@@ -49,8 +49,15 @@ static void iree_hip_error_state_sync_thread(int64_t process_state) {
 }
 
 hipError_t iree_hip_error_state_fatal_result(void) {
+  return iree_hip_error_state_snapshot(/*out_generation=*/NULL);
+}
+
+hipError_t iree_hip_error_state_snapshot(uint32_t* out_generation) {
   const int64_t process_state = iree_atomic_load(&iree_hip_process_error_state,
                                                  iree_memory_order_acquire);
+  if (out_generation) {
+    *out_generation = iree_hip_error_state_generation(process_state);
+  }
   return iree_hip_error_state_result(process_state);
 }
 

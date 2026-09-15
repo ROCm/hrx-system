@@ -18,11 +18,16 @@ using HipInitFn = hipError_t (*)(unsigned int flags);
 using HipHalDeinitFn = hipError_t (*)(void);
 using HipGetDeviceCountFn = hipError_t (*)(int* count);
 using HipGetDeviceFn = hipError_t (*)(int* device);
+using HipSetDeviceFn = hipError_t (*)(int device);
 using HipSetValidDevicesFn = hipError_t (*)(int* devices, int count);
 using HipGetDeviceFlagsFn = hipError_t (*)(unsigned int* flags);
 using HipSetDeviceFlagsFn = hipError_t (*)(unsigned int flags);
 using HipDeviceGetLimitFn = hipError_t (*)(size_t* value, hipLimit_t limit);
 using HipDeviceSetLimitFn = hipError_t (*)(hipLimit_t limit, size_t value);
+using HipDevicePrimaryCtxGetStateFn = hipError_t (*)(hipDevice_t device,
+                                                     unsigned int* flags,
+                                                     int* active);
+using HipDeviceResetFn = hipError_t (*)(void);
 using HipDeviceGetPCIBusIdFn = hipError_t (*)(char* pci_bus_id, int length,
                                               int device);
 using HipDeviceGetByPCIBusIdFn = hipError_t (*)(int* device,
@@ -42,6 +47,8 @@ struct HipRuntimeApi {
   HipGetDeviceCountFn get_device_count = nullptr;
   // Reports the calling thread's selected device.
   HipGetDeviceFn get_device = nullptr;
+  // Explicitly selects the calling thread's current device.
+  HipSetDeviceFn set_device = nullptr;
   // Selects a preferred device list for the calling thread.
   HipSetValidDevicesFn set_valid_devices = nullptr;
   // Reports the current device's public scheduling flags.
@@ -52,6 +59,10 @@ struct HipRuntimeApi {
   HipDeviceGetLimitFn device_get_limit = nullptr;
   // Replaces one runtime resource limit.
   HipDeviceSetLimitFn device_set_limit = nullptr;
+  // Reports a primary context's flags and activation state.
+  HipDevicePrimaryCtxGetStateFn device_primary_context_get_state = nullptr;
+  // Resets the calling thread's current device.
+  HipDeviceResetFn device_reset = nullptr;
   // Formats a device's PCI identity.
   HipDeviceGetPCIBusIdFn device_get_pci_bus_id = nullptr;
   // Resolves a formatted PCI identity to a device ordinal.
@@ -77,6 +88,7 @@ class HipDeviceContractsApiTest : public testing::Test {
       api_.get_device_count =
           dso_.Resolve<HipGetDeviceCountFn>("hipGetDeviceCount");
       api_.get_device = dso_.Resolve<HipGetDeviceFn>("hipGetDevice");
+      api_.set_device = dso_.Resolve<HipSetDeviceFn>("hipSetDevice");
       api_.set_valid_devices =
           dso_.Resolve<HipSetValidDevicesFn>("hipSetValidDevices");
       api_.get_device_flags =
@@ -87,6 +99,10 @@ class HipDeviceContractsApiTest : public testing::Test {
           dso_.Resolve<HipDeviceGetLimitFn>("hipDeviceGetLimit");
       api_.device_set_limit =
           dso_.Resolve<HipDeviceSetLimitFn>("hipDeviceSetLimit");
+      api_.device_primary_context_get_state =
+          dso_.Resolve<HipDevicePrimaryCtxGetStateFn>(
+              "hipDevicePrimaryCtxGetState");
+      api_.device_reset = dso_.Resolve<HipDeviceResetFn>("hipDeviceReset");
       api_.device_get_pci_bus_id =
           dso_.Resolve<HipDeviceGetPCIBusIdFn>("hipDeviceGetPCIBusId");
       api_.device_get_by_pci_bus_id =
@@ -105,11 +121,14 @@ class HipDeviceContractsApiTest : public testing::Test {
     ASSERT_NE(nullptr, api_.hal_deinit);
     ASSERT_NE(nullptr, api_.get_device_count);
     ASSERT_NE(nullptr, api_.get_device);
+    ASSERT_NE(nullptr, api_.set_device);
     ASSERT_NE(nullptr, api_.set_valid_devices);
     ASSERT_NE(nullptr, api_.get_device_flags);
     ASSERT_NE(nullptr, api_.set_device_flags);
     ASSERT_NE(nullptr, api_.device_get_limit);
     ASSERT_NE(nullptr, api_.device_set_limit);
+    ASSERT_NE(nullptr, api_.device_primary_context_get_state);
+    ASSERT_NE(nullptr, api_.device_reset);
     ASSERT_NE(nullptr, api_.device_get_pci_bus_id);
     ASSERT_NE(nullptr, api_.device_get_by_pci_bus_id);
     ASSERT_NE(nullptr, api_.launch_cooperative_kernel_multi_device);
@@ -145,7 +164,9 @@ TEST_F(HipDeviceContractsApiTest, DeviceFlagsRoundTripUnderConcurrentAccess) {
   ASSERT_EQ(hipSuccess, api_.get_device_flags(&flags));
   EXPECT_EQ(hipDeviceScheduleAuto, flags);
 
-  ASSERT_EQ(hipSuccess, api_.set_device_flags(hipDeviceScheduleYield));
+  ASSERT_EQ(hipSuccess,
+            api_.set_device_flags(hipDeviceScheduleYield | hipDeviceMapHost |
+                                  hipDeviceLmemResizeToMax));
   ASSERT_EQ(hipSuccess, api_.get_device_flags(&flags));
   EXPECT_EQ(hipDeviceScheduleYield, flags);
 
@@ -179,6 +200,17 @@ TEST_F(HipDeviceContractsApiTest, DeviceFlagsRoundTripUnderConcurrentAccess) {
   EXPECT_EQ(hipSuccess, api_.set_device_flags(hipDeviceScheduleAuto));
 }
 
+TEST_F(HipDeviceContractsApiTest, DeviceResetRestoresSchedulingDefaults) {
+  ASSERT_EQ(hipSuccess, api_.set_device_flags(hipDeviceScheduleBlockingSync));
+  unsigned int flags = UINT_MAX;
+  ASSERT_EQ(hipSuccess, api_.get_device_flags(&flags));
+  ASSERT_EQ(hipDeviceScheduleBlockingSync, flags);
+
+  ASSERT_EQ(hipSuccess, api_.device_reset());
+  ASSERT_EQ(hipSuccess, api_.get_device_flags(&flags));
+  EXPECT_EQ(hipDeviceScheduleAuto, flags);
+}
+
 TEST_F(HipDeviceContractsApiTest, EmptyValidDeviceListPreservesSelection) {
   int device_count = 0;
   ASSERT_EQ(hipSuccess, api_.get_device_count(&device_count));
@@ -199,6 +231,65 @@ TEST_F(HipDeviceContractsApiTest, EmptyValidDeviceListPreservesSelection) {
   selection_thread.join();
   ASSERT_EQ(hipSuccess, result);
   EXPECT_EQ(device_count - 1, selected_device);
+}
+
+TEST_F(HipDeviceContractsApiTest,
+       ValidDevicePreferenceDoesNotActivatePrimaryContext) {
+  int device_count = 0;
+  ASSERT_EQ(hipSuccess, api_.get_device_count(&device_count));
+  const int preferred_device = device_count - 1;
+  ASSERT_EQ(hipSuccess, api_.set_device(preferred_device));
+  ASSERT_EQ(hipSuccess, api_.device_reset());
+
+  int active = -1;
+  hipError_t result = hipSuccess;
+  std::thread selection_thread([&] {
+    int preferred_device_copy = preferred_device;
+    result = api_.set_valid_devices(&preferred_device_copy, /*count=*/1);
+    if (result != hipSuccess) return;
+    result = api_.device_primary_context_get_state(preferred_device,
+                                                   /*flags=*/nullptr, &active);
+  });
+  selection_thread.join();
+  ASSERT_EQ(hipSuccess, result);
+  EXPECT_EQ(0, active);
+}
+
+TEST_F(HipDeviceContractsApiTest,
+       ValidDevicePreferenceResetsAcrossRuntimeGenerations) {
+  int device_count = 0;
+  ASSERT_EQ(hipSuccess, api_.get_device_count(&device_count));
+  if (device_count < 2) {
+    GTEST_SKIP() << "requires two independently selectable devices";
+  }
+
+  std::atomic<int> phase{0};
+  hipError_t result = hipSuccess;
+  int selected_device = -1;
+  std::thread selection_thread([&] {
+    result = api_.set_device(/*device=*/0);
+    phase.store(1, std::memory_order_release);
+    while (phase.load(std::memory_order_acquire) != 2) {
+    }
+    if (result != hipSuccess) return;
+    int preferred_device = 1;
+    result = api_.set_valid_devices(&preferred_device, /*count=*/1);
+    if (result != hipSuccess) return;
+    result = api_.get_device(&selected_device);
+  });
+
+  while (phase.load(std::memory_order_acquire) != 1) {
+  }
+  const hipError_t deinit_result = api_.hal_deinit();
+  const hipError_t init_result =
+      deinit_result == hipSuccess ? api_.init(/*flags=*/0) : deinit_result;
+  phase.store(2, std::memory_order_release);
+  selection_thread.join();
+
+  ASSERT_EQ(hipSuccess, deinit_result);
+  ASSERT_EQ(hipSuccess, init_result);
+  ASSERT_EQ(hipSuccess, result);
+  EXPECT_EQ(1, selected_device);
 }
 
 TEST_F(HipDeviceContractsApiTest, PciIdentifiersRoundTripForEveryDevice) {

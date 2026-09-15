@@ -25,6 +25,11 @@ hipError_t iree_hip_error_state_publish(hipError_t result);
 // been observed. This does not modify the calling thread's last-error state.
 hipError_t iree_hip_error_state_fatal_result(void);
 
+// Returns the process-wide fatal result and optionally the runtime-lifetime
+// generation from one atomic snapshot. Full runtime teardown advances the
+// generation so other per-thread HIP state can lazily discard stale values.
+hipError_t iree_hip_error_state_snapshot(uint32_t* out_generation);
+
 // Returns the process-fatal result when one is latched, otherwise returns and
 // clears the calling thread's ordinary last error.
 hipError_t iree_hip_error_state_get_and_clear_last_error(void);

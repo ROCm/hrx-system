@@ -1510,6 +1510,33 @@ static hipError_t iree_hip_graph_exec_rebuild(
 // Implicit initialization helpers
 //===----------------------------------------------------------------------===//
 
+typedef struct iree_hip_thread_device_selection_t {
+  // Runtime generation in which the remaining fields were selected.
+  uint32_t generation;
+  // Device to use when the thread next needs an implicit primary context.
+  int preferred_device;
+  // True after hipSetDevice has explicitly selected a device this generation.
+  bool explicitly_selected;
+} iree_hip_thread_device_selection_t;
+
+static IREE_THREAD_LOCAL iree_hip_thread_device_selection_t
+    iree_hip_thread_device_selection = {UINT32_MAX, 0, false};
+
+static void iree_hip_clear_per_thread_stream(
+    iree_hal_streaming_context_t* context);
+
+// Synchronizes selection state before reading a TLS context. A context retained
+// by a thread may survive teardown initiated by another thread, but it belongs
+// to the old device registry and must not be reused by the next runtime.
+static void iree_hip_sync_thread_device_selection(uint32_t generation) {
+  if (iree_hip_thread_device_selection.generation == generation) return;
+  iree_hip_clear_per_thread_stream(/*context=*/NULL);
+  iree_hal_streaming_context_set_current(NULL);
+  iree_hip_thread_device_selection.generation = generation;
+  iree_hip_thread_device_selection.preferred_device = 0;
+  iree_hip_thread_device_selection.explicitly_selected = false;
+}
+
 // Ensures HIP runtime is initialized (calls hipInit if needed).
 static bool iree_hip_no_visible_devices_requested(void) {
   const char* hip_visible_devices = getenv("HIP_VISIBLE_DEVICES");
@@ -1521,7 +1548,10 @@ static bool iree_hip_no_visible_devices_requested(void) {
 }
 
 static hipError_t iree_hip_ensure_initialized(void) {
-  const hipError_t fatal_result = iree_hip_error_state_fatal_result();
+  uint32_t runtime_generation = 0;
+  const hipError_t fatal_result =
+      iree_hip_error_state_snapshot(&runtime_generation);
+  iree_hip_sync_thread_device_selection(runtime_generation);
   if (IREE_UNLIKELY(fatal_result != hipSuccess)) {
     return iree_hip_error_state_publish(fatal_result);
   }
@@ -1592,9 +1622,10 @@ static hipError_t iree_hip_ensure_context(
   // Check if current thread has context.
   iree_hal_streaming_context_t* context = iree_hal_streaming_context_current();
   if (!context) {
-    // No context set - create primary context for device 0.
-    // This matches HIP behavior of implicitly using device 0.
-    iree_hal_streaming_device_t* device = iree_hal_streaming_device_entry(0);
+    // No context is installed. Lazily activate the preferred device, which is
+    // device 0 until hipSetValidDevices selects another initial device.
+    iree_hal_streaming_device_t* device = iree_hal_streaming_device_entry(
+        iree_hip_thread_device_selection.preferred_device);
     if (!device) {
       if (out_context) {
         *out_context = NULL;
@@ -1973,8 +2004,6 @@ HIPAPI hipError_t hipGetDevice(int* device) {
   HIP_RETURN_ERROR(hipSuccess);
 }
 
-static IREE_THREAD_LOCAL bool iree_hip_device_was_explicitly_selected = false;
-
 static hipError_t iree_hip_set_current_device(int device,
                                               bool explicit_selection) {
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -1984,7 +2013,6 @@ static hipError_t iree_hip_set_current_device(int device,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
   }
-
   iree_hal_streaming_device_t* device_obj =
       iree_hal_streaming_device_entry(device);
   if (!device_obj) {
@@ -2000,8 +2028,9 @@ static hipError_t iree_hip_set_current_device(int device,
       hipErrorOutOfMemory);
 
   iree_hal_streaming_context_set_current(primary_context);
+  iree_hip_thread_device_selection.preferred_device = device;
   if (explicit_selection) {
-    iree_hip_device_was_explicitly_selected = true;
+    iree_hip_thread_device_selection.explicitly_selected = true;
   }
 
   IREE_TRACE_ZONE_END(z0);
@@ -2055,11 +2084,21 @@ HIPAPI hipError_t hipSetValidDevices(int* device_arr, int len) {
     }
   }
 
-  // The valid-device list selects the initial device for this thread. An
-  // explicit hipSetDevice call takes precedence over later preference lists.
-  if (iree_hip_device_was_explicitly_selected) HIP_RETURN_ERROR(hipSuccess);
-  HIP_RETURN_ERROR(iree_hip_set_current_device(device_arr[0],
-                                               /*explicit_selection=*/false));
+  // The list chooses the device to activate on the next context-requiring call.
+  // It must not create a primary context merely to record that preference. An
+  // explicit hipSetDevice call takes precedence for the runtime generation.
+  if (iree_hip_thread_device_selection.explicitly_selected) {
+    HIP_RETURN_ERROR(hipSuccess);
+  }
+  iree_hal_streaming_context_t* current_context =
+      iree_hal_streaming_context_current();
+  if (current_context &&
+      current_context->device_ordinal != (iree_host_size_t)device_arr[0]) {
+    iree_hip_clear_per_thread_stream(current_context);
+    iree_hal_streaming_context_set_current(NULL);
+  }
+  iree_hip_thread_device_selection.preferred_device = device_arr[0];
+  HIP_RETURN_ERROR(hipSuccess);
 }
 
 // Gets the number of HIP-capable devices.
@@ -4288,6 +4327,16 @@ HIPAPI hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev) {
     iree_slim_mutex_unlock(&device->primary_context_mutex);
   }
 
+  const iree_hal_streaming_context_flags_t default_flags = {
+      .scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO,
+      .map_host_memory = false,
+      .resize_local_mem_to_max = false,
+  };
+  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_hal_streaming_device_set_primary_context_flags(dev, &default_flags),
+      hipErrorInvalidDevice);
+
   IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(hipSuccess);
 }
@@ -4361,8 +4410,6 @@ static unsigned int iree_hip_context_flags_from_internal(
       hip_flags = hipDeviceScheduleBlockingSync;
       break;
   }
-  if (flags.map_host_memory) hip_flags |= hipDeviceMapHost;
-  if (flags.resize_local_mem_to_max) hip_flags |= hipDeviceLmemResizeToMax;
   return hip_flags;
 }
 
