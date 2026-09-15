@@ -932,6 +932,15 @@ bool loom_value_facts_refine_relation(uint8_t predicate_kind,
 void loom_value_facts_addi(const loom_value_facts_t* lhs,
                            const loom_value_facts_t* rhs,
                            loom_value_facts_t* out) {
+  // Zero is the identity, including for predicates not implied by the range.
+  if (loom_value_facts_is_zero(*lhs)) {
+    *out = *rhs;
+    return;
+  }
+  if (loom_value_facts_is_zero(*rhs)) {
+    *out = *lhs;
+    return;
+  }
   // Read inputs before writing output (output may alias one input).
   const loom_value_facts_t lhs_facts = *lhs;
   const loom_value_facts_t rhs_facts = *rhs;
@@ -958,6 +967,10 @@ void loom_value_facts_addi(const loom_value_facts_t* lhs,
 void loom_value_facts_subi(const loom_value_facts_t* lhs,
                            const loom_value_facts_t* rhs,
                            loom_value_facts_t* out) {
+  if (loom_value_facts_is_zero(*rhs)) {
+    *out = *lhs;
+    return;
+  }
   const loom_value_facts_t lhs_facts = *lhs;
   const loom_value_facts_t rhs_facts = *rhs;
   int64_t lhs_lo = lhs_facts.range_lo, lhs_hi = lhs_facts.range_hi;
@@ -965,7 +978,11 @@ void loom_value_facts_subi(const loom_value_facts_t* lhs,
   int64_t lhs_divisor = lhs_facts.known_divisor;
   int64_t rhs_divisor = rhs_facts.known_divisor;
 
-  int64_t divisor = iree_math_gcd_i64(lhs_divisor, rhs_divisor);
+  // Negation preserves divisibility. Exact zero's stored divisor of one
+  // does not constrain the result, since zero is divisible by every divisor.
+  int64_t divisor = loom_value_facts_is_zero(lhs_facts)
+                        ? rhs_divisor
+                        : iree_math_gcd_i64(lhs_divisor, rhs_divisor);
 
   // Subtraction: lo = lhs_lo - rhs_hi, hi = lhs_hi - rhs_lo (bound swap).
   int64_t lo, hi;

@@ -750,6 +750,12 @@ TEST_F(SourceMemoryPlanTest,
                                                   plan.static_byte_offset);
   EXPECT_EQ(offset_facts.range_lo, 16);
   EXPECT_EQ(offset_facts.range_hi, 4108);
+  EXPECT_EQ(offset_facts.known_divisor, 4);
+  const loom_value_facts_t base_facts =
+      loom_low_source_memory_dynamic_offset_facts(&plan, 0);
+  EXPECT_EQ(base_facts.range_lo, 0);
+  EXPECT_EQ(base_facts.range_hi, 4092);
+  EXPECT_EQ(base_facts.known_divisor, 4);
   EXPECT_TRUE(loom_low_source_memory_dynamic_offset_fits_unsigned_bit_count(
       &plan, plan.static_byte_offset, 13));
 }
@@ -940,6 +946,44 @@ TEST_F(SourceMemoryPlanTest, SummaryCapturesStridedPacketSlot) {
                                                   &preceding_summary);
   EXPECT_FALSE(
       loom_low_memory_access_summaries_may_alias(&preceding_summary, &summary));
+}
+
+TEST(SourceMemoryPlan, DynamicPacketOffsetsPreserveDivisibility) {
+  loom_low_source_memory_access_plan_t plan = {};
+  plan.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
+  plan.memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL;
+  plan.alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
+  plan.element_byte_count = 4;
+  plan.vector_lane_count = 4;
+  plan.vector_lane_byte_stride = 4;
+  plan.dynamic_term_count = 1;
+  plan.dynamic_terms[0].byte_stride = 16;
+  plan.dynamic_terms[0].byte_facts = loom_value_facts_make(16, 64, 16);
+
+  const loom_value_facts_t offset =
+      loom_low_source_memory_dynamic_offset_facts(&plan, 0);
+  EXPECT_EQ(offset.range_lo, 16);
+  EXPECT_EQ(offset.range_hi, 64);
+  EXPECT_EQ(offset.known_divisor, 16);
+
+  loom_low_byte_interval_t interval = {};
+  loom_low_memory_access_summary_t summary = {};
+  loom_low_source_memory_access_plan_make_summary(&plan, &interval, &summary);
+  ASSERT_EQ(summary.byte_interval, &interval);
+  EXPECT_EQ(interval.begin_facts.range_lo, 16);
+  EXPECT_EQ(interval.begin_facts.range_hi, 64);
+  EXPECT_EQ(interval.begin_facts.known_divisor, 16);
+  EXPECT_EQ(interval.end_facts.range_lo, 32);
+  EXPECT_EQ(interval.end_facts.range_hi, 80);
+  EXPECT_EQ(interval.end_facts.known_divisor, 16);
+
+  // A scalar packet in the same slot has a less aligned exclusive end.
+  plan.vector_lane_count = 1;
+  loom_low_source_memory_access_plan_make_summary(&plan, &interval, &summary);
+  EXPECT_EQ(interval.begin_facts.known_divisor, 16);
+  EXPECT_EQ(interval.end_facts.range_lo, 20);
+  EXPECT_EQ(interval.end_facts.range_hi, 68);
+  EXPECT_EQ(interval.end_facts.known_divisor, 4);
 }
 
 }  // namespace
