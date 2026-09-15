@@ -74,11 +74,37 @@ typedef struct iree_hal_streaming_fat_binary_extract_t {
 // Raw ELF also counts as "supported" (trivially passthrough).
 bool iree_hal_streaming_fat_binary_is_supported(iree_const_byte_span_t data);
 
+// Clones an in-memory module container into one self-contained allocation.
+// Wrapper inputs are rewritten so their embedded binary pointer targets the
+// cloned payload. Inputs whose representation depends on the source mapping
+// cannot be cloned and return IREE_STATUS_UNIMPLEMENTED.
+//
+// When |data.data_length| is zero the encoded container length is derived from
+// its headers. The caller owns |*out_data| and must free it with
+// |host_allocator|. On failure the outputs are cleared.
+iree_status_t iree_hal_streaming_fat_binary_clone(
+    iree_const_byte_span_t data, iree_allocator_t host_allocator,
+    void** out_data, iree_host_size_t* out_data_length);
+
 // Validates a raw AMDGPU HSACO ELF and derives the HAL AMDGPU target key from
 // its code-object target metadata.
 iree_status_t iree_hal_streaming_fat_binary_describe_amdgpu_elf(
     iree_const_byte_span_t elf_data, iree_host_size_t target_key_capacity,
     char* target_key, iree_host_size_t* out_elf_size);
+
+// Callback invoked for each defined global object in an AMDGPU ELF symbol
+// table. The name aliases |elf_data| and is only valid for the duration of the
+// callback.
+typedef iree_status_t(
+    IREE_API_PTR* iree_hal_streaming_fat_binary_global_visitor_t)(
+    void* user_data, iree_string_view_t name);
+
+// Visits defined global and weak object symbols in an AMDGPU ELF. A symbol
+// present in both the static and dynamic symbol tables may be visited more than
+// once. Callers should make processing idempotent when both tables are present.
+iree_status_t iree_hal_streaming_fat_binary_visit_elf_global_objects(
+    iree_const_byte_span_t elf_data,
+    iree_hal_streaming_fat_binary_global_visitor_t visitor, void* user_data);
 
 // Unwraps a fat-binary / offload-bundle / CCOB / raw ELF blob and returns
 // every contained ELF compatible with the best-ranked target candidate. For a

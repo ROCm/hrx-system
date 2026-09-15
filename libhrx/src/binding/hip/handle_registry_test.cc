@@ -30,6 +30,10 @@ uintptr_t retained_handle = 0;
 
 void RetainHandle(uintptr_t handle) { retained_handle = handle; }
 
+uintptr_t retained_value = 0;
+
+void RetainValue(uintptr_t value) { retained_value = value; }
+
 std::atomic<uint64_t> concurrent_retain_count{0};
 
 void CountRetain(uintptr_t handle) {
@@ -63,6 +67,25 @@ TEST_F(HandleRegistryTest, RejectsDuplicateAndRepeatedRemoval) {
   iree_status_free(duplicate_status);
   EXPECT_TRUE(iree_hip_handle_registry_remove(&registry_, handle));
   EXPECT_FALSE(iree_hip_handle_registry_remove(&registry_, handle));
+}
+
+TEST_F(HandleRegistryTest, PreservesAssociatedValues) {
+  constexpr uintptr_t handle = 0x1234;
+  constexpr uintptr_t value = 0x9876;
+  IREE_ASSERT_OK(
+      iree_hip_handle_registry_insert_value(&registry_, handle, value));
+
+  retained_value = 0;
+  uintptr_t looked_up_value = 0;
+  EXPECT_TRUE(iree_hip_handle_registry_lookup_retain_value(
+      &registry_, handle, RetainValue, &looked_up_value));
+  EXPECT_EQ(retained_value, value);
+  EXPECT_EQ(looked_up_value, value);
+
+  uintptr_t removed_value = 0;
+  EXPECT_TRUE(iree_hip_handle_registry_remove_value(&registry_, handle,
+                                                    &removed_value));
+  EXPECT_EQ(removed_value, value);
 }
 
 TEST_F(HandleRegistryTest, RetainsEntriesAcrossGrowthAndTombstoneReuse) {

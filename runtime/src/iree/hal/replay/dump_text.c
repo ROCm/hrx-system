@@ -564,6 +564,7 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
           " executable_id=%" PRIu64 " function_ordinal=%" PRIu32
           " flags=0x%08" PRIx32 " workgroup_count=[%" PRIu32 ",%" PRIu32
           ",%" PRIu32 "] workgroup_size=[%" PRIu32 ",%" PRIu32 ",%" PRIu32
+          "] workitem_count=[%" PRIu32 ",%" PRIu32 ",%" PRIu32
           "] wait_count=%" PRIu64 " signal_count=%" PRIu64
           " constants_range=[%" PRIu64 ", +%" PRIu64
           "] bindings_range=[%" PRIu64 ", +%" PRIhsz "]",
@@ -571,7 +572,9 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
           payload.workgroup_count[0], payload.workgroup_count[1],
           payload.workgroup_count[2], payload.workgroup_size[0],
           payload.workgroup_size[1], payload.workgroup_size[2],
-          payload.wait_semaphore_count, payload.signal_semaphore_count,
+          payload.workitem_count[0], payload.workitem_count[1],
+          payload.workitem_count[2], payload.wait_semaphore_count,
+          payload.signal_semaphore_count,
           payload_range->offset + constants_offset, payload.constants_length,
           payload_range->offset + bindings_offset, bindings_size));
       return iree_hal_replay_dump_append_text_buffer_ref(

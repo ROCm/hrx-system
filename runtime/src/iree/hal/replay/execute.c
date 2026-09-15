@@ -272,6 +272,8 @@ static iree_status_t iree_hal_replay_plan_prepare_command_buffer_dispatch(
          sizeof(out_dispatch->config.workgroup_size));
   memcpy(out_dispatch->config.workgroup_count, payload.workgroup_count,
          sizeof(out_dispatch->config.workgroup_count));
+  memcpy(out_dispatch->config.workitem_count, payload.workitem_count,
+         sizeof(out_dispatch->config.workitem_count));
   out_dispatch->config.dynamic_workgroup_local_memory =
       payload.dynamic_workgroup_local_memory;
   out_dispatch->workgroup_count_ref = payload.workgroup_count_ref;

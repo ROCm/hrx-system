@@ -287,7 +287,7 @@ std::vector<uint8_t> MakeMinimalAmdgpuElf(uint32_t machine = 0x041) {
   header.abiversion = 4;
   header.machine = 224;
   header.version = 1;
-  header.shoff = sizeof(Elf64Header);
+  header.ehsize = sizeof(Elf64Header);
   header.flags = machine;
   std::vector<uint8_t> elf(sizeof(header), 0);
   memcpy(elf.data(), &header, sizeof(header));

@@ -146,6 +146,11 @@ typedef struct iree_hal_amdgpu_aql_dispatch_params_t {
   // Direct dispatch size in workgroups. Clustered dimensions must be nonzero;
   // ordinary dispatch permits the HAL no-op zero shape.
   uint32_t workgroup_count[3];
+  // Exact ordinary dispatch size in work-items, or zeroes to derive it from
+  // |workgroup_count| and |workgroup_size|.
+  uint32_t workitem_count[3];
+  // True when |workitem_count| supplies the ordinary packet grid dimensions.
+  bool uses_exact_workitem_count;
   // Workgroup cluster shape, or all zeroes for ordinary dispatch.
   uint32_t workgroup_cluster_size[3];
   // Private segment byte size per work-item.
@@ -182,6 +187,12 @@ static inline iree_status_t iree_hal_amdgpu_aql_validate_dispatch_params(
   uint32_t cluster_count[3] = {0};
   const bool uses_workgroup_clusters =
       iree_hal_amdgpu_aql_dispatch_uses_workgroup_clusters(params);
+  const bool uses_exact_workitem_count = params->uses_exact_workitem_count;
+  if (IREE_UNLIKELY(uses_workgroup_clusters && uses_exact_workitem_count)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "clustered dispatch cannot specify an exact work-item count");
+  }
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(cluster_count); ++i) {
     if (IREE_UNLIKELY(params->workgroup_size[i] == 0)) {
       return iree_make_status(
@@ -193,6 +204,28 @@ static inline iree_status_t iree_hal_amdgpu_aql_validate_dispatch_params(
       return iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
           "dispatch work-item grid dimension %u exceeds u32", (unsigned)i);
+    }
+    if (uses_exact_workitem_count) {
+      if (IREE_UNLIKELY(params->workitem_count[i] == 0)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "exact work-item count dimension %u must be nonzero", (unsigned)i);
+      }
+      const uint64_t maximum_workitem_count =
+          (uint64_t)params->workgroup_count[i] * params->workgroup_size[i];
+      const uint64_t minimum_workitem_count =
+          params->workgroup_count[i] == 0
+              ? 0
+              : maximum_workitem_count - params->workgroup_size[i] + 1;
+      if (IREE_UNLIKELY(params->workitem_count[i] < minimum_workitem_count ||
+                        params->workitem_count[i] > maximum_workitem_count)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "exact work-item count dimension %u must be in [%" PRIu64
+            ", %" PRIu64 "]; got %u",
+            (unsigned)i, minimum_workitem_count, maximum_workitem_count,
+            params->workitem_count[i]);
+      }
     }
     if (!uses_workgroup_clusters) continue;
     if (IREE_UNLIKELY(params->workgroup_count[i] == 0)) {
@@ -252,11 +285,14 @@ static inline void iree_hal_amdgpu_aql_emplace_dispatch_packet(
     const uint32_t cluster_count[3], uint16_t* out_header,
     uint16_t* out_setup) {
   if (!iree_hal_amdgpu_aql_dispatch_uses_workgroup_clusters(params)) {
-    const uint32_t grid_size[3] = {
-        params->workgroup_count[0] * params->workgroup_size[0],
-        params->workgroup_count[1] * params->workgroup_size[1],
-        params->workgroup_count[2] * params->workgroup_size[2],
-    };
+    uint32_t grid_size[3];
+    if (params->uses_exact_workitem_count) {
+      memcpy(grid_size, params->workitem_count, sizeof(grid_size));
+    } else {
+      for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(grid_size); ++i) {
+        grid_size[i] = params->workgroup_count[i] * params->workgroup_size[i];
+      }
+    }
     *out_header = iree_hal_amdgpu_aql_emit_dispatch(
         ordinary_packet, params->kernel_object, params->kernarg_address,
         params->workgroup_size, grid_size, params->private_segment_size,

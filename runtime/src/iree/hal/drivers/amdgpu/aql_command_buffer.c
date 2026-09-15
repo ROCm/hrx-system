@@ -1380,7 +1380,8 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_check_dispatch_flags(
       IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS |
       IREE_HAL_DISPATCH_FLAG_ALLOW_INLINE_EXECUTION |
       IREE_HAL_DISPATCH_FLAG_BORROW_RESOURCE_LIFETIMES |
-      IREE_HAL_DISPATCH_FLAG_COOPERATIVE;
+      IREE_HAL_DISPATCH_FLAG_COOPERATIVE |
+      IREE_HAL_DISPATCH_FLAG_EXACT_WORKITEM_COUNT;
   if (IREE_UNLIKELY(iree_any_bit_set(flags, ~supported_flags))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unsupported dispatch flags: 0x%" PRIx64, flags);
@@ -1412,6 +1413,13 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_validate_dispatch_shape(
     const iree_hal_dispatch_config_t config, iree_hal_dispatch_flags_t flags) {
   const bool uses_indirect_parameters =
       iree_hal_dispatch_uses_indirect_parameters(flags);
+  const bool uses_exact_workitem_count =
+      iree_any_bit_set(flags, IREE_HAL_DISPATCH_FLAG_EXACT_WORKITEM_COUNT);
+  if (IREE_UNLIKELY(uses_indirect_parameters && uses_exact_workitem_count)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "exact work-item counts require static workgroup counts");
+  }
   const bool has_workgroup_size_override =
       iree_hal_amdgpu_dispatch_config_has_workgroup_size_override(config);
   if (IREE_UNLIKELY(descriptor->custom_direct_only &&
@@ -1450,6 +1458,22 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_validate_dispatch_shape(
             descriptor->kernel_args.workgroup_size[i]);
       }
     }
+  }
+  if (uses_exact_workitem_count) {
+    iree_hal_amdgpu_aql_dispatch_params_t params = {0};
+    for (iree_host_size_t i = 0; i < 3; ++i) {
+      params.workgroup_size[i] =
+          has_workgroup_size_override
+              ? (uint16_t)config.workgroup_size[i]
+              : descriptor->kernel_args.workgroup_size[i];
+      params.workgroup_count[i] = config.workgroup_count[i];
+      params.workitem_count[i] = config.workitem_count[i];
+      params.workgroup_cluster_size[i] =
+          descriptor->kernel_args.workgroup_cluster_size[i];
+    }
+    params.uses_exact_workitem_count = true;
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_aql_validate_dispatch_params(&params, NULL));
   }
   if (IREE_UNLIKELY(
           config.dynamic_workgroup_local_memory >
@@ -2487,6 +2511,11 @@ static void iree_hal_amdgpu_aql_command_buffer_initialize_dispatch_command(
     dispatch_command->dispatch_flags |=
         IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_COOPERATIVE;
   }
+  if (iree_any_bit_set(inputs->flags,
+                       IREE_HAL_DISPATCH_FLAG_EXACT_WORKITEM_COUNT)) {
+    dispatch_command->dispatch_flags |=
+        IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_EXACT_WORKITEM_COUNT;
+  }
   memcpy(dispatch_command->workgroup_cluster_size,
          plan->kernel_args->workgroup_cluster_size,
          sizeof(dispatch_command->workgroup_cluster_size));
@@ -2504,6 +2533,14 @@ static void iree_hal_amdgpu_aql_command_buffer_initialize_dispatch_command(
       uses_indirect_parameters ? 0 : inputs->config.workgroup_count[1];
   dispatch_command->workgroup_count[2] =
       uses_indirect_parameters ? 0 : inputs->config.workgroup_count[2];
+  if (iree_any_bit_set(inputs->flags,
+                       IREE_HAL_DISPATCH_FLAG_EXACT_WORKITEM_COUNT)) {
+    memcpy(dispatch_command->workitem_count, inputs->config.workitem_count,
+           sizeof(dispatch_command->workitem_count));
+  } else {
+    memset(dispatch_command->workitem_count, 0,
+           sizeof(dispatch_command->workitem_count));
+  }
   dispatch_command->private_segment_size =
       plan->kernel_args->private_segment_size;
   dispatch_command->group_segment_size =

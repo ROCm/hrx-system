@@ -200,6 +200,122 @@ TEST(AQLEmitterTest, OrdinaryNoopDispatchRemainsValid) {
       iree_hal_amdgpu_aql_validate_dispatch_params(&params, nullptr));
 }
 
+TEST(AQLEmitterTest, EmitsExactOrdinaryWorkItemCount) {
+  iree_hal_amdgpu_aql_dispatch_params_t params = MakeExtendedDispatchParams();
+  std::memset(params.workgroup_cluster_size, 0,
+              sizeof(params.workgroup_cluster_size));
+  params.workgroup_count[0] = 2;
+  params.workgroup_count[1] = 1;
+  params.workgroup_count[2] = 1;
+  params.workitem_count[0] = 100;
+  params.workitem_count[1] = 2;
+  params.workitem_count[2] = 1;
+  params.uses_exact_workitem_count = true;
+
+  union {
+    iree_hsa_kernel_dispatch_packet_t ordinary;
+    iree_hsa_amd_ext_kernel_dispatch_packet_t extended;
+  } packet;
+  std::memset(&packet, 0xCC, sizeof(packet));
+  uint16_t header = 0;
+  uint16_t setup = 0;
+  IREE_ASSERT_OK(iree_hal_amdgpu_aql_emit_dispatch_packet(
+      &packet.ordinary, &packet.extended, &params, &header, &setup));
+
+  EXPECT_EQ(packet.ordinary.grid_size[0], 100u);
+  EXPECT_EQ(packet.ordinary.grid_size[1], 2u);
+  EXPECT_EQ(packet.ordinary.grid_size[2], 1u);
+}
+
+TEST(AQLEmitterTest, EmitsExactGridSmallerThanWorkgroup) {
+  iree_hal_amdgpu_aql_dispatch_params_t params = MakeExtendedDispatchParams();
+  std::memset(params.workgroup_cluster_size, 0,
+              sizeof(params.workgroup_cluster_size));
+  params.workgroup_count[0] = 1;
+  params.workgroup_count[1] = 1;
+  params.workgroup_count[2] = 1;
+  params.workitem_count[0] = 17;
+  params.workitem_count[1] = 1;
+  params.workitem_count[2] = 1;
+  params.uses_exact_workitem_count = true;
+
+  union {
+    iree_hsa_kernel_dispatch_packet_t ordinary;
+    iree_hsa_amd_ext_kernel_dispatch_packet_t extended;
+  } packet = {};
+  uint16_t header = 0;
+  uint16_t setup = 0;
+  IREE_ASSERT_OK(iree_hal_amdgpu_aql_emit_dispatch_packet(
+      &packet.ordinary, &packet.extended, &params, &header, &setup));
+
+  EXPECT_EQ(packet.ordinary.workgroup_size[0], 64u);
+  EXPECT_EQ(packet.ordinary.grid_size[0], 17u);
+}
+
+TEST(AQLEmitterTest, RejectsInvalidExactOrdinaryWorkItemCount) {
+  enum class Variant {
+    kAllZero,
+    kZeroDimension,
+    kBelowFinalWorkgroup,
+    kAboveFullGrid,
+    kClustered,
+  };
+  const Variant variants[] = {
+      Variant::kAllZero,
+      Variant::kZeroDimension,
+      Variant::kBelowFinalWorkgroup,
+      Variant::kAboveFullGrid,
+      Variant::kClustered,
+  };
+  for (const Variant variant : variants) {
+    iree_hal_amdgpu_aql_dispatch_params_t params = MakeExtendedDispatchParams();
+    std::memset(params.workgroup_cluster_size, 0,
+                sizeof(params.workgroup_cluster_size));
+    params.workgroup_count[0] = 2;
+    params.workgroup_count[1] = 1;
+    params.workgroup_count[2] = 1;
+    params.workitem_count[0] = 100;
+    params.workitem_count[1] = 2;
+    params.workitem_count[2] = 1;
+    params.uses_exact_workitem_count = true;
+    switch (variant) {
+      case Variant::kAllZero:
+        std::memset(params.workitem_count, 0, sizeof(params.workitem_count));
+        break;
+      case Variant::kZeroDimension:
+        params.workitem_count[1] = 0;
+        break;
+      case Variant::kBelowFinalWorkgroup:
+        params.workitem_count[0] = 64;
+        break;
+      case Variant::kAboveFullGrid:
+        params.workitem_count[0] = 129;
+        break;
+      case Variant::kClustered:
+        params.workgroup_cluster_size[0] = 2;
+        params.workgroup_cluster_size[1] = 1;
+        params.workgroup_cluster_size[2] = 1;
+        break;
+    }
+
+    union {
+      iree_hsa_kernel_dispatch_packet_t ordinary;
+      iree_hsa_amd_ext_kernel_dispatch_packet_t extended;
+    } packet;
+    std::memset(&packet, 0xCC, sizeof(packet));
+    const auto original_packet = packet;
+    uint16_t header = UINT16_MAX;
+    uint16_t setup = UINT16_MAX;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        iree_hal_amdgpu_aql_emit_dispatch_packet(
+            &packet.ordinary, &packet.extended, &params, &header, &setup));
+    EXPECT_EQ(header, 0u);
+    EXPECT_EQ(setup, 0u);
+    EXPECT_EQ(std::memcmp(&packet, &original_packet, sizeof(packet)), 0);
+  }
+}
+
 enum class InvalidExtendedDispatchVariant {
   kZeroWorkgroupSize,
   kZeroWorkgroupCount,

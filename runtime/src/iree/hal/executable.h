@@ -159,6 +159,9 @@ enum iree_hal_executable_function_flag_bits_e {
   // The workgroup size specified on the function info is the minimum size and
   // granularity and any dynamic workgroup size chosen must be a multiple.
   IREE_HAL_EXECUTABLE_FUNCTION_FLAG_WORKGROUP_SIZE_DYNAMIC = 1ull << 1,
+  // Every dispatched workgroup must have the selected workgroup size. Dispatch
+  // dimensions that would produce a partial final workgroup are invalid.
+  IREE_HAL_EXECUTABLE_FUNCTION_FLAG_REQUIRES_UNIFORM_WORKGROUPS = 1ull << 2,
 };
 typedef uint64_t iree_hal_executable_function_flags_t;
 

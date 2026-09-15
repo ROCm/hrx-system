@@ -11,6 +11,38 @@ HRX_CTS_TEST_ATTRIBUTE_KERNEL void hrx_store_output(unsigned int* output,
   output[0] = value;
 }
 
+// The leading 16-bit scalar forces native ABI padding before the first
+// pointer. Metadata queries and argument-array launches must agree on that
+// padded layout.
+HRX_CTS_TEST_ATTRIBUTE_KERNEL void hrx_transform_padded_parameters(
+    unsigned short bias, unsigned int* input, unsigned int scale,
+    unsigned int* output) {
+  output[0] = input[0] * scale + bias;
+}
+
+// Records every work-item instantiated by an exact-size dispatch. A launch of
+// 100 work-items with a local size of 64 proves that the final workgroup has 36
+// active lanes instead of being rejected or rounded up to 128 lanes.
+HRX_CTS_TEST_ATTRIBUTE_KERNEL void hrx_store_exact_workitem_indices(
+    unsigned int local_size, unsigned int* output) {
+  const unsigned int index = __builtin_amdgcn_workgroup_id_x() * local_size +
+                             __builtin_amdgcn_workitem_id_x();
+  output[index] = index + 1;
+}
+
+// Reports the packet geometry so callers can distinguish an exact partial
+// workgroup from a launch whose requested workgroup size was silently reduced.
+HRX_CTS_TEST_ATTRIBUTE_KERNEL void hrx_report_dispatch_size(
+    unsigned int* output) {
+  if (__builtin_amdgcn_workgroup_id_x() == 0 &&
+      __builtin_amdgcn_workitem_id_x() == 0) {
+    output[0] = __builtin_amdgcn_grid_size_x();
+    output[1] = __builtin_amdgcn_workgroup_size_x();
+  }
+}
+
+[[gnu::used, gnu::visibility("protected")]] unsigned int hrx_device_global = 17;
+
 typedef struct hrx_launch_gate_t {
   // Set once the gated kernel begins execution.
   unsigned int entered;

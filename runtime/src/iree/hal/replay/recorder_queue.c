@@ -803,6 +803,8 @@ static iree_status_t iree_hal_replay_recorder_queue_dispatch(
          sizeof(payload.workgroup_size));
   memcpy(payload.workgroup_count, config.workgroup_count,
          sizeof(payload.workgroup_count));
+  memcpy(payload.workitem_count, config.workitem_count,
+         sizeof(payload.workitem_count));
   iree_hal_replay_recorder_queue_make_buffer_ref_payload(
       queue, config.workgroup_count_ref.buffer,
       config.workgroup_count_ref.offset, config.workgroup_count_ref.length,

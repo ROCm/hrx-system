@@ -171,6 +171,25 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    function_handle
+  HDRS
+    "function_handle.h"
+  SRCS
+    "function_handle.c"
+  DEPS
+    ::handle_registry
+    iree::base
+    iree::base::threading
+    libhrx::src::binding::common
+    libhrx_defs
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     execution_resource_descriptor
   HDRS
     "execution_resource_descriptor.h"
@@ -250,6 +269,25 @@ iree_cc_library(
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
+    spirv_linker_compiler
+  HDRS
+    "spirv_linker_compiler.h"
+  SRCS
+    "spirv_linker_compiler.c"
+  DEPS
+    iree::base
+    iree::base::internal::dynamic_library
+    libhrx_defs
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
     amdhip64
   COPTS
     "-DIREE_HAL_STREAMING_HIP_EXPORTS"
@@ -261,15 +299,20 @@ iree_cc_library(
     "abi_stubs.c"
     "api.c"
     "api_metadata.c"
+    "library.c"
+    "linker.c"
   DEPS
     ::blocking_printf_provider
     ::execution_context
     ::execution_resource
     ::execution_resource_descriptor
+    ::function_handle
     ::handle_registry
     ::launch_params
+    ::spirv_linker_compiler
     ::stream
     iree::base
+    iree::base::internal
     iree::base::threading
     iree::hal
     libhrx::src::binding::common
@@ -331,6 +374,19 @@ iree_cc_test(
     ::handle_registry
     iree::testing::gtest
     iree::testing::gtest_main
+    libhrx_defs
+)
+
+iree_cc_test(
+  NAME
+    function_handle_test
+  SRCS
+    "function_handle_test.cc"
+  DEPS
+    ::function_handle
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx::src::binding::common
     libhrx_defs
 )
 

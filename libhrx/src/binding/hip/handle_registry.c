@@ -43,7 +43,8 @@ static iree_host_size_t iree_hip_handle_registry_slot_hash(
 }
 
 static void iree_hip_handle_registry_insert_unchecked(
-    iree_hip_handle_registry_shard_t* shard, uintptr_t handle) {
+    iree_hip_handle_registry_shard_t* shard, uintptr_t handle,
+    uintptr_t value) {
   const iree_host_size_t mask = shard->capacity - 1;
   iree_host_size_t slot = iree_hip_handle_registry_slot_hash(
                               iree_hip_handle_registry_hash(handle)) &
@@ -52,6 +53,7 @@ static void iree_hip_handle_registry_insert_unchecked(
     slot = (slot + 1) & mask;
   }
   shard->handles[slot] = handle;
+  shard->values[slot] = value;
   shard->states[slot] = IREE_HIP_HANDLE_REGISTRY_SLOT_LIVE;
   ++shard->count;
 }
@@ -76,22 +78,34 @@ static iree_status_t iree_hip_handle_registry_rehash(
     iree_allocator_free(iree_allocator_system(), new_handles);
     return status;
   }
+  uintptr_t* new_values = NULL;
+  status = iree_allocator_malloc(iree_allocator_system(), handles_size,
+                                 (void**)&new_values);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(iree_allocator_system(), new_states);
+    iree_allocator_free(iree_allocator_system(), new_handles);
+    return status;
+  }
   memset(new_states, 0, new_capacity * sizeof(*new_states));
 
   uintptr_t* old_handles = shard->handles;
+  uintptr_t* old_values = shard->values;
   uint8_t* old_states = shard->states;
   const iree_host_size_t old_capacity = shard->capacity;
   shard->handles = new_handles;
+  shard->values = new_values;
   shard->states = new_states;
   shard->capacity = new_capacity;
   shard->count = 0;
   shard->tombstone_count = 0;
   for (iree_host_size_t i = 0; i < old_capacity; ++i) {
     if (old_states[i] == IREE_HIP_HANDLE_REGISTRY_SLOT_LIVE) {
-      iree_hip_handle_registry_insert_unchecked(shard, old_handles[i]);
+      iree_hip_handle_registry_insert_unchecked(shard, old_handles[i],
+                                                old_values[i]);
     }
   }
   iree_allocator_free(iree_allocator_system(), old_states);
+  iree_allocator_free(iree_allocator_system(), old_values);
   iree_allocator_free(iree_allocator_system(), old_handles);
   return iree_ok_status();
 }
@@ -102,6 +116,7 @@ void iree_hip_handle_registry_initialize(iree_hip_handle_registry_t* registry) {
     iree_hip_handle_registry_shard_t* shard = &registry->shards[i];
     iree_slim_mutex_initialize(&shard->mutex);
     shard->handles = NULL;
+    shard->values = NULL;
     shard->states = NULL;
     shard->capacity = 0;
     shard->count = 0;
@@ -116,6 +131,7 @@ void iree_hip_handle_registry_deinitialize(
     iree_hip_handle_registry_shard_t* shard = &registry->shards[i];
     IREE_ASSERT(shard->count == 0);
     iree_allocator_free(iree_allocator_system(), shard->states);
+    iree_allocator_free(iree_allocator_system(), shard->values);
     iree_allocator_free(iree_allocator_system(), shard->handles);
     iree_slim_mutex_deinitialize(&shard->mutex);
   }
@@ -123,6 +139,11 @@ void iree_hip_handle_registry_deinitialize(
 
 iree_status_t iree_hip_handle_registry_insert(
     iree_hip_handle_registry_t* registry, uintptr_t handle) {
+  return iree_hip_handle_registry_insert_value(registry, handle, handle);
+}
+
+iree_status_t iree_hip_handle_registry_insert_value(
+    iree_hip_handle_registry_t* registry, uintptr_t handle, uintptr_t value) {
   IREE_ASSERT_ARGUMENT(registry);
   IREE_ASSERT_ARGUMENT(handle);
 
@@ -176,6 +197,7 @@ iree_status_t iree_hip_handle_registry_insert(
       --shard->tombstone_count;
     }
     shard->handles[insertion_slot] = handle;
+    shard->values[insertion_slot] = value;
     shard->states[insertion_slot] = IREE_HIP_HANDLE_REGISTRY_SLOT_LIVE;
     ++shard->count;
   }
@@ -186,8 +208,16 @@ iree_status_t iree_hip_handle_registry_insert(
 bool iree_hip_handle_registry_lookup_retain(
     iree_hip_handle_registry_t* registry, uintptr_t handle,
     iree_hip_handle_registry_retain_fn_t retain_fn) {
+  return iree_hip_handle_registry_lookup_retain_value(registry, handle,
+                                                      retain_fn, NULL);
+}
+
+bool iree_hip_handle_registry_lookup_retain_value(
+    iree_hip_handle_registry_t* registry, uintptr_t handle,
+    iree_hip_handle_registry_retain_fn_t retain_fn, uintptr_t* out_value) {
   IREE_ASSERT_ARGUMENT(registry);
   IREE_ASSERT_ARGUMENT(retain_fn);
+  if (out_value) *out_value = 0;
   if (!handle) return false;
 
   bool found = false;
@@ -201,7 +231,9 @@ bool iree_hip_handle_registry_lookup_retain(
     while (shard->states[slot] != IREE_HIP_HANDLE_REGISTRY_SLOT_EMPTY) {
       if (shard->states[slot] == IREE_HIP_HANDLE_REGISTRY_SLOT_LIVE &&
           shard->handles[slot] == handle) {
-        retain_fn(handle);
+        const uintptr_t value = shard->values[slot];
+        retain_fn(value);
+        if (out_value) *out_value = value;
         found = true;
         break;
       }
@@ -214,7 +246,14 @@ bool iree_hip_handle_registry_lookup_retain(
 
 bool iree_hip_handle_registry_remove(iree_hip_handle_registry_t* registry,
                                      uintptr_t handle) {
+  return iree_hip_handle_registry_remove_value(registry, handle, NULL);
+}
+
+bool iree_hip_handle_registry_remove_value(iree_hip_handle_registry_t* registry,
+                                           uintptr_t handle,
+                                           uintptr_t* out_value) {
   IREE_ASSERT_ARGUMENT(registry);
+  if (out_value) *out_value = 0;
   if (!handle) return false;
 
   bool found = false;
@@ -228,6 +267,7 @@ bool iree_hip_handle_registry_remove(iree_hip_handle_registry_t* registry,
     while (shard->states[slot] != IREE_HIP_HANDLE_REGISTRY_SLOT_EMPTY) {
       if (shard->states[slot] == IREE_HIP_HANDLE_REGISTRY_SLOT_LIVE &&
           shard->handles[slot] == handle) {
+        if (out_value) *out_value = shard->values[slot];
         shard->states[slot] = IREE_HIP_HANDLE_REGISTRY_SLOT_TOMBSTONE;
         --shard->count;
         ++shard->tombstone_count;

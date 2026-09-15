@@ -5,7 +5,11 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/amdgpu:binary.bzl", "iree_amdgpu_binary_variants_embed_data")
-load("//build_tools/sanitizer:suppressions.bzl", "hsa_suppressions")
+load(
+    "//build_tools/sanitizer:suppressions.bzl",
+    "hsa_suppressions",
+    "rocm_suppressions",
+)
 load(
     "//libhrx/build_tools/bazel:cc.bzl",
     "hrx_cc_library",
@@ -65,6 +69,20 @@ iree_amdgpu_binary_variants_embed_data(
     c_file_output = "amdgpu_hip_cooperative_test_kernels.c",
     h_file_output = "amdgpu_hip_cooperative_test_kernels.h",
     identifier = "hrx_cts_amdgpu_hip_cooperative_test_kernels",
+    source_format = "hip",
+    tags = ["manual"],
+    target = "amdgcn-amd-amdhsa",
+    target_selectors_flag = "//runtime/src/iree/hal/drivers/amdgpu:targets",
+)
+
+iree_amdgpu_binary_variants_embed_data(
+    name = "amdgpu_hip_module_library_test_kernels",
+    testonly = True,
+    srcs = ["tests/hip/module_library_kernel.hip"],
+    binary_name_prefix = "hrx_cts_hip_module_library_kernel",
+    c_file_output = "amdgpu_hip_module_library_test_kernels.c",
+    h_file_output = "amdgpu_hip_module_library_test_kernels.h",
+    identifier = "hrx_cts_amdgpu_hip_module_library_test_kernels",
     source_format = "hip",
     tags = ["manual"],
     target = "amdgcn-amd-amdhsa",
@@ -232,6 +250,38 @@ hrx_cc_test(
         "//libhrx/src/binding/hip:launch_params",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "hip_module_library_execution_test",
+    srcs = [
+        "core/amdgpu_executable_test_data.hpp",
+        "core/amdgpu_hip_module_library_test_data.hpp",
+        "core/amdgpu_test_data.hpp",
+        "tests/hip/module_library_execution_test.cpp",
+    ],
+    copts = ["-Wno-attributes"],
+    data = ["//libhrx/src/binding/hip:amdhip64"],
+    env = {
+        # The linker keeps COMGR's process-global LLVM registrations resident
+        # because they cannot be reconstructed after unloading. ASAN continues
+        # to instrument accesses; only its process-exit leak scan is disabled.
+        "ASAN_OPTIONS": "detect_leaks=0",
+        "HRX_TEST_LIBAMDHIP64": "$(location //libhrx/src/binding/hip:amdhip64)",
+    },
+    sanitizer_suppressions = rocm_suppressions,
+    tags = AMD_GPU_CTS_TAGS,
+    target_compatible_with = _HIP_GPU_COMPATIBILITY,
+    deps = [
+        ":amdgpu_executable_test_kernels",
+        ":amdgpu_hip_module_library_test_kernels",
+        "//build_tools/amdgpu:target_map_h",
+        "//build_tools/bazel:dl",
+        "//libhrx/src/binding/hip:launch_params",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
     ],
 )
 

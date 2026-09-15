@@ -329,6 +329,11 @@ static iree_status_t iree_hal_webgpu_command_buffer_dispatch(
     iree_hal_executable_t* executable, iree_hal_executable_function_t function,
     const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
     iree_hal_buffer_ref_list_t bindings, iree_hal_dispatch_flags_t flags) {
+  if (iree_any_bit_set(flags, IREE_HAL_DISPATCH_FLAG_EXACT_WORKITEM_COUNT)) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "exact work-item dispatch is not supported by WebGPU");
+  }
   if (IREE_UNLIKELY(constants.data_length != 0)) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,

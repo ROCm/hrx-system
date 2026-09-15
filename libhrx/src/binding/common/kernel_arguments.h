@@ -21,6 +21,13 @@ iree_status_t iree_hal_streaming_validate_prepacked_kernel_arguments(
     const iree_hal_streaming_symbol_t* symbol,
     const iree_hal_streaming_dispatch_params_t* params);
 
+// Validates a pointer-array launch parameter list without copying it. This is
+// used when callers must reject malformed arguments before mutating stream or
+// event state.
+iree_status_t iree_hal_streaming_validate_raw_argument_list(
+    const iree_hal_streaming_parameter_info_t* parameters,
+    void** parameter_list);
+
 // Unpacks a packed kernel parameter buffer into a constant buffer and binding
 // list. Some dispatches may use raw device buffer pointers and others may use
 // bindings that can be resolved to HAL buffers.

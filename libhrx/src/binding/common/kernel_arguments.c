@@ -269,7 +269,7 @@ iree_status_t iree_hal_streaming_unpack_parameters(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_streaming_pack_raw_argument_list(
+static iree_status_t iree_hal_streaming_process_raw_argument_list(
     const iree_hal_streaming_parameter_info_t* parameters,
     void** parameter_list, void* out_constants,
     iree_host_size_t* out_constants_size) {
@@ -288,9 +288,10 @@ iree_status_t iree_hal_streaming_pack_raw_argument_list(
     *out_constants_size = parameters->buffer_size;
   }
   if (*out_constants_size == 0) return iree_ok_status();
-  if (!out_constants || (!parameter_list && (parameters->buffer_size > 0 ||
-                                             parameters->binding_count > 0 ||
-                                             parameters->copy_count > 0))) {
+  const bool copy_arguments = out_constants != NULL;
+  if (!parameter_list &&
+      (parameters->buffer_size > 0 || parameters->binding_count > 0 ||
+       parameters->copy_count > 0)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "raw kernel arguments require parameter storage");
   }
@@ -308,7 +309,7 @@ iree_status_t iree_hal_streaming_pack_raw_argument_list(
   }
 
   uint8_t* constants = (uint8_t*)out_constants;
-  memset(constants, 0, *out_constants_size);
+  if (copy_arguments) memset(constants, 0, *out_constants_size);
   const iree_hal_streaming_parameter_op_t* copy_ops = parameters->ops;
   const iree_hal_streaming_parameter_op_t* resolve_ops =
       parameters->ops + parameters->copy_count;
@@ -374,18 +375,45 @@ iree_status_t iree_hal_streaming_pack_raw_argument_list(
                               "kernel argument %" PRIu32 " is NULL",
                               (uint32_t)source_ordinal);
     }
-    if (use_copy) {
+    if (copy_arguments && use_copy) {
       memcpy(constants + destination_offset, param_ptr, argument_size);
-      ++copy_index;
-    } else {
+    } else if (copy_arguments) {
       const iree_hal_streaming_deviceptr_t device_pointer =
           iree_hal_streaming_load_device_pointer_bytes(param_ptr);
       memcpy(constants + destination_offset, &device_pointer,
              sizeof(device_pointer));
+    }
+    if (use_copy) {
+      ++copy_index;
+    } else {
       ++resolve_index;
     }
     written_end = destination_offset + argument_size;
   }
 
   return iree_ok_status();
+}
+
+iree_status_t iree_hal_streaming_validate_raw_argument_list(
+    const iree_hal_streaming_parameter_info_t* parameters,
+    void** parameter_list) {
+  IREE_ASSERT_ARGUMENT(parameters);
+  iree_host_size_t argument_size = 0;
+  return iree_hal_streaming_process_raw_argument_list(
+      parameters, parameter_list, NULL, &argument_size);
+}
+
+iree_status_t iree_hal_streaming_pack_raw_argument_list(
+    const iree_hal_streaming_parameter_info_t* parameters,
+    void** parameter_list, void* out_constants,
+    iree_host_size_t* out_constants_size) {
+  IREE_ASSERT_ARGUMENT(parameters);
+  IREE_ASSERT_ARGUMENT(out_constants_size);
+  if (!iree_hal_streaming_parameter_info_is_empty(parameters) &&
+      !out_constants) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "raw kernel argument output storage is required");
+  }
+  return iree_hal_streaming_process_raw_argument_list(
+      parameters, parameter_list, out_constants, out_constants_size);
 }

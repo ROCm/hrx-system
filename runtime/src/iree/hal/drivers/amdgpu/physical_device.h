@@ -422,7 +422,7 @@ iree_status_t iree_hal_amdgpu_physical_device_assign_frontier(
 // |release_slot| is captured only on success. The caller remains responsible
 // for returning the slot when this call fails. |out_queue| is unchanged on
 // failure.
-iree_status_t iree_hal_amdgpu_physical_device_allocate_host_queue(
+iree_status_t iree_hal_amdgpu_physical_device_create_host_queue(
     iree_hal_amdgpu_physical_device_t* physical_device,
     const iree_hal_queue_params_t* params, iree_async_axis_t axis,
     iree_hal_amdgpu_host_queue_release_slot_callback_t release_slot,

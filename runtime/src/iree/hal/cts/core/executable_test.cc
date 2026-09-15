@@ -77,9 +77,11 @@ TEST_P(ExecutableTest, ExportInfo) {
   IREE_ASSERT_OK(iree_hal_executable_function_info(
       executable_, iree_hal_executable_function_from_index(0), &info));
   EXPECT_EQ(std::string_view(info.name.data, info.name.size), "export0");
-  EXPECT_EQ(
-      info.flags & ~IREE_HAL_EXECUTABLE_FUNCTION_FLAG_WORKGROUP_SIZE_DYNAMIC,
-      IREE_HAL_EXECUTABLE_FUNCTION_FLAG_NONE);
+  constexpr iree_hal_executable_function_flags_t kAllowedFunctionFlags =
+      IREE_HAL_EXECUTABLE_FUNCTION_FLAG_WORKGROUP_SIZE_DYNAMIC |
+      IREE_HAL_EXECUTABLE_FUNCTION_FLAG_REQUIRES_UNIFORM_WORKGROUPS;
+  EXPECT_EQ(info.flags & ~kAllowedFunctionFlags,
+            IREE_HAL_EXECUTABLE_FUNCTION_FLAG_NONE);
   EXPECT_EQ(info.constant_byte_length, 2 * sizeof(uint32_t));
   EXPECT_EQ(info.binding_count, 2);
   EXPECT_EQ(info.resource_usage.provided_flags &

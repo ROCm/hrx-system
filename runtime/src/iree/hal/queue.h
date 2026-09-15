@@ -352,6 +352,13 @@ enum iree_hal_dispatch_flag_bits_t {
   // independent synchronization state and may overlap other executions of the
   // same command buffer.
   IREE_HAL_DISPATCH_FLAG_COOPERATIVE = 1ull << 7,
+
+  // Uses the exact work-item dimensions in
+  // iree_hal_dispatch_config_t::workitem_count instead of deriving them from
+  // workgroup_count * workgroup_size. The exact extent may partially populate
+  // only the final workgroup in each dimension. This flag is incompatible with
+  // indirect workgroup counts.
+  IREE_HAL_DISPATCH_FLAG_EXACT_WORKITEM_COUNT = 1ull << 8,
 };
 
 // Returns true if the given dispatch uses indirect workgroup parameters.

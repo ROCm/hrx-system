@@ -87,6 +87,8 @@ typedef enum iree_hal_amdgpu_command_buffer_dispatch_flag_bits_e {
   // The dispatch requires a cooperative-capable queue and per-execution grid
   // synchronization state when implicit arguments are present.
   IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_COOPERATIVE = 1u << 3,
+  // The dispatch uses |workitem_count| as the exact ordinary packet grid size.
+  IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_EXACT_WORKITEM_COUNT = 1u << 4,
 } iree_hal_amdgpu_command_buffer_dispatch_flag_bits_t;
 
 // Kernarg storage mode for a dispatch command.
@@ -404,6 +406,8 @@ typedef struct IREE_AMDGPU_ALIGNAS(8)
   uint16_t implicit_args_offset_qwords;
   // Direct dispatch size in workgroups.
   uint32_t workgroup_count[3];
+  // Exact ordinary dispatch size in work-items, or zeroes for full workgroups.
+  uint32_t workitem_count[3];
   // AQL dispatch packet private segment size field.
   uint32_t private_segment_size;
   // AQL dispatch packet group segment size field.
@@ -412,7 +416,7 @@ typedef struct IREE_AMDGPU_ALIGNAS(8)
   uint64_t executable_id;
 } iree_hal_amdgpu_command_buffer_dispatch_command_t;
 IREE_AMDGPU_STATIC_ASSERT(
-    sizeof(iree_hal_amdgpu_command_buffer_dispatch_command_t) == 80,
+    sizeof(iree_hal_amdgpu_command_buffer_dispatch_command_t) == 88,
     "dispatch command size must remain qword aligned");
 
 // Fill command record.

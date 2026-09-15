@@ -1698,6 +1698,12 @@ iree_status_t iree_hal_streaming_launch_kernel(
                 params->grid_dim[1],
                 params->grid_dim[2],
             },
+        .workitem_count =
+            {
+                params->workitem_count[0],
+                params->workitem_count[1],
+                params->workitem_count[2],
+            },
         .dynamic_workgroup_local_memory = params->shared_memory_bytes,
     };
 
@@ -1710,6 +1716,10 @@ iree_status_t iree_hal_streaming_launch_kernel(
             : IREE_HAL_DISPATCH_FLAG_NONE;
     if (cooperative_dispatch) {
       flags |= IREE_HAL_DISPATCH_FLAG_COOPERATIVE;
+    }
+    if (params->workitem_count[0] || params->workitem_count[1] ||
+        params->workitem_count[2]) {
+      flags |= IREE_HAL_DISPATCH_FLAG_EXACT_WORKITEM_COUNT;
     }
 
     uint64_t timing_step_ns = timing_enabled ? hrx_launch_timing_now_ns() : 0;
@@ -1952,14 +1962,25 @@ iree_status_t iree_hal_streaming_launch_kernel_batch(
                 launch->params.grid_dim[1],
                 launch->params.grid_dim[2],
             },
+        .workitem_count =
+            {
+                launch->params.workitem_count[0],
+                launch->params.workitem_count[1],
+                launch->params.workitem_count[2],
+            },
         .dynamic_workgroup_local_memory = launch->params.shared_memory_bytes,
     };
+    iree_hal_dispatch_flags_t flags =
+        IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS;
+    if (launch->params.workitem_count[0] || launch->params.workitem_count[1] ||
+        launch->params.workitem_count[2]) {
+      flags |= IREE_HAL_DISPATCH_FLAG_EXACT_WORKITEM_COUNT;
+    }
     status = iree_hal_streaming_record_dispatch_locked(
         launch->stream, launch->symbol, config,
         iree_make_const_byte_span(prepared[i].constants,
                                   prepared[i].constants_size),
-        iree_hal_buffer_ref_list_empty(),
-        IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS,
+        iree_hal_buffer_ref_list_empty(), flags,
         /*timing_begin_ns=*/NULL, /*timing_barrier_ns=*/NULL,
         /*out_should_flush=*/NULL);
     if (iree_status_is_ok(status)) ++recorded_count;

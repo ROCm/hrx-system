@@ -52,10 +52,13 @@ class FakeExecutable {
 
   void AddFunction(
       std::string name, uint32_t constant_byte_length, uint16_t binding_count,
-      std::vector<iree_hal_executable_function_parameter_t> parameters) {
+      std::vector<iree_hal_executable_function_parameter_t> parameters,
+      iree_hal_executable_function_flags_t flags =
+          IREE_HAL_EXECUTABLE_FUNCTION_FLAG_NONE) {
     ASSERT_LE(parameters.size(), UINT16_MAX);
     FakeFunction function;
     function.name = std::move(name);
+    function.info.flags = flags;
     function.info.constant_byte_length = constant_byte_length;
     function.info.binding_count = binding_count;
     function.info.parameter_count = static_cast<uint16_t>(parameters.size());
@@ -275,7 +278,8 @@ TEST_F(ModuleMetadataTest, OwnsStableContiguousSymbolsAndOperations) {
                         /*size=*/2, /*offset=*/4, /*native_abi_offset=*/16),
           MakeParameter(IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_BINDING,
                         /*size=*/8, /*offset=*/0, /*native_abi_offset=*/24),
-      });
+      },
+      IREE_HAL_EXECUTABLE_FUNCTION_FLAG_REQUIRES_UNIFORM_WORKGROUPS);
   executable_.AddFunction(
       "tail_kernel", /*constant_byte_length=*/1, /*binding_count=*/0,
       {MakeParameter(IREE_HAL_EXECUTABLE_FUNCTION_PARAMETER_TYPE_CONSTANT,
@@ -286,6 +290,10 @@ TEST_F(ModuleMetadataTest, OwnsStableContiguousSymbolsAndOperations) {
   ASSERT_NE(nullptr, module_.symbols);
 
   const iree_hal_streaming_symbol_t& mixed = module_.symbols[0];
+  EXPECT_EQ(IREE_HAL_EXECUTABLE_FUNCTION_FLAG_REQUIRES_UNIFORM_WORKGROUPS,
+            mixed.function_flags);
+  EXPECT_EQ(-1, iree_atomic_load(&mixed.preferred_shared_memory_carveout,
+                                 iree_memory_order_relaxed));
   EXPECT_EQ(22u, mixed.parameters.buffer_size);
   EXPECT_EQ(6u, mixed.parameters.constant_bytes);
   EXPECT_EQ(32u, mixed.parameters.direct_arg_bytes);
@@ -308,6 +316,8 @@ TEST_F(ModuleMetadataTest, OwnsStableContiguousSymbolsAndOperations) {
   EXPECT_EQ(reinterpret_cast<uint8_t*>(module_.symbols) + expected_ops_offset,
             reinterpret_cast<const uint8_t*>(mixed.parameters.ops));
   EXPECT_EQ(mixed.parameters.ops + 4, module_.symbols[1].parameters.ops);
+  EXPECT_EQ(IREE_HAL_EXECUTABLE_FUNCTION_FLAG_NONE,
+            module_.symbols[1].function_flags);
 
   iree_hal_streaming_symbol_t* found_symbol = nullptr;
   IREE_ASSERT_OK(iree_hal_streaming_module_function(

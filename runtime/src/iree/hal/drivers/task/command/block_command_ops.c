@@ -270,6 +270,11 @@ iree_status_t iree_hal_cmd_build_dispatch(
   IREE_ASSERT_ARGUMENT(out_fixups);
   IREE_ASSERT_ARGUMENT(out_token);
 
+  if (iree_any_bit_set(flags, IREE_HAL_DISPATCH_FLAG_EXACT_WORKITEM_COUNT)) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "exact work-item dispatch is not supported by the task backend");
+  }
   if (iree_hal_dispatch_uses_custom_arguments(flags)) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,

@@ -25,6 +25,8 @@ typedef struct iree_hip_handle_registry_shard_t {
   iree_slim_mutex_t mutex;
   // Open-addressed table of live handle values.
   uintptr_t* handles;
+  // Caller-defined values parallel to |handles|.
+  uintptr_t* values;
   // Slot state array parallel to |handles|.
   uint8_t* states;
   // Power-of-two slot count in |handles| and |states|.
@@ -53,14 +55,31 @@ void iree_hip_handle_registry_deinitialize(
 iree_status_t iree_hip_handle_registry_insert(
     iree_hip_handle_registry_t* registry, uintptr_t handle);
 
+// Inserts a handle associated with |value|. The registry does not own the
+// value; callers must remove it before releasing its storage.
+iree_status_t iree_hip_handle_registry_insert_value(
+    iree_hip_handle_registry_t* registry, uintptr_t handle, uintptr_t value);
+
 // Looks up and retains a live handle before releasing the registry lock.
 bool iree_hip_handle_registry_lookup_retain(
     iree_hip_handle_registry_t* registry, uintptr_t handle,
     iree_hip_handle_registry_retain_fn_t retain_fn);
 
+// Looks up a live handle and retains its associated value before releasing the
+// registry lock. |retain_fn| must make the returned value safe to use after
+// this call returns.
+bool iree_hip_handle_registry_lookup_retain_value(
+    iree_hip_handle_registry_t* registry, uintptr_t handle,
+    iree_hip_handle_registry_retain_fn_t retain_fn, uintptr_t* out_value);
+
 // Removes a live handle, transferring its existing ownership to the caller.
 bool iree_hip_handle_registry_remove(iree_hip_handle_registry_t* registry,
                                      uintptr_t handle);
+
+// Removes a live handle and returns its associated value without retaining it.
+bool iree_hip_handle_registry_remove_value(iree_hip_handle_registry_t* registry,
+                                           uintptr_t handle,
+                                           uintptr_t* out_value);
 
 #ifdef __cplusplus
 }  // extern "C"

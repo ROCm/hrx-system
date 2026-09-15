@@ -4,9 +4,9 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef _DEFAULT_SOURCE
-#define _DEFAULT_SOURCE 1
-#endif  // _DEFAULT_SOURCE
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif  // _GNU_SOURCE
 
 #include "loom/target/tool/process_platform.h"
 
