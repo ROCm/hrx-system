@@ -11,12 +11,12 @@
 namespace {
 
 TEST(StatusConversionTest, DistinguishesDeviceFailureClasses) {
-  EXPECT_EQ(hipErrorIllegalAddress,
-            iree_status_to_hip_result(iree_make_status(
-                IREE_STATUS_DATA_LOSS, "device memory access fault")));
   EXPECT_EQ(hipErrorLaunchFailure,
             iree_status_to_hip_result(iree_make_status(
-                IREE_STATUS_ABORTED, "device execution aborted")));
+                IREE_STATUS_DATA_LOSS, "device execution failed")));
+  EXPECT_EQ(hipErrorIllegalAddress,
+            iree_status_to_hip_result(iree_make_status(
+                IREE_STATUS_ABORTED, "device memory access fault")));
 }
 
 TEST(StatusConversionTest, MapsValidationAndAvailability) {

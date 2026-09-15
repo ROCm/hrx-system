@@ -64,7 +64,7 @@ static iree_status_code_t iree_hsa_status_code(hsa_status_t status) {
       return IREE_STATUS_NOT_FOUND;
     case HSA_STATUS_ERROR_EXCEPTION:
     case HSA_STATUS_ERROR_FATAL:
-      return IREE_STATUS_ABORTED;
+      return IREE_STATUS_DATA_LOSS;
   }
 }
 

@@ -465,10 +465,10 @@ TEST_F(SystemEventTest, MatchedEventFailsPublishedQueues) {
   EXPECT_EQ(DispatchMemoryFault(kAgentHandleA, kFaultAddress),
             HSA_STATUS_SUCCESS);
   for (iree_host_size_t i = 0; i < queues.count(); ++i) {
-    EXPECT_EQ(queues.ErrorStatusCode(i), IREE_STATUS_DATA_LOSS);
+    EXPECT_EQ(queues.ErrorStatusCode(i), IREE_STATUS_ABORTED);
     EXPECT_TRUE(queues.ErrorStatusMentions(i, "00000000dead0000"));
   }
-  EXPECT_EQ(device.FailureStatusCode(), IREE_STATUS_DATA_LOSS);
+  EXPECT_EQ(device.FailureStatusCode(), IREE_STATUS_ABORTED);
   EXPECT_TRUE(device.FailureStatusMentions("00000000dead0000"));
 
   iree_hal_amdgpu_system_event_unregister_device(registration);
@@ -489,8 +489,8 @@ TEST_F(SystemEventTest, HardwareExceptionPreservesFailureClass) {
   EXPECT_EQ(DispatchHardwareException(kAgentHandleA, /*reset_type=*/3,
                                       /*reset_cause=*/5),
             HSA_STATUS_SUCCESS);
-  EXPECT_EQ(queues.ErrorStatusCode(0), IREE_STATUS_ABORTED);
-  EXPECT_EQ(device.FailureStatusCode(), IREE_STATUS_ABORTED);
+  EXPECT_EQ(queues.ErrorStatusCode(0), IREE_STATUS_DATA_LOSS);
+  EXPECT_EQ(device.FailureStatusCode(), IREE_STATUS_DATA_LOSS);
   EXPECT_TRUE(queues.ErrorStatusMentions(0, "reset type 0x00000003"));
   EXPECT_TRUE(device.FailureStatusMentions("cause 0x00000005"));
 
@@ -518,8 +518,8 @@ TEST_F(SystemEventTest, SelectiveRetirementPreservesOtherQueueTargets) {
   EXPECT_EQ(DispatchMemoryFault(kAgentHandleA, kFaultAddress),
             HSA_STATUS_SUCCESS);
   EXPECT_EQ(retired_queue.ErrorStatusCode(0), IREE_STATUS_OK);
-  EXPECT_EQ(live_queue.ErrorStatusCode(0), IREE_STATUS_DATA_LOSS);
-  EXPECT_EQ(device.FailureStatusCode(), IREE_STATUS_DATA_LOSS);
+  EXPECT_EQ(live_queue.ErrorStatusCode(0), IREE_STATUS_ABORTED);
+  EXPECT_EQ(device.FailureStatusCode(), IREE_STATUS_ABORTED);
 
   iree_hal_amdgpu_system_event_unregister_device(registration);
 }
@@ -536,7 +536,7 @@ TEST_F(SystemEventTest, UnpublishedRegistrationClaimsWithoutFailingQueues) {
   EXPECT_EQ(DispatchMemoryFault(kAgentHandleA, kFaultAddress),
             HSA_STATUS_SUCCESS);
   EXPECT_EQ(queues.ErrorStatusCode(0), IREE_STATUS_OK);
-  EXPECT_EQ(device.FailureStatusCode(), IREE_STATUS_DATA_LOSS);
+  EXPECT_EQ(device.FailureStatusCode(), IREE_STATUS_ABORTED);
 
   iree_hal_amdgpu_system_event_unregister_device(registration);
 }
@@ -563,13 +563,13 @@ TEST_F(SystemEventTest, FanoutCoversEveryAgentOfTheRegistration) {
   EXPECT_EQ(DispatchMemoryFault(kAgentHandleB, kFaultAddress),
             HSA_STATUS_SUCCESS);
   for (iree_host_size_t i = 0; i < queues_a.count(); ++i) {
-    EXPECT_EQ(queues_a.ErrorStatusCode(i), IREE_STATUS_DATA_LOSS);
+    EXPECT_EQ(queues_a.ErrorStatusCode(i), IREE_STATUS_ABORTED);
     EXPECT_TRUE(queues_a.ErrorStatusMentions(i, "00000000dead0000"));
   }
   for (iree_host_size_t i = 0; i < queues_b.count(); ++i) {
-    EXPECT_EQ(queues_b.ErrorStatusCode(i), IREE_STATUS_DATA_LOSS);
+    EXPECT_EQ(queues_b.ErrorStatusCode(i), IREE_STATUS_ABORTED);
   }
-  EXPECT_EQ(device.FailureStatusCode(), IREE_STATUS_DATA_LOSS);
+  EXPECT_EQ(device.FailureStatusCode(), IREE_STATUS_ABORTED);
 
   iree_hal_amdgpu_system_event_unregister_device(registration);
 }
@@ -600,11 +600,11 @@ TEST_F(SystemEventTest, FanoutStopsAtTheRegistrationBoundary) {
 
   EXPECT_EQ(DispatchMemoryFault(kAgentHandleA, kFaultAddress),
             HSA_STATUS_SUCCESS);
-  EXPECT_EQ(faulting_queues.ErrorStatusCode(0), IREE_STATUS_DATA_LOSS);
-  EXPECT_EQ(faulting_queues.ErrorStatusCode(1), IREE_STATUS_DATA_LOSS);
+  EXPECT_EQ(faulting_queues.ErrorStatusCode(0), IREE_STATUS_ABORTED);
+  EXPECT_EQ(faulting_queues.ErrorStatusCode(1), IREE_STATUS_ABORTED);
   EXPECT_EQ(other_queues.ErrorStatusCode(0), IREE_STATUS_OK);
   EXPECT_EQ(other_queues.ErrorStatusCode(1), IREE_STATUS_OK);
-  EXPECT_EQ(faulting_device.FailureStatusCode(), IREE_STATUS_DATA_LOSS);
+  EXPECT_EQ(faulting_device.FailureStatusCode(), IREE_STATUS_ABORTED);
   EXPECT_EQ(other_device.FailureStatusCode(), IREE_STATUS_OK);
 
   iree_hal_amdgpu_system_event_unregister_device(other_registration);
@@ -633,7 +633,7 @@ TEST_F(SystemEventTest, RetiredTargetsStopQueueDeliveryAndStillClaim) {
             HSA_STATUS_SUCCESS);
   EXPECT_EQ(queues.ErrorStatusCode(0), IREE_STATUS_OK);
   EXPECT_EQ(queues.ErrorStatusCode(1), IREE_STATUS_OK);
-  EXPECT_EQ(device.FailureStatusCode(), IREE_STATUS_DATA_LOSS);
+  EXPECT_EQ(device.FailureStatusCode(), IREE_STATUS_ABORTED);
 
   iree_hal_amdgpu_system_event_unregister_device(registration);
 }
@@ -655,8 +655,8 @@ TEST_F(SystemEventTest, RetiredDeviceStatusStillDeliversToPublishedQueues) {
 
   EXPECT_EQ(DispatchMemoryFault(kAgentHandleA, kFaultAddress),
             HSA_STATUS_SUCCESS);
-  EXPECT_EQ(queues.ErrorStatusCode(0), IREE_STATUS_DATA_LOSS);
-  EXPECT_EQ(queues.ErrorStatusCode(1), IREE_STATUS_DATA_LOSS);
+  EXPECT_EQ(queues.ErrorStatusCode(0), IREE_STATUS_ABORTED);
+  EXPECT_EQ(queues.ErrorStatusCode(1), IREE_STATUS_ABORTED);
   EXPECT_EQ(device.FailureStatusCode(), IREE_STATUS_OK);
 
   iree_hal_amdgpu_system_event_unregister_device(registration);
@@ -761,10 +761,10 @@ TEST_F(SystemEventTest, RegistrationsSharingAnAgentAreIndependent) {
 
   EXPECT_EQ(DispatchMemoryFault(kAgentHandleA, kFaultAddress),
             HSA_STATUS_SUCCESS);
-  EXPECT_EQ(first_queues.ErrorStatusCode(0), IREE_STATUS_DATA_LOSS);
-  EXPECT_EQ(second_queues.ErrorStatusCode(0), IREE_STATUS_DATA_LOSS);
-  EXPECT_EQ(first_device.FailureStatusCode(), IREE_STATUS_DATA_LOSS);
-  EXPECT_EQ(second_device.FailureStatusCode(), IREE_STATUS_DATA_LOSS);
+  EXPECT_EQ(first_queues.ErrorStatusCode(0), IREE_STATUS_ABORTED);
+  EXPECT_EQ(second_queues.ErrorStatusCode(0), IREE_STATUS_ABORTED);
+  EXPECT_EQ(first_device.FailureStatusCode(), IREE_STATUS_ABORTED);
+  EXPECT_EQ(second_device.FailureStatusCode(), IREE_STATUS_ABORTED);
 
   // Removing the first registration must leave the second delivering.
   iree_hal_amdgpu_system_event_unregister_device(first_registration);
@@ -774,7 +774,7 @@ TEST_F(SystemEventTest, RegistrationsSharingAnAgentAreIndependent) {
           late_queues);
   EXPECT_EQ(DispatchMemoryFault(kAgentHandleA, kSecondFaultAddress),
             HSA_STATUS_SUCCESS);
-  EXPECT_EQ(late_queues.ErrorStatusCode(0), IREE_STATUS_DATA_LOSS);
+  EXPECT_EQ(late_queues.ErrorStatusCode(0), IREE_STATUS_ABORTED);
 
   iree_hal_amdgpu_system_event_unregister_device(second_registration);
 }
@@ -854,7 +854,7 @@ TEST_F(SystemEventTest, HsaShutdownRearmsHandlerRegistration) {
           queues);
   EXPECT_EQ(DispatchMemoryFault(kAgentHandleA, kFaultAddress),
             HSA_STATUS_SUCCESS);
-  EXPECT_EQ(queues.ErrorStatusCode(0), IREE_STATUS_DATA_LOSS);
+  EXPECT_EQ(queues.ErrorStatusCode(0), IREE_STATUS_ABORTED);
   iree_hal_amdgpu_system_event_unregister_device(third);
 }
 

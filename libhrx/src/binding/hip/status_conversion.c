@@ -26,15 +26,15 @@ hipError_t iree_status_to_hip_result(iree_status_t status) {
       return hipErrorNotReady;
     case IREE_STATUS_FAILED_PRECONDITION:
       return hipErrorNotInitialized;
-    // Device-side memory access faults are reported as data loss by HAL
-    // backends: the operation's data is no longer trustworthy and the device
-    // context cannot continue safely.
+    // Hardware execution failures use data loss when no invalid memory access
+    // was identified. This status is non-fatal because other producers also
+    // use it for malformed input and protocol data.
     case IREE_STATUS_DATA_LOSS:
-      return hipErrorIllegalAddress;
-    // A device execution failure that is not attributable to a memory access
-    // aborts the submitted operation without identifying an illegal address.
-    case IREE_STATUS_ABORTED:
       return hipErrorLaunchFailure;
+    // Device-side memory access faults abort the submitted operation and make
+    // the device context unsafe to continue using.
+    case IREE_STATUS_ABORTED:
+      return hipErrorIllegalAddress;
     default:
       return hipErrorUnknown;
   }
