@@ -19,6 +19,12 @@ class HipErrorStateTest : public testing::Test {
   void TearDown() override { iree_hip_error_state_reset(); }
 };
 
+static hipError_t TestPublicQuery(int* output) {
+  HIP_API_BEGIN();
+  *output = 42;
+  HIP_RETURN_ERROR(hipSuccess);
+}
+
 TEST_F(HipErrorStateTest, NonFatalErrorsRemainThreadLocalAndClearable) {
   EXPECT_EQ(hipErrorInvalidValue,
             iree_hip_error_state_publish(hipErrorInvalidValue));
@@ -65,6 +71,17 @@ TEST_F(HipErrorStateTest, IllegalAddressIsProcessSharedAndSticky) {
   EXPECT_EQ(hipErrorIllegalAddress,
             iree_hip_error_state_get_and_clear_last_error());
   EXPECT_EQ(hipErrorIllegalAddress, iree_hip_error_state_peek_last_error());
+}
+
+TEST_F(HipErrorStateTest, FatalEntryBoundaryPrecedesApiSideEffects) {
+  EXPECT_EQ(hipErrorIllegalAddress,
+            iree_hip_error_state_publish(hipErrorIllegalAddress));
+
+  int output = 7;
+  EXPECT_EQ(hipErrorIllegalAddress, TestPublicQuery(&output));
+  EXPECT_EQ(7, output);
+  EXPECT_EQ(hipErrorIllegalAddress,
+            iree_hip_error_state_get_and_clear_command_error());
 }
 
 TEST_F(HipErrorStateTest, ResetInvalidatesOtherThreadsFatalState) {

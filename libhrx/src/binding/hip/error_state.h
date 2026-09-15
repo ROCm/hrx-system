@@ -52,6 +52,17 @@ void iree_hip_error_state_reset(void);
     return iree_hip_error_state_publish((error)); \
   } while (0)
 
+// Rejects an ordinary public HIP API call before it can observe or mutate
+// runtime state when a process-fatal device error is active. Error inspection
+// and runtime teardown entry points intentionally omit this boundary.
+#define HIP_API_BEGIN()                                                   \
+  do {                                                                    \
+    const hipError_t _fatal_result = iree_hip_error_state_fatal_result(); \
+    if (_fatal_result != hipSuccess) {                                    \
+      return iree_hip_error_state_publish(_fatal_result);                 \
+    }                                                                     \
+  } while (0)
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

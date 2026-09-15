@@ -260,6 +260,7 @@ static hipError_t iree_hip_link_compiler_status_to_result(
 
 HIPAPI hipError_t hipLinkCreate(unsigned int numOptions, hipJitOption* options,
                                 void** optionValues, hipLinkState_t* stateOut) {
+  HIP_API_BEGIN();
   if (!stateOut) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
@@ -300,6 +301,7 @@ HIPAPI hipError_t hipLinkAddData(hipLinkState_t state, hipJitInputType type,
                                  void* data, size_t size, const char* name,
                                  unsigned int numOptions, hipJitOption* options,
                                  void** optionValues) {
+  HIP_API_BEGIN();
   if (!data || size == 0) {
     HIP_RETURN_ERROR(hipErrorInvalidImage);
   }
@@ -330,6 +332,7 @@ HIPAPI hipError_t hipLinkAddData(hipLinkState_t state, hipJitInputType type,
 HIPAPI hipError_t hipLinkAddFile(hipLinkState_t state, hipJitInputType type,
                                  const char* path, unsigned int numOptions,
                                  hipJitOption* options, void** optionValues) {
+  HIP_API_BEGIN();
   if (!state) {
     HIP_RETURN_ERROR(hipErrorInvalidHandle);
   }
@@ -387,6 +390,7 @@ HIPAPI hipError_t hipLinkAddFile(hipLinkState_t state, hipJitInputType type,
 
 HIPAPI hipError_t hipLinkComplete(hipLinkState_t state, void** hipBinOut,
                                   size_t* sizeOut) {
+  HIP_API_BEGIN();
   if (!hipBinOut || !sizeOut) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
@@ -464,6 +468,7 @@ HIPAPI hipError_t hipLinkComplete(hipLinkState_t state, void** hipBinOut,
 }
 
 HIPAPI hipError_t hipLinkDestroy(hipLinkState_t state) {
+  HIP_API_BEGIN();
   if (!state) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
