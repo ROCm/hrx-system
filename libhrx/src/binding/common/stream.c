@@ -509,94 +509,118 @@ iree_status_t iree_hal_streaming_stream_begin(
   return status;
 }
 
-iree_status_t iree_hal_streaming_stream_flush(
-    iree_hal_streaming_stream_t* stream) {
+typedef struct iree_hal_streaming_flush_timing_t {
+  int enabled;
+  uint64_t start_ns;
+  uint64_t end_ns;
+  uint64_t execute_ns;
+  uint64_t release_ns;
+} iree_hal_streaming_flush_timing_t;
+
+static iree_hal_streaming_flush_timing_t iree_hal_streaming_flush_timing_begin(
+    void) {
+  iree_hal_streaming_flush_timing_t timing = {
+      .enabled = hrx_launch_timing_enabled(),
+  };
+  if (timing.enabled) timing.start_ns = hrx_launch_timing_now_ns();
+  return timing;
+}
+
+static void iree_hal_streaming_flush_timing_end(
+    const iree_hal_streaming_flush_timing_t* timing) {
+  if (!timing->enabled) return;
+  ++g_hrx_launch_timing.flush_count;
+  g_hrx_launch_timing.flush_total_ns +=
+      hrx_launch_timing_now_ns() - timing->start_ns;
+  g_hrx_launch_timing.flush_end_ns += timing->end_ns;
+  g_hrx_launch_timing.flush_execute_ns += timing->execute_ns;
+  g_hrx_launch_timing.flush_release_ns += timing->release_ns;
+}
+
+static iree_status_t iree_hal_streaming_stream_flush_locked_impl(
+    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_flush_timing_t* timing) {
   IREE_ASSERT_ARGUMENT(stream);
-  IREE_TRACE_ZONE_BEGIN(z0);
-  const int timing_enabled = hrx_launch_timing_enabled();
-  const uint64_t timing_start_ns =
-      timing_enabled ? hrx_launch_timing_now_ns() : 0;
-  uint64_t timing_end_ns = 0;
-  uint64_t timing_execute_ns = 0;
-  uint64_t timing_release_ns = 0;
-  iree_slim_mutex_lock(&stream->mutex);
+  if (!stream->command_buffer) return iree_ok_status();
 
-  iree_status_t status = iree_ok_status();
-  if (stream->command_buffer) {
-    // End recording and submit command buffer.
-    uint64_t timing_step_ns = timing_enabled ? hrx_launch_timing_now_ns() : 0;
-    status = iree_hal_command_buffer_end(stream->command_buffer);
-    if (timing_enabled) {
-      timing_end_ns += hrx_launch_timing_now_ns() - timing_step_ns;
-    }
-    if (!iree_status_is_ok(status)) {
-      iree_slim_mutex_unlock(&stream->mutex);
-      IREE_TRACE_ZONE_END(z0);
-      return status;
-    }
+  iree_hal_command_buffer_t* command_buffer = stream->command_buffer;
+  stream->command_buffer = NULL;
+  stream->pending_launch_count = 0;
 
-    // Wait for the previous submission. This chains each flush after the one
-    // before it, so that operations split across multiple command buffers
-    // (e.g. by an intervening hipMemcpy) still execute in order.
-    uint64_t wait_value = 0;
-    uint64_t signal_value = 0;
+  // Once ending has been attempted, a one-shot command buffer cannot accept
+  // more commands and must be released on every path below.
+  uint64_t timing_step_ns = timing->enabled ? hrx_launch_timing_now_ns() : 0;
+  iree_status_t status = iree_hal_command_buffer_end(command_buffer);
+  if (timing->enabled) {
+    timing->end_ns += hrx_launch_timing_now_ns() - timing_step_ns;
+  }
+
+  uint64_t wait_value = 0;
+  uint64_t signal_value = 0;
+  if (iree_status_is_ok(status)) {
+    // Timeline chaining preserves stream order across command-buffer
+    // boundaries. A rejected submission does not consume |signal_value|.
     status = iree_hal_streaming_stream_reserve_next_value_locked(
         stream, &wait_value, &signal_value);
-    if (!iree_status_is_ok(status)) {
-      iree_slim_mutex_unlock(&stream->mutex);
-      IREE_TRACE_ZONE_END(z0);
-      return status;
-    }
-
-    // Submit to device queue with timeline semaphore.
-    // Wait for the previous submission to complete before executing.
-    iree_hal_semaphore_list_t wait_semaphores = {
-        .count = wait_value > 0
-                     ? 1
-                     : 0,  // Only wait if there was a previous submission.
+  }
+  if (iree_status_is_ok(status)) {
+    const iree_hal_semaphore_list_t wait_semaphores = {
+        .count = wait_value > 0 ? 1 : 0,
         .semaphores = &stream->timeline_semaphore,
         .payload_values = &wait_value,
     };
-    iree_hal_semaphore_list_t signal_semaphores = {
+    const iree_hal_semaphore_list_t signal_semaphores = {
         .count = 1,
         .semaphores = &stream->timeline_semaphore,
         .payload_values = &signal_value,
     };
 
-    timing_step_ns = timing_enabled ? hrx_launch_timing_now_ns() : 0;
+    timing_step_ns = timing->enabled ? hrx_launch_timing_now_ns() : 0;
     status = iree_hal_queue_execute(stream->queue, wait_semaphores,
-                                    signal_semaphores, stream->command_buffer,
+                                    signal_semaphores, command_buffer,
                                     iree_hal_buffer_binding_table_empty(),
                                     IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
     if (iree_status_is_ok(status)) {
-      // The accepted submission owns the value it signals, so the timeline
-      // advances here and stays advanced even when the flush below fails.
+      // An accepted submission owns the value it signals, even if flushing the
+      // hardware queue subsequently reports an error.
       stream->pending_value = signal_value;
       status = iree_hal_queue_flush(stream->queue);
     }
-    if (timing_enabled) {
-      timing_execute_ns += hrx_launch_timing_now_ns() - timing_step_ns;
-    }
-
-    // Release command buffer (we're done with it).
-    timing_step_ns = timing_enabled ? hrx_launch_timing_now_ns() : 0;
-    iree_hal_command_buffer_release(stream->command_buffer);
-    stream->command_buffer = NULL;
-    stream->pending_launch_count = 0;
-    if (timing_enabled) {
-      timing_release_ns += hrx_launch_timing_now_ns() - timing_step_ns;
+    if (timing->enabled) {
+      timing->execute_ns += hrx_launch_timing_now_ns() - timing_step_ns;
     }
   }
 
+  timing_step_ns = timing->enabled ? hrx_launch_timing_now_ns() : 0;
+  iree_hal_command_buffer_release(command_buffer);
+  if (timing->enabled) {
+    timing->release_ns += hrx_launch_timing_now_ns() - timing_step_ns;
+  }
+  return status;
+}
+
+iree_status_t iree_hal_streaming_stream_flush_locked(
+    iree_hal_streaming_stream_t* stream) {
+  IREE_ASSERT_ARGUMENT(stream);
+  iree_hal_streaming_flush_timing_t timing =
+      iree_hal_streaming_flush_timing_begin();
+  iree_status_t status =
+      iree_hal_streaming_stream_flush_locked_impl(stream, &timing);
+  iree_hal_streaming_flush_timing_end(&timing);
+  return status;
+}
+
+iree_status_t iree_hal_streaming_stream_flush(
+    iree_hal_streaming_stream_t* stream) {
+  IREE_ASSERT_ARGUMENT(stream);
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_hal_streaming_flush_timing_t timing =
+      iree_hal_streaming_flush_timing_begin();
+  iree_slim_mutex_lock(&stream->mutex);
+  iree_status_t status =
+      iree_hal_streaming_stream_flush_locked_impl(stream, &timing);
   iree_slim_mutex_unlock(&stream->mutex);
-  if (timing_enabled) {
-    ++g_hrx_launch_timing.flush_count;
-    g_hrx_launch_timing.flush_total_ns +=
-        hrx_launch_timing_now_ns() - timing_start_ns;
-    g_hrx_launch_timing.flush_end_ns += timing_end_ns;
-    g_hrx_launch_timing.flush_execute_ns += timing_execute_ns;
-    g_hrx_launch_timing.flush_release_ns += timing_release_ns;
-  }
+  iree_hal_streaming_flush_timing_end(&timing);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -1121,7 +1145,7 @@ iree_status_t iree_hal_streaming_stream_wait_submitted(
 //
 // |capture_graph| is borrowed for the call; a stream that adopts it takes its
 // own reference.
-static iree_status_t iree_hal_streaming_stream_wait_captured_event(
+static iree_status_t iree_hal_streaming_stream_wait_captured_event_impl(
     iree_hal_streaming_stream_t* stream, iree_hal_streaming_event_t* event,
     iree_hal_streaming_graph_t* capture_graph) {
   bool adopt_capture_graph = false;
@@ -1147,6 +1171,14 @@ static iree_status_t iree_hal_streaming_stream_wait_captured_event(
 
     iree_slim_mutex_lock(&stream->mutex);
     if (stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
+      if (stream->capture_dependency_capacity == 0) {
+        iree_status_t status =
+            iree_hal_streaming_capture_reserve_dependencies_locked(stream, 1);
+        if (!iree_status_is_ok(status)) {
+          iree_slim_mutex_unlock(&stream->mutex);
+          return status;
+        }
+      }
       stream->capture_graph = capture_graph;
       stream->capture_graph_owned = true;
       stream->capture_origin = false;
@@ -1176,6 +1208,22 @@ static iree_status_t iree_hal_streaming_stream_wait_captured_event(
   return iree_hal_streaming_update_capture_dependencies(
       stream, event->capture_dependencies, event->capture_dependency_count,
       IREE_HAL_STREAMING_CAPTURE_DEPENDENCIES_ADD);
+}
+
+static iree_status_t iree_hal_streaming_stream_wait_captured_event(
+    iree_hal_streaming_stream_t* stream, iree_hal_streaming_event_t* event,
+    iree_hal_streaming_graph_t* capture_graph) {
+  iree_hal_streaming_context_t* context = NULL;
+  if (!iree_hal_streaming_stream_retain_context(stream, &context)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "stream execution context has been destroyed");
+  }
+  iree_slim_mutex_lock(&context->capture_transition_mutex);
+  iree_status_t status = iree_hal_streaming_stream_wait_captured_event_impl(
+      stream, event, capture_graph);
+  iree_slim_mutex_unlock(&context->capture_transition_mutex);
+  iree_hal_streaming_context_release(context);
+  return status;
 }
 
 iree_status_t iree_hal_streaming_stream_wait_event(

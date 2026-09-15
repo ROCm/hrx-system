@@ -18,6 +18,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "iree/base/threading/mutex.h"
+#include "iree/base/threading/notification.h"
 #include "iree/hal/api.h"
 
 #ifdef __cplusplus
@@ -212,6 +213,25 @@ typedef struct iree_hal_streaming_timestamp_domain_t {
   uint32_t valid_bits;
 } iree_hal_streaming_timestamp_domain_t;
 
+// Exact queue kept exclusive while an externally controlled atomic wait may
+// block it. Completed lanes are recycled by the next wait submission.
+typedef struct iree_hal_streaming_value_wait_lane_t {
+  // Next lane in a context-owned idle or pending list.
+  struct iree_hal_streaming_value_wait_lane_t* next;
+  // Dynamically acquired exact queue owned by this lane.
+  iree_hal_queue_t* queue;
+  // Queue family the lane realizes.
+  const iree_hal_queue_family_t* family;
+  // Scheduling priority the lane realizes.
+  iree_hal_queue_priority_t priority;
+  // Immutable execution-resource set the lane realizes.
+  iree_hal_queue_execution_resource_list_t execution_resources;
+  // Retained stream timeline semaphore proving pending work has completed.
+  iree_hal_semaphore_t* completion_semaphore;
+  // Value on |completion_semaphore| reached when the lane becomes reusable.
+  uint64_t completion_value;
+} iree_hal_streaming_value_wait_lane_t;
+
 // Stream context mapped to HAL device.
 struct iree_hal_streaming_context_t {
   // Reference counting.
@@ -270,6 +290,23 @@ struct iree_hal_streaming_context_t {
 
   // Number of streams in this context with capture state other than NONE.
   iree_atomic_int32_t capture_stream_count;
+  // Serializes capture-state transitions with API operations whose stream
+  // ordering and capture disposition must be decided as one transaction.
+  iree_slim_mutex_t capture_transition_mutex;
+
+  // Idle exact queues available for an atomic wait submission.
+  iree_hal_streaming_value_wait_lane_t* idle_value_wait_lanes;
+  // Exact queues still occupied by accepted atomic wait submissions.
+  iree_hal_streaming_value_wait_lane_t* pending_value_wait_lanes;
+  // Guards both value-wait lane lists and their completion records.
+  iree_slim_mutex_t value_wait_lane_mutex;
+
+  // Serializes allocation removal with stream-value target acquisition.
+  iree_slim_mutex_t stream_value_target_mutex;
+  // Number of stream-value targets acquired but not yet recorded or rejected.
+  iree_atomic_int32_t active_stream_value_target_count;
+  // Notifies allocation destruction when the final target preparation ends.
+  iree_notification_t stream_value_target_notification;
 
   // Context resource limits.
   iree_hal_streaming_limits_t limits;
@@ -601,7 +638,7 @@ static inline iree_status_t iree_hal_streaming_stream_reserve_next_value_locked(
     iree_hal_streaming_stream_t* stream, uint64_t* out_wait_value,
     uint64_t* out_signal_value) {
   const uint64_t wait_value = stream->pending_value;
-  if (IREE_UNLIKELY(wait_value == UINT64_MAX)) {
+  if (IREE_UNLIKELY(wait_value >= IREE_HAL_SEMAPHORE_MAX_VALUE)) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "stream timeline value overflow");
   }
@@ -940,9 +977,6 @@ typedef struct iree_hal_streaming_buffer_t {
   // Host address, if available.
   void* host_ptr;
 
-  // True when |host_ptr| is separately allocated and owned by this wrapper.
-  bool owns_host_ptr;
-
   // True when |host_mapping| contains an active persistent HAL mapping.
   bool has_host_mapping;
 
@@ -1040,6 +1074,30 @@ typedef struct iree_hal_streaming_buffer_ref_t {
   iree_device_size_t offset;
 } iree_hal_streaming_buffer_ref_t;
 
+// Immutable allocation metadata retained independently of the streaming
+// wrapper and buffer-table entry from which it was resolved.
+typedef struct iree_hal_streaming_retained_buffer_ref_t {
+  // HRX allocation retaining the HAL buffer and its physical backing.
+  hrx_buffer_t owner;
+  // HAL buffer valid in the operation's context. Retained independently
+  // because cross-context operations may require an imported wrapper.
+  iree_hal_buffer_t* buffer;
+  // Byte offset of the requested pointer into |buffer|.
+  iree_device_size_t offset;
+  // Memory type captured while the allocation is retained.
+  iree_hal_memory_type_t memory_type;
+  // Base device pointer captured while the buffer-table entry was protected.
+  iree_hal_streaming_deviceptr_t device_pointer;
+  // Base host pointer captured while the buffer-table entry was protected.
+  void* host_pointer;
+  // Allocation length captured while the buffer-table entry was protected.
+  iree_device_size_t allocation_size;
+  // True when the target was resolved from a different execution context.
+  bool is_cross_context;
+  // Context whose target-preparation count this reference holds.
+  iree_hal_streaming_context_t* owner_context;
+} iree_hal_streaming_retained_buffer_ref_t;
+
 static inline iree_hal_buffer_ref_t iree_hal_streaming_convert_buffer_ref(
     iree_hal_streaming_buffer_ref_t ref) {
   const iree_device_size_t length =
@@ -1067,6 +1125,8 @@ enum iree_hal_streaming_graph_node_type_e {
       2 | IREE_HAL_STREAMING_GRAPH_NODE_TYPE_RECORDABLE,
   IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMSET =
       3 | IREE_HAL_STREAMING_GRAPH_NODE_TYPE_RECORDABLE,
+  IREE_HAL_STREAMING_GRAPH_NODE_TYPE_ATOMIC_STORE =
+      4 | IREE_HAL_STREAMING_GRAPH_NODE_TYPE_RECORDABLE,
   IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL = 4,
   IREE_HAL_STREAMING_GRAPH_NODE_TYPE_GRAPH = 5,
   IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT = 6,
@@ -1270,6 +1330,17 @@ typedef struct iree_hal_streaming_graph_memset_node_attrs_t {
   iree_device_size_t hip_pitch;
 } iree_hal_streaming_graph_memset_node_attrs_t;
 
+typedef struct iree_hal_streaming_graph_atomic_store_node_attrs_t {
+  // HRX allocation retaining the target's physical backing.
+  hrx_buffer_t owner;
+  // HAL buffer valid in the graph's execution context and retained by the node.
+  iree_hal_buffer_t* target_buffer;
+  // Byte offset of the atomic cell in |target_buffer|.
+  iree_device_size_t target_offset;
+  // Atomic value, width, scope, and ordering semantics captured for replay.
+  iree_hal_atomic_store_params_t params;
+} iree_hal_streaming_graph_atomic_store_node_attrs_t;
+
 typedef struct iree_hal_streaming_graph_host_call_node_attrs_t {
   // Host callback function.
   void (*fn)(void* user_data);
@@ -1350,6 +1421,7 @@ typedef struct iree_hal_streaming_graph_node_t {
     iree_hal_streaming_graph_kernel_node_attrs_t kernel;
     iree_hal_streaming_graph_memcpy_node_attrs_t memcpy;
     iree_hal_streaming_graph_memset_node_attrs_t memset;
+    iree_hal_streaming_graph_atomic_store_node_attrs_t atomic_store;
     iree_hal_streaming_graph_host_call_node_attrs_t host;
     iree_hal_streaming_graph_child_graph_node_attrs_t child_graph;
     iree_hal_streaming_graph_event_node_attrs_t event;
@@ -1760,6 +1832,12 @@ iree_status_t iree_hal_streaming_stream_begin(
 iree_status_t iree_hal_streaming_stream_begin_locked(
     iree_hal_streaming_stream_t* stream);
 
+// Submits the current command buffer while the caller holds |stream->mutex|.
+// The command buffer is discarded after any terminal recording/submission
+// failure because it cannot be resumed safely.
+iree_status_t iree_hal_streaming_stream_flush_locked(
+    iree_hal_streaming_stream_t* stream);
+
 // Flushes pending commands.
 // Synchronization: none (submits to queue, non-blocking).
 iree_status_t iree_hal_streaming_stream_flush(
@@ -2051,6 +2129,25 @@ iree_status_t iree_hal_streaming_memory_lookup_range_across_contexts(
     iree_hal_streaming_deviceptr_t device_ptr, iree_device_size_t size,
     iree_hal_streaming_context_t** out_context,
     iree_hal_streaming_buffer_ref_t* out_ref);
+
+// Looks up and retains immutable allocation metadata for an address range.
+// |out_ref| must be deinitialized by the caller on success.
+iree_status_t iree_hal_streaming_memory_lookup_range_retain(
+    iree_hal_streaming_context_t* context,
+    iree_hal_streaming_deviceptr_t device_ptr, iree_device_size_t size,
+    iree_hal_streaming_retained_buffer_ref_t* out_ref);
+
+// Searches every live context for an address range and materializes a HAL
+// buffer valid for |execution_context|. Device-local memory requires enabled
+// peer access. |out_ref| must be deinitialized by the caller on success.
+iree_status_t iree_hal_streaming_memory_lookup_range_retain_for_context(
+    iree_hal_streaming_context_t* execution_context,
+    iree_hal_streaming_deviceptr_t device_ptr, iree_device_size_t size,
+    iree_hal_streaming_retained_buffer_ref_t* out_ref);
+
+// Releases a retained allocation reference and clears its metadata.
+void iree_hal_streaming_retained_buffer_ref_deinitialize(
+    iree_hal_streaming_retained_buffer_ref_t* ref);
 
 // Synchronization: none (allocates memory).
 iree_status_t iree_hal_streaming_memory_allocate_device(
@@ -2353,6 +2450,16 @@ iree_status_t iree_hal_streaming_graph_add_fill_ptr_node(
     uint32_t pattern, iree_host_size_t pattern_size, iree_device_size_t count,
     iree_hal_streaming_graph_node_t** out_node);
 
+// Adds an internal atomic store node used to preserve stream-write ordering and
+// coherence semantics during graph capture. The graph retains |target|.
+iree_status_t iree_hal_streaming_graph_add_atomic_store_node(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** dependencies,
+    iree_host_size_t dependency_count,
+    const iree_hal_streaming_retained_buffer_ref_t* target,
+    iree_hal_atomic_store_params_t params,
+    iree_hal_streaming_graph_node_t** out_node);
+
 iree_status_t iree_hal_streaming_graph_add_host_call_node(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
@@ -2488,7 +2595,17 @@ iree_status_t iree_hal_streaming_update_capture_dependencies(
     iree_host_size_t dependency_count,
     iree_hal_streaming_capture_dependencies_mode_t mode);
 
+// Ensures capture-frontier storage for |required_capacity| entries. The caller
+// must hold |stream->mutex|.
+iree_status_t iree_hal_streaming_capture_reserve_dependencies_locked(
+    iree_hal_streaming_stream_t* stream, iree_host_size_t required_capacity);
+
 iree_status_t iree_hal_streaming_capture_set_last_node(
+    iree_hal_streaming_stream_t* stream, iree_hal_streaming_graph_node_t* node);
+
+// Updates the stream capture frontier to |node|. The caller must hold
+// |stream->mutex| and the stream must be actively capturing.
+iree_status_t iree_hal_streaming_capture_set_last_node_locked(
     iree_hal_streaming_stream_t* stream, iree_hal_streaming_graph_node_t* node);
 
 //===----------------------------------------------------------------------===//

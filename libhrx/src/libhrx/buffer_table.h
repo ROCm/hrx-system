@@ -34,6 +34,21 @@ typedef struct hrx_buffer_table_t {
   size_t reserved_insert_count;
 } hrx_buffer_table_t;
 
+// Stable allocation metadata copied while the table lock protects the entry.
+// |buffer| is retained and must be released by the caller.
+typedef struct hrx_buffer_table_retained_ref_t {
+  // Retained allocation wrapper.
+  hrx_buffer_t buffer;
+  // Base device address recorded by the table entry.
+  uint64_t device_ptr;
+  // Base host address recorded by the table entry, or NULL.
+  void* host_ptr;
+  // Allocation length in bytes.
+  size_t size;
+  // Byte offset of the requested pointer from its matching device or host base.
+  size_t offset;
+} hrx_buffer_table_retained_ref_t;
+
 void hrx_buffer_table_initialize(hrx_buffer_table_t* table);
 void hrx_buffer_table_deinitialize(hrx_buffer_table_t* table);
 
@@ -83,6 +98,13 @@ hrx_status_t hrx_buffer_table_find_range(hrx_buffer_table_t* table,
                                          hrx_buffer_t* out_buffer,
                                          size_t* out_offset,
                                          void** out_user_data);
+
+// Looks up a buffer containing the entire range [any_ptr, any_ptr + size),
+// retains it, and snapshots immutable entry metadata before releasing the
+// table lock. On success, |out_ref->buffer| must be released by the caller.
+hrx_status_t hrx_buffer_table_find_range_retain(
+    hrx_buffer_table_t* table, uint64_t any_ptr, size_t size,
+    hrx_buffer_table_retained_ref_t* out_ref);
 
 #ifdef __cplusplus
 }

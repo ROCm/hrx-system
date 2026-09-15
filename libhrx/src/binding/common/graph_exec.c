@@ -1391,7 +1391,8 @@ static iree_status_t iree_hal_streaming_graph_create_execute_block(
           exec->context->device, iree_hal_queue_family(exec->context->queue),
           IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED,
           IREE_HAL_COMMAND_CATEGORY_TRANSFER |
-              IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+              IREE_HAL_COMMAND_CATEGORY_DISPATCH |
+              IREE_HAL_COMMAND_CATEGORY_ATOMIC,
           /*binding_capacity=*/0, &attrs->command_buffer));
 
   // Add to resource set for cleanup.
@@ -1518,22 +1519,28 @@ static bool iree_hal_streaming_graph_node_has_recorded_dependency_hazard(
 static iree_status_t iree_hal_streaming_graph_record_dependency_barrier(
     iree_hal_command_buffer_t* command_buffer) {
   // A dependency orders both command execution and memory visibility. Graph
-  // nodes can alternate between dispatches and transfers, so make writes from
-  // either operation class available to reads by either class.
+  // nodes can alternate between dispatches, transfers, and atomics, so make
+  // writes from any operation class available to reads by any class.
   static const iree_hal_memory_barrier_t memory_barrier = {
       .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
                       IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
                       IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
-                      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE |
+                      IREE_HAL_ACCESS_SCOPE_ATOMIC_READ |
+                      IREE_HAL_ACCESS_SCOPE_ATOMIC_WRITE,
       .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
                       IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
                       IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
-                      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE |
+                      IREE_HAL_ACCESS_SCOPE_ATOMIC_READ |
+                      IREE_HAL_ACCESS_SCOPE_ATOMIC_WRITE,
   };
   return iree_hal_command_buffer_execution_barrier(
       command_buffer,
-      IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER,
-      IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER |
+          IREE_HAL_EXECUTION_STAGE_ATOMIC,
+      IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER |
+          IREE_HAL_EXECUTION_STAGE_ATOMIC,
       IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, 1, &memory_barrier, 0, NULL);
 }
 
@@ -1645,6 +1652,20 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
             iree_hal_streaming_convert_range_buffer_ref(attrs->dst_ref,
                                                         fill_length),
             &attrs->pattern, attrs->pattern_size, attrs->flags);
+        break;
+      }
+      case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_ATOMIC_STORE: {
+        const iree_hal_streaming_graph_atomic_store_node_attrs_t* attrs =
+            &node->attrs.atomic_store;
+        status = iree_hal_command_buffer_atomic_store(
+            command_buffer,
+            IREE_HAL_EXECUTION_STAGE_DISPATCH |
+                IREE_HAL_EXECUTION_STAGE_TRANSFER |
+                IREE_HAL_EXECUTION_STAGE_ATOMIC,
+            IREE_HAL_EXECUTION_STAGE_ATOMIC,
+            iree_hal_make_buffer_ref(attrs->target_buffer, attrs->target_offset,
+                                     attrs->params.width / 8),
+            attrs->params);
         break;
       }
       default: {

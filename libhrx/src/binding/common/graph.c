@@ -41,6 +41,12 @@ static void iree_hal_streaming_graph_node_deinitialize_attrs(
       node->attrs.mem_alloc.bytesize = 0;
       node->attrs.mem_alloc.owns_device_allocation = false;
       break;
+    case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_ATOMIC_STORE:
+      iree_hal_buffer_release(node->attrs.atomic_store.target_buffer);
+      node->attrs.atomic_store.target_buffer = NULL;
+      hrx_buffer_release(node->attrs.atomic_store.owner);
+      node->attrs.atomic_store.owner = NULL;
+      break;
     default:
       break;
   }
@@ -534,55 +540,58 @@ static iree_status_t iree_hal_streaming_graph_add_node(
                             "graph node count exceeds supported range");
   }
 
-  // Assign unique index to the node that can be used to get the logical index
-  // in the graph for use as dependency references.
+  const bool needs_node_block =
+      !graph->current_node_block ||
+      graph->current_node_block->count >= graph->current_node_block->capacity;
+  const bool needs_root_block =
+      node->dependency_count == 0 &&
+      (!graph->current_root_block ||
+       graph->current_root_block->count >= graph->current_root_block->capacity);
+
+  // Allocate every required container before publishing the node. Arena
+  // allocations are reclaimed with the graph, but the graph's observable
+  // topology and counters remain unchanged if either allocation fails.
+  iree_hal_streaming_node_block_t* new_node_block = NULL;
+  if (needs_node_block) {
+    const iree_host_size_t block_capacity =
+        graph->node_count < 64 ? 16 : 64;  // Grow block size for larger graphs.
+    IREE_RETURN_IF_ERROR(iree_hal_streaming_allocate_node_block(
+        graph->arena_allocator, block_capacity, &new_node_block));
+  }
+  iree_hal_streaming_node_block_t* new_root_block = NULL;
+  if (needs_root_block) {
+    IREE_RETURN_IF_ERROR(iree_hal_streaming_allocate_node_block(
+        graph->arena_allocator, /*capacity=*/8, &new_root_block));
+  }
+
+  // Assign identifiers only after all fallible preparation succeeds.
   node->graph = graph;
   node->node_index = (uint32_t)graph->node_count;
   node->clone_source_node_index = graph->next_clone_source_node_index++;
   node->debug_id = iree_atomic_fetch_add(&iree_hal_streaming_next_node_debug_id,
                                          1, iree_memory_order_relaxed);
 
-  // Add to node blocks.
-  if (!graph->current_node_block ||
-      graph->current_node_block->count >= graph->current_node_block->capacity) {
-    // Need a new block.
-    const iree_host_size_t block_capacity =
-        graph->node_count < 64 ? 16 : 64;  // Grow block size for larger graphs.
-    iree_hal_streaming_node_block_t* new_block = NULL;
-    IREE_RETURN_IF_ERROR(iree_hal_streaming_allocate_node_block(
-        graph->arena_allocator, block_capacity, &new_block));
-
-    // Chain the new block.
+  if (new_node_block) {
     if (graph->current_node_block) {
-      graph->current_node_block->next = new_block;
+      graph->current_node_block->next = new_node_block;
     } else {
-      graph->node_blocks = new_block;
+      graph->node_blocks = new_node_block;
     }
-    graph->current_node_block = new_block;
+    graph->current_node_block = new_node_block;
   }
 
   graph->current_node_block->nodes[graph->current_node_block->count++] = node;
   ++graph->node_count;
 
-  // Add to root nodes if no dependencies.
   if (node->dependency_count == 0) {
-    if (!graph->current_root_block || graph->current_root_block->count >=
-                                          graph->current_root_block->capacity) {
-      // Need a new root block.
-      const iree_host_size_t block_capacity = 8;
-      iree_hal_streaming_node_block_t* new_block = NULL;
-      IREE_RETURN_IF_ERROR(iree_hal_streaming_allocate_node_block(
-          graph->arena_allocator, block_capacity, &new_block));
-
-      // Chain the new block.
+    if (new_root_block) {
       if (graph->current_root_block) {
-        graph->current_root_block->next = new_block;
+        graph->current_root_block->next = new_root_block;
       } else {
-        graph->root_blocks = new_block;
+        graph->root_blocks = new_root_block;
       }
-      graph->current_root_block = new_block;
+      graph->current_root_block = new_root_block;
     }
-
     graph->current_root_block->nodes[graph->current_root_block->count++] = node;
     ++graph->root_count;
   }
@@ -841,6 +850,10 @@ iree_status_t iree_hal_streaming_graph_clone(
         iree_hal_streaming_graph_clone_rewrite_owned_buffer_ref(
             host_allocation_map, host_allocation_count,
             &clone_node->attrs.memcpy.src_ref);
+      } else if (source_node->type ==
+                 IREE_HAL_STREAMING_GRAPH_NODE_TYPE_ATOMIC_STORE) {
+        hrx_buffer_retain(clone_node->attrs.atomic_store.owner);
+        iree_hal_buffer_retain(clone_node->attrs.atomic_store.target_buffer);
       } else if (source_node->type ==
                      IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL &&
                  (source_node->flags &
@@ -1641,6 +1654,56 @@ iree_status_t iree_hal_streaming_graph_add_fill_ptr_node(
   return status;
 }
 
+iree_status_t iree_hal_streaming_graph_add_atomic_store_node(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** dependencies,
+    iree_host_size_t dependency_count,
+    const iree_hal_streaming_retained_buffer_ref_t* target,
+    iree_hal_atomic_store_params_t params,
+    iree_hal_streaming_graph_node_t** out_node) {
+  IREE_ASSERT_ARGUMENT(graph);
+  IREE_ASSERT_ARGUMENT(target);
+  IREE_ASSERT_ARGUMENT(out_node);
+  *out_node = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_validate_dependencies(
+      graph, dependencies, dependency_count));
+  if (IREE_UNLIKELY(!target->owner || !target->buffer)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "atomic store target is not retained");
+  }
+  if (IREE_UNLIKELY(params.width != IREE_HAL_ATOMIC_WIDTH_32 &&
+                    params.width != IREE_HAL_ATOMIC_WIDTH_64)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid atomic store width %u", params.width);
+  }
+
+  const iree_device_size_t byte_length = params.width / 8;
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_range(
+      target->buffer, target->offset, byte_length));
+
+  iree_hal_streaming_graph_node_t* node = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_allocate_node(
+      graph->arena_allocator, dependency_count, /*extra_data_size=*/0, &node,
+      NULL));
+  node->type = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_ATOMIC_STORE;
+  node->flags = IREE_HAL_STREAMING_GRAPH_NODE_FLAG_HIDDEN;
+  node->dependency_count = dependency_count;
+  if (dependency_count > 0) {
+    memcpy(node->dependencies, dependencies,
+           dependency_count * sizeof(*dependencies));
+  }
+  node->attrs.atomic_store.owner = target->owner;
+  node->attrs.atomic_store.target_buffer = target->buffer;
+  node->attrs.atomic_store.target_offset = target->offset;
+  node->attrs.atomic_store.params = params;
+
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_add_node(graph, node));
+  hrx_buffer_retain(node->attrs.atomic_store.owner);
+  iree_hal_buffer_retain(node->attrs.atomic_store.target_buffer);
+  *out_node = node;
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_streaming_graph_add_host_call_node(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
@@ -2043,10 +2106,7 @@ iree_status_t iree_hal_streaming_graph_instantiate(
 // Stream capture internal functions
 //===----------------------------------------------------------------------===//
 
-static iree_status_t iree_hal_streaming_grow_capture_dependencies(
-    iree_hal_streaming_stream_t* stream, iree_host_size_t required_capacity);
-
-iree_status_t iree_hal_streaming_begin_capture(
+static iree_status_t iree_hal_streaming_begin_capture_impl(
     iree_hal_streaming_stream_t* stream,
     iree_hal_streaming_capture_mode_t mode) {
   IREE_ASSERT_ARGUMENT(stream);
@@ -2071,10 +2131,17 @@ iree_status_t iree_hal_streaming_begin_capture(
                             "stream is already capturing");
   }
 
-  // Create a new graph for capture.
-  iree_status_t status = iree_hal_streaming_graph_create(
-      stream->context, /*flags=*/0, stream->host_allocator,
-      &stream->capture_graph);
+  // Reserve the one-entry frontier before capture begins so recording a node
+  // cannot publish graph topology and then fail while advancing the frontier.
+  iree_status_t status = iree_ok_status();
+  if (stream->capture_dependency_capacity == 0) {
+    status = iree_hal_streaming_capture_reserve_dependencies_locked(stream, 1);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_graph_create(stream->context, /*flags=*/0,
+                                             stream->host_allocator,
+                                             &stream->capture_graph);
+  }
   if (!iree_status_is_ok(status)) {
     iree_slim_mutex_unlock(&stream->mutex);
     IREE_TRACE_ZONE_END(z0);
@@ -2097,7 +2164,23 @@ iree_status_t iree_hal_streaming_begin_capture(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_streaming_begin_capture_to_graph(
+iree_status_t iree_hal_streaming_begin_capture(
+    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_capture_mode_t mode) {
+  IREE_ASSERT_ARGUMENT(stream);
+  iree_hal_streaming_context_t* context = NULL;
+  if (!iree_hal_streaming_stream_retain_context(stream, &context)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "stream execution context has been destroyed");
+  }
+  iree_slim_mutex_lock(&context->capture_transition_mutex);
+  iree_status_t status = iree_hal_streaming_begin_capture_impl(stream, mode);
+  iree_slim_mutex_unlock(&context->capture_transition_mutex);
+  iree_hal_streaming_context_release(context);
+  return status;
+}
+
+static iree_status_t iree_hal_streaming_begin_capture_to_graph_impl(
     iree_hal_streaming_stream_t* stream, iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count, iree_hal_streaming_capture_mode_t mode) {
@@ -2127,9 +2210,12 @@ iree_status_t iree_hal_streaming_begin_capture_to_graph(
                             "stream is already capturing");
   }
 
-  if (dependency_count > stream->capture_dependency_capacity) {
+  const iree_host_size_t required_capacity =
+      iree_max((iree_host_size_t)1, dependency_count);
+  if (required_capacity > stream->capture_dependency_capacity) {
     iree_status_t status =
-        iree_hal_streaming_grow_capture_dependencies(stream, dependency_count);
+        iree_hal_streaming_capture_reserve_dependencies_locked(
+            stream, required_capacity);
     if (!iree_status_is_ok(status)) {
       iree_slim_mutex_unlock(&stream->mutex);
       IREE_TRACE_ZONE_END(z0);
@@ -2155,6 +2241,24 @@ iree_status_t iree_hal_streaming_begin_capture_to_graph(
   iree_slim_mutex_unlock(&stream->mutex);
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
+}
+
+iree_status_t iree_hal_streaming_begin_capture_to_graph(
+    iree_hal_streaming_stream_t* stream, iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** dependencies,
+    iree_host_size_t dependency_count, iree_hal_streaming_capture_mode_t mode) {
+  IREE_ASSERT_ARGUMENT(stream);
+  iree_hal_streaming_context_t* context = NULL;
+  if (!iree_hal_streaming_stream_retain_context(stream, &context)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "stream execution context has been destroyed");
+  }
+  iree_slim_mutex_lock(&context->capture_transition_mutex);
+  iree_status_t status = iree_hal_streaming_begin_capture_to_graph_impl(
+      stream, graph, dependencies, dependency_count, mode);
+  iree_slim_mutex_unlock(&context->capture_transition_mutex);
+  iree_hal_streaming_context_release(context);
+  return status;
 }
 
 static void iree_hal_streaming_clear_capture_participants(
@@ -2414,7 +2518,7 @@ static iree_status_t iree_hal_streaming_has_unjoined_capture_participants(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_streaming_end_capture(
+static iree_status_t iree_hal_streaming_end_capture_impl(
     iree_hal_streaming_stream_t* stream,
     iree_hal_streaming_graph_t** out_graph) {
   IREE_ASSERT_ARGUMENT(stream);
@@ -2527,6 +2631,22 @@ iree_status_t iree_hal_streaming_end_capture(
   return iree_ok_status();
 }
 
+iree_status_t iree_hal_streaming_end_capture(
+    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_graph_t** out_graph) {
+  IREE_ASSERT_ARGUMENT(stream);
+  iree_hal_streaming_context_t* context = NULL;
+  if (!iree_hal_streaming_stream_retain_context(stream, &context)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "stream execution context has been destroyed");
+  }
+  iree_slim_mutex_lock(&context->capture_transition_mutex);
+  iree_status_t status = iree_hal_streaming_end_capture_impl(stream, out_graph);
+  iree_slim_mutex_unlock(&context->capture_transition_mutex);
+  iree_hal_streaming_context_release(context);
+  return status;
+}
+
 iree_status_t iree_hal_streaming_capture_status(
     iree_hal_streaming_stream_t* stream,
     iree_hal_streaming_capture_status_t* out_status,
@@ -2560,7 +2680,7 @@ iree_status_t iree_hal_streaming_is_capturing(
 }
 
 // Helper to grow the capture dependencies array.
-static iree_status_t iree_hal_streaming_grow_capture_dependencies(
+iree_status_t iree_hal_streaming_capture_reserve_dependencies_locked(
     iree_hal_streaming_stream_t* stream, iree_host_size_t required_capacity) {
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, required_capacity);
@@ -2641,7 +2761,8 @@ iree_status_t iree_hal_streaming_update_capture_dependencies(
   // Grow dependency array if needed.
   if (total_count > stream->capture_dependency_capacity) {
     iree_status_t status =
-        iree_hal_streaming_grow_capture_dependencies(stream, total_count);
+        iree_hal_streaming_capture_reserve_dependencies_locked(stream,
+                                                               total_count);
     if (!iree_status_is_ok(status)) {
       iree_slim_mutex_unlock(&stream->mutex);
       IREE_TRACE_ZONE_END(z0);
@@ -2665,14 +2786,42 @@ iree_status_t iree_hal_streaming_update_capture_dependencies(
   return iree_ok_status();
 }
 
+iree_status_t iree_hal_streaming_capture_set_last_node_locked(
+    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_graph_node_t* node) {
+  IREE_ASSERT_ARGUMENT(stream);
+  IREE_ASSERT_ARGUMENT(node);
+  if (IREE_UNLIKELY(stream->capture_status !=
+                    IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "stream is not actively capturing");
+  }
+  if (IREE_UNLIKELY(!iree_hal_streaming_graph_node_is_active_in_graph(
+          stream->capture_graph, node))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "capture frontier node does not belong to the active graph");
+  }
+  if (IREE_UNLIKELY(stream->capture_dependency_capacity == 0)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "active capture has no frontier storage");
+  }
+  if (!stream->capture_origin) {
+    stream->capture_joined_to_origin = false;
+  }
+  stream->capture_dependencies[0] = node;
+  stream->capture_dependency_count = 1;
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_streaming_capture_set_last_node(
     iree_hal_streaming_stream_t* stream,
     iree_hal_streaming_graph_node_t* node) {
   IREE_ASSERT_ARGUMENT(stream);
   IREE_ASSERT_ARGUMENT(node);
-  if (!stream->capture_origin) {
-    stream->capture_joined_to_origin = false;
-  }
-  return iree_hal_streaming_update_capture_dependencies(
-      stream, &node, 1, IREE_HAL_STREAMING_CAPTURE_DEPENDENCIES_SET);
+  iree_slim_mutex_lock(&stream->mutex);
+  iree_status_t status =
+      iree_hal_streaming_capture_set_last_node_locked(stream, node);
+  iree_slim_mutex_unlock(&stream->mutex);
+  return status;
 }

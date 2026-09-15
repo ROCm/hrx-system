@@ -98,6 +98,23 @@ using HipStreamEndCaptureFn = hipError_t (*)(hipStream_t stream,
 using HipStreamIsCapturingFn =
     hipError_t (*)(hipStream_t stream, hipStreamCaptureStatus* capture_status);
 using HipStreamDestroyFn = hipError_t (*)(hipStream_t stream);
+using HipStreamWriteValue32Fn = hipError_t (*)(hipStream_t stream,
+                                               void* pointer, uint32_t value,
+                                               unsigned int flags);
+using HipStreamWriteValue64Fn = hipError_t (*)(hipStream_t stream,
+                                               void* pointer, uint64_t value,
+                                               unsigned int flags);
+using HipStreamWaitValue32Fn = hipError_t (*)(hipStream_t stream, void* pointer,
+                                              uint32_t value,
+                                              unsigned int flags,
+                                              uint32_t mask);
+using HipStreamWaitValue64Fn = hipError_t (*)(hipStream_t stream, void* pointer,
+                                              uint64_t value,
+                                              unsigned int flags,
+                                              uint64_t mask);
+using HipStreamBatchMemOpFn =
+    hipError_t (*)(hipStream_t stream, unsigned int count,
+                   hipStreamBatchMemOpParams* parameters, unsigned int flags);
 using HipLaunchHostFuncFn = hipError_t (*)(hipStream_t stream, hipHostFn_t fn,
                                            void* user_data);
 using HipEventCreateWithFlagsFn = hipError_t (*)(hipEvent_t* event,
@@ -288,6 +305,21 @@ struct HipRuntimeApi {
   // Destroys a live or execution-context-detached stream.
   HipStreamDestroyFn stream_destroy = nullptr;
 
+  // Enqueues a 32-bit stream-ordered write.
+  HipStreamWriteValue32Fn write_value_32 = nullptr;
+
+  // Enqueues a 64-bit stream-ordered write.
+  HipStreamWriteValue64Fn write_value_64 = nullptr;
+
+  // Enqueues a 32-bit stream-ordered wait.
+  HipStreamWaitValue32Fn wait_value_32 = nullptr;
+
+  // Enqueues a 64-bit stream-ordered wait.
+  HipStreamWaitValue64Fn wait_value_64 = nullptr;
+
+  // Enqueues one transaction of stream memory operations.
+  HipStreamBatchMemOpFn batch_mem_op = nullptr;
+
   // Enqueues a host callback in a stream.
   HipLaunchHostFuncFn launch_host_function = nullptr;
 
@@ -387,6 +419,16 @@ class HipExecutionResourceApiTest : public testing::Test {
           api_.library, "hipStreamIsCapturing");
       api_.stream_destroy = ResolveHipSymbol<HipStreamDestroyFn>(
           api_.library, "hipStreamDestroy");
+      api_.write_value_32 = ResolveHipSymbol<HipStreamWriteValue32Fn>(
+          api_.library, "hipStreamWriteValue32");
+      api_.write_value_64 = ResolveHipSymbol<HipStreamWriteValue64Fn>(
+          api_.library, "hipStreamWriteValue64");
+      api_.wait_value_32 = ResolveHipSymbol<HipStreamWaitValue32Fn>(
+          api_.library, "hipStreamWaitValue32");
+      api_.wait_value_64 = ResolveHipSymbol<HipStreamWaitValue64Fn>(
+          api_.library, "hipStreamWaitValue64");
+      api_.batch_mem_op = ResolveHipSymbol<HipStreamBatchMemOpFn>(
+          api_.library, "hipStreamBatchMemOp");
       api_.launch_host_function = ResolveHipSymbol<HipLaunchHostFuncFn>(
           api_.library, "hipLaunchHostFunc");
       api_.event_create_with_flags =
@@ -431,6 +473,11 @@ class HipExecutionResourceApiTest : public testing::Test {
     ASSERT_NE(api_.stream_end_capture, nullptr);
     ASSERT_NE(api_.stream_is_capturing, nullptr);
     ASSERT_NE(api_.stream_destroy, nullptr);
+    ASSERT_NE(api_.write_value_32, nullptr);
+    ASSERT_NE(api_.write_value_64, nullptr);
+    ASSERT_NE(api_.wait_value_32, nullptr);
+    ASSERT_NE(api_.wait_value_64, nullptr);
+    ASSERT_NE(api_.batch_mem_op, nullptr);
     ASSERT_NE(api_.launch_host_function, nullptr);
     ASSERT_NE(api_.event_create_with_flags, nullptr);
     ASSERT_NE(api_.event_destroy, nullptr);
@@ -902,6 +949,49 @@ TEST_F(HipExecutionResourceApiTest,
   gate.Open();
   ASSERT_EQ(hipSuccess, api_.context_synchronize(primary_context));
   EXPECT_EQ(hipSuccess, api_.event_query(event));
+}
+
+TEST_F(HipExecutionResourceApiTest,
+       StreamMemoryOperationsReportDetachedExecutionContext) {
+  hipDevResource full_resource;
+  ASSERT_EQ(hipSuccess, api_.device_get_resource(device_, &full_resource,
+                                                 hipDevResourceTypeSm));
+  hipDevResourceDesc_t descriptor = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.generate_descriptor(&descriptor, &full_resource, 1));
+  hipExecutionCtx_t context = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.create_context(&context, descriptor, device_, /*flags=*/0));
+
+  hipStream_t stream = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.context_stream_create(&stream, context, hipStreamDefault,
+                                       /*priority=*/0));
+  ASSERT_NE(stream, nullptr);
+  ASSERT_EQ(hipSuccess, api_.destroy_context(context));
+
+  alignas(uint64_t) uint64_t target = 0;
+  EXPECT_EQ(
+      hipErrorStreamDetached,
+      api_.write_value_32(stream, &target, 1, hipStreamWriteValueDefault));
+  EXPECT_EQ(
+      hipErrorStreamDetached,
+      api_.write_value_64(stream, &target, 1, hipStreamWriteValueDefault));
+  EXPECT_EQ(
+      hipErrorStreamDetached,
+      api_.wait_value_32(stream, &target, 1, hipStreamWaitValueEq, UINT32_MAX));
+  EXPECT_EQ(
+      hipErrorStreamDetached,
+      api_.wait_value_64(stream, &target, 1, hipStreamWaitValueEq, UINT64_MAX));
+
+  hipStreamBatchMemOpParams parameter = {};
+  parameter.writeValue.operation = hipStreamMemOpWriteValue32;
+  parameter.writeValue.address = reinterpret_cast<hipDeviceptr_t>(&target);
+  parameter.writeValue.value = 1;
+  parameter.writeValue.flags = hipStreamWriteValueDefault;
+  EXPECT_EQ(hipErrorStreamDetached,
+            api_.batch_mem_op(stream, 1, &parameter, /*flags=*/0));
+  EXPECT_EQ(hipSuccess, api_.stream_destroy(stream));
 }
 
 TEST_F(HipExecutionResourceApiTest,

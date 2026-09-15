@@ -125,6 +125,72 @@ class GraphExecTest : public ::testing::Test {
   std::atomic<bool> stream_marker_ran_{false};
 };
 
+TEST_F(GraphExecTest, AtomicStorePreservesCapturedSemantics) {
+  iree_hal_buffer_t* buffer = nullptr;
+  iree_hal_buffer_mapping_t mapping = {};
+  iree_hal_streaming_retained_buffer_ref_t target = {};
+  iree_hal_streaming_graph_t* graph = nullptr;
+  iree_hal_streaming_graph_exec_t* executable = nullptr;
+  ScopeExit release_handles([&] {
+    iree_hal_streaming_graph_exec_release(executable);
+    iree_hal_streaming_graph_release(graph);
+    iree_hal_streaming_retained_buffer_ref_deinitialize(&target);
+    if (mapping.contents.data) {
+      IREE_EXPECT_OK(iree_hal_buffer_unmap_range(&mapping));
+    }
+    iree_hal_buffer_release(buffer);
+  });
+
+  const iree_hal_buffer_params_t buffer_params = {
+      /*.usage=*/IREE_HAL_BUFFER_USAGE_DEFAULT,
+      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
+      /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+          IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+  };
+  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+      context_->device_allocator, buffer_params, sizeof(uint64_t), &buffer));
+  IREE_ASSERT_OK(iree_hal_buffer_map_range(
+      buffer, IREE_HAL_MAPPING_MODE_PERSISTENT, IREE_HAL_MEMORY_ACCESS_ALL,
+      /*local_byte_offset=*/0, sizeof(uint64_t), &mapping));
+  ASSERT_NE(mapping.contents.data, nullptr);
+  *reinterpret_cast<uint64_t*>(mapping.contents.data) = 0;
+  IREE_ASSERT_OK(hrx_buffer_create_from_hal(
+      buffer, device_entry_.hrx_device,
+      HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_DEVICE_VISIBLE,
+      sizeof(uint64_t), mapping.contents.data, &target.owner));
+  target.buffer = buffer;
+  iree_hal_buffer_retain(target.buffer);
+  target.memory_type = buffer_params.type;
+  target.allocation_size = sizeof(uint64_t);
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &graph));
+
+  const iree_hal_atomic_store_params_t params = {
+      /*.value=*/47,
+      /*.flags=*/IREE_HAL_ATOMIC_FLAG_RELEASE |
+          IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+      /*.width=*/IREE_HAL_ATOMIC_WIDTH_64,
+      /*.reserved=*/{},
+  };
+  iree_hal_streaming_graph_node_t* node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_atomic_store_node(
+      graph, /*dependencies=*/nullptr, /*dependency_count=*/0, &target, params,
+      &node));
+  ASSERT_NE(node, nullptr);
+  EXPECT_EQ(params.flags, node->attrs.atomic_store.params.flags);
+  EXPECT_EQ(params.width, node->attrs.atomic_store.params.width);
+  EXPECT_EQ(params.value, node->attrs.atomic_store.params.value);
+  EXPECT_EQ(target.buffer, node->attrs.atomic_store.target_buffer);
+  EXPECT_EQ(target.offset, node->attrs.atomic_store.target_offset);
+
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &executable));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_launch(executable, stream_));
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  EXPECT_EQ(47u, *reinterpret_cast<uint64_t*>(mapping.contents.data));
+}
+
 // A replayed event record ends its event's association with the graph a
 // capture-time record left on it, and the launch releases every reference it
 // takes over exactly once.
