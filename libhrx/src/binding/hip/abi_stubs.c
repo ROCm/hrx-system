@@ -396,7 +396,7 @@ static hipError_t hrx_hip_spt_default_stream(hipStream_t* stream) {
 static hipError_t hrx_hip_spt_stream_or_explicit(hipStream_t stream,
                                                  hipStream_t* resolved_stream) {
   if (!resolved_stream) return hipErrorInvalidValue;
-  if (stream && stream != hipStreamPerThread) {
+  if (stream && stream != hipStreamLegacy && stream != hipStreamPerThread) {
     *resolved_stream = stream;
     return hipSuccess;
   }
@@ -1977,22 +1977,6 @@ HIPAPI hipError_t hipMemcpy2DAsync_spt(void* dst, size_t dpitch,
   if (result != hipSuccess) return result;
   return hipMemcpy2DAsync(dst, dpitch, src, spitch, width, height, kind,
                           resolved_stream);
-}
-
-HIPAPI hipError_t hipMemcpy2DFromArray_spt(void* dst, size_t dpitch,
-                                           hipArray_const_t src, size_t wOffset,
-                                           size_t hOffset, size_t width,
-                                           size_t height, hipMemcpyKind kind) {
-  return hipMemcpy2DFromArray(dst, dpitch, src, wOffset, hOffset, width, height,
-                              kind);
-}
-
-HIPAPI hipError_t hipMemcpy2DToArray_spt(hipArray_t dst, size_t wOffset,
-                                         size_t hOffset, const void* src,
-                                         size_t spitch, size_t width,
-                                         size_t height, hipMemcpyKind kind) {
-  return hipMemcpy2DToArray(dst, wOffset, hOffset, src, spitch, width, height,
-                            kind);
 }
 
 HIPAPI hipError_t hipMemcpy2D_spt(void* dst, size_t dpitch, const void* src,

@@ -12,6 +12,25 @@ iree_add_all_subdirs()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
+    hip_dso_test_util
+  HDRS
+    "hip_dso_test_util.h"
+  SRCS
+    "hip_dso_test_util.cc"
+  DEPS
+    ${CMAKE_DL_LIBS}
+    libhrx_defs
+  TESTONLY
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
     printf_format
   HDRS
     "printf_format.h"
@@ -365,6 +384,31 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_HAL_DRIVER_AMDGPU)
 iree_cc_test(
   NAME
+    hip_array_copy_spt_api_test
+  SRCS
+    "api.h"
+    "hip_array_copy_spt_api_test.cc"
+  DATA
+    ::amdhip64
+  DEPS
+    ::hip_dso_test_util
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  SANITIZER_SUPPRESSIONS
+    lsan
+    hsa
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
     hip_execution_resource_api_test
   SRCS
     "hip_execution_resource_api_test.cc"
@@ -526,6 +570,7 @@ endif()
 # The build-tree path is only valid for the in-tree CTest run.
 foreach(_hrx_hip_dso_test
     libhrx_src_binding_hip_hip_api_name_test
+    libhrx_src_binding_hip_hip_array_copy_spt_api_test
     libhrx_src_binding_hip_hip_get_proc_address_test
     libhrx_src_binding_hip_hip_launch_validation_api_test)
   if(TARGET ${_hrx_hip_dso_test})
