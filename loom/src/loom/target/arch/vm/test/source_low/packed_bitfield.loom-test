@@ -177,9 +177,9 @@ func.def target(@target) @i32_bitfield_insert_full_width_alias(%field_buffer: bu
 
 // ----
 low.func.def target<vm.core>(@target) abi(vm_function) @i32_bitfield_insert_full_width_alias(%field_view: reg<vm.ref : buffer>, %base_buffer: reg<vm.ref : buffer>, %output_view: reg<vm.ref : buffer>) asm {
-  %25 = constant.i64 0
-  %26 = buffer.load %field_view, %25, %25, 0, 8 : reg<vm.value : i32>
-  buffer.store %output_view, %25, %25, %26, 0, 8
+  %24 = constant.i64 0
+  %25 = buffer.load %field_view, %24, %24, 0, 8 : reg<vm.value : i32>
+  buffer.store %output_view, %24, %24, %25, 0, 8
   return
 }
 

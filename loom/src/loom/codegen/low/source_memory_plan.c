@@ -1124,6 +1124,12 @@ loom_low_source_memory_classify_address_layout(
   int64_t expected_stride = 1;
   for (int16_t axis = (int16_t)vector_access->view_rank - 1; axis >= 0;
        --axis) {
+    // A singleton axis contributes no address delta, regardless of its stride.
+    if (!loom_type_dim_is_dynamic_at(vector_access->view_type, (uint8_t)axis) &&
+        loom_type_dim_static_size_at(vector_access->view_type, (uint8_t)axis) ==
+            1) {
+      continue;
+    }
     int64_t actual_stride = 0;
     if (!loom_vector_memory_access_static_axis_stride(
             vector_access, (uint8_t)axis, &actual_stride) ||
@@ -1149,7 +1155,8 @@ static bool loom_low_source_memory_access_plan_from_components(
     loom_low_source_memory_operation_kind_t operation_kind,
     loom_value_id_t view_value_id, loom_value_slice_t dynamic_indices,
     loom_attribute_t static_indices, loom_type_t view_type,
-    loom_type_t vector_type, loom_vector_memory_cache_policy_t cache_policy,
+    loom_type_t vector_type, bool whole_view,
+    loom_vector_memory_cache_policy_t cache_policy,
     loom_low_source_memory_access_plan_t* out_plan,
     loom_low_source_memory_access_diagnostic_t* out_diagnostic) {
   out_plan->operation_kind = operation_kind;
@@ -1205,21 +1212,33 @@ static bool loom_low_source_memory_access_plan_from_components(
     return false;
   }
 
-  loom_low_source_memory_axis_byte_stride_t vector_axis_stride;
-  loom_low_source_memory_query_axis_byte_stride(fact_table, &vector_access,
-                                                vector_access.first_vector_axis,
-                                                &vector_axis_stride);
-  if (vector_axis_stride.kind ==
-      LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_STATIC) {
-    out_plan->vector_lane_byte_stride =
-        vector_axis_stride.static_byte_coefficient;
-  } else if (out_plan->vector_lane_count == 1) {
-    // A one-lane access has no adjacent-lane address delta to materialize.
-    out_plan->vector_lane_byte_stride = 0;
+  if (whole_view) {
+    // Flattening a whole view must preserve every axis, not only the final
+    // axis used by an indexed vector access.
+    if (out_plan->address_layout !=
+        LOOM_LOW_SOURCE_MEMORY_ADDRESS_LAYOUT_COMPACT_ROW_MAJOR) {
+      out_diagnostic->rejection_bits |=
+          LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_LAYOUT;
+      return false;
+    }
+    out_plan->vector_lane_byte_stride = out_plan->element_byte_count;
   } else {
-    out_diagnostic->rejection_bits |=
-        LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VECTOR_AXIS_STRIDE;
-    return false;
+    loom_low_source_memory_axis_byte_stride_t vector_axis_stride;
+    loom_low_source_memory_query_axis_byte_stride(
+        fact_table, &vector_access, vector_access.first_vector_axis,
+        &vector_axis_stride);
+    if (vector_axis_stride.kind ==
+        LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_STATIC) {
+      out_plan->vector_lane_byte_stride =
+          vector_axis_stride.static_byte_coefficient;
+    } else if (out_plan->vector_lane_count == 1) {
+      // A one-lane access has no adjacent-lane address delta to materialize.
+      out_plan->vector_lane_byte_stride = 0;
+    } else {
+      out_diagnostic->rejection_bits |=
+          LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VECTOR_AXIS_STRIDE;
+      return false;
+    }
   }
 
   uint8_t dynamic_axes[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY] = {0};
@@ -1574,8 +1593,8 @@ static bool loom_low_source_memory_access_plan_build_indexed_impl(
   const loom_type_t view_type = loom_module_value_type(module, view_value_id);
   return loom_low_source_memory_access_plan_from_components(
       view_regions, operation_kind, view_value_id, dynamic_indices,
-      static_indices, view_type, vector_type, cache_policy, out_plan,
-      out_diagnostic);
+      static_indices, view_type, vector_type, /*whole_view=*/false,
+      cache_policy, out_plan, out_diagnostic);
 }
 
 static bool loom_low_source_memory_access_plan_build_byte_offset_impl(
@@ -1763,9 +1782,10 @@ bool loom_low_source_memory_access_plan_build_view(
   loom_attribute_t static_indices =
       loom_attr_i64_array(zero_indices, loom_type_rank(result_view_type));
 
-  return loom_low_source_memory_access_plan_build_indexed_impl(
+  return loom_low_source_memory_access_plan_from_components(
       view_regions, operation_kind, access_view_id, dynamic_indices,
-      static_indices, vector_type, cache_policy, out_plan, out_diagnostic);
+      static_indices, result_view_type, vector_type, /*whole_view=*/true,
+      cache_policy, out_plan, out_diagnostic);
 }
 
 iree_string_view_t loom_low_source_memory_access_rejection_key(

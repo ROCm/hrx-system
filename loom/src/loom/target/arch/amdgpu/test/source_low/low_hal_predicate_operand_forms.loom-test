@@ -20,7 +20,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 2
   %position = slice %7[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %output = s_load_dwordx2_offset_only %kernarg
   %offset = v_mov_b32 0
-  %result = s_addk_i32 %position, 3
+  %result = s_add_u32_rhs_inline %position, 3
   %stored = v_mov_b32_copy %result
   global_store_b32_saddr %offset, %stored, %output
   return

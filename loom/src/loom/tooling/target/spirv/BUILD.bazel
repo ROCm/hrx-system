@@ -224,6 +224,7 @@ loom_test(
         "test/spirv_vulkan_hal_actual.loom",
         "test/spirv_vulkan_integer_hal_actual.loom",
         "test/spirv_vulkan_quantized_hal_actual.loom",
+        "test/spirv_vulkan_vector_float.loom",
         "test/spirv_vulkan_workgroup_offsets.loom",
         "//loom/src/loom/test/corpus/conformance:global_atomic_add_f32.loom",
         "//loom/src/loom/test/corpus/conformance:loop_rotating_values.loom",

@@ -21,6 +21,8 @@ extern "C" {
 typedef struct loom_amdgpu_async_gather_descriptor_candidate_t {
   // Number of source bytes moved by the async gather packet.
   uint32_t packet_byte_count;
+  // Implicit byte stride between consecutive subgroup-lane LDS destinations.
+  uint32_t dest_lane_byte_stride;
   // Dense AMDGPU descriptor ref selected when present in the descriptor set.
   loom_amdgpu_descriptor_ref_t descriptor_ref;
 } loom_amdgpu_async_gather_descriptor_candidate_t;

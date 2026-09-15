@@ -299,6 +299,7 @@ def _amdgpu_async_gather_candidate_from_overlay(
         )
     return AmdgpuAsyncGatherDescriptorCandidate(
         packet_byte_count=global_width_bits // 8,
+        dest_lane_byte_stride=4 if global_width_bits <= 32 else 16,
         descriptor_key=overlay.descriptor_key,
     )
 

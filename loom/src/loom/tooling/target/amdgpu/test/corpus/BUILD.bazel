@@ -33,6 +33,11 @@ _GFX11_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/target/amdgpu:iree_hal_descriptor_set_gfx11_generic_core",
 ])
 
+_CDNA3_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/execute:amdgpu_hal",
+    "//loom/config/target/amdgpu:iree_hal_descriptor_set_cdna3_core",
+])
+
 loom_module(
     name = "generic_test_module",
     srcs = [
@@ -112,6 +117,18 @@ iree_executable_test(
     data = [":gfx9_4_test_module"],
     tags = _EXECUTION_TAGS + ["manual"],
     target_compatible_with = _GENERIC_COMPATIBLE_WITH,
+)
+
+iree_executable_test(
+    name = "gfx9_4_async_gather_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(rootpath gfx9_4/gfx9_4_async_gather.loom)",
+        "--device=amdgpu",
+    ],
+    data = ["gfx9_4/gfx9_4_async_gather.loom"],
+    tags = _EXECUTION_TAGS,
+    target_compatible_with = _CDNA3_COMPATIBLE_WITH,
 )
 
 loom_module(

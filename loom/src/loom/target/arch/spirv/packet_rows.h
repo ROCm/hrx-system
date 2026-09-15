@@ -60,6 +60,12 @@ typedef uint16_t loom_spirv_packet_value_type_ref_t;
 #define LOOM_SPIRV_PACKET_VALUE_TYPE_REF_UNKNOWN \
   ((loom_spirv_packet_value_type_ref_t)0)
 
+enum loom_spirv_packet_flag_bits_e {
+  // Preserves the operation's separate rounding and arithmetic ordering.
+  LOOM_SPIRV_PACKET_FLAG_NO_CONTRACTION = 1u << 0,
+};
+typedef uint8_t loom_spirv_packet_flags_t;
+
 typedef struct loom_spirv_packet_row_t {
   // SPIR-V instruction opcode.
   uint32_t opcode;
@@ -132,6 +138,8 @@ typedef struct loom_spirv_packet_row_t {
   uint8_t immediate_index;
   // Alignment operand for aligned memory access rows.
   uint8_t memory_alignment;
+  // Semantic emission requirements of the selected packet.
+  loom_spirv_packet_flags_t flags;
 } loom_spirv_packet_row_t;
 
 static_assert(sizeof(loom_spirv_packet_row_t) == 32,

@@ -154,10 +154,6 @@ static bool loom_low_allocation_storage_lease_instance_conflicts(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_storage_lease_t* lease,
     const loom_low_allocation_assignment_t* candidate) {
-  if (lease->release_action_index !=
-      LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE) {
-    return false;
-  }
   if (lease->end_point <= candidate->start_point ||
       lease->start_point >= candidate->end_point) {
     return false;
@@ -436,7 +432,6 @@ static bool loom_low_allocation_storage_lease_index_conflicts(
       candidate->location_kind, candidate->location_base,
       candidate->location_count, (uint64_t)candidate->start_point + 1u,
       candidate->end_point,
-      LOOM_LOW_ALLOCATION_STORAGE_LEASE_QUERY_FLAG_UNRELEASED,
       /*selection=*/NULL, &query);
   uint32_t storage_lease_index = 0;
   while (loom_low_allocation_storage_lease_unit_query_next(
@@ -652,11 +647,6 @@ loom_low_allocation_storage_lease_state_record_release_action(
       &state->instances[lease_record_index];
   const loom_low_storage_lease_record_t* record =
       &state->lease_table->records[lease_record_index];
-  if (state->release_action_count >= state->lease_table->record_count) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "allocation storage release action count exceeded lease count");
-  }
   if (!loom_low_allocation_storage_lease_can_release_before(state, liveness,
                                                             lease, candidate)) {
     return iree_make_status(
@@ -674,7 +664,15 @@ loom_low_allocation_storage_lease_state_record_release_action(
       &insertion_node_index, &block_index, &scheduled_ordinal,
       &release_program_point));
 
-  const uint32_t release_action_index = (uint32_t)state->release_action_count++;
+  // Aggregate reservations can be assigned before the scalar writers that
+  // populate them. Retain the earliest conflicting write even when a later
+  // reservation already requested release of this lease.
+  uint32_t release_action_index = lease->release_action_index;
+  if (release_action_index == LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE) {
+    IREE_ASSERT_LT(state->release_action_count,
+                   state->lease_table->record_count);
+    release_action_index = (uint32_t)state->release_action_count++;
+  }
   state->release_actions[release_action_index] =
       (loom_low_storage_release_action_t){
           .insertion_packet_index = insertion_packet_index,
@@ -753,7 +751,6 @@ iree_status_t loom_low_allocation_storage_lease_state_record_release_actions(
       candidate->location_kind, candidate->location_base,
       candidate->location_count, (uint64_t)candidate->start_point + 1u,
       candidate->end_point,
-      LOOM_LOW_ALLOCATION_STORAGE_LEASE_QUERY_FLAG_UNRELEASED,
       /*selection=*/NULL, &query);
   uint32_t storage_lease_index = 0;
   while (loom_low_allocation_storage_lease_unit_query_next(

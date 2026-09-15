@@ -1,0 +1,317 @@
+// Component-wise float arithmetic through the Vulkan source compiler.
+// Distinct negative lanes expose dropped components and signed remainders.
+// Loop-carried results exercise native vector values through control flow.
+spirv.target<vulkan1_3> @target {abi = hal_kernel}
+
+kernel.def target(@target) @vector_float_f16_2() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%count: index, %lhs_buffer: buffer, %rhs_buffer: buffer, %add_buffer: buffer, %sub_buffer: buffer, %mul_buffer: buffer, %div_buffer: buffer, %rem_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %lhs_aligned = buffer.assume.alignment %lhs_buffer {minimum_alignment = 2} : buffer
+  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<2xf16>
+  %rhs_aligned = buffer.assume.alignment %rhs_buffer {minimum_alignment = 2} : buffer
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<2xf16>
+  %add_aligned = buffer.assume.alignment %add_buffer {minimum_alignment = 2} : buffer
+  %add_view = buffer.view %add_aligned[%base] : buffer -> view<2xf16>
+  %sub_aligned = buffer.assume.alignment %sub_buffer {minimum_alignment = 2} : buffer
+  %sub_view = buffer.view %sub_aligned[%base] : buffer -> view<2xf16>
+  %mul_aligned = buffer.assume.alignment %mul_buffer {minimum_alignment = 2} : buffer
+  %mul_view = buffer.view %mul_aligned[%base] : buffer -> view<2xf16>
+  %div_aligned = buffer.assume.alignment %div_buffer {minimum_alignment = 2} : buffer
+  %div_view = buffer.view %div_aligned[%base] : buffer -> view<2xf16>
+  %rem_aligned = buffer.assume.alignment %rem_buffer {minimum_alignment = 2} : buffer
+  %rem_view = buffer.view %rem_aligned[%base] : buffer -> view<2xf16>
+  %lhs = vector.load %lhs_view[0] : view<2xf16> -> vector<2xf16>
+  %rhs = vector.load %rhs_view[0] : view<2xf16> -> vector<2xf16>
+  %add, %sub, %mul, %div, %rem = scf.for %iteration = [%begin to %count step %step](%add_accumulator = %lhs : vector<2xf16>, %sub_accumulator = %lhs : vector<2xf16>, %mul_accumulator = %lhs : vector<2xf16>, %div_accumulator = %lhs : vector<2xf16>, %rem_accumulator = %lhs : vector<2xf16>) -> (vector<2xf16>, vector<2xf16>, vector<2xf16>, vector<2xf16>, vector<2xf16>) {
+    %add_next = vector.addf %add_accumulator, %rhs : vector<2xf16>
+    %sub_next = vector.subf %sub_accumulator, %rhs : vector<2xf16>
+    %mul_next = vector.mulf %mul_accumulator, %rhs : vector<2xf16>
+    %div_next = vector.divf %div_accumulator, %rhs : vector<2xf16>
+    %rem_next = vector.remf %rem_accumulator, %rhs : vector<2xf16>
+    scf.yield %add_next, %sub_next, %mul_next, %div_next, %rem_next : vector<2xf16>, vector<2xf16>, vector<2xf16>, vector<2xf16>, vector<2xf16>
+  }
+  vector.store %add, %add_view[0] : vector<2xf16>, view<2xf16>
+  vector.store %sub, %sub_view[0] : vector<2xf16>, view<2xf16>
+  vector.store %mul, %mul_view[0] : vector<2xf16>, view<2xf16>
+  vector.store %div, %div_view[0] : vector<2xf16>, view<2xf16>
+  vector.store %rem, %rem_view[0] : vector<2xf16>, view<2xf16>
+  kernel.return
+}
+
+check.case @vector_float_f16_2_case {
+  check.requires<hal.vulkan.feature> {feature = "shader_float16"}
+  check.requires<hal.vulkan.feature> {feature = "storage_buffer_16bit_access"}
+  %lhs = check.generate.iota offset(-15.0) step(4.0) : tensor<2xf16>
+  %rhs = check.generate.fill value(2.0) : tensor<2xf16>
+  %add = check.generate.fill value(99.0) : tensor<2xf16>
+  %sub = check.generate.fill value(99.0) : tensor<2xf16>
+  %mul = check.generate.fill value(99.0) : tensor<2xf16>
+  %div = check.generate.fill value(99.0) : tensor<2xf16>
+  %rem = check.generate.fill value(99.0) : tensor<2xf16>
+  %count = check.literal value(1) : index
+  kernel.launch @vector_float_f16_2(%count, %lhs, %rhs, %add, %sub, %mul, %div, %rem) : (index, tensor<2xf16>, tensor<2xf16>, tensor<2xf16>, tensor<2xf16>, tensor<2xf16>, tensor<2xf16>, tensor<2xf16>)
+  %add_expected = check.generate.iota offset(-13.0) step(4.0) : tensor<2xf16>
+  %sub_expected = check.generate.iota offset(-17.0) step(4.0) : tensor<2xf16>
+  %mul_expected = check.generate.iota offset(-30.0) step(8.0) : tensor<2xf16>
+  %div_expected = check.generate.iota offset(-7.5) step(2.0) : tensor<2xf16>
+  %rem_expected = check.generate.iota offset(-1.0) step(0.0) : tensor<2xf16>
+  check.expect.bitwise actual(%add) expected(%add_expected) : tensor<2xf16>
+  check.expect.bitwise actual(%sub) expected(%sub_expected) : tensor<2xf16>
+  check.expect.bitwise actual(%mul) expected(%mul_expected) : tensor<2xf16>
+  check.expect.bitwise actual(%div) expected(%div_expected) : tensor<2xf16>
+  check.expect.bitwise actual(%rem) expected(%rem_expected) : tensor<2xf16>
+  check.return
+}
+
+kernel.def target(@target) @vector_float_f32_1() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%count: index, %lhs_buffer: buffer, %rhs_buffer: buffer, %add_buffer: buffer, %sub_buffer: buffer, %mul_buffer: buffer, %div_buffer: buffer, %rem_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %lhs_aligned = buffer.assume.alignment %lhs_buffer {minimum_alignment = 4} : buffer
+  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<1xf32>
+  %rhs_aligned = buffer.assume.alignment %rhs_buffer {minimum_alignment = 4} : buffer
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<1xf32>
+  %add_aligned = buffer.assume.alignment %add_buffer {minimum_alignment = 4} : buffer
+  %add_view = buffer.view %add_aligned[%base] : buffer -> view<1xf32>
+  %sub_aligned = buffer.assume.alignment %sub_buffer {minimum_alignment = 4} : buffer
+  %sub_view = buffer.view %sub_aligned[%base] : buffer -> view<1xf32>
+  %mul_aligned = buffer.assume.alignment %mul_buffer {minimum_alignment = 4} : buffer
+  %mul_view = buffer.view %mul_aligned[%base] : buffer -> view<1xf32>
+  %div_aligned = buffer.assume.alignment %div_buffer {minimum_alignment = 4} : buffer
+  %div_view = buffer.view %div_aligned[%base] : buffer -> view<1xf32>
+  %rem_aligned = buffer.assume.alignment %rem_buffer {minimum_alignment = 4} : buffer
+  %rem_view = buffer.view %rem_aligned[%base] : buffer -> view<1xf32>
+  %lhs = vector.load %lhs_view[0] : view<1xf32> -> vector<1xf32>
+  %rhs = vector.load %rhs_view[0] : view<1xf32> -> vector<1xf32>
+  %add, %sub, %mul, %div, %rem = scf.for %iteration = [%begin to %count step %step](%add_accumulator = %lhs : vector<1xf32>, %sub_accumulator = %lhs : vector<1xf32>, %mul_accumulator = %lhs : vector<1xf32>, %div_accumulator = %lhs : vector<1xf32>, %rem_accumulator = %lhs : vector<1xf32>) -> (vector<1xf32>, vector<1xf32>, vector<1xf32>, vector<1xf32>, vector<1xf32>) {
+    %add_next = vector.addf %add_accumulator, %rhs : vector<1xf32>
+    %sub_next = vector.subf %sub_accumulator, %rhs : vector<1xf32>
+    %mul_next = vector.mulf %mul_accumulator, %rhs : vector<1xf32>
+    %div_next = vector.divf %div_accumulator, %rhs : vector<1xf32>
+    %rem_next = vector.remf %rem_accumulator, %rhs : vector<1xf32>
+    scf.yield %add_next, %sub_next, %mul_next, %div_next, %rem_next : vector<1xf32>, vector<1xf32>, vector<1xf32>, vector<1xf32>, vector<1xf32>
+  }
+  vector.store %add, %add_view[0] : vector<1xf32>, view<1xf32>
+  vector.store %sub, %sub_view[0] : vector<1xf32>, view<1xf32>
+  vector.store %mul, %mul_view[0] : vector<1xf32>, view<1xf32>
+  vector.store %div, %div_view[0] : vector<1xf32>, view<1xf32>
+  vector.store %rem, %rem_view[0] : vector<1xf32>, view<1xf32>
+  kernel.return
+}
+
+check.case @vector_float_f32_1_case {
+  %lhs = check.generate.iota offset(-15.0) step(4.0) : tensor<1xf32>
+  %rhs = check.generate.fill value(2.0) : tensor<1xf32>
+  %add = check.generate.fill value(99.0) : tensor<1xf32>
+  %sub = check.generate.fill value(99.0) : tensor<1xf32>
+  %mul = check.generate.fill value(99.0) : tensor<1xf32>
+  %div = check.generate.fill value(99.0) : tensor<1xf32>
+  %rem = check.generate.fill value(99.0) : tensor<1xf32>
+  %count = check.literal value(1) : index
+  kernel.launch @vector_float_f32_1(%count, %lhs, %rhs, %add, %sub, %mul, %div, %rem) : (index, tensor<1xf32>, tensor<1xf32>, tensor<1xf32>, tensor<1xf32>, tensor<1xf32>, tensor<1xf32>, tensor<1xf32>)
+  %add_expected = check.generate.iota offset(-13.0) step(4.0) : tensor<1xf32>
+  %sub_expected = check.generate.iota offset(-17.0) step(4.0) : tensor<1xf32>
+  %mul_expected = check.generate.iota offset(-30.0) step(8.0) : tensor<1xf32>
+  %div_expected = check.generate.iota offset(-7.5) step(2.0) : tensor<1xf32>
+  %rem_expected = check.generate.iota offset(-1.0) step(0.0) : tensor<1xf32>
+  check.expect.bitwise actual(%add) expected(%add_expected) : tensor<1xf32>
+  check.expect.bitwise actual(%sub) expected(%sub_expected) : tensor<1xf32>
+  check.expect.bitwise actual(%mul) expected(%mul_expected) : tensor<1xf32>
+  check.expect.bitwise actual(%div) expected(%div_expected) : tensor<1xf32>
+  check.expect.bitwise actual(%rem) expected(%rem_expected) : tensor<1xf32>
+  check.return
+}
+
+kernel.def target(@target) @vector_float_f32_4() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%count: index, %lhs_buffer: buffer, %rhs_buffer: buffer, %add_buffer: buffer, %sub_buffer: buffer, %mul_buffer: buffer, %div_buffer: buffer, %rem_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %lhs_aligned = buffer.assume.alignment %lhs_buffer {minimum_alignment = 4} : buffer
+  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<4xf32>
+  %rhs_aligned = buffer.assume.alignment %rhs_buffer {minimum_alignment = 4} : buffer
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<4xf32>
+  %add_aligned = buffer.assume.alignment %add_buffer {minimum_alignment = 4} : buffer
+  %add_view = buffer.view %add_aligned[%base] : buffer -> view<4xf32>
+  %sub_aligned = buffer.assume.alignment %sub_buffer {minimum_alignment = 4} : buffer
+  %sub_view = buffer.view %sub_aligned[%base] : buffer -> view<4xf32>
+  %mul_aligned = buffer.assume.alignment %mul_buffer {minimum_alignment = 4} : buffer
+  %mul_view = buffer.view %mul_aligned[%base] : buffer -> view<4xf32>
+  %div_aligned = buffer.assume.alignment %div_buffer {minimum_alignment = 4} : buffer
+  %div_view = buffer.view %div_aligned[%base] : buffer -> view<4xf32>
+  %rem_aligned = buffer.assume.alignment %rem_buffer {minimum_alignment = 4} : buffer
+  %rem_view = buffer.view %rem_aligned[%base] : buffer -> view<4xf32>
+  %lhs = vector.load %lhs_view[0] : view<4xf32> -> vector<4xf32>
+  %rhs = vector.load %rhs_view[0] : view<4xf32> -> vector<4xf32>
+  %add, %sub, %mul, %div, %rem = scf.for %iteration = [%begin to %count step %step](%add_accumulator = %lhs : vector<4xf32>, %sub_accumulator = %lhs : vector<4xf32>, %mul_accumulator = %lhs : vector<4xf32>, %div_accumulator = %lhs : vector<4xf32>, %rem_accumulator = %lhs : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
+    %add_next = vector.addf %add_accumulator, %rhs : vector<4xf32>
+    %sub_next = vector.subf %sub_accumulator, %rhs : vector<4xf32>
+    %mul_next = vector.mulf %mul_accumulator, %rhs : vector<4xf32>
+    %div_next = vector.divf %div_accumulator, %rhs : vector<4xf32>
+    %rem_next = vector.remf %rem_accumulator, %rhs : vector<4xf32>
+    scf.yield %add_next, %sub_next, %mul_next, %div_next, %rem_next : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
+  }
+  vector.store %add, %add_view[0] : vector<4xf32>, view<4xf32>
+  vector.store %sub, %sub_view[0] : vector<4xf32>, view<4xf32>
+  vector.store %mul, %mul_view[0] : vector<4xf32>, view<4xf32>
+  vector.store %div, %div_view[0] : vector<4xf32>, view<4xf32>
+  vector.store %rem, %rem_view[0] : vector<4xf32>, view<4xf32>
+  kernel.return
+}
+
+check.case @vector_float_f32_4_case {
+  %lhs = check.generate.iota offset(-15.0) step(4.0) : tensor<4xf32>
+  %rhs = check.generate.fill value(2.0) : tensor<4xf32>
+  %add = check.generate.fill value(99.0) : tensor<4xf32>
+  %sub = check.generate.fill value(99.0) : tensor<4xf32>
+  %mul = check.generate.fill value(99.0) : tensor<4xf32>
+  %div = check.generate.fill value(99.0) : tensor<4xf32>
+  %rem = check.generate.fill value(99.0) : tensor<4xf32>
+  %count = check.literal value(1) : index
+  kernel.launch @vector_float_f32_4(%count, %lhs, %rhs, %add, %sub, %mul, %div, %rem) : (index, tensor<4xf32>, tensor<4xf32>, tensor<4xf32>, tensor<4xf32>, tensor<4xf32>, tensor<4xf32>, tensor<4xf32>)
+  %add_expected = check.generate.iota offset(-13.0) step(4.0) : tensor<4xf32>
+  %sub_expected = check.generate.iota offset(-17.0) step(4.0) : tensor<4xf32>
+  %mul_expected = check.generate.iota offset(-30.0) step(8.0) : tensor<4xf32>
+  %div_expected = check.generate.iota offset(-7.5) step(2.0) : tensor<4xf32>
+  %rem_expected = check.generate.iota offset(-1.0) step(0.0) : tensor<4xf32>
+  check.expect.bitwise actual(%add) expected(%add_expected) : tensor<4xf32>
+  check.expect.bitwise actual(%sub) expected(%sub_expected) : tensor<4xf32>
+  check.expect.bitwise actual(%mul) expected(%mul_expected) : tensor<4xf32>
+  check.expect.bitwise actual(%div) expected(%div_expected) : tensor<4xf32>
+  check.expect.bitwise actual(%rem) expected(%rem_expected) : tensor<4xf32>
+  check.return
+}
+
+kernel.def target(@target) @vector_float_f64_3() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%count: index, %lhs_buffer: buffer, %rhs_buffer: buffer, %add_buffer: buffer, %sub_buffer: buffer, %mul_buffer: buffer, %div_buffer: buffer, %rem_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %lhs_aligned = buffer.assume.alignment %lhs_buffer {minimum_alignment = 8} : buffer
+  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<3xf64>
+  %rhs_aligned = buffer.assume.alignment %rhs_buffer {minimum_alignment = 8} : buffer
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<3xf64>
+  %add_aligned = buffer.assume.alignment %add_buffer {minimum_alignment = 8} : buffer
+  %add_view = buffer.view %add_aligned[%base] : buffer -> view<3xf64>
+  %sub_aligned = buffer.assume.alignment %sub_buffer {minimum_alignment = 8} : buffer
+  %sub_view = buffer.view %sub_aligned[%base] : buffer -> view<3xf64>
+  %mul_aligned = buffer.assume.alignment %mul_buffer {minimum_alignment = 8} : buffer
+  %mul_view = buffer.view %mul_aligned[%base] : buffer -> view<3xf64>
+  %div_aligned = buffer.assume.alignment %div_buffer {minimum_alignment = 8} : buffer
+  %div_view = buffer.view %div_aligned[%base] : buffer -> view<3xf64>
+  %rem_aligned = buffer.assume.alignment %rem_buffer {minimum_alignment = 8} : buffer
+  %rem_view = buffer.view %rem_aligned[%base] : buffer -> view<3xf64>
+  %lhs = vector.load %lhs_view[0] : view<3xf64> -> vector<3xf64>
+  %rhs = vector.load %rhs_view[0] : view<3xf64> -> vector<3xf64>
+  %add, %sub, %mul, %div, %rem = scf.for %iteration = [%begin to %count step %step](%add_accumulator = %lhs : vector<3xf64>, %sub_accumulator = %lhs : vector<3xf64>, %mul_accumulator = %lhs : vector<3xf64>, %div_accumulator = %lhs : vector<3xf64>, %rem_accumulator = %lhs : vector<3xf64>) -> (vector<3xf64>, vector<3xf64>, vector<3xf64>, vector<3xf64>, vector<3xf64>) {
+    %add_next = vector.addf %add_accumulator, %rhs : vector<3xf64>
+    %sub_next = vector.subf %sub_accumulator, %rhs : vector<3xf64>
+    %mul_next = vector.mulf %mul_accumulator, %rhs : vector<3xf64>
+    %div_next = vector.divf %div_accumulator, %rhs : vector<3xf64>
+    %rem_next = vector.remf %rem_accumulator, %rhs : vector<3xf64>
+    scf.yield %add_next, %sub_next, %mul_next, %div_next, %rem_next : vector<3xf64>, vector<3xf64>, vector<3xf64>, vector<3xf64>, vector<3xf64>
+  }
+  vector.store %add, %add_view[0] : vector<3xf64>, view<3xf64>
+  vector.store %sub, %sub_view[0] : vector<3xf64>, view<3xf64>
+  vector.store %mul, %mul_view[0] : vector<3xf64>, view<3xf64>
+  vector.store %div, %div_view[0] : vector<3xf64>, view<3xf64>
+  vector.store %rem, %rem_view[0] : vector<3xf64>, view<3xf64>
+  kernel.return
+}
+
+check.case @vector_float_f64_3_case {
+  check.requires<hal.vulkan.feature> {feature = "shader_float64"}
+  %lhs = check.generate.iota offset(-15.0) step(4.0) : tensor<3xf64>
+  %rhs = check.generate.fill value(2.0) : tensor<3xf64>
+  %add = check.generate.fill value(99.0) : tensor<3xf64>
+  %sub = check.generate.fill value(99.0) : tensor<3xf64>
+  %mul = check.generate.fill value(99.0) : tensor<3xf64>
+  %div = check.generate.fill value(99.0) : tensor<3xf64>
+  %rem = check.generate.fill value(99.0) : tensor<3xf64>
+  %count = check.literal value(1) : index
+  kernel.launch @vector_float_f64_3(%count, %lhs, %rhs, %add, %sub, %mul, %div, %rem) : (index, tensor<3xf64>, tensor<3xf64>, tensor<3xf64>, tensor<3xf64>, tensor<3xf64>, tensor<3xf64>, tensor<3xf64>)
+  %add_expected = check.generate.iota offset(-13.0) step(4.0) : tensor<3xf64>
+  %sub_expected = check.generate.iota offset(-17.0) step(4.0) : tensor<3xf64>
+  %mul_expected = check.generate.iota offset(-30.0) step(8.0) : tensor<3xf64>
+  %div_expected = check.generate.iota offset(-7.5) step(2.0) : tensor<3xf64>
+  %rem_expected = check.generate.iota offset(-1.0) step(0.0) : tensor<3xf64>
+  check.expect.bitwise actual(%add) expected(%add_expected) : tensor<3xf64>
+  check.expect.bitwise actual(%sub) expected(%sub_expected) : tensor<3xf64>
+  check.expect.bitwise actual(%mul) expected(%mul_expected) : tensor<3xf64>
+  check.expect.bitwise actual(%div) expected(%div_expected) : tensor<3xf64>
+  check.expect.bitwise actual(%rem) expected(%rem_expected) : tensor<3xf64>
+  check.return
+}
+
+// A vector load captures its inputs before an aliasing overwrite. The loop
+// preserves separately rounded multiplication and addition: replacing them
+// with a fused operation changes the one-iteration result from zero to 2^-46.
+kernel.def target(@target) @vector_float_rounding_snapshot() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%count: index, %input: buffer, %bias: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %bias_aligned = buffer.assume.alignment %bias {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<4xf32>
+  %bias_view = buffer.view %bias_aligned[%base] : buffer -> view<4xf32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<4xf32>
+  %loaded = vector.load %input_view[0] : view<4xf32> -> vector<4xf32>
+  %initial = vector.load %bias_view[0] : view<4xf32> -> vector<4xf32>
+  %replacement = scalar.constant 99.0 : f32
+  view.store %replacement, %input_view[0] : f32, view<4xf32>
+  %total = scf.for %iteration = [%begin to %count step %step](%accumulator = %initial : vector<4xf32>) -> (vector<4xf32>) {
+    %product = vector.mulf %loaded, %loaded : vector<4xf32>
+    %next = vector.addf %product, %accumulator : vector<4xf32>
+    scf.yield %next : vector<4xf32>
+  }
+  vector.store %total, %output_view[0] : vector<4xf32>, view<4xf32>
+  kernel.return
+}
+
+check.case @vector_float_rounding_snapshot_n0 {
+  %count = check.literal value(0) : index
+  %input = check.generate.fill value(1.0000001192092896) : tensor<4xf32>
+  %bias = check.generate.fill value(-1.0000002384185791) : tensor<4xf32>
+  %output = check.generate.fill value(99.0) : tensor<4xf32>
+  kernel.launch @vector_float_rounding_snapshot(%count, %input, %bias, %output) : (index, tensor<4xf32>, tensor<4xf32>, tensor<4xf32>)
+  %expected = check.generate.fill value(-1.0000002384185791) : tensor<4xf32>
+  check.expect.bitwise actual(%output) expected(%expected) : tensor<4xf32>
+  check.return
+}
+
+check.case @vector_float_rounding_snapshot_n1 {
+  %count = check.literal value(1) : index
+  %input = check.generate.fill value(1.0000001192092896) : tensor<4xf32>
+  %bias = check.generate.fill value(-1.0000002384185791) : tensor<4xf32>
+  %output = check.generate.fill value(99.0) : tensor<4xf32>
+  kernel.launch @vector_float_rounding_snapshot(%count, %input, %bias, %output) : (index, tensor<4xf32>, tensor<4xf32>, tensor<4xf32>)
+  %expected = check.generate.fill value(0.0) : tensor<4xf32>
+  check.expect.bitwise actual(%output) expected(%expected) : tensor<4xf32>
+  check.return
+}
+
+check.case @vector_float_rounding_snapshot_n2 {
+  %count = check.literal value(2) : index
+  %input = check.generate.fill value(1.0000001192092896) : tensor<4xf32>
+  %bias = check.generate.fill value(-1.0000002384185791) : tensor<4xf32>
+  %output = check.generate.fill value(99.0) : tensor<4xf32>
+  kernel.launch @vector_float_rounding_snapshot(%count, %input, %bias, %output) : (index, tensor<4xf32>, tensor<4xf32>, tensor<4xf32>)
+  %expected = check.generate.fill value(1.0000002384185791) : tensor<4xf32>
+  check.expect.bitwise actual(%output) expected(%expected) : tensor<4xf32>
+  check.return
+}

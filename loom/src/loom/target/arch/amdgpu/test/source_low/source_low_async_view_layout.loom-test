@@ -1,0 +1,88 @@
+// RUN: emit source-low output=low
+
+// Singleton axes do not change the ordered four-byte source payload.
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @gather_projected_contiguous_payload() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %storage_bytes = index.constant 256 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %layout = encoding.layout.strided [16, 1, 999] : encoding<layout>
+  %source_base = buffer.view %global[%base] : buffer -> view<64x4x1xi8, %layout>
+  %source = view.subview %source_base[%lane, 0, 0] : view<64x4x1xi8, %layout> -> view<1x4x1xi8, %layout>
+  %scratch = buffer.alloca<workgroup> align(16) %storage_bytes : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<64x1x4x1xi8>
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x4x1xi8, %layout> to view<64x1x4x1xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gather_projected_contiguous_payload() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1012} : reg<amdgpu.sgpr x2>
+  %16 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
+  %18 = v_lshlrev_b32_src0_inline %lane, 4
+  %19 = s_mov_b32_m0_imm 0
+  global_load_lds_dword_saddr %18, %global, %19
+  s_waitcnt {vmcnt = 0}
+  return
+}
+
+// ====
+
+// Flattening the final axis cannot turn gapped rows into a contiguous transfer.
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @gather_source_row_gap_rejected() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %storage_bytes = index.constant 256 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %layout = encoding.layout.strided [16, 8, 1] : encoding<layout>
+  %source_base = buffer.view %global[%base] : buffer -> view<64x2x2xi8, %layout>
+  %source = view.subview %source_base[%lane, 0, 0] : view<64x2x2xi8, %layout> -> view<1x2x2xi8, %layout>
+  %scratch = buffer.alloca<workgroup> align(16) %storage_bytes : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<64x1x2x2xi8>
+  // ERROR@+1: AMDGPU/023 {constraint_key="source_memory.layout"}
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x2x2xi8, %layout> to view<64x1x2x2xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ====
+
+// Equal byte envelopes do not make a transposed destination a linear payload.
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @cluster_gather_dest_transpose_rejected() {
+  %unit = index.constant 1 : index
+  %participants_count = index.constant 2 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %participants_count, %unit) workgroup_size(%width, %unit, %unit) cluster_size(%unit, %participants_count, %unit) : index
+} launch(%input: buffer) {
+  %base = index.constant 0 : offset
+  %storage_bytes = index.constant 256 : offset
+  %participants = scalar.constant 3 : i32
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %global[%base] : buffer -> view<2x2xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %storage_bytes : buffer
+  %layout = encoding.layout.strided [1, 2] : encoding<layout>
+  %dest = buffer.view %scratch[%base] : buffer -> view<2x2xi8, %layout>
+  // ERROR@+1: AMDGPU/023 {constraint_key="source_memory.layout"}
+  %copy = kernel.async.cluster.gather %source to %dest using %participants {cache_scope = device, cache_temporal = regular} : view<2x2xi8> to view<2x2xi8, %layout>, i32 -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}

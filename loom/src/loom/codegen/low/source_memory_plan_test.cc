@@ -141,6 +141,61 @@ TEST_F(SourceMemoryPlanTest, StaticStridedLayoutClassifiesCompactness) {
   }
 }
 
+TEST_F(SourceMemoryPlanTest, WholeViewPayloadPreservesEveryAxis) {
+  const loom_value_id_t buffer = DefineBufferArg();
+  const loom_value_id_t base_offset =
+      loom_index_constant_result(BuildOffsetConstant(16));
+  struct LayoutCase {
+    // Number of source rows.
+    int64_t rows;
+    // Number of source columns.
+    int64_t columns;
+    // Element stride between source rows.
+    int64_t row_stride;
+    // Element stride between source columns.
+    int64_t column_stride;
+    // Whether the whole view forms one contiguous ordered payload.
+    bool contiguous;
+  };
+  const LayoutCase cases[] = {
+      {2, 2, 2, 1, true},  {1, 4, 32, 1, true}, {4, 1, 1, 32, true},
+      {2, 2, 8, 1, false}, {2, 2, 1, 2, false}, {1, 4, 32, 2, false},
+  };
+  loom_value_id_t views[IREE_ARRAYSIZE(cases)] = {};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(cases); ++i) {
+    const LayoutCase& layout_case = cases[i];
+    const loom_value_id_t layout =
+        BuildStridedLayout(layout_case.row_stride, layout_case.column_stride);
+    loom_op_t* view_op = nullptr;
+    IREE_ASSERT_OK(loom_buffer_view_build(
+        &builder_, buffer, base_offset,
+        ViewType2D(layout_case.rows, layout_case.columns, layout),
+        LOOM_LOCATION_UNKNOWN, &view_op));
+    views[i] = loom_buffer_view_result(view_op);
+  }
+
+  loom_value_fact_table_t facts = {0};
+  ComputeFacts(&facts);
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(cases); ++i) {
+    SCOPED_TRACE(i);
+    loom_low_source_memory_access_plan_t plan = {};
+    loom_low_source_memory_access_diagnostic_t diagnostic = {0};
+    ASSERT_EQ(BuildViewPlan(&facts, views[i], &plan, &diagnostic),
+              cases[i].contiguous);
+    if (cases[i].contiguous) {
+      EXPECT_EQ(plan.root_value_id, buffer);
+      EXPECT_EQ(plan.static_byte_offset, 16);
+      EXPECT_EQ(plan.element_byte_count, 4u);
+      EXPECT_EQ(plan.vector_lane_count, 4u);
+      EXPECT_EQ(plan.vector_lane_byte_stride, 4);
+      EXPECT_EQ(diagnostic.rejection_bits, 0u);
+    } else {
+      EXPECT_EQ(diagnostic.rejection_bits,
+                LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_LAYOUT);
+    }
+  }
+}
+
 TEST_F(SourceMemoryPlanTest, DynamicStridedLayoutScalesDynamicOrigin) {
   const loom_value_id_t buffer = DefineBufferArg();
   const loom_value_id_t row_stride = DefineIndexArg();

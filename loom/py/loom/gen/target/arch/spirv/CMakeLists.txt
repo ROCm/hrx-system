@@ -108,6 +108,7 @@ iree_py_library(
     loom::py::loom::target::arch::spirv::descriptors
     loom::py::loom::target::arch::spirv::ordinary_vector
     loom::py::loom::target::arch::spirv::ordinary_vector_bit_layout
+    loom::py::loom::target::arch::spirv::ordinary_vector_float
     loom::py::loom::target::arch::spirv::ordinary_vector_integer
     loom::py::loom::target::arch::spirv::ordinary_vector_integer_conversion
     loom::py::loom::target::arch::spirv::scalar_alu

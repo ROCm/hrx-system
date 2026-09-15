@@ -51,12 +51,12 @@ kernel.def @async_gather_two_stage() {
   %source_base = buffer.view %global[%buffer_base] : buffer -> view<64x1x16xi8>
   %source = view.subview %source_base[%tid, 0, 0] : view<64x1x16xi8> -> view<1x1x16xi8>
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %dest_base = buffer.view %scratch[%buffer_base] : buffer -> view<2x64x1x16xi8>
-  %dest0 = view.subview %dest_base[0, 0, 0, 0] : view<2x64x1x16xi8> -> view<1x64x1x16xi8>
-  %dest1 = view.subview %dest_base[1, 0, 0, 0] : view<2x64x1x16xi8> -> view<1x64x1x16xi8>
-  %copy0 = kernel.async.gather %source to %dest0 {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<1x64x1x16xi8> -> kernel.async.token
+  %dest0 = buffer.view %scratch[%buffer_base] : buffer -> view<64x1x1x16xi8>
+  %slot1_offset = index.constant 1024 : offset
+  %dest1 = buffer.view %scratch[%slot1_offset] : buffer -> view<64x1x1x16xi8>
+  %copy0 = kernel.async.gather %source to %dest0 {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<64x1x1x16xi8> -> kernel.async.token
   %load0 = kernel.async.group %copy0 : kernel.async.token -> kernel.async.group
-  %copy1 = kernel.async.gather %source to %dest1 {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<1x64x1x16xi8> -> kernel.async.token
+  %copy1 = kernel.async.gather %source to %dest1 {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<64x1x1x16xi8> -> kernel.async.token
   %load1 = kernel.async.group %copy1 : kernel.async.token -> kernel.async.group
   kernel.async.wait %load0 {newer_groups = 1} : kernel.async.group
   kernel.async.wait %load1 {newer_groups = 0} : kernel.async.group
@@ -76,14 +76,15 @@ kernel.def @async_gather_multi_packet_newer_group() {
   %source_base = buffer.view %global[%buffer_base] : buffer -> view<64x1x16xi8>
   %source = view.subview %source_base[%tid, 0, 0] : view<64x1x16xi8> -> view<1x1x16xi8>
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %dest_base = buffer.view %scratch[%buffer_base] : buffer -> view<3x64x1x16xi8>
-  %dest0 = view.subview %dest_base[0, 0, 0, 0] : view<3x64x1x16xi8> -> view<1x64x1x16xi8>
-  %dest1a = view.subview %dest_base[1, 0, 0, 0] : view<3x64x1x16xi8> -> view<1x64x1x16xi8>
-  %dest1b = view.subview %dest_base[2, 0, 0, 0] : view<3x64x1x16xi8> -> view<1x64x1x16xi8>
-  %copy0 = kernel.async.gather %source to %dest0 {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<1x64x1x16xi8> -> kernel.async.token
+  %dest0 = buffer.view %scratch[%buffer_base] : buffer -> view<64x1x1x16xi8>
+  %slot1_offset = index.constant 1024 : offset
+  %dest1a = buffer.view %scratch[%slot1_offset] : buffer -> view<64x1x1x16xi8>
+  %slot2_offset = index.constant 2048 : offset
+  %dest1b = buffer.view %scratch[%slot2_offset] : buffer -> view<64x1x1x16xi8>
+  %copy0 = kernel.async.gather %source to %dest0 {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<64x1x1x16xi8> -> kernel.async.token
   %load0 = kernel.async.group %copy0 : kernel.async.token -> kernel.async.group
-  %copy1a = kernel.async.gather %source to %dest1a {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<1x64x1x16xi8> -> kernel.async.token
-  %copy1b = kernel.async.gather %source to %dest1b {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<1x64x1x16xi8> -> kernel.async.token
+  %copy1a = kernel.async.gather %source to %dest1a {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<64x1x1x16xi8> -> kernel.async.token
+  %copy1b = kernel.async.gather %source to %dest1b {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<64x1x1x16xi8> -> kernel.async.token
   %load1 = kernel.async.group %copy1a, %copy1b : kernel.async.token, kernel.async.token -> kernel.async.group
   kernel.async.wait %load0 {newer_groups = 1} : kernel.async.group
   kernel.async.wait %load1 {newer_groups = 0} : kernel.async.group

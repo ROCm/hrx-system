@@ -131,6 +131,7 @@ def test_async_gather_generator_emits_data_source_only() -> None:
     assert "kLoomAmdgpuAsyncGatherDescriptorCandidates[]" in source
     assert "kLoomAmdgpuAsyncGatherDescriptorCandidateCount" in source
     assert ".packet_byte_count" in source
+    assert ".dest_lane_byte_stride" in source
     assert ".descriptor_ref" in source
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_LOAD_LDS_DWORD_SADDR" in source
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_LOAD_LDS_DWORDX3_SADDR" in source
@@ -142,11 +143,18 @@ def test_async_gather_generator_emits_data_source_only() -> None:
 def test_async_gather_generator_covers_packet_widths() -> None:
     candidates = amdgpu_async_gather_candidates.amdgpu_async_gather_descriptor_candidates()
 
-    assert [(candidate.packet_byte_count, candidate.descriptor_key) for candidate in candidates] == [
-        (4, "amdgpu.global_load_lds_dword_saddr"),
-        (12, "amdgpu.global_load_lds_dwordx3_saddr"),
-        (16, "amdgpu.global_load_lds_dwordx4_saddr"),
+    assert [(candidate.packet_byte_count, candidate.dest_lane_byte_stride, candidate.descriptor_key) for candidate in candidates] == [
+        (4, 4, "amdgpu.global_load_lds_dword_saddr"),
+        (12, 16, "amdgpu.global_load_lds_dwordx3_saddr"),
+        (16, 16, "amdgpu.global_load_lds_dwordx4_saddr"),
     ]
+
+
+def test_async_gather_generator_rejects_short_destination_slots() -> None:
+    candidates = amdgpu_async_gather_candidates.amdgpu_async_gather_descriptor_candidates()
+    bad_candidate = replace(candidates[1], dest_lane_byte_stride=4)
+    with pytest.raises(ValueError, match="incompatible destination lane stride 4"):
+        amdgpu_async_gather_candidates._ordered_candidates((bad_candidate,))
 
 
 def test_async_gather_generator_rejects_missing_descriptor_ref() -> None:

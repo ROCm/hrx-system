@@ -1,0 +1,27 @@
+// Masking a multiple of three does not preserve divisibility by three.
+// With runtime input three, the masked value and its remainder are both two.
+kernel.def @masked_multiple_remainder() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: index, %output: buffer) {
+  %value = index.assume %input [range(%input, 3, 9), mul(%input, 3)] : index
+  %mask = index.constant 6 : index
+  %masked = index.andi %value, %mask : index
+  %remainder = index.rem %masked, %mask : index
+  %result = index.cast %remainder : index to i32
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %view = buffer.view %output[%base] : buffer -> view<32xi32>
+  view.store %result, %view[%lane] : i32, view<32xi32>
+  kernel.return
+}
+
+check.case public @masked_multiple_remainder_case {
+  %input = check.literal value(3) : index
+  %output = check.generate.fill value(-1) : tensor<32xi32>
+  %expected = check.generate.fill value(2) : tensor<32xi32>
+  kernel.launch @masked_multiple_remainder(%input, %output) : (index, tensor<32xi32>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
+  check.return
+}

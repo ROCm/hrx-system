@@ -214,7 +214,7 @@ class LowAllocationStorageLeaseReleasePointTest
       public ::testing::WithParamInterface<ReleasePoint> {};
 
 TEST_P(LowAllocationStorageLeaseReleasePointTest,
-       MaterializesAndReleasesConflictingLease) {
+       MaterializesAndRefinesConflictingLeaseRelease) {
   const ReleasePoint point = GetParam();
   const loom_low_reg_class_t reg_classes[] = {
       RegClass(/*alias_set_id=*/1),
@@ -300,6 +300,21 @@ TEST_P(LowAllocationStorageLeaseReleasePointTest,
   EXPECT_EQ(lease->location_count, 2u);
   EXPECT_EQ(lease->release_action_index,
             LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE);
+
+  // Aggregate storage can be reserved before its earlier scalar definitions.
+  // A release scheduled for the reservation still conflicts with those writes.
+  if (point.program_point < 9) {
+    const loom_low_allocation_assignment_t later_candidate =
+        Assignment(value_ids[1], /*descriptor_reg_class_id=*/1,
+                   /*start_point=*/9, /*end_point=*/10, /*location_base=*/11,
+                   /*location_count=*/2);
+    IREE_ASSERT_OK(
+        loom_low_allocation_storage_lease_state_record_release_actions(
+            &state, &descriptor_set, &liveness, &later_candidate,
+            /*ignored_value_ids=*/NULL, /*ignored_value_count=*/0));
+    ASSERT_EQ(state.release_action_count, 1u);
+    EXPECT_EQ(lease->end_point, 9u);
+  }
 
   const loom_low_allocation_assignment_t candidate = Assignment(
       /*value_id=*/value_ids[1], /*descriptor_reg_class_id=*/1,

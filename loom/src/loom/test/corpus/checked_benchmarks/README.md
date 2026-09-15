@@ -75,6 +75,32 @@ nickname do not meet the suite contract. If the exact GGML block schema matters,
 the name says so. If the case only uses raw signed byte fields, the name says
 that instead.
 
+## Streaming Pipeline Controls
+
+`streaming_packed_s8_dot.loom` carries packed fields, f16 scales, activation
+vectors, and an ordered f32 accumulator through runtime-count loops. Its
+serial and handwritten depth-two forms establish the basic recurrence. A
+second pair compares serial recurrence-unroll two with depth-four lookahead
+at the same unroll factor, separating the benefit of lookahead from the
+benefit of unrolling. Pipeline depth describes the retained input records;
+unroll describes how many original iterations share a loop body.
+
+The depth-four form starts three records, issues a future record while
+consuming the oldest, and drains the remaining records in order. Counts below
+three take the serial path. Analytic cases use a closed-form exact result;
+the shared varied-input case changes every carried input independently and
+compares all forms bitwise across startup, steady-state remainders, and drain
+boundaries. Different output sentinels make missing stores observable.
+
+The matched factor-two benchmark rows are
+`@streaming_packed_s8_dot_serial_unroll2_n128_time` and
+`@streaming_packed_s8_dot_pipelined_depth4_unroll2_n128_time`. Their device
+timings belong alongside emitted load/compute order, wait causes, registers,
+code size, and JIT cost: numerical agreement alone does not establish overlap,
+and deeper lookahead increases the amount of live state and generated code.
+These programs express their pipelines with ordinary SSA and SCF, using the
+existing unroll policy independently.
+
 ## Review Questions
 
 Before adding a source file here, the review answers:

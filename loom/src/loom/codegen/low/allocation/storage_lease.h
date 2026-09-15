@@ -86,8 +86,10 @@ bool loom_low_allocation_storage_lease_state_value_has_records(
     const loom_low_allocation_storage_lease_state_t* state,
     const loom_liveness_analysis_t* liveness, loom_value_id_t value_id);
 
-// Appends release actions for every materialized lease conflicting with
-// |candidate|. All conflicts must be legally releasable before |candidate|.
+// Records release actions for every materialized lease conflicting with
+// |candidate|, moving a recorded release earlier when an aggregate reservation
+// precedes allocation of its writers. Each lease retains its earliest release.
+// All conflicts must be legally releasable before |candidate|.
 iree_status_t loom_low_allocation_storage_lease_state_record_release_actions(
     loom_low_allocation_storage_lease_state_t* state,
     const loom_low_descriptor_set_t* descriptor_set,

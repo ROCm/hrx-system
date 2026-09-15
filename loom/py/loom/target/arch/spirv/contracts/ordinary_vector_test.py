@@ -22,6 +22,7 @@ from loom.target.arch.spirv.ordinary_vector import (
 )
 from loom.target.contracts import (
     DescriptorRule,
+    GuardKind,
     SourceValueKind,
     TypePattern,
     ValueAliasRule,
@@ -166,3 +167,42 @@ def test_vector_contract_contains_no_arithmetic_or_conversion_rows() -> None:
     )
     assert all(key.startswith(structural_stems) for key in descriptor_keys)
     assert len(ORDINARY_VECTOR_COMPONENT_TYPES) == 10
+
+
+def test_shipping_float_arithmetic_covers_widths_lanes_and_capabilities() -> None:
+    operations = {
+        "vector.addf",
+        "vector.subf",
+        "vector.mulf",
+        "vector.divf",
+        "vector.remf",
+    }
+    rules = [
+        case
+        for case in SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT.cases
+        if case.source_op.name in operations
+    ]
+    actual = set()
+    for rule in rules:
+        patterns = {
+            guard.field: guard.type_pattern
+            for guard in rule.guards
+            if guard.kind == GuardKind.VALUE_TYPE
+        }
+        assert patterns.keys() == {"lhs", "rhs", "result"}
+        assert patterns["lhs"] == patterns["rhs"] == patterns["result"]
+        pattern = patterns["result"]
+        actual.add((rule.source_op.name, pattern.element, pattern.lanes))
+        availability_guards = [
+            guard
+            for guard in rule.guards
+            if guard.kind == GuardKind.DESCRIPTOR_AVAILABLE
+        ]
+        assert bool(availability_guards) == (pattern.element != "f32")
+    assert len(rules) == 60
+    assert actual == {
+        (operation, element, lanes)
+        for operation in operations
+        for element in ("f16", "f32", "f64")
+        for lanes in (1, 2, 3, 4)
+    }

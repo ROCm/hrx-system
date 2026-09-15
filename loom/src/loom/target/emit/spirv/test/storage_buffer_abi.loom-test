@@ -560,6 +560,10 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
                OpDecorate %_struct_28 Block
                OpMemberDecorate %_struct_28 0 Offset 0
                OpDecorate %_ptr_PhysicalStorageBuffer_float ArrayStride 4
+               OpDecorate %sum NoContraction
+               OpDecorate %product NoContraction
+               OpDecorate %quotient NoContraction
+               OpDecorate %remainder NoContraction
       %ulong = OpTypeInt 64 0
        %uint = OpTypeInt 32 0
      %uint_2 = OpConstant %uint 2

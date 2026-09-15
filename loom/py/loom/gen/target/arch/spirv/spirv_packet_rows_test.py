@@ -45,6 +45,9 @@ from loom.target.arch.spirv.ordinary_vector import (
 from loom.target.arch.spirv.ordinary_vector_bit_layout import (
     ORDINARY_VECTOR_BIT_LAYOUT_INSTRUCTIONS,
 )
+from loom.target.arch.spirv.ordinary_vector_float import (
+    ORDINARY_VECTOR_FLOAT_BINARY_INSTRUCTIONS,
+)
 from loom.target.arch.spirv.ordinary_vector_integer import (
     ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
 )
@@ -676,6 +679,13 @@ def _assert_generated_ordinary_vector_instructions(
 def test_generation_emits_complete_ordinary_vector_integer_matrix() -> None:
     assert len(ORDINARY_VECTOR_INTEGER_INSTRUCTIONS) == 309
     _assert_generated_ordinary_vector_instructions(ORDINARY_VECTOR_INTEGER_INSTRUCTIONS)
+
+
+def test_float_binary_packets_preserve_operation_rounding() -> None:
+    _assert_generated_ordinary_vector_instructions(ORDINARY_VECTOR_FLOAT_BINARY_INSTRUCTIONS)
+    rows = {row.descriptor_key: row for row in _packet_rows()}
+    expected_keys = {f"spirv.op_{operation}.{prefix}{scalar}" for operation in ("fadd", "fsub", "fmul", "fdiv", "frem") for prefix in ("", "v2", "v3", "v4") for scalar in ("f16", "f32", "f64")}
+    assert {key for key, row in rows.items() if row.no_contraction} == expected_keys
 
 
 def test_generation_emits_complete_ordinary_vector_integer_conversions() -> None:

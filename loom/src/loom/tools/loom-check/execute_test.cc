@@ -1004,6 +1004,32 @@ TEST_F(ExecuteTest, PassModeDce) {
   loom_check_result_deinitialize(&result);
 }
 
+TEST_F(ExecuteTest, PassModeIgnoresStandaloneFixtureComments) {
+  loom_check_result_t result;
+  IREE_ASSERT_OK(ExecuteFirst(
+      "// RUN: pass dce\n"
+      "func.def @first() {\n"
+      "  func.return\n"
+      "}\n"
+      "\n"
+      "// This fixture explanation precedes a retained operation.\n"
+      "func.def @second() {\n"
+      "  func.return\n"
+      "}\n"
+      "// ----\n"
+      "func.def @first() {\n"
+      "  func.return\n"
+      "}\n"
+      "\n"
+      "// Expected output may also carry fixture explanations.\n"
+      "func.def @second() {\n"
+      "  func.return\n"
+      "}\n",
+      &result));
+  EXPECT_EQ(result.final_outcome, LOOM_CHECK_PASS) << DetailString(result);
+  loom_check_result_deinitialize(&result);
+}
+
 TEST_F(ExecuteTest, PassModeVerifiesTransformedModule) {
   loom_check_result_t result;
   IREE_ASSERT_OK(

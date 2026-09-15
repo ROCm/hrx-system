@@ -49,12 +49,6 @@ typedef struct loom_low_allocation_storage_lease_selection_t {
   uint32_t* subtree_counts;
 } loom_low_allocation_storage_lease_selection_t;
 
-typedef enum loom_low_allocation_storage_lease_query_flag_bits_e {
-  // Temporal matches exclude leases with an allocator-requested release.
-  LOOM_LOW_ALLOCATION_STORAGE_LEASE_QUERY_FLAG_UNRELEASED = 1u << 0,
-} loom_low_allocation_storage_lease_query_flag_bits_t;
-typedef uint8_t loom_low_allocation_storage_lease_query_flags_t;
-
 // Cursor over physical units and matching temporal or selected leases. Units
 // are visited in ascending order; lease order within a unit is unspecified.
 // A lease spanning several queried units may be returned more than once.
@@ -80,8 +74,6 @@ typedef struct loom_low_allocation_storage_lease_unit_query_t {
   // Exclusive upper bound on a matching lease's start point. The widened
   // domain represents one past UINT32_MAX without wrapping.
   uint64_t start_point_limit;
-  // Temporal membership requirements.
-  loom_low_allocation_storage_lease_query_flags_t flags;
   // Number of initialized entries in the pending-node stack.
   uint32_t stack_count;
   // Pending temporal subtrees; strictly decreasing radix bits bound depth.
@@ -105,9 +97,9 @@ void loom_low_allocation_storage_lease_unit_index_insert(
     const loom_low_descriptor_set_t* descriptor_set,
     uint32_t storage_lease_index);
 
-// Retains changed endpoint and allocator-release facts for a materialized
-// lease. Cursors remain valid while endpoints shorten or allocator releases are
-// added. Construction is complete before any selection is initialized.
+// Retains a changed endpoint for a materialized lease. Cursors remain valid
+// while endpoints shorten. Construction is complete before any selection is
+// initialized.
 void loom_low_allocation_storage_lease_unit_index_update(
     loom_low_allocation_storage_lease_unit_index_t* index,
     uint32_t storage_lease_index);
@@ -134,7 +126,8 @@ void loom_low_allocation_storage_lease_selection_set_active(
 // independent: nonempty [start, end) overlap uses (start + 1, end), while an
 // inclusive point query uses (point, point + 1). Widened endpoints preserve
 // zero and maximum-u32 boundaries. Selection adds matches outside those bounds.
-// An unreleased query requires minimum_end_point >= 1.
+// An allocator-requested release shortens a lease's endpoint; the remaining
+// interval still participates in queries for earlier conflicting writes.
 void loom_low_allocation_storage_lease_unit_query_initialize(
     const loom_low_allocation_storage_lease_unit_index_t* index,
     const loom_low_descriptor_set_t* descriptor_set,
@@ -142,7 +135,6 @@ void loom_low_allocation_storage_lease_unit_query_initialize(
     loom_low_allocation_location_kind_t location_kind, uint32_t location_base,
     uint32_t location_count, uint64_t minimum_end_point,
     uint64_t start_point_limit,
-    loom_low_allocation_storage_lease_query_flags_t flags,
     const loom_low_allocation_storage_lease_selection_t* selection,
     loom_low_allocation_storage_lease_unit_query_t* out_query);
 

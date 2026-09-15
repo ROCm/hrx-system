@@ -1353,41 +1353,25 @@ void loom_value_facts_andi(const loom_value_facts_t* lhs,
     loom_value_facts_propagate_bitwise_flags(&lhs_facts, &rhs_facts, out);
     return;
   }
-  // If either operand is an exact mask, derive divisibility from its
-  // trailing zeros: andi(%x, mask) clears the bottom ctz(mask) bits,
-  // so the result is divisible by 2^ctz(mask). AND forces divisibility
-  // (LCM, not GCD — the mask guarantees the trailing zeros).
-  int64_t exact_mask = 0;
-  int64_t other_divisor = 1;
-  if (rhs_lo == rhs_hi && rhs_lo != 0) {
-    exact_mask = rhs_lo;
-    other_divisor = lhs_facts.known_divisor;
-  } else if (lhs_lo == lhs_hi && lhs_lo != 0) {
-    exact_mask = lhs_lo;
-    other_divisor = rhs_facts.known_divisor;
+  // AND preserves every trailing zero bit proven on either input. Arbitrary
+  // odd divisors do not survive masking, so retain only power-of-two factors.
+  int64_t lhs_divisor = lhs_facts.known_divisor & -lhs_facts.known_divisor;
+  int64_t rhs_divisor = rhs_facts.known_divisor & -rhs_facts.known_divisor;
+  int64_t divisor = iree_max(lhs_divisor, rhs_divisor);
+
+  // Any nonnegative operand clears the sign bit and bounds the result, even
+  // when the other operand is a negative mask.
+  int64_t lo = INT64_MIN;
+  int64_t hi = INT64_MAX;
+  if (lhs_lo >= 0) {
+    lo = 0;
+    hi = lhs_hi;
   }
-  if (exact_mask != 0) {
-    int64_t mask_divisor =
-        (int64_t)1 << iree_math_count_trailing_zeros_u64((uint64_t)exact_mask);
-    int64_t divisor = 0;
-    if (!iree_math_checked_lcm_i64(other_divisor, mask_divisor, &divisor)) {
-      divisor = mask_divisor;
-    }
-    if (exact_mask >= 0) {
-      *out = loom_value_facts_make(0, exact_mask, divisor);
-    } else {
-      *out = loom_value_facts_make(INT64_MIN, INT64_MAX, divisor);
-    }
-    loom_value_facts_propagate_bitwise_flags(&lhs_facts, &rhs_facts, out);
-    return;
+  if (rhs_lo >= 0) {
+    lo = 0;
+    hi = iree_min(hi, rhs_hi);
   }
-  // Both non-negative: result is non-negative with bounded range.
-  if (lhs_lo >= 0 && rhs_lo >= 0) {
-    *out = loom_value_facts_make(0, iree_min(lhs_hi, rhs_hi), 1);
-    loom_value_facts_propagate_bitwise_flags(&lhs_facts, &rhs_facts, out);
-    return;
-  }
-  *out = loom_value_facts_unknown();
+  *out = loom_value_facts_make(lo, hi, divisor);
   loom_value_facts_propagate_bitwise_flags(&lhs_facts, &rhs_facts, out);
 }
 

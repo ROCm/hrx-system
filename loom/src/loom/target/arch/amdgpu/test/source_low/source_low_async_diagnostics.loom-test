@@ -60,25 +60,20 @@ amdgpu.target<gfx950> @target
 
 kernel.def target(@target) @async_gather_dynamic_offset_sum_rejected() {
   %c1 = index.constant 1 : index
-  %c4 = index.constant 4 : index
-  %c64 = index.constant 64 : index
-  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c4, %c1) : index
+  %c8 = index.constant 8 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c8, %c8, %c1) : index
 } launch(%input: buffer) {
-  %lane_x = kernel.workitem.id<x> : index
-  %base_x = index.constant 4294966000 : index
-  %x = index.add %lane_x, %base_x : index
-  %lane_y = kernel.workitem.id<y> : index
-  %base_y = index.constant 2000 : index
-  %y = index.add %lane_y, %base_y : index
+  %x = kernel.workitem.id<x> : index
+  %y = kernel.workitem.id<y> : index
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 256 : offset
   %global = buffer.assume.memory_space<global> %input : buffer
-  %layout = encoding.layout.strided [1, 1, 1] : encoding<layout>
-  %source_base = buffer.view %global[%buffer_base] : buffer -> view<4294967296x4096x4xi8, %layout>
-  %source = view.subview %source_base[%x, %y, 0] : view<4294967296x4096x4xi8, %layout> -> view<1x1x4xi8, %layout>
+  %layout = encoding.layout.strided [536870912, 536870912, 1] : encoding<layout>
+  %source_base = buffer.view %global[%buffer_base] : buffer -> view<8x8x4xi8, %layout>
+  %source = view.subview %source_base[%x, %y, 0] : view<8x8x4xi8, %layout> -> view<1x1x4xi8, %layout>
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest = buffer.view %scratch[%buffer_base] : buffer -> view<64x1x1x4xi8>
-  // ERROR@+1: AMDGPU/023 {constraint_key="async_gather.offset_immediate"}
+  // ERROR@+1: AMDGPU/023 {constraint_key="memory_access.dynamic_offset_range"}
   %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x1x4xi8, %layout> to view<64x1x1x4xi8> -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group

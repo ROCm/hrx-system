@@ -85,12 +85,9 @@ def _s_add_u32_overlay() -> AmdgpuDescriptorOverlay:
             AmdgpuOperandOverlay("SSRC1", _sgpr_operand("rhs")),
         ),
         implicit_operands=(_SCC_CLOBBER_OUTPUT,),
+        # S_ADDK_I32 sets signed overflow in SCC, not the unsigned carry
+        # consumed by S_ADDC_U32. Literal folding must retain S_ADD_U32.
         operand_forms=(
-            _literal_operand_form(
-                replacement_descriptor="amdgpu.s_addk_i32",
-                source_operand="rhs",
-                immediate_field="imm16",
-            ),
             _literal_operand_form(
                 replacement_descriptor="amdgpu.s_add_u32.rhs_inline",
                 source_operand="rhs",

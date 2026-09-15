@@ -106,6 +106,7 @@ iree_py_library(
     loom::py::loom::target::arch::spirv::features
     loom::py::loom::target::arch::spirv::ordinary_vector
     loom::py::loom::target::arch::spirv::ordinary_vector_bit_layout
+    loom::py::loom::target::arch::spirv::ordinary_vector_float
     loom::py::loom::target::arch::spirv::ordinary_vector_integer
     loom::py::loom::target::arch::spirv::ordinary_vector_integer_conversion
     loom::py::loom::target::arch::spirv::scalar_alu
@@ -115,6 +116,16 @@ iree_py_library(
     loom::py::loom::core
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::package
+)
+
+iree_py_library(
+  NAME
+    ordinary_vector_float
+  SRCS
+    "ordinary_vector_float.py"
+  DEPS
+    loom::py::loom::target::arch::spirv::ordinary_vector
+    loom::py::loom::target::arch::spirv::scalar_alu
 )
 
 iree_py_test(
@@ -134,6 +145,7 @@ iree_py_test(
     loom::py::loom::target::arch::spirv::descriptors
     loom::py::loom::target::arch::spirv::ordinary_vector
     loom::py::loom::target::arch::spirv::ordinary_vector_bit_layout
+    loom::py::loom::target::arch::spirv::ordinary_vector_float
     loom::py::loom::target::arch::spirv::ordinary_vector_integer
     loom::py::loom::target::arch::spirv::ordinary_vector_integer_conversion
     loom::py::loom::target::arch::spirv::scalar_alu

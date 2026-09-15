@@ -294,6 +294,7 @@ loom_check_test_suite(
     "test/index_conversion.loom-test"
     "test/integer_boolean.loom-test"
     "test/ordinary_vector_bit_layout.loom-test"
+    "test/ordinary_vector_float.loom-test"
     "test/ordinary_vector_integer.loom-test"
     "test/ordinary_vector_integer_conversion.loom-test"
     "test/ordinary_vector_structure.loom-test"

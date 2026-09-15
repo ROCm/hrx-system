@@ -59,6 +59,9 @@ from loom.target.arch.spirv.ordinary_vector import (  # noqa: E402
 from loom.target.arch.spirv.ordinary_vector_bit_layout import (  # noqa: E402
     ORDINARY_VECTOR_BIT_LAYOUT_INSTRUCTIONS,
 )
+from loom.target.arch.spirv.ordinary_vector_float import (  # noqa: E402
+    ORDINARY_VECTOR_FLOAT_BINARY_INSTRUCTIONS,
+)
 from loom.target.arch.spirv.ordinary_vector_integer import (  # noqa: E402
     ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
 )
@@ -104,6 +107,7 @@ from loom.target.low_descriptors import descriptor_set_relative_name  # noqa: E4
 
 _PACKET_MAX_OPERAND_COUNT = 4
 _PACKET_OPERAND_TYPE_CAPACITY = 3
+_FLOAT_BINARY_OPCODES = frozenset(row.opcode for row in FLOAT_BINARY_OPERATIONS)
 
 
 def _c_identifier(value: str) -> str:
@@ -209,6 +213,7 @@ class _PacketRow:
     immediate_index: int | None = None
     literal_word_count: int = 0
     memory_alignment: int = 0
+    no_contraction: bool = False
     coordinate_byte_shift: int = 0
     builtin: str | None = None
     component_index: int | None = None
@@ -256,6 +261,8 @@ class _PacketRow:
             lines.append(f"            .payload.scalar_constant.literal_word_count = {self.literal_word_count},")
         if self.memory_alignment:
             lines.append(f"            .memory_alignment = {self.memory_alignment},")
+        if self.no_contraction:
+            lines.append("            .flags = LOOM_SPIRV_PACKET_FLAG_NO_CONTRACTION,")
         if self.coordinate_byte_shift:
             lines.append(f"            .payload.access_chain.coordinate_byte_shift = {self.coordinate_byte_shift},")
         if self.builtin is not None:
@@ -798,6 +805,7 @@ def _scalar_binary_row(scalar: ScalarAluType, operation: ScalarBinaryOperation) 
         result_type=scalar_value,
         operand_types=(scalar_value, scalar_value),
         result_count=1,
+        no_contraction=operation.opcode in _FLOAT_BINARY_OPCODES,
     )
 
 
@@ -924,9 +932,11 @@ def _ordinary_vector_rows() -> list[_PacketRow]:
             operand_types=tuple(_ordinary_vector_instruction_value(operand_type) for operand_type in row.operand_types),
             result_count=1,
             immediate_index=(0 if row.component_index_maximum is not None else None),
+            no_contraction=row.opcode in _FLOAT_BINARY_OPCODES,
         )
         for row in (
             *ORDINARY_VECTOR_INSTRUCTIONS,
+            *ORDINARY_VECTOR_FLOAT_BINARY_INSTRUCTIONS,
             *ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
             *ORDINARY_VECTOR_INTEGER_CONVERSION_INSTRUCTIONS,
             *ORDINARY_VECTOR_BIT_LAYOUT_INSTRUCTIONS,

@@ -449,8 +449,18 @@ static iree_status_t loom_check_execute_pass_with_output(
         &low_asm_storage, &parse_options.low_asm_environment);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_text_parse(test_case->input, filename, context, block_pool,
-                             &parse_options, &module);
+    // Standalone fixture comments are annotations in both input and expected
+    // IR. Preserve their line positions for diagnostics without attaching them
+    // to operations that the pass printer would retain in comparable output.
+    iree_string_builder_t stripped_input;
+    iree_string_builder_initialize(allocator, &stripped_input);
+    status = loom_test_file_strip_comments(test_case->input, &stripped_input);
+    if (iree_status_is_ok(status)) {
+      status =
+          loom_text_parse(iree_string_builder_view(&stripped_input), filename,
+                          context, block_pool, &parse_options, &module);
+    }
+    iree_string_builder_deinitialize(&stripped_input);
   }
   diagnostic_collector.module = module;
   if (!module) {

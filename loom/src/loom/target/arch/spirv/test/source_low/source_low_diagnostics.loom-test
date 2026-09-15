@@ -23,7 +23,7 @@ func.def target(@target) @unsupported_scalar_pow_math(%base: f32, %exponent: f32
 spirv.target<vulkan1_3> @target
 
 func.def target(@target) @unsupported_vector_tanh_math(%input: vector<4xf32>) -> (vector<4xf32>) {
-  // ERROR@+1: LOWERING/036 {op_name="vector.tanhf", phase_name="legalize-math", policy_name="spirv-math", math_op="tanhf", lane_domain="vector", element_type="f32", constraint_key="math.scalar"}
+  // ERROR@+1: LOWERING/036 {op_name="vector.tanhf", phase_name="legalize-math", policy_name="spirv-math", math_op="tanhf", lane_domain="vector", element_type="f32", constraint_key="math.op.native_arithmetic"}
   %result = vector.tanhf<afn> %input : vector<4xf32>
   func.return %result : vector<4xf32>
 }
@@ -407,4 +407,30 @@ func.def target(@target) @ordinary_vector_rejects_direct_target_result(%a: i32, 
   %value = vector.from_elements %a, %b, %c, %d : vector<4xi32>
   // ERROR@+1: TARGET/033 {field_name="source", actual_type="vector<4xi32>"}
   func.return %value : vector<4xi32>
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @vector_f16_requires_target_features(%lhs: f16, %rhs: f16) -> (f16) {
+  %left = vector.splat %lhs : vector<1xf16>
+  %right = vector.splat %rhs : vector<1xf16>
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_fadd.f16", constraint_key="descriptor_available"}
+  %sum = vector.addf %left, %right : vector<1xf16>
+  %result = vector.extract %sum[0] : vector<1xf16> -> f16
+  func.return %result : f16
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @vector_f64_requires_target_features(%lhs: f64, %rhs: f64) -> (f64) {
+  %left = vector.splat %lhs : vector<1xf64>
+  %right = vector.splat %rhs : vector<1xf64>
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_fadd.f64", constraint_key="descriptor_available"}
+  %sum = vector.addf %left, %right : vector<1xf64>
+  %result = vector.extract %sum[0] : vector<1xf64> -> f64
+  func.return %result : f64
 }

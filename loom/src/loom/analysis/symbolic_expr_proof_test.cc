@@ -204,6 +204,48 @@ TEST_F(SymbolicExprTest, SimplifiesDifferenceToConstant) {
   EXPECT_EQ(difference.constant, 16);
 }
 
+TEST_F(SymbolicExprTest, DifferencePreservesAssumedValue) {
+  loom_value_id_t value = DefineIndexValue();
+  loom_value_id_t other = DefineIndexValue();
+  loom_predicate_t predicate = {
+      /*.kind=*/LOOM_PREDICATE_LT,
+      /*.arg_count=*/2,
+      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+      /*.reserved=*/{},
+      /*.args=*/{value, other},
+  };
+  loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_op_t* assume_op = nullptr;
+  IREE_ASSERT_OK(loom_index_assume_build(&builder_, &value, 1, &predicate, 1,
+                                         &index_type, 1, LOOM_LOCATION_UNKNOWN,
+                                         &assume_op));
+  loom_value_id_t assumed_value =
+      loom_index_assume_results(assume_op).values[0];
+  loom_value_id_t zero = loom_index_constant_result(BuildIndexConstant(0));
+
+  loom_symbolic_value_difference_t difference = {};
+  IREE_ASSERT_OK(loom_symbolic_expr_simplify_value_difference(
+      &expression_context_, assumed_value, zero, &difference));
+  EXPECT_EQ(difference.kind, LOOM_SYMBOLIC_VALUE_DIFFERENCE_VALUE);
+  EXPECT_EQ(difference.value_id, assumed_value);
+
+  // Cancellation uses the underlying value's identity while retaining the
+  // assumed SSA value that carries the surviving term's predicates.
+  loom_op_t* sum_op = nullptr;
+  IREE_ASSERT_OK(loom_index_add_build(&builder_, assumed_value, other,
+                                      index_type, LOOM_LOCATION_UNKNOWN,
+                                      &sum_op));
+  IREE_ASSERT_OK(loom_symbolic_expr_simplify_value_difference(
+      &expression_context_, loom_index_add_result(sum_op), other, &difference));
+  EXPECT_EQ(difference.kind, LOOM_SYMBOLIC_VALUE_DIFFERENCE_VALUE);
+  EXPECT_EQ(difference.value_id, assumed_value);
+
+  IREE_ASSERT_OK(loom_symbolic_expr_simplify_value_difference(
+      &expression_context_, assumed_value, value, &difference));
+  EXPECT_EQ(difference.kind, LOOM_SYMBOLIC_VALUE_DIFFERENCE_CONSTANT);
+  EXPECT_EQ(difference.constant, 0);
+}
+
 TEST_F(SymbolicExprTest, ProvesRelationsThroughSymbolicCancellation) {
   loom_value_id_t value = DefineIndexValue();
   loom_value_id_t four = loom_index_constant_result(BuildIndexConstant(4));

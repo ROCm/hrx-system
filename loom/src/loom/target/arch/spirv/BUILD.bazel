@@ -423,6 +423,7 @@ loom_check_test_suite(
         "test/source_low/numeric_scalar_f32.loom-test",
         "test/source_low/numeric_scalar_i32.loom-test",
         "test/source_low/numeric_scalar_i64.loom-test",
+        "test/source_low/ordinary_vector_float.loom-test",
         "test/source_low/ordinary_vector_structure.loom-test",
         "test/source_low/source_low.loom-test",
         "test/source_low/source_low_diagnostics.loom-test",

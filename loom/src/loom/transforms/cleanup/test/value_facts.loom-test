@@ -64,3 +64,63 @@ func.def @unknown_subgroup_size() -> (index) {
   %size = target.subgroup.size : index
   func.return %size : index
 }
+
+// ====
+
+// The surviving symbolic term retains the SSA identity that carries range and
+// relational facts, including after cancellation through an addition.
+func.def @symbolic_difference_preserves_assumptions(%raw: index, %other: index, %upper: index) -> (index, index, index) {
+  %bounded = index.assume %raw [range(%raw, 0, 128)] : index
+  %related = index.assume %bounded [lt(%bounded, %upper)] : index
+  %c0 = index.constant 0 : index
+  %difference = index.sub %related, %c0 : index
+  %sum = index.add %related, %other : index
+  %cancelled = index.sub %sum, %other : index
+  %identity = index.sub %related, %raw : index
+  func.return %difference, %cancelled, %identity : index, index, index
+}
+
+// ----
+func.def @symbolic_difference_preserves_assumptions(%raw: index, %other: index, %upper: index) -> (index, index, index) {
+  %bounded = index.assume %raw [range(%raw, 0, 128)] : index
+  %related = index.assume %bounded [lt(%bounded, %upper)] : index
+  %identity = index.constant 0 : index
+  func.return %related, %related, %identity : index, index, index
+}
+
+// ====
+
+// AND preserves trailing zero bits, not arbitrary divisibility. For input
+// three the masked value and remainder are both two, so the remainder is live.
+func.def @masked_multiple_remainder(%input: index) -> (index) {
+  %value = index.assume %input [range(%input, 3, 9), mul(%input, 3)] : index
+  %mask = index.constant 6 : index
+  %masked = index.andi %value, %mask : index
+  %remainder = index.rem %masked, %mask : index
+  func.return %remainder : index
+}
+
+// A negative mask preserves the input's nonnegative range and clears low bits.
+func.def @negative_mask_alignment(%input: index) -> (index) {
+  %value = index.assume %input [range(%input, 0, 31)] : index
+  %mask = index.constant -8 : index
+  %alignment = index.constant 8 : index
+  %masked = index.andi %value, %mask : index
+  %remainder = index.rem %masked, %alignment : index
+  func.return %remainder : index
+}
+
+// ----
+func.def @masked_multiple_remainder(%input: index) -> (index) {
+  %value = index.assume %input [range(%input, 3, 9), mul(%input, 3)] : index
+  %mask = index.constant 6 : index
+  %masked = index.andi %value, %mask : index
+  %remainder = index.rem %masked, %mask : index
+  func.return %remainder : index
+}
+
+// A negative mask preserves the input's nonnegative range and clears low bits.
+func.def @negative_mask_alignment(%input: index) -> (index) {
+  %remainder = index.constant 0 : index
+  func.return %remainder : index
+}

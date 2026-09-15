@@ -1879,8 +1879,6 @@ typedef struct loom_amdgpu_async_gather_plan_t {
       source_dynamic_term_kinds[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY];
   // Static LDS byte offset materialized into M0.
   uint32_t dest_byte_offset;
-  // Static global byte offset encoded in the packet immediate.
-  int64_t source_immediate_offset;
   // Number of bytes moved by the selected async packet.
   uint32_t packet_byte_count;
   // Descriptor row selected for the active descriptor set.

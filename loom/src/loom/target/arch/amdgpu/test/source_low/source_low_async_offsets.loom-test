@@ -1,0 +1,133 @@
+// RUN: emit source-low output=low
+
+// The transfer's immediate shifts both endpoints. Source-only offsets belong
+// in the global address, independently of the subgroup's LDS base.
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @distinct_endpoint_offsets() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %source_offset = index.constant 16 : offset
+  %dest_offset = index.constant 128 : offset
+  %storage_bytes = index.constant 384 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%source_offset] : buffer -> view<64x4xi8>
+  %source = view.subview %source_base[%lane, 0] : view<64x4xi8> -> view<1x4xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %storage_bytes : buffer
+  %dest = buffer.view %scratch[%dest_offset] : buffer -> view<64x1x4xi8>
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x4xi8> to view<64x1x4xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @distinct_endpoint_offsets() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 272} : reg<amdgpu.sgpr x2>
+  %16 = storage {byte_alignment = 16, byte_length = 384} : low.storage<workgroup>
+  %18 = v_lshlrev_b32_src0_inline %lane, 2
+  %19 = s_mov_b32 16
+  %20 = slice %global[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %21 = slice %global[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %22 = s_mov_b32 0
+  %23 = s_add_u32 %20, %19
+  %24 = s_addc_u32 %21, %22
+  %25 = concat(%23, %24) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %26 = s_mov_b32_m0_imm 128
+  global_load_lds_dword_saddr %18, %25, %26
+  s_waitcnt {vmcnt = 0}
+  return
+}
+
+// ====
+
+// A source offset is not limited by the packet's signed immediate range.
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @source_offset_above_packet_immediate() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %source_offset = index.constant 8192 : offset
+  %dest_offset = index.constant 0 : offset
+  %storage_bytes = index.constant 256 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%source_offset] : buffer -> view<64x4xi8>
+  %source = view.subview %source_base[%lane, 0] : view<64x4xi8> -> view<1x4xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %storage_bytes : buffer
+  %dest = buffer.view %scratch[%dest_offset] : buffer -> view<64x1x4xi8>
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x4xi8> to view<64x1x4xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @source_offset_above_packet_immediate() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 8448} : reg<amdgpu.sgpr x2>
+  %16 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
+  %18 = v_lshlrev_b32_src0_inline %lane, 2
+  %19 = s_mov_b32 8192
+  %20 = slice %global[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %21 = slice %global[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %22 = s_mov_b32 0
+  %23 = s_add_u32 %20, %19
+  %24 = s_addc_u32 %21, %22
+  %25 = concat(%23, %24) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %26 = s_mov_b32_m0_imm 0
+  global_load_lds_dword_saddr %18, %25, %26
+  s_waitcnt {vmcnt = 0}
+  return
+}
+
+// ====
+
+// The uniform source base adjustment preserves the full 64-bit offset even
+// though each invocation's dynamic byte offset fits in a single VGPR.
+amdgpu.target<gfx950> @target
+
+kernel.def target(@target) @source_offset_above_u32() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %source_offset = index.constant 16 : offset
+  %dest_offset = index.constant 64 : offset
+  %storage_bytes = index.constant 1088 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%source_offset] : buffer -> view<4194305x64x16xi8>
+  %source = view.subview %source_base[4194304, %lane, 0] : view<4194305x64x16xi8> -> view<1x1x16xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %storage_bytes : buffer
+  %dest = buffer.view %scratch[%dest_offset] : buffer -> view<64x1x1x16xi8>
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<64x1x1x16xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @source_offset_above_u32() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4294968336} : reg<amdgpu.sgpr x2>
+  %16 = storage {byte_alignment = 16, byte_length = 1088} : low.storage<workgroup>
+  %18 = v_lshlrev_b32_src0_inline %lane, 4
+  %19 = s_mov_b32 16
+  %20 = s_mov_b32 1
+  %22 = slice %global[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %23 = slice %global[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %26 = s_add_u32 %22, %19
+  %27 = s_addc_u32 %23, %20
+  %28 = concat(%26, %27) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %29 = s_mov_b32_m0_imm 64
+  global_load_lds_dwordx4_saddr %18, %28, %29
+  s_waitcnt {vmcnt = 0}
+  return
+}

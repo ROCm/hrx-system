@@ -343,7 +343,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @sop2_rhs_inline_shift(%value: r
 
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @sopk_immediate_add(%position: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.rdna3.core>(@target) @sop2_rhs_inline_add(%position: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
   %step = s_mov_b32 3
   %result = s_add_u32 %position, %step
   return %result
@@ -352,8 +352,8 @@ low.func.def target<amdgpu.rdna3.core>(@target) @sopk_immediate_add(%position: r
 // ----
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @sopk_immediate_add(%position: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
-  %result = s_addk_i32 %position, 3
+low.func.def target<amdgpu.rdna3.core>(@target) @sop2_rhs_inline_add(%position: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %result = s_add_u32_rhs_inline %position, 3
   return %result
 }
 

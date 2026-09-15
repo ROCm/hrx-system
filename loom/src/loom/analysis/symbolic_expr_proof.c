@@ -403,7 +403,7 @@ iree_status_t loom_symbolic_expr_simplify_value_difference(
     *out_difference = (loom_symbolic_value_difference_t){
         .kind = LOOM_SYMBOLIC_VALUE_DIFFERENCE_VALUE,
         .constant = 0,
-        .value_id = context->scratch_terms[0].value_id,
+        .value_id = context->scratch_terms[0].relation_value_id,
     };
   }
   return iree_ok_status();

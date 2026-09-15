@@ -369,9 +369,11 @@ bool loom_low_source_memory_access_plan_build_indexed(
 
 // Builds a target-independent source memory plan for a whole typed view.
 //
-// This is the view-payload sibling of vector.load/store planning. It treats the
-// full static footprint of |view_value_id| as the transferred vector payload
-// and preserves dynamic base terms from the analyzed view-region summary.
+// This is the view-payload sibling of vector.load/store planning. It requires
+// a compact row-major layout and treats the full static footprint of
+// |view_value_id| as one contiguous vector payload. Singleton-axis strides do
+// not affect that footprint. Dynamic base terms are preserved from the
+// analyzed view-region summary.
 // Targets use this for memory-to-memory movement ops such as async
 // global-to-workgroup gathers, where the source IR names a view projection
 // rather than an indexed vector load.

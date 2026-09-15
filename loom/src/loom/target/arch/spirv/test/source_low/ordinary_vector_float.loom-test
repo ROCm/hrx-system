@@ -1,0 +1,137 @@
+// RUN: emit source-low output=low control-flow=structured-low
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @float_lanes_1(%lhs: f32, %rhs: f32, %count: index) -> (f32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %initial = vector.splat %lhs : vector<1xf32>
+  %divisor = vector.splat %rhs : vector<1xf32>
+  %total = scf.for %iteration = [%begin to %count step %step](%accumulator = %initial : vector<1xf32>) -> (vector<1xf32>) {
+    %add = vector.addf %accumulator, %divisor : vector<1xf32>
+    %sub = vector.subf %add, %divisor : vector<1xf32>
+    %mul = vector.mulf %sub, %divisor : vector<1xf32>
+    %div = vector.divf %mul, %divisor : vector<1xf32>
+    %rem = vector.remf %div, %divisor : vector<1xf32>
+    scf.yield %rem : vector<1xf32>
+  }
+  %result = vector.extract %total[0] : vector<1xf32> -> f32
+  func.return %result : f32
+}
+
+func.def target(@target) @float_lanes_2(%lhs: f32, %rhs: f32, %count: index) -> (f32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %initial = vector.splat %lhs : vector<2xf32>
+  %divisor = vector.splat %rhs : vector<2xf32>
+  %total = scf.for %iteration = [%begin to %count step %step](%accumulator = %initial : vector<2xf32>) -> (vector<2xf32>) {
+    %add = vector.addf %accumulator, %divisor : vector<2xf32>
+    %sub = vector.subf %add, %divisor : vector<2xf32>
+    %mul = vector.mulf %sub, %divisor : vector<2xf32>
+    %div = vector.divf %mul, %divisor : vector<2xf32>
+    %rem = vector.remf %div, %divisor : vector<2xf32>
+    scf.yield %rem : vector<2xf32>
+  }
+  %result = vector.extract %total[1] : vector<2xf32> -> f32
+  func.return %result : f32
+}
+
+func.def target(@target) @float_lanes_3(%lhs: f32, %rhs: f32, %count: index) -> (f32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %initial = vector.splat %lhs : vector<3xf32>
+  %divisor = vector.splat %rhs : vector<3xf32>
+  %total = scf.for %iteration = [%begin to %count step %step](%accumulator = %initial : vector<3xf32>) -> (vector<3xf32>) {
+    %add = vector.addf %accumulator, %divisor : vector<3xf32>
+    %sub = vector.subf %add, %divisor : vector<3xf32>
+    %mul = vector.mulf %sub, %divisor : vector<3xf32>
+    %div = vector.divf %mul, %divisor : vector<3xf32>
+    %rem = vector.remf %div, %divisor : vector<3xf32>
+    scf.yield %rem : vector<3xf32>
+  }
+  %result = vector.extract %total[2] : vector<3xf32> -> f32
+  func.return %result : f32
+}
+
+func.def target(@target) @float_lanes_4(%lhs: f32, %rhs: f32, %count: index) -> (f32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %initial = vector.splat %lhs : vector<4xf32>
+  %divisor = vector.splat %rhs : vector<4xf32>
+  %total = scf.for %iteration = [%begin to %count step %step](%accumulator = %initial : vector<4xf32>) -> (vector<4xf32>) {
+    %add = vector.addf %accumulator, %divisor : vector<4xf32>
+    %sub = vector.subf %add, %divisor : vector<4xf32>
+    %mul = vector.mulf %sub, %divisor : vector<4xf32>
+    %div = vector.divf %mul, %divisor : vector<4xf32>
+    %rem = vector.remf %div, %divisor : vector<4xf32>
+    scf.yield %rem : vector<4xf32>
+  }
+  %result = vector.extract %total[3] : vector<4xf32> -> f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @float_lanes_1(%initial: reg<spirv.id : f32>, %divisor: reg<spirv.id : f32>, %count: reg<spirv.id : index>) -> (reg<spirv.id : f32>) asm {
+  %begin = OpConstant.i32 0 : reg<spirv.id : index>
+  %step = OpConstant.i32 1 : reg<spirv.id : index>
+  %result = low.scf.for [%begin to %count step %step] iter_args(%initial: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) do(%iteration: reg<spirv.id : index>, %accumulator: reg<spirv.id : f32>) {
+    %add = OpFAdd.f32 %accumulator, %divisor
+    %sub = OpFSub.f32 %add, %divisor
+    %mul = OpFMul.f32 %sub, %divisor
+    %div = OpFDiv.f32 %mul, %divisor
+    %rem = OpFRem.f32 %div, %divisor
+    low.scf.yield %rem : reg<spirv.id : f32>
+  }
+  return %result
+}
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @float_lanes_2(%lhs: reg<spirv.id : f32>, %rhs: reg<spirv.id : f32>, %count: reg<spirv.id : index>) -> (reg<spirv.id : f32>) asm {
+  %begin = OpConstant.i32 0 : reg<spirv.id : index>
+  %step = OpConstant.i32 1 : reg<spirv.id : index>
+  %initial = OpCompositeConstruct.v2f32 %lhs, %lhs
+  %divisor = OpCompositeConstruct.v2f32 %rhs, %rhs
+  %total = low.scf.for [%begin to %count step %step] iter_args(%initial: reg<spirv.id : vector<2xf32>>) -> (reg<spirv.id : vector<2xf32>>) do(%iteration: reg<spirv.id : index>, %accumulator: reg<spirv.id : vector<2xf32>>) {
+    %add = OpFAdd.v2f32 %accumulator, %divisor
+    %sub = OpFSub.v2f32 %add, %divisor
+    %mul = OpFMul.v2f32 %sub, %divisor
+    %div = OpFDiv.v2f32 %mul, %divisor
+    %rem = OpFRem.v2f32 %div, %divisor
+    low.scf.yield %rem : reg<spirv.id : vector<2xf32>>
+  }
+  %result = OpCompositeExtract.v2f32.f32 %total, 1
+  return %result
+}
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @float_lanes_3(%lhs: reg<spirv.id : f32>, %rhs: reg<spirv.id : f32>, %count: reg<spirv.id : index>) -> (reg<spirv.id : f32>) asm {
+  %begin = OpConstant.i32 0 : reg<spirv.id : index>
+  %step = OpConstant.i32 1 : reg<spirv.id : index>
+  %initial = OpCompositeConstruct.v3f32 %lhs, %lhs, %lhs
+  %divisor = OpCompositeConstruct.v3f32 %rhs, %rhs, %rhs
+  %total = low.scf.for [%begin to %count step %step] iter_args(%initial: reg<spirv.id : vector<3xf32>>) -> (reg<spirv.id : vector<3xf32>>) do(%iteration: reg<spirv.id : index>, %accumulator: reg<spirv.id : vector<3xf32>>) {
+    %add = OpFAdd.v3f32 %accumulator, %divisor
+    %sub = OpFSub.v3f32 %add, %divisor
+    %mul = OpFMul.v3f32 %sub, %divisor
+    %div = OpFDiv.v3f32 %mul, %divisor
+    %rem = OpFRem.v3f32 %div, %divisor
+    low.scf.yield %rem : reg<spirv.id : vector<3xf32>>
+  }
+  %result = OpCompositeExtract.v3f32.f32 %total, 2
+  return %result
+}
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @float_lanes_4(%lhs: reg<spirv.id : f32>, %rhs: reg<spirv.id : f32>, %count: reg<spirv.id : index>) -> (reg<spirv.id : f32>) asm {
+  %begin = OpConstant.i32 0 : reg<spirv.id : index>
+  %step = OpConstant.i32 1 : reg<spirv.id : index>
+  %initial = OpCompositeConstruct.v4f32 %lhs, %lhs, %lhs, %lhs
+  %divisor = OpCompositeConstruct.v4f32 %rhs, %rhs, %rhs, %rhs
+  %total = low.scf.for [%begin to %count step %step] iter_args(%initial: reg<spirv.id : vector<4xf32>>) -> (reg<spirv.id : vector<4xf32>>) do(%iteration: reg<spirv.id : index>, %accumulator: reg<spirv.id : vector<4xf32>>) {
+    %add = OpFAdd.v4f32 %accumulator, %divisor
+    %sub = OpFSub.v4f32 %add, %divisor
+    %mul = OpFMul.v4f32 %sub, %divisor
+    %div = OpFDiv.v4f32 %mul, %divisor
+    %rem = OpFRem.v4f32 %div, %divisor
+    low.scf.yield %rem : reg<spirv.id : vector<4xf32>>
+  }
+  %result = OpCompositeExtract.v4f32.f32 %total, 3
+  return %result
+}

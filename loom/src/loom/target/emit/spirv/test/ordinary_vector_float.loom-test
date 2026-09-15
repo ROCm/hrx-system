@@ -1,0 +1,188 @@
+// RUN: emit spirv-dis input=source-low control-flow=structured-low validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @target {abi = hal_kernel}
+
+// A vector load captures its inputs before an aliasing overwrite. The loop
+// preserves separately rounded multiplication and addition: replacing them
+// with a fused operation changes the one-iteration result from zero to 2^-46.
+kernel.def target(@target) @vector_float_rounding_snapshot() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%count: index, %input: buffer, %bias: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %bias_aligned = buffer.assume.alignment %bias {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<4xf32>
+  %bias_view = buffer.view %bias_aligned[%base] : buffer -> view<4xf32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<4xf32>
+  %loaded = vector.load %input_view[0] : view<4xf32> -> vector<4xf32>
+  %initial = vector.load %bias_view[0] : view<4xf32> -> vector<4xf32>
+  %replacement = scalar.constant 99.0 : f32
+  view.store %replacement, %input_view[0] : f32, view<4xf32>
+  %total = scf.for %iteration = [%begin to %count step %step](%accumulator = %initial : vector<4xf32>) -> (vector<4xf32>) {
+    %product = vector.mulf %loaded, %loaded : vector<4xf32>
+    %next = vector.addf %product, %accumulator : vector<4xf32>
+    scf.yield %next : vector<4xf32>
+  }
+  vector.store %total, %output_view[0] : vector<4xf32>, view<4xf32>
+  kernel.return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 GLSL450
+               OpEntryPoint GLCompute %vector_float_rounding_snapshot "vector_float_rounding_snapshot"
+               OpExecutionMode %vector_float_rounding_snapshot LocalSize 1 1 1
+               OpName %vector_float_rounding_snapshot "vector_float_rounding_snapshot"
+               OpName %count "count"
+               OpName %input_aligned "input_aligned"
+               OpName %bias_aligned "bias_aligned"
+               OpName %output_aligned "output_aligned"
+               OpName %begin "begin"
+               OpName %step "step"
+               OpName %loaded "loaded"
+               OpName %initial "initial"
+               OpName %replacement "replacement"
+               OpName %iteration "iteration"
+               OpName %accumulator "accumulator"
+               OpName %product "product"
+               OpName %next "next"
+               OpName %total "total"
+               OpModuleProcessed "iree.vulkan.bda.v1"
+               OpModuleProcessed "iree.vulkan.bda.v1.root=0,32"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_offset=32"
+               OpModuleProcessed "iree.vulkan.bda.v1.constant_length=4"
+               OpModuleProcessed "iree.vulkan.bda.v1.bindings=3"
+               OpDecorate %_arr_uint_uint_1 ArrayStride 4
+               OpDecorate %_struct_6 Block
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpMemberDecorate %_struct_6 1 Offset 8
+               OpMemberDecorate %_struct_6 2 Offset 16
+               OpMemberDecorate %_struct_6 3 Offset 20
+               OpMemberDecorate %_struct_6 4 Offset 24
+               OpMemberDecorate %_struct_6 5 Offset 28
+               OpMemberDecorate %_struct_6 6 Offset 32
+               OpDecorate %_runtimearr_ulong ArrayStride 8
+               OpDecorate %_struct_21 Block
+               OpMemberDecorate %_struct_21 0 Offset 0
+               OpDecorate %_ptr_PhysicalStorageBuffer_float ArrayStride 4
+               OpDecorate %product NoContraction
+               OpDecorate %next NoContraction
+      %ulong = OpTypeInt 64 0
+       %uint = OpTypeInt 32 0
+     %uint_1 = OpConstant %uint 1
+%_arr_uint_uint_1 = OpTypeArray %uint %uint_1
+  %_struct_6 = OpTypeStruct %ulong %ulong %uint %uint %uint %uint %_arr_uint_uint_1
+%_ptr_PushConstant__struct_6 = OpTypePointer PushConstant %_struct_6
+          %8 = OpVariable %_ptr_PushConstant__struct_6 PushConstant
+       %void = OpTypeVoid
+         %10 = OpTypeFunction %void
+        %int = OpTypeInt 32 1
+%_ptr_PushConstant_uint = OpTypePointer PushConstant %uint
+      %int_6 = OpConstant %int 6
+      %int_0 = OpConstant %int 0
+%_ptr_PushConstant_ulong = OpTypePointer PushConstant %ulong
+%_runtimearr_ulong = OpTypeRuntimeArray %ulong
+ %_struct_21 = OpTypeStruct %_runtimearr_ulong
+%_ptr_PhysicalStorageBuffer__struct_21 = OpTypePointer PhysicalStorageBuffer %_struct_21
+      %int_2 = OpConstant %int 2
+%_ptr_PhysicalStorageBuffer_ulong = OpTypePointer PhysicalStorageBuffer %ulong
+   %uint_1_0 = OpConstant %uint 1
+     %uint_2 = OpConstant %uint 2
+      %begin = OpConstant %int 0
+       %step = OpConstant %int 1
+    %ulong_0 = OpConstant %ulong 0
+      %float = OpTypeFloat 32
+%_ptr_PhysicalStorageBuffer_float = OpTypePointer PhysicalStorageBuffer %float
+    %ulong_4 = OpConstant %ulong 4
+    %ulong_8 = OpConstant %ulong 8
+   %ulong_12 = OpConstant %ulong 12
+    %v4float = OpTypeVector %float 4
+%replacement = OpConstant %float 99
+       %bool = OpTypeBool
+%vector_float_rounding_snapshot = OpFunction %void None %10
+         %11 = OpLabel
+         %16 = OpAccessChain %_ptr_PushConstant_uint %8 %int_6 %int_0
+         %17 = OpLoad %uint %16 Aligned 4
+      %count = OpBitcast %int %17
+         %24 = OpAccessChain %_ptr_PushConstant_ulong %8 %int_0
+         %25 = OpLoad %ulong %24 Aligned 8
+         %26 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer__struct_21 %25
+         %27 = OpAccessChain %_ptr_PushConstant_uint %8 %int_2
+         %28 = OpLoad %uint %27 Aligned 4
+         %30 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %26 %int_0 %28
+%input_aligned = OpLoad %ulong %30 Aligned 8
+         %33 = OpIAdd %uint %28 %uint_1_0
+         %34 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %26 %int_0 %33
+%bias_aligned = OpLoad %ulong %34 Aligned 8
+         %37 = OpIAdd %uint %28 %uint_2
+         %38 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %26 %int_0 %37
+%output_aligned = OpLoad %ulong %38 Aligned 8
+         %43 = OpIAdd %ulong %input_aligned %ulong_0
+         %46 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %43
+         %47 = OpLoad %float %46 Aligned 4
+         %49 = OpIAdd %ulong %input_aligned %ulong_4
+         %50 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %49
+         %51 = OpLoad %float %50 Aligned 4
+         %53 = OpIAdd %ulong %input_aligned %ulong_8
+         %54 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %53
+         %55 = OpLoad %float %54 Aligned 4
+         %57 = OpIAdd %ulong %input_aligned %ulong_12
+         %58 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %57
+         %59 = OpLoad %float %58 Aligned 4
+     %loaded = OpCompositeConstruct %v4float %47 %51 %55 %59
+         %62 = OpIAdd %ulong %bias_aligned %ulong_0
+         %63 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %62
+         %64 = OpLoad %float %63 Aligned 4
+         %65 = OpIAdd %ulong %bias_aligned %ulong_4
+         %66 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %65
+         %67 = OpLoad %float %66 Aligned 4
+         %68 = OpIAdd %ulong %bias_aligned %ulong_8
+         %69 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %68
+         %70 = OpLoad %float %69 Aligned 4
+         %71 = OpIAdd %ulong %bias_aligned %ulong_12
+         %72 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %71
+         %73 = OpLoad %float %72 Aligned 4
+    %initial = OpCompositeConstruct %v4float %64 %67 %70 %73
+               OpStore %46 %replacement Aligned 4
+               OpBranch %76
+         %76 = OpLabel
+  %iteration = OpPhi %int %begin %11 %80 %79
+%accumulator = OpPhi %v4float %initial %11 %next %79
+         %85 = OpSLessThan %bool %iteration %count
+               OpLoopMerge %78 %79 None
+               OpBranchConditional %85 %77 %78
+         %77 = OpLabel
+    %product = OpFMul %v4float %loaded %loaded
+       %next = OpFAdd %v4float %product %accumulator
+               OpBranch %79
+         %79 = OpLabel
+         %80 = OpIAdd %int %iteration %step
+               OpBranch %76
+         %78 = OpLabel
+      %total = OpPhi %v4float %accumulator %76
+         %88 = OpCompositeExtract %float %total 0
+         %89 = OpCompositeExtract %float %total 1
+         %90 = OpCompositeExtract %float %total 2
+         %91 = OpCompositeExtract %float %total 3
+         %92 = OpIAdd %ulong %output_aligned %ulong_0
+         %93 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %92
+               OpStore %93 %88 Aligned 4
+         %94 = OpIAdd %ulong %output_aligned %ulong_4
+         %95 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %94
+               OpStore %95 %89 Aligned 4
+         %96 = OpIAdd %ulong %output_aligned %ulong_8
+         %97 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %96
+               OpStore %97 %90 Aligned 4
+         %98 = OpIAdd %ulong %output_aligned %ulong_12
+         %99 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %98
+               OpStore %99 %91 Aligned 4
+               OpReturn
+               OpFunctionEnd

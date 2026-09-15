@@ -1369,6 +1369,20 @@ def _scalar_binary_rules() -> tuple[DescriptorRule, ...]:
     return tuple(rules)
 
 
+def _vector_float_binary_rules() -> tuple[DescriptorRule, ...]:
+    return tuple(
+        _binary_rule(
+            getattr(vector, f"vector_{operation.source_op_key}"),
+            Vector(scalar.source_type, lanes=lane_count),
+            f"spirv.op_{operation.descriptor_suffix}."
+            + (scalar.suffix if lane_count == 1 else f"v{lane_count}{scalar.suffix}"),
+        )
+        for scalar in FLOAT_SCALAR_ALU_TYPES
+        for lane_count in (1, 2, 3, 4)
+        for operation in FLOAT_BINARY_OPERATIONS
+    )
+
+
 def _conversion_rules() -> tuple[DescriptorRule, ...]:
     rules = [_conversion_rule(row) for row in DIRECT_SCALAR_CONVERSIONS]
     rules.extend(_unsigned_conversion_rule(row) for row in UNSIGNED_SCALAR_CONVERSIONS)
@@ -1439,6 +1453,7 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
         _conversion_alias_rule(scalar_conversion.scalar_bitcast, _I8, _F8E5M2),
         *_conversion_rules(),
         *_scalar_binary_rules(),
+        *_vector_float_binary_rules(),
         *SPIRV_ORDINARY_VECTOR_CONTRACT_CASES,
         *_compare_rules(),
         *_select_rules(),

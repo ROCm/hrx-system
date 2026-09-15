@@ -1,0 +1,117 @@
+// Uniform immediate addition preserves unsigned carry into the upper word,
+// independently of signed overflow in the lower word.
+kernel.def @uniform_i64_add_immediate() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: i64, %output: buffer) {
+  %step = scalar.constant 256 : i64
+  %sum = scalar.addi %input, %step : i64
+  %base = index.constant 0 : offset
+  %aligned = buffer.assume.alignment %output {minimum_alignment = 8} : buffer
+  %dest = buffer.view %aligned[%base] : buffer -> view<1xi64>
+  view.store %sum, %dest[0] : i64, view<1xi64>
+  kernel.return
+}
+
+check.case public @uniform_i64_add_immediate_no_carry {
+  %input = check.literal value(128) : i64
+  %output = check.generate.fill value(99) : tensor<1xi64>
+  %expected = check.generate.fill value(384) : tensor<1xi64>
+  kernel.launch @uniform_i64_add_immediate(%input, %output) : (i64, tensor<1xi64>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi64>
+  check.return
+}
+
+check.case public @uniform_i64_add_immediate_signed_overflow {
+  %input = check.literal value(2147483520) : i64
+  %output = check.generate.fill value(99) : tensor<1xi64>
+  %expected = check.generate.fill value(2147483776) : tensor<1xi64>
+  kernel.launch @uniform_i64_add_immediate(%input, %output) : (i64, tensor<1xi64>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi64>
+  check.return
+}
+
+check.case public @uniform_i64_add_immediate_unsigned_carry {
+  %input = check.literal value(4294967168) : i64
+  %output = check.generate.fill value(99) : tensor<1xi64>
+  %expected = check.generate.fill value(4294967424) : tensor<1xi64>
+  kernel.launch @uniform_i64_add_immediate(%input, %output) : (i64, tensor<1xi64>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi64>
+  check.return
+}
+
+check.case public @uniform_i64_add_immediate_high_word_carry {
+  %input = check.literal value(12884901760) : i64
+  %output = check.generate.fill value(99) : tensor<1xi64>
+  %expected = check.generate.fill value(12884902016) : tensor<1xi64>
+  kernel.launch @uniform_i64_add_immediate(%input, %output) : (i64, tensor<1xi64>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi64>
+  check.return
+}
+
+check.case public @uniform_i64_add_immediate_wrap {
+  %input = check.literal value(-128) : i64
+  %output = check.generate.fill value(99) : tensor<1xi64>
+  %expected = check.generate.fill value(128) : tensor<1xi64>
+  kernel.launch @uniform_i64_add_immediate(%input, %output) : (i64, tensor<1xi64>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi64>
+  check.return
+}
+
+kernel.def @uniform_i64_add_negative_immediate() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: i64, %output: buffer) {
+  %step = scalar.constant -256 : i64
+  %sum = scalar.addi %input, %step : i64
+  %base = index.constant 0 : offset
+  %aligned = buffer.assume.alignment %output {minimum_alignment = 8} : buffer
+  %dest = buffer.view %aligned[%base] : buffer -> view<1xi64>
+  view.store %sum, %dest[0] : i64, view<1xi64>
+  kernel.return
+}
+
+check.case public @uniform_i64_add_negative_immediate_no_borrow {
+  %input = check.literal value(512) : i64
+  %output = check.generate.fill value(99) : tensor<1xi64>
+  %expected = check.generate.fill value(256) : tensor<1xi64>
+  kernel.launch @uniform_i64_add_negative_immediate(%input, %output) : (i64, tensor<1xi64>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi64>
+  check.return
+}
+
+check.case public @uniform_i64_add_negative_immediate_signed_overflow {
+  %input = check.literal value(2147483776) : i64
+  %output = check.generate.fill value(99) : tensor<1xi64>
+  %expected = check.generate.fill value(2147483520) : tensor<1xi64>
+  kernel.launch @uniform_i64_add_negative_immediate(%input, %output) : (i64, tensor<1xi64>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi64>
+  check.return
+}
+
+check.case public @uniform_i64_add_negative_immediate_low_word_borrow {
+  %input = check.literal value(128) : i64
+  %output = check.generate.fill value(99) : tensor<1xi64>
+  %expected = check.generate.fill value(-128) : tensor<1xi64>
+  kernel.launch @uniform_i64_add_negative_immediate(%input, %output) : (i64, tensor<1xi64>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi64>
+  check.return
+}
+
+check.case public @uniform_i64_add_negative_immediate_high_word_borrow {
+  %input = check.literal value(8589934720) : i64
+  %output = check.generate.fill value(99) : tensor<1xi64>
+  %expected = check.generate.fill value(8589934464) : tensor<1xi64>
+  kernel.launch @uniform_i64_add_negative_immediate(%input, %output) : (i64, tensor<1xi64>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi64>
+  check.return
+}
+
+check.case public @uniform_i64_add_negative_immediate_wrap {
+  %input = check.literal value(-9223372036854775680) : i64
+  %output = check.generate.fill value(99) : tensor<1xi64>
+  %expected = check.generate.fill value(9223372036854775680) : tensor<1xi64>
+  kernel.launch @uniform_i64_add_negative_immediate(%input, %output) : (i64, tensor<1xi64>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi64>
+  check.return
+}

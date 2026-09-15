@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <vector>
 
 #include "iree/testing/gtest.h"
 #include "loom/ir/float_facts.h"
@@ -1723,6 +1724,92 @@ TEST(AndiTransfer, MaskBounds) {
   loom_value_facts_andi(&a, &b, &out);
   EXPECT_EQ(out.range_lo, 0);
   EXPECT_EQ(out.range_hi, 0xFF);
+}
+
+TEST(AndiTransfer, MaskPreservesOnlyPowerOfTwoDivisibility) {
+  loom_value_facts_t input = loom_value_facts_make(3, 9, 3);
+  loom_value_facts_t mask = loom_value_facts_exact_i64(6);
+  loom_value_facts_t output;
+  loom_value_facts_andi(&input, &mask, &output);
+  // Three is a possible input and 3 & 6 is two, not a multiple of three.
+  EXPECT_EQ(output.known_divisor, 2);
+
+  input = loom_value_facts_make(0, 96, 24);
+  mask = loom_value_facts_make(0, 96, 12);
+  loom_value_facts_andi(&input, &mask, &output);
+  EXPECT_EQ(output.known_divisor, 8);
+}
+
+TEST(AndiTransfer, NegativeMaskPreservesNonnegativeBound) {
+  loom_value_facts_t input = loom_value_facts_make(0, 31, 1);
+  loom_value_facts_t mask = loom_value_facts_exact_i64(-8);
+  loom_value_facts_t output;
+  loom_value_facts_andi(&input, &mask, &output);
+  EXPECT_EQ(output.range_lo, 0);
+  EXPECT_LE(output.range_hi, 31);
+  EXPECT_EQ(output.known_divisor, 8);
+}
+
+TEST(AndiTransfer, BoundedConcreteValuesSatisfyResultFacts) {
+  std::vector<loom_value_facts_t> inputs;
+  for (int64_t value = -16; value <= 16; ++value) {
+    inputs.push_back(loom_value_facts_exact_i64(value));
+  }
+  for (int64_t lower : {-16, 0, 4}) {
+    for (int64_t upper : {-1, 0, 16}) {
+      if (lower > upper) continue;
+      for (int64_t divisor : {1, 2, 3, 4, 6, 8}) {
+        inputs.push_back(loom_value_facts_make(lower, upper, divisor));
+      }
+    }
+  }
+  for (const auto& left : inputs) {
+    for (const auto& right : inputs) {
+      loom_value_facts_t output;
+      loom_value_facts_andi(&left, &right, &output);
+      ASSERT_GE(output.known_divisor, 1);
+      for (int64_t lhs = left.range_lo; lhs <= left.range_hi; ++lhs) {
+        if (lhs % left.known_divisor != 0) continue;
+        for (int64_t rhs = right.range_lo; rhs <= right.range_hi; ++rhs) {
+          if (rhs % right.known_divisor != 0) continue;
+          const int64_t result = lhs & rhs;
+          ASSERT_LE(output.range_lo, result) << lhs << " & " << rhs;
+          ASSERT_GE(output.range_hi, result) << lhs << " & " << rhs;
+          ASSERT_EQ(result % output.known_divisor, 0) << lhs << " & " << rhs;
+        }
+      }
+    }
+  }
+}
+
+TEST(AndiTransfer, SignedBoundaryMasksSupportInPlaceTransfer) {
+  for (int64_t mask : {INT64_MIN, INT64_MIN + 1, INT64_MAX, INT64_C(-1),
+                       INT64_C(0), INT64_C(1) << 62}) {
+    const loom_value_facts_t mask_facts = loom_value_facts_exact_i64(mask);
+    const loom_value_facts_t input_facts = loom_value_facts_unknown();
+    loom_value_facts_t output;
+    loom_value_facts_andi(&input_facts, &mask_facts, &output);
+    ASSERT_GE(output.known_divisor, 1);
+    for (int64_t value : {INT64_MIN, INT64_MIN + 1, INT64_C(-9), INT64_C(-1),
+                          INT64_C(0), INT64_C(8), INT64_MAX}) {
+      const int64_t result = value & mask;
+      ASSERT_LE(output.range_lo, result);
+      ASSERT_GE(output.range_hi, result);
+      ASSERT_EQ(result % output.known_divisor, 0);
+    }
+    loom_value_facts_t in_place_input = input_facts;
+    loom_value_facts_andi(&in_place_input, &mask_facts, &in_place_input);
+    EXPECT_EQ(in_place_input.range_lo, output.range_lo);
+    EXPECT_EQ(in_place_input.range_hi, output.range_hi);
+    EXPECT_EQ(in_place_input.known_divisor, output.known_divisor);
+    EXPECT_EQ(in_place_input.flags, output.flags);
+    loom_value_facts_t in_place_mask = mask_facts;
+    loom_value_facts_andi(&input_facts, &in_place_mask, &in_place_mask);
+    EXPECT_EQ(in_place_mask.range_lo, output.range_lo);
+    EXPECT_EQ(in_place_mask.range_hi, output.range_hi);
+    EXPECT_EQ(in_place_mask.known_divisor, output.known_divisor);
+    EXPECT_EQ(in_place_mask.flags, output.flags);
+  }
 }
 
 TEST(XoriTransfer, SelfCancel) {

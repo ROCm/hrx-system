@@ -406,6 +406,14 @@ static iree_status_t loom_spirv_emit_binary_same_type_packet(
       operands[0].id,
       operands[1].id,
   };
+  if (iree_any_bit_set(row->flags, LOOM_SPIRV_PACKET_FLAG_NO_CONTRACTION)) {
+    const uint32_t decoration_operands[] = {
+        result_id, LOOM_SPIRV_DECORATION_NO_CONTRACTION};
+    IREE_RETURN_IF_ERROR(loom_spirv_binary_write_instruction(
+        loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_ANNOTATION),
+        LOOM_SPIRV_OP_DECORATE, decoration_operands,
+        IREE_ARRAYSIZE(decoration_operands)));
+  }
   IREE_RETURN_IF_ERROR(loom_spirv_binary_write_instruction(
       loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_FUNCTION),
       row->opcode, instruction_operands, IREE_ARRAYSIZE(instruction_operands)));

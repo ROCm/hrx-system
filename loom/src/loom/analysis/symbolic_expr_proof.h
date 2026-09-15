@@ -62,7 +62,8 @@ iree_status_t loom_symbolic_expr_prove_le(
     loom_symbolic_proof_result_t* out_result);
 
 // Simplifies left_value - right_value when the normalized difference is a
-// single existing value or an exact integer constant.
+// single existing value or an exact integer constant. A value replacement uses
+// the retained identity-chain value so its predicates survive the rewrite.
 iree_status_t loom_symbolic_expr_simplify_value_difference(
     loom_symbolic_expr_context_t* context, loom_value_id_t left_value,
     loom_value_id_t right_value,

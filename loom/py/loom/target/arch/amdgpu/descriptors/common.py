@@ -846,6 +846,7 @@ class AmdgpuMemoryDescriptorCandidate:
 @dataclass(frozen=True, slots=True)
 class AmdgpuAsyncGatherDescriptorCandidate:
     packet_byte_count: int
+    dest_lane_byte_stride: int
     descriptor_key: str
 
 

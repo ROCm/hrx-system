@@ -22,8 +22,10 @@ from loom.target.arch.amdgpu.descriptors import (
 
 
 def _validate_candidate(candidate: AmdgpuAsyncGatherDescriptorCandidate) -> None:
-    if candidate.packet_byte_count < 0 or candidate.packet_byte_count > 0xFFFFFFFF:
-        raise ValueError(f"AMDGPU async gather descriptor candidate {candidate.descriptor_key} has packet_byte_count {candidate.packet_byte_count}, which does not fit uint32_t")
+    if candidate.packet_byte_count <= 0 or candidate.packet_byte_count > 0xFFFFFFFF:
+        raise ValueError(f"AMDGPU async gather descriptor candidate {candidate.descriptor_key} has packet_byte_count {candidate.packet_byte_count}, which must be a positive uint32_t")
+    if candidate.dest_lane_byte_stride not in (4, 16) or candidate.packet_byte_count > candidate.dest_lane_byte_stride:
+        raise ValueError(f"AMDGPU async gather descriptor candidate {candidate.descriptor_key} has incompatible destination lane stride {candidate.dest_lane_byte_stride}")
 
 
 def _ordered_candidates(
@@ -51,6 +53,7 @@ def _candidate_initializer(candidate: AmdgpuAsyncGatherDescriptorCandidate) -> s
         [
             "    {",
             f"        .packet_byte_count = {candidate.packet_byte_count},",
+            f"        .dest_lane_byte_stride = {candidate.dest_lane_byte_stride},",
             f"        .descriptor_ref = {descriptor_ref},",
             "    },",
         ]

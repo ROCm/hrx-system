@@ -1760,6 +1760,28 @@ static iree_status_t loom_amdgpu_wait_plan_finish_node_classification(
   return iree_ok_status();
 }
 
+static bool loom_amdgpu_wait_plan_storage_release_is_ordered_vmem_reuse(
+    const loom_amdgpu_wait_plan_builder_t* builder,
+    const loom_low_storage_release_action_t* action,
+    const loom_low_storage_lease_record_t* lease_record,
+    loom_amdgpu_wait_plan_reason_t reason) {
+  if (reason != LOOM_AMDGPU_WAIT_PLAN_REASON_READ_RESULT_REUSE ||
+      action->release_class_id != LOOM_AMDGPU_WAIT_COUNTER_VMEM_LOAD ||
+      !loom_amdgpu_processor_properties_have_scheduling(
+          builder->processor_properties,
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER)) {
+    return false;
+  }
+  const loom_amdgpu_vmem_result_order_class_t producer_order_class =
+      builder->frontier_nodes[lease_record->node_index].vmem_result_order_class;
+  const loom_amdgpu_vmem_result_order_class_t consumer_order_class =
+      builder->frontier_nodes[action->insertion_node_index]
+          .vmem_result_order_class;
+  return producer_order_class != LOOM_AMDGPU_VMEM_RESULT_ORDER_NONE &&
+         producer_order_class != LOOM_AMDGPU_VMEM_RESULT_ORDER_UNKNOWN &&
+         producer_order_class == consumer_order_class;
+}
+
 static iree_status_t loom_amdgpu_wait_plan_build_dependency_links(
     loom_amdgpu_wait_plan_builder_t* builder) {
   const loom_low_schedule_table_t* schedule = builder->schedule;
@@ -1844,6 +1866,28 @@ static iree_status_t loom_amdgpu_wait_plan_build_dependency_links(
     IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_visit_effect_dependency_link(
         builder,
         loom_low_schedule_dependency_graph_at(&schedule->dependencies, i)));
+  }
+  // Physical reuse closes the same completion epoch as a payload consumer.
+  // Carry the allocator's exact release points into loop analysis before it
+  // derives the outstanding requests that can survive a backedge.
+  const loom_low_allocation_table_t* allocation = builder->allocation;
+  if (allocation != NULL) {
+    for (iree_host_size_t i = 0; i < allocation->storage_release_action_count;
+         ++i) {
+      const loom_low_storage_release_action_t* action =
+          &allocation->storage_release_actions[i];
+      const loom_low_storage_lease_record_t* record =
+          &allocation->storage_leases.records[action->lease_record_index];
+      const loom_amdgpu_wait_plan_reason_t reason =
+          (loom_amdgpu_wait_plan_reason_t)action->release_reason_id;
+      if (loom_amdgpu_wait_plan_storage_release_is_ordered_vmem_reuse(
+              builder, action, record, reason)) {
+        continue;
+      }
+      IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_append_dependency_link(
+          builder, record->node_index, action->insertion_node_index,
+          loom_amdgpu_wait_counter_mask(action->release_class_id), reason));
+    }
   }
   return iree_ok_status();
 }
@@ -2530,28 +2574,6 @@ loom_amdgpu_wait_plan_storage_release_action_flags(
   return 0;
 }
 
-static bool loom_amdgpu_wait_plan_storage_release_is_ordered_vmem_reuse(
-    const loom_amdgpu_wait_plan_builder_t* builder,
-    const loom_low_storage_release_action_t* action,
-    const loom_low_storage_lease_record_t* lease_record,
-    loom_amdgpu_wait_plan_reason_t reason) {
-  if (reason != LOOM_AMDGPU_WAIT_PLAN_REASON_READ_RESULT_REUSE ||
-      action->release_class_id != LOOM_AMDGPU_WAIT_COUNTER_VMEM_LOAD ||
-      !loom_amdgpu_processor_properties_have_scheduling(
-          builder->processor_properties,
-          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER)) {
-    return false;
-  }
-  const loom_amdgpu_vmem_result_order_class_t producer_order_class =
-      builder->frontier_nodes[lease_record->node_index].vmem_result_order_class;
-  const loom_amdgpu_vmem_result_order_class_t consumer_order_class =
-      builder->frontier_nodes[action->insertion_node_index]
-          .vmem_result_order_class;
-  return producer_order_class != LOOM_AMDGPU_VMEM_RESULT_ORDER_NONE &&
-         producer_order_class != LOOM_AMDGPU_VMEM_RESULT_ORDER_UNKNOWN &&
-         producer_order_class == consumer_order_class;
-}
-
 static loom_amdgpu_wait_xcnt_group_t loom_amdgpu_wait_plan_node_xcnt_group(
     const loom_amdgpu_wait_node_state_t* node_state) {
   if (iree_any_bit_set(node_state->flags,
@@ -2732,8 +2754,7 @@ static iree_status_t loom_amdgpu_wait_plan_handle_physical_write_range(
       allocation->storage_lease_unit_index,
       builder->schedule->target.descriptor_set, descriptor_reg_class_id,
       location_kind, location_base, location_count, program_point,
-      (uint64_t)program_point + 1u,
-      /*flags=*/0, incoming_selection, &query);
+      (uint64_t)program_point + 1u, incoming_selection, &query);
   uint32_t storage_lease_index = 0;
   while (loom_low_allocation_storage_lease_unit_query_next(
       &query, &storage_lease_index)) {

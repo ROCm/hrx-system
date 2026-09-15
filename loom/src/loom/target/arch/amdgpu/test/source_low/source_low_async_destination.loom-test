@@ -1,0 +1,247 @@
+// RUN: emit source-low output=low
+
+// A compact explicit layout may give singleton axes arbitrary strides.
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @gather_explicit_lane_layout() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %storage_bytes = index.constant 1024 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%base] : buffer -> view<64x4xi8>
+  %source = view.subview %source_base[%lane, 0] : view<64x4xi8> -> view<1x4xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %storage_bytes : buffer
+  %layout = encoding.layout.strided [4, 99, 1] : encoding<layout>
+  %dest = buffer.view %scratch[%base] : buffer -> view<64x1x4xi8, %layout>
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x4xi8> to view<64x1x4xi8, %layout> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gather_explicit_lane_layout() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %16 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
+  %18 = v_lshlrev_b32_src0_inline %lane, 2
+  %19 = s_mov_b32_m0_imm 0
+  global_load_lds_dword_saddr %18, %global, %19
+  s_waitcnt {vmcnt = 0}
+  return
+}
+
+// ====
+
+// The selected subgroup size specializes an authored dynamic lane axis.
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @gather_specialized_subgroup_extent() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %wave = kernel.subgroup.size : index
+  %base = index.constant 0 : offset
+  %storage_bytes = index.constant 1024 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%base] : buffer -> view<64x4xi8>
+  %source = view.subview %source_base[%lane, 0] : view<64x4xi8> -> view<1x4xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %storage_bytes : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<[%wave]x1x4xi8>
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x4xi8> to view<[%wave]x1x4xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gather_specialized_subgroup_extent() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %16 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
+  %18 = v_lshlrev_b32_src0_inline %lane, 2
+  %19 = s_mov_b32_m0_imm 0
+  global_load_lds_dword_saddr %18, %global, %19
+  s_waitcnt {vmcnt = 0}
+  return
+}
+
+// ====
+
+// Lane spacing is measured in bytes, independently of the element type.
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @gather_typed_lane_stride() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %storage_bytes = index.constant 1024 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%base] : buffer -> view<64x1xi32>
+  %source = view.subview %source_base[%lane, 0] : view<64x1xi32> -> view<1x1xi32>
+  %scratch = buffer.alloca<workgroup> align(16) %storage_bytes : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<64x1x1xi32>
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x1xi32> to view<64x1x1xi32> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gather_typed_lane_stride() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %15 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
+  %17 = v_lshlrev_b32_src0_inline %lane, 2
+  %18 = s_mov_b32_m0_imm 0
+  global_load_lds_dword_saddr %17, %global, %18
+  s_waitcnt {vmcnt = 0}
+  return
+}
+
+// ====
+
+// Twelve-byte packets use sixteen-byte destination lane slots.
+amdgpu.target<gfx950> @target
+
+kernel.def target(@target) @gather_padded_twelve_byte_payload() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %storage_bytes = index.constant 1024 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%base] : buffer -> view<64x12xi8>
+  %source = view.subview %source_base[%lane, 0] : view<64x12xi8> -> view<1x12xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %storage_bytes : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<64x1x16xi8>
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x12xi8> to view<64x1x16xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gather_padded_twelve_byte_payload() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 768} : reg<amdgpu.sgpr x2>
+  %15 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
+  %17 = v_mov_b32 12
+  %18 = v_mul_lo_u32 %lane, %17
+  %19 = s_mov_b32_m0_imm 0
+  global_load_lds_dwordx3_saddr %18, %global, %19
+  s_waitcnt {vmcnt = 0}
+  return
+}
+
+// ====
+
+// Twelve-byte lane slots disagree with the packet destination spacing.
+amdgpu.target<gfx950> @target
+
+kernel.def target(@target) @gather_unpadded_twelve_byte_payload_rejected() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %storage_bytes = index.constant 1024 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%base] : buffer -> view<64x12xi8>
+  %source = view.subview %source_base[%lane, 0] : view<64x12xi8> -> view<1x12xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %storage_bytes : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<64x1x12xi8>
+  // ERROR@+1: AMDGPU/023 {constraint_key="async_gather.dest_lane_stride"}
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x12xi8> to view<64x1x12xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ====
+
+// A four-byte packet cannot skip eight bytes between destinations.
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @gather_oversized_lane_slot_rejected() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %storage_bytes = index.constant 1024 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%base] : buffer -> view<64x4xi8>
+  %source = view.subview %source_base[%lane, 0] : view<64x4xi8> -> view<1x4xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %storage_bytes : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<64x1x8xi8>
+  // ERROR@+1: AMDGPU/023 {constraint_key="async_gather.dest_lane_stride"}
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x4xi8> to view<64x1x8xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ====
+
+// The leading destination dimension covers the selected native subgroup.
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @gather_short_subgroup_extent_rejected() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %storage_bytes = index.constant 1024 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%base] : buffer -> view<64x4xi8>
+  %source = view.subview %source_base[%lane, 0] : view<64x4xi8> -> view<1x4xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %storage_bytes : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<32x1x4xi8>
+  // ERROR@+1: AMDGPU/023 {constraint_key="async_gather.dest_lane_count"}
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x4xi8> to view<32x1x4xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ====
+
+// An explicit lane gap cannot be flattened into implicit packet spacing.
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @gather_destination_lane_gap_rejected() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %storage_bytes = index.constant 1024 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%base] : buffer -> view<64x4xi8>
+  %source = view.subview %source_base[%lane, 0] : view<64x4xi8> -> view<1x4xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %storage_bytes : buffer
+  %layout = encoding.layout.strided [8, 4, 1] : encoding<layout>
+  %dest = buffer.view %scratch[%base] : buffer -> view<64x1x4xi8, %layout>
+  // ERROR@+1: AMDGPU/023 {constraint_key="source_memory.layout"}
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x4xi8> to view<64x1x4xi8, %layout> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}

@@ -110,6 +110,7 @@ iree_py_library(
         ":features",
         ":ordinary_vector",
         ":ordinary_vector_bit_layout",
+        ":ordinary_vector_float",
         ":ordinary_vector_integer",
         ":ordinary_vector_integer_conversion",
         ":scalar_alu",
@@ -119,6 +120,15 @@ iree_py_library(
         "//loom/py/loom:core",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch:package",
+    ],
+)
+
+iree_py_library(
+    name = "ordinary_vector_float",
+    srcs = ["ordinary_vector_float.py"],
+    deps = [
+        ":ordinary_vector",
+        ":scalar_alu",
     ],
 )
 
@@ -138,6 +148,7 @@ iree_py_test(
         ":descriptors",
         ":ordinary_vector",
         ":ordinary_vector_bit_layout",
+        ":ordinary_vector_float",
         ":ordinary_vector_integer",
         ":ordinary_vector_integer_conversion",
         ":scalar_alu",

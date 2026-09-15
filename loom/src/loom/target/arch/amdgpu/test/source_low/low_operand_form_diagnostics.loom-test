@@ -2,38 +2,38 @@
 
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @sopk_immediate_add_selected(%position: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.rdna3.core>(@target) @sop2_rhs_inline_add_selected(%position: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
   %step = s_mov_b32 3
-  // REMARK@+1: BACKEND/042 {source_descriptor_key="amdgpu.s_add_u32", replacement_descriptor_key="amdgpu.s_addk_i32", decision="selected", reason_key="selected", immediate_name="imm16", immediate_value="3", tied_operand_name="lhs", tied_value_name="position"}
-  %result = s_add_u32 %position, %step
-  return %result
-}
-
-// ----
-amdgpu.target<gfx1100> @target
-
-low.func.def target<amdgpu.rdna3.core>(@target) @sopk_immediate_add_selected(%position: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
-  %result = s_addk_i32 %position, 3
-  return %result
-}
-
-// ====
-
-amdgpu.target<gfx1100> @target
-
-low.func.def target<amdgpu.rdna3.core>(@target) @sopk_immediate_add_rejected_live_lhs(%position: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
-  %step = s_mov_b32 3
-  // REMARK@+2: BACKEND/042 {source_descriptor_key="amdgpu.s_add_u32", replacement_descriptor_key="amdgpu.s_addk_i32", decision="rejected", reason_key="destructive_operand_not_single_use", immediate_name="imm16", immediate_value="3", tied_operand_name="lhs", tied_value_name="position"}
   // REMARK@+1: BACKEND/042 {source_descriptor_key="amdgpu.s_add_u32", replacement_descriptor_key="amdgpu.s_add_u32.rhs_inline", decision="selected", reason_key="selected", immediate_name="imm32", immediate_value="3", tied_operand_name="<none>", tied_value_name="<none>"}
   %result = s_add_u32 %position, %step
+  return %result
+}
+
+// ----
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @sop2_rhs_inline_add_selected(%position: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %result = s_add_u32_rhs_inline %position, 3
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @sopk_immediate_mul_rejected_live_lhs(%position: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+  %scale = s_mov_b32 3
+  // REMARK@+2: BACKEND/042 {source_descriptor_key="amdgpu.s_mul_i32", replacement_descriptor_key="amdgpu.s_mulk_i32", decision="rejected", reason_key="destructive_operand_not_single_use", immediate_name="imm16", immediate_value="3", tied_operand_name="lhs", tied_value_name="position"}
+  // REMARK@+1: BACKEND/042 {source_descriptor_key="amdgpu.s_mul_i32", replacement_descriptor_key="amdgpu.s_mul_i32.rhs_inline", decision="selected", reason_key="selected", immediate_name="imm32", immediate_value="3", tied_operand_name="<none>", tied_value_name="<none>"}
+  %result = s_mul_i32 %position, %scale
   return %result, %position
 }
 
 // ----
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @sopk_immediate_add_rejected_live_lhs(%position: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
-  %result = s_add_u32_rhs_inline %position, 3
+low.func.def target<amdgpu.rdna3.core>(@target) @sopk_immediate_mul_rejected_live_lhs(%position: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+  %result = s_mul_i32_rhs_inline %position, 3
   return %result, %position
 }
 
@@ -41,23 +41,23 @@ low.func.def target<amdgpu.rdna3.core>(@target) @sopk_immediate_add_rejected_liv
 
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @sopk_immediate_add_rejected_live_slice_source(%lo: reg<amdgpu.sgpr>, %hi: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.rdna3.core>(@target) @sopk_immediate_mul_rejected_live_slice_source(%lo: reg<amdgpu.sgpr>, %hi: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>) asm {
   %pair = concat(%lo, %hi) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %position = slice %pair[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %step = s_mov_b32 3
-  // REMARK@+2: BACKEND/042 {source_descriptor_key="amdgpu.s_add_u32", replacement_descriptor_key="amdgpu.s_addk_i32", decision="rejected", reason_key="destructive_operand_alias_reused_after_consume", immediate_name="imm16", immediate_value="3", tied_operand_name="lhs", tied_value_name="position"}
-  // REMARK@+1: BACKEND/042 {source_descriptor_key="amdgpu.s_add_u32", replacement_descriptor_key="amdgpu.s_add_u32.rhs_inline", decision="selected", reason_key="selected", immediate_name="imm32", immediate_value="3", tied_operand_name="<none>", tied_value_name="<none>"}
-  %result = s_add_u32 %position, %step
+  %scale = s_mov_b32 3
+  // REMARK@+2: BACKEND/042 {source_descriptor_key="amdgpu.s_mul_i32", replacement_descriptor_key="amdgpu.s_mulk_i32", decision="rejected", reason_key="destructive_operand_alias_reused_after_consume", immediate_name="imm16", immediate_value="3", tied_operand_name="lhs", tied_value_name="position"}
+  // REMARK@+1: BACKEND/042 {source_descriptor_key="amdgpu.s_mul_i32", replacement_descriptor_key="amdgpu.s_mul_i32.rhs_inline", decision="selected", reason_key="selected", immediate_name="imm32", immediate_value="3", tied_operand_name="<none>", tied_value_name="<none>"}
+  %result = s_mul_i32 %position, %scale
   return %result, %pair
 }
 
 // ----
 amdgpu.target<gfx1100> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @sopk_immediate_add_rejected_live_slice_source(%lo: reg<amdgpu.sgpr>, %hi: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.rdna3.core>(@target) @sopk_immediate_mul_rejected_live_slice_source(%lo: reg<amdgpu.sgpr>, %hi: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>) asm {
   %pair = concat(%lo, %hi) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %position = slice %pair[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %result = s_add_u32_rhs_inline %position, 3
+  %result = s_mul_i32_rhs_inline %position, 3
   return %result, %pair
 }
 

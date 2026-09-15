@@ -13,8 +13,6 @@ struct loom_low_allocation_storage_lease_index_node_t {
   uint64_t key;
   // Maximum end point of any temporal lease in this subtree.
   uint32_t maximum_end_point;
-  // Maximum end point of unreleased temporal leases, or zero when empty.
-  uint32_t maximum_unreleased_end_point;
   // Parent in this radix tree, or UINT32_MAX at a root.
   uint32_t parent;
   // Kind-specific payload; directory and temporal trees have separate roots.
@@ -98,15 +96,10 @@ static void loom_low_allocation_storage_lease_index_refresh_ancestors(
         &index->nodes[node->data.children[1]];
     const uint32_t maximum_end_point =
         iree_max(left->maximum_end_point, right->maximum_end_point);
-    const uint32_t maximum_unreleased_end_point =
-        iree_max(left->maximum_unreleased_end_point,
-                 right->maximum_unreleased_end_point);
-    if (node->maximum_end_point == maximum_end_point &&
-        node->maximum_unreleased_end_point == maximum_unreleased_end_point) {
+    if (node->maximum_end_point == maximum_end_point) {
       break;
     }
     node->maximum_end_point = maximum_end_point;
-    node->maximum_unreleased_end_point = maximum_unreleased_end_point;
     node_index = node->parent;
   }
 }
@@ -213,11 +206,6 @@ void loom_low_allocation_storage_lease_unit_index_insert(
     loom_low_allocation_storage_lease_index_node_t* leaf =
         &index->nodes[leaf_index];
     leaf->maximum_end_point = lease->end_point;
-    leaf->maximum_unreleased_end_point =
-        lease->release_action_index ==
-                LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE
-            ? lease->end_point
-            : 0;
     leaf->data.lease.index = storage_lease_index;
     leaf->data.lease.next_node =
         index->first_nodes_by_lease[storage_lease_index];
@@ -240,11 +228,6 @@ void loom_low_allocation_storage_lease_unit_index_update(
     loom_low_allocation_storage_lease_index_node_t* node =
         &index->nodes[node_index];
     node->maximum_end_point = lease->end_point;
-    node->maximum_unreleased_end_point =
-        lease->release_action_index ==
-                LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE
-            ? lease->end_point
-            : 0;
     loom_low_allocation_storage_lease_index_refresh_ancestors(index,
                                                               node->parent);
     node_index = node->data.lease.next_node;
@@ -300,7 +283,6 @@ void loom_low_allocation_storage_lease_unit_query_initialize(
     loom_low_allocation_location_kind_t location_kind, uint32_t location_base,
     uint32_t location_count, uint64_t minimum_end_point,
     uint64_t start_point_limit,
-    loom_low_allocation_storage_lease_query_flags_t flags,
     const loom_low_allocation_storage_lease_selection_t* selection,
     loom_low_allocation_storage_lease_unit_query_t* out_query) {
   out_query->index = index;
@@ -315,7 +297,6 @@ void loom_low_allocation_storage_lease_unit_query_initialize(
   out_query->active_location = 0;
   out_query->minimum_end_point = minimum_end_point;
   out_query->start_point_limit = start_point_limit;
-  out_query->flags = flags;
   out_query->stack_count = 0;
 }
 
@@ -331,15 +312,9 @@ bool loom_low_allocation_storage_lease_unit_query_next(
       const uint32_t node_index = query->stack[--query->stack_count];
       const loom_low_allocation_storage_lease_index_node_t* node =
           &index->nodes[node_index];
-      const uint32_t maximum_end_point =
-          iree_any_bit_set(
-              query->flags,
-              LOOM_LOW_ALLOCATION_STORAGE_LEASE_QUERY_FLAG_UNRELEASED)
-              ? node->maximum_unreleased_end_point
-              : node->maximum_end_point;
       const bool temporal_match =
           (node->key >> 32) < query->start_point_limit &&
-          maximum_end_point >= query->minimum_end_point;
+          node->maximum_end_point >= query->minimum_end_point;
       const bool selected_match =
           query->selection != NULL &&
           query->selection->subtree_counts[node_index] != 0;

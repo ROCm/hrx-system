@@ -17,7 +17,7 @@ static bool loom_spirv_legalizer_descriptor_set_is_spirv(
              loom_spirv_logical_core_descriptor_set()->target_stable_id;
 }
 
-static iree_status_t loom_spirv_legalize_vector_atomic(
+static iree_status_t loom_spirv_legalize_vector_memory(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
     loom_target_legalizer_result_t* out_result) {
@@ -30,8 +30,15 @@ static iree_status_t loom_spirv_legalize_vector_atomic(
   }
 
   bool rewritten = false;
-  IREE_RETURN_IF_ERROR(loom_vector_atomic_to_scalar_rewrite_op(
-      context->pass, context->rewriter, op, &rewritten));
+  if (loom_vector_load_isa(op)) {
+    // Capture every lane where the vector read occurs. Delaying reads until
+    // arithmetic consumers would change the snapshot across aliasing writes.
+    IREE_RETURN_IF_ERROR(loom_vector_descriptor_to_scalar_rewrite_op(
+        context->pass, context->rewriter, op, &rewritten));
+  } else {
+    IREE_RETURN_IF_ERROR(loom_vector_atomic_to_scalar_rewrite_op(
+        context->pass, context->rewriter, op, &rewritten));
+  }
   if (rewritten) {
     out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
   }
@@ -40,24 +47,28 @@ static iree_status_t loom_spirv_legalize_vector_atomic(
 
 static const loom_target_legalizer_rule_t kSpirvLegalizerRules[] = {
     {
+        .root_kind = LOOM_OP_VECTOR_LOAD,
+        .legalize = loom_spirv_legalize_vector_memory,
+    },
+    {
         .root_kind = LOOM_OP_VECTOR_ATOMIC_REDUCE,
-        .legalize = loom_spirv_legalize_vector_atomic,
+        .legalize = loom_spirv_legalize_vector_memory,
     },
     {
         .root_kind = LOOM_OP_VECTOR_ATOMIC_REDUCE_MASK,
-        .legalize = loom_spirv_legalize_vector_atomic,
+        .legalize = loom_spirv_legalize_vector_memory,
     },
     {
         .root_kind = LOOM_OP_VECTOR_ATOMIC_RMW,
-        .legalize = loom_spirv_legalize_vector_atomic,
+        .legalize = loom_spirv_legalize_vector_memory,
     },
     {
         .root_kind = LOOM_OP_VECTOR_ATOMIC_RMW_MASK,
-        .legalize = loom_spirv_legalize_vector_atomic,
+        .legalize = loom_spirv_legalize_vector_memory,
     },
     {
         .root_kind = LOOM_OP_VECTOR_ATOMIC_CMPXCHG,
-        .legalize = loom_spirv_legalize_vector_atomic,
+        .legalize = loom_spirv_legalize_vector_memory,
     },
 };
 

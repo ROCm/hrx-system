@@ -22,7 +22,7 @@ static loom_target_math_policy_decision_t loom_spirv_math_reject(
   };
 }
 
-static bool loom_spirv_math_op_is_native_scalar_arithmetic(
+static bool loom_spirv_math_op_is_native_arithmetic(
     loom_target_math_op_t math_op) {
   return math_op == LOOM_TARGET_MATH_OP_ADDF ||
          math_op == LOOM_TARGET_MATH_OP_MULF;
@@ -39,11 +39,7 @@ static void loom_spirv_math_policy_query(
     const loom_target_math_policy_t* policy,
     const loom_target_math_query_t* query,
     loom_target_math_policy_decision_t* out_decision) {
-  if (query->lane_domain != LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR) {
-    *out_decision = loom_spirv_math_reject(IREE_SV("math.scalar"));
-    return;
-  }
-  if (!loom_spirv_math_op_is_native_scalar_arithmetic(query->math_op)) {
+  if (!loom_spirv_math_op_is_native_arithmetic(query->math_op)) {
     *out_decision =
         loom_spirv_math_reject(IREE_SV("math.op.native_arithmetic"));
     return;
@@ -53,7 +49,7 @@ static void loom_spirv_math_policy_query(
     return;
   }
 
-  *out_decision = loom_spirv_math_keep(IREE_SV("math.op.native_scalar"));
+  *out_decision = loom_spirv_math_keep(IREE_SV("math.op.native_arithmetic"));
 }
 
 static const loom_target_math_policy_t kSpirvMathPolicy = {

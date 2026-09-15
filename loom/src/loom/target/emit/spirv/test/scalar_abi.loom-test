@@ -111,8 +111,10 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
                OpDecorate %_ptr_PhysicalStorageBuffer_char ArrayStride 1
                OpDecorate %_ptr_PhysicalStorageBuffer_short ArrayStride 2
                OpDecorate %_ptr_PhysicalStorageBuffer_half ArrayStride 2
+               OpDecorate %sum_f16 NoContraction
                OpDecorate %_ptr_PhysicalStorageBuffer_bfloat16 ArrayStride 2
                OpDecorate %_ptr_PhysicalStorageBuffer_double ArrayStride 8
+               OpDecorate %sum_f64 NoContraction
       %ulong = OpTypeInt 64 0
        %uint = OpTypeInt 32 0
      %uint_2 = OpConstant %uint 2
@@ -564,7 +566,9 @@ low.kernel.def target<spirv.logical.core>(@hal_target_scalar_payloads) workgroup
                OpDecorate %_ptr_PhysicalStorageBuffer_short ArrayStride 2
                OpDecorate %_ptr_PhysicalStorageBuffer_half ArrayStride 2
                OpDecorate %_ptr_PhysicalStorageBuffer_bfloat16 ArrayStride 2
+               OpDecorate %f32_sum NoContraction
                OpDecorate %_ptr_PhysicalStorageBuffer_float ArrayStride 4
+               OpDecorate %f64_sum NoContraction
                OpDecorate %_ptr_PhysicalStorageBuffer_double ArrayStride 8
                OpDecorate %_ptr_PhysicalStorageBuffer_long ArrayStride 8
       %ulong = OpTypeInt 64 0

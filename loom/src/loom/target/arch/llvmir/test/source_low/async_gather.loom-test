@@ -64,15 +64,15 @@ kernel.def target(@target) @async_gather_two_stage() {
   %source_base = buffer.view %global[%buffer_base] : buffer -> view<64x1x16xi8>
   %source = view.subview %source_base[%tid, 0, 0] : view<64x1x16xi8> -> view<1x1x16xi8>
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %dest_base = buffer.view %scratch[%buffer_base] : buffer -> view<2x64x1x16xi8>
-  %dest0 = view.subview %dest_base[0, 0, 0, 0] : view<2x64x1x16xi8> -> view<1x64x1x16xi8>
-  %dest1 = view.subview %dest_base[1, 0, 0, 0] : view<2x64x1x16xi8> -> view<1x64x1x16xi8>
+  %dest0 = buffer.view %scratch[%buffer_base] : buffer -> view<64x1x1x16xi8>
+  %slot1_offset = index.constant 1024 : offset
+  %dest1 = buffer.view %scratch[%slot1_offset] : buffer -> view<64x1x1x16xi8>
   // ERROR@+1: TARGET/032 {op_name="kernel.async.gather", op_constraint="target_contract.kernel_async.provider_required"}
-  %copy0 = kernel.async.gather %source to %dest0 {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<1x64x1x16xi8> -> kernel.async.token
+  %copy0 = kernel.async.gather %source to %dest0 {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<64x1x1x16xi8> -> kernel.async.token
   // ERROR@+1: TARGET/032 {op_name="kernel.async.group", op_constraint="target_contract.kernel_async.provider_required"}
   %load0 = kernel.async.group %copy0 : kernel.async.token -> kernel.async.group
   // ERROR@+1: TARGET/032 {op_name="kernel.async.gather", op_constraint="target_contract.kernel_async.provider_required"}
-  %copy1 = kernel.async.gather %source to %dest1 {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<1x64x1x16xi8> -> kernel.async.token
+  %copy1 = kernel.async.gather %source to %dest1 {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<64x1x1x16xi8> -> kernel.async.token
   // ERROR@+1: TARGET/032 {op_name="kernel.async.group", op_constraint="target_contract.kernel_async.provider_required"}
   %load1 = kernel.async.group %copy1 : kernel.async.token -> kernel.async.group
   // ERROR@+1: TARGET/032 {op_name="kernel.async.wait", op_constraint="target_contract.kernel_async.provider_required"}
@@ -97,18 +97,19 @@ kernel.def target(@target) @async_gather_multi_packet_newer_group() {
   %source_base = buffer.view %global[%buffer_base] : buffer -> view<64x1x16xi8>
   %source = view.subview %source_base[%tid, 0, 0] : view<64x1x16xi8> -> view<1x1x16xi8>
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  %dest_base = buffer.view %scratch[%buffer_base] : buffer -> view<3x64x1x16xi8>
-  %dest0 = view.subview %dest_base[0, 0, 0, 0] : view<3x64x1x16xi8> -> view<1x64x1x16xi8>
-  %dest1a = view.subview %dest_base[1, 0, 0, 0] : view<3x64x1x16xi8> -> view<1x64x1x16xi8>
-  %dest1b = view.subview %dest_base[2, 0, 0, 0] : view<3x64x1x16xi8> -> view<1x64x1x16xi8>
+  %dest0 = buffer.view %scratch[%buffer_base] : buffer -> view<64x1x1x16xi8>
+  %slot1_offset = index.constant 1024 : offset
+  %dest1a = buffer.view %scratch[%slot1_offset] : buffer -> view<64x1x1x16xi8>
+  %slot2_offset = index.constant 2048 : offset
+  %dest1b = buffer.view %scratch[%slot2_offset] : buffer -> view<64x1x1x16xi8>
   // ERROR@+1: TARGET/032 {op_name="kernel.async.gather", op_constraint="target_contract.kernel_async.provider_required"}
-  %copy0 = kernel.async.gather %source to %dest0 {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<1x64x1x16xi8> -> kernel.async.token
+  %copy0 = kernel.async.gather %source to %dest0 {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<64x1x1x16xi8> -> kernel.async.token
   // ERROR@+1: TARGET/032 {op_name="kernel.async.group", op_constraint="target_contract.kernel_async.provider_required"}
   %load0 = kernel.async.group %copy0 : kernel.async.token -> kernel.async.group
   // ERROR@+1: TARGET/032 {op_name="kernel.async.gather", op_constraint="target_contract.kernel_async.provider_required"}
-  %copy1a = kernel.async.gather %source to %dest1a {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<1x64x1x16xi8> -> kernel.async.token
+  %copy1a = kernel.async.gather %source to %dest1a {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<64x1x1x16xi8> -> kernel.async.token
   // ERROR@+1: TARGET/032 {op_name="kernel.async.gather", op_constraint="target_contract.kernel_async.provider_required"}
-  %copy1b = kernel.async.gather %source to %dest1b {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<1x64x1x16xi8> -> kernel.async.token
+  %copy1b = kernel.async.gather %source to %dest1b {cache_scope = device, cache_temporal = regular} : view<1x1x16xi8> to view<64x1x1x16xi8> -> kernel.async.token
   // ERROR@+1: TARGET/032 {op_name="kernel.async.group", op_constraint="target_contract.kernel_async.provider_required"}
   %load1 = kernel.async.group %copy1a, %copy1b : kernel.async.token, kernel.async.token -> kernel.async.group
   // ERROR@+1: TARGET/032 {op_name="kernel.async.wait", op_constraint="target_contract.kernel_async.provider_required"}
