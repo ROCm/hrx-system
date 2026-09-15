@@ -1530,7 +1530,7 @@ static hipError_t iree_hip_ensure_initialized(void) {
       iree_hip_error_state_snapshot(&runtime_generation);
   iree_hip_sync_thread_device_selection(runtime_generation);
   if (IREE_UNLIKELY(fatal_result != hipSuccess)) {
-    return iree_hip_error_state_publish(fatal_result);
+    return fatal_result;
   }
   if (iree_hip_no_visible_devices_requested()) {
     return hipErrorNoDevice;
@@ -1593,7 +1593,7 @@ static hipError_t iree_hip_ensure_context(
     if (out_context) {
       *out_context = NULL;
     }
-    HIP_RETURN_ERROR(init_result);
+    return init_result;
   }
 
   // Check if current thread has context.
