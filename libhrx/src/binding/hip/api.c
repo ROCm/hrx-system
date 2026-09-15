@@ -645,6 +645,21 @@ static bool iree_hip_mem_pool_allocation_type_is_supported(
 // architecture.
 static bool iree_hip_memory_pools_supported(void) { return true; }
 
+static bool iree_hip_device_supports_virtual_memory(
+    const iree_hal_streaming_device_t* device) {
+  return iree_hal_allocator_supports_virtual_memory(
+      iree_hal_device_allocator(device->hal_device));
+}
+
+static bool iree_hip_device_supports_dma_buf(
+    const iree_hal_streaming_device_t* device) {
+  const iree_hal_external_buffer_handle_selection_t selection = {
+      .handle_type_mask = IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF,
+  };
+  return iree_hal_device_spec_find_external_buffer_handle(
+             iree_hal_device_spec(device->hal_device), &selection) != NULL;
+}
+
 //===----------------------------------------------------------------------===//
 // Flag translation functions
 //===----------------------------------------------------------------------===//
@@ -2696,7 +2711,7 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       *value = 0;
       break;
     case hipDeviceAttributeVirtualMemoryManagementSupported:
-      *value = 1;
+      *value = iree_hip_device_supports_virtual_memory(device_obj) ? 1 : 0;
       break;
     case hipDeviceAttributeConcurrentManagedAccess:
       *value = 1;
@@ -2795,11 +2810,13 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
                    : -1;
       break;
     }
-    case hipDeviceAttributeDmaBufSupported:
     case hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported:
     case hipDeviceAttributeExpertSchedMode:
     case hipDeviceAttributeMaxDynDataPrefetchRegions:
       *value = 0;
+      break;
+    case hipDeviceAttributeDmaBufSupported:
+      *value = iree_hip_device_supports_dma_buf(device_obj) ? 1 : 0;
       break;
     case hipDeviceAttributeMaxTexture1DWidth:
     case hipDeviceAttributeMaxTexture1DLinear:
