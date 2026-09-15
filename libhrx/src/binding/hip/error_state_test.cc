@@ -25,6 +25,12 @@ static hipError_t TestPublicQuery(int* output) {
   HIP_RETURN_ERROR(hipSuccess);
 }
 
+static int TestPublicValueQuery(int* output) {
+  HIP_API_BEGIN_OR_RETURN(-1);
+  *output = 42;
+  return 42;
+}
+
 TEST_F(HipErrorStateTest, NonFatalErrorsRemainThreadLocalAndClearable) {
   EXPECT_EQ(hipErrorInvalidValue,
             iree_hip_error_state_publish(hipErrorInvalidValue));
@@ -80,8 +86,20 @@ TEST_F(HipErrorStateTest, FatalEntryBoundaryPrecedesApiSideEffects) {
   int output = 7;
   EXPECT_EQ(hipErrorIllegalAddress, TestPublicQuery(&output));
   EXPECT_EQ(7, output);
+  EXPECT_EQ(-1, TestPublicValueQuery(&output));
+  EXPECT_EQ(7, output);
   EXPECT_EQ(hipErrorIllegalAddress,
             iree_hip_error_state_get_and_clear_command_error());
+}
+
+TEST_F(HipErrorStateTest, FatalEntryDoesNotRelatchAcrossReset) {
+  EXPECT_EQ(hipErrorIllegalAddress,
+            iree_hip_error_state_publish(hipErrorIllegalAddress));
+  EXPECT_EQ(hipErrorIllegalAddress, iree_hip_error_state_begin());
+
+  iree_hip_error_state_reset();
+  EXPECT_EQ(hipSuccess, iree_hip_error_state_fatal_result());
+  EXPECT_EQ(hipSuccess, iree_hip_error_state_begin());
 }
 
 TEST_F(HipErrorStateTest, ResetInvalidatesOtherThreadsFatalState) {

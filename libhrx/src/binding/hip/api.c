@@ -12041,6 +12041,7 @@ HIPAPI hipError_t hipStreamGetId(hipStream_t stream,
 //
 // See also: hipStreamGetDevice, hipGetDevice, hipSetDevice.
 HIPAPI int hipGetStreamDeviceId(hipStream_t stream) {
+  HIP_API_BEGIN_OR_RETURN(-1);
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hip_resolved_stream_t resolved_stream = {0};

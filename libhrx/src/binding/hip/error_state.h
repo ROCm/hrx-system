@@ -31,6 +31,11 @@ hipError_t iree_hip_error_state_fatal_result(void);
 // generation so other per-thread HIP state can lazily discard stale values.
 hipError_t iree_hip_error_state_snapshot(uint32_t* out_generation);
 
+// Starts an ordinary public HIP call. Returns and records the process-fatal
+// result from one generation-consistent snapshot, or hipSuccess when the call
+// may proceed. Unlike publication, this never latches a new fatal result.
+hipError_t iree_hip_error_state_begin(void);
+
 // Returns the process-fatal result when one is latched, otherwise returns and
 // clears the calling thread's ordinary last error.
 hipError_t iree_hip_error_state_get_and_clear_last_error(void);
@@ -56,13 +61,14 @@ void iree_hip_error_state_reset(void);
 // Rejects an ordinary public HIP API call before it can observe or mutate
 // runtime state when a process-fatal device error is active. Error inspection
 // and runtime teardown entry points intentionally omit this boundary.
-#define HIP_API_BEGIN()                                                   \
-  do {                                                                    \
-    const hipError_t _fatal_result = iree_hip_error_state_fatal_result(); \
-    if (IREE_UNLIKELY(_fatal_result != hipSuccess)) {                     \
-      return iree_hip_error_state_publish(_fatal_result);                 \
-    }                                                                     \
+#define HIP_API_BEGIN_OR_RETURN(return_value)                      \
+  do {                                                             \
+    const hipError_t _fatal_result = iree_hip_error_state_begin(); \
+    if (IREE_UNLIKELY(_fatal_result != hipSuccess)) {              \
+      return (return_value);                                       \
+    }                                                              \
   } while (0)
+#define HIP_API_BEGIN() HIP_API_BEGIN_OR_RETURN(_fatal_result)
 
 #ifdef __cplusplus
 }  // extern "C"

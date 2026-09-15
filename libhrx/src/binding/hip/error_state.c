@@ -61,6 +61,18 @@ hipError_t iree_hip_error_state_snapshot(uint32_t* out_generation) {
   return iree_hip_error_state_result(process_state);
 }
 
+hipError_t iree_hip_error_state_begin(void) {
+  const int64_t process_state = iree_atomic_load(&iree_hip_process_error_state,
+                                                 iree_memory_order_acquire);
+  iree_hip_error_state_sync_thread(process_state);
+  const hipError_t fatal_result = iree_hip_error_state_result(process_state);
+  if (fatal_result != hipSuccess) {
+    iree_hip_thread_error_state.last_command_error = fatal_result;
+    iree_hip_thread_error_state.last_error = fatal_result;
+  }
+  return fatal_result;
+}
+
 hipError_t iree_hip_error_state_publish(hipError_t result) {
   int64_t process_state = iree_atomic_load(&iree_hip_process_error_state,
                                            iree_memory_order_acquire);
