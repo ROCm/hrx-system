@@ -103,7 +103,7 @@ NTSTATUS APIENTRY CreateAllocation(D3DKMT_CREATEALLOCATION* create) {
               native_state->shared_kernel_buffers);
     EXPECT_EQ(create->Flags.CreateShared, native_state->shared_kernel_buffers);
   } else if (allocation.type == 0x332B) {
-    EXPECT_EQ(native_state->protocol, AMDF_WINDOWS_XDNA_PROTOCOL_METADATA);
+    EXPECT_NE(native_state->protocol, AMDF_WINDOWS_XDNA_PROTOCOL_DIRECT);
     EXPECT_EQ(ReadU32(info->pPrivateDriverData, 0x20), 0u);
     EXPECT_EQ(ReadU32(info->pPrivateDriverData, 0x28), 0u);
     EXPECT_TRUE(create->Flags.CreateResource);
@@ -171,7 +171,11 @@ NTSTATUS APIENTRY Submit(const D3DKMT_SUBMITCOMMANDTOHWQUEUE* submit) {
   const uint64_t opcode = ReadU64(bytes, 0);
   const bool direct =
       native_state->protocol == AMDF_WINDOWS_XDNA_PROTOCOL_DIRECT;
-  const size_t header_length = direct ? 120 : 104;
+  const size_t header_length =
+      direct ? 120
+             : (native_state->protocol == AMDF_WINDOWS_XDNA_PROTOCOL_METADATA
+                    ? 104
+                    : 88);
   const size_t response_address_offset = direct ? 0x40 : 0x38;
   native_state->opcodes.push_back(opcode);
   if (opcode == 5 || opcode == 3) {
@@ -538,6 +542,9 @@ INSTANTIATE_TEST_SUITE_P(NativeInterfaces, WindowsXdnaKernelExecutionTest,
                              amdf_windows_xdna_adapter_info_t{
                                  AMDF_WINDOWS_XDNA_PROTOCOL_DIRECT, true},
                              amdf_windows_xdna_adapter_info_t{
-                                 AMDF_WINDOWS_XDNA_PROTOCOL_METADATA, true}));
+                                 AMDF_WINDOWS_XDNA_PROTOCOL_METADATA, true},
+                             amdf_windows_xdna_adapter_info_t{
+                                 AMDF_WINDOWS_XDNA_PROTOCOL_METADATA_COMPACT,
+                                 true}));
 
 }  // namespace

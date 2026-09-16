@@ -85,6 +85,10 @@ NTSTATUS APIENTRY FakeQueryAdapterInfo(const D3DKMT_QUERYADAPTERINFO* query) {
   if (current_state->query_status != kSuccess)
     return current_state->query_status;
   EXPECT_EQ(query->Type, KMTQAITYPE_UMDRIVERPRIVATE);
+  if (current_state->protocol == AMDF_WINDOWS_XDNA_PROTOCOL_METADATA_COMPACT) {
+    EXPECT_EQ(query->PrivateDriverDataSize, 8u);
+    return kSuccess;
+  }
   if (current_state->protocol == AMDF_WINDOWS_XDNA_PROTOCOL_METADATA) {
     EXPECT_EQ(query->PrivateDriverDataSize, 8u);
     const uint32_t basic_info[2] = {0, 3};
@@ -117,17 +121,22 @@ FakeCreateContextVirtual(D3DKMT_CREATECONTEXTVIRTUAL* create) {
     EXPECT_TRUE(buffer.locked);
     EXPECT_EQ(host_address, reinterpret_cast<uintptr_t>(buffer.bytes.data()));
   } else {
-    EXPECT_EQ(create->PrivateDriverDataSize, 312u);
+    const bool compact =
+        current_state->protocol == AMDF_WINDOWS_XDNA_PROTOCOL_METADATA_COMPACT;
+    EXPECT_EQ(create->PrivateDriverDataSize, compact ? 272u : 312u);
     EXPECT_TRUE(current_state->kernel_buffers.empty());
     EXPECT_EQ(std::memcmp(bytes, amdf_xdna_npu5_bootstrap.context.uuid, 16), 0);
     uint64_t container_offset = 0;
-    std::memcpy(&container_offset, bytes + 0x50, sizeof(container_offset));
+    std::memcpy(&container_offset, bytes + (compact ? 0x40 : 0x50),
+                sizeof(container_offset));
     EXPECT_EQ(container_offset, 0x48u);
     uint64_t skipped_bytes = 0;
-    std::memcpy(&skipped_bytes, bytes + container_offset + 0x90,
+    std::memcpy(&skipped_bytes,
+                bytes + container_offset + (compact ? 0x68 : 0x90),
                 sizeof(skipped_bytes));
     EXPECT_EQ(skipped_bytes, 0u);
-    const auto* partition = bytes + container_offset + 0xA0 + skipped_bytes;
+    const auto* partition =
+        bytes + container_offset + (compact ? 0x78 : 0xA0) + skipped_bytes;
     uint32_t operations_per_cycle = 0;
     uint32_t candidate_count = 0;
     std::memcpy(&operations_per_cycle, partition + 0x40, 4);
@@ -148,8 +157,13 @@ FakeCreateContextVirtual(D3DKMT_CREATECONTEXTVIRTUAL* create) {
   EXPECT_GT(create->PrivateDriverDataSize, 0u);
   create->hContext = current_state->next_context++;
   const uint32_t cookie = create->hContext - 0x30;
-  std::memcpy(static_cast<uint8_t*>(create->pPrivateDriverData) +
-                  (direct ? 0x44 : 0x40),
+  const size_t cookie_offset =
+      direct ? 0x44
+             : (current_state->protocol ==
+                        AMDF_WINDOWS_XDNA_PROTOCOL_METADATA_COMPACT
+                    ? 0x30
+                    : 0x40);
+  std::memcpy(static_cast<uint8_t*>(create->pPrivateDriverData) + cookie_offset,
               &cookie, sizeof(cookie));
   current_state->created_contexts.push_back(create->hContext);
   return kSuccess;
@@ -349,8 +363,13 @@ TEST_F(WindowsXdnaContextTest, CreatesContextWithZeroCookie) {
   EXPECT_EQ(state_.destroyed_contexts, (std::vector<D3DKMT_HANDLE>{0x30}));
 }
 
-TEST_F(WindowsXdnaContextTest, AdmitsMetadataPartitionsWithoutKernelBuffers) {
-  state_.protocol = AMDF_WINDOWS_XDNA_PROTOCOL_METADATA;
+class WindowsXdnaMetadataContextTest
+    : public WindowsXdnaContextTest,
+      public ::testing::WithParamInterface<amdf_windows_xdna_protocol_t> {};
+
+TEST_P(WindowsXdnaMetadataContextTest,
+       AdmitsMetadataPartitionsWithoutKernelBuffers) {
+  state_.protocol = GetParam();
   for (uint32_t width : {1u, 4u, 8u}) {
     state_.expected_column_count = width;
     create_info_.logical_column_count = width;
@@ -360,8 +379,7 @@ TEST_F(WindowsXdnaContextTest, AdmitsMetadataPartitionsWithoutKernelBuffers) {
     ASSERT_EQ(amdf_xdna_umd_context_create(&device_, &create_info_, &context,
                                            &result),
               AMDF_STATUS_OK);
-    EXPECT_EQ(context->adapter_info.protocol,
-              AMDF_WINDOWS_XDNA_PROTOCOL_METADATA);
+    EXPECT_EQ(context->adapter_info.protocol, GetParam());
     EXPECT_EQ(context->kernel_buffer.allocation, 0u);
     EXPECT_EQ(context->command_aperture_cookie, context->handle - 0x30);
     EXPECT_EQ(result.physical_column_count, 0u);
@@ -373,8 +391,8 @@ TEST_F(WindowsXdnaContextTest, AdmitsMetadataPartitionsWithoutKernelBuffers) {
   EXPECT_EQ(state_.query_count, 3u);
 }
 
-TEST_F(WindowsXdnaContextTest, MetadataAdmissionFailureDoesNotPublish) {
-  state_.protocol = AMDF_WINDOWS_XDNA_PROTOCOL_METADATA;
+TEST_P(WindowsXdnaMetadataContextTest, MetadataAdmissionFailureDoesNotPublish) {
+  state_.protocol = GetParam();
   state_.failure = Operation::kCreateContext;
   FaultAllocatorState allocator_state = {};
   device_.host_allocator = {
@@ -397,6 +415,11 @@ TEST_F(WindowsXdnaContextTest, MetadataAdmissionFailureDoesNotPublish) {
   EXPECT_EQ(state_.operations,
             (std::vector<Operation>{Operation::kCreateContext}));
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    NativeInterfaces, WindowsXdnaMetadataContextTest,
+    ::testing::Values(AMDF_WINDOWS_XDNA_PROTOCOL_METADATA,
+                      AMDF_WINDOWS_XDNA_PROTOCOL_METADATA_COMPACT));
 
 TEST_F(WindowsXdnaContextTest, RetainsKernelBufferUntilContextDestruction) {
   for (uint8_t unshared : {uint8_t{0}, uint8_t{1}}) {

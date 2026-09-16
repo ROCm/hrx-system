@@ -86,7 +86,7 @@ TEST_F(WindowsXdnaAdapterInfoTest,
 
 TEST_F(WindowsXdnaAdapterInfoTest, BasicReplySelectsCompleteMetadataProtocol) {
   state_.reply_byte_length = 8;
-  for (uint32_t identity : {1u, 3u, 0x12345678u}) {
+  for (uint32_t identity : {1u, 3u, 0x12345678u, UINT32_MAX}) {
     state_.private_info[0] = identity;
     state_.private_info[1] = identity;
     state_.query_count = 0;
@@ -99,18 +99,18 @@ TEST_F(WindowsXdnaAdapterInfoTest, BasicReplySelectsCompleteMetadataProtocol) {
   }
 }
 
-TEST_F(WindowsXdnaAdapterInfoTest, RejectsEmptyBasicReplyWithoutPublishing) {
+TEST_F(WindowsXdnaAdapterInfoTest,
+       EmptyBasicReplySelectsCompleteCompactMetadataProtocol) {
   state_.reply_byte_length = 8;
-  for (uint32_t identity : {0u, UINT32_MAX}) {
-    state_.private_info[1] = identity;
-    state_.no_op = identity == UINT32_MAX;
+  state_.private_info[1] = 0;
+  for (bool untouched : {false, true}) {
+    state_.no_op = untouched;
     state_.query_count = 0;
     amdf_windows_xdna_adapter_info_t info = {AMDF_WINDOWS_XDNA_PROTOCOL_DIRECT,
                                              true};
-    EXPECT_EQ(
-        amdf_status_code(amdf_windows_xdna_adapter_info_query(&kmt_, 1, &info)),
-        AMDF_STATUS_CODE_UNSUPPORTED);
-    EXPECT_EQ(info.protocol, AMDF_WINDOWS_XDNA_PROTOCOL_DIRECT);
+    ASSERT_EQ(amdf_windows_xdna_adapter_info_query(&kmt_, 1, &info),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(info.protocol, AMDF_WINDOWS_XDNA_PROTOCOL_METADATA_COMPACT);
     EXPECT_TRUE(info.shared_kernel_buffers);
     EXPECT_EQ(state_.query_count, 1u);
   }

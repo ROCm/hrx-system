@@ -135,8 +135,10 @@ compatible newer drivers without a release allowlist. Hardware capabilities and
 native interface support determine which operations are available; driver
 package versions do not select implementation paths. The
 [XDNA native requirements](docs/xdna.md#native-requirements) describe the NPU
-interface floor, including Windows discovery of direct or metadata partition
-admission. Drivers that lack required interfaces need an update.
+interface floor, including Windows discovery of direct and metadata partition
+admission. The baseline Windows metadata interface supports drivers that do not
+populate the private adapter query. Drivers that lack required execution
+interfaces need an update.
 
 Install the complete driver package for the hardware, including its firmware.
 libamdf accesses native drivers directly and does not require the XRT, ROCr, or

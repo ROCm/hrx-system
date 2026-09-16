@@ -53,13 +53,15 @@ native array metadata and allocation/context operations used by its hardware
 architecture. DRM release metadata does not determine admission.
 
 Windows queries the native private adapter interface before preparing a context.
-Its required reply size distinguishes two coupled context and submission
-contracts:
+Its reply presence and required size distinguish three coupled context and
+submission contracts:
 
-- The basic 8-byte reply identifies metadata partition admission. A compact
-  record supplies bootstrap identity and partition width without an embedded
-  xclbin. Submission uses 104-byte headers and a shared, host-only response
-  allocation.
+- The baseline provider returns success without populating the 8-byte reply.
+  It uses a 272-byte metadata context and 88-byte submission headers.
+- A populated basic 8-byte reply selects the expanded 312-byte metadata context
+  and 104-byte submission headers. Both metadata protocols supply bootstrap
+  identity and partition width without an embedded xclbin and use a shared,
+  host-only response allocation.
 - A provider requiring the extended 12-byte reply supplies kernel-buffer
   allocation policy for direct partition admission and 120-byte submission
   headers. The context retains its native kernel buffer until destruction;
@@ -67,18 +69,18 @@ contracts:
 
 These native interfaces establish the support floor. Compatible newer drivers
 are accepted without code changes. Driver build numbers, reserved query fields,
-and particular hardware-kind values do not select wire layouts. An empty basic
-reply or an invalid extended allocation policy is unsupported before context
-preparation. Native query and context failures propagate without guessing
+and particular populated hardware-kind values do not select wire layouts.
+An invalid extended allocation policy is unsupported before context preparation.
+Native query and context failures propagate without guessing
 another layout. An escape query on the created device supplies native tile
 layout. Native context ID zero is valid.
 
-Windows initialization loads a target-selected native bootstrap independently
-of application code. The NPU4 bootstrap only asserts four core resets; it does
-not install application DMA routes or a schedule. The native bootstrap UUID
-identifies that setup, not the caller's executable. This mandatory provider
-setup is distinct from any application PDI a HAL may construct. No public PDI,
-program, lane, or argument-patching object is required.
+Windows initialization generates a native admission PDI containing one CDO NOP,
+independently of application code. It has no register, DMA, lock, route, or
+tile-memory effects. The target bootstrap UUID identifies native admission,
+not the caller's executable. This mandatory provider setup is distinct from
+any application PDI a HAL may construct. No public PDI, program, lane, or
+argument-patching object is required.
 
 ## Submitting a prepared range
 

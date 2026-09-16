@@ -70,10 +70,17 @@ TEST_F(WindowsXdnaAdapterInfoSystemTest,
                 AMDF_STATUS_OK);
       RecordProperty("shared_kernel_buffers",
                      adapter_info.shared_kernel_buffers ? 1 : 0);
-      RecordProperty("native_protocol",
-                     adapter_info.protocol == AMDF_WINDOWS_XDNA_PROTOCOL_DIRECT
-                         ? "direct"
-                         : "metadata");
+      switch (adapter_info.protocol) {
+        case AMDF_WINDOWS_XDNA_PROTOCOL_DIRECT:
+          RecordProperty("native_protocol", "direct");
+          break;
+        case AMDF_WINDOWS_XDNA_PROTOCOL_METADATA:
+          RecordProperty("native_protocol", "metadata");
+          break;
+        case AMDF_WINDOWS_XDNA_PROTOCOL_METADATA_COMPACT:
+          RecordProperty("native_protocol", "compact_metadata");
+          break;
+      }
     }
     ASSERT_EQ(amdf_platform_endpoint_close(endpoint_), AMDF_STATUS_OK);
     endpoint_ = nullptr;

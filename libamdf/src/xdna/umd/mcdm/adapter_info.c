@@ -12,21 +12,21 @@ amdf_status_t amdf_windows_xdna_adapter_info_query(
   struct {
     // Reserved native word, not a protocol version.
     uint32_t reserved;
-    // Zero is unknown; a populated identity establishes the basic reply.
+    // Zero remains when the baseline provider supplies no private information.
     uint32_t hardware_kind;
-  } basic_info = {0, UINT32_MAX};
+  } basic_info = {0};
   amdf_status_t status =
       amdf_kmt_query_adapter_info(kmt, adapter, KMTQAITYPE_UMDRIVERPRIVATE,
                                   &basic_info, sizeof(basic_info));
   if (amdf_status_is_ok(status)) {
-    // An older no-op query may return zeroed or untouched storage. It does not
-    // establish an interface. No particular populated kind selects a layout.
-    if (basic_info.hardware_kind == 0 ||
-        basic_info.hardware_kind == UINT32_MAX) {
-      return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
-    }
+    // The baseline metadata provider implements this query as a successful
+    // no-op. Zero initialization also handles native marshalling that clears
+    // unwritten output. A populated reply selects the expanded metadata
+    // contract; no particular hardware identity selects its layout.
     *out_info = (amdf_windows_xdna_adapter_info_t){
-        .protocol = AMDF_WINDOWS_XDNA_PROTOCOL_METADATA,
+        .protocol = basic_info.hardware_kind == 0
+                        ? AMDF_WINDOWS_XDNA_PROTOCOL_METADATA_COMPACT
+                        : AMDF_WINDOWS_XDNA_PROTOCOL_METADATA,
         .shared_kernel_buffers = true,
     };
     return AMDF_STATUS_OK;

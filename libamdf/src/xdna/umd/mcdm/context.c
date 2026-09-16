@@ -49,6 +49,51 @@ _Static_assert(offsetof(amdf_windows_xdna_direct_context_t,
                         kernel_buffer_allocation) == 0x68,
                "direct context buffer must match the native wire offset");
 
+// Baseline metadata admission. The native decoder locates the partition as
+// record + container_byte_offset + 0x78 + skipped_payload_byte_length.
+typedef struct amdf_windows_xdna_compact_metadata_context_t {
+  // Identity of the target bootstrap, independent of application code.
+  uint8_t uuid[16];
+  // Zero selects the native default quality-of-service policy.
+  uint8_t quality_of_service[0x20];
+  // Context ID returned by native creation, including zero.
+  uint32_t command_aperture_cookie;
+  // Native alignment preceding the firmware aperture address.
+  uint32_t reserved_0034;
+  // Size of the native instruction aperture in bytes.
+  uint64_t command_aperture_byte_length;
+  // Byte offset locating the native metadata container within this record.
+  uint64_t container_byte_offset;
+  // Number of bytes following native record offset 0x70.
+  uint64_t bytes_after_0070;
+  // Process creating the native context.
+  uint32_t process_id;
+  // Zero selects ordinary native context creation.
+  uint32_t reserved_0054;
+  // Unused container state; no image or kernel-description payload is supplied.
+  uint8_t reserved_0058[0x58];
+  // Bytes skipped before partition metadata, zero in this representation.
+  uint64_t skipped_payload_byte_length;
+  // Unused native container size field.
+  uint64_t reserved_00b8;
+  // Native partition name, empty for program-independent admission.
+  uint8_t partition_name[0x40];
+  // Nominal accounting from the target bootstrap.
+  uint32_t operations_per_cycle;
+  // A nonempty candidate list is required; the driver chooses placement.
+  uint32_t start_column_count;
+  // Requested logical partition width in columns.
+  uint32_t column_count;
+  // Admission input only, not a binding placement guarantee.
+  uint32_t first_start_column;
+} amdf_windows_xdna_compact_metadata_context_t;
+
+_Static_assert(sizeof(amdf_windows_xdna_compact_metadata_context_t) == 0x110,
+               "compact metadata context must match the native wire record");
+_Static_assert(offsetof(amdf_windows_xdna_compact_metadata_context_t,
+                        column_count) == 0x108,
+               "partition width must match the compact metadata locator");
+
 // Metadata partition admission. The native decoder locates the partition as
 // record + container_byte_offset + 0xA0 + skipped_payload_byte_length. There
 // is no embedded image or kernel metadata between the container and partition.
@@ -193,6 +238,9 @@ amdf_status_t amdf_xdna_umd_context_create(
   union {
     // Direct admission with a retained native kernel buffer.
     amdf_windows_xdna_direct_context_t direct;
+    // Baseline partition-metadata admission without private adapter
+    // information.
+    amdf_windows_xdna_compact_metadata_context_t compact_metadata;
     // Partition-metadata admission without an image container.
     amdf_windows_xdna_metadata_context_t metadata;
   } context_data = {0};
@@ -209,6 +257,24 @@ amdf_status_t amdf_xdna_umd_context_create(
             (uintptr_t)context->kernel_buffer.host_pointer,
     };
     context_data_size = sizeof(context_data.direct);
+  } else if (adapter_info.protocol ==
+             AMDF_WINDOWS_XDNA_PROTOCOL_METADATA_COMPACT) {
+    context_data.compact_metadata =
+        (amdf_windows_xdna_compact_metadata_context_t){
+            .command_aperture_byte_length =
+                AMDF_WINDOWS_XDNA_PRIVATE_APERTURE_SIZE,
+            .container_byte_offset = 0x48,
+            .bytes_after_0070 = sizeof(context_data.compact_metadata) - 0x70,
+            .process_id = GetCurrentProcessId(),
+            .operations_per_cycle =
+                profile->bootstrap->context.operations_per_cycle,
+            .start_column_count = 1,
+            .column_count = create_info->logical_column_count,
+            .first_start_column = profile->info->array.column_origin,
+        };
+    memcpy(context_data.compact_metadata.uuid, profile->bootstrap->context.uuid,
+           sizeof(context_data.compact_metadata.uuid));
+    context_data_size = sizeof(context_data.compact_metadata);
   } else {
     context_data.metadata = (amdf_windows_xdna_metadata_context_t){
         .command_aperture_byte_length = AMDF_WINDOWS_XDNA_PRIVATE_APERTURE_SIZE,
@@ -242,9 +308,20 @@ amdf_status_t amdf_xdna_umd_context_create(
     if (context->handle == 0) {
       status = amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
     } else {
-      context->command_aperture_cookie =
-          direct ? context_data.direct.command_aperture_cookie
-                 : context_data.metadata.command_aperture_cookie;
+      switch (adapter_info.protocol) {
+        case AMDF_WINDOWS_XDNA_PROTOCOL_DIRECT:
+          context->command_aperture_cookie =
+              context_data.direct.command_aperture_cookie;
+          break;
+        case AMDF_WINDOWS_XDNA_PROTOCOL_METADATA:
+          context->command_aperture_cookie =
+              context_data.metadata.command_aperture_cookie;
+          break;
+        case AMDF_WINDOWS_XDNA_PROTOCOL_METADATA_COMPACT:
+          context->command_aperture_cookie =
+              context_data.compact_metadata.command_aperture_cookie;
+          break;
+      }
       if (context->command_aperture_cookie > UINT8_MAX) {
         status = amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
       }

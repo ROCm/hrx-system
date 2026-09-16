@@ -15,7 +15,9 @@ enum {
 
 uint32_t amdf_windows_xdna_submission_header_size(
     amdf_windows_xdna_protocol_t protocol) {
-  return protocol == AMDF_WINDOWS_XDNA_PROTOCOL_DIRECT ? 120 : 104;
+  if (protocol == AMDF_WINDOWS_XDNA_PROTOCOL_DIRECT) return 120;
+  if (protocol == AMDF_WINDOWS_XDNA_PROTOCOL_METADATA) return 104;
+  return 88;
 }
 
 static void amdf_windows_xdna_submission_write_u32(uint8_t* bytes,
@@ -97,7 +99,7 @@ void amdf_windows_xdna_submission_build_accounting(
   amdf_windows_xdna_submission_write_u64(out_submission->bytes, 0x00, 9);
   // Metadata admission accounts against the instruction allocation. Direct
   // admission accounts against the context with no allocation handle.
-  if (protocol == AMDF_WINDOWS_XDNA_PROTOCOL_METADATA) {
+  if (protocol != AMDF_WINDOWS_XDNA_PROTOCOL_DIRECT) {
     amdf_windows_xdna_submission_write_u64(out_submission->bytes, 0x08,
                                            instruction_allocation->allocation);
   }

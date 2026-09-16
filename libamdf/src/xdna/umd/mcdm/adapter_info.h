@@ -16,8 +16,12 @@ extern "C" {
 // Coupled context, allocation and submission contracts exposed by the private
 // adapter query. These are native interfaces, not driver release identities.
 typedef enum amdf_windows_xdna_protocol_e {
+  // Explicit partition width and a retained native kernel buffer.
   AMDF_WINDOWS_XDNA_PROTOCOL_DIRECT = 0,
+  // Expanded partition metadata and hardware information from the basic query.
   AMDF_WINDOWS_XDNA_PROTOCOL_METADATA = 1,
+  // Baseline partition metadata with no private adapter-query output.
+  AMDF_WINDOWS_XDNA_PROTOCOL_METADATA_COMPACT = 2,
 } amdf_windows_xdna_protocol_t;
 
 // Native execution interface and its allocation policy.
@@ -28,11 +32,12 @@ typedef struct amdf_windows_xdna_adapter_info_t {
   bool shared_kernel_buffers;
 } amdf_windows_xdna_adapter_info_t;
 
-// Resolves the native interface using only an adapter query. The basic query
-// supplies hardware information; an extended provider requires a
-// larger reply with kernel-buffer policy. The required reply size distinguishes
-// the coupled protocols, independently of driver releases and hardware kind.
-// Failure leaves the output unchanged.
+// Resolves the native interface using only an adapter query on an XDNA
+// endpoint. The baseline provider leaves the basic reply empty; its successor
+// supplies hardware information. An extended provider requires a larger reply
+// with kernel-buffer policy. Reply presence and required size distinguish the
+// coupled protocols, independently of driver releases and specific hardware
+// kinds. Failure leaves the output unchanged.
 amdf_status_t amdf_windows_xdna_adapter_info_query(
     const amdf_kmt_api_t* kmt, D3DKMT_HANDLE adapter,
     amdf_windows_xdna_adapter_info_t* out_info);

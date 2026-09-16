@@ -34,7 +34,9 @@ class WindowsXdnaSubmissionProtocolTest
 
 TEST_P(WindowsXdnaSubmissionProtocolTest, BuildsContextLifecycleRecords) {
   const bool direct = GetParam() == AMDF_WINDOWS_XDNA_PROTOCOL_DIRECT;
-  const uint32_t header_length = direct ? 120 : 104;
+  const uint32_t header_length =
+      direct ? 120
+             : (GetParam() == AMDF_WINDOWS_XDNA_PROTOCOL_METADATA ? 104 : 88);
   const size_t response_offset = direct ? 0x38 : 0x30;
   std::array<uint8_t, 4096> command_bytes = {};
   for (size_t i = 0; i < 512; ++i) {
@@ -85,7 +87,9 @@ TEST_P(WindowsXdnaSubmissionProtocolTest, BuildsContextLifecycleRecords) {
 TEST_P(WindowsXdnaSubmissionProtocolTest,
        BuildsInstructionRangeExecutionRecords) {
   const bool direct = GetParam() == AMDF_WINDOWS_XDNA_PROTOCOL_DIRECT;
-  const uint32_t header_length = direct ? 120 : 104;
+  const uint32_t header_length =
+      direct ? 120
+             : (GetParam() == AMDF_WINDOWS_XDNA_PROTOCOL_METADATA ? 104 : 88);
   const size_t response_offset = direct ? 0x38 : 0x30;
   amdf_xdna_transaction_interpreter_packet_t packet = {};
   amdf_xdna_transaction_interpreter_packet_build(UINT64_C(0x04008000), 300,
@@ -127,7 +131,8 @@ TEST_P(WindowsXdnaSubmissionProtocolTest,
 INSTANTIATE_TEST_SUITE_P(
     NativeInterfaces, WindowsXdnaSubmissionProtocolTest,
     ::testing::Values(AMDF_WINDOWS_XDNA_PROTOCOL_DIRECT,
-                      AMDF_WINDOWS_XDNA_PROTOCOL_METADATA));
+                      AMDF_WINDOWS_XDNA_PROTOCOL_METADATA,
+                      AMDF_WINDOWS_XDNA_PROTOCOL_METADATA_COMPACT));
 
 TEST(WindowsXdnaSubmissionLayoutTest, ReadsInitializationBooleanResponse) {
   // The driver writes only the low 32 bits of the eight-byte response cell.
