@@ -34,8 +34,9 @@ class SlabRegistrationTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    if (limit_changed_)
+    if (limit_changed_) {
       EXPECT_EQ(setrlimit(RLIMIT_MEMLOCK, &original_limit_), 0);
+    }
     ResetSlab();
     iree_async_proactor_release(proactor_);
   }
