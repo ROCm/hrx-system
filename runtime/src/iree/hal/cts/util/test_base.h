@@ -326,7 +326,8 @@ inline std::vector<uint8_t> MakeFilledBytes(iree_device_size_t buffer_size,
 }
 
 // Base class for all HAL CTS tests. Parameterized on BackendInfo.
-// Creates a fresh driver + device in SetUp(), releases in TearDown().
+// Retains cached backend resources in SetUp() and releases per-test references
+// in TearDown(). The global test environment owns their final teardown.
 template <typename BaseType = ::testing::TestWithParam<BackendInfo>>
 class CtsTestBase : public BaseType {
  protected:
@@ -365,10 +366,9 @@ class CtsTestBase : public BaseType {
       }
     }
 
-    // Get or create cached backend resources. GPU backends cannot
-    // create/destroy devices per test (cloud runners have reliability issues
-    // with device churn). CPU backends also benefit from avoiding redundant
-    // creation overhead.
+    // Get or create cached backend resources. Sharing the driver and device
+    // keeps backend runtime initialization and shutdown outside individual
+    // cases and avoids redundant creation overhead.
     auto& cached = GetBackendCache()[GetBackendDeviceCacheKey(backend)];
     if (!cached.device && !cached.unavailable) {
       iree_hal_driver_t* driver = nullptr;

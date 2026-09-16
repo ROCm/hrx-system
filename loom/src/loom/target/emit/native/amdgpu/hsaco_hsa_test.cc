@@ -298,8 +298,10 @@ iree_status_t LoadHsaLibrary(HsaApi* api) {
 
   std::string failures;
   for (const std::string& candidate : candidates) {
+    // ROCr retains process-wide KFD state after hsa_shut_down. Keep its module
+    // loaded across runtime instances, matching the HAL's HSA loader lifetime.
     iree_status_t status = iree_dynamic_library_load_from_file(
-        candidate.c_str(), IREE_DYNAMIC_LIBRARY_FLAG_NONE,
+        candidate.c_str(), IREE_DYNAMIC_LIBRARY_FLAG_NODELETE,
         iree_allocator_system(), &api->library);
     if (iree_status_is_ok(status)) {
       return iree_ok_status();
@@ -1104,7 +1106,7 @@ iree_status_t CheckHsaStatus(const HsaApi& api, hsa_status_t status,
   if (status == HSA_STATUS_SUCCESS) {
     return iree_ok_status();
   }
-  return iree_make_status(IREE_STATUS_UNAVAILABLE, "%s failed: %s", call_name,
+  return iree_make_status(IREE_STATUS_INTERNAL, "%s failed: %s", call_name,
                           HsaStatusString(api, status).c_str());
 }
 
@@ -1271,20 +1273,38 @@ iree_status_t InitializeCurrentAmdgpuTarget(HsaRuntime* runtime,
 using EmitLowKernelForTargetFn =
     iree_status_t (*)(const AmdgpuHsaTarget& target, std::string* out_hsaco);
 
-void LoadLowKernelForCurrentTargetOrSkip(
-    EmitLowKernelForTargetFn emit_kernel,
-    uint32_t expected_kernarg_segment_size) {
-  HsaRuntime runtime;
-  AmdgpuHsaTarget target = {};
-  iree_status_t target_status =
-      InitializeCurrentAmdgpuTarget(&runtime, &target);
-  if (iree_status_is_not_found(target_status) ||
-      iree_status_is_unavailable(target_status) ||
-      iree_status_is_unimplemented(target_status)) {
-    GTEST_SKIP() << StatusToStringAndFree(target_status);
+class AmdgpuHsacoHsaTest : public ::testing::Test {
+ protected:
+  static void SetUpTestSuite() {
+    runtime_ = std::make_unique<HsaRuntime>();
+    iree_status_t status =
+        InitializeCurrentAmdgpuTarget(runtime_.get(), &target_);
+    if (iree_status_is_not_found(status) ||
+        iree_status_is_unavailable(status) ||
+        iree_status_is_unimplemented(status)) {
+      GTEST_SKIP() << StatusToStringAndFree(status);
+    }
+    IREE_ASSERT_OK(status);
   }
-  IREE_ASSERT_OK(target_status);
 
+  static void TearDownTestSuite() {
+    target_ = {};
+    runtime_.reset();
+  }
+
+  // One runtime instance shared by all cases, outliving their executables.
+  static std::unique_ptr<HsaRuntime> runtime_;
+  // Physical target discovered during suite setup and borrowed by each case.
+  static AmdgpuHsaTarget target_;
+};
+
+std::unique_ptr<HsaRuntime> AmdgpuHsacoHsaTest::runtime_;
+AmdgpuHsaTarget AmdgpuHsacoHsaTest::target_;
+
+void LoadLowKernelForTargetOrSkip(const HsaApi& api,
+                                  const AmdgpuHsaTarget& target,
+                                  EmitLowKernelForTargetFn emit_kernel,
+                                  uint32_t expected_kernarg_segment_size) {
   std::string hsaco;
   iree_status_t emit_status = emit_kernel(target, &hsaco);
   if (iree_status_is_unimplemented(emit_status)) {
@@ -1294,7 +1314,6 @@ void LoadLowKernelForCurrentTargetOrSkip(
   }
   IREE_ASSERT_OK(emit_status);
 
-  const HsaApi& api = runtime.api();
   HsaExecutable executable(&api);
   LoadedKernelInfo kernel = {};
   IREE_ASSERT_OK(LoadKernelExecutable(api, target, hsaco, "loom_kernel.kd",
@@ -1305,18 +1324,8 @@ void LoadLowKernelForCurrentTargetOrSkip(
   EXPECT_EQ(kernel.private_segment_size, 0u);
 }
 
-void LoadRuntimeGlobalsForCurrentTargetOrSkip() {
-  HsaRuntime runtime;
-  AmdgpuHsaTarget target = {};
-  iree_status_t target_status =
-      InitializeCurrentAmdgpuTarget(&runtime, &target);
-  if (iree_status_is_not_found(target_status) ||
-      iree_status_is_unavailable(target_status) ||
-      iree_status_is_unimplemented(target_status)) {
-    GTEST_SKIP() << StatusToStringAndFree(target_status);
-  }
-  IREE_ASSERT_OK(target_status);
-
+void LoadRuntimeGlobalsForTargetOrSkip(const HsaApi& api,
+                                       const AmdgpuHsaTarget& target) {
   std::string hsaco;
   iree_status_t emit_status = EmitRuntimeGlobalKernelForAmdgpu(target, &hsaco);
   if (iree_status_is_unimplemented(emit_status)) {
@@ -1326,7 +1335,6 @@ void LoadRuntimeGlobalsForCurrentTargetOrSkip() {
   }
   IREE_ASSERT_OK(emit_status);
 
-  const HsaApi& api = runtime.api();
   HsaExecutable executable(&api);
   IREE_ASSERT_OK(LoadExecutable(api, target, hsaco, &executable));
 
@@ -1345,16 +1353,18 @@ void LoadRuntimeGlobalsForCurrentTargetOrSkip() {
   EXPECT_EQ(feedback_config.byte_length, kFeedbackConfigByteLength);
 }
 
-TEST(AmdgpuHsacoHsaTest, LoadsWorkitemIndexedStoreKernel) {
-  LoadLowKernelForCurrentTargetOrSkip(EmitWorkitemStoreKernelForAmdgpu, 8);
+TEST_F(AmdgpuHsacoHsaTest, LoadsWorkitemIndexedStoreKernel) {
+  LoadLowKernelForTargetOrSkip(runtime_->api(), target_,
+                               EmitWorkitemStoreKernelForAmdgpu, 8);
 }
 
-TEST(AmdgpuHsacoHsaTest, LoadsB128CopyKernel) {
-  LoadLowKernelForCurrentTargetOrSkip(EmitB128CopyKernelForAmdgpu, 16);
+TEST_F(AmdgpuHsacoHsaTest, LoadsB128CopyKernel) {
+  LoadLowKernelForTargetOrSkip(runtime_->api(), target_,
+                               EmitB128CopyKernelForAmdgpu, 16);
 }
 
-TEST(AmdgpuHsacoHsaTest, LoadsWritableRuntimeDataSymbols) {
-  LoadRuntimeGlobalsForCurrentTargetOrSkip();
+TEST_F(AmdgpuHsacoHsaTest, LoadsWritableRuntimeDataSymbols) {
+  LoadRuntimeGlobalsForTargetOrSkip(runtime_->api(), target_);
 }
 
 }  // namespace
