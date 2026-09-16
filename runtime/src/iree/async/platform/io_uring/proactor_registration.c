@@ -615,22 +615,41 @@ static iree_status_t iree_async_io_uring_slab_region_register_fixed_buffers(
           buffer_count);
     }
     if (iree_status_is_ok(status)) {
-      iree_io_uring_rsrc_update2_t update = {
-          .offset = (uint32_t)base_slot,
-          .resv = 0,
-          .data = (uint64_t)(uintptr_t)iovecs,
-          .tags = 0,
-          .nr = (uint32_t)buffer_count,
-          .resv2 = 0,
-      };
-      int register_result = iree_io_uring_ring_register(
-          &proactor->ring, IREE_IORING_REGISTER_BUFFERS_UPDATE, &update,
-          sizeof(update));
+      // A positive short result owns a registered prefix but hides the error
+      // at the next buffer. Continue only after progress so the remaining
+      // range either completes or supplies its terminal errno.
+      uint16_t registered_count = 0;
+      int register_result = 0;
+      while (registered_count < buffer_count) {
+        uint32_t remaining_count = (uint32_t)buffer_count - registered_count;
+        iree_io_uring_rsrc_update2_t update = {
+            .offset = (uint32_t)base_slot + registered_count,
+            .resv = 0,
+            .data = (uint64_t)(uintptr_t)&iovecs[registered_count],
+            .tags = 0,
+            .nr = remaining_count,
+            .resv2 = 0,
+        };
+        register_result = iree_io_uring_ring_register(
+            &proactor->ring, IREE_IORING_REGISTER_BUFFERS_UPDATE, &update,
+            sizeof(update));
+        if (register_result <= 0) break;
+        if ((uint32_t)register_result > remaining_count) {
+          iree_status_abort(iree_make_status(
+              IREE_STATUS_INTERNAL,
+              "IORING_REGISTER_BUFFERS_UPDATE registered %d of %u requested "
+              "slots",
+              register_result, remaining_count));
+        }
+        registered_count = (uint16_t)(registered_count + register_result);
+      }
       if (register_result < 0) {
         int error_number = -register_result;
-        iree_io_uring_sparse_table_release(proactor->buffer_table,
-                                           (uint16_t)base_slot,
-                                           (uint16_t)buffer_count);
+        // No region is published on failure. Release both the registered
+        // prefix and untouched suffix before propagating the terminal result.
+        IREE_CHECK_OK(iree_async_io_uring_rollback_buffer_slots(
+            proactor, (uint16_t)base_slot, (uint16_t)buffer_count,
+            registered_count));
         if (error_number == ENOMEM) {
           // Kernel couldn't pin pages — RLIMIT_MEMLOCK is likely too low.
           // Fall back to copy-based I/O instead of failing hard. The region
@@ -646,22 +665,17 @@ static iree_status_t iree_async_io_uring_slab_region_register_fixed_buffers(
               iree_status_code_from_errno(error_number),
               "IORING_REGISTER_BUFFERS_UPDATE failed (%d)", error_number);
         }
-      } else if ((iree_host_size_t)register_result != buffer_count) {
-        status = iree_make_status(
-            IREE_STATUS_INTERNAL,
-            "IORING_REGISTER_BUFFERS_UPDATE registered %d of %" PRIhsz
-            " requested slots",
-            register_result, buffer_count);
-        if ((iree_host_size_t)register_result <= buffer_count) {
-          iree_status_t rollback_status =
-              iree_async_io_uring_rollback_buffer_slots(
-                  proactor, (uint16_t)base_slot, (uint16_t)buffer_count,
-                  (uint16_t)register_result);
-          if (!iree_status_is_ok(rollback_status)) {
-            iree_status_abort(iree_status_join(status, rollback_status));
-          }
-        } else {
-          iree_status_abort(status);
+      } else if (registered_count != buffer_count) {
+        status = iree_make_status(IREE_STATUS_INTERNAL,
+                                  "IORING_REGISTER_BUFFERS_UPDATE made no "
+                                  "progress after %u of %" PRIhsz " slots",
+                                  (unsigned)registered_count, buffer_count);
+        iree_status_t rollback_status =
+            iree_async_io_uring_rollback_buffer_slots(
+                proactor, (uint16_t)base_slot, (uint16_t)buffer_count,
+                registered_count);
+        if (!iree_status_is_ok(rollback_status)) {
+          iree_status_abort(iree_status_join(status, rollback_status));
         }
       } else {
         slab_region->fixed_buffer_base = (uint16_t)base_slot;

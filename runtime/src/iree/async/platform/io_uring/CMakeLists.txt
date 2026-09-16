@@ -219,6 +219,22 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_test(
   NAME
+    proactor_registration_test
+  SRCS
+    "proactor_registration_test.cc"
+  DEPS
+    ::io_uring
+    iree::async
+    iree::testing::gtest
+    iree::testing::gtest_main
+  RESOURCE_GROUP
+    io_uring
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
     proactor_lifetime_test
   SRCS
     "proactor_lifetime_test.cc"
