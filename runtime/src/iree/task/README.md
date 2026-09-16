@@ -444,6 +444,15 @@ single consumer — one worker pops per item). Push is `slist_push` (CAS on
 head). Pop is `slist_pop` (CAS on head). Typical size: 0-2 items. The
 list is empty 99.9% of the time; the failed pop costs one atomic load.
 
+Immediate processes carry ownership and pending wakes in one atomic scheduling
+word. Scheduling exchanges the state to NOTIFIED; observing IDLE assigns the
+caller responsibility for enqueueing, while any other state leaves ownership
+with the queued or active worker. The worker consumes NOTIFIED before draining
+and goes idle only with a DRAINING-to-IDLE compare-and-exchange. A racing wake
+either prevents that transition or owns the next enqueue. Publishing IDLE is
+the worker's final process access, allowing the next owner to complete and free
+the process without overlapping the old owner's sleep handoff.
+
 ### Suspension and wake ordering
 
 A process's suspend count is the synchronization mechanism for all

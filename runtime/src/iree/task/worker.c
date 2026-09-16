@@ -176,9 +176,8 @@ static void iree_task_worker_mark_idle(iree_task_worker_t* worker) {
 
 // Pops one process from the executor's immediate list and drains it.
 // Drains in a loop until the process completes or returns both did_work=false
-// and keep_active=false (sleeping), then transitions the process to IDLE with a
-// final needs_drain race-check to ensure no work signaled between the last
-// drain and the DRAINING->IDLE transition is lost.
+// and keep_active=false (sleeping). A pending wake prevents the final
+// DRAINING->IDLE CAS, so publishing IDLE ends all access to process storage.
 //
 // Returns true if a process was found (whether completed or put to sleep).
 // Returns false if the immediate list was empty (no processes available).
@@ -190,10 +189,11 @@ static bool iree_task_worker_drain_process(iree_task_worker_t* worker) {
 
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Transition QUEUED → DRAINING. We own this process exclusively now.
-  iree_atomic_store(&process->schedule_state,
-                    (int32_t)IREE_TASK_PROCESS_SCHEDULE_DRAINING,
-                    iree_memory_order_release);
+  // Consume the pending wake. We own this process exclusively until a
+  // successful DRAINING->IDLE CAS or its terminal callback.
+  iree_atomic_exchange(&process->schedule_state,
+                       (int32_t)IREE_TASK_PROCESS_SCHEDULE_DRAINING,
+                       iree_memory_order_acq_rel);
 
   const iree_task_worker_context_t worker_context = {
       .worker_index = (uint32_t)worker->worker_index,
@@ -243,43 +243,24 @@ static bool iree_task_worker_drain_process(iree_task_worker_t* worker) {
     // window; loop immediately.
     if (result.did_work || result.keep_active) continue;
 
-    // No work available (sleeping). Check if an external event signaled
-    // between our last drain call and now.
-    if (iree_atomic_exchange(&process->needs_drain, 0,
-                             iree_memory_order_acq_rel)) {
-      continue;  // New work signaled — drain again.
+    // Only go idle if no wake arrived while draining. Publishing IDLE lets
+    // another worker acquire, complete, and free the process, so this must be
+    // our final process access on success.
+    int32_t expected = IREE_TASK_PROCESS_SCHEDULE_DRAINING;
+    if (iree_atomic_compare_exchange_strong(
+            &process->schedule_state, &expected,
+            (int32_t)IREE_TASK_PROCESS_SCHEDULE_IDLE, iree_memory_order_acq_rel,
+            iree_memory_order_acquire)) {
+      IREE_TRACE_ZONE_END(z0);
+      return true;
     }
 
-    // Transition DRAINING → IDLE.
-    //
-    // Matches schedule_process's seq-cst store/CAS pair in the Dekker-style
-    // sleep/wake handoff: the IDLE store and the final needs_drain load both
-    // participate in the same seq-cst order as the scheduler's operations.
-    // Without that, the worker can miss needs_drain=1 while the scheduler's
-    // CAS still sees DRAINING and skips enqueueing.
-    iree_atomic_store(&process->schedule_state,
-                      (int32_t)IREE_TASK_PROCESS_SCHEDULE_IDLE,
-                      iree_memory_order_seq_cst);
-
-    // Final race check: an external event may have set needs_drain after our
-    // exchange (saw 0) but before we stored IDLE. That event's
-    // schedule_process saw DRAINING and returned without pushing, trusting us
-    // to re-check. If needs_drain is set, reclaim the process.
-    if (iree_atomic_load(&process->needs_drain, iree_memory_order_seq_cst)) {
-      int32_t expected = IREE_TASK_PROCESS_SCHEDULE_IDLE;
-      if (iree_atomic_compare_exchange_strong(
-              &process->schedule_state, &expected,
-              (int32_t)IREE_TASK_PROCESS_SCHEDULE_DRAINING,
-              iree_memory_order_acq_rel, iree_memory_order_acquire)) {
-        continue;  // Reclaimed — drain again.
-      }
-      // CAS failed: another thread already transitioned IDLE→QUEUED and
-      // pushed to the list. The process will be picked up by a worker.
-    }
-
-    // Process is truly sleeping. We're done with it.
-    IREE_TRACE_ZONE_END(z0);
-    return true;
+    // A scheduler published NOTIFIED while we still owned the process.
+    // Consume all pending wakes before the next drain; a later wake will
+    // prevent the next idle transition in the same way.
+    iree_atomic_exchange(&process->schedule_state,
+                         (int32_t)IREE_TASK_PROCESS_SCHEDULE_DRAINING,
+                         iree_memory_order_acq_rel);
   }
 }
 
@@ -429,8 +410,8 @@ static void iree_task_worker_release_compute_process(
   // CAS(IDLE→DRAINING) and re-place the process, causing double
   // completion and double release.
   if (!process_is_terminal) {
-    // Matches schedule_process's seq-cst store/CAS pair in the same
-    // Dekker-style handoff used by the wake_budget == 1 path.
+    // Matches schedule_process's seq-cst store/CAS pair. The placement claim
+    // keeps process storage live through the post-IDLE checks below.
     iree_atomic_store(&process->schedule_state,
                       (int32_t)IREE_TASK_PROCESS_SCHEDULE_IDLE,
                       iree_memory_order_seq_cst);

@@ -137,12 +137,12 @@ void iree_task_executor_wake_workers(iree_task_executor_t* executor,
 
 // Schedules a process for draining by a worker. If the process is idle, it is
 // pushed to the appropriate run list and a worker is woken. If the process is
-// already queued or being drained, this is a no-op — the draining worker will
-// re-check for new work before going idle.
+// already queued or being drained, this publishes a pending wake so the owning
+// worker re-checks for new work before going idle.
 //
 // Callers must make work available to the process (e.g., push to its ready
-// list) BEFORE calling this. The needs_drain flag is set to ensure the draining
-// worker sees the new work even if it's mid-drain.
+// list) BEFORE calling this. Wake publication and the worker's sleep handoff
+// ensure the work remains visible even if the worker is mid-drain.
 //
 // Thread-safe: may be called from any thread (proactor, semaphore callback,
 // completing worker, user thread).

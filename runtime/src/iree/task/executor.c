@@ -345,12 +345,30 @@ void iree_task_executor_schedule_process(iree_task_executor_t* executor,
   IREE_TRACE_ZONE_BEGIN(z0);
 
   int32_t budget = iree_task_process_wake_budget(process);
+  const bool use_compute_slots =
+      budget > 1 || iree_task_process_uses_compute_slots(process);
+  if (!use_compute_slots) {
+    // A single atomic word carries both ownership and pending wake state. If
+    // IDLE, we own enqueueing the process. Otherwise the queued/active worker
+    // consumes NOTIFIED before draining and can only go idle via a CAS from
+    // DRAINING. A racing wake either prevents that CAS or owns the next
+    // enqueue. No process access is allowed after handing it to the immediate
+    // list.
+    int32_t previous = iree_atomic_exchange(
+        &process->schedule_state, (int32_t)IREE_TASK_PROCESS_SCHEDULE_NOTIFIED,
+        iree_memory_order_acq_rel);
+    if (previous == IREE_TASK_PROCESS_SCHEDULE_IDLE) {
+      iree_task_process_slist_push(&executor->immediate_list, process);
+      iree_task_executor_wake_workers(executor, 1);
+    }
+    IREE_TRACE_ZONE_END(z0);
+    return;
+  }
 
-  // Signal that new work is available. The draining worker checks this
-  // before transitioning to idle, closing the sleep/wake race.
+  // Signal that new compute work is available. Slot release retains process
+  // storage while checking this around its transition to idle.
   //
   // This is one half of a Dekker-style sleep/wake protocol with
-  // iree_task_worker_drain_process and
   // iree_task_worker_release_compute_process:
   //   Scheduler: store_seq_cst(needs_drain=1)
   //              then CAS_seq_cst(schedule_state)
@@ -367,38 +385,22 @@ void iree_task_executor_schedule_process(iree_task_executor_t* executor,
   // that process-local state changed and that it should rejoin scheduling.
   iree_task_process_advance_retention_epoch(process);
 
-  const bool use_compute_slots =
-      budget > 1 || iree_task_process_uses_compute_slots(process);
-  if (!use_compute_slots) {
-    // Sequential process: immediate list with Dekker sleeping protocol.
-    // Try to enqueue if idle. If already QUEUED or DRAINING, the worker
-    // will see our needs_drain signal before going idle.
-    int32_t expected = IREE_TASK_PROCESS_SCHEDULE_IDLE;
-    if (iree_atomic_compare_exchange_strong(
-            &process->schedule_state, &expected,
-            (int32_t)IREE_TASK_PROCESS_SCHEDULE_QUEUED,
-            iree_memory_order_seq_cst, iree_memory_order_seq_cst)) {
-      iree_task_process_slist_push(&executor->immediate_list, process);
-      iree_task_executor_wake_workers(executor, 1);
-    }
-  } else {
-    // Compute process: place in a compute slot on first activation.
-    // Workers scan these slots round-robin and drain cooperatively.
-    int32_t expected = IREE_TASK_PROCESS_SCHEDULE_IDLE;
-    if (iree_atomic_compare_exchange_strong(
-            &process->schedule_state, &expected,
-            (int32_t)IREE_TASK_PROCESS_SCHEDULE_DRAINING,
-            iree_memory_order_seq_cst, iree_memory_order_seq_cst)) {
-      // This fresh compute-slot lifetime consumes the activation that moved the
-      // process out of IDLE. Later schedule_process calls while the process is
-      // already DRAINING publish needs_drain again and are consumed by the
-      // final-drainer release/rejoin checks.
-      iree_atomic_store(&process->needs_drain, 0, iree_memory_order_seq_cst);
-      iree_task_executor_place_in_compute_slot(executor, process);
-    }
-    // Wake workers up to the budget (whether first activation or re-wake).
-    iree_task_executor_wake_workers(executor, budget);
+  // Compute process: place in a compute slot on first activation.
+  // Workers scan these slots round-robin and drain cooperatively.
+  int32_t expected = IREE_TASK_PROCESS_SCHEDULE_IDLE;
+  if (iree_atomic_compare_exchange_strong(
+          &process->schedule_state, &expected,
+          (int32_t)IREE_TASK_PROCESS_SCHEDULE_DRAINING,
+          iree_memory_order_seq_cst, iree_memory_order_seq_cst)) {
+    // This fresh compute-slot lifetime consumes the activation that moved the
+    // process out of IDLE. Later schedule_process calls while the process is
+    // already DRAINING publish needs_drain again and are consumed by the
+    // final-drainer release/rejoin checks.
+    iree_atomic_store(&process->needs_drain, 0, iree_memory_order_seq_cst);
+    iree_task_executor_place_in_compute_slot(executor, process);
   }
+  // Wake workers up to the budget (whether first activation or re-wake).
+  iree_task_executor_wake_workers(executor, budget);
 
   IREE_TRACE_ZONE_END(z0);
 }

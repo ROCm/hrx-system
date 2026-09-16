@@ -180,9 +180,10 @@ typedef enum iree_task_process_state_e {
 typedef enum iree_task_process_schedule_state_e {
   // Not on any run list. External events must push to activate.
   IREE_TASK_PROCESS_SCHEDULE_IDLE = 0,
-  // On the immediate list, waiting for a worker to pop and drain.
-  IREE_TASK_PROCESS_SCHEDULE_QUEUED = 1,
-  // A worker has popped this process and is actively draining it.
+  // Immediate process with a pending wake. Either on the immediate list or
+  // owned by a worker that must consume the wake before going idle.
+  IREE_TASK_PROCESS_SCHEDULE_NOTIFIED = 1,
+  // Owned by an immediate worker or a compute-slot placement.
   IREE_TASK_PROCESS_SCHEDULE_DRAINING = 2,
 } iree_task_process_schedule_state_t;
 
@@ -289,10 +290,10 @@ struct iree_task_process_t {
   // list and to coordinate the sleeping/re-wake protocol.
   iree_atomic_int32_t schedule_state;
 
-  // Set by external events to signal that new work is available for this
-  // process. The draining worker checks this before transitioning to idle
-  // to close the race between "drain returned no work" and "new work arrived
-  // while we were draining." See the worker drain loop in worker.c.
+  // Set by external events to signal new compute-process work. Compute-slot
+  // release checks this around its transition to idle while retaining process
+  // storage. Immediate processes carry pending wakes in schedule_state so
+  // publishing IDLE can be their final process access.
   iree_atomic_int32_t needs_drain;
 
   // Set by drainers that need a keep_active decision to be visible to peer

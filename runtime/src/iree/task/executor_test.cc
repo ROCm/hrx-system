@@ -333,10 +333,8 @@ TEST(ExecutorProcessTest, SleepAndRewake) {
   // worker will enter the sleep protocol.
   iree_task_executor_schedule_process(executor, &process);
 
-  // Wait for the drain function to signal it returned did_work=false. At this
-  // point the worker is in the sleep protocol (checking needs_drain,
-  // transitioning to IDLE, etc.). This is a deterministic signal — no
-  // sleep_for needed.
+  // Wait for the drain function to publish that it found no work. The wake
+  // must survive whether it arrives before or after the worker goes idle.
   context.WaitUntil([&] { return context.entered_sleep.load(); });
 
   // The process should NOT be completed — it's sleeping.
@@ -445,13 +443,9 @@ TEST(ExecutorProcessTest, ConcurrentScheduleFromMultipleThreads) {
 }
 
 TEST(ExecutorProcessTest, RepeatedSleepWakeCycles) {
-  // Exercises the sleeping protocol repeatedly to stress the Dekker-style
-  // race between schedule_state and needs_drain.
-  //
-  // Each cycle uses a separate process instance because the worker may still
-  // be inside drain_process (storing schedule_state, reading dependent_count)
-  // when the completion callback fires. Reusing the same instance would race
-  // with re-initialization.
+  // Exercises pending wake publication as the owning worker goes idle.
+  // Each cycle retains its context until executor shutdown because completion
+  // publishes its flag before returning from the notification post.
   iree_task_executor_t* executor = CreateExecutor(2);
 
   static constexpr int kCycles = 50;
@@ -474,6 +468,41 @@ TEST(ExecutorProcessTest, RepeatedSleepWakeCycles) {
     iree_task_executor_schedule_process(executor, &processes[cycle]);
 
     contexts[cycle].WaitUntil([&] { return contexts[cycle].completed.load(); });
+  }
+
+  iree_task_executor_release(executor);
+}
+
+TEST(ExecutorProcessTest, ImmediateSleepWakeReleaseFreesProcess) {
+  iree_task_executor_t* executor = CreateExecutor(4);
+  static constexpr int kCycles = 100;
+  SleepingProcessContext contexts[kCycles];
+
+  for (int cycle = 0; cycle < kCycles; ++cycle) {
+    auto& context = contexts[cycle];
+    auto* process = new iree_task_process_t;
+    iree_task_process_initialize(sleeping_drain, /*suspend_count=*/0,
+                                 /*wake_budget=*/1, process);
+    process->user_data = &context;
+    process->release_fn = +[](iree_task_process_t* process) {
+      auto* context = static_cast<SleepingProcessContext*>(process->user_data);
+      delete process;
+      context->completed.store(true, std::memory_order_release);
+      context->Notify();
+    };
+    iree_task_executor_schedule_process(executor, process);
+
+    // Reschedule as soon as the first worker permits another worker to own
+    // the process. Its release callback must also be able to free the storage
+    // without racing any remaining accesses by the first worker.
+    SpinUntilInternalState([&] {
+      return iree_atomic_load(&process->schedule_state,
+                              iree_memory_order_acquire) ==
+             IREE_TASK_PROCESS_SCHEDULE_IDLE;
+    });
+    context.ready.store(true, std::memory_order_release);
+    iree_task_executor_schedule_process(executor, process);
+    context.WaitUntil([&] { return context.completed.load(); });
   }
 
   iree_task_executor_release(executor);
