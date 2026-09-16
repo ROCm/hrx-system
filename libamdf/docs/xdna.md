@@ -37,7 +37,7 @@ edge completes. The query itself neither flushes caches nor orders execution.
 
 | Boundary | Linux modern DRM | Windows MCDM |
 | --- | --- | --- |
-| Context admission | Native hardware context and negotiated execution support. | Native kernel-buffer allocation policy and direct partition admission. |
+| Context admission | Native hardware context and negotiated execution support. | Native private adapter query selects direct or metadata partition admission. |
 | Instruction storage | Context-qualified DEV backing, with sizes and alignment from its scope. | One 64 MiB native aperture per context; a reserved 32 KiB bootstrap prefix is excluded from the caller's usable range. |
 | Instruction submission | Mandatory DRM execution record and command BO referencing the caller's instruction range. | Mandatory native transport record and transaction-interpreter packet referencing that range. |
 | Ordinary data addresses | Firmware and shim-DMA address interpretations. | Firmware and shim-DMA address interpretations for standard system backing. |
@@ -52,19 +52,26 @@ Linux checks the opened device file and driver identity, then requires the
 native array metadata and allocation/context operations used by its hardware
 architecture. DRM release metadata does not determine admission.
 
-Windows requires the native interface with a kernel-buffer allocation policy
-in the 12-byte private adapter query, direct partition admission by width, and
-120-byte submission headers. The context retains its native kernel buffer
-until destruction. The queried policy selects shared or unshared kernel-buffer
-allocation. An escape query on the created device supplies native tile layout.
-Native context ID zero is valid.
+Windows queries the native private adapter interface before preparing a context.
+Its required reply size distinguishes two coupled context and submission
+contracts:
 
-This interface is a minimum requirement, not a driver release allowlist.
-Compatible newer drivers are accepted without code changes. Driver build
-numbers, reserved query fields, and hardware-kind values do not select wire
-layouts. A provider that leaves the required allocation policy unwritten is
-unsupported before context preparation. Older metadata and embedded-xclbin
-context interfaces are outside the supported baseline.
+- The basic 8-byte reply identifies metadata partition admission. A compact
+  record supplies bootstrap identity and partition width without an embedded
+  xclbin. Submission uses 104-byte headers and a shared, host-only response
+  allocation.
+- A provider requiring the extended 12-byte reply supplies kernel-buffer
+  allocation policy for direct partition admission and 120-byte submission
+  headers. The context retains its native kernel buffer until destruction;
+  the queried policy selects shared or unshared kernel-buffer allocation.
+
+These native interfaces establish the support floor. Compatible newer drivers
+are accepted without code changes. Driver build numbers, reserved query fields,
+and particular hardware-kind values do not select wire layouts. An empty basic
+reply or an invalid extended allocation policy is unsupported before context
+preparation. Native query and context failures propagate without guessing
+another layout. An escape query on the created device supplies native tile
+layout. Native context ID zero is valid.
 
 Windows initialization loads a target-selected native bootstrap independently
 of application code. The NPU4 bootstrap only asserts four core resets; it does

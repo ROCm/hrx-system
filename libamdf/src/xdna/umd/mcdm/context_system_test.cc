@@ -27,8 +27,19 @@ amdf_kmt_api_t native_kmt = {};
     return status;                                                    \
   }
 
-AMDF_OBSERVE_KMT_CALL(query_adapter_info, D3DKMTQueryAdapterInfo,
-                      const D3DKMT_QUERYADAPTERINFO*)
+NTSTATUS APIENTRY
+ObserveD3DKMTQueryAdapterInfo(const D3DKMT_QUERYADAPTERINFO* query) {
+  const NTSTATUS status = native_kmt.query_adapter_info(query);
+  // The direct interface requests extended storage before writing its policy.
+  const bool negotiating_size = query->Type == KMTQAITYPE_UMDRIVERPRIVATE &&
+                                query->PrivateDriverDataSize == 8 &&
+                                status == static_cast<NTSTATUS>(0xC0000023u);
+  EXPECT_TRUE(status >= 0 || negotiating_size)
+      << "D3DKMTQueryAdapterInfo returned NTSTATUS 0x" << std::hex
+      << static_cast<uint32_t>(status);
+  return status;
+}
+
 AMDF_OBSERVE_KMT_CALL(create_allocation, D3DKMTCreateAllocation2,
                       D3DKMT_CREATEALLOCATION*)
 AMDF_OBSERVE_KMT_CALL(map_gpu_virtual_address, D3DKMTMapGpuVirtualAddress,

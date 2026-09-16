@@ -6,6 +6,8 @@
 
 #include "libamdf/src/xdna/umd/context.h"
 
+#include <string.h>
+
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/xdna/umd/mcdm/context.h"
 #include "libamdf/src/xdna/umd/mcdm/kernel_execution.h"
@@ -46,6 +48,52 @@ _Static_assert(sizeof(amdf_windows_xdna_direct_context_t) == 0xA0,
 _Static_assert(offsetof(amdf_windows_xdna_direct_context_t,
                         kernel_buffer_allocation) == 0x68,
                "direct context buffer must match the native wire offset");
+
+// Metadata partition admission. The native decoder locates the partition as
+// record + container_byte_offset + 0xA0 + skipped_payload_byte_length. There
+// is no embedded image or kernel metadata between the container and partition.
+typedef struct amdf_windows_xdna_metadata_context_t {
+  // Identity of the target bootstrap, independent of application code.
+  uint8_t uuid[16];
+  // Zero selects the native default quality-of-service policy.
+  uint8_t quality_of_service[0x30];
+  // Context ID returned by native creation, including zero.
+  uint32_t command_aperture_cookie;
+  // Native alignment preceding the firmware aperture address.
+  uint32_t reserved_0044;
+  // Size of the native instruction aperture in bytes.
+  uint64_t command_aperture_byte_length;
+  // Byte offset locating the native metadata container within this record.
+  uint64_t container_byte_offset;
+  // Number of bytes following native record offset 0x80.
+  uint64_t bytes_after_0080;
+  // Process creating the native context.
+  uint32_t process_id;
+  // Zero selects ordinary native context creation.
+  uint32_t reserved_0064;
+  // Unused container state; no image or kernel-description payload is supplied.
+  uint8_t reserved_0068[0x70];
+  // Bytes skipped before partition metadata, zero in this representation.
+  uint64_t skipped_payload_byte_length;
+  // Unused native container size field.
+  uint64_t reserved_00e0;
+  // Native partition name, empty for program-independent admission.
+  uint8_t partition_name[0x40];
+  // Nominal accounting from the target bootstrap.
+  uint32_t operations_per_cycle;
+  // A nonempty candidate list is required; the driver chooses placement.
+  uint32_t start_column_count;
+  // Requested logical partition width in columns.
+  uint32_t column_count;
+  // Admission input only, not a binding placement guarantee.
+  uint32_t first_start_column;
+} amdf_windows_xdna_metadata_context_t;
+
+_Static_assert(sizeof(amdf_windows_xdna_metadata_context_t) == 0x138,
+               "metadata context must match the native wire record");
+_Static_assert(offsetof(amdf_windows_xdna_metadata_context_t, column_count) ==
+                   0x130,
+               "partition width must match the native metadata locator");
 
 amdf_status_t amdf_xdna_umd_context_destroy(amdf_xdna_umd_context_t* context) {
   if (context->kernel_execution != NULL) {
@@ -118,34 +166,65 @@ amdf_status_t amdf_xdna_umd_context_create(
   context->device = device;
   context->adapter_info = adapter_info;
 
-  const amdf_windows_xdna_private_allocation_descriptor_t descriptor = {
-      .requested_byte_length = 4096,
-      .allocation_byte_length = 4096,
-      .type = 0x332C,
-      .policy = 2,
-      .xcl_flags = 0x02000000,
-      .flags = AMDF_WINDOWS_XDNA_PRIVATE_ALLOCATION_FLAG_DEVICE_ADDRESS |
-               (adapter_info.shared_kernel_buffers
-                    ? AMDF_WINDOWS_XDNA_PRIVATE_ALLOCATION_FLAG_SHARED_RESOURCE
-                    : 0),
-  };
-  amdf_windows_xdna_private_allocation_initialize(device, &descriptor,
-                                                  &context->kernel_buffer);
-  status =
-      amdf_windows_xdna_private_allocation_realize(&context->kernel_buffer);
-  if (amdf_status_is_ok(status)) {
-    status = amdf_windows_xdna_private_allocation_lock(&context->kernel_buffer);
+  const bool direct =
+      adapter_info.protocol == AMDF_WINDOWS_XDNA_PROTOCOL_DIRECT;
+  if (direct) {
+    const amdf_windows_xdna_private_allocation_descriptor_t descriptor = {
+        .requested_byte_length = 4096,
+        .allocation_byte_length = 4096,
+        .type = 0x332C,
+        .policy = 2,
+        .xcl_flags = 0x02000000,
+        .flags =
+            AMDF_WINDOWS_XDNA_PRIVATE_ALLOCATION_FLAG_DEVICE_ADDRESS |
+            (adapter_info.shared_kernel_buffers
+                 ? AMDF_WINDOWS_XDNA_PRIVATE_ALLOCATION_FLAG_SHARED_RESOURCE
+                 : 0),
+    };
+    amdf_windows_xdna_private_allocation_initialize(device, &descriptor,
+                                                    &context->kernel_buffer);
+    status =
+        amdf_windows_xdna_private_allocation_realize(&context->kernel_buffer);
+    if (amdf_status_is_ok(status)) {
+      status =
+          amdf_windows_xdna_private_allocation_lock(&context->kernel_buffer);
+    }
   }
-  amdf_windows_xdna_direct_context_t context_data = {
-      .command_aperture_byte_length = AMDF_WINDOWS_XDNA_PRIVATE_APERTURE_SIZE,
-      .process_id = GetCurrentProcessId(),
-      .column_count = create_info->logical_column_count,
-      .kernel_buffer_allocation = context->kernel_buffer.allocation,
-      .kernel_buffer_byte_length =
-          (uint32_t)context->kernel_buffer.descriptor.allocation_byte_length,
-      .kernel_buffer_host_address =
-          (uintptr_t)context->kernel_buffer.host_pointer,
-  };
+  union {
+    // Direct admission with a retained native kernel buffer.
+    amdf_windows_xdna_direct_context_t direct;
+    // Partition-metadata admission without an image container.
+    amdf_windows_xdna_metadata_context_t metadata;
+  } context_data = {0};
+  uint32_t context_data_size;
+  if (direct) {
+    context_data.direct = (amdf_windows_xdna_direct_context_t){
+        .command_aperture_byte_length = AMDF_WINDOWS_XDNA_PRIVATE_APERTURE_SIZE,
+        .process_id = GetCurrentProcessId(),
+        .column_count = create_info->logical_column_count,
+        .kernel_buffer_allocation = context->kernel_buffer.allocation,
+        .kernel_buffer_byte_length =
+            (uint32_t)context->kernel_buffer.descriptor.allocation_byte_length,
+        .kernel_buffer_host_address =
+            (uintptr_t)context->kernel_buffer.host_pointer,
+    };
+    context_data_size = sizeof(context_data.direct);
+  } else {
+    context_data.metadata = (amdf_windows_xdna_metadata_context_t){
+        .command_aperture_byte_length = AMDF_WINDOWS_XDNA_PRIVATE_APERTURE_SIZE,
+        .container_byte_offset = 0x48,
+        .bytes_after_0080 = sizeof(context_data.metadata) - 0x80,
+        .process_id = GetCurrentProcessId(),
+        .operations_per_cycle =
+            profile->bootstrap->context.operations_per_cycle,
+        .start_column_count = 1,
+        .column_count = create_info->logical_column_count,
+        .first_start_column = profile->info->array.column_origin,
+    };
+    memcpy(context_data.metadata.uuid, profile->bootstrap->context.uuid,
+           sizeof(context_data.metadata.uuid));
+    context_data_size = sizeof(context_data.metadata);
+  }
 
   D3DKMT_CREATECONTEXTVIRTUAL create = {0};
   create.hDevice = device->device;
@@ -153,7 +232,7 @@ amdf_status_t amdf_xdna_umd_context_create(
   create.EngineAffinity = 1;
   create.Flags.HwQueueSupported = 1;
   create.pPrivateDriverData = &context_data;
-  create.PrivateDriverDataSize = sizeof(context_data);
+  create.PrivateDriverDataSize = context_data_size;
   create.ClientHint = (D3DKMT_CLIENTHINT)25;
   if (amdf_status_is_ok(status)) {
     status = amdf_kmt_make_status(device->kmt->create_context_virtual(&create));
@@ -163,7 +242,9 @@ amdf_status_t amdf_xdna_umd_context_create(
     if (context->handle == 0) {
       status = amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
     } else {
-      context->command_aperture_cookie = context_data.command_aperture_cookie;
+      context->command_aperture_cookie =
+          direct ? context_data.direct.command_aperture_cookie
+                 : context_data.metadata.command_aperture_cookie;
       if (context->command_aperture_cookie > UINT8_MAX) {
         status = amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
       }

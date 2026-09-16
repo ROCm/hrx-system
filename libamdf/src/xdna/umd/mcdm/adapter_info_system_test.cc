@@ -38,7 +38,7 @@ class WindowsXdnaAdapterInfoSystemTest : public ::testing::Test {
 };
 
 TEST_F(WindowsXdnaAdapterInfoSystemTest,
-       QueriesAllocationPolicyBeforeDeviceCreation) {
+       QueriesNativeInterfaceBeforeDeviceCreation) {
   uint32_t count = 0;
   ASSERT_EQ(amdf_platform_endpoint_enumerate(instance_, 0, nullptr, &count),
             AMDF_STATUS_OK);
@@ -60,8 +60,8 @@ TEST_F(WindowsXdnaAdapterInfoSystemTest,
         (profile.execution_capabilities &
          AMDF_XDNA_EXECUTION_CAPABILITY_TRANSACTION_INTERPRETER_V1) != 0) {
       found = true;
-      // Policy discovery receives only a query procedure; it cannot depend on
-      // device, context, paging or allocation creation.
+      // Interface discovery receives only a query procedure; it cannot depend
+      // on device, context, paging or allocation creation.
       amdf_kmt_api_t query_api = {};
       query_api.query_adapter_info = instance_->kmt.query_adapter_info;
       amdf_windows_xdna_adapter_info_t adapter_info = {};
@@ -70,6 +70,10 @@ TEST_F(WindowsXdnaAdapterInfoSystemTest,
                 AMDF_STATUS_OK);
       RecordProperty("shared_kernel_buffers",
                      adapter_info.shared_kernel_buffers ? 1 : 0);
+      RecordProperty("native_protocol",
+                     adapter_info.protocol == AMDF_WINDOWS_XDNA_PROTOCOL_DIRECT
+                         ? "direct"
+                         : "metadata");
     }
     ASSERT_EQ(amdf_platform_endpoint_close(endpoint_), AMDF_STATUS_OK);
     endpoint_ = nullptr;

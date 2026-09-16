@@ -143,6 +143,7 @@ amdf_cc_library(
     hdrs = ["submission.h"],
     target_compatible_with = MCDM_COMPATIBILITY,
     deps = [
+        ":adapter_info",
         ":private_allocation",
         "//libamdf/src/xdna:transaction_interpreter",
     ],

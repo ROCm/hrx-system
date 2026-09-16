@@ -191,6 +191,7 @@ iree_cc_library(
   SRCS
     "submission.c"
   DEPS
+    ::adapter_info
     ::private_allocation
     amdf::headers
     libamdf::src::xdna::transaction_interpreter

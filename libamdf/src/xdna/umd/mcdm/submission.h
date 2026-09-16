@@ -11,14 +11,12 @@
 
 #include "amdf/amdf.h"
 #include "libamdf/src/xdna/transaction_interpreter.h"
+#include "libamdf/src/xdna/umd/mcdm/adapter_info.h"
 #include "libamdf/src/xdna/umd/mcdm/private_allocation.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
-
-// Fixed prefix preceding the command copy in native submission records.
-#define AMDF_WINDOWS_XDNA_SUBMISSION_HEADER_SIZE 120u
 
 // Maximum private record accepted by the native submission interface.
 #define AMDF_WINDOWS_XDNA_SUBMISSION_CAPACITY 640u
@@ -31,22 +29,31 @@ typedef struct amdf_windows_xdna_submission_t {
   uint32_t byte_length;
 } amdf_windows_xdna_submission_t;
 
+// Size of the native prefix preceding the command copy for this interface.
+uint32_t amdf_windows_xdna_submission_header_size(
+    amdf_windows_xdna_protocol_t protocol);
+
 // Builds the context-aperture publication record.
 void amdf_windows_xdna_submission_build_aperture(
+    amdf_windows_xdna_protocol_t protocol,
     const amdf_windows_xdna_private_allocation_t* instruction_allocation,
     amdf_windows_xdna_submission_t* out_submission);
 
 // Builds the program-independent context initialization record.
 void amdf_windows_xdna_submission_build_context_initialize(
+    amdf_windows_xdna_protocol_t protocol,
     const amdf_windows_xdna_private_allocation_t* command_allocation,
     amdf_windows_xdna_submission_t* out_submission);
 
 // Reports live instruction bytes for native accounting; it is not retirement.
 void amdf_windows_xdna_submission_build_accounting(
+    amdf_windows_xdna_protocol_t protocol,
+    const amdf_windows_xdna_private_allocation_t* instruction_allocation,
     uint64_t live_byte_length, amdf_windows_xdna_submission_t* out_submission);
 
 // Builds the private execution record adjoining one ERT packet.
 void amdf_windows_xdna_submission_build_execute(
+    amdf_windows_xdna_protocol_t protocol,
     const amdf_windows_xdna_private_allocation_t* execution_allocation,
     const amdf_windows_xdna_private_allocation_t* command_allocation,
     const amdf_xdna_transaction_interpreter_packet_t* packet,

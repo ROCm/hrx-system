@@ -23,10 +23,10 @@ struct amdf_xdna_umd_context_t {
   D3DKMT_HANDLE handle;
   // Driver-returned command aperture selector; zero is a valid value.
   uint32_t command_aperture_cookie;
-  // Allocation policy queried from the native adapter.
+  // Coupled native protocol and allocation policy queried from the adapter.
   amdf_windows_xdna_adapter_info_t adapter_info;
-  // Kernel buffer created before the native context and retained until that
-  // context is destroyed.
+  // Direct-protocol kernel buffer retained through native context destruction;
+  // inert for partition-metadata admission.
   amdf_windows_xdna_private_allocation_t kernel_buffer;
   // Context-local instruction preparation and kernel-queue state.
   amdf_windows_xdna_kernel_execution_t* kernel_execution;

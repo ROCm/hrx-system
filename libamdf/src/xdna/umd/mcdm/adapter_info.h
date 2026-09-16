@@ -13,16 +13,26 @@
 extern "C" {
 #endif
 
-// Native allocation policy required by the Windows XDNA execution interface.
+// Coupled context, allocation and submission contracts exposed by the private
+// adapter query. These are native interfaces, not driver release identities.
+typedef enum amdf_windows_xdna_protocol_e {
+  AMDF_WINDOWS_XDNA_PROTOCOL_DIRECT = 0,
+  AMDF_WINDOWS_XDNA_PROTOCOL_METADATA = 1,
+} amdf_windows_xdna_protocol_t;
+
+// Native execution interface and its allocation policy.
 typedef struct amdf_windows_xdna_adapter_info_t {
-  // Whether driver kernel buffers require CreateResource and CreateShared.
+  // Complete wire protocol established before preparing a native context.
+  amdf_windows_xdna_protocol_t protocol;
+  // Whether native context/response buffers require shared KMT resources.
   bool shared_kernel_buffers;
 } amdf_windows_xdna_adapter_info_t;
 
-// Queries the adapter's required kernel-buffer allocation policy before any
-// device or context is created. Drivers that do not report this policy are
-// unsupported. Failure leaves the output unchanged. Driver release numbers
-// and hardware identity do not select the native protocol.
+// Resolves the native interface using only an adapter query. The basic query
+// supplies hardware information; an extended provider requires a
+// larger reply with kernel-buffer policy. The required reply size distinguishes
+// the coupled protocols, independently of driver releases and hardware kind.
+// Failure leaves the output unchanged.
 amdf_status_t amdf_windows_xdna_adapter_info_query(
     const amdf_kmt_api_t* kmt, D3DKMT_HANDLE adapter,
     amdf_windows_xdna_adapter_info_t* out_info);
