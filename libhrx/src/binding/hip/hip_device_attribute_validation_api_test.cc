@@ -24,7 +24,10 @@ using HipDeviceGetAttributeFn = hipError_t (*)(int* value,
                                                hipDeviceAttribute_t attribute,
                                                int device);
 using HipGetLastErrorFn = hipError_t (*)(void);
+using HipExtGetLastErrorFn = hipError_t (*)(void);
 using HipPeekAtLastErrorFn = hipError_t (*)(void);
+
+static_assert(hipDeviceAttributeHandleTypeFabricSupported == 95);
 
 // Owns the RTLD_LOCAL handle and exact public entry points exercised by this
 // test.
@@ -43,6 +46,8 @@ struct HipRuntimeApi {
   HipDeviceGetAttributeFn device_get_attribute = nullptr;
   // Returns and clears the calling thread's last HIP error.
   HipGetLastErrorFn get_last_error = nullptr;
+  // Returns and clears the calling thread's most recent HIP call result.
+  HipExtGetLastErrorFn ext_get_last_error = nullptr;
   // Returns without clearing the calling thread's last HIP error.
   HipPeekAtLastErrorFn peek_at_last_error = nullptr;
 };
@@ -61,6 +66,8 @@ class HipDeviceAttributeValidationApiTest : public testing::Test {
       api_.device_get_attribute =
           dso_.Resolve<HipDeviceGetAttributeFn>("hipDeviceGetAttribute");
       api_.get_last_error = dso_.Resolve<HipGetLastErrorFn>("hipGetLastError");
+      api_.ext_get_last_error =
+          dso_.Resolve<HipExtGetLastErrorFn>("hipExtGetLastError");
       api_.peek_at_last_error =
           dso_.Resolve<HipPeekAtLastErrorFn>("hipPeekAtLastError");
       ASSERT_TRUE(dso_.error().empty()) << dso_.error();
@@ -73,6 +80,7 @@ class HipDeviceAttributeValidationApiTest : public testing::Test {
     ASSERT_NE(nullptr, api_.get_device_count);
     ASSERT_NE(nullptr, api_.device_get_attribute);
     ASSERT_NE(nullptr, api_.get_last_error);
+    ASSERT_NE(nullptr, api_.ext_get_last_error);
     ASSERT_NE(nullptr, api_.peek_at_last_error);
 
     ASSERT_EQ(hipSuccess, api_.init(/*flags=*/0));
@@ -168,6 +176,36 @@ TEST_F(HipDeviceAttributeValidationApiTest,
 }
 
 TEST_F(HipDeviceAttributeValidationApiTest,
+       FabricHandleCapabilitySupportsDeclaredAndPinnedNumericSelectors) {
+  ASSERT_EQ(
+      hipErrorInvalidValue,
+      GetDeviceAttribute(nullptr, hipDeviceAttributeHandleTypeFabricSupported,
+                         /*device=*/0));
+  ASSERT_EQ(hipErrorInvalidValue, api_.peek_at_last_error());
+
+  struct SelectorCase {
+    const char* name;
+    int value;
+  };
+  const SelectorCase selectors[] = {
+      {"declared name", hipDeviceAttributeHandleTypeFabricSupported},
+      {"pinned numeric value", 95},
+  };
+  for (const SelectorCase& selector : selectors) {
+    SCOPED_TRACE(selector.name);
+    int attribute_value = kOutputSentinel;
+    EXPECT_EQ(hipSuccess, GetDeviceAttribute(&attribute_value, selector.value,
+                                             /*device=*/0));
+    EXPECT_EQ(0, attribute_value);
+    EXPECT_EQ(hipSuccess, api_.ext_get_last_error());
+    ExpectCurrentDevice();
+    EXPECT_EQ(hipErrorInvalidValue, api_.peek_at_last_error());
+  }
+  EXPECT_EQ(hipErrorInvalidValue, api_.get_last_error());
+  EXPECT_EQ(hipSuccess, api_.peek_at_last_error());
+}
+
+TEST_F(HipDeviceAttributeValidationApiTest,
        CompleteDeviceAttributeSetReturnsValues) {
   const int attributes[] = {
       hipDeviceAttributeEccEnabled,
@@ -196,6 +234,7 @@ TEST_F(HipDeviceAttributeValidationApiTest,
       hipDeviceAttributeHostNumaId,
       hipDeviceAttributeDmaBufSupported,
       hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported,
+      hipDeviceAttributeHandleTypeFabricSupported,
       hipDeviceAttributeClockInstructionRate,
       hipDeviceAttributeCooperativeMultiDeviceUnmatchedFunc,
       hipDeviceAttributeCooperativeMultiDeviceUnmatchedGridDim,
@@ -290,7 +329,6 @@ TEST_F(HipDeviceAttributeValidationApiTest,
   const int attributes[] = {
       INT_MIN,
       -1,
-      95,
       9998,
       hipDeviceAttributeCudaCompatibleEnd,
       10023,

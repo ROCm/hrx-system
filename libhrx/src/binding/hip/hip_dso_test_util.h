@@ -26,10 +26,17 @@ class HipDso {
   // Closes the DSO. Returns false when the loader rejects the close request.
   bool Close();
 
-  // Resolves |name| and verifies that the symbol belongs to this DSO.
+  // Resolves exported |name| and verifies that the symbol belongs to this DSO.
   template <typename T>
   T Resolve(const char* name) {
     return reinterpret_cast<T>(ResolveRaw(name));
+  }
+
+  // Resolves an unexported test-control symbol from this exact unstripped DSO.
+  // This does not widen the DSO symbol surface under test.
+  template <typename T>
+  T ResolveLocalForTest(const char* name) {
+    return reinterpret_cast<T>(ResolveLocalForTestRaw(name));
   }
 
   // True while this object owns a loader reference.
@@ -40,6 +47,7 @@ class HipDso {
 
  private:
   void* ResolveRaw(const char* name);
+  void* ResolveLocalForTestRaw(const char* name);
 
   // Handle returned by dlopen for the configured artifact.
   void* handle_ = nullptr;

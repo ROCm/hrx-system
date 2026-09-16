@@ -34,6 +34,10 @@ using HipDeviceGetByPCIBusIdFn = hipError_t (*)(int* device,
                                                 const char* pci_bus_id);
 using HipLaunchCooperativeKernelMultiDeviceFn = hipError_t (*)(
     hipLaunchParams* launch_params, int device_count, unsigned int flags);
+using HipStreamSynchronizeFn = hipError_t (*)(hipStream_t stream);
+using ErrorStatePublishHookFn = void (*)(hipError_t* result, void* user_data);
+using ErrorStateSetPublishHookFn = void (*)(ErrorStatePublishHookFn hook,
+                                            void* user_data);
 using HipGetLastErrorFn = hipError_t (*)(void);
 using HipExtGetLastErrorFn = hipError_t (*)(void);
 using HipPeekAtLastErrorFn = hipError_t (*)(void);
@@ -70,6 +74,8 @@ struct HipRuntimeApi {
   // Launches one cooperative kernel on each listed device.
   HipLaunchCooperativeKernelMultiDeviceFn
       launch_cooperative_kernel_multi_device = nullptr;
+  // Waits for all work on a stream through the public completion path.
+  HipStreamSynchronizeFn stream_synchronize = nullptr;
   // Returns and clears the calling thread's last HIP error.
   HipGetLastErrorFn get_last_error = nullptr;
   // Returns and clears the calling thread's most recent HIP call result.
@@ -110,6 +116,8 @@ class HipDeviceContractsApiTest : public testing::Test {
       api_.launch_cooperative_kernel_multi_device =
           dso_.Resolve<HipLaunchCooperativeKernelMultiDeviceFn>(
               "hipLaunchCooperativeKernelMultiDevice");
+      api_.stream_synchronize =
+          dso_.Resolve<HipStreamSynchronizeFn>("hipStreamSynchronize");
       api_.get_last_error = dso_.Resolve<HipGetLastErrorFn>("hipGetLastError");
       api_.ext_get_last_error =
           dso_.Resolve<HipExtGetLastErrorFn>("hipExtGetLastError");
@@ -132,6 +140,7 @@ class HipDeviceContractsApiTest : public testing::Test {
     ASSERT_NE(nullptr, api_.device_get_pci_bus_id);
     ASSERT_NE(nullptr, api_.device_get_by_pci_bus_id);
     ASSERT_NE(nullptr, api_.launch_cooperative_kernel_multi_device);
+    ASSERT_NE(nullptr, api_.stream_synchronize);
     ASSERT_NE(nullptr, api_.get_last_error);
     ASSERT_NE(nullptr, api_.ext_get_last_error);
     ASSERT_NE(nullptr, api_.peek_at_last_error);
@@ -158,6 +167,79 @@ class HipDeviceContractsApiTest : public testing::Test {
 
 hrx::hip::testing::HipDso HipDeviceContractsApiTest::dso_;
 HipRuntimeApi HipDeviceContractsApiTest::api_;
+
+struct PublicationBarrier {
+  std::atomic<int> call_count{0};
+  std::atomic<bool> reached{false};
+  std::atomic<bool> proceed{false};
+};
+
+static void InjectIllegalAddressAtFirstPublication(hipError_t* result,
+                                                   void* user_data) {
+  auto* barrier = static_cast<PublicationBarrier*>(user_data);
+  if (barrier->call_count.fetch_add(1, std::memory_order_acq_rel) != 0) return;
+  *result = hipErrorIllegalAddress;
+  barrier->reached.store(true, std::memory_order_release);
+  while (!barrier->proceed.load(std::memory_order_acquire)) {
+    std::this_thread::yield();
+  }
+}
+
+TEST_F(HipDeviceContractsApiTest,
+       OldGenerationStreamCompletionCannotPoisonReinitializedRuntime) {
+  const ErrorStateSetPublishHookFn set_publish_hook =
+      dso_.ResolveLocalForTest<ErrorStateSetPublishHookFn>(
+          "iree_hip_error_state_test_set_publish_hook");
+  ASSERT_NE(nullptr, set_publish_hook) << dso_.error();
+
+  PublicationBarrier barrier;
+  set_publish_hook(InjectIllegalAddressAtFirstPublication, &barrier);
+
+  std::atomic<hipError_t> synchronize_result{hipErrorUnknown};
+  std::atomic<hipError_t> thread_query_result{hipErrorUnknown};
+  std::atomic<hipError_t> thread_command_result{hipErrorUnknown};
+  std::atomic<hipError_t> thread_ordinary_result{hipErrorUnknown};
+  std::atomic<int> thread_device_count{0};
+  std::thread publisher([&] {
+    synchronize_result.store(api_.stream_synchronize(/*stream=*/nullptr),
+                             std::memory_order_release);
+    int device_count = 0;
+    thread_query_result.store(api_.get_device_count(&device_count),
+                              std::memory_order_release);
+    thread_device_count.store(device_count, std::memory_order_release);
+    thread_command_result.store(api_.ext_get_last_error(),
+                                std::memory_order_release);
+    thread_ordinary_result.store(api_.get_last_error(),
+                                 std::memory_order_release);
+  });
+
+  while (!barrier.reached.load(std::memory_order_acquire)) {
+    std::this_thread::yield();
+  }
+  const hipError_t deinit_result = api_.hal_deinit();
+  const hipError_t init_result =
+      deinit_result == hipSuccess ? api_.init(/*flags=*/0) : deinit_result;
+  int main_device_count = 0;
+  const hipError_t main_query_result =
+      init_result == hipSuccess ? api_.get_device_count(&main_device_count)
+                                : init_result;
+  barrier.proceed.store(true, std::memory_order_release);
+  publisher.join();
+  set_publish_hook(nullptr, nullptr);
+
+  ASSERT_EQ(hipSuccess, deinit_result);
+  ASSERT_EQ(hipSuccess, init_result);
+  ASSERT_EQ(hipSuccess, main_query_result);
+  EXPECT_GT(main_device_count, 0);
+  EXPECT_EQ(hipErrorIllegalAddress,
+            synchronize_result.load(std::memory_order_acquire));
+  EXPECT_EQ(hipSuccess, thread_query_result.load(std::memory_order_acquire));
+  EXPECT_GT(thread_device_count.load(std::memory_order_acquire), 0);
+  EXPECT_EQ(hipSuccess, thread_command_result.load(std::memory_order_acquire));
+  EXPECT_EQ(hipSuccess, thread_ordinary_result.load(std::memory_order_acquire));
+  EXPECT_EQ(hipSuccess, api_.ext_get_last_error());
+  EXPECT_EQ(hipSuccess, api_.peek_at_last_error());
+}
 
 TEST_F(HipDeviceContractsApiTest, DeviceFlagsRoundTripUnderConcurrentAccess) {
   unsigned int flags = UINT_MAX;

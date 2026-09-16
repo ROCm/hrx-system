@@ -1056,20 +1056,20 @@ static hipError_t iree_hip_get_per_thread_stream_state(
 #define _GET_ARG_COUNT_2(_1, _2, COUNT, ...) COUNT
 #define _GET_ARG_COUNT_3(_1, _2, _3, COUNT, ...) COUNT
 
-#define HIP_RETURN_STATUS_1(status)                         \
-  do {                                                      \
-    iree_status_t _status = (status);                       \
-    if (!iree_status_is_ok(_status)) {                      \
-      hipError_t _err = iree_status_to_hip_result(_status); \
-      return iree_hip_error_state_publish(_err);            \
-    }                                                       \
+#define HIP_RETURN_STATUS_1(status)                                      \
+  do {                                                                   \
+    iree_status_t _status = (status);                                    \
+    if (!iree_status_is_ok(_status)) {                                   \
+      hipError_t _err = iree_status_to_hip_result(_status);              \
+      return iree_hip_error_state_publish(_hip_error_state_token, _err); \
+    }                                                                    \
   } while (0)
 #define HIP_RETURN_STATUS_2(status, error)                               \
   do {                                                                   \
     iree_status_t _status = (status);                                    \
     if (!iree_status_is_ok(_status)) {                                   \
       hipError_t _err = iree_status_to_fixed_hip_result(_status, error); \
-      return iree_hip_error_state_publish(_err);                         \
+      return iree_hip_error_state_publish(_hip_error_state_token, _err); \
     }                                                                    \
   } while (0)
 
@@ -1081,14 +1081,14 @@ static hipError_t iree_hip_get_per_thread_stream_state(
   _GET_ARG_COUNT_2(__VA_ARGS__, HIP_RETURN_STATUS_2, HIP_RETURN_STATUS_1) \
   (__VA_ARGS__)
 
-#define HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR_2(zone, status) \
-  do {                                                          \
-    iree_status_t _status = (status);                           \
-    if (!iree_status_is_ok(_status)) {                          \
-      hipError_t _err = iree_status_to_hip_result(_status);     \
-      IREE_TRACE_ZONE_END(zone);                                \
-      return iree_hip_error_state_publish(_err);                \
-    }                                                           \
+#define HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR_2(zone, status)          \
+  do {                                                                   \
+    iree_status_t _status = (status);                                    \
+    if (!iree_status_is_ok(_status)) {                                   \
+      hipError_t _err = iree_status_to_hip_result(_status);              \
+      IREE_TRACE_ZONE_END(zone);                                         \
+      return iree_hip_error_state_publish(_hip_error_state_token, _err); \
+    }                                                                    \
   } while (0)
 #define HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR_3(zone, status, error)   \
   do {                                                                   \
@@ -1096,7 +1096,7 @@ static hipError_t iree_hip_get_per_thread_stream_state(
     if (!iree_status_is_ok(_status)) {                                   \
       hipError_t _err = iree_status_to_fixed_hip_result(_status, error); \
       IREE_TRACE_ZONE_END(zone);                                         \
-      return iree_hip_error_state_publish(_err);                         \
+      return iree_hip_error_state_publish(_hip_error_state_token, _err); \
     }                                                                    \
   } while (0)
 
@@ -1880,6 +1880,7 @@ HIPAPI hipError_t hipHRXSetDeviceEventSink(hrx_device_event_sink_t sink) {
 // Deinitializes the embedded HRX runtime.
 // This is an HRX extension, not a standard HIP API function.
 HIPAPI hipError_t hipHALDeinit(void) {
+  HIP_API_CAPTURE_ERROR_STATE();
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_call_once(&iree_hip_global_init_mutex_once,
                  iree_hip_initialize_global_init_mutex);
@@ -1993,21 +1994,25 @@ static hipError_t iree_hip_set_current_device(int device,
   hipError_t init_result = iree_hip_ensure_initialized();
   if (init_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
+    return init_result;
   }
   iree_hal_streaming_device_t* device_obj =
       iree_hal_streaming_device_entry(device);
   if (!device_obj) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorInvalidDevice);
+    return hipErrorInvalidDevice;
   }
 
   iree_hal_streaming_context_t* primary_context = NULL;
-  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
-      z0,
+  iree_status_t status =
       iree_hal_streaming_device_get_or_create_primary_context(device_obj,
-                                                              &primary_context),
-      hipErrorOutOfMemory);
+                                                              &primary_context);
+  if (!iree_status_is_ok(status)) {
+    hipError_t result =
+        iree_status_to_fixed_hip_result(status, hipErrorOutOfMemory);
+    IREE_TRACE_ZONE_END(z0);
+    return result;
+  }
 
   iree_hal_streaming_context_set_current(primary_context);
   iree_hip_thread_device_selection.preferred_device = device;
@@ -2789,6 +2794,7 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       break;
     }
     case hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported:
+    case hipDeviceAttributeHandleTypeFabricSupported:
     case hipDeviceAttributeExpertSchedMode:
     case hipDeviceAttributeMaxDynDataPrefetchRegions:
       *value = 0;
@@ -9065,7 +9071,7 @@ static hipError_t iree_hip_array_create(hipArray_t* array,
                                         const hipChannelFormatDesc* desc,
                                         hipExtent extent, unsigned int flags) {
   if (!array || !desc || extent.width == 0) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   *array = NULL;
 
@@ -9075,14 +9081,14 @@ static hipError_t iree_hip_array_create(hipArray_t* array,
   hipError_t element_result = iree_hip_array_desc_to_format(
       desc, &format, &num_channels, &element_size);
   if (element_result != hipSuccess) {
-    HIP_RETURN_ERROR(element_result);
+    return element_result;
   }
   if (flags != hipArrayDefault) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   hipError_t extent_result = iree_hip_array_validate_extent_limits(extent);
   if (extent_result != hipSuccess) {
-    HIP_RETURN_ERROR(extent_result);
+    return extent_result;
   }
 
   const hipExtent public_extent = extent;
@@ -9102,13 +9108,13 @@ static hipError_t iree_hip_array_create(hipArray_t* array,
                                                 &slice_pitch) ||
                     !iree_host_size_checked_mul(slice_pitch, extent.depth,
                                                 &allocation_size))) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
 
   iree_hal_streaming_context_t* context = NULL;
   hipError_t init_result = iree_hip_ensure_context(&context);
   if (init_result != hipSuccess) {
-    HIP_RETURN_ERROR(init_result);
+    return init_result;
   }
 
   iree_hal_streaming_buffer_t* buffer = NULL;
@@ -9123,7 +9129,7 @@ static hipError_t iree_hip_array_create(hipArray_t* array,
   if (!new_array) {
     iree_status_ignore(
         iree_hal_streaming_memory_free_device(context, buffer->device_ptr));
-    HIP_RETURN_ERROR(hipErrorOutOfMemory);
+    return hipErrorOutOfMemory;
   }
 
   new_array->magic = IREE_HIP_ARRAY_MAGIC;
@@ -12049,7 +12055,7 @@ HIPAPI int hipGetStreamDeviceId(hipStream_t stream) {
       iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (init_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
-    iree_hip_error_state_publish(init_result);
+    iree_hip_error_state_publish(_hip_error_state_token, init_result);
     return -1;
   }
 
@@ -22560,7 +22566,7 @@ static hipError_t iree_hip_graph_exec_rebuild(
   iree_status_t status =
       iree_hal_streaming_graph_exec_rebuild_from_template(exec);
   if (!iree_status_is_ok(status)) {
-    HIP_RETURN_STATUS(status, hipErrorInvalidValue);
+    return iree_status_to_fixed_hip_result(status, hipErrorInvalidValue);
   }
   return hipSuccess;
 }
@@ -26820,6 +26826,7 @@ HIPAPI hipError_t hipExtGetLastError(void) {
 //
 // See also: hipGetLastError, hipGetErrorString.
 HIPAPI hipError_t hipPeekAtLastError(void) {
+  HIP_API_CAPTURE_ERROR_STATE();
   HIP_RETURN_ERROR(iree_hip_error_state_peek_last_error());
 }
 

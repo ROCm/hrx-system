@@ -1118,6 +1118,26 @@ iree_cc_binary_benchmark(
 endif()
 
 if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
+    feedback_state_test_util
+  HDRS
+    "feedback_state_test_util.h"
+  SRCS
+    "feedback_state_test_util.cc"
+  DEPS
+    ::amdgpu
+    ::headers
+    iree::base
+    iree::base::internal
+    iree::hal
+    iree::hal::drivers::amdgpu::abi
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_test(
   NAME
     system_event_test

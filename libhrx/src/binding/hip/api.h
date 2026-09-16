@@ -411,6 +411,7 @@ typedef enum hipDeviceAttribute_t {
   hipDeviceAttributeHostNumaId = 92,
   hipDeviceAttributeDmaBufSupported = 93,
   hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported = 94,
+  hipDeviceAttributeHandleTypeFabricSupported = 95,
   hipDeviceAttributeCudaCompatibleEnd = 9999,
 
   // AMD-specific attributes (ROCm 7.x uses decimal 10000 base, not 0x10000)

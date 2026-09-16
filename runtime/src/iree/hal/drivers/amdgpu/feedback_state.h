@@ -117,6 +117,14 @@ void iree_hal_amdgpu_feedback_state_deinitialize(
 bool iree_hal_amdgpu_feedback_state_is_enabled(
     const iree_hal_amdgpu_feedback_state_t* state);
 
+// Handles one materialized feedback packet through the same decoder and policy
+// path used by channel drains. Returns a policy failure after publishing a
+// valid report, or a validation failure for a malformed packet.
+iree_status_t iree_hal_amdgpu_feedback_state_handle_packet(
+    iree_hal_amdgpu_feedback_state_t* state,
+    iree_host_size_t physical_device_ordinal,
+    const iree_hal_amdgpu_feedback_packet_t* packet);
+
 // Drains ready packets from the channel for |physical_device_ordinal|.
 //
 // This reports channel or packet handling errors through the state error

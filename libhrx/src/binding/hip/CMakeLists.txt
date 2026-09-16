@@ -292,10 +292,12 @@ iree_cc_library(
   HDRS
     "api.h"
     "error_state.h"
+    "error_state_test_util.h"
   SRCS
     "error_state.c"
   DEPS
     iree::base
+    iree::base::core_headers
     iree::base::internal
     libhrx_defs
   INCLUDES
@@ -759,11 +761,28 @@ iree_cc_test(
   SRCS
     "status_conversion_test.cc"
   DEPS
+    ::error_state
     ::status_conversion
     iree::testing::gtest
     iree::testing::gtest_main
     libhrx_defs
 )
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    status_conversion_amdgpu_test
+  SRCS
+    "status_conversion_amdgpu_test.cc"
+  DEPS
+    ::error_state
+    ::status_conversion
+    iree::hal::drivers::amdgpu::feedback_state_test_util
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+endif()
 
 iree_cc_test(
   NAME

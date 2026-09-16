@@ -385,7 +385,7 @@ static iree_status_t iree_hal_amdgpu_feedback_state_handle_tsan_packet(
   }
 
   return iree_make_status(
-      IREE_STATUS_ABORTED,
+      IREE_STATUS_DATA_LOSS,
       "AMDGPU TSAN %s violation on physical device %" PRIhsz
       " site_id=0x%016" PRIx64 " prior_site_id=0x%016" PRIx64
       " memory=%s address=0x%016" PRIx64 " current_access=%s prior_access=%s",
@@ -400,7 +400,7 @@ static iree_status_t iree_hal_amdgpu_feedback_state_handle_tsan_packet(
           report->prior_access_kind));
 }
 
-static iree_status_t iree_hal_amdgpu_feedback_state_handle_packet(
+iree_status_t iree_hal_amdgpu_feedback_state_handle_packet(
     iree_hal_amdgpu_feedback_state_t* state,
     iree_host_size_t physical_device_ordinal,
     const iree_hal_amdgpu_feedback_packet_t* packet) {
