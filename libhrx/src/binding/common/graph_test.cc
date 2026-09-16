@@ -73,7 +73,7 @@ class GraphNodeBlockStorage {
 };
 
 TEST(GraphTest, AddedDependenciesConstrainDetectedWorkstreams) {
-  constexpr size_t kNodeCount = 20;
+  constexpr size_t kNodeCount = 64;
   std::array<GraphNodeStorage, kNodeCount> node_storage;
   GraphNodeBlockStorage<kNodeCount> node_block(node_storage);
   for (uint32_t i = 0; i < kNodeCount; ++i) {
@@ -107,6 +107,44 @@ TEST(GraphTest, AddedDependenciesConstrainDetectedWorkstreams) {
     EXPECT_EQ(schedule.sorted_nodes[i].node->node_index, i);
     EXPECT_EQ(schedule.sorted_nodes[i].stream_id, 0u);
   }
+
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&block_pool);
+}
+
+TEST(GraphTest, ReorderedAddedDependencyUsesFinalWorkstreamIndex) {
+  constexpr size_t kNodeCount = 64;
+  std::array<GraphNodeStorage, kNodeCount> node_storage;
+  GraphNodeBlockStorage<kNodeCount> node_block(node_storage);
+  for (uint32_t i = 0; i < kNodeCount; ++i) {
+    iree_hal_streaming_graph_node_t* node = node_storage[i].get();
+    node->node_index = i;
+    node->type = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL;
+  }
+
+  iree_hal_streaming_graph_edge_t edge = {
+      /*.next=*/nullptr,
+      /*.from=*/node_storage[17].get(),
+      /*.to=*/node_storage[0].get(),
+  };
+
+  iree_arena_block_pool_t block_pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool, &arena);
+  iree_hal_streaming_graph_schedule_t schedule = {};
+  IREE_ASSERT_OK(iree_hal_streaming_graph_schedule_nodes(
+      node_block.get(), kNodeCount, /*disabled_nodes=*/nullptr,
+      /*disabled_node_count=*/0, &edge, &arena, &schedule));
+
+  const uint32_t source_index = schedule.node_index_map[17];
+  const uint32_t target_index = schedule.node_index_map[0];
+  ASSERT_LT(source_index, target_index);
+  EXPECT_EQ(schedule.sorted_nodes[source_index].node, node_storage[17].get());
+  EXPECT_EQ(schedule.sorted_nodes[target_index].node, node_storage[0].get());
+  ASSERT_NE(schedule.sorted_nodes[source_index].stream_id, 0u);
+  EXPECT_EQ(schedule.sorted_nodes[source_index].stream_id,
+            schedule.sorted_nodes[target_index].stream_id);
 
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&block_pool);

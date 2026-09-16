@@ -109,7 +109,8 @@
 //
 // Performance characteristics:
 // - Time Complexity: O(N + E) for all phases
-// - Space Complexity: O(N) with 24 bytes per node + O(P) partitions
+// - Space Complexity: O(N + E + P) for sort nodes, the added-edge index, and
+//                     partitions
 // - Cache Behavior: Sequential access patterns, prefetch-friendly
 // - Scalability: Handles 1-100,000 nodes efficiently within the ordering and
 //                mutability constraints of the graph API.
