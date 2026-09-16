@@ -12,6 +12,7 @@
 #include "loom/ops/cfg/ops.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
+#include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
@@ -393,11 +394,40 @@ iree_status_t loom_amdgpu_materialize_branch_arg(
         context, source_terminator, low_value_id, out_low_value_id);
   }
 
-  if (requires_sgpr &&
-      loom_low_register_type_unit_count(required_low_type) == 2 &&
-      loom_amdgpu_type_is_i1(source_type)) {
-    return loom_amdgpu_lookup_or_materialize_native_i1_mask(
-        context, source_terminator, source_value_id, out_low_value_id);
+  if (requires_sgpr && loom_amdgpu_type_is_i1(source_type)) {
+    if (loom_low_register_type_unit_count(required_low_type) == 2) {
+      return loom_amdgpu_lookup_or_materialize_native_i1_mask(
+          context, source_terminator, source_value_id, out_low_value_id);
+    }
+    // A scalar destination has a uniformity proof. Its source can still use a
+    // native mask (for example, a Boolean select), or transient SCC state.
+    // Capture the truth value without changing the source's canonical mapping.
+    loom_value_id_t low_condition = low_value_id;
+    const loom_type_t actual_type = loom_module_value_type(
+        loom_low_lower_context_module(context), low_value_id);
+    if (loom_low_register_type_unit_count(actual_type) == 2) {
+      const uint32_t wavefront_size = loom_amdgpu_target_wavefront_size(
+          loom_low_lower_context_bundle(context));
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_lane_mask_nonzero_scc(
+          context, source_terminator, low_value_id, wavefront_size,
+          &low_condition));
+    }
+    loom_value_id_t low_false = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+        context, source_terminator, LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32, 0,
+        required_low_type, &low_false));
+    loom_value_id_t low_true = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+        context, source_terminator, LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32, 1,
+        required_low_type, &low_true));
+    const loom_value_id_t operands[] = {low_true, low_false, low_condition};
+    loom_op_t* select_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
+        context, source_terminator, LOOM_AMDGPU_DESCRIPTOR_REF_S_CSELECT_B32,
+        operands, IREE_ARRAYSIZE(operands), loom_named_attr_slice_empty(),
+        &required_low_type, 1, &select_op));
+    *out_low_value_id = loom_value_slice_get(loom_low_op_results(select_op), 0);
+    return iree_ok_status();
   }
 
   IREE_ASSERT_UNREACHABLE(
@@ -1487,14 +1517,31 @@ static iree_status_t loom_amdgpu_emit_exec_restore_passthrough_block(
     loom_value_id_t saved_exec, loom_block_t* restore_block,
     loom_block_t* restore_dest, const loom_op_t* passthrough_terminator) {
   IREE_ASSERT(loom_cfg_br_isa(passthrough_terminator));
+  loom_builder_t* builder = loom_low_lower_context_builder(context);
+  loom_builder_ip_t saved_ip = loom_builder_save(builder);
+  loom_builder_set_block(builder, restore_block);
+
+  // Edge materialization may read EXEC or emit vector copies. The skipped
+  // arm's payload belongs to the restored parent lanes, not the narrowed arm.
+  loom_op_t* restore_op = NULL;
+  iree_status_t status = loom_amdgpu_emit_low_op(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B64_EXEC,
+      &saved_exec, 1, loom_named_attr_slice_empty(), /*result_types=*/NULL, 0,
+      &restore_op);
   loom_value_slice_t args = loom_cfg_br_args(passthrough_terminator);
   loom_value_id_t* low_args = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_remap_successor_args(
-      context, passthrough_terminator, 0, restore_dest, args.values, args.count,
-      &low_args));
-  return loom_amdgpu_emit_exec_restore_branch(context, source_op, saved_exec,
-                                              restore_block, restore_dest,
-                                              low_args, args.count);
+  if (iree_status_is_ok(status)) {
+    status = loom_low_lower_remap_successor_args(
+        context, passthrough_terminator, 0, restore_dest, args.values,
+        args.count, &low_args);
+  }
+  if (iree_status_is_ok(status)) {
+    loom_op_t* branch_op = NULL;
+    status = loom_low_br_build(builder, restore_dest, low_args, args.count,
+                               source_op->location, &branch_op);
+  }
+  loom_builder_restore(builder, saved_ip);
+  return status;
 }
 
 static iree_status_t loom_amdgpu_emit_zero_vgpr_value(

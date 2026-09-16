@@ -682,7 +682,7 @@ static bool loom_amdgpu_source_value_can_lower_as_sgpr_i1_bool(
 
   const loom_value_t* value = loom_module_value(module, source_value_id);
   if (loom_value_is_block_arg(value)) {
-    return false;
+    return true;
   }
   const loom_op_t* defining_op = loom_value_def_op(value);
   if (defining_op == NULL) {
@@ -760,11 +760,19 @@ static bool loom_amdgpu_source_value_is_native_i1_mask_excluding(
     return true;
   }
 
-  const bool source_can_lower_as_scc =
-      loom_amdgpu_source_value_can_lower_as_scc_i1(
-          module, fact_table, view_regions, analysis, source_value_id,
-          next_excluded_value_id);
   const loom_value_t* value = loom_module_value(module, source_value_id);
+  if (loom_value_is_block_arg(value)) {
+    const loom_block_t* block = loom_value_def_block(value);
+    if (block != loom_region_const_entry_block(block->parent_region) &&
+        !loom_amdgpu_source_value_facts_are_uniform_i1(module, fact_table,
+                                                       source_value_id)) {
+      // A merge without a uniformity proof must preserve every lane's bit.
+      return true;
+    }
+  }
+  // Branch edges materialize the destination's representation. Propagating
+  // storage demand through successor arguments would walk loop-carried cycles;
+  // the fact table already owns the destination's lane distribution.
   const loom_use_t* use = NULL;
   loom_value_for_each_use(value, use) {
     const loom_op_t* user_op = loom_use_user_op(*use);
@@ -785,28 +793,6 @@ static bool loom_amdgpu_source_value_is_native_i1_mask_excluding(
             next_excluded_value_id)) {
       return true;
     }
-    if (source_can_lower_as_scc) {
-      continue;
-    }
-    if (user_op == NULL || user_op->successor_count != 1) {
-      continue;
-    }
-    loom_block_t* const* successors = loom_op_const_successors(user_op);
-    const loom_block_t* dest = successors[0];
-    const loom_value_id_t* args = NULL;
-    uint16_t arg_count = 0;
-    if (!loom_cfg_terminator_payload_for_successor(user_op, dest, &args,
-                                                   &arg_count) ||
-        operand_index >= arg_count || args[operand_index] != source_value_id) {
-      continue;
-    }
-    const loom_value_id_t dest_arg = loom_block_arg_id(dest, operand_index);
-    if (dest_arg != source_value_id &&
-        loom_amdgpu_source_value_is_native_i1_mask_excluding(
-            module, fact_table, view_regions, analysis, dest_arg,
-            next_excluded_value_id)) {
-      return true;
-    }
   }
   if (loom_value_is_block_arg(value)) {
     return false;
@@ -814,6 +800,12 @@ static bool loom_amdgpu_source_value_is_native_i1_mask_excluding(
   const loom_op_t* defining_op = loom_value_def_op(value);
   if (!defining_op) {
     return false;
+  }
+
+  // Boolean selects use the native mask selection contract, including when
+  // their result is forwarded through CFG arguments before its first use.
+  if (loom_scf_select_isa(defining_op)) {
+    return true;
   }
 
   const loom_trait_flags_t defining_op_traits =
@@ -1080,6 +1072,13 @@ static bool loom_amdgpu_source_value_is_durable_i1_bool(
     const loom_view_region_table_t* view_regions,
     loom_amdgpu_source_value_analysis_t* analysis,
     loom_value_id_t source_value_id) {
+  const loom_value_t* value = loom_module_value(module, source_value_id);
+  if (loom_value_is_block_arg(value)) {
+    // Arguments transport independent values across entry and CFG boundaries.
+    // SCC is a single ephemeral condition bit, not Boolean argument storage.
+    // Native lane masks are selected before this scalar Boolean policy.
+    return true;
+  }
   return (loom_amdgpu_source_i1_value_has_cross_block_use(module,
                                                           source_value_id) ||
           loom_amdgpu_source_i1_value_has_same_block_branch_and_mask_use(

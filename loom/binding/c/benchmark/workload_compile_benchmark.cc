@@ -955,6 +955,7 @@ void RegisterInputScalingCompileBenchmarks(
 }
 
 void RegisterPipelineCompileBenchmarks(const WorkloadCompileTarget& target,
+                                       const char* workload_name,
                                        CompileWorkload workload) {
   auto register_phase = [&](PipelineCompilePhase phase, const char* phase_name,
                             loomc_compile_report_mode_t report_mode,
@@ -962,7 +963,7 @@ void RegisterPipelineCompileBenchmarks(const WorkloadCompileTarget& target,
                             bool cold_workspace) {
     const PipelineBenchmarkSpec spec = {phase, &target, workload, report_mode};
     const std::string name =
-        BuildBenchmarkName("ScfPipeline", phase_name, target);
+        BuildBenchmarkName(workload_name, phase_name, target);
     auto* registration = ::benchmark::RegisterBenchmark(
         name.c_str(), [spec, cold_workspace](::benchmark::State& state) {
           if (cold_workspace) {

@@ -1,0 +1,51 @@
+// Setup expands the outer loop, preserving independent live predicate queues.
+// These configuration values control compiler benchmark size and schedule.
+config.decl @benchmark.loop_count : %value: index where [range(%value, 1, 512)]
+
+config.decl @benchmark.pipeline_depth : %value: index where [range(%value, 1, 4)]
+
+kernel.def export("segmented_guarded_read_ahead") @segmented_guarded_read_ahead() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%flags: buffer, %input: buffer, %output: buffer, %length: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %segment_length = index.constant 64 : index
+  %loop_count = config.get @benchmark.loop_count : index
+  %depth = config.get @benchmark.pipeline_depth : index
+  %end = index.assume %length [range(%length, 0, 64)] : index
+  %threshold = scalar.constant 0 : i32
+  %initial = scalar.constant 0.0 : f32
+  %byte_offset = index.constant 0 : offset
+  %flags_aligned = buffer.assume.alignment %flags {minimum_alignment = 4} : buffer
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %flags_storage, %input_storage, %output_storage = buffer.assume.noalias %flags_aligned, %input_aligned, %output_aligned : buffer, buffer, buffer
+  %flags_view = buffer.view %flags_storage[%byte_offset] : buffer -> view<32768xi32>
+  %input_view = buffer.view %input_storage[%byte_offset] : buffer -> view<32768xf32>
+  %output_view = buffer.view %output_storage[%byte_offset] : buffer -> view<1xf32>
+  %result = scf.for %segment = [%begin to %loop_count step %step](%accumulator = %initial : f32) -> (f32) unroll {
+    %base = index.mul %segment, %segment_length : index
+    %partial = scf.for %i = [%begin to %end step %step](%sum = %accumulator : f32) -> (f32) pipeline(%depth) {
+      %position = index.add %base, %i : index
+      %flag = view.load %flags_view[%position] : view<32768xi32> -> i32
+      %valid = scalar.cmpi sgt, %flag, %threshold : i32
+      %value = scf.if %valid -> (f32) {
+        %loaded = view.load %input_view[%position] : view<32768xf32> -> f32
+        scf.yield %loaded : f32
+      } else {
+        scf.yield %initial : f32
+      }
+      %next = scf.if %valid -> (f32) {
+        %updated = scalar.addf %sum, %value : f32
+        scf.yield %updated : f32
+      } else {
+        scf.yield %sum : f32
+      }
+      scf.yield %next : f32
+    }
+    scf.yield %partial : f32
+  }
+  view.store %result, %output_view[0] : f32, view<1xf32>
+  kernel.return
+}

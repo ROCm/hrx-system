@@ -87,10 +87,11 @@ void RegisterInputScalingCompileBenchmarks(
     InputScalingCompileWorkload workload);
 
 // Registers clone, pipeline transformation and native compile/emit benchmarks
-// over a shared segmented reduction. Setup expands benchmark.loop_count live
+// over a named segmented reduction. Setup expands benchmark.loop_count live
 // loops before timing; benchmark.pipeline_depth independently controls their
 // schedules. Native emission measures report modes and cold workspace growth.
 void RegisterPipelineCompileBenchmarks(const WorkloadCompileTarget& target,
+                                       const char* workload_name,
                                        CompileWorkload workload);
 
 }  // namespace loomc::bench

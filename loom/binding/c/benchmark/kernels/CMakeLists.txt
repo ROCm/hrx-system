@@ -78,6 +78,7 @@ iree_c_embed_data(
   NAME
     synthetic_pipeline_smoke
   SRCS
+    "synthetic/segmented_guarded_read_ahead.loom"
     "synthetic/segmented_read_ahead.loom"
   C_FILE_OUTPUT
     "synthetic_pipeline_smoke.c"

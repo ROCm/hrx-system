@@ -95,6 +95,51 @@ loom_test(
 )
 
 loom_test(
+    name = "pipeline_predicates_serial_test",
+    srcs = [
+        "amdgpu_pipeline_predicates.loom",
+        "//loom/binding/c/benchmark/kernels:synthetic/segmented_guarded_read_ahead.loom",
+    ],
+    args = [
+        "--config=test.depth=1",
+        "--config=test.factor=1",
+        "--config=benchmark.loop_count=8",
+        "--config=benchmark.pipeline_depth=1",
+    ],
+    execution_profile = AMDGPU_ACCESS_PROFILE,
+)
+
+loom_test(
+    name = "pipeline_predicates_depth_three_test",
+    srcs = [
+        "amdgpu_pipeline_predicates.loom",
+        "//loom/binding/c/benchmark/kernels:synthetic/segmented_guarded_read_ahead.loom",
+    ],
+    args = [
+        "--config=test.depth=3",
+        "--config=test.factor=1",
+        "--config=benchmark.loop_count=8",
+        "--config=benchmark.pipeline_depth=3",
+    ],
+    execution_profile = AMDGPU_ACCESS_PROFILE,
+)
+
+loom_test(
+    name = "pipeline_predicates_unrolled_test",
+    srcs = [
+        "amdgpu_pipeline_predicates.loom",
+        "//loom/binding/c/benchmark/kernels:synthetic/segmented_guarded_read_ahead.loom",
+    ],
+    args = [
+        "--config=test.depth=4",
+        "--config=test.factor=2",
+        "--config=benchmark.loop_count=8",
+        "--config=benchmark.pipeline_depth=4",
+    ],
+    execution_profile = AMDGPU_ACCESS_PROFILE,
+)
+
+loom_test(
     name = "tsan_test",
     srcs = ["//loom/src/loom/test/corpus/sanitizer:amdgpu_tsan_actual.loom"],
     execution_profile = AMDGPU_TSAN_PROFILE,

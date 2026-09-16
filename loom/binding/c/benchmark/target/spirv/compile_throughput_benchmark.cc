@@ -255,7 +255,7 @@ const EmbeddedSource kI32MemoryChainSource = FindEmbeddedSource(
 
 [[maybe_unused]] const bool kSpirvWorkloadBenchmarksRegistered = [] {
   RegisterPipelineCompileBenchmarks(
-      kSpirvWorkloadTarget,
+      kSpirvWorkloadTarget, "ScfPipeline",
       {
           /*.source=*/FindEmbeddedSource(
               loomc_benchmark_synthetic_pipeline_smoke_create(),
@@ -263,6 +263,16 @@ const EmbeddedSource kI32MemoryChainSource = FindEmbeddedSource(
               "segmented_read_ahead.loom"),
           /*.function_symbol=*/"segmented_read_ahead",
           /*.artifact_identifier=*/"pipeline_benchmark.spv",
+      });
+  RegisterPipelineCompileBenchmarks(
+      kSpirvWorkloadTarget, "ScfGuardedPipeline",
+      {
+          /*.source=*/FindEmbeddedSource(
+              loomc_benchmark_synthetic_pipeline_smoke_create(),
+              loomc_benchmark_synthetic_pipeline_smoke_size(),
+              "segmented_guarded_read_ahead.loom"),
+          /*.function_symbol=*/"segmented_guarded_read_ahead",
+          /*.artifact_identifier=*/"guarded_pipeline_benchmark.spv",
       });
   RegisterInputScalingCompileBenchmarks(
       kSpirvWorkloadTarget, "FfnGateUpQuadraticF32",

@@ -11,7 +11,10 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-exports_files(["attention/prefill_f16_wmma_amdgpu.loom"])
+exports_files([
+    "attention/prefill_f16_wmma_amdgpu.loom",
+    "synthetic/segmented_guarded_read_ahead.loom",
+])
 
 iree_c_embed_data(
     name = "attention_prefill_smoke",
@@ -59,7 +62,10 @@ iree_c_embed_data(
 iree_c_embed_data(
     name = "synthetic_pipeline_smoke",
     testonly = True,
-    srcs = ["synthetic/segmented_read_ahead.loom"],
+    srcs = [
+        "synthetic/segmented_guarded_read_ahead.loom",
+        "synthetic/segmented_read_ahead.loom",
+    ],
     c_file_output = "synthetic_pipeline_smoke.c",
     flatten = True,
     h_file_output = "synthetic_pipeline_smoke.h",

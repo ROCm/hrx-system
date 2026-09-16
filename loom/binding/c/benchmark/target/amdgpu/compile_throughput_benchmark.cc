@@ -252,7 +252,7 @@ const EmbeddedSource kI32MemoryChainSource = FindEmbeddedSource(
 
 [[maybe_unused]] const bool kAmdgpuWorkloadBenchmarksRegistered = [] {
   RegisterPipelineCompileBenchmarks(
-      kAmdgpuWorkloadTarget,
+      kAmdgpuWorkloadTarget, "ScfPipeline",
       {
           /*.source=*/FindEmbeddedSource(
               loomc_benchmark_synthetic_pipeline_smoke_create(),
@@ -260,6 +260,16 @@ const EmbeddedSource kI32MemoryChainSource = FindEmbeddedSource(
               "segmented_read_ahead.loom"),
           /*.function_symbol=*/"segmented_read_ahead",
           /*.artifact_identifier=*/"pipeline_benchmark.hsaco",
+      });
+  RegisterPipelineCompileBenchmarks(
+      kAmdgpuWorkloadTarget, "ScfGuardedPipeline",
+      {
+          /*.source=*/FindEmbeddedSource(
+              loomc_benchmark_synthetic_pipeline_smoke_create(),
+              loomc_benchmark_synthetic_pipeline_smoke_size(),
+              "segmented_guarded_read_ahead.loom"),
+          /*.function_symbol=*/"segmented_guarded_read_ahead",
+          /*.artifact_identifier=*/"guarded_pipeline_benchmark.hsaco",
       });
   RegisterAttentionCompileBenchmarks(
       kAmdgpuWorkloadTarget,

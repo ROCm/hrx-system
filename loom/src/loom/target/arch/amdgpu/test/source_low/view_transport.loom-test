@@ -15,7 +15,7 @@ func.def target(@target) @wide_subview_selection(%input: buffer, %byte_base0: of
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @wide_subview_selection(%byte_base: reg<amdgpu.sgpr x2>, %condition: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @wide_subview_selection(%byte_base: reg<amdgpu.sgpr x2>, %condition: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
   %selected = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %24 = s_mov_b32 4
   %25 = s_mov_b32 0
@@ -26,15 +26,16 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @wide_su
   %34 = s_mov_b32 8
   %41 = s_add_u32 %27, %34
   %42 = s_addc_u32 %28, %25
-  %46 = s_cselect_b32 %31, %41, %condition
-  %49 = s_cselect_b32 %32, %42, %condition
-  %51 = v_mov_b32 0
-  %52 = slice %selected[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %53 = slice %selected[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %56 = s_add_u32 %52, %46
-  %57 = s_addc_u32 %53, %49
-  %58 = concat(%56, %57) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %value = global_load_b32_saddr %51, %58
+  %44 = s_cmp_lg_i32_src1_inline %condition {rhs = 0}
+  %47 = s_cselect_b32 %31, %41, %44
+  %50 = s_cselect_b32 %32, %42, %44
+  %52 = v_mov_b32 0
+  %53 = slice %selected[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %54 = slice %selected[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %57 = s_add_u32 %53, %47
+  %58 = s_addc_u32 %54, %50
+  %59 = concat(%57, %58) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %value = global_load_b32_saddr %52, %59
   return %value
 }
 

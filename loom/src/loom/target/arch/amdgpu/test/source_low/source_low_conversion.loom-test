@@ -1662,10 +1662,11 @@ func.def target(@target) @scalar_extui_i1_to_i32(%input: i1) -> (i32) {
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_extui_i1_to_i32(%input: reg<amdgpu.scc>) -> (reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_extui_i1_to_i32(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
   %8 = s_mov_b32 1
   %9 = s_mov_b32 0
-  %converted = s_cselect_b32 %8, %9, %input
+  %10 = s_cmp_lg_i32_src1_inline %input {rhs = 0}
+  %converted = s_cselect_b32 %8, %9, %10
   return %converted
 }
 

@@ -1,0 +1,529 @@
+// The test runner sweeps these policies over one checked source. Each iteration
+// queues its predicate with its guarded payload; a separate guarded recurrence
+// consumes both later. The odd row stride alternates the two lanes' predicates.
+config.decl @test.depth : %value: index where [range(%value, 1, 4)]
+
+config.decl @test.factor : %value: index where [range(%value, 1, 2)]
+
+template.decl @test.guarded_sum(%count: index, %lane: index, %flags: view<16x17xi32>, %values: view<16x17xf32>, %depth: index, %factor: index) -> (f32)
+
+template.def<@test.guarded_sum> @guarded_sum_impl(%count: index, %lane: index, %flags: view<16x17xi32>, %values: view<16x17xf32>, %depth: index, %factor: index) -> (f32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %threshold = scalar.constant 0 : i32
+  %initial = scalar.constant 0.0 : f32
+  %total = scf.for %row = [%begin to %count step %step](%sum = %initial : f32) -> (f32) pipeline(%depth) unroll(%factor) {
+    %flag = view.load %flags[%row, %lane] : view<16x17xi32> -> i32
+    %valid = scalar.cmpi sgt, %flag, %threshold : i32
+    %payload = scf.if %valid -> (f32) {
+      %loaded = view.load %values[%row, %lane] : view<16x17xf32> -> f32
+      scf.yield %loaded : f32
+    } else {
+      scf.yield %initial : f32
+    }
+    %next = scf.if %valid -> (f32) {
+      %updated = scalar.addf %sum, %payload : f32
+      scf.yield %updated : f32
+    } else {
+      scf.yield %sum : f32
+    }
+    scf.yield %next : f32
+  }
+  template.return %total : f32
+}
+
+kernel.def @guarded_uniform() {
+  %groups = index.constant 2 : index
+  %lanes = index.constant 1 : index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%lanes, %unit, %unit) : index
+} launch(%row_count: index, %flag_buffer: buffer, %value_buffer: buffer, %output_buffer: buffer) {
+  %count = index.assume %row_count [range(%row_count, 0, 16)] : index
+  %lane = kernel.workgroup.id<x> : index
+  %base = index.constant 0 : offset
+  %depth = config.get @test.depth : index
+  %factor = config.get @test.factor : index
+  %flags_aligned = buffer.assume.alignment %flag_buffer {minimum_alignment = 4} : buffer
+  %values_aligned = buffer.assume.alignment %value_buffer {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output_buffer {minimum_alignment = 4} : buffer
+  %flags_storage, %values_storage, %output_storage = buffer.assume.noalias %flags_aligned, %values_aligned, %output_aligned : buffer, buffer, buffer
+  %flags = buffer.view %flags_storage[%base] : buffer -> view<16x17xi32>
+  %values = buffer.view %values_storage[%base] : buffer -> view<16x17xf32>
+  %output = buffer.view %output_storage[%base] : buffer -> view<2xf32>
+  %result = template.apply<@test.guarded_sum>(%count, %lane, %flags, %values, %depth, %factor) : (index, index, view<16x17xi32>, view<16x17xf32>, index, index) -> (f32)
+  view.store %result, %output[%lane] : f32, view<2xf32>
+  kernel.return
+}
+
+kernel.def @guarded_varying() {
+  %groups = index.constant 1 : index
+  %lanes = index.constant 2 : index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%lanes, %unit, %unit) : index
+} launch(%row_count: index, %flag_buffer: buffer, %value_buffer: buffer, %output_buffer: buffer) {
+  %count = index.assume %row_count [range(%row_count, 0, 16)] : index
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %depth = config.get @test.depth : index
+  %factor = config.get @test.factor : index
+  %flags_aligned = buffer.assume.alignment %flag_buffer {minimum_alignment = 4} : buffer
+  %values_aligned = buffer.assume.alignment %value_buffer {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output_buffer {minimum_alignment = 4} : buffer
+  %flags_storage, %values_storage, %output_storage = buffer.assume.noalias %flags_aligned, %values_aligned, %output_aligned : buffer, buffer, buffer
+  %flags = buffer.view %flags_storage[%base] : buffer -> view<16x17xi32>
+  %values = buffer.view %values_storage[%base] : buffer -> view<16x17xf32>
+  %output = buffer.view %output_storage[%base] : buffer -> view<2xf32>
+  %result = template.apply<@test.guarded_sum>(%count, %lane, %flags, %values, %depth, %factor) : (index, index, view<16x17xi32>, view<16x17xf32>, index, index) -> (f32)
+  view.store %result, %output[%lane] : f32, view<2xf32>
+  kernel.return
+}
+
+// Lane 0 sums odd rows: 17*m*m + m, where m=floor(N/2).
+// Lane 1 sums even rows: 17*k*(k-1) + 2*k, where k=ceil(N/2).
+// This closed form is independent of the loop/pipeline implementation.
+check.case @predicate_queue_n0 {
+  %count = check.literal value(0) : index
+  %flags = check.generate.iota offset(-1) step(2) period(2) : tensor<16x17xi32>
+  %values = check.generate.iota offset(1.0) step(1.0) : tensor<16x17xf32>
+  %uniform = check.generate.fill value(-1.0) : tensor<2xf32>
+  %varying = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(0.0) step(0.0) : tensor<2xf32>
+  kernel.launch @guarded_uniform(%count, %flags, %values, %uniform) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  kernel.launch @guarded_varying(%count, %flags, %values, %varying) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  check.expect.close actual(%uniform) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.expect.close actual(%varying) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_queue_n1 {
+  %count = check.literal value(1) : index
+  %flags = check.generate.iota offset(-1) step(2) period(2) : tensor<16x17xi32>
+  %values = check.generate.iota offset(1.0) step(1.0) : tensor<16x17xf32>
+  %uniform = check.generate.fill value(-1.0) : tensor<2xf32>
+  %varying = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(0.0) step(2.0) : tensor<2xf32>
+  kernel.launch @guarded_uniform(%count, %flags, %values, %uniform) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  kernel.launch @guarded_varying(%count, %flags, %values, %varying) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  check.expect.close actual(%uniform) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.expect.close actual(%varying) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_queue_n2 {
+  %count = check.literal value(2) : index
+  %flags = check.generate.iota offset(-1) step(2) period(2) : tensor<16x17xi32>
+  %values = check.generate.iota offset(1.0) step(1.0) : tensor<16x17xf32>
+  %uniform = check.generate.fill value(-1.0) : tensor<2xf32>
+  %varying = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(18.0) step(-16.0) : tensor<2xf32>
+  kernel.launch @guarded_uniform(%count, %flags, %values, %uniform) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  kernel.launch @guarded_varying(%count, %flags, %values, %varying) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  check.expect.close actual(%uniform) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.expect.close actual(%varying) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_queue_n3 {
+  %count = check.literal value(3) : index
+  %flags = check.generate.iota offset(-1) step(2) period(2) : tensor<16x17xi32>
+  %values = check.generate.iota offset(1.0) step(1.0) : tensor<16x17xf32>
+  %uniform = check.generate.fill value(-1.0) : tensor<2xf32>
+  %varying = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(18.0) step(20.0) : tensor<2xf32>
+  kernel.launch @guarded_uniform(%count, %flags, %values, %uniform) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  kernel.launch @guarded_varying(%count, %flags, %values, %varying) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  check.expect.close actual(%uniform) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.expect.close actual(%varying) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_queue_n4 {
+  %count = check.literal value(4) : index
+  %flags = check.generate.iota offset(-1) step(2) period(2) : tensor<16x17xi32>
+  %values = check.generate.iota offset(1.0) step(1.0) : tensor<16x17xf32>
+  %uniform = check.generate.fill value(-1.0) : tensor<2xf32>
+  %varying = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(70.0) step(-32.0) : tensor<2xf32>
+  kernel.launch @guarded_uniform(%count, %flags, %values, %uniform) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  kernel.launch @guarded_varying(%count, %flags, %values, %varying) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  check.expect.close actual(%uniform) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.expect.close actual(%varying) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_queue_n5 {
+  %count = check.literal value(5) : index
+  %flags = check.generate.iota offset(-1) step(2) period(2) : tensor<16x17xi32>
+  %values = check.generate.iota offset(1.0) step(1.0) : tensor<16x17xf32>
+  %uniform = check.generate.fill value(-1.0) : tensor<2xf32>
+  %varying = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(70.0) step(38.0) : tensor<2xf32>
+  kernel.launch @guarded_uniform(%count, %flags, %values, %uniform) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  kernel.launch @guarded_varying(%count, %flags, %values, %varying) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  check.expect.close actual(%uniform) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.expect.close actual(%varying) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_queue_n7 {
+  %count = check.literal value(7) : index
+  %flags = check.generate.iota offset(-1) step(2) period(2) : tensor<16x17xi32>
+  %values = check.generate.iota offset(1.0) step(1.0) : tensor<16x17xf32>
+  %uniform = check.generate.fill value(-1.0) : tensor<2xf32>
+  %varying = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(156.0) step(56.0) : tensor<2xf32>
+  kernel.launch @guarded_uniform(%count, %flags, %values, %uniform) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  kernel.launch @guarded_varying(%count, %flags, %values, %varying) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  check.expect.close actual(%uniform) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.expect.close actual(%varying) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_queue_n8 {
+  %count = check.literal value(8) : index
+  %flags = check.generate.iota offset(-1) step(2) period(2) : tensor<16x17xi32>
+  %values = check.generate.iota offset(1.0) step(1.0) : tensor<16x17xf32>
+  %uniform = check.generate.fill value(-1.0) : tensor<2xf32>
+  %varying = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(276.0) step(-64.0) : tensor<2xf32>
+  kernel.launch @guarded_uniform(%count, %flags, %values, %uniform) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  kernel.launch @guarded_varying(%count, %flags, %values, %varying) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  check.expect.close actual(%uniform) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.expect.close actual(%varying) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_queue_n9 {
+  %count = check.literal value(9) : index
+  %flags = check.generate.iota offset(-1) step(2) period(2) : tensor<16x17xi32>
+  %values = check.generate.iota offset(1.0) step(1.0) : tensor<16x17xf32>
+  %uniform = check.generate.fill value(-1.0) : tensor<2xf32>
+  %varying = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(276.0) step(74.0) : tensor<2xf32>
+  kernel.launch @guarded_uniform(%count, %flags, %values, %uniform) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  kernel.launch @guarded_varying(%count, %flags, %values, %varying) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  check.expect.close actual(%uniform) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.expect.close actual(%varying) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_queue_n15 {
+  %count = check.literal value(15) : index
+  %flags = check.generate.iota offset(-1) step(2) period(2) : tensor<16x17xi32>
+  %values = check.generate.iota offset(1.0) step(1.0) : tensor<16x17xf32>
+  %uniform = check.generate.fill value(-1.0) : tensor<2xf32>
+  %varying = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(840.0) step(128.0) : tensor<2xf32>
+  kernel.launch @guarded_uniform(%count, %flags, %values, %uniform) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  kernel.launch @guarded_varying(%count, %flags, %values, %varying) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  check.expect.close actual(%uniform) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.expect.close actual(%varying) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_queue_n16 {
+  %count = check.literal value(16) : index
+  %flags = check.generate.iota offset(-1) step(2) period(2) : tensor<16x17xi32>
+  %values = check.generate.iota offset(1.0) step(1.0) : tensor<16x17xf32>
+  %uniform = check.generate.fill value(-1.0) : tensor<2xf32>
+  %varying = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(1096.0) step(-128.0) : tensor<2xf32>
+  kernel.launch @guarded_uniform(%count, %flags, %values, %uniform) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  kernel.launch @guarded_varying(%count, %flags, %values, %varying) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  check.expect.close actual(%uniform) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.expect.close actual(%varying) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_queue_all_masked {
+  %count = check.literal value(16) : index
+  %flags = check.generate.fill value(-1) : tensor<16x17xi32>
+  %values = check.generate.iota offset(1.0) step(1.0) : tensor<16x17xf32>
+  %uniform = check.generate.fill value(-1.0) : tensor<2xf32>
+  %varying = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(0.0) step(0.0) : tensor<2xf32>
+  kernel.launch @guarded_uniform(%count, %flags, %values, %uniform) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  kernel.launch @guarded_varying(%count, %flags, %values, %varying) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  check.expect.close actual(%uniform) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.expect.close actual(%varying) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_queue_all_active {
+  %count = check.literal value(16) : index
+  %flags = check.generate.fill value(1) : tensor<16x17xi32>
+  %values = check.generate.iota offset(1.0) step(1.0) : tensor<16x17xf32>
+  %uniform = check.generate.fill value(-1.0) : tensor<2xf32>
+  %varying = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(2056.0) step(16.0) : tensor<2xf32>
+  kernel.launch @guarded_uniform(%count, %flags, %values, %uniform) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  kernel.launch @guarded_varying(%count, %flags, %values, %varying) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
+  check.expect.close actual(%uniform) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.expect.close actual(%varying) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+// The skipped arm's uniform predicate is materialized after restoring EXEC.
+// An empty active arm still leaves both fallback lanes true.
+kernel.def @predicate_fallback() {
+  %unit = index.constant 1 : index
+  %lanes = index.constant 2 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lanes, %unit, %unit) : index
+} launch(%active_lane_count: index, %fallback_flag: i32, %flag_buffer: buffer, %output_buffer: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %threshold = scalar.constant 0 : i32
+  %enabled = scalar.constant 1.0 : f32
+  %disabled = scalar.constant 0.0 : f32
+  %flags_aligned = buffer.assume.alignment %flag_buffer {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output_buffer {minimum_alignment = 4} : buffer
+  %flags = buffer.view %flags_aligned[%base] : buffer -> view<2xi32>
+  %output = buffer.view %output_aligned[%base] : buffer -> view<2xf32>
+  %fallback = scalar.cmpi ne, %fallback_flag, %threshold : i32
+  %active = index.cmp slt, %lane, %active_lane_count : index
+  cfg.cond_br %active, ^active_lane, ^inactive_lane
+^active_lane:
+  %flag = view.load %flags[%lane] : view<2xi32> -> i32
+  %present = scalar.cmpi sgt, %flag, %threshold : i32
+  cfg.cond_br %present, ^positive, ^negative
+^positive:
+  cfg.br ^active_exit(%present: i1)
+^negative:
+  %negative_flag = view.load %flags[%lane] : view<2xi32> -> i32
+  %negative_present = scalar.cmpi slt, %negative_flag, %threshold : i32
+  cfg.br ^active_exit(%negative_present: i1)
+^active_exit(%active_predicate: i1):
+  cfg.br ^join(%active_predicate: i1)
+^inactive_lane:
+  cfg.br ^join(%fallback: i1)
+^join(%chosen: i1):
+  %result = scf.select %chosen, %enabled, %disabled : f32
+  view.store %result, %output[%lane] : f32, view<2xf32>
+  kernel.return
+}
+
+check.case @predicate_fallback_empty_active_arm {
+  %count = check.literal value(0) : index
+  %fallback = check.literal value(1) : i32
+  %flags = check.generate.iota offset(-1) step(2) : tensor<2xi32>
+  %actual = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.fill value(1.0) : tensor<2xf32>
+  kernel.launch @predicate_fallback(%count, %fallback, %flags, %actual) : (index, i32, tensor<2xi32>, tensor<2xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_fallback_empty_false {
+  %count = check.literal value(0) : index
+  %fallback = check.literal value(0) : i32
+  %flags = check.generate.iota offset(-1) step(2) : tensor<2xi32>
+  %actual = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(0.0) step(0.0) : tensor<2xf32>
+  kernel.launch @predicate_fallback(%count, %fallback, %flags, %actual) : (index, i32, tensor<2xi32>, tensor<2xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_fallback_mixed_false {
+  %count = check.literal value(1) : index
+  %fallback = check.literal value(0) : i32
+  %flags = check.generate.iota offset(-1) step(2) : tensor<2xi32>
+  %actual = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(1.0) step(-1.0) : tensor<2xf32>
+  kernel.launch @predicate_fallback(%count, %fallback, %flags, %actual) : (index, i32, tensor<2xi32>, tensor<2xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_fallback_mixed_true {
+  %count = check.literal value(1) : index
+  %fallback = check.literal value(1) : i32
+  %flags = check.generate.iota offset(-1) step(2) : tensor<2xi32>
+  %actual = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(1.0) step(0.0) : tensor<2xf32>
+  kernel.launch @predicate_fallback(%count, %fallback, %flags, %actual) : (index, i32, tensor<2xi32>, tensor<2xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_fallback_full_false {
+  %count = check.literal value(2) : index
+  %fallback = check.literal value(0) : i32
+  %flags = check.generate.iota offset(-1) step(2) : tensor<2xi32>
+  %actual = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(1.0) step(0.0) : tensor<2xf32>
+  kernel.launch @predicate_fallback(%count, %fallback, %flags, %actual) : (index, i32, tensor<2xi32>, tensor<2xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_fallback_full_true {
+  %count = check.literal value(2) : index
+  %fallback = check.literal value(1) : i32
+  %flags = check.generate.iota offset(-1) step(2) : tensor<2xi32>
+  %actual = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(1.0) step(0.0) : tensor<2xf32>
+  kernel.launch @predicate_fallback(%count, %fallback, %flags, %actual) : (index, i32, tensor<2xi32>, tensor<2xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_fallback_mixed_zero_flags {
+  %count = check.literal value(1) : index
+  %fallback = check.literal value(1) : i32
+  %flags = check.generate.fill value(0) : tensor<2xi32>
+  %actual = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(0.0) step(1.0) : tensor<2xf32>
+  kernel.launch @predicate_fallback(%count, %fallback, %flags, %actual) : (index, i32, tensor<2xi32>, tensor<2xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_fallback_full_zero_flags {
+  %count = check.literal value(2) : index
+  %fallback = check.literal value(1) : i32
+  %flags = check.generate.fill value(0) : tensor<2xi32>
+  %actual = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(0.0) step(0.0) : tensor<2xf32>
+  kernel.launch @predicate_fallback(%count, %fallback, %flags, %actual) : (index, i32, tensor<2xi32>, tensor<2xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+// A Boolean select produces a mask while uniform queue arguments use scalars.
+kernel.def @uniform_predicate_queue() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%selector: i32, %first_flag: i32, %second_flag: i32, %limit: i32, %output: buffer) {
+  %begin = scalar.constant 0 : i32
+  %step = scalar.constant 1 : i32
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %pick_first = scalar.cmpi ne, %selector, %begin : i32
+  %first = scalar.cmpi ne, %first_flag, %begin : i32
+  %second = scalar.cmpi ne, %second_flag, %begin : i32
+  %selected = scf.select %pick_first, %first, %second : i1
+  cfg.br ^loop(%begin: i32, %selected: i1, %first: i1)
+^loop(%iteration: i32, %head: i1, %tail: i1):
+  %again = scalar.cmpi slt, %iteration, %limit : i32
+  cfg.cond_br %again, ^body, ^exit
+^body:
+  %next = scalar.addi %iteration, %step : i32
+  cfg.br ^loop(%next: i32, %tail: i1, %head: i1)
+^exit:
+  cfg.cond_br %head, ^enabled, ^disabled
+^enabled:
+  view.store %step, %output_view[0] : i32, view<1xi32>
+  kernel.return
+^disabled:
+  view.store %begin, %output_view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+check.case @uniform_predicate_queue_selected_false {
+  %selector = check.literal value(0) : i32
+  %first = check.literal value(1) : i32
+  %second = check.literal value(0) : i32
+  %count = check.literal value(2) : i32
+  %actual = check.generate.fill value(-1) : tensor<1xi32>
+  %expected = check.generate.fill value(0) : tensor<1xi32>
+  kernel.launch @uniform_predicate_queue(%selector, %first, %second, %count, %actual) : (i32, i32, i32, i32, tensor<1xi32>)
+  check.expect.equal actual(%actual) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+check.case @uniform_predicate_queue_selected_true {
+  %selector = check.literal value(0) : i32
+  %first = check.literal value(0) : i32
+  %second = check.literal value(1) : i32
+  %count = check.literal value(2) : i32
+  %actual = check.generate.fill value(-1) : tensor<1xi32>
+  %expected = check.generate.fill value(1) : tensor<1xi32>
+  kernel.launch @uniform_predicate_queue(%selector, %first, %second, %count, %actual) : (i32, i32, i32, i32, tensor<1xi32>)
+  check.expect.equal actual(%actual) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+check.case @uniform_predicate_queue_rotated_false {
+  %selector = check.literal value(0) : i32
+  %first = check.literal value(0) : i32
+  %second = check.literal value(1) : i32
+  %count = check.literal value(3) : i32
+  %actual = check.generate.fill value(-1) : tensor<1xi32>
+  %expected = check.generate.fill value(0) : tensor<1xi32>
+  kernel.launch @uniform_predicate_queue(%selector, %first, %second, %count, %actual) : (i32, i32, i32, i32, tensor<1xi32>)
+  check.expect.equal actual(%actual) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+check.case @uniform_predicate_queue_rotated_true {
+  %selector = check.literal value(0) : i32
+  %first = check.literal value(1) : i32
+  %second = check.literal value(0) : i32
+  %count = check.literal value(3) : i32
+  %actual = check.generate.fill value(-1) : tensor<1xi32>
+  %expected = check.generate.fill value(1) : tensor<1xi32>
+  kernel.launch @uniform_predicate_queue(%selector, %first, %second, %count, %actual) : (i32, i32, i32, i32, tensor<1xi32>)
+  check.expect.equal actual(%actual) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+check.case @uniform_predicate_queue_choose_first {
+  %selector = check.literal value(1) : i32
+  %first = check.literal value(1) : i32
+  %second = check.literal value(0) : i32
+  %count = check.literal value(0) : i32
+  %actual = check.generate.fill value(-1) : tensor<1xi32>
+  %expected = check.generate.fill value(1) : tensor<1xi32>
+  kernel.launch @uniform_predicate_queue(%selector, %first, %second, %count, %actual) : (i32, i32, i32, i32, tensor<1xi32>)
+  check.expect.equal actual(%actual) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+// The compile-throughput witness runs eight segments here. Alternating flags
+// select odd rows; each segment starts 64 elements after its predecessor.
+kernel.decl @segmented_guarded_read_ahead() launch(%flags: buffer, %input: buffer, %output: buffer, %length: index)
+
+check.case @segmented_predicate_queues_n0 {
+  %count = check.literal value(0) : index
+  %flags = check.generate.iota offset(-1) step(2) period(2) : tensor<32768xi32>
+  %input = check.generate.iota offset(1.0) step(1.0) : tensor<32768xf32>
+  %actual = check.generate.fill value(-1.0) : tensor<1xf32>
+  %expected = check.generate.fill value(0.0) : tensor<1xf32>
+  kernel.launch @segmented_guarded_read_ahead(%flags, %input, %actual, %count) : (tensor<32768xi32>, tensor<32768xf32>, tensor<1xf32>, index)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1xf32>
+  check.return
+}
+
+check.case @segmented_predicate_queues_n3 {
+  %count = check.literal value(3) : index
+  %flags = check.generate.iota offset(-1) step(2) period(2) : tensor<32768xi32>
+  %input = check.generate.iota offset(1.0) step(1.0) : tensor<32768xf32>
+  %actual = check.generate.fill value(-1.0) : tensor<1xf32>
+  %expected = check.generate.fill value(1808.0) : tensor<1xf32>
+  kernel.launch @segmented_guarded_read_ahead(%flags, %input, %actual, %count) : (tensor<32768xi32>, tensor<32768xf32>, tensor<1xf32>, index)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1xf32>
+  check.return
+}
+
+check.case @segmented_predicate_queues_n7 {
+  %count = check.literal value(7) : index
+  %flags = check.generate.iota offset(-1) step(2) period(2) : tensor<32768xi32>
+  %input = check.generate.iota offset(1.0) step(1.0) : tensor<32768xf32>
+  %actual = check.generate.fill value(-1.0) : tensor<1xf32>
+  %expected = check.generate.fill value(5472.0) : tensor<1xf32>
+  kernel.launch @segmented_guarded_read_ahead(%flags, %input, %actual, %count) : (tensor<32768xi32>, tensor<32768xf32>, tensor<1xf32>, index)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1xf32>
+  check.return
+}
+
+check.case @segmented_predicate_queues_n64 {
+  %count = check.literal value(64) : index
+  %flags = check.generate.iota offset(-1) step(2) period(2) : tensor<32768xi32>
+  %input = check.generate.iota offset(1.0) step(1.0) : tensor<32768xf32>
+  %actual = check.generate.fill value(-1.0) : tensor<1xf32>
+  %expected = check.generate.fill value(65792.0) : tensor<1xf32>
+  kernel.launch @segmented_guarded_read_ahead(%flags, %input, %actual, %count) : (tensor<32768xi32>, tensor<32768xf32>, tensor<1xf32>, index)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1xf32>
+  check.return
+}
