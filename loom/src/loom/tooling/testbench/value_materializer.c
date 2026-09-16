@@ -1092,6 +1092,74 @@ static iree_hal_buffer_params_t loom_testbench_buffer_params(
   return options->buffer_params;
 }
 
+static bool loom_testbench_should_stage_buffer_params(
+    const loom_testbench_value_materializer_options_t* options,
+    iree_hal_buffer_params_t buffer_params) {
+  if (!options->device || !options->transfer_queue) {
+    return false;
+  }
+  iree_hal_buffer_params_canonicalize(&buffer_params);
+  return !iree_all_bits_set(buffer_params.type,
+                            IREE_HAL_MEMORY_TYPE_HOST_VISIBLE);
+}
+
+static iree_hal_buffer_params_t loom_testbench_staging_buffer_params(
+    iree_hal_buffer_params_t buffer_params) {
+  iree_hal_buffer_params_canonicalize(&buffer_params);
+  buffer_params.usage |=
+      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING;
+  buffer_params.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  buffer_params.type &= ~IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  buffer_params.type |=
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
+  return buffer_params;
+}
+
+static iree_status_t loom_testbench_copy_buffer_view_to_params(
+    const loom_testbench_value_materializer_options_t* options,
+    iree_hal_buffer_view_t* source_buffer_view,
+    iree_hal_buffer_params_t target_params,
+    iree_hal_buffer_view_t** out_target_buffer_view) {
+  iree_hal_buffer_view_t* target_buffer_view = NULL;
+  iree_status_t status = iree_hal_buffer_view_create_uninitialized_like(
+      options->device_allocator, target_params, source_buffer_view,
+      &target_buffer_view);
+
+  iree_hal_semaphore_t* completion_semaphore = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_semaphore_create(
+        options->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &completion_semaphore);
+  }
+  if (iree_status_is_ok(status)) {
+    uint64_t completion_value = 1;
+    iree_hal_semaphore_list_t signal_semaphore_list = {
+        .count = 1,
+        .semaphores = &completion_semaphore,
+        .payload_values = &completion_value,
+    };
+    status = iree_hal_queue_copy(
+        options->transfer_queue, iree_hal_semaphore_list_empty(),
+        signal_semaphore_list, iree_hal_buffer_view_buffer(source_buffer_view),
+        0, iree_hal_buffer_view_buffer(target_buffer_view), 0,
+        iree_hal_buffer_view_byte_length(source_buffer_view),
+        IREE_HAL_COPY_FLAG_NONE);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_semaphore_wait(completion_semaphore, completion_value,
+                                       iree_infinite_timeout(),
+                                       IREE_ASYNC_WAIT_FLAG_NONE);
+    }
+  }
+
+  iree_hal_semaphore_release(completion_semaphore);
+  if (iree_status_is_ok(status)) {
+    *out_target_buffer_view = target_buffer_view;
+  } else {
+    iree_hal_buffer_view_release(target_buffer_view);
+  }
+  return status;
+}
+
 static iree_status_t loom_testbench_materialize_generated_source(
     const loom_testbench_value_materializer_options_t* options,
     const loom_testbench_value_source_plan_t* source,
@@ -1115,11 +1183,28 @@ static iree_status_t loom_testbench_materialize_generated_source(
   IREE_RETURN_IF_ERROR(loom_testbench_scalar_type_to_hal_element_type(
       loom_type_element_type(source->type), &element_type));
 
+  iree_hal_buffer_params_t buffer_params =
+      loom_testbench_buffer_params(options);
   iree_hal_buffer_view_t* buffer_view = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_buffer_view_generate(
-      options->device_allocator, loom_testbench_buffer_params(options),
-      shape_rank, shape, element_type, IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-      loom_testbench_generate_buffer, generator_state, &buffer_view));
+  if (loom_testbench_should_stage_buffer_params(options, buffer_params)) {
+    iree_hal_buffer_view_t* staging_buffer_view = NULL;
+    iree_status_t status = iree_hal_buffer_view_generate(
+        options->device_allocator,
+        loom_testbench_staging_buffer_params(buffer_params), shape_rank, shape,
+        element_type, IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
+        loom_testbench_generate_buffer, generator_state, &staging_buffer_view);
+    if (iree_status_is_ok(status)) {
+      status = loom_testbench_copy_buffer_view_to_params(
+          options, staging_buffer_view, buffer_params, &buffer_view);
+    }
+    iree_hal_buffer_view_release(staging_buffer_view);
+    IREE_RETURN_IF_ERROR(status);
+  } else {
+    IREE_RETURN_IF_ERROR(iree_hal_buffer_view_generate(
+        options->device_allocator, buffer_params, shape_rank, shape,
+        element_type, IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
+        loom_testbench_generate_buffer, generator_state, &buffer_view));
+  }
 
   loom_testbench_value_t value = {0};
   iree_status_t status =
@@ -1200,11 +1285,26 @@ static iree_status_t loom_testbench_materialize_file_read_npy(
                             "file provider returned NULL stream");
   }
 
+  iree_hal_buffer_params_t buffer_params =
+      loom_testbench_buffer_params(options);
   iree_hal_buffer_view_t* buffer_view = NULL;
-  iree_status_t status =
-      iree_numpy_npy_load_ndarray(stream, IREE_NUMPY_NPY_LOAD_OPTION_DEFAULT,
-                                  loom_testbench_buffer_params(options),
-                                  options->device_allocator, &buffer_view);
+  iree_status_t status = iree_ok_status();
+  if (loom_testbench_should_stage_buffer_params(options, buffer_params)) {
+    iree_hal_buffer_view_t* staging_buffer_view = NULL;
+    status = iree_numpy_npy_load_ndarray(
+        stream, IREE_NUMPY_NPY_LOAD_OPTION_DEFAULT,
+        loom_testbench_staging_buffer_params(buffer_params),
+        options->device_allocator, &staging_buffer_view);
+    if (iree_status_is_ok(status)) {
+      status = loom_testbench_copy_buffer_view_to_params(
+          options, staging_buffer_view, buffer_params, &buffer_view);
+    }
+    iree_hal_buffer_view_release(staging_buffer_view);
+  } else {
+    status = iree_numpy_npy_load_ndarray(
+        stream, IREE_NUMPY_NPY_LOAD_OPTION_DEFAULT, buffer_params,
+        options->device_allocator, &buffer_view);
+  }
   iree_io_stream_release(stream);
 
   if (iree_status_is_ok(status)) {
