@@ -136,9 +136,9 @@ class GraphExecTest : public ::testing::Test {
   std::atomic<bool> stream_marker_ran_{false};
 };
 
-// A replayed event record ends its event's association with the graph a
-// capture-time record left on it, and the launch releases every reference it
-// takes over exactly once.
+// A replayed event record ends the complete capture association a capture-time
+// record left on its event, and the launch releases every graph and recording-
+// stream reference it takes over exactly once.
 //
 // The records are split across a parent graph and a child graph so the child's
 // walk claims room in the same storage the parent's does, and there are more of
@@ -146,7 +146,8 @@ class GraphExecTest : public ::testing::Test {
 // to grow it and carry across the growth what it already collected. The test
 // keeps no reference to the capture graph, so the launch drops the last one and
 // the release of the context the graph retained counts the destruction.
-TEST_F(GraphExecTest, ReplayedEventRecordsDropEveryCapturedGraphReference) {
+TEST_F(GraphExecTest,
+       ReplayedEventRecordsDropEveryCapturedAssociationReference) {
   static constexpr iree_host_size_t kChildEventCount = 7;
   static constexpr iree_host_size_t kParentEventCount = 10;
   std::array<iree_hal_streaming_event_t*, kChildEventCount + kParentEventCount>
@@ -154,15 +155,17 @@ TEST_F(GraphExecTest, ReplayedEventRecordsDropEveryCapturedGraphReference) {
   iree_hal_streaming_graph_t* child_graph = nullptr;
   iree_hal_streaming_graph_t* parent_graph = nullptr;
   iree_hal_streaming_graph_exec_t* exec = nullptr;
+  iree_hal_streaming_graph_t* captured_graph = nullptr;
   // Hands these handles back, on the assertion failure paths as much as on the
   // last line. They start null and a release takes null, so a body cut short
-  // hands back only what it reached. The capture graph is not among them: the
-  // test drops its reference mid-body on purpose, to leave the events holding
-  // the last ones.
+  // hands back only what it reached. The test drops the capture graph reference
+  // mid-body on purpose and then clears it to leave the events holding the last
+  // ones without making an earlier assertion failure leak it.
   ScopeExit release_handles([&] {
     iree_hal_streaming_graph_exec_release(exec);
     iree_hal_streaming_graph_release(parent_graph);
     iree_hal_streaming_graph_release(child_graph);
+    iree_hal_streaming_graph_release(captured_graph);
     for (iree_hal_streaming_event_t* event : events) {
       iree_hal_streaming_event_release(event);
     }
@@ -180,15 +183,16 @@ TEST_F(GraphExecTest, ReplayedEventRecordsDropEveryCapturedGraphReference) {
   for (iree_hal_streaming_event_t* event : events) {
     IREE_ASSERT_OK(iree_hal_streaming_event_record(event, stream_));
   }
-  iree_hal_streaming_graph_t* captured_graph = nullptr;
   IREE_ASSERT_OK(iree_hal_streaming_end_capture(stream_, &captured_graph));
   ASSERT_NE(captured_graph, nullptr);
   for (iree_hal_streaming_event_t* event : events) {
     ASSERT_EQ(event->capture_graph, captured_graph);
+    ASSERT_EQ(event->recording_stream, stream_);
   }
 
   // Leaves the events holding the only references to the capture graph.
   iree_hal_streaming_graph_release(captured_graph);
+  captured_graph = nullptr;
 
   IREE_ASSERT_OK(iree_hal_streaming_graph_create(
       context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
@@ -219,16 +223,23 @@ TEST_F(GraphExecTest, ReplayedEventRecordsDropEveryCapturedGraphReference) {
   // nothing else.
   const int32_t context_references_before =
       iree_atomic_ref_count_load(&context_->ref_count);
+  const int32_t stream_references_before =
+      iree_atomic_ref_count_load(&stream_->ref_count);
   IREE_ASSERT_OK(iree_hal_streaming_graph_exec_launch(exec, stream_));
   IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
 
   for (iree_hal_streaming_event_t* event : events) {
     EXPECT_EQ(event->capture_graph, nullptr);
+    EXPECT_EQ(event->recording_stream, nullptr);
   }
   EXPECT_EQ(context_references_before - 1,
             iree_atomic_ref_count_load(&context_->ref_count))
       << "the launch destroyed the capture graph a number of times other than "
          "once";
+  EXPECT_EQ(stream_references_before - static_cast<int32_t>(events.size()),
+            iree_atomic_ref_count_load(&stream_->ref_count))
+      << "the launch did not release every displaced recording-stream "
+         "reference exactly once";
 }
 
 // An instantiated executable takes an event node's event only from the context

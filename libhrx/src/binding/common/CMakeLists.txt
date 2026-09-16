@@ -58,6 +58,7 @@ iree_cc_library(
     "fat_binary.h"
     "graph.h"
     "hrx_bridge.h"
+    "init_test_util.h"
     "internal.h"
     "ipc_memory.h"
     "kernel_arguments.h"
@@ -227,8 +228,10 @@ iree_cc_test(
   DEPS
     ::common
     iree::base
+    iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
+    libhrx::src::libhrx::hrx_static
     libhrx_defs
 )
 

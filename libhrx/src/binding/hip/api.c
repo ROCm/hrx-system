@@ -28,6 +28,7 @@
 
 #include "binding/hip/binding_internal.h"
 #include "binding/hip/blocking_printf_provider.h"
+#include "binding/hip/event_operations.h"
 #include "binding/hip/execution_context.h"
 #include "binding/hip/execution_resource.h"
 #include "binding/hip/execution_resource_descriptor.h"
@@ -1370,34 +1371,6 @@ static bool iree_hip_context_invalidate_stream_blocking_capture(
          (stream->capture_mode ==
               IREE_HAL_STREAMING_CAPTURE_MODE_THREAD_LOCAL &&
           stream->capture_owner_thread_id == thread_id))) {
-      iree_hal_streaming_stream_set_capture_status(
-          stream, IREE_HAL_STREAMING_CAPTURE_STATUS_INVALIDATED);
-      invalidated = true;
-    }
-    iree_slim_mutex_unlock(&stream->mutex);
-  }
-  iree_hip_context_release_stream_snapshot(context, streams, stream_count);
-  return invalidated;
-}
-
-static bool iree_hip_context_invalidate_capture_graph(
-    iree_hal_streaming_context_t* context, iree_hal_streaming_graph_t* graph) {
-  if (!graph) return false;
-  if (!iree_hal_streaming_context_has_capture_streams(context)) return false;
-  iree_hal_streaming_stream_t** streams = NULL;
-  iree_host_size_t stream_count = 0;
-  iree_status_t status =
-      iree_hip_context_snapshot_streams(context, &streams, &stream_count);
-  if (!iree_status_is_ok(status)) {
-    return iree_hip_status_to_capture_invalidation_failure(status);
-  }
-
-  bool invalidated = false;
-  for (iree_host_size_t i = 0; i < stream_count; ++i) {
-    iree_hal_streaming_stream_t* stream = streams[i];
-    iree_slim_mutex_lock(&stream->mutex);
-    if (stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE &&
-        stream->capture_graph == graph) {
       iree_hal_streaming_stream_set_capture_status(
           stream, IREE_HAL_STREAMING_CAPTURE_STATUS_INVALIDATED);
       invalidated = true;
@@ -12199,6 +12172,8 @@ HIPAPI hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) {
 //  - hipErrorLaunchFailure: A kernel launch associated with event failed.
 //  - hipErrorIllegalAddress: Invalid memory access in associated operations.
 //  - hipErrorNotInitialized: HIP runtime not initialized.
+//  - hipErrorOutOfMemory: A process-wide capture participant snapshot could
+//    not be allocated; the capture remains unchanged.
 //  - hipErrorCapturedEvent: The event's last record went into a stream
 //    capture, which names a dependency frontier and no queue point.
 //
@@ -12215,8 +12190,8 @@ HIPAPI hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) {
 // Performance note: For polling without blocking, use hipEventQuery.
 //
 // Graph capture: An event whose last record went into a stream capture is
-// refused with hipErrorCapturedEvent, and a stream of the current context
-// capturing into that graph is invalidated.
+// refused with hipErrorCapturedEvent, and every stream participating in that
+// exact capture session is invalidated.
 //
 // See also: hipEventQuery, hipEventRecord, hipStreamSynchronize.
 HIPAPI hipError_t hipEventSynchronize(hipEvent_t event) {
@@ -12243,20 +12218,12 @@ HIPAPI hipError_t hipEventSynchronize(hipEvent_t event) {
     HIP_RETURN_ERROR(init_result);
   }
 
-  iree_hal_streaming_graph_t* capture_graph =
-      iree_hal_streaming_event_acquire_capture_graph(streaming_event);
-  if (capture_graph) {
-    iree_hip_context_invalidate_capture_graph(context, capture_graph);
-    iree_hal_streaming_graph_release(capture_graph);
-    iree_hal_streaming_event_release(streaming_event);
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorCapturedEvent);
-  }
-
-  iree_status_t status = iree_hal_streaming_event_synchronize(streaming_event);
+  bool captured_path = false;
+  hipError_t result =
+      iree_hip_event_synchronize_retained(streaming_event, &captured_path);
   iree_hal_streaming_event_release(streaming_event);
-  hipError_t result = iree_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
+  if (captured_path) HIP_RETURN_ERROR(result);
   return result;
 }
 
@@ -12271,6 +12238,8 @@ HIPAPI hipError_t hipEventSynchronize(hipEvent_t event) {
 //  - hipErrorInvalidResourceHandle: Invalid event handle.
 //  - hipErrorLaunchFailure: A kernel launch associated with event failed.
 //  - hipErrorNotInitialized: HIP runtime not initialized.
+//  - hipErrorOutOfMemory: A process-wide capture participant snapshot could
+//    not be allocated; the capture remains unchanged.
 //  - hipErrorCapturedEvent: The event's last record went into a stream
 //    capture, which names a dependency frontier and no queue point.
 //
@@ -12295,8 +12264,8 @@ HIPAPI hipError_t hipEventSynchronize(hipEvent_t event) {
 // ```
 //
 // Graph capture: An event whose last record went into a stream capture is
-// refused with hipErrorCapturedEvent, and a stream of the current context
-// capturing into that graph is invalidated.
+// refused with hipErrorCapturedEvent, and every stream participating in that
+// exact capture session is invalidated.
 //
 // See also: hipEventSynchronize, hipEventRecord, hipStreamQuery.
 HIPAPI hipError_t hipEventQuery(hipEvent_t event) {
@@ -12315,45 +12284,12 @@ HIPAPI hipError_t hipEventQuery(hipEvent_t event) {
     HIP_RETURN_ERROR(init_result);
   }
 
-  iree_hal_streaming_graph_t* capture_graph =
-      iree_hal_streaming_event_acquire_capture_graph(streaming_event);
-  if (capture_graph) {
-    iree_hip_context_invalidate_capture_graph(context, capture_graph);
-    iree_hal_streaming_graph_release(capture_graph);
-    iree_hal_streaming_event_release(streaming_event);
-    HIP_RETURN_ERROR(hipErrorCapturedEvent);
-  }
-
-  int is_complete = 0;
-  iree_status_t status =
-      iree_hal_streaming_event_query(streaming_event, &is_complete);
+  bool captured_path = false;
+  hipError_t result =
+      iree_hip_event_query_retained(streaming_event, &captured_path);
   iree_hal_streaming_event_release(streaming_event);
-  // is_complete == 0 means complete, is_complete == 1 means not complete.
-  hipError_t result = iree_status_is_ok(status)
-                          ? (is_complete == 0 ? hipSuccess : hipErrorNotReady)
-                          : iree_status_to_hip_result(status);
+  if (captured_path) HIP_RETURN_ERROR(result);
   return result;
-}
-
-// Invalidates the stream capture |event|'s last record went into. An event
-// that names no capture invalidates nothing: one whose last record was
-// submitted, and one that has never been recorded.
-//
-// The graph identifies the capture and the context only narrows which streams
-// are searched for it, so this searches the event's own context: the one
-// hipEventElapsedTime has already established both of its events share. The
-// streams searched are then a property of the pair being measured, and an
-// entry point that resolves no current context needs none. hipEventQuery and
-// hipEventSynchronize search the current context instead, which
-// iree_hip_ensure_context hands them when they initialize the runtime. A
-// capture recorded on a stream belonging to neither context is found by none
-// of the three.
-static void iree_hip_invalidate_event_capture(
-    iree_hal_streaming_event_t* event) {
-  iree_hal_streaming_graph_t* capture_graph =
-      iree_hal_streaming_event_acquire_capture_graph(event);
-  iree_hip_context_invalidate_capture_graph(event->context, capture_graph);
-  iree_hal_streaming_graph_release(capture_graph);
 }
 
 // Computes elapsed time between two events.
@@ -12372,6 +12308,8 @@ static void iree_hip_invalidate_event_capture(
 //  - hipErrorNotReady: One or both records have not been reached.
 //  - hipErrorCapturedEvent: An event's last record went into a stream capture,
 //    which names a dependency frontier and no queue point.
+//  - hipErrorOutOfMemory: A process-wide capture participant snapshot could
+//    not be allocated; every capture remains unchanged.
 //  - hipErrorNotSupported: The device advertises no timestamp domain, so no
 //    clock the two records share can measure the interval between them.
 //
@@ -12424,53 +12362,7 @@ HIPAPI hipError_t hipEventElapsedTime(float* ms, hipEvent_t start,
     HIP_RETURN_ERROR(hipErrorInvalidHandle);
   }
 
-  if (start_event->context != stop_event->context) {
-    iree_hal_streaming_event_release(stop_event);
-    iree_hal_streaming_event_release(start_event);
-    HIP_RETURN_ERROR(hipErrorInvalidHandle);
-  }
-
-  iree_hal_streaming_event_timing_t timing =
-      IREE_HAL_STREAMING_EVENT_TIMING_UNTIMED;
-  iree_status_t status = iree_hal_streaming_event_elapsed_time(
-      ms, start_event, stop_event, &timing);
-  if (!iree_status_is_ok(status)) {
-    // The timeline a record names has failed; the event handles are fine.
-    result = iree_status_to_hip_result(status);
-    iree_hal_streaming_event_release(stop_event);
-    iree_hal_streaming_event_release(start_event);
-    HIP_RETURN_ERROR(result);
-  }
-  // Both events stay held across the outcomes below: refusing a captured pair
-  // reaches back into each event for the capture it names.
-  result = hipErrorInvalidHandle;
-  switch (timing) {
-    case IREE_HAL_STREAMING_EVENT_TIMING_MEASURED:
-      result = hipSuccess;
-      break;
-    case IREE_HAL_STREAMING_EVENT_TIMING_INCOMPLETE:
-      result = hipErrorNotReady;
-      break;
-    case IREE_HAL_STREAMING_EVENT_TIMING_UNTIMED:
-      // An event with timing disabled or without a submitted record is a bad
-      // handle here, not a bad value.
-      result = hipErrorInvalidHandle;
-      break;
-    case IREE_HAL_STREAMING_EVENT_TIMING_CAPTURED:
-      // Measuring a captured event is not something a capture can express, so
-      // the capture it belongs to is invalidated and the pair refused, which
-      // is how hipEventQuery and hipEventSynchronize answer a captured event
-      // too. Either event may be the captured one and an event whose last
-      // record was submitted names no capture, so both are offered and one
-      // naming no capture invalidates nothing.
-      iree_hip_invalidate_event_capture(start_event);
-      iree_hip_invalidate_event_capture(stop_event);
-      result = hipErrorCapturedEvent;
-      break;
-    case IREE_HAL_STREAMING_EVENT_TIMING_UNSUPPORTED:
-      result = hipErrorNotSupported;
-      break;
-  }
+  result = iree_hip_event_elapsed_time_retained(ms, start_event, stop_event);
   iree_hal_streaming_event_release(stop_event);
   iree_hal_streaming_event_release(start_event);
   HIP_RETURN_ERROR(result);

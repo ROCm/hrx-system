@@ -6,6 +6,7 @@
 
 #include "binding/hip/execution_context.h"
 
+#include "binding/hip/execution_context_test_util.h"
 #include "binding/hip/execution_resource.h"
 #include "binding/hip/execution_resource_descriptor.h"
 #include "binding/hip/stream.h"
@@ -92,6 +93,14 @@ static iree_once_flag iree_hip_execution_context_registry_once =
 static iree_hip_execution_context_registry_t
     iree_hip_execution_context_registry;
 
+// Process-global test-only factory installed before execution-context use.
+static iree_hip_execution_context_primary_resource_factory_t
+    iree_hip_execution_context_primary_resource_factory_for_testing;
+static iree_once_flag iree_hip_execution_context_primary_resource_factory_once =
+    IREE_ONCE_FLAG_INIT;
+static iree_slim_mutex_t
+    iree_hip_execution_context_primary_resource_factory_mutex;
+
 // Next process-unique context identifier. Zero permanently marks exhaustion.
 static iree_atomic_uint64_t iree_hip_next_execution_context_id =
     IREE_ATOMIC_VAR_INIT(1);
@@ -99,6 +108,28 @@ static iree_atomic_uint64_t iree_hip_next_execution_context_id =
 static void iree_hip_execution_context_registry_initialize(void) {
   iree_slim_mutex_initialize(&iree_hip_execution_context_registry.mutex);
   iree_hip_execution_context_registry.head = NULL;
+}
+
+static void iree_hip_execution_context_primary_resource_factory_initialize(
+    void) {
+  iree_slim_mutex_initialize(
+      &iree_hip_execution_context_primary_resource_factory_mutex);
+}
+
+iree_hip_execution_context_primary_resource_factory_t
+iree_hip_execution_context_exchange_primary_resource_factory_for_testing(
+    iree_hip_execution_context_primary_resource_factory_t factory) {
+  iree_call_once(
+      &iree_hip_execution_context_primary_resource_factory_once,
+      iree_hip_execution_context_primary_resource_factory_initialize);
+  iree_slim_mutex_lock(
+      &iree_hip_execution_context_primary_resource_factory_mutex);
+  iree_hip_execution_context_primary_resource_factory_t previous_factory =
+      iree_hip_execution_context_primary_resource_factory_for_testing;
+  iree_hip_execution_context_primary_resource_factory_for_testing = factory;
+  iree_slim_mutex_unlock(
+      &iree_hip_execution_context_primary_resource_factory_mutex);
+  return previous_factory;
 }
 
 static hipError_t iree_hip_execution_context_consume_status(
@@ -333,10 +364,23 @@ hipError_t iree_hip_execution_context_primary(
 
   hipDevResource sm_resource = {0};
   if (!context && result == hipSuccess) {
-    iree_status_t status = iree_hip_execution_resource_create_sm(
-        device, iree_hal_queue_family(primary_queue),
-        (iree_hal_queue_execution_resource_list_t){0},
-        hipDevSmResourceGroupDefault, &sm_resource);
+    const iree_hal_queue_family_t* queue_family =
+        iree_hal_queue_family(primary_queue);
+    iree_call_once(
+        &iree_hip_execution_context_primary_resource_factory_once,
+        iree_hip_execution_context_primary_resource_factory_initialize);
+    iree_slim_mutex_lock(
+        &iree_hip_execution_context_primary_resource_factory_mutex);
+    iree_hip_execution_context_primary_resource_factory_t resource_factory =
+        iree_hip_execution_context_primary_resource_factory_for_testing;
+    iree_slim_mutex_unlock(
+        &iree_hip_execution_context_primary_resource_factory_mutex);
+    iree_status_t status =
+        resource_factory ? resource_factory(device, queue_family, &sm_resource)
+                         : iree_hip_execution_resource_create_sm(
+                               device, queue_family,
+                               (iree_hal_queue_execution_resource_list_t){0},
+                               hipDevSmResourceGroupDefault, &sm_resource);
     if (!iree_status_is_ok(status)) {
       result = iree_hip_execution_context_consume_status(status);
     }
@@ -787,35 +831,6 @@ static bool iree_hip_execution_context_invalidate_captures(
   return had_capture;
 }
 
-// Invalidates streams participating in |capture_graph|. The event retaining
-// the graph also retains |common_context| for the duration of the call.
-static iree_status_t iree_hip_execution_context_invalidate_capture_graph(
-    iree_hal_streaming_context_t* common_context,
-    iree_hal_streaming_graph_t* capture_graph) {
-  IREE_ASSERT_ARGUMENT(common_context);
-  IREE_ASSERT_ARGUMENT(capture_graph);
-
-  iree_hal_streaming_stream_t** streams = NULL;
-  iree_host_size_t stream_count = 0;
-  iree_status_t status = iree_hal_streaming_context_snapshot_streams(
-      common_context, &streams, &stream_count);
-  if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < stream_count; ++i) {
-      iree_hal_streaming_stream_t* stream = streams[i];
-      iree_slim_mutex_lock(&stream->mutex);
-      if (stream->capture_graph == capture_graph &&
-          stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
-        iree_hal_streaming_stream_set_capture_status(
-            stream, IREE_HAL_STREAMING_CAPTURE_STATUS_INVALIDATED);
-      }
-      iree_slim_mutex_unlock(&stream->mutex);
-    }
-  }
-  iree_hal_streaming_context_release_stream_snapshot(common_context, streams,
-                                                     stream_count);
-  return status;
-}
-
 hipError_t iree_hip_execution_context_record_event(
     hipExecutionCtx_t context_handle, iree_hal_streaming_event_t* event) {
   IREE_ASSERT_ARGUMENT(event);
@@ -869,15 +884,16 @@ hipError_t iree_hip_execution_context_wait_event(
       iree_hip_execution_context_resolve_live(context_handle);
   if (!context) return hipErrorInvalidValue;
 
-  iree_hal_streaming_graph_t* capture_graph =
-      iree_hal_streaming_event_acquire_capture_graph(event);
+  iree_hal_streaming_event_capture_association_t capture_association;
+  iree_hal_streaming_event_acquire_capture_association(event,
+                                                       &capture_association);
   iree_status_t status = iree_ok_status();
-  const bool event_is_captured = capture_graph != NULL;
-  if (capture_graph) {
-    status = iree_hip_execution_context_invalidate_capture_graph(event->context,
-                                                                 capture_graph);
+  const bool event_is_captured = capture_association.graph != NULL;
+  iree_hal_streaming_capture_invalidation_t capture_invalidation = {0};
+  if (event_is_captured) {
+    status = iree_hal_streaming_event_capture_invalidation_prepare(
+        &capture_association, 1, &capture_invalidation);
   }
-  iree_hal_streaming_graph_release(capture_graph);
 
   iree_hip_execution_context_stream_snapshot_t snapshot = {0};
   iree_hal_streaming_recorded_point_t recorded_point = {0};
@@ -890,6 +906,13 @@ hipError_t iree_hip_execution_context_wait_event(
     status = iree_hip_execution_context_snapshot_locked(context, &snapshot);
   }
   if (iree_status_is_ok(status)) {
+    // Both process-wide source-session and execution-context stream snapshots
+    // are now fully retained. Applying either invalidation below cannot fail,
+    // so allocation failure never leaves one side changed without the other.
+    if (event_is_captured) {
+      (void)iree_hal_streaming_event_capture_invalidation_apply(
+          &capture_association, 1, &capture_invalidation);
+    }
     target_is_captured =
         iree_hip_execution_context_invalidate_captures(&snapshot);
   }
@@ -924,6 +947,10 @@ hipError_t iree_hip_execution_context_wait_event(
     }
   }
   iree_slim_mutex_unlock(&context->mutex);
+
+  iree_hal_streaming_event_capture_invalidation_deinitialize(
+      &capture_invalidation);
+  iree_hal_streaming_event_release_capture_association(&capture_association);
 
   if (iree_status_is_ok(status) && fan_out_wait) {
     const iree_hal_semaphore_list_t wait = {

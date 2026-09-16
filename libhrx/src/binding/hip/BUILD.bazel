@@ -165,6 +165,25 @@ hrx_cc_library(
 )
 
 hrx_cc_library(
+    name = "event_operations",
+    srcs = ["event_operations.c"],
+    hdrs = [
+        "api.h",
+        "event_operations.h",
+    ],
+    includes = [
+        "../..",
+        "../../../include",
+        "../../libhrx",
+    ],
+    deps = [
+        "//libhrx/src/binding/common",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+hrx_cc_library(
     name = "execution_resource_descriptor",
     srcs = ["execution_resource_descriptor.c"],
     hdrs = ["execution_resource_descriptor.h"],
@@ -187,7 +206,10 @@ hrx_cc_library(
 hrx_cc_library(
     name = "execution_context",
     srcs = ["execution_context.c"],
-    hdrs = ["execution_context.h"],
+    hdrs = [
+        "execution_context.h",
+        "execution_context_test_util.h",
+    ],
     includes = [
         "../..",
         "../../../include",
@@ -256,6 +278,7 @@ hrx_cc_shared_library(
     target_compatible_with = _LINUX_COMPATIBILITY,
     deps = [
         ":blocking_printf_provider",
+        ":event_operations",
         ":execution_context",
         ":execution_resource",
         ":execution_resource_descriptor",
@@ -297,6 +320,34 @@ hrx_cc_test(
     target_compatible_with = _LINUX_COMPATIBILITY,
     deps = [
         "//libhrx/src/binding/common",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "event_operations_test",
+    srcs = ["event_operations_test.cc"],
+    deps = [
+        ":event_operations",
+        "//libhrx/src/binding/common",
+        "//libhrx/src/libhrx:hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "execution_context_test",
+    srcs = ["execution_context_test.cc"],
+    deps = [
+        ":execution_context",
+        "//libhrx/src/binding/common",
+        "//libhrx/src/libhrx:hrx_static",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",

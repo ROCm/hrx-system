@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstring>
 
+#include "common/init_test_util.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -563,6 +564,607 @@ TEST(GraphTest, LaunchReportsHeapArgumentStorageAllocationFailure) {
   EXPECT_EQ(1, allocator.allocation_attempt_count);
   EXPECT_EQ(0, allocator.successful_allocation_count);
   EXPECT_EQ(0, allocator.free_count);
+}
+
+class CrossContextCaptureTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    IREE_ASSERT_OK(HRX_CALL(hrx_cpu_initialize(/*flags=*/0)));
+    cpu_initialized_ = true;
+    IREE_ASSERT_OK(HRX_CALL(hrx_cpu_device_get(/*index=*/0, &hrx_device_)));
+
+    device_entry_.hrx_device = hrx_device_;
+    device_entry_.hal_device = hrx_device_hal(hrx_device_);
+    iree_slim_mutex_initialize(&device_entry_.primary_context_mutex);
+    iree_slim_mutex_initialize(&device_entry_.graph_memory_mutex);
+    iree_arena_block_pool_initialize(/*block_size=*/64 * 1024,
+                                     iree_allocator_system(),
+                                     &device_entry_.block_pool);
+    device_entry_initialized_ = true;
+
+    device_registry_.host_allocator = iree_allocator_system();
+    iree_slim_mutex_initialize(&device_registry_.context_list.mutex);
+    iree_notification_initialize(&device_registry_.context_list.changed);
+    iree_hal_streaming_set_device_registry_for_testing(&device_registry_);
+    device_registry_installed_ = true;
+
+    iree_hal_streaming_context_flags_t context_flags = {};
+    context_flags.scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO;
+    IREE_ASSERT_OK(iree_hal_streaming_context_create(
+        &device_entry_, context_flags, allocators_[0].AsAllocator(),
+        &contexts_[0]));
+    IREE_ASSERT_OK(iree_hal_streaming_context_create(
+        &device_entry_, context_flags, allocators_[1].AsAllocator(),
+        &contexts_[1]));
+  }
+
+  void TearDown() override {
+    allocators_[0].fail_allocations = false;
+    allocators_[1].fail_allocations = false;
+    if (origin_stream_ && origin_stream_->capture_status !=
+                              IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
+      iree_status_ignore(iree_hal_streaming_end_capture(origin_stream_,
+                                                        /*out_graph=*/nullptr));
+    }
+    if (participant_stream_ && participant_stream_->capture_status !=
+                                   IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
+      iree_status_ignore(iree_hal_streaming_end_capture(participant_stream_,
+                                                        /*out_graph=*/nullptr));
+    }
+    iree_hal_streaming_event_release(second_event_);
+    iree_hal_streaming_event_release(event_);
+    iree_hal_streaming_stream_release(participant_stream_);
+    iree_hal_streaming_stream_release(origin_stream_);
+    iree_hal_streaming_graph_release(shared_graph_);
+    iree_hal_streaming_context_release(contexts_[1]);
+    iree_hal_streaming_context_release(contexts_[0]);
+    if (device_registry_installed_) {
+      EXPECT_EQ(nullptr, device_registry_.context_list.head);
+      EXPECT_EQ(nullptr, device_registry_.context_list.tail);
+      iree_hal_streaming_set_device_registry_for_testing(nullptr);
+      iree_notification_deinitialize(&device_registry_.context_list.changed);
+      iree_slim_mutex_deinitialize(&device_registry_.context_list.mutex);
+    }
+    if (device_entry_initialized_) {
+      iree_arena_block_pool_deinitialize(&device_entry_.block_pool);
+      iree_slim_mutex_deinitialize(&device_entry_.graph_memory_mutex);
+      iree_slim_mutex_deinitialize(&device_entry_.primary_context_mutex);
+    }
+    if (cpu_initialized_) {
+      IREE_EXPECT_OK(HRX_CALL(hrx_cpu_shutdown()));
+    }
+  }
+
+  iree_status_t CreateNonBlockingStream(
+      iree_hal_streaming_context_t* context, iree_allocator_t host_allocator,
+      iree_hal_streaming_stream_t** out_stream) {
+    IREE_ASSERT_ARGUMENT(context);
+    IREE_ASSERT_ARGUMENT(out_stream);
+    *out_stream = nullptr;
+    const iree_hal_queue_family_t* queue_family =
+        iree_hal_device_queue_family(context->device, /*family_ordinal=*/0);
+    if (!queue_family) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "task device has no queue family");
+    }
+    iree_hal_queue_params_t queue_params;
+    iree_hal_queue_params_initialize(&queue_params);
+    iree_hal_queue_t* queue = nullptr;
+    IREE_RETURN_IF_ERROR(
+        iree_hal_queue_acquire(queue_family, &queue_params, &queue));
+    iree_status_t status = iree_hal_streaming_stream_create(
+        context, queue, IREE_HAL_STREAMING_STREAM_FLAG_NON_BLOCKING,
+        /*priority=*/0, host_allocator, out_stream);
+    iree_hal_queue_release(queue);
+    return status;
+  }
+
+  void BeginJoinedCapture() {
+    IREE_ASSERT_OK(CreateNonBlockingStream(
+        contexts_[0], allocators_[0].AsAllocator(), &origin_stream_));
+    IREE_ASSERT_OK(CreateNonBlockingStream(
+        contexts_[1], allocators_[1].AsAllocator(), &participant_stream_));
+    IREE_ASSERT_OK(iree_hal_streaming_event_create(
+        contexts_[0], IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+        allocators_[0].AsAllocator(), &event_));
+    IREE_ASSERT_OK(iree_hal_streaming_begin_capture(
+        origin_stream_, IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL));
+    IREE_ASSERT_OK(iree_hal_streaming_event_record(event_, origin_stream_));
+    IREE_ASSERT_OK(iree_hal_streaming_stream_wait_event(
+        participant_stream_, event_, /*capture_external_wait=*/false));
+  }
+
+  void ExpectExactActiveSession(iree_hal_streaming_graph_t* graph,
+                                unsigned long long capture_id) {
+    EXPECT_EQ(IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE,
+              origin_stream_->capture_status);
+    EXPECT_EQ(IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE,
+              participant_stream_->capture_status);
+    EXPECT_EQ(graph, origin_stream_->capture_graph);
+    EXPECT_EQ(graph, participant_stream_->capture_graph);
+    EXPECT_EQ(capture_id, origin_stream_->capture_id);
+    EXPECT_EQ(capture_id, participant_stream_->capture_id);
+  }
+
+  void ExpectCaptureCleared() {
+    EXPECT_EQ(IREE_HAL_STREAMING_CAPTURE_STATUS_NONE,
+              origin_stream_->capture_status);
+    EXPECT_EQ(IREE_HAL_STREAMING_CAPTURE_STATUS_NONE,
+              participant_stream_->capture_status);
+    EXPECT_EQ(nullptr, origin_stream_->capture_graph);
+    EXPECT_EQ(nullptr, participant_stream_->capture_graph);
+    EXPECT_EQ(0u, origin_stream_->capture_id);
+    EXPECT_EQ(0u, participant_stream_->capture_id);
+  }
+
+  std::array<ProbedHostAllocator, 2> allocators_;
+  bool cpu_initialized_ = false;
+  bool device_entry_initialized_ = false;
+  bool device_registry_installed_ = false;
+  hrx_device_t hrx_device_ = nullptr;
+  iree_hal_streaming_device_t device_entry_ = {};
+  iree_hal_streaming_device_registry_t device_registry_ = {};
+  std::array<iree_hal_streaming_context_t*, 2> contexts_ = {};
+  iree_hal_streaming_stream_t* origin_stream_ = nullptr;
+  iree_hal_streaming_stream_t* participant_stream_ = nullptr;
+  iree_hal_streaming_event_t* event_ = nullptr;
+  iree_hal_streaming_event_t* second_event_ = nullptr;
+  iree_hal_streaming_graph_t* shared_graph_ = nullptr;
+};
+
+TEST_F(CrossContextCaptureTest, EndsJoinedSessionAndClearsEveryParticipant) {
+  BeginJoinedCapture();
+  ASSERT_FALSE(HasFatalFailure());
+  iree_hal_streaming_graph_t* const graph = origin_stream_->capture_graph;
+  ASSERT_NE(nullptr, graph);
+  ASSERT_EQ(graph, participant_stream_->capture_graph);
+
+  iree_hal_streaming_graph_t* captured_graph = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_streaming_end_capture(origin_stream_, &captured_graph));
+  EXPECT_EQ(graph, captured_graph);
+  ExpectCaptureCleared();
+  iree_hal_streaming_graph_release(captured_graph);
+}
+
+TEST_F(CrossContextCaptureTest, RejectsUnjoinedParticipantAndClearsSession) {
+  BeginJoinedCapture();
+  ASSERT_FALSE(HasFatalFailure());
+  iree_hal_streaming_graph_t* const graph = origin_stream_->capture_graph;
+  ASSERT_NE(nullptr, graph);
+
+  iree_hal_streaming_graph_node_t* node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      graph, participant_stream_->capture_dependencies,
+      participant_stream_->capture_dependency_count, &node));
+  IREE_ASSERT_OK(
+      iree_hal_streaming_capture_set_last_node(participant_stream_, node));
+
+  iree_hal_streaming_graph_t* captured_graph = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_ABORTED,
+      iree_hal_streaming_end_capture(origin_stream_, &captured_graph));
+  EXPECT_EQ(nullptr, captured_graph);
+  iree_hal_streaming_graph_release(captured_graph);
+  ExpectCaptureCleared();
+}
+
+TEST_F(CrossContextCaptureTest, InvalidatesAndClearsEveryParticipant) {
+  BeginJoinedCapture();
+  ASSERT_FALSE(HasFatalFailure());
+  iree_hal_streaming_graph_t* const graph = origin_stream_->capture_graph;
+  ASSERT_NE(nullptr, graph);
+  const unsigned long long capture_id = origin_stream_->capture_id;
+  ASSERT_NE(0u, capture_id);
+
+  bool invalidated = false;
+  IREE_ASSERT_OK(iree_hal_streaming_invalidate_capture_graph(graph, capture_id,
+                                                             &invalidated));
+  EXPECT_TRUE(invalidated);
+  EXPECT_EQ(IREE_HAL_STREAMING_CAPTURE_STATUS_INVALIDATED,
+            origin_stream_->capture_status);
+  EXPECT_EQ(IREE_HAL_STREAMING_CAPTURE_STATUS_INVALIDATED,
+            participant_stream_->capture_status);
+
+  iree_hal_streaming_graph_t* captured_graph = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DATA_LOSS,
+      iree_hal_streaming_end_capture(origin_stream_, &captured_graph));
+  EXPECT_EQ(nullptr, captured_graph);
+  iree_hal_streaming_graph_release(captured_graph);
+  ExpectCaptureCleared();
+}
+
+TEST_F(CrossContextCaptureTest,
+       InvalidationDoesNotCrossIndependentSameGraphSessions) {
+  IREE_ASSERT_OK(CreateNonBlockingStream(
+      contexts_[0], allocators_[0].AsAllocator(), &origin_stream_));
+  IREE_ASSERT_OK(CreateNonBlockingStream(
+      contexts_[1], allocators_[1].AsAllocator(), &participant_stream_));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      contexts_[0], IREE_HAL_STREAMING_GRAPH_FLAG_NONE,
+      allocators_[0].AsAllocator(), &shared_graph_));
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      contexts_[0], IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+      allocators_[0].AsAllocator(), &event_));
+
+  IREE_ASSERT_OK(iree_hal_streaming_begin_capture_to_graph(
+      origin_stream_, shared_graph_, /*dependencies=*/nullptr,
+      /*dependency_count=*/0, IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL));
+  IREE_ASSERT_OK(iree_hal_streaming_begin_capture_to_graph(
+      participant_stream_, shared_graph_, /*dependencies=*/nullptr,
+      /*dependency_count=*/0, IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL));
+  const unsigned long long origin_capture_id = origin_stream_->capture_id;
+  const unsigned long long participant_capture_id =
+      participant_stream_->capture_id;
+  EXPECT_NE(origin_capture_id, participant_capture_id);
+
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(event_, origin_stream_));
+  iree_hal_streaming_event_capture_association_t association;
+  iree_hal_streaming_event_acquire_capture_association(event_, &association);
+  bool invalidated = false;
+  IREE_EXPECT_OK(iree_hal_streaming_invalidate_event_captures(&association, 1,
+                                                              &invalidated));
+  iree_hal_streaming_event_release_capture_association(&association);
+  EXPECT_TRUE(invalidated);
+  EXPECT_EQ(IREE_HAL_STREAMING_CAPTURE_STATUS_INVALIDATED,
+            origin_stream_->capture_status);
+  EXPECT_EQ(IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE,
+            participant_stream_->capture_status);
+  EXPECT_EQ(shared_graph_, participant_stream_->capture_graph);
+  EXPECT_EQ(participant_capture_id, participant_stream_->capture_id);
+
+  iree_hal_streaming_graph_t* captured_graph = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DATA_LOSS,
+      iree_hal_streaming_end_capture(origin_stream_, &captured_graph));
+  EXPECT_EQ(nullptr, captured_graph);
+  iree_hal_streaming_graph_release(captured_graph);
+  EXPECT_EQ(IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE,
+            participant_stream_->capture_status);
+  EXPECT_EQ(shared_graph_, participant_stream_->capture_graph);
+  EXPECT_EQ(participant_capture_id, participant_stream_->capture_id);
+  IREE_EXPECT_OK(iree_hal_streaming_end_capture(participant_stream_,
+                                                /*out_graph=*/nullptr));
+}
+
+TEST_F(CrossContextCaptureTest, EndDoesNotCrossIndependentSameGraphSessions) {
+  IREE_ASSERT_OK(CreateNonBlockingStream(
+      contexts_[0], allocators_[0].AsAllocator(), &origin_stream_));
+  IREE_ASSERT_OK(CreateNonBlockingStream(
+      contexts_[1], allocators_[1].AsAllocator(), &participant_stream_));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      contexts_[0], IREE_HAL_STREAMING_GRAPH_FLAG_NONE,
+      allocators_[0].AsAllocator(), &shared_graph_));
+
+  IREE_ASSERT_OK(iree_hal_streaming_begin_capture_to_graph(
+      origin_stream_, shared_graph_, /*dependencies=*/nullptr,
+      /*dependency_count=*/0, IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL));
+  IREE_ASSERT_OK(iree_hal_streaming_begin_capture_to_graph(
+      participant_stream_, shared_graph_, /*dependencies=*/nullptr,
+      /*dependency_count=*/0, IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL));
+  const unsigned long long origin_capture_id = origin_stream_->capture_id;
+  const unsigned long long participant_capture_id =
+      participant_stream_->capture_id;
+  EXPECT_NE(origin_capture_id, participant_capture_id);
+
+  // Give the second independent session a frontier that would be unjoined from
+  // the first. Session matching must exclude it before reachability or cleanup.
+  iree_hal_streaming_graph_node_t* participant_node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      shared_graph_, /*dependencies=*/nullptr, /*dependency_count=*/0,
+      &participant_node));
+  IREE_ASSERT_OK(iree_hal_streaming_capture_set_last_node(participant_stream_,
+                                                          participant_node));
+
+  IREE_EXPECT_OK(
+      iree_hal_streaming_end_capture(origin_stream_, /*out_graph=*/nullptr));
+  EXPECT_EQ(IREE_HAL_STREAMING_CAPTURE_STATUS_NONE,
+            origin_stream_->capture_status);
+  EXPECT_EQ(IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE,
+            participant_stream_->capture_status);
+  EXPECT_EQ(shared_graph_, participant_stream_->capture_graph);
+  EXPECT_EQ(participant_capture_id, participant_stream_->capture_id);
+  IREE_EXPECT_OK(iree_hal_streaming_end_capture(participant_stream_,
+                                                /*out_graph=*/nullptr));
+}
+
+TEST_F(CrossContextCaptureTest, EventWaitRejectsIndependentSameGraphSession) {
+  IREE_ASSERT_OK(CreateNonBlockingStream(
+      contexts_[0], allocators_[0].AsAllocator(), &origin_stream_));
+  IREE_ASSERT_OK(CreateNonBlockingStream(
+      contexts_[1], allocators_[1].AsAllocator(), &participant_stream_));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      contexts_[0], IREE_HAL_STREAMING_GRAPH_FLAG_NONE,
+      allocators_[0].AsAllocator(), &shared_graph_));
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      contexts_[0], IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+      allocators_[0].AsAllocator(), &event_));
+
+  IREE_ASSERT_OK(iree_hal_streaming_begin_capture_to_graph(
+      origin_stream_, shared_graph_, /*dependencies=*/nullptr,
+      /*dependency_count=*/0, IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL));
+  IREE_ASSERT_OK(iree_hal_streaming_begin_capture_to_graph(
+      participant_stream_, shared_graph_, /*dependencies=*/nullptr,
+      /*dependency_count=*/0, IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL));
+  const unsigned long long origin_capture_id = origin_stream_->capture_id;
+  const unsigned long long participant_capture_id =
+      participant_stream_->capture_id;
+  ASSERT_NE(origin_capture_id, participant_capture_id);
+
+  iree_hal_streaming_graph_node_t* origin_node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      shared_graph_, /*dependencies=*/nullptr, /*dependency_count=*/0,
+      &origin_node));
+  IREE_ASSERT_OK(
+      iree_hal_streaming_capture_set_last_node(origin_stream_, origin_node));
+  iree_hal_streaming_graph_node_t* participant_node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      shared_graph_, /*dependencies=*/nullptr, /*dependency_count=*/0,
+      &participant_node));
+  IREE_ASSERT_OK(iree_hal_streaming_capture_set_last_node(participant_stream_,
+                                                          participant_node));
+
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(event_, origin_stream_));
+  iree_status_t status = iree_hal_streaming_stream_wait_event(
+      participant_stream_, event_, /*capture_external_wait=*/false);
+  EXPECT_EQ(IREE_STATUS_INVALID_ARGUMENT, iree_status_code(status));
+  iree_status_ignore(status);
+
+  EXPECT_EQ(IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE,
+            origin_stream_->capture_status);
+  EXPECT_EQ(shared_graph_, origin_stream_->capture_graph);
+  EXPECT_EQ(origin_capture_id, origin_stream_->capture_id);
+  EXPECT_EQ(IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE,
+            participant_stream_->capture_status);
+  EXPECT_EQ(shared_graph_, participant_stream_->capture_graph);
+  EXPECT_EQ(participant_capture_id, participant_stream_->capture_id);
+  ASSERT_EQ(1u, participant_stream_->capture_dependency_count);
+  EXPECT_EQ(participant_node, participant_stream_->capture_dependencies[0]);
+
+  IREE_EXPECT_OK(
+      iree_hal_streaming_end_capture(origin_stream_, /*out_graph=*/nullptr));
+  IREE_EXPECT_OK(iree_hal_streaming_end_capture(participant_stream_,
+                                                /*out_graph=*/nullptr));
+}
+
+TEST_F(CrossContextCaptureTest,
+       InvalidationSnapshotFailureLeavesExactSessionRetryable) {
+  BeginJoinedCapture();
+  ASSERT_FALSE(HasFatalFailure());
+  iree_hal_streaming_graph_t* const graph = origin_stream_->capture_graph;
+  ASSERT_NE(nullptr, graph);
+  const unsigned long long capture_id = origin_stream_->capture_id;
+  ASSERT_NE(0u, capture_id);
+
+  const int origin_success_count = allocators_[0].successful_allocation_count;
+  const int origin_free_count = allocators_[0].free_count;
+  const int participant_attempt_count = allocators_[1].allocation_attempt_count;
+  allocators_[1].fail_allocations = true;
+  bool invalidated = true;
+  iree_status_t status = iree_hal_streaming_invalidate_capture_graph(
+      graph, capture_id, &invalidated);
+  allocators_[1].fail_allocations = false;
+
+  EXPECT_EQ(IREE_STATUS_RESOURCE_EXHAUSTED, iree_status_code(status));
+  iree_status_ignore(status);
+  EXPECT_FALSE(invalidated);
+  EXPECT_EQ(origin_success_count + 1,
+            allocators_[0].successful_allocation_count);
+  EXPECT_EQ(origin_free_count + 1, allocators_[0].free_count);
+  EXPECT_EQ(participant_attempt_count + 1,
+            allocators_[1].allocation_attempt_count);
+  ExpectExactActiveSession(graph, capture_id);
+
+  IREE_ASSERT_OK(iree_hal_streaming_invalidate_capture_graph(graph, capture_id,
+                                                             &invalidated));
+  EXPECT_TRUE(invalidated);
+  iree_hal_streaming_graph_t* captured_graph = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DATA_LOSS,
+      iree_hal_streaming_end_capture(origin_stream_, &captured_graph));
+  EXPECT_EQ(nullptr, captured_graph);
+  iree_hal_streaming_graph_release(captured_graph);
+  ExpectCaptureCleared();
+}
+
+TEST_F(CrossContextCaptureTest, EndSnapshotFailureLeavesExactSessionRetryable) {
+  BeginJoinedCapture();
+  ASSERT_FALSE(HasFatalFailure());
+  iree_hal_streaming_graph_t* const graph = origin_stream_->capture_graph;
+  ASSERT_NE(nullptr, graph);
+  const unsigned long long capture_id = origin_stream_->capture_id;
+  ASSERT_NE(0u, capture_id);
+
+  const int origin_success_count = allocators_[0].successful_allocation_count;
+  const int origin_free_count = allocators_[0].free_count;
+  const int participant_attempt_count = allocators_[1].allocation_attempt_count;
+  allocators_[1].fail_allocations = true;
+  iree_hal_streaming_graph_t* failure_graph = nullptr;
+  iree_status_t status =
+      iree_hal_streaming_end_capture(origin_stream_, &failure_graph);
+  allocators_[1].fail_allocations = false;
+
+  EXPECT_EQ(IREE_STATUS_RESOURCE_EXHAUSTED, iree_status_code(status));
+  iree_status_ignore(status);
+  EXPECT_EQ(nullptr, failure_graph);
+  iree_hal_streaming_graph_release(failure_graph);
+  EXPECT_EQ(origin_success_count + 1,
+            allocators_[0].successful_allocation_count);
+  EXPECT_EQ(origin_free_count + 1, allocators_[0].free_count);
+  EXPECT_EQ(participant_attempt_count + 1,
+            allocators_[1].allocation_attempt_count);
+  ExpectExactActiveSession(graph, capture_id);
+
+  iree_hal_streaming_graph_t* captured_graph = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_streaming_end_capture(origin_stream_, &captured_graph));
+  EXPECT_EQ(graph, captured_graph);
+  ExpectCaptureCleared();
+  iree_hal_streaming_graph_release(captured_graph);
+}
+
+TEST_F(CrossContextCaptureTest,
+       StaleEventDoesNotTouchSameStreamGraphSuccessor) {
+  IREE_ASSERT_OK(CreateNonBlockingStream(
+      contexts_[0], allocators_[0].AsAllocator(), &origin_stream_));
+  IREE_ASSERT_OK(CreateNonBlockingStream(
+      contexts_[1], allocators_[1].AsAllocator(), &participant_stream_));
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      contexts_[0], IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+      allocators_[0].AsAllocator(), &event_));
+
+  IREE_ASSERT_OK(iree_hal_streaming_begin_capture(
+      origin_stream_, IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL));
+  const unsigned long long first_capture_id = origin_stream_->capture_id;
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(event_, origin_stream_));
+  IREE_ASSERT_OK(
+      iree_hal_streaming_end_capture(origin_stream_, &shared_graph_));
+  ASSERT_NE(nullptr, shared_graph_);
+
+  IREE_ASSERT_OK(iree_hal_streaming_begin_capture_to_graph(
+      origin_stream_, shared_graph_, /*dependencies=*/nullptr,
+      /*dependency_count=*/0, IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL));
+  const unsigned long long successor_capture_id = origin_stream_->capture_id;
+  ASSERT_NE(first_capture_id, successor_capture_id);
+
+  iree_hal_streaming_event_capture_association_t association;
+  iree_hal_streaming_event_acquire_capture_association(event_, &association);
+  EXPECT_EQ(shared_graph_, association.graph);
+  EXPECT_EQ(origin_stream_, association.recording_stream);
+  EXPECT_EQ(first_capture_id, association.capture_id);
+  bool invalidated = true;
+  IREE_EXPECT_OK(iree_hal_streaming_invalidate_event_captures(&association, 1,
+                                                              &invalidated));
+  EXPECT_FALSE(invalidated);
+  iree_hal_streaming_event_release_capture_association(&association);
+
+  iree_status_t wait_status = iree_hal_streaming_stream_wait_event(
+      participant_stream_, event_, /*capture_external_wait=*/false);
+  EXPECT_EQ(IREE_STATUS_INVALID_ARGUMENT, iree_status_code(wait_status));
+  iree_status_ignore(wait_status);
+  EXPECT_EQ(IREE_HAL_STREAMING_CAPTURE_STATUS_NONE,
+            participant_stream_->capture_status);
+  EXPECT_EQ(IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE,
+            origin_stream_->capture_status);
+  EXPECT_EQ(shared_graph_, origin_stream_->capture_graph);
+  EXPECT_EQ(successor_capture_id, origin_stream_->capture_id);
+
+  IREE_EXPECT_OK(
+      iree_hal_streaming_end_capture(origin_stream_, /*out_graph=*/nullptr));
+}
+
+TEST_F(CrossContextCaptureTest,
+       StaleEventDoesNotTouchDifferentContextSuccessor) {
+  IREE_ASSERT_OK(CreateNonBlockingStream(
+      contexts_[0], allocators_[0].AsAllocator(), &origin_stream_));
+  IREE_ASSERT_OK(CreateNonBlockingStream(
+      contexts_[1], allocators_[1].AsAllocator(), &participant_stream_));
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      contexts_[0], IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+      allocators_[0].AsAllocator(), &event_));
+
+  IREE_ASSERT_OK(iree_hal_streaming_begin_capture(
+      origin_stream_, IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL));
+  const unsigned long long first_capture_id = origin_stream_->capture_id;
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(event_, origin_stream_));
+  IREE_ASSERT_OK(
+      iree_hal_streaming_end_capture(origin_stream_, &shared_graph_));
+  ASSERT_NE(nullptr, shared_graph_);
+
+  IREE_ASSERT_OK(iree_hal_streaming_begin_capture_to_graph(
+      participant_stream_, shared_graph_, /*dependencies=*/nullptr,
+      /*dependency_count=*/0, IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL));
+  ASSERT_NE(first_capture_id, participant_stream_->capture_id);
+
+  iree_hal_streaming_event_capture_association_t association;
+  iree_hal_streaming_event_acquire_capture_association(event_, &association);
+  bool invalidated = true;
+  IREE_EXPECT_OK(iree_hal_streaming_invalidate_event_captures(&association, 1,
+                                                              &invalidated));
+  EXPECT_FALSE(invalidated);
+  iree_hal_streaming_event_release_capture_association(&association);
+
+  iree_status_t wait_status = iree_hal_streaming_stream_wait_event(
+      origin_stream_, event_, /*capture_external_wait=*/false);
+  EXPECT_EQ(IREE_STATUS_INVALID_ARGUMENT, iree_status_code(wait_status));
+  iree_status_ignore(wait_status);
+  EXPECT_EQ(IREE_HAL_STREAMING_CAPTURE_STATUS_NONE,
+            origin_stream_->capture_status);
+  EXPECT_EQ(IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE,
+            participant_stream_->capture_status);
+  EXPECT_EQ(shared_graph_, participant_stream_->capture_graph);
+  EXPECT_NE(first_capture_id, participant_stream_->capture_id);
+
+  IREE_EXPECT_OK(iree_hal_streaming_end_capture(participant_stream_,
+                                                /*out_graph=*/nullptr));
+}
+
+TEST_F(CrossContextCaptureTest,
+       MultiEventInvalidationAllocationFailureChangesNeitherSession) {
+  IREE_ASSERT_OK(CreateNonBlockingStream(
+      contexts_[0], allocators_[0].AsAllocator(), &origin_stream_));
+  IREE_ASSERT_OK(CreateNonBlockingStream(
+      contexts_[1], allocators_[1].AsAllocator(), &participant_stream_));
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      contexts_[0], IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+      allocators_[0].AsAllocator(), &event_));
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      contexts_[1], IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+      allocators_[1].AsAllocator(), &second_event_));
+
+  IREE_ASSERT_OK(iree_hal_streaming_begin_capture(
+      origin_stream_, IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL));
+  IREE_ASSERT_OK(iree_hal_streaming_begin_capture(
+      participant_stream_, IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL));
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(event_, origin_stream_));
+  IREE_ASSERT_OK(
+      iree_hal_streaming_event_record(second_event_, participant_stream_));
+
+  ASSERT_NE(origin_stream_->capture_id, participant_stream_->capture_id);
+
+  iree_hal_streaming_event_capture_association_t associations[2];
+  iree_hal_streaming_event_acquire_capture_association(event_,
+                                                       &associations[0]);
+  iree_hal_streaming_event_acquire_capture_association(second_event_,
+                                                       &associations[1]);
+  EXPECT_NE(associations[0].capture_id, associations[1].capture_id);
+
+  allocators_[1].fail_allocations = true;
+  bool invalidated = true;
+  iree_status_t status = iree_hal_streaming_invalidate_event_captures(
+      associations, IREE_ARRAYSIZE(associations), &invalidated);
+  allocators_[1].fail_allocations = false;
+  EXPECT_EQ(IREE_STATUS_RESOURCE_EXHAUSTED, iree_status_code(status));
+  iree_status_ignore(status);
+  EXPECT_FALSE(invalidated);
+  EXPECT_EQ(IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE,
+            origin_stream_->capture_status);
+  EXPECT_EQ(IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE,
+            participant_stream_->capture_status);
+
+  IREE_EXPECT_OK(iree_hal_streaming_invalidate_event_captures(
+      associations, IREE_ARRAYSIZE(associations), &invalidated));
+  EXPECT_TRUE(invalidated);
+  EXPECT_EQ(IREE_HAL_STREAMING_CAPTURE_STATUS_INVALIDATED,
+            origin_stream_->capture_status);
+  EXPECT_EQ(IREE_HAL_STREAMING_CAPTURE_STATUS_INVALIDATED,
+            participant_stream_->capture_status);
+  iree_hal_streaming_event_release_capture_association(&associations[1]);
+  iree_hal_streaming_event_release_capture_association(&associations[0]);
+
+  iree_hal_streaming_graph_t* origin_graph = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DATA_LOSS,
+      iree_hal_streaming_end_capture(origin_stream_, &origin_graph));
+  EXPECT_EQ(nullptr, origin_graph);
+  iree_hal_streaming_graph_release(origin_graph);
+  iree_hal_streaming_graph_t* participant_graph = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DATA_LOSS,
+      iree_hal_streaming_end_capture(participant_stream_, &participant_graph));
+  EXPECT_EQ(nullptr, participant_graph);
+  iree_hal_streaming_graph_release(participant_graph);
 }
 
 }  // namespace

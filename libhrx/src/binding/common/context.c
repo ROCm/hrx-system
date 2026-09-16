@@ -25,6 +25,12 @@ static IREE_THREAD_LOCAL int iree_hal_streaming_thread_token_storage;
 static iree_atomic_uint64_t iree_hal_streaming_next_stream_id =
     IREE_ATOMIC_VAR_INIT(1);
 
+// Capture IDs identify sessions that may span contexts and may independently
+// target the same graph. Zero permanently marks exhaustion after the final
+// nonzero process-unique identifier has been issued.
+static iree_atomic_uint64_t iree_hal_streaming_next_capture_id =
+    IREE_ATOMIC_VAR_INIT(1);
+
 typedef struct iree_hal_streaming_context_stack_t {
   iree_hal_streaming_context_t** contexts;
   iree_host_size_t depth;
@@ -121,7 +127,6 @@ static iree_status_t iree_hal_streaming_context_create_with_handle_state(
   context->flags = flags;
   context->handle_state = handle_state;
   context->default_stream = NULL;
-  context->next_capture_id = 1;
   context->peer_contexts = NULL;
   context->peer_count = 0;
   context->peer_capacity = 0;
@@ -317,13 +322,14 @@ static void iree_hal_streaming_context_destroy(
   // reader that gets there first is refused anyway: it retains through
   // iree_hal_streaming_context_try_retain, which fails once the last reference
   // is gone, and an unpublished context has no such reader to refuse. The list
-  // mutex is not held: end_capture holds a stream mutex while walking the list,
-  // and taking these in the other order deadlocks against it. The list still
-  // holds its reference to every stream, so none can be destroyed while the
-  // loop runs; those references are released afterwards, outside both locks,
-  // because the last one destroys the stream. Queue references are released
-  // during detachment so a dynamically acquired queue cannot outlive the HAL
-  // device retained by this context.
+  // mutex is not held while stream mutexes are acquired. Capture/session scans
+  // follow the same split-phase order: retain a stream snapshot under list
+  // locks, release them, and then inspect stream mutexes one at a time. The
+  // list still holds its reference to every stream, so none can be destroyed
+  // while the loop runs; those references are released afterwards, outside
+  // both locks, because the last one destroys the stream. Queue references are
+  // released during detachment so a dynamically acquired queue cannot outlive
+  // the HAL device retained by this context.
   for (iree_host_size_t i = 0; i < detached_stream_count; ++i) {
     iree_hal_streaming_stream_t* stream = context->streams[i];
     iree_hal_queue_t* queue = NULL;
@@ -990,21 +996,24 @@ iree_status_t iree_hal_streaming_context_register_stream(
   return status;
 }
 
-iree_status_t iree_hal_streaming_context_allocate_capture_id(
-    iree_hal_streaming_context_t* context, unsigned long long* out_capture_id) {
-  IREE_ASSERT_ARGUMENT(context);
+iree_status_t iree_hal_streaming_allocate_capture_id(
+    unsigned long long* out_capture_id) {
   IREE_ASSERT_ARGUMENT(out_capture_id);
   *out_capture_id = 0;
 
-  iree_slim_mutex_lock(&context->stream_list_mutex);
-  if (context->next_capture_id == 0) {
-    iree_slim_mutex_unlock(&context->stream_list_mutex);
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "stream capture identifier space exhausted");
+  uint64_t current = iree_atomic_load(&iree_hal_streaming_next_capture_id,
+                                      iree_memory_order_relaxed);
+  while (current != 0) {
+    const uint64_t next = current + 1;
+    if (iree_atomic_compare_exchange_weak(
+            &iree_hal_streaming_next_capture_id, &current, next,
+            iree_memory_order_relaxed, iree_memory_order_relaxed)) {
+      *out_capture_id = current;
+      return iree_ok_status();
+    }
   }
-  *out_capture_id = context->next_capture_id++;
-  iree_slim_mutex_unlock(&context->stream_list_mutex);
-  return iree_ok_status();
+  return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                          "stream capture identifier space exhausted");
 }
 
 void iree_hal_streaming_context_unregister_stream(

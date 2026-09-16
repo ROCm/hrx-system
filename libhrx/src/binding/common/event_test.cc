@@ -487,6 +487,84 @@ TEST_F(CpuStreamingContextTest, DirectRecordsOnAnUntimedDeviceGoUntimed) {
   iree_hal_streaming_stream_release(stream);
 }
 
+// A submitted record transfers the complete prior capture association to its
+// caller. Publishing a successor capture record before those displaced
+// references are released models the exact interleaving the old two-step
+// graph-then-stream cleanup allowed: cleanup may destroy old objects, but it
+// must not reach back into the event and split the successor association.
+TEST_F(CpuStreamingContextTest,
+       SubmittedRecordCleanupCannotSplitSuccessorCaptureAssociation) {
+  iree_hal_streaming_stream_t* stream = nullptr;
+  iree_hal_streaming_event_t* event = nullptr;
+  iree_hal_streaming_graph_t* first_graph = nullptr;
+  iree_hal_streaming_graph_t* successor_graph = nullptr;
+  iree_hal_semaphore_t* submitted_semaphore = nullptr;
+  iree_hal_streaming_event_displaced_capture_t displaced_capture = {0};
+  ScopeExit cleanup([&] {
+    if (stream &&
+        stream->capture_status != IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
+      iree_hal_streaming_graph_t* active_graph = nullptr;
+      iree_status_ignore(iree_hal_streaming_end_capture(stream, &active_graph));
+      iree_hal_streaming_graph_release(active_graph);
+    }
+    iree_hal_streaming_event_release_displaced_capture(&displaced_capture);
+    iree_hal_semaphore_release(submitted_semaphore);
+    iree_hal_streaming_graph_release(successor_graph);
+    iree_hal_streaming_graph_release(first_graph);
+    iree_hal_streaming_event_release(event);
+    iree_hal_streaming_stream_release(stream);
+  });
+
+  IREE_ASSERT_OK(iree_hal_streaming_stream_create(
+      context_, context_->queue, IREE_HAL_STREAMING_STREAM_FLAG_NONE,
+      /*priority=*/0, iree_allocator_system(), &stream));
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      context_, IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+      iree_allocator_system(), &event));
+  IREE_ASSERT_OK(iree_hal_streaming_begin_capture(
+      stream, IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL));
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(event, stream));
+  iree_hal_streaming_graph_t* const captured_graph = stream->capture_graph;
+  const unsigned long long captured_id = stream->capture_id;
+
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      context_->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+      /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_NONE, &submitted_semaphore));
+  iree_hal_streaming_recorded_point_t submitted_point = {
+      /*.semaphore=*/submitted_semaphore,
+      /*.value=*/1,
+  };
+  displaced_capture =
+      iree_hal_streaming_event_commit_recorded_point(event, submitted_point);
+  submitted_semaphore = nullptr;  // Ownership moved into |event|.
+  EXPECT_EQ(captured_graph, displaced_capture.graph);
+  EXPECT_EQ(stream, displaced_capture.recording_stream);
+  EXPECT_EQ(nullptr, event->capture_graph);
+  EXPECT_EQ(nullptr, event->recording_stream);
+  EXPECT_EQ(0u, event->capture_id);
+
+  IREE_ASSERT_OK(iree_hal_streaming_end_capture(stream, &first_graph));
+  EXPECT_EQ(captured_graph, first_graph);
+  IREE_ASSERT_OK(iree_hal_streaming_begin_capture(
+      stream, IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL));
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(event, stream));
+  const unsigned long long successor_id = stream->capture_id;
+  ASSERT_NE(captured_id, successor_id);
+
+  // This release is the cleanup phase of the earlier submitted commit. It is
+  // deliberately delayed until after the successor association is published.
+  iree_hal_streaming_event_release_displaced_capture(&displaced_capture);
+  iree_hal_streaming_event_capture_association_t association;
+  iree_hal_streaming_event_acquire_capture_association(event, &association);
+  EXPECT_EQ(stream->capture_graph, association.graph);
+  EXPECT_EQ(stream, association.recording_stream);
+  EXPECT_EQ(successor_id, association.capture_id);
+  EXPECT_EQ(IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL, association.capture_mode);
+  iree_hal_streaming_event_release_capture_association(&association);
+
+  IREE_ASSERT_OK(iree_hal_streaming_end_capture(stream, &successor_graph));
+}
+
 TEST_F(CpuStreamingContextTest, ContextRecordWaitsForEveryCurrentStream) {
   iree_hal_streaming_stream_t* first_stream = nullptr;
   iree_hal_streaming_stream_t* second_stream = nullptr;

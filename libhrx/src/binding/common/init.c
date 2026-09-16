@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "common/init_test_util.h"
 #include "common/internal.h"
 //===----------------------------------------------------------------------===//
 // Global state
@@ -19,6 +20,14 @@ static iree_hal_streaming_device_registry_t*
 // Accessor function for the global device registry.
 iree_hal_streaming_device_registry_t* iree_hal_streaming_device_registry(void) {
   return iree_hal_streaming_global_registry;
+}
+
+void iree_hal_streaming_set_device_registry_for_testing(
+    iree_hal_streaming_device_registry_t* device_registry) {
+  // Tests transition only from no registry to one isolated registry and back.
+  IREE_ASSERT((iree_hal_streaming_global_registry == NULL) !=
+              (device_registry == NULL));
+  iree_hal_streaming_global_registry = device_registry;
 }
 
 //===----------------------------------------------------------------------===//

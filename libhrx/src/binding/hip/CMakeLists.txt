@@ -171,6 +171,29 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    event_operations
+  HDRS
+    "api.h"
+    "event_operations.h"
+  SRCS
+    "event_operations.c"
+  DEPS
+    iree::base
+    iree::hal
+    libhrx::src::binding::common
+    libhrx_defs
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../../include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../libhrx>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../libhrx>"
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     execution_resource_descriptor
   HDRS
     "execution_resource_descriptor.h"
@@ -200,6 +223,7 @@ iree_cc_library(
     execution_context
   HDRS
     "execution_context.h"
+    "execution_context_test_util.h"
   SRCS
     "execution_context.c"
   DEPS
@@ -269,6 +293,7 @@ iree_cc_library(
     "ipc.c"
   DEPS
     ::blocking_printf_provider
+    ::event_operations
     ::execution_context
     ::execution_resource
     ::execution_resource_descriptor
@@ -326,6 +351,38 @@ iree_cc_test(
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../libhrx>"
 )
 endif()
+
+iree_cc_test(
+  NAME
+    event_operations_test
+  SRCS
+    "event_operations_test.cc"
+  DEPS
+    ::event_operations
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx::src::binding::common
+    libhrx::src::libhrx::hrx_static
+    libhrx_defs
+)
+
+iree_cc_test(
+  NAME
+    execution_context_test
+  SRCS
+    "execution_context_test.cc"
+  DEPS
+    ::execution_context
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx::src::binding::common
+    libhrx::src::libhrx::hrx_static
+    libhrx_defs
+)
 
 iree_cc_test(
   NAME

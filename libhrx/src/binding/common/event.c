@@ -35,6 +35,9 @@ iree_status_t iree_hal_streaming_event_create(
   iree_hal_streaming_context_retain(context);
   event->ipc_handle = NULL;
   event->capture_graph = NULL;
+  event->capture_id = 0;
+  event->capture_mode = IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL;
+  event->capture_owner_thread_id = 0;
   event->capture_dependencies = NULL;
   event->capture_dependency_count = 0;
   event->capture_dependency_capacity = 0;
@@ -102,34 +105,35 @@ void iree_hal_streaming_event_release_recorded_point(
   *point = (iree_hal_streaming_recorded_point_t){0};
 }
 
-iree_hal_streaming_graph_t* iree_hal_streaming_event_commit_recorded_point(
+iree_hal_streaming_event_displaced_capture_t
+iree_hal_streaming_event_commit_recorded_point(
     iree_hal_streaming_event_t* event,
     iree_hal_streaming_recorded_point_t point) {
   iree_slim_mutex_lock(&event->mutex);
   iree_hal_streaming_recorded_point_t previous = event->recorded_point;
   event->recorded_point = point;
-  iree_hal_streaming_graph_t* dropped_capture_graph = event->capture_graph;
+  iree_hal_streaming_event_displaced_capture_t displaced_capture = {
+      .graph = event->capture_graph,
+      .recording_stream = event->recording_stream,
+  };
   event->capture_graph = NULL;
+  event->recording_stream = NULL;
+  event->capture_id = 0;
+  event->capture_mode = IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL;
+  event->capture_owner_thread_id = 0;
   iree_slim_mutex_unlock(&event->mutex);
   // Dropped outside the lock: returning a tick slot to its pool takes the pool
   // mutex, and that mutex and this one are both leaves that no path holds at
   // the same time.
   iree_hal_streaming_event_release_recorded_point(&previous);
-  return dropped_capture_graph;
+  return displaced_capture;
 }
 
-iree_hal_streaming_stream_t* iree_hal_streaming_event_exchange_recording_stream(
-    iree_hal_streaming_event_t* event, iree_hal_streaming_stream_t* stream) {
-  iree_slim_mutex_lock(&event->mutex);
-  iree_hal_streaming_stream_t* previous_stream = event->recording_stream;
-  if (previous_stream != stream) {
-    iree_hal_streaming_stream_retain(stream);
-    event->recording_stream = stream;
-  } else {
-    previous_stream = NULL;
-  }
-  iree_slim_mutex_unlock(&event->mutex);
-  return previous_stream;
+void iree_hal_streaming_event_release_displaced_capture(
+    iree_hal_streaming_event_displaced_capture_t* displaced_capture) {
+  iree_hal_streaming_stream_release(displaced_capture->recording_stream);
+  iree_hal_streaming_graph_release(displaced_capture->graph);
+  *displaced_capture = (iree_hal_streaming_event_displaced_capture_t){0};
 }
 
 bool iree_hal_streaming_event_has_capture_graph(
@@ -140,27 +144,67 @@ bool iree_hal_streaming_event_has_capture_graph(
   return has_capture_graph;
 }
 
-iree_hal_streaming_graph_t* iree_hal_streaming_event_acquire_capture_graph(
-    iree_hal_streaming_event_t* event) {
+void iree_hal_streaming_event_acquire_capture_association(
+    iree_hal_streaming_event_t* event,
+    iree_hal_streaming_event_capture_association_t* out_association) {
+  *out_association = (iree_hal_streaming_event_capture_association_t){0};
   iree_slim_mutex_lock(&event->mutex);
-  iree_hal_streaming_graph_t* capture_graph = event->capture_graph;
-  iree_hal_streaming_graph_retain(capture_graph);
-  iree_slim_mutex_unlock(&event->mutex);
-  return capture_graph;
-}
-
-iree_hal_streaming_graph_t* iree_hal_streaming_event_exchange_capture_graph(
-    iree_hal_streaming_event_t* event, iree_hal_streaming_graph_t* graph) {
-  iree_slim_mutex_lock(&event->mutex);
-  iree_hal_streaming_graph_t* previous_graph = event->capture_graph;
-  if (previous_graph != graph) {
-    iree_hal_streaming_graph_retain(graph);
-    event->capture_graph = graph;
-  } else {
-    previous_graph = NULL;
+  if (event->capture_graph) {
+    out_association->graph = event->capture_graph;
+    out_association->recording_stream = event->recording_stream;
+    out_association->capture_id = event->capture_id;
+    out_association->capture_mode = event->capture_mode;
+    out_association->capture_owner_thread_id = event->capture_owner_thread_id;
+    iree_hal_streaming_graph_retain(out_association->graph);
+    iree_hal_streaming_stream_retain(out_association->recording_stream);
   }
   iree_slim_mutex_unlock(&event->mutex);
-  return previous_graph;
+}
+
+bool iree_hal_streaming_event_capture_association_is_active(
+    const iree_hal_streaming_event_capture_association_t* association) {
+  if (!association->graph || !association->recording_stream ||
+      association->capture_id == 0) {
+    return false;
+  }
+  iree_hal_streaming_stream_t* stream = association->recording_stream;
+  iree_slim_mutex_lock(&stream->mutex);
+  const bool is_active =
+      stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE &&
+      stream->capture_graph == association->graph &&
+      stream->capture_id == association->capture_id;
+  iree_slim_mutex_unlock(&stream->mutex);
+  return is_active;
+}
+
+void iree_hal_streaming_event_release_capture_association(
+    iree_hal_streaming_event_capture_association_t* association) {
+  iree_hal_streaming_stream_release(association->recording_stream);
+  iree_hal_streaming_graph_release(association->graph);
+  *association = (iree_hal_streaming_event_capture_association_t){0};
+}
+
+static void iree_hal_streaming_event_set_capture_association(
+    iree_hal_streaming_event_t* event,
+    iree_hal_streaming_stream_t* recording_stream,
+    iree_hal_streaming_graph_t** out_previous_graph,
+    iree_hal_streaming_stream_t** out_previous_stream) {
+  iree_hal_streaming_graph_t* graph = recording_stream->capture_graph;
+  const unsigned long long capture_id = recording_stream->capture_id;
+  IREE_ASSERT(graph);
+  IREE_ASSERT(capture_id != 0);
+
+  iree_hal_streaming_graph_retain(graph);
+  iree_hal_streaming_stream_retain(recording_stream);
+  iree_slim_mutex_lock(&event->mutex);
+  *out_previous_graph = event->capture_graph;
+  *out_previous_stream = event->recording_stream;
+  event->capture_graph = graph;
+  event->recording_stream = recording_stream;
+  event->capture_id = capture_id;
+  event->capture_mode = recording_stream->capture_mode;
+  event->capture_owner_thread_id = recording_stream->capture_owner_thread_id;
+  iree_slim_mutex_unlock(&event->mutex);
 }
 
 iree_status_t iree_hal_streaming_event_record_after_streams(
@@ -311,8 +355,7 @@ iree_status_t iree_hal_streaming_event_record_after_streams(
     iree_slim_mutex_unlock(&stream->mutex);
   }
 
-  iree_hal_streaming_stream_t* previous_recording_stream = NULL;
-  iree_hal_streaming_graph_t* dropped_capture_graph = NULL;
+  iree_hal_streaming_event_displaced_capture_t displaced_capture = {0};
   if (iree_status_is_ok(status)) {
     const iree_hal_semaphore_list_t waits = {
         .count = wait_count,
@@ -343,16 +386,13 @@ iree_status_t iree_hal_streaming_event_record_after_streams(
       if (additional_timeline) {
         additional_timeline->pending_value = additional_signal_value;
       }
-      dropped_capture_graph =
+      displaced_capture =
           iree_hal_streaming_event_commit_recorded_point(event, recorded_point);
-      previous_recording_stream =
-          iree_hal_streaming_event_exchange_recording_stream(event, NULL);
     }
   }
 
   iree_slim_mutex_unlock(&context->event_record_mutex);
-  iree_hal_streaming_stream_release(previous_recording_stream);
-  iree_hal_streaming_graph_release(dropped_capture_graph);
+  iree_hal_streaming_event_release_displaced_capture(&displaced_capture);
   iree_allocator_free(context->host_allocator, wait_values);
   iree_allocator_free(context->host_allocator, wait_semaphores);
 
@@ -468,15 +508,16 @@ iree_status_t iree_hal_streaming_event_record(
                  sizeof(*event->capture_dependencies));
     }
     event->capture_dependency_count = stream->capture_dependency_count;
-    // No lock is held here, so the displaced graph can be released inline.
-    iree_hal_streaming_graph_release(
-        iree_hal_streaming_event_exchange_capture_graph(event,
-                                                        stream->capture_graph));
-    // A captured record produces no submission, so it leaves the recorded point
-    // alone; only the stream is adopted, for the later wait that picks the
-    // capture up from the stream that captured it.
-    iree_hal_streaming_stream_release(
-        iree_hal_streaming_event_exchange_recording_stream(event, stream));
+    // A captured record produces no submission, so it leaves the recorded
+    // point alone. The graph, source stream, and immutable session metadata are
+    // published together for later wait and invalidation consumers.
+    iree_hal_streaming_graph_t* previous_graph = NULL;
+    iree_hal_streaming_stream_t* previous_stream = NULL;
+    iree_hal_streaming_event_set_capture_association(
+        event, stream, &previous_graph, &previous_stream);
+    // No lock is held here, so displaced references can be released inline.
+    iree_hal_streaming_stream_release(previous_stream);
+    iree_hal_streaming_graph_release(previous_graph);
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }
@@ -520,8 +561,7 @@ iree_status_t iree_hal_streaming_event_record(
       .ordered_after_stream_id = stream->stream_id,
       .ordered_after_stream_value = stream_signal_value,
   };
-  iree_hal_streaming_stream_t* previous_stream = NULL;
-  iree_hal_streaming_graph_t* dropped_capture_graph = NULL;
+  iree_hal_streaming_event_displaced_capture_t displaced_capture = {0};
   status = iree_hal_streaming_event_enqueue_record(
       event, stream->context, stream->queue, wait_semaphores, signal_semaphores,
       &recorded_point);
@@ -531,10 +571,8 @@ iree_status_t iree_hal_streaming_event_record(
     stream->pending_value = stream_signal_value;
     // A rejected submission signals nothing, so the event keeps its old point
     // and stays associated with whatever capture it belonged to.
-    dropped_capture_graph =
+    displaced_capture =
         iree_hal_streaming_event_commit_recorded_point(event, recorded_point);
-    previous_stream =
-        iree_hal_streaming_event_exchange_recording_stream(event, stream);
     status = iree_hal_queue_flush(stream->queue);
   }
   iree_slim_mutex_unlock(&stream->mutex);
@@ -542,8 +580,7 @@ iree_status_t iree_hal_streaming_event_record(
   // captured graph frees the allocations it owns, which synchronizes every
   // context and relocks this stream. Both displaced references are therefore
   // dropped outside this stream's mutex.
-  iree_hal_streaming_stream_release(previous_stream);
-  iree_hal_streaming_graph_release(dropped_capture_graph);
+  iree_hal_streaming_event_release_displaced_capture(&displaced_capture);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
 
   IREE_TRACE_ZONE_END(z0);

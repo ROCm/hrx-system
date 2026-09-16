@@ -245,9 +245,6 @@ struct iree_hal_streaming_context_t {
   // initialization).
   iree_hal_streaming_stream_t* default_stream;
 
-  // Next non-zero stream capture identifier assigned under |stream_list_mutex|.
-  unsigned long long next_capture_id;
-
   // Peer access list.
   iree_hal_streaming_context_t** peer_contexts;
   iree_host_size_t peer_count;
@@ -835,6 +832,48 @@ typedef struct iree_hal_streaming_recorded_point_t {
   iree_hal_streaming_event_timestamp_slot_t* timestamp_slot;
 } iree_hal_streaming_recorded_point_t;
 
+// Immutable identity and policy of the capture session named by an event's
+// last capture-time record. Acquirers own the graph and recording stream
+// references and must release the association when finished.
+typedef struct iree_hal_streaming_event_capture_association_t {
+  // Graph the record was captured into, retained, or NULL when the event names
+  // no capture session.
+  iree_hal_streaming_graph_t* graph;
+  // Stream whose capture produced the record, retained when |graph| is set.
+  iree_hal_streaming_stream_t* recording_stream;
+  // Non-zero identifier assigned to that exact capture session.
+  unsigned long long capture_id;
+  // Visibility mode the capture session was begun with.
+  iree_hal_streaming_capture_mode_t capture_mode;
+  // Host thread that began the capture session.
+  uintptr_t capture_owner_thread_id;
+} iree_hal_streaming_event_capture_association_t;
+
+typedef struct iree_hal_streaming_capture_context_snapshot_t
+    iree_hal_streaming_capture_context_snapshot_t;
+
+// Fully retained process-wide context and stream snapshot prepared for capture
+// invalidation. Preparation may allocate; applying a prepared snapshot cannot
+// fail. Callers must deinitialize the snapshot after applying or abandoning it.
+typedef struct iree_hal_streaming_capture_invalidation_t {
+  // Allocator owning |contexts|.
+  iree_allocator_t host_allocator;
+  // Retained context snapshots, each owning its retained stream array.
+  iree_hal_streaming_capture_context_snapshot_t* contexts;
+  // Number of initialized entries in |contexts|.
+  iree_host_size_t context_count;
+} iree_hal_streaming_capture_invalidation_t;
+
+// Owned references displaced when a submitted record ends an event's capture
+// association. Callers release the result after dropping any stream or graph
+// executable mutex held while the record was committed.
+typedef struct iree_hal_streaming_event_displaced_capture_t {
+  // Graph retained by the previous capture association, or NULL.
+  iree_hal_streaming_graph_t* graph;
+  // Recording stream retained by the previous capture association, or NULL.
+  iree_hal_streaming_stream_t* recording_stream;
+} iree_hal_streaming_event_displaced_capture_t;
+
 // Event for synchronization.
 typedef struct iree_hal_streaming_event_t {
   // Reference counting.
@@ -843,8 +882,8 @@ typedef struct iree_hal_streaming_event_t {
   // Event properties.
   iree_hal_streaming_event_flags_t flags;
 
-  // Guards |recorded_point| and |capture_graph|, which move together: a
-  // submitted record installs a point and ends any capture association in one
+  // Guards |recorded_point| and the capture association fields. A submitted
+  // record installs a point and ends the graph/session association in one
   // transition, so no reader can see the new point while the event still reads
   // as captured. The point carries the record's timeline point and the slot its
   // tick lands in as one value, so no reader can pair one record's point with
@@ -862,11 +901,10 @@ typedef struct iree_hal_streaming_event_t {
   // queryable after the stream or graph executable that carried it is gone.
   iree_hal_streaming_recorded_point_t recorded_point;
 
-  // Stream that last recorded this event through the stream API, retained, or
-  // NULL before any such record. Consumed only by stream capture, which picks
-  // the capture mode, id and owning thread up from here; a graph launch leaves
-  // it alone. Exchanged under |mutex| but read by the capture paths without it,
-  // which is sound only because a capture sequence is driven by one thread.
+  // Retained stream that produced the current capture-time record, or NULL
+  // when the event has no such association. Acquired with the graph and the
+  // immutable session metadata below; no consumer reads mutable capture fields
+  // from this stream as the event's identity.
   iree_hal_streaming_stream_t* recording_stream;
   // Context that created the event, retained.
   iree_hal_streaming_context_t* context;
@@ -877,6 +915,15 @@ typedef struct iree_hal_streaming_event_t {
   // Graph a capture-time record last associated this event with, retained, or
   // NULL when the event's last record was submitted. Guarded by |mutex|.
   iree_hal_streaming_graph_t* capture_graph;
+  // Non-zero identifier of the exact session that produced the capture-time
+  // record, or zero when |capture_graph| is NULL. Guarded by |mutex|.
+  unsigned long long capture_id;
+  // Visibility mode snapshotted from the session that produced the
+  // capture-time record. Guarded by |mutex|.
+  iree_hal_streaming_capture_mode_t capture_mode;
+  // Host thread that began the session which produced the capture-time record.
+  // Guarded by |mutex|.
+  uintptr_t capture_owner_thread_id;
   // Captured dependency frontier stored by the last captured record. Not
   // guarded by |mutex|, unlike the association above it: the capture-time
   // record writes this array with no lock held and the capture-time wait that
@@ -1693,8 +1740,10 @@ iree_status_t iree_hal_streaming_context_record_event(
 iree_status_t iree_hal_streaming_context_wait_event(
     iree_hal_streaming_context_t* context, iree_hal_streaming_event_t* event);
 
-iree_status_t iree_hal_streaming_context_allocate_capture_id(
-    iree_hal_streaming_context_t* context, unsigned long long* out_capture_id);
+// Allocates a process-unique nonzero stream-capture identifier. Identifiers are
+// never reused; returns RESOURCE_EXHAUSTED after the namespace wraps to zero.
+iree_status_t iree_hal_streaming_allocate_capture_id(
+    unsigned long long* out_capture_id);
 
 // Returns true when another live context can be retained from the global weak
 // context list.
@@ -1919,29 +1968,23 @@ void iree_hal_streaming_event_release_recorded_point(
 // once the submission that signals |point| has been accepted, with a point
 // iree_hal_streaming_event_enqueue_record completed.
 //
-// A submitted record ends the event's association with any graph a capture-time
-// record left on it, in the same transition, so no reader can see the new point
-// while the event still reads as captured. Returns that graph reference;
-// releasing it can free the allocations the graph owns, which synchronizes
-// every context and relocks the stream, so callers holding a stream or graph
-// executable mutex must release it after unlocking.
+// A submitted record ends the complete capture association in the same
+// transition, so no reader can see the new point paired with capture identity
+// or observe a graph without its recording stream. Returns the graph and stream
+// references that association owned. Releasing either can re-enter the
+// streaming layer, so callers holding a stream or graph executable mutex must
+// release the result after unlocking.
 // Synchronization: event (event mutex held while replacing the point).
-IREE_MUST_USE_RESULT iree_hal_streaming_graph_t*
+IREE_MUST_USE_RESULT iree_hal_streaming_event_displaced_capture_t
 iree_hal_streaming_event_commit_recorded_point(
     iree_hal_streaming_event_t* event,
     iree_hal_streaming_recorded_point_t point);
 
-// Makes |stream| the stream whose capture state |event| belongs to, taking a
-// reference to it, and transfers the previously referenced stream to the
-// caller. Returns NULL when |stream| was already the recording stream.
-//
-// Releasing the returned stream can run its teardown, which re-enters the
-// streaming layer to synchronize and unregister the stream, so callers holding
-// a stream mutex must drop the reference after unlocking.
-// Synchronization: event (event mutex held while exchanging).
-IREE_MUST_USE_RESULT iree_hal_streaming_stream_t*
-iree_hal_streaming_event_exchange_recording_stream(
-    iree_hal_streaming_event_t* event, iree_hal_streaming_stream_t* stream);
+// Releases and zeroes references returned by
+// iree_hal_streaming_event_commit_recorded_point. May re-enter the streaming
+// layer and must run without event, stream, or graph executable mutexes held.
+void iree_hal_streaming_event_release_displaced_capture(
+    iree_hal_streaming_event_displaced_capture_t* displaced_capture);
 
 // Returns whether a capture-time record last associated |event| with a graph.
 // An event names none once its last record has been submitted, and none before
@@ -1955,28 +1998,27 @@ iree_hal_streaming_event_exchange_recording_stream(
 bool iree_hal_streaming_event_has_capture_graph(
     iree_hal_streaming_event_t* event);
 
-// Returns a retained reference to the graph a capture-time record last
-// associated |event| with, or NULL when the event names no capture: once its
-// last record has been submitted, and before any record has been made.
-// Releasing the returned graph can free the allocations it owns, which
-// synchronizes every context and relocks streams, so callers holding a stream
-// mutex must release it after unlocking.
-// Synchronization: event (event mutex held while retaining).
-IREE_MUST_USE_RESULT iree_hal_streaming_graph_t*
-iree_hal_streaming_event_acquire_capture_graph(
-    iree_hal_streaming_event_t* event);
+// Acquires one immutable snapshot of the capture session named by |event|'s
+// last capture-time record. Returns a zeroed association when the event names
+// no capture. Both graph and recording stream are retained in one event-mutex
+// critical section, so the scalar identity cannot describe different objects.
+// Synchronization: event (event mutex held while copying and retaining).
+void iree_hal_streaming_event_acquire_capture_association(
+    iree_hal_streaming_event_t* event,
+    iree_hal_streaming_event_capture_association_t* out_association);
 
-// Makes |graph| the graph |event|'s capture-time record belongs to, taking a
-// reference to it, and transfers the reference the event held to the caller.
-// Returns NULL when |graph| was already the capture graph.
-//
-// Releasing the returned graph can free the allocations it owns, which
-// synchronizes every context and relocks streams, so callers holding a stream
-// mutex must release it after unlocking.
-// Synchronization: event (event mutex held while exchanging).
-IREE_MUST_USE_RESULT iree_hal_streaming_graph_t*
-iree_hal_streaming_event_exchange_capture_graph(
-    iree_hal_streaming_event_t* event, iree_hal_streaming_graph_t* graph);
+// Returns whether the retained source stream is still ACTIVE in the exact
+// graph/session stored in |association|. Callers use this before adopting or
+// invalidating a captured record so an ended session cannot name a successor.
+// Synchronization: recording stream (stream mutex held while validating).
+bool iree_hal_streaming_event_capture_association_is_active(
+    const iree_hal_streaming_event_capture_association_t* association);
+
+// Releases the graph and recording stream retained by an acquired association.
+// May synchronize through graph or stream teardown and must run without event,
+// stream, graph executable, or registry mutexes held.
+void iree_hal_streaming_event_release_capture_association(
+    iree_hal_streaming_event_capture_association_t* association);
 
 // Records |event| after the current tails of every stream in |streams|. Each
 // stream must belong to the context that created |event| and none may be
@@ -2541,6 +2583,51 @@ iree_status_t iree_hal_streaming_begin_capture_to_graph(
     iree_hal_streaming_stream_t* stream, iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count, iree_hal_streaming_capture_mode_t mode);
+
+// Invalidates every active stream participating in the exact capture session
+// identified by |graph| and |capture_id|. All process contexts and streams are
+// retained before any capture state changes, so allocation failure leaves the
+// session unchanged. |out_invalidated| is false on failure and reports whether
+// any participant was invalidated on success.
+// Synchronization: none (thread-compatible with context/stream destruction).
+iree_status_t iree_hal_streaming_invalidate_capture_graph(
+    iree_hal_streaming_graph_t* graph, unsigned long long capture_id,
+    bool* out_invalidated);
+
+// Invalidates every ACTIVE session still named by up to two retained event
+// capture associations. Stale associations are ignored. All process contexts
+// and streams needed for both sessions are retained before either session is
+// changed, so allocation failure leaves both untouched. Duplicate graph/ID
+// pairs are invalidated once. |out_invalidated| is false on failure.
+// Synchronization: none (thread-compatible with context/stream destruction;
+// capture session mutation follows the one-thread capture protocol).
+iree_status_t iree_hal_streaming_invalidate_event_captures(
+    const iree_hal_streaming_event_capture_association_t* associations,
+    iree_host_size_t association_count, bool* out_invalidated);
+
+// Prepares every retained process context and stream needed to invalidate the
+// active sessions named by up to two event capture associations. Preparation
+// does not mutate capture state. Stale associations produce an empty snapshot.
+// Synchronization: none (thread-compatible with context/stream destruction).
+iree_status_t iree_hal_streaming_event_capture_invalidation_prepare(
+    const iree_hal_streaming_event_capture_association_t* associations,
+    iree_host_size_t association_count,
+    iree_hal_streaming_capture_invalidation_t* out_invalidation);
+
+// Revalidates the event associations and invalidates their exact active
+// sessions using an already prepared process snapshot. This operation cannot
+// allocate or fail and returns whether any participant was invalidated.
+// Synchronization: none (capture session mutation follows the one-thread
+// capture protocol).
+bool iree_hal_streaming_event_capture_invalidation_apply(
+    const iree_hal_streaming_event_capture_association_t* associations,
+    iree_host_size_t association_count,
+    const iree_hal_streaming_capture_invalidation_t* invalidation);
+
+// Releases every context and stream retained by |invalidation|.
+// Synchronization: none.
+void iree_hal_streaming_event_capture_invalidation_deinitialize(
+    iree_hal_streaming_capture_invalidation_t* invalidation);
 
 // Synchronization: none (ends capture mode, creates graph).
 iree_status_t iree_hal_streaming_end_capture(
