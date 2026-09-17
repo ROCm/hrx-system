@@ -92,7 +92,9 @@ class HipGetProcAddressTest : public testing::Test {
   }
 
   static void TearDownTestSuite() {
-    if (!dso_.is_open()) return;
+    if (!dso_.is_open()) {
+      return;
+    }
     ASSERT_NE(nullptr, api_.hal_deinit);
     EXPECT_EQ(hipSuccess, api_.hal_deinit());
     api_ = {};

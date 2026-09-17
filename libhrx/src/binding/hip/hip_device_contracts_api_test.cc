@@ -152,7 +152,9 @@ class HipDeviceContractsApiTest : public testing::Test {
   }
 
   static void TearDownTestSuite() {
-    if (!dso_.is_open()) return;
+    if (!dso_.is_open()) {
+      return;
+    }
     ASSERT_NE(nullptr, api_.hal_deinit);
     EXPECT_EQ(hipSuccess, api_.hal_deinit());
     api_ = {};
@@ -177,7 +179,9 @@ struct PublicationBarrier {
 static void InjectIllegalAddressAtFirstPublication(hipError_t* result,
                                                    void* user_data) {
   auto* barrier = static_cast<PublicationBarrier*>(user_data);
-  if (barrier->call_count.fetch_add(1, std::memory_order_acq_rel) != 0) return;
+  if (barrier->call_count.fetch_add(1, std::memory_order_acq_rel) != 0) {
+    return;
+  }
   *result = hipErrorIllegalAddress;
   barrier->reached.store(true, std::memory_order_release);
   while (!barrier->proceed.load(std::memory_order_acquire)) {
@@ -305,9 +309,13 @@ TEST_F(HipDeviceContractsApiTest, EmptyValidDeviceListPreservesSelection) {
   std::thread selection_thread([&] {
     int preferred_device = device_count - 1;
     result = api_.set_valid_devices(&preferred_device, /*count=*/1);
-    if (result != hipSuccess) return;
+    if (result != hipSuccess) {
+      return;
+    }
     result = api_.set_valid_devices(/*devices=*/nullptr, /*count=*/0);
-    if (result != hipSuccess) return;
+    if (result != hipSuccess) {
+      return;
+    }
     result = api_.get_device(&selected_device);
   });
   selection_thread.join();
@@ -328,7 +336,9 @@ TEST_F(HipDeviceContractsApiTest,
   std::thread selection_thread([&] {
     int preferred_device_copy = preferred_device;
     result = api_.set_valid_devices(&preferred_device_copy, /*count=*/1);
-    if (result != hipSuccess) return;
+    if (result != hipSuccess) {
+      return;
+    }
     result = api_.device_primary_context_get_state(preferred_device,
                                                    /*flags=*/nullptr, &active);
   });
@@ -353,10 +363,14 @@ TEST_F(HipDeviceContractsApiTest,
     phase.store(1, std::memory_order_release);
     while (phase.load(std::memory_order_acquire) != 2) {
     }
-    if (result != hipSuccess) return;
+    if (result != hipSuccess) {
+      return;
+    }
     int preferred_device = 1;
     result = api_.set_valid_devices(&preferred_device, /*count=*/1);
-    if (result != hipSuccess) return;
+    if (result != hipSuccess) {
+      return;
+    }
     result = api_.get_device(&selected_device);
   });
 

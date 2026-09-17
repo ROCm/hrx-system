@@ -23,7 +23,9 @@ struct CompareExchangeBarrier {
 
 static void WaitAtFirstCompareExchange(void* user_data) {
   auto* barrier = static_cast<CompareExchangeBarrier*>(user_data);
-  if (barrier->call_count.fetch_add(1, std::memory_order_acq_rel) != 0) return;
+  if (barrier->call_count.fetch_add(1, std::memory_order_acq_rel) != 0) {
+    return;
+  }
   barrier->reached.store(true, std::memory_order_release);
   while (!barrier->proceed.load(std::memory_order_acquire)) {
     std::this_thread::yield();
@@ -246,7 +248,9 @@ TEST_F(HipErrorStateTest, ExistingFatalLatchPerformsNoFurtherStrongRmw) {
       }
     });
   }
-  for (auto& publisher : publishers) publisher.join();
+  for (auto& publisher : publishers) {
+    publisher.join();
+  }
 
   EXPECT_EQ(0, unexpected_results.load(std::memory_order_acquire));
   EXPECT_EQ(0u, iree_hip_error_state_test_compare_exchange_count());

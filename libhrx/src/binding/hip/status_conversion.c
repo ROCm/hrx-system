@@ -7,7 +7,9 @@
 #include "binding/hip/status_conversion.h"
 
 hipError_t iree_status_to_hip_result(iree_status_t status) {
-  if (iree_status_is_ok(status)) return hipSuccess;
+  if (iree_status_is_ok(status)) {
+    return hipSuccess;
+  }
 
   const iree_status_code_t code = iree_status_consume_code(status);
   switch (code) {

@@ -67,7 +67,9 @@ static iree_status_t iree_hal_streaming_query_device_info(
   iree_status_t arch_status = hrx_to_iree_status(hrx_device_get_property(
       device->hrx_device, HRX_DEVICE_PROPERTY_ARCHITECTURE, arch_name,
       sizeof(arch_name)));
-  if (!iree_status_is_ok(arch_status)) return arch_status;
+  if (!iree_status_is_ok(arch_status)) {
+    return arch_status;
+  }
   iree_hal_streaming_amdgpu_architecture_t architecture = {0};
   if (!iree_hal_streaming_parse_amdgpu_architecture(arch_name, &architecture)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,

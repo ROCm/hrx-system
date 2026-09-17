@@ -11,14 +11,18 @@
 
 static bool iree_hal_streaming_parse_decimal_digit(char value,
                                                    uint32_t* out_digit) {
-  if (value < '0' || value > '9') return false;
+  if (value < '0' || value > '9') {
+    return false;
+  }
   *out_digit = (uint32_t)(value - '0');
   return true;
 }
 
 static bool iree_hal_streaming_parse_hex_digit(char value,
                                                uint32_t* out_digit) {
-  if (iree_hal_streaming_parse_decimal_digit(value, out_digit)) return true;
+  if (iree_hal_streaming_parse_decimal_digit(value, out_digit)) {
+    return true;
+  }
   if (value >= 'a' && value <= 'f') {
     *out_digit = (uint32_t)(value - 'a' + 10);
     return true;
@@ -39,7 +43,9 @@ static bool iree_hal_streaming_is_supported_target_feature(const char* value,
 
 static bool iree_hal_streaming_validate_target_features(const char* value) {
   while (*value != '\0') {
-    if (*value++ != ':') return false;
+    if (*value++ != ':') {
+      return false;
+    }
     const char* feature = value;
     while (*value != '\0' && *value != ':' && *value != '+' && *value != '-') {
       ++value;
@@ -51,7 +57,9 @@ static bool iree_hal_streaming_validate_target_features(const char* value) {
       return false;
     }
     ++value;
-    if (*value != '\0' && *value != ':') return false;
+    if (*value != '\0' && *value != ':') {
+      return false;
+    }
   }
   return true;
 }

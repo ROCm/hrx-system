@@ -1506,7 +1506,9 @@ static void iree_hip_clear_per_thread_stream(
 // by a thread may survive teardown initiated by another thread, but it belongs
 // to the old device registry and must not be reused by the next runtime.
 static void iree_hip_sync_thread_device_selection(uint32_t generation) {
-  if (iree_hip_thread_device_selection.generation == generation) return;
+  if (iree_hip_thread_device_selection.generation == generation) {
+    return;
+  }
   iree_hip_clear_per_thread_stream(/*context=*/NULL);
   iree_hal_streaming_context_set_current(NULL);
   iree_hip_thread_device_selection.generation = generation;
@@ -2061,11 +2063,15 @@ HIPAPI hipError_t hipSetValidDevices(int* device_arr, int len) {
   HIP_API_BEGIN();
   int device_count = 0;
   hipError_t result = hipGetDeviceCount(&device_count);
-  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  if (result != hipSuccess) {
+    HIP_RETURN_ERROR(result);
+  }
   if (len < 0 || len > device_count || (len > 0 && !device_arr)) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  if (len == 0) HIP_RETURN_ERROR(hipSuccess);
+  if (len == 0) {
+    HIP_RETURN_ERROR(hipSuccess);
+  }
 
   for (int i = 0; i < len; ++i) {
     if (device_arr[i] < 0 || device_arr[i] >= device_count) {
@@ -2924,11 +2930,17 @@ HIPAPI hipError_t hipDeviceGetName(char* name, int len, int device) {
 // See also: hipDeviceGet, hipGetDeviceProperties.
 HIPAPI hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t dev) {
   HIP_API_BEGIN();
-  if (!uuid) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (!uuid) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
   hipError_t init_result = iree_hip_ensure_initialized();
-  if (init_result != hipSuccess) HIP_RETURN_ERROR(init_result);
+  if (init_result != hipSuccess) {
+    HIP_RETURN_ERROR(init_result);
+  }
   iree_hal_streaming_device_t* device = iree_hal_streaming_device_entry(dev);
-  if (!device) HIP_RETURN_ERROR(hipErrorInvalidDevice);
+  if (!device) {
+    HIP_RETURN_ERROR(hipErrorInvalidDevice);
+  }
   const iree_hal_physical_device_identity_t* physical_identity =
       iree_hip_physical_device_identity(device);
   if (!physical_identity ||
@@ -3325,7 +3337,9 @@ HIPAPI hipError_t hipDeviceGetByPCIBusId(int* device, const char* pciBusId) {
 
   int device_count = 0;
   hipError_t count_result = hipGetDeviceCount(&device_count);
-  if (count_result != hipSuccess) HIP_RETURN_ERROR(count_result);
+  if (count_result != hipSuccess) {
+    HIP_RETURN_ERROR(count_result);
+  }
 
   unsigned int domain = 0;
   unsigned int bus = 0;
@@ -4482,7 +4496,9 @@ HIPAPI hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev) {
 static bool iree_hip_context_flags_are_valid(unsigned int flags) {
   const unsigned int known_flags =
       hipDeviceScheduleMask | hipDeviceMapHost | hipDeviceLmemResizeToMax;
-  if ((flags & ~known_flags) != 0) return false;
+  if ((flags & ~known_flags) != 0) {
+    return false;
+  }
   switch (flags & hipDeviceScheduleMask) {
     case hipDeviceScheduleAuto:
     case hipDeviceScheduleSpin:
@@ -6024,7 +6040,9 @@ HIPAPI hipError_t hipFree(void* ptr) {
 
 HIPAPI hipError_t hipFreeArray(hipArray_t array) {
   HIP_API_BEGIN();
-  if (!array) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (!array) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
   struct hipArray_st* removed_array = NULL;
   if (!iree_hip_array_registry_remove(array, &removed_array)) {
     HIP_RETURN_ERROR(hipErrorContextIsDestroyed);
@@ -9235,11 +9253,15 @@ HIPAPI hipError_t hipMemcpy2DToArrayAsync(hipArray_t dst, size_t wOffset,
                                           size_t height, hipMemcpyKind kind,
                                           hipStream_t stream) {
   HIP_API_BEGIN();
-  if (!dst) HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  if (!dst) {
+    HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  }
   if (!src || spitch < width) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  if (width == 0 || height == 0) HIP_RETURN_ERROR(hipSuccess);
+  if (width == 0 || height == 0) {
+    HIP_RETURN_ERROR(hipSuccess);
+  }
   size_t element_offset = 0;
   size_t element_width = 0;
   hipError_t range_result = iree_hip_array_byte_range_to_elements(
@@ -9267,11 +9289,15 @@ HIPAPI hipError_t hipMemcpy2DToArray(hipArray_t dst, size_t wOffset,
                                      size_t spitch, size_t width, size_t height,
                                      hipMemcpyKind kind) {
   HIP_API_BEGIN();
-  if (!dst) HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  if (!dst) {
+    HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  }
   if (!src || spitch < width) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  if (width == 0 || height == 0) HIP_RETURN_ERROR(hipSuccess);
+  if (width == 0 || height == 0) {
+    HIP_RETURN_ERROR(hipSuccess);
+  }
   size_t element_offset = 0;
   size_t element_width = 0;
   hipError_t range_result = iree_hip_array_byte_range_to_elements(
@@ -9301,11 +9327,15 @@ HIPAPI hipError_t hipMemcpy2DFromArrayAsync(void* dst, size_t dpitch,
                                             hipMemcpyKind kind,
                                             hipStream_t stream) {
   HIP_API_BEGIN();
-  if (!src) HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  if (!src) {
+    HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  }
   if (!dst || dpitch < width) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  if (width == 0 || height == 0) HIP_RETURN_ERROR(hipSuccess);
+  if (width == 0 || height == 0) {
+    HIP_RETURN_ERROR(hipSuccess);
+  }
   size_t element_offset = 0;
   size_t element_width = 0;
   hipError_t range_result = iree_hip_array_byte_range_to_elements(
@@ -9333,11 +9363,15 @@ HIPAPI hipError_t hipMemcpy2DFromArray(void* dst, size_t dpitch,
                                        size_t hOffset, size_t width,
                                        size_t height, hipMemcpyKind kind) {
   HIP_API_BEGIN();
-  if (!src) HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  if (!src) {
+    HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  }
   if (!dst || dpitch < width) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  if (width == 0 || height == 0) HIP_RETURN_ERROR(hipSuccess);
+  if (width == 0 || height == 0) {
+    HIP_RETURN_ERROR(hipSuccess);
+  }
   size_t element_offset = 0;
   size_t element_width = 0;
   hipError_t range_result = iree_hip_array_byte_range_to_elements(
@@ -9370,7 +9404,9 @@ HIPAPI hipError_t hipMemcpy2DArrayToArray(hipArray_t dst, size_t wOffsetDst,
   if (!dst || !src) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  if (width == 0 || height == 0) HIP_RETURN_ERROR(hipSuccess);
+  if (width == 0 || height == 0) {
+    HIP_RETURN_ERROR(hipSuccess);
+  }
   size_t src_element_offset = 0;
   size_t src_element_width = 0;
   hipError_t range_result = iree_hip_array_byte_range_to_elements(
@@ -9405,11 +9441,15 @@ HIPAPI hipError_t hipMemcpyToArray(hipArray_t dst, size_t wOffset,
                                    size_t hOffset, const void* src,
                                    size_t count, hipMemcpyKind kind) {
   HIP_API_BEGIN();
-  if (!src) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (!src) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
   hipError_t result = iree_hip_array_copy_packed_rows(
       (hipArray_const_t)dst, wOffset, hOffset, (void*)src, count, kind,
       /*array_is_destination=*/true);
-  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  if (result != hipSuccess) {
+    HIP_RETURN_ERROR(result);
+  }
   HIP_RETURN_ERROR(hipSuccess);
 }
 
@@ -9417,11 +9457,15 @@ HIPAPI hipError_t hipMemcpyFromArray(void* dst, hipArray_const_t srcArray,
                                      size_t wOffset, size_t hOffset,
                                      size_t count, hipMemcpyKind kind) {
   HIP_API_BEGIN();
-  if (!dst) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (!dst) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
   hipError_t result = iree_hip_array_copy_packed_rows(
       srcArray, wOffset, hOffset, dst, count, kind,
       /*array_is_destination=*/false);
-  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  if (result != hipSuccess) {
+    HIP_RETURN_ERROR(result);
+  }
   HIP_RETURN_ERROR(hipSuccess);
 }
 
@@ -9429,12 +9473,18 @@ HIPAPI hipError_t hipMemcpyHtoAAsync(hipArray_t dstArray, size_t dstOffset,
                                      const void* srcHost, size_t ByteCount,
                                      hipStream_t stream) {
   HIP_API_BEGIN();
-  if (!srcHost) HIP_RETURN_ERROR(hipErrorInvalidValue);
-  if (ByteCount == 0) HIP_RETURN_ERROR(hipSuccess);
+  if (!srcHost) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (ByteCount == 0) {
+    HIP_RETURN_ERROR(hipSuccess);
+  }
   iree_hal_streaming_deviceptr_t dst_ptr = 0;
   hipError_t result = iree_hip_array_legacy_row_range(
       (hipArray_const_t)dstArray, dstOffset, ByteCount, NULL, &dst_ptr);
-  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  if (result != hipSuccess) {
+    HIP_RETURN_ERROR(result);
+  }
   HIP_RETURN_ERROR(hipMemcpyAsync((void*)dst_ptr, srcHost, ByteCount,
                                   hipMemcpyHostToDevice, stream));
 }
@@ -9442,12 +9492,18 @@ HIPAPI hipError_t hipMemcpyHtoAAsync(hipArray_t dstArray, size_t dstOffset,
 HIPAPI hipError_t hipMemcpyHtoA(hipArray_t dstArray, size_t dstOffset,
                                 const void* srcHost, size_t count) {
   HIP_API_BEGIN();
-  if (!srcHost) HIP_RETURN_ERROR(hipErrorInvalidValue);
-  if (count == 0) HIP_RETURN_ERROR(hipSuccess);
+  if (!srcHost) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (count == 0) {
+    HIP_RETURN_ERROR(hipSuccess);
+  }
   iree_hal_streaming_deviceptr_t dst_ptr = 0;
   hipError_t result = iree_hip_array_legacy_row_range(
       (hipArray_const_t)dstArray, dstOffset, count, NULL, &dst_ptr);
-  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  if (result != hipSuccess) {
+    HIP_RETURN_ERROR(result);
+  }
   HIP_RETURN_ERROR(
       hipMemcpy((void*)dst_ptr, srcHost, count, hipMemcpyHostToDevice));
 }
@@ -9456,12 +9512,18 @@ HIPAPI hipError_t hipMemcpyAtoHAsync(void* dstHost, hipArray_t srcArray,
                                      size_t srcOffset, size_t ByteCount,
                                      hipStream_t stream) {
   HIP_API_BEGIN();
-  if (!dstHost) HIP_RETURN_ERROR(hipErrorInvalidValue);
-  if (ByteCount == 0) HIP_RETURN_ERROR(hipSuccess);
+  if (!dstHost) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (ByteCount == 0) {
+    HIP_RETURN_ERROR(hipSuccess);
+  }
   iree_hal_streaming_deviceptr_t src_ptr = 0;
   hipError_t result = iree_hip_array_legacy_row_range(
       (hipArray_const_t)srcArray, srcOffset, ByteCount, NULL, &src_ptr);
-  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  if (result != hipSuccess) {
+    HIP_RETURN_ERROR(result);
+  }
   HIP_RETURN_ERROR(hipMemcpyAsync(dstHost, (const void*)src_ptr, ByteCount,
                                   hipMemcpyDeviceToHost, stream));
 }
@@ -9469,12 +9531,18 @@ HIPAPI hipError_t hipMemcpyAtoHAsync(void* dstHost, hipArray_t srcArray,
 HIPAPI hipError_t hipMemcpyAtoH(void* dst, hipArray_t srcArray,
                                 size_t srcOffset, size_t count) {
   HIP_API_BEGIN();
-  if (!dst) HIP_RETURN_ERROR(hipErrorInvalidValue);
-  if (count == 0) HIP_RETURN_ERROR(hipSuccess);
+  if (!dst) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (count == 0) {
+    HIP_RETURN_ERROR(hipSuccess);
+  }
   iree_hal_streaming_deviceptr_t src_ptr = 0;
   hipError_t result = iree_hip_array_legacy_row_range(
       (hipArray_const_t)srcArray, srcOffset, count, NULL, &src_ptr);
-  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  if (result != hipSuccess) {
+    HIP_RETURN_ERROR(result);
+  }
   HIP_RETURN_ERROR(
       hipMemcpy(dst, (const void*)src_ptr, count, hipMemcpyDeviceToHost));
 }
@@ -9482,12 +9550,18 @@ HIPAPI hipError_t hipMemcpyAtoH(void* dst, hipArray_t srcArray,
 HIPAPI hipError_t hipMemcpyDtoA(hipArray_t dstArray, size_t dstOffset,
                                 hipDeviceptr_t srcDevice, size_t ByteCount) {
   HIP_API_BEGIN();
-  if (!srcDevice) HIP_RETURN_ERROR(hipErrorInvalidValue);
-  if (ByteCount == 0) HIP_RETURN_ERROR(hipSuccess);
+  if (!srcDevice) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (ByteCount == 0) {
+    HIP_RETURN_ERROR(hipSuccess);
+  }
   iree_hal_streaming_deviceptr_t dst_ptr = 0;
   hipError_t result = iree_hip_array_legacy_row_range(
       (hipArray_const_t)dstArray, dstOffset, ByteCount, NULL, &dst_ptr);
-  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  if (result != hipSuccess) {
+    HIP_RETURN_ERROR(result);
+  }
   HIP_RETURN_ERROR(
       hipMemcpy((void*)dst_ptr, srcDevice, ByteCount, hipMemcpyDeviceToDevice));
 }
@@ -9495,12 +9569,18 @@ HIPAPI hipError_t hipMemcpyDtoA(hipArray_t dstArray, size_t dstOffset,
 HIPAPI hipError_t hipMemcpyAtoD(hipDeviceptr_t dstDevice, hipArray_t srcArray,
                                 size_t srcOffset, size_t ByteCount) {
   HIP_API_BEGIN();
-  if (!dstDevice) HIP_RETURN_ERROR(hipErrorInvalidValue);
-  if (ByteCount == 0) HIP_RETURN_ERROR(hipSuccess);
+  if (!dstDevice) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (ByteCount == 0) {
+    HIP_RETURN_ERROR(hipSuccess);
+  }
   iree_hal_streaming_deviceptr_t src_ptr = 0;
   hipError_t result = iree_hip_array_legacy_row_range(
       (hipArray_const_t)srcArray, srcOffset, ByteCount, NULL, &src_ptr);
-  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  if (result != hipSuccess) {
+    HIP_RETURN_ERROR(result);
+  }
   HIP_RETURN_ERROR(hipMemcpy(dstDevice, (const void*)src_ptr, ByteCount,
                              hipMemcpyDeviceToDevice));
 }
@@ -9533,7 +9613,9 @@ HIPAPI hipError_t hipMemcpyAtoA(hipArray_t dstArray, size_t dstOffset,
                                 hipArray_t srcArray, size_t srcOffset,
                                 size_t ByteCount) {
   HIP_API_BEGIN();
-  if (ByteCount == 0) HIP_RETURN_ERROR(hipSuccess);
+  if (ByteCount == 0) {
+    HIP_RETURN_ERROR(hipSuccess);
+  }
   iree_hal_streaming_deviceptr_t dst_ptr = 0;
   hipError_t result = iree_hip_array_legacy_row_range(
       (hipArray_const_t)dstArray, dstOffset, ByteCount, NULL, &dst_ptr);
@@ -9543,7 +9625,9 @@ HIPAPI hipError_t hipMemcpyAtoA(hipArray_t dstArray, size_t dstOffset,
   iree_hal_streaming_deviceptr_t src_ptr = 0;
   result = iree_hip_array_legacy_row_range(
       (hipArray_const_t)srcArray, srcOffset, ByteCount, NULL, &src_ptr);
-  if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  if (result != hipSuccess) {
+    HIP_RETURN_ERROR(result);
+  }
   HIP_RETURN_ERROR(hipMemcpy((void*)dst_ptr, (const void*)src_ptr, ByteCount,
                              hipMemcpyDeviceToDevice));
 }
@@ -9641,7 +9725,9 @@ HIPAPI hipError_t hipMemset2DAsync(void* dst, size_t pitch, int value,
     result = iree_status_to_hip_result(status);
     iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
-    if (result != hipSuccess) HIP_RETURN_ERROR(result);
+    if (result != hipSuccess) {
+      HIP_RETURN_ERROR(result);
+    }
     HIP_RETURN_ERROR(hipSuccess);
   }
 
@@ -10430,8 +10516,12 @@ HIPAPI hipError_t hipArrayDestroy(hipArray_t array) {
 HIPAPI hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDescriptor,
                                         hipArray_t array) {
   HIP_API_BEGIN();
-  if (!array) HIP_RETURN_ERROR(hipErrorInvalidHandle);
-  if (!pArrayDescriptor) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (!array) {
+    HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  }
+  if (!pArrayDescriptor) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
   struct hipArray_st* array_info = NULL;
   hipError_t result =
       iree_hip_array_retain((hipArray_const_t)array, &array_info);
@@ -10449,8 +10539,12 @@ HIPAPI hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDescriptor,
 HIPAPI hipError_t hipArray3DGetDescriptor(
     HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hipArray_t array) {
   HIP_API_BEGIN();
-  if (!array) HIP_RETURN_ERROR(hipErrorInvalidHandle);
-  if (!pArrayDescriptor) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (!array) {
+    HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  }
+  if (!pArrayDescriptor) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
   struct hipArray_st* array_info = NULL;
   hipError_t result =
       iree_hip_array_retain((hipArray_const_t)array, &array_info);
@@ -10470,8 +10564,12 @@ HIPAPI hipError_t hipArray3DGetDescriptor(
 HIPAPI hipError_t hipArrayGetInfo(hipChannelFormatDesc* desc, hipExtent* extent,
                                   unsigned int* flags, hipArray_t array) {
   HIP_API_BEGIN();
-  if (!array) HIP_RETURN_ERROR(hipErrorInvalidHandle);
-  if (!desc && !extent && !flags) HIP_RETURN_ERROR(hipSuccess);
+  if (!array) {
+    HIP_RETURN_ERROR(hipErrorInvalidHandle);
+  }
+  if (!desc && !extent && !flags) {
+    HIP_RETURN_ERROR(hipSuccess);
+  }
   struct hipArray_st* array_info = NULL;
   hipError_t result =
       iree_hip_array_retain((hipArray_const_t)array, &array_info);
@@ -10494,7 +10592,9 @@ HIPAPI hipError_t hipArrayGetInfo(hipChannelFormatDesc* desc, hipExtent* extent,
 HIPAPI hipError_t hipGetChannelDesc(hipChannelFormatDesc* desc,
                                     hipArray_const_t array) {
   HIP_API_BEGIN();
-  if (!desc) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (!desc) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
   struct hipArray_st* array_info = NULL;
   hipError_t result = iree_hip_array_retain(array, &array_info);
   if (result != hipSuccess) {
@@ -11947,7 +12047,9 @@ HIPAPI hipError_t hipStreamGetAttribute(hipStream_t stream,
                                         hipStreamAttrID attribute,
                                         hipStreamAttrValue* value_out) {
   HIP_API_BEGIN();
-  if (!value_out) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (!value_out) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
 
   iree_hip_resolved_stream_t resolved_stream = {0};
   hipError_t result =
@@ -11972,7 +12074,9 @@ HIPAPI hipError_t hipStreamSetAttribute(hipStream_t stream,
                                         hipStreamAttrID attribute,
                                         const hipStreamAttrValue* value) {
   HIP_API_BEGIN();
-  if (!value) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (!value) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
   if (attribute == hipStreamAttributeSynchronizationPolicy &&
       !iree_hip_synchronization_policy_is_valid(value->syncPolicy)) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
@@ -15764,9 +15868,15 @@ HIPAPI hipError_t hipModuleOccupancyMaxPotentialBlockSizeWithFlags(
 HIPAPI hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessor(
     int* numBlocks, const void* f, int blockSize, size_t dynSharedMemPerBlk) {
   HIP_API_BEGIN();
-  if (!numBlocks) HIP_RETURN_ERROR(hipErrorInvalidValue);
-  if (!f) HIP_RETURN_ERROR(hipErrorInvalidDeviceFunction);
-  if (blockSize <= 0) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (!numBlocks) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (!f) {
+    HIP_RETURN_ERROR(hipErrorInvalidDeviceFunction);
+  }
+  if (blockSize <= 0) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
 
   iree_hal_streaming_context_t* context = NULL;
   iree_hal_streaming_symbol_t* symbol = NULL;
@@ -15796,8 +15906,12 @@ HIPAPI hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
 HIPAPI hipError_t hipOccupancyAvailableDynamicSMemPerBlock(
     size_t* dynamicSmemSize, const void* f, int numBlocks, int blockSize) {
   HIP_API_BEGIN();
-  if (!dynamicSmemSize) HIP_RETURN_ERROR(hipErrorInvalidValue);
-  if (!f) HIP_RETURN_ERROR(hipErrorInvalidDeviceFunction);
+  if (!dynamicSmemSize) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (!f) {
+    HIP_RETURN_ERROR(hipErrorInvalidDeviceFunction);
+  }
   if (numBlocks <= 0 || blockSize <= 0) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
@@ -15842,9 +15956,15 @@ HIPAPI hipError_t hipOccupancyMaxPotentialBlockSize(int* gridSize,
                                                     size_t dynSharedMemPerBlk,
                                                     int blockSizeLimit) {
   HIP_API_BEGIN();
-  if (!gridSize || !blockSize) HIP_RETURN_ERROR(hipErrorInvalidValue);
-  if (!f) HIP_RETURN_ERROR(hipErrorInvalidDeviceFunction);
-  if (blockSizeLimit < 0) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  if (!gridSize || !blockSize) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (!f) {
+    HIP_RETURN_ERROR(hipErrorInvalidDeviceFunction);
+  }
+  if (blockSizeLimit < 0) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
 
   iree_hal_streaming_context_t* context = NULL;
   iree_hal_streaming_symbol_t* symbol = NULL;
@@ -26098,7 +26218,9 @@ HIPAPI hipError_t hipFreeAsync(void* ptr, hipStream_t stream) {
     result = iree_status_to_hip_result(status);
     iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
-    if (result != hipSuccess) HIP_RETURN_ERROR(result);
+    if (result != hipSuccess) {
+      HIP_RETURN_ERROR(result);
+    }
     HIP_RETURN_ERROR(hipSuccess);
   }
 

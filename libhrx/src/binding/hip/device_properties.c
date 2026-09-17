@@ -9,7 +9,9 @@
 #include "common/amdgpu_architecture.h"
 
 bool iree_hip_parse_gcn_arch_name(const char* name, int* out_architecture) {
-  if (!out_architecture) return false;
+  if (!out_architecture) {
+    return false;
+  }
   iree_hal_streaming_amdgpu_architecture_t architecture = {0};
   if (!iree_hal_streaming_parse_amdgpu_architecture(name, &architecture)) {
     return false;

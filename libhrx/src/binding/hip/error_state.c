@@ -61,7 +61,9 @@ static int64_t iree_hip_error_state_pack(uint32_t generation,
 
 static void iree_hip_error_state_sync_thread(int64_t process_state) {
   const uint32_t generation = iree_hip_error_state_generation(process_state);
-  if (iree_hip_thread_error_state.generation == generation) return;
+  if (iree_hip_thread_error_state.generation == generation) {
+    return;
+  }
   iree_hip_thread_error_state.last_error = hipSuccess;
   iree_hip_thread_error_state.last_command_error = hipSuccess;
   iree_hip_thread_error_state.generation = generation;
@@ -141,7 +143,9 @@ hipError_t iree_hip_error_state_publish(iree_hip_error_state_token_t token,
   }
   iree_hip_error_state_sync_thread(process_state);
   const hipError_t fatal_result = iree_hip_error_state_result(process_state);
-  if (fatal_result != hipSuccess) result = fatal_result;
+  if (fatal_result != hipSuccess) {
+    result = fatal_result;
+  }
   iree_hip_thread_error_state.last_command_error = result;
   if (result != hipSuccess && result != hipErrorNotReady) {
     iree_hip_thread_error_state.last_error = result;
@@ -167,7 +171,9 @@ hipError_t iree_hip_error_state_get_and_clear_command_error(void) {
                                                  iree_memory_order_acquire);
   iree_hip_error_state_sync_thread(process_state);
   const hipError_t fatal_result = iree_hip_error_state_result(process_state);
-  if (fatal_result != hipSuccess) return fatal_result;
+  if (fatal_result != hipSuccess) {
+    return fatal_result;
+  }
   const hipError_t result = iree_hip_thread_error_state.last_command_error;
   iree_hip_thread_error_state.last_command_error = hipSuccess;
   return result;
