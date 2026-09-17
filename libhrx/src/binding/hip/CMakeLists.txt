@@ -286,6 +286,25 @@ iree_cc_library(
   PUBLIC
 )
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_library(
+  NAME
+    spirv_linker_compiler
+  HDRS
+    "spirv_linker_compiler.h"
+  SRCS
+    "spirv_linker_compiler.c"
+  DEPS
+    iree::base
+    iree::base::internal::dynamic_library
+    libhrx_defs
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+  PUBLIC
+)
+endif()
+
 iree_cc_library(
   NAME
     error_state
@@ -342,25 +361,6 @@ iree_cc_library(
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
-    spirv_linker_compiler
-  HDRS
-    "spirv_linker_compiler.h"
-  SRCS
-    "spirv_linker_compiler.c"
-  DEPS
-    iree::base
-    iree::base::internal::dynamic_library
-    libhrx_defs
-  INCLUDES
-    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
-    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
-  PUBLIC
-)
-endif()
-
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-iree_cc_library(
-  NAME
     amdhip64
   COPTS
     "-DIREE_HAL_STREAMING_HIP_EXPORTS"
@@ -389,6 +389,7 @@ iree_cc_library(
     ::status_conversion
     ::stream
     iree::base
+    iree::base::core_headers
     iree::base::internal
     iree::base::threading
     iree::hal

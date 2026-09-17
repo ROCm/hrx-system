@@ -14678,7 +14678,7 @@ static hipError_t iree_hip_launch_kernel(const void* function_address,
 
   if (!function_address) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorInvalidDeviceFunction);
+    return hipErrorInvalidDeviceFunction;
   }
 
   hipError_t result = hipSuccess;
@@ -14713,7 +14713,7 @@ static hipError_t iree_hip_launch_kernel(const void* function_address,
   iree_hip_launch_events_release(&events);
   iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
-  HIP_RETURN_ERROR(result);
+  return result;
 }
 
 HIPAPI hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
@@ -14998,9 +14998,9 @@ HIPAPI hipError_t hipExtLaunchKernel(const void* function_address,
   if (flags & ~hipExtAnyOrderLaunch) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  HIP_RETURN_ERROR(iree_hip_launch_kernel(
-      function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream,
-      startEvent, stopEvent));
+  HIP_RETURN_ERROR(iree_hip_launch_kernel(function_address, numBlocks,
+                                          dimBlocks, args, sharedMemBytes,
+                                          stream, startEvent, stopEvent));
 }
 
 // Launches a kernel function with specified dimensions and parameters.
@@ -15221,7 +15221,7 @@ static hipError_t iree_hip_module_launch_kernel(
   iree_hip_launch_events_release(&events);
   iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
-  HIP_RETURN_ERROR(result);
+  return result;
 }
 
 HIPAPI hipError_t hipModuleLaunchKernel(

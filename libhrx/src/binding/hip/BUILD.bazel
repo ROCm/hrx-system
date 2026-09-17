@@ -325,6 +325,7 @@ hrx_cc_shared_library(
         ":stream",
         "//libhrx/src/binding/common",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
