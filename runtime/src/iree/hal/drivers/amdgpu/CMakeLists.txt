@@ -1118,22 +1118,25 @@ iree_cc_binary_benchmark(
 endif()
 
 if(IREE_HAL_DRIVER_AMDGPU)
-iree_cc_library(
+iree_cc_test(
   NAME
-    feedback_state_test_util
-  HDRS
-    "feedback_state_test_util.h"
+    feedback_state_test
   SRCS
-    "feedback_state_test_util.cc"
+    "feedback_state_test.cc"
   DEPS
     ::amdgpu
     ::headers
     iree::base
-    iree::base::internal
     iree::hal
-    iree::hal::drivers::amdgpu::abi
-  TESTONLY
-  PUBLIC
+    iree::hal::drivers::amdgpu::device::headers
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
 )
 endif()
 

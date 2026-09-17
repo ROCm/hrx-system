@@ -674,19 +674,6 @@ hrx_cc_test(
 )
 
 hrx_cc_test(
-    name = "status_conversion_amdgpu_test",
-    srcs = ["status_conversion_amdgpu_test.cc"],
-    target_compatible_with = _HIP_GPU_COMPATIBILITY,
-    deps = [
-        ":error_state",
-        ":status_conversion",
-        "//runtime/src/iree/hal/drivers/amdgpu:feedback_state_test_util",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-hrx_cc_test(
     name = "device_properties_test",
     srcs = ["device_properties_test.cc"],
     deps = [

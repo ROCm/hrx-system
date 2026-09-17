@@ -870,18 +870,17 @@ iree_runtime_cc_benchmark(
     ],
 )
 
-iree_runtime_cc_library(
-    name = "feedback_state_test_util",
-    testonly = True,
-    srcs = ["feedback_state_test_util.cc"],
-    hdrs = ["feedback_state_test_util.h"],
+iree_runtime_cc_test(
+    name = "feedback_state_test",
+    srcs = ["feedback_state_test.cc"],
     deps = [
         ":amdgpu",
         ":headers",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/amdgpu/abi",
+        "//runtime/src/iree/hal/drivers/amdgpu/device:headers",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

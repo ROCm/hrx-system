@@ -400,7 +400,7 @@ static iree_status_t iree_hal_amdgpu_feedback_state_handle_tsan_packet(
           report->prior_access_kind));
 }
 
-iree_status_t iree_hal_amdgpu_feedback_state_handle_packet(
+static iree_status_t iree_hal_amdgpu_feedback_state_handle_packet(
     iree_hal_amdgpu_feedback_state_t* state,
     iree_host_size_t physical_device_ordinal,
     const iree_hal_amdgpu_feedback_packet_t* packet) {

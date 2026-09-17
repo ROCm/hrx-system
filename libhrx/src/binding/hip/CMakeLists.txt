@@ -768,22 +768,6 @@ iree_cc_test(
     libhrx_defs
 )
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_HAL_DRIVER_AMDGPU)
-iree_cc_test(
-  NAME
-    status_conversion_amdgpu_test
-  SRCS
-    "status_conversion_amdgpu_test.cc"
-  DEPS
-    ::error_state
-    ::status_conversion
-    iree::hal::drivers::amdgpu::feedback_state_test_util
-    iree::testing::gtest
-    iree::testing::gtest_main
-    libhrx_defs
-)
-endif()
-
 iree_cc_test(
   NAME
     device_properties_test
