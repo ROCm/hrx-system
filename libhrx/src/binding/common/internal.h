@@ -7,11 +7,13 @@
 #ifndef IREE_EXPERIMENTAL_STREAMING_INTERNAL_H_
 #define IREE_EXPERIMENTAL_STREAMING_INTERNAL_H_
 
+#include "common/context_handle.h"
 #include "common/event_timestamp_pool.h"
 #include "common/execution_resource.h"
 #include "common/fat_binary.h"
 #include "common/function_attributes.h"
 #include "common/hrx_bridge.h"
+#include "common/ipc_memory.h"
 #include "common/stream.h"
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
@@ -47,9 +49,8 @@ typedef struct iree_hal_streaming_operation_timeline_t {
 typedef struct iree_hal_streaming_deferred_device_free_t
     iree_hal_streaming_deferred_device_free_t;
 typedef struct iree_hal_streaming_device_t iree_hal_streaming_device_t;
-typedef struct iree_hal_streaming_device_registry_t
-    iree_hal_streaming_device_registry_t;
 typedef struct iree_hal_streaming_event_t iree_hal_streaming_event_t;
+typedef struct iree_hal_streaming_ipc_event_t iree_hal_streaming_ipc_event_t;
 typedef struct iree_hal_streaming_global_symbol_registry_t
     iree_hal_streaming_global_symbol_registry_t;
 typedef struct iree_hal_streaming_graph_t iree_hal_streaming_graph_t;
@@ -245,9 +246,6 @@ struct iree_hal_streaming_context_t {
   // initialization).
   iree_hal_streaming_stream_t* default_stream;
 
-  // Next non-zero stream capture identifier assigned under |stream_list_mutex|.
-  unsigned long long next_capture_id;
-
   // Peer access list.
   iree_hal_streaming_context_t** peer_contexts;
   iree_host_size_t peer_count;
@@ -277,6 +275,24 @@ struct iree_hal_streaming_context_t {
   // Synchronization.
   iree_slim_mutex_t mutex;
 
+  // Ownership state of the raw binding handle, guarded by |mutex|.
+  iree_hal_streaming_context_handle_state_t handle_state;
+
+  // Serializes IPC-import admission and reservation accounting.
+  iree_slim_mutex_t ipc_import_mutex;
+  // Gives one cold-path retirement transaction exclusive ownership of the
+  // admission gate until it commits or aborts.
+  iree_slim_mutex_t ipc_import_retirement_mutex;
+  // Posted whenever IPC-import admission or the active count changes.
+  iree_notification_t ipc_import_notification;
+  // Number of IPC imports admitted but not yet completed or rolled back.
+  uint32_t active_ipc_import_count;
+  // True once context retirement has permanently closed IPC-import admission.
+  bool ipc_imports_retiring;
+  // True when the current retirement transaction closed admission and may
+  // reopen it if that transaction aborts.
+  bool ipc_import_retirement_may_reopen;
+
   // Host allocator.
   iree_allocator_t host_allocator;
 
@@ -301,9 +317,12 @@ struct iree_hal_streaming_context_t {
   // Serializes event record submission and |event_record_timeline| updates.
   iree_slim_mutex_t event_record_mutex;
 
-  // Global context list node pointers for cleanup tracking.
-  // These are used to link all contexts in a global list for proper cleanup.
-  // Guarded by the context list mutex.
+  // Device registry whose weak context list contains this context, or zero.
+  // Stored atomically because final release may begin before list detachment.
+  iree_atomic_intptr_t context_registry;
+
+  // Weak global context-list links used for lookup and cleanup tracking.
+  // Membership does not retain the context. Guarded by the context-list mutex.
   struct {
     iree_hal_streaming_context_t* next;
     iree_hal_streaming_context_t* prev;
@@ -468,13 +487,19 @@ typedef struct iree_hal_streaming_device_registry_t {
   iree_hal_streaming_device_t devices[IREE_HAL_STREAMING_MAX_DEVICES];
   iree_host_size_t device_count;
 
-  // Global context tracking for cleanup.
-  // All created contexts are tracked here to ensure proper cleanup.
+  // Weak tracking of registered contexts. A zero-reference context remains
+  // linked until its final destructor publishes completion. Callers retain an
+  // entry under |context_list.mutex| before using it after unlocking.
   struct {
     iree_slim_mutex_t mutex;
+    // Posted whenever an entry is unlinked.
+    iree_notification_t changed;
     iree_hal_streaming_context_t* head;
     iree_hal_streaming_context_t* tail;
   } context_list;
+
+  // Process-wide ownership and duplicate-open registry for IPC memory imports.
+  iree_hal_streaming_ipc_memory_registry_t ipc_memory_registry;
 } iree_hal_streaming_device_registry_t;
 
 //===----------------------------------------------------------------------===//
@@ -808,6 +833,48 @@ typedef struct iree_hal_streaming_recorded_point_t {
   iree_hal_streaming_event_timestamp_slot_t* timestamp_slot;
 } iree_hal_streaming_recorded_point_t;
 
+// Immutable identity and policy of the capture session named by an event's
+// last capture-time record. Acquirers own the graph and recording stream
+// references and must release the association when finished.
+typedef struct iree_hal_streaming_event_capture_association_t {
+  // Graph the record was captured into, retained, or NULL when the event names
+  // no capture session.
+  iree_hal_streaming_graph_t* graph;
+  // Stream whose capture produced the record, retained when |graph| is set.
+  iree_hal_streaming_stream_t* recording_stream;
+  // Non-zero identifier assigned to that exact capture session.
+  unsigned long long capture_id;
+  // Visibility mode the capture session was begun with.
+  iree_hal_streaming_capture_mode_t capture_mode;
+  // Host thread that began the capture session.
+  uintptr_t capture_owner_thread_id;
+} iree_hal_streaming_event_capture_association_t;
+
+typedef struct iree_hal_streaming_capture_context_snapshot_t
+    iree_hal_streaming_capture_context_snapshot_t;
+
+// Fully retained process-wide context and stream snapshot prepared for capture
+// invalidation. Preparation may allocate; applying a prepared snapshot cannot
+// fail. Callers must deinitialize the snapshot after applying or abandoning it.
+typedef struct iree_hal_streaming_capture_invalidation_t {
+  // Allocator owning |contexts|.
+  iree_allocator_t host_allocator;
+  // Retained context snapshots, each owning its retained stream array.
+  iree_hal_streaming_capture_context_snapshot_t* contexts;
+  // Number of initialized entries in |contexts|.
+  iree_host_size_t context_count;
+} iree_hal_streaming_capture_invalidation_t;
+
+// Owned references displaced when a submitted record ends an event's capture
+// association. Callers release the result after dropping any stream or graph
+// executable mutex held while the record was committed.
+typedef struct iree_hal_streaming_event_displaced_capture_t {
+  // Graph retained by the previous capture association, or NULL.
+  iree_hal_streaming_graph_t* graph;
+  // Recording stream retained by the previous capture association, or NULL.
+  iree_hal_streaming_stream_t* recording_stream;
+} iree_hal_streaming_event_displaced_capture_t;
+
 // Event for synchronization.
 typedef struct iree_hal_streaming_event_t {
   // Reference counting.
@@ -816,8 +883,8 @@ typedef struct iree_hal_streaming_event_t {
   // Event properties.
   iree_hal_streaming_event_flags_t flags;
 
-  // Guards |recorded_point| and |capture_graph|, which move together: a
-  // submitted record installs a point and ends any capture association in one
+  // Guards |recorded_point| and the capture association fields. A submitted
+  // record installs a point and ends the graph/session association in one
   // transition, so no reader can see the new point while the event still reads
   // as captured. The point carries the record's timeline point and the slot its
   // tick lands in as one value, so no reader can pair one record's point with
@@ -835,21 +902,29 @@ typedef struct iree_hal_streaming_event_t {
   // queryable after the stream or graph executable that carried it is gone.
   iree_hal_streaming_recorded_point_t recorded_point;
 
-  // Stream that last recorded this event through the stream API, retained, or
-  // NULL before any such record. Consumed only by stream capture, which picks
-  // the capture mode, id and owning thread up from here; a graph launch leaves
-  // it alone. Exchanged under |mutex| but read by the capture paths without it,
-  // which is sound only because a capture sequence is driven by one thread.
+  // Retained stream that produced the current capture-time record, or NULL
+  // when the event has no such association. Acquired with the graph and the
+  // immutable session metadata below; no consumer reads mutable capture fields
+  // from this stream as the event's identity.
   iree_hal_streaming_stream_t* recording_stream;
   // Context that created the event, retained.
   iree_hal_streaming_context_t* context;
 
-  // Platform-specific IPC handle, if the event is IPC enabled.
-  void* ipc_handle;
+  // Binding-specific IPC implementation owned by this event, or NULL.
+  iree_hal_streaming_ipc_event_t* ipc_event;
 
   // Graph a capture-time record last associated this event with, retained, or
   // NULL when the event's last record was submitted. Guarded by |mutex|.
   iree_hal_streaming_graph_t* capture_graph;
+  // Non-zero identifier of the exact session that produced the capture-time
+  // record, or zero when |capture_graph| is NULL. Guarded by |mutex|.
+  unsigned long long capture_id;
+  // Visibility mode snapshotted from the session that produced the
+  // capture-time record. Guarded by |mutex|.
+  iree_hal_streaming_capture_mode_t capture_mode;
+  // Host thread that began the session which produced the capture-time record.
+  // Guarded by |mutex|.
+  uintptr_t capture_owner_thread_id;
   // Captured dependency frontier stored by the last captured record. Not
   // guarded by |mutex|, unlike the association above it: the capture-time
   // record writes this array with no lock held and the capture-time wait that
@@ -1011,8 +1086,9 @@ typedef struct iree_hal_streaming_buffer_t {
   // Per-context imported wrappers over the same HIP-visible allocation.
   iree_hal_streaming_context_import_t* context_imports;
 
-  // Platform-specific IPC handle, if the buffer is IPC enabled.
-  void* ipc_handle;
+  // True when this wrapper owns an allocation that hipFree/hipFreeAsync may
+  // release.
+  bool is_device_freeable;
 
   // Read-mostly hint for optimizing memory duplication across devices.
   bool read_mostly_hint;
@@ -1374,7 +1450,10 @@ iree_status_t iree_hal_streaming_init_global(
     const iree_hal_device_create_params_extension_t* device_extensions,
     iree_allocator_t host_allocator);
 
-// Cleans up global state and releases all resources.
+// Cleans up global state and releases all resources. Callers must exclude new
+// runtime operations, context registration, and release of live context
+// references. A final destructor that has already decremented its reference
+// count to zero is joined internally.
 // Synchronization: all contexts (synchronizes all active contexts).
 void iree_hal_streaming_cleanup_global(void);
 
@@ -1382,11 +1461,43 @@ void iree_hal_streaming_cleanup_global(void);
 // Synchronization: none (read-only access).
 iree_hal_streaming_device_registry_t* iree_hal_streaming_device_registry(void);
 
-// Global context list management.
+// Global context-list management. Membership is weak and does not contribute a
+// context reference. |device_registry| may be NULL when creating standalone
+// contexts without a process-wide registry.
 // Synchronization: none (thread-safe internal locking).
-void iree_hal_streaming_register_context(iree_hal_streaming_context_t* context);
+void iree_hal_streaming_register_context(
+    iree_hal_streaming_device_registry_t* device_registry,
+    iree_hal_streaming_context_t* context);
 void iree_hal_streaming_unregister_context(
     iree_hal_streaming_context_t* context);
+
+// Synchronizes and detaches live entries until |device_registry|'s weak context
+// list is empty. Entries whose final release has begun remain linked while this
+// waits for their destructor-completion publication. |timeout| bounds only
+// waits for final destructors; context synchronization itself is unbounded.
+// New registrations and registry-backed runtime operations must be
+// caller-serialized with this operation; final context destruction may overlap.
+// Synchronization: all contexts (thread-safe against final destruction).
+iree_status_t iree_hal_streaming_context_list_drain(
+    iree_hal_streaming_device_registry_t* device_registry,
+    iree_timeout_t timeout);
+
+// Resolves |handle| by address against the current weak registry membership and
+// returns a retained context, or NULL if it is absent or its final release has
+// begun. The raw handle is never dereferenced before successful promotion.
+// Synchronization: none (thread-safe internal locking).
+iree_hal_streaming_context_t*
+iree_hal_streaming_context_list_try_retain_registered(
+    iree_hal_streaming_device_registry_t* device_registry,
+    const iree_hal_streaming_context_t* handle);
+
+// Returns the first live context after |previous_context| in the weak registry
+// list, retained for use after the list mutex is released. Pass NULL to begin
+// an iteration. A non-NULL predecessor must remain retained by the caller.
+// Synchronization: none (thread-safe internal locking).
+iree_hal_streaming_context_t* iree_hal_streaming_context_list_retain_next(
+    iree_hal_streaming_device_registry_t* device_registry,
+    const iree_hal_streaming_context_t* previous_context);
 
 //===----------------------------------------------------------------------===//
 // Device management
@@ -1462,7 +1573,9 @@ iree_status_t iree_hal_streaming_device_retain_primary_context(
     iree_hal_streaming_context_t** out_context);
 
 // Releases one primary-context reference and decrements its device-level usage
-// count. Destroys the device-owned context when the count reaches zero.
+// count. The final release atomically drains context-owned IPC imports before
+// destroying the device-owned context. A failed drain preserves the reference
+// and usage count so the release can be retried.
 // Synchronization: context (waits for idle when destroying).
 iree_status_t iree_hal_streaming_device_release_primary_context(
     iree_hal_streaming_device_t* device);
@@ -1498,12 +1611,20 @@ iree_status_t iree_hal_streaming_context_create(
     iree_hal_streaming_context_flags_t flags, iree_allocator_t host_allocator,
     iree_hal_streaming_context_t** out_context);
 
+// Creates a device-managed primary context whose raw handle cannot be consumed
+// by an explicit context-destroy API.
+// Synchronization: none (creates new context).
+iree_status_t iree_hal_streaming_context_create_primary(
+    iree_hal_streaming_device_t* device_entry,
+    iree_hal_streaming_context_flags_t flags, iree_allocator_t host_allocator,
+    iree_hal_streaming_context_t** out_context);
+
 // Synchronization: none (reference counting).
 void iree_hal_streaming_context_retain(iree_hal_streaming_context_t* context);
 void iree_hal_streaming_context_release(iree_hal_streaming_context_t* context);
 
 // Attempts to form a reference without resurrecting a context whose final
-// release has begun. Returns false when the reference count has reached zero.
+// release has begun. Returns false when the count is zero or already saturated.
 bool iree_hal_streaming_context_try_retain(
     iree_hal_streaming_context_t* context);
 
@@ -1620,10 +1741,13 @@ iree_status_t iree_hal_streaming_context_record_event(
 iree_status_t iree_hal_streaming_context_wait_event(
     iree_hal_streaming_context_t* context, iree_hal_streaming_event_t* event);
 
-iree_status_t iree_hal_streaming_context_allocate_capture_id(
-    iree_hal_streaming_context_t* context, unsigned long long* out_capture_id);
+// Allocates a process-unique nonzero stream-capture identifier. Identifiers are
+// never reused; returns RESOURCE_EXHAUSTED after the namespace wraps to zero.
+iree_status_t iree_hal_streaming_allocate_capture_id(
+    unsigned long long* out_capture_id);
 
-// Returns true when another context is present in the global context list.
+// Returns true when another live context can be retained from the global weak
+// context list.
 bool iree_hal_streaming_context_has_peer_contexts(
     iree_hal_streaming_context_t* context);
 
@@ -1819,6 +1943,13 @@ iree_status_t iree_hal_streaming_event_create(
 void iree_hal_streaming_event_retain(iree_hal_streaming_event_t* event);
 void iree_hal_streaming_event_release(iree_hal_streaming_event_t* event);
 
+// Returns true when |event| can be recorded directly on a stream belonging to
+// |context|. Ordinary events require their creating context. An event with an
+// IPC adapter may additionally use another context on the same device.
+bool iree_hal_streaming_event_can_record_in_context(
+    const iree_hal_streaming_event_t* event,
+    const iree_hal_streaming_context_t* context);
+
 // Synchronization: none (queries event status, non-blocking).
 iree_status_t iree_hal_streaming_event_query(iree_hal_streaming_event_t* event,
                                              int* status);
@@ -1845,29 +1976,23 @@ void iree_hal_streaming_event_release_recorded_point(
 // once the submission that signals |point| has been accepted, with a point
 // iree_hal_streaming_event_enqueue_record completed.
 //
-// A submitted record ends the event's association with any graph a capture-time
-// record left on it, in the same transition, so no reader can see the new point
-// while the event still reads as captured. Returns that graph reference;
-// releasing it can free the allocations the graph owns, which synchronizes
-// every context and relocks the stream, so callers holding a stream or graph
-// executable mutex must release it after unlocking.
+// A submitted record ends the complete capture association in the same
+// transition, so no reader can see the new point paired with capture identity
+// or observe a graph without its recording stream. Returns the graph and stream
+// references that association owned. Releasing either can re-enter the
+// streaming layer, so callers holding a stream or graph executable mutex must
+// release the result after unlocking.
 // Synchronization: event (event mutex held while replacing the point).
-IREE_MUST_USE_RESULT iree_hal_streaming_graph_t*
+IREE_MUST_USE_RESULT iree_hal_streaming_event_displaced_capture_t
 iree_hal_streaming_event_commit_recorded_point(
     iree_hal_streaming_event_t* event,
     iree_hal_streaming_recorded_point_t point);
 
-// Makes |stream| the stream whose capture state |event| belongs to, taking a
-// reference to it, and transfers the previously referenced stream to the
-// caller. Returns NULL when |stream| was already the recording stream.
-//
-// Releasing the returned stream can run its teardown, which re-enters the
-// streaming layer to synchronize and unregister the stream, so callers holding
-// a stream mutex must drop the reference after unlocking.
-// Synchronization: event (event mutex held while exchanging).
-IREE_MUST_USE_RESULT iree_hal_streaming_stream_t*
-iree_hal_streaming_event_exchange_recording_stream(
-    iree_hal_streaming_event_t* event, iree_hal_streaming_stream_t* stream);
+// Releases and zeroes references returned by
+// iree_hal_streaming_event_commit_recorded_point. May re-enter the streaming
+// layer and must run without event, stream, or graph executable mutexes held.
+void iree_hal_streaming_event_release_displaced_capture(
+    iree_hal_streaming_event_displaced_capture_t* displaced_capture);
 
 // Returns whether a capture-time record last associated |event| with a graph.
 // An event names none once its last record has been submitted, and none before
@@ -1881,28 +2006,27 @@ iree_hal_streaming_event_exchange_recording_stream(
 bool iree_hal_streaming_event_has_capture_graph(
     iree_hal_streaming_event_t* event);
 
-// Returns a retained reference to the graph a capture-time record last
-// associated |event| with, or NULL when the event names no capture: once its
-// last record has been submitted, and before any record has been made.
-// Releasing the returned graph can free the allocations it owns, which
-// synchronizes every context and relocks streams, so callers holding a stream
-// mutex must release it after unlocking.
-// Synchronization: event (event mutex held while retaining).
-IREE_MUST_USE_RESULT iree_hal_streaming_graph_t*
-iree_hal_streaming_event_acquire_capture_graph(
-    iree_hal_streaming_event_t* event);
+// Acquires one immutable snapshot of the capture session named by |event|'s
+// last capture-time record. Returns a zeroed association when the event names
+// no capture. Both graph and recording stream are retained in one event-mutex
+// critical section, so the scalar identity cannot describe different objects.
+// Synchronization: event (event mutex held while copying and retaining).
+void iree_hal_streaming_event_acquire_capture_association(
+    iree_hal_streaming_event_t* event,
+    iree_hal_streaming_event_capture_association_t* out_association);
 
-// Makes |graph| the graph |event|'s capture-time record belongs to, taking a
-// reference to it, and transfers the reference the event held to the caller.
-// Returns NULL when |graph| was already the capture graph.
-//
-// Releasing the returned graph can free the allocations it owns, which
-// synchronizes every context and relocks streams, so callers holding a stream
-// mutex must release it after unlocking.
-// Synchronization: event (event mutex held while exchanging).
-IREE_MUST_USE_RESULT iree_hal_streaming_graph_t*
-iree_hal_streaming_event_exchange_capture_graph(
-    iree_hal_streaming_event_t* event, iree_hal_streaming_graph_t* graph);
+// Returns whether the retained source stream is still ACTIVE in the exact
+// graph/session stored in |association|. Callers use this before adopting or
+// invalidating a captured record so an ended session cannot name a successor.
+// Synchronization: recording stream (stream mutex held while validating).
+bool iree_hal_streaming_event_capture_association_is_active(
+    const iree_hal_streaming_event_capture_association_t* association);
+
+// Releases the graph and recording stream retained by an acquired association.
+// May synchronize through graph or stream teardown and must run without event,
+// stream, graph executable, or registry mutexes held.
+void iree_hal_streaming_event_release_capture_association(
+    iree_hal_streaming_event_capture_association_t* association);
 
 // Records |event| after the current tails of every stream in |streams|. Each
 // stream must belong to the context that created |event| and none may be
@@ -1928,6 +2052,8 @@ iree_status_t iree_hal_streaming_event_record_after_streams(
 // holds, and nothing the point names keeps that pool alive: only the reference
 // the event holds on its own context does. This is the streaming layer's own
 // enforcement of the rule, covering callers that have not already decided it.
+// IPC events are rejected before submission; direct stream recording uses a
+// private adapter-aware path instead.
 //
 // |point| arrives describing the timeline point that record signals and owning
 // nothing. On success it additionally names the slot the device writes this
@@ -1957,14 +2083,16 @@ IREE_MUST_USE_RESULT iree_status_t iree_hal_streaming_event_enqueue_record(
 // Records |event| at the point |stream| has reached. On a stream that is not
 // capturing that point is a queue point: |stream| is flushed so the record
 // lands behind everything already recorded on it, and the record is enqueued
-// there. |stream| must then belong to |event|'s context, or the record is
-// refused with IREE_STATUS_INCOMPATIBLE.
+// there. |stream| must then belong to |event|'s context, unless the event has
+// an IPC adapter and the stream belongs to another context on the same device.
+// Every other pair is refused with IREE_STATUS_INCOMPATIBLE.
 //
 // A capturing stream is the exception on both counts. Such a record names the
 // stream's dependency frontier and no queue point, so nothing is flushed or
-// enqueued and it is accepted from any context. A binding may be stricter:
-// hipEventRecord holds a capturing stream to the context rule too, refusing
-// the pair before it reaches here.
+// enqueued and it is accepted from any context. An IPC event is also refused
+// during capture because its adapter has no graph integration in this path. A
+// binding may be stricter for ordinary events: hipEventRecord holds a capturing
+// stream to the exact-context rule.
 // Synchronization: stream flush (flushes a stream that is not capturing).
 iree_status_t iree_hal_streaming_event_record(
     iree_hal_streaming_event_t* event, iree_hal_streaming_stream_t* stream);
@@ -2018,6 +2146,8 @@ typedef enum iree_hal_streaming_memory_flag_bits_e {
   IREE_HAL_STREAMING_MEMORY_FLAG_PORTABLE = 1ull << 1,
   IREE_HAL_STREAMING_MEMORY_FLAG_WRITE_COMBINED = 1ull << 2,
   IREE_HAL_STREAMING_MEMORY_FLAG_UNCACHED = 1ull << 3,
+  // Requests a dedicated allocation suitable for later external export.
+  IREE_HAL_STREAMING_MEMORY_FLAG_SHARING_EXPORT = 1ull << 4,
 } iree_hal_streaming_memory_flags_t;
 
 // Synchronization: none (returns pointer value).
@@ -2046,7 +2176,7 @@ iree_status_t iree_hal_streaming_memory_lookup_range(
 // Looks up the context and buffer that contain the specified address range.
 // On success, |out_context| receives a retained context reference that the
 // caller must release.
-// Synchronization: global context-list lock during lookup.
+// Synchronization: retained weak-list traversal and per-context table lookup.
 iree_status_t iree_hal_streaming_memory_lookup_range_across_contexts(
     iree_hal_streaming_deviceptr_t device_ptr, iree_device_size_t size,
     iree_hal_streaming_context_t** out_context,
@@ -2465,6 +2595,51 @@ iree_status_t iree_hal_streaming_begin_capture_to_graph(
     iree_hal_streaming_stream_t* stream, iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count, iree_hal_streaming_capture_mode_t mode);
+
+// Invalidates every active stream participating in the exact capture session
+// identified by |graph| and |capture_id|. All process contexts and streams are
+// retained before any capture state changes, so allocation failure leaves the
+// session unchanged. |out_invalidated| is false on failure and reports whether
+// any participant was invalidated on success.
+// Synchronization: none (thread-compatible with context/stream destruction).
+iree_status_t iree_hal_streaming_invalidate_capture_graph(
+    iree_hal_streaming_graph_t* graph, unsigned long long capture_id,
+    bool* out_invalidated);
+
+// Invalidates every ACTIVE session still named by up to two retained event
+// capture associations. Stale associations are ignored. All process contexts
+// and streams needed for both sessions are retained before either session is
+// changed, so allocation failure leaves both untouched. Duplicate graph/ID
+// pairs are invalidated once. |out_invalidated| is false on failure.
+// Synchronization: none (thread-compatible with context/stream destruction;
+// capture session mutation follows the one-thread capture protocol).
+iree_status_t iree_hal_streaming_invalidate_event_captures(
+    const iree_hal_streaming_event_capture_association_t* associations,
+    iree_host_size_t association_count, bool* out_invalidated);
+
+// Prepares every retained process context and stream needed to invalidate the
+// active sessions named by up to two event capture associations. Preparation
+// does not mutate capture state. Stale associations produce an empty snapshot.
+// Synchronization: none (thread-compatible with context/stream destruction).
+iree_status_t iree_hal_streaming_event_capture_invalidation_prepare(
+    const iree_hal_streaming_event_capture_association_t* associations,
+    iree_host_size_t association_count,
+    iree_hal_streaming_capture_invalidation_t* out_invalidation);
+
+// Revalidates the event associations and invalidates their exact active
+// sessions using an already prepared process snapshot. This operation cannot
+// allocate or fail and returns whether any participant was invalidated.
+// Synchronization: none (capture session mutation follows the one-thread
+// capture protocol).
+bool iree_hal_streaming_event_capture_invalidation_apply(
+    const iree_hal_streaming_event_capture_association_t* associations,
+    iree_host_size_t association_count,
+    const iree_hal_streaming_capture_invalidation_t* invalidation);
+
+// Releases every context and stream retained by |invalidation|.
+// Synchronization: none.
+void iree_hal_streaming_event_capture_invalidation_deinitialize(
+    iree_hal_streaming_capture_invalidation_t* invalidation);
 
 // Synchronization: none (ends capture mode, creates graph).
 iree_status_t iree_hal_streaming_end_capture(

@@ -45,6 +45,61 @@ static bool AgentListContains(
   return false;
 }
 
+#if !IREE_HAL_AMDGPU_LIBHSA_STATIC
+static hsa_status_t HSA_API IpcAccessIterateAgentsHook(
+    hsa_status_t (*callback)(hsa_agent_t, void*), void* data) {
+  const hsa_agent_t agents[] = {
+      MakeAgent(100), MakeAgent(200), MakeAgent(201),
+      MakeAgent(202), MakeAgent(203), MakeAgent(204),
+  };
+  for (hsa_agent_t agent : agents) {
+    const hsa_status_t status = callback(agent, data);
+    if (status != HSA_STATUS_SUCCESS) return status;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
+static hsa_status_t HSA_API IpcAccessAgentGetInfoHook(
+    hsa_agent_t agent, hsa_agent_info_t attribute, void* value) {
+  if (attribute != HSA_AGENT_INFO_DEVICE || !value) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+  *static_cast<hsa_device_type_t*>(value) =
+      agent.handle == 100 ? HSA_DEVICE_TYPE_CPU : HSA_DEVICE_TYPE_GPU;
+  return HSA_STATUS_SUCCESS;
+}
+
+static hsa_status_t HSA_API IpcAccessPoolGetInfoHook(
+    hsa_agent_t agent, hsa_amd_memory_pool_t memory_pool,
+    hsa_amd_agent_memory_pool_info_t attribute, void* value) {
+  if (memory_pool.handle != 77 ||
+      attribute != HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS || !value) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+  hsa_amd_memory_pool_access_t access =
+      HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED;
+  switch (agent.handle) {
+    case 200:
+      access = HSA_AMD_MEMORY_POOL_ACCESS_ALLOWED_BY_DEFAULT;
+      break;
+    case 201:
+      access = HSA_AMD_MEMORY_POOL_ACCESS_DISALLOWED_BY_DEFAULT;
+      break;
+    default:
+      break;
+  }
+  *static_cast<hsa_amd_memory_pool_access_t*>(value) = access;
+  return HSA_STATUS_SUCCESS;
+}
+
+static hsa_status_t HSA_API IpcAccessFailingPoolGetInfoHook(
+    hsa_agent_t agent, hsa_amd_memory_pool_t memory_pool,
+    hsa_amd_agent_memory_pool_info_t attribute, void* value) {
+  if (agent.handle == 204) return HSA_STATUS_ERROR;
+  return IpcAccessPoolGetInfoHook(agent, memory_pool, attribute, value);
+}
+#endif  // !IREE_HAL_AMDGPU_LIBHSA_STATIC
+
 TEST(AccessPolicyTest, AnySelectsLogicalTopologyAgents) {
   iree_hal_amdgpu_topology_t topology = MakeThreeGpuTopology();
 
@@ -216,6 +271,65 @@ TEST(AccessPolicyTest, ScopeRejectsTopologyBeyondFamilyCapacity) {
           &topology, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
           IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE, &agent_list));
 }
+
+#if !IREE_HAL_AMDGPU_LIBHSA_STATIC
+TEST(AccessPolicyTest, IpcMemorySelectsExportPoolAccessibleGpuPeers) {
+  iree_hal_amdgpu_topology_t topology = MakeThreeGpuTopology();
+  iree_hal_amdgpu_libhsa_t libhsa = {};
+  libhsa.hsa_iterate_agents = IpcAccessIterateAgentsHook;
+  libhsa.hsa_agent_get_info = IpcAccessAgentGetInfoHook;
+  libhsa.hsa_amd_agent_memory_pool_get_info = IpcAccessPoolGetInfoHook;
+
+  iree_hal_amdgpu_access_agent_list_t agent_list;
+  IREE_ASSERT_OK(iree_hal_amdgpu_access_agent_list_resolve_ipc_memory_agents(
+      &libhsa, &topology, iree_hal_make_queue_family_affinity(1),
+      hsa_amd_memory_pool_t{77}, &agent_list));
+
+  ASSERT_EQ(agent_list.count, 2u);
+  EXPECT_EQ(agent_list.values[0].handle, topology.gpu_agents[1].handle);
+  EXPECT_TRUE(AgentListContains(agent_list, MakeAgent(200)));
+  EXPECT_TRUE(AgentListContains(agent_list, MakeAgent(201)));
+  EXPECT_FALSE(AgentListContains(agent_list, MakeAgent(100)));
+  EXPECT_FALSE(AgentListContains(agent_list, MakeAgent(202)));
+  EXPECT_FALSE(AgentListContains(agent_list, MakeAgent(203)));
+  EXPECT_FALSE(AgentListContains(agent_list, MakeAgent(204)));
+}
+
+TEST(AccessPolicyTest, IpcMemoryRejectsInaccessibleDestinationGpu) {
+  iree_hal_amdgpu_topology_t topology = MakeThreeGpuTopology();
+  iree_hal_amdgpu_libhsa_t libhsa = {};
+  libhsa.hsa_iterate_agents = IpcAccessIterateAgentsHook;
+  libhsa.hsa_agent_get_info = IpcAccessAgentGetInfoHook;
+  libhsa.hsa_amd_agent_memory_pool_get_info = IpcAccessPoolGetInfoHook;
+
+  iree_hal_amdgpu_access_agent_list_t agent_list;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_PERMISSION_DENIED,
+      iree_hal_amdgpu_access_agent_list_resolve_ipc_memory_agents(
+          &libhsa, &topology, iree_hal_make_queue_family_affinity(2),
+          hsa_amd_memory_pool_t{77}, &agent_list));
+  EXPECT_EQ(agent_list.count, 0u);
+}
+
+TEST(AccessPolicyTest, IpcMemoryPropagatesPeerAccessQueryFailure) {
+  iree_hal_amdgpu_topology_t topology = MakeThreeGpuTopology();
+  iree_hal_amdgpu_libhsa_t libhsa = {};
+  libhsa.hsa_iterate_agents = IpcAccessIterateAgentsHook;
+  libhsa.hsa_agent_get_info = IpcAccessAgentGetInfoHook;
+  libhsa.hsa_amd_agent_memory_pool_get_info = IpcAccessFailingPoolGetInfoHook;
+
+  iree_hal_amdgpu_access_agent_list_t agent_list;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNKNOWN,
+      iree_hal_amdgpu_access_agent_list_resolve_ipc_memory_agents(
+          &libhsa, &topology, iree_hal_make_queue_family_affinity(0),
+          hsa_amd_memory_pool_t{77}, &agent_list));
+}
+#else
+TEST(AccessPolicyTest, IpcMemoryPeerQueryHooksRequireDynamicLibhsa) {
+  GTEST_SKIP() << "IPC peer-query hooks require dynamic libhsa";
+}
+#endif  // !IREE_HAL_AMDGPU_LIBHSA_STATIC
 
 }  // namespace
 }  // namespace iree::hal::amdgpu

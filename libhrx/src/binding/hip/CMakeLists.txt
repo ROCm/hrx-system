@@ -171,6 +171,29 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    event_operations
+  HDRS
+    "api.h"
+    "event_operations.h"
+  SRCS
+    "event_operations.c"
+  DEPS
+    iree::base
+    iree::hal
+    libhrx::src::binding::common
+    libhrx_defs
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../../include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../libhrx>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../libhrx>"
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     execution_resource_descriptor
   HDRS
     "execution_resource_descriptor.h"
@@ -200,6 +223,7 @@ iree_cc_library(
     execution_context
   HDRS
     "execution_context.h"
+    "execution_context_test_util.h"
   SRCS
     "execution_context.c"
   DEPS
@@ -248,6 +272,12 @@ iree_cc_library(
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+set(_amdhip64_platform_deps "")
+if(IREE_HAL_DRIVER_AMDGPU)
+  list(APPEND _amdhip64_platform_deps iree::hal::drivers::amdgpu::ipc_event)
+  list(APPEND _amdhip64_platform_deps iree::hal::drivers::amdgpu::ipc_event_monitor)
+  list(APPEND _amdhip64_platform_deps iree::hal::drivers::amdgpu::ipc_memory)
+endif()
 iree_cc_library(
   NAME
     amdhip64
@@ -257,12 +287,15 @@ iree_cc_library(
   HDRS
     "api.h"
     "binding_internal.h"
+    "ipc.h"
   SRCS
     "abi_stubs.c"
     "api.c"
     "api_metadata.c"
+    "ipc.c"
   DEPS
     ::blocking_printf_provider
+    ::event_operations
     ::execution_context
     ::execution_resource
     ::execution_resource_descriptor
@@ -274,6 +307,7 @@ iree_cc_library(
     iree::hal
     libhrx::src::binding::common
     libhrx_defs
+    ${_amdhip64_platform_deps}
   SHARED
   LINKOPTS
     "-Wl,--undefined-version"
@@ -288,6 +322,69 @@ iree_cc_library(
   PUBLIC
 )
 endif()
+
+if(IREE_HAL_DRIVER_AMDGPU AND TARGET libhrx_src_binding_hip_amdhip64.objects)
+  target_compile_definitions(libhrx_src_binding_hip_amdhip64.objects
+    PRIVATE IREE_HIP_HAS_AMDGPU_IPC)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    ipc_test
+  SRCS
+    "api.h"
+    "ipc.c"
+    "ipc.h"
+    "ipc_test.cc"
+  DEPS
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx::src::binding::common
+    libhrx_defs
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../../include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../libhrx>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../libhrx>"
+)
+endif()
+
+iree_cc_test(
+  NAME
+    event_operations_test
+  SRCS
+    "event_operations_test.cc"
+  DEPS
+    ::event_operations
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx::src::binding::common
+    libhrx::src::libhrx::hrx_static
+    libhrx_defs
+)
+
+iree_cc_test(
+  NAME
+    execution_context_test
+  SRCS
+    "execution_context_test.cc"
+  DEPS
+    ::execution_context
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx::src::binding::common
+    libhrx::src::libhrx::hrx_static
+    libhrx_defs
+)
 
 iree_cc_test(
   NAME
@@ -381,6 +478,171 @@ iree_cc_test(
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "runtime-resource=amd-gpu"
+  SANITIZER_SUPPRESSIONS
+    lsan
+    hsa
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    hip_lifecycle_api_test
+  SRCS
+    "api.h"
+    "hip_lifecycle_api_test.cc"
+  DATA
+    ::amdhip64
+  DEPS
+    ${CMAKE_DL_LIBS}
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+  SANITIZER_SUPPRESSIONS
+    lsan
+    hsa
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    hip_ipc_event_api_test
+  SRCS
+    "api.h"
+    "hip_ipc_event_api_test.cc"
+  DATA
+    ::amdhip64
+  DEPS
+    ${CMAKE_DL_LIBS}
+    iree::testing::coordinated_test
+    iree::testing::coordinated_test_main
+    iree::testing::gtest
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../../include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../libhrx>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../libhrx>"
+  SANITIZER_SUPPRESSIONS
+    lsan
+    hsa
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    hip_ipc_event_deinit_api_test
+  SRCS
+    "api.h"
+    "hip_ipc_event_deinit_api_test.cc"
+  DATA
+    ::amdhip64
+  DEPS
+    ${CMAKE_DL_LIBS}
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../../include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../libhrx>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../libhrx>"
+  SANITIZER_SUPPRESSIONS
+    lsan
+    hsa
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    hip_ipc_memory_unsupported_api_test
+  SRCS
+    "api.h"
+    "hip_ipc_memory_unsupported_api_test.cc"
+  DATA
+    ::amdhip64
+  DEPS
+    ${CMAKE_DL_LIBS}
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+)
+iree_cc_test(
+  NAME
+    hip_ipc_event_unsupported_api_test
+  SRCS
+    "api.h"
+    "hip_ipc_event_unsupported_api_test.cc"
+  DATA
+    ::amdhip64
+  DEPS
+    ${CMAKE_DL_LIBS}
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    hip_ipc_memory_api_test
+  SRCS
+    "api.h"
+    "hip_ipc_memory_api_test.cc"
+  DATA
+    ::amdhip64
+  DEPS
+    ${CMAKE_DL_LIBS}
+    iree::testing::gtest
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../../include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../libhrx>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../../libhrx>"
   SANITIZER_SUPPRESSIONS
     lsan
     hsa
@@ -527,7 +789,12 @@ endif()
 foreach(_hrx_hip_dso_test
     libhrx_src_binding_hip_hip_api_name_test
     libhrx_src_binding_hip_hip_get_proc_address_test
-    libhrx_src_binding_hip_hip_launch_validation_api_test)
+    libhrx_src_binding_hip_hip_launch_validation_api_test
+    libhrx_src_binding_hip_hip_ipc_event_api_test
+    libhrx_src_binding_hip_hip_ipc_event_deinit_api_test
+    libhrx_src_binding_hip_hip_ipc_event_unsupported_api_test
+    libhrx_src_binding_hip_hip_ipc_memory_unsupported_api_test
+    libhrx_src_binding_hip_hip_ipc_memory_api_test)
   if(TARGET ${_hrx_hip_dso_test})
     target_compile_definitions(${_hrx_hip_dso_test}
       PRIVATE

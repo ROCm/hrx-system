@@ -11,6 +11,7 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 #include "binding/hip/api.h"
@@ -95,6 +96,7 @@ using HipStreamBeginCaptureFn = hipError_t (*)(hipStream_t stream,
                                                hipStreamCaptureMode mode);
 using HipStreamEndCaptureFn = hipError_t (*)(hipStream_t stream,
                                              hipGraph_t* graph);
+using HipGraphDestroyFn = hipError_t (*)(hipGraph_t graph);
 using HipStreamIsCapturingFn =
     hipError_t (*)(hipStream_t stream, hipStreamCaptureStatus* capture_status);
 using HipStreamDestroyFn = hipError_t (*)(hipStream_t stream);
@@ -106,6 +108,14 @@ using HipEventDestroyFn = hipError_t (*)(hipEvent_t event);
 using HipEventRecordFn = hipError_t (*)(hipEvent_t event, hipStream_t stream);
 using HipEventQueryFn = hipError_t (*)(hipEvent_t event);
 using HipEventSynchronizeFn = hipError_t (*)(hipEvent_t event);
+using HipDevicePrimaryCtxRetainFn = hipError_t (*)(hipCtx_t* context,
+                                                   hipDevice_t device);
+using HipDevicePrimaryCtxReleaseFn = hipError_t (*)(hipDevice_t device);
+using HipCtxCreateFn = hipError_t (*)(hipCtx_t* context, unsigned int flags,
+                                      hipDevice_t device);
+using HipCtxDestroyFn = hipError_t (*)(hipCtx_t context);
+using HipCtxGetCurrentFn = hipError_t (*)(hipCtx_t* context);
+using HipCtxSetCurrentFn = hipError_t (*)(hipCtx_t context);
 
 struct ExecutionContextDeleter {
   // Runtime entry point used to destroy a live execution context.
@@ -282,6 +292,9 @@ struct HipRuntimeApi {
   // Ends graph capture on one stream.
   HipStreamEndCaptureFn stream_end_capture = nullptr;
 
+  // Destroys a captured graph.
+  HipGraphDestroyFn graph_destroy = nullptr;
+
   // Queries the graph capture state of one stream.
   HipStreamIsCapturingFn stream_is_capturing = nullptr;
 
@@ -305,6 +318,16 @@ struct HipRuntimeApi {
 
   // Waits for event completion.
   HipEventSynchronizeFn event_synchronize = nullptr;
+
+  // Retains and releases device-managed primary-context handles.
+  HipDevicePrimaryCtxRetainFn primary_context_retain = nullptr;
+  HipDevicePrimaryCtxReleaseFn primary_context_release = nullptr;
+
+  // Creates, destroys, and selects ordinary HIP contexts.
+  HipCtxCreateFn context_create = nullptr;
+  HipCtxDestroyFn context_destroy = nullptr;
+  HipCtxGetCurrentFn context_get_current = nullptr;
+  HipCtxSetCurrentFn context_set_current = nullptr;
 };
 
 template <typename T>
@@ -383,6 +406,8 @@ class HipExecutionResourceApiTest : public testing::Test {
           api_.library, "hipStreamBeginCapture");
       api_.stream_end_capture = ResolveHipSymbol<HipStreamEndCaptureFn>(
           api_.library, "hipStreamEndCapture");
+      api_.graph_destroy =
+          ResolveHipSymbol<HipGraphDestroyFn>(api_.library, "hipGraphDestroy");
       api_.stream_is_capturing = ResolveHipSymbol<HipStreamIsCapturingFn>(
           api_.library, "hipStreamIsCapturing");
       api_.stream_destroy = ResolveHipSymbol<HipStreamDestroyFn>(
@@ -400,6 +425,20 @@ class HipExecutionResourceApiTest : public testing::Test {
           ResolveHipSymbol<HipEventQueryFn>(api_.library, "hipEventQuery");
       api_.event_synchronize = ResolveHipSymbol<HipEventSynchronizeFn>(
           api_.library, "hipEventSynchronize");
+      api_.primary_context_retain =
+          ResolveHipSymbol<HipDevicePrimaryCtxRetainFn>(
+              api_.library, "hipDevicePrimaryCtxRetain");
+      api_.primary_context_release =
+          ResolveHipSymbol<HipDevicePrimaryCtxReleaseFn>(
+              api_.library, "hipDevicePrimaryCtxRelease");
+      api_.context_create =
+          ResolveHipSymbol<HipCtxCreateFn>(api_.library, "hipCtxCreate");
+      api_.context_destroy =
+          ResolveHipSymbol<HipCtxDestroyFn>(api_.library, "hipCtxDestroy");
+      api_.context_get_current = ResolveHipSymbol<HipCtxGetCurrentFn>(
+          api_.library, "hipCtxGetCurrent");
+      api_.context_set_current = ResolveHipSymbol<HipCtxSetCurrentFn>(
+          api_.library, "hipCtxSetCurrent");
     }
 
     ASSERT_NE(api_.init, nullptr);
@@ -429,6 +468,7 @@ class HipExecutionResourceApiTest : public testing::Test {
     ASSERT_NE(api_.stream_get_priority, nullptr);
     ASSERT_NE(api_.stream_begin_capture, nullptr);
     ASSERT_NE(api_.stream_end_capture, nullptr);
+    ASSERT_NE(api_.graph_destroy, nullptr);
     ASSERT_NE(api_.stream_is_capturing, nullptr);
     ASSERT_NE(api_.stream_destroy, nullptr);
     ASSERT_NE(api_.launch_host_function, nullptr);
@@ -437,6 +477,12 @@ class HipExecutionResourceApiTest : public testing::Test {
     ASSERT_NE(api_.event_record, nullptr);
     ASSERT_NE(api_.event_query, nullptr);
     ASSERT_NE(api_.event_synchronize, nullptr);
+    ASSERT_NE(api_.primary_context_retain, nullptr);
+    ASSERT_NE(api_.primary_context_release, nullptr);
+    ASSERT_NE(api_.context_create, nullptr);
+    ASSERT_NE(api_.context_destroy, nullptr);
+    ASSERT_NE(api_.context_get_current, nullptr);
+    ASSERT_NE(api_.context_set_current, nullptr);
 
     ASSERT_EQ(hipSuccess, api_.init(/*flags=*/0));
     ASSERT_EQ(hipSuccess, api_.get_device(&device_));
@@ -483,6 +529,89 @@ TEST_F(HipExecutionResourceApiTest, RejectsInvalidQueriesWithoutPublishing) {
       hipErrorInvalidDevice,
       api_.device_get_resource(/*device=*/-1, &resource, hipDevResourceTypeSm));
   EXPECT_EQ(std::memcmp(&resource, &expected_resource, sizeof(resource)), 0);
+}
+
+TEST_F(HipExecutionResourceApiTest,
+       ExplicitContextDestroyRejectsInvalidHandle) {
+  EXPECT_EQ(hipErrorInvalidContext,
+            api_.context_destroy(reinterpret_cast<hipCtx_t>(uintptr_t{1})));
+}
+
+TEST_F(HipExecutionResourceApiTest,
+       ExplicitContextDestroyRejectsPrimaryHandle) {
+  hipCtx_t primary_context = nullptr;
+  ASSERT_EQ(hipSuccess, api_.primary_context_retain(&primary_context, device_));
+  EXPECT_NE(nullptr, primary_context);
+  if (primary_context) {
+    EXPECT_EQ(hipErrorInvalidContext, api_.context_destroy(primary_context));
+  }
+  EXPECT_EQ(hipSuccess, api_.primary_context_release(device_));
+}
+
+TEST_F(HipExecutionResourceApiTest,
+       ExplicitContextDestroyConsumesHandleOnlyOnce) {
+  hipCtx_t original_context = nullptr;
+  ASSERT_EQ(hipSuccess, api_.context_get_current(&original_context));
+
+  hipCtx_t explicit_context = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.context_create(&explicit_context, /*flags=*/0, device_));
+  EXPECT_NE(nullptr, explicit_context);
+  EXPECT_EQ(hipSuccess, api_.context_set_current(nullptr));
+
+  EXPECT_EQ(hipSuccess, api_.context_destroy(explicit_context));
+  EXPECT_EQ(hipErrorInvalidContext, api_.context_destroy(explicit_context));
+
+  EXPECT_EQ(hipSuccess, api_.context_set_current(original_context));
+}
+
+TEST_F(HipExecutionResourceApiTest,
+       ConcurrentExplicitContextDestroyConsumesHandleOnce) {
+  hipCtx_t original_context = nullptr;
+  ASSERT_EQ(hipSuccess, api_.context_get_current(&original_context));
+
+  hipCtx_t explicit_context = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.context_create(&explicit_context, /*flags=*/0, device_));
+  EXPECT_NE(nullptr, explicit_context);
+  EXPECT_EQ(hipSuccess, api_.context_set_current(nullptr));
+
+  std::mutex start_mutex;
+  std::condition_variable start_condition;
+  int ready_count = 0;
+  bool start = false;
+  hipError_t first_result = hipErrorUnknown;
+  hipError_t second_result = hipErrorUnknown;
+  auto destroy_context = [&](hipError_t* out_result) {
+    {
+      std::unique_lock<std::mutex> lock(start_mutex);
+      ++ready_count;
+      start_condition.notify_all();
+      start_condition.wait(lock, [&] { return start; });
+    }
+    *out_result = api_.context_destroy(explicit_context);
+  };
+
+  std::thread first_thread(destroy_context, &first_result);
+  std::thread second_thread(destroy_context, &second_result);
+  {
+    std::unique_lock<std::mutex> lock(start_mutex);
+    start_condition.wait(lock, [&] { return ready_count == 2; });
+    start = true;
+  }
+  start_condition.notify_all();
+  first_thread.join();
+  second_thread.join();
+
+  const bool first_consumed =
+      first_result == hipSuccess && second_result == hipErrorInvalidContext;
+  const bool second_consumed =
+      second_result == hipSuccess && first_result == hipErrorInvalidContext;
+  EXPECT_TRUE(first_consumed || second_consumed)
+      << "first=" << static_cast<int>(first_result)
+      << ", second=" << static_cast<int>(second_result);
+
+  EXPECT_EQ(hipSuccess, api_.context_set_current(original_context));
 }
 
 TEST_F(HipExecutionResourceApiTest,
@@ -947,6 +1076,61 @@ TEST_F(HipExecutionResourceApiTest,
   EXPECT_EQ(hipStreamCaptureStatusInvalidated, capture_status);
   EXPECT_EQ(hipErrorStreamCaptureInvalidated,
             api_.stream_end_capture(stream, nullptr));
+
+  // Ending a successful capture clears the stream's mutable capture ID. The
+  // event retains the immutable ID of the record's session, so an execution-
+  // context wait still identifies it as captured without reading zero.
+  ASSERT_EQ(hipSuccess,
+            api_.stream_begin_capture(stream, hipStreamCaptureModeGlobal));
+  ASSERT_EQ(hipSuccess, api_.event_record(event, stream));
+  hipGraph_t graph = nullptr;
+  ASSERT_EQ(hipSuccess, api_.stream_end_capture(stream, &graph));
+  ASSERT_NE(nullptr, graph);
+  EXPECT_EQ(hipErrorStreamCaptureUnsupported,
+            api_.context_wait_event(context, event));
+  EXPECT_EQ(hipSuccess, api_.graph_destroy(graph));
+}
+
+TEST_F(HipExecutionResourceApiTest,
+       IpcEventsRejectBeforeExecutionContextCaptureMutation) {
+  hipDevResource full_resource;
+  ASSERT_EQ(hipSuccess, api_.device_get_resource(device_, &full_resource,
+                                                 hipDevResourceTypeSm));
+  hipDevResourceDesc_t descriptor = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.generate_descriptor(&descriptor, &full_resource, 1));
+  hipExecutionCtx_t context = nullptr;
+  ASSERT_EQ(hipSuccess, api_.create_context(&context, descriptor, device_, 0));
+  ScopedExecutionContext context_guard(
+      context, ExecutionContextDeleter{api_.destroy_context});
+
+  hipStream_t stream = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.context_stream_create(&stream, context, hipStreamDefault,
+                                       /*priority=*/0));
+  ScopedStream stream_guard(stream, StreamDeleter{api_.stream_destroy});
+  hipEvent_t event = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.event_create_with_flags(
+                &event, hipEventInterprocess | hipEventDisableTiming));
+  ScopedEvent event_guard(event, EventDeleter{api_.event_destroy});
+
+  ASSERT_EQ(hipSuccess,
+            api_.stream_begin_capture(stream, hipStreamCaptureModeGlobal));
+  EXPECT_EQ(hipErrorNotSupported, api_.context_record_event(context, event));
+  hipStreamCaptureStatus capture_status = hipStreamCaptureStatusNone;
+  ASSERT_EQ(hipSuccess, api_.stream_is_capturing(stream, &capture_status));
+  EXPECT_EQ(hipStreamCaptureStatusActive, capture_status);
+
+  EXPECT_EQ(hipErrorNotSupported, api_.context_wait_event(context, event));
+  capture_status = hipStreamCaptureStatusNone;
+  ASSERT_EQ(hipSuccess, api_.stream_is_capturing(stream, &capture_status));
+  EXPECT_EQ(hipStreamCaptureStatusActive, capture_status);
+
+  hipGraph_t graph = nullptr;
+  ASSERT_EQ(hipSuccess, api_.stream_end_capture(stream, &graph));
+  ASSERT_NE(nullptr, graph);
+  EXPECT_EQ(hipSuccess, api_.graph_destroy(graph));
 }
 
 TEST_F(HipExecutionResourceApiTest, CreatesStreamsAtClampedHardwarePriorities) {

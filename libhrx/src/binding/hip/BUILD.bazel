@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
+load("//build_tools/bazel:select.bzl", "iree_select")
 load(
     "//build_tools/sanitizer:suppressions.bzl",
     "hsa_suppressions",
@@ -32,6 +33,27 @@ _LINUX_COMPATIBILITY = ["@platforms//os:linux"]
 _HIP_GPU_COMPATIBILITY = _LINUX_COMPATIBILITY + select({
     "//runtime/config/hal:driver_amdgpu": [],
     "//conditions:default": ["@platforms//:incompatible"],
+})
+
+# The unsupported-path tests exercise the production DSO only when the AMDGPU
+# carrier is absent from that artifact.
+_HIP_NO_AMDGPU_COMPATIBILITY = _LINUX_COMPATIBILITY + select({
+    "//runtime/config/hal:driver_amdgpu": ["@platforms//:incompatible"],
+    "//conditions:default": [],
+})
+
+_AMDGPU_IPC_COPTS = iree_select({
+    "//runtime/config/hal:driver_amdgpu": ["-DIREE_HIP_HAS_AMDGPU_IPC"],
+    "//conditions:default": [],
+})
+
+_AMDGPU_IPC_DEPS = iree_select({
+    "//runtime/config/hal:driver_amdgpu": [
+        "//runtime/src/iree/hal/drivers/amdgpu:ipc_event",
+        "//runtime/src/iree/hal/drivers/amdgpu:ipc_event_monitor",
+        "//runtime/src/iree/hal/drivers/amdgpu:ipc_memory",
+    ],
+    "//conditions:default": [],
 })
 
 hrx_cc_library(
@@ -145,6 +167,25 @@ hrx_cc_library(
 )
 
 hrx_cc_library(
+    name = "event_operations",
+    srcs = ["event_operations.c"],
+    hdrs = [
+        "api.h",
+        "event_operations.h",
+    ],
+    includes = [
+        "../..",
+        "../../../include",
+        "../../libhrx",
+    ],
+    deps = [
+        "//libhrx/src/binding/common",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+hrx_cc_library(
     name = "execution_resource_descriptor",
     srcs = ["execution_resource_descriptor.c"],
     hdrs = ["execution_resource_descriptor.h"],
@@ -167,7 +208,10 @@ hrx_cc_library(
 hrx_cc_library(
     name = "execution_context",
     srcs = ["execution_context.c"],
-    hdrs = ["execution_context.h"],
+    hdrs = [
+        "execution_context.h",
+        "execution_context_test_util.h",
+    ],
     includes = [
         "../..",
         "../../../include",
@@ -212,16 +256,18 @@ hrx_cc_shared_library(
         "abi_stubs.c",
         "api.c",
         "api_metadata.c",
+        "ipc.c",
     ],
     hdrs = [
         "api.h",
         "binding_internal.h",
+        "ipc.h",
     ],
     additional_linker_inputs = ["amdhip64.map"],
     copts = [
         "-DIREE_HAL_STREAMING_HIP_EXPORTS",
         "-Wno-unused-variable",
-    ],
+    ] + _AMDGPU_IPC_COPTS,
     includes = [
         "../..",
         "../../../include",
@@ -234,6 +280,7 @@ hrx_cc_shared_library(
     target_compatible_with = _LINUX_COMPATIBILITY,
     deps = [
         ":blocking_printf_provider",
+        ":event_operations",
         ":execution_context",
         ":execution_resource",
         ":execution_resource_descriptor",
@@ -244,6 +291,69 @@ hrx_cc_shared_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
+    ] + _AMDGPU_IPC_DEPS,
+)
+
+# Bazel selects the AMDGPU carrier above. Keep the CMake feature definition
+# equally optional because amdhip64 is also built with that driver disabled.
+iree_cmake_extra_content(
+    content = """
+if(IREE_HAL_DRIVER_AMDGPU AND TARGET libhrx_src_binding_hip_amdhip64.objects)
+  target_compile_definitions(libhrx_src_binding_hip_amdhip64.objects
+    PRIVATE IREE_HIP_HAS_AMDGPU_IPC)
+endif()
+""",
+    inline = True,
+)
+
+hrx_cc_test(
+    name = "ipc_test",
+    srcs = [
+        "api.h",
+        "ipc.c",
+        "ipc.h",
+        "ipc_test.cc",
+    ],
+    includes = [
+        "../..",
+        "../../../include",
+        "../../libhrx",
+    ],
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        "//libhrx/src/binding/common",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "event_operations_test",
+    srcs = ["event_operations_test.cc"],
+    deps = [
+        ":event_operations",
+        "//libhrx/src/binding/common",
+        "//libhrx/src/libhrx:hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "execution_context_test",
+    srcs = ["execution_context_test.cc"],
+    deps = [
+        ":execution_context",
+        "//libhrx/src/binding/common",
+        "//libhrx/src/libhrx:hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -338,6 +448,203 @@ hrx_cc_test(
         "//build_tools/bazel:dl",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "hip_lifecycle_api_test",
+    srcs = [
+        "api.h",
+        "hip_lifecycle_api_test.cc",
+    ],
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    includes = ["../.."],
+    sanitizer_suppressions = hsa_suppressions,
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = _HIP_GPU_COMPATIBILITY,
+    deps = [
+        "//build_tools/bazel:dl",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "hip_ipc_event_api_test",
+    srcs = [
+        "api.h",
+        "hip_ipc_event_api_test.cc",
+    ],
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    includes = [
+        "../..",
+        "../../../include",
+        "../../libhrx",
+    ],
+    sanitizer_suppressions = hsa_suppressions,
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = _HIP_GPU_COMPATIBILITY,
+    deps = [
+        "//build_tools/bazel:dl",
+        "//build_tools/bazel:pthreads",
+        "//runtime/src/iree/testing:coordinated_test",
+        "//runtime/src/iree/testing:coordinated_test_main",
+        "//runtime/src/iree/testing:gtest",
+    ],
+)
+
+hrx_cc_test(
+    name = "hip_ipc_event_deinit_api_test",
+    srcs = [
+        "api.h",
+        "hip_ipc_event_deinit_api_test.cc",
+    ],
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    includes = [
+        "../..",
+        "../../../include",
+        "../../libhrx",
+    ],
+    sanitizer_suppressions = hsa_suppressions,
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = _HIP_GPU_COMPATIBILITY,
+    deps = [
+        "//build_tools/bazel:dl",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "hip_ipc_memory_unsupported_api_test",
+    srcs = [
+        "api.h",
+        "hip_ipc_memory_unsupported_api_test.cc",
+    ],
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    includes = ["../.."],
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = _HIP_NO_AMDGPU_COMPATIBILITY,
+    deps = [
+        "//build_tools/bazel:dl",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "hip_ipc_event_unsupported_api_test",
+    srcs = [
+        "api.h",
+        "hip_ipc_event_unsupported_api_test.cc",
+    ],
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    includes = ["../.."],
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = _HIP_NO_AMDGPU_COMPATIBILITY,
+    deps = [
+        "//build_tools/bazel:dl",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+# The converter cannot express a target that is compatible with a feature's
+# default branch. Keep the CMake target adjacent to its Bazel source of truth.
+iree_cmake_extra_content(
+    content = """
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    hip_ipc_memory_unsupported_api_test
+  SRCS
+    "api.h"
+    "hip_ipc_memory_unsupported_api_test.cc"
+  DATA
+    ::amdhip64
+  DEPS
+    ${CMAKE_DL_LIBS}
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+)
+iree_cc_test(
+  NAME
+    hip_ipc_event_unsupported_api_test
+  SRCS
+    "api.h"
+    "hip_ipc_event_unsupported_api_test.cc"
+  DATA
+    ::amdhip64
+  DEPS
+    ${CMAKE_DL_LIBS}
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+)
+endif()
+""",
+    inline = True,
+)
+
+hrx_cc_test(
+    name = "hip_ipc_memory_api_test",
+    srcs = [
+        "api.h",
+        "hip_ipc_memory_api_test.cc",
+    ],
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    includes = [
+        "../..",
+        "../../../include",
+        "../../libhrx",
+    ],
+    sanitizer_suppressions = hsa_suppressions,
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = _HIP_GPU_COMPATIBILITY,
+    deps = [
+        "//build_tools/bazel:dl",
+        "//runtime/src/iree/testing:gtest",
     ],
 )
 

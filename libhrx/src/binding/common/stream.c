@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "common/internal.h"
+#include "common/ipc_event.h"
 #include "common/kernel_arguments.h"
 
 // Env-gated timing for launch-path investigation. This intentionally uses plain
@@ -1118,31 +1119,33 @@ iree_status_t iree_hal_streaming_stream_wait_submitted(
 // already capturing and then adding the event's dependency frontier to the
 // stream's.
 //
-// |capture_graph| is borrowed for the call; a stream that adopts it takes its
-// own reference.
+// |association| holds retained graph and source-stream references for the
+// call; a stream that adopts its graph takes its own reference.
 static iree_status_t iree_hal_streaming_stream_wait_captured_event(
     iree_hal_streaming_stream_t* stream, iree_hal_streaming_event_t* event,
-    iree_hal_streaming_graph_t* capture_graph) {
+    const iree_hal_streaming_event_capture_association_t* association) {
+  if (IREE_UNLIKELY(!iree_hal_streaming_event_capture_association_is_active(
+          association))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "captured event's source session is no longer active");
+  }
+  iree_hal_streaming_graph_t* capture_graph = association->graph;
   bool adopt_capture_graph = false;
   iree_slim_mutex_lock(&stream->mutex);
   if (stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
     adopt_capture_graph = true;
-  } else if (stream->capture_graph != capture_graph) {
+  } else if (stream->capture_graph != capture_graph ||
+             stream->capture_id != association->capture_id) {
     iree_slim_mutex_unlock(&stream->mutex);
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "event wait crosses different active capture graphs");
+        "event wait crosses different active capture sessions");
   }
   iree_slim_mutex_unlock(&stream->mutex);
 
   if (adopt_capture_graph) {
     IREE_RETURN_IF_ERROR(iree_hal_streaming_stream_flush(stream));
-
-    unsigned long long capture_id = 0;
-    if (!event->recording_stream) {
-      IREE_RETURN_IF_ERROR(iree_hal_streaming_context_allocate_capture_id(
-          stream->context, &capture_id));
-    }
 
     iree_slim_mutex_lock(&stream->mutex);
     if (stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
@@ -1150,24 +1153,18 @@ static iree_status_t iree_hal_streaming_stream_wait_captured_event(
       stream->capture_graph_owned = true;
       stream->capture_origin = false;
       stream->capture_joined_to_origin = false;
-      if (event->recording_stream) {
-        stream->capture_mode = event->recording_stream->capture_mode;
-        stream->capture_id = event->recording_stream->capture_id;
-        stream->capture_owner_thread_id =
-            event->recording_stream->capture_owner_thread_id;
-      } else {
-        stream->capture_mode = IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL;
-        stream->capture_id = capture_id;
-        stream->capture_owner_thread_id = 0;
-      }
+      stream->capture_mode = association->capture_mode;
+      stream->capture_id = association->capture_id;
+      stream->capture_owner_thread_id = association->capture_owner_thread_id;
       iree_hal_streaming_graph_retain(stream->capture_graph);
       iree_hal_streaming_stream_set_capture_status(
           stream, IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE);
-    } else if (stream->capture_graph != capture_graph) {
+    } else if (stream->capture_graph != capture_graph ||
+               stream->capture_id != association->capture_id) {
       iree_slim_mutex_unlock(&stream->mutex);
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "event wait crosses different active capture graphs");
+          "event wait crosses different active capture sessions");
     }
     iree_slim_mutex_unlock(&stream->mutex);
   }
@@ -1183,6 +1180,15 @@ iree_status_t iree_hal_streaming_stream_wait_event(
   IREE_ASSERT_ARGUMENT(stream);
   IREE_ASSERT_ARGUMENT(event);
   IREE_TRACE_ZONE_BEGIN(z0);
+
+  if (IREE_UNLIKELY(event->ipc_event &&
+                    stream->capture_status ==
+                        IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "IPC event waits are unavailable during stream capture");
+  }
 
   // An external wait remains an explicit node so each graph launch resolves
   // the event point supplied by the application at execution time.
@@ -1204,27 +1210,35 @@ iree_status_t iree_hal_streaming_stream_wait_event(
   // into. A wait on such an event joins that capture and submits no timeline
   // wait. The association is read once and held for the whole branch, so the
   // graph the branch works from cannot be freed underneath it.
-  iree_hal_streaming_graph_t* capture_graph =
-      iree_hal_streaming_event_acquire_capture_graph(event);
-  if (capture_graph) {
+  iree_hal_streaming_event_capture_association_t capture_association;
+  iree_hal_streaming_event_acquire_capture_association(event,
+                                                       &capture_association);
+  if (capture_association.graph) {
     const iree_status_t capture_status =
         iree_hal_streaming_stream_wait_captured_event(stream, event,
-                                                      capture_graph);
-    // Released with no lock held: the last reference to a graph frees the
-    // allocations it owns, which synchronizes every context and relocks this
-    // stream.
-    iree_hal_streaming_graph_release(capture_graph);
+                                                      &capture_association);
+    // Released with no lock held: graph or stream teardown may synchronize and
+    // relock this stream.
+    iree_hal_streaming_event_release_capture_association(&capture_association);
     IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, capture_status);
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }
+  iree_hal_streaming_event_release_capture_association(&capture_association);
 
   // Read the point once. The barrier below waits on exactly the point whose
   // stream ordering is filed as a reuse dependency, so a record landing on this
   // event concurrently cannot make the filed dependency describe a point other
   // than the one waited on.
-  iree_hal_streaming_recorded_point_t recorded_point;
-  iree_hal_streaming_event_acquire_recorded_point(event, &recorded_point);
+  iree_hal_streaming_recorded_point_t recorded_point = {0};
+  iree_hal_streaming_ipc_event_wait_state_t ipc_wait_state = NULL;
+  iree_status_t status = iree_ok_status();
+  if (IREE_LIKELY(!event->ipc_event)) {
+    iree_hal_streaming_event_acquire_recorded_point(event, &recorded_point);
+  } else {
+    status = iree_hal_streaming_event_reserve_wait_point(
+        event, stream->context->device, &recorded_point, &ipc_wait_state);
+  }
 
   // Waiting on the point orders every later submission on this stream behind
   // it, and therefore behind the stream timeline point it follows. That is the
@@ -1242,8 +1256,7 @@ iree_status_t iree_hal_streaming_stream_wait_event(
   bool added_memory_reuse_dependency = false;
   // True once the queue has accepted the barrier that establishes the ordering.
   bool submitted = false;
-  iree_status_t status = iree_ok_status();
-  if (files_memory_reuse_dependency) {
+  if (iree_status_is_ok(status) && files_memory_reuse_dependency) {
     status = iree_hal_streaming_stream_reserve_memory_reuse_dependency(
         stream, source_stream_id, &added_memory_reuse_dependency);
   }
@@ -1265,6 +1278,9 @@ iree_status_t iree_hal_streaming_stream_wait_event(
     status = iree_hal_streaming_stream_reserve_next_value_locked(
         stream, &wait_value, &signal_value);
     if (iree_status_is_ok(status)) {
+      const bool include_ipc_wait =
+          !ipc_wait_state ||
+          iree_hal_streaming_event_arm_wait(event, ipc_wait_state);
       // The barrier waits on the point the event was recorded at and on
       // everything already on this stream, so the value it signals stays behind
       // the value below it. Either wait is dropped when there is nothing behind
@@ -1278,7 +1294,7 @@ iree_status_t iree_hal_streaming_stream_wait_event(
         wait_value_storage[wait_count] = wait_value;
         ++wait_count;
       }
-      if (recorded_point.semaphore) {
+      if (recorded_point.semaphore && include_ipc_wait) {
         wait_semaphore_storage[wait_count] = recorded_point.semaphore;
         wait_value_storage[wait_count] = recorded_point.value;
         ++wait_count;
@@ -1302,13 +1318,27 @@ iree_status_t iree_hal_streaming_stream_wait_event(
         // advances here and stays advanced even when the flush below fails.
         submitted = true;
         stream->pending_value = signal_value;
-        status = iree_hal_queue_flush(stream->queue);
+        if (ipc_wait_state) {
+          iree_status_t commit_status =
+              iree_hal_streaming_event_commit_wait(event, ipc_wait_state);
+          ipc_wait_state = NULL;
+          // The accepted barrier must be flushed even when activating its IPC
+          // proxy failed. Commit resolves that proxy with failure, so accepted
+          // work cannot remain blocked forever.
+          status = iree_status_join(commit_status,
+                                    iree_hal_queue_flush(stream->queue));
+        } else {
+          status = iree_hal_queue_flush(stream->queue);
+        }
       }
     }
 
     iree_slim_mutex_unlock(&stream->mutex);
   }
 
+  if (ipc_wait_state) {
+    iree_hal_streaming_event_abort_wait(event, ipc_wait_state);
+  }
   iree_hal_streaming_event_release_recorded_point(&recorded_point);
 
   // The reservation holds the dependency slot from before the submission so a

@@ -28,10 +28,12 @@
 
 #include "binding/hip/binding_internal.h"
 #include "binding/hip/blocking_printf_provider.h"
+#include "binding/hip/event_operations.h"
 #include "binding/hip/execution_context.h"
 #include "binding/hip/execution_resource.h"
 #include "binding/hip/execution_resource_descriptor.h"
 #include "binding/hip/handle_registry.h"
+#include "binding/hip/ipc.h"
 #include "binding/hip/launch_params.h"
 #include "binding/hip/stream.h"
 #include "common/direct_transfer.h"
@@ -617,6 +619,50 @@ static bool iree_hip_event_create_flags_are_valid(unsigned int flags) {
     return false;
   }
   return true;
+}
+
+static bool iree_hip_event_is_interprocess(
+    const iree_hal_streaming_event_t* event) {
+  return (event->flags & IREE_HAL_STREAMING_EVENT_FLAG_INTERPROCESS) != 0;
+}
+
+// Native IPC event carriers are not represented in graph execution yet. An
+// attempted capture invalidates every process stream participating in the
+// target stream's exact capture session before common graph state could
+// observe or record the operation.
+static hipError_t iree_hip_reject_ipc_event_capture(
+    const iree_hal_streaming_event_t* event,
+    iree_hal_streaming_stream_t* stream) {
+  if (IREE_LIKELY(!iree_hip_event_is_interprocess(event))) return hipSuccess;
+
+  iree_hal_streaming_graph_t* capture_graph = NULL;
+  unsigned long long capture_id = 0;
+  iree_slim_mutex_lock(&stream->mutex);
+  const iree_hal_streaming_capture_status_t capture_status =
+      stream->capture_status;
+  if (capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
+    capture_graph = stream->capture_graph;
+    capture_id = stream->capture_id;
+    iree_hal_streaming_graph_retain(capture_graph);
+  }
+  iree_slim_mutex_unlock(&stream->mutex);
+
+  if (capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
+    bool invalidated = false;
+    iree_status_t status = iree_hal_streaming_invalidate_capture_graph(
+        capture_graph, capture_id, &invalidated);
+    iree_hal_streaming_graph_release(capture_graph);
+    if (!iree_status_is_ok(status)) {
+      return iree_hip_ipc_event_operation_status_to_result(status);
+    }
+    IREE_ASSERT(invalidated,
+                "the observed active capture session must be in its snapshot");
+    return hipErrorStreamCaptureUnsupported;
+  }
+  if (capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_INVALIDATED) {
+    return hipErrorStreamCaptureInvalidated;
+  }
+  return hipSuccess;
 }
 
 static iree_hal_streaming_memory_flags_t iree_hip_memory_flags_to_internal(
@@ -1379,34 +1425,6 @@ static bool iree_hip_context_invalidate_stream_blocking_capture(
   return invalidated;
 }
 
-static bool iree_hip_context_invalidate_capture_graph(
-    iree_hal_streaming_context_t* context, iree_hal_streaming_graph_t* graph) {
-  if (!graph) return false;
-  if (!iree_hal_streaming_context_has_capture_streams(context)) return false;
-  iree_hal_streaming_stream_t** streams = NULL;
-  iree_host_size_t stream_count = 0;
-  iree_status_t status =
-      iree_hip_context_snapshot_streams(context, &streams, &stream_count);
-  if (!iree_status_is_ok(status)) {
-    return iree_hip_status_to_capture_invalidation_failure(status);
-  }
-
-  bool invalidated = false;
-  for (iree_host_size_t i = 0; i < stream_count; ++i) {
-    iree_hal_streaming_stream_t* stream = streams[i];
-    iree_slim_mutex_lock(&stream->mutex);
-    if (stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE &&
-        stream->capture_graph == graph) {
-      iree_hal_streaming_stream_set_capture_status(
-          stream, IREE_HAL_STREAMING_CAPTURE_STATUS_INVALIDATED);
-      invalidated = true;
-    }
-    iree_slim_mutex_unlock(&stream->mutex);
-  }
-  iree_hip_context_release_stream_snapshot(context, streams, stream_count);
-  return invalidated;
-}
-
 static iree_hal_streaming_graph_node_t*
 iree_hip_graph_find_post_memcpy_callback(iree_hal_streaming_graph_node_t* node);
 static bool iree_hip_graph_node_is_active(
@@ -1760,6 +1778,7 @@ HIPAPI hipError_t hipHALDeinit(void) {
   iree_call_once(&iree_hip_global_init_mutex_once,
                  iree_hip_initialize_global_init_mutex);
   iree_slim_mutex_lock(&iree_hip_global_init_mutex);
+  iree_hip_ipc_event_shutdown();
   const hipError_t result = iree_hip_execution_context_reset_all();
   iree_hal_streaming_cleanup_global();
   iree_atomic_store(&iree_hip_runtime_initialized, 0,
@@ -2252,6 +2271,7 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   // shared memory required during device initialization.
   prop->hostNativeAtomicSupported = 1;
   prop->memoryPoolsSupported = iree_hip_memory_pools_supported() ? 1 : 0;
+  prop->ipcEventSupported = iree_hip_ipc_event_supported() ? 1 : 0;
   prop->hostRegisterSupported = 1;
   prop->hostRegisterReadOnlySupported = 1;
   prop->maxSharedMemoryPerMultiProcessor =
@@ -3286,8 +3306,10 @@ HIPAPI hipError_t hipExecutionCtxGetId(hipExecutionCtx_t context,
 // only their own streams. The event and execution context must belong to the
 // same device incarnation.
 //
-// This operation is asynchronous. A stream capture in the target execution
-// context is invalidated and reported as hipErrorStreamCaptureUnsupported.
+// This operation is asynchronous. Native IPC events are unsupported and
+// rejected before inspecting or mutating the target execution context. For an
+// ordinary event, a stream capture in the target execution context is
+// invalidated and reported as hipErrorStreamCaptureUnsupported.
 HIPAPI hipError_t hipExecutionCtxRecordEvent(hipExecutionCtx_t context,
                                              hipEvent_t event) {
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -3316,8 +3338,10 @@ HIPAPI hipError_t hipExecutionCtxRecordEvent(hipExecutionCtx_t context,
 // execution context or device. Device primary contexts apply the wait to every
 // resource-partitioned context on the device as well.
 //
-// A capture containing the event or any target stream is invalidated and
-// reported as hipErrorStreamCaptureUnsupported.
+// Native IPC events are unsupported and rejected before inspecting or mutating
+// the target execution context. For an ordinary event, a capture containing
+// the event or any target stream is invalidated and reported as
+// hipErrorStreamCaptureUnsupported.
 HIPAPI hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t context,
                                            hipEvent_t event) {
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -4018,11 +4042,18 @@ HIPAPI hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev) {
   // 2. Releasing the current context
   // 3. The context will be recreated lazily on next access
 
-  if (device->primary_context) {
+  iree_slim_mutex_lock(&device->primary_context_mutex);
+  iree_hal_streaming_context_t* primary_context = device->primary_context;
+  if (primary_context) {
     // Wait for all operations on the context to complete.
     iree_status_t status = iree_hal_streaming_context_wait_idle(
-        device->primary_context, iree_infinite_timeout());
+        primary_context, iree_infinite_timeout());
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_streaming_ipc_memory_release_context(
+          &device_registry->ipc_memory_registry, primary_context);
+    }
     if (!iree_status_is_ok(status)) {
+      iree_slim_mutex_unlock(&device->primary_context_mutex);
       IREE_TRACE_ZONE_END(z0);
       HIP_RETURN_ERROR(
           iree_status_to_fixed_hip_result(status, hipErrorUnknown));
@@ -4031,19 +4062,12 @@ HIPAPI hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev) {
     // Clear current context if it was the primary context (before release).
     iree_hal_streaming_context_t* current_context =
         iree_hal_streaming_context_current();
-    if (current_context == device->primary_context) {
+    if (current_context == primary_context) {
       iree_hal_streaming_context_set_current(NULL);
     }
 
-    // All allocations are released with the context — reset free memory.
-    iree_atomic_store(&device->free_memory, device->total_memory,
-                      iree_memory_order_relaxed);
-
-    // Lock to ensure thread safety during reset.
-    iree_slim_mutex_lock(&device->primary_context_mutex);
-
     // Release the old context.
-    iree_hal_streaming_context_release(device->primary_context);
+    iree_hal_streaming_context_release(primary_context);
     device->primary_context = NULL;
 
     // Reset reference count to 0.
@@ -4055,8 +4079,12 @@ HIPAPI hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev) {
     hrx_mem_pool_release(device->default_mem_pool);
     device->default_mem_pool = NULL;
 
-    iree_slim_mutex_unlock(&device->primary_context_mutex);
+    // Publish reset accounting only after IPC mappings have been revoked and
+    // the context-owned allocation pools have been released.
+    iree_atomic_store(&device->free_memory, device->total_memory,
+                      iree_memory_order_relaxed);
   }
+  iree_slim_mutex_unlock(&device->primary_context_mutex);
 
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -4196,22 +4224,21 @@ HIPAPI hipError_t hipCtxCreate(hipCtx_t* pctx, unsigned int flags,
 //  - hipSuccess: Context destroyed successfully.
 //  - hipErrorInvalidValue: ctx is NULL.
 //  - hipErrorInvalidContext: Invalid context handle.
-//  - hipErrorContextIsDestroyed: Context already destroyed.
 //
-// Synchronization: This operation is synchronous. Waits for all operations
-// in the context to complete before destroying.
+// Synchronization: Public-handle invalidation is synchronous. Final resource
+// teardown occurs after retained owners drain. Callers must exclude concurrent
+// context use and must not begin new use after destruction.
 //
 // Context behavior:
-// - All resources associated with the context are released.
+// - The public context handle is invalidated and its owning reference released.
+// - Refcounted teardown completes after outstanding retained users release it.
 // - If context is current, it is popped from the stack.
-// - All memory allocations in the context are freed.
-// - All streams and events in the context are destroyed.
-// - Using a destroyed context results in undefined behavior.
+// - Using the context or its resources after destruction is undefined behavior.
 //
 // Multi-GPU: Only affects the specified context on its device.
 //
-// Warning: Ensure all operations using this context have completed.
-// Destroying a context with active operations may cause errors.
+// Warning: Ensure all operations using this context have completed before
+// destroying it.
 //
 // See also: hipCtxCreate, hipCtxPushCurrent, hipCtxPopCurrent.
 HIPAPI hipError_t hipCtxDestroy(hipCtx_t ctx) {
@@ -4220,6 +4247,40 @@ HIPAPI hipError_t hipCtxDestroy(hipCtx_t ctx) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+
+  iree_hal_streaming_device_registry_t* device_registry =
+      iree_hal_streaming_device_registry();
+  if (!device_registry) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorNotInitialized);
+  }
+
+  // Resolve the untrusted raw handle against current registry membership before
+  // reading any context fields. This also claims the explicit public owner
+  // exactly once and rejects device-managed primary handles. Raw-handle use
+  // after a successful destroy remains outside the API lifetime contract.
+  iree_hal_streaming_context_t* retained_context = NULL;
+  iree_status_t status = iree_hal_streaming_context_begin_handle_destroy(
+      device_registry, (iree_hal_streaming_context_t*)ctx, &retained_context);
+  if (!iree_status_is_ok(status)) {
+    iree_status_ignore(status);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidContext);
+  }
+
+  // Revoke every IPC-memory binding before consuming the public context
+  // ownership. On failure both teardown transactions roll back so callers can
+  // retry with the same live handle and mappings.
+  status = iree_hal_streaming_ipc_memory_release_context(
+      &device_registry->ipc_memory_registry, retained_context);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_streaming_context_cancel_handle_destroy(retained_context);
+    iree_hal_streaming_context_release(retained_context);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(iree_status_to_fixed_hip_result(status, hipErrorUnknown));
+  }
+
+  iree_hal_streaming_context_commit_handle_destroy(retained_context);
 
   // Check if this is the current context.
   // If so, clear it from TLS to avoid a dangling reference.
@@ -4230,6 +4291,7 @@ HIPAPI hipError_t hipCtxDestroy(hipCtx_t ctx) {
 
   // Release the context.
   iree_hal_streaming_context_release((iree_hal_streaming_context_t*)ctx);
+  iree_hal_streaming_context_release(retained_context);
 
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -5228,9 +5290,16 @@ HIPAPI hipError_t hipMalloc(void** ptr, size_t size) {
   }
 
   iree_hal_streaming_buffer_t* buffer = NULL;
+  iree_hal_streaming_memory_flags_t allocation_flags =
+      IREE_HAL_STREAMING_MEMORY_FLAG_NONE;
+#if defined(IREE_HIP_HAS_AMDGPU_IPC)
+  const size_t allocation_size = size;
+  allocation_flags |= IREE_HAL_STREAMING_MEMORY_FLAG_SHARING_EXPORT;
+#else
   const size_t allocation_size = iree_max(size, (size_t)8);
+#endif  // IREE_HIP_HAS_AMDGPU_IPC
   iree_status_t status = iree_hal_streaming_memory_allocate_device(
-      context, allocation_size, /*flags=*/0, &buffer);
+      context, allocation_size, allocation_flags, &buffer);
   hipError_t result = iree_status_to_hip_result(status);
   if (result == hipSuccess) {
     buffer->logical_size = (iree_device_size_t)size;
@@ -9784,50 +9853,174 @@ HIPAPI hipError_t hipGetChannelDesc(hipChannelFormatDesc* desc,
 }
 
 //===----------------------------------------------------------------------===//
-// IPC Memory Operations (not supported)
+// IPC Memory Operations
 //===----------------------------------------------------------------------===//
 
+// Maps the private distinctions produced after HIP memory-handle validation.
+static hipError_t iree_hip_ipc_memory_open_status_to_result(
+    iree_status_t status) {
+  if (iree_status_is_ok(status)) return hipSuccess;
+  const iree_status_code_t code = iree_status_code(status);
+  if (code == IREE_STATUS_ABORTED) {
+    iree_status_free(status);
+    return hipErrorContextIsDestroyed;
+  }
+  if (code == IREE_STATUS_NOT_FOUND || code == IREE_STATUS_ALREADY_EXISTS) {
+    iree_status_free(status);
+    return code == IREE_STATUS_NOT_FOUND ? hipErrorInvalidDevicePointer
+                                         : hipErrorInvalidResourceHandle;
+  }
+  return iree_status_to_hip_result(status);
+}
+
 // Gets an IPC memory handle for a device allocation.
-// Not supported - returns hipErrorNotSupported.
 HIPAPI hipError_t hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* devPtr) {
-  (void)handle;
-  (void)devPtr;
+  IREE_TRACE_ZONE_BEGIN(z0);
+  if (!handle) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  memset(handle, 0, sizeof(*handle));
+  if (!devPtr) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+#if !defined(IREE_HIP_HAS_AMDGPU_IPC)
+  IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(hipErrorNotSupported);
+#else
+  iree_hal_streaming_context_t* context = NULL;
+  hipError_t result = iree_hip_ensure_context(&context);
+  if (result == hipSuccess) {
+    result = iree_hip_ipc_memory_export_status_to_result(
+        iree_hip_ipc_memory_export(context, devPtr, handle));
+  }
+  IREE_TRACE_ZONE_END(z0);
+  HIP_RETURN_ERROR(result);
+#endif  // IREE_HIP_HAS_AMDGPU_IPC
 }
 
 // Opens an IPC memory handle exported from another process.
-// Not supported - returns hipErrorNotSupported.
 HIPAPI hipError_t hipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t handle,
                                       unsigned int flags) {
-  (void)devPtr;
-  (void)handle;
-  (void)flags;
+  IREE_TRACE_ZONE_BEGIN(z0);
+  if (!devPtr) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  *devPtr = NULL;
+  if (flags != hipIpcMemLazyEnablePeerAccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+#if !defined(IREE_HIP_HAS_AMDGPU_IPC)
+  IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(hipErrorNotSupported);
+#else
+  iree_hal_streaming_context_t* context = NULL;
+  hipError_t result = iree_hip_ensure_context(&context);
+  if (result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(result);
+  }
+  result = iree_hip_ipc_memory_open_status_to_result(
+      iree_hip_ipc_memory_import(context, handle, devPtr));
+  IREE_TRACE_ZONE_END(z0);
+  HIP_RETURN_ERROR(result);
+#endif  // IREE_HIP_HAS_AMDGPU_IPC
 }
 
 // Closes an IPC memory handle.
-// Not supported - returns hipErrorNotSupported.
 HIPAPI hipError_t hipIpcCloseMemHandle(void* devPtr) {
-  (void)devPtr;
+  IREE_TRACE_ZONE_BEGIN(z0);
+  if (!devPtr) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+#if !defined(IREE_HIP_HAS_AMDGPU_IPC)
+  IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(hipErrorNotSupported);
+#else
+  iree_hal_streaming_context_t* context = NULL;
+  hipError_t result = iree_hip_ensure_context(&context);
+  if (result == hipSuccess) {
+    result =
+        iree_status_to_hip_result(iree_hip_ipc_memory_close(context, devPtr));
+  }
+  IREE_TRACE_ZONE_END(z0);
+  HIP_RETURN_ERROR(result);
+#endif  // IREE_HIP_HAS_AMDGPU_IPC
 }
 
 // Gets an IPC event handle for an event.
-// Not supported - returns hipErrorNotSupported.
 HIPAPI hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t* handle,
                                        hipEvent_t event) {
-  (void)handle;
-  (void)event;
-  HIP_RETURN_ERROR(hipErrorNotSupported);
+  IREE_TRACE_ZONE_BEGIN(z0);
+  if (!handle) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  memset(handle, 0, sizeof(*handle));
+
+  iree_hal_streaming_event_t* event_object = NULL;
+  if (iree_hip_event_lookup_retain(event, &event_object) != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (IREE_UNLIKELY(!iree_hip_event_is_interprocess(event_object))) {
+    iree_hal_streaming_event_release(event_object);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidConfiguration);
+  }
+
+  const hipError_t result = iree_hip_ipc_event_export_status_to_result(
+      iree_hip_ipc_event_export(event_object, handle));
+  iree_hal_streaming_event_release(event_object);
+  IREE_TRACE_ZONE_END(z0);
+  HIP_RETURN_ERROR(result);
 }
 
 // Opens an IPC event handle.
-// Not supported - returns hipErrorNotSupported.
 HIPAPI hipError_t hipIpcOpenEventHandle(hipEvent_t* event,
                                         hipIpcEventHandle_t handle) {
-  (void)event;
-  (void)handle;
+  IREE_TRACE_ZONE_BEGIN(z0);
+  if (!event) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  *event = NULL;
+#if !defined(IREE_HIP_HAS_AMDGPU_IPC)
+  IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(hipErrorNotSupported);
+#else
+
+  iree_hal_streaming_context_t* context = NULL;
+  hipError_t result = iree_hip_ensure_context(&context);
+  if (result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(result);
+  }
+
+  iree_status_t status =
+      iree_hal_streaming_context_try_begin_ipc_import(context);
+  if (iree_status_is_ok(status)) {
+    iree_hal_streaming_event_t* event_object = NULL;
+    status = iree_hip_ipc_event_import(context, handle, &event_object);
+    if (iree_status_is_ok(status)) {
+      status = iree_hip_event_register(event_object);
+    }
+    if (iree_status_is_ok(status)) {
+      *event = (hipEvent_t)event_object;
+    } else {
+      iree_hal_streaming_event_release(event_object);
+    }
+    iree_hal_streaming_context_end_ipc_import(context);
+  }
+
+  result = iree_hip_ipc_event_open_status_to_result(status);
+  IREE_TRACE_ZONE_END(z0);
+  HIP_RETURN_ERROR(result);
+#endif  // IREE_HIP_HAS_AMDGPU_IPC
 }
 
 //===----------------------------------------------------------------------===//
@@ -11417,7 +11610,15 @@ HIPAPI hipError_t hipStreamQuery(hipStream_t stream) {
 //  - hipErrorInvalidResourceHandle: Invalid stream or event handle.
 //  - hipErrorInvalidContext: No active HIP context.
 //  - hipErrorInvalidValue: Invalid flags or NULL event.
+//  - hipErrorContextIsDestroyed: The IPC event's pending record generation was
+//    abandoned during runtime shutdown.
 //  - hipErrorNotInitialized: HIP runtime not initialized.
+//  - hipErrorStreamCaptureUnsupported: An IPC event was used during active
+//    stream capture; the capture was invalidated.
+//  - hipErrorStreamCaptureInvalidated: The stream capture was already
+//    invalidated.
+//  - hipErrorOutOfMemory: A capture dependency or process-wide participant
+//    snapshot allocation failed.
 //
 // Synchronization: This operation is asynchronous. Adds a dependency to the
 // stream but does not block the host.
@@ -11425,7 +11626,8 @@ HIPAPI hipError_t hipStreamQuery(hipStream_t stream) {
 // Stream behavior:
 // - If stream is NULL, uses the default stream.
 // - The event can be from the same or different device.
-// - Graph capture: Supported. Creates wait node when capturing.
+// - Graph capture: Ordinary events create wait nodes. IPC events are
+//   unsupported and invalidate an active capture.
 // - Stream will wait for the event before executing subsequent operations.
 // - Does not affect operations already enqueued in the stream.
 // - The event can be from the same or different stream.
@@ -11465,11 +11667,20 @@ HIPAPI hipError_t hipStreamWaitEvent(hipStream_t stream, hipEvent_t event,
     HIP_RETURN_ERROR(init_result);
   }
 
+  hipError_t capture_result =
+      iree_hip_reject_ipc_event_capture(event_object, resolved_stream.stream);
+  if (capture_result != hipSuccess) {
+    iree_hip_resolved_stream_release(&resolved_stream);
+    iree_hal_streaming_event_release(event_object);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(capture_result);
+  }
+
   iree_status_t status = iree_hal_streaming_stream_wait_event(
       resolved_stream.stream, event_object, flags == hipEventWaitExternal);
   iree_hip_resolved_stream_release(&resolved_stream);
   iree_hal_streaming_event_release(event_object);
-  hipError_t result = iree_status_to_hip_result(status);
+  hipError_t result = iree_hip_ipc_event_operation_status_to_result(status);
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -11923,6 +12134,12 @@ HIPAPI hipError_t hipEventCreateWithFlags(hipEvent_t* event,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+#if !defined(IREE_HIP_HAS_AMDGPU_IPC)
+  if (IREE_UNLIKELY(flags & hipEventInterprocess)) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorNotSupported);
+  }
+#endif  // IREE_HIP_HAS_AMDGPU_IPC
 
   // Ensure initialization and get context.
   iree_hal_streaming_context_t* context = NULL;
@@ -11937,6 +12154,10 @@ HIPAPI hipError_t hipEventCreateWithFlags(hipEvent_t* event,
       context, iree_hip_event_flags_to_internal(flags), context->host_allocator,
       &event_obj);
 
+  if (iree_status_is_ok(status) &&
+      IREE_UNLIKELY(flags & hipEventInterprocess)) {
+    status = iree_hip_ipc_event_attach_source(event_obj);
+  }
   if (iree_status_is_ok(status)) {
     status = iree_hip_event_register(event_obj);
   }
@@ -11961,18 +12182,15 @@ HIPAPI hipError_t hipEventCreateWithFlags(hipEvent_t* event,
 //  - hipErrorInvalidResourceHandle: Invalid event handle.
 //  - hipErrorContextIsDestroyed: Associated context already destroyed.
 //
-// Synchronization: This operation is synchronous. Waits for the event to
-// complete if it has been recorded but not yet reached.
+// Synchronization: The handle removal is synchronous, but this operation does
+// not wait for a pending event to complete.
 //
 // Event behavior:
-// - All uses of the event must complete before destruction.
+// - Pending submissions retain the resources they need after handle removal.
 // - After destruction, the event handle becomes invalid.
 // - A destroyed event is rejected as an invalid resource handle.
 //
 // Multi-GPU: Event must be destroyed from a context that can access it.
-//
-// Warning: Ensure the event has completed or been synchronized before
-// destroying.
 //
 // See also: hipEventCreate, hipEventCreateWithFlags, hipEventSynchronize.
 HIPAPI hipError_t hipEventDestroy(hipEvent_t event) {
@@ -11996,14 +12214,15 @@ HIPAPI hipError_t hipEventDestroy(hipEvent_t event) {
 //  - hipSuccess: Event recorded successfully.
 //  - hipErrorInvalidValue: A queue operation this record submits was rejected.
 //  - hipErrorInvalidHandle: The event or the stream is not a live handle, or
-//    the stream belongs to a context other than the one that created the
-//    event.
-//  - hipErrorContextIsDestroyed: The stream's context has been destroyed.
+//    their contexts differ without a same-device IPC event adapter.
+//  - hipErrorContextIsDestroyed: The stream's context was destroyed, or the IPC
+//    event's pending record generation was abandoned during runtime shutdown.
 //  - hipErrorNoDevice: No device is visible to the runtime.
 //  - hipErrorNotInitialized: HIP runtime not initialized.
 //  - hipErrorOutOfMemory: An allocation this record needs failed - a timed
-//    record's tick slot, or the capture dependency list a captured record
-//    grows - or the stream's timeline values ran out.
+//    record's tick slot, the capture dependency list a captured record grows,
+//    or the process-wide participant snapshot used to reject an IPC capture -
+//    or the stream's timeline values ran out.
 //  - hipErrorUnknown: Internal error during recording.
 //
 // Synchronization: This operation is asynchronous.
@@ -12016,15 +12235,14 @@ HIPAPI hipError_t hipEventDestroy(hipEvent_t event) {
 //   enqueueing itself, so a failure to submit that work is reported here.
 //   Neither step happens while the stream is capturing.
 // - If stream is NULL, uses the current context's default stream.
-// - The stream must belong to the context that created the event, whether or
-//   not it is capturing. This binding refuses the pair itself, ahead of the
-//   record, so a capturing stream is held to the rule as well even though the
-//   streaming layer's record accepts one from any context.
-// - Graph capture: Supported. A record made on a capturing stream snapshots
+// - The stream must belong to the context that created an ordinary event. An
+//   IPC event may instead use another context on the same device. Every other
+//   pair is refused before capture or submission.
+// - Graph capture: An ordinary event record on a capturing stream snapshots
 //   the stream's dependency frontier onto the event and associates the event
 //   with the graph being captured, so that a later wait on the event joins
 //   that capture. No node is created, no queue point is named, and nothing is
-//   submitted.
+//   submitted. IPC events are unsupported and invalidate an active capture.
 // - The event can be waited on by other streams using hipStreamWaitEvent().
 // - The event can be queried with hipEventQuery() or synchronized with
 //   hipEventSynchronize().
@@ -12055,18 +12273,28 @@ HIPAPI hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) {
     HIP_RETURN_ERROR(init_result);
   }
 
-  if (event_object->context != resolved_stream.context) {
+  if (!iree_hal_streaming_event_can_record_in_context(
+          event_object, resolved_stream.context)) {
     iree_hip_resolved_stream_release(&resolved_stream);
     iree_hal_streaming_event_release(event_object);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidHandle);
   }
 
+  hipError_t capture_result =
+      iree_hip_reject_ipc_event_capture(event_object, resolved_stream.stream);
+  if (capture_result != hipSuccess) {
+    iree_hip_resolved_stream_release(&resolved_stream);
+    iree_hal_streaming_event_release(event_object);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(capture_result);
+  }
+
   iree_status_t status =
       iree_hal_streaming_event_record(event_object, resolved_stream.stream);
   iree_hip_resolved_stream_release(&resolved_stream);
   iree_hal_streaming_event_release(event_object);
-  hipError_t result = iree_status_to_hip_result(status);
+  hipError_t result = iree_hip_ipc_event_operation_status_to_result(status);
   IREE_TRACE_ZONE_END(z0);
   return result;
 }
@@ -12082,6 +12310,10 @@ HIPAPI hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) {
 //  - hipErrorLaunchFailure: A kernel launch associated with event failed.
 //  - hipErrorIllegalAddress: Invalid memory access in associated operations.
 //  - hipErrorNotInitialized: HIP runtime not initialized.
+//  - hipErrorContextIsDestroyed: The IPC event's pending record generation was
+//    abandoned during runtime shutdown.
+//  - hipErrorOutOfMemory: A process-wide capture participant snapshot could
+//    not be allocated; the capture remains unchanged.
 //  - hipErrorCapturedEvent: The event's last record went into a stream
 //    capture, which names a dependency frontier and no queue point.
 //
@@ -12098,8 +12330,8 @@ HIPAPI hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) {
 // Performance note: For polling without blocking, use hipEventQuery.
 //
 // Graph capture: An event whose last record went into a stream capture is
-// refused with hipErrorCapturedEvent, and a stream of the current context
-// capturing into that graph is invalidated.
+// refused with hipErrorCapturedEvent, and every stream participating in that
+// exact capture session is invalidated.
 //
 // See also: hipEventQuery, hipEventRecord, hipStreamSynchronize.
 HIPAPI hipError_t hipEventSynchronize(hipEvent_t event) {
@@ -12126,20 +12358,12 @@ HIPAPI hipError_t hipEventSynchronize(hipEvent_t event) {
     HIP_RETURN_ERROR(init_result);
   }
 
-  iree_hal_streaming_graph_t* capture_graph =
-      iree_hal_streaming_event_acquire_capture_graph(streaming_event);
-  if (capture_graph) {
-    iree_hip_context_invalidate_capture_graph(context, capture_graph);
-    iree_hal_streaming_graph_release(capture_graph);
-    iree_hal_streaming_event_release(streaming_event);
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorCapturedEvent);
-  }
-
-  iree_status_t status = iree_hal_streaming_event_synchronize(streaming_event);
+  bool captured_path = false;
+  hipError_t result =
+      iree_hip_event_synchronize_retained(streaming_event, &captured_path);
   iree_hal_streaming_event_release(streaming_event);
-  hipError_t result = iree_status_to_hip_result(status);
   IREE_TRACE_ZONE_END(z0);
+  if (captured_path) HIP_RETURN_ERROR(result);
   return result;
 }
 
@@ -12154,6 +12378,10 @@ HIPAPI hipError_t hipEventSynchronize(hipEvent_t event) {
 //  - hipErrorInvalidResourceHandle: Invalid event handle.
 //  - hipErrorLaunchFailure: A kernel launch associated with event failed.
 //  - hipErrorNotInitialized: HIP runtime not initialized.
+//  - hipErrorContextIsDestroyed: The IPC event's pending record generation was
+//    abandoned during runtime shutdown.
+//  - hipErrorOutOfMemory: A process-wide capture participant snapshot could
+//    not be allocated; the capture remains unchanged.
 //  - hipErrorCapturedEvent: The event's last record went into a stream
 //    capture, which names a dependency frontier and no queue point.
 //
@@ -12178,8 +12406,8 @@ HIPAPI hipError_t hipEventSynchronize(hipEvent_t event) {
 // ```
 //
 // Graph capture: An event whose last record went into a stream capture is
-// refused with hipErrorCapturedEvent, and a stream of the current context
-// capturing into that graph is invalidated.
+// refused with hipErrorCapturedEvent, and every stream participating in that
+// exact capture session is invalidated.
 //
 // See also: hipEventSynchronize, hipEventRecord, hipStreamQuery.
 HIPAPI hipError_t hipEventQuery(hipEvent_t event) {
@@ -12198,45 +12426,12 @@ HIPAPI hipError_t hipEventQuery(hipEvent_t event) {
     HIP_RETURN_ERROR(init_result);
   }
 
-  iree_hal_streaming_graph_t* capture_graph =
-      iree_hal_streaming_event_acquire_capture_graph(streaming_event);
-  if (capture_graph) {
-    iree_hip_context_invalidate_capture_graph(context, capture_graph);
-    iree_hal_streaming_graph_release(capture_graph);
-    iree_hal_streaming_event_release(streaming_event);
-    HIP_RETURN_ERROR(hipErrorCapturedEvent);
-  }
-
-  int is_complete = 0;
-  iree_status_t status =
-      iree_hal_streaming_event_query(streaming_event, &is_complete);
+  bool captured_path = false;
+  hipError_t result =
+      iree_hip_event_query_retained(streaming_event, &captured_path);
   iree_hal_streaming_event_release(streaming_event);
-  // is_complete == 0 means complete, is_complete == 1 means not complete.
-  hipError_t result = iree_status_is_ok(status)
-                          ? (is_complete == 0 ? hipSuccess : hipErrorNotReady)
-                          : iree_status_to_hip_result(status);
+  if (captured_path) HIP_RETURN_ERROR(result);
   return result;
-}
-
-// Invalidates the stream capture |event|'s last record went into. An event
-// that names no capture invalidates nothing: one whose last record was
-// submitted, and one that has never been recorded.
-//
-// The graph identifies the capture and the context only narrows which streams
-// are searched for it, so this searches the event's own context: the one
-// hipEventElapsedTime has already established both of its events share. The
-// streams searched are then a property of the pair being measured, and an
-// entry point that resolves no current context needs none. hipEventQuery and
-// hipEventSynchronize search the current context instead, which
-// iree_hip_ensure_context hands them when they initialize the runtime. A
-// capture recorded on a stream belonging to neither context is found by none
-// of the three.
-static void iree_hip_invalidate_event_capture(
-    iree_hal_streaming_event_t* event) {
-  iree_hal_streaming_graph_t* capture_graph =
-      iree_hal_streaming_event_acquire_capture_graph(event);
-  iree_hip_context_invalidate_capture_graph(event->context, capture_graph);
-  iree_hal_streaming_graph_release(capture_graph);
 }
 
 // Computes elapsed time between two events.
@@ -12255,6 +12450,8 @@ static void iree_hip_invalidate_event_capture(
 //  - hipErrorNotReady: One or both records have not been reached.
 //  - hipErrorCapturedEvent: An event's last record went into a stream capture,
 //    which names a dependency frontier and no queue point.
+//  - hipErrorOutOfMemory: A process-wide capture participant snapshot could
+//    not be allocated; every capture remains unchanged.
 //  - hipErrorNotSupported: The device advertises no timestamp domain, so no
 //    clock the two records share can measure the interval between them.
 //
@@ -12307,53 +12504,7 @@ HIPAPI hipError_t hipEventElapsedTime(float* ms, hipEvent_t start,
     HIP_RETURN_ERROR(hipErrorInvalidHandle);
   }
 
-  if (start_event->context != stop_event->context) {
-    iree_hal_streaming_event_release(stop_event);
-    iree_hal_streaming_event_release(start_event);
-    HIP_RETURN_ERROR(hipErrorInvalidHandle);
-  }
-
-  iree_hal_streaming_event_timing_t timing =
-      IREE_HAL_STREAMING_EVENT_TIMING_UNTIMED;
-  iree_status_t status = iree_hal_streaming_event_elapsed_time(
-      ms, start_event, stop_event, &timing);
-  if (!iree_status_is_ok(status)) {
-    // The timeline a record names has failed; the event handles are fine.
-    result = iree_status_to_hip_result(status);
-    iree_hal_streaming_event_release(stop_event);
-    iree_hal_streaming_event_release(start_event);
-    HIP_RETURN_ERROR(result);
-  }
-  // Both events stay held across the outcomes below: refusing a captured pair
-  // reaches back into each event for the capture it names.
-  result = hipErrorInvalidHandle;
-  switch (timing) {
-    case IREE_HAL_STREAMING_EVENT_TIMING_MEASURED:
-      result = hipSuccess;
-      break;
-    case IREE_HAL_STREAMING_EVENT_TIMING_INCOMPLETE:
-      result = hipErrorNotReady;
-      break;
-    case IREE_HAL_STREAMING_EVENT_TIMING_UNTIMED:
-      // An event with timing disabled or without a submitted record is a bad
-      // handle here, not a bad value.
-      result = hipErrorInvalidHandle;
-      break;
-    case IREE_HAL_STREAMING_EVENT_TIMING_CAPTURED:
-      // Measuring a captured event is not something a capture can express, so
-      // the capture it belongs to is invalidated and the pair refused, which
-      // is how hipEventQuery and hipEventSynchronize answer a captured event
-      // too. Either event may be the captured one and an event whose last
-      // record was submitted names no capture, so both are offered and one
-      // naming no capture invalidates nothing.
-      iree_hip_invalidate_event_capture(start_event);
-      iree_hip_invalidate_event_capture(stop_event);
-      result = hipErrorCapturedEvent;
-      break;
-    case IREE_HAL_STREAMING_EVENT_TIMING_UNSUPPORTED:
-      result = hipErrorNotSupported;
-      break;
-  }
+  result = iree_hip_event_elapsed_time_retained(ms, start_event, stop_event);
   iree_hal_streaming_event_release(stop_event);
   iree_hal_streaming_event_release(start_event);
   HIP_RETURN_ERROR(result);
@@ -13660,6 +13811,22 @@ HIPAPI hipError_t hipExtLaunchKernel(const void* function_address,
     }
   }
 
+  iree_hal_streaming_event_t* ipc_event =
+      start_event && iree_hip_event_is_interprocess(start_event)
+          ? start_event
+          : (stop_event && iree_hip_event_is_interprocess(stop_event)
+                 ? stop_event
+                 : NULL);
+  if (IREE_UNLIKELY(ipc_event)) {
+    result =
+        iree_hip_reject_ipc_event_capture(ipc_event, resolved_stream.stream);
+    if (result == hipSuccess) result = hipErrorNotSupported;
+    iree_hal_streaming_event_release(stop_event);
+    iree_hal_streaming_event_release(start_event);
+    iree_hip_resolved_stream_release(&resolved_stream);
+    HIP_RETURN_ERROR(result);
+  }
+
   if (start_event) {
     result = iree_status_to_hip_result(
         iree_hal_streaming_event_record(start_event, resolved_stream.stream));
@@ -13963,6 +14130,48 @@ HIPAPI hipError_t hipExtModuleLaunchKernel(
     unsigned int localWorkSizeY, unsigned int localWorkSizeZ,
     unsigned int sharedMemBytes, hipStream_t stream, void** kernelParams,
     void** extra, hipEvent_t startEvent, hipEvent_t stopEvent, int flags) {
+  iree_hal_streaming_event_t* start_event = NULL;
+  hipError_t result = hipSuccess;
+  if (startEvent) {
+    result = iree_hip_event_lookup_retain(startEvent, &start_event);
+    // This entry point historically ignores ordinary start/stop events. Keep
+    // invalid ordinary handles equally inert while recognizing live IPC
+    // events so they cannot bypass the native-event support boundary.
+    if (result != hipSuccess) start_event = NULL;
+  }
+  iree_hal_streaming_event_t* stop_event = NULL;
+  if (stopEvent) {
+    result = iree_hip_event_lookup_retain(stopEvent, &stop_event);
+    if (result != hipSuccess) stop_event = NULL;
+  }
+
+  iree_hal_streaming_event_t* ipc_event =
+      start_event && iree_hip_event_is_interprocess(start_event)
+          ? start_event
+          : (stop_event && iree_hip_event_is_interprocess(stop_event)
+                 ? stop_event
+                 : NULL);
+  if (IREE_UNLIKELY(ipc_event)) {
+    iree_hip_resolved_stream_t resolved_stream = {0};
+    result = iree_hip_resolve_registered_stream(stream, &resolved_stream);
+    if (result == hipSuccess &&
+        ((start_event && start_event->context != resolved_stream.context) ||
+         (stop_event && stop_event->context != resolved_stream.context))) {
+      result = hipErrorInvalidValue;
+    }
+    if (result == hipSuccess) {
+      result =
+          iree_hip_reject_ipc_event_capture(ipc_event, resolved_stream.stream);
+      if (result == hipSuccess) result = hipErrorNotSupported;
+    }
+    iree_hip_resolved_stream_release(&resolved_stream);
+    iree_hal_streaming_event_release(stop_event);
+    iree_hal_streaming_event_release(start_event);
+    HIP_RETURN_ERROR(result);
+  }
+  iree_hal_streaming_event_release(stop_event);
+  iree_hal_streaming_event_release(start_event);
+
   // Convert OpenCL-style global/local work sizes to CUDA-style grid/block
   // dimensions. hipModuleLaunchKernel expects gridDim (number of workgroups),
   // but hipExtModuleLaunchKernel receives globalWorkSize (total threads).
@@ -18648,6 +18857,11 @@ hipGraphAddEventRecordNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(event_result);
   }
+  if (IREE_UNLIKELY(iree_hip_event_is_interprocess(streaming_event))) {
+    iree_hal_streaming_event_release(streaming_event);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorNotSupported);
+  }
   iree_hal_streaming_graph_node_t* node = NULL;
   iree_status_t status = iree_hal_streaming_graph_add_event_node(
       (iree_hal_streaming_graph_t*)graph,
@@ -18686,6 +18900,11 @@ HIPAPI hipError_t hipGraphAddEventWaitNode(hipGraphNode_t* pGraphNode,
   if (event_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(event_result);
+  }
+  if (IREE_UNLIKELY(iree_hip_event_is_interprocess(streaming_event))) {
+    iree_hal_streaming_event_release(streaming_event);
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorNotSupported);
   }
   iree_hal_streaming_graph_node_t* node = NULL;
   iree_status_t status = iree_hal_streaming_graph_add_event_node(
@@ -20753,6 +20972,10 @@ HIPAPI hipError_t hipGraphEventRecordNodeSetEvent(hipGraphNode_t node,
   iree_hal_streaming_event_t* streaming_event = NULL;
   hipError_t result = iree_hip_event_lookup_retain(event, &streaming_event);
   if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  if (IREE_UNLIKELY(iree_hip_event_is_interprocess(streaming_event))) {
+    iree_hal_streaming_event_release(streaming_event);
+    HIP_RETURN_ERROR(hipErrorNotSupported);
+  }
   if (streaming_event->context != stream_node->graph->context) {
     iree_hal_streaming_event_release(streaming_event);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
@@ -20795,6 +21018,10 @@ HIPAPI hipError_t hipGraphEventWaitNodeSetEvent(hipGraphNode_t node,
   iree_hal_streaming_event_t* streaming_event = NULL;
   hipError_t result = iree_hip_event_lookup_retain(event, &streaming_event);
   if (result != hipSuccess) HIP_RETURN_ERROR(result);
+  if (IREE_UNLIKELY(iree_hip_event_is_interprocess(streaming_event))) {
+    iree_hal_streaming_event_release(streaming_event);
+    HIP_RETURN_ERROR(hipErrorNotSupported);
+  }
   if (streaming_event->context != stream_node->graph->context) {
     iree_hal_streaming_event_release(streaming_event);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
@@ -20871,6 +21098,11 @@ HIPAPI hipError_t hipGraphExecEventRecordNodeSetEvent(hipGraphExec_t graphExec,
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(result);
   }
+  if (IREE_UNLIKELY(iree_hip_event_is_interprocess(streaming_event))) {
+    iree_hal_streaming_event_release(streaming_event);
+    iree_hal_streaming_graph_exec_release(exec);
+    HIP_RETURN_ERROR(hipErrorNotSupported);
+  }
   iree_status_t status = iree_hal_streaming_graph_exec_set_event_node_event(
       exec, stream_node, IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD,
       streaming_event);
@@ -20904,6 +21136,11 @@ HIPAPI hipError_t hipGraphExecEventWaitNodeSetEvent(hipGraphExec_t graphExec,
   if (result != hipSuccess) {
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(result);
+  }
+  if (IREE_UNLIKELY(iree_hip_event_is_interprocess(streaming_event))) {
+    iree_hal_streaming_event_release(streaming_event);
+    iree_hal_streaming_graph_exec_release(exec);
+    HIP_RETURN_ERROR(hipErrorNotSupported);
   }
   iree_status_t status = iree_hal_streaming_graph_exec_set_event_node_event(
       exec, stream_node, IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT,
@@ -22745,6 +22982,8 @@ HIPAPI hipError_t hipStreamBeginCaptureToGraph(
 //  - hipErrorStreamCaptureInvalidated: Capture was invalidated.
 //  - hipErrorStreamCaptureUnmatched: Unmatched begin/end.
 //  - hipErrorStreamCaptureWrongThread: Wrong thread for thread-local.
+//  - hipErrorOutOfMemory: The process-wide participant snapshot or capture
+//    reachability storage could not be allocated.
 //
 // Synchronization: Stream returns to normal execution mode.
 //
@@ -22860,6 +23099,9 @@ HIPAPI hipError_t hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph) {
         break;
       case IREE_STATUS_PERMISSION_DENIED:
         result = hipErrorStreamCaptureWrongThread;
+        break;
+      case IREE_STATUS_RESOURCE_EXHAUSTED:
+        result = hipErrorOutOfMemory;
         break;
       default:
         result = hipErrorInvalidValue;
@@ -23014,9 +23256,9 @@ HIPAPI hipError_t hipStreamIsCapturing(hipStream_t stream,
 // - Helps identify related captures.
 // - Cross-stream dependencies tracked.
 //
-// Multi-GPU:
-// - Each device maintains capture IDs.
-// - Cross-device captures share ID.
+// Capture identity:
+// - Each capture sequence receives a process-unique, non-reused ID.
+// - Joined cross-context and cross-device streams share the originating ID.
 //
 // See also: hipStreamIsCapturing, hipStreamBeginCapture,
 //           hipStreamEndCapture.

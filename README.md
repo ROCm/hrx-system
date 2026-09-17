@@ -245,5 +245,7 @@ developer tools for comparing behavior against the real ROCm HIP runtime.
 - `BUILDING.md`: source-build, embedding, and build configuration options.
 - `CONTRIBUTING.md`: contributor workflow and `dev.py` modes.
 - `build_tools/lefthook/README.md`: Lefthook profiles and hook architecture.
+- `docs/hip_ipc.md`: HIP IPC memory and event ownership, wire formats, and
+  validation.
 - `docs/testing/installed_tests.md`: installed test tree details.
 - `libhrx/src/passthrough/README.md`: HIP passthrough and tracing tools.

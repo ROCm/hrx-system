@@ -361,7 +361,7 @@ static iree_status_t iree_hal_streaming_device_create_primary_context_locked(
   const bool had_default_mem_pool = device->default_mem_pool != NULL;
   const bool had_current_mem_pool = device->current_mem_pool != NULL;
   iree_hal_streaming_context_t* context = NULL;
-  iree_status_t status = iree_hal_streaming_context_create(
+  iree_status_t status = iree_hal_streaming_context_create_primary(
       device, device->primary_context_flags, device_registry->host_allocator,
       &context);
   if (iree_status_is_ok(status)) {
@@ -448,29 +448,49 @@ iree_status_t iree_hal_streaming_device_release_primary_context(
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "primary context not retained");
   } else {
-    iree_hal_streaming_context_t* retained_context = device->primary_context;
-    --device->primary_context_ref_count;
-
-    if (device->primary_context_ref_count == 0) {
-      status = iree_hal_streaming_context_wait_idle(retained_context,
+    iree_hal_streaming_context_t* caller_context = device->primary_context;
+    if (device->primary_context_ref_count == 1) {
+      status = iree_hal_streaming_context_wait_idle(caller_context,
                                                     iree_infinite_timeout());
-
-      if (iree_hal_streaming_context_current() == retained_context) {
-        iree_hal_streaming_context_set_current(NULL);
+      iree_hal_streaming_device_registry_t* device_registry =
+          iree_hal_streaming_device_registry();
+      if (iree_status_is_ok(status) && !device_registry) {
+        status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                  "device registry not initialized");
+      }
+      if (iree_status_is_ok(status)) {
+        status = iree_hal_streaming_ipc_memory_release_context(
+            &device_registry->ipc_memory_registry, caller_context);
       }
 
-      // Release the device's primary-context ownership.
-      iree_hal_streaming_context_release(retained_context);
-      device->primary_context = NULL;
+      // The IPC drain rolls back all registry changes and reopens admission on
+      // failure. Preserve both primary-context references and the usage count
+      // with it so the caller can retry the same final release.
+      if (iree_status_is_ok(status)) {
+        --device->primary_context_ref_count;
 
-      hrx_mem_pool_release(device->current_mem_pool);
-      device->current_mem_pool = NULL;
-      hrx_mem_pool_release(device->default_mem_pool);
-      device->default_mem_pool = NULL;
+        if (iree_hal_streaming_context_current() == caller_context) {
+          iree_hal_streaming_context_set_current(NULL);
+        }
+
+        // Release the device's primary-context ownership.
+        iree_hal_streaming_context_t* device_context = device->primary_context;
+        device->primary_context = NULL;
+        iree_hal_streaming_context_release(device_context);
+
+        hrx_mem_pool_release(device->current_mem_pool);
+        device->current_mem_pool = NULL;
+        hrx_mem_pool_release(device->default_mem_pool);
+        device->default_mem_pool = NULL;
+
+        // Release the owning reference returned by the matching retain call.
+        iree_hal_streaming_context_release(caller_context);
+      }
+    } else {
+      --device->primary_context_ref_count;
+      // Release the owning reference returned by the matching retain call.
+      iree_hal_streaming_context_release(caller_context);
     }
-
-    // Release the owning reference returned by the matching retain call.
-    iree_hal_streaming_context_release(retained_context);
   }
 
   iree_slim_mutex_unlock(&device->primary_context_mutex);

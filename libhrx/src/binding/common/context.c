@@ -25,6 +25,12 @@ static IREE_THREAD_LOCAL int iree_hal_streaming_thread_token_storage;
 static iree_atomic_uint64_t iree_hal_streaming_next_stream_id =
     IREE_ATOMIC_VAR_INIT(1);
 
+// Capture IDs identify sessions that may span contexts and may independently
+// target the same graph. Zero permanently marks exhaustion after the final
+// nonzero process-unique identifier has been issued.
+static iree_atomic_uint64_t iree_hal_streaming_next_capture_id =
+    IREE_ATOMIC_VAR_INIT(1);
+
 typedef struct iree_hal_streaming_context_stack_t {
   iree_hal_streaming_context_t** contexts;
   iree_host_size_t depth;
@@ -87,9 +93,10 @@ iree_hal_streaming_timestamp_domain_t iree_hal_streaming_query_timestamp_domain(
   return domain;
 }
 
-iree_status_t iree_hal_streaming_context_create(
+static iree_status_t iree_hal_streaming_context_create_with_handle_state(
     iree_hal_streaming_device_t* device_entry,
     iree_hal_streaming_context_flags_t flags, iree_allocator_t host_allocator,
+    iree_hal_streaming_context_handle_state_t handle_state,
     iree_hal_streaming_context_t** out_context) {
   IREE_ASSERT_ARGUMENT(device_entry);
   IREE_ASSERT_ARGUMENT(out_context);
@@ -118,8 +125,8 @@ iree_status_t iree_hal_streaming_context_create(
   context->timestamp_domain = iree_hal_streaming_query_timestamp_domain(
       iree_hal_device_spec(device_entry->hal_device));
   context->flags = flags;
+  context->handle_state = handle_state;
   context->default_stream = NULL;
-  context->next_capture_id = 1;
   context->peer_contexts = NULL;
   context->peer_count = 0;
   context->peer_capacity = 0;
@@ -132,9 +139,17 @@ iree_status_t iree_hal_streaming_context_create(
                     iree_memory_order_relaxed);
   context->host_allocator = host_allocator;
   iree_slim_mutex_initialize(&context->mutex);
+  iree_slim_mutex_initialize(&context->ipc_import_mutex);
+  iree_slim_mutex_initialize(&context->ipc_import_retirement_mutex);
+  iree_notification_initialize(&context->ipc_import_notification);
+  context->active_ipc_import_count = 0;
+  context->ipc_imports_retiring = false;
+  context->ipc_import_retirement_may_reopen = false;
   iree_slim_mutex_initialize(&context->pending_free_mutex);
 
   // Initialize global list pointers.
+  iree_atomic_store(&context->context_registry, (intptr_t)NULL,
+                    iree_memory_order_relaxed);
   context->context_list_entry.next = NULL;
   context->context_list_entry.prev = NULL;
 
@@ -211,8 +226,9 @@ iree_status_t iree_hal_streaming_context_create(
   }
 
   if (iree_status_is_ok(status)) {
-    // Register with global list.
-    iree_hal_streaming_register_context(context);
+    // Register with the global weak context list when one is available.
+    iree_hal_streaming_register_context(iree_hal_streaming_device_registry(),
+                                        context);
     *out_context = context;
   } else {
     iree_hal_streaming_context_destroy(context);
@@ -221,12 +237,27 @@ iree_status_t iree_hal_streaming_context_create(
   return status;
 }
 
+iree_status_t iree_hal_streaming_context_create(
+    iree_hal_streaming_device_t* device_entry,
+    iree_hal_streaming_context_flags_t flags, iree_allocator_t host_allocator,
+    iree_hal_streaming_context_t** out_context) {
+  return iree_hal_streaming_context_create_with_handle_state(
+      device_entry, flags, host_allocator,
+      IREE_HAL_STREAMING_CONTEXT_HANDLE_STATE_EXPLICIT_LIVE, out_context);
+}
+
+iree_status_t iree_hal_streaming_context_create_primary(
+    iree_hal_streaming_device_t* device_entry,
+    iree_hal_streaming_context_flags_t flags, iree_allocator_t host_allocator,
+    iree_hal_streaming_context_t** out_context) {
+  return iree_hal_streaming_context_create_with_handle_state(
+      device_entry, flags, host_allocator,
+      IREE_HAL_STREAMING_CONTEXT_HANDLE_STATE_PRIMARY, out_context);
+}
+
 static void iree_hal_streaming_context_destroy(
     iree_hal_streaming_context_t* context) {
   IREE_TRACE_ZONE_BEGIN(z0);
-
-  // Unregister from global list.
-  iree_hal_streaming_unregister_context(context);
 
   // Clean up peer contexts array.
   if (context->peer_contexts) {
@@ -291,13 +322,14 @@ static void iree_hal_streaming_context_destroy(
   // reader that gets there first is refused anyway: it retains through
   // iree_hal_streaming_context_try_retain, which fails once the last reference
   // is gone, and an unpublished context has no such reader to refuse. The list
-  // mutex is not held: end_capture holds a stream mutex while walking the list,
-  // and taking these in the other order deadlocks against it. The list still
-  // holds its reference to every stream, so none can be destroyed while the
-  // loop runs; those references are released afterwards, outside both locks,
-  // because the last one destroys the stream. Queue references are released
-  // during detachment so a dynamically acquired queue cannot outlive the HAL
-  // device retained by this context.
+  // mutex is not held while stream mutexes are acquired. Capture/session scans
+  // follow the same split-phase order: retain a stream snapshot under list
+  // locks, release them, and then inspect stream mutexes one at a time. The
+  // list still holds its reference to every stream, so none can be destroyed
+  // while the loop runs; those references are released afterwards, outside
+  // both locks, because the last one destroys the stream. Queue references are
+  // released during detachment so a dynamically acquired queue cannot outlive
+  // the HAL device retained by this context.
   for (iree_host_size_t i = 0; i < detached_stream_count; ++i) {
     iree_hal_streaming_stream_t* stream = context->streams[i];
     iree_hal_queue_t* queue = NULL;
@@ -342,10 +374,22 @@ static void iree_hal_streaming_context_destroy(
   iree_hal_device_release(context->device);
 
   // Deinitialize synchronization.
+  IREE_ASSERT(context->active_ipc_import_count == 0,
+              "IPC imports must finish before context destruction");
+  iree_notification_deinitialize(&context->ipc_import_notification);
+  iree_slim_mutex_deinitialize(&context->ipc_import_retirement_mutex);
+  iree_slim_mutex_deinitialize(&context->ipc_import_mutex);
   iree_slim_mutex_deinitialize(&context->mutex);
 
-  // Free context memory.
+  // Publish final destruction only after all context and device teardown is
+  // complete. Weak-list readers hold the list mutex while traversing links and
+  // cannot retain this zero-reference context, so keeping it registered through
+  // teardown is safe and lets global cleanup join this destructor.
   const iree_allocator_t host_allocator = context->host_allocator;
+  iree_hal_streaming_unregister_context(context);
+
+  // Free context memory. No registry or device state is touched after the
+  // destructor-completion publication above.
   iree_allocator_free(host_allocator, context);
 
   IREE_TRACE_ZONE_END(z0);
@@ -362,6 +406,7 @@ bool iree_hal_streaming_context_try_retain(
   if (!context) return false;
   int32_t reference_count = iree_atomic_ref_count_load(&context->ref_count);
   while (reference_count > 0) {
+    if (IREE_UNLIKELY(reference_count == INT32_MAX)) return false;
     if (iree_atomic_compare_exchange_weak(
             &context->ref_count, &reference_count, reference_count + 1,
             iree_memory_order_acq_rel, iree_memory_order_acquire)) {
@@ -369,6 +414,75 @@ bool iree_hal_streaming_context_try_retain(
     }
   }
   return false;
+}
+
+iree_status_t iree_hal_streaming_context_begin_handle_destroy(
+    iree_hal_streaming_device_registry_t* device_registry,
+    iree_hal_streaming_context_t* handle,
+    iree_hal_streaming_context_t** out_context) {
+  IREE_ASSERT_ARGUMENT(device_registry);
+  IREE_ASSERT_ARGUMENT(handle);
+  IREE_ASSERT_ARGUMENT(out_context);
+  *out_context = NULL;
+
+  // Compare the untrusted raw handle only as an address. Promotion under the
+  // weak-list lock couples current membership validation to the operation
+  // reference used below without reviving a final-release context.
+  iree_hal_streaming_context_t* retained_context =
+      iree_hal_streaming_context_list_try_retain_registered(device_registry,
+                                                            handle);
+  if (!retained_context) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "context handle is not currently registered");
+  }
+
+  iree_status_t status = iree_ok_status();
+  iree_slim_mutex_lock(&retained_context->mutex);
+  switch (retained_context->handle_state) {
+    case IREE_HAL_STREAMING_CONTEXT_HANDLE_STATE_EXPLICIT_LIVE:
+      retained_context->handle_state =
+          IREE_HAL_STREAMING_CONTEXT_HANDLE_STATE_EXPLICIT_DESTROYING;
+      break;
+    case IREE_HAL_STREAMING_CONTEXT_HANDLE_STATE_PRIMARY:
+      status = iree_make_status(
+          IREE_STATUS_PERMISSION_DENIED,
+          "primary context handles must be released by the device API");
+      break;
+    case IREE_HAL_STREAMING_CONTEXT_HANDLE_STATE_EXPLICIT_DESTROYING:
+    case IREE_HAL_STREAMING_CONTEXT_HANDLE_STATE_EXPLICIT_DESTROYED:
+      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "context handle is already destroyed");
+      break;
+  }
+  iree_slim_mutex_unlock(&retained_context->mutex);
+
+  if (!iree_status_is_ok(status)) {
+    iree_hal_streaming_context_release(retained_context);
+    return status;
+  }
+  *out_context = retained_context;
+  return iree_ok_status();
+}
+
+void iree_hal_streaming_context_cancel_handle_destroy(
+    iree_hal_streaming_context_t* context) {
+  IREE_ASSERT_ARGUMENT(context);
+  iree_slim_mutex_lock(&context->mutex);
+  IREE_ASSERT(context->handle_state ==
+              IREE_HAL_STREAMING_CONTEXT_HANDLE_STATE_EXPLICIT_DESTROYING);
+  context->handle_state = IREE_HAL_STREAMING_CONTEXT_HANDLE_STATE_EXPLICIT_LIVE;
+  iree_slim_mutex_unlock(&context->mutex);
+}
+
+void iree_hal_streaming_context_commit_handle_destroy(
+    iree_hal_streaming_context_t* context) {
+  IREE_ASSERT_ARGUMENT(context);
+  iree_slim_mutex_lock(&context->mutex);
+  IREE_ASSERT(context->handle_state ==
+              IREE_HAL_STREAMING_CONTEXT_HANDLE_STATE_EXPLICIT_DESTROYING);
+  context->handle_state =
+      IREE_HAL_STREAMING_CONTEXT_HANDLE_STATE_EXPLICIT_DESTROYED;
+  iree_slim_mutex_unlock(&context->mutex);
 }
 
 void iree_hal_streaming_context_release(iree_hal_streaming_context_t* context) {
@@ -406,6 +520,96 @@ void iree_hal_streaming_context_set_current(
   iree_hal_streaming_context_release(old_context);
 
   IREE_TRACE_ZONE_END(z0);
+}
+
+iree_status_t iree_hal_streaming_context_try_begin_ipc_import(
+    iree_hal_streaming_context_t* context) {
+  IREE_ASSERT_ARGUMENT(context);
+  iree_slim_mutex_lock(&context->ipc_import_mutex);
+  iree_status_t status = iree_ok_status();
+  if (IREE_UNLIKELY(context->ipc_imports_retiring)) {
+    status = iree_make_status(IREE_STATUS_ABORTED,
+                              "context is retiring from IPC imports");
+  } else if (IREE_UNLIKELY(context->active_ipc_import_count == UINT32_MAX)) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "active IPC import count overflow");
+  } else {
+    ++context->active_ipc_import_count;
+  }
+  iree_slim_mutex_unlock(&context->ipc_import_mutex);
+  return status;
+}
+
+void iree_hal_streaming_context_end_ipc_import(
+    iree_hal_streaming_context_t* context) {
+  IREE_ASSERT_ARGUMENT(context);
+  iree_slim_mutex_lock(&context->ipc_import_mutex);
+  IREE_ASSERT(context->active_ipc_import_count > 0,
+              "IPC import reservation underflow");
+  const bool became_idle = --context->active_ipc_import_count == 0;
+  iree_slim_mutex_unlock(&context->ipc_import_mutex);
+  if (became_idle) {
+    iree_notification_post(&context->ipc_import_notification, IREE_ALL_WAITERS);
+  }
+}
+
+void iree_hal_streaming_context_begin_ipc_import_retirement(
+    iree_hal_streaming_context_t* context) {
+  IREE_ASSERT_ARGUMENT(context);
+  iree_slim_mutex_lock(&context->ipc_import_retirement_mutex);
+  iree_slim_mutex_lock(&context->ipc_import_mutex);
+  const bool gate_changed = !context->ipc_imports_retiring;
+  context->ipc_imports_retiring = true;
+  context->ipc_import_retirement_may_reopen = gate_changed;
+  iree_slim_mutex_unlock(&context->ipc_import_mutex);
+  if (gate_changed) {
+    iree_notification_post(&context->ipc_import_notification, IREE_ALL_WAITERS);
+  }
+
+  for (;;) {
+    iree_slim_mutex_lock(&context->ipc_import_mutex);
+    if (context->active_ipc_import_count == 0) {
+      iree_slim_mutex_unlock(&context->ipc_import_mutex);
+      return;
+    }
+    const iree_wait_token_t wait_token =
+        iree_notification_prepare_wait(&context->ipc_import_notification);
+    iree_slim_mutex_unlock(&context->ipc_import_mutex);
+    (void)iree_notification_commit_wait(&context->ipc_import_notification,
+                                        wait_token, IREE_DURATION_ZERO,
+                                        IREE_TIME_INFINITE_FUTURE);
+  }
+}
+
+void iree_hal_streaming_context_commit_ipc_import_retirement(
+    iree_hal_streaming_context_t* context) {
+  IREE_ASSERT_ARGUMENT(context);
+  iree_slim_mutex_lock(&context->ipc_import_mutex);
+  IREE_ASSERT(context->ipc_imports_retiring,
+              "IPC import retirement was not active");
+  IREE_ASSERT(context->active_ipc_import_count == 0,
+              "cannot commit IPC retirement with active reservations");
+  context->ipc_import_retirement_may_reopen = false;
+  iree_slim_mutex_unlock(&context->ipc_import_mutex);
+  iree_slim_mutex_unlock(&context->ipc_import_retirement_mutex);
+}
+
+void iree_hal_streaming_context_cancel_ipc_import_retirement(
+    iree_hal_streaming_context_t* context) {
+  IREE_ASSERT_ARGUMENT(context);
+  iree_slim_mutex_lock(&context->ipc_import_mutex);
+  IREE_ASSERT(context->ipc_imports_retiring,
+              "IPC import retirement was not active");
+  IREE_ASSERT(context->active_ipc_import_count == 0,
+              "cannot reopen IPC imports with active reservations");
+  const bool gate_changed = context->ipc_import_retirement_may_reopen;
+  if (gate_changed) context->ipc_imports_retiring = false;
+  context->ipc_import_retirement_may_reopen = false;
+  iree_slim_mutex_unlock(&context->ipc_import_mutex);
+  if (gate_changed) {
+    iree_notification_post(&context->ipc_import_notification, IREE_ALL_WAITERS);
+  }
+  iree_slim_mutex_unlock(&context->ipc_import_retirement_mutex);
 }
 
 iree_status_t iree_hal_streaming_context_push(
@@ -792,21 +996,24 @@ iree_status_t iree_hal_streaming_context_register_stream(
   return status;
 }
 
-iree_status_t iree_hal_streaming_context_allocate_capture_id(
-    iree_hal_streaming_context_t* context, unsigned long long* out_capture_id) {
-  IREE_ASSERT_ARGUMENT(context);
+iree_status_t iree_hal_streaming_allocate_capture_id(
+    unsigned long long* out_capture_id) {
   IREE_ASSERT_ARGUMENT(out_capture_id);
   *out_capture_id = 0;
 
-  iree_slim_mutex_lock(&context->stream_list_mutex);
-  if (context->next_capture_id == 0) {
-    iree_slim_mutex_unlock(&context->stream_list_mutex);
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "stream capture identifier space exhausted");
+  uint64_t current = iree_atomic_load(&iree_hal_streaming_next_capture_id,
+                                      iree_memory_order_relaxed);
+  while (current != 0) {
+    const uint64_t next = current + 1;
+    if (iree_atomic_compare_exchange_weak(
+            &iree_hal_streaming_next_capture_id, &current, next,
+            iree_memory_order_relaxed, iree_memory_order_relaxed)) {
+      *out_capture_id = current;
+      return iree_ok_status();
+    }
   }
-  *out_capture_id = context->next_capture_id++;
-  iree_slim_mutex_unlock(&context->stream_list_mutex);
-  return iree_ok_status();
+  return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                          "stream capture identifier space exhausted");
 }
 
 void iree_hal_streaming_context_unregister_stream(
@@ -846,18 +1053,20 @@ bool iree_hal_streaming_context_has_peer_contexts(
       iree_hal_streaming_device_registry();
   if (!device_registry) return false;
 
-  bool has_peer = false;
+  iree_hal_streaming_context_t* retained_peer = NULL;
   iree_slim_mutex_lock(&device_registry->context_list.mutex);
   for (iree_hal_streaming_context_t* candidate =
            device_registry->context_list.head;
        candidate; candidate = candidate->context_list_entry.next) {
-    if (candidate != context) {
-      has_peer = true;
+    if (candidate != context &&
+        iree_hal_streaming_context_try_retain(candidate)) {
+      retained_peer = candidate;
       break;
     }
   }
   iree_slim_mutex_unlock(&device_registry->context_list.mutex);
-  return has_peer;
+  iree_hal_streaming_context_release(retained_peer);
+  return retained_peer != NULL;
 }
 
 // Takes a retained snapshot while the caller holds |stream_list_mutex|.
@@ -1135,8 +1344,9 @@ iree_status_t iree_hal_streaming_context_flush_all(void) {
     for (iree_hal_streaming_context_t* context =
              device_registry->context_list.head;
          context; context = context->context_list_entry.next) {
-      contexts[index++] = context;
-      iree_hal_streaming_context_retain(context);
+      if (iree_hal_streaming_context_try_retain(context)) {
+        contexts[index++] = context;
+      }
     }
     context_count = index;
   }
@@ -1292,8 +1502,9 @@ iree_status_t iree_hal_streaming_context_synchronize_all(void) {
     for (iree_hal_streaming_context_t* context =
              device_registry->context_list.head;
          context; context = context->context_list_entry.next) {
-      contexts[index++] = context;
-      iree_hal_streaming_context_retain(context);
+      if (iree_hal_streaming_context_try_retain(context)) {
+        contexts[index++] = context;
+      }
     }
     context_count = index;
   }

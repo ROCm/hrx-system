@@ -600,6 +600,21 @@ static iree_hal_amdgpu_logical_device_t* iree_hal_amdgpu_logical_device_cast(
   return (iree_hal_amdgpu_logical_device_t*)base_value;
 }
 
+iree_status_t iree_hal_amdgpu_logical_device_cast_checked(
+    iree_hal_device_t* base_value,
+    iree_hal_amdgpu_logical_device_t** out_logical_device) {
+  *out_logical_device = NULL;
+  if (IREE_UNLIKELY(
+          !base_value ||
+          !iree_hal_resource_is((const iree_hal_resource_t*)base_value,
+                                &iree_hal_amdgpu_logical_device_vtable))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "device is not an AMDGPU logical device");
+  }
+  *out_logical_device = (iree_hal_amdgpu_logical_device_t*)base_value;
+  return iree_ok_status();
+}
+
 static iree_host_size_t iree_hal_amdgpu_logical_device_provisioned_queue_count(
     const iree_hal_amdgpu_logical_device_t* logical_device) {
   iree_host_size_t queue_count = 0;
