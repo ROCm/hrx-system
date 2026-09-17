@@ -2,6 +2,86 @@
   "version": 1,
   "cases": [
     {
+      "name": "resumes explicit kernel roots from Low text and bytecode",
+      "steps": [
+        {
+          "name": "compile-source",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/loom_opt_f32_arith.loom",
+              "--root=@f32_arith",
+              "--format=amdgpu-hsaco",
+              "--output={tmp}/source.hsaco"
+            ]
+          },
+          "files": [{"path": "{tmp}/source.hsaco", "non_empty": true}]
+        },
+        {
+          "name": "save-low-text",
+          "run": {
+            "tool": "loom-opt",
+            "args": [
+              "{srcdir}/loom_opt_f32_arith.loom",
+              "--pipeline=source-low",
+              "--output={tmp}/prepared.loom"
+            ]
+          },
+          "files": [{"path": "{tmp}/prepared.loom", "contains": ["low.kernel.def"]}]
+        },
+        {
+          "name": "compile-low-text",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/prepared.loom",
+              "--root=@f32_arith",
+              "--format=amdgpu-hsaco",
+              "--output={tmp}/text.hsaco"
+            ]
+          },
+          "files": [{"path": "{tmp}/text.hsaco", "equals": "{tmp}/source.hsaco"}]
+        },
+        {
+          "name": "save-low-bytecode",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "{tmp}/prepared.loom",
+              "--to=bc",
+              "--output={tmp}/prepared.loombc"
+            ]
+          },
+          "files": [{"path": "{tmp}/prepared.loombc", "non_empty": true}]
+        },
+        {
+          "name": "compile-low-bytecode",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/prepared.loombc",
+              "--root=@f32_arith",
+              "--format=amdgpu-hsaco",
+              "--output={tmp}/bytecode.hsaco"
+            ]
+          },
+          "files": [{"path": "{tmp}/bytecode.hsaco", "equals": "{tmp}/source.hsaco"}]
+        },
+        {
+          "name": "infer-low-kernel-root",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/prepared.loom",
+              "--format=amdgpu-hsaco",
+              "--output={tmp}/implicit.hsaco"
+            ]
+          },
+          "files": [{"path": "{tmp}/implicit.hsaco", "equals": "{tmp}/source.hsaco"}]
+        }
+      ]
+    },
+    {
       "name": "compiles HAL kernel closures from complete authoring modules",
       "run": {
         "tool": "loom-compile",

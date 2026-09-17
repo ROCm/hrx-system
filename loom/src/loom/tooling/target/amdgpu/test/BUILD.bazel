@@ -33,6 +33,7 @@ iree_execution_test_suite(
     data = [
         "complete_authoring_module.loom",
         "gfx1250_configured_fragment_bank.loom",
+        "loom_opt_f32_arith.loom",
         "selected_root_amdgpu.loom",
         "//loom/src/loom/tooling/target/amdgpu/test/corpus:gfx11/schedule_scopes.loom",
     ],
@@ -42,6 +43,8 @@ iree_execution_test_suite(
     tools = {
         "loom-compile": "//loom/src/loom/tools/loom-compile",
         "loom-compile-report": "//loom/py/loom/tools:loom-compile-report",
+        "loom-format": "//loom/src/loom/tools/loom-format",
+        "loom-opt": "//loom/src/loom/tools/loom-opt",
     },
 )
 
