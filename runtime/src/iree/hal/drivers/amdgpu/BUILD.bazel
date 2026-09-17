@@ -956,6 +956,22 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "hsa_queue_test",
+    srcs = [
+        "hsa_queue.h",
+        "hsa_queue_test.cc",
+    ],
+    deps = [
+        ":amdgpu",
+        ":headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:libhsa",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "host_queue_timestamp_test",
     srcs = ["host_queue_timestamp_test.cc"],
     deps = [

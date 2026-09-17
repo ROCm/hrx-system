@@ -53,6 +53,16 @@ typedef struct iree_hal_amdgpu_libhsa_t iree_hal_amdgpu_libhsa_t;
 // #define IREE_HAL_AMDGPU_LIBHSA_STATIC 1
 #endif  // IREE_HAL_AMDGPU_LIBHSA_STATIC
 
+// Descriptor-based queue creation is optional in dynamically loaded HSA
+// runtimes. Static builds conservatively use the stable queue API so linking
+// does not require an entry point that the selected HSA library may omit.
+#if defined(HSA_AMD_QUEUE_CREATE_DESC_VERSION) && !IREE_HAL_AMDGPU_LIBHSA_STATIC
+#define IREE_HAL_AMDGPU_HAVE_HSA_AMD_QUEUE_CREATE 1
+#else
+#define IREE_HAL_AMDGPU_HAVE_HSA_AMD_QUEUE_CREATE 0
+#endif  // HSA_AMD_QUEUE_CREATE_DESC_VERSION &&
+        // !IREE_HAL_AMDGPU_LIBHSA_STATIC
+
 #define IREE_HAL_AMDGPU_LIBHSA_TRACE_CATEGORY_ALWAYS (1 << 0)
 #define IREE_HAL_AMDGPU_LIBHSA_TRACE_CATEGORY_SIGNALS (1 << 1)
 #define IREE_HAL_AMDGPU_LIBHSA_TRACE_CATEGORY_QUEUES (1 << 2)
@@ -130,6 +140,19 @@ typedef struct iree_hal_amdgpu_libhsa_t {
   // Always required even when statically linking.
   hsa_ven_amd_loader_1_03_pfn_t amd_loader;
 } iree_hal_amdgpu_libhsa_t;
+
+// Returns true when descriptor-based queue creation is available. Older
+// headers and static builds select the stable API, while dynamic builds probe
+// the runtime independently of the headers.
+static inline bool iree_hal_amdgpu_libhsa_has_hsa_amd_queue_create(
+    const iree_hal_amdgpu_libhsa_t* libhsa) {
+#if IREE_HAL_AMDGPU_HAVE_HSA_AMD_QUEUE_CREATE
+  return libhsa->hsa_amd_queue_create != NULL;
+#else
+  (void)libhsa;
+  return false;
+#endif  // IREE_HAL_AMDGPU_HAVE_HSA_AMD_QUEUE_CREATE
+}
 
 // Initializes |out_libhsa| in-place with dynamically loaded HSA symbols.
 // iree_hal_amdgpu_libhsa_deinitialize must be used to release the library

@@ -5,11 +5,16 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/amdgpu:cts.bzl", "iree_amdgpu_hal_cts_testdata")
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load(
     "//runtime/build_tools/bazel:amdgpu_binary.bzl",
     "iree_amdgpu_binary_variants_embed_data",
 )
-load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load(
+    "//runtime/build_tools/bazel:cc.bzl",
+    "iree_runtime_cc_binary",
+    "iree_runtime_cc_library",
+)
 load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
 load("//runtime/build_tools/bazel:cc_fuzz.bzl", "iree_runtime_cc_fuzz")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
@@ -44,6 +49,31 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_binary(
+    name = "libhsa_test_library.so",
+    testonly = True,
+    srcs = ["libhsa_test_library.c"],
+    linkshared = True,
+    deps = [
+        ":libhsa",
+        "//runtime/src/iree/base",
+        "//third_party:hsa_runtime_headers",
+    ],
+)
+
+iree_c_embed_data(
+    name = "libhsa_test_library",
+    testonly = True,
+    srcs = [":libhsa_test_library.so"],
+    c_file_output = "libhsa_test_library_embed.c",
+    flatten = True,
+    h_file_output = "libhsa_test_library_embed.h",
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amdgpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)
+
 iree_runtime_cc_library(
     name = "libaqlprofile",
     srcs = [
@@ -69,6 +99,7 @@ iree_runtime_cc_test(
     srcs = ["libhsa_test.cc"],
     deps = [
         ":libhsa",
+        ":libhsa_test_library",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/testing:dynamic_library_test_library",
         "//runtime/src/iree/io:file_handle",
