@@ -95,6 +95,7 @@ loom_test(
 loom_test(
     name = "indirection_access_test",
     srcs = [
+        "queued_routes.loom",
         "//loom/src/loom/test/corpus/checked_benchmarks:moe_routed_combine_loop_f32.loom",
         "//loom/src/loom/test/corpus/checked_benchmarks:paged_online_softmax_loop_f32.loom",
     ],

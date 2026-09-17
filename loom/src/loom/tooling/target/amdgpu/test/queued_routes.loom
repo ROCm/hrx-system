@@ -1,0 +1,149 @@
+// A deep route queue retains runtime IDs until their guarded payload use.
+// Each of four lanes combines one channel, preserving holes and duplicate IDs.
+// Every input route is consumed once after twelve iterations of lookahead.
+kernel.def @queued_routes() {
+  %unit = index.constant 1 : index
+  %width = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%route_count: index, %route_ids: buffer, %payloads: buffer, %output: buffer) {
+  %count = index.assume %route_count [range(%route_count, 0, 32)] : index
+  %lane = kernel.workitem.id<x> : index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %distance = index.constant 12 : index
+  %base = index.constant 0 : offset
+  %absent = scalar.constant -1 : i32
+  %first_expert = scalar.constant 0 : i32
+  %initial_sum = scalar.constant 0.0 : f32
+  %ids_aligned = buffer.assume.alignment %route_ids {minimum_alignment = 4} : buffer
+  %payloads_aligned = buffer.assume.alignment %payloads {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %ids_storage, %payload_storage, %output_storage = buffer.assume.noalias %ids_aligned, %payloads_aligned, %output_aligned : buffer, buffer, buffer
+  %ids = buffer.view %ids_storage[%base] : buffer -> view<32xi32>
+  %rows = buffer.view %payload_storage[%base] : buffer -> view<4x4xf32>
+  %result = buffer.view %output_storage[%base] : buffer -> view<4xf32>
+  %ticks = index.add %count, %distance : index
+  %final_slot0, %final_slot1, %final_slot2, %final_slot3, %final_slot4, %final_slot5, %final_slot6, %final_slot7, %final_slot8, %final_slot9, %final_slot10, %final_slot11, %combined = scf.for %route = [%begin to %ticks step %step](%slot0 = %absent : i32, %slot1 = %absent : i32, %slot2 = %absent : i32, %slot3 = %absent : i32, %slot4 = %absent : i32, %slot5 = %absent : i32, %slot6 = %absent : i32, %slot7 = %absent : i32, %slot8 = %absent : i32, %slot9 = %absent : i32, %slot10 = %absent : i32, %slot11 = %absent : i32, %sum = %initial_sum : f32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, f32) {
+    %in_range = index.cmp slt, %route, %count : index
+    %issued = scf.if %in_range -> (i32) {
+      %loaded = view.load %ids[%route] : view<32xi32> -> i32
+      scf.yield %loaded : i32
+    } else {
+      scf.yield %absent : i32
+    }
+    %valid = scalar.cmpi sge, %slot0, %first_expert : i32
+    %next_sum = scf.if %valid -> (f32) {
+      %expert_index = index.cast %slot0 : i32 to index
+      %expert = index.assume %expert_index [range(%expert_index, 0, 3)] : index
+      %payload = view.load %rows[%expert, %lane] : view<4x4xf32> -> f32
+      %updated = scalar.addf %sum, %payload : f32
+      scf.yield %updated : f32
+    } else {
+      scf.yield %sum : f32
+    }
+    scf.yield %slot1, %slot2, %slot3, %slot4, %slot5, %slot6, %slot7, %slot8, %slot9, %slot10, %slot11, %issued, %next_sum : i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, f32
+  }
+  view.store %combined, %result[%lane] : f32, view<4xf32>
+  kernel.return
+}
+
+// Five-route cycles contribute -8 + 4*channel. Remaining prefix values are
+// summed separately, independent of the queue's rotation/startup/drain.
+check.case @queued_routes_n0 {
+  %count = check.literal value(0) : index
+  %ids = check.generate.iota offset(3) step(-1) period(5) : tensor<32xi32>
+  %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
+  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
+  %expected = check.generate.iota offset(0.0) step(0.0) : tensor<4xf32>
+  kernel.launch @queued_routes(%count, %ids, %payloads, %actual) : (index, tensor<32xi32>, tensor<4x4xf32>, tensor<4xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
+  check.return
+}
+
+check.case @queued_routes_n1 {
+  %count = check.literal value(1) : index
+  %ids = check.generate.iota offset(3) step(-1) period(5) : tensor<32xi32>
+  %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
+  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
+  %expected = check.generate.iota offset(4.0) step(1.0) : tensor<4xf32>
+  kernel.launch @queued_routes(%count, %ids, %payloads, %actual) : (index, tensor<32xi32>, tensor<4x4xf32>, tensor<4xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
+  check.return
+}
+
+check.case @queued_routes_n11 {
+  %count = check.literal value(11) : index
+  %ids = check.generate.iota offset(3) step(-1) period(5) : tensor<32xi32>
+  %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
+  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
+  %expected = check.generate.iota offset(-12.0) step(9.0) : tensor<4xf32>
+  kernel.launch @queued_routes(%count, %ids, %payloads, %actual) : (index, tensor<32xi32>, tensor<4x4xf32>, tensor<4xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
+  check.return
+}
+
+check.case @queued_routes_n12 {
+  %count = check.literal value(12) : index
+  %ids = check.generate.iota offset(3) step(-1) period(5) : tensor<32xi32>
+  %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
+  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
+  %expected = check.generate.iota offset(-12.0) step(10.0) : tensor<4xf32>
+  kernel.launch @queued_routes(%count, %ids, %payloads, %actual) : (index, tensor<32xi32>, tensor<4x4xf32>, tensor<4xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
+  check.return
+}
+
+check.case @queued_routes_n13 {
+  %count = check.literal value(13) : index
+  %ids = check.generate.iota offset(3) step(-1) period(5) : tensor<32xi32>
+  %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
+  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
+  %expected = check.generate.iota offset(-16.0) step(11.0) : tensor<4xf32>
+  kernel.launch @queued_routes(%count, %ids, %payloads, %actual) : (index, tensor<32xi32>, tensor<4x4xf32>, tensor<4xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
+  check.return
+}
+
+check.case @queued_routes_n31 {
+  %count = check.literal value(31) : index
+  %ids = check.generate.iota offset(3) step(-1) period(5) : tensor<32xi32>
+  %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
+  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
+  %expected = check.generate.iota offset(-44.0) step(25.0) : tensor<4xf32>
+  kernel.launch @queued_routes(%count, %ids, %payloads, %actual) : (index, tensor<32xi32>, tensor<4x4xf32>, tensor<4xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
+  check.return
+}
+
+check.case @queued_routes_n32 {
+  %count = check.literal value(32) : index
+  %ids = check.generate.iota offset(3) step(-1) period(5) : tensor<32xi32>
+  %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
+  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
+  %expected = check.generate.iota offset(-44.0) step(26.0) : tensor<4xf32>
+  kernel.launch @queued_routes(%count, %ids, %payloads, %actual) : (index, tensor<32xi32>, tensor<4x4xf32>, tensor<4xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
+  check.return
+}
+
+check.case @queued_routes_all_absent {
+  %count = check.literal value(32) : index
+  %ids = check.generate.fill value(-1) : tensor<32xi32>
+  %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
+  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
+  %expected = check.generate.iota offset(0.0) step(0.0) : tensor<4xf32>
+  kernel.launch @queued_routes(%count, %ids, %payloads, %actual) : (index, tensor<32xi32>, tensor<4x4xf32>, tensor<4xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
+  check.return
+}
+
+check.case @queued_routes_duplicate {
+  %count = check.literal value(32) : index
+  %ids = check.generate.fill value(2) : tensor<32xi32>
+  %payloads = check.generate.iota offset(-8.0) step(1.0) : tensor<4x4xf32>
+  %actual = check.generate.fill value(-1000.0) : tensor<4xf32>
+  %expected = check.generate.iota offset(0.0) step(32.0) : tensor<4xf32>
+  kernel.launch @queued_routes(%count, %ids, %payloads, %actual) : (index, tensor<32xi32>, tensor<4x4xf32>, tensor<4xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
+  check.return
+}

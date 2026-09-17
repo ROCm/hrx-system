@@ -14,6 +14,7 @@ loom_check_test_suite(
     test
   SRCS
     "canonicalize.loom-test"
+    "convergence_facts.loom-test"
     "facts.loom-test"
     "rotation_facts.loom-test"
     "roundtrip.loom-test"

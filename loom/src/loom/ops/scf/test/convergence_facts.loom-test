@@ -1,0 +1,59 @@
+// RUN: pass canonicalize
+
+// Counted queue facts include values arriving after every carried slot.
+func.def @shift_for(%count: index, %input: i64) -> (i64) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %seed = scalar.constant 0 : i64
+  %out0, %out1, %out2, %out3, %out4, %out5, %out6, %out7, %out8, %out9, %out10, %out11 = scf.for %iv = [%begin to %count step %step](%slot0 = %seed : i64, %slot1 = %seed : i64, %slot2 = %seed : i64, %slot3 = %seed : i64, %slot4 = %seed : i64, %slot5 = %seed : i64, %slot6 = %seed : i64, %slot7 = %seed : i64, %slot8 = %seed : i64, %slot9 = %seed : i64, %slot10 = %seed : i64, %slot11 = %seed : i64) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) {
+    %head_high = test.fact_range_hi %slot0 : i64 -> i64
+    test.use %head_high : i64
+    scf.yield %slot1, %slot2, %slot3, %slot4, %slot5, %slot6, %slot7, %slot8, %slot9, %slot10, %slot11, %input : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64
+  }
+  %high = test.fact_range_hi %out0 : i64 -> i64
+  func.return %high : i64
+}
+
+// ----
+func.def @shift_for(%count: index, %input: i64) -> (i64) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %seed = scalar.constant 0 : i64
+  %out0, %out1, %out2, %out3, %out4, %out5, %out6, %out7, %out8, %out9, %out10, %out11 = scf.for %iv = [%begin to %count step %step](%slot0 = %seed : i64, %slot1 = %seed : i64, %slot2 = %seed : i64, %slot3 = %seed : i64, %slot4 = %seed : i64, %slot5 = %seed : i64, %slot6 = %seed : i64, %slot7 = %seed : i64, %slot8 = %seed : i64, %slot9 = %seed : i64, %slot10 = %seed : i64, %slot11 = %seed : i64) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) {
+    %head_high = scalar.constant 9223372036854775807 : i64
+    test.use %head_high : i64
+    scf.yield %slot1, %slot2, %slot3, %slot4, %slot5, %slot6, %slot7, %slot8, %slot9, %slot10, %slot11, %input : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64
+  }
+  %high = scalar.constant 9223372036854775807 : i64
+  func.return %high : i64
+}
+
+// ====
+
+// Condition-region queues propagate the same delayed state to the exit.
+func.def @shift_while(%input: i64, %condition: i1) -> (i64) {
+  %seed = scalar.constant 0 : i64
+  %out0, %out1, %out2, %out3, %out4, %out5, %out6, %out7, %out8, %out9, %out10, %out11 = scf.while(%slot0 = %seed : i64, %slot1 = %seed : i64, %slot2 = %seed : i64, %slot3 = %seed : i64, %slot4 = %seed : i64, %slot5 = %seed : i64, %slot6 = %seed : i64, %slot7 = %seed : i64, %slot8 = %seed : i64, %slot9 = %seed : i64, %slot10 = %seed : i64, %slot11 = %seed : i64) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) {
+    %head_high = test.fact_range_hi %slot0 : i64 -> i64
+    test.use %head_high : i64
+    scf.condition %condition, %slot0, %slot1, %slot2, %slot3, %slot4, %slot5, %slot6, %slot7, %slot8, %slot9, %slot10, %slot11 : i1, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64
+  } do(%next0: i64, %next1: i64, %next2: i64, %next3: i64, %next4: i64, %next5: i64, %next6: i64, %next7: i64, %next8: i64, %next9: i64, %next10: i64, %next11: i64) {
+    scf.yield %next1, %next2, %next3, %next4, %next5, %next6, %next7, %next8, %next9, %next10, %next11, %input : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64
+  }
+  %high = test.fact_range_hi %out0 : i64 -> i64
+  func.return %high : i64
+}
+
+// ----
+func.def @shift_while(%input: i64, %condition: i1) -> (i64) {
+  %seed = scalar.constant 0 : i64
+  %out0, %out1, %out2, %out3, %out4, %out5, %out6, %out7, %out8, %out9, %out10, %out11 = scf.while(%slot0 = %seed : i64, %slot1 = %seed : i64, %slot2 = %seed : i64, %slot3 = %seed : i64, %slot4 = %seed : i64, %slot5 = %seed : i64, %slot6 = %seed : i64, %slot7 = %seed : i64, %slot8 = %seed : i64, %slot9 = %seed : i64, %slot10 = %seed : i64, %slot11 = %seed : i64) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) {
+    %head_high = scalar.constant 9223372036854775807 : i64
+    test.use %head_high : i64
+    scf.condition %condition, %slot0, %slot1, %slot2, %slot3, %slot4, %slot5, %slot6, %slot7, %slot8, %slot9, %slot10, %slot11 : i1, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64
+  } do(%next0: i64, %next1: i64, %next2: i64, %next3: i64, %next4: i64, %next5: i64, %next6: i64, %next7: i64, %next8: i64, %next9: i64, %next10: i64, %next11: i64) {
+    scf.yield %next1, %next2, %next3, %next4, %next5, %next6, %next7, %next8, %next9, %next10, %next11, %input : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64
+  }
+  %high = scalar.constant 9223372036854775807 : i64
+  func.return %high : i64
+}

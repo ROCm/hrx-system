@@ -942,6 +942,22 @@ static iree_status_t loom_value_fact_table_save_cfg_block(
   return iree_ok_status();
 }
 
+// A bounded solve may stop before a changed input reaches every dependent
+// value. Reset the complete solve scope, including provisional op results,
+// before evaluating it once with unconstrained block arguments. Captures and
+// function entry arguments retain the facts established outside this scope.
+static iree_status_t loom_value_fact_table_reset_cfg_values(
+    loom_value_fact_table_t* table, const loom_module_t* module,
+    const loom_value_fact_cfg_saved_values_t* saved) {
+  for (iree_host_size_t i = 0; i < saved->count; ++i) {
+    loom_value_id_t value_id = saved->values[i].value_id;
+    IREE_RETURN_IF_ERROR(loom_value_fact_table_define(
+        table, value_id,
+        loom_value_fact_table_unknown_for_value(module, value_id)));
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_value_fact_table_recompute_cfg_component(
     loom_value_fact_table_t* table, const loom_module_t* module,
     const loom_value_fact_cfg_region_t* region, const loom_scc_t* component,
@@ -966,6 +982,7 @@ iree_status_t loom_value_fact_table_recompute_cfg_component(
       (void**)&visited_components));
   memset(visited_components, 0,
          partition->argument_count * sizeof(*visited_components));
+  bool converged = false;
   for (uint32_t iteration = 0; iteration < LOOM_VALUE_FACT_CFG_MAX_ITERATIONS;
        ++iteration) {
     bool changed = false;
@@ -978,7 +995,17 @@ iree_status_t loom_value_fact_table_recompute_cfg_component(
           table, module, region->graph.blocks[block_index].block, &changed));
     }
     if (!changed) {
+      converged = true;
       break;
+    }
+  }
+  if (!converged) {
+    IREE_RETURN_IF_ERROR(
+        loom_value_fact_table_reset_cfg_values(table, module, &saved));
+    for (iree_host_size_t i = 0; i < component->node_count; ++i) {
+      bool changed = false;
+      IREE_RETURN_IF_ERROR(loom_value_fact_table_compute_cfg_block_tree(
+          table, module, region->graph.blocks[blocks[i]].block, &changed));
     }
   }
   for (iree_host_size_t i = 0; i < saved.count; ++i) {
@@ -1016,6 +1043,7 @@ static iree_status_t loom_value_fact_table_compute_cfg_region_tree(
   IREE_RETURN_IF_ERROR(loom_value_fact_table_seed_block_args(
       table, module, entry_block, parent_op));
 
+  bool converged = false;
   for (uint32_t iteration = 0; iteration < LOOM_VALUE_FACT_CFG_MAX_ITERATIONS;
        ++iteration) {
     bool changed = false;
@@ -1032,7 +1060,25 @@ static iree_status_t loom_value_fact_table_compute_cfg_region_tree(
           table, module, block, &changed));
     }
     if (!changed) {
+      converged = true;
       break;
+    }
+  }
+  if (!converged) {
+    loom_value_fact_cfg_saved_values_t saved = {0};
+    for (iree_host_size_t i = 0; i < graph->reverse_postorder.count; ++i) {
+      uint16_t block_index = graph->reverse_postorder.values[i];
+      IREE_RETURN_IF_ERROR(loom_value_fact_table_save_cfg_block(
+          table, graph->blocks[block_index].block, block_index != 0,
+          table->transient_arena, &saved));
+    }
+    IREE_RETURN_IF_ERROR(
+        loom_value_fact_table_reset_cfg_values(table, module, &saved));
+    for (iree_host_size_t i = 0; i < graph->reverse_postorder.count; ++i) {
+      uint16_t block_index = graph->reverse_postorder.values[i];
+      bool changed = false;
+      IREE_RETURN_IF_ERROR(loom_value_fact_table_compute_cfg_block_tree(
+          table, module, graph->blocks[block_index].block, &changed));
     }
   }
   return iree_ok_status();
@@ -1185,6 +1231,16 @@ static iree_status_t loom_value_fact_table_initialize_loop_state(
                           : loom_type_none();
   }
   return iree_ok_status();
+}
+
+// Lack of change in one slot is not convergence: a long carried queue can
+// delay another slot's change past the solve budget. Unknown state bounds all
+// iterations and lets the final body evaluation publish sound derived facts.
+static void loom_value_fact_loop_forget_state(uint16_t count,
+                                              loom_value_facts_t* facts) {
+  for (uint16_t i = 0; i < count; ++i) {
+    facts[i] = loom_value_facts_unknown();
+  }
 }
 
 // The forwarding graph contains only direct carried-argument yields. A cycle
@@ -1520,6 +1576,7 @@ static iree_status_t loom_value_fact_table_compute_counted_loop_summary(
     }
   }
   if (!converged) {
+    loom_value_fact_loop_forget_state(count, current_facts);
     IREE_RETURN_IF_ERROR(loom_value_fact_table_define_loop_entry_args(
         table, module, body, carried_arg_offset, current_facts, count));
     IREE_RETURN_IF_ERROR(loom_value_fact_table_compute_region_tree(
@@ -1623,6 +1680,7 @@ static iree_status_t loom_value_fact_table_compute_condition_loop_summary(
     }
   }
   if (!converged) {
+    loom_value_fact_loop_forget_state(count, current_facts);
     IREE_RETURN_IF_ERROR(loom_value_fact_table_define_loop_entry_args(
         table, module, condition_region, /*arg_offset=*/0, current_facts,
         count));

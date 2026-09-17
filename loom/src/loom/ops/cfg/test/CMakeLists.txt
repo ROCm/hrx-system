@@ -13,6 +13,7 @@ loom_check_test_suite(
   NAME
     test
   SRCS
+    "convergence_facts.loom-test"
     "facts.loom-test"
     "rotation_facts.loom-test"
     "verify.loom-test"

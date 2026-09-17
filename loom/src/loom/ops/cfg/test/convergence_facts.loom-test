@@ -1,0 +1,54 @@
+// RUN: pass canonicalize
+
+// Computed forwarding can require more propagation rounds than direct cycles.
+// Neither the head nor values derived from it are constant over the loop.
+func.def @shift_cfg(%input: i64, %condition: i1) -> (i64) {
+  %seed = scalar.constant 0 : i64
+  cfg.br ^body(%seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64)
+^body(%slot0: i64, %slot1: i64, %slot2: i64, %slot3: i64, %slot4: i64, %slot5: i64, %slot6: i64, %slot7: i64, %slot8: i64, %slot9: i64, %slot10: i64, %slot11: i64, %slot12: i64, %slot13: i64, %slot14: i64, %slot15: i64, %slot16: i64, %slot17: i64, %slot18: i64, %slot19: i64, %slot20: i64, %slot21: i64, %slot22: i64, %slot23: i64):
+  %head_high = test.fact_range_hi %slot0 : i64 -> i64
+  test.use %head_high : i64
+  %next0 = scalar.addi %slot1, %seed : i64
+  %next1 = scalar.addi %slot2, %seed : i64
+  %next2 = scalar.addi %slot3, %seed : i64
+  %next3 = scalar.addi %slot4, %seed : i64
+  %next4 = scalar.addi %slot5, %seed : i64
+  %next5 = scalar.addi %slot6, %seed : i64
+  %next6 = scalar.addi %slot7, %seed : i64
+  %next7 = scalar.addi %slot8, %seed : i64
+  %next8 = scalar.addi %slot9, %seed : i64
+  %next9 = scalar.addi %slot10, %seed : i64
+  %next10 = scalar.addi %slot11, %seed : i64
+  %next11 = scalar.addi %slot12, %seed : i64
+  %next12 = scalar.addi %slot13, %seed : i64
+  %next13 = scalar.addi %slot14, %seed : i64
+  %next14 = scalar.addi %slot15, %seed : i64
+  %next15 = scalar.addi %slot16, %seed : i64
+  %next16 = scalar.addi %slot17, %seed : i64
+  %next17 = scalar.addi %slot18, %seed : i64
+  %next18 = scalar.addi %slot19, %seed : i64
+  %next19 = scalar.addi %slot20, %seed : i64
+  %next20 = scalar.addi %slot21, %seed : i64
+  %next21 = scalar.addi %slot22, %seed : i64
+  %next22 = scalar.addi %slot23, %seed : i64
+  %next23 = scalar.addi %input, %seed : i64
+  cfg.cond_br %condition, ^repeat, ^exit
+^repeat:
+  cfg.br ^body(%next0: i64, %next1: i64, %next2: i64, %next3: i64, %next4: i64, %next5: i64, %next6: i64, %next7: i64, %next8: i64, %next9: i64, %next10: i64, %next11: i64, %next12: i64, %next13: i64, %next14: i64, %next15: i64, %next16: i64, %next17: i64, %next18: i64, %next19: i64, %next20: i64, %next21: i64, %next22: i64, %next23: i64)
+^exit:
+  func.return %head_high : i64
+}
+
+// ----
+func.def @shift_cfg(%input: i64, %condition: i1) -> (i64) {
+  %seed = scalar.constant 0 : i64
+  cfg.br ^body(%seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64, %seed: i64)
+^body(%slot0: i64, %slot1: i64, %slot2: i64, %slot3: i64, %slot4: i64, %slot5: i64, %slot6: i64, %slot7: i64, %slot8: i64, %slot9: i64, %slot10: i64, %slot11: i64, %slot12: i64, %slot13: i64, %slot14: i64, %slot15: i64, %slot16: i64, %slot17: i64, %slot18: i64, %slot19: i64, %slot20: i64, %slot21: i64, %slot22: i64, %slot23: i64):
+  %head_high = scalar.constant 9223372036854775807 : i64
+  test.use %head_high : i64
+  cfg.cond_br %condition, ^repeat, ^exit
+^repeat:
+  cfg.br ^body(%slot1: i64, %slot2: i64, %slot3: i64, %slot4: i64, %slot5: i64, %slot6: i64, %slot7: i64, %slot8: i64, %slot9: i64, %slot10: i64, %slot11: i64, %slot12: i64, %slot13: i64, %slot14: i64, %slot15: i64, %slot16: i64, %slot17: i64, %slot18: i64, %slot19: i64, %slot20: i64, %slot21: i64, %slot22: i64, %slot23: i64, %input: i64)
+^exit:
+  func.return %head_high : i64
+}
