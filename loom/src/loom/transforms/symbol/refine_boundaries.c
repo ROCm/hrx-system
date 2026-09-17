@@ -649,10 +649,8 @@ static iree_status_t loom_refine_boundaries_join_facts(
 static iree_status_t loom_refine_boundaries_merge_fact(
     loom_value_fact_table_t* table, loom_value_id_t value_id,
     const loom_value_fact_table_t* source_table, loom_value_facts_t facts) {
-  if (loom_value_facts_is_unknown(facts) &&
-      !loom_refine_boundaries_table_has_entry(table, value_id)) {
-    return iree_ok_status();
-  }
+  // An observed unknown input participates in the join. Keeping it distinct
+  // from an unseen boundary prevents later callers from narrowing the result.
   if (!loom_refine_boundaries_table_has_entry(table, value_id)) {
     loom_value_facts_t cloned_facts = loom_value_facts_unknown();
     IREE_RETURN_IF_ERROR(loom_value_fact_table_clone_fact(

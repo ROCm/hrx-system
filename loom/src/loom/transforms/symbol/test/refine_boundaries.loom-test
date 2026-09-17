@@ -992,3 +992,65 @@ command.program.def public @launch_program(%extent: index) launch(%storage: buff
   command.program.launch @unused_program_inputs[%extent](%storage) : [index](buffer)
   command.return
 }
+
+// ====
+
+// An unconstrained first caller contributes unknown facts rather than leaving
+// the argument unobserved. A later aligned caller cannot narrow the shared body.
+func.def noinline @remainder(%value: index) -> (index) {
+  %alignment = index.constant 16 : index
+  %result = index.rem %value, %alignment : index
+  func.return %result : index
+}
+
+func.def public @unknown_first(%input: index) -> (index, index) {
+  %unknown_result = func.call @remainder(%input) : (index) -> (index)
+  %aligned = index.constant 32 : index
+  %known_result = func.call @remainder(%aligned) : (index) -> (index)
+  func.return %unknown_result, %known_result : index, index
+}
+
+// ----
+func.def noinline @remainder(%value: index) -> (index) {
+  %alignment = index.constant 16 : index
+  %result = index.rem %value, %alignment : index
+  func.return %result : index
+}
+
+func.def public @unknown_first(%input: index) -> (index, index) {
+  %unknown_result = func.call pure @remainder(%input) : (index) -> (index)
+  %aligned = index.constant 32 : index
+  %known_result = func.call pure @remainder(%aligned) : (index) -> (index)
+  func.return %unknown_result, %known_result : index, index
+}
+
+// ====
+
+// Joining an unknown caller after a known caller has the same conservative
+// result. Refinement is independent of the order in which calls are visited.
+func.def noinline @remainder(%value: index) -> (index) {
+  %alignment = index.constant 16 : index
+  %result = index.rem %value, %alignment : index
+  func.return %result : index
+}
+
+func.def public @known_first(%input: index) -> (index, index) {
+  %aligned = index.constant 32 : index
+  %known_result = func.call @remainder(%aligned) : (index) -> (index)
+  %unknown_result = func.call @remainder(%input) : (index) -> (index)
+  func.return %unknown_result, %known_result : index, index
+}
+
+// ----
+func.def noinline @remainder(%value: index) -> (index) {
+  %alignment = index.constant 16 : index
+  %result = index.rem %value, %alignment : index
+  func.return %result : index
+}
+
+func.def public @known_first(%input: index) -> (index, index) {
+  %aligned = index.constant 32 : index
+  %known_result = func.call pure @remainder(%aligned) : (index) -> (index)
+  %unknown_result = func.call pure @remainder(%input) : (index) -> (index)
+  func.return %unknown_result, %known_result : index, index
+}
