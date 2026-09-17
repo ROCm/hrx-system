@@ -7,6 +7,8 @@
 #include "libamdf/src/platform/linux/endpoint.h"
 
 #include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
 
 #include <cstring>
 #include <iostream>
@@ -66,6 +68,14 @@ TEST_F(LinuxEndpointTest, NativeIdentityAndIndependentFiles) {
     EXPECT_STREQ(summary.name, info.name);
     ASSERT_EQ(amdf_linux_endpoint_open_file(endpoint, &first), AMDF_STATUS_OK);
     ASSERT_EQ(amdf_linux_endpoint_open_file(endpoint, &second), AMDF_STATUS_OK);
+    struct stat native_info = {};
+    ASSERT_EQ(fstat(first, &native_info), 0);
+    EXPECT_EQ(info.native_identity.type,
+              AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_LINUX_DEVICE);
+    EXPECT_EQ(info.native_identity.value.linux_device.major,
+              major(native_info.st_rdev));
+    EXPECT_EQ(info.native_identity.value.linux_device.minor,
+              minor(native_info.st_rdev));
     EXPECT_NE(first, second);
     EXPECT_NE(fcntl(first, F_GETFD) & FD_CLOEXEC, 0);
     EXPECT_NE(fcntl(second, F_GETFD) & FD_CLOEXEC, 0);

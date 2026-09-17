@@ -45,6 +45,32 @@ XDNA context's instruction aperture, are obtained from that explicitly created
 owner. Discovering a physical memory location does not implicitly create the
 device required to allocate there.
 
+## Matching other native APIs
+
+`endpoint_query_info` also returns a typed `native_identity` captured during
+passive discovery. It identifies an actual native device when multiple
+endpoints have identical PCI product IDs. The opaque `id` continues to select
+libamdf endpoints; the diagnostic name is intended for display.
+
+For a Linux GPU, the identity contains its DRM render-node major and minor
+numbers. A Vulkan consumer can compare these with
+`VkPhysicalDeviceDrmPropertiesEXT.renderMajor` and `renderMinor` when `hasRender`
+is true. An XDNA endpoint reports its accelerator character-device numbers in
+the same native namespace.
+
+On Windows, the identity contains the adapter LUID bits and its KMT
+physical-adapter index. DXGI can select the logical adapter directly with
+`EnumAdapterByLuid`. Linked adapters retain their separate physical indices;
+matching the logical adapter alone does not select a physical node. The LUID
+bits encode `(uint64_t)(uint32_t)HighPart << 32 | LowPart` without exposing a
+Windows ABI type in the public headers.
+
+Native identities correlate contemporaneous providers on the same machine.
+They are not persistent across reboot or device removal. A match establishes
+identity; the caller still qualifies the requested transport, memory geometry
+and access before constructing shared backing. Identity queries acquire no
+execution resources and expose no native handles to retain or release.
+
 ## Native metadata boundaries
 
 Linux discovery reads cached sysfs identity, topology and heap metadata without

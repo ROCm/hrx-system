@@ -134,6 +134,9 @@ static amdf_status_t amdf_linux_query_endpoint(int directory,
     return amdf_linux_error(EPROTO);
   }
   info->id.words[0] = ((uint64_t)device_major << 32) | device_minor;
+  info->native_identity.type = AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_LINUX_DEVICE;
+  info->native_identity.value.linux_device.major = device_major;
+  info->native_identity.value.linux_device.minor = device_minor;
   char device_path[512];
   const ssize_t path_length =
       readlinkat(directory, "device", device_path, sizeof(device_path) - 1);

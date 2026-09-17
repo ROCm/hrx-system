@@ -147,6 +147,12 @@ amdf_status_t amdf_windows_query_endpoint_info(const amdf_kmt_api_t* api,
     endpoint_info.structure_size = sizeof(endpoint_info);
     endpoint_info.id = amdf_windows_endpoint_id_encode(
         adapter_luid, physical_adapter_index, &device_ids.DeviceIds);
+    endpoint_info.native_identity.type =
+        AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_WINDOWS_ADAPTER;
+    endpoint_info.native_identity.value.windows_adapter.luid =
+        amdf_windows_luid_encode(adapter_luid);
+    endpoint_info.native_identity.value.windows_adapter.physical_adapter_index =
+        physical_adapter_index;
     if (adapter_type.DisplaySupported) {
       endpoint_info.type_flags |= AMDF_ENDPOINT_TYPE_FLAG_DISPLAY_SUPPORTED;
     }

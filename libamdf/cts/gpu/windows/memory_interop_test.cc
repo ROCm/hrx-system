@@ -72,43 +72,20 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
     endpoint.type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO;
     endpoint.structure_size = sizeof(endpoint);
     ASSERT_EQ(api_->endpoint_query_info(endpoint_, &endpoint), AMDF_STATUS_OK);
-    // PCI IDs narrow discovery; successful native admission establishes the
-    // exact adapter match even when several GPUs have the same product ID.
-    bool matched = false;
-    for (UINT index = 0; !matched; ++index) {
-      ComPtr<IDXGIAdapter1> candidate;
-      const HRESULT status = factory_->EnumAdapters1(index, &candidate);
-      if (status == DXGI_ERROR_NOT_FOUND) {
-        break;
-      }
-      ASSERT_TRUE(SUCCEEDED(status));
-      DXGI_ADAPTER_DESC1 description = {};
-      ASSERT_TRUE(SUCCEEDED(candidate->GetDesc1(&description)));
-      if (description.VendorId != endpoint.pci.vendor_id ||
-          description.DeviceId != endpoint.pci.device_id) {
-        continue;
-      }
-      adapter_ = candidate;
-      d3d_.Reset();
-      ASSERT_TRUE(SUCCEEDED(D3D12CreateDevice(
-          adapter_.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&d3d_))));
-      ASSERT_NO_FATAL_FAILURE(CreateSharedBuffer());
-      amdf_external_memory_t source = Transport();
-      amdf_memory_t* memory = nullptr;
-      const amdf_status_t imported =
-          api_->memory_import(local_scope_, &import_info_, &source, &memory);
-      if (amdf_status_is_ok(imported)) {
-        ASSERT_EQ(api_->memory_destroy(memory), AMDF_STATUS_OK);
-        matched = true;
-      } else {
-        EXPECT_EQ(memory, nullptr);
-        EXPECT_EQ(source.payload.native_handle, shared_);
-        std::printf(
-            "D3D12 adapter candidate %u rejected: domain=%u code=%08x\n", index,
-            amdf_status_domain(imported), amdf_status_code(imported));
-      }
-    }
-    ASSERT_TRUE(matched) << "No DXGI resource was admitted on the selected GPU";
+    ASSERT_EQ(endpoint.native_identity.type,
+              AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_WINDOWS_ADAPTER);
+    const auto& identity = endpoint.native_identity.value.windows_adapter;
+    ASSERT_EQ(identity.physical_adapter_index, 0u);
+    const LUID luid = {
+        static_cast<DWORD>(identity.luid),
+        static_cast<LONG>(static_cast<uint32_t>(identity.luid >> 32)),
+    };
+    ASSERT_TRUE(
+        SUCCEEDED(factory_->EnumAdapterByLuid(luid, IID_PPV_ARGS(&adapter_))));
+    ASSERT_TRUE(SUCCEEDED(D3D12CreateDevice(
+        adapter_.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&d3d_))));
+    ASSERT_EQ(d3d_->GetNodeCount(), 1u);
+    ASSERT_NO_FATAL_FAILURE(CreateSharedBuffer());
   }
 
   amdf_external_memory_t Transport() const {
@@ -529,7 +506,7 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
   // Number of source transports consumed by successful imports.
   uint32_t release_count_ = 0;
   // Factory used to locate the matching foreign API adapter.
-  ComPtr<IDXGIFactory1> factory_;
+  ComPtr<IDXGIFactory4> factory_;
   // Foreign adapter independently admitted against the libamdf device.
   ComPtr<IDXGIAdapter1> adapter_;
   // Foreign device owning the resource and verification queues.

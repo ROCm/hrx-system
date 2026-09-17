@@ -469,6 +469,46 @@ typedef struct amdf_pci_info_t {
   uint32_t revision_id;
 } amdf_pci_info_t;
 
+/// Native namespace used to correlate an endpoint with another API provider.
+typedef uint32_t amdf_endpoint_native_identity_type_t;
+enum amdf_endpoint_native_identity_type_e {
+  /// No native correlation identity is available.
+  AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_NONE = 0,
+  /// Linux character-device major/minor numbers.
+  AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_LINUX_DEVICE = 1,
+  /// Windows adapter LUID and physical-adapter index.
+  AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_WINDOWS_ADAPTER = 2,
+};
+
+/// Passive identity for matching contemporaneous native API providers.
+///
+/// This value conveys neither a native handle nor ownership. It is not stable
+/// across device removal or reboot. Matching identifies the native device;
+/// foreign-driver, memory-transport and access compatibility still require
+/// their own qualification. The opaque endpoint id remains the value used to
+/// open libamdf endpoints.
+typedef struct amdf_endpoint_native_identity_t {
+  /// Native namespace selecting the active member of `value`.
+  amdf_endpoint_native_identity_type_t type;
+  /// Native identity in the namespace selected by `type`.
+  union {
+    /// Linux DRM render node for GPU endpoints, accelerator node for XDNA.
+    struct {
+      /// Character-device major number, as returned by `major(st_rdev)`.
+      uint32_t major;
+      /// Character-device minor number, as returned by `minor(st_rdev)`.
+      uint32_t minor;
+    } linux_device;
+    /// Windows logical adapter and the endpoint's physical adapter within it.
+    struct {
+      /// LUID bits: `(uint64_t)(uint32_t)HighPart << 32 | LowPart`.
+      uint64_t luid;
+      /// KMT physical-adapter index within the logical adapter.
+      uint32_t physical_adapter_index;
+    } windows_adapter;
+  } value;
+} amdf_endpoint_native_identity_t;
+
 /// Fixed-stride endpoint identity returned by `endpoint_enumerate`.
 ///
 /// This structure is immutable for ABI v1. It contains no pointers, extension
@@ -504,6 +544,8 @@ typedef struct amdf_endpoint_info_t {
   char name[AMDF_ENDPOINT_NAME_CAPACITY];
   /// Number of immutable endpoint-local native queue families.
   uint32_t queue_family_count;
+  /// Cached native identity for matching other API providers before activation.
+  amdf_endpoint_native_identity_t native_identity;
 } amdf_endpoint_info_t;
 
 #ifdef __cplusplus

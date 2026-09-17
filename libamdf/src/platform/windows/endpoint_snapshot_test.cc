@@ -23,6 +23,7 @@ constexpr NTSTATUS kSuccess = 0;
 constexpr NTSTATUS kFailure = static_cast<NTSTATUS>(0xC0000001u);
 constexpr NTSTATUS kCloseFailure = static_cast<NTSTATUS>(0xC000000Du);
 constexpr D3DKMT_HANDLE kAmdAdapter = 1;
+constexpr LONG kAmdAdapterLuidHigh = static_cast<LONG>(0x87654321u);
 constexpr D3DKMT_HANDLE kOtherAdapter = 2;
 
 amdf_endpoint_summary_t MakeSentinelSummary() {
@@ -84,7 +85,7 @@ struct FakeKmt {
   uint32_t amd_physical_adapter_count = 1;
   // PCI vendor used for endpoint classification.
   uint32_t amd_vendor_id = 0x1002u;
-  // Base PCI device identity, incremented per physical adapter.
+  // PCI device identity, shared by every AMD physical adapter in the fixture.
   uint32_t amd_device_id = 0x1000u;
   // PCI revision used for endpoint classification.
   uint32_t amd_revision_id = 1;
@@ -108,7 +109,8 @@ FakeKmt* current_fake = nullptr;
 NTSTATUS APIENTRY
 FakeOpenAdapterFromLuid(D3DKMT_OPENADAPTERFROMLUID* open_adapter) {
   ++current_fake->open_call_count;
-  if (open_adapter->AdapterLuid.LowPart != kAmdAdapter) {
+  if (open_adapter->AdapterLuid.LowPart != kAmdAdapter ||
+      open_adapter->AdapterLuid.HighPart != kAmdAdapterLuidHigh) {
     return kFailure;
   }
   if (current_fake->failure_point == FailurePoint::kOpen) {
@@ -141,6 +143,7 @@ NTSTATUS APIENTRY FakeEnumerateAdapters(D3DKMT_ENUMADAPTERS3* enumeration) {
   if (include_amd_adapter) {
     enumeration->pAdapters[0].hAdapter = kAmdAdapter;
     enumeration->pAdapters[0].AdapterLuid.LowPart = kAmdAdapter;
+    enumeration->pAdapters[0].AdapterLuid.HighPart = kAmdAdapterLuidHigh;
   }
   enumeration->pAdapters[adapter_count - 1].hAdapter = kOtherAdapter;
   enumeration->pAdapters[adapter_count - 1].AdapterLuid.LowPart = kOtherAdapter;
@@ -172,10 +175,9 @@ NTSTATUS APIENTRY FakeQueryAdapterInfo(const D3DKMT_QUERYADAPTERINFO* query) {
       ids->DeviceIds.VendorID = query->hAdapter == kAmdAdapter
                                     ? current_fake->amd_vendor_id
                                     : 0x8086u;
-      ids->DeviceIds.DeviceID =
-          query->hAdapter == kAmdAdapter
-              ? current_fake->amd_device_id + ids->PhysicalAdapterIndex
-              : 0x1000u + ids->PhysicalAdapterIndex;
+      ids->DeviceIds.DeviceID = query->hAdapter == kAmdAdapter
+                                    ? current_fake->amd_device_id
+                                    : 0x1000u + ids->PhysicalAdapterIndex;
       ids->DeviceIds.SubVendorID = ids->DeviceIds.VendorID;
       ids->DeviceIds.SubSystemID = 0x2000u;
       ids->DeviceIds.RevisionID =
@@ -411,6 +413,22 @@ TEST_F(EndpointSnapshotTest, EmitsDistinctPhysicalAdapterEndpoints) {
   ASSERT_EQ(endpoint_count, 2u);
   EXPECT_FALSE(amdf_endpoint_id_is_equal(&summaries[0].id, &summaries[1].id));
   EXPECT_EQ(fake_.close.call_count, 2u);
+  for (uint32_t i = 0; i < endpoint_count; ++i) {
+    amdf_platform_endpoint_t* endpoint = nullptr;
+    amdf_endpoint_info_t info = {};
+    ASSERT_EQ(amdf_platform_endpoint_open(platform_instance_, &summaries[i].id,
+                                          &endpoint, &info),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(info.pci.device_id, fake_.amd_device_id);
+    EXPECT_EQ(info.native_identity.type,
+              AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_WINDOWS_ADAPTER);
+    EXPECT_EQ(info.native_identity.value.windows_adapter.luid,
+              UINT64_C(0x8765432100000001));
+    EXPECT_EQ(info.native_identity.value.windows_adapter.physical_adapter_index,
+              i);
+    EXPECT_EQ(amdf_platform_endpoint_close(endpoint), AMDF_STATUS_OK);
+  }
+  EXPECT_EQ(fake_.close.call_count, 4u);
 }
 
 TEST_F(EndpointSnapshotTest, WritesAvailablePrefixAndReportsTotal) {

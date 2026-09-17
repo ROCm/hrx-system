@@ -95,6 +95,10 @@ TEST_P(LinuxEndpointMetadataTest, DiscoversWithoutAnExecutionNode) {
       AMDF_STATUS_OK);
   EXPECT_TRUE(amdf_endpoint_id_is_equal(&summary.id, &info.id));
   EXPECT_STREQ(summary.name, info.name);
+  EXPECT_EQ(info.native_identity.type,
+            AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_LINUX_DEVICE);
+  EXPECT_EQ(info.native_identity.value.linux_device.major, 511u);
+  EXPECT_EQ(info.native_identity.value.linux_device.minor, 63u);
   EXPECT_EQ(amdf_platform_endpoint_query_queue_publication_modes(
                 endpoint_, AMDF_QUEUE_COMMAND_TYPE_XDNA),
             GetParam() == AMDF_ENGINE_KIND_XDNA
