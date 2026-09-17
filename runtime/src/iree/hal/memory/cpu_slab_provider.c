@@ -6,10 +6,6 @@
 
 #include "iree/hal/memory/cpu_slab_provider.h"
 
-#if defined(IREE_PLATFORM_LINUX)
-#include <sys/mman.h>
-#endif  // IREE_PLATFORM_LINUX
-
 typedef struct iree_hal_cpu_slab_provider_t {
   // Base provider header for vtable dispatch and ref counting.
   iree_hal_slab_provider_t base;
@@ -107,52 +103,12 @@ static void iree_hal_cpu_slab_provider_advise_asan_range(
   IREE_ASSERT(false, "CPU slab provider cannot advise ASAN ranges");
 }
 
-// Forces the OS to back all virtual pages in the slab with physical memory
-// and zero them. Without this, each page faults on first write: 65,536
-// faults for a 256MB slab, scattered across whichever thread touches the
-// memory first. Running this on the slab cache's background thread (which is
-// NUMA-pinned) ensures pages are allocated on the correct NUMA node via
-// first-touch policy.
-static void iree_hal_cpu_slab_provider_prefault(
-    iree_hal_slab_provider_t* base_provider, iree_hal_slab_t* slab) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)slab->length);
-
-  bool populated = false;
-
-#if defined(IREE_PLATFORM_LINUX)
-#ifdef MADV_HUGEPAGE
-  // Hint to the kernel that this region is a good candidate for transparent
-  // huge pages. Best-effort; errors are ignored.
-  if (slab->length >= 2 * 1024 * 1024) {
-    madvise(slab->base_ptr, (size_t)slab->length, MADV_HUGEPAGE);
-  }
-#endif  // MADV_HUGEPAGE
-
-#ifdef MADV_POPULATE_WRITE
-  // MADV_POPULATE_WRITE (kernel 5.14+) faults and zeroes all pages in a
-  // single syscall. Much faster than touching each page from userspace.
-  populated =
-      madvise(slab->base_ptr, (size_t)slab->length, MADV_POPULATE_WRITE) == 0;
-#endif  // MADV_POPULATE_WRITE
-#endif  // IREE_PLATFORM_LINUX
-
-  if (!populated) {
-    // Fallback: touch every page to force allocation and zero-fill.
-    // Sequential access pattern for TLB and prefetcher friendliness.
-    memset(slab->base_ptr, 0, (size_t)slab->length);
-  }
-
-  IREE_TRACE_ZONE_END(z0);
-}
-
-// The CPU provider has no cache or freelist; nothing to trim.
+// The CPU provider releases all resources with their slabs.
 static void iree_hal_cpu_slab_provider_trim(
-    iree_hal_slab_provider_t* base_provider,
-    iree_hal_slab_provider_trim_flags_t flags) {}
+    iree_hal_slab_provider_t* base_provider) {}
 
 // The CPU provider tracks no statistics beyond what the allocator itself
-// provides. Leaf provider; no inner provider to recurse into.
+// provides.
 static void iree_hal_cpu_slab_provider_query_stats(
     const iree_hal_slab_provider_t* base_provider,
     iree_hal_slab_provider_visited_set_t* visited,
@@ -182,7 +138,6 @@ static const iree_hal_slab_provider_vtable_t iree_hal_cpu_slab_provider_vtable =
         .validate_asan_options =
             iree_hal_cpu_slab_provider_validate_asan_options,
         .advise_asan_range = iree_hal_cpu_slab_provider_advise_asan_range,
-        .prefault = iree_hal_cpu_slab_provider_prefault,
         .trim = iree_hal_cpu_slab_provider_trim,
         .query_stats = iree_hal_cpu_slab_provider_query_stats,
         .query_properties = iree_hal_cpu_slab_provider_query_properties,

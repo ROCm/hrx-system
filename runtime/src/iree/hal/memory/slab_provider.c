@@ -132,14 +132,8 @@ void iree_hal_slab_provider_advise_asan_range(
                                       advice_flags, layout);
 }
 
-void iree_hal_slab_provider_prefault(iree_hal_slab_provider_t* provider,
-                                     iree_hal_slab_t* slab) {
-  provider->vtable->prefault(provider, slab);
-}
-
-void iree_hal_slab_provider_trim(iree_hal_slab_provider_t* provider,
-                                 iree_hal_slab_provider_trim_flags_t flags) {
-  provider->vtable->trim(provider, flags);
+void iree_hal_slab_provider_trim(iree_hal_slab_provider_t* provider) {
+  provider->vtable->trim(provider);
 }
 
 void iree_hal_slab_provider_query_stats(

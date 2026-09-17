@@ -992,8 +992,7 @@ static void iree_hal_fixed_block_pool_query_stats(
 static iree_status_t iree_hal_fixed_block_pool_trim(
     iree_hal_pool_t* base_pool) {
   iree_hal_fixed_block_pool_t* pool = (iree_hal_fixed_block_pool_t*)base_pool;
-  iree_hal_slab_provider_trim(pool->slab_provider,
-                              IREE_HAL_SLAB_PROVIDER_TRIM_FLAG_EXCESS);
+  iree_hal_slab_provider_trim(pool->slab_provider);
   return iree_ok_status();
 }
 

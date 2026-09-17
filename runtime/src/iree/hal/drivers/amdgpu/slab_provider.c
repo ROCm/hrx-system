@@ -861,17 +861,9 @@ static void iree_hal_amdgpu_slab_provider_advise_asan_range(
   }
 }
 
-static void iree_hal_amdgpu_slab_provider_prefault(
-    iree_hal_slab_provider_t* base_provider, iree_hal_slab_t* slab) {
-  (void)base_provider;
-  (void)slab;
-}
-
 static void iree_hal_amdgpu_slab_provider_trim(
-    iree_hal_slab_provider_t* base_provider,
-    iree_hal_slab_provider_trim_flags_t flags) {
+    iree_hal_slab_provider_t* base_provider) {
   (void)base_provider;
-  (void)flags;
 }
 
 static void iree_hal_amdgpu_slab_provider_query_stats(
@@ -906,7 +898,6 @@ static const iree_hal_slab_provider_vtable_t
         .validate_asan_options =
             iree_hal_amdgpu_slab_provider_validate_asan_options,
         .advise_asan_range = iree_hal_amdgpu_slab_provider_advise_asan_range,
-        .prefault = iree_hal_amdgpu_slab_provider_prefault,
         .trim = iree_hal_amdgpu_slab_provider_trim,
         .query_stats = iree_hal_amdgpu_slab_provider_query_stats,
         .query_properties = iree_hal_amdgpu_slab_provider_query_properties,

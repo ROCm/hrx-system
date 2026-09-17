@@ -337,16 +337,8 @@ static void hrx_vmm_slab_provider_advise_asan_range(
   IREE_ASSERT(false, "VMM slab provider cannot advise ASAN ranges");
 }
 
-static void hrx_vmm_slab_provider_prefault(
-    iree_hal_slab_provider_t* base_provider, iree_hal_slab_t* slab) {
-  (void)base_provider;
-  (void)slab;
-}
-
 static void hrx_vmm_slab_provider_trim(
-    iree_hal_slab_provider_t* base_provider,
-    iree_hal_slab_provider_trim_flags_t flags) {
-  (void)flags;
+    iree_hal_slab_provider_t* base_provider) {
   hrx_vmm_slab_provider_t* provider = hrx_vmm_slab_provider_cast(base_provider);
   iree_status_t status = hrx_vmm_slab_provider_retry_failed_releases(provider);
   if (!iree_status_is_ok(status)) {
@@ -447,7 +439,6 @@ static const iree_hal_slab_provider_vtable_t hrx_vmm_slab_provider_vtable = {
     .wrap_buffer = hrx_vmm_slab_provider_wrap_buffer,
     .validate_asan_options = hrx_vmm_slab_provider_validate_asan_options,
     .advise_asan_range = hrx_vmm_slab_provider_advise_asan_range,
-    .prefault = hrx_vmm_slab_provider_prefault,
     .trim = hrx_vmm_slab_provider_trim,
     .query_stats = hrx_vmm_slab_provider_query_stats,
     .query_properties = hrx_vmm_slab_provider_query_properties,

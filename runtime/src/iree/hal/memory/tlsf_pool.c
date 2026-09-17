@@ -1517,8 +1517,7 @@ IREE_API_EXPORT iree_status_t iree_hal_tlsf_pool_trim_to(
   iree_hal_tlsf_pool_trim_unused_slabs_locked(pool, min_bytes_to_keep);
   iree_hal_tlsf_pool_free_release_nodes(pool);
   iree_slim_mutex_unlock(&pool->mutex);
-  iree_hal_slab_provider_trim(pool->slab_provider,
-                              IREE_HAL_SLAB_PROVIDER_TRIM_FLAG_EXCESS);
+  iree_hal_slab_provider_trim(pool->slab_provider);
   return iree_ok_status();
 }
 

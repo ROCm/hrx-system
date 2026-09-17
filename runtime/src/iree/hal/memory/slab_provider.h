@@ -24,16 +24,6 @@ typedef struct iree_hal_slab_provider_vtable_t iree_hal_slab_provider_vtable_t;
 // Types
 //===----------------------------------------------------------------------===//
 
-// Flags controlling trim behavior.
-typedef uint32_t iree_hal_slab_provider_trim_flags_t;
-enum iree_hal_slab_provider_trim_flag_bits_e {
-  IREE_HAL_SLAB_PROVIDER_TRIM_FLAG_NONE = 0u,
-  // Release all cached/unused resources regardless of retention policy.
-  IREE_HAL_SLAB_PROVIDER_TRIM_FLAG_ALL = 1u << 0,
-  // Release only resources above the target retention level.
-  IREE_HAL_SLAB_PROVIDER_TRIM_FLAG_EXCESS = 1u << 1,
-};
-
 // Immutable properties of slabs acquired from a provider.
 typedef struct iree_hal_slab_provider_properties_t {
   // Memory type properties shared by every slab from the provider.
@@ -51,38 +41,20 @@ typedef struct iree_hal_slab_provider_properties_t {
   iree_hal_atomic_operation_capabilities_t atomic_operations;
 } iree_hal_slab_provider_properties_t;
 
-// Running statistics for a slab provider (and any inner providers in its
-// chain). Stats accumulate from the innermost provider outward, with each
-// layer adding its own contributions.
+// Running statistics for a slab provider.
 typedef struct iree_hal_slab_provider_stats_t {
   // Cumulative slabs acquired from the platform/driver.
   uint64_t total_acquired;
   // Cumulative slabs released to the platform/driver.
   uint64_t total_released;
-
-  // Cache-layer statistics. Zero for non-caching providers.
-  struct {
-    // Number of slabs currently in the cache freelist.
-    uint32_t count;
-    // Acquires satisfied from the freelist (fast path).
-    uint64_t hit_count;
-    // Acquires that required waiting or fell through to the inner provider.
-    uint64_t miss_count;
-    // Current EMA of reuse interval in nanoseconds. Tracks how quickly
-    // cached slabs are recycled. Short intervals indicate bursty reuse.
-    uint64_t ema_reuse_interval_nanoseconds;
-    // Cumulative time spent in prefault callbacks (nanoseconds).
-    uint64_t prefault_time_nanoseconds;
-  } cache;
 } iree_hal_slab_provider_stats_t;
 
-// Maximum number of providers tracked in a visited set. If a provider chain
-// is deeper than this, stats queries bail at the top level.
+// Maximum number of providers counted by one statistics query. Additional
+// providers are skipped when the visited set is full.
 #define IREE_HAL_SLAB_PROVIDER_MAX_VISITED 32
 
-// Set of already-visited providers for deduplicating stats queries across
-// shared provider chains. Multiple pools may share the same provider (or
-// provider chain); the visited set prevents double-counting.
+// Set of already-visited providers for deduplicating statistics queries when
+// multiple pools share the same provider.
 //
 // Stack-allocate before a stats query:
 //   iree_hal_slab_provider_visited_set_t visited = {0};
@@ -90,7 +62,7 @@ typedef struct iree_hal_slab_provider_visited_set_t {
   // Number of providers already recorded in |providers|.
   iree_host_size_t count;
 
-  // Providers visited during the current recursive stats query.
+  // Providers visited during the current statistics query.
   const iree_hal_slab_provider_t* providers[IREE_HAL_SLAB_PROVIDER_MAX_VISITED];
 } iree_hal_slab_provider_visited_set_t;
 
@@ -206,17 +178,11 @@ void iree_hal_slab_provider_advise_asan_range(
     iree_hal_asan_range_advice_flags_t advice_flags,
     const iree_hal_asan_allocation_layout_t* layout);
 
-// Prepares a slab for use (page faulting, NUMA pinning, etc.).
-void iree_hal_slab_provider_prefault(iree_hal_slab_provider_t* provider,
-                                     iree_hal_slab_t* slab);
+// Releases unused provider resources.
+void iree_hal_slab_provider_trim(iree_hal_slab_provider_t* provider);
 
-// Releases unused cached resources. Passes |flags| through to the provider
-// and any inner providers in the chain.
-void iree_hal_slab_provider_trim(iree_hal_slab_provider_t* provider,
-                                 iree_hal_slab_provider_trim_flags_t flags);
-
-// Accumulates statistics from the provider (and any inner providers).
-// |visited| prevents double-counting across shared provider chains.
+// Accumulates statistics from the provider. |visited| prevents double-counting
+// when multiple pools share the provider.
 void iree_hal_slab_provider_query_stats(
     const iree_hal_slab_provider_t* provider,
     iree_hal_slab_provider_visited_set_t* visited,
@@ -287,29 +253,12 @@ struct iree_hal_slab_provider_vtable_t {
                             iree_hal_asan_range_advice_flags_t advice_flags,
                             const iree_hal_asan_allocation_layout_t* layout);
 
-  // Prepares a slab for use after acquisition. Called by the slab cache's
-  // background thread after acquire_slab() succeeds and before the slab is
-  // placed on the ready freelist.
-  //
-  // Provider-specific preparation:
-  //   CPU (Linux): madvise(MADV_POPULATE_WRITE) to force page allocation
-  //     and zeroing, eliminating lazy zero-fill page faults on first write.
-  //   CPU (Windows): PrefetchVirtualMemory or page-strided writes.
-  //   CPU (any): NUMA pinning via mbind + first-touch policy.
-  // Providers where acquire_slab already commits all pages implement this
-  // as an empty function.
-  void (*prefault)(iree_hal_slab_provider_t* provider, iree_hal_slab_t* slab);
+  // Releases unused provider resources.
+  void (*trim)(iree_hal_slab_provider_t* provider);
 
-  // Releases unused cached resources. Caching providers release freelisted
-  // slabs back to their inner provider. Non-caching providers do nothing.
-  // |flags| controls which resources are released (ALL vs EXCESS).
-  void (*trim)(iree_hal_slab_provider_t* provider,
-               iree_hal_slab_provider_trim_flags_t flags);
-
-  // Accumulates this provider's statistics into |out_stats|. Wrapping
-  // providers call into their inner provider first, then add their own
-  // contributions. |visited| prevents double-counting when multiple pools
-  // share a provider chain; providers already in the set return immediately.
+  // Accumulates this provider's statistics into |out_stats|. |visited| prevents
+  // double-counting when multiple pools share the provider; providers already
+  // in the set return immediately.
   void (*query_stats)(const iree_hal_slab_provider_t* provider,
                       iree_hal_slab_provider_visited_set_t* visited,
                       iree_hal_slab_provider_stats_t* out_stats);
