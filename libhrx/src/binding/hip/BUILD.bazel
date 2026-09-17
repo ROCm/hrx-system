@@ -565,9 +565,13 @@ hrx_cc_test(
 
 hrx_cc_test(
     name = "hip_launch_validation_api_test",
-    srcs = ["hip_launch_validation_api_test.cc"],
-    # The test loads the built runtime through its public ABI and supplies a
-    # tagged function handle that reaches argument validation before dispatch.
+    srcs = [
+        "hip_launch_validation_api_test.cc",
+        "//libhrx/cts:core/amdgpu_executable_test_data.hpp",
+        "//libhrx/cts:core/amdgpu_test_data.hpp",
+    ],
+    # The test loads the built runtime through its public ABI and resolves
+    # production function handles from an embedded executable image.
     data = [":amdhip64"],
     env = {
         "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
@@ -581,9 +585,10 @@ hrx_cc_test(
     deps = [
         ":hip_dso_test_util",
         ":launch_params",
+        "//build_tools/amdgpu:target_map_h",
         "//build_tools/bazel:dl",
         "//build_tools/bazel:pthreads",
-        "//libhrx/src/binding/common",
+        "//libhrx/cts:amdgpu_executable_test_kernels",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

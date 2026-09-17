@@ -15023,7 +15023,7 @@ HIPAPI hipError_t hipExtLaunchKernel(const void* function_address,
 //  - hipErrorInvalidValue: Invalid function handle or dimensions.
 //  - hipErrorInvalidConfiguration: Invalid launch configuration.
 //  - hipErrorInvalidContext: No active HIP context.
-//  - hipErrorInvalidResourceHandle: Invalid stream handle.
+//  - hipErrorContextIsDestroyed: Invalid stream handle.
 //  - hipErrorSharedObjectInitFailed: Shared memory allocation failed.
 //  - hipErrorLaunchOutOfResources: Insufficient resources for launch.
 //  - hipErrorLaunchTimeOut: Previous kernel execution timed out.
@@ -15103,6 +15103,12 @@ static hipError_t iree_hip_module_launch_kernel(
   iree_hal_streaming_stream_t* stream_obj = NULL;
   iree_hal_streaming_module_t* module = NULL;
   result = iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  if (result == hipErrorInvalidResourceHandle) {
+    // Module launch APIs classify an absent explicit stream as belonging to a
+    // destroyed context. The registry resolver retains the generic resource
+    // error used by other stream APIs, so translate it at this API boundary.
+    result = hipErrorContextIsDestroyed;
+  }
   if (result == hipSuccess) {
     context = resolved_stream.context;
     stream_obj = resolved_stream.stream;
@@ -15261,7 +15267,7 @@ HIPAPI hipError_t hipModuleLaunchKernel(
 //  - hipErrorInvalidValue: Invalid function handle or dimensions.
 //  - hipErrorInvalidConfiguration: Invalid launch configuration.
 //  - hipErrorInvalidContext: No active HIP context.
-//  - hipErrorInvalidResourceHandle: Invalid stream handle.
+//  - hipErrorContextIsDestroyed: Invalid stream handle.
 //  - hipErrorSharedObjectInitFailed: Shared memory allocation failed.
 //  - hipErrorLaunchOutOfResources: Insufficient resources for launch.
 //  - hipErrorLaunchTimeOut: Previous kernel execution timed out.

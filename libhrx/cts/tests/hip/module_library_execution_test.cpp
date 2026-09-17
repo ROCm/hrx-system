@@ -45,8 +45,8 @@ using HipHalDeinitFn = hipError_t (*)(void);
 using HipGetDeviceFn = hipError_t (*)(int* device);
 using HipSetDeviceFn = hipError_t (*)(int device);
 using HipGetDeviceCountFn = hipError_t (*)(int* device_count);
-using HipGetDevicePropertiesFn = hipError_t (*)(hipDeviceProp_t* properties,
-                                                int device);
+using HipGetDevicePropertiesR0600Fn =
+    hipError_t (*)(hipDeviceProp_t* properties, int device);
 using HipDeviceSynchronizeFn = hipError_t (*)(void);
 using HipGetLastErrorFn = hipError_t (*)(void);
 using HipPeekAtLastErrorFn = hipError_t (*)(void);
@@ -218,8 +218,8 @@ struct HipApi {
     HRX_RESOLVE_HIP_API(set_device, HipSetDeviceFn, "hipSetDevice");
     HRX_RESOLVE_HIP_API(get_device_count, HipGetDeviceCountFn,
                         "hipGetDeviceCount");
-    HRX_RESOLVE_HIP_API(get_device_properties, HipGetDevicePropertiesFn,
-                        "hipGetDeviceProperties");
+    HRX_RESOLVE_HIP_API(get_device_properties, HipGetDevicePropertiesR0600Fn,
+                        "hipGetDevicePropertiesR0600");
     HRX_RESOLVE_HIP_API(device_synchronize, HipDeviceSynchronizeFn,
                         "hipDeviceSynchronize");
     HRX_RESOLVE_HIP_API(get_last_error, HipGetLastErrorFn, "hipGetLastError");
@@ -354,7 +354,7 @@ struct HipApi {
   HipGetDeviceFn get_device = nullptr;
   HipSetDeviceFn set_device = nullptr;
   HipGetDeviceCountFn get_device_count = nullptr;
-  HipGetDevicePropertiesFn get_device_properties = nullptr;
+  HipGetDevicePropertiesR0600Fn get_device_properties = nullptr;
   HipDeviceSynchronizeFn device_synchronize = nullptr;
   HipGetLastErrorFn get_last_error = nullptr;
   HipPeekAtLastErrorFn peek_at_last_error = nullptr;

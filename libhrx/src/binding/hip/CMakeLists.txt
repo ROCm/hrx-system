@@ -645,6 +645,8 @@ iree_cc_test(
   NAME
     hip_launch_validation_api_test
   SRCS
+    "${LIBHRX_SOURCE_DIR}/cts/core/amdgpu_executable_test_data.hpp"
+    "${LIBHRX_SOURCE_DIR}/cts/core/amdgpu_test_data.hpp"
     "hip_launch_validation_api_test.cc"
   DATA
     ::amdhip64
@@ -654,7 +656,7 @@ iree_cc_test(
     ::launch_params
     iree::testing::gtest
     iree::testing::gtest_main
-    libhrx::src::binding::common
+    libhrx::cts::amdgpu_executable_test_kernels
     libhrx_defs
   ENV
     "HRX_TEST_LIBAMDHIP64=$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>"

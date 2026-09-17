@@ -6,17 +6,27 @@
 
 #include <atomic>
 #include <cstdint>
+#include <limits>
 #include <thread>
 
 #include "binding/hip/api.h"
 #include "binding/hip/hip_dso_test_util.h"
-#include "common/internal.h"
 #include "iree/testing/gtest.h"
+#include "libhrx/cts/core/amdgpu_executable_test_data.hpp"
 
 namespace {
 
 using HipInitFn = hipError_t (*)(unsigned int flags);
 using HipHalDeinitFn = hipError_t (*)(void);
+using HipGetDeviceFn = hipError_t (*)(int* device);
+using HipGetDevicePropertiesR0600Fn =
+    hipError_t (*)(hipDeviceProp_t* properties, int device);
+using HipModuleLoadDataFn = hipError_t (*)(hipModule_t* module,
+                                           const void* image);
+using HipModuleUnloadFn = hipError_t (*)(hipModule_t module);
+using HipModuleGetFunctionFn = hipError_t (*)(hipFunction_t* function,
+                                              hipModule_t module,
+                                              const char* name);
 using HipStreamCreateFn = hipError_t (*)(hipStream_t* stream);
 using HipStreamDestroyFn = hipError_t (*)(hipStream_t stream);
 using HipStreamGetIdFn = hipError_t (*)(hipStream_t stream,
@@ -65,6 +75,16 @@ struct HipRuntimeApi {
   HipInitFn init = nullptr;
   // Deinitializes the HIP runtime instance before unloading its DSO.
   HipHalDeinitFn hal_deinit = nullptr;
+  // Queries the device selected by the current thread.
+  HipGetDeviceFn get_device = nullptr;
+  // Queries the selected device architecture used to choose an HSACO image.
+  HipGetDevicePropertiesR0600Fn get_device_properties = nullptr;
+  // Loads an executable image into the current context.
+  HipModuleLoadDataFn module_load_data = nullptr;
+  // Unloads an executable image from the current context.
+  HipModuleUnloadFn module_unload = nullptr;
+  // Resolves a production function handle from a loaded module.
+  HipModuleGetFunctionFn module_get_function = nullptr;
   // Creates the stream used by immediate launch entry points.
   HipStreamCreateFn stream_create = nullptr;
   // Destroys the stream used by immediate launch entry points.
@@ -104,6 +124,14 @@ class HipLaunchValidationApiTest : public testing::Test {
       ASSERT_TRUE(dso_.Open()) << dso_.error();
       api_.init = dso_.Resolve<HipInitFn>("hipInit");
       api_.hal_deinit = dso_.Resolve<HipHalDeinitFn>("hipHALDeinit");
+      api_.get_device = dso_.Resolve<HipGetDeviceFn>("hipGetDevice");
+      api_.get_device_properties = dso_.Resolve<HipGetDevicePropertiesR0600Fn>(
+          "hipGetDevicePropertiesR0600");
+      api_.module_load_data =
+          dso_.Resolve<HipModuleLoadDataFn>("hipModuleLoadData");
+      api_.module_unload = dso_.Resolve<HipModuleUnloadFn>("hipModuleUnload");
+      api_.module_get_function =
+          dso_.Resolve<HipModuleGetFunctionFn>("hipModuleGetFunction");
       api_.stream_create = dso_.Resolve<HipStreamCreateFn>("hipStreamCreate");
       api_.stream_destroy =
           dso_.Resolve<HipStreamDestroyFn>("hipStreamDestroy");
@@ -137,6 +165,11 @@ class HipLaunchValidationApiTest : public testing::Test {
 
     ASSERT_NE(nullptr, api_.init);
     ASSERT_NE(nullptr, api_.hal_deinit);
+    ASSERT_NE(nullptr, api_.get_device);
+    ASSERT_NE(nullptr, api_.get_device_properties);
+    ASSERT_NE(nullptr, api_.module_load_data);
+    ASSERT_NE(nullptr, api_.module_unload);
+    ASSERT_NE(nullptr, api_.module_get_function);
     ASSERT_NE(nullptr, api_.stream_create);
     ASSERT_NE(nullptr, api_.stream_destroy);
     ASSERT_NE(nullptr, api_.stream_get_id);
@@ -155,6 +188,23 @@ class HipLaunchValidationApiTest : public testing::Test {
 
     const hipError_t init_result = api_.init(/*flags=*/0);
     ASSERT_EQ(hipSuccess, init_result);
+    if (!module_) {
+      int device = 0;
+      ASSERT_EQ(hipSuccess, api_.get_device(&device));
+      hipDeviceProp_t properties = {};
+      ASSERT_EQ(hipSuccess, api_.get_device_properties(&properties, device));
+      const hrx_cts::AmdgpuExecutableTestImage test_image =
+          hrx_cts::FindAmdgpuExecutableTestImage(properties.gcnArchName);
+      ASSERT_NE(nullptr, test_image.file)
+          << "no embedded executable HSACO for " << properties.gcnArchName;
+      ASSERT_EQ(hipSuccess,
+                api_.module_load_data(&module_, test_image.file->data));
+      ASSERT_EQ(hipSuccess, api_.module_get_function(&empty_function_, module_,
+                                                     "hrx_noop"));
+      ASSERT_EQ(hipSuccess,
+                api_.module_get_function(&prepacked_function_, module_,
+                                         "hrx_transform_nested_pointers"));
+    }
     ASSERT_EQ(hipSuccess, api_.stream_create(&stream_));
   }
 
@@ -172,6 +222,13 @@ class HipLaunchValidationApiTest : public testing::Test {
     if (!dso_.is_open()) {
       return;
     }
+    ASSERT_NE(nullptr, api_.module_unload);
+    if (module_) {
+      EXPECT_EQ(hipSuccess, api_.module_unload(module_));
+      module_ = nullptr;
+      empty_function_ = nullptr;
+      prepacked_function_ = nullptr;
+    }
     ASSERT_NE(nullptr, api_.hal_deinit);
     EXPECT_EQ(hipSuccess, api_.hal_deinit());
     api_ = {};
@@ -182,52 +239,55 @@ class HipLaunchValidationApiTest : public testing::Test {
   static HipRuntimeApi api_;
   // Exact DSO owner shared by every test in this fixture.
   static hrx::hip::testing::HipDso dso_;
+  // Module loaded through the public API and retained across test cases.
+  static hipModule_t module_;
+  // No-argument kernel used when argument packing is not under test.
+  static hipFunction_t empty_function_;
+  // Kernel with a nonempty native argument image used for span validation.
+  static hipFunction_t prepacked_function_;
   // Stream supplied to immediate launch entry points.
   hipStream_t stream_ = nullptr;
 };
 
 HipRuntimeApi HipLaunchValidationApiTest::api_;
 hrx::hip::testing::HipDso HipLaunchValidationApiTest::dso_;
+hipModule_t HipLaunchValidationApiTest::module_;
+hipFunction_t HipLaunchValidationApiTest::empty_function_;
+hipFunction_t HipLaunchValidationApiTest::prepacked_function_;
 
 TEST_F(HipLaunchValidationApiTest,
-       FunctionDynamicSharedMemoryAttributeHonorsGenericCeiling) {
-  iree_hal_streaming_symbol_t symbol = {};
-  symbol.type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
-  symbol.function_attributes.provided_flags =
-      IREE_HAL_STREAMING_FUNCTION_ATTRIBUTE_FLAG_DYNAMIC_SHARED_MEMORY;
-  symbol.function_attributes.maximum_configurable_dynamic_shared_memory_size =
-      4096;
-  iree_atomic_store(
-      &symbol.function_attributes.configured_dynamic_shared_memory_size, 2048,
-      iree_memory_order_relaxed);
-  hipFunction_t function =
-      reinterpret_cast<hipFunction_t>(iree_hal_streaming_symbol_tag(&symbol));
-
-  int value = 0;
-  EXPECT_EQ(hipSuccess,
+       FunctionDynamicSharedMemoryAttributeRejectsInvalidValues) {
+  int original_value = 0;
+  ASSERT_EQ(hipSuccess,
             api_.function_get_attribute(
-                &value, hipFuncAttributeMaxDynamicSharedSizeBytes, function));
-  EXPECT_EQ(2048, value);
+                &original_value, hipFuncAttributeMaxDynamicSharedSizeBytes,
+                empty_function_));
+  EXPECT_GE(original_value, 0);
+  EXPECT_EQ(
+      hipErrorInvalidValue,
+      api_.function_set_attribute(
+          empty_function_, hipFuncAttributeMaxDynamicSharedSizeBytes, -1));
   EXPECT_EQ(hipErrorInvalidValue,
             api_.function_set_attribute(
-                function, hipFuncAttributeMaxDynamicSharedSizeBytes, -1));
-  EXPECT_EQ(hipErrorInvalidValue,
-            api_.function_set_attribute(
-                function, hipFuncAttributeMaxDynamicSharedSizeBytes, 4097));
+                empty_function_, hipFuncAttributeMaxDynamicSharedSizeBytes,
+                std::numeric_limits<int>::max()));
   EXPECT_EQ(hipSuccess,
             api_.function_set_attribute(
-                function, hipFuncAttributeMaxDynamicSharedSizeBytes, 4096));
+                empty_function_, hipFuncAttributeMaxDynamicSharedSizeBytes, 0));
+  int value = -1;
+  EXPECT_EQ(hipSuccess, api_.function_get_attribute(
+                            &value, hipFuncAttributeMaxDynamicSharedSizeBytes,
+                            empty_function_));
+  EXPECT_EQ(0, value);
   EXPECT_EQ(hipSuccess,
-            api_.function_get_attribute(
-                &value, hipFuncAttributeMaxDynamicSharedSizeBytes, function));
-  EXPECT_EQ(4096, value);
+            api_.function_set_attribute(
+                empty_function_, hipFuncAttributeMaxDynamicSharedSizeBytes,
+                original_value));
 }
 
 TEST_F(HipLaunchValidationApiTest,
        LaunchEntryPointsRejectInvalidConfiguration) {
-  iree_hal_streaming_symbol_t symbol = {};
-  symbol.type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
-  const void* function = iree_hal_streaming_symbol_tag(&symbol);
+  const void* function = empty_function_;
   const dim3 invalid_grid = {0, 1, 1};
   const dim3 valid_dimension = {1, 1, 1};
 
@@ -284,13 +344,11 @@ TEST_F(HipLaunchValidationApiTest,
 }
 
 TEST_F(HipLaunchValidationApiTest, ZeroAccessPolicyWindowRemainsSupported) {
-  iree_hal_streaming_symbol_t symbol = {};
-  symbol.type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
   const dim3 one = {1, 1, 1};
   hipKernelNodeParams params = {
       /*.blockDim=*/one,
       /*.extra=*/nullptr,
-      /*.func=*/iree_hal_streaming_symbol_tag(&symbol),
+      /*.func=*/empty_function_,
       /*.gridDim=*/one,
       /*.kernelParams=*/nullptr,
       /*.sharedMemBytes=*/0,
@@ -325,9 +383,7 @@ TEST_F(HipLaunchValidationApiTest, ZeroAccessPolicyWindowRemainsSupported) {
 }
 
 TEST_F(HipLaunchValidationApiTest, LaunchEntryPointsRejectDestroyedStreams) {
-  iree_hal_streaming_symbol_t symbol = {};
-  symbol.type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
-  const void* function = iree_hal_streaming_symbol_tag(&symbol);
+  const void* function = empty_function_;
   const dim3 valid_dimension = {1, 1, 1};
   hipStream_t stale_stream = stream_;
   ASSERT_EQ(hipSuccess, api_.stream_destroy(stream_));
@@ -394,9 +450,7 @@ TEST_F(HipLaunchValidationApiTest,
     GTEST_SKIP() << "size_t cannot represent a value above uint32_t";
   }
 
-  iree_hal_streaming_symbol_t symbol = {};
-  symbol.type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
-  const void* function = iree_hal_streaming_symbol_tag(&symbol);
+  const void* function = empty_function_;
   const dim3 valid_dimension = {1, 1, 1};
   const size_t largest_dispatch_shared_memory = UINT32_MAX;
   const size_t oversized_shared_memory = (size_t)UINT32_MAX + 1;
@@ -463,15 +517,6 @@ TEST_F(HipLaunchValidationApiTest,
 
 TEST_F(HipLaunchValidationApiTest,
        PrepackedGraphArgumentsRejectShortSpansWithoutMutatingTheNode) {
-  iree_hal_streaming_symbol_t empty_symbol = {};
-  empty_symbol.type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
-  iree_hal_streaming_symbol_t prepacked_symbol = {};
-  prepacked_symbol.type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
-  prepacked_symbol.parameters.constant_bytes = 16;
-  prepacked_symbol.parameters.direct_arg_bytes = 16;
-  const void* empty_function = iree_hal_streaming_symbol_tag(&empty_symbol);
-  const void* prepacked_function =
-      iree_hal_streaming_symbol_tag(&prepacked_symbol);
   const dim3 valid_dimension = {1, 1, 1};
 
   uint8_t argument_storage[16] = {};
@@ -486,7 +531,7 @@ TEST_F(HipLaunchValidationApiTest,
   hipKernelNodeParams empty_params = {
       /*.blockDim=*/valid_dimension,
       /*.extra=*/nullptr,
-      /*.func=*/const_cast<void*>(empty_function),
+      /*.func=*/empty_function_,
       /*.gridDim=*/valid_dimension,
       /*.kernelParams=*/nullptr,
       /*.sharedMemBytes=*/0,
@@ -494,19 +539,19 @@ TEST_F(HipLaunchValidationApiTest,
   hipKernelNodeParams short_prepacked_params = {
       /*.blockDim=*/valid_dimension,
       /*.extra=*/extra,
-      /*.func=*/const_cast<void*>(prepacked_function),
+      /*.func=*/prepacked_function_,
       /*.gridDim=*/valid_dimension,
       /*.kernelParams=*/nullptr,
       /*.sharedMemBytes=*/0,
   };
 
-  EXPECT_EQ(
-      hipErrorInvalidValue,
-      api_.module_launch_kernel(
-          (hipFunction_t)prepacked_function, /*grid_dim_x=*/1,
-          /*grid_dim_y=*/1, /*grid_dim_z=*/1, /*block_dim_x=*/1,
-          /*block_dim_y=*/1, /*block_dim_z=*/1,
-          /*shared_memory_bytes=*/0, stream_, /*arguments=*/nullptr, extra));
+  EXPECT_EQ(hipErrorInvalidValue,
+            api_.module_launch_kernel(prepacked_function_, /*grid_dim_x=*/1,
+                                      /*grid_dim_y=*/1,
+                                      /*grid_dim_z=*/1, /*block_dim_x=*/1,
+                                      /*block_dim_y=*/1, /*block_dim_z=*/1,
+                                      /*shared_memory_bytes=*/0, stream_,
+                                      /*arguments=*/nullptr, extra));
 
   hipGraph_t graph = nullptr;
   ASSERT_EQ(hipSuccess, api_.graph_create(&graph, /*flags=*/0));
