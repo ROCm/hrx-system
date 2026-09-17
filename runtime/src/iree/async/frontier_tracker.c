@@ -17,10 +17,9 @@
 //
 // The axis table maps each registered axis to its current epoch, optional
 // bridge semaphore, and permanent failure status. It is an implementation
-// detail of the frontier tracker: the tracker owns the storage, populates it
-// during setup via iree_async_frontier_tracker_register_axis, and queries it
-// during advance/wait/fail/retire. Nothing outside this file should touch it
-// directly.
+// detail of the frontier tracker: the tracker owns the storage, publishes new
+// entries via iree_async_frontier_tracker_register_axis, and queries it during
+// advance/wait/fail/retire. Nothing outside this file should touch it directly.
 //
 // Lookup is an open-addressed hash table instead of an append-only vector:
 //
@@ -50,8 +49,9 @@
 // For remotely-owned axes, the semaphore is a proxy signaled by the transport
 // or protocol layer when it receives a frontier update from the remote owner.
 typedef struct iree_async_axis_table_entry_t {
-  // True if this slot contains a registered axis.
-  bool occupied;
+  // Set to 1 with release ordering after the entry is fully initialized.
+  // Readers acquire this flag before accessing the entry. Never cleared.
+  iree_atomic_int32_t occupied;
 
   // The full 64-bit axis identifier.
   iree_async_axis_t axis;
@@ -82,16 +82,17 @@ typedef struct iree_async_axis_table_entry_t {
 //   if (entry) { CAS(entry->current_epoch); }
 //
 // Thread safety:
-//   - Entries are added only during setup (single-threaded).
+//   - Entry insertion is serialized by the tracker's waiters_mutex.
+//   - Readers acquire each entry's occupied flag before accessing its payload.
 //   - current_epoch is updated atomically during steady-state.
 //   - The table itself (entries pointer, capacity, slot_count) is immutable
-//     after setup.
+//     after creation. Published entries are never removed or reused.
 typedef struct iree_async_axis_table_t {
   // Storage for all hash table slots. The table does not own this
   // pointer; the enclosing tracker holds the underlying FAM storage.
   iree_async_axis_table_entry_t* entries;
 
-  // Number of currently registered axis entries.
+  // Number of registered axis entries, protected by the tracker's mutex.
   uint32_t count;
 
   // Maximum number of axes that may be registered.
@@ -154,14 +155,16 @@ static inline iree_async_axis_table_entry_t* iree_async_axis_table_lookup(
   uint32_t slot = iree_async_axis_table_hash(axis) & table->slot_mask;
   for (uint32_t probe = 0; probe < table->slot_count; ++probe) {
     iree_async_axis_table_entry_t* entry = &table->entries[slot];
-    if (!entry->occupied) return NULL;
+    if (!iree_atomic_load(&entry->occupied, iree_memory_order_acquire)) {
+      return NULL;
+    }
     if (entry->axis == axis) return entry;
     slot = (slot + 1) & table->slot_mask;
   }
   return NULL;
 }
 
-// Registers |axis| in the table. Must be called during setup.
+// Registers |axis| in the table under the tracker's waiters_mutex.
 static iree_status_t iree_async_axis_table_register(
     iree_async_axis_table_t* table, iree_async_axis_t axis,
     iree_async_semaphore_t* semaphore) {
@@ -180,13 +183,13 @@ static iree_status_t iree_async_axis_table_register(
   uint32_t slot = iree_async_axis_table_hash(axis) & table->slot_mask;
   for (uint32_t probe = 0; probe < table->slot_count; ++probe) {
     iree_async_axis_table_entry_t* entry = &table->entries[slot];
-    if (!entry->occupied) {
-      entry->occupied = true;
+    if (!iree_atomic_load(&entry->occupied, iree_memory_order_relaxed)) {
       entry->axis = axis;
-      iree_atomic_store(&entry->current_epoch, 0, iree_memory_order_release);
+      iree_atomic_store(&entry->current_epoch, 0, iree_memory_order_relaxed);
       entry->semaphore = semaphore;
       entry->failure_status = iree_ok_status();
       ++table->count;
+      iree_atomic_store(&entry->occupied, 1, iree_memory_order_release);
       return iree_ok_status();
     }
     slot = (slot + 1) & table->slot_mask;
@@ -214,10 +217,11 @@ struct iree_async_frontier_tracker_t {
   // Local machine ordinal embedded into locally constructed axes.
   uint8_t machine_index;
 
-  // Axis-to-progress table populated during setup and queried during waits.
+  // Axis-to-progress table with fixed storage and independently published
+  // entries.
   iree_async_axis_table_t axis_table;
 
-  // Mutex protecting the intrusive waiter list and per-axis failure states.
+  // Mutex protecting axis registration, the waiter list and per-axis failures.
   iree_slim_mutex_t waiters_mutex;
 
   // Head of the intrusive list of pending frontier waiters, stored as an
@@ -395,9 +399,10 @@ static void iree_async_frontier_tracker_destroy(
 
   // Free failure statuses.
   for (uint32_t i = 0; i < tracker->axis_table.slot_count; ++i) {
-    if (tracker->axis_table.entries[i].occupied &&
-        !iree_status_is_ok(tracker->axis_table.entries[i].failure_status)) {
-      iree_status_free(tracker->axis_table.entries[i].failure_status);
+    iree_async_axis_table_entry_t* entry = &tracker->axis_table.entries[i];
+    if (iree_atomic_load(&entry->occupied, iree_memory_order_relaxed) &&
+        !iree_status_is_ok(entry->failure_status)) {
+      iree_status_free(entry->failure_status);
     }
   }
 
@@ -437,7 +442,11 @@ IREE_API_EXPORT iree_status_t iree_async_frontier_tracker_register_axis(
     iree_async_frontier_tracker_t* tracker, iree_async_axis_t axis,
     iree_async_semaphore_t* semaphore) {
   IREE_ASSERT_ARGUMENT(tracker);
-  return iree_async_axis_table_register(&tracker->axis_table, axis, semaphore);
+  iree_slim_mutex_lock(&tracker->waiters_mutex);
+  iree_status_t status =
+      iree_async_axis_table_register(&tracker->axis_table, axis, semaphore);
+  iree_slim_mutex_unlock(&tracker->waiters_mutex);
+  return status;
 }
 
 IREE_API_EXPORT bool iree_async_frontier_tracker_query_epoch(
@@ -749,12 +758,11 @@ static void iree_async_frontier_tracker_fail_axis_impl(
   // Store failure status (take ownership).
   entry->failure_status = status;
 
-  // Fail the associated semaphore (if any). This dispatches all pending
-  // semaphore timepoints with the failure status, bridging axis failure to
-  // the proactor's semaphore-based wait infrastructure. Without this, proxy
-  // semaphore timepoints would be orphaned when a remote axis fails.
+  // Preserve the borrowed bridge while dispatching outside the lock. A
+  // concurrent retirement or a failure callback may clear the bridge and
+  // release its owner's reference.
   if (semaphore != NULL) {
-    iree_async_semaphore_fail(semaphore, iree_status_clone(status));
+    iree_async_semaphore_retain(semaphore);
   }
 
   // Collect all waiters that reference this axis into a local dispatch list.
@@ -794,6 +802,13 @@ static void iree_async_frontier_tracker_fail_axis_impl(
   }
 
   iree_slim_mutex_unlock(&tracker->waiters_mutex);
+
+  // Semaphore failure invokes timepoint callbacks synchronously. Like frontier
+  // callbacks, these may reenter the tracker, including to register a new axis.
+  if (semaphore != NULL) {
+    iree_async_semaphore_fail(semaphore, iree_status_clone(status));
+    iree_async_semaphore_release(semaphore);
+  }
 
   // Dispatch all collected waiters outside the lock.
   waiter = dispatch_head;

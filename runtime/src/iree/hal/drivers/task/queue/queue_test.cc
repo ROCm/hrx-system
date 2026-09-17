@@ -6,6 +6,12 @@
 
 #include "iree/hal/drivers/task/queue/queue.h"
 
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <thread>
+#include <vector>
+
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/hal/device_group.h"
@@ -15,8 +21,7 @@
 
 namespace {
 
-class TaskQueueShutdownTest
-    : public ::testing::TestWithParam<iree_host_size_t> {
+class TaskQueueTest : public ::testing::TestWithParam<iree_host_size_t> {
  protected:
   void SetUp() override {
     iree_task_topology_t topology;
@@ -80,7 +85,7 @@ class TaskQueueShutdownTest
   iree_async_proactor_pool_t* proactor_pool_ = nullptr;
 };
 
-TEST_P(TaskQueueShutdownTest, ReleasesDeviceGroupWithAcceptedExecuteInFlight) {
+TEST_P(TaskQueueTest, ReleasesDeviceGroupWithAcceptedExecuteInFlight) {
   // Repeated immediate destruction drives shutdown across the control-to-
   // compute ownership handoff without externally waiting for completion.
   // Device group release must either finish or cancel every accepted
@@ -126,7 +131,7 @@ TEST_P(TaskQueueShutdownTest, ReleasesDeviceGroupWithAcceptedExecuteInFlight) {
   }
 }
 
-TEST_P(TaskQueueShutdownTest, ReusedDynamicQueueSlotAdvancesIncarnation) {
+TEST_P(TaskQueueTest, ReusedDynamicQueueSlotAdvancesIncarnation) {
   iree_hal_device_group_t* device_group = nullptr;
   IREE_ASSERT_OK(CreateDeviceGroup(&device_group));
   iree_hal_device_t* device = iree_hal_device_group_device_at(device_group, 0);
@@ -163,7 +168,95 @@ TEST_P(TaskQueueShutdownTest, ReusedDynamicQueueSlotAdvancesIncarnation) {
   iree_hal_device_group_release(device_group);
 }
 
-INSTANTIATE_TEST_SUITE_P(WorkerCounts, TaskQueueShutdownTest,
-                         ::testing::Values(1, 4));
+TEST_P(TaskQueueTest, ConcurrentQueueAcquisitionWithQueueProgress) {
+  constexpr int kThreadCount = 4;
+  constexpr int kQueuesPerThread = 16;
+  iree_hal_device_group_t* device_group = nullptr;
+  IREE_ASSERT_OK(CreateDeviceGroup(&device_group));
+  iree_hal_device_t* device = iree_hal_device_group_device_at(device_group, 0);
+  iree_hal_queue_t* provisioned_queue =
+      iree_hal_device_queue(device, /*family_ordinal=*/0, /*queue_ordinal=*/0);
+  const iree_hal_queue_family_t* queue_family =
+      iree_hal_queue_family(provisioned_queue);
+  iree_async_frontier_tracker_t* frontier_tracker =
+      ((iree_hal_task_queue_t*)provisioned_queue)->frontier_tracker;
+
+  std::atomic<bool> start{false};
+  std::atomic<int> remaining{kThreadCount};
+  std::array<iree_async_axis_t, kThreadCount * kQueuesPerThread> axes = {};
+  std::vector<std::thread> threads;
+  for (int thread_index = 0; thread_index < kThreadCount; ++thread_index) {
+    threads.emplace_back([&, thread_index]() {
+      iree_hal_semaphore_t* completion = nullptr;
+      iree_status_t status = iree_hal_semaphore_create(
+          device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
+          IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &completion);
+      iree_hal_queue_params_t params;
+      iree_hal_queue_params_initialize(&params);
+      while (!start.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+      for (int i = 0; i < kQueuesPerThread && iree_status_is_ok(status); ++i) {
+        iree_hal_queue_t* queue = nullptr;
+        status = iree_hal_queue_acquire(queue_family, &params, &queue);
+        uint64_t completion_value = i + 1;
+        const iree_hal_semaphore_list_t signal_list = {1, &completion,
+                                                       &completion_value};
+        if (iree_status_is_ok(status)) {
+          axes[thread_index * kQueuesPerThread + i] =
+              ((iree_hal_task_queue_t*)queue)->axis;
+          status = iree_hal_queue_barrier(
+              queue, iree_hal_semaphore_list_empty(), signal_list,
+              IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
+        }
+        if (iree_status_is_ok(status)) {
+          status = iree_hal_semaphore_list_wait(
+              signal_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
+        }
+        iree_hal_queue_release(queue);
+      }
+      iree_hal_semaphore_release(completion);
+      IREE_EXPECT_OK(status);
+      remaining.fetch_sub(1, std::memory_order_release);
+    });
+  }
+
+  // Keep an existing queue completing work while other threads acquire, use
+  // and release queues in this same sealed device group.
+  iree_hal_semaphore_t* completion = nullptr;
+  iree_status_t status = iree_hal_semaphore_create(
+      device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &completion);
+  start.store(true, std::memory_order_release);
+  uint64_t completion_value = 0;
+  do {
+    const iree_hal_semaphore_list_t signal_list = {1, &completion,
+                                                   &completion_value};
+    ++completion_value;
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_queue_barrier(
+          provisioned_queue, iree_hal_semaphore_list_empty(), signal_list,
+          IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_semaphore_list_wait(
+          signal_list, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
+    }
+  } while (iree_status_is_ok(status) &&
+           remaining.load(std::memory_order_acquire) != 0);
+
+  for (auto& thread : threads) thread.join();
+  IREE_EXPECT_OK(status);
+  for (iree_async_axis_t axis : axes) {
+    EXPECT_TRUE(
+        iree_async_frontier_tracker_query_epoch(frontier_tracker, axis, 1));
+  }
+  std::sort(axes.begin(), axes.end());
+  EXPECT_EQ(std::adjacent_find(axes.begin(), axes.end()), axes.end());
+  iree_hal_semaphore_release(completion);
+  iree_hal_device_group_release(device_group);
+}
+
+INSTANTIATE_TEST_SUITE_P(WorkerCounts, TaskQueueTest, ::testing::Values(1, 4));
 
 }  // namespace

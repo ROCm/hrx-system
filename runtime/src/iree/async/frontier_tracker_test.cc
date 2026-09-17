@@ -6,12 +6,15 @@
 
 #include "iree/async/frontier_tracker.h"
 
+#include <array>
 #include <atomic>
 #include <cstring>
 #include <memory>
 #include <thread>
 #include <vector>
 
+#include "iree/async/proactor_platform.h"
+#include "iree/async/semaphore.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -623,9 +626,142 @@ TEST(SemaphoreBridgingTest, AdvanceWithoutSemaphore) {
   // No crash; that's the test.
 }
 
+TEST(SemaphoreBridgingTest, FailureCallbackRegistersAxisAndRetiresBridge) {
+  iree_async_proactor_t* proactor = nullptr;
+  IREE_ASSERT_OK(
+      iree_async_proactor_create_platform(iree_async_proactor_options_default(),
+                                          iree_allocator_system(), &proactor));
+  std::unique_ptr<iree_async_proactor_t, decltype(&iree_async_proactor_release)>
+      proactor_owner(proactor, iree_async_proactor_release);
+  iree_async_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(iree_async_semaphore_create(
+      proactor, /*initial_value=*/0,
+      IREE_ASYNC_SEMAPHORE_DEFAULT_FRONTIER_CAPACITY, iree_allocator_system(),
+      &semaphore));
+  std::unique_ptr<iree_async_semaphore_t,
+                  decltype(&iree_async_semaphore_release)>
+      semaphore_owner(semaphore, iree_async_semaphore_release);
+
+  TrackerFixture fixture(2);
+  fixture.AddAxis(Axis(0), semaphore);
+  struct CallbackData {
+    // Tracker whose failure dispatch invokes this callback.
+    iree_async_frontier_tracker_t* tracker;
+    // Caller-owned bridge reference released after retiring the axis.
+    decltype(semaphore_owner)* semaphore;
+    // Number of synchronous failure notifications received.
+    int call_count;
+  } callback_data = {fixture.tracker(), &semaphore_owner, 0};
+  iree_async_semaphore_timepoint_t timepoint = {};
+  timepoint.user_data = &callback_data;
+  timepoint.callback = [](void* user_data,
+                          iree_async_semaphore_timepoint_t* timepoint,
+                          iree_status_t status) {
+    auto* data = static_cast<CallbackData*>(user_data);
+    ++data->call_count;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED, status);
+    IREE_EXPECT_OK(iree_async_frontier_tracker_register_axis(data->tracker,
+                                                             Axis(1), nullptr));
+    iree_async_frontier_tracker_retire_axis(
+        data->tracker, Axis(0), iree_status_from_code(IREE_STATUS_CANCELLED));
+    data->semaphore->reset();
+  };
+  IREE_ASSERT_OK(iree_async_semaphore_acquire_timepoint(
+      semaphore, /*minimum_value=*/1, &timepoint));
+
+  iree_async_frontier_tracker_fail_axis(
+      fixture.tracker(), Axis(0), iree_status_from_code(IREE_STATUS_ABORTED));
+  EXPECT_EQ(callback_data.call_count, 1);
+  EXPECT_EQ(semaphore_owner.get(), nullptr);
+  iree_async_frontier_tracker_advance(fixture.tracker(), Axis(1), 1);
+  EXPECT_TRUE(
+      iree_async_frontier_tracker_query_epoch(fixture.tracker(), Axis(1), 1));
+}
+
 //===----------------------------------------------------------------------===//
 // Section 8: Concurrency
 //===----------------------------------------------------------------------===//
+
+TEST(ConcurrencyTest, RegisterWhileAdvancingAndQuerying) {
+  constexpr int kThreadCount = 4;
+  constexpr int kAxesPerThread = 32;
+  constexpr int kRegistrationCount = kThreadCount * kAxesPerThread;
+  TrackerFixture fixture(kRegistrationCount + 1);
+  const iree_async_axis_t running_axis = Axis(kRegistrationCount);
+  fixture.AddAxis(running_axis);
+
+  std::atomic<bool> start{false};
+  std::atomic<int> remaining{kThreadCount};
+  std::vector<std::thread> threads;
+  for (int thread_index = 0; thread_index < kThreadCount; ++thread_index) {
+    threads.emplace_back([&, thread_index]() {
+      while (!start.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+      for (int i = 0; i < kAxesPerThread; ++i) {
+        const iree_async_axis_t axis = Axis(thread_index * kAxesPerThread + i);
+        IREE_EXPECT_OK(fixture.RegisterAxis(axis));
+        iree_async_frontier_tracker_advance(fixture.tracker(), axis, 1);
+      }
+      remaining.fetch_sub(1, std::memory_order_release);
+    });
+  }
+
+  start.store(true, std::memory_order_release);
+  uint64_t epoch = 0;
+  do {
+    iree_async_frontier_tracker_advance(fixture.tracker(), running_axis,
+                                        ++epoch);
+    EXPECT_TRUE(iree_async_frontier_tracker_query_epoch(fixture.tracker(),
+                                                        running_axis, epoch));
+    for (int i = 0; i < kRegistrationCount; ++i) {
+      // Unknown axes may become visible during this scan. Exercise publication
+      // without an external synchronization edge from the registering thread.
+      iree_async_frontier_tracker_query_epoch(fixture.tracker(), Axis(i), 1);
+    }
+  } while (remaining.load(std::memory_order_acquire) != 0);
+
+  for (auto& thread : threads) thread.join();
+  for (int i = 0; i < kRegistrationCount; ++i) {
+    EXPECT_TRUE(
+        iree_async_frontier_tracker_query_epoch(fixture.tracker(), Axis(i), 1));
+  }
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        fixture.RegisterAxis(Axis(kRegistrationCount + 1)));
+}
+
+TEST(ConcurrencyTest, ConcurrentDuplicateRegistration) {
+  constexpr int kThreadCount = 8;
+  TrackerFixture fixture(2);
+  std::atomic<bool> start{false};
+  std::array<iree_status_code_t, kThreadCount> results;
+  std::vector<std::thread> threads;
+  for (int thread_index = 0; thread_index < kThreadCount; ++thread_index) {
+    threads.emplace_back([&, thread_index]() {
+      while (!start.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+      iree_status_t status = fixture.RegisterAxis(Axis(0));
+      results[thread_index] = iree_status_code(status);
+      iree_status_free(status);
+    });
+  }
+  start.store(true, std::memory_order_release);
+  for (auto& thread : threads) thread.join();
+
+  int successful_registrations = 0;
+  for (iree_status_code_t result : results) {
+    if (result == IREE_STATUS_OK) {
+      ++successful_registrations;
+    } else {
+      EXPECT_EQ(result, IREE_STATUS_ALREADY_EXISTS);
+    }
+  }
+  EXPECT_EQ(successful_registrations, 1);
+  IREE_EXPECT_OK(fixture.RegisterAxis(Axis(1)));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        fixture.RegisterAxis(Axis(2)));
+}
 
 TEST(ConcurrencyTest, ConcurrentAdvanceDifferentAxes) {
   TrackerFixture fixture(16);

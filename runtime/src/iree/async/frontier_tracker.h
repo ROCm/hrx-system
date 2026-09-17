@@ -86,6 +86,10 @@ typedef struct iree_async_frontier_waiter_t {
 //
 // ## Thread safety
 //
+//   register_axis(): Thread-safe. Registration may run concurrently with other
+//                    registrations and operations on previously registered
+//                    axes.
+//
 //   advance():     Thread-safe. Multiple threads can advance different axes
 //                  concurrently. Same axis from multiple threads is safe
 //                  (monotonic: max wins, lower values are no-ops).
@@ -106,18 +110,20 @@ typedef struct iree_async_frontier_waiter_t {
 //
 // Per-causal-domain object. Created when a distributed/local execution context
 // establishes its axis namespace and destroyed after all participants using
-// that namespace have retired. The axis table is populated during setup and is
-// immutable during steady-state operation except for cold-path axis retirement.
+// that namespace have retired. Axis storage has fixed capacity. New axes may be
+// registered while other axes are active, such as when acquiring another queue
+// on an existing device. Registered identities remain reserved after
+// retirement.
 //
 //   iree_async_frontier_tracker_create(options, allocator, &tracker);
-//   // ... populate axis table during session setup ...
-//   // ... steady-state: advance() and wait() from multiple threads ...
+//   // ... register each axis before publishing its participant ...
+//   // ... advance()/wait() and new registrations from multiple threads ...
 //   iree_async_frontier_tracker_release(tracker);
 //
 // ## Axis lookup shape
 //
-// Axes are registered once during setup, then looked up by advance(), wait(),
-// and query_epoch(). The implementation stores them in tracker-owned hash
+// Each axis is registered once, then looked up by advance(), wait(), and
+// query_epoch(). The implementation stores them in tracker-owned hash
 // slots so steady-state operations do not scan all registered axes:
 //
 //   ┌───────────────────────────────┐
@@ -187,6 +193,11 @@ uint8_t iree_async_frontier_tracker_machine_index(
 // Registers an axis for the lifetime of the tracker. Axis IDs are never reused:
 // once registered, an axis remains reserved even after retirement.
 //
+// Thread-safe with other registrations and operations on existing axes. The
+// caller must finish registration before publishing the axis to its users.
+// For a new ID with available capacity, exactly one concurrent registration
+// succeeds; the others return ALREADY_EXISTS and consume no additional entry.
+//
 // |semaphore| is a borrowed bridge pointer. The registering participant must
 // retire the axis before destroying the borrowed semaphore.
 iree_status_t iree_async_frontier_tracker_register_axis(
@@ -242,8 +253,7 @@ iree_host_size_t iree_async_frontier_tracker_advance(
 // same duration.
 //
 // Returns IREE_STATUS_NOT_FOUND if any axis in the frontier is not in the
-// tracker's axis table (programming error: all axes must be registered during
-// session setup).
+// tracker's axis table. Registration must complete before waiting on an axis.
 iree_status_t iree_async_frontier_tracker_wait(
     iree_async_frontier_tracker_t* tracker,
     const iree_async_frontier_t* frontier,
