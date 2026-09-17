@@ -561,7 +561,9 @@ typedef struct amdf_memory_info_t {
   /// Guaranteed power-of-two logical-base alignment in every supported address
   /// space.
   uint64_t alignment;
-  /// Complete native physical allocation or registered page-cover length.
+  /// Complete native payload allocation or registered source extent in bytes,
+  /// including native rounding. Excludes driver and library metadata. Multiple
+  /// attachments can report the same backing extent independently.
   uint64_t native_allocation_byte_length;
   /// Granularity of `native_allocation_byte_length` in bytes.
   uint64_t native_allocation_granularity;

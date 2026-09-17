@@ -214,6 +214,21 @@ An interior range is explicit and needs no search for an original allocation
 base. Libamdf needs no object for every tensor, argument block, or executable
 subrange.
 
+`memory_query_info` reports the requested logical range and the complete native
+payload extent separately. Native rounding and any private backing prefix count
+toward `native_allocation_byte_length`; driver and library metadata are separate.
+Several attachments to one backing can each report that complete extent. When
+the provider can establish physical identity, `physical_backing_id` identifies
+the shared backing; an all-zero identity leaves that relationship unknown.
+
+A pool accounts for the backing it owns and the logical ranges it allocates.
+Native process residency charges and device-wide usage have their own scopes:
+shared imports can incur separate residency charges, and exported backing can
+outlive the original owner's accounting entry. Those mutable observations cannot
+establish the pool's owned capacity or whether an allocation will succeed.
+The profile's construction limits describe accepted dimensions, while the live
+resource query describes the extent actually acquired.
+
 ## Windows foreign buffers
 
 Windows GPU local-memory scopes expose an IMPORT profile for
