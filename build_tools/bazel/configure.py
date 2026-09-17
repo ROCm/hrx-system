@@ -97,12 +97,6 @@ NATIVE_AMDF_FAMILIES_FLAG = "--//libamdf/config:families"
 NATIVE_REPO_ENV_PREFIX = "--repo_env="
 TRUE_VALUES = frozenset(("1", "ON", "TRUE", "YES"))
 FALSE_VALUES = frozenset(("0", "OFF", "FALSE", "NO"))
-WINDOWS_LONG_PATHS_REGISTRY_PATH = r"SYSTEM\CurrentControlSet\Control\FileSystem"
-WINDOWS_LONG_PATHS_REGISTRY_VALUE = "LongPathsEnabled"
-WINDOWS_LONG_PATHS_POWERSHELL_COMMAND = (
-    'New-ItemProperty -Path "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\FileSystem" '
-    '-Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force'
-)
 
 
 @dataclass
@@ -339,23 +333,6 @@ class ConfigRequest:
         return self.dependency_mode
 
 
-def windows_long_paths_enabled() -> bool:
-    """Returns whether this Windows host has opted into long Win32 paths."""
-    import winreg
-
-    try:
-        with winreg.OpenKey(
-            winreg.HKEY_LOCAL_MACHINE,
-            WINDOWS_LONG_PATHS_REGISTRY_PATH,
-        ) as key:
-            value, value_type = winreg.QueryValueEx(
-                key, WINDOWS_LONG_PATHS_REGISTRY_VALUE
-            )
-    except OSError:
-        return False
-    return value_type == winreg.REG_DWORD and value == 1
-
-
 def windows_symbolic_links_available() -> bool:
     """Returns whether this process can create Windows symbolic links."""
     with tempfile.TemporaryDirectory(prefix="hrx-bazel-symlink-") as temp_directory:
@@ -373,46 +350,24 @@ def windows_symbolic_links_available() -> bool:
 def require_windows_bazel_host(
     *,
     platform_name: str | None = None,
-    long_paths_reader: Callable[[], bool] | None = None,
     symbolic_link_probe: Callable[[], bool] | None = None,
 ) -> None:
     """Fails with setup instructions for missing Windows Bazel capabilities."""
     platform_name = sys.platform if platform_name is None else platform_name
     if platform_name != "win32":
         return
-    if long_paths_reader is None:
-        long_paths_reader = windows_long_paths_enabled
     if symbolic_link_probe is None:
         symbolic_link_probe = windows_symbolic_links_available
-
-    failures = []
-    if not long_paths_reader():
-        failures.append(
-            "Long Win32 paths are disabled. Deeply nested rules_python "
-            "runfiles exceed the legacy MAX_PATH limit even when the checkout "
-            "and Bazel output roots are short. Open PowerShell as "
-            "Administrator and run:\n"
-            f"  {WINDOWS_LONG_PATHS_POWERSHELL_COMMAND}"
-        )
-    if not symbolic_link_probe():
-        failures.append(
-            "Symbolic-link creation is unavailable. rules_python constructs "
-            "Windows runfiles and runtime virtual environments with symbolic "
-            "links. Enable Windows Developer Mode or grant this account the "
-            "'Create symbolic links' user right."
-        )
-    if not failures:
+    if symbolic_link_probe():
         return
     raise SystemExit(
         "Windows Bazel host requirements are not satisfied:\n\n"
-        + "\n\n".join(failures)
-        + "\n\nCI jobs without administrator rights must use a base image where "
-        "these machine policies are already provisioned. After changing host "
-        "policy, run:\n"
-        "  python dev.py bazel shutdown\n\n"
-        "Start a new terminal so new processes observe the policy. Windows "
-        "may require a reboot when an existing process has cached the old "
-        "value."
+        "Symbolic-link creation is unavailable. rules_python constructs "
+        "Windows runfiles and runtime virtual environments with symbolic "
+        "links. Enable Windows Developer Mode or grant this account the "
+        "'Create symbolic links' user right.\n\n"
+        "CI jobs without administrator rights must use a base image where "
+        "symbolic-link creation is already provisioned."
     )
 
 

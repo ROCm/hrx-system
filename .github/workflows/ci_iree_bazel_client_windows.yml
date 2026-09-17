@@ -74,7 +74,10 @@ jobs:
 
       - name: Check Windows host capabilities
         shell: powershell
-        run: python build_tools/bazel/configure.py --check-windows-host
+        run: |
+          $fileSystemPolicy = Get-Item -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -ErrorAction Stop
+          Write-Output "LongPathsEnabled=$($fileSystemPolicy.GetValue('LongPathsEnabled', '<unset>'))"
+          python build_tools/bazel/configure.py --check-windows-host
 
       - name: Fetch host LLVM toolchain
         shell: powershell

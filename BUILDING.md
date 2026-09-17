@@ -875,12 +875,17 @@ Git operations remain on the source machine.
 
 Keep Windows build trees short and keep one tree per compiler. The `C:\b` CMake
 trees below remain within the legacy Win32 path limit and do not require the
-machine-wide `LongPathsEnabled` policy. Bazel has a different host contract:
-its managed Python runfiles exceed the legacy limit and use symbolic links, so
-Windows Bazel hosts require `LongPathsEnabled` plus Developer Mode or an
-equivalent symbolic-link policy. Provision both policies in the base image for
-CI runners that cannot elevate during a job. `python dev.py bazel configure`
-and `python dev.py bazel doctor` diagnose those capabilities.
+machine-wide `LongPathsEnabled` policy. Bazel's managed Python runfiles use
+symbolic links, so Windows Bazel hosts require Developer Mode or an equivalent
+symbolic-link policy. Provision that capability in the base image for CI runners
+that cannot elevate during a job. `python dev.py bazel configure` and
+`python dev.py bazel doctor` verify that the current process can create a
+symbolic link.
+
+The Bazel host check does not require `LongPathsEnabled`. Deep build and runfiles
+paths can still exceed the legacy limit in tools that use ordinary Win32 paths;
+those failures are reported by the affected build or test command. Enabling the
+policy allows tools that opt into long paths to access them.
 
 Windows Firewall displays an interactive approval prompt when a newly built
 executable begins listening for inbound connections. Approving one executable

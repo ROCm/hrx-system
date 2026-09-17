@@ -226,7 +226,10 @@ jobs:
           python-version: "3.12"
 
       - name: Check Windows host capabilities
-        run: python build_tools/bazel/configure.py --check-windows-host
+        run: |
+          $fileSystemPolicy = Get-Item -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -ErrorAction Stop
+          Write-Output "LongPathsEnabled=$($fileSystemPolicy.GetValue('LongPathsEnabled', '<unset>'))"
+          python build_tools/bazel/configure.py --check-windows-host
 
       - name: Fetch ROCm toolchain
         run: |
