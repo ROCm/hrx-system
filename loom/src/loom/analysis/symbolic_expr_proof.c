@@ -473,11 +473,12 @@ static loom_value_id_t loom_symbolic_expr_term_relation_value(
              : term->relation_value_id;
 }
 
-static bool loom_symbolic_expr_terms_are_exact_positive_multiple(
+static bool loom_symbolic_expr_terms_are_exact_multiple(
     const loom_symbolic_term_t* expression_terms,
     iree_host_size_t expression_term_count,
     const loom_symbolic_term_t* relation_terms,
-    iree_host_size_t relation_term_count, int64_t* out_multiplier) {
+    iree_host_size_t relation_term_count, bool positive_multiplier,
+    int64_t* out_multiplier) {
   *out_multiplier = 0;
   if (expression_term_count == 0 ||
       expression_term_count != relation_term_count ||
@@ -488,7 +489,7 @@ static bool loom_symbolic_expr_terms_are_exact_positive_multiple(
   }
   const int64_t multiplier =
       expression_terms[0].coefficient / relation_terms[0].coefficient;
-  if (multiplier <= 0 ||
+  if (multiplier == 0 || (multiplier > 0) != positive_multiplier ||
       expression_terms[0].coefficient % relation_terms[0].coefficient != 0) {
     return false;
   }
@@ -505,18 +506,18 @@ static bool loom_symbolic_expr_terms_are_exact_positive_multiple(
   return true;
 }
 
-static iree_status_t loom_symbolic_expr_terms_are_positive_multiple(
+static iree_status_t loom_symbolic_expr_terms_are_multiple(
     loom_symbolic_expr_context_t* context,
     const loom_symbolic_term_t* expression_terms,
     iree_host_size_t expression_term_count,
     const loom_symbolic_term_t* relation_terms,
-    iree_host_size_t relation_term_count, bool* out_match,
-    int64_t* out_multiplier) {
+    iree_host_size_t relation_term_count, bool positive_multiplier,
+    bool* out_match, int64_t* out_multiplier) {
   *out_match = false;
   *out_multiplier = 0;
-  if (loom_symbolic_expr_terms_are_exact_positive_multiple(
+  if (loom_symbolic_expr_terms_are_exact_multiple(
           expression_terms, expression_term_count, relation_terms,
-          relation_term_count, out_multiplier)) {
+          relation_term_count, positive_multiplier, out_multiplier)) {
     *out_match = true;
     return iree_ok_status();
   }
@@ -546,7 +547,8 @@ static iree_status_t loom_symbolic_expr_terms_are_positive_multiple(
         }
         candidate_multiplier = expression_terms[expression_index].coefficient /
                                relation_terms[relation_index].coefficient;
-        if (candidate_multiplier <= 0 ||
+        if (candidate_multiplier == 0 ||
+            (candidate_multiplier > 0) != positive_multiplier ||
             expression_terms[expression_index].coefficient %
                     relation_terms[relation_index].coefficient !=
                 0) {
@@ -594,7 +596,8 @@ static iree_status_t loom_symbolic_expr_terms_are_positive_multiple(
 
 // Matches an expanded query against an active edge relation. For integral
 // values, scale * lower + residual <= scale * upper follows from lower < upper
-// when residual <= scale, or from lower <= upper when residual <= 0.
+// when scale > 0 and residual <= scale, or from lower <= upper when scale > 0
+// and residual <= 0. Equality permits either sign when residual <= 0.
 static iree_status_t loom_symbolic_expr_prove_le_by_condition_relations(
     loom_symbolic_expr_context_t* context,
     const loom_symbolic_expr_t* left_expression,
@@ -654,9 +657,17 @@ static iree_status_t loom_symbolic_expr_prove_le_by_condition_relations(
 
     bool terms_match = false;
     int64_t multiplier = 0;
-    IREE_RETURN_IF_ERROR(loom_symbolic_expr_terms_are_positive_multiple(
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_terms_are_multiple(
         context, expression_terms, expression_term_count, relation_terms,
-        relation_term_count, &terms_match, &multiplier));
+        relation_term_count, /*positive_multiplier=*/true, &terms_match,
+        &multiplier));
+    if (!terms_match &&
+        relation->relation == LOOM_SYMBOLIC_INTEGER_RELATION_EQ) {
+      IREE_RETURN_IF_ERROR(loom_symbolic_expr_terms_are_multiple(
+          context, expression_terms, expression_term_count, relation_terms,
+          relation_term_count, /*positive_multiplier=*/false, &terms_match,
+          &multiplier));
+    }
     if (!terms_match) {
       continue;
     }

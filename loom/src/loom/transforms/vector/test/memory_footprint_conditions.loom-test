@@ -193,3 +193,110 @@ func.def @join_weaker_edge_does_not_establish_equality(%storage: buffer, %base: 
 ^exit:
   func.return
 }
+
+// ====
+
+// RUN: pass vector-memory-footprint
+func.def @reversed_equality_proves_scaled_access(%storage: buffer, %raw: index, %bound_raw: index) {
+  %base = index.constant 0 : offset
+  %element_count = index.constant 1 : index
+  %element_bytes = index.constant 4 : index
+  %origin = index.assume %raw [range(%raw, 0, 63)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 1, 64)] : index
+  %limit = index.add %origin, %element_count : index
+  %fits = index.cmp eq, %bound, %limit : index
+  %byte_origin = index.mul %origin, %element_bytes : index
+  %byte_bound = index.mul %bound, %element_bytes : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%byte_bound]xi8>
+  scf.if %fits {
+    %loaded = vector.load %view[%byte_origin] : view<[%byte_bound]xi8> -> vector<4xi8>
+    test.use %loaded : vector<4xi8>
+  }
+  func.return
+}
+
+// ====
+
+// RUN: pass vector-memory-footprint
+func.def @reversed_equality_rejects_excess_extent(%storage: buffer, %raw: index, %bound_raw: index) {
+  %base = index.constant 0 : offset
+  %element_count = index.constant 1 : index
+  %element_bytes = index.constant 4 : index
+  %origin = index.assume %raw [range(%raw, 0, 63)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 1, 64)] : index
+  %limit = index.add %origin, %element_count : index
+  %fits = index.cmp eq, %bound, %limit : index
+  %byte_origin = index.mul %origin, %element_bytes : index
+  %byte_bound = index.mul %bound, %element_bytes : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%byte_bound]xi8>
+  scf.if %fits {
+    // ERROR@+1: SUBRANGE/010 {op_name="vector.load", vector_extent="5"}
+    %loaded = vector.load %view[%byte_origin] : view<[%byte_bound]xi8> -> vector<5xi8>
+    test.use %loaded : vector<5xi8>
+  }
+  func.return
+}
+
+// ====
+
+// RUN: pass scf-to-cfg,vector-memory-footprint
+func.def @reversed_equality_proves_scaled_access_cfg(%storage: buffer, %raw: index, %bound_raw: index) {
+  %base = index.constant 0 : offset
+  %element_count = index.constant 1 : index
+  %element_bytes = index.constant 4 : index
+  %origin = index.assume %raw [range(%raw, 0, 63)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 1, 64)] : index
+  %limit = index.add %origin, %element_count : index
+  %fits = index.cmp eq, %bound, %limit : index
+  %byte_origin = index.mul %origin, %element_bytes : index
+  %byte_bound = index.mul %bound, %element_bytes : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%byte_bound]xi8>
+  scf.if %fits {
+    %loaded = vector.load %view[%byte_origin] : view<[%byte_bound]xi8> -> vector<4xi8>
+    test.use %loaded : vector<4xi8>
+  }
+  func.return
+}
+
+// ----
+func.def @reversed_equality_proves_scaled_access_cfg(%storage: buffer, %raw: index, %bound_raw: index) {
+  %base = index.constant 0 : offset
+  %element_count = index.constant 1 : index
+  %element_bytes = index.constant 4 : index
+  %origin = index.assume %raw [range(%raw, 0, 63)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 1, 64)] : index
+  %limit = index.add %origin, %element_count : index
+  %fits = index.cmp eq, %bound, %limit : index
+  %byte_origin = index.mul %origin, %element_bytes : index
+  %byte_bound = index.mul %bound, %element_bytes : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%byte_bound]xi8>
+  cfg.cond_br %fits, ^_bb1, ^_bb2
+^_bb1:
+  %loaded = vector.load %view[%byte_origin] : view<[%byte_bound]xi8> -> vector<4xi8>
+  test.use %loaded : vector<4xi8>
+  cfg.br ^_bb2
+^_bb2:
+  func.return
+}
+
+// ====
+
+// RUN: pass scf-to-cfg,vector-memory-footprint
+func.def @reversed_equality_rejects_excess_extent_cfg(%storage: buffer, %raw: index, %bound_raw: index) {
+  %base = index.constant 0 : offset
+  %element_count = index.constant 1 : index
+  %element_bytes = index.constant 4 : index
+  %origin = index.assume %raw [range(%raw, 0, 63)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 1, 64)] : index
+  %limit = index.add %origin, %element_count : index
+  %fits = index.cmp eq, %bound, %limit : index
+  %byte_origin = index.mul %origin, %element_bytes : index
+  %byte_bound = index.mul %bound, %element_bytes : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%byte_bound]xi8>
+  scf.if %fits {
+    // ERROR@+1: SUBRANGE/010 {op_name="vector.load", vector_extent="5"}
+    %loaded = vector.load %view[%byte_origin] : view<[%byte_bound]xi8> -> vector<5xi8>
+    test.use %loaded : vector<5xi8>
+  }
+  func.return
+}

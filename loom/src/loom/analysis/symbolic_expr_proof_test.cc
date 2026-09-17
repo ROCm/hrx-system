@@ -25,6 +25,32 @@
 namespace loom {
 namespace {
 
+// Keeps borrowed facts and cached expressions within their active test scope,
+// including when a fatal assertion returns from the test early.
+class ScopedConditionFacts {
+ public:
+  ScopedConditionFacts(loom_symbolic_expr_context_t* context,
+                       const loom_condition_fact_set_t* facts)
+      : context_(*context), previous_facts_(context->condition_facts) {
+    context_.condition_facts = facts;
+    loom_symbolic_expr_context_reset(&context_);
+  }
+
+  ~ScopedConditionFacts() {
+    context_.condition_facts = previous_facts_;
+    loom_symbolic_expr_context_reset(&context_);
+  }
+
+  ScopedConditionFacts(const ScopedConditionFacts&) = delete;
+  ScopedConditionFacts& operator=(const ScopedConditionFacts&) = delete;
+
+ private:
+  // Fixture context borrowing the active facts.
+  loom_symbolic_expr_context_t& context_;
+  // Enclosing facts restored before the scoped facts leave their lifetime.
+  const loom_condition_fact_set_t* previous_facts_;
+};
+
 static bool QueryConditionFacts(
     loom_symbolic_expr_context_t* expression_context,
     const loom_value_fact_table_t* fact_table, loom_value_id_t condition,
@@ -70,8 +96,7 @@ static iree_status_t ProveSemanticallyEquivalentUpperBound(
       /*.integer_relation_count=*/1,
       /*.integer_relation_capacity=*/1,
   };
-  context->condition_facts = &condition_facts;
-  loom_symbolic_expr_context_reset(context);
+  ScopedConditionFacts condition_scope(context, &condition_facts);
 
   loom_symbolic_expr_t zero = {};
   loom_symbolic_expr_constant(0, &zero);
@@ -81,8 +106,6 @@ static iree_status_t ProveSemanticallyEquivalentUpperBound(
     status = loom_symbolic_expr_prove_le(context, &zero, &query, out_result);
   }
 
-  context->condition_facts = nullptr;
-  loom_symbolic_expr_context_reset(context);
   return status;
 }
 
@@ -360,6 +383,212 @@ TEST_F(SymbolicExprTest, ScaledStrictRelationProvesLessEqualWithUnitExtent) {
   EXPECT_EQ(proof, LOOM_SYMBOLIC_PROOF_TRUE);
 }
 
+TEST_F(SymbolicExprTest, AffineConditionProofsRespectRelationOrientation) {
+  const loom_value_id_t left = DefineIndexValue();
+  const loom_value_id_t right = DefineIndexValue();
+  DefineFacts(left, loom_value_facts_make(-8, 8, 1));
+  DefineFacts(right, loom_value_facts_make(-8, 8, 1));
+  const struct {
+    // Relation retained from the selected edge.
+    loom_symbolic_integer_relation_t relation;
+    // Independent concrete interpretation of that relation.
+    bool (*evaluate)(int64_t, int64_t);
+  } relations[] = {
+      {LOOM_SYMBOLIC_INTEGER_RELATION_EQ,
+       [](int64_t lhs, int64_t rhs) { return lhs == rhs; }},
+      {LOOM_SYMBOLIC_INTEGER_RELATION_NE,
+       [](int64_t lhs, int64_t rhs) { return lhs != rhs; }},
+      {LOOM_SYMBOLIC_INTEGER_RELATION_LT,
+       [](int64_t lhs, int64_t rhs) { return lhs < rhs; }},
+      {LOOM_SYMBOLIC_INTEGER_RELATION_LE,
+       [](int64_t lhs, int64_t rhs) { return lhs <= rhs; }},
+      {LOOM_SYMBOLIC_INTEGER_RELATION_GT,
+       [](int64_t lhs, int64_t rhs) { return lhs > rhs; }},
+      {LOOM_SYMBOLIC_INTEGER_RELATION_GE,
+       [](int64_t lhs, int64_t rhs) { return lhs >= rhs; }},
+  };
+  const int64_t shifts[] = {-2, 0, 2};
+  const int64_t scales[] = {-4, -1, 1, 4};
+  const int64_t offsets[] = {-4, 0, 4};
+  for (int64_t shift : shifts) {
+    SCOPED_TRACE(shift);
+    const loom_value_id_t shift_value =
+        loom_index_constant_result(BuildIndexConstant(shift));
+    loom_op_t* shifted_op = nullptr;
+    IREE_ASSERT_OK(loom_index_add_build(
+        &builder_, left, shift_value, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+        LOOM_LOCATION_UNKNOWN, &shifted_op));
+    for (const auto& test_case : relations) {
+      SCOPED_TRACE(test_case.relation);
+      for (int orientation = 0; orientation < 2; ++orientation) {
+        SCOPED_TRACE(orientation);
+        loom_condition_integer_relation_t relation = {
+            /*.relation=*/test_case.relation,
+            /*.left=*/
+            {/*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+             /*.value_id=*/orientation == 0 ? loom_index_add_result(shifted_op)
+                                            : right},
+            /*.right=*/
+            {/*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+             /*.value_id=*/orientation == 0
+                 ? right
+                 : loom_index_add_result(shifted_op)},
+        };
+        loom_condition_fact_set_t condition_facts = {
+            /*.integer_relations=*/&relation,
+            /*.integer_relation_count=*/1,
+            /*.integer_relation_capacity=*/1,
+        };
+        ScopedConditionFacts condition_scope(&expression_context_,
+                                             &condition_facts);
+        for (int64_t scale : scales) {
+          SCOPED_TRACE(scale);
+          loom_symbolic_expr_t left_expression = {};
+          loom_symbolic_expr_t right_expression = {};
+          IREE_ASSERT_OK(loom_symbolic_expr_value(&expression_context_, left,
+                                                  &left_expression));
+          IREE_ASSERT_OK(loom_symbolic_expr_value(&expression_context_, right,
+                                                  &right_expression));
+          loom_symbolic_expr_t scaled_left = {};
+          loom_symbolic_expr_t scaled_right = {};
+          IREE_ASSERT_OK(loom_symbolic_expr_mul_i64(
+              &expression_context_, &left_expression, scale, &scaled_left));
+          IREE_ASSERT_OK(loom_symbolic_expr_mul_i64(
+              &expression_context_, &right_expression, scale, &scaled_right));
+          for (int64_t offset : offsets) {
+            SCOPED_TRACE(offset);
+            bool always_true = true;
+            for (int64_t left_value = -8; left_value <= 8; ++left_value) {
+              for (int64_t right_value = -8; right_value <= 8; ++right_value) {
+                const bool selected =
+                    orientation == 0
+                        ? test_case.evaluate(left_value + shift, right_value)
+                        : test_case.evaluate(right_value, left_value + shift);
+                if (selected &&
+                    scale * left_value + offset > scale * right_value) {
+                  always_true = false;
+                }
+              }
+            }
+            loom_symbolic_expr_t constant = {};
+            loom_symbolic_expr_constant(offset, &constant);
+            loom_symbolic_expr_t query_left = {};
+            IREE_ASSERT_OK(loom_symbolic_expr_add(
+                &expression_context_, &scaled_left, &constant, &query_left));
+            loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+            IREE_ASSERT_OK(loom_symbolic_expr_prove_le(
+                &expression_context_, &query_left, &scaled_right, &proof));
+            EXPECT_EQ(proof == LOOM_SYMBOLIC_PROOF_TRUE, always_true);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST_F(SymbolicExprTest, EqualityMatchesOppositeSemanticProducerTerms) {
+  const loom_value_id_t left_source = DefineI64Value();
+  const loom_value_id_t right_source = DefineI64Value();
+  const loom_value_id_t mask = DefineI64Value();
+  const loom_value_id_t left = BuildScalarAndI(left_source, mask);
+  const loom_value_id_t right = BuildScalarAndI(right_source, mask);
+  const loom_value_id_t query_left = BuildScalarAndI(right_source, mask);
+  const loom_value_id_t query_right = BuildScalarAndI(left_source, mask);
+  loom_condition_integer_relation_t relation = {
+      /*.relation=*/LOOM_SYMBOLIC_INTEGER_RELATION_EQ,
+      /*.left=*/
+      {/*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE, /*.value_id=*/left},
+      /*.right=*/
+      {/*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+       /*.value_id=*/right},
+  };
+  loom_condition_fact_set_t condition_facts = {
+      /*.integer_relations=*/&relation,
+      /*.integer_relation_count=*/1,
+      /*.integer_relation_capacity=*/1,
+  };
+  ScopedConditionFacts condition_scope(&expression_context_, &condition_facts);
+  const int64_t scales[] = {-4, 4};
+  const int64_t offsets[] = {-1, 0, 1};
+  for (int64_t scale : scales) {
+    SCOPED_TRACE(scale);
+    loom_symbolic_expr_t left_expression = {};
+    loom_symbolic_expr_t right_expression = {};
+    IREE_ASSERT_OK(loom_symbolic_expr_value(&expression_context_, query_left,
+                                            &left_expression));
+    IREE_ASSERT_OK(loom_symbolic_expr_value(&expression_context_, query_right,
+                                            &right_expression));
+    loom_symbolic_expr_t scaled_left = {};
+    loom_symbolic_expr_t scaled_right = {};
+    IREE_ASSERT_OK(loom_symbolic_expr_mul_i64(
+        &expression_context_, &left_expression, scale, &scaled_left));
+    IREE_ASSERT_OK(loom_symbolic_expr_mul_i64(
+        &expression_context_, &right_expression, scale, &scaled_right));
+    for (int64_t offset : offsets) {
+      SCOPED_TRACE(offset);
+      loom_symbolic_expr_t constant = {};
+      loom_symbolic_expr_constant(offset, &constant);
+      loom_symbolic_expr_t query = {};
+      IREE_ASSERT_OK(loom_symbolic_expr_add(&expression_context_, &scaled_left,
+                                            &constant, &query));
+      loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+      IREE_ASSERT_OK(loom_symbolic_expr_prove_le(&expression_context_, &query,
+                                                 &scaled_right, &proof));
+      EXPECT_EQ(proof == LOOM_SYMBOLIC_PROOF_TRUE, offset <= 0);
+    }
+  }
+}
+
+TEST_F(SymbolicExprTest, EqualityMultiplierOverflowDoesNotProveOrder) {
+  const loom_value_id_t left = DefineIndexValue();
+  const loom_value_id_t right = DefineIndexValue();
+  DefineFacts(left, loom_value_facts_make(-1, 1, 1));
+  DefineFacts(right, loom_value_facts_make(-1, 1, 1));
+  const int64_t scales[] = {INT64_MIN, INT64_MAX};
+  for (int orientation = 0; orientation < 2; ++orientation) {
+    SCOPED_TRACE(orientation);
+    loom_condition_integer_relation_t relation = {
+        /*.relation=*/LOOM_SYMBOLIC_INTEGER_RELATION_EQ,
+        /*.left=*/
+        {/*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+         /*.value_id=*/orientation == 0 ? left : right},
+        /*.right=*/
+        {/*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+         /*.value_id=*/orientation == 0 ? right : left},
+    };
+    loom_condition_fact_set_t condition_facts = {
+        /*.integer_relations=*/&relation,
+        /*.integer_relation_count=*/1,
+        /*.integer_relation_capacity=*/1,
+    };
+    ScopedConditionFacts condition_scope(&expression_context_,
+                                         &condition_facts);
+    for (int64_t scale : scales) {
+      SCOPED_TRACE(scale);
+      loom_symbolic_expr_t left_expression = {};
+      loom_symbolic_expr_t right_expression = {};
+      IREE_ASSERT_OK(loom_symbolic_expr_value(&expression_context_, left,
+                                              &left_expression));
+      IREE_ASSERT_OK(loom_symbolic_expr_value(&expression_context_, right,
+                                              &right_expression));
+      loom_symbolic_expr_t scaled_left = {};
+      IREE_ASSERT_OK(loom_symbolic_expr_mul_i64(
+          &expression_context_, &left_expression, scale, &scaled_left));
+      loom_symbolic_expr_t sum = {};
+      IREE_ASSERT_OK(loom_symbolic_expr_add(&expression_context_, &scaled_left,
+                                            &right_expression, &sum));
+      loom_symbolic_expr_t zero = {};
+      loom_symbolic_expr_constant(0, &zero);
+      loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+      IREE_ASSERT_OK(loom_symbolic_expr_prove_le(&expression_context_, &sum,
+                                                 &zero, &proof));
+      // Equality leaves the common value's sign unknown. Neither overflowing
+      // INT64_MIN / -1 nor multiplying a relation coefficient may prove it.
+      EXPECT_EQ(proof, LOOM_SYMBOLIC_PROOF_UNKNOWN);
+    }
+  }
+}
+
 TEST_F(SymbolicExprTest, ShiftedStrictRelationProvesWideExtent) {
   loom_value_id_t origin = DefineIndexValue();
   loom_value_id_t element_count = DefineIndexValue();
@@ -496,8 +725,7 @@ TEST_F(SymbolicExprTest, ProvesFlattenedAddressFromDynamicAxisBounds) {
   ASSERT_TRUE(QueryConditionFacts(&expression_context_, &fact_table_,
                                   loom_index_cmp_result(column_compare_op),
                                   true, &condition_facts));
-  expression_context_.condition_facts = &condition_facts;
-  loom_symbolic_expr_context_reset(&expression_context_);
+  ScopedConditionFacts condition_scope(&expression_context_, &condition_facts);
 
   loom_op_t* row_base_op = nullptr;
   IREE_ASSERT_OK(loom_index_mul_build(&builder_, row, column_count,
@@ -748,7 +976,7 @@ TEST_F(SymbolicExprTest, ConditionRefinementMemoReusesPersistentStorage) {
       relation_storage, IREE_ARRAYSIZE(relation_storage), &condition_facts);
   ASSERT_TRUE(QueryConditionFacts(&expression_context_, &fact_table_, condition,
                                   /*assumed_truth=*/true, &condition_facts));
-  expression_context_.condition_facts = &condition_facts;
+  ScopedConditionFacts condition_scope(&expression_context_, &condition_facts);
 
   loom_symbolic_expr_t zero = {0};
   loom_symbolic_expr_constant(0, &zero);
@@ -931,29 +1159,30 @@ TEST_F(SymbolicExprTest, SelectConditionProvesDynamicLoopDivBounds) {
   ASSERT_TRUE(QueryConditionFacts(&expression_context_, &fact_table_,
                                   loom_index_cmp_result(left_edge_cmp_op),
                                   /*assumed_truth=*/false, &left_false_facts));
-  expression_context_.condition_facts = &left_false_facts;
-  expression_context_.condition_proof_depth = 1;
-  loom_symbolic_expr_context_reset(&expression_context_);
-  loom_symbolic_expr_t left_false_source_lane = {0};
-  IREE_ASSERT_OK(loom_symbolic_expr_from_value(
-      &expression_context_, loom_index_sub_result(source_lane_op),
-      &left_false_source_lane));
-  ASSERT_EQ(left_false_source_lane.term_count, 2);
-  EXPECT_EQ(left_false_source_lane.constant, -1);
-  EXPECT_EQ(left_false_source_lane.terms[0].value_id, raw_tap);
-  EXPECT_EQ(left_false_source_lane.terms[0].relation_value_id, tap);
-  EXPECT_EQ(left_false_source_lane.terms[0].coefficient, 1);
-  EXPECT_EQ(left_false_source_lane.terms[1].value_id, lane);
-  EXPECT_EQ(left_false_source_lane.terms[1].coefficient, 1);
   loom_symbolic_expr_t zero = {0};
   loom_symbolic_expr_constant(0, &zero);
-  loom_symbolic_proof_result_t left_false_proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
-  IREE_ASSERT_OK(loom_symbolic_expr_prove_le(
-      &expression_context_, &zero, &left_false_source_lane, &left_false_proof));
-  EXPECT_EQ(left_false_proof, LOOM_SYMBOLIC_PROOF_TRUE);
-  expression_context_.condition_facts = nullptr;
+  {
+    ScopedConditionFacts condition_scope(&expression_context_,
+                                         &left_false_facts);
+    expression_context_.condition_proof_depth = 1;
+    loom_symbolic_expr_t left_false_source_lane = {0};
+    IREE_ASSERT_OK(loom_symbolic_expr_from_value(
+        &expression_context_, loom_index_sub_result(source_lane_op),
+        &left_false_source_lane));
+    ASSERT_EQ(left_false_source_lane.term_count, 2);
+    EXPECT_EQ(left_false_source_lane.constant, -1);
+    EXPECT_EQ(left_false_source_lane.terms[0].value_id, raw_tap);
+    EXPECT_EQ(left_false_source_lane.terms[0].relation_value_id, tap);
+    EXPECT_EQ(left_false_source_lane.terms[0].coefficient, 1);
+    EXPECT_EQ(left_false_source_lane.terms[1].value_id, lane);
+    EXPECT_EQ(left_false_source_lane.terms[1].coefficient, 1);
+    loom_symbolic_proof_result_t left_false_proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+    IREE_ASSERT_OK(loom_symbolic_expr_prove_le(&expression_context_, &zero,
+                                               &left_false_source_lane,
+                                               &left_false_proof));
+    EXPECT_EQ(left_false_proof, LOOM_SYMBOLIC_PROOF_TRUE);
+  }
   expression_context_.condition_proof_depth = 0;
-  loom_symbolic_expr_context_reset(&expression_context_);
 
   loom_symbolic_proof_result_t source_lower_proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
   IREE_ASSERT_OK(loom_symbolic_expr_prove_le(
