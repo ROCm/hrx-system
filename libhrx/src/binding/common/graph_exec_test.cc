@@ -9,6 +9,7 @@
 #include <cstring>
 #include <utility>
 
+#include "common/graph.h"
 #include "common/internal.h"
 #include "iree/base/api.h"
 #include "iree/base/internal/atomics.h"
@@ -46,6 +47,16 @@ class ScopeExit {
 // declaration can spell.
 template <typename Cleanup>
 ScopeExit(Cleanup) -> ScopeExit<Cleanup>;
+
+TEST(GraphExecLayoutTest, AlignsSemaphoreRegionsAcrossSupportedCounts) {
+  static constexpr uint16_t kCounts[] = {0, 1, 2, UINT16_MAX};
+  for (uint16_t wait_count : kCounts) {
+    for (uint16_t signal_count : kCounts) {
+      IREE_EXPECT_OK(iree_hal_streaming_graph_exec_test_verify_block_layout(
+          wait_count, signal_count));
+    }
+  }
+}
 
 // Runs streaming graph launches against the host CPU device. Launches take the
 // same block submit path they take on an accelerator; the event records they
