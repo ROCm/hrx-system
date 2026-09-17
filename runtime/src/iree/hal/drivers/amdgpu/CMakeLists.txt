@@ -1128,6 +1128,7 @@ iree_cc_test(
     ::headers
     iree::base
     iree::hal
+    iree::hal::drivers::amdgpu::abi
     iree::hal::drivers::amdgpu::device::headers
     iree::testing::gtest
     iree::testing::gtest_main

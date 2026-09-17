@@ -878,6 +878,7 @@ iree_runtime_cc_test(
         ":headers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amdgpu/abi",
         "//runtime/src/iree/hal/drivers/amdgpu/device:headers",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
