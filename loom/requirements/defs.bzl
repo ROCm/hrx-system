@@ -95,6 +95,13 @@ TARGET_ARCH_VM = build_requirement(
     cmake_condition = "LOOM_TARGET_ARCH_VM",
 )
 
+TARGET_ARCH_XDNA = build_requirement(
+    id = "loom.target.arch.xdna",
+    label = Label("//loom/requirements:target_arch_xdna"),
+    enabled_by = Label("//loom/config/target/arch:xdna"),
+    cmake_condition = "LOOM_TARGET_ARCH_XDNA",
+)
+
 TARGET_ARCH_X86 = build_requirement(
     id = "loom.target.arch.x86",
     label = Label("//loom/requirements:target_arch_x86"),
@@ -115,5 +122,6 @@ REQUIREMENTS = [
     TARGET_ARCH_SPIRV,
     TARGET_ARCH_WASM,
     TARGET_ARCH_VM,
+    TARGET_ARCH_XDNA,
     TARGET_ARCH_X86,
 ]

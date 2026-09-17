@@ -9,6 +9,7 @@
 
 iree_add_all_subdirs()
 
+if(LOOM_TARGET_ARCH_VM)
 loom_generated_cc_library(
   NAME
     ops
@@ -36,5 +37,6 @@ loom_generated_cc_library(
     loom::target::arch::vm::records
     loom::target::types
 )
+endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

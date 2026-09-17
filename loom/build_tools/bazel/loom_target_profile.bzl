@@ -14,6 +14,7 @@ load(
     "//loom/build_tools/amdgpu:target_config.bzl",
     "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET",
 )
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 
 LoomTargetProfileInfo = provider(
     doc = "Immutable Loom target identity shared by all target families.",
@@ -69,7 +70,7 @@ def loom_target_profile(name, family, selector, **kwargs):
     )
 
 def loom_amdgpu_target_profile(name, target, **kwargs):
-    """Declares an AMDGPU profile available with its descriptor contract.
+    """Declares an AMDGPU profile requiring its architecture and descriptors.
 
     Args:
       name: Bazel target name.
@@ -87,6 +88,9 @@ def loom_amdgpu_target_profile(name, target, **kwargs):
         family = "amdgpu",
         selector = target,
         target_compatible_with = target_compatible_with +
+                                 loom_config_compatible_with([
+                                     "//loom/config/target/arch:amdgpu",
+                                 ]) +
                                  loom_amdgpu_descriptor_set_compatible_with(
                                      descriptor_set_capability,
                                  ),

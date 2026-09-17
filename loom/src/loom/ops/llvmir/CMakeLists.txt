@@ -9,6 +9,7 @@
 
 iree_add_all_subdirs()
 
+if(LOOM_TARGET_ARCH_LLVMIR)
 loom_generated_cc_library(
   NAME
     llvmir
@@ -39,5 +40,6 @@ loom_generated_cc_library(
     loom::target::arch::llvmir::facts
     loom::target::types
 )
+endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

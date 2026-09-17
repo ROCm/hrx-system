@@ -24,11 +24,21 @@ load(
     "TARGET_ARCH_AMDGPU",
     "TARGET_ARCH_LLVMIR",
     "TARGET_ARCH_SPIRV",
+    "TARGET_ARCH_VM",
     "TARGET_ARCH_WASM",
     "TARGET_ARCH_X86",
+    "TARGET_ARCH_XDNA",
 )
 
 PACKAGE_POLICIES = [
+    package_policy(
+        packages = ["loom/src/loom/ops/llvmir/..."],
+        build_requirements = [TARGET_ARCH_LLVMIR],
+    ),
+    package_policy(
+        packages = ["loom/src/loom/target/arch/amd/xdna/..."],
+        build_requirements = [TARGET_ARCH_XDNA],
+    ),
     package_policy(
         packages = ["loom/src/loom/target/arch/amdgpu/..."],
         build_requirements = [TARGET_ARCH_AMDGPU],
@@ -44,6 +54,10 @@ PACKAGE_POLICIES = [
     package_policy(
         packages = ["loom/src/loom/target/arch/spirv/..."],
         build_requirements = [TARGET_ARCH_SPIRV],
+    ),
+    package_policy(
+        packages = ["loom/src/loom/target/arch/vm/..."],
+        build_requirements = [TARGET_ARCH_VM],
     ),
     package_policy(
         packages = ["loom/src/loom/target/arch/wasm/..."],
@@ -95,6 +109,10 @@ PACKAGE_POLICIES = [
             TARGET_ARCH_SPIRV,
             EMIT_SPIRV,
         ],
+    ),
+    package_policy(
+        packages = ["loom/src/loom/tooling/target/vm/..."],
+        build_requirements = [TARGET_ARCH_VM],
     ),
     package_policy(
         packages = ["loom/py/loom/importers/mlir/..."],

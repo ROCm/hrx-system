@@ -9,6 +9,7 @@
 
 iree_add_all_subdirs()
 
+if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
     testbench
@@ -31,6 +32,7 @@ loom_cc_library(
     loom::tooling::testbench::invocation
   PUBLIC
 )
+endif()
 
 if(LOOM_TARGET_ARCH_VM)
 iree_execution_test_suite(

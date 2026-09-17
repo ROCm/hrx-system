@@ -56,12 +56,18 @@ loom_module(
     name = "gfx11_cases",
     srcs = _GFX11_CASES,
     output_format = "bc",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:amdgpu",
+    ]),
 )
 
 loom_module(
     name = "gfx1250_cases",
     srcs = _GFX1250_CASES,
     output_format = "bc",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:amdgpu",
+    ]),
 )
 
 # Authoring diagnostics and transform examples exercise CLI contracts rather

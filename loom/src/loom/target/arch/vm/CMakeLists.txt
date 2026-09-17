@@ -9,6 +9,7 @@
 
 iree_add_all_subdirs()
 
+if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
     records
@@ -21,7 +22,9 @@ loom_cc_library(
     loom::target::types
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
     module
@@ -47,7 +50,9 @@ loom_cc_library(
     loom::target::provider
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
     provider
@@ -78,6 +83,7 @@ loom_cc_library(
     loom::target::provider
   PUBLIC
 )
+endif()
 
 if(LOOM_TARGET_ARCH_VM)
 loom_check_test_suite(
@@ -151,6 +157,7 @@ loom_check_test_suite(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
     check
@@ -167,5 +174,6 @@ loom_cc_library(
     loom::tools::loom-check::provider
   PUBLIC
 )
+endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -9,6 +9,7 @@
 
 iree_add_all_subdirs()
 
+if(LOOM_TARGET_ARCH_VM)
 loom_target_contract_table_cc_libraries(
   NAME
     core
@@ -31,5 +32,6 @@ loom_target_contract_table_cc_libraries(
     loom::ops::view
     loom::target::arch::vm::descriptors::descriptors_ids
 )
+endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -337,6 +337,7 @@ loom_cc_library(
   PUBLIC
 )
 
+if(LOOM_TARGET_ARCH_LLVMIR AND LOOM_EMIT_LLVMIR)
 loom_cc_library(
   NAME
     llvmir_provider
@@ -350,6 +351,7 @@ loom_cc_library(
     loom::target::emit::llvmir::loom_check
   PUBLIC
 )
+endif()
 
 loom_cc_library(
   NAME

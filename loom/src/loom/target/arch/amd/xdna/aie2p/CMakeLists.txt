@@ -9,6 +9,7 @@
 
 iree_add_all_subdirs()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_generated_file_family(
   NAME
     target_tables_gen
@@ -31,7 +32,9 @@ loom_generated_file_family(
     "--machine-output"
     "--register-output"
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     target_facts
@@ -45,7 +48,9 @@ loom_cc_library(
     loom::target::facts
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     target_profile
@@ -66,7 +71,9 @@ loom_cc_library(
     loom::target::profile
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     array_descriptors
@@ -78,7 +85,9 @@ loom_cc_library(
     loom::codegen::low::descriptors
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     encoding
@@ -92,7 +101,9 @@ loom_cc_library(
     iree::base
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     machine
@@ -107,7 +118,9 @@ loom_cc_library(
     iree::base::internal
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     core_descriptors
@@ -119,7 +132,9 @@ loom_cc_library(
     loom::codegen::low::descriptors
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     descriptor_encoding
@@ -138,7 +153,9 @@ loom_cc_library(
     loom::codegen::low::descriptors
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     legalization
@@ -156,7 +173,9 @@ loom_cc_library(
     loom::transforms::vector::to_scalar
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     low_registry
@@ -173,7 +192,9 @@ loom_cc_library(
     loom::target::low_descriptor_registry
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     low_verify
@@ -193,7 +214,9 @@ loom_cc_library(
     loom::target::projection
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     math_policy
@@ -206,7 +229,9 @@ loom_cc_library(
     loom::target::math_policy
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     array_plan
@@ -241,7 +266,9 @@ loom_cc_library(
     loom::util::fact_table
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     array_program
@@ -257,7 +284,9 @@ loom_cc_library(
     loom::target::arch::amd::xdna::array_registers
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     array_resident
@@ -280,7 +309,9 @@ loom_cc_library(
     loom::target::arch::amd::xdna::array_facts
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     target_records
@@ -293,7 +324,9 @@ loom_cc_library(
     loom::target::types
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     lower
@@ -325,7 +358,9 @@ loom_cc_library(
     loom::util::fact_table
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     provider
@@ -349,7 +384,9 @@ loom_cc_library(
     loom::target::provider
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     pipeline_lower
@@ -382,7 +419,9 @@ loom_cc_library(
     loom::util::fact_table
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     pipeline_pass
@@ -401,7 +440,9 @@ loom_cc_library(
     loom::target::function_version
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     check_provider
@@ -434,7 +475,9 @@ loom_cc_library(
   TESTONLY
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_binary(
   NAME
     loom-check
@@ -447,7 +490,9 @@ loom_cc_binary(
     loom::tools::loom-check::test_provider
   TESTONLY
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_check_test_suite(
   NAME
     loom_check_file_test
@@ -550,7 +595,9 @@ loom_check_test_suite(
   TEST_NAME_PREFIX_TO_STRIP
     "test/source_low/"
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     bundle_plan
@@ -574,7 +621,9 @@ loom_cc_library(
     loom::ops::low
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     relocation
@@ -592,7 +641,9 @@ loom_cc_library(
     loom::target::emit::native::object
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     leaf_object
@@ -617,7 +668,9 @@ loom_cc_library(
     loom::target::emit::native::object
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     leaf_compile
@@ -641,7 +694,9 @@ loom_cc_library(
     loom::util::fact_table
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     tile_link
@@ -657,7 +712,9 @@ loom_cc_library(
     loom::target::emit::native::contribution
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     xdna_product
@@ -676,7 +733,9 @@ loom_cc_library(
     loom::target::emit::native::elf
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     artifact
@@ -713,7 +772,9 @@ loom_cc_library(
     loom::util::fact_table
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_test(
   NAME
     provider_test
@@ -724,8 +785,12 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::target::provider
+  LABELS
+    "iree-build-requirement=loom.target.arch.xdna"
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_test(
   NAME
     array_program_test
@@ -737,8 +802,12 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::codegen::low::function_requirements
+  LABELS
+    "iree-build-requirement=loom.target.arch.xdna"
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_test(
   NAME
     encoding_test
@@ -748,8 +817,12 @@ loom_cc_test(
     ::encoding
     iree::testing::gtest
     iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.xdna"
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_test(
   NAME
     machine_test
@@ -760,8 +833,12 @@ loom_cc_test(
     ::machine
     iree::testing::gtest
     iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.xdna"
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_test(
   NAME
     descriptor_encoding_test
@@ -775,8 +852,12 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::codegen::low::descriptors
+  LABELS
+    "iree-build-requirement=loom.target.arch.xdna"
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_test(
   NAME
     tile_link_test
@@ -790,6 +871,9 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::target::emit::native::object
+  LABELS
+    "iree-build-requirement=loom.target.arch.xdna"
 )
+endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

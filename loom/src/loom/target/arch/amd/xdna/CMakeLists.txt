@@ -9,6 +9,7 @@
 
 iree_add_all_subdirs()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_generated_file_family(
   NAME
     hardware_tables_gen
@@ -27,7 +28,9 @@ loom_generated_file_family(
     "--profile-output"
     "--aie2p-profile-output"
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     array_facts
@@ -41,7 +44,9 @@ loom_cc_library(
     iree::base
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     array_registers
@@ -57,7 +62,9 @@ loom_cc_library(
     iree::base
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
     device_profile
@@ -72,7 +79,9 @@ loom_cc_library(
     iree::base
   PUBLIC
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_test(
   NAME
     array_facts_test
@@ -82,8 +91,12 @@ loom_cc_test(
     ::array_facts
     iree::testing::gtest
     iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.xdna"
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_test(
   NAME
     array_registers_test
@@ -94,8 +107,12 @@ loom_cc_test(
     ::array_registers
     iree::testing::gtest
     iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.xdna"
 )
+endif()
 
+if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_test(
   NAME
     device_profile_test
@@ -106,6 +123,9 @@ loom_cc_test(
     ::device_profile
     iree::testing::gtest
     iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.xdna"
 )
+endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

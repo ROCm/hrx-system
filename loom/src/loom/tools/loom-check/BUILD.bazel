@@ -4,6 +4,7 @@ load(
     "loom_cc_binary",
     "loom_cc_library",
     "loom_cc_test",
+    "loom_config_compatible_with",
 )
 
 package(
@@ -457,6 +458,9 @@ loom_cc_library(
     name = "llvmir_provider",
     srcs = ["llvmir_provider.c"],
     hdrs = ["llvmir_provider.h"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target:llvmir_artifacts",
+    ]),
     deps = [
         ":provider",
         "//loom/src/loom/target/emit/llvmir:loom_check",

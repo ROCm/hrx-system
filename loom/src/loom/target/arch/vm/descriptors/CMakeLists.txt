@@ -9,6 +9,7 @@
 
 iree_add_all_subdirs()
 
+if(LOOM_TARGET_ARCH_VM)
 loom_low_descriptor_cc_library(
   NAME
     descriptors
@@ -19,5 +20,6 @@ loom_low_descriptor_cc_library(
   DEPS
     loom::codegen::low::descriptors
 )
+endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

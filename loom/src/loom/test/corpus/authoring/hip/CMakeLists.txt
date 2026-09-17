@@ -51,6 +51,7 @@ loom_module(
     "bc"
 )
 
+if(LOOM_TARGET_ARCH_AMDGPU)
 loom_module(
   NAME
     gfx11_cases
@@ -64,7 +65,9 @@ loom_module(
   OUTPUT_FORMAT
     "bc"
 )
+endif()
 
+if(LOOM_TARGET_ARCH_AMDGPU)
 loom_module(
   NAME
     gfx1250_cases
@@ -77,6 +80,7 @@ loom_module(
   OUTPUT_FORMAT
     "bc"
 )
+endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 iree_execution_test_suite(

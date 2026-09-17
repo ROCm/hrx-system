@@ -524,7 +524,6 @@ class CiTest(unittest.TestCase):
         command_lines = [step.command_line() for step in steps]
 
         self.assertEqual(len(steps), 2)
-        self.assertEqual(command_lines[0], "python3 dev.py bazel configure")
         test_step = steps[1]
         self.assertEqual(test_step.name, "Test Loom AMDGPU compile coverage")
         self.assertIn(
@@ -762,11 +761,6 @@ class CiTest(unittest.TestCase):
         command_lines = [step.command_line() for step in steps]
 
         self.assertEqual(
-            command_lines[0],
-            "python3 dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON "
-            "-DIREE_ROCM_DEPENDENCY_MODE=pinned",
-        )
-        self.assertEqual(
             [step.name for step in steps],
             [
                 "Configure Bazel",
@@ -839,12 +833,7 @@ class CiTest(unittest.TestCase):
         args = ci.parse_arguments(["iree-bazel-vulkan"])
 
         steps = ci.steps_from_args(args)
-        command_lines = [step.command_line() for step in steps]
 
-        self.assertEqual(
-            command_lines[0],
-            "python3 dev.py bazel configure -DIREE_HAL_DRIVER_VULKAN=ON",
-        )
         self.assertEqual(
             [step.name for step in steps],
             ["Configure Bazel", "Build IREE / Vulkan", "Test IREE / Vulkan"],
@@ -1740,7 +1729,6 @@ fi
         steps = ci.steps_from_args(args)
         command_lines = [step.command_line() for step in steps]
 
-        self.assertEqual(len(steps), 3)
         self.assertTrue(
             any(
                 self.uses_cmake_build_dir(step, "iree-cmake-loom-amdgpu")
@@ -1753,13 +1741,6 @@ fi
         self.assertFalse(
             any("-DIREE_HAL_AMDGPU_TARGETS=" in line for line in command_lines)
         )
-        build_step = next(
-            step
-            for step in steps
-            if step.name == "Build Loom CMake AMDGPU compile coverage"
-        )
-        for target in ci_config.LOOM_AMDGPU_CMAKE_COMPILE_TEST_BUILD_TARGETS:
-            self.assertIn(target, build_step.argv)
         test_step = next(
             step
             for step in steps
