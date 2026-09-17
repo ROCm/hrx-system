@@ -185,19 +185,13 @@ bool loom_low_memory_access_summaries_may_alias(
     const loom_low_memory_access_summary_t* left,
     const loom_low_memory_access_summary_t* right);
 
-// Returns true when |write_summary| can replace |access_summary| in an effect
-// frontier. This is stronger than may-alias: it must be safe for future memory
-// effects that would have depended on access_summary to depend on write_summary
-// instead.
-bool loom_low_memory_access_write_subsumes_access(
-    const loom_low_memory_access_summary_t* write_summary,
-    const loom_low_memory_access_summary_t* access_summary);
-
-// Returns true when |write_summary| can replace |read_summary| in an effect
-// frontier.
-bool loom_low_memory_access_write_subsumes_read(
-    const loom_low_memory_access_summary_t* write_summary,
-    const loom_low_memory_access_summary_t* read_summary);
+// Returns true when the summaries have identical conservative alias facts.
+// This proves equivalent may-alias queries, not identical runtime addresses or
+// full overwrite. Retiring an access additionally requires an established
+// completion dependency through an intervening opposite-kind access.
+bool loom_low_memory_access_summaries_equal(
+    const loom_low_memory_access_summary_t* left,
+    const loom_low_memory_access_summary_t* right);
 
 #ifdef __cplusplus
 }  // extern "C"

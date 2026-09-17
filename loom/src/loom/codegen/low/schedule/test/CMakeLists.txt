@@ -13,6 +13,7 @@ loom_check_test_suite(
   NAME
     test
   SRCS
+    "memory_frontier.loom-test"
     "schedule.loom-test"
     "schedule_locked.loom-test"
 )

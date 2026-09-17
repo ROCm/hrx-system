@@ -1184,3 +1184,56 @@ low.func.def target<amdgpu.rdna3.core>(@target) @explicit_lgkm_wait_keeps_vmem_p
   global_store_b128 v4, v[0:3], s[2:3] offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @scratch_completion_chain_preserves_pending_stores strategy=source
+
+// The first read completes the older stores. Two newer stores still require
+// their own completion before the second read can observe either scratch slot.
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @scratch_completion_chain_preserves_pending_stores(%address: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
+  scratch_store_b32_vaddr %address, %value
+  scratch_store_b32_vaddr %address, %value {offset = 4}
+  %earlier = scratch_load_b32_vaddr %address
+  scratch_store_b32_vaddr %address, %value
+  scratch_store_b32_vaddr %address, %value {offset = 4}
+  %later = scratch_load_b32_vaddr %address
+  %sum = v_add_u32 %earlier, %later
+  global_store_b32_saddr %address, %sum, %output
+  return
+}
+
+// ----
+  scratch_store_b32 v1, v0, off offset:0 glc:0 slc:0 dlc:0
+  scratch_store_b32 v1, v0, off offset:4 glc:0 slc:0 dlc:0
+  s_waitcnt_vscnt vscnt(0)
+  scratch_load_b32 v2, v1, off offset:0 glc:0 slc:0 dlc:0
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  scratch_store_b32 v1, v0, off offset:0 glc:0 slc:0 dlc:0
+  scratch_store_b32 v1, v0, off offset:4 glc:0 slc:0 dlc:0
+  s_waitcnt_vscnt vscnt(0)
+  scratch_load_b32 v0, v1, off offset:0 glc:0 slc:0 dlc:0
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_add_u32 v0, v2, v0
+  global_store_b32 v1, v0, s[0:1] offset:0
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-wait-counter-plan-json @disjoint_read_does_not_complete_stores strategy=source
+
+// The LDS read cannot stand in for global store completion. Both global
+// stores must remain dependencies of the later global read.
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @disjoint_read_does_not_complete_stores(%address: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %storage: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  global_store_b32_saddr %address, %value, %storage
+  %local_value = ds_read_b32 %address
+  global_store_b32_saddr %address, %value, %storage {offset = 4}
+  %global_value = global_load_b32_saddr %address, %storage
+  return %local_value, %global_value
+}
+
+// ----
+{"format":"loom.low.packet_hazard_plan.v1","function":"disjoint_read_does_not_complete_stores","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":4,"hazard_count":3,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1},{"index":1,"packet":1,"node":1,"block":0,"scheduled_ordinal":1,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":2,"packet":2,"node":2,"block":0,"scheduled_ordinal":2,"class_id":2,"class_name":"amdgpu.vmem_store","action":"advance","units":1},{"index":3,"packet":3,"node":3,"block":0,"scheduled_ordinal":3,"class_id":1,"class_name":"amdgpu.vmem_load","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":8,"reason_name":"amdgpu.memory_effect","producer_node":2,"producer_packet":2,"producer_scheduled_ordinal":2,"consumer_node":3,"insertion_packet":3,"block":0,"scheduled_ordinal":3,"progress_class_id":2,"progress_class_name":"amdgpu.vmem_store","required":2,"observed":0,"residual":2},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":3,"producer_packet":3,"producer_scheduled_ordinal":3,"consumer_node":4,"insertion_packet":4,"block":0,"scheduled_ordinal":4,"progress_class_id":1,"progress_class_name":"amdgpu.vmem_load","required":1,"observed":0,"residual":1},{"index":2,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":1,"producer_packet":1,"producer_scheduled_ordinal":1,"consumer_node":4,"insertion_packet":4,"block":0,"scheduled_ordinal":4,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":1,"observed":0,"residual":1}]}

@@ -140,5 +140,60 @@ TEST(MemoryAccessTest, SharedSpaceSummariesPreserveConservativeAliasing) {
   EXPECT_TRUE(loom_low_memory_access_summaries_may_alias(generic, global));
 }
 
+TEST(MemoryAccessTest, EqualSummariesPreserveIdentityAndFootprintFacts) {
+  const auto original = MakeStridedSummary(7, 64, 0, 16);
+  auto other = original;
+  EXPECT_TRUE(loom_low_memory_access_summaries_equal(&original, &other));
+  ++other.alias_root_id;
+  EXPECT_FALSE(loom_low_memory_access_summaries_equal(&original, &other));
+  other = original;
+  other.strided_interval.begin_bytes = 8;
+  EXPECT_TRUE(loom_low_memory_access_summaries_may_alias(&original, &other));
+  EXPECT_FALSE(loom_low_memory_access_summaries_equal(&original, &other));
+  other = original;
+  other.strided_interval.end_bytes = 32;
+  EXPECT_FALSE(loom_low_memory_access_summaries_equal(&original, &other));
+  other = original;
+  other.strided_interval.stride_bytes = 128;
+  EXPECT_FALSE(loom_low_memory_access_summaries_equal(&original, &other));
+  other = original;
+  other.memory_space = LOOM_LOW_MEMORY_SPACE_GLOBAL;
+  EXPECT_FALSE(loom_low_memory_access_summaries_equal(&original, &other));
+  other = original;
+  other.precision_flags &= ~LOOM_LOW_MEMORY_ACCESS_PRECISION_ROOT;
+  EXPECT_FALSE(loom_low_memory_access_summaries_equal(&original, &other));
+}
+
+TEST(MemoryAccessTest, EqualIntervalsCompareOwnedFactsAndExpressions) {
+  loom_low_byte_interval_t left_interval;
+  loom_low_byte_interval_t right_interval;
+  const auto left = MakeIntervalSummary(&left_interval, 11, 0, 16);
+  auto right = MakeIntervalSummary(&right_interval, 11, 0, 16);
+  EXPECT_TRUE(loom_low_memory_access_summaries_equal(&left, &right));
+  right_interval.end_facts.range_hi = 32;
+  EXPECT_FALSE(loom_low_memory_access_summaries_equal(&left, &right));
+  right_interval = left_interval;
+  right_interval.begin_expr_id = 42;
+  EXPECT_FALSE(loom_low_memory_access_summaries_equal(&left, &right));
+  right.byte_interval = nullptr;
+  EXPECT_FALSE(loom_low_memory_access_summaries_equal(&left, &right));
+}
+
+TEST(MemoryAccessTest, EqualSummariesIgnoreAbsentIdentityPayloads) {
+  const auto* space =
+      loom_low_memory_access_summary_for_space(LOOM_LOW_MEMORY_SPACE_GLOBAL);
+  auto other = *space;
+  other.alias_root_id = 42;
+  other.alias_group_id = 7;
+  other.strided_interval = {64, 16, 32};
+  EXPECT_TRUE(loom_low_memory_access_summaries_equal(space, &other));
+
+  other.precision_flags |= LOOM_LOW_MEMORY_ACCESS_PRECISION_GROUP;
+  auto group = other;
+  EXPECT_TRUE(loom_low_memory_access_summaries_equal(&group, &other));
+  ++other.alias_group_id;
+  EXPECT_FALSE(loom_low_memory_access_summaries_equal(&group, &other));
+}
+
 }  // namespace
 }  // namespace loom

@@ -1,0 +1,75 @@
+// Compiler benchmark for independently invoked matrix helpers followed by source
+// stores. Configuration selects the experimental materialized pair count; every
+// pair retains the same two-stage load/consume order and distinct numerical
+// results. Repeated accesses exercise memory-frontier retirement after inlining.
+config.decl @benchmark.pair_count : %value: index where [range(%value, 1, 256)]
+
+amdgpu.target<gfx11-generic> @paired_matrix_target {subgroup_size = 32}
+
+low.func.def target<amdgpu.gfx11.generic.core>(@paired_matrix_target) @paired_matrix_tile(%workitem_id: reg<amdgpu.vgpr>, %lhs_view: reg<amdgpu.sgpr x2>, %rhs_view: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x8>) asm {
+  %lane = v_and_b32_src0_inline %workitem_id, 15
+  %byte_offset = v_lshlrev_b32_src0_inline %lane, 6
+  %lhs0_low = global_load_b128_saddr %byte_offset, %lhs_view
+  %lhs0_high = global_load_b128_saddr %byte_offset, %lhs_view {offset = 16}
+  %lhs0 = concat(%lhs0_low, %lhs0_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  %rhs0_low = global_load_b128_saddr %byte_offset, %rhs_view
+  %rhs0_high = global_load_b128_saddr %byte_offset, %rhs_view {offset = 16}
+  %rhs0 = concat(%rhs0_low, %rhs0_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  %zero = v_mov_b32 0
+  %zero_acc = concat(%zero, %zero, %zero, %zero, %zero, %zero, %zero, %zero) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  %zero_acc_copy = copy %zero_acc : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  low.schedule.fence
+  %partial = v_wmma_f32_16x16x16_bf16 %lhs0, %rhs0, %zero_acc_copy
+  low.schedule.fence
+  %lhs1_low = global_load_b128_saddr %byte_offset, %lhs_view {offset = 32}
+  %lhs1_high = global_load_b128_saddr %byte_offset, %lhs_view {offset = 48}
+  %lhs1 = concat(%lhs1_low, %lhs1_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  %rhs1_low = global_load_b128_saddr %byte_offset, %rhs_view {offset = 32}
+  %rhs1_high = global_load_b128_saddr %byte_offset, %rhs_view {offset = 48}
+  %rhs1 = concat(%rhs1_low, %rhs1_high) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  %partial_copy = copy %partial : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %result = v_wmma_f32_16x16x16_bf16 %lhs1, %rhs1, %partial_copy
+  return %result
+}
+
+kernel.def target(@paired_matrix_target) @paired_matrix_helpers() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%a_lhs: buffer, %a_rhs: buffer, %b_lhs: buffer, %b_rhs: buffer, %a_output: buffer, %b_output: buffer) {
+  %workitem = kernel.workitem.id<x> : index
+  %workitem_i32 = index.cast %workitem : index to i32
+  %lane = vector.splat %workitem_i32 : vector<1xi32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = config.get @benchmark.pair_count : index
+  scf.for %pair = [%begin to %count step %step] unroll {
+    %a_result = low.invoke @paired_matrix_tile(%lane, %a_lhs, %a_rhs) : (vector<1xi32>, buffer, buffer) -> (vector<8xf32>)
+    %b_result = low.invoke @paired_matrix_tile(%lane, %b_lhs, %b_rhs) : (vector<1xi32>, buffer, buffer) -> (vector<8xf32>)
+    %base_offset = index.constant 0 : offset
+    %width = index.constant 8 : index
+    %position = index.mul %workitem, %width : index
+    %a_aligned = buffer.assume.alignment %a_output {minimum_alignment = 16} : buffer
+    %b_aligned = buffer.assume.alignment %b_output {minimum_alignment = 16} : buffer
+    %a_view = buffer.view %a_aligned[%base_offset] : buffer -> view<256xf32>
+    %b_view = buffer.view %b_aligned[%base_offset] : buffer -> view<256xf32>
+    vector.store %a_result, %a_view[%position] : vector<8xf32>, view<256xf32>
+    vector.store %b_result, %b_view[%position] : vector<8xf32>, view<256xf32>
+  }
+  kernel.return
+}
+
+check.case public @paired_matrix_helpers_case {
+  %a_lhs = check.generate.fill value(1.0) : tensor<16x32xbf16>
+  %a_rhs = check.generate.iota offset(1.0) step(1.0) period(32) : tensor<16x32xbf16>
+  %b_lhs = check.generate.fill value(2.0) : tensor<16x32xbf16>
+  %b_rhs = check.generate.iota offset(1.0) step(1.0) period(32) : tensor<16x32xbf16>
+  %a_output = check.generate.fill value(-1.0) : tensor<256xf32>
+  %b_output = check.generate.fill value(-1.0) : tensor<256xf32>
+  %a_expected = check.generate.fill value(528.0) : tensor<256xf32>
+  %b_expected = check.generate.fill value(1056.0) : tensor<256xf32>
+  kernel.launch @paired_matrix_helpers(%a_lhs, %a_rhs, %b_lhs, %b_rhs, %a_output, %b_output) : (tensor<16x32xbf16>, tensor<16x32xbf16>, tensor<16x32xbf16>, tensor<16x32xbf16>, tensor<256xf32>, tensor<256xf32>)
+  check.expect.equal actual(%a_output) expected(%a_expected) : tensor<256xf32>
+  check.expect.equal actual(%b_output) expected(%b_expected) : tensor<256xf32>
+  check.return
+}

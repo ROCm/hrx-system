@@ -160,21 +160,46 @@ bool loom_low_memory_access_summaries_may_alias(
   return true;
 }
 
-bool loom_low_memory_access_write_subsumes_access(
-    const loom_low_memory_access_summary_t* write_summary,
-    const loom_low_memory_access_summary_t* access_summary) {
-  (void)write_summary;
-  (void)access_summary;
-  // Conservative access summaries prove aliasing, not full overwrite. Keeping
-  // earlier effects live is required for generated stack spill traffic where
-  // adjacent scratch stores may target unrelated slots but only carry
-  // descriptor-level stack-space precision.
-  return false;
-}
-
-bool loom_low_memory_access_write_subsumes_read(
-    const loom_low_memory_access_summary_t* write_summary,
-    const loom_low_memory_access_summary_t* read_summary) {
-  return loom_low_memory_access_write_subsumes_access(write_summary,
-                                                      read_summary);
+bool loom_low_memory_access_summaries_equal(
+    const loom_low_memory_access_summary_t* left,
+    const loom_low_memory_access_summary_t* right) {
+  if (left == right) return true;
+  if (left->memory_space != right->memory_space ||
+      left->precision_flags != right->precision_flags) {
+    return false;
+  }
+  if (iree_any_bit_set(left->precision_flags,
+                       LOOM_LOW_MEMORY_ACCESS_PRECISION_ROOT) &&
+      left->alias_root_id != right->alias_root_id) {
+    return false;
+  }
+  if (iree_any_bit_set(left->precision_flags,
+                       LOOM_LOW_MEMORY_ACCESS_PRECISION_GROUP) &&
+      left->alias_group_id != right->alias_group_id) {
+    return false;
+  }
+  if (iree_any_bit_set(left->precision_flags,
+                       LOOM_LOW_MEMORY_ACCESS_PRECISION_STRIDED_INTERVAL) &&
+      (left->strided_interval.stride_bytes !=
+           right->strided_interval.stride_bytes ||
+       left->strided_interval.begin_bytes !=
+           right->strided_interval.begin_bytes ||
+       left->strided_interval.end_bytes != right->strided_interval.end_bytes)) {
+    return false;
+  }
+  if (!iree_any_bit_set(left->precision_flags,
+                        LOOM_LOW_MEMORY_ACCESS_PRECISION_INTERVAL) ||
+      left->byte_interval == right->byte_interval) {
+    return true;
+  }
+  if (left->byte_interval == NULL || right->byte_interval == NULL) return false;
+  const loom_low_byte_interval_t* left_interval = left->byte_interval;
+  const loom_low_byte_interval_t* right_interval = right->byte_interval;
+  return left_interval->precision_flags == right_interval->precision_flags &&
+         left_interval->begin_expr_id == right_interval->begin_expr_id &&
+         left_interval->end_expr_id == right_interval->end_expr_id &&
+         loom_value_facts_equal(left_interval->begin_facts,
+                                right_interval->begin_facts) &&
+         loom_value_facts_equal(left_interval->end_facts,
+                                right_interval->end_facts);
 }

@@ -13,6 +13,7 @@ package(
 
 exports_files([
     "attention/prefill_f16_wmma_amdgpu.loom",
+    "synthetic/paired_matrix_helpers.loom",
     "synthetic/segmented_guarded_read_ahead.loom",
 ])
 
@@ -57,6 +58,16 @@ iree_c_embed_data(
     flatten = True,
     h_file_output = "synthetic_i32_chain_smoke.h",
     identifier = "loomc_benchmark_synthetic_i32_chain_smoke",
+)
+
+iree_c_embed_data(
+    name = "synthetic_paired_matrix_smoke",
+    testonly = True,
+    srcs = ["synthetic/paired_matrix_helpers.loom"],
+    c_file_output = "synthetic_paired_matrix_smoke.c",
+    flatten = True,
+    h_file_output = "synthetic_paired_matrix_smoke.h",
+    identifier = "loomc_benchmark_synthetic_paired_matrix_smoke",
 )
 
 iree_c_embed_data(

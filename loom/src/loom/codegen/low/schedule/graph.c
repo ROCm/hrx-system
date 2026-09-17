@@ -19,19 +19,23 @@
 typedef struct loom_low_schedule_effect_frontier_t {
   // Latest ordered effect node that every later dependency effect must follow.
   uint32_t ordered_node;
-  // Outstanding read nodes not yet subsumed by a later write or ordered effect.
+  // Read nodes not yet completed through an equivalent later read or an
+  // ordered effect.
   uint32_t* read_nodes;
   // Borrowed access summary for each outstanding read node.
   const loom_low_memory_access_summary_t** read_summaries;
   // Number of outstanding read entries.
   iree_host_size_t read_count;
-  // Outstanding write nodes not yet subsumed by a later write or ordered
-  // effect.
+  // Write nodes not yet completed through an equivalent later write or an
+  // ordered effect.
   uint32_t* write_nodes;
   // Borrowed access summary for each outstanding write node.
   const loom_low_memory_access_summary_t** write_summaries;
   // Number of outstanding write entries.
   iree_host_size_t write_count;
+  // Last write cutoff used to retire canonical descriptor-only reads in each
+  // normalized memory space. Zero cannot precede an earlier node.
+  uint32_t read_retirement_nodes[LOOM_LOW_MEMORY_SPACE_WASM_MEMORY + 1];
 } loom_low_schedule_effect_frontier_t;
 
 static bool loom_low_schedule_op_is_descriptor_packet(const loom_op_t* op) {
@@ -1319,6 +1323,8 @@ static void loom_low_schedule_effect_frontier_reset(
   frontier->ordered_node = LOOM_LOW_SCHEDULE_NODE_NONE;
   frontier->read_count = 0;
   frontier->write_count = 0;
+  memset(frontier->read_retirement_nodes, 0,
+         sizeof(frontier->read_retirement_nodes));
 }
 
 static void loom_low_schedule_effect_frontier_initialize(
@@ -1344,12 +1350,33 @@ static iree_status_t loom_low_schedule_effect_frontier_depend_on_ordered(
       LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT, UINT32_MAX);
 }
 
+// An equal-footprint access after an opposite-kind predecessor carries the
+// earlier access's completion transitively: R -> W -> R or W -> R -> W.
+// W -> W alone is insufficient because it does not require completion.
+static iree_host_size_t loom_low_schedule_effect_frontier_retire_completed(
+    uint32_t* nodes, const loom_low_memory_access_summary_t** summaries,
+    iree_host_size_t count, uint32_t predecessor_node,
+    const loom_low_memory_access_summary_t* summary) {
+  iree_host_size_t retained_count = 0;
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    if (nodes[i] < predecessor_node &&
+        loom_low_memory_access_summaries_equal(summary, summaries[i])) {
+      continue;
+    }
+    nodes[retained_count] = nodes[i];
+    summaries[retained_count] = summaries[i];
+    ++retained_count;
+  }
+  return retained_count;
+}
+
 static iree_status_t loom_low_schedule_effect_frontier_note_read(
     loom_low_schedule_build_state_t* state,
     loom_low_schedule_effect_frontier_t* frontier, uint32_t node_index,
     const loom_low_memory_access_summary_t* summary) {
   IREE_RETURN_IF_ERROR(loom_low_schedule_effect_frontier_depend_on_ordered(
       state, frontier, node_index));
+  uint32_t predecessor_node = 0;
   for (iree_host_size_t i = 0; i < frontier->write_count; ++i) {
     if (!loom_low_memory_access_summaries_may_alias(
             summary, frontier->write_summaries[i])) {
@@ -1358,48 +1385,25 @@ static iree_status_t loom_low_schedule_effect_frontier_note_read(
     IREE_RETURN_IF_ERROR(loom_low_schedule_add_dependency(
         state, frontier->write_nodes[i], node_index,
         LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT, UINT32_MAX));
+    predecessor_node = iree_max(predecessor_node, frontier->write_nodes[i]);
+  }
+  const loom_low_memory_space_t memory_space =
+      loom_low_memory_access_normalize_space(summary->memory_space);
+  if (summary == loom_low_memory_access_summary_for_space(memory_space) &&
+      predecessor_node > frontier->read_retirement_nodes[memory_space]) {
+    // Canonical descriptor summaries have a bounded key domain. Each new
+    // opposite-kind cutoff retires once, so a read-only run never rescans its
+    // growing read frontier after the first read.
+    frontier->read_count = loom_low_schedule_effect_frontier_retire_completed(
+        frontier->read_nodes, frontier->read_summaries, frontier->read_count,
+        predecessor_node, summary);
+    frontier->read_retirement_nodes[memory_space] = predecessor_node;
   }
   IREE_ASSERT(frontier->read_count < state->effect_read_capacity,
               "precomputed effect-frontier read capacity must cover all rows");
   frontier->read_nodes[frontier->read_count] = node_index;
   frontier->read_summaries[frontier->read_count] = summary;
   ++frontier->read_count;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_low_schedule_effect_frontier_note_write_complete(
-    loom_low_schedule_build_state_t* state,
-    loom_low_schedule_effect_frontier_t* frontier, uint32_t node_index,
-    const loom_low_memory_access_summary_t* summary) {
-  iree_host_size_t write_index = 0;
-  for (iree_host_size_t read_index = 0; read_index < frontier->read_count;
-       ++read_index) {
-    const loom_low_memory_access_summary_t* read_summary =
-        frontier->read_summaries[read_index];
-    if (loom_low_memory_access_write_subsumes_read(summary, read_summary)) {
-      continue;
-    }
-    frontier->read_nodes[write_index] = frontier->read_nodes[read_index];
-    frontier->read_summaries[write_index] = read_summary;
-    ++write_index;
-  }
-  frontier->read_count = write_index;
-  write_index = 0;
-  for (iree_host_size_t i = 0; i < frontier->write_count; ++i) {
-    if (loom_low_memory_access_write_subsumes_access(
-            summary, frontier->write_summaries[i])) {
-      continue;
-    }
-    frontier->write_nodes[write_index] = frontier->write_nodes[i];
-    frontier->write_summaries[write_index] = frontier->write_summaries[i];
-    ++write_index;
-  }
-  frontier->write_count = write_index;
-  IREE_ASSERT(frontier->write_count < state->effect_write_capacity,
-              "precomputed effect-frontier write capacity must cover all rows");
-  frontier->write_nodes[frontier->write_count] = node_index;
-  frontier->write_summaries[frontier->write_count] = summary;
-  ++frontier->write_count;
   return iree_ok_status();
 }
 
@@ -1418,6 +1422,7 @@ static iree_status_t loom_low_schedule_effect_frontier_note_write(
         state, frontier->write_nodes[i], node_index,
         LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT, UINT32_MAX));
   }
+  uint32_t predecessor_node = 0;
   for (iree_host_size_t i = 0; i < frontier->read_count; ++i) {
     if (!loom_low_memory_access_summaries_may_alias(
             summary, frontier->read_summaries[i])) {
@@ -1426,9 +1431,19 @@ static iree_status_t loom_low_schedule_effect_frontier_note_write(
     IREE_RETURN_IF_ERROR(loom_low_schedule_add_dependency(
         state, frontier->read_nodes[i], node_index,
         LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT, UINT32_MAX));
+    predecessor_node = iree_max(predecessor_node, frontier->read_nodes[i]);
   }
-  return loom_low_schedule_effect_frontier_note_write_complete(
-      state, frontier, node_index, summary);
+  if (predecessor_node != 0) {
+    frontier->write_count = loom_low_schedule_effect_frontier_retire_completed(
+        frontier->write_nodes, frontier->write_summaries, frontier->write_count,
+        predecessor_node, summary);
+  }
+  IREE_ASSERT(frontier->write_count < state->effect_write_capacity,
+              "precomputed effect-frontier write capacity must cover all rows");
+  frontier->write_nodes[frontier->write_count] = node_index;
+  frontier->write_summaries[frontier->write_count] = summary;
+  ++frontier->write_count;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_low_schedule_effect_frontier_note_ordered(

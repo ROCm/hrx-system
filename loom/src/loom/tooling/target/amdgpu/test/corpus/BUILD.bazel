@@ -66,6 +66,7 @@ loom_module(
     name = "gfx11_test_module",
     srcs = [
         "//loom/binding/c/benchmark/kernels:attention/prefill_f16_wmma_amdgpu.loom",
+        "//loom/binding/c/benchmark/kernels:synthetic/paired_matrix_helpers.loom",
         "//loom/src/loom/test/corpus/authoring/hip:gfx11_cases",
     ] + glob(["gfx11/*.loom"]),
     output_format = "bc",
@@ -78,6 +79,7 @@ iree_executable_test(
     args = [
         "$(rootpath :gfx11_test_module)",
         "--device=amdgpu",
+        "--config=benchmark.pair_count=16",
     ],
     data = [":gfx11_test_module"],
     tags = _EXECUTION_TAGS,

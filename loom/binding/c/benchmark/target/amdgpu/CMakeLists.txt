@@ -23,6 +23,7 @@ loom_cc_benchmark(
     loom::binding::c::benchmark::kernels::ffn_gate_up_smoke
     loom::binding::c::benchmark::kernels::ffn_routed_gate_up_smoke
     loom::binding::c::benchmark::kernels::synthetic_i32_chain_smoke
+    loom::binding::c::benchmark::kernels::synthetic_paired_matrix_smoke
     loom::binding::c::benchmark::kernels::synthetic_pipeline_smoke
     loom::binding::c::benchmark::kernels::synthetic_unroll_smoke
     loom::binding::c::benchmark::workload_compile_benchmark

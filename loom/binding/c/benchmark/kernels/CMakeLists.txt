@@ -76,6 +76,22 @@ iree_c_embed_data(
 
 iree_c_embed_data(
   NAME
+    synthetic_paired_matrix_smoke
+  SRCS
+    "synthetic/paired_matrix_helpers.loom"
+  C_FILE_OUTPUT
+    "synthetic_paired_matrix_smoke.c"
+  H_FILE_OUTPUT
+    "synthetic_paired_matrix_smoke.h"
+  IDENTIFIER
+    "loomc_benchmark_synthetic_paired_matrix_smoke"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+
+iree_c_embed_data(
+  NAME
     synthetic_pipeline_smoke
   SRCS
     "synthetic/segmented_guarded_read_ahead.loom"
