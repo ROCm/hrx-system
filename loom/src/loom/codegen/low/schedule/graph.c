@@ -1607,8 +1607,56 @@ static iree_status_t loom_low_schedule_note_structural_effects(
   return iree_ok_status();
 }
 
+static iree_status_t loom_low_schedule_preserve_live_out_state(
+    loom_low_schedule_build_state_t* state, uint32_t block_index,
+    const loom_liveness_block_info_t* liveness) {
+  const loom_low_schedule_block_t* block = &state->blocks[block_index];
+  for (iree_host_size_t i = 0; i < liveness->live_out_count; ++i) {
+    const loom_value_ordinal_t ordinal = loom_local_value_domain_ordinal(
+        state->value_domain, liveness->live_out_values[i]);
+    const loom_low_schedule_value_record_t* value = &state->values[ordinal];
+    const uint16_t reg_class_id = value->register_class_id;
+    if (!loom_low_schedule_reg_class_is_state(state, reg_class_id)) {
+      continue;
+    }
+
+    // State writers retain their source order. A locally defined value must
+    // survive all later writers; an incoming value must survive the whole
+    // block. Ordinary read dependencies only protect uses inside this block.
+    const uint32_t producer = value->producer_node;
+    const uint32_t clobber =
+        producer != LOOM_LOW_SCHEDULE_NODE_NONE &&
+                state->nodes[producer].block_index == block_index
+            ? value->state_next_write_node
+            : state->state_first_write_nodes[reg_class_id];
+    if (clobber == LOOM_LOW_SCHEDULE_NODE_NONE) {
+      continue;
+    }
+
+    state->failure = (loom_low_schedule_failure_t){
+        .kind = LOOM_LOW_SCHEDULE_FAILURE_STATE_CLOBBER,
+        .block_index = block_index,
+        .block_node_count = block->node_count,
+        .unscheduled_node_count = block->node_count,
+        .producer_node = clobber,
+        .consumer_node = block->node_start + block->node_count - 1,
+        .dependency_kind = LOOM_LOW_SCHEDULE_DEPENDENCY_STATE,
+        .operand_index = UINT32_MAX,
+        .state_value_id = value->value_id,
+    };
+    ++state->error_count;
+    if (state->options->emitter.fn != NULL) {
+      IREE_RETURN_IF_ERROR(
+          loom_low_schedule_emit_state_clobber(state, &state->failure));
+    }
+    return iree_ok_status();
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_low_schedule_build_dependencies(
-    loom_low_schedule_build_state_t* state) {
+    loom_low_schedule_build_state_t* state,
+    const loom_liveness_analysis_t* liveness) {
   for (iree_host_size_t block_index = 0; block_index < state->body->block_count;
        ++block_index) {
     const loom_low_schedule_block_t* block_record = &state->blocks[block_index];
@@ -1699,6 +1747,13 @@ iree_status_t loom_low_schedule_build_dependencies(
       }
     }
     loom_low_schedule_reset_storage_reads(state);
+    if (liveness->block_count != 0) {
+      IREE_RETURN_IF_ERROR(loom_low_schedule_preserve_live_out_state(
+          state, (uint32_t)block_index, &liveness->blocks[block_index]));
+      if (state->error_count != 0) {
+        return iree_ok_status();
+      }
+    }
   }
   return iree_ok_status();
 }

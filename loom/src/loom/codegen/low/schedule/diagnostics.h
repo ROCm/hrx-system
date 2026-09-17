@@ -19,6 +19,10 @@ iree_status_t loom_low_schedule_emit_dependency_cycle(
     loom_low_schedule_build_state_t* state,
     const loom_low_schedule_failure_t* failure);
 
+iree_status_t loom_low_schedule_emit_state_clobber(
+    loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_failure_t* failure);
+
 iree_status_t loom_low_schedule_emit_pressure_diagnostics(
     loom_low_schedule_build_state_t* state,
     const loom_liveness_analysis_t* liveness);

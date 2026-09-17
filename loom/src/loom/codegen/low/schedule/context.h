@@ -130,7 +130,7 @@ typedef uint16_t loom_low_schedule_value_flags_t;
 typedef struct loom_low_schedule_value_record_t {
   // Module value represented by this local record.
   loom_value_id_t value_id;
-  // Same-block producer node index, or NONE for block arguments/external defs.
+  // Defining node index, or NONE for block arguments/external definitions.
   uint32_t producer_node;
   // First same-class state writer after the producer, or NONE.
   uint32_t state_next_write_node;

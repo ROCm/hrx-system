@@ -216,6 +216,30 @@ iree_status_t loom_low_schedule_emit_dependency_cycle(
       related_ops, related_op_count);
 }
 
+iree_status_t loom_low_schedule_emit_state_clobber(
+    loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_failure_t* failure) {
+  const loom_low_schedule_node_t* clobber =
+      &state->nodes[failure->producer_node];
+  iree_string_view_t clobber_label;
+  IREE_RETURN_IF_ERROR(
+      loom_low_schedule_node_diagnostic_label(state, clobber, &clobber_label));
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_low_diagnostic_target_key(&state->target)),
+      loom_param_string(loom_low_diagnostic_export_name(&state->target)),
+      loom_param_string(loom_low_diagnostic_config_key(&state->target)),
+      loom_param_string(
+          loom_low_diagnostic_function_name(state->module, state->function_op)),
+      loom_param_string(
+          loom_low_diagnostic_block_name(state->module, clobber->block)),
+      loom_param_string(loom_low_diagnostic_value_name(
+          state->module, failure->state_value_id)),
+      loom_param_string(clobber_label),
+  };
+  return loom_low_schedule_emit(state, clobber->op, LOOM_ERR_BACKEND_048,
+                                params, IREE_ARRAYSIZE(params));
+}
+
 static bool loom_low_schedule_interval_contains_point(
     const loom_liveness_interval_t* interval, uint32_t point) {
   return interval->start_point <= point && point < interval->end_point;

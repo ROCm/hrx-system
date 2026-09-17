@@ -34,7 +34,9 @@ static loom_low_schedule_phase_frontier_t* loom_low_schedule_phase_frontier(
 static iree_status_t loom_low_schedule_add_order_dependency(
     loom_low_schedule_build_state_t* state, uint32_t producer,
     uint32_t consumer) {
-  if (producer == LOOM_LOW_SCHEDULE_NODE_NONE) return iree_ok_status();
+  if (producer == LOOM_LOW_SCHEDULE_NODE_NONE) {
+    return iree_ok_status();
+  }
   return loom_low_schedule_add_dependency(state, producer, consumer,
                                           LOOM_LOW_SCHEDULE_DEPENDENCY_ORDER,
                                           UINT32_MAX);
@@ -44,7 +46,9 @@ static iree_status_t loom_low_schedule_phase_add_member(
     loom_low_schedule_build_state_t* state,
     loom_low_schedule_phase_frontier_t* frontiers, uint32_t* next_members,
     uint32_t scope, uint32_t block_index, uint32_t node_index) {
-  if (scope == 0) return iree_ok_status();
+  if (scope == 0) {
+    return iree_ok_status();
+  }
   loom_low_schedule_phase_frontier_t* frontier =
       loom_low_schedule_phase_frontier(frontiers, scope, block_index);
   IREE_RETURN_IF_ERROR(loom_low_schedule_add_order_dependency(
@@ -110,7 +114,9 @@ iree_status_t loom_low_schedule_build_scope_dependencies(
                   state->scopes.controls[control_index].node_index == node_index
               ? &state->scopes.controls[control_index++]
               : NULL;
-      if (active_scope == LOOM_LOW_SCHEDULE_SCOPE_UNREACHABLE) continue;
+      if (active_scope == LOOM_LOW_SCHEDULE_SCOPE_UNREACHABLE) {
+        continue;
+      }
       if (control == NULL) {
         status = loom_low_schedule_phase_add_member(state, frontiers,
                                                     next_members, active_scope,

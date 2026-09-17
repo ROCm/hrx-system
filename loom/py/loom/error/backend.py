@@ -1197,6 +1197,33 @@ ERR_BACKEND_047 = ErrorDef(
     ),
 )
 
+# ERR_BACKEND_048: Architectural state is clobbered across a CFG edge.
+ERR_BACKEND_048 = ErrorDef(
+    domain=ErrorDomain.BACKEND,
+    code=48,
+    severity=Severity.ERROR,
+    summary="Architectural state is clobbered across a CFG edge.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "'@{function_name}' block '{block_name}' clobbers architectural-state "
+        "value '{value_name}' at '{clobber_packet}' while the value remains "
+        "live at block exit"
+    ),
+    params=(
+        ErrorParam("target_key", ParamKind.STRING),
+        ErrorParam("export_name", ParamKind.STRING),
+        ErrorParam("config_key", ParamKind.STRING),
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("block_name", ParamKind.STRING),
+        ErrorParam("value_name", ParamKind.STRING),
+        ErrorParam("clobber_packet", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Carry the predicate in ordinary registers and restore it before use, "
+        "or provide a recomputable definition of the architectural-state value"
+    ),
+)
+
 ALL_BACKEND_ERRORS: tuple[ErrorDef, ...] = (
     ERR_BACKEND_003,
     ERR_BACKEND_005,
@@ -1239,4 +1266,5 @@ ALL_BACKEND_ERRORS: tuple[ErrorDef, ...] = (
     ERR_BACKEND_045,
     ERR_BACKEND_046,
     ERR_BACKEND_047,
+    ERR_BACKEND_048,
 )

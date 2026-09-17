@@ -26,7 +26,8 @@ iree_status_t loom_low_schedule_fill_nodes(
     loom_low_schedule_build_state_t* state);
 
 iree_status_t loom_low_schedule_build_dependencies(
-    loom_low_schedule_build_state_t* state);
+    loom_low_schedule_build_state_t* state,
+    const loom_liveness_analysis_t* liveness);
 
 #ifdef __cplusplus
 }  // extern "C"

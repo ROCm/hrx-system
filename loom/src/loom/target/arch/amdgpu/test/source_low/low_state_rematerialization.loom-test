@@ -77,3 +77,217 @@ s_cmp_lt_u32 s0, s1
   s_cmp_lt_u32 s0, s1
   s_cselect_b32 s0, s3, s2
   s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @scc_compare_survives_intervening_block strategy=source waits=none
+
+amdgpu.target<gfx1100> @target
+
+// The clobbering block has no explicit use of the predicate. Its live-out
+// requirement still preserves the original condition for the final select.
+low.func.def target<amdgpu.rdna3.core>(@target) @scc_compare_survives_intervening_block(%ordinal: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %valid = s_cmp_lt_u32 %ordinal, %limit
+  %bounded = s_cselect_b32 %ordinal, %fallback, %valid
+  low.br ^control
+^control:
+  %advanced = s_add_u32 %bounded, %limit
+  low.br ^consume
+^consume:
+  %result = s_cselect_b32 %advanced, %fallback, %valid
+  return %result
+}
+
+// ----
+  s_cmp_lt_u32 s0, s1
+  s_cselect_b32 s3, s0, s2
+.Lbb1:
+  s_add_u32 s3, s3, s1
+.Lbb2:
+  s_cmp_lt_u32 s0, s1
+  s_cselect_b32 s0, s3, s2
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @scc_compare_survives_producer_tail strategy=source waits=none
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @scc_compare_survives_producer_tail(%ordinal: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %valid = s_cmp_lt_u32 %ordinal, %limit
+  %bounded = s_cselect_b32 %ordinal, %fallback, %valid
+  %advanced = s_add_u32 %bounded, %limit
+  low.br ^consume
+^consume:
+  %result = s_cselect_b32 %advanced, %fallback, %valid
+  return %result
+}
+
+// ----
+  s_cmp_lt_u32 s0, s1
+  s_cselect_b32 s3, s0, s2
+  s_add_u32 s3, s3, s1
+.Lbb1:
+  s_cmp_lt_u32 s0, s1
+  s_cselect_b32 s0, s3, s2
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @scc_compare_survives_diamond strategy=source waits=none
+
+amdgpu.target<gfx1100> @target
+
+// Only one incoming path clobbers SCC. The merge consumes the entry predicate
+// regardless of which path executed.
+low.func.def target<amdgpu.rdna3.core>(@target) @scc_compare_survives_diamond(%ordinal: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %valid = s_cmp_lt_u32 %ordinal, %limit
+  low.cond_br %valid, ^advance, ^unchanged : reg<amdgpu.scc>
+^advance:
+  %advanced = s_add_u32 %ordinal, %limit
+  low.br ^merge(%advanced: reg<amdgpu.sgpr>)
+^unchanged:
+  low.br ^merge(%ordinal: reg<amdgpu.sgpr>)
+^merge(%candidate: reg<amdgpu.sgpr>):
+  %result = s_cselect_b32 %candidate, %fallback, %valid
+  return %result
+}
+
+// ----
+  s_cmp_lt_u32 s0, s1
+  s_cbranch_scc0 .Lbb2
+.Lbb1:
+  s_add_u32 s3, s0, s1
+  s_branch .Lbb3
+.Lbb2:
+  s_mov_b32 s3, s0
+.Lbb3:
+  s_cmp_lt_u32 s0, s1
+  s_cselect_b32 s0, s3, s2
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @scc_compare_survives_loop_backedge strategy=source waits=none
+
+amdgpu.target<gfx1100> @target
+
+// The initial range check remains the selection predicate on every iteration;
+// the induction update and loop-exit check both overwrite SCC.
+low.func.def target<amdgpu.rdna3.core>(@target) @scc_compare_survives_loop_backedge(%ordinal: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %valid = s_cmp_lt_u32 %ordinal, %limit
+  %one = s_mov_b32 1
+  low.br ^loop(%ordinal: reg<amdgpu.sgpr>)
+^loop(%index: reg<amdgpu.sgpr>):
+  %selected = s_cselect_b32 %index, %fallback, %valid
+  %next = s_add_u32 %index, %one
+  %again = s_cmp_lt_u32 %next, %limit
+  low.cond_br %again, ^latch, ^done : reg<amdgpu.scc>
+^latch:
+  low.br ^loop(%next: reg<amdgpu.sgpr>)
+^done:
+  return %selected
+}
+
+// ----
+  s_mov_b32 s3, 1
+  s_mov_b32 s4, s0
+.Lbb1:
+  s_cmp_lt_u32 s0, s1
+  s_cselect_b32 s5, s4, s2
+  s_add_u32 s4, s4, s3
+  s_cmp_lt_u32 s4, s1
+  s_cbranch_scc0 .Lbb3
+.Lbb2:
+  s_branch .Lbb1
+.Lbb3:
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @scc_compare_crosses_transparent_blocks strategy=source waits=none
+
+amdgpu.target<gfx1100> @target
+
+// There is no SCC writer between producer and consumer, so one comparison is
+// sufficient across both edges.
+low.func.def target<amdgpu.rdna3.core>(@target) @scc_compare_crosses_transparent_blocks(%ordinal: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %valid = s_cmp_lt_u32 %ordinal, %limit
+  low.br ^control
+^control:
+  %candidate = copy %ordinal : reg<amdgpu.sgpr> -> reg<amdgpu.sgpr>
+  low.br ^consume
+^consume:
+  %result = s_cselect_b32 %candidate, %fallback, %valid
+  return %result
+}
+
+// ----
+  s_cmp_lt_u32 s1, s0
+.Lbb1:
+.Lbb2:
+  s_cselect_b32 s0, s1, s2
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @scc_copy_crosses_transparent_blocks strategy=source waits=none
+
+amdgpu.target<gfx1100> @target
+
+// An explicit state copy preserves the same condition. Its lifetime starts
+// after the comparison rather than treating the comparison as a clobber.
+low.func.def target<amdgpu.rdna3.core>(@target) @scc_copy_crosses_transparent_blocks(%ordinal: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %valid = s_cmp_lt_u32 %ordinal, %limit
+  %alias = copy %valid : reg<amdgpu.scc> -> reg<amdgpu.scc>
+  low.br ^control
+^control:
+  %candidate = copy %ordinal : reg<amdgpu.sgpr> -> reg<amdgpu.sgpr>
+  low.br ^consume
+^consume:
+  %result = s_cselect_b32 %candidate, %fallback, %alias
+  return %result
+}
+
+// ----
+  s_cmp_lt_u32 s1, s0
+.Lbb1:
+.Lbb2:
+  s_cselect_b32 s0, s1, s2
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @scc_block_argument_crosses_transparent_block strategy=source waits=none
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @scc_block_argument_crosses_transparent_block(%ordinal: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %valid = s_cmp_lt_u32 %ordinal, %limit
+  low.br ^control(%valid: reg<amdgpu.scc>)
+^control(%condition: reg<amdgpu.scc>):
+  %candidate = copy %ordinal : reg<amdgpu.sgpr> -> reg<amdgpu.sgpr>
+  low.br ^consume
+^consume:
+  %result = s_cselect_b32 %candidate, %fallback, %condition
+  return %result
+}
+
+// ----
+  s_cmp_lt_u32 s1, s0
+.Lbb1:
+.Lbb2:
+  s_cselect_b32 s0, s1, s2
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @imported_scc_clobber_is_diagnosed strategy=source waits=none
+
+amdgpu.target<gfx1100> @target
+
+// Imported state has no recomputable definition. The compiler names the value
+// and the instruction that loses it instead of selecting with the add carry.
+low.func.def target<amdgpu.rdna3.core>(@target) @imported_scc_clobber_is_diagnosed(%ordinal: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>, %valid: reg<amdgpu.scc>) -> (reg<amdgpu.sgpr>) asm {
+  low.br ^control
+^control:
+  // ERROR@+1: BACKEND/048 {function_name="imported_scc_clobber_is_diagnosed", block_name="control", value_name="valid", clobber_packet="amdgpu.s_add_u32"}
+  %advanced = s_add_u32 %ordinal, %limit
+  low.br ^consume
+^consume:
+  %result = s_cselect_b32 %advanced, %fallback, %valid
+  return %result
+}

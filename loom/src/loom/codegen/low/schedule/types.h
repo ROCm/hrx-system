@@ -82,6 +82,8 @@ typedef enum loom_low_schedule_failure_kind_e {
   LOOM_LOW_SCHEDULE_FAILURE_NONE = 0,
   // Remaining same-block dependencies formed a cycle.
   LOOM_LOW_SCHEDULE_FAILURE_DEPENDENCY_CYCLE = 1,
+  // A block overwrites architectural state that remains live at its exit.
+  LOOM_LOW_SCHEDULE_FAILURE_STATE_CLOBBER = 2,
 } loom_low_schedule_failure_kind_t;
 
 enum loom_low_schedule_failure_flag_bits_e {
@@ -107,16 +109,16 @@ typedef struct loom_low_schedule_failure_t {
   uint32_t scheduled_node_count;
   // Number of unscheduled nodes remaining in the failed block.
   uint32_t unscheduled_node_count;
-  // Producer node for the representative unresolved dependency edge.
+  // Producer of the unresolved dependency, or the live-out state clobber.
   uint32_t producer_node;
-  // Consumer node for the representative unresolved dependency edge.
+  // Consumer of the unresolved dependency, or the clobbering block's exit.
   uint32_t consumer_node;
   // Dependency kind for the representative unresolved edge.
   loom_low_schedule_dependency_kind_t dependency_kind;
   // Operand index for the representative edge, or UINT32_MAX.
   uint32_t operand_index;
-  // Architectural-state SSA value read across a clobber edge in the cycle, or
-  // LOOM_VALUE_ID_INVALID when the cycle has no explicit state-value witness.
+  // Architectural-state SSA value requiring preservation across a clobber, or
+  // LOOM_VALUE_ID_INVALID when the failure has no explicit state witness.
   loom_value_id_t state_value_id;
   // Inline same-block cycle node path. When non-empty, the last node has a
   // dependency edge back to the first node.

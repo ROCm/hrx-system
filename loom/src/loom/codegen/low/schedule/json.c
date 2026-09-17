@@ -78,6 +78,8 @@ static const char* loom_low_schedule_json_failure_kind(
       return "none";
     case LOOM_LOW_SCHEDULE_FAILURE_DEPENDENCY_CYCLE:
       return "dependency_cycle";
+    case LOOM_LOW_SCHEDULE_FAILURE_STATE_CLOBBER:
+      return "state_clobber";
     default:
       return "unknown";
   }
@@ -467,8 +469,9 @@ iree_status_t loom_low_schedule_format_json(
     IREE_RETURN_IF_ERROR(loom_json_array_begin(&stream, &controls));
     for (iree_host_size_t i = 0; i < table->scopes.control_count; ++i) {
       const loom_low_schedule_control_t* control = &table->scopes.controls[i];
-      if (control->scope_before == LOOM_LOW_SCHEDULE_SCOPE_UNREACHABLE)
+      if (control->scope_before == LOOM_LOW_SCHEDULE_SCOPE_UNREACHABLE) {
         continue;
+      }
       IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&controls));
       loom_json_object_writer_t control_object;
       IREE_RETURN_IF_ERROR(loom_json_object_begin(&stream, &control_object));
