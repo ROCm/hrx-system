@@ -37,8 +37,6 @@ struct amdf_xdna_umd_memory_t {
   uint64_t byte_length;
   // Stable XDNA virtual base established before publication.
   uint64_t device_address;
-  // Accepted paging fence that must retire before native release.
-  uint64_t pending_paging_fence;
 };
 
 struct amdf_xdna_umd_host_mapping_t {
@@ -61,16 +59,6 @@ static amdf_status_t amdf_windows_xdna_memory_release_native(
     }
     return status;
   }
-  if (memory->pending_paging_fence != 0) {
-    const amdf_status_t status = amdf_kmt_wait_for_paging(
-        memory->device->kmt, memory->device->device,
-        memory->device->paging_sync_object, memory->device->paging_fence,
-        memory->pending_paging_fence);
-    if (!amdf_status_is_ok(status)) {
-      return status;
-    }
-    memory->pending_paging_fence = 0;
-  }
   if (memory->resource != 0 || memory->allocation != 0) {
     D3DKMT_DESTROYALLOCATION2 destroy = {0};
     destroy.hDevice = memory->device->device;
@@ -80,7 +68,8 @@ static amdf_status_t amdf_windows_xdna_memory_release_native(
       destroy.AllocationCount = 1;
     }
     destroy.Flags.AssumeNotInUse = 1;
-    // Both owned and registered host pages outlive OS reclamation. Execution
+    // Synchronous destruction reclaims accepted preparation work even when its
+    // CPU wait failed. Host backing outlives OS reclamation; execution
     // retirement remains the caller's precondition.
     destroy.Flags.SynchronousDestroy = 1;
     const amdf_status_t status =
@@ -155,13 +144,11 @@ static amdf_status_t amdf_windows_xdna_memory_map_device_address(
   if (!amdf_kmt_status_is_success_or_pending(native_status)) {
     return amdf_kmt_make_status(native_status);
   }
-  memory->pending_paging_fence = map.PagingFenceValue;
   amdf_status_t status = amdf_kmt_wait_for_paging(
       memory->device->kmt, memory->device->device,
       memory->device->paging_sync_object, memory->device->paging_fence,
-      memory->pending_paging_fence);
+      map.PagingFenceValue);
   if (amdf_status_is_ok(status)) {
-    memory->pending_paging_fence = 0;
     memory->device_address = map.VirtualAddress;
     if (memory->device_address < address_capabilities->minimum_address ||
         memory->device_address > maximum_address ||
@@ -186,13 +173,11 @@ static amdf_status_t amdf_windows_xdna_memory_make_resident(
   if (!amdf_kmt_status_is_success_or_pending(native_status)) {
     return amdf_kmt_make_status(native_status);
   }
-  memory->pending_paging_fence = make_resident.PagingFenceValue;
   amdf_status_t status = amdf_kmt_wait_for_paging(
       memory->device->kmt, memory->device->device,
       memory->device->paging_sync_object, memory->device->paging_fence,
-      memory->pending_paging_fence);
+      make_resident.PagingFenceValue);
   if (amdf_status_is_ok(status)) {
-    memory->pending_paging_fence = 0;
     if (make_resident.NumAllocations != 1) {
       status = amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
     }

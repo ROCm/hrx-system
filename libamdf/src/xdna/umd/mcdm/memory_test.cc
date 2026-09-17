@@ -50,8 +50,6 @@ struct FakeKmtState {
   FailurePoint failure_point = FailurePoint::kNone;
   // Number of allocation release calls rejected before consuming the handle.
   uint32_t destroy_failures_remaining = 0;
-  // Number of matching paging waits rejected before completion is observed.
-  uint32_t wait_failures_remaining = 1;
   // Real host backing borrowed by the modeled native allocation.
   const void* host_pointer = nullptr;
   // Memory and host-view metadata returned to the host allocator.
@@ -150,8 +148,7 @@ FakeWaitFromCpu(const D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMCPU* wait) {
       g_fake_state->failure_point == FailurePoint::kFirstWait    ? 1
       : g_fake_state->failure_point == FailurePoint::kSecondWait ? 2
                                                                  : 0;
-  if (target == failing_target && g_fake_state->wait_failures_remaining != 0) {
-    --g_fake_state->wait_failures_remaining;
+  if (target == failing_target) {
     return kStatusNoMemory;
   }
   return 0;
@@ -473,7 +470,7 @@ TEST_F(WindowsXdnaMemoryTest, RequiresAddressGeometryBeforeAdvertisingMemory) {
 }
 
 TEST_F(WindowsXdnaMemoryTest,
-       ReclaimsEveryFailurePrefixAfterAcceptedPagingRetires) {
+       ReclaimsEveryFailurePrefixThroughAllocationDestruction) {
   for (FailurePoint failure_point :
        {FailurePoint::kCreate, FailurePoint::kMap,
         FailurePoint::kInvalidMapAddress, FailurePoint::kFirstWait,
@@ -513,11 +510,11 @@ TEST_F(WindowsXdnaMemoryTest,
                                     Operation::kWait, Operation::kDestroy}));
         break;
       case FailurePoint::kFirstWait:
-        EXPECT_EQ(state_.operations,
-                  (std::vector<Operation>{Operation::kCreate, Operation::kMap,
-                                          Operation::kWait, Operation::kWait,
-                                          Operation::kDestroy}));
-        EXPECT_EQ(state_.wait_targets, (std::vector<uint64_t>{1, 1}));
+        EXPECT_EQ(
+            state_.operations,
+            (std::vector<Operation>{Operation::kCreate, Operation::kMap,
+                                    Operation::kWait, Operation::kDestroy}));
+        EXPECT_EQ(state_.wait_targets, (std::vector<uint64_t>{1}));
         break;
       case FailurePoint::kResident:
         EXPECT_EQ(state_.operations,
@@ -533,12 +530,12 @@ TEST_F(WindowsXdnaMemoryTest,
                                     Operation::kWait, Operation::kDestroy}));
         break;
       case FailurePoint::kSecondWait:
-        EXPECT_EQ(state_.operations,
-                  (std::vector<Operation>{
-                      Operation::kCreate, Operation::kMap, Operation::kWait,
-                      Operation::kResident, Operation::kWait, Operation::kWait,
-                      Operation::kDestroy}));
-        EXPECT_EQ(state_.wait_targets, (std::vector<uint64_t>{1, 2, 2}));
+        EXPECT_EQ(
+            state_.operations,
+            (std::vector<Operation>{Operation::kCreate, Operation::kMap,
+                                    Operation::kWait, Operation::kResident,
+                                    Operation::kWait, Operation::kDestroy}));
+        EXPECT_EQ(state_.wait_targets, (std::vector<uint64_t>{1, 2}));
         break;
       case FailurePoint::kDestroy:
       case FailurePoint::kNone:
@@ -549,35 +546,38 @@ TEST_F(WindowsXdnaMemoryTest,
 }
 
 TEST_F(WindowsXdnaMemoryTest,
-       LeaksBackingWhenRollbackCannotObservePagingCompletion) {
-  state_.failure_point = FailurePoint::kFirstWait;
-  state_.wait_failures_remaining = 2;
-  amdf_xdna_umd_memory_t* memory = nullptr;
-  amdf_xdna_umd_memory_result_t result;
-  std::memset(&result, 0xA5, sizeof(result));
-  const amdf_xdna_umd_memory_result_t original_result = result;
+       ReclaimsOwnedBackingAfterPersistentPreparationWaitFailure) {
+  for (FailurePoint failure_point :
+       {FailurePoint::kFirstWait, FailurePoint::kSecondWait}) {
+    SCOPED_TRACE(static_cast<int>(failure_point));
+    state_ = {};
+    state_.failure_point = failure_point;
+    amdf_xdna_umd_memory_t* memory = nullptr;
+    amdf_xdna_umd_memory_result_t result;
+    std::memset(&result, 0xA5, sizeof(result));
+    const amdf_xdna_umd_memory_result_t original_result = result;
 
-  EXPECT_EQ(amdf_xdna_umd_memory_prepare(&device_, &profile_, &create_info_,
-                                         &memory, &result),
-            amdf_kmt_make_status(kStatusNoMemory));
-  ASSERT_NE(memory, nullptr);
-  EXPECT_EQ(std::memcmp(&result, &original_result, sizeof(result)), 0);
-  EXPECT_EQ(state_.metadata_free_count, 0u);
-  EXPECT_EQ(state_.wait_targets, (std::vector<uint64_t>{1}));
-  EXPECT_EQ(amdf_xdna_umd_memory_destroy(memory),
-            amdf_kmt_make_status(kStatusNoMemory));
-  EXPECT_EQ(state_.metadata_free_count, 0u);
-  amdf_xdna_umd_memory_abandon(memory);
-  EXPECT_EQ(state_.metadata_free_count, 1u);
-  EXPECT_EQ(state_.operations,
-            (std::vector<Operation>{Operation::kCreate, Operation::kMap,
-                                    Operation::kWait, Operation::kWait}));
+    EXPECT_EQ(amdf_xdna_umd_memory_prepare(&device_, &profile_, &create_info_,
+                                           &memory, &result),
+              amdf_kmt_make_status(kStatusNoMemory));
+    ASSERT_NE(memory, nullptr);
+    EXPECT_EQ(std::memcmp(&result, &original_result, sizeof(result)), 0);
+    EXPECT_EQ(state_.metadata_free_count, 0u);
+    const auto preparation_waits = state_.wait_targets;
+    EXPECT_EQ(amdf_xdna_umd_memory_destroy(memory), AMDF_STATUS_OK);
+    EXPECT_EQ(state_.metadata_free_count, 1u);
+    EXPECT_EQ(state_.operations.back(), Operation::kDestroy);
+    EXPECT_EQ(state_.wait_targets, preparation_waits);
 
-  EXPECT_EQ(state_.wait_targets, (std::vector<uint64_t>{1, 1}));
-  ReleaseLeakedBacking();
+    MEMORY_BASIC_INFORMATION information = {};
+    ASSERT_NE(
+        VirtualQuery(state_.host_pointer, &information, sizeof(information)),
+        0u);
+    EXPECT_EQ(information.State, MEM_FREE);
+  }
 }
 
-TEST_F(WindowsXdnaMemoryTest, KeepsPublishedMemoryLiveAfterDestroyFailure) {
+TEST_F(WindowsXdnaMemoryTest, PreservesBackingAfterFinalDestructionFailure) {
   amdf_xdna_umd_memory_t* memory = nullptr;
   amdf_xdna_umd_memory_result_t result = {};
   ASSERT_TRUE(amdf_status_is_ok(amdf_xdna_umd_memory_prepare(
@@ -587,9 +587,9 @@ TEST_F(WindowsXdnaMemoryTest, KeepsPublishedMemoryLiveAfterDestroyFailure) {
   state_.failure_point = FailurePoint::kDestroy;
   EXPECT_FALSE(amdf_status_is_ok(amdf_xdna_umd_memory_destroy(memory)));
   EXPECT_EQ(state_.metadata_free_count, 0u);
-  state_.failure_point = FailurePoint::kNone;
-  EXPECT_TRUE(amdf_status_is_ok(amdf_xdna_umd_memory_destroy(memory)));
+  amdf_xdna_umd_memory_abandon(memory);
   EXPECT_EQ(state_.metadata_free_count, 1u);
+  ReleaseLeakedBacking();
 }
 
 TEST_F(WindowsXdnaMemoryTest,
