@@ -212,10 +212,12 @@ hrx_cc_shared_library(
         "abi_stubs.c",
         "api.c",
         "api_metadata.c",
+        "vmm.c",
     ],
     hdrs = [
         "api.h",
         "binding_internal.h",
+        "vmm.h",
     ],
     additional_linker_inputs = ["amdhip64.map"],
     copts = [
