@@ -67,7 +67,9 @@ iree_status_t loom_low_schedule_scope_builder_finish(
       .controls = builder->controls,
       .control_count = builder->control_count,
   };
-  if (builder->control_count == 0) return iree_ok_status();
+  if (builder->control_count == 0) {
+    return iree_ok_status();
+  }
 
   uint32_t* block_entry_scopes = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, graph->block_count,
@@ -120,7 +122,9 @@ iree_status_t loom_low_schedule_scope_builder_finish(
       }
       control->scope_after = active_scope;
     }
-    if (!iree_status_is_ok(status) || out_scopes->error_count != 0) break;
+    if (!iree_status_is_ok(status) || out_scopes->error_count != 0) {
+      break;
+    }
 
     const loom_cfg_block_index_span_t successors =
         graph->blocks ? loom_cfg_graph_successors(graph, block_index)
