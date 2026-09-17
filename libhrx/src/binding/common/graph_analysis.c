@@ -438,7 +438,9 @@ static iree_status_t iree_hal_streaming_graph_build_additional_dependency_index(
     uint32_t node_count, iree_arena_allocator_t* arena,
     iree_hal_streaming_graph_additional_dependency_index_t* out_index) {
   memset(out_index, 0, sizeof(*out_index));
-  if (!additional_edges) return iree_ok_status();
+  if (!additional_edges) {
+    return iree_ok_status();
+  }
 
   iree_host_size_t active_edge_count = 0;
   for (iree_hal_streaming_graph_edge_t* edge = additional_edges; edge;
@@ -447,14 +449,18 @@ static iree_status_t iree_hal_streaming_graph_build_additional_dependency_index(
         node_index_map, node_index_map_count, edge->from);
     const uint32_t target_index = iree_hal_streaming_graph_node_map_lookup(
         node_index_map, node_index_map_count, edge->to);
-    if (source_index == UINT32_MAX || target_index == UINT32_MAX) continue;
+    if (source_index == UINT32_MAX || target_index == UINT32_MAX) {
+      continue;
+    }
     if (IREE_UNLIKELY(active_edge_count == UINT32_MAX)) {
       return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                               "graph has too many additional dependencies");
     }
     ++active_edge_count;
   }
-  if (active_edge_count == 0) return iree_ok_status();
+  if (active_edge_count == 0) {
+    return iree_ok_status();
+  }
 
   iree_host_size_t heads_size = 0;
   if (IREE_UNLIKELY(!iree_host_size_checked_mul(
@@ -483,7 +489,9 @@ static iree_status_t iree_hal_streaming_graph_build_additional_dependency_index(
         node_index_map, node_index_map_count, edge->from);
     const uint32_t target_index = iree_hal_streaming_graph_node_map_lookup(
         node_index_map, node_index_map_count, edge->to);
-    if (source_index == UINT32_MAX || target_index == UINT32_MAX) continue;
+    if (source_index == UINT32_MAX || target_index == UINT32_MAX) {
+      continue;
+    }
     out_index->dependencies[dependency_index] =
         (iree_hal_streaming_graph_additional_dependency_t){
             .source_index = source_index,
