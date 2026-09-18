@@ -1089,3 +1089,72 @@ func.def public @known_first(%input: index) -> (index, index) {
   %unknown_result = func.call pure @remainder(%input) : (index) -> (index)
   func.return %unknown_result, %known_result : index, index
 }
+
+// ====
+
+// Kernel callers precede their device helpers in the symbol graph. Nested
+// successor walks preserve the caller's live region traversal after a call.
+kernel.def @caller_before_callees() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer, %value: f32, %choose_chain: i1) {
+  %result = scf.if %choose_chain -> (f32) {
+    %scaled = func.call @scale_chain(%value) : (f32) -> (f32)
+    %bias = scalar.constant 1.0 : f32
+    %sum = scalar.addf %scaled, %bias : f32
+    scf.yield %sum : f32
+  } else {
+    %scaled = func.call @scale_leaf(%value) : (f32) -> (f32)
+    scf.yield %scaled : f32
+  }
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<1xf32>
+  view.store %result, %output_view[0] : f32, view<1xf32>
+  kernel.return
+}
+
+func.def device @scale_chain(%value: f32) -> (f32) {
+  %scaled = func.call @scale_leaf(%value) : (f32) -> (f32)
+  %chain_scale = scalar.constant 2.0 : f32
+  %result = scalar.mulf %scaled, %chain_scale : f32
+  func.return %result : f32
+}
+
+func.def device @scale_leaf(%value: f32) -> (f32) {
+  %leaf_scale = scalar.constant 3.0 : f32
+  %result = scalar.mulf %value, %leaf_scale : f32
+  func.return %result : f32
+}
+
+// ----
+kernel.def @caller_before_callees() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer, %value: f32, %choose_chain: i1) {
+  %result = scf.if %choose_chain -> (f32) {
+    %scaled = func.call pure @scale_chain(%value) : (f32) -> (f32)
+    %bias = scalar.constant 1.0 : f32
+    %sum = scalar.addf %scaled, %bias : f32
+    scf.yield %sum : f32
+  } else {
+    %scaled = func.call pure @scale_leaf(%value) : (f32) -> (f32)
+    scf.yield %scaled : f32
+  }
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<1xf32>
+  view.store %result, %output_view[0] : f32, view<1xf32>
+  kernel.return
+}
+
+func.def device @scale_chain(%value: f32) -> (f32) {
+  %scaled = func.call pure @scale_leaf(%value) : (f32) -> (f32)
+  %chain_scale = scalar.constant 2.0 : f32
+  %result = scalar.mulf %scaled, %chain_scale : f32
+  func.return %result : f32
+}
+
+func.def device @scale_leaf(%value: f32) -> (f32) {
+  %leaf_scale = scalar.constant 3.0 : f32
+  %result = scalar.mulf %value, %leaf_scale : f32
+  func.return %result : f32
+}

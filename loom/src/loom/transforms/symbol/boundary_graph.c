@@ -145,7 +145,7 @@ static iree_status_t loom_refine_boundaries_collect_argument_projections(
         (loom_refine_boundaries_argument_projection_t){
             .region = region,
             .entry_block = loom_region_entry_block(region),
-        };
+    };
   }
   return iree_ok_status();
 }
@@ -191,12 +191,17 @@ static iree_status_t loom_refine_boundaries_visit_successors(
       .visitor = visitor,
   };
   loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
-  iree_arena_reset(graph->walk_arena);
-  return loom_walk_function(
+  // SCC successor callbacks may recursively walk callees while this function's
+  // traversal is still live. Reclaim only the frames owned by this invocation.
+  const iree_arena_checkpoint_t walk_checkpoint =
+      iree_arena_checkpoint_save(graph->walk_arena);
+  iree_status_t status = loom_walk_function(
       graph->module, graph->functions[node].function, LOOM_WALK_PRE_ORDER,
       (loom_walk_callback_t){loom_refine_boundaries_visit_successor_call,
                              &walk},
       graph->walk_arena, &walk_result);
+  iree_arena_checkpoint_restore(&walk_checkpoint);
+  return status;
 }
 
 iree_status_t loom_refine_boundaries_build_graph(

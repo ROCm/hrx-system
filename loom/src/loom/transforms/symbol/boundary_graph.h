@@ -80,7 +80,8 @@ typedef struct loom_refine_boundaries_graph_t {
   // Module being refined.
   loom_module_t* module;
 
-  // Reset before each graph walk; owns walker stacks only.
+  // Owns walker stacks. Nested successor walks preserve live caller frames
+  // through stack-ordered arena checkpoints.
   iree_arena_allocator_t* walk_arena;
 
   // Dense function nodes.
