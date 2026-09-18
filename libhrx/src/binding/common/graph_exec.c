@@ -103,7 +103,7 @@ typedef struct iree_hal_streaming_graph_child_graph_block_attrs_t {
   iree_hal_streaming_graph_exec_t* exec;
 } iree_hal_streaming_graph_child_graph_block_attrs_t;
 
-// Block-specific data stored at the end of the block allocation.
+// Block-specific data stored in the fixed block header.
 typedef union iree_hal_streaming_graph_block_attrs_t {
   // IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_BARRIER
   iree_hal_streaming_graph_barrier_block_attrs_t barrier;
@@ -136,13 +136,23 @@ typedef struct iree_hal_streaming_graph_block_t {
   uint16_t wait_semaphore_count;
   uint16_t signal_semaphore_count;
 
+  // Type-specific block data. Keeping this in the fixed header gives the
+  // union its natural alignment without launch-time offset calculations.
+  iree_hal_streaming_graph_block_attrs_t attrs;
+
   // Variable-length data follows:
-  // - uint16_t wait_semaphore_indices[wait_semaphore_count]
   // - uint32_t wait_payload_deltas[wait_semaphore_count]
-  // - uint16_t signal_semaphore_indices[signal_semaphore_count]
   // - uint32_t signal_payload_deltas[signal_semaphore_count]
-  // - iree_hal_streaming_graph_block_attrs_t attrs (based on type)
+  // - uint16_t wait_semaphore_indices[wait_semaphore_count]
+  // - uint16_t signal_semaphore_indices[signal_semaphore_count]
+  // Arrays are ordered by decreasing alignment so decoding requires no
+  // dynamic padding or fallible layout calculation.
 } iree_hal_streaming_graph_block_t;
+
+static_assert(sizeof(iree_hal_streaming_graph_block_t) %
+                      iree_alignof(uint32_t) ==
+                  0,
+              "graph block trailing uint32_t arrays must be aligned");
 
 // Pointers to all variable-length arrays in a block.
 typedef struct iree_hal_streaming_graph_block_ptrs_t {
@@ -1053,17 +1063,23 @@ iree_status_t iree_hal_streaming_graph_exec_set_event_node_event(
                : iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
 }
 
-// Calculate the size needed for a block with variable-length arrays.
-static iree_host_size_t iree_hal_streaming_graph_block_calculate_size(
-    uint16_t wait_semaphore_count, uint16_t signal_semaphore_count) {
-  iree_host_size_t size = sizeof(iree_hal_streaming_graph_block_t);
-  size += wait_semaphore_count * sizeof(uint16_t);  // wait_semaphore_indices
-  size += wait_semaphore_count * sizeof(uint32_t);  // wait_payload_deltas
-  size +=
-      signal_semaphore_count * sizeof(uint16_t);  // signal_semaphore_indices
-  size += signal_semaphore_count * sizeof(uint32_t);  // signal_payload_deltas
-  size += sizeof(iree_hal_streaming_graph_block_attrs_t);  // type-specific data
-  return size;
+// Calculates the allocation size for the fixed block and its trailing arrays.
+// The descending-alignment field order makes each aligned offset equal to the
+// directly preceding field end used by graph_block_get_ptrs. Keep the two in
+// sync when changing the private block representation.
+static iree_status_t iree_hal_streaming_graph_block_calculate_size(
+    uint16_t wait_semaphore_count, uint16_t signal_semaphore_count,
+    iree_host_size_t* out_total_size) {
+  return IREE_STRUCT_LAYOUT(
+      sizeof(iree_hal_streaming_graph_block_t), out_total_size,
+      IREE_STRUCT_FIELD_ALIGNED(wait_semaphore_count, uint32_t,
+                                iree_alignof(uint32_t), NULL),
+      IREE_STRUCT_FIELD_ALIGNED(signal_semaphore_count, uint32_t,
+                                iree_alignof(uint32_t), NULL),
+      IREE_STRUCT_FIELD_ALIGNED(wait_semaphore_count, uint16_t,
+                                iree_alignof(uint16_t), NULL),
+      IREE_STRUCT_FIELD_ALIGNED(signal_semaphore_count, uint16_t,
+                                iree_alignof(uint16_t), NULL));
 }
 
 // Get pointers to all variable-length arrays in a block.
@@ -1072,22 +1088,56 @@ static inline void iree_hal_streaming_graph_block_get_ptrs(
     iree_hal_streaming_graph_block_ptrs_t* out_ptrs) {
   uint8_t* ptr = (uint8_t*)block + sizeof(*block);
 
-  out_ptrs->wait_semaphore_indices = (uint16_t*)ptr;
-  ptr +=
-      block->wait_semaphore_count * sizeof(*out_ptrs->wait_semaphore_indices);
-
   out_ptrs->wait_payload_deltas = (uint32_t*)ptr;
   ptr += block->wait_semaphore_count * sizeof(*out_ptrs->wait_payload_deltas);
-
-  out_ptrs->signal_semaphore_indices = (uint16_t*)ptr;
-  ptr += block->signal_semaphore_count *
-         sizeof(*out_ptrs->signal_semaphore_indices);
 
   out_ptrs->signal_payload_deltas = (uint32_t*)ptr;
   ptr +=
       block->signal_semaphore_count * sizeof(*out_ptrs->signal_payload_deltas);
 
-  out_ptrs->attrs = (iree_hal_streaming_graph_block_attrs_t*)ptr;
+  out_ptrs->wait_semaphore_indices = (uint16_t*)ptr;
+  ptr +=
+      block->wait_semaphore_count * sizeof(*out_ptrs->wait_semaphore_indices);
+
+  out_ptrs->signal_semaphore_indices = (uint16_t*)ptr;
+  out_ptrs->attrs = &block->attrs;
+}
+
+iree_status_t iree_hal_streaming_graph_exec_test_verify_block_layout(
+    uint16_t wait_semaphore_count, uint16_t signal_semaphore_count) {
+  iree_host_size_t total_size = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_block_calculate_size(
+      wait_semaphore_count, signal_semaphore_count, &total_size));
+  iree_hal_streaming_graph_block_t* block = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(iree_allocator_system(),
+                                             total_size, (void**)&block));
+  block->wait_semaphore_count = wait_semaphore_count;
+  block->signal_semaphore_count = signal_semaphore_count;
+  iree_hal_streaming_graph_block_ptrs_t ptrs;
+  iree_hal_streaming_graph_block_get_ptrs(block, &ptrs);
+
+  uint8_t* expected_end =
+      (uint8_t*)(ptrs.signal_semaphore_indices + signal_semaphore_count);
+  const bool is_valid =
+      iree_host_ptr_has_alignment(ptrs.wait_payload_deltas,
+                                  iree_alignof(uint32_t)) &&
+      iree_host_ptr_has_alignment(ptrs.signal_payload_deltas,
+                                  iree_alignof(uint32_t)) &&
+      iree_host_ptr_has_alignment(ptrs.wait_semaphore_indices,
+                                  iree_alignof(uint16_t)) &&
+      iree_host_ptr_has_alignment(ptrs.signal_semaphore_indices,
+                                  iree_alignof(uint16_t)) &&
+      iree_host_ptr_has_alignment(
+          ptrs.attrs, iree_alignof(iree_hal_streaming_graph_block_attrs_t)) &&
+      expected_end == (uint8_t*)block + total_size;
+  iree_allocator_free(iree_allocator_system(), block);
+  if (!is_valid) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "graph block layout is misaligned for wait=%" PRIu16
+                            " signal=%" PRIu16,
+                            wait_semaphore_count, signal_semaphore_count);
+  }
+  return iree_ok_status();
 }
 
 // Allocates a block with variable-length arrays.
@@ -1098,9 +1148,9 @@ static iree_status_t iree_hal_streaming_graph_block_allocate(
     uint16_t signal_semaphore_count,
     iree_hal_streaming_graph_block_t** out_block,
     iree_hal_streaming_graph_block_ptrs_t* out_ptrs) {
-  const iree_host_size_t total_size =
-      iree_hal_streaming_graph_block_calculate_size(wait_semaphore_count,
-                                                    signal_semaphore_count);
+  iree_host_size_t total_size = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_block_calculate_size(
+      wait_semaphore_count, signal_semaphore_count, &total_size));
   iree_hal_streaming_graph_block_t* block = NULL;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate(arena_allocator, total_size, (void**)&block));

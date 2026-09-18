@@ -160,6 +160,11 @@ iree_status_t iree_hal_streaming_graph_exec_instantiate_from_template(
 iree_status_t iree_hal_streaming_graph_exec_rebuild_from_template(
     iree_hal_streaming_graph_exec_t* exec);
 
+// Test-only verification that graph executable block storage correctly aligns
+// its fixed attributes and every trailing semaphore region.
+iree_status_t iree_hal_streaming_graph_exec_test_verify_block_layout(
+    uint16_t wait_semaphore_count, uint16_t signal_semaphore_count);
+
 bool iree_hal_streaming_graph_exec_owns_node(
     iree_hal_streaming_graph_exec_t* exec,
     iree_hal_streaming_graph_node_t* node);
