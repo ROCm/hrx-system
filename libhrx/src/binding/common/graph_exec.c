@@ -103,7 +103,7 @@ typedef struct iree_hal_streaming_graph_child_graph_block_attrs_t {
   iree_hal_streaming_graph_exec_t* exec;
 } iree_hal_streaming_graph_child_graph_block_attrs_t;
 
-// Block-specific data stored at the end of the block allocation.
+// Block-specific data stored inline in the block header.
 typedef union iree_hal_streaming_graph_block_attrs_t {
   // IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_BARRIER
   iree_hal_streaming_graph_barrier_block_attrs_t barrier;
@@ -136,20 +136,39 @@ typedef struct iree_hal_streaming_graph_block_t {
   uint16_t wait_semaphore_count;
   uint16_t signal_semaphore_count;
 
-  // Variable-length data follows:
-  // - uint16_t wait_semaphore_indices[wait_semaphore_count]
+  // Type-specific attributes, stored inline so the compiler supplies the
+  // pointer alignment the union requires and the block header ends on that
+  // same boundary.
+  iree_hal_streaming_graph_block_attrs_t attrs;
+
+  // Variable-length trailing data follows in descending alignment order:
   // - uint32_t wait_payload_deltas[wait_semaphore_count]
-  // - uint16_t signal_semaphore_indices[signal_semaphore_count]
   // - uint32_t signal_payload_deltas[signal_semaphore_count]
-  // - iree_hal_streaming_graph_block_attrs_t attrs (based on type)
+  // - uint16_t wait_semaphore_indices[wait_semaphore_count]
+  // - uint16_t signal_semaphore_indices[signal_semaphore_count]
 } iree_hal_streaming_graph_block_t;
 
-// Pointers to all variable-length arrays in a block.
+// Blocks are carved out of an arena, which guarantees iree_max_align_t and
+// nothing stronger.
+static_assert(iree_alignof(iree_hal_streaming_graph_block_t) <=
+                  iree_max_align_t,
+              "block alignment must be satisfiable by an arena allocation");
+
+// The first trailing region begins at the end of the header and holds
+// uint32_t, so the header's size decides whether that region is aligned.
+// The region order only keeps the regions aligned relative to each other;
+// this assert is what pins the offset they start from.
+static_assert(sizeof(iree_hal_streaming_graph_block_t) %
+                      iree_alignof(uint32_t) ==
+                  0,
+              "block header must end on the first trailing region's alignment");
+
+// Pointers to the inline attributes and variable-length arrays in a block.
 typedef struct iree_hal_streaming_graph_block_ptrs_t {
-  uint16_t* wait_semaphore_indices;
   uint32_t* wait_payload_deltas;
-  uint16_t* signal_semaphore_indices;
   uint32_t* signal_payload_deltas;
+  uint16_t* wait_semaphore_indices;
+  uint16_t* signal_semaphore_indices;
   iree_hal_streaming_graph_block_attrs_t* attrs;
 } iree_hal_streaming_graph_block_ptrs_t;
 
@@ -1057,37 +1076,38 @@ iree_status_t iree_hal_streaming_graph_exec_set_event_node_event(
 static iree_host_size_t iree_hal_streaming_graph_block_calculate_size(
     uint16_t wait_semaphore_count, uint16_t signal_semaphore_count) {
   iree_host_size_t size = sizeof(iree_hal_streaming_graph_block_t);
-  size += wait_semaphore_count * sizeof(uint16_t);  // wait_semaphore_indices
-  size += wait_semaphore_count * sizeof(uint32_t);  // wait_payload_deltas
+  size += wait_semaphore_count * sizeof(uint32_t);    // wait_payload_deltas
+  size += signal_semaphore_count * sizeof(uint32_t);  // signal_payload_deltas
+  size += wait_semaphore_count * sizeof(uint16_t);    // wait_semaphore_indices
   size +=
       signal_semaphore_count * sizeof(uint16_t);  // signal_semaphore_indices
-  size += signal_semaphore_count * sizeof(uint32_t);  // signal_payload_deltas
-  size += sizeof(iree_hal_streaming_graph_block_attrs_t);  // type-specific data
   return size;
 }
 
-// Get pointers to all variable-length arrays in a block.
+// Resolves the payload pointers for |block|. The trailing arrays run in
+// descending alignment order - both payload delta arrays before both semaphore
+// index arrays - starting at the end of the block header, whose size is a
+// multiple of the block's own alignment. Every region therefore lands on its
+// natural alignment and the block holds no interior padding.
+// iree_hal_streaming_graph_block_calculate_size uses this same order.
 static inline void iree_hal_streaming_graph_block_get_ptrs(
     iree_hal_streaming_graph_block_t* block,
     iree_hal_streaming_graph_block_ptrs_t* out_ptrs) {
   uint8_t* ptr = (uint8_t*)block + sizeof(*block);
 
-  out_ptrs->wait_semaphore_indices = (uint16_t*)ptr;
-  ptr +=
-      block->wait_semaphore_count * sizeof(*out_ptrs->wait_semaphore_indices);
-
   out_ptrs->wait_payload_deltas = (uint32_t*)ptr;
   ptr += block->wait_semaphore_count * sizeof(*out_ptrs->wait_payload_deltas);
-
-  out_ptrs->signal_semaphore_indices = (uint16_t*)ptr;
-  ptr += block->signal_semaphore_count *
-         sizeof(*out_ptrs->signal_semaphore_indices);
 
   out_ptrs->signal_payload_deltas = (uint32_t*)ptr;
   ptr +=
       block->signal_semaphore_count * sizeof(*out_ptrs->signal_payload_deltas);
 
-  out_ptrs->attrs = (iree_hal_streaming_graph_block_attrs_t*)ptr;
+  out_ptrs->wait_semaphore_indices = (uint16_t*)ptr;
+  ptr +=
+      block->wait_semaphore_count * sizeof(*out_ptrs->wait_semaphore_indices);
+
+  out_ptrs->signal_semaphore_indices = (uint16_t*)ptr;
+  out_ptrs->attrs = &block->attrs;
 }
 
 // Allocates a block with variable-length arrays.
