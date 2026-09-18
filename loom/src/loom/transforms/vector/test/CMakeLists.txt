@@ -16,6 +16,7 @@ loom_check_test_suite(
     "bank_sroa.loom-test"
     "dynamic_extract.loom-test"
     "memory_footprint.loom-test"
+    "memory_footprint_cfg_identities.loom-test"
     "memory_footprint_conditions.loom-test"
     "memory_to_scalar.loom-test"
     "reduce_axes_to_scalar.loom-test"

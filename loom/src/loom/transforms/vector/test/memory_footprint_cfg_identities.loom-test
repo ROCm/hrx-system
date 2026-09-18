@@ -1,0 +1,567 @@
+// RUN: pass vector-memory-footprint
+
+// A dominating guarded value may feed several block arguments without losing the guard relation.
+func.def @duplicated_dominating_sources_preserve_guard(%storage: buffer, %raw: index, %bound_raw: index) {
+  %base = index.constant 0 : offset
+  %c4 = index.constant 4 : index
+  %origin = index.assume %raw [range(%raw, 0, 63)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 1, 64)] : index
+  %fits = index.cmp slt, %origin, %bound : index
+  cfg.cond_br %fits, ^forward, ^exit
+^forward:
+  cfg.br ^access(%origin: index, %origin: index, %bound: index, %bound: index)
+^access(%origin0: index, %origin1: index, %bound0: index, %bound1: index):
+  %byte_origin = index.mul %origin1, %c4 : index
+  %byte_bound = index.mul %bound1, %c4 : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%byte_bound]xi8>
+  %loaded = vector.load %view[%byte_origin] : view<[%byte_bound]xi8> -> vector<4xi8>
+  test.use %loaded : vector<4xi8>
+  cfg.br ^exit
+^exit:
+  func.return
+}
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// A different forwarded source cannot inherit the guard relation merely because adjacent arguments match.
+func.def @distinct_forwarded_source_rejects_guard(%storage: buffer, %raw: index, %bound_raw: index) {
+  %base = index.constant 0 : offset
+  %c4 = index.constant 4 : index
+  %origin = index.assume %raw [range(%raw, 0, 63)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 1, 64)] : index
+  %fits = index.cmp slt, %origin, %bound : index
+  cfg.cond_br %fits, ^forward, ^exit
+^forward:
+  cfg.br ^access(%origin: index, %bound: index, %bound: index, %bound: index)
+^access(%origin0: index, %origin1: index, %bound0: index, %bound1: index):
+  %byte_origin = index.mul %origin1, %c4 : index
+  %byte_bound = index.mul %bound1, %c4 : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%byte_bound]xi8>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.load", vector_extent="4"}
+  %loaded = vector.load %view[%byte_origin] : view<[%byte_bound]xi8> -> vector<4xi8>
+  test.use %loaded : vector<4xi8>
+  cfg.br ^exit
+^exit:
+  func.return
+}
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// Correlated loop arguments remain equal while their positions rotate on the backedge.
+func.def @correlated_loop_rotation_preserves_identity(%storage: buffer, %raw: index, %bound_raw: index, %choice: i1) {
+  %base = index.constant 0 : offset
+  %step = index.constant 1 : index
+  %element_bytes = index.constant 4 : index
+  %start = index.constant 0 : index
+  %limit = index.constant 2 : index
+  %origin = index.assume %raw [range(%raw, 0, 3)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 1, 4)] : index
+  cfg.cond_br %choice, ^left, ^right
+^left:
+  cfg.br ^header(%start: index, %origin: index, %origin: index)
+^right:
+  cfg.br ^header(%start: index, %bound: index, %bound: index)
+^header(%iteration: index, %first: index, %last: index):
+  %again = index.cmp slt, %iteration, %limit : index
+  cfg.cond_br %again, ^guard, ^exit
+^guard:
+  %fits = index.cmp slt, %first, %bound : index
+  cfg.cond_br %fits, ^access, ^exit
+^access:
+  %byte_origin = index.mul %last, %element_bytes : index
+  %byte_bound = index.mul %bound, %element_bytes : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%byte_bound]xi8>
+  %loaded = vector.load %view[%byte_origin] : view<[%byte_bound]xi8> -> vector<4xi8>
+  test.use %loaded : vector<4xi8>
+  %next = index.add %iteration, %step : index
+  cfg.br ^header(%next: index, %last: index, %first: index)
+^exit:
+  func.return
+}
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// Nested feedback carries an equality discovered after dependent forwarding components were first distinguished.
+func.def @nested_feedback_preserves_correlated_identity(%storage: buffer, %raw: index, %bound_raw: index, %choice_0: i1, %choice_1: i1, %choice_2: i1) -> (index) {
+  %base = index.constant 0 : offset
+  %step = index.constant 1 : index
+  %element_bytes = index.constant 4 : index
+  %start = index.constant 0 : index
+  %limit = index.constant 2 : index
+  %origin = index.assume %raw [range(%raw, 0, 3)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 1, 4)] : index
+  cfg.br ^choose_0
+^choose_0:
+  cfg.cond_br %choice_0, ^left_0, ^right_0
+^left_0:
+  cfg.br ^header_0(%start: index, %origin: index, %origin: index, %bound: index)
+^right_0:
+  cfg.br ^header_0(%start: index, %bound: index, %bound: index, %bound: index)
+^header_0(%iteration_0: index, %a_0: index, %b_0: index, %carry_0: index):
+  %again_0 = index.cmp slt, %iteration_0, %limit : index
+  cfg.cond_br %again_0, ^choose_1, ^exit
+^choose_1:
+  cfg.cond_br %choice_1, ^left_1, ^right_1
+^left_1:
+  cfg.br ^header_1(%start: index, %a_0: index, %b_0: index, %bound: index)
+^right_1:
+  cfg.br ^header_1(%start: index, %b_0: index, %a_0: index, %bound: index)
+^header_1(%iteration_1: index, %a_1: index, %b_1: index, %carry_1: index):
+  %again_1 = index.cmp slt, %iteration_1, %limit : index
+  cfg.cond_br %again_1, ^choose_2, ^leave_1
+^choose_2:
+  cfg.cond_br %choice_2, ^left_2, ^right_2
+^left_2:
+  cfg.br ^header_2(%start: index, %a_0: index, %a_1: index)
+^right_2:
+  cfg.br ^header_2(%start: index, %bound: index, %bound: index)
+^header_2(%iteration_2: index, %a_2: index, %b_2: index):
+  %again_2 = index.cmp slt, %iteration_2, %limit : index
+  cfg.cond_br %again_2, ^guard, ^leave_2
+^guard:
+  %fits = index.cmp slt, %a_2, %bound : index
+  cfg.cond_br %fits, ^access, ^advance_2
+^access:
+  %byte_origin = index.mul %b_2, %element_bytes : index
+  %byte_bound = index.mul %bound, %element_bytes : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%byte_bound]xi8>
+  %loaded = vector.load %view[%byte_origin] : view<[%byte_bound]xi8> -> vector<4xi8>
+  test.use %loaded : vector<4xi8>
+  cfg.br ^advance_2
+^advance_2:
+  %next_2 = index.add %iteration_2, %step : index
+  cfg.br ^header_2(%next_2: index, %b_2: index, %a_2: index)
+^leave_2:
+  cfg.br ^advance_1(%a_2: index)
+^advance_1(%feedback_1: index):
+  %next_1 = index.add %iteration_1, %step : index
+  cfg.br ^header_1(%next_1: index, %b_1: index, %a_1: index, %feedback_1: index)
+^leave_1:
+  cfg.br ^advance_0(%carry_1: index)
+^advance_0(%feedback_0: index):
+  %next_0 = index.add %iteration_0, %step : index
+  cfg.br ^header_0(%next_0: index, %b_0: index, %a_0: index, %feedback_0: index)
+^exit:
+  func.return %carry_0 : index
+}
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// Changing one nested feedback source revokes the provisional equality before footprint proof.
+func.def @nested_feedback_changed_source_rejects(%storage: buffer, %raw: index, %bound_raw: index, %choice_0: i1, %choice_1: i1, %choice_2: i1) -> (index) {
+  %base = index.constant 0 : offset
+  %step = index.constant 1 : index
+  %element_bytes = index.constant 4 : index
+  %start = index.constant 0 : index
+  %limit = index.constant 2 : index
+  %origin = index.assume %raw [range(%raw, 0, 3)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 1, 4)] : index
+  cfg.br ^choose_0
+^choose_0:
+  cfg.cond_br %choice_0, ^left_0, ^right_0
+^left_0:
+  cfg.br ^header_0(%start: index, %origin: index, %origin: index, %bound: index)
+^right_0:
+  cfg.br ^header_0(%start: index, %bound: index, %bound: index, %bound: index)
+^header_0(%iteration_0: index, %a_0: index, %b_0: index, %carry_0: index):
+  %again_0 = index.cmp slt, %iteration_0, %limit : index
+  cfg.cond_br %again_0, ^choose_1, ^exit
+^choose_1:
+  cfg.cond_br %choice_1, ^left_1, ^right_1
+^left_1:
+  cfg.br ^header_1(%start: index, %a_0: index, %b_0: index, %bound: index)
+^right_1:
+  cfg.br ^header_1(%start: index, %b_0: index, %a_0: index, %bound: index)
+^header_1(%iteration_1: index, %a_1: index, %b_1: index, %carry_1: index):
+  %again_1 = index.cmp slt, %iteration_1, %limit : index
+  cfg.cond_br %again_1, ^choose_2, ^leave_1
+^choose_2:
+  cfg.cond_br %choice_2, ^left_2, ^right_2
+^left_2:
+  %different = index.add %a_1, %step : index
+  cfg.br ^header_2(%start: index, %a_0: index, %different: index)
+^right_2:
+  cfg.br ^header_2(%start: index, %bound: index, %bound: index)
+^header_2(%iteration_2: index, %a_2: index, %b_2: index):
+  %again_2 = index.cmp slt, %iteration_2, %limit : index
+  cfg.cond_br %again_2, ^guard, ^leave_2
+^guard:
+  %fits = index.cmp slt, %a_2, %bound : index
+  cfg.cond_br %fits, ^access, ^advance_2
+^access:
+  %byte_origin = index.mul %b_2, %element_bytes : index
+  %byte_bound = index.mul %bound, %element_bytes : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%byte_bound]xi8>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.load", vector_extent="4"}
+  %loaded = vector.load %view[%byte_origin] : view<[%byte_bound]xi8> -> vector<4xi8>
+  test.use %loaded : vector<4xi8>
+  cfg.br ^advance_2
+^advance_2:
+  %next_2 = index.add %iteration_2, %step : index
+  cfg.br ^header_2(%next_2: index, %b_2: index, %a_2: index)
+^leave_2:
+  cfg.br ^advance_1(%a_2: index)
+^advance_1(%feedback_1: index):
+  %next_1 = index.add %iteration_1, %step : index
+  cfg.br ^header_1(%next_1: index, %b_1: index, %a_1: index, %feedback_1: index)
+^leave_1:
+  cfg.br ^advance_0(%carry_1: index)
+^advance_0(%feedback_0: index):
+  %next_0 = index.add %iteration_0, %step : index
+  cfg.br ^header_0(%next_0: index, %b_0: index, %a_0: index, %feedback_0: index)
+^exit:
+  func.return %carry_0 : index
+}
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// Several incoming forwarding paths preserve the same correlated identity.
+func.def @fanin_preserves_correlated_identity(%storage: buffer, %raw: index, %bound_raw: index, %choice_0: i1, %choice_1: i1, %choice_2: i1) -> (index) {
+  %base = index.constant 0 : offset
+  %step = index.constant 1 : index
+  %element_bytes = index.constant 4 : index
+  %start = index.constant 0 : index
+  %limit = index.constant 2 : index
+  %origin = index.assume %raw [range(%raw, 0, 3)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 1, 4)] : index
+  cfg.br ^choose_0
+^choose_0:
+  cfg.cond_br %choice_0, ^left_0, ^right_0
+^left_0:
+  cfg.br ^header_0(%start: index, %origin: index, %origin: index, %bound: index)
+^right_0:
+  cfg.br ^header_0(%start: index, %bound: index, %bound: index, %bound: index)
+^header_0(%iteration_0: index, %a_0: index, %b_0: index, %carry_0: index):
+  %again_0 = index.cmp slt, %iteration_0, %limit : index
+  cfg.cond_br %again_0, ^choose_1, ^exit
+^choose_1:
+  cfg.cond_br %choice_1, ^left_1, ^right_1
+^left_1:
+  cfg.br ^header_1(%start: index, %a_0: index, %b_0: index, %bound: index)
+^right_1:
+  cfg.br ^header_1(%start: index, %b_0: index, %a_0: index, %bound: index)
+^header_1(%iteration_1: index, %a_1: index, %b_1: index, %carry_1: index):
+  %again_1 = index.cmp slt, %iteration_1, %limit : index
+  cfg.cond_br %again_1, ^choose_2, ^leave_1
+^choose_2:
+  cfg.cond_br %choice_2, ^left_2, ^right_2
+^left_2:
+  cfg.br ^header_2(%start: index, %a_0: index, %a_1: index, %start: index)
+^right_2:
+  cfg.br ^header_2(%start: index, %bound: index, %bound: index, %start: index)
+^header_2(%iteration_2: index, %a_2: index, %b_2: index, %carry_2: index):
+  %again_2 = index.cmp slt, %iteration_2, %limit : index
+  cfg.cond_br %again_2, ^observe_choose, ^leave_2
+^observe_choose:
+  cfg.cond_br %choice_0, ^observe_left, ^observe_right
+^observe_left:
+  cfg.br ^observe(%start: index, %a_0: index, %b_0: index, %a_1: index, %b_1: index, %a_2: index, %b_2: index)
+^observe_right:
+  cfg.br ^observe(%start: index, %bound: index, %bound: index, %bound: index, %bound: index, %bound: index, %bound: index)
+^observe(%observed_iteration: index, %observed_a_0: index, %observed_b_0: index, %observed_a_1: index, %observed_b_1: index, %observed_a_2: index, %observed_b_2: index):
+  %observed_again = index.cmp slt, %observed_iteration, %limit : index
+  cfg.cond_br %observed_again, ^guard, ^observe_result
+^guard:
+  %fits = index.cmp slt, %observed_a_2, %bound : index
+  cfg.cond_br %fits, ^access, ^observe_advance
+^access:
+  %byte_origin = index.mul %observed_b_2, %element_bytes : index
+  %byte_bound = index.mul %bound, %element_bytes : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%byte_bound]xi8>
+  %loaded = vector.load %view[%byte_origin] : view<[%byte_bound]xi8> -> vector<4xi8>
+  test.use %loaded : vector<4xi8>
+  cfg.br ^observe_advance
+^observe_advance:
+  %observed_next = index.add %observed_iteration, %step : index
+  cfg.br ^observe(%observed_next: index, %observed_b_0: index, %observed_a_0: index, %observed_b_1: index, %observed_a_1: index, %observed_b_2: index, %observed_a_2: index)
+^observe_result:
+  %total_a_0 = index.add %start, %observed_a_0 : index
+  %total_b_0 = index.add %total_a_0, %observed_b_0 : index
+  %total_a_1 = index.add %total_b_0, %observed_a_1 : index
+  %total_b_1 = index.add %total_a_1, %observed_b_1 : index
+  %total_a_2 = index.add %total_b_1, %observed_a_2 : index
+  %total_b_2 = index.add %total_a_2, %observed_b_2 : index
+  cfg.br ^advance_2(%total_b_2: index)
+^advance_2(%observed_result: index):
+  %next_2 = index.add %iteration_2, %step : index
+  cfg.br ^header_2(%next_2: index, %b_2: index, %a_2: index, %observed_result: index)
+^leave_2:
+  cfg.br ^advance_1(%carry_2: index)
+^advance_1(%feedback_1: index):
+  %next_1 = index.add %iteration_1, %step : index
+  cfg.br ^header_1(%next_1: index, %b_1: index, %a_1: index, %feedback_1: index)
+^leave_1:
+  cfg.br ^advance_0(%carry_1: index)
+^advance_0(%feedback_0: index):
+  %next_0 = index.add %iteration_0, %step : index
+  cfg.br ^header_0(%next_0: index, %b_0: index, %a_0: index, %feedback_0: index)
+^exit:
+  func.return %carry_0 : index
+}
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// Fan-in remains correlated while argument positions rotate through nested loops.
+func.def @rotating_fanin_preserves_correlated_identity(%storage: buffer, %raw: index, %bound_raw: index, %choice_0: i1, %choice_1: i1, %choice_2: i1) -> (index) {
+  %base = index.constant 0 : offset
+  %step = index.constant 1 : index
+  %element_bytes = index.constant 4 : index
+  %start = index.constant 0 : index
+  %limit = index.constant 2 : index
+  %origin = index.assume %raw [range(%raw, 0, 3)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 1, 4)] : index
+  cfg.br ^choose_0
+^choose_0:
+  cfg.cond_br %choice_0, ^left_0, ^right_0
+^left_0:
+  cfg.br ^header_0(%start: index, %origin: index, %origin: index, %bound: index)
+^right_0:
+  cfg.br ^header_0(%start: index, %bound: index, %bound: index, %bound: index)
+^header_0(%iteration_0: index, %a_0: index, %b_0: index, %carry_0: index):
+  %again_0 = index.cmp slt, %iteration_0, %limit : index
+  cfg.cond_br %again_0, ^choose_1, ^exit
+^choose_1:
+  cfg.cond_br %choice_1, ^left_1, ^right_1
+^left_1:
+  cfg.br ^header_1(%start: index, %a_0: index, %b_0: index, %bound: index)
+^right_1:
+  cfg.br ^header_1(%start: index, %b_0: index, %a_0: index, %bound: index)
+^header_1(%iteration_1: index, %a_1: index, %b_1: index, %carry_1: index):
+  %again_1 = index.cmp slt, %iteration_1, %limit : index
+  cfg.cond_br %again_1, ^choose_2, ^leave_1
+^choose_2:
+  cfg.cond_br %choice_2, ^left_2, ^right_2
+^left_2:
+  cfg.br ^header_2(%start: index, %a_0: index, %a_1: index, %start: index)
+^right_2:
+  cfg.br ^header_2(%start: index, %bound: index, %bound: index, %start: index)
+^header_2(%iteration_2: index, %a_2: index, %b_2: index, %carry_2: index):
+  %again_2 = index.cmp slt, %iteration_2, %limit : index
+  cfg.cond_br %again_2, ^observe_choose, ^leave_2
+^observe_choose:
+  cfg.cond_br %choice_0, ^observe_left, ^observe_right
+^observe_left:
+  cfg.br ^observe(%start: index, %a_0: index, %b_0: index, %a_1: index, %b_1: index, %a_2: index, %b_2: index)
+^observe_right:
+  cfg.br ^observe(%start: index, %bound: index, %bound: index, %bound: index, %bound: index, %bound: index, %bound: index)
+^observe(%observed_iteration: index, %observed_a_0: index, %observed_b_0: index, %observed_a_1: index, %observed_b_1: index, %observed_a_2: index, %observed_b_2: index):
+  %observed_again = index.cmp slt, %observed_iteration, %limit : index
+  cfg.cond_br %observed_again, ^guard, ^observe_result
+^guard:
+  %fits = index.cmp slt, %observed_a_2, %bound : index
+  cfg.cond_br %fits, ^access, ^observe_advance
+^access:
+  %byte_origin = index.mul %observed_b_2, %element_bytes : index
+  %byte_bound = index.mul %bound, %element_bytes : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%byte_bound]xi8>
+  %loaded = vector.load %view[%byte_origin] : view<[%byte_bound]xi8> -> vector<4xi8>
+  test.use %loaded : vector<4xi8>
+  cfg.br ^observe_advance
+^observe_advance:
+  %observed_next = index.add %observed_iteration, %step : index
+  cfg.br ^observe(%observed_next: index, %observed_a_1: index, %observed_b_1: index, %observed_a_2: index, %observed_b_2: index, %observed_a_0: index, %observed_b_0: index)
+^observe_result:
+  %total_a_0 = index.add %start, %observed_a_0 : index
+  %total_b_0 = index.add %total_a_0, %observed_b_0 : index
+  %total_a_1 = index.add %total_b_0, %observed_a_1 : index
+  %total_b_1 = index.add %total_a_1, %observed_b_1 : index
+  %total_a_2 = index.add %total_b_1, %observed_a_2 : index
+  %total_b_2 = index.add %total_a_2, %observed_b_2 : index
+  cfg.br ^advance_2(%total_b_2: index)
+^advance_2(%observed_result: index):
+  %next_2 = index.add %iteration_2, %step : index
+  cfg.br ^header_2(%next_2: index, %b_2: index, %a_2: index, %observed_result: index)
+^leave_2:
+  cfg.br ^advance_1(%carry_2: index)
+^advance_1(%feedback_1: index):
+  %next_1 = index.add %iteration_1, %step : index
+  cfg.br ^header_1(%next_1: index, %b_1: index, %a_1: index, %feedback_1: index)
+^leave_1:
+  cfg.br ^advance_0(%carry_1: index)
+^advance_0(%feedback_0: index):
+  %next_0 = index.add %iteration_0, %step : index
+  cfg.br ^header_0(%next_0: index, %b_0: index, %a_0: index, %feedback_0: index)
+^exit:
+  func.return %carry_0 : index
+}
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// Self-forwarding equations preserve the current block argument incarnation across nested feedback.
+func.def @self_forwarding_uses_current_incarnation(%storage: buffer, %raw: index, %bound_raw: index, %choice_0: i1, %choice_1: i1, %choice_2: i1) -> (index) {
+  %base = index.constant 0 : offset
+  %step = index.constant 1 : index
+  %element_bytes = index.constant 4 : index
+  %start = index.constant 0 : index
+  %limit = index.constant 2 : index
+  %origin = index.assume %raw [range(%raw, 0, 3)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 1, 4)] : index
+  cfg.br ^choose_0
+^choose_0:
+  cfg.cond_br %choice_0, ^left_0, ^right_0
+^left_0:
+  cfg.br ^header_0(%start: index, %origin: index, %origin: index, %bound: index)
+^right_0:
+  cfg.br ^header_0(%start: index, %bound: index, %bound: index, %bound: index)
+^header_0(%iteration_0: index, %a_0: index, %b_0: index, %carry_0: index):
+  %again_0 = index.cmp slt, %iteration_0, %limit : index
+  cfg.cond_br %again_0, ^choose_1, ^exit
+^choose_1:
+  cfg.cond_br %choice_1, ^left_1, ^right_1
+^left_1:
+  cfg.br ^header_1(%start: index, %a_0: index, %b_0: index, %bound: index)
+^right_1:
+  cfg.br ^header_1(%start: index, %a_0: index, %b_0: index, %bound: index)
+^header_1(%iteration_1: index, %a_1: index, %b_1: index, %carry_1: index):
+  %again_1 = index.cmp slt, %iteration_1, %limit : index
+  cfg.cond_br %again_1, ^choose_2, ^leave_1
+^choose_2:
+  cfg.cond_br %choice_2, ^left_2, ^right_2
+^left_2:
+  cfg.br ^header_2(%start: index, %a_0: index, %a_1: index)
+^right_2:
+  cfg.br ^header_2(%start: index, %bound: index, %bound: index)
+^header_2(%iteration_2: index, %a_2: index, %b_2: index):
+  %again_2 = index.cmp slt, %iteration_2, %limit : index
+  cfg.cond_br %again_2, ^guard, ^leave_2
+^guard:
+  %fits = index.cmp slt, %a_2, %bound : index
+  cfg.cond_br %fits, ^access, ^advance_2
+^access:
+  %byte_origin = index.mul %b_2, %element_bytes : index
+  %byte_bound = index.mul %bound, %element_bytes : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%byte_bound]xi8>
+  %loaded = vector.load %view[%byte_origin] : view<[%byte_bound]xi8> -> vector<4xi8>
+  test.use %loaded : vector<4xi8>
+  cfg.br ^advance_2
+^advance_2:
+  %next_2 = index.add %iteration_2, %step : index
+  cfg.br ^header_2(%next_2: index, %a_2: index, %b_2: index)
+^leave_2:
+  cfg.br ^advance_1(%a_2: index)
+^advance_1(%feedback_1: index):
+  %next_1 = index.add %iteration_1, %step : index
+  cfg.br ^header_1(%next_1: index, %a_1: index, %b_1: index, %feedback_1: index)
+^leave_1:
+  cfg.br ^advance_0(%carry_1: index)
+^advance_0(%feedback_0: index):
+  %next_0 = index.add %iteration_0, %step : index
+  cfg.br ^header_0(%next_0: index, %a_0: index, %b_0: index, %feedback_0: index)
+^exit:
+  func.return %carry_0 : index
+}
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// Independent recurrence components may establish identities consumed by one guarded access.
+func.def @independent_recurrences_preserve_identity(%storage: buffer, %raw: index, %bound_raw: index, %choice_0: i1, %choice_1: i1, %choice_2: i1) {
+  %base = index.constant 0 : offset
+  %step = index.constant 1 : index
+  %element_bytes = index.constant 4 : index
+  %start = index.constant 0 : index
+  %limit = index.constant 2 : index
+  %origin = index.assume %raw [range(%raw, 0, 3)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 1, 4)] : index
+  cfg.br ^choose_0
+^choose_0:
+  cfg.cond_br %choice_0, ^left_0, ^right_0
+^left_0:
+  cfg.br ^header_0(%start: index, %origin: index, %origin: index)
+^right_0:
+  cfg.br ^header_0(%start: index, %bound: index, %bound: index)
+^header_0(%iteration_0: index, %a_0: index, %b_0: index):
+  %again_0 = index.cmp slt, %iteration_0, %limit : index
+  cfg.cond_br %again_0, ^choose_1, ^exit
+^choose_1:
+  cfg.cond_br %choice_1, ^left_1, ^right_1
+^left_1:
+  cfg.br ^header_1(%start: index, %a_0: index, %b_0: index)
+^right_1:
+  cfg.br ^header_1(%start: index, %b_0: index, %a_0: index)
+^header_1(%iteration_1: index, %a_1: index, %b_1: index):
+  %again_1 = index.cmp slt, %iteration_1, %limit : index
+  cfg.cond_br %again_1, ^choose_2, ^advance_0
+^choose_2:
+  cfg.cond_br %choice_2, ^left_2, ^right_2
+^left_2:
+  cfg.br ^header_2(%start: index, %a_0: index, %bound: index, %a_1: index, %bound: index)
+^right_2:
+  cfg.br ^header_2(%start: index, %bound: index, %bound: index, %bound: index, %bound: index)
+^header_2(%iteration_2: index, %a_2: index, %b_2: index, %c_2: index, %d_2: index):
+  %again_2 = index.cmp slt, %iteration_2, %limit : index
+  cfg.cond_br %again_2, ^guard, ^advance_1
+^guard:
+  %fits = index.cmp slt, %a_2, %bound : index
+  cfg.cond_br %fits, ^access, ^advance_2
+^access:
+  %byte_origin = index.mul %c_2, %element_bytes : index
+  %byte_bound = index.mul %bound, %element_bytes : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%byte_bound]xi8>
+  %loaded = vector.load %view[%byte_origin] : view<[%byte_bound]xi8> -> vector<4xi8>
+  test.use %loaded : vector<4xi8>
+  cfg.br ^advance_2
+^advance_2:
+  %next_2 = index.add %iteration_2, %step : index
+  cfg.br ^header_2(%next_2: index, %b_2: index, %a_2: index, %d_2: index, %c_2: index)
+^advance_1:
+  %next_1 = index.add %iteration_1, %step : index
+  cfg.br ^header_1(%next_1: index, %b_1: index, %a_1: index)
+^advance_0:
+  %next_0 = index.add %iteration_0, %step : index
+  cfg.br ^header_0(%next_0: index, %b_0: index, %a_0: index)
+^exit:
+  func.return
+}
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// Structurally similar but distinct incoming expression classes do not establish an equality.
+func.def @distinct_expression_classes_do_not_merge(%storage: buffer, %raw: index, %bound_raw: index, %choice: i1) {
+  %base = index.constant 0 : offset
+  %step = index.constant 1 : index
+  %element_bytes = index.constant 4 : index
+  %start = index.constant 0 : index
+  %limit = index.constant 4 : index
+  %origin = index.assume %raw [range(%raw, 0, 3)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 1, 4)] : index
+  cfg.cond_br %choice, ^left, ^right
+^left:
+  cfg.br ^header(%start: index, %origin: index, %origin: index, %bound: index, %bound: index)
+^right:
+  cfg.br ^header(%start: index, %bound: index, %bound: index, %origin: index, %origin: index)
+^header(%iteration: index, %slot0: index, %slot1: index, %slot2: index, %slot3: index):
+  %again = index.cmp slt, %iteration, %limit : index
+  cfg.cond_br %again, ^guard, ^exit
+^guard:
+  %fits = index.cmp slt, %slot0, %bound : index
+  cfg.cond_br %fits, ^access, ^exit
+^access:
+  %byte_origin = index.mul %slot3, %element_bytes : index
+  %byte_bound = index.mul %bound, %element_bytes : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%byte_bound]xi8>
+  // ERROR@+1: SUBRANGE/010 {op_name="vector.load", vector_extent="4"}
+  %loaded = vector.load %view[%byte_origin] : view<[%byte_bound]xi8> -> vector<4xi8>
+  test.use %loaded : vector<4xi8>
+  %next = index.add %iteration, %step : index
+  cfg.br ^header(%next: index, %slot0: index, %slot1: index, %slot2: index, %slot3: index)
+^exit:
+  func.return
+}

@@ -487,3 +487,65 @@ low.func.def target<x86.avx512.core>(@target) abi(object_function) @f32x16_multi
   vmovdqu32.store.indexed %loaded, %output_view, %24 {disp32 = 16, scale = 1}
   return
 }
+
+// ====
+
+x86.target<avx2> @target
+
+// Rotating CFG arguments remain correlated across the loop backedge, allowing
+// the guard on %first to prove the vector access through %last.
+func.def target(@target) @cfg_rotating_f32x4_memory(%input: buffer, %output: buffer, %raw: index, %bound_raw: index, %choice: i1) {
+  %base = index.constant 0 : offset
+  %step = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  %start = index.constant 0 : index
+  %limit = index.constant 2 : index
+  %origin = index.assume %raw [range(%raw, 0, 60)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 4, 64)] : index
+  cfg.cond_br %choice, ^left, ^right
+^left:
+  cfg.br ^header(%start: index, %origin: index, %origin: index)
+^right:
+  cfg.br ^header(%start: index, %bound: index, %bound: index)
+^header(%iteration: index, %first: index, %last: index):
+  %again = index.cmp slt, %iteration, %limit : index
+  cfg.cond_br %again, ^guard, ^exit
+^guard:
+  %end = index.add %first, %c3 : index
+  %fits = index.cmp slt, %end, %bound : index
+  cfg.cond_br %fits, ^access, ^exit
+^access:
+  %input_view = buffer.view %input[%base] : buffer -> view<[%bound]xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%bound]xf32>
+  %loaded = vector.load %input_view[%last] : view<[%bound]xf32> -> vector<4xf32>
+  vector.store %loaded, %output_view[%last] : vector<4xf32>, view<[%bound]xf32>
+  %next = index.add %iteration, %step : index
+  cfg.br ^header(%next: index, %last: index, %first: index)
+^exit:
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @cfg_rotating_f32x4_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %origin: reg<x86.gpr64>, %bound: reg<x86.gpr64>, %choice: reg<x86.gpr32>) asm {
+  %start = mov.imm64 0
+  %limit = mov.imm64 2
+  low.cond_br %choice, ^left, ^right : reg<x86.gpr32>
+^left:
+  low.br ^header(%start: reg<x86.gpr64>, %origin: reg<x86.gpr64>, %origin: reg<x86.gpr64>)
+^right:
+  low.br ^header(%start: reg<x86.gpr64>, %bound: reg<x86.gpr64>, %bound: reg<x86.gpr64>)
+^header(%iteration: reg<x86.gpr64>, %first: reg<x86.gpr64>, %last: reg<x86.gpr64>):
+  %again = cmp.slt.gpr64 %iteration, %limit
+  low.cond_br %again, ^guard, ^exit : reg<x86.gpr32>
+^guard:
+  %end = lea.disp %first {disp32 = 3}
+  %fits = cmp.slt.gpr64 %end, %bound
+  low.cond_br %fits, ^access, ^exit : reg<x86.gpr32>
+^access:
+  %loaded = vmovdqu32.load.indexed.xmm %input_view, %last {disp32 = 0, scale = 4}
+  vmovdqu32.store.indexed.xmm %loaded, %output_view, %last {disp32 = 0, scale = 4}
+  %next = lea.disp %iteration {disp32 = 1}
+  low.br ^header(%next: reg<x86.gpr64>, %last: reg<x86.gpr64>, %first: reg<x86.gpr64>)
+^exit:
+  return
+}

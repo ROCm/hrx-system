@@ -47,6 +47,7 @@ extern "C" {
 #define LOOM_SYMBOLIC_EXPR_DEFAULT_TERM_LIMIT 64
 
 typedef struct loom_symbolic_expr_memo_entry_t loom_symbolic_expr_memo_entry_t;
+typedef struct loom_cfg_value_identity_table_t loom_cfg_value_identity_table_t;
 // A single coefficient times an SSA value.
 typedef struct loom_symbolic_term_t {
   // Signed coefficient multiplying value_id.
@@ -118,6 +119,9 @@ typedef struct loom_symbolic_expr_context_t {
 
   // Dense facts used to seed ranges, exact constants, and divisibility.
   const loom_value_fact_table_t* fact_table;
+
+  // Optional direct CFG representatives for block argument expansion.
+  const loom_cfg_value_identity_table_t* value_identities;
 
   // Optional edge-local facts applied during branch-sensitive proofs. Reset
   // the context after changing this pointer or the facts it references.

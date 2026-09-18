@@ -180,6 +180,20 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "cfg_value_identity",
+    srcs = ["cfg_value_identity.c"],
+    hdrs = ["cfg_value_identity.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:dominance",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
 loom_cc_test(
     name = "cfg_condition_facts_test",
     srcs = ["cfg_condition_facts_test.cc"],
@@ -452,6 +466,7 @@ loom_cc_library(
     ],
     deps = [
         ":cfg_condition_facts",
+        ":cfg_value_identity",
         ":condition_facts",
         ":symbolic_expr",
         "//loom/src/loom/error:emitter",
@@ -880,6 +895,7 @@ loom_cc_library(
         "symbolic_expr_proof.h",
     ],
     deps = [
+        ":cfg_value_identity",
         ":condition_facts",
         ":integer_relation",
         "//loom/src/loom/ir",

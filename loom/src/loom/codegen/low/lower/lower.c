@@ -1309,6 +1309,7 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
   if (iree_status_is_ok(status)) {
     const loom_vector_memory_footprint_options_t footprint_options = {
         .fact_table = context.lowering.fact_table,
+        .value_domain = &context.lowering.value_domain,
         .emitter = options->emitter,
         .max_errors = options->max_errors,
     };

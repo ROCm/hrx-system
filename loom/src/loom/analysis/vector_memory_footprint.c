@@ -12,6 +12,7 @@
 
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/cfg_condition_facts.h"
+#include "loom/analysis/cfg_value_identity.h"
 #include "loom/analysis/condition_facts.h"
 #include "loom/analysis/memory_root_bounds.h"
 #include "loom/analysis/symbolic_expr.h"
@@ -48,6 +49,15 @@ typedef struct loom_vector_memory_footprint_state_t {
 
   // Per-function value facts visible to footprint proof.
   const loom_value_fact_table_t* fact_table;
+
+  // Value domain borrowed from the caller or owned below.
+  loom_local_value_domain_t* value_domain;
+
+  // Invocation-owned value domain when the caller supplies none.
+  loom_local_value_domain_t owned_value_domain;
+
+  // Direct CFG argument representatives indexed by value_domain.
+  loom_cfg_value_identity_table_t value_identities;
 
   // Per-function symbolic expression context sharing the fact table above.
   loom_symbolic_expr_context_t expression_context;
@@ -699,7 +709,7 @@ static bool loom_vector_memory_footprint_axis_extent_is_group_aligned(
   }
   const loom_value_id_t extent =
       loom_type_dim_value_id_at(memory_access->vector_type, vector_axis);
-  if (extent == LOOM_VALUE_ID_INVALID || state->fact_table == NULL) {
+  if (extent == LOOM_VALUE_ID_INVALID) {
     return false;
   }
   const loom_value_facts_t facts =
@@ -1790,24 +1800,28 @@ static iree_status_t loom_vector_memory_footprint_push_cfg_blocks(
     const loom_condition_fact_set_t* condition_facts) {
   IREE_RETURN_IF_ERROR(loom_vector_memory_footprint_ensure_dominance(state));
 
-  loom_cfg_graph_t graph = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_cfg_graph_build(state->module, region, state->arena, &graph));
-  if (graph.malformed) {
+  const loom_value_fact_cfg_region_t* retained_region =
+      loom_value_fact_table_lookup_cfg_region(state->fact_table, region);
+  IREE_ASSERT(retained_region != NULL);
+  const loom_cfg_graph_t* graph = &retained_region->graph;
+  if (graph->malformed) {
     return loom_vector_memory_footprint_push_structured_blocks(
         state, stack, region, condition_facts);
   }
+  IREE_RETURN_IF_ERROR(loom_cfg_value_identity_table_update(
+      &state->value_identities, retained_region, &state->dominance,
+      state->arena));
 
   loom_cfg_condition_fact_table_t condition_fact_table = {0};
   IREE_RETURN_IF_ERROR(loom_cfg_condition_fact_table_compute(
-      state->module, &graph, state->fact_table, &state->dominance, state->arena,
+      state->module, graph, state->fact_table, &state->dominance, state->arena,
       &condition_fact_table));
-  for (iree_host_size_t i = graph.block_count; i > 0; --i) {
+  for (iree_host_size_t i = graph->block_count; i > 0; --i) {
     uint16_t block_index = (uint16_t)(i - 1);
-    if (!loom_cfg_graph_block_is_reachable(&graph, block_index)) {
+    if (!loom_cfg_graph_block_is_reachable(graph, block_index)) {
       continue;
     }
-    loom_block_t* block = (loom_block_t*)graph.blocks[block_index].block;
+    loom_block_t* block = (loom_block_t*)graph->blocks[block_index].block;
     if (!block) {
       continue;
     }
@@ -1925,6 +1939,8 @@ iree_status_t loom_vector_memory_footprint_verify_function(
     loom_module_t* module, loom_func_like_t function,
     const loom_vector_memory_footprint_options_t* options,
     loom_vector_memory_footprint_result_t* out_result) {
+  IREE_ASSERT_ARGUMENT(options);
+  IREE_ASSERT_ARGUMENT(options->fact_table);
   *out_result = (loom_vector_memory_footprint_result_t){0};
 
   loom_region_t* body = loom_func_like_body(function);
@@ -1942,12 +1958,30 @@ iree_status_t loom_vector_memory_footprint_verify_function(
       .fact_table = options->fact_table,
       .result = out_result,
   };
-  loom_symbolic_expr_context_initialize(module, /*value_domain=*/NULL,
-                                        state.fact_table, &arena,
-                                        &state.expression_context);
-
-  iree_status_t status =
-      loom_vector_memory_footprint_check_with_stack(&state, body);
+  iree_status_t status = iree_ok_status();
+  if (options->value_domain) {
+    state.value_domain = options->value_domain;
+  } else {
+    status = loom_local_value_domain_acquire_for_region_tree(
+        module, body, &arena, &state.owned_value_domain);
+    if (iree_status_is_ok(status)) {
+      state.value_domain = &state.owned_value_domain;
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_cfg_value_identity_table_initialize(
+        state.value_domain, &arena, &state.value_identities);
+  }
+  if (iree_status_is_ok(status)) {
+    loom_symbolic_expr_context_initialize(module, state.value_domain,
+                                          state.fact_table, &arena,
+                                          &state.expression_context);
+    state.expression_context.value_identities = &state.value_identities;
+    status = loom_vector_memory_footprint_check_with_stack(&state, body);
+  }
+  if (!options->value_domain && state.value_domain) {
+    loom_local_value_domain_release(&state.owned_value_domain);
+  }
   iree_arena_deinitialize(&arena);
   return status;
 }

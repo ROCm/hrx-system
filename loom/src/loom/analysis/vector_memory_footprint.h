@@ -17,6 +17,7 @@
 #include "iree/base/api.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
+#include "loom/ir/local_value_domain.h"
 #include "loom/util/fact_table.h"
 
 #ifdef __cplusplus
@@ -24,8 +25,11 @@ extern "C" {
 #endif
 
 typedef struct loom_vector_memory_footprint_options_t {
-  // Caller-owned value facts for |function|.
+  // Caller-owned value facts for |function|, including retained CFG structure.
   const loom_value_fact_table_t* fact_table;
+  // Optional acquired domain covering the function's complete region tree.
+  // The verifier acquires an invocation-local domain when this is NULL.
+  loom_local_value_domain_t* value_domain;
   // Structured diagnostic emitter for user footprint proof failures.
   iree_diagnostic_emitter_t emitter;
   // Maximum number of errors to emit before suppressing further diagnostics.

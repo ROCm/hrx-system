@@ -88,8 +88,7 @@ static bool loom_cfg_condition_try_map_branch_arg_to_block_arg(
     }
     if (found_mapping) {
       *out_ambiguous = true;
-      *out_block_arg = LOOM_VALUE_ID_INVALID;
-      return false;
+      return true;
     }
     *out_block_arg = loom_block_arg_id(block, i);
     found_mapping = true;
@@ -150,7 +149,8 @@ static bool loom_cfg_condition_remap_operand_to_block_entry(
       block, predecessor_terminator, operand.value_id, &block_arg,
       &ambiguous_mapping);
   if (ambiguous_mapping) {
-    return false;
+    return loom_cfg_condition_value_preserved_at_block_entry(
+        module, dominance, operand.value_id, block);
   }
   if (found_mapping) {
     *out_operand = loom_cfg_condition_value_operand(block_arg);
@@ -171,7 +171,8 @@ static bool loom_cfg_condition_remap_value_to_block_entry(
   bool found_mapping = loom_cfg_condition_try_map_terminator_arg_to_block_arg(
       block, predecessor_terminator, value_id, &block_arg, &ambiguous_mapping);
   if (ambiguous_mapping) {
-    return false;
+    return loom_cfg_condition_value_preserved_at_block_entry(module, dominance,
+                                                             value_id, block);
   }
   if (found_mapping) {
     *out_value_id = block_arg;

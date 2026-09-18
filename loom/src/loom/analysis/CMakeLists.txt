@@ -202,6 +202,23 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    cfg_value_identity
+  HDRS
+    "cfg_value_identity.h"
+  SRCS
+    "cfg_value_identity.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::util::cfg_graph
+    loom::util::dominance
+    loom::util::fact_table
+  PUBLIC
+)
+
 loom_cc_test(
   NAME
     cfg_condition_facts_test
@@ -508,6 +525,7 @@ loom_cc_library(
     "vector_memory_mask_bounds.c"
   DEPS
     ::cfg_condition_facts
+    ::cfg_value_identity
     ::condition_facts
     ::symbolic_expr
     iree::base
@@ -996,6 +1014,7 @@ loom_cc_library(
     "symbolic_value.c"
     "symbolic_value.h"
   DEPS
+    ::cfg_value_identity
     ::condition_facts
     ::integer_relation
     iree::base

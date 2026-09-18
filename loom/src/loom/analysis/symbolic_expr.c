@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/analysis/cfg_value_identity.h"
 #include "loom/analysis/condition_facts.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/context.h"
@@ -791,8 +792,21 @@ static iree_status_t loom_symbolic_expr_expansion_prepare_frame(
   const loom_value_t* value =
       loom_module_value(context->module, frame->value_id);
   if (loom_value_is_block_arg(value)) {
-    *out_complete = true;
-    return loom_symbolic_expr_value(context, frame->value_id, out_expression);
+    const loom_value_id_t representative = loom_cfg_value_identity_table_lookup(
+        context->value_identities, frame->value_id);
+    if (representative == frame->value_id) {
+      *out_complete = true;
+      return loom_symbolic_expr_value(context, frame->value_id, out_expression);
+    }
+    frame->kind = LOOM_SYMBOLIC_EXPR_EXPANSION_IDENTITY;
+    frame->operand_values[0] = representative;
+    const loom_scalar_type_t scalar_type = loom_type_element_type(value->type);
+    if (loom_scalar_type_is_integer(scalar_type)) {
+      frame->integer_bit_count =
+          (uint8_t)loom_scalar_type_bitwidth(scalar_type);
+    }
+    frame->stage = LOOM_SYMBOLIC_EXPR_EXPANSION_STAGE_FIRST_OPERAND;
+    return iree_ok_status();
   }
   const loom_op_t* defining_op = loom_value_def_op(value);
   if (!defining_op) {
