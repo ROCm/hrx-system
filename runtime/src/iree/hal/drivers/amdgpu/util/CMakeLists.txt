@@ -32,6 +32,37 @@ endif()
 if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_library(
   NAME
+    libhsa_test_library.so
+  SRCS
+    "libhsa_test_library.c"
+  DEPS
+    ::libhsa
+    iree::base
+    iree::third_party::hsa_runtime_headers
+  TESTONLY
+  SHARED
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_c_embed_data(
+  NAME
+    libhsa_test_library
+  SRCS
+    "$<TARGET_FILE:iree::hal::drivers::amdgpu::util::libhsa_test_library.so>"
+  C_FILE_OUTPUT
+    "libhsa_test_library_embed.c"
+  H_FILE_OUTPUT
+    "libhsa_test_library_embed.h"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
     libaqlprofile
   HDRS
     "libaqlprofile.h"
@@ -58,6 +89,7 @@ iree_cc_test(
     "libhsa_test.cc"
   DEPS
     ::libhsa
+    ::libhsa_test_library
     iree::base
     iree::base::testing::dynamic_library_test_library
     iree::io::file_handle
@@ -1293,12 +1325,16 @@ if(IREE_HAL_AMDGPU_LIBHSA_STATIC)
       "ROCm discovery is enough for dynamic loading but cannot satisfy static "
       "libhsa linking.")
   endif()
+  # The split object target reevaluates the link interface outside the package
+  # target scope, so link the globally visible backing target instead.
+  get_target_property(_hsa_runtime_target
+    iree::third_party::hsa_runtime ALIASED_TARGET)
   target_compile_options(iree_hal_drivers_amdgpu_util_libhsa
     PUBLIC
       "-DIREE_HAL_AMDGPU_LIBHSA_STATIC=1"
   )
   target_link_libraries(iree_hal_drivers_amdgpu_util_libhsa
     PRIVATE
-      iree::third_party::hsa_runtime
+      ${_hsa_runtime_target}
   )
 endif()
