@@ -145,7 +145,7 @@ static iree_status_t loom_refine_boundaries_collect_argument_projections(
         (loom_refine_boundaries_argument_projection_t){
             .region = region,
             .entry_block = loom_region_entry_block(region),
-    };
+        };
   }
   return iree_ok_status();
 }
