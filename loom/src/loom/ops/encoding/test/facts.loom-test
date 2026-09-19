@@ -197,6 +197,46 @@ func.def @strided_layout_summary(%stride: index) -> (i64, i64) {
 
 // ====
 
+func.def @mixed_dynamic_strided_layout_facts() -> (i64, i64, i64, i64) {
+  %outer_stride = index.constant 64 : index
+  %layout = encoding.layout.strided [1, %outer_stride] : encoding<layout>
+  %constant_hi = test.fact_range_hi %outer_stride : index -> i64
+  %kind = test.fact_encoding_layout_kind %layout : encoding<layout> -> i64
+  %stride0 = test.fact_encoding_layout_stride_hi %layout [0] : encoding<layout> -> i64
+  %stride1 = test.fact_encoding_layout_stride_hi %layout [1] : encoding<layout> -> i64
+  func.return %constant_hi, %kind, %stride0, %stride1 : i64, i64, i64, i64
+}
+
+// ----
+func.def @mixed_dynamic_strided_layout_facts() -> (i64, i64, i64, i64) {
+  %constant_hi = scalar.constant 64 : i64
+  %kind = scalar.constant 2 : i64
+  %stride0 = scalar.constant 1 : i64
+  %stride1 = scalar.constant 64 : i64
+  func.return %constant_hi, %kind, %stride0, %stride1 : i64, i64, i64, i64
+}
+
+// ====
+
+func.def @assumed_strided_layout_facts() -> (i64, i64, i64) {
+  %dense = encoding.layout.dense : encoding<layout>
+  %layout = encoding.layout.assume.strided %dense {rank = 2} : encoding<layout>
+  %kind = test.fact_encoding_layout_kind %layout : encoding<layout> -> i64
+  %stride0 = test.fact_encoding_layout_stride_hi %layout [0] : encoding<layout> -> i64
+  %stride1 = test.fact_encoding_layout_stride_hi %layout [1] : encoding<layout> -> i64
+  func.return %kind, %stride0, %stride1 : i64, i64, i64
+}
+
+// ----
+func.def @assumed_strided_layout_facts() -> (i64, i64, i64) {
+  %kind = scalar.constant 2 : i64
+  %stride0 = scalar.constant 9223372036854775807 : i64
+  %stride1 = scalar.constant 9223372036854775807 : i64
+  func.return %kind, %stride0, %stride1 : i64, i64, i64
+}
+
+// ====
+
 // Layout assumptions seed facts for layout values that arrive as arguments
 // instead of being constructed locally.
 func.def @assume_dense_layout_summary(%layout: encoding<layout>) -> (i64) {
