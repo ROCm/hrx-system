@@ -1591,7 +1591,8 @@ static iree_status_t loom_low_target_legalize_verify_final(
       .type_supported = state->selection->policy->source_type_supported,
       .view_regions = state->legalization_context.view_regions,
       .structural_legality_flags =
-          LOOM_TARGET_LOW_STRUCTURAL_LEGALITY_ALLOW_SOURCE_SCF,
+          LOOM_TARGET_LOW_STRUCTURAL_LEGALITY_ALLOW_SOURCE_SCF |
+          LOOM_TARGET_LOW_STRUCTURAL_LEGALITY_ALLOW_SOURCE_CFG,
       .emitter = state->pass->diagnostic_emitter,
       .max_errors = pass_state->max_errors,
   };

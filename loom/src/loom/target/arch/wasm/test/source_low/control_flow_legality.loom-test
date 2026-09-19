@@ -1,0 +1,105 @@
+// RUN: pass source-to-low{control-flow=structured-low}
+
+wasm.target<simd128> @target
+
+// Source-to-low must establish the emitter's representation contract itself.
+// ERROR@+1: TARGET/089 {descriptor_set="wasm.core.simd128", function_name="source_conditional", op_name="func.def"}
+func.def target(@target) @source_conditional(%condition: i1) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  func.return
+^right:
+  func.return
+}
+
+// ====
+// RUN: pass source-to-low
+
+wasm.target<simd128> @target
+
+// Selecting CFG lowering cannot override a target representation requirement.
+// ERROR@+1: TARGET/089 {descriptor_set="wasm.core.simd128", function_name="source_self_loop", op_name="func.def"}
+func.def target(@target) @source_self_loop() {
+^entry:
+  cfg.br ^entry
+}
+
+// ====
+// RUN: pass source-to-low{control-flow=structured-low}
+
+wasm.target<simd128> @target
+
+// Disconnected blocks have no branch operation to diagnose.
+// ERROR@+1: TARGET/089 {descriptor_set="wasm.core.simd128", function_name="source_disconnected", op_name="func.def"}
+func.def target(@target) @source_disconnected() {
+  func.return
+^unreachable:
+  func.return
+}
+
+// ====
+// RUN: with-checks pass target-legalize{mode=complete}
+
+wasm.target<simd128> @target
+
+// Target legalization precedes control-flow finalization and permits source CFG.
+func.def target(@target) @legalize_before_structurization(%condition: i1) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  func.return
+^right:
+  func.return
+}
+
+// ----
+CHECK: cfg.cond_br %condition, ^left, ^right
+CHECK-NOT: low.func.def *
+
+// ====
+// RUN: verify
+
+wasm.target<simd128> @target
+
+// An entry self-loop has one block but still requires CFG emission.
+// ERROR@+1: TARGET/089 {descriptor_set="wasm.core.simd128", function_name="low_self_loop", op_name="low.func.def"}
+low.func.def target<wasm.core.simd128>(@target) @low_self_loop() asm {
+^entry:
+  low.br ^entry
+}
+
+// ====
+// RUN: verify
+
+wasm.target<simd128> @target
+
+// ERROR@+1: TARGET/089 {descriptor_set="wasm.core.simd128", function_name="low_conditional", op_name="low.func.def"}
+low.func.def target<wasm.core.simd128>(@target) @low_conditional(%condition: reg<wasm.i32>) asm {
+  low.cond_br %condition, ^left, ^right : reg<wasm.i32>
+^left:
+  return
+^right:
+  return
+}
+
+// ====
+// RUN: verify
+
+wasm.target<simd128> @target
+
+// ERROR@+1: TARGET/089 {descriptor_set="wasm.core.simd128", function_name="low_disconnected", op_name="low.func.def"}
+low.func.def target<wasm.core.simd128>(@target) @low_disconnected() asm {
+  return
+^unreachable:
+  return
+}
+
+// ====
+// RUN: verify
+
+wasm.target<simd128> @target
+
+// A presentation label alone does not require CFG semantics.
+low.func.def target<wasm.core.simd128>(@target) @named_entry() asm {
+^entry:
+  return
+}

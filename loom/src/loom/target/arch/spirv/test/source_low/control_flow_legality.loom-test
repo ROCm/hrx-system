@@ -1,0 +1,105 @@
+// RUN: pass source-to-low{control-flow=structured-low}
+
+spirv.target<vulkan1_3> @target
+
+// Source-to-low must establish the emitter's representation contract itself.
+// ERROR@+1: TARGET/089 {descriptor_set="spirv.logical.core", function_name="source_conditional", op_name="func.def"}
+func.def target(@target) @source_conditional(%condition: i1) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  func.return
+^right:
+  func.return
+}
+
+// ====
+// RUN: pass source-to-low
+
+spirv.target<vulkan1_3> @target
+
+// Selecting CFG lowering cannot override a target representation requirement.
+// ERROR@+1: TARGET/089 {descriptor_set="spirv.logical.core", function_name="source_self_loop", op_name="func.def"}
+func.def target(@target) @source_self_loop() {
+^entry:
+  cfg.br ^entry
+}
+
+// ====
+// RUN: pass source-to-low{control-flow=structured-low}
+
+spirv.target<vulkan1_3> @target
+
+// Disconnected blocks have no branch operation to diagnose.
+// ERROR@+1: TARGET/089 {descriptor_set="spirv.logical.core", function_name="source_disconnected", op_name="func.def"}
+func.def target(@target) @source_disconnected() {
+  func.return
+^unreachable:
+  func.return
+}
+
+// ====
+// RUN: with-checks pass target-legalize{mode=complete}
+
+spirv.target<vulkan1_3> @target
+
+// Target legalization precedes control-flow finalization and permits source CFG.
+func.def target(@target) @legalize_before_structurization(%condition: i1) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  func.return
+^right:
+  func.return
+}
+
+// ----
+CHECK: cfg.cond_br %condition, ^left, ^right
+CHECK-NOT: low.func.def *
+
+// ====
+// RUN: verify
+
+spirv.target<vulkan1_3> @target
+
+// An entry self-loop has one block but still requires CFG emission.
+// ERROR@+1: TARGET/089 {descriptor_set="spirv.logical.core", function_name="low_self_loop", op_name="low.func.def"}
+low.func.def target<spirv.logical.core>(@target) @low_self_loop() asm {
+^entry:
+  low.br ^entry
+}
+
+// ====
+// RUN: verify
+
+spirv.target<vulkan1_3> @target
+
+// ERROR@+1: TARGET/089 {descriptor_set="spirv.logical.core", function_name="low_conditional", op_name="low.func.def"}
+low.func.def target<spirv.logical.core>(@target) @low_conditional(%condition: reg<spirv.id : i1>) asm {
+  low.cond_br %condition, ^left, ^right : reg<spirv.id : i1>
+^left:
+  return
+^right:
+  return
+}
+
+// ====
+// RUN: verify
+
+spirv.target<vulkan1_3> @target
+
+// ERROR@+1: TARGET/089 {descriptor_set="spirv.logical.core", function_name="low_disconnected", op_name="low.func.def"}
+low.func.def target<spirv.logical.core>(@target) @low_disconnected() asm {
+  return
+^unreachable:
+  return
+}
+
+// ====
+// RUN: verify
+
+spirv.target<vulkan1_3> @target
+
+// A presentation label alone does not require CFG semantics.
+low.func.def target<spirv.logical.core>(@target) @named_entry() asm {
+^entry:
+  return
+}

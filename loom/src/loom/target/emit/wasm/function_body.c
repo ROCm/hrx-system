@@ -1467,23 +1467,6 @@ static iree_status_t loom_wasm_emit_local_declarations(
 
 static iree_status_t loom_wasm_emit_region(loom_wasm_emit_state_t* state,
                                            const loom_region_t* region) {
-  if (region == NULL || region->block_count == 0) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "Wasm function-body emission requires a non-empty "
-                            "low region");
-  }
-  if (iree_any_bit_set(region->flags, LOOM_REGION_INSTANCE_FLAG_CFG)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "Wasm function-body emission does not support CFG low regions");
-  }
-  if (region->block_count != 1) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "Wasm function-body emission requires structured single-block low "
-        "regions");
-  }
-
   const loom_block_t* block = loom_region_const_entry_block(region);
   for (const loom_op_t* op = block->first_op; op; op = op->next_op) {
     IREE_RETURN_IF_ERROR(loom_wasm_emit_op(state, op));

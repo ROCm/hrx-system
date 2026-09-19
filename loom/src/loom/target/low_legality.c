@@ -1017,13 +1017,31 @@ iree_status_t loom_target_low_verify_function_legality(
       .descriptor_set = descriptor_set,
       .result = out_result,
   };
+  loom_region_t* body = loom_func_like_body(function);
+  if (body &&
+      (body->block_count != 1 ||
+       iree_any_bit_set(body->flags, LOOM_REGION_INSTANCE_FLAG_CFG)) &&
+      !iree_any_bit_set(context.options->structural_legality_flags,
+                        LOOM_TARGET_LOW_STRUCTURAL_LEGALITY_ALLOW_SOURCE_CFG) &&
+      iree_any_bit_set(
+          descriptor_set->flags,
+          LOOM_LOW_DESCRIPTOR_SET_FLAG_REQUIRES_STRUCTURED_CONTROL_FLOW)) {
+    const loom_diagnostic_param_t params[] = {
+        loom_param_string(loom_low_descriptor_set_string(
+            descriptor_set, descriptor_set->key_string_offset)),
+        loom_param_string(loom_target_low_legality_function_name(&context)),
+        loom_param_string(loom_op_name(module, function.op)),
+    };
+    return loom_target_low_legality_emit(&context, function.op,
+                                         LOOM_ERR_TARGET_089, params,
+                                         IREE_ARRAYSIZE(params));
+  }
   iree_arena_initialize(module->arena.block_pool, &context.arena);
 
   iree_status_t status = iree_ok_status();
   if (iree_status_is_ok(status)) {
     status = loom_target_low_legality_verify_function_signature(&context);
   }
-  loom_region_t* body = loom_func_like_body(function);
   if (iree_status_is_ok(status) && body) {
     loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
     status = loom_walk_region(

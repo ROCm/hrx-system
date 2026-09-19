@@ -58,9 +58,14 @@ typedef enum loom_target_low_structural_legality_flag_bits_e {
   // source-to-low leaves this unset and requires an explicit structural
   // lowering pass before executable target-low lowering.
   LOOM_TARGET_LOW_STRUCTURAL_LEGALITY_ALLOW_SOURCE_SCF = 1u << 0,
+  // Source CFG may still be transformed before the final source-to-low
+  // boundary. Target legalization permits it; source-to-low requires the
+  // selected representation to support the remaining control flow.
+  LOOM_TARGET_LOW_STRUCTURAL_LEGALITY_ALLOW_SOURCE_CFG = 1u << 1,
   // All structural legality flags known to this header.
   LOOM_TARGET_LOW_STRUCTURAL_LEGALITY_ALL =
-      LOOM_TARGET_LOW_STRUCTURAL_LEGALITY_ALLOW_SOURCE_SCF,
+      LOOM_TARGET_LOW_STRUCTURAL_LEGALITY_ALLOW_SOURCE_SCF |
+      LOOM_TARGET_LOW_STRUCTURAL_LEGALITY_ALLOW_SOURCE_CFG,
 } loom_target_low_structural_legality_flag_bits_t;
 typedef uint32_t loom_target_low_structural_legality_flags_t;
 

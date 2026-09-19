@@ -91,6 +91,7 @@ loom_check_test_suite(
     "test/source_low/buffer_bulk.loom-test"
     "test/source_low/buffer_raw.loom-test"
     "test/source_low/carried_counter_store.loom-test"
+    "test/source_low/control_flow_legality.loom-test"
     "test/source_low/loop_counter_offset.loom-test"
     "test/source_low/memory_wide_carriers.loom-test"
     "test/source_low/numeric_scalar_i64_subtract.loom-test"

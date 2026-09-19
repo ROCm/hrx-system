@@ -1287,6 +1287,10 @@ typedef enum loom_low_descriptor_set_flag_bits_e {
   // Selected effect endpoints have at least one positive issue separation.
   // Operand-only timing does not require cross-block effect traversal.
   LOOM_LOW_DESCRIPTOR_SET_FLAG_POSITIVE_EFFECT_SEPARATIONS = 1u << 1,
+  // Function bodies use structured regions instead of explicit CFG blocks.
+  // Source legality establishes this before lowering; authored Low is checked
+  // at its input boundary. Emitters consume the established representation.
+  LOOM_LOW_DESCRIPTOR_SET_FLAG_REQUIRES_STRUCTURED_CONTROL_FLOW = 1u << 2,
 } loom_low_descriptor_set_flag_bits_t;
 typedef uint8_t loom_low_descriptor_set_flags_t;
 

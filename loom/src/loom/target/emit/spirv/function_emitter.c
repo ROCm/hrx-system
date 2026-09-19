@@ -1194,12 +1194,6 @@ static iree_status_t loom_spirv_emit_function_entry_block(
 
 static iree_status_t loom_spirv_emit_function_body(
     loom_spirv_emit_state_t* state) {
-  if (state->body->block_count != 1) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "verified SPIR-V low function has %u top-level blocks; expected one",
-        (unsigned)state->body->block_count);
-  }
   const loom_block_t* block = loom_region_const_entry_block(state->body);
   IREE_RETURN_IF_ERROR(loom_spirv_emit_function_entry_block(state, block));
   return loom_spirv_binary_write_instruction(

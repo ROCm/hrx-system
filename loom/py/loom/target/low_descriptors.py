@@ -743,6 +743,8 @@ class DescriptorSet:
     requires_explicit_asm_surface: bool = False
     supported_target_contract_keys: tuple[str, ...] = ()
     supports_native_scheduling: bool = False
+    # Function bodies must use structured regions instead of explicit CFG.
+    requires_structured_control_flow: bool = False
 
     def __post_init__(self) -> None:
         canonical_target_contract_keys = tuple(

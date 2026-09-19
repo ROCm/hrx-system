@@ -1608,6 +1608,27 @@ ERR_TARGET_088 = ErrorDef(
     fix_hint="Reduce the channel capacity or record size, or change worker placement.",
 )
 
+# ERR_TARGET_089: Target representation requires structured control flow.
+ERR_TARGET_089 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=89,
+    severity=Severity.ERROR,
+    summary="Target representation requires structured control flow.",
+    message=(
+        "target representation '{descriptor_set}' requires structured control "
+        "flow in '@{function_name}'; '{op_name}' has an explicit CFG body"
+    ),
+    params=(
+        ErrorParam("descriptor_set", ParamKind.STRING),
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("op_name", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Express control flow with scf.if, scf.for, or scf.while before "
+        "lowering to this target; authored Low uses the corresponding low.scf ops."
+    ),
+)
+
 ALL_TARGET_ERRORS = (
     ERR_TARGET_001,
     ERR_TARGET_002,
@@ -1687,4 +1708,5 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_086,
     ERR_TARGET_087,
     ERR_TARGET_088,
+    ERR_TARGET_089,
 )

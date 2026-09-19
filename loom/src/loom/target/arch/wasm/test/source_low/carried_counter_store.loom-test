@@ -3,6 +3,7 @@
 
 wasm.target<simd128> @target
 
+// ERROR@+1: TARGET/089 {descriptor_set="wasm.core.simd128", function_name="carried_counter_store", op_name="func.def"}
 func.def target(@target) @carried_counter_store(%output: buffer) {
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
@@ -14,7 +15,6 @@ func.def target(@target) @carried_counter_store(%output: buffer) {
 ^preheader:
   cfg.br ^header(%begin: index)
 ^header(%position: index):
-  // ERROR@+1: TARGET/003 {op_name="index.cmp", subject_name="predicate", constraint_key="enum_case.ult"}
   %more = index.cmp slt, %position, %end : index
   cfg.cond_br %more, ^body, ^exit
 ^body:

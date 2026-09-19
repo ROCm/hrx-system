@@ -181,8 +181,8 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
 
 spirv.target<vulkan1_3> @target
 
+// ERROR@+1: TARGET/089 {descriptor_set="spirv.logical.core", function_name="cfg_conditional_requires_low_scf", op_name="low.func.def"}
 low.func.def target<spirv.logical.core>(@target) @cfg_conditional_requires_low_scf(%condition: reg<spirv.id : i1>) asm {
-  // ERROR@+1: SPIRV/015 {function_name="cfg_conditional_requires_low_scf", op_name="low.cond_br"}
   low.cond_br %condition, ^then, ^else : reg<spirv.id : i1>
 ^then:
   return
@@ -196,8 +196,8 @@ low.func.def target<spirv.logical.core>(@target) @cfg_conditional_requires_low_s
 
 spirv.target<vulkan1_3> @target
 
+// ERROR@+1: TARGET/089 {descriptor_set="spirv.logical.core", function_name="cfg_branch_requires_low_scf", op_name="low.func.def"}
 low.func.def target<spirv.logical.core>(@target) @cfg_branch_requires_low_scf() asm {
-  // ERROR@+1: SPIRV/015 {function_name="cfg_branch_requires_low_scf", op_name="low.br"}
   low.br ^done
 ^done:
   return
@@ -307,7 +307,7 @@ low.func.def target<spirv.logical.core>(@target) @shader_entry_workgroup_pointer
 
 spirv.target<vulkan1_3> @target
 
-// ERROR@+1: SPIRV/024 {function_name="multiblock_requires_low_scf", block_count="2"}
+// ERROR@+1: TARGET/089 {descriptor_set="spirv.logical.core", function_name="multiblock_requires_low_scf", op_name="low.func.def"}
 low.func.def target<spirv.logical.core>(@target) @multiblock_requires_low_scf() asm {
   return
 ^dead:

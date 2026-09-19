@@ -2141,6 +2141,21 @@ static iree_status_t loom_low_verify_function(loom_low_verify_state_t* state,
       .function_name =
           loom_low_verify_function_name(state->module, low_func_op),
   };
+  if (body &&
+      (body->block_count != 1 ||
+       iree_any_bit_set(body->flags, LOOM_REGION_INSTANCE_FLAG_CFG)) &&
+      iree_any_bit_set(
+          target.descriptor_set->flags,
+          LOOM_LOW_DESCRIPTOR_SET_FLAG_REQUIRES_STRUCTURED_CONTROL_FLOW)) {
+    const loom_diagnostic_param_t params[] = {
+        loom_param_string(loom_low_descriptor_set_string(
+            target.descriptor_set, target.descriptor_set->key_string_offset)),
+        loom_param_string(function_state.function_name),
+        loom_param_string(loom_op_name(state->module, low_func_op)),
+    };
+    return loom_low_verify_emit(state, low_func_op, LOOM_ERR_TARGET_089, params,
+                                IREE_ARRAYSIZE(params), NULL, 0);
+  }
   function_state.register_type_resolver =
       loom_low_register_type_resolver_for_descriptor_set(target.descriptor_set);
   if (loom_low_function_schedule(low_func_op) == LOOM_LOW_SCHEDULE_PHASED &&

@@ -3,6 +3,7 @@
 
 spirv.target<vulkan1_3> @target
 
+// ERROR@+1: TARGET/089 {descriptor_set="spirv.logical.core", function_name="carried_counter_store", op_name="func.def"}
 func.def target(@target) @carried_counter_store(%output: buffer) {
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
@@ -12,17 +13,14 @@ func.def target(@target) @carried_counter_store(%output: buffer) {
   %output_view = buffer.view %aligned_output[%base] : buffer -> view<4xi32>
   cfg.br ^preheader
 ^preheader:
-  // ERROR@+1: SPIRV/015 {function_name="carried_counter_store", op_name="low.br"}
   cfg.br ^header(%begin: index)
 ^header(%position: index):
   %more = index.cmp slt, %position, %end : index
-  // ERROR@+1: SPIRV/015 {function_name="carried_counter_store", op_name="low.cond_br"}
   cfg.cond_br %more, ^body, ^exit
 ^body:
   %value = index.cast %position : index to i32
   view.store %value, %output_view[%position] : i32, view<4xi32>
   %next = index.add %position, %step : index
-  // ERROR@+1: SPIRV/015 {function_name="carried_counter_store", op_name="low.br"}
   cfg.br ^header(%next: index)
 ^exit:
   func.return

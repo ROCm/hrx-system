@@ -189,22 +189,6 @@ ERR_SPIRV_014 = ErrorDef(
     ),
 )
 
-# ERR_SPIRV_015: SPIR-V requires structured low control flow.
-ERR_SPIRV_015 = ErrorDef(
-    domain=ErrorDomain.SPIRV,
-    code=15,
-    severity=Severity.ERROR,
-    summary="SPIR-V requires structured low control flow.",
-    message=(
-        "SPIR-V emission for '@{function_name}' requires low.scf control "
-        "flow; '{op_name}' is CFG input"
-    ),
-    params=(
-        ErrorParam("function_name", ParamKind.STRING),
-        ErrorParam("op_name", ParamKind.STRING),
-    ),
-)
-
 # ERR_SPIRV_016: SPIR-V shader-entry result value is unsupported.
 ERR_SPIRV_016 = ErrorDef(
     domain=ErrorDomain.SPIRV,
@@ -323,22 +307,6 @@ ERR_SPIRV_023 = ErrorDef(
     params=(
         ErrorParam("function_name", ParamKind.STRING),
         ErrorParam("constant_word_count", ParamKind.U32),
-    ),
-)
-
-# ERR_SPIRV_024: SPIR-V target-low function body is not structured.
-ERR_SPIRV_024 = ErrorDef(
-    domain=ErrorDomain.SPIRV,
-    code=24,
-    severity=Severity.ERROR,
-    summary="SPIR-V target-low function body is not structured.",
-    message=(
-        "SPIR-V emission for '@{function_name}' requires exactly one "
-        "top-level low function block, but the body has {block_count}"
-    ),
-    params=(
-        ErrorParam("function_name", ParamKind.STRING),
-        ErrorParam("block_count", ParamKind.U32),
     ),
 )
 
@@ -492,7 +460,6 @@ ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_012,
     ERR_SPIRV_013,
     ERR_SPIRV_014,
-    ERR_SPIRV_015,
     ERR_SPIRV_016,
     ERR_SPIRV_017,
     ERR_SPIRV_018,
@@ -500,7 +467,6 @@ ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_020,
     ERR_SPIRV_022,
     ERR_SPIRV_023,
-    ERR_SPIRV_024,
     ERR_SPIRV_025,
     ERR_SPIRV_026,
     ERR_SPIRV_027,

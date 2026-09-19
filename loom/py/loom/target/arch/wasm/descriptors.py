@@ -284,6 +284,7 @@ _CONTROL_EFFECT = Effect(
 
 WASM_CORE_SIMD128_DESCRIPTOR_SET = DescriptorSet(
     key="wasm.core.simd128",
+    requires_structured_control_flow=True,
     target_key="wasm",
     feature_key="wasm.simd128.v1",
     c_header_path=Path("loom/src/loom/target/arch/wasm/descriptors.h"),
