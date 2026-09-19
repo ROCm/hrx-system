@@ -1,0 +1,169 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_wide_carriers.loom-test
+// RUN: emit source-low output=low
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @copy_wide_origin_vectors(%input: buffer, %output: buffer, %byte_offset_input: i64) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %byte_offset = scalar.assume %byte_offset_input [range(%byte_offset_input, 0, 4096), mul(%byte_offset_input, 64)] : i64
+  %prefix = scalar.constant 64 : i64
+  %source_origin = scalar.addi %byte_offset, %prefix : i64
+  %source_offset = index.cast %source_origin : i64 to offset
+  %destination_offset = index.cast %byte_offset : i64 to offset
+  %source_view = buffer.view %source[%source_offset] : buffer -> view<16xi32>
+  %destination_view = buffer.view %destination[%destination_offset] : buffer -> view<16xi32>
+  %value = vector.load %source_view[0] : view<16xi32> -> vector<16xi32>
+  vector.store %value, %destination_view[0] : vector<16xi32>, view<16xi32>
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @copy_wide_origin_vectors(%source: reg<spirv.ptr.storage_buffer>, %destination: reg<spirv.ptr.storage_buffer>, %byte_offset: reg<spirv.id : i64>) asm {
+  %prefix = OpConstant.i64 64
+  %source_origin = OpIAdd.i64 %byte_offset, %prefix
+  %source_offset = OpBitcast.i64.offset64 %source_origin
+  %destination_offset = OpBitcast.i64.offset64 %byte_offset
+  %53 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source, %source_offset
+  %54 = OpLoad.storage_buffer.i32 %53
+  %55 = OpConstant.offset64 4
+  %56 = OpIAdd.offset64 %source_offset, %55
+  %57 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source, %56
+  %58 = OpLoad.storage_buffer.i32 %57
+  %59 = OpConstant.offset64 8
+  %60 = OpIAdd.offset64 %source_offset, %59
+  %61 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source, %60
+  %62 = OpLoad.storage_buffer.i32 %61
+  %63 = OpConstant.offset64 12
+  %64 = OpIAdd.offset64 %source_offset, %63
+  %65 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source, %64
+  %66 = OpLoad.storage_buffer.i32 %65
+  %67 = OpConstant.offset64 16
+  %68 = OpIAdd.offset64 %source_offset, %67
+  %69 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source, %68
+  %70 = OpLoad.storage_buffer.i32 %69
+  %71 = OpConstant.offset64 20
+  %72 = OpIAdd.offset64 %source_offset, %71
+  %73 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source, %72
+  %74 = OpLoad.storage_buffer.i32 %73
+  %75 = OpConstant.offset64 24
+  %76 = OpIAdd.offset64 %source_offset, %75
+  %77 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source, %76
+  %78 = OpLoad.storage_buffer.i32 %77
+  %79 = OpConstant.offset64 28
+  %80 = OpIAdd.offset64 %source_offset, %79
+  %81 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source, %80
+  %82 = OpLoad.storage_buffer.i32 %81
+  %83 = OpConstant.offset64 32
+  %84 = OpIAdd.offset64 %source_offset, %83
+  %85 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source, %84
+  %86 = OpLoad.storage_buffer.i32 %85
+  %87 = OpConstant.offset64 36
+  %88 = OpIAdd.offset64 %source_offset, %87
+  %89 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source, %88
+  %90 = OpLoad.storage_buffer.i32 %89
+  %91 = OpConstant.offset64 40
+  %92 = OpIAdd.offset64 %source_offset, %91
+  %93 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source, %92
+  %94 = OpLoad.storage_buffer.i32 %93
+  %95 = OpConstant.offset64 44
+  %96 = OpIAdd.offset64 %source_offset, %95
+  %97 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source, %96
+  %98 = OpLoad.storage_buffer.i32 %97
+  %99 = OpConstant.offset64 48
+  %100 = OpIAdd.offset64 %source_offset, %99
+  %101 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source, %100
+  %102 = OpLoad.storage_buffer.i32 %101
+  %103 = OpConstant.offset64 52
+  %104 = OpIAdd.offset64 %source_offset, %103
+  %105 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source, %104
+  %106 = OpLoad.storage_buffer.i32 %105
+  %107 = OpConstant.offset64 56
+  %108 = OpIAdd.offset64 %source_offset, %107
+  %109 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source, %108
+  %110 = OpLoad.storage_buffer.i32 %109
+  %111 = OpConstant.offset64 60
+  %112 = OpIAdd.offset64 %source_offset, %111
+  %113 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source, %112
+  %114 = OpLoad.storage_buffer.i32 %113
+  %115 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination, %destination_offset
+  OpStore.storage_buffer.i32 %115, %54
+  %117 = OpIAdd.offset64 %destination_offset, %55
+  %118 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination, %117
+  OpStore.storage_buffer.i32 %118, %58
+  %120 = OpIAdd.offset64 %destination_offset, %59
+  %121 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination, %120
+  OpStore.storage_buffer.i32 %121, %62
+  %123 = OpIAdd.offset64 %destination_offset, %63
+  %124 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination, %123
+  OpStore.storage_buffer.i32 %124, %66
+  %126 = OpIAdd.offset64 %destination_offset, %67
+  %127 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination, %126
+  OpStore.storage_buffer.i32 %127, %70
+  %129 = OpIAdd.offset64 %destination_offset, %71
+  %130 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination, %129
+  OpStore.storage_buffer.i32 %130, %74
+  %132 = OpIAdd.offset64 %destination_offset, %75
+  %133 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination, %132
+  OpStore.storage_buffer.i32 %133, %78
+  %135 = OpIAdd.offset64 %destination_offset, %79
+  %136 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination, %135
+  OpStore.storage_buffer.i32 %136, %82
+  %138 = OpIAdd.offset64 %destination_offset, %83
+  %139 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination, %138
+  OpStore.storage_buffer.i32 %139, %86
+  %141 = OpIAdd.offset64 %destination_offset, %87
+  %142 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination, %141
+  OpStore.storage_buffer.i32 %142, %90
+  %144 = OpIAdd.offset64 %destination_offset, %91
+  %145 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination, %144
+  OpStore.storage_buffer.i32 %145, %94
+  %147 = OpIAdd.offset64 %destination_offset, %95
+  %148 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination, %147
+  OpStore.storage_buffer.i32 %148, %98
+  %150 = OpIAdd.offset64 %destination_offset, %99
+  %151 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination, %150
+  OpStore.storage_buffer.i32 %151, %102
+  %153 = OpIAdd.offset64 %destination_offset, %103
+  %154 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination, %153
+  OpStore.storage_buffer.i32 %154, %106
+  %156 = OpIAdd.offset64 %destination_offset, %107
+  %157 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination, %156
+  OpStore.storage_buffer.i32 %157, %110
+  %159 = OpIAdd.offset64 %destination_offset, %111
+  %160 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination, %159
+  OpStore.storage_buffer.i32 %160, %114
+  return
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @copy_wide_origin_scalar(%input: buffer, %output: buffer, %byte_offset_input: i64) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %byte_offset = scalar.assume %byte_offset_input [range(%byte_offset_input, 0, 4096), mul(%byte_offset_input, 64)] : i64
+  %prefix = scalar.constant 64 : i64
+  %source_origin = scalar.addi %byte_offset, %prefix : i64
+  %source_offset = index.cast %source_origin : i64 to offset
+  %destination_offset = index.cast %byte_offset : i64 to offset
+  %source_view = buffer.view %source[%source_offset] : buffer -> view<1xi32>
+  %destination_view = buffer.view %destination[%destination_offset] : buffer -> view<1xi32>
+  %value = view.load %source_view[0] : view<1xi32> -> i32
+  view.store %value, %destination_view[0] : i32, view<1xi32>
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @copy_wide_origin_scalar(%source: reg<spirv.ptr.storage_buffer>, %destination: reg<spirv.ptr.storage_buffer>, %byte_offset: reg<spirv.id : i64>) asm {
+  %prefix = OpConstant.i64 64
+  %source_origin = OpIAdd.i64 %byte_offset, %prefix
+  %source_offset = OpBitcast.i64.offset64 %source_origin
+  %destination_offset = OpBitcast.i64.offset64 %byte_offset
+  %20 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source, %source_offset
+  %value = OpLoad.storage_buffer.i32 %20
+  %22 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination, %destination_offset
+  OpStore.storage_buffer.i32 %22, %value
+  return
+}

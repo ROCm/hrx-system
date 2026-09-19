@@ -1,0 +1,82 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_wide_carriers.loom-test
+// RUN: emit source-low output=low
+
+x86.target<avx2> @target
+
+func.def target(@target) @copy_wide_origin_vectors(%input: buffer, %output: buffer, %byte_offset_input: i64) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %byte_offset = scalar.assume %byte_offset_input [range(%byte_offset_input, 0, 4096), mul(%byte_offset_input, 64)] : i64
+  %prefix = scalar.constant 64 : i64
+  %source_origin = scalar.addi %byte_offset, %prefix : i64
+  %source_offset = index.cast %source_origin : i64 to offset
+  %destination_offset = index.cast %byte_offset : i64 to offset
+  %source_view = buffer.view %source[%source_offset] : buffer -> view<16xi32>
+  %destination_view = buffer.view %destination[%destination_offset] : buffer -> view<16xi32>
+  %value = vector.load %source_view[0] : view<16xi32> -> vector<16xi32>
+  vector.store %value, %destination_view[0] : vector<16xi32>, view<16xi32>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @copy_wide_origin_vectors(%source_view: reg<x86.gpr64>, %destination_view: reg<x86.gpr64>, %destination_offset: reg<x86.gpr64>) asm {
+  %48 = mov.load.indexed.gpr32 %source_view, %destination_offset {disp32 = 64, scale = 1}
+  %49 = mov.load.indexed.gpr32 %source_view, %destination_offset {disp32 = 68, scale = 1}
+  %50 = mov.load.indexed.gpr32 %source_view, %destination_offset {disp32 = 72, scale = 1}
+  %51 = mov.load.indexed.gpr32 %source_view, %destination_offset {disp32 = 76, scale = 1}
+  %52 = mov.load.indexed.gpr32 %source_view, %destination_offset {disp32 = 80, scale = 1}
+  %53 = mov.load.indexed.gpr32 %source_view, %destination_offset {disp32 = 84, scale = 1}
+  %54 = mov.load.indexed.gpr32 %source_view, %destination_offset {disp32 = 88, scale = 1}
+  %55 = mov.load.indexed.gpr32 %source_view, %destination_offset {disp32 = 92, scale = 1}
+  %56 = mov.load.indexed.gpr32 %source_view, %destination_offset {disp32 = 96, scale = 1}
+  %57 = mov.load.indexed.gpr32 %source_view, %destination_offset {disp32 = 100, scale = 1}
+  %58 = mov.load.indexed.gpr32 %source_view, %destination_offset {disp32 = 104, scale = 1}
+  %59 = mov.load.indexed.gpr32 %source_view, %destination_offset {disp32 = 108, scale = 1}
+  %60 = mov.load.indexed.gpr32 %source_view, %destination_offset {disp32 = 112, scale = 1}
+  %61 = mov.load.indexed.gpr32 %source_view, %destination_offset {disp32 = 116, scale = 1}
+  %62 = mov.load.indexed.gpr32 %source_view, %destination_offset {disp32 = 120, scale = 1}
+  %63 = mov.load.indexed.gpr32 %source_view, %destination_offset {disp32 = 124, scale = 1}
+  mov.store.indexed.gpr32 %48, %destination_view, %destination_offset {disp32 = 0, scale = 1}
+  mov.store.indexed.gpr32 %49, %destination_view, %destination_offset {disp32 = 4, scale = 1}
+  mov.store.indexed.gpr32 %50, %destination_view, %destination_offset {disp32 = 8, scale = 1}
+  mov.store.indexed.gpr32 %51, %destination_view, %destination_offset {disp32 = 12, scale = 1}
+  mov.store.indexed.gpr32 %52, %destination_view, %destination_offset {disp32 = 16, scale = 1}
+  mov.store.indexed.gpr32 %53, %destination_view, %destination_offset {disp32 = 20, scale = 1}
+  mov.store.indexed.gpr32 %54, %destination_view, %destination_offset {disp32 = 24, scale = 1}
+  mov.store.indexed.gpr32 %55, %destination_view, %destination_offset {disp32 = 28, scale = 1}
+  mov.store.indexed.gpr32 %56, %destination_view, %destination_offset {disp32 = 32, scale = 1}
+  mov.store.indexed.gpr32 %57, %destination_view, %destination_offset {disp32 = 36, scale = 1}
+  mov.store.indexed.gpr32 %58, %destination_view, %destination_offset {disp32 = 40, scale = 1}
+  mov.store.indexed.gpr32 %59, %destination_view, %destination_offset {disp32 = 44, scale = 1}
+  mov.store.indexed.gpr32 %60, %destination_view, %destination_offset {disp32 = 48, scale = 1}
+  mov.store.indexed.gpr32 %61, %destination_view, %destination_offset {disp32 = 52, scale = 1}
+  mov.store.indexed.gpr32 %62, %destination_view, %destination_offset {disp32 = 56, scale = 1}
+  mov.store.indexed.gpr32 %63, %destination_view, %destination_offset {disp32 = 60, scale = 1}
+  return
+}
+
+// ====
+
+x86.target<avx2> @target
+
+func.def target(@target) @copy_wide_origin_scalar(%input: buffer, %output: buffer, %byte_offset_input: i64) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %byte_offset = scalar.assume %byte_offset_input [range(%byte_offset_input, 0, 4096), mul(%byte_offset_input, 64)] : i64
+  %prefix = scalar.constant 64 : i64
+  %source_origin = scalar.addi %byte_offset, %prefix : i64
+  %source_offset = index.cast %source_origin : i64 to offset
+  %destination_offset = index.cast %byte_offset : i64 to offset
+  %source_view = buffer.view %source[%source_offset] : buffer -> view<1xi32>
+  %destination_view = buffer.view %destination[%destination_offset] : buffer -> view<1xi32>
+  %value = view.load %source_view[0] : view<1xi32> -> i32
+  view.store %value, %destination_view[0] : i32, view<1xi32>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @copy_wide_origin_scalar(%source_view: reg<x86.gpr64>, %destination_view: reg<x86.gpr64>, %destination_offset: reg<x86.gpr64>) asm {
+  %value = mov.load.indexed.gpr32 %source_view, %destination_offset {disp32 = 64, scale = 1}
+  mov.store.indexed.gpr32 %value, %destination_view, %destination_offset {disp32 = 0, scale = 1}
+  return
+}

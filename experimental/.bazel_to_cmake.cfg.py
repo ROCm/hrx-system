@@ -12,6 +12,9 @@ import bazel_to_cmake_requirements
 
 
 class XdnaBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
+    def _should_emit_python_target(self):
+        return True
+
     def _custom_initialize(self):
         self._xdna_policy = bazel_to_cmake_requirements.load_project_policy(
             self._repo_root, "experimental/xdna"
@@ -53,7 +56,9 @@ class XdnaBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         )
 
     def xdna_execution_test_suite(self, **kwargs):
-        self.iree_execution_test_suite(**self._apply_xdna_policy(kwargs))
+        self.iree_execution_test_suite(
+            **self._apply_xdna_policy(kwargs, include_run_requirements=True)
+        )
 
     def xdna_cc_benchmark(self, deps=[], **kwargs):
         self.cc_binary_benchmark(

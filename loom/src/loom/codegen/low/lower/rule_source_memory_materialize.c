@@ -289,22 +289,47 @@ static iree_status_t loom_low_lower_rule_source_memory_emit_unary_op(
   return iree_ok_status();
 }
 
+// Canonical address terms can retain wider scalar sources after index casts
+// have been factored out. Address matching proves that the complete offset
+// fits the materializer's carrier; modular arithmetic therefore uses its low
+// register units even when an individual source term has a wider carrier.
+static iree_status_t loom_low_lower_rule_source_memory_lookup_byte_offset(
+    loom_low_lower_context_t* context, loom_value_id_t source_value_id,
+    loom_type_t offset_type, loom_location_id_t location,
+    loom_value_id_t* out_value_id) {
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_lookup_value(context, source_value_id, out_value_id));
+  const loom_type_t source_type = loom_module_value_type(
+      loom_low_lower_context_module(context), *out_value_id);
+  if (loom_low_register_type_unit_count(source_type) <=
+      loom_low_register_type_unit_count(offset_type)) {
+    return iree_ok_status();
+  }
+  loom_op_t* slice_op = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_low_slice_build(loom_low_lower_context_builder(context),
+                           *out_value_id, 0, offset_type, location, &slice_op));
+  *out_value_id = loom_low_slice_result(slice_op);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_lower_rule_materialize_source_memory_term(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     const loom_low_lower_source_memory_byte_offset_materializer_t* materializer,
-    const loom_low_source_memory_dynamic_term_t* term,
+    const loom_low_source_memory_dynamic_term_t* term, loom_type_t offset_type,
     loom_value_id_t* out_value_id) {
   *out_value_id = LOOM_VALUE_ID_INVALID;
 
   loom_value_id_t index = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(
-      loom_low_lower_lookup_value(context, term->index, &index));
+  IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_lookup_byte_offset(
+      context, term->index, offset_type, source_op->location, &index));
   loom_value_id_t accumulator = index;
   for (uint8_t i = 0; i < term->stride_value_count; ++i) {
     loom_value_id_t stride_value = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
-        context, term->stride_values[i], &stride_value));
+    IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_lookup_byte_offset(
+        context, term->stride_values[i], offset_type, source_op->location,
+        &stride_value));
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_emit_binary_op(
         context, rule_set, materializer->mul_i64_descriptor_ref, accumulator,
         stride_value, source_op->location, &accumulator));
@@ -350,14 +375,22 @@ iree_status_t loom_low_lower_rule_materialize_source_memory_byte_offset(
   const loom_low_lower_source_memory_byte_offset_materializer_t* materializer =
       loom_low_lower_rule_set_source_memory_byte_offset_materializer(
           rule_set, source_memory);
+  loom_low_lower_resolved_descriptor_t constant_descriptor = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_rule_source_memory_resolve_materializer_descriptor(
+          context, rule_set, materializer->const_i64_descriptor_ref,
+          &constant_descriptor));
+  loom_type_t offset_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_low_lower_rule_descriptor_result_type(
+      context, constant_descriptor.descriptor, 0, &offset_type));
 
   if (loom_low_source_memory_access_dynamic_offset_has_materialized_view_base(
           source_memory_access) &&
       loom_low_lower_source_value_has_low_mapping(
           context, source_memory_access->dynamic_view_base_value_id)) {
-    return loom_low_lower_lookup_value(
-        context, source_memory_access->dynamic_view_base_value_id,
-        out_value_id);
+    return loom_low_lower_rule_source_memory_lookup_byte_offset(
+        context, source_memory_access->dynamic_view_base_value_id, offset_type,
+        source_op->location, out_value_id);
   }
 
   loom_value_id_t accumulator = LOOM_VALUE_ID_INVALID;
@@ -380,7 +413,8 @@ iree_status_t loom_low_lower_rule_materialize_source_memory_byte_offset(
     }
     loom_value_id_t term_value = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_materialize_source_memory_term(
-        context, rule_set, source_op, materializer, term, &term_value));
+        context, rule_set, source_op, materializer, term, offset_type,
+        &term_value));
     if (accumulator == LOOM_VALUE_ID_INVALID) {
       accumulator = term_value;
     } else {

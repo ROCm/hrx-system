@@ -82,6 +82,7 @@ xdna_cc_binary(
         "@platforms//os:windows": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
+    visibility = ["//experimental/xdna/cts:__pkg__"],
     deps = [
         ":amdf_status",
         ":executable",

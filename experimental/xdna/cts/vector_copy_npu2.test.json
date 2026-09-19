@@ -1,0 +1,167 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "vector copy preserves every packet word and guard on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures"
+            ]
+          }
+        },
+        {
+          "name": "import",
+          "run": {
+            "tool": "loom-import-cxx",
+            "args": [
+              "--builtin-includes=false",
+              "--isystem={srcdir}/../../../loom/src/loom/import/cxx/include",
+              "--root=copy_blocks",
+              "--D=SCALAR_COPY=0",
+              "--to=bc",
+              "--output={tmp}/copy.loombc",
+              "{srcdir}/testdata/vector_copy.cpp"
+            ]
+          }
+        },
+        {
+          "name": "link",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{srcdir}/testdata/vector_copy.loom",
+              "--library={tmp}/copy.loombc",
+              "--root=@copy_packets",
+              "--to=bc",
+              "--output={tmp}/module.loombc"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/module.loombc",
+              "--root=@copy_packets",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/copy.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/copy.xdna",
+              "--columns=1",
+              "--entry=copy_packets",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "scalar copy preserves every packet word and guard on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures"
+            ]
+          }
+        },
+        {
+          "name": "import",
+          "run": {
+            "tool": "loom-import-cxx",
+            "args": [
+              "--builtin-includes=false",
+              "--isystem={srcdir}/../../../loom/src/loom/import/cxx/include",
+              "--root=copy_blocks",
+              "--D=SCALAR_COPY=1",
+              "--to=bc",
+              "--output={tmp}/copy.loombc",
+              "{srcdir}/testdata/vector_copy.cpp"
+            ]
+          }
+        },
+        {
+          "name": "link",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{srcdir}/testdata/vector_copy.loom",
+              "--library={tmp}/copy.loombc",
+              "--root=@copy_packets",
+              "--to=bc",
+              "--output={tmp}/module.loombc"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/module.loombc",
+              "--root=@copy_packets",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/copy.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/copy.xdna",
+              "--columns=1",
+              "--entry=copy_packets",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_wide_carriers.loom-test
+// RUN: emit source-low output=low
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def target(@target) @copy_wide_origin_vectors(%input: buffer, %output: buffer, %byte_offset_input: i64) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %byte_offset = scalar.assume %byte_offset_input [range(%byte_offset_input, 0, 4096), mul(%byte_offset_input, 64)] : i64
+  %prefix = scalar.constant 64 : i64
+  %source_origin = scalar.addi %byte_offset, %prefix : i64
+  %source_offset = index.cast %source_origin : i64 to offset
+  %destination_offset = index.cast %byte_offset : i64 to offset
+  %source_view = buffer.view %source[%source_offset] : buffer -> view<16xi32>
+  %destination_view = buffer.view %destination[%destination_offset] : buffer -> view<16xi32>
+  %value = vector.load %source_view[0] : view<16xi32> -> vector<16xi32>
+  vector.store %value, %destination_view[0] : vector<16xi32>, view<16xi32>
+  func.return
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @copy_wide_origin_vectors(%source_view: reg<llvmir.ptr>, %destination_view: reg<llvmir.ptr>, %destination_offset: reg<llvmir.i64>) asm {
+  %value = load.indexed.v16i32 %source_view, %destination_offset, 64, 1
+  store.indexed.v16i32 %value, %destination_view, %destination_offset, 0, 1
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def target(@target) @copy_wide_origin_scalar(%input: buffer, %output: buffer, %byte_offset_input: i64) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %byte_offset = scalar.assume %byte_offset_input [range(%byte_offset_input, 0, 4096), mul(%byte_offset_input, 64)] : i64
+  %prefix = scalar.constant 64 : i64
+  %source_origin = scalar.addi %byte_offset, %prefix : i64
+  %source_offset = index.cast %source_origin : i64 to offset
+  %destination_offset = index.cast %byte_offset : i64 to offset
+  %source_view = buffer.view %source[%source_offset] : buffer -> view<1xi32>
+  %destination_view = buffer.view %destination[%destination_offset] : buffer -> view<1xi32>
+  %value = view.load %source_view[0] : view<1xi32> -> i32
+  view.store %value, %destination_view[0] : i32, view<1xi32>
+  func.return
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @copy_wide_origin_scalar(%source_view: reg<llvmir.ptr>, %destination_view: reg<llvmir.ptr>, %destination_offset: reg<llvmir.i64>) asm {
+  %value = load.indexed.i32 %source_view, %destination_offset, 64, 1
+  store.indexed.i32 %value, %destination_view, %destination_offset, 0, 1
+  return
+}

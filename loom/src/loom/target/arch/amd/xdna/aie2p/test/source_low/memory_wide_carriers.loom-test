@@ -1,0 +1,66 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_wide_carriers.loom-test
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @copy_wide_origin_vectors(%input: buffer, %output: buffer, %byte_offset_input: i64) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %byte_offset = scalar.assume %byte_offset_input [range(%byte_offset_input, 0, 4096), mul(%byte_offset_input, 64)] : i64
+  %prefix = scalar.constant 64 : i64
+  %source_origin = scalar.addi %byte_offset, %prefix : i64
+  %source_offset = index.cast %source_origin : i64 to offset
+  %destination_offset = index.cast %byte_offset : i64 to offset
+  %source_view = buffer.view %source[%source_offset] : buffer -> view<16xi32>
+  %destination_view = buffer.view %destination[%destination_offset] : buffer -> view<16xi32>
+  %value = vector.load %source_view[0] : view<16xi32> -> vector<16xi32>
+  vector.store %value, %destination_view[0] : vector<16xi32>, view<16xi32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_wide_origin_vectors(%byte_offset: reg<aie2p.er x2>) asm {
+  %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %destination_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %destination_offset = slice %byte_offset[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %17 = mov.static-byte-offset 64
+  %19 = add.rr %destination_offset, %17
+  %20 = mov.address-index %19
+  %value = vlda.512.i32x16.index %source_view, %20
+  %22 = mov.address-index %destination_offset
+  vst.512.i32x16.index %value, %destination_view, %22
+  return
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @copy_wide_origin_scalar(%input: buffer, %output: buffer, %byte_offset_input: i64) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %byte_offset = scalar.assume %byte_offset_input [range(%byte_offset_input, 0, 4096), mul(%byte_offset_input, 64)] : i64
+  %prefix = scalar.constant 64 : i64
+  %source_origin = scalar.addi %byte_offset, %prefix : i64
+  %source_offset = index.cast %source_origin : i64 to offset
+  %destination_offset = index.cast %byte_offset : i64 to offset
+  %source_view = buffer.view %source[%source_offset] : buffer -> view<1xi32>
+  %destination_view = buffer.view %destination[%destination_offset] : buffer -> view<1xi32>
+  %value = view.load %source_view[0] : view<1xi32> -> i32
+  view.store %value, %destination_view[0] : i32, view<1xi32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_wide_origin_scalar(%byte_offset: reg<aie2p.er x2>) asm {
+  %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %destination_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %destination_offset = slice %byte_offset[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %17 = mov.static-byte-offset 64
+  %19 = add.rr %destination_offset, %17
+  %20 = mov.address-index %19
+  %value = lda.i32.index %source_view, %20
+  %22 = mov.address-index %destination_offset
+  st.i32.index %value, %destination_view, %22
+  return
+}

@@ -467,16 +467,20 @@ typedef uint16_t loom_low_lower_source_memory_flags_t;
 // Accept any advisory source cache policy.
 #define LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_CACHE_POLICY_ANY ((uint16_t)1u << 3)
 
+// Materializes canonical byte-offset arithmetic in the constant descriptor's
+// integer carrier. All arithmetic descriptors use that same carrier. Source
+// terms wider than the carrier are projected to their low register units;
+// source-memory matching owns the complete-address range proof.
 typedef struct loom_low_lower_source_memory_byte_offset_materializer_t {
-  // Rule-set B-string offset for the i64 constant immediate field.
+  // Rule-set B-string offset for the integer constant immediate field.
   loom_bstring_table_offset_t const_i64_immediate_string_offset;
-  // Descriptor ref used to materialize i64 constants.
+  // Descriptor ref defining the arithmetic carrier and materializing constants.
   loom_low_lower_descriptor_ref_t const_i64_descriptor_ref;
-  // Descriptor ref used to materialize i64 additions.
+  // Descriptor ref used to materialize additions in the arithmetic carrier.
   loom_low_lower_descriptor_ref_t add_i64_descriptor_ref;
-  // Descriptor ref used to materialize i64 multiplies.
+  // Descriptor ref used to materialize multiplies in the arithmetic carrier.
   loom_low_lower_descriptor_ref_t mul_i64_descriptor_ref;
-  // Descriptor ref used to materialize i64 shifts.
+  // Descriptor ref used to materialize shifts in the arithmetic carrier.
   loom_low_lower_descriptor_ref_t shl_i64_descriptor_ref;
 } loom_low_lower_source_memory_byte_offset_materializer_t;
 static_assert(sizeof(loom_low_lower_source_memory_byte_offset_materializer_t) ==

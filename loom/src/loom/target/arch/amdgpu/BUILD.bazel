@@ -549,6 +549,7 @@ loom_check_test_suite(
         "//loom/src/loom/test/corpus/source_low:memory_global_atomic_ordering.loom-test",
         "//loom/src/loom/test/corpus/source_low:memory_prefetch.loom-test",
         "//loom/src/loom/test/corpus/source_low:memory_scalar_wide_offsets.loom-test",
+        "//loom/src/loom/test/corpus/source_low:memory_wide_carriers.loom-test",
         "//loom/src/loom/test/corpus/source_low:memory_wide_offsets.loom-test",
         "//loom/src/loom/test/corpus/source_low:memory_workgroup_atomic.loom-test",
         "//loom/src/loom/test/corpus/source_low:memory_workgroup_b128.loom-test",

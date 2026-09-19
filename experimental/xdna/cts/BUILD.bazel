@@ -4,12 +4,51 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//experimental/xdna:build_defs.bzl", "xdna_cc_test")
+load("//build_tools/bazel:python.bzl", "iree_py_binary")
+load("//experimental/xdna:build_defs.bzl", "xdna_cc_test", "xdna_execution_test_suite")
 
 package(
     default_visibility = ["//visibility:private"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
+)
+
+iree_py_binary(
+    name = "vector_copy_cases",
+    testonly = True,
+    srcs = ["vector_copy_cases.py"],
+    main = "vector_copy_cases.py",
+)
+
+# This packet corpus selects the NPU2 profile and runs explicitly on matching
+# hardware; the consumer CTS below select images from the device family.
+xdna_execution_test_suite(
+    name = "vector_copy_npu2_test",
+    data = [
+        "testdata/vector_copy.cpp",
+        "testdata/vector_copy.loom",
+        "//loom/src/loom/import/cxx:include/loomcxx/kernel.h",
+    ],
+    manifests = ["vector_copy_npu2.test.json"],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//loom/config/import:cxx": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }) + select({
+        "//loom/config/target:xdna_artifacts": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }) + select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    tools = {
+        "generate-cases": ":vector_copy_cases",
+        "iree-xdna-run": "//experimental/xdna:iree-xdna-run",
+        "loom-compile": "//loom/src/loom/tools/loom-compile",
+        "loom-import-cxx": "//loom/src/loom/tools/loom-import-cxx",
+        "loom-link": "//loom/src/loom/tools/loom-link",
+    },
 )
 
 [

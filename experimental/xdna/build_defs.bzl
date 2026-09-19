@@ -30,4 +30,5 @@ def xdna_cc_benchmark(name, **kwargs):
     iree_runtime_cc_benchmark(name = name, **apply_test_policy(kwargs, policy, name = name))
 
 def xdna_execution_test_suite(name, **kwargs):
-    iree_execution_test_suite(name = name, **apply_build_requirements(kwargs, REQUIREMENTS))
+    policy = collect_package_policy(native.package_name(), PACKAGE_POLICIES)
+    iree_execution_test_suite(name = name, **apply_test_policy(kwargs, policy, name = name))

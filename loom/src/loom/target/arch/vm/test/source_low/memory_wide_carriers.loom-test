@@ -1,0 +1,146 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_wide_carriers.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+
+func.def target(@target) @copy_wide_origin_vectors(%input: buffer, %output: buffer, %byte_offset_input: i64) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %byte_offset = scalar.assume %byte_offset_input [range(%byte_offset_input, 0, 4096), mul(%byte_offset_input, 64)] : i64
+  %prefix = scalar.constant 64 : i64
+  %source_origin = scalar.addi %byte_offset, %prefix : i64
+  %source_offset = index.cast %source_origin : i64 to offset
+  %destination_offset = index.cast %byte_offset : i64 to offset
+  %source_view = buffer.view %source[%source_offset] : buffer -> view<16xi32>
+  %destination_view = buffer.view %destination[%destination_offset] : buffer -> view<16xi32>
+  %value = vector.load %source_view[0] : view<16xi32> -> vector<16xi32>
+  vector.store %value, %destination_view[0] : vector<16xi32>, view<16xi32>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @copy_wide_origin_vectors(%source_view: reg<vm.ref : buffer>, %destination_view: reg<vm.ref : buffer>, %destination_offset: reg<vm.value : i64>) asm {
+  %48 = constant.i64 64
+  %49 = integer.add.i64 %destination_offset, %48
+  %50 = buffer.load %source_view, %49, %49, 0, 8 : reg<vm.value : i32>
+  %51 = constant.i64 68
+  %52 = integer.add.i64 %destination_offset, %51
+  %53 = buffer.load %source_view, %52, %52, 0, 8 : reg<vm.value : i32>
+  %54 = constant.i64 72
+  %55 = integer.add.i64 %destination_offset, %54
+  %56 = buffer.load %source_view, %55, %55, 0, 8 : reg<vm.value : i32>
+  %57 = constant.i64 76
+  %58 = integer.add.i64 %destination_offset, %57
+  %59 = buffer.load %source_view, %58, %58, 0, 8 : reg<vm.value : i32>
+  %60 = constant.i64 80
+  %61 = integer.add.i64 %destination_offset, %60
+  %62 = buffer.load %source_view, %61, %61, 0, 8 : reg<vm.value : i32>
+  %63 = constant.i64 84
+  %64 = integer.add.i64 %destination_offset, %63
+  %65 = buffer.load %source_view, %64, %64, 0, 8 : reg<vm.value : i32>
+  %66 = constant.i64 88
+  %67 = integer.add.i64 %destination_offset, %66
+  %68 = buffer.load %source_view, %67, %67, 0, 8 : reg<vm.value : i32>
+  %69 = constant.i64 92
+  %70 = integer.add.i64 %destination_offset, %69
+  %71 = buffer.load %source_view, %70, %70, 0, 8 : reg<vm.value : i32>
+  %72 = constant.i64 96
+  %73 = integer.add.i64 %destination_offset, %72
+  %74 = buffer.load %source_view, %73, %73, 0, 8 : reg<vm.value : i32>
+  %75 = constant.i64 100
+  %76 = integer.add.i64 %destination_offset, %75
+  %77 = buffer.load %source_view, %76, %76, 0, 8 : reg<vm.value : i32>
+  %78 = constant.i64 104
+  %79 = integer.add.i64 %destination_offset, %78
+  %80 = buffer.load %source_view, %79, %79, 0, 8 : reg<vm.value : i32>
+  %81 = constant.i64 108
+  %82 = integer.add.i64 %destination_offset, %81
+  %83 = buffer.load %source_view, %82, %82, 0, 8 : reg<vm.value : i32>
+  %84 = constant.i64 112
+  %85 = integer.add.i64 %destination_offset, %84
+  %86 = buffer.load %source_view, %85, %85, 0, 8 : reg<vm.value : i32>
+  %87 = constant.i64 116
+  %88 = integer.add.i64 %destination_offset, %87
+  %89 = buffer.load %source_view, %88, %88, 0, 8 : reg<vm.value : i32>
+  %90 = constant.i64 120
+  %91 = integer.add.i64 %destination_offset, %90
+  %92 = buffer.load %source_view, %91, %91, 0, 8 : reg<vm.value : i32>
+  %93 = constant.i64 124
+  %94 = integer.add.i64 %destination_offset, %93
+  %95 = buffer.load %source_view, %94, %94, 0, 8 : reg<vm.value : i32>
+  buffer.store %destination_view, %destination_offset, %destination_offset, %50, 0, 8
+  %96 = constant.i64 4
+  %97 = integer.add.i64 %destination_offset, %96
+  buffer.store %destination_view, %97, %97, %53, 0, 8
+  %98 = constant.i64 8
+  %99 = integer.add.i64 %destination_offset, %98
+  buffer.store %destination_view, %99, %99, %56, 0, 8
+  %100 = constant.i64 12
+  %101 = integer.add.i64 %destination_offset, %100
+  buffer.store %destination_view, %101, %101, %59, 0, 8
+  %102 = constant.i64 16
+  %103 = integer.add.i64 %destination_offset, %102
+  buffer.store %destination_view, %103, %103, %62, 0, 8
+  %104 = constant.i64 20
+  %105 = integer.add.i64 %destination_offset, %104
+  buffer.store %destination_view, %105, %105, %65, 0, 8
+  %106 = constant.i64 24
+  %107 = integer.add.i64 %destination_offset, %106
+  buffer.store %destination_view, %107, %107, %68, 0, 8
+  %108 = constant.i64 28
+  %109 = integer.add.i64 %destination_offset, %108
+  buffer.store %destination_view, %109, %109, %71, 0, 8
+  %110 = constant.i64 32
+  %111 = integer.add.i64 %destination_offset, %110
+  buffer.store %destination_view, %111, %111, %74, 0, 8
+  %112 = constant.i64 36
+  %113 = integer.add.i64 %destination_offset, %112
+  buffer.store %destination_view, %113, %113, %77, 0, 8
+  %114 = constant.i64 40
+  %115 = integer.add.i64 %destination_offset, %114
+  buffer.store %destination_view, %115, %115, %80, 0, 8
+  %116 = constant.i64 44
+  %117 = integer.add.i64 %destination_offset, %116
+  buffer.store %destination_view, %117, %117, %83, 0, 8
+  %118 = constant.i64 48
+  %119 = integer.add.i64 %destination_offset, %118
+  buffer.store %destination_view, %119, %119, %86, 0, 8
+  %120 = constant.i64 52
+  %121 = integer.add.i64 %destination_offset, %120
+  buffer.store %destination_view, %121, %121, %89, 0, 8
+  %122 = constant.i64 56
+  %123 = integer.add.i64 %destination_offset, %122
+  buffer.store %destination_view, %123, %123, %92, 0, 8
+  %124 = constant.i64 60
+  %125 = integer.add.i64 %destination_offset, %124
+  buffer.store %destination_view, %125, %125, %95, 0, 8
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+func.def target(@target) @copy_wide_origin_scalar(%input: buffer, %output: buffer, %byte_offset_input: i64) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %byte_offset = scalar.assume %byte_offset_input [range(%byte_offset_input, 0, 4096), mul(%byte_offset_input, 64)] : i64
+  %prefix = scalar.constant 64 : i64
+  %source_origin = scalar.addi %byte_offset, %prefix : i64
+  %source_offset = index.cast %source_origin : i64 to offset
+  %destination_offset = index.cast %byte_offset : i64 to offset
+  %source_view = buffer.view %source[%source_offset] : buffer -> view<1xi32>
+  %destination_view = buffer.view %destination[%destination_offset] : buffer -> view<1xi32>
+  %value = view.load %source_view[0] : view<1xi32> -> i32
+  view.store %value, %destination_view[0] : i32, view<1xi32>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @copy_wide_origin_scalar(%source_view: reg<vm.ref : buffer>, %destination_view: reg<vm.ref : buffer>, %destination_offset: reg<vm.value : i64>) asm {
+  %16 = constant.i64 64
+  %17 = integer.add.i64 %destination_offset, %16
+  %value = buffer.load %source_view, %17, %17, 0, 8 : reg<vm.value : i32>
+  buffer.store %destination_view, %destination_offset, %destination_offset, %value, 0, 8
+  return
+}

@@ -1,0 +1,106 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_wide_carriers.loom-test
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1151> @target
+
+func.def target(@target) @copy_wide_origin_vectors(%input: buffer, %output: buffer, %byte_offset_input: i64) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %byte_offset = scalar.assume %byte_offset_input [range(%byte_offset_input, 0, 4096), mul(%byte_offset_input, 64)] : i64
+  %prefix = scalar.constant 64 : i64
+  %source_origin = scalar.addi %byte_offset, %prefix : i64
+  %source_offset = index.cast %source_origin : i64 to offset
+  %destination_offset = index.cast %byte_offset : i64 to offset
+  %source_view = buffer.view %source[%source_offset] : buffer -> view<16xi32>
+  %destination_view = buffer.view %destination[%destination_offset] : buffer -> view<16xi32>
+  %value = vector.load %source_view[0] : view<16xi32> -> vector<16xi32>
+  vector.store %value, %destination_view[0] : vector<16xi32>, view<16xi32>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @copy_wide_origin_vectors(%byte_offset: reg<amdgpu.sgpr x2>) asm {
+  %source_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %destination_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %30 = v_mov_b32 0
+  %31 = slice %byte_offset[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %32 = slice %source_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %33 = slice %source_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %34 = s_mov_b32 0
+  %35, %36 = s_add_co_u32 %32, %31
+  %37, %38 = s_addc_u32 %33, %34, %36
+  %39 = concat(%35, %37) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %40 = global_load_b128_saddr %30, %39 {offset = 64}
+  %46, %47 = s_add_co_u32 %32, %31
+  %48, %49 = s_addc_u32 %33, %34, %47
+  %50 = concat(%46, %48) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %51 = global_load_b128_saddr %30, %50 {offset = 80}
+  %57, %58 = s_add_co_u32 %32, %31
+  %59, %60 = s_addc_u32 %33, %34, %58
+  %61 = concat(%57, %59) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %62 = global_load_b128_saddr %30, %61 {offset = 96}
+  %68, %69 = s_add_co_u32 %32, %31
+  %70, %71 = s_addc_u32 %33, %34, %69
+  %72 = concat(%68, %70) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %73 = global_load_b128_saddr %30, %72 {offset = 112}
+  %78 = slice %destination_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %79 = slice %destination_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %81, %82 = s_add_co_u32 %78, %31
+  %83, %84 = s_addc_u32 %79, %34, %82
+  %85 = concat(%81, %83) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_b128_saddr %30, %40, %85
+  %92, %93 = s_add_co_u32 %78, %31
+  %94, %95 = s_addc_u32 %79, %34, %93
+  %96 = concat(%92, %94) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_b128_saddr %30, %51, %96 {offset = 16}
+  %103, %104 = s_add_co_u32 %78, %31
+  %105, %106 = s_addc_u32 %79, %34, %104
+  %107 = concat(%103, %105) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_b128_saddr %30, %62, %107 {offset = 32}
+  %114, %115 = s_add_co_u32 %78, %31
+  %116, %117 = s_addc_u32 %79, %34, %115
+  %118 = concat(%114, %116) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_b128_saddr %30, %73, %118 {offset = 48}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1151> @target
+
+func.def target(@target) @copy_wide_origin_scalar(%input: buffer, %output: buffer, %byte_offset_input: i64) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %byte_offset = scalar.assume %byte_offset_input [range(%byte_offset_input, 0, 4096), mul(%byte_offset_input, 64)] : i64
+  %prefix = scalar.constant 64 : i64
+  %source_origin = scalar.addi %byte_offset, %prefix : i64
+  %source_offset = index.cast %source_origin : i64 to offset
+  %destination_offset = index.cast %byte_offset : i64 to offset
+  %source_view = buffer.view %source[%source_offset] : buffer -> view<1xi32>
+  %destination_view = buffer.view %destination[%destination_offset] : buffer -> view<1xi32>
+  %value = view.load %source_view[0] : view<1xi32> -> i32
+  view.store %value, %destination_view[0] : i32, view<1xi32>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @copy_wide_origin_scalar(%byte_offset: reg<amdgpu.sgpr x2>) asm {
+  %source_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %destination_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %30 = v_mov_b32 0
+  %31 = slice %byte_offset[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %32 = slice %source_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %33 = slice %source_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %34 = s_mov_b32 0
+  %35, %36 = s_add_co_u32 %32, %31
+  %37, %38 = s_addc_u32 %33, %34, %36
+  %39 = concat(%35, %37) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %value = global_load_b32_saddr %30, %39 {offset = 64}
+  %43 = slice %destination_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %44 = slice %destination_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %46, %47 = s_add_co_u32 %43, %31
+  %48, %49 = s_addc_u32 %44, %34, %47
+  %50 = concat(%46, %48) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_b32_saddr %30, %value, %50
+  return
+}

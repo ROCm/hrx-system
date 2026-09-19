@@ -1,0 +1,23 @@
+aie2p.target<array> @array_target
+aie2p.target<core> @core_target
+
+pipeline.def<kernel> public retain target(@array_target) @copy_packets() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 2 : index
+  %zero = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%zero] : buffer -> view<2x3x1024xi32>
+  %output_view = buffer.view %output[%zero] : buffer -> view<2x3x1024xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<2x3x1024xi32>, group -> pipeline.flow<tile<1024xi32>>
+  %copies = pipeline.stage @copy_entry on %workers(%packets) : (group, pipeline.flow<tile<1024xi32>>) -> (pipeline.flow<tile<1024xi32>>)
+  pipeline.write %copies to %output_view : pipeline.flow<tile<1024xi32>>, view<2x3x1024xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @copy_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %zero = index.constant 0 : offset
+  func.call @copy_blocks(%source, %zero, %destination, %zero) : (buffer, offset, buffer, offset)
+  func.return
+}
+
+func.decl @copy_blocks(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset)
