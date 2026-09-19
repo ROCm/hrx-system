@@ -15,6 +15,7 @@
 #include "loom/ir/context.h"
 #include "loom/ops/test/ops.h"
 #include "loom/target/facts_builder.h"
+#include "loom/target/registers.h"
 #include "loom/target/test/descriptors.h"
 #include "loom/target/test/target_records.h"
 
@@ -354,6 +355,102 @@ TEST_F(LowAllocationTargetConstraintsTest,
 }
 
 TEST_F(LowAllocationTargetConstraintsTest,
+       ResolvesFixedTiesIndependentOfValueOrdinalOrder) {
+  loom_context_t context;
+  loom_context_initialize(iree_allocator_system(), &context);
+  IREE_ASSERT_OK(loom_context_finalize(&context));
+  loom_module_t* module = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate(&context, IREE_SV("fixed"), &block_pool_,
+                                      nullptr, iree_allocator_system(),
+                                      &module));
+  // CFG layout and local value registration need not follow definition order.
+  // The required chain is ordinal 1 -> 2 -> 0, with only its final value fixed.
+  constexpr uint32_t kValueCount = 3;
+  loom_value_id_t values[kValueCount];
+  loom_liveness_interval_t intervals[kValueCount] = {};
+  uint32_t interval_indices[] = {0, 1, 2};
+  uint32_t point_starts[] = {0, 1, 2};
+  uint32_t unit_start_points[] = {2, 0, 1};
+  uint32_t unit_end_points[] = {3, 2, 3};
+  const uint16_t reg_class_id = RegisterClassId(IREE_SV("test.phys"));
+  loom_liveness_value_class_t value_class = {};
+  value_class.type_kind = LOOM_TYPE_REGISTER;
+  value_class.register_descriptor_set_stable_id =
+      target_.descriptor_set->stable_id;
+  value_class.register_class_id = reg_class_id;
+  loom_module_value_ordinal_scratch_acquire(module);
+  for (uint32_t i = 0; i < kValueCount; ++i) {
+    IREE_ASSERT_OK(loom_module_define_value(
+        module,
+        loom_low_register_type(target_.descriptor_set->stable_id, reg_class_id,
+                               1),
+        &values[i]));
+    loom_module_value_ordinal_scratch_set(module, values[i], i);
+    intervals[i].value_id = values[i];
+    intervals[i].value_class = value_class;
+    intervals[i].unit_count = 1;
+    intervals[i].start_point = unit_start_points[i];
+    intervals[i].end_point = unit_end_points[i];
+  }
+  loom_local_value_domain_t domain = {};
+  domain.module = module;
+  domain.value_ids = values;
+  domain.value_count = kValueCount;
+  domain.flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED;
+  loom_liveness_analysis_t liveness = {};
+  liveness.intervals = intervals;
+  liveness.interval_count = kValueCount;
+  liveness.value_ids = values;
+  liveness.value_count = kValueCount;
+  liveness.value_interval_indices = interval_indices;
+  loom_low_allocation_unit_liveness_t unit_liveness = {};
+  unit_liveness.point_starts_by_value_ordinal = point_starts;
+  unit_liveness.start_points = unit_start_points;
+  unit_liveness.end_points = unit_end_points;
+  unit_liveness.point_count = kValueCount;
+  uint64_t incomplete_storage_words[] = {0};
+  unit_liveness.values_with_incomplete_storage_segments = {
+      kValueCount, incomplete_storage_words};
+  loom_low_placement_relation_t relations[2] = {};
+  relations[0].result_ordinal = 0;
+  relations[0].source_ordinal = 2;
+  relations[1].result_ordinal = 2;
+  relations[1].source_ordinal = 1;
+  for (auto& relation : relations) {
+    relation.kind = LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE;
+    relation.cause = LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT;
+    relation.flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD |
+                     LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE;
+    relation.unit_count = 1;
+  }
+  loom_low_placement_table_t placement = {};
+  placement.relations = relations;
+  placement.relation_count = IREE_ARRAYSIZE(relations);
+  const loom_low_allocation_fixed_value_t fixed = {
+      values[0], LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, 6, 1};
+  loom_low_allocation_target_constraints_t constraints = {};
+  IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
+      module, &function_op_, &target_, nullptr, 0, nullptr, 0, {}, &arena_,
+      &constraints));
+  IREE_ASSERT_OK(loom_low_allocation_target_constraints_resolve_fixed_values(
+      &constraints, &liveness, &domain, &unit_liveness, &placement, &fixed, 1,
+      &arena_));
+  ASSERT_EQ(constraints.error_count, 0u);
+  EXPECT_EQ(constraints.preassigned_fixed_value_count, kValueCount);
+  for (auto value : values) {
+    const auto* binding =
+        loom_low_allocation_target_constraints_preassigned_fixed_value_for_value(
+            &constraints, value);
+    ASSERT_NE(binding, nullptr);
+    EXPECT_EQ(binding->tied_root_ordinal, 1u);
+    EXPECT_EQ(binding->assignment.location_base, 6u);
+  }
+  loom_local_value_domain_release(&domain);
+  loom_module_free(module);
+  loom_context_deinitialize(&context);
+}
+
+TEST_F(LowAllocationTargetConstraintsTest,
        IndexesFixedValuesAndLifetimeOverlap) {
   loom_context_t context;
   loom_context_initialize(iree_allocator_system(), &context);
@@ -423,9 +520,10 @@ TEST_F(LowAllocationTargetConstraintsTest,
   IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
       module, &function_op_, &target_, nullptr, 0, nullptr, 0, {}, &arena_,
       &constraints));
+  const loom_low_placement_table_t placement = {};
   IREE_ASSERT_OK(loom_low_allocation_target_constraints_resolve_fixed_values(
-      &constraints, &liveness, &domain, &unit_liveness, fixed_values,
-      kFixedCount, &arena_));
+      &constraints, &liveness, &domain, &unit_liveness, &placement,
+      fixed_values, kFixedCount, &arena_));
   ASSERT_EQ(constraints.error_count, 0u);
   for (uint32_t i = 0; i < kFixedCount; ++i) {
     EXPECT_EQ(loom_low_allocation_target_constraints_fixed_value_for_value(
@@ -447,12 +545,6 @@ TEST_F(LowAllocationTargetConstraintsTest,
   candidate.location_count = 1;
   candidate.unit_count = 1;
   candidate.unit_point_start = kFixedCount;
-  loom_low_placement_relation_range_t placement_ranges[kValueCount] = {};
-  loom_low_placement_table_t placement = {};
-  placement.value_ids = values;
-  placement.value_count = kValueCount;
-  placement.ranges_by_result_ordinal = placement_ranges;
-  placement.ranges_by_source_ordinal = placement_ranges;
   // Disordered starts, equal starts, nested ranges, touching endpoints, and
   // ignored values all use the same half-open lifetime contract.
   for (uint32_t start = 0; start <= 64; ++start) {
@@ -470,7 +562,7 @@ TEST_F(LowAllocationTargetConstraintsTest,
           }
           EXPECT_EQ(
               loom_low_allocation_target_constraints_fixed_storage_conflicts(
-                  &constraints, &unit_liveness, &placement, &candidate, values,
+                  &constraints, &unit_liveness, &candidate, values,
                   ignored_count),
               expected)
               << "start=" << start << " length=" << length

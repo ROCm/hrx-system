@@ -1224,6 +1224,57 @@ ERR_BACKEND_048 = ErrorDef(
     ),
 )
 
+# ERR_BACKEND_049: Required tied values have conflicting fixed locations.
+ERR_BACKEND_049 = ErrorDef(
+    domain=ErrorDomain.BACKEND,
+    code=49,
+    severity=Severity.ERROR,
+    summary="Required tied values have conflicting fixed locations.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "cannot bind tied values in '@{function_name}': '%{first_value_name}' "
+        "is fixed at {first_location_base}, but '%{second_value_name}' "
+        "requires the same storage and is fixed at {second_location_base}"
+    ),
+    params=(
+        ErrorParam("target_key", ParamKind.STRING),
+        ErrorParam("export_name", ParamKind.STRING),
+        ErrorParam("config_key", ParamKind.STRING),
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("first_value_name", ParamKind.STRING),
+        ErrorParam("first_location_base", ParamKind.U32),
+        ErrorParam("second_value_name", ParamKind.STRING),
+        ErrorParam("second_location_base", ParamKind.U32),
+    ),
+    fix_hint="Give required tied values the same fixed location",
+)
+
+# ERR_BACKEND_050: Fixed allocation conflicts with occupied storage.
+ERR_BACKEND_050 = ErrorDef(
+    domain=ErrorDomain.BACKEND,
+    code=50,
+    severity=Severity.ERROR,
+    summary="Fixed allocation conflicts with occupied storage.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "cannot bind '%{value_name}' in '@{function_name}' to "
+        "{location_kind} {location_base} with {location_count} unit(s): "
+        "the required storage overlaps a live value, pending lease, reserved "
+        "range, or implicit physical write"
+    ),
+    params=(
+        ErrorParam("target_key", ParamKind.STRING),
+        ErrorParam("export_name", ParamKind.STRING),
+        ErrorParam("config_key", ParamKind.STRING),
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("value_name", ParamKind.STRING),
+        ErrorParam("location_kind", ParamKind.STRING),
+        ErrorParam("location_base", ParamKind.U32),
+        ErrorParam("location_count", ParamKind.U32),
+    ),
+    fix_hint="Choose a nonconflicting location or remove the fixed binding",
+)
+
 ALL_BACKEND_ERRORS: tuple[ErrorDef, ...] = (
     ERR_BACKEND_003,
     ERR_BACKEND_005,
@@ -1267,4 +1318,6 @@ ALL_BACKEND_ERRORS: tuple[ErrorDef, ...] = (
     ERR_BACKEND_046,
     ERR_BACKEND_047,
     ERR_BACKEND_048,
+    ERR_BACKEND_049,
+    ERR_BACKEND_050,
 )

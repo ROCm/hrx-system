@@ -313,9 +313,8 @@ bool loom_low_allocation_search_assignment_conflicts(
     return true;
   }
   if (loom_low_allocation_target_constraints_fixed_storage_conflicts(
-          context->target_constraints, context->unit_liveness,
-          context->placement, candidate, ignored_value_ids,
-          ignored_value_count)) {
+          context->target_constraints, context->unit_liveness, candidate,
+          ignored_value_ids, ignored_value_count)) {
     return true;
   }
   if (loom_low_allocation_target_constraints_reserved_range_conflicts(

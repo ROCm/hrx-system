@@ -906,6 +906,29 @@ loom_low_allocation_target_constraints_emit_duplicate_fixed_value(
       LOOM_ERR_BACKEND_036, params, IREE_ARRAYSIZE(params));
 }
 
+iree_status_t loom_low_allocation_target_constraints_emit_fixed_value_conflict(
+    loom_low_allocation_target_constraints_t* constraints,
+    const loom_low_allocation_assignment_t* assignment) {
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_low_diagnostic_target_key(constraints->target)),
+      loom_param_string(loom_low_diagnostic_export_name(constraints->target)),
+      loom_param_string(loom_low_diagnostic_config_key(constraints->target)),
+      loom_param_string(loom_low_diagnostic_function_name(
+          constraints->module, constraints->function_op)),
+      loom_param_string(loom_low_diagnostic_value_name(constraints->module,
+                                                       assignment->value_id)),
+      loom_param_string(
+          loom_low_allocation_location_kind_name(assignment->location_kind)),
+      loom_param_u32(assignment->location_base),
+      loom_param_u32(assignment->location_count),
+  };
+  return loom_low_allocation_target_constraints_emit(
+      constraints,
+      loom_low_diagnostic_value_origin_op(
+          constraints->module, assignment->value_id, constraints->function_op),
+      LOOM_ERR_BACKEND_050, params, IREE_ARRAYSIZE(params));
+}
+
 static loom_low_allocation_resolved_fixed_value_t
 loom_low_allocation_target_constraints_make_resolved_fixed_value(
     const loom_liveness_interval_t* interval,
@@ -939,8 +962,160 @@ loom_low_allocation_target_constraints_make_resolved_fixed_value(
   return (loom_low_allocation_resolved_fixed_value_t){
       .assignment = assignment,
       .value_ordinal = value_ordinal,
+      .tied_root_ordinal = value_ordinal,
       .semantic_end_point = interval->end_point,
   };
+}
+
+static iree_status_t
+loom_low_allocation_target_constraints_emit_conflicting_tied_fixed_values(
+    loom_low_allocation_target_constraints_t* constraints,
+    const loom_low_allocation_assignment_t* first,
+    const loom_low_allocation_assignment_t* second) {
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_low_diagnostic_target_key(constraints->target)),
+      loom_param_string(loom_low_diagnostic_export_name(constraints->target)),
+      loom_param_string(loom_low_diagnostic_config_key(constraints->target)),
+      loom_param_string(loom_low_diagnostic_function_name(
+          constraints->module, constraints->function_op)),
+      loom_param_string(
+          loom_low_diagnostic_value_name(constraints->module, first->value_id)),
+      loom_param_u32(first->location_base),
+      loom_param_string(loom_low_diagnostic_value_name(constraints->module,
+                                                       second->value_id)),
+      loom_param_u32(second->location_base),
+  };
+  return loom_low_allocation_target_constraints_emit(
+      constraints,
+      loom_low_diagnostic_value_origin_op(constraints->module, second->value_id,
+                                          constraints->function_op),
+      LOOM_ERR_BACKEND_049, params, IREE_ARRAYSIZE(params));
+}
+
+static loom_value_ordinal_t loom_low_allocation_target_constraints_tied_root(
+    loom_value_ordinal_t* roots, loom_value_ordinal_t ordinal) {
+  loom_value_ordinal_t root = ordinal;
+  while (roots[root] != root) {
+    root = roots[root];
+  }
+  while (roots[ordinal] != root) {
+    const loom_value_ordinal_t parent = roots[ordinal];
+    roots[ordinal] = root;
+    ordinal = parent;
+  }
+  return root;
+}
+
+// Required ties preserve whole-value storage types, and each result has one
+// tied source. Flatten the resulting forest once, independent of value ordinal
+// order, before any member can be independently assigned. Optional transfers
+// do not bind their endpoints: their moves are chosen after allocation.
+static iree_status_t
+loom_low_allocation_target_constraints_resolve_tied_fixed_values(
+    loom_low_allocation_target_constraints_t* constraints,
+    const loom_liveness_analysis_t* liveness,
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
+    const loom_low_placement_table_t* placement,
+    iree_arena_allocator_t* scratch_arena, iree_arena_allocator_t* arena) {
+  iree_host_size_t first_tie = 0;
+  while (first_tie < placement->relation_count &&
+         placement->relations[first_tie].cause !=
+             LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT) {
+    ++first_tie;
+  }
+  if (first_tie == placement->relation_count) {
+    return iree_ok_status();
+  }
+  loom_value_ordinal_t* roots = NULL;
+  uint32_t* bindings = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      scratch_arena, liveness->value_count, sizeof(*roots), (void**)&roots));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(scratch_arena, liveness->value_count,
+                                sizeof(*bindings), (void**)&bindings));
+  for (loom_value_ordinal_t i = 0; i < liveness->value_count; ++i) {
+    roots[i] = i;
+    bindings[i] = UINT32_MAX;
+  }
+  for (iree_host_size_t i = first_tie; i < placement->relation_count; ++i) {
+    const loom_low_placement_relation_t* relation = &placement->relations[i];
+    if (relation->cause == LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT) {
+      roots[relation->result_ordinal] = relation->source_ordinal;
+    }
+  }
+  for (loom_value_ordinal_t i = 0; i < liveness->value_count; ++i) {
+    roots[i] = loom_low_allocation_target_constraints_tied_root(roots, i);
+  }
+  for (uint32_t i = 0; i < constraints->fixed_value_count; ++i) {
+    loom_low_allocation_resolved_fixed_value_t* fixed =
+        &constraints->fixed_values[i];
+    fixed->tied_root_ordinal = roots[fixed->value_ordinal];
+    uint32_t* binding = &bindings[fixed->tied_root_ordinal];
+    if (*binding == UINT32_MAX) {
+      *binding = i;
+    } else if (!loom_low_allocation_storage_assignment_ranges_equal(
+                   constraints->target->descriptor_set,
+                   &constraints->fixed_values[*binding].assignment,
+                   &fixed->assignment)) {
+      IREE_RETURN_IF_ERROR(
+          loom_low_allocation_target_constraints_emit_conflicting_tied_fixed_values(
+              constraints, &constraints->fixed_values[*binding].assignment,
+              &fixed->assignment));
+    }
+  }
+  if (constraints->error_count != 0) {
+    return iree_ok_status();
+  }
+
+  uint32_t* fixed_indices = constraints->fixed_index.indices_by_ordinal;
+  iree_host_size_t inferred_count = 0;
+  for (loom_value_ordinal_t i = 0; i < liveness->value_count; ++i) {
+    if (bindings[roots[i]] != UINT32_MAX && fixed_indices[i] == 0) {
+      ++inferred_count;
+    }
+  }
+  if (inferred_count == 0) {
+    return iree_ok_status();
+  }
+  const iree_host_size_t preassigned_count =
+      constraints->preassigned_fixed_value_count;
+  const iree_host_size_t expanded_count =
+      constraints->fixed_value_count + inferred_count;
+  loom_low_allocation_resolved_fixed_value_t* expanded = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, expanded_count, sizeof(*expanded), (void**)&expanded));
+  memcpy(expanded, constraints->fixed_values,
+         preassigned_count * sizeof(*expanded));
+  iree_host_size_t next_index = preassigned_count;
+  for (loom_value_ordinal_t i = 0; i < liveness->value_count; ++i) {
+    const uint32_t binding = bindings[roots[i]];
+    if (binding == UINT32_MAX || fixed_indices[i] != 0) {
+      continue;
+    }
+    const loom_low_allocation_assignment_t* reference =
+        &constraints->fixed_values[binding].assignment;
+    const loom_liveness_interval_t* interval =
+        loom_liveness_interval_for_value_ordinal(liveness, i);
+    expanded[next_index] =
+        loom_low_allocation_target_constraints_make_resolved_fixed_value(
+            interval, i, unit_liveness, liveness,
+            reference->descriptor_reg_class_id, reference->location_kind,
+            reference->location_base, reference->location_count);
+    expanded[next_index++].tied_root_ordinal = roots[i];
+  }
+  // Singleton-class bindings already cover every member of their component.
+  // Inferred entries therefore extend explicit requests and precede the
+  // target-implied suffix, preserving the preassignment boundary.
+  memcpy(
+      expanded + next_index, constraints->fixed_values + preassigned_count,
+      (constraints->fixed_value_count - preassigned_count) * sizeof(*expanded));
+  constraints->fixed_values = expanded;
+  constraints->fixed_value_count = expanded_count;
+  constraints->preassigned_fixed_value_count += inferred_count;
+  for (uint32_t i = 0; i < constraints->fixed_value_count; ++i) {
+    fixed_indices[expanded[i].value_ordinal] = i + 1;
+  }
+  return iree_ok_status();
 }
 
 static bool
@@ -960,6 +1135,7 @@ iree_status_t loom_low_allocation_target_constraints_resolve_fixed_values(
     const loom_liveness_analysis_t* liveness,
     const loom_local_value_domain_t* value_domain,
     const loom_low_allocation_unit_liveness_t* unit_liveness,
+    const loom_low_placement_table_t* placement,
     const loom_low_allocation_fixed_value_t* fixed_values,
     iree_host_size_t fixed_value_count, iree_arena_allocator_t* arena) {
   IREE_ASSERT_ARGUMENT(constraints);
@@ -1130,6 +1306,17 @@ iree_status_t loom_low_allocation_target_constraints_resolve_fixed_values(
             loom_low_allocation_storage_reg_class_location_kind(reg_class),
             physical_register_id, interval->unit_count);
     fixed_indices[value_ordinal] = (uint32_t)constraints->fixed_value_count;
+  }
+  if (constraints->error_count == 0 && constraints->fixed_value_count != 0 &&
+      placement->relation_count != 0) {
+    iree_arena_allocator_t scratch_arena;
+    iree_arena_initialize(arena->block_pool, &scratch_arena);
+    iree_status_t status =
+        loom_low_allocation_target_constraints_resolve_tied_fixed_values(
+            constraints, liveness, unit_liveness, placement, &scratch_arena,
+            arena);
+    iree_arena_deinitialize(&scratch_arena);
+    IREE_RETURN_IF_ERROR(status);
   }
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(arena, constraints->fixed_value_count,
@@ -1342,52 +1529,22 @@ uint32_t loom_low_allocation_target_constraints_assigned_location_search_limit(
 }
 
 static bool loom_low_allocation_target_constraints_fixed_value_is_tied_alias(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_placement_table_t* placement,
+    const loom_low_allocation_target_constraints_t* constraints,
     const loom_low_allocation_resolved_fixed_value_t* fixed_value,
     const loom_low_allocation_assignment_t* candidate) {
-  for (uint32_t direction = 0; direction < 2; ++direction) {
-    const bool fixed_is_result = direction == 0;
-    const loom_low_placement_relation_range_t range =
-        fixed_is_result
-            ? loom_low_placement_relation_range_for_value_ordinal(
-                  placement, fixed_value->value_ordinal)
-            : loom_low_placement_relation_range_for_source_value_ordinal(
-                  placement, fixed_value->value_ordinal);
-    for (uint32_t i = 0; i < range.count; ++i) {
-      const uint32_t relation_index =
-          fixed_is_result
-              ? range.start + i
-              : placement->relation_indices_by_source_ordinal[range.start + i];
-      const loom_low_placement_relation_t* relation =
-          &placement->relations[relation_index];
-      if (relation->cause != LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT ||
-          relation->kind != LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE ||
-          !iree_any_bit_set(relation->flags,
-                            LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD) ||
-          relation->unit_count != candidate->unit_count ||
-          relation->unit_count != fixed_value->assignment.unit_count) {
-        continue;
-      }
-      const loom_value_ordinal_t counterpart_ordinal =
-          fixed_is_result ? relation->source_ordinal : relation->result_ordinal;
-      if (loom_low_placement_value_id(placement, counterpart_ordinal) ==
-              candidate->value_id &&
-          loom_low_allocation_storage_placement_relation_satisfied(
-              descriptor_set, relation,
-              fixed_is_result ? &fixed_value->assignment : candidate,
-              fixed_is_result ? candidate : &fixed_value->assignment)) {
-        return true;
-      }
-    }
-  }
-  return false;
+  const loom_low_allocation_resolved_fixed_value_t* candidate_fixed =
+      loom_low_allocation_target_constraints_fixed_value_for_value(
+          constraints, candidate->value_id);
+  return candidate_fixed != NULL &&
+         candidate_fixed->tied_root_ordinal == fixed_value->tied_root_ordinal &&
+         loom_low_allocation_storage_assignment_ranges_equal(
+             constraints->target->descriptor_set, &fixed_value->assignment,
+             candidate);
 }
 
 static bool loom_low_allocation_fixed_interval_conflicts(
     const loom_low_allocation_target_constraints_t* constraints,
     const loom_low_allocation_unit_liveness_t* unit_liveness,
-    const loom_low_placement_table_t* placement,
     const loom_low_allocation_assignment_t* candidate,
     const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count,
     uint32_t begin, uint32_t end) {
@@ -1405,7 +1562,7 @@ static bool loom_low_allocation_fixed_interval_conflicts(
       continue;
     }
     if (loom_low_allocation_fixed_interval_conflicts(
-            constraints, unit_liveness, placement, candidate, ignored_value_ids,
+            constraints, unit_liveness, candidate, ignored_value_ids,
             ignored_value_count, begin, middle)) {
       return true;
     }
@@ -1435,7 +1592,7 @@ static bool loom_low_allocation_fixed_interval_conflicts(
             unit_liveness->start_points, unit_liveness->end_points,
             unit_liveness->point_count, fixed_assignment, candidate) &&
         !loom_low_allocation_target_constraints_fixed_value_is_tied_alias(
-            descriptor_set, placement, fixed_value, candidate)) {
+            constraints, fixed_value, candidate)) {
       return true;
     }
   }
@@ -1445,15 +1602,23 @@ static bool loom_low_allocation_fixed_interval_conflicts(
 bool loom_low_allocation_target_constraints_fixed_storage_conflicts(
     const loom_low_allocation_target_constraints_t* constraints,
     const loom_low_allocation_unit_liveness_t* unit_liveness,
-    const loom_low_placement_table_t* placement,
     const loom_low_allocation_assignment_t* candidate,
     const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count) {
+  const loom_low_allocation_resolved_fixed_value_t* fixed_value =
+      loom_low_allocation_target_constraints_fixed_value_for_value(
+          constraints, candidate->value_id);
+  if (fixed_value != NULL &&
+      !loom_low_allocation_storage_assignment_ranges_equal(
+          constraints->target->descriptor_set, &fixed_value->assignment,
+          candidate)) {
+    return true;
+  }
   if (loom_low_allocation_unit_liveness_clobber_conflicts(
           unit_liveness, constraints->target->descriptor_set, candidate)) {
     return true;
   }
   return loom_low_allocation_fixed_interval_conflicts(
-      constraints, unit_liveness, placement, candidate, ignored_value_ids,
+      constraints, unit_liveness, candidate, ignored_value_ids,
       ignored_value_count, 0, (uint32_t)constraints->fixed_value_count);
 }
 

@@ -256,3 +256,21 @@ low.func.def target<x86.avx_vnni.core> @avx_vnni_copy_rejects_high_register(%inp
   %result = copy %input : reg<x86.ymm> -> reg<x86.ymm>
   return %result
 }
+
+// ====
+
+// The two-address add reads the same fixed register it writes. Its input copy
+// materializes there while the original argument remains independently live.
+// RUN: emit x86-asm @fixed_two_address_result strategy=source fixed=%source:physical_register:2:1 fixed=%rhs:physical_register:1:1 fixed=%result:physical_register:3:1
+x86.target<scalar> @target
+
+low.func.def target<x86.scalar.core>(@target) @fixed_two_address_result(%source: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>) asm {
+  %copy = copy %source : reg<x86.gpr64> -> reg<x86.gpr64>
+  %result = add.gpr64 %copy, %rhs
+  return %source, %result
+}
+
+// ----
+  mov rbx, rdx
+  add rbx, rcx
+  ret

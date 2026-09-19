@@ -327,7 +327,7 @@ static iree_status_t loom_low_allocation_interval_assignment_record_failure(
 
     if (loom_low_allocation_target_constraints_fixed_storage_conflicts(
             state->context->target_constraints, state->context->unit_liveness,
-            state->context->placement, &candidate,
+            &candidate,
             /*ignored_value_ids=*/NULL, /*ignored_value_count=*/0) ||
         loom_low_allocation_target_constraints_reserved_range_conflicts(
             state->context->target_constraints,
@@ -583,205 +583,6 @@ loom_low_allocation_interval_assignment_append_assignment_callback(
       out_assignment_index);
 }
 
-static bool loom_low_allocation_interval_assignment_value_id_is_listed(
-    const loom_value_id_t* value_ids, uint16_t value_count,
-    loom_value_id_t value_id) {
-  for (uint16_t i = 0; i < value_count; ++i) {
-    if (value_ids[i] == value_id) {
-      return true;
-    }
-  }
-  return false;
-}
-
-static iree_status_t
-loom_low_allocation_interval_assignment_append_unique_value_id(
-    loom_value_id_t* value_ids, uint16_t value_capacity, uint16_t* value_count,
-    loom_value_id_t value_id) {
-  if (loom_low_allocation_interval_assignment_value_id_is_listed(
-          value_ids, *value_count, value_id)) {
-    return iree_ok_status();
-  }
-  if (*value_count >= value_capacity) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "low allocation fixed ignored-value list "
-                            "exhausted");
-  }
-  value_ids[(*value_count)++] = value_id;
-  return iree_ok_status();
-}
-
-static bool loom_low_allocation_interval_assignment_tied_location_matches(
-    const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_placement_relation_t* relation, bool fixed_is_result,
-    uint16_t fixed_reg_class_id,
-    loom_low_allocation_location_kind_t fixed_location_kind,
-    uint32_t fixed_location_base, uint32_t fixed_location_count,
-    uint16_t counterpart_reg_class_id,
-    loom_low_allocation_location_kind_t counterpart_location_kind,
-    uint32_t counterpart_location_base, uint32_t counterpart_location_count) {
-  if (relation->unit_count != fixed_location_count ||
-      relation->unit_count != counterpart_location_count) {
-    return false;
-  }
-
-  const uint32_t fixed_unit_offset = fixed_is_result
-                                         ? relation->result_unit_offset
-                                         : relation->source_unit_offset;
-  const uint32_t counterpart_unit_offset = fixed_is_result
-                                               ? relation->source_unit_offset
-                                               : relation->result_unit_offset;
-  if (fixed_unit_offset > fixed_location_count ||
-      relation->unit_count > fixed_location_count - fixed_unit_offset ||
-      counterpart_unit_offset > counterpart_location_count ||
-      relation->unit_count >
-          counterpart_location_count - counterpart_unit_offset) {
-    return false;
-  }
-  const loom_low_allocation_assignment_t fixed_assignment = {
-      .descriptor_reg_class_id = fixed_reg_class_id,
-      .location_kind = fixed_location_kind,
-      .location_base = fixed_location_base,
-      .location_count = fixed_location_count,
-  };
-  const loom_low_allocation_assignment_t counterpart_assignment = {
-      .descriptor_reg_class_id = counterpart_reg_class_id,
-      .location_kind = counterpart_location_kind,
-      .location_base = counterpart_location_base,
-      .location_count = counterpart_location_count,
-  };
-  return loom_low_allocation_storage_assignment_subranges_equal(
-      descriptor_set, &fixed_assignment, fixed_unit_offset,
-      &counterpart_assignment, counterpart_unit_offset, relation->unit_count);
-}
-
-static bool loom_low_allocation_interval_assignment_tied_fixed_location_matches(
-    const loom_low_allocation_interval_assignment_state_t* state,
-    const loom_low_allocation_resolved_fixed_value_t* fixed_value,
-    const loom_low_placement_relation_t* relation, bool fixed_is_result,
-    loom_value_id_t counterpart_value_id) {
-  const loom_low_allocation_resolved_fixed_value_t* counterpart_fixed_value =
-      loom_low_allocation_target_constraints_fixed_value_for_value(
-          state->context->target_constraints, counterpart_value_id);
-  if (!counterpart_fixed_value) {
-    return false;
-  }
-  return loom_low_allocation_interval_assignment_tied_location_matches(
-      state->context->target->descriptor_set, relation, fixed_is_result,
-      fixed_value->assignment.descriptor_reg_class_id,
-      fixed_value->assignment.location_kind,
-      fixed_value->assignment.location_base,
-      fixed_value->assignment.location_count,
-      counterpart_fixed_value->assignment.descriptor_reg_class_id,
-      counterpart_fixed_value->assignment.location_kind,
-      counterpart_fixed_value->assignment.location_base,
-      counterpart_fixed_value->assignment.location_count);
-}
-
-static bool
-loom_low_allocation_interval_assignment_tied_assignment_location_matches(
-    const loom_low_allocation_interval_assignment_state_t* state,
-    const loom_low_allocation_resolved_fixed_value_t* fixed_value,
-    const loom_low_placement_relation_t* relation, bool fixed_is_result,
-    loom_value_ordinal_t counterpart_ordinal) {
-  const loom_low_allocation_assignment_t* counterpart_assignment =
-      loom_low_allocation_interval_assignment_current_assignment_for_value_ordinal(
-          state, counterpart_ordinal);
-  if (!counterpart_assignment) {
-    return false;
-  }
-  return loom_low_allocation_interval_assignment_tied_location_matches(
-      state->context->target->descriptor_set, relation, fixed_is_result,
-      fixed_value->assignment.descriptor_reg_class_id,
-      fixed_value->assignment.location_kind,
-      fixed_value->assignment.location_base,
-      fixed_value->assignment.location_count,
-      counterpart_assignment->descriptor_reg_class_id,
-      counterpart_assignment->location_kind,
-      counterpart_assignment->location_base,
-      counterpart_assignment->location_count);
-}
-
-static iree_status_t
-loom_low_allocation_interval_assignment_collect_fixed_tied_counterpart(
-    const loom_low_allocation_interval_assignment_state_t* state,
-    const loom_low_allocation_resolved_fixed_value_t* fixed_value,
-    const loom_low_placement_relation_t* relation, bool fixed_is_result,
-    loom_value_ordinal_t counterpart_ordinal,
-    loom_value_id_t* ignored_value_ids, uint16_t ignored_value_capacity,
-    uint16_t* ignored_value_count,
-    loom_value_id_t* ignored_storage_lease_value_ids,
-    uint16_t ignored_storage_lease_value_capacity,
-    uint16_t* ignored_storage_lease_value_count) {
-  if (relation->cause != LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT ||
-      !iree_all_bits_set(relation->flags,
-                         LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD)) {
-    return iree_ok_status();
-  }
-
-  const loom_value_id_t counterpart_value_id = loom_low_placement_value_id(
-      state->context->placement, counterpart_ordinal);
-  if (!loom_low_allocation_interval_assignment_tied_fixed_location_matches(
-          state, fixed_value, relation, fixed_is_result,
-          counterpart_value_id) &&
-      !loom_low_allocation_interval_assignment_tied_assignment_location_matches(
-          state, fixed_value, relation, fixed_is_result, counterpart_ordinal)) {
-    return iree_ok_status();
-  }
-
-  IREE_RETURN_IF_ERROR(
-      loom_low_allocation_interval_assignment_append_unique_value_id(
-          ignored_value_ids, ignored_value_capacity, ignored_value_count,
-          counterpart_value_id));
-  return loom_low_allocation_interval_assignment_append_unique_value_id(
-      ignored_storage_lease_value_ids, ignored_storage_lease_value_capacity,
-      ignored_storage_lease_value_count, counterpart_value_id);
-}
-
-static iree_status_t
-loom_low_allocation_interval_assignment_collect_fixed_tied_counterparts(
-    const loom_low_allocation_interval_assignment_state_t* state,
-    const loom_low_allocation_resolved_fixed_value_t* fixed_value,
-    loom_value_id_t* ignored_value_ids, uint16_t ignored_value_capacity,
-    uint16_t* ignored_value_count,
-    loom_value_id_t* ignored_storage_lease_value_ids,
-    uint16_t ignored_storage_lease_value_capacity,
-    uint16_t* ignored_storage_lease_value_count) {
-  const loom_low_placement_relation_range_t result_range =
-      loom_low_placement_relation_range_for_value_ordinal(
-          state->context->placement, fixed_value->value_ordinal);
-  for (uint32_t i = 0; i < result_range.count; ++i) {
-    const loom_low_placement_relation_t* relation =
-        &state->context->placement->relations[result_range.start + i];
-    IREE_RETURN_IF_ERROR(
-        loom_low_allocation_interval_assignment_collect_fixed_tied_counterpart(
-            state, fixed_value, relation, /*fixed_is_result=*/true,
-            relation->source_ordinal, ignored_value_ids, ignored_value_capacity,
-            ignored_value_count, ignored_storage_lease_value_ids,
-            ignored_storage_lease_value_capacity,
-            ignored_storage_lease_value_count));
-  }
-
-  const loom_low_placement_relation_range_t source_range =
-      loom_low_placement_relation_range_for_source_value_ordinal(
-          state->context->placement, fixed_value->value_ordinal);
-  for (uint32_t i = 0; i < source_range.count; ++i) {
-    const uint32_t relation_index =
-        state->context->placement
-            ->relation_indices_by_source_ordinal[source_range.start + i];
-    const loom_low_placement_relation_t* relation =
-        &state->context->placement->relations[relation_index];
-    IREE_RETURN_IF_ERROR(
-        loom_low_allocation_interval_assignment_collect_fixed_tied_counterpart(
-            state, fixed_value, relation, /*fixed_is_result=*/false,
-            relation->result_ordinal, ignored_value_ids, ignored_value_capacity,
-            ignored_value_count, ignored_storage_lease_value_ids,
-            ignored_storage_lease_value_capacity,
-            ignored_storage_lease_value_count));
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t
 loom_low_allocation_interval_assignment_assign_fixed_interval(
     loom_low_allocation_interval_assignment_state_t* state,
@@ -793,64 +594,26 @@ loom_low_allocation_interval_assignment_assign_fixed_interval(
   if (!fixed_value) {
     return iree_ok_status();
   }
-  const loom_low_placement_relation_range_t result_range =
-      loom_low_placement_relation_range_for_value_ordinal(
-          state->context->placement, fixed_value->value_ordinal);
-  const loom_low_placement_relation_range_t source_range =
-      loom_low_placement_relation_range_for_source_value_ordinal(
-          state->context->placement, fixed_value->value_ordinal);
-  const uint32_t ignored_value_capacity_u32 =
-      1u + result_range.count + source_range.count;
-  if (ignored_value_capacity_u32 > UINT16_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "low allocation fixed tied counterpart count "
-                            "exceeds uint16_t");
-  }
-  const uint16_t ignored_value_capacity = (uint16_t)ignored_value_capacity_u32;
-  loom_value_id_t inline_ignored_value_ids[8];
-  loom_value_id_t* ignored_value_ids = inline_ignored_value_ids;
-  loom_value_id_t inline_ignored_storage_lease_value_ids[8];
-  loom_value_id_t* ignored_storage_lease_value_ids =
-      inline_ignored_storage_lease_value_ids;
-  if (ignored_value_capacity > IREE_ARRAYSIZE(inline_ignored_value_ids)) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->scratch_arena, ignored_value_capacity,
-        sizeof(*ignored_value_ids), (void**)&ignored_value_ids));
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(state->scratch_arena, ignored_value_capacity,
-                                  sizeof(*ignored_storage_lease_value_ids),
-                                  (void**)&ignored_storage_lease_value_ids));
-  }
-  ignored_value_ids[0] = interval->value_id;
-  uint16_t ignored_value_count = 1;
-  uint16_t ignored_storage_lease_value_count = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_low_allocation_interval_assignment_collect_fixed_tied_counterparts(
-          state, fixed_value, ignored_value_ids, ignored_value_capacity,
-          &ignored_value_count, ignored_storage_lease_value_ids,
-          ignored_value_capacity, &ignored_storage_lease_value_count));
 
   loom_low_allocation_search_context_t search_context =
       loom_low_allocation_interval_assignment_search_context(state);
-  if (loom_low_allocation_search_location_conflicts(
-          &search_context, interval,
-          fixed_value->assignment.descriptor_reg_class_id,
-          fixed_value->assignment.location_kind,
-          fixed_value->assignment.location_base,
-          fixed_value->assignment.location_count, ignored_value_ids,
-          ignored_value_count, ignored_storage_lease_value_ids,
-          ignored_storage_lease_value_count,
-          LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "low fixed value cannot occupy its required location without "
-        "overlapping another live interval or reserved range");
+  // A fixed destination may reuse dead storage after releasing an asynchronous
+  // lease. The normal append path records the required completion action.
+  if (loom_low_allocation_search_assignment_conflicts(
+          &search_context, &fixed_value->assignment,
+          /*ignored_value_ids=*/NULL, /*ignored_value_count=*/0,
+          /*ignored_storage_lease_value_ids=*/NULL,
+          /*ignored_storage_lease_value_count=*/0,
+          LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED)) {
+    return loom_low_allocation_target_constraints_emit_fixed_value_conflict(
+        state->context->target_constraints, &fixed_value->assignment);
   }
 
   IREE_RETURN_IF_ERROR(
       loom_low_allocation_interval_assignment_append_assignment(
-          state, &fixed_value->assignment, ignored_storage_lease_value_ids,
-          ignored_storage_lease_value_count, NULL));
+          state, &fixed_value->assignment,
+          /*ignored_storage_lease_value_ids=*/NULL,
+          /*ignored_storage_lease_value_count=*/0, NULL));
   *out_assigned = true;
   return iree_ok_status();
 }
@@ -958,14 +721,6 @@ static iree_status_t loom_low_allocation_interval_assignment_assign(
       continue;
     }
 
-    bool assigned_fixed_interval = false;
-    IREE_RETURN_IF_ERROR(
-        loom_low_allocation_interval_assignment_assign_fixed_interval(
-            state, interval, &assigned_fixed_interval));
-    if (assigned_fixed_interval) {
-      continue;
-    }
-
     loom_low_allocation_search_context_t search_context =
         loom_low_allocation_interval_assignment_search_context(state);
     loom_low_allocation_coalescing_context_t coalescing_context = {
@@ -1011,6 +766,19 @@ static iree_status_t loom_low_allocation_interval_assignment_assign(
         loom_low_allocation_coalescing_assign_edge_source_interval(
             &coalescing_context, interval, &assigned_edge_source_interval));
     if (assigned_edge_source_interval) {
+      continue;
+    }
+
+    // Fixed bindings constrain every candidate but retain the same required
+    // ties and structural ownership handoffs as unconstrained values.
+    bool assigned_fixed_interval = false;
+    IREE_RETURN_IF_ERROR(
+        loom_low_allocation_interval_assignment_assign_fixed_interval(
+            state, interval, &assigned_fixed_interval));
+    if (context->target_constraints->error_count != 0) {
+      return iree_ok_status();
+    }
+    if (assigned_fixed_interval) {
       continue;
     }
 

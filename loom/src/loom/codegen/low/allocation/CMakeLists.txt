@@ -788,6 +788,7 @@ loom_cc_test(
     loom::ir
     loom::ops::test
     loom::target::facts_builder
+    loom::target::registers
     loom::target::test::descriptors
     loom::target::test::target_record_table
 )

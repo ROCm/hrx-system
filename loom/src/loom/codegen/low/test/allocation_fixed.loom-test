@@ -1,0 +1,89 @@
+// Fixing any member constrains the complete required storage chain.
+// RUN: emit low-allocation-json @fixed_tied_chain fixed=%last:target_id:6:1
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @fixed_tied_chain(%seed: reg<test.i32>) -> (reg<test.i32>) asm {
+  %first = test.tied.any %seed
+  %last = test.tied.any %first
+  return %last
+}
+
+// ----
+{"format":"loom.low.allocation.v0","function":"fixed_tied_chain","target":"target","descriptor_set":"test.low.core","allocation_mode":"virtual","assignment_count":3,"remark_count":0,"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":0,"name":"seed","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":0,"end_point":2,"unit_count":1,"location":{"kind":"target_id","base":6,"count":1}},{"index":1,"value":{"id":2,"name":"first","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":1,"end_point":3,"unit_count":1,"location":{"kind":"target_id","base":6,"count":1}},{"index":2,"value":{"id":3,"name":"last","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":2,"end_point":3,"unit_count":1,"location":{"kind":"target_id","base":6,"count":1}}],"spill_plans":[],"copy_decisions":[],"remarks":[]}
+
+// ====
+
+// An offset slice may share fixed storage with its wider source and a tie.
+// RUN: emit low-allocation-json @fixed_offset_slice fixed=%wide:target_id:4:4 fixed=%last:target_id:6:1
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @fixed_offset_slice(%wide: reg<test.i32 x4>) -> (reg<test.i32>) asm {
+  %middle = slice %wide[2] : reg<test.i32 x4> -> reg<test.i32>
+  %last = test.tied.any %middle
+  return %last
+}
+
+// ----
+{"format":"loom.low.allocation.v0","function":"fixed_offset_slice","target":"target","descriptor_set":"test.low.core","allocation_mode":"virtual","assignment_count":3,"remark_count":0,"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":0,"name":"wide","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":0,"end_point":1,"unit_count":4,"location":{"kind":"target_id","base":4,"count":4}},{"index":1,"value":{"id":2,"name":"middle","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":1,"end_point":3,"unit_count":1,"location":{"kind":"target_id","base":6,"count":1}},{"index":2,"value":{"id":3,"name":"last","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":2,"end_point":3,"unit_count":1,"location":{"kind":"target_id","base":6,"count":1}}],"spill_plans":[],"copy_decisions":[],"remarks":[]}
+
+// ====
+
+// Optional transfers stop fixed propagation and preserve a live copy source.
+// RUN: emit low-allocation-json @fixed_copy_continuation fixed=%source:target_id:2:1 fixed=%last:target_id:6:1
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @fixed_copy_continuation(%source: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %copy = copy %source : reg<test.i32> -> reg<test.i32>
+  %last = test.tied.any %copy
+  return %source, %last
+}
+
+// ----
+{"format":"loom.low.allocation.v0","function":"fixed_copy_continuation","target":"target","descriptor_set":"test.low.core","allocation_mode":"virtual","assignment_count":3,"remark_count":0,"copy_decision_count":1,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":1,"assignments":[{"index":0,"value":{"id":0,"name":"source","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":0,"end_point":3,"unit_count":1,"location":{"kind":"target_id","base":2,"count":1}},{"index":1,"value":{"id":3,"name":"copy","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":1,"end_point":3,"unit_count":1,"location":{"kind":"target_id","base":6,"count":1}},{"index":2,"value":{"id":4,"name":"last","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":2,"end_point":3,"unit_count":1,"location":{"kind":"target_id","base":6,"count":1}}],"spill_plans":[],"copy_decisions":[{"index":0,"kind":"materialized","source_value":{"id":0,"name":"source","type":"reg<test.i32>"},"result_value":{"id":3,"name":"copy","type":"reg<test.i32>"},"source_assignment":0,"result_assignment":1}],"remarks":[]}
+
+// ====
+
+// The fixed aggregate constrains concat reservation as well as its own tie.
+// RUN: emit low-allocation-json @fixed_concat_continuation fixed=%last:target_id:4:4
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @fixed_concat_continuation(%left: reg<test.i32 x2>, %right: reg<test.i32 x2>) -> (reg<test.i32 x4>) asm {
+  %packed = concat(%left, %right) : (reg<test.i32 x2>, reg<test.i32 x2>) -> reg<test.i32 x4>
+  %last = test.early_tied.v4i32 %packed
+  return %last
+}
+
+// ----
+{"format":"loom.low.allocation.v0","function":"fixed_concat_continuation","target":"target","descriptor_set":"test.low.core","allocation_mode":"virtual","assignment_count":4,"remark_count":0,"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":3,"name":"packed","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":1,"end_point":3,"unit_count":4,"location":{"kind":"target_id","base":4,"count":4}},{"index":1,"value":{"id":0,"name":"left","type":"reg<test.i32 x2>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":0,"end_point":1,"unit_count":2,"location":{"kind":"target_id","base":4,"count":2}},{"index":2,"value":{"id":1,"name":"right","type":"reg<test.i32 x2>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":0,"end_point":1,"unit_count":2,"location":{"kind":"target_id","base":6,"count":2}},{"index":3,"value":{"id":4,"name":"last","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":2,"end_point":3,"unit_count":4,"location":{"kind":"target_id","base":4,"count":4}}],"spill_plans":[],"copy_decisions":[],"remarks":[]}
+
+// ====
+
+// Distinct fixed locations cannot split a required chain, even transitively.
+// RUN: emit low-allocation-json @conflicting_fixed_chain fixed=%seed:target_id:6:1 fixed=%last:target_id:7:1 output=none
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @conflicting_fixed_chain(%seed: reg<test.i32>) -> (reg<test.i32>) asm {
+  %first = test.tied.any %seed
+  // ERROR@+1: BACKEND/049 {first_value_name="seed", first_location_base="6", second_value_name="last", second_location_base="7"}
+  %last = test.tied.any %first
+  return %last
+}
+
+// ====
+
+// An optional copy does not authorize overwriting its still-live input.
+// RUN: emit low-allocation-json @fixed_copy_live_conflict fixed=%source:target_id:2:1 fixed=%last:target_id:2:1 output=none
+
+test.target<low_core> @target
+
+// ERROR@+1: BACKEND/050 {value_name="source", location_kind="target_id", location_base="2", location_count="1"}
+low.func.def target<test.low.core>(@target) @fixed_copy_live_conflict(%source: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %copy = copy %source : reg<test.i32> -> reg<test.i32>
+  %last = test.tied.any %copy
+  return %source, %last
+}

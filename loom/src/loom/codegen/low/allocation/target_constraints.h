@@ -92,14 +92,17 @@ typedef struct loom_low_allocation_resolved_reserved_range_t {
 // Target-validated fixed value prepared for allocation.
 //
 // |assignment| contains the propagated sparse and per-unit storage lifetime
-// used by conflict searches. Explicit preassignments are copied directly into
-// the final allocation table; target-implied locations reserve their storage
-// until the ordinary interval assignment path selects them.
+// used by conflict searches. Explicit bindings extend to all required tied
+// values. They constrain both coalescing and direct interval assignment;
+// target-implied locations reserve storage until ordinary allocation selects
+// it.
 typedef struct loom_low_allocation_resolved_fixed_value_t {
   // Complete assignment at the required target-visible location.
   loom_low_allocation_assignment_t assignment;
   // Liveness-local ordinal for |assignment.value_id|.
   loom_value_ordinal_t value_ordinal;
+  // Untied source ordinal owning the required whole-value storage component.
+  loom_value_ordinal_t tied_root_ordinal;
   // Exclusive semantic live-range end before storage lifetime refinement.
   uint32_t semantic_end_point;
 } loom_low_allocation_resolved_fixed_value_t;
@@ -214,11 +217,11 @@ typedef struct loom_low_allocation_target_constraints_t {
   loom_low_allocation_resolved_budget_t* budgets;
   // Number of entries in |budgets|.
   iree_host_size_t budget_count;
-  // Resolved fixed SSA value locations. Explicit preassignments occupy the
-  // leading |preassigned_fixed_value_count| entries and are followed by
-  // target-implied mandatory locations.
+  // Resolved fixed SSA value locations. Explicit bindings and their required
+  // tied aliases occupy the leading |preassigned_fixed_value_count| entries,
+  // followed by target-implied mandatory locations.
   loom_low_allocation_resolved_fixed_value_t* fixed_values;
-  // Number of explicit fixed values that must be preassigned.
+  // Number of explicitly bound values and tied aliases to preassign.
   iree_host_size_t preassigned_fixed_value_count;
   // Total number of entries in |fixed_values|.
   iree_host_size_t fixed_value_count;
@@ -252,14 +255,23 @@ iree_status_t loom_low_allocation_target_constraints_initialize(
     loom_low_allocation_target_constraints_t* out_constraints);
 
 // Resolves fixed values into complete assignments after |unit_liveness| has
-// been initialized and propagated for |liveness|.
+// been initialized and propagated for |liveness|. Required ties in |placement|
+// propagate explicit bindings; contradictory bindings diagnose at this
+// boundary.
 iree_status_t loom_low_allocation_target_constraints_resolve_fixed_values(
     loom_low_allocation_target_constraints_t* constraints,
     const loom_liveness_analysis_t* liveness,
     const loom_local_value_domain_t* value_domain,
     const loom_low_allocation_unit_liveness_t* unit_liveness,
+    const loom_low_placement_table_t* placement,
     const loom_low_allocation_fixed_value_t* fixed_values,
     iree_host_size_t fixed_value_count, iree_arena_allocator_t* arena);
+
+// Diagnoses a fixed binding whose required storage conflicts with another
+// live value, asynchronous lease, reserved range, or implicit physical write.
+iree_status_t loom_low_allocation_target_constraints_emit_fixed_value_conflict(
+    loom_low_allocation_target_constraints_t* constraints,
+    const loom_low_allocation_assignment_t* assignment);
 
 // Resolves |value_class| to a descriptor-set-local register class.
 iree_status_t loom_low_allocation_target_constraints_resolve_reg_class(
@@ -315,8 +327,8 @@ loom_low_allocation_target_constraints_fixed_value_for_value(
     const loom_low_allocation_target_constraints_t* constraints,
     loom_value_id_t value_id);
 
-// Returns the explicit fixed value that must be preassigned for |value_id|, or
-// NULL when the value has no explicit fixed-location request.
+// Returns the fixed value to preassign for |value_id|, or NULL when neither the
+// value nor its required tied aliases have an explicit fixed-location request.
 const loom_low_allocation_resolved_fixed_value_t*
 loom_low_allocation_target_constraints_preassigned_fixed_value_for_value(
     const loom_low_allocation_target_constraints_t* constraints,
@@ -343,13 +355,13 @@ uint32_t loom_low_allocation_target_constraints_assigned_location_search_limit(
     const loom_low_allocation_target_constraints_t* constraints,
     uint16_t reg_class_id, loom_low_allocation_location_kind_t location_kind);
 
-// Returns true when |candidate| conflicts with a fixed value or implicit
-// physical write. Whole-value hard ties in |placement| share fixed-value
-// storage even before either interval is assigned; they never excuse clobbers.
+// Returns true when |candidate| violates its own fixed binding or conflicts
+// with another fixed value or implicit physical write. Resolved whole-value
+// tied components share reservations when their concrete storage matches;
+// they never excuse clobbers.
 bool loom_low_allocation_target_constraints_fixed_storage_conflicts(
     const loom_low_allocation_target_constraints_t* constraints,
     const loom_low_allocation_unit_liveness_t* unit_liveness,
-    const loom_low_placement_table_t* placement,
     const loom_low_allocation_assignment_t* candidate,
     const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count);
 

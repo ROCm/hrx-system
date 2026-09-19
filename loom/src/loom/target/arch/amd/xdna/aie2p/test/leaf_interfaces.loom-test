@@ -165,3 +165,34 @@ r1: written
 r2: written
 r3: written
 lr: preserved
+
+// ====
+
+// Each fixed result binds its own required input, including descriptor-local
+// pointer and dimension views. Unrelated pointer storage remains untouched.
+// RUN: emit aie2p-leaf @fixed_recurrence_results fixed=%next_pointer:physical_register:203:1 fixed=%next_dimension:physical_register:47:1 registers=p0,p3,dc0,dc4,dn0,dn4,lr
+
+low.func.def target<amd.xdna.aie2p.core> @fixed_recurrence_results(%pointer: reg<aie2p.ep>, %dimension: reg<aie2p.eds>) -> (reg<aie2p.ep>, reg<aie2p.eds>) asm {
+  %next_pointer, %next_dimension = padda.3d %pointer, %dimension
+  return %next_pointer, %next_dimension
+}
+
+// ----
+p0: preserved
+p3: written
+dc0: written
+dc4: written
+dn0: preserved
+dn4: preserved
+lr: preserved
+
+// ====
+
+// A recurrence cannot read one fixed pointer and update a different one.
+// RUN: emit aie2p-leaf @conflicting_recurrence fixed=%pointer:physical_register:200:1 fixed=%next_pointer:physical_register:203:1
+
+low.func.def target<amd.xdna.aie2p.core> @conflicting_recurrence(%pointer: reg<aie2p.ep>, %dimension: reg<aie2p.eds>) -> (reg<aie2p.ep>, reg<aie2p.eds>) asm {
+  // ERROR@+1: BACKEND/049 {first_value_name="pointer", first_location_base="200", second_value_name="next_pointer", second_location_base="203"}
+  %next_pointer, %next_dimension = padda.3d %pointer, %dimension
+  return %next_pointer, %next_dimension
+}

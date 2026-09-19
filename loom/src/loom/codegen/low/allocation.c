@@ -296,8 +296,8 @@ iree_status_t loom_low_allocate_function(
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_low_allocation_target_constraints_resolve_fixed_values(
         &state.target_constraints, &state.liveness, value_domain,
-        &state.unit_liveness, options->fixed_values, options->fixed_value_count,
-        arena);
+        &state.unit_liveness, &state.placement, options->fixed_values,
+        options->fixed_value_count, arena);
   }
   const iree_arena_checkpoint_t interval_assignment_checkpoint =
       iree_arena_checkpoint_save(arena);

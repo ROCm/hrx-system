@@ -517,7 +517,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   value_domain.value_count = IREE_ARRAYSIZE(value_ids);
   value_domain.flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED;
   IREE_ASSERT_OK(loom_low_allocation_target_constraints_resolve_fixed_values(
-      &target_constraints, &liveness, &value_domain, &unit_liveness,
+      &target_constraints, &liveness, &value_domain, &unit_liveness, &placement,
       fixed_values, IREE_ARRAYSIZE(fixed_values), &arena_));
 
   loom_low_allocation_storage_lease_state_t storage_leases = {};
