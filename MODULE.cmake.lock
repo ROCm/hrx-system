@@ -131,6 +131,7 @@ set(IREE_DEP_CXX_BUILD_FILE "//build_tools/third_party/cxx:cxx.BUILD.bazel")
 set(IREE_DEP_CXX_PATCHES
   "//build_tools/third_party/cxx:include_continuation.patch"
   "//build_tools/third_party/cxx:include_paths.patch"
+  "//build_tools/third_party/cxx:template_lookahead.patch"
 )
 set(IREE_DEP_CXX_PATCH_ARGS
   "-p1"

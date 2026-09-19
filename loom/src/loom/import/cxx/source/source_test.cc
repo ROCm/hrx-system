@@ -99,6 +99,86 @@ TEST(SourceTest, RejectedSourceLeavesTheNextInvocationIndependent) {
   ASSERT_NE(source.unit().ast(), nullptr);
 }
 
+TEST(SourceTest, ComparisonsDoNotSpeculateOnNonTemplateArguments) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"cpp(
+                  constexpr bool bounded(unsigned a, unsigned b, unsigned c,
+                                         unsigned d, unsigned e, unsigned f,
+                                         unsigned g) {
+                    return a < 256u && b < 256u && c < 256u && d < 256u &&
+                           e < 256u && f < 256u && g < 256u;
+                  }
+                  static_assert(bounded(0, 1, 2, 3, 4, 5, 255));
+                  static_assert(!bounded(0, 1, 2, 3, 4, 5, 256));
+
+                  namespace bounds {
+                  constexpr unsigned first = 1;
+                  constexpr unsigned second = 2;
+                  }  // namespace bounds
+                  static_assert(bounds::first < 2u && bounds::second < 3u);
+
+                  struct Bounds {
+                    unsigned first;
+                    unsigned second;
+                  };
+                  constexpr Bounds pair{1, 2};
+                  static_assert(pair.first < 2u && pair.second < 3u);
+
+                  template <unsigned Limit>
+                  constexpr bool below(unsigned value) {
+                    return value < Limit && Limit < 256u;
+                  }
+                  static_assert(below<16>(15));
+                  static_assert(!below<16>(16));
+                )cpp"),
+                IREE_SV("comparisons.cpp"), options);
+  EXPECT_FALSE(source.diagnostics().has_error());
+}
+
+TEST(SourceTest, TemplateLookaheadRetainsOverloadsCastsAndDependentNames) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"cpp(
+                  constexpr int increment(int value) {
+                    return value + 10;
+                  }
+                  template <class T>
+                  constexpr T increment(T value) {
+                    return T(value) + T{1};
+                  }
+                  static_assert(increment(2) == 12);
+                  static_assert(increment<unsigned>(2) == 3);
+
+                  template <class T>
+                  struct Box {
+                    using type = T;
+                    template <class U>
+                    struct Rebind {
+                      using type = U;
+                    };
+                    template <class U>
+                    constexpr U get() const {
+                      return U{3};
+                    }
+                  };
+                  template <class T, class U>
+                  constexpr U extract(const Box<T>& box) {
+                    return box.template get<U>();
+                  }
+                  constexpr Box<float> box;
+                  static_assert(extract<float, int>(box) == 3);
+
+                  template <class T>
+                  struct Alias {
+                    using type = typename T::template Rebind<int>::type;
+                  };
+                  static_assert(sizeof(Alias<Box<int>>::type) == sizeof(int));
+                )cpp"),
+                IREE_SV("template_names.cpp"), options);
+  EXPECT_FALSE(source.diagnostics().has_error());
+}
+
 TEST(SourceTest, IncludeDirectoryRetainsFilesystemRoot) {
   const auto root = std::filesystem::current_path().root_path();
   const auto directory = root.string();

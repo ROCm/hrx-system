@@ -21,6 +21,7 @@ iree_execution_test_suite(
     "loom-compile=loom::tools::loom-compile"
     "loom-import-cxx=loom::tools::loom-import-cxx"
   DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/import/cxx/test/comparison_functions.cpp"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/import/cxx/test/integer_functions.cpp"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/import/cxx/test/shaped_intrinsics.cpp"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/import/cxx/test/vector_values.cpp"

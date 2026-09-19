@@ -22,6 +22,7 @@ exports_files([
 iree_execution_test_suite(
     name = "functions_test",
     data = [
+        "comparison_functions.cpp",
         "integer_functions.cpp",
         "shaped_intrinsics.cpp",
         "vector_values.cpp",

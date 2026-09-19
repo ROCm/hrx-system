@@ -10,4 +10,5 @@ exports_files([
     "cxx.BUILD.bazel",
     "include_continuation.patch",
     "include_paths.patch",
+    "template_lookahead.patch",
 ])

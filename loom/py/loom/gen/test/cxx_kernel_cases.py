@@ -193,6 +193,8 @@ def short_circuit(directory):
                     int(first or second),
                     4 * int((lane & 8) != 0),
                     int(lane != 31 and lane != 32),
+                    next(trace for bound, trace in [(2, 123456), (4, 12345), (8, 1234), (16, 123), (32, 12), (64, 1)] if lane < bound),
+                    int(lane == 0),
                 ]
             )
         case = Case(directory, f"short_circuit_{length}", "i32", len(expected))
@@ -280,6 +282,20 @@ def integer_functions(directory):
     function("shift_right_signed", [64, 32], 64, [([value, count], value // (1 << count)) for value in wide_values for count in counts])
     function("shift_right_unsigned", [64, 32], 64, [([value, count], (value % (1 << 64)) // (1 << count)) for value in wide_values for count in counts])
     return "\n\n".join(cases) + "\n"
+
+
+def comparison_functions(directory):
+    del directory
+    samples = []
+    for mask in range(128):
+        arguments = [256 if mask & (1 << index) else 255 for index in range(7)]
+        samples.append((arguments, int(mask == 0)))
+    samples.append(([0] * 7, 1))
+    for index in range(7):
+        arguments = [0] * 7
+        arguments[index] = (1 << 32) - 1
+        samples.append((arguments, 0))
+    return function_cases("comparison_chain", [32] * 7, 32, samples) + "\n"
 
 
 def pointer_walk(directory):
@@ -517,6 +533,7 @@ def main():
         ("increment_u8", lambda directory: integer_increment(directory, 8, BYTE_INPUTS)),
         ("increment_u64", lambda directory: integer_increment(directory, 64, WIDE_INPUTS)),
         ("integer_functions", integer_functions),
+        ("comparison_functions", comparison_functions),
         ("pointer_walk", pointer_walk),
         ("vector_depth", vector_depth),
         ("vector_depth_span", vector_depth_span),
