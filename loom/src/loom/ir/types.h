@@ -637,16 +637,28 @@ static inline bool loom_register_class_name_is_qualified(
 
 // One-way SSA value map used when comparing types across forwarding
 // boundaries.
+enum loom_type_value_remap_flag_bits_e {
+  // source_values is a contiguous definition-index slice from one op or block.
+  // Membership and absence can be resolved without scanning the span.
+  LOOM_TYPE_VALUE_REMAP_FLAG_SOURCE_DEFINITION_SLICE = 1u << 0,
+};
+typedef uint16_t loom_type_value_remap_flags_t;
+
 typedef struct loom_type_value_remap_t {
   // Values appearing in the source-side type.
   const loom_value_id_t* source_values;
   // Values that the corresponding source values forward to.
   const loom_value_id_t* target_values;
   // Number of source/target value pairs.
-  iree_host_size_t count;
+  uint16_t count;
+  // Structural promises enabling bounded source lookup.
+  loom_type_value_remap_flags_t flags;
   // Additional discontiguous value pairs, or NULL when this is the last span.
   const struct loom_type_value_remap_t* next;
 } loom_type_value_remap_t;
+
+static_assert(sizeof(loom_type_value_remap_t) == 32,
+              "value remap spans must remain compact");
 
 // Returns true if two types have the same element type.
 // Meaningful for scalar and shaped types. For non-element-bearing types

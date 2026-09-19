@@ -319,6 +319,7 @@ static iree_status_t loom_function_contract_verify_boundary(
       .source_values = signature->result_ids,
       .target_values = boundary->result_ids,
       .count = result_count,
+      .flags = LOOM_TYPE_VALUE_REMAP_FLAG_SOURCE_DEFINITION_SLICE,
   };
   const loom_type_value_remap_t signature_remap = {
       .source_values = signature->argument_ids,

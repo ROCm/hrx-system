@@ -87,6 +87,7 @@ iree_status_t loom_ops_verify_successor_args(
       .source_values = target->arg_ids,
       .target_values = args,
       .count = target->arg_count,
+      .flags = LOOM_TYPE_VALUE_REMAP_FLAG_SOURCE_DEFINITION_SLICE,
   };
   for (uint16_t i = 0; i < target->arg_count; ++i) {
     loom_value_id_t actual_id = args[i];

@@ -39,21 +39,55 @@ static bool loom_rewriter_op_summarizes_nested_regions(
   return vtable && (vtable->loop_like || vtable->region_branch);
 }
 
-static bool loom_rewriter_region_branch_summary_is_ready(
+static bool loom_rewriter_summary_region_is_ready(
+    const loom_op_t* op, const loom_op_vtable_t* vtable, uint8_t region_index) {
+  if (region_index >= op->region_count) {
+    return false;
+  }
+  const loom_region_descriptor_t* descriptor =
+      loom_op_vtable_region_descriptor(vtable, region_index);
+  loom_region_t* region = loom_op_regions(op)[region_index];
+  if (!descriptor || !region || region->block_count != 1) {
+    return false;
+  }
+  const loom_block_t* block = loom_region_const_entry_block(region);
+  const loom_op_t* terminator = block->last_op;
+  if (!terminator) {
+    return false;
+  }
+  return descriptor->terminator == LOOM_OP_KIND_UNKNOWN ||
+         terminator->kind == descriptor->terminator;
+}
+
+static bool loom_rewriter_nested_region_summary_is_ready(
     const loom_rewriter_t* rewriter, loom_op_t* op,
     const loom_op_vtable_t* vtable) {
-  if (!vtable || !vtable->region_branch) {
+  if (!vtable) {
     return true;
   }
-  loom_region_branch_t branch = loom_region_branch_cast(rewriter->module, op);
-  for (uint8_t region_index = 0; region_index < op->region_count;
-       ++region_index) {
-    if (!loom_region_branch_region(rewriter->module, branch, region_index)) {
-      continue;
-    }
-    if (!loom_region_branch_region_terminator(rewriter->module, branch,
-                                              region_index)) {
+  if (vtable->loop_like) {
+    if (!loom_rewriter_summary_region_is_ready(
+            op, vtable, vtable->loop_like->body_region_index)) {
       return false;
+    }
+    const uint8_t condition_region_index =
+        vtable->loop_like->condition_region_index;
+    if (condition_region_index != LOOM_REGION_INDEX_NONE &&
+        !loom_rewriter_summary_region_is_ready(op, vtable,
+                                               condition_region_index)) {
+      return false;
+    }
+  }
+  if (vtable->region_branch) {
+    loom_region_branch_t branch = loom_region_branch_cast(rewriter->module, op);
+    for (uint8_t region_index = 0; region_index < op->region_count;
+         ++region_index) {
+      if (!loom_region_branch_region(rewriter->module, branch, region_index)) {
+        continue;
+      }
+      if (!loom_rewriter_summary_region_is_ready(op, vtable, region_index)) {
+        return false;
+      }
     }
   }
   return true;
@@ -105,7 +139,7 @@ static iree_status_t loom_rewriter_seed_nested_temporal_scope(
 // Callback installed on the builder. Fired by finalize_op after a new op's
 // direct fields are fully wired. Adds the op to the rewriter's worklist so the
 // driver can attempt patterns on it. When analysis is enabled, also computes
-// facts for ordinary op results and complete structured ops. RegionBranch
+// facts for ordinary op results and complete structured ops. Structured op
 // shells remain on the worklist until callers have populated the regions
 // created by their builders.
 static iree_status_t loom_rewriter_on_op_finalized(void* user_data,
@@ -124,7 +158,7 @@ static iree_status_t loom_rewriter_on_op_finalized(void* user_data,
         loom_rewriter_add_parent_summary_ops_to_worklist(rewriter, op));
   }
   const loom_op_vtable_t* vtable = loom_op_vtable(rewriter->module, op);
-  if (!loom_rewriter_region_branch_summary_is_ready(rewriter, op, vtable)) {
+  if (!loom_rewriter_nested_region_summary_is_ready(rewriter, op, vtable)) {
     return iree_ok_status();
   }
   return loom_rewriter_recompute_op_facts(rewriter, op);

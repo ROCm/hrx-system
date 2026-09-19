@@ -14,6 +14,7 @@
 #include "loom/ir/module.h"
 #include "loom/ir/type_refinement.h"
 #include "loom/target/registers.h"
+#include "loom/util/cfg_graph.h"
 
 #define LOOM_TYPE_PROPAGATION_INITIAL_ORDINAL_CAPACITY 64
 #define LOOM_TYPE_PROPAGATION_INITIAL_LIST_CAPACITY 32
@@ -29,6 +30,14 @@ typedef struct loom_type_value_span_t {
   // Inline storage for fixed single-value field references.
   loom_value_id_t single_value;
 } loom_type_value_span_t;
+
+typedef struct loom_type_propagator_queue_marks_t {
+  // Transaction generation in which the value was queued.
+  uint32_t value_generation;
+
+  // Transaction generation in which the forwarding group was queued.
+  uint32_t forwarding_generation;
+} loom_type_propagator_queue_marks_t;
 
 struct loom_type_propagator_t {
   // Module whose value table provides canonical value payloads.
@@ -52,8 +61,9 @@ struct loom_type_propagator_t {
   // Generation mark indicating that candidate_types[ordinal] is live.
   uint32_t* candidate_generations;
 
-  // Generation mark indicating that a value is already queued.
-  uint32_t* queued_generations;
+  // Queue generation marks indexed by value ordinal. A forwarding group's
+  // first destination value owns its forwarding mark.
+  loom_type_propagator_queue_marks_t* queue_marks;
 
   // Parent op owning the region that defines each block argument, when known.
   loom_op_t** owner_ops;
@@ -75,6 +85,15 @@ struct loom_type_propagator_t {
 
   // Allocated entry count for value_worklist.
   iree_host_size_t value_worklist_capacity;
+
+  // Forwarding groups awaiting collective tuple propagation.
+  loom_value_ordinal_t* forwarding_worklist;
+
+  // Number of live entries in forwarding_worklist.
+  iree_host_size_t forwarding_worklist_count;
+
+  // Allocated entry count for forwarding_worklist.
+  iree_host_size_t forwarding_worklist_capacity;
 
   // True when a candidate contradicts another candidate or existing type.
   bool conflict;
@@ -107,7 +126,7 @@ static iree_status_t loom_type_propagator_ensure_ordinal_capacity(
 
   loom_type_t* candidate_types = NULL;
   uint32_t* candidate_generations = NULL;
-  uint32_t* queued_generations = NULL;
+  loom_type_propagator_queue_marks_t* queue_marks = NULL;
   loom_op_t** owner_ops = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       propagator->arena, new_capacity, sizeof(*candidate_types),
@@ -115,15 +134,15 @@ static iree_status_t loom_type_propagator_ensure_ordinal_capacity(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       propagator->arena, new_capacity, sizeof(*candidate_generations),
       (void**)&candidate_generations));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      propagator->arena, new_capacity, sizeof(*queued_generations),
-      (void**)&queued_generations));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(propagator->arena, new_capacity,
+                                sizeof(*queue_marks), (void**)&queue_marks));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       propagator->arena, new_capacity, sizeof(*owner_ops), (void**)&owner_ops));
   memset(candidate_types, 0, new_capacity * sizeof(*candidate_types));
   memset(candidate_generations, 0,
          new_capacity * sizeof(*candidate_generations));
-  memset(queued_generations, 0, new_capacity * sizeof(*queued_generations));
+  memset(queue_marks, 0, new_capacity * sizeof(*queue_marks));
   memset(owner_ops, 0, new_capacity * sizeof(*owner_ops));
 
   if (old_capacity > 0) {
@@ -131,14 +150,14 @@ static iree_status_t loom_type_propagator_ensure_ordinal_capacity(
            old_capacity * sizeof(*candidate_types));
     memcpy(candidate_generations, propagator->candidate_generations,
            old_capacity * sizeof(*candidate_generations));
-    memcpy(queued_generations, propagator->queued_generations,
-           old_capacity * sizeof(*queued_generations));
+    memcpy(queue_marks, propagator->queue_marks,
+           old_capacity * sizeof(*queue_marks));
     memcpy(owner_ops, propagator->owner_ops, old_capacity * sizeof(*owner_ops));
   }
 
   propagator->candidate_types = candidate_types;
   propagator->candidate_generations = candidate_generations;
-  propagator->queued_generations = queued_generations;
+  propagator->queue_marks = queue_marks;
   propagator->owner_ops = owner_ops;
   propagator->ordinal_capacity = new_capacity;
   return iree_ok_status();
@@ -202,13 +221,13 @@ static void loom_type_propagator_next_transaction(
     memset(propagator->candidate_generations, 0,
            propagator->ordinal_capacity *
                sizeof(*propagator->candidate_generations));
-    memset(
-        propagator->queued_generations, 0,
-        propagator->ordinal_capacity * sizeof(*propagator->queued_generations));
+    memset(propagator->queue_marks, 0,
+           propagator->ordinal_capacity * sizeof(*propagator->queue_marks));
     propagator->transaction_generation = 1;
   }
   propagator->touched_count = 0;
   propagator->value_worklist_count = 0;
+  propagator->forwarding_worklist_count = 0;
   propagator->conflict = false;
 }
 
@@ -419,17 +438,38 @@ static loom_type_t loom_type_propagator_value_type(
 
 static iree_status_t loom_type_propagator_enqueue_value(
     loom_type_propagator_t* propagator, loom_value_ordinal_t value_ordinal) {
-  if (propagator->queued_generations[value_ordinal] ==
+  if (propagator->queue_marks[value_ordinal].value_generation ==
       propagator->transaction_generation) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_type_propagator_grow_ordinal_list(
       propagator, &propagator->value_worklist, propagator->value_worklist_count,
       &propagator->value_worklist_capacity));
-  propagator->queued_generations[value_ordinal] =
+  propagator->queue_marks[value_ordinal].value_generation =
       propagator->transaction_generation;
   propagator->value_worklist[propagator->value_worklist_count++] =
       value_ordinal;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_type_propagator_enqueue_forwarding(
+    loom_type_propagator_t* propagator, loom_value_id_t key_value_id) {
+  loom_value_ordinal_t key_ordinal = LOOM_VALUE_ORDINAL_INVALID;
+  IREE_RETURN_IF_ERROR(loom_type_propagator_register_value(
+      propagator, key_value_id, &key_ordinal));
+  if (key_ordinal == LOOM_VALUE_ORDINAL_INVALID ||
+      propagator->queue_marks[key_ordinal].forwarding_generation ==
+          propagator->transaction_generation) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(loom_type_propagator_grow_ordinal_list(
+      propagator, &propagator->forwarding_worklist,
+      propagator->forwarding_worklist_count,
+      &propagator->forwarding_worklist_capacity));
+  propagator->queue_marks[key_ordinal].forwarding_generation =
+      propagator->transaction_generation;
+  propagator->forwarding_worklist[propagator->forwarding_worklist_count++] =
+      key_ordinal;
   return iree_ok_status();
 }
 
@@ -705,7 +745,8 @@ iree_status_t loom_type_transfer_seed_static_structure_from_type(
     }
   }
 
-  if (loom_type_has_static_encoding(candidate_type)) {
+  if (loom_type_can_have_encoding(candidate_type) &&
+      !loom_type_has_ssa_encoding(candidate_type)) {
     IREE_RETURN_IF_ERROR(loom_type_transfer_seed_encoding_attachment(
         context, value_id, candidate_type.encoding_id,
         candidate_type.encoding_flags));
@@ -1069,58 +1110,187 @@ static iree_status_t loom_type_propagator_relation_variadic_match(
   return iree_ok_status();
 }
 
+static iree_status_t loom_type_propagator_seed_value_facts(
+    loom_type_propagator_t* propagator, const loom_rewriter_t* rewriter,
+    loom_value_id_t value_id) {
+  if (!rewriter->fact_table ||
+      !loom_type_propagator_valid_value_id(propagator, value_id)) {
+    return iree_ok_status();
+  }
+  loom_type_t current_type =
+      loom_type_propagator_value_type(propagator, value_id);
+  loom_type_t refined_type = current_type;
+  loom_type_refinement_result_t result = LOOM_TYPE_REFINEMENT_UNCHANGED;
+  IREE_RETURN_IF_ERROR(loom_type_specialize_with_value_facts(
+      propagator->module, current_type, rewriter->fact_table, propagator->arena,
+      &refined_type, &result));
+  if (result == LOOM_TYPE_REFINEMENT_CONFLICT) {
+    propagator->conflict = true;
+    return iree_ok_status();
+  }
+  return loom_type_propagator_seed_candidate(propagator, value_id, refined_type,
+                                             LOOM_PROPERTY_TYPE);
+}
+
+static iree_status_t loom_type_propagator_seed_value_span_facts(
+    loom_type_propagator_t* propagator, const loom_rewriter_t* rewriter,
+    const loom_value_id_t* values, uint16_t count) {
+  for (uint16_t i = 0; i < count; ++i) {
+    IREE_RETURN_IF_ERROR(
+        loom_type_propagator_seed_value_facts(propagator, rewriter, values[i]));
+    if (propagator->conflict) {
+      break;
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_type_propagator_seed_op_value_facts(
     loom_type_propagator_t* propagator, const loom_rewriter_t* rewriter,
     loom_op_t* op) {
-  if (!rewriter->fact_table) {
+  IREE_RETURN_IF_ERROR(loom_type_propagator_seed_value_span_facts(
+      propagator, rewriter, loom_op_const_operands(op), op->operand_count));
+  if (propagator->conflict) {
     return iree_ok_status();
   }
-  const loom_value_id_t* operands = loom_op_const_operands(op);
-  for (uint16_t i = 0; i < op->operand_count; ++i) {
-    loom_value_id_t value_id = operands[i];
-    if (!loom_type_propagator_valid_value_id(propagator, value_id)) {
-      continue;
-    }
-    loom_type_t current_type =
-        loom_type_propagator_value_type(propagator, value_id);
-    loom_type_t refined_type = current_type;
-    loom_type_refinement_result_t result = LOOM_TYPE_REFINEMENT_UNCHANGED;
-    IREE_RETURN_IF_ERROR(loom_type_specialize_with_value_facts(
-        propagator->module, current_type, rewriter->fact_table,
-        propagator->arena, &refined_type, &result));
-    if (result == LOOM_TYPE_REFINEMENT_CONFLICT) {
-      propagator->conflict = true;
-      return iree_ok_status();
-    }
-    IREE_RETURN_IF_ERROR(loom_type_propagator_seed_candidate(
-        propagator, value_id, refined_type, LOOM_PROPERTY_TYPE));
+  return loom_type_propagator_seed_value_span_facts(
+      propagator, rewriter, loom_op_const_results(op), op->result_count);
+}
+
+static iree_status_t loom_type_propagator_forward_source_tuple(
+    loom_type_propagator_t* propagator,
+    const loom_value_id_t* destination_values,
+    const loom_value_id_t* source_values, uint16_t count) {
+  loom_type_transfer_context_t context = {.propagator = propagator};
+  for (uint16_t i = 0; i < count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_type_transfer_seed_static_structure_from_type(
+        &context, source_values[i],
+        loom_type_propagator_value_type(propagator, destination_values[i])));
     if (propagator->conflict) {
       return iree_ok_status();
     }
   }
 
-  const loom_value_id_t* results = loom_op_const_results(op);
-  for (uint16_t i = 0; i < op->result_count; ++i) {
-    loom_value_id_t value_id = results[i];
-    if (!loom_type_propagator_valid_value_id(propagator, value_id)) {
-      continue;
-    }
-    loom_type_t current_type =
-        loom_type_propagator_value_type(propagator, value_id);
-    loom_type_t refined_type = current_type;
-    loom_type_refinement_result_t result = LOOM_TYPE_REFINEMENT_UNCHANGED;
-    IREE_RETURN_IF_ERROR(loom_type_specialize_with_value_facts(
-        propagator->module, current_type, rewriter->fact_table,
-        propagator->arena, &refined_type, &result));
-    if (result == LOOM_TYPE_REFINEMENT_CONFLICT) {
+  const loom_type_value_remap_t remap = {
+      .source_values = destination_values,
+      .target_values = source_values,
+      .count = count,
+      .flags = LOOM_TYPE_VALUE_REMAP_FLAG_SOURCE_DEFINITION_SLICE,
+  };
+  for (uint16_t i = 0; i < count; ++i) {
+    if (!loom_type_equal_after_value_remap(
+            propagator->module,
+            loom_type_propagator_value_type(propagator, destination_values[i]),
+            loom_type_propagator_value_type(propagator, source_values[i]),
+            &remap)) {
       propagator->conflict = true;
-      return iree_ok_status();
+      break;
     }
-    IREE_RETURN_IF_ERROR(loom_type_propagator_seed_candidate(
-        propagator, value_id, refined_type, LOOM_PROPERTY_TYPE));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_type_propagator_process_region_forwarding(
+    loom_type_propagator_t* propagator, const loom_rewriter_t* rewriter,
+    loom_op_t* op) {
+  const loom_region_branch_t branch =
+      loom_region_branch_cast(propagator->module, op);
+
+  const loom_value_id_t* results = loom_op_const_results(op);
+  IREE_RETURN_IF_ERROR(loom_type_propagator_seed_value_span_facts(
+      propagator, rewriter, results, op->result_count));
+  if (propagator->conflict) {
+    return iree_ok_status();
+  }
+
+  for (uint8_t region_index = 0; region_index < op->region_count;
+       ++region_index) {
+    const loom_op_t* terminator = loom_region_branch_region_terminator(
+        propagator->module, branch, region_index);
+    IREE_ASSERT(terminator);
+    IREE_ASSERT_EQ(terminator->operand_count, op->result_count);
+    const loom_value_id_t* sources = loom_op_const_operands(terminator);
+    IREE_RETURN_IF_ERROR(loom_type_propagator_forward_source_tuple(
+        propagator, results, sources, op->result_count));
     if (propagator->conflict) {
-      return iree_ok_status();
+      break;
     }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_type_propagator_process_cfg_forwarding(
+    loom_type_propagator_t* propagator, const loom_rewriter_t* rewriter,
+    loom_block_t* target) {
+  const loom_cfg_graph_t* graph =
+      rewriter->fact_table ? loom_value_fact_table_lookup_cfg_graph(
+                                 rewriter->fact_table, target->parent_region)
+                           : NULL;
+  if (!graph || graph->malformed) {
+    propagator->conflict = true;
+    return iree_ok_status();
+  }
+  const iree_host_size_t target_index =
+      loom_cfg_graph_block_index(graph, target);
+  IREE_ASSERT(target_index != IREE_HOST_SIZE_MAX);
+  const loom_cfg_edge_index_span_t predecessor_edges =
+      loom_cfg_graph_predecessor_edges(graph, (uint16_t)target_index);
+  if (predecessor_edges.count == 0) {
+    return iree_ok_status();
+  }
+
+  IREE_RETURN_IF_ERROR(loom_type_propagator_seed_value_span_facts(
+      propagator, rewriter, target->arg_ids, target->arg_count));
+  if (propagator->conflict) {
+    return iree_ok_status();
+  }
+
+  for (iree_host_size_t i = 0; i < predecessor_edges.count; ++i) {
+    const loom_cfg_edge_info_t* edge =
+        &graph->edges[predecessor_edges.values[i]];
+    IREE_ASSERT_EQ(edge->terminator->successor_count, 1);
+    IREE_ASSERT_EQ(edge->terminator->operand_count, target->arg_count);
+    const loom_value_id_t* sources = loom_op_const_operands(edge->terminator);
+    IREE_RETURN_IF_ERROR(loom_type_propagator_forward_source_tuple(
+        propagator, target->arg_ids, sources, target->arg_count));
+    if (propagator->conflict) {
+      break;
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_type_propagator_schedule_region_forwarding(
+    loom_type_propagator_t* propagator, loom_op_t* op) {
+  const loom_region_branch_t branch =
+      loom_region_branch_cast(propagator->module, op);
+  if (!loom_region_branch_isa(branch) || op->result_count == 0) {
+    return iree_ok_status();
+  }
+  return loom_type_propagator_enqueue_forwarding(propagator,
+                                                 loom_op_const_results(op)[0]);
+}
+
+static iree_status_t loom_type_propagator_schedule_cfg_forwarding(
+    loom_type_propagator_t* propagator, loom_block_t* block) {
+  if (!block || block->arg_count == 0) {
+    return iree_ok_status();
+  }
+  return loom_type_propagator_enqueue_forwarding(propagator, block->arg_ids[0]);
+}
+
+static iree_status_t loom_type_propagator_schedule_forwarding(
+    loom_type_propagator_t* propagator, loom_op_t* op) {
+  IREE_RETURN_IF_ERROR(
+      loom_type_propagator_schedule_region_forwarding(propagator, op));
+  if (loom_type_propagator_op_is_terminator(propagator, op) && op->parent_op) {
+    IREE_RETURN_IF_ERROR(loom_type_propagator_schedule_region_forwarding(
+        propagator, op->parent_op));
+  }
+  loom_block_t* const* successors = loom_op_successors(op);
+  for (uint8_t i = 0; i < op->successor_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_type_propagator_schedule_cfg_forwarding(
+        propagator, successors[i]));
   }
   return iree_ok_status();
 }
@@ -1187,8 +1357,43 @@ static iree_status_t loom_type_propagator_process_op_constraints(
     loom_type_transfer_context_t context = {.propagator = propagator};
     IREE_RETURN_IF_ERROR(
         vtable->type_transfer(&context, propagator->module, op));
+    if (propagator->conflict) {
+      return iree_ok_status();
+    }
   }
-  return iree_ok_status();
+  return loom_type_propagator_schedule_forwarding(propagator, op);
+}
+
+static iree_status_t loom_type_propagator_process_use_constraints(
+    loom_type_propagator_t* propagator, const loom_rewriter_t* rewriter,
+    loom_op_t* op) {
+  const loom_op_vtable_t* vtable = loom_op_vtable(propagator->module, op);
+  const bool has_type_constraints =
+      vtable && vtable->constraint_count > vtable->operand_dictionary_count;
+  const bool has_type_transfer = vtable && vtable->type_transfer;
+  const bool is_cfg_forwarding = op->successor_count > 0;
+  const bool is_region_forwarding =
+      loom_type_propagator_op_is_terminator(propagator, op) && op->parent_op &&
+      loom_region_branch_isa(
+          loom_region_branch_cast(propagator->module, op->parent_op));
+  if ((is_cfg_forwarding || is_region_forwarding) && !has_type_constraints &&
+      !has_type_transfer && op->region_count == 0) {
+    return loom_type_propagator_schedule_forwarding(propagator, op);
+  }
+  return loom_type_propagator_process_op_constraints(propagator, rewriter, op);
+}
+
+static iree_status_t loom_type_propagator_process_def_constraints(
+    loom_type_propagator_t* propagator, const loom_rewriter_t* rewriter,
+    loom_value_t* value) {
+  loom_op_t* def_op = loom_value_def_op(value);
+  const loom_region_branch_t branch =
+      loom_region_branch_cast(propagator->module, def_op);
+  return loom_region_branch_isa(branch)
+             ? loom_type_propagator_schedule_region_forwarding(propagator,
+                                                               def_op)
+             : loom_type_propagator_process_op_constraints(propagator, rewriter,
+                                                           def_op);
 }
 
 static iree_status_t loom_type_propagator_process_value_adjacency(
@@ -1200,6 +1405,8 @@ static iree_status_t loom_type_propagator_process_value_adjacency(
 
   loom_value_t* value = loom_module_value(propagator->module, value_id);
   if (loom_value_is_block_arg(value)) {
+    IREE_RETURN_IF_ERROR(loom_type_propagator_schedule_cfg_forwarding(
+        propagator, loom_value_def_block(value)));
     const loom_value_ordinal_t value_ordinal =
         loom_local_value_domain_try_ordinal(&propagator->value_domain,
                                             value_id);
@@ -1213,9 +1420,8 @@ static iree_status_t loom_type_propagator_process_value_adjacency(
       }
     }
   } else {
-    loom_op_t* def_op = loom_value_def_op(value);
-    IREE_RETURN_IF_ERROR(loom_type_propagator_process_op_constraints(
-        propagator, rewriter, def_op));
+    IREE_RETURN_IF_ERROR(loom_type_propagator_process_def_constraints(
+        propagator, rewriter, value));
     if (propagator->conflict) {
       return iree_ok_status();
     }
@@ -1223,7 +1429,7 @@ static iree_status_t loom_type_propagator_process_value_adjacency(
 
   const loom_use_t* uses = loom_value_uses(value);
   for (uint32_t i = 0; i < value->use_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_type_propagator_process_op_constraints(
+    IREE_RETURN_IF_ERROR(loom_type_propagator_process_use_constraints(
         propagator, rewriter, loom_use_user_op(uses[i])));
     if (propagator->conflict) {
       return iree_ok_status();
@@ -1250,15 +1456,15 @@ static iree_status_t loom_type_propagator_process_value_adjacency(
               propagator, rewriter, propagator->owner_ops[user_value_ordinal]));
         }
       } else {
-        IREE_RETURN_IF_ERROR(loom_type_propagator_process_op_constraints(
-            propagator, rewriter, loom_value_def_op(user_value)));
+        IREE_RETURN_IF_ERROR(loom_type_propagator_process_def_constraints(
+            propagator, rewriter, user_value));
       }
       if (propagator->conflict) {
         return iree_ok_status();
       }
       const loom_use_t* user_value_uses = loom_value_uses(user_value);
       for (uint32_t i = 0; i < user_value->use_count; ++i) {
-        IREE_RETURN_IF_ERROR(loom_type_propagator_process_op_constraints(
+        IREE_RETURN_IF_ERROR(loom_type_propagator_process_use_constraints(
             propagator, rewriter, loom_use_user_op(user_value_uses[i])));
         if (propagator->conflict) {
           return iree_ok_status();
@@ -1314,14 +1520,34 @@ iree_status_t loom_type_propagator_apply_op(loom_type_propagator_t* propagator,
   IREE_RETURN_IF_ERROR(
       loom_type_propagator_process_op_constraints(propagator, rewriter, op));
 
-  while (!propagator->conflict && propagator->value_worklist_count > 0) {
-    const loom_value_ordinal_t value_ordinal =
-        propagator->value_worklist[--propagator->value_worklist_count];
-    propagator->queued_generations[value_ordinal] = 0;
-    const loom_value_id_t value_id =
-        propagator->value_domain.value_ids[value_ordinal];
-    IREE_RETURN_IF_ERROR(loom_type_propagator_process_value_adjacency(
-        propagator, rewriter, value_id));
+  while (!propagator->conflict && (propagator->value_worklist_count > 0 ||
+                                   propagator->forwarding_worklist_count > 0)) {
+    if (propagator->value_worklist_count > 0) {
+      const loom_value_ordinal_t value_ordinal =
+          propagator->value_worklist[--propagator->value_worklist_count];
+      propagator->queue_marks[value_ordinal].value_generation = 0;
+      const loom_value_id_t value_id =
+          propagator->value_domain.value_ids[value_ordinal];
+      IREE_RETURN_IF_ERROR(loom_type_propagator_process_value_adjacency(
+          propagator, rewriter, value_id));
+      continue;
+    }
+
+    const loom_value_ordinal_t key_ordinal =
+        propagator
+            ->forwarding_worklist[--propagator->forwarding_worklist_count];
+    propagator->queue_marks[key_ordinal].forwarding_generation = 0;
+    const loom_value_id_t key_value_id =
+        propagator->value_domain.value_ids[key_ordinal];
+    loom_value_t* key_value =
+        loom_module_value(propagator->module, key_value_id);
+    if (loom_value_is_block_arg(key_value)) {
+      IREE_RETURN_IF_ERROR(loom_type_propagator_process_cfg_forwarding(
+          propagator, rewriter, loom_value_def_block(key_value)));
+    } else {
+      IREE_RETURN_IF_ERROR(loom_type_propagator_process_region_forwarding(
+          propagator, rewriter, loom_value_def_op(key_value)));
+    }
   }
   if (propagator->conflict) {
     return iree_ok_status();

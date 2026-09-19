@@ -19,6 +19,7 @@ bool loom_cfg_block_arguments_can_replace(
       .source_values = block->arg_ids,
       .target_values = replacements.values,
       .count = block->arg_count,
+      .flags = LOOM_TYPE_VALUE_REMAP_FLAG_SOURCE_DEFINITION_SLICE,
   };
   for (uint16_t i = 0; i < block->arg_count; ++i) {
     loom_value_id_t replacement = replacements.values[i];

@@ -47,6 +47,7 @@ loom_cc_test(
 loom_cc_library(
     name = "ir",
     srcs = [
+        "ancestry.c",
         "attribute.c",
         "context.c",
         "encoding.c",
@@ -65,6 +66,7 @@ loom_cc_library(
         "value_replacement.c",
     ],
     hdrs = [
+        "ancestry.h",
         "attribute.h",
         "attribute_schema.h",
         "context.h",
@@ -112,6 +114,18 @@ loom_cc_library(
         ":ir",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "ancestry_test",
+    srcs = ["ancestry_test.cc"],
+    deps = [
+        ":ir",
+        "//loom/src/loom/ops/test",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

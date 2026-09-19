@@ -1551,6 +1551,10 @@ static void loom_verify_relation_region_arg_match(
       .source_values = inputs.values,
       .target_values = args.values,
       .count = check_count,
+      .flags =
+          LOOM_FIELD_REF_CATEGORY(constraint->args[1]) == LOOM_FIELD_OPERAND
+              ? 0
+              : LOOM_TYPE_VALUE_REMAP_FLAG_SOURCE_DEFINITION_SLICE,
   };
   for (uint16_t i = 0; i < check_count; ++i) {
     loom_type_t block_arg_type = loom_verify_value_type(state, args.values[i]);
@@ -1807,6 +1811,7 @@ static void loom_verify_relation_yield_match(
         .source_values = result_values,
         .target_values = yield_operands,
         .count = check_count,
+        .flags = LOOM_TYPE_VALUE_REMAP_FLAG_SOURCE_DEFINITION_SLICE,
     };
     for (uint16_t i = 0; i < check_count; ++i) {
       const loom_type_t yield_type =

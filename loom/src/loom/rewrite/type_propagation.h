@@ -9,9 +9,9 @@
 // This utility interprets table-driven semantic constraints as a monotonic
 // refinement problem. Candidate type narrowings are collected in scratch state,
 // expanded across the connected constraint/use closure, and committed through
-// the rewriter only if the whole transaction is consistent. Malformed or
-// contradictory IR leaves the module unchanged; the verifier remains
-// responsible for structured user diagnostics.
+// the rewriter only if the whole transaction is consistent. The propagator
+// consumes verified IR and retained analysis facts; contradictory candidate
+// closures leave the module unchanged.
 
 #ifndef LOOM_REWRITE_TYPE_PROPAGATION_H_
 #define LOOM_REWRITE_TYPE_PROPAGATION_H_

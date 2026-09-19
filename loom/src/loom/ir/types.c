@@ -172,11 +172,49 @@ bool loom_type_equal(loom_type_t a, loom_type_t b) {
 }
 
 static loom_value_id_t loom_type_remap_value(
-    const loom_type_value_remap_t* remap, loom_value_id_t value_id) {
+    const loom_module_t* module, const loom_type_value_remap_t* remap,
+    loom_value_id_t value_id) {
   for (const loom_type_value_remap_t* span = remap; span; span = span->next) {
-    for (iree_host_size_t i = 0; i < span->count; ++i) {
-      if (span->source_values[i] == value_id) {
-        return span->target_values[i];
+    if (iree_any_bit_set(span->flags,
+                         LOOM_TYPE_VALUE_REMAP_FLAG_SOURCE_DEFINITION_SLICE)) {
+      if (span->count == 0 || value_id >= module->values.count) {
+        continue;
+      }
+      IREE_ASSERT(span->source_values[0] < module->values.count);
+      const loom_value_t* first_value =
+          loom_module_value(module, span->source_values[0]);
+      const loom_value_t* value = loom_module_value(module, value_id);
+      if (loom_value_is_block_arg(first_value) !=
+          loom_value_is_block_arg(value)) {
+        continue;
+      }
+      if (loom_value_is_block_arg(first_value)) {
+        if (loom_value_def_block(first_value) != loom_value_def_block(value)) {
+          continue;
+        }
+      } else {
+        const loom_op_t* owner_op = loom_value_def_op(first_value);
+        IREE_ASSERT(owner_op != NULL);
+        if (owner_op != loom_value_def_op(value)) {
+          continue;
+        }
+      }
+      const uint16_t first_index = loom_value_def_index(first_value);
+      const uint16_t value_index = loom_value_def_index(value);
+      if (value_index < first_index) {
+        continue;
+      }
+      const uint16_t span_index = (uint16_t)(value_index - first_index);
+      if (span_index >= span->count) {
+        continue;
+      }
+      IREE_ASSERT(span->source_values[span_index] == value_id);
+      return span->target_values[span_index];
+    } else {
+      for (uint16_t i = 0; i < span->count; ++i) {
+        if (span->source_values[i] == value_id) {
+          return span->target_values[i];
+        }
       }
     }
   }
@@ -184,19 +222,19 @@ static loom_value_id_t loom_type_remap_value(
 }
 
 static bool loom_type_dim_equal_after_value_remap(
-    uint64_t source_dim, uint64_t target_dim,
+    const loom_module_t* module, uint64_t source_dim, uint64_t target_dim,
     const loom_type_value_remap_t* remap) {
   if (!loom_dim_is_dynamic(source_dim)) {
     return source_dim == target_dim;
   }
   loom_value_id_t remapped_value =
-      loom_type_remap_value(remap, loom_dim_value_id(source_dim));
+      loom_type_remap_value(module, remap, loom_dim_value_id(source_dim));
   return loom_dim_pack_dynamic(remapped_value) == target_dim;
 }
 
 static bool loom_type_encoding_equal_after_value_remap(
-    loom_type_t source_type, loom_type_t target_type,
-    const loom_type_value_remap_t* remap) {
+    const loom_module_t* module, loom_type_t source_type,
+    loom_type_t target_type, const loom_type_value_remap_t* remap) {
   if (source_type.encoding_flags != target_type.encoding_flags) {
     return false;
   }
@@ -204,7 +242,7 @@ static bool loom_type_encoding_equal_after_value_remap(
     return source_type.encoding_id == target_type.encoding_id;
   }
   loom_value_id_t remapped_value = loom_type_remap_value(
-      remap, (loom_value_id_t)loom_type_encoding_value_id(source_type));
+      module, remap, (loom_value_id_t)loom_type_encoding_value_id(source_type));
   if (remapped_value > UINT16_MAX) {
     return false;
   }
@@ -268,7 +306,7 @@ static bool loom_attribute_equal_after_value_remap(
           if (source->arg_tags[j] == LOOM_PRED_ARG_VALUE) {
             if (source->args[j] < 0 || target->args[j] < 0 ||
                 (loom_value_id_t)target->args[j] !=
-                    loom_type_remap_value(remap,
+                    loom_type_remap_value(module, remap,
                                           (loom_value_id_t)source->args[j])) {
               return false;
             }
@@ -462,14 +500,14 @@ bool loom_type_equal_after_value_remap(const loom_module_t* module,
     }
     uint8_t rank = loom_type_rank(source_type);
     for (uint8_t i = 0; i < rank; ++i) {
-      if (!loom_type_dim_equal_after_value_remap(loom_type_dim(source_type, i),
-                                                 loom_type_dim(target_type, i),
-                                                 remap)) {
+      if (!loom_type_dim_equal_after_value_remap(
+              module, loom_type_dim(source_type, i),
+              loom_type_dim(target_type, i), remap)) {
         return false;
       }
     }
-    return loom_type_encoding_equal_after_value_remap(source_type, target_type,
-                                                      remap);
+    return loom_type_encoding_equal_after_value_remap(module, source_type,
+                                                      target_type, remap);
   }
 
   return source_type.header == target_type.header &&

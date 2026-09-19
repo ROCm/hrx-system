@@ -1,0 +1,272 @@
+// RUN: pass canonicalize,scf-to-cfg,canonicalize
+
+func.def @preserves_branch_dependent_layouts(%cond: i1, %buffer: buffer, %offset: offset) {
+  %dense, %view = scf.if %cond -> (encoding<layout>, view<4xf32, %dense>) {
+    %then_layout = encoding.layout.dense : encoding<layout>
+    %then_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %then_layout>
+    scf.yield %then_layout, %then_view : encoding<layout>, view<4xf32, %then_layout>
+  } else {
+    %else_layout = encoding.layout.strided [1] : encoding<layout>
+    %else_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %else_layout>
+    scf.yield %else_layout, %else_view : encoding<layout>, view<4xf32, %else_layout>
+  }
+  test.use %view : view<4xf32, %dense>
+  func.return
+}
+
+// ----
+func.def @preserves_branch_dependent_layouts(%cond: i1, %buffer: buffer, %offset: offset) {
+  cfg.cond_br %cond, ^_bb1, ^_bb2
+^_bb1:
+  %then_layout = encoding.layout.dense : encoding<layout>
+  %then_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %then_layout>
+  cfg.br ^_bb3(%then_layout: encoding<layout>, %then_view: view<4xf32, %then_layout>)
+^_bb2:
+  %else_layout = encoding.layout.strided [1] : encoding<layout>
+  %else_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %else_layout>
+  cfg.br ^_bb3(%else_layout: encoding<layout>, %else_view: view<4xf32, %else_layout>)
+^_bb3(%dense: encoding<layout>, %view: view<4xf32, %dense>):
+  test.use %view : view<4xf32, %dense>
+  func.return
+}
+
+// ====
+
+func.def @refines_common_cfg_layout(%cond: i1, %buffer: buffer, %offset: offset) {
+  cfg.cond_br %cond, ^then, ^else
+^then:
+  %then_layout = encoding.layout.dense : encoding<layout>
+  %then_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %then_layout>
+  cfg.br ^join(%then_layout: encoding<layout>, %then_view: view<4xf32, %then_layout>)
+^else:
+  %else_layout = encoding.layout.dense : encoding<layout>
+  %else_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %else_layout>
+  cfg.br ^join(%else_layout: encoding<layout>, %else_view: view<4xf32, %else_layout>)
+^join(%layout: encoding<layout>, %view: view<4xf32, %layout>):
+  test.use %view : view<4xf32, %layout>
+  func.return
+}
+
+// ----
+func.def @refines_common_cfg_layout(%cond: i1, %buffer: buffer, %offset: offset) {
+  cfg.cond_br %cond, ^then, ^else
+^then:
+  %then_layout = encoding.layout.dense : encoding<layout>
+  %then_view = buffer.view %buffer[%offset] : buffer -> view<4xf32>
+  cfg.br ^join(%then_layout: encoding<layout>, %then_view: view<4xf32>)
+^else:
+  %else_layout = encoding.layout.dense : encoding<layout>
+  %else_view = buffer.view %buffer[%offset] : buffer -> view<4xf32>
+  cfg.br ^join(%else_layout: encoding<layout>, %else_view: view<4xf32>)
+^join(%layout: encoding<layout>, %view: view<4xf32>):
+  test.use %view : view<4xf32>
+  func.return
+}
+
+// ====
+
+func.def @refines_common_region_layout(%cond: i1, %buffer: buffer, %then_offset: offset, %else_offset: offset) {
+  %layout, %view = scf.if %cond -> (encoding<layout>, view<4xf32, %layout>) {
+    %then_layout = encoding.layout.dense : encoding<layout>
+    %then_view = buffer.view %buffer[%then_offset] : buffer -> view<4xf32, %then_layout>
+    test.use %then_view : view<4xf32, %then_layout>
+    scf.yield %then_layout, %then_view : encoding<layout>, view<4xf32, %then_layout>
+  } else {
+    %else_layout = encoding.layout.dense : encoding<layout>
+    %else_view = buffer.view %buffer[%else_offset] : buffer -> view<4xf32, %else_layout>
+    test.use %else_view : view<4xf32, %else_layout>
+    scf.yield %else_layout, %else_view : encoding<layout>, view<4xf32, %else_layout>
+  }
+  test.use %view : view<4xf32, %layout>
+  func.return
+}
+
+// ----
+func.def @refines_common_region_layout(%cond: i1, %buffer: buffer, %then_offset: offset, %else_offset: offset) {
+  cfg.cond_br %cond, ^_bb1, ^_bb2
+^_bb1:
+  %then_view = buffer.view %buffer[%then_offset] : buffer -> view<4xf32>
+  test.use %then_view : view<4xf32>
+  cfg.br ^_bb3(%then_view: view<4xf32>)
+^_bb2:
+  %else_view = buffer.view %buffer[%else_offset] : buffer -> view<4xf32>
+  test.use %else_view : view<4xf32>
+  cfg.br ^_bb3(%else_view: view<4xf32>)
+^_bb3(%view: view<4xf32>):
+  test.use %view : view<4xf32>
+  func.return
+}
+
+// ====
+
+func.def @refines_common_region_layout_with_external_dimension(%cond: i1, %size: index, %buffer: buffer, %then_offset: offset, %else_offset: offset) {
+  %layout, %view = scf.if %cond -> (encoding<layout>, view<[%size]xf32, %layout>) {
+    %then_layout = encoding.layout.dense : encoding<layout>
+    %then_view = buffer.view %buffer[%then_offset] : buffer -> view<[%size]xf32, %then_layout>
+    scf.yield %then_layout, %then_view : encoding<layout>, view<[%size]xf32, %then_layout>
+  } else {
+    %else_layout = encoding.layout.dense : encoding<layout>
+    %else_view = buffer.view %buffer[%else_offset] : buffer -> view<[%size]xf32, %else_layout>
+    scf.yield %else_layout, %else_view : encoding<layout>, view<[%size]xf32, %else_layout>
+  }
+  test.use %view : view<[%size]xf32, %layout>
+  func.return
+}
+
+// ----
+func.def @refines_common_region_layout_with_external_dimension(%cond: i1, %size: index, %buffer: buffer, %then_offset: offset, %else_offset: offset) {
+  %16 = scf.select %cond, %then_offset, %else_offset : offset
+  %view = buffer.view %buffer[%16] : buffer -> view<[%size]xf32>
+  test.use %view : view<[%size]xf32>
+  func.return
+}
+
+// ====
+
+func.def @preserves_branch_dependent_dimensions(%cond: i1, %buffer: buffer, %offset: offset) {
+  %size, %view = scf.if %cond -> (index, view<[%size]xf32>) {
+    %then_size = index.constant 4 : index
+    %then_view = buffer.view %buffer[%offset] : buffer -> view<[%then_size]xf32>
+    scf.yield %then_size, %then_view : index, view<[%then_size]xf32>
+  } else {
+    %else_size = index.constant 8 : index
+    %else_view = buffer.view %buffer[%offset] : buffer -> view<[%else_size]xf32>
+    scf.yield %else_size, %else_view : index, view<[%else_size]xf32>
+  }
+  test.use %view : view<[%size]xf32>
+  func.return
+}
+
+// ----
+func.def @preserves_branch_dependent_dimensions(%cond: i1, %buffer: buffer, %offset: offset) {
+  cfg.cond_br %cond, ^_bb1, ^_bb2
+^_bb1:
+  %then_size = index.constant 4 : index
+  %then_view = buffer.view %buffer[%offset] : buffer -> view<[%then_size]xf32>
+  cfg.br ^_bb3(%then_size: index, %then_view: view<[%then_size]xf32>)
+^_bb2:
+  %else_size = index.constant 8 : index
+  %else_view = buffer.view %buffer[%offset] : buffer -> view<[%else_size]xf32>
+  cfg.br ^_bb3(%else_size: index, %else_view: view<[%else_size]xf32>)
+^_bb3(%size: index, %view: view<[%size]xf32>):
+  test.use %view : view<[%size]xf32>
+  func.return
+}
+
+// ====
+
+func.def @refines_common_cfg_dimension(%cond: i1, %buffer: buffer, %offset: offset) {
+  cfg.cond_br %cond, ^then, ^else
+^then:
+  %then_size = index.constant 4 : index
+  %then_view = buffer.view %buffer[%offset] : buffer -> view<[%then_size]xf32>
+  cfg.br ^join(%then_size: index, %then_view: view<[%then_size]xf32>)
+^else:
+  %else_size = index.constant 4 : index
+  %else_view = buffer.view %buffer[%offset] : buffer -> view<[%else_size]xf32>
+  cfg.br ^join(%else_size: index, %else_view: view<[%else_size]xf32>)
+^join(%size: index, %view: view<[%size]xf32>):
+  test.use %view : view<[%size]xf32>
+  func.return
+}
+
+// ----
+func.def @refines_common_cfg_dimension(%cond: i1, %buffer: buffer, %offset: offset) {
+  cfg.cond_br %cond, ^then, ^else
+^then:
+  %then_size = index.constant 4 : index
+  %then_view = buffer.view %buffer[%offset] : buffer -> view<4xf32>
+  cfg.br ^join(%then_size: index, %then_view: view<4xf32>)
+^else:
+  %else_size = index.constant 4 : index
+  %else_view = buffer.view %buffer[%offset] : buffer -> view<4xf32>
+  cfg.br ^join(%else_size: index, %else_view: view<4xf32>)
+^join(%size: index, %view: view<4xf32>):
+  test.use %view : view<4xf32>
+  func.return
+}
+
+// ====
+
+func.def @refines_cyclic_cfg_layout(%cond: i1, %buffer: buffer, %offset: offset) {
+  %initial_layout = encoding.layout.dense : encoding<layout>
+  %initial_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %initial_layout>
+  cfg.br ^loop(%initial_layout: encoding<layout>, %initial_view: view<4xf32, %initial_layout>)
+^loop(%layout: encoding<layout>, %view: view<4xf32, %layout>):
+  cfg.cond_br %cond, ^body, ^done
+^body:
+  cfg.br ^loop(%layout: encoding<layout>, %view: view<4xf32, %layout>)
+^done:
+  test.use %view : view<4xf32, %layout>
+  func.return
+}
+
+// ----
+func.def @refines_cyclic_cfg_layout(%cond: i1, %buffer: buffer, %offset: offset) {
+  %initial_layout = encoding.layout.dense : encoding<layout>
+  %initial_view = buffer.view %buffer[%offset] : buffer -> view<4xf32>
+  cfg.br ^loop(%initial_layout: encoding<layout>, %initial_view: view<4xf32>)
+^loop(%layout: encoding<layout>, %view: view<4xf32>):
+  cfg.cond_br %cond, ^body, ^done
+^body:
+  cfg.br ^loop(%layout: encoding<layout>, %view: view<4xf32>)
+^done:
+  test.use %view : view<4xf32>
+  func.return
+}
+
+// ====
+
+func.def @refines_common_switch_layout(%selector: index, %buffer: buffer, %case0_offset: offset, %case1_offset: offset, %default_offset: offset) {
+  %layout, %view = scf.switch %selector -> (encoding<layout>, view<4xf32, %layout>) {
+    case 0 {
+      %case0_layout = encoding.layout.dense : encoding<layout>
+      %case0_view = buffer.view %buffer[%case0_offset] : buffer -> view<4xf32, %case0_layout>
+      test.use %case0_view : view<4xf32, %case0_layout>
+      scf.yield %case0_layout, %case0_view : encoding<layout>, view<4xf32, %case0_layout>
+    }
+    case 2 {
+      %case1_layout = encoding.layout.dense : encoding<layout>
+      %case1_view = buffer.view %buffer[%case1_offset] : buffer -> view<4xf32, %case1_layout>
+      test.use %case1_view : view<4xf32, %case1_layout>
+      scf.yield %case1_layout, %case1_view : encoding<layout>, view<4xf32, %case1_layout>
+    }
+    default {
+      %default_layout = encoding.layout.dense : encoding<layout>
+      %default_view = buffer.view %buffer[%default_offset] : buffer -> view<4xf32, %default_layout>
+      test.use %default_view : view<4xf32, %default_layout>
+      scf.yield %default_layout, %default_view : encoding<layout>, view<4xf32, %default_layout>
+    }
+  }
+  test.use %view : view<4xf32, %layout>
+  func.return
+}
+
+// ----
+func.def @refines_common_switch_layout(%selector: index, %buffer: buffer, %case0_offset: offset, %case1_offset: offset, %default_offset: offset) {
+  %15 = index.constant 0 : index
+  %16 = index.cmp eq, %selector, %15 : index
+  cfg.cond_br %16, ^_bb2, ^_bb1
+^_bb1:
+  %17 = index.constant 2 : index
+  %18 = index.cmp eq, %selector, %17 : index
+  cfg.cond_br %18, ^_bb3, ^_bb4
+^_bb2:
+  %case0_layout = encoding.layout.dense : encoding<layout>
+  %case0_view = buffer.view %buffer[%case0_offset] : buffer -> view<4xf32>
+  test.use %case0_view : view<4xf32>
+  cfg.br ^_bb5(%case0_layout: encoding<layout>, %case0_view: view<4xf32>)
+^_bb3:
+  %case1_layout = encoding.layout.dense : encoding<layout>
+  %case1_view = buffer.view %buffer[%case1_offset] : buffer -> view<4xf32>
+  test.use %case1_view : view<4xf32>
+  cfg.br ^_bb5(%case1_layout: encoding<layout>, %case1_view: view<4xf32>)
+^_bb4:
+  %default_layout = encoding.layout.dense : encoding<layout>
+  %default_view = buffer.view %buffer[%default_offset] : buffer -> view<4xf32>
+  test.use %default_view : view<4xf32>
+  cfg.br ^_bb5(%default_layout: encoding<layout>, %default_view: view<4xf32>)
+^_bb5(%layout: encoding<layout>, %view: view<4xf32>):
+  test.use %view : view<4xf32>
+  func.return
+}
