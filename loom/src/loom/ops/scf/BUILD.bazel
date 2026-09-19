@@ -31,7 +31,6 @@ loom_generated_cc_library(
     srcs = [
         "canonicalize.c",
         "facts.c",
-        "type_transfer.c",
         "verify.c",
     ],
     hdrs = ["ops.h"],
@@ -53,7 +52,6 @@ loom_generated_cc_library(
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/rewrite:rewriter",
-        "//loom/src/loom/rewrite:type_propagation",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base/internal",
     ],

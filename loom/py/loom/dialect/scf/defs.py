@@ -530,7 +530,6 @@ scf_if = Op(
     doc="Conditional execution with optional else region for resultless conditionals.",
     verify="loom_scf_if_verify",
     canonicalize="loom_scf_if_canonicalize",
-    type_transfer="loom_scf_region_branch_type_transfer",
     operands=[Operand("condition", I1, role=OperandRole.CONTROL_CONDITION)],
     results=[Result("results", ANY, variadic=True)],
     regions=[
@@ -597,7 +596,6 @@ scf_switch = Op(
     ),
     canonicalize="loom_scf_switch_canonicalize",
     verify="loom_scf_switch_verify",
-    type_transfer="loom_scf_region_branch_type_transfer",
     operands=[Operand("selector", INDEX)],
     results=[Result("results", ANY, variadic=True)],
     attrs=[

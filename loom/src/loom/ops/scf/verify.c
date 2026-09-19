@@ -258,6 +258,7 @@ static iree_status_t loom_scf_switch_verify_region_yield(
       .source_values = results.values,
       .target_values = yielded_values.values,
       .count = yielded_values.count,
+      .flags = LOOM_TYPE_VALUE_REMAP_FLAG_SOURCE_DEFINITION_SLICE,
   };
   for (uint16_t i = 0; i < yielded_values.count; ++i) {
     loom_type_t yield_type =

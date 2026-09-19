@@ -1038,7 +1038,7 @@ static bool loom_cfg_simplify_types_equal_after_map(
   loom_type_value_remap_t remap = {
       .source_values = map->source_values,
       .target_values = map->target_values,
-      .count = map->count,
+      .count = (uint16_t)map->count,
   };
   return loom_type_equal_after_value_remap(module, source_type, target_type,
                                            &remap);

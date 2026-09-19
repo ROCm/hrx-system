@@ -312,7 +312,7 @@ TEST_F(ModuleTypesTest, FunctionTypeReferencesPreserveCombinedArity) {
   IREE_ASSERT_OK(
       loom_module_define_value(module_, index_type, &target_dimension));
   const loom_type_value_remap_t remap = {&source_dimension, &target_dimension,
-                                         1, nullptr};
+                                         1, 0, nullptr};
   std::vector<loom_type_t> arguments(UINT16_MAX, index_type);
   const auto source_result =
       loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32,
@@ -480,6 +480,7 @@ TEST_F(ModuleTypesTest, ValueRemapComposesDiscontiguousSpans) {
       /*.source_values=*/source_outer,
       /*.target_values=*/target_outer,
       /*.count=*/IREE_ARRAYSIZE(source_outer),
+      /*.flags=*/0,
       /*.next=*/&inner_remap,
   };
 
@@ -487,6 +488,44 @@ TEST_F(ModuleTypesTest, ValueRemapComposesDiscontiguousSpans) {
       loom_type_equal_after_value_remap(module_, source, target, &remap));
   EXPECT_FALSE(
       loom_type_equal_after_value_remap(module_, source, target, &inner_remap));
+}
+
+TEST_F(ModuleTypesTest, ValueRemapIndexesContiguousDefinitionSpans) {
+  loom_block_t* block = loom_module_block(module_);
+  loom_value_id_t values[6] = {0};
+  for (loom_value_id_t& value : values) {
+    IREE_ASSERT_OK(loom_module_define_value(
+        module_, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &value));
+    IREE_ASSERT_OK(loom_block_add_arg(module_, block, value));
+  }
+
+  const loom_value_id_t source_values[] = {values[0], values[1]};
+  const loom_value_id_t target_values[] = {values[2], values[3]};
+  const loom_value_id_t external_source = values[4];
+  const loom_value_id_t external_target = values[5];
+  const loom_type_value_remap_t external_remap = {
+      /*.source_values=*/&external_source,
+      /*.target_values=*/&external_target,
+      /*.count=*/1,
+  };
+  const loom_type_value_remap_t indexed_remap = {
+      /*.source_values=*/source_values,
+      /*.target_values=*/target_values,
+      /*.count=*/IREE_ARRAYSIZE(source_values),
+      /*.flags=*/LOOM_TYPE_VALUE_REMAP_FLAG_SOURCE_DEFINITION_SLICE,
+      /*.next=*/&external_remap,
+  };
+  const loom_type_t source =
+      loom_type_shaped_2d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32,
+                          loom_dim_pack_dynamic(source_values[1]),
+                          loom_dim_pack_dynamic(external_source), 0);
+  const loom_type_t target =
+      loom_type_shaped_2d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32,
+                          loom_dim_pack_dynamic(target_values[1]),
+                          loom_dim_pack_dynamic(external_target), 0);
+
+  EXPECT_TRUE(loom_type_equal_after_value_remap(module_, source, target,
+                                                &indexed_remap));
 }
 
 TEST(TypesTest, RegisterClassNamesMustBeNamespaceQualified) {

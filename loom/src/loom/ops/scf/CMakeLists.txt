@@ -32,7 +32,6 @@ loom_generated_cc_library(
   SRCS
     "canonicalize.c"
     "facts.c"
-    "type_transfer.c"
     "verify.c"
   GENERATED_SRC_FLAGS
     "--builders"
@@ -53,7 +52,6 @@ loom_generated_cc_library(
     loom::ir::facts
     loom::ops::op_defs
     loom::rewrite::rewriter
-    loom::rewrite::type_propagation
     loom::util::fact_table
 )
 

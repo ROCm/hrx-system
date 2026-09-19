@@ -219,6 +219,8 @@ loom_cc_library(
     loom::ir::type_refinement
     loom::ops::op_defs
     loom::target::registers
+    loom::util::cfg_graph
+    loom::util::fact_table
   PUBLIC
 )
 
@@ -236,7 +238,6 @@ loom_cc_test(
     loom::ir
     loom::ops::encoding
     loom::ops::op_defs
-    loom::ops::scf
     loom::ops::test
     loom::ops::vector
     loom::ops::view
