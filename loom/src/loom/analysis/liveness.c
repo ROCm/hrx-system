@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "iree/base/internal/math.h"
+#include "loom/ir/ancestry.h"
 #include "loom/ir/module.h"
 #include "loom/ir/types.h"
 #include "loom/target/registers.h"
@@ -659,59 +660,6 @@ static bool loom_liveness_op_defines_value(const loom_op_t* op,
   return false;
 }
 
-static bool loom_liveness_region_is_nested_in_op(const loom_op_t* owner_op,
-                                                 const loom_region_t* region);
-
-static bool loom_liveness_block_is_nested_in_op(const loom_op_t* owner_op,
-                                                const loom_block_t* block) {
-  return block &&
-         loom_liveness_region_is_nested_in_op(owner_op, block->parent_region);
-}
-
-static bool loom_liveness_value_is_defined_inside_op(
-    const loom_op_t* owner_op, const loom_module_t* module,
-    loom_value_id_t value_id) {
-  if (value_id >= module->values.count) {
-    return false;
-  }
-  const loom_value_t* value = loom_module_value(module, value_id);
-  if (loom_value_is_block_arg(value)) {
-    return loom_liveness_block_is_nested_in_op(owner_op,
-                                               loom_value_def_block(value));
-  }
-  const loom_op_t* def_op = loom_value_def_op(value);
-  while (def_op) {
-    if (def_op == owner_op) {
-      return true;
-    }
-    def_op = def_op->parent_op;
-  }
-  return false;
-}
-
-static bool loom_liveness_region_is_nested_in_op(const loom_op_t* owner_op,
-                                                 const loom_region_t* region) {
-  if (!owner_op || !region) {
-    return false;
-  }
-  loom_region_t* const* regions = loom_op_regions(owner_op);
-  for (uint8_t i = 0; i < owner_op->region_count; ++i) {
-    if (regions[i] == region) {
-      return true;
-    }
-    const loom_block_t* block = NULL;
-    loom_region_for_each_block(regions[i], block) {
-      const loom_op_t* op = NULL;
-      loom_block_for_each_op(block, op) {
-        if (loom_liveness_region_is_nested_in_op(op, region)) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
-}
-
 typedef struct loom_liveness_external_use_state_t {
   const loom_module_t* module;
   const loom_op_t* owner_op;
@@ -722,8 +670,7 @@ static iree_status_t loom_liveness_external_value_callback(
     void* user_data, loom_value_id_t value_id) {
   loom_liveness_external_use_state_t* state =
       (loom_liveness_external_use_state_t*)user_data;
-  if (loom_liveness_value_is_defined_inside_op(state->owner_op, state->module,
-                                               value_id)) {
+  if (loom_op_subtree_defines_value(state->module, state->owner_op, value_id)) {
     return iree_ok_status();
   }
   return state->visitor.fn(state->visitor.user_data, value_id);

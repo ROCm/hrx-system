@@ -43,6 +43,7 @@ loom_cc_library(
   NAME
     ir
   HDRS
+    "ancestry.h"
     "attribute.h"
     "attribute_schema.h"
     "context.h"
@@ -70,6 +71,7 @@ loom_cc_library(
     "location_tag_table.inc"
     "scalar_type_table.inc"
   SRCS
+    "ancestry.c"
     "attribute.c"
     "context.c"
     "encoding.c"
@@ -109,6 +111,19 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    ancestry_test
+  SRCS
+    "ancestry_test.cc"
+  DEPS
+    ::ir
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ops::test
 )
 
 loom_cc_test(
