@@ -120,14 +120,22 @@ void ControlFlow::visit(cxx::UnaryExpressionAST* ast) {
 }
 
 bool ControlFlow::structured(cxx::AST* ast) {
+  if (auto* binary = cxx::ast_cast<cxx::BinaryExpressionAST>(ast)) {
+    return !binary->symbol && (binary->op == cxx::TokenKind::T_AMP_AMP ||
+                               binary->op == cxx::TokenKind::T_BAR_BAR);
+  }
   return cxx::ast_cast<cxx::IfStatementAST>(ast) ||
          cxx::ast_cast<cxx::ForStatementAST>(ast) ||
          cxx::ast_cast<cxx::WhileStatementAST>(ast) ||
          cxx::ast_cast<cxx::DoStatementAST>(ast) ||
-         cxx::ast_cast<cxx::CompoundStatementAST>(ast);
+         cxx::ast_cast<cxx::CompoundStatementAST>(ast) ||
+         cxx::ast_cast<cxx::ConditionalExpressionAST>(ast);
 }
 
 void ControlFlow::record(cxx::ExpressionAST* expression) {
+  while (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(expression)) {
+    expression = nested->expression;
+  }
   auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression);
   if (!id) {
     return;

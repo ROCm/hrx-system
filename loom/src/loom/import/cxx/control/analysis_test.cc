@@ -7,6 +7,7 @@
 #include "loom/import/cxx/control/analysis.h"
 
 #include <cxx/ast.h>
+#include <cxx/initialization.h>
 #include <cxx/names.h>
 #include <cxx/symbols.h>
 
@@ -145,6 +146,44 @@ TEST(ControlFlowTest, ReturnSummariesRetainFallthroughAndNestedExits) {
                      ->statement;
     ControlFlow analysis(source.unit(), body);
     EXPECT_EQ(analysis.returns(body), test.flow);
+  }
+}
+
+TEST(ControlFlowTest, ConditionalValuesRetainOrderedBindingMutations) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    unsigned entry(unsigned x, unsigned y, unsigned choose) {
+      return choose++ ? ((x)++ && ++(y)) : (x++ || y--);
+    }
+  )"),
+                IREE_SV("conditional.cpp"), options);
+  auto* function = definition(source);
+  ASSERT_NE(function, nullptr);
+  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                   function->functionBody)
+                   ->statement;
+  auto* ret =
+      cxx::ast_cast<cxx::ReturnStatementAST>(body->statementList->value);
+  ASSERT_NE(ret, nullptr);
+  auto* select = cxx::ast_cast<cxx::ConditionalExpressionAST>(
+      cxx::Initializer::stripImplicitCasts(ret->expression));
+  ASSERT_NE(select, nullptr);
+  ControlFlow analysis(source.unit(), body);
+  auto writes = analysis.written(select);
+  ASSERT_EQ(writes.size(), 3u);
+  auto parameters = function->symbol->parameters();
+  EXPECT_EQ(writes[0], parameters[2]);
+  EXPECT_EQ(writes[1], parameters[0]);
+  EXPECT_EQ(writes[2], parameters[1]);
+  for (auto* arm : {select->iftrueExpression, select->iffalseExpression}) {
+    auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(
+        cxx::Initializer::stripImplicitCasts(arm));
+    ASSERT_NE(nested, nullptr);
+    auto arm_writes = analysis.written(nested->expression);
+    ASSERT_EQ(arm_writes.size(), 2u);
+    EXPECT_EQ(arm_writes[0], parameters[0]);
+    EXPECT_EQ(arm_writes[1], parameters[1]);
   }
 }
 

@@ -2,6 +2,154 @@
   "version": 1,
   "cases": [
     {
+      "name": "increment_pointers preserves sequenced source updates and guarded accesses",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures"
+            ]
+          }
+        },
+        {
+          "name": "import",
+          "run": {
+            "tool": "loom-import-cxx",
+            "args": [
+              "--builtin-includes=false",
+              "--I={srcdir}/../include",
+              "--root=increment_pointers",
+              "--to=bc",
+              "--output={tmp}/kernel.loombc",
+              "{srcdir}/increment_values.cpp"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-test-loom",
+            "args": [
+              "{tmp}/fixtures/increment_pointers.loom",
+              "--library={tmp}/kernel.loombc",
+              "--device=amdgpu"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"case_count\":9",
+                "\"sample_count\":9",
+                "\"failed_sample_count\":0",
+                "\"skipped_case_count\":0",
+                "\"planning_issue_count\":0"
+              ]
+            }
+          }
+        },
+        {
+          "name": "check updates with the device sanitizer",
+          "run": {
+            "tool": "iree-test-loom",
+            "args": [
+              "{tmp}/fixtures/increment_pointers.loom",
+              "--library={tmp}/kernel.loombc",
+              "--device=amdgpu",
+              "--sanitizer=access",
+              "--sanitizer-reporting=report-only"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"case_count\":9",
+                "\"sample_count\":9",
+                "\"failed_sample_count\":0",
+                "\"skipped_case_count\":0",
+                "\"planning_issue_count\":0"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "increment_values preserves sequenced source updates and guarded accesses",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures"
+            ]
+          }
+        },
+        {
+          "name": "import",
+          "run": {
+            "tool": "loom-import-cxx",
+            "args": [
+              "--builtin-includes=false",
+              "--I={srcdir}/../include",
+              "--root=increment_values",
+              "--to=bc",
+              "--output={tmp}/kernel.loombc",
+              "{srcdir}/increment_values.cpp"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-test-loom",
+            "args": [
+              "{tmp}/fixtures/increment_values.loom",
+              "--library={tmp}/kernel.loombc",
+              "--device=amdgpu"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"case_count\":8",
+                "\"sample_count\":8",
+                "\"failed_sample_count\":0",
+                "\"skipped_case_count\":0",
+                "\"planning_issue_count\":0"
+              ]
+            }
+          }
+        },
+        {
+          "name": "check updates with the device sanitizer",
+          "run": {
+            "tool": "iree-test-loom",
+            "args": [
+              "{tmp}/fixtures/increment_values.loom",
+              "--library={tmp}/kernel.loombc",
+              "--device=amdgpu",
+              "--sanitizer=access",
+              "--sanitizer-reporting=report-only"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"case_count\":8",
+                "\"sample_count\":8",
+                "\"failed_sample_count\":0",
+                "\"skipped_case_count\":0",
+                "\"planning_issue_count\":0"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "unsigned assumptions retain conjunctions, constants, promotions and scope",
       "steps": [
         {

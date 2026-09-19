@@ -233,9 +233,14 @@ origin before entering the nonnegative offset domain, so an interior pointer
 can move backward within its allocation.
 
 Pointer addition, subtraction by an integer, unary plus, dereference, address-of
-an existing storage element, and increments used as statements are admitted.
-Pointer differences, comparisons, truth conversions, value-producing increments,
-and addresses of automatic scalar locals produce source diagnostics.
+an existing storage element, and prefix/postfix increments are admitted.
+Integer and pointer increments update an owned automatic binding and return
+its previous or updated value; `*output++ = *input++` preserves both pointer
+origins. Conditional expressions and short-circuit operands carry binding
+updates only along the executed path. Incrementing memory elements, vectors or
+floating-point values requires additional lvalue/type projections and produces
+a source diagnostic. Pointer differences, comparisons, truth conversions, and
+addresses of automatic scalar locals also produce source diagnostics.
 Distinct-root choices import as ordinary buffer values; executing them requires
 the selected Loom target to support buffer transport through those control-flow
 edges. Objects with constructors, exceptions and indirect calls need additional

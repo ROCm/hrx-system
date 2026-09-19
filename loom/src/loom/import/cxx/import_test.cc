@@ -328,12 +328,21 @@ TEST_F(ImportTest, UnsupportedPointerOperationsProduceSourceDiagnostics) {
   for (auto source : {IREE_SV("long diff(int* a, int* b) { return a - b; }"),
                       IREE_SV("bool equal(int* a, int* b) { return a == b; }"),
                       IREE_SV("bool truth(int* a) { return a; }"),
-                      IREE_SV("int* increment(int* a) { return ++a; }"),
                       IREE_SV("int* local() { int x = 1; return &x; }")}) {
     IREE_EXPECT_OK(Import(source));
     EXPECT_EQ(module_, nullptr);
   }
-  EXPECT_GE(diagnostic_count_, 5);
+  EXPECT_GE(diagnostic_count_, 4);
+}
+
+TEST_F(ImportTest, PointerIncrementResultsPreserveTheSourceABI) {
+  IREE_ASSERT_OK(
+      Import(IREE_SV("int* next(int* p) { return ++p; }\n"
+                     "int* previous(int* p) { return p++; }\n"
+                     "int* retreat(int* p) { return --p; }\n"
+                     "int* old_retreat(int* p) { return p--; }\n")));
+  ASSERT_NE(module_, nullptr);
+  EXPECT_EQ(diagnostic_count_, 0);
 }
 
 TEST_F(ImportTest, FunctionsAndRootsOutliveSource) {
@@ -645,6 +654,25 @@ TEST_F(ImportTest, SourceDataModelControlsLongWidth) {
   IREE_ASSERT_OK(Import(IREE_SV("long identity(long x) { return x; }")));
   ASSERT_NE(module_, nullptr);
   EXPECT_NE(Print().find("%x: i32"), std::string::npos);
+}
+
+TEST_F(ImportTest, IncrementRejectsUnprojectedLvaluesAndSourceTypes) {
+  for (const char* source : {
+           "unsigned entry() { const unsigned x = 1; return x++; }",
+           "unsigned entry() { volatile unsigned x = 1; return ++x; }",
+           "unsigned entry(unsigned* pointer) { return (*pointer)++; }",
+           "unsigned entry(unsigned* pointer) { return ++pointer[0u]; }",
+           "float entry(float value) { return value++; }",
+           "extern unsigned value; unsigned entry() { return ++value; }",
+           "using V = unsigned __attribute__((vector_size(16))); "
+           "V entry(V value) { return value++; }",
+       }) {
+    SCOPED_TRACE(source);
+    auto before = diagnostic_count_;
+    IREE_ASSERT_OK(Import(iree_make_cstring_view(source)));
+    EXPECT_EQ(module_, nullptr);
+    EXPECT_GT(diagnostic_count_, before);
+  }
 }
 
 TEST_F(ImportTest, ShortCircuitOperandsUseContextualBooleanConversions) {

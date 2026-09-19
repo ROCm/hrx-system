@@ -2,6 +2,63 @@
   "version": 1,
   "cases": [
     {
+      "name": "increment expressions preserve old/new values and conditional binding updates",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures"
+            ]
+          }
+        },
+        {
+          "name": "import",
+          "run": {
+            "tool": "loom-import-cxx",
+            "args": [
+              "--builtin-includes=false",
+              "--I={srcdir}/../include",
+              "--root=increment_byte",
+              "--root=decrement_short",
+              "--root=increment_wide",
+              "--root=increment_chain",
+              "--root=increment_or",
+              "--root=increment_select",
+              "--root=increment_condition",
+              "--root=increment_while",
+              "--root=increment_do",
+              "--to=bc",
+              "--output={tmp}/functions.loombc",
+              "{srcdir}/increment_values.cpp"
+            ]
+          }
+        },
+        {
+          "name": "execute on the VM",
+          "run": {
+            "tool": "iree-test-loom",
+            "args": [
+              "{tmp}/fixtures/increment_functions.loom",
+              "--library={tmp}/functions.loombc"
+            ]
+          },
+          "stdout": {
+            "contains": {
+              "unordered": [
+                "\"case_count\":532",
+                "\"sample_count\":532",
+                "\"failed_sample_count\":0",
+                "\"skipped_case_count\":0",
+                "\"planning_issue_count\":0"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "unsigned assumptions retain conjunctions, constants, promotions and scope",
       "steps": [
         {

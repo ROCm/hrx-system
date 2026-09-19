@@ -45,7 +45,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   ControlFlow(const ControlFlow&) = delete;
   ControlFlow& operator=(const ControlFlow&) = delete;
 
-  // Unique bindings mutated under a structured owner, in encounter order.
+  // Unique bindings mutated under a structured statement or conditional value
+  // expression, in encounter order. Includes mutations in conditions.
   std::span<cxx::Symbol* const> written(cxx::AST* owner) const;
   // Null retains ordinary while semantics; a result permits scf.for lowering.
   const CountedLoop* counted(cxx::ForStatementAST* loop) const;

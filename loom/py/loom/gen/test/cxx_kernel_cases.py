@@ -261,6 +261,129 @@ def function_cases(name, argument_widths, result_width, samples):
     return "\n\n".join(cases)
 
 
+INCREMENT_INPUTS = [0, 1, 3, 4, 7, 8, 15, 16, 31, 32, 63, 64, 127, 128, 254, 255, 256, 0x7FFFFFFF, 0xFFFFFFFE, 0xFFFFFFFF]
+
+
+def increment_byte_reference(value):
+    first, second = value % 256, (value + 2) % 256
+    return first | (second << 8) | (second << 16) | (first << 24)
+
+
+def increment_select_reference(value, choose):
+    first, second = value % 256, (value * 3 + 1) % 256
+    if choose & 1:
+        selected, first = first, (first + 1) % 256
+    else:
+        second = (second - 1) % 256
+        selected = second
+    if choose & 2:
+        if choose & 4:
+            first = (first + 1) % 256
+            nested = first
+        else:
+            nested, second = second, (second - 1) % 256
+    else:
+        nested, first = first, (first - 1) % 256
+    return selected | (nested << 8) | (first << 16) | (second << 24)
+
+
+def increment_chain_reference(value):
+    return sum(value < bound for bound in [256, 128, 64, 32, 16, 8]) + 256 * int(value < 4)
+
+
+def increment_wide_reference(value):
+    return (value ^ ((value + 2) * 17) ^ ((value + 2) * 3)) % (1 << 64)
+
+
+def increment_condition_reference(value):
+    selected, final = (value + 2, value + 2) if value & 1 else (value + 1, value)
+    return (selected ^ (final * 17)) % (1 << 32)
+
+
+def increment_functions(directory):
+    del directory
+    counts = [0, 1, 2, 3, 7, 8, 15, 16, 31, 32]
+    functions = [
+        ("increment_byte", [32], 32, [([value], increment_byte_reference(value)) for value in range(256)]),
+        ("decrement_short", [32], 32, [([value], value * 65536 + value - 2 + 32768) for value in [-32766, -129, -1, 0, 1, 128, 32767]]),
+        ("increment_wide", [64], 64, [([value], increment_wide_reference(value)) for value in WIDE_INPUTS]),
+        ("increment_chain", [32], 32, [([value], increment_chain_reference(value)) for value in INCREMENT_INPUTS]),
+        ("increment_or", [32, 32], 32, [([value, choose], (value + int(not choose)) * 2 + int(choose or value < 128)) for value in INCREMENT_INPUTS for choose in [0, 1]]),
+        ("increment_select", [32, 32], 32, [([value, choose], increment_select_reference(value, choose)) for value in INCREMENT_INPUTS for choose in range(8)]),
+        ("increment_condition", [32], 32, [([value], increment_condition_reference(value)) for value in INCREMENT_INPUTS]),
+        ("increment_while", [32], 32, [([count], count * (count + 1) // 2 * 257 + count + 1) for count in counts]),
+        ("increment_do", [32], 32, [([count], max(1, count) * (max(1, count) - 1) // 2 * 257 + max(1, count)) for count in counts]),
+    ]
+    return "\n\n".join(function_cases(name, widths, result_width, samples) for name, widths, result_width, samples in functions)
+
+
+def increment_values(directory):
+    cases = []
+    for input_value in [0, 1, 127, 255, 256, 0x7FFFFFFF, 0xFFFFFFFE, 0xFFFFFFFF]:
+        expected = []
+        for lane in range(64):
+            value = (input_value + lane) % (1 << 32)
+            wide = increment_wide_reference((input_value * 4294967297 + lane) % (1 << 64))
+            count = lane % 8
+            expected.extend(
+                [
+                    increment_byte_reference(value),
+                    (lane - 31) * 65536 + lane - 33 + 32768,
+                    wide % (1 << 32),
+                    wide >> 32,
+                    increment_chain_reference(value),
+                    (value + int(lane % 2 == 0)) * 2 + int(lane % 2 or value < 128),
+                    increment_select_reference(value, lane % 8),
+                    increment_condition_reference(value),
+                    count * (count + 1) // 2 * 257 + count + 1,
+                    max(1, count) * (max(1, count) - 1) // 2 * 257 + max(1, count),
+                ]
+            )
+        case = Case(directory, f"increment_values_{input_value}", "i32", len(expected))
+        case.scalar("input", signed_bits(input_value, 32), "i32")
+        case.launch("increment_values", "%output, %input", f"tensor<{len(expected)}xi32>, i32")
+        case.lines.append('  check.expect.event<device> {type = "asan_report", count = 0}')
+        cases.append(case.finish([signed_bits(value, 32) for value in expected]))
+    return "kernel.decl @increment_values() launch(%output: buffer, %input: i32)\n\n" + "\n".join(cases)
+
+
+def increment_pointers(directory):
+    cases = []
+    for length, choose in [(0, 0), (1, 0), (17, 1), (33, 2), *[(64, choose) for choose in range(3, 8)]]:
+        values = [(index * 17) % 31 - 15 for index in range(max(1, length) * 8)]
+        expected = [-123] * (64 * 12)
+        for lane in range(length):
+            inputs = values[lane * 8 : (lane + 1) * 8]
+            cursor = 2 + int(not choose & 2)
+            accepted = bool(choose & 2 or inputs[2])
+            guarded = bool(choose & 4 and inputs[cursor])
+            final = cursor + int(bool(choose & 4))
+            expected[lane * 12 : (lane + 1) * 12] = [
+                inputs[1],
+                inputs[3],
+                inputs[3],
+                inputs[1],
+                inputs[1 if choose & 1 else 2],
+                inputs[2],
+                int(accepted),
+                inputs[cursor],
+                int(guarded),
+                inputs[final],
+                inputs[final] + inputs[final + 1],
+                inputs[final + 2],
+            ]
+        case = Case(directory, f"increment_pointers_{length}_{choose}", "i32", len(expected))
+        case.array("input", values)
+        case.scalar("length", length, "i32")
+        case.scalar("choose", choose, "i32")
+        case.launch("increment_pointers", "%input, %output, %length, %choose", f"tensor<{len(values)}xi32>, tensor<{len(expected)}xi32>, i32, i32")
+        case.array("input_expected", values)
+        case.lines.append(f"  check.expect.bitwise actual(%input) expected(%input_expected) : tensor<{len(values)}xi32>")
+        case.lines.append('  check.expect.event<device> {type = "asan_report", count = 0}')
+        cases.append(case.finish(expected))
+    return "kernel.decl @increment_pointers() launch(%input: buffer, %output: buffer, %length: i32, %choose: i32)\n\n" + "\n".join(cases)
+
+
 def assumption_functions(directory):
     del directory
     values = [0, 1, 127, 128, 254, 255]
@@ -620,6 +743,9 @@ def main():
         ("increment_u8", lambda directory: integer_increment(directory, 8, BYTE_INPUTS)),
         ("increment_u64", lambda directory: integer_increment(directory, 64, WIDE_INPUTS)),
         ("integer_functions", integer_functions),
+        ("increment_functions", increment_functions),
+        ("increment_values", increment_values),
+        ("increment_pointers", increment_pointers),
         ("assumption_functions", assumption_functions),
         ("assumption_kernel", assumption_kernel),
         ("comparison_functions", comparison_functions),

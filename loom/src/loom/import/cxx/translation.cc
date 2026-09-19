@@ -392,6 +392,91 @@ class Translator {
     return result(op);
   }
 
+  enum class IncrementResult { Previous, Updated };
+
+  Value increment(cxx::ExpressionAST* destination, cxx::TokenKind token,
+                  IncrementResult selected, cxx::AST* owner) {
+    while (auto* nested =
+               cxx::ast_cast<cxx::NestedExpressionAST>(destination)) {
+      destination = nested->expression;
+    }
+    auto* id = cxx::ast_cast<cxx::IdExpressionAST>(destination);
+    if (!id || !values_.contains(id->symbol)) {
+      fail(owner, "increment requires an owned automatic source binding");
+    }
+    types_.require_mutable(id->type, id);
+    auto previous = values_.at(id->symbol);
+    auto source = locations_.get(owner);
+    auto operation = token == cxx::TokenKind::T_MINUS_MINUS
+                         ? cxx::TokenKind::T_MINUS
+                         : cxx::TokenKind::T_PLUS;
+    Value updated;
+    if (auto* pointer =
+            cxx::type_cast<cxx::PointerType>(types_.unqualified(id->type))) {
+      auto one = scalars_.integer(1, LOOM_SCALAR_TYPE_I32, source);
+      updated =
+          storage_.advance(previous.pointer(), one, pointer,
+                           unit_.control()->getIntType(), operation, owner);
+    } else {
+      if (!unit_.typeTraits().is_integral(id->type) ||
+          types_.unqualified(id->type)->kind() == cxx::TypeKind::kBool) {
+        fail(owner, "increment requires an integer or pointer binding");
+      }
+      // Builtin ++/-- performs promoted arithmetic before converting back to
+      // the lvalue type, just like compound assignment with an integer one.
+      auto* promoted = unit_.typeTraits().promoted_integer_type(id->type);
+      auto value = scalars_.convert(previous.ssa(), id->type, promoted, owner);
+      auto one = scalars_.integer(1, loom_type_element_type(value_type(value)),
+                                  source);
+      value = scalars_.binary(operation, value, one, promoted, promoted, owner);
+      updated = scalars_.convert(value, promoted, id->type, owner);
+    }
+    values_[id->symbol] = name(updated, cxx::to_string(id->symbol->name()));
+    return selected == IncrementResult::Previous ? previous : updated;
+  }
+
+  // The condition has already executed. Each arm starts from that same state
+  // and yields its value followed by the bindings it may have changed.
+  template <typename Then, typename Else>
+  Value conditional_value(cxx::ExpressionAST* ast, loom_value_id_t condition,
+                          Then then_value, Else else_value) {
+    std::vector<loom_type_t> outputs;
+    types_.append(ast->type, ast, outputs);
+    auto value_count = outputs.size();
+    auto written = live_mutations(ast);
+    for (auto* symbol : written) {
+      types_.append(symbol->type(), ast, outputs);
+    }
+    auto initial = current(written);
+    auto source = locations_.get(ast);
+    loom_op_t* op;
+    check(loom_scf_if_build(&builder_, LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION,
+                            condition, outputs.data(), outputs.size(), nullptr,
+                            0, source, &op));
+    auto saved =
+        loom_builder_enter_region(&builder_, op, loom_scf_if_then_region(op));
+    std::vector<loom_value_id_t> yielded;
+    then_value().append_to(yielded);
+    auto mutations = current(written);
+    yielded.insert(yielded.end(), mutations.begin(), mutations.end());
+    loom_op_t* yield;
+    check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
+                               source, &yield));
+    loom_builder_restore(&builder_, saved);
+    bind_values(written, initial.data());
+    saved =
+        loom_builder_enter_region(&builder_, op, loom_scf_if_else_region(op));
+    yielded.clear();
+    else_value().append_to(yielded);
+    mutations = current(written);
+    yielded.insert(yielded.end(), mutations.begin(), mutations.end());
+    check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
+                               source, &yield));
+    loom_builder_restore(&builder_, saved);
+    bind_values(written, loom_op_results(op) + value_count);
+    return Value({loom_op_results(op), value_count});
+  }
+
   Value expression(cxx::ExpressionAST* ast) {
     if (!ast) {
       throw std::runtime_error("missing expression");
@@ -496,27 +581,10 @@ class Translator {
       if (types_.vector(select->condition->type)) {
         fail(ast, "vector conditions require lane-wise selection");
       }
-      std::vector<loom_type_t> outputs;
-      types_.append(select->type, ast, outputs);
       auto condition = expression(select->condition).ssa();
-      loom_op_t* op;
-      check(loom_scf_if_build(&builder_, LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION,
-                              condition, outputs.data(), outputs.size(),
-                              nullptr, 0, source, &op));
-      auto saved =
-          loom_builder_enter_region(&builder_, op, loom_scf_if_then_region(op));
-      auto value = expression(select->iftrueExpression);
-      loom_op_t* yield;
-      check(loom_scf_yield_build(&builder_, value.components().data(),
-                                 value.components().size(), source, &yield));
-      loom_builder_restore(&builder_, saved);
-      saved =
-          loom_builder_enter_region(&builder_, op, loom_scf_if_else_region(op));
-      value = expression(select->iffalseExpression);
-      check(loom_scf_yield_build(&builder_, value.components().data(),
-                                 value.components().size(), source, &yield));
-      loom_builder_restore(&builder_, saved);
-      return Value({loom_op_results(op), outputs.size()});
+      return conditional_value(
+          ast, condition, [&] { return expression(select->iftrueExpression); },
+          [&] { return expression(select->iffalseExpression); });
     }
 
     if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(ast)) {
@@ -596,29 +664,19 @@ class Translator {
           fail(ast, "vector logical operators require lane-wise evaluation");
         }
         // The semantic AST supplies both contextual boolean conversions.
-        // The skipped arm forwards the left value without evaluating the
-        // right operand, including its memory accesses and helper calls.
-        auto output = types_.get(ast->type, ast);
-        auto left_scalar = left.ssa();
-        loom_op_t* op;
-        check(loom_scf_if_build(
-            &builder_, LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION, left_scalar,
-            &output, 1, nullptr, 0, source, &op));
-        auto* right_region = binary->op == cxx::TokenKind::T_AMP_AMP
-                                 ? loom_scf_if_then_region(op)
-                                 : loom_scf_if_else_region(op);
-        auto* skipped_region = binary->op == cxx::TokenKind::T_AMP_AMP
-                                   ? loom_scf_if_else_region(op)
-                                   : loom_scf_if_then_region(op);
-        auto saved = loom_builder_enter_region(&builder_, op, right_region);
-        auto right = expression(binary->rightExpression).ssa();
-        loom_op_t* yield;
-        check(loom_scf_yield_build(&builder_, &right, 1, source, &yield));
-        loom_builder_restore(&builder_, saved);
-        saved = loom_builder_enter_region(&builder_, op, skipped_region);
-        check(loom_scf_yield_build(&builder_, &left_scalar, 1, source, &yield));
-        loom_builder_restore(&builder_, saved);
-        return result(op);
+        // The skipped arm has a known boolean result and never evaluates the
+        // right operand, including its memory accesses and binding updates.
+        auto evaluate_right = [&] {
+          return expression(binary->rightExpression);
+        };
+        auto skipped = [&] {
+          return Value(scalars_.integer(binary->op == cxx::TokenKind::T_BAR_BAR,
+                                        LOOM_SCALAR_TYPE_I1, source));
+        };
+        return binary->op == cxx::TokenKind::T_AMP_AMP
+                   ? conditional_value(ast, left.ssa(), evaluate_right, skipped)
+                   : conditional_value(ast, left.ssa(), skipped,
+                                       evaluate_right);
       }
       auto right = expression(binary->rightExpression);
       if (left.is_pointer() || right.is_pointer()) {
@@ -648,9 +706,21 @@ class Translator {
       return this->binary(binary->op, left.ssa(), right.ssa(),
                           binary->leftExpression->type, ast->type, ast);
     }
+    if (auto* postfix = cxx::ast_cast<cxx::PostIncrExpressionAST>(ast)) {
+      if (postfix->symbol) {
+        fail(ast, "only builtin increment/decrement is admitted");
+      }
+      return increment(postfix->baseExpression, postfix->op,
+                       IncrementResult::Previous, ast);
+    }
     if (auto* unary = cxx::ast_cast<cxx::UnaryExpressionAST>(ast)) {
       if (unary->symbol) {
         fail(ast, "overloaded unary operations are not supported");
+      }
+      if (unary->op == cxx::TokenKind::T_PLUS_PLUS ||
+          unary->op == cxx::TokenKind::T_MINUS_MINUS) {
+        return increment(unary->expression, unary->op, IncrementResult::Updated,
+                         ast);
       }
       if (unary->op == cxx::TokenKind::T_AMP) {
         return address_of(unary->expression);
@@ -865,7 +935,7 @@ class Translator {
         values_ = saved_values;
         loom_builder_restore(&builder_, saved);
       }
-      bind_results(written, op);
+      bind_values(written, loom_op_results(op));
       return;
     }
     if (auto* loop = cxx::ast_cast<cxx::ForStatementAST>(ast)) {
@@ -959,7 +1029,7 @@ class Translator {
                                source, &terminator));
     loom_builder_restore(&builder_, saved);
     values_ = outer_values;
-    bind_results(written, op);
+    bind_values(written, loom_op_results(op));
   }
 
   loom_value_id_t unsigned_offset(loom_value_id_t value,
@@ -1001,7 +1071,7 @@ class Translator {
     loom_builder_restore(&builder_, saved);
     values_ = outer_values;
     values_.erase(induction);
-    bind_results(written, op);
+    bind_values(written, loom_op_results(op));
   }
 
   std::vector<cxx::Symbol*> live_mutations(cxx::AST* owner) {
@@ -1029,11 +1099,12 @@ class Translator {
                              cxx::to_string(symbol->name()));
     }
   }
-  void bind_results(const std::vector<cxx::Symbol*>& symbols, loom_op_t* op) {
+  void bind_values(const std::vector<cxx::Symbol*>& symbols,
+                   const loom_value_id_t* components) {
     size_t index = 0;
     for (auto* symbol : symbols) {
       auto count = values_.at(symbol).components().size();
-      values_[symbol] = name(Value({loom_op_results(op) + index, count}),
+      values_[symbol] = name(Value({components + index, count}),
                              cxx::to_string(symbol->name()));
       index += count;
     }
@@ -1173,55 +1244,11 @@ class Translator {
                   &selector, 1, 0, 0, locations_.get(ast), &op));
       return;
     }
-    cxx::ExpressionAST* destination = nullptr;
-    bool decrement = false;
-    if (auto* increment = cxx::ast_cast<cxx::PostIncrExpressionAST>(ast)) {
-      if ((increment->op != cxx::TokenKind::T_PLUS_PLUS &&
-           increment->op != cxx::TokenKind::T_MINUS_MINUS) ||
-          increment->symbol) {
-        fail(ast, "only builtin increment/decrement is admitted");
-      }
-      decrement = increment->op == cxx::TokenKind::T_MINUS_MINUS;
-      destination = increment->baseExpression;
-    } else if (auto* increment = cxx::ast_cast<cxx::UnaryExpressionAST>(ast)) {
-      if ((increment->op != cxx::TokenKind::T_PLUS_PLUS &&
-           increment->op != cxx::TokenKind::T_MINUS_MINUS) ||
-          increment->symbol) {
-        fail(ast, "only builtin increment/decrement is admitted");
-      }
-      decrement = increment->op == cxx::TokenKind::T_MINUS_MINUS;
-      destination = increment->expression;
-    }
-    if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(destination)) {
-      types_.require_mutable(id->type, id);
-      if (auto* pointer =
-              cxx::type_cast<cxx::PointerType>(types_.unqualified(id->type))) {
-        auto old = expression(id);
-        auto one =
-            scalars_.integer(1, LOOM_SCALAR_TYPE_I32, locations_.get(ast));
-        auto updated = storage_.advance(
-            old.pointer(), one, pointer, unit_.control()->getIntType(),
-            decrement ? cxx::TokenKind::T_MINUS : cxx::TokenKind::T_PLUS, ast);
-        values_[id->symbol] =
-            name(Value(updated), cxx::to_string(id->symbol->name()));
-        return;
-      }
-      if (!unit_.typeTraits().is_integral(id->type) ||
-          types_.unqualified(id->type)->kind() == cxx::TypeKind::kBool) {
-        fail(ast, "increment requires an integer local");
-      }
-      auto old = expression(id).ssa();
-      // Builtin ++/-- performs promoted arithmetic before converting back to
-      // the lvalue type, just like compound assignment with an integer one.
-      auto* promoted = unit_.typeTraits().promoted_integer_type(id->type);
-      old = scalars_.convert(old, id->type, promoted, ast);
-      auto one = scalars_.integer(1, loom_type_element_type(value_type(old)),
-                                  locations_.get(ast));
-      auto updated = scalars_.binary(
-          decrement ? cxx::TokenKind::T_MINUS : cxx::TokenKind::T_PLUS, old,
-          one, promoted, promoted, ast);
-      updated = scalars_.convert(updated, promoted, id->type, ast);
-      values_[id->symbol] = name(updated, cxx::to_string(id->symbol->name()));
+    auto* unary = cxx::ast_cast<cxx::UnaryExpressionAST>(ast);
+    if (cxx::ast_cast<cxx::PostIncrExpressionAST>(ast) ||
+        (unary && (unary->op == cxx::TokenKind::T_PLUS_PLUS ||
+                   unary->op == cxx::TokenKind::T_MINUS_MINUS))) {
+      expression(ast);
       return;
     }
     fail(ast, "unsupported effect expression: " +

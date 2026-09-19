@@ -24,6 +24,7 @@ iree_execution_test_suite(
     data = [
         "assumptions.cpp",
         "comparison_functions.cpp",
+        "increment_values.cpp",
         "integer_functions.cpp",
         "shaped_intrinsics.cpp",
         "vector_initializers.cpp",
@@ -55,6 +56,7 @@ iree_execution_test_suite(
         "control_flow.cpp",
         "early_returns.cpp",
         "flash_attention.cpp",
+        "increment_values.cpp",
         "integer_increment.cpp",
         "llama_rms_norm.cpp",
         "pointer_walk.cpp",
