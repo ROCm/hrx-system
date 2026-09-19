@@ -492,10 +492,19 @@ iree_status_t hrx_graph_exec_instantiate_locked(
         // attributes live in without walking it, so a reference held only by
         // the attributes is a reference nothing can drop.
         iree_hal_command_buffer_t* command_buffer = NULL;
+        // Profile sessions attribute dispatch events through the command
+        // buffer's profile id, which the HAL only assigns to command buffers
+        // that retain profile metadata.
+        iree_hal_command_buffer_mode_t command_buffer_mode =
+            IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED;
+        if (exec->device->profiling_active) {
+          command_buffer_mode |=
+              IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA;
+        }
         IREE_RETURN_AND_END_ZONE_IF_ERROR(
             z0, iree_hal_command_buffer_create(
                     iree_hal_queue_family(exec->device->dispatch_queue),
-                    IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED,
+                    command_buffer_mode,
                     IREE_HAL_COMMAND_CATEGORY_TRANSFER |
                         IREE_HAL_COMMAND_CATEGORY_DISPATCH,
                     /*binding_capacity=*/0, &command_buffer));
