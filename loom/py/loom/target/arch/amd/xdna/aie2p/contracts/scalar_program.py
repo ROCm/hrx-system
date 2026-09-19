@@ -17,6 +17,7 @@ from loom.target.contracts import (
     DescriptorEmitForm,
     DescriptorResultType,
     EmitDescriptorOp,
+    ValueProject,
     ValueRef,
     descriptor_by_key,
 )
@@ -38,14 +39,14 @@ class ScalarProgram:
     def constant(
         self,
         result_name: str,
-        value: int,
+        value: int | ValueProject,
         *,
         descriptor_key: str | None = None,
     ) -> ValueRef:
         if descriptor_key is None:
             descriptor_key = (
                 "amd.xdna.aie2p.constant.i32.short"
-                if _SHORT_MIN <= value <= _SHORT_MAX
+                if isinstance(value, int) and _SHORT_MIN <= value <= _SHORT_MAX
                 else "amd.xdna.aie2p.constant.i32"
             )
         result = self.temporary(result_name)

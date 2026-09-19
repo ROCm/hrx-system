@@ -97,7 +97,9 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
     ]
 
     index_divide_rules = [
-        rule for rule in rules if rule.source_op in (index.index_div, index.index_rem)
+        rule
+        for rule in rules
+        if rule.source_op in (index.index_div, index.index_rem) and rule.priority == 0
     ]
     assert [len(rule.emit) for rule in index_divide_rules] == [35, 34]
     for rule in index_divide_rules:
@@ -546,7 +548,8 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
     scalar_address_alu_rules = [
         rule
         for rule in rules
-        if rule.source_op
+        if rule.priority == 0
+        and rule.source_op
         in (
             scalar_arithmetic.scalar_divui,
             scalar_arithmetic.scalar_remui,

@@ -52,6 +52,7 @@ class ValueProjectKind(Enum):
     EXACT_I64_LOG2 = "exact_i64_log2"
     EXACT_I64_MINUS_ONE = "exact_i64_minus_one"
     U32_DIVISOR_MAGIC_MULTIPLIER = "u32_divisor_magic_multiplier"
+    U32_DIVISOR_MAGIC_MULTIPLIER_AS_I32 = "u32_divisor_magic_multiplier_as_i32"
     U32_DIVISOR_MAGIC_SHIFT = "u32_divisor_magic_shift"
     I32_AS_U32_BITS = "i32_as_u32_bits"
     FLOAT_BITS = "float_bits"
@@ -67,6 +68,7 @@ _I32_WORD_VALUE_PROJECT_KINDS = (
 _SIGNED_I32_VALUE_PROJECT_KINDS = (
     *_I32_WORD_VALUE_PROJECT_KINDS,
     ValueProjectKind.FLOAT_AS_F32_I32,
+    ValueProjectKind.U32_DIVISOR_MAGIC_MULTIPLIER_AS_I32,
 )
 
 
@@ -613,6 +615,14 @@ class ValueProject:
         )
 
     @classmethod
+    def u32_divisor_magic_multiplier_as_i32(cls, source_value: str) -> Self:
+        """Projects unsigned reciprocal bits as a signed i32 immediate."""
+        return cls(
+            kind=ValueProjectKind.U32_DIVISOR_MAGIC_MULTIPLIER_AS_I32,
+            source_value=source_value,
+        )
+
+    @classmethod
     def i32_as_u32_bits(cls, source_value: str, *, target_bit_offset: int = 0) -> Self:
         return cls(
             kind=ValueProjectKind.I32_AS_U32_BITS,
@@ -666,6 +676,13 @@ class ValueProject:
                 )
         elif self.word_index != 0:
             raise ValueError(f"{self.kind.value} projection must not name an i32 word")
+        if (
+            self.kind == ValueProjectKind.U32_DIVISOR_MAGIC_MULTIPLIER_AS_I32
+            and self.target_bit_offset != 0
+        ):
+            raise ValueError(
+                "signed reciprocal projection must not use target bit offset"
+            )
 
     def validate(
         self,

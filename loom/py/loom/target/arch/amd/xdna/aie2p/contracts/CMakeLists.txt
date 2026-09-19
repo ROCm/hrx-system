@@ -23,6 +23,7 @@ iree_py_library(
     "floating.py"
     "i64.py"
     "index_conversion.py"
+    "integer_division.py"
     "memory.py"
     "nonlinear.py"
     "packed_dot.py"
@@ -96,12 +97,14 @@ iree_py_test(
   SRCS
     "core_test.py"
     "i64_test.py"
+    "integer_division_test.py"
     "nonlinear_test.py"
     "structural_test.py"
     "../../../../../../tools/pytest_style_runner.py"
   ARGS
     "loom.target.arch.amd.xdna.aie2p.contracts.core_test"
     "loom.target.arch.amd.xdna.aie2p.contracts.i64_test"
+    "loom.target.arch.amd.xdna.aie2p.contracts.integer_division_test"
     "loom.target.arch.amd.xdna.aie2p.contracts.nonlinear_test"
     "loom.target.arch.amd.xdna.aie2p.contracts.structural_test"
   DEPS

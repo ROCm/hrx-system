@@ -279,6 +279,9 @@ typedef enum loom_low_lower_attr_copy_kind_e {
   LOOM_LOW_LOWER_ATTR_COPY_VALUE_FLOAT_AS_F32_I32 = 30,
   // Emits one i64_array element plus literal_i64.
   LOOM_LOW_LOWER_ATTR_COPY_I64_ARRAY_ELEMENT_PLUS_LITERAL = 31,
+  // Emits unsigned 32-bit reciprocal multiplier bits as a signed i32 packet
+  // attribute. The divisor's unsigned arithmetic domain is unchanged.
+  LOOM_LOW_LOWER_ATTR_COPY_VALUE_U32_DIVISOR_MAGIC_MULTIPLIER_AS_I32 = 32,
 } loom_low_lower_attr_copy_kind_t;
 
 typedef struct loom_low_lower_attr_copy_t {

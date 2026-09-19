@@ -1885,6 +1885,8 @@ class _LowerRuleSetCompiler:
             kind = LowerAttrCopyKind.VALUE_EXACT_I64_MINUS_ONE
         elif project.kind == ValueProjectKind.U32_DIVISOR_MAGIC_MULTIPLIER:
             kind = LowerAttrCopyKind.VALUE_U32_DIVISOR_MAGIC_MULTIPLIER
+        elif project.kind == ValueProjectKind.U32_DIVISOR_MAGIC_MULTIPLIER_AS_I32:
+            kind = LowerAttrCopyKind.VALUE_U32_DIVISOR_MAGIC_MULTIPLIER_AS_I32
         elif project.kind == ValueProjectKind.U32_DIVISOR_MAGIC_SHIFT:
             kind = LowerAttrCopyKind.VALUE_U32_DIVISOR_MAGIC_SHIFT
         elif project.kind == ValueProjectKind.I32_AS_U32_BITS:

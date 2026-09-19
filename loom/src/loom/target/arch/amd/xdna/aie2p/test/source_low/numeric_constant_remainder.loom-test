@@ -10,7 +10,10 @@ func.def target(@target) @constant_remainder_uniform(%value: i32) -> (i32) {
 }
 
 // ----
-CHECK: %remainder, %* = divs *
+CHECK: %* = mov.i32 -1431655765
+CHECK: %* = mac *
+CHECK: %remainder = sub %value, %*
+CHECK-NOT: * = divs *
 CHECK: return %remainder
 
 // ====
@@ -34,6 +37,9 @@ func.def target(@target) @constant_remainder_loaded(%input: buffer) -> (i32, ind
 
 // ----
 CHECK: %value = lda *
-CHECK: %remainder, %* = divs *
-CHECK: %index_remainder, %* = divs *
+CHECK: %* = mov.i32 -1431655765
+CHECK: %* = mac *
+CHECK: %remainder = sub %value, %*
+CHECK: %index_remainder = sub *
+CHECK-NOT: * = divs *
 CHECK: return %remainder, %index_remainder

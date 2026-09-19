@@ -1541,6 +1541,12 @@ def test_generate_lower_rule_set_emits_divisor_magic_projection() -> None:
                     ),
                     EmitDescriptorOp(
                         descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
+                        results={"dst": ValueRef.temporary("signed_multiplier")},
+                        result_types={"dst": ValueRef.result("result")},
+                        immediates={"i32_value": ValueProject.u32_divisor_magic_multiplier_as_i32("rhs")},
+                    ),
+                    EmitDescriptorOp(
+                        descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
                         results={"dst": ValueRef.temporary("mask")},
                         result_types={"dst": ValueRef.result("result")},
                         immediates={"i32_value": ValueProject.exact_i64_minus_one("rhs")},
@@ -1554,6 +1560,7 @@ def test_generate_lower_rule_set_emits_divisor_magic_projection() -> None:
 
     assert "LOOM_LOW_LOWER_GUARD_VALUE_U32_DIVISOR_MAGIC_IS_ADD" in generated.source
     assert "LOOM_LOW_LOWER_ATTR_COPY_VALUE_U32_DIVISOR_MAGIC_MULTIPLIER" in generated.source
+    assert "LOOM_LOW_LOWER_ATTR_COPY_VALUE_U32_DIVISOR_MAGIC_MULTIPLIER_AS_I32" in generated.source
     assert "LOOM_LOW_LOWER_ATTR_COPY_VALUE_U32_DIVISOR_MAGIC_SHIFT" in generated.source
     assert "LOOM_LOW_LOWER_ATTR_COPY_VALUE_EXACT_I64_MINUS_ONE" in generated.source
 

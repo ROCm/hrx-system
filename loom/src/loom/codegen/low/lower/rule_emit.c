@@ -663,6 +663,7 @@ static iree_status_t loom_low_lower_rule_build_attrs(
         break;
       }
       case LOOM_LOW_LOWER_ATTR_COPY_VALUE_U32_DIVISOR_MAGIC_MULTIPLIER:
+      case LOOM_LOW_LOWER_ATTR_COPY_VALUE_U32_DIVISOR_MAGIC_MULTIPLIER_AS_I32:
       case LOOM_LOW_LOWER_ATTR_COPY_VALUE_U32_DIVISOR_MAGIC_SHIFT: {
         const loom_value_id_t source_value_id =
             loom_low_lower_rule_emit_source_value(
@@ -674,6 +675,11 @@ static iree_status_t loom_low_lower_rule_build_attrs(
                 loom_low_lower_context_fact_table(context), source_value_id,
                 &info);
         IREE_ASSERT(has_magic_info);
+        if (attr_copy->kind ==
+            LOOM_LOW_LOWER_ATTR_COPY_VALUE_U32_DIVISOR_MAGIC_MULTIPLIER_AS_I32) {
+          attrs[i].value = loom_attr_i64((int32_t)info.multiplier);
+          break;
+        }
         uint64_t projected_value =
             attr_copy->kind ==
                     LOOM_LOW_LOWER_ATTR_COPY_VALUE_U32_DIVISOR_MAGIC_MULTIPLIER

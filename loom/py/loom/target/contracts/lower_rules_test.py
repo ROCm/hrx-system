@@ -2432,7 +2432,7 @@ def test_exact_i64_i32_word_rejects_non_word_projection() -> None:
     )
 
 
-def test_exact_i64_i32_word_requires_signed_i32_immediate() -> None:
+def test_word_value_projections_require_signed_i32_immediate() -> None:
     unsigned_descriptor = replace(
         TEST_LOW_CONST_I32_DESCRIPTOR,
         immediates=(
@@ -2454,7 +2454,7 @@ def test_exact_i64_i32_word_requires_signed_i32_immediate() -> None:
         ),
     )
 
-    def compile_unsigned_immediate() -> None:
+    def compile_unsigned_immediate(projection: ValueProject) -> None:
         table = ContractFragment(
             name="test.value-i64-word-unsigned-immediate",
             descriptor_set=descriptor_set,
@@ -2468,9 +2468,7 @@ def test_exact_i64_i32_word_requires_signed_i32_immediate() -> None:
                             descriptor=unsigned_descriptor,
                             results={"dst": ValueRef.result("result")},
                             immediates={
-                                "i32_value": ValueProject.exact_i64_i32_word(
-                                    "lhs", word_index=0
-                                ),
+                                "i32_value": projection,
                             },
                         ),
                     ),
@@ -2479,9 +2477,23 @@ def test_exact_i64_i32_word_requires_signed_i32_immediate() -> None:
         )
         compile_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS})
 
+    for projection in (
+        ValueProject.exact_i64_i32_word("lhs", word_index=0),
+        ValueProject.u32_divisor_magic_multiplier_as_i32("rhs"),
+    ):
+        _expect_value_error(
+            lambda projection=projection: compile_unsigned_immediate(projection),
+            "must be a signed 32-bit immediate",
+        )
+
+
+def test_signed_reciprocal_projection_rejects_bit_offset() -> None:
     _expect_value_error(
-        compile_unsigned_immediate,
-        "must be a signed 32-bit immediate",
+        lambda: replace(
+            ValueProject.u32_divisor_magic_multiplier_as_i32("rhs"),
+            target_bit_offset=1,
+        ),
+        "signed reciprocal projection must not use target bit offset",
     )
 
 

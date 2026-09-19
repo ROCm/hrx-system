@@ -66,6 +66,9 @@ class LowerAttrCopyKind(Enum):
     VALUE_EXACT_I64_LOG2 = "value_exact_i64_log2"
     VALUE_EXACT_I64_MINUS_ONE = "value_exact_i64_minus_one"
     VALUE_U32_DIVISOR_MAGIC_MULTIPLIER = "value_u32_divisor_magic_multiplier"
+    VALUE_U32_DIVISOR_MAGIC_MULTIPLIER_AS_I32 = (
+        "value_u32_divisor_magic_multiplier_as_i32"
+    )
     VALUE_U32_DIVISOR_MAGIC_SHIFT = "value_u32_divisor_magic_shift"
     VALUE_I32_AS_U32_BITS = "value_i32_as_u32_bits"
     VALUE_FLOAT_BITS = "value_float_bits"

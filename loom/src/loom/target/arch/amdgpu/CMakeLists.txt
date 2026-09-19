@@ -578,6 +578,7 @@ loom_check_test_suite(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_i64.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_i64_shift_counts.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_i64_subtract.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_unsigned_constant_division.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_unsigned_remainder.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/packed_bitfield.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/packed_bitpack.loom-test"
