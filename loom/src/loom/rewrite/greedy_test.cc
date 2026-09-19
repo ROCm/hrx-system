@@ -1191,6 +1191,13 @@ TEST_P(StructuredForwardingFactsRewriteTest,
         0, LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID, 0, 0,
         LOOM_LOCATION_UNKNOWN, &loop));
   }
+  auto expect_summary_deferred = [&]() {
+    for (uint16_t i = 0; i < count; ++i) {
+      EXPECT_FALSE(
+          loom_value_fact_table_has_entry(facts, loom_op_results(loop)[i]));
+    }
+  };
+  expect_summary_deferred();
   const auto loop_like = loom_loop_like_cast(module_, loop);
   loom_region_t* body = loom_loop_like_body(loop_like);
   loom_region_t* before = loom_loop_like_condition_region(loop_like);
@@ -1212,6 +1219,7 @@ TEST_P(StructuredForwardingFactsRewriteTest,
     IREE_ASSERT_OK(loom_scf_condition_build(
         &condition_builder, loom_test_attrs_result(selector), reversed.data(),
         count, LOOM_LOCATION_UNKNOWN, &condition));
+    expect_summary_deferred();
   }
   loom_builder_t body_builder = rewriter.builder;
   loom_builder_enter_region(&body_builder, loop, body);
