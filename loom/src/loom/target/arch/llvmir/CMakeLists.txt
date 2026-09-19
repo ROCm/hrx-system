@@ -96,6 +96,7 @@ loom_check_test_suite(
     "test/source_low/async_gather.loom-test"
     "test/source_low/buffer_bulk.loom-test"
     "test/source_low/buffer_raw.loom-test"
+    "test/source_low/carried_counter_store.loom-test"
     "test/source_low/index_addressing.loom-test"
     "test/source_low/index_assume.loom-test"
     "test/source_low/lookup_table.loom-test"
@@ -139,6 +140,7 @@ loom_check_test_suite(
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/async_empty.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/async_gather.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/carried_counter_store.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/index_addressing.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/lookup_table.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/loop_counter_offset.loom-test"

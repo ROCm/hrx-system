@@ -71,7 +71,6 @@ loom_cc_library(
         "//loom/src/loom/analysis:condition_facts",
         "//loom/src/loom/analysis:contract_vector",
         "//loom/src/loom/analysis:kernel_async_legality",
-        "//loom/src/loom/analysis:loop_domain",
         "//loom/src/loom/analysis:native_layout",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/analysis:symbolic_expr",

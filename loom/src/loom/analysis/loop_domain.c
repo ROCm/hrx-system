@@ -8,79 +8,26 @@
 
 #include "loom/ir/facts.h"
 
-static bool loom_loop_domain_value_equal(
-    const loom_value_fact_table_t* fact_table, loom_value_id_t lhs,
-    loom_value_id_t rhs) {
-  if (lhs == LOOM_VALUE_ID_INVALID || rhs == LOOM_VALUE_ID_INVALID) {
-    return false;
-  }
-  if (lhs == rhs) {
-    return true;
-  }
-  if (!fact_table) {
-    return false;
-  }
-
-  loom_value_facts_t lhs_facts = loom_value_fact_table_lookup(fact_table, lhs);
-  loom_value_facts_t rhs_facts = loom_value_fact_table_lookup(fact_table, rhs);
-  return loom_value_facts_is_exact(lhs_facts) &&
-         loom_value_facts_is_exact(rhs_facts) &&
-         !loom_value_facts_is_float(lhs_facts) &&
-         !loom_value_facts_is_float(rhs_facts) &&
-         lhs_facts.range_lo == rhs_facts.range_lo;
+static bool loom_loop_domain_has_positive_step(loom_value_facts_t lower_bound,
+                                               loom_value_facts_t upper_bound,
+                                               loom_value_facts_t step) {
+  return !loom_value_facts_is_float(lower_bound) &&
+         !loom_value_facts_is_float(upper_bound) &&
+         !loom_value_facts_is_float(step) && loom_value_facts_is_positive(step);
 }
 
-bool loom_loop_domain_equal(const loom_value_fact_table_t* fact_table,
-                            loom_loop_domain_t lhs, loom_loop_domain_t rhs) {
-  return loom_loop_domain_value_equal(fact_table, lhs.lower_bound,
-                                      rhs.lower_bound) &&
-         loom_loop_domain_value_equal(fact_table, lhs.upper_bound,
-                                      rhs.upper_bound) &&
-         loom_loop_domain_value_equal(fact_table, lhs.step, rhs.step);
+bool loom_loop_domain_proven_empty(loom_value_facts_t lower_bound,
+                                   loom_value_facts_t upper_bound,
+                                   loom_value_facts_t step) {
+  return loom_loop_domain_has_positive_step(lower_bound, upper_bound, step) &&
+         lower_bound.range_lo >= upper_bound.range_hi;
 }
 
-static bool loom_loop_domain_lookup_range_facts(
-    const loom_value_fact_table_t* fact_table, loom_loop_domain_t domain,
-    loom_value_facts_t* out_lower_bound, loom_value_facts_t* out_upper_bound,
-    loom_value_facts_t* out_step) {
-  if (!fact_table || domain.lower_bound == LOOM_VALUE_ID_INVALID ||
-      domain.upper_bound == LOOM_VALUE_ID_INVALID ||
-      domain.step == LOOM_VALUE_ID_INVALID) {
-    return false;
-  }
-  *out_lower_bound =
-      loom_value_fact_table_lookup(fact_table, domain.lower_bound);
-  *out_upper_bound =
-      loom_value_fact_table_lookup(fact_table, domain.upper_bound);
-  *out_step = loom_value_fact_table_lookup(fact_table, domain.step);
-  return !loom_value_facts_is_float(*out_lower_bound) &&
-         !loom_value_facts_is_float(*out_upper_bound) &&
-         !loom_value_facts_is_float(*out_step) &&
-         loom_value_facts_is_positive(*out_step);
-}
-
-bool loom_loop_domain_proven_empty(const loom_value_fact_table_t* fact_table,
-                                   loom_loop_domain_t domain) {
-  loom_value_facts_t lower_bound = {0};
-  loom_value_facts_t upper_bound = {0};
-  loom_value_facts_t step = {0};
-  if (!loom_loop_domain_lookup_range_facts(fact_table, domain, &lower_bound,
-                                           &upper_bound, &step)) {
-    return false;
-  }
-  return lower_bound.range_lo >= upper_bound.range_hi;
-}
-
-bool loom_loop_domain_proven_nonempty(const loom_value_fact_table_t* fact_table,
-                                      loom_loop_domain_t domain) {
-  loom_value_facts_t lower_bound = {0};
-  loom_value_facts_t upper_bound = {0};
-  loom_value_facts_t step = {0};
-  if (!loom_loop_domain_lookup_range_facts(fact_table, domain, &lower_bound,
-                                           &upper_bound, &step)) {
-    return false;
-  }
-  return lower_bound.range_hi < upper_bound.range_lo;
+bool loom_loop_domain_proven_nonempty(loom_value_facts_t lower_bound,
+                                      loom_value_facts_t upper_bound,
+                                      loom_value_facts_t step) {
+  return loom_loop_domain_has_positive_step(lower_bound, upper_bound, step) &&
+         lower_bound.range_hi < upper_bound.range_lo;
 }
 
 bool loom_loop_domain_trip_count(loom_loop_bound_flags_t bound_flags,
@@ -113,4 +60,42 @@ bool loom_loop_domain_trip_count(loom_loop_bound_flags_t bound_flags,
   }
   *out_trip_count = trip_count;
   return true;
+}
+
+loom_loop_recurrence_facts_t loom_loop_domain_recurrence_facts(
+    loom_loop_bound_flags_t bound_flags, uint8_t bitwidth,
+    int64_t initial_value, int64_t upper_bound, int64_t step) {
+  loom_loop_recurrence_facts_t result = {
+      .values = loom_value_facts_unknown(),
+  };
+  result.trip_count_known = loom_loop_domain_trip_count(
+      bound_flags, bitwidth, (uint64_t)initial_value, (uint64_t)upper_bound,
+      (uint64_t)step, &result.trip_count);
+  const int64_t maximum = INT64_MAX >> (64 - bitwidth);
+  const int64_t minimum = -maximum - 1;
+  if (!result.trip_count_known || initial_value < minimum ||
+      initial_value > maximum) {
+    return result;
+  }
+  if (result.trip_count == 0) {
+    result.values = loom_value_facts_exact_i64(initial_value);
+    return result;
+  }
+  if (step <= 0 || step > maximum) {
+    return result;
+  }
+  // Unsigned distance also covers a signed recurrence spanning zero without
+  // overflowing host signed arithmetic. The division proves the product fits.
+  const uint64_t available = (uint64_t)maximum - (uint64_t)initial_value;
+  if (result.trip_count > available / (uint64_t)step) {
+    return result;
+  }
+  const uint64_t distance = result.trip_count * (uint64_t)step;
+  const uint64_t rank =
+      ((uint64_t)initial_value ^ (UINT64_C(1) << 63)) + distance;
+  const int64_t terminal = rank >= (UINT64_C(1) << 63)
+                               ? (int64_t)(rank - (UINT64_C(1) << 63))
+                               : INT64_MIN + (int64_t)rank;
+  result.values = loom_value_facts_make(initial_value, terminal, 1);
+  return result;
 }

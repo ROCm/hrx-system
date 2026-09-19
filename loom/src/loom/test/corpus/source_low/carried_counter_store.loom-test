@@ -1,0 +1,23 @@
+// RUN: roundtrip
+
+func.def @carried_counter_store(%output: buffer) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.constant 4 : index
+  %base = index.constant 0 : offset
+  %aligned_output = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %output_view = buffer.view %aligned_output[%base] : buffer -> view<4xi32>
+  cfg.br ^preheader
+^preheader:
+  cfg.br ^header(%begin: index)
+^header(%position: index):
+  %more = index.cmp slt, %position, %end : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %value = index.cast %position : index to i32
+  view.store %value, %output_view[%position] : i32, view<4xi32>
+  %next = index.add %position, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return
+}

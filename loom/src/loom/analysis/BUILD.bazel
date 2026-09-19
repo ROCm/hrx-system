@@ -785,7 +785,6 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
-        "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
     ],
 )
@@ -796,8 +795,6 @@ loom_cc_test(
     deps = [
         ":loop_domain",
         "//loom/src/loom/ir:facts",
-        "//loom/src/loom/util:fact_table",
-        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

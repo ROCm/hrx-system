@@ -18,12 +18,14 @@
 #include "loom/ir/module.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/cfg/ops.h"
+#include "loom/ops/index/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/pass/value_facts.h"
 #include "loom/target/facts.h"
 #include "loom/target/types.h"
+#include "loom/util/fact_cfg.h"
 
 namespace loom {
 namespace {
@@ -69,6 +71,9 @@ class GreedyRewriteTest : public ::testing::Test {
     vtables = loom_scf_dialect_vtables(&vtable_count);
     IREE_ASSERT_OK(loom_context_register_dialect(
         &context_, LOOM_DIALECT_SCF, vtables, (uint16_t)vtable_count));
+    vtables = loom_index_dialect_vtables(&vtable_count);
+    IREE_ASSERT_OK(loom_context_register_dialect(
+        &context_, LOOM_DIALECT_INDEX, vtables, (uint16_t)vtable_count));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"),
                                         &block_pool_, NULL,
@@ -466,6 +471,163 @@ TEST_F(GreedyRewriteTest, CyclicFactsNarrowAfterSemanticUpdates) {
   graphs.clear();
   IREE_ASSERT_OK(loom_value_fact_table_enumerate_cfg_graphs(facts, callback));
   EXPECT_TRUE(graphs.empty());
+  loom_pass_value_fact_owner_deinitialize(&owner);
+  iree_arena_deinitialize(&arena);
+}
+
+TEST_F(GreedyRewriteTest, InductionFactsTrackSemanticAndTopologyEdits) {
+  const auto type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  auto* region = loom_func_like_body(function_);
+  region->flags |= LOOM_REGION_INSTANCE_FLAG_CFG;
+  loom_op_t* initial = nullptr;
+  loom_op_t* upper = nullptr;
+  loom_op_t* step = nullptr;
+  IREE_ASSERT_OK(loom_index_constant_build(&builder_, loom_attr_i64(0), type,
+                                           LOOM_LOCATION_UNKNOWN, &initial));
+  IREE_ASSERT_OK(loom_index_constant_build(&builder_, loom_attr_i64(4), type,
+                                           LOOM_LOCATION_UNKNOWN, &upper));
+  IREE_ASSERT_OK(loom_index_constant_build(&builder_, loom_attr_i64(1), type,
+                                           LOOM_LOCATION_UNKNOWN, &step));
+  loom_block_t* header = nullptr;
+  loom_block_t* body = nullptr;
+  loom_block_t* exit = nullptr;
+  IREE_ASSERT_OK(loom_region_append_block(module_, region, &header));
+  IREE_ASSERT_OK(loom_region_append_block(module_, region, &body));
+  IREE_ASSERT_OK(loom_region_append_block(module_, region, &exit));
+  loom_value_id_t counter = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_builder_define_block_arg(&builder_, header, type, &counter));
+  auto initial_value = loom_index_constant_result(initial);
+  loom_op_t* entry = nullptr;
+  IREE_ASSERT_OK(loom_cfg_br_build(&builder_, header, &initial_value, 1,
+                                   LOOM_LOCATION_UNKNOWN, &entry));
+  loom_builder_set_block(&builder_, header);
+  loom_op_t* compare = nullptr;
+  loom_op_t* guard = nullptr;
+  IREE_ASSERT_OK(loom_index_cmp_build(
+      &builder_, LOOM_INDEX_CMP_PREDICATE_SLT, counter,
+      loom_index_constant_result(upper), LOOM_LOCATION_UNKNOWN, &compare));
+  IREE_ASSERT_OK(loom_cfg_cond_br_build(&builder_,
+                                        loom_index_cmp_result(compare), body,
+                                        exit, LOOM_LOCATION_UNKNOWN, &guard));
+  loom_builder_set_block(&builder_, body);
+  loom_op_t* add = nullptr;
+  IREE_ASSERT_OK(loom_index_add_build(&builder_, counter,
+                                      loom_index_constant_result(step), type,
+                                      LOOM_LOCATION_UNKNOWN, &add));
+  auto next = loom_index_add_result(add);
+  loom_op_t* backedge = nullptr;
+  IREE_ASSERT_OK(loom_cfg_br_build(&builder_, header, &next, 1,
+                                   LOOM_LOCATION_UNKNOWN, &backedge));
+  loom_builder_set_block(&builder_, exit);
+  loom_op_t* return_op = nullptr;
+  IREE_ASSERT_OK(loom_test_yield_build(&builder_, nullptr, 0,
+                                       LOOM_LOCATION_UNKNOWN, &return_op));
+
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool_, &arena);
+  loom_pass_value_fact_owner_t owner;
+  loom_pass_value_fact_owner_initialize(&block_pool_, &owner);
+  loom_value_fact_table_t* facts = nullptr;
+  IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
+      &owner, module_, loom_pass_value_fact_scope_function(function_), &facts));
+  loom_rewriter_t rewriter;
+  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, module_, &arena));
+  loom_rewriter_attach_value_facts(&rewriter, facts);
+  int check_index = 0;
+  auto check = [&](int64_t expected_lo, int64_t expected_hi) {
+    SCOPED_TRACE(check_index++);
+    while (auto* op = loom_rewriter_pop(&rewriter)) {
+      bool folded = false;
+      IREE_ASSERT_OK(loom_rewriter_try_fold(&rewriter, op, &folded));
+    }
+    loom_pass_value_fact_owner_t fresh_owner;
+    loom_pass_value_fact_owner_initialize(&block_pool_, &fresh_owner);
+    loom_value_fact_table_t* fresh = nullptr;
+    IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
+        &fresh_owner, module_, loom_pass_value_fact_scope_function(function_),
+        &fresh));
+    for (auto value : {counter, next, loom_index_cmp_result(compare)}) {
+      const auto value_type = loom_module_value_type(module_, value);
+      EXPECT_TRUE(loom_value_fact_table_facts_equal_for_type(
+          module_, value_type, facts,
+          loom_value_fact_table_lookup(facts, value), fresh,
+          loom_value_fact_table_lookup(fresh, value)));
+    }
+    const auto actual = loom_value_fact_table_lookup(facts, counter);
+    EXPECT_EQ(actual.range_lo, expected_lo);
+    EXPECT_EQ(actual.range_hi, expected_hi);
+    const auto* retained =
+        loom_value_fact_table_lookup_cfg_region(facts, region);
+    const auto* rebuilt =
+        loom_value_fact_table_lookup_cfg_region(fresh, region);
+    EXPECT_EQ(retained->loops.loop_count, rebuilt->loops.loop_count);
+    for (size_t i = 0; i < retained->loops.loop_count; ++i) {
+      const auto old_proof = loom_value_fact_cfg_induction_facts(
+          facts, module_, &retained->inductions[i]);
+      const auto new_proof = loom_value_fact_cfg_induction_facts(
+          fresh, module_, &rebuilt->inductions[i]);
+      EXPECT_EQ(old_proof.trip_count_known, new_proof.trip_count_known);
+      EXPECT_EQ(old_proof.trip_count, new_proof.trip_count);
+    }
+    loom_pass_value_fact_owner_deinitialize(&fresh_owner);
+  };
+  check(0, 4);
+  for (int64_t bound : {5, 4}) {
+    IREE_ASSERT_OK(loom_rewriter_set_attr(&rewriter, upper,
+                                          loom_index_constant_value_ATTR_INDEX,
+                                          loom_attr_i64(bound)));
+    check(0, bound);
+  }
+  for (int64_t value : {3, 1, 2, 1}) {
+    IREE_ASSERT_OK(loom_rewriter_set_attr(&rewriter, step,
+                                          loom_index_constant_value_ATTR_INDEX,
+                                          loom_attr_i64(value)));
+    check(0, value == 3 ? 6 : 4);
+  }
+  IREE_ASSERT_OK(loom_rewriter_set_attr(&rewriter, initial,
+                                        loom_index_constant_value_ATTR_INDEX,
+                                        loom_attr_i64(-2)));
+  check(-2, 4);
+  IREE_ASSERT_OK(loom_rewriter_set_attr(
+      &rewriter, compare, loom_index_cmp_predicate_ATTR_INDEX,
+      loom_attr_enum(LOOM_INDEX_CMP_PREDICATE_SLE)));
+  check(-2, 5);
+  IREE_ASSERT_OK(loom_rewriter_set_attr(
+      &rewriter, compare, loom_index_cmp_predicate_ATTR_INDEX,
+      loom_attr_enum(LOOM_INDEX_CMP_PREDICATE_NE)));
+  check(INT64_MIN, INT64_MAX);
+  IREE_ASSERT_OK(loom_rewriter_set_attr(
+      &rewriter, compare, loom_index_cmp_predicate_ATTR_INDEX,
+      loom_attr_enum(LOOM_INDEX_CMP_PREDICATE_SLT)));
+  check(-2, 4);
+  IREE_ASSERT_OK(loom_rewriter_set_operand(&rewriter, backedge, 0, counter));
+  check(-2, -2);
+  IREE_ASSERT_OK(loom_rewriter_set_operand(&rewriter, backedge, 0, next));
+  check(-2, 4);
+  IREE_ASSERT_OK(loom_rewriter_refresh_cfg_facts(&rewriter, region));
+  check(-2, 4);
+  loom_op_successors(guard)[0] = exit;
+  loom_op_successors(guard)[1] = body;
+  IREE_ASSERT_OK(loom_rewriter_refresh_cfg_facts(&rewriter, region));
+  check(INT64_MIN, INT64_MAX);
+  loom_op_successors(guard)[0] = body;
+  loom_op_successors(guard)[1] = exit;
+  IREE_ASSERT_OK(loom_rewriter_refresh_cfg_facts(&rewriter, region));
+  check(-2, 4);
+  loom_builder_set_before(&rewriter.builder, guard);
+  loom_op_t* false_condition = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(&rewriter.builder, loom_attr_i64(0),
+                                          loom_type_scalar(LOOM_SCALAR_TYPE_I1),
+                                          LOOM_LOCATION_UNKNOWN,
+                                          &false_condition));
+  IREE_ASSERT_OK(loom_rewriter_set_operand(
+      &rewriter, guard, 0, loom_test_constant_result(false_condition)));
+  check(-2, -2);
+  IREE_ASSERT_OK(loom_rewriter_set_operand(&rewriter, guard, 0,
+                                           loom_index_cmp_result(compare)));
+  check(-2, 4);
+  loom_rewriter_deinitialize(&rewriter);
   loom_pass_value_fact_owner_deinitialize(&owner);
   iree_arena_deinitialize(&arena);
 }

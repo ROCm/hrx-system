@@ -537,6 +537,7 @@ loom_check_test_suite(
     data = [
         "//loom/src/loom/test/corpus/source_low:async_empty.loom-test",
         "//loom/src/loom/test/corpus/source_low:async_gather.loom-test",
+        "//loom/src/loom/test/corpus/source_low:carried_counter_store.loom-test",
         "//loom/src/loom/test/corpus/source_low:index_addressing.loom-test",
         "//loom/src/loom/test/corpus/source_low:lookup_table.loom-test",
         "//loom/src/loom/test/corpus/source_low:loop_counter_offset.loom-test",

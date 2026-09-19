@@ -528,7 +528,8 @@ loom_value_facts_t loom_value_fact_table_block_temporal_scope(
 }
 
 iree_status_t loom_value_fact_table_set_cfg_region(
-    loom_value_fact_table_t* table, const loom_region_t* region,
+    loom_value_fact_table_t* table, const loom_module_t* module,
+    const loom_region_t* region,
     const loom_value_fact_cfg_region_t* structure) {
   loom_value_fact_region_entry_t* entry = NULL;
   IREE_RETURN_IF_ERROR(
@@ -537,6 +538,10 @@ iree_status_t loom_value_fact_table_set_cfg_region(
     ++table->regions.cfg_count;
   }
   entry->structure = structure;
+  for (iree_host_size_t i = 0; i < structure->loops.loop_count; ++i) {
+    loom_value_fact_cfg_update_induction(
+        table, module, structure, structure->loops.loops[i].header_index);
+  }
   loom_value_fact_cfg_seed_control(table, structure, NULL);
   return iree_ok_status();
 }
@@ -568,7 +573,7 @@ iree_status_t loom_value_fact_table_get_or_build_cfg_region(
   IREE_RETURN_IF_ERROR(loom_value_fact_cfg_region_initialize(
       module, region, table->transient_arena, structure));
   IREE_RETURN_IF_ERROR(
-      loom_value_fact_table_set_cfg_region(table, region, structure));
+      loom_value_fact_table_set_cfg_region(table, module, region, structure));
   *out_region = structure;
   return iree_ok_status();
 }
@@ -601,6 +606,27 @@ void loom_value_fact_table_undefine(loom_value_fact_table_t* table,
   if (value_id < table->identities.capacity) {
     table->identities.entries[value_id] = LOOM_VALUE_ID_INVALID;
   }
+}
+
+bool loom_value_fact_table_values_equal(const loom_value_fact_table_t* table,
+                                        loom_value_id_t lhs,
+                                        loom_value_id_t rhs) {
+  if (lhs == LOOM_VALUE_ID_INVALID || rhs == LOOM_VALUE_ID_INVALID) {
+    return false;
+  }
+  if (lhs == rhs) {
+    return true;
+  }
+  if (!table) {
+    return false;
+  }
+  const loom_value_facts_t lhs_facts = loom_value_fact_table_lookup(table, lhs);
+  const loom_value_facts_t rhs_facts = loom_value_fact_table_lookup(table, rhs);
+  return loom_value_facts_is_exact(lhs_facts) &&
+         loom_value_facts_is_exact(rhs_facts) &&
+         !loom_value_facts_is_float(lhs_facts) &&
+         !loom_value_facts_is_float(rhs_facts) &&
+         lhs_facts.range_lo == rhs_facts.range_lo;
 }
 
 loom_value_id_t loom_value_fact_table_query_identity(

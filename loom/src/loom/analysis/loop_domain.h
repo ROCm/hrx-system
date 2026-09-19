@@ -4,17 +4,15 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Dialect-independent loop-domain proofs. SSA domains support equality and
-// emptiness proofs from value facts; concrete integer recurrences support exact
-// trip counts with finite-width comparison semantics. Callers own loop
-// recognition and supply the domain's bounds and step.
+// Dialect-independent loop-domain proofs. Callers supply bound facts or
+// concrete integer recurrences; this component owns their numeric semantics.
 
 #ifndef LOOM_ANALYSIS_LOOP_DOMAIN_H_
 #define LOOM_ANALYSIS_LOOP_DOMAIN_H_
 
 #include "iree/base/api.h"
+#include "loom/ir/facts.h"
 #include "loom/ir/ir.h"
-#include "loom/util/fact_table.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,23 +29,19 @@ typedef struct loom_loop_domain_t {
   loom_value_id_t step;
 } loom_loop_domain_t;
 
-// Returns true when both domains are proven identical by SSA identity or exact
-// integer value facts. Non-exact facts deliberately do not prove equality: two
-// values with the same range may still differ at runtime.
-bool loom_loop_domain_equal(const loom_value_fact_table_t* fact_table,
-                            loom_loop_domain_t lhs, loom_loop_domain_t rhs);
-
 // Returns true when every value admitted by the domain facts produces zero
 // iterations. The proof requires a positive integer step and lower_bound >=
 // upper_bound for the complete fact ranges.
-bool loom_loop_domain_proven_empty(const loom_value_fact_table_t* fact_table,
-                                   loom_loop_domain_t domain);
+bool loom_loop_domain_proven_empty(loom_value_facts_t lower_bound,
+                                   loom_value_facts_t upper_bound,
+                                   loom_value_facts_t step);
 
 // Returns true when every value admitted by the domain facts produces at least
 // one iteration. The proof requires a positive integer step and lower_bound <
 // upper_bound for the complete fact ranges.
-bool loom_loop_domain_proven_nonempty(const loom_value_fact_table_t* fact_table,
-                                      loom_loop_domain_t domain);
+bool loom_loop_domain_proven_nonempty(loom_value_facts_t lower_bound,
+                                      loom_value_facts_t upper_bound,
+                                      loom_value_facts_t step);
 
 // Upper-bound comparison semantics for a header-tested integer recurrence.
 enum loom_loop_bound_flag_bits_e {
@@ -77,6 +71,26 @@ bool loom_loop_domain_trip_count(loom_loop_bound_flags_t bound_flags,
                                  uint8_t bitwidth, uint64_t initial_value,
                                  uint64_t upper_bound, uint64_t step,
                                  uint64_t* out_trip_count);
+
+// Facts for the controlling value of a finite-width, header-tested recurrence.
+typedef struct loom_loop_recurrence_facts_t {
+  // Inclusive range of all header observations, including the terminal value.
+  // Unknown when the recurrence crosses the signed source representation.
+  loom_value_facts_t values;
+  // Exact body execution count when trip_count_known is true; zero otherwise.
+  uint64_t trip_count;
+  // True when the recurrence reaches its exit without wrapping in guard order.
+  bool trip_count_known;
+} loom_loop_recurrence_facts_t;
+
+// Proves the same recurrence as trip_count, retaining a source-integer range
+// when its initial value and positive increments remain representable in the
+// signed carrier. An exact count alone does not imply such a range: unsigned
+// order can cross the sign bit, and a modular increment can be negative in the
+// source representation. A zero-trip range contains only the initial value.
+loom_loop_recurrence_facts_t loom_loop_domain_recurrence_facts(
+    loom_loop_bound_flags_t bound_flags, uint8_t bitwidth,
+    int64_t initial_value, int64_t upper_bound, int64_t step);
 
 #ifdef __cplusplus
 }

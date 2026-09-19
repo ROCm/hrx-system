@@ -455,6 +455,7 @@ static bool loom_rewriter_cfg_predecessors_equal(
     const loom_cfg_edge_info_t* new_edge =
         &new_graph->edges[new_edges.values[new_position++]];
     if (old_edge->terminator != new_edge->terminator ||
+        old_edge->successor_index != new_edge->successor_index ||
         old_edge->selector_value_id != new_edge->selector_value_id ||
         old_graph->blocks[old_edge->source_block_index].block !=
             new_graph->blocks[new_edge->source_block_index].block ||
@@ -561,8 +562,8 @@ iree_status_t loom_rewriter_refresh_cfg_facts(loom_rewriter_t* rewriter,
                                                    &next_arena, structure);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_value_fact_table_set_cfg_region(rewriter->fact_table, region,
-                                                  structure);
+    status = loom_value_fact_table_set_cfg_region(
+        rewriter->fact_table, rewriter->module, region, structure);
   }
   if (iree_status_is_ok(status)) {
     iree_arena_checkpoint_t checkpoint =

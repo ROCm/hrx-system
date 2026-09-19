@@ -20,6 +20,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_u
 
 // ====
 
+// RUN: with-checks emit source-low output=low
 amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @offset_loop_narrows_induction_operand() {
@@ -38,41 +39,14 @@ kernel.def target(@target) @offset_loop_narrows_induction_operand() {
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @offset_loop_narrows_induction_operand() asm {
-  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %begin = s_mov_b32 0
-  %end = s_mov_b32 2
-  %step = s_mov_b32 1
-  %value = v_mov_b32 42
-  %32 = s_mov_b64_exec_read
-  low.br ^_bb1(%begin: reg<amdgpu.sgpr>, %begin: reg<amdgpu.sgpr>)
-^_bb1(%49: reg<amdgpu.sgpr>, %50: reg<amdgpu.sgpr>):
-  %22 = v_mov_b32_copy %49
-  %24 = v_mov_b32_copy %50
-  %25 = v_mov_b32_copy %end
-  %26 = v_mov_b32 0
-  %27 = v_cmp_lt_u32 %24, %26
-  %28 = v_cmp_lt_u32 %22, %25
-  %29 = v_cmp_eq_i32 %24, %26
-  %30 = s_and_b64 %29, %28
-  %31 = s_or_b64 %27, %30
-  %33, %34 = s_and_saveexec_b64 %31
-  low.cond_br %34, ^_bb2, ^_bb3 : reg<amdgpu.scc>
-^_bb2:
-  %35 = v_mov_b32 0
-  %37 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %38 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %39 = s_mov_b32 0
-  %40, %41 = s_add_co_u32 %37, %49
-  %42, %43 = s_addc_u32 %38, %39, %41
-  %44 = concat(%40, %42) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  global_store_b8_saddr %35, %value, %44
-  %46 = s_add_u32 %49, %step
-  low.br ^_bb1(%46: reg<amdgpu.sgpr>, %39: reg<amdgpu.sgpr>)
-^_bb3:
-  s_mov_b64_exec %32
-  return
-}
+CHECK: low.kernel.def *@offset_loop_narrows_induction_operand() asm {
+CHECK: ^*(%byte_offset: reg<amdgpu.sgpr>):
+CHECK: * = s_cmp_lt_u32 %byte_offset, %end
+CHECK: global_store_b8_saddr *
+CHECK: * = s_add_u32 %byte_offset, %step
+CHECK: *return
+CHECK-NOT: *saveexec*
+CHECK-NOT: *v_cmp*
 
 // ====
 

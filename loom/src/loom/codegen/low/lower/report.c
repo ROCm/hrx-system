@@ -9,17 +9,14 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "loom/analysis/loop_domain.h"
 #include "loom/codegen/low/lower/context.h"
 #include "loom/codegen/low/lower/rule_emit.h"
 #include "loom/codegen/low/lower/source_plan.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
-#include "loom/ops/cfg/ops.h"
 #include "loom/ops/func/ops.h"
-#include "loom/ops/index/ops.h"
-#include "loom/util/cfg_graph.h"
 #include "loom/util/cfg_loop_nest.h"
+#include "loom/util/fact_cfg.h"
 
 enum {
   // Default allocation block size for source-to-Low selection report rows.
@@ -447,258 +444,6 @@ static bool loom_low_lower_report_exact_trip_count(
   return true;
 }
 
-static bool loom_low_lower_report_value_exact_i64(
-    const loom_low_lower_context_t* context, loom_value_id_t value_id,
-    int64_t* out_value) {
-  *out_value = 0;
-  if (value_id == LOOM_VALUE_ID_INVALID) {
-    return false;
-  }
-  const loom_value_fact_table_t* fact_table = context->lowering.fact_table;
-  if (fact_table != NULL) {
-    const loom_value_facts_t facts =
-        loom_value_fact_table_lookup(fact_table, value_id);
-    if (loom_value_facts_as_exact_i64(facts, out_value)) {
-      return true;
-    }
-    loom_value_facts_t element_facts = loom_value_facts_unknown();
-    if (loom_value_facts_query_all_equal_element(&fact_table->context, facts,
-                                                 &element_facts) &&
-        loom_value_facts_as_exact_i64(element_facts, out_value)) {
-      return true;
-    }
-  }
-  if (value_id >= context->module->values.count) {
-    return false;
-  }
-  const loom_value_t* value = loom_module_value(context->module, value_id);
-  if (loom_value_is_block_arg(value)) {
-    return false;
-  }
-  const loom_op_t* defining_op = loom_value_def_op(value);
-  if (defining_op == NULL || !loom_index_constant_isa(defining_op)) {
-    return false;
-  }
-  loom_attribute_t attr = loom_index_constant_value(defining_op);
-  if (attr.kind != LOOM_ATTR_I64) {
-    return false;
-  }
-  *out_value = loom_attr_as_i64(attr);
-  return true;
-}
-
-static loom_value_id_t loom_low_lower_report_identity_value(
-    const loom_low_lower_context_t* context, loom_value_id_t value_id) {
-  for (iree_host_size_t i = 0; i < context->module->values.count; ++i) {
-    if (value_id == LOOM_VALUE_ID_INVALID ||
-        value_id >= context->module->values.count) {
-      return value_id;
-    }
-    const loom_value_t* value = loom_module_value(context->module, value_id);
-    if (loom_value_is_block_arg(value)) {
-      return value_id;
-    }
-    const loom_op_t* defining_op = loom_value_def_op(value);
-    if (defining_op == NULL) {
-      return value_id;
-    }
-    const loom_trait_flags_t traits =
-        loom_op_effective_traits(context->module, defining_op);
-    const uint16_t result_index = loom_value_def_index(value);
-    loom_value_id_t next_value_id = value_id;
-    if (loom_traits_are_fact_identity(traits)) {
-      if (result_index >= defining_op->operand_count) {
-        return value_id;
-      }
-      next_value_id = loom_op_const_operands(defining_op)[result_index];
-    } else if (loom_traits_are_value_alias(traits)) {
-      if (result_index != 0 || defining_op->operand_count == 0) {
-        return value_id;
-      }
-      next_value_id = loom_op_const_operands(defining_op)[0];
-    } else {
-      return value_id;
-    }
-    if (next_value_id == value_id) {
-      return value_id;
-    }
-    value_id = next_value_id;
-  }
-  return value_id;
-}
-
-static bool loom_low_lower_report_block_branches_to(const loom_block_t* block,
-                                                    const loom_block_t* dest,
-                                                    const loom_op_t** out_br) {
-  const loom_op_t* terminator = block != NULL ? block->last_op : NULL;
-  if (terminator == NULL || !loom_cfg_br_isa(terminator) ||
-      loom_cfg_br_dest(terminator) != dest) {
-    return false;
-  }
-  *out_br = terminator;
-  return true;
-}
-
-static bool loom_low_lower_report_branch_argument(
-    const loom_op_t* branch_op, const loom_block_t* dest, uint16_t arg_index,
-    loom_value_id_t* out_value_id) {
-  *out_value_id = LOOM_VALUE_ID_INVALID;
-  if (branch_op == NULL || !loom_cfg_br_isa(branch_op) ||
-      arg_index >= dest->arg_count) {
-    return false;
-  }
-  const loom_value_slice_t args = loom_cfg_br_args(branch_op);
-  if (arg_index >= args.count) {
-    return false;
-  }
-  *out_value_id = args.values[arg_index];
-  return true;
-}
-
-static bool loom_low_lower_report_add_step(
-    const loom_low_lower_context_t* context, loom_value_id_t value_id,
-    loom_value_id_t iv_id, int64_t* out_step) {
-  if (value_id >= context->module->values.count) {
-    return false;
-  }
-  const loom_value_t* value = loom_module_value(context->module, value_id);
-  if (loom_value_is_block_arg(value)) {
-    return false;
-  }
-  const loom_op_t* defining_op = loom_value_def_op(value);
-  if (defining_op == NULL || !loom_index_add_isa(defining_op)) {
-    return false;
-  }
-  const loom_value_id_t lhs = loom_low_lower_report_identity_value(
-      context, loom_index_add_lhs(defining_op));
-  const loom_value_id_t rhs = loom_low_lower_report_identity_value(
-      context, loom_index_add_rhs(defining_op));
-  if (lhs == iv_id) {
-    return loom_low_lower_report_value_exact_i64(context, rhs, out_step);
-  }
-  if (rhs == iv_id) {
-    return loom_low_lower_report_value_exact_i64(context, lhs, out_step);
-  }
-  return false;
-}
-
-static bool loom_low_lower_report_header_upper_bound(
-    const loom_low_lower_context_t* context, const loom_op_t* cond_br_op,
-    loom_value_id_t iv_id, int64_t* out_upper_bound,
-    loom_loop_bound_flags_t* out_bound_flags) {
-  if (cond_br_op == NULL || !loom_cfg_cond_br_isa(cond_br_op)) {
-    return false;
-  }
-  const loom_value_id_t condition = loom_cfg_cond_br_condition(cond_br_op);
-  if (condition >= context->module->values.count) {
-    return false;
-  }
-  const loom_value_t* condition_value =
-      loom_module_value(context->module, condition);
-  if (loom_value_is_block_arg(condition_value)) {
-    return false;
-  }
-  const loom_op_t* compare_op = loom_value_def_op(condition_value);
-  if (compare_op == NULL || !loom_index_cmp_isa(compare_op)) {
-    return false;
-  }
-  switch (loom_index_cmp_predicate(compare_op)) {
-    case LOOM_INDEX_CMP_PREDICATE_SLT:
-      *out_bound_flags = LOOM_LOOP_BOUND_SIGNED;
-      break;
-    case LOOM_INDEX_CMP_PREDICATE_SLE:
-      *out_bound_flags = LOOM_LOOP_BOUND_SIGNED | LOOM_LOOP_BOUND_INCLUSIVE;
-      break;
-    case LOOM_INDEX_CMP_PREDICATE_ULT:
-      *out_bound_flags = LOOM_LOOP_BOUND_NONE;
-      break;
-    case LOOM_INDEX_CMP_PREDICATE_ULE:
-      *out_bound_flags = LOOM_LOOP_BOUND_INCLUSIVE;
-      break;
-    default:
-      return false;
-  }
-  if (loom_index_cmp_lhs(compare_op) != iv_id) {
-    return false;
-  }
-  if (!loom_low_lower_report_value_exact_i64(
-          context, loom_index_cmp_rhs(compare_op), out_upper_bound)) {
-    return false;
-  }
-  return true;
-}
-
-static bool loom_low_lower_report_try_counted_cfg_loop(
-    const loom_low_lower_context_t* context, const loom_cfg_graph_t* graph,
-    const loom_cfg_natural_loop_t* loop, uint64_t* out_trip_count) {
-  *out_trip_count = 0;
-  if (loop->entries.count != 1 || loop->backedges.count != 1 ||
-      loop->exits.count != 1) {
-    return false;
-  }
-  const loom_cfg_edge_info_t* exit_edge =
-      &graph->edges[loop->exits.unique_index];
-  const loom_block_t* header = graph->blocks[loop->header_index].block;
-  if (exit_edge->source_block_index != loop->header_index ||
-      exit_edge->successor_index != 1 || header->arg_count == 0 ||
-      !loom_cfg_cond_br_isa(header->last_op)) {
-    return false;
-  }
-  const loom_value_id_t iv_id = loom_block_arg_id(header, 0);
-  const loom_cfg_edge_info_t* entry_edge =
-      &graph->edges[loop->entries.unique_index];
-  const loom_cfg_edge_info_t* backedge =
-      &graph->edges[loop->backedges.unique_index];
-
-  const loom_op_t* initial_branch_op = NULL;
-  if (!loom_low_lower_report_block_branches_to(
-          graph->blocks[entry_edge->source_block_index].block, header,
-          &initial_branch_op)) {
-    return false;
-  }
-  const loom_op_t* body_backedge_op = NULL;
-  if (!loom_low_lower_report_block_branches_to(
-          graph->blocks[backedge->source_block_index].block, header,
-          &body_backedge_op)) {
-    return false;
-  }
-
-  loom_value_id_t body_backedge_arg = LOOM_VALUE_ID_INVALID;
-  if (!loom_low_lower_report_branch_argument(
-          body_backedge_op, header, /*arg_index=*/0, &body_backedge_arg)) {
-    return false;
-  }
-
-  loom_value_id_t initial_arg = LOOM_VALUE_ID_INVALID;
-  if (!loom_low_lower_report_branch_argument(initial_branch_op, header,
-                                             /*arg_index=*/0, &initial_arg)) {
-    return false;
-  }
-
-  int64_t lower_bound = 0;
-  int64_t upper_bound = 0;
-  int64_t step = 0;
-  loom_loop_bound_flags_t bound_flags = LOOM_LOOP_BOUND_NONE;
-  if (!loom_low_lower_report_value_exact_i64(context, initial_arg,
-                                             &lower_bound) ||
-      !loom_low_lower_report_add_step(context, body_backedge_arg, iv_id,
-                                      &step) ||
-      !loom_low_lower_report_header_upper_bound(context, header->last_op, iv_id,
-                                                &upper_bound, &bound_flags)) {
-    return false;
-  }
-  const loom_target_snapshot_t* target =
-      &context->options->target_facts->storage.snapshot;
-  const loom_scalar_type_t scalar_type =
-      loom_type_element_type(loom_module_value_type(context->module, iv_id));
-  const uint8_t bitwidth = scalar_type == LOOM_SCALAR_TYPE_INDEX
-                               ? target->index_bitwidth
-                               : target->offset_bitwidth;
-  return loom_loop_domain_trip_count(
-      bound_flags, bitwidth, (uint64_t)lower_bound, (uint64_t)upper_bound,
-      (uint64_t)step, out_trip_count);
-}
-
 static iree_status_t loom_low_lower_report_calculate_source_block_counts(
     loom_low_lower_context_t* context, loom_region_t* body,
     iree_arena_allocator_t* analysis_arena) {
@@ -706,8 +451,10 @@ static iree_status_t loom_low_lower_report_calculate_source_block_counts(
     context->lowering.report.source_block_execution_counts[0] = 1;
     return iree_ok_status();
   }
-  const loom_cfg_loop_nest_t* loops = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_context_cfg_loops(context, &loops));
+  const loom_value_fact_cfg_region_t* region =
+      loom_value_fact_table_lookup_cfg_region(context->lowering.fact_table,
+                                              body);
+  const loom_cfg_loop_nest_t* loops = &region->loops;
   uint64_t* trip_counts = NULL;
   if (loops->loop_count > 0) {
     IREE_RETURN_IF_ERROR(
@@ -715,11 +462,15 @@ static iree_status_t loom_low_lower_report_calculate_source_block_counts(
                                   sizeof(*trip_counts), (void**)&trip_counts));
   }
   for (iree_host_size_t i = 0; i < loops->loop_count; ++i) {
-    if (!loom_low_lower_report_try_counted_cfg_loop(
-            context, loops->graph, &loops->loops[i], &trip_counts[i])) {
+    const loom_loop_recurrence_facts_t recurrence =
+        loom_value_fact_cfg_induction_facts(context->lowering.fact_table,
+                                            context->module,
+                                            &region->inductions[i]);
+    if (!recurrence.trip_count_known) {
       context->lowering.report.source_block_execution_counts_exact = false;
       return iree_ok_status();
     }
+    trip_counts[i] = recurrence.trip_count;
   }
   context->lowering.report.source_block_execution_counts_exact =
       loom_cfg_loop_nest_calculate_block_execution_counts(

@@ -171,6 +171,12 @@ loom_test(
 )
 
 loom_test(
+    name = "loop_count_access_test",
+    srcs = ["//loom/src/loom/test/corpus/conformance:loop_count.loom"],
+    execution_profile = AMDGPU_ACCESS_PROFILE,
+)
+
+loom_test(
     name = "loop_termination_hardware_test",
     srcs = ["//loom/src/loom/test/corpus/conformance:loop_termination.loom"],
     execution_profile = AMDGPU_HARDWARE_PROFILE,

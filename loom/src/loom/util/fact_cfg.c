@@ -197,6 +197,18 @@ iree_status_t loom_value_fact_cfg_region_initialize(
   *out_region = (loom_value_fact_cfg_region_t){0};
   IREE_RETURN_IF_ERROR(
       loom_cfg_graph_build(module, region, arena, &out_region->graph));
+  IREE_RETURN_IF_ERROR(
+      loom_cfg_loop_nest_build(&out_region->graph, arena, &out_region->loops));
+  if (out_region->loops.loop_count) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, out_region->loops.loop_count, sizeof(*out_region->inductions),
+        (void**)&out_region->inductions));
+    for (iree_host_size_t i = 0; i < out_region->loops.loop_count; ++i) {
+      out_region->inductions[i] = (loom_value_fact_cfg_induction_t){
+          .value = LOOM_VALUE_ID_INVALID,
+      };
+    }
+  }
   IREE_RETURN_IF_ERROR(loom_cfg_control_build(&out_region->graph, arena,
                                               &out_region->control_structure));
   IREE_RETURN_IF_ERROR(iree_arena_allocate(arena, sizeof(*out_region->control),

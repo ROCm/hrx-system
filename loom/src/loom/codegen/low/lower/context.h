@@ -67,8 +67,6 @@ typedef struct loom_low_lower_function_analysis_t {
   loom_symbolic_expr_context_t expression_context;
   // View-region table borrowing expression_context.
   loom_view_region_table_t view_regions;
-  // Lazily built semantic loops borrowing the immutable fact-owned CFG.
-  loom_cfg_loop_nest_t* cfg_loops;
 } loom_low_lower_function_analysis_t;
 
 typedef struct loom_low_lowering_frame_t {

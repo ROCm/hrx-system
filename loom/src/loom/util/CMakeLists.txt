@@ -220,22 +220,28 @@ loom_cc_library(
   SRCS
     "fact_cfg.c"
     "fact_extensions.c"
+    "fact_induction.c"
     "fact_table.c"
     "fact_table_compute.c"
     "reference_transfer.c"
   DEPS
     ::cfg_control
     ::cfg_graph
+    ::cfg_loop_nest
     ::fact_control
     ::numeric_format
     ::reference_facts
     iree::base
     iree::base::internal
     iree::base::internal::arena
+    loom::analysis::loop_domain
     loom::analysis::scc
     loom::ir
     loom::ir::facts
+    loom::ops::cfg::op_defs
+    loom::ops::index::op_defs
     loom::ops::op_defs
+    loom::target::facts
   PUBLIC
 )
 
@@ -249,6 +255,7 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::ir::facts
 )
 
 loom_cc_test(

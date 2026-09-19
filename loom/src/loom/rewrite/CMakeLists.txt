@@ -56,12 +56,14 @@ loom_cc_test(
     loom::ir
     loom::ops::buffer
     loom::ops::cfg
+    loom::ops::index
     loom::ops::op_defs
     loom::ops::scf
     loom::ops::test
     loom::pass::value_facts
     loom::target::facts
     loom::target::types
+    loom::util::fact_table
 )
 
 loom_cc_library(

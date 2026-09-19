@@ -340,6 +340,13 @@ static inline loom_value_facts_t loom_value_fact_table_lookup(
   return table->entries[value_id];
 }
 
+// Returns true for the same valid SSA value or equal exact integer values.
+// Equal ranges do not prove runtime equality. A NULL table permits SSA identity
+// alone; invalid value IDs never compare equal.
+bool loom_value_fact_table_values_equal(const loom_value_fact_table_t* table,
+                                        loom_value_id_t lhs,
+                                        loom_value_id_t rhs);
+
 // Returns the CFG graph built while computing facts for |region|, or NULL when
 // the region was not part of the populated fact scope. The returned graph is
 // borrowed from |table| and remains valid until the scope is cleared or the

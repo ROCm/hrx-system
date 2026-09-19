@@ -141,3 +141,37 @@ check.case public @inverted_loop_guard_case {
   check.expect.equal actual(%actual) expected(%expected) : tensor<1xi32>
   check.return
 }
+
+// A signed carried counter needs the initializer's lower bound as well as the
+// guard's upper bound to establish every store's memory footprint.
+kernel.def @carried_counter_store() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer) {
+  %loop_begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.constant 4 : index
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<4xi32>
+  cfg.br ^preheader
+^preheader:
+  cfg.br ^header(%loop_begin: index)
+^header(%position: index):
+  %more = index.cmp slt, %position, %end : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %value = index.cast %position : index to i32
+  view.store %value, %output_view[%position] : i32, view<4xi32>
+  %next = index.add %position, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  kernel.return
+}
+
+check.case public @carried_counter_store_case {
+  %actual = check.generate.fill value(-1) : tensor<4xi32>
+  %expected = check.generate.iota offset(0) step(1) : tensor<4xi32>
+  kernel.launch @carried_counter_store(%actual) : (tensor<4xi32>)
+  check.expect.equal actual(%actual) expected(%expected) : tensor<4xi32>
+  check.return
+}

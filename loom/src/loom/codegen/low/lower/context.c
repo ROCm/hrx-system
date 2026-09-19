@@ -17,6 +17,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/ops/type_registry.h"
 #include "loom/target/registers.h"
+#include "loom/util/fact_cfg.h"
 
 static iree_string_view_t loom_low_lower_nonempty(
     iree_string_view_t value, iree_string_view_t placeholder) {
@@ -306,23 +307,13 @@ const loom_value_fact_table_t* loom_low_lower_context_fact_table(
   return context->lowering.fact_table;
 }
 
-iree_status_t loom_low_lower_context_cfg_loops(
-    loom_low_lower_context_t* context, const loom_cfg_loop_nest_t** out_loops) {
-  loom_low_lower_function_analysis_t* analysis =
-      &context->lowering.function_analysis;
-  if (analysis->cfg_loops == NULL) {
-    const loom_cfg_graph_t* graph = loom_value_fact_table_lookup_cfg_graph(
-        context->lowering.fact_table,
-        loom_func_like_body(context->source_function));
-    loom_cfg_loop_nest_t* loops = NULL;
-    IREE_RETURN_IF_ERROR(iree_arena_allocate(&context->function_arena,
-                                             sizeof(*loops), (void**)&loops));
-    IREE_RETURN_IF_ERROR(
-        loom_cfg_loop_nest_build(graph, &context->function_arena, loops));
-    analysis->cfg_loops = loops;
-  }
-  *out_loops = analysis->cfg_loops;
-  return iree_ok_status();
+const loom_cfg_loop_nest_t* loom_low_lower_context_cfg_loops(
+    const loom_low_lower_context_t* context) {
+  const loom_value_fact_cfg_region_t* region =
+      loom_value_fact_table_lookup_cfg_region(
+          context->lowering.fact_table,
+          loom_func_like_body(context->source_function));
+  return &region->loops;
 }
 
 loom_condition_query_t* loom_low_lower_context_condition_query(

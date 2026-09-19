@@ -1080,10 +1080,10 @@ const loom_value_fact_table_t* loom_low_lower_context_fact_table(
     const loom_low_lower_context_t* context);
 
 // Returns retained natural-loop structure for the source function's CFG body.
-// The analysis borrows the fact-owned graph and is built once on first use.
-// Both remain valid throughout this immutable source-function lowering.
-iree_status_t loom_low_lower_context_cfg_loops(
-    loom_low_lower_context_t* context, const loom_cfg_loop_nest_t** out_loops);
+// The fact scope owns both the graph and its loop structure. Both remain valid
+// throughout this immutable source-function lowering.
+const loom_cfg_loop_nest_t* loom_low_lower_context_cfg_loops(
+    const loom_low_lower_context_t* context);
 
 // Returns reusable traversal state for condition-fact queries.
 loom_condition_query_t* loom_low_lower_context_condition_query(

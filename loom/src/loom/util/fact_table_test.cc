@@ -12,6 +12,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/ir/float_facts.h"
 
 namespace loom {
 namespace {
@@ -32,6 +33,34 @@ class FactTableTest : public ::testing::Test {
   iree_arena_block_pool_t block_pool_;
   iree_arena_allocator_t arena_;
 };
+
+TEST_F(FactTableTest, ValueEqualityUsesSsaOrExactIntegers) {
+  EXPECT_TRUE(loom_value_fact_table_values_equal(nullptr, 1, 1));
+  EXPECT_FALSE(loom_value_fact_table_values_equal(nullptr, 1, 2));
+  EXPECT_FALSE(loom_value_fact_table_values_equal(
+      nullptr, LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID));
+  loom_value_fact_table_t table;
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 8));
+  IREE_ASSERT_OK(
+      loom_value_fact_table_define(&table, 1, loom_value_facts_exact_i64(4)));
+  IREE_ASSERT_OK(
+      loom_value_fact_table_define(&table, 2, loom_value_facts_exact_i64(4)));
+  EXPECT_TRUE(loom_value_fact_table_values_equal(&table, 1, 2));
+  for (const auto facts :
+       {loom_value_facts_exact_i64(5), loom_value_facts_make(0, 8, 1),
+        loom_value_facts_unknown()}) {
+    IREE_ASSERT_OK(loom_value_fact_table_define(&table, 2, facts));
+    EXPECT_FALSE(loom_value_fact_table_values_equal(&table, 1, 2));
+  }
+  const auto range = loom_value_facts_make(0, 8, 1);
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table, 1, range));
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table, 2, range));
+  EXPECT_FALSE(loom_value_fact_table_values_equal(&table, 1, 2));
+  const auto floating = loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 4.0);
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table, 1, floating));
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table, 2, floating));
+  EXPECT_FALSE(loom_value_fact_table_values_equal(&table, 1, 2));
+}
 
 static constexpr uint8_t kTestRawPayloadTag = 42;
 

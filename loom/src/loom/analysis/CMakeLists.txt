@@ -899,7 +899,6 @@ loom_cc_library(
     iree::base
     loom::ir
     loom::ir::facts
-    loom::util::fact_table
   PUBLIC
 )
 
@@ -910,11 +909,9 @@ loom_cc_test(
     "loop_domain_test.cc"
   DEPS
     ::loop_domain
-    iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
     loom::ir::facts
-    loom::util::fact_table
 )
 
 loom_cc_library(

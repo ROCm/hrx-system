@@ -611,12 +611,13 @@ iree_status_t loom_motion_subtree_evaluate_hoist_before_loop(
         loop.op);
     return iree_ok_status();
   }
-  const loom_loop_domain_t domain = {
-      .lower_bound = loom_loop_like_lower_bound(loop),
-      .upper_bound = loom_loop_like_upper_bound(loop),
-      .step = loom_loop_like_step(loop),
-  };
-  if (!loom_loop_domain_proven_nonempty(analysis->fact_table, domain)) {
+  if (!loom_loop_domain_proven_nonempty(
+          loom_value_fact_table_lookup(analysis->fact_table,
+                                       loom_loop_like_lower_bound(loop)),
+          loom_value_fact_table_lookup(analysis->fact_table,
+                                       loom_loop_like_upper_bound(loop)),
+          loom_value_fact_table_lookup(analysis->fact_table,
+                                       loom_loop_like_step(loop)))) {
     loom_motion_loop_hoist_reject(
         out_result, LOOM_MOTION_LOOP_HOIST_REJECTION_LOOP_MAY_NOT_EXECUTE,
         loop.op);

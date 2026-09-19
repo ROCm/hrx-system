@@ -1283,8 +1283,7 @@ static iree_status_t loom_amdgpu_try_prepare_divergent_loop(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     bool* out_handled) {
   *out_handled = false;
-  const loom_cfg_loop_nest_t* loops = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_context_cfg_loops(context, &loops));
+  const loom_cfg_loop_nest_t* loops = loom_low_lower_context_cfg_loops(context);
   const loom_cfg_graph_t* graph = loops->graph;
   uint16_t block_index =
       (uint16_t)loom_cfg_graph_block_index(graph, source_op->parent_block);

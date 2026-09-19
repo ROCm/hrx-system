@@ -587,6 +587,13 @@ static iree_status_t loom_value_fact_table_compute_cfg_block_arg(
   }
   loom_type_t type = loom_module_value_type(module, arg_id);
 
+  const uint16_t header_loop =
+      loom_cfg_loop_nest_innermost(&region->loops, block_index);
+  const bool exits_at_header =
+      header_loop != LOOM_CFG_LOOP_NEST_NONE &&
+      region->loops.loops[header_loop].header_index == block_index &&
+      region->inductions[header_loop].exits_at_header;
+
   bool has_facts = false;
   loom_value_facts_t control_facts = loom_value_facts_unknown();
   loom_value_facts_mark_cluster_uniform(&control_facts);
@@ -617,6 +624,11 @@ static iree_status_t loom_value_fact_table_compute_cfg_block_arg(
       }
       uint16_t predecessor_index = predecessor_edge->source_block_index;
       if (!loom_cfg_graph_block_is_reachable(graph, predecessor_index)) {
+        continue;
+      }
+      if (exits_at_header &&
+          predecessor_edges.values[i] ==
+              region->loops.loops[header_loop].backedges.unique_index) {
         continue;
       }
       const loom_block_t* predecessor_block =
@@ -668,12 +680,21 @@ static iree_status_t loom_value_fact_table_compute_cfg_block_arg(
     }
   }
   loom_value_facts_t facts = incoming_facts;
-  if (widen && loom_value_fact_table_has_entry(table, arg_id)) {
+  if (widen && !exits_at_header &&
+      loom_value_fact_table_has_entry(table, arg_id)) {
     loom_value_facts_t current_facts =
         loom_value_fact_table_lookup(table, arg_id);
     IREE_RETURN_IF_ERROR(loom_value_fact_table_widen_for_type(
         table, module, type, table, current_facts, table, incoming_facts,
         iteration, &facts));
+  }
+  if (header_loop != LOOM_CFG_LOOP_NEST_NONE &&
+      region->inductions[header_loop].value == arg_id) {
+    const loom_loop_recurrence_facts_t recurrence =
+        loom_value_fact_cfg_induction_facts(table, module,
+                                            &region->inductions[header_loop]);
+    facts = loom_value_facts_clamp_domain(facts, recurrence.values.range_lo,
+                                          recurrence.values.range_hi);
   }
   for (iree_host_size_t member = 0; member < member_count; ++member) {
     loom_value_id_t value_id =
@@ -701,6 +722,12 @@ static iree_status_t loom_value_fact_table_compute_cfg_forwarding(
     bool* out_changed) {
   IREE_RETURN_IF_ERROR(loom_value_fact_cfg_update_forwarding(
       region, control_flow_component, table->transient_arena));
+  const loom_scc_t* blocks =
+      &region->control_flow.components.values[control_flow_component];
+  for (iree_host_size_t i = 0; i < blocks->node_count; ++i) {
+    loom_value_fact_cfg_update_induction(table, module, region,
+                                         (uint16_t)blocks->nodes[i]);
+  }
   const loom_value_fact_cfg_forwarding_t* partition =
       &region->control_flow.forwarding[control_flow_component];
   for (iree_host_size_t i = 0; i < partition->component_count; ++i) {
@@ -720,6 +747,7 @@ static iree_status_t loom_value_fact_table_compute_cfg_block_args(
     loom_value_fact_table_t* table, const loom_module_t* module,
     const loom_value_fact_cfg_region_t* region, uint16_t block_index,
     bool* out_changed) {
+  loom_value_fact_cfg_update_induction(table, module, region, block_index);
   if (block_index == 0) {
     return iree_ok_status();
   }

@@ -9,6 +9,16 @@
 
 iree_add_all_subdirs()
 
+loom_cc_library(
+  NAME
+    op_defs
+  HDRS
+    "ops.h"
+  DEPS
+    loom::ops::op_defs
+  PUBLIC
+)
+
 loom_generated_cc_library(
   NAME
     cfg
@@ -27,6 +37,7 @@ loom_generated_cc_library(
   ARGS
     "--dialect=cfg"
   DEPS
+    ::op_defs
     loom::error::emitter
     loom::error::error_defs
     loom::ir

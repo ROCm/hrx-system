@@ -446,8 +446,15 @@ static bool loom_loop_fusion_candidate_is_legal(
   if (combined_result_count > UINT16_MAX) {
     return false;
   }
-  if (!loom_loop_domain_equal(context->rewriter->fact_table, first->domain,
-                              second->domain)) {
+  if (!loom_value_fact_table_values_equal(context->rewriter->fact_table,
+                                          first->domain.lower_bound,
+                                          second->domain.lower_bound) ||
+      !loom_value_fact_table_values_equal(context->rewriter->fact_table,
+                                          first->domain.upper_bound,
+                                          second->domain.upper_bound) ||
+      !loom_value_fact_table_values_equal(context->rewriter->fact_table,
+                                          first->domain.step,
+                                          second->domain.step)) {
     return false;
   }
   if (!loom_loop_fusion_block_effects_are_allowed(context->module, first->block,

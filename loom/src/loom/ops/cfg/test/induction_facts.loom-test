@@ -1,0 +1,546 @@
+// RUN: with-checks pass canonicalize,dce
+
+func.def @counted_signed() -> (i64, i64) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  cfg.br ^header(%begin: index)
+^header(%counter: index):
+  %lo = test.fact_range_lo %counter : index -> i64
+  %hi = test.fact_range_hi %counter : index -> i64
+  %more = index.cmp slt, %counter, %end : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next = index.add %counter, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return %lo, %hi : i64, i64
+}
+
+// ----
+CHECK: %lo = scalar.constant 0 : i64
+CHECK: %hi = scalar.constant 4 : i64
+CHECK-NOT: *test.fact_range_*
+
+// ====
+
+// RUN: with-checks pass canonicalize,dce
+
+func.def @partial_step() -> (i64, i64) {
+  %begin = index.constant 2 : index
+  %end = index.constant 9 : index
+  %step = index.constant 3 : index
+  cfg.br ^header(%begin: index)
+^header(%counter: index):
+  %lo = test.fact_range_lo %counter : index -> i64
+  %hi = test.fact_range_hi %counter : index -> i64
+  %more = index.cmp slt, %counter, %end : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next = index.add %counter, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return %lo, %hi : i64, i64
+}
+
+// ----
+CHECK: %lo = scalar.constant 2 : i64
+CHECK: %hi = scalar.constant 11 : i64
+CHECK-NOT: *test.fact_range_*
+
+// ====
+
+// RUN: with-checks pass canonicalize,dce
+
+func.def @negative_start() -> (i64, i64) {
+  %begin = index.constant -5 : index
+  %end = index.constant 2 : index
+  %step = index.constant 3 : index
+  cfg.br ^header(%begin: index)
+^header(%counter: index):
+  %lo = test.fact_range_lo %counter : index -> i64
+  %hi = test.fact_range_hi %counter : index -> i64
+  %more = index.cmp slt, %counter, %end : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next = index.add %counter, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return %lo, %hi : i64, i64
+}
+
+// ----
+CHECK: %lo = scalar.constant -5 : i64
+CHECK: %hi = scalar.constant 4 : i64
+CHECK-NOT: *test.fact_range_*
+
+// ====
+
+// RUN: with-checks pass canonicalize,dce
+
+func.def @inclusive_bound() -> (i64, i64) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 2 : index
+  cfg.br ^header(%begin: index)
+^header(%counter: index):
+  %lo = test.fact_range_lo %counter : index -> i64
+  %hi = test.fact_range_hi %counter : index -> i64
+  %more = index.cmp sle, %counter, %end : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next = index.add %counter, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return %lo, %hi : i64, i64
+}
+
+// ----
+CHECK: %lo = scalar.constant 0 : i64
+CHECK: %hi = scalar.constant 6 : i64
+CHECK-NOT: *test.fact_range_*
+
+// ====
+
+// RUN: with-checks pass canonicalize,dce
+
+func.def @unsigned_counter() -> (i64, i64) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  cfg.br ^header(%begin: index)
+^header(%counter: index):
+  %lo = test.fact_range_lo %counter : index -> i64
+  %hi = test.fact_range_hi %counter : index -> i64
+  %more = index.cmp ult, %counter, %end : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next = index.add %counter, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return %lo, %hi : i64, i64
+}
+
+// ----
+CHECK: %lo = scalar.constant 0 : i64
+CHECK: %hi = scalar.constant 4 : i64
+CHECK-NOT: *test.fact_range_*
+
+// ====
+
+// RUN: with-checks pass canonicalize,dce
+
+func.def @unsigned_negative_empty() -> (i64, i64) {
+  %begin = index.constant -1 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  cfg.br ^header(%begin: index)
+^header(%counter: index):
+  %lo = test.fact_range_lo %counter : index -> i64
+  %hi = test.fact_range_hi %counter : index -> i64
+  %more = index.cmp ult, %counter, %end : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next = index.add %counter, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return %lo, %hi : i64, i64
+}
+
+// ----
+CHECK: %lo = scalar.constant -1 : i64
+CHECK: %hi = scalar.constant -1 : i64
+CHECK-NOT: *test.fact_range_*
+
+// ====
+
+// RUN: with-checks pass canonicalize,dce
+
+func.def @signed_empty() -> (i64, i64) {
+  %begin = index.constant 5 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  cfg.br ^header(%begin: index)
+^header(%counter: index):
+  %lo = test.fact_range_lo %counter : index -> i64
+  %hi = test.fact_range_hi %counter : index -> i64
+  %more = index.cmp slt, %counter, %end : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next = index.add %counter, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return %lo, %hi : i64, i64
+}
+
+// ----
+CHECK: %lo = scalar.constant 5 : i64
+CHECK: %hi = scalar.constant 5 : i64
+CHECK-NOT: *test.fact_range_*
+
+// ====
+
+// RUN: with-checks pass canonicalize,dce
+
+func.def @signed_terminal_wrap() -> (i64, i64) {
+  %begin = index.constant 9223372036854775806 : index
+  %end = index.constant 9223372036854775807 : index
+  %step = index.constant 2 : index
+  cfg.br ^header(%begin: index)
+^header(%counter: index):
+  %lo = test.fact_range_lo %counter : index -> i64
+  %hi = test.fact_range_hi %counter : index -> i64
+  %more = index.cmp slt, %counter, %end : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next = index.add %counter, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return %lo, %hi : i64, i64
+}
+
+// ----
+CHECK: %lo = scalar.constant -9223372036854775808 : i64
+CHECK: %hi = scalar.constant 9223372036854775807 : i64
+CHECK-NOT: *test.fact_range_*
+
+// ====
+
+// RUN: with-checks pass canonicalize,dce
+
+func.def @unsupported_not_equal() -> (i64, i64) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  cfg.br ^header(%begin: index)
+^header(%counter: index):
+  %lo = test.fact_range_lo %counter : index -> i64
+  %hi = test.fact_range_hi %counter : index -> i64
+  %more = index.cmp ne, %counter, %end : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next = index.add %counter, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return %lo, %hi : i64, i64
+}
+
+// ----
+CHECK: %lo = scalar.constant -9223372036854775808 : i64
+CHECK: %hi = scalar.constant 9223372036854775807 : i64
+CHECK-NOT: *test.fact_range_*
+
+// ====
+
+// RUN: with-checks pass canonicalize,dce
+
+func.def @negative_step() -> (i64, i64) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant -1 : index
+  cfg.br ^header(%begin: index)
+^header(%counter: index):
+  %lo = test.fact_range_lo %counter : index -> i64
+  %hi = test.fact_range_hi %counter : index -> i64
+  %more = index.cmp slt, %counter, %end : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next = index.add %counter, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return %lo, %hi : i64, i64
+}
+
+// ----
+CHECK: %lo = scalar.constant -9223372036854775808 : i64
+CHECK: %hi = scalar.constant 9223372036854775807 : i64
+CHECK-NOT: *test.fact_range_*
+
+// ====
+
+// RUN: with-checks pass canonicalize,dce
+
+func.def @varying_step(%increment: index) -> (i64, i64) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  cfg.br ^header(%begin: index)
+^header(%counter: index):
+  %lo = test.fact_range_lo %counter : index -> i64
+  %hi = test.fact_range_hi %counter : index -> i64
+  %more = index.cmp slt, %counter, %end : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next = index.add %counter, %increment : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return %lo, %hi : i64, i64
+}
+
+// ----
+CHECK: %lo = scalar.constant -9223372036854775808 : i64
+CHECK: %hi = scalar.constant 9223372036854775807 : i64
+CHECK-NOT: *test.fact_range_*
+
+// ====
+
+// RUN: with-checks pass canonicalize,dce
+
+func.def @skipped_update(%choice: i1) -> (i64, i64) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  cfg.br ^header(%begin: index)
+^header(%counter: index):
+  %lo = test.fact_range_lo %counter : index -> i64
+  %hi = test.fact_range_hi %counter : index -> i64
+  %more = index.cmp slt, %counter, %end : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next = index.add %counter, %step : index
+  %selected = scf.select %choice, %next, %counter : index
+  cfg.br ^header(%selected: index)
+^exit:
+  func.return %lo, %hi : i64, i64
+}
+
+// ----
+CHECK: %lo = scalar.constant -9223372036854775808 : i64
+CHECK: %hi = scalar.constant 9223372036854775807 : i64
+CHECK-NOT: *test.fact_range_*
+
+// ====
+
+// RUN: with-checks pass canonicalize,dce
+
+func.def @changing_bound() -> (i64, i64) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  cfg.br ^header(%begin: index, %end: index)
+^header(%counter: index, %bound: index):
+  %lo = test.fact_range_lo %counter : index -> i64
+  %hi = test.fact_range_hi %counter : index -> i64
+  %more = index.cmp slt, %counter, %bound : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next = index.add %counter, %step : index
+  %next_bound = index.add %bound, %step : index
+  cfg.br ^header(%next: index, %next_bound: index)
+^exit:
+  func.return %lo, %hi : i64, i64
+}
+
+// ----
+CHECK: %lo = scalar.constant -9223372036854775808 : i64
+CHECK: %hi = scalar.constant 9223372036854775807 : i64
+CHECK-NOT: *test.fact_range_*
+
+// ====
+
+// RUN: with-checks pass canonicalize,dce
+
+func.def @two_backedges(%choice: i1) -> (i64, i64) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  cfg.br ^header(%begin: index)
+^header(%counter: index):
+  %lo = test.fact_range_lo %counter : index -> i64
+  %hi = test.fact_range_hi %counter : index -> i64
+  %more = index.cmp slt, %counter, %end : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next = index.add %counter, %step : index
+  cfg.cond_br %choice, ^first, ^second
+^first:
+  cfg.br ^header(%next: index)
+^second:
+  cfg.br ^header(%counter: index)
+^exit:
+  func.return %lo, %hi : i64, i64
+}
+
+// ----
+CHECK: %lo = scalar.constant -9223372036854775808 : i64
+CHECK: %hi = scalar.constant 9223372036854775807 : i64
+CHECK-NOT: *test.fact_range_*
+
+// ====
+
+// RUN: with-checks pass canonicalize,dce
+
+func.def @inverted_guard() -> (i64, i64) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  cfg.br ^header(%begin: index)
+^header(%counter: index):
+  %lo = test.fact_range_lo %counter : index -> i64
+  %hi = test.fact_range_hi %counter : index -> i64
+  %more = index.cmp slt, %counter, %end : index
+  cfg.cond_br %more, ^exit, ^body
+^body:
+  %next = index.add %counter, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return %lo, %hi : i64, i64
+}
+
+// ----
+CHECK: %lo = scalar.constant -9223372036854775808 : i64
+CHECK: %hi = scalar.constant 9223372036854775807 : i64
+CHECK-NOT: *test.fact_range_*
+
+// ====
+
+// RUN: with-checks pass canonicalize,dce
+
+// The controlling argument need not be first. Fact aliases preserve its SSA
+// identity, and addition accepts either operand order.
+func.def @aliased_second_argument(%seed: index) -> (index, i64, i64) {
+  %begin = index.constant 2 : index
+  %end = index.constant 9 : index
+  %step = index.constant 3 : index
+  cfg.br ^header(%seed: index, %begin: index)
+^header(%payload: index, %counter: index):
+  %lo = test.fact_range_lo %counter : index -> i64
+  %hi = test.fact_range_hi %counter : index -> i64
+  %alias = index.assume %counter [mul(%counter, 1)] : index
+  %more = index.cmp slt, %alias, %end : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next = index.add %step, %alias : index
+  cfg.br ^header(%payload: index, %next: index)
+^exit:
+  func.return %payload, %lo, %hi : index, i64, i64
+}
+
+// ----
+CHECK: %lo = scalar.constant 2 : i64
+CHECK: %hi = scalar.constant 11 : i64
+CHECK-NOT: *test.fact_range_*
+
+// ====
+
+// RUN: with-checks pass canonicalize,dce
+
+func.def @nested_counters() {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  cfg.br ^outer_header(%begin: index)
+^outer_header(%outer: index):
+  %outer_lo = test.fact_range_lo %outer : index -> i64
+  %outer_hi = test.fact_range_hi %outer : index -> i64
+  test.use %outer_lo, %outer_hi : i64, i64
+  %outer_more = index.cmp slt, %outer, %end : index
+  cfg.cond_br %outer_more, ^inner_entry, ^exit
+^inner_entry:
+  cfg.br ^inner_header(%begin: index)
+^inner_header(%inner: index):
+  %inner_lo = test.fact_range_lo %inner : index -> i64
+  %inner_hi = test.fact_range_hi %inner : index -> i64
+  test.use %inner_lo, %inner_hi : i64, i64
+  %inner_more = index.cmp slt, %inner, %end : index
+  cfg.cond_br %inner_more, ^inner_body, ^outer_latch
+^inner_body:
+  %inner_next = index.add %inner, %step : index
+  cfg.br ^inner_header(%inner_next: index)
+^outer_latch:
+  %outer_next = index.add %outer, %step : index
+  cfg.br ^outer_header(%outer_next: index)
+^exit:
+  func.return
+}
+
+// ----
+CHECK: %outer_lo = scalar.constant 0 : i64
+CHECK: %outer_hi = scalar.constant 4 : i64
+CHECK: %inner_lo = scalar.constant 0 : i64
+CHECK: %inner_hi = scalar.constant 4 : i64
+CHECK-NOT: *test.fact_range_*
+
+// ====
+
+// RUN: with-checks pass canonicalize,dce
+
+// The same terminal increment wraps the selected 32-bit index carrier but is
+// representable in its 64-bit offset carrier.
+test.target<quirky> @target32
+
+func.def target(@target32) @index_terminal_wrap() -> (i64, i64) {
+  %begin = index.constant 2147483646 : index
+  %end = index.constant 2147483647 : index
+  %step = index.constant 2 : index
+  cfg.br ^header(%begin: index)
+^header(%counter: index):
+  %lo = test.fact_range_lo %counter : index -> i64
+  %hi = test.fact_range_hi %counter : index -> i64
+  %more = index.cmp slt, %counter, %end : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next = index.add %counter, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return %lo, %hi : i64, i64
+}
+
+func.def target(@target32) @offset_terminal_fits() -> (i64, i64) {
+  %begin = index.constant 2147483646 : offset
+  %end = index.constant 2147483647 : offset
+  %step = index.constant 2 : offset
+  cfg.br ^header(%begin: offset)
+^header(%counter: offset):
+  %lo = test.fact_range_lo %counter : offset -> i64
+  %hi = test.fact_range_hi %counter : offset -> i64
+  %more = index.cmp slt, %counter, %end : offset
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next = index.add %counter, %step : offset
+  cfg.br ^header(%next: offset)
+^exit:
+  func.return %lo, %hi : i64, i64
+}
+
+// ----
+CHECK: func.def target(@target32) @index_terminal_wrap*
+CHECK: %lo = scalar.constant -9223372036854775808 : i64
+CHECK: %hi = scalar.constant 9223372036854775807 : i64
+CHECK: func.def target(@target32) @offset_terminal_fits*
+CHECK: %lo = scalar.constant 2147483646 : i64
+CHECK: %hi = scalar.constant 2147483648 : i64
+CHECK-NOT: *test.fact_range_*
+
+// ====
+
+// RUN: with-checks pass canonicalize,dce
+
+// An alternate entry may exceed the guard's bound at the header. Selecting only
+// the first entry would incorrectly discard that observation.
+func.def @multiple_entries(%choice: i1) -> (i64, i64) {
+  %begin = index.constant 0 : index
+  %other_begin = index.constant 100 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  cfg.cond_br %choice, ^first_entry, ^second_entry
+^first_entry:
+  cfg.br ^header(%begin: index)
+^second_entry:
+  cfg.br ^header(%other_begin: index)
+^header(%counter: index):
+  %lo = test.fact_range_lo %counter : index -> i64
+  %hi = test.fact_range_hi %counter : index -> i64
+  %more = index.cmp slt, %counter, %end : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next = index.add %counter, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return %lo, %hi : i64, i64
+}
+
+// ----
+CHECK: %lo = scalar.constant -9223372036854775808 : i64
+CHECK: %hi = scalar.constant 9223372036854775807 : i64
+CHECK-NOT: *test.fact_range_*

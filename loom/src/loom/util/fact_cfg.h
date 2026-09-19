@@ -12,8 +12,10 @@
 #ifndef LOOM_UTIL_FACT_CFG_H_
 #define LOOM_UTIL_FACT_CFG_H_
 
+#include "loom/analysis/loop_domain.h"
 #include "loom/analysis/scc.h"
 #include "loom/util/cfg_graph.h"
+#include "loom/util/cfg_loop_nest.h"
 #include "loom/util/fact_control.h"
 
 #ifdef __cplusplus
@@ -21,6 +23,26 @@ extern "C" {
 #endif
 
 typedef struct loom_value_fact_table_t loom_value_fact_table_t;
+
+// A recognized header-tested recurrence. Its inputs are invariant within the
+// natural loop. The CFG fact solver refreshes this equation after semantic
+// edits; numeric queries consume current table entries, never cached counts.
+typedef struct loom_value_fact_cfg_induction_t {
+  // Header argument, or INVALID for an unrecognized or literal-false guard.
+  loom_value_id_t value;
+  // Value entering the header from outside the loop.
+  loom_value_id_t initial_value;
+  // Invariant upper bound tested by the header guard.
+  loom_value_id_t upper_bound;
+  // Invariant increment added by the unique backedge, or INVALID. A missing
+  // increment can still establish zero trips from a false entry guard.
+  loom_value_id_t step;
+  // Signedness and inclusivity of the guard.
+  loom_loop_bound_flags_t bound_flags;
+  // True when the header condition is a literal false. No backedge executes,
+  // including after canonicalization removes the original comparison.
+  bool exits_at_header;
+} loom_value_fact_cfg_induction_t;
 
 // One argument participating in the region's forwarding graph.
 typedef struct loom_value_fact_cfg_argument_t {
@@ -51,6 +73,10 @@ typedef struct loom_value_fact_cfg_forwarding_t {
 typedef struct loom_value_fact_cfg_region_t {
   // CFG edges and reachability owned by this analysis.
   loom_cfg_graph_t graph;
+  // Semantic natural loops, independent of textual block order.
+  loom_cfg_loop_nest_t loops;
+  // Current recurrence equations, indexed by loops.loops.
+  loom_value_fact_cfg_induction_t* inductions;
   // Immutable compressed control dependencies for this graph snapshot.
   loom_cfg_control_t control_structure;
   // Selector distributions and live execution facts with snapshot lifetime.
@@ -90,6 +116,18 @@ typedef struct loom_value_fact_cfg_region_t {
 iree_status_t loom_value_fact_cfg_region_initialize(
     const loom_module_t* module, const loom_region_t* region,
     iree_arena_allocator_t* arena, loom_value_fact_cfg_region_t* out_region);
+
+// Refreshes the recurrence equation if block_index is a natural-loop header.
+// Called by the owning CFG solve after predecessor facts become available.
+void loom_value_fact_cfg_update_induction(
+    const loom_value_fact_table_t* table, const loom_module_t* module,
+    const loom_value_fact_cfg_region_t* region, uint16_t block_index);
+
+// Evaluates a retained recurrence against current facts and target carriers.
+// Unknown or nonconstant inputs do not establish a numeric recurrence proof.
+loom_loop_recurrence_facts_t loom_value_fact_cfg_induction_facts(
+    const loom_value_fact_table_t* table, const loom_module_t* module,
+    const loom_value_fact_cfg_induction_t* induction);
 
 // Refreshes one retained selector from its current SSA identity and facts,
 // then settles indexed control dependents. Returns whether execution changed.
@@ -135,8 +173,8 @@ iree_status_t loom_value_fact_table_get_or_build_cfg_region(
 // The caller keeps the structure alive until replacing it again or forgetting
 // it. This changes only structural analysis; existing value facts are retained.
 iree_status_t loom_value_fact_table_set_cfg_region(
-    loom_value_fact_table_t* table, const loom_region_t* region,
-    const loom_value_fact_cfg_region_t* structure);
+    loom_value_fact_table_t* table, const loom_module_t* module,
+    const loom_region_t* region, const loom_value_fact_cfg_region_t* structure);
 
 // Withdraws a region's structure before its storage or CFG becomes invalid.
 // A subsequent structural query rebuilds it from the current IR.
