@@ -1376,6 +1376,7 @@ def test_integer_binary_src0_accepts_scalar_or_vector_registers() -> None:
         "amdgpu.v_or_b32",
         "amdgpu.v_xor_b32",
         "amdgpu.v_lshlrev_b32",
+        "amdgpu.v_lshlrev_b64",
         "amdgpu.v_lshrrev_b32",
         "amdgpu.v_ashrrev_i32",
     )

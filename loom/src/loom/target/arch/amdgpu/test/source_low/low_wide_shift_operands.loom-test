@@ -1,0 +1,263 @@
+// RUN: pass low-select-operand-forms,low-cse,low-dce
+
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @shift_counts_gfx942(%value: reg<amdgpu.vgpr x2>, %uniform_count: reg<amdgpu.sgpr>, %varying_count: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %count_0 = s_mov_b32 0
+  %shift_0 = v_lshlrev_b64 %count_0, %value
+  %count_1 = s_mov_b32 1
+  %shift_1 = v_lshlrev_b64 %count_1, %value
+  %count_2 = s_mov_b32 2
+  %shift_2 = v_lshlrev_b64 %count_2, %value
+  %count_31 = s_mov_b32 31
+  %shift_31 = v_lshlrev_b64 %count_31, %value
+  %count_32 = s_mov_b32 32
+  %shift_32 = v_lshlrev_b64 %count_32, %value
+  %count_63 = s_mov_b32 63
+  %shift_63 = v_lshlrev_b64 %count_63, %value
+  %count_64 = s_mov_b32 64
+  %shift_64 = v_lshlrev_b64 %count_64, %value
+  %count_65 = s_mov_b32 65
+  %shift_65 = v_lshlrev_b64 %count_65, %value
+  %uniform = v_lshlrev_b64 %uniform_count, %value
+  %varying = v_lshlrev_b64 %varying_count, %value
+  return %shift_0, %shift_1, %shift_2, %shift_31, %shift_32, %shift_63, %shift_64, %shift_65, %uniform, %varying
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @shift_counts_gfx942(%value: reg<amdgpu.vgpr x2>, %uniform_count: reg<amdgpu.sgpr>, %varying_count: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %shift_0 = v_lshlrev_b64_src0_inline %value, 0
+  %shift_1 = v_lshlrev_b64_src0_inline %value, 1
+  %shift_2 = v_lshlrev_b64_src0_inline %value, 2
+  %shift_31 = v_lshlrev_b64_src0_inline %value, 31
+  %shift_32 = v_lshlrev_b64_src0_inline %value, 32
+  %shift_63 = v_lshlrev_b64_src0_inline %value, 63
+  %shift_64 = v_lshlrev_b64_src0_inline %value, 64
+  %count_65 = s_mov_b32 65
+  %shift_65 = v_lshlrev_b64 %count_65, %value
+  %uniform = v_lshlrev_b64 %uniform_count, %value
+  %varying = v_lshlrev_b64 %varying_count, %value
+  return %shift_0, %shift_1, %shift_2, %shift_31, %shift_32, %shift_63, %shift_64, %shift_65, %uniform, %varying
+}
+
+// ====
+
+amdgpu.target<gfx950> @target
+
+low.func.def target<amdgpu.cdna4.core>(@target) @shift_counts_gfx950(%value: reg<amdgpu.vgpr x2>, %uniform_count: reg<amdgpu.sgpr>, %varying_count: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %count_0 = s_mov_b32 0
+  %shift_0 = v_lshlrev_b64 %count_0, %value
+  %count_1 = s_mov_b32 1
+  %shift_1 = v_lshlrev_b64 %count_1, %value
+  %count_2 = s_mov_b32 2
+  %shift_2 = v_lshlrev_b64 %count_2, %value
+  %count_31 = s_mov_b32 31
+  %shift_31 = v_lshlrev_b64 %count_31, %value
+  %count_32 = s_mov_b32 32
+  %shift_32 = v_lshlrev_b64 %count_32, %value
+  %count_63 = s_mov_b32 63
+  %shift_63 = v_lshlrev_b64 %count_63, %value
+  %count_64 = s_mov_b32 64
+  %shift_64 = v_lshlrev_b64 %count_64, %value
+  %count_65 = s_mov_b32 65
+  %shift_65 = v_lshlrev_b64 %count_65, %value
+  %uniform = v_lshlrev_b64 %uniform_count, %value
+  %varying = v_lshlrev_b64 %varying_count, %value
+  return %shift_0, %shift_1, %shift_2, %shift_31, %shift_32, %shift_63, %shift_64, %shift_65, %uniform, %varying
+}
+
+// ----
+amdgpu.target<gfx950> @target
+
+low.func.def target<amdgpu.cdna4.core>(@target) @shift_counts_gfx950(%value: reg<amdgpu.vgpr x2>, %uniform_count: reg<amdgpu.sgpr>, %varying_count: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %shift_0 = v_lshlrev_b64_src0_inline %value, 0
+  %shift_1 = v_lshlrev_b64_src0_inline %value, 1
+  %shift_2 = v_lshlrev_b64_src0_inline %value, 2
+  %shift_31 = v_lshlrev_b64_src0_inline %value, 31
+  %shift_32 = v_lshlrev_b64_src0_inline %value, 32
+  %shift_63 = v_lshlrev_b64_src0_inline %value, 63
+  %shift_64 = v_lshlrev_b64_src0_inline %value, 64
+  %count_65 = s_mov_b32 65
+  %shift_65 = v_lshlrev_b64 %count_65, %value
+  %uniform = v_lshlrev_b64 %uniform_count, %value
+  %varying = v_lshlrev_b64 %varying_count, %value
+  return %shift_0, %shift_1, %shift_2, %shift_31, %shift_32, %shift_63, %shift_64, %shift_65, %uniform, %varying
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @shift_counts_gfx1100(%value: reg<amdgpu.vgpr x2>, %uniform_count: reg<amdgpu.sgpr>, %varying_count: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %count_0 = s_mov_b32 0
+  %shift_0 = v_lshlrev_b64 %count_0, %value
+  %count_1 = s_mov_b32 1
+  %shift_1 = v_lshlrev_b64 %count_1, %value
+  %count_2 = s_mov_b32 2
+  %shift_2 = v_lshlrev_b64 %count_2, %value
+  %count_31 = s_mov_b32 31
+  %shift_31 = v_lshlrev_b64 %count_31, %value
+  %count_32 = s_mov_b32 32
+  %shift_32 = v_lshlrev_b64 %count_32, %value
+  %count_63 = s_mov_b32 63
+  %shift_63 = v_lshlrev_b64 %count_63, %value
+  %count_64 = s_mov_b32 64
+  %shift_64 = v_lshlrev_b64 %count_64, %value
+  %count_65 = s_mov_b32 65
+  %shift_65 = v_lshlrev_b64 %count_65, %value
+  %uniform = v_lshlrev_b64 %uniform_count, %value
+  %varying = v_lshlrev_b64 %varying_count, %value
+  return %shift_0, %shift_1, %shift_2, %shift_31, %shift_32, %shift_63, %shift_64, %shift_65, %uniform, %varying
+}
+
+// ----
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @shift_counts_gfx1100(%value: reg<amdgpu.vgpr x2>, %uniform_count: reg<amdgpu.sgpr>, %varying_count: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %shift_0 = v_lshlrev_b64_src0_inline %value, 0
+  %shift_1 = v_lshlrev_b64_src0_inline %value, 1
+  %shift_2 = v_lshlrev_b64_src0_inline %value, 2
+  %shift_31 = v_lshlrev_b64_src0_inline %value, 31
+  %shift_32 = v_lshlrev_b64_src0_inline %value, 32
+  %shift_63 = v_lshlrev_b64_src0_inline %value, 63
+  %shift_64 = v_lshlrev_b64_src0_inline %value, 64
+  %count_65 = s_mov_b32 65
+  %shift_65 = v_lshlrev_b64 %count_65, %value
+  %uniform = v_lshlrev_b64 %uniform_count, %value
+  %varying = v_lshlrev_b64 %varying_count, %value
+  return %shift_0, %shift_1, %shift_2, %shift_31, %shift_32, %shift_63, %shift_64, %shift_65, %uniform, %varying
+}
+
+// ====
+
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @shift_counts_gfx1151(%value: reg<amdgpu.vgpr x2>, %uniform_count: reg<amdgpu.sgpr>, %varying_count: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %count_0 = s_mov_b32 0
+  %shift_0 = v_lshlrev_b64 %count_0, %value
+  %count_1 = s_mov_b32 1
+  %shift_1 = v_lshlrev_b64 %count_1, %value
+  %count_2 = s_mov_b32 2
+  %shift_2 = v_lshlrev_b64 %count_2, %value
+  %count_31 = s_mov_b32 31
+  %shift_31 = v_lshlrev_b64 %count_31, %value
+  %count_32 = s_mov_b32 32
+  %shift_32 = v_lshlrev_b64 %count_32, %value
+  %count_63 = s_mov_b32 63
+  %shift_63 = v_lshlrev_b64 %count_63, %value
+  %count_64 = s_mov_b32 64
+  %shift_64 = v_lshlrev_b64 %count_64, %value
+  %count_65 = s_mov_b32 65
+  %shift_65 = v_lshlrev_b64 %count_65, %value
+  %uniform = v_lshlrev_b64 %uniform_count, %value
+  %varying = v_lshlrev_b64 %varying_count, %value
+  return %shift_0, %shift_1, %shift_2, %shift_31, %shift_32, %shift_63, %shift_64, %shift_65, %uniform, %varying
+}
+
+// ----
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @shift_counts_gfx1151(%value: reg<amdgpu.vgpr x2>, %uniform_count: reg<amdgpu.sgpr>, %varying_count: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %shift_0 = v_lshlrev_b64_src0_inline %value, 0
+  %shift_1 = v_lshlrev_b64_src0_inline %value, 1
+  %shift_2 = v_lshlrev_b64_src0_inline %value, 2
+  %shift_31 = v_lshlrev_b64_src0_inline %value, 31
+  %shift_32 = v_lshlrev_b64_src0_inline %value, 32
+  %shift_63 = v_lshlrev_b64_src0_inline %value, 63
+  %shift_64 = v_lshlrev_b64_src0_inline %value, 64
+  %count_65 = s_mov_b32 65
+  %shift_65 = v_lshlrev_b64 %count_65, %value
+  %uniform = v_lshlrev_b64 %uniform_count, %value
+  %varying = v_lshlrev_b64 %varying_count, %value
+  return %shift_0, %shift_1, %shift_2, %shift_31, %shift_32, %shift_63, %shift_64, %shift_65, %uniform, %varying
+}
+
+// ====
+
+amdgpu.target<gfx1201> @target
+
+low.func.def target<amdgpu.rdna4.core>(@target) @shift_counts_gfx1201(%value: reg<amdgpu.vgpr x2>, %uniform_count: reg<amdgpu.sgpr>, %varying_count: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %count_0 = s_mov_b32 0
+  %shift_0 = v_lshlrev_b64 %count_0, %value
+  %count_1 = s_mov_b32 1
+  %shift_1 = v_lshlrev_b64 %count_1, %value
+  %count_2 = s_mov_b32 2
+  %shift_2 = v_lshlrev_b64 %count_2, %value
+  %count_31 = s_mov_b32 31
+  %shift_31 = v_lshlrev_b64 %count_31, %value
+  %count_32 = s_mov_b32 32
+  %shift_32 = v_lshlrev_b64 %count_32, %value
+  %count_63 = s_mov_b32 63
+  %shift_63 = v_lshlrev_b64 %count_63, %value
+  %count_64 = s_mov_b32 64
+  %shift_64 = v_lshlrev_b64 %count_64, %value
+  %count_65 = s_mov_b32 65
+  %shift_65 = v_lshlrev_b64 %count_65, %value
+  %uniform = v_lshlrev_b64 %uniform_count, %value
+  %varying = v_lshlrev_b64 %varying_count, %value
+  return %shift_0, %shift_1, %shift_2, %shift_31, %shift_32, %shift_63, %shift_64, %shift_65, %uniform, %varying
+}
+
+// ----
+amdgpu.target<gfx1201> @target
+
+low.func.def target<amdgpu.rdna4.core>(@target) @shift_counts_gfx1201(%value: reg<amdgpu.vgpr x2>, %uniform_count: reg<amdgpu.sgpr>, %varying_count: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %shift_0 = v_lshlrev_b64_src0_inline %value, 0
+  %shift_1 = v_lshlrev_b64_src0_inline %value, 1
+  %shift_2 = v_lshlrev_b64_src0_inline %value, 2
+  %shift_31 = v_lshlrev_b64_src0_inline %value, 31
+  %shift_32 = v_lshlrev_b64_src0_inline %value, 32
+  %shift_63 = v_lshlrev_b64_src0_inline %value, 63
+  %shift_64 = v_lshlrev_b64_src0_inline %value, 64
+  %count_65 = s_mov_b32 65
+  %shift_65 = v_lshlrev_b64 %count_65, %value
+  %uniform = v_lshlrev_b64 %uniform_count, %value
+  %varying = v_lshlrev_b64 %varying_count, %value
+  return %shift_0, %shift_1, %shift_2, %shift_31, %shift_32, %shift_63, %shift_64, %shift_65, %uniform, %varying
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @shift_counts_gfx1250(%value: reg<amdgpu.vgpr x2>, %uniform_count: reg<amdgpu.sgpr>, %varying_count: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %count_0 = s_mov_b32 0
+  %shift_0 = v_lshlrev_b64 %count_0, %value
+  %count_1 = s_mov_b32 1
+  %shift_1 = v_lshlrev_b64 %count_1, %value
+  %count_2 = s_mov_b32 2
+  %shift_2 = v_lshlrev_b64 %count_2, %value
+  %count_31 = s_mov_b32 31
+  %shift_31 = v_lshlrev_b64 %count_31, %value
+  %count_32 = s_mov_b32 32
+  %shift_32 = v_lshlrev_b64 %count_32, %value
+  %count_63 = s_mov_b32 63
+  %shift_63 = v_lshlrev_b64 %count_63, %value
+  %count_64 = s_mov_b32 64
+  %shift_64 = v_lshlrev_b64 %count_64, %value
+  %count_65 = s_mov_b32 65
+  %shift_65 = v_lshlrev_b64 %count_65, %value
+  %uniform = v_lshlrev_b64 %uniform_count, %value
+  %varying = v_lshlrev_b64 %varying_count, %value
+  return %shift_0, %shift_1, %shift_2, %shift_31, %shift_32, %shift_63, %shift_64, %shift_65, %uniform, %varying
+}
+
+// ----
+amdgpu.target<gfx1250> @target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @shift_counts_gfx1250(%value: reg<amdgpu.vgpr x2>, %uniform_count: reg<amdgpu.sgpr>, %varying_count: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %shift_0 = v_lshlrev_b64_src0_inline %value, 0
+  %shift_1 = v_lshlrev_b64_src0_inline %value, 1
+  %shift_2 = v_lshlrev_b64_src0_inline %value, 2
+  %shift_31 = v_lshlrev_b64_src0_inline %value, 31
+  %shift_32 = v_lshlrev_b64_src0_inline %value, 32
+  %shift_63 = v_lshlrev_b64_src0_inline %value, 63
+  %shift_64 = v_lshlrev_b64_src0_inline %value, 64
+  %count_65 = s_mov_b32 65
+  %shift_65 = v_lshlrev_b64 %count_65, %value
+  %uniform = v_lshlrev_b64 %uniform_count, %value
+  %varying = v_lshlrev_b64 %varying_count, %value
+  return %shift_0, %shift_1, %shift_2, %shift_31, %shift_32, %shift_63, %shift_64, %shift_65, %uniform, %varying
+}

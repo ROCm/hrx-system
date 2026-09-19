@@ -1,0 +1,169 @@
+// Left shifts preserve full 64-bit payloads with immediate, scalar-register,
+// and loaded vector-register counts. Every output row has an exact oracle.
+kernel.def @integer_wide_shifts() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%uniform_count: i64, %input: buffer, %counts: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %input_base = index.constant 0 : offset
+  %output_base = index.constant 128 : offset
+  %aligned_input = buffer.assume.alignment %input {minimum_alignment = 8} : buffer
+  %aligned_counts = buffer.assume.alignment %counts {minimum_alignment = 8} : buffer
+  %aligned_output = buffer.assume.alignment %output {minimum_alignment = 8} : buffer
+  %inputs = buffer.view %aligned_input[%input_base] : buffer -> view<32xi64>
+  %shifts = buffer.view %aligned_counts[%input_base] : buffer -> view<32xi64>
+  %outputs = buffer.view %aligned_output[%output_base] : buffer -> view<8x32xi64>
+  %value = view.load %inputs[%lane] : view<32xi64> -> i64
+  %varying_count = view.load %shifts[%lane] : view<32xi64> -> i64
+  %count_0 = scalar.constant 0 : i64
+  %shifted_0 = scalar.shli %value, %count_0 : i64
+  view.store %shifted_0, %outputs[0, %lane] : i64, view<8x32xi64>
+  %count_1 = scalar.constant 1 : i64
+  %shifted_1 = scalar.shli %value, %count_1 : i64
+  view.store %shifted_1, %outputs[1, %lane] : i64, view<8x32xi64>
+  %count_2 = scalar.constant 2 : i64
+  %shifted_2 = scalar.shli %value, %count_2 : i64
+  view.store %shifted_2, %outputs[2, %lane] : i64, view<8x32xi64>
+  %count_31 = scalar.constant 31 : i64
+  %shifted_31 = scalar.shli %value, %count_31 : i64
+  view.store %shifted_31, %outputs[3, %lane] : i64, view<8x32xi64>
+  %count_32 = scalar.constant 32 : i64
+  %shifted_32 = scalar.shli %value, %count_32 : i64
+  view.store %shifted_32, %outputs[4, %lane] : i64, view<8x32xi64>
+  %count_63 = scalar.constant 63 : i64
+  %shifted_63 = scalar.shli %value, %count_63 : i64
+  view.store %shifted_63, %outputs[5, %lane] : i64, view<8x32xi64>
+  %uniform_result = scalar.shli %value, %uniform_count : i64
+  view.store %uniform_result, %outputs[6, %lane] : i64, view<8x32xi64>
+  %varying_result = scalar.shli %value, %varying_count : i64
+  view.store %varying_result, %outputs[7, %lane] : i64, view<8x32xi64>
+  kernel.return
+}
+
+check.case public @integer_wide_shifts_high_word {
+  %count = check.literal value(31) : i64
+  %input = check.generate.iota offset(4294967297) step(2) : tensor<32xi64>
+  %counts = check.generate.fill value(31) : tensor<32xi64>
+  %output = check.generate.fill value(-7777) : tensor<288xi64>
+  kernel.launch @integer_wide_shifts(%count, %input, %counts, %output) : (i64, tensor<32xi64>, tensor<32xi64>, tensor<288xi64>)
+  %expected_0 = check.generate.iota offset(4294967297) step(2) : tensor<32xi64>
+  %actual_0 = check.tensor.view %output offset(128) : tensor<288xi64> -> tensor<32xi64>
+  check.expect.bitwise actual(%actual_0) expected(%expected_0) : tensor<32xi64>
+  %expected_1 = check.generate.iota offset(8589934594) step(4) : tensor<32xi64>
+  %actual_1 = check.tensor.view %output offset(384) : tensor<288xi64> -> tensor<32xi64>
+  check.expect.bitwise actual(%actual_1) expected(%expected_1) : tensor<32xi64>
+  %expected_2 = check.generate.iota offset(17179869188) step(8) : tensor<32xi64>
+  %actual_2 = check.tensor.view %output offset(640) : tensor<288xi64> -> tensor<32xi64>
+  check.expect.bitwise actual(%actual_2) expected(%expected_2) : tensor<32xi64>
+  %expected_3 = check.generate.iota offset(-9223372034707292160) step(4294967296) : tensor<32xi64>
+  %actual_3 = check.tensor.view %output offset(896) : tensor<288xi64> -> tensor<32xi64>
+  check.expect.bitwise actual(%actual_3) expected(%expected_3) : tensor<32xi64>
+  %expected_4 = check.generate.iota offset(4294967296) step(8589934592) : tensor<32xi64>
+  %actual_4 = check.tensor.view %output offset(1152) : tensor<288xi64> -> tensor<32xi64>
+  check.expect.bitwise actual(%actual_4) expected(%expected_4) : tensor<32xi64>
+  %expected_5 = check.generate.iota offset(-9223372036854775808) step(0) : tensor<32xi64>
+  %actual_5 = check.tensor.view %output offset(1408) : tensor<288xi64> -> tensor<32xi64>
+  check.expect.bitwise actual(%actual_5) expected(%expected_5) : tensor<32xi64>
+  %expected_6 = check.generate.iota offset(-9223372034707292160) step(4294967296) : tensor<32xi64>
+  %actual_6 = check.tensor.view %output offset(1664) : tensor<288xi64> -> tensor<32xi64>
+  check.expect.bitwise actual(%actual_6) expected(%expected_6) : tensor<32xi64>
+  %expected_7 = check.generate.iota offset(-9223372034707292160) step(4294967296) : tensor<32xi64>
+  %actual_7 = check.tensor.view %output offset(1920) : tensor<288xi64> -> tensor<32xi64>
+  check.expect.bitwise actual(%actual_7) expected(%expected_7) : tensor<32xi64>
+  %expected_input = check.generate.iota offset(4294967297) step(2) : tensor<32xi64>
+  %expected_counts = check.generate.fill value(31) : tensor<32xi64>
+  check.expect.bitwise actual(%input) expected(%expected_input) : tensor<32xi64>
+  check.expect.bitwise actual(%counts) expected(%expected_counts) : tensor<32xi64>
+  %prefix = check.tensor.view %output offset(0) : tensor<288xi64> -> tensor<16xi64>
+  %suffix = check.tensor.view %output offset(2176) : tensor<288xi64> -> tensor<16xi64>
+  %guard = check.generate.fill value(-7777) : tensor<16xi64>
+  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<16xi64>
+  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<16xi64>
+  check.return
+}
+
+check.case public @integer_wide_shifts_negative {
+  %count = check.literal value(31) : i64
+  %input = check.generate.iota offset(-65) step(2) : tensor<32xi64>
+  %counts = check.generate.fill value(31) : tensor<32xi64>
+  %output = check.generate.fill value(-7777) : tensor<288xi64>
+  kernel.launch @integer_wide_shifts(%count, %input, %counts, %output) : (i64, tensor<32xi64>, tensor<32xi64>, tensor<288xi64>)
+  %expected_0 = check.generate.iota offset(-65) step(2) : tensor<32xi64>
+  %actual_0 = check.tensor.view %output offset(128) : tensor<288xi64> -> tensor<32xi64>
+  check.expect.bitwise actual(%actual_0) expected(%expected_0) : tensor<32xi64>
+  %expected_1 = check.generate.iota offset(-130) step(4) : tensor<32xi64>
+  %actual_1 = check.tensor.view %output offset(384) : tensor<288xi64> -> tensor<32xi64>
+  check.expect.bitwise actual(%actual_1) expected(%expected_1) : tensor<32xi64>
+  %expected_2 = check.generate.iota offset(-260) step(8) : tensor<32xi64>
+  %actual_2 = check.tensor.view %output offset(640) : tensor<288xi64> -> tensor<32xi64>
+  check.expect.bitwise actual(%actual_2) expected(%expected_2) : tensor<32xi64>
+  %expected_3 = check.generate.iota offset(-139586437120) step(4294967296) : tensor<32xi64>
+  %actual_3 = check.tensor.view %output offset(896) : tensor<288xi64> -> tensor<32xi64>
+  check.expect.bitwise actual(%actual_3) expected(%expected_3) : tensor<32xi64>
+  %expected_4 = check.generate.iota offset(-279172874240) step(8589934592) : tensor<32xi64>
+  %actual_4 = check.tensor.view %output offset(1152) : tensor<288xi64> -> tensor<32xi64>
+  check.expect.bitwise actual(%actual_4) expected(%expected_4) : tensor<32xi64>
+  %expected_5 = check.generate.iota offset(-9223372036854775808) step(0) : tensor<32xi64>
+  %actual_5 = check.tensor.view %output offset(1408) : tensor<288xi64> -> tensor<32xi64>
+  check.expect.bitwise actual(%actual_5) expected(%expected_5) : tensor<32xi64>
+  %expected_6 = check.generate.iota offset(-139586437120) step(4294967296) : tensor<32xi64>
+  %actual_6 = check.tensor.view %output offset(1664) : tensor<288xi64> -> tensor<32xi64>
+  check.expect.bitwise actual(%actual_6) expected(%expected_6) : tensor<32xi64>
+  %expected_7 = check.generate.iota offset(-139586437120) step(4294967296) : tensor<32xi64>
+  %actual_7 = check.tensor.view %output offset(1920) : tensor<288xi64> -> tensor<32xi64>
+  check.expect.bitwise actual(%actual_7) expected(%expected_7) : tensor<32xi64>
+  %expected_input = check.generate.iota offset(-65) step(2) : tensor<32xi64>
+  %expected_counts = check.generate.fill value(31) : tensor<32xi64>
+  check.expect.bitwise actual(%input) expected(%expected_input) : tensor<32xi64>
+  check.expect.bitwise actual(%counts) expected(%expected_counts) : tensor<32xi64>
+  %prefix = check.tensor.view %output offset(0) : tensor<288xi64> -> tensor<16xi64>
+  %suffix = check.tensor.view %output offset(2176) : tensor<288xi64> -> tensor<16xi64>
+  %guard = check.generate.fill value(-7777) : tensor<16xi64>
+  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<16xi64>
+  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<16xi64>
+  check.return
+}
+
+// Alternating per-lane counts expose accidental scalarization of a loaded count.
+check.case public @integer_wide_shifts_varying {
+  %count = check.literal value(63) : i64
+  %input = check.generate.fill value(4294967297) : tensor<32xi64>
+  %counts = check.generate.iota offset(0) step(32) period(2) : tensor<32xi64>
+  %output = check.generate.fill value(-7777) : tensor<288xi64>
+  kernel.launch @integer_wide_shifts(%count, %input, %counts, %output) : (i64, tensor<32xi64>, tensor<32xi64>, tensor<288xi64>)
+  %expected_0 = check.generate.fill value(4294967297) : tensor<32xi64>
+  %actual_0 = check.tensor.view %output offset(128) : tensor<288xi64> -> tensor<32xi64>
+  check.expect.bitwise actual(%actual_0) expected(%expected_0) : tensor<32xi64>
+  %expected_1 = check.generate.fill value(8589934594) : tensor<32xi64>
+  %actual_1 = check.tensor.view %output offset(384) : tensor<288xi64> -> tensor<32xi64>
+  check.expect.bitwise actual(%actual_1) expected(%expected_1) : tensor<32xi64>
+  %expected_2 = check.generate.fill value(17179869188) : tensor<32xi64>
+  %actual_2 = check.tensor.view %output offset(640) : tensor<288xi64> -> tensor<32xi64>
+  check.expect.bitwise actual(%actual_2) expected(%expected_2) : tensor<32xi64>
+  %expected_3 = check.generate.fill value(-9223372034707292160) : tensor<32xi64>
+  %actual_3 = check.tensor.view %output offset(896) : tensor<288xi64> -> tensor<32xi64>
+  check.expect.bitwise actual(%actual_3) expected(%expected_3) : tensor<32xi64>
+  %expected_4 = check.generate.fill value(4294967296) : tensor<32xi64>
+  %actual_4 = check.tensor.view %output offset(1152) : tensor<288xi64> -> tensor<32xi64>
+  check.expect.bitwise actual(%actual_4) expected(%expected_4) : tensor<32xi64>
+  %expected_5 = check.generate.fill value(-9223372036854775808) : tensor<32xi64>
+  %actual_5 = check.tensor.view %output offset(1408) : tensor<288xi64> -> tensor<32xi64>
+  check.expect.bitwise actual(%actual_5) expected(%expected_5) : tensor<32xi64>
+  %expected_6 = check.generate.fill value(-9223372036854775808) : tensor<32xi64>
+  %actual_6 = check.tensor.view %output offset(1664) : tensor<288xi64> -> tensor<32xi64>
+  check.expect.bitwise actual(%actual_6) expected(%expected_6) : tensor<32xi64>
+  %expected_7 = check.generate.iota offset(4294967297) step(-1) period(2) : tensor<32xi64>
+  %actual_7 = check.tensor.view %output offset(1920) : tensor<288xi64> -> tensor<32xi64>
+  check.expect.bitwise actual(%actual_7) expected(%expected_7) : tensor<32xi64>
+  %expected_input = check.generate.fill value(4294967297) : tensor<32xi64>
+  %expected_counts = check.generate.iota offset(0) step(32) period(2) : tensor<32xi64>
+  check.expect.bitwise actual(%input) expected(%expected_input) : tensor<32xi64>
+  check.expect.bitwise actual(%counts) expected(%expected_counts) : tensor<32xi64>
+  %prefix = check.tensor.view %output offset(0) : tensor<288xi64> -> tensor<16xi64>
+  %suffix = check.tensor.view %output offset(2176) : tensor<288xi64> -> tensor<16xi64>
+  %guard = check.generate.fill value(-7777) : tensor<16xi64>
+  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<16xi64>
+  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<16xi64>
+  check.return
+}

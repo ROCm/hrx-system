@@ -1978,9 +1978,39 @@ def _v_lshlrev_b64_overlay() -> AmdgpuDescriptorOverlay:
         schedule_class=_SCHEDULE_VALU,
         operands=(
             AmdgpuOperandOverlay("VDST", _vgpr_result(units=2)),
-            AmdgpuOperandOverlay("SRC0", _vgpr_operand("shift")),
+            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("shift")),
             AmdgpuOperandOverlay("SRC1", _vgpr_operand("value", units=2)),
         ),
+        operand_forms=(
+            _literal_operand_form(
+                replacement_descriptor="amdgpu.v_lshlrev_b64.src0_inline",
+                source_operand="shift",
+            ),
+        ),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _v_lshlrev_b64_src0_inline_overlay() -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.v_lshlrev_b64.src0_inline",
+        instruction_name="V_LSHLREV_B64",
+        mnemonic="v_lshlrev_b64",
+        encoding_name="ENC_VOP3",
+        semantic_tag="integer.shl.u64",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result(units=2)),
+            AmdgpuOperandOverlay("SRC1", _vgpr_operand("value", units=2)),
+        ),
+        asm_forms=_asm(
+            mnemonic="v_lshlrev_b64_src0_inline",
+            results=("dst",),
+            operands=("value",),
+            immediates=("imm32",),
+        ),
+        immediate_fields=("SRC0",),
+        immediates=(_SOURCE_INLINE_U32_IMMEDIATE,),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -2435,6 +2465,7 @@ def _integer_bitwise_shift_overlays(
         _v_lshlrev_b32_literal_overlay(),
         _v_lshlrev_b32_vop3_immediate_overlay(),
         _v_lshlrev_b64_overlay(),
+        _v_lshlrev_b64_src0_inline_overlay(),
         _v_lshl_add_u32_shift_immediate_overlay(
             include_literal_operand_form=include_vop3_literal_forms
         ),
@@ -6924,6 +6955,7 @@ __all__ = (
     "_v_lshlrev_b32_src0_inline_overlay",
     "_v_lshlrev_b32_vop3_immediate_overlay",
     "_v_lshlrev_b64_overlay",
+    "_v_lshlrev_b64_src0_inline_overlay",
     "_v_lshrrev_b32_literal_overlay",
     "_v_lshrrev_b32_overlay",
     "_v_lshrrev_b32_src0_inline_overlay",

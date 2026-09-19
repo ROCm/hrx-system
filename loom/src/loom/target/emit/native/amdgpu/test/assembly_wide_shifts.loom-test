@@ -1,0 +1,237 @@
+// RUN: emit amdgpu-native-words @wide_shifts_gfx942 strategy=source
+
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @wide_shifts_gfx942(%value: reg<amdgpu.vgpr x2>, %uniform_count: reg<amdgpu.sgpr>, %varying_count: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %shift_0 = v_lshlrev_b64_src0_inline %value, 0
+  %shift_1 = v_lshlrev_b64_src0_inline %value, 1
+  %shift_2 = v_lshlrev_b64_src0_inline %value, 2
+  %shift_31 = v_lshlrev_b64_src0_inline %value, 31
+  %shift_32 = v_lshlrev_b64_src0_inline %value, 32
+  %shift_63 = v_lshlrev_b64_src0_inline %value, 63
+  %shift_64 = v_lshlrev_b64_src0_inline %value, 64
+  %uniform = v_lshlrev_b64 %uniform_count, %value
+  %varying = v_lshlrev_b64 %varying_count, %value
+  return %shift_0, %shift_1, %shift_2, %shift_31, %shift_32, %shift_63, %shift_64, %uniform, %varying
+}
+
+// ----
+0xD28F0004
+0x00020080
+0xD28F0006
+0x00020081
+0xD28F0008
+0x00020082
+0xD28F000A
+0x0002009F
+0xD28F000C
+0x000200A0
+0xD28F000E
+0x000200BF
+0xD28F0010
+0x000200C0
+0xD28F0012
+0x00020000
+0xD28F0000
+0x00020102
+0xBF810000
+
+// ====
+
+// RUN: emit amdgpu-native-words @wide_shifts_gfx950 strategy=source
+
+amdgpu.target<gfx950> @target
+
+low.func.def target<amdgpu.cdna4.core>(@target) @wide_shifts_gfx950(%value: reg<amdgpu.vgpr x2>, %uniform_count: reg<amdgpu.sgpr>, %varying_count: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %shift_0 = v_lshlrev_b64_src0_inline %value, 0
+  %shift_1 = v_lshlrev_b64_src0_inline %value, 1
+  %shift_2 = v_lshlrev_b64_src0_inline %value, 2
+  %shift_31 = v_lshlrev_b64_src0_inline %value, 31
+  %shift_32 = v_lshlrev_b64_src0_inline %value, 32
+  %shift_63 = v_lshlrev_b64_src0_inline %value, 63
+  %shift_64 = v_lshlrev_b64_src0_inline %value, 64
+  %uniform = v_lshlrev_b64 %uniform_count, %value
+  %varying = v_lshlrev_b64 %varying_count, %value
+  return %shift_0, %shift_1, %shift_2, %shift_31, %shift_32, %shift_63, %shift_64, %uniform, %varying
+}
+
+// ----
+0xD28F0004
+0x00020080
+0xD28F0006
+0x00020081
+0xD28F0008
+0x00020082
+0xD28F000A
+0x0002009F
+0xD28F000C
+0x000200A0
+0xD28F000E
+0x000200BF
+0xD28F0010
+0x000200C0
+0xD28F0012
+0x00020000
+0xD28F0000
+0x00020102
+0xBF810000
+
+// ====
+
+// RUN: emit amdgpu-native-words @wide_shifts_gfx1100 strategy=source
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @wide_shifts_gfx1100(%value: reg<amdgpu.vgpr x2>, %uniform_count: reg<amdgpu.sgpr>, %varying_count: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %shift_0 = v_lshlrev_b64_src0_inline %value, 0
+  %shift_1 = v_lshlrev_b64_src0_inline %value, 1
+  %shift_2 = v_lshlrev_b64_src0_inline %value, 2
+  %shift_31 = v_lshlrev_b64_src0_inline %value, 31
+  %shift_32 = v_lshlrev_b64_src0_inline %value, 32
+  %shift_63 = v_lshlrev_b64_src0_inline %value, 63
+  %shift_64 = v_lshlrev_b64_src0_inline %value, 64
+  %uniform = v_lshlrev_b64 %uniform_count, %value
+  %varying = v_lshlrev_b64 %varying_count, %value
+  return %shift_0, %shift_1, %shift_2, %shift_31, %shift_32, %shift_63, %shift_64, %uniform, %varying
+}
+
+// ----
+0xD73C0004
+0x02020080
+0xD73C0006
+0x02020081
+0xD73C0008
+0x02020082
+0xD73C000A
+0x0202009F
+0xD73C000C
+0x020200A0
+0xD73C000E
+0x020200BF
+0xD73C0010
+0x020200C0
+0xD73C0012
+0x02020000
+0xD73C0000
+0x02020102
+0xBFB00000
+
+// ====
+
+// RUN: emit amdgpu-native-words @wide_shifts_gfx1151 strategy=source
+
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @wide_shifts_gfx1151(%value: reg<amdgpu.vgpr x2>, %uniform_count: reg<amdgpu.sgpr>, %varying_count: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %shift_0 = v_lshlrev_b64_src0_inline %value, 0
+  %shift_1 = v_lshlrev_b64_src0_inline %value, 1
+  %shift_2 = v_lshlrev_b64_src0_inline %value, 2
+  %shift_31 = v_lshlrev_b64_src0_inline %value, 31
+  %shift_32 = v_lshlrev_b64_src0_inline %value, 32
+  %shift_63 = v_lshlrev_b64_src0_inline %value, 63
+  %shift_64 = v_lshlrev_b64_src0_inline %value, 64
+  %uniform = v_lshlrev_b64 %uniform_count, %value
+  %varying = v_lshlrev_b64 %varying_count, %value
+  return %shift_0, %shift_1, %shift_2, %shift_31, %shift_32, %shift_63, %shift_64, %uniform, %varying
+}
+
+// ----
+0xD73C0004
+0x02020080
+0xD73C0006
+0x02020081
+0xD73C0008
+0x02020082
+0xD73C000A
+0x0202009F
+0xD73C000C
+0x020200A0
+0xD73C000E
+0x020200BF
+0xD73C0010
+0x020200C0
+0xD73C0012
+0x02020000
+0xD73C0000
+0x02020102
+0xBFB00000
+
+// ====
+
+// RUN: emit amdgpu-native-words @wide_shifts_gfx1201 strategy=source
+
+amdgpu.target<gfx1201> @target
+
+low.func.def target<amdgpu.rdna4.core>(@target) @wide_shifts_gfx1201(%value: reg<amdgpu.vgpr x2>, %uniform_count: reg<amdgpu.sgpr>, %varying_count: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %shift_0 = v_lshlrev_b64_src0_inline %value, 0
+  %shift_1 = v_lshlrev_b64_src0_inline %value, 1
+  %shift_2 = v_lshlrev_b64_src0_inline %value, 2
+  %shift_31 = v_lshlrev_b64_src0_inline %value, 31
+  %shift_32 = v_lshlrev_b64_src0_inline %value, 32
+  %shift_63 = v_lshlrev_b64_src0_inline %value, 63
+  %shift_64 = v_lshlrev_b64_src0_inline %value, 64
+  %uniform = v_lshlrev_b64 %uniform_count, %value
+  %varying = v_lshlrev_b64 %varying_count, %value
+  return %shift_0, %shift_1, %shift_2, %shift_31, %shift_32, %shift_63, %shift_64, %uniform, %varying
+}
+
+// ----
+0xD51F0004
+0x02020080
+0xD51F0006
+0x02020081
+0xD51F0008
+0x02020082
+0xD51F000A
+0x0202009F
+0xD51F000C
+0x020200A0
+0xD51F000E
+0x020200BF
+0xD51F0010
+0x020200C0
+0xD51F0012
+0x02020000
+0xD51F0000
+0x02020102
+0xBFB00000
+
+// ====
+
+// RUN: emit amdgpu-native-words @wide_shifts_gfx1250 strategy=source
+
+amdgpu.target<gfx1250> @target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @wide_shifts_gfx1250(%value: reg<amdgpu.vgpr x2>, %uniform_count: reg<amdgpu.sgpr>, %varying_count: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %shift_0 = v_lshlrev_b64_src0_inline %value, 0
+  %shift_1 = v_lshlrev_b64_src0_inline %value, 1
+  %shift_2 = v_lshlrev_b64_src0_inline %value, 2
+  %shift_31 = v_lshlrev_b64_src0_inline %value, 31
+  %shift_32 = v_lshlrev_b64_src0_inline %value, 32
+  %shift_63 = v_lshlrev_b64_src0_inline %value, 63
+  %shift_64 = v_lshlrev_b64_src0_inline %value, 64
+  %uniform = v_lshlrev_b64 %uniform_count, %value
+  %varying = v_lshlrev_b64 %varying_count, %value
+  return %shift_0, %shift_1, %shift_2, %shift_31, %shift_32, %shift_63, %shift_64, %uniform, %varying
+}
+
+// ----
+0xD51F0004
+0x02020080
+0xD51F0006
+0x02020081
+0xD51F0008
+0x02020082
+0xD51F000A
+0x0202009F
+0xD51F000C
+0x020200A0
+0xD51F000E
+0x020200BF
+0xD51F0010
+0x020200C0
+0xD51F0012
+0x02020000
+0xD51F0000
+0x02020102
+0xBFB00000

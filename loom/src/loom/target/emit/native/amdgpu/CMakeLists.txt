@@ -129,6 +129,7 @@ loom_check_test_suite(
     "test/assembly_integer_multiply.loom-test"
     "test/assembly_q8.loom-test"
     "test/assembly_vopd_profiles.loom-test"
+    "test/assembly_wide_shifts.loom-test"
     "test/assembly_wmma.loom-test"
     "test/compile_time_insertions.loom-test"
     "test/delay_alu.loom-test"

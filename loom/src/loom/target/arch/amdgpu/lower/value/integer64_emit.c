@@ -591,9 +591,14 @@ iree_status_t loom_amdgpu_lower_scalar_i64_alu(
       loom_value_id_t low_value = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_or_materialize_vgpr_i64(
           context, source_op, plan->lhs, &low_value));
+      loom_value_id_t low_rhs = LOOM_VALUE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(
+          loom_low_lower_lookup_value(context, plan->rhs, &low_rhs));
+      const loom_type_t lane_type = loom_amdgpu_low_register_lane_type(
+          loom_low_lower_context_module(context), low_rhs);
       loom_value_id_t low_shift = LOOM_VALUE_ID_INVALID;
-      IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_32_bits_as_vgpr(
-          context, source_op, plan->rhs, &low_shift));
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_slice(
+          context, source_op, low_rhs, 0, lane_type, &low_shift));
       loom_value_id_t low_result = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr64_shl(
           context, source_op, low_value, low_shift, &low_result));

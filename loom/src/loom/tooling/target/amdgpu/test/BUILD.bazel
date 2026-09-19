@@ -100,6 +100,12 @@ loom_test(
 )
 
 loom_test(
+    name = "wide_shift_hardware_test",
+    srcs = ["//loom/src/loom/test/corpus/conformance:integer_wide_shifts.loom"],
+    execution_profile = AMDGPU_HARDWARE_PROFILE,
+)
+
+loom_test(
     name = "kernarg_hardware_test",
     srcs = ["amdgpu_unused_kernargs.loom"],
     execution_profile = AMDGPU_HARDWARE_PROFILE,
