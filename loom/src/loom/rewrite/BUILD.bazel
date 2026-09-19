@@ -150,10 +150,7 @@ loom_cc_test(
 
 loom_cc_library(
     name = "callable",
-    srcs = [
-        "callable.c",
-        "callable_outline.c",
-    ],
+    srcs = ["callable.c"],
     hdrs = ["callable.h"],
     deps = [
         ":materialize",
@@ -163,7 +160,6 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/cfg",
-        "//loom/src/loom/ops/func",
         "//runtime/src/iree/base",
     ],
 )

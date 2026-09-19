@@ -9,7 +9,6 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/cfg/ops.h"
-#include "loom/ops/func/ops.h"
 #include "loom/rewrite/materialize.h"
 
 static bool loom_callable_get_call_symbol_ref(const loom_module_t* module,

@@ -171,7 +171,6 @@ loom_cc_library(
     "callable.h"
   SRCS
     "callable.c"
-    "callable_outline.c"
   DEPS
     ::materialize
     ::remap
@@ -180,7 +179,6 @@ loom_cc_library(
     loom::analysis::availability
     loom::ir
     loom::ops::cfg
-    loom::ops::func
     loom::ops::op_defs
   PUBLIC
 )
