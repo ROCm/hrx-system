@@ -1,0 +1,16 @@
+// RUN: format bytecode
+
+// Catalog discovery resumes the enclosing parameter list after TYPE leaves
+// inside dictionaries and parameterized arrays. Later names and repeated child
+// types survive the public bytecode write/read path.
+test.decl @nested_catalogs(%aggregate: test.array<test.matrix<f32, scope = subgroup, rows = 8>, metadata = {before = "early", payload = #test.options<mode = fast, element_type = test.array<i32, alignment = 16>, tile = #test.tile<width = 8>>, trailing = "late"}>, %variants: test.variant_set<[#test.options<mode = precise, element_type = test.matrix<f16, scope = workgroup, rows = 16>>, #test.compact<32, label = "variant">, #test.options<mode = fast, element_type = test.array<i32, alignment = 16>>], alternatives = [#test.tile<width = 4>]>)
+
+// ----
+test.decl @nested_catalogs(%aggregate: test.array<test.matrix<f32, scope = subgroup, rows = 8>, metadata = {before = "early", payload = #test.options<mode = fast, element_type = test.array<i32, alignment = 16>, tile = #test.tile<width = 8>>, trailing = "late"}>, %variants: test.variant_set<[#test.options<mode = precise, element_type = test.matrix<f16, scope = workgroup, rows = 16>>, #test.compact<32, label = "variant">, #test.options<mode = fast, element_type = test.array<i32, alignment = 16>>], alternatives = [#test.tile<width = 4>]>)
+
+// ====
+// RUN: format bytecode
+
+// Signatures and dialect parameters share children while scalar element types
+// are numbered before their shaped parents.
+test.decl @shared_children(%callback: (test.array<vector<8xf32>>, test.ref<test.array<vector<8xf32>>>) -> (test.array<vector<8xf32>>), %values: test.array<vector<8xf32>>, %plain: test.array<i32>)

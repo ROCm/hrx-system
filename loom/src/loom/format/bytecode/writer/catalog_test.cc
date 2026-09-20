@@ -6,10 +6,14 @@
 
 #include "loom/format/bytecode/writer/catalog.h"
 
+#include <vector>
+
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ir/parameterized_attr.h"
+#include "loom/ir/parameterized_type.h"
 
 namespace loom {
 namespace {
@@ -36,6 +40,21 @@ static const loom_encoding_family_descriptor_t kDescriptor = {
 };
 static const loom_encoding_vtable_t kVtable = {/*.descriptor=*/&kDescriptor};
 
+static const loom_attr_descriptor_t kPayloadParameters[] = {
+    {/*.name=*/LOOM_BSTRING_REF(7, "element"),
+     /*.attr_kind=*/LOOM_ATTR_TYPE},
+    {/*.name=*/LOOM_BSTRING_REF(5, "label"),
+     /*.attr_kind=*/LOOM_ATTR_STRING,
+     /*.flags=*/LOOM_ATTR_OPTIONAL},
+};
+static const loom_parameterized_attr_descriptor_t kPayloadDescriptor = {
+    /*.name=*/LOOM_BSTRING_REF(20, "test.catalog_payload"),
+    /*.kind=*/LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 0),
+    /*.parameter_count=*/IREE_ARRAYSIZE(kPayloadParameters),
+    /*.primary_parameter_index=*/LOOM_PARAMETERIZED_ATTR_NO_PRIMARY_PARAMETER,
+    /*.parameter_descriptors=*/kPayloadParameters,
+};
+
 class CatalogTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -43,6 +62,8 @@ class CatalogTest : public ::testing::Test {
     iree_arena_initialize(&pool_, &arena_);
     loom_context_initialize(iree_allocator_system(), &context_);
     IREE_ASSERT_OK(loom_context_register_encoding_vtable(&context_, &kVtable));
+    IREE_ASSERT_OK(loom_context_register_parameterized_attrs(
+        &context_, LOOM_DIALECT_TEST, &kPayloadDescriptor, 1));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("catalog"), &pool_,
                                         nullptr, iree_allocator_system(),
@@ -59,6 +80,24 @@ class CatalogTest : public ::testing::Test {
   loom_string_id_t Intern(iree_string_view_t name) {
     loom_string_id_t id = LOOM_STRING_ID_INVALID;
     IREE_CHECK_OK(loom_module_intern_string(module_, name, &id));
+    return id;
+  }
+
+  loom_type_id_t InternType(loom_type_t type) {
+    loom_type_id_t id = LOOM_TYPE_ID_INVALID;
+    IREE_CHECK_OK(loom_module_intern_type_id(module_, type, &id));
+    return id;
+  }
+
+  loom_type_id_t Pair(loom_type_id_t child) {
+    alignas(loom_func_type_data_t) unsigned char
+        storage[sizeof(loom_func_type_data_t) + 2 * sizeof(loom_type_t)] = {};
+    auto* data = reinterpret_cast<loom_func_type_data_t*>(storage);
+    data->arg_count = 2;
+    const loom_type_id_t children[] = {child, child};
+    loom_type_id_t id = LOOM_TYPE_ID_INVALID;
+    IREE_CHECK_OK(loom_module_intern_topological_type_id(
+        module_, loom_type_function(data), children, 2, &id));
     return id;
   }
 
@@ -190,6 +229,170 @@ TEST_F(CatalogTest, EncodingPayloadsNumberNestedTypesAndStrings) {
   ASSERT_LT(label_id, numbering.strings.count);
   EXPECT_TRUE(iree_string_view_equal(numbering.strings.values[label_id],
                                      IREE_SV("element_label")));
+}
+
+TEST_F(CatalogTest, SharedTypeNumberingRetainsCompletedResults) {
+  std::vector<loom_type_id_t> types = {
+      InternType(loom_type_scalar(LOOM_SCALAR_TYPE_F32))};
+  for (int level = 0; level < 8192; ++level) {
+    types.push_back(Pair(types.back()));
+  }
+  loom_bytecode_numbering_t numbering;
+  IREE_ASSERT_OK(
+      loom_bytecode_numbering_initialize(&numbering, module_, &arena_));
+  uint32_t writer_id = 0;
+  IREE_ASSERT_OK(loom_bytecode_numbering_intern_type(
+      &numbering, module_->types.entries[types.back()], &writer_id));
+  ASSERT_EQ(numbering.types.count, types.size());
+  EXPECT_EQ(writer_id, types.size() - 1);
+  const auto completed_storage = arena_.used_allocation_size;
+  for (size_t i = 0; i < types.size(); ++i) {
+    EXPECT_EQ(numbering.types.module_indices_by_writer_id[i], types[i]);
+    IREE_ASSERT_OK(loom_bytecode_numbering_intern_type(
+        &numbering, module_->types.entries[types[i]], &writer_id));
+    EXPECT_EQ(writer_id, i);
+  }
+  EXPECT_EQ(numbering.types.count, types.size());
+  EXPECT_EQ(arena_.used_allocation_size, completed_storage);
+}
+
+TEST_F(CatalogTest, TypeAndAttributeMetadataKeepFirstUseOrder) {
+  static const loom_attr_descriptor_t variants_parameter = [] {
+    loom_attr_descriptor_t descriptor = {
+        /*.name=*/LOOM_BSTRING_REF(8, "variants"),
+        /*.attr_kind=*/LOOM_ATTR_PARAMETERIZED_ARRAY,
+    };
+    descriptor.reference.parameterized_attr_kind =
+        LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 0);
+    return descriptor;
+  }();
+  static const loom_attr_descriptor_t parameters[] = {
+      {/*.name=*/LOOM_BSTRING_REF(6, "before"),
+       /*.attr_kind=*/LOOM_ATTR_STRING},
+      {/*.name=*/LOOM_BSTRING_REF(8, "metadata"),
+       /*.attr_kind=*/LOOM_ATTR_DICT},
+      variants_parameter,
+      {/*.name=*/LOOM_BSTRING_REF(5, "after"),
+       /*.attr_kind=*/LOOM_ATTR_STRING},
+      {/*.name=*/LOOM_BSTRING_REF(8, "optional"),
+       /*.attr_kind=*/LOOM_ATTR_TYPE,
+       /*.flags=*/LOOM_ATTR_OPTIONAL},
+  };
+  static const loom_parameterized_type_descriptor_t descriptor = {
+      /*.name=*/LOOM_BSTRING_REF(17, "test.catalog_type"),
+      /*.parameter_descriptors=*/parameters,
+      /*.ir_kind=*/LOOM_TYPE_PARAMETERIZED,
+      /*.type_flags=*/{},
+      /*.parameter_count=*/IREE_ARRAYSIZE(parameters),
+  };
+  // Module insertion order intentionally differs from first-use wire order.
+  const auto late = Intern(IREE_SV("late"));
+  const auto inner_label = Intern(IREE_SV("inner_label"));
+  const auto early = Intern(IREE_SV("early"));
+  const auto scalar = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
+  const auto element = InternType(scalar);
+  const auto child =
+      InternType(loom_type_dialect(Intern(IREE_SV("test.child")), 1, &scalar));
+  const loom_named_attr_t entry = {
+      Intern(IREE_SV("shape")), {}, loom_attr_type(child)};
+  loom_attribute_t metadata;
+  IREE_ASSERT_OK(loom_module_make_canonical_attr_dict(
+      module_, loom_make_named_attr_slice(&entry, 1), &metadata));
+  const loom_attribute_t payload_slots[] = {loom_attr_type(child),
+                                            loom_attr_string(inner_label)};
+  loom_attribute_t payload;
+  IREE_ASSERT_OK(loom_module_make_parameterized_attr(
+      module_, kPayloadDescriptor.kind, payload_slots, 2, &payload));
+  const loom_attribute_t payloads[] = {payload, payload};
+  loom_attribute_t variants;
+  IREE_ASSERT_OK(loom_module_make_parameterized_attr_array(
+      module_, loom_make_parameterized_attr_array(payloads, 2), &variants));
+  const loom_attribute_t slots[] = {loom_attr_string(early), metadata, variants,
+                                    loom_attr_string(late), loom_attr_absent()};
+  loom_type_t type;
+  loom_type_id_t type_id;
+  IREE_ASSERT_OK(loom_module_make_parameterized_type(
+      module_, &descriptor, slots, IREE_ARRAYSIZE(slots), &type, &type_id));
+  loom_bytecode_numbering_t numbering;
+  IREE_ASSERT_OK(
+      loom_bytecode_numbering_initialize(&numbering, module_, &arena_));
+  uint32_t writer_id = 0;
+  IREE_ASSERT_OK(
+      loom_bytecode_numbering_intern_type(&numbering, type, &writer_id));
+  const loom_type_id_t expected_types[] = {element, child, type_id};
+  ASSERT_EQ(numbering.types.count, IREE_ARRAYSIZE(expected_types));
+  for (size_t i = 0; i < IREE_ARRAYSIZE(expected_types); ++i) {
+    EXPECT_EQ(numbering.types.module_indices_by_writer_id[i],
+              expected_types[i]);
+  }
+  const iree_string_view_t expected_strings[] = {
+      IREE_SV(""),
+      IREE_SV("test.catalog_type"),
+      IREE_SV("before"),
+      IREE_SV("early"),
+      IREE_SV("metadata"),
+      IREE_SV("shape"),
+      IREE_SV("test.child"),
+      IREE_SV("variants"),
+      IREE_SV("test.catalog_payload"),
+      IREE_SV("element"),
+      IREE_SV("label"),
+      IREE_SV("inner_label"),
+      IREE_SV("after"),
+      IREE_SV("late"),
+  };
+  ASSERT_EQ(numbering.strings.count, IREE_ARRAYSIZE(expected_strings));
+  for (size_t i = 0; i < IREE_ARRAYSIZE(expected_strings); ++i) {
+    EXPECT_TRUE(iree_string_view_equal(numbering.strings.values[i],
+                                       expected_strings[i]));
+  }
+  const auto completed_storage = arena_.used_allocation_size;
+  IREE_ASSERT_OK(
+      loom_bytecode_number_attr_value(&numbering, variants, &parameters[2]));
+  EXPECT_EQ(numbering.strings.count, IREE_ARRAYSIZE(expected_strings));
+  EXPECT_EQ(numbering.types.count, IREE_ARRAYSIZE(expected_types));
+  EXPECT_EQ(arena_.used_allocation_size, completed_storage);
+}
+
+TEST_F(CatalogTest, ParameterizedTypesResumeAfterNestedTypes) {
+  static const loom_parameterized_type_descriptor_t descriptor = {
+      /*.name=*/LOOM_BSTRING_REF(10, "test.chain"),
+      /*.parameter_descriptors=*/kPayloadParameters,
+      /*.ir_kind=*/LOOM_TYPE_PARAMETERIZED,
+      /*.type_flags=*/{},
+      /*.parameter_count=*/IREE_ARRAYSIZE(kPayloadParameters),
+  };
+  const auto label = Intern(IREE_SV("chain_label"));
+  std::vector<loom_type_id_t> types = {
+      InternType(loom_type_scalar(LOOM_SCALAR_TYPE_F32))};
+  loom_type_t type;
+  for (int level = 0; level < 512; ++level) {
+    const loom_attribute_t slots[] = {loom_attr_type(types.back()),
+                                      loom_attr_string(label)};
+    loom_type_id_t id;
+    IREE_ASSERT_OK(loom_module_make_parameterized_type(module_, &descriptor,
+                                                       slots, 2, &type, &id));
+    types.push_back(id);
+  }
+  loom_bytecode_numbering_t numbering;
+  IREE_ASSERT_OK(
+      loom_bytecode_numbering_initialize(&numbering, module_, &arena_));
+  uint32_t writer_id = 0;
+  IREE_ASSERT_OK(
+      loom_bytecode_numbering_intern_type(&numbering, type, &writer_id));
+  ASSERT_EQ(numbering.types.count, types.size());
+  for (size_t i = 0; i < types.size(); ++i) {
+    EXPECT_EQ(numbering.types.module_indices_by_writer_id[i], types[i]);
+  }
+  const iree_string_view_t expected[] = {
+      IREE_SV(""),      IREE_SV("test.chain"),  IREE_SV("element"),
+      IREE_SV("label"), IREE_SV("chain_label"),
+  };
+  ASSERT_EQ(numbering.strings.count, IREE_ARRAYSIZE(expected));
+  for (size_t i = 0; i < IREE_ARRAYSIZE(expected); ++i) {
+    EXPECT_TRUE(
+        iree_string_view_equal(numbering.strings.values[i], expected[i]));
+  }
 }
 
 }  // namespace

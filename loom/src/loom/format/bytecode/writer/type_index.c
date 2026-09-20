@@ -13,29 +13,7 @@
 #include "loom/ir/parameterized_type.h"
 #include "loom/ir/structural_hash.h"
 
-// One distinct exact storage representation and its wire-equivalence class.
-// Canonical compound types retain the canonical storage of their children.
-typedef struct loom_bytecode_type_node_t {
-  // Borrowed by-value type whose payload remains owned by the module.
-  loom_type_t type;
-  // Hash of exact storage, including payload addresses and SSA identities.
-  uint32_t storage_hash;
-  // Earliest equivalent module index, retained on the wire representative.
-  loom_type_id_t module_index;
-  // Ordered immediate type dependencies in the construction graph.
-  struct {
-    // Beginning of the dependency slice.
-    iree_host_size_t begin;
-    // Number of dependencies, including repeated occurrences.
-    iree_host_size_t count;
-  } dependencies;
-  // Shallow structural hash using already-computed child equivalence classes.
-  uint32_t wire_hash;
-  // Wire-equivalent storage node, or UINT32_MAX until postorder completion.
-  uint32_t representative;
-} loom_bytecode_type_node_t;
-
-// Temporary graph construction storage; numbering retains only the type index.
+// Temporary graph construction capacity; the index retains the completed edges.
 typedef struct loom_bytecode_type_graph_t {
   // Index receiving exact storage and wire-equivalence facts.
   loom_bytecode_type_index_t* index;
@@ -194,6 +172,12 @@ static iree_status_t loom_bytecode_type_graph_add_children(
   const loom_type_t* children = NULL;
   iree_host_size_t count = 0;
   switch (loom_type_kind(type)) {
+    case LOOM_TYPE_TILE:
+    case LOOM_TYPE_TENSOR:
+    case LOOM_TYPE_VECTOR:
+    case LOOM_TYPE_VIEW:
+      return loom_bytecode_type_graph_add_dependency(
+          graph, loom_type_scalar(loom_type_element_type(type)));
     case LOOM_TYPE_FUNCTION: {
       const loom_func_type_data_t* data = loom_type_func_data(type);
       if (data) {
@@ -695,6 +679,7 @@ iree_status_t loom_bytecode_type_index_initialize(
     out_index->nodes[i].dependencies.begin = begin;
     out_index->nodes[i].dependencies.count = graph.count - begin;
   }
+  out_index->dependencies = graph.dependencies;
 
   iree_host_size_t class_capacity =
       iree_host_size_next_power_of_two((out_index->count * 4 + 2) / 3);
@@ -756,11 +741,17 @@ iree_status_t loom_bytecode_type_index_initialize(
   return iree_ok_status();
 }
 
-loom_type_id_t loom_bytecode_type_index_lookup(
+const loom_bytecode_type_node_t* loom_bytecode_type_index_lookup_node(
     const loom_bytecode_type_index_t* index, loom_type_t type) {
   uint32_t node = loom_bytecode_type_storage_lookup(
       index, type, loom_bytecode_type_storage_hash(type));
-  return node == UINT32_MAX
-             ? LOOM_TYPE_ID_INVALID
-             : index->nodes[index->nodes[node].representative].module_index;
+  return node == UINT32_MAX ? NULL : &index->nodes[node];
+}
+
+loom_type_id_t loom_bytecode_type_index_lookup(
+    const loom_bytecode_type_index_t* index, loom_type_t type) {
+  const loom_bytecode_type_node_t* node =
+      loom_bytecode_type_index_lookup_node(index, type);
+  return !node ? LOOM_TYPE_ID_INVALID
+               : index->nodes[node->representative].module_index;
 }

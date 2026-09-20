@@ -99,6 +99,14 @@ typedef struct loom_bytecode_numbering_t {
     iree_host_size_t capacity;
   } types;
 
+  // Reusable continuations for interleaved type and attribute discovery.
+  struct {
+    // Arena-owned suspended work; borrowed source payloads remain immutable.
+    struct loom_bytecode_catalog_frame_t* frames;
+    // Allocated frame capacity, reused by successive catalog roots.
+    iree_host_size_t capacity;
+  } traversal;
+
   // First-use-ordered operation catalog.
   struct {
     // Operation entries indexed by bytecode operation ID.

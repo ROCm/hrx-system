@@ -5,11 +5,17 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_benchmark", "loom_cc_fuzz", "loom_cc_library", "loom_cc_test")
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test_suite")
 
 package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
+)
+
+loom_check_test_suite(
+    name = "test",
+    srcs = ["catalog_order.loom-test"],
 )
 
 loom_cc_library(

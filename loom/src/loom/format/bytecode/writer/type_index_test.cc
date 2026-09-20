@@ -92,6 +92,29 @@ TEST_F(TypeIndexTest, SharedDependenciesAreIndexedOnce) {
   }
 }
 
+TEST_F(TypeIndexTest, ShapedTypesRetainTheirScalarDependency) {
+  const loom_type_kind_t kinds[] = {LOOM_TYPE_TILE, LOOM_TYPE_TENSOR,
+                                    LOOM_TYPE_VECTOR, LOOM_TYPE_VIEW};
+  loom_type_id_t types[IREE_ARRAYSIZE(kinds)];
+  for (size_t i = 0; i < IREE_ARRAYSIZE(kinds); ++i) {
+    types[i] = Intern(loom_type_shaped_1d(kinds[i], LOOM_SCALAR_TYPE_F32, 8,
+                                          /*encoding_id=*/0));
+  }
+  loom_bytecode_type_index_t index;
+  IREE_ASSERT_OK(loom_bytecode_type_index_initialize(module_, &arena_, &index));
+  const auto* scalar = loom_bytecode_type_index_lookup_node(
+      &index, loom_type_scalar(LOOM_SCALAR_TYPE_F32));
+  ASSERT_NE(scalar, nullptr);
+  for (auto type : types) {
+    const auto* node = loom_bytecode_type_index_lookup_node(
+        &index, module_->types.entries[type]);
+    ASSERT_NE(node, nullptr);
+    ASSERT_EQ(node->dependencies.count, 1u);
+    EXPECT_EQ(&index.nodes[index.dependencies[node->dependencies.begin]],
+              scalar);
+  }
+}
+
 TEST_F(TypeIndexTest,
        WireEquivalenceIgnoresScopedBindingsThroughSharedChildren) {
   const loom_type_t dimension_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);

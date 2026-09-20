@@ -9,6 +9,13 @@
 
 iree_add_all_subdirs()
 
+loom_check_test_suite(
+  NAME
+    test
+  SRCS
+    "catalog_order.loom-test"
+)
+
 loom_cc_library(
   NAME
     varint
