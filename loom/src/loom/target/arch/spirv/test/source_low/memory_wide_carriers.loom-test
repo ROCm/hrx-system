@@ -167,3 +167,57 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @copy_w
   OpStore.storage_buffer.i32 %22, %value
   return
 }
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @exchange_wide_origin(%buffer: buffer, %base_input: i64, %position_input: index, %value: i32) -> (i32) {
+  %aligned_buffer = buffer.assume.alignment %buffer {minimum_alignment = 8} : buffer
+  %wide_base = scalar.assume %base_input [range(%base_input, 0, 128), mul(%base_input, 8)] : i64
+  %base = index.cast %wide_base : i64 to offset
+  %position = index.assume %position_input [range(%position_input, 0, 7)] : index
+  %prefix = index.constant 16 : offset
+  %origin = index.add %base, %prefix : offset
+  %view = buffer.view %aligned_buffer[%origin] : buffer -> view<8xi32>
+  %previous = view.load %view[%position] : view<8xi32> -> i32
+  view.store %value, %view[%position] : i32, view<8xi32>
+  func.return %previous : i32
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @exchange_wide_origin(%aligned_buffer: reg<spirv.ptr.storage_buffer>, %wide_base: reg<spirv.id : i64>, %position: reg<spirv.id : index>, %value: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+  %base = OpBitcast.i64.offset64 %wide_base
+  %prefix = OpConstant.offset64 16
+  %origin = OpIAdd.offset64 %base, %prefix
+  %21 = OpBitcast.i32.u32 %position
+  %22 = OpUConvert.u32.offset64 %21
+  %23 = OpConstant.offset64 4
+  %24 = OpIMul.offset64 %22, %23
+  %25 = OpIAdd.offset64 %origin, %24
+  %26 = OpPtrAccessChain.storage_buffer.i32.byte_offset %aligned_buffer, %25
+  %previous = OpLoad.storage_buffer.i32 %26
+  OpStore.storage_buffer.i32 %26, %value
+  return %previous
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @exchange_signed_coordinate(%buffer: buffer, %base_input: offset, %position_input: i32, %value: i32) -> (i32) {
+  %aligned_buffer = buffer.assume.alignment %buffer {minimum_alignment = 8} : buffer
+  %base = index.assume %base_input [range(%base_input, 64, 128), mul(%base_input, 8)] : offset
+  %signed_position = scalar.assume %position_input [range(%position_input, -8, -1)] : i32
+  %coordinate = index.cast %signed_position : i32 to index
+  %bias = index.constant 8 : index
+  %position = index.add %coordinate, %bias : index
+  %prefix = index.constant 16 : offset
+  %origin = index.add %base, %prefix : offset
+  %view = buffer.view %aligned_buffer[%origin] : buffer -> view<8xi32>
+  // ERROR@+1: SPIRV/028 {constraint_key="source_memory.address_index_non_negative_s32"}
+  %previous = view.load %view[%position] : view<8xi32> -> i32
+  // ERROR@+1: SPIRV/028 {constraint_key="source_memory.address_index_non_negative_s32"}
+  view.store %value, %view[%position] : i32, view<8xi32>
+  func.return %previous : i32
+}

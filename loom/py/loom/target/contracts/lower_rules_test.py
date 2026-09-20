@@ -1495,11 +1495,11 @@ def test_compile_lower_rule_set_compiles_any_positive_dynamic_byte_offset() -> N
                         ),
                         source_memory_byte_offset_materializer=(
                             SourceMemoryByteOffsetMaterializer(
-                                const_i64=TEST_LOW_CONST_I32_DESCRIPTOR,
-                                add_i64=TEST_LOW_ADD_I32_DESCRIPTOR,
-                                mul_i64=TEST_LOW_MUL_I32_DESCRIPTOR,
-                                shl_i64=None,
-                                const_i64_immediate="i32_value",
+                                constant=TEST_LOW_CONST_I32_DESCRIPTOR,
+                                add=TEST_LOW_ADD_I32_DESCRIPTOR,
+                                multiply=TEST_LOW_MUL_I32_DESCRIPTOR,
+                                shift_left=None,
+                                constant_immediate="i32_value",
                             )
                         ),
                     ),

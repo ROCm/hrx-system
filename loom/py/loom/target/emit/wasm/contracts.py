@@ -45,6 +45,7 @@ from loom.target.contracts import (
     Scalar,
     SourceMemoryByteOffsetMaterializer,
     SourceMemoryConstraint,
+    SourceMemoryIntegerConversion,
     SourceMemoryOperation,
     SourceMemoryProject,
     SourceMemoryRootKind,
@@ -276,6 +277,8 @@ def _conversion_rule(
     source_type: TypePattern,
     result_type: TypePattern,
     descriptor_key: str,
+    *,
+    guards: tuple[Guard, ...] = (),
 ) -> DescriptorRule:
     descriptor = _descriptor(descriptor_key)
     return DescriptorRule(
@@ -284,6 +287,7 @@ def _conversion_rule(
         guards=(
             _value_type("input", source_type),
             _value_type("result", result_type),
+            *guards,
         ),
         emit=(
             EmitDescriptorOp(
@@ -696,11 +700,16 @@ def _memory_rule(
                 result_types={"dst": _I32},
                 source_memory=source_memory,
                 source_memory_byte_offset_materializer=SourceMemoryByteOffsetMaterializer(
-                    const_i64=_descriptor("wasm.i32.const"),
-                    add_i64=_descriptor("wasm.i32.add"),
-                    mul_i64=_descriptor("wasm.i32.mul"),
-                    shl_i64=None,
-                    const_i64_immediate="i32_value",
+                    constant=_descriptor("wasm.i32.const"),
+                    add=_descriptor("wasm.i32.add"),
+                    multiply=_descriptor("wasm.i32.mul"),
+                    shift_left=None,
+                    constant_immediate="i32_value",
+                    integer_conversions=(
+                        SourceMemoryIntegerConversion(
+                            "i64", _descriptor("wasm.i32.wrap_i64")
+                        ),
+                    ),
                 ),
             )
         )
@@ -894,6 +903,19 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
                 guards=(Guard.value_i64_range("input", 0, (1 << 31) - 1),),
             )
             for source_type, result_type in ((_INDEX, _OFFSET), (_OFFSET, _INDEX))
+        ),
+        *(
+            _conversion_rule(
+                index.index_cast,
+                _I64,
+                result_type,
+                "wasm.i32.wrap_i64",
+                guards=(Guard.value_i64_range("input", minimum, maximum),),
+            )
+            for result_type, minimum, maximum in (
+                (_INDEX, -(1 << 31), (1 << 31) - 1),
+                (_OFFSET, 0, (1 << 32) - 1),
+            )
         ),
         _binary_rule(index.index_add, _INDEX, "wasm.i32.add"),
         _binary_rule(index.index_add, _OFFSET, "wasm.i32.add"),

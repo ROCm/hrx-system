@@ -471,25 +471,46 @@ typedef uint16_t loom_low_lower_source_memory_flags_t;
 // Accept any advisory source cache policy.
 #define LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_CACHE_POLICY_ANY ((uint16_t)1u << 3)
 
+// Converts a fixed-width canonical integer term to the byte arithmetic carrier.
+// Symbolic analysis preserves signed numeric values (zero/one for i1), even
+// when the term originated in an unsigned offset cast. Narrowing is modular;
+// source-memory matching owns the complete-address representability proof.
+typedef struct loom_low_lower_source_memory_integer_conversion_t {
+  // Literal selector for a descriptor with an explicit conversion immediate.
+  int64_t immediate_value;
+  // Selector name, or LOOM_BSTRING_TABLE_OFFSET_NONE for no selector.
+  loom_bstring_table_offset_t immediate_string_offset;
+  // Unary conversion, or NONE for compatible carriers with low-unit projection.
+  loom_low_lower_descriptor_ref_t descriptor_ref;
+} loom_low_lower_source_memory_integer_conversion_t;
+static_assert(sizeof(loom_low_lower_source_memory_integer_conversion_t) == 16,
+              "source-memory integer conversion must be 16 bytes");
+
 // Materializes canonical byte-offset arithmetic in the constant descriptor's
-// integer carrier. All arithmetic descriptors use that same carrier. Source
-// terms wider than the carrier are projected to their low register units;
-// source-memory matching owns the complete-address range proof.
+// integer carrier. All arithmetic descriptors use that same carrier; source
+// terms are converted before multiplication or addition. Source-memory matching
+// owns the complete-address range proof, including modular narrowing.
 typedef struct loom_low_lower_source_memory_byte_offset_materializer_t {
   // Rule-set B-string offset for the integer constant immediate field.
-  loom_bstring_table_offset_t const_i64_immediate_string_offset;
+  loom_bstring_table_offset_t constant_immediate_string_offset;
   // Descriptor ref defining the arithmetic carrier and materializing constants.
-  loom_low_lower_descriptor_ref_t const_i64_descriptor_ref;
+  loom_low_lower_descriptor_ref_t constant_descriptor_ref;
   // Descriptor ref used to materialize additions in the arithmetic carrier.
-  loom_low_lower_descriptor_ref_t add_i64_descriptor_ref;
+  loom_low_lower_descriptor_ref_t add_descriptor_ref;
   // Descriptor ref used to materialize multiplies in the arithmetic carrier.
-  loom_low_lower_descriptor_ref_t mul_i64_descriptor_ref;
+  loom_low_lower_descriptor_ref_t multiply_descriptor_ref;
   // Descriptor ref used to materialize shifts in the arithmetic carrier.
-  loom_low_lower_descriptor_ref_t shl_i64_descriptor_ref;
+  loom_low_lower_descriptor_ref_t shift_left_descriptor_ref;
+  // Conversions indexed by source scalar kind minus LOOM_SCALAR_TYPE_I1.
+  // Address-domain terms already use their target-selected carrier. An absent
+  // fixed-width conversion requires the same register class as the arithmetic
+  // carrier and permits projection of wider physical register tuples.
+  loom_low_lower_source_memory_integer_conversion_t
+      integer_conversions[LOOM_SCALAR_TYPE_I64 - LOOM_SCALAR_TYPE_I1 + 1];
 } loom_low_lower_source_memory_byte_offset_materializer_t;
 static_assert(sizeof(loom_low_lower_source_memory_byte_offset_materializer_t) ==
-                  12,
-              "source-memory byte-offset materializer must be 12 bytes");
+                  96,
+              "source-memory byte-offset materializer must be 96 bytes");
 
 typedef struct loom_low_lower_source_memory_address_materializer_t {
   // Minimum accepted complete address coordinate.

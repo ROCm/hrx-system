@@ -123,6 +123,7 @@ from loom.target.contracts.source_memory import (
     SourceMemoryByteOffsetMaterializer,
     SourceMemoryConstraint,
     SourceMemoryDynamicIndexSource,
+    SourceMemoryIntegerConversion,
     SourceMemoryOperation,
     SourceMemoryRootKind,
 )
@@ -221,6 +222,7 @@ __all__ = [
     "SourceValueKind",
     "SourceMemoryConstraint",
     "SourceMemoryDynamicIndexSource",
+    "SourceMemoryIntegerConversion",
     "SourceMemoryOperation",
     "SourceMemoryRootKind",
     "SourceOpProject",

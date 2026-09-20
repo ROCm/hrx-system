@@ -1,5 +1,5 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_wide_carriers.loom-test
-// RUN: emit source-low output=low
+// RUN: with-checks emit source-low output=low
 
 aie2p.target<core> @target
 
@@ -19,18 +19,9 @@ func.def target(@target) @copy_wide_origin_vectors(%input: buffer, %output: buff
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_wide_origin_vectors(%byte_offset: reg<aie2p.er x2>) asm {
-  %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
-  %destination_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %destination_offset = slice %byte_offset[0] : reg<aie2p.er x2> -> reg<aie2p.er>
-  %17 = mov.static-byte-offset 64
-  %19 = add.rr %destination_offset, %17
-  %20 = mov.address-index %19
-  %value = vlda.512.i32x16.index %source_view, %20
-  %22 = mov.address-index %destination_offset
-  vst.512.i32x16.index %value, %destination_view, %22
-  return
-}
+CHECK: %destination_offset = slice %byte_offset[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+CHECK: %value = vlda.512.i32x16.index %source_view, *
+CHECK: vst.512.i32x16.index %value, %destination_view, *
 
 // ====
 
@@ -52,15 +43,54 @@ func.def target(@target) @copy_wide_origin_scalar(%input: buffer, %output: buffe
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_wide_origin_scalar(%byte_offset: reg<aie2p.er x2>) asm {
-  %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
-  %destination_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %destination_offset = slice %byte_offset[0] : reg<aie2p.er x2> -> reg<aie2p.er>
-  %17 = mov.static-byte-offset 64
-  %19 = add.rr %destination_offset, %17
-  %20 = mov.address-index %19
-  %value = lda.i32.index %source_view, %20
-  %22 = mov.address-index %destination_offset
-  st.i32.index %value, %destination_view, %22
-  return
+CHECK: %destination_offset = slice %byte_offset[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+CHECK: %value = lda.i32.index %source_view, *
+CHECK: st.i32.index %value, %destination_view, *
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @exchange_wide_origin(%buffer: buffer, %base_input: i64, %position_input: index, %value: i32) -> (i32) {
+  %aligned_buffer = buffer.assume.alignment %buffer {minimum_alignment = 8} : buffer
+  %wide_base = scalar.assume %base_input [range(%base_input, 0, 128), mul(%base_input, 8)] : i64
+  %base = index.cast %wide_base : i64 to offset
+  %position = index.assume %position_input [range(%position_input, 0, 7)] : index
+  %prefix = index.constant 16 : offset
+  %origin = index.add %base, %prefix : offset
+  %view = buffer.view %aligned_buffer[%origin] : buffer -> view<8xi32>
+  %previous = view.load %view[%position] : view<8xi32> -> i32
+  view.store %value, %view[%position] : i32, view<8xi32>
+  func.return %previous : i32
 }
+
+// ----
+CHECK: * = slice %wide_base[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+CHECK: * = add *, 16
+CHECK: %previous = lda.i32.index %view, *
+CHECK: st.i32.index %value, %view, *
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @exchange_signed_coordinate(%buffer: buffer, %base_input: offset, %position_input: i32, %value: i32) -> (i32) {
+  %aligned_buffer = buffer.assume.alignment %buffer {minimum_alignment = 8} : buffer
+  %base = index.assume %base_input [range(%base_input, 64, 128), mul(%base_input, 8)] : offset
+  %signed_position = scalar.assume %position_input [range(%position_input, -8, -1)] : i32
+  %coordinate = index.cast %signed_position : i32 to index
+  %bias = index.constant 8 : index
+  %position = index.add %coordinate, %bias : index
+  %prefix = index.constant 16 : offset
+  %origin = index.add %base, %prefix : offset
+  %view = buffer.view %aligned_buffer[%origin] : buffer -> view<8xi32>
+  %previous = view.load %view[%position] : view<8xi32> -> i32
+  view.store %value, %view[%position] : i32, view<8xi32>
+  func.return %previous : i32
+}
+
+// ----
+CHECK: * = lshl %signed_position, *
+CHECK: * = add *, 48
+CHECK: %previous = lda.i32.index %view, *
+CHECK: st.i32.index %value, %view, *

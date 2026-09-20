@@ -72,6 +72,7 @@ from loom.target.contracts import (
     SourceMemoryByteOffsetMaterializer,
     SourceMemoryConstraint,
     SourceMemoryDynamicIndexSource,
+    SourceMemoryIntegerConversion,
     SourceMemoryOperation,
     SourceMemoryRootKind,
     SourceNodeRelation,
@@ -90,6 +91,7 @@ from loom.target.test.descriptors import (
     TEST_LOW_CONST_I32_DESCRIPTOR,
     TEST_LOW_CORE_DESCRIPTOR_SET,
     TEST_LOW_MUL_I32_DESCRIPTOR,
+    TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR,
 )
 
 _TEST_PUBLIC_HEADER = "loom/target/test/contracts/generated.h"
@@ -1845,11 +1847,11 @@ def test_source_memory_rows_split_complete_address_materializer() -> None:
 
 def test_source_memory_rows_split_byte_offset_materializer() -> None:
     materializer = SourceMemoryByteOffsetMaterializer(
-        const_i64=TEST_LOW_CONST_I32_DESCRIPTOR,
-        add_i64=TEST_LOW_ADD_I32_DESCRIPTOR,
-        mul_i64=TEST_LOW_MUL_I32_DESCRIPTOR,
-        shl_i64=None,
-        const_i64_immediate="i32_value",
+        constant=TEST_LOW_CONST_I32_DESCRIPTOR,
+        add=TEST_LOW_ADD_I32_DESCRIPTOR,
+        multiply=TEST_LOW_MUL_I32_DESCRIPTOR,
+        shift_left=None,
+        constant_immediate="i32_value",
     )
     descriptor_refs = {
         TEST_LOW_CONST_I32_DESCRIPTOR.key: 0,
@@ -1861,10 +1863,75 @@ def test_source_memory_rows_split_byte_offset_materializer() -> None:
         descriptor_refs,
         materializer,
         immediate_string_offset="TEST_STRING_I32_VALUE",
+        conversion_immediate_string_offsets={},
     )
 
-    assert ".const_i64_immediate_string_offset = TEST_STRING_I32_VALUE" in materializer_fields
-    assert ".const_i64_descriptor_ref = 0" in materializer_fields
-    assert ".add_i64_descriptor_ref = 1" in materializer_fields
-    assert ".mul_i64_descriptor_ref = 2" in materializer_fields
-    assert ".shl_i64_descriptor_ref = 65535" in materializer_fields
+    assert ".constant_immediate_string_offset = TEST_STRING_I32_VALUE" in materializer_fields
+    assert ".constant_descriptor_ref = 0" in materializer_fields
+    assert ".add_descriptor_ref = 1" in materializer_fields
+    assert ".multiply_descriptor_ref = 2" in materializer_fields
+    assert ".shift_left_descriptor_ref = 65535" in materializer_fields
+
+
+def test_source_memory_conversion_rows_keep_source_kind_and_selector() -> None:
+    descriptor = replace(
+        TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR,
+        key="test.convert.selected",
+        immediates=(Immediate("selector", ImmediateKind.UNSIGNED, bit_width=8, unsigned_max=255),),
+    )
+    materializer = SourceMemoryByteOffsetMaterializer(
+        constant=TEST_LOW_CONST_I32_DESCRIPTOR,
+        add=TEST_LOW_ADD_I32_DESCRIPTOR,
+        multiply=TEST_LOW_MUL_I32_DESCRIPTOR,
+        shift_left=None,
+        constant_immediate="i32_value",
+        integer_conversions=(SourceMemoryIntegerConversion("i8", descriptor, ("selector", 18)),),
+    )
+    references = {
+        descriptor.key: index
+        for index, descriptor in enumerate(
+            (
+                TEST_LOW_CONST_I32_DESCRIPTOR,
+                TEST_LOW_ADD_I32_DESCRIPTOR,
+                TEST_LOW_MUL_I32_DESCRIPTOR,
+                descriptor,
+            )
+        )
+    }
+    fields = source_memory_byte_offset_materializer_row(
+        references,
+        materializer,
+        immediate_string_offset="VALUE",
+        conversion_immediate_string_offsets={"i8": "SELECTOR"},
+    )
+    conversions = fields[0].removeprefix(".integer_conversions = {").removesuffix("}").split("}, {")
+    assert len(conversions) == 5
+    assert ".descriptor_ref = 3" in conversions[1]
+    assert ".immediate_value = INT64_C(18)" in conversions[1]
+    assert ".immediate_string_offset = SELECTOR" in conversions[1]
+    assert all(".descriptor_ref = 65535" in conversions[index] for index in (0, 2, 3, 4))
+    row = LowerSourceMemory(
+        constraint=SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=1,
+            vector_lane_byte_stride=4,
+            static_byte_offset=0,
+            dynamic_term_count=None,
+            dynamic_term_count_minimum=1,
+        ),
+        diagnostic_index=0xFFFF,
+        dynamic_offset_diagnostic_index=0xFFFF,
+        byte_offset_materializer=materializer,
+    )
+    table = _compiled_lower_rule_set(source_memories=(row,))
+    contract = _c_shape_contract()
+    contract = replace(
+        contract,
+        descriptor_set=replace(
+            contract.descriptor_set,
+            descriptors=(*contract.descriptor_set.descriptors, descriptor),
+        ),
+    )
+    assert set(descriptor_ref_keys(table, contract)) == set(references)

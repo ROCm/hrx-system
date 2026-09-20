@@ -20,12 +20,15 @@ iree_py_test(
         "$(location //loom/src/loom/tools/loom-compile:loom-compile)",
         "$(location sum.loom)",
         "$(location scalar_memory.loom)",
+        "$(location typed_addresses.loom)",
     ],
     data = [
         "scalar_memory.loom",
         "scalar_memory.mjs",
         "sum.loom",
         "sum.mjs",
+        "typed_addresses.loom",
+        "typed_addresses.mjs",
         "//loom/src/loom/tools/loom-compile",
     ],
     env_inherit = [

@@ -1,5 +1,5 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_wide_carriers.loom-test
-// RUN: emit source-low output=low
+// RUN: with-checks emit source-low output=low
 
 wasm.target<simd128> @target
 
@@ -9,9 +9,7 @@ func.def target(@target) @copy_wide_origin_vectors(%input: buffer, %output: buff
   %byte_offset = scalar.assume %byte_offset_input [range(%byte_offset_input, 0, 4096), mul(%byte_offset_input, 64)] : i64
   %prefix = scalar.constant 64 : i64
   %source_origin = scalar.addi %byte_offset, %prefix : i64
-  // ERROR@+1: WASM/001 {op_name="index.cast", field_name="input"}
   %source_offset = index.cast %source_origin : i64 to offset
-  // ERROR@+1: WASM/001 {op_name="index.cast", field_name="input"}
   %destination_offset = index.cast %byte_offset : i64 to offset
   %source_view = buffer.view %source[%source_offset] : buffer -> view<16xi32>
   %destination_view = buffer.view %destination[%destination_offset] : buffer -> view<16xi32>
@@ -19,6 +17,12 @@ func.def target(@target) @copy_wide_origin_vectors(%input: buffer, %output: buff
   vector.store %value, %destination_view[0] : vector<16xi32>, view<16xi32>
   func.return
 }
+
+// ----
+CHECK: * = i32.wrap_i64 %byte_offset
+CHECK: * = i32.load * {offset = 64}
+CHECK: * = i32.load * {offset = 124}
+CHECK: i32.store * {offset = 60}
 
 // ====
 
@@ -30,9 +34,7 @@ func.def target(@target) @copy_wide_origin_scalar(%input: buffer, %output: buffe
   %byte_offset = scalar.assume %byte_offset_input [range(%byte_offset_input, 0, 4096), mul(%byte_offset_input, 64)] : i64
   %prefix = scalar.constant 64 : i64
   %source_origin = scalar.addi %byte_offset, %prefix : i64
-  // ERROR@+1: WASM/001 {op_name="index.cast", field_name="input"}
   %source_offset = index.cast %source_origin : i64 to offset
-  // ERROR@+1: WASM/001 {op_name="index.cast", field_name="input"}
   %destination_offset = index.cast %byte_offset : i64 to offset
   %source_view = buffer.view %source[%source_offset] : buffer -> view<1xi32>
   %destination_view = buffer.view %destination[%destination_offset] : buffer -> view<1xi32>
@@ -40,3 +42,54 @@ func.def target(@target) @copy_wide_origin_scalar(%input: buffer, %output: buffe
   view.store %value, %destination_view[0] : i32, view<1xi32>
   func.return
 }
+
+// ----
+CHECK: * = i32.wrap_i64 %byte_offset
+CHECK: * = i32.load * {offset = 64}
+CHECK: i32.store *, %value
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @exchange_wide_origin(%buffer: buffer, %base_input: i64, %position_input: index, %value: i32) -> (i32) {
+  %aligned_buffer = buffer.assume.alignment %buffer {minimum_alignment = 8} : buffer
+  %wide_base = scalar.assume %base_input [range(%base_input, 0, 128), mul(%base_input, 8)] : i64
+  %base = index.cast %wide_base : i64 to offset
+  %position = index.assume %position_input [range(%position_input, 0, 7)] : index
+  %prefix = index.constant 16 : offset
+  %origin = index.add %base, %prefix : offset
+  %view = buffer.view %aligned_buffer[%origin] : buffer -> view<8xi32>
+  %previous = view.load %view[%position] : view<8xi32> -> i32
+  view.store %value, %view[%position] : i32, view<8xi32>
+  func.return %previous : i32
+}
+
+// ----
+CHECK: * = i32.wrap_i64 %wide_base
+CHECK: %previous = i32.load * {offset = 16}
+CHECK: i32.store *, %value {offset = 16}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @exchange_signed_coordinate(%buffer: buffer, %base_input: offset, %position_input: i32, %value: i32) -> (i32) {
+  %aligned_buffer = buffer.assume.alignment %buffer {minimum_alignment = 8} : buffer
+  %base = index.assume %base_input [range(%base_input, 64, 128), mul(%base_input, 8)] : offset
+  %signed_position = scalar.assume %position_input [range(%position_input, -8, -1)] : i32
+  %coordinate = index.cast %signed_position : i32 to index
+  %bias = index.constant 8 : index
+  %position = index.add %coordinate, %bias : index
+  %prefix = index.constant 16 : offset
+  %origin = index.add %base, %prefix : offset
+  %view = buffer.view %aligned_buffer[%origin] : buffer -> view<8xi32>
+  %previous = view.load %view[%position] : view<8xi32> -> i32
+  view.store %value, %view[%position] : i32, view<8xi32>
+  func.return %previous : i32
+}
+
+// ----
+CHECK: * = i32.mul %signed_position, *
+CHECK: %previous = i32.load * {offset = 48}
+CHECK: i32.store *, %value {offset = 48}

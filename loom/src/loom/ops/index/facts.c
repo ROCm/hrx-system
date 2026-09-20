@@ -97,7 +97,6 @@ iree_status_t loom_index_cast_facts(loom_fact_context_t* context,
   }
 
   int32_t input_bitwidth = loom_scalar_type_bitwidth(input_scalar_type);
-  int32_t result_bitwidth = loom_scalar_type_bitwidth(result_scalar_type);
   loom_value_facts_t facts =
       loom_value_facts_clamp_domain(operand_facts[0], input_lo, input_hi);
 
@@ -108,20 +107,14 @@ iree_status_t loom_index_cast_facts(loom_fact_context_t* context,
     return iree_ok_status();
   }
 
-  if (input_bitwidth <= result_bitwidth) {
-    result_facts[0] =
-        loom_value_facts_clamp_domain(facts, result_lo, result_hi);
-    return iree_ok_status();
-  }
-
   if (facts.range_lo >= result_lo && facts.range_hi <= result_hi) {
     result_facts[0] = facts;
     return iree_ok_status();
   }
 
-  // Truncation may wrap arbitrary inputs into any value in the result domain.
-  // Preserve the original facts only when the source range already proves that
-  // truncation is value-preserving.
+  // Truncation can wrap, and a signed-to-offset cast requires an input proof.
+  // Intersecting an unproven input with the result domain could manufacture an
+  // exact value and let folding erase the cast before legality checks it.
   result_facts[0] = loom_value_facts_make(result_lo, result_hi, 1);
   return iree_ok_status();
 }

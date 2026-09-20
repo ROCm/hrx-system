@@ -1,5 +1,5 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_wide_carriers.loom-test
-// RUN: emit source-low output=low
+// RUN: with-checks emit source-low output=low
 
 llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
 
@@ -19,11 +19,8 @@ func.def target(@target) @copy_wide_origin_vectors(%input: buffer, %output: buff
 }
 
 // ----
-low.func.def target<llvmir.generic.core>(@target) abi(object_function) @copy_wide_origin_vectors(%source_view: reg<llvmir.ptr>, %destination_view: reg<llvmir.ptr>, %destination_offset: reg<llvmir.i64>) asm {
-  %value = load.indexed.v16i32 %source_view, %destination_offset, 64, 1
-  store.indexed.v16i32 %value, %destination_view, %destination_offset, 0, 1
-  return
-}
+CHECK: %value = load.indexed.v16i32 %source_view, %destination_offset, 64, 1
+CHECK: store.indexed.v16i32 %value, %destination_view, %destination_offset, 0, 1
 
 // ====
 
@@ -45,8 +42,51 @@ func.def target(@target) @copy_wide_origin_scalar(%input: buffer, %output: buffe
 }
 
 // ----
-low.func.def target<llvmir.generic.core>(@target) abi(object_function) @copy_wide_origin_scalar(%source_view: reg<llvmir.ptr>, %destination_view: reg<llvmir.ptr>, %destination_offset: reg<llvmir.i64>) asm {
-  %value = load.indexed.i32 %source_view, %destination_offset, 64, 1
-  store.indexed.i32 %value, %destination_view, %destination_offset, 0, 1
-  return
+CHECK: %value = load.indexed.i32 %source_view, %destination_offset, 64, 1
+CHECK: store.indexed.i32 %value, %destination_view, %destination_offset, 0, 1
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def target(@target) @exchange_wide_origin(%buffer: buffer, %base_input: i64, %position_input: index, %value: i32) -> (i32) {
+  %aligned_buffer = buffer.assume.alignment %buffer {minimum_alignment = 8} : buffer
+  %wide_base = scalar.assume %base_input [range(%base_input, 0, 128), mul(%base_input, 8)] : i64
+  %base = index.cast %wide_base : i64 to offset
+  %position = index.assume %position_input [range(%position_input, 0, 7)] : index
+  %prefix = index.constant 16 : offset
+  %origin = index.add %base, %prefix : offset
+  %view = buffer.view %aligned_buffer[%origin] : buffer -> view<8xi32>
+  %previous = view.load %view[%position] : view<8xi32> -> i32
+  view.store %value, %view[%position] : i32, view<8xi32>
+  func.return %previous : i32
 }
+
+// ----
+CHECK: * = add.i64 %wide_base, *
+CHECK: %previous = load.indexed.i32 %view, *, 16, 1
+CHECK: store.indexed.i32 %value, %view, *, 16, 1
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def target(@target) @exchange_signed_coordinate(%buffer: buffer, %base_input: offset, %position_input: i32, %value: i32) -> (i32) {
+  %aligned_buffer = buffer.assume.alignment %buffer {minimum_alignment = 8} : buffer
+  %base = index.assume %base_input [range(%base_input, 64, 128), mul(%base_input, 8)] : offset
+  %signed_position = scalar.assume %position_input [range(%position_input, -8, -1)] : i32
+  %coordinate = index.cast %signed_position : i32 to index
+  %bias = index.constant 8 : index
+  %position = index.add %coordinate, %bias : index
+  %prefix = index.constant 16 : offset
+  %origin = index.add %base, %prefix : offset
+  %view = buffer.view %aligned_buffer[%origin] : buffer -> view<8xi32>
+  %previous = view.load %view[%position] : view<8xi32> -> i32
+  view.store %value, %view[%position] : i32, view<8xi32>
+  func.return %previous : i32
+}
+
+// ----
+CHECK: * = sext.i32.i64 %signed_position
+CHECK: %previous = load.indexed.i32 %view, *, 48, 1
+CHECK: store.indexed.i32 %value, %view, *, 48, 1

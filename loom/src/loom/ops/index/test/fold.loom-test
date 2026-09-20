@@ -361,6 +361,23 @@ func.def @cast_preserves_exact() -> (i64) {
 
 // ====
 
+// A result domain cannot turn an unproven signed input into exact zero.
+func.def @cast_i64_offset_preserves_input_obligation(%input: i64) -> (offset) {
+  %bounded = scalar.assume %input [range(%input, -1, 0)] : i64
+  %offset = index.cast %bounded : i64 to offset
+  func.return %offset : offset
+}
+
+// ====
+
+func.def @cast_index_offset_preserves_input_obligation(%input: index) -> (offset) {
+  %bounded = index.assume %input [range(%input, -1, 0)] : index
+  %offset = index.cast %bounded : index to offset
+  func.return %offset : offset
+}
+
+// ====
+
 // Fixed-width integer inputs bound address-domain cast results.
 func.def @cast_i32_to_index_uses_source_domain(%raw: i32) -> (i64, i64) {
   %idx = index.cast %raw : i32 to index

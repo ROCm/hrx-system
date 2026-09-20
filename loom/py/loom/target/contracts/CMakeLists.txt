@@ -48,12 +48,14 @@ iree_py_test(
     "compile_test.py"
     "lower_rules_test.py"
     "schema_test.py"
+    "source_memory_test.py"
     "templates_test.py"
     "../../tools/pytest_style_runner.py"
   ARGS
     "loom.target.contracts.compile_test"
     "loom.target.contracts.lower_rules_test"
     "loom.target.contracts.schema_test"
+    "loom.target.contracts.source_memory_test"
     "loom.target.contracts.templates_test"
   DEPS
     loom::py::loom::target::contracts::contracts

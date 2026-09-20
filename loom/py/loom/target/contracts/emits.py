@@ -491,14 +491,18 @@ class EmitDescriptorOp:
                 )
             materializer = self.source_memory_byte_offset_materializer
             for descriptor in (
-                materializer.const_i64,
-                materializer.add_i64,
-                materializer.mul_i64,
-                materializer.shl_i64,
+                materializer.constant,
+                materializer.add,
+                materializer.multiply,
+                materializer.shift_left,
+                *(
+                    conversion.descriptor
+                    for conversion in materializer.integer_conversions
+                ),
             ):
                 if descriptor is not None:
                     _require_descriptor(descriptor_set, descriptor)
-            _validate_byte_offset_materializer(source_op, materializer)
+            _validate_byte_offset_materializer(source_op, descriptor_set, materializer)
         if self.source_memory_address_materializer is not None:
             if self.source_memory is None:
                 raise ValueError(
@@ -840,6 +844,7 @@ def _validate_materializer_descriptor(
     input_carriers: tuple[_MaterializerCarrier | None, ...],
     result_carrier: _MaterializerCarrier | None = None,
     bound_immediate: str | None = None,
+    bound_immediates: tuple[str, ...] = (),
 ) -> _MaterializerCarrier:
     if descriptor.op_kind is not op_kind:
         expected_kind = "low.const" if op_kind is DescriptorOpKind.CONST else "low.op"
@@ -911,6 +916,7 @@ def _validate_materializer_descriptor(
             immediate.field_name
             for immediate in descriptor.immediates
             if not _immediate_has_default(immediate)
+            and immediate.field_name not in bound_immediates
         )
     else:
         immediate = _require_immediate(
@@ -938,20 +944,21 @@ def _validate_materializer_descriptor(
 
 def _validate_byte_offset_materializer(
     source_op: Op,
+    descriptor_set: DescriptorSet,
     materializer: SourceMemoryByteOffsetMaterializer,
 ) -> None:
     carrier = _validate_materializer_descriptor(
         source_op,
-        materializer.const_i64,
+        materializer.constant,
         subject="source-memory byte-offset constant",
         op_kind=DescriptorOpKind.CONST,
         input_carriers=(),
-        bound_immediate=materializer.const_i64_immediate,
+        bound_immediate=materializer.constant_immediate,
     )
     for subject, descriptor in (
-        ("source-memory byte-offset add", materializer.add_i64),
-        ("source-memory byte-offset multiply", materializer.mul_i64),
-        ("source-memory byte-offset shift", materializer.shl_i64),
+        ("source-memory byte-offset add", materializer.add),
+        ("source-memory byte-offset multiply", materializer.multiply),
+        ("source-memory byte-offset shift", materializer.shift_left),
     ):
         if descriptor is not None:
             _validate_materializer_descriptor(
@@ -962,6 +969,46 @@ def _validate_byte_offset_materializer(
                 input_carriers=(carrier, carrier),
                 result_carrier=carrier,
             )
+    source_types: set[str] = set()
+    for conversion in materializer.integer_conversions:
+        if conversion.source_type not in ("i1", "i8", "i16", "i32", "i64"):
+            raise ValueError("byte-offset conversion requires a fixed-width integer")
+        if conversion.source_type in source_types:
+            raise ValueError(
+                f"duplicate byte-offset conversion for {conversion.source_type}"
+            )
+        source_types.add(conversion.source_type)
+        bound_immediates = ()
+        if conversion.immediate is not None:
+            name, value = conversion.immediate
+            immediate = _require_immediate(
+                conversion.descriptor, name, "byte-offset conversion"
+            )
+            if immediate.kind not in (
+                ImmediateKind.SIGNED,
+                ImmediateKind.UNSIGNED,
+                ImmediateKind.ENUM,
+            ):
+                raise ValueError(
+                    "byte-offset conversion selector must be an integer or enum"
+                )
+            _validate_immediate_literal(
+                source_op, descriptor_set, conversion.descriptor, immediate, value
+            )
+            if not -(2**63) <= value < 2**63:
+                raise ValueError(
+                    "byte-offset conversion immediate must fit in signed i64"
+                )
+            bound_immediates = (name,)
+        _validate_materializer_descriptor(
+            source_op,
+            conversion.descriptor,
+            subject="source-memory byte-offset conversion",
+            op_kind=DescriptorOpKind.OP,
+            input_carriers=(None,),
+            result_carrier=carrier,
+            bound_immediates=bound_immediates,
+        )
 
 
 def _validate_address_materializer(

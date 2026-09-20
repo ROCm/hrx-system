@@ -145,3 +145,36 @@ func.def target(@target) @dynamic_base_plus_index_overflows_wasm32(%input: buffe
   %value = view.load %view[%position] : view<8xi32> -> i32
   func.return %value : i32
 }
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @wide_index_cast_result_cannot_prove_input(%input: i64) -> (index) {
+  // ERROR@+1: TARGET/005 {op_name="index.cast", subject_name="input", minimum="-2147483648", maximum="2147483647"}
+  %position = index.cast %input : i64 to index
+  %assumed = index.assume %position [range(%position, 0, 7)] : index
+  func.return %assumed : index
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @wide_offset_overflows_carrier(%input: i64) -> (offset) {
+  %bounded = scalar.assume %input [range(%input, 0, 4294967296)] : i64
+  // ERROR@+1: TARGET/005 {op_name="index.cast", subject_name="input", minimum="0", maximum="4294967295"}
+  %offset = index.cast %bounded : i64 to offset
+  func.return %offset : offset
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @wide_offset_rejects_negative(%input: i64) -> (offset) {
+  %bounded = scalar.assume %input [range(%input, -1, 0)] : i64
+  // ERROR@+1: TARGET/005 {op_name="index.cast", subject_name="input", constraint_key="index_cast.offset_non_negative"}
+  %offset = index.cast %bounded : i64 to offset
+  func.return %offset : offset
+}

@@ -27,6 +27,7 @@ from loom.target.contracts import (
     SourceMemoryAddressLayout,
     SourceMemoryByteOffsetMaterializer,
     SourceMemoryConstraint,
+    SourceMemoryIntegerConversion,
     SourceMemoryOperation,
     SourceMemoryProject,
     SourceMemoryRootKind,
@@ -205,11 +206,17 @@ def _memory_constraint(
 
 def _byte_offset_materializer() -> SourceMemoryByteOffsetMaterializer:
     return SourceMemoryByteOffsetMaterializer(
-        const_i64=_descriptor("amd.xdna.aie2p.constant.i32"),
-        add_i64=_descriptor("amd.xdna.aie2p.add.i32"),
-        mul_i64=_descriptor("amd.xdna.aie2p.mul.i32"),
-        shl_i64=_descriptor("amd.xdna.aie2p.lshl.i32"),
-        const_i64_immediate="i",
+        constant=_descriptor("amd.xdna.aie2p.constant.i32"),
+        add=_descriptor("amd.xdna.aie2p.add.i32"),
+        multiply=_descriptor("amd.xdna.aie2p.mul.i32"),
+        shift_left=_descriptor("amd.xdna.aie2p.lshl.i32"),
+        constant_immediate="i",
+        integer_conversions=tuple(
+            SourceMemoryIntegerConversion(
+                source_type, _descriptor(f"amd.xdna.aie2p.extend.signed.{source_type}")
+            )
+            for source_type in ("i8", "i16")
+        ),
     )
 
 

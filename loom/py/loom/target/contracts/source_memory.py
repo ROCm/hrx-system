@@ -79,14 +79,29 @@ class SourceMemoryAddressCoordinateType(Enum):
 
 
 @dataclass(frozen=True, slots=True)
+class SourceMemoryIntegerConversion:
+    """Converts a canonical integer term to the byte arithmetic carrier.
+
+    Canonical terms preserve numeric values: i1 is zero/one and the other
+    fixed-width integers are signed. Narrowing preserves the low carrier bits;
+    source-memory matching proves representability of the complete address.
+    """
+
+    source_type: str
+    descriptor: Descriptor
+    immediate: tuple[str, int] | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SourceMemoryByteOffsetMaterializer:
     """Low descriptors used to materialize a dynamic byte offset value."""
 
-    const_i64: Descriptor
-    add_i64: Descriptor
-    mul_i64: Descriptor
-    shl_i64: Descriptor | None
-    const_i64_immediate: str = "value"
+    constant: Descriptor
+    add: Descriptor
+    multiply: Descriptor
+    shift_left: Descriptor | None
+    constant_immediate: str = "value"
+    integer_conversions: tuple[SourceMemoryIntegerConversion, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

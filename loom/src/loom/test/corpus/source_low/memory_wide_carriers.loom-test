@@ -31,3 +31,35 @@ func.def @copy_wide_origin_scalar(%input: buffer, %output: buffer, %byte_offset_
   view.store %value, %destination_view[0] : i32, view<1xi32>
   func.return
 }
+
+// ====
+
+func.def @exchange_wide_origin(%buffer: buffer, %base_input: i64, %position_input: index, %value: i32) -> (i32) {
+  %aligned_buffer = buffer.assume.alignment %buffer {minimum_alignment = 8} : buffer
+  %wide_base = scalar.assume %base_input [range(%base_input, 0, 128), mul(%base_input, 8)] : i64
+  %base = index.cast %wide_base : i64 to offset
+  %position = index.assume %position_input [range(%position_input, 0, 7)] : index
+  %prefix = index.constant 16 : offset
+  %origin = index.add %base, %prefix : offset
+  %view = buffer.view %aligned_buffer[%origin] : buffer -> view<8xi32>
+  %previous = view.load %view[%position] : view<8xi32> -> i32
+  view.store %value, %view[%position] : i32, view<8xi32>
+  func.return %previous : i32
+}
+
+// ====
+
+func.def @exchange_signed_coordinate(%buffer: buffer, %base_input: offset, %position_input: i32, %value: i32) -> (i32) {
+  %aligned_buffer = buffer.assume.alignment %buffer {minimum_alignment = 8} : buffer
+  %base = index.assume %base_input [range(%base_input, 64, 128), mul(%base_input, 8)] : offset
+  %signed_position = scalar.assume %position_input [range(%position_input, -8, -1)] : i32
+  %coordinate = index.cast %signed_position : i32 to index
+  %bias = index.constant 8 : index
+  %position = index.add %coordinate, %bias : index
+  %prefix = index.constant 16 : offset
+  %origin = index.add %base, %prefix : offset
+  %view = buffer.view %aligned_buffer[%origin] : buffer -> view<8xi32>
+  %previous = view.load %view[%position] : view<8xi32> -> i32
+  view.store %value, %view[%position] : i32, view<8xi32>
+  func.return %previous : i32
+}

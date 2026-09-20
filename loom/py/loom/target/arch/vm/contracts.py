@@ -85,6 +85,7 @@ from loom.target.contracts import (
     SelectDescriptorCase,
     SourceMemoryByteOffsetMaterializer,
     SourceMemoryConstraint,
+    SourceMemoryIntegerConversion,
     SourceMemoryOperation,
     SourceMemoryProject,
     ValueAliasRule,
@@ -867,11 +868,28 @@ def _view_cases():
     constant = _DESCRIPTORS[CONSTANT_I64.opcode]
     add = integers[IntegerBinaryOperation.ADD]
     materializer = SourceMemoryByteOffsetMaterializer(
-        const_i64=constant,
-        add_i64=add,
-        mul_i64=integers[IntegerBinaryOperation.MUL],
-        shl_i64=integers[IntegerBinaryOperation.SHIFT_LEFT],
-        const_i64_immediate="bits",
+        constant=constant,
+        add=add,
+        multiply=integers[IntegerBinaryOperation.MUL],
+        shift_left=integers[IntegerBinaryOperation.SHIFT_LEFT],
+        constant_immediate="bits",
+        integer_conversions=tuple(
+            SourceMemoryIntegerConversion(
+                source_type, descriptor, (descriptor.immediates[0].field_name, selector)
+            )
+            for (source_op, source_type, result_type), (
+                descriptor,
+                selector,
+            ) in _conversion_steps()
+            if result_type == "i64"
+            and (
+                (source_type == "i1" and source_op is conversion.scalar_extui)
+                or (
+                    source_type in ("i8", "i16", "i32")
+                    and source_op is conversion.scalar_extsi
+                )
+            )
+        ),
     )
     for selector in MEMORY_FORMAT_SELECTOR.values:
         scalar, lanes = selector.name.split(".")

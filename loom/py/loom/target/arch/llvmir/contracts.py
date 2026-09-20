@@ -42,6 +42,7 @@ from loom.target.contracts import (
     SourceMemoryByteOffsetMaterializer,
     SourceMemoryConstraint,
     SourceMemoryDynamicIndexSource,
+    SourceMemoryIntegerConversion,
     SourceMemoryOperation,
     SourceMemoryProject,
     SourceMemoryRootKind,
@@ -266,10 +267,21 @@ def _descriptor(key: str) -> Descriptor:
 
 def _source_memory_byte_offset_materializer() -> SourceMemoryByteOffsetMaterializer:
     return SourceMemoryByteOffsetMaterializer(
-        const_i64=_descriptor("llvmir.const.i64"),
-        add_i64=_descriptor("llvmir.add.i64"),
-        mul_i64=_descriptor("llvmir.mul.i64"),
-        shl_i64=_descriptor("llvmir.shl.i64"),
+        constant=_descriptor("llvmir.const.i64"),
+        add=_descriptor("llvmir.add.i64"),
+        multiply=_descriptor("llvmir.mul.i64"),
+        shift_left=_descriptor("llvmir.shl.i64"),
+        integer_conversions=tuple(
+            SourceMemoryIntegerConversion(
+                source_type, _descriptor(f"llvmir.{extension}.{source_type}.i64")
+            )
+            for source_type, extension in (
+                ("i1", "zext"),
+                ("i8", "sext"),
+                ("i16", "sext"),
+                ("i32", "sext"),
+            )
+        ),
     )
 
 

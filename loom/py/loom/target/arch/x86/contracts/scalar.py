@@ -39,6 +39,7 @@ from loom.target.contracts import (
     SourceMemoryByteOffsetMaterializer,
     SourceMemoryConstraint,
     SourceMemoryDynamicIndexSource,
+    SourceMemoryIntegerConversion,
     SourceMemoryOperation,
     SourceMemoryProject,
     SourceMemoryRootKind,
@@ -96,11 +97,19 @@ def x86_source_memory_byte_offset_materializer(
     descriptor_lookup: _DescriptorLookup,
 ) -> SourceMemoryByteOffsetMaterializer:
     return SourceMemoryByteOffsetMaterializer(
-        const_i64=descriptor_lookup("x86.scalar.movimm.gpr64"),
-        add_i64=descriptor_lookup("x86.scalar.add.gpr64"),
-        mul_i64=descriptor_lookup("x86.scalar.imul.gpr64"),
-        shl_i64=None,
-        const_i64_immediate="imm64",
+        constant=descriptor_lookup("x86.scalar.movimm.gpr64"),
+        add=descriptor_lookup("x86.scalar.add.gpr64"),
+        multiply=descriptor_lookup("x86.scalar.imul.gpr64"),
+        shift_left=None,
+        constant_immediate="imm64",
+        integer_conversions=(
+            SourceMemoryIntegerConversion(
+                "i1", descriptor_lookup("x86.scalar.movzx.gpr64.gpr32")
+            ),
+            SourceMemoryIntegerConversion(
+                "i32", descriptor_lookup("x86.scalar.movsxd.gpr64.gpr32")
+            ),
+        ),
     )
 
 

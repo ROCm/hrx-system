@@ -388,13 +388,26 @@ def source_memory_byte_offset_materializer_row(
     row: SourceMemoryByteOffsetMaterializer,
     *,
     immediate_string_offset: str,
+    conversion_immediate_string_offsets: Mapping[str, str],
 ) -> list[str]:
+    conversions = {conversion.source_type: conversion for conversion in row.integer_conversions}
+    conversion_rows = []
+    for source_type in ("i1", "i8", "i16", "i32", "i64"):
+        conversion = conversions.get(source_type)
+        descriptor = conversion.descriptor if conversion is not None else None
+        immediate = conversion.immediate if conversion is not None else None
+        conversion_rows.append(
+            "{" + f".immediate_value = {_c_i64_literal(immediate[1] if immediate is not None else 0)}, "
+            f".immediate_string_offset = {conversion_immediate_string_offsets.get(source_type, 'LOOM_BSTRING_TABLE_OFFSET_NONE')}, "
+            f".descriptor_ref = {_descriptor_ref_index(descriptor_refs, descriptor)}" + "}"
+        )
     return [
-        f".const_i64_immediate_string_offset = {immediate_string_offset}",
-        f".const_i64_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.const_i64)}",
-        f".add_i64_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.add_i64)}",
-        f".mul_i64_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.mul_i64)}",
-        f".shl_i64_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.shl_i64)}",
+        ".integer_conversions = {" + ", ".join(conversion_rows) + "}",
+        f".constant_immediate_string_offset = {immediate_string_offset}",
+        f".constant_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.constant)}",
+        f".add_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.add)}",
+        f".multiply_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.multiply)}",
+        f".shift_left_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.shift_left)}",
     ]
 
 
@@ -430,10 +443,11 @@ def descriptor_ref_keys(table: CompiledLowerRuleSet, source_contract: ContractFr
             used_keys.update(
                 descriptor.key
                 for descriptor in (
-                    materializer.const_i64,
-                    materializer.add_i64,
-                    materializer.mul_i64,
-                    materializer.shl_i64,
+                    materializer.constant,
+                    materializer.add,
+                    materializer.multiply,
+                    materializer.shift_left,
+                    *(conversion.descriptor for conversion in materializer.integer_conversions),
                 )
                 if descriptor is not None
             )

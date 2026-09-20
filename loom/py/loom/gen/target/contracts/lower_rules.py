@@ -340,6 +340,11 @@ def _generate_source(
                     descriptor_refs,
                     row,
                     immediate_string_offset=string_pool.ref(_source_memory_byte_offset_string_label(index)),
+                    conversion_immediate_string_offsets={
+                        conversion.source_type: string_pool.ref(_source_memory_conversion_string_label(index, conversion.source_type))
+                        for conversion in row.integer_conversions
+                        if conversion.immediate is not None
+                    },
                 )
                 for index, row in enumerate(source_memory_byte_offset_materializers)
             ],
@@ -581,6 +586,10 @@ def _descriptor_ref_string_label(index: int) -> str:
     return f"descriptor_ref_{index}_key"
 
 
+def _source_memory_conversion_string_label(index: int, source_type: str) -> str:
+    return f"source_memory_byte_offset_{index}_{source_type}_immediate"
+
+
 def _source_memory_byte_offset_string_label(index: int) -> str:
     return f"source_memory_byte_offset_materializer_{index}_immediate"
 
@@ -616,8 +625,14 @@ def _build_string_pool(
     for index, row in enumerate(source_memory_byte_offset_materializers):
         pool.intern(
             _source_memory_byte_offset_string_label(index),
-            row.const_i64_immediate,
+            row.constant_immediate,
         )
+        for conversion in row.integer_conversions:
+            if conversion.immediate is not None:
+                pool.intern(
+                    _source_memory_conversion_string_label(index, conversion.source_type),
+                    conversion.immediate[0],
+                )
     for index, row in enumerate(source_memory_address_materializers):
         pool.intern(
             _source_memory_address_string_label(index),

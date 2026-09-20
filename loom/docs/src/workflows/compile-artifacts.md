@@ -220,11 +220,18 @@ console.log(instance.exports.sum_to(4)); // 6
 
 Wasm uses 32-bit `index` and `offset` carriers. Address casts connect these types
 with `i32`; converting an offset to an index requires a value no greater than
-`2147483647`. Scalar `i32`, `i64`, `f32`, and `f64` memory accesses support static
-and dynamic view origins and bounded indices. Relative byte offsets must fit
-within 32 bits. Modules using memory define one private 64 KiB linear memory;
-buffer parameters are byte addresses into it, and exported functions provide
-the host's access to that memory.
+`2147483647`. An `i64` input can also cast to `index` when its proven range fits
+`[-2147483648, 2147483647]`, or to `offset` when it fits `[0, 4294967295]`.
+These casts require facts about the input; an assumption on the cast's result
+does not establish that the input fits. Ordinary arithmetic can prove the range,
+or `scalar.assume` can state a guarantee made by the caller.
+
+Scalar `i32`, `i64`, `f32`, and `f64` memory accesses support static and dynamic
+view origins, bounded indices, and dynamic strides. Wide integer origins can
+combine with element indices and static byte prefixes; the complete relative
+byte offset must fit within 32 bits. Modules using memory define one private
+64 KiB linear memory; buffer parameters are byte addresses into it, and exported
+functions provide the host's access to that memory.
 
 ## Emit a target-native sidecar
 
