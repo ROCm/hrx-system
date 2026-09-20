@@ -441,3 +441,17 @@ func.def target(@target) @vector_f64_requires_target_features(%lhs: f64, %rhs: f
   %result = vector.extract %sum[0] : vector<1xf64> -> f64
   func.return %result : f64
 }
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @index_constants_require_signed_carrier() -> (index, index, index) {
+  // ERROR@+1: TARGET/005 {op_name="index.constant", subject_name="value", minimum="-2147483648", maximum="2147483647"}
+  %underflow = index.constant -2147483649 : index
+  // ERROR@+1: TARGET/005 {op_name="index.constant", subject_name="value", minimum="-2147483648", maximum="2147483647"}
+  %overflow = index.constant 2147483648 : index
+  // ERROR@+1: TARGET/005 {op_name="index.constant", subject_name="value", minimum="-2147483648", maximum="2147483647"}
+  %unsigned_maximum = index.constant 4294967295 : index
+  func.return %underflow, %overflow, %unsigned_maximum : index, index, index
+}

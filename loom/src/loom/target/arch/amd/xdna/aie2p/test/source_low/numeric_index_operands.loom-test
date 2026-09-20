@@ -1,5 +1,5 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_index_operands.loom-test
-// RUN: emit source-low output=none
+// RUN: emit source-low output=low
 
 aie2p.target<core> @target
 
@@ -15,6 +15,18 @@ func.def target(@target) @uniform_lhs_index_operands(%input: buffer, %uniform: i
   %xor = index.xori %uniform, %value : index
   %subtract = index.sub %uniform, %value : index
   func.return %multiply, %and, %or, %xor, %subtract : index, index, index, index, index
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @uniform_lhs_index_operands(%uniform: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %value = lda %input_view, 0
+  %multiply = mul %uniform, %value
+  %and = and %uniform, %value
+  %or = or %uniform, %value
+  %xor = xor %uniform, %value
+  %subtract = sub %uniform, %value
+  return %multiply, %and, %or, %xor, %subtract
 }
 
 // ====
@@ -33,6 +45,18 @@ func.def target(@target) @uniform_rhs_index_operands(%input: buffer, %uniform: i
   %xor = index.xori %value, %uniform : index
   %subtract = index.sub %value, %uniform : index
   func.return %multiply, %and, %or, %xor, %subtract : index, index, index, index, index
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @uniform_rhs_index_operands(%uniform: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %value = lda %input_view, 0
+  %multiply = mul %value, %uniform
+  %and = and %value, %uniform
+  %or = or %value, %uniform
+  %xor = xor %value, %uniform
+  %subtract = sub %value, %uniform
+  return %multiply, %and, %or, %xor, %subtract
 }
 
 // ====
@@ -56,6 +80,21 @@ func.def target(@target) @constant_index_operands(%input: buffer) -> (index, ind
   func.return %masked, %tagged, %toggled, %scaled : index, index, index, index
 }
 
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @constant_index_operands() -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %value = lda %input_view, 0
+  %inline = mov.short 64
+  %literal = mov.short 128
+  %negative = mov.short -16
+  %factor = mov.short 65
+  %masked = and %value, %inline
+  %tagged = or %literal, %value
+  %toggled = xor %value, %negative
+  %scaled = mul %factor, %value
+  return %masked, %tagged, %toggled, %scaled
+}
+
 // ====
 
 aie2p.target<core> @target
@@ -67,6 +106,16 @@ func.def target(@target) @uniform_index_operands(%lhs: index, %rhs: index) -> (i
   %xor = index.xori %lhs, %rhs : index
   %subtract = index.sub %lhs, %rhs : index
   func.return %multiply, %and, %or, %xor, %subtract : index, index, index, index, index
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @uniform_index_operands(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %multiply = mul %lhs, %rhs
+  %and = and %lhs, %rhs
+  %or = or %lhs, %rhs
+  %xor = xor %lhs, %rhs
+  %subtract = sub %lhs, %rhs
+  return %multiply, %and, %or, %xor, %subtract
 }
 
 // ====
@@ -89,6 +138,19 @@ func.def target(@target) @varying_index_operands(%input: buffer) -> (index, inde
   func.return %multiply, %and, %or, %xor, %subtract : index, index, index, index, index
 }
 
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @varying_index_operands() -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %lhs = lda %input_view, 0
+  %rhs = lda %input_view, 4
+  %multiply = mul %lhs, %rhs
+  %and = and %lhs, %rhs
+  %or = or %lhs, %rhs
+  %xor = xor %lhs, %rhs
+  %subtract = sub %lhs, %rhs
+  return %multiply, %and, %or, %xor, %subtract
+}
+
 // ====
 
 aie2p.target<core> @target
@@ -103,4 +165,76 @@ func.def target(@target) @bounded_offset_difference(%input: buffer, %wide_limit:
   %limit = index.assume %wide_limit [range(%wide_limit, 1024, 2047)] : offset
   %remaining = index.sub %limit, %position : offset
   func.return %remaining : offset
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @bounded_offset_difference(%limit: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %position = lda %input_view, 0
+  %remaining = sub %limit, %position
+  return %remaining
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @address_constant_boundaries() -> (index, index, offset, offset, offset, offset) {
+  %minimum_index = index.constant -2147483648 : index
+  %maximum_index = index.constant 2147483647 : index
+  %compact_offset = index.constant 1023 : offset
+  %wide_offset = index.constant 1024 : offset
+  %high_bit_offset = index.constant 2147483648 : offset
+  %maximum_offset = index.constant 4294967295 : offset
+  func.return %minimum_index, %maximum_index, %compact_offset, %wide_offset, %high_bit_offset, %maximum_offset : index, index, offset, offset, offset, offset
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @address_constant_boundaries() -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %minimum_index = mov.i32 -2147483648
+  %maximum_index = mov.i32 2147483647
+  %compact_offset = mov.short 1023
+  %wide_offset = mov.i32 1024
+  %maximum_offset = mov.i32 -1
+  return %minimum_index, %maximum_index, %compact_offset, %wide_offset, %minimum_index, %maximum_offset
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @offset_from_constant_payloads() -> (offset, offset) {
+  %high_bit = scalar.constant -2147483648 : i32
+  %all_bits = scalar.constant -1 : i32
+  %high_bit_offset = index.cast %high_bit : i32 to offset
+  %maximum_offset = index.cast %all_bits : i32 to offset
+  func.return %high_bit_offset, %maximum_offset : offset, offset
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @offset_from_constant_payloads() -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+  %high_bit_offset = mov.i32 -2147483648
+  %maximum_offset = mov.i32 -1
+  return %high_bit_offset, %maximum_offset
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @high_bit_offset_add(%input: offset) -> (i64) {
+  %bounded = index.assume %input [range(%input, 0, 1023)] : offset
+  %base = index.constant 2147483648 : offset
+  %sum = index.add %base, %bounded : offset
+  %wide = index.cast %sum : offset to i64
+  func.return %wide : i64
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @high_bit_offset_add(%bounded: reg<aie2p.er>) -> (reg<aie2p.er x2>) asm {
+  %base = mov.i32 -2147483648
+  %sum = add.rr %base, %bounded
+  %10 = mov.short 0
+  %wide = concat(%sum, %10) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  return %wide
 }

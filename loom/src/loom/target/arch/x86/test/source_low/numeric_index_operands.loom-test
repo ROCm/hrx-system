@@ -200,3 +200,66 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @bounded_offset
   %remaining = sub.gpr64 %16, %position
   return %remaining
 }
+
+// ====
+
+x86.target<avx2> @target
+
+func.def target(@target) @address_constant_boundaries() -> (index, index, offset, offset, offset, offset) {
+  %minimum_index = index.constant -2147483648 : index
+  %maximum_index = index.constant 2147483647 : index
+  %compact_offset = index.constant 1023 : offset
+  %wide_offset = index.constant 1024 : offset
+  %high_bit_offset = index.constant 2147483648 : offset
+  %maximum_offset = index.constant 4294967295 : offset
+  func.return %minimum_index, %maximum_index, %compact_offset, %wide_offset, %high_bit_offset, %maximum_offset : index, index, offset, offset, offset, offset
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @address_constant_boundaries() -> (reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>) asm {
+  %minimum_index = mov.imm64 -2147483648
+  %maximum_index = mov.imm64 2147483647
+  %compact_offset = mov.imm64 1023
+  %wide_offset = mov.imm64 1024
+  %high_bit_offset = mov.imm64 2147483648
+  %maximum_offset = mov.imm64 4294967295
+  return %minimum_index, %maximum_index, %compact_offset, %wide_offset, %high_bit_offset, %maximum_offset
+}
+
+// ====
+
+x86.target<avx2> @target
+
+func.def target(@target) @offset_from_constant_payloads() -> (offset, offset) {
+  %high_bit = scalar.constant -2147483648 : i32
+  %all_bits = scalar.constant -1 : i32
+  %high_bit_offset = index.cast %high_bit : i32 to offset
+  %maximum_offset = index.cast %all_bits : i32 to offset
+  func.return %high_bit_offset, %maximum_offset : offset, offset
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @offset_from_constant_payloads() -> (reg<x86.gpr64>, reg<x86.gpr64>) asm {
+  %high_bit_offset = mov.imm64 2147483648
+  %maximum_offset = mov.imm64 4294967295
+  return %high_bit_offset, %maximum_offset
+}
+
+// ====
+
+x86.target<avx2> @target
+
+func.def target(@target) @high_bit_offset_add(%input: offset) -> (i64) {
+  %bounded = index.assume %input [range(%input, 0, 1023)] : offset
+  %base = index.constant 2147483648 : offset
+  %sum = index.add %base, %bounded : offset
+  %wide = index.cast %sum : offset to i64
+  func.return %wide : i64
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @high_bit_offset_add(%bounded: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %base = mov.imm64 2147483648
+  %wide = lea %base, %bounded
+  return %wide
+}

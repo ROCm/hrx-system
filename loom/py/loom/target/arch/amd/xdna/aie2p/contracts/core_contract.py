@@ -138,7 +138,7 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             )
             for result_type, minimum, maximum in (
                 (core_rules._INDEX, core_rules._I32_MIN, core_rules._I32_MAX),
-                (core_rules._OFFSET, 0, core_rules._I32_MAX),
+                (core_rules._OFFSET, 0, core_rules._U32_MAX),
             )
         ),
         *AIE2P_INDEX_CONVERSION_RULES,

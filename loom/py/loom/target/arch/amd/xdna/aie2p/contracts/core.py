@@ -88,6 +88,7 @@ _I16_MIN = -(2**15)
 _I16_MAX = (2**15) - 1
 _I32_MIN = -(2**31)
 _I32_MAX = (2**31) - 1
+_U32_MAX = (2**32) - 1
 _SHORT_MIN = -1024
 _SHORT_MAX = 1023
 
@@ -221,6 +222,13 @@ def _address_constant_rule(
     maximum: int,
 ) -> DescriptorRule:
     descriptor = _descriptor(descriptor_key)
+    # Unsigned offsets retain their numeric value in source facts while the
+    # full-word descriptor encodes the same bits as a signed i32 immediate.
+    immediate = (
+        ValueProject.exact_i64_i32_word("result", word_index=0)
+        if maximum > _I32_MAX
+        else AttrProject.direct("value")
+    )
     return DescriptorRule(
         source_op=index.index_constant,
         descriptor=descriptor,
@@ -233,7 +241,7 @@ def _address_constant_rule(
             EmitDescriptorOp(
                 descriptor=descriptor,
                 results={"dst": ValueRef.result("result")},
-                immediates={"i": AttrProject.direct("value")},
+                immediates={"i": immediate},
                 form=DescriptorEmitForm.CONST,
             ),
         ),

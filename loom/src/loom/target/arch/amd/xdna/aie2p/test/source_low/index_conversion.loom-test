@@ -90,3 +90,27 @@ func.def target(@target) @address_domain_casts(%coordinate0: index, %byte_offset
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @address_domain_casts(%as_offset: reg<aie2p.er>, %as_index: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
   return %as_offset, %as_index, %as_offset, %as_index
 }
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @index_constants_require_signed_carrier() -> (index, index, index) {
+  // ERROR@+1: TARGET/005 {op_name="index.constant", subject_name="value"}
+  %underflow = index.constant -2147483649 : index
+  // ERROR@+1: TARGET/005 {op_name="index.constant", subject_name="value"}
+  %overflow = index.constant 2147483648 : index
+  // ERROR@+1: TARGET/005 {op_name="index.constant", subject_name="value"}
+  %unsigned_maximum = index.constant 4294967295 : index
+  func.return %underflow, %overflow, %unsigned_maximum : index, index, index
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @offset_constant_requires_unsigned_carrier() -> (offset) {
+  // ERROR@+1: TARGET/005 {op_name="index.constant", subject_name="value"}
+  %overflow = index.constant 4294967296 : offset
+  func.return %overflow : offset
+}
