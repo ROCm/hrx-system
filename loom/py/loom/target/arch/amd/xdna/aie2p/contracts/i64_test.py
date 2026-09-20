@@ -111,6 +111,8 @@ def _evaluate_rule(rule: DescriptorRule, lhs: int, rhs: int) -> int:
                 values[emit.results["carry_out"]] = int(result < 0)
         elif semantic_tag == "integer.lshl.i32":
             result = _logical_shift(operands["s0"], operands["s1"])
+        elif semantic_tag == "integer.ashl.i32":
+            result = _logical_shift(_s32(operands["s0"]), operands["s1"])
         elif semantic_tag == "integer.cmp.eq.i32":
             result = int(operands["s0"] == operands["s1"])
         elif semantic_tag == "integer.cmp.ne.i32":
@@ -186,15 +188,22 @@ def test_i64_binary_recipes_are_exact() -> None:
             assert _evaluate_rule(rule, lhs, rhs) == reference(lhs, rhs) & _U64_MASK
 
 
-def test_i64_left_shift_recipes_are_exact() -> None:
+def test_i64_shift_recipes_are_exact() -> None:
+    references = {
+        scalar_bitwise.scalar_shli: lambda value, amount: value << amount,
+        scalar_bitwise.scalar_shrui: lambda value, amount: value >> amount,
+        scalar_bitwise.scalar_shrsi: lambda value, amount: (
+            (value if value < 2**63 else value - 2**64) >> amount
+        ),
+    }
     rules = [
         rule
         for rule in AIE2P_I64_RULES
-        if isinstance(rule, DescriptorRule)
-        and rule.source_op is scalar_bitwise.scalar_shli
+        if isinstance(rule, DescriptorRule) and rule.source_op in references
     ]
     values = [lhs for lhs, _ in _i64_samples()[:1024]]
     for rule in rules:
+        reference = references[rule.source_op]
         count_range = next(
             (guard for guard in rule.guards if guard.kind == GuardKind.VALUE_I64_RANGE),
             None,
@@ -206,7 +215,8 @@ def test_i64_left_shift_recipes_are_exact() -> None:
         for value in values:
             for amount in amounts:
                 assert (
-                    _evaluate_rule(rule, value, amount) == (value << amount) & _U64_MASK
+                    _evaluate_rule(rule, value, amount)
+                    == reference(value, amount) & _U64_MASK
                 )
 
 

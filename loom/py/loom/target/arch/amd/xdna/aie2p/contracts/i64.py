@@ -315,6 +315,75 @@ def _pair_left_shift_rule() -> DescriptorRule:
     )
 
 
+def _pair_right_shift_rule(
+    source_op: Op, high_shift: str, count_range: tuple[int, int] | None
+) -> DescriptorRule:
+    program = ScalarProgram()
+    lhs_emits, lhs_low, lhs_high = _split_pair(ValueRef.operand("lhs"), "lhs")
+    shift_count = program.temporary("shift_count")
+    if count_range == (32, 63):
+        word_bits = program.constant("word_bits", 32)
+        right_count = program.binary("right_count", "sub.i32", word_bits, shift_count)
+    else:
+        zero = program.constant("zero", 0)
+        within_word_count = shift_count
+        if count_range is None:
+            mask31 = program.constant("mask31", 31)
+            within_word_count = program.binary(
+                "within_word_count", "and.i32", shift_count, mask31
+            )
+        right_count = program.binary("right_count", "sub.i32", zero, within_word_count)
+    shifted_high = program.binary("shifted_high", high_shift, lhs_high, right_count)
+    if count_range == (32, 63):
+        result_low = shifted_high
+    else:
+        if count_range == (1, 31):
+            cross_source = lhs_high
+            cross_count = program.add_immediate("cross_count", right_count, 32)
+        else:
+            # A single left shift by 32 wraps to zero bits. Splitting the
+            # carry into 1 + (31-count) makes count zero preserve the low word.
+            one = program.constant("one", 1)
+            cross_source = program.binary("high_lower", "lshl.i32", lhs_high, one)
+            cross_count = program.add_immediate("cross_count", right_count, 31)
+        high_cross = program.binary("high_cross", "lshl.i32", cross_source, cross_count)
+        low_base = program.binary("low_base", "lshl.i32", lhs_low, right_count)
+        result_low = program.binary("low_if_small", "or.i32", low_base, high_cross)
+    result_high = shifted_high
+    if count_range is None or count_range == (32, 63):
+        if source_op is scalar_bitwise.scalar_shrsi:
+            sign_count = program.constant("sign_count", -31)
+            fill = program.binary("sign_fill", "ashl.i32", lhs_high, sign_count)
+        else:
+            fill = program.constant("zero", 0) if count_range == (32, 63) else zero
+        if count_range == (32, 63):
+            result_high = fill
+        else:
+            word_bits = program.constant("word_bits", 32)
+            is_small = program.binary("is_small", "cmp.ult.i32", shift_count, word_bits)
+            result_low = program.select(
+                "result_low", result_low, shifted_high, is_small
+            )
+            result_high = program.select("result_high", shifted_high, fill, is_small)
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=_descriptor(f"amd.xdna.aie2p.{high_shift}"),
+        guards=(
+            *_typed_guards(("lhs", "rhs", "result"), _I64),
+            *((Guard.value_i64_range("rhs", *count_range),) if count_range else ()),
+        ),
+        priority=2 if count_range == (1, 31) else 1 if count_range else 0,
+        emit=(
+            *lhs_emits,
+            EmitRegisterSlice(
+                source=ValueRef.operand("rhs"), result=shift_count, unit_count=1
+            ),
+            *program.emits,
+            _concat_pair(result_low, result_high),
+        ),
+    )
+
+
 def _pair_less(
     program: ScalarProgram,
     prefix: str,
@@ -609,6 +678,14 @@ AIE2P_I64_RULES = (
     _pair_multiply_rule(),
     *(_pair_bounded_left_shift_rule(word_index) for word_index in range(2)),
     _pair_left_shift_rule(),
+    *(
+        _pair_right_shift_rule(source_op, high_shift, count_range)
+        for source_op, high_shift in (
+            (scalar_bitwise.scalar_shrui, "lshl.i32"),
+            (scalar_bitwise.scalar_shrsi, "ashl.i32"),
+        )
+        for count_range in ((1, 31), (0, 31), (32, 63), None)
+    ),
     _pair_add_sub_rule(
         scalar_arithmetic.scalar_subi,
         "sub.borrow_out.i32",

@@ -25,7 +25,11 @@ def main():
             value = edges[packet] if packet < len(edges) else generator.getrandbits(64)
             low_count = count % 31 + 1
             high_count = count % 32 + 32
-            inputs.extend((value, count, low_count, high_count))
+            low_zero_count = count & 31
+            crossing_count = 31 + (count & 1)
+            inputs.extend(
+                (value, count, low_count, high_count, low_zero_count, crossing_count)
+            )
             expected.extend(
                 (value << amount) & mask
                 for amount in (count, low_count, high_count, 0, 6, 31, 32, 63)
@@ -35,6 +39,20 @@ def main():
             signed_word = word if word < (1 << 31) else word - (1 << 32)
             for amount in (count & 31, 1, 16, 31):
                 expected.extend((word >> amount, (signed_word >> amount) & 0xFFFFFFFF))
+            signed_value = value if value < (1 << 63) else value - (1 << 64)
+            for amount in (
+                count,
+                low_count,
+                high_count,
+                0,
+                6,
+                31,
+                32,
+                63,
+                low_zero_count,
+                crossing_count,
+            ):
+                expected.extend((value >> amount, (signed_value >> amount) & mask))
     # Binding tails expose DMA writes beyond the declared pipeline views.
     guard = bytes([0xA5]) * 64
     (directory / "input.bin").write_bytes(

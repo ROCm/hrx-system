@@ -291,3 +291,109 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @word_rig
   %signed = ashr.i32 %value, %count
   return %logical, %signed
 }
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def target(@target) @wide_right_shift_word_boundaries(%value: i64) -> (i64, i64, i64, i64, i64, i64, i64, i64) {
+  %identity_count = scalar.constant 0 : i64
+  %last_low = scalar.constant 31 : i64
+  %first_high = scalar.constant 32 : i64
+  %last_high = scalar.constant 63 : i64
+  %logical_identity = scalar.shrui %value, %identity_count : i64
+  %signed_identity = scalar.shrsi %value, %identity_count : i64
+  %logical_low_edge = scalar.shrui %value, %last_low : i64
+  %signed_low_edge = scalar.shrsi %value, %last_low : i64
+  %logical_high_edge = scalar.shrui %value, %first_high : i64
+  %signed_high_edge = scalar.shrsi %value, %first_high : i64
+  %logical_top = scalar.shrui %value, %last_high : i64
+  %signed_top = scalar.shrsi %value, %last_high : i64
+  func.return %logical_identity, %signed_identity, %logical_low_edge, %signed_low_edge, %logical_high_edge, %signed_high_edge, %logical_top, %signed_top : i64, i64, i64, i64, i64, i64, i64, i64
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @wide_right_shift_word_boundaries(%value: reg<llvmir.i64>) -> (reg<llvmir.i64>, reg<llvmir.i64>, reg<llvmir.i64>, reg<llvmir.i64>, reg<llvmir.i64>, reg<llvmir.i64>, reg<llvmir.i64>, reg<llvmir.i64>) asm {
+  %last_low = const.i64 31
+  %first_high = const.i64 32
+  %last_high = const.i64 63
+  %logical_low_edge = lshr.i64 %value, %last_low
+  %signed_low_edge = ashr.i64 %value, %last_low
+  %logical_high_edge = lshr.i64 %value, %first_high
+  %signed_high_edge = ashr.i64 %value, %first_high
+  %logical_top = lshr.i64 %value, %last_high
+  %signed_top = ashr.i64 %value, %last_high
+  return %value, %value, %logical_low_edge, %signed_low_edge, %logical_high_edge, %signed_high_edge, %logical_top, %signed_top
+}
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def target(@target) @wide_right_shift_bounded_low(%value: i64, %count_input: i64) -> (i64, i64) {
+  %count = scalar.assume %count_input [range(%count_input, 0, 31)] : i64
+  %logical = scalar.shrui %value, %count : i64
+  %signed = scalar.shrsi %value, %count : i64
+  func.return %logical, %signed : i64, i64
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @wide_right_shift_bounded_low(%value: reg<llvmir.i64>, %count: reg<llvmir.i64>) -> (reg<llvmir.i64>, reg<llvmir.i64>) asm {
+  %logical = lshr.i64 %value, %count
+  %signed = ashr.i64 %value, %count
+  return %logical, %signed
+}
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def target(@target) @wide_right_shift_bounded_nonzero_low(%value: i64, %count_input: i64) -> (i64, i64) {
+  %count = scalar.assume %count_input [range(%count_input, 1, 31)] : i64
+  %logical = scalar.shrui %value, %count : i64
+  %signed = scalar.shrsi %value, %count : i64
+  func.return %logical, %signed : i64, i64
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @wide_right_shift_bounded_nonzero_low(%value: reg<llvmir.i64>, %count: reg<llvmir.i64>) -> (reg<llvmir.i64>, reg<llvmir.i64>) asm {
+  %logical = lshr.i64 %value, %count
+  %signed = ashr.i64 %value, %count
+  return %logical, %signed
+}
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def target(@target) @wide_right_shift_bounded_high(%value: i64, %count_input: i64) -> (i64, i64) {
+  %count = scalar.assume %count_input [range(%count_input, 32, 63)] : i64
+  %logical = scalar.shrui %value, %count : i64
+  %signed = scalar.shrsi %value, %count : i64
+  func.return %logical, %signed : i64, i64
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @wide_right_shift_bounded_high(%value: reg<llvmir.i64>, %count: reg<llvmir.i64>) -> (reg<llvmir.i64>, reg<llvmir.i64>) asm {
+  %logical = lshr.i64 %value, %count
+  %signed = ashr.i64 %value, %count
+  return %logical, %signed
+}
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def target(@target) @wide_right_shift_crossing_words(%value: i64, %count_input: i64) -> (i64, i64) {
+  %count = scalar.assume %count_input [range(%count_input, 31, 32)] : i64
+  %logical = scalar.shrui %value, %count : i64
+  %signed = scalar.shrsi %value, %count : i64
+  func.return %logical, %signed : i64, i64
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @wide_right_shift_crossing_words(%value: reg<llvmir.i64>, %count: reg<llvmir.i64>) -> (reg<llvmir.i64>, reg<llvmir.i64>) asm {
+  %logical = lshr.i64 %value, %count
+  %signed = ashr.i64 %value, %count
+  return %logical, %signed
+}

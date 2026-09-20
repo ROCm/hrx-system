@@ -5,11 +5,11 @@ pipeline.def<kernel> public retain target(@array_target) @shift_packets() launch
   %count = index.constant 1 : index
   %base_offset = index.constant 0 : offset
   %workers = group.create %count : index -> group
-  %input_view = buffer.view %input[%base_offset] : buffer -> view<1x16x512xi32>
-  %output_view = buffer.view %output[%base_offset] : buffer -> view<1x16x2176xi32>
-  %packets = pipeline.scatter %input_view across %workers : view<1x16x512xi32>, group -> pipeline.flow<tile<512xi32>>
-  %results = pipeline.stage @shift_entry on %workers(%packets) : (group, pipeline.flow<tile<512xi32>>) -> (pipeline.flow<tile<2176xi32>>)
-  pipeline.write %results to %output_view : pipeline.flow<tile<2176xi32>>, view<1x16x2176xi32>
+  %input_view = buffer.view %input[%base_offset] : buffer -> view<1x16x768xi32>
+  %output_view = buffer.view %output[%base_offset] : buffer -> view<1x16x4736xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x768xi32>, group -> pipeline.flow<tile<768xi32>>
+  %results = pipeline.stage @shift_entry on %workers(%packets) : (group, pipeline.flow<tile<768xi32>>) -> (pipeline.flow<tile<4736xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<4736xi32>>, view<1x16x4736xi32>
   pipeline.return
 }
 
@@ -19,8 +19,8 @@ func.def target(@core_target) @shift_entry(%input: buffer, %output: buffer) {
   %begin = index.constant 0 : index
   %end = index.constant 64 : index
   %step = index.constant 1 : index
-  %input_view = buffer.view %source[%base_offset] : buffer -> view<64x4xi64>
-  %output_view = buffer.view %destination[%base_offset] : buffer -> view<64x17xi64>
+  %input_view = buffer.view %source[%base_offset] : buffer -> view<64x6xi64>
+  %output_view = buffer.view %destination[%base_offset] : buffer -> view<64x37xi64>
   %count_zero = scalar.constant 0 : i64
   %count_six = scalar.constant 6 : i64
   %count_low_edge = scalar.constant 31 : i64
@@ -31,58 +31,102 @@ func.def target(@core_target) @shift_entry(%input: buffer, %output: buffer) {
   %word_middle = scalar.constant 16 : i32
   %word_last = scalar.constant 31 : i32
   scf.for %sample = [%begin to %end step %step] {
-    %value = view.load %input_view[%sample, 0] : view<64x4xi64> -> i64
-    %count = view.load %input_view[%sample, 1] : view<64x4xi64> -> i64
-    %low_input = view.load %input_view[%sample, 2] : view<64x4xi64> -> i64
-    %high_input = view.load %input_view[%sample, 3] : view<64x4xi64> -> i64
+    %value = view.load %input_view[%sample, 0] : view<64x6xi64> -> i64
+    %count = view.load %input_view[%sample, 1] : view<64x6xi64> -> i64
+    %low_input = view.load %input_view[%sample, 2] : view<64x6xi64> -> i64
+    %high_input = view.load %input_view[%sample, 3] : view<64x6xi64> -> i64
     %low_count = scalar.assume %low_input [range(%low_input, 1, 31)] : i64
     %high_count = scalar.assume %high_input [range(%high_input, 32, 63)] : i64
+    %low_zero_input = view.load %input_view[%sample, 4] : view<64x6xi64> -> i64
+    %crossing_input = view.load %input_view[%sample, 5] : view<64x6xi64> -> i64
+    %low_zero_count = scalar.assume %low_zero_input [range(%low_zero_input, 0, 31)] : i64
+    %crossing_count = scalar.assume %crossing_input [range(%crossing_input, 31, 32)] : i64
     %dynamic = scalar.shli %value, %count : i64
-    view.store %dynamic, %output_view[%sample, 0] : i64, view<64x17xi64>
+    view.store %dynamic, %output_view[%sample, 0] : i64, view<64x37xi64>
     %bounded_low = scalar.shli %value, %low_count : i64
-    view.store %bounded_low, %output_view[%sample, 1] : i64, view<64x17xi64>
+    view.store %bounded_low, %output_view[%sample, 1] : i64, view<64x37xi64>
     %bounded_high = scalar.shli %value, %high_count : i64
-    view.store %bounded_high, %output_view[%sample, 2] : i64, view<64x17xi64>
+    view.store %bounded_high, %output_view[%sample, 2] : i64, view<64x37xi64>
     %unchanged = scalar.shli %value, %count_zero : i64
-    view.store %unchanged, %output_view[%sample, 3] : i64, view<64x17xi64>
+    view.store %unchanged, %output_view[%sample, 3] : i64, view<64x37xi64>
     %six = scalar.shli %value, %count_six : i64
-    view.store %six, %output_view[%sample, 4] : i64, view<64x17xi64>
+    view.store %six, %output_view[%sample, 4] : i64, view<64x37xi64>
     %low_edge = scalar.shli %value, %count_low_edge : i64
-    view.store %low_edge, %output_view[%sample, 5] : i64, view<64x17xi64>
+    view.store %low_edge, %output_view[%sample, 5] : i64, view<64x37xi64>
     %high_edge = scalar.shli %value, %count_high_edge : i64
-    view.store %high_edge, %output_view[%sample, 6] : i64, view<64x17xi64>
+    view.store %high_edge, %output_view[%sample, 6] : i64, view<64x37xi64>
     %top = scalar.shli %value, %count_top : i64
-    view.store %top, %output_view[%sample, 7] : i64, view<64x17xi64>
+    view.store %top, %output_view[%sample, 7] : i64, view<64x37xi64>
     %narrow = scalar.trunci %six : i64 to i32
     %narrow_unsigned = scalar.extui %narrow : i32 to i64
-    view.store %narrow_unsigned, %output_view[%sample, 8] : i64, view<64x17xi64>
+    view.store %narrow_unsigned, %output_view[%sample, 8] : i64, view<64x37xi64>
     %word = scalar.trunci %value : i64 to i32
     %count_word = scalar.trunci %count : i64 to i32
     %word_count = scalar.andi %count_word, %word_mask : i32
     %logical_dynamic = scalar.shrui %word, %word_count : i32
     %logical_dynamic_bits = scalar.extui %logical_dynamic : i32 to i64
-    view.store %logical_dynamic_bits, %output_view[%sample, 9] : i64, view<64x17xi64>
+    view.store %logical_dynamic_bits, %output_view[%sample, 9] : i64, view<64x37xi64>
     %signed_dynamic = scalar.shrsi %word, %word_count : i32
     %signed_dynamic_bits = scalar.extui %signed_dynamic : i32 to i64
-    view.store %signed_dynamic_bits, %output_view[%sample, 10] : i64, view<64x17xi64>
+    view.store %signed_dynamic_bits, %output_view[%sample, 10] : i64, view<64x37xi64>
     %logical_one = scalar.shrui %word, %word_one : i32
     %logical_one_bits = scalar.extui %logical_one : i32 to i64
-    view.store %logical_one_bits, %output_view[%sample, 11] : i64, view<64x17xi64>
+    view.store %logical_one_bits, %output_view[%sample, 11] : i64, view<64x37xi64>
     %signed_one = scalar.shrsi %word, %word_one : i32
     %signed_one_bits = scalar.extui %signed_one : i32 to i64
-    view.store %signed_one_bits, %output_view[%sample, 12] : i64, view<64x17xi64>
+    view.store %signed_one_bits, %output_view[%sample, 12] : i64, view<64x37xi64>
     %logical_middle = scalar.shrui %word, %word_middle : i32
     %logical_middle_bits = scalar.extui %logical_middle : i32 to i64
-    view.store %logical_middle_bits, %output_view[%sample, 13] : i64, view<64x17xi64>
+    view.store %logical_middle_bits, %output_view[%sample, 13] : i64, view<64x37xi64>
     %signed_middle = scalar.shrsi %word, %word_middle : i32
     %signed_middle_bits = scalar.extui %signed_middle : i32 to i64
-    view.store %signed_middle_bits, %output_view[%sample, 14] : i64, view<64x17xi64>
+    view.store %signed_middle_bits, %output_view[%sample, 14] : i64, view<64x37xi64>
     %logical_last = scalar.shrui %word, %word_last : i32
     %logical_last_bits = scalar.extui %logical_last : i32 to i64
-    view.store %logical_last_bits, %output_view[%sample, 15] : i64, view<64x17xi64>
+    view.store %logical_last_bits, %output_view[%sample, 15] : i64, view<64x37xi64>
     %signed_last = scalar.shrsi %word, %word_last : i32
     %signed_last_bits = scalar.extui %signed_last : i32 to i64
-    view.store %signed_last_bits, %output_view[%sample, 16] : i64, view<64x17xi64>
+    view.store %signed_last_bits, %output_view[%sample, 16] : i64, view<64x37xi64>
+    %wide_logical_dynamic = scalar.shrui %value, %count : i64
+    view.store %wide_logical_dynamic, %output_view[%sample, 17] : i64, view<64x37xi64>
+    %wide_signed_dynamic = scalar.shrsi %value, %count : i64
+    view.store %wide_signed_dynamic, %output_view[%sample, 18] : i64, view<64x37xi64>
+    %wide_logical_bounded_low = scalar.shrui %value, %low_count : i64
+    view.store %wide_logical_bounded_low, %output_view[%sample, 19] : i64, view<64x37xi64>
+    %wide_signed_bounded_low = scalar.shrsi %value, %low_count : i64
+    view.store %wide_signed_bounded_low, %output_view[%sample, 20] : i64, view<64x37xi64>
+    %wide_logical_bounded_high = scalar.shrui %value, %high_count : i64
+    view.store %wide_logical_bounded_high, %output_view[%sample, 21] : i64, view<64x37xi64>
+    %wide_signed_bounded_high = scalar.shrsi %value, %high_count : i64
+    view.store %wide_signed_bounded_high, %output_view[%sample, 22] : i64, view<64x37xi64>
+    %wide_logical_zero = scalar.shrui %value, %count_zero : i64
+    view.store %wide_logical_zero, %output_view[%sample, 23] : i64, view<64x37xi64>
+    %wide_signed_zero = scalar.shrsi %value, %count_zero : i64
+    view.store %wide_signed_zero, %output_view[%sample, 24] : i64, view<64x37xi64>
+    %wide_logical_six = scalar.shrui %value, %count_six : i64
+    view.store %wide_logical_six, %output_view[%sample, 25] : i64, view<64x37xi64>
+    %wide_signed_six = scalar.shrsi %value, %count_six : i64
+    view.store %wide_signed_six, %output_view[%sample, 26] : i64, view<64x37xi64>
+    %wide_logical_low_edge = scalar.shrui %value, %count_low_edge : i64
+    view.store %wide_logical_low_edge, %output_view[%sample, 27] : i64, view<64x37xi64>
+    %wide_signed_low_edge = scalar.shrsi %value, %count_low_edge : i64
+    view.store %wide_signed_low_edge, %output_view[%sample, 28] : i64, view<64x37xi64>
+    %wide_logical_high_edge = scalar.shrui %value, %count_high_edge : i64
+    view.store %wide_logical_high_edge, %output_view[%sample, 29] : i64, view<64x37xi64>
+    %wide_signed_high_edge = scalar.shrsi %value, %count_high_edge : i64
+    view.store %wide_signed_high_edge, %output_view[%sample, 30] : i64, view<64x37xi64>
+    %wide_logical_top = scalar.shrui %value, %count_top : i64
+    view.store %wide_logical_top, %output_view[%sample, 31] : i64, view<64x37xi64>
+    %wide_signed_top = scalar.shrsi %value, %count_top : i64
+    view.store %wide_signed_top, %output_view[%sample, 32] : i64, view<64x37xi64>
+    %wide_logical_bounded_low_zero = scalar.shrui %value, %low_zero_count : i64
+    view.store %wide_logical_bounded_low_zero, %output_view[%sample, 33] : i64, view<64x37xi64>
+    %wide_signed_bounded_low_zero = scalar.shrsi %value, %low_zero_count : i64
+    view.store %wide_signed_bounded_low_zero, %output_view[%sample, 34] : i64, view<64x37xi64>
+    %wide_logical_crossing = scalar.shrui %value, %crossing_count : i64
+    view.store %wide_logical_crossing, %output_view[%sample, 35] : i64, view<64x37xi64>
+    %wide_signed_crossing = scalar.shrsi %value, %crossing_count : i64
+    view.store %wide_signed_crossing, %output_view[%sample, 36] : i64, view<64x37xi64>
     scf.yield
   }
   func.return

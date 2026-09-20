@@ -540,16 +540,41 @@ aie2p.target<core> @target
 func.def target(@target) @scalar_i64_right_shift_select(%value: i64, %condition: i1) -> (i64, i64, i64, i64, i64) {
   %word_count = scalar.constant 32 : i64
   %sign_count = scalar.constant 63 : i64
-  // ERROR@+1: TARGET/002 {op_name="scalar.shrui", field_name="lhs", actual_type="i64", expected_type="i32"}
   %logical_word = scalar.shrui %value, %word_count : i64
-  // ERROR@+1: TARGET/002 {op_name="scalar.shrsi", field_name="lhs", actual_type="i64", expected_type="i32"}
   %signed_word = scalar.shrsi %value, %word_count : i64
-  // ERROR@+1: TARGET/002 {op_name="scalar.shrui", field_name="lhs", actual_type="i64", expected_type="i32"}
   %logical_sign = scalar.shrui %value, %sign_count : i64
-  // ERROR@+1: TARGET/002 {op_name="scalar.shrsi", field_name="lhs", actual_type="i64", expected_type="i32"}
   %signed_sign = scalar.shrsi %value, %sign_count : i64
   %selected = scf.select %condition, %logical_word, %signed_word : i64
   func.return %logical_word, %signed_word, %logical_sign, %signed_sign, %selected : i64, i64, i64, i64, i64
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_i64_right_shift_select(%value: reg<aie2p.er x2>, %condition: reg<aie2p.er>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
+  %21 = mov.i32 32
+  %24 = mov.i32 63
+  %28 = slice %value[1] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %30 = mov.short 32
+  %31 = sub %30, %21
+  %32 = lshl %28, %31
+  %33 = mov.short 0
+  %logical_word = concat(%32, %33) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %39 = sub %30, %21
+  %40 = ashl %28, %39
+  %41 = mov.short -31
+  %42 = ashl %28, %41
+  %signed_word = concat(%40, %42) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %48 = sub %30, %24
+  %49 = lshl %28, %48
+  %logical_sign = concat(%49, %33) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %56 = sub %30, %24
+  %57 = ashl %28, %56
+  %signed_sign = concat(%57, %42) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %65 = copy %condition : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %66 = sel.nez %32, %40, %65
+  %67 = copy %condition : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %68 = sel.nez %33, %42, %67
+  %selected = concat(%66, %68) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  return %logical_word, %signed_word, %logical_sign, %signed_sign, %selected
 }
 
 // ====

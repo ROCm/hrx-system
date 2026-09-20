@@ -239,3 +239,92 @@ func.def target(@target) @word_right_shift_dynamic(%value: i32, %count: i32) -> 
   %signed = scalar.shrsi %value, %count : i32
   func.return %logical, %signed : i32, i32
 }
+
+// ====
+
+x86.target<avx2> @target
+
+func.def target(@target) @wide_right_shift_word_boundaries(%value: i64) -> (i64, i64, i64, i64, i64, i64, i64, i64) {
+  %identity_count = scalar.constant 0 : i64
+  %last_low = scalar.constant 31 : i64
+  %first_high = scalar.constant 32 : i64
+  %last_high = scalar.constant 63 : i64
+  %logical_identity = scalar.shrui %value, %identity_count : i64
+  %signed_identity = scalar.shrsi %value, %identity_count : i64
+  %logical_low_edge = scalar.shrui %value, %last_low : i64
+  %signed_low_edge = scalar.shrsi %value, %last_low : i64
+  %logical_high_edge = scalar.shrui %value, %first_high : i64
+  %signed_high_edge = scalar.shrsi %value, %first_high : i64
+  %logical_top = scalar.shrui %value, %last_high : i64
+  %signed_top = scalar.shrsi %value, %last_high : i64
+  func.return %logical_identity, %signed_identity, %logical_low_edge, %signed_low_edge, %logical_high_edge, %signed_high_edge, %logical_top, %signed_top : i64, i64, i64, i64, i64, i64, i64, i64
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @wide_right_shift_word_boundaries(%value: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>) asm {
+  %30 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %logical_low_edge = shr.imm.gpr64 %30 {shift = 31}
+  %32 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %signed_low_edge = sar.imm.gpr64 %32 {shift = 31}
+  %34 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %logical_high_edge = shr.imm.gpr64 %34 {shift = 32}
+  %36 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %signed_high_edge = sar.imm.gpr64 %36 {shift = 32}
+  %38 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %logical_top = shr.imm.gpr64 %38 {shift = 63}
+  %40 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %signed_top = sar.imm.gpr64 %40 {shift = 63}
+  return %value, %value, %logical_low_edge, %signed_low_edge, %logical_high_edge, %signed_high_edge, %logical_top, %signed_top
+}
+
+// ====
+
+x86.target<avx2> @target
+
+func.def target(@target) @wide_right_shift_bounded_low(%value: i64, %count_input: i64) -> (i64, i64) {
+  %count = scalar.assume %count_input [range(%count_input, 0, 31)] : i64
+  // ERROR@+1: TARGET/003 {op_name="scalar.shrui", subject_role="value_fact", subject_name="rhs", constraint_key="exact_i64"}
+  %logical = scalar.shrui %value, %count : i64
+  // ERROR@+1: TARGET/003 {op_name="scalar.shrsi", subject_role="value_fact", subject_name="rhs", constraint_key="exact_i64"}
+  %signed = scalar.shrsi %value, %count : i64
+  func.return %logical, %signed : i64, i64
+}
+
+// ====
+
+x86.target<avx2> @target
+
+func.def target(@target) @wide_right_shift_bounded_nonzero_low(%value: i64, %count_input: i64) -> (i64, i64) {
+  %count = scalar.assume %count_input [range(%count_input, 1, 31)] : i64
+  // ERROR@+1: TARGET/003 {op_name="scalar.shrui", subject_role="value_fact", subject_name="rhs", constraint_key="exact_i64"}
+  %logical = scalar.shrui %value, %count : i64
+  // ERROR@+1: TARGET/003 {op_name="scalar.shrsi", subject_role="value_fact", subject_name="rhs", constraint_key="exact_i64"}
+  %signed = scalar.shrsi %value, %count : i64
+  func.return %logical, %signed : i64, i64
+}
+
+// ====
+
+x86.target<avx2> @target
+
+func.def target(@target) @wide_right_shift_bounded_high(%value: i64, %count_input: i64) -> (i64, i64) {
+  %count = scalar.assume %count_input [range(%count_input, 32, 63)] : i64
+  // ERROR@+1: TARGET/003 {op_name="scalar.shrui", subject_role="value_fact", subject_name="rhs", constraint_key="exact_i64"}
+  %logical = scalar.shrui %value, %count : i64
+  // ERROR@+1: TARGET/003 {op_name="scalar.shrsi", subject_role="value_fact", subject_name="rhs", constraint_key="exact_i64"}
+  %signed = scalar.shrsi %value, %count : i64
+  func.return %logical, %signed : i64, i64
+}
+
+// ====
+
+x86.target<avx2> @target
+
+func.def target(@target) @wide_right_shift_crossing_words(%value: i64, %count_input: i64) -> (i64, i64) {
+  %count = scalar.assume %count_input [range(%count_input, 31, 32)] : i64
+  // ERROR@+1: TARGET/003 {op_name="scalar.shrui", subject_role="value_fact", subject_name="rhs", constraint_key="exact_i64"}
+  %logical = scalar.shrui %value, %count : i64
+  // ERROR@+1: TARGET/003 {op_name="scalar.shrsi", subject_role="value_fact", subject_name="rhs", constraint_key="exact_i64"}
+  %signed = scalar.shrsi %value, %count : i64
+  func.return %logical, %signed : i64, i64
+}

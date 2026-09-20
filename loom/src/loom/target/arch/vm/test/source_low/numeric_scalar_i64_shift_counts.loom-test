@@ -258,3 +258,109 @@ low.func.def target<vm.core>(@target) abi(vm_function) @word_right_shift_dynamic
   %signed = integer.shift.right.s32 %value, %count
   return %logical, %signed
 }
+
+// ====
+
+vm.target<core> @target
+
+func.def target(@target) @wide_right_shift_word_boundaries(%value: i64) -> (i64, i64, i64, i64, i64, i64, i64, i64) {
+  %identity_count = scalar.constant 0 : i64
+  %last_low = scalar.constant 31 : i64
+  %first_high = scalar.constant 32 : i64
+  %last_high = scalar.constant 63 : i64
+  %logical_identity = scalar.shrui %value, %identity_count : i64
+  %signed_identity = scalar.shrsi %value, %identity_count : i64
+  %logical_low_edge = scalar.shrui %value, %last_low : i64
+  %signed_low_edge = scalar.shrsi %value, %last_low : i64
+  %logical_high_edge = scalar.shrui %value, %first_high : i64
+  %signed_high_edge = scalar.shrsi %value, %first_high : i64
+  %logical_top = scalar.shrui %value, %last_high : i64
+  %signed_top = scalar.shrsi %value, %last_high : i64
+  func.return %logical_identity, %signed_identity, %logical_low_edge, %signed_low_edge, %logical_high_edge, %signed_high_edge, %logical_top, %signed_top : i64, i64, i64, i64, i64, i64, i64, i64
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @wide_right_shift_word_boundaries(%value: reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) asm {
+  %last_low = constant.i64 31
+  %first_high = constant.i64 32
+  %last_high = constant.i64 63
+  %logical_low_edge = integer.shift.right.u64 %value, %last_low
+  %signed_low_edge = integer.shift.right.s64 %value, %last_low
+  %logical_high_edge = integer.shift.right.u64 %value, %first_high
+  %signed_high_edge = integer.shift.right.s64 %value, %first_high
+  %logical_top = integer.shift.right.u64 %value, %last_high
+  %signed_top = integer.shift.right.s64 %value, %last_high
+  return %value, %value, %logical_low_edge, %signed_low_edge, %logical_high_edge, %signed_high_edge, %logical_top, %signed_top
+}
+
+// ====
+
+vm.target<core> @target
+
+func.def target(@target) @wide_right_shift_bounded_low(%value: i64, %count_input: i64) -> (i64, i64) {
+  %count = scalar.assume %count_input [range(%count_input, 0, 31)] : i64
+  %logical = scalar.shrui %value, %count : i64
+  %signed = scalar.shrsi %value, %count : i64
+  func.return %logical, %signed : i64, i64
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @wide_right_shift_bounded_low(%value: reg<vm.value : i64>, %count: reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>) asm {
+  %logical = integer.shift.right.u64 %value, %count
+  %signed = integer.shift.right.s64 %value, %count
+  return %logical, %signed
+}
+
+// ====
+
+vm.target<core> @target
+
+func.def target(@target) @wide_right_shift_bounded_nonzero_low(%value: i64, %count_input: i64) -> (i64, i64) {
+  %count = scalar.assume %count_input [range(%count_input, 1, 31)] : i64
+  %logical = scalar.shrui %value, %count : i64
+  %signed = scalar.shrsi %value, %count : i64
+  func.return %logical, %signed : i64, i64
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @wide_right_shift_bounded_nonzero_low(%value: reg<vm.value : i64>, %count: reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>) asm {
+  %logical = integer.shift.right.u64 %value, %count
+  %signed = integer.shift.right.s64 %value, %count
+  return %logical, %signed
+}
+
+// ====
+
+vm.target<core> @target
+
+func.def target(@target) @wide_right_shift_bounded_high(%value: i64, %count_input: i64) -> (i64, i64) {
+  %count = scalar.assume %count_input [range(%count_input, 32, 63)] : i64
+  %logical = scalar.shrui %value, %count : i64
+  %signed = scalar.shrsi %value, %count : i64
+  func.return %logical, %signed : i64, i64
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @wide_right_shift_bounded_high(%value: reg<vm.value : i64>, %count: reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>) asm {
+  %logical = integer.shift.right.u64 %value, %count
+  %signed = integer.shift.right.s64 %value, %count
+  return %logical, %signed
+}
+
+// ====
+
+vm.target<core> @target
+
+func.def target(@target) @wide_right_shift_crossing_words(%value: i64, %count_input: i64) -> (i64, i64) {
+  %count = scalar.assume %count_input [range(%count_input, 31, 32)] : i64
+  %logical = scalar.shrui %value, %count : i64
+  %signed = scalar.shrsi %value, %count : i64
+  func.return %logical, %signed : i64, i64
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @wide_right_shift_crossing_words(%value: reg<vm.value : i64>, %count: reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>) asm {
+  %logical = integer.shift.right.u64 %value, %count
+  %signed = integer.shift.right.s64 %value, %count
+  return %logical, %signed
+}
