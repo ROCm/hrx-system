@@ -574,6 +574,9 @@ consumer loop, checking each schedule against independent integer results.
 The [cooperative paged-attention workflow](../workflows/tune-loop-schedules.md#pipeline-cooperative-paged-attention)
 applies this shape to shared K/V page lookups, subgroup score reductions, online
 softmax state and ragged sequence tails, with matched checked benchmarks.
+The [sparse token variant](../workflows/tune-loop-schedules.md#pipeline-sparse-token-attention)
+adds dependent per-token IDs and an independent selected-prefix boundary,
+including ignored suffixes that point at poisoned payloads.
 
 The caller can also calculate these values with `index` arithmetic from
 specialized template arguments or target properties. A global configuration

@@ -147,6 +147,28 @@ Matched benchmark names are
 [cooperative pipeline workflow](../../../../../docs/src/workflows/tune-loop-schedules.md#pipeline-cooperative-paged-attention)
 connects these workloads to native resource reports and controlled timings.
 
+## Sparse Token Attention
+
+`sparse_token_attention_f32.loom` gathers an ordered prefix of physical token
+IDs for each 128-channel query. The prefix guard protects the index read;
+an unsigned range test separately protects dependent K/V reads. Negative and
+out-of-range IDs leave all online state unchanged, while duplicates contribute
+once per occurrence. Causal selection belongs to the caller's index list.
+
+One template takes the caller's depth and unroll factor. A fixed sixteen-entry
+tile permits read-ahead into the subgroup score reduction while the outer
+prefix count stays dynamic. Matched depth-one/depth-three callers both unroll
+by two. Independent analytic cases check maximum, denominator and normalized
+output; varied queries cover shared lists and differing prefixes. Minimal
+backing and NaN-poisoned inactive payloads exercise both access boundaries.
+
+The `@sparse_token_attention_serial_n128_i256` and
+`@sparse_token_attention_pipelined_n128_i256` benchmarks launch one kernel
+each. The `n128`/`n1024` and `i1`/`i16`/`i256` suffixes select prefix and query
+counts with the same full-cache footprint. The
+[sparse attention workflow](../../../../../docs/src/workflows/tune-loop-schedules.md#pipeline-sparse-token-attention)
+connects this source to access checking, reports and schedule comparisons.
+
 ## Review Questions
 
 Before adding a source file here, the review answers:

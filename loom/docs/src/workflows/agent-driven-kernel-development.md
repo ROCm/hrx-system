@@ -322,6 +322,11 @@ pipelines K/V fragments into subgroup score reductions while preserving shared
 page identity, ordered softmax/PV state and ragged tail guards. Its independent
 analytic checks and matched benchmarks provide a starting point for schedule
 searches without hand-building the input queue.
+For top-k token lists, the
+[sparse attention example](tune-loop-schedules.md#pipeline-sparse-token-attention)
+separates the selected-prefix guard from physical-ID validity, with independent
+numerical checks, short allocations and poisoned inactive payloads. Preserve
+both boundaries when searching schedules for an indexer-selected workload.
 
 For authored native motifs, give a Low helper
 [`schedule(phased)`](../guide/functions-and-control.md#compose-independently-scheduled-helpers)

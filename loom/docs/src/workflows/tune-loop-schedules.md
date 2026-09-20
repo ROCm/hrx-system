@@ -568,6 +568,71 @@ neither the depth nor a full wait alone establishes whether useful overlap
 survived. The checked policies are a comparison point; device measurements and
 resource costs determine the choice for another query shape or target.
 
+## Pipeline sparse token attention
+
+The [sparse token-attention example](../generated/examples/guide/functions-and-control/sparse-token-attention.loom)
+consumes a caller-selected prefix of physical token IDs. This fits top-k
+attention where an indexer has already selected the causal candidates: the
+attention kernel gathers their K/V rows in list order, including duplicates.
+Negative IDs and IDs at or beyond the runtime cache bound contribute nothing.
+
+There are two independent access boundaries. The prefix decides whether an
+index entry exists; the loaded ID decides whether a K/V row exists. The source
+keeps both guards ahead of the separate score/softmax/PV consumer:
+
+```loom
+%row_id = scf.if %active -> (i32) {
+  %loaded_id = view.load %index_view[%instance, %selected] : view<[%instances]x1024xi32> -> i32
+  scf.yield %loaded_id : i32
+} else {
+  scf.yield %absent_id : i32
+}
+%valid = scalar.cmpi ult, %row_id, %cache_limit : i32
+```
+
+The unsigned comparison excludes negative IDs as well as the upper bound.
+Guarding K/V loads alone is insufficient: an ignored suffix may contain valid
+IDs, and their rows may contain NaNs. The checked example tests that case and
+also uses index allocations ending exactly at the active prefix. Separate
+analytic checks cover maximum, denominator and every output channel; varied
+queries distinguish row identity across shared lists and different prefixes.
+
+One subgroup owns each 128-channel query. A dynamic outer loop traverses the
+selected prefix in sixteen-entry tiles; the fixed inner loop accepts
+`pipeline(%depth) unroll(%factor)`. Both callers instantiate the same template
+with unroll two, at depth one or three. The schedule advances the dependent
+ID/K/V read closure while retaining each record's validity and consumption
+order. These values belong to the caller's workload and target policy.
+
+```shell
+iree-test-loom sparse-token-attention.loom --device=amdgpu --sanitizer=access
+
+iree-benchmark-loom sparse-token-attention.loom \
+  --compare=@sparse_token_attention_serial_n128_i256,@sparse_token_attention_pipelined_n128_i256 \
+  --device=amdgpu --measure=dispatch_complete --batch-size=8 \
+  --iterations=16 --warmup-iterations=3 --input-ring-count=1 \
+  --interleave=ABABA --repetitions=2 --output=sparse-comparison.json
+
+loom-compile sparse-token-attention.loom \
+  --root=@sparse_token_attention_pipelined --target=amdgpu:gfx1151 \
+  --format=amdgpu-hsaco --output=sparse.hsaco --compile-report=details \
+  --compile-report-output=sparse.report.json
+loom-compile-report show sparse.report.json
+loom-compile-report suggest sparse.report.json
+```
+
+The generated `gfx1151` comparison makes the retained-state cost visible:
+
+--8<-- "generated/examples/guide/functions-and-control/sparse-resources.md"
+
+Inspect both dependency steps in native code. The ID must complete before it
+can form a payload address, while future K/V loads can overlap the current
+score reduction and PV update. Queue copies can still require completion at
+the backedge. Compare device time, register use, code size and JIT cost at
+matched unroll factors; a larger depth alone does not establish useful overlap.
+The `n128`/`n1024` and `i1`/`i16`/`i256` benchmark suffixes vary selected-token
+and query counts without changing the cache footprint.
+
 ## Carry the experiment into a kernel
 
 After a sweep, put the selected policy in the caller or its target-derived

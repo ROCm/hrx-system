@@ -41,6 +41,8 @@ cp -- "${repo_root}/loom/src/loom/test/corpus/checked_benchmarks/routed_row_comb
   "${output_dir}/routed-row-combine.loom"
 cp -- "${repo_root}/loom/src/loom/test/corpus/checked_benchmarks/cooperative_paged_attention_f32.loom" \
   "${output_dir}/cooperative-paged-attention.loom"
+cp -- "${repo_root}/loom/src/loom/test/corpus/checked_benchmarks/sparse_token_attention_f32.loom" \
+  "${output_dir}/sparse-token-attention.loom"
 
 cd -- "${output_dir}"
 "${loom_format}" --check guarded-read-ahead.loom
@@ -162,6 +164,21 @@ sed -n '/^\[scf.compare_pipeline_depth\]/,/^$/p' cooperative.suggest.txt \
   >cooperative-pipeline-suggest.txt
 test -s cooperative-pipeline-suggest.txt
 
+"${loom_format}" --check sparse-token-attention.loom
+for policy in serial pipelined; do
+  "${loom_compile}" sparse-token-attention.loom \
+    --root="@sparse_token_attention_${policy}" \
+    --target=amdgpu:gfx1151 --format=amdgpu-hsaco \
+    --output="sparse-${policy}.hsaco" --compile-report=details \
+    --compile-report-output="sparse-${policy}.report.json"
+  "${loom_report}" show "sparse-${policy}.report.json" --format=json \
+    >"sparse-${policy}.view.json"
+  "${loom_benchmark}" sparse-token-attention.loom \
+    --benchmark="@sparse_token_attention_${policy}_n128_i256" \
+    --dry-run --output="sparse-${policy}.plan.json"
+done
+"${loom_report}" suggest sparse-pipelined.report.json >sparse.suggest.txt
+
 # Compile the independent caller grid and retain the bounded evidence readers use.
 "${loom_format}" --check paired-read-ahead.loom
 "${loom_format}" --check paired-read-ahead-tests.loom
@@ -249,19 +266,20 @@ for left_depth, left_factor, right_depth, right_factor in (
     )
 Path("paired-resources.md").write_text("\n".join(lines) + "\n")
 
-lines = [
-    "| Policy | Code bytes | VGPRs | Modeled residency | Spills |",
-    "| --- | ---: | ---: | ---: | ---: |",
-]
-for policy, depth in (("serial", 1), ("pipelined", 3)):
-    view = json.loads(Path(f"cooperative-{policy}.view.json").read_text())
-    entry = view["entries"][0]
-    facts = entry["artifact_facts"]
-    analysis = entry["compiler_analysis"]
-    lines.append(
-        f"| Depth {depth}, unroll 2 | {facts['code_byte_count']} | "
-        f"{analysis['vector_register_count']} | "
-        f"{analysis['occupancy_percent']}% | {analysis['allocation_spill_count']} |"
-    )
-Path("cooperative-resources.md").write_text("\n".join(lines) + "\n")
+for example in ("cooperative", "sparse"):
+    lines = [
+        "| Policy | Code bytes | VGPRs | Modeled residency | Spills |",
+        "| --- | ---: | ---: | ---: | ---: |",
+    ]
+    for policy, depth in (("serial", 1), ("pipelined", 3)):
+        view = json.loads(Path(f"{example}-{policy}.view.json").read_text())
+        entry = view["entries"][0]
+        facts = entry["artifact_facts"]
+        analysis = entry["compiler_analysis"]
+        lines.append(
+            f"| Depth {depth}, unroll 2 | {facts['code_byte_count']} | "
+            f"{analysis['vector_register_count']} | "
+            f"{analysis['occupancy_percent']}% | {analysis['allocation_spill_count']} |"
+        )
+    Path(f"{example}-resources.md").write_text("\n".join(lines) + "\n")
 PY
