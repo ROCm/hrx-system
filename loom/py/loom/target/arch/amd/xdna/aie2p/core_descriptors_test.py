@@ -981,6 +981,9 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
         operand.reg_alts[0].reg_class for operand in address_index_move.operands
     ] == ["aie2p.edj", "aie2p.er"]
     assert address_index_move.asm_forms[0].mnemonic == "mov.address-index"
+    assert Constraint(ConstraintKind.REMATERIALIZABLE, 0) in (
+        address_index_move.constraints
+    )
 
     static_offset = descriptors["amd.xdna.aie2p.materialize.static-byte-offset.i32"]
     assert static_offset.asm_forms[0].mnemonic == "mov.static-byte-offset"

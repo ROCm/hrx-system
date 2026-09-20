@@ -795,6 +795,7 @@ _BASE_DESCRIPTOR_SPECS = (
         "II_MOVS_eDJ_eR",
         (("dst", "eDJ"), ("src", "eR")),
         asm_mnemonic="mov.address-index",
+        rematerializable=True,
     ),
     _DescriptorSpec(
         "NOP",

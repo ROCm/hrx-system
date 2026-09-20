@@ -82,3 +82,67 @@ low.func.def target<amd.xdna.aie2p.core> @insert_lane(%vector: reg<aie2p.vec256 
 
 // ----
 {"format":"loom.low.allocation.v0","function":"insert_lane","target":"","descriptor_set":"amd.xdna.aie2p.core","allocation_mode":"virtual","assignment_count":5,"remark_count":0,"copy_decision_count":1,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":1,"assignments":[{"index":0,"value":{"id":1,"name":"index","type":"reg<aie2p.er>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"aie2p.er"},"start_point":0,"end_point":1,"unit_count":1,"location":{"kind":"physical_register","base":253,"count":1}},{"index":1,"value":{"id":0,"name":"vector","type":"reg<aie2p.vec256 x2>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"aie2p.vec256"},"start_point":0,"end_point":2,"unit_count":2,"location":{"kind":"physical_register","base":341,"count":2}},{"index":2,"value":{"id":2,"name":"value","type":"reg<aie2p.er>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"aie2p.er"},"start_point":0,"end_point":2,"unit_count":1,"location":{"kind":"physical_register","base":254,"count":1}},{"index":3,"value":{"id":4,"name":"fixed_index","type":"reg<aie2p.mr29_insert>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"aie2p.mr29_insert"},"start_point":1,"end_point":2,"unit_count":1,"location":{"kind":"physical_register","base":275,"count":1}},{"index":4,"value":{"id":5,"name":"result","type":"reg<aie2p.vec256 x2>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"aie2p.vec256"},"start_point":2,"end_point":3,"unit_count":2,"location":{"kind":"physical_register","base":341,"count":2}}],"spill_plans":[],"copy_decisions":[{"index":0,"kind":"materialized","source_value":{"id":1,"name":"index","type":"reg<aie2p.er>"},"result_value":{"id":4,"name":"fixed_index","type":"reg<aie2p.mr29_insert>"},"source_assignment":0,"result_assignment":3}],"remarks":[]}
+
+// ====
+
+// Nine loop-invariant offsets exceed the eight address-index registers. The
+// native emitter recreates pure index moves near their loads instead of
+// retaining every index through the loop or requiring spill storage.
+// RUN: emit aie2p-leaf @indexed_loop report=emission
+
+low.func.def target<amd.xdna.aie2p.core> @indexed_loop(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>, %count: reg<aie2p.er>) asm {
+  %zero = mov.short 0
+  %one = mov.short 1
+  %offset0 = mov.static-byte-offset 64
+  %index0 = mov.address-index %offset0
+  %offset1 = mov.static-byte-offset 128
+  %index1 = mov.address-index %offset1
+  %offset2 = mov.static-byte-offset 192
+  %index2 = mov.address-index %offset2
+  %offset3 = mov.static-byte-offset 256
+  %index3 = mov.address-index %offset3
+  %offset4 = mov.static-byte-offset 320
+  %index4 = mov.address-index %offset4
+  %offset5 = mov.static-byte-offset 384
+  %index5 = mov.address-index %offset5
+  %offset6 = mov.static-byte-offset 448
+  %index6 = mov.address-index %offset6
+  %offset7 = mov.static-byte-offset 512
+  %index7 = mov.address-index %offset7
+  %offset8 = mov.static-byte-offset 576
+  %index8 = mov.address-index %offset8
+  low.br ^loop(%count: reg<aie2p.er>)
+^loop(%remaining: reg<aie2p.er>):
+  %value0 = lda.i32.index %input, %index0
+  %sum0 = add.rr %zero, %value0
+  %value1 = lda.i32.index %input, %index1
+  %sum1 = add.rr %sum0, %value1
+  %value2 = lda.i32.index %input, %index2
+  %sum2 = add.rr %sum1, %value2
+  %value3 = lda.i32.index %input, %index3
+  %sum3 = add.rr %sum2, %value3
+  %value4 = lda.i32.index %input, %index4
+  %sum4 = add.rr %sum3, %value4
+  %value5 = lda.i32.index %input, %index5
+  %sum5 = add.rr %sum4, %value5
+  %value6 = lda.i32.index %input, %index6
+  %sum6 = add.rr %sum5, %value6
+  %value7 = lda.i32.index %input, %index7
+  %sum7 = add.rr %sum6, %value7
+  %value8 = lda.i32.index %input, %index8
+  %sum8 = add.rr %sum7, %value8
+  st %sum8, %output, 0
+  %next = sub %remaining, %one
+  %more = nez %next
+  low.cond_br %more, ^again, ^done : reg<aie2p.er>
+^again:
+  low.br ^loop(%next: reg<aie2p.er>)
+^done:
+  return
+}
+
+// ----
+issue cycles: 65
+code bytes: 254
+coissued bundles: 10
+coissued components: 20

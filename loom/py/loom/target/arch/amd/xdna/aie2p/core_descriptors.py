@@ -1390,7 +1390,7 @@ def _descriptor(spec: descriptor_specs._DescriptorSpec) -> Descriptor:
             *descriptor_constraints(spec, form, operand_names),
             *(
                 (Constraint(ConstraintKind.REMATERIALIZABLE, 0),)
-                if spec.op_kind is DescriptorOpKind.CONST
+                if spec.op_kind is DescriptorOpKind.CONST or spec.rematerializable
                 else ()
             ),
             *(
