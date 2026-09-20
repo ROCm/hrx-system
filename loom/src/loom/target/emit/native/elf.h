@@ -71,6 +71,7 @@ typedef enum loom_native_elf_section_type_e {
   LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS = 1,
   LOOM_NATIVE_ELF_SECTION_TYPE_SYMTAB = 2,
   LOOM_NATIVE_ELF_SECTION_TYPE_STRTAB = 3,
+  LOOM_NATIVE_ELF_SECTION_TYPE_RELA = 4,
   LOOM_NATIVE_ELF_SECTION_TYPE_HASH = 5,
   LOOM_NATIVE_ELF_SECTION_TYPE_DYNAMIC = 6,
   LOOM_NATIVE_ELF_SECTION_TYPE_NOTE = 7,
@@ -83,6 +84,7 @@ typedef enum loom_native_elf_section_flag_bits_e {
   LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC = 0x2,
   LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR = 0x4,
   LOOM_NATIVE_ELF_SECTION_FLAG_STRINGS = 0x20,
+  LOOM_NATIVE_ELF_SECTION_FLAG_INFO_LINK = 0x40,
 } loom_native_elf_section_flag_bits_t;
 
 typedef enum loom_native_elf_amdgpu_flag_bits_e {

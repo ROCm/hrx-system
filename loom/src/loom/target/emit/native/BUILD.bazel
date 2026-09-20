@@ -57,6 +57,21 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "elf_object",
+    srcs = ["elf_object.c"],
+    hdrs = ["elf_object.h"],
+    visibility = _NATIVE_X86_VISIBILITY,
+    deps = [
+        ":elf",
+        ":object",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+    ],
+)
+
+loom_cc_library(
     name = "contribution",
     srcs = ["contribution.c"],
     hdrs = ["contribution.h"],
@@ -83,6 +98,20 @@ loom_cc_test(
     srcs = ["elf_test.cc"],
     deps = [
         ":elf",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "elf_object_test",
+    srcs = ["elf_object_test.cc"],
+    deps = [
+        ":elf",
+        ":elf_object",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/io:stream",

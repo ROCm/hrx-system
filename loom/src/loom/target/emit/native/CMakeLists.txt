@@ -43,6 +43,23 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    elf_object
+  HDRS
+    "elf_object.h"
+  SRCS
+    "elf_object.c"
+  DEPS
+    ::elf
+    ::object
+    iree::base
+    iree::base::core_headers
+    iree::base::internal::arena
+    iree::io::stream
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     contribution
   HDRS
     "contribution.h"
@@ -74,6 +91,21 @@ loom_cc_test(
     "elf_test.cc"
   DEPS
     ::elf
+    iree::base
+    iree::base::internal::arena
+    iree::io::stream
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_test(
+  NAME
+    elf_object_test
+  SRCS
+    "elf_object_test.cc"
+  DEPS
+    ::elf
+    ::elf_object
     iree::base
     iree::base::internal::arena
     iree::io::stream
