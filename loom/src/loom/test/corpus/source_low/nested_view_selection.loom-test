@@ -1,0 +1,48 @@
+// RUN: roundtrip
+
+// A derived selection retains both the selected buffer and its byte base.
+func.def @derived_selection(%first: buffer, %second: buffer, %third: buffer, %position_input: index, %select_first: i1, %select_pair: i1) -> (i32) {
+  %position = index.assume %position_input [range(%position_input, 1, 2)] : index
+  %base0 = index.constant 4 : offset
+  %base1 = index.constant 8 : offset
+  %base2 = index.constant 12 : offset
+  %first_aligned = buffer.assume.alignment %first {minimum_alignment = 4} : buffer
+  %second_aligned = buffer.assume.alignment %second {minimum_alignment = 4} : buffer
+  %third_aligned = buffer.assume.alignment %third {minimum_alignment = 4} : buffer
+  %first_view = buffer.view %first_aligned[%base0] : buffer -> view<4xi32>
+  %second_view = buffer.view %second_aligned[%base1] : buffer -> view<4xi32>
+  %third_view = buffer.view %third_aligned[%base2] : buffer -> view<1xi32>
+  %pair = scf.select %select_first, %first_view, %second_view : view<4xi32>
+  %refined = view.refine %pair : view<4xi32> -> view<4xi32>
+  %part = view.subview %refined[%position] : view<4xi32> -> view<1xi32>
+  %selected = scf.select %select_pair, %part, %third_view : view<1xi32>
+  %value = view.load %selected[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ====
+
+// Nested selections compose with structured side effects and explicit CFG.
+func.def @selection_with_side_effects(%first: buffer, %second: buffer, %third: buffer, %select_first: i1, %select_pair: i1, %enter: i1, %side: i1, %initial: i32) -> (i32) {
+  %base = index.constant 0 : offset
+  %first_aligned = buffer.assume.alignment %first {minimum_alignment = 4} : buffer
+  %second_aligned = buffer.assume.alignment %second {minimum_alignment = 4} : buffer
+  %third_aligned = buffer.assume.alignment %third {minimum_alignment = 4} : buffer
+  %first_view = buffer.view %first_aligned[%base] : buffer -> view<1xi32>
+  %second_view = buffer.view %second_aligned[%base] : buffer -> view<1xi32>
+  %third_view = buffer.view %third_aligned[%base] : buffer -> view<1xi32>
+  cfg.cond_br %enter, ^producer, ^exit
+^producer:
+  view.store %initial, %third_view[0] : i32, view<1xi32>
+  scf.if %side {
+    view.store %initial, %first_view[0] : i32, view<1xi32>
+  }
+  %pair = scf.select %select_first, %first_view, %second_view : view<1xi32>
+  cfg.br ^consumer
+^consumer:
+  %selected = scf.select %select_pair, %pair, %third_view : view<1xi32>
+  %result = view.load %selected[0] : view<1xi32> -> i32
+  func.return %result : i32
+^exit:
+  func.return %initial : i32
+}

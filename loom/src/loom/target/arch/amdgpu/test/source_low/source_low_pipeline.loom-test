@@ -93,6 +93,10 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
         canonicalize
         cse
       }
+      decompose-view-root-selections
+      if changed {
+        dce
+      }
       scf-to-cfg
       cfg-simplify
       canonicalize
@@ -223,6 +227,10 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
       if changed {
         canonicalize
         cse
+      }
+      decompose-view-root-selections
+      if changed {
+        dce
       }
       scf-to-cfg
       cfg-simplify
@@ -403,6 +411,10 @@ pass.pipeline<module> @__loom_check_prepared_low pipeline {
       if changed {
         canonicalize
         cse
+      }
+      decompose-view-root-selections
+      if changed {
+        dce
       }
       scf-to-cfg
       cfg-simplify

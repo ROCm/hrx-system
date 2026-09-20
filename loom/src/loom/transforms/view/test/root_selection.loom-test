@@ -1,0 +1,277 @@
+// RUN: pass decompose-view-transports,decompose-view-root-selections,dce
+
+// Distinct materializers remain selected even when their storage root is the
+// same, preserving the assumptions attached to the chosen buffer value.
+func.def @different_materializers(%input: buffer, %condition: i1) -> (view<16xf32>) {
+  %base0 = index.constant 0 : offset
+  %base1 = index.constant 64 : offset
+  %first = buffer.assume.noalias %input : buffer
+  %second = buffer.assume.noalias %input : buffer
+  %left = buffer.view %first[%base0] : buffer -> view<16xf32>
+  %right = buffer.view %second[%base1] : buffer -> view<16xf32>
+  %selected = scf.select %condition, %left, %right : view<16xf32>
+  func.return %selected : view<16xf32>
+}
+
+// ----
+func.def @different_materializers(%input: buffer, %condition: i1) -> (view<16xf32>) {
+  %base0 = index.constant 0 : offset
+  %base1 = index.constant 64 : offset
+  %first = buffer.assume.noalias %input : buffer
+  %second = buffer.assume.noalias %input : buffer
+  %selected_root, %selected_offset = scf.if %condition -> (buffer, offset) {
+    scf.yield %first, %base0 : buffer, offset
+  } else {
+    scf.yield %second, %base1 : buffer, offset
+  }
+  %selected = buffer.view %selected_root[%selected_offset] : buffer -> view<16xf32>
+  func.return %selected : view<16xf32>
+}
+
+// ====
+
+func.def @different_roots(%first: buffer, %second: buffer, %condition: i1) -> (view<16xf32>) {
+  %base = index.constant 0 : offset
+  %left = buffer.view %first[%base] : buffer -> view<16xf32>
+  %right = buffer.view %second[%base] : buffer -> view<16xf32>
+  %selected = scf.select %condition, %left, %right : view<16xf32>
+  func.return %selected : view<16xf32>
+}
+
+// ----
+func.def @different_roots(%first: buffer, %second: buffer, %condition: i1) -> (view<16xf32>) {
+  %base = index.constant 0 : offset
+  %selected_root, %selected_offset = scf.if %condition -> (buffer, offset) {
+    scf.yield %first, %base : buffer, offset
+  } else {
+    scf.yield %second, %base : buffer, offset
+  }
+  %selected = buffer.view %selected_root[%selected_offset] : buffer -> view<16xf32>
+  func.return %selected : view<16xf32>
+}
+
+// ====
+
+// Common-root selections remain owned by the earlier offset-only transport.
+func.def @common_root(%input: buffer, %condition: i1) -> (view<16xf32>) {
+  %base0 = index.constant 0 : offset
+  %base1 = index.constant 64 : offset
+  %left = buffer.view %input[%base0] : buffer -> view<16xf32>
+  %right = buffer.view %input[%base1] : buffer -> view<16xf32>
+  %selected = scf.select %condition, %left, %right : view<16xf32>
+  func.return %selected : view<16xf32>
+}
+
+// ----
+func.def @common_root(%input: buffer, %condition: i1) -> (view<16xf32>) {
+  %base0 = index.constant 0 : offset
+  %base1 = index.constant 64 : offset
+  %selected_offset = scf.select %condition, %base0, %base1 : offset
+  %selected = buffer.view %input[%selected_offset] : buffer -> view<16xf32>
+  func.return %selected : view<16xf32>
+}
+
+// ====
+
+// Nested selections reuse the previously selected coordinate instead of
+// reconstructing its provenance from the replacement view.
+func.def @nested_roots(%first: buffer, %second: buffer, %third: buffer, %select_first: i1, %select_third: i1) -> (view<1xi32>) {
+  %base0 = index.constant 0 : offset
+  %base1 = index.constant 4 : offset
+  %base2 = index.constant 8 : offset
+  %first_view = buffer.view %first[%base0] : buffer -> view<1xi32>
+  %second_view = buffer.view %second[%base1] : buffer -> view<1xi32>
+  %third_view = buffer.view %third[%base2] : buffer -> view<1xi32>
+  %pair = scf.select %select_first, %first_view, %second_view : view<1xi32>
+  %selected = scf.select %select_third, %third_view, %pair : view<1xi32>
+  func.return %selected : view<1xi32>
+}
+
+// ----
+func.def @nested_roots(%first: buffer, %second: buffer, %third: buffer, %select_first: i1, %select_third: i1) -> (view<1xi32>) {
+  %base0 = index.constant 0 : offset
+  %base1 = index.constant 4 : offset
+  %base2 = index.constant 8 : offset
+  %pair_root, %pair_offset = scf.if %select_first -> (buffer, offset) {
+    scf.yield %first, %base0 : buffer, offset
+  } else {
+    scf.yield %second, %base1 : buffer, offset
+  }
+  %selected_root, %selected_offset = scf.if %select_third -> (buffer, offset) {
+    scf.yield %third, %base2 : buffer, offset
+  } else {
+    scf.yield %pair_root, %pair_offset : buffer, offset
+  }
+  %selected = buffer.view %selected_root[%selected_offset] : buffer -> view<1xi32>
+  func.return %selected : view<1xi32>
+}
+
+// ====
+
+// A common-root inner selection remains an offset-only source while an outer
+// distinct-root selection carries the full coordinate.
+func.def @nested_common_then_distinct(%first: buffer, %second: buffer, %select_first: i1, %select_second: i1) -> (view<1xi32>) {
+  %base0 = index.constant 0 : offset
+  %base1 = index.constant 4 : offset
+  %base2 = index.constant 8 : offset
+  %first_view0 = buffer.view %first[%base0] : buffer -> view<1xi32>
+  %first_view1 = buffer.view %first[%base1] : buffer -> view<1xi32>
+  %second_view = buffer.view %second[%base2] : buffer -> view<1xi32>
+  %first_selected = scf.select %select_first, %first_view0, %first_view1 : view<1xi32>
+  %selected = scf.select %select_second, %first_selected, %second_view : view<1xi32>
+  func.return %selected : view<1xi32>
+}
+
+// ----
+func.def @nested_common_then_distinct(%first: buffer, %second: buffer, %select_first: i1, %select_second: i1) -> (view<1xi32>) {
+  %base0 = index.constant 0 : offset
+  %base1 = index.constant 4 : offset
+  %base2 = index.constant 8 : offset
+  %first_selected_offset = scf.select %select_first, %base0, %base1 : offset
+  %selected_root, %selected_offset = scf.if %select_second -> (buffer, offset) {
+    scf.yield %first, %first_selected_offset : buffer, offset
+  } else {
+    scf.yield %second, %base2 : buffer, offset
+  }
+  %selected = buffer.view %selected_root[%selected_offset] : buffer -> view<1xi32>
+  func.return %selected : view<1xi32>
+}
+
+// ====
+
+// An unknown layout makes the exact root-relative projection unavailable. The
+// selection remains intact for source-to-low to diagnose by target contract.
+func.def @unavailable_offset(%first: buffer, %second: buffer, %row: index, %condition: i1, %layout: encoding<layout>) -> (view<1xf32, %layout>) {
+  %base = index.constant 0 : offset
+  %first_view = buffer.view %first[%base] : buffer -> view<16xf32, %layout>
+  %second_view = buffer.view %second[%base] : buffer -> view<16xf32, %layout>
+  %first_part = view.subview %first_view[%row] : view<16xf32, %layout> -> view<1xf32, %layout>
+  %second_part = view.subview %second_view[%row] : view<16xf32, %layout> -> view<1xf32, %layout>
+  %selected = scf.select %condition, %first_part, %second_part : view<1xf32, %layout>
+  func.return %selected : view<1xf32, %layout>
+}
+
+// ----
+func.def @unavailable_offset(%first: buffer, %second: buffer, %row: index, %condition: i1, %layout: encoding<layout>) -> (view<1xf32, %layout>) {
+  %base = index.constant 0 : offset
+  %first_view = buffer.view %first[%base] : buffer -> view<16xf32, %layout>
+  %second_view = buffer.view %second[%base] : buffer -> view<16xf32, %layout>
+  %first_part = view.subview %first_view[%row] : view<16xf32, %layout> -> view<1xf32, %layout>
+  %second_part = view.subview %second_view[%row] : view<16xf32, %layout> -> view<1xf32, %layout>
+  %selected = scf.select %condition, %first_part, %second_part : view<1xf32, %layout>
+  func.return %selected : view<1xf32, %layout>
+}
+
+// ====
+
+func.def @derived_selection(%first: buffer, %second: buffer, %third: buffer, %position_input: index, %select_first: i1, %select_pair: i1) -> (i32) {
+  %position = index.assume %position_input [range(%position_input, 1, 2)] : index
+  %base0 = index.constant 4 : offset
+  %base1 = index.constant 8 : offset
+  %base2 = index.constant 12 : offset
+  %first_view = buffer.view %first[%base0] : buffer -> view<4xi32>
+  %second_view = buffer.view %second[%base1] : buffer -> view<4xi32>
+  %third_view = buffer.view %third[%base2] : buffer -> view<1xi32>
+  %pair = scf.select %select_first, %first_view, %second_view : view<4xi32>
+  %refined = view.refine %pair : view<4xi32> -> view<4xi32>
+  %part = view.subview %refined[%position] : view<4xi32> -> view<1xi32>
+  %selected = scf.select %select_pair, %part, %third_view : view<1xi32>
+  %value = view.load %selected[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ----
+func.def @derived_selection(%first: buffer, %second: buffer, %third: buffer, %position_input: index, %select_first: i1, %select_pair: i1) -> (i32) {
+  %position = index.assume %position_input [range(%position_input, 1, 2)] : index
+  %base0 = index.constant 4 : offset
+  %base1 = index.constant 8 : offset
+  %base2 = index.constant 12 : offset
+  %pair_root, %pair_offset = scf.if %select_first -> (buffer, offset) {
+    scf.yield %first, %base0 : buffer, offset
+  } else {
+    scf.yield %second, %base1 : buffer, offset
+  }
+  %22 = index.cast %pair_offset : offset to i64
+  %23 = index.cast %position : index to i64
+  %24 = scalar.constant 4 : i64
+  %25 = scalar.muli %23, %24 : i64
+  %26 = scalar.addi %22, %25 : i64
+  %27 = index.cast %26 : i64 to offset
+  %selected_root, %selected_offset = scf.if %select_pair -> (buffer, offset) {
+    scf.yield %pair_root, %27 : buffer, offset
+  } else {
+    scf.yield %third, %base2 : buffer, offset
+  }
+  %selected = buffer.view %selected_root[%selected_offset] : buffer -> view<1xi32>
+  %value = view.load %selected[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ====
+// RUN: pass cfg-simplify,decompose-view-transports,decompose-view-root-selections,dce
+
+// Folding the alternate edge removes a join argument whose sole remaining
+// producer is stored after the consumer. Dependency order follows the new CFG.
+func.def @fused_block_selections(%first: buffer, %second: buffer, %third: buffer, %select_first: i1, %select_pair: i1, %enter: i1, %side: i1, %initial: i32) -> (i32) {
+  %base = index.constant 0 : offset
+  %always = scalar.constant true : i1
+  %first_aligned = buffer.assume.alignment %first {minimum_alignment = 4} : buffer
+  %second_aligned = buffer.assume.alignment %second {minimum_alignment = 4} : buffer
+  %third_aligned = buffer.assume.alignment %third {minimum_alignment = 4} : buffer
+  %first_view = buffer.view %first_aligned[%base] : buffer -> view<1xi32>
+  %second_view = buffer.view %second_aligned[%base] : buffer -> view<1xi32>
+  %third_view = buffer.view %third_aligned[%base] : buffer -> view<1xi32>
+  cfg.cond_br %enter, ^producer, ^alternate
+^alternate:
+  cfg.cond_br %always, ^exit, ^unused
+^unused:
+  cfg.br ^consumer(%third_view: view<1xi32>)
+^consumer(%chosen: view<1xi32>):
+  %selected = scf.select %select_pair, %chosen, %third_view : view<1xi32>
+  %result = view.load %selected[0] : view<1xi32> -> i32
+  func.return %result : i32
+^producer:
+  view.store %initial, %third_view[0] : i32, view<1xi32>
+  %pair = scf.select %select_first, %first_view, %second_view : view<1xi32>
+  cfg.cond_br %side, ^side_effect, ^direct
+^direct:
+  cfg.br ^consumer(%pair: view<1xi32>)
+^side_effect:
+  view.store %initial, %first_view[0] : i32, view<1xi32>
+  cfg.br ^consumer(%pair: view<1xi32>)
+^exit:
+  func.return %initial : i32
+}
+
+// ----
+func.def @fused_block_selections(%first: buffer, %second: buffer, %third: buffer, %select_first: i1, %select_pair: i1, %enter: i1, %side: i1, %initial: i32) -> (i32) {
+  %base = index.constant 0 : offset
+  %first_aligned = buffer.assume.alignment %first {minimum_alignment = 4} : buffer
+  %second_aligned = buffer.assume.alignment %second {minimum_alignment = 4} : buffer
+  %third_aligned = buffer.assume.alignment %third {minimum_alignment = 4} : buffer
+  %first_view = buffer.view %first_aligned[%base] : buffer -> view<1xi32>
+  %third_view = buffer.view %third_aligned[%base] : buffer -> view<1xi32>
+  cfg.cond_br %enter, ^producer, ^alternate
+^alternate:
+  func.return %initial : i32
+^producer:
+  view.store %initial, %third_view[0] : i32, view<1xi32>
+  %pair_root, %pair_offset = scf.if %select_first -> (buffer, offset) {
+    scf.yield %first_aligned, %base : buffer, offset
+  } else {
+    scf.yield %second_aligned, %base : buffer, offset
+  }
+  cfg.cond_br %side, ^side_effect, ^consumer
+^consumer:
+  %selected_root, %selected_offset = scf.if %select_pair -> (buffer, offset) {
+    scf.yield %pair_root, %pair_offset : buffer, offset
+  } else {
+    scf.yield %third_aligned, %base : buffer, offset
+  }
+  %selected = buffer.view %selected_root[%selected_offset] : buffer -> view<1xi32>
+  %result = view.load %selected[0] : view<1xi32> -> i32
+  func.return %result : i32
+^side_effect:
+  view.store %initial, %first_view[0] : i32, view<1xi32>
+  cfg.br ^consumer
+}

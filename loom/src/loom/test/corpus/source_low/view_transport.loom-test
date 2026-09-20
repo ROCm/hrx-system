@@ -13,6 +13,20 @@ func.def @wide_subview_selection(%input: buffer, %byte_base0: offset, %condition
 
 // ====
 
+func.def @distinct_root_selection(%first: buffer, %second: buffer, %condition: i1) -> (i32) {
+  %first_offset = index.constant 4 : offset
+  %second_offset = index.constant 8 : offset
+  %first_aligned = buffer.assume.alignment %first {minimum_alignment = 4} : buffer
+  %second_aligned = buffer.assume.alignment %second {minimum_alignment = 4} : buffer
+  %first_view = buffer.view %first_aligned[%first_offset] : buffer -> view<1xi32>
+  %second_view = buffer.view %second_aligned[%second_offset] : buffer -> view<1xi32>
+  %selected = scf.select %condition, %first_view, %second_view : view<1xi32>
+  %value = view.load %selected[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ====
+
 func.def public @rotate_buffer_views(%input: buffer, %count_input: index, %seed: i32) -> (i32) {
   %count = index.assume %count_input [range(%count_input, 0, 257)] : index
   %begin = index.constant 0 : index

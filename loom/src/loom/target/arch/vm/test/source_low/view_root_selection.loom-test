@@ -1,0 +1,35 @@
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+
+func.def target(@target) @select_entry_or_private(%input: buffer, %condition: i1) -> (i32) {
+  %input_offset = index.constant 4 : offset
+  %scratch_offset = index.constant 0 : offset
+  %bytes = index.constant 4 : offset
+  %initial = scalar.constant 7 : i32
+  %scratch = buffer.alloca<private> align(4) %bytes : buffer
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%input_offset] : buffer -> view<1xi32>
+  %scratch_view = buffer.view %scratch[%scratch_offset] : buffer -> view<1xi32>
+  view.store %initial, %scratch_view[0] : i32, view<1xi32>
+  %selected = scf.select %condition, %input_view, %scratch_view : view<1xi32>
+  %value = view.load %selected[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @select_entry_or_private(%input_aligned: reg<vm.ref : buffer>, %condition: reg<vm.value : i1>) -> (reg<vm.value : i32>) asm {
+  %input_offset = constant.i64 4
+  %scratch_offset = constant.i64 0
+  %initial = constant.i32 7
+  %scratch_view = buffer.allocate %input_offset, 2 : reg<vm.ref : buffer>
+  buffer.store %scratch_view, %scratch_offset, %scratch_offset, %initial, 0, 8
+  low.cond_br %condition, ^_bb1, ^_bb2 : reg<vm.value : i1>
+^_bb1:
+  low.br ^_bb3(%input_aligned: reg<vm.ref : buffer>, %input_offset: reg<vm.value : i64>)
+^_bb2:
+  low.br ^_bb3(%scratch_view: reg<vm.ref : buffer>, %scratch_offset: reg<vm.value : i64>)
+^_bb3(%selected: reg<vm.ref : buffer>, %selected_offset: reg<vm.value : i64>):
+  %value = buffer.load %selected, %selected_offset, %selected_offset, 0, 8 : reg<vm.value : i32>
+  return %value
+}

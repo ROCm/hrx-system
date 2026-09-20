@@ -1,0 +1,104 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/nested_view_selection.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+
+func.def target(@target) @derived_selection(%first: buffer, %second: buffer, %third: buffer, %position_input: index, %select_first: i1, %select_pair: i1) -> (i32) {
+  %position = index.assume %position_input [range(%position_input, 1, 2)] : index
+  %base0 = index.constant 4 : offset
+  %base1 = index.constant 8 : offset
+  %base2 = index.constant 12 : offset
+  %first_aligned = buffer.assume.alignment %first {minimum_alignment = 4} : buffer
+  %second_aligned = buffer.assume.alignment %second {minimum_alignment = 4} : buffer
+  %third_aligned = buffer.assume.alignment %third {minimum_alignment = 4} : buffer
+  %first_view = buffer.view %first_aligned[%base0] : buffer -> view<4xi32>
+  %second_view = buffer.view %second_aligned[%base1] : buffer -> view<4xi32>
+  %third_view = buffer.view %third_aligned[%base2] : buffer -> view<1xi32>
+  %pair = scf.select %select_first, %first_view, %second_view : view<4xi32>
+  %refined = view.refine %pair : view<4xi32> -> view<4xi32>
+  %part = view.subview %refined[%position] : view<4xi32> -> view<1xi32>
+  %selected = scf.select %select_pair, %part, %third_view : view<1xi32>
+  %value = view.load %selected[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @derived_selection(%first_aligned: reg<vm.ref : buffer>, %second_aligned: reg<vm.ref : buffer>, %third_aligned: reg<vm.ref : buffer>, %position: reg<vm.value : i64>, %select_first: reg<vm.value : i1>, %select_pair: reg<vm.value : i1>) -> (reg<vm.value : i32>) asm {
+  %base0 = constant.i64 4
+  %base1 = constant.i64 8
+  %base2 = constant.i64 12
+  low.cond_br %select_first, ^_bb1, ^_bb2 : reg<vm.value : i1>
+^_bb1:
+  low.br ^_bb3(%first_aligned: reg<vm.ref : buffer>, %base0: reg<vm.value : i64>)
+^_bb2:
+  low.br ^_bb3(%second_aligned: reg<vm.ref : buffer>, %base1: reg<vm.value : i64>)
+^_bb3(%pair_root: reg<vm.ref : buffer>, %pair_offset: reg<vm.value : i64>):
+  %54 = constant.i64 2
+  %55 = integer.shift.left.i64 %position, %54
+  %56 = integer.add.i64 %pair_offset, %55
+  low.cond_br %select_pair, ^_bb4, ^_bb5 : reg<vm.value : i1>
+^_bb4:
+  low.br ^_bb6(%pair_root: reg<vm.ref : buffer>, %56: reg<vm.value : i64>)
+^_bb5:
+  low.br ^_bb6(%third_aligned: reg<vm.ref : buffer>, %base2: reg<vm.value : i64>)
+^_bb6(%selected: reg<vm.ref : buffer>, %selected_offset: reg<vm.value : i64>):
+  %value = buffer.load %selected, %selected_offset, %selected_offset, 0, 8 : reg<vm.value : i32>
+  return %value
+}
+
+// ====
+
+vm.target<core> @target
+
+func.def target(@target) @selection_with_side_effects(%first: buffer, %second: buffer, %third: buffer, %select_first: i1, %select_pair: i1, %enter: i1, %side: i1, %initial: i32) -> (i32) {
+  %base = index.constant 0 : offset
+  %first_aligned = buffer.assume.alignment %first {minimum_alignment = 4} : buffer
+  %second_aligned = buffer.assume.alignment %second {minimum_alignment = 4} : buffer
+  %third_aligned = buffer.assume.alignment %third {minimum_alignment = 4} : buffer
+  %first_view = buffer.view %first_aligned[%base] : buffer -> view<1xi32>
+  %second_view = buffer.view %second_aligned[%base] : buffer -> view<1xi32>
+  %third_view = buffer.view %third_aligned[%base] : buffer -> view<1xi32>
+  cfg.cond_br %enter, ^producer, ^exit
+^producer:
+  view.store %initial, %third_view[0] : i32, view<1xi32>
+  scf.if %side {
+    view.store %initial, %first_view[0] : i32, view<1xi32>
+  }
+  %pair = scf.select %select_first, %first_view, %second_view : view<1xi32>
+  cfg.br ^consumer
+^consumer:
+  %selected = scf.select %select_pair, %pair, %third_view : view<1xi32>
+  %result = view.load %selected[0] : view<1xi32> -> i32
+  func.return %result : i32
+^exit:
+  func.return %initial : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @selection_with_side_effects(%first_view: reg<vm.ref : buffer>, %second_aligned: reg<vm.ref : buffer>, %third_view: reg<vm.ref : buffer>, %select_first: reg<vm.value : i1>, %select_pair: reg<vm.value : i1>, %enter: reg<vm.value : i1>, %side: reg<vm.value : i1>, %initial: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  low.cond_br %enter, ^producer, ^exit : reg<vm.value : i1>
+^producer:
+  %40 = constant.i64 0
+  buffer.store %third_view, %40, %40, %initial, 0, 8
+  low.cond_br %side, ^_bb2, ^_bb3 : reg<vm.value : i1>
+^_bb2:
+  buffer.store %first_view, %40, %40, %initial, 0, 8
+  low.br ^_bb3
+^_bb3:
+  low.cond_br %select_first, ^_bb4, ^_bb5 : reg<vm.value : i1>
+^_bb4:
+  low.br ^_bb6(%first_view: reg<vm.ref : buffer>)
+^_bb5:
+  low.br ^_bb6(%second_aligned: reg<vm.ref : buffer>)
+^_bb6(%pair_root: reg<vm.ref : buffer>):
+  low.cond_br %select_pair, ^_bb7, ^_bb8 : reg<vm.value : i1>
+^_bb7:
+  low.br ^_bb9(%pair_root: reg<vm.ref : buffer>)
+^_bb8:
+  low.br ^_bb9(%third_view: reg<vm.ref : buffer>)
+^_bb9(%selected: reg<vm.ref : buffer>):
+  %result = buffer.load %selected, %40, %40, 0, 8 : reg<vm.value : i32>
+  return %result
+^exit:
+  return %initial
+}

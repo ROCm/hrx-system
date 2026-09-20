@@ -85,6 +85,14 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
       cfg-converge
     }
   }
+  for func {
+    where target {
+      decompose-view-root-selections
+      if changed {
+        dce
+      }
+    }
+  }
   source-to-low(control-flow = "structured-low")
   inline-callables(policy = "target")
   for func {

@@ -382,6 +382,11 @@ static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
         .function_run = loom_dce_run,
     },
     {
+        .key = IREE_SVL("decompose-view-root-selections"),
+        .info = loom_decompose_view_root_selections_pass_info,
+        .function_run = loom_decompose_view_root_selections_run,
+    },
+    {
         .key = IREE_SVL("decompose-view-transports"),
         .info = loom_decompose_view_transports_pass_info,
         .function_run = loom_decompose_view_transports_run,

@@ -1,0 +1,103 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/nested_view_selection.loom-test
+// RUN: emit source-low output=low
+
+llvmir.target<object> @target {triple = "x86_64-unknown-linux-gnu"}
+
+func.def target(@target) @derived_selection(%first: buffer, %second: buffer, %third: buffer, %position_input: index, %select_first: i1, %select_pair: i1) -> (i32) {
+  %position = index.assume %position_input [range(%position_input, 1, 2)] : index
+  %base0 = index.constant 4 : offset
+  %base1 = index.constant 8 : offset
+  %base2 = index.constant 12 : offset
+  %first_aligned = buffer.assume.alignment %first {minimum_alignment = 4} : buffer
+  %second_aligned = buffer.assume.alignment %second {minimum_alignment = 4} : buffer
+  %third_aligned = buffer.assume.alignment %third {minimum_alignment = 4} : buffer
+  %first_view = buffer.view %first_aligned[%base0] : buffer -> view<4xi32>
+  %second_view = buffer.view %second_aligned[%base1] : buffer -> view<4xi32>
+  %third_view = buffer.view %third_aligned[%base2] : buffer -> view<1xi32>
+  %pair = scf.select %select_first, %first_view, %second_view : view<4xi32>
+  %refined = view.refine %pair : view<4xi32> -> view<4xi32>
+  %part = view.subview %refined[%position] : view<4xi32> -> view<1xi32>
+  %selected = scf.select %select_pair, %part, %third_view : view<1xi32>
+  %value = view.load %selected[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @derived_selection(%first_aligned: reg<llvmir.ptr>, %second_aligned: reg<llvmir.ptr>, %third_aligned: reg<llvmir.ptr>, %position: reg<llvmir.i64>, %select_first: reg<llvmir.i1>, %select_pair: reg<llvmir.i1>) -> (reg<llvmir.i32>) asm {
+  %base0 = const.i64 4
+  %base1 = const.i64 8
+  %base2 = const.i64 12
+  low.cond_br %select_first, ^_bb1, ^_bb2 : reg<llvmir.i1>
+^_bb1:
+  low.br ^_bb3(%first_aligned: reg<llvmir.ptr>, %base0: reg<llvmir.i64>)
+^_bb2:
+  low.br ^_bb3(%second_aligned: reg<llvmir.ptr>, %base1: reg<llvmir.i64>)
+^_bb3(%pair_root: reg<llvmir.ptr>, %pair_offset: reg<llvmir.i64>):
+  %54 = const.i64 2
+  %55 = shl.i64 %position, %54
+  %56 = add.i64 %pair_offset, %55
+  low.cond_br %select_pair, ^_bb4, ^_bb5 : reg<llvmir.i1>
+^_bb4:
+  low.br ^_bb6(%pair_root: reg<llvmir.ptr>, %56: reg<llvmir.i64>)
+^_bb5:
+  low.br ^_bb6(%third_aligned: reg<llvmir.ptr>, %base2: reg<llvmir.i64>)
+^_bb6(%selected: reg<llvmir.ptr>, %selected_offset: reg<llvmir.i64>):
+  %value = load.indexed.i32 %selected, %selected_offset, 0, 1
+  return %value
+}
+
+// ====
+
+llvmir.target<object> @target {triple = "x86_64-unknown-linux-gnu"}
+
+func.def target(@target) @selection_with_side_effects(%first: buffer, %second: buffer, %third: buffer, %select_first: i1, %select_pair: i1, %enter: i1, %side: i1, %initial: i32) -> (i32) {
+  %base = index.constant 0 : offset
+  %first_aligned = buffer.assume.alignment %first {minimum_alignment = 4} : buffer
+  %second_aligned = buffer.assume.alignment %second {minimum_alignment = 4} : buffer
+  %third_aligned = buffer.assume.alignment %third {minimum_alignment = 4} : buffer
+  %first_view = buffer.view %first_aligned[%base] : buffer -> view<1xi32>
+  %second_view = buffer.view %second_aligned[%base] : buffer -> view<1xi32>
+  %third_view = buffer.view %third_aligned[%base] : buffer -> view<1xi32>
+  cfg.cond_br %enter, ^producer, ^exit
+^producer:
+  view.store %initial, %third_view[0] : i32, view<1xi32>
+  scf.if %side {
+    view.store %initial, %first_view[0] : i32, view<1xi32>
+  }
+  %pair = scf.select %select_first, %first_view, %second_view : view<1xi32>
+  cfg.br ^consumer
+^consumer:
+  %selected = scf.select %select_pair, %pair, %third_view : view<1xi32>
+  %result = view.load %selected[0] : view<1xi32> -> i32
+  func.return %result : i32
+^exit:
+  func.return %initial : i32
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @selection_with_side_effects(%first_view: reg<llvmir.ptr>, %second_aligned: reg<llvmir.ptr>, %third_view: reg<llvmir.ptr>, %select_first: reg<llvmir.i1>, %select_pair: reg<llvmir.i1>, %enter: reg<llvmir.i1>, %side: reg<llvmir.i1>, %initial: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm {
+  low.cond_br %enter, ^producer, ^exit : reg<llvmir.i1>
+^producer:
+  store.i32 %initial, %third_view, 0
+  low.cond_br %side, ^_bb2, ^_bb3 : reg<llvmir.i1>
+^_bb2:
+  store.i32 %initial, %first_view, 0
+  low.br ^_bb3
+^_bb3:
+  low.cond_br %select_first, ^_bb4, ^_bb5 : reg<llvmir.i1>
+^_bb4:
+  low.br ^_bb6(%first_view: reg<llvmir.ptr>)
+^_bb5:
+  low.br ^_bb6(%second_aligned: reg<llvmir.ptr>)
+^_bb6(%pair_root: reg<llvmir.ptr>):
+  low.cond_br %select_pair, ^_bb7, ^_bb8 : reg<llvmir.i1>
+^_bb7:
+  low.br ^_bb9(%pair_root: reg<llvmir.ptr>)
+^_bb8:
+  low.br ^_bb9(%third_view: reg<llvmir.ptr>)
+^_bb9(%selected: reg<llvmir.ptr>):
+  %result = load.i32 %selected, 0
+  return %result
+^exit:
+  return %initial
+}

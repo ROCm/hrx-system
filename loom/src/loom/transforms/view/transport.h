@@ -28,6 +28,13 @@ iree_status_t loom_decompose_view_transports_run(loom_pass_t* pass,
                                                  loom_module_t* module,
                                                  loom_func_like_t function);
 
+// Decomposes view selections without a common materializing buffer into a
+// correlated materializing-buffer and root-relative-offset selection.
+const loom_pass_info_t* loom_decompose_view_root_selections_pass_info(void);
+
+iree_status_t loom_decompose_view_root_selections_run(
+    loom_pass_t* pass, loom_module_t* module, loom_func_like_t function);
+
 #ifdef __cplusplus
 }
 #endif
