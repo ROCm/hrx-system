@@ -389,6 +389,62 @@ TEST(LowAllocationStorageTest, ResolvesExplicitAggregateRegisterViews) {
   EXPECT_EQ(pressure_extent, 4u);
 }
 
+TEST(LowAllocationStorageTest, FindsDirectPhysicalAliasesAcrossClasses) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_test_low_core_descriptor_set();
+  uint16_t broad_class = LOOM_LOW_REG_CLASS_NONE;
+  uint16_t narrow_class = LOOM_LOW_REG_CLASS_NONE;
+  ASSERT_TRUE(loom_low_descriptor_set_lookup_register_class(
+      descriptor_set, IREE_SV("test.explicit32"), &broad_class, nullptr));
+  ASSERT_TRUE(loom_low_descriptor_set_lookup_register_class(
+      descriptor_set, IREE_SV("test.packed.narrow"), &narrow_class, nullptr));
+  for (uint16_t ordinal = 0; ordinal < 4; ++ordinal) {
+    const uint32_t physical_register =
+        loom_low_descriptor_set_physical_register_candidate(
+            descriptor_set, broad_class, ordinal);
+    const auto reference =
+        Assignment(broad_class, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+                   physical_register, /*location_count=*/1);
+    uint32_t unit_register = UINT32_MAX;
+    ASSERT_TRUE(loom_low_allocation_storage_assignment_unit_physical_register(
+        descriptor_set, &reference, 0, &unit_register));
+    EXPECT_EQ(unit_register, physical_register);
+    ASSERT_EQ(loom_low_allocation_storage_assignment_atomic_unit_count(
+                  descriptor_set, &reference),
+              1u);
+    uint32_t storage_key = UINT32_MAX;
+    uint32_t atomic_unit = UINT32_MAX;
+    loom_low_allocation_storage_assignment_atomic_unit(
+        descriptor_set, &reference, 0, &storage_key, &atomic_unit);
+    EXPECT_EQ(storage_key, 0u);
+    EXPECT_EQ(atomic_unit, ordinal ^ 1u);
+    for (uint16_t other_ordinal = 0; other_ordinal < 4; ++other_ordinal) {
+      const auto other = Assignment(
+          broad_class, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          loom_low_descriptor_set_physical_register_candidate(
+              descriptor_set, broad_class, other_ordinal),
+          /*location_count=*/1);
+      EXPECT_EQ(loom_low_allocation_storage_assignment_ranges_equal(
+                    descriptor_set, &reference, &other),
+                ordinal == other_ordinal);
+      EXPECT_EQ(loom_low_allocation_storage_assignment_ranges_overlap(
+                    descriptor_set, &reference, &other),
+                ordinal == other_ordinal);
+    }
+    for (uint16_t candidate_class : {broad_class, narrow_class}) {
+      uint32_t alias = UINT32_MAX;
+      const bool found =
+          loom_low_allocation_storage_find_subrange_alias_location(
+              descriptor_set, candidate_class,
+              LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+              /*candidate_location_count=*/1, /*candidate_unit_start=*/0,
+              &reference, /*reference_unit_start=*/0, /*unit_count=*/1, &alias);
+      EXPECT_EQ(found, candidate_class == broad_class || ordinal < 2);
+      EXPECT_EQ(alias, found ? physical_register : UINT32_MAX);
+    }
+  }
+}
+
 TEST(LowAllocationStorageTest, MatchesExplicitRegisterCandidateOrdinals) {
   const loom_low_descriptor_set_t* descriptor_set =
       loom_test_low_core_descriptor_set();

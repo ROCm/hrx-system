@@ -151,6 +151,10 @@ bool loom_low_allocation_storage_assignment_unit_physical_register(
       unit_index >= assignment->location_count) {
     return false;
   }
+  if (assignment->location_count == 1) {
+    *out_physical_register_id = assignment->location_base;
+    return true;
+  }
   loom_low_allocation_explicit_register_view_t view;
   if (!loom_low_allocation_storage_resolve_explicit_register_view(
           descriptor_set, assignment->descriptor_reg_class_id,
@@ -196,6 +200,15 @@ bool loom_low_allocation_storage_find_subrange_alias_location(
   if (candidate_is_explicit || reference_is_explicit) {
     if (!candidate_is_explicit || !reference_is_explicit) {
       return false;
+    }
+    // A direct candidate already names the exact storage. Candidates within
+    // one class are disjoint, so no other candidate can be a better alias.
+    if (candidate_location_count == 1 && reference->location_count == 1 &&
+        loom_low_descriptor_set_find_physical_register_candidate(
+            descriptor_set, candidate_reg_class_id, reference->location_base,
+            /*out_candidate_ordinal=*/NULL)) {
+      *out_candidate_location_base = reference->location_base;
+      return true;
     }
     uint32_t best_candidate_ordinal = UINT32_MAX;
     for (uint32_t physical_register_id = 0;
@@ -471,14 +484,8 @@ uint32_t loom_low_allocation_storage_assignment_atomic_unit_count(
           descriptor_set, assignment)) {
     return assignment->location_count;
   }
-  loom_low_allocation_explicit_register_view_t view;
-  const bool resolved =
-      loom_low_allocation_storage_resolve_explicit_register_view(
-          descriptor_set, assignment->descriptor_reg_class_id,
-          assignment->location_base, assignment->location_count, UINT32_MAX,
-          &view);
-  IREE_ASSERT_TRUE(resolved);
-  return view.atomic_unit_count;
+  return descriptor_set->physical_registers[assignment->location_base]
+      .atomic_unit_count;
 }
 
 void loom_low_allocation_storage_assignment_atomic_unit(
@@ -493,16 +500,12 @@ void loom_low_allocation_storage_assignment_atomic_unit(
     *out_location = assignment->location_base + atomic_unit_ordinal;
     return;
   }
-  loom_low_allocation_explicit_register_view_t view;
-  const bool resolved =
-      loom_low_allocation_storage_resolve_explicit_register_view(
-          descriptor_set, assignment->descriptor_reg_class_id,
-          assignment->location_base, assignment->location_count, UINT32_MAX,
-          &view);
-  IREE_ASSERT_TRUE(resolved);
-  IREE_ASSERT_LT(atomic_unit_ordinal, view.atomic_unit_count);
+  const loom_low_physical_register_t* physical_register =
+      &descriptor_set->physical_registers[assignment->location_base];
   *out_storage_key = 0;
-  *out_location = view.atomic_units[atomic_unit_ordinal];
+  *out_location =
+      descriptor_set->physical_register_atomic_units
+          [physical_register->atomic_unit_start + atomic_unit_ordinal];
 }
 
 uint32_t loom_low_allocation_storage_assignment_pressure_extent(
@@ -573,6 +576,11 @@ bool loom_low_allocation_storage_assignment_ranges_equal(
                                                             rhs)) {
     return false;
   }
+  // Direct candidates in one class have disjoint storage by construction.
+  if (lhs->descriptor_reg_class_id == rhs->descriptor_reg_class_id &&
+      lhs->location_count == 1 && rhs->location_count == 1) {
+    return lhs->location_base == rhs->location_base;
+  }
   const bool lhs_is_explicit =
       loom_low_allocation_storage_assignment_uses_explicit_physical_register(
           descriptor_set, lhs);
@@ -583,9 +591,16 @@ bool loom_low_allocation_storage_assignment_ranges_equal(
     if (!lhs_is_explicit || !rhs_is_explicit) {
       return false;
     }
-    return loom_low_allocation_storage_explicit_subranges_equal(
-        descriptor_set, lhs, 0, lhs->location_count, rhs, 0,
-        rhs->location_count);
+    const loom_low_physical_register_t* lhs_register =
+        &descriptor_set->physical_registers[lhs->location_base];
+    const loom_low_physical_register_t* rhs_register =
+        &descriptor_set->physical_registers[rhs->location_base];
+    return lhs_register->atomic_unit_count == rhs_register->atomic_unit_count &&
+           memcmp(descriptor_set->physical_register_atomic_units +
+                      lhs_register->atomic_unit_start,
+                  descriptor_set->physical_register_atomic_units +
+                      rhs_register->atomic_unit_start,
+                  lhs_register->atomic_unit_count * sizeof(uint16_t)) == 0;
   }
   return lhs->location_base == rhs->location_base &&
          lhs->location_count == rhs->location_count;
@@ -620,6 +635,10 @@ bool loom_low_allocation_storage_assignment_ranges_overlap(
                                                             rhs)) {
     return false;
   }
+  if (lhs->descriptor_reg_class_id == rhs->descriptor_reg_class_id &&
+      lhs->location_count == 1 && rhs->location_count == 1) {
+    return lhs->location_base == rhs->location_base;
+  }
   const bool lhs_is_explicit =
       loom_low_allocation_storage_assignment_uses_explicit_physical_register(
           descriptor_set, lhs);
@@ -630,9 +649,17 @@ bool loom_low_allocation_storage_assignment_ranges_overlap(
     if (!lhs_is_explicit || !rhs_is_explicit) {
       return false;
     }
-    return loom_low_allocation_storage_explicit_subranges_overlap(
-        descriptor_set, lhs, 0, lhs->location_count, rhs, 0,
-        rhs->location_count);
+    const loom_low_physical_register_t* lhs_register =
+        &descriptor_set->physical_registers[lhs->location_base];
+    const loom_low_physical_register_t* rhs_register =
+        &descriptor_set->physical_registers[rhs->location_base];
+    return loom_low_allocation_storage_sorted_atomic_units_overlap(
+        descriptor_set->physical_register_atomic_units +
+            lhs_register->atomic_unit_start,
+        lhs_register->atomic_unit_count,
+        descriptor_set->physical_register_atomic_units +
+            rhs_register->atomic_unit_start,
+        rhs_register->atomic_unit_count);
   }
   const uint64_t lhs_begin = lhs->location_base;
   const uint64_t rhs_begin = rhs->location_base;
