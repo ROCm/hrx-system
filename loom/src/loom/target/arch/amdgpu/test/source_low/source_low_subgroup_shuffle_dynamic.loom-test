@@ -32,16 +32,16 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %c3 = s_mov_b32 3
   %biased_lane = v_add_u32 %c3, %lane
-  %27 = v_mov_b32 15
-  %source_lane_i32 = v_and_b32 %biased_lane, %27
-  %29 = v_lshlrev_b32_src0_inline %lane, 2
-  %value = global_load_b32_saddr %29, %input_view
-  %31 = v_and_b32_lit %lane, 4294967280
-  %32 = v_or_b32 %31, %source_lane_i32
-  %35 = v_lshlrev_b32_src0_inline %32, 2
-  %shuffled = ds_bpermute_b32 %35, %value
-  %37 = v_lshlrev_b32_src0_inline %lane, 2
-  global_store_b32_saddr %37, %shuffled, %output_view
+  %26 = s_mov_b32 15
+  %source_lane_i32 = v_and_b32 %26, %biased_lane
+  %28 = v_lshlrev_b32_src0_inline %lane, 2
+  %value = global_load_b32_saddr %28, %input_view
+  %30 = v_and_b32_lit %lane, 4294967280
+  %31 = v_or_b32 %30, %source_lane_i32
+  %34 = v_lshlrev_b32_src0_inline %31, 2
+  %shuffled = ds_bpermute_b32 %34, %value
+  %36 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %36, %shuffled, %output_view
   return
 }
 
@@ -79,15 +79,15 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %c3 = s_mov_b32 3
   %biased_lane = v_add_u32 %c3, %lane
-  %27 = v_mov_b32 15
-  %source_lane_i32 = v_and_b32 %biased_lane, %27
-  %29 = v_lshlrev_b32_src0_inline %lane, 2
-  %value = global_load_b32_saddr %29, %input_view
-  %31 = v_xor_b32 %lane, %source_lane_i32
-  %34 = v_lshlrev_b32_src0_inline %31, 2
-  %shuffled = ds_bpermute_b32 %34, %value
-  %36 = v_lshlrev_b32_src0_inline %lane, 2
-  global_store_b32_saddr %36, %shuffled, %output_view
+  %26 = s_mov_b32 15
+  %source_lane_i32 = v_and_b32 %26, %biased_lane
+  %28 = v_lshlrev_b32_src0_inline %lane, 2
+  %value = global_load_b32_saddr %28, %input_view
+  %30 = v_xor_b32 %lane, %source_lane_i32
+  %33 = v_lshlrev_b32_src0_inline %30, 2
+  %shuffled = ds_bpermute_b32 %33, %value
+  %35 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %35, %shuffled, %output_view
   return
 }
 
@@ -127,23 +127,23 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %c3 = s_mov_b32 3
   %biased_lane = v_add_u32 %c3, %lane
-  %27 = v_mov_b32 15
-  %source_lane_i32 = v_and_b32 %biased_lane, %27
-  %29 = v_lshlrev_b32_src0_inline %lane, 2
-  %value = global_load_b32_saddr %29, %input_view
-  %31 = v_and_b32_src0_inline %lane, 15
-  %32 = v_sub_nc_u32 %lane, %source_lane_i32
-  %valid = v_cmp_ge_u32 %31, %source_lane_i32
-  %34 = v_lshlrev_b32_src0_inline %32, 2
-  %shuffled = ds_bpermute_b32 %34, %value
-  %36, %37 = s_and_saveexec_b64 %valid
-  low.cond_br %37, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+  %26 = s_mov_b32 15
+  %source_lane_i32 = v_and_b32 %26, %biased_lane
+  %28 = v_lshlrev_b32_src0_inline %lane, 2
+  %value = global_load_b32_saddr %28, %input_view
+  %30 = v_and_b32_src0_inline %lane, 15
+  %31 = v_sub_nc_u32 %lane, %source_lane_i32
+  %valid = v_cmp_ge_u32 %30, %source_lane_i32
+  %33 = v_lshlrev_b32_src0_inline %31, 2
+  %shuffled = ds_bpermute_b32 %33, %value
+  %35, %36 = s_and_saveexec_b64 %valid
+  low.cond_br %36, ^_bb1, ^_bb2 : reg<amdgpu.scc>
 ^_bb1:
-  %38 = v_lshlrev_b32_src0_inline %lane, 2
-  global_store_b32_saddr %38, %shuffled, %output_view
+  %37 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %37, %shuffled, %output_view
   low.br ^_bb2
 ^_bb2:
-  s_mov_b64_exec %36
+  s_mov_b64_exec %35
   return
 }
 
@@ -183,24 +183,24 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %c3 = s_mov_b32 3
   %biased_lane = v_add_u32 %c3, %lane
-  %27 = v_mov_b32 15
-  %source_lane_i32 = v_and_b32 %biased_lane, %27
-  %29 = v_lshlrev_b32_src0_inline %lane, 2
-  %value = global_load_b32_saddr %29, %input_view
-  %31 = v_add_u32 %lane, %source_lane_i32
-  %32 = v_and_b32_src0_inline %lane, 15
-  %33 = v_add_u32 %32, %source_lane_i32
-  %34 = v_mov_b32 16
-  %valid = v_cmp_lt_u32 %33, %34
-  %36 = v_lshlrev_b32_src0_inline %31, 2
-  %shuffled = ds_bpermute_b32 %36, %value
-  %38, %39 = s_and_saveexec_b64 %valid
-  low.cond_br %39, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+  %26 = s_mov_b32 15
+  %source_lane_i32 = v_and_b32 %26, %biased_lane
+  %28 = v_lshlrev_b32_src0_inline %lane, 2
+  %value = global_load_b32_saddr %28, %input_view
+  %30 = v_add_u32 %lane, %source_lane_i32
+  %31 = v_and_b32_src0_inline %lane, 15
+  %32 = v_add_u32 %31, %source_lane_i32
+  %33 = v_mov_b32 16
+  %valid = v_cmp_lt_u32 %32, %33
+  %35 = v_lshlrev_b32_src0_inline %30, 2
+  %shuffled = ds_bpermute_b32 %35, %value
+  %37, %38 = s_and_saveexec_b64 %valid
+  low.cond_br %38, ^_bb1, ^_bb2 : reg<amdgpu.scc>
 ^_bb1:
-  %40 = v_lshlrev_b32_src0_inline %lane, 2
-  global_store_b32_saddr %40, %shuffled, %output_view
+  %39 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %39, %shuffled, %output_view
   low.br ^_bb2
 ^_bb2:
-  s_mov_b64_exec %38
+  s_mov_b64_exec %37
   return
 }

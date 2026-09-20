@@ -564,6 +564,7 @@ loom_check_test_suite(
         "//loom/src/loom/test/corpus/source_low:numeric_conversion_wide.loom-test",
         "//loom/src/loom/test/corpus/source_low:numeric_f32_memory.loom-test",
         "//loom/src/loom/test/corpus/source_low:numeric_i32_memory.loom-test",
+        "//loom/src/loom/test/corpus/source_low:numeric_index_operands.loom-test",
         "//loom/src/loom/test/corpus/source_low:numeric_minmax.loom-test",
         "//loom/src/loom/test/corpus/source_low:numeric_offset_wide.loom-test",
         "//loom/src/loom/test/corpus/source_low:numeric_reduce.loom-test",

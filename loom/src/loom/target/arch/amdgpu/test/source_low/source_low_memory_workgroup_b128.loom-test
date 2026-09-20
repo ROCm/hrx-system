@@ -111,15 +111,15 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %42 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
   %shifted = v_lshrrev_b32_lit %lane, 4
-  %46 = v_mov_b32 3
-  %swizzle_bits = v_and_b32 %shifted, %46
+  %mask = s_mov_b32 3
+  %swizzle_bits = v_and_b32 %mask, %shifted
   %swizzled = v_xor_b32 %lane, %swizzle_bits
-  %49 = v_lshlrev_b32_src0_inline %lane, 4
-  %loaded = global_load_b128_saddr %49, %input_view
-  %51 = v_lshlrev_b32_src0_inline %swizzled, 4
-  ds_write_b128 %51, %loaded
-  %roundtrip = ds_read_b128 %51
-  global_store_b128_saddr %49, %roundtrip, %output_view
+  %48 = v_lshlrev_b32_src0_inline %lane, 4
+  %loaded = global_load_b128_saddr %48, %input_view
+  %50 = v_lshlrev_b32_src0_inline %swizzled, 4
+  ds_write_b128 %50, %loaded
+  %roundtrip = ds_read_b128 %50
+  global_store_b128_saddr %48, %roundtrip, %output_view
   return
 }
 

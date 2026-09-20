@@ -1,0 +1,121 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_index_operands.loom-test
+// RUN: emit source-low output=none
+
+wasm.target<simd128> @target
+
+func.def target(@target) @uniform_lhs_index_operands(%input: buffer, %uniform: index) -> (index, index, index, index, index) {
+  %base = index.constant 0 : offset
+  %aligned_input = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %aligned_input[%base] : buffer -> view<1xi32>
+  %word = view.load %input_view[0] : view<1xi32> -> i32
+  %value = index.cast %word : i32 to index
+  %multiply = index.mul %uniform, %value : index
+  // ERROR@+1: TARGET/001 {op_name="index.andi"}
+  %and = index.andi %uniform, %value : index
+  // ERROR@+1: TARGET/001 {op_name="index.ori"}
+  %or = index.ori %uniform, %value : index
+  // ERROR@+1: TARGET/001 {op_name="index.xori"}
+  %xor = index.xori %uniform, %value : index
+  %subtract = index.sub %uniform, %value : index
+  func.return %multiply, %and, %or, %xor, %subtract : index, index, index, index, index
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @uniform_rhs_index_operands(%input: buffer, %uniform: index) -> (index, index, index, index, index) {
+  %base = index.constant 0 : offset
+  %aligned_input = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %aligned_input[%base] : buffer -> view<1xi32>
+  %word = view.load %input_view[0] : view<1xi32> -> i32
+  %value = index.cast %word : i32 to index
+  %multiply = index.mul %value, %uniform : index
+  // ERROR@+1: TARGET/001 {op_name="index.andi"}
+  %and = index.andi %value, %uniform : index
+  // ERROR@+1: TARGET/001 {op_name="index.ori"}
+  %or = index.ori %value, %uniform : index
+  // ERROR@+1: TARGET/001 {op_name="index.xori"}
+  %xor = index.xori %value, %uniform : index
+  %subtract = index.sub %value, %uniform : index
+  func.return %multiply, %and, %or, %xor, %subtract : index, index, index, index, index
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @constant_index_operands(%input: buffer) -> (index, index, index, index) {
+  %base = index.constant 0 : offset
+  %aligned_input = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %aligned_input[%base] : buffer -> view<1xi32>
+  %word = view.load %input_view[0] : view<1xi32> -> i32
+  %value = index.cast %word : i32 to index
+  %inline = index.constant 64 : index
+  %literal = index.constant 128 : index
+  %negative = index.constant -16 : index
+  %factor = index.constant 65 : index
+  // ERROR@+1: TARGET/001 {op_name="index.andi"}
+  %masked = index.andi %value, %inline : index
+  // ERROR@+1: TARGET/001 {op_name="index.ori"}
+  %tagged = index.ori %literal, %value : index
+  // ERROR@+1: TARGET/001 {op_name="index.xori"}
+  %toggled = index.xori %value, %negative : index
+  %scaled = index.mul %factor, %value : index
+  func.return %masked, %tagged, %toggled, %scaled : index, index, index, index
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @uniform_index_operands(%lhs: index, %rhs: index) -> (index, index, index, index, index) {
+  %multiply = index.mul %lhs, %rhs : index
+  // ERROR@+1: TARGET/001 {op_name="index.andi"}
+  %and = index.andi %lhs, %rhs : index
+  // ERROR@+1: TARGET/001 {op_name="index.ori"}
+  %or = index.ori %lhs, %rhs : index
+  // ERROR@+1: TARGET/001 {op_name="index.xori"}
+  %xor = index.xori %lhs, %rhs : index
+  %subtract = index.sub %lhs, %rhs : index
+  func.return %multiply, %and, %or, %xor, %subtract : index, index, index, index, index
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @varying_index_operands(%input: buffer) -> (index, index, index, index, index) {
+  %base = index.constant 0 : offset
+  %aligned_input = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %aligned_input[%base] : buffer -> view<2xi32>
+  %lhs_word = view.load %input_view[0] : view<2xi32> -> i32
+  %rhs_word = view.load %input_view[1] : view<2xi32> -> i32
+  %lhs = index.cast %lhs_word : i32 to index
+  %rhs = index.cast %rhs_word : i32 to index
+  %multiply = index.mul %lhs, %rhs : index
+  // ERROR@+1: TARGET/001 {op_name="index.andi"}
+  %and = index.andi %lhs, %rhs : index
+  // ERROR@+1: TARGET/001 {op_name="index.ori"}
+  %or = index.ori %lhs, %rhs : index
+  // ERROR@+1: TARGET/001 {op_name="index.xori"}
+  %xor = index.xori %lhs, %rhs : index
+  %subtract = index.sub %lhs, %rhs : index
+  func.return %multiply, %and, %or, %xor, %subtract : index, index, index, index, index
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @bounded_offset_difference(%input: buffer, %wide_limit: offset) -> (offset) {
+  %base = index.constant 0 : offset
+  %aligned_input = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %aligned_input[%base] : buffer -> view<1xi32>
+  %word = view.load %input_view[0] : view<1xi32> -> i32
+  %bounded_word = scalar.assume %word [range(%word, 0, 1023)] : i32
+  %position = index.cast %bounded_word : i32 to offset
+  %limit = index.assume %wide_limit [range(%wide_limit, 1024, 2047)] : offset
+  %remaining = index.sub %limit, %position : offset
+  func.return %remaining : offset
+}

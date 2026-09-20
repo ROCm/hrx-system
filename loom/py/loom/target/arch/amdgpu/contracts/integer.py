@@ -908,7 +908,7 @@ def _address_binary_rules(
     )
 
 
-def _index_binary_rules(
+def _commutative_index_binary_rules(
     source_op: Op,
     sgpr_descriptor_key: str,
     vgpr_descriptor_key: str,
@@ -918,6 +918,7 @@ def _index_binary_rules(
         _INDEX,
         sgpr_descriptor_key,
         vgpr_descriptor_key,
+        sgpr_operand_orders=(("lhs", "rhs"), ("rhs", "lhs")),
     )
 
 
@@ -1533,10 +1534,15 @@ def _rules() -> tuple[DescriptorRule, ...]:
         )
     )
     rules.extend(
-        _address_binary_rules(index.index_sub, "amdgpu.s_sub_u32", "amdgpu.v_sub_u32")
+        _address_binary_rules(
+            index.index_sub,
+            "amdgpu.s_sub_u32",
+            "amdgpu.v_sub_u32",
+            sgpr_operand_orders=(("lhs", "rhs"),),
+        )
     )
     rules.extend(
-        _index_binary_rules(
+        _commutative_index_binary_rules(
             index.index_mul,
             "amdgpu.s_mul_i32",
             "amdgpu.v_mul_lo_u32",
@@ -1563,13 +1569,19 @@ def _rules() -> tuple[DescriptorRule, ...]:
         )
     )
     rules.extend(
-        _index_binary_rules(index.index_andi, "amdgpu.s_and_b32", "amdgpu.v_and_b32")
+        _commutative_index_binary_rules(
+            index.index_andi, "amdgpu.s_and_b32", "amdgpu.v_and_b32"
+        )
     )
     rules.extend(
-        _index_binary_rules(index.index_ori, "amdgpu.s_or_b32", "amdgpu.v_or_b32")
+        _commutative_index_binary_rules(
+            index.index_ori, "amdgpu.s_or_b32", "amdgpu.v_or_b32"
+        )
     )
     rules.extend(
-        _index_binary_rules(index.index_xori, "amdgpu.s_xor_b32", "amdgpu.v_xor_b32")
+        _commutative_index_binary_rules(
+            index.index_xori, "amdgpu.s_xor_b32", "amdgpu.v_xor_b32"
+        )
     )
     rules.extend(
         _index_shift_rules(

@@ -405,12 +405,12 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 32} : reg<amdgpu.sgpr x2>
   %quotient = v_lshrrev_b32_lit %lane, 3
-  %21 = v_mov_b32 7
-  %remainder = v_and_b32 %lane, %21
-  %23 = v_lshlrev_b32_src0_inline %quotient, 2
-  %loaded = global_load_b32_saddr %23, %input_view
-  %25 = v_lshlrev_b32_src0_inline %remainder, 2
-  global_store_b32_saddr %25, %loaded, %output_view
+  %20 = s_mov_b32 7
+  %remainder = v_and_b32 %20, %lane
+  %22 = v_lshlrev_b32_src0_inline %quotient, 2
+  %loaded = global_load_b32_saddr %22, %input_view
+  %24 = v_lshlrev_b32_src0_inline %remainder, 2
+  global_store_b32_saddr %24, %loaded, %output_view
   return
 }
 
