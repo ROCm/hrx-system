@@ -13,9 +13,33 @@ low.func.def target<amd.xdna.aie2p.core> @bounds(%pointer: reg<aie2p.ep>) -> (re
 // their unused results.
 // RUN: emit source-low
 
-low.func.def retain target<amd.xdna.aie2p.core> @unused_overflow(%pointer: reg<aie2p.ep>) asm {
+aie2p.target<core> @target
+
+low.func.def retain target<amd.xdna.aie2p.core>(@target) @unused_overflow(%pointer: reg<aie2p.ep>) asm {
   // ERROR@+1: STRUCTURE/014 "imm" "512"
   %unused = vlda.acc %pointer, 512
+  return
+}
+
+// ====
+
+// Binding the target selects cleanup. Legal unused constants and loads vanish.
+// RUN: emit source-low
+
+aie2p.target<core> @target
+
+low.func.def retain target<amd.xdna.aie2p.core>(@target) @unused_in_range(%pointer: reg<aie2p.ep>) asm {
+  %constant = mova.i32 1023
+  %accumulator = vlda.acc %pointer, 448
+  %byte = lda.u8 %pointer, 7
+  %scalar = lda %pointer, 28
+  return
+}
+
+// ----
+aie2p.target<core> @target
+
+low.func.def retain target<amd.xdna.aie2p.core>(@target) @unused_in_range(%pointer: reg<aie2p.ep>) asm {
   return
 }
 
@@ -42,6 +66,131 @@ low.func.def target<amd.xdna.aie2p.core> @underflow(%pointer: reg<aie2p.ep>) asm
 low.func.def target<amd.xdna.aie2p.core> @misaligned(%pointer: reg<aie2p.ep>) asm {
   // ERROR@+1: STRUCTURE/014 "imm" "1"
   %unused = vlda.acc %pointer, 1
+  return
+}
+
+// ====
+
+// Byte loads use signed 4-bit byte offsets.
+low.func.def target<amd.xdna.aie2p.core> @byte_load_bounds(%pointer: reg<aie2p.ep>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+  %minimum = lda.u8 %pointer, -8
+  %maximum = lda.u8 %pointer, 7
+  return %minimum, %maximum
+}
+
+// ====
+
+// RUN: emit source-low
+
+aie2p.target<core> @target
+
+low.func.def retain target<amd.xdna.aie2p.core>(@target) @unused_byte_load_overflow(%pointer: reg<aie2p.ep>) asm {
+  // ERROR@+1: STRUCTURE/014 "imm" "8"
+  %unused = lda.u8 %pointer, 8
+  return
+}
+
+// ====
+
+low.func.def target<amd.xdna.aie2p.core> @byte_load_underflow(%pointer: reg<aie2p.ep>) -> (reg<aie2p.er>) asm {
+  // ERROR@+1: STRUCTURE/014 "imm" "-9"
+  %value = lda.u8 %pointer, -9
+  return %value
+}
+
+// ====
+
+// Scalar data registers cannot substitute for pointer registers.
+low.func.def target<amd.xdna.aie2p.core> @scalar_pointer(%pointer: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  // ERROR@+1: TYPE/003 "ptr" "aie2p.ep"
+  %value = lda.volatile %pointer, 0
+  return %value
+}
+
+// ====
+
+// The same register-class contract applies before unused loads are removed.
+// RUN: emit source-low
+
+aie2p.target<core> @target
+
+low.func.def retain target<amd.xdna.aie2p.core>(@target) @unused_scalar_pointer(%pointer: reg<aie2p.er>) asm {
+  // ERROR@+1: TYPE/003 "ptr" "aie2p.ep"
+  %unused = lda %pointer, 0
+  return
+}
+
+// ====
+
+// Scalar stores use signed 6-bit byte offsets aligned to 4 bytes.
+low.func.def target<amd.xdna.aie2p.core> @scalar_store_bounds(%pointer: reg<aie2p.ep>, %value: reg<aie2p.er>) asm {
+  st %value, %pointer, -32
+  st %value, %pointer, 28
+  return
+}
+
+// ====
+
+// RUN: emit source-low
+
+aie2p.target<core> @target
+
+low.func.def retain target<amd.xdna.aie2p.core>(@target) @scalar_store_overflow(%pointer: reg<aie2p.ep>, %value: reg<aie2p.er>) asm {
+  // ERROR@+1: STRUCTURE/014 "imm" "32"
+  st %value, %pointer, 32
+  return
+}
+
+// ====
+
+low.func.def target<amd.xdna.aie2p.core> @scalar_store_underflow(%pointer: reg<aie2p.ep>, %value: reg<aie2p.er>) asm {
+  // ERROR@+1: STRUCTURE/014 "imm" "-36"
+  st %value, %pointer, -36
+  return
+}
+
+// ====
+
+low.func.def target<amd.xdna.aie2p.core> @scalar_store_misaligned(%pointer: reg<aie2p.ep>, %value: reg<aie2p.er>) asm {
+  // ERROR@+1: STRUCTURE/014 "imm" "2"
+  st %value, %pointer, 2
+  return
+}
+
+// ====
+
+// Accumulator stores share the signed 10-bit, 64-byte-aligned load offsets.
+low.func.def target<amd.xdna.aie2p.core> @accumulator_store_bounds(%pointer: reg<aie2p.ep>, %value: reg<aie2p.mbms>) asm {
+  vst.acc %value, %pointer, -512
+  vst.acc %value, %pointer, 448
+  return
+}
+
+// ====
+
+// RUN: emit source-low
+
+aie2p.target<core> @target
+
+low.func.def retain target<amd.xdna.aie2p.core>(@target) @accumulator_store_overflow(%pointer: reg<aie2p.ep>, %value: reg<aie2p.mbms>) asm {
+  // ERROR@+1: STRUCTURE/014 "imm" "512"
+  vst.acc %value, %pointer, 512
+  return
+}
+
+// ====
+
+low.func.def target<amd.xdna.aie2p.core> @accumulator_store_underflow(%pointer: reg<aie2p.ep>, %value: reg<aie2p.mbms>) asm {
+  // ERROR@+1: STRUCTURE/014 "imm" "-576"
+  vst.acc %value, %pointer, -576
+  return
+}
+
+// ====
+
+low.func.def target<amd.xdna.aie2p.core> @accumulator_store_misaligned(%pointer: reg<aie2p.ep>, %value: reg<aie2p.mbms>) asm {
+  // ERROR@+1: STRUCTURE/014 "imm" "1"
+  vst.acc %value, %pointer, 1
   return
 }
 

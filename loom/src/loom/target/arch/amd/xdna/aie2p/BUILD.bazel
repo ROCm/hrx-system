@@ -453,6 +453,7 @@ loom_check_test_suite(
         "test/descriptors/memory_immediates.loom-test",
         "test/descriptors/postincrement.loom-test",
         "test/descriptors/scalar_carry.loom-test",
+        "test/descriptors/scalar_immediates.loom-test",
         "test/descriptors/scalar_nonlinear.loom-test",
         "test/descriptors/scalar_stream.loom-test",
         "test/leaf_allocation.loom-test",

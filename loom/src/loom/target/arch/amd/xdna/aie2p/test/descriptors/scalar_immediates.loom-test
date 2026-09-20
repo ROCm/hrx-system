@@ -1,0 +1,40 @@
+// Compact scalar constants use signed 11-bit immediates.
+// RUN: verify
+
+low.func.def target<amd.xdna.aie2p.core> @compact_constant_bounds() -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+  %minimum = mova.i32 -1024
+  %maximum = mova.i32 1023
+  return %minimum, %maximum
+}
+
+// ====
+
+low.func.def target<amd.xdna.aie2p.core> @compact_constant_overflow() -> (reg<aie2p.er>) asm {
+  // ERROR@+1: STRUCTURE/014 "i" "1024"
+  %value = mova.i32 1024
+  return %value
+}
+
+// ====
+
+low.func.def target<amd.xdna.aie2p.core> @compact_constant_underflow() -> (reg<aie2p.er>) asm {
+  // ERROR@+1: STRUCTURE/014 "i" "-1025"
+  %value = mova.i32 -1025
+  return %value
+}
+
+// ====
+
+// Compact scalar constants cannot materialize these local addresses. Input
+// verification must diagnose both even when cleanup can erase their results.
+// RUN: emit source-low
+
+aie2p.target<core> @target
+
+low.func.def retain target<amd.xdna.aie2p.core>(@target) @unused_address_constants() asm {
+  // ERROR@+1: STRUCTURE/014 "i" "460800"
+  %control = mova.i32 460800
+  // ERROR@+1: STRUCTURE/014 "i" "395264"
+  %peer = mova.i32 395264
+  return
+}
