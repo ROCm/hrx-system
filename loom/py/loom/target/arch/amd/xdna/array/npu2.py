@@ -566,6 +566,7 @@ NPU2_ARRAY_FAMILY = ArrayFamily(
                 buffer_descriptor_count=16,
                 maximum_task_repeat_count=256,
                 channel_count_per_direction=2,
+                loopback_channel_count=0,
                 address_dimension_count=3,
                 address_maximum=0x1000000000000,
                 address_alignment=4,
@@ -618,6 +619,8 @@ NPU2_ARRAY_FAMILY = ArrayFamily(
                 buffer_descriptor_count=48,
                 maximum_task_repeat_count=256,
                 channel_count_per_direction=6,
+                # The memory switch connects only equal DMA channel indices.
+                loopback_channel_count=6,
                 address_dimension_count=4,
                 address_maximum=0x180000,
                 address_alignment=4,
@@ -673,6 +676,8 @@ NPU2_ARRAY_FAMILY = ArrayFamily(
                 buffer_descriptor_count=16,
                 maximum_task_repeat_count=256,
                 channel_count_per_direction=2,
+                # The compute switch connects only equal DMA channel indices.
+                loopback_channel_count=2,
                 address_dimension_count=3,
                 address_maximum=0x20000,
                 address_alignment=4,

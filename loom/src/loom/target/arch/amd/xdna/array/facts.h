@@ -139,6 +139,10 @@ typedef struct loom_xdna_dma_facts_t {
   uint16_t maximum_task_repeat_count;
   // Number of channels in each transfer direction.
   uint8_t channel_count_per_direction;
+  // Number of DMA port pairs supporting direct, same-index stream-switch
+  // loopback. Cross-index loopback is unavailable; zero excludes direct DMA
+  // loopback on tiles whose DMA connects through a separate mux.
+  uint8_t loopback_channel_count;
   // Number of address dimensions.
   uint8_t address_dimension_count;
   // Required byte-address alignment.

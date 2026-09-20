@@ -1,0 +1,246 @@
+// RUN: with-checks emit aie2p-array-plan @matching_dma_service
+
+// A borrowed service tile retains its legal DMA0-to-DMA0 loopback.
+// Two workers exhaust their local engines and borrow the tile between them.
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @matching_dma_service() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %writer_row = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %reader_row = constant.u32 4 : reg<aie2p.array.scalar : index>
+  %writers = group %one
+  %readers = group %one
+  %writer = worker %writers, %zero, @write_values
+  %reader = worker %readers, %zero, @read_values
+  %output0 = binding 0, "write"
+  %write0 = sender %writer, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %sink0 = receiver %output0, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %outgoing0 = channel %write0, %sink0, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  %output1 = binding 1, "write"
+  %write1 = sender %writer, 1 : reg<aie2p.array.sender : tile<1xi32>>
+  %sink1 = receiver %output1, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %outgoing1 = channel %write1, %sink1, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  %input0 = binding 2, "read"
+  %source0 = sender %input0, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %read0 = receiver %reader, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %incoming0 = channel %source0, %read0, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  %input1 = binding 3, "read"
+  %source1 = sender %input1, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %read1 = receiver %reader, 1 : reg<aie2p.array.receiver : tile<1xi32>>
+  %incoming1 = channel %source1, %read1, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  %send = sender %writer, 2 : reg<aie2p.array.sender : tile<1xi32>>
+  %receive0 = receiver %reader, 2 : reg<aie2p.array.receiver : tile<1xi32>>
+  %internal0 = channel %send, %receive0, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  %result = binding 4, "write"
+  %result_sender = sender %reader, 3 : reg<aie2p.array.sender : tile<1xi32>>
+  %result_receiver = receiver %result, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %result_channel = channel %result_sender, %result_receiver, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %writer, %zero, %writer_row
+  constrain.location %reader, %zero, %reader_row
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @write_values() asm {
+  %out0 = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %out1 = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %out2 = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
+  %value = mov.short 7
+  st %value, %out0, 0
+  st %value, %out1, 0
+  st %value, %out2, 0
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @read_values() asm {
+  %in0 = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %in1 = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %in2 = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
+  %out = resource<native_pointer> {index = 3, source_type = buffer} : reg<aie2p.ep>
+  %value0 = lda %in0, 0
+  %value1 = lda %in1, 0
+  %value2 = lda %in2, 0
+  %sum1 = add.rr %value0, %value1
+  %sum2 = add.rr %sum1, %value2
+  st %sum2, %out, 0
+  return
+}
+
+// ----
+CHECK: dma channel=4 tile=(0,3) side=compute direction=memory-to-stream engine-channel=0 *
+CHECK: route channel=4 tile=(0,3) kind=switch source=dma[0] destination=dma[0]
+
+// ====
+
+// RUN: with-checks emit aie2p-array-plan @mismatched_dma_service
+
+// An occupied S2MM0 makes DMA0-to-DMA1 illegal; select another visible tile.
+// Two workers exhaust their local engines and borrow the tile between them.
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @mismatched_dma_service() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %writer_row = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %reader_row = constant.u32 4 : reg<aie2p.array.scalar : index>
+  %writers = group %one
+  %readers = group %one
+  %writer = worker %writers, %zero, @write_values
+  %reader = worker %readers, %zero, @read_values
+  %output0 = binding 0, "write"
+  %write0 = sender %writer, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %sink0 = receiver %output0, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %outgoing0 = channel %write0, %sink0, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  %output1 = binding 1, "write"
+  %write1 = sender %writer, 1 : reg<aie2p.array.sender : tile<1xi32>>
+  %sink1 = receiver %output1, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %outgoing1 = channel %write1, %sink1, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  %input0 = binding 2, "read"
+  %source0 = sender %input0, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %read0 = receiver %reader, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %incoming0 = channel %source0, %read0, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  %input1 = binding 3, "read"
+  %source1 = sender %input1, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %read1 = receiver %reader, 1 : reg<aie2p.array.receiver : tile<1xi32>>
+  %incoming1 = channel %source1, %read1, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  %input2 = binding 4, "read"
+  %source2 = sender %input2, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %read2 = receiver %reader, 2 : reg<aie2p.array.receiver : tile<1xi32>>
+  %incoming2 = channel %source2, %read2, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  %send = sender %writer, 2 : reg<aie2p.array.sender : tile<1xi32>>
+  %receive0 = receiver %reader, 3 : reg<aie2p.array.receiver : tile<1xi32>>
+  %internal0 = channel %send, %receive0, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  %result = binding 5, "write"
+  %result_sender = sender %reader, 4 : reg<aie2p.array.sender : tile<1xi32>>
+  %result_receiver = receiver %result, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %result_channel = channel %result_sender, %result_receiver, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %writer, %zero, %writer_row
+  constrain.location %reader, %zero, %reader_row
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @write_values() asm {
+  %out0 = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %out1 = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %out2 = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
+  %value = mov.short 7
+  st %value, %out0, 0
+  st %value, %out1, 0
+  st %value, %out2, 0
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @read_values() asm {
+  %in0 = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %in1 = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %in2 = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
+  %in3 = resource<native_pointer> {index = 3, source_type = buffer} : reg<aie2p.ep>
+  %out = resource<native_pointer> {index = 4, source_type = buffer} : reg<aie2p.ep>
+  %value0 = lda %in0, 0
+  %value1 = lda %in1, 0
+  %value2 = lda %in2, 0
+  %value3 = lda %in3, 0
+  %sum1 = add.rr %value0, %value1
+  %sum2 = add.rr %sum1, %value2
+  %sum3 = add.rr %sum2, %value3
+  st %sum3, %out, 0
+  return
+}
+
+// ----
+CHECK: dma channel=5 tile=(0,3) side=compute direction=memory-to-stream engine-channel=0 *
+CHECK: dma channel=5 tile=(0,5) side=compute direction=stream-to-memory engine-channel=0 *
+CHECK: route channel=5 tile=(0,3) kind=switch source=dma[0] destination=north[2]
+CHECK: route channel=5 tile=(0,5) kind=switch source=south[0] destination=dma[0]
+CHECK-NOT: route * kind=switch source=dma[0] destination=dma[1]
+
+// ====
+
+// RUN: with-checks emit aie2p-array-plan @multicast_dma_service
+
+// A reused source still constrains connectivity after its ring is allocated.
+// Two workers exhaust their local engines and borrow the tile between them.
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @multicast_dma_service() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %writer_row = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %reader_row = constant.u32 4 : reg<aie2p.array.scalar : index>
+  %writers = group %one
+  %readers = group %one
+  %writer = worker %writers, %zero, @write_values
+  %reader = worker %readers, %zero, @read_values
+  %output0 = binding 0, "write"
+  %write0 = sender %writer, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %sink0 = receiver %output0, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %outgoing0 = channel %write0, %sink0, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  %output1 = binding 1, "write"
+  %write1 = sender %writer, 1 : reg<aie2p.array.sender : tile<1xi32>>
+  %sink1 = receiver %output1, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %outgoing1 = channel %write1, %sink1, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  %input0 = binding 2, "read"
+  %source0 = sender %input0, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %read0 = receiver %reader, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %incoming0 = channel %source0, %read0, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  %input1 = binding 3, "read"
+  %source1 = sender %input1, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %read1 = receiver %reader, 1 : reg<aie2p.array.receiver : tile<1xi32>>
+  %incoming1 = channel %source1, %read1, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  %send = sender %writer, 2 : reg<aie2p.array.sender : tile<1xi32>>
+  %receive0 = receiver %reader, 2 : reg<aie2p.array.receiver : tile<1xi32>>
+  %internal0 = channel %send, %receive0, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  %receive1 = receiver %reader, 3 : reg<aie2p.array.receiver : tile<1xi32>>
+  %internal1 = channel %send, %receive1, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  %result = binding 4, "write"
+  %result_sender = sender %reader, 4 : reg<aie2p.array.sender : tile<1xi32>>
+  %result_receiver = receiver %result, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %result_channel = channel %result_sender, %result_receiver, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %writer, %zero, %writer_row
+  constrain.location %reader, %zero, %reader_row
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @write_values() asm {
+  %out0 = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %out1 = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %out2 = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
+  %value = mov.short 7
+  st %value, %out0, 0
+  st %value, %out1, 0
+  st %value, %out2, 0
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @read_values() asm {
+  %in0 = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %in1 = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %in2 = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
+  %in3 = resource<native_pointer> {index = 3, source_type = buffer} : reg<aie2p.ep>
+  %out = resource<native_pointer> {index = 4, source_type = buffer} : reg<aie2p.ep>
+  %value0 = lda %in0, 0
+  %value1 = lda %in1, 0
+  %value2 = lda %in2, 0
+  %value3 = lda %in3, 0
+  %sum1 = add.rr %value0, %value1
+  %sum2 = add.rr %sum1, %value2
+  %sum3 = add.rr %sum2, %value3
+  st %sum3, %out, 0
+  return
+}
+
+// ----
+CHECK: dma channel=4 tile=(0,3) side=compute direction=memory-to-stream engine-channel=0 *
+CHECK: route channel=4 tile=(0,3) kind=switch source=dma[0] destination=dma[0]
+CHECK: dma channel=5 tile=(0,5) side=compute direction=stream-to-memory engine-channel=0 *
+CHECK: route channel=5 tile=(0,3) kind=switch source=dma[0] destination=north[2]
+CHECK: route channel=5 tile=(0,5) kind=switch source=south[0] destination=dma[0]
+CHECK-NOT: route * kind=switch source=dma[0] destination=dma[1]
+CHECK-NOT: dma channel=5 * direction=memory-to-stream *
+CHECK: slot channel=5 index=0 bytes=4 sender-owner=(0,3) sender-offset=0x00000 *

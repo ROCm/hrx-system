@@ -129,6 +129,35 @@ def test_npu2_dma_encoding_and_stream_port_mappings_are_exact() -> None:
     ) == (2, 0, 1, 0, 1)
 
 
+def test_npu2_direct_dma_loopback_pairs_match_the_stream_switch() -> None:
+    # The pinned aie-rt compute and memory validators permit DMA-to-DMA only
+    # with matching indices. Shim DMA uses a separate mux and south ports.
+    assert {
+        tile.kind: tile.dma.loopback_channel_count
+        for tile in NPU2_ARRAY_FAMILY.tiles
+        if tile.dma is not None
+    } == {TileKind.SHIM_NOC: 0, TileKind.MEMORY: 6, TileKind.COMPUTE: 2}
+
+
+@pytest.mark.parametrize("loopback_channel_count", [-1, 3])
+def test_validator_rejects_loopback_pairs_outside_dma_channels(
+    loopback_channel_count: int,
+) -> None:
+    compute = NPU2_ARRAY_FAMILY.tiles[-1]
+    assert compute.dma is not None
+    invalid_compute = replace(
+        compute,
+        dma=replace(compute.dma, loopback_channel_count=loopback_channel_count),
+    )
+    with pytest.raises(ValueError, match="invalid DMA loopback channel range"):
+        validate_array_family(
+            replace(
+                NPU2_ARRAY_FAMILY,
+                tiles=(*NPU2_ARRAY_FAMILY.tiles[:-1], invalid_compute),
+            )
+        )
+
+
 def test_register_patterns_cover_complete_seed_resource_families() -> None:
     family = NPU2_ARRAY_FAMILY
 

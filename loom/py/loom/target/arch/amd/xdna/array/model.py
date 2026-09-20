@@ -108,6 +108,7 @@ class DmaEngineFacts:
     buffer_descriptor_count: int
     maximum_task_repeat_count: int
     channel_count_per_direction: int
+    loopback_channel_count: int
     address_dimension_count: int
     address_maximum: int
     address_alignment: int
@@ -306,6 +307,8 @@ def _validate_dma(tile: TileFacts) -> None:
     )
     if any(value <= 0 for value in positive_values):
         raise ValueError(f"{tile.kind.value}: invalid DMA resource limit")
+    if not 0 <= dma.loopback_channel_count <= dma.channel_count_per_direction:
+        raise ValueError(f"{tile.kind.value}: invalid DMA loopback channel range")
     if dma.address_alignment & (dma.address_alignment - 1):
         raise ValueError(f"{tile.kind.value}: DMA alignment is not a power of two")
     if dma.address_maximum % dma.address_alignment:

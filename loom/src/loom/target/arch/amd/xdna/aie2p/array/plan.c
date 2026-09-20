@@ -69,14 +69,17 @@ typedef struct loom_aie2p_array_tile_state_t {
   loom_aie2p_array_tile_state_flags_t flags;
 } loom_aie2p_array_tile_state_t;
 
-typedef struct loom_aie2p_array_pending_endpoint_t {
-  // Compute tile selected for the endpoint but not yet charged for its ring.
-  loom_xdna_tile_coordinate_t coordinate;
-  // Byte length of each pending ring record.
-  uint32_t record_byte_length;
-  // Number of pending ring records.
-  uint32_t record_count;
-} loom_aie2p_array_pending_endpoint_t;
+typedef struct loom_aie2p_array_source_endpoint_t {
+  // Retained sending DMA whose stream must reach the selected receiver.
+  const loom_aie2p_array_dma_plan_t* dma;
+  // Storage and locks not yet charged to a newly selected sending endpoint.
+  struct {
+    // Byte length of each pending ring record.
+    uint32_t record_byte_length;
+    // Pending record count, or zero when reusing an allocated multicast source.
+    uint32_t record_count;
+  } pending_ring;
+} loom_aie2p_array_source_endpoint_t;
 
 typedef struct loom_aie2p_array_plan_builder_t {
   const loom_module_t* module;
@@ -917,21 +920,21 @@ static bool loom_aie2p_array_can_allocate_ring_storage(
     const loom_aie2p_array_tile_state_t* state,
     loom_xdna_tile_coordinate_t coordinate, uint32_t record_byte_length,
     uint32_t record_count,
-    const loom_aie2p_array_pending_endpoint_t* pending_endpoint) {
+    const loom_aie2p_array_source_endpoint_t* source_endpoint) {
   const uint8_t bank_count = state->facts->memory.bank_count;
   uint32_t bank_cursors[UINT8_MAX + 1u];
   memcpy(bank_cursors, state->allocation.bank_cursors,
          bank_count * sizeof(*bank_cursors));
   loom_aie2p_array_tile_state_t probe = *state;
   probe.allocation.bank_cursors = bank_cursors;
-  if (pending_endpoint != NULL &&
-      pending_endpoint->coordinate.column == coordinate.column &&
-      pending_endpoint->coordinate.row == coordinate.row) {
-    for (uint32_t record = 0; record < pending_endpoint->record_count;
-         ++record) {
+  if (source_endpoint != NULL &&
+      source_endpoint->dma->coordinate.column == coordinate.column &&
+      source_endpoint->dma->coordinate.row == coordinate.row) {
+    for (uint32_t record = 0;
+         record < source_endpoint->pending_ring.record_count; ++record) {
       uint32_t owner_offset = 0;
       if (!loom_aie2p_array_try_allocate_channel_storage(
-              &probe, pending_endpoint->record_byte_length,
+              &probe, source_endpoint->pending_ring.record_byte_length,
               LOOM_AIE2P_ARRAY_CHANNEL_ALIGNMENT, &owner_offset)) {
         return false;
       }
@@ -953,19 +956,28 @@ static bool loom_aie2p_array_can_allocate_channel_endpoint(
     loom_xdna_tile_coordinate_t coordinate,
     loom_aie2p_array_dma_direction_t direction, uint32_t descriptor_count,
     uint32_t record_byte_length,
-    const loom_aie2p_array_pending_endpoint_t* pending_endpoint) {
-  const bool shares_pending_tile =
-      pending_endpoint != NULL &&
-      pending_endpoint->coordinate.column == coordinate.column &&
-      pending_endpoint->coordinate.row == coordinate.row;
-  const uint32_t required_lock_count = shares_pending_tile ? 4u : 2u;
+    const loom_aie2p_array_source_endpoint_t* source_endpoint) {
+  const bool shares_source_tile =
+      source_endpoint != NULL &&
+      source_endpoint->dma->coordinate.column == coordinate.column &&
+      source_endpoint->dma->coordinate.row == coordinate.row;
+  if (shares_source_tile && (source_endpoint->dma->dma_channel >=
+                                 state->facts->dma.loopback_channel_count ||
+                             source_endpoint->dma->dma_channel !=
+                                 state->next_stream_to_memory_channel)) {
+    return false;
+  }
+  const uint32_t required_lock_count =
+      shares_source_tile && source_endpoint->pending_ring.record_count != 0
+          ? 4u
+          : 2u;
   return loom_aie2p_array_can_allocate_dma(state, direction,
                                            descriptor_count) &&
          (uint32_t)state->next_lock + required_lock_count <=
              state->facts->lock_count &&
          loom_aie2p_array_can_allocate_ring_storage(
              state, coordinate, record_byte_length, descriptor_count,
-             pending_endpoint);
+             source_endpoint);
 }
 
 static iree_status_t loom_aie2p_array_allocate_dma(
@@ -1016,19 +1028,20 @@ static iree_status_t loom_aie2p_array_allocate_dma(
 // adjacent compute tiles, so a worker with more logical ports than local DMA
 // channels can use available engines in that architectural window.
 // The worker's own tile remains first to keep compact plans local when it has
-// capacity.
+// capacity. A routed receiver must also connect to the retained source DMA;
+// sharing its tile requires an available same-index loopback pair.
 static iree_status_t loom_aie2p_array_select_compute_dma(
     loom_aie2p_array_plan_builder_t* builder, uint32_t channel_index,
     loom_xdna_tile_coordinate_t worker_coordinate,
     loom_aie2p_array_dma_direction_t direction, uint32_t descriptor_count,
     uint32_t record_byte_length,
-    const loom_aie2p_array_pending_endpoint_t* pending_endpoint,
+    const loom_aie2p_array_source_endpoint_t* source_endpoint,
     uint32_t* out_dma_index) {
   loom_aie2p_array_tile_state_t* worker_state =
       loom_aie2p_array_tile_state(builder, worker_coordinate);
   if (loom_aie2p_array_can_allocate_channel_endpoint(
           worker_state, worker_coordinate, direction, descriptor_count,
-          record_byte_length, pending_endpoint)) {
+          record_byte_length, source_endpoint)) {
     return loom_aie2p_array_allocate_dma(
         builder, channel_index, worker_coordinate, direction, descriptor_count,
         /*flags=*/0, out_dma_index);
@@ -1069,7 +1082,7 @@ static iree_status_t loom_aie2p_array_select_compute_dma(
       if (candidate_state->facts->kind != LOOM_XDNA_TILE_KIND_COMPUTE ||
           !loom_aie2p_array_can_allocate_channel_endpoint(
               candidate_state, candidate, direction, descriptor_count,
-              record_byte_length, pending_endpoint)) {
+              record_byte_length, source_endpoint)) {
         continue;
       }
       return loom_aie2p_array_allocate_dma(builder, channel_index, candidate,
@@ -1449,7 +1462,7 @@ static iree_status_t loom_aie2p_array_plan_external_channel(
     IREE_RETURN_IF_ERROR(loom_aie2p_array_select_compute_dma(
         builder, channel_index, worker->coordinate, compute_direction,
         channel->capacity, channel->record_byte_length,
-        /*pending_endpoint=*/NULL, &compute_dma_index));
+        /*source_endpoint=*/NULL, &compute_dma_index));
   } else {
     compute_dma_index = source_channel->sender_dma_index;
   }
@@ -1575,7 +1588,7 @@ static iree_status_t loom_aie2p_array_plan_routed_channel(
     IREE_RETURN_IF_ERROR(loom_aie2p_array_select_compute_dma(
         builder, channel_index, sender_worker->coordinate,
         LOOM_AIE2P_ARRAY_DMA_DIRECTION_MEMORY_TO_STREAM, channel->capacity,
-        channel->record_byte_length, /*pending_endpoint=*/NULL,
+        channel->record_byte_length, /*source_endpoint=*/NULL,
         &sender_dma_index));
   } else {
     sender_dma_index = source_channel->sender_dma_index;
@@ -1583,17 +1596,19 @@ static iree_status_t loom_aie2p_array_plan_routed_channel(
   channel->sender_dma_index = sender_dma_index;
   loom_aie2p_array_dma_plan_t* sender_dma =
       &builder->dma_channels[sender_dma_index];
-  const loom_aie2p_array_pending_endpoint_t pending_sender = {
-      .coordinate = sender_dma->coordinate,
-      .record_byte_length = channel->record_byte_length,
-      .record_count = channel->capacity,
+  const loom_aie2p_array_source_endpoint_t source_endpoint = {
+      .dma = sender_dma,
+      .pending_ring =
+          {
+              .record_byte_length = channel->record_byte_length,
+              .record_count = owns_sender_dma ? channel->capacity : 0,
+          },
   };
   uint32_t receiver_dma_index = UINT32_MAX;
   IREE_RETURN_IF_ERROR(loom_aie2p_array_select_compute_dma(
       builder, channel_index, receiver_worker->coordinate,
       LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY, channel->capacity,
-      channel->record_byte_length, owns_sender_dma ? &pending_sender : NULL,
-      &receiver_dma_index));
+      channel->record_byte_length, &source_endpoint, &receiver_dma_index));
   loom_aie2p_array_dma_plan_t* receiver_dma =
       &builder->dma_channels[receiver_dma_index];
   IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_channel_slots(

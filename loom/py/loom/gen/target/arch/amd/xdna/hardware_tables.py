@@ -139,6 +139,7 @@ def emit_array_facts() -> str:
                 f"            .buffer_descriptor_count = {dma.buffer_descriptor_count},",
                 f"            .maximum_task_repeat_count = {dma.maximum_task_repeat_count},",
                 f"            .channel_count_per_direction = {dma.channel_count_per_direction},",
+                f"            .loopback_channel_count = {dma.loopback_channel_count},",
                 f"            .address_dimension_count = {dma.address_dimension_count},",
                 f"            .address_alignment = {dma.address_alignment},",
                 f"            .address_encoding_shift = {dma.address_encoding_shift},",

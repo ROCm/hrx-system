@@ -1595,8 +1595,8 @@ ERR_TARGET_088 = ErrorDef(
     summary="AIE2P channel has no available compute endpoint.",
     message=(
         "AIE2P channel {channel} needs {capacity} records of {record_bytes} bytes, "
-        "DMA descriptors and locks on a compute tile visible to worker "
-        "({column}, {row}); no candidate has all requested resources"
+        "compatible DMA channels, descriptors and locks on a compute tile visible "
+        "to worker ({column}, {row}); no candidate has all requested resources"
     ),
     params=(
         ErrorParam("channel", ParamKind.U32),
