@@ -721,3 +721,187 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_rig
   %signed = concat(%51, %53) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
   return %logical, %signed
 }
+
+// ====
+
+aie2p.target<core> @target
+
+// All three shifts preserve their input and the count for later arithmetic.
+func.def target(@target) @word_shifts_reuse_input(%value: i32, %count: i32) -> (i32) {
+  %left = scalar.shli %value, %count : i32
+  %logical = scalar.shrui %value, %count : i32
+  %signed = scalar.shrsi %value, %count : i32
+  %directions = scalar.xori %left, %logical : i32
+  %combined = scalar.xori %directions, %signed : i32
+  %with_count = scalar.addi %combined, %count : i32
+  %result = scalar.xori %with_count, %value : i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @word_shifts_reuse_input(%value: reg<aie2p.er>, %count: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %left = lshl %value, %count
+  %14 = mov.short 0
+  %15 = sub %14, %count
+  %logical = lshl %value, %15
+  %18 = sub %14, %count
+  %signed = ashl %value, %18
+  %directions = xor %left, %logical
+  %combined = xor %directions, %signed
+  %with_count = add.rr %combined, %count
+  %result = xor %with_count, %value
+  return %result
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @wide_shifts_reuse_counts(%value: i64, %left_count: i64, %right_count: i64) -> (i64) {
+  %left = scalar.shli %value, %left_count : i64
+  %logical = scalar.shrui %value, %right_count : i64
+  %signed = scalar.shrsi %left, %left_count : i64
+  %directions = scalar.xori %logical, %signed : i64
+  %with_left_count = scalar.addi %directions, %left_count : i64
+  %with_counts = scalar.addi %with_left_count, %right_count : i64
+  %result = scalar.xori %with_counts, %value : i64
+  func.return %result : i64
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_shifts_reuse_counts(%value: reg<aie2p.er x2>, %left_count: reg<aie2p.er x2>, %right_count: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
+  %15 = slice %value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %16 = slice %value[1] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %17 = slice %left_count[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %18 = mov.short 0
+  %19 = mov.short 31
+  %20 = mov.short 32
+  %21 = and %17, %19
+  %22 = mov.short -1
+  %23 = lshl %15, %22
+  %24 = add %21, -31
+  %25 = lshl %15, %21
+  %26 = lshl %16, %21
+  %27 = lshl %23, %24
+  %28 = or %26, %27
+  %30 = ltu %17, %20
+  %31 = copy %30 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %32 = sel.nez %25, %18, %31
+  %33 = copy %30 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %34 = sel.nez %28, %25, %33
+  %38 = slice %right_count[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %41 = and %38, %19
+  %42 = sub %18, %41
+  %43 = lshl %16, %42
+  %44 = mov.short 1
+  %45 = lshl %16, %44
+  %46 = add %42, 31
+  %47 = lshl %45, %46
+  %48 = lshl %15, %42
+  %49 = or %48, %47
+  %51 = ltu %38, %20
+  %52 = copy %51 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %53 = sel.nez %49, %43, %52
+  %54 = copy %51 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %55 = sel.nez %43, %18, %54
+  %63 = sub %18, %21
+  %64 = ashl %34, %63
+  %66 = lshl %34, %44
+  %67 = add %63, 31
+  %68 = lshl %66, %67
+  %69 = lshl %32, %63
+  %70 = or %69, %68
+  %71 = mov.short -31
+  %72 = ashl %34, %71
+  %75 = copy %30 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %76 = sel.nez %70, %64, %75
+  %77 = copy %30 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %78 = sel.nez %64, %72, %77
+  %84 = xor %53, %76
+  %85 = xor %55, %78
+  %90 = slice %left_count[1] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %91, %92 = add.carry %84, %17
+  %93, %94 = adc %85, %90, %92
+  %99 = slice %right_count[1] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %100, %101 = add.carry %91, %38
+  %102, %103 = adc %93, %99, %101
+  %109 = xor %100, %15
+  %110 = xor %102, %16
+  %result = concat(%109, %110) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  return %result
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @wide_shift_value_is_count(%input: i64) -> (i64) {
+  %mask = scalar.constant 63 : i64
+  %value = scalar.andi %input, %mask : i64
+  %result = scalar.shli %value, %value : i64
+  func.return %result : i64
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_shift_value_is_count(%input: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
+  %7 = mov.i32 63
+  %8 = mov.i32 0
+  %10 = slice %input[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %11 = slice %input[1] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %14 = and %10, %7
+  %15 = and %11, %8
+  %20 = mov.short 0
+  %21 = mov.short 31
+  %22 = mov.short 32
+  %23 = and %14, %21
+  %24 = mov.short -1
+  %25 = lshl %14, %24
+  %26 = add %23, -31
+  %27 = lshl %14, %23
+  %28 = lshl %15, %23
+  %29 = lshl %25, %26
+  %30 = or %28, %29
+  %32 = ltu %14, %22
+  %33 = copy %32 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %34 = sel.nez %27, %20, %33
+  %35 = copy %32 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %36 = sel.nez %30, %27, %35
+  %result = concat(%34, %36) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  return %result
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @index_shift_dynamic(%value: index, %count: index) -> (index, index) {
+  %left = index.shli %value, %count : index
+  %right = index.shrui %value, %count : index
+  func.return %left, %right : index, index
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_shift_dynamic(%value: reg<aie2p.er>, %count: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+  %left = lshl %value, %count
+  %11 = mov.short 0
+  %12 = sub %11, %count
+  %right = lshl %value, %12
+  return %left, %right
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @index_shift_constant_four(%value: index) -> (index) {
+  %count = index.constant 4 : index
+  %result = index.shli %value, %count : index
+  func.return %result : index
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_shift_constant_four(%value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %count = mov.short 4
+  %result = lshl %value, %count
+  return %result
+}

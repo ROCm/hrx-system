@@ -1,0 +1,412 @@
+// Per-use count copies share RCX with both general register widths.
+// Live inputs and multiple counts exercise interference and scheduling.
+// RUN: emit x86-asm @word_shifts_reuse_input strategy=source fixed=%value:physical_register:7:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @word_shifts_reuse_input(%value: reg<x86.gpr32>, %count: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %left_input = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
+  %left_count = copy %count : reg<x86.gpr32> -> reg<x86.ecx>
+  %left = shl.cl.gpr32 %left_input, %left_count
+  %logical_input = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
+  %logical_count = copy %count : reg<x86.gpr32> -> reg<x86.ecx>
+  %logical = shr.cl.gpr32 %logical_input, %logical_count
+  %signed_input = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
+  %signed_count = copy %count : reg<x86.gpr32> -> reg<x86.ecx>
+  %signed = sar.cl.gpr32 %signed_input, %signed_count
+  %directions_input = copy %left : reg<x86.gpr32> -> reg<x86.gpr32>
+  %directions = xor.gpr32 %directions_input, %logical
+  %combined_input = copy %directions : reg<x86.gpr32> -> reg<x86.gpr32>
+  %combined = xor.gpr32 %combined_input, %signed
+  %sum_input = copy %combined : reg<x86.gpr32> -> reg<x86.gpr32>
+  %with_count = add.gpr32 %sum_input, %count
+  %result_input = copy %with_count : reg<x86.gpr32> -> reg<x86.gpr32>
+  %result = xor.gpr32 %result_input, %value
+  return %result
+}
+
+// ----
+  mov eax, edi
+  mov ecx, esi
+  shl eax, cl
+  mov edx, edi
+  mov ecx, esi
+  shr edx, cl
+  mov ebx, edi
+  mov ecx, esi
+  sar ebx, cl
+  xor eax, edx
+  xor eax, ebx
+  add eax, esi
+  xor eax, edi
+  ret
+
+// ====
+
+// RUN: emit x86-asm @word_shifts_reuse_input strategy=latency-hiding fixed=%value:physical_register:7:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @word_shifts_reuse_input(%value: reg<x86.gpr32>, %count: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %left_input = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
+  %left_count = copy %count : reg<x86.gpr32> -> reg<x86.ecx>
+  %left = shl.cl.gpr32 %left_input, %left_count
+  %logical_input = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
+  %logical_count = copy %count : reg<x86.gpr32> -> reg<x86.ecx>
+  %logical = shr.cl.gpr32 %logical_input, %logical_count
+  %signed_input = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
+  %signed_count = copy %count : reg<x86.gpr32> -> reg<x86.ecx>
+  %signed = sar.cl.gpr32 %signed_input, %signed_count
+  %directions_input = copy %left : reg<x86.gpr32> -> reg<x86.gpr32>
+  %directions = xor.gpr32 %directions_input, %logical
+  %combined_input = copy %directions : reg<x86.gpr32> -> reg<x86.gpr32>
+  %combined = xor.gpr32 %combined_input, %signed
+  %sum_input = copy %combined : reg<x86.gpr32> -> reg<x86.gpr32>
+  %with_count = add.gpr32 %sum_input, %count
+  %result_input = copy %with_count : reg<x86.gpr32> -> reg<x86.gpr32>
+  %result = xor.gpr32 %result_input, %value
+  return %result
+}
+
+// ----
+  mov eax, edi
+  mov ecx, esi
+  shl eax, cl
+  mov edx, edi
+  mov ecx, esi
+  shr edx, cl
+  mov ebx, edi
+  mov ecx, esi
+  sar ebx, cl
+  xor eax, edx
+  xor eax, ebx
+  add eax, esi
+  xor eax, edi
+  ret
+
+// ====
+
+// RUN: emit x86-asm @wide_shifts_reuse_counts strategy=source fixed=%value:physical_register:7:1 fixed=%left_count:physical_register:6:1 fixed=%right_count:physical_register:2:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @wide_shifts_reuse_counts(%value: reg<x86.gpr64>, %left_count: reg<x86.gpr64>, %right_count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %left_input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %left_register = copy %left_count : reg<x86.gpr64> -> reg<x86.rcx>
+  %left = shl.cl.gpr64 %left_input, %left_register
+  %logical_input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %right_register = copy %right_count : reg<x86.gpr64> -> reg<x86.rcx>
+  %logical = shr.cl.gpr64 %logical_input, %right_register
+  %signed_input = copy %left : reg<x86.gpr64> -> reg<x86.gpr64>
+  %signed_register = copy %left_count : reg<x86.gpr64> -> reg<x86.rcx>
+  %signed = sar.cl.gpr64 %signed_input, %signed_register
+  %directions_input = copy %logical : reg<x86.gpr64> -> reg<x86.gpr64>
+  %directions = xor.gpr64 %directions_input, %signed
+  %left_sum_input = copy %directions : reg<x86.gpr64> -> reg<x86.gpr64>
+  %with_left_count = add.gpr64 %left_sum_input, %left_count
+  %right_sum_input = copy %with_left_count : reg<x86.gpr64> -> reg<x86.gpr64>
+  %with_counts = add.gpr64 %right_sum_input, %right_count
+  %result_input = copy %with_counts : reg<x86.gpr64> -> reg<x86.gpr64>
+  %result = xor.gpr64 %result_input, %value
+  return %result
+}
+
+// ----
+  mov rax, rdi
+  mov rcx, rsi
+  shl rax, cl
+  mov rbx, rdi
+  mov rcx, rdx
+  shr rbx, cl
+  mov rcx, rsi
+  sar rax, cl
+  xor rbx, rax
+  add rbx, rsi
+  add rbx, rdx
+  mov rax, rbx
+  xor rax, rdi
+  ret
+
+// ====
+
+// RUN: emit x86-asm @wide_shifts_reuse_counts strategy=latency-hiding fixed=%value:physical_register:7:1 fixed=%left_count:physical_register:6:1 fixed=%right_count:physical_register:2:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @wide_shifts_reuse_counts(%value: reg<x86.gpr64>, %left_count: reg<x86.gpr64>, %right_count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %left_input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %left_register = copy %left_count : reg<x86.gpr64> -> reg<x86.rcx>
+  %left = shl.cl.gpr64 %left_input, %left_register
+  %logical_input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %right_register = copy %right_count : reg<x86.gpr64> -> reg<x86.rcx>
+  %logical = shr.cl.gpr64 %logical_input, %right_register
+  %signed_input = copy %left : reg<x86.gpr64> -> reg<x86.gpr64>
+  %signed_register = copy %left_count : reg<x86.gpr64> -> reg<x86.rcx>
+  %signed = sar.cl.gpr64 %signed_input, %signed_register
+  %directions_input = copy %logical : reg<x86.gpr64> -> reg<x86.gpr64>
+  %directions = xor.gpr64 %directions_input, %signed
+  %left_sum_input = copy %directions : reg<x86.gpr64> -> reg<x86.gpr64>
+  %with_left_count = add.gpr64 %left_sum_input, %left_count
+  %right_sum_input = copy %with_left_count : reg<x86.gpr64> -> reg<x86.gpr64>
+  %with_counts = add.gpr64 %right_sum_input, %right_count
+  %result_input = copy %with_counts : reg<x86.gpr64> -> reg<x86.gpr64>
+  %result = xor.gpr64 %result_input, %value
+  return %result
+}
+
+// ----
+  mov rax, rdi
+  mov rcx, rsi
+  shl rax, cl
+  mov rbx, rdi
+  mov rcx, rdx
+  shr rbx, cl
+  mov rcx, rsi
+  sar rax, cl
+  xor rbx, rax
+  add rbx, rsi
+  add rbx, rdx
+  mov rax, rbx
+  xor rax, rdi
+  ret
+
+// ====
+
+// RUN: emit x86-asm @wide_shift_value_is_count strategy=source fixed=%input:physical_register:7:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @wide_shift_value_is_count(%input: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %masked_input = copy %input : reg<x86.gpr64> -> reg<x86.gpr64>
+  %value = and.imm.gpr64 %masked_input {imm32 = 63}
+  %shift_input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %count = copy %value : reg<x86.gpr64> -> reg<x86.rcx>
+  %result = shl.cl.gpr64 %shift_input, %count
+  return %result
+}
+
+// ----
+  mov rcx, rdi
+  and rcx, 63
+  mov rax, rcx
+  shl rax, cl
+  ret
+
+// ====
+
+// RUN: emit x86-asm @wide_shift_value_is_count strategy=latency-hiding fixed=%input:physical_register:7:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @wide_shift_value_is_count(%input: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %masked_input = copy %input : reg<x86.gpr64> -> reg<x86.gpr64>
+  %value = and.imm.gpr64 %masked_input {imm32 = 63}
+  %shift_input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %count = copy %value : reg<x86.gpr64> -> reg<x86.rcx>
+  %result = shl.cl.gpr64 %shift_input, %count
+  return %result
+}
+
+// ----
+  mov rcx, rdi
+  and rcx, 63
+  mov rax, rcx
+  shl rax, cl
+  ret
+
+// ====
+
+// RUN: emit x86-asm @shift_shl_32 fixed=%value:physical_register:1:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @shift_shl_32(%value: reg<x86.gpr32>, %count: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %input = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
+  %count_register = copy %count : reg<x86.gpr32> -> reg<x86.ecx>
+  %result = shl.cl.gpr32 %input, %count_register
+  return %result
+}
+
+// ----
+  mov eax, ecx
+  mov ecx, esi
+  shl eax, cl
+  ret
+
+// ====
+
+// RUN: emit x86-asm @shift_shl_32 fixed=%value:physical_register:7:1 fixed=%count:physical_register:1:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @shift_shl_32(%value: reg<x86.gpr32>, %count: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %input = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
+  %count_register = copy %count : reg<x86.gpr32> -> reg<x86.ecx>
+  %result = shl.cl.gpr32 %input, %count_register
+  return %result
+}
+
+// ----
+  mov eax, edi
+  shl eax, cl
+  ret
+
+// ====
+
+// RUN: emit x86-asm @shift_shr_32 fixed=%value:physical_register:1:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @shift_shr_32(%value: reg<x86.gpr32>, %count: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %input = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
+  %count_register = copy %count : reg<x86.gpr32> -> reg<x86.ecx>
+  %result = shr.cl.gpr32 %input, %count_register
+  return %result
+}
+
+// ----
+  mov eax, ecx
+  mov ecx, esi
+  shr eax, cl
+  ret
+
+// ====
+
+// RUN: emit x86-asm @shift_shr_32 fixed=%value:physical_register:7:1 fixed=%count:physical_register:1:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @shift_shr_32(%value: reg<x86.gpr32>, %count: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %input = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
+  %count_register = copy %count : reg<x86.gpr32> -> reg<x86.ecx>
+  %result = shr.cl.gpr32 %input, %count_register
+  return %result
+}
+
+// ----
+  mov eax, edi
+  shr eax, cl
+  ret
+
+// ====
+
+// RUN: emit x86-asm @shift_sar_32 fixed=%value:physical_register:1:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @shift_sar_32(%value: reg<x86.gpr32>, %count: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %input = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
+  %count_register = copy %count : reg<x86.gpr32> -> reg<x86.ecx>
+  %result = sar.cl.gpr32 %input, %count_register
+  return %result
+}
+
+// ----
+  mov eax, ecx
+  mov ecx, esi
+  sar eax, cl
+  ret
+
+// ====
+
+// RUN: emit x86-asm @shift_sar_32 fixed=%value:physical_register:7:1 fixed=%count:physical_register:1:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @shift_sar_32(%value: reg<x86.gpr32>, %count: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %input = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
+  %count_register = copy %count : reg<x86.gpr32> -> reg<x86.ecx>
+  %result = sar.cl.gpr32 %input, %count_register
+  return %result
+}
+
+// ----
+  mov eax, edi
+  sar eax, cl
+  ret
+
+// ====
+
+// RUN: emit x86-asm @shift_shl_64 fixed=%value:physical_register:1:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @shift_shl_64(%value: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %count_register = copy %count : reg<x86.gpr64> -> reg<x86.rcx>
+  %result = shl.cl.gpr64 %input, %count_register
+  return %result
+}
+
+// ----
+  mov rax, rcx
+  mov rcx, rsi
+  shl rax, cl
+  ret
+
+// ====
+
+// RUN: emit x86-asm @shift_shl_64 fixed=%value:physical_register:7:1 fixed=%count:physical_register:1:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @shift_shl_64(%value: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %count_register = copy %count : reg<x86.gpr64> -> reg<x86.rcx>
+  %result = shl.cl.gpr64 %input, %count_register
+  return %result
+}
+
+// ----
+  mov rax, rdi
+  shl rax, cl
+  ret
+
+// ====
+
+// RUN: emit x86-asm @shift_shr_64 fixed=%value:physical_register:1:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @shift_shr_64(%value: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %count_register = copy %count : reg<x86.gpr64> -> reg<x86.rcx>
+  %result = shr.cl.gpr64 %input, %count_register
+  return %result
+}
+
+// ----
+  mov rax, rcx
+  mov rcx, rsi
+  shr rax, cl
+  ret
+
+// ====
+
+// RUN: emit x86-asm @shift_shr_64 fixed=%value:physical_register:7:1 fixed=%count:physical_register:1:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @shift_shr_64(%value: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %count_register = copy %count : reg<x86.gpr64> -> reg<x86.rcx>
+  %result = shr.cl.gpr64 %input, %count_register
+  return %result
+}
+
+// ----
+  mov rax, rdi
+  shr rax, cl
+  ret
+
+// ====
+
+// RUN: emit x86-asm @shift_sar_64 fixed=%value:physical_register:1:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @shift_sar_64(%value: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %count_register = copy %count : reg<x86.gpr64> -> reg<x86.rcx>
+  %result = sar.cl.gpr64 %input, %count_register
+  return %result
+}
+
+// ----
+  mov rax, rcx
+  mov rcx, rsi
+  sar rax, cl
+  ret
+
+// ====
+
+// RUN: emit x86-asm @shift_sar_64 fixed=%value:physical_register:7:1 fixed=%count:physical_register:1:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @shift_sar_64(%value: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %count_register = copy %count : reg<x86.gpr64> -> reg<x86.rcx>
+  %result = sar.cl.gpr64 %input, %count_register
+  return %result
+}
+
+// ----
+  mov rax, rdi
+  sar rax, cl
+  ret
+
+// ====
+
+// Immediate-form limits are verified on the instruction that owns them.
+// RUN: verify
+
+low.func.def target<x86.scalar.core> @immediate_count_too_wide(%value: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  // ERROR@+1: STRUCTURE/014
+  %result = shr.imm.gpr64 %value {shift = 64}
+  return %result
+}

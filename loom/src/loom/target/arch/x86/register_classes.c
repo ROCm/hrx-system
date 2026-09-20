@@ -86,12 +86,14 @@ iree_status_t loom_x86_descriptor_set_register_class_id(
 static iree_status_t loom_x86_register_class_from_name(
     iree_string_view_t register_class_name,
     loom_x86_register_class_t* out_register_class) {
-  if (iree_string_view_equal(register_class_name, IREE_SV("x86.gpr32"))) {
+  if (iree_string_view_equal(register_class_name, IREE_SV("x86.gpr32")) ||
+      iree_string_view_equal(register_class_name, IREE_SV("x86.ecx"))) {
     *out_register_class = LOOM_X86_REGISTER_CLASS_GPR32;
     return iree_ok_status();
   }
   if (iree_string_view_equal(register_class_name, IREE_SV("x86.gpr64")) ||
       iree_string_view_equal(register_class_name, IREE_SV("x86.rax")) ||
+      iree_string_view_equal(register_class_name, IREE_SV("x86.rcx")) ||
       iree_string_view_equal(register_class_name, IREE_SV("x86.rdx"))) {
     *out_register_class = LOOM_X86_REGISTER_CLASS_GPR64;
     return iree_ok_status();

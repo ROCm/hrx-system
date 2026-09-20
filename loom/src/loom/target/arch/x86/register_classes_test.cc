@@ -184,6 +184,46 @@ TEST(X86RegisterClassesTest, SharedScalarClassesAcrossViews) {
   ExpectDescriptorClass(avx512_descriptor_set, LOOM_X86_REGISTER_CLASS_GPR64);
 }
 
+TEST(X86RegisterClassesTest, CountClassesAliasTheSamePhysicalRegister) {
+  for (const auto* descriptor_set : {
+           loom_x86_scalar_core_descriptor_set(),
+           loom_x86_simd128_core_descriptor_set(),
+           loom_x86_avx2_core_descriptor_set(),
+           loom_x86_avx512_core_descriptor_set(),
+           loom_x86_avx512_packed_dot_core_descriptor_set(),
+       }) {
+    SCOPED_TRACE(ToString(loom_low_descriptor_set_string(
+        descriptor_set, descriptor_set->key_string_offset)));
+    uint16_t general_class_id = LOOM_LOW_REG_CLASS_NONE;
+    const loom_low_reg_class_t* general_class = nullptr;
+    ASSERT_TRUE(loom_low_descriptor_set_lookup_register_class(
+        descriptor_set, IREE_SV("x86.gpr64"), &general_class_id,
+        &general_class));
+    for (const auto count_name : {IREE_SV("x86.ecx"), IREE_SV("x86.rcx")}) {
+      SCOPED_TRACE(ToString(count_name));
+      uint16_t count_class_id = LOOM_LOW_REG_CLASS_NONE;
+      const loom_low_reg_class_t* count_class = nullptr;
+      ASSERT_TRUE(loom_low_descriptor_set_lookup_register_class(
+          descriptor_set, count_name, &count_class_id, &count_class));
+      EXPECT_EQ(count_class->allocatable_count, 1);
+      EXPECT_EQ(count_class->alias_set_id, general_class->alias_set_id);
+      EXPECT_TRUE(iree_any_bit_set(count_class->flags,
+                                   LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE));
+      EXPECT_EQ(loom_low_descriptor_set_physical_register_candidate(
+                    descriptor_set, count_class_id, 0),
+                1);
+      const bool is_word =
+          iree_string_view_equal(count_name, IREE_SV("x86.ecx"));
+      EXPECT_EQ(count_class->alloc_unit_bits, is_word ? 32 : 64);
+      loom_x86_register_class_t logical_class = LOOM_X86_REGISTER_CLASS_GPR32;
+      IREE_ASSERT_OK(loom_x86_descriptor_set_logical_register_class(
+          descriptor_set, count_class_id, &logical_class));
+      EXPECT_EQ(logical_class, is_word ? LOOM_X86_REGISTER_CLASS_GPR32
+                                       : LOOM_X86_REGISTER_CLASS_GPR64);
+    }
+  }
+}
+
 TEST(X86RegisterClassesTest, VectorClassesAcrossProfileViews) {
   const loom_low_descriptor_set_t* simd128_descriptor_set =
       loom_x86_simd128_core_descriptor_set();

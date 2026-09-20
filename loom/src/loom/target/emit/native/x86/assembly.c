@@ -632,12 +632,21 @@ static iree_status_t loom_x86_append_tied_binary_packet(
         IREE_STATUS_FAILED_PRECONDITION,
         "x86 tied binary result must share the left-hand physical register");
   }
-  IREE_RETURN_IF_ERROR(loom_x86_append_mnemonic(context));
+  const iree_string_view_t mnemonic = loom_x86_descriptor_mnemonic(context);
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_string(context->builder, mnemonic));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(context->builder, " "));
   IREE_RETURN_IF_ERROR(loom_x86_append_result(context, 0));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(context->builder, ", "));
+  if (iree_string_view_equal(mnemonic, IREE_SV("shl")) ||
+      iree_string_view_equal(mnemonic, IREE_SV("sar")) ||
+      iree_string_view_equal(mnemonic, IREE_SV("shr"))) {
+    // The descriptor's singleton count class binds ECX/RCX before allocation.
+    // Native shifts read its low byte regardless of the SSA carrier width.
+    return iree_string_builder_append_cstring(context->builder, "cl");
+  }
   return loom_x86_append_operand(context, 1);
 }
 

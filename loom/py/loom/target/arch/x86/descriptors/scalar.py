@@ -94,6 +94,8 @@ _GPR_NAMES = (
 )
 _REG_RAX = "x86.rax"
 _REG_RDX = "x86.rdx"
+_REG_ECX = "x86.ecx"
+_REG_RCX = "x86.rcx"
 
 
 def _gpr32_destructive_binary_descriptor(
@@ -187,6 +189,38 @@ def _gpr64_destructive_shift_descriptor(
         source=_gpr64_operand("lhs"),
         immediate=_SHIFT64_IMMEDIATE,
         asm_suffix="gpr64",
+    )
+
+
+def _gpr_count_shift_descriptor(
+    *,
+    mnemonic: str,
+    semantic: str,
+    bit_count: int,
+) -> Descriptor:
+    result = _gpr32_result() if bit_count == 32 else _gpr64_result()
+    lhs = _gpr32_operand("lhs") if bit_count == 32 else _gpr64_operand("lhs")
+    return Descriptor(
+        key=f"x86.scalar.{mnemonic}.cl.gpr{bit_count}",
+        mnemonic=mnemonic,
+        semantic_tag=f"integer.{semantic}.i{bit_count}",
+        operands=(
+            result,
+            lhs,
+            Operand(
+                "rhs",
+                OperandRole.OPERAND,
+                (RegClassAlt(_REG_ECX if bit_count == 32 else _REG_RCX),),
+            ),
+        ),
+        constraints=_GPR_DESTRUCTIVE_LHS_CONSTRAINTS,
+        asm_forms=_asm(
+            mnemonic=f"{mnemonic}.cl.gpr{bit_count}",
+            results=("dst",),
+            operands=("lhs", "rhs"),
+        ),
+        schedule_class=_SCHEDULE_SCALAR,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
 
@@ -519,6 +553,13 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         key="x86.scalar.shr.imm.gpr64",
         mnemonic="shr",
         semantic_tag="integer.shru.i64",
+    ),
+    *(
+        _gpr_count_shift_descriptor(
+            mnemonic=mnemonic, semantic=semantic, bit_count=bit_count
+        )
+        for bit_count in (32, 64)
+        for mnemonic, semantic in (("shl", "shl"), ("sar", "shrs"), ("shr", "shru"))
     ),
     _gpr64_to_gpr32_truncate_descriptor(),
     _gpr_select_descriptor(32),
@@ -965,6 +1006,22 @@ X86_SCALAR_DESCRIPTOR_SET = DescriptorSet(
                 physical_registers=(register,),
             )
             for register_class, register in ((_REG_RAX, "rax"), (_REG_RDX, "rdx"))
+        ),
+        # Count carriers preserve the source width while both classes occupy
+        # RCX. The shift instruction reads CL; ordinary copies use ECX/RCX.
+        *(
+            RegClass(
+                register_class,
+                bit_count,
+                SpillSlotSpace.STACK,
+                flags=(
+                    RegClassFlag.PHYSICAL,
+                    RegClassFlag.UNSPILLABLE,
+                    RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS,
+                ),
+                physical_registers=("rcx",),
+            )
+            for register_class, bit_count in ((_REG_ECX, 32), (_REG_RCX, 64))
         ),
     ),
     resources=(

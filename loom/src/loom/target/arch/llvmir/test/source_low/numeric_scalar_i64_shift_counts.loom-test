@@ -397,3 +397,111 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @wide_rig
   %signed = ashr.i64 %value, %count
   return %logical, %signed
 }
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+// All three shifts preserve their input and the count for later arithmetic.
+func.def target(@target) @word_shifts_reuse_input(%value: i32, %count: i32) -> (i32) {
+  %left = scalar.shli %value, %count : i32
+  %logical = scalar.shrui %value, %count : i32
+  %signed = scalar.shrsi %value, %count : i32
+  %directions = scalar.xori %left, %logical : i32
+  %combined = scalar.xori %directions, %signed : i32
+  %with_count = scalar.addi %combined, %count : i32
+  %result = scalar.xori %with_count, %value : i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @word_shifts_reuse_input(%value: reg<llvmir.i32>, %count: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm {
+  %left = shl.i32 %value, %count
+  %logical = lshr.i32 %value, %count
+  %signed = ashr.i32 %value, %count
+  %directions = xor.i32 %left, %logical
+  %combined = xor.i32 %directions, %signed
+  %with_count = add.i32 %combined, %count
+  %result = xor.i32 %with_count, %value
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def target(@target) @wide_shifts_reuse_counts(%value: i64, %left_count: i64, %right_count: i64) -> (i64) {
+  %left = scalar.shli %value, %left_count : i64
+  %logical = scalar.shrui %value, %right_count : i64
+  %signed = scalar.shrsi %left, %left_count : i64
+  %directions = scalar.xori %logical, %signed : i64
+  %with_left_count = scalar.addi %directions, %left_count : i64
+  %with_counts = scalar.addi %with_left_count, %right_count : i64
+  %result = scalar.xori %with_counts, %value : i64
+  func.return %result : i64
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @wide_shifts_reuse_counts(%value: reg<llvmir.i64>, %left_count: reg<llvmir.i64>, %right_count: reg<llvmir.i64>) -> (reg<llvmir.i64>) asm {
+  %left = shl.i64 %value, %left_count
+  %logical = lshr.i64 %value, %right_count
+  %signed = ashr.i64 %left, %left_count
+  %directions = xor.i64 %logical, %signed
+  %with_left_count = add.i64 %directions, %left_count
+  %with_counts = add.i64 %with_left_count, %right_count
+  %result = xor.i64 %with_counts, %value
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def target(@target) @wide_shift_value_is_count(%input: i64) -> (i64) {
+  %mask = scalar.constant 63 : i64
+  %value = scalar.andi %input, %mask : i64
+  %result = scalar.shli %value, %value : i64
+  func.return %result : i64
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @wide_shift_value_is_count(%input: reg<llvmir.i64>) -> (reg<llvmir.i64>) asm {
+  %mask = const.i64 63
+  %value = and.i64 %input, %mask
+  %result = shl.i64 %value, %value
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def target(@target) @index_shift_dynamic(%value: index, %count: index) -> (index, index) {
+  %left = index.shli %value, %count : index
+  %right = index.shrui %value, %count : index
+  func.return %left, %right : index, index
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @index_shift_dynamic(%value: reg<llvmir.i64>, %count: reg<llvmir.i64>) -> (reg<llvmir.i64>, reg<llvmir.i64>) asm {
+  %left = shl.i64 %value, %count
+  %right = lshr.i64 %value, %count
+  return %left, %right
+}
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def target(@target) @index_shift_constant_four(%value: index) -> (index) {
+  %count = index.constant 4 : index
+  %result = index.shli %value, %count : index
+  func.return %result : index
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @index_shift_constant_four(%value: reg<llvmir.i64>) -> (reg<llvmir.i64>) asm {
+  %count = const.i64 4
+  %result = shl.i64 %value, %count
+  return %result
+}

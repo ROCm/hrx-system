@@ -63,6 +63,7 @@ loom_check_test_suite(
     "test/high_product.loom-test"
     "test/lanes.loom-test"
     "test/schedule_scopes.loom-test"
+    "test/shifts.loom-test"
 )
 endif()
 

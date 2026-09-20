@@ -386,22 +386,22 @@ def _const_i1_rule(descriptor_lookup: _DescriptorLookup) -> DescriptorRule:
     )
 
 
-def _shift_imm_rule(
+def _shift_rules(
     source_op: Op,
     type_pattern: TypePattern,
-    descriptor_key: str,
+    operation: str,
+    bit_count: int,
     descriptor_lookup: _DescriptorLookup,
-    *,
-    maximum: int,
-) -> DescriptorRule:
-    descriptor = descriptor_lookup(descriptor_key)
-    return DescriptorRule(
+) -> Iterable[DescriptorRule]:
+    descriptor = descriptor_lookup(f"x86.scalar.{operation}.imm.gpr{bit_count}")
+    yield DescriptorRule(
         source_op=source_op,
         descriptor=descriptor,
+        priority=1,
         guards=(
             *_typed_guards(("lhs", "rhs", "result"), type_pattern),
             Guard.value_exact_i64("rhs"),
-            Guard.value_i64_range("rhs", 0, maximum),
+            Guard.value_i64_range("rhs", 0, bit_count - 1),
         ),
         emit=(
             _op_emit(
@@ -409,6 +409,25 @@ def _shift_imm_rule(
                 operands={"lhs": ValueRef.operand("lhs")},
                 results={"dst": ValueRef.result("result")},
                 immediates={"shift": ValueProject.exact_i64("rhs")},
+            ),
+        ),
+    )
+    descriptor = descriptor_lookup(f"x86.scalar.{operation}.cl.gpr{bit_count}")
+    yield DescriptorRule(
+        source_op=source_op,
+        descriptor=descriptor,
+        guards=_typed_guards(("lhs", "rhs", "result"), type_pattern),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={
+                    "lhs": ValueRef.operand("lhs"),
+                    "rhs": ValueRef.operand("rhs"),
+                },
+                results={"dst": ValueRef.result("result")},
+                # Bind only this use to the fixed count register. Other uses
+                # retain the original value's unconstrained register class.
+                copy_operands=("rhs",),
             ),
         ),
     )
@@ -1219,6 +1238,7 @@ def _shli_scale_rule(
     return DescriptorRule(
         source_op=index.index_shli,
         descriptor=descriptor,
+        priority=2,
         guards=(
             *_typed_guards(("lhs", "rhs", "result"), _INDEX),
             *_exact_i64_literal_guards("rhs", shift_amount),
@@ -1476,54 +1496,27 @@ def _cases() -> Sequence[ContractCase]:
             _select_rule(type_pattern, "x86.scalar.select.gpr64", descriptor_lookup)
             for type_pattern in (_I64, _INDEX, _OFFSET)
         ),
-        _shift_imm_rule(
-            scalar_bitwise.scalar_shli,
-            _I32,
-            "x86.scalar.shl.imm.gpr32",
-            descriptor_lookup,
-            maximum=31,
+        *(
+            rule
+            for type_pattern, bit_count in ((_I32, 32), (_I64, 64))
+            for source_op, operation in (
+                (scalar_bitwise.scalar_shli, "shl"),
+                (scalar_bitwise.scalar_shrsi, "sar"),
+                (scalar_bitwise.scalar_shrui, "shr"),
+            )
+            for rule in _shift_rules(
+                source_op, type_pattern, operation, bit_count, descriptor_lookup
+            )
         ),
-        _shift_imm_rule(
-            scalar_bitwise.scalar_shrsi,
-            _I32,
-            "x86.scalar.sar.imm.gpr32",
-            descriptor_lookup,
-            maximum=31,
-        ),
-        _shift_imm_rule(
-            scalar_bitwise.scalar_shrui,
-            _I32,
-            "x86.scalar.shr.imm.gpr32",
-            descriptor_lookup,
-            maximum=31,
-        ),
-        _shift_imm_rule(
-            scalar_bitwise.scalar_shli,
-            _I64,
-            "x86.scalar.shl.imm.gpr64",
-            descriptor_lookup,
-            maximum=63,
-        ),
-        _shift_imm_rule(
-            scalar_bitwise.scalar_shrsi,
-            _I64,
-            "x86.scalar.sar.imm.gpr64",
-            descriptor_lookup,
-            maximum=63,
-        ),
-        _shift_imm_rule(
-            scalar_bitwise.scalar_shrui,
-            _I64,
-            "x86.scalar.shr.imm.gpr64",
-            descriptor_lookup,
-            maximum=63,
-        ),
-        _shift_imm_rule(
-            index.index_shrui,
-            _INDEX,
-            "x86.scalar.shr.imm.gpr64",
-            descriptor_lookup,
-            maximum=63,
+        *(
+            rule
+            for source_op, operation in (
+                (index.index_shli, "shl"),
+                (index.index_shrui, "shr"),
+            )
+            for rule in _shift_rules(
+                source_op, _INDEX, operation, 64, descriptor_lookup
+            )
         ),
         *(
             _integer_compare_rule(

@@ -68,9 +68,18 @@ x86.target<avx2> @target
 func.def target(@target) @scalar_i64_shli_vgpr(%value_values: vector<2xi64>, %shift_values: vector<2xi64>) -> (i64) {
   %value = vector.extract %value_values[0] : vector<2xi64> -> i64
   %shift = vector.extract %shift_values[0] : vector<2xi64> -> i64
-  // ERROR@+1: TARGET/003 {op_name="scalar.shli", subject_role="value_fact", subject_name="rhs", constraint_key="exact_i64"}
   %shifted = scalar.shli %value, %shift : i64
   func.return %shifted : i64
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @scalar_i64_shli_vgpr(%value_values: reg<x86.xmm>, %shift_values: reg<x86.xmm>) -> (reg<x86.gpr64>) asm {
+  %value = vpextrq.xmm %value_values, 0
+  %shift = vpextrq.xmm %shift_values, 0
+  %11 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %12 = copy %shift : reg<x86.gpr64> -> reg<x86.rcx>
+  %shifted = shl.cl.gpr64 %11, %12
+  return %shifted
 }
 
 // ====
@@ -254,9 +263,16 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @scalar_i64_mul
 x86.target<avx2> @target
 
 func.def target(@target) @scalar_i64_shli_uniform(%lhs: i64, %rhs: i64) -> (i64) {
-  // ERROR@+1: TARGET/003 {op_name="scalar.shli", subject_role="value_fact", subject_name="rhs", constraint_key="exact_i64"}
   %result = scalar.shli %lhs, %rhs : i64
   func.return %result : i64
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @scalar_i64_shli_uniform(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %7 = copy %lhs : reg<x86.gpr64> -> reg<x86.gpr64>
+  %8 = copy %rhs : reg<x86.gpr64> -> reg<x86.rcx>
+  %result = shl.cl.gpr64 %7, %8
+  return %result
 }
 
 // ====

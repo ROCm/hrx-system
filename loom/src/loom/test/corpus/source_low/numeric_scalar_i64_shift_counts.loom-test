@@ -195,3 +195,55 @@ func.def @wide_right_shift_crossing_words(%value: i64, %count_input: i64) -> (i6
   %signed = scalar.shrsi %value, %count : i64
   func.return %logical, %signed : i64, i64
 }
+
+// ====
+
+// All three shifts preserve their input and the count for later arithmetic.
+func.def @word_shifts_reuse_input(%value: i32, %count: i32) -> (i32) {
+  %left = scalar.shli %value, %count : i32
+  %logical = scalar.shrui %value, %count : i32
+  %signed = scalar.shrsi %value, %count : i32
+  %directions = scalar.xori %left, %logical : i32
+  %combined = scalar.xori %directions, %signed : i32
+  %with_count = scalar.addi %combined, %count : i32
+  %result = scalar.xori %with_count, %value : i32
+  func.return %result : i32
+}
+
+// ====
+
+func.def @wide_shifts_reuse_counts(%value: i64, %left_count: i64, %right_count: i64) -> (i64) {
+  %left = scalar.shli %value, %left_count : i64
+  %logical = scalar.shrui %value, %right_count : i64
+  %signed = scalar.shrsi %left, %left_count : i64
+  %directions = scalar.xori %logical, %signed : i64
+  %with_left_count = scalar.addi %directions, %left_count : i64
+  %with_counts = scalar.addi %with_left_count, %right_count : i64
+  %result = scalar.xori %with_counts, %value : i64
+  func.return %result : i64
+}
+
+// ====
+
+func.def @wide_shift_value_is_count(%input: i64) -> (i64) {
+  %mask = scalar.constant 63 : i64
+  %value = scalar.andi %input, %mask : i64
+  %result = scalar.shli %value, %value : i64
+  func.return %result : i64
+}
+
+// ====
+
+func.def @index_shift_dynamic(%value: index, %count: index) -> (index, index) {
+  %left = index.shli %value, %count : index
+  %right = index.shrui %value, %count : index
+  func.return %left, %right : index, index
+}
+
+// ====
+
+func.def @index_shift_constant_four(%value: index) -> (index) {
+  %count = index.constant 4 : index
+  %result = index.shli %value, %count : index
+  func.return %result : index
+}
