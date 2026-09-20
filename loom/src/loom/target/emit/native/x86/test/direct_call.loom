@@ -14,6 +14,8 @@ func.decl retain import("native", "external_add_one") target(@target) @external(
 
 func.decl retain import("native", "external_sum_eight") target(@target) @external_eight(%a: i64, %b: i64, %c: i64, %d: i64, %e: i64, %f: i64, %g: i64, %h: i64) -> (i64)
 
+func.decl retain import("native", "external_sum_sixteen") target(@target) @external_sixteen(%a: i64, %b: i64, %c: i64, %d: i64, %e: i64, %f: i64, %g: i64, %h: i64, %i: i64, %j: i64, %k: i64, %l: i64, %m: i64, %n: i64, %o: i64, %p: i64) -> (i64)
+
 func.def public target(@target) @loom_direct_call_test(%value: i64) -> (i64) {
   %doubled = func.call @double(%value) : (i64) -> (i64)
   %result = func.call @external(%doubled) : (i64) -> (i64)
@@ -39,6 +41,21 @@ func.def public target(@target) @loom_direct_call_stress(%a: i64, %b: i64, %c: i
   %sum_gg = scalar.addi %sum_ff, %gg : i64
   %sum_hh = scalar.addi %sum_gg, %hh : i64
   func.return %sum_hh : i64
+}
+
+func.def public target(@target) @loom_direct_call_sixteen(%a: i64, %b: i64, %c: i64, %d: i64, %e: i64, %f: i64, %g: i64, %h: i64, %i: i64, %j: i64, %k: i64, %l: i64, %m: i64, %n: i64, %o: i64, %p: i64) -> (i64) {
+  %call = func.call @external_sixteen(%a, %b, %c, %d, %e, %f, %g, %h, %i, %j, %k, %l, %m, %n, %o, %p) : (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) -> (i64)
+  %sum_g = scalar.addi %call, %g : i64
+  %sum_h = scalar.addi %sum_g, %h : i64
+  %sum_i = scalar.addi %sum_h, %i : i64
+  %sum_j = scalar.addi %sum_i, %j : i64
+  %sum_k = scalar.addi %sum_j, %k : i64
+  %sum_l = scalar.addi %sum_k, %l : i64
+  %sum_m = scalar.addi %sum_l, %m : i64
+  %sum_n = scalar.addi %sum_m, %n : i64
+  %sum_o = scalar.addi %sum_n, %o : i64
+  %sum_p = scalar.addi %sum_o, %p : i64
+  func.return %sum_p : i64
 }
 
 func.def public target(@target) @loom_view_call(%input: buffer) -> (i32) {

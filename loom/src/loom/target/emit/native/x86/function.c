@@ -709,20 +709,11 @@ static iree_status_t loom_x86_function_frame_slot_offset(
     int32_t* out_offset) {
   IREE_ASSERT_LT(slot_index, state->plan->slot_count);
   const loom_x86_sysv_frame_slot_t* slot = &state->plan->slots[slot_index];
-  uint64_t byte_offset = slot->byte_offset;
-  if (slot->kind == LOOM_X86_SYSV_FRAME_SLOT_INCOMING_ARGUMENT) {
-    if (state->plan->frame_size > UINT64_MAX - 8u ||
-        state->plan->frame_size + 8u > UINT64_MAX - slot->byte_offset) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "x86 incoming argument offset overflows");
-    }
-    byte_offset = state->plan->frame_size + 8u + slot->byte_offset;
-  }
-  if (byte_offset > INT32_MAX) {
+  if (slot->byte_offset > INT32_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "x86 frame slot offset is outside disp32");
   }
-  *out_offset = (int32_t)byte_offset;
+  *out_offset = (int32_t)slot->byte_offset;
   return iree_ok_status();
 }
 
@@ -1007,6 +998,64 @@ static iree_status_t loom_x86_function_encode_storage_transfer(
   return iree_ok_status();
 }
 
+static iree_status_t loom_x86_function_stack_memory(
+    const loom_x86_function_encode_state_t* state, int64_t raw_byte_offset,
+    bool incoming, loom_x86_memory_operand_t* out_memory) {
+  IREE_ASSERT_GE(raw_byte_offset, 0);
+  IREE_ASSERT_LE((uint64_t)raw_byte_offset, UINT32_MAX);
+  uint64_t byte_offset = (uint32_t)raw_byte_offset;
+  if (incoming && (!iree_checked_add_u64(byte_offset, state->plan->frame_size,
+                                         &byte_offset) ||
+                   !iree_checked_add_u64(byte_offset, 8, &byte_offset))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "x86 incoming argument offset overflows");
+  }
+  if (byte_offset > INT32_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "x86 stack argument offset is outside disp32");
+  }
+  *out_memory = (loom_x86_memory_operand_t){
+      .displacement = (int32_t)byte_offset,
+      .base_register = LOOM_X86_SYSV_GPR_RSP,
+      .has_base = true,
+  };
+  return iree_ok_status();
+}
+
+static iree_status_t loom_x86_function_encode_stack_argument(
+    loom_x86_function_encode_state_t* state,
+    const loom_low_packet_view_t* packet) {
+  uint32_t physical_register = 0;
+  loom_x86_register_class_t register_class = 0;
+  IREE_RETURN_IF_ERROR(loom_x86_function_packet_result_register(
+      state, packet, 0, &physical_register, &register_class));
+  loom_x86_memory_operand_t memory = {0};
+  IREE_RETURN_IF_ERROR(loom_x86_function_stack_memory(
+      state, loom_low_func_stack_arg_byte_offset(packet->node->op), true,
+      &memory));
+  loom_x86_function_encode_memory_modrm(
+      state, 0x8B, register_class == LOOM_X86_REGISTER_CLASS_GPR64,
+      physical_register, &memory, false);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_x86_function_encode_call_argument(
+    loom_x86_function_encode_state_t* state,
+    const loom_low_packet_view_t* packet) {
+  uint32_t physical_register = 0;
+  loom_x86_register_class_t register_class = 0;
+  IREE_RETURN_IF_ERROR(loom_x86_function_packet_operand_register(
+      state, packet, 0, &physical_register, &register_class));
+  loom_x86_memory_operand_t memory = {0};
+  IREE_RETURN_IF_ERROR(loom_x86_function_stack_memory(
+      state, loom_low_func_call_arg_byte_offset(packet->node->op), false,
+      &memory));
+  loom_x86_function_encode_memory_modrm(
+      state, 0x89, register_class == LOOM_X86_REGISTER_CLASS_GPR64,
+      physical_register, &memory, false);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_x86_function_encode_structural_packet(
     loom_x86_function_encode_state_t* state,
     const loom_low_packet_view_t* packet) {
@@ -1021,6 +1070,12 @@ static iree_status_t loom_x86_function_encode_structural_packet(
   }
   if (loom_low_spill_isa(op) || loom_low_reload_isa(op)) {
     return loom_x86_function_encode_storage_transfer(state, packet);
+  }
+  if (loom_low_func_stack_arg_isa(op)) {
+    return loom_x86_function_encode_stack_argument(state, packet);
+  }
+  if (loom_low_func_call_arg_isa(op)) {
+    return loom_x86_function_encode_call_argument(state, packet);
   }
   if (loom_low_func_call_isa(op)) {
     return loom_x86_function_encode_call(state, packet);

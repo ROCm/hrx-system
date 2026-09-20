@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/ir/module.h"
+#include "loom/ops/low/ops.h"
 #include "loom/target/arch/x86/register_classes.h"
 #include "loom/target/registers.h"
 
@@ -295,6 +296,55 @@ iree_status_t loom_x86_sysv_abi_layout_parse(
       .stack_argument_bytes = (uint32_t)stack_argument_bytes,
   };
   return iree_ok_status();
+}
+
+iree_status_t loom_x86_sysv_abi_function_layout_parse(
+    const loom_module_t* module,
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_op_t* function_op, iree_arena_allocator_t* scratch_arena,
+    loom_x86_sysv_abi_layout_t* out_layout) {
+  const loom_func_like_t function =
+      loom_func_like_const_cast(module, function_op);
+  uint16_t argument_count = 0;
+  const loom_value_id_t* argument_ids =
+      loom_func_like_arg_ids(function, &argument_count);
+  const uint16_t result_count = function_op->result_count;
+  const loom_value_id_t* result_ids = loom_op_const_results(function_op);
+  loom_type_t* argument_types = NULL;
+  loom_type_t* result_types = NULL;
+  if (argument_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        scratch_arena, argument_count, sizeof(*argument_types),
+        (void**)&argument_types));
+    for (uint16_t i = 0; i < argument_count; ++i) {
+      argument_types[i] = loom_module_value_type(module, argument_ids[i]);
+    }
+  }
+  if (result_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(scratch_arena, result_count,
+                                                   sizeof(*result_types),
+                                                   (void**)&result_types));
+    for (uint16_t i = 0; i < result_count; ++i) {
+      result_types[i] = loom_module_value_type(module, result_ids[i]);
+    }
+  }
+
+  loom_named_attr_slice_t attrs = loom_named_attr_slice_empty();
+  if (loom_low_func_def_isa(function_op)) {
+    attrs = loom_low_func_def_abi_layout(function_op);
+  } else if (loom_low_func_decl_isa(function_op)) {
+    attrs = loom_low_func_decl_abi_layout(function_op);
+  } else {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "x86 SysV ABI layout requires a low function");
+  }
+  if (attrs.count == 0) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "x86 SysV function has no retained ABI layout");
+  }
+  return loom_x86_sysv_abi_layout_parse(
+      module, descriptor_set, attrs, argument_types, argument_count,
+      result_types, result_count, scratch_arena, out_layout);
 }
 
 bool loom_x86_sysv_gpr_is_caller_saved(uint32_t physical_register) {

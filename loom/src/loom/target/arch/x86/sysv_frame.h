@@ -20,16 +20,12 @@ extern "C" {
 #endif
 
 enum loom_x86_sysv_frame_slot_kind_e {
-  // Argument bytes above the entry return address and allocated frame.
-  LOOM_X86_SYSV_FRAME_SLOT_INCOMING_ARGUMENT = 0,
-  // Argument bytes at the current stack pointer before a call.
-  LOOM_X86_SYSV_FRAME_SLOT_OUTGOING_ARGUMENT = 1,
   // Storage preserving a caller-clobbered register across a call.
-  LOOM_X86_SYSV_FRAME_SLOT_CALLER_SAVE = 2,
+  LOOM_X86_SYSV_FRAME_SLOT_CALLER_SAVE = 0,
   // Storage breaking a parallel register-move cycle.
-  LOOM_X86_SYSV_FRAME_SLOT_MOVE_SCRATCH = 3,
+  LOOM_X86_SYSV_FRAME_SLOT_MOVE_SCRATCH = 1,
   // Storage preserving a register owned by the caller.
-  LOOM_X86_SYSV_FRAME_SLOT_CALLEE_SAVE = 4,
+  LOOM_X86_SYSV_FRAME_SLOT_CALLEE_SAVE = 2,
 };
 typedef uint8_t loom_x86_sysv_frame_slot_kind_t;
 
@@ -93,7 +89,7 @@ typedef struct loom_x86_sysv_frame_plan_t {
   uint64_t stack_storage_offset;
   // Bytes occupied by generic low stack storage.
   uint64_t stack_storage_size;
-  // Addressable ABI and preservation slots.
+  // Addressable preservation and move-scratch slots.
   const loom_x86_sysv_frame_slot_t* slots;
   // Number of entries in |slots|.
   uint32_t slot_count;

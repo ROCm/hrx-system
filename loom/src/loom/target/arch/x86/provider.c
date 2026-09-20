@@ -9,6 +9,7 @@
 #include "loom/pass/builder.h"
 #include "loom/target/arch/x86/descriptors/low_registry.h"
 #include "loom/target/arch/x86/legalization.h"
+#include "loom/target/arch/x86/low_verify.h"
 #include "loom/target/arch/x86/lower/lower.h"
 #include "loom/target/arch/x86/math_policy.h"
 #include "loom/target/arch/x86/ops/ops.h"
@@ -18,6 +19,10 @@
 
 static const loom_target_legalizer_provider_t* kLoomX86LegalizerProviders[] = {
     &loom_x86_target_legalizer_provider_storage,
+};
+
+static const loom_low_verify_provider_t* const kLoomX86LowVerifyProviders[] = {
+    &loom_x86_low_verify_provider,
 };
 
 static const loom_target_emitter_t* const kLoomX86Emitters[] = {
@@ -62,6 +67,11 @@ const loom_target_provider_t loom_x86_target_provider = {
         {
             .count = IREE_ARRAYSIZE(kLoomX86LegalizerProviders),
             .values = kLoomX86LegalizerProviders,
+        },
+    .low_verify_provider_list =
+        {
+            .count = IREE_ARRAYSIZE(kLoomX86LowVerifyProviders),
+            .values = kLoomX86LowVerifyProviders,
         },
     .target_fact_type = &loom_x86_target_fact_type,
 };

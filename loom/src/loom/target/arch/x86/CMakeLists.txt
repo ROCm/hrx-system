@@ -10,6 +10,29 @@
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_X86)
+loom_generated_cc_library(
+  NAME
+    error_defs
+  GENERATOR
+    loom::py::loom::gen::error::c_errors
+  SOURCE
+    "error_catalog.c"
+  GENERATED_HDR_FLAGS
+    "--header"
+  GENERATED_HDRS
+    "error_catalog.h"
+  ARGS
+    "--catalog-symbol=loom_x86_error_catalog"
+    "--fallback-catalog-symbol=loom_error_catalog_core"
+    "--fallback-public-header=loom/error/error_catalog.h"
+    "--public-header=loom/target/arch/x86/error_catalog.h"
+    "--shard=x86"
+  DEPS
+    loom::error::error_defs
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
 loom_cc_library(
   NAME
     sysv_abi
@@ -23,7 +46,31 @@ loom_cc_library(
     iree::base::internal::arena
     loom::codegen::low::descriptors
     loom::ir
+    loom::ops::low
     loom::target::registers
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
+loom_cc_library(
+  NAME
+    low_verify
+  HDRS
+    "low_verify.h"
+  SRCS
+    "low_verify.c"
+  DEPS
+    ::error_defs
+    ::sysv_abi
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::diagnostics
+    loom::codegen::low::verify
+    loom::ir
+    loom::ops::low
+    loom::ops::op_defs
+    loom::target::arch::x86::ops
   PUBLIC
 )
 endif()
@@ -41,6 +88,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::analysis::symbol_facts
+    loom::analysis::symbol_references
     loom::codegen::low::pipeline::pass_environment
     loom::codegen::low::target_binding
     loom::ir
@@ -229,6 +277,7 @@ loom_cc_library(
     "provider.c"
   DEPS
     ::legalization
+    ::low_verify
     ::math_policy
     ::pass_registry
     iree::base
@@ -281,6 +330,7 @@ loom_check_test_suite(
     "test/source_low/callable_values.loom-test"
     "test/source_low/carried_counter_store.loom-test"
     "test/source_low/loop_counter_offset.loom-test"
+    "test/source_low/low_verify_diagnostics.loom-test"
     "test/source_low/memory_wide_carriers.loom-test"
     "test/source_low/memory_wide_offsets.loom-test"
     "test/source_low/numeric_address_widening.loom-test"

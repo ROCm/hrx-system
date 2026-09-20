@@ -13,10 +13,23 @@ int64_t external_sum_eight(int64_t a, int64_t b, int64_t c, int64_t d,
   return a + b + c + d + e + f + g + h;
 }
 
+int64_t external_sum_sixteen(int64_t a, int64_t b, int64_t c, int64_t d,
+                             int64_t e, int64_t f, int64_t g, int64_t h,
+                             int64_t i, int64_t j, int64_t k, int64_t l,
+                             int64_t m, int64_t n, int64_t o, int64_t p) {
+  return a + b + c + d + e + f + g + h + i + j + k + l + m + n + o + p;
+}
+
 extern int64_t loom_direct_call_test(int64_t value);
 extern int64_t loom_direct_call_stress(int64_t a, int64_t b, int64_t c,
                                        int64_t d, int64_t e, int64_t f,
                                        int64_t g, int64_t h);
+extern int64_t loom_direct_call_sixteen(int64_t a, int64_t b, int64_t c,
+                                        int64_t d, int64_t e, int64_t f,
+                                        int64_t g, int64_t h, int64_t i,
+                                        int64_t j, int64_t k, int64_t l,
+                                        int64_t m, int64_t n, int64_t o,
+                                        int64_t p);
 extern int32_t loom_view_call(const int32_t* input);
 extern int32_t loom_selected_view_call(const int32_t* first,
                                        const int32_t* second,
@@ -30,6 +43,10 @@ int main(void) {
     return 1;
   }
   if (loom_direct_call_stress(1, 2, 3, 4, 5, 6, 7, 8) != 108) {
+    return 1;
+  }
+  if (loom_direct_call_sixteen(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
+                               15, 16) != 251) {
     return 1;
   }
   const int32_t first[] = {10, 11, 12};

@@ -16,6 +16,7 @@ GENERATOR_VISIBILITY = [
     "//loom/src/loom/error:__pkg__",
     "//loom/src/loom/target/arch/amdgpu:__pkg__",
     "//loom/src/loom/target/arch/spirv:__pkg__",
+    "//loom/src/loom/target/arch/x86:__pkg__",
     "//loom/src/loom/target/emit/wasm:__pkg__",
 ]
 

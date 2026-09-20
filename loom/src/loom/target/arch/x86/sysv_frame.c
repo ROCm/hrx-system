@@ -58,8 +58,6 @@ typedef struct loom_x86_sysv_frame_build_t {
   loom_x86_sysv_return_plan_t* return_plans;
   loom_x86_sysv_frame_slot_t* slots;
   uint32_t slot_capacity;
-  uint32_t outgoing_slot_base;
-  uint32_t incoming_slot_base;
   uint32_t caller_gpr_slots[LOOM_X86_SYSV_GPR_COUNT];
   uint32_t caller_vector_slots[LOOM_X86_SYSV_VECTOR_REGISTER_COUNT];
   uint32_t caller_mask_slots[LOOM_X86_SYSV_MASK_REGISTER_COUNT];
@@ -77,53 +75,14 @@ typedef struct loom_x86_sysv_frame_build_t {
   uint16_t callee_gpr_mask;
 } loom_x86_sysv_frame_build_t;
 
-static iree_status_t loom_x86_sysv_frame_function_layout(
-    const loom_low_emission_frame_t* frame, const loom_op_t* function_op,
-    iree_arena_allocator_t* scratch_arena,
-    loom_x86_sysv_abi_layout_t* out_layout) {
-  const loom_module_t* module = frame->module;
-  const loom_func_like_t function =
-      loom_func_like_const_cast(module, function_op);
-  uint16_t argument_count = 0;
-  const loom_value_id_t* argument_ids =
-      loom_func_like_arg_ids(function, &argument_count);
-  const uint16_t result_count = function_op->result_count;
-  const loom_value_id_t* result_ids = loom_op_const_results(function_op);
-  loom_type_t* argument_types = NULL;
-  loom_type_t* result_types = NULL;
-  if (argument_count != 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        scratch_arena, argument_count, sizeof(*argument_types),
-        (void**)&argument_types));
-    for (iree_host_size_t i = 0; i < argument_count; ++i) {
-      argument_types[i] = loom_module_value_type(module, argument_ids[i]);
-    }
+static uint32_t loom_x86_sysv_abi_register_argument_count(
+    const loom_x86_sysv_abi_layout_t* layout) {
+  uint32_t count = 0;
+  for (iree_host_size_t i = 0; i < layout->argument_count; ++i) {
+    count +=
+        loom_x86_sysv_abi_location_is_register(layout->argument_locations[i]);
   }
-  if (result_count != 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(scratch_arena, result_count,
-                                                   sizeof(*result_types),
-                                                   (void**)&result_types));
-    for (iree_host_size_t i = 0; i < result_count; ++i) {
-      result_types[i] = loom_module_value_type(module, result_ids[i]);
-    }
-  }
-
-  loom_named_attr_slice_t attrs = loom_named_attr_slice_empty();
-  if (loom_low_func_def_isa(function_op)) {
-    attrs = loom_low_func_def_abi_layout(function_op);
-  } else if (loom_low_func_decl_isa(function_op)) {
-    attrs = loom_low_func_decl_abi_layout(function_op);
-  } else {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "x86 SysV frame requires a low function");
-  }
-  if (attrs.count == 0) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "x86 SysV function has no retained ABI layout");
-  }
-  return loom_x86_sysv_abi_layout_parse(
-      module, frame->target.descriptor_set, attrs, argument_types,
-      argument_count, result_types, result_count, scratch_arena, out_layout);
+  return count;
 }
 
 static iree_status_t loom_x86_sysv_frame_call_layouts(
@@ -143,9 +102,9 @@ static iree_status_t loom_x86_sysv_frame_call_layouts(
     const loom_symbol_ref_t callee_ref = loom_low_func_call_callee(call_op);
     const loom_op_t* callee_op =
         build->frame->module->symbols.entries[callee_ref.symbol_id].defining_op;
-    IREE_RETURN_IF_ERROR(loom_x86_sysv_frame_function_layout(
-        build->frame, callee_op, build->scratch_arena,
-        &build->calls[i].abi_layout));
+    IREE_RETURN_IF_ERROR(loom_x86_sysv_abi_function_layout_parse(
+        build->frame->module, build->frame->target.descriptor_set, callee_op,
+        build->scratch_arena, &build->calls[i].abi_layout));
     *out_max_outgoing_bytes =
         iree_max(*out_max_outgoing_bytes,
                  build->calls[i].abi_layout.stack_argument_bytes);
@@ -358,12 +317,16 @@ static uint32_t loom_x86_sysv_frame_caller_slot_count(
 
 static bool loom_x86_sysv_frame_may_need_cycle_slot(
     const loom_x86_sysv_frame_build_t* build) {
-  if (build->plan->abi_layout.argument_count >= 2) {
+  const uint32_t entry_register_count =
+      loom_x86_sysv_abi_register_argument_count(&build->plan->abi_layout);
+  if (entry_register_count >= 2) {
     return true;
   }
   for (uint32_t i = 0; i < build->plan->call_count; ++i) {
     const loom_x86_sysv_call_build_t* call = &build->calls[i];
-    if (call->abi_layout.argument_count >= 2 ||
+    const uint32_t call_register_count =
+        loom_x86_sysv_abi_register_argument_count(&call->abi_layout);
+    if (call_register_count >= 2 ||
         call->abi_layout.result_count +
                 loom_x86_sysv_frame_call_preserved_count(call) >=
             2) {
@@ -393,26 +356,6 @@ static iree_status_t loom_x86_sysv_frame_append_slot(
       .byte_alignment = (uint16_t)byte_alignment,
   };
   *out_slot_index = slot_index;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_x86_sysv_frame_allocate_argument_slots(
-    loom_x86_sysv_frame_build_t* build, uint32_t max_outgoing_bytes) {
-  build->outgoing_slot_base = build->plan->slot_count;
-  for (uint32_t offset = 0; offset < max_outgoing_bytes; offset += 8) {
-    uint32_t slot_index = 0;
-    IREE_RETURN_IF_ERROR(loom_x86_sysv_frame_append_slot(
-        build, LOOM_X86_SYSV_FRAME_SLOT_OUTGOING_ARGUMENT, offset, 8, 8,
-        &slot_index));
-  }
-  build->incoming_slot_base = build->plan->slot_count;
-  for (uint32_t offset = 0;
-       offset < build->plan->abi_layout.stack_argument_bytes; offset += 8) {
-    uint32_t slot_index = 0;
-    IREE_RETURN_IF_ERROR(loom_x86_sysv_frame_append_slot(
-        build, LOOM_X86_SYSV_FRAME_SLOT_INCOMING_ARGUMENT, offset, 8, 8,
-        &slot_index));
-  }
   return iree_ok_status();
 }
 
@@ -588,18 +531,12 @@ static loom_low_move_location_t loom_x86_sysv_frame_assignment_location(
 }
 
 static loom_low_move_location_t loom_x86_sysv_frame_abi_location(
-    loom_x86_sysv_frame_build_t* build, loom_type_t type, int64_t abi_location,
-    uint32_t stack_slot_base) {
+    loom_type_t type, int64_t abi_location) {
+  IREE_ASSERT(loom_x86_sysv_abi_location_is_register(abi_location));
   const uint16_t descriptor_reg_class_id =
       loom_low_register_type_class_id(type);
-  if (loom_x86_sysv_abi_location_is_register(abi_location)) {
-    return loom_x86_sysv_frame_register_location(descriptor_reg_class_id,
-                                                 (uint32_t)abi_location);
-  }
-  const uint32_t byte_offset =
-      loom_x86_sysv_abi_stack_location_offset(abi_location);
-  return loom_x86_sysv_frame_slot_location(descriptor_reg_class_id,
-                                           stack_slot_base + byte_offset / 8);
+  return loom_x86_sysv_frame_register_location(descriptor_reg_class_id,
+                                               (uint32_t)abi_location);
 }
 
 static iree_status_t loom_x86_sysv_frame_append_entry_moves(
@@ -609,21 +546,27 @@ static iree_status_t loom_x86_sysv_frame_append_entry_moves(
   uint16_t argument_count = 0;
   const loom_value_id_t* argument_ids =
       loom_func_like_arg_ids(function, &argument_count);
+  uint32_t move_count = 0;
   for (iree_host_size_t i = 0; i < argument_count; ++i) {
+    const int64_t abi_location = build->plan->abi_layout.argument_locations[i];
+    if (!loom_x86_sysv_abi_location_is_register(abi_location)) {
+      continue;
+    }
     const loom_value_id_t value_id = argument_ids[i];
     const loom_low_allocation_assignment_t* assignment =
-        loom_low_allocation_map_active_value_assignment(
+        loom_low_allocation_try_map_active_value_assignment(
             &build->frame->allocation, value_id, NULL);
+    if (assignment == NULL) {
+      continue;
+    }
     const loom_type_t type =
         loom_module_value_type(build->frame->module, value_id);
-    build->move_scratch.moves[i] = (loom_low_move_t){
+    build->move_scratch.moves[move_count++] = (loom_low_move_t){
         .destination = loom_x86_sysv_frame_assignment_location(assignment),
-        .source = loom_x86_sysv_frame_abi_location(
-            build, type, build->plan->abi_layout.argument_locations[i],
-            build->incoming_slot_base),
+        .source = loom_x86_sysv_frame_abi_location(type, abi_location),
     };
   }
-  return loom_x86_sysv_frame_resolve_moves(build, (uint32_t)argument_count,
+  return loom_x86_sysv_frame_resolve_moves(build, move_count,
                                            &build->plan->entry_moves);
 }
 
@@ -707,23 +650,28 @@ static iree_status_t loom_x86_sysv_frame_append_call_arguments(
     loom_x86_sysv_frame_build_t* build, const loom_op_t* call_op,
     const loom_x86_sysv_abi_layout_t* layout,
     loom_x86_sysv_frame_move_range_t* out_range) {
-  const loom_value_id_t* operands = loom_op_const_operands(call_op);
-  for (uint16_t i = 0; i < call_op->operand_count; ++i) {
-    const loom_value_id_t value_id = operands[i];
+  const loom_value_slice_t operands = loom_low_func_call_operands(call_op);
+  uint32_t move_count = 0;
+  iree_host_size_t operand_index = 0;
+  for (iree_host_size_t i = 0; i < layout->argument_count; ++i) {
+    const int64_t abi_location = layout->argument_locations[i];
+    if (!loom_x86_sysv_abi_location_is_register(abi_location)) {
+      continue;
+    }
+    IREE_ASSERT_LT(operand_index, operands.count);
+    const loom_value_id_t value_id = operands.values[operand_index++];
     const loom_low_allocation_assignment_t* assignment =
         loom_low_allocation_map_active_value_assignment(
             &build->frame->allocation, value_id, NULL);
     const loom_type_t type =
         loom_module_value_type(build->frame->module, value_id);
-    build->move_scratch.moves[i] = (loom_low_move_t){
-        .destination = loom_x86_sysv_frame_abi_location(
-            build, type, layout->argument_locations[i],
-            build->outgoing_slot_base),
+    build->move_scratch.moves[move_count++] = (loom_low_move_t){
+        .destination = loom_x86_sysv_frame_abi_location(type, abi_location),
         .source = loom_x86_sysv_frame_assignment_location(assignment),
     };
   }
-  return loom_x86_sysv_frame_resolve_moves(build, call_op->operand_count,
-                                           out_range);
+  IREE_ASSERT_EQ(operand_index, operands.count);
+  return loom_x86_sysv_frame_resolve_moves(build, move_count, out_range);
 }
 
 static iree_status_t loom_x86_sysv_frame_append_call_results_and_restores(
@@ -742,8 +690,7 @@ static iree_status_t loom_x86_sysv_frame_append_call_results_and_restores(
     build->move_scratch.moves[move_count++] = (loom_low_move_t){
         .destination = loom_x86_sysv_frame_assignment_location(assignment),
         .source = loom_x86_sysv_frame_abi_location(
-            build, type, call->abi_layout.result_locations[i],
-            build->outgoing_slot_base),
+            type, call->abi_layout.result_locations[i]),
     };
   }
   IREE_RETURN_IF_ERROR(loom_x86_sysv_frame_append_preservation_moves(
@@ -795,8 +742,7 @@ static iree_status_t loom_x86_sysv_frame_append_returns(
           loom_module_value_type(build->frame->module, value_id);
       build->move_scratch.moves[j] = (loom_low_move_t){
           .destination = loom_x86_sysv_frame_abi_location(
-              build, type, build->plan->abi_layout.result_locations[j],
-              build->outgoing_slot_base),
+              type, build->plan->abi_layout.result_locations[j]),
           .source = loom_x86_sysv_frame_assignment_location(assignment),
       };
     }
@@ -854,7 +800,8 @@ static iree_status_t loom_x86_sysv_frame_allocate_moves(
     loom_x86_sysv_frame_build_t* build) {
   uint64_t move_bound = 0;
   uint32_t max_group = 0;
-  const uint32_t argument_count = build->plan->abi_layout.argument_count;
+  const uint32_t argument_count =
+      loom_x86_sysv_abi_register_argument_count(&build->plan->abi_layout);
   if (!loom_x86_sysv_frame_accumulate_group_bound(argument_count, &move_bound,
                                                   &max_group)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -874,7 +821,7 @@ static iree_status_t loom_x86_sysv_frame_allocate_moves(
         loom_x86_sysv_frame_call_preserved_count(&build->calls[i]);
     const uint32_t counts[] = {
         preserve_count,
-        (uint32_t)build->calls[i].abi_layout.argument_count,
+        loom_x86_sysv_abi_register_argument_count(&build->calls[i].abi_layout),
         preserve_count + (uint32_t)build->calls[i].abi_layout.result_count,
     };
     for (iree_host_size_t j = 0; j < IREE_ARRAYSIZE(counts); ++j) {
@@ -946,10 +893,6 @@ static iree_status_t loom_x86_sysv_frame_layout_stack(
   }
   for (uint32_t i = 0; i < build->plan->slot_count; ++i) {
     loom_x86_sysv_frame_slot_t* slot = &build->slots[i];
-    if (slot->kind == LOOM_X86_SYSV_FRAME_SLOT_INCOMING_ARGUMENT ||
-        slot->kind == LOOM_X86_SYSV_FRAME_SLOT_OUTGOING_ARGUMENT) {
-      continue;
-    }
     if (!iree_checked_align_u64(cursor, slot->byte_alignment, &cursor)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "x86 SysV frame slot alignment overflows");
@@ -973,10 +916,7 @@ static iree_status_t loom_x86_sysv_frame_layout_stack(
 }
 
 static iree_status_t loom_x86_sysv_frame_initialize_storage(
-    loom_x86_sysv_frame_build_t* build, uint32_t max_outgoing_bytes) {
-  const uint32_t outgoing_slot_count = max_outgoing_bytes / 8;
-  const uint32_t incoming_slot_count =
-      build->plan->abi_layout.stack_argument_bytes / 8;
+    loom_x86_sysv_frame_build_t* build) {
   const uint32_t caller_slot_count =
       loom_x86_sysv_frame_caller_slot_count(build);
   const uint32_t callee_slot_count =
@@ -985,9 +925,8 @@ static iree_status_t loom_x86_sysv_frame_initialize_storage(
       loom_x86_sysv_frame_may_need_cycle_slot(build)
           ? build->frame->target.descriptor_set->reg_class_count
           : 0;
-  uint64_t slot_capacity = (uint64_t)outgoing_slot_count + incoming_slot_count +
-                           caller_slot_count + callee_slot_count +
-                           cycle_slot_limit;
+  uint64_t slot_capacity =
+      (uint64_t)caller_slot_count + callee_slot_count + cycle_slot_limit;
   if (slot_capacity > UINT32_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "x86 SysV frame slot table exceeds u32 range");
@@ -1004,8 +943,6 @@ static iree_status_t loom_x86_sysv_frame_initialize_storage(
         (void**)&build->cycle_slots));
   }
   build->plan->slots = build->slots;
-  IREE_RETURN_IF_ERROR(
-      loom_x86_sysv_frame_allocate_argument_slots(build, max_outgoing_bytes));
   return loom_x86_sysv_frame_allocate_caller_slots(build);
 }
 
@@ -1051,8 +988,9 @@ iree_status_t loom_x86_sysv_frame_plan_build(
   IREE_RETURN_IF_ERROR(loom_x86_descriptor_set_register_class_id(
       frame->target.descriptor_set, LOOM_X86_REGISTER_CLASS_GPR64,
       &build.gpr64_class_id));
-  IREE_RETURN_IF_ERROR(loom_x86_sysv_frame_function_layout(
-      frame, frame->function_op, scratch_arena, &out_plan->abi_layout));
+  IREE_RETURN_IF_ERROR(loom_x86_sysv_abi_function_layout_parse(
+      frame->module, frame->target.descriptor_set, frame->function_op,
+      scratch_arena, &out_plan->abi_layout));
   uint32_t max_outgoing_bytes = 0;
   IREE_RETURN_IF_ERROR(
       loom_x86_sysv_frame_call_layouts(&build, &max_outgoing_bytes));
@@ -1078,8 +1016,7 @@ iree_status_t loom_x86_sysv_frame_plan_build(
   build.call_plans = call_plans;
   build.return_plans = return_plans;
 
-  IREE_RETURN_IF_ERROR(
-      loom_x86_sysv_frame_initialize_storage(&build, max_outgoing_bytes));
+  IREE_RETURN_IF_ERROR(loom_x86_sysv_frame_initialize_storage(&build));
   IREE_RETURN_IF_ERROR(loom_x86_sysv_frame_allocate_moves(&build));
   loom_low_allocation_value_scratch_t value_scratch = {0};
   iree_status_t status = loom_low_allocation_acquire_value_scratch(

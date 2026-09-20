@@ -83,18 +83,6 @@ class X86SysvFrameTest : public ::testing::Test {
                                          &options, &arena_, out_frame);
   }
 
-  const loom_x86_sysv_frame_slot_t* FindSlot(
-      const loom_x86_sysv_frame_plan_t& plan,
-      loom_x86_sysv_frame_slot_kind_t kind, uint64_t byte_offset) {
-    for (uint32_t i = 0; i < plan.slot_count; ++i) {
-      if (plan.slots[i].kind == kind &&
-          plan.slots[i].byte_offset == byte_offset) {
-        return &plan.slots[i];
-      }
-    }
-    return nullptr;
-  }
-
   bool RangeContainsRegisterToSlot(const loom_x86_sysv_frame_plan_t& plan,
                                    uint32_t move_start, uint32_t move_count,
                                    uint32_t physical_register,
@@ -151,7 +139,11 @@ low.func.decl import(native, "external") target<x86.scalar.core>(@target) abi_la
 low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2, 1, 8, 9, -1, -9], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 16}) @caller(%a0: reg<x86.gpr64>, %a1: reg<x86.gpr64>, %a2: reg<x86.gpr64>, %a3: reg<x86.gpr64>, %a4: reg<x86.gpr64>, %a5: reg<x86.gpr64>, %a6: reg<x86.gpr64>, %a7: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %volatile = copy %a2 : reg<x86.gpr64> -> reg<x86.gpr64>
   %preserved = copy %a3 : reg<x86.gpr64> -> reg<x86.gpr64>
-  %called = low.func.call @external(%a0, %a1, %a2, %a3, %a4, %a5, %a6, %a7) : (reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>) -> (reg<x86.gpr64>)
+  %incoming6 = low.func.stack_arg [6, 0] : reg<x86.gpr64>
+  %outgoing6 = low.func.call_arg @external[6, 0](%incoming6) : reg<x86.gpr64> -> low.storage<stack>
+  %incoming7 = low.func.stack_arg [7, 8] : reg<x86.gpr64>
+  %outgoing7 = low.func.call_arg @external[7, 8](%incoming7) : reg<x86.gpr64> -> low.storage<stack>
+  %called = low.func.call @external(%a0, %a1, %a2, %a3, %a4, %a5) : (reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>) [%outgoing6: low.storage<stack>, %outgoing7: low.storage<stack>] -> (reg<x86.gpr64>)
   %partial = add.gpr64 %called, %volatile
   %result = add.gpr64 %partial, %preserved
   return %result
@@ -194,17 +186,11 @@ low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({a
   ASSERT_EQ(plan.return_count, 1u);
   EXPECT_EQ(plan.frame_size % 16, 8u);
   EXPECT_GE(plan.frame_size, 40u);
-  EXPECT_NE(FindSlot(plan, LOOM_X86_SYSV_FRAME_SLOT_INCOMING_ARGUMENT, 0),
-            nullptr);
-  EXPECT_NE(FindSlot(plan, LOOM_X86_SYSV_FRAME_SLOT_INCOMING_ARGUMENT, 8),
-            nullptr);
-  EXPECT_NE(FindSlot(plan, LOOM_X86_SYSV_FRAME_SLOT_OUTGOING_ARGUMENT, 0),
-            nullptr);
-  EXPECT_NE(FindSlot(plan, LOOM_X86_SYSV_FRAME_SLOT_OUTGOING_ARGUMENT, 8),
-            nullptr);
+  EXPECT_EQ(plan.abi_layout.stack_argument_bytes, 16u);
 
   bool has_move_scratch = false;
   for (uint32_t i = 0; i < plan.slot_count; ++i) {
+    EXPECT_GE(plan.slots[i].byte_offset, 16u);
     has_move_scratch |=
         plan.slots[i].kind == LOOM_X86_SYSV_FRAME_SLOT_MOVE_SCRATCH;
   }

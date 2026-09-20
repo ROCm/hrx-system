@@ -40,6 +40,22 @@ _X86_PROVIDER_VISIBILITY = [
 # x86 target support
 #===------------------------------------------------------------------------===#
 
+loom_generated_cc_library(
+    name = "error_defs",
+    args = [
+        "--catalog-symbol=loom_x86_error_catalog",
+        "--fallback-catalog-symbol=loom_error_catalog_core",
+        "--fallback-public-header=loom/error/error_catalog.h",
+        "--public-header=loom/target/arch/x86/error_catalog.h",
+        "--shard=x86",
+    ],
+    generated_hdr_flags = ["--header"],
+    generated_hdrs = ["error_catalog.h"],
+    generator = "//loom/py/loom/gen/error:c_errors",
+    source = "error_catalog.c",
+    deps = ["//loom/src/loom/error:error_defs"],
+)
+
 loom_cc_library(
     name = "sysv_abi",
     srcs = ["sysv_abi.c"],
@@ -49,7 +65,26 @@ loom_cc_library(
         ":register_classes",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
         "//loom/src/loom/target:registers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "low_verify",
+    srcs = ["low_verify.c"],
+    hdrs = ["low_verify.h"],
+    deps = [
+        ":error_defs",
+        ":sysv_abi",
+        "//loom/src/loom/codegen/low:diagnostics",
+        "//loom/src/loom/codegen/low:verify",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target/arch/x86/ops",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -62,6 +97,7 @@ loom_cc_library(
     deps = [
         ":sysv_abi",
         "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/codegen/low/pipeline:pass_environment",
         "//loom/src/loom/ir",
@@ -205,6 +241,7 @@ loom_cc_library(
     visibility = _X86_PROVIDER_VISIBILITY,
     deps = [
         ":legalization",
+        ":low_verify",
         ":math_policy",
         ":pass_registry",
         "//loom/src/loom/pass:builder",
@@ -249,6 +286,7 @@ loom_check_test_suite(
         "test/source_low/callable_values.loom-test",
         "test/source_low/carried_counter_store.loom-test",
         "test/source_low/loop_counter_offset.loom-test",
+        "test/source_low/low_verify_diagnostics.loom-test",
         "test/source_low/memory_wide_carriers.loom-test",
         "test/source_low/memory_wide_offsets.loom-test",
         "test/source_low/numeric_address_widening.loom-test",

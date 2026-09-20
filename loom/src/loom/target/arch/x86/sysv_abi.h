@@ -102,6 +102,15 @@ iree_status_t loom_x86_sysv_abi_layout_parse(
     iree_host_size_t result_count, iree_arena_allocator_t* scratch_arena,
     loom_x86_sysv_abi_layout_t* out_layout);
 
+// Decodes and validates the retained ABI layout on |function_op| against its
+// Low signature. |function_op| must be low.func.def or low.func.decl. The
+// returned arrays borrow the canonical module attribute storage.
+iree_status_t loom_x86_sysv_abi_function_layout_parse(
+    const loom_module_t* module,
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_op_t* function_op, iree_arena_allocator_t* scratch_arena,
+    loom_x86_sysv_abi_layout_t* out_layout);
+
 // Returns true when |physical_register| is clobbered by a SysV call.
 bool loom_x86_sysv_gpr_is_caller_saved(uint32_t physical_register);
 

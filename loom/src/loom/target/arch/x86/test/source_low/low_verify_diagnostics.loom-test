@@ -1,0 +1,87 @@
+// RUN: verify
+
+x86.target<scalar> @target
+
+// ERROR@+1: X86/001 {function_name="invalid_layout"}
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [6], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @invalid_layout(%value: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  return %value
+}
+
+// ====
+
+// RUN: verify
+
+x86.target<scalar> @target
+
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @register_argument_as_stack(%value: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  // ERROR@+1: X86/002 {function_name="register_argument_as_stack", op_name="low.func.stack_arg", argument_ordinal="0", actual_location="stack memory", expected_location="a register"}
+  %loaded = low.func.stack_arg [0, 0] : reg<x86.gpr64>
+  return %loaded
+}
+
+// ====
+
+// RUN: verify
+
+x86.target<scalar> @target
+
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2, 1, 8, 9, -1], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 8}) @wrong_incoming_offset(%a0: reg<x86.gpr64>, %a1: reg<x86.gpr64>, %a2: reg<x86.gpr64>, %a3: reg<x86.gpr64>, %a4: reg<x86.gpr64>, %a5: reg<x86.gpr64>, %a6: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  // ERROR@+1: X86/003 {function_name="wrong_incoming_offset", op_name="low.func.stack_arg", argument_ordinal="6", actual_offset="8", expected_offset="0"}
+  %loaded = low.func.stack_arg [6, 8] : reg<x86.gpr64>
+  return %loaded
+}
+
+// ====
+
+// RUN: verify
+
+x86.target<scalar> @target
+
+low.func.decl target<x86.scalar.core>(@target) abi_layout({argument_locations = [7, 6, 2, 1, 8, 9, -1, -9], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 16}) @callee(%a0: reg<x86.gpr64>, %a1: reg<x86.gpr64>, %a2: reg<x86.gpr64>, %a3: reg<x86.gpr64>, %a4: reg<x86.gpr64>, %a5: reg<x86.gpr64>, %a6: reg<x86.gpr64>, %a7: reg<x86.gpr64>) -> (reg<x86.gpr64>)
+
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2, 1, 8, 9, -1, -9], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 16}) @missing_first_stack_store(%a0: reg<x86.gpr64>, %a1: reg<x86.gpr64>, %a2: reg<x86.gpr64>, %a3: reg<x86.gpr64>, %a4: reg<x86.gpr64>, %a5: reg<x86.gpr64>, %a6: reg<x86.gpr64>, %a7: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %outgoing7 = low.func.call_arg @callee[7, 8](%a7) : reg<x86.gpr64> -> low.storage<stack>
+  // ERROR@+1: X86/002 {function_name="missing_first_stack_store", op_name="low.func.call", argument_ordinal="6", actual_location="a register", expected_location="stack memory"}
+  %result = low.func.call @callee(%a0, %a1, %a2, %a3, %a4, %a5, %a6) : (reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>) [%outgoing7: low.storage<stack>] -> (reg<x86.gpr64>)
+  return %result
+}
+
+// ====
+
+// RUN: verify
+
+x86.target<scalar> @target
+
+low.func.decl target<x86.scalar.core>(@target) abi_layout({argument_locations = [7, 6, 2, 1, 8, 9, -1], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 8}) @callee(%a0: reg<x86.gpr64>, %a1: reg<x86.gpr64>, %a2: reg<x86.gpr64>, %a3: reg<x86.gpr64>, %a4: reg<x86.gpr64>, %a5: reg<x86.gpr64>, %a6: reg<x86.gpr64>) -> (reg<x86.gpr64>)
+
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2, 1, 8, 9, -1], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 8}) @wrong_outgoing_offset(%a0: reg<x86.gpr64>, %a1: reg<x86.gpr64>, %a2: reg<x86.gpr64>, %a3: reg<x86.gpr64>, %a4: reg<x86.gpr64>, %a5: reg<x86.gpr64>, %a6: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  // ERROR@+1: X86/003 {function_name="wrong_outgoing_offset", op_name="low.func.call_arg", argument_ordinal="6", actual_offset="8", expected_offset="0"}
+  %outgoing6 = low.func.call_arg @callee[6, 8](%a6) : reg<x86.gpr64> -> low.storage<stack>
+  %result = low.func.call @callee(%a0, %a1, %a2, %a3, %a4, %a5) : (reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>) [%outgoing6: low.storage<stack>] -> (reg<x86.gpr64>)
+  return %result
+}
+
+// ====
+
+// RUN: verify
+
+x86.target<scalar> @target
+
+low.func.decl target<x86.scalar.core>(@target) abi_layout({argument_locations = [7, 6, 2, 1, 8, 9, -1], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 8}) @callee(%a0: reg<x86.gpr64>, %a1: reg<x86.gpr64>, %a2: reg<x86.gpr64>, %a3: reg<x86.gpr64>, %a4: reg<x86.gpr64>, %a5: reg<x86.gpr64>, %a6: reg<x86.gpr64>) -> (reg<x86.gpr64>)
+
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2, 1, 8, 9, -1], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 8}) @valid_stack_boundary(%a0: reg<x86.gpr64>, %a1: reg<x86.gpr64>, %a2: reg<x86.gpr64>, %a3: reg<x86.gpr64>, %a4: reg<x86.gpr64>, %a5: reg<x86.gpr64>, %a6: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %incoming6 = low.func.stack_arg [6, 0] : reg<x86.gpr64>
+  %outgoing6 = low.func.call_arg @callee[6, 0](%incoming6) : reg<x86.gpr64> -> low.storage<stack>
+  %result = low.func.call @callee(%a0, %a1, %a2, %a3, %a4, %a5) : (reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>) [%outgoing6: low.storage<stack>] -> (reg<x86.gpr64>)
+  return %result
+}
+
+// ====
+
+// RUN: verify
+
+x86.target<scalar> @target
+
+low.kernel.def target<x86.scalar.core>(@target) @kernel() asm {
+  return
+}
