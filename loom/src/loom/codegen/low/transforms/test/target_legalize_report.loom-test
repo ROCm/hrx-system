@@ -160,3 +160,63 @@ func.def target(@test_target) @reports_reference_only_matrix_override(%lhs_data:
 // ----
 CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=1 target_rewritten=0 reference_rewritten=1 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1
 CHECK: COMPILE-REPORT: target_legalization[*] * source_op=vector.mma mode=final policy=reference-only action=rewritten outcome=reference-fallback contract=legal legalizer=vector strategy=reference * descriptor_key=test.mma.i32.2x2x2 source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 *
+
+// ====
+// RUN: with-checks compile-report target-legalize{policy=prefer-native}
+
+test.target<low_core> @test_target
+
+// These types have no applicable reference rule. They neither query a native
+// contract nor contribute a reference-policy decision to the report.
+func.def target(@test_target) @inapplicable_reference_domains(%left: i32, %right: i32, %wide_left: i64, %wide_right: i64, %condition: i1, %other_condition: i1, %bytes: vector<4xi8>, %halfwords: vector<4xi16>) -> (i32, i64, i1, vector<4xi32>, vector<4xi32>) {
+  %sum = scalar.addi %left, %right : i32
+  %wide_sum = scalar.addi %wide_left, %wide_right : i64
+  %predicate = scalar.andi %condition, %other_condition : i1
+  %signed_values = vector.extsi %bytes : vector<4xi8> to vector<4xi32>
+  %unsigned_values = vector.extui %halfwords : vector<4xi16> to vector<4xi32>
+  func.return %sum, %wide_sum, %predicate, %signed_values, %unsigned_values : i32, i64, i1, vector<4xi32>, vector<4xi32>
+}
+
+// ----
+CHECK: COMPILE-REPORT: summary artifact=none status=OK *
+CHECK-NOT: COMPILE-REPORT: target_legalization*
+
+// ====
+// RUN: with-checks compile-report target-legalize{policy=require-native}
+
+test.target<low_core> @test_target
+
+// These types have no applicable reference rule. They neither query a native
+// contract nor contribute a reference-policy decision to the report.
+func.def target(@test_target) @inapplicable_reference_domains(%left: i32, %right: i32, %wide_left: i64, %wide_right: i64, %condition: i1, %other_condition: i1, %bytes: vector<4xi8>, %halfwords: vector<4xi16>) -> (i32, i64, i1, vector<4xi32>, vector<4xi32>) {
+  %sum = scalar.addi %left, %right : i32
+  %wide_sum = scalar.addi %wide_left, %wide_right : i64
+  %predicate = scalar.andi %condition, %other_condition : i1
+  %signed_values = vector.extsi %bytes : vector<4xi8> to vector<4xi32>
+  %unsigned_values = vector.extui %halfwords : vector<4xi16> to vector<4xi32>
+  func.return %sum, %wide_sum, %predicate, %signed_values, %unsigned_values : i32, i64, i1, vector<4xi32>, vector<4xi32>
+}
+
+// ----
+CHECK: COMPILE-REPORT: summary artifact=none status=OK *
+CHECK-NOT: COMPILE-REPORT: target_legalization*
+
+// ====
+// RUN: with-checks compile-report target-legalize{policy=reference-only}
+
+test.target<low_core> @test_target
+
+// These types have no applicable reference rule. They neither query a native
+// contract nor contribute a reference-policy decision to the report.
+func.def target(@test_target) @inapplicable_reference_domains(%left: i32, %right: i32, %wide_left: i64, %wide_right: i64, %condition: i1, %other_condition: i1, %bytes: vector<4xi8>, %halfwords: vector<4xi16>) -> (i32, i64, i1, vector<4xi32>, vector<4xi32>) {
+  %sum = scalar.addi %left, %right : i32
+  %wide_sum = scalar.addi %wide_left, %wide_right : i64
+  %predicate = scalar.andi %condition, %other_condition : i1
+  %signed_values = vector.extsi %bytes : vector<4xi8> to vector<4xi32>
+  %unsigned_values = vector.extui %halfwords : vector<4xi16> to vector<4xi32>
+  func.return %sum, %wide_sum, %predicate, %signed_values, %unsigned_values : i32, i64, i1, vector<4xi32>, vector<4xi32>
+}
+
+// ----
+CHECK: COMPILE-REPORT: summary artifact=none status=OK *
+CHECK-NOT: COMPILE-REPORT: target_legalization*

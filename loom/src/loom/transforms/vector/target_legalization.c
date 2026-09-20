@@ -394,10 +394,6 @@ static iree_status_t loom_vector_legalize_predicate_extension(
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
   loom_value_id_t input = loom_op_operands(op)[0];
-  if (loom_type_element_type(loom_module_value_type(context->module, input)) !=
-      LOOM_SCALAR_TYPE_I1) {
-    return iree_ok_status();
-  }
   loom_rewriter_t* rewriter = context->rewriter;
   loom_builder_set_before(&rewriter->builder, op);
   const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
@@ -431,10 +427,12 @@ static iree_status_t loom_vector_legalize_predicate_extension(
 static const loom_target_legalizer_rule_t kVectorLegalizerRules[] = {
     {
         .root_kind = LOOM_OP_VECTOR_EXTSI,
+        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_I1,
         .legalize = loom_vector_legalize_predicate_extension,
     },
     {
         .root_kind = LOOM_OP_VECTOR_EXTUI,
+        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_I1,
         .legalize = loom_vector_legalize_predicate_extension,
     },
     {

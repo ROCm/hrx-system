@@ -896,6 +896,34 @@ static iree_status_t loom_low_target_legalize_record_report_source_op(
   return iree_ok_status();
 }
 
+static bool loom_low_target_legalize_entry_matches(
+    const loom_low_target_legalize_function_state_t* state,
+    const loom_target_legalizer_entry_t* entry, const loom_op_t* op) {
+  if (!entry->first_operand_element_types) {
+    return true;
+  }
+  const loom_type_t operand_type =
+      loom_module_value_type(state->module, loom_op_operands(op)[0]);
+  return loom_scalar_type_set_contains(entry->first_operand_element_types,
+                                       loom_type_element_type(operand_type));
+}
+
+// Filters a nonempty registry span to its first applicable row, or an empty
+// span. Later rows remain in provider order and still require their own check.
+static loom_target_legalizer_op_entry_t loom_low_target_legalize_filter_entries(
+    const loom_low_target_legalize_function_state_t* state, const loom_op_t* op,
+    loom_target_legalizer_op_entry_t op_entry) {
+  do {
+    const loom_target_legalizer_entry_t* entry =
+        &state->legalizer_registry->entries[op_entry.entry_start];
+    if (loom_low_target_legalize_entry_matches(state, entry, op)) {
+      break;
+    }
+    ++op_entry.entry_start;
+  } while (--op_entry.entry_count);
+  return op_entry;
+}
+
 static iree_status_t loom_low_target_legalize_capture_report_source_op(
     void* user_data, loom_op_t* op, const loom_walk_context_t* context,
     loom_walk_result_t* out_result) {
@@ -903,9 +931,13 @@ static iree_status_t loom_low_target_legalize_capture_report_source_op(
   *out_result = LOOM_WALK_CONTINUE;
   loom_low_target_legalize_function_state_t* state =
       (loom_low_target_legalize_function_state_t*)user_data;
-  const loom_target_legalizer_op_entry_t op_entry =
+  loom_target_legalizer_op_entry_t op_entry =
       loom_target_legalizer_registry_lookup_kind(state->legalizer_registry,
                                                  op->kind);
+  if (loom_target_legalizer_op_entry_is_empty(op_entry)) {
+    return iree_ok_status();
+  }
+  op_entry = loom_low_target_legalize_filter_entries(state, op, op_entry);
   if (loom_target_legalizer_op_entry_is_empty(op_entry)) {
     return iree_ok_status();
   }
@@ -1058,11 +1090,14 @@ loom_low_target_legalize_result_for_legalizer_report(
 }
 
 static bool loom_low_target_legalize_op_has_reference_legalizer(
-    const loom_target_legalizer_registry_t* registry,
+    const loom_low_target_legalize_function_state_t* state, const loom_op_t* op,
     loom_target_legalizer_op_entry_t op_entry) {
   for (uint16_t i = 0; i < op_entry.entry_count; ++i) {
     const loom_target_legalizer_entry_t* entry =
-        &registry->entries[op_entry.entry_start + i];
+        &state->legalizer_registry->entries[op_entry.entry_start + i];
+    if (i != 0 && !loom_low_target_legalize_entry_matches(state, entry, op)) {
+      continue;
+    }
     if (entry->provider_strategy == LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE) {
       return true;
     }
@@ -1071,11 +1106,14 @@ static bool loom_low_target_legalize_op_has_reference_legalizer(
 }
 
 static bool loom_low_target_legalize_op_has_legal_rewrite_entry(
-    const loom_low_target_legalize_function_state_t* state,
+    const loom_low_target_legalize_function_state_t* state, const loom_op_t* op,
     loom_target_legalizer_op_entry_t op_entry) {
   for (uint16_t i = 0; i < op_entry.entry_count; ++i) {
     const loom_target_legalizer_entry_t* entry =
         &state->legalizer_registry->entries[op_entry.entry_start + i];
+    if (i != 0 && !loom_low_target_legalize_entry_matches(state, entry, op)) {
+      continue;
+    }
     if (state->legalization_context.policy ==
             LOOM_TARGET_LEGALIZATION_POLICY_REFERENCE_ONLY &&
         entry->provider_strategy == LOOM_TARGET_LEGALIZER_STRATEGY_TARGET) {
@@ -1090,15 +1128,16 @@ static bool loom_low_target_legalize_op_has_legal_rewrite_entry(
 }
 
 static bool loom_low_target_legalize_should_accept_legal_contract(
-    const loom_low_target_legalize_function_state_t* state,
+    const loom_low_target_legalize_function_state_t* state, const loom_op_t* op,
     loom_target_legalizer_op_entry_t op_entry) {
-  if (loom_low_target_legalize_op_has_legal_rewrite_entry(state, op_entry)) {
+  if (loom_low_target_legalize_op_has_legal_rewrite_entry(state, op,
+                                                          op_entry)) {
     return false;
   }
   return state->legalization_context.policy !=
              LOOM_TARGET_LEGALIZATION_POLICY_REFERENCE_ONLY ||
-         !loom_low_target_legalize_op_has_reference_legalizer(
-             state->legalizer_registry, op_entry);
+         !loom_low_target_legalize_op_has_reference_legalizer(state, op,
+                                                              op_entry);
 }
 
 static bool loom_low_target_legalize_should_skip_entry(
@@ -1387,9 +1426,13 @@ static iree_status_t loom_low_target_legalize_rewrite_op(
     return iree_ok_status();
   }
 
-  const loom_target_legalizer_op_entry_t op_entry =
+  loom_target_legalizer_op_entry_t op_entry =
       loom_target_legalizer_registry_lookup_kind(state->legalizer_registry,
                                                  op->kind);
+  if (loom_target_legalizer_op_entry_is_empty(op_entry)) {
+    return iree_ok_status();
+  }
+  op_entry = loom_low_target_legalize_filter_entries(state, op, op_entry);
   if (loom_target_legalizer_op_entry_is_empty(op_entry)) {
     return iree_ok_status();
   }
@@ -1410,7 +1453,8 @@ static iree_status_t loom_low_target_legalize_rewrite_op(
   IREE_RETURN_IF_ERROR(loom_target_legalization_query_contract(
       &state->legalization_context, op, &query_result));
   if (query_result.outcome == LOOM_TARGET_CONTRACT_QUERY_LEGAL &&
-      loom_low_target_legalize_should_accept_legal_contract(state, op_entry)) {
+      loom_low_target_legalize_should_accept_legal_contract(state, op,
+                                                            op_entry)) {
     loom_low_target_legalize_report_accept_native(report_decision);
     ++state->statistics->ops_legal;
     return iree_ok_status();
@@ -1430,6 +1474,9 @@ static iree_status_t loom_low_target_legalize_rewrite_op(
   for (uint16_t i = 0; i < op_entry.entry_count; ++i) {
     const loom_target_legalizer_entry_t* entry =
         &state->legalizer_registry->entries[op_entry.entry_start + i];
+    if (i != 0 && !loom_low_target_legalize_entry_matches(state, entry, op)) {
+      continue;
+    }
     if (loom_low_target_legalize_should_skip_entry(state, entry)) {
       continue;
     }

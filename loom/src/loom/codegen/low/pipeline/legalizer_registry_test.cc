@@ -53,6 +53,7 @@ TEST(LowLegalizerRegistryTest, TargetProvidersPrecedeGenericProviders) {
   const loom_target_legalizer_rule_t target_rules[] = {
       {/*.flags=*/LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REWRITE_LEGAL,
        /*.root_kind=*/LOOM_OP_SCALAR_EXTF,
+       /*.first_operand_element_types=*/0,
        /*.legalize=*/TargetLegalize},
   };
   const loom_target_legalizer_provider_t target_provider = {
@@ -93,6 +94,17 @@ TEST(LowLegalizerRegistryTest, TargetProvidersPrecedeGenericProviders) {
   ExpectReferenceProvider(registry, LOOM_OP_BUFFER_COPY, IREE_SV("buffer"));
   ExpectReferenceProvider(registry, LOOM_OP_VECTOR_REDUCE, IREE_SV("vector"));
   ExpectReferenceProvider(registry, LOOM_OP_VIEW_ATOMIC_RMW, IREE_SV("view"));
+
+  const loom_target_legalizer_entry_t* narrow_binary =
+      LookupOnlyEntry(registry, LOOM_OP_SCALAR_ADDI);
+  ASSERT_NE(narrow_binary, nullptr);
+  EXPECT_EQ(narrow_binary->first_operand_element_types,
+            LOOM_SCALAR_TYPE_SET_I8 | LOOM_SCALAR_TYPE_SET_I16);
+  const loom_target_legalizer_entry_t* predicate_extension =
+      LookupOnlyEntry(registry, LOOM_OP_VECTOR_EXTUI);
+  ASSERT_NE(predicate_extension, nullptr);
+  EXPECT_EQ(predicate_extension->first_operand_element_types,
+            LOOM_SCALAR_TYPE_SET_I1);
 
   loom_target_legalizer_registry_storage_deinitialize(&storage);
 }

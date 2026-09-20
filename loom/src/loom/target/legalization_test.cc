@@ -17,15 +17,19 @@ namespace {
 static const loom_target_legalizer_rule_t kTargetRules[] = {
     {/*.flags=*/0,
      /*.root_kind=*/LOOM_OP_KIND(LOOM_DIALECT_SCALAR, 3),
+     /*.first_operand_element_types=*/0,
      /*.legalize=*/nullptr},
     {/*.flags=*/0,
      /*.root_kind=*/LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 2),
+     /*.first_operand_element_types=*/0,
      /*.legalize=*/nullptr},
 };
 
 static const loom_target_legalizer_rule_t kReferenceRules[] = {
     {/*.flags=*/0,
      /*.root_kind=*/LOOM_OP_KIND(LOOM_DIALECT_SCALAR, 3),
+     /*.first_operand_element_types=*/LOOM_SCALAR_TYPE_SET_I8 |
+         LOOM_SCALAR_TYPE_SET_I16,
      /*.legalize=*/nullptr},
 };
 
@@ -75,10 +79,13 @@ TEST(TargetLegalizerRegistryTest, ComposesOrderedProviderListsIntoOneSlab) {
                                      IREE_SV("target")));
   EXPECT_EQ(scalar_entries[0].provider_strategy,
             LOOM_TARGET_LEGALIZER_STRATEGY_TARGET);
+  EXPECT_EQ(scalar_entries[0].first_operand_element_types, 0);
   EXPECT_TRUE(iree_string_view_equal(scalar_entries[1].provider_name,
                                      IREE_SV("reference")));
   EXPECT_EQ(scalar_entries[1].provider_strategy,
             LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE);
+  EXPECT_EQ(scalar_entries[1].first_operand_element_types,
+            LOOM_SCALAR_TYPE_SET_I8 | LOOM_SCALAR_TYPE_SET_I16);
 
   EXPECT_EQ(loom_target_legalizer_registry_lookup_kind(
                 registry, LOOM_OP_KIND(LOOM_DIALECT_TEST, 0))

@@ -154,6 +154,10 @@ struct loom_target_legalizer_rule_t {
   loom_target_legalizer_entry_flags_t flags;
   // Op kind this legalizer can rewrite.
   loom_op_kind_t root_kind;
+  // Applicable scalar/element types of operand zero, or zero if unconstrained.
+  // A constrained rule's root kind must have at least one operand. Dispatch
+  // checks this domain before querying the target contract or applying policy.
+  loom_scalar_type_set_t first_operand_element_types;
   // Rewriter callback for root_kind.
   loom_target_legalizer_fn_t legalize;
 };
@@ -164,6 +168,9 @@ struct loom_target_legalizer_entry_t {
   loom_target_legalizer_entry_flags_t flags;
   // Op kind this legalizer can rewrite.
   loom_op_kind_t root_kind;
+  // Operand-zero type domain copied from the provider rule; zero is
+  // unrestricted.
+  loom_scalar_type_set_t first_operand_element_types;
   // Stable provider name attached while composing the dense registry.
   iree_string_view_t provider_name;
   // Rewrite strategy attached while composing the dense registry.

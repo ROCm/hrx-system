@@ -576,11 +576,6 @@ static iree_status_t loom_scalar_legalize_narrow_binary(
   };
   const loom_type_t result_type =
       loom_module_value_type(context->module, loom_op_results(op)[0]);
-  const loom_scalar_type_t element_type = loom_type_element_type(result_type);
-  if (element_type != LOOM_SCALAR_TYPE_I8 &&
-      element_type != LOOM_SCALAR_TYPE_I16) {
-    return iree_ok_status();
-  }
 
   const bool signed_operands = op->kind == LOOM_OP_SCALAR_DIVSI ||
                                op->kind == LOOM_OP_SCALAR_REMSI ||
@@ -631,54 +626,80 @@ static iree_status_t loom_scalar_legalize_narrow_binary(
 static const loom_target_legalizer_rule_t kScalarLegalizerRules[] = {
     {
         .root_kind = LOOM_OP_SCALAR_ADDI,
+        .first_operand_element_types =
+            LOOM_SCALAR_TYPE_SET_I8 | LOOM_SCALAR_TYPE_SET_I16,
         .legalize = loom_scalar_legalize_narrow_binary,
     },
     {
         .root_kind = LOOM_OP_SCALAR_SUBI,
+        .first_operand_element_types =
+            LOOM_SCALAR_TYPE_SET_I8 | LOOM_SCALAR_TYPE_SET_I16,
         .legalize = loom_scalar_legalize_narrow_binary,
     },
     {
         .root_kind = LOOM_OP_SCALAR_MULI,
+        .first_operand_element_types =
+            LOOM_SCALAR_TYPE_SET_I8 | LOOM_SCALAR_TYPE_SET_I16,
         .legalize = loom_scalar_legalize_narrow_binary,
     },
     {
         .root_kind = LOOM_OP_SCALAR_DIVSI,
+        .first_operand_element_types =
+            LOOM_SCALAR_TYPE_SET_I8 | LOOM_SCALAR_TYPE_SET_I16,
         .legalize = loom_scalar_legalize_narrow_binary,
     },
     {
         .root_kind = LOOM_OP_SCALAR_DIVUI,
+        .first_operand_element_types =
+            LOOM_SCALAR_TYPE_SET_I8 | LOOM_SCALAR_TYPE_SET_I16,
         .legalize = loom_scalar_legalize_narrow_binary,
     },
     {
         .root_kind = LOOM_OP_SCALAR_REMSI,
+        .first_operand_element_types =
+            LOOM_SCALAR_TYPE_SET_I8 | LOOM_SCALAR_TYPE_SET_I16,
         .legalize = loom_scalar_legalize_narrow_binary,
     },
     {
         .root_kind = LOOM_OP_SCALAR_REMUI,
+        .first_operand_element_types =
+            LOOM_SCALAR_TYPE_SET_I8 | LOOM_SCALAR_TYPE_SET_I16,
         .legalize = loom_scalar_legalize_narrow_binary,
     },
     {
         .root_kind = LOOM_OP_SCALAR_ANDI,
+        .first_operand_element_types =
+            LOOM_SCALAR_TYPE_SET_I8 | LOOM_SCALAR_TYPE_SET_I16,
         .legalize = loom_scalar_legalize_narrow_binary,
     },
     {
         .root_kind = LOOM_OP_SCALAR_ORI,
+        .first_operand_element_types =
+            LOOM_SCALAR_TYPE_SET_I8 | LOOM_SCALAR_TYPE_SET_I16,
         .legalize = loom_scalar_legalize_narrow_binary,
     },
     {
         .root_kind = LOOM_OP_SCALAR_XORI,
+        .first_operand_element_types =
+            LOOM_SCALAR_TYPE_SET_I8 | LOOM_SCALAR_TYPE_SET_I16,
         .legalize = loom_scalar_legalize_narrow_binary,
     },
     {
         .root_kind = LOOM_OP_SCALAR_SHLI,
+        .first_operand_element_types =
+            LOOM_SCALAR_TYPE_SET_I8 | LOOM_SCALAR_TYPE_SET_I16,
         .legalize = loom_scalar_legalize_narrow_binary,
     },
     {
         .root_kind = LOOM_OP_SCALAR_SHRSI,
+        .first_operand_element_types =
+            LOOM_SCALAR_TYPE_SET_I8 | LOOM_SCALAR_TYPE_SET_I16,
         .legalize = loom_scalar_legalize_narrow_binary,
     },
     {
         .root_kind = LOOM_OP_SCALAR_SHRUI,
+        .first_operand_element_types =
+            LOOM_SCALAR_TYPE_SET_I8 | LOOM_SCALAR_TYPE_SET_I16,
         .legalize = loom_scalar_legalize_narrow_binary,
     },
     {

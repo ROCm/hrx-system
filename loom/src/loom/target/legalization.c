@@ -163,6 +163,8 @@ static void loom_target_legalizer_registry_fill_entries(
         *target_entry = (loom_target_legalizer_entry_t){
             .flags = source_rule->flags,
             .root_kind = source_rule->root_kind,
+            .first_operand_element_types =
+                source_rule->first_operand_element_types,
             .provider_name = provider->name,
             .provider_strategy = provider->strategy,
             .legalize = source_rule->legalize,
