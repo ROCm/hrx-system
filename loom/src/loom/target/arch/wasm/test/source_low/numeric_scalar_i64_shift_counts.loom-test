@@ -477,11 +477,16 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_shift_v
 wasm.target<simd128> @target
 
 func.def target(@target) @index_shift_dynamic(%value: index, %count: index) -> (index, index) {
-  // ERROR@+1: TARGET/001 {op_name="index.shli"}
   %left = index.shli %value, %count : index
-  // ERROR@+1: TARGET/001 {op_name="index.shrui"}
   %right = index.shrui %value, %count : index
   func.return %left, %right : index, index
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @index_shift_dynamic(%value: reg<wasm.i32>, %count: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>) asm {
+  %left = i32.shl %value, %count
+  %right = i32.shr_u %value, %count
+  return %left, %right
 }
 
 // ====
@@ -490,7 +495,73 @@ wasm.target<simd128> @target
 
 func.def target(@target) @index_shift_constant_four(%value: index) -> (index) {
   %count = index.constant 4 : index
-  // ERROR@+1: TARGET/001 {op_name="index.shli"}
   %result = index.shli %value, %count : index
   func.return %result : index
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @index_shift_constant_four(%value: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %count = i32.const 4
+  %result = i32.shl %value, %count
+  return %result
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @index_shift_arithmetic(%value: index, %count: index) -> (index) {
+  %result = index.shrsi %value, %count : index
+  func.return %result : index
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @index_shift_arithmetic(%value: reg<wasm.i32>, %count: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %result = i32.shr_s %value, %count
+  return %result
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @index_shift_bounded(%value: index, %count_input: index) -> (index, index, index) {
+  %count = index.assume %count_input [range(%count_input, 0, 31)] : index
+  %left = index.shli %value, %count : index
+  %logical = index.shrui %value, %count : index
+  %signed = index.shrsi %value, %count : index
+  func.return %left, %logical, %signed : index, index, index
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @index_shift_bounded(%value: reg<wasm.i32>, %count: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) asm {
+  %left = i32.shl %value, %count
+  %logical = i32.shr_u %value, %count
+  %signed = i32.shr_s %value, %count
+  return %left, %logical, %signed
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @index_shift_constant_boundaries(%value: index) -> (index, index, index, index, index, index) {
+  %identity_count = index.constant 0 : index
+  %last = index.constant 31 : index
+  %left_zero = index.shli %value, %identity_count : index
+  %logical_zero = index.shrui %value, %identity_count : index
+  %signed_zero = index.shrsi %value, %identity_count : index
+  %left_last = index.shli %value, %last : index
+  %logical_last = index.shrui %value, %last : index
+  %signed_last = index.shrsi %value, %last : index
+  func.return %left_zero, %logical_zero, %signed_zero, %left_last, %logical_last, %signed_last : index, index, index, index, index, index
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @index_shift_constant_boundaries(%value: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) asm {
+  %last = i32.const 31
+  %left_last = i32.shl %value, %last
+  %logical_last = i32.shr_u %value, %last
+  %signed_last = i32.shr_s %value, %last
+  return %value, %value, %value, %left_last, %logical_last, %signed_last
 }

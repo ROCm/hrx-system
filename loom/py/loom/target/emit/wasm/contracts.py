@@ -965,6 +965,9 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
                 (index.index_andi, "and"),
                 (index.index_ori, "or"),
                 (index.index_xori, "xor"),
+                (index.index_shli, "shl"),
+                (index.index_shrsi, "shr_s"),
+                (index.index_shrui, "shr_u"),
             )
         ),
         _binary_rule(

@@ -505,3 +505,63 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @index_sh
   %result = shl.i64 %value, %count
   return %result
 }
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def target(@target) @index_shift_arithmetic(%value: index, %count: index) -> (index) {
+  %result = index.shrsi %value, %count : index
+  func.return %result : index
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @index_shift_arithmetic(%value: reg<llvmir.i64>, %count: reg<llvmir.i64>) -> (reg<llvmir.i64>) asm {
+  %result = ashr.i64 %value, %count
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def target(@target) @index_shift_bounded(%value: index, %count_input: index) -> (index, index, index) {
+  %count = index.assume %count_input [range(%count_input, 0, 31)] : index
+  %left = index.shli %value, %count : index
+  %logical = index.shrui %value, %count : index
+  %signed = index.shrsi %value, %count : index
+  func.return %left, %logical, %signed : index, index, index
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @index_shift_bounded(%value: reg<llvmir.i64>, %count: reg<llvmir.i64>) -> (reg<llvmir.i64>, reg<llvmir.i64>, reg<llvmir.i64>) asm {
+  %left = shl.i64 %value, %count
+  %logical = lshr.i64 %value, %count
+  %signed = ashr.i64 %value, %count
+  return %left, %logical, %signed
+}
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def target(@target) @index_shift_constant_boundaries(%value: index) -> (index, index, index, index, index, index) {
+  %identity_count = index.constant 0 : index
+  %last = index.constant 31 : index
+  %left_zero = index.shli %value, %identity_count : index
+  %logical_zero = index.shrui %value, %identity_count : index
+  %signed_zero = index.shrsi %value, %identity_count : index
+  %left_last = index.shli %value, %last : index
+  %logical_last = index.shrui %value, %last : index
+  %signed_last = index.shrsi %value, %last : index
+  func.return %left_zero, %logical_zero, %signed_zero, %left_last, %logical_last, %signed_last : index, index, index, index, index, index
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @index_shift_constant_boundaries(%value: reg<llvmir.i64>) -> (reg<llvmir.i64>, reg<llvmir.i64>, reg<llvmir.i64>, reg<llvmir.i64>, reg<llvmir.i64>, reg<llvmir.i64>) asm {
+  %last = const.i64 31
+  %left_last = shl.i64 %value, %last
+  %logical_last = lshr.i64 %value, %last
+  %signed_last = ashr.i64 %value, %last
+  return %value, %value, %value, %left_last, %logical_last, %signed_last
+}

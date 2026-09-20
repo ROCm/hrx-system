@@ -905,3 +905,69 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_sh
   %result = lshl %value, %count
   return %result
 }
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @index_shift_arithmetic(%value: index, %count: index) -> (index) {
+  %result = index.shrsi %value, %count : index
+  func.return %result : index
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_shift_arithmetic(%value: reg<aie2p.er>, %count: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %7 = mov.short 0
+  %8 = sub %7, %count
+  %result = ashl %value, %8
+  return %result
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @index_shift_bounded(%value: index, %count_input: index) -> (index, index, index) {
+  %count = index.assume %count_input [range(%count_input, 0, 31)] : index
+  %left = index.shli %value, %count : index
+  %logical = index.shrui %value, %count : index
+  %signed = index.shrsi %value, %count : index
+  func.return %left, %logical, %signed : index, index, index
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_shift_bounded(%value: reg<aie2p.er>, %count: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %left = lshl %value, %count
+  %15 = mov.short 0
+  %16 = sub %15, %count
+  %logical = lshl %value, %16
+  %19 = sub %15, %count
+  %signed = ashl %value, %19
+  return %left, %logical, %signed
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @index_shift_constant_boundaries(%value: index) -> (index, index, index, index, index, index) {
+  %identity_count = index.constant 0 : index
+  %last = index.constant 31 : index
+  %left_zero = index.shli %value, %identity_count : index
+  %logical_zero = index.shrui %value, %identity_count : index
+  %signed_zero = index.shrsi %value, %identity_count : index
+  %left_last = index.shli %value, %last : index
+  %logical_last = index.shrui %value, %last : index
+  %signed_last = index.shrsi %value, %last : index
+  func.return %left_zero, %logical_zero, %signed_zero, %left_last, %logical_last, %signed_last : index, index, index, index, index, index
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_shift_constant_boundaries(%value: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %last = mov.short 31
+  %left_last = lshl %value, %last
+  %24 = mov.short -31
+  %logical_last = lshl %value, %24
+  %signed_last = ashl %value, %24
+  return %value, %value, %value, %left_last, %logical_last, %signed_last
+}

@@ -217,7 +217,6 @@ func.def target(@target) @index_boundary_pairs(%input: index) -> (index, index, 
   %bounded = index.assume %input [range(%input, 0, 4294967295)] : index
   %power = index.constant 2147483648 : index
   %largest = index.constant 4294967295 : index
-  // ERROR@+1: TARGET/001 {op_name="index.shrui"}
   %power_quotient = index.div %bounded, %power : index
   %power_remainder = index.rem %bounded, %power : index
   // ERROR@+1: TARGET/001 {op_name="index.div"}

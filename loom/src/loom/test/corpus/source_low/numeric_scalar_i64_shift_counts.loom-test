@@ -247,3 +247,34 @@ func.def @index_shift_constant_four(%value: index) -> (index) {
   %result = index.shli %value, %count : index
   func.return %result : index
 }
+
+// ====
+
+func.def @index_shift_arithmetic(%value: index, %count: index) -> (index) {
+  %result = index.shrsi %value, %count : index
+  func.return %result : index
+}
+
+// ====
+
+func.def @index_shift_bounded(%value: index, %count_input: index) -> (index, index, index) {
+  %count = index.assume %count_input [range(%count_input, 0, 31)] : index
+  %left = index.shli %value, %count : index
+  %logical = index.shrui %value, %count : index
+  %signed = index.shrsi %value, %count : index
+  func.return %left, %logical, %signed : index, index, index
+}
+
+// ====
+
+func.def @index_shift_constant_boundaries(%value: index) -> (index, index, index, index, index, index) {
+  %identity_count = index.constant 0 : index
+  %last = index.constant 31 : index
+  %left_zero = index.shli %value, %identity_count : index
+  %logical_zero = index.shrui %value, %identity_count : index
+  %signed_zero = index.shrsi %value, %identity_count : index
+  %left_last = index.shli %value, %last : index
+  %logical_last = index.shrui %value, %last : index
+  %signed_last = index.shrsi %value, %last : index
+  func.return %left_zero, %logical_zero, %signed_zero, %left_last, %logical_last, %signed_last : index, index, index, index, index, index
+}

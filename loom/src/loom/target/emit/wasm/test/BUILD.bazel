@@ -30,11 +30,15 @@ iree_py_test(
         "--corpus",
         "$(location //loom/src/loom/test/corpus/source_low:numeric_index_operands.loom-test)",
         "$(location index_operands.mjs)",
+        "--corpus",
+        "$(location //loom/src/loom/test/corpus/source_low:numeric_scalar_i64_shift_counts.loom-test)",
+        "$(location index_shifts.mjs)",
     ],
     data = [
         "address_widening.mjs",
         "boolean.mjs",
         "index_operands.mjs",
+        "index_shifts.mjs",
         "scalar_memory.loom",
         "scalar_memory.mjs",
         "sum.loom",
@@ -44,6 +48,7 @@ iree_py_test(
         "//loom/src/loom/test/corpus/source_low:numeric_address_widening.loom-test",
         "//loom/src/loom/test/corpus/source_low:numeric_boolean_comparison.loom-test",
         "//loom/src/loom/test/corpus/source_low:numeric_index_operands.loom-test",
+        "//loom/src/loom/test/corpus/source_low:numeric_scalar_i64_shift_counts.loom-test",
         "//loom/src/loom/tools/loom-compile",
     ],
     env_inherit = [
