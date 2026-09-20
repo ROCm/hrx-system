@@ -1,0 +1,99 @@
+// RUN: verify
+// INPUT: cxx data-model=lp64
+#include "record_layout.h"
+
+// ====
+// RUN: verify
+// INPUT: cxx data-model=llp64
+#include "record_layout.h"
+
+// ====
+// RUN: verify
+// INPUT: cxx data-model=ilp32
+#include "record_layout.h"
+
+// ====
+// INPUT: cxx
+// ERROR@+1: PARSE/036 "layout attribute 'packed' is not supported"
+struct __attribute__((packed)) Packet { unsigned char first; unsigned value; };
+
+// ====
+// INPUT: cxx
+// ERROR@+1: PARSE/036 "layout attribute 'packed' is not supported"
+struct __attribute__((__packed__)) Packet { unsigned char first; unsigned value; };
+
+// ====
+// INPUT: cxx
+// ERROR@+1: PARSE/036 "layout attribute 'packed' is not supported"
+struct [[gnu::packed]] Packet { unsigned char first; unsigned value; };
+
+// ====
+// INPUT: cxx
+// ERROR@+1: PARSE/036 "layout attribute 'packed' is not supported"
+struct [[using __gnu__: __packed__]] Packet { unsigned char first; unsigned value; };
+
+// ====
+// INPUT: cxx
+// ERROR@+1: PARSE/036 "layout attribute 'packed' is not supported"
+struct Packet { unsigned value __attribute__((packed)); };
+
+// ====
+// INPUT: cxx
+// ERROR@+1: PARSE/036 "layout attribute 'packed' is not supported"
+struct Packet { [[gnu::packed]] unsigned value; };
+
+// ====
+// INPUT: cxx
+// ERROR@+1: PARSE/036 "layout attribute 'packed' is not supported"
+struct Packet { unsigned char first; unsigned value; } __attribute__((packed));
+
+// ====
+// INPUT: cxx
+// ERROR@+1: PARSE/036 "layout attribute 'packed' is not supported"
+template<class T> struct __attribute__((packed)) Packet { T value; };
+
+// ====
+// INPUT: cxx
+// ERROR@+1: PARSE/036 "layout attribute 'aligned' is not supported"
+struct __attribute__((aligned(16))) Packet { unsigned value; };
+
+// ====
+// INPUT: cxx
+// ERROR@+1: PARSE/036 "layout attribute 'aligned' is not supported"
+struct [[gnu::aligned(16)]] Packet { unsigned value; };
+
+// ====
+// INPUT: cxx
+// ERROR@+1: PARSE/036 "layout attribute 'aligned' is not supported"
+struct Packet { unsigned value __attribute__((aligned(16))); };
+
+// ====
+// INPUT: cxx
+// ERROR@+1: PARSE/036 "layout attribute 'aligned' is not supported"
+struct Packet { unsigned value __attribute__((__aligned__(16))); };
+
+// ====
+// INPUT: cxx
+// ERROR@+1: PARSE/036 "layout attribute 'aligned' is not supported"
+struct Packet { [[using gnu: aligned(16)]] unsigned value; };
+
+// ====
+// INPUT: cxx
+// ERROR@+1: PARSE/036 "layout attribute 'aligned' is not supported"
+typedef unsigned Value __attribute__((aligned(16)));
+
+// ====
+// INPUT: cxx
+// ERROR@+1: PARSE/036 "layout attribute 'aligned' is not supported"
+template<unsigned Alignment> struct Packet { unsigned value __attribute__((aligned(Alignment))); };
+
+// ====
+// INPUT: cxx
+// ERROR@+1: PARSE/036 "layout attribute 'aligned' is not supported"
+struct Packet { unsigned value __attribute__((unused, aligned(16))); };
+
+// ====
+// INPUT: cxx
+#define PACKED __attribute__((packed))
+// ERROR@+1: PARSE/036 "layout attribute 'packed' is not supported"
+struct PACKED Packet { unsigned char first; unsigned value; };

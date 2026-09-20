@@ -47,6 +47,7 @@ http_archive(
         "//build_tools/third_party/cxx:enum_semantics.patch",
         "//build_tools/third_party/cxx:include_continuation.patch",
         "//build_tools/third_party/cxx:include_paths.patch",
+        "//build_tools/third_party/cxx:layout_attributes.patch",
         "//build_tools/third_party/cxx:macro_operator_locations.patch",
         "//build_tools/third_party/cxx:template_lookahead.patch",
     ],

@@ -36,6 +36,7 @@ loom_check_test_suite(
         "intrinsics_invalid.cxx-test",
         "launch.cxx-test",
         "launch_invalid.cxx-test",
+        "layout_attributes.cxx-test",
         "locations.cxx-test",
         "loops.cxx-test",
         "macro_operators.cxx-test",
@@ -51,6 +52,7 @@ loom_check_test_suite(
     data = [
         "enum_semantics.h",
         "locations.h",
+        "record_layout.h",
     ],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )

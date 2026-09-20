@@ -1,0 +1,56 @@
+--- a/src/parser/cxx/parser.cc
++++ b/src/parser/cxx/parser.cc
+@@ -22,6 +22,7 @@
+ #include <cxx/ast.h>
+ #include <cxx/ast_interpreter.h>
+ #include <cxx/ast_rewriter.h>
++#include <cxx/attributes.h>
+ #include <cxx/control.h>
+ #include <cxx/decl.h>
+ #include <cxx/decl_specs.h>
+@@ -8901,6 +8902,29 @@
+   return true;
+ }
+
++namespace {
++
++// These spellings affect object layout, but neither declaration binding nor
++// record layout implements their semantics. Reject them before attributes can
++// be discarded by type projection or speculative declaration parsing.
++void rejectUnsupportedLayoutAttributes(TranslationUnit* unit,
++                                       AttributeSpecifierAST* specifier) {
++  static constexpr AttributeSpelling spellings[] = {
++      {AttributeSyntax::kGnu, "", "packed"},
++      {AttributeSyntax::kGnu, "", "aligned"},
++      {AttributeSyntax::kCxx, "gnu", "packed"},
++      {AttributeSyntax::kCxx, "gnu", "aligned"},
++  };
++  List<AttributeSpecifierAST*> attributes{specifier};
++  if (auto attribute = findAttributeBySpelling(unit, &attributes, spellings)) {
++    unit->error(attribute.location,
++                std::format("layout attribute '{}' is not supported",
++                            attribute.spelling->name));
++  }
++}
++
++}  // namespace
++
+ auto Parser::parse_cxx_attribute_specifier(AttributeSpecifierAST*& yyast)
+     -> bool {
+   if (!lookat_cxx_attribute_specifier()) return false;
+@@ -8913,6 +8937,7 @@
+   (void)parse_attribute_list(ast->attributeList);
+   expect(TokenKind::T_RBRACKET, ast->rbracketLoc);
+   expect(TokenKind::T_RBRACKET, ast->rbracket2Loc);
++  rejectUnsupportedLayoutAttributes(unit_, ast);
+   return true;
+ }
+
+@@ -8977,6 +9002,7 @@
+   }
+
+   expect(TokenKind::T_RPAREN, ast->rparen2Loc);
++  rejectUnsupportedLayoutAttributes(unit_, ast);
+
+   return true;
+ }

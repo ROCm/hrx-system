@@ -27,6 +27,7 @@ loom_check_test_suite(
     "intrinsics_invalid.cxx-test"
     "launch.cxx-test"
     "launch_invalid.cxx-test"
+    "layout_attributes.cxx-test"
     "locations.cxx-test"
     "loops.cxx-test"
     "macro_operators.cxx-test"
@@ -41,6 +42,7 @@ loom_check_test_suite(
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/import/cxx/test/enum_semantics.h"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/import/cxx/test/locations.h"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/import/cxx/test/record_layout.h"
 )
 endif()
 
