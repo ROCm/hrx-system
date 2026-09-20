@@ -155,6 +155,17 @@ typedef struct loom_low_allocation_packet_move_group_t {
   loom_low_move_group_t move_group;
 } loom_low_allocation_packet_move_group_t;
 
+// One retained call boundary in final scheduled liveness order.
+typedef struct loom_low_allocation_call_point_t {
+  // Schedule node containing the low.func.call operation.
+  uint32_t node_index;
+  // Operation row in |loom_low_allocation_table_t.liveness|.
+  uint32_t operation_index;
+} loom_low_allocation_call_point_t;
+
+static_assert(sizeof(loom_low_allocation_call_point_t) == 8,
+              "allocation call points must remain compact");
+
 // Assignment-backed storage lease over target-visible physical units.
 //
 // Each record corresponds to one entry in |storage_leases.records|. The lease
@@ -262,6 +273,12 @@ typedef struct loom_low_allocation_table_t {
   const iree_host_size_t* scratch_move_indices;
   // Number of final move rows across packet-local move groups.
   iree_host_size_t packet_move_count;
+  // Call boundaries in final scheduled liveness order. The schedule already
+  // owns call discovery; allocation retains this exact join so ABI planners do
+  // not recover operation points by walking either table.
+  const loom_low_allocation_call_point_t* call_points;
+  // Number of records in |call_points|. Leaf functions allocate no storage.
+  iree_host_size_t call_point_count;
   // Target storage-lease facts consumed by this allocation.
   loom_low_storage_lease_table_t storage_leases;
   // Assignment-backed storage-lease records in storage-lease table order.

@@ -57,9 +57,54 @@ typedef struct loom_low_allocation_build_state_t {
   loom_low_allocation_edge_copy_plan_t edge_copy_plan;
   // Mutable packet-local final move plan being built.
   loom_low_allocation_packet_move_plan_t packet_move_plan;
+  // Final scheduled call boundaries joined to allocation liveness.
+  loom_low_allocation_call_point_t* call_points;
+  // Number of initialized records in |call_points|.
+  iree_host_size_t call_point_count;
   // Mutable assignment-backed storage leases and release actions being built.
   loom_low_allocation_storage_lease_state_t storage_leases;
 } loom_low_allocation_build_state_t;
+
+// Allocation is the first owner that has both the accepted schedule and its
+// final scheduled liveness. Join their already-indexed orders once and retain
+// only the sparse call rows needed by ABI planning.
+static iree_status_t loom_low_allocation_build_call_points(
+    loom_low_allocation_build_state_t* state) {
+  const loom_low_schedule_table_t* schedule = state->options->schedule;
+  if (schedule == NULL || schedule->call_node_count == 0) {
+    return iree_ok_status();
+  }
+
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      state->arena, schedule->call_node_count, sizeof(*state->call_points),
+      (void**)&state->call_points));
+  uint32_t scheduled_node_ordinal = 0;
+  for (uint32_t operation_index = 0;
+       operation_index < state->liveness.operation_count; ++operation_index) {
+    const loom_liveness_operation_point_t* operation_point =
+        &state->liveness.operation_points[operation_index];
+    if (operation_point->parent_operation_index != UINT32_MAX) {
+      continue;
+    }
+    IREE_ASSERT_LT(scheduled_node_ordinal, schedule->scheduled_node_count);
+    const uint32_t node_index =
+        schedule->scheduled_node_indices[scheduled_node_ordinal++];
+    IREE_ASSERT_EQ(schedule->nodes[node_index].op, operation_point->op,
+                   "allocation liveness must follow the accepted schedule");
+    if (!loom_low_func_call_isa(operation_point->op)) {
+      continue;
+    }
+    IREE_ASSERT_LT(state->call_point_count, schedule->call_node_count);
+    state->call_points[state->call_point_count++] =
+        (loom_low_allocation_call_point_t){
+            .node_index = node_index,
+            .operation_index = operation_index,
+        };
+  }
+  IREE_ASSERT_EQ(scheduled_node_ordinal, schedule->scheduled_node_count);
+  IREE_ASSERT_EQ(state->call_point_count, schedule->call_node_count);
+  return iree_ok_status();
+}
 
 static bool loom_low_allocation_mode_can_synthesize(uint8_t allocation_mode) {
   return allocation_mode == 0 || allocation_mode == LOOM_LOW_ALLOCATION_VIRTUAL;
@@ -277,6 +322,9 @@ iree_status_t loom_low_allocate_function(
         &state.liveness);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
+    status = loom_low_allocation_build_call_points(&state);
+  }
+  if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     const loom_low_placement_pair_use_list_t placement_pair_uses =
         options->schedule != NULL ? options->schedule->placement_pair_uses
                                   : loom_low_placement_pair_use_list_empty();
@@ -442,6 +490,8 @@ iree_status_t loom_low_allocate_function(
         .moves = state.move_plan.moves,
         .scratch_move_indices = state.move_plan.scratch_move_indices,
         .packet_move_count = state.packet_move_plan.move_count,
+        .call_points = state.call_points,
+        .call_point_count = state.call_point_count,
         .storage_leases = options->storage_leases,
         .storage_lease_instances = state.storage_leases.instances,
         .storage_lease_instance_count = state.storage_leases.instance_count,

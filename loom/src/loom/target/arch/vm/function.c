@@ -427,12 +427,17 @@ static iree_status_t loom_vm_function_prepare_calls(
   uint16_t max_arguments = 0, max_results = 0;
   uint32_t packet_bytes = 0;
   uint32_t packet_refs = 0;
-  for (iree_host_size_t i = 0; i < frame->schedule.call_node_count; ++i) {
+  for (iree_host_size_t i = 0; i < frame->allocation.call_point_count; ++i) {
+    const loom_low_allocation_call_point_t* call_point =
+        &frame->allocation.call_points[i];
+    const loom_liveness_operation_point_t* operation_point =
+        &frame->allocation.liveness
+             .operation_points[call_point->operation_index];
     const loom_low_schedule_node_t* node =
-        &frame->schedule.nodes[frame->schedule.call_node_indices[i]];
+        &frame->schedule.nodes[call_point->node_index];
     const uint16_t ordinal =
-        functions
-            ->ordinals_by_symbol[loom_low_func_call_callee(node->op).symbol_id];
+        functions->ordinals_by_symbol
+            [loom_low_func_call_callee(operation_point->op).symbol_id];
     if (ordinal == UINT16_MAX) {
       return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                               "VM runtime imports require module import rows");
