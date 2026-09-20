@@ -1007,8 +1007,12 @@ static iree_status_t loom_liveness_finalize_block_arguments(
     uint32_t start_point) {
   for (uint16_t arg_index = 0; arg_index < block->arg_count; ++arg_index) {
     loom_value_id_t arg_id = loom_block_arg_id(block, arg_index);
-    IREE_RETURN_IF_ERROR(
-        loom_liveness_note_definition(state, arg_id, start_point));
+    const loom_value_t* argument = loom_module_value(state->module, arg_id);
+    if (!loom_value_has_no_uses(argument) ||
+        loom_value_has_attribute_uses(argument)) {
+      IREE_RETURN_IF_ERROR(
+          loom_liveness_note_definition(state, arg_id, start_point));
+    }
     loom_liveness_point_use_state_t type_use_state = {
         .build_state = state,
         .point = start_point,

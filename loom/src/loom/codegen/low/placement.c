@@ -356,13 +356,9 @@ loom_low_placement_flags_from_storage_relation(
 }
 
 static void loom_low_placement_assert_storage_relation_units(
-    const loom_low_placement_build_state_t* state,
     const loom_low_storage_relation_t* relation,
-    loom_value_ordinal_t result_ordinal, loom_value_ordinal_t source_ordinal) {
-  const loom_liveness_interval_t* result_interval =
-      loom_low_placement_interval_for_ordinal(state, result_ordinal);
-  const loom_liveness_interval_t* source_interval =
-      loom_low_placement_interval_for_ordinal(state, source_ordinal);
+    const loom_liveness_interval_t* result_interval,
+    const loom_liveness_interval_t* source_interval) {
   IREE_ASSERT(
       relation->destination_unit_offset <= result_interval->unit_count &&
           relation->unit_count <=
@@ -398,11 +394,20 @@ static iree_status_t loom_low_placement_collect_op_relations(
     const loom_value_ordinal_t result_ordinal =
         loom_low_placement_value_ordinal(state,
                                          storage_relation.destination_value_id);
+    const loom_liveness_interval_t* result_interval =
+        loom_liveness_interval_for_value_ordinal(state->liveness,
+                                                 result_ordinal);
+    // A relation into an unobservable destination needs no placement or move.
+    if (!result_interval) {
+      continue;
+    }
     const loom_value_ordinal_t source_ordinal =
         loom_low_placement_value_ordinal(state,
                                          storage_relation.source_value_id);
+    const loom_liveness_interval_t* source_interval =
+        loom_low_placement_interval_for_ordinal(state, source_ordinal);
     loom_low_placement_assert_storage_relation_units(
-        state, &storage_relation, result_ordinal, source_ordinal);
+        &storage_relation, result_interval, source_interval);
     loom_low_placement_relation_t placement_relation = {
         .op = storage_relation.op,
         .result_ordinal = result_ordinal,

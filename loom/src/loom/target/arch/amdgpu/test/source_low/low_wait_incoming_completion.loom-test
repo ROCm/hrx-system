@@ -174,12 +174,12 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @completed_lds_result(%address
 
 // ----
   v_mov_b32 v1, 0
-  s_mov_b32 s0, 0
-  s_mov_b32 s1, 1
+  s_mov_b32 s1, 0
+  s_mov_b32 s2, 1
   s_delay_alu instid0(VALU_DEP_1)
   v_mov_b32 v5, v1
 .Lbb1:
-  s_cmp_lt_i32 s0, s2
+  s_cmp_lt_i32 s1, s0
   s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb4
 .Lbb2:
@@ -188,7 +188,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @completed_lds_result(%address
 .Lbb3:
   s_waitcnt vmcnt(63) lgkmcnt(0)
   v_add_f32 v5, v5, v4
-  s_add_u32 s0, s0, s1
+  s_add_u32 s1, s1, s2
   s_branch .Lbb1
 .Lbb4:
   s_endpgm

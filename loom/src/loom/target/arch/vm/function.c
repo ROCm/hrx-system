@@ -782,7 +782,8 @@ iree_status_t loom_vm_function_emit(
         signature->fields[i].kind_u16 == IREE_VM_BYTECODE_SIGNATURE_KIND_REF
             ? ref_ordinal++
             : value_ordinal++;
-    if (ordinal >= 16) {
+    if (ordinal >= 16 || loom_value_has_no_uses(loom_module_value(
+                             request->module, arguments[i]))) {
       continue;
     }
     fixed_values[fixed_count++] = (loom_low_allocation_fixed_value_t){

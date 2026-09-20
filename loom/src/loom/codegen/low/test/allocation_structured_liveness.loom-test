@@ -167,15 +167,14 @@ CHECK: spills: 0
 test.target<low_core> @target
 
 // Forwarding an invariant through condition must not let the after region
-// overwrite it before the next condition evaluation.
+// overwrite it before the next condition evaluation. The unused carried value
+// needs no placement on either loop edge.
 low.func.def target<test.low.core>(@target) @while_condition_capture(%condition: reg<test.i32>, %captured: reg<test.i32>, %seed: reg<test.i32>) -> (reg<test.i32>) asm {
-  // REMARK@+1: BACKEND/043 {source_value_name="seed", result_value_name="before", decision="accepted"}
   %result = low.scf.while(%before = %seed : reg<test.i32>) -> (reg<test.i32>) {
     // REMARK@+2: BACKEND/043 {source_value_name="captured", result_value_name="body", decision="rejected"}
     // REMARK@+1: BACKEND/043 {source_value_name="captured", result_value_name="result", decision="rejected"}
     low.scf.condition %condition, %captured : reg<test.i32>, reg<test.i32>
   } do(%body: reg<test.i32>) {
-    // REMARK@+1: BACKEND/043 {source_value_name="body", result_value_name="before", decision="accepted"}
     low.scf.yield %body : reg<test.i32>
   }
   return %result

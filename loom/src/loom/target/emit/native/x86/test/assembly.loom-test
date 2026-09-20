@@ -274,8 +274,8 @@ low.func.def target<x86.avx512.core>(@x86_target) @x86_fragment(%base: reg<x86.g
   return
 }
 // ----
-  vmovdqu32 zmm0, [rax]
-  vpaddd zmm0, zmm0, zmm1
+  vmovdqu32 zmm1, [rax]
+  vpaddd zmm0, zmm1, zmm0
   vmovdqu32 [rax + 64], zmm0
   ret
 

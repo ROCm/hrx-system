@@ -32,12 +32,12 @@ lr: preserved
 
 // ====
 
-// Fixing a dead input does not reserve its register for the entire leaf.
-// RUN: emit aie2p-leaf @reuse fixed=%unused:physical_register:253:1 registers=r0,r1
+// A private result can reuse the incoming location after the input dies.
+// RUN: emit aie2p-leaf @reuse fixed=%input:physical_register:253:1 registers=r0,r1
 
-low.func.def target<amd.xdna.aie2p.core> @reuse(%unused: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
-  %one = mov.i32 1
-  return %one
+low.func.def target<amd.xdna.aie2p.core> @reuse(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %result = add %input, 1
+  return %result
 }
 
 // ----

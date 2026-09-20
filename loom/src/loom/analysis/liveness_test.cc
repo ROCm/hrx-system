@@ -233,6 +233,24 @@ func.def @linear(%a: i32, %b: i32) -> (i32) {
             FindValueOrdinal(analysis, sum));
 }
 
+TEST_F(LivenessTest, UnusedBlockArgumentHasNoInterval) {
+  ModulePtr module = ParseModule(R"(
+func.def @unused_argument(%used: i32, %unused: i32) -> (i32) {
+  func.return %used : i32
+}
+)");
+  loom_func_like_t func =
+      FindFunction(module.get(), IREE_SV("unused_argument"));
+  uint16_t argument_count = 0;
+  const loom_value_id_t* arguments =
+      loom_func_like_arg_ids(func, &argument_count);
+  ASSERT_EQ(argument_count, 2u);
+
+  loom_liveness_analysis_t analysis = AnalyzeBody(module.get(), func);
+  EXPECT_NE(loom_liveness_interval_for_value(&analysis, arguments[0]), nullptr);
+  EXPECT_EQ(loom_liveness_interval_for_value(&analysis, arguments[1]), nullptr);
+}
+
 TEST_F(LivenessTest, OperationRowsFollowAcceptedOrder) {
   ModulePtr module = ParseModule(R"(
 func.def @ordered(%a: i32, %b: i32) -> (i32) {

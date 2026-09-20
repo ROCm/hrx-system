@@ -46,6 +46,32 @@ classes:
 
 // ====
 
+// RUN: emit low-allocation @dead_branch_argument
+
+test.target<low_core> @test_target
+
+// A branch destination with no uses needs neither storage nor an edge copy.
+low.func.def target<test.low.core>(@test_target) @dead_branch_argument(%forwarded: reg<test.i32>) -> (reg<test.i32>) asm {
+  %one = test.const.i32 1
+  low.br ^exit(%forwarded: reg<test.i32>)
+^exit(%unused: reg<test.i32>):
+  return %one
+}
+
+// ----
+low-allocation @dead_branch_argument
+target: test_target
+descriptor_set: test.low.core
+mode: virtual
+assignments: 2
+remarks: 0
+spills: 0
+copies: coalesced=0 materialized=0
+classes:
+  test.i32: assignments=2 units=2 target_ids=2 physical=0 spill_slots=0 unassigned=0
+
+// ====
+
 // RUN: emit low-allocation-json @ordinary_packet_reuses_dead_input test.i32=8
 
 test.target<low_core> @test_target
