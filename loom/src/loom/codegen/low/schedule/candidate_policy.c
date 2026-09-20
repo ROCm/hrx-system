@@ -279,6 +279,13 @@ static bool loom_low_schedule_candidate_score_less(
     return lhs->active_register_packing_completion_capacity <
            rhs->active_register_packing_completion_capacity;
   }
+  // A setup can advance a constrained source's completion while its destination
+  // consumer is still blocked. Defer that materialization before using source
+  // order to choose between completion candidates, or it can occupy a scarce
+  // destination across the very work needed to make its consumer ready.
+  if (lhs_defers_materialization != rhs_defers_materialization) {
+    return !lhs_defers_materialization;
+  }
   if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL &&
       compare_mode != LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT &&
       iree_any_bit_set(
@@ -289,9 +296,6 @@ static bool loom_low_schedule_candidate_score_less(
           LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_CONSTRAINED_COMPLETION) &&
       lhs->source_ordinal != rhs->source_ordinal) {
     return lhs->source_ordinal < rhs->source_ordinal;
-  }
-  if (lhs_defers_materialization != rhs_defers_materialization) {
-    return !lhs_defers_materialization;
   }
   if (lhs_defers_materialization) {
     const bool lhs_unlocks_descriptor =

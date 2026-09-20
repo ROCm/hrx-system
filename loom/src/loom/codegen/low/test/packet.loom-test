@@ -115,6 +115,36 @@ low.func.def target<test.low.core>(@test_target) @singleton(%condition: reg<test
 
 // ====
 
+// RUN: with-checks emit low-packet-json @deferred_fixed_setup strategy=resource-stall
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @deferred_fixed_setup(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  %later_index = test.packing.create %lhs
+  %first_index = test.packing.create %rhs
+  low.schedule.fence
+  // Both copies advance the constrained packing chain below, but only the
+  // second copy exposes a ready consumer. Source order must not open the later
+  // fixed value across the first select, which needs the same physical r0.
+  %later_fixed = copy %later_index : reg<test.packed.narrow> -> reg<test.fixed.r0>
+  %first_fixed = copy %first_index : reg<test.packed.narrow> -> reg<test.fixed.r0>
+  %first = test.fixed.select.i32 %lhs, %rhs, %first_fixed
+  %last = test.fixed.select.i32 %first, %rhs, %later_fixed
+  %wide0, %wide1 = test.packing.configured.expand %later_index, %last
+  %result = test.packing.retire %wide0, %wide1
+  return %result
+}
+
+// The full emission frame must allocate both fixed values to r0 without spills,
+// scheduling the first copy and consumer before materializing the later value.
+// ----
+CHECK: *"spill_count":0,*
+CHECK: *"source_ordinal":4,"scheduled_ordinal":3,*"name":"first_fixed","type":"reg<test.fixed.r0>","location":{*"kind":"physical_register","base":0,"count":1}}]*
+CHECK: *"source_ordinal":5,"scheduled_ordinal":4,*"source_ordinal":3,"scheduled_ordinal":5,*"source_ordinal":6,"scheduled_ordinal":6,*
+CHECK: *"source_ordinal":3,"scheduled_ordinal":5,*"name":"later_fixed","type":"reg<test.fixed.r0>","location":{*"kind":"physical_register","base":0,"count":1}}]*
+
+// ====
+
 // Narrow definitions occupy one pair and leave a complete pair for the wide value.
 // RUN: emit low-packet-json @aggregate strategy=source
 
