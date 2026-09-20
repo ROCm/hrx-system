@@ -1,0 +1,60 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/vector_large_insert.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+
+// ERROR@+1: TARGET/033 {op_name="func.def", field_name="argument"}
+func.def target(@target) @i64x16_insert_static(%values: vector<16xi64>, %value: i64) -> (vector<16xi64>) {
+  // ERROR@+1: TARGET/001 {op_name="vector.insert"}
+  %result = vector.insert %value into %values[1] : i64, vector<16xi64>
+  // ERROR@+1: TARGET/033 {op_name="func.return", field_name="source"}
+  func.return %result : vector<16xi64>
+}
+
+// ====
+
+vm.target<core> @target
+
+// ERROR@+1: TARGET/033 {op_name="func.def", field_name="argument"}
+func.def target(@target) @i32x32_insert_static(%values: vector<32xi32>, %value: i32) -> (vector<32xi32>) {
+  // ERROR@+1: TARGET/001 {op_name="vector.insert"}
+  %result = vector.insert %value into %values[17] : i32, vector<32xi32>
+  // ERROR@+1: TARGET/033 {op_name="func.return", field_name="source"}
+  func.return %result : vector<32xi32>
+}
+
+// ====
+
+vm.target<core> @target
+
+// ERROR@+1: TARGET/033 {op_name="func.def", field_name="argument"}
+func.def target(@target) @i64x16_insert_dynamic(%values: vector<16xi64>, %value: i64, %position: index) -> (vector<16xi64>) {
+  // ERROR@+1: TARGET/001 {op_name="vector.insert"}
+  %result = vector.insert %value into %values[%position] : i64, vector<16xi64>
+  // ERROR@+1: TARGET/033 {op_name="func.return", field_name="source"}
+  func.return %result : vector<16xi64>
+}
+
+// ====
+
+vm.target<core> @target
+
+// ERROR@+1: TARGET/033 {op_name="func.def", field_name="argument"}
+func.def target(@target) @i32x2x2_insert_static(%values: vector<2x2xi32>, %value: i32) -> (vector<2x2xi32>) {
+  // ERROR@+1: TARGET/001 {op_name="vector.insert"}
+  %result = vector.insert %value into %values[1, 1] : i32, vector<2x2xi32>
+  // ERROR@+1: TARGET/033 {op_name="func.return", field_name="source"}
+  func.return %result : vector<2x2xi32>
+}
+
+// ====
+
+vm.target<core> @target
+
+// ERROR@+1: TARGET/033 {op_name="func.def", field_name="argument"}
+func.def target(@target) @i32x16_insert_static(%values: vector<16xi32>, %value: i32) -> (vector<16xi32>) {
+  // ERROR@+1: TARGET/001 {op_name="vector.insert"}
+  %result = vector.insert %value into %values[15] : i32, vector<16xi32>
+  // ERROR@+1: TARGET/033 {op_name="func.return", field_name="source"}
+  func.return %result : vector<16xi32>
+}

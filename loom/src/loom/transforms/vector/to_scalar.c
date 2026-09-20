@@ -1002,6 +1002,17 @@ iree_status_t loom_vector_to_scalar_rewrite_op(loom_pass_t* pass,
                                                loom_op_t* op,
                                                bool* out_rewritten) {
   *out_rewritten = false;
+  if (loom_vector_insert_isa(op)) {
+    const loom_type_t result_type =
+        loom_module_value_type(rewriter->module, loom_vector_insert_result(op));
+    const loom_type_t value_type =
+        loom_module_value_type(rewriter->module, loom_vector_insert_value(op));
+    // Per-op legalization stops at linear scalar insertions: expanding one to
+    // from_elements would recreate it when construction is linearized.
+    if (loom_type_rank(result_type) == 1 && loom_type_is_scalar(value_type)) {
+      return iree_ok_status();
+    }
+  }
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_lower_op(pass, rewriter, op));
   if (!loom_pass_has_error_diagnostics(pass) &&
       iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) {

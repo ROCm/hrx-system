@@ -512,6 +512,7 @@ loom_check_test_suite(
     "test/source_low/structural_value_types_bytecode.loom-test"
     "test/source_low/structured_control.loom-test"
     "test/source_low/target_legalize.loom-test"
+    "test/source_low/vector_large_insert.loom-test"
     "test/source_low/view_transport.loom-test"
     "test/source_low/workgroup_storage.loom-test"
   DATA
@@ -541,6 +542,7 @@ loom_check_test_suite(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/ordinary_vector_structure.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/shared_conditional_values.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/sync_barrier.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/vector_large_insert.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/view_transport.loom-test"
   TEST_NAME_PREFIX_TO_STRIP
     "test/source_low/"

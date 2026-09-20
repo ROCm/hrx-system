@@ -64,7 +64,10 @@ iree_status_t loom_vector_transform_to_scalar_rewrite_op(
     bool* out_rewritten);
 
 // Rewrites one vector op using the same direct and descriptor-backed scalar
-// reference lowerers as the standalone pass.
+// reference lowerers as the standalone pass. Rank-one scalar insertions are
+// terminal in this per-op interface so target legalization converges with
+// aggregate construction linearization. The standalone pass can still compose
+// these insertions into a complete scalar lane program.
 iree_status_t loom_vector_to_scalar_rewrite_op(loom_pass_t* pass,
                                                loom_rewriter_t* rewriter,
                                                loom_op_t* op,

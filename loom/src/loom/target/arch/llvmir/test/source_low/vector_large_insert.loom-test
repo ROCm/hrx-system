@@ -1,0 +1,70 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/vector_large_insert.loom-test
+// RUN: emit source-low output=low
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def target(@target) @i64x16_insert_static(%values: vector<16xi64>, %value: i64) -> (vector<16xi64>) {
+  %result = vector.insert %value into %values[1] : i64, vector<16xi64>
+  func.return %result : vector<16xi64>
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i64x16_insert_static(%values: reg<llvmir.i64 x16>, %value: reg<llvmir.i64>) -> (reg<llvmir.i64 x16>) asm {
+  %result = insert.v16i64 %values, %value, 1
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def target(@target) @i32x32_insert_static(%values: vector<32xi32>, %value: i32) -> (vector<32xi32>) {
+  %result = vector.insert %value into %values[17] : i32, vector<32xi32>
+  func.return %result : vector<32xi32>
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32x32_insert_static(%values: reg<llvmir.i32 x32>, %value: reg<llvmir.i32>) -> (reg<llvmir.i32 x32>) asm {
+  %result = insert.v32i32 %values, %value, 17
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def target(@target) @i64x16_insert_dynamic(%values: vector<16xi64>, %value: i64, %position: index) -> (vector<16xi64>) {
+  %result = vector.insert %value into %values[%position] : i64, vector<16xi64>
+  func.return %result : vector<16xi64>
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i64x16_insert_dynamic(%values: reg<llvmir.i64 x16>, %value: reg<llvmir.i64>, %position: reg<llvmir.i64>) -> (reg<llvmir.i64 x16>) asm {
+  %result = insert.dynamic.v16i64 %values, %value, %position
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def target(@target) @i32x2x2_insert_static(%values: vector<2x2xi32>, %value: i32) -> (vector<2x2xi32>) {
+  // ERROR@+1: TARGET/002 {op_name="vector.insert", field_name="dest"}
+  %result = vector.insert %value into %values[1, 1] : i32, vector<2x2xi32>
+  func.return %result : vector<2x2xi32>
+}
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def target(@target) @i32x16_insert_static(%values: vector<16xi32>, %value: i32) -> (vector<16xi32>) {
+  %result = vector.insert %value into %values[15] : i32, vector<16xi32>
+  func.return %result : vector<16xi32>
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32x16_insert_static(%values: reg<llvmir.i32 x16>, %value: reg<llvmir.i32>) -> (reg<llvmir.i32 x16>) asm {
+  %result = insert.v16i32 %values, %value, 15
+  return %result
+}

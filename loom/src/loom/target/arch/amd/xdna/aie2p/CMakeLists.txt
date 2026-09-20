@@ -577,6 +577,7 @@ loom_check_test_suite(
     "test/source_low/shared_conditional_values.loom-test"
     "test/source_low/vector_bitcast.loom-test"
     "test/source_low/vector_dot_interleave.loom-test"
+    "test/source_low/vector_large_insert.loom-test"
     "test/source_low/vector_mask_select.loom-test"
     "test/source_low/vector_memory.loom-test"
     "test/source_low/vector_predicate.loom-test"
@@ -615,6 +616,7 @@ loom_check_test_suite(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/packed_integer_arithmetic.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/shared_conditional_values.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/vector_bitcast.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/vector_large_insert.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/vector_mask_select.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/vector_slice.loom-test"
   TEST_NAME_PREFIX_TO_STRIP
