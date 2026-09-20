@@ -579,6 +579,21 @@ class PresubmitTest(unittest.TestCase):
         self.assertIn(f"--output_groups={presubmit.CLANG_TIDY_OUTPUT_GROUP}", command)
         self.assertEqual(command[-1], "//runtime/src/iree/base:all")
 
+    def test_clang_tidy_bazel_command_enables_optional_loom_targets(self):
+        targets = [
+            "//loom/src/loom/target/emit/wasm:all",
+            "//loom/src/loom/target/arch/vm:all",
+        ]
+        command = presubmit.clang_tidy_bazel_command(targets)
+
+        target_flag = next(
+            arg for arg in command if arg.startswith("--//loom/config/target:enable=")
+        )
+        self.assertTrue(
+            {"wasm", "vm"}.issubset(target_flag.split("=", 1)[1].split(","))
+        )
+        self.assertEqual(command[command.index("--") + 1 :], targets)
+
     def test_clang_tidy_bazel_command_obeys_configured_jobs(self):
         with mock.patch.dict(os.environ, {"IREE_CLANG_TIDY_JOBS": "7"}):
             command = presubmit.clang_tidy_bazel_command(

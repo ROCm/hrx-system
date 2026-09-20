@@ -16,6 +16,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from build_tools.bazel import configure as bazel_configure
 from build_tools.devtools import aliases, cli, importers
 from build_tools.devtools import bazel as bazel_dev
 from build_tools.devtools.command_plan import (
@@ -779,6 +780,40 @@ class CliTest(unittest.TestCase):
                     "--//libamdf/config:enabled=true" in description, enabled
                 )
                 self.assertNotIn("--//libamdf/config:enabled=false", description)
+
+    def test_bazel_clang_tidy_scopes_loom_enablement(self):
+        cases = (
+            (["//loom/src/loom/target/emit/wasm:all"], True),
+            (["//loom/src/loom/target/arch/wasm/..."], True),
+            (["//loom/src/loom/target/arch/vm:all"], True),
+            (["//loom/src/loom/ir:all"], True),
+            (["//loom/...", "-//loom/src/loom/target/emit/wasm/..."], True),
+            (["//..."], True),
+            (["//...", "-//loom:all"], True),
+            (["//...", "-//loom/...", "//loom/src/loom/ir:all"], True),
+            (["//loom/...", "-//loom/..."], False),
+            (["//...", "-//loom/..."], False),
+            (["@@//...", "-@hrx//loom/...:all-targets"], False),
+            (["//loom/src/loom/ir:all", "-//loom/src/..."], False),
+            (["//runtime/..."], False),
+            (["//libamdf/..."], False),
+            (["//:all"], False),
+            (["//loom_tools:all"], False),
+            (["@external//loom/..."], False),
+        )
+        for targets, enabled in cases:
+            with self.subTest(targets=targets):
+                command = self.planned_argv(["bazel", "clang-tidy", "--", *targets])
+                target_flags = [
+                    arg.removeprefix(bazel_configure.NATIVE_LOOM_TARGET_FLAG + "=")
+                    for arg in command
+                    if arg.startswith(bazel_configure.NATIVE_LOOM_TARGET_FLAG + "=")
+                ]
+                self.assertEqual(
+                    target_flags,
+                    [",".join(bazel_configure.LOOM_TARGETS)] if enabled else [],
+                )
+                self.assertEqual(command[command.index("--") + 1 :], targets)
 
     def test_bazel_clang_tidy_git_scope_uses_presubmit_provider(self):
         args = cli.parse_arguments(["bazel", "clang-tidy", "--base", "origin/main"])

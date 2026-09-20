@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from build_tools.bazel import compile_commands_merge
+from build_tools.bazel import configure as bazel_configure
 from build_tools.devtools import bazel_launcher, fuzz
 from build_tools.devtools.command_plan import quote_command
 from build_tools.devtools.environment import (
@@ -359,8 +360,8 @@ def forwarded_tool_args(arguments: list[str]) -> list[str]:
     return arguments
 
 
-def clang_tidy_configuration_args(targets: list[str]) -> list[str]:
-    """Enables libamdf only when the root-relative target scope selects it.
+def target_patterns_select_project(targets: list[str], project: str) -> bool:
+    """Whether root-relative target patterns retain work in a project tree.
 
     Track positive patterns not fully covered by a later exclusion. Partial
     exclusions leave a broader pattern selected without querying Bazel's graph.
@@ -379,8 +380,8 @@ def clang_tidy_configuration_args(targets: list[str]) -> list[str]:
             pattern = relative_pattern
         package, _, name = pattern.partition(":")
         if package == "...":
-            package = "libamdf/..."
-        if package != "libamdf" and not package.startswith("libamdf/"):
+            package = project + "/..."
+        if package != project and not package.startswith(project + "/"):
             continue
         name = name or package.rsplit("/", 1)[-1]
         if not excluded:
@@ -394,7 +395,20 @@ def clang_tidy_configuration_args(targets: list[str]) -> list[str]:
             }
         else:
             selected.discard((package, name))
-    return ["--//libamdf/config:enabled=true"] if selected else []
+    return bool(selected)
+
+
+def clang_tidy_configuration_args(targets: list[str]) -> list[str]:
+    """Enables the selected projects' source coverage for static analysis."""
+    args = []
+    if target_patterns_select_project(targets, "libamdf"):
+        args.append("--//libamdf/config:enabled=true")
+    if target_patterns_select_project(targets, "loom"):
+        args.append(
+            f"{bazel_configure.NATIVE_LOOM_TARGET_FLAG}="
+            + ",".join(bazel_configure.LOOM_TARGETS)
+        )
+    return args
 
 
 def clang_tidy_build_argv(

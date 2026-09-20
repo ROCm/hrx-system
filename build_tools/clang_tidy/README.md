@@ -19,6 +19,12 @@ python dev.py bazel clang-tidy --base origin/main
 python dev.py bazel clang-tidy --all --profile ci
 ```
 
+Selecting Loom sources enables the full compiler target set for analysis,
+including optional backends such as Wasm and VM. Selecting libamdf enables that
+library. These overrides apply to the source selection after target exclusions;
+dependencies alone keep their configured enablement. The same policy applies
+to explicit targets, changed-file checks, and commit hooks.
+
 Bazel exposes the matching LLVM install through the optional
 `@iree_clang_tidy_llvm` repository. The repository is a stub unless explicitly
 enabled. `dev.py bazel clang-tidy` enables it with

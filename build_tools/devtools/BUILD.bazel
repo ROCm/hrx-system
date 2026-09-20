@@ -46,7 +46,10 @@ py_library(
         "smoke_test_lib.py",
         "source_lock.py",
     ],
-    deps = ["//build_tools/bazel:compile_commands_merge_lib"],
+    deps = [
+        "//build_tools/bazel:compile_commands_merge_lib",
+        "//build_tools/bazel:configure",
+    ],
 )
 
 py_binary(
@@ -108,7 +111,10 @@ py_test(
     ],
     main = "bazel_test.py",
     tags = _PRESUBMIT_TEST_TAGS,
-    deps = ["//build_tools/bazel:compile_commands_merge_lib"],
+    deps = [
+        "//build_tools/bazel:compile_commands_merge_lib",
+        "//build_tools/bazel:configure",
+    ],
 )
 
 py_test(
@@ -176,7 +182,10 @@ py_test(
     ],
     main = "cli_test.py",
     tags = _PRESUBMIT_TEST_TAGS,
-    deps = ["//build_tools/bazel:compile_commands_merge_lib"],
+    deps = [
+        "//build_tools/bazel:compile_commands_merge_lib",
+        "//build_tools/bazel:configure",
+    ],
 )
 
 py_test(

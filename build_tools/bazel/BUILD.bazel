@@ -46,13 +46,16 @@ exports_files([
     "msvc_masm_wrapper.bat",
 ])
 
+py_library(
+    name = "configure",
+    srcs = ["configure.py"],
+)
+
 py_test(
     name = "configure_test",
-    srcs = [
-        "configure.py",
-        "configure_test.py",
-    ],
+    srcs = ["configure_test.py"],
     main = "configure_test.py",
+    deps = [":configure"],
 )
 
 py_binary(
