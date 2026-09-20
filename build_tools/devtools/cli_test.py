@@ -493,10 +493,10 @@ class CliTest(unittest.TestCase):
         plan = args.handler(args)
         description = normalized_plan_description(plan)
 
-        self.assertIn(".iree/bazel-try/run-<pid>/BUILD.bazel", description)
+        self.assertIn(".iree/bazel-try/run-<pid>-<nonce>/BUILD.bazel", description)
         self.assertIn("bazel build", description)
         self.assertIn("--check_visibility=false", description)
-        self.assertIn("//.iree/bazel-try/run-<pid>:snippet", description)
+        self.assertIn("//.iree/bazel-try/run-<pid>-<nonce>:snippet", description)
         self.assertIn("# compile only", description)
 
     def test_cmake_try_generates_scratch_build(self):

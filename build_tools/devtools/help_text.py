@@ -467,7 +467,9 @@ changes.""",
 
 Temporary packages are written under .iree/bazel-try/ so Bazel can address
 them as // workspace labels while .tmp/ remains hidden from Bazel package
-scans. The tool infers common deps from quoted iree/...,
+scans. Source and compiled scratch outputs are removed after completion unless
+--keep is specified. --output copies the executable before cleanup.
+The tool infers common deps from quoted iree/...,
 loom/..., and loomc/... includes and accepts explicit --dep labels.""",
         )
     if command == "try" and lane == "cmake":
@@ -822,9 +824,10 @@ it."""
 Use `iree-bazel-try` for one-shot C/C++ probes without creating a permanent
 BUILD target. It writes a temporary package under `.iree/bazel-try/` so the
 snippet has a valid Bazel workspace label while `.tmp/` remains hidden from
-Bazel package scans. The tool builds the snippet with Bazel, then execs the
-snippet unless `--compile-only` is used. The scratch package is removed by
-default.
+Bazel package scans. The tool builds the snippet with Bazel and waits for it to
+finish unless `--compile-only` is used. It then removes the scratch source and
+compiled outputs. `--keep` retains both; `--output` copies the executable before
+cleanup. Signals sent to the wrapper are forwarded to the snippet.
 
 ```bash
 iree-bazel-try -e 'int main() { return 0; }'

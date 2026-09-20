@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -202,6 +204,96 @@ def verify_try_dependency_aliases(temporary_root: Path) -> None:
         )
 
 
+def try_packages(process_id: int) -> list[Path]:
+    pattern = f"run-{process_id}-*"
+    paths = list((REPO_ROOT / ".iree/bazel-try").glob(pattern))
+    output_root = (REPO_ROOT / "bazel-out").resolve()
+    for kind in ("bin", "genfiles", "testlogs"):
+        paths.extend(output_root.glob(f"*/{kind}/.iree/bazel-try/{pattern}"))
+    return paths
+
+
+def verify_try_lifecycle(temporary_root: Path) -> None:
+    def run_probe(*arguments: str, expected: int = 0, keep: bool = False) -> None:
+        process = subprocess.Popen(
+            dev_command("bazel", "try", "--config=asan", *arguments),
+            cwd=temporary_root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        output, _ = process.communicate()
+        if process.returncode != expected:
+            raise RuntimeError(
+                f"try exited {process.returncode}, expected {expected}:\n{output}"
+            )
+        packages = try_packages(process.pid)
+        if keep:
+            try:
+                if not any((package / "BUILD.bazel").exists() for package in packages):
+                    raise RuntimeError("--keep lost the source package")
+                if not any(
+                    (package / "snippet").exists() or (package / "snippet.exe").exists()
+                    for package in packages
+                ):
+                    raise RuntimeError("--keep lost the executable")
+            finally:
+                for package in packages:
+                    shutil.rmtree(package)
+        elif packages:
+            raise RuntimeError(f"try leaked source or output packages: {packages}")
+
+    run_probe("-e", "int main(void) { return 37; }", expected=37)
+    copied = temporary_root / ("copied.exe" if os.name == "nt" else "copied")
+    run_probe(
+        "--compile-only", "--output", str(copied), "-e", "int main(void) { return 0; }"
+    )
+    subprocess.run([str(copied)], check=True)
+    run_probe("--compile-only", "-e", "#error deliberate compile failure", expected=1)
+    run_probe("--keep", "-e", "int main(void) { return 0; }", keep=True)
+
+    # Keep one probe live while another builds and cleans its own package.
+    # The pipe is the readiness/release contract, without wall-clock deadlines.
+    source = '#include <stdio.h>\nint main(void) { puts("ready"); fflush(stdout); return getchar() == EOF; }'
+    process = subprocess.Popen(
+        dev_command("bazel", "try", "--config=asan", "-e", source),
+        cwd=temporary_root,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        if process.stdout.readline().strip() != "ready":
+            _, error = process.communicate()
+            raise RuntimeError(f"try did not reach readiness: {error}")
+        packages = try_packages(process.pid)
+        if not any(
+            (package / "snippet").is_file() or (package / "snippet.exe").is_file()
+            for package in packages
+        ):
+            raise RuntimeError("live try lost its executable package")
+        run_probe("-e", "int main(void) { return 0; }")
+        if not all(package.exists() for package in packages):
+            raise RuntimeError("concurrent try removed a live probe's package")
+        if os.name != "nt":
+            process.send_signal(signal.SIGTERM)
+            expected = 128 + signal.SIGTERM
+            output, error = process.communicate()
+        else:
+            expected = 0
+            output, error = process.communicate("\n")
+        if process.returncode != expected:
+            raise RuntimeError(
+                f"try termination returned {process.returncode}: {output} {error}"
+            )
+        if try_packages(process.pid):
+            raise RuntimeError("try leaked packages after termination")
+    finally:
+        if process.poll() is None:
+            process.communicate("\n")
+
+
 def main() -> int:
     # The debug fixture consumes an artifact made by its own host-tool version.
     # Both versions are in its dependency closure when launch metadata is read.
@@ -224,6 +316,7 @@ def main() -> int:
         verify_lock_free_launch(temporary_root)
         verify_exit_code(temporary_root)
         verify_try_dependency_aliases(temporary_root)
+        verify_try_lifecycle(temporary_root)
     print("Bazel launcher integration passed")
     return 0
 

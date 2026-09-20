@@ -998,16 +998,58 @@ def exec_path(
         return 127
 
 
-def cleanup_try_scratch(scratch_dir: Path) -> None:
-    shutil.rmtree(scratch_dir, ignore_errors=True)
+def cleanup_try_scratch(scratch_dir: Path, execution_root: Path | None) -> None:
+    """Removes only this invocation's package and configured output packages."""
+    if execution_root is not None:
+        output_root = execution_root / "bazel-out"
+        if output_root.is_dir():
+            for configuration in output_root.iterdir():
+                if not configuration.is_dir() or configuration.is_symlink():
+                    continue
+                for output_kind in ("bin", "genfiles", "testlogs"):
+                    package = (
+                        configuration
+                        / output_kind
+                        / ".iree"
+                        / "bazel-try"
+                        / scratch_dir.name
+                    )
+                    if package.is_dir():
+                        shutil.rmtree(package)
+    shutil.rmtree(scratch_dir)
+    # Shared parent directories remain: another invocation may be creating its
+    # package concurrently, and their empty scaffolding has no retained payload.
+
+
+def wait_for_try_process(process_launch: BazelProcess) -> int:
+    """Keeps artifact ownership until the snippet exits, including on signals."""
+    process = None
+    pending_signal = None
+
+    def forward_signal(signum, frame):
+        nonlocal pending_signal
+        if os.name == "nt" and signum == signal.SIGINT:
+            # Console Ctrl-C already reaches the child on Windows; Popen cannot
+            # forward SIGINT as a process signal on that platform.
+            return
+        if process is None:
+            pending_signal = signum
+        else:
+            process.send_signal(signum)
+
+    previous_handlers = {}
     try:
-        BAZEL_TRY_ROOT.rmdir()
-    except OSError:
-        pass
-    try:
-        LOCAL_STATE_ROOT.rmdir()
-    except OSError:
-        pass
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            previous_handlers[signum] = signal.signal(signum, forward_signal)
+        with subprocess.Popen(
+            process_launch.argv, cwd=process_launch.cwd, env=process_launch.env
+        ) as process:
+            if pending_signal is not None:
+                process.send_signal(pending_signal)
+            return process_exit_code(process.wait())
+    finally:
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
 
 
 def cleanup_compile_commands_scratch(scratch_dir: Path) -> None:
@@ -1432,23 +1474,24 @@ class BazelTryStep:
         return [self.bazel, "build", *self._bazel_args(), label]
 
     def describe(self) -> str:
-        scratch = BAZEL_TRY_ROOT / "run-<pid>"
-        label = f"{BAZEL_TRY_LABEL_ROOT}/run-<pid>:snippet"
+        scratch = BAZEL_TRY_ROOT / "run-<pid>-<nonce>"
+        label = f"{BAZEL_TRY_LABEL_ROOT}/run-<pid>-<nonce>:snippet"
         lines = [f"# write {scratch}/BUILD.bazel"]
         if self.command.compile_only:
             lines.append(quote_command(self._build_command(label)))
             lines.append("# compile only")
         else:
             lines.append("# build and generate canonical Bazel launch script")
-            lines.append("exec " + quote_command(["<Bazel launch script>"]))
+            lines.append(quote_command(["<Bazel launch script>"]))
+        if not self.command.keep:
+            lines.append("# remove scratch source and outputs after completion")
         return "\n".join(lines)
 
     def run(self, verbose: bool = False) -> int:
-        scratch_dir = BAZEL_TRY_ROOT / f"run-{os.getpid()}"
-        if scratch_dir.exists():
-            shutil.rmtree(scratch_dir)
+        scratch_dir = BAZEL_TRY_ROOT / f"run-{os.getpid()}-{secrets.token_hex(8)}"
         scratch_dir.mkdir(parents=True)
         launch = None
+        execution_root = None
         try:
             try:
                 source_names, source_texts = self.materialize_sources(scratch_dir)
@@ -1467,6 +1510,15 @@ class BazelTryStep:
             label = (
                 f"{BAZEL_TRY_LABEL_ROOT}/{scratch_dir.name}:{DEFAULT_TRY_BINARY_NAME}"
             )
+            execution_root = bazel_execution_root(
+                bazel=self.bazel,
+                bazel_args=self._bazel_args(),
+                cwd=REPO_ROOT,
+                env=self.env,
+            )
+            if execution_root is None:
+                print("dev.py: could not resolve Bazel execution root", file=sys.stderr)
+                return 1
             if self.command.compile_only:
                 build_result = run_quietly(
                     self._build_command(label),
@@ -1495,14 +1547,15 @@ class BazelTryStep:
                     return copy_result
             if self.command.compile_only:
                 return 0
-            if not self.command.keep:
-                cleanup_try_scratch(scratch_dir)
-            return execute_bazel_launch(launch, env=self.env)
+            process_result, process_launch = prepare_bazel_process(launch, env=self.env)
+            if process_result != 0 or process_launch is None:
+                return process_result
+            return wait_for_try_process(process_launch)
         finally:
             if launch is not None:
                 bazel_launcher.remove_launch_script(launch.script_path)
             if not self.command.keep:
-                cleanup_try_scratch(scratch_dir)
+                cleanup_try_scratch(scratch_dir, execution_root)
 
     def copy_output(self, label: str, output_path: Path) -> int:
         """Copies a built try executable to the caller-selected path."""

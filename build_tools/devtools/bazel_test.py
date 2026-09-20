@@ -19,6 +19,55 @@ from build_tools.devtools import bazel as bazel_dev
 
 
 class BazelTest(unittest.TestCase):
+    def test_try_cleanup_removes_all_configurations_but_preserves_other_packages(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            local = root / "workspace/.iree"
+            probes = local / "bazel-try"
+            scratch = probes / "run-owned"
+            scratch.mkdir(parents=True)
+            (scratch / "snippet.c").write_text("source")
+            sibling = probes / "run-retained"
+            sibling.mkdir()
+            dependency = root / "dependency"
+            dependency.mkdir()
+            (dependency / "data").write_text("retained")
+            execution_root = root / "custom-output-base/execroot/project"
+            packages = []
+            for configuration in ("target-asan", "target-opt", "tool-exec"):
+                for kind in ("bin", "genfiles", "testlogs"):
+                    parent = execution_root / "bazel-out" / configuration / kind
+                    package = parent / ".iree/bazel-try" / scratch.name
+                    package.mkdir(parents=True)
+                    (package / "snippet").write_text("binary")
+                    (package / "snippet.runfiles").symlink_to(
+                        dependency, target_is_directory=True
+                    )
+                    other = package.with_name("run-retained")
+                    other.mkdir()
+                    (other / "snippet").write_text("retained")
+                    packages.append(package)
+            bazel_dev.cleanup_try_scratch(scratch, execution_root)
+            self.assertFalse(scratch.exists())
+            self.assertTrue(sibling.is_dir())
+            self.assertEqual((dependency / "data").read_text(), "retained")
+            for package in packages:
+                self.assertFalse(package.exists())
+                self.assertEqual(
+                    (package.with_name("run-retained") / "snippet").read_text(),
+                    "retained",
+                )
+
+    def test_try_cleanup_before_bazel_initialization(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            local = Path(temporary) / ".iree"
+            probes = local / "bazel-try"
+            scratch = probes / "run-owned"
+            scratch.mkdir(parents=True)
+            bazel_dev.cleanup_try_scratch(scratch, None)
+            self.assertFalse(scratch.exists())
+            self.assertTrue(probes.is_dir())
+
     def test_bazel_output_path_uses_configured_executable(self):
         executable_path = Path("C:/b/execroot/bazel-out/bin/pkg/tool.exe")
         metadata = bazel_dev.BazelLaunchMetadata(executable_path=executable_path)
