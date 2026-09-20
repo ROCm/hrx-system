@@ -12,7 +12,7 @@ func.def target(@target) @scalar_i64_arithmetic(%lhs: i64, %rhs: i64, %factor: i
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @scalar_i64_arithmetic(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>, %factor: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @scalar_i64_arithmetic(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>, %factor: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %bias = mov.imm64 17
   %14 = copy %lhs : reg<x86.gpr64> -> reg<x86.gpr64>
   %sum = add.gpr64 %14, %rhs
@@ -47,7 +47,7 @@ func.def target(@target) @scalar_i64_bitwise(%lhs: i64, %rhs: i64) -> (i64) {
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @scalar_i64_bitwise(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @scalar_i64_bitwise(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %19 = copy %lhs : reg<x86.gpr64> -> reg<x86.gpr64>
   %masked = and.imm.gpr64 %19 {imm32 = 255}
   %21 = copy %masked : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -114,7 +114,7 @@ func.def target(@target) @scalar_i64_compare_control(%lhs: i64, %rhs: i64, %true
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @scalar_i64_compare_control(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>, %true_value: reg<x86.gpr64>, %false_value: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2, 1], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @scalar_i64_compare_control(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>, %true_value: reg<x86.gpr64>, %false_value: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %signed = cmp.slt.gpr64 %lhs, %rhs
   %unsigned = cmp.uge.gpr64 %lhs, %rhs
   %15 = copy %signed : reg<x86.gpr32> -> reg<x86.gpr32>
@@ -141,7 +141,7 @@ func.def target(@target) @scalar_i64_static_memory(%input: buffer, %output: buff
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @scalar_i64_static_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6], calling_convention = "sysv_x86_64", result_locations = [], stack_argument_bytes = 0}) @scalar_i64_static_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>) asm {
   %loaded = mov.load.gpr64 %input_view {disp32 = 24}
   mov.store.gpr64 %loaded, %output_view {disp32 = 40}
   return
@@ -163,7 +163,7 @@ func.def target(@target) @scalar_i64_dynamic_memory(%input: buffer, %output: buf
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @scalar_i64_dynamic_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %bounded_i: reg<x86.gpr64>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2], calling_convention = "sysv_x86_64", result_locations = [], stack_argument_bytes = 0}) @scalar_i64_dynamic_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %bounded_i: reg<x86.gpr64>) asm {
   %loaded = mov.load.indexed.gpr64 %input_view, %bounded_i {disp32 = 0, scale = 8}
   %13 = copy %loaded : reg<x86.gpr64> -> reg<x86.gpr64>
   %incremented = add.gpr64 %13, %loaded

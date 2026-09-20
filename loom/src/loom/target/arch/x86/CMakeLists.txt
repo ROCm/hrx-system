@@ -12,6 +12,44 @@ iree_add_all_subdirs()
 if(LOOM_TARGET_ARCH_X86)
 loom_cc_library(
   NAME
+    sysv_abi
+  HDRS
+    "sysv_abi.h"
+  SRCS
+    "sysv_abi.c"
+  DEPS
+    ::register_classes
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::descriptors
+    loom::ir
+    loom::target::registers
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
+loom_cc_test(
+  NAME
+    sysv_abi_test
+  SRCS
+    "sysv_abi_test.cc"
+  DEPS
+    ::register_classes
+    ::sysv_abi
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::builder
+    loom::ir
+    loom::target::arch::x86::descriptors::shards_for_testing
+  LABELS
+    "iree-build-requirement=loom.target.arch.x86"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
+loom_cc_library(
+  NAME
     feature_bits
   HDRS
     "feature_bits.h"
@@ -112,6 +150,7 @@ loom_check_test_suite(
     loom_check_file_test
   SRCS
     "test/register_classes.loom-test"
+    "test/source_low/abi_layout.loom-test"
     "test/source_low/allocation.loom-test"
     "test/source_low/buffer_bulk.loom-test"
     "test/source_low/buffer_raw.loom-test"

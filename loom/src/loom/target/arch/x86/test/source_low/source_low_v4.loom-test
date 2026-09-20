@@ -233,7 +233,7 @@ func.def target(@target) @i32x4_memory_copy(%input: buffer, %output: buffer) {
 }
 
 // ----
-low.func.def target<x86.avx512.core>(@target) abi(object_function) @i32x4_memory_copy(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>) asm {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6], calling_convention = "sysv_x86_64", result_locations = [], stack_argument_bytes = 0}) @i32x4_memory_copy(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>) asm {
   %loaded = vmovdqu32.load.xmm %input_view {disp32 = 0}
   vmovdqu32.store.xmm %loaded, %output_view {disp32 = 0}
   return
@@ -254,7 +254,7 @@ func.def target(@target) @i32x4_memory_indexed(%input: buffer, %output: buffer, 
 }
 
 // ----
-low.func.def target<x86.avx512.core>(@target) abi(object_function) @i32x4_memory_indexed(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %bounded_i: reg<x86.gpr64>) asm {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2], calling_convention = "sysv_x86_64", result_locations = [], stack_argument_bytes = 0}) @i32x4_memory_indexed(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %bounded_i: reg<x86.gpr64>) asm {
   %loaded = vmovdqu32.load.indexed.xmm %input_view, %bounded_i {disp32 = 0, scale = 4}
   vmovdqu32.store.indexed.xmm %loaded, %output_view, %bounded_i {disp32 = 0, scale = 4}
   return
@@ -274,7 +274,7 @@ func.def target(@target) @f32x4_memory_copy(%input: buffer, %output: buffer) {
 }
 
 // ----
-low.func.def target<x86.avx512.core>(@target) abi(object_function) @f32x4_memory_copy(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>) asm {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6], calling_convention = "sysv_x86_64", result_locations = [], stack_argument_bytes = 0}) @f32x4_memory_copy(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>) asm {
   %loaded = vmovdqu32.load.xmm %input_view {disp32 = 0}
   vmovdqu32.store.xmm %loaded, %output_view {disp32 = 0}
   return
@@ -298,7 +298,7 @@ func.def target(@target) @f32x4_memory_indexed_add(%lhs: buffer, %rhs: buffer, %
 }
 
 // ----
-low.func.def target<x86.avx512.core>(@target) abi(object_function) @f32x4_memory_indexed_add(%lhs_view: reg<x86.gpr64>, %rhs_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %bounded_i: reg<x86.gpr64>) asm {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2, 1], calling_convention = "sysv_x86_64", result_locations = [], stack_argument_bytes = 0}) @f32x4_memory_indexed_add(%lhs_view: reg<x86.gpr64>, %rhs_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %bounded_i: reg<x86.gpr64>) asm {
   %lhs_v = vmovdqu32.load.indexed.xmm %lhs_view, %bounded_i {disp32 = 0, scale = 4}
   %rhs_v = vmovdqu32.load.indexed.xmm %rhs_view, %bounded_i {disp32 = 0, scale = 4}
   %sum = vaddps.xmm %lhs_v, %rhs_v

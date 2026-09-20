@@ -1,0 +1,33 @@
+// RUN: emit source-low output=low
+
+// Scalar SysV arguments use the six integer argument registers followed by
+// eight-byte outgoing stack slots.
+x86.target<scalar> @target
+
+func.def target(@target) @stack_arguments(%a0: i64, %a1: i64, %a2: i64, %a3: i64, %a4: i64, %a5: i64, %a6: i64, %a7: i64) -> (i64) {
+  func.return %a7 : i64
+}
+
+// ----
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2, 1, 8, 9, -1, -9], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 16}) @stack_arguments(%a0: reg<x86.gpr64>, %a1: reg<x86.gpr64>, %a2: reg<x86.gpr64>, %a3: reg<x86.gpr64>, %a4: reg<x86.gpr64>, %a5: reg<x86.gpr64>, %a6: reg<x86.gpr64>, %a7: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  return %a7
+}
+
+// ====
+
+// An empty definition still carries its selected calling convention, and an
+// imported declaration retains the same placement contract.
+x86.target<scalar> @target
+
+func.decl retain import("external_add") target(@target) @external_add(%lhs: i64, %rhs: i64) -> (i64)
+
+func.def target(@target) @empty_signature() {
+  func.return
+}
+
+// ----
+low.func.decl retain import(native, "external_add") target<x86.scalar.core>(@target) abi_layout({argument_locations = [7, 6], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @external_add(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr64>)
+
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [], calling_convention = "sysv_x86_64", result_locations = [], stack_argument_bytes = 0}) @empty_signature() asm {
+  return
+}

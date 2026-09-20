@@ -8,7 +8,7 @@ func.def target(@target) @copy(%source: buffer, %source_offset: offset, %target:
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @copy(%source: reg<x86.gpr64>, %source_offset: reg<x86.gpr64>, %target: reg<x86.gpr64>, %target_offset: reg<x86.gpr64>, %byte_length: reg<x86.gpr64>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2, 1, 8], calling_convention = "sysv_x86_64", result_locations = [], stack_argument_bytes = 0}) @copy(%source: reg<x86.gpr64>, %source_offset: reg<x86.gpr64>, %target: reg<x86.gpr64>, %target_offset: reg<x86.gpr64>, %byte_length: reg<x86.gpr64>) asm {
   %21 = mov.imm64 0
   low.br ^_bb1(%21: reg<x86.gpr64>)
 ^_bb1(%20: reg<x86.gpr64>):
@@ -131,7 +131,7 @@ func.def target(@target) @fill_i64(%pattern: i64, %target: buffer, %target_offse
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @fill_i64(%pattern: reg<x86.gpr64>, %target: reg<x86.gpr64>, %target_offset: reg<x86.gpr64>, %byte_length: reg<x86.gpr64>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2, 1], calling_convention = "sysv_x86_64", result_locations = [], stack_argument_bytes = 0}) @fill_i64(%pattern: reg<x86.gpr64>, %target: reg<x86.gpr64>, %target_offset: reg<x86.gpr64>, %byte_length: reg<x86.gpr64>) asm {
   %28 = mov.imm64 0
   low.br ^_bb1(%28: reg<x86.gpr64>, %pattern: reg<x86.gpr64>)
 ^_bb1(%26: reg<x86.gpr64>, %27: reg<x86.gpr64>):
@@ -196,7 +196,7 @@ func.def target(@target) @compare(%lhs: buffer, %lhs_offset: offset, %rhs: buffe
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @compare(%lhs: reg<x86.gpr64>, %lhs_offset: reg<x86.gpr64>, %rhs: reg<x86.gpr64>, %rhs_offset: reg<x86.gpr64>, %byte_length: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2, 1, 8], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @compare(%lhs: reg<x86.gpr64>, %lhs_offset: reg<x86.gpr64>, %rhs: reg<x86.gpr64>, %rhs_offset: reg<x86.gpr64>, %byte_length: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
   %42 = mov.imm64 0
   %43 = mov.imm32 0
   %44 = mov.imm32 -1

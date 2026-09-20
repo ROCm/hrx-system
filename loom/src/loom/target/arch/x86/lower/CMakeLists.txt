@@ -14,11 +14,13 @@ loom_cc_library(
   NAME
     lower
   HDRS
+    "abi.h"
     "contraction.h"
     "lower.h"
   TEXTUAL_HDRS
     "${IREE_BINARY_DIR}/loom/src/loom/target/arch/x86/contracts/tables.inl"
   SRCS
+    "abi.c"
     "contraction.c"
     "registry.c"
   DEPS
@@ -31,6 +33,8 @@ loom_cc_library(
     loom::target::arch::x86::packed_dot_contract
     loom::target::arch::x86::packed_dot_contract_projection
     loom::target::arch::x86::register_classes
+    loom::target::arch::x86::sysv_abi
+    loom::target::facts
   PUBLIC
 )
 endif()

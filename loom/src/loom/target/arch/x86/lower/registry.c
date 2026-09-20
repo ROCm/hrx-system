@@ -16,6 +16,7 @@
 #include "loom/target/arch/x86/contracts/packed_dot_lower_rules.h"
 #include "loom/target/arch/x86/contracts/scalar.h"
 #include "loom/target/arch/x86/contracts/scalar_lower_rules.h"
+#include "loom/target/arch/x86/lower/abi.h"
 #include "loom/target/arch/x86/lower/contraction.h"
 #include "loom/target/arch/x86/lower/lower.h"
 #include "loom/target/arch/x86/register_classes.h"
@@ -335,6 +336,8 @@ static const loom_low_lower_policy_t kX86Avx512LowLowerPolicy = {
     .error_catalog = &loom_error_catalog_core,
     .map_type = {.fn = loom_x86_map_avx512_type, .user_data = NULL},
     .map_argument = {.fn = loom_x86_map_avx512_argument, .user_data = NULL},
+    .map_abi_layout = {.fn = loom_x86_map_abi_layout, .user_data = NULL},
+    .import_decl_kind = LOOM_LOW_FUNC_DECL_IMPORT_KIND_NATIVE,
     .source_type_supported = {.fn = loom_x86_source_type_supported,
                               .user_data = NULL},
     .contract = LOOM_X86_AVX512_CONTRACT,
@@ -345,6 +348,8 @@ static const loom_low_lower_policy_t kX86Avx2LowLowerPolicy = {
     .error_catalog = &loom_error_catalog_core,
     .map_type = {.fn = loom_x86_map_avx2_type, .user_data = NULL},
     .map_argument = {.fn = loom_x86_map_avx2_argument, .user_data = NULL},
+    .map_abi_layout = {.fn = loom_x86_map_abi_layout, .user_data = NULL},
+    .import_decl_kind = LOOM_LOW_FUNC_DECL_IMPORT_KIND_NATIVE,
     .source_type_supported = {.fn = loom_x86_source_type_supported,
                               .user_data = NULL},
     .contract = LOOM_X86_AVX2_CONTRACT,
@@ -355,6 +360,8 @@ static const loom_low_lower_policy_t kX86ScalarLowLowerPolicy = {
     .error_catalog = &loom_error_catalog_core,
     .map_type = {.fn = loom_x86_map_scalar_type, .user_data = NULL},
     .map_argument = {.fn = loom_x86_map_scalar_argument, .user_data = NULL},
+    .map_abi_layout = {.fn = loom_x86_map_abi_layout, .user_data = NULL},
+    .import_decl_kind = LOOM_LOW_FUNC_DECL_IMPORT_KIND_NATIVE,
     .source_type_supported = {.fn = loom_x86_source_type_supported,
                               .user_data = NULL},
     .contract = LOOM_X86_SCALAR_CONTRACT,
@@ -364,6 +371,8 @@ static const loom_low_lower_policy_t kX86PackedDotLowLowerPolicy = {
     .name = IREE_SVL("x86-packed-dot-low-lower"),
     .error_catalog = &loom_error_catalog_core,
     .map_type = {.fn = loom_x86_map_packed_dot_type, .user_data = NULL},
+    .map_abi_layout = {.fn = loom_x86_map_abi_layout, .user_data = NULL},
+    .import_decl_kind = LOOM_LOW_FUNC_DECL_IMPORT_KIND_NATIVE,
     .descriptor_matrix =
         {
             .options = loom_x86_descriptor_matrix_options,
@@ -378,6 +387,8 @@ static const loom_low_lower_policy_t kX86Avx512PackedDotLowLowerPolicy = {
     .map_type = {.fn = loom_x86_map_avx512_packed_dot_type, .user_data = NULL},
     .map_argument = {.fn = loom_x86_map_avx512_packed_dot_argument,
                      .user_data = NULL},
+    .map_abi_layout = {.fn = loom_x86_map_abi_layout, .user_data = NULL},
+    .import_decl_kind = LOOM_LOW_FUNC_DECL_IMPORT_KIND_NATIVE,
     .descriptor_matrix =
         {
             .options = loom_x86_descriptor_matrix_options,

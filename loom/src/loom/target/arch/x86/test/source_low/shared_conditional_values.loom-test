@@ -33,7 +33,7 @@ func.def target(@target) @shared_conditional_values(%input: buffer, %output: buf
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @shared_conditional_values(%in: reg<x86.gpr64>, %out: reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6], calling_convention = "sysv_x86_64", result_locations = [], stack_argument_bytes = 0}) @shared_conditional_values(%in: reg<x86.gpr64>, %out: reg<x86.gpr64>) asm {
   %completed = mov.imm32 1
   %outer_value = mov.load.gpr32 %in {disp32 = 0}
   %outer = cmp.ne.imm.gpr32 %outer_value, 0

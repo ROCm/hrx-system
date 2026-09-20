@@ -10,7 +10,7 @@ func.def target(@target) @quotient_by_three(%input: i32) -> (i32) {
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @quotient_by_three(%input: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({argument_locations = [7], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @quotient_by_three(%input: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %6 = movzx.gpr64.gpr32 %input
   %7 = mov.imm64 6148914691236517206
   %8 = copy %6 : reg<x86.gpr64> -> reg<x86.rax>
@@ -31,7 +31,7 @@ func.def target(@target) @quotient_by_seven(%input: i32) -> (i32) {
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @quotient_by_seven(%input: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({argument_locations = [7], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @quotient_by_seven(%input: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %6 = movzx.gpr64.gpr32 %input
   %7 = mov.imm64 2635249153387078803
   %8 = copy %6 : reg<x86.gpr64> -> reg<x86.rax>
@@ -52,7 +52,7 @@ func.def target(@target) @remainder_by_twenty(%input: i32) -> (i32) {
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @remainder_by_twenty(%input: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({argument_locations = [7], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @remainder_by_twenty(%input: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %6 = movzx.gpr64.gpr32 %input
   %7 = mov.imm64 922337203685477581
   %8 = copy %6 : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -76,7 +76,7 @@ func.def target(@target) @remainder_by_seven(%input: i32) -> (i32) {
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @remainder_by_seven(%input: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({argument_locations = [7], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @remainder_by_seven(%input: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %6 = movzx.gpr64.gpr32 %input
   %7 = mov.imm64 2635249153387078803
   %8 = copy %6 : reg<x86.gpr64> -> reg<x86.gpr64>

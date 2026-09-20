@@ -190,7 +190,7 @@ func.def target(@target) @bounded_offset_difference(%input: buffer, %wide_limit:
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @bounded_offset_difference(%input_view: reg<x86.gpr64>, %limit: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @bounded_offset_difference(%input_view: reg<x86.gpr64>, %limit: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %bounded_word = mov.load.gpr32 %input_view {disp32 = 0}
   %position = movzx.gpr64.gpr32 %bounded_word
   %16 = copy %limit : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -255,7 +255,7 @@ func.def target(@target) @high_bit_offset_add(%input: offset) -> (i64) {
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @high_bit_offset_add(%bounded: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({argument_locations = [7], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @high_bit_offset_add(%bounded: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %base = mov.imm64 2147483648
   %wide = lea %base, %bounded
   return %wide

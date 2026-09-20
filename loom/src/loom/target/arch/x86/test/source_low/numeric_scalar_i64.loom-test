@@ -158,7 +158,7 @@ func.def target(@target) @scalar_i64_compare_slt_if(%lhs: i64, %rhs: i64, %then_
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @scalar_i64_compare_slt_if(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>, %then_value: reg<x86.gpr32>, %else_value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2, 1], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @scalar_i64_compare_slt_if(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>, %then_value: reg<x86.gpr32>, %else_value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %cmp = cmp.slt.gpr64 %lhs, %rhs
   %14 = copy %else_value : reg<x86.gpr32> -> reg<x86.gpr32>
   %result = select.gpr32 %cmp, %then_value, %14
@@ -227,7 +227,7 @@ func.def target(@target) @scalar_i64_addi_uniform(%lhs: i64, %rhs: i64) -> (i64)
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @scalar_i64_addi_uniform(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @scalar_i64_addi_uniform(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %7 = copy %lhs : reg<x86.gpr64> -> reg<x86.gpr64>
   %result = add.gpr64 %7, %rhs
   return %result
@@ -243,7 +243,7 @@ func.def target(@target) @scalar_i64_muli_uniform(%lhs: i64, %rhs: i64) -> (i64)
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @scalar_i64_muli_uniform(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @scalar_i64_muli_uniform(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %7 = copy %lhs : reg<x86.gpr64> -> reg<x86.gpr64>
   %result = imul.gpr64 %7, %rhs
   return %result
@@ -357,7 +357,7 @@ func.def target(@target) @scalar_i32_control(%lhs: i32, %rhs: i32) -> (i32) {
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @scalar_i32_control(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @scalar_i32_control(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %10 = copy %lhs : reg<x86.gpr32> -> reg<x86.gpr32>
   %product = imul.gpr32 %10, %rhs
   %12 = copy %product : reg<x86.gpr32> -> reg<x86.gpr32>

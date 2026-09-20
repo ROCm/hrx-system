@@ -10,7 +10,7 @@ func.def target(@target) @constant_remainder_uniform(%value: i32) -> (i32) {
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @constant_remainder_uniform(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({argument_locations = [7], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @constant_remainder_uniform(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %6 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
   %7 = movzx.gpr64.gpr32 %6
   %8 = mov.imm64 2863311531

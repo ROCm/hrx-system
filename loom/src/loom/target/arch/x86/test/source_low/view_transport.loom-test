@@ -102,7 +102,7 @@ func.def target(@target) @rotate_buffer_views(%input: buffer, %count_input: inde
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @rotate_buffer_views(%last0: reg<x86.gpr64>, %count: reg<x86.gpr64>, %seed: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @rotate_buffer_views(%last0: reg<x86.gpr64>, %count: reg<x86.gpr64>, %seed: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %begin = mov.imm64 0
   %depth = mov.imm32 4
   mov.store.gpr32 %seed, %last0 {disp32 = 0}
@@ -184,7 +184,7 @@ func.def target(@target) @correlated_duplicate_rotation(%input: buffer, %count_i
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @correlated_duplicate_rotation(%last_a_view: reg<x86.gpr64>, %count: reg<x86.gpr64>, %first_offset: reg<x86.gpr64>, %second_offset: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2, 1], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @correlated_duplicate_rotation(%last_a_view: reg<x86.gpr64>, %count: reg<x86.gpr64>, %first_offset: reg<x86.gpr64>, %second_offset: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
   %begin = mov.imm64 0
   low.br ^_bb1(%begin: reg<x86.gpr64>, %first_offset: reg<x86.gpr64>, %second_offset: reg<x86.gpr64>)
 ^_bb1(%i: reg<x86.gpr64>, %a_offset: reg<x86.gpr64>, %b_offset: reg<x86.gpr64>):

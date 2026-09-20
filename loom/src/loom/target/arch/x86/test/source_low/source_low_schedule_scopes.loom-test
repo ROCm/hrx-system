@@ -28,7 +28,7 @@ func.def public target(@target) @unrolled_helpers(%lhs: i32, %rhs: i32) -> (i32)
 }
 
 // ----
-low.func.def public target<x86.scalar.core>(@target) abi(object_function) @unrolled_helpers(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def public target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @unrolled_helpers(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   low.schedule.begin
   %value_copy$49 = copy %lhs : reg<x86.gpr32> -> reg<x86.gpr32>
   %first$50 = add.gpr32 %value_copy$49, %lhs
@@ -99,7 +99,7 @@ func.def public target(@target) @partial_unrolled_helpers(%lhs: i32, %rhs: i32) 
 }
 
 // ----
-low.func.def public target<x86.scalar.core>(@target) abi(object_function) @partial_unrolled_helpers(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def public target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @partial_unrolled_helpers(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %begin = mov.imm64 0
   %end = mov.imm64 5
   %initial = mov.imm32 0

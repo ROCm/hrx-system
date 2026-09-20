@@ -8,7 +8,7 @@ func.def target(@target) @i64_to_index_identity(%value: i64) -> (index) {
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @i64_to_index_identity(%index: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @i64_to_index_identity(%index: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   return %index
 }
 
@@ -25,7 +25,7 @@ func.def target(@target) @index_add_sub_disp(%base: index) -> (index) {
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @index_add_sub_disp(%base: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @index_add_sub_disp(%base: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %plus = lea.disp %base {disp32 = 24}
   %result = lea.disp %plus {disp32 = -8}
   return %result
@@ -44,7 +44,7 @@ func.def target(@target) @offset_add_sub_disp(%base: offset) -> (offset) {
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @offset_add_sub_disp(%base: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @offset_add_sub_disp(%base: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %plus = lea.disp %base {disp32 = 128}
   %result = lea.disp %plus {disp32 = -16}
   return %result
@@ -117,7 +117,7 @@ func.def target(@target) @index_madd_dynamic_stride_constant_bias(%row: index, %
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @index_madd_dynamic_stride_constant_bias(%row: reg<x86.gpr64>, %stride: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @index_madd_dynamic_stride_constant_bias(%row: reg<x86.gpr64>, %stride: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %8 = copy %row : reg<x86.gpr64> -> reg<x86.gpr64>
   %9 = imul.gpr64 %8, %stride
   %linear = lea.disp %9 {disp32 = 5}
@@ -142,7 +142,7 @@ func.def target(@target) @f32x16_index_madd_scaled_bias_memory(%input: buffer, %
 }
 
 // ----
-low.func.def target<x86.avx512.core>(@target) abi(object_function) @f32x16_index_madd_scaled_bias_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %row: reg<x86.gpr64>) asm {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2], calling_convention = "sysv_x86_64", result_locations = [], stack_argument_bytes = 0}) @f32x16_index_madd_scaled_bias_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %row: reg<x86.gpr64>) asm {
   %15 = lea.scale %row {disp32 = 1, scale = 4}
   %loaded = vmovdqu32.load.indexed %input_view, %15 {disp32 = 0, scale = 4}
   vmovdqu32.store.indexed %loaded, %output_view, %15 {disp32 = 0, scale = 4}
@@ -168,7 +168,7 @@ func.def target(@target) @i32_index_madd_scaled_bias_memory(%input: buffer, %out
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @i32_index_madd_scaled_bias_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %row: reg<x86.gpr64>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2], calling_convention = "sysv_x86_64", result_locations = [], stack_argument_bytes = 0}) @i32_index_madd_scaled_bias_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %row: reg<x86.gpr64>) asm {
   %16 = lea.scale %row {disp32 = 1, scale = 4}
   %loaded = mov.load.indexed.gpr32 %input_view, %16 {disp32 = 0, scale = 4}
   %18 = copy %loaded : reg<x86.gpr32> -> reg<x86.gpr32>
@@ -196,7 +196,7 @@ func.def target(@target) @i64_index_madd_scaled_bias_memory(%input: buffer, %out
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @i64_index_madd_scaled_bias_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %row: reg<x86.gpr64>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2], calling_convention = "sysv_x86_64", result_locations = [], stack_argument_bytes = 0}) @i64_index_madd_scaled_bias_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %row: reg<x86.gpr64>) asm {
   %16 = lea.scale %row {disp32 = 1, scale = 4}
   %loaded = mov.load.indexed.gpr64 %input_view, %16 {disp32 = 0, scale = 8}
   %18 = copy %loaded : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -224,7 +224,7 @@ func.def target(@target) @i64_index_add_madd_memory(%input: buffer, %output: buf
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @i64_index_add_madd_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %i: reg<x86.gpr64>, %j: reg<x86.gpr64>, %row: reg<x86.gpr64>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2, 1, 8], calling_convention = "sysv_x86_64", result_locations = [], stack_argument_bytes = 0}) @i64_index_add_madd_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %i: reg<x86.gpr64>, %j: reg<x86.gpr64>, %row: reg<x86.gpr64>) asm {
   %sum = lea %i, %j
   %bounded_linear = lea.add_scale %sum, %row {disp32 = 0, scale = 4}
   %loaded = mov.load.indexed.gpr64 %input_view, %bounded_linear {disp32 = 0, scale = 8}
@@ -257,7 +257,7 @@ func.def target(@target) @guarded_loaded_i64_index_address(%control: buffer, %ou
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @guarded_loaded_i64_index_address(%control_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6], calling_convention = "sysv_x86_64", result_locations = [], stack_argument_bytes = 0}) @guarded_loaded_i64_index_address(%control_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>) asm {
   %row = mov.load.gpr64 %control_view {disp32 = 0}
   %minimum_row = mov.imm64 0
   %limit_i64 = mov.imm64 64
@@ -296,7 +296,7 @@ func.def target(@target) @guarded_loaded_i32_index_address(%control: buffer, %ou
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @guarded_loaded_i32_index_address(%control_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6], calling_convention = "sysv_x86_64", result_locations = [], stack_argument_bytes = 0}) @guarded_loaded_i32_index_address(%control_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>) asm {
   %row_i32 = mov.load.gpr32 %control_view {disp32 = 0}
   %row = movsxd.gpr64.gpr32 %row_i32
   %c0 = mov.imm32 0
@@ -323,7 +323,7 @@ func.def target(@target) @nonnegative_i32_to_index(%value_i32: i32) -> (index) {
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @nonnegative_i32_to_index(%bounded_i32: reg<x86.gpr32>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @nonnegative_i32_to_index(%bounded_i32: reg<x86.gpr32>) -> (reg<x86.gpr64>) asm {
   %index = movzx.gpr64.gpr32 %bounded_i32
   return %index
 }
@@ -345,7 +345,7 @@ func.def target(@target) @i32_source_index_static_suffix(%input: buffer, %output
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @i32_source_index_static_suffix(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %i: reg<x86.gpr64>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2], calling_convention = "sysv_x86_64", result_locations = [], stack_argument_bytes = 0}) @i32_source_index_static_suffix(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %i: reg<x86.gpr64>) asm {
   %loaded = mov.load.indexed.gpr32 %input_view, %i {disp32 = 16, scale = 4}
   mov.store.indexed.gpr32 %loaded, %output_view, %i {disp32 = 16, scale = 4}
   return
@@ -368,7 +368,7 @@ func.def target(@target) @f32x4_source_index_static_suffix(%input: buffer, %outp
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @f32x4_source_index_static_suffix(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %i: reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2], calling_convention = "sysv_x86_64", result_locations = [], stack_argument_bytes = 0}) @f32x4_source_index_static_suffix(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %i: reg<x86.gpr64>) asm {
   %loaded = vmovdqu32.load.indexed.xmm %input_view, %i {disp32 = 16, scale = 4}
   vmovdqu32.store.indexed.xmm %loaded, %output_view, %i {disp32 = 16, scale = 4}
   return
@@ -391,7 +391,7 @@ func.def target(@target) @f32x16_source_index_static_suffix(%input: buffer, %out
 }
 
 // ----
-low.func.def target<x86.avx512.core>(@target) abi(object_function) @f32x16_source_index_static_suffix(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %i: reg<x86.gpr64>) asm {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2], calling_convention = "sysv_x86_64", result_locations = [], stack_argument_bytes = 0}) @f32x16_source_index_static_suffix(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %i: reg<x86.gpr64>) asm {
   %loaded = vmovdqu32.load.indexed %input_view, %i {disp32 = 16, scale = 4}
   vmovdqu32.store.indexed %loaded, %output_view, %i {disp32 = 16, scale = 4}
   return
@@ -415,7 +415,7 @@ func.def target(@target) @i32_multi_term_static_suffix(%input: buffer, %output: 
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @i32_multi_term_static_suffix(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %i: reg<x86.gpr64>, %j: reg<x86.gpr64>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2, 1], calling_convention = "sysv_x86_64", result_locations = [], stack_argument_bytes = 0}) @i32_multi_term_static_suffix(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %i: reg<x86.gpr64>, %j: reg<x86.gpr64>) asm {
   %linear = lea %i, %j
   %18 = mov.imm64 4
   %19 = copy %linear : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -445,7 +445,7 @@ func.def target(@target) @f32x4_multi_term_static_suffix(%input: buffer, %output
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @f32x4_multi_term_static_suffix(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %i: reg<x86.gpr64>, %j: reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2, 1], calling_convention = "sysv_x86_64", result_locations = [], stack_argument_bytes = 0}) @f32x4_multi_term_static_suffix(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %i: reg<x86.gpr64>, %j: reg<x86.gpr64>) asm {
   %linear = lea %i, %j
   %18 = mov.imm64 4
   %19 = copy %linear : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -475,7 +475,7 @@ func.def target(@target) @f32x16_multi_term_static_suffix(%input: buffer, %outpu
 }
 
 // ----
-low.func.def target<x86.avx512.core>(@target) abi(object_function) @f32x16_multi_term_static_suffix(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %i: reg<x86.gpr64>, %j: reg<x86.gpr64>) asm {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2, 1], calling_convention = "sysv_x86_64", result_locations = [], stack_argument_bytes = 0}) @f32x16_multi_term_static_suffix(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %i: reg<x86.gpr64>, %j: reg<x86.gpr64>) asm {
   %linear = lea %i, %j
   %18 = mov.imm64 4
   %19 = copy %linear : reg<x86.gpr64> -> reg<x86.gpr64>

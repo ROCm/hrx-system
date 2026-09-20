@@ -9,7 +9,7 @@ func.def target(@target) @uniform_subtract(%lhs: i64, %rhs: i64) -> (i64) {
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @uniform_subtract(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @uniform_subtract(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %7 = copy %lhs : reg<x86.gpr64> -> reg<x86.gpr64>
   %difference = sub.gpr64 %7, %rhs
   return %difference

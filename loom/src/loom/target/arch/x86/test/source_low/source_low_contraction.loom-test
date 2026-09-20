@@ -145,7 +145,7 @@ func.def target(@target) @encoded_i8_blocked_mma(%lhs_buffer: buffer, %rhs_buffe
 }
 
 // ----
-low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @encoded_i8_blocked_mma(%lhs_view: reg<x86.gpr64>, %rhs_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %bounded_origin: reg<x86.gpr64>) asm {
+low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6, 2, 1], calling_convention = "sysv_x86_64", result_locations = [], stack_argument_bytes = 0}) @encoded_i8_blocked_mma(%lhs_view: reg<x86.gpr64>, %rhs_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %bounded_origin: reg<x86.gpr64>) asm {
   %lhs = vmovdqu32.load.indexed.ymm %lhs_view, %bounded_origin {disp32 = 0, scale = 1}
   %rhs = vmovdqu32.load.indexed.ymm %rhs_view, %bounded_origin {disp32 = 0, scale = 1}
   %init = vmovdqu32.load.indexed.ymm %output_view, %bounded_origin {disp32 = 0, scale = 4}

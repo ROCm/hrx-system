@@ -41,6 +41,35 @@ _X86_PROVIDER_VISIBILITY = [
 #===------------------------------------------------------------------------===#
 
 loom_cc_library(
+    name = "sysv_abi",
+    srcs = ["sysv_abi.c"],
+    hdrs = ["sysv_abi.h"],
+    visibility = _X86_LOWER_VISIBILITY + _X86_NATIVE_VISIBILITY,
+    deps = [
+        ":register_classes",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target:registers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "sysv_abi_test",
+    srcs = ["sysv_abi_test.cc"],
+    deps = [
+        ":register_classes",
+        ":sysv_abi",
+        "//loom/src/loom/codegen/low:builder",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target/arch/x86/descriptors:shards_for_testing",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "feature_bits",
     hdrs = ["feature_bits.h"],
     visibility = _X86_LLVMIR_VISIBILITY + _X86_RECORDS_VISIBILITY,
@@ -113,6 +142,7 @@ loom_check_test_suite(
     name = "loom_check_file_test",
     srcs = [
         "test/register_classes.loom-test",
+        "test/source_low/abi_layout.loom-test",
         "test/source_low/allocation.loom-test",
         "test/source_low/buffer_bulk.loom-test",
         "test/source_low/buffer_raw.loom-test",
