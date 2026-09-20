@@ -32,6 +32,36 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @wide_subview_s
 
 x86.target<avx2> @target
 
+func.def target(@target) @distinct_root_selection(%first: buffer, %second: buffer, %condition: i1) -> (i32) {
+  %first_offset = index.constant 4 : offset
+  %second_offset = index.constant 8 : offset
+  %first_aligned = buffer.assume.alignment %first {minimum_alignment = 4} : buffer
+  %second_aligned = buffer.assume.alignment %second {minimum_alignment = 4} : buffer
+  %first_view = buffer.view %first_aligned[%first_offset] : buffer -> view<1xi32>
+  %second_view = buffer.view %second_aligned[%second_offset] : buffer -> view<1xi32>
+  %selected = scf.select %condition, %first_view, %second_view : view<1xi32>
+  %value = view.load %selected[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @distinct_root_selection(%first_aligned: reg<x86.gpr64>, %second_aligned: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %first_offset = mov.imm64 4
+  %second_offset = mov.imm64 8
+  low.cond_br %condition, ^_bb1, ^_bb2 : reg<x86.gpr32>
+^_bb1:
+  low.br ^_bb3(%first_aligned: reg<x86.gpr64>, %first_offset: reg<x86.gpr64>)
+^_bb2:
+  low.br ^_bb3(%second_aligned: reg<x86.gpr64>, %second_offset: reg<x86.gpr64>)
+^_bb3(%selected: reg<x86.gpr64>, %selected_offset: reg<x86.gpr64>):
+  %value = mov.load.indexed.gpr32 %selected, %selected_offset {disp32 = 0, scale = 1}
+  return %value
+}
+
+// ====
+
+x86.target<avx2> @target
+
 func.def target(@target) @rotate_buffer_views(%input: buffer, %count_input: index, %seed: i32) -> (i32) {
   %count = index.assume %count_input [range(%count_input, 0, 257)] : index
   %begin = index.constant 0 : index

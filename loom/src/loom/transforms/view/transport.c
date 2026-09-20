@@ -36,8 +36,29 @@ static const loom_pass_info_t kPassInfo = {
     .statistic_layout = &loom_view_transport_statistics_layout,
 };
 
+#define LOOM_VIEW_ROOT_SELECTION_STATISTICS(V, statistics_type)           \
+  V(statistics_type, selections_decomposed, "selections-decomposed",      \
+    "Number of view selections replaced by correlated buffer and offset " \
+    "selections.")
+
+LOOM_PASS_STATISTICS_DEFINE(loom_view_root_selection_statistics,
+                            loom_view_root_selection_statistics_t,
+                            LOOM_VIEW_ROOT_SELECTION_STATISTICS)
+
+static const loom_pass_info_t kRootSelectionPassInfo = {
+    .name = IREE_SVL("decompose-view-root-selections"),
+    .description =
+        IREE_SVL("Carry distinct-root view selections as buffer-offset pairs."),
+    .kind = LOOM_PASS_FUNCTION,
+    .statistic_layout = &loom_view_root_selection_statistics_layout,
+};
+
 const loom_pass_info_t* loom_decompose_view_transports_pass_info(void) {
   return &kPassInfo;
+}
+
+const loom_pass_info_t* loom_decompose_view_root_selections_pass_info(void) {
+  return &kRootSelectionPassInfo;
 }
 
 //===----------------------------------------------------------------------===//
@@ -203,6 +224,9 @@ static iree_status_t loom_view_transport_collect(
 
 static iree_host_size_t loom_view_transport_index(
     const loom_view_transport_plan_t* plan, loom_value_id_t value_id) {
+  if (!plan->indices) {
+    return IREE_HOST_SIZE_MAX;
+  }
   return plan
       ->indices[loom_local_value_domain_ordinal(&plan->domain, value_id)];
 }
@@ -683,6 +707,325 @@ iree_status_t loom_decompose_view_transports_run(loom_pass_t* pass,
       module, body, pass->arena, &plan.domain);
   if (iree_status_is_ok(status)) {
     status = loom_view_transport_prepare(&plan, pass, function, &rewriter);
+  }
+  if (iree_any_bit_set(rewriter.flags, LOOM_REWRITER_FLAG_CHANGED)) {
+    loom_pass_value_fact_owner_invalidate(pass->value_facts);
+    if (iree_status_is_ok(status)) {
+      loom_pass_mark_changed(pass);
+    }
+  }
+  loom_local_value_domain_release(&plan.domain);
+  loom_rewriter_deinitialize(&rewriter);
+  return status;
+}
+
+//===----------------------------------------------------------------------===//
+// Distinct-root selections
+//===----------------------------------------------------------------------===//
+
+typedef struct loom_view_root_selection_source_t {
+  // Materializing buffer for a leaf view, or INVALID for a nested selection.
+  loom_value_id_t buffer_value_id;
+  // View-region offset recipe for a leaf view, or INVALID when nested.
+  loom_view_region_id_t region_id;
+  // Earlier selection supplying the source pair, or IREE_HOST_SIZE_MAX.
+  iree_host_size_t selection_index;
+} loom_view_root_selection_source_t;
+
+typedef struct loom_view_root_selection_t {
+  // Original scf.select operation replaced by this plan entry.
+  loom_op_t* op;
+  // Original view type reconstructed after selecting the storage coordinate.
+  loom_type_t view_type;
+  // True-value storage coordinate.
+  loom_view_root_selection_source_t true_source;
+  // False-value storage coordinate.
+  loom_view_root_selection_source_t false_source;
+  // Rewritten selected materializing buffer, or INVALID before rewriting.
+  loom_value_id_t buffer_value_id;
+  // Rewritten selected root-relative offset, or INVALID before rewriting.
+  loom_value_id_t offset_value_id;
+  // Whether both source coordinates can be materialized exactly.
+  bool selected;
+} loom_view_root_selection_t;
+
+typedef struct loom_view_root_selection_plan_t {
+  // Module being normalized.
+  loom_module_t* module;
+  // Pass arena owning every plan allocation.
+  iree_arena_allocator_t* arena;
+  // Acquired function-local correspondence domain.
+  loom_local_value_domain_t domain;
+  // Borrowed, completely populated function value facts.
+  const loom_value_fact_table_t* facts;
+  // Function dominance used to prove materializers available at selections.
+  loom_dominance_info_t dominance;
+  // Compact selection entries in definition order.
+  loom_view_root_selection_t* selections;
+  // Number of populated selection entries.
+  iree_host_size_t selection_count;
+  // Allocated selection entry capacity.
+  iree_host_size_t selection_capacity;
+  // Selection index by local result ordinal, or IREE_HOST_SIZE_MAX.
+  iree_host_size_t* selection_indices;
+  // Shared root-relative offset analysis and materialization state.
+  loom_view_transport_plan_t offsets;
+} loom_view_root_selection_plan_t;
+
+static iree_status_t loom_view_root_selection_collect(
+    void* user_data, loom_op_t* op, const loom_walk_context_t* context,
+    loom_walk_result_t* out_result) {
+  (void)context;
+  loom_view_root_selection_plan_t* plan = user_data;
+  *out_result = LOOM_WALK_CONTINUE;
+  if (!loom_scf_select_isa(op) ||
+      !loom_type_is_view(
+          loom_module_value_type(plan->module, loom_scf_select_result(op)))) {
+    return iree_ok_status();
+  }
+  if (plan->selection_count == plan->selection_capacity) {
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        plan->arena, plan->selection_count, plan->selection_count + 1,
+        sizeof(*plan->selections), &plan->selection_capacity,
+        (void**)&plan->selections));
+  }
+  plan->selections[plan->selection_count++] = (loom_view_root_selection_t){
+      .op = op,
+      .view_type =
+          loom_module_value_type(plan->module, loom_scf_select_result(op)),
+      .buffer_value_id = LOOM_VALUE_ID_INVALID,
+      .offset_value_id = LOOM_VALUE_ID_INVALID,
+  };
+  return iree_ok_status();
+}
+
+static bool loom_view_root_selection_plan_source(
+    loom_view_root_selection_plan_t* plan, iree_host_size_t selection_index,
+    loom_value_id_t source_value_id,
+    loom_view_root_selection_source_t* out_source) {
+  *out_source = (loom_view_root_selection_source_t){
+      .buffer_value_id = LOOM_VALUE_ID_INVALID,
+      .region_id = LOOM_VIEW_REGION_ID_INVALID,
+      .selection_index = IREE_HOST_SIZE_MAX,
+  };
+  const loom_value_ordinal_t source_ordinal =
+      loom_local_value_domain_ordinal(&plan->domain, source_value_id);
+  const iree_host_size_t source_selection_index =
+      plan->selection_indices[source_ordinal];
+  if (source_selection_index < selection_index &&
+      plan->selections[source_selection_index].selected) {
+    out_source->selection_index = source_selection_index;
+    return true;
+  }
+
+  loom_value_fact_view_reference_t reference;
+  if (!loom_value_facts_query_view_reference(
+          &plan->facts->context,
+          loom_value_fact_table_lookup(plan->facts, source_value_id),
+          &reference) ||
+      reference.buffer_value_id == LOOM_VALUE_ID_INVALID ||
+      !loom_value_is_available_before_op(
+          &plan->dominance, reference.buffer_value_id,
+          plan->selections[selection_index].op)) {
+    return false;
+  }
+  const loom_view_region_t* region = NULL;
+  if (!loom_view_region_table_try_lookup(plan->offsets.regions, source_value_id,
+                                         &region)) {
+    return false;
+  }
+  const loom_view_transport_offset_t* offset =
+      &plan->offsets.offsets[region->region_id];
+  if (offset->value_id == LOOM_VALUE_ID_INVALID && !offset->expression) {
+    return false;
+  }
+  out_source->buffer_value_id = reference.buffer_value_id;
+  out_source->region_id = region->region_id;
+  return true;
+}
+
+static void loom_view_root_selection_plan_entries(
+    loom_view_root_selection_plan_t* plan) {
+  for (iree_host_size_t i = 0; i < plan->selection_count; ++i) {
+    loom_view_root_selection_t* selection = &plan->selections[i];
+    loom_value_fact_view_reference_t result_reference;
+    const loom_value_id_t result = loom_scf_select_result(selection->op);
+    if (!loom_value_facts_query_view_reference(
+            &plan->facts->context,
+            loom_value_fact_table_lookup(plan->facts, result),
+            &result_reference) ||
+        result_reference.buffer_value_id != LOOM_VALUE_ID_INVALID) {
+      continue;
+    }
+    selection->selected =
+        loom_view_root_selection_plan_source(
+            plan, i, loom_scf_select_true_value(selection->op),
+            &selection->true_source) &&
+        loom_view_root_selection_plan_source(
+            plan, i, loom_scf_select_false_value(selection->op),
+            &selection->false_source);
+  }
+}
+
+static iree_status_t loom_view_root_selection_materialize_source(
+    loom_view_root_selection_plan_t* plan, loom_rewriter_t* rewriter,
+    const loom_view_root_selection_source_t* source,
+    loom_value_id_t* out_buffer_value_id,
+    loom_value_id_t* out_offset_value_id) {
+  if (source->selection_index != IREE_HOST_SIZE_MAX) {
+    const loom_view_root_selection_t* selection =
+        &plan->selections[source->selection_index];
+    *out_buffer_value_id = selection->buffer_value_id;
+    *out_offset_value_id = selection->offset_value_id;
+    return iree_ok_status();
+  }
+  *out_buffer_value_id = source->buffer_value_id;
+  return loom_view_transport_materialize_offset(
+      &plan->offsets, rewriter, source->region_id, out_offset_value_id);
+}
+
+static iree_status_t loom_view_root_selection_rewrite(
+    loom_view_root_selection_plan_t* plan, loom_rewriter_t* rewriter,
+    loom_view_root_selection_statistics_t* statistics) {
+  for (iree_host_size_t i = 0; i < plan->selection_count; ++i) {
+    loom_view_root_selection_t* selection = &plan->selections[i];
+    if (!selection->selected) {
+      continue;
+    }
+    loom_value_id_t true_values[2];
+    IREE_RETURN_IF_ERROR(loom_view_root_selection_materialize_source(
+        plan, rewriter, &selection->true_source, &true_values[0],
+        &true_values[1]));
+    loom_value_id_t false_values[2];
+    IREE_RETURN_IF_ERROR(loom_view_root_selection_materialize_source(
+        plan, rewriter, &selection->false_source, &false_values[0],
+        &false_values[1]));
+
+    loom_builder_t* builder = &rewriter->builder;
+    loom_builder_set_before(builder, selection->op);
+    const loom_value_id_t value_checkpoint =
+        loom_rewriter_value_checkpoint(rewriter);
+    const loom_type_t result_types[] = {
+        loom_type_buffer(), loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET)};
+    loom_op_t* if_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_scf_if_build(
+        builder, LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION,
+        loom_scf_select_condition(selection->op), result_types,
+        IREE_ARRAYSIZE(result_types), /*tied_results=*/NULL,
+        /*tied_result_count=*/0, selection->op->location, &if_op));
+
+    loom_builder_ip_t saved_ip = loom_builder_enter_region(
+        builder, if_op, loom_scf_if_then_region(if_op));
+    loom_op_t* yield_op = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_scf_yield_build(builder, true_values, IREE_ARRAYSIZE(true_values),
+                             selection->op->location, &yield_op));
+    loom_builder_restore(builder, saved_ip);
+    saved_ip = loom_builder_enter_region(builder, if_op,
+                                         loom_scf_if_else_region(if_op));
+    IREE_RETURN_IF_ERROR(loom_scf_yield_build(
+        builder, false_values, IREE_ARRAYSIZE(false_values),
+        selection->op->location, &yield_op));
+    loom_builder_restore(builder, saved_ip);
+
+    const loom_value_slice_t if_results = loom_scf_if_results(if_op);
+    selection->buffer_value_id = if_results.values[0];
+    selection->offset_value_id = if_results.values[1];
+    const loom_value_id_t old_result = loom_scf_select_result(selection->op);
+    IREE_RETURN_IF_ERROR(loom_rewriter_try_set_derived_value_name(
+        rewriter, old_result, selection->buffer_value_id, IREE_SV("root")));
+    IREE_RETURN_IF_ERROR(loom_rewriter_try_set_derived_value_name(
+        rewriter, old_result, selection->offset_value_id, IREE_SV("offset")));
+    loom_op_t* view_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_buffer_view_build(
+        builder, selection->buffer_value_id, selection->offset_value_id,
+        selection->view_type, selection->op->location, &view_op));
+    const loom_value_id_t replacement = loom_buffer_view_result(view_op);
+    IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+        rewriter, selection->op, &replacement, 1, value_checkpoint));
+    IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
+        rewriter, selection->op, &replacement, 1));
+    ++statistics->selections_decomposed;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_view_root_selection_prepare(
+    loom_view_root_selection_plan_t* plan, loom_pass_t* pass,
+    loom_func_like_t function, loom_rewriter_t* rewriter) {
+  loom_value_fact_table_t* facts = NULL;
+  IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
+      pass, plan->module, loom_pass_value_fact_scope_function(function),
+      &facts));
+  plan->facts = facts;
+  IREE_RETURN_IF_ERROR(loom_dominance_info_initialize_region(
+      plan->module, loom_func_like_body(function), plan->arena,
+      &plan->dominance));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      plan->arena, plan->domain.value_count, sizeof(*plan->selection_indices),
+      (void**)&plan->selection_indices));
+  for (iree_host_size_t i = 0; i < plan->domain.value_count; ++i) {
+    plan->selection_indices[i] = IREE_HOST_SIZE_MAX;
+  }
+  for (iree_host_size_t i = 0; i < plan->selection_count; ++i) {
+    const loom_value_id_t result =
+        loom_scf_select_result(plan->selections[i].op);
+    plan->selection_indices[loom_local_value_domain_ordinal(&plan->domain,
+                                                            result)] = i;
+  }
+
+  loom_symbolic_expr_context_t expressions;
+  loom_symbolic_expr_context_initialize(plan->module, &plan->domain, facts,
+                                        plan->arena, &expressions);
+  loom_view_region_table_t regions;
+  IREE_RETURN_IF_ERROR(
+      loom_view_region_table_initialize(&plan->domain, &expressions, &regions));
+  IREE_RETURN_IF_ERROR(loom_view_region_table_analyze(&regions));
+  plan->offsets = (loom_view_transport_plan_t){
+      .module = plan->module,
+      .arena = plan->arena,
+      .domain = plan->domain,
+      .regions = &regions,
+  };
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      plan->arena, regions.region_count, sizeof(*plan->offsets.offsets),
+      (void**)&plan->offsets.offsets));
+  for (iree_host_size_t i = 0; i < regions.region_count; ++i) {
+    loom_view_transport_plan_offset(&plan->offsets, &regions.regions[i],
+                                    &plan->offsets.offsets[i]);
+  }
+  loom_view_root_selection_plan_entries(plan);
+  return loom_view_root_selection_rewrite(
+      plan, rewriter, loom_view_root_selection_statistics(pass));
+}
+
+iree_status_t loom_decompose_view_root_selections_run(
+    loom_pass_t* pass, loom_module_t* module, loom_func_like_t function) {
+  loom_region_t* body = loom_func_like_body(function);
+  if (!body) {
+    return iree_ok_status();
+  }
+  loom_view_root_selection_plan_t plan = {
+      .module = module,
+      .arena = pass->arena,
+  };
+  loom_walk_result_t result;
+  IREE_RETURN_IF_ERROR(loom_walk_function(
+      module, function, LOOM_WALK_PRE_ORDER,
+      (loom_walk_callback_t){.fn = loom_view_root_selection_collect,
+                             .user_data = &plan},
+      pass->arena, &result));
+  if (plan.selection_count == 0) {
+    return iree_ok_status();
+  }
+
+  loom_rewriter_t rewriter;
+  IREE_RETURN_IF_ERROR(
+      loom_rewriter_initialize(&rewriter, module, pass->arena));
+  iree_status_t status = loom_local_value_domain_acquire_for_region_tree(
+      module, body, pass->arena, &plan.domain);
+  if (iree_status_is_ok(status)) {
+    status = loom_view_root_selection_prepare(&plan, pass, function, &rewriter);
   }
   if (iree_any_bit_set(rewriter.flags, LOOM_REWRITER_FLAG_CHANGED)) {
     loom_pass_value_fact_owner_invalidate(pass->value_facts);

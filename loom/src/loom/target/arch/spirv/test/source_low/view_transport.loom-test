@@ -33,6 +33,36 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @wide_s
 
 spirv.target<vulkan1_3> @target
 
+func.def target(@target) @distinct_root_selection(%first: buffer, %second: buffer, %condition: i1) -> (i32) {
+  %first_offset = index.constant 4 : offset
+  %second_offset = index.constant 8 : offset
+  %first_aligned = buffer.assume.alignment %first {minimum_alignment = 4} : buffer
+  %second_aligned = buffer.assume.alignment %second {minimum_alignment = 4} : buffer
+  %first_view = buffer.view %first_aligned[%first_offset] : buffer -> view<1xi32>
+  %second_view = buffer.view %second_aligned[%second_offset] : buffer -> view<1xi32>
+  %selected = scf.select %condition, %first_view, %second_view : view<1xi32>
+  %value = view.load %selected[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @distinct_root_selection(%first_aligned: reg<spirv.ptr.storage_buffer>, %second_aligned: reg<spirv.ptr.storage_buffer>, %condition: reg<spirv.id : i1>) -> (reg<spirv.id : i32>) asm {
+  %first_offset = OpConstant.offset64 4
+  %second_offset = OpConstant.offset64 8
+  %selected_root, %selected_offset = low.scf.if %condition -> (reg<spirv.ptr.storage_buffer>, reg<spirv.offset64>) {
+    low.scf.yield %first_aligned, %first_offset : reg<spirv.ptr.storage_buffer>, reg<spirv.offset64>
+  } else {
+    low.scf.yield %second_aligned, %second_offset : reg<spirv.ptr.storage_buffer>, reg<spirv.offset64>
+  }
+  %23 = OpPtrAccessChain.storage_buffer.i32.byte_offset %selected_root, %selected_offset
+  %value = OpLoad.storage_buffer.i32 %23
+  return %value
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
 func.def public target(@target) @rotate_buffer_views(%input: buffer, %count_input: index, %seed: i32) -> (i32) {
   %count = index.assume %count_input [range(%count_input, 0, 257)] : index
   %begin = index.constant 0 : index

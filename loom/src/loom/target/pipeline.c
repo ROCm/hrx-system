@@ -348,6 +348,23 @@ static iree_status_t loom_target_pipeline_build_source_loop_pipelining(
   return loom_target_pipeline_build_cleanup_if_changed(builder);
 }
 
+static iree_status_t loom_target_pipeline_build_dce_body(
+    loom_builder_t* builder, void* user_data) {
+  (void)user_data;
+  return loom_target_pipeline_build_run(builder, IREE_SV("dce"));
+}
+
+static iree_status_t
+loom_target_pipeline_build_view_root_selection_decomposition(
+    loom_builder_t* builder, void* user_data) {
+  (void)user_data;
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
+      builder, IREE_SV("decompose-view-root-selections")));
+  loom_op_t* if_changed_op = NULL;
+  return loom_pass_ir_build_if_changed(
+      builder, loom_target_pipeline_build_dce_body, NULL, &if_changed_op);
+}
+
 static iree_status_t
 loom_target_pipeline_build_cfg_source_finalization_after_legalize(
     loom_builder_t* builder, void* user_data) {
@@ -364,6 +381,9 @@ loom_target_pipeline_build_cfg_source_finalization_after_legalize(
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
       builder, IREE_SV("promote-private-fragments")));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_cleanup_if_changed(builder));
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_view_root_selection_decomposition(builder,
+                                                                   NULL));
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_run(builder, IREE_SV("scf-to-cfg")));
   IREE_RETURN_IF_ERROR(
@@ -538,6 +558,12 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
       loom_target_pipeline_build_required_source_inlining(builder, user_data));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_contribute_phase(
       builder, context, LOOM_TARGET_PIPELINE_PHASE_SOURCE_TO_LOW));
+  if (control_flow_lowering ==
+      LOOM_TARGET_CONTROL_FLOW_LOWERING_STRUCTURED_LOW) {
+    IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
+        builder, loom_target_pipeline_build_view_root_selection_decomposition,
+        user_data, &for_op));
+  }
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_source_to_low(builder, context->options));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run_with_string_option(

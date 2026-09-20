@@ -1,0 +1,80 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @select_global_roots(%select_second: index) {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%select_second: index, %first: buffer, %second: buffer, %output: buffer) {
+  %c1 = index.constant 1 : index
+  %first_offset = index.constant 4 : offset
+  %second_offset = index.constant 8 : offset
+  %output_offset = index.constant 0 : offset
+  %condition = index.cmp eq, %select_second, %c1 : index
+  %first_aligned = buffer.assume.alignment %first {minimum_alignment = 4} : buffer
+  %second_aligned = buffer.assume.alignment %second {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %first_view = buffer.view %first_aligned[%first_offset] : buffer -> view<1xi32>
+  %second_view = buffer.view %second_aligned[%second_offset] : buffer -> view<1xi32>
+  %selected = scf.select %condition, %second_view, %first_view : view<1xi32>
+  %output_view = buffer.view %output_aligned[%output_offset] : buffer -> view<1xi32>
+  %value = view.load %selected[0] : view<1xi32> -> i32
+  view.store %value, %output_view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @select_global_roots(%select_second: reg<amdgpu.sgpr>) asm {
+  %first_aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %second_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %c1 = s_mov_b32 1
+  %first_offset = s_mov_b32 4
+  %second_offset = s_mov_b32 8
+  %condition = s_cmp_eq_i32 %select_second, %c1
+  low.cond_br %condition, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+^_bb1:
+  %47 = slice %second_aligned[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %48 = slice %second_aligned[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  low.br ^_bb3(%47: reg<amdgpu.sgpr>, %48: reg<amdgpu.sgpr>, %second_offset: reg<amdgpu.sgpr>)
+^_bb2:
+  %49 = slice %first_aligned[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %50 = slice %first_aligned[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  low.br ^_bb3(%49: reg<amdgpu.sgpr>, %50: reg<amdgpu.sgpr>, %first_offset: reg<amdgpu.sgpr>)
+^_bb3(%45: reg<amdgpu.sgpr>, %46: reg<amdgpu.sgpr>, %selected_offset: reg<amdgpu.sgpr>):
+  %34 = v_mov_b32 0
+  %37 = s_mov_b32 0
+  %38, %39 = s_add_co_u32 %45, %selected_offset
+  %40, %41 = s_addc_u32 %46, %37, %39
+  %42 = concat(%38, %40) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %value = global_load_b32_saddr %34, %42
+  global_store_b32_saddr %34, %value, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+// ERROR@+1: TARGET/033 {op_name="kernel.def", field_name="source", actual_type="buffer"}
+kernel.def target(@target) @select_global_or_private(%select_private: index) {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%select_private: index, %input: buffer, %output: buffer) {
+  %c1 = index.constant 1 : index
+  %c0 = index.constant 0 : offset
+  %bytes = index.constant 4 : offset
+  %initial = scalar.constant 7 : i32
+  %condition = index.cmp eq, %select_private, %c1 : index
+  %scratch = buffer.alloca<private> align(4) %bytes : buffer
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%c0] : buffer -> view<1xi32>
+  %scratch_view = buffer.view %scratch[%c0] : buffer -> view<1xi32>
+  view.store %initial, %scratch_view[0] : i32, view<1xi32>
+  %selected = scf.select %condition, %scratch_view, %input_view : view<1xi32>
+  %output_view = buffer.view %output_aligned[%c0] : buffer -> view<1xi32>
+  %value = view.load %selected[0] : view<1xi32> -> i32
+  view.store %value, %output_view[0] : i32, view<1xi32>
+  kernel.return
+}
