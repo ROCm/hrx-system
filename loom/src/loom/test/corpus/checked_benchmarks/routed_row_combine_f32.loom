@@ -1,0 +1,313 @@
+// Ordered combine of routed expert-output rows into 1024-channel token rows.
+//
+// Each token selects up to 32 rows from a 4096-row pool. Route IDs are -1
+// (dropped) or in [0, 4095]; duplicates contribute once per route, in order.
+// Weights are read only for present routes. Buffers are disjoint, four-byte
+// aligned, and contain all selected rows. Inputs are finite; contraction is
+// allowed, while reassociation of the accumulation is not.
+//
+// The matched unroll-two kernels separate a serial dependent-load chain from
+// an explicit pipeline: route IDs lead consumption by two iterations, while
+// weights and payloads lead it by one. The shorter payload queue reduces live
+// state. This is an author-selected schedule, not a recommended universal depth.
+
+kernel.def @routed_row_combine_serial(%token_count: index) {
+  %unit = index.constant 1 : index
+  %width = index.constant 128 : index
+  %tiles = index.constant 8 : index
+  kernel.launch.config workgroups(%tiles, %token_count, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%route_count: index, %token_count: index, %route_ids: buffer, %route_weights: buffer, %row_buffer: buffer, %combined_rows: buffer) {
+  %count = index.assume %route_count [range(%route_count, 0, 32)] : index
+  %factor = index.constant 2 : index
+  %local_channel = kernel.workitem.id<x> : index
+  %channel_tile = kernel.workgroup.id<x> : index
+  %token_id = kernel.workgroup.id<y> : index
+  %token, %tokens = index.assume %token_id, %token_count [range(%token_count, 1, 256), lt(%token_id, %token_count)] : index, index
+  %width = index.constant 128 : index
+  %tile_base = index.mul %channel_tile, %width : index
+  %channel_id = index.add %tile_base, %local_channel : index
+  %channel = index.assume %channel_id [range(%channel_id, 0, 1023)] : index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %first_row_id = scalar.constant 0 : i32
+  %identity = scalar.constant 0.0 : f32
+  %ids_aligned = buffer.assume.alignment %route_ids {minimum_alignment = 4} : buffer
+  %weights_aligned = buffer.assume.alignment %route_weights {minimum_alignment = 4} : buffer
+  %rows_aligned = buffer.assume.alignment %row_buffer {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %combined_rows {minimum_alignment = 4} : buffer
+  %ids_storage, %weights_storage, %row_storage, %output_storage = buffer.assume.noalias %ids_aligned, %weights_aligned, %rows_aligned, %output_aligned : buffer, buffer, buffer, buffer
+  %ids = buffer.view %ids_storage[%base] : buffer -> view<[%tokens]x32xi32>
+  %weights = buffer.view %weights_storage[%base] : buffer -> view<[%tokens]x32xf32>
+  %rows = buffer.view %row_storage[%base] : buffer -> view<4096x1024xf32>
+  %output = buffer.view %output_storage[%base] : buffer -> view<[%tokens]x1024xf32>
+  %combined = scf.for %route = [%begin to %count step %step](%accumulator = %identity : f32) -> (f32) unroll(%factor) {
+    %row_id = view.load %ids[%token, %route] : view<[%tokens]x32xi32> -> i32
+    %valid = scalar.cmpi sge, %row_id, %first_row_id : i32
+    %weight, %payload = scf.if %valid -> (f32, f32) {
+      %row_index0 = index.cast %row_id : i32 to index
+      %row_index = index.assume %row_index0 [range(%row_index0, 0, 4095)] : index
+      %loaded_weight = view.load %weights[%token, %route] : view<[%tokens]x32xf32> -> f32
+      %loaded_payload = view.load %rows[%row_index, %channel] : view<4096x1024xf32> -> f32
+      scf.yield %loaded_weight, %loaded_payload : f32, f32
+    } else {
+      scf.yield %identity, %identity : f32, f32
+    }
+    %next = scf.if %valid -> (f32) {
+      %weighted = scalar.mulf<contract> %payload, %weight : f32
+      %updated = scalar.addf<contract> %accumulator, %weighted : f32
+      scf.yield %updated : f32
+    } else {
+      scf.yield %accumulator : f32
+    }
+    scf.yield %next : f32
+  }
+  view.store %combined, %output[%token, %channel] : f32, view<[%tokens]x1024xf32>
+  kernel.return
+}
+
+kernel.def @routed_row_combine_pipelined(%token_count: index) {
+  %unit = index.constant 1 : index
+  %width = index.constant 128 : index
+  %tiles = index.constant 8 : index
+  kernel.launch.config workgroups(%tiles, %token_count, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%route_count: index, %token_count: index, %route_ids: buffer, %route_weights: buffer, %row_buffer: buffer, %combined_rows: buffer) {
+  %count = index.assume %route_count [range(%route_count, 0, 32)] : index
+  %local_channel = kernel.workitem.id<x> : index
+  %channel_tile = kernel.workgroup.id<x> : index
+  %token_id = kernel.workgroup.id<y> : index
+  %token, %tokens = index.assume %token_id, %token_count [range(%token_count, 1, 256), lt(%token_id, %token_count)] : index, index
+  %width = index.constant 128 : index
+  %tile_base = index.mul %channel_tile, %width : index
+  %channel_id = index.add %tile_base, %local_channel : index
+  %channel = index.assume %channel_id [range(%channel_id, 0, 1023)] : index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %first_row_id = scalar.constant 0 : i32
+  %identity = scalar.constant 0.0 : f32
+  %ids_aligned = buffer.assume.alignment %route_ids {minimum_alignment = 4} : buffer
+  %weights_aligned = buffer.assume.alignment %route_weights {minimum_alignment = 4} : buffer
+  %rows_aligned = buffer.assume.alignment %row_buffer {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %combined_rows {minimum_alignment = 4} : buffer
+  %ids_storage, %weights_storage, %row_storage, %output_storage = buffer.assume.noalias %ids_aligned, %weights_aligned, %rows_aligned, %output_aligned : buffer, buffer, buffer, buffer
+  %ids = buffer.view %ids_storage[%base] : buffer -> view<[%tokens]x32xi32>
+  %weights = buffer.view %weights_storage[%base] : buffer -> view<[%tokens]x32xf32>
+  %rows = buffer.view %row_storage[%base] : buffer -> view<4096x1024xf32>
+  %output = buffer.view %output_storage[%base] : buffer -> view<[%tokens]x1024xf32>
+  // A missing ID and invalid payload make startup and drain ordinary guarded
+  // iterations. The extra two ticks retire the final route and payload.
+  %missing = scalar.constant -1 : i32
+  %inactive = scalar.constant false : i1
+  %distance = index.constant 2 : index
+  %metadata_gap = index.constant 1 : index
+  %factor = index.constant 2 : index
+  %ticks = index.add %count, %distance : index
+  // Two unrolled ticks expose the ID/payload/consumer sequence within each
+  // outer loop body. The guards handle startup, drain and dynamic tails.
+  %final_id, %final_valid, %final_weight, %final_value, %combined = scf.for %batch = [%begin to %ticks step %factor](%queued_id = %missing : i32, %queued_valid = %inactive : i1, %queued_weight = %identity : f32, %queued_value = %identity : f32, %accumulator = %identity : f32) -> (i32, i1, f32, f32, f32) {
+    %next_id, %next_valid, %next_weight, %next_value, %next_sum = scf.for %slot = [%begin to %factor step %step](%ahead_id = %queued_id : i32, %ready = %queued_valid : i1, %ready_weight = %queued_weight : f32, %ready_value = %queued_value : f32, %sum = %accumulator : f32) -> (i32, i1, f32, f32, f32) unroll(%factor) {
+      %route = index.add %batch, %slot : index
+      %in_range = index.cmp slt, %route, %count : index
+      // This ID has no immediate dependent use: it will address the next
+      // payload after the current payload issue and older accumulation.
+      %issued_id = scf.if %in_range -> (i32) {
+        %loaded_id = view.load %ids[%token, %route] : view<[%tokens]x32xi32> -> i32
+        scf.yield %loaded_id : i32
+      } else {
+        scf.yield %missing : i32
+      }
+      %loaded_valid = scalar.cmpi sge, %ahead_id, %first_row_id : i32
+      %loaded_value, %loaded_weight, %next = scf.if %loaded_valid -> (f32, f32, f32) {
+        %row_index0 = index.cast %ahead_id : i32 to index
+        %row_index = index.assume %row_index0 [range(%row_index0, 0, 4095)] : index
+        %payload_route0 = index.sub %route, %metadata_gap : index
+        // A present queued ID came from route-1 in the previous iteration;
+        // the issue guard therefore established this route's bounds.
+        %payload_route = index.assume %payload_route0 [range(%payload_route0, 0, 31)] : index
+        %payload = view.load %rows[%row_index, %channel] : view<4096x1024xf32> -> f32
+        %weight = view.load %weights[%token, %payload_route] : view<[%tokens]x32xf32> -> f32
+        // Keep these future reads ahead of the older arithmetic. The fence
+        // constrains scheduling and emits no hardware wait.
+        scf.schedule.fence
+        %weighted = scalar.mulf<contract> %ready_value, %ready_weight : f32
+        %updated = scalar.addf<contract> %sum, %weighted : f32
+        %consumed = scf.select %ready, %updated, %sum : f32
+        scf.yield %payload, %weight, %consumed : f32, f32, f32
+      } else {
+        %weighted = scalar.mulf<contract> %ready_value, %ready_weight : f32
+        %updated = scalar.addf<contract> %sum, %weighted : f32
+        %consumed = scf.select %ready, %updated, %sum : f32
+        scf.yield %identity, %identity, %consumed : f32, f32, f32
+      }
+      scf.yield %issued_id, %loaded_valid, %loaded_weight, %loaded_value, %next : i32, i1, f32, f32, f32
+    }
+    scf.yield %next_id, %next_valid, %next_weight, %next_value, %next_sum : i32, i1, f32, f32, f32
+  }
+  view.store %combined, %output[%token, %channel] : f32, view<[%tokens]x1024xf32>
+  kernel.return
+}
+
+// Vary IDs, weights, payloads, token ownership and queue boundaries separately.
+// Dyadic inputs make every intermediate exact, so bitwise agreement observes
+// payload/weight pairing without tolerating reordered or missing contributions.
+check.case public @routed_row_combine_varied {
+  %count = check.param.choice values([0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32]) : index
+  %tokens = check.param.choice values([1, 16]) : index
+  %seed = check.param.seed base(727) count(2) : i64
+  %ids = check.generate.random.uniform seed(%seed) range(-1 to 4095) : tensor<[%tokens]x32xi32>
+  %weights = check.generate.iota offset(-0.25) step(0.125) period(7) : tensor<[%tokens]x32xf32>
+  %rows = check.generate.iota offset(-8.0) step(0.0625) period(257) : tensor<4096x1024xf32>
+  %serial = check.generate.fill value(-10000.0) : tensor<[%tokens]x1024xf32>
+  %pipelined = check.generate.fill value(-20000.0) : tensor<[%tokens]x1024xf32>
+  kernel.launch @routed_row_combine_serial[%tokens](%count, %tokens, %ids, %weights, %rows, %serial) : [index](index, index, tensor<[%tokens]x32xi32>, tensor<[%tokens]x32xf32>, tensor<4096x1024xf32>, tensor<[%tokens]x1024xf32>)
+  kernel.launch @routed_row_combine_pipelined[%tokens](%count, %tokens, %ids, %weights, %rows, %pipelined) : [index](index, index, tensor<[%tokens]x32xi32>, tensor<[%tokens]x32xf32>, tensor<4096x1024xf32>, tensor<[%tokens]x1024xf32>)
+  check.expect.bitwise actual(%pipelined) expected(%serial) : tensor<[%tokens]x1024xf32>
+  check.return
+}
+
+// Nonmonotonic and repeated rows keep separate weights; every fifth route is
+// absent. Only the four selected rows exist, so guard errors are observable.
+check.case public @routed_row_combine_holes {
+  %count = check.param.choice values([0, 1, 2, 3, 4, 5, 7, 8, 9, 31, 32]) : index
+  %tokens = check.literal value(1) : index
+  %ids = check.generate.iota offset(3) step(-1) period(5) : tensor<1x32xi32>
+  %weights = check.generate.iota offset(0.125) step(0.125) : tensor<1x32xf32>
+  %rows = check.generate.iota offset(-8.0) step(0.0625) period(257) : tensor<4x1024xf32>
+  %serial = check.generate.fill value(-10000.0) : tensor<1x1024xf32>
+  %pipelined = check.generate.fill value(-20000.0) : tensor<1x1024xf32>
+  kernel.launch @routed_row_combine_serial[%tokens](%count, %tokens, %ids, %weights, %rows, %serial) : [index](index, index, tensor<1x32xi32>, tensor<1x32xf32>, tensor<4x1024xf32>, tensor<1x1024xf32>)
+  kernel.launch @routed_row_combine_pipelined[%tokens](%count, %tokens, %ids, %weights, %rows, %pipelined) : [index](index, index, tensor<1x32xi32>, tensor<1x32xf32>, tensor<4x1024xf32>, tensor<1x1024xf32>)
+  check.expect.bitwise actual(%pipelined) expected(%serial) : tensor<1x1024xf32>
+  check.return
+}
+
+// Four present routes have total weight 1.25 and weighted row index 1.25.
+// With payload(row,channel)=1024*row+channel-8, the result is 1270+1.25*channel.
+check.case public @routed_row_combine_holes_oracle {
+  %count = check.literal value(5) : index
+  %tokens = check.literal value(1) : index
+  %ids = check.generate.iota offset(3) step(-1) period(5) : tensor<1x32xi32>
+  %weights = check.generate.iota offset(0.125) step(0.125) : tensor<1x32xf32>
+  %rows = check.generate.iota offset(-8.0) step(1.0) : tensor<4x1024xf32>
+  %actual = check.generate.fill value(-10000.0) : tensor<1x1024xf32>
+  %expected = check.generate.iota offset(1270.0) step(1.25) : tensor<1x1024xf32>
+  kernel.launch @routed_row_combine_pipelined[%tokens](%count, %tokens, %ids, %weights, %rows, %actual) : [index](index, index, tensor<1x32xi32>, tensor<1x32xf32>, tensor<4x1024xf32>, tensor<1x1024xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x1024xf32>
+  check.return
+}
+
+// Even a valid output row must not cause missing routes to read weights or
+// payloads. Their backing allocations are intentionally smaller than the views.
+check.case public @routed_row_combine_absent {
+  %count = check.param.choice values([0, 1, 2, 3, 8, 32]) : index
+  %tokens = check.literal value(1) : index
+  %ids = check.generate.fill value(-1) : tensor<1x32xi32>
+  %weights = check.generate.fill value(1.0) : tensor<1xf32>
+  %rows = check.generate.fill value(1.0) : tensor<1x1024xf32>
+  %expected = check.generate.fill value(0.0) : tensor<1x1024xf32>
+  %serial = check.generate.fill value(-10000.0) : tensor<1x1024xf32>
+  %pipelined = check.generate.fill value(-20000.0) : tensor<1x1024xf32>
+  kernel.launch @routed_row_combine_serial[%tokens](%count, %tokens, %ids, %weights, %rows, %serial) : [index](index, index, tensor<1x32xi32>, tensor<1xf32>, tensor<1x1024xf32>, tensor<1x1024xf32>)
+  kernel.launch @routed_row_combine_pipelined[%tokens](%count, %tokens, %ids, %weights, %rows, %pipelined) : [index](index, index, tensor<1x32xi32>, tensor<1xf32>, tensor<1x1024xf32>, tensor<1x1024xf32>)
+  check.expect.bitwise actual(%pipelined) expected(%serial) : tensor<1x1024xf32>
+  check.expect.close actual(%serial) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x1024xf32>
+  check.return
+}
+
+// [2^24, 1, -(2^24-2)] sums to 2 in route order and 3 in reverse order.
+check.case public @routed_row_combine_rounding_order {
+  %count = check.literal value(3) : index
+  %tokens = check.literal value(1) : index
+  %ids = check.generate.fill value(0) : tensor<1x32xi32>
+  %weights = check.generate.iota offset(16777216.0) step(-16777215.0) period(3) : tensor<1x32xf32>
+  %rows = check.generate.fill value(1.0) : tensor<1x1024xf32>
+  %expected = check.generate.fill value(2.0) : tensor<1x1024xf32>
+  %serial = check.generate.fill value(-10000.0) : tensor<1x1024xf32>
+  %pipelined = check.generate.fill value(-20000.0) : tensor<1x1024xf32>
+  kernel.launch @routed_row_combine_serial[%tokens](%count, %tokens, %ids, %weights, %rows, %serial) : [index](index, index, tensor<1x32xi32>, tensor<1x32xf32>, tensor<1x1024xf32>, tensor<1x1024xf32>)
+  kernel.launch @routed_row_combine_pipelined[%tokens](%count, %tokens, %ids, %weights, %rows, %pipelined) : [index](index, index, tensor<1x32xi32>, tensor<1x32xf32>, tensor<1x1024xf32>, tensor<1x1024xf32>)
+  check.expect.bitwise actual(%pipelined) expected(%serial) : tensor<1x1024xf32>
+  check.expect.close actual(%serial) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x1024xf32>
+  check.return
+}
+
+// Analytic timing inputs span the row pool: row IDs descend through 4095..0,
+// weights alternate -1,+1, and payload(row,channel)=row+channel/1024-0.5.
+// Every consecutive route pair contributes exactly -1, giving -4 for eight
+// routes and -16 for 32. Each row below times exactly one kernel launch.
+check.case public @routed_row_combine_serial_n8 {
+  %count = check.literal value(8) : index
+  %tokens = check.param.choice values([1, 16, 256]) name("tokens") : index
+  %ids = check.generate.iota offset(4095) step(-1) period(4096) : tensor<[%tokens]x32xi32>
+  %weights = check.generate.iota offset(-1.0) step(2.0) period(2) : tensor<[%tokens]x32xf32>
+  %rows = check.generate.iota offset(-0.5) step(0.0009765625) : tensor<4096x1024xf32>
+  %actual = check.generate.fill value(-10000.0) : tensor<[%tokens]x1024xf32>
+  %expected = check.generate.fill value(-4.0) : tensor<[%tokens]x1024xf32>
+  kernel.launch @routed_row_combine_serial[%tokens](%count, %tokens, %ids, %weights, %rows, %actual) : [index](index, index, tensor<[%tokens]x32xi32>, tensor<[%tokens]x32xf32>, tensor<4096x1024xf32>, tensor<[%tokens]x1024xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%tokens]x1024xf32>
+  check.return
+}
+
+check.benchmark<@routed_row_combine_serial_n8> @routed_row_combine_serial_n8_t1 {tokens = 1}
+
+check.benchmark<@routed_row_combine_serial_n8> @routed_row_combine_serial_n8_t16 {tokens = 16}
+
+check.benchmark<@routed_row_combine_serial_n8> @routed_row_combine_serial_n8_t256 {tokens = 256}
+
+check.case public @routed_row_combine_pipelined_n8 {
+  %count = check.literal value(8) : index
+  %tokens = check.param.choice values([1, 16, 256]) name("tokens") : index
+  %ids = check.generate.iota offset(4095) step(-1) period(4096) : tensor<[%tokens]x32xi32>
+  %weights = check.generate.iota offset(-1.0) step(2.0) period(2) : tensor<[%tokens]x32xf32>
+  %rows = check.generate.iota offset(-0.5) step(0.0009765625) : tensor<4096x1024xf32>
+  %actual = check.generate.fill value(-10000.0) : tensor<[%tokens]x1024xf32>
+  %expected = check.generate.fill value(-4.0) : tensor<[%tokens]x1024xf32>
+  kernel.launch @routed_row_combine_pipelined[%tokens](%count, %tokens, %ids, %weights, %rows, %actual) : [index](index, index, tensor<[%tokens]x32xi32>, tensor<[%tokens]x32xf32>, tensor<4096x1024xf32>, tensor<[%tokens]x1024xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%tokens]x1024xf32>
+  check.return
+}
+
+check.benchmark<@routed_row_combine_pipelined_n8> @routed_row_combine_pipelined_n8_t1 {tokens = 1}
+
+check.benchmark<@routed_row_combine_pipelined_n8> @routed_row_combine_pipelined_n8_t16 {tokens = 16}
+
+check.benchmark<@routed_row_combine_pipelined_n8> @routed_row_combine_pipelined_n8_t256 {tokens = 256}
+
+check.case public @routed_row_combine_serial_n32 {
+  %count = check.literal value(32) : index
+  %tokens = check.param.choice values([1, 16, 256]) name("tokens") : index
+  %ids = check.generate.iota offset(4095) step(-1) period(4096) : tensor<[%tokens]x32xi32>
+  %weights = check.generate.iota offset(-1.0) step(2.0) period(2) : tensor<[%tokens]x32xf32>
+  %rows = check.generate.iota offset(-0.5) step(0.0009765625) : tensor<4096x1024xf32>
+  %actual = check.generate.fill value(-10000.0) : tensor<[%tokens]x1024xf32>
+  %expected = check.generate.fill value(-16.0) : tensor<[%tokens]x1024xf32>
+  kernel.launch @routed_row_combine_serial[%tokens](%count, %tokens, %ids, %weights, %rows, %actual) : [index](index, index, tensor<[%tokens]x32xi32>, tensor<[%tokens]x32xf32>, tensor<4096x1024xf32>, tensor<[%tokens]x1024xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%tokens]x1024xf32>
+  check.return
+}
+
+check.benchmark<@routed_row_combine_serial_n32> @routed_row_combine_serial_n32_t1 {tokens = 1}
+
+check.benchmark<@routed_row_combine_serial_n32> @routed_row_combine_serial_n32_t16 {tokens = 16}
+
+check.benchmark<@routed_row_combine_serial_n32> @routed_row_combine_serial_n32_t256 {tokens = 256}
+
+check.case public @routed_row_combine_pipelined_n32 {
+  %count = check.literal value(32) : index
+  %tokens = check.param.choice values([1, 16, 256]) name("tokens") : index
+  %ids = check.generate.iota offset(4095) step(-1) period(4096) : tensor<[%tokens]x32xi32>
+  %weights = check.generate.iota offset(-1.0) step(2.0) period(2) : tensor<[%tokens]x32xf32>
+  %rows = check.generate.iota offset(-0.5) step(0.0009765625) : tensor<4096x1024xf32>
+  %actual = check.generate.fill value(-10000.0) : tensor<[%tokens]x1024xf32>
+  %expected = check.generate.fill value(-16.0) : tensor<[%tokens]x1024xf32>
+  kernel.launch @routed_row_combine_pipelined[%tokens](%count, %tokens, %ids, %weights, %rows, %actual) : [index](index, index, tensor<[%tokens]x32xi32>, tensor<[%tokens]x32xf32>, tensor<4096x1024xf32>, tensor<[%tokens]x1024xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%tokens]x1024xf32>
+  check.return
+}
+
+check.benchmark<@routed_row_combine_pipelined_n32> @routed_row_combine_pipelined_n32_t1 {tokens = 1}
+
+check.benchmark<@routed_row_combine_pipelined_n32> @routed_row_combine_pipelined_n32_t16 {tokens = 16}
+
+check.benchmark<@routed_row_combine_pipelined_n32> @routed_row_combine_pipelined_n32_t256 {tokens = 256}

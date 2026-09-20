@@ -37,6 +37,8 @@ cp -- "${script_dir}/guarded-read-ahead.loom" "${output_dir}/guarded-read-ahead.
 cp -- "${script_dir}/guarded-read-ahead-tests.loom" "${output_dir}/guarded-read-ahead-tests.loom"
 cp -- "${repo_root}/loom/src/loom/test/corpus/checked_benchmarks/streaming_packed_s8_dot.loom" \
   "${output_dir}/streaming-packed-dot.loom"
+cp -- "${repo_root}/loom/src/loom/test/corpus/checked_benchmarks/routed_row_combine_f32.loom" \
+  "${output_dir}/routed-row-combine.loom"
 
 cd -- "${output_dir}"
 "${loom_format}" --check guarded-read-ahead.loom
@@ -123,6 +125,21 @@ test -s pipeline-copy-waits.txt
   --benchmark=@streaming_packed_s8_dot_read_ahead_n128_time \
   --config=packed_stream.depth=4 --config=packed_stream.unroll=2 \
   --dry-run --output=packed-dot.plan.json
+
+# Publish the matched dependent-load controls and their real compile reports.
+"${loom_format}" --check routed-row-combine.loom
+for policy in serial pipelined; do
+  "${loom_compile}" routed-row-combine.loom \
+    --root="@routed_row_combine_${policy}" \
+    --target=amdgpu:gfx11-generic --format=amdgpu-hsaco \
+    --output="routed-${policy}.hsaco" --compile-report=details \
+    --compile-report-output="routed-${policy}.report.json"
+  "${loom_benchmark}" routed-row-combine.loom \
+    --benchmark="@routed_row_combine_${policy}_n8_t256" \
+    --dry-run --output="routed-${policy}.plan.json"
+done
+"${loom_report}" diff routed-serial.report.json routed-pipelined.report.json \
+  --force >routed-lookahead.diff.txt
 
 # Compile the independent caller grid and retain the bounded evidence readers use.
 "${loom_format}" --check paired-read-ahead.loom

@@ -306,6 +306,13 @@ checks candidate identity, and inspects resource cliffs before device execution.
 The [control-flow guide](../guide/functions-and-control.md#unrolling-is-a-loop-policy)
 owns the exact policy and schedule semantics.
 
+For dependent route/page lookups, compare metadata and payload lead distances
+separately. The checked
+[routed-row example](tune-loop-schedules.md#separate-route-and-payload-lookahead)
+uses ordinary SSA queues to keep a row ID farther ahead than its weighted
+payload. Its matched unrolled control, numerical cases and named benchmark rows
+make source distance, native overlap and measured speed separate decisions.
+
 For authored native motifs, give a Low helper
 [`schedule(phased)`](../guide/functions-and-control.md#compose-independently-scheduled-helpers)
 and place `low.schedule.phase` separators between its instruction phases. The

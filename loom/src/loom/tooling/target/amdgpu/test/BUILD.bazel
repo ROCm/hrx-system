@@ -296,6 +296,7 @@ loom_test(
         "queued_routes.loom",
         "//loom/src/loom/test/corpus/checked_benchmarks:moe_routed_combine_loop_f32.loom",
         "//loom/src/loom/test/corpus/checked_benchmarks:paged_online_softmax_loop_f32.loom",
+        "//loom/src/loom/test/corpus/checked_benchmarks:routed_row_combine_f32.loom",
     ],
     execution_profile = AMDGPU_ACCESS_PROFILE,
 )

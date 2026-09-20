@@ -101,6 +101,29 @@ and deeper lookahead increases the amount of live state and generated code.
 These programs express their pipelines with ordinary SSA and SCF, using the
 existing unroll policy independently.
 
+## Dependent Route Lookahead
+
+`routed_row_combine_f32.loom` combines selected expert-output rows into
+1024-channel token rows. Its two kernels use the same unroll factor of two.
+The serial control reads and consumes one route per logical iteration;
+the explicit pipeline reads route IDs two iterations ahead of consumption and
+weights/payloads one ahead. Carrying only the ID in the metadata stage avoids
+making the weight an immediate consumer of that lookup.
+
+The varied-input checks preserve row/weight identity across startup, drain,
+holes, duplicates and tails. Independent analytic cases check missing routes,
+floating-point recurrence order, and the benchmark outputs. Access testing uses
+undersized backing storage for inactive routes. The `n8_t1`, `n8_t16`, and
+`n8_t256` benchmark suffixes cover decode and batched combines; `n32` rows stress
+a longer recurrence. Each benchmark case launches exactly one kernel.
+
+Compare the serial and pipelined rows under the same batching and cache policy.
+Native partial waits show overlap inside the unrolled body; edge copies may
+still require completion at the backedge. Registers, code size, JIT cost and
+device time are separate evidence. The website's
+[dependent-load workflow](../../../../../docs/src/workflows/tune-loop-schedules.md#separate-route-and-payload-lookahead)
+walks through that comparison.
+
 ## Review Questions
 
 Before adding a source file here, the review answers:

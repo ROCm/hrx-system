@@ -443,6 +443,64 @@ and four, then investigate unrolling separately. The default demonstrates the
 policy; selecting a winner requires measurements for the intended device,
 workload, and data-reuse policy.
 
+## Separate route and payload lookahead
+
+Indirect reads have more than one useful lead distance. A routed MoE combine
+first loads a row ID, uses it to load an expert-output row, then applies that
+route's weight. The
+[`routed-row-combine.loom`](../generated/examples/guide/functions-and-control/routed-row-combine.loom)
+example expresses those stages with ordinary SSA values and `scf.for`:
+
+| Steady-state work | Logical route |
+| --- | --- |
+| Read the next row ID | `i + 2` |
+| Read the selected payload and its weight | `i + 1` |
+| Accumulate the previously loaded weighted payload | `i` |
+
+One carried ID connects the metadata and payload stages. A separate carried
+validity/weight/payload tuple connects the payload stage to the ordered sum.
+Missing IDs suppress the weight and payload accesses; invalid startup and drain
+slots leave the sum unchanged. Both kernels use unroll two, so the serial
+control isolates the effect of staging from the effect of unrolling.
+
+Where a value is consumed matters as much as its source distance. Reading a
+weight under the newly loaded ID's guard immediately needs that ID. Keeping the
+weight with the later payload stage lets the ID load precede independent work
+and shortens the weight's live range. The example's `scf.schedule.fence` keeps
+future reads ahead of older arithmetic without emitting a hardware wait.
+Register moves and actual consumers still determine native completion waits.
+
+`pipeline(%depth)` moves the ordinary read prerequisite closure together; it
+does not choose independent distances within that closure. This example shows
+the explicit source baseline for such a schedule. Its distances belong to the
+kernel, with no global configuration coupling other instances.
+
+After saving the example, check its varied inputs, missing routes, short loops
+and cancellation cases, then compare the two named workloads:
+
+```shell
+iree-test-loom routed-row-combine.loom --device=amdgpu --sanitizer=access
+
+iree-benchmark-loom routed-row-combine.loom \
+  --compare=@routed_row_combine_serial_n8_t256,@routed_row_combine_pipelined_n8_t256 \
+  --device=amdgpu --measure=dispatch_complete --batch-size=64 \
+  --interleave=ABABA --output=routed-comparison.json
+
+loom-compile routed-row-combine.loom --root=@routed_row_combine_pipelined \
+  --target=amdgpu:gfx11-generic --format=amdgpu-hsaco \
+  --output=routed.hsaco --compile-report=details \
+  --compile-report-output=routed.report.json
+loom-compile-report show routed.report.json
+loom-compile-report suggest routed.report.json
+```
+
+The `n8_t1`, `n8_t16` and `n8_t256` rows select one, sixteen and 256 tokens
+with eight routes each; `n32` rows exercise a longer recurrence. Each benchmark
+case has one dispatch and an independent analytic expectation. Compare final
+register use, code size, copy waits and JIT cost alongside device time. A partial
+wait can preserve overlap within a body while backedge copies still drain it;
+neither that wait count nor a deeper queue predicts which policy wins.
+
 ## Carry the experiment into a kernel
 
 After a sweep, put the selected policy in the caller or its target-derived
