@@ -551,6 +551,8 @@ def wanted_artifacts(
 def select_available(
     available: list[S3Object], prefix: str, wanted: list[str]
 ) -> tuple[list[S3Object], list[str]]:
+    """Selects preferred archives and reports missing archives or checksum sidecars."""
+    available_keys = {obj.key for obj in available}
     by_name: dict[str, S3Object] = {}
     for obj in available:
         filename = obj.key.removeprefix(prefix)
@@ -562,6 +564,11 @@ def select_available(
             by_name.setdefault(filename.removesuffix(".tar.xz"), obj)
     selected = [by_name[name] for name in wanted if name in by_name]
     missing = [name for name in wanted if name not in by_name]
+    missing.extend(
+        f"{obj.key.removeprefix(prefix)}.sha256sum"
+        for obj in selected
+        if f"{obj.key}.sha256sum" not in available_keys
+    )
     return selected, missing
 
 
@@ -655,7 +662,8 @@ def discover_latest_run_id(
             return str(run_id)
     raise RuntimeError(
         f"Could not discover a complete {release_type} {platform_display} "
-        f"{artifact_variant} run with artifact set {artifact_set!r} and a supported "
+        f"{artifact_variant} run with artifact set {artifact_set!r}, checksum "
+        "sidecars, and a supported "
         f"THEROCK_SANITIZER setting in {ROCM_ARTIFACT_VARIANT_LOG_KEY}."
     )
 
@@ -673,25 +681,23 @@ def download_one(s3, bucket: str, obj: S3Object, cache_dir: Path) -> Path:
     return dest
 
 
-def download_checksum(s3, bucket: str, key: str, dest: Path) -> Path | None:
+def download_checksum(s3, bucket: str, key: str, dest: Path) -> Path:
     checksum_key = f"{key}.sha256sum"
     checksum_dest = dest.with_name(dest.name + ".sha256sum")
-    try:
-        s3.download_file(bucket, checksum_key, str(checksum_dest))
-    except Exception:
-        return None
+    s3.download_file(bucket, checksum_key, str(checksum_dest))
     return checksum_dest
 
 
-def verify_checksum(archive_path: Path, checksum_path: Path | None) -> None:
-    if checksum_path is None or not checksum_path.exists():
-        log(f"  ?? No checksum for {archive_path.name}")
-        return
-    text = checksum_path.read_text().strip()
-    if not text:
-        log(f"  ?? Empty checksum for {archive_path.name}")
-        return
-    expected = text.split()[0]
+def verify_checksum(archive_path: Path, checksum_path: Path) -> None:
+    # TheRock publishes bare digests; sha256sum records also name the archive.
+    text = checksum_path.read_text(encoding="ascii").strip()
+    match = re.fullmatch(r"([0-9a-fA-F]{64})(?:[ \t]+\*?([^\r\n]+))?", text)
+    if match is None or match[2] not in (None, archive_path.name):
+        raise RuntimeError(
+            f"Invalid SHA-256 checksum in {checksum_path}: expected one digest "
+            f"optionally followed by {archive_path.name}"
+        )
+    expected = match[1].lower()
     actual = sha256_file(archive_path)
     if actual != expected:
         raise RuntimeError(
@@ -825,9 +831,13 @@ def fetch_rocm(
             obj = futures[future]
             downloaded.append((obj, future.result()))
 
-    for obj, archive_path in sorted(downloaded, key=lambda item: item[1].name):
+    downloaded.sort(key=lambda item: item[1].name)
+    for obj, archive_path in downloaded:
         checksum = download_checksum(s3, bucket, obj.key, archive_path)
         verify_checksum(archive_path, checksum)
+
+    # A later checksum failure must not leave an earlier archive extracted.
+    for _, archive_path in downloaded:
         log(f"  ++ Flattening {archive_path.name}")
         flatten_therock_artifact(
             archive_path,
