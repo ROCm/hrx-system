@@ -507,7 +507,8 @@ def _binary_rule(
                 descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
                 type_patterns=type_pattern,
             ),
-        )
+        ),
+        form=DescriptorEmitForm.AUTO,
     )[0]
 
 

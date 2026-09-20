@@ -87,12 +87,13 @@ class ReductionDescriptorCase:
 def unary_descriptor_rules(
     cases: Sequence[DirectDescriptorCase],
     *,
+    form: DescriptorEmitForm,
     source_input: str = "input",
     source_result: str = "result",
     descriptor_input: str = "input",
     descriptor_result: str = "dst",
 ) -> tuple[DescriptorRule, ...]:
-    """Expands regular same-typed unary source ops to descriptor rules."""
+    """Expands unary source ops using the requested descriptor emission form."""
 
     rules: list[DescriptorRule] = []
     for case in cases:
@@ -115,6 +116,7 @@ def unary_descriptor_rules(
                         descriptor=case.descriptor,
                         operands=((descriptor_input, source_input),),
                         results=((descriptor_result, source_result),),
+                        form=form,
                     ),
                 ),
                 priority=case.priority,
@@ -126,6 +128,7 @@ def unary_descriptor_rules(
 def binary_descriptor_rules(
     cases: Sequence[DirectDescriptorCase],
     *,
+    form: DescriptorEmitForm,
     source_lhs: str = "lhs",
     source_rhs: str = "rhs",
     source_result: str = "result",
@@ -133,7 +136,13 @@ def binary_descriptor_rules(
     descriptor_rhs: str = "rhs",
     descriptor_result: str = "dst",
 ) -> tuple[DescriptorRule, ...]:
-    """Expands regular same-typed binary source ops to descriptor rules."""
+    """Expands binary source ops using the requested descriptor emission form.
+
+    OP emits once for the whole value, including native vector registers.
+    PER_LANE expands scalar descriptors across vector lanes. AUTO infers the
+    form from result types and descriptor register units; one register unit
+    does not distinguish a scalar lane from a native vector register.
+    """
 
     rules: list[DescriptorRule] = []
     for case in cases:
@@ -159,6 +168,7 @@ def binary_descriptor_rules(
                             (descriptor_rhs, source_rhs),
                         ),
                         results=((descriptor_result, source_result),),
+                        form=form,
                     ),
                 ),
                 priority=case.priority,
@@ -170,6 +180,7 @@ def binary_descriptor_rules(
 def ternary_descriptor_rules(
     cases: Sequence[DirectDescriptorCase],
     *,
+    form: DescriptorEmitForm,
     source_a: str = "a",
     source_b: str = "b",
     source_c: str = "c",
@@ -179,7 +190,7 @@ def ternary_descriptor_rules(
     descriptor_c: str = "c",
     descriptor_result: str = "dst",
 ) -> tuple[DescriptorRule, ...]:
-    """Expands regular same-typed ternary source ops to descriptor rules."""
+    """Expands ternary source ops using the requested descriptor emission form."""
 
     rules: list[DescriptorRule] = []
     for case in cases:
@@ -206,6 +217,7 @@ def ternary_descriptor_rules(
                             (descriptor_c, source_c),
                         ),
                         results=((descriptor_result, source_result),),
+                        form=form,
                     ),
                 ),
                 priority=case.priority,

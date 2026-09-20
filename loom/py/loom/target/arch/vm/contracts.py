@@ -1196,6 +1196,7 @@ VM_CORE_CONTRACT_FRAGMENT = ContractFragment(
         tuple(_direct_cases(IntegerBinarySemantics, _BINARY_SOURCE_OPS))
         + tuple(_direct_cases(IntegerDivisionSemantics, _DIVISION_SOURCE_OPS))
         + tuple(_direct_cases(FloatBinarySemantics, _FLOAT_BINARY_SOURCE_OPS, "f")),
+        form=DescriptorEmitForm.OP,
         descriptor_result="destination_v8",
         descriptor_lhs="left_v8",
         descriptor_rhs="right_v8",
@@ -1216,6 +1217,7 @@ VM_CORE_CONTRACT_FRAGMENT = ContractFragment(
                 ("i64", "f64"),
             )
         ),
+        form=DescriptorEmitForm.OP,
         descriptor_result="destination_v8",
         descriptor_input="source_v8",
     )
@@ -1230,6 +1232,7 @@ VM_CORE_CONTRACT_FRAGMENT = ContractFragment(
                 FloatFmaSemantics,
             )
         ),
+        form=DescriptorEmitForm.OP,
         descriptor_result="destination_v8",
         descriptor_a="a_v8",
         descriptor_b="b_v8",

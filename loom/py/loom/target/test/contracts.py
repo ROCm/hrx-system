@@ -96,7 +96,8 @@ def _binary_rule(
                 type_patterns,
                 semantic_tag=semantic_tag,
             ),
-        )
+        ),
+        form=DescriptorEmitForm.AUTO,
     )[0]
 
 

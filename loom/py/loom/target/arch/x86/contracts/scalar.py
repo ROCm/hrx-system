@@ -34,6 +34,7 @@ from loom.target.contracts import (
     ContractFragment,
     DescriptorEmitForm,
     DescriptorRule,
+    DirectDescriptorCase,
     EmitDescriptorOp,
     Guard,
     GuardDiagnostic,
@@ -49,6 +50,7 @@ from loom.target.contracts import (
     ValueAliasRule,
     ValueProject,
     ValueRef,
+    binary_descriptor_rules,
     descriptor_by_key,
 )
 from loom.target.low_descriptors import Descriptor
@@ -183,30 +185,6 @@ def _negated_disp32_guards(field: str) -> tuple[Guard, ...]:
     )
 
 
-def _binary_rule(
-    source_op: Op,
-    type_pattern: TypePattern,
-    descriptor_key: str,
-    descriptor_lookup: _DescriptorLookup,
-) -> DescriptorRule:
-    descriptor = descriptor_lookup(descriptor_key)
-    return DescriptorRule(
-        source_op=source_op,
-        descriptor=descriptor,
-        guards=_typed_guards(("lhs", "rhs", "result"), type_pattern),
-        emit=(
-            _op_emit(
-                descriptor=descriptor,
-                operands={
-                    "lhs": ValueRef.operand("lhs"),
-                    "rhs": ValueRef.operand("rhs"),
-                },
-                results={"dst": ValueRef.result("result")},
-            ),
-        ),
-    )
-
-
 def _bitwise_rules(
     source_op: Op,
     type_pattern: TypePattern,
@@ -235,11 +213,15 @@ def _bitwise_rules(
                 ),
             ),
         )
-    yield _binary_rule(
-        source_op,
-        type_pattern,
-        f"x86.scalar.{operation}.gpr{register_width}",
-        descriptor_lookup,
+    yield from binary_descriptor_rules(
+        (
+            DirectDescriptorCase(
+                source_op,
+                descriptor_lookup(f"x86.scalar.{operation}.gpr{register_width}"),
+                type_pattern,
+            ),
+        ),
+        form=DescriptorEmitForm.OP,
     )
 
 
@@ -1443,41 +1425,21 @@ def _cases() -> Sequence[ContractCase]:
         _buffer_view_rule(),
         _buffer_load_i8_u_rule(descriptor_lookup),
         _buffer_store_i8_rule(descriptor_lookup),
-        _binary_rule(
-            scalar_arithmetic.scalar_addi,
-            _I32,
-            "x86.scalar.add.gpr32",
-            descriptor_lookup,
-        ),
-        _binary_rule(
-            scalar_arithmetic.scalar_subi,
-            _I32,
-            "x86.scalar.sub.gpr32",
-            descriptor_lookup,
-        ),
-        _binary_rule(
-            scalar_arithmetic.scalar_muli,
-            _I32,
-            "x86.scalar.imul.gpr32",
-            descriptor_lookup,
-        ),
-        _binary_rule(
-            scalar_arithmetic.scalar_addi,
-            _I64,
-            "x86.scalar.add.gpr64",
-            descriptor_lookup,
-        ),
-        _binary_rule(
-            scalar_arithmetic.scalar_subi,
-            _I64,
-            "x86.scalar.sub.gpr64",
-            descriptor_lookup,
-        ),
-        _binary_rule(
-            scalar_arithmetic.scalar_muli,
-            _I64,
-            "x86.scalar.imul.gpr64",
-            descriptor_lookup,
+        *binary_descriptor_rules(
+            tuple(
+                DirectDescriptorCase(
+                    source_op,
+                    descriptor_lookup(f"x86.scalar.{operation}.gpr{register_width}"),
+                    type_pattern,
+                )
+                for type_pattern, register_width in ((_I32, 32), (_I64, 64))
+                for source_op, operation in (
+                    (scalar_arithmetic.scalar_addi, "add"),
+                    (scalar_arithmetic.scalar_subi, "sub"),
+                    (scalar_arithmetic.scalar_muli, "imul"),
+                )
+            ),
+            form=DescriptorEmitForm.OP,
         ),
         *(
             rule
@@ -1658,21 +1620,29 @@ def _cases() -> Sequence[ContractCase]:
         ),
         _sub_disp_rule(_INDEX, descriptor_lookup),
         _sub_disp_rule(_OFFSET, descriptor_lookup),
-        *(
-            _binary_rule(
-                index.index_sub, type_pattern, "x86.scalar.sub.gpr64", descriptor_lookup
-            )
-            for type_pattern in (_INDEX, _OFFSET)
-        ),
-        _binary_rule(
-            index.index_add, _INDEX, "x86.scalar.lea.add.gpr64", descriptor_lookup
-        ),
-        _binary_rule(
-            index.index_add, _OFFSET, "x86.scalar.lea.add.gpr64", descriptor_lookup
+        *binary_descriptor_rules(
+            tuple(
+                DirectDescriptorCase(
+                    source_op,
+                    descriptor_lookup(f"x86.scalar.{operation}.gpr64"),
+                    type_pattern,
+                )
+                for source_op, operation in (
+                    (index.index_sub, "sub"),
+                    (index.index_add, "lea.add"),
+                )
+                for type_pattern in (_INDEX, _OFFSET)
+            ),
+            form=DescriptorEmitForm.OP,
         ),
         *_scale_rules(descriptor_lookup),
-        _binary_rule(
-            index.index_mul, _INDEX, "x86.scalar.imul.gpr64", descriptor_lookup
+        *binary_descriptor_rules(
+            (
+                DirectDescriptorCase(
+                    index.index_mul, descriptor_lookup("x86.scalar.imul.gpr64"), _INDEX
+                ),
+            ),
+            form=DescriptorEmitForm.OP,
         ),
         *(
             rule

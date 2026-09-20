@@ -13,12 +13,15 @@ import pytest
 from loom.dialect.combining import CombiningKind
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.scalar.comparison import CmpIPredicate
+from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
 from loom.target.contracts import (
     ContractCase,
     ContractFragment,
+    DescriptorEmitForm,
     DescriptorRule,
     DirectDescriptorCase,
+    LowerEmitKind,
     PredicateDescriptorCase,
     ReductionDescriptorCase,
     Scalar,
@@ -27,14 +30,17 @@ from loom.target.contracts import (
     Vector,
     binary_descriptor_rules,
     compare_descriptor_rules,
+    compile_lower_rule_set,
     reduction_descriptor_rules,
     select_descriptor_rules,
     ternary_descriptor_rules,
     unary_descriptor_rules,
 )
+from loom.target.low_descriptors import Descriptor
 from loom.target.test.descriptors import (
     TEST_LOW_ADD_F32_DESCRIPTOR,
     TEST_LOW_ADD_I32_DESCRIPTOR,
+    TEST_LOW_ADD_PHYS_DESCRIPTOR,
     TEST_LOW_ADD_V4I32_DESCRIPTOR,
     TEST_LOW_ALT_DESCRIPTOR_SET,
     TEST_LOW_ALT_NEG_I32_DESCRIPTOR,
@@ -68,7 +74,8 @@ def test_binary_descriptor_template_generates_test_low_arithmetic_rules() -> Non
                 Scalar("f32"),
                 semantic_tag="float.add.f32",
             ),
-        )
+        ),
+        form=DescriptorEmitForm.OP,
     )
 
     table = _test_table(rules)
@@ -85,6 +92,49 @@ def test_binary_descriptor_template_generates_test_low_arithmetic_rules() -> Non
         "rhs": ValueRef.operand("rhs"),
     }
     assert add_rule.emit[0].results == {"dst": ValueRef.result("result")}
+
+
+@pytest.mark.parametrize(
+    ("descriptor", "form", "expected_kind"),
+    [
+        (
+            TEST_LOW_ADD_PHYS_DESCRIPTOR,
+            DescriptorEmitForm.OP,
+            LowerEmitKind.DESCRIPTOR_OP,
+        ),
+        (
+            TEST_LOW_ADD_I32_DESCRIPTOR,
+            DescriptorEmitForm.PER_LANE,
+            LowerEmitKind.DESCRIPTOR_OP_PER_LANE,
+        ),
+        (
+            TEST_LOW_ADD_I32_DESCRIPTOR,
+            DescriptorEmitForm.AUTO,
+            LowerEmitKind.DESCRIPTOR_OP_PER_LANE,
+        ),
+    ],
+)
+def test_binary_template_distinguishes_native_vector_and_scalar_lanes(
+    descriptor: Descriptor,
+    form: DescriptorEmitForm,
+    expected_kind: LowerEmitKind,
+) -> None:
+    # Both descriptors use one register unit per operand. The physical register
+    # holds the whole vector; the scalar descriptor expands over its lanes.
+    rules = binary_descriptor_rules(
+        (
+            DirectDescriptorCase(
+                vector.vector_addi, descriptor, Vector("i32", lanes=16)
+            ),
+        ),
+        form=form,
+    )
+    compiled = compile_lower_rule_set(
+        _test_table(rules), dialect_ops={"vector": ALL_VECTOR_OPS}
+    )
+
+    assert len(compiled.emits) == 1
+    assert compiled.emits[0].kind == expected_kind
 
 
 def test_compare_descriptor_template_generates_test_low_predicate_cases() -> None:
@@ -191,6 +241,7 @@ def test_unary_and_ternary_descriptor_templates_validate_direct_shapes() -> None
                 semantic_tag="test.alt.integer.neg.i32",
             ),
         ),
+        form=DescriptorEmitForm.OP,
         descriptor_input="value",
     )
     unary_table = ContractFragment(
@@ -213,6 +264,7 @@ def test_unary_and_ternary_descriptor_templates_validate_direct_shapes() -> None
                 semantic_tag="integer.dot4.s8s8",
             ),
         ),
+        form=DescriptorEmitForm.OP,
         source_a="lhs",
         source_b="rhs",
         source_c="acc",
@@ -251,7 +303,8 @@ def test_template_rejects_source_op_shape_mismatch() -> None:
                 TEST_LOW_ADD_V4I32_DESCRIPTOR,
                 Vector("i32", lanes=4),
             ),
-        )
+        ),
+        form=DescriptorEmitForm.OP,
     )
 
     with pytest.raises(
@@ -280,7 +333,8 @@ def test_template_rejects_descriptor_semantic_tag_mismatch() -> None:
                     Vector("i32", lanes=4),
                     semantic_tag="vector.sub.i32x4",
                 ),
-            )
+            ),
+            form=DescriptorEmitForm.OP,
         )
 
 
@@ -293,6 +347,7 @@ def test_template_rejects_unknown_descriptor_field() -> None:
                 Vector("i32", lanes=4),
             ),
         ),
+        form=DescriptorEmitForm.OP,
         descriptor_lhs="missing",
     )
 
@@ -343,6 +398,7 @@ def test_template_rejects_incomplete_type_case() -> None:
                     {"scalar": Scalar("i32")},
                 ),
             ),
+            form=DescriptorEmitForm.OP,
             source_input="scalar",
             descriptor_input="value",
         )

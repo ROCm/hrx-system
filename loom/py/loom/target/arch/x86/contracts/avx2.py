@@ -37,8 +37,11 @@ from loom.target.contracts import (
     descriptor_by_key,
 )
 from loom.target.contracts.templates import (
+    DirectDescriptorCase,
     ReductionDescriptorCase,
+    binary_descriptor_rules,
     reduction_descriptor_rules,
+    ternary_descriptor_rules,
 )
 from loom.target.low_descriptors import Descriptor
 
@@ -90,30 +93,6 @@ def _typed_guards(
     type_pattern: TypePattern,
 ) -> tuple[Guard, ...]:
     return tuple(Guard.value_type(field, type_pattern) for field in fields)
-
-
-def _binary_rule(
-    source_op: Op,
-    type_pattern: TypePattern,
-    descriptor_key: str,
-    descriptor_lookup: _DescriptorLookup,
-) -> DescriptorRule:
-    descriptor = descriptor_lookup(descriptor_key)
-    return DescriptorRule(
-        source_op=source_op,
-        descriptor=descriptor,
-        guards=_typed_guards(("lhs", "rhs", "result"), type_pattern),
-        emit=(
-            _op_emit(
-                descriptor=descriptor,
-                operands={
-                    "lhs": ValueRef.operand("lhs"),
-                    "rhs": ValueRef.operand("rhs"),
-                },
-                results={"dst": ValueRef.result("result")},
-            ),
-        ),
-    )
 
 
 def _conversion_rule(
@@ -177,31 +156,6 @@ def _select_rule(
                     "false_value": ValueRef.operand("false_value"),
                     "true_value": ValueRef.operand("true_value"),
                     "mask": ValueRef.temporary("mask"),
-                },
-                results={"dst": ValueRef.result("result")},
-            ),
-        ),
-    )
-
-
-def _fma_rule(
-    source_op: Op,
-    type_pattern: TypePattern,
-    descriptor_key: str,
-    descriptor_lookup: _DescriptorLookup,
-) -> DescriptorRule:
-    descriptor = descriptor_lookup(descriptor_key)
-    return DescriptorRule(
-        source_op=source_op,
-        descriptor=descriptor,
-        guards=_typed_guards(("a", "b", "c", "result"), type_pattern),
-        emit=(
-            _op_emit(
-                descriptor=descriptor,
-                operands={
-                    "acc": ValueRef.operand("c"),
-                    "lhs": ValueRef.operand("a"),
-                    "rhs": ValueRef.operand("b"),
                 },
                 results={"dst": ValueRef.result("result")},
             ),
@@ -498,29 +452,29 @@ def _cases() -> Sequence[ContractCase]:
             "x86.avx2.vmovq.xmm.gpr64",
             descriptor_lookup,
         ),
-        _binary_rule(
-            scalar_arithmetic.scalar_addf,
-            _F32,
-            "x86.avx2.vaddss.xmm",
-            descriptor_lookup,
+        *binary_descriptor_rules(
+            tuple(
+                DirectDescriptorCase(source_op, descriptor_lookup(descriptor_key), _F32)
+                for source_op, descriptor_key in (
+                    (scalar_arithmetic.scalar_addf, "x86.avx2.vaddss.xmm"),
+                    (scalar_arithmetic.scalar_subf, "x86.avx2.vsubss.xmm"),
+                    (scalar_arithmetic.scalar_mulf, "x86.avx2.vmulss.xmm"),
+                )
+            ),
+            form=DescriptorEmitForm.OP,
         ),
-        _binary_rule(
-            scalar_arithmetic.scalar_subf,
-            _F32,
-            "x86.avx2.vsubss.xmm",
-            descriptor_lookup,
-        ),
-        _binary_rule(
-            scalar_arithmetic.scalar_mulf,
-            _F32,
-            "x86.avx2.vmulss.xmm",
-            descriptor_lookup,
-        ),
-        _fma_rule(
-            scalar_math.scalar_fmaf,
-            _F32,
-            "x86.avx2.vfmadd231ss.xmm",
-            descriptor_lookup,
+        *ternary_descriptor_rules(
+            (
+                DirectDescriptorCase(
+                    scalar_math.scalar_fmaf,
+                    descriptor_lookup("x86.avx2.vfmadd231ss.xmm"),
+                    _F32,
+                ),
+            ),
+            form=DescriptorEmitForm.OP,
+            descriptor_a="lhs",
+            descriptor_b="rhs",
+            descriptor_c="acc",
         ),
         _splat_rule(_I32, _V4I32, "x86.avx2.vpbroadcastd.xmm", descriptor_lookup),
         _splat_rule(_F32, _V4F32, "x86.avx2.vbroadcastss.xmm", descriptor_lookup),
@@ -540,41 +494,21 @@ def _cases() -> Sequence[ContractCase]:
         _insert_f64_rule(1, descriptor_lookup),
         _shuffle_rule(_V4I32, "x86.avx2.vpshufd.xmm", descriptor_lookup),
         _shuffle_rule(_V4F32, "x86.avx2.vpermilps.xmm", descriptor_lookup),
-        _binary_rule(
-            vector.vector_addf,
-            _V4F32,
-            "x86.avx2.vaddps.xmm",
-            descriptor_lookup,
-        ),
-        _binary_rule(
-            vector.vector_subf,
-            _V4F32,
-            "x86.avx2.vsubps.xmm",
-            descriptor_lookup,
-        ),
-        _binary_rule(
-            vector.vector_mulf,
-            _V4F32,
-            "x86.avx2.vmulps.xmm",
-            descriptor_lookup,
-        ),
-        _binary_rule(
-            vector.vector_addi,
-            _V4I32,
-            "x86.avx2.vpaddd.xmm",
-            descriptor_lookup,
-        ),
-        _binary_rule(
-            vector.vector_subi,
-            _V4I32,
-            "x86.avx2.vpsubd.xmm",
-            descriptor_lookup,
-        ),
-        _binary_rule(
-            vector.vector_muli,
-            _V4I32,
-            "x86.avx2.vpmulld.xmm",
-            descriptor_lookup,
+        *binary_descriptor_rules(
+            tuple(
+                DirectDescriptorCase(
+                    source_op, descriptor_lookup(descriptor_key), type_pattern
+                )
+                for source_op, type_pattern, descriptor_key in (
+                    (vector.vector_addf, _V4F32, "x86.avx2.vaddps.xmm"),
+                    (vector.vector_subf, _V4F32, "x86.avx2.vsubps.xmm"),
+                    (vector.vector_mulf, _V4F32, "x86.avx2.vmulps.xmm"),
+                    (vector.vector_addi, _V4I32, "x86.avx2.vpaddd.xmm"),
+                    (vector.vector_subi, _V4I32, "x86.avx2.vpsubd.xmm"),
+                    (vector.vector_muli, _V4I32, "x86.avx2.vpmulld.xmm"),
+                )
+            ),
+            form=DescriptorEmitForm.OP,
         ),
         *_memory_rules(descriptor_lookup),
         *reduction_descriptor_rules(
