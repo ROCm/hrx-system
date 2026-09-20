@@ -97,14 +97,7 @@ ARTIFACT_SETS = {
 }
 
 # Re-export shared helpers used by existing tests and callers of this script.
-ROCM_ARTIFACT_VARIANT_LOG_KEY = common.ROCM_ARTIFACT_VARIANT_LOG_KEY
-ROCM_ARTIFACT_VARIANTS = common.ROCM_ARTIFACT_VARIANTS
-S3Object = common.S3Object
-rocm_artifact_variant_from_configure_log = (
-    common.rocm_artifact_variant_from_configure_log
-)
 s3_cache_path = common.s3_cache_path
-validate_rocm_artifact_variant = common.validate_rocm_artifact_variant
 
 
 def run(

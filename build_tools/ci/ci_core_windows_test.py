@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import argparse
-import io
 import os
 import subprocess
 import sys
@@ -21,14 +20,6 @@ from unittest import mock
 from build_tools.ci import ci_core_common, ci_core_windows
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-
-
-class FakeS3:
-    def __init__(self, objects: dict[tuple[str, str], str]):
-        self.objects = objects
-
-    def get_object(self, Bucket: str, Key: str):
-        return {"Body": io.BytesIO(self.objects[(Bucket, Key)].encode())}
 
 
 class CiCoreWindowsTest(unittest.TestCase):
@@ -180,30 +171,6 @@ class CiCoreWindowsTest(unittest.TestCase):
             with zipfile.ZipFile(zip_path) as zf:
                 self.assertEqual(zf.read("link.py"), fixture_contents)
 
-    def test_rocm_artifact_variant_from_configure_log(self):
-        self.assertEqual(
-            ci_core_windows.rocm_artifact_variant_from_configure_log(""),
-            "release",
-        )
-        self.assertEqual(
-            ci_core_windows.rocm_artifact_variant_from_configure_log(
-                "Override ASAN GPU_TARGETS = gfx942:xnack+"
-            ),
-            "asan",
-        )
-        self.assertEqual(
-            ci_core_windows.rocm_artifact_variant_from_configure_log(
-                "Override TSAN GPU_TARGETS = gfx942:xnack+"
-            ),
-            "tsan",
-        )
-        self.assertEqual(
-            ci_core_windows.rocm_artifact_variant_from_configure_log(
-                "SANITIZER = HOST_ASAN"
-            ),
-            "host-asan",
-        )
-
     def test_s3_cache_path_preserves_artifact_identity(self):
         cache_root = Path("C:/cache")
 
@@ -234,24 +201,6 @@ class CiCoreWindowsTest(unittest.TestCase):
     def test_s3_cache_path_rejects_unsafe_keys(self):
         with self.assertRaisesRegex(RuntimeError, "Unsafe S3 key"):
             ci_core_windows.s3_cache_path(Path("C:/cache"), "bucket", "../evil")
-
-    def test_validate_rocm_artifact_variant_rejects_mismatch(self):
-        bucket = "therock-nightly-artifacts"
-        prefix = "123-windows/"
-        log_key = prefix + ci_core_windows.ROCM_ARTIFACT_VARIANT_LOG_KEY
-        available = [
-            ci_core_windows.S3Object(key=log_key, size=1, last_modified=""),
-        ]
-        s3 = FakeS3({(bucket, log_key): "SANITIZER = ASAN\n"})
-
-        with self.assertRaisesRegex(RuntimeError, "variant 'asan'.*'release'"):
-            ci_core_windows.validate_rocm_artifact_variant(
-                s3,
-                bucket,
-                prefix,
-                available,
-                "release",
-            )
 
     def test_windows_core_artifact_set_matches_windows_packaging(self):
         self.assertEqual(

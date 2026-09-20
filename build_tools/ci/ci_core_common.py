@@ -59,7 +59,7 @@ ARTIFACT_SETS = {
 }
 
 ROCM_ARTIFACT_VARIANTS = ("release", "asan", "host-asan", "tsan")
-ROCM_ARTIFACT_VARIANT_LOG_KEY = "logs/compiler-runtime/ROCR-Runtime_configure.log"
+ROCM_ARTIFACT_VARIANT_LOG_KEY = "logs/compiler-runtime/amd-llvm_configure.log"
 CORE_CTEST_EXCLUDE_REGEXES = ()
 
 
@@ -573,22 +573,28 @@ def read_s3_text(s3, bucket: str, key: str) -> str:
     return body.read().decode(errors="replace")
 
 
-def rocm_artifact_variant_from_configure_log(text: str) -> str:
-    if "Override ASAN GPU_TARGETS" in text or "SANITIZER = ASAN" in text:
-        return "asan"
-    if "Override TSAN GPU_TARGETS" in text or "SANITIZER = TSAN" in text:
-        return "tsan"
-    if "HOST_ASAN enabled" in text or "SANITIZER = HOST_ASAN" in text:
-        return "host-asan"
-    return "release"
+def rocm_artifact_variant_from_configure_log(text: str) -> str | None:
+    """Returns the explicit build variant, or None when it cannot be classified."""
+    # TheRock explicitly passes this setting to LLVM on both Linux and Windows.
+    # Release requires the empty setting, not merely absent sanitizer messages.
+    match = re.search(r"(?m)^EXEC\t[^\r\n]* -DTHEROCK_SANITIZER=([^\s]*)", text)
+    if match is None:
+        return None
+    return {
+        "": "release",
+        "ASAN": "asan",
+        "HOST_ASAN": "host-asan",
+        "TSAN": "tsan",
+    }.get(match[1])
 
 
 def rocm_artifact_variant(
     s3, bucket: str, prefix: str, available: list[S3Object]
-) -> str:
+) -> str | None:
     key = prefix + ROCM_ARTIFACT_VARIANT_LOG_KEY
     if not any(obj.key == key for obj in available):
-        return "release"
+        # Archives can be published before their configure log.
+        return None
     return rocm_artifact_variant_from_configure_log(read_s3_text(s3, bucket, key))
 
 
@@ -600,6 +606,12 @@ def validate_rocm_artifact_variant(
     expected_variant: str,
 ) -> None:
     actual_variant = rocm_artifact_variant(s3, bucket, prefix, available)
+    if actual_variant is None:
+        raise RuntimeError(
+            f"Cannot determine ROCm artifact variant at s3://{bucket}/{prefix}: "
+            f"{ROCM_ARTIFACT_VARIANT_LOG_KEY} must be published with an explicit "
+            "supported THEROCK_SANITIZER setting. Choose a complete --run-id."
+        )
     if actual_variant == expected_variant:
         return
     raise RuntimeError(
@@ -642,9 +654,9 @@ def discover_latest_run_id(
         ):
             return str(run_id)
     raise RuntimeError(
-        f"Could not discover a {release_type} {platform_display} "
-        f"{artifact_variant} run with artifact set {artifact_set!r}. Pass --run-id "
-        "explicitly."
+        f"Could not discover a complete {release_type} {platform_display} "
+        f"{artifact_variant} run with artifact set {artifact_set!r} and a supported "
+        f"THEROCK_SANITIZER setting in {ROCM_ARTIFACT_VARIANT_LOG_KEY}."
     )
 
 

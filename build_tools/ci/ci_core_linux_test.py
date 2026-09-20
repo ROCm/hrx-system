@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import argparse
-import io
 import json
 import os
 import subprocess
@@ -20,14 +19,6 @@ from unittest import mock
 from build_tools.ci import ci_core_linux
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-
-
-class FakeS3:
-    def __init__(self, objects: dict[tuple[str, str], str]):
-        self.objects = objects
-
-    def get_object(self, Bucket: str, Key: str):
-        return {"Body": io.BytesIO(self.objects[(Bucket, Key)].encode())}
 
 
 class CiCoreLinuxTest(unittest.TestCase):
@@ -74,30 +65,6 @@ class CiCoreLinuxTest(unittest.TestCase):
             check=True,
         )
         self.assertIn("fetch-rocm", result.stdout)
-
-    def test_rocm_artifact_variant_from_configure_log(self):
-        self.assertEqual(
-            ci_core_linux.rocm_artifact_variant_from_configure_log(""),
-            "release",
-        )
-        self.assertEqual(
-            ci_core_linux.rocm_artifact_variant_from_configure_log(
-                "Override ASAN GPU_TARGETS = gfx942:xnack+"
-            ),
-            "asan",
-        )
-        self.assertEqual(
-            ci_core_linux.rocm_artifact_variant_from_configure_log(
-                "Override TSAN GPU_TARGETS = gfx942:xnack+"
-            ),
-            "tsan",
-        )
-        self.assertEqual(
-            ci_core_linux.rocm_artifact_variant_from_configure_log(
-                "SANITIZER = HOST_ASAN"
-            ),
-            "host-asan",
-        )
 
     def test_s3_cache_path_preserves_artifact_identity(self):
         cache_root = Path("/tmp/cache")
@@ -169,24 +136,6 @@ class CiCoreLinuxTest(unittest.TestCase):
                 artifact_sets=ci_core_linux.ARTIFACT_SETS,
             ),
         )
-
-    def test_validate_rocm_artifact_variant_rejects_mismatch(self):
-        bucket = "therock-nightly-artifacts"
-        prefix = "123-linux/"
-        log_key = prefix + ci_core_linux.ROCM_ARTIFACT_VARIANT_LOG_KEY
-        available = [
-            ci_core_linux.S3Object(key=log_key, size=1, last_modified=""),
-        ]
-        s3 = FakeS3({(bucket, log_key): "SANITIZER = ASAN\n"})
-
-        with self.assertRaisesRegex(RuntimeError, "variant 'asan'.*'release'"):
-            ci_core_linux.validate_rocm_artifact_variant(
-                s3,
-                bucket,
-                prefix,
-                available,
-                "release",
-            )
 
     def test_amdgpu_device_binary_source_options_pin_rocm_root(self):
         self.assertEqual(

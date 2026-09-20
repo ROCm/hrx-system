@@ -36,6 +36,18 @@ py_test(
 )
 
 py_test(
+    name = "ci_core_common_test",
+    srcs = [
+        "ci_core_common.py",
+        "ci_core_common_test.py",
+        "ci_core_linux.py",
+        "ci_core_windows.py",
+    ],
+    main = "ci_core_common_test.py",
+    deps = ["//build_tools/devtools"],
+)
+
+py_test(
     name = "ci_core_linux_test",
     srcs = [
         "ci_core_common.py",
