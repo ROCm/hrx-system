@@ -13,6 +13,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "loom/import/cxx/symbol/names.h"
 #include "loom/import/cxx/value/scalar.h"
 
 namespace loom::cxx_import {
@@ -26,12 +27,13 @@ namespace loom::cxx_import {
 class Configs {
  public:
   Configs(cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types,
-          Scalars& scalars, Locations& locations)
+          Scalars& scalars, Locations& locations, SymbolNames& symbol_names)
       : unit_(unit),
         diagnostics_(diagnostics),
         types_(types),
         scalars_(scalars),
-        locations_(locations) {}
+        locations_(locations),
+        symbol_names_(symbol_names) {}
 
   // Admits a namespace-scope declaration during the shared declaration walk.
   // Returns whether it is a config binding. Every redeclaration must carry the
@@ -40,18 +42,9 @@ class Configs {
                    cxx::List<cxx::AttributeSpecifierAST*>* attributes,
                    cxx::AST* owner);
 
-  // Rejects config attributes in contexts that cannot define a global value.
-  void reject_attributes(cxx::List<cxx::AttributeSpecifierAST*>* attributes);
-  // Declarator/type and parameter attributes cannot declare global configs.
-  void reject_declarator(cxx::DeclaratorAST* declarator);
-
   // Completes redeclaration admission and emits one module symbol per key in
   // source order. Called once after collection, before lowering any functions.
   void build(loom_builder_t* builder);
-
-  // Diagnoses an ordinary function or implicit launch config taking an explicit
-  // config's symbol name. Explicit config names are never mangled.
-  void reject_symbol_conflict(std::string_view name);
 
   // Reads a registered binding at the current insertion point, or returns empty
   // for an ordinary source variable. Exact definitions produce constants;
@@ -86,6 +79,8 @@ class Configs {
   Scalars& scalars_;
   // Copies source provenance into the output module.
   Locations& locations_;
+  // Shared namespace reserves one exact symbol per reconciled config key.
+  SymbolNames& symbol_names_;
   // Deterministic first-declaration order, independent of hash-table iteration.
   std::vector<Binding> bindings_;
   // Explicit names reconcile different C++ symbols denoting the same setting.

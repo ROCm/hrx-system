@@ -1,0 +1,175 @@
+// RUN: verify
+// ERROR@+1: LOWERING/059 "one valid Loom symbol string"
+[[loom::symbol]] unsigned value() { return 0; }
+
+// ====
+// ERROR@+1: LOWERING/059 "one valid Loom symbol string"
+[[loom::symbol(4)]] unsigned value() { return 0; }
+
+// ====
+// ERROR@+1: LOWERING/059 "one valid Loom symbol string"
+[[loom::symbol("")]] unsigned value() { return 0; }
+
+// ====
+// ERROR@+1: LOWERING/059 "one valid Loom symbol string"
+[[loom::symbol("bad\0name")]] unsigned value() { return 0; }
+
+// ====
+// ERROR@+1: LOWERING/059 "one valid Loom symbol string"
+[[loom::symbol("@value")]] unsigned value() { return 0; }
+
+// ====
+// ERROR@+1: LOWERING/059 "one valid Loom symbol string"
+[[loom::symbol("a b")]] unsigned value() { return 0; }
+
+// ====
+// ERROR@+1: LOWERING/059 "one valid Loom symbol string"
+[[loom::symbol("a::b")]] unsigned value() { return 0; }
+
+// ====
+// ERROR@+1: LOWERING/059 "one valid Loom symbol string"
+[[loom::symbol("a", "b")]] unsigned value() { return 0; }
+
+// ====
+// ERROR@+1: LOWERING/059 "one symbol binding"
+[[loom::symbol("same"), loom::symbol("same")]] unsigned value() { return 0; }
+
+// ====
+[[loom::symbol("first")]] unsigned value(unsigned);
+// ERROR@+1: LOWERING/059 "conflicting symbol names across redeclarations"
+[[loom::symbol("second")]] unsigned value(unsigned x) { return x; }
+
+// ====
+[[loom::symbol("same")]] unsigned first(unsigned x) { return x; }
+// ERROR@+1: LOWERING/059 "Loom symbol name is already reserved: same"
+[[loom::symbol("same")]] float second(float x) { return x; }
+
+// ====
+// Exact and default public names share one namespace, regardless of order.
+// ERROR@+1: LOWERING/059 "Loom symbol name is already reserved: entry"
+unsigned entry(unsigned x) { return x; }
+[[loom::symbol("entry")]] unsigned other(unsigned x) { return x; }
+
+// ====
+[[loom::symbol("entry")]] unsigned other(unsigned x) { return x; }
+// ERROR@+1: LOWERING/059 "Loom symbol name is already reserved: entry"
+unsigned entry(unsigned x) { return x; }
+
+// ====
+[[loom::config("library.value")]] extern const unsigned setting;
+// ERROR@+1: LOWERING/059 "Loom symbol name is already reserved: library.value"
+[[loom::symbol("library.value")]] unsigned value() { return setting; }
+
+// ====
+[[loom::symbol("library.value")]] unsigned value() { return 0; }
+// ERROR@+1: LOWERING/059 "Loom symbol name is already reserved: library.value"
+[[loom::config("library.value")]] extern const unsigned setting;
+
+// ====
+[[loom::symbol("library.dispatch.workgroup_size.x")]] unsigned value() { return 0; }
+// ERROR@+1: LOWERING/059 "Loom symbol name is already reserved: library.dispatch.workgroup_size.x"
+[[loom::kernel, loom::symbol("library.dispatch")]] void entry() {}
+
+// ====
+// ERROR@+1: LOWERING/059 "Loom symbol name is already reserved: library.dispatch.workgroup_size.x"
+[[loom::kernel, loom::symbol("library.dispatch")]] void entry() {}
+[[loom::symbol("library.dispatch.workgroup_size.x")]] unsigned value() { return 0; }
+
+// ====
+// ERROR@+1: LOWERING/059 "require concrete namespace-scope functions"
+[[loom::symbol("value")]] extern const unsigned value;
+
+// ====
+// ERROR@+1: LOWERING/059 "require concrete namespace-scope functions"
+namespace [[loom::symbol("space")]] space {}
+
+// ====
+struct Value {
+  // ERROR@+1: LOWERING/059 "require concrete namespace-scope functions"
+  [[loom::symbol("value")]] static unsigned value() { return 0; }
+};
+
+// ====
+template<class T>
+// ERROR@+1: LOWERING/059 "require concrete namespace-scope functions"
+[[loom::symbol("value")]] T value(T x) { return x; }
+
+// ====
+unsigned entry() {
+  // ERROR@+1: LOWERING/059 "with a leading attribute"
+  [[loom::symbol("value")]] unsigned value = 0;
+  return value;
+}
+
+// ====
+// ERROR@+1: LOWERING/059 "with a leading attribute"
+unsigned entry([[loom::symbol("value")]] unsigned value) { return value; }
+
+// ====
+// ERROR@+1: LOWERING/059 "with a leading attribute"
+unsigned entry() [[loom::symbol("entry")]] { return 0; }
+
+// ====
+// ERROR@+1: LOWERING/059 "with a leading attribute"
+unsigned entry [[loom::symbol("entry")]] () { return 0; }
+
+// ====
+// ERROR@+1: LOWERING/059 "intrinsic bindings do not define Loom symbols"
+[[loom::op("scalar.addi"), loom::symbol("add")]] unsigned add(unsigned, unsigned);
+
+// ====
+// An unused overload still prevents a public name from depending on reachability.
+unsigned identity(unsigned);
+// ERROR@+1: LOWERING/059 "require an explicit loom::symbol name"
+float identity(float value) { return value; }
+
+// ====
+enum class Bits : unsigned { Zero = 0 };
+// ERROR@+1: LOWERING/059 "require an explicit loom::symbol name"
+Bits operator|(Bits a, Bits b) { return (Bits)((unsigned)a | (unsigned)b); }
+
+// ====
+template<class T> T identity(T value) { return value; }
+// ERROR@+1: LOWERING/059 "require an explicit loom::symbol name"
+template<> unsigned identity<unsigned>(unsigned value) { return value; }
+
+// ====
+// Renaming a declaration does not provide the missing body or its contract.
+[[loom::symbol("library.external")]] unsigned external(unsigned);
+unsigned entry(unsigned value) {
+  // ERROR@+1: LOWERING/059 "call must resolve to an owned intrinsic or defined device helper"
+  return external(value);
+}
+
+// ====
+// INPUT: cxx root=library.entry
+// ERROR: LOWERING/059 "root has no concrete definition: library.entry"
+[[loom::symbol("library.entry")]] unsigned entry(unsigned value) { return value; }
+
+// ====
+[[loom::check_case]] void correct() {}
+[[loom::symbol("measure")]] unsigned other() { return 0; }
+// ERROR@+1: LOWERING/059 "Loom symbol name is already reserved: measure"
+[[loom::check_benchmark(correct)]] void measure();
+
+// ====
+// ERROR@+1: LOWERING/059 "with a leading attribute"
+using Word = unsigned [[loom::symbol("word")]];
+
+// ====
+// ERROR@+1: LOWERING/059 "require concrete namespace-scope functions"
+struct [[loom::symbol("record")]] Record {};
+
+// ====
+// ERROR@+1: LOWERING/059 "intrinsic bindings do not define Loom symbols"
+[[loom::symbol("custom")]] float custom(float);
+[[loom::op("scalar.expf")]] float custom(float);
+
+// ====
+[[loom::op("scalar.expf")]] float custom(float);
+// ERROR@+1: LOWERING/059 "intrinsic bindings do not define Loom symbols"
+[[loom::symbol("custom")]] float custom(float);
+
+// ====
+// ERROR@+1: LOWERING/059 "intrinsic bindings do not define Loom symbols"
+[[loom::assume, loom::symbol("assume")]] void assume(bool);

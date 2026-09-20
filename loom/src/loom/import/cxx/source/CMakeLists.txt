@@ -190,7 +190,10 @@ loom_cc_library(
     attributes
   HDRS
     "attributes.h"
+  SRCS
+    "attributes.cc"
   DEPS
+    ::source
     iree::third_party::cxx_parser
   PUBLIC
 )
@@ -237,6 +240,7 @@ endif()
 # Parser-facing sources use the same scoped language and unwind contract as
 # their Bazel targets. The C options and facade catalog retain normal flags.
 foreach(_target IN ITEMS
+    loom_import_cxx_source_attributes.objects
     loom_import_cxx_source_source.objects
     loom_import_cxx_source_locations.objects
     loom_import_cxx_source_constants.objects

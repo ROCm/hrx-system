@@ -50,7 +50,7 @@ LOOM_CHECK_BENCHMARK(measure_narrow, narrow);
 }
 
 // ----
-check.case public @sample__narrow {
+check.case public @sample.narrow {
   %expected = check.literal value(-7) : i16
   %1 = check.literal value(-7) : i16
   %actual = func.call @sample__identity(%1) : (i16) -> (i16)
@@ -72,7 +72,7 @@ func.def @sample__identity(%value: i16) -> (i16) {
   func.return %value : i16
 }
 
-check.benchmark<@sample__narrow> @sample__measure_narrow
+check.benchmark<@sample.narrow> @sample.measure_narrow
 
 // ====
 // RUN: roundtrip

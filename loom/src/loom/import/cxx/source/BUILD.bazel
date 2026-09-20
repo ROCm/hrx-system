@@ -142,8 +142,13 @@ loom_cc_test(
 
 loom_cc_library(
     name = "attributes",
+    srcs = ["attributes.cc"],
     hdrs = ["attributes.h"],
-    deps = ["//third_party:cxx_parser"],
+    cxxopts = select(CXX_COMPILER_OPTIONS),
+    deps = [
+        ":source",
+        "//third_party:cxx_parser",
+    ],
 )
 
 loom_cc_test(
@@ -181,6 +186,7 @@ iree_cmake_extra_content(
 # Parser-facing sources use the same scoped language and unwind contract as
 # their Bazel targets. The C options and facade catalog retain normal flags.
 foreach(_target IN ITEMS
+    loom_import_cxx_source_attributes.objects
     loom_import_cxx_source_source.objects
     loom_import_cxx_source_locations.objects
     loom_import_cxx_source_constants.objects

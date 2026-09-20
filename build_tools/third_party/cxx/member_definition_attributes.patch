@@ -1,0 +1,11 @@
+diff --git a/src/parser/cxx/parser.cc b/src/parser/cxx/parser.cc
+--- a/src/parser/cxx/parser.cc
++++ b/src/parser/cxx/parser.cc
+@@ -9878,6 +9878,7 @@
+     auto ast = FunctionDefinitionAST::create(pool_);
+     yyast = ast;
+
++    ast->attributeList = attributes;
+     ast->declSpecifierList = declSpecifierList;
+     ast->declarator = declarator;
+     ast->requiresClause = requiresClause;

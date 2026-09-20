@@ -28,8 +28,9 @@ TEST_F(ConfigTest, ReadsUseOneSymbolForRedeclarationsAndAliases) {
   Locations locations(source.unit(), source.diagnostics(), module_);
   Scalars scalars(source.unit(), source.diagnostics(), types, locations,
                   builder_);
+  SymbolNames names(source.unit(), source.diagnostics());
   Configs configs(source.unit(), source.diagnostics(), types, scalars,
-                  locations);
+                  locations, names);
   std::vector<cxx::VariableSymbol*> variables;
   auto* root = cxx::ast_cast<cxx::TranslationUnitAST>(source.unit().ast());
   for (auto* declaration : cxx::ListView{root->declarationList}) {
@@ -74,8 +75,9 @@ TEST_F(ConfigTest, LaterDefinitionFixesEarlierDeclarationsAndAliases) {
   Locations locations(source.unit(), source.diagnostics(), module_);
   Scalars scalars(source.unit(), source.diagnostics(), types, locations,
                   builder_);
+  SymbolNames names(source.unit(), source.diagnostics());
   Configs configs(source.unit(), source.diagnostics(), types, scalars,
-                  locations);
+                  locations, names);
   std::vector<cxx::VariableSymbol*> variables;
   auto* root = cxx::ast_cast<cxx::TranslationUnitAST>(source.unit().ast());
   for (auto* declaration : cxx::ListView{root->declarationList}) {

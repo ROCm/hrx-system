@@ -31,10 +31,10 @@ static_assert(__is_same(decltype(+short_value), int));
 static_assert(__is_same(decltype(+word_value), int));
 static_assert(__is_same(decltype(+full_value), __underlying_type(Full)));
 
-constexpr int choose(int) { return 1; }
-constexpr int choose(unsigned char) { return 2; }
-constexpr int choose(unsigned short) { return 3; }
-constexpr int choose(unsigned) { return 4; }
+static constexpr int choose(int) { return 1; }
+static constexpr int choose(unsigned char) { return 2; }
+static constexpr int choose(unsigned short) { return 3; }
+static constexpr int choose(unsigned) { return 4; }
 static_assert(choose(byte) == 1);
 static_assert(choose(short_value) == 1);
 static_assert(choose(word_value) == 1);

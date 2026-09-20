@@ -62,12 +62,14 @@ class Translator {
         locations_(unit, diagnostics, module),
         types_(unit, diagnostics),
         scalars_(unit, diagnostics, types_, locations_, builder_),
-        configs_(unit, diagnostics, types_, scalars_, locations_),
+        names_(unit, diagnostics),
+        configs_(unit, diagnostics, types_, scalars_, locations_, names_),
         vectors_(unit, diagnostics, types_, scalars_, locations_, builder_),
         storage_(unit, diagnostics, types_, scalars_, locations_, builder_),
         intrinsics_(unit, diagnostics, types_),
         launches_(unit, diagnostics),
-        functions_(unit, diagnostics, module, intrinsics_, launches_, configs_),
+        functions_(unit, diagnostics, module, intrinsics_, launches_, configs_,
+                   names_),
         options_(options),
         math_flags_(iree_any_bit_set(options.flags,
                                      LOOM_CXX_IMPORT_FLAG_APPROXIMATE_FUNCTIONS)
@@ -189,9 +191,8 @@ class Translator {
     auto* region = defined.region;
     if (defined.kind == FunctionKind::CheckCase) {
       auto saved = loom_builder_enter_region(&builder_, op, region);
-      translate_check_body(unit_, diagnostics_, functions_, intrinsics_,
-                           configs_, types_, scalars_, locations_, builder_,
-                           defined);
+      translate_check_body(unit_, diagnostics_, functions_, intrinsics_, types_,
+                           scalars_, locations_, builder_, defined);
       loom_builder_restore(&builder_, saved);
       return;
     }
@@ -1022,9 +1023,11 @@ class Translator {
       if (!simple) {
         fail(ast, "unsupported local declaration");
       }
-      configs_.reject_attributes(simple->attributeList);
+      reject_global_binding_attributes(unit_, diagnostics_,
+                                       simple->attributeList);
       for (auto* variable : cxx::ListView{simple->initDeclaratorList}) {
-        configs_.reject_declarator(variable->declarator);
+        reject_global_binding_declarator(unit_, diagnostics_,
+                                         variable->declarator);
         auto* source_variable =
             cxx::symbol_cast<cxx::VariableSymbol>(variable->symbol);
         if (!source_variable || source_variable->isStatic() ||
@@ -1450,6 +1453,8 @@ class Translator {
   Types types_;
   // Numeric builders consume evaluated operands without AST callbacks.
   Scalars scalars_;
+  // Shared output namespace for callables and configuration symbols.
+  SymbolNames names_;
   // Namespace-scope scalar configs retain key identity across source aliases.
   Configs configs_;
   // Explicit vector builders retain lane widths and full-width source masks.

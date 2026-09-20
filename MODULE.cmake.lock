@@ -136,6 +136,7 @@ set(IREE_DEP_CXX_PATCHES
   "//build_tools/third_party/cxx:include_continuation.patch"
   "//build_tools/third_party/cxx:include_paths.patch"
   "//build_tools/third_party/cxx:macro_operator_locations.patch"
+  "//build_tools/third_party/cxx:member_definition_attributes.patch"
   "//build_tools/third_party/cxx:packed_bitfields.patch"
   "//build_tools/third_party/cxx:packed_records.patch"
   "//build_tools/third_party/cxx:aligned_records.patch"

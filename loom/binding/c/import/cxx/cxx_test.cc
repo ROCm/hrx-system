@@ -10,8 +10,10 @@
 #include <atomic>
 #include <string>
 #include <thread>
+#include <utility>
 
 #include "iree/testing/gtest.h"
+#include "loomc/link.h"
 #include "test/util.h"
 
 namespace {
@@ -24,6 +26,10 @@ using ModulePtr = HandlePtr<loomc_module_t, loomc_module_release>;
 using ResultPtr = HandlePtr<loomc_result_t, loomc_result_release>;
 using CompilerPtr = HandlePtr<loomc_compiler_t, loomc_compiler_release>;
 using PassPtr = HandlePtr<loomc_pass_program_t, loomc_pass_program_release>;
+using LinkBuilderPtr =
+    HandlePtr<loomc_link_index_builder_t, loomc_link_index_builder_release>;
+using LinkIndexPtr = HandlePtr<loomc_link_index_t, loomc_link_index_release>;
+using LinkerPtr = HandlePtr<loomc_linker_t, loomc_linker_release>;
 
 std::string ToString(loomc_string_view_t value) {
   return value.size ? std::string(value.data, value.size) : std::string();
@@ -172,6 +178,90 @@ TEST_F(CxxTest, RejectedSourceRetainsBorrowedContentsAndAllowsReuse) {
   auto good = Source("good.cpp", "int answer() { return 42; }");
   LOOMC_ASSERT_OK(Import(good.get()));
   ExpectSuccess(result_.get());
+}
+
+TEST_F(CxxTest, RenamedExportsLinkWithTheirTypesAfterSourceRelease) {
+  for (auto format : {LOOMC_SOURCE_FORMAT_TEXT, LOOMC_SOURCE_FORMAT_BYTECODE}) {
+    SCOPED_TRACE(format);
+    auto source = Source("library.cpp", R"(
+      [[loom::symbol("library.increment")]] unsigned increment(unsigned);
+      unsigned increment(unsigned value) { return value + 1u; }
+    )");
+    LOOMC_ASSERT_OK(Import(source.get()));
+    ExpectSuccess(result_.get());
+    loomc_module_serialize_options_t serialization = {};
+    serialization.format = format;
+    loomc_source_t* library = nullptr;
+    LOOMC_ASSERT_OK(loomc_module_serialize_to_source(
+        module_.get(), &serialization, loomc_allocator_system(), &library));
+    SourcePtr library_owner(library);
+    source.reset();
+    module_.reset();
+    result_.reset();
+
+    for (const auto& [argument_type, result_type] :
+         {std::pair{"i32", "i32"}, std::pair{"f32", "i32"},
+          std::pair{"i32", "f32"}}) {
+      const std::string signature =
+          std::string(argument_type) + ") -> (" + result_type;
+      SCOPED_TRACE(signature);
+      const std::string caller_text =
+          "func.decl @library.increment(" + signature + ")\n" +
+          "func.def public @entry(%value: " + signature + ") {\n" +
+          "  %result = func.call @library.increment(%value) : (" + signature +
+          ")\n  func.return %result : " + result_type + "\n}\n";
+      auto caller = Source("caller.loom", caller_text.c_str());
+      loomc_link_index_builder_t* builder = nullptr;
+      LOOMC_ASSERT_OK(loomc_link_index_builder_create(
+          context_.get(), nullptr, loomc_allocator_system(), &builder));
+      LinkBuilderPtr builder_owner(builder);
+      loomc_link_index_source_options_t provider = {};
+      provider.role = LOOMC_LINK_PROVIDER_ROLE_LIBRARY;
+      LOOMC_ASSERT_OK(loomc_link_index_builder_add_source(builder, library,
+                                                          &provider, nullptr));
+      provider.role = LOOMC_LINK_PROVIDER_ROLE_INPUT;
+      LOOMC_ASSERT_OK(loomc_link_index_builder_add_source(builder, caller.get(),
+                                                          &provider, nullptr));
+      loomc_link_index_t* index = nullptr;
+      loomc_result_t* result = nullptr;
+      LOOMC_ASSERT_OK(
+          loomc_link_index_builder_finish(builder, &index, &result));
+      LinkIndexPtr index_owner(index);
+      ResultPtr index_result(result);
+      ExpectSuccess(result);
+      builder_owner.reset();
+      caller.reset();
+
+      loomc_linker_t* linker = nullptr;
+      LOOMC_ASSERT_OK(loomc_linker_create(context_.get(), nullptr,
+                                          loomc_allocator_system(), &linker));
+      LinkerPtr linker_owner(linker);
+      loomc_link_options_t options = {};
+      options.link_index = index;
+      options.mode = LOOMC_LINK_MODE_LINK;
+      options.flags = LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS;
+      loomc_module_t* linked = nullptr;
+      LOOMC_ASSERT_OK(loomc_link_module(linker, workspace_.get(), &options,
+                                        &linked, &result));
+      ModulePtr linked_owner(linked);
+      ResultPtr link_result(result);
+      if (signature == "i32) -> (i32") {
+        ExpectSuccess(result);
+        ASSERT_NE(linked, nullptr);
+        auto text = Print(linked);
+        EXPECT_NE(text.find("@library.increment"), std::string::npos);
+        EXPECT_NE(text.find("scalar.addi"), std::string::npos);
+        EXPECT_EQ(text.find("func.decl"), std::string::npos);
+      } else {
+        EXPECT_FALSE(loomc_result_succeeded(result));
+        EXPECT_EQ(linked, nullptr);
+        ASSERT_GT(loomc_result_diagnostic_count(result), 0u);
+        const auto* diagnostic = loomc_result_diagnostic_at(result, 0);
+        EXPECT_NE(ToString(diagnostic->message).find("incompatible"),
+                  std::string::npos);
+      }
+    }
+  }
 }
 
 // An immutable cache shared by independently owned frontend invocations.

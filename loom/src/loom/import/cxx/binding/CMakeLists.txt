@@ -52,6 +52,7 @@ loom_cc_library(
     loom::import::cxx::source::attributes
     loom::import::cxx::source::error
     loom::import::cxx::source::locations
+    loom::import::cxx::symbol::names
     loom::import::cxx::value::scalar
     loom::import::cxx::value::types
     loom::ir
@@ -107,11 +108,11 @@ loom_cc_library(
   SRCS
     "launch.cc"
   DEPS
-    ::config
     iree::third_party::cxx_parser
     loom::import::cxx::source
     loom::import::cxx::source::attributes
     loom::import::cxx::source::error
+    loom::import::cxx::symbol::names
     loom::ir
     loom::ops::config
     loom::ops::index

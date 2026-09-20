@@ -27,14 +27,12 @@ namespace {
 class CheckBody {
  public:
   CheckBody(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
-            Functions& functions, Intrinsics& intrinsics, Configs& configs,
-            Types& types, Scalars& scalars, Locations& locations,
-            loom_builder_t& builder)
+            Functions& functions, Intrinsics& intrinsics, Types& types,
+            Scalars& scalars, Locations& locations, loom_builder_t& builder)
       : unit_(unit),
         diagnostics_(diagnostics),
         functions_(functions),
         intrinsics_(intrinsics),
-        configs_(configs),
         types_(types),
         scalars_(scalars),
         locations_(locations),
@@ -197,9 +195,11 @@ class CheckBody {
     if (!declaration) {
       fail(statement, "check locals require immutable scalar bindings");
     }
-    configs_.reject_attributes(declaration->attributeList);
+    reject_global_binding_attributes(unit_, diagnostics_,
+                                     declaration->attributeList);
     for (auto* declarator : cxx::ListView{declaration->initDeclaratorList}) {
-      configs_.reject_declarator(declarator->declarator);
+      reject_global_binding_declarator(unit_, diagnostics_,
+                                       declarator->declarator);
       auto* variable =
           cxx::symbol_cast<cxx::VariableSymbol>(declarator->symbol);
       if (!variable || !declarator->initializer || variable->isStatic() ||
@@ -229,8 +229,6 @@ class CheckBody {
   Functions& functions_;
   // Admitted declaration bindings, including equality expectations.
   Intrinsics& intrinsics_;
-  // Namespace-scope config admission shared with ordinary function bodies.
-  Configs& configs_;
   // Source scalar representation admission.
   Types& types_;
   // Shared constant payload encoding with ordinary functions.
@@ -249,11 +247,10 @@ class CheckBody {
 
 void translate_check_body(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
                           Functions& functions, Intrinsics& intrinsics,
-                          Configs& configs, Types& types, Scalars& scalars,
-                          Locations& locations, loom_builder_t& builder,
-                          const FunctionBody& body) {
-  CheckBody(unit, diagnostics, functions, intrinsics, configs, types, scalars,
-            locations, builder)
+                          Types& types, Scalars& scalars, Locations& locations,
+                          loom_builder_t& builder, const FunctionBody& body) {
+  CheckBody(unit, diagnostics, functions, intrinsics, types, scalars, locations,
+            builder)
       .translate(body);
 }
 

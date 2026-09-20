@@ -944,6 +944,22 @@ def scheduled_sum(arrays):
     return "\n".join(scheduled_sum_variant(arrays, f"scheduled_sum_unroll_{unroll}_depth_{depth}") for unroll in (1, 3) for depth in (1, 2))
 
 
+def symbol_exports(arrays):
+    samples = [0, 1, 2, 3, 255, 256, 65535, 65536, 0x7FFFFFFF, 0x80000000, 0xFFFFFFFE, 0xFFFFFFFF]
+    rng = random.Random(83728)
+    samples += [rng.randrange(1 << 32) for _ in range(20)]
+    cases = []
+    for index, value in enumerate(samples):
+        case = Case(arrays, f"symbol_export_{index}", "i32", 1)
+        original = signed_bits(value, 32)
+        case.array("input", [original])
+        case.launch("library.dispatch", "%output, %input", "tensor<1xi32>, tensor<1xi32>")
+        case.array("original", [original])
+        case.lines.append("  check.expect.bitwise actual(%input) expected(%original) : tensor<1xi32>")
+        cases.append(case.finish([signed_bits(value * value + 7, 32)]))
+    return "kernel.decl @library.dispatch() launch(%output: buffer, %input: buffer)\n\n" + "\n".join(cases)
+
+
 KERNEL_GROUPS = {
     "aiter_swiglu_f16": lambda arrays: launch_grid("aiter_swiglu_f16", 3) + swiglu(arrays),
     "assumptions": assumption_kernel,
@@ -960,6 +976,7 @@ KERNEL_GROUPS = {
     "shaped_intrinsics": lambda arrays: register_lookup(arrays) + "\n" + register_lookup(arrays, floating=True) + "\n" + mixed_dot(arrays),
     "short_circuit": short_circuit,
     "structured_continue": lambda arrays: "\n".join(reference(arrays) for reference in (continue_values, continue_scheduled, continue_copy, continue_pointers, continue_vectors)),
+    "symbol_exports": symbol_exports,
     "vector_depth": lambda arrays: vector_depth(arrays) + "\n" + vector_depth_span(arrays),
     "vector_initializers": vector_initializers,
     "vector_values": lambda arrays: vector_control(arrays) + "\n" + vector_masks(arrays),

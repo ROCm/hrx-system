@@ -128,6 +128,25 @@ TEST_F(ImportTest, FunctionsAndRootsOutliveSource) {
   EXPECT_EQ(diagnostic_count_, 0);
 }
 
+TEST_F(ImportTest, ExplicitSymbolNamesOutliveSource) {
+  std::string source =
+      "[[loom::symbol(\"library.helper\")]] static int helper(int x);\n"
+      "static int helper(int x) { return x + 1; }\n"
+      "[[loom::symbol(\"library.entry\")]] int entry(int x) { return "
+      "helper(x); }\n";
+  const iree_string_view_t root = IREE_SV("entry");
+  options_.roots = &root;
+  options_.root_count = 1;
+  IREE_ASSERT_OK(Import(iree_make_string_view(source.data(), source.size())));
+  ASSERT_NE(module_, nullptr);
+  source.assign(source.size(), '?');
+  auto text = Print();
+  EXPECT_NE(text.find("func.def public @library.entry"), std::string::npos);
+  EXPECT_NE(text.find("func.def @library.helper"), std::string::npos);
+  EXPECT_NE(text.find("func.call @library.helper"), std::string::npos);
+  EXPECT_EQ(diagnostic_count_, 0);
+}
+
 TEST_F(ImportTest, HeaderProviderUsesNormalIncludeSearch) {
   const auto overrides =
       std::filesystem::path("/overrides/").make_preferred().string();

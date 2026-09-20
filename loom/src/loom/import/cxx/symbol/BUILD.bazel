@@ -14,11 +14,20 @@ package(
 )
 
 loom_cc_library(
+    name = "names",
+    srcs = ["names.cc"],
+    hdrs = ["names.h"],
+    cxxopts = select(CXX_COMPILER_OPTIONS),
+    deps = ["//loom/src/loom/import/cxx/source"],
+)
+
+loom_cc_library(
     name = "functions",
     srcs = ["functions.cc"],
     hdrs = ["functions.h"],
     cxxopts = select(CXX_COMPILER_OPTIONS),
     deps = [
+        ":names",
         "//loom/src/loom/import/cxx/binding:config",
         "//loom/src/loom/import/cxx/binding:intrinsics",
         "//loom/src/loom/import/cxx/binding:launch",
@@ -54,6 +63,7 @@ loom_cc_test(
 iree_cmake_extra_content(
     """
 foreach(_target IN ITEMS
+    loom_import_cxx_symbol_names.objects
     loom_import_cxx_symbol_functions.objects
     loom_import_cxx_symbol_functions_test
 )

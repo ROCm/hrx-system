@@ -21,12 +21,6 @@ namespace loom::cxx_import {
 bool Configs::declaration(cxx::Symbol* symbol,
                           cxx::List<cxx::AttributeSpecifierAST*>* attributes,
                           cxx::AST* owner) {
-  if (auto* declarator = cxx::ast_cast<cxx::InitDeclaratorAST>(owner)) {
-    reject_declarator(declarator->declarator);
-  } else if (auto* function =
-                 cxx::ast_cast<cxx::FunctionDefinitionAST>(owner)) {
-    reject_declarator(function->declarator);
-  }
   cxx::AttributeAST* selected = nullptr;
   visit_loom_attributes(
       unit_, attributes,
@@ -57,10 +51,10 @@ bool Configs::declaration(cxx::Symbol* symbol,
           ? cxx::ast_cast<cxx::StringLiteralExpressionAST>(arguments->value)
           : nullptr;
   auto name = literal ? literal->literal->stringValue() : std::string_view{};
-  if (name.empty() || name.find('\0') != std::string_view::npos) {
+  if (!is_symbol_name(name)) {
     diagnostics_.reject(
         unit_, selected,
-        "config binding requires one nonempty string key without NUL bytes");
+        "config binding requires one valid Loom symbol string key");
   }
   const auto& traits = unit_.typeTraits();
   auto* source_type = variable->type();
@@ -87,6 +81,7 @@ bool Configs::declaration(cxx::Symbol* symbol,
   }
   auto [named, inserted] = names_.try_emplace(name, bindings_.size());
   if (inserted) {
+    symbol_names_.reserve(name, owner);
     bindings_.push_back({name, types_.unqualified(source_type), type, value,
                          owner, loom_symbol_ref_null()});
   } else {
@@ -113,53 +108,6 @@ bool Configs::declaration(cxx::Symbol* symbol,
   }
   declarations_.insert(variable);
   return true;
-}
-
-void Configs::reject_attributes(
-    cxx::List<cxx::AttributeSpecifierAST*>* attributes) {
-  visit_loom_attributes(
-      unit_, attributes,
-      [&](std::string_view name, cxx::AttributeAST* attribute) {
-        if (name == "config") {
-          diagnostics_.reject(unit_, attribute,
-                              "config bindings require namespace-scope scalar "
-                              "variables with a leading attribute");
-        }
-      });
-}
-
-void Configs::reject_declarator(cxx::DeclaratorAST* declarator) {
-  if (!declarator) {
-    return;
-  }
-  for (auto* pointer : cxx::ListView{declarator->ptrOpList}) {
-    cxx::visit([&](auto* op) { reject_attributes(op->attributeList); },
-               pointer);
-  }
-  if (auto* id =
-          cxx::ast_cast<cxx::IdDeclaratorAST>(declarator->coreDeclarator)) {
-    reject_attributes(id->attributeList);
-  } else if (auto* nested = cxx::ast_cast<cxx::NestedDeclaratorAST>(
-                 declarator->coreDeclarator)) {
-    reject_declarator(nested->declarator);
-  } else if (auto* bitfield = cxx::ast_cast<cxx::BitfieldDeclaratorAST>(
-                 declarator->coreDeclarator)) {
-    reject_attributes(bitfield->attributeList);
-    reject_attributes(bitfield->trailingAttributeList);
-  }
-  for (auto* chunk : cxx::ListView{declarator->declaratorChunkList}) {
-    cxx::visit([&](auto* part) { reject_attributes(part->attributeList); },
-               chunk);
-    auto* function = cxx::ast_cast<cxx::FunctionDeclaratorChunkAST>(chunk);
-    if (!function || !function->parameterDeclarationClause) {
-      continue;
-    }
-    for (auto* parameter : cxx::ListView{
-             function->parameterDeclarationClause->parameterDeclarationList}) {
-      reject_attributes(parameter->attributeList);
-      reject_declarator(parameter->declarator);
-    }
-  }
 }
 
 void Configs::build(loom_builder_t* builder) {
@@ -192,14 +140,6 @@ void Configs::build(loom_builder_t* builder) {
                                    nullptr, 0, nullptr, 0,
                                    locations_.get(binding.owner), &op));
     }
-  }
-}
-
-void Configs::reject_symbol_conflict(std::string_view name) {
-  if (auto found = names_.find(name); found != names_.end()) {
-    diagnostics_.reject(unit_, bindings_[found->second].owner,
-                        "symbol name conflicts with an explicit config key: " +
-                            std::string(name));
   }
 }
 

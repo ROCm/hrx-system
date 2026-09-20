@@ -17,9 +17,8 @@ namespace loom::cxx_import {
 // All collaborators and source AST remain live until translation returns.
 void translate_check_body(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
                           Functions& functions, Intrinsics& intrinsics,
-                          Configs& configs, Types& types, Scalars& scalars,
-                          Locations& locations, loom_builder_t& builder,
-                          const FunctionBody& body);
+                          Types& types, Scalars& scalars, Locations& locations,
+                          loom_builder_t& builder, const FunctionBody& body);
 
 }  // namespace loom::cxx_import
 

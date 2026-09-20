@@ -1,21 +1,21 @@
 // RUN: verify
-// ERROR@+1: LOWERING/059 "one nonempty string key"
+// ERROR@+1: LOWERING/059 "one valid Loom symbol string key"
 [[loom::config]] extern const unsigned value;
 
 // ====
-// ERROR@+1: LOWERING/059 "one nonempty string key"
+// ERROR@+1: LOWERING/059 "one valid Loom symbol string key"
 [[loom::config(4)]] extern const unsigned value;
 
 // ====
-// ERROR@+1: LOWERING/059 "one nonempty string key"
+// ERROR@+1: LOWERING/059 "one valid Loom symbol string key"
 [[loom::config("")]] extern const unsigned value;
 
 // ====
-// ERROR@+1: LOWERING/059 "one nonempty string key"
+// ERROR@+1: LOWERING/059 "one valid Loom symbol string key"
 [[loom::config("first", "second")]] extern const unsigned value;
 
 // ====
-// ERROR@+1: LOWERING/059 "one nonempty string key"
+// ERROR@+1: LOWERING/059 "one valid Loom symbol string key"
 [[loom::config("bad\0key")]] extern const unsigned value;
 
 // ====
@@ -105,13 +105,13 @@ template<unsigned N>
 const unsigned* address() { return &value; }
 
 // ====
-// ERROR@+1: LOWERING/059 "symbol name conflicts with an explicit config key"
 [[loom::config("entry")]] extern const unsigned value;
+// ERROR@+1: LOWERING/059 "Loom symbol name is already reserved: entry"
 unsigned entry() { return value; }
 
 // ====
-// ERROR@+1: LOWERING/059 "symbol name conflicts with an explicit config key"
 [[loom::config("entry.workgroup_size.x")]] extern const unsigned value;
+// ERROR@+1: LOWERING/059 "Loom symbol name is already reserved: entry.workgroup_size.x"
 [[loom::kernel]] void entry() {}
 
 // ====
@@ -155,3 +155,17 @@ unsigned entry() {
   if constexpr (value == 5) { return 1; }
   return 0;
 }
+
+// ====
+// ERROR@+1: LOWERING/059 "one valid Loom symbol string key"
+[[loom::config("not a symbol")]] extern const unsigned value;
+
+// ====
+struct Value {
+  // ERROR@+1: LOWERING/059 "namespace-scope scalar variables"
+  [[loom::config("value")]] static unsigned value() { return 0; }
+};
+
+// ====
+// ERROR@+1: LOWERING/059 "with a leading attribute"
+using Word = unsigned [[loom::config("word")]];

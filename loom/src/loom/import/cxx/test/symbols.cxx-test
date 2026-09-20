@@ -1,0 +1,146 @@
+// RUN: with-checks roundtrip
+// Namespace boundaries remain distinct from underscores in source identifiers.
+namespace math { unsigned twice(unsigned x) { return x * 2; } }
+unsigned math__twice(unsigned x) { return math::twice(x); }
+// ----
+// CHECK: func.def public @math.twice*
+// CHECK: func.def public @math__twice*
+// CHECK: *func.call @math.twice*
+
+// ====
+// A declaration's exact symbol survives its unannotated definition.
+[[loom::symbol("arithmetic.square")]] unsigned square(unsigned);
+unsigned square(unsigned x) { return x * x; }
+unsigned entry(unsigned x) { return square(x); }
+// ----
+// CHECK: func.def public @arithmetic.square*
+// CHECK: *func.call @arithmetic.square*
+// CHECK-NOT: *@square(*
+
+// ====
+// Later canonical redeclarations contribute the same exact binding.
+unsigned square(unsigned x) { return x * x; }
+[[loom::symbol("arithmetic.square")]] unsigned square(unsigned);
+[[using loom: symbol("arithmetic.square")]] unsigned square(unsigned);
+unsigned entry(unsigned x) { return square(x); }
+// ----
+// CHECK: func.def public @arithmetic.square*
+// CHECK: *func.call @arithmetic.square*
+
+// ====
+// Public overloads explicitly choose stable names, independently of types.
+[[loom::symbol("arithmetic.identity.i32")]] int identity(int x) { return x; }
+[[loom::symbol("arithmetic.identity.f32")]] float identity(float x) { return x; }
+int entry(int x) { return identity(x); }
+// ----
+// CHECK: func.def public @arithmetic.identity.i32*
+// CHECK: func.def public @arithmetic.identity.f32*
+// CHECK: *func.call @arithmetic.identity.i32*
+
+// ====
+// Source roots and calls keep their C++ identities. A symbol does not retain
+// an unused helper or export a reachable private helper.
+// INPUT: cxx root=api::entry
+namespace api {
+[[loom::symbol("library.entry")]] unsigned entry(unsigned);
+[[loom::symbol("library.unused")]] unsigned unused(unsigned x) { return x; }
+[[loom::symbol("library.helper")]] unsigned helper(unsigned x) { return x + 1; }
+unsigned entry(unsigned x) { return helper(x); }
+}
+// ----
+// CHECK: func.def public @library.entry*
+// CHECK: *func.call @library.helper*
+// CHECK: func.def @library.helper*
+// CHECK-NOT: *@library.unused*
+// CHECK-NOT: *public @library.helper*
+
+// ====
+// Exact names are reserved before private helpers are discovered. Generated
+// suffixes skip occupied names too.
+// INPUT: cxx root=entry
+static unsigned helper(unsigned x) { return x + 1; }
+[[loom::symbol("helper")]] static unsigned second(unsigned x) { return x + 2; }
+[[loom::symbol("helper_1")]] static unsigned third(unsigned x) { return x + 3; }
+unsigned entry(unsigned x) { return helper(x) + second(x) + third(x); }
+// ----
+// CHECK: *func.call @helper_2*
+// CHECK: *func.call @helper(*
+// CHECK: *func.call @helper_1*
+// CHECK: func.def @helper_2*
+// CHECK: func.def @helper(*
+// CHECK: func.def @helper_1*
+
+// ====
+// Semantic namespaces determine defaults; namespace aliases do not rename them.
+namespace api { inline namespace v1 {
+unsigned identity(unsigned x) { return x; }
+} }
+namespace alias = api;
+unsigned entry(unsigned x) { return alias::identity(x); }
+// ----
+// CHECK: func.def public @api.v1.identity*
+// CHECK: *func.call @api.v1.identity*
+
+// ====
+// C linkage retains its unqualified name even inside a C++ namespace.
+namespace api { extern "C" unsigned identity(unsigned x) { return x; } }
+unsigned entry(unsigned x) { return api::identity(x); }
+// ----
+// CHECK: func.def public @identity*
+// CHECK: *func.call @identity*
+// CHECK-NOT: *@api.identity*
+
+// ====
+// Concrete template specializations can export an explicit symbol.
+template<class T> T identity(T value) { return value; }
+template<> [[loom::symbol("arithmetic.identity.u32")]]
+unsigned identity<unsigned>(unsigned value) { return value; }
+unsigned entry(unsigned x) { return identity(x); }
+// ----
+// CHECK: func.def public @arithmetic.identity.u32*
+// CHECK: *func.call @arithmetic.identity.u32*
+
+// ====
+// Operators can choose ordinary library names without encoding their C++ syntax.
+enum class Bits : unsigned { Zero = 0 };
+[[loom::symbol("bits.union")]] Bits operator|(Bits a, Bits b) {
+  return (Bits)((unsigned)a | (unsigned)b);
+}
+// ----
+// CHECK: func.def public @bits.union*
+
+// ====
+// Generated launch configuration keys use the actual kernel symbol.
+[[loom::kernel, loom::symbol("library.dispatch")]] void entry() {}
+// ----
+// CHECK: kernel.def @library.dispatch*
+// CHECK: *config.get @library.dispatch.workgroup_size.x*
+// CHECK: config.decl @library.dispatch.workgroup_count.x*
+// CHECK: config.decl @library.dispatch.workgroup_size.x*
+// CHECK-NOT: *@entry*
+
+// ====
+// Check cases and their benchmark references obey the same naming contract.
+[[loom::check_case, loom::symbol("checks.case")]] void case_body() {}
+[[loom::check_benchmark(case_body), loom::symbol("checks.benchmark")]]
+void benchmark();
+// ----
+// CHECK: check.case public @checks.case*
+// CHECK: check.benchmark<@checks.case> @checks.benchmark
+
+// ====
+// Every printable symbol character is preserved literally.
+[[loom::symbol("$library.1-identity")]] unsigned identity(unsigned x) { return x; }
+// ----
+// CHECK: func.def public @$library.1-identity*
+
+// ====
+// Public benchmark names take precedence over generated private helper names.
+#include <loomcxx/check.h>
+namespace sample { static unsigned measure(unsigned x) { return x; } }
+LOOM_CHECK_CASE(correct) { loom::check::expect_equal(sample::measure(7u), 7u); }
+LOOM_CHECK_BENCHMARK(sample__measure, correct);
+// ----
+// CHECK: *func.call @sample__measure_1*
+// CHECK: func.def @sample__measure_1*
+// CHECK: check.benchmark<@correct> @sample__measure

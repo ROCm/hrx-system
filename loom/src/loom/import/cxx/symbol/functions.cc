@@ -8,9 +8,11 @@
 
 #include <cxx/ast.h>
 #include <cxx/attributes.h>
+#include <cxx/literals.h>
 #include <cxx/names.h>
 #include <cxx/symbols.h>
 #include <cxx/types.h>
+#include <cxx/views/symbol_chain.h>
 
 #include <cctype>
 
@@ -88,6 +90,14 @@ void Functions::select(std::span<const iree_string_view_t> roots) {
       }
     }
   }
+  // A case can only be selected as a root, never reached through a call.
+  // Reserve its public benchmark names before discovering private helpers.
+  for (const auto& benchmark : benchmarks_) {
+    if (callees_.contains(benchmark.case_function->canonical())) {
+      exported_.insert(benchmark.function);
+      create_symbol(benchmark.function, benchmark.source);
+    }
+  }
 }
 
 void Functions::collect(cxx::List<cxx::DeclarationAST*>* declarations,
@@ -122,10 +132,16 @@ void Functions::collect(cxx::DeclarationAST* declaration,
     collect(linkage->declarationList, scope, definitions);
   } else if (auto* pattern =
                  cxx::ast_cast<cxx::TemplateDeclarationAST>(declaration)) {
-    collect(pattern->declaration, DeclarationScope::Nested, definitions);
+    collect(pattern->declaration,
+            pattern->templateParameterList ? DeclarationScope::Nested : scope,
+            definitions);
   } else if (auto* alias =
                  cxx::ast_cast<cxx::AliasDeclarationAST>(declaration)) {
     admit_declaration(nullptr, alias->attributeList, alias, scope);
+    reject_global_binding_attributes(unit_, diagnostics_,
+                                     alias->typeId->attributeList);
+    reject_global_binding_declarator(unit_, diagnostics_,
+                                     alias->typeId->declarator);
   } else if (auto* attribute =
                  cxx::ast_cast<cxx::AttributeDeclarationAST>(declaration)) {
     admit_declaration(nullptr, attribute->attributeList, attribute, scope);
@@ -181,7 +197,15 @@ void Functions::collect(cxx::DeclarationAST* declaration,
 bool Functions::admit_declaration(
     cxx::Symbol* symbol, cxx::List<cxx::AttributeSpecifierAST*>* attributes,
     cxx::AST* owner, DeclarationScope scope) {
+  if (auto* declarator = cxx::ast_cast<cxx::InitDeclaratorAST>(owner)) {
+    reject_global_binding_declarator(unit_, diagnostics_,
+                                     declarator->declarator);
+  } else if (auto* function =
+                 cxx::ast_cast<cxx::FunctionDefinitionAST>(owner)) {
+    reject_global_binding_declarator(unit_, diagnostics_, function->declarator);
+  }
   bool is_config = configs_.declaration(symbol, attributes, owner);
+  admit_symbol(symbol, attributes);
   auto* function = cxx::symbol_cast<cxx::FunctionSymbol>(symbol);
   auto require_namespace_function = [&] {
     if (!function || scope != DeclarationScope::Namespace ||
@@ -262,6 +286,55 @@ bool Functions::admit_declaration(
   return is_config;
 }
 
+void Functions::admit_symbol(
+    cxx::Symbol* symbol, cxx::List<cxx::AttributeSpecifierAST*>* attributes) {
+  bool found = false;
+  visit_loom_attributes(
+      unit_, attributes,
+      [&](std::string_view name, cxx::AttributeAST* attribute) {
+        if (name != "symbol") {
+          return;
+        }
+        if (found) {
+          diagnostics_.reject(unit_, attribute,
+                              "one symbol binding is allowed per declaration");
+        }
+        found = true;
+        auto* function = cxx::symbol_cast<cxx::FunctionSymbol>(symbol);
+        if (!function || function->isTemplatePattern() ||
+            !cxx::symbol_cast<cxx::NamespaceSymbol>(function->parent())) {
+          diagnostics_.reject(
+              unit_, attribute,
+              "symbol bindings require concrete namespace-scope functions");
+        }
+        if (annotated(function, "op") || annotated(function, "assume")) {
+          diagnostics_.reject(unit_, attribute,
+                              "intrinsic bindings do not define Loom symbols");
+        }
+        auto* clause = attribute->attributeArgumentClause;
+        auto* arguments = clause ? clause->expressionList : nullptr;
+        auto* literal = arguments && !arguments->next
+                            ? cxx::ast_cast<cxx::StringLiteralExpressionAST>(
+                                  arguments->value)
+                            : nullptr;
+        auto spelling =
+            literal ? literal->literal->stringValue() : std::string_view{};
+        if (!is_symbol_name(spelling)) {
+          diagnostics_.reject(unit_, attribute,
+                              "symbol binding requires one valid Loom symbol "
+                              "string without the @ prefix");
+        }
+        auto [binding, inserted] =
+            explicit_names_.try_emplace(function->canonical(), spelling);
+        if (inserted) {
+          names_.reserve(spelling, attribute);
+        } else if (binding->second != spelling) {
+          diagnostics_.reject(unit_, attribute,
+                              "conflicting symbol names across redeclarations");
+        }
+      });
+}
+
 cxx::FunctionSymbol* Functions::definition(
     cxx::FunctionSymbol* function) const {
   auto found = definitions_.find(function->canonical());
@@ -282,7 +355,7 @@ void Functions::build_benchmarks(Locations& locations,
     if (target == callees_.end()) {
       continue;
     }
-    auto symbol = create_symbol(benchmark.function);
+    auto symbol = callees_.at(benchmark.function->canonical());
     loom_op_t* op;
     check(loom_check_benchmark_build(
         builder, LOOM_CHECK_BENCHMARK_BUILD_FLAG_HAS_BENCHMARK, target->second,
@@ -314,26 +387,57 @@ loom_symbol_ref_t Functions::declare(cxx::FunctionSymbol* function) {
   if (!function->templateArguments().empty() && function->declaration()) {
     launches_.declaration(function, function->declaration()->attributeList);
   }
-  auto callee = create_symbol(function);
-  pending_.push_back(definition(function));
+  auto* body = definition(function);
+  auto callee = create_symbol(function, body->declaration());
+  pending_.push_back(body);
   return callee;
 }
 
-loom_symbol_ref_t Functions::create_symbol(cxx::FunctionSymbol* function) {
-  std::string spelling = qualified_name(function);
-  for (const auto& argument : function->templateArguments()) {
-    spelling += "_" + cxx::to_string(argument);
-  }
-  for (char& ch : spelling) {
-    if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '_') {
-      ch = '_';
+loom_symbol_ref_t Functions::create_symbol(cxx::FunctionSymbol* function,
+                                           cxx::AST* source) {
+  std::string spelling;
+  if (auto found = explicit_names_.find(function->canonical());
+      found != explicit_names_.end()) {
+    spelling = found->second;
+  } else if (exported_.contains(function)) {
+    bool overloaded = false;
+    for (auto* candidate : function->parent()->find(function->name())) {
+      if (auto* overloads =
+              cxx::symbol_cast<cxx::OverloadSetSymbol>(candidate)) {
+        overloaded = overloads->declaredFunctions().size() > 1;
+      }
     }
+    if (overloaded || !function->templateArguments().empty() ||
+        !cxx::name_cast<cxx::Identifier>(function->name())) {
+      diagnostics_.reject(unit_, source,
+                          "exported overloads, templates and operators require "
+                          "an explicit loom::symbol name");
+    }
+    spelling = function->hasCLinkage() ? cxx::to_string(function->name())
+                                       : qualified_name(function);
+    for (size_t position = 0; position < spelling.size(); ++position) {
+      if (spelling[position] == ':') {
+        spelling.replace(position, 2, ".");
+      }
+    }
+    if (!is_symbol_name(spelling)) {
+      diagnostics_.reject(unit_, source,
+                          "exported source name requires an explicit "
+                          "loom::symbol spelling");
+    }
+    names_.reserve(spelling, source);
+  } else {
+    spelling = qualified_name(function);
+    for (const auto& argument : function->templateArguments()) {
+      spelling += "_" + cxx::to_string(argument);
+    }
+    for (char& ch : spelling) {
+      if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '_') {
+        ch = '_';
+      }
+    }
+    spelling = names_.unique(std::move(spelling));
   }
-  auto ordinal = symbol_names_[spelling]++;
-  if (ordinal) {
-    spelling += "_" + std::to_string(ordinal);
-  }
-  configs_.reject_symbol_conflict(spelling);
   loom_string_id_t name;
   check(loom_module_intern_string(module_, view(spelling), &name));
   loom_symbol_id_t id;
@@ -388,7 +492,7 @@ FunctionBody Functions::define(cxx::FunctionSymbol* symbol, Types& types,
     auto saved =
         loom_builder_enter_region(builder, op, loom_kernel_def_config(op));
     auto spelling = module_->strings.entries[name_id];
-    launches_.build(symbol, {spelling.data, spelling.size}, configs_, builder,
+    launches_.build(symbol, {spelling.data, spelling.size}, names_, builder,
                     locations.get(definition));
     loom_builder_restore(builder, saved);
   } else {

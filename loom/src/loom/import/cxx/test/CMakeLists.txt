@@ -48,6 +48,8 @@ loom_check_test_suite(
     "shaped_intrinsics.cxx-test"
     "shaped_intrinsics_invalid.cxx-test"
     "standards.cxx-test"
+    "symbols.cxx-test"
+    "symbols_invalid.cxx-test"
     "vectors.cxx-test"
     "vectors_invalid.cxx-test"
   DATA
@@ -731,6 +733,25 @@ loom_generated_file_family(
   ARGS
     "kernel"
     "--group=structured_continue"
+  TESTONLY
+)
+endif()
+
+if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_generated_file_family(
+  NAME
+    symbol_exports_checks_gen
+  GENERATOR
+    loom::py::loom::gen::test::cxx_kernel_cases
+  OUTPUTS
+    "symbol_exports_checks.loom"
+    "symbol_exports_arrays"
+  OUTPUT_FLAGS
+    "--output"
+    "--arrays"
+  ARGS
+    "kernel"
+    "--group=symbol_exports"
   TESTONLY
 )
 endif()
@@ -1831,6 +1852,77 @@ loom_test(
   DATA
     "${CMAKE_CURRENT_BINARY_DIR}/structured_continue_arrays"
     "${CMAKE_CURRENT_BINARY_DIR}/structured_continue_checks.loom"
+  INPUTOPTS
+
+  ARGS
+    "--sanitizer=access"
+    "--sanitizer-reporting=report-only"
+  RUNNER_ARGS
+    "--device=amdgpu"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "loom-amdgpu-tests"
+  SANITIZER_SUPPRESSIONS
+    lsan
+    rocm
+)
+endif()
+
+if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_test(
+  NAME
+    symbol_exports_source_test
+  SRCS
+    "symbol_exports.cpp"
+    "${CMAKE_CURRENT_BINARY_DIR}/symbol_exports_checks.loom"
+  DATA
+    "${CMAKE_CURRENT_BINARY_DIR}/symbol_exports_arrays"
+    "${CMAKE_CURRENT_BINARY_DIR}/symbol_exports_checks.loom"
+  INPUTOPTS
+
+  ARGS
+
+  RUNNER_ARGS
+    "--device=amdgpu"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "loom-amdgpu-tests"
+  SANITIZER_SUPPRESSIONS
+    lsan
+    rocm
+)
+endif()
+
+if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_test(
+  NAME
+    symbol_exports_access_test
+  SRCS
+    "symbol_exports.cpp"
+    "${CMAKE_CURRENT_BINARY_DIR}/symbol_exports_checks.loom"
+  DATA
+    "${CMAKE_CURRENT_BINARY_DIR}/symbol_exports_arrays"
+    "${CMAKE_CURRENT_BINARY_DIR}/symbol_exports_checks.loom"
   INPUTOPTS
 
   ARGS

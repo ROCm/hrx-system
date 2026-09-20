@@ -18,6 +18,7 @@ exports_files([
     "include_continuation.patch",
     "include_paths.patch",
     "macro_operator_locations.patch",
+    "member_definition_attributes.patch",
     "packed_bitfields.patch",
     "packed_enums.patch",
     "packed_records.patch",

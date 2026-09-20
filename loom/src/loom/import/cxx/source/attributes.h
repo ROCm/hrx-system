@@ -17,6 +17,18 @@
 
 namespace loom::cxx_import {
 
+class Diagnostics;
+
+// Rejects global bindings in local, parameter or type attribute positions.
+void reject_global_binding_attributes(
+    cxx::TranslationUnit& unit, Diagnostics& diagnostics,
+    cxx::List<cxx::AttributeSpecifierAST*>* attributes);
+
+// Visits declarator/type and parameter positions once for global bindings.
+void reject_global_binding_declarator(cxx::TranslationUnit& unit,
+                                      Diagnostics& diagnostics,
+                                      cxx::DeclaratorAST* declarator);
+
 // Queries a semantic Loom annotation attached to a resolved source symbol.
 inline bool annotated(cxx::Symbol* symbol, std::string_view spelling) {
   if (!symbol || !symbol->attributes()) {

@@ -55,7 +55,7 @@ static_assert(0x8000000000000000ULL >> 63 == 1ULL);
 // ====
 // RUN: verify
 // Template lookahead retains overloads, casts, and dependent names.
-constexpr int increment(int value) { return value + 10; }
+static constexpr int increment(int value) { return value + 10; }
 template <class T>
 constexpr T increment(T value) {
   return T(value) + T{1};

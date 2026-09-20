@@ -108,6 +108,55 @@ cover ownership, source providers, and failure propagation. The
 [execution corpus](test/README.md) uses ordinary `loom_test` targets with
 independent numerical oracles.
 
+## Callable symbol names
+
+Public functions use readable Loom names: `ticks32` becomes `@ticks32`, and
+`device::ticks32` becomes `@device.ticks32`. C-linkage functions keep their
+unqualified C name. Private helpers have module-local names that can be
+disambiguated as functions become reachable.
+
+The leading `loom::symbol` attribute chooses an exact name independently of
+the C++ spelling:
+
+```cpp
+namespace arithmetic {
+[[loom::symbol("math.square.u32")]] unsigned square(unsigned);
+unsigned square(unsigned value) { return value * value; }
+
+[[loom::symbol("math.square.f32")]] float square(float value) {
+  return value * value;
+}
+}
+
+[[loom::kernel, loom::symbol("kernels.square"),
+  loom::workgroup_size(1, 1, 1)]]
+void square_kernel(unsigned* output, const unsigned* input) {
+  output[0u] = arithmetic::square(input[0u]);
+}
+```
+
+This exports `@math.square.u32`, `@math.square.f32` and `@kernels.square`.
+Authored Loom can declare and call the typed exported functions and resolve
+them against the imported library. The linker still checks argument and result
+types. Generated kernel configuration keys use the chosen name, such as
+`@kernels.square.workgroup_count.x`.
+
+The same attribute applies to declarations, definitions, kernels, check cases
+and benchmarks. One annotation on any canonical redeclaration supplies the
+name; repeated identical redeclarations agree, and conflicting names diagnose.
+Source calls and `--root` selection still use C++ names. The attribute changes
+neither visibility nor reachability: a selected root remains public, a reached
+helper remains private, and an unused helper is omitted. Ordinary called
+functions still require C++ definitions during import.
+
+Public overloads, operator functions and concrete template specializations
+require explicit names. An attribute on a primary template, member, local or
+parameter is rejected. Intrinsic bindings (`loom::op` and `loom::assume`) have
+no function symbol to rename. Names contain ASCII letters, digits, `_`, `$`, `.`
+or `-`, with no leading `@`. Functions and configuration values share one Loom
+namespace; conflicting exact names diagnose instead of receiving an automatic
+suffix.
+
 ## Named configuration values
 
 An attributed `extern const` scalar declares a Loom specialization input:
@@ -165,8 +214,8 @@ unresolved module again.
 
 Bindings require a leading `[[loom::config("key")]]` attribute on every
 declaration and definition, including redeclarations. Keys are explicit,
-nonempty strings. Different source names with the same key share one binding;
-their source types and any exact definitions must agree. Boolean, integer,
+nonempty Loom symbol spellings without `@`. Different source names with the same
+key share one binding; their source types and any exact definitions must agree. Boolean, integer,
 floating-point and enum scalars retain their source representations. Mutable,
 volatile, thread-local, local, member, pointer and aggregate bindings produce
 source diagnostics. Configs are values without addressable storage.

@@ -96,56 +96,56 @@ config.decl @bounded.workgroup_size.z : %10: index where [range(%10, 1, 1)]
 // RUN: roundtrip
 // Overloaded kernels have distinct configuration symbols.
 namespace kernels {
-[[loom::kernel]] void entry(float* output) {}
-[[loom::kernel]] void entry(int* output) {}
+[[loom::kernel, loom::symbol("kernels.entry.f32")]] void entry(float* output) {}
+[[loom::kernel, loom::symbol("kernels.entry.i32")]] void entry(int* output) {}
 }  // namespace kernels
 // ----
-kernel.def @kernels__entry() {
-  %workgroup_count_x = config.get @kernels__entry.workgroup_count.x : index
-  %workgroup_count_y = config.get @kernels__entry.workgroup_count.y : index
-  %workgroup_count_z = config.get @kernels__entry.workgroup_count.z : index
-  %workgroup_size_x = config.get @kernels__entry.workgroup_size.x : index
-  %workgroup_size_y = config.get @kernels__entry.workgroup_size.y : index
-  %workgroup_size_z = config.get @kernels__entry.workgroup_size.z : index
+kernel.def @kernels.entry.f32() {
+  %workgroup_count_x = config.get @kernels.entry.f32.workgroup_count.x : index
+  %workgroup_count_y = config.get @kernels.entry.f32.workgroup_count.y : index
+  %workgroup_count_z = config.get @kernels.entry.f32.workgroup_count.z : index
+  %workgroup_size_x = config.get @kernels.entry.f32.workgroup_size.x : index
+  %workgroup_size_y = config.get @kernels.entry.f32.workgroup_size.y : index
+  %workgroup_size_z = config.get @kernels.entry.f32.workgroup_size.z : index
   kernel.launch.config workgroups(%workgroup_count_x, %workgroup_count_y, %workgroup_count_z) workgroup_size(%workgroup_size_x, %workgroup_size_y, %workgroup_size_z) : index
 } launch(%output: buffer) {
   %output_byte_offset = index.constant 0 : offset
   kernel.return
 }
 
-config.decl @kernels__entry.workgroup_count.x : index
+config.decl @kernels.entry.f32.workgroup_count.x : index
 
-config.decl @kernels__entry.workgroup_count.y : index
+config.decl @kernels.entry.f32.workgroup_count.y : index
 
-config.decl @kernels__entry.workgroup_count.z : index
+config.decl @kernels.entry.f32.workgroup_count.z : index
 
-config.decl @kernels__entry.workgroup_size.x : index
+config.decl @kernels.entry.f32.workgroup_size.x : index
 
-config.decl @kernels__entry.workgroup_size.y : index
+config.decl @kernels.entry.f32.workgroup_size.y : index
 
-config.decl @kernels__entry.workgroup_size.z : index
+config.decl @kernels.entry.f32.workgroup_size.z : index
 
-kernel.def @kernels__entry_1() {
-  %workgroup_count_x = config.get @kernels__entry_1.workgroup_count.x : index
-  %workgroup_count_y = config.get @kernels__entry_1.workgroup_count.y : index
-  %workgroup_count_z = config.get @kernels__entry_1.workgroup_count.z : index
-  %workgroup_size_x = config.get @kernels__entry_1.workgroup_size.x : index
-  %workgroup_size_y = config.get @kernels__entry_1.workgroup_size.y : index
-  %workgroup_size_z = config.get @kernels__entry_1.workgroup_size.z : index
+kernel.def @kernels.entry.i32() {
+  %workgroup_count_x = config.get @kernels.entry.i32.workgroup_count.x : index
+  %workgroup_count_y = config.get @kernels.entry.i32.workgroup_count.y : index
+  %workgroup_count_z = config.get @kernels.entry.i32.workgroup_count.z : index
+  %workgroup_size_x = config.get @kernels.entry.i32.workgroup_size.x : index
+  %workgroup_size_y = config.get @kernels.entry.i32.workgroup_size.y : index
+  %workgroup_size_z = config.get @kernels.entry.i32.workgroup_size.z : index
   kernel.launch.config workgroups(%workgroup_count_x, %workgroup_count_y, %workgroup_count_z) workgroup_size(%workgroup_size_x, %workgroup_size_y, %workgroup_size_z) : index
 } launch(%output: buffer) {
   %output_byte_offset = index.constant 0 : offset
   kernel.return
 }
 
-config.decl @kernels__entry_1.workgroup_count.x : index
+config.decl @kernels.entry.i32.workgroup_count.x : index
 
-config.decl @kernels__entry_1.workgroup_count.y : index
+config.decl @kernels.entry.i32.workgroup_count.y : index
 
-config.decl @kernels__entry_1.workgroup_count.z : index
+config.decl @kernels.entry.i32.workgroup_count.z : index
 
-config.decl @kernels__entry_1.workgroup_size.x : index
+config.decl @kernels.entry.i32.workgroup_size.x : index
 
-config.decl @kernels__entry_1.workgroup_size.y : index
+config.decl @kernels.entry.i32.workgroup_size.y : index
 
-config.decl @kernels__entry_1.workgroup_size.z : index
+config.decl @kernels.entry.i32.workgroup_size.z : index
