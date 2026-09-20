@@ -15,7 +15,9 @@
 extern "C" {
 #endif
 
-// Plans divergent branch expansion before the source body is emitted.
+// Plans divergent branch expansion before the source body is emitted. Source
+// distribution facts distinguish divergent predicates from uniform predicates
+// whose other uses require native mask storage.
 iree_status_t loom_amdgpu_prepare_branch(
     void* user_data, loom_low_lower_context_t* context,
     const loom_op_t* source_terminator, iree_arena_allocator_t* analysis_arena);
@@ -30,6 +32,7 @@ iree_status_t loom_amdgpu_materialize_branch_arg(
     loom_value_id_t* out_low_value_id);
 
 // Emits a conditional branch, using EXEC narrowing for divergent SGPR masks.
+// Uniform masks test the active lanes without modifying EXEC.
 iree_status_t loom_amdgpu_emit_cond_branch(void* user_data,
                                            loom_low_lower_context_t* context,
                                            const loom_op_t* source_op,

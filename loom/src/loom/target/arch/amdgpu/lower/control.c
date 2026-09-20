@@ -105,6 +105,13 @@ static bool loom_amdgpu_low_type_is_native_i1_mask(
   return is_sgpr && loom_low_register_type_unit_count(low_type) == 2;
 }
 
+static bool loom_amdgpu_branch_condition_is_uniform(
+    loom_low_lower_context_t* context, const loom_op_t* source_op) {
+  return loom_value_facts_is_subgroup_uniform(
+      loom_value_fact_table_lookup(loom_low_lower_context_fact_table(context),
+                                   loom_cfg_cond_br_condition(source_op)));
+}
+
 static bool loom_amdgpu_single_predecessor_cfg_condition(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t* out_condition, bool* out_assumed_truth) {
@@ -967,7 +974,8 @@ iree_status_t loom_amdgpu_prepare_branch(
       &condition_type));
 
   if (!loom_amdgpu_condition_is_reg_class(context, condition_type,
-                                          LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2)) {
+                                          LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2) ||
+      loom_amdgpu_branch_condition_is_uniform(context, source_terminator)) {
     return iree_ok_status();
   }
   return loom_amdgpu_prepare_exec_mask_branch(context, source_terminator);
@@ -1673,6 +1681,34 @@ static iree_status_t loom_amdgpu_emit_exec_mask_cond_branch(
                                             low_true_dest, low_false_dest);
 }
 
+// A uniform predicate may still need a native mask for vector selects. Its
+// storage does not make the branch divergent. Ignore inactive lanes without
+// changing EXEC or introducing masked merges for the branch payloads.
+static iree_status_t loom_amdgpu_emit_uniform_mask_cond_branch(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t low_condition, loom_type_t condition_type,
+    loom_block_t* low_true_dest, loom_block_t* low_false_dest) {
+  loom_op_t* exec_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B64_EXEC_READ, NULL,
+      0, loom_named_attr_slice_empty(), &condition_type, 1, &exec_op));
+  loom_type_t scc_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_amdgpu_make_scc_type(context, &scc_type));
+  const loom_type_t result_types[] = {condition_type, scc_type};
+  const loom_value_id_t operands[] = {
+      low_condition,
+      loom_op_const_results(exec_op)[0],
+  };
+  loom_op_t* test_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_AND_B64_SCC, operands,
+      IREE_ARRAYSIZE(operands), loom_named_attr_slice_empty(), result_types,
+      IREE_ARRAYSIZE(result_types), &test_op));
+  return loom_amdgpu_emit_plain_cond_branch(context, source_op,
+                                            loom_op_const_results(test_op)[1],
+                                            low_true_dest, low_false_dest);
+}
+
 iree_status_t loom_amdgpu_emit_cond_branch(void* user_data,
                                            loom_low_lower_context_t* context,
                                            const loom_op_t* source_op,
@@ -1707,6 +1743,11 @@ iree_status_t loom_amdgpu_emit_cond_branch(void* user_data,
       return loom_low_br_build(loom_low_lower_context_builder(context),
                                low_dest, NULL, 0, source_op->location,
                                &low_br_op);
+    }
+    if (loom_amdgpu_branch_condition_is_uniform(context, source_op)) {
+      return loom_amdgpu_emit_uniform_mask_cond_branch(
+          context, source_op, low_condition, condition_type, low_true_dest,
+          low_false_dest);
     }
     return loom_amdgpu_emit_exec_mask_cond_branch(
         context, source_op, low_condition, low_true_dest, low_false_dest,

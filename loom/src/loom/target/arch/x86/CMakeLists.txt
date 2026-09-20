@@ -148,6 +148,7 @@ loom_check_test_suite(
     "test/source_low/source_low_scalar_memory.loom-test"
     "test/source_low/source_low_schedule_scopes.loom-test"
     "test/source_low/source_low_v4.loom-test"
+    "test/source_low/uniform_predicate_control.loom-test"
     "test/source_low/vector_large_insert.loom-test"
     "test/source_low/view_transport.loom-test"
   DATA
@@ -168,6 +169,7 @@ loom_check_test_suite(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_unsigned_remainder.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/packed_dot_wide.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/shared_conditional_values.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/uniform_predicate_control.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/vector_large_insert.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/vector_v16.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/vector_v4.loom-test"

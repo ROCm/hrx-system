@@ -1632,15 +1632,14 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
   %nonnegative = v_cmp_ge_i32_src1_inline %column {rhs = 0}
   %below = v_cmp_lt_i32_src1_inline %column {rhs = 64}
   %guard = s_and_b64 %nonnegative, %below
-  %23, %24 = s_and_saveexec_b64 %guard
-  low.cond_br %24, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+  %23 = s_mov_b64_exec_read
+  %24, %25 = s_and_b64_scc %guard, %23
+  low.cond_br %25, ^_bb1, ^_bb2 : reg<amdgpu.scc>
 ^_bb1:
-  %25 = v_mov_b32 0
-  %26 = v_lshlrev_b32_src0_inline %column, 2
-  global_store_b32_saddr %26, %25, %output_view
+  %27 = v_lshlrev_b32_src0_inline %column, 2
+  global_store_b32_saddr %27, %17, %output_view
   low.br ^_bb2
 ^_bb2:
-  s_mov_b64_exec %23
   return
 }
 
@@ -1692,16 +1691,14 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
   %45 = s_and_b64 %33, %43
   %below = s_or_b64 %42, %45
   %guard = s_and_b64 %nonnegative, %below
-  %49, %50 = s_and_saveexec_b64 %guard
-  low.cond_br %50, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+  %49 = s_mov_b64_exec_read
+  %50, %51 = s_and_b64_scc %guard, %49
+  low.cond_br %51, ^_bb1, ^_bb2 : reg<amdgpu.scc>
 ^_bb1:
-  %column = slice %bounded_column_i64[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %52 = v_mov_b32 0
-  %53 = v_lshlrev_b32_src0_inline %column, 2
-  global_store_b32_saddr %53, %52, %output_view
+  %54 = v_lshlrev_b32_src0_inline %25, 2
+  global_store_b32_saddr %54, %17, %output_view
   low.br ^_bb2
 ^_bb2:
-  s_mov_b64_exec %49
   return
 }
 

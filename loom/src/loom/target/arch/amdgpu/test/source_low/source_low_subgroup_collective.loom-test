@@ -3852,55 +3852,40 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %bias_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %flags_view = resource<hal_binding> {index = 3, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
-  %32 = v_lshlrev_b32_src0_inline %tid_i32, 2
-  %value = global_load_b32_saddr %32, %input_view
-  %34 = v_add_f32_dpp16 %value, %value {dpp_ctrl = 177}
-  %35 = v_add_f32_dpp16 %34, %34 {dpp_ctrl = 78}
-  %36 = v_add_f32_dpp16 %35, %35 {dpp_ctrl = 321}
-  %37 = v_add_f32_dpp16 %36, %36 {dpp_ctrl = 320}
-  %38 = v_permlanex16_b32_src12_inline %37, 0, 0
-  %39 = v_add_f32 %37, %38
-  %40 = v_readlane_b32_src1_inline %39, 0
-  %41 = v_add_f32 %40, %39
-  %42 = v_readlane_b32_src1_inline %41, 63
-  %sum = v_mov_b32_copy %42
+  %30 = v_lshlrev_b32_src0_inline %tid_i32, 2
+  %value = global_load_b32_saddr %30, %input_view
+  %32 = v_add_f32_dpp16 %value, %value {dpp_ctrl = 177}
+  %33 = v_add_f32_dpp16 %32, %32 {dpp_ctrl = 78}
+  %34 = v_add_f32_dpp16 %33, %33 {dpp_ctrl = 321}
+  %35 = v_add_f32_dpp16 %34, %34 {dpp_ctrl = 320}
+  %36 = v_permlanex16_b32_src12_inline %35, 0, 0
+  %37 = v_add_f32 %35, %36
+  %38 = v_readlane_b32_src1_inline %37, 0
+  %39 = v_add_f32 %38, %37
+  %40 = v_readlane_b32_src1_inline %39, 63
+  %sum = v_mov_b32_copy %40
   %is_leader = v_cmp_eq_i32_src1_inline %tid_i32 {rhs = 0}
-  %45, %46 = s_and_saveexec_b64 %is_leader
-  low.cond_br %46, ^_bb1, ^_bb5 : reg<amdgpu.scc>
+  %43, %44 = s_and_saveexec_b64 %is_leader
+  low.cond_br %44, ^_bb1, ^_bb5 : reg<amdgpu.scc>
 ^_bb1:
-  %47 = v_mov_b32 0
-  %flag = global_load_b32_saddr %47, %flags_view
+  %45 = v_mov_b32 0
+  %flag = global_load_b32_saddr %45, %flags_view
   %has_bias = v_cmp_ne_i32_src1_inline %flag {rhs = 0}
-  %50, %51 = s_and_saveexec_b64 %has_bias
-  low.cond_br %51, ^_bb2, ^_bb7 : reg<amdgpu.scc>
+  %48 = s_mov_b64_exec_read
+  %49, %50 = s_and_b64_scc %has_bias, %48
+  low.cond_br %50, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
-  %56 = v_mov_b32 0
-  %bias_value = global_load_b32_saddr %56, %bias_view
+  %bias_value = global_load_b32_saddr %45, %bias_view
   %biased = v_add_f32 %sum, %bias_value
-  low.br ^_bb6(%biased: reg<amdgpu.vgpr>)
-^_bb6(%out$25: reg<amdgpu.vgpr>):
-  s_mov_b64_exec %50
-  %54 = s_and_b64 %50, %has_bias
-  %55 = s_xor_b64_exec %54
-  low.cond_br %55, ^_bb3, ^_bb8 : reg<amdgpu.scc>
+  low.br ^_bb4(%biased: reg<amdgpu.vgpr>)
 ^_bb3:
-  s_mov_b64_exec %50
-  %53 = v_cndmask_b32 %sum, %out$25, %has_bias
-  low.br ^_bb4(%53: reg<amdgpu.vgpr>)
-^_bb4(%out$24: reg<amdgpu.vgpr>):
-  %59 = v_mov_b32 0
-  global_store_b32_saddr %59, %out$24, %output_view
+  low.br ^_bb4(%sum: reg<amdgpu.vgpr>)
+^_bb4(%out: reg<amdgpu.vgpr>):
+  global_store_b32_saddr %45, %out, %output_view
   low.br ^_bb5
 ^_bb5:
-  s_mov_b64_exec %45
+  s_mov_b64_exec %43
   return
-^_bb7:
-  s_mov_b64_exec %50
-  %52 = v_mov_b32 0
-  low.br ^_bb6(%52: reg<amdgpu.vgpr>)
-^_bb8:
-  s_mov_b64_exec %50
-  low.br ^_bb4(%out$25: reg<amdgpu.vgpr>)
 }
 
 // ====
@@ -4522,15 +4507,15 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 
   %sum = v_add_u32 %21, %22
   %26 = v_mov_b32 496
   %matches = v_cmp_eq_i32 %sum, %26
-  %28, %29 = s_and_saveexec_b64 %matches
-  low.cond_br %29, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+  %28 = s_mov_b64_exec_read
+  %29, %30 = s_and_b64_scc %matches, %28
+  low.cond_br %30, ^_bb1, ^_bb2 : reg<amdgpu.scc>
 ^_bb1:
-  %30 = v_mov_b32 1
-  %31 = v_mov_b32 0
-  global_store_b32_saddr %31, %30, %output_view
+  %31 = v_mov_b32 1
+  %32 = v_mov_b32 0
+  global_store_b32_saddr %32, %31, %output_view
   low.br ^_bb2
 ^_bb2:
-  s_mov_b64_exec %28
   return
 }
 

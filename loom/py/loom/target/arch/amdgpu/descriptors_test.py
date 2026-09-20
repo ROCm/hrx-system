@@ -763,6 +763,25 @@ def test_materialized_exec_value_is_a_semantic_state_read() -> None:
     assert OperandFlag.SCHEDULE_ONLY_STATE not in exec_operand.flags
 
 
+def test_scalar_and_can_preserve_its_nonzero_condition() -> None:
+    for target, builder in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS.items():
+        descriptors = {row.descriptor_key: row for row in builder.overlay_rows()}
+        descriptor = descriptors["amdgpu.s_and_b64.scc"]
+        assert descriptor.instruction_name == "S_AND_B64", target
+        assert all(
+            row.descriptor_operand.unit_count == 2 for row in descriptor.operands
+        ), target
+        condition = descriptor.implicit_operands[0].descriptor_operand
+        assert condition is not None, target
+        assert condition.role is OperandRole.RESULT, target
+        assert OperandFlag.STATE_WRITE in condition.flags, target
+        assert OperandFlag.SCHEDULE_ONLY_STATE not in condition.flags, target
+        assert all(
+            constraint.kind is not ConstraintKind.REMATERIALIZABLE
+            for constraint in descriptor.constraints
+        ), target
+
+
 def test_trans_descriptors_use_descriptor_specific_schedule_classes() -> None:
     overlays = {
         overlay.descriptor_key: overlay

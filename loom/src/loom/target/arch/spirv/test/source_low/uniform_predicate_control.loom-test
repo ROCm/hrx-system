@@ -1,0 +1,98 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/uniform_predicate_control.loom-test
+// RUN: emit source-low output=low control-flow=structured-low
+
+spirv.target<vulkan1_3> @target
+
+// ERROR@+1: TARGET/089 {descriptor_set="spirv.logical.core", function_name="uniform_select_guard", op_name="kernel.def"}
+kernel.def target(@target) @uniform_select_guard() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%mode: i32, %input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %number = index.cast %lane : index to i32
+  %threshold = scalar.constant 0 : i32
+  %negative = scalar.constant -1 : i32
+  %base = index.constant 0 : offset
+  %aligned_input = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %aligned_output = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %in = buffer.view %aligned_input[%base] : buffer -> view<64xi32>
+  %out = buffer.view %aligned_output[%base] : buffer -> view<64xi32>
+  %condition = scalar.cmpi sgt, %mode, %threshold : i32
+  cfg.cond_br %condition, ^read, ^fallback
+^read:
+  %loaded = view.load %in[%lane] : view<64xi32> -> i32
+  cfg.br ^finish(%loaded: i32)
+^fallback:
+  cfg.br ^finish(%negative: i32)
+^finish(%value: i32):
+  %selected = scf.select %condition, %number, %negative : i32
+  %sum = scalar.addi %value, %selected : i32
+  view.store %sum, %out[%lane] : i32, view<64xi32>
+  kernel.return
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+// ERROR@+1: TARGET/089 {descriptor_set="spirv.logical.core", function_name="uniform_float_guard", op_name="kernel.def"}
+kernel.def target(@target) @uniform_float_guard() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%mode: f32, %input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %number = index.cast %lane : index to i32
+  %threshold = scalar.constant 0.0 : f32
+  %negative = scalar.constant -1 : i32
+  %base = index.constant 0 : offset
+  %aligned_input = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %aligned_output = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %in = buffer.view %aligned_input[%base] : buffer -> view<64xi32>
+  %out = buffer.view %aligned_output[%base] : buffer -> view<64xi32>
+  %condition = scalar.cmpf ogt, %mode, %threshold : f32
+  cfg.cond_br %condition, ^read, ^fallback
+^read:
+  %loaded = view.load %in[%lane] : view<64xi32> -> i32
+  cfg.br ^finish(%loaded: i32)
+^fallback:
+  cfg.br ^finish(%negative: i32)
+^finish(%value: i32):
+  %selected = scf.select %condition, %number, %negative : i32
+  %sum = scalar.addi %value, %selected : i32
+  view.store %sum, %out[%lane] : i32, view<64xi32>
+  kernel.return
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+// ERROR@+1: TARGET/089 {descriptor_set="spirv.logical.core", function_name="varying_select_guard", op_name="kernel.def"}
+kernel.def target(@target) @varying_select_guard() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%mode: i32, %input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %number = index.cast %lane : index to i32
+  %negative = scalar.constant -1 : i32
+  %base = index.constant 0 : offset
+  %aligned_input = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %aligned_output = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %in = buffer.view %aligned_input[%base] : buffer -> view<64xi32>
+  %out = buffer.view %aligned_output[%base] : buffer -> view<64xi32>
+  %condition = scalar.cmpi sgt, %number, %mode : i32
+  cfg.cond_br %condition, ^read, ^fallback
+^read:
+  %loaded = view.load %in[%lane] : view<64xi32> -> i32
+  cfg.br ^finish(%loaded: i32)
+^fallback:
+  cfg.br ^finish(%negative: i32)
+^finish(%value: i32):
+  %selected = scf.select %condition, %number, %negative : i32
+  %sum = scalar.addi %value, %selected : i32
+  view.store %sum, %out[%lane] : i32, view<64xi32>
+  kernel.return
+}

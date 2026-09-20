@@ -1,0 +1,159 @@
+// A uniform route decision also selects a lane-dependent payload. Each loop
+// iteration narrows participation with a lane guard, then branches on the
+// uniform decision without changing the active lanes. False decisions suppress
+// the load. Bounds are in [0, 64], rounds in [0, 16], and buffers are aligned.
+// Input lane j is 3*j - 2. With t true decisions in n rounds, an active lane
+// contributes t*(4*lane - 3*start - 2) - 3*(n-t).
+kernel.def @uniform_predicate_control() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%start: index, %end: index, %rounds: index, %mode: i32, %input: buffer, %output: buffer) {
+  %first = index.assume %start [range(%start, 0, 64)] : index
+  %limit = index.assume %end [range(%end, 0, 64)] : index
+  %count = index.assume %rounds [range(%rounds, 0, 16)] : index
+  %lane = kernel.workitem.id<x> : index
+  %number = index.cast %lane : index to i32
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %initial = scalar.constant 0 : i32
+  %negative = scalar.constant -1 : i32
+  %missing = scalar.constant -2 : i32
+  %untouched = scalar.constant -700 : i32
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %in = buffer.view %input_aligned[%base] : buffer -> view<64xi32>
+  %out = buffer.view %output_aligned[%base] : buffer -> view<64xi32>
+  %after_start = index.cmp sge, %lane, %first : index
+  %before_end = index.cmp slt, %lane, %limit : index
+  %active = scalar.andi %after_start, %before_end : i1
+  %sum = scf.for %iteration = [%begin to %count step %step](%accumulator = %initial : i32) -> (i32) {
+    %ordinal = index.cast %iteration : index to i32
+    %condition = scalar.cmpi slt, %ordinal, %mode : i32
+    %next = scf.if %active -> (i32) {
+      %position = index.sub %lane, %first : index
+      %payload = scf.if %condition -> (i32) {
+        %loaded = view.load %in[%position] : view<64xi32> -> i32
+        scf.yield %loaded : i32
+      } else {
+        scf.yield %missing : i32
+      }
+      %selected = scf.select %condition, %number, %negative : i32
+      %contribution = scalar.addi %payload, %selected : i32
+      %updated = scalar.addi %accumulator, %contribution : i32
+      scf.yield %updated : i32
+    } else {
+      scf.yield %accumulator : i32
+    }
+    scf.yield %next : i32
+  }
+  %result = scf.select %active, %sum, %untouched : i32
+  view.store %result, %out[%lane] : i32, view<64xi32>
+  kernel.return
+}
+
+check.case public @uniform_predicate_control_empty {
+  %start = check.literal value(0) : index
+  %end = check.literal value(0) : index
+  %rounds = check.literal value(5) : index
+  %mode = check.literal value(3) : i32
+  %input = check.generate.iota offset(-2) step(3) : tensor<1xi32>
+  %actual = check.generate.fill value(-12345) : tensor<64xi32>
+  kernel.launch @uniform_predicate_control(%start, %end, %rounds, %mode, %input, %actual) : (index, index, index, i32, tensor<1xi32>, tensor<64xi32>)
+  %suffix = check.tensor.view %actual offset(0) : tensor<64xi32> -> tensor<64xi32>
+  %expected_suffix = check.generate.iota offset(-700) step(0) : tensor<64xi32>
+  check.expect.equal actual(%suffix) expected(%expected_suffix) : tensor<64xi32>
+  check.return
+}
+
+check.case public @uniform_predicate_control_zero_rounds {
+  %start = check.literal value(17) : index
+  %end = check.literal value(53) : index
+  %rounds = check.literal value(0) : index
+  %mode = check.literal value(3) : i32
+  %input = check.generate.iota offset(-2) step(3) : tensor<1xi32>
+  %actual = check.generate.fill value(-12345) : tensor<64xi32>
+  kernel.launch @uniform_predicate_control(%start, %end, %rounds, %mode, %input, %actual) : (index, index, index, i32, tensor<1xi32>, tensor<64xi32>)
+  %prefix = check.tensor.view %actual offset(0) : tensor<64xi32> -> tensor<17xi32>
+  %expected_prefix = check.generate.iota offset(-700) step(0) : tensor<17xi32>
+  check.expect.equal actual(%prefix) expected(%expected_prefix) : tensor<17xi32>
+  %active = check.tensor.view %actual offset(68) : tensor<64xi32> -> tensor<36xi32>
+  %expected_active = check.generate.iota offset(0) step(0) : tensor<36xi32>
+  check.expect.equal actual(%active) expected(%expected_active) : tensor<36xi32>
+  %suffix = check.tensor.view %actual offset(212) : tensor<64xi32> -> tensor<11xi32>
+  %expected_suffix = check.generate.iota offset(-700) step(0) : tensor<11xi32>
+  check.expect.equal actual(%suffix) expected(%expected_suffix) : tensor<11xi32>
+  check.return
+}
+
+check.case public @uniform_predicate_control_false {
+  %start = check.literal value(17) : index
+  %end = check.literal value(53) : index
+  %rounds = check.literal value(5) : index
+  %mode = check.literal value(0) : i32
+  %input = check.generate.iota offset(-2) step(3) : tensor<1xi32>
+  %actual = check.generate.fill value(-12345) : tensor<64xi32>
+  kernel.launch @uniform_predicate_control(%start, %end, %rounds, %mode, %input, %actual) : (index, index, index, i32, tensor<1xi32>, tensor<64xi32>)
+  %prefix = check.tensor.view %actual offset(0) : tensor<64xi32> -> tensor<17xi32>
+  %expected_prefix = check.generate.iota offset(-700) step(0) : tensor<17xi32>
+  check.expect.equal actual(%prefix) expected(%expected_prefix) : tensor<17xi32>
+  %active = check.tensor.view %actual offset(68) : tensor<64xi32> -> tensor<36xi32>
+  %expected_active = check.generate.iota offset(-15) step(0) : tensor<36xi32>
+  check.expect.equal actual(%active) expected(%expected_active) : tensor<36xi32>
+  %suffix = check.tensor.view %actual offset(212) : tensor<64xi32> -> tensor<11xi32>
+  %expected_suffix = check.generate.iota offset(-700) step(0) : tensor<11xi32>
+  check.expect.equal actual(%suffix) expected(%expected_suffix) : tensor<11xi32>
+  check.return
+}
+
+check.case public @uniform_predicate_control_mixed {
+  %start = check.literal value(17) : index
+  %end = check.literal value(53) : index
+  %rounds = check.literal value(5) : index
+  %mode = check.literal value(3) : i32
+  %input = check.generate.iota offset(-2) step(3) : tensor<36xi32>
+  %actual = check.generate.fill value(-12345) : tensor<64xi32>
+  kernel.launch @uniform_predicate_control(%start, %end, %rounds, %mode, %input, %actual) : (index, index, index, i32, tensor<36xi32>, tensor<64xi32>)
+  %prefix = check.tensor.view %actual offset(0) : tensor<64xi32> -> tensor<17xi32>
+  %expected_prefix = check.generate.iota offset(-700) step(0) : tensor<17xi32>
+  check.expect.equal actual(%prefix) expected(%expected_prefix) : tensor<17xi32>
+  %active = check.tensor.view %actual offset(68) : tensor<64xi32> -> tensor<36xi32>
+  %expected_active = check.generate.iota offset(39) step(12) : tensor<36xi32>
+  check.expect.equal actual(%active) expected(%expected_active) : tensor<36xi32>
+  %suffix = check.tensor.view %actual offset(212) : tensor<64xi32> -> tensor<11xi32>
+  %expected_suffix = check.generate.iota offset(-700) step(0) : tensor<11xi32>
+  check.expect.equal actual(%suffix) expected(%expected_suffix) : tensor<11xi32>
+  check.return
+}
+
+check.case public @uniform_predicate_control_upper_half {
+  %start = check.literal value(32) : index
+  %end = check.literal value(64) : index
+  %rounds = check.literal value(2) : index
+  %mode = check.literal value(5) : i32
+  %input = check.generate.iota offset(-2) step(3) : tensor<32xi32>
+  %actual = check.generate.fill value(-12345) : tensor<64xi32>
+  kernel.launch @uniform_predicate_control(%start, %end, %rounds, %mode, %input, %actual) : (index, index, index, i32, tensor<32xi32>, tensor<64xi32>)
+  %prefix = check.tensor.view %actual offset(0) : tensor<64xi32> -> tensor<32xi32>
+  %expected_prefix = check.generate.iota offset(-700) step(0) : tensor<32xi32>
+  check.expect.equal actual(%prefix) expected(%expected_prefix) : tensor<32xi32>
+  %active = check.tensor.view %actual offset(128) : tensor<64xi32> -> tensor<32xi32>
+  %expected_active = check.generate.iota offset(60) step(8) : tensor<32xi32>
+  check.expect.equal actual(%active) expected(%expected_active) : tensor<32xi32>
+  check.return
+}
+
+check.case public @uniform_predicate_control_full {
+  %start = check.literal value(0) : index
+  %end = check.literal value(64) : index
+  %rounds = check.literal value(3) : index
+  %mode = check.literal value(2) : i32
+  %input = check.generate.iota offset(-2) step(3) : tensor<64xi32>
+  %actual = check.generate.fill value(-12345) : tensor<64xi32>
+  kernel.launch @uniform_predicate_control(%start, %end, %rounds, %mode, %input, %actual) : (index, index, index, i32, tensor<64xi32>, tensor<64xi32>)
+  %active = check.tensor.view %actual offset(0) : tensor<64xi32> -> tensor<64xi32>
+  %expected_active = check.generate.iota offset(-7) step(8) : tensor<64xi32>
+  check.expect.equal actual(%active) expected(%expected_active) : tensor<64xi32>
+  check.return
+}

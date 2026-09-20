@@ -1464,6 +1464,29 @@ def _s_and_b64_overlay() -> AmdgpuDescriptorOverlay:
     )
 
 
+def _s_and_b64_scc_overlay() -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.s_and_b64.scc",
+        instruction_name="S_AND_B64",
+        mnemonic="s_and_b64",
+        encoding_name="ENC_SOP2",
+        semantic_tag="integer.and.nonzero.u64",
+        schedule_class=_SCHEDULE_SALU,
+        operands=(
+            AmdgpuOperandOverlay("SDST", _sgpr_result(units=2)),
+            AmdgpuOperandOverlay("SSRC0", _sgpr_operand("lhs", units=2)),
+            AmdgpuOperandOverlay("SSRC1", _sgpr_operand("rhs", units=2)),
+        ),
+        implicit_operands=(_scc_output(_scc_result("nonzero")),),
+        asm_forms=_asm(
+            mnemonic="s_and_b64_scc",
+            results=("dst", "nonzero"),
+            operands=("lhs", "rhs"),
+        ),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 def _s_or_b64_overlay() -> AmdgpuDescriptorOverlay:
     return _s_binary_u64_overlay(
         descriptor_key="amdgpu.s_or_b64",
@@ -2437,6 +2460,7 @@ def _integer_bitwise_shift_overlays(
         _s_or_b32_overlay(),
         _s_xor_b32_overlay(),
         _s_and_b64_overlay(),
+        _s_and_b64_scc_overlay(),
         _s_or_b64_overlay(),
         _s_xor_b64_overlay(),
         _s_lshl_b32_overlay(),

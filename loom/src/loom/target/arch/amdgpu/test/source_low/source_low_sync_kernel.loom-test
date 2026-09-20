@@ -434,12 +434,12 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
   %10 = v_mov_b32 0
   %control_value = global_load_b32_saddr %10, %control_view
   %is_zero = v_cmp_eq_i32_src1_inline %control_value {rhs = 0}
-  %13, %14 = s_and_saveexec_b64 %is_zero
-  low.cond_br %14, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+  %13 = s_mov_b64_exec_read
+  %14, %15 = s_and_b64_scc %is_zero, %13
+  low.cond_br %15, ^_bb1, ^_bb2 : reg<amdgpu.scc>
 ^_bb1:
   s_waitcnt {lgkmcnt = 0}
   low.br ^_bb2
 ^_bb2:
-  s_mov_b64_exec %13
   return
 }
