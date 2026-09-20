@@ -32,6 +32,15 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    encoding
+  SRCS
+    "encoding.py"
+  DEPS
+    loom::py::loom::target::arch::x86::package_init
+)
+
+iree_py_library(
+  NAME
     dialect
   SRCS
     "dialect.py"
@@ -54,6 +63,7 @@ iree_py_library(
     "descriptors/scalar.py"
     "descriptors/simd128.py"
   DEPS
+    loom::py::loom::target::arch::x86::encoding
     loom::py::loom::target::arch::x86::target_info
     loom::py::loom::target::low_descriptors
     loom::py::loom::target::arch::package

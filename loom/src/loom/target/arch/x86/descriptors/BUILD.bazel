@@ -145,6 +145,7 @@ loom_low_descriptor_cc_library(
     name = "avx512_packed_dot_descriptors",
     args = ["--target=avx512_packed_dot"],
     generated_hdr_flags = [
+        "--encoding-header",
         "--view-header=scalar",
         "--view-header=simd128",
         "--view-header=avx2",
@@ -158,6 +159,7 @@ loom_low_descriptor_cc_library(
         "--view-header=avx10_2",
     ],
     generated_hdrs = [
+        "encoding_defs.h",
         "scalar_descriptors.h",
         "simd128_descriptors.h",
         "avx2_descriptors.h",

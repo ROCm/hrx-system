@@ -159,6 +159,7 @@ loom_low_descriptor_cc_library(
   GENERATOR
     loom::py::loom::gen::target::arch::x86::low_descriptor_shard
   GENERATED_HDR_FLAGS
+    "--encoding-header"
     "--view-header=scalar"
     "--view-header=simd128"
     "--view-header=avx2"
@@ -171,6 +172,7 @@ loom_low_descriptor_cc_library(
     "--view-header=avx_vnni_int16"
     "--view-header=avx10_2"
   GENERATED_HDRS
+    "encoding_defs.h"
     "scalar_descriptors.h"
     "simd128_descriptors.h"
     "avx2_descriptors.h"

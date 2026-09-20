@@ -10,6 +10,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from loom.target.arch.x86.encoding import (
+    X86EncodingFormat,
+    x86_legacy_opcode,
+    x86_modrm_group_opcode,
+)
 from loom.target.low_descriptors import (
     Constraint,
     ConstraintKind,
@@ -101,11 +106,15 @@ def _gpr32_destructive_binary_descriptor(
     key: str,
     mnemonic: str,
     semantic_tag: str,
+    encoding_format: X86EncodingFormat,
+    encoding_id: int,
 ) -> Descriptor:
     return _gpr_destructive_binary_descriptor(
         key=key,
         mnemonic=mnemonic,
         semantic_tag=semantic_tag,
+        encoding_format=encoding_format,
+        encoding_id=encoding_id,
         result=_gpr32_result(),
         lhs=_gpr32_operand("lhs"),
         rhs=_gpr32_operand("rhs"),
@@ -118,11 +127,15 @@ def _gpr64_destructive_binary_descriptor(
     key: str,
     mnemonic: str,
     semantic_tag: str,
+    encoding_format: X86EncodingFormat,
+    encoding_id: int,
 ) -> Descriptor:
     return _gpr_destructive_binary_descriptor(
         key=key,
         mnemonic=mnemonic,
         semantic_tag=semantic_tag,
+        encoding_format=encoding_format,
+        encoding_id=encoding_id,
         result=_gpr64_result(),
         lhs=_gpr64_operand("lhs"),
         rhs=_gpr64_operand("rhs"),
@@ -139,6 +152,8 @@ def _gpr_destructive_binary_descriptor(
     lhs: Operand,
     rhs: Operand,
     asm_suffix: str,
+    encoding_format: X86EncodingFormat,
+    encoding_id: int,
 ) -> Descriptor:
     return Descriptor(
         key=key,
@@ -152,6 +167,8 @@ def _gpr_destructive_binary_descriptor(
             operands=("lhs", "rhs"),
         ),
         schedule_class=_SCHEDULE_SCALAR,
+        encoding_format_id=encoding_format,
+        encoding_id=encoding_id,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -161,6 +178,7 @@ def _gpr32_destructive_shift_descriptor(
     key: str,
     mnemonic: str,
     semantic_tag: str,
+    modrm_extension: int,
 ) -> Descriptor:
     return _gpr_destructive_immediate_descriptor(
         key=key,
@@ -170,6 +188,8 @@ def _gpr32_destructive_shift_descriptor(
         source=_gpr32_operand("lhs"),
         immediate=_SHIFT32_IMMEDIATE,
         asm_suffix="gpr32",
+        encoding_format=X86EncodingFormat.RM_IMM8,
+        encoding_id=x86_modrm_group_opcode(0xC1, modrm_extension),
     )
 
 
@@ -178,6 +198,7 @@ def _gpr64_destructive_shift_descriptor(
     key: str,
     mnemonic: str,
     semantic_tag: str,
+    modrm_extension: int,
 ) -> Descriptor:
     return _gpr_destructive_immediate_descriptor(
         key=key,
@@ -187,6 +208,8 @@ def _gpr64_destructive_shift_descriptor(
         source=_gpr64_operand("lhs"),
         immediate=_SHIFT64_IMMEDIATE,
         asm_suffix="gpr64",
+        encoding_format=X86EncodingFormat.RM_IMM8,
+        encoding_id=x86_modrm_group_opcode(0xC1, modrm_extension),
     )
 
 
@@ -199,6 +222,8 @@ def _gpr_destructive_immediate_descriptor(
     source: Operand,
     immediate: Immediate,
     asm_suffix: str,
+    encoding_format: X86EncodingFormat,
+    encoding_id: int,
 ) -> Descriptor:
     return Descriptor(
         key=key,
@@ -215,6 +240,8 @@ def _gpr_destructive_immediate_descriptor(
             named_immediates=True,
         ),
         schedule_class=_SCHEDULE_SCALAR,
+        encoding_format_id=encoding_format,
+        encoding_id=encoding_id,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -225,6 +252,8 @@ def _gpr32_to_gpr64_extend_descriptor(
     mnemonic: str,
     semantic_tag: str,
     asm_mnemonic: str,
+    encoding_format: X86EncodingFormat,
+    encoding_id: int,
 ) -> Descriptor:
     return Descriptor(
         key=key,
@@ -237,6 +266,8 @@ def _gpr32_to_gpr64_extend_descriptor(
             operands=("src",),
         ),
         schedule_class=_SCHEDULE_SCALAR,
+        encoding_format_id=encoding_format,
+        encoding_id=encoding_id,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -253,6 +284,8 @@ def _gpr64_to_gpr32_truncate_descriptor() -> Descriptor:
             operands=("src",),
         ),
         schedule_class=_SCHEDULE_SCALAR,
+        encoding_format_id=X86EncodingFormat.RM_REG,
+        encoding_id=x86_legacy_opcode(0x89),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -280,6 +313,8 @@ def _gpr_select_descriptor(bit_count: int) -> Descriptor:
             operands=("condition", "true_value", "false_value"),
         ),
         schedule_class=_SCHEDULE_SCALAR,
+        encoding_format_id=X86EncodingFormat.SELECT,
+        encoding_id=0x5,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -289,11 +324,13 @@ def _gpr32_compare_descriptor(
     predicate: str,
     setcc: str,
     semantic_tag: str,
+    condition_code: int,
 ) -> Descriptor:
     return _gpr_compare_descriptor(
         predicate=predicate,
         setcc=setcc,
         semantic_tag=semantic_tag,
+        condition_code=condition_code,
         lhs=_gpr32_operand("lhs"),
         rhs=_gpr32_operand("rhs"),
         asm_suffix="gpr32",
@@ -305,11 +342,13 @@ def _gpr64_compare_descriptor(
     predicate: str,
     setcc: str,
     semantic_tag: str,
+    condition_code: int,
 ) -> Descriptor:
     return _gpr_compare_descriptor(
         predicate=predicate,
         setcc=setcc,
         semantic_tag=semantic_tag,
+        condition_code=condition_code,
         lhs=_gpr64_operand("lhs"),
         rhs=_gpr64_operand("rhs"),
         asm_suffix="gpr64",
@@ -324,6 +363,7 @@ def _gpr_compare_descriptor(
     lhs: Operand,
     rhs: Operand | Immediate,
     asm_suffix: str,
+    condition_code: int,
 ) -> Descriptor:
     immediate = isinstance(rhs, Immediate)
     return Descriptor(
@@ -343,21 +383,23 @@ def _gpr_compare_descriptor(
             immediates=("imm32",) if immediate else (),
         ),
         schedule_class=_SCHEDULE_SCALAR,
+        encoding_format_id=X86EncodingFormat.COMPARE,
+        encoding_id=condition_code,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
 
 _CMP_PREDICATE_SETCC = (
-    ("eq", "sete"),
-    ("ne", "setne"),
-    ("slt", "setl"),
-    ("sle", "setle"),
-    ("sgt", "setg"),
-    ("sge", "setge"),
-    ("ult", "setb"),
-    ("ule", "setbe"),
-    ("ugt", "seta"),
-    ("uge", "setae"),
+    ("eq", "sete", 0x4),
+    ("ne", "setne", 0x5),
+    ("slt", "setl", 0xC),
+    ("sle", "setle", 0xE),
+    ("sgt", "setg", 0xF),
+    ("sge", "setge", 0xD),
+    ("ult", "setb", 0x2),
+    ("ule", "setbe", 0x6),
+    ("ugt", "seta", 0x7),
+    ("uge", "setae", 0x3),
 )
 
 
@@ -366,11 +408,15 @@ X86_SCALAR_PREFIX_DESCRIPTORS = (
         key="x86.scalar.add.gpr32",
         mnemonic="add",
         semantic_tag="integer.add.i32",
+        encoding_format=X86EncodingFormat.RM_REG,
+        encoding_id=x86_legacy_opcode(0x01),
     ),
     _gpr64_destructive_binary_descriptor(
         key="x86.scalar.add.gpr64",
         mnemonic="add",
         semantic_tag="integer.add.i64",
+        encoding_format=X86EncodingFormat.RM_REG,
+        encoding_id=x86_legacy_opcode(0x01),
     ),
 )
 
@@ -379,21 +425,29 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         key="x86.scalar.sub.gpr32",
         mnemonic="sub",
         semantic_tag="integer.sub.i32",
+        encoding_format=X86EncodingFormat.RM_REG,
+        encoding_id=x86_legacy_opcode(0x29),
     ),
     _gpr32_destructive_binary_descriptor(
         key="x86.scalar.imul.gpr32",
         mnemonic="imul",
         semantic_tag="integer.mul.i32",
+        encoding_format=X86EncodingFormat.REG_RM,
+        encoding_id=x86_legacy_opcode(0x0F, 0xAF),
     ),
     _gpr64_destructive_binary_descriptor(
         key="x86.scalar.sub.gpr64",
         mnemonic="sub",
         semantic_tag="integer.sub.i64",
+        encoding_format=X86EncodingFormat.RM_REG,
+        encoding_id=x86_legacy_opcode(0x29),
     ),
     _gpr64_destructive_binary_descriptor(
         key="x86.scalar.imul.gpr64",
         mnemonic="imul",
         semantic_tag="integer.mul.i64",
+        encoding_format=X86EncodingFormat.REG_RM,
+        encoding_id=x86_legacy_opcode(0x0F, 0xAF),
     ),
     Descriptor(
         key="x86.scalar.mul.high.gpr64",
@@ -426,6 +480,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
             operands=("lhs", "rhs"),
         ),
         schedule_class=_SCHEDULE_SCALAR,
+        encoding_format_id=X86EncodingFormat.RM_GROUP,
+        encoding_id=x86_modrm_group_opcode(0xF7, 4),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     ),
     Descriptor(
@@ -442,37 +498,51 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
             named_immediates=True,
         ),
         schedule_class=_SCHEDULE_SCALAR,
+        encoding_format_id=X86EncodingFormat.REG_RM_IMM32,
+        encoding_id=x86_legacy_opcode(0x69),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     ),
     _gpr32_destructive_binary_descriptor(
         key="x86.scalar.and.gpr32",
         mnemonic="and",
         semantic_tag="integer.and.i32",
+        encoding_format=X86EncodingFormat.RM_REG,
+        encoding_id=x86_legacy_opcode(0x21),
     ),
     _gpr32_destructive_binary_descriptor(
         key="x86.scalar.or.gpr32",
         mnemonic="or",
         semantic_tag="integer.or.i32",
+        encoding_format=X86EncodingFormat.RM_REG,
+        encoding_id=x86_legacy_opcode(0x09),
     ),
     _gpr32_destructive_binary_descriptor(
         key="x86.scalar.xor.gpr32",
         mnemonic="xor",
         semantic_tag="integer.xor.i32",
+        encoding_format=X86EncodingFormat.RM_REG,
+        encoding_id=x86_legacy_opcode(0x31),
     ),
     _gpr64_destructive_binary_descriptor(
         key="x86.scalar.and.gpr64",
         mnemonic="and",
         semantic_tag="integer.and.i64",
+        encoding_format=X86EncodingFormat.RM_REG,
+        encoding_id=x86_legacy_opcode(0x21),
     ),
     _gpr64_destructive_binary_descriptor(
         key="x86.scalar.or.gpr64",
         mnemonic="or",
         semantic_tag="integer.or.i64",
+        encoding_format=X86EncodingFormat.RM_REG,
+        encoding_id=x86_legacy_opcode(0x09),
     ),
     _gpr64_destructive_binary_descriptor(
         key="x86.scalar.xor.gpr64",
         mnemonic="xor",
         semantic_tag="integer.xor.i64",
+        encoding_format=X86EncodingFormat.RM_REG,
+        encoding_id=x86_legacy_opcode(0x31),
     ),
     *(
         _gpr_destructive_immediate_descriptor(
@@ -483,42 +553,50 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
             source=operand("lhs"),
             immediate=_IMM32_IMMEDIATE,
             asm_suffix=f"gpr{width}",
+            encoding_format=X86EncodingFormat.RM_IMM32,
+            encoding_id=x86_modrm_group_opcode(0x81, modrm_extension),
         )
         for width, result, operand in (
             (32, _gpr32_result, _gpr32_operand),
             (64, _gpr64_result, _gpr64_operand),
         )
-        for operation in ("and", "or", "xor")
+        for operation, modrm_extension in (("and", 4), ("or", 1), ("xor", 6))
     ),
     _gpr32_destructive_shift_descriptor(
         key="x86.scalar.shl.imm.gpr32",
         mnemonic="shl",
         semantic_tag="integer.shl.i32",
+        modrm_extension=4,
     ),
     _gpr32_destructive_shift_descriptor(
         key="x86.scalar.sar.imm.gpr32",
         mnemonic="sar",
         semantic_tag="integer.shrs.i32",
+        modrm_extension=7,
     ),
     _gpr32_destructive_shift_descriptor(
         key="x86.scalar.shr.imm.gpr32",
         mnemonic="shr",
         semantic_tag="integer.shru.i32",
+        modrm_extension=5,
     ),
     _gpr64_destructive_shift_descriptor(
         key="x86.scalar.shl.imm.gpr64",
         mnemonic="shl",
         semantic_tag="integer.shl.i64",
+        modrm_extension=4,
     ),
     _gpr64_destructive_shift_descriptor(
         key="x86.scalar.sar.imm.gpr64",
         mnemonic="sar",
         semantic_tag="integer.shrs.i64",
+        modrm_extension=7,
     ),
     _gpr64_destructive_shift_descriptor(
         key="x86.scalar.shr.imm.gpr64",
         mnemonic="shr",
         semantic_tag="integer.shru.i64",
+        modrm_extension=5,
     ),
     _gpr64_to_gpr32_truncate_descriptor(),
     _gpr_select_descriptor(32),
@@ -539,6 +617,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
             immediates=("imm32",),
         ),
         schedule_class=_SCHEDULE_SCALAR,
+        encoding_format_id=X86EncodingFormat.CONDITIONAL_SUBTRACT,
+        encoding_id=x86_modrm_group_opcode(0x81, 5),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     ),
     *(
@@ -549,24 +629,27 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
             lhs=_gpr32_operand("lhs"),
             rhs=_IMM32_IMMEDIATE,
             asm_suffix="imm.gpr32",
+            condition_code=condition_code,
         )
-        for predicate, setcc in _CMP_PREDICATE_SETCC
+        for predicate, setcc, condition_code in _CMP_PREDICATE_SETCC
     ),
     *(
         _gpr32_compare_descriptor(
             predicate=predicate,
             setcc=setcc,
             semantic_tag=f"integer.cmp.{predicate}.i32",
+            condition_code=condition_code,
         )
-        for predicate, setcc in _CMP_PREDICATE_SETCC
+        for predicate, setcc, condition_code in _CMP_PREDICATE_SETCC
     ),
     *(
         _gpr64_compare_descriptor(
             predicate=predicate,
             setcc=setcc,
             semantic_tag=f"integer.cmp.{predicate}.i64",
+            condition_code=condition_code,
         )
-        for predicate, setcc in _CMP_PREDICATE_SETCC
+        for predicate, setcc, condition_code in _CMP_PREDICATE_SETCC
     ),
     Descriptor(
         key="x86.scalar.movimm.gpr32",
@@ -582,6 +665,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
             immediates=("imm32",),
         ),
         schedule_class=_SCHEDULE_SCALAR,
+        encoding_format_id=X86EncodingFormat.MOV_IMMEDIATE,
+        encoding_id=x86_legacy_opcode(0xB8),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     ),
     Descriptor(
@@ -603,6 +688,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         ),
         effects=(_load_effect(8),),
         schedule_class=_SCHEDULE_MEMORY_LOAD_GPR32,
+        encoding_format_id=X86EncodingFormat.MEMORY_REG_RM,
+        encoding_id=x86_legacy_opcode(0x0F, 0xB6),
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     ),
     Descriptor(
@@ -623,6 +710,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         ),
         effects=(_store_effect(8),),
         schedule_class=_SCHEDULE_MEMORY_STORE_GPR32,
+        encoding_format_id=X86EncodingFormat.MEMORY_RM_REG,
+        encoding_id=x86_legacy_opcode(0x88),
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     ),
     Descriptor(
@@ -640,6 +729,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         ),
         effects=(_load_effect(32),),
         schedule_class=_SCHEDULE_MEMORY_LOAD_GPR32,
+        encoding_format_id=X86EncodingFormat.MEMORY_REG_RM,
+        encoding_id=x86_legacy_opcode(0x8B),
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     ),
     Descriptor(
@@ -661,6 +752,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         ),
         effects=(_load_effect(32),),
         schedule_class=_SCHEDULE_MEMORY_LOAD_GPR32,
+        encoding_format_id=X86EncodingFormat.MEMORY_REG_RM,
+        encoding_id=x86_legacy_opcode(0x8B),
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     ),
     Descriptor(
@@ -677,6 +770,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         ),
         effects=(_store_effect(32),),
         schedule_class=_SCHEDULE_MEMORY_STORE_GPR32,
+        encoding_format_id=X86EncodingFormat.MEMORY_RM_REG,
+        encoding_id=x86_legacy_opcode(0x89),
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     ),
     Descriptor(
@@ -697,6 +792,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         ),
         effects=(_store_effect(32),),
         schedule_class=_SCHEDULE_MEMORY_STORE_GPR32,
+        encoding_format_id=X86EncodingFormat.MEMORY_RM_REG,
+        encoding_id=x86_legacy_opcode(0x89),
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     ),
     Descriptor(
@@ -714,6 +811,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         ),
         effects=(_load_effect(64),),
         schedule_class=_SCHEDULE_MEMORY_LOAD_GPR64,
+        encoding_format_id=X86EncodingFormat.MEMORY_REG_RM,
+        encoding_id=x86_legacy_opcode(0x8B),
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     ),
     Descriptor(
@@ -735,6 +834,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         ),
         effects=(_load_effect(64),),
         schedule_class=_SCHEDULE_MEMORY_LOAD_GPR64,
+        encoding_format_id=X86EncodingFormat.MEMORY_REG_RM,
+        encoding_id=x86_legacy_opcode(0x8B),
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     ),
     Descriptor(
@@ -751,6 +852,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         ),
         effects=(_store_effect(64),),
         schedule_class=_SCHEDULE_MEMORY_STORE_GPR64,
+        encoding_format_id=X86EncodingFormat.MEMORY_RM_REG,
+        encoding_id=x86_legacy_opcode(0x89),
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     ),
     Descriptor(
@@ -771,6 +874,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         ),
         effects=(_store_effect(64),),
         schedule_class=_SCHEDULE_MEMORY_STORE_GPR64,
+        encoding_format_id=X86EncodingFormat.MEMORY_RM_REG,
+        encoding_id=x86_legacy_opcode(0x89),
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     ),
     Descriptor(
@@ -780,6 +885,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         operands=(_gpr64_result(), _gpr64_operand("src")),
         asm_forms=_asm(results=("dst",), operands=("src",)),
         schedule_class=_SCHEDULE_SCALAR,
+        encoding_format_id=X86EncodingFormat.RM_REG,
+        encoding_id=x86_legacy_opcode(0x89),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     ),
     _gpr32_to_gpr64_extend_descriptor(
@@ -787,12 +894,16 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         mnemonic="movsxd",
         semantic_tag="integer.extsi.i32.i64",
         asm_mnemonic="movsxd.gpr64.gpr32",
+        encoding_format=X86EncodingFormat.REG_RM,
+        encoding_id=x86_legacy_opcode(0x63),
     ),
     _gpr32_to_gpr64_extend_descriptor(
         key="x86.scalar.movzx.gpr64.gpr32",
         mnemonic="movzx",
         semantic_tag="integer.extui.i32.i64",
         asm_mnemonic="movzx.gpr64.gpr32",
+        encoding_format=X86EncodingFormat.RM_REG,
+        encoding_id=x86_legacy_opcode(0x89, force_32_bit=True),
     ),
     Descriptor(
         key="x86.scalar.movimm.gpr64",
@@ -808,6 +919,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
             immediates=("imm64",),
         ),
         schedule_class=_SCHEDULE_SCALAR,
+        encoding_format_id=X86EncodingFormat.MOV_IMMEDIATE,
+        encoding_id=x86_legacy_opcode(0xB8),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     ),
     Descriptor(
@@ -821,6 +934,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         ),
         asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
         schedule_class=_SCHEDULE_ADDRESS,
+        encoding_format_id=X86EncodingFormat.LEA,
+        encoding_id=x86_legacy_opcode(0x8D),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     ),
     Descriptor(
@@ -840,6 +955,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
             named_immediates=True,
         ),
         schedule_class=_SCHEDULE_ADDRESS,
+        encoding_format_id=X86EncodingFormat.LEA,
+        encoding_id=x86_legacy_opcode(0x8D),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     ),
     Descriptor(
@@ -859,6 +976,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
             named_immediates=True,
         ),
         schedule_class=_SCHEDULE_ADDRESS,
+        encoding_format_id=X86EncodingFormat.LEA,
+        encoding_id=x86_legacy_opcode(0x8D),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     ),
     Descriptor(
@@ -879,6 +998,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
             named_immediates=True,
         ),
         schedule_class=_SCHEDULE_ADDRESS,
+        encoding_format_id=X86EncodingFormat.LEA,
+        encoding_id=x86_legacy_opcode(0x8D),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     ),
     Descriptor(
@@ -899,6 +1020,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
             named_immediates=True,
         ),
         schedule_class=_SCHEDULE_ADDRESS,
+        encoding_format_id=X86EncodingFormat.LEA,
+        encoding_id=x86_legacy_opcode(0x8D),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     ),
     Descriptor(
@@ -910,6 +1033,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         asm_forms=_asm(immediates=("target_block",)),
         effects=(_CONTROL_EFFECT,),
         schedule_class=_SCHEDULE_CONTROL,
+        encoding_format_id=X86EncodingFormat.DIRECT_BRANCH,
+        encoding_id=x86_legacy_opcode(0xE9),
         flags=(DescriptorFlag.SIDE_EFFECTING, DescriptorFlag.TERMINATOR),
     ),
 )

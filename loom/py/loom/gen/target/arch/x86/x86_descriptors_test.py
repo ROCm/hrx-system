@@ -15,6 +15,12 @@ from types import TracebackType
 from loom.gen.target.arch.x86 import x86_descriptors
 from loom.gen.target.low import compiler
 from loom.target.arch.x86 import descriptors as x86_descriptor_data
+from loom.target.arch.x86.encoding import (
+    X86_ENCODING_ID_FORCE_32_BIT,
+    X86EncodingFormat,
+    x86_legacy_opcode,
+    x86_modrm_group_opcode,
+)
 from loom.target.arch.x86.target_info import (
     sorted_descriptor_set_infos,
     x86_descriptor_set_info_by_generator_target,
@@ -136,6 +142,7 @@ def test_storage_generation_emits_current_public_views() -> None:
                     "--target=avx512_packed_dot",
                     f"--header={tmp_path / 'avx512_packed_dot_descriptors.h'}",
                     f"--source={tmp_path / 'avx512_packed_dot_descriptors.c'}",
+                    f"--encoding-header={tmp_path / 'encoding_defs.h'}",
                     f"--view-header=avx512={tmp_path / 'avx512_descriptors.h'}",
                     f"--view-header=avx2={tmp_path / 'avx2_descriptors.h'}",
                     f"--view-header=avx10_2={tmp_path / 'avx10_2_descriptors.h'}",
@@ -153,6 +160,7 @@ def test_storage_generation_emits_current_public_views() -> None:
         )
 
         source = (tmp_path / "avx512_packed_dot_descriptors.c").read_text(encoding="utf-8")
+        encoding_header = (tmp_path / "encoding_defs.h").read_text(encoding="utf-8")
         composite_header = (tmp_path / "avx512_packed_dot_descriptors.h").read_text(encoding="utf-8")
         avx512_header = (tmp_path / "avx512_descriptors.h").read_text(encoding="utf-8")
         avx2_header = (tmp_path / "avx2_descriptors.h").read_text(encoding="utf-8")
@@ -162,6 +170,8 @@ def test_storage_generation_emits_current_public_views() -> None:
         simd128_header = (tmp_path / "simd128_descriptors.h").read_text(encoding="utf-8")
 
     assert "loom_x86_avx512_core_descriptor_set" in source
+    assert "LOOM_X86_ENCODING_FORMAT_COMPARE = 6u" in encoding_header
+    assert "#define LOOM_X86_ENCODING_ID_FORCE_32_BIT 32768u" in encoding_header
     assert "loom_x86_avx2_core_descriptor_set" in source
     assert "loom_x86_packed_dot_core_descriptor_set" in source
     assert "loom_x86_avx_vnni_core_descriptor_set" in source
@@ -229,6 +239,79 @@ def test_storage_generation_emits_current_public_views() -> None:
     _assert_reg_class_id(packed_dot_header, "X86_PACKED_DOT_CORE_REG_CLASS_ID_XMM")
     _assert_reg_class_id(packed_dot_header, "X86_PACKED_DOT_CORE_REG_CLASS_ID_YMM")
     _assert_reg_class_id(packed_dot_header, "X86_PACKED_DOT_CORE_REG_CLASS_ID_ZMM")
+
+
+def test_scalar_descriptors_define_complete_native_encoding_recipes() -> None:
+    descriptors = {descriptor.key: descriptor for descriptor in x86_descriptor_data.X86_SCALAR_DESCRIPTOR_SET.descriptors}
+    assert len(descriptors) == 81
+    assert all(descriptor.encoding_format_id != X86EncodingFormat.NONE for descriptor in descriptors.values())
+
+    for bit_count in (32, 64):
+        for mnemonic, opcode in (
+            ("add", 0x01),
+            ("sub", 0x29),
+            ("and", 0x21),
+            ("or", 0x09),
+            ("xor", 0x31),
+        ):
+            descriptor = descriptors[f"x86.scalar.{mnemonic}.gpr{bit_count}"]
+            assert descriptor.encoding_format_id == X86EncodingFormat.RM_REG
+            assert descriptor.encoding_id == x86_legacy_opcode(opcode)
+        imul = descriptors[f"x86.scalar.imul.gpr{bit_count}"]
+        assert imul.encoding_format_id == X86EncodingFormat.REG_RM
+        assert imul.encoding_id == x86_legacy_opcode(0x0F, 0xAF)
+        for mnemonic, extension in (("shl", 4), ("sar", 7), ("shr", 5)):
+            shift = descriptors[f"x86.scalar.{mnemonic}.imm.gpr{bit_count}"]
+            assert shift.encoding_format_id == X86EncodingFormat.RM_IMM8
+            assert shift.encoding_id == x86_modrm_group_opcode(0xC1, extension)
+        for mnemonic, extension in (("and", 4), ("or", 1), ("xor", 6)):
+            bitwise = descriptors[f"x86.scalar.{mnemonic}.imm.gpr{bit_count}"]
+            assert bitwise.encoding_format_id == X86EncodingFormat.RM_IMM32
+            assert bitwise.encoding_id == x86_modrm_group_opcode(0x81, extension)
+        assert descriptors[f"x86.scalar.select.gpr{bit_count}"].encoding_format_id == X86EncodingFormat.SELECT
+
+    condition_codes = {
+        "eq": 0x4,
+        "ne": 0x5,
+        "slt": 0xC,
+        "sle": 0xE,
+        "sgt": 0xF,
+        "sge": 0xD,
+        "ult": 0x2,
+        "ule": 0x6,
+        "ugt": 0x7,
+        "uge": 0x3,
+    }
+    for bit_count in (32, 64):
+        for predicate, condition_code in condition_codes.items():
+            descriptor = descriptors[f"x86.scalar.cmp.{predicate}.gpr{bit_count}"]
+            assert descriptor.encoding_format_id == X86EncodingFormat.COMPARE
+            assert descriptor.encoding_id == condition_code
+            if bit_count == 32:
+                immediate = descriptors[f"x86.scalar.cmp.{predicate}.imm.gpr32"]
+                assert immediate.encoding_format_id == X86EncodingFormat.COMPARE
+                assert immediate.encoding_id == condition_code
+
+    high_product = descriptors["x86.scalar.mul.high.gpr64"]
+    assert high_product.encoding_format_id == X86EncodingFormat.RM_GROUP
+    assert high_product.encoding_id == x86_modrm_group_opcode(0xF7, 4)
+    conditional_subtract = descriptors["x86.scalar.sub.if_uge.imm.gpr32"]
+    assert conditional_subtract.encoding_format_id == X86EncodingFormat.CONDITIONAL_SUBTRACT
+    assert conditional_subtract.encoding_id == x86_modrm_group_opcode(0x81, 5)
+
+    assert descriptors["x86.scalar.movimm.gpr32"].encoding_format_id == X86EncodingFormat.MOV_IMMEDIATE
+    assert descriptors["x86.scalar.movimm.gpr64"].encoding_format_id == X86EncodingFormat.MOV_IMMEDIATE
+    zero_extend = descriptors["x86.scalar.movzx.gpr64.gpr32"]
+    assert zero_extend.encoding_format_id == X86EncodingFormat.RM_REG
+    assert zero_extend.encoding_id == (X86_ENCODING_ID_FORCE_32_BIT | 0x89)
+    for descriptor in descriptors.values():
+        if ".load" in descriptor.key:
+            assert descriptor.encoding_format_id == X86EncodingFormat.MEMORY_REG_RM
+        if ".store" in descriptor.key:
+            assert descriptor.encoding_format_id == X86EncodingFormat.MEMORY_RM_REG
+        if ".lea." in descriptor.key:
+            assert descriptor.encoding_format_id == X86EncodingFormat.LEA
+    assert descriptors["x86.scalar.jmp"].encoding_format_id == X86EncodingFormat.DIRECT_BRANCH
 
 
 def test_view_target_generation_rejects_direct_source_output() -> None:

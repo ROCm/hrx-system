@@ -31,6 +31,12 @@ iree_py_library(
 )
 
 iree_py_library(
+    name = "encoding",
+    srcs = ["encoding.py"],
+    deps = [":package_init"],
+)
+
+iree_py_library(
     name = "dialect",
     srcs = ["dialect.py"],
     deps = [
@@ -53,6 +59,7 @@ iree_py_library(
         "descriptors/simd128.py",
     ],
     deps = [
+        ":encoding",
         ":target_info",
         "//loom/py/loom/target:low_descriptors",
         "//loom/py/loom/target/arch:package",

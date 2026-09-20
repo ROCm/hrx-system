@@ -30,6 +30,11 @@ from loom.gen.target.low.low_descriptors import (  # noqa: E402
     generate_descriptor_set_family,
     write_descriptor_set_to_paths,
 )
+from loom.target.arch.x86.encoding import (  # noqa: E402
+    X86_ENCODING_ID_FORCE_32_BIT,
+    X86_ENCODING_ID_OPCODE_MASK,
+    X86EncodingFormat,
+)
 from loom.target.arch.x86.target_info import (  # noqa: E402
     X86DescriptorSetInfo,
     x86_descriptor_set_info_by_generator_target,
@@ -47,6 +52,36 @@ from loom.target.low_descriptors import (  # noqa: E402
 )
 
 _T = TypeVar("_T", RegClass, Resource, ScheduleClass, EnumDomain)
+
+
+def _generate_encoding_header() -> str:
+    lines = [
+        "// Copyright 2026 The IREE Authors",
+        "//",
+        "// Licensed under the Apache License v2.0 with LLVM Exceptions.",
+        "// See https://llvm.org/LICENSE.txt for license information.",
+        "// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception",
+        "",
+        "// Generated x86 target-low native encoding identities.",
+        "",
+        "#ifndef LOOM_TARGET_ARCH_X86_DESCRIPTORS_ENCODING_DEFS_H_",
+        "#define LOOM_TARGET_ARCH_X86_DESCRIPTORS_ENCODING_DEFS_H_",
+        "",
+        "enum loom_x86_encoding_format_e {",
+    ]
+    lines.extend(f"  LOOM_X86_ENCODING_FORMAT_{encoding_format.name} = {int(encoding_format)}u," for encoding_format in X86EncodingFormat)
+    lines.extend(
+        [
+            "};",
+            "",
+            f"#define LOOM_X86_ENCODING_ID_FORCE_32_BIT {X86_ENCODING_ID_FORCE_32_BIT}u",
+            f"#define LOOM_X86_ENCODING_ID_OPCODE_MASK {X86_ENCODING_ID_OPCODE_MASK}u",
+            "",
+            "#endif  // LOOM_TARGET_ARCH_X86_DESCRIPTORS_ENCODING_DEFS_H_",
+            "",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def _parse_view_headers(values: Sequence[str]) -> dict[str, Path]:
@@ -144,7 +179,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=[],
         help="Generated descriptor view header as <target>=<path>.",
     )
+    parser.add_argument(
+        "--encoding-header",
+        type=Path,
+        help="Optional generated C header for x86 native encoding identities.",
+    )
     args = parser.parse_args(argv)
+
+    if args.encoding_header is not None:
+        write_text_file(args.encoding_header, _generate_encoding_header())
 
     view_headers = _parse_view_headers(args.view_header)
     descriptor_set_info = x86_descriptor_set_info_by_generator_target(args.target)

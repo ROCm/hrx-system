@@ -22,6 +22,7 @@ iree_py_library(
     loom::py::loom::gen::target::low::low_descriptors
     loom::py::loom::target::descriptor_sets
     loom::py::loom::target::arch::x86::descriptors
+    loom::py::loom::target::arch::x86::encoding
     loom::py::loom::target::arch::x86::target_info
 )
 
@@ -37,6 +38,7 @@ iree_py_test(
     "loom.gen.target.arch.x86.x86_descriptors_test"
   DEPS
     loom::py::loom::gen::target::arch::x86::low_descriptor_shard
+    loom::py::loom::target::arch::x86::encoding
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
