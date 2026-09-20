@@ -186,3 +186,76 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(1, 1, 1) workgr
   s_waitcnt {vmcnt = 0}
   return
 }
+
+// ====
+
+amdgpu.target<gfx950> @target
+
+kernel.def target(@target) @async_gather_uniform_source() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %position: index) {
+  %slot = index.assume %position [range(%position, 0, 63)] : index
+  %buffer_base = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%buffer_base] : buffer -> view<64x4xi8>
+  %source = view.subview %source_base[%slot, 0] : view<64x4xi8> -> view<1x4xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest = buffer.view %scratch[%buffer_base] : buffer -> view<64x1x4xi8>
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x4xi8> to view<64x1x4xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @async_gather_uniform_source(%slot: reg<amdgpu.sgpr>) asm {
+  %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
+  %16 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
+  %18 = v_mov_b32_copy %slot
+  %19 = v_lshlrev_b32_src0_inline %18, 2
+  %20 = s_mov_b32_m0_imm 0
+  global_load_lds_dword_saddr %19, %global, %20
+  s_waitcnt {vmcnt = 0}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx950> @target
+
+kernel.def target(@target) @async_gather_uniform_row() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %row_input: index) {
+  %row = index.assume %row_input [range(%row_input, 0, 15)] : index
+  %lane = kernel.workitem.id<x> : index
+  %buffer_base = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%buffer_base] : buffer -> view<16x64x4xi8>
+  %source = view.subview %source_base[%row, %lane, 0] : view<16x64x4xi8> -> view<1x1x4xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest = buffer.view %scratch[%buffer_base] : buffer -> view<64x1x1x4xi8>
+  %copy = kernel.async.gather %source to %dest {cache_scope = device, cache_temporal = regular} : view<1x1x4xi8> to view<64x1x1x4xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @async_gather_uniform_row(%row: reg<amdgpu.sgpr>) asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4096} : reg<amdgpu.sgpr x2>
+  %18 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
+  %20 = v_mov_b32_copy %row
+  %21 = v_lshl_add_u32_shift_imm %20, %lane, 6
+  %22 = v_lshlrev_b32_src0_inline %21, 2
+  %23 = s_mov_b32_m0_imm 0
+  global_load_lds_dword_saddr %22, %global, %23
+  s_waitcnt {vmcnt = 0}
+  return
+}

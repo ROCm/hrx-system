@@ -19,6 +19,7 @@
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/legality.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
+#include "loom/target/arch/amdgpu/lower/source_value_analysis.h"
 #include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/planning/wait_packets.h"
@@ -686,54 +687,30 @@ static bool loom_amdgpu_atomic_value_can_feed_vgpr_operand(
 }
 
 static loom_amdgpu_atomic_payload_placement_flags_t
-loom_amdgpu_atomic_payload_placement_from_source_facts(
+loom_amdgpu_atomic_payload_placement_from_analysis(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,
+    loom_amdgpu_source_value_analysis_t* analysis,
     const loom_amdgpu_atomic_source_t* atomic_source) {
   loom_amdgpu_atomic_payload_placement_flags_t flags = 0;
   if (atomic_source->operation_kind == LOOM_AMDGPU_ATOMIC_OPERATION_CMPXCHG) {
-    if (loom_amdgpu_source_value_prefers_vgpr(module, fact_table, view_regions,
-                                              atomic_source->expected)) {
+    if (loom_amdgpu_analyzed_source_value_prefers_vgpr(
+            module, fact_table, view_regions, analysis,
+            atomic_source->expected)) {
       flags |= LOOM_AMDGPU_ATOMIC_PAYLOAD_EXPECTED_PREFERS_VGPR;
     }
-    if (loom_amdgpu_source_value_prefers_vgpr(module, fact_table, view_regions,
-                                              atomic_source->replacement)) {
+    if (loom_amdgpu_analyzed_source_value_prefers_vgpr(
+            module, fact_table, view_regions, analysis,
+            atomic_source->replacement)) {
       flags |= LOOM_AMDGPU_ATOMIC_PAYLOAD_REPLACEMENT_PREFERS_VGPR;
     }
     return flags;
   }
-  if (loom_amdgpu_source_value_prefers_vgpr(module, fact_table, view_regions,
-                                            atomic_source->value)) {
+  if (loom_amdgpu_analyzed_source_value_prefers_vgpr(
+          module, fact_table, view_regions, analysis, atomic_source->value)) {
     flags |= LOOM_AMDGPU_ATOMIC_PAYLOAD_VALUE_PREFERS_VGPR;
   }
   return flags;
-}
-
-static iree_status_t loom_amdgpu_atomic_payload_placement_from_context(
-    loom_low_lower_context_t* context,
-    const loom_amdgpu_atomic_source_t* atomic_source,
-    loom_amdgpu_atomic_payload_placement_flags_t* out_flags) {
-  *out_flags = 0;
-  bool prefers_vgpr = false;
-  if (atomic_source->operation_kind == LOOM_AMDGPU_ATOMIC_OPERATION_CMPXCHG) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_context_value_prefers_vgpr(
-        context, atomic_source->expected, &prefers_vgpr));
-    if (prefers_vgpr) {
-      *out_flags |= LOOM_AMDGPU_ATOMIC_PAYLOAD_EXPECTED_PREFERS_VGPR;
-    }
-    IREE_RETURN_IF_ERROR(loom_amdgpu_context_value_prefers_vgpr(
-        context, atomic_source->replacement, &prefers_vgpr));
-    if (prefers_vgpr) {
-      *out_flags |= LOOM_AMDGPU_ATOMIC_PAYLOAD_REPLACEMENT_PREFERS_VGPR;
-    }
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(loom_amdgpu_context_value_prefers_vgpr(
-      context, atomic_source->value, &prefers_vgpr));
-  if (prefers_vgpr) {
-    *out_flags |= LOOM_AMDGPU_ATOMIC_PAYLOAD_VALUE_PREFERS_VGPR;
-  }
-  return iree_ok_status();
 }
 
 static bool loom_amdgpu_atomic_memory_space_candidate_index(
@@ -1293,6 +1270,7 @@ static bool loom_amdgpu_atomic_select(
     loom_func_like_t source_function,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_view_region_table_t* view_regions,
+    loom_amdgpu_source_value_analysis_t* analysis,
     const loom_amdgpu_source_alloca_layout_t* alloca_layout,
     const loom_amdgpu_atomic_source_t* atomic_source,
     loom_amdgpu_atomic_selection_t* out_selection,
@@ -1379,14 +1357,16 @@ static bool loom_amdgpu_atomic_select(
       .source = out_selection->source,
       .address_form = out_selection->address_form,
   };
-  if (!loom_amdgpu_memory_access_select_dynamic_term_kinds(
-          module, /*fact_table=*/NULL, /*view_regions=*/NULL, &memory_access,
-          memory_diagnostic)) {
-    return false;
-  }
   if (out_selection->source.memory_space ==
       LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) {
-    loom_amdgpu_memory_access_route_dynamic_terms_through_vaddr(&memory_access);
+    if (!loom_amdgpu_memory_access_select_vaddr_dynamic_terms(
+            module, &memory_access, memory_diagnostic)) {
+      return false;
+    }
+  } else if (!loom_amdgpu_memory_access_select_dynamic_term_kinds(
+                 module, fact_table, view_regions, analysis, &memory_access,
+                 memory_diagnostic)) {
+    return false;
   }
   for (iree_host_size_t i = 0; i < LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY;
        ++i) {
@@ -1595,15 +1575,20 @@ iree_status_t loom_amdgpu_select_atomic_plan(
   const loom_view_region_table_t* view_regions = NULL;
   IREE_RETURN_IF_ERROR(
       loom_low_lower_context_view_regions(context, &view_regions));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_atomic_payload_placement_from_context(
-      context, &atomic_source, &atomic_source.payload_placement_flags));
+  loom_amdgpu_source_value_analysis_t* analysis = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_source_value_analysis_for_context(context, &analysis));
+  atomic_source.payload_placement_flags =
+      loom_amdgpu_atomic_payload_placement_from_analysis(
+          module, loom_low_lower_context_fact_table(context), view_regions,
+          analysis, &atomic_source);
   const loom_amdgpu_source_alloca_layout_t* alloca_layout = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_for_lower_context(
       context, &alloca_layout));
   const bool selected = loom_amdgpu_atomic_select(
       module, loom_low_lower_context_fact_table(context),
       loom_low_lower_context_source_function(context),
-      loom_low_lower_context_descriptor_set(context), view_regions,
+      loom_low_lower_context_descriptor_set(context), view_regions, analysis,
       alloca_layout, &atomic_source, &selection, &source_diagnostic,
       &memory_diagnostic, &diagnostic);
   if (!selected) {
@@ -2020,17 +2005,21 @@ iree_status_t loom_amdgpu_low_legality_verify_atomic(
   loom_amdgpu_atomic_diagnostic_t diagnostic = {0};
   const loom_view_region_table_t* view_regions =
       loom_target_low_legality_view_regions(context);
+  loom_amdgpu_source_value_analysis_t* analysis = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_source_value_analysis_for_target_low_legality(context,
+                                                                &analysis));
   atomic_source.payload_placement_flags =
-      loom_amdgpu_atomic_payload_placement_from_source_facts(
+      loom_amdgpu_atomic_payload_placement_from_analysis(
           module, loom_target_low_legality_fact_table(context), view_regions,
-          &atomic_source);
+          analysis, &atomic_source);
   const loom_amdgpu_source_alloca_layout_t* alloca_layout = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_for_low_legality(
       context, &alloca_layout));
   const bool selected = loom_amdgpu_atomic_select(
       module, loom_target_low_legality_fact_table(context),
       loom_target_low_legality_function(context),
-      loom_target_low_legality_descriptor_set(context), view_regions,
+      loom_target_low_legality_descriptor_set(context), view_regions, analysis,
       alloca_layout, &atomic_source, &selection, &source_diagnostic,
       &memory_diagnostic, &diagnostic);
   if (selected) {

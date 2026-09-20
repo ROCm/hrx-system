@@ -238,18 +238,8 @@ static bool loom_amdgpu_async_gather_select_source(
       .source = selection->source,
       .address_form = LOOM_AMDGPU_MEMORY_ADDRESS_FORM_GLOBAL_SADDR,
   };
-  if (!loom_amdgpu_memory_access_select_dynamic_term_kinds(
-          module, /*fact_table=*/NULL, /*view_regions=*/NULL, &access,
-          &diagnostic->memory_diagnostic)) {
-    diagnostic->rejection_bits |=
-        LOOM_AMDGPU_ASYNC_GATHER_REJECTION_SOURCE_ADDRESS;
-    return false;
-  }
-  for (uint8_t i = 0; i < access.source.dynamic_term_count; ++i) {
-    if (access.dynamic_term_kinds[i] !=
-        LOOM_AMDGPU_MEMORY_DYNAMIC_INDEX_SOFFSET) {
-      continue;
-    }
+  if (!loom_amdgpu_memory_access_select_vaddr_dynamic_terms(
+          module, &access, &diagnostic->memory_diagnostic)) {
     diagnostic->rejection_bits |=
         LOOM_AMDGPU_ASYNC_GATHER_REJECTION_SOURCE_ADDRESS;
     return false;
@@ -548,8 +538,7 @@ static bool loom_amdgpu_cluster_gather_select(
   }
 
   if (!loom_amdgpu_memory_access_select_u32_vaddr_byte_offset(
-          module, fact_table, view_regions, alloca_layout, &source,
-          &out_selection->source_address,
+          module, alloca_layout, &source, &out_selection->source_address,
           &out_diagnostic->source_address_diagnostic)) {
     out_diagnostic->rejection_bits |=
         LOOM_AMDGPU_CLUSTER_GATHER_REJECTION_SOURCE_ADDRESS;
@@ -561,8 +550,7 @@ static bool loom_amdgpu_cluster_gather_select(
       out_selection->packet_byte_count;
 
   if (!loom_amdgpu_memory_access_select_u32_vaddr_byte_offset(
-          module, fact_table, view_regions, alloca_layout, &dest,
-          &out_selection->dest_address,
+          module, alloca_layout, &dest, &out_selection->dest_address,
           &out_diagnostic->dest_address_diagnostic)) {
     out_diagnostic->rejection_bits |=
         LOOM_AMDGPU_CLUSTER_GATHER_REJECTION_DEST_ADDRESS;

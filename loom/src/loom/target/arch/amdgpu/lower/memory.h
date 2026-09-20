@@ -28,6 +28,8 @@ extern "C" {
 
 typedef struct loom_amdgpu_source_alloca_layout_t
     loom_amdgpu_source_alloca_layout_t;
+typedef struct loom_amdgpu_source_value_analysis_t
+    loom_amdgpu_source_value_analysis_t;
 
 // Bounded caller-owned workspace for selecting one direct memory plan. The
 // workspace lives only for one selection call and is never retained.
@@ -164,11 +166,13 @@ bool loom_amdgpu_source_memory_offset_fits_u32(
     int64_t static_byte_offset);
 
 // Selects a complete AMDGPU memory packet sequence from source IR and facts
-// into caller-owned bounded workspace.
+// into caller-owned bounded workspace. Operand paths use the same retained
+// source placement as value mapping.
 bool loom_amdgpu_memory_access_plan_select(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_view_region_table_t* view_regions,
+    loom_amdgpu_source_value_analysis_t* analysis,
     loom_func_like_t source_function, const loom_target_bundle_t* bundle,
     loom_amdgpu_instruction_constraint_bits_t instruction_constraints,
     const loom_amdgpu_source_alloca_layout_t* alloca_layout,
@@ -195,8 +199,7 @@ bool loom_amdgpu_memory_access_select_flat_global_address(
 // result to loom_amdgpu_emit_memory_vaddr with no base value to materialize the
 // exact u32 memory-space-relative byte offset.
 bool loom_amdgpu_memory_access_select_u32_vaddr_byte_offset(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    const loom_view_region_table_t* view_regions,
+    const loom_module_t* module,
     const loom_amdgpu_source_alloca_layout_t* alloca_layout,
     const loom_low_source_memory_access_plan_t* source,
     loom_amdgpu_memory_access_t* out_access,
@@ -214,7 +217,15 @@ bool loom_amdgpu_memory_access_include_alloca_root_byte_offset(
 bool loom_amdgpu_memory_access_select_dynamic_term_kinds(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,
+    loom_amdgpu_source_value_analysis_t* analysis,
     loom_amdgpu_memory_access_t* access,
+    loom_amdgpu_memory_access_diagnostic_t* diagnostic);
+
+// Selects dynamic terms for packets with only a VGPR byte-address operand.
+// Scalar source values can be broadcast to VADDR without changing their
+// placement. The caller owns the offset-width proof for the selected packet.
+bool loom_amdgpu_memory_access_select_vaddr_dynamic_terms(
+    const loom_module_t* module, loom_amdgpu_memory_access_t* access,
     loom_amdgpu_memory_access_diagnostic_t* diagnostic);
 
 // Routes all dynamic source terms through the VGPR byte-address operand.

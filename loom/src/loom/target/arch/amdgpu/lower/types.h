@@ -264,16 +264,6 @@ bool loom_amdgpu_low_value_is_register_class_count(
 loom_type_t loom_amdgpu_low_register_lane_type(const loom_module_t* module,
                                                loom_value_id_t low_value);
 
-// Returns true when the source value should prefer a VGPR mapping even if its
-// scalar type could otherwise map to an SGPR. Fact and view-region tables
-// enable placement-sensitive proofs for values such as read-only scalar memory
-// loads; pass NULL for both tables only on callers that intentionally need the
-// conservative module-local answer.
-bool loom_amdgpu_source_value_prefers_vgpr(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    const loom_view_region_table_t* view_regions,
-    loom_value_id_t source_value_id);
-
 // Returns true when the source value is an i1 represented by an EXEC-width
 // native lane mask using the supplied fact and view-region context.
 bool loom_amdgpu_source_value_is_native_i1_mask(

@@ -9,6 +9,7 @@
 #include "loom/ops/view/ops.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
+#include "loom/target/arch/amdgpu/lower/source_value_analysis.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
@@ -76,6 +77,7 @@ static bool loom_amdgpu_prefetch_static_offset_split(
 static bool loom_amdgpu_prefetch_select_dynamic_index(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,
+    loom_amdgpu_source_value_analysis_t* analysis,
     loom_amdgpu_prefetch_plan_t* plan) {
   if (!loom_low_source_memory_access_is_dynamic(&plan->source)) {
     return true;
@@ -101,8 +103,8 @@ static bool loom_amdgpu_prefetch_select_dynamic_index(
       plan->dynamic_term_kind = LOOM_AMDGPU_MEMORY_DYNAMIC_INDEX_SOFFSET;
       return true;
     case LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE:
-      if (loom_amdgpu_source_value_prefers_vgpr(module, fact_table,
-                                                view_regions, term->index)) {
+      if (loom_amdgpu_analyzed_source_value_prefers_vgpr(
+              module, fact_table, view_regions, analysis, term->index)) {
         return false;
       }
       plan->dynamic_term_kind = LOOM_AMDGPU_MEMORY_DYNAMIC_INDEX_SOFFSET;
@@ -154,7 +156,8 @@ static bool loom_amdgpu_prefetch_memory_space_is_buffer_backed(
 static bool loom_amdgpu_prefetch_select_source(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_view_region_table_t* view_regions, const loom_op_t* source_op,
+    const loom_view_region_table_t* view_regions,
+    loom_amdgpu_source_value_analysis_t* analysis, const loom_op_t* source_op,
     loom_amdgpu_prefetch_plan_t* out_plan,
     const loom_low_descriptor_t** out_descriptor,
     iree_string_view_t* out_decision_key) {
@@ -202,8 +205,8 @@ static bool loom_amdgpu_prefetch_select_source(
     *out_decision_key = IREE_SV("prefetch.memory_space");
     return false;
   }
-  if (!loom_amdgpu_prefetch_select_dynamic_index(module, fact_table,
-                                                 view_regions, out_plan)) {
+  if (!loom_amdgpu_prefetch_select_dynamic_index(
+          module, fact_table, view_regions, analysis, out_plan)) {
     *out_decision_key = IREE_SV("prefetch.dynamic_index");
     return false;
   }
@@ -233,13 +236,16 @@ static iree_status_t loom_amdgpu_prefetch_select(
   const loom_view_region_table_t* view_regions = NULL;
   IREE_RETURN_IF_ERROR(
       loom_low_lower_context_view_regions(context, &view_regions));
+  loom_amdgpu_source_value_analysis_t* analysis = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_source_value_analysis_for_context(context, &analysis));
   const loom_low_descriptor_set_t* descriptor_set =
       loom_low_lower_context_descriptor_set(context);
   const loom_low_descriptor_t* descriptor = NULL;
   iree_string_view_t unused_decision_key = iree_string_view_empty();
-  if (!loom_amdgpu_prefetch_select_source(module, fact_table, descriptor_set,
-                                          view_regions, source_op, out_plan,
-                                          &descriptor, &unused_decision_key)) {
+  if (!loom_amdgpu_prefetch_select_source(
+          module, fact_table, descriptor_set, view_regions, analysis, source_op,
+          out_plan, &descriptor, &unused_decision_key)) {
     return iree_ok_status();
   }
   out_plan->descriptor.descriptor = descriptor;
@@ -262,13 +268,17 @@ iree_status_t loom_amdgpu_record_view_prefetch_diagnostic(
 
   const loom_view_region_table_t* view_regions =
       loom_target_low_legality_view_regions(context);
+  loom_amdgpu_source_value_analysis_t* analysis = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_source_value_analysis_for_target_low_legality(context,
+                                                                &analysis));
   loom_amdgpu_prefetch_plan_t plan = {0};
   const loom_low_descriptor_t* descriptor = NULL;
   iree_string_view_t decision_key = iree_string_view_empty();
   const bool selected = loom_amdgpu_prefetch_select_source(
       loom_target_low_legality_module(context),
       loom_target_low_legality_fact_table(context), descriptor_set,
-      view_regions, source_op, &plan, &descriptor, &decision_key);
+      view_regions, analysis, source_op, &plan, &descriptor, &decision_key);
   const iree_string_view_t packet_key =
       descriptor ? loom_low_descriptor_set_string(descriptor_set,
                                                   descriptor->key_string_offset)

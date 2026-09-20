@@ -1068,14 +1068,6 @@ static bool loom_amdgpu_source_value_prefers_vgpr_impl(
              module, fact_table, view_regions, analysis, operand);
 }
 
-bool loom_amdgpu_source_value_prefers_vgpr(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    const loom_view_region_table_t* view_regions,
-    loom_value_id_t source_value_id) {
-  return loom_amdgpu_source_value_prefers_vgpr_impl(
-      module, fact_table, view_regions, /*analysis=*/NULL, source_value_id);
-}
-
 bool loom_amdgpu_analyzed_source_value_prefers_vgpr(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,

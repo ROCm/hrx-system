@@ -12,6 +12,7 @@
 #include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/lower/legality.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
+#include "loom/target/arch/amdgpu/lower/source_value_analysis.h"
 #include "loom/target/arch/amdgpu/lower/topology.h"
 
 static iree_string_view_t loom_amdgpu_cache_policy_scope_param(
@@ -94,6 +95,10 @@ iree_status_t loom_amdgpu_low_legality_verify_memory(
   loom_amdgpu_memory_access_diagnostic_t diagnostic = {0};
   const loom_view_region_table_t* view_regions =
       loom_target_low_legality_view_regions(context);
+  loom_amdgpu_source_value_analysis_t* analysis = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_source_value_analysis_for_target_low_legality(context,
+                                                                &analysis));
   const loom_amdgpu_source_alloca_layout_t* alloca_layout = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_for_low_legality(
       context, &alloca_layout));
@@ -103,9 +108,10 @@ iree_status_t loom_amdgpu_low_legality_verify_memory(
   IREE_ASSERT(target_facts != NULL);
   if (!loom_amdgpu_memory_access_plan_select(
           module, loom_target_low_legality_fact_table(context), descriptor_set,
-          view_regions, loom_target_low_legality_function(context), bundle,
-          target_facts->properties.instruction_constraints, alloca_layout, op,
-          &source, &selection, &source_diagnostic, &diagnostic)) {
+          view_regions, analysis, loom_target_low_legality_function(context),
+          bundle, target_facts->properties.instruction_constraints,
+          alloca_layout, op, &source, &selection, &source_diagnostic,
+          &diagnostic)) {
     bool handled = false;
     if (diagnostic.rejection_bits != 0) {
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_memory_access_rejection_diagnostic(
