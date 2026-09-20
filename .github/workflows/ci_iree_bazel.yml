@@ -81,6 +81,14 @@ jobs:
             host_cxx: clang++
             install_compiler_rt: false
             setup_python: true
+          - name: Linux / libamdf / ThinLTO
+            command: iree-bazel-libamdf-thinlto
+            container_image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+            host_ar: llvm-ar
+            host_cc: clang
+            host_cxx: clang++
+            install_compiler_rt: false
+            setup_python: true
           - name: Linux / CPU / ASAN
             command: iree-bazel-cpu-asan
             container_image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98

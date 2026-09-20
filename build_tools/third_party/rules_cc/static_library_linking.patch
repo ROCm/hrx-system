@@ -1,0 +1,248 @@
+diff --git a/cc/private/rules_impl/cc_static_library.bzl b/cc/private/rules_impl/cc_static_library.bzl
+--- a/cc/private/rules_impl/cc_static_library.bzl
++++ b/cc/private/rules_impl/cc_static_library.bzl
+@@ -19,6 +19,8 @@
+ load("//cc/common:cc_common.bzl", "cc_common")
+ load("//cc/common:cc_helper.bzl", "artifact_category")
+ load("//cc/common:cc_info.bzl", "CcInfo")
++load("//cc/private/compile:lto_compilation_context.bzl", "merge_lto_compilation_contexts")
++load("//cc/private/link:create_library_to_link.bzl", "make_library_to_link")
+
+ def _declare_static_library(*, name, actions, cc_toolchain):
+     basename = paths.basename(name)
+@@ -33,16 +35,59 @@
+     transitive_linker_inputs = [dep[CcInfo].linking_context.linker_inputs for dep in deps]
+     return depset(transitive = transitive_linker_inputs, order = "topological")
+
+-def _flatten_and_get_objects(linker_inputs):
+-    # Flattening a depset to get the action inputs.
+-    transitive_objects = []
++def _collect_archive_inputs(linker_inputs):
++    # Preserve the metadata for exactly the object variant placed in the archive.
++    # ThinLTO consumers need the original bitcode, compile flags, and reusable
++    # non-indexed backends; importing the archive alone loses these identities.
++    objects = []
++    lto_contexts = []
++    all_pic = True
++    must_keep_debug = False
++    shared_non_lto_backends = {}
++    libraries = []
++    user_link_flags = []
++    additional_inputs = []
++    linkstamps = []
+     for linker_input in linker_inputs.to_list():
++        user_link_flags.extend(linker_input.user_link_flags)
++        additional_inputs.extend(linker_input.additional_inputs)
++        linkstamps.extend(linker_input.linkstamps)
+         for lib in linker_input.libraries:
+-            if lib._contains_objects:
+-                transitive_objects.append(depset(lib.pic_objects))
+-                transitive_objects.append(depset(lib.objects))
+-
+-    return depset(transitive = transitive_objects, order = "topological")
++            if not lib._contains_objects:
++                libraries.append(lib)
++                continue
++            must_keep_debug = must_keep_debug or lib._must_keep_debug
++            if lib.pic_objects:
++                objects.append(depset(lib.pic_objects))
++                lto_context = lib._pic_lto_compilation_context
++                shared_non_lto_backends.update(lib._pic_shared_non_lto_backends or {})
++            else:
++                all_pic = all_pic and not lib.objects
++                objects.append(depset(lib.objects))
++                lto_context = lib._lto_compilation_context
++                shared_non_lto_backends.update(lib._shared_non_lto_backends or {})
++            if lto_context:
++                lto_contexts.append(lto_context)
++    return struct(
++        # Exact archived object files in link order.
++        objects = depset(transitive = objects, order = "topological"),
++        # Whether every archived object came from a PIC variant.
++        all_pic = all_pic,
++        # Whether an archived component requires debug information at final link.
++        must_keep_debug = must_keep_debug,
++        # Original minimized bitcode and backend flags for the selected objects.
++        lto_context = merge_lto_compilation_contexts(lto_compilation_contexts = lto_contexts),
++        # Producer-owned backend artifacts for links without per-binary indexing.
++        shared_non_lto_backends = shared_non_lto_backends,
++        # Native libraries whose contents were not folded into the archive.
++        libraries = libraries,
++        # Ordered flags from both archived and residual linker inputs.
++        user_link_flags = user_link_flags,
++        # Non-code inputs required by the final link.
++        additional_inputs = depset(additional_inputs),
++        # Link-time compilations retained from the component linking contexts.
++        linkstamps = depset(linkstamps),
++    )
+
+ def _archive_objects(*, name, actions, cc_toolchain, feature_configuration, objects):
+     static_library = _declare_static_library(
+@@ -188,13 +233,14 @@
+     )
+
+     linker_inputs = _collect_linker_inputs(ctx.attr.deps)
++    archive_inputs = _collect_archive_inputs(linker_inputs)
+
+     static_library = _archive_objects(
+         name = ctx.label.name,
+         actions = ctx.actions,
+         cc_toolchain = cc_toolchain,
+         feature_configuration = feature_configuration,
+-        objects = _flatten_and_get_objects(linker_inputs),
++        objects = archive_inputs.objects,
+     )
+
+     linkdeps_file = _format_linker_inputs(
+@@ -231,7 +277,43 @@
+         for dep in ctx.attr.deps
+     ])
+
++    # A single archive may contain ordinary objects when a dependency has no
++    # PIC variant. Only advertise it as PIC when every archived object is PIC.
++    if archive_inputs.all_pic:
++        library_fields = dict(
++            pic_static_library = static_library,
++            pic_objects = archive_inputs.objects.to_list(),
++            _pic_lto_compilation_context = archive_inputs.lto_context,
++            _pic_shared_non_lto_backends = archive_inputs.shared_non_lto_backends,
++        )
++    else:
++        library_fields = dict(
++            static_library = static_library,
++            objects = archive_inputs.objects.to_list(),
++            _lto_compilation_context = archive_inputs.lto_context,
++            _shared_non_lto_backends = archive_inputs.shared_non_lto_backends,
++        )
++    library = make_library_to_link(
++        _library_identifier = paths.replace_extension(static_library.short_path, ""),
++        _contains_objects = True,
++        _must_keep_debug = archive_inputs.must_keep_debug,
++        **library_fields
++    )
++
++    # Attach native requirements to the archive's own linker input. Shared
++    # library composition can discard flag-only inputs with no library attached.
++    linking_context = cc_common.create_linking_context(
++        linker_inputs = depset([cc_common.create_linker_input(
++            owner = ctx.label,
++            libraries = depset([library] + archive_inputs.libraries),
++            user_link_flags = archive_inputs.user_link_flags,
++            additional_inputs = archive_inputs.additional_inputs,
++            linkstamps = archive_inputs.linkstamps,
++        )]),
++    )
++
+     return [
++        CcInfo(linking_context = linking_context),
+         DefaultInfo(
+             files = depset([static_library]),
+             runfiles = runfiles,
+@@ -247,6 +329,11 @@
+ <p>The resulting static library contains the object files of the targets listed in
+ <code>deps</code> as well as their transitive dependencies, with preference given to
+ <code>PIC</code> objects.</p>
++
++<p>The target provides <code>CcInfo</code> for direct use by C++ link rules. It
++retains the archived objects and their ThinLTO compilation metadata, together
++with remaining native libraries, link flags, additional inputs, and linkstamps.
++Compilation headers and include paths are not re-exported.</p>
+
+ <h4 id="cc_static_library_output_groups">Output groups</h4>
+
+@@ -295,6 +382,7 @@
+ """,
+         ),
+     },
++    provides = [CcInfo],
+     toolchains = use_cc_toolchain(),
+     fragments = ["cpp"],
+ )
+diff --git a/cc/private/rules_impl/cc_shared_library_impl.bzl b/cc/private/rules_impl/cc_shared_library_impl.bzl
+--- a/cc/private/rules_impl/cc_shared_library_impl.bzl
++++ b/cc/private/rules_impl/cc_shared_library_impl.bzl
+@@ -22,6 +22,7 @@
+ load("//cc/common:cc_shared_library_info.bzl", "CcSharedLibraryInfo")
+ load("//cc/common:semantics.bzl", "semantics")
+ load("//cc/private:graph_node_info.bzl", "GraphNodeInfo")
++load("//cc/private/link:create_library_to_link.bzl", "make_library_to_link")
+ load(":function_providing_rule.bzl", "wrap_starlark_function")
+
+ # TODO(#5200): Add export_define to library_to_link and cc_library
+@@ -255,23 +256,29 @@
+         return True
+     return False
+
+-def _wrap_static_library_with_alwayslink(ctx, feature_configuration, cc_toolchain, linker_input):
++def _wrap_static_library_with_alwayslink(linker_input):
+     new_libraries_to_link = []
+     for old_library_to_link in linker_input.libraries:
+         if _is_dynamic_only(old_library_to_link):
+             new_libraries_to_link.append(old_library_to_link)
+             continue
+-        new_library_to_link = cc_common.create_library_to_link(
+-            actions = ctx.actions,
+-            feature_configuration = feature_configuration,
+-            cc_toolchain = cc_toolchain,
++
++        # Whole-archive selection changes link semantics, not compilation.
++        # Keep the original object identities and already registered backends.
++        new_library_to_link = make_library_to_link(
+             static_library = old_library_to_link.static_library,
+             objects = old_library_to_link.objects,
+             pic_static_library = old_library_to_link.pic_static_library,
+             pic_objects = old_library_to_link.pic_objects,
+-            lto_compilation_context = old_library_to_link._lto_compilation_context,
+-            pic_lto_compilation_context = old_library_to_link._pic_lto_compilation_context,
+             alwayslink = True,
++            _library_identifier = old_library_to_link._library_identifier,
++            _contains_objects = old_library_to_link._contains_objects,
++            _must_keep_debug = old_library_to_link._must_keep_debug,
++            _disable_whole_archive = old_library_to_link._disable_whole_archive,
++            _lto_compilation_context = old_library_to_link._lto_compilation_context,
++            _pic_lto_compilation_context = old_library_to_link._pic_lto_compilation_context,
++            _shared_non_lto_backends = old_library_to_link._shared_non_lto_backends,
++            _pic_shared_non_lto_backends = old_library_to_link._pic_shared_non_lto_backends,
+         )
+         new_libraries_to_link.append(new_library_to_link)
+
+@@ -280,6 +287,7 @@
+         libraries = depset(direct = new_libraries_to_link),
+         user_link_flags = linker_input.user_link_flags,
+         additional_inputs = depset(direct = linker_input.additional_inputs),
++        linkstamps = depset(direct = linker_input.linkstamps),
+     )
+
+ def _check_if_target_under_path(value, pattern):
+@@ -350,8 +358,6 @@
+
+ def _filter_inputs(
+         ctx,
+-        feature_configuration,
+-        cc_toolchain,
+         deps,
+         transitive_exports,
+         link_once_static_libs_map):
+@@ -470,12 +476,7 @@
+
+             linker_input_to_be_linked_statically = linker_input
+             if owner in top_level_linker_input_labels_set:
+-                linker_input_to_be_linked_statically = _wrap_static_library_with_alwayslink(
+-                    ctx,
+-                    feature_configuration,
+-                    cc_toolchain,
+-                    linker_input,
+-                )
++                linker_input_to_be_linked_statically = _wrap_static_library_with_alwayslink(linker_input)
+             if _check_if_target_should_be_exported_with_filter(
+                 linker_input.owner,
+                 ctx.label,
+@@ -644,8 +645,6 @@
+
+     (exports, linker_inputs, curr_link_once_static_libs_set, precompiled_only_dynamic_libraries) = _filter_inputs(
+         ctx,
+-        feature_configuration,
+-        cc_toolchain,
+         deps,
+         exports_map,
+         link_once_static_libs_map,

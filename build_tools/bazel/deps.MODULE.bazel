@@ -15,13 +15,13 @@ bazel_dep(name = "rules_shell", version = "0.6.1")
 # Windows toolchains expose compiler-owned sanitizer artifacts and declare
 # whether the linker supports Bazel's automatic DLL export helper.
 # Sanitizer debug information uses compiler-specific feature flags on all hosts.
-# Flattened static archives select one object variant per implementation.
+# Flattened static archives retain the selected objects and their link metadata.
 single_version_override(
     module_name = "rules_cc",
     patch_strip = 1,
     patches = [
         "//build_tools/third_party/rules_cc:sanitizer_debug_info.patch",
-        "//build_tools/third_party/rules_cc:static_library_objects.patch",
+        "//build_tools/third_party/rules_cc:static_library_linking.patch",
         "//build_tools/third_party/rules_cc:windows_toolchain.patch",
     ],
     version = "0.2.21",

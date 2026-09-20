@@ -9,6 +9,6 @@
 
 exports_files([
     "sanitizer_debug_info.patch",
-    "static_library_objects.patch",
+    "static_library_linking.patch",
     "windows_toolchain.patch",
 ])

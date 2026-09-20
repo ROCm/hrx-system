@@ -143,6 +143,18 @@ CPU_RESOURCE_TAG_EXCLUDES = (
 NON_CPU_HAL_DRIVER_CTEST_REGEX = r"^iree/hal/drivers/(amdgpu|vulkan|webgpu)/"
 
 AMDF_BAZEL_TARGETS = ("//libamdf/...",)
+# Exercise the complete archive in a real executable and the public ABI across
+# static, shared, and runtime-loaded linkage without requiring native hardware.
+AMDF_THINLTO_BAZEL_BUILD_TARGETS = (
+    "//libamdf:amdf_static_artifact",
+    "//experimental/xdna:iree-xdna-run",
+)
+AMDF_THINLTO_BAZEL_TEST_TARGETS = ("//libamdf/cts/core:query",)
+AMDF_THINLTO_BAZEL_OPTIONS = (
+    "--//libamdf/config:enabled=true",
+    "--compilation_mode=opt",
+    "--features=thin_lto",
+)
 AMDF_BUILD_REQUIREMENT_TAG = "iree-build-requirement=libamdf"
 XDNA_RUN_REQUIREMENT_TAG = "iree-run-requirement=libamdf.resource.xdna"
 XDNA_CTEST_RESOURCE_LABEL = "runtime-resource=amd-xdna"
