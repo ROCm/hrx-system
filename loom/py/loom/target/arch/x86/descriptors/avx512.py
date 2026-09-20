@@ -78,7 +78,6 @@ from .common import (
     _vector_i32_compare_descriptor,
     _vector_lane_units,
     _vector_mask_select_descriptor,
-    _vector_memory_descriptors,
     _xmm_operand,
     _xmm_result,
     _zmm_f32_compare_descriptor,
@@ -89,6 +88,7 @@ from .common import (
     _zmm_result,
     _zmm_splat_descriptor,
 )
+from .memory import memory_descriptors
 from .scalar import X86_SCALAR_DESCRIPTOR_SET
 
 X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
@@ -693,9 +693,16 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
             semantic_tag="float.select.f32x16",
             schedule_class=_SCHEDULE_VECTOR_F32_ZMM,
         ),
-        *_vector_memory_descriptors(
+        *memory_descriptors(
             key_prefix="x86.avx512",
-            vector_bit_width=512,
+            mnemonic="vmovdqu32",
+            register_class=_REG_ZMM,
+            register_suffix="zmm",
+            semantic_type="v512",
+            width_bits=512,
+            load_schedule_class=_SCHEDULE_MEMORY_LOAD_ZMM,
+            store_schedule_class=_SCHEDULE_MEMORY_STORE_ZMM,
+            assembly_suffix="",
         ),
         Descriptor(
             key="x86.avx512.vpdpbusd.zmm",

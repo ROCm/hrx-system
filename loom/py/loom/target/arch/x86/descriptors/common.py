@@ -38,7 +38,6 @@ from loom.target.low_descriptors import (
     Immediate,
     ImmediateFlag,
     ImmediateKind,
-    MemorySpace,
     Operand,
     OperandAddressMapKind,
     OperandRole,
@@ -164,30 +163,6 @@ def _vector_compare_schedule_class(vector_bit_width: int) -> str:
             return _SCHEDULE_VECTOR_COMPARE_ZMM
         case _:
             raise ValueError(f"unsupported x86 compare vector width {vector_bit_width}")
-
-
-def _memory_load_schedule_class(vector_bit_width: int) -> str:
-    match vector_bit_width:
-        case 128:
-            return _SCHEDULE_MEMORY_LOAD_XMM
-        case 256:
-            return _SCHEDULE_MEMORY_LOAD_YMM
-        case 512:
-            return _SCHEDULE_MEMORY_LOAD_ZMM
-        case _:
-            raise ValueError(f"unsupported x86 memory vector width {vector_bit_width}")
-
-
-def _memory_store_schedule_class(vector_bit_width: int) -> str:
-    match vector_bit_width:
-        case 128:
-            return _SCHEDULE_MEMORY_STORE_XMM
-        case 256:
-            return _SCHEDULE_MEMORY_STORE_YMM
-        case 512:
-            return _SCHEDULE_MEMORY_STORE_ZMM
-        case _:
-            raise ValueError(f"unsupported x86 memory vector width {vector_bit_width}")
 
 
 def _asm(
@@ -381,133 +356,6 @@ _TARGET_BLOCK_IMMEDIATE = Immediate(
     bit_width=32,
     unsigned_max=(2**32) - 1,
 )
-
-
-def _load_effect(width_bits: int) -> Effect:
-    return Effect(
-        EffectKind.READ,
-        memory_space=MemorySpace.GENERIC,
-        flags=(EffectFlag.DEPENDENCY,),
-        width_bits=width_bits,
-    )
-
-
-def _store_effect(width_bits: int) -> Effect:
-    return Effect(
-        EffectKind.WRITE,
-        memory_space=MemorySpace.GENERIC,
-        flags=(EffectFlag.DEPENDENCY,),
-        width_bits=width_bits,
-    )
-
-
-def _vector_memory_descriptors(
-    *,
-    key_prefix: str,
-    vector_bit_width: int,
-    native_assembly_mnemonic: str | None = None,
-) -> tuple[Descriptor, ...]:
-    register_suffix = {
-        128: "xmm",
-        256: "ymm",
-        512: "zmm",
-    }.get(vector_bit_width)
-    if register_suffix is None:
-        raise ValueError(f"unsupported x86 memory vector width {vector_bit_width}")
-    static_load_key = f"{key_prefix}.vmovdqu32.load.{register_suffix}"
-    indexed_load_key = f"{key_prefix}.vmovdqu32.load.indexed.{register_suffix}"
-    static_store_key = f"{key_prefix}.vmovdqu32.store.{register_suffix}"
-    indexed_store_key = f"{key_prefix}.vmovdqu32.store.indexed.{register_suffix}"
-    return (
-        Descriptor(
-            key=static_load_key,
-            mnemonic="vmovdqu32",
-            semantic_tag=f"memory.load.v{vector_bit_width}",
-            operands=(
-                _vector_result(vector_bit_width),
-                _gpr64_resource("base"),
-            ),
-            immediates=(_DISP32_IMMEDIATE,),
-            asm_forms=_asm(
-                mnemonic=_vector_asm_mnemonic("vmovdqu32.load", vector_bit_width),
-                native_assembly_mnemonic=native_assembly_mnemonic,
-                results=("dst",),
-                operands=("base",),
-                immediates=("disp32",),
-                named_immediates=True,
-            ),
-            effects=(_load_effect(vector_bit_width),),
-            schedule_class=_memory_load_schedule_class(vector_bit_width),
-            flags=(DescriptorFlag.SIDE_EFFECTING,),
-        ),
-        Descriptor(
-            key=indexed_load_key,
-            mnemonic="vmovdqu32",
-            semantic_tag=f"memory.load.indexed.v{vector_bit_width}",
-            operands=(
-                _vector_result(vector_bit_width),
-                _gpr64_resource("base"),
-                _gpr64_resource("index"),
-            ),
-            immediates=(_DISP32_IMMEDIATE, _ADDRESS_SCALE_IMMEDIATE),
-            asm_forms=_asm(
-                mnemonic=_vector_asm_mnemonic(
-                    "vmovdqu32.load.indexed", vector_bit_width
-                ),
-                native_assembly_mnemonic=native_assembly_mnemonic,
-                results=("dst",),
-                operands=("base", "index"),
-                immediates=("disp32", "scale"),
-                named_immediates=True,
-            ),
-            effects=(_load_effect(vector_bit_width),),
-            schedule_class=_memory_load_schedule_class(vector_bit_width),
-            flags=(DescriptorFlag.SIDE_EFFECTING,),
-        ),
-        Descriptor(
-            key=static_store_key,
-            mnemonic="vmovdqu32",
-            semantic_tag=f"memory.store.v{vector_bit_width}",
-            operands=(
-                _vector_operand(vector_bit_width, "value"),
-                _gpr64_resource("base"),
-            ),
-            immediates=(_DISP32_IMMEDIATE,),
-            asm_forms=_asm(
-                mnemonic=_vector_asm_mnemonic("vmovdqu32.store", vector_bit_width),
-                native_assembly_mnemonic=native_assembly_mnemonic,
-                operands=("value", "base"),
-                immediates=("disp32",),
-                named_immediates=True,
-            ),
-            effects=(_store_effect(vector_bit_width),),
-            schedule_class=_memory_store_schedule_class(vector_bit_width),
-            flags=(DescriptorFlag.SIDE_EFFECTING,),
-        ),
-        Descriptor(
-            key=indexed_store_key,
-            mnemonic="vmovdqu32",
-            semantic_tag=f"memory.store.indexed.v{vector_bit_width}",
-            operands=(
-                _vector_operand(vector_bit_width, "value"),
-                _gpr64_resource("base"),
-                _gpr64_resource("index"),
-            ),
-            immediates=(_DISP32_IMMEDIATE, _ADDRESS_SCALE_IMMEDIATE),
-            asm_forms=_asm(
-                mnemonic=_vector_asm_mnemonic(
-                    "vmovdqu32.store.indexed", vector_bit_width
-                ),
-                native_assembly_mnemonic=native_assembly_mnemonic,
-                operands=("value", "base", "index"),
-                immediates=("disp32", "scale"),
-                named_immediates=True,
-            ),
-            effects=(_store_effect(vector_bit_width),),
-            schedule_class=_memory_store_schedule_class(vector_bit_width),
-            flags=(DescriptorFlag.SIDE_EFFECTING,),
-        ),
-    )
 
 
 _CONTROL_EFFECT = Effect(

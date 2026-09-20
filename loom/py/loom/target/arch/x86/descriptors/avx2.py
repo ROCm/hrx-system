@@ -60,12 +60,12 @@ from .common import (
     _vector_f32_binary_descriptor,
     _vector_i32_binary_descriptor,
     _vector_lane_units,
-    _vector_memory_descriptors,
     _vector_result,
     _vector_splat_descriptor,
     _xmm_operand,
     _xmm_result,
 )
+from .memory import memory_descriptors
 from .scalar import (
     X86_SCALAR_DESCRIPTOR_SET,
     X86_SCALAR_PREFIX_DESCRIPTORS,
@@ -413,14 +413,28 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
         schedule_class=_SCHEDULE_VECTOR_FMA_F32_XMM,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     ),
-    *_vector_memory_descriptors(
+    *memory_descriptors(
         key_prefix="x86.avx2",
-        vector_bit_width=128,
+        mnemonic="vmovdqu32",
+        register_class=_REG_XMM,
+        register_suffix="xmm",
+        semantic_type="v128",
+        width_bits=128,
+        load_schedule_class=_SCHEDULE_MEMORY_LOAD_XMM,
+        store_schedule_class=_SCHEDULE_MEMORY_STORE_XMM,
+        assembly_suffix=".xmm",
         native_assembly_mnemonic="vmovdqu",
     ),
-    *_vector_memory_descriptors(
+    *memory_descriptors(
         key_prefix="x86.avx2",
-        vector_bit_width=256,
+        mnemonic="vmovdqu32",
+        register_class=_REG_YMM,
+        register_suffix="ymm",
+        semantic_type="v256",
+        width_bits=256,
+        load_schedule_class=_SCHEDULE_MEMORY_LOAD_YMM,
+        store_schedule_class=_SCHEDULE_MEMORY_STORE_YMM,
+        assembly_suffix=".ymm",
         native_assembly_mnemonic="vmovdqu",
     ),
 )

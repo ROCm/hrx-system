@@ -48,6 +48,7 @@ iree_py_library(
         "descriptors/avx512.py",
         "descriptors/common.py",
         "descriptors/composite.py",
+        "descriptors/memory.py",
         "descriptors/packed_dot.py",
         "descriptors/scalar.py",
         "descriptors/simd128.py",
