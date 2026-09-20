@@ -244,6 +244,18 @@ static iree_status_t loom_target_function_version_projection_clone_source(
                               out_module);
 }
 
+static loom_symbol_ref_t loom_target_function_version_projection_map_symbol(
+    const loom_ir_module_projection_t* projection,
+    loom_symbol_id_t source_symbol_id) {
+  if (projection == NULL) {
+    return (loom_symbol_ref_t){
+        .module_id = 0,
+        .symbol_id = source_symbol_id,
+    };
+  }
+  return loom_ir_module_projection_target_symbol(projection, source_symbol_id);
+}
+
 static void loom_target_function_version_projection_seed_exact_contexts(
     const loom_module_t* source_module,
     const loom_ir_module_projection_t* projection,
@@ -264,8 +276,8 @@ static void loom_target_function_version_projection_seed_exact_contexts(
     IREE_ASSERT_EQ(source_target_ref.module_id, 0);
     IREE_ASSERT_LT(source_target_ref.symbol_id, source_module->symbols.count);
     const loom_symbol_ref_t projected_target_ref =
-        loom_ir_module_projection_target_symbol(projection,
-                                                source_target_ref.symbol_id);
+        loom_target_function_version_projection_map_symbol(
+            projection, source_target_ref.symbol_id);
 
     const loom_target_context_ordinal_t context_ordinal =
         function_version->target_context_ordinal;
@@ -319,8 +331,8 @@ loom_target_function_version_projection_materialize_and_bind(
                           loom_module_block(projected_module), &builder);
 
   iree_host_size_t materialization_ordinal = 0;
-  for (loom_symbol_id_t symbol_id = 0; symbol_id < source_module->symbols.count;
-       ++symbol_id) {
+  for (loom_symbol_id_t symbol_id = 0;
+       symbol_id < plan->version_snapshot.symbol_count; ++symbol_id) {
     const loom_target_function_version_t* function_version =
         loom_target_function_version_snapshot_at(&plan->version_snapshot,
                                                  symbol_id);
@@ -347,7 +359,8 @@ loom_target_function_version_projection_materialize_and_bind(
     }
 
     const loom_symbol_ref_t projected_function_ref =
-        loom_ir_module_projection_target_symbol(projection, symbol_id);
+        loom_target_function_version_projection_map_symbol(projection,
+                                                           symbol_id);
     const loom_func_like_t projected_function = loom_func_like_cast(
         projected_module,
         projected_module->symbols.entries[projected_function_ref.symbol_id]
@@ -357,6 +370,30 @@ loom_target_function_version_projection_materialize_and_bind(
   }
   IREE_ASSERT_EQ(materialization_ordinal, plan->materialization_count);
   return iree_ok_status();
+}
+
+iree_status_t loom_target_function_versions_materialize_module(
+    loom_module_t* module,
+    const loom_function_version_list_t* function_versions,
+    iree_arena_block_pool_t* block_pool) {
+  if (module == NULL || block_pool == NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "module and block_pool must not be NULL");
+  }
+
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(block_pool, &scratch_arena);
+  loom_target_function_version_projection_plan_t plan = {0};
+  iree_status_t status = loom_target_function_version_projection_plan_build(
+      module, function_versions, &scratch_arena, &plan);
+  if (iree_status_is_ok(status) && plan.contexts.present.bit_count > 0) {
+    loom_target_function_version_projection_seed_exact_contexts(
+        module, /*projection=*/NULL, &plan);
+    status = loom_target_function_version_projection_materialize_and_bind(
+        module, module, /*projection=*/NULL, &plan);
+  }
+  iree_arena_deinitialize(&scratch_arena);
+  return status;
 }
 
 iree_status_t loom_target_function_versions_project_module(

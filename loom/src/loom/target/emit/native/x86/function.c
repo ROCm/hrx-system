@@ -11,6 +11,7 @@
 
 #include "iree/base/internal/math.h"
 #include "loom/codegen/low/packet.h"
+#include "loom/codegen/low/storage_layout.h"
 #include "loom/ir/context.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/x86/descriptors/encoding_defs.h"
@@ -960,6 +961,52 @@ static iree_status_t loom_x86_function_encode_packet_moves(
       group->move_group.moves.count);
 }
 
+static iree_status_t loom_x86_function_encode_storage_transfer(
+    loom_x86_function_encode_state_t* state,
+    const loom_low_packet_view_t* packet) {
+  const loom_op_t* op = packet->node->op;
+  const bool is_store = loom_low_spill_isa(op);
+  const loom_value_id_t storage_value =
+      is_store ? loom_low_spill_storage(op) : loom_low_reload_storage(op);
+  const uint64_t relative_offset =
+      (uint64_t)(is_store ? loom_low_spill_offset(op)
+                          : loom_low_reload_offset(op));
+  loom_low_storage_layout_reference_t reference = {0};
+  loom_low_storage_layout_lookup_reference(
+      &state->frame->schedule.requirements.storage_layout, state->frame->module,
+      storage_value, &reference);
+
+  uint64_t byte_offset = state->plan->stack_storage_offset;
+  if (!iree_checked_add_u64(byte_offset, reference.reservation.byte_offset,
+                            &byte_offset) ||
+      !iree_checked_add_u64(byte_offset, reference.byte_offset, &byte_offset) ||
+      !iree_checked_add_u64(byte_offset, relative_offset, &byte_offset) ||
+      byte_offset > INT32_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "x86 stack storage offset is outside disp32");
+  }
+
+  const loom_low_allocation_assignment_t* assignment =
+      is_store ? loom_low_packet_operand_assignment(&state->frame->allocation,
+                                                    packet, 0)
+               : loom_low_packet_result_assignment(&state->frame->allocation,
+                                                   packet, 0);
+  uint32_t physical_register = 0;
+  loom_x86_register_class_t register_class = 0;
+  IREE_RETURN_IF_ERROR(loom_x86_function_assignment_register(
+      state, assignment, &physical_register, &register_class));
+  const loom_x86_memory_operand_t memory = {
+      .displacement = (int32_t)byte_offset,
+      .base_register = LOOM_X86_SYSV_GPR_RSP,
+      .has_base = true,
+  };
+  loom_x86_function_encode_memory_modrm(
+      state, is_store ? 0x89 : 0x8B,
+      register_class == LOOM_X86_REGISTER_CLASS_GPR64, physical_register,
+      &memory, false);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_x86_function_encode_structural_packet(
     loom_x86_function_encode_state_t* state,
     const loom_low_packet_view_t* packet) {
@@ -971,6 +1018,9 @@ static iree_status_t loom_x86_function_encode_structural_packet(
   if (loom_low_copy_isa(op) || loom_low_move_isa(op) ||
       loom_low_slice_isa(op) || loom_low_concat_isa(op)) {
     return loom_x86_function_encode_packet_moves(state, packet);
+  }
+  if (loom_low_spill_isa(op) || loom_low_reload_isa(op)) {
+    return loom_x86_function_encode_storage_transfer(state, packet);
   }
   if (loom_low_func_call_isa(op)) {
     return loom_x86_function_encode_call(state, packet);

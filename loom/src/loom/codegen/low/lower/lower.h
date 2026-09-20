@@ -1131,6 +1131,13 @@ bool loom_low_lower_source_value_has_low_mapping(
 void loom_low_lower_require_source_operands_storage(
     loom_low_lower_context_t* context, const loom_op_t* source_op);
 
+// Requires low SSA storage for the dynamic byte-offset terms retained by a
+// source-memory plan. The plan's base view is required separately by the
+// structural operation or descriptor rule that consumes it.
+void loom_low_lower_require_source_memory_offset_storage(
+    loom_low_lower_context_t* context,
+    const loom_low_source_memory_access_plan_t* source_plan);
+
 // Returns the arena retaining state for the current function lowering. Storage
 // allocated from the arena remains valid until loom_low_lower_function returns.
 iree_arena_allocator_t* loom_low_lower_context_function_arena(

@@ -622,5 +622,40 @@ low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({a
                                   0x34, 0x12, 0xC3}));
 }
 
+TEST_F(X86FunctionTest, EncodesStackStorageSpillAndReload) {
+  ModulePtr module = Parse(R"(
+x86.target<scalar> @target
+
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @spill(%value: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %storage = storage {byte_alignment = 8, byte_length = 32} : low.storage<stack>
+  %view = storage_view %storage {offset = 8, byte_length = 16} : low.storage<stack> -> low.storage<stack>
+  low.spill %value, %view {offset = 8} : reg<x86.gpr64>, low.storage<stack>
+  %reload = low.reload %view {offset = 8} : low.storage<stack> -> reg<x86.gpr64>
+  return %reload
+}
+)");
+  loom_op_t* function = FindDefinition(module.get());
+  ASSERT_NE(function, nullptr);
+  loom_block_t* body =
+      loom_region_entry_block(loom_low_func_def_body(function));
+  const loom_value_id_t reload =
+      loom_op_const_results(loom_block_op(body, 3))[0];
+  const loom_low_allocation_fixed_value_t fixed_values[] = {
+      {loom_block_arg_id(body, 0),
+       LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, LOOM_X86_SYSV_GPR_R10,
+       1},
+      {reload, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+       LOOM_X86_SYSV_GPR_R11, 1},
+  };
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(BuildFrame(module.get(), fixed_values,
+                            IREE_ARRAYSIZE(fixed_values), &frame));
+  EXPECT_EQ(Encode(frame),
+            (std::vector<uint8_t>{0x48, 0x83, 0xEC, 0x28, 0x49, 0x89, 0xFA,
+                                  0x4C, 0x89, 0x54, 0x24, 0x10, 0x4C, 0x8B,
+                                  0x5C, 0x24, 0x10, 0x4C, 0x89, 0xD8, 0x48,
+                                  0x83, 0xC4, 0x28, 0xC3}));
+}
+
 }  // namespace
 }  // namespace loom

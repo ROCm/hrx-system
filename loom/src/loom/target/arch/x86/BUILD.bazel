@@ -55,6 +55,40 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "sysv_abi_materialization_pass",
+    srcs = ["sysv_abi_materialization_pass.c"],
+    hdrs = ["sysv_abi_materialization_pass.h"],
+    deps = [
+        ":sysv_abi",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/codegen/low/pipeline:pass_environment",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target:pass_environment",
+        "//loom/src/loom/target/arch/x86/ops",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "pass_registry",
+    srcs = ["pass_registry.c"],
+    hdrs = ["pass_registry.h"],
+    deps = [
+        ":sysv_abi_materialization_pass",
+        "//loom/src/loom/codegen/low/pipeline:pass_environment",
+        "//loom/src/loom/codegen/low/pipeline:pass_requirements",
+        "//loom/src/loom/pass:registry",
+        "//runtime/src/iree/base",
+    ],
+)
+
 loom_cc_test(
     name = "sysv_abi_test",
     srcs = ["sysv_abi_test.cc"],
@@ -172,11 +206,35 @@ loom_cc_library(
     deps = [
         ":legalization",
         ":math_policy",
+        ":pass_registry",
+        "//loom/src/loom/pass:builder",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/arch/x86/descriptors:low_registry",
         "//loom/src/loom/target/arch/x86/lower",
         "//loom/src/loom/target/arch/x86/ops",
+        "//loom/src/loom/target/emit/native/x86:object",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "provider_test",
+    srcs = ["provider_test.cc"],
+    deps = [
+        ":provider",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/codegen/low/pipeline:pass_environment",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/pass:registry",
+        "//loom/src/loom/pass:tooling",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

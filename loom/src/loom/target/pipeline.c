@@ -619,6 +619,11 @@ static iree_status_t loom_target_pipeline_build_prepared_low_body(
   // artifact entries.
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_run(builder, IREE_SV("symbol-dce")));
+  const loom_target_pipeline_build_context_t* context =
+      (const loom_target_pipeline_build_context_t*)user_data;
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_contribute_phase(
+      builder, context,
+      LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_SYMBOL_MATERIALIZATION));
   loom_op_t* for_op = NULL;
   return loom_target_pipeline_build_for_target_functions(
       builder, loom_target_pipeline_build_low_preparation, user_data, &for_op);

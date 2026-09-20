@@ -126,6 +126,42 @@ void loom_low_lower_require_source_operands_storage(
   }
 }
 
+void loom_low_lower_require_source_memory_offset_storage(
+    loom_low_lower_context_t* context,
+    const loom_low_source_memory_access_plan_t* source_plan) {
+  if (loom_low_source_memory_access_dynamic_offset_has_materialized_view_base(
+          source_plan)) {
+    // Canonical address terms normally replace the source view-base
+    // expression. Preserve the exact view base when that expression also
+    // carries an integer-to-index conversion required by target lowering.
+    for (uint8_t term_ordinal = 0;
+         term_ordinal < source_plan->dynamic_view_base_term_count;
+         ++term_ordinal) {
+      const loom_type_t term_type = loom_module_value_type(
+          context->module, source_plan->dynamic_terms[term_ordinal].index);
+      if (!loom_type_equal(term_type,
+                           loom_type_scalar(LOOM_SCALAR_TYPE_INDEX)) &&
+          !loom_type_equal(term_type,
+                           loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET))) {
+        loom_low_lower_mark_value_storage_required(
+            context, source_plan->dynamic_view_base_value_id);
+        break;
+      }
+    }
+  }
+  for (uint8_t term_ordinal = 0; term_ordinal < source_plan->dynamic_term_count;
+       ++term_ordinal) {
+    const loom_low_source_memory_dynamic_term_t* term =
+        &source_plan->dynamic_terms[term_ordinal];
+    loom_low_lower_mark_value_storage_required(context, term->index);
+    for (uint8_t stride_ordinal = 0; stride_ordinal < term->stride_value_count;
+         ++stride_ordinal) {
+      loom_low_lower_mark_value_storage_required(
+          context, term->stride_values[stride_ordinal]);
+    }
+  }
+}
+
 static bool loom_low_lower_value_storage_required(
     const loom_low_lower_context_t* context, loom_value_id_t source_value_id) {
   const loom_value_ordinal_t source_ordinal =
@@ -242,42 +278,25 @@ static void loom_low_lower_mark_source_memory_access_storage_demands(
         address_materializer,
     const loom_low_source_memory_access_plan_t* access) {
   uint8_t first_canonical_term = 0;
-  if (address_materializer != NULL) {
-    const loom_value_id_t base_value_id =
-        address_materializer->base_kind ==
-                LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_BASE_VIEW
-            ? loom_low_source_memory_access_base_view_value_id(access)
-            : access->root_value_id;
-    IREE_ASSERT_NE(base_value_id, LOOM_VALUE_ID_INVALID);
-    loom_low_lower_mark_value_storage_required(context, base_value_id);
-    if (address_materializer->coordinate_unit_byte_count == 1 &&
-        address_materializer->coordinate_type ==
-            LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_COORDINATE_OFFSET &&
-        access->dynamic_view_base_term_count != 0 &&
-        access->dynamic_view_base_value_id != LOOM_VALUE_ID_INVALID) {
-      loom_low_lower_mark_value_storage_required(
-          context, access->dynamic_view_base_value_id);
-      first_canonical_term = access->dynamic_view_base_term_count;
-    }
-  } else if (
-      loom_low_source_memory_access_dynamic_offset_has_materialized_view_base(
-          access)) {
-    // Canonical address terms normally replace the source view-base
-    // expression. Preserve the exact view base when that expression also
-    // carries an integer-to-index conversion required by target lowering.
-    for (uint8_t term_ordinal = 0;
-         term_ordinal < access->dynamic_view_base_term_count; ++term_ordinal) {
-      const loom_type_t term_type = loom_module_value_type(
-          context->module, access->dynamic_terms[term_ordinal].index);
-      if (!loom_type_equal(term_type,
-                           loom_type_scalar(LOOM_SCALAR_TYPE_INDEX)) &&
-          !loom_type_equal(term_type,
-                           loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET))) {
-        loom_low_lower_mark_value_storage_required(
-            context, access->dynamic_view_base_value_id);
-        break;
-      }
-    }
+  if (address_materializer == NULL) {
+    loom_low_lower_require_source_memory_offset_storage(context, access);
+    return;
+  }
+  const loom_value_id_t base_value_id =
+      address_materializer->base_kind ==
+              LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_BASE_VIEW
+          ? loom_low_source_memory_access_base_view_value_id(access)
+          : access->root_value_id;
+  IREE_ASSERT_NE(base_value_id, LOOM_VALUE_ID_INVALID);
+  loom_low_lower_mark_value_storage_required(context, base_value_id);
+  if (address_materializer->coordinate_unit_byte_count == 1 &&
+      address_materializer->coordinate_type ==
+          LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_COORDINATE_OFFSET &&
+      access->dynamic_view_base_term_count != 0 &&
+      access->dynamic_view_base_value_id != LOOM_VALUE_ID_INVALID) {
+    loom_low_lower_mark_value_storage_required(
+        context, access->dynamic_view_base_value_id);
+    first_canonical_term = access->dynamic_view_base_term_count;
   }
   for (uint8_t term_ordinal = first_canonical_term;
        term_ordinal < access->dynamic_term_count; ++term_ordinal) {

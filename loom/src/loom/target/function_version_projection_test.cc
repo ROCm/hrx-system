@@ -597,6 +597,94 @@ func.def public target(@exact) @witness() {
 }
 
 TEST_F(TargetFunctionVersionProjectionTest,
+       InPlaceMaterializationBindsSharedExactContext) {
+  ModulePtr module = Parse(R"(
+test.target<low_core> @exact
+
+func.def public @inherited() {
+  func.return
+}
+
+func.def public target(@exact) @witness() {
+  func.return
+}
+)");
+  loom_target_facts_t facts = {};
+  InitializeFacts(LOOM_TEST_TARGET_KIND_LOW_CORE, 0, &facts);
+  loom_target_function_version_t inherited_version =
+      MakeVersion(module.get(), IREE_SV("inherited"),
+                  &kMissingMaterializerProvider, &facts);
+  loom_target_function_version_t witness_version = MakeVersion(
+      module.get(), IREE_SV("witness"), &kMissingMaterializerProvider, &facts);
+  witness_version.authored_target_name = IREE_SV("exact");
+  witness_version.target_requirement_facts = &facts;
+  witness_version.authored_target_is_exact = true;
+  loom_function_version_t* version_values[] = {
+      &inherited_version.base,
+      &witness_version.base,
+  };
+  const loom_function_version_list_t versions = {
+      /*.values=*/version_values,
+      /*.count=*/IREE_ARRAYSIZE(version_values),
+  };
+  const iree_host_size_t symbol_count = module->symbols.count;
+  loom_op_t* inherited_op = inherited_version.base.function.op;
+  loom_op_t* witness_op = witness_version.base.function.op;
+
+  IREE_ASSERT_OK(loom_target_function_versions_materialize_module(
+      module.get(), &versions, &block_pool_));
+
+  EXPECT_EQ(module->symbols.count, symbol_count);
+  EXPECT_EQ(inherited_version.base.function.op, inherited_op);
+  EXPECT_EQ(witness_version.base.function.op, witness_op);
+  EXPECT_TRUE(iree_string_view_equal(
+      FunctionTargetName(module.get(), IREE_SV("inherited")),
+      IREE_SV("exact")));
+  EXPECT_TRUE(iree_string_view_equal(
+      FunctionTargetName(module.get(), IREE_SV("witness")), IREE_SV("exact")));
+}
+
+TEST_F(TargetFunctionVersionProjectionTest,
+       InPlaceMaterializationCreatesMissingContextOnce) {
+  ModulePtr module = Parse(R"(
+func.def public @left() {
+  func.return
+}
+
+func.def public @right() {
+  func.return
+}
+)");
+  const TestTargetProfile profile =
+      MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
+  const loom_target_specialization_request_t requests[] = {
+      {
+          /*.function_name=*/IREE_SV("left"),
+          /*.target_profile=*/&profile.base,
+      },
+      {
+          /*.function_name=*/IREE_SV("right"),
+          /*.target_profile=*/&profile.base,
+      },
+  };
+  const loom_target_specialization_result_t specialization =
+      Specialize(module.get(), requests, IREE_ARRAYSIZE(requests));
+  const iree_host_size_t symbol_count = module->symbols.count;
+
+  IREE_ASSERT_OK(loom_target_function_versions_materialize_module(
+      module.get(), &specialization.function_versions.list, &block_pool_));
+
+  EXPECT_EQ(module->symbols.count, symbol_count + 1);
+  EXPECT_EQ(CountTestTargets(module.get()), 1u);
+  EXPECT_TRUE(
+      iree_string_view_equal(FunctionTargetName(module.get(), IREE_SV("left")),
+                             IREE_SV("__loom_target_context_0_0")));
+  EXPECT_TRUE(
+      iree_string_view_equal(FunctionTargetName(module.get(), IREE_SV("right")),
+                             IREE_SV("__loom_target_context_0_0")));
+}
+
+TEST_F(TargetFunctionVersionProjectionTest,
        EquivalentIndependentProfilesRemainDistinctContexts) {
   ModulePtr source = Parse(R"(
 func.def public @left() {

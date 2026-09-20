@@ -58,7 +58,7 @@ func.def public target(@target) @boolean_comparisons(%left: i32, %right: i32) ->
 }
 
 // ----
-low.func.def public target<x86.avx2.core>(@target) abi(object_function) @boolean_comparisons(%left: reg<x86.gpr32>, %right: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def public target<x86.avx2.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @boolean_comparisons(%left: reg<x86.gpr32>, %right: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %lhs = cmp.ne.imm.gpr32 %left, 0
   %rhs = cmp.ne.imm.gpr32 %right, 0
   %86 = copy %lhs : reg<x86.gpr32> -> reg<x86.gpr32>

@@ -692,6 +692,24 @@ TEST_F(LowLowerPassTest,
   IREE_ASSERT_OK(status);
 }
 
+TEST_F(LowLowerPassTest, ReportsLegalityErrorsAcrossTargetFunctions) {
+  ModulePtr module =
+      Parse(IREE_SV("test.target<low_core> @target\n"
+                    "func.def target(@target) @first(%value: i32) {\n"
+                    "  test.use %value : i32\n"
+                    "  func.return\n"
+                    "}\n"
+                    "func.def target(@target) @second(%value: i32) {\n"
+                    "  test.use %value : i32\n"
+                    "  func.return\n"
+                    "}\n"));
+
+  DiagnosticEmissionCollector collector;
+  IREE_ASSERT_OK(RunSourceToLow(&policy_registry_, module.get(), &collector));
+  EXPECT_EQ(collector.count, 2);
+  EXPECT_EQ(collector.last_error, LOOM_ERR_TARGET_001);
+}
+
 TEST_F(LowLowerPassTest, InvokeNormalizesToDirectLowCallWithPolicyPreserved) {
   ModulePtr module = Parse(IREE_SV(
       "test.target<low_core> @target\n"

@@ -51,6 +51,55 @@ TEST_F(SourceMemoryPlanTest, StaticDenseLoadIncludesViewBase) {
   EXPECT_EQ(plan.dynamic_view_base_term_count, 0u);
 }
 
+TEST_F(SourceMemoryPlanTest, ViewAddressAcceptsStaticStridedLayout) {
+  const loom_value_id_t buffer = DefineBufferArg();
+  const loom_value_id_t layout = BuildStridedLayout(32, 4);
+  const loom_value_id_t base_offset =
+      loom_index_constant_result(BuildOffsetConstant(16));
+  loom_op_t* view_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base_offset,
+                                        ViewType2D(4, 4, layout),
+                                        LOOM_LOCATION_UNKNOWN, &view_op));
+
+  loom_value_fact_table_t facts = {0};
+  ComputeFacts(&facts);
+  loom_low_source_memory_access_plan_t plan = {};
+  loom_low_source_memory_access_diagnostic_t diagnostic = {0};
+  ASSERT_TRUE(BuildViewAddressPlan(&facts, loom_buffer_view_result(view_op),
+                                   &plan, &diagnostic));
+  EXPECT_EQ(plan.view_value_id, loom_buffer_view_result(view_op));
+  EXPECT_EQ(plan.base_view_value_id, loom_buffer_view_result(view_op));
+  EXPECT_EQ(plan.root_value_id, buffer);
+  EXPECT_EQ(plan.address_layout,
+            LOOM_LOW_SOURCE_MEMORY_ADDRESS_LAYOUT_UNPROVEN);
+  EXPECT_EQ(plan.static_byte_offset, 16);
+  EXPECT_EQ(plan.dynamic_term_count, 0u);
+}
+
+TEST_F(SourceMemoryPlanTest, ViewAddressRetainsDynamicBaseOffset) {
+  const loom_value_id_t buffer = DefineBufferArg();
+  const loom_value_id_t layout = BuildDenseLayout();
+  const loom_value_id_t base_offset = DefineOffsetArg();
+  loom_op_t* view_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base_offset,
+                                        ViewType1D(32, layout),
+                                        LOOM_LOCATION_UNKNOWN, &view_op));
+
+  loom_value_fact_table_t facts = {0};
+  ComputeFacts(&facts);
+  loom_low_source_memory_access_plan_t plan = {};
+  loom_low_source_memory_access_diagnostic_t diagnostic = {0};
+  ASSERT_TRUE(BuildViewAddressPlan(&facts, loom_buffer_view_result(view_op),
+                                   &plan, &diagnostic));
+  EXPECT_EQ(plan.root_value_id, buffer);
+  EXPECT_EQ(plan.static_byte_offset, 0);
+  ASSERT_EQ(plan.dynamic_term_count, 1u);
+  EXPECT_EQ(plan.dynamic_view_base_term_count, 1u);
+  EXPECT_EQ(plan.dynamic_view_base_value_id, base_offset);
+  EXPECT_EQ(plan.dynamic_terms[0].index, base_offset);
+  EXPECT_EQ(plan.dynamic_terms[0].byte_stride, 1);
+}
+
 TEST_F(SourceMemoryPlanTest, PhysicalByteLoadUsesBufferReferenceAndOffset) {
   const loom_value_id_t root_buffer = DefineBufferArg();
   const loom_value_id_t buffer = BuildAligned(root_buffer, 16);

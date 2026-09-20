@@ -24,7 +24,7 @@ kernel.def target(@target) @select_global_roots(%select_second: index) {
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @select_global_roots(%select_second: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "select_second"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 4, resource_count = 3, resource_offsets = [8, 16, 24], resource_parameter_indices = [1, 2, 3], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @select_global_roots(%select_second: reg<amdgpu.sgpr>) asm {
   %first_aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %second_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>

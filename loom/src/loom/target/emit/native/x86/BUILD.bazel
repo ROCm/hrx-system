@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:generate.bzl", "iree_generated_files")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
@@ -59,6 +60,7 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/codegen/low:frame",
         "//loom/src/loom/codegen/low:packet",
+        "//loom/src/loom/codegen/low:storage_layout",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target/arch/x86:register_classes",
@@ -88,6 +90,76 @@ loom_cc_test(
         "//loom/src/loom/testing:module_ptr",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "object",
+    srcs = ["object.c"],
+    hdrs = ["object.h"],
+    visibility = ["//loom/src/loom/target/arch/x86:__pkg__"],
+    deps = [
+        ":function",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/x86:sysv_frame",
+        "//loom/src/loom/target/arch/x86/ops",
+        "//loom/src/loom/target/emit/native:contribution",
+        "//loom/src/loom/target/emit/native:elf_object",
+        "//loom/src/loom/target/emit/native:object",
+        "//loom/src/loom/target/reporting:low",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+    ],
+)
+
+loom_cc_test(
+    name = "object_test",
+    srcs = ["object_test.cc"],
+    deps = [
+        ":object",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/x86/descriptors:low_registry",
+        "//loom/src/loom/target/arch/x86/ops",
+        "//loom/src/loom/testing:context",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_generated_files(
+    name = "direct_call_object",
+    srcs = ["test/direct_call.loom"],
+    outs = ["direct_call_test.o"],
+    args = [
+        "$(location test/direct_call.loom)",
+        "--product=module",
+        "--format=x86-elf-object",
+    ],
+    output_args = {"direct_call_test.o": "--output={path}"},
+    tags = ["skip-bazel_to_cmake"],
+    tool = "//loom/src/loom/tools/loom-compile",
+)
+
+loom_cc_test(
+    name = "direct_call_link_test",
+    srcs = [
+        "direct_call_link_test.c",
+        ":direct_call_object",
     ],
 )
 

@@ -29,6 +29,50 @@ loom_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_X86)
+loom_cc_library(
+  NAME
+    sysv_abi_materialization_pass
+  HDRS
+    "sysv_abi_materialization_pass.h"
+  SRCS
+    "sysv_abi_materialization_pass.c"
+  DEPS
+    ::sysv_abi
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::symbol_facts
+    loom::codegen::low::pipeline::pass_environment
+    loom::codegen::low::target_binding
+    loom::ir
+    loom::ops::low
+    loom::ops::op_defs
+    loom::pass::types
+    loom::target::arch::x86::ops
+    loom::target::function_version
+    loom::target::pass_environment
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
+loom_cc_library(
+  NAME
+    pass_registry
+  HDRS
+    "pass_registry.h"
+  SRCS
+    "pass_registry.c"
+  DEPS
+    ::sysv_abi_materialization_pass
+    iree::base
+    loom::codegen::low::pipeline::pass_environment
+    loom::codegen::low::pipeline::pass_requirements
+    loom::pass::registry
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
 loom_cc_test(
   NAME
     sysv_abi_test
@@ -186,12 +230,41 @@ loom_cc_library(
   DEPS
     ::legalization
     ::math_policy
+    ::pass_registry
     iree::base
+    loom::pass::builder
     loom::target::arch::x86::descriptors::low_registry
     loom::target::arch::x86::lower
     loom::target::arch::x86::ops
+    loom::target::emit::native::x86::object
     loom::target::provider
   PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
+loom_cc_test(
+  NAME
+    provider_test
+  SRCS
+    "provider_test.cc"
+  DEPS
+    ::provider
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::pipeline::pass_environment
+    loom::codegen::low::text_asm
+    loom::format::text::parser
+    loom::ir
+    loom::ops::low
+    loom::ops::op_registry
+    loom::pass::registry
+    loom::pass::tooling
+    loom::target::provider
+    loom::testing::module_ptr
+  LABELS
+    "iree-build-requirement=loom.target.arch.x86"
 )
 endif()
 

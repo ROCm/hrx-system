@@ -19,6 +19,7 @@
 #include "loom/target/arch/x86/lower/abi.h"
 #include "loom/target/arch/x86/lower/contraction.h"
 #include "loom/target/arch/x86/lower/lower.h"
+#include "loom/target/arch/x86/lower/view_abi.h"
 #include "loom/target/arch/x86/register_classes.h"
 
 static bool loom_x86_type_is_vector_i1(loom_type_t type, int64_t lane_count) {
@@ -247,6 +248,16 @@ static iree_status_t loom_x86_map_packed_dot_type(
   return iree_ok_status();
 }
 
+static iree_status_t loom_x86_map_view_argument_type(
+    loom_low_lower_context_t* context, loom_type_t source_type,
+    loom_type_t* out_low_type) {
+  if (!loom_type_is_view(source_type)) {
+    return iree_ok_status();
+  }
+  return loom_x86_make_register_type(context, LOOM_X86_REGISTER_CLASS_GPR64,
+                                     out_low_type);
+}
+
 static iree_status_t loom_x86_map_scalar_argument(
     void* user_data, loom_low_lower_context_t* context,
     const loom_op_t* source_function_op, uint16_t source_argument_index,
@@ -260,6 +271,11 @@ static iree_status_t loom_x86_map_scalar_argument(
       .abi_type = loom_type_none(),
       .resource_source_type = loom_type_none(),
   };
+  IREE_RETURN_IF_ERROR(loom_x86_map_view_argument_type(
+      context, source_type, &out_argument->abi_type));
+  if (loom_type_kind(out_argument->abi_type) != LOOM_TYPE_NONE) {
+    return iree_ok_status();
+  }
   return loom_x86_map_scalar_type(user_data, context, source_function_op,
                                   source_type, &out_argument->abi_type);
 }
@@ -277,6 +293,11 @@ static iree_status_t loom_x86_map_avx512_argument(
       .abi_type = loom_type_none(),
       .resource_source_type = loom_type_none(),
   };
+  IREE_RETURN_IF_ERROR(loom_x86_map_view_argument_type(
+      context, source_type, &out_argument->abi_type));
+  if (loom_type_kind(out_argument->abi_type) != LOOM_TYPE_NONE) {
+    return iree_ok_status();
+  }
   return loom_x86_map_avx512_type(user_data, context, source_function_op,
                                   source_type, &out_argument->abi_type);
 }
@@ -294,6 +315,11 @@ static iree_status_t loom_x86_map_avx2_argument(
       .abi_type = loom_type_none(),
       .resource_source_type = loom_type_none(),
   };
+  IREE_RETURN_IF_ERROR(loom_x86_map_view_argument_type(
+      context, source_type, &out_argument->abi_type));
+  if (loom_type_kind(out_argument->abi_type) != LOOM_TYPE_NONE) {
+    return iree_ok_status();
+  }
   return loom_x86_map_avx2_type(user_data, context, source_function_op,
                                 source_type, &out_argument->abi_type);
 }
@@ -324,6 +350,11 @@ static iree_status_t loom_x86_map_avx512_packed_dot_argument(
       .abi_type = loom_type_none(),
       .resource_source_type = loom_type_none(),
   };
+  IREE_RETURN_IF_ERROR(loom_x86_map_view_argument_type(
+      context, source_type, &out_argument->abi_type));
+  if (loom_type_kind(out_argument->abi_type) != LOOM_TYPE_NONE) {
+    return iree_ok_status();
+  }
   return loom_x86_map_avx512_packed_dot_type(user_data, context,
                                              source_function_op, source_type,
                                              &out_argument->abi_type);
@@ -340,6 +371,9 @@ static const loom_low_lower_policy_t kX86Avx512LowLowerPolicy = {
     .import_decl_kind = LOOM_LOW_FUNC_DECL_IMPORT_KIND_NATIVE,
     .source_type_supported = {.fn = loom_x86_source_type_supported,
                               .user_data = NULL},
+    .materialize_structural_operand =
+        {.fn = loom_x86_materialize_view_abi_operand, .user_data = NULL},
+    .source_plan_observer = &loom_x86_view_abi_source_plan_observer,
     .contract = LOOM_X86_AVX512_CONTRACT,
 };
 
@@ -352,6 +386,9 @@ static const loom_low_lower_policy_t kX86Avx2LowLowerPolicy = {
     .import_decl_kind = LOOM_LOW_FUNC_DECL_IMPORT_KIND_NATIVE,
     .source_type_supported = {.fn = loom_x86_source_type_supported,
                               .user_data = NULL},
+    .materialize_structural_operand =
+        {.fn = loom_x86_materialize_view_abi_operand, .user_data = NULL},
+    .source_plan_observer = &loom_x86_view_abi_source_plan_observer,
     .contract = LOOM_X86_AVX2_CONTRACT,
 };
 
@@ -364,6 +401,9 @@ static const loom_low_lower_policy_t kX86ScalarLowLowerPolicy = {
     .import_decl_kind = LOOM_LOW_FUNC_DECL_IMPORT_KIND_NATIVE,
     .source_type_supported = {.fn = loom_x86_source_type_supported,
                               .user_data = NULL},
+    .materialize_structural_operand =
+        {.fn = loom_x86_materialize_view_abi_operand, .user_data = NULL},
+    .source_plan_observer = &loom_x86_view_abi_source_plan_observer,
     .contract = LOOM_X86_SCALAR_CONTRACT,
 };
 
@@ -389,6 +429,9 @@ static const loom_low_lower_policy_t kX86Avx512PackedDotLowLowerPolicy = {
                      .user_data = NULL},
     .map_abi_layout = {.fn = loom_x86_map_abi_layout, .user_data = NULL},
     .import_decl_kind = LOOM_LOW_FUNC_DECL_IMPORT_KIND_NATIVE,
+    .materialize_structural_operand =
+        {.fn = loom_x86_materialize_view_abi_operand, .user_data = NULL},
+    .source_plan_observer = &loom_x86_view_abi_source_plan_observer,
     .descriptor_matrix =
         {
             .options = loom_x86_descriptor_matrix_options,

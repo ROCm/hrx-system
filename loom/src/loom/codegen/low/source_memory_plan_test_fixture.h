@@ -355,6 +355,27 @@ class SourceMemoryPlanTest : public ::testing::Test {
     return built;
   }
 
+  bool BuildViewAddressPlan(
+      loom_value_fact_table_t* facts, loom_value_id_t view,
+      loom_low_source_memory_access_plan_t* out_plan,
+      loom_low_source_memory_access_diagnostic_t* out_diagnostic) {
+    loom_local_value_domain_t value_domain = {};
+    IREE_EXPECT_OK(loom_local_value_domain_acquire_for_region(
+        module_, loom_func_like_body(function_), &analysis_arena_,
+        &value_domain));
+    loom_view_region_table_t view_regions = {};
+    loom_symbolic_expr_context_t expression_context = {};
+    loom_symbolic_expr_context_initialize(
+        module_, &value_domain, facts, &analysis_arena_, &expression_context);
+    IREE_EXPECT_OK(loom_view_region_table_initialize(
+        &value_domain, &expression_context, &view_regions));
+    IREE_EXPECT_OK(loom_view_region_table_analyze(&view_regions));
+    const bool built = loom_low_source_memory_access_plan_build_view_address(
+        &view_regions, view, out_plan, out_diagnostic);
+    loom_local_value_domain_release(&value_domain);
+    return built;
+  }
+
   iree_arena_block_pool_t block_pool_;
   iree_arena_allocator_t analysis_arena_;
   loom_context_t context_;

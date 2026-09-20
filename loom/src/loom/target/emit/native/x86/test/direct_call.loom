@@ -1,0 +1,84 @@
+x86.target<scalar> @target
+
+func.def @double(%value: i64) -> (i64) {
+  %result = scalar.addi %value, %value : i64
+  func.return %result : i64
+}
+
+func.def @load_view(%input: view<1xi32>) -> (i32) {
+  %value = view.load %input[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+func.decl retain import("native", "external_add_one") target(@target) @external(%value: i64) -> (i64)
+
+func.decl retain import("native", "external_sum_eight") target(@target) @external_eight(%a: i64, %b: i64, %c: i64, %d: i64, %e: i64, %f: i64, %g: i64, %h: i64) -> (i64)
+
+func.def public target(@target) @loom_direct_call_test(%value: i64) -> (i64) {
+  %doubled = func.call @double(%value) : (i64) -> (i64)
+  %result = func.call @external(%doubled) : (i64) -> (i64)
+  func.return %result : i64
+}
+
+func.def public target(@target) @loom_direct_call_stress(%a: i64, %b: i64, %c: i64, %d: i64, %e: i64, %f: i64, %g: i64, %h: i64) -> (i64) {
+  %aa = scalar.addi %a, %a : i64
+  %bb = scalar.addi %b, %b : i64
+  %cc = scalar.addi %c, %c : i64
+  %dd = scalar.addi %d, %d : i64
+  %ee = scalar.addi %e, %e : i64
+  %ff = scalar.addi %f, %f : i64
+  %gg = scalar.addi %g, %g : i64
+  %hh = scalar.addi %h, %h : i64
+  %call = func.call @external_eight(%a, %b, %c, %d, %e, %f, %g, %h) : (i64, i64, i64, i64, i64, i64, i64, i64) -> (i64)
+  %sum_aa = scalar.addi %call, %aa : i64
+  %sum_bb = scalar.addi %sum_aa, %bb : i64
+  %sum_cc = scalar.addi %sum_bb, %cc : i64
+  %sum_dd = scalar.addi %sum_cc, %dd : i64
+  %sum_ee = scalar.addi %sum_dd, %ee : i64
+  %sum_ff = scalar.addi %sum_ee, %ff : i64
+  %sum_gg = scalar.addi %sum_ff, %gg : i64
+  %sum_hh = scalar.addi %sum_gg, %hh : i64
+  func.return %sum_hh : i64
+}
+
+func.def public target(@target) @loom_view_call(%input: buffer) -> (i32) {
+  %aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %offset = index.constant 4 : offset
+  %view = buffer.view %aligned[%offset] : buffer -> view<1xi32>
+  %value = func.call @load_view(%view) : (view<1xi32>) -> (i32)
+  func.return %value : i32
+}
+
+func.def public target(@target) @loom_selected_view_call(%first: buffer, %second: buffer, %condition: i1) -> (i32) {
+  %first_aligned = buffer.assume.alignment %first {minimum_alignment = 4} : buffer
+  %second_aligned = buffer.assume.alignment %second {minimum_alignment = 4} : buffer
+  %first_offset = index.constant 4 : offset
+  %second_offset = index.constant 8 : offset
+  %first_view = buffer.view %first_aligned[%first_offset] : buffer -> view<1xi32>
+  %second_view = buffer.view %second_aligned[%second_offset] : buffer -> view<1xi32>
+  %selected = scf.select %condition, %first_view, %second_view : view<1xi32>
+  %value = func.call @load_view(%selected) : (view<1xi32>) -> (i32)
+  func.return %value : i32
+}
+
+func.def public target(@target) @loom_unsigned_divide_by_three(%value: i32) -> (i32) {
+  %divisor = scalar.constant 3 : i32
+  %result = scalar.divui %value, %divisor : i32
+  func.return %result : i32
+}
+
+func.def public target(@target) @loom_unsigned_remainder_high_bit(%value: i32) -> (i32) {
+  %divisor = scalar.constant -2147483647 : i32
+  %result = scalar.remui %value, %divisor : i32
+  func.return %result : i32
+}
+
+func.def public target(@target) @loom_bitwise_immediates(%value: i64) -> (i64) {
+  %mask = scalar.constant -2147483648 : i64
+  %tag = scalar.constant 2147483647 : i64
+  %toggle = scalar.constant -129 : i64
+  %masked = scalar.andi %value, %mask : i64
+  %tagged = scalar.ori %masked, %tag : i64
+  %result = scalar.xori %tagged, %toggle : i64
+  func.return %result : i64
+}

@@ -76,13 +76,13 @@ loom_low_lower_rule_source_memory_emits_match(
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     const loom_low_lower_rule_t* rule);
 
-// Materializes the canonical dynamic byte offset selected by a source-memory
-// plan in the descriptor-declared carrier. Wider source terms are projected
-// before arithmetic; the selected memory contract owns the address range proof.
-iree_status_t loom_low_lower_rule_materialize_source_memory_byte_offset(
+// Materializes a canonical dynamic byte offset in the descriptor-declared
+// carrier. Wider source terms are projected before arithmetic; the caller's
+// selected memory contract owns the address range proof.
+iree_status_t loom_low_lower_materialize_source_memory_byte_offset(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
-    const loom_low_lower_source_memory_t* source_memory,
+    const loom_low_lower_source_memory_byte_offset_materializer_t* materializer,
     const loom_low_source_memory_access_plan_t* source_memory_access,
     loom_value_id_t* out_value_id);
 

@@ -371,6 +371,17 @@ bool loom_low_source_memory_access_plan_build_indexed(
     loom_low_source_memory_access_plan_t* out_plan,
     loom_low_source_memory_access_diagnostic_t* out_diagnostic);
 
+// Builds the target-independent address of a typed view's first element.
+//
+// Unlike whole-view payload planning, this accepts non-compact layouts because
+// only the view origin is represented. The returned plan retains the analyzed
+// base view plus every static and dynamic byte-offset contribution needed to
+// materialize a single native pointer without rediscovering source producers.
+bool loom_low_source_memory_access_plan_build_view_address(
+    const loom_view_region_table_t* view_regions, loom_value_id_t view_value_id,
+    loom_low_source_memory_access_plan_t* out_plan,
+    loom_low_source_memory_access_diagnostic_t* out_diagnostic);
+
 // Builds a target-independent source memory plan for a whole typed view.
 //
 // This is the view-payload sibling of vector.load/store planning. It requires

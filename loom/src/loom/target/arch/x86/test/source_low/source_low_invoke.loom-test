@@ -1,8 +1,7 @@
 // RUN: emit source-low output=low
 
-// x86 emission does not consume its retained call ABI yet, so its target policy
-// flattens an ordinary low.invoke after source-to-Low normalizes the edge to
-// low.func.call.
+// x86 preserves an ordinary low.invoke as a direct low.func.call after
+// source-to-Low projects the helper into the caller's target context.
 x86.target<scalar> @target
 
 low.func.def target<x86.scalar.core>(@target) @identity(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
@@ -15,14 +14,18 @@ func.def target(@target) @caller(%value: i32) -> (i32) {
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @caller(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.scalar.core>(@target) @identity(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   return %value
+}
+
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @caller(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %result = low.func.call @identity(%value) : (reg<x86.gpr32>) -> (reg<x86.gpr32>)
+  return %result
 }
 
 // ====
 
-// A user-authored noinline boundary conflicts with x86 emission rather than
-// silently leaving an unsupported Low call in the output.
+// A user-authored noinline boundary remains explicit in target-low IR.
 x86.target<scalar> @target
 
 low.func.def target<x86.scalar.core>(@target) @identity(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
@@ -30,7 +33,122 @@ low.func.def target<x86.scalar.core>(@target) @identity(%value: reg<x86.gpr32>) 
 }
 
 func.def target(@target) @noinline_caller(%value: i32) -> (i32) {
-  // ERROR@+1: LOWERING/044 {op_name="low.func.call", phase_name="inline-callables", callee_name="identity", failure_code="target_requires_inline"}
   %result = low.invoke noinline @identity(%value) : (i32) -> (i32)
   func.return %result : i32
+}
+
+// ----
+low.func.def target<x86.scalar.core>(@target) @identity(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  return %value
+}
+
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @noinline_caller(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %result = low.func.call noinline @identity(%value) : (reg<x86.gpr32>) -> (reg<x86.gpr32>)
+  return %result
+}
+
+// ====
+
+// A derived view crosses the SysV boundary as the address of its first
+// element. The callee receives one native pointer rather than reconstructing
+// source view provenance.
+x86.target<scalar> @target
+
+func.def @load_view(%input: view<1xi32>) -> (i32) {
+  %value = view.load %input[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+func.def target(@target) @call_static_view(%input: buffer) -> (i32) {
+  %aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %offset = index.constant 4 : offset
+  %view = buffer.view %aligned[%offset] : buffer -> view<1xi32>
+  %value = func.call @load_view(%view) : (view<1xi32>) -> (i32)
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<x86.scalar.core>(@target) @load_view(%input: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+  %value = mov.load.gpr32 %input {disp32 = 0}
+  return %value
+}
+
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @call_static_view(%view: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+  %14 = lea.disp %view {disp32 = 4}
+  %value = low.func.call @load_view(%14) : (reg<x86.gpr64>) -> (reg<x86.gpr32>)
+  return %value
+}
+
+// ====
+
+// Dynamic byte offsets remain in the source memory plan and are materialized
+// once at the call boundary.
+x86.target<scalar> @target
+
+func.def @load_view(%input: view<1xi32>) -> (i32) {
+  %value = view.load %input[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+func.def target(@target) @call_dynamic_view(%input: buffer, %offset_input: offset) -> (i32) {
+  %aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %offset = index.assume %offset_input [mul(%offset_input, 4)] : offset
+  %view = buffer.view %aligned[%offset] : buffer -> view<1xi32>
+  %value = func.call @load_view(%view) : (view<1xi32>) -> (i32)
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<x86.scalar.core>(@target) @load_view(%input: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+  %value = mov.load.gpr32 %input {disp32 = 0}
+  return %value
+}
+
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @call_dynamic_view(%view: reg<x86.gpr64>, %offset: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+  %16 = lea %view, %offset
+  %value = low.func.call @load_view(%16) : (reg<x86.gpr64>) -> (reg<x86.gpr32>)
+  return %value
+}
+
+// ====
+
+// Selection retains both the selected root and selected byte offset. The call
+// consumes those analyzed facts directly to form one native pointer.
+x86.target<scalar> @target
+
+func.def @load_view(%input: view<1xi32>) -> (i32) {
+  %value = view.load %input[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+func.def target(@target) @call_selected_view(%first: buffer, %second: buffer, %condition: i1) -> (i32) {
+  %first_aligned = buffer.assume.alignment %first {minimum_alignment = 4} : buffer
+  %second_aligned = buffer.assume.alignment %second {minimum_alignment = 4} : buffer
+  %first_offset = index.constant 4 : offset
+  %second_offset = index.constant 8 : offset
+  %first_view = buffer.view %first_aligned[%first_offset] : buffer -> view<1xi32>
+  %second_view = buffer.view %second_aligned[%second_offset] : buffer -> view<1xi32>
+  %selected = scf.select %condition, %first_view, %second_view : view<1xi32>
+  %value = func.call @load_view(%selected) : (view<1xi32>) -> (i32)
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<x86.scalar.core>(@target) @load_view(%input: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+  %value = mov.load.gpr32 %input {disp32 = 0}
+  return %value
+}
+
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @call_selected_view(%first_aligned: reg<x86.gpr64>, %second_aligned: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %first_offset = mov.imm64 4
+  %second_offset = mov.imm64 8
+  low.cond_br %condition, ^_bb1, ^_bb2 : reg<x86.gpr32>
+^_bb1:
+  low.br ^_bb3(%first_aligned: reg<x86.gpr64>, %first_offset: reg<x86.gpr64>)
+^_bb2:
+  low.br ^_bb3(%second_aligned: reg<x86.gpr64>, %second_offset: reg<x86.gpr64>)
+^_bb3(%selected: reg<x86.gpr64>, %selected_offset: reg<x86.gpr64>):
+  %31 = lea %selected, %selected_offset
+  %value = low.func.call @load_view(%31) : (reg<x86.gpr64>) -> (reg<x86.gpr32>)
+  return %value
 }

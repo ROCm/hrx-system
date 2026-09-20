@@ -126,9 +126,13 @@ static iree_status_t loom_low_lower_rule_low_value(
       IREE_ASSERT_EQ(value_ref->materializer_index, 0);
       // Repeated references in one emit denote the same address expression.
       if (*dynamic_byte_offset == LOOM_VALUE_ID_INVALID) {
+        const loom_low_lower_source_memory_byte_offset_materializer_t*
+            materializer =
+                loom_low_lower_rule_set_source_memory_byte_offset_materializer(
+                    rule_set, source_memory);
         IREE_RETURN_IF_ERROR(
-            loom_low_lower_rule_materialize_source_memory_byte_offset(
-                context, rule_set, source_op, source_memory,
+            loom_low_lower_materialize_source_memory_byte_offset(
+                context, rule_set, source_op, materializer,
                 source_memory_access, dynamic_byte_offset));
       }
       *out_low_value_id = *dynamic_byte_offset;

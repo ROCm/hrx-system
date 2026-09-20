@@ -52,6 +52,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::codegen::low::frame
     loom::codegen::low::packet
+    loom::codegen::low::storage_layout
     loom::ir
     loom::ops::low
     loom::target::arch::x86::descriptors::avx512_packed_dot_descriptors
@@ -82,6 +83,77 @@ loom_cc_test(
     loom::target::arch::x86::sysv_frame
     loom::testing::context
     loom::testing::module_ptr
+  LABELS
+    "iree-build-requirement=loom.target.arch.x86"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
+loom_cc_library(
+  NAME
+    object
+  HDRS
+    "object.h"
+  SRCS
+    "object.c"
+  DEPS
+    ::function
+    iree::base
+    iree::base::internal::arena
+    iree::io::stream
+    loom::codegen::low::frame
+    loom::ir
+    loom::ops::low
+    loom::ops::op_defs
+    loom::target::arch::x86::ops
+    loom::target::arch::x86::sysv_frame
+    loom::target::emit::native::contribution
+    loom::target::emit::native::elf_object
+    loom::target::emit::native::object
+    loom::target::function_version
+    loom::target::provider
+    loom::target::reporting::low
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
+loom_cc_test(
+  NAME
+    object_test
+  SRCS
+    "object_test.cc"
+  DEPS
+    ::object
+    iree::base
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::text_asm
+    loom::format::text::parser
+    loom::ir
+    loom::ops::low
+    loom::ops::op_defs
+    loom::target::arch::x86::descriptors::low_registry
+    loom::target::arch::x86::ops
+    loom::target::function_version
+    loom::target::provider
+    loom::testing::context
+    loom::testing::module_ptr
+  LABELS
+    "iree-build-requirement=loom.target.arch.x86"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
+loom_cc_test(
+  NAME
+    direct_call_link_test
+  SRCS
+    "direct_call_link_test.c"
+    "direct_call_object.stamp"
+  DEPS
+
   LABELS
     "iree-build-requirement=loom.target.arch.x86"
 )

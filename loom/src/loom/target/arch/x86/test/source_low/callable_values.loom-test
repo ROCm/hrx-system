@@ -99,7 +99,12 @@ func.def @scalar_add(%value: i32, %delta: i32) -> (i32) {
 
 // ----
 low.func.def public target<x86.avx2.core>(@target) abi(object_function) abi_layout({argument_locations = [7, 6], calling_convention = "sysv_x86_64", result_locations = [0], stack_argument_bytes = 0}) @call_scalar(%value: reg<x86.gpr32>, %delta: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
-  %11 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
-  %result = add.gpr32 %11, %delta
+  %result = low.func.call pure @scalar_add(%value, %delta) : (reg<x86.gpr32>, reg<x86.gpr32>) -> (reg<x86.gpr32>)
+  return %result
+}
+
+low.func.def target<x86.avx2.core>(@target) @scalar_add(%value: reg<x86.gpr32>, %delta: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %15 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
+  %result = add.gpr32 %15, %delta
   return %result
 }

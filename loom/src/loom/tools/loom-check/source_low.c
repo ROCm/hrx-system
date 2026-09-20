@@ -299,7 +299,9 @@ iree_status_t loom_check_prepare_source_low_module(
   IREE_ASSERT_ARGUMENT(diagnostic_collector);
   IREE_ASSERT_ARGUMENT(block_pool);
 
+  loom_compile_pipeline_result_t pipeline_result = {0};
   const loom_target_entry_options_t entry_options = {
+      .function_versions = &pipeline_result.function_versions.list,
       .diagnostic_sink = {.fn = loom_check_diagnostic_collector_sink,
                           .user_data = diagnostic_collector},
       .source_resolver = source_resolver,
@@ -330,7 +332,6 @@ iree_status_t loom_check_prepare_source_low_module(
   compile_options.max_errors = 20;
   compile_options.report = options->report;
 
-  loom_compile_pipeline_result_t pipeline_result = {0};
   iree_status_t status = loom_compile_run_pipeline(
       module, &compile_options, block_pool, &pipeline_result);
   if (iree_status_is_ok(status) && pipeline_result.pass.error_count == 0 &&

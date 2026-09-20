@@ -19,6 +19,25 @@
 extern "C" {
 #endif
 
+// Materializes every compiler-owned target context in |function_versions|
+// into |module| and binds each versioned function to its concrete target
+// definition.
+//
+// Equal producer-owned target context ordinals share one definition. An exact
+// authored target definition is reused directly; a context without an exact
+// authored witness is materialized from its resolved target facts through the
+// owning provider. Semantically equivalent but independently produced contexts
+// remain distinct.
+//
+// This is the in-place self-containment boundary for a mutable compiler module.
+// Function-version handles remain valid because their function operations are
+// not replaced. A non-target function-version representation is rejected
+// because this layer cannot project its compiler-owned semantics into IR.
+iree_status_t loom_target_function_versions_materialize_module(
+    loom_module_t* module,
+    const loom_function_version_list_t* function_versions,
+    iree_arena_block_pool_t* block_pool);
+
 // Projects |source_module| into a standalone IR-only module that preserves
 // every target-refined function version in |function_versions| as an ordinary
 // target definition and function target reference.

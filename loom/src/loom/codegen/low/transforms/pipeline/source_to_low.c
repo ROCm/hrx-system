@@ -372,9 +372,7 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
   }
   uint32_t declaration_count = 0;
   for (iree_host_size_t i = 0;
-       i < selection_list.count && iree_status_is_ok(status) &&
-       !emitted_error_diagnostics;
-       ++i) {
+       i < selection_list.count && iree_status_is_ok(status); ++i) {
     const loom_low_source_selection_t* selection = &selection_list.values[i];
     if (selection->kind != LOOM_LOW_SOURCE_SELECTION_IMPORT_DECL) {
       continue;
@@ -401,7 +399,7 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
     if (iree_status_is_ok(status) && lower_result.error_count > 0) {
       emitted_error_diagnostics = true;
       loom_low_lower_result_deinitialize(&lower_result);
-      break;
+      continue;
     }
     if (iree_status_is_ok(status)) {
       IREE_ASSERT(lower_result.low_func_op != NULL);
@@ -416,9 +414,7 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
   }
   uint32_t function_count = 0;
   for (iree_host_size_t i = 0;
-       i < selection_list.count && iree_status_is_ok(status) &&
-       !emitted_error_diagnostics;
-       ++i) {
+       i < selection_list.count && iree_status_is_ok(status); ++i) {
     const loom_low_source_selection_t* selection = &selection_list.values[i];
     if (selection->kind != LOOM_LOW_SOURCE_SELECTION_FUNCTION) {
       continue;
@@ -477,7 +473,7 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
     if (iree_status_is_ok(status) && lower_result.error_count > 0) {
       emitted_error_diagnostics = true;
       loom_low_lower_result_deinitialize(&lower_result);
-      break;
+      continue;
     }
     if (iree_status_is_ok(status)) {
       IREE_ASSERT(lower_result.low_func_op != NULL);

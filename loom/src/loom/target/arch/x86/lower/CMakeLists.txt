@@ -17,18 +17,23 @@ loom_cc_library(
     "abi.h"
     "contraction.h"
     "lower.h"
+    "view_abi.h"
   TEXTUAL_HDRS
     "${IREE_BINARY_DIR}/loom/src/loom/target/arch/x86/contracts/tables.inl"
   SRCS
     "abi.c"
     "contraction.c"
     "registry.c"
+    "view_abi.c"
   DEPS
     iree::base
     loom::codegen::low::descriptors
     loom::codegen::low::lower
+    loom::codegen::low::source_memory_plan
     loom::error::error_defs
     loom::ir
+    loom::ops::func
+    loom::ops::low
     loom::target::arch::x86::contracts
     loom::target::arch::x86::packed_dot_contract
     loom::target::arch::x86::packed_dot_contract_projection

@@ -250,11 +250,14 @@ typedef enum loom_target_pipeline_phase_e {
   LOOM_TARGET_PIPELINE_PHASE_SOURCE_TO_LOW = 1,
   // Target-owned cleanup for human-facing source-low asm artifacts.
   LOOM_TARGET_PIPELINE_PHASE_SOURCE_LOW_ARTIFACT_PREPARATION = 2,
-  // Target ABI/resource materialization after source-to-low.
-  LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_MATERIALIZATION = 3,
+  // Target ABI materialization spanning definitions and declarations after
+  // source-to-low and symbol pruning. Contributions run at module scope.
+  LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_SYMBOL_MATERIALIZATION = 3,
+  // Target ABI/resource materialization within each target-low definition.
+  LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_MATERIALIZATION = 4,
   // Target-low preparation before the common cleanup and operand-form
   // selection immediately preceding emission.
-  LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_PREPARATION = 4,
+  LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_PREPARATION = 5,
   LOOM_TARGET_PIPELINE_PHASE_COUNT_,
 } loom_target_pipeline_phase_t;
 
