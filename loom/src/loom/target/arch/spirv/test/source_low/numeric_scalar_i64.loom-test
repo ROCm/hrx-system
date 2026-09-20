@@ -349,3 +349,53 @@ func.def target(@target) @scalar_f64_insert_dynamic(%values: vector<2xf64>, %rep
   %updated = vector.insert %replacement into %values[%lane] : f64, vector<2xf64>
   func.return %updated : vector<2xf64>
 }
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @scalar_f32_select(%condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
+  %result = scf.select %condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_f32_select(%condition: reg<spirv.id : i1>, %true_value: reg<spirv.id : f32>, %false_value: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
+  %result = OpSelect.f32 %condition, %true_value, %false_value
+  return %result
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @scalar_f64_select(%condition: i1, %true_value: f64, %false_value: f64) -> (f64) {
+  // ERROR@+1: TARGET/003 {op_name="scf.select", subject_role="descriptor", subject_name="spirv.op_select.f64", constraint_key="descriptor_available"}
+  %result = scf.select %condition, %true_value, %false_value : f64
+  func.return %result : f64
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @scalar_f32_select_reuse(%condition: i1, %true_value: f32, %false_value: f32) -> (f32, f32, f32, i1) {
+  %result = scf.select %condition, %true_value, %false_value : f32
+  func.return %result, %true_value, %false_value, %condition : f32, f32, f32, i1
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_f32_select_reuse(%condition: reg<spirv.id : i1>, %true_value: reg<spirv.id : f32>, %false_value: reg<spirv.id : f32>) -> (reg<spirv.id : f32>, reg<spirv.id : f32>, reg<spirv.id : f32>, reg<spirv.id : i1>) asm {
+  %result = OpSelect.f32 %condition, %true_value, %false_value
+  return %result, %true_value, %false_value, %condition
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @scalar_f64_select_reuse(%condition: i1, %true_value: f64, %false_value: f64) -> (f64, f64, f64, i1) {
+  // ERROR@+1: TARGET/003 {op_name="scf.select", subject_role="descriptor", subject_name="spirv.op_select.f64", constraint_key="descriptor_available"}
+  %result = scf.select %condition, %true_value, %false_value : f64
+  func.return %result, %true_value, %false_value, %condition : f64, f64, f64, i1
+}

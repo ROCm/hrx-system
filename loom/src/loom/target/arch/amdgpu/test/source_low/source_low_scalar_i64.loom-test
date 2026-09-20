@@ -576,3 +576,75 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_
   %updated = concat(%15, %17, %21, %23) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
   return %updated
 }
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @scalar_f32_select(%condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
+  %result = scf.select %condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_f32_select(%condition: reg<amdgpu.sgpr x2>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %result = v_cndmask_b32 %false_value, %true_value, %condition
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @scalar_f64_select(%condition: i1, %true_value: f64, %false_value: f64) -> (f64) {
+  %result = scf.select %condition, %true_value, %false_value : f64
+  func.return %result : f64
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_f64_select(%condition: reg<amdgpu.sgpr x2>, %true_value: reg<amdgpu.vgpr x2>, %false_value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+  %9 = slice %true_value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %10 = slice %false_value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %11 = v_cndmask_b32 %10, %9, %condition
+  %12 = slice %true_value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %13 = slice %false_value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %14 = v_cndmask_b32 %13, %12, %condition
+  %result = concat(%11, %14) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @scalar_f32_select_reuse(%condition: i1, %true_value: f32, %false_value: f32) -> (f32, f32, f32, i1) {
+  %result = scf.select %condition, %true_value, %false_value : f32
+  func.return %result, %true_value, %false_value, %condition : f32, f32, f32, i1
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_f32_select_reuse(%condition: reg<amdgpu.sgpr x2>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) asm {
+  %result = v_cndmask_b32 %false_value, %true_value, %condition
+  return %result, %true_value, %false_value, %condition
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @scalar_f64_select_reuse(%condition: i1, %true_value: f64, %false_value: f64) -> (f64, f64, f64, i1) {
+  %result = scf.select %condition, %true_value, %false_value : f64
+  func.return %result, %true_value, %false_value, %condition : f64, f64, f64, i1
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_f64_select_reuse(%condition: reg<amdgpu.sgpr x2>, %true_value: reg<amdgpu.vgpr x2>, %false_value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.sgpr x2>) asm {
+  %15 = slice %true_value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %16 = slice %false_value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %17 = v_cndmask_b32 %16, %15, %condition
+  %18 = slice %true_value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %19 = slice %false_value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %20 = v_cndmask_b32 %19, %18, %condition
+  %result = concat(%17, %20) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %result, %true_value, %false_value, %condition
+}

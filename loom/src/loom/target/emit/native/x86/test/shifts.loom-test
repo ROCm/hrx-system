@@ -470,3 +470,37 @@ low.func.def target<x86.scalar.core> @immediate_count_too_wide(%value: reg<x86.g
   %result = shr.imm.gpr64 %value {shift = 64}
   return %result
 }
+
+// ====
+
+// Packed shifts accept an imm8; counts of at least 64 clear both qwords.
+// RUN: emit x86-asm @shift_bounds
+
+x86.target<avx2> @target
+
+low.func.def target<x86.avx2.core>(@target) @shift_bounds(%input: reg<x86.xmm>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>) asm {
+  %unchanged = vpsllq.xmm %input, 0
+  %sign = vpsllq.xmm %input, 63
+  %width = vpsllq.xmm %input, 64
+  %maximum = vpsllq.xmm %input, 255
+  return %unchanged, %sign, %width, %maximum
+}
+
+// ----
+  vpsllq xmm1, xmm0, 0
+  vpsllq xmm2, xmm0, 63
+  vpsllq xmm3, xmm0, 64
+  vpsllq xmm0, xmm0, 255
+  ret
+
+// ====
+
+// RUN: verify
+
+x86.target<avx2> @target
+
+low.func.def target<x86.avx2.core>(@target) @shift_invalid(%input: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  // ERROR@+1: STRUCTURE/014
+  %result = vpsllq.xmm %input, 256
+  return %result
+}

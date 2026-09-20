@@ -374,3 +374,63 @@ func.def target(@target) @scalar_f64_insert_dynamic(%values: vector<2xf64>, %rep
   // ERROR@+1: TARGET/033 {op_name="func.return", field_name="source", actual_type="vector<2xf64>"}
   func.return %updated : vector<2xf64>
 }
+
+// ====
+
+vm.target<core> @target
+
+func.def target(@target) @scalar_f32_select(%condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
+  %result = scf.select %condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @scalar_f32_select(%condition: reg<vm.value : i1>, %true_value: reg<vm.value : f32>, %false_value: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+  %result = value.select %condition, %true_value, %false_value : reg<vm.value : f32>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+
+func.def target(@target) @scalar_f64_select(%condition: i1, %true_value: f64, %false_value: f64) -> (f64) {
+  %result = scf.select %condition, %true_value, %false_value : f64
+  func.return %result : f64
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @scalar_f64_select(%condition: reg<vm.value : i1>, %true_value: reg<vm.value : f64>, %false_value: reg<vm.value : f64>) -> (reg<vm.value : f64>) asm {
+  %result = value.select %condition, %true_value, %false_value : reg<vm.value : f64>
+  return %result
+}
+
+// ====
+
+vm.target<core> @target
+
+func.def target(@target) @scalar_f32_select_reuse(%condition: i1, %true_value: f32, %false_value: f32) -> (f32, f32, f32, i1) {
+  %result = scf.select %condition, %true_value, %false_value : f32
+  func.return %result, %true_value, %false_value, %condition : f32, f32, f32, i1
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @scalar_f32_select_reuse(%condition: reg<vm.value : i1>, %true_value: reg<vm.value : f32>, %false_value: reg<vm.value : f32>) -> (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : i1>) asm {
+  %result = value.select %condition, %true_value, %false_value : reg<vm.value : f32>
+  return %result, %true_value, %false_value, %condition
+}
+
+// ====
+
+vm.target<core> @target
+
+func.def target(@target) @scalar_f64_select_reuse(%condition: i1, %true_value: f64, %false_value: f64) -> (f64, f64, f64, i1) {
+  %result = scf.select %condition, %true_value, %false_value : f64
+  func.return %result, %true_value, %false_value, %condition : f64, f64, f64, i1
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @scalar_f64_select_reuse(%condition: reg<vm.value : i1>, %true_value: reg<vm.value : f64>, %false_value: reg<vm.value : f64>) -> (reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : i1>) asm {
+  %result = value.select %condition, %true_value, %false_value : reg<vm.value : f64>
+  return %result, %true_value, %false_value, %condition
+}

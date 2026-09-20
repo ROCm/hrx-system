@@ -14,6 +14,8 @@ from loom.dialect.scalar import ALL_SCALAR_OPS
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.scalar import conversion as scalar_conversion
 from loom.dialect.scalar import math as scalar_math
+from loom.dialect.scf import ALL_SCF_OPS
+from loom.dialect.scf import defs as scf
 from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
 from loom.dsl import Op
@@ -42,6 +44,7 @@ from loom.target.low_descriptors import Descriptor
 
 _DescriptorLookup = Callable[[str], Descriptor]
 
+_I1 = Scalar("i1")
 _I32 = Scalar("i32")
 _I64 = Scalar("i64")
 _F32 = Scalar("f32")
@@ -132,6 +135,49 @@ def _conversion_rule(
             _op_emit(
                 descriptor=descriptor,
                 operands={"input": ValueRef.operand("input")},
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _select_rule(
+    type_pattern: TypePattern,
+    descriptor_lookup: _DescriptorLookup,
+) -> DescriptorRule:
+    move = descriptor_lookup("x86.avx2.vmovd.xmm.gpr32")
+    shift = descriptor_lookup("x86.avx2.vpsllq.xmm")
+    blend = descriptor_lookup("x86.avx2.vblendvpd.xmm")
+    # Both scalar float widths occupy the low qword. Selecting that qword
+    # preserves every payload bit; the remaining XMM bits have no scalar meaning.
+    return DescriptorRule(
+        source_op=scf.scf_select,
+        descriptor=blend,
+        guards=(
+            Guard.value_type("condition", _I1),
+            *_typed_guards(("true_value", "false_value", "result"), type_pattern),
+        ),
+        emit=(
+            _op_emit(
+                descriptor=move,
+                operands={"input": ValueRef.operand("condition")},
+                results={"dst": ValueRef.temporary("condition_bits")},
+                result_types={"dst": _V2I64},
+            ),
+            _op_emit(
+                descriptor=shift,
+                operands={"source": ValueRef.temporary("condition_bits")},
+                results={"dst": ValueRef.temporary("mask")},
+                result_types={"dst": _V2I64},
+                immediates={"shift": 63},
+            ),
+            _op_emit(
+                descriptor=blend,
+                operands={
+                    "false_value": ValueRef.operand("false_value"),
+                    "true_value": ValueRef.operand("true_value"),
+                    "mask": ValueRef.temporary("mask"),
+                },
                 results={"dst": ValueRef.result("result")},
             ),
         ),
@@ -420,6 +466,10 @@ def _reduce_f32x4_rule(
 def _cases() -> Sequence[ContractCase]:
     descriptor_lookup = _descriptor
     return (
+        *(
+            _select_rule(type_pattern, descriptor_lookup)
+            for type_pattern in (_F32, _F64)
+        ),
         _conversion_rule(
             scalar_conversion.scalar_bitcast,
             _F32,
@@ -546,6 +596,7 @@ def _cases() -> Sequence[ContractCase]:
 
 X86_AVX2_CONTRACT_DIALECT_OPS = {
     "scalar": ALL_SCALAR_OPS,
+    "scf": ALL_SCF_OPS,
     "vector": ALL_VECTOR_OPS,
 }
 

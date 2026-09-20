@@ -630,3 +630,81 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f
   %updated = vinsert.64.reg %values, %9, %replacement
   return %updated
 }
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @scalar_f32_select(%condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
+  %result = scf.select %condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f32_select(%condition: reg<aie2p.er>, %true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %9 = copy %condition : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %result = sel.nez %true_value, %false_value, %9
+  return %result
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @scalar_f64_select(%condition: i1, %true_value: f64, %false_value: f64) -> (f64) {
+  %result = scf.select %condition, %true_value, %false_value : f64
+  func.return %result : f64
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f64_select(%condition: reg<aie2p.er>, %true_value: reg<aie2p.er x2>, %false_value: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
+  %9 = slice %true_value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %10 = slice %true_value[1] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %11 = slice %false_value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %12 = slice %false_value[1] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %13 = copy %condition : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %14 = sel.nez %9, %11, %13
+  %15 = copy %condition : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %16 = sel.nez %10, %12, %15
+  %result = concat(%14, %16) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  return %result
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @scalar_f32_select_reuse(%condition: i1, %true_value: f32, %false_value: f32) -> (f32, f32, f32, i1) {
+  %result = scf.select %condition, %true_value, %false_value : f32
+  func.return %result, %true_value, %false_value, %condition : f32, f32, f32, i1
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f32_select_reuse(%condition: reg<aie2p.er>, %true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %15 = copy %condition : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %result = sel.nez %true_value, %false_value, %15
+  return %result, %true_value, %false_value, %condition
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @scalar_f64_select_reuse(%condition: i1, %true_value: f64, %false_value: f64) -> (f64, f64, f64, i1) {
+  %result = scf.select %condition, %true_value, %false_value : f64
+  func.return %result, %true_value, %false_value, %condition : f64, f64, f64, i1
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f64_select_reuse(%condition: reg<aie2p.er>, %true_value: reg<aie2p.er x2>, %false_value: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er>) asm {
+  %15 = slice %true_value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %16 = slice %true_value[1] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %17 = slice %false_value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %18 = slice %false_value[1] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %19 = copy %condition : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %20 = sel.nez %15, %17, %19
+  %21 = copy %condition : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %22 = sel.nez %16, %18, %21
+  %result = concat(%20, %22) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  return %result, %true_value, %false_value, %condition
+}

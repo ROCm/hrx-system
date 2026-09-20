@@ -27,6 +27,7 @@ iree_py_library(
         "//loom/py/loom/dialect/buffer",
         "//loom/py/loom/dialect/index",
         "//loom/py/loom/dialect/scalar",
+        "//loom/py/loom/dialect/scf",
         "//loom/py/loom/dialect/vector",
         "//loom/py/loom/target/arch/x86:descriptors",
         "//loom/py/loom/target/contracts",

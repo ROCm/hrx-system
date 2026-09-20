@@ -1,0 +1,121 @@
+// Scalar f32 and f64 selection share the low-qword mask and blend sequence.
+// Dead operands may alias the result; live operands and the predicate survive.
+// RUN: emit x86-asm @floating_select strategy=source fixed=%condition:physical_register:7:1 fixed=%true_value:physical_register:0:1 fixed=%false_value:physical_register:1:1 fixed=%result:physical_register:0:1
+
+x86.target<avx2> @target
+
+low.func.def target<x86.avx2.core>(@target) @floating_select(%condition: reg<x86.gpr32>, %true_value: reg<x86.xmm>, %false_value: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  %condition_bits = vmovd.xmm.gpr32 %condition
+  %mask = vpsllq.xmm %condition_bits, 63
+  %result = vblendvpd.xmm %false_value, %true_value, %mask
+  return %result
+}
+
+// ----
+  vmovd xmm2, edi
+  vpsllq xmm2, xmm2, 63
+  vblendvpd xmm0, xmm1, xmm0, xmm2
+  ret
+
+// ====
+
+// RUN: emit x86-asm @floating_select strategy=latency-hiding fixed=%condition:physical_register:7:1 fixed=%true_value:physical_register:0:1 fixed=%false_value:physical_register:1:1 fixed=%result:physical_register:1:1
+
+x86.target<avx2> @target
+
+low.func.def target<x86.avx2.core>(@target) @floating_select(%condition: reg<x86.gpr32>, %true_value: reg<x86.xmm>, %false_value: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  %condition_bits = vmovd.xmm.gpr32 %condition
+  %mask = vpsllq.xmm %condition_bits, 63
+  %result = vblendvpd.xmm %false_value, %true_value, %mask
+  return %result
+}
+
+// ----
+  vmovd xmm2, edi
+  vpsllq xmm2, xmm2, 63
+  vblendvpd xmm1, xmm1, xmm0, xmm2
+  ret
+
+// ====
+
+// RUN: emit x86-asm @floating_select strategy=source fixed=%condition:physical_register:7:1 fixed=%true_value:physical_register:8:1 fixed=%false_value:physical_register:14:1 fixed=%result:physical_register:15:1
+
+x86.target<avx2> @target
+
+low.func.def target<x86.avx2.core>(@target) @floating_select(%condition: reg<x86.gpr32>, %true_value: reg<x86.xmm>, %false_value: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  %condition_bits = vmovd.xmm.gpr32 %condition
+  %mask = vpsllq.xmm %condition_bits, 63
+  %result = vblendvpd.xmm %false_value, %true_value, %mask
+  return %result
+}
+
+// ----
+  vmovd xmm0, edi
+  vpsllq xmm0, xmm0, 63
+  vblendvpd xmm15, xmm14, xmm8, xmm0
+  ret
+
+// ====
+
+// RUN: emit x86-asm @floating_select_reuse strategy=source fixed=%condition:physical_register:7:1 fixed=%true_value:physical_register:0:1 fixed=%false_value:physical_register:1:1 fixed=%result:physical_register:2:1
+
+x86.target<avx2> @target
+
+low.func.def target<x86.avx2.core>(@target) @floating_select_reuse(%condition: reg<x86.gpr32>, %true_value: reg<x86.xmm>, %false_value: reg<x86.xmm>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.gpr32>) asm {
+  %condition_bits = vmovd.xmm.gpr32 %condition
+  %mask = vpsllq.xmm %condition_bits, 63
+  %result = vblendvpd.xmm %false_value, %true_value, %mask
+  return %result, %true_value, %false_value, %condition
+}
+
+// ----
+  vmovd xmm2, edi
+  vpsllq xmm2, xmm2, 63
+  vblendvpd xmm2, xmm1, xmm0, xmm2
+  ret
+
+// ====
+
+// AVX-512 inherits this VEX sequence and its encodable XMM register subset.
+// RUN: emit x86-asm @floating_select_reuse strategy=latency-hiding fixed=%condition:physical_register:7:1 fixed=%true_value:physical_register:8:1 fixed=%false_value:physical_register:14:1 fixed=%result:physical_register:15:1
+
+x86.target<avx512> @target
+
+low.func.def target<x86.avx512.core>(@target) @floating_select_reuse(%condition: reg<x86.gpr32>, %true_value: reg<x86.xmm>, %false_value: reg<x86.xmm>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.gpr32>) asm {
+  %condition_bits = vmovd.xmm.gpr32 %condition
+  %mask = vpsllq.xmm %condition_bits, 63
+  %result = vblendvpd.xmm %false_value, %true_value, %mask
+  return %result, %true_value, %false_value, %condition
+}
+
+// ----
+  vmovd xmm0, edi
+  vpsllq xmm0, xmm0, 63
+  vblendvpd xmm15, xmm14, xmm8, xmm0
+  ret
+
+// ====
+
+// A comparison materializes the same i1 bit used by an incoming condition.
+// RUN: emit x86-asm @compare_select fixed=%lhs:physical_register:7:1 fixed=%true_value:physical_register:0:1 fixed=%false_value:physical_register:1:1 fixed=%result:physical_register:0:1
+
+x86.target<avx2> @target
+
+low.func.def target<x86.avx2.core>(@target) @compare_select(%lhs: reg<x86.gpr64>, %true_value: reg<x86.xmm>, %false_value: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  %limit = mov.imm64 4294967296
+  %condition = cmp.ult.gpr64 %lhs, %limit
+  %condition_bits = vmovd.xmm.gpr32 %condition
+  %mask = vpsllq.xmm %condition_bits, 63
+  %result = vblendvpd.xmm %false_value, %true_value, %mask
+  return %result
+}
+
+// ----
+  mov rax, 4294967296
+  cmp rdi, rax
+  mov eax, 0
+  setb al
+  vmovd xmm2, eax
+  vpsllq xmm2, xmm2, 63
+  vblendvpd xmm0, xmm1, xmm0, xmm2
+  ret

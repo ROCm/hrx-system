@@ -423,3 +423,63 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_f
   %updated = insert.dynamic.v2f64 %values, %replacement, %lane
   return %updated
 }
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def target(@target) @scalar_f32_select(%condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
+  %result = scf.select %condition, %true_value, %false_value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_f32_select(%condition: reg<llvmir.i1>, %true_value: reg<llvmir.f32>, %false_value: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
+  %result = select.f32 %condition, %true_value, %false_value
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def target(@target) @scalar_f64_select(%condition: i1, %true_value: f64, %false_value: f64) -> (f64) {
+  %result = scf.select %condition, %true_value, %false_value : f64
+  func.return %result : f64
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_f64_select(%condition: reg<llvmir.i1>, %true_value: reg<llvmir.f64>, %false_value: reg<llvmir.f64>) -> (reg<llvmir.f64>) asm {
+  %result = select.f64 %condition, %true_value, %false_value
+  return %result
+}
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def target(@target) @scalar_f32_select_reuse(%condition: i1, %true_value: f32, %false_value: f32) -> (f32, f32, f32, i1) {
+  %result = scf.select %condition, %true_value, %false_value : f32
+  func.return %result, %true_value, %false_value, %condition : f32, f32, f32, i1
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_f32_select_reuse(%condition: reg<llvmir.i1>, %true_value: reg<llvmir.f32>, %false_value: reg<llvmir.f32>) -> (reg<llvmir.f32>, reg<llvmir.f32>, reg<llvmir.f32>, reg<llvmir.i1>) asm {
+  %result = select.f32 %condition, %true_value, %false_value
+  return %result, %true_value, %false_value, %condition
+}
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def target(@target) @scalar_f64_select_reuse(%condition: i1, %true_value: f64, %false_value: f64) -> (f64, f64, f64, i1) {
+  %result = scf.select %condition, %true_value, %false_value : f64
+  func.return %result, %true_value, %false_value, %condition : f64, f64, f64, i1
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_f64_select_reuse(%condition: reg<llvmir.i1>, %true_value: reg<llvmir.f64>, %false_value: reg<llvmir.f64>) -> (reg<llvmir.f64>, reg<llvmir.f64>, reg<llvmir.f64>, reg<llvmir.i1>) asm {
+  %result = select.f64 %condition, %true_value, %false_value
+  return %result, %true_value, %false_value, %condition
+}

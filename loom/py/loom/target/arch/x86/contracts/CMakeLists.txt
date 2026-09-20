@@ -25,6 +25,7 @@ iree_py_library(
     loom::py::loom::dialect::buffer::buffer
     loom::py::loom::dialect::index::index
     loom::py::loom::dialect::scalar::scalar
+    loom::py::loom::dialect::scf::scf
     loom::py::loom::dialect::vector::vector
     loom::py::loom::target::arch::x86::descriptors
     loom::py::loom::target::contracts::contracts

@@ -58,6 +58,7 @@ loom_target_contract_cc_libraries(
   LOWER_RULE_DEPS
     loom::codegen::low::lower
     loom::ops::scalar
+    loom::ops::scf
     loom::ops::vector
 )
 endif()
