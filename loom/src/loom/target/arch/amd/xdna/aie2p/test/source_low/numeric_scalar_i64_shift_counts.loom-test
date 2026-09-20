@@ -971,3 +971,24 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_sh
   %signed_last = ashl %value, %24
   return %value, %value, %value, %left_last, %logical_last, %signed_last
 }
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @index_shift_arithmetic_reuse(%value: index, %count: index) -> (index) {
+  %shifted = index.shrsi %value, %count : index
+  %with_count = index.add %shifted, %count : index
+  %result = index.xori %with_count, %value : index
+  func.return %result : index
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_shift_arithmetic_reuse(%value: reg<aie2p.er>, %count: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %9 = mov.short 0
+  %10 = sub %9, %count
+  %shifted = ashl %value, %10
+  %with_count = add.rr %shifted, %count
+  %result = xor %with_count, %value
+  return %result
+}

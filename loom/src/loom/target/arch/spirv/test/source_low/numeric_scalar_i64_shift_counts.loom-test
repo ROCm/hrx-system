@@ -514,3 +514,15 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @index_
   %signed_last = OpShiftRightArithmetic %value, %last : reg<spirv.id : index>
   return %value, %value, %value, %left_last, %logical_last, %signed_last
 }
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @index_shift_arithmetic_reuse(%value: index, %count: index) -> (index) {
+  // ERROR@+1: SPIRV/027 {op_name="index.shrsi", field_name="rhs", constraint_key="spirv.index.shift_amount.u5"}
+  %shifted = index.shrsi %value, %count : index
+  %with_count = index.add %shifted, %count : index
+  %result = index.xori %with_count, %value : index
+  func.return %result : index
+}

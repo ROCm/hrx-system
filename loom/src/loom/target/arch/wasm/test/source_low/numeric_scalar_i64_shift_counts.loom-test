@@ -565,3 +565,22 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @index_shift_
   %signed_last = i32.shr_s %value, %last
   return %value, %value, %value, %left_last, %logical_last, %signed_last
 }
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @index_shift_arithmetic_reuse(%value: index, %count: index) -> (index) {
+  %shifted = index.shrsi %value, %count : index
+  %with_count = index.add %shifted, %count : index
+  %result = index.xori %with_count, %value : index
+  func.return %result : index
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @index_shift_arithmetic_reuse(%value: reg<wasm.i32>, %count: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %shifted = i32.shr_s %value, %count
+  %with_count = i32.add %shifted, %count
+  %result = i32.xor %with_count, %value
+  return %result
+}

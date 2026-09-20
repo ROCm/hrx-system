@@ -604,3 +604,22 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @index_shift_c
   %signed_last = s_ashr_i32 %value, %last
   return %value, %value, %value, %left_last, %logical_last, %signed_last
 }
+
+// ====
+
+amdgpu.target<gfx1151> @target
+
+func.def target(@target) @index_shift_arithmetic_reuse(%value: index, %count: index) -> (index) {
+  %shifted = index.shrsi %value, %count : index
+  %with_count = index.add %shifted, %count : index
+  %result = index.xori %with_count, %value : index
+  func.return %result : index
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @index_shift_arithmetic_reuse(%value: reg<amdgpu.sgpr>, %count: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %shifted = s_ashr_i32 %value, %count
+  %with_count = s_add_u32 %shifted, %count
+  %result = s_xor_b32 %with_count, %value
+  return %result
+}

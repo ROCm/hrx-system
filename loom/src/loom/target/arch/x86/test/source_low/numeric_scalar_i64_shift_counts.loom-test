@@ -588,9 +588,16 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @index_shift_co
 x86.target<avx2> @target
 
 func.def target(@target) @index_shift_arithmetic(%value: index, %count: index) -> (index) {
-  // ERROR@+1: TARGET/001 {op_name="index.shrsi"}
   %result = index.shrsi %value, %count : index
   func.return %result : index
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @index_shift_arithmetic(%value: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %7 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %8 = copy %count : reg<x86.gpr64> -> reg<x86.rcx>
+  %result = sar.cl.gpr64 %7, %8
+  return %result
 }
 
 // ====
@@ -601,9 +608,22 @@ func.def target(@target) @index_shift_bounded(%value: index, %count_input: index
   %count = index.assume %count_input [range(%count_input, 0, 31)] : index
   %left = index.shli %value, %count : index
   %logical = index.shrui %value, %count : index
-  // ERROR@+1: TARGET/001 {op_name="index.shrsi"}
   %signed = index.shrsi %value, %count : index
   func.return %left, %logical, %signed : index, index, index
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @index_shift_bounded(%value: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>) asm {
+  %14 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %15 = copy %count : reg<x86.gpr64> -> reg<x86.rcx>
+  %left = shl.cl.gpr64 %14, %15
+  %17 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %18 = copy %count : reg<x86.gpr64> -> reg<x86.rcx>
+  %logical = shr.cl.gpr64 %17, %18
+  %20 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %21 = copy %count : reg<x86.gpr64> -> reg<x86.rcx>
+  %signed = sar.cl.gpr64 %20, %21
+  return %left, %logical, %signed
 }
 
 // ====
@@ -618,7 +638,39 @@ func.def target(@target) @index_shift_constant_boundaries(%value: index) -> (ind
   %signed_zero = index.shrsi %value, %identity_count : index
   %left_last = index.shli %value, %last : index
   %logical_last = index.shrui %value, %last : index
-  // ERROR@+1: TARGET/001 {op_name="index.shrsi"}
   %signed_last = index.shrsi %value, %last : index
   func.return %left_zero, %logical_zero, %signed_zero, %left_last, %logical_last, %signed_last : index, index, index, index, index, index
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @index_shift_constant_boundaries(%value: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>) asm {
+  %22 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %left_last = shl.imm.gpr64 %22 {shift = 31}
+  %24 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %logical_last = shr.imm.gpr64 %24 {shift = 31}
+  %26 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %signed_last = sar.imm.gpr64 %26 {shift = 31}
+  return %value, %value, %value, %left_last, %logical_last, %signed_last
+}
+
+// ====
+
+x86.target<avx2> @target
+
+func.def target(@target) @index_shift_arithmetic_reuse(%value: index, %count: index) -> (index) {
+  %shifted = index.shrsi %value, %count : index
+  %with_count = index.add %shifted, %count : index
+  %result = index.xori %with_count, %value : index
+  func.return %result : index
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @index_shift_arithmetic_reuse(%value: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %9 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %10 = copy %count : reg<x86.gpr64> -> reg<x86.rcx>
+  %shifted = sar.cl.gpr64 %9, %10
+  %with_count = lea %shifted, %count
+  %13 = copy %with_count : reg<x86.gpr64> -> reg<x86.gpr64>
+  %result = xor.gpr64 %13, %value
+  return %result
 }

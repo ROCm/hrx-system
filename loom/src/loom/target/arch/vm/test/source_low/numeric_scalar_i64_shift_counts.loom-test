@@ -532,3 +532,22 @@ low.func.def target<vm.core>(@target) abi(vm_function) @index_shift_constant_bou
   %signed_last = integer.shift.right.s64 %value, %last
   return %value, %value, %value, %left_last, %logical_last, %signed_last
 }
+
+// ====
+
+vm.target<core> @target
+
+func.def target(@target) @index_shift_arithmetic_reuse(%value: index, %count: index) -> (index) {
+  %shifted = index.shrsi %value, %count : index
+  %with_count = index.add %shifted, %count : index
+  %result = index.xori %with_count, %value : index
+  func.return %result : index
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @index_shift_arithmetic_reuse(%value: reg<vm.value : i64>, %count: reg<vm.value : i64>) -> (reg<vm.value : i64>) asm {
+  %shifted = integer.shift.right.s64 %value, %count
+  %with_count = integer.add.i64 %shifted, %count
+  %result = integer.xor.i64 %with_count, %value
+  return %result
+}

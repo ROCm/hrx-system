@@ -46,6 +46,10 @@ for (const value of values) {
                  `arithmetic value ${value}, count ${count}`);
     assert.deepEqual(exports.index_shift_bounded(value, count), expected,
                      `bounded value ${value}, count ${count}`);
+    const reused = (BigInt(expected[2]) + BigInt(count)) ^ BigInt(value);
+    assert.equal(exports.index_shift_arithmetic_reuse(value, count),
+                 Number(BigInt.asIntN(32, reused)),
+                 `reused value ${value}, count ${count}`);
   }
   assert.equal(exports.index_shift_constant_four(value), reference(value, 4)[0],
                `constant count 4, value ${value}`);

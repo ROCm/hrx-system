@@ -1512,6 +1512,7 @@ def _cases() -> Sequence[ContractCase]:
             rule
             for source_op, operation in (
                 (index.index_shli, "shl"),
+                (index.index_shrsi, "sar"),
                 (index.index_shrui, "shr"),
             )
             for rule in _shift_rules(

@@ -278,3 +278,12 @@ func.def @index_shift_constant_boundaries(%value: index) -> (index, index, index
   %signed_last = index.shrsi %value, %last : index
   func.return %left_zero, %logical_zero, %signed_zero, %left_last, %logical_last, %signed_last : index, index, index, index, index, index
 }
+
+// ====
+
+func.def @index_shift_arithmetic_reuse(%value: index, %count: index) -> (index) {
+  %shifted = index.shrsi %value, %count : index
+  %with_count = index.add %shifted, %count : index
+  %result = index.xori %with_count, %value : index
+  func.return %result : index
+}

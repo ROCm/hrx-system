@@ -402,6 +402,66 @@ low.func.def target<x86.scalar.core> @shift_sar_64(%value: reg<x86.gpr64>, %coun
 
 // ====
 
+// The original value and count remain live after the arithmetic shift.
+// RUN: emit x86-asm @index_shift_arithmetic_reuse strategy=source fixed=%value:physical_register:7:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @index_shift_arithmetic_reuse(%value: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %shift_input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %count_register = copy %count : reg<x86.gpr64> -> reg<x86.rcx>
+  %shifted = sar.cl.gpr64 %shift_input, %count_register
+  %with_count = lea %shifted, %count
+  %result_input = copy %with_count : reg<x86.gpr64> -> reg<x86.gpr64>
+  %result = xor.gpr64 %result_input, %value
+  return %result
+}
+
+// ----
+  mov rax, rdi
+  mov rcx, rsi
+  sar rax, cl
+  lea rax, [rax + rsi]
+  xor rax, rdi
+  ret
+
+// ====
+
+// RUN: emit x86-asm @index_shift_arithmetic_reuse strategy=latency-hiding fixed=%value:physical_register:7:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @index_shift_arithmetic_reuse(%value: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %shift_input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %count_register = copy %count : reg<x86.gpr64> -> reg<x86.rcx>
+  %shifted = sar.cl.gpr64 %shift_input, %count_register
+  %with_count = lea %shifted, %count
+  %result_input = copy %with_count : reg<x86.gpr64> -> reg<x86.gpr64>
+  %result = xor.gpr64 %result_input, %value
+  return %result
+}
+
+// ----
+  mov rax, rdi
+  mov rcx, rsi
+  sar rax, cl
+  lea rax, [rax + rsi]
+  xor rax, rdi
+  ret
+
+// ====
+
+// RUN: emit x86-asm @shift_sar_64_immediate fixed=%value:physical_register:7:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @shift_sar_64_immediate(%value: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
+  %result = sar.imm.gpr64 %input {shift = 63}
+  return %result
+}
+
+// ----
+  mov rax, rdi
+  sar rax, 63
+  ret
+
+// ====
+
 // Immediate-form limits are verified on the instruction that owns them.
 // RUN: verify
 
