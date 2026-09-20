@@ -76,6 +76,16 @@ loom_low_lower_u32_divisor_magic_info(uint32_t divisor) {
   return info;
 }
 
+uint64_t loom_low_lower_u32_divisor_magic_high64_multiplier(
+    loom_low_lower_u32_divisor_magic_info_t info) {
+  // The add recipe encodes a 33-bit reciprocal with its leading bit omitted.
+  // Scaling that complete reciprocal to 2^64 folds in the final division by
+  // 2^(32 + post_shift + is_add) without changing the u32 quotient.
+  const uint64_t multiplier =
+      (uint64_t)info.multiplier + ((uint64_t)info.is_add << 32);
+  return multiplier << (32 - info.post_shift - info.is_add);
+}
+
 const loom_op_t* loom_low_lower_rule_source_op(
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     const loom_op_t* const* source_nodes, uint8_t source_node_count,

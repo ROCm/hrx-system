@@ -411,6 +411,7 @@ X86_AVX2_DESCRIPTOR_SET = DescriptorSet(
     c_enum_prefix="X86_AVX2_CORE",
     generator_version=1,
     supports_native_scheduling=True,
+    physical_registers=X86_SCALAR_DESCRIPTOR_SET.physical_registers,
     reg_classes=(
         *X86_SCALAR_DESCRIPTOR_SET.reg_classes,
         RegClass(
@@ -419,7 +420,7 @@ X86_AVX2_DESCRIPTOR_SET = DescriptorSet(
             SpillSlotSpace.STACK,
             flags=(RegClassFlag.PHYSICAL,),
             allocatable_count=16,
-            alias_set_id=2,
+            alias_set_id=1,
         ),
         RegClass(
             _REG_YMM,
@@ -427,7 +428,7 @@ X86_AVX2_DESCRIPTOR_SET = DescriptorSet(
             SpillSlotSpace.STACK,
             flags=(RegClassFlag.PHYSICAL,),
             allocatable_count=16,
-            alias_set_id=2,
+            alias_set_id=1,
         ),
     ),
     resources=(

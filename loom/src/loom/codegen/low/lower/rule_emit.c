@@ -683,7 +683,10 @@ static iree_status_t loom_low_lower_rule_build_attrs(
         uint64_t projected_value =
             attr_copy->kind ==
                     LOOM_LOW_LOWER_ATTR_COPY_VALUE_U32_DIVISOR_MAGIC_MULTIPLIER
-                ? info.multiplier
+                ? (attr_copy->literal_i64 == 0
+                       ? info.multiplier
+                       : loom_low_lower_u32_divisor_magic_high64_multiplier(
+                             info))
                 : info.post_shift + attr_copy->literal_i64;
         if (attr_copy->target_bit_offset != 0) {
           IREE_ASSERT_LT(attr_copy->target_bit_offset, 63);

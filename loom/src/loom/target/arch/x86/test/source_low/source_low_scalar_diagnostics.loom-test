@@ -106,8 +106,41 @@ func.def target(@target) @remainder_requires_u32_numerator(%input: index) -> (in
 x86.target<scalar> @target
 
 func.def target(@target) @remainder_requires_supported_divisor(%input: i32) -> (i32) {
-  %divisor = scalar.constant 7 : i32
+  %divisor = scalar.constant 11 : i32
   // ERROR@+1: TARGET/003 {op_name="scalar.remui", constraint_key="x86.scalar.remainder_divisor"}
   %result = scalar.remui %input, %divisor : i32
+  func.return %result : i32
+}
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @remainder_by_seven_requires_u32_index(%input: index) -> (index) {
+  %divisor = index.constant 7 : index
+  // ERROR@+1: TARGET/003 {op_name="index.rem", constraint_key="x86.scalar.remainder_u32"}
+  %result = index.rem %input, %divisor : index
+  func.return %result : index
+}
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @remainder_by_seven_rejects_wide_integer(%input: i64) -> (i64) {
+  %divisor = scalar.constant 7 : i64
+  // ERROR@+1: TARGET/002 {op_name="scalar.remui", field_name="lhs", actual_type="i64"}
+  %result = scalar.remui %input, %divisor : i64
+  func.return %result : i64
+}
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @remainder_by_seven_rejects_signed_integer(%input: i32) -> (i32) {
+  %divisor = scalar.constant 7 : i32
+  // ERROR@+1: TARGET/001 {op_name="scalar.remsi"}
+  %result = scalar.remsi %input, %divisor : i32
   func.return %result : i32
 }

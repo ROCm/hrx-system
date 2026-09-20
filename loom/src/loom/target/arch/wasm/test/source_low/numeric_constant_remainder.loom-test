@@ -60,3 +60,21 @@ CHECK: *i32.rem_u *
 CHECK: *i32.rem_u *
 CHECK: *i32.rem_u *
 CHECK: *i32.rem_u *
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @constant_remainder_by_seven(%word: i32, %position: index) -> (i32, index, i32, index) {
+  %bounded = index.assume %position [range(%position, 0, 4294967295)] : index
+  %word_divisor = scalar.constant 7 : i32
+  %index_divisor = index.constant 7 : index
+  %word_remainder = scalar.remui %word, %word_divisor : i32
+  %index_remainder = index.rem %bounded, %index_divisor : index
+  func.return %word_remainder, %index_remainder, %word, %bounded : i32, index, i32, index
+}
+
+// ----
+CHECK: %word_remainder = i32.rem_u %word, %*
+CHECK: %index_remainder = i32.rem_u %bounded, %*
+CHECK: return %word_remainder, %index_remainder, %word, %bounded

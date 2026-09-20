@@ -245,6 +245,7 @@ loom_cc_library(
     ::concat_reservation
     ::edge_alias
     ::live_range
+    ::physical_domains
     ::search
     ::storage
     ::target_constraints

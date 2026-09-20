@@ -13,8 +13,13 @@ from tempfile import TemporaryDirectory
 from types import TracebackType
 
 from loom.gen.target.arch.x86 import x86_descriptors
+from loom.gen.target.low import compiler
 from loom.target.arch.x86 import descriptors as x86_descriptor_data
-from loom.target.arch.x86.target_info import x86_descriptor_set_ordinal
+from loom.target.arch.x86.target_info import (
+    x86_descriptor_set_info_by_generator_target,
+    x86_descriptor_set_ordinal,
+)
+from loom.target.low_descriptors import OperandFlag, OperandRole, RegClassFlag
 
 
 class _RaisesValueError:
@@ -47,6 +52,54 @@ def _assert_descriptor_ref(header: str, macro_name: str) -> None:
 def _assert_reg_class_id(header: str, constant_name: str) -> None:
     assert re.search(rf"  {re.escape(constant_name)} = \d+u,", header), constant_name
     assert f"#define {constant_name} " not in header
+
+
+def test_scalar_physical_ownership_is_shared_by_core_profiles() -> None:
+    names = (
+        "rax",
+        "rcx",
+        "rdx",
+        "rbx",
+        "rsp",
+        "rbp",
+        "rsi",
+        "rdi",
+        "r8",
+        "r9",
+        "r10",
+        "r11",
+        "r12",
+        "r13",
+        "r14",
+        "r15",
+    )
+    for target in ("scalar", "simd128", "avx2", "avx512", "avx512_packed_dot"):
+        spec = x86_descriptors._descriptor_set_for_info(x86_descriptor_set_info_by_generator_target(target))
+        # Native profiles are views over the composite storage inventory.
+        storage = x86_descriptors._shared_storage_descriptor_set(x86_descriptor_data.X86_AVX512_PACKED_DOT_DESCRIPTOR_SET, (spec,))
+        compiled = compiler.compile_descriptor_set(storage)
+        assert tuple(register.name for register in compiled.physical_registers) == names
+        assert tuple(register.atomic_units for register in compiled.physical_registers) == tuple((i,) for i in range(16))
+        for name, width, physical_ids in (
+            ("x86.gpr32", 32, tuple(range(16))),
+            ("x86.gpr64", 64, tuple(range(16))),
+            ("x86.rax", 64, (0,)),
+            ("x86.rdx", 64, (2,)),
+        ):
+            class_id = compiled.reg_class_ids[name]
+            reg_class = compiled.reg_classes[class_id]
+            assert reg_class.alloc_unit_bits == width
+            assert RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS in reg_class.flags
+            start = compiled.physical_register_candidate_starts[class_id]
+            assert tuple(compiled.physical_register_candidate_ids[start : start + len(physical_ids)]) == physical_ids
+            if len(physical_ids) == 1:
+                assert RegClassFlag.UNSPILLABLE in reg_class.flags
+        multiply = next(descriptor for descriptor in spec.descriptors if descriptor.key == "x86.scalar.mul.high.gpr64")
+        operands = {operand.field_name: operand for operand in multiply.operands}
+        assert OperandFlag.IMPLICIT in operands["lhs"].flags
+        assert OperandFlag.IMPLICIT in operands["dst"].flags
+        assert operands["low"].role == OperandRole.IMPLICIT
+        assert OperandFlag.STATE_WRITE in operands["low"].flags
 
 
 def test_storage_generation_emits_current_public_views() -> None:

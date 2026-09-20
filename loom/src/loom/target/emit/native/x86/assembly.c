@@ -476,11 +476,18 @@ static iree_status_t loom_x86_append_asm_form_values(
   const loom_low_descriptor_set_t* descriptor_set =
       context->schedule->target.descriptor_set;
   for (uint16_t i = 0; i < count; ++i) {
+    const uint16_t operand_index =
+        descriptor_set->asm_operand_indices[start + i];
+    const loom_low_operand_t* operand =
+        &descriptor_set->operands[context->packet->descriptor->operand_start +
+                                  operand_index];
+    if (iree_any_bit_set(operand->flags, LOOM_LOW_OPERAND_FLAG_IMPLICIT)) {
+      continue;
+    }
     IREE_RETURN_IF_ERROR(loom_x86_append_asm_form_separator(context, in_list));
     IREE_RETURN_IF_ERROR(loom_x86_append_assignment(
         context, loom_low_packet_descriptor_operand_assignment(
-                     context->allocation, context->packet,
-                     descriptor_set->asm_operand_indices[start + i])));
+                     context->allocation, context->packet, operand_index)));
   }
   return iree_ok_status();
 }
@@ -1045,8 +1052,13 @@ static iree_status_t loom_x86_append_transfer_packet(
     return iree_ok_status();
   }
 
-  if (source_assignment->descriptor_reg_class_id !=
-      result_assignment->descriptor_reg_class_id) {
+  loom_x86_register_class_t source_kind = 0;
+  loom_x86_register_class_t result_kind = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_x86_register_class_kind(context, source_assignment, &source_kind));
+  IREE_RETURN_IF_ERROR(
+      loom_x86_register_class_kind(context, result_assignment, &result_kind));
+  if (source_kind != result_kind) {
     iree_string_view_t source_register_class = iree_string_view_empty();
     IREE_RETURN_IF_ERROR(loom_low_allocation_assignment_register_class_name(
         context->allocation, source_assignment, &source_register_class));
@@ -1059,6 +1071,11 @@ static iree_status_t loom_x86_append_transfer_packet(
         "unsupported",
         (int)source_register_class.size, source_register_class.data,
         (int)result_register_class.size, result_register_class.data);
+  }
+  if (source_assignment->location_kind == result_assignment->location_kind &&
+      source_assignment->location_base == result_assignment->location_base &&
+      source_assignment->location_count == result_assignment->location_count) {
+    return iree_ok_status();
   }
 
   IREE_RETURN_IF_ERROR(loom_x86_append_copy_mnemonic(

@@ -196,6 +196,7 @@ loom_cc_test(
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

@@ -1,0 +1,170 @@
+// The numerator remains live across MUL's implicit RAX/RDX writes. A 32-bit
+// move still clears the upper half when source and destination alias.
+// RUN: emit x86-asm @remainder fixed=%input:physical_register:0:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @remainder(%input: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %preserved = copy %input : reg<x86.gpr32> -> reg<x86.gpr32>
+  %numerator = movzx.gpr64.gpr32 %preserved
+  %magic = mov.imm64 2635249153617166336
+  %accumulator = copy %numerator : reg<x86.gpr64> -> reg<x86.rax>
+  %high = mul.high.gpr64 %accumulator, %magic
+  %quotient = copy %high : reg<x86.rdx> -> reg<x86.gpr64>
+  %scaled = lea.scale %quotient {disp32 = 0, scale = 8}
+  %negative = sub.gpr64 %quotient, %scaled
+  %narrow = mov.trunc.gpr32.gpr64 %negative
+  %result = add.gpr32 %narrow, %preserved
+  return %result
+}
+
+// ----
+  mov ecx, eax
+  mov eax, ecx
+  mov rdx, 2635249153617166336
+  mul rdx
+  lea rax, [rdx * 8]
+  sub rdx, rax
+  mov eax, edx
+  add eax, ecx
+  ret
+
+// ====
+
+// A numerator arriving in RDX must be preserved outside the high-result domain.
+// RUN: emit x86-asm @remainder fixed=%input:physical_register:2:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @remainder(%input: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %preserved = copy %input : reg<x86.gpr32> -> reg<x86.gpr32>
+  %numerator = movzx.gpr64.gpr32 %preserved
+  %magic = mov.imm64 2635249153617166336
+  %accumulator = copy %numerator : reg<x86.gpr64> -> reg<x86.rax>
+  %high = mul.high.gpr64 %accumulator, %magic
+  %quotient = copy %high : reg<x86.rdx> -> reg<x86.gpr64>
+  %scaled = lea.scale %quotient {disp32 = 0, scale = 8}
+  %negative = sub.gpr64 %quotient, %scaled
+  %narrow = mov.trunc.gpr32.gpr64 %negative
+  %result = add.gpr32 %narrow, %preserved
+  return %result
+}
+
+// ----
+  mov ecx, edx
+  mov eax, ecx
+  mov rdx, 2635249153617166336
+  mul rdx
+  lea rax, [rdx * 8]
+  sub rdx, rax
+  mov eax, edx
+  add eax, ecx
+  ret
+
+// ====
+
+// RUN: emit x86-asm @two_products strategy=source fixed=%lhs:physical_register:7:1 fixed=%rhs:physical_register:6:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @two_products(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %magic = mov.imm64 2635249153617166336
+  %lhs_accumulator = copy %lhs : reg<x86.gpr64> -> reg<x86.rax>
+  %lhs_high = mul.high.gpr64 %lhs_accumulator, %magic
+  %lhs_result = copy %lhs_high : reg<x86.rdx> -> reg<x86.gpr64>
+  %rhs_accumulator = copy %rhs : reg<x86.gpr64> -> reg<x86.rax>
+  %rhs_high = mul.high.gpr64 %rhs_accumulator, %magic
+  %rhs_result = copy %rhs_high : reg<x86.rdx> -> reg<x86.gpr64>
+  %sum_input = copy %lhs_result : reg<x86.gpr64> -> reg<x86.gpr64>
+  %result = add.gpr64 %sum_input, %rhs_result
+  return %result
+}
+
+// ----
+  mov rcx, 2635249153617166336
+  mov rax, rdi
+  mul rcx
+  mov rbx, rdx
+  mov rax, rsi
+  mul rcx
+  mov rax, rbx
+  add rax, rdx
+  ret
+
+// ====
+
+// RUN: emit x86-asm @two_products strategy=pressure fixed=%lhs:physical_register:7:1 fixed=%rhs:physical_register:6:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @two_products(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %magic = mov.imm64 2635249153617166336
+  %lhs_accumulator = copy %lhs : reg<x86.gpr64> -> reg<x86.rax>
+  %lhs_high = mul.high.gpr64 %lhs_accumulator, %magic
+  %lhs_result = copy %lhs_high : reg<x86.rdx> -> reg<x86.gpr64>
+  %rhs_accumulator = copy %rhs : reg<x86.gpr64> -> reg<x86.rax>
+  %rhs_high = mul.high.gpr64 %rhs_accumulator, %magic
+  %rhs_result = copy %rhs_high : reg<x86.rdx> -> reg<x86.gpr64>
+  %sum_input = copy %lhs_result : reg<x86.gpr64> -> reg<x86.gpr64>
+  %result = add.gpr64 %sum_input, %rhs_result
+  return %result
+}
+
+// ----
+  mov rcx, 2635249153617166336
+  mov rax, rdi
+  mul rcx
+  mov rbx, rdx
+  mov rax, rsi
+  mul rcx
+  mov rax, rbx
+  add rax, rdx
+  ret
+
+// ====
+
+// RUN: emit x86-asm @two_products strategy=latency-hiding fixed=%lhs:physical_register:7:1 fixed=%rhs:physical_register:6:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @two_products(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %magic = mov.imm64 2635249153617166336
+  %lhs_accumulator = copy %lhs : reg<x86.gpr64> -> reg<x86.rax>
+  %lhs_high = mul.high.gpr64 %lhs_accumulator, %magic
+  %lhs_result = copy %lhs_high : reg<x86.rdx> -> reg<x86.gpr64>
+  %rhs_accumulator = copy %rhs : reg<x86.gpr64> -> reg<x86.rax>
+  %rhs_high = mul.high.gpr64 %rhs_accumulator, %magic
+  %rhs_result = copy %rhs_high : reg<x86.rdx> -> reg<x86.gpr64>
+  %sum_input = copy %lhs_result : reg<x86.gpr64> -> reg<x86.gpr64>
+  %result = add.gpr64 %sum_input, %rhs_result
+  return %result
+}
+
+// ----
+  mov rcx, 2635249153617166336
+  mov rax, rdi
+  mul rcx
+  mov rax, rsi
+  mov rbx, rdx
+  mul rcx
+  mov rax, rbx
+  add rax, rdx
+  ret
+
+// ====
+
+// RUN: emit x86-asm @two_products strategy=resource-stall fixed=%lhs:physical_register:7:1 fixed=%rhs:physical_register:6:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @two_products(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %magic = mov.imm64 2635249153617166336
+  %lhs_accumulator = copy %lhs : reg<x86.gpr64> -> reg<x86.rax>
+  %lhs_high = mul.high.gpr64 %lhs_accumulator, %magic
+  %lhs_result = copy %lhs_high : reg<x86.rdx> -> reg<x86.gpr64>
+  %rhs_accumulator = copy %rhs : reg<x86.gpr64> -> reg<x86.rax>
+  %rhs_high = mul.high.gpr64 %rhs_accumulator, %magic
+  %rhs_result = copy %rhs_high : reg<x86.rdx> -> reg<x86.gpr64>
+  %sum_input = copy %lhs_result : reg<x86.gpr64> -> reg<x86.gpr64>
+  %result = add.gpr64 %sum_input, %rhs_result
+  return %result
+}
+
+// ----
+  mov rcx, 2635249153617166336
+  mov rax, rdi
+  mul rcx
+  mov rbx, rdx
+  mov rax, rsi
+  mul rcx
+  mov rax, rbx
+  add rax, rdx
+  ret

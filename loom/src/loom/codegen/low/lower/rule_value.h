@@ -31,6 +31,12 @@ typedef struct loom_low_lower_u32_divisor_magic_info_t {
   bool is_add;
 } loom_low_lower_u32_divisor_magic_info_t;
 
+// Projects a retained u32 reciprocal recipe into the multiplier for a high64
+// product. For a zero-extended u32 numerator the high product is the quotient;
+// the reciprocal incorporates the 32-bit recipe's correction and post-shift.
+uint64_t loom_low_lower_u32_divisor_magic_high64_multiplier(
+    loom_low_lower_u32_divisor_magic_info_t info);
+
 // Returns the target-owned materializer selected by a nonzero value-ref
 // materializer index. Generated table indices are trusted.
 const loom_low_lower_value_materializer_t*

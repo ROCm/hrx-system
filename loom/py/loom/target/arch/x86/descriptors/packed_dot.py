@@ -93,7 +93,7 @@ def _packed_dot_reg_classes(
             SpillSlotSpace.STACK,
             flags=(RegClassFlag.PHYSICAL,),
             allocatable_count=allocatable_count,
-            alias_set_id=2,
+            alias_set_id=1,
         )
         for vector_bit_width in vector_bit_widths
     )

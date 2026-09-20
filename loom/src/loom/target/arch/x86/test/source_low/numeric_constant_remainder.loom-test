@@ -117,3 +117,42 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @constant_remai
   %position_nine = sub.gpr64 %49, %48
   return %word_five, %word_nine, %position_five, %position_nine
 }
+
+// ====
+
+x86.target<avx2> @target
+
+func.def target(@target) @constant_remainder_by_seven(%word: i32, %position: index) -> (i32, index, i32, index) {
+  %bounded = index.assume %position [range(%position, 0, 4294967295)] : index
+  %word_divisor = scalar.constant 7 : i32
+  %index_divisor = index.constant 7 : index
+  %word_remainder = scalar.remui %word, %word_divisor : i32
+  %index_remainder = index.rem %bounded, %index_divisor : index
+  func.return %word_remainder, %index_remainder, %word, %bounded : i32, index, i32, index
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @constant_remainder_by_seven(%word: reg<x86.gpr32>, %bounded: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr64>, reg<x86.gpr32>, reg<x86.gpr64>) asm {
+  %17 = copy %word : reg<x86.gpr32> -> reg<x86.gpr32>
+  %18 = movzx.gpr64.gpr32 %17
+  %19 = mov.imm64 2635249153617166336
+  %20 = copy %18 : reg<x86.gpr64> -> reg<x86.rax>
+  %21 = mul.high.gpr64 %20, %19
+  %22 = copy %21 : reg<x86.rdx> -> reg<x86.gpr64>
+  %23 = lea.scale %22 {disp32 = 0, scale = 8}
+  %24 = copy %22 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %25 = sub.gpr64 %24, %23
+  %26 = mov.trunc.gpr32.gpr64 %25
+  %27 = copy %26 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %word_remainder = add.gpr32 %27, %17
+  %29 = copy %bounded : reg<x86.gpr64> -> reg<x86.gpr64>
+  %31 = copy %29 : reg<x86.gpr64> -> reg<x86.rax>
+  %32 = mul.high.gpr64 %31, %19
+  %33 = copy %32 : reg<x86.rdx> -> reg<x86.gpr64>
+  %34 = lea.scale %33 {disp32 = 0, scale = 8}
+  %35 = copy %33 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %36 = sub.gpr64 %35, %34
+  %37 = copy %36 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %index_remainder = add.gpr64 %37, %29
+  return %word_remainder, %index_remainder, %word, %bounded
+}

@@ -78,3 +78,25 @@ low.func.def target<vm.core>(@target) abi(vm_function) @constant_remainder_facto
   %position_nine = integer.rem.u64 %bounded, %c9_index
   return %word_five, %word_nine, %position_five, %position_nine
 }
+
+// ====
+
+vm.target<core> @target
+
+func.def target(@target) @constant_remainder_by_seven(%word: i32, %position: index) -> (i32, index, i32, index) {
+  %bounded = index.assume %position [range(%position, 0, 4294967295)] : index
+  %word_divisor = scalar.constant 7 : i32
+  %index_divisor = index.constant 7 : index
+  %word_remainder = scalar.remui %word, %word_divisor : i32
+  %index_remainder = index.rem %bounded, %index_divisor : index
+  func.return %word_remainder, %index_remainder, %word, %bounded : i32, index, i32, index
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @constant_remainder_by_seven(%word: reg<vm.value : i32>, %bounded: reg<vm.value : i64>) -> (reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : i32>, reg<vm.value : i64>) asm {
+  %word_divisor = constant.i32 7
+  %index_divisor = constant.i64 7
+  %word_remainder = integer.rem.u32 %word, %word_divisor
+  %index_remainder = integer.rem.u64 %bounded, %index_divisor
+  return %word_remainder, %index_remainder, %word, %bounded
+}

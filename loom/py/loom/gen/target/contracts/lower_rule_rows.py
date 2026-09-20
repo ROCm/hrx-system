@@ -693,6 +693,7 @@ def attr_copy_row(
         LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET_QUOTIENT,
         LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET_REMAINDER,
         LowerAttrCopyKind.VALUE_U32_DIVISOR_MAGIC_SHIFT,
+        LowerAttrCopyKind.VALUE_U32_DIVISOR_MAGIC_MULTIPLIER,
     ):
         _append_field(
             fields,

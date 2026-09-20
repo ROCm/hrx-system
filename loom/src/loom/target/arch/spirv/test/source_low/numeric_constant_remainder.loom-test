@@ -98,3 +98,31 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @consta
   %position_nine = OpBitcast.u32.i32 %39 : reg<spirv.id : index>
   return %word_five, %word_nine, %position_five, %position_nine
 }
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @constant_remainder_by_seven(%word: i32, %position: index) -> (i32, index, i32, index) {
+  %bounded = index.assume %position [range(%position, 0, 4294967295)] : index
+  %word_divisor = scalar.constant 7 : i32
+  %index_divisor = index.constant 7 : index
+  %word_remainder = scalar.remui %word, %word_divisor : i32
+  %index_remainder = index.rem %bounded, %index_divisor : index
+  func.return %word_remainder, %index_remainder, %word, %bounded : i32, index, i32, index
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @constant_remainder_by_seven(%word: reg<spirv.id : i32>, %bounded: reg<spirv.id : index>) -> (reg<spirv.id : i32>, reg<spirv.id : index>, reg<spirv.id : i32>, reg<spirv.id : index>) asm {
+  %word_divisor = OpConstant.i32 7
+  %index_divisor = OpConstant.i32 7 : reg<spirv.id : index>
+  %19 = OpBitcast.i32.u32 %word
+  %20 = OpBitcast.i32.u32 %word_divisor
+  %21 = OpUMod.u32 %19, %20
+  %word_remainder = OpBitcast.u32.i32 %21
+  %23 = OpBitcast.i32.u32 %bounded
+  %24 = OpBitcast.i32.u32 %index_divisor
+  %25 = OpUMod.u32 %23, %24
+  %index_remainder = OpBitcast.u32.i32 %25 : reg<spirv.id : index>
+  return %word_remainder, %index_remainder, %word, %bounded
+}

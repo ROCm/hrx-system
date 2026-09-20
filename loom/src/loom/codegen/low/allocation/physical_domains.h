@@ -33,6 +33,14 @@ typedef struct loom_low_allocation_physical_domains_t {
   const uint64_t* words;
 } loom_low_allocation_physical_domains_t;
 
+// Returns the retained candidate-penalty row for an interval, or NULL when
+// no preference row is needed. Bits address semantic candidate
+// ordinals in the interval's register class, not physical-register IDs.
+const uint64_t* loom_low_allocation_physical_domains_for_interval(
+    const loom_low_allocation_physical_domains_t* domains,
+    const loom_liveness_analysis_t* liveness,
+    const loom_liveness_interval_t* interval);
+
 // Builds preferences from final producer-owned placement and unit liveness.
 // Inputs are borrowed; all retained storage belongs to |arena|. Construction
 // scratch is released before returning. Changed input facts require rebuilding

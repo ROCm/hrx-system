@@ -9,6 +9,7 @@
 #include "loom/codegen/low/allocation/concat_reservation.h"
 #include "loom/codegen/low/allocation/edge_alias.h"
 #include "loom/codegen/low/allocation/live_range.h"
+#include "loom/codegen/low/allocation/physical_domains.h"
 #include "loom/codegen/low/allocation/storage.h"
 #include "loom/codegen/low/schedule/types.h"
 #include "loom/codegen/low/storage_relation.h"
@@ -868,6 +869,29 @@ static iree_status_t loom_low_allocation_coalescing_append_relation_interval(
           relation->source_unit_offset, relation->unit_count,
           &result_location_base)) {
     return iree_ok_status();
+  }
+  // Optional copies use the same retained physical-domain preferences as
+  // ordinary search, leaving narrow storage available to its constrained users.
+  if (relation->cause == LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY ||
+      relation->cause == LOOM_LOW_PLACEMENT_CAUSE_LOW_MOVE) {
+    const uint64_t* penalties =
+        loom_low_allocation_physical_domains_for_interval(
+            context->search_context->physical_domains, context->liveness,
+            interval);
+    if (penalties) {
+      const loom_low_descriptor_set_t* descriptor_set =
+          context->search_context->descriptor_set;
+      const loom_low_reg_class_t* reg_class =
+          &descriptor_set->reg_classes[interval_reg_class_id];
+      const uint16_t ordinal =
+          descriptor_set->physical_register_candidate_ordinals
+              [reg_class->candidate_lookup.ordinal_start +
+               result_location_base -
+               reg_class->candidate_lookup.register_base];
+      if ((penalties[ordinal / 64] >> (ordinal % 64)) & 1) {
+        return iree_ok_status();
+      }
+    }
   }
   const loom_value_id_t* ignored_storage_lease_value_ids = NULL;
   uint16_t ignored_storage_lease_value_count = 0;

@@ -9,6 +9,7 @@
 #include <cstdint>
 
 #include "iree/base/internal/arena.h"
+#include "iree/base/internal/math.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/codegen/low/testing/source_workload.h"
@@ -249,8 +250,16 @@ TEST_F(LowLowerRuleValueTest, ProjectsExactScalarFacts) {
 TEST_F(LowLowerRuleValueTest, DerivesExactUnsignedDivisorRecipes) {
   const loom_value_id_t value_id =
       loom_scalar_constant_result(integer_constant_op_);
-  const uint32_t divisors[] = {
-      2u, 3u, 5u, 7u, 10u, 31u, UINT32_C(0x80000000), UINT32_MAX};
+  const uint32_t divisors[] = {2u,
+                               3u,
+                               5u,
+                               7u,
+                               10u,
+                               31u,
+                               UINT32_C(0x7fffffff),
+                               UINT32_C(0x80000000),
+                               UINT32_C(0x80000001),
+                               UINT32_MAX};
   const uint32_t numerators[] = {
       0u, 1u, 2u, 6u, 7u, 8u, UINT32_C(0x7fffffff), UINT32_MAX};
   for (uint32_t divisor : divisors) {
@@ -259,7 +268,9 @@ TEST_F(LowLowerRuleValueTest, DerivesExactUnsignedDivisorRecipes) {
     loom_low_lower_u32_divisor_magic_info_t info = {};
     ASSERT_TRUE(loom_low_lower_rule_value_facts_u32_divisor_magic_info(
         module_, &fact_table_, value_id, &info));
-    for (uint32_t numerator : numerators) {
+    const uint64_t high_multiplier =
+        loom_low_lower_u32_divisor_magic_high64_multiplier(info);
+    auto check_quotient = [&](uint32_t numerator) {
       uint32_t quotient =
           static_cast<uint32_t>((static_cast<uint64_t>(numerator) *
                                  static_cast<uint64_t>(info.multiplier)) >>
@@ -270,6 +281,27 @@ TEST_F(LowLowerRuleValueTest, DerivesExactUnsignedDivisorRecipes) {
       quotient >>= info.post_shift;
       EXPECT_EQ(quotient, numerator / divisor)
           << "numerator=" << numerator << " divisor=" << divisor;
+      uint64_t high = 0;
+      uint64_t low = 0;
+      iree_math_mul_u64_to_u128(numerator, high_multiplier, &high, &low);
+      EXPECT_EQ(high, numerator / divisor)
+          << "numerator=" << numerator << " divisor=" << divisor;
+    };
+    for (uint32_t numerator : numerators) {
+      check_quotient(numerator);
+    }
+    for (uint32_t quotient : {1u, UINT32_MAX / divisor}) {
+      const uint32_t multiple = quotient * divisor;
+      check_quotient(multiple - 1);
+      check_quotient(multiple);
+      if (multiple != UINT32_MAX) {
+        check_quotient(multiple + 1);
+      }
+    }
+    uint32_t random = 0x6c52a591u;
+    for (uint32_t i = 0; i < 1024; ++i) {
+      random = random * 1664525u + 1013904223u;
+      check_quotient(random);
     }
   }
 }

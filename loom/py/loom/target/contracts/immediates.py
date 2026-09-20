@@ -545,6 +545,8 @@ class ValueProject:
     word_index: int = 0
     # Width retained from the reciprocal product before the projected shift.
     product_bit_width: int = 32
+    # Width of the reciprocal multiplier, independent of the source u32 domain.
+    multiplier_bit_width: int = 32
 
     def in_source_node(self, source_node: str) -> Self:
         """Returns this projection scoped to a named descriptor-rule node."""
@@ -598,12 +600,18 @@ class ValueProject:
 
     @classmethod
     def u32_divisor_magic_multiplier(
-        cls, source_value: str, *, target_bit_offset: int = 0
+        cls, source_value: str, *, bit_width: int = 32, target_bit_offset: int = 0
     ) -> Self:
+        """Projects a reciprocal for a 32- or 64-bit high-half multiply.
+
+        The 32-bit recipe retains its correction and post-shift. The 64-bit
+        reciprocal incorporates both, so its high product is the u32 quotient.
+        """
         return cls(
             kind=ValueProjectKind.U32_DIVISOR_MAGIC_MULTIPLIER,
             source_value=source_value,
             target_bit_offset=target_bit_offset,
+            multiplier_bit_width=bit_width,
         )
 
     @classmethod
@@ -700,6 +708,13 @@ class ValueProject:
                 raise ValueError("divisor magic product width must be 32 or 64")
         elif self.product_bit_width != 32:
             raise ValueError(f"{self.kind.value} projection must not set product width")
+        if self.kind == ValueProjectKind.U32_DIVISOR_MAGIC_MULTIPLIER:
+            if self.multiplier_bit_width not in (32, 64):
+                raise ValueError("divisor magic multiplier width must be 32 or 64")
+        elif self.multiplier_bit_width != 32:
+            raise ValueError(
+                f"{self.kind.value} projection must not set multiplier width"
+            )
 
     def validate(
         self,

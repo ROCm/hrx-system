@@ -60,6 +60,7 @@ loom_check_test_suite(
   SRCS
     "test/assembly.loom-test"
     "test/copies.loom-test"
+    "test/high_product.loom-test"
     "test/lanes.loom-test"
     "test/schedule_scopes.loom-test"
 )

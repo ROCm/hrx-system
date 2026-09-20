@@ -647,15 +647,10 @@ bool loom_low_allocation_search_find_free_location(
   loom_low_allocation_search_location_preference_t preference =
       loom_low_allocation_search_location_preference(context,
                                                      &candidate_template);
-  if (uses_explicit_physical_registers && interval->unit_count == 1 &&
-      context->physical_domains && context->physical_domains->offsets) {
-    const uint32_t offset =
-        context->physical_domains
-            ->offsets[interval - context->liveness->intervals];
-    if (offset != UINT32_MAX) {
-      preference.physical_domain_words =
-          context->physical_domains->words + offset;
-    }
+  if (uses_explicit_physical_registers && interval->unit_count == 1) {
+    preference.physical_domain_words =
+        loom_low_allocation_physical_domains_for_interval(
+            context->physical_domains, context->liveness, interval);
   }
   const uint32_t scalar_packing_frontier =
       loom_low_allocation_search_scalar_packing_frontier(context, interval,

@@ -90,7 +90,9 @@ static iree_status_t loom_x86_register_class_from_name(
     *out_register_class = LOOM_X86_REGISTER_CLASS_GPR32;
     return iree_ok_status();
   }
-  if (iree_string_view_equal(register_class_name, IREE_SV("x86.gpr64"))) {
+  if (iree_string_view_equal(register_class_name, IREE_SV("x86.gpr64")) ||
+      iree_string_view_equal(register_class_name, IREE_SV("x86.rax")) ||
+      iree_string_view_equal(register_class_name, IREE_SV("x86.rdx"))) {
     *out_register_class = LOOM_X86_REGISTER_CLASS_GPR64;
     return iree_ok_status();
   }

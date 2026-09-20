@@ -502,6 +502,17 @@ static iree_status_t loom_low_physical_domains_build_preferences(
   return iree_ok_status();
 }
 
+const uint64_t* loom_low_allocation_physical_domains_for_interval(
+    const loom_low_allocation_physical_domains_t* domains,
+    const loom_liveness_analysis_t* liveness,
+    const loom_liveness_interval_t* interval) {
+  if (!domains || !domains->offsets) {
+    return NULL;
+  }
+  const uint32_t offset = domains->offsets[interval - liveness->intervals];
+  return offset == UINT32_MAX ? NULL : domains->words + offset;
+}
+
 iree_status_t loom_low_allocation_physical_domains_build(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_liveness_analysis_t* liveness,

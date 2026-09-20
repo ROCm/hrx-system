@@ -38,9 +38,25 @@ x86.target<avx2> @target
 
 func.def target(@target) @remainder_by_seven(%input: i32) -> (i32) {
   %divisor = scalar.constant 7 : i32
-  // ERROR@+1: TARGET/003 {op_name="scalar.remui", constraint_key="x86.scalar.remainder_divisor"}
   %remainder = scalar.remui %input, %divisor : i32
   func.return %remainder : i32
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @remainder_by_seven(%input: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %6 = copy %input : reg<x86.gpr32> -> reg<x86.gpr32>
+  %7 = movzx.gpr64.gpr32 %6
+  %8 = mov.imm64 2635249153617166336
+  %9 = copy %7 : reg<x86.gpr64> -> reg<x86.rax>
+  %10 = mul.high.gpr64 %9, %8
+  %11 = copy %10 : reg<x86.rdx> -> reg<x86.gpr64>
+  %12 = lea.scale %11 {disp32 = 0, scale = 8}
+  %13 = copy %11 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %14 = sub.gpr64 %13, %12
+  %15 = mov.trunc.gpr32.gpr64 %14
+  %16 = copy %15 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %remainder = add.gpr32 %16, %6
+  return %remainder
 }
 
 // ====
@@ -61,8 +77,8 @@ x86.target<avx2> @target
 
 func.def target(@target) @pair_by_seven(%input: i32) -> (i32, i32) {
   %divisor = scalar.constant 7 : i32
+  // ERROR@+1: TARGET/001 {op_name="scalar.divui"}
   %quotient = scalar.divui %input, %divisor : i32
-  // ERROR@+1: TARGET/003 {op_name="scalar.remui", constraint_key="x86.scalar.remainder_divisor"}
   %remainder = scalar.remui %input, %divisor : i32
   func.return %quotient, %remainder : i32, i32
 }
@@ -171,8 +187,8 @@ x86.target<avx2> @target
 func.def target(@target) @index_pair_by_7(%input: index) -> (index, index) {
   %bounded = index.assume %input [range(%input, 0, 4294967295)] : index
   %divisor = index.constant 7 : index
+  // ERROR@+1: TARGET/001 {op_name="index.div"}
   %quotient = index.div %bounded, %divisor : index
-  // ERROR@+1: TARGET/003 {op_name="index.rem", constraint_key="x86.scalar.remainder_divisor"}
   %remainder = index.rem %bounded, %divisor : index
   func.return %quotient, %remainder : index, index
 }

@@ -2423,6 +2423,22 @@ def test_divisor_magic_shift_retains_product_width() -> None:
     )
 
 
+def test_divisor_magic_multiplier_retains_width() -> None:
+    for width in (32, 64):
+        projected = ValueProject.u32_divisor_magic_multiplier("rhs", bit_width=width)
+        assert projected.source_value == "rhs"
+        assert projected.multiplier_bit_width == width
+        assert projected.product_bit_width == 32
+    _expect_value_error(
+        lambda: ValueProject.u32_divisor_magic_multiplier("rhs", bit_width=16),
+        "multiplier width must be 32 or 64",
+    )
+    _expect_value_error(
+        lambda: replace(ValueProject.exact_i64("rhs"), multiplier_bit_width=64),
+        "projection must not set multiplier width",
+    )
+
+
 def test_compile_lower_rule_set_compiles_exact_i64_i32_word() -> None:
     table = ContractFragment(
         name="test.value-i64-word-immediate",

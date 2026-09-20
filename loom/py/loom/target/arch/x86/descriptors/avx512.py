@@ -34,8 +34,6 @@ from .common import (
     _ADDRESS_SCALE_ENUM,
     _DESTRUCTIVE_ACCUMULATOR_CONSTRAINTS,
     _LANE_I32X4_IMMEDIATE,
-    _REG_GPR32,
-    _REG_GPR64,
     _REG_K,
     _REG_XMM,
     _REG_YMM,
@@ -91,6 +89,7 @@ from .common import (
     _zmm_result,
     _zmm_splat_descriptor,
 )
+from .scalar import X86_SCALAR_DESCRIPTOR_SET
 
 X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
     key="x86.avx512.core",
@@ -107,30 +106,16 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
     c_enum_prefix="X86_AVX512_CORE",
     generator_version=1,
     supports_native_scheduling=True,
+    physical_registers=X86_SCALAR_DESCRIPTOR_SET.physical_registers,
     reg_classes=(
-        RegClass(
-            _REG_GPR32,
-            32,
-            SpillSlotSpace.STACK,
-            flags=(RegClassFlag.PHYSICAL,),
-            allocatable_count=16,
-            alias_set_id=1,
-        ),
-        RegClass(
-            _REG_GPR64,
-            64,
-            SpillSlotSpace.STACK,
-            flags=(RegClassFlag.PHYSICAL,),
-            allocatable_count=16,
-            alias_set_id=1,
-        ),
+        *X86_SCALAR_DESCRIPTOR_SET.reg_classes,
         RegClass(
             _REG_XMM,
             128,
             SpillSlotSpace.STACK,
             flags=(RegClassFlag.PHYSICAL,),
             allocatable_count=32,
-            alias_set_id=2,
+            alias_set_id=1,
         ),
         RegClass(
             _REG_YMM,
@@ -138,7 +123,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
             SpillSlotSpace.STACK,
             flags=(RegClassFlag.PHYSICAL,),
             allocatable_count=32,
-            alias_set_id=2,
+            alias_set_id=1,
         ),
         RegClass(
             _REG_ZMM,
@@ -146,7 +131,7 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
             SpillSlotSpace.STACK,
             flags=(RegClassFlag.PHYSICAL,),
             allocatable_count=32,
-            alias_set_id=2,
+            alias_set_id=1,
         ),
         RegClass(
             _REG_K,
