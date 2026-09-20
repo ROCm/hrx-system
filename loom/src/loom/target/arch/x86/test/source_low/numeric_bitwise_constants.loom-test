@@ -1,0 +1,131 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_bitwise_constants.loom-test
+// RUN: emit source-low output=low
+
+x86.target<scalar> @target
+
+func.def target(@target) @bitwise_word_constants(%input: i32, %mask_input: i32) -> (i32, i32, i32) {
+  %mask = scalar.assume %mask_input [range(%mask_input, 255, 255)] : i32
+  %tag = scalar.constant -2147483648 : i32
+  %toggle = scalar.constant 2147483647 : i32
+  %masked = scalar.andi %input, %mask : i32
+  %tagged = scalar.ori %tag, %input : i32
+  %toggled = scalar.xori %input, %toggle : i32
+  func.return %masked, %tagged, %toggled : i32, i32, i32
+}
+
+// ----
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @bitwise_word_constants(%input: reg<x86.gpr32>, %mask_input: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>) asm {
+  %17 = copy %input : reg<x86.gpr32> -> reg<x86.gpr32>
+  %masked = and.imm.gpr32 %17 {imm32 = 255}
+  %19 = copy %input : reg<x86.gpr32> -> reg<x86.gpr32>
+  %tagged = or.imm.gpr32 %19 {imm32 = -2147483648}
+  %21 = copy %input : reg<x86.gpr32> -> reg<x86.gpr32>
+  %toggled = xor.imm.gpr32 %21 {imm32 = 2147483647}
+  return %masked, %tagged, %toggled
+}
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @bitwise_wide_signed_constants(%input: i64) -> (i64, i64, i64) {
+  %mask = scalar.constant -2147483648 : i64
+  %tag = scalar.constant 2147483647 : i64
+  %toggle = scalar.constant -1 : i64
+  %masked = scalar.andi %mask, %input : i64
+  %tagged = scalar.ori %input, %tag : i64
+  %toggled = scalar.xori %toggle, %input : i64
+  func.return %masked, %tagged, %toggled : i64, i64, i64
+}
+
+// ----
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @bitwise_wide_signed_constants(%input: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>) asm {
+  %14 = copy %input : reg<x86.gpr64> -> reg<x86.gpr64>
+  %masked = and.imm.gpr64 %14 {imm32 = -2147483648}
+  %16 = copy %input : reg<x86.gpr64> -> reg<x86.gpr64>
+  %tagged = or.imm.gpr64 %16 {imm32 = 2147483647}
+  %18 = copy %input : reg<x86.gpr64> -> reg<x86.gpr64>
+  %toggled = xor.imm.gpr64 %18 {imm32 = -1}
+  return %masked, %tagged, %toggled
+}
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @bitwise_wide_constant_boundaries(%input: i64) -> (i64, i64, i64) {
+  %mask = scalar.constant 4294967295 : i64
+  %tag = scalar.constant 2147483648 : i64
+  %toggle = scalar.constant -2147483649 : i64
+  %masked = scalar.andi %input, %mask : i64
+  %tagged = scalar.ori %tag, %input : i64
+  %toggled = scalar.xori %input, %toggle : i64
+  func.return %masked, %tagged, %toggled : i64, i64, i64
+}
+
+// ----
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @bitwise_wide_constant_boundaries(%input: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>) asm {
+  %mask = mov.imm64 4294967295
+  %tag = mov.imm64 2147483648
+  %toggle = mov.imm64 -2147483649
+  %17 = copy %input : reg<x86.gpr64> -> reg<x86.gpr64>
+  %masked = and.gpr64 %17, %mask
+  %19 = copy %tag : reg<x86.gpr64> -> reg<x86.gpr64>
+  %tagged = or.gpr64 %19, %input
+  %21 = copy %input : reg<x86.gpr64> -> reg<x86.gpr64>
+  %toggled = xor.gpr64 %21, %toggle
+  return %masked, %tagged, %toggled
+}
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @bitwise_index_signed_constants(%input: index) -> (index, index, index) {
+  %mask = index.constant -2147483648 : index
+  %tag = index.constant 2147483647 : index
+  %toggle = index.constant -1 : index
+  %masked = index.andi %mask, %input : index
+  %tagged = index.ori %input, %tag : index
+  %toggled = index.xori %toggle, %input : index
+  func.return %masked, %tagged, %toggled : index, index, index
+}
+
+// ----
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @bitwise_index_signed_constants(%input: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>) asm {
+  %14 = copy %input : reg<x86.gpr64> -> reg<x86.gpr64>
+  %masked = and.imm.gpr64 %14 {imm32 = -2147483648}
+  %16 = copy %input : reg<x86.gpr64> -> reg<x86.gpr64>
+  %tagged = or.imm.gpr64 %16 {imm32 = 2147483647}
+  %18 = copy %input : reg<x86.gpr64> -> reg<x86.gpr64>
+  %toggled = xor.imm.gpr64 %18 {imm32 = -1}
+  return %masked, %tagged, %toggled
+}
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @bitwise_index_constant_boundaries(%input: index) -> (index, index, index) {
+  %mask = index.constant 4294967295 : index
+  %tag = index.constant 2147483648 : index
+  %toggle = index.constant 4294967294 : index
+  %masked = index.andi %input, %mask : index
+  %tagged = index.ori %tag, %input : index
+  %toggled = index.xori %input, %toggle : index
+  func.return %masked, %tagged, %toggled : index, index, index
+}
+
+// ----
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @bitwise_index_constant_boundaries(%input: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>) asm {
+  %mask = mov.imm64 4294967295
+  %tag = mov.imm64 2147483648
+  %toggle = mov.imm64 4294967294
+  %17 = copy %input : reg<x86.gpr64> -> reg<x86.gpr64>
+  %masked = and.gpr64 %17, %mask
+  %19 = copy %tag : reg<x86.gpr64> -> reg<x86.gpr64>
+  %tagged = or.gpr64 %19, %input
+  %21 = copy %input : reg<x86.gpr64> -> reg<x86.gpr64>
+  %toggled = xor.gpr64 %21, %toggle
+  return %masked, %tagged, %toggled
+}

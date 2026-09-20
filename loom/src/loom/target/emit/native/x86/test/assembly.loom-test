@@ -1060,3 +1060,51 @@ low.func.def target<x86.scalar.core> @conditional_subtract(%input: reg<x86.gpr32
   sub eax, 17
   cmovb eax, ecx
   ret
+
+// ====
+
+// The destructive immediate forms preserve a separately live input.
+// RUN: emit x86-asm @bitwise_word fixed=%input:physical_register:0:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @bitwise_word(%input: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %copy = copy %input : reg<x86.gpr32> -> reg<x86.gpr32>
+  %masked = and.imm.gpr32 %copy {imm32 = 2147483647}
+  %tagged = or.imm.gpr32 %masked {imm32 = -2147483648}
+  %toggled = xor.imm.gpr32 %tagged {imm32 = -1}
+  %mixed = add.gpr32 %toggled, %input
+  %result = copy %mixed : reg<x86.gpr32> -> reg<x86.gpr32>
+  return %result
+}
+
+// ----
+  mov ecx, eax
+  and ecx, 2147483647
+  or ecx, -2147483648
+  xor ecx, -1
+  add ecx, eax
+  mov eax, ecx
+  ret
+
+// ====
+
+// Wide operations use the same signed immediate domain without narrowing input.
+// RUN: emit x86-asm @bitwise_wide fixed=%input:physical_register:0:1 fixed=%result:physical_register:0:1
+
+low.func.def target<x86.scalar.core> @bitwise_wide(%input: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %copy = copy %input : reg<x86.gpr64> -> reg<x86.gpr64>
+  %masked = and.imm.gpr64 %copy {imm32 = -2147483648}
+  %tagged = or.imm.gpr64 %masked {imm32 = 2147483647}
+  %toggled = xor.imm.gpr64 %tagged {imm32 = -129}
+  %mixed = add.gpr64 %toggled, %input
+  %result = copy %mixed : reg<x86.gpr64> -> reg<x86.gpr64>
+  return %result
+}
+
+// ----
+  mov rcx, rax
+  and rcx, -2147483648
+  or rcx, 2147483647
+  xor rcx, -129
+  add rcx, rax
+  mov rax, rcx
+  ret

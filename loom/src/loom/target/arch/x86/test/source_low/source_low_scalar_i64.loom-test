@@ -48,23 +48,20 @@ func.def target(@target) @scalar_i64_bitwise(%lhs: i64, %rhs: i64) -> (i64) {
 
 // ----
 low.func.def target<x86.scalar.core>(@target) abi(object_function) @scalar_i64_bitwise(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
-  %mask = mov.imm64 255
-  %20 = copy %lhs : reg<x86.gpr64> -> reg<x86.gpr64>
-  %masked = and.gpr64 %20, %mask
-  %tag = mov.imm64 240
-  %23 = copy %masked : reg<x86.gpr64> -> reg<x86.gpr64>
-  %tagged = or.gpr64 %23, %tag
-  %invert = mov.imm64 -1
-  %26 = copy %tagged : reg<x86.gpr64> -> reg<x86.gpr64>
-  %inverted = xor.gpr64 %26, %invert
-  %28 = copy %inverted : reg<x86.gpr64> -> reg<x86.gpr64>
-  %mixed = xor.gpr64 %28, %rhs
-  %30 = copy %mixed : reg<x86.gpr64> -> reg<x86.gpr64>
-  %left = shl.imm.gpr64 %30 {shift = 33}
-  %32 = copy %left : reg<x86.gpr64> -> reg<x86.gpr64>
-  %arithmetic = sar.imm.gpr64 %32 {shift = 7}
-  %34 = copy %arithmetic : reg<x86.gpr64> -> reg<x86.gpr64>
-  %result = shr.imm.gpr64 %34 {shift = 9}
+  %19 = copy %lhs : reg<x86.gpr64> -> reg<x86.gpr64>
+  %masked = and.imm.gpr64 %19 {imm32 = 255}
+  %21 = copy %masked : reg<x86.gpr64> -> reg<x86.gpr64>
+  %tagged = or.imm.gpr64 %21 {imm32 = 240}
+  %23 = copy %tagged : reg<x86.gpr64> -> reg<x86.gpr64>
+  %inverted = xor.imm.gpr64 %23 {imm32 = -1}
+  %25 = copy %inverted : reg<x86.gpr64> -> reg<x86.gpr64>
+  %mixed = xor.gpr64 %25, %rhs
+  %27 = copy %mixed : reg<x86.gpr64> -> reg<x86.gpr64>
+  %left = shl.imm.gpr64 %27 {shift = 33}
+  %29 = copy %left : reg<x86.gpr64> -> reg<x86.gpr64>
+  %arithmetic = sar.imm.gpr64 %29 {shift = 7}
+  %31 = copy %arithmetic : reg<x86.gpr64> -> reg<x86.gpr64>
+  %result = shr.imm.gpr64 %31 {shift = 9}
   return %result
 }
 

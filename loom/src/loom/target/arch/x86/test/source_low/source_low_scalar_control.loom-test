@@ -10,9 +10,8 @@ func.def target(@target) @scalar_i1_constant(%value: i1) -> (i1) {
 
 // ----
 low.func.def target<x86.scalar.core>(@target) abi(object_function) @scalar_i1_constant(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
-  %true = mov.imm32 1
-  %7 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
-  %result = xor.gpr32 %7, %true
+  %6 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
+  %result = xor.imm.gpr32 %6 {imm32 = 1}
   return %result
 }
 

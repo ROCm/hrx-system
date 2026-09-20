@@ -162,7 +162,7 @@ def _gpr32_destructive_shift_descriptor(
     mnemonic: str,
     semantic_tag: str,
 ) -> Descriptor:
-    return _gpr_destructive_shift_descriptor(
+    return _gpr_destructive_immediate_descriptor(
         key=key,
         mnemonic=mnemonic,
         semantic_tag=semantic_tag,
@@ -179,7 +179,7 @@ def _gpr64_destructive_shift_descriptor(
     mnemonic: str,
     semantic_tag: str,
 ) -> Descriptor:
-    return _gpr_destructive_shift_descriptor(
+    return _gpr_destructive_immediate_descriptor(
         key=key,
         mnemonic=mnemonic,
         semantic_tag=semantic_tag,
@@ -190,7 +190,7 @@ def _gpr64_destructive_shift_descriptor(
     )
 
 
-def _gpr_destructive_shift_descriptor(
+def _gpr_destructive_immediate_descriptor(
     *,
     key: str,
     mnemonic: str,
@@ -211,7 +211,7 @@ def _gpr_destructive_shift_descriptor(
             mnemonic=f"{mnemonic}.imm.{asm_suffix}",
             results=("dst",),
             operands=("lhs",),
-            immediates=("shift",),
+            immediates=(immediate.field_name,),
             named_immediates=True,
         ),
         schedule_class=_SCHEDULE_SCALAR,
@@ -473,6 +473,22 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         key="x86.scalar.xor.gpr64",
         mnemonic="xor",
         semantic_tag="integer.xor.i64",
+    ),
+    *(
+        _gpr_destructive_immediate_descriptor(
+            key=f"x86.scalar.{operation}.imm.gpr{width}",
+            mnemonic=operation,
+            semantic_tag=f"integer.{operation}.signed_imm32.i{width}",
+            result=result(),
+            source=operand("lhs"),
+            immediate=_IMM32_IMMEDIATE,
+            asm_suffix=f"gpr{width}",
+        )
+        for width, result, operand in (
+            (32, _gpr32_result, _gpr32_operand),
+            (64, _gpr64_result, _gpr64_operand),
+        )
+        for operation in ("and", "or", "xor")
     ),
     _gpr32_destructive_shift_descriptor(
         key="x86.scalar.shl.imm.gpr32",

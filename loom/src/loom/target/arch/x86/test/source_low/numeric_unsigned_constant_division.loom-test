@@ -179,9 +179,8 @@ func.def target(@target) @pair_by_power_of_two(%input: i32) -> (i32, i32) {
 low.func.def target<x86.avx2.core>(@target) abi(object_function) @pair_by_power_of_two(%input: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>) asm {
   %13 = copy %input : reg<x86.gpr32> -> reg<x86.gpr32>
   %quotient = shr.imm.gpr32 %13 {shift = 4}
-  %15 = mov.imm32 15
-  %16 = copy %input : reg<x86.gpr32> -> reg<x86.gpr32>
-  %remainder = and.gpr32 %16, %15
+  %15 = copy %input : reg<x86.gpr32> -> reg<x86.gpr32>
+  %remainder = and.imm.gpr32 %15 {imm32 = 15}
   return %quotient, %remainder
 }
 
@@ -200,9 +199,8 @@ func.def target(@target) @pair_by_high_power_of_two(%input: i32) -> (i32, i32) {
 low.func.def target<x86.avx2.core>(@target) abi(object_function) @pair_by_high_power_of_two(%input: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>) asm {
   %13 = copy %input : reg<x86.gpr32> -> reg<x86.gpr32>
   %quotient = shr.imm.gpr32 %13 {shift = 31}
-  %15 = mov.imm32 2147483647
-  %16 = copy %input : reg<x86.gpr32> -> reg<x86.gpr32>
-  %remainder = and.gpr32 %16, %15
+  %15 = copy %input : reg<x86.gpr32> -> reg<x86.gpr32>
+  %remainder = and.imm.gpr32 %15 {imm32 = 2147483647}
   return %quotient, %remainder
 }
 
@@ -358,14 +356,13 @@ func.def target(@target) @index_boundary_pairs(%input: index) -> (index, index, 
 low.func.def target<x86.avx2.core>(@target) abi(object_function) @index_boundary_pairs(%bounded: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>) asm {
   %21 = copy %bounded : reg<x86.gpr64> -> reg<x86.gpr64>
   %power_quotient = shr.imm.gpr64 %21 {shift = 31}
-  %23 = mov.imm64 2147483647
-  %24 = copy %bounded : reg<x86.gpr64> -> reg<x86.gpr64>
-  %power_remainder = and.gpr64 %24, %23
-  %26 = mov.trunc.gpr32.gpr64 %bounded
-  %27 = cmp.uge.imm.gpr32 %26, -1
-  %large_quotient = movzx.gpr64.gpr32 %27
-  %30 = copy %26 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %31 = sub.if_uge.imm.gpr32 %30, -1
-  %large_remainder = movzx.gpr64.gpr32 %31
+  %23 = copy %bounded : reg<x86.gpr64> -> reg<x86.gpr64>
+  %power_remainder = and.imm.gpr64 %23 {imm32 = 2147483647}
+  %25 = mov.trunc.gpr32.gpr64 %bounded
+  %26 = cmp.uge.imm.gpr32 %25, -1
+  %large_quotient = movzx.gpr64.gpr32 %26
+  %29 = copy %25 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %30 = sub.if_uge.imm.gpr32 %29, -1
+  %large_remainder = movzx.gpr64.gpr32 %30
   return %power_quotient, %power_remainder, %large_quotient, %large_remainder
 }

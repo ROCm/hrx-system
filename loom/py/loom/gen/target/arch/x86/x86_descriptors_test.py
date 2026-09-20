@@ -16,10 +16,11 @@ from loom.gen.target.arch.x86 import x86_descriptors
 from loom.gen.target.low import compiler
 from loom.target.arch.x86 import descriptors as x86_descriptor_data
 from loom.target.arch.x86.target_info import (
+    sorted_descriptor_set_infos,
     x86_descriptor_set_info_by_generator_target,
     x86_descriptor_set_ordinal,
 )
-from loom.target.low_descriptors import OperandFlag, OperandRole, RegClassFlag
+from loom.target.low_descriptors import Constraint, ConstraintKind, ImmediateKind, OperandFlag, OperandRole, RegClassFlag
 
 
 class _RaisesValueError:
@@ -100,6 +101,30 @@ def test_scalar_physical_ownership_is_shared_by_core_profiles() -> None:
         assert OperandFlag.IMPLICIT in operands["dst"].flags
         assert operands["low"].role == OperandRole.IMPLICIT
         assert OperandFlag.STATE_WRITE in operands["low"].flags
+
+
+def test_bitwise_immediate_forms_are_shared_by_scalar_profiles() -> None:
+    for info in sorted_descriptor_set_infos():
+        # Packed-dot-only profiles do not expose scalar register classes.
+        if "x86.gpr32" not in info.register_classes:
+            continue
+        spec = x86_descriptors._descriptor_set_for_info(info)
+        descriptors = {descriptor.key: descriptor for descriptor in spec.descriptors}
+        for width in (32, 64):
+            for operation in ("and", "or", "xor"):
+                descriptor = descriptors[f"x86.scalar.{operation}.imm.gpr{width}"]
+                assert descriptor.constraints == (
+                    Constraint(ConstraintKind.TIED, 0, 1),
+                    Constraint(ConstraintKind.DESTRUCTIVE, 0, 1),
+                )
+                assert len(descriptor.operands) == 2
+                assert descriptor.operands[0].reg_alts == descriptor.operands[1].reg_alts
+                assert len(descriptor.immediates) == 1
+                immediate = descriptor.immediates[0]
+                assert immediate.kind == ImmediateKind.SIGNED
+                assert immediate.bit_width == 32
+                assert immediate.signed_min == -(2**31)
+                assert immediate.unsigned_max == 2**31 - 1
 
 
 def test_storage_generation_emits_current_public_views() -> None:

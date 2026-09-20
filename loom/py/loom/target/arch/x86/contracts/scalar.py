@@ -207,6 +207,42 @@ def _binary_rule(
     )
 
 
+def _bitwise_rules(
+    source_op: Op,
+    type_pattern: TypePattern,
+    operation: str,
+    register_width: int,
+    descriptor_lookup: _DescriptorLookup,
+) -> Iterable[DescriptorRule]:
+    descriptor = descriptor_lookup(f"x86.scalar.{operation}.imm.gpr{register_width}")
+    for input_field, constant_field in (("lhs", "rhs"), ("rhs", "lhs")):
+        yield DescriptorRule(
+            source_op=source_op,
+            descriptor=descriptor,
+            guards=(
+                *_typed_guards(("lhs", "rhs", "result"), type_pattern),
+                Guard.value_exact_i64(constant_field),
+                # Wide operations sign-extend imm32; positive full-word masks
+                # outside this range retain their full-width register form.
+                Guard.value_i64_range(constant_field, _I32_MIN, _I32_MAX),
+            ),
+            emit=(
+                _op_emit(
+                    descriptor=descriptor,
+                    operands={"lhs": ValueRef.operand(input_field)},
+                    results={"dst": ValueRef.result("result")},
+                    immediates={"imm32": ValueProject.exact_i64(constant_field)},
+                ),
+            ),
+        )
+    yield _binary_rule(
+        source_op,
+        type_pattern,
+        f"x86.scalar.{operation}.gpr{register_width}",
+        descriptor_lookup,
+    )
+
+
 def _select_rule(
     type_pattern: TypePattern,
     descriptor_key: str,
@@ -994,8 +1030,7 @@ def _masked_extui_rule(
     mask: int,
     descriptor_lookup: _DescriptorLookup,
 ) -> DescriptorRule:
-    move = descriptor_lookup("x86.scalar.movimm.gpr32")
-    bitwise_and = descriptor_lookup("x86.scalar.and.gpr32")
+    bitwise_and = descriptor_lookup("x86.scalar.and.imm.gpr32")
     return DescriptorRule(
         source_op=scalar_conversion.scalar_extui,
         descriptor=bitwise_and,
@@ -1004,20 +1039,11 @@ def _masked_extui_rule(
             Guard.value_type("result", _I32),
         ),
         emit=(
-            EmitDescriptorOp(
-                descriptor=move,
-                results={"dst": ValueRef.temporary("mask")},
-                result_types={"dst": _I32},
-                immediates={"imm32": mask},
-                form=DescriptorEmitForm.CONST,
-            ),
             _op_emit(
                 descriptor=bitwise_and,
-                operands={
-                    "lhs": ValueRef.operand("input"),
-                    "rhs": ValueRef.temporary("mask"),
-                },
+                operands={"lhs": ValueRef.operand("input")},
                 results={"dst": ValueRef.result("result")},
+                immediates={"imm32": mask},
             ),
         ),
     )
@@ -1433,59 +1459,17 @@ def _cases() -> Sequence[ContractCase]:
             "x86.scalar.imul.gpr64",
             descriptor_lookup,
         ),
-        _binary_rule(
-            scalar_bitwise.scalar_andi,
-            _I32,
-            "x86.scalar.and.gpr32",
-            descriptor_lookup,
-        ),
-        _binary_rule(
-            scalar_bitwise.scalar_ori,
-            _I32,
-            "x86.scalar.or.gpr32",
-            descriptor_lookup,
-        ),
-        _binary_rule(
-            scalar_bitwise.scalar_xori,
-            _I32,
-            "x86.scalar.xor.gpr32",
-            descriptor_lookup,
-        ),
-        _binary_rule(
-            scalar_bitwise.scalar_andi,
-            _I64,
-            "x86.scalar.and.gpr64",
-            descriptor_lookup,
-        ),
-        _binary_rule(
-            scalar_bitwise.scalar_ori,
-            _I64,
-            "x86.scalar.or.gpr64",
-            descriptor_lookup,
-        ),
-        _binary_rule(
-            scalar_bitwise.scalar_xori,
-            _I64,
-            "x86.scalar.xor.gpr64",
-            descriptor_lookup,
-        ),
-        _binary_rule(
-            scalar_bitwise.scalar_andi,
-            _I1,
-            "x86.scalar.and.gpr32",
-            descriptor_lookup,
-        ),
-        _binary_rule(
-            scalar_bitwise.scalar_ori,
-            _I1,
-            "x86.scalar.or.gpr32",
-            descriptor_lookup,
-        ),
-        _binary_rule(
-            scalar_bitwise.scalar_xori,
-            _I1,
-            "x86.scalar.xor.gpr32",
-            descriptor_lookup,
+        *(
+            rule
+            for type_pattern, register_width in ((_I1, 32), (_I32, 32), (_I64, 64))
+            for source_op, operation in (
+                (scalar_bitwise.scalar_andi, "and"),
+                (scalar_bitwise.scalar_ori, "or"),
+                (scalar_bitwise.scalar_xori, "xor"),
+            )
+            for rule in _bitwise_rules(
+                source_op, type_pattern, operation, register_width, descriptor_lookup
+            )
         ),
         _select_rule(_I32, "x86.scalar.select.gpr32", descriptor_lookup),
         *(
@@ -1697,13 +1681,14 @@ def _cases() -> Sequence[ContractCase]:
             index.index_mul, _INDEX, "x86.scalar.imul.gpr64", descriptor_lookup
         ),
         *(
-            _binary_rule(
-                source_op, _INDEX, f"x86.scalar.{operation}.gpr64", descriptor_lookup
-            )
+            rule
             for source_op, operation in (
                 (index.index_andi, "and"),
                 (index.index_ori, "or"),
                 (index.index_xori, "xor"),
+            )
+            for rule in _bitwise_rules(
+                source_op, _INDEX, operation, 64, descriptor_lookup
             )
         ),
         *_madd_address_rules(descriptor_lookup),
