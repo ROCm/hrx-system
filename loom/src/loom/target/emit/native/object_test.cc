@@ -91,6 +91,7 @@ TEST(NativeObjectTest, ResolvesSymbolsAndFixupsThroughContributionLayout) {
           /*.binding=*/LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
           /*.visibility=*/LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_DEFAULT,
           /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
+          /*.definition=*/LOOM_NATIVE_OBJECT_SYMBOL_DEFINITION_SECTION,
       },
       {
           /*.name=*/IREE_SV("second"),
@@ -100,6 +101,7 @@ TEST(NativeObjectTest, ResolvesSymbolsAndFixupsThroughContributionLayout) {
           /*.binding=*/LOOM_NATIVE_OBJECT_SYMBOL_BINDING_LOCAL,
           /*.visibility=*/LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_HIDDEN,
           /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
+          /*.definition=*/LOOM_NATIVE_OBJECT_SYMBOL_DEFINITION_SECTION,
       },
   };
   loom_native_object_symbol_layout_t layouts[IREE_ARRAYSIZE(symbols)] = {};
@@ -128,6 +130,58 @@ TEST(NativeObjectTest, ResolvesSymbolsAndFixupsThroughContributionLayout) {
   EXPECT_EQ(fixup_layouts[0].section_offset, 11u);
 }
 
+TEST(NativeObjectTest, ResolvesUndefinedSymbolWithoutSections) {
+  const loom_native_object_symbol_t symbol = {
+      /*.name=*/IREE_SV("external_function"),
+      /*.section_contribution_index=*/{},
+      /*.section_offset=*/{},
+      /*.size=*/{},
+      /*.binding=*/LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
+      /*.visibility=*/LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_DEFAULT,
+      /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
+      /*.definition=*/LOOM_NATIVE_OBJECT_SYMBOL_DEFINITION_UNDEFINED,
+  };
+  loom_native_object_symbol_layout_t layout = {};
+  IREE_ASSERT_OK(loom_native_object_resolve_symbol_layouts(&symbol, 1, nullptr,
+                                                           0, &layout));
+  EXPECT_EQ(layout.section_index, IREE_HOST_SIZE_MAX);
+  EXPECT_EQ(layout.section_offset, 0u);
+}
+
+TEST(NativeObjectTest, RejectsUndefinedLocalSymbol) {
+  const loom_native_object_symbol_t symbol = {
+      /*.name=*/IREE_SV("local_function"),
+      /*.section_contribution_index=*/{},
+      /*.section_offset=*/{},
+      /*.size=*/{},
+      /*.binding=*/LOOM_NATIVE_OBJECT_SYMBOL_BINDING_LOCAL,
+      /*.visibility=*/LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_DEFAULT,
+      /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
+      /*.definition=*/LOOM_NATIVE_OBJECT_SYMBOL_DEFINITION_UNDEFINED,
+  };
+  loom_native_object_symbol_layout_t layout = {};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_native_object_resolve_symbol_layouts(
+                            &symbol, 1, nullptr, 0, &layout));
+}
+
+TEST(NativeObjectTest, RejectsUndefinedSymbolWithSectionData) {
+  const loom_native_object_symbol_t symbol = {
+      /*.name=*/IREE_SV("external_data"),
+      /*.section_contribution_index=*/{},
+      /*.section_offset=*/1,
+      /*.size=*/4,
+      /*.binding=*/LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
+      /*.visibility=*/LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_DEFAULT,
+      /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_DATA,
+      /*.definition=*/LOOM_NATIVE_OBJECT_SYMBOL_DEFINITION_UNDEFINED,
+  };
+  loom_native_object_symbol_layout_t layout = {};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_native_object_resolve_symbol_layouts(
+                            &symbol, 1, nullptr, 0, &layout));
+}
+
 TEST(NativeObjectTest, RejectsMissingSymbolName) {
   const loom_native_section_contribution_layout_t section_layouts[] = {{
       /*.section_index=*/0,
@@ -141,6 +195,7 @@ TEST(NativeObjectTest, RejectsMissingSymbolName) {
       /*.binding=*/LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
       /*.visibility=*/{},
       /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
+      /*.definition=*/LOOM_NATIVE_OBJECT_SYMBOL_DEFINITION_SECTION,
   };
   loom_native_object_symbol_layout_t layout = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -162,6 +217,7 @@ TEST(NativeObjectTest, RejectsInvalidSectionContributionIndex) {
       /*.binding=*/LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
       /*.visibility=*/{},
       /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
+      /*.definition=*/LOOM_NATIVE_OBJECT_SYMBOL_DEFINITION_SECTION,
   };
   loom_native_object_symbol_layout_t layout = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
@@ -183,6 +239,7 @@ TEST(NativeObjectTest, RejectsOffsetOverflow) {
       /*.binding=*/LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
       /*.visibility=*/{},
       /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
+      /*.definition=*/LOOM_NATIVE_OBJECT_SYMBOL_DEFINITION_SECTION,
   };
   loom_native_object_symbol_layout_t layout = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,

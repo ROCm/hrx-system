@@ -42,14 +42,23 @@ typedef enum loom_native_object_symbol_kind_e {
   LOOM_NATIVE_OBJECT_SYMBOL_KIND_DATA = 2,
 } loom_native_object_symbol_kind_t;
 
+typedef enum loom_native_object_symbol_definition_e {
+  // Symbol is resolved by the final linker or loader.
+  LOOM_NATIVE_OBJECT_SYMBOL_DEFINITION_UNDEFINED = 0,
+  // Symbol is defined relative to one section contribution.
+  LOOM_NATIVE_OBJECT_SYMBOL_DEFINITION_SECTION = 1,
+} loom_native_object_symbol_definition_t;
+
 typedef struct loom_native_object_symbol_t {
   // Symbol name emitted into the final object symbol table.
   iree_string_view_t name;
-  // Section contribution containing the symbol definition.
+  // Section contribution containing a section-defined symbol. Ignored for an
+  // undefined symbol.
   iree_host_size_t section_contribution_index;
-  // Byte offset of the symbol within the referenced section contribution.
+  // Byte offset within the referenced section contribution. Must be zero for
+  // an undefined symbol.
   uint64_t section_offset;
-  // Symbol byte size, or zero when the target writer cannot describe it yet.
+  // Symbol byte size, or zero when undefined or not known by the producer.
   uint64_t size;
   // Linkage binding for the final object symbol.
   uint32_t binding;
@@ -57,12 +66,15 @@ typedef struct loom_native_object_symbol_t {
   uint32_t visibility;
   // Symbol payload kind in the final object.
   uint32_t kind;
+  // How this symbol obtains its definition.
+  uint32_t definition;
 } loom_native_object_symbol_t;
 
 typedef struct loom_native_object_symbol_layout_t {
-  // Final assembled section containing the symbol definition.
+  // Final assembled section containing the symbol definition, or
+  // IREE_HOST_SIZE_MAX for an undefined symbol.
   iree_host_size_t section_index;
-  // Byte offset of the symbol within the final assembled section.
+  // Byte offset within the final assembled section, or zero when undefined.
   uint64_t section_offset;
 } loom_native_object_symbol_layout_t;
 
@@ -91,9 +103,9 @@ typedef struct loom_native_object_contribution_t {
   const loom_native_section_contribution_t* sections;
   // Number of worker-produced section byte contributions.
   iree_host_size_t section_count;
-  // Worker-produced symbol definitions relative to |sections|.
+  // Worker-produced symbols defined relative to |sections| or left undefined.
   const loom_native_object_symbol_t* symbols;
-  // Number of worker-produced symbol definitions.
+  // Number of worker-produced symbols.
   iree_host_size_t symbol_count;
   // Worker-produced relocation sites relative to |sections|.
   const loom_native_object_fixup_t* fixups;

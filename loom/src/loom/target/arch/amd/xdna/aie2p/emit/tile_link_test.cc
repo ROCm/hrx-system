@@ -42,6 +42,7 @@ TEST(Aie2pTileLinkTest, PlacesExecutableContribution) {
       /*.binding=*/LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
       /*.visibility=*/LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_DEFAULT,
       /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
+      /*.definition=*/LOOM_NATIVE_OBJECT_SYMBOL_DEFINITION_SECTION,
   };
   const loom_aie2p_leaf_contribution_t contribution = {
       /*.object=*/
@@ -136,6 +137,7 @@ TEST(Aie2pTileLinkTest, AppliesBranchFixupAfterContributionPlacement) {
       /*.binding=*/LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
       /*.visibility=*/LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_DEFAULT,
       /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
+      /*.definition=*/LOOM_NATIVE_OBJECT_SYMBOL_DEFINITION_SECTION,
   };
   const loom_native_object_fixup_t fixup = {
       /*.section_contribution_index=*/1,
@@ -274,6 +276,7 @@ TEST(Aie2pTileLinkTest, RelocatesMovxmInsideAMultiSlotBundle) {
       /*.binding=*/LOOM_NATIVE_OBJECT_SYMBOL_BINDING_LOCAL,
       /*.visibility=*/LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_HIDDEN,
       /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_DATA,
+      /*.definition=*/LOOM_NATIVE_OBJECT_SYMBOL_DEFINITION_SECTION,
   };
   const loom_native_object_fixup_t fixup = {
       /*.section_contribution_index=*/0,
@@ -377,6 +380,7 @@ TEST(Aie2pTileLinkTest, PlacesAndRelocatesFunctionLocalStorage) {
           /*.binding=*/LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
           /*.visibility=*/LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_DEFAULT,
           /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
+          /*.definition=*/LOOM_NATIVE_OBJECT_SYMBOL_DEFINITION_SECTION,
       },
       {
           /*.name=*/IREE_SV("local_address.workgroup"),
@@ -386,6 +390,7 @@ TEST(Aie2pTileLinkTest, PlacesAndRelocatesFunctionLocalStorage) {
           /*.binding=*/LOOM_NATIVE_OBJECT_SYMBOL_BINDING_LOCAL,
           /*.visibility=*/LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_HIDDEN,
           /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_DATA,
+          /*.definition=*/LOOM_NATIVE_OBJECT_SYMBOL_DEFINITION_SECTION,
       },
   };
   const loom_native_object_fixup_t fixup = {

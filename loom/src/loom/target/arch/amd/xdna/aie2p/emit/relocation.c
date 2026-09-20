@@ -277,6 +277,13 @@ iree_status_t loom_aie2p_native_object_apply_fixups(
 
   for (iree_host_size_t i = 0; i < object->fixup_count; ++i) {
     const loom_native_object_fixup_t* fixup = &object->fixups[i];
+    const loom_native_object_symbol_t* target_symbol =
+        &object->symbols[fixup->target_symbol_index];
+    if (target_symbol->definition !=
+        LOOM_NATIVE_OBJECT_SYMBOL_DEFINITION_SECTION) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "AIE2P fixup target must be section-defined");
+    }
     const loom_native_object_fixup_layout_t* fixup_layout = &fixup_layouts[i];
     const loom_native_object_symbol_layout_t* target_layout =
         &symbol_layouts[fixup->target_symbol_index];

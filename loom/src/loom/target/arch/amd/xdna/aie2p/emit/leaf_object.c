@@ -379,6 +379,7 @@ iree_status_t loom_aie2p_leaf_object_emit(
       .binding = LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
       .visibility = LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_DEFAULT,
       .kind = LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
+      .definition = LOOM_NATIVE_OBJECT_SYMBOL_DEFINITION_SECTION,
   };
 
   uint32_t storage_symbol_indices[LOOM_STORAGE_SPACE_COUNT_];
@@ -419,6 +420,7 @@ iree_status_t loom_aie2p_leaf_object_emit(
         .binding = LOOM_NATIVE_OBJECT_SYMBOL_BINDING_LOCAL,
         .visibility = LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_HIDDEN,
         .kind = LOOM_NATIVE_OBJECT_SYMBOL_KIND_DATA,
+        .definition = LOOM_NATIVE_OBJECT_SYMBOL_DEFINITION_SECTION,
     };
     storage_domains[domain_index] = (loom_aie2p_leaf_storage_domain_t){
         .storage_space = storage_space,

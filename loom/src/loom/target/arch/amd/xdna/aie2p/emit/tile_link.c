@@ -28,8 +28,10 @@ static iree_status_t loom_aie2p_tile_link_assign_addresses(
   }
   const loom_native_object_symbol_t* entry_symbol =
       &object->symbols[realization->entry_symbol_index];
-  if (entry_symbol->section_contribution_index >=
-      assembly->contribution_layout_count) {
+  if (entry_symbol->definition !=
+          LOOM_NATIVE_OBJECT_SYMBOL_DEFINITION_SECTION ||
+      entry_symbol->section_contribution_index >=
+          assembly->contribution_layout_count) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "AIE2P tile entry section is invalid");
   }
@@ -117,7 +119,9 @@ static iree_status_t loom_aie2p_tile_link_assign_addresses(
     }
     const loom_native_object_symbol_t* domain_symbol =
         &object->symbols[domain->symbol_index];
-    if (domain_symbol->section_contribution_index !=
+    if (domain_symbol->definition !=
+            LOOM_NATIVE_OBJECT_SYMBOL_DEFINITION_SECTION ||
+        domain_symbol->section_contribution_index !=
             domain->section_contribution_index ||
         domain_symbol->kind != LOOM_NATIVE_OBJECT_SYMBOL_KIND_DATA) {
       return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,

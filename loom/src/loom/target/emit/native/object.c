@@ -61,12 +61,34 @@ static iree_status_t loom_native_object_validate_symbol(
           IREE_STATUS_INVALID_ARGUMENT,
           "native object symbol %" PRIhsz " kind is invalid", index);
   }
-  if (symbol->section_contribution_index >= section_layout_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "native object symbol %" PRIhsz
-                            " section contribution index %" PRIhsz
-                            " is outside the assembled contribution layout",
-                            index, symbol->section_contribution_index);
+  switch (symbol->definition) {
+    case LOOM_NATIVE_OBJECT_SYMBOL_DEFINITION_UNDEFINED:
+      if (symbol->binding == LOOM_NATIVE_OBJECT_SYMBOL_BINDING_LOCAL) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "native object symbol %" PRIhsz
+                                " is both local and undefined",
+                                index);
+      }
+      if (symbol->section_offset != 0 || symbol->size != 0) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "native object symbol %" PRIhsz
+                                " has undefined section-relative data",
+                                index);
+      }
+      break;
+    case LOOM_NATIVE_OBJECT_SYMBOL_DEFINITION_SECTION:
+      if (symbol->section_contribution_index >= section_layout_count) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "native object symbol %" PRIhsz
+                                " section contribution index %" PRIhsz
+                                " is outside the assembled contribution layout",
+                                index, symbol->section_contribution_index);
+      }
+      break;
+    default:
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "native object symbol %" PRIhsz " definition is invalid", index);
   }
   return iree_ok_status();
 }
@@ -84,6 +106,12 @@ iree_status_t loom_native_object_resolve_symbol_layouts(
     const loom_native_object_symbol_t* symbol = &symbols[i];
     IREE_RETURN_IF_ERROR(
         loom_native_object_validate_symbol(symbol, i, section_layout_count));
+    if (symbol->definition == LOOM_NATIVE_OBJECT_SYMBOL_DEFINITION_UNDEFINED) {
+      out_symbol_layouts[i] = (loom_native_object_symbol_layout_t){
+          .section_index = IREE_HOST_SIZE_MAX,
+      };
+      continue;
+    }
     const loom_native_section_contribution_layout_t* section_layout =
         &section_layouts[symbol->section_contribution_index];
     uint64_t final_offset = 0;
