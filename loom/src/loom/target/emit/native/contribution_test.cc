@@ -6,19 +6,14 @@
 
 #include "loom/target/emit/native/contribution.h"
 
-#include <memory>
 #include <string>
 
 #include "iree/base/internal/arena.h"
-#include "iree/io/vec_stream.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
 namespace loom {
 namespace {
-
-using StreamPtr =
-    std::unique_ptr<iree_io_stream_t, void (*)(iree_io_stream_t*)>;
 
 class TestArena {
  public:
@@ -42,38 +37,7 @@ class TestArena {
   iree_arena_allocator_t arena_ = {0};
 };
 
-StreamPtr CreateStream() {
-  iree_io_stream_t* stream = nullptr;
-  IREE_CHECK_OK(iree_io_vec_stream_create(
-      IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_WRITABLE |
-          IREE_IO_STREAM_MODE_SEEKABLE | IREE_IO_STREAM_MODE_RESIZABLE,
-      1024, iree_allocator_system(), &stream));
-  return StreamPtr(stream, iree_io_stream_release);
-}
-
-std::string StreamBytes(iree_io_stream_t* stream) {
-  const iree_io_stream_pos_t length = iree_io_stream_length(stream);
-  IREE_ASSERT_GE(length, 0);
-  std::string bytes((size_t)length, '\0');
-  IREE_CHECK_OK(iree_io_stream_seek(stream, IREE_IO_STREAM_SEEK_SET, 0));
-  IREE_CHECK_OK(iree_io_stream_read(stream, bytes.size(), bytes.data(), NULL));
-  return bytes;
-}
-
-uint16_t LoadLeU16(const std::string& bytes, size_t offset) {
-  return (uint16_t)(uint8_t)bytes[offset] |
-         ((uint16_t)(uint8_t)bytes[offset + 1] << 8);
-}
-
-uint64_t LoadLeU64(const std::string& bytes, size_t offset) {
-  uint64_t value = 0;
-  for (size_t i = 0; i < 8; ++i) {
-    value |= (uint64_t)(uint8_t)bytes[offset + i] << (8 * i);
-  }
-  return value;
-}
-
-TEST(NativeContributionTest, AssemblesAlignedSectionsAndWritesElf) {
+TEST(NativeContributionTest, AssemblesAlignedSections) {
   char text_section_name[] = ".text";
   char rodata_section_name[] = ".rodata";
   const uint8_t text0[] = {0x01, 0x02, 0x03};
@@ -83,36 +47,27 @@ TEST(NativeContributionTest, AssemblesAlignedSectionsAndWritesElf) {
       {
           /*.section_name=*/iree_make_string_view(
               text_section_name, sizeof(text_section_name) - 1u),
-          /*.section_type=*/LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
-          /*.section_flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-              LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR,
+          /*.kind=*/LOOM_NATIVE_SECTION_KIND_BYTES,
+          /*.flags=*/LOOM_NATIVE_SECTION_FLAG_ALLOCATED |
+              LOOM_NATIVE_SECTION_FLAG_EXECUTABLE,
           /*.contribution_alignment=*/4,
-          /*.entry_size=*/{},
-          /*.link=*/{},
-          /*.info=*/{},
           /*.contents=*/iree_make_const_byte_span(text0, sizeof(text0)),
       },
       {
           /*.section_name=*/iree_make_string_view(
               rodata_section_name, sizeof(rodata_section_name) - 1u),
-          /*.section_type=*/LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
-          /*.section_flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC,
+          /*.kind=*/LOOM_NATIVE_SECTION_KIND_BYTES,
+          /*.flags=*/LOOM_NATIVE_SECTION_FLAG_ALLOCATED,
           /*.contribution_alignment=*/1,
-          /*.entry_size=*/{},
-          /*.link=*/{},
-          /*.info=*/{},
           /*.contents=*/iree_make_const_byte_span(rodata0, sizeof(rodata0)),
       },
       {
           /*.section_name=*/iree_make_string_view(
               text_section_name, sizeof(text_section_name) - 1u),
-          /*.section_type=*/LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
-          /*.section_flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-              LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR,
+          /*.kind=*/LOOM_NATIVE_SECTION_KIND_BYTES,
+          /*.flags=*/LOOM_NATIVE_SECTION_FLAG_ALLOCATED |
+              LOOM_NATIVE_SECTION_FLAG_EXECUTABLE,
           /*.contribution_alignment=*/8,
-          /*.entry_size=*/{},
-          /*.link=*/{},
-          /*.info=*/{},
           /*.contents=*/iree_make_const_byte_span(text1, sizeof(text1)),
       },
   };
@@ -146,65 +101,25 @@ TEST(NativeContributionTest, AssemblesAlignedSectionsAndWritesElf) {
   EXPECT_EQ(std::string((const char*)assembly.sections[1].contents.data,
                         assembly.sections[1].contents.data_length),
             std::string("\xa0\xa1", 2));
-
-  const loom_native_elf64le_file_t file = {
-      /*.type=*/LOOM_NATIVE_ELF_FILE_TYPE_DYN,
-      /*.machine=*/LOOM_NATIVE_ELF_MACHINE_AMDGPU,
-      /*.os_abi=*/LOOM_NATIVE_ELF_OS_ABI_AMDGPU_HSA,
-      /*.abi_version=*/LOOM_NATIVE_ELF_ABI_VERSION_AMDGPU_HSA_V5,
-      /*.flags=*/LOOM_NATIVE_ELF_AMDGPU_FLAG_MACH_GFX1100,
-      /*.entry=*/{},
-      /*.sections=*/assembly.sections,
-      /*.section_count=*/assembly.section_count,
-  };
-  StreamPtr stream = CreateStream();
-  IREE_ASSERT_OK(
-      loom_native_elf64le_write_file(&file, stream.get(), arena.arena()));
-  const std::string elf_bytes = StreamBytes(stream.get());
-  ASSERT_EQ(LoadLeU16(elf_bytes, 60), 4u);
-  const size_t section_header_offset = (size_t)LoadLeU64(elf_bytes, 40);
-  ASSERT_LE(section_header_offset + 4 * 64, elf_bytes.size());
-  const size_t text_section_header_offset = section_header_offset + 64;
-  const size_t rodata_section_header_offset = text_section_header_offset + 64;
-  const size_t text_offset =
-      (size_t)LoadLeU64(elf_bytes, text_section_header_offset + 24);
-  const size_t text_size =
-      (size_t)LoadLeU64(elf_bytes, text_section_header_offset + 32);
-  const size_t rodata_offset =
-      (size_t)LoadLeU64(elf_bytes, rodata_section_header_offset + 24);
-  const size_t rodata_size =
-      (size_t)LoadLeU64(elf_bytes, rodata_section_header_offset + 32);
-  ASSERT_LE(text_offset + text_size, elf_bytes.size());
-  ASSERT_LE(rodata_offset + rodata_size, elf_bytes.size());
-  EXPECT_EQ(elf_bytes.substr(text_offset, text_size),
-            std::string("\x01\x02\x03\x00\x00\x00\x00\x00\x10\x11", 10));
-  EXPECT_EQ(elf_bytes.substr(rodata_offset, rodata_size),
-            std::string("\xa0\xa1", 2));
 }
 
-TEST(NativeContributionTest, AssemblesAlignedNobitsWithoutPayloadBytes) {
+TEST(NativeContributionTest, AssemblesAlignedZeroFillWithoutPayloadBytes) {
   const loom_native_section_contribution_t contributions[] = {
       {
           /*.section_name=*/IREE_SV(".bss"),
-          /*.section_type=*/LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS,
-          /*.section_flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-              LOOM_NATIVE_ELF_SECTION_FLAG_WRITE,
+          /*.kind=*/LOOM_NATIVE_SECTION_KIND_ZERO_FILL,
+          /*.flags=*/LOOM_NATIVE_SECTION_FLAG_ALLOCATED |
+              LOOM_NATIVE_SECTION_FLAG_WRITABLE,
           /*.contribution_alignment=*/4,
-          /*.entry_size=*/{},
-          /*.link=*/{},
-          /*.info=*/{},
           /*.contents=*/{},
           /*.zero_fill_length=*/12,
       },
       {
           /*.section_name=*/IREE_SV(".bss"),
-          /*.section_type=*/LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS,
-          /*.section_flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-              LOOM_NATIVE_ELF_SECTION_FLAG_WRITE,
+          /*.kind=*/LOOM_NATIVE_SECTION_KIND_ZERO_FILL,
+          /*.flags=*/LOOM_NATIVE_SECTION_FLAG_ALLOCATED |
+              LOOM_NATIVE_SECTION_FLAG_WRITABLE,
           /*.contribution_alignment=*/16,
-          /*.entry_size=*/{},
-          /*.link=*/{},
-          /*.info=*/{},
           /*.contents=*/{},
           /*.zero_fill_length=*/8,
       },
@@ -216,7 +131,7 @@ TEST(NativeContributionTest, AssemblesAlignedNobitsWithoutPayloadBytes) {
       contributions, IREE_ARRAYSIZE(contributions), &assembly, arena.arena()));
 
   ASSERT_EQ(assembly.section_count, 1u);
-  EXPECT_EQ(assembly.sections[0].type, LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS);
+  EXPECT_EQ(assembly.sections[0].kind, LOOM_NATIVE_SECTION_KIND_ZERO_FILL);
   EXPECT_EQ(assembly.sections[0].alignment, 16u);
   EXPECT_EQ(assembly.sections[0].contents.data, nullptr);
   EXPECT_EQ(assembly.sections[0].contents.data_length, 0u);
@@ -233,22 +148,17 @@ TEST(NativeContributionTest, RejectsConflictingSectionMetadata) {
   const loom_native_section_contribution_t contributions[] = {
       {
           /*.section_name=*/IREE_SV(".text"),
-          /*.section_type=*/LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
-          /*.section_flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC,
+          /*.kind=*/LOOM_NATIVE_SECTION_KIND_BYTES,
+          /*.flags=*/LOOM_NATIVE_SECTION_FLAG_ALLOCATED,
           /*.contribution_alignment=*/4,
-          /*.entry_size=*/{},
-          /*.link=*/{},
-          /*.info=*/{},
           /*.contents=*/iree_make_const_byte_span(&byte, sizeof(byte)),
       },
       {
           /*.section_name=*/IREE_SV(".text"),
-          /*.section_type=*/LOOM_NATIVE_ELF_SECTION_TYPE_NOTE,
-          /*.section_flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC,
+          /*.kind=*/LOOM_NATIVE_SECTION_KIND_BYTES,
+          /*.flags=*/LOOM_NATIVE_SECTION_FLAG_ALLOCATED |
+              LOOM_NATIVE_SECTION_FLAG_EXECUTABLE,
           /*.contribution_alignment=*/4,
-          /*.entry_size=*/{},
-          /*.link=*/{},
-          /*.info=*/{},
           /*.contents=*/iree_make_const_byte_span(&byte, sizeof(byte)),
       },
   };
@@ -265,12 +175,9 @@ TEST(NativeContributionTest, RejectsInvalidAlignment) {
   const uint8_t byte = 0;
   const loom_native_section_contribution_t contribution = {
       /*.section_name=*/IREE_SV(".text"),
-      /*.section_type=*/LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
-      /*.section_flags=*/{},
+      /*.kind=*/LOOM_NATIVE_SECTION_KIND_BYTES,
+      /*.flags=*/{},
       /*.contribution_alignment=*/3,
-      /*.entry_size=*/{},
-      /*.link=*/{},
-      /*.info=*/{},
       /*.contents=*/iree_make_const_byte_span(&byte, sizeof(byte)),
   };
 

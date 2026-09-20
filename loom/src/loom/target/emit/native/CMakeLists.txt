@@ -34,6 +34,7 @@ loom_cc_library(
   SRCS
     "elf.c"
   DEPS
+    ::contribution
     iree::base
     iree::base::internal::arena
     iree::io::stream
@@ -48,7 +49,6 @@ loom_cc_library(
   SRCS
     "contribution.c"
   DEPS
-    ::elf
     iree::base
     iree::base::internal::arena
   PUBLIC
@@ -102,10 +102,8 @@ loom_cc_test(
     "contribution_test.cc"
   DEPS
     ::contribution
-    ::elf
     iree::base
     iree::base::internal::arena
-    iree::io::stream
     iree::testing::gtest
     iree::testing::gtest_main
 )

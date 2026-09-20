@@ -9,6 +9,33 @@
 #include <inttypes.h>
 #include <string.h>
 
+loom_native_elf_section_t loom_native_elf_section_from_native(
+    const loom_native_section_t* section) {
+  IREE_ASSERT_TRUE(section->kind == LOOM_NATIVE_SECTION_KIND_BYTES ||
+                   section->kind == LOOM_NATIVE_SECTION_KIND_ZERO_FILL);
+  uint64_t flags = 0;
+  if (iree_any_bit_set(section->flags, LOOM_NATIVE_SECTION_FLAG_ALLOCATED)) {
+    flags |= LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC;
+  }
+  if (iree_any_bit_set(section->flags, LOOM_NATIVE_SECTION_FLAG_WRITABLE)) {
+    flags |= LOOM_NATIVE_ELF_SECTION_FLAG_WRITE;
+  }
+  if (iree_any_bit_set(section->flags, LOOM_NATIVE_SECTION_FLAG_EXECUTABLE)) {
+    flags |= LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR;
+  }
+  return (loom_native_elf_section_t){
+      .name = section->name,
+      .type = section->kind == LOOM_NATIVE_SECTION_KIND_ZERO_FILL
+                  ? LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS
+                  : LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
+      .flags = flags,
+      .address = section->address,
+      .alignment = section->alignment,
+      .contents = section->contents,
+      .zero_fill_length = section->zero_fill_length,
+  };
+}
+
 //===----------------------------------------------------------------------===//
 // ELF little-endian format records
 //===----------------------------------------------------------------------===//

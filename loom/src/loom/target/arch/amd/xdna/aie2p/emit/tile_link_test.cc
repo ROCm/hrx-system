@@ -25,13 +25,10 @@ TEST(Aie2pTileLinkTest, PlacesExecutableContribution) {
   };
   const loom_native_section_contribution_t section = {
       /*.section_name=*/IREE_SV(".text.kernel"),
-      /*.section_type=*/LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
-      /*.section_flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-          LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR,
+      /*.kind=*/LOOM_NATIVE_SECTION_KIND_BYTES,
+      /*.flags=*/LOOM_NATIVE_SECTION_FLAG_ALLOCATED |
+          LOOM_NATIVE_SECTION_FLAG_EXECUTABLE,
       /*.contribution_alignment=*/16,
-      /*.entry_size=*/0,
-      /*.link=*/0,
-      /*.info=*/0,
       /*.contents=*/iree_make_const_byte_span(code, sizeof(code)),
   };
   const loom_native_object_symbol_t symbol = {
@@ -106,25 +103,19 @@ TEST(Aie2pTileLinkTest, AppliesBranchFixupAfterContributionPlacement) {
   const loom_native_section_contribution_t sections[] = {
       {
           /*.section_name=*/IREE_SV(".text.kernel"),
-          /*.section_type=*/LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
-          /*.section_flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-              LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR,
+          /*.kind=*/LOOM_NATIVE_SECTION_KIND_BYTES,
+          /*.flags=*/LOOM_NATIVE_SECTION_FLAG_ALLOCATED |
+              LOOM_NATIVE_SECTION_FLAG_EXECUTABLE,
           /*.contribution_alignment=*/16,
-          /*.entry_size=*/0,
-          /*.link=*/0,
-          /*.info=*/0,
           /*.contents=*/
           iree_make_const_byte_span(prefix_code.data(), prefix_code.size()),
       },
       {
           /*.section_name=*/IREE_SV(".text.kernel"),
-          /*.section_type=*/LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
-          /*.section_flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-              LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR,
+          /*.kind=*/LOOM_NATIVE_SECTION_KIND_BYTES,
+          /*.flags=*/LOOM_NATIVE_SECTION_FLAG_ALLOCATED |
+              LOOM_NATIVE_SECTION_FLAG_EXECUTABLE,
           /*.contribution_alignment=*/16,
-          /*.entry_size=*/0,
-          /*.link=*/0,
-          /*.info=*/0,
           /*.contents=*/
           iree_make_const_byte_span(function_code.data(), function_code.size()),
       },
@@ -245,25 +236,19 @@ TEST(Aie2pTileLinkTest, RelocatesMovxmInsideAMultiSlotBundle) {
   const loom_native_section_contribution_t sections[] = {
       {
           /*.section_name=*/IREE_SV(".text.multi_slot"),
-          /*.section_type=*/LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
-          /*.section_flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-              LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR,
+          /*.kind=*/LOOM_NATIVE_SECTION_KIND_BYTES,
+          /*.flags=*/LOOM_NATIVE_SECTION_FLAG_ALLOCATED |
+              LOOM_NATIVE_SECTION_FLAG_EXECUTABLE,
           /*.contribution_alignment=*/16,
-          /*.entry_size=*/0,
-          /*.link=*/0,
-          /*.info=*/0,
           /*.contents=*/
           iree_make_const_byte_span(packet.data, packet.data_length),
       },
       {
           /*.section_name=*/IREE_SV(".storage.multi_slot.workgroup"),
-          /*.section_type=*/LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS,
-          /*.section_flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-              LOOM_NATIVE_ELF_SECTION_FLAG_WRITE,
+          /*.kind=*/LOOM_NATIVE_SECTION_KIND_ZERO_FILL,
+          /*.flags=*/LOOM_NATIVE_SECTION_FLAG_ALLOCATED |
+              LOOM_NATIVE_SECTION_FLAG_WRITABLE,
           /*.contribution_alignment=*/64,
-          /*.entry_size=*/0,
-          /*.link=*/0,
-          /*.info=*/0,
           /*.contents=*/iree_const_byte_span_empty(),
           /*.zero_fill_length=*/320,
       },
@@ -349,24 +334,18 @@ TEST(Aie2pTileLinkTest, PlacesAndRelocatesFunctionLocalStorage) {
   const loom_native_section_contribution_t sections[] = {
       {
           /*.section_name=*/IREE_SV(".text.local_address"),
-          /*.section_type=*/LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
-          /*.section_flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-              LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR,
+          /*.kind=*/LOOM_NATIVE_SECTION_KIND_BYTES,
+          /*.flags=*/LOOM_NATIVE_SECTION_FLAG_ALLOCATED |
+              LOOM_NATIVE_SECTION_FLAG_EXECUTABLE,
           /*.contribution_alignment=*/16,
-          /*.entry_size=*/0,
-          /*.link=*/0,
-          /*.info=*/0,
           /*.contents=*/iree_make_const_byte_span(code.data(), code.size()),
       },
       {
           /*.section_name=*/IREE_SV(".storage.local_address.workgroup"),
-          /*.section_type=*/LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS,
-          /*.section_flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-              LOOM_NATIVE_ELF_SECTION_FLAG_WRITE,
+          /*.kind=*/LOOM_NATIVE_SECTION_KIND_ZERO_FILL,
+          /*.flags=*/LOOM_NATIVE_SECTION_FLAG_ALLOCATED |
+              LOOM_NATIVE_SECTION_FLAG_WRITABLE,
           /*.contribution_alignment=*/64,
-          /*.entry_size=*/0,
-          /*.link=*/0,
-          /*.info=*/0,
           /*.contents=*/iree_const_byte_span_empty(),
           /*.zero_fill_length=*/320,
       },
@@ -460,13 +439,12 @@ TEST(Aie2pTileLinkTest, PlacesAndRelocatesFunctionLocalStorage) {
       loom_aie2p_tile_link(&contribution, &layout, &arena, &linked_tile));
   ASSERT_EQ(linked_tile.assembly.section_count, 2u);
   EXPECT_EQ(linked_tile.entry_section_index, 0u);
-  const loom_native_elf_section_t& linked_code =
-      linked_tile.assembly.sections[0];
-  const loom_native_elf_section_t& linked_storage =
+  const loom_native_section_t& linked_code = linked_tile.assembly.sections[0];
+  const loom_native_section_t& linked_storage =
       linked_tile.assembly.sections[1];
   EXPECT_EQ(linked_code.address, 0u);
   EXPECT_EQ(linked_storage.address, 0x70000u);
-  EXPECT_EQ(linked_storage.type, LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS);
+  EXPECT_EQ(linked_storage.kind, LOOM_NATIVE_SECTION_KIND_ZERO_FILL);
   EXPECT_EQ(linked_storage.zero_fill_length, 320u);
   EXPECT_EQ(linked_storage.alignment, 64u);
 

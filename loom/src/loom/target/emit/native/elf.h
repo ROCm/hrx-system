@@ -17,6 +17,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "iree/io/stream.h"
+#include "loom/target/emit/native/contribution.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -124,6 +125,10 @@ typedef struct loom_native_elf_section_t {
   // zero for every content-backed section.
   uint64_t zero_fill_length;
 } loom_native_elf_section_t;
+
+// Maps one trusted format-neutral native section to its ELF representation.
+loom_native_elf_section_t loom_native_elf_section_from_native(
+    const loom_native_section_t* section);
 
 // Returns the logical size recorded in the section header.
 static inline uint64_t loom_native_elf_section_byte_length(

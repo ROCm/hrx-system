@@ -49,6 +49,7 @@ loom_cc_library(
     hdrs = ["elf.h"],
     visibility = _NATIVE_AMDGPU_VISIBILITY + _NATIVE_XDNA_VISIBILITY,
     deps = [
+        ":contribution",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/io:stream",
@@ -61,7 +62,6 @@ loom_cc_library(
     hdrs = ["contribution.h"],
     visibility = _NATIVE_AIE2P_VISIBILITY,
     deps = [
-        ":elf",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -109,10 +109,8 @@ loom_cc_test(
     srcs = ["contribution_test.cc"],
     deps = [
         ":contribution",
-        ":elf",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/io:stream",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

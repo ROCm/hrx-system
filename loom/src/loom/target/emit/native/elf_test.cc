@@ -81,6 +81,49 @@ uint64_t LoadLeU64(const std::string& bytes, size_t offset) {
   return value;
 }
 
+TEST(NativeElfTest, MapsFormatNeutralSections) {
+  const uint8_t data[] = {0x01, 0x02};
+  const loom_native_section_t native_sections[] = {
+      {
+          /*.name=*/IREE_SV(".text"),
+          /*.kind=*/LOOM_NATIVE_SECTION_KIND_BYTES,
+          /*.flags=*/LOOM_NATIVE_SECTION_FLAG_ALLOCATED |
+              LOOM_NATIVE_SECTION_FLAG_EXECUTABLE,
+          /*.address=*/0x1000,
+          /*.alignment=*/16,
+          /*.contents=*/iree_make_const_byte_span(data, sizeof(data)),
+      },
+      {
+          /*.name=*/IREE_SV(".bss"),
+          /*.kind=*/LOOM_NATIVE_SECTION_KIND_ZERO_FILL,
+          /*.flags=*/LOOM_NATIVE_SECTION_FLAG_ALLOCATED |
+              LOOM_NATIVE_SECTION_FLAG_WRITABLE,
+          /*.address=*/0x2000,
+          /*.alignment=*/64,
+          /*.contents=*/{},
+          /*.zero_fill_length=*/128,
+      },
+  };
+
+  const loom_native_elf_section_t text =
+      loom_native_elf_section_from_native(&native_sections[0]);
+  EXPECT_EQ(text.type, LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS);
+  EXPECT_EQ(text.flags, LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
+                            LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR);
+  EXPECT_EQ(text.address, 0x1000u);
+  EXPECT_EQ(text.contents.data, data);
+  EXPECT_EQ(text.contents.data_length, sizeof(data));
+
+  const loom_native_elf_section_t bss =
+      loom_native_elf_section_from_native(&native_sections[1]);
+  EXPECT_EQ(bss.type, LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS);
+  EXPECT_EQ(bss.flags, LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
+                           LOOM_NATIVE_ELF_SECTION_FLAG_WRITE);
+  EXPECT_EQ(bss.address, 0x2000u);
+  EXPECT_EQ(bss.alignment, 64u);
+  EXPECT_EQ(bss.zero_fill_length, 128u);
+}
+
 TEST(NativeElfTest, WritesAieElf32ExecutableEnvelope) {
   const uint8_t text[16] = {
       0x10, 0x32, 0x54, 0x76, 0x98, 0xba, 0xdc, 0xfe,

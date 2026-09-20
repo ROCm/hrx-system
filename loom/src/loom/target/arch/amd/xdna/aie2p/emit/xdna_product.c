@@ -29,14 +29,11 @@ static void loom_aie2p_xdna_store_u32(uint8_t* target, uint32_t value) {
 // Section names are diagnostic labels and do not participate. Every load-time
 // property and byte must match exactly.
 static bool loom_aie2p_xdna_sections_identical(
-    const loom_native_elf_section_t* lhs,
-    const loom_native_elf_section_t* rhs) {
-  if (!iree_all_bits_set(lhs->flags, LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC) ||
-      !iree_all_bits_set(rhs->flags, LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC) ||
-      lhs->type != rhs->type || lhs->flags != rhs->flags ||
+    const loom_native_section_t* lhs, const loom_native_section_t* rhs) {
+  if (!iree_all_bits_set(lhs->flags, LOOM_NATIVE_SECTION_FLAG_ALLOCATED) ||
+      !iree_all_bits_set(rhs->flags, LOOM_NATIVE_SECTION_FLAG_ALLOCATED) ||
+      lhs->kind != rhs->kind || lhs->flags != rhs->flags ||
       lhs->address != rhs->address || lhs->alignment != rhs->alignment ||
-      lhs->entry_size != rhs->entry_size || lhs->link != rhs->link ||
-      lhs->info != rhs->info ||
       lhs->contents.data_length != rhs->contents.data_length ||
       lhs->zero_fill_length != rhs->zero_fill_length) {
     return false;
@@ -47,8 +44,8 @@ static bool loom_aie2p_xdna_sections_identical(
 }
 
 static iree_host_size_t loom_aie2p_xdna_intern_linked_section(
-    const loom_native_elf_section_t* section,
-    const loom_native_elf_section_t** unique_sections,
+    const loom_native_section_t* section,
+    const loom_native_section_t** unique_sections,
     iree_host_size_t* unique_section_count) {
   for (iree_host_size_t i = 0; i < *unique_section_count; ++i) {
     if (loom_aie2p_xdna_sections_identical(section, unique_sections[i])) {
@@ -451,7 +448,7 @@ static void loom_aie2p_xdna_emit_entry(
       const uint32_t tile_index =
           record->value.tile_program_load.tile_program_index;
       const loom_aie2p_xdna_tile_t* tile = &entry->tiles[tile_index];
-      const loom_native_elf_section_t* code =
+      const loom_native_section_t* code =
           &tile->linked_tile->assembly
                .sections[tile->linked_tile->entry_section_index];
       const uint32_t code_size =
@@ -591,7 +588,7 @@ iree_status_t loom_aie2p_xdna_product_write(
       profile, profile->physical_column_origin, columns));
 
   const loom_aie2p_xdna_tile_t** tiles = NULL;
-  const loom_native_elf_section_t** unique_sections = NULL;
+  const loom_native_section_t** unique_sections = NULL;
   iree_host_size_t* code_sections = NULL;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(scratch_arena, (iree_host_size_t)tile_count,
@@ -691,7 +688,8 @@ iree_status_t loom_aie2p_xdna_product_write(
                                   (uint32_t)metadata.data_length, sections,
                                   &section_count);
   for (iree_host_size_t i = 0; i < unique_section_count; ++i) {
-    sections[section_count++] = *unique_sections[i];
+    sections[section_count++] =
+        loom_native_elf_section_from_native(unique_sections[i]);
   }
   uint32_t segment_count = 1;
   segments[0] = (loom_native_elf_segment_t){

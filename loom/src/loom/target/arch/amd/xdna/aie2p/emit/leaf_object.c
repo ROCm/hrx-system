@@ -365,9 +365,9 @@ iree_status_t loom_aie2p_leaf_object_emit(
       function_name, arena, &code_section_name, &entry_symbol_name));
   sections[0] = (loom_native_section_contribution_t){
       .section_name = code_section_name,
-      .section_type = LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
-      .section_flags = LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-                       LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR,
+      .kind = LOOM_NATIVE_SECTION_KIND_BYTES,
+      .flags = LOOM_NATIVE_SECTION_FLAG_ALLOCATED |
+               LOOM_NATIVE_SECTION_FLAG_EXECUTABLE,
       .contribution_alignment = realization->code.minimum_alignment,
       .contents = iree_make_const_byte_span(code, plan->encoded_byte_length),
   };
@@ -402,13 +402,13 @@ iree_status_t loom_aie2p_leaf_object_emit(
     IREE_RETURN_IF_ERROR(loom_aie2p_leaf_object_copy_storage_name(
         function_name, storage_space, arena, &storage_section_name,
         &storage_symbol_name));
-    // NOBITS keeps uninitialized function storage compact. The retained
-    // FUNCTION_STORAGE capability distinguishes it from semantic zero-fill.
+    // Zero-fill keeps uninitialized function storage compact. The retained
+    // FUNCTION_STORAGE capability distinguishes it from semantic storage.
     sections[section_index] = (loom_native_section_contribution_t){
         .section_name = storage_section_name,
-        .section_type = LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS,
-        .section_flags = LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-                         LOOM_NATIVE_ELF_SECTION_FLAG_WRITE,
+        .kind = LOOM_NATIVE_SECTION_KIND_ZERO_FILL,
+        .flags = LOOM_NATIVE_SECTION_FLAG_ALLOCATED |
+                 LOOM_NATIVE_SECTION_FLAG_WRITABLE,
         .contribution_alignment = requirement->minimum_alignment,
         .zero_fill_length = requirement->byte_length,
     };
