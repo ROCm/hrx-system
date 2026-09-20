@@ -106,6 +106,7 @@ class LowBuilder(DialectBuilder):
         inline_policy: str | None = ...,
         callee: str,
         operands: list[ValueRef] = ...,
+        stack_args: list[ValueRef] = ...,
         results: list[Type | TiedResultSpec],
         name: str | None = ...,
         names: Sequence[str] | None = ...,
@@ -370,3 +371,27 @@ class LowBuilder(DialectBuilder):
         *,
         location_id: int | None = ...,
     ) -> None: ...
+    def stack_arg(
+        self,
+        *,
+        ordinal: int,
+        byte_offset: int,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def call_arg(
+        self,
+        *,
+        callee: str,
+        ordinal: int,
+        byte_offset: int,
+        value: ValueRef,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...

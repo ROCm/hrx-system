@@ -299,14 +299,15 @@ low.func.def target<test.low.core>(@test_target) @low_call_non_low(%lhs: reg<tes
 // ====
 
 test.target<low_core> @gfx1100
+
 test.target<low_core> @gfx1200
 
 low.func.decl target<test.low.core>(@gfx1200) @extern_add(%lhs: reg<test.i32>) -> (reg<test.i32>)
 
-low.func.def target<test.low.core>(@gfx1100) @low_call_cross_target(%lhs: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@gfx1100) @low_call_cross_target(%lhs: reg<test.i32>) -> (reg<test.i32>) asm {
   // ERROR@+1: TARGET/040 {op_name="low.func.call", field_name="callee", callee_target_name="gfx1200", caller_target_name="gfx1100"}
   %sum = low.func.call @extern_add(%lhs) : (reg<test.i32>) -> (reg<test.i32>)
-  low.return %sum : reg<test.i32>
+  return %sum
 }
 
 // ====
@@ -405,6 +406,117 @@ low.func.def target<test.low.core>(@test_target) @low_call_operand_type(%lhs: re
   // ERROR@+1: TYPE/001 {field_a="operand 1", type_a="reg<test.i32>", field_b="callee argument 1", type_b="reg<test.ptr>"}
   %sum = low.func.call @extern_add(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> (reg<test.i32>)
   low.return %sum : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.kernel.def target<test.low.core>(@test_target) @stack_arg_outside_low_function() {
+  // ERROR@+1: STRUCTURE/029
+  %value = low.func.stack_arg [0, 0] : reg<test.i32>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @stack_arg_ordinal(%value: reg<test.i32>) asm {
+  // ERROR@+1: STRUCTURE/014
+  %loaded = low.func.stack_arg [1, 0] : reg<test.i32>
+  return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @stack_arg_type(%value: reg<test.i32>) asm {
+  // ERROR@+1: TYPE/001 {field_a="result 0", type_a="reg<test.ptr>", field_b="function argument 0", type_b="reg<test.i32>"}
+  %loaded = low.func.stack_arg [0, 0] : reg<test.ptr>
+  return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.decl target<test.low.core>(@test_target) @consume_stack_arg(%value: reg<test.i32>)
+
+low.func.def target<test.low.core>(@test_target) @unused_call_arg(%value: reg<test.i32>) asm {
+  // ERROR@+1: DOMINANCE/009
+  %token = low.func.call_arg @consume_stack_arg[0, 0](%value) : reg<test.i32> -> low.storage<stack>
+  return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.decl target<test.low.core>(@test_target) @consume_stack_arg(%value: reg<test.i32>)
+
+low.func.def target<test.low.core>(@test_target) @wrong_call_arg_user(%value: reg<test.i32>) asm {
+  // ERROR@+1: DOMINANCE/010
+  %token = low.func.call_arg @consume_stack_arg[0, 0](%value) : reg<test.i32> -> low.storage<stack>
+  // ERROR@+1: STRUCTURE/032
+  low.spill %value, %token : reg<test.i32>, low.storage<stack>
+  return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.decl target<test.low.core>(@test_target) @consume_stack_arg(%value: reg<test.i32>)
+
+low.func.def target<test.low.core>(@test_target) @wrong_stack_token_origin() asm {
+  %slot = storage {byte_alignment = 4, byte_length = 4} : low.storage<stack>
+  // ERROR@+1: STRUCTURE/032
+  low.func.call @consume_stack_arg() : () [%slot: low.storage<stack>]
+  return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.decl target<test.low.core>(@test_target) @callee_a(%value: reg<test.i32>)
+low.func.decl target<test.low.core>(@test_target) @callee_b(%value: reg<test.i32>)
+
+low.func.def target<test.low.core>(@test_target) @wrong_stack_token_callee(%value: reg<test.i32>) asm {
+  // ERROR@+1: DOMINANCE/010
+  %token = low.func.call_arg @callee_a[0, 0](%value) : reg<test.i32> -> low.storage<stack>
+  // ERROR@+1: STRUCTURE/032
+  low.func.call @callee_b() : () [%token: low.storage<stack>]
+  return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.decl target<test.low.core>(@test_target) @two_stack_args(%a0: reg<test.i32>, %a1: reg<test.i32>)
+
+low.func.def target<test.low.core>(@test_target) @out_of_order_stack_tokens(%a0: reg<test.i32>, %a1: reg<test.i32>) asm {
+  %token1 = low.func.call_arg @two_stack_args[1, 8](%a1) : reg<test.i32> -> low.storage<stack>
+  // ERROR@+1: STRUCTURE/014
+  %token0 = low.func.call_arg @two_stack_args[0, 0](%a0) : reg<test.i32> -> low.storage<stack>
+  low.func.call @two_stack_args() : () [%token1: low.storage<stack>, %token0: low.storage<stack>]
+  return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.decl target<test.low.core>(@test_target) @partitioned_types(%a0: reg<test.i32>, %a1: reg<test.ptr>, %a2: reg<test.i32>)
+
+low.func.def target<test.low.core>(@test_target) @partitioned_type_mismatch(%a0: reg<test.i32>, %stack: reg<test.ptr>, %wrong: reg<test.ptr>) asm {
+  %token = low.func.call_arg @partitioned_types[1, 0](%stack) : reg<test.ptr> -> low.storage<stack>
+  // ERROR@+1: TYPE/001 {field_a="operand 1", type_a="reg<test.ptr>", field_b="callee argument 2", type_b="reg<test.i32>"}
+  low.func.call @partitioned_types(%a0, %wrong) : (reg<test.i32>, reg<test.ptr>) [%token: low.storage<stack>]
+  return
 }
 
 // ====

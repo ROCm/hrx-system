@@ -587,7 +587,8 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_low_lower_structural_op(
       IREE_RETURN_IF_ERROR(loom_low_func_call_build(
           &context->builder, build_flags, purity, inline_policy,
           loom_func_call_callee(source_op), low_operands, operands.count,
-          result_types, source_op->result_count,
+          /*stack_args=*/NULL, /*stack_args_count=*/0, result_types,
+          source_op->result_count,
           /*tied_results=*/NULL, /*tied_result_count=*/0, source_op->location,
           &low_call_op));
 

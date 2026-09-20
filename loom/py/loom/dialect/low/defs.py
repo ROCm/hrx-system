@@ -670,7 +670,15 @@ low_func_call = Op(
     "low.func.call",
     group=low_ops,
     doc="Direct call from one low function body to another same-target low function.",
-    operands=[Operand("operands", REGISTER, variadic=True)],
+    operands=[
+        Operand("operands", REGISTER, variadic=True),
+        Operand(
+            "stack_args",
+            STORAGE,
+            variadic=True,
+            doc="Materialized stack-argument stores in signature order.",
+        ),
+    ],
     attrs=[
         AttrDef(
             "callee",
@@ -707,6 +715,10 @@ low_func_call = Op(
         TypesOf("operands"),
         RPAREN,
         OptionalGroup(
+            [LBRACKET, TypedRefs("stack_args"), RBRACKET],
+            anchor="stack_args",
+        ),
+        OptionalGroup(
             [ARROW, ResultTypeList("results")],
             anchor="results",
         ),
@@ -714,6 +726,97 @@ low_func_call = Op(
     examples=[
         "%result = low.func.call @extern_add(%lhs, %rhs) : (reg<amdgpu.vgpr x1>, reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>)",
         "%result = low.func.call pure @extern_add(%lhs) : (reg<test.i32>) -> (reg<test.i32>)",
+        "%result = low.func.call @extern_add(%lhs) : (reg<test.i32>)[%rhs: low.storage<stack>] -> (reg<test.i32>)",
+    ],
+)
+
+# ============================================================================
+# low.func.stack_arg — materialize one incoming stack argument
+# ============================================================================
+
+low_func_stack_arg = Op(
+    "low.func.stack_arg",
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc="Materialize one stack-classified function argument at its use site.",
+    attrs=[
+        AttrDef(
+            "ordinal",
+            ATTR_TYPE_I64,
+            doc="Zero-based argument ordinal in the enclosing function signature.",
+        ),
+        AttrDef(
+            "byte_offset",
+            ATTR_TYPE_I64,
+            doc="Canonical byte offset in the incoming stack-argument area.",
+        ),
+    ],
+    results=[Result("result", REGISTER)],
+    traits=[UNKNOWN_EFFECTS],
+    verify="loom_low_func_stack_arg_verify",
+    format=[
+        LBRACKET,
+        Attr("ordinal"),
+        COMMA,
+        Attr("byte_offset"),
+        RBRACKET,
+        COLON,
+        ResultType("result"),
+    ],
+    examples=[
+        "%arg6 = low.func.stack_arg [6, 0] : reg<test.i64>",
+    ],
+)
+
+# ============================================================================
+# low.func.call_arg — store one outgoing stack argument
+# ============================================================================
+
+low_func_call_arg = Op(
+    "low.func.call_arg",
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc="Store one stack-classified call argument and yield its call witness.",
+    operands=[Operand("value", REGISTER)],
+    attrs=[
+        AttrDef(
+            "callee",
+            "symbol",
+            symbol_ref=SymbolReference("function", ["callable"]),
+        ),
+        AttrDef(
+            "ordinal",
+            ATTR_TYPE_I64,
+            doc="Zero-based argument ordinal in the callee signature.",
+        ),
+        AttrDef(
+            "byte_offset",
+            ATTR_TYPE_I64,
+            doc="Canonical byte offset in the outgoing stack-argument area.",
+        ),
+    ],
+    results=[Result("token", STORAGE)],
+    traits=[UNKNOWN_EFFECTS],
+    verify="loom_low_func_call_arg_verify",
+    format=[
+        SymbolRef("callee"),
+        GLUE,
+        LBRACKET,
+        Attr("ordinal"),
+        COMMA,
+        Attr("byte_offset"),
+        RBRACKET,
+        GLUE,
+        LPAREN,
+        Ref("value"),
+        RPAREN,
+        COLON,
+        TypeOf("value"),
+        ARROW,
+        ResultType("token"),
+    ],
+    examples=[
+        "%arg6 = low.func.call_arg @callee[6, 0](%value) : reg<test.i64> -> low.storage<stack>",
     ],
 )
 
@@ -1752,4 +1855,6 @@ ALL_LOW_OPS: tuple[Op, ...] = (
     low_schedule_begin,
     low_schedule_phase,
     low_schedule_end,
+    low_func_stack_arg,
+    low_func_call_arg,
 )

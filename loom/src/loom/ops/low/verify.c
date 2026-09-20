@@ -1419,18 +1419,57 @@ static void loom_low_format_call_field_name(char* buffer,
   iree_snprintf(buffer, buffer_capacity, "%s %u", prefix, field_index);
 }
 
+static iree_string_view_t loom_low_value_name(const loom_module_t* module,
+                                              loom_value_id_t value_id) {
+  if (value_id >= module->values.count) {
+    return IREE_SV("<invalid>");
+  }
+  const loom_string_id_t name_id = loom_module_value(module, value_id)->name_id;
+  if (name_id == LOOM_STRING_ID_INVALID || name_id >= module->strings.count) {
+    return IREE_SV("<unnamed>");
+  }
+  return module->strings.entries[name_id];
+}
+
+static iree_status_t loom_low_emit_value_use_count_error(
+    const loom_module_t* module, const loom_op_t* op, loom_value_id_t value_id,
+    uint32_t actual_count, iree_string_view_t expected_constraint,
+    iree_diagnostic_emitter_t emitter) {
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_low_value_name(module, value_id)),
+      loom_param_u32(actual_count),
+      loom_param_string(expected_constraint),
+  };
+  return loom_low_emit(emitter, op, LOOM_ERR_DOMINANCE_009, params,
+                       IREE_ARRAYSIZE(params));
+}
+
+static iree_status_t loom_low_emit_value_user_error(
+    const loom_module_t* module, const loom_op_t* op, loom_value_id_t value_id,
+    const loom_op_t* user_op, iree_string_view_t expected_constraint,
+    iree_diagnostic_emitter_t emitter) {
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_low_value_name(module, value_id)),
+      loom_param_string(loom_low_op_name(module, user_op)),
+      loom_param_string(expected_constraint),
+  };
+  return loom_low_emit(emitter, op, LOOM_ERR_DOMINANCE_010, params,
+                       IREE_ARRAYSIZE(params));
+}
+
 static iree_status_t loom_low_emit_call_type_mismatch(
     const loom_op_t* call_op, const loom_low_callee_signature_t* signature,
     iree_diagnostic_emitter_t emitter,
     loom_diagnostic_field_kind_t field_ref_kind, const char* field_prefix,
     uint16_t field_index, loom_type_t actual_type,
-    const char* callee_field_prefix, loom_type_t expected_type) {
+    const char* callee_field_prefix, uint16_t callee_field_index,
+    loom_type_t expected_type) {
   char field_name[32];
   char callee_field_name[32];
   loom_low_format_call_field_name(field_name, sizeof(field_name), field_prefix,
                                   field_index);
   loom_low_format_call_field_name(callee_field_name, sizeof(callee_field_name),
-                                  callee_field_prefix, field_index);
+                                  callee_field_prefix, callee_field_index);
   loom_diagnostic_param_t params[] = {
       loom_param_with_field_ref(
           loom_param_string(iree_make_cstring_view(field_name)),
@@ -1486,7 +1525,7 @@ static iree_status_t loom_low_verify_call_argument_types(
     }
     IREE_RETURN_IF_ERROR(loom_low_emit_call_type_mismatch(
         call_op, signature, emitter, LOOM_DIAGNOSTIC_FIELD_OPERAND, "operand",
-        i, actual_type, "callee argument", expected_type));
+        i, actual_type, "callee argument", i, expected_type));
   }
   return iree_ok_status();
 }
@@ -1509,7 +1548,7 @@ static iree_status_t loom_low_verify_call_result_types(
     }
     IREE_RETURN_IF_ERROR(loom_low_emit_call_type_mismatch(
         call_op, signature, emitter, LOOM_DIAGNOSTIC_FIELD_RESULT, "result", i,
-        actual_type, "callee result", expected_type));
+        actual_type, "callee result", i, expected_type));
   }
   return iree_ok_status();
 }
@@ -1517,7 +1556,7 @@ static iree_status_t loom_low_verify_call_result_types(
 static iree_status_t loom_low_verify_func_call_context(
     const loom_module_t* module, const loom_op_t* call_op,
     const loom_low_callee_signature_t* callee_signature,
-    iree_diagnostic_emitter_t emitter) {
+    uint16_t callee_attr_index, iree_diagnostic_emitter_t emitter) {
   const loom_op_t* caller_op =
       loom_low_find_enclosing_low_executable_def(module, call_op);
   if (!caller_op) {
@@ -1540,7 +1579,7 @@ static iree_status_t loom_low_verify_func_call_context(
       loom_param_with_field_ref(
           loom_param_string(IREE_SV("callee")),
           loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
-                                    loom_low_func_call_callee_ATTR_INDEX)),
+                                    callee_attr_index)),
       loom_param_string(loom_low_symbol_name(module, callee_target)),
       loom_param_string(loom_low_symbol_name(module, caller_target)),
   };
@@ -1838,6 +1877,216 @@ iree_status_t loom_low_resource_verify(const loom_module_t* module,
   return loom_low_verify_resource_op(module, op, emitter);
 }
 
+static const loom_op_t* loom_low_func_call_arg_producer(
+    const loom_module_t* module, loom_value_id_t token_id) {
+  if (token_id >= module->values.count) {
+    return NULL;
+  }
+  const loom_value_t* token = loom_module_value(module, token_id);
+  if (loom_value_is_block_arg(token)) {
+    return NULL;
+  }
+  const loom_op_t* producer = loom_value_def_op(token);
+  return producer != NULL && loom_low_func_call_arg_isa(producer) ? producer
+                                                                  : NULL;
+}
+
+static iree_status_t loom_low_verify_materialized_call_arguments(
+    const loom_module_t* module, const loom_op_t* call_op,
+    const loom_low_callee_signature_t* signature,
+    iree_diagnostic_emitter_t emitter) {
+  const loom_value_slice_t register_args = loom_low_func_call_operands(call_op);
+  const loom_value_slice_t stack_args = loom_low_func_call_stack_args(call_op);
+  const uint32_t argument_count =
+      (uint32_t)register_args.count + (uint32_t)stack_args.count;
+  if (argument_count != signature->argument_count) {
+    return loom_low_emit_call_count_mismatch(
+        module, call_op, signature, emitter, LOOM_ERR_STRUCTURE_001,
+        (uint16_t)argument_count, signature->argument_count);
+  }
+
+  int64_t previous_stack_ordinal = -1;
+  for (uint16_t i = 0; i < stack_args.count; ++i) {
+    const uint16_t operand_index = register_args.count + i;
+    const loom_value_id_t token_id = stack_args.values[i];
+    const loom_type_t token_type = loom_module_value_type(module, token_id);
+    if (!loom_type_equal(token_type,
+                         loom_type_storage(LOOM_STORAGE_SPACE_STACK))) {
+      return loom_low_emit_type_constraint_error(
+          call_op, LOOM_DIAGNOSTIC_FIELD_OPERAND, operand_index,
+          IREE_SV("stack argument"), token_type, IREE_SV("low.storage<stack>"),
+          emitter);
+    }
+
+    const loom_op_t* producer =
+        loom_low_func_call_arg_producer(module, token_id);
+    if (producer == NULL ||
+        !loom_low_symbol_ref_equal(loom_low_func_call_arg_callee(producer),
+                                   loom_low_func_call_callee(call_op))) {
+      char field_name[32];
+      loom_low_format_call_field_name(field_name, sizeof(field_name),
+                                      "stack argument", i);
+      return loom_low_emit_structural_origin_error(
+          module, call_op, LOOM_DIAGNOSTIC_FIELD_OPERAND, operand_index,
+          iree_make_cstring_view(field_name),
+          IREE_SV("a low.func.call_arg result for the same callee"), emitter);
+    }
+
+    const int64_t ordinal = loom_low_func_call_arg_ordinal(producer);
+    if (ordinal < 0 || ordinal >= signature->argument_count) {
+      return loom_low_emit_attr_value_error(
+          producer, loom_low_func_call_arg_ordinal_ATTR_INDEX,
+          IREE_SV("ordinal"), ordinal,
+          IREE_SV("an existing callee argument ordinal"), emitter);
+    }
+    if (ordinal <= previous_stack_ordinal) {
+      return loom_low_emit_attr_value_error(
+          producer, loom_low_func_call_arg_ordinal_ATTR_INDEX,
+          IREE_SV("ordinal"), ordinal,
+          IREE_SV("strictly increasing stack argument order"), emitter);
+    }
+    previous_stack_ordinal = ordinal;
+  }
+
+  uint16_t register_index = 0;
+  uint16_t stack_index = 0;
+  for (uint16_t ordinal = 0; ordinal < signature->argument_count; ++ordinal) {
+    if (stack_index < stack_args.count) {
+      const loom_op_t* producer = loom_low_func_call_arg_producer(
+          module, stack_args.values[stack_index]);
+      IREE_ASSERT(producer != NULL);
+      if (loom_low_func_call_arg_ordinal(producer) == ordinal) {
+        ++stack_index;
+        continue;
+      }
+    }
+    IREE_ASSERT_LT(register_index, register_args.count);
+    const loom_type_t actual_type =
+        loom_module_value_type(module, register_args.values[register_index]);
+    const loom_type_t expected_type =
+        loom_module_value_type(module, signature->argument_ids[ordinal]);
+    if (!loom_type_equal(actual_type, expected_type)) {
+      return loom_low_emit_call_type_mismatch(
+          call_op, signature, emitter, LOOM_DIAGNOSTIC_FIELD_OPERAND, "operand",
+          register_index, actual_type, "callee argument", ordinal,
+          expected_type);
+    }
+    ++register_index;
+  }
+  IREE_ASSERT_EQ(register_index, register_args.count);
+  IREE_ASSERT_EQ(stack_index, stack_args.count);
+  return iree_ok_status();
+}
+
+iree_status_t loom_low_func_stack_arg_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter) {
+  const loom_op_t* function_op =
+      loom_low_find_enclosing_low_executable_def(module, op);
+  if (function_op == NULL || !loom_low_func_def_isa(function_op)) {
+    return loom_low_emit_low_entry_placement_error(
+        module, op, IREE_SV("low.func.def"), emitter);
+  }
+
+  loom_func_like_t function = loom_func_like_const_cast(module, function_op);
+  uint16_t argument_count = 0;
+  const loom_value_id_t* argument_ids =
+      loom_func_like_arg_ids(function, &argument_count);
+  const int64_t ordinal = loom_low_func_stack_arg_ordinal(op);
+  if (ordinal < 0 || ordinal >= argument_count) {
+    return loom_low_emit_attr_value_error(
+        op, loom_low_func_stack_arg_ordinal_ATTR_INDEX, IREE_SV("ordinal"),
+        ordinal, IREE_SV("an existing enclosing function argument ordinal"),
+        emitter);
+  }
+
+  const loom_type_t actual_type =
+      loom_module_value_type(module, loom_low_func_stack_arg_result(op));
+  const loom_type_t expected_type =
+      loom_module_value_type(module, argument_ids[ordinal]);
+  if (loom_type_equal(actual_type, expected_type)) {
+    return iree_ok_status();
+  }
+  const loom_low_callee_signature_t signature = {
+      .definition_op = function_op,
+      .argument_ids = argument_ids,
+      .argument_count = argument_count,
+  };
+  return loom_low_emit_call_type_mismatch(
+      op, &signature, emitter, LOOM_DIAGNOSTIC_FIELD_RESULT, "result", 0,
+      actual_type, "function argument", (uint16_t)ordinal, expected_type);
+}
+
+iree_status_t loom_low_func_call_arg_verify(const loom_module_t* module,
+                                            const loom_op_t* op,
+                                            iree_diagnostic_emitter_t emitter) {
+  const loom_symbol_ref_t callee = loom_low_func_call_arg_callee(op);
+  const loom_symbol_t* symbol = loom_low_lookup_defined_symbol(module, callee);
+  if (symbol != NULL) {
+    loom_low_callee_signature_t signature = {0};
+    if (!loom_low_load_low_signature(module, symbol, &signature)) {
+      return loom_low_emit_call_callee_kind_mismatch(
+          module, op, callee, loom_low_func_call_arg_callee_ATTR_INDEX, symbol,
+          emitter);
+    }
+    IREE_RETURN_IF_ERROR(loom_low_verify_func_call_context(
+        module, op, &signature, loom_low_func_call_arg_callee_ATTR_INDEX,
+        emitter));
+    const int64_t ordinal = loom_low_func_call_arg_ordinal(op);
+    if (ordinal < 0 || ordinal >= signature.argument_count) {
+      return loom_low_emit_attr_value_error(
+          op, loom_low_func_call_arg_ordinal_ATTR_INDEX, IREE_SV("ordinal"),
+          ordinal, IREE_SV("an existing callee argument ordinal"), emitter);
+    }
+    const loom_type_t actual_type =
+        loom_module_value_type(module, loom_low_func_call_arg_value(op));
+    const loom_type_t expected_type =
+        loom_module_value_type(module, signature.argument_ids[ordinal]);
+    if (!loom_type_equal(actual_type, expected_type)) {
+      return loom_low_emit_call_type_mismatch(
+          op, &signature, emitter, LOOM_DIAGNOSTIC_FIELD_OPERAND, "operand", 0,
+          actual_type, "callee argument", (uint16_t)ordinal, expected_type);
+    }
+  }
+
+  const loom_value_id_t token_id = loom_low_func_call_arg_token(op);
+  const loom_type_t token_type = loom_module_value_type(module, token_id);
+  if (!loom_type_equal(token_type,
+                       loom_type_storage(LOOM_STORAGE_SPACE_STACK))) {
+    return loom_low_emit_type_constraint_error(
+        op, LOOM_DIAGNOSTIC_FIELD_RESULT, 0, IREE_SV("token"), token_type,
+        IREE_SV("low.storage<stack>"), emitter);
+  }
+
+  const loom_value_t* token = loom_module_value(module, token_id);
+  if (token->use_count != 1) {
+    return loom_low_emit_value_use_count_error(
+        module, op, token_id, token->use_count,
+        IREE_SV("exactly one same-callee low.func.call stack argument use"),
+        emitter);
+  }
+  const loom_use_t use = loom_value_uses(token)[0];
+  const loom_op_t* user_op = loom_use_user_op(use);
+  if (!loom_low_func_call_isa(user_op)) {
+    return loom_low_emit_value_user_error(
+        module, op, token_id, user_op,
+        IREE_SV("a same-callee low.func.call stack argument operand"), emitter);
+  }
+  const loom_value_slice_t user_register_args =
+      loom_low_func_call_operands(user_op);
+  const loom_value_slice_t user_stack_args =
+      loom_low_func_call_stack_args(user_op);
+  const uint16_t operand_index = loom_use_operand_index(use);
+  if (operand_index < user_register_args.count ||
+      operand_index >= user_register_args.count + user_stack_args.count ||
+      !loom_low_symbol_ref_equal(callee, loom_low_func_call_callee(user_op))) {
+    return loom_low_emit_value_user_error(
+        module, op, token_id, user_op,
+        IREE_SV("a same-callee low.func.call stack argument operand"), emitter);
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_low_func_call_verify(const loom_module_t* module,
                                         const loom_op_t* op,
                                         iree_diagnostic_emitter_t emitter) {
@@ -1854,14 +2103,20 @@ iree_status_t loom_low_func_call_verify(const loom_module_t* module,
         emitter);
   }
 
-  IREE_RETURN_IF_ERROR(
-      loom_low_verify_func_call_context(module, op, &low_signature, emitter));
-  IREE_RETURN_IF_ERROR(
-      loom_low_verify_call_argument_count(module, op, &low_signature, emitter));
+  IREE_RETURN_IF_ERROR(loom_low_verify_func_call_context(
+      module, op, &low_signature, loom_low_func_call_callee_ATTR_INDEX,
+      emitter));
+  if (loom_low_func_call_stack_args(op).count == 0) {
+    IREE_RETURN_IF_ERROR(loom_low_verify_call_argument_count(
+        module, op, &low_signature, emitter));
+    IREE_RETURN_IF_ERROR(loom_low_verify_call_argument_types(
+        module, op, &low_signature, emitter));
+  } else {
+    IREE_RETURN_IF_ERROR(loom_low_verify_materialized_call_arguments(
+        module, op, &low_signature, emitter));
+  }
   IREE_RETURN_IF_ERROR(
       loom_low_verify_call_result_count(module, op, &low_signature, emitter));
-  IREE_RETURN_IF_ERROR(
-      loom_low_verify_call_argument_types(module, op, &low_signature, emitter));
   return loom_low_verify_call_result_types(module, op, &low_signature, emitter);
 }
 
@@ -1884,7 +2139,8 @@ iree_status_t loom_low_invoke_verify(const loom_module_t* module,
 }
 
 loom_trait_flags_t loom_low_func_call_effective_traits(const loom_op_t* op) {
-  if (loom_low_func_call_purity(op) != 0) {
+  if (loom_low_func_call_purity(op) != 0 &&
+      loom_low_func_call_stack_args(op).count == 0) {
     return LOOM_TRAIT_PURE;
   }
   return LOOM_TRAIT_UNKNOWN_EFFECTS;

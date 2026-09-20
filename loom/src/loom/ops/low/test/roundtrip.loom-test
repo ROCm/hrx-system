@@ -77,6 +77,21 @@ low.func.def target<test.low.core>(@test_target) @typed_call_and_branch(%value: 
 
 test.target<low_core> @test_target
 
+low.func.decl target<test.low.core>(@test_target) @stack_callee(%arg0: reg<test.i32>, %arg1: reg<test.i32>, %arg2: reg<test.i32>, %arg3: reg<test.i32>, %arg4: reg<test.i32>, %arg5: reg<test.i32>, %arg6: reg<test.i32>, %arg7: reg<test.i32>) -> (reg<test.i32>)
+
+low.func.def target<test.low.core>(@test_target) @materialized_stack_call(%arg0: reg<test.i32>, %arg1: reg<test.i32>, %arg2: reg<test.i32>, %arg3: reg<test.i32>, %arg4: reg<test.i32>, %arg5: reg<test.i32>, %arg6: reg<test.i32>, %arg7: reg<test.i32>) -> (reg<test.i32>) asm {
+  %incoming6 = low.func.stack_arg [6, 0] : reg<test.i32>
+  %incoming7 = low.func.stack_arg [7, 8] : reg<test.i32>
+  %outgoing6 = low.func.call_arg @stack_callee[6, 0](%incoming6) : reg<test.i32> -> low.storage<stack>
+  %outgoing7 = low.func.call_arg @stack_callee[7, 8](%incoming7) : reg<test.i32> -> low.storage<stack>
+  %result = low.func.call @stack_callee(%arg0, %arg1, %arg2, %arg3, %arg4, %arg5) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) [%outgoing6: low.storage<stack>, %outgoing7: low.storage<stack>] -> (reg<test.i32>)
+  return %result
+}
+
+// ====
+
+test.target<low_core> @test_target
+
 low.func.def target<test.low.core>(@test_target) @storage_view(%value: reg<test.i32>) -> (reg<test.i32>) asm {
   %storage = storage {byte_alignment = 16, byte_length = 64} : low.storage<scratch>
   %whole = storage_view %storage {byte_length = 64} : low.storage<scratch> -> low.storage<scratch>

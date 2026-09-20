@@ -52,7 +52,9 @@ enum {
   LOOM_OP_LOW_SCHEDULE_BEGIN = LOOM_OP_KIND(LOOM_DIALECT_LOW, 28),
   LOOM_OP_LOW_SCHEDULE_PHASE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 29),
   LOOM_OP_LOW_SCHEDULE_END = LOOM_OP_KIND(LOOM_DIALECT_LOW, 30),
-  LOOM_OP_LOW_COUNT_ = 31,
+  LOOM_OP_LOW_FUNC_STACK_ARG = LOOM_OP_KIND(LOOM_DIALECT_LOW, 31),
+  LOOM_OP_LOW_FUNC_CALL_ARG = LOOM_OP_KIND(LOOM_DIALECT_LOW, 32),
+  LOOM_OP_LOW_COUNT_ = 33,
 };
 
 // Function visibility. Absent (0) means private (module-internal).
@@ -367,7 +369,8 @@ iree_status_t loom_low_return_build(
 // LOOM_OP_LOW_FUNC_CALL: Direct call from one low function body to another same-target low function.
 // %result = low.func.call @extern_add(%lhs, %rhs) : (reg<amdgpu.vgpr x1>, reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>)
 LOOM_DEFINE_ISA(loom_low_func_call_isa, LOOM_OP_LOW_FUNC_CALL)
-LOOM_DEFINE_VARIADIC_OPERANDS(loom_low_func_call_operands, 0)
+LOOM_DEFINE_SEGMENTED_OPERANDS(loom_low_func_call_operands, 0)
+LOOM_DEFINE_SEGMENTED_OPERANDS(loom_low_func_call_stack_args, 1)
 LOOM_DEFINE_VARIADIC_RESULTS(loom_low_func_call_results, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_low_func_call_callee, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_call_purity, 1, loom_low_purity_t)
@@ -385,6 +388,8 @@ iree_status_t loom_low_func_call_build(
     loom_symbol_ref_t callee,
     loom_may_consume const loom_value_id_t* operands,
     iree_host_size_t operands_count,
+    loom_may_consume const loom_value_id_t* stack_args,
+    iree_host_size_t stack_args_count,
     const loom_type_t* result_types,
     iree_host_size_t result_count,
     const loom_tied_result_t* tied_results,
@@ -893,6 +898,44 @@ iree_status_t loom_low_schedule_end_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_low_schedule_control_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_LOW_FUNC_STACK_ARG: Materialize one stack-classified function argument at its use site.
+// %arg6 = low.func.stack_arg [6, 0] : reg<test.i64>
+LOOM_DEFINE_ISA(loom_low_func_stack_arg_isa, LOOM_OP_LOW_FUNC_STACK_ARG)
+LOOM_DEFINE_RESULT(loom_low_func_stack_arg_result, 0)
+LOOM_DEFINE_ATTR_I64(loom_low_func_stack_arg_ordinal, 0)
+LOOM_DEFINE_ATTR_I64(loom_low_func_stack_arg_byte_offset, 1)
+iree_status_t loom_low_func_stack_arg_build(
+    loom_builder_t* builder,
+    int64_t ordinal,
+    int64_t byte_offset,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_low_func_stack_arg_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_LOW_FUNC_CALL_ARG: Store one stack-classified call argument and yield its call witness.
+// %arg6 = low.func.call_arg @callee[6, 0](%value) : reg<test.i64> -> low.storage<stack>
+LOOM_DEFINE_ISA(loom_low_func_call_arg_isa, LOOM_OP_LOW_FUNC_CALL_ARG)
+LOOM_DEFINE_OPERAND(loom_low_func_call_arg_value, 0)
+LOOM_DEFINE_RESULT(loom_low_func_call_arg_token, 0)
+LOOM_DEFINE_ATTR_SYMBOL(loom_low_func_call_arg_callee, 0)
+LOOM_DEFINE_ATTR_I64(loom_low_func_call_arg_ordinal, 1)
+LOOM_DEFINE_ATTR_I64(loom_low_func_call_arg_byte_offset, 2)
+iree_status_t loom_low_func_call_arg_build(
+    loom_builder_t* builder,
+    loom_symbol_ref_t callee,
+    int64_t ordinal,
+    int64_t byte_offset,
+    loom_may_consume loom_value_id_t value,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_low_func_call_arg_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
