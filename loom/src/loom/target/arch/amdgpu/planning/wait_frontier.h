@@ -107,6 +107,10 @@ typedef struct loom_amdgpu_wait_frontier_t {
     } release_membership;
     // Conservative transitive outgoing words for every block.
     uint64_t* static_outgoing_words;
+    // Per-block incoming result instances completed by retained dependencies.
+    // Static propagation filters these bits before unioning incoming state;
+    // locally issued instances remain live. NULL when counter drains suffice.
+    uint64_t* completed_incoming_words;
     // Refined outgoing words recorded after each processed block.
     uint64_t* resolved_outgoing_words;
     // Incoming words active while the current block is processed.
@@ -142,13 +146,18 @@ loom_amdgpu_wait_memory_space_flags_t loom_amdgpu_wait_memory_space_flag(
     loom_low_memory_space_t memory_space);
 
 // Initializes bounded cross-block state from the schedule CFG, allocation,
-// and retained node classifications/completion facts. Dynamically retained
-// storage is owned by |arena|; inline state lives in |out_frontier|.
+// retained node classifications/completion facts, and counter dependencies.
+// Cross-block result uses filter incoming lease instances at their consumers;
+// dependencies must reflect the final allocation's coalesced edge transport.
+// Dynamically retained storage is owned by |arena|; inline state lives in
+// |out_frontier|.
 iree_status_t loom_amdgpu_wait_frontier_initialize(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_wait_frontier_node_t* nodes,
     const loom_amdgpu_wait_completion_node_t* completion_nodes,
+    const loom_amdgpu_wait_dependency_t* dependencies,
+    iree_host_size_t dependency_count,
     const uint32_t* planned_block_drain_counter_masks,
     iree_arena_allocator_t* arena, loom_amdgpu_wait_frontier_t* out_frontier);
 

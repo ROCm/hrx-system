@@ -199,8 +199,9 @@ static void loom_amdgpu_wait_storage_lease_state_drain(
 
 static bool loom_amdgpu_wait_storage_lease_state_union_after_drain_changed(
     const loom_amdgpu_wait_frontier_t* frontier, uint64_t* target,
-    const uint64_t* source, uint32_t counter_mask) {
-  if (counter_mask == 0) {
+    const uint64_t* source, const uint64_t* completed_words,
+    uint32_t counter_mask) {
+  if (counter_mask == 0 && completed_words == NULL) {
     return loom_amdgpu_wait_storage_lease_state_union_changed(
         target, source, frontier->storage_leases.word_count,
         /*selection=*/NULL);
@@ -211,6 +212,9 @@ static bool loom_amdgpu_wait_storage_lease_state_union_after_drain_changed(
   for (iree_host_size_t word_index = 0;
        word_index < frontier->storage_leases.word_count; ++word_index) {
     uint64_t retained_source = source[word_index];
+    if (completed_words != NULL) {
+      retained_source &= ~completed_words[word_index];
+    }
     uint32_t remaining_counter_mask =
         counter_mask & LOOM_AMDGPU_WAIT_COUNTER_MASK_ALL;
     while (remaining_counter_mask != 0) {
@@ -442,6 +446,104 @@ static void loom_amdgpu_wait_frontier_build_local_states(
   }
 }
 
+// Local completion and full incoming drains already filter these counters.
+// Only dependencies carrying otherwise-pending results need exact lease bits.
+static uint32_t loom_amdgpu_wait_frontier_incoming_dependency_counter_mask(
+    const loom_amdgpu_wait_frontier_t* frontier,
+    const loom_amdgpu_wait_completion_node_t* completion_nodes,
+    const loom_amdgpu_wait_dependency_t* dependency) {
+  const loom_low_schedule_table_t* schedule = frontier->schedule;
+  const uint16_t consumer_block =
+      schedule->nodes[dependency->consumer_node].block_index;
+  if (schedule->nodes[dependency->producer_node].block_index ==
+      consumer_block) {
+    return 0;
+  }
+  return dependency->counter_mask &
+         ~completion_nodes[dependency->producer_node]
+              .completed_before_block_exit_counter_mask &
+         ~frontier->incoming_completion_counter_masks[consumer_block];
+}
+
+// A cross-block use completes its producer's incoming result instance. Keep
+// that fact in the static transfer so a backedge cannot resurrect its lease.
+// Dependency construction follows pending values only through coalesced edges;
+// materialized copies complete their source at the copy. A use of an older,
+// copied value therefore cannot retire a newly issued instance of its producer.
+//
+// This transfer filters incoming bits, never locally generated instances or
+// unrelated work in the same counter. Reusing an already-completed SSA value
+// need not emit a wait and therefore proves no counter-wide reset.
+static iree_status_t loom_amdgpu_wait_frontier_build_result_completions(
+    loom_amdgpu_wait_frontier_t* frontier,
+    const loom_amdgpu_wait_completion_node_t* completion_nodes,
+    const loom_amdgpu_wait_dependency_t* dependencies,
+    iree_host_size_t dependency_count, iree_arena_allocator_t* arena) {
+  if (frontier->storage_leases.word_count == 0) {
+    return iree_ok_status();
+  }
+  const loom_low_schedule_table_t* schedule = frontier->schedule;
+  iree_host_size_t first_dependency = 0;
+  while (first_dependency < dependency_count &&
+         loom_amdgpu_wait_frontier_incoming_dependency_counter_mask(
+             frontier, completion_nodes, &dependencies[first_dependency]) ==
+             0) {
+    ++first_dependency;
+  }
+  if (first_dependency == dependency_count) {
+    return iree_ok_status();
+  }
+  const iree_host_size_t word_count =
+      schedule->block_count * frontier->storage_leases.word_count;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, word_count, sizeof(uint64_t),
+      (void**)&frontier->storage_leases.completed_incoming_words));
+  memset(frontier->storage_leases.completed_incoming_words, 0,
+         word_count * sizeof(uint64_t));
+  // Lease records are contiguous by producer in scheduled packet order. Index
+  // each range once instead of searching the record table for every use.
+  uint32_t* first_leases = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, schedule->node_count,
+                                                 sizeof(*first_leases),
+                                                 (void**)&first_leases));
+  memset(first_leases, 0xFF, schedule->node_count * sizeof(*first_leases));
+  const loom_low_storage_lease_record_t* records =
+      frontier->allocation->storage_leases.records;
+  for (iree_host_size_t i = frontier->storage_leases.lease_count; i > 0; --i) {
+    first_leases[records[i - 1].node_index] = (uint32_t)(i - 1);
+  }
+  for (iree_host_size_t i = first_dependency; i < dependency_count; ++i) {
+    const loom_amdgpu_wait_dependency_t* dependency = &dependencies[i];
+    const uint32_t counter_mask =
+        loom_amdgpu_wait_frontier_incoming_dependency_counter_mask(
+            frontier, completion_nodes, dependency);
+    if (counter_mask == 0) {
+      continue;
+    }
+    const uint16_t consumer_block =
+        schedule->nodes[dependency->consumer_node].block_index;
+    uint64_t* completed_words =
+        loom_amdgpu_wait_frontier_storage_lease_block_words(
+            frontier, frontier->storage_leases.completed_incoming_words,
+            consumer_block);
+    for (iree_host_size_t lease_index = first_leases[dependency->producer_node];
+         lease_index < frontier->storage_leases.lease_count &&
+         records[lease_index].node_index == dependency->producer_node;
+         ++lease_index) {
+      const loom_low_storage_lease_record_t* record = &records[lease_index];
+      if (record->kind == LOOM_LOW_STORAGE_LEASE_RESULT_WRITE &&
+          record->release_scope ==
+              LOOM_LOW_STORAGE_LEASE_RELEASE_SCOPE_PROGRESS_CLASS &&
+          loom_amdgpu_wait_counter_id_is_valid(record->release_class_id) &&
+          iree_any_bit_set(counter_mask, loom_amdgpu_wait_counter_mask(
+                                             record->release_class_id))) {
+        loom_amdgpu_wait_storage_lease_state_set(completed_words, lease_index);
+      }
+    }
+  }
+  return iree_ok_status();
+}
+
 static bool loom_amdgpu_wait_frontier_block_state_union_changed(
     loom_amdgpu_wait_frontier_t* frontier, uint16_t target_block,
     uint16_t source_block) {
@@ -457,6 +559,12 @@ static bool loom_amdgpu_wait_frontier_block_state_union_changed(
         &incoming_state);
   }
   if (frontier->storage_leases.static_outgoing_words != NULL) {
+    const uint64_t* completed_words =
+        frontier->storage_leases.completed_incoming_words == NULL
+            ? NULL
+            : loom_amdgpu_wait_frontier_const_storage_lease_block_words(
+                  frontier, frontier->storage_leases.completed_incoming_words,
+                  target_block);
     changed |= loom_amdgpu_wait_storage_lease_state_union_after_drain_changed(
         frontier,
         loom_amdgpu_wait_frontier_storage_lease_block_words(
@@ -465,7 +573,7 @@ static bool loom_amdgpu_wait_frontier_block_state_union_changed(
         loom_amdgpu_wait_frontier_const_storage_lease_block_words(
             frontier, frontier->storage_leases.static_outgoing_words,
             source_block),
-        drain_counter_mask);
+        completed_words, drain_counter_mask);
   }
   if (frontier->xcnt.static_outgoing_flags != NULL &&
       !iree_any_bit_set(drain_counter_mask, LOOM_AMDGPU_WAIT_COUNTER_MASK_X)) {
@@ -562,6 +670,8 @@ iree_status_t loom_amdgpu_wait_frontier_initialize(
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_wait_frontier_node_t* nodes,
     const loom_amdgpu_wait_completion_node_t* completion_nodes,
+    const loom_amdgpu_wait_dependency_t* dependencies,
+    iree_host_size_t dependency_count,
     const uint32_t* planned_block_drain_counter_masks,
     iree_arena_allocator_t* arena, loom_amdgpu_wait_frontier_t* out_frontier) {
   IREE_ASSERT_ARGUMENT(schedule);
@@ -721,6 +831,8 @@ iree_status_t loom_amdgpu_wait_frontier_initialize(
 
   loom_amdgpu_wait_frontier_build_local_states(
       out_frontier, completion_nodes, planned_block_drain_counter_masks);
+  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_frontier_build_result_completions(
+      out_frontier, completion_nodes, dependencies, dependency_count, arena));
   loom_amdgpu_wait_frontier_propagate_static_states(out_frontier, worklist);
   return iree_ok_status();
 }

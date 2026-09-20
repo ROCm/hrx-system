@@ -3997,6 +3997,7 @@ iree_status_t loom_amdgpu_wait_plan_build(
         builder.dependency_links, builder.completion_nodes);
     status = loom_amdgpu_wait_frontier_initialize(
         schedule, allocation, builder.frontier_nodes, builder.completion_nodes,
+        builder.dependency_links, builder.dependency_link_count,
         builder.loop_entry_drain_counter_masks, transient_arena,
         &builder.frontier);
   }

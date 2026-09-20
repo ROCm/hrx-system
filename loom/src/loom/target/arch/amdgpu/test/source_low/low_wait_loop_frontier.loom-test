@@ -321,32 +321,6 @@ low.func.def target<amdgpu.rdna3.core>(@target) @trailing_producer_waits_before_
 {"format":"loom.low.packet_hazard_plan.v1","function":"trailing_producer_waits_before_storage_reuse","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":3,"hazard_count":3,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":1,"packet":3,"node":3,"block":1,"scheduled_ordinal":1,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":2,"packet":4,"node":4,"block":1,"scheduled_ordinal":2,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":0,"producer_packet":0,"producer_scheduled_ordinal":0,"consumer_node":1,"insertion_packet":1,"block":0,"scheduled_ordinal":1,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":15,"reason_name":"amdgpu.loop_carried_conservative_ssa_use","producer_node":3,"producer_packet":3,"producer_scheduled_ordinal":1,"consumer_node":2,"insertion_packet":2,"block":1,"scheduled_ordinal":0,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":1,"observed":0,"residual":1},{"index":2,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":4,"producer_packet":4,"producer_scheduled_ordinal":2,"consumer_node":7,"insertion_packet":7,"block":3,"scheduled_ordinal":0,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":1,"observed":0,"residual":1}]}
 
 // ====
-// RUN: emit amdgpu-wait-counter-plan-json @late_carried_read_requires_backedge_copy strategy=source
-
-// Reading the old carried value after issuing its replacement requires
-// distinct storage and an actual backedge copy. The younger read still has to
-// complete before its storage is reused on the next iteration.
-amdgpu.target<gfx1100> @target
-
-low.func.def target<amdgpu.rdna3.core>(@target) @late_carried_read_requires_backedge_copy(%address: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
-  %seed = ds_read_b32 %address
-  low.br ^loop(%seed: reg<amdgpu.vgpr>)
-^loop(%carried: reg<amdgpu.vgpr>):
-  %next = ds_read_b32 %address {offset = 4}
-  %used = v_add_u32 %carried, %rhs
-  %younger = ds_read_b32 %address {offset = 8}
-  low.cond_br %again, ^backedge, ^exit : reg<amdgpu.scc>
-^backedge:
-  low.br ^loop(%next: reg<amdgpu.vgpr>)
-^exit:
-  %result = v_add_u32 %used, %younger
-  return %result
-}
-
-// ----
-{"format":"loom.low.packet_hazard_plan.v1","function":"late_carried_read_requires_backedge_copy","target":"target","descriptor_set":"amdgpu.rdna3.core","progress_count":3,"hazard_count":4,"progress":[{"index":0,"packet":0,"node":0,"block":0,"scheduled_ordinal":0,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":1,"packet":2,"node":2,"block":1,"scheduled_ordinal":0,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1},{"index":2,"packet":4,"node":4,"block":1,"scheduled_ordinal":2,"class_id":3,"class_name":"amdgpu.lds","action":"advance","units":1}],"hazards":[{"index":0,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":12,"reason_name":"amdgpu.loop_entry_derived_ssa_use","producer_node":0,"producer_packet":0,"producer_scheduled_ordinal":0,"consumer_node":1,"insertion_packet":1,"block":0,"scheduled_ordinal":1,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":1,"observed":0,"residual":1},{"index":1,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":5,"reason_name":"amdgpu.read_result_reuse","producer_node":2,"producer_packet":2,"producer_scheduled_ordinal":0,"consumer_node":2,"insertion_packet":2,"block":1,"scheduled_ordinal":0,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":1,"observed":0,"residual":1},{"index":2,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":2,"producer_packet":2,"producer_scheduled_ordinal":0,"consumer_node":6,"insertion_packet":6,"block":2,"scheduled_ordinal":0,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":1,"observed":0,"residual":1},{"index":3,"kind":"action","action_id":1,"action_name":"amdgpu.wait_packet","reason_id":2,"reason_name":"amdgpu.ssa_use","producer_node":4,"producer_packet":4,"producer_scheduled_ordinal":2,"consumer_node":7,"insertion_packet":7,"block":3,"scheduled_ordinal":0,"progress_class_id":3,"progress_class_name":"amdgpu.lds","required":1,"observed":0,"residual":1}]}
-
-// ====
 // RUN: emit amdgpu-assembly @late_carried_read_requires_backedge_copy_assembly strategy=source
 
 // Reading the old carried value after issuing its replacement requires
@@ -373,13 +347,12 @@ low.func.def target<amdgpu.rdna3.core>(@target) @late_carried_read_requires_back
   ds_read_b32 v2, v0 offset:0
   s_waitcnt vmcnt(63) lgkmcnt(0)
 .Lbb1:
-  s_waitcnt vmcnt(63) lgkmcnt(0)
   ds_read_b32 v3, v0 offset:4
   v_add_u32 v2, v2, v1
+  s_waitcnt vmcnt(63) lgkmcnt(0)
   ds_read_b32 v4, v0 offset:8
   s_cbranch_scc0 .Lbb3
 .Lbb2:
-  s_waitcnt vmcnt(63) lgkmcnt(0)
   v_mov_b32 v2, v3
   s_branch .Lbb1
 .Lbb3:

@@ -1,0 +1,167 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// A load result consumed in a successor block is complete on the backedge.
+// Skipping that consumer keeps the destination leased until the next reuse.
+amdgpu.target<gfx11-generic> @incoming_completion_target
+
+low.func.def schedule(locked) target<amdgpu.gfx11.generic.core>(@incoming_completion_target) @incoming_completion_alternating_sum(%lane_offset: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %count: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %zero = v_mov_b32 0
+  %begin = s_mov_b32 0
+  %step = s_mov_b32 1
+  %row_shift = s_mov_b32 7
+  low.br ^loop(%begin: reg<amdgpu.sgpr>, %zero: reg<amdgpu.vgpr>)
+^loop(%index: reg<amdgpu.sgpr>, %accumulator: reg<amdgpu.vgpr>):
+  %more = s_cmp_lt_i32 %index, %count
+  low.cond_br %more, ^load, ^exit : reg<amdgpu.scc>
+^load:
+  %row_offset = s_lshl_b32 %index, %row_shift
+  %row_address = v_mov_b32_copy %row_offset
+  %address = v_add_u32 %lane_offset, %row_address
+  %value = global_load_b32_saddr %address, %base
+  %odd = s_and_b32 %index, %step
+  %even = s_cmp_eq_i32 %odd, %begin
+  low.cond_br %even, ^consume, ^subtract : reg<amdgpu.scc>
+^consume:
+  %next = v_add_u32 %accumulator, %value
+  %advanced = s_add_u32 %index, %step
+  low.br ^loop(%advanced: reg<amdgpu.sgpr>, %next: reg<amdgpu.vgpr>)
+^subtract:
+  %subtracted = v_sub_nc_u32 %accumulator, %value
+  %advanced_odd = s_add_u32 %index, %step
+  low.br ^loop(%advanced_odd: reg<amdgpu.sgpr>, %subtracted: reg<amdgpu.vgpr>)
+^exit:
+  return %accumulator
+}
+
+low.func.def schedule(locked) target<amdgpu.gfx11.generic.core>(@incoming_completion_target) @incoming_completion_even_sum(%lane_offset: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %count: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %zero = v_mov_b32 0
+  %begin = s_mov_b32 0
+  %step = s_mov_b32 1
+  %row_shift = s_mov_b32 7
+  low.br ^loop(%begin: reg<amdgpu.sgpr>, %zero: reg<amdgpu.vgpr>)
+^loop(%index: reg<amdgpu.sgpr>, %accumulator: reg<amdgpu.vgpr>):
+  %more = s_cmp_lt_i32 %index, %count
+  low.cond_br %more, ^load, ^exit : reg<amdgpu.scc>
+^load:
+  %row_offset = s_lshl_b32 %index, %row_shift
+  %row_address = v_mov_b32_copy %row_offset
+  %address = v_add_u32 %lane_offset, %row_address
+  %value = global_load_b32_saddr %address, %base
+  %odd = s_and_b32 %index, %step
+  %even = s_cmp_eq_i32 %odd, %begin
+  low.cond_br %even, ^consume, ^skip : reg<amdgpu.scc>
+^consume:
+  %next = v_add_u32 %accumulator, %value
+  %advanced = s_add_u32 %index, %step
+  low.br ^loop(%advanced: reg<amdgpu.sgpr>, %next: reg<amdgpu.vgpr>)
+^skip:
+  %skipped = s_add_u32 %index, %step
+  low.br ^loop(%skipped: reg<amdgpu.sgpr>, %accumulator: reg<amdgpu.vgpr>)
+^exit:
+  return %accumulator
+}
+
+kernel.def target(@incoming_completion_target) @incoming_completion_rows() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %alternating_output: buffer, %even_output: buffer, %count: i32) {
+  %lane = kernel.workitem.id<x> : index
+  %element_bytes = index.constant 4 : index
+  %byte_offset = index.mul %lane, %element_bytes : index
+  %byte_i32 = index.cast %byte_offset : index to i32
+  %address = vector.splat %byte_i32 : vector<1xi32>
+  %alternating = low.invoke @incoming_completion_alternating_sum(%address, %input, %count) : (vector<1xi32>, buffer, i32) -> (vector<1xi32>)
+  %even = low.invoke @incoming_completion_even_sum(%address, %input, %count) : (vector<1xi32>, buffer, i32) -> (vector<1xi32>)
+  %base = index.constant 0 : offset
+  %alternating_view = buffer.view %alternating_output[%base] : buffer -> view<32xi32>
+  %even_view = buffer.view %even_output[%base] : buffer -> view<32xi32>
+  vector.store %alternating, %alternating_view[%lane] : vector<1xi32>, view<32xi32>
+  vector.store %even, %even_view[%lane] : vector<1xi32>, view<32xi32>
+  kernel.return
+}
+
+// Row r at lane l contains 1 + 32*r + l. Alternating sums pair to -32;
+// even-row sums form an arithmetic series with stride 64. These exact
+// oracles distinguish stale data, skipped consumers, and missing trips.
+check.case public @incoming_completion_rows_0 {
+  %input = check.generate.iota offset(1) step(1) : tensor<64x32xi32>
+  %alternating_output = check.generate.fill value(-1) : tensor<32xi32>
+  %even_output = check.generate.fill value(-1) : tensor<32xi32>
+  %count = check.literal value(0) : i32
+  kernel.launch @incoming_completion_rows(%input, %alternating_output, %even_output, %count) : (tensor<64x32xi32>, tensor<32xi32>, tensor<32xi32>, i32)
+  %expected_alternating = check.generate.iota offset(0) step(0) : tensor<32xi32>
+  %expected_even = check.generate.iota offset(0) step(0) : tensor<32xi32>
+  check.expect.equal actual(%alternating_output) expected(%expected_alternating) : tensor<32xi32>
+  check.expect.equal actual(%even_output) expected(%expected_even) : tensor<32xi32>
+  check.return
+}
+
+check.case public @incoming_completion_rows_1 {
+  %input = check.generate.iota offset(1) step(1) : tensor<64x32xi32>
+  %alternating_output = check.generate.fill value(-1) : tensor<32xi32>
+  %even_output = check.generate.fill value(-1) : tensor<32xi32>
+  %count = check.literal value(1) : i32
+  kernel.launch @incoming_completion_rows(%input, %alternating_output, %even_output, %count) : (tensor<64x32xi32>, tensor<32xi32>, tensor<32xi32>, i32)
+  %expected_alternating = check.generate.iota offset(1) step(1) : tensor<32xi32>
+  %expected_even = check.generate.iota offset(1) step(1) : tensor<32xi32>
+  check.expect.equal actual(%alternating_output) expected(%expected_alternating) : tensor<32xi32>
+  check.expect.equal actual(%even_output) expected(%expected_even) : tensor<32xi32>
+  check.return
+}
+
+check.case public @incoming_completion_rows_2 {
+  %input = check.generate.iota offset(1) step(1) : tensor<64x32xi32>
+  %alternating_output = check.generate.fill value(-1) : tensor<32xi32>
+  %even_output = check.generate.fill value(-1) : tensor<32xi32>
+  %count = check.literal value(2) : i32
+  kernel.launch @incoming_completion_rows(%input, %alternating_output, %even_output, %count) : (tensor<64x32xi32>, tensor<32xi32>, tensor<32xi32>, i32)
+  %expected_alternating = check.generate.iota offset(-32) step(0) : tensor<32xi32>
+  %expected_even = check.generate.iota offset(1) step(1) : tensor<32xi32>
+  check.expect.equal actual(%alternating_output) expected(%expected_alternating) : tensor<32xi32>
+  check.expect.equal actual(%even_output) expected(%expected_even) : tensor<32xi32>
+  check.return
+}
+
+check.case public @incoming_completion_rows_3 {
+  %input = check.generate.iota offset(1) step(1) : tensor<64x32xi32>
+  %alternating_output = check.generate.fill value(-1) : tensor<32xi32>
+  %even_output = check.generate.fill value(-1) : tensor<32xi32>
+  %count = check.literal value(3) : i32
+  kernel.launch @incoming_completion_rows(%input, %alternating_output, %even_output, %count) : (tensor<64x32xi32>, tensor<32xi32>, tensor<32xi32>, i32)
+  %expected_alternating = check.generate.iota offset(33) step(1) : tensor<32xi32>
+  %expected_even = check.generate.iota offset(66) step(2) : tensor<32xi32>
+  check.expect.equal actual(%alternating_output) expected(%expected_alternating) : tensor<32xi32>
+  check.expect.equal actual(%even_output) expected(%expected_even) : tensor<32xi32>
+  check.return
+}
+
+check.case public @incoming_completion_rows_17 {
+  %input = check.generate.iota offset(1) step(1) : tensor<64x32xi32>
+  %alternating_output = check.generate.fill value(-1) : tensor<32xi32>
+  %even_output = check.generate.fill value(-1) : tensor<32xi32>
+  %count = check.literal value(17) : i32
+  kernel.launch @incoming_completion_rows(%input, %alternating_output, %even_output, %count) : (tensor<64x32xi32>, tensor<32xi32>, tensor<32xi32>, i32)
+  %expected_alternating = check.generate.iota offset(257) step(1) : tensor<32xi32>
+  %expected_even = check.generate.iota offset(2313) step(9) : tensor<32xi32>
+  check.expect.equal actual(%alternating_output) expected(%expected_alternating) : tensor<32xi32>
+  check.expect.equal actual(%even_output) expected(%expected_even) : tensor<32xi32>
+  check.return
+}
+
+check.case public @incoming_completion_rows_64 {
+  %input = check.generate.iota offset(1) step(1) : tensor<64x32xi32>
+  %alternating_output = check.generate.fill value(-1) : tensor<32xi32>
+  %even_output = check.generate.fill value(-1) : tensor<32xi32>
+  %count = check.literal value(64) : i32
+  kernel.launch @incoming_completion_rows(%input, %alternating_output, %even_output, %count) : (tensor<64x32xi32>, tensor<32xi32>, tensor<32xi32>, i32)
+  %expected_alternating = check.generate.iota offset(-1024) step(0) : tensor<32xi32>
+  %expected_even = check.generate.iota offset(31776) step(32) : tensor<32xi32>
+  check.expect.equal actual(%alternating_output) expected(%expected_alternating) : tensor<32xi32>
+  check.expect.equal actual(%even_output) expected(%expected_even) : tensor<32xi32>
+  check.return
+}
