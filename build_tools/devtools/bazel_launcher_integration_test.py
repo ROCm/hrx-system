@@ -22,6 +22,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEV_PY = REPO_ROOT / "dev.py"
 FIXTURE_TARGET = "//build_tools/devtools:bazel_launcher_integration_fixture"
 
+# This integration harness also runs directly from a source checkout in CI.
+sys.path.insert(0, str(REPO_ROOT))
+from build_tools.devtools import bazel as bazel_dev  # noqa: E402
+
 
 def dev_command(*args: str) -> list[str]:
     executable = Path(sys.executable)
@@ -239,7 +243,7 @@ def verify_try_lifecycle(temporary_root: Path) -> None:
                     raise RuntimeError("--keep lost the executable")
             finally:
                 for package in packages:
-                    shutil.rmtree(package)
+                    shutil.rmtree(package, onexc=bazel_dev.remove_readonly_try_file)
         elif packages:
             raise RuntimeError(f"try leaked source or output packages: {packages}")
 

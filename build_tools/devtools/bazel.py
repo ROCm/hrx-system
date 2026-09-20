@@ -14,6 +14,7 @@ import re
 import secrets
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -998,6 +999,25 @@ def exec_path(
         return 127
 
 
+def remove_readonly_try_file(function, path: str, error: BaseException) -> None:
+    """Clears Windows' read-only attribute only for owned output-file deletion."""
+    if (
+        os.name != "nt"
+        or function is not os.unlink
+        or not isinstance(error, PermissionError)
+    ):
+        raise error
+    info = os.lstat(path)
+    if not stat.S_ISREG(info.st_mode) or not (
+        info.st_file_attributes & stat.FILE_ATTRIBUTE_READONLY
+    ):
+        raise error
+    # Bazel marks completed outputs read-only. Windows requires this attribute
+    # to be cleared before unlinking; directory write access alone is not enough.
+    os.chmod(path, info.st_mode | stat.S_IWRITE)
+    function(path)
+
+
 def cleanup_try_scratch(scratch_dir: Path, execution_root: Path | None) -> None:
     """Removes only this invocation's package and configured output packages."""
     if execution_root is not None:
@@ -1015,8 +1035,8 @@ def cleanup_try_scratch(scratch_dir: Path, execution_root: Path | None) -> None:
                         / scratch_dir.name
                     )
                     if package.is_dir():
-                        shutil.rmtree(package)
-    shutil.rmtree(scratch_dir)
+                        shutil.rmtree(package, onexc=remove_readonly_try_file)
+    shutil.rmtree(scratch_dir, onexc=remove_readonly_try_file)
     # Shared parent directories remain: another invocation may be creating its
     # package concurrently, and their empty scaffolding has no retained payload.
 

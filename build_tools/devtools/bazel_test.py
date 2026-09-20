@@ -9,6 +9,8 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -40,6 +42,7 @@ class BazelTest(unittest.TestCase):
                     package = parent / ".iree/bazel-try" / scratch.name
                     package.mkdir(parents=True)
                     (package / "snippet").write_text("binary")
+                    (package / "snippet").chmod(stat.S_IREAD)
                     (package / "snippet.runfiles").symlink_to(
                         dependency, target_is_directory=True
                     )
@@ -57,6 +60,12 @@ class BazelTest(unittest.TestCase):
                     (package.with_name("run-retained") / "snippet").read_text(),
                     "retained",
                 )
+
+    def test_try_cleanup_does_not_swallow_other_removal_errors(self):
+        error = OSError("filesystem failure")
+        with self.assertRaises(OSError) as raised:
+            bazel_dev.remove_readonly_try_file(os.unlink, "unused", error)
+        self.assertIs(raised.exception, error)
 
     def test_try_cleanup_before_bazel_initialization(self):
         with tempfile.TemporaryDirectory() as temporary:
