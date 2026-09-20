@@ -1648,6 +1648,16 @@ def _cases() -> Sequence[ContractCase]:
         _binary_rule(
             index.index_mul, _INDEX, "x86.scalar.imul.gpr64", descriptor_lookup
         ),
+        *(
+            _binary_rule(
+                source_op, _INDEX, f"x86.scalar.{operation}.gpr64", descriptor_lookup
+            )
+            for source_op, operation in (
+                (index.index_andi, "and"),
+                (index.index_ori, "or"),
+                (index.index_xori, "xor"),
+            )
+        ),
         *_madd_address_rules(descriptor_lookup),
         *_memory_rules(descriptor_lookup),
         *unsigned_remainder_rules(descriptor_lookup),

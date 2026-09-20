@@ -72,7 +72,10 @@ for (const base of [0, 4, 64, 1024]) {
 const bits = [-2147483648, -2147483647, -1, 0, 1, 17, 2147483647];
 for (const lhs of bits) {
   assert.deepEqual(exports.address_roundtrip(lhs), [lhs, lhs, lhs & 0x7FFFFFFF]);
+  assert.deepEqual(exports.index_bitwise_constants(lhs),
+    [lhs & 64, 128 | lhs, lhs ^ -16, -2147483648 & lhs]);
   for (const rhs of bits) {
+    assert.deepEqual(exports.index_bitwise(lhs, rhs), [lhs & rhs, lhs | rhs, lhs ^ rhs]);
     const expected = [
       lhs === rhs, lhs !== rhs,
       lhs < rhs, lhs <= rhs, lhs > rhs, lhs >= rhs,

@@ -1,5 +1,5 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_index_operands.loom-test
-// RUN: emit source-low output=none
+// RUN: emit source-low output=low
 
 wasm.target<simd128> @target
 
@@ -10,14 +10,22 @@ func.def target(@target) @uniform_lhs_index_operands(%input: buffer, %uniform: i
   %word = view.load %input_view[0] : view<1xi32> -> i32
   %value = index.cast %word : i32 to index
   %multiply = index.mul %uniform, %value : index
-  // ERROR@+1: TARGET/001 {op_name="index.andi"}
   %and = index.andi %uniform, %value : index
-  // ERROR@+1: TARGET/001 {op_name="index.ori"}
   %or = index.ori %uniform, %value : index
-  // ERROR@+1: TARGET/001 {op_name="index.xori"}
   %xor = index.xori %uniform, %value : index
   %subtract = index.sub %uniform, %value : index
   func.return %multiply, %and, %or, %xor, %subtract : index, index, index, index, index
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @uniform_lhs_index_operands(%input_view: reg<wasm.i32>, %uniform: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) asm {
+  %value = i32.load %input_view
+  %multiply = i32.mul %uniform, %value
+  %and = i32.and %uniform, %value
+  %or = i32.or %uniform, %value
+  %xor = i32.xor %uniform, %value
+  %subtract = i32.sub %uniform, %value
+  return %multiply, %and, %or, %xor, %subtract
 }
 
 // ====
@@ -31,14 +39,22 @@ func.def target(@target) @uniform_rhs_index_operands(%input: buffer, %uniform: i
   %word = view.load %input_view[0] : view<1xi32> -> i32
   %value = index.cast %word : i32 to index
   %multiply = index.mul %value, %uniform : index
-  // ERROR@+1: TARGET/001 {op_name="index.andi"}
   %and = index.andi %value, %uniform : index
-  // ERROR@+1: TARGET/001 {op_name="index.ori"}
   %or = index.ori %value, %uniform : index
-  // ERROR@+1: TARGET/001 {op_name="index.xori"}
   %xor = index.xori %value, %uniform : index
   %subtract = index.sub %value, %uniform : index
   func.return %multiply, %and, %or, %xor, %subtract : index, index, index, index, index
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @uniform_rhs_index_operands(%input_view: reg<wasm.i32>, %uniform: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) asm {
+  %value = i32.load %input_view
+  %multiply = i32.mul %value, %uniform
+  %and = i32.and %value, %uniform
+  %or = i32.or %value, %uniform
+  %xor = i32.xor %value, %uniform
+  %subtract = i32.sub %value, %uniform
+  return %multiply, %and, %or, %xor, %subtract
 }
 
 // ====
@@ -55,14 +71,25 @@ func.def target(@target) @constant_index_operands(%input: buffer) -> (index, ind
   %literal = index.constant 128 : index
   %negative = index.constant -16 : index
   %factor = index.constant 65 : index
-  // ERROR@+1: TARGET/001 {op_name="index.andi"}
   %masked = index.andi %value, %inline : index
-  // ERROR@+1: TARGET/001 {op_name="index.ori"}
   %tagged = index.ori %literal, %value : index
-  // ERROR@+1: TARGET/001 {op_name="index.xori"}
   %toggled = index.xori %value, %negative : index
   %scaled = index.mul %factor, %value : index
   func.return %masked, %tagged, %toggled, %scaled : index, index, index, index
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @constant_index_operands(%input_view: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) asm {
+  %value = i32.load %input_view
+  %inline = i32.const 64
+  %literal = i32.const 128
+  %negative = i32.const -16
+  %factor = i32.const 65
+  %masked = i32.and %value, %inline
+  %tagged = i32.or %literal, %value
+  %toggled = i32.xor %value, %negative
+  %scaled = i32.mul %factor, %value
+  return %masked, %tagged, %toggled, %scaled
 }
 
 // ====
@@ -71,14 +98,21 @@ wasm.target<simd128> @target
 
 func.def target(@target) @uniform_index_operands(%lhs: index, %rhs: index) -> (index, index, index, index, index) {
   %multiply = index.mul %lhs, %rhs : index
-  // ERROR@+1: TARGET/001 {op_name="index.andi"}
   %and = index.andi %lhs, %rhs : index
-  // ERROR@+1: TARGET/001 {op_name="index.ori"}
   %or = index.ori %lhs, %rhs : index
-  // ERROR@+1: TARGET/001 {op_name="index.xori"}
   %xor = index.xori %lhs, %rhs : index
   %subtract = index.sub %lhs, %rhs : index
   func.return %multiply, %and, %or, %xor, %subtract : index, index, index, index, index
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @uniform_index_operands(%lhs: reg<wasm.i32>, %rhs: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) asm {
+  %multiply = i32.mul %lhs, %rhs
+  %and = i32.and %lhs, %rhs
+  %or = i32.or %lhs, %rhs
+  %xor = i32.xor %lhs, %rhs
+  %subtract = i32.sub %lhs, %rhs
+  return %multiply, %and, %or, %xor, %subtract
 }
 
 // ====
@@ -94,14 +128,23 @@ func.def target(@target) @varying_index_operands(%input: buffer) -> (index, inde
   %lhs = index.cast %lhs_word : i32 to index
   %rhs = index.cast %rhs_word : i32 to index
   %multiply = index.mul %lhs, %rhs : index
-  // ERROR@+1: TARGET/001 {op_name="index.andi"}
   %and = index.andi %lhs, %rhs : index
-  // ERROR@+1: TARGET/001 {op_name="index.ori"}
   %or = index.ori %lhs, %rhs : index
-  // ERROR@+1: TARGET/001 {op_name="index.xori"}
   %xor = index.xori %lhs, %rhs : index
   %subtract = index.sub %lhs, %rhs : index
   func.return %multiply, %and, %or, %xor, %subtract : index, index, index, index, index
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @varying_index_operands(%input_view: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) asm {
+  %lhs = i32.load %input_view
+  %rhs = i32.load %input_view {offset = 4}
+  %multiply = i32.mul %lhs, %rhs
+  %and = i32.and %lhs, %rhs
+  %or = i32.or %lhs, %rhs
+  %xor = i32.xor %lhs, %rhs
+  %subtract = i32.sub %lhs, %rhs
+  return %multiply, %and, %or, %xor, %subtract
 }
 
 // ====
@@ -118,4 +161,11 @@ func.def target(@target) @bounded_offset_difference(%input: buffer, %wide_limit:
   %limit = index.assume %wide_limit [range(%wide_limit, 1024, 2047)] : offset
   %remaining = index.sub %limit, %position : offset
   func.return %remaining : offset
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @bounded_offset_difference(%input_view: reg<wasm.i32>, %limit: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %position = i32.load %input_view
+  %remaining = i32.sub %limit, %position
+  return %remaining
 }

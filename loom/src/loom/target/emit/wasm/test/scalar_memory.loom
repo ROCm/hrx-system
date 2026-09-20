@@ -105,6 +105,25 @@ func.def public target(@target) @compare_offset(%lhs_input: i32, %rhs_input: i32
   func.return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge : i1, i1, i1, i1, i1, i1, i1, i1, i1, i1
 }
 
+func.def public target(@target) @index_bitwise(%lhs: index, %rhs: index) -> (index, index, index) {
+  %and = index.andi %lhs, %rhs : index
+  %or = index.ori %lhs, %rhs : index
+  %xor = index.xori %lhs, %rhs : index
+  func.return %and, %or, %xor : index, index, index
+}
+
+func.def public target(@target) @index_bitwise_constants(%input: index) -> (index, index, index, index) {
+  %mask = index.constant 64 : index
+  %tag = index.constant 128 : index
+  %negative = index.constant -16 : index
+  %high_bit = index.constant -2147483648 : index
+  %masked = index.andi %input, %mask : index
+  %tagged = index.ori %tag, %input : index
+  %toggled = index.xori %input, %negative : index
+  %sign = index.andi %high_bit, %input : index
+  func.return %masked, %tagged, %toggled, %sign : index, index, index, index
+}
+
 func.def public target(@target) @exchange_matrix(%buffer: buffer, %columns_input: index, %row_input: index, %column_input: index, %value: i32) -> (i32) {
   %aligned = buffer.assume.alignment %buffer {minimum_alignment = 4} : buffer
   %columns = index.assume %columns_input [range(%columns_input, 4, 16)] : index

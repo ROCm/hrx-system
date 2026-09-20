@@ -900,6 +900,14 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
         _binary_rule(index.index_sub, _INDEX, "wasm.i32.sub"),
         _binary_rule(index.index_sub, _OFFSET, "wasm.i32.sub"),
         _binary_rule(index.index_mul, _INDEX, "wasm.i32.mul"),
+        *(
+            _binary_rule(source_op, _INDEX, f"wasm.i32.{operation}")
+            for source_op, operation in (
+                (index.index_andi, "and"),
+                (index.index_ori, "or"),
+                (index.index_xori, "xor"),
+            )
+        ),
         _binary_rule(
             index.index_rem,
             _INDEX,
