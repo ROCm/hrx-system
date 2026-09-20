@@ -82,7 +82,6 @@ AMDGPU_DEVICE_BINARY_PREBUILT_OPTIONS = (
 BAZEL_COMMANDS = {
     "iree-bazel-amd-client": ("amd-client", None),
     "iree-bazel-amd-client-asan": ("amd-client", "asan"),
-    "iree-bazel-libamdf-thinlto": ("libamdf-thinlto", None),
     "iree-bazel-xdna": ("xdna", None),
     "iree-bazel-xdna-asan": ("xdna", "asan"),
     "iree-bazel-cpu": ("cpu", None),
@@ -548,23 +547,6 @@ def xdna_steps(targets: tuple[str, ...], config: str | None) -> list[CiStep]:
             targets,
             config=config,
             test_tag_filters=ci_config.XDNA_BAZEL_TEST_TAG_FILTERS,
-            bazel_options=options,
-        ),
-    ]
-
-
-def amdf_thinlto_steps(targets: tuple[str, ...]) -> list[CiStep]:
-    options = ci_config.AMDF_THINLTO_BAZEL_OPTIONS
-    return [
-        bazel_configure_step(),
-        bazel_build_step(
-            "Build static libamdf consumer with ThinLTO",
-            ci_config.AMDF_THINLTO_BAZEL_BUILD_TARGETS,
-            bazel_options=options,
-        ),
-        bazel_test_step(
-            "Test libamdf linkage with ThinLTO",
-            targets,
             bazel_options=options,
         ),
     ]
@@ -1124,12 +1106,6 @@ def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
         )
 
     bazel_target, sanitizer = BAZEL_COMMANDS[args.command]
-    if bazel_target == "libamdf-thinlto":
-        return amdf_thinlto_steps(
-            tuple(args.target)
-            if args.target
-            else ci_config.AMDF_THINLTO_BAZEL_TEST_TARGETS
-        )
     if bazel_target == "amd-client":
         return amd_client_steps(
             tuple(args.target) if args.target else ci_config.AMD_CLIENT_BAZEL_TARGETS,

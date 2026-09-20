@@ -359,7 +359,6 @@ python build_tools/devtools/ci.py iree-bazel-amdgpu-tsan --amdgpu-target gfx942 
 python build_tools/devtools/ci.py iree-bazel-amdgpu-ubsan --amdgpu-target gfx942 --keep-going
 python build_tools/devtools/ci.py iree-bazel-xdna-asan
 python build_tools/devtools/ci.py iree-bazel-amd-client-asan
-python build_tools/devtools/ci.py iree-bazel-libamdf-thinlto
 
 python build_tools/devtools/ci.py iree-cmake-cpu --keep-going
 python build_tools/devtools/ci.py iree-cmake-cpu-sanitizers --keep-going
@@ -406,12 +405,6 @@ Linux runs with ASAN on the gfx1150 NPU pool and requires access to the assigned
 XDNA tests reuse their devices and the existing AMD test resource group. The
 runner supplies exclusive native device access. The unsuffixed command is the
 Windows reproduction form.
-
-The Linux CPU `iree-bazel-libamdf-thinlto` lane uses Clang and LLVM's archiver
-with optimized ThinLTO. It builds the complete static archive and XDNA runner,
-then runs the existing API-query corpus through static, shared, and loaded
-providers. These checks exercise archive composition and final-link metadata
-without requiring accelerator hardware.
 
 AMDGPU Bazel sanitizer configurations are separate CI jobs so they build and
 test independently. Aggregate CPU Bazel and CMake commands remain available as
