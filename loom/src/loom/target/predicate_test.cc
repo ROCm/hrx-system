@@ -20,6 +20,7 @@
 #include "loom/pass/verify.h"
 #include "loom/target/facts_builder.h"
 #include "loom/target/function_version.h"
+#include "loom/target/pass_environment.h"
 #include "loom/target/test/target_records.h"
 #include "loom/testing/module_ptr.h"
 
@@ -96,7 +97,7 @@ class TargetPredicateTest : public ::testing::Test {
     return loom_func_like_cast(module, symbol->defining_op);
   }
 
-  loom_op_t* FirstWhere(loom_op_t* pipeline_op) {
+  loom_op_t* FirstFunctionWhere(loom_op_t* pipeline_op) {
     loom_block_t* pipeline_body =
         loom_region_entry_block(loom_pass_pipeline_body(pipeline_op));
     IREE_ASSERT(pipeline_body != nullptr);
@@ -107,6 +108,14 @@ class TargetPredicateTest : public ::testing::Test {
     IREE_ASSERT(for_body != nullptr);
     IREE_ASSERT(loom_pass_where_isa(for_body->first_op));
     return for_body->first_op;
+  }
+
+  loom_op_t* FirstModuleWhere(loom_op_t* pipeline_op) {
+    loom_block_t* pipeline_body =
+        loom_region_entry_block(loom_pass_pipeline_body(pipeline_op));
+    IREE_ASSERT(pipeline_body != nullptr);
+    IREE_ASSERT(loom_pass_where_isa(pipeline_body->first_op));
+    return pipeline_body->first_op;
   }
 
   iree_status_t VerifyPipeline(loom_module_t* module,
@@ -140,6 +149,34 @@ class TargetPredicateTest : public ::testing::Test {
         /*.symbol=*/symbol,
         /*.function=*/function,
         /*.function_version=*/function_version,
+    };
+    IREE_CHECK_OK(predicate_provider_.evaluate(predicate_provider_.user_data,
+                                               &context, &match));
+    return match;
+  }
+
+  bool EvaluateModule(
+      loom_module_t* module, loom_op_t* where_op,
+      const loom_function_version_list_t* function_versions = nullptr) {
+    const loom_target_pass_capability_t target_capability =
+        loom_target_pass_capability_make(/*target_environment=*/nullptr,
+                                         function_versions);
+    const loom_pass_environment_capability_t* capabilities[] = {
+        &target_capability.base,
+    };
+    const loom_pass_environment_t environment =
+        loom_pass_environment_make(capabilities, IREE_ARRAYSIZE(capabilities));
+    bool match = false;
+    const loom_pass_predicate_evaluate_context_t context = {
+        /*.pipeline_module=*/module,
+        /*.where_op=*/where_op,
+        /*.anchor_kind=*/LOOM_PASS_MODULE,
+        /*.predicate=*/IREE_SV("target"),
+        /*.environment=*/&environment,
+        /*.target_module=*/module,
+        /*.symbol=*/nullptr,
+        /*.function=*/{},
+        /*.function_version=*/nullptr,
     };
     IREE_CHECK_OK(predicate_provider_.evaluate(predicate_provider_.user_data,
                                                &context, &match));
@@ -201,7 +238,7 @@ func.def target(@other_target) abi(object_function) @rejected() {
 )");
 
   loom_op_t* where_op =
-      FirstWhere(FindPipeline(module.get(), IREE_SV("pipeline")));
+      FirstFunctionWhere(FindPipeline(module.get(), IREE_SV("pipeline")));
   EXPECT_TRUE(Evaluate(module.get(), where_op, IREE_SV("matched")));
   EXPECT_FALSE(Evaluate(module.get(), where_op, IREE_SV("rejected")));
 }
@@ -232,7 +269,7 @@ func.def target(@authored_target) abi(object_function) @entry() {
   function_version.base.function = function;
   function_version.function_target_facts = &function_target_facts;
   loom_op_t* where_op =
-      FirstWhere(FindPipeline(module.get(), IREE_SV("pipeline")));
+      FirstFunctionWhere(FindPipeline(module.get(), IREE_SV("pipeline")));
 
   EXPECT_FALSE(Evaluate(module.get(), where_op, IREE_SV("entry")));
   EXPECT_TRUE(Evaluate(module.get(), where_op, IREE_SV("entry"),
@@ -256,8 +293,98 @@ func.def target(@test_target) @rejected() {
 )");
 
   loom_op_t* where_op =
-      FirstWhere(FindPipeline(module.get(), IREE_SV("pipeline")));
+      FirstFunctionWhere(FindPipeline(module.get(), IREE_SV("pipeline")));
   EXPECT_FALSE(Evaluate(module.get(), where_op, IREE_SV("rejected")));
+}
+
+TEST_F(TargetPredicateTest, ModuleMatchesAnyAuthoredFunctionTarget) {
+  ModulePtr module = ParseModule(R"(
+test.target<low_core> @test_target
+test.target<quirky> @other_target
+
+pass.pipeline<module> @pipeline pipeline {
+  where target(family = "test", bundle = "test_target") {
+  }
+}
+
+func.def target(@other_target) @rejected() {
+  func.return
+}
+
+func.def target(@test_target) @matched() {
+  func.return
+}
+)");
+
+  IREE_ASSERT_OK(VerifyPipeline(module.get(), IREE_SV("pipeline")));
+  loom_op_t* where_op =
+      FirstModuleWhere(FindPipeline(module.get(), IREE_SV("pipeline")));
+  EXPECT_TRUE(EvaluateModule(module.get(), where_op));
+}
+
+TEST_F(TargetPredicateTest, ModuleRejectsAbsentTargetFamily) {
+  ModulePtr module = ParseModule(R"(
+test.target<low_core> @test_target
+
+pass.pipeline<module> @pipeline pipeline {
+  where target(family = "amdgpu") {
+  }
+}
+
+func.def target(@test_target) @rejected() {
+  func.return
+}
+)");
+
+  loom_op_t* where_op =
+      FirstModuleWhere(FindPipeline(module.get(), IREE_SV("pipeline")));
+  EXPECT_FALSE(EvaluateModule(module.get(), where_op));
+}
+
+TEST_F(TargetPredicateTest, ModuleConcreteVersionOverridesAuthoredTarget) {
+  ModulePtr module = ParseModule(R"(
+test.target<low_core> @authored_target
+
+pass.pipeline<module> @concrete_pipeline pipeline {
+  where target(family = "test", bundle = "test-quirky") {
+  }
+}
+
+pass.pipeline<module> @authored_pipeline pipeline {
+  where target(family = "test", bundle = "authored_target") {
+  }
+}
+
+func.def target(@authored_target) @entry() {
+  func.return
+}
+)");
+
+  loom_target_facts_t function_target_facts = {};
+  loom_target_facts_builder_initialize(&loom_test_target_fact_type,
+                                       loom_test_target_bundles.values[2],
+                                       &function_target_facts);
+  loom_target_function_version_t function_version = {};
+  function_version.base.type = &loom_target_function_version_type;
+  function_version.base.function = FindFunction(module.get(), IREE_SV("entry"));
+  function_version.function_target_facts = &function_target_facts;
+  loom_function_version_t* version_values[] = {&function_version.base};
+  const loom_function_version_list_t function_versions = {
+      /*.values=*/version_values,
+      /*.count=*/IREE_ARRAYSIZE(version_values),
+  };
+  loom_op_t* concrete_where = FirstModuleWhere(
+      FindPipeline(module.get(), IREE_SV("concrete_pipeline")));
+  loom_op_t* authored_where = FirstModuleWhere(
+      FindPipeline(module.get(), IREE_SV("authored_pipeline")));
+
+  EXPECT_FALSE(Evaluate(module.get(), concrete_where, IREE_SV("entry")));
+  EXPECT_TRUE(Evaluate(module.get(), authored_where, IREE_SV("entry")));
+  EXPECT_FALSE(EvaluateModule(module.get(), concrete_where));
+  EXPECT_TRUE(EvaluateModule(module.get(), authored_where));
+  EXPECT_TRUE(EvaluateModule(module.get(), concrete_where, &function_versions));
+  EXPECT_FALSE(
+      EvaluateModule(module.get(), authored_where, &function_versions));
 }
 
 }  // namespace

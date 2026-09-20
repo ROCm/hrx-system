@@ -1553,41 +1553,6 @@ static iree_status_t loom_low_verify_call_result_types(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_verify_func_call_context(
-    const loom_module_t* module, const loom_op_t* call_op,
-    const loom_low_callee_signature_t* callee_signature,
-    uint16_t callee_attr_index, iree_diagnostic_emitter_t emitter) {
-  const loom_op_t* caller_op =
-      loom_low_find_enclosing_low_executable_def(module, call_op);
-  if (!caller_op) {
-    return loom_low_emit_low_entry_placement_error(
-        module, call_op, IREE_SV("low executable"), emitter);
-  }
-
-  loom_symbol_ref_t caller_target = loom_low_function_target(caller_op);
-  loom_symbol_ref_t callee_target =
-      loom_low_function_target(callee_signature->definition_op);
-  if (loom_low_symbol_ref_equal(caller_target, callee_target)) {
-    return iree_ok_status();
-  }
-  loom_diagnostic_related_op_t related[] = {{
-      .label = IREE_SV("callee defined here"),
-      .op = callee_signature->definition_op,
-  }};
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(loom_low_op_name(module, call_op)),
-      loom_param_with_field_ref(
-          loom_param_string(IREE_SV("callee")),
-          loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
-                                    callee_attr_index)),
-      loom_param_string(loom_low_symbol_name(module, callee_target)),
-      loom_param_string(loom_low_symbol_name(module, caller_target)),
-  };
-  return loom_low_emit_related(emitter, call_op, LOOM_ERR_TARGET_040, params,
-                               IREE_ARRAYSIZE(params), related,
-                               IREE_ARRAYSIZE(related));
-}
-
 iree_status_t loom_low_copy_verify(const loom_module_t* module,
                                    const loom_op_t* op,
                                    iree_diagnostic_emitter_t emitter) {
@@ -2029,9 +1994,6 @@ iree_status_t loom_low_func_call_arg_verify(const loom_module_t* module,
           module, op, callee, loom_low_func_call_arg_callee_ATTR_INDEX, symbol,
           emitter);
     }
-    IREE_RETURN_IF_ERROR(loom_low_verify_func_call_context(
-        module, op, &signature, loom_low_func_call_arg_callee_ATTR_INDEX,
-        emitter));
     const int64_t ordinal = loom_low_func_call_arg_ordinal(op);
     if (ordinal < 0 || ordinal >= signature.argument_count) {
       return loom_low_emit_attr_value_error(
@@ -2102,10 +2064,11 @@ iree_status_t loom_low_func_call_verify(const loom_module_t* module,
         module, op, callee, loom_low_func_call_callee_ATTR_INDEX, symbol,
         emitter);
   }
+  if (loom_low_find_enclosing_low_executable_def(module, op) == NULL) {
+    return loom_low_emit_low_entry_placement_error(
+        module, op, IREE_SV("low executable"), emitter);
+  }
 
-  IREE_RETURN_IF_ERROR(loom_low_verify_func_call_context(
-      module, op, &low_signature, loom_low_func_call_callee_ATTR_INDEX,
-      emitter));
   if (loom_low_func_call_stack_args(op).count == 0) {
     IREE_RETURN_IF_ERROR(loom_low_verify_call_argument_count(
         module, op, &low_signature, emitter));

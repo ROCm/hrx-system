@@ -755,6 +755,7 @@ loom_cc_library(
   DEPS
     ::function_contract
     ::function_version
+    ::pass_environment
     ::types
     iree::base
     iree::base::internal::arena
@@ -791,6 +792,7 @@ loom_cc_test(
   DEPS
     ::facts_builder
     ::function_version
+    ::pass_environment
     ::predicate
     iree::base::internal::arena
     iree::testing::gtest

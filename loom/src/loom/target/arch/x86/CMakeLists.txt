@@ -281,6 +281,7 @@ loom_cc_library(
     ::math_policy
     ::pass_registry
     iree::base
+    loom::ir
     loom::pass::builder
     loom::target::arch::x86::descriptors::low_registry
     loom::target::arch::x86::lower

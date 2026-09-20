@@ -18,6 +18,22 @@
       "files": [{"path": "{tmp}/invalid.bin", "exists": false}]
     },
     {
+      "name": "runs target-owned Low verification",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "--pipeline=none",
+          "--output={tmp}/invalid.bin"
+        ],
+        "stdin": {
+          "text": "x86.target<scalar> @target\n\nlow.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({argument_locations = [6], calling_convention = \"sysv_x86_64\", result_locations = [0], stack_argument_bytes = 0}) @invalid_layout(%value: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {\n  return %value\n}\n"
+        }
+      },
+      "exit": 1,
+      "stderr": {"contains": ["X86/001", "input module failed Low verification"]},
+      "files": [{"path": "{tmp}/invalid.bin", "exists": false}]
+    },
+    {
       "name": "prints agent documentation",
       "run": {
         "tool": "loom-compile",

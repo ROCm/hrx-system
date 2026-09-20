@@ -55,7 +55,9 @@ func.def public target(@target) @call_vector_result(%input: i32, %lane: index) -
   func.return %result : i32
 }
 
+// ERROR@+1: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<4xi32>"}
 func.def @select_lane(%values: vector<4xi32>, %lane: index) -> (i32) where [range(%lane, 0, 3)] {
+  // ERROR@+1: TARGET/001 {op_name="vector.extract"}
   %result = vector.extract %values[%lane] : vector<4xi32> -> i32
   func.return %result : i32
 }
@@ -92,7 +94,6 @@ func.def @advance_i32(%value: i32, %delta: i32) -> (i32) {
 vm.target<core> @target
 
 func.def public target(@target) @call_scalar(%value: i32, %delta: i32) -> (i32) {
-  // ERROR@+1: TARGET/040 {op_name="low.func.call", field_name="callee", caller_target_name="target"}
   %result = func.call @scalar_add(%value, %delta) : (i32, i32) -> (i32)
   func.return %result : i32
 }
@@ -100,4 +101,15 @@ func.def public target(@target) @call_scalar(%value: i32, %delta: i32) -> (i32) 
 func.def @scalar_add(%value: i32, %delta: i32) -> (i32) {
   %result = scalar.addi %value, %delta : i32
   func.return %result : i32
+}
+
+// ----
+low.func.def public target<vm.core>(@target) abi(vm_function) @call_scalar(%value: reg<vm.value : i32>, %delta: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %result = low.func.call pure @scalar_add(%value, %delta) : (reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)
+  return %result
+}
+
+low.func.def target<vm.core> @scalar_add(%value: reg<vm.value : i32>, %delta: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %result = integer.add.i32 %value, %delta
+  return %result
 }

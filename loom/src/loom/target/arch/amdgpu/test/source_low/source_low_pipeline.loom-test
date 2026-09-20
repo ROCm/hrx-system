@@ -450,7 +450,9 @@ pass.pipeline<module> @__loom_check_prepared_low pipeline {
     }
   }
   symbol-dce
-  x86-materialize-sysv-abi
+  where target(family = "x86") {
+    x86-materialize-sysv-abi
+  }
   for func {
     where target {
       where target(abi = "hal_kernel", codegen = "low_native", family = "amdgpu") {

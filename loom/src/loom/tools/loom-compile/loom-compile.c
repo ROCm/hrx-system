@@ -248,6 +248,7 @@ static iree_status_t loom_compile_parse_input_module(
 
 static iree_status_t loom_compile_verify_input_module(
     const loom_target_low_descriptor_registry_t* low_registry,
+    loom_low_verify_provider_list_t low_verify_provider_list,
     loom_run_module_t* run_module) {
   const loom_target_entry_options_t options = {
       .diagnostic_sink = {.fn = loom_diagnostic_stderr_sink},
@@ -270,7 +271,7 @@ static iree_status_t loom_compile_verify_input_module(
   loom_low_verify_result_t low_result = {0};
   IREE_RETURN_IF_ERROR(loom_target_entry_verify_low_module(
       run_module->module, low_registry, &options, &emitter, options.max_errors,
-      loom_low_verify_provider_list_empty(), &scratch, &low_result));
+      low_verify_provider_list, &scratch, &low_result));
   if (low_result.error_count != 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "input module failed Low verification");
@@ -1195,7 +1196,10 @@ int main(int argc, char** argv) {
   }
   if (iree_status_is_ok(status)) {
     status = loom_compile_verify_input_module(
-        loom_run_session_low_descriptor_registry(&session), &run_module);
+        loom_run_session_low_descriptor_registry(&session),
+        loom_target_environment_low_verify_provider_list(
+            compile_environment->target_environment),
+        &run_module);
   }
   if (iree_status_is_ok(status)) {
     status = loom_compile_report_options_initialize(&compile_report_options);

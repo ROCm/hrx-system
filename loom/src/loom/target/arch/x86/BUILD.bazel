@@ -244,6 +244,7 @@ loom_cc_library(
         ":low_verify",
         ":math_policy",
         ":pass_registry",
+        "//loom/src/loom/ir",
         "//loom/src/loom/pass:builder",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/arch/x86/descriptors:low_registry",

@@ -34,6 +34,34 @@ using ::loom::testing::CapturedDiagnosticEmission;
 using ::loom::testing::DiagnosticEmissionCapture;
 using ModulePtr = ::loom::testing::ModulePtr;
 
+static constexpr char kTargetlessCalleeModule[] = R"(
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @caller(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = low.func.call @callee(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  return %result
+}
+
+low.func.def target<test.low.core> @callee(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  return %value
+}
+)";
+
+static constexpr char kDistinctAuthoredTargetsModule[] = R"(
+test.target<low_core> @caller_target
+test.target<low_core> @callee_target
+test.target<low_core> @concrete_target
+
+low.func.def target<test.low.core>(@caller_target) @caller(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = low.func.call @callee(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  return %result
+}
+
+low.func.def target<test.low.core>(@callee_target) @callee(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  return %value
+}
+)";
+
 class LowVerifyTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -86,6 +114,26 @@ class LowVerifyTest : public ::testing::Test {
     return symbol_id;
   }
 
+  loom_func_like_t FindFunction(loom_module_t* module,
+                                iree_string_view_t name) {
+    const loom_symbol_id_t symbol_id = FindSymbol(module, name);
+    return loom_func_like_cast(module,
+                               module->symbols.entries[symbol_id].defining_op);
+  }
+
+  const loom_target_facts_t* FindTargetFacts(loom_module_t* module,
+                                             iree_string_view_t name) {
+    loom_symbol_fact_table_t symbol_facts = {};
+    loom_symbol_fact_table_initialize(&symbol_facts, &analysis_arena_);
+    const loom_symbol_facts_base_t* base_facts = nullptr;
+    IREE_CHECK_OK(loom_symbol_fact_table_lookup(
+        &symbol_facts, module, FindSymbol(module, name), &base_facts));
+    const loom_target_symbol_facts_t* target_facts =
+        loom_target_symbol_facts_cast(base_facts);
+    IREE_ASSERT(target_facts != nullptr);
+    return target_facts->projection;
+  }
+
   void VerifyModule(
       loom_module_t* module, DiagnosticEmissionCapture* capture,
       loom_low_verify_result_t* out_result,
@@ -100,6 +148,40 @@ class LowVerifyTest : public ::testing::Test {
         loom_low_verify_scratch_for_module(module);
     IREE_EXPECT_OK(
         loom_low_verify_module(module, &options, &scratch, out_result));
+  }
+
+  void VerifyCallContexts(const char* source,
+                          iree_string_view_t concrete_target_name,
+                          loom_target_context_ordinal_t caller_context_ordinal,
+                          loom_target_context_ordinal_t callee_context_ordinal,
+                          DiagnosticEmissionCapture* capture,
+                          loom_low_verify_result_t* out_result) {
+    ModulePtr module = ParseModule(source);
+    const loom_target_facts_t* target_facts =
+        FindTargetFacts(module.get(), concrete_target_name);
+    loom_target_function_version_t caller_version = {};
+    caller_version.base.type = &loom_target_function_version_type;
+    caller_version.base.function =
+        FindFunction(module.get(), IREE_SV("caller"));
+    caller_version.resolved_target.facts = target_facts;
+    caller_version.target_context_ordinal = caller_context_ordinal;
+    caller_version.function_target_facts = target_facts;
+    loom_target_function_version_t callee_version = {};
+    callee_version.base.type = &loom_target_function_version_type;
+    callee_version.base.function =
+        FindFunction(module.get(), IREE_SV("callee"));
+    callee_version.resolved_target.facts = target_facts;
+    callee_version.target_context_ordinal = callee_context_ordinal;
+    callee_version.function_target_facts = target_facts;
+    loom_function_version_t* version_values[] = {
+        &caller_version.base,
+        &callee_version.base,
+    };
+    const loom_function_version_list_t function_versions = {
+        /*.values=*/version_values,
+        /*.count=*/IREE_ARRAYSIZE(version_values),
+    };
+    VerifyModule(module.get(), capture, out_result, &function_versions);
   }
 
   iree_arena_block_pool_t block_pool_;
@@ -215,6 +297,37 @@ low.func.def target<test.low.core> @uses_workgroup_storage() {
   ASSERT_EQ(emission.u64_params.size(), 2u);
   EXPECT_EQ(emission.u64_params[0], 80u);
   EXPECT_EQ(emission.u64_params[1], 64u);
+}
+
+TEST_F(LowVerifyTest, AcceptsCallWithinConcreteTargetContext) {
+  DiagnosticEmissionCapture capture;
+  loom_low_verify_result_t result = {};
+  VerifyCallContexts(kTargetlessCalleeModule, IREE_SV("target"),
+                     /*caller_context_ordinal=*/7,
+                     /*callee_context_ordinal=*/7, &capture, &result);
+  EXPECT_EQ(result.error_count, 0u);
+  EXPECT_TRUE(capture.emissions.empty());
+}
+
+TEST_F(LowVerifyTest, ConcreteContextOverridesAuthoredTargets) {
+  DiagnosticEmissionCapture capture;
+  loom_low_verify_result_t result = {};
+  VerifyCallContexts(kDistinctAuthoredTargetsModule, IREE_SV("concrete_target"),
+                     /*caller_context_ordinal=*/7,
+                     /*callee_context_ordinal=*/7, &capture, &result);
+  EXPECT_EQ(result.error_count, 0u);
+  EXPECT_TRUE(capture.emissions.empty());
+}
+
+TEST_F(LowVerifyTest, RejectsCallAcrossConcreteTargetContexts) {
+  DiagnosticEmissionCapture capture;
+  loom_low_verify_result_t result = {};
+  VerifyCallContexts(kTargetlessCalleeModule, IREE_SV("target"),
+                     /*caller_context_ordinal=*/7,
+                     /*callee_context_ordinal=*/8, &capture, &result);
+  EXPECT_EQ(result.error_count, 1u);
+  ASSERT_EQ(capture.emissions.size(), 1u);
+  EXPECT_EQ(capture.emissions[0].error, LOOM_ERR_TARGET_040);
 }
 
 }  // namespace

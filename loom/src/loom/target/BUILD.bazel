@@ -676,6 +676,7 @@ loom_cc_library(
     deps = [
         ":function_contract",
         ":function_version",
+        ":pass_environment",
         ":types",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/ir",
@@ -709,6 +710,7 @@ loom_cc_test(
     deps = [
         ":facts_builder",
         ":function_version",
+        ":pass_environment",
         ":predicate",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",

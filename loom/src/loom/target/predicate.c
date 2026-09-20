@@ -12,6 +12,7 @@
 #include "loom/ops/pass/ops.h"
 #include "loom/target/function_contract.h"
 #include "loom/target/function_version.h"
+#include "loom/target/pass_environment.h"
 #include "loom/target/types.h"
 
 static bool loom_target_pass_predicate_is_supported_attr(
@@ -75,9 +76,11 @@ static iree_status_t loom_target_pass_predicate_verify(
                             (int)context->predicate.size,
                             context->predicate.data);
   }
-  if (context->anchor_kind != LOOM_PASS_FUNCTION) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "pass.where target predicate requires func anchor");
+  if (context->anchor_kind != LOOM_PASS_MODULE &&
+      context->anchor_kind != LOOM_PASS_FUNCTION) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "pass.where target predicate requires module or func anchor");
   }
   const loom_named_attr_slice_t attrs =
       loom_pass_where_attrs(context->where_op);
@@ -122,13 +125,13 @@ static bool loom_target_pass_predicate_symbol_id(
 
 static iree_status_t loom_target_pass_predicate_resolve_facts(
     const loom_pass_predicate_evaluate_context_t* context,
-    iree_arena_allocator_t* arena, bool* out_valid,
-    const loom_target_facts_t** out_facts) {
+    const loom_symbol_t* symbol,
+    const loom_target_function_version_t* function_version,
+    loom_symbol_fact_table_t* fact_table, iree_arena_allocator_t* arena,
+    bool* out_valid, const loom_target_facts_t** out_facts) {
   *out_valid = false;
   *out_facts = NULL;
 
-  const loom_target_function_version_t* function_version =
-      loom_target_function_version_const_cast(context->function_version);
   if (function_version != NULL) {
     *out_facts = function_version->function_target_facts;
     *out_valid = true;
@@ -136,16 +139,14 @@ static iree_status_t loom_target_pass_predicate_resolve_facts(
   }
 
   loom_symbol_id_t symbol_id = LOOM_SYMBOL_ID_INVALID;
-  if (!loom_target_pass_predicate_symbol_id(context->target_module,
-                                            context->symbol, &symbol_id)) {
+  if (!loom_target_pass_predicate_symbol_id(context->target_module, symbol,
+                                            &symbol_id)) {
     return iree_ok_status();
   }
 
-  loom_symbol_fact_table_t fact_table = {0};
-  loom_symbol_fact_table_initialize(&fact_table, arena);
   const loom_symbol_facts_base_t* base_facts = NULL;
   IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup(
-      &fact_table, context->target_module, symbol_id, &base_facts));
+      fact_table, context->target_module, symbol_id, &base_facts));
   const loom_func_symbol_facts_t* func_facts =
       loom_func_symbol_facts_cast(base_facts);
   if (func_facts == NULL) {
@@ -153,7 +154,7 @@ static iree_status_t loom_target_pass_predicate_resolve_facts(
   }
 
   return loom_target_function_contract_resolve_facts(
-      context->target_module, &fact_table, func_facts,
+      context->target_module, fact_table, func_facts,
       (iree_diagnostic_emitter_t){0}, arena, out_valid, out_facts);
 }
 
@@ -193,6 +194,82 @@ static bool loom_target_pass_predicate_match_attr(
   return false;
 }
 
+static iree_status_t loom_target_pass_predicate_facts_match(
+    const loom_pass_predicate_evaluate_context_t* context,
+    const loom_target_facts_t* facts, bool* out_match) {
+  *out_match = true;
+  const loom_named_attr_slice_t attrs =
+      loom_pass_where_attrs(context->where_op);
+  for (iree_host_size_t i = 0; i < attrs.count; ++i) {
+    iree_string_view_t name = iree_string_view_empty();
+    iree_string_view_t expected = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(loom_target_pass_predicate_attr_strings(
+        context->pipeline_module, &attrs.entries[i], &name, &expected));
+    if (!loom_target_pass_predicate_match_attr(facts, name, expected)) {
+      *out_match = false;
+      break;
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_target_pass_predicate_evaluate_function(
+    const loom_pass_predicate_evaluate_context_t* context,
+    loom_symbol_fact_table_t* fact_table, iree_arena_allocator_t* arena,
+    bool* out_match) {
+  const loom_target_function_version_t* function_version =
+      loom_target_function_version_const_cast(context->function_version);
+  const loom_target_facts_t* facts = NULL;
+  bool facts_valid = false;
+  IREE_RETURN_IF_ERROR(loom_target_pass_predicate_resolve_facts(
+      context, context->symbol, function_version, fact_table, arena,
+      &facts_valid, &facts));
+  if (!facts_valid) {
+    *out_match = false;
+    return iree_ok_status();
+  }
+  return loom_target_pass_predicate_facts_match(context, facts, out_match);
+}
+
+static iree_status_t loom_target_pass_predicate_evaluate_module(
+    const loom_pass_predicate_evaluate_context_t* context,
+    loom_symbol_fact_table_t* fact_table, iree_arena_allocator_t* arena,
+    bool* out_match) {
+  *out_match = false;
+  const loom_target_pass_capability_t* target_capability =
+      loom_target_pass_capability_from_environment(context->environment);
+  const loom_function_version_list_t* function_versions =
+      loom_target_pass_capability_function_versions(target_capability);
+  loom_target_function_version_snapshot_t versions = {0};
+  IREE_RETURN_IF_ERROR(loom_target_function_version_snapshot_build(
+      context->target_module, function_versions, arena, &versions));
+
+  for (loom_symbol_id_t symbol_id = 0;
+       symbol_id < context->target_module->symbols.count; ++symbol_id) {
+    const loom_symbol_t* symbol =
+        &context->target_module->symbols.entries[symbol_id];
+    if (!loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_FUNC_LIKE)) {
+      continue;
+    }
+    const loom_target_function_version_t* function_version =
+        loom_target_function_version_snapshot_at(&versions, symbol_id);
+    const loom_target_facts_t* facts = NULL;
+    bool facts_valid = false;
+    IREE_RETURN_IF_ERROR(loom_target_pass_predicate_resolve_facts(
+        context, symbol, function_version, fact_table, arena, &facts_valid,
+        &facts));
+    if (!facts_valid) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(
+        loom_target_pass_predicate_facts_match(context, facts, out_match));
+    if (*out_match) {
+      break;
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_target_pass_predicate_evaluate(
     void* user_data, const loom_pass_predicate_evaluate_context_t* context,
     bool* out_match) {
@@ -203,9 +280,11 @@ static iree_status_t loom_target_pass_predicate_evaluate(
                             (int)context->predicate.size,
                             context->predicate.data);
   }
-  if (context->anchor_kind != LOOM_PASS_FUNCTION) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "pass.where target predicate requires func anchor");
+  if (context->anchor_kind != LOOM_PASS_MODULE &&
+      context->anchor_kind != LOOM_PASS_FUNCTION) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "pass.where target predicate requires module or func anchor");
   }
 
   loom_target_pass_predicate_provider_storage_t* storage =
@@ -218,28 +297,13 @@ static iree_status_t loom_target_pass_predicate_evaluate(
 
   iree_arena_allocator_t arena;
   iree_arena_initialize(storage->block_pool, &arena);
-  const loom_target_facts_t* facts = NULL;
-  bool facts_valid = false;
-  iree_status_t status = loom_target_pass_predicate_resolve_facts(
-      context, &arena, &facts_valid, &facts);
-  if (iree_status_is_ok(status) && facts_valid) {
-    *out_match = true;
-    const loom_named_attr_slice_t attrs =
-        loom_pass_where_attrs(context->where_op);
-    for (iree_host_size_t i = 0; i < attrs.count; ++i) {
-      iree_string_view_t name = iree_string_view_empty();
-      iree_string_view_t expected = iree_string_view_empty();
-      status = loom_target_pass_predicate_attr_strings(
-          context->pipeline_module, &attrs.entries[i], &name, &expected);
-      if (!iree_status_is_ok(status)) {
-        break;
-      }
-      if (!loom_target_pass_predicate_match_attr(facts, name, expected)) {
-        *out_match = false;
-        break;
-      }
-    }
-  }
+  loom_symbol_fact_table_t fact_table = {0};
+  loom_symbol_fact_table_initialize(&fact_table, &arena);
+  iree_status_t status = context->anchor_kind == LOOM_PASS_MODULE
+                             ? loom_target_pass_predicate_evaluate_module(
+                                   context, &fact_table, &arena, out_match)
+                             : loom_target_pass_predicate_evaluate_function(
+                                   context, &fact_table, &arena, out_match);
   iree_arena_deinitialize(&arena);
   return status;
 }

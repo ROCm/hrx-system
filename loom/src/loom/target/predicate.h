@@ -28,6 +28,12 @@ void loom_target_pass_predicate_provider_storage_initialize(
     loom_target_pass_predicate_provider_storage_t* out_storage);
 
 // Returns a pass.where provider implementing the `target` predicate.
+//
+// A function-anchored predicate observes the active concrete function version,
+// falling back to the function's authored target contract when no version is
+// present. A module-anchored predicate matches when any function's effective
+// target matches all predicate attributes. Concrete versions override authored
+// target contracts in both cases.
 loom_pass_predicate_provider_t loom_target_pass_predicate_provider(
     loom_target_pass_predicate_provider_storage_t* storage);
 

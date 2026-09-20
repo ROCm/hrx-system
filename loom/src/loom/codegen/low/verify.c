@@ -43,6 +43,8 @@ typedef struct loom_low_verify_state_t {
 typedef struct loom_low_function_verify_state_t {
   loom_low_verify_state_t* state;
   const loom_low_resolved_target_t* target;
+  // Concrete compiler version supplying the effective target context.
+  const loom_target_function_version_t* function_version;
   loom_low_register_type_resolver_t register_type_resolver;
   iree_string_view_t function_name;
   const loom_op_t* function_op;
@@ -210,7 +212,7 @@ static loom_region_t* loom_low_verify_function_body(
   return NULL;
 }
 
-static const loom_target_facts_t* loom_low_verify_function_target_facts(
+static const loom_target_function_version_t* loom_low_verify_function_version(
     const loom_low_verify_state_t* state, const loom_op_t* low_func_op) {
   const loom_func_like_t function =
       loom_func_like_const_cast(state->module, low_func_op);
@@ -222,9 +224,92 @@ static const loom_target_facts_t* loom_low_verify_function_target_facts(
       function_ref.symbol_id >= state->function_version_snapshot.symbol_count) {
     return NULL;
   }
-  return loom_target_function_version_target_facts(
-      loom_target_function_version_snapshot_handle_at(
-          &state->function_version_snapshot, function_ref.symbol_id));
+  return loom_target_function_version_snapshot_at(
+      &state->function_version_snapshot, function_ref.symbol_id);
+}
+
+static const loom_target_facts_t* loom_low_verify_function_target_facts(
+    const loom_low_verify_state_t* state, const loom_op_t* low_func_op) {
+  const loom_target_function_version_t* function_version =
+      loom_low_verify_function_version(state, low_func_op);
+  return function_version != NULL ? function_version->function_target_facts
+                                  : NULL;
+}
+
+static iree_string_view_t loom_low_verify_effective_target_name(
+    const loom_low_verify_state_t* state, const loom_op_t* function_op,
+    const loom_target_function_version_t* function_version) {
+  if (function_version != NULL) {
+    const loom_target_facts_t* target_facts =
+        function_version->resolved_target.facts != NULL
+            ? function_version->resolved_target.facts
+            : function_version->function_target_facts;
+    return loom_target_facts_identity_name(target_facts);
+  }
+  const loom_func_like_t function =
+      loom_func_like_const_cast(state->module, function_op);
+  return loom_low_verify_symbol_name(state->module,
+                                     loom_func_like_target(function));
+}
+
+static iree_status_t loom_low_verify_call_target_context(
+    loom_low_function_verify_state_t* function_state,
+    const loom_op_t* call_op) {
+  const loom_symbol_ref_t callee_ref = loom_low_func_call_callee(call_op);
+  if (!loom_symbol_ref_is_valid(callee_ref) || callee_ref.module_id != 0 ||
+      callee_ref.symbol_id >= function_state->state->module->symbols.count) {
+    return iree_ok_status();
+  }
+  const loom_symbol_t* callee_symbol =
+      &function_state->state->module->symbols.entries[callee_ref.symbol_id];
+  const loom_op_t* callee_op = callee_symbol->defining_op;
+  const loom_func_like_t callee =
+      loom_func_like_const_cast(function_state->state->module, callee_op);
+  if (!loom_func_like_isa(callee)) {
+    return iree_ok_status();
+  }
+
+  const loom_target_function_version_t* caller_version =
+      function_state->function_version;
+  const loom_target_function_version_t* callee_version =
+      loom_target_function_version_snapshot_at(
+          &function_state->state->function_version_snapshot,
+          callee_ref.symbol_id);
+  bool matches = false;
+  if (caller_version != NULL || callee_version != NULL) {
+    matches = caller_version != NULL && callee_version != NULL &&
+              caller_version->target_context_ordinal ==
+                  callee_version->target_context_ordinal;
+  } else {
+    const loom_func_like_t caller = loom_func_like_const_cast(
+        function_state->state->module, function_state->function_op);
+    const loom_symbol_ref_t caller_target = loom_func_like_target(caller);
+    const loom_symbol_ref_t callee_target = loom_func_like_target(callee);
+    matches = caller_target.module_id == callee_target.module_id &&
+              caller_target.symbol_id == callee_target.symbol_id;
+  }
+  if (matches) {
+    return iree_ok_status();
+  }
+
+  const loom_diagnostic_related_op_t related_ops[] = {{
+      .label = IREE_SV("callee defined here"),
+      .op = callee_op,
+  }};
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_op_name(function_state->state->module, call_op)),
+      loom_param_with_field_ref(
+          loom_param_string(IREE_SV("callee")),
+          loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
+                                    loom_low_func_call_callee_ATTR_INDEX)),
+      loom_param_string(loom_low_verify_effective_target_name(
+          function_state->state, callee_op, callee_version)),
+      loom_param_string(loom_low_verify_effective_target_name(
+          function_state->state, function_state->function_op, caller_version)),
+  };
+  return loom_low_verify_emit(
+      function_state->state, call_op, LOOM_ERR_TARGET_040, params,
+      IREE_ARRAYSIZE(params), related_ops, IREE_ARRAYSIZE(related_ops));
 }
 
 static iree_string_view_t loom_low_verify_string_or_empty(
@@ -2017,6 +2102,10 @@ static iree_status_t loom_low_verify_walk_op(void* user_data, loom_op_t* op,
         function_state->state->module, op,
         &function_state->storage_space_sizes));
   }
+  if (loom_low_func_call_isa(op)) {
+    IREE_RETURN_IF_ERROR(
+        loom_low_verify_call_target_context(function_state, op));
+  }
 
   loom_low_descriptor_packet_t packet = {0};
   const loom_low_descriptor_packet_kind_t packet_kind =
@@ -2131,6 +2220,7 @@ static iree_status_t loom_low_verify_function(loom_low_verify_state_t* state,
   loom_low_function_verify_state_t function_state = {
       .state = state,
       .target = &target,
+      .function_version = loom_low_verify_function_version(state, low_func_op),
       .function_op = low_func_op,
       .body = body,
       .register_parts =

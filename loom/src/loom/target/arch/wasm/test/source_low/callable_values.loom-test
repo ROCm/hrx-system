@@ -12,7 +12,9 @@ func.def public target(@target) @call_mixed_i32(%input: vector<1xi32>, %delta: i
 }
 
 func.def @add_i32(%value: i32, %delta: i32) -> (i32) {
+  // ERROR@+1: WASM/001 {op_name="scalar.extui", field_name="input"}
   %wide_value = scalar.extui %value : i32 to i64
+  // ERROR@+1: WASM/001 {op_name="scalar.extui", field_name="input"}
   %wide_delta = scalar.extui %delta : i32 to i64
   %sum = scalar.addi %wide_value, %wide_delta : i64
   %result = scalar.trunci %sum : i64 to i32
@@ -66,6 +68,7 @@ func.def public target(@target) @call_loop(%input: vector<1xi32>, %delta: i32, %
   func.return %result : i32
 }
 
+// ERROR@+1: TARGET/089 {descriptor_set="wasm.core.simd128", function_name="repeat_add", op_name="func.def"}
 func.def @repeat_add(%value: i32, %delta: i32, %count: index) -> (i32) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -86,7 +89,6 @@ func.def @advance_i32(%value: i32, %delta: i32) -> (i32) {
 wasm.target<simd128> @target
 
 func.def public target(@target) @call_scalar(%value: i32, %delta: i32) -> (i32) {
-  // ERROR@+1: TARGET/040 {op_name="low.func.call", field_name="callee", caller_target_name="target"}
   %result = func.call @scalar_add(%value, %delta) : (i32, i32) -> (i32)
   func.return %result : i32
 }
@@ -94,4 +96,15 @@ func.def public target(@target) @call_scalar(%value: i32, %delta: i32) -> (i32) 
 func.def @scalar_add(%value: i32, %delta: i32) -> (i32) {
   %result = scalar.addi %value, %delta : i32
   func.return %result : i32
+}
+
+// ----
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @call_scalar(%value: reg<wasm.i32>, %delta: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %result = low.func.call pure @scalar_add(%value, %delta) : (reg<wasm.i32>, reg<wasm.i32>) -> (reg<wasm.i32>)
+  return %result
+}
+
+low.func.def target<wasm.core.simd128> @scalar_add(%value: reg<wasm.i32>, %delta: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %result = i32.add %value, %delta
+  return %result
 }

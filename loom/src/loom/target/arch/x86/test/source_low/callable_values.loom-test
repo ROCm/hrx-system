@@ -103,7 +103,7 @@ low.func.def public target<x86.avx2.core>(@target) abi(object_function) abi_layo
   return %result
 }
 
-low.func.def target<x86.avx2.core>(@target) @scalar_add(%value: reg<x86.gpr32>, %delta: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> @scalar_add(%value: reg<x86.gpr32>, %delta: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %15 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
   %result = add.gpr32 %15, %delta
   return %result

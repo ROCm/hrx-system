@@ -68,7 +68,7 @@ func.def target(@target) @call_static_view(%input: buffer) -> (i32) {
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) @load_view(%input: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.scalar.core> @load_view(%input: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
   %value = mov.load.gpr32 %input {disp32 = 0}
   return %value
 }
@@ -99,7 +99,7 @@ func.def target(@target) @call_dynamic_view(%input: buffer, %offset_input: offse
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) @load_view(%input: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.scalar.core> @load_view(%input: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
   %value = mov.load.gpr32 %input {disp32 = 0}
   return %value
 }
@@ -134,7 +134,7 @@ func.def target(@target) @call_selected_view(%first: buffer, %second: buffer, %c
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) @load_view(%input: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.scalar.core> @load_view(%input: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
   %value = mov.load.gpr32 %input {disp32 = 0}
   return %value
 }
