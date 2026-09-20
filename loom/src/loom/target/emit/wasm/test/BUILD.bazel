@@ -21,14 +21,18 @@ iree_py_test(
         "$(location sum.loom)",
         "$(location scalar_memory.loom)",
         "$(location typed_addresses.loom)",
+        "$(location //loom/src/loom/test/corpus/source_low:numeric_boolean_comparison.loom-test)",
+        "$(location boolean.mjs)",
     ],
     data = [
+        "boolean.mjs",
         "scalar_memory.loom",
         "scalar_memory.mjs",
         "sum.loom",
         "sum.mjs",
         "typed_addresses.loom",
         "typed_addresses.mjs",
+        "//loom/src/loom/test/corpus/source_low:numeric_boolean_comparison.loom-test",
         "//loom/src/loom/tools/loom-compile",
     ],
     env_inherit = [

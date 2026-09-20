@@ -53,3 +53,28 @@ func.def public @boolean_comparisons(%left: i32, %right: i32) -> (i32) {
   %mask_9 = scalar.ori %mask_8, %uge_shifted : i32
   func.return %mask_9 : i32
 }
+
+// ====
+
+func.def public @boolean_constants() -> (i1, i1) {
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  func.return %false, %true : i1, i1
+}
+
+// ====
+
+func.def public @boolean_algebra(%lhs: i1, %rhs: i1) -> (i1, i1, i1) {
+  %and = scalar.andi %lhs, %rhs : i1
+  %or = scalar.ori %lhs, %rhs : i1
+  %xor = scalar.xori %lhs, %rhs : i1
+  func.return %and, %or, %xor : i1, i1, i1
+}
+
+// ====
+
+func.def public @boolean_unsigned_extensions(%input: i1) -> (i32, i64) {
+  %word = scalar.extui %input : i1 to i32
+  %wide = scalar.extui %input : i1 to i64
+  func.return %word, %wide : i32, i64
+}

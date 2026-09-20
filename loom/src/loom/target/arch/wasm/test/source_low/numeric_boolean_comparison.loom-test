@@ -1,5 +1,5 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_boolean_comparison.loom-test
-// RUN: emit source-low output=none
+// RUN: emit source-low output=low
 
 wasm.target<simd128> @target
 
@@ -7,9 +7,6 @@ func.def public target(@target) @boolean_comparisons(%left: i32, %right: i32) ->
   %c0 = scalar.constant 0 : i32
   %lhs = scalar.cmpi ne, %left, %c0 : i32
   %rhs = scalar.cmpi ne, %right, %c0 : i32
-  // ERROR@+3: WASM/001 {op_name="scalar.xori", field_name="lhs"}
-  // ERROR@+2: WASM/002 {op_name="scalar.constant", field_name="value"}
-  // ERROR@+1: WASM/001 {op_name="scalar.xori", field_name="lhs"}
   %eq = scalar.cmpi eq, %lhs, %rhs : i1
   %eq_bit = scalar.extui %eq : i1 to i32
   %ne = scalar.cmpi ne, %lhs, %rhs : i1
@@ -17,25 +14,21 @@ func.def public target(@target) @boolean_comparisons(%left: i32, %right: i32) ->
   %shift_1 = scalar.constant 1 : i32
   %ne_shifted = scalar.shli %ne_bit, %shift_1 : i32
   %mask_1 = scalar.ori %eq_bit, %ne_shifted : i32
-  // ERROR@+1: WASM/001 {op_name="scalar.xori", field_name="lhs"}
   %slt = scalar.cmpi slt, %lhs, %rhs : i1
   %slt_bit = scalar.extui %slt : i1 to i32
   %shift_2 = scalar.constant 2 : i32
   %slt_shifted = scalar.shli %slt_bit, %shift_2 : i32
   %mask_2 = scalar.ori %mask_1, %slt_shifted : i32
-  // ERROR@+1: WASM/001 {op_name="scalar.ori", field_name="lhs"}
   %sle = scalar.cmpi sle, %lhs, %rhs : i1
   %sle_bit = scalar.extui %sle : i1 to i32
   %shift_3 = scalar.constant 3 : i32
   %sle_shifted = scalar.shli %sle_bit, %shift_3 : i32
   %mask_3 = scalar.ori %mask_2, %sle_shifted : i32
-  // ERROR@+1: WASM/001 {op_name="scalar.xori", field_name="lhs"}
   %sgt = scalar.cmpi sgt, %lhs, %rhs : i1
   %sgt_bit = scalar.extui %sgt : i1 to i32
   %shift_4 = scalar.constant 4 : i32
   %sgt_shifted = scalar.shli %sgt_bit, %shift_4 : i32
   %mask_4 = scalar.ori %mask_3, %sgt_shifted : i32
-  // ERROR@+1: WASM/001 {op_name="scalar.ori", field_name="lhs"}
   %sge = scalar.cmpi sge, %lhs, %rhs : i1
   %sge_bit = scalar.extui %sge : i1 to i32
   %shift_5 = scalar.constant 5 : i32
@@ -62,4 +55,101 @@ func.def public target(@target) @boolean_comparisons(%left: i32, %right: i32) ->
   %uge_shifted = scalar.shli %uge_bit, %shift_9 : i32
   %mask_9 = scalar.ori %mask_8, %uge_shifted : i32
   func.return %mask_9 : i32
+}
+
+// ----
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @boolean_comparisons(%left: reg<wasm.i32>, %right: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %c0 = i32.const 0
+  %lhs = i32.ne %left, %c0
+  %rhs = i32.ne %right, %c0
+  %ne_bit = i32.xor %lhs, %rhs
+  %88 = i32.const 1
+  %eq_bit = i32.xor %ne_bit, %88
+  %ne_shifted = i32.shl %ne_bit, %88
+  %mask_1 = i32.or %eq_bit, %ne_shifted
+  %93 = i32.xor %rhs, %88
+  %slt_bit = i32.and %93, %lhs
+  %shift_2 = i32.const 2
+  %slt_shifted = i32.shl %slt_bit, %shift_2
+  %mask_2 = i32.or %mask_1, %slt_shifted
+  %sle_bit = i32.or %93, %lhs
+  %shift_3 = i32.const 3
+  %sle_shifted = i32.shl %sle_bit, %shift_3
+  %mask_3 = i32.or %mask_2, %sle_shifted
+  %102 = i32.xor %lhs, %88
+  %sgt_bit = i32.and %102, %rhs
+  %shift_4 = i32.const 4
+  %sgt_shifted = i32.shl %sgt_bit, %shift_4
+  %mask_4 = i32.or %mask_3, %sgt_shifted
+  %sge_bit = i32.or %102, %rhs
+  %shift_5 = i32.const 5
+  %sge_shifted = i32.shl %sge_bit, %shift_5
+  %mask_5 = i32.or %mask_4, %sge_shifted
+  %shift_6 = i32.const 6
+  %ult_shifted = i32.shl %sgt_bit, %shift_6
+  %mask_6 = i32.or %mask_5, %ult_shifted
+  %shift_7 = i32.const 7
+  %ule_shifted = i32.shl %sge_bit, %shift_7
+  %mask_7 = i32.or %mask_6, %ule_shifted
+  %shift_8 = i32.const 8
+  %ugt_shifted = i32.shl %slt_bit, %shift_8
+  %mask_8 = i32.or %mask_7, %ugt_shifted
+  %shift_9 = i32.const 9
+  %uge_shifted = i32.shl %sle_bit, %shift_9
+  %mask_9 = i32.or %mask_8, %uge_shifted
+  return %mask_9
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def public target(@target) @boolean_constants() -> (i1, i1) {
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  func.return %false, %true : i1, i1
+}
+
+// ----
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @boolean_constants() -> (reg<wasm.i32>, reg<wasm.i32>) asm {
+  %false = i32.const 0
+  %true = i32.const 1
+  return %false, %true
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def public target(@target) @boolean_algebra(%lhs: i1, %rhs: i1) -> (i1, i1, i1) {
+  %and = scalar.andi %lhs, %rhs : i1
+  %or = scalar.ori %lhs, %rhs : i1
+  %xor = scalar.xori %lhs, %rhs : i1
+  func.return %and, %or, %xor : i1, i1, i1
+}
+
+// ----
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @boolean_algebra(%lhs: reg<wasm.i32>, %rhs: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) asm {
+  %and = i32.and %lhs, %rhs
+  %or = i32.or %lhs, %rhs
+  %xor = i32.xor %lhs, %rhs
+  return %and, %or, %xor
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def public target(@target) @boolean_unsigned_extensions(%input: i1) -> (i32, i64) {
+  %word = scalar.extui %input : i1 to i32
+  %wide = scalar.extui %input : i1 to i64
+  func.return %word, %wide : i32, i64
+}
+
+// ----
+low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @boolean_unsigned_extensions(%word: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i64>) asm {
+  %11 = i64.const 1
+  %12 = i64.const 0
+  %wide = i64.select %11, %12, %word
+  return %word, %wide
 }

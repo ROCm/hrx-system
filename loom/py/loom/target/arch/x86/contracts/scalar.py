@@ -307,9 +307,6 @@ def _const_scalar_i64_rule(
 def _const_i32_rule(
     result_type: TypePattern,
     descriptor_lookup: _DescriptorLookup,
-    *,
-    minimum: int = _I32_MIN,
-    maximum: int = _I32_MAX,
 ) -> DescriptorRule:
     descriptor = descriptor_lookup("x86.scalar.movimm.gpr32")
     return DescriptorRule(
@@ -318,13 +315,33 @@ def _const_i32_rule(
         guards=(
             Guard.attr_kind("value", "i64"),
             Guard.value_type("result", result_type),
-            Guard.i64_range("value", minimum, maximum),
+            Guard.i64_range("value", _I32_MIN, _I32_MAX),
         ),
         emit=(
             EmitDescriptorOp(
                 descriptor=descriptor,
                 results={"dst": ValueRef.result("result")},
                 immediates={"imm32": AttrProject.direct("value")},
+                form=DescriptorEmitForm.CONST,
+            ),
+        ),
+    )
+
+
+def _const_i1_rule(descriptor_lookup: _DescriptorLookup) -> DescriptorRule:
+    descriptor = descriptor_lookup("x86.scalar.movimm.gpr32")
+    return DescriptorRule(
+        source_op=scalar_conversion.scalar_constant,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("result", _I1),
+            Guard.value_exact_i64("result"),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                results={"dst": ValueRef.result("result")},
+                immediates={"imm32": ValueProject.exact_i64("result")},
                 form=DescriptorEmitForm.CONST,
             ),
         ),
@@ -1546,7 +1563,7 @@ def _cases() -> Sequence[ContractCase]:
             )
         ),
         _const_i32_rule(_I32, descriptor_lookup),
-        _const_i32_rule(_I1, descriptor_lookup, minimum=0, maximum=1),
+        _const_i1_rule(descriptor_lookup),
         _const_scalar_i64_rule(descriptor_lookup),
         _index_const_i64_rule(_INDEX, descriptor_lookup),
         _index_const_i64_rule(_OFFSET, descriptor_lookup),

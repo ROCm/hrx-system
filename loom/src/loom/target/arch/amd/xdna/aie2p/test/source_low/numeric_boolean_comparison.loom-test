@@ -111,3 +111,65 @@ low.func.def public target<amd.xdna.aie2p.core>(@target) abi(object_function) @b
   %mask_9 = or %mask_8, %uge_shifted
   return %mask_9
 }
+
+// ====
+
+aie2p.target<core> @target
+
+func.def public target(@target) @boolean_constants() -> (i1, i1) {
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  func.return %false, %true : i1, i1
+}
+
+// ----
+low.func.def public target<amd.xdna.aie2p.core>(@target) abi(object_function) @boolean_constants() -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+  %false = mov.short 0
+  %true = mov.short 1
+  return %false, %true
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def public target(@target) @boolean_algebra(%lhs: i1, %rhs: i1) -> (i1, i1, i1) {
+  %and = scalar.andi %lhs, %rhs : i1
+  %or = scalar.ori %lhs, %rhs : i1
+  %xor = scalar.xori %lhs, %rhs : i1
+  func.return %and, %or, %xor : i1, i1, i1
+}
+
+// ----
+low.func.def public target<amd.xdna.aie2p.core>(@target) abi(object_function) @boolean_algebra(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %and = and %lhs, %rhs
+  %or = or %lhs, %rhs
+  %xor = xor %lhs, %rhs
+  return %and, %or, %xor
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def public target(@target) @boolean_unsigned_extensions(%input: i1) -> (i32, i64) {
+  %word = scalar.extui %input : i1 to i32
+  %wide = scalar.extui %input : i1 to i64
+  func.return %word, %wide : i32, i64
+}
+
+// ----
+low.func.def public target<amd.xdna.aie2p.core>(@target) abi(object_function) @boolean_unsigned_extensions(%input: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er x2>) asm {
+  %14 = mov.short 1
+  %15 = mov.short 0
+  %16 = copy %input : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %word = sel.nez %14, %15, %16
+  %18 = mov.i32 1
+  %19 = mov.i32 0
+  %28 = copy %input : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %29 = sel.nez %18, %19, %28
+  %30 = copy %input : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %31 = sel.nez %19, %19, %30
+  %wide = concat(%29, %31) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  return %word, %wide
+}

@@ -207,6 +207,26 @@ def _const_i32_rule(source_op: Op, result_type: TypePattern) -> DescriptorRule:
     )
 
 
+def _const_i1_rule() -> DescriptorRule:
+    descriptor = _descriptor("wasm.i32.const")
+    return DescriptorRule(
+        source_op=scalar_conversion.scalar_constant,
+        descriptor=descriptor,
+        guards=(
+            _value_type("result", _I1),
+            Guard.value_exact_i64("result"),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                results={"dst": ValueRef.result("result")},
+                immediates={"i32_value": ValueProject.exact_i64("result")},
+                form=DescriptorEmitForm.CONST,
+            ),
+        ),
+    )
+
+
 def _const_i64_rule(source_op: Op, result_type: TypePattern) -> DescriptorRule:
     descriptor = _descriptor("wasm.i64.const")
     return DescriptorRule(
@@ -770,7 +790,14 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
                 (scalar_bitwise.scalar_shrui, "shr_u"),
             )
         ),
-        _binary_rule(scalar_bitwise.scalar_andi, _I1, "wasm.i32.and"),
+        *(
+            _binary_rule(source_op, _I1, f"wasm.i32.{operation}")
+            for source_op, operation in (
+                (scalar_bitwise.scalar_andi, "and"),
+                (scalar_bitwise.scalar_ori, "or"),
+                (scalar_bitwise.scalar_xori, "xor"),
+            )
+        ),
         _binary_rule(scalar_arithmetic.scalar_addf, _F32, "wasm.f32.add"),
         *(
             _scalar_compare_rule(
@@ -825,6 +852,7 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
         _masked_extui_rule(_I8, 0xFF),
         _masked_extui_rule(_I16, 0xFFFF),
         _const_i32_rule(scalar_conversion.scalar_constant, _I32),
+        _const_i1_rule(),
         _const_i64_rule(scalar_conversion.scalar_constant, _I64),
         _const_float_rule(_F32, "wasm.f32.const"),
         _const_float_rule(_F64, "wasm.f64.const"),

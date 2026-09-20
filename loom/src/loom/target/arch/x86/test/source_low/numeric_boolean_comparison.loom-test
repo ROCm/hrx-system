@@ -1,5 +1,5 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_boolean_comparison.loom-test
-// RUN: emit source-low output=none
+// RUN: emit source-low output=low
 
 x86.target<avx2> @target
 
@@ -7,7 +7,6 @@ func.def public target(@target) @boolean_comparisons(%left: i32, %right: i32) ->
   %c0 = scalar.constant 0 : i32
   %lhs = scalar.cmpi ne, %left, %c0 : i32
   %rhs = scalar.cmpi ne, %right, %c0 : i32
-  // ERROR@+1: TARGET/003 {op_name="scalar.constant", constraint_key="attr_kind.i64"}
   %eq = scalar.cmpi eq, %lhs, %rhs : i1
   %eq_bit = scalar.extui %eq : i1 to i32
   %ne = scalar.cmpi ne, %lhs, %rhs : i1
@@ -56,4 +55,123 @@ func.def public target(@target) @boolean_comparisons(%left: i32, %right: i32) ->
   %uge_shifted = scalar.shli %uge_bit, %shift_9 : i32
   %mask_9 = scalar.ori %mask_8, %uge_shifted : i32
   func.return %mask_9 : i32
+}
+
+// ----
+low.func.def public target<x86.avx2.core>(@target) abi(object_function) @boolean_comparisons(%left: reg<x86.gpr32>, %right: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %c0 = mov.imm32 0
+  %lhs = cmp.ne.gpr32 %left, %c0
+  %rhs = cmp.ne.gpr32 %right, %c0
+  %87 = copy %lhs : reg<x86.gpr32> -> reg<x86.gpr32>
+  %ne_bit = xor.gpr32 %87, %rhs
+  %89 = mov.imm32 1
+  %90 = copy %ne_bit : reg<x86.gpr32> -> reg<x86.gpr32>
+  %eq_bit = xor.gpr32 %90, %89
+  %92 = copy %ne_bit : reg<x86.gpr32> -> reg<x86.gpr32>
+  %ne_shifted = shl.imm.gpr32 %92 {shift = 1}
+  %94 = copy %eq_bit : reg<x86.gpr32> -> reg<x86.gpr32>
+  %mask_1 = or.gpr32 %94, %ne_shifted
+  %96 = copy %rhs : reg<x86.gpr32> -> reg<x86.gpr32>
+  %97 = xor.gpr32 %96, %89
+  %98 = copy %97 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %slt_bit = and.gpr32 %98, %lhs
+  %100 = copy %slt_bit : reg<x86.gpr32> -> reg<x86.gpr32>
+  %slt_shifted = shl.imm.gpr32 %100 {shift = 2}
+  %102 = copy %mask_1 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %mask_2 = or.gpr32 %102, %slt_shifted
+  %104 = copy %97 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %sle_bit = or.gpr32 %104, %lhs
+  %106 = copy %sle_bit : reg<x86.gpr32> -> reg<x86.gpr32>
+  %sle_shifted = shl.imm.gpr32 %106 {shift = 3}
+  %108 = copy %mask_2 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %mask_3 = or.gpr32 %108, %sle_shifted
+  %110 = copy %lhs : reg<x86.gpr32> -> reg<x86.gpr32>
+  %111 = xor.gpr32 %110, %89
+  %112 = copy %111 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %sgt_bit = and.gpr32 %112, %rhs
+  %114 = copy %sgt_bit : reg<x86.gpr32> -> reg<x86.gpr32>
+  %sgt_shifted = shl.imm.gpr32 %114 {shift = 4}
+  %116 = copy %mask_3 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %mask_4 = or.gpr32 %116, %sgt_shifted
+  %118 = copy %111 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %sge_bit = or.gpr32 %118, %rhs
+  %120 = copy %sge_bit : reg<x86.gpr32> -> reg<x86.gpr32>
+  %sge_shifted = shl.imm.gpr32 %120 {shift = 5}
+  %122 = copy %mask_4 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %mask_5 = or.gpr32 %122, %sge_shifted
+  %124 = copy %sgt_bit : reg<x86.gpr32> -> reg<x86.gpr32>
+  %ult_shifted = shl.imm.gpr32 %124 {shift = 6}
+  %126 = copy %mask_5 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %mask_6 = or.gpr32 %126, %ult_shifted
+  %128 = copy %sge_bit : reg<x86.gpr32> -> reg<x86.gpr32>
+  %ule_shifted = shl.imm.gpr32 %128 {shift = 7}
+  %130 = copy %mask_6 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %mask_7 = or.gpr32 %130, %ule_shifted
+  %132 = copy %slt_bit : reg<x86.gpr32> -> reg<x86.gpr32>
+  %ugt_shifted = shl.imm.gpr32 %132 {shift = 8}
+  %134 = copy %mask_7 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %mask_8 = or.gpr32 %134, %ugt_shifted
+  %136 = copy %sle_bit : reg<x86.gpr32> -> reg<x86.gpr32>
+  %uge_shifted = shl.imm.gpr32 %136 {shift = 9}
+  %138 = copy %mask_8 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %mask_9 = or.gpr32 %138, %uge_shifted
+  return %mask_9
+}
+
+// ====
+
+x86.target<avx2> @target
+
+func.def public target(@target) @boolean_constants() -> (i1, i1) {
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  func.return %false, %true : i1, i1
+}
+
+// ----
+low.func.def public target<x86.avx2.core>(@target) abi(object_function) @boolean_constants() -> (reg<x86.gpr32>, reg<x86.gpr32>) asm {
+  %false = mov.imm32 0
+  %true = mov.imm32 1
+  return %false, %true
+}
+
+// ====
+
+x86.target<avx2> @target
+
+func.def public target(@target) @boolean_algebra(%lhs: i1, %rhs: i1) -> (i1, i1, i1) {
+  %and = scalar.andi %lhs, %rhs : i1
+  %or = scalar.ori %lhs, %rhs : i1
+  %xor = scalar.xori %lhs, %rhs : i1
+  func.return %and, %or, %xor : i1, i1, i1
+}
+
+// ----
+low.func.def public target<x86.avx2.core>(@target) abi(object_function) @boolean_algebra(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>) asm {
+  %13 = copy %lhs : reg<x86.gpr32> -> reg<x86.gpr32>
+  %and = and.gpr32 %13, %rhs
+  %15 = copy %lhs : reg<x86.gpr32> -> reg<x86.gpr32>
+  %or = or.gpr32 %15, %rhs
+  %17 = copy %lhs : reg<x86.gpr32> -> reg<x86.gpr32>
+  %xor = xor.gpr32 %17, %rhs
+  return %and, %or, %xor
+}
+
+// ====
+
+x86.target<avx2> @target
+
+func.def public target(@target) @boolean_unsigned_extensions(%input: i1) -> (i32, i64) {
+  %word = scalar.extui %input : i1 to i32
+  %wide = scalar.extui %input : i1 to i64
+  func.return %word, %wide : i32, i64
+}
+
+// ----
+low.func.def public target<x86.avx2.core>(@target) abi(object_function) @boolean_unsigned_extensions(%word: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr64>) asm {
+  %11 = mov.imm64 1
+  %12 = mov.imm64 0
+  %13 = copy %12 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %wide = select.gpr64 %word, %11, %13
+  return %word, %wide
 }

@@ -106,3 +106,60 @@ low.func.def public target<llvmir.generic.core>(@target) abi(object_function) @b
   %mask_9 = or.i32 %mask_8, %uge_shifted
   return %mask_9
 }
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def public target(@target) @boolean_constants() -> (i1, i1) {
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  func.return %false, %true : i1, i1
+}
+
+// ----
+low.func.def public target<llvmir.generic.core>(@target) abi(object_function) @boolean_constants() -> (reg<llvmir.i1>, reg<llvmir.i1>) asm {
+  %false = const.i1 0
+  %true = const.i1 1
+  return %false, %true
+}
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def public target(@target) @boolean_algebra(%lhs: i1, %rhs: i1) -> (i1, i1, i1) {
+  %and = scalar.andi %lhs, %rhs : i1
+  %or = scalar.ori %lhs, %rhs : i1
+  %xor = scalar.xori %lhs, %rhs : i1
+  func.return %and, %or, %xor : i1, i1, i1
+}
+
+// ----
+low.func.def public target<llvmir.generic.core>(@target) abi(object_function) @boolean_algebra(%lhs: reg<llvmir.i1>, %rhs: reg<llvmir.i1>) -> (reg<llvmir.i1>, reg<llvmir.i1>, reg<llvmir.i1>) asm {
+  %and = and.i1 %lhs, %rhs
+  %or = or.i1 %lhs, %rhs
+  %xor = xor.i1 %lhs, %rhs
+  return %and, %or, %xor
+}
+
+// ====
+
+llvmir.target<object> @target {data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128", triple = "loom-direct64-unknown-none"}
+
+func.def public target(@target) @boolean_unsigned_extensions(%input: i1) -> (i32, i64) {
+  %word = scalar.extui %input : i1 to i32
+  %wide = scalar.extui %input : i1 to i64
+  func.return %word, %wide : i32, i64
+}
+
+// ----
+low.func.def public target<llvmir.generic.core>(@target) abi(object_function) @boolean_unsigned_extensions(%input: reg<llvmir.i1>) -> (reg<llvmir.i32>, reg<llvmir.i64>) asm {
+  %14 = const.i32 1
+  %15 = const.i32 0
+  %word = select.i32 %input, %14, %15
+  %17 = const.i64 1
+  %18 = const.i64 0
+  %wide = select.i64 %input, %17, %18
+  return %word, %wide
+}

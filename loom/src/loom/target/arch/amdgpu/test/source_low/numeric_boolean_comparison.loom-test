@@ -119,3 +119,67 @@ low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @
   %mask_9 = s_or_b32 %mask_8, %uge_shifted
   return %mask_9
 }
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def public target(@target) @boolean_constants() -> (i1, i1) {
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  func.return %false, %true : i1, i1
+}
+
+// ----
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @boolean_constants() -> (reg<amdgpu.scc>, reg<amdgpu.scc>) asm {
+  %6 = s_mov_b32 0
+  %false = s_cmp_lg_i32 %6, %6
+  %true = s_cmp_eq_i32 %6, %6
+  return %false, %true
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def public target(@target) @boolean_algebra(%lhs: i1, %rhs: i1) -> (i1, i1, i1) {
+  %and = scalar.andi %lhs, %rhs : i1
+  %or = scalar.ori %lhs, %rhs : i1
+  %xor = scalar.xori %lhs, %rhs : i1
+  func.return %and, %or, %xor : i1, i1, i1
+}
+
+// ----
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @boolean_algebra(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.scc>, reg<amdgpu.scc>, reg<amdgpu.scc>) asm {
+  %13 = s_mov_b32 0
+  %14 = s_and_b32 %lhs, %rhs
+  %and = s_cmp_lg_i32 %14, %13
+  %17 = s_or_b32 %lhs, %rhs
+  %or = s_cmp_lg_i32 %17, %13
+  %20 = s_xor_b32 %lhs, %rhs
+  %xor = s_cmp_lg_i32 %20, %13
+  return %and, %or, %xor
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def public target(@target) @boolean_unsigned_extensions(%input: i1) -> (i32, i64) {
+  %word = scalar.extui %input : i1 to i32
+  %wide = scalar.extui %input : i1 to i64
+  func.return %word, %wide : i32, i64
+}
+
+// ----
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @boolean_unsigned_extensions(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>) asm {
+  %14 = s_mov_b32 1
+  %15 = s_mov_b32 0
+  %16 = s_cmp_lg_i32_src1_inline %input {rhs = 0}
+  %word = s_cselect_b32 %14, %15, %16
+  %24 = s_cmp_lg_i32_src1_inline %input {rhs = 0}
+  %27 = s_cselect_b32 %14, %15, %24
+  %30 = s_cselect_b32 %15, %15, %24
+  %wide = concat(%27, %30) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  return %word, %wide
+}

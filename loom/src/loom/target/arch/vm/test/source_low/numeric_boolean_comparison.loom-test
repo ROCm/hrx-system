@@ -106,3 +106,56 @@ low.func.def public target<vm.core>(@target) abi(vm_function) @boolean_compariso
   %mask_9 = integer.or.i32 %mask_8, %uge_shifted
   return %mask_9
 }
+
+// ====
+
+vm.target<core> @target
+
+func.def public target(@target) @boolean_constants() -> (i1, i1) {
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  func.return %false, %true : i1, i1
+}
+
+// ----
+low.func.def public target<vm.core>(@target) abi(vm_function) @boolean_constants() -> (reg<vm.value : i1>, reg<vm.value : i1>) asm {
+  %false = constant.i32 0 : reg<vm.value : i1>
+  %true = constant.i32 1 : reg<vm.value : i1>
+  return %false, %true
+}
+
+// ====
+
+vm.target<core> @target
+
+func.def public target(@target) @boolean_algebra(%lhs: i1, %rhs: i1) -> (i1, i1, i1) {
+  %and = scalar.andi %lhs, %rhs : i1
+  %or = scalar.ori %lhs, %rhs : i1
+  %xor = scalar.xori %lhs, %rhs : i1
+  func.return %and, %or, %xor : i1, i1, i1
+}
+
+// ----
+low.func.def public target<vm.core>(@target) abi(vm_function) @boolean_algebra(%lhs: reg<vm.value : i1>, %rhs: reg<vm.value : i1>) -> (reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>) asm {
+  %and = integer.and.i32 %lhs, %rhs : reg<vm.value : i1>
+  %or = integer.or.i32 %lhs, %rhs : reg<vm.value : i1>
+  %xor = integer.xor.i32 %lhs, %rhs : reg<vm.value : i1>
+  return %and, %or, %xor
+}
+
+// ====
+
+vm.target<core> @target
+
+func.def public target(@target) @boolean_unsigned_extensions(%input: i1) -> (i32, i64) {
+  %word = scalar.extui %input : i1 to i32
+  %wide = scalar.extui %input : i1 to i64
+  func.return %word, %wide : i32, i64
+}
+
+// ----
+low.func.def public target<vm.core>(@target) abi(vm_function) @boolean_unsigned_extensions(%input: reg<vm.value : i1>) -> (reg<vm.value : i32>, reg<vm.value : i64>) asm {
+  %word = conversion.integer %input, 5 : reg<vm.value : i32>
+  %wide = conversion.integer %input, 7
+  return %word, %wide
+}
