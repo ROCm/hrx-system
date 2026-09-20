@@ -752,7 +752,14 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
         state->arena, state->call_node_count, sizeof(*state->call_node_indices),
         (void**)&state->call_node_indices));
   }
+  if (state->return_node_count) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(state->arena, state->return_node_count,
+                                  sizeof(*state->return_node_indices),
+                                  (void**)&state->return_node_indices));
+  }
   iree_host_size_t call_index = 0;
+  iree_host_size_t return_index = 0;
   for (iree_host_size_t node_index = 0; node_index < node_count; ++node_index) {
     const loom_low_schedule_node_t* node = &state->nodes[node_index];
     if (node->descriptor != NULL) {
@@ -764,6 +771,9 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
       }
       structural_memory_node_count += iree_any_bit_set(
           node->traits, LOOM_TRAIT_READS_MEMORY | LOOM_TRAIT_WRITES_MEMORY);
+    }
+    if (loom_low_return_isa(node->op)) {
+      state->return_node_indices[return_index++] = (uint32_t)node_index;
     }
     const loom_low_schedule_class_t* schedule_class = node->schedule_class;
     has_resource_uses |=
@@ -1897,6 +1907,8 @@ static iree_status_t loom_low_schedule_build(
         .scopes = state.scopes,
         .call_node_indices = state.call_node_indices,
         .call_node_count = state.call_node_count,
+        .return_node_indices = state.return_node_indices,
+        .return_node_count = state.return_node_count,
         .dependency_group_count = state.dependency_index.group_count,
         .unlock_summary_publication_count =
             state.unlock_summary_publication_count,

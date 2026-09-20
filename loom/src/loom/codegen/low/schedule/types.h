@@ -745,6 +745,10 @@ typedef struct loom_low_schedule_table_t {
   // Number of entries in |call_node_indices|. Leaves have no call-table
   // storage.
   iree_host_size_t call_node_count;
+  // Source-ordered low.return node indices retained for ABI frame planning.
+  const uint32_t* return_node_indices;
+  // Number of entries in |return_node_indices|.
+  iree_host_size_t return_node_count;
   // Authored per-instance scope identities and control-flow entry states.
   loom_low_schedule_scopes_t scopes;
   // Stable ordering dependency graph consumed by scheduling and target

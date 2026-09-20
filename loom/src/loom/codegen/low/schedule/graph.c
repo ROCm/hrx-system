@@ -1491,6 +1491,7 @@ iree_status_t loom_low_schedule_fill_nodes(
       }
       if (loom_low_return_isa(op)) {
         node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_PROGRAM_EXIT_MEMORY;
+        ++state->return_node_count;
       }
       if ((loom_low_copy_isa(op) && loom_low_copy_detached(op)) ||
           (loom_low_move_isa(op) && loom_low_move_detached(op))) {

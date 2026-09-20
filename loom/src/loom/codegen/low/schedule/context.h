@@ -233,6 +233,10 @@ typedef struct loom_low_schedule_build_state_t {
   uint32_t* call_node_indices;
   // Exact call-node count established before allocating the call index.
   iree_host_size_t call_node_count;
+  // Source-ordered return nodes populated by the scheduler's collection walk.
+  uint32_t* return_node_indices;
+  // Exact return-node count established before allocating the return index.
+  iree_host_size_t return_node_count;
   // Per-block liveness order records populated as nodes are scheduled.
   loom_liveness_block_order_t* liveness_block_orders;
   // Operation pointers in final scheduled order.

@@ -50,6 +50,57 @@ endif()
 if(LOOM_TARGET_ARCH_X86)
 loom_cc_library(
   NAME
+    sysv_frame
+  HDRS
+    "sysv_frame.h"
+  SRCS
+    "sysv_frame.c"
+  DEPS
+    ::register_classes
+    ::sysv_abi
+    iree::base
+    iree::base::internal
+    iree::base::internal::arena
+    loom::codegen::low::allocation
+    loom::codegen::low::allocation::move
+    loom::codegen::low::allocation::move_sequence
+    loom::codegen::low::allocation::storage
+    loom::codegen::low::frame
+    loom::codegen::low::storage_layout
+    loom::ir
+    loom::ops::low
+    loom::target::registers
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
+loom_cc_test(
+  NAME
+    sysv_frame_test
+  SRCS
+    "sysv_frame_test.cc"
+  DEPS
+    ::sysv_frame
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::frame
+    loom::codegen::low::text_asm
+    loom::format::text::parser
+    loom::ir
+    loom::ops::low
+    loom::target::arch::x86::descriptors::low_registry
+    loom::target::arch::x86::ops
+    loom::testing::context
+    loom::testing::module_ptr
+  LABELS
+    "iree-build-requirement=loom.target.arch.x86"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
+loom_cc_library(
+  NAME
     feature_bits
   HDRS
     "feature_bits.h"

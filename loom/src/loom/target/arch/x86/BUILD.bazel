@@ -70,6 +70,48 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "sysv_frame",
+    srcs = ["sysv_frame.c"],
+    hdrs = ["sysv_frame.h"],
+    visibility = _X86_NATIVE_VISIBILITY,
+    deps = [
+        ":register_classes",
+        ":sysv_abi",
+        "//loom/src/loom/codegen/low:allocation",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/codegen/low:storage_layout",
+        "//loom/src/loom/codegen/low/allocation:move",
+        "//loom/src/loom/codegen/low/allocation:move_sequence",
+        "//loom/src/loom/codegen/low/allocation:storage",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:registers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "sysv_frame_test",
+    srcs = ["sysv_frame_test.cc"],
+    deps = [
+        ":sysv_frame",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target/arch/x86/descriptors:low_registry",
+        "//loom/src/loom/target/arch/x86/ops",
+        "//loom/src/loom/testing:context",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "feature_bits",
     hdrs = ["feature_bits.h"],
     visibility = _X86_LLVMIR_VISIBILITY + _X86_RECORDS_VISIBILITY,
