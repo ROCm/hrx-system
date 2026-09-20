@@ -40,6 +40,56 @@ endif()
 if(LOOM_TARGET_ARCH_X86)
 loom_cc_library(
   NAME
+    function
+  HDRS
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/x86/descriptors/encoding_defs.h"
+    "function.h"
+  SRCS
+    "function.c"
+  DEPS
+    iree::base
+    iree::base::internal
+    iree::base::internal::arena
+    loom::codegen::low::frame
+    loom::codegen::low::packet
+    loom::ir
+    loom::ops::low
+    loom::target::arch::x86::descriptors::avx512_packed_dot_descriptors
+    loom::target::arch::x86::register_classes
+    loom::target::arch::x86::sysv_frame
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
+loom_cc_test(
+  NAME
+    function_test
+  SRCS
+    "function_test.cc"
+  DEPS
+    ::function
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::frame
+    loom::codegen::low::text_asm
+    loom::format::text::parser
+    loom::ir
+    loom::ops::low
+    loom::target::arch::x86::descriptors::low_registry
+    loom::target::arch::x86::ops
+    loom::target::arch::x86::sysv_abi
+    loom::target::arch::x86::sysv_frame
+    loom::testing::context
+    loom::testing::module_ptr
+  LABELS
+    "iree-build-requirement=loom.target.arch.x86"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
+loom_cc_library(
+  NAME
     loom_check
   HDRS
     "check/loom_check.h"

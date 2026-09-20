@@ -181,7 +181,7 @@ loom_cc_library(
     name = "low_registry",
     srcs = ["low_registry.c"],
     hdrs = ["low_registry.h"],
-    visibility = _X86_ROOT_VISIBILITY,
+    visibility = _X86_NATIVE_VISIBILITY + _X86_ROOT_VISIBILITY,
     deps = [
         ":avx10_2_descriptors",
         ":avx2_descriptors",

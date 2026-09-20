@@ -17,6 +17,8 @@ package(
 
 _X86_ROOT_VISIBILITY = ["//loom/src/loom/target/arch/x86:__pkg__"]
 
+_X86_NATIVE_VISIBILITY = ["//loom/src/loom/target/emit/native/x86:__pkg__"]
+
 loom_generated_cc_library(
     name = "ops",
     srcs = [
@@ -36,7 +38,7 @@ loom_generated_cc_library(
         "tables.c",
     ],
     generator = "//loom/py/loom/gen/ops:c_tables_x86_generator",
-    visibility = _X86_ROOT_VISIBILITY,
+    visibility = _X86_NATIVE_VISIBILITY + _X86_ROOT_VISIBILITY,
     deps = [
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
