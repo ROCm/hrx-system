@@ -169,11 +169,7 @@ typedef enum loom_inline_blocker_e {
   LOOM_INLINE_BLOCKER_CALLEE_BODY_MISSING_TERMINATOR = 13,
   LOOM_INLINE_BLOCKER_CALLEE_BODY_INVALID_TERMINATOR = 14,
   LOOM_INLINE_BLOCKER_OPERAND_COUNT_MISMATCH = 15,
-  LOOM_INLINE_BLOCKER_INVALID_OPERAND_OR_ARGUMENT = 16,
-  LOOM_INLINE_BLOCKER_OPERAND_TYPE_MISMATCH = 17,
   LOOM_INLINE_BLOCKER_RETURN_COUNT_MISMATCH = 18,
-  LOOM_INLINE_BLOCKER_INVALID_RETURN_OR_RESULT = 19,
-  LOOM_INLINE_BLOCKER_RESULT_TYPE_MISMATCH = 20,
   LOOM_INLINE_BLOCKER_TARGET_REQUIRES_INLINE = 21,
   LOOM_INLINE_BLOCKER_LOW_CALLEE_KIND = 22,
   LOOM_INLINE_BLOCKER_LOW_ALLOCATION = 23,
@@ -360,16 +356,8 @@ static iree_string_view_t loom_inline_blocker_code(
       return IREE_SV("callee_body_invalid_terminator");
     case LOOM_INLINE_BLOCKER_OPERAND_COUNT_MISMATCH:
       return IREE_SV("operand_count_mismatch");
-    case LOOM_INLINE_BLOCKER_INVALID_OPERAND_OR_ARGUMENT:
-      return IREE_SV("invalid_operand_or_argument");
-    case LOOM_INLINE_BLOCKER_OPERAND_TYPE_MISMATCH:
-      return IREE_SV("operand_type_mismatch");
     case LOOM_INLINE_BLOCKER_RETURN_COUNT_MISMATCH:
       return IREE_SV("return_count_mismatch");
-    case LOOM_INLINE_BLOCKER_INVALID_RETURN_OR_RESULT:
-      return IREE_SV("invalid_return_or_result");
-    case LOOM_INLINE_BLOCKER_RESULT_TYPE_MISMATCH:
-      return IREE_SV("result_type_mismatch");
     case LOOM_INLINE_BLOCKER_TARGET_REQUIRES_INLINE:
       return IREE_SV("target_requires_inline");
     case LOOM_INLINE_BLOCKER_LOW_CALLEE_KIND:
@@ -922,44 +910,18 @@ static loom_inline_blocker_t loom_inline_validate_inline_body(
     }
   }
 
+  // Function contracts are verified at the input boundary. Caller types may
+  // have been refined since then; materialization substitutes the actual
+  // arguments and remaps dependent dimensions/layouts in the cloned body.
   uint16_t arg_count = 0;
-  const loom_value_id_t* arg_ids =
-      loom_func_like_arg_ids(entry->callee, &arg_count);
+  loom_func_like_arg_ids(entry->callee, &arg_count);
   loom_value_slice_t call_operands = loom_call_like_operands(entry->call);
   if (arg_count != call_operands.count) {
     return LOOM_INLINE_BLOCKER_OPERAND_COUNT_MISMATCH;
   }
-  for (uint16_t i = 0; i < arg_count; ++i) {
-    if (arg_ids[i] >= module->values.count ||
-        call_operands.values[i] >= module->values.count) {
-      return LOOM_INLINE_BLOCKER_INVALID_OPERAND_OR_ARGUMENT;
-    }
-    loom_type_t arg_type = loom_module_value_type(module, arg_ids[i]);
-    loom_type_t operand_type =
-        loom_module_value_type(module, call_operands.values[i]);
-    if (!loom_type_equal(arg_type, operand_type)) {
-      return LOOM_INLINE_BLOCKER_OPERAND_TYPE_MISMATCH;
-    }
-  }
-
   loom_value_slice_t call_results = loom_call_like_results(entry->call);
   if (entry->callee.op->result_count != call_results.count) {
     return LOOM_INLINE_BLOCKER_RETURN_COUNT_MISMATCH;
-  }
-  const loom_value_id_t* callee_results =
-      loom_op_const_results(entry->callee.op);
-  for (uint16_t i = 0; i < call_results.count; ++i) {
-    if (callee_results[i] >= module->values.count ||
-        call_results.values[i] >= module->values.count) {
-      return LOOM_INLINE_BLOCKER_INVALID_RETURN_OR_RESULT;
-    }
-    loom_type_t callee_result_type =
-        loom_module_value_type(module, callee_results[i]);
-    loom_type_t result_type =
-        loom_module_value_type(module, call_results.values[i]);
-    if (!loom_type_equal(callee_result_type, result_type)) {
-      return LOOM_INLINE_BLOCKER_RESULT_TYPE_MISMATCH;
-    }
   }
 
   for (uint16_t block_index = 0; block_index < body->block_count;
@@ -986,19 +948,6 @@ static loom_inline_blocker_t loom_inline_validate_inline_body(
     }
     if (terminator->operand_count != call_results.count) {
       return LOOM_INLINE_BLOCKER_RETURN_COUNT_MISMATCH;
-    }
-    const loom_value_id_t* return_operands = loom_op_const_operands(terminator);
-    for (uint16_t i = 0; i < call_results.count; ++i) {
-      if (return_operands[i] >= module->values.count) {
-        return LOOM_INLINE_BLOCKER_INVALID_RETURN_OR_RESULT;
-      }
-      const loom_type_t return_type =
-          loom_module_value_type(module, return_operands[i]);
-      const loom_type_t result_type =
-          loom_module_value_type(module, call_results.values[i]);
-      if (!loom_type_equal(return_type, result_type)) {
-        return LOOM_INLINE_BLOCKER_RESULT_TYPE_MISMATCH;
-      }
     }
   }
 

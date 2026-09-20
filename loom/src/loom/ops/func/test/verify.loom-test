@@ -218,3 +218,17 @@ func.def @pure_template_calls_require_pure_providers() {
   template.call pure @impure_provider() : ()
   func.return
 }
+
+// ====
+
+// A view bound to a different layout remains an invalid public call contract.
+func.def inline @read(%layout: encoding<layout>, %input: view<4xf32, %layout>) -> (f32) {
+  %value = view.load %input[0] : view<4xf32, %layout> -> f32
+  func.return %value : f32
+}
+
+func.def public @wrong_layout(%layout: encoding<layout>, %other: encoding<layout>, %input: view<4xf32, %other>) -> (f32) {
+  // ERROR@+1: TYPE/001 "operand 1" "contract argument 1"
+  %value = func.call @read(%layout, %input) : (encoding<layout>, view<4xf32, %other>) -> (f32)
+  func.return %value : f32
+}

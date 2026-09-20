@@ -1,0 +1,96 @@
+// RUN: pass canonicalize,inline-callables
+
+// Both callers supply a layout-dependent view. Inlining clones the shared
+// helper and then consumes its last call without comparing raw layout IDs.
+func.def inline @first(%layout: encoding<layout>, %input: view<2x3xf32, %layout>) -> (f32) {
+  %value = view.load %input[0, 0] : view<2x3xf32, %layout> -> f32
+  func.return %value : f32
+}
+
+func.def public @row_major(%storage: buffer) -> (f32) {
+  %layout = encoding.layout.strided [3, 1] : encoding<layout>
+  %base = index.constant 0 : offset
+  %input = buffer.view %storage[%base] : buffer -> view<2x3xf32, %layout>
+  %result = func.call @first(%layout, %input) : (encoding<layout>, view<2x3xf32, %layout>) -> (f32)
+  func.return %result : f32
+}
+
+func.def public @column_major(%storage: buffer) -> (f32) {
+  %layout = encoding.layout.strided [1, 2] : encoding<layout>
+  %base = index.constant 0 : offset
+  %input = buffer.view %storage[%base] : buffer -> view<2x3xf32, %layout>
+  %result = func.call @first(%layout, %input) : (encoding<layout>, view<2x3xf32, %layout>) -> (f32)
+  func.return %result : f32
+}
+
+// ----
+func.def public @row_major(%storage: buffer) -> (f32) {
+  %layout = encoding.layout.strided [3, 1] : encoding<layout>
+  %base = index.constant 0 : offset
+  %input = buffer.view %storage[%base] : buffer -> view<2x3xf32, #encoding.layout.strided<strides=[3, 1]>>
+  %value = view.load %input[0, 0] : view<2x3xf32, #encoding.layout.strided<strides=[3, 1]>> -> f32
+  func.return %value : f32
+}
+
+func.def public @column_major(%storage: buffer) -> (f32) {
+  %layout = encoding.layout.strided [1, 2] : encoding<layout>
+  %base = index.constant 0 : offset
+  %input = buffer.view %storage[%base] : buffer -> view<2x3xf32, #encoding.layout.strided<strides=[1, 2]>>
+  %value = view.load %input[0, 0] : view<2x3xf32, #encoding.layout.strided<strides=[1, 2]>> -> f32
+  func.return %value : f32
+}
+
+// ====
+
+// A returned view can depend on a dimension supplied by the caller.
+func.def inline @forward(%extent: index, %input: view<[%extent]xf32>) -> (view<[%extent]xf32>) {
+  func.return %input : view<[%extent]xf32>
+}
+
+func.def public @forward_view(%length: index, %input: view<[%length]xf32>) -> (view<[%length]xf32>) {
+  %result = func.call @forward(%length, %input) : (index, view<[%length]xf32>) -> (view<[%length]xf32>)
+  func.return %result : view<[%length]xf32>
+}
+
+// ----
+func.def public @forward_view(%length: index, %input: view<[%length]xf32>) -> (view<[%length]xf32>) {
+  func.return %input : view<[%length]xf32>
+}
+
+// ====
+
+// The signature's extent result, the caller's size result, and the returned
+// argument name the same dimension in three distinct SSA scopes. Two callers
+// exercise result remapping during both clone and consuming materialization.
+func.def inline @make_view(%storage: buffer, %length: index) -> (%extent: index, view<[%extent]xf32>) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %storage[%base] : buffer -> view<[%length]xf32>
+  func.return %length, %view : index, view<[%length]xf32>
+}
+
+func.def public @consume_view(%storage: buffer, %length: index) {
+  %size, %view = func.call @make_view(%storage, %length) : (buffer, index) -> (index, view<[%size]xf32>)
+  test.use %view : view<[%size]xf32>
+  func.return
+}
+
+func.def public @consume_other_view(%storage: buffer, %length: index) {
+  %size, %view = func.call @make_view(%storage, %length) : (buffer, index) -> (index, view<[%size]xf32>)
+  test.use %view : view<[%size]xf32>
+  func.return
+}
+
+// ----
+func.def public @consume_view(%storage: buffer, %length: index) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %storage[%base] : buffer -> view<[%length]xf32>
+  test.use %view : view<[%length]xf32>
+  func.return
+}
+
+func.def public @consume_other_view(%storage: buffer, %length: index) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %storage[%base] : buffer -> view<[%length]xf32>
+  test.use %view : view<[%length]xf32>
+  func.return
+}

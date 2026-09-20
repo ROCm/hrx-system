@@ -8,7 +8,7 @@
 //
 // These helpers adapt generic IR remapping/materialization to function-like
 // operations. They do not decide inline profitability or import policy; callers
-// choose a call site and these helpers perform the checked mutation.
+// choose a verified call site and these helpers perform the mutation.
 
 #ifndef LOOM_REWRITE_CALLABLE_H_
 #define LOOM_REWRITE_CALLABLE_H_
@@ -67,9 +67,11 @@ bool loom_callable_call_site_allows_cfg_splice(const loom_module_t* module,
 
 // Inlines |callee| using |build_branch| for multi-block CFG edges.
 //
-// |build_branch| may be NULL for a callee with one returning block. All
-// callable, caller-region, body, entry, exit, arity, and type preconditions are
-// checked before the caller is mutated.
+// |build_branch| may be NULL for a callee with one returning block. The call
+// and callee must satisfy their verified function contract. Caller types may
+// carry refinements of that contract; materialization substitutes the arguments
+// and remaps dependent dimensions/layouts and co-result references. Structural
+// splice preconditions are checked before the caller is mutated.
 iree_status_t loom_callable_inline_call_with_branch(
     loom_rewriter_t* rewriter, loom_op_t* call_op, loom_func_like_t callee,
     loom_callable_build_branch_fn_t build_branch);

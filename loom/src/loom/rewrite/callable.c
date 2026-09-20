@@ -233,11 +233,6 @@ typedef struct loom_callable_cfg_body_t {
   bool entry_has_predecessor;
 } loom_callable_cfg_body_t;
 
-static bool loom_callable_value_is_valid(const loom_module_t* module,
-                                         loom_value_id_t value_id) {
-  return value_id != LOOM_VALUE_ID_INVALID && value_id < module->values.count;
-}
-
 static iree_status_t loom_callable_validate_cfg_body(
     const loom_module_t* module, const loom_op_t* call_op,
     loom_func_like_t callee, loom_call_like_t call,
@@ -279,26 +274,6 @@ static iree_status_t loom_callable_validate_cfg_body(
         IREE_STATUS_FAILED_PRECONDITION,
         "callee entry block argument count does not match its signature");
   }
-  for (uint16_t i = 0; i < argument_count; ++i) {
-    if (!loom_callable_value_is_valid(module, arguments[i]) ||
-        !loom_callable_value_is_valid(module, call_operands.values[i])) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "call operand and callee argument must be valid");
-    }
-    if (loom_block_arg_id(entry_block, i) != arguments[i]) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "callee entry block argument does not match its signature");
-    }
-    if (!loom_type_equal(
-            loom_module_value_type(module, arguments[i]),
-            loom_module_value_type(module, call_operands.values[i]))) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "call operand type does not match callee argument type");
-    }
-  }
-
   const loom_value_slice_t call_results = loom_call_like_results(call);
   if (call_results.count != callee.op->result_count) {
     return iree_make_status(
@@ -306,18 +281,11 @@ static iree_status_t loom_callable_validate_cfg_body(
         "call result count %u does not match callee result count %u",
         (unsigned)call_results.count, (unsigned)callee.op->result_count);
   }
-  const loom_value_id_t* callee_results = loom_op_const_results(callee.op);
-  for (uint16_t i = 0; i < call_results.count; ++i) {
-    if (!loom_callable_value_is_valid(module, call_results.values[i]) ||
-        !loom_callable_value_is_valid(module, callee_results[i])) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "call and callee results must be valid");
-    }
-    if (!loom_type_equal(loom_module_value_type(module, call_results.values[i]),
-                         loom_module_value_type(module, callee_results[i]))) {
+  for (uint16_t i = 0; i < argument_count; ++i) {
+    if (loom_block_arg_id(entry_block, i) != arguments[i]) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
-          "call result type does not match callee result type");
+          "callee entry block argument does not match its signature");
     }
   }
 
@@ -361,20 +329,6 @@ static iree_status_t loom_callable_validate_cfg_body(
           "callee return operand count %u does not match call result count %u",
           (unsigned)terminator->operand_count, (unsigned)call_results.count);
     }
-    const loom_value_id_t* return_values = loom_op_const_operands(terminator);
-    for (uint16_t i = 0; i < call_results.count; ++i) {
-      if (!loom_callable_value_is_valid(module, return_values[i])) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "callee return operand must be valid");
-      }
-      if (!loom_type_equal(
-              loom_module_value_type(module, return_values[i]),
-              loom_module_value_type(module, call_results.values[i]))) {
-        return iree_make_status(
-            IREE_STATUS_FAILED_PRECONDITION,
-            "callee return operand type does not match call result type");
-      }
-    }
   }
 
   *out_body = (loom_callable_cfg_body_t){
@@ -406,38 +360,19 @@ static iree_status_t loom_callable_bind_entry_args(loom_ir_remap_t* remap,
   return iree_ok_status();
 }
 
+// The callee return contract is checked before mutation. Materialization and
+// batch result replacement remap dependent types after resolving these IDs;
+// a consuming inline still has callee-local types until its definitions move.
 static iree_status_t loom_callable_resolve_return_replacements(
-    loom_rewriter_t* rewriter, loom_call_like_t call, loom_op_t* terminator_op,
-    loom_ir_remap_t* remap, loom_value_id_t* replacements) {
+    loom_op_t* terminator_op, loom_ir_remap_t* remap,
+    loom_value_id_t* replacements) {
   loom_value_slice_t return_operands = {
       .values = loom_op_operands(terminator_op),
       .count = terminator_op->operand_count,
   };
-  loom_value_slice_t call_results_slice = loom_call_like_results(call);
-  if (return_operands.count != call_results_slice.count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "callee terminator operand count %u does not match call result count "
-        "%u",
-        (unsigned)return_operands.count, (unsigned)call_results_slice.count);
-  }
-  for (uint16_t i = 0; i < call_results_slice.count; ++i) {
+  for (uint16_t i = 0; i < return_operands.count; ++i) {
     IREE_RETURN_IF_ERROR(loom_ir_remap_resolve_value(
         remap, return_operands.values[i], &replacements[i]));
-    if (call_results_slice.values[i] == LOOM_VALUE_ID_INVALID ||
-        replacements[i] == LOOM_VALUE_ID_INVALID) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "call result and replacement must be valid");
-    }
-    loom_type_t result_type =
-        loom_module_value_type(rewriter->module, call_results_slice.values[i]);
-    loom_type_t replacement_type =
-        loom_module_value_type(rewriter->module, replacements[i]);
-    if (!loom_type_equal(result_type, replacement_type)) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "inline replacement type does not match call result type");
-    }
   }
   return iree_ok_status();
 }
@@ -553,8 +488,8 @@ static iree_status_t loom_callable_inline_single_block_call(
   iree_status_t status = loom_ir_clone_block_ops(
       &rewriter->builder, entry_block, &remap, &clone_options);
   if (iree_status_is_ok(status)) {
-    status = loom_callable_resolve_return_replacements(
-        rewriter, call, terminator_op, &remap, replacements);
+    status = loom_callable_resolve_return_replacements(terminator_op, &remap,
+                                                       replacements);
   }
   loom_builder_restore(&rewriter->builder, saved_ip);
   IREE_RETURN_IF_ERROR(status);
@@ -1053,7 +988,7 @@ iree_status_t loom_callable_inline_consuming_call_with_branch(
         (void**)&replacements));
   }
   IREE_RETURN_IF_ERROR(loom_callable_resolve_return_replacements(
-      rewriter, call, terminator_op, &remap, replacements));
+      terminator_op, &remap, replacements));
 
   loom_ir_move_block_options_t move_options = {
       .omit_terminators = true,

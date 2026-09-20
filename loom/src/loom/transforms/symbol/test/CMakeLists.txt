@@ -13,6 +13,7 @@ loom_check_test_suite(
   NAME
     test
   SRCS
+    "inline_callable_types.loom-test"
     "inline_callables.loom-test"
     "refine_boundaries.loom-test"
     "symbol_dce.loom-test"
