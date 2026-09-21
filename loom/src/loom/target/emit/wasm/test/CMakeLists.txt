@@ -36,7 +36,7 @@ iree_py_test(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_i64_shift_counts.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/target/emit/wasm/test/index_shifts.mjs"
     "--corpus"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/memory_scalar_narrow.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/memory_scalar_narrow.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/memory_access_flags.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/target/emit/wasm/test/byte_access.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/target/emit/wasm/test/narrow_memory.mjs"

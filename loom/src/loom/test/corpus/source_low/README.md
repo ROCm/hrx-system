@@ -1,22 +1,25 @@
 # Source-Low Corpus
 
-This directory contains positive, target-reusable source programs for
-source-to-low lowering coverage. A corpus case should be a program we want every
-compatible target to accept, lower, and eventually execute or compare against an
-oracle. Each applicable backend participates through a `TEMPLATE` fixture with
-its own target compiler options, RUN mode, and output assertions. TEMPLATE copies
-the common source without adding declarations, changing modifiers, or binding
-targets in the IR. A backend that does not yet implement the required capability
-records the precise structured diagnostic
-in its fixture. This keeps the positive source shared and makes newly supported
-behavior visible when that diagnostic stops appearing. Profile-specific
-instruction selection and pass-mode checks can use separate fixtures consuming
-the same corpus program.
+This directory contains shared source programs for tests that assert lowered
+output or execution results. Shared input without its own expectations is
+exported `.loom` data, not a standalone roundtrip test. Its value comes from the
+consumers' assertions: selected instructions, addressing, access widths, returned
+values, or other observable behavior. Parser/printer roundtrip coverage belongs
+beside the corresponding format implementation.
 
-Architecturally inapplicable corpora need no target fixture or build
-registration. The target suite documents the source/target contract that makes
-them inapplicable, with rejection coverage beside the owning subsystem. A mixed
-fixture excludes exact cases in its file preamble:
+A target participates through a `TEMPLATE` fixture with its own compiler options,
+RUN mode, and output assertions, or through an execution test with an independent
+oracle. TEMPLATE copies the common source without adding declarations, changing
+modifiers, or binding targets in the IR. Each target/profile instantiation needs
+an independently useful assertion; corpus membership does not require a backend
+matrix. Successful compilation alone adds no correctness assertion. Missing
+lowering support belongs in work tracking, not a list of expected errors copied
+across positive programs. Precise diagnostic expectations describe intentional
+rejection behavior and live beside the subsystem that owns that contract.
+
+Corpora without useful assertions for a target need no fixture or build
+registration. A mixed fixture excludes exact cases outside its assertion contract
+in its file preamble:
 
 ```text
 // TEMPLATE: loom/src/loom/test/corpus/source_low/view_transport.loom-test
@@ -27,8 +30,8 @@ fixture excludes exact cases in its file preamble:
 as synchronization. Unknown or duplicate names fail, including when a corpus
 case is renamed or removed. All other cases remain synchronized, including new
 cases added to the corpus. Excluding every case is an error; an entirely
-inapplicable corpus has no fixture. Missing lowering implementations continue
-to use precise diagnostics in applicable target fixtures.
+excluded corpus has no fixture. A target's dedicated rejection tests cover its
+architectural boundary.
 
 A case containing several functions has one public entry and private helpers.
 The entry identifies the case and receives the requested compiler profile;

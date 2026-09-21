@@ -165,7 +165,7 @@ loom_check_test_suite(
         "//loom/src/loom/test/corpus/source_low:carried_counter_store.loom-test",
         "//loom/src/loom/test/corpus/source_low:loop_counter_offset.loom-test",
         "//loom/src/loom/test/corpus/source_low:memory_access_flags.loom-test",
-        "//loom/src/loom/test/corpus/source_low:memory_scalar_narrow.loom-test",
+        "//loom/src/loom/test/corpus/source_low:memory_scalar_narrow.loom",
         "//loom/src/loom/test/corpus/source_low:memory_scalar_wide_offsets.loom-test",
         "//loom/src/loom/test/corpus/source_low:memory_subview.loom-test",
         "//loom/src/loom/test/corpus/source_low:memory_wide_carriers.loom-test",

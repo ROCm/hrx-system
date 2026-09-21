@@ -15,7 +15,7 @@ package(
 
 _CASES = glob(["*.loom-test"])
 
-exports_files(_CASES)
+exports_files(_CASES + glob(["*.loom"]))
 
 loom_check_test_suite(
     name = "test",

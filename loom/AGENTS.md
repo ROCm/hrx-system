@@ -273,20 +273,24 @@ run through `loom-check`. This keeps IR available to the formatter and migration
 tools, and lets program tests share one runner instead of linking a compiler
 stack into each unit-test executable.
 
-Positive source-lowering regressions with a shared source contract belong in
-the [common corpus](src/loom/test/corpus/source_low/README.md). Target fixtures
-consume them through `TEMPLATE`, which copies the authoritative source without
-declaration overlays or semantic additions. Target profiles are compiler options
-in RUN directives; target fixtures own lowering modes and output assertions.
-A bug discovered on one backend contributes coverage to every applicable backend:
-supported lowering or an exercised, precise
-unsupported diagnostic for a missing implementation. Architectural
-non-applicability is different: entirely inapplicable corpora need no target
-fixture, and mixed fixtures use `TEMPLATE-EXCLUDE: @case <reason>` for the exact
-inapplicable cases. The target suite records the architectural reason; dedicated
-target tests own that rejection contract instead of repeating it for every
-positive source program. Authored Low IR, target-specific configuration, and
-rejection semantics stay with their owning subsystem.
+Source-lowering programs with meaningful consumers on several targets belong in
+the [common corpus](src/loom/test/corpus/source_low/README.md). Shared input without
+its own expectations is exported `.loom` data, not a standalone roundtrip test.
+Target fixtures consume it through `TEMPLATE`, which copies the authoritative
+source without declaration overlays or semantic additions. Target profiles are
+compiler options in RUN directives. Each consumer contributes lowered-output
+expectations, execution results, or precise diagnostics for intentional rejection
+behavior. Successful compilation alone is not a correctness assertion, and a
+missing implementation is a work item rather than expected corpus behavior.
+
+Corpus membership does not require a copy for every backend or profile. Each
+instantiation needs an independently useful assertion. Mixed fixtures can use
+`TEMPLATE-EXCLUDE: @case <reason>` for cases outside their assertion contract;
+entirely unsupported corpora have no consumer. Analysis and transform invariants
+are tested beside their owner, using target-independent fixtures where possible,
+instead of duplicating the same assertion across physical targets. Text roundtrip
+tests belong to parser/printer coverage. Authored Low IR, target-specific
+configuration, and intentional rejection semantics stay with their owner.
 
 A new `format/text:parser` dependency in a C++ unit-test target is a boundary
 review signal. Parsing is appropriate when the parser API itself is the subject;

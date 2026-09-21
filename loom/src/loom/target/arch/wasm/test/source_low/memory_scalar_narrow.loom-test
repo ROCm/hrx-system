@@ -1,4 +1,4 @@
-// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_scalar_narrow.loom-test
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_scalar_narrow.loom
 // RUN: emit source-low target=wasm:simd128 output=low
 
 func.def @copy_narrow_static(%input: buffer, %output: buffer) {
