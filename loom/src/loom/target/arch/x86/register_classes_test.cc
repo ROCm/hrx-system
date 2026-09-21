@@ -31,28 +31,6 @@ std::string ToString(iree_string_view_t value) {
   return std::string(value.data, value.size);
 }
 
-void ExpectDescriptorClass(const loom_low_descriptor_set_t* descriptor_set,
-                           loom_x86_register_class_t register_class) {
-  uint16_t descriptor_reg_class_id = LOOM_LOW_REG_CLASS_NONE;
-  IREE_ASSERT_OK(loom_x86_descriptor_set_register_class_id(
-      descriptor_set, register_class, &descriptor_reg_class_id));
-
-  loom_x86_register_class_t resolved_register_class =
-      LOOM_X86_REGISTER_CLASS_GPR32;
-  IREE_ASSERT_OK(loom_x86_descriptor_set_logical_register_class(
-      descriptor_set, descriptor_reg_class_id, &resolved_register_class));
-  EXPECT_EQ(resolved_register_class, register_class);
-
-  iree_string_view_t expected_name = iree_string_view_empty();
-  IREE_ASSERT_OK(loom_x86_register_class_name(register_class, &expected_name));
-  ASSERT_LT(descriptor_reg_class_id, descriptor_set->reg_class_count);
-  const loom_low_reg_class_t& descriptor_reg_class =
-      descriptor_set->reg_classes[descriptor_reg_class_id];
-  EXPECT_EQ(ToString(loom_low_descriptor_set_string(
-                descriptor_set, descriptor_reg_class.name_string_offset)),
-            ToString(expected_name));
-}
-
 void ExpectDescriptorPresent(const loom_low_descriptor_set_t* descriptor_set,
                              iree_string_view_t descriptor_key) {
   EXPECT_NE(
@@ -124,19 +102,22 @@ TEST(X86RegisterClassesTest, ViewsPreserveRegisterVocabularyAndCapacity) {
       {loom_x86_avx_vnni_int16_core_descriptor_set(), {0, 0, 16, 16, 0, 0}},
       {loom_x86_avx10_2_core_descriptor_set(), {0, 0, 32, 32, 32, 0}},
   };
+  constexpr loom_x86_register_class_t register_classes[] = {
+      LOOM_X86_REGISTER_CLASS_GPR32, LOOM_X86_REGISTER_CLASS_GPR64,
+      LOOM_X86_REGISTER_CLASS_XMM,   LOOM_X86_REGISTER_CLASS_YMM,
+      LOOM_X86_REGISTER_CLASS_ZMM,   LOOM_X86_REGISTER_CLASS_K,
+  };
+  const auto* storage = loom_x86_avx512_packed_dot_core_descriptor_set();
   for (const Case& test_case : cases) {
     const auto* descriptor_set = test_case.descriptor_set;
     SCOPED_TRACE(ToString(loom_low_descriptor_set_string(
         descriptor_set, descriptor_set->key_string_offset)));
-    for (uint16_t kind = 0; kind < IREE_ARRAYSIZE(test_case.capacities);
-         ++kind) {
-      iree_string_view_t name = iree_string_view_empty();
-      IREE_ASSERT_OK(loom_x86_register_class_name(
-          static_cast<loom_x86_register_class_t>(kind), &name));
+    for (uint16_t kind = 0; kind < IREE_ARRAYSIZE(register_classes); ++kind) {
+      const auto register_class = register_classes[kind];
+      const uint16_t storage_id = register_class;
+      const iree_string_view_t name = loom_low_descriptor_set_string(
+          storage, storage->reg_classes[storage_id].name_string_offset);
       SCOPED_TRACE(ToString(name));
-      uint16_t storage_id = LOOM_LOW_REG_CLASS_NONE;
-      ASSERT_TRUE(loom_low_descriptor_set_lookup_register_class(
-          loom_x86_avx512_core_descriptor_set(), name, &storage_id, nullptr));
       uint16_t class_id = LOOM_LOW_REG_CLASS_NONE;
       const loom_low_reg_class_t* reg_class = nullptr;
       bool found = loom_low_descriptor_set_lookup_register_class(
@@ -155,6 +136,7 @@ TEST(X86RegisterClassesTest, ViewsPreserveRegisterVocabularyAndCapacity) {
         EXPECT_EQ(reg_class->allocatable_count, test_case.capacities[kind]);
         IREE_ASSERT_OK(
             loom_low_build_register_type(descriptor_set, storage_id, 1, &type));
+        EXPECT_EQ(loom_x86_logical_register_class(class_id), register_class);
       }
     }
   }
@@ -162,26 +144,6 @@ TEST(X86RegisterClassesTest, ViewsPreserveRegisterVocabularyAndCapacity) {
             loom_x86_avx_vnni_int8_core_descriptor_set()->reg_classes);
   EXPECT_EQ(loom_x86_avx512_core_descriptor_set()->operands,
             loom_x86_avx2_core_descriptor_set()->operands);
-}
-
-TEST(X86RegisterClassesTest, SharedScalarClassesAcrossViews) {
-  const loom_low_descriptor_set_t* scalar_descriptor_set =
-      loom_x86_scalar_core_descriptor_set();
-  const loom_low_descriptor_set_t* simd128_descriptor_set =
-      loom_x86_simd128_core_descriptor_set();
-  const loom_low_descriptor_set_t* avx2_descriptor_set =
-      loom_x86_avx2_core_descriptor_set();
-  const loom_low_descriptor_set_t* avx512_descriptor_set =
-      loom_x86_avx512_core_descriptor_set();
-
-  ExpectDescriptorClass(scalar_descriptor_set, LOOM_X86_REGISTER_CLASS_GPR32);
-  ExpectDescriptorClass(scalar_descriptor_set, LOOM_X86_REGISTER_CLASS_GPR64);
-  ExpectDescriptorClass(simd128_descriptor_set, LOOM_X86_REGISTER_CLASS_GPR32);
-  ExpectDescriptorClass(simd128_descriptor_set, LOOM_X86_REGISTER_CLASS_GPR64);
-  ExpectDescriptorClass(avx2_descriptor_set, LOOM_X86_REGISTER_CLASS_GPR32);
-  ExpectDescriptorClass(avx2_descriptor_set, LOOM_X86_REGISTER_CLASS_GPR64);
-  ExpectDescriptorClass(avx512_descriptor_set, LOOM_X86_REGISTER_CLASS_GPR32);
-  ExpectDescriptorClass(avx512_descriptor_set, LOOM_X86_REGISTER_CLASS_GPR64);
 }
 
 TEST(X86RegisterClassesTest, CountClassesAliasTheSamePhysicalRegister) {
@@ -215,47 +177,11 @@ TEST(X86RegisterClassesTest, CountClassesAliasTheSamePhysicalRegister) {
       const bool is_word =
           iree_string_view_equal(count_name, IREE_SV("x86.ecx"));
       EXPECT_EQ(count_class->alloc_unit_bits, is_word ? 32 : 64);
-      loom_x86_register_class_t logical_class = LOOM_X86_REGISTER_CLASS_GPR32;
-      IREE_ASSERT_OK(loom_x86_descriptor_set_logical_register_class(
-          descriptor_set, count_class_id, &logical_class));
-      EXPECT_EQ(logical_class, is_word ? LOOM_X86_REGISTER_CLASS_GPR32
-                                       : LOOM_X86_REGISTER_CLASS_GPR64);
+      EXPECT_EQ(loom_x86_logical_register_class(count_class_id),
+                is_word ? LOOM_X86_REGISTER_CLASS_GPR32
+                        : LOOM_X86_REGISTER_CLASS_GPR64);
     }
   }
-}
-
-TEST(X86RegisterClassesTest, VectorClassesAcrossProfileViews) {
-  const loom_low_descriptor_set_t* simd128_descriptor_set =
-      loom_x86_simd128_core_descriptor_set();
-  const loom_low_descriptor_set_t* avx2_descriptor_set =
-      loom_x86_avx2_core_descriptor_set();
-  const loom_low_descriptor_set_t* avx512_descriptor_set =
-      loom_x86_avx512_core_descriptor_set();
-  const loom_low_descriptor_set_t* packed_dot_descriptor_set =
-      loom_x86_packed_dot_core_descriptor_set();
-  const loom_low_descriptor_set_t* avx512_packed_dot_descriptor_set =
-      loom_x86_avx512_packed_dot_core_descriptor_set();
-
-  ExpectDescriptorClass(simd128_descriptor_set, LOOM_X86_REGISTER_CLASS_XMM);
-
-  ExpectDescriptorClass(avx2_descriptor_set, LOOM_X86_REGISTER_CLASS_XMM);
-  ExpectDescriptorClass(avx2_descriptor_set, LOOM_X86_REGISTER_CLASS_YMM);
-
-  ExpectDescriptorClass(avx512_descriptor_set, LOOM_X86_REGISTER_CLASS_XMM);
-  ExpectDescriptorClass(avx512_descriptor_set, LOOM_X86_REGISTER_CLASS_YMM);
-  ExpectDescriptorClass(avx512_descriptor_set, LOOM_X86_REGISTER_CLASS_ZMM);
-  ExpectDescriptorClass(avx512_descriptor_set, LOOM_X86_REGISTER_CLASS_K);
-
-  ExpectDescriptorClass(packed_dot_descriptor_set, LOOM_X86_REGISTER_CLASS_XMM);
-  ExpectDescriptorClass(packed_dot_descriptor_set, LOOM_X86_REGISTER_CLASS_YMM);
-  ExpectDescriptorClass(packed_dot_descriptor_set, LOOM_X86_REGISTER_CLASS_ZMM);
-
-  ExpectDescriptorClass(avx512_packed_dot_descriptor_set,
-                        LOOM_X86_REGISTER_CLASS_XMM);
-  ExpectDescriptorClass(avx512_packed_dot_descriptor_set,
-                        LOOM_X86_REGISTER_CLASS_YMM);
-  ExpectDescriptorClass(avx512_packed_dot_descriptor_set,
-                        LOOM_X86_REGISTER_CLASS_ZMM);
 }
 
 TEST(X86RegisterClassesTest, VexRowsImportedIntoWideViewsStayLow16) {
@@ -299,21 +225,11 @@ TEST(X86RegisterClassesTest,
   const loom_low_descriptor_set_t* avx10_2_descriptor_set =
       loom_x86_avx10_2_core_descriptor_set();
 
-  ExpectDescriptorClass(avx512_vnni_descriptor_set,
-                        LOOM_X86_REGISTER_CLASS_XMM);
-  ExpectDescriptorClass(avx512_vnni_descriptor_set,
-                        LOOM_X86_REGISTER_CLASS_YMM);
-  ExpectDescriptorClass(avx512_vnni_descriptor_set,
-                        LOOM_X86_REGISTER_CLASS_ZMM);
   ExpectDescriptorPresent(avx512_vnni_descriptor_set,
                           IREE_SV("x86.avx512_vnni.vpdpbusd.zmm"));
-  ExpectDescriptorClass(avx512_bf16_descriptor_set,
-                        LOOM_X86_REGISTER_CLASS_ZMM);
   ExpectDescriptorPresent(avx512_bf16_descriptor_set,
                           IREE_SV("x86.avx512_bf16.vdpbf16ps.zmm"));
 
-  ExpectDescriptorClass(avx_vnni_descriptor_set, LOOM_X86_REGISTER_CLASS_XMM);
-  ExpectDescriptorClass(avx_vnni_descriptor_set, LOOM_X86_REGISTER_CLASS_YMM);
   ExpectDescriptorPresent(avx_vnni_descriptor_set,
                           IREE_SV("x86.avx_vnni.vpdpbusd.ymm"));
   ExpectDescriptorMissing(avx_vnni_descriptor_set,
@@ -322,20 +238,13 @@ TEST(X86RegisterClassesTest,
                           IREE_SV("x86.avx512_vnni.vpdpbusd.zmm"));
   ExpectDescriptorMissing(avx_vnni_descriptor_set,
                           IREE_SV("x86.avx10_2.vpdpbssd.zmm"));
-  ExpectDescriptorClass(avx_vnni_int8_descriptor_set,
-                        LOOM_X86_REGISTER_CLASS_YMM);
   ExpectDescriptorPresent(avx_vnni_int8_descriptor_set,
                           IREE_SV("x86.avx_vnni_int8.vpdpbssd.ymm"));
   ExpectDescriptorMissing(avx_vnni_int8_descriptor_set,
                           IREE_SV("x86.avx10_2.vpdpbssd.zmm"));
-  ExpectDescriptorClass(avx_vnni_int16_descriptor_set,
-                        LOOM_X86_REGISTER_CLASS_YMM);
   ExpectDescriptorPresent(avx_vnni_int16_descriptor_set,
                           IREE_SV("x86.avx_vnni_int16.vpdpwsud.ymm"));
 
-  ExpectDescriptorClass(avx10_2_descriptor_set, LOOM_X86_REGISTER_CLASS_XMM);
-  ExpectDescriptorClass(avx10_2_descriptor_set, LOOM_X86_REGISTER_CLASS_YMM);
-  ExpectDescriptorClass(avx10_2_descriptor_set, LOOM_X86_REGISTER_CLASS_ZMM);
   ExpectDescriptorPresent(avx10_2_descriptor_set,
                           IREE_SV("x86.avx10_2.vpdpbssd.zmm"));
 }
@@ -354,20 +263,6 @@ TEST(X86RegisterClassesTest, VectorWidthProjection) {
   EXPECT_FALSE(
       loom_x86_register_class_for_vector_bit_width(64, &register_class));
   EXPECT_EQ(register_class, LOOM_X86_REGISTER_CLASS_GPR32);
-}
-
-TEST(X86RegisterClassesTest, InvalidProjectionFailsLoudly) {
-  iree_string_view_t register_class_name = iree_string_view_empty();
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_x86_register_class_name((loom_x86_register_class_t)99,
-                                   &register_class_name));
-
-  loom_x86_register_class_t register_class = LOOM_X86_REGISTER_CLASS_GPR32;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_OUT_OF_RANGE,
-      loom_x86_descriptor_set_logical_register_class(
-          loom_x86_scalar_core_descriptor_set(), UINT16_MAX, &register_class));
 }
 
 }  // namespace

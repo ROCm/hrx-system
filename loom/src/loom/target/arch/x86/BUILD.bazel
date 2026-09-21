@@ -63,7 +63,7 @@ loom_cc_library(
     hdrs = ["register_classes.h"],
     visibility = _X86_LOWER_VISIBILITY + _X86_NATIVE_VISIBILITY,
     deps = [
-        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/target/arch/x86/descriptors:avx512_packed_dot_descriptors_ids",
         "//runtime/src/iree/base",
     ],
 )

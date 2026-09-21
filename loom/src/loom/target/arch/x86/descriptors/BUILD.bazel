@@ -171,6 +171,7 @@ loom_low_descriptor_cc_library(
         "avx10_2_descriptors.h",
     ],
     generator = "//loom/py/loom/gen/target/arch/x86:low_descriptor_shard",
+    ids_visibility = _X86_ROOT_VISIBILITY + _X86_NATIVE_VISIBILITY,
     visibility = _X86_NATIVE_VISIBILITY,
     deps = ["//loom/src/loom/codegen/low:descriptors"],
 )

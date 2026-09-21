@@ -187,11 +187,7 @@ static bool loom_x86_avx512_register_class_for_source_type(
 static iree_status_t loom_x86_make_register_type(
     loom_low_lower_context_t* context, loom_x86_register_class_t register_class,
     loom_type_t* out_type) {
-  uint16_t descriptor_reg_class_id = LOOM_LOW_REG_CLASS_NONE;
-  IREE_RETURN_IF_ERROR(loom_x86_descriptor_set_register_class_id(
-      loom_low_lower_context_descriptor_set(context), register_class,
-      &descriptor_reg_class_id));
-  return loom_low_lower_make_register_type(context, descriptor_reg_class_id, 1,
+  return loom_low_lower_make_register_type(context, register_class, 1,
                                            out_type);
 }
 

@@ -57,6 +57,25 @@ def test_view_preserves_capacity_fixed_locations_and_absence() -> None:
     assert compiled.reg_classes[compiled.reg_class_ids["test.phys"]].allocatable_count == 32
 
 
+def test_view_register_ids_follow_storage_not_authored_order() -> None:
+    storage = TEST_LOW_CORE_DESCRIPTOR_SET
+    spec = _view_spec()
+    reordered = replace(spec, reg_classes=tuple(reversed(spec.reg_classes)))
+    compiled = compiler.compile_descriptor_set(storage)
+    original_view = views.descriptor_set_view_for_spec(compiled, spec)
+    reordered_view = views.descriptor_set_view_for_spec(compiled, reordered)
+    assert reordered_view.reg_classes == original_view.reg_classes
+
+    generated = tuple(generate_descriptor_set_family(storage, (view,)) for view in (spec, reordered))
+    assert generated[0].source == generated[1].source
+    for family in generated:
+        header = family.view_headers[0]
+        for name in ("i32", "phys"):
+            storage_id = compiled.reg_class_ids[f"test.{name}"]
+            assert f"TEST_LOW_REGISTER_VIEW_CORE_REG_CLASS_ID_TEST_{name.upper()} = {storage_id}u" in header
+        assert "REG_CLASS_ID_TEST_F32" not in header
+
+
 def test_equal_view_register_tables_share_storage() -> None:
     spec = _view_spec()
     alias = replace(

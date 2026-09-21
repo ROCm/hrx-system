@@ -46,7 +46,7 @@ loom_cc_library(
     "register_classes.c"
   DEPS
     iree::base
-    loom::codegen::low::descriptors
+    loom::target::arch::x86::descriptors::avx512_packed_dot_descriptors_ids
   PUBLIC
 )
 endif()
