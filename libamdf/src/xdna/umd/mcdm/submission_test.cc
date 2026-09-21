@@ -104,7 +104,7 @@ TEST_P(WindowsXdnaSubmissionProtocolTest,
     EXPECT_EQ(packet.bytes[i], 0);
   }
 
-  std::array<uint8_t, 4096> command_bytes = {};
+  std::array<uint8_t, 32768> command_bytes = {};
   amdf_windows_xdna_private_allocation_t execution = {};
   execution.allocation = 0x30;
   amdf_windows_xdna_private_allocation_t command = {};
@@ -112,24 +112,27 @@ TEST_P(WindowsXdnaSubmissionProtocolTest,
   command.device_address = UINT64_C(0x100000000);
   command.host_pointer = command_bytes.data();
   amdf_windows_xdna_submission_t submission = {};
-  amdf_windows_xdna_submission_build_execute(GetParam(), &execution, &command,
-                                             &packet, &submission);
-  EXPECT_EQ(submission.byte_length, header_length + 512u);
-  EXPECT_EQ(ReadU64(submission.bytes, 0x00), 3u);
-  EXPECT_EQ(ReadU64(submission.bytes, 0x08), 0x30u);
-  EXPECT_EQ(ReadU64(submission.bytes, 0x10), 68u);
-  EXPECT_EQ(ReadU64(submission.bytes, 0x28), 0x20u);
-  if (direct) {
-    EXPECT_EQ(ReadU64(submission.bytes, 0x30), command.device_address);
+  for (uint32_t cell_offset : {0u, 8u, 4096u, 32760u}) {
+    SCOPED_TRACE(cell_offset);
+    amdf_windows_xdna_submission_build_execute(
+        GetParam(), &execution, &command, cell_offset, &packet, &submission);
+    EXPECT_EQ(submission.byte_length, header_length + 512u);
+    EXPECT_EQ(ReadU64(submission.bytes, 0x00), 3u);
+    EXPECT_EQ(ReadU64(submission.bytes, 0x08), 0x30u);
+    EXPECT_EQ(ReadU64(submission.bytes, 0x10), 68u);
+    EXPECT_EQ(ReadU64(submission.bytes, 0x28), 0x20u);
+    if (direct) {
+      EXPECT_EQ(ReadU64(submission.bytes, 0x30), command.device_address);
+    }
+    EXPECT_EQ(ReadU64(submission.bytes, 0x48), 0u);
+    EXPECT_EQ(ReadU32(submission.bytes, response_offset), cell_offset);
+    EXPECT_EQ(ReadU32(submission.bytes, response_offset + 4), 8u);
+    EXPECT_EQ(ReadU64(submission.bytes, response_offset + 8),
+              reinterpret_cast<uintptr_t>(command_bytes.data() + cell_offset));
+    EXPECT_EQ(std::memcmp(submission.bytes + header_length, packet.bytes,
+                          sizeof(packet.bytes)),
+              0);
   }
-  EXPECT_EQ(ReadU64(submission.bytes, 0x48), 0u);
-  EXPECT_EQ(ReadU32(submission.bytes, response_offset), 8u);
-  EXPECT_EQ(ReadU32(submission.bytes, response_offset + 4), 8u);
-  EXPECT_EQ(ReadU64(submission.bytes, response_offset + 8),
-            reinterpret_cast<uintptr_t>(command_bytes.data() + 8));
-  EXPECT_EQ(std::memcmp(submission.bytes + header_length, packet.bytes,
-                        sizeof(packet.bytes)),
-            0);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -156,27 +159,35 @@ TEST(WindowsXdnaSubmissionLayoutTest, ReadsInitializationBooleanResponse) {
 }
 
 TEST(WindowsXdnaSubmissionLayoutTest, ReadsExecutionResponseState) {
-  std::array<uint32_t, 4> command_words = {1, 0, 0, 0xA5A5A5A5u};
+  std::array<uint32_t, 8192> command_words;
   amdf_windows_xdna_private_allocation_t command = {};
   command.host_pointer = command_words.data();
-  for (uint32_t state = 0; state < 16; ++state) {
-    SCOPED_TRACE(state);
-    // Non-state header bits and the untouched high word are not error codes.
-    const uint32_t response = 0x30010000u | state;
-    command_words[2] = response;
-    const amdf_status_t status =
-        amdf_windows_xdna_submission_query_execute_result(&command);
-    if (state == 0) {
-      EXPECT_EQ(status, amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL));
-    } else if (state == 4) {
-      EXPECT_EQ(status, AMDF_STATUS_OK);
-    } else {
-      EXPECT_EQ(amdf_status_domain(status), AMDF_STATUS_DOMAIN_FIRMWARE);
-      EXPECT_EQ(amdf_status_code(status), state);
+  for (uint32_t cell_offset : {0u, 8u, 4096u, 32760u}) {
+    SCOPED_TRACE(cell_offset);
+    command_words.fill(0xA5A5A5A5u);
+    const size_t word_index = cell_offset / sizeof(uint32_t);
+    for (uint32_t state = 0; state < 16; ++state) {
+      SCOPED_TRACE(state);
+      // Non-state header bits and the untouched high word are not error codes.
+      const uint32_t response = 0x30010000u | state;
+      command_words[word_index] = response;
+      const amdf_status_t status =
+          amdf_windows_xdna_submission_query_execute_result(&command,
+                                                            cell_offset);
+      if (state == 0) {
+        EXPECT_EQ(status, amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL));
+      } else if (state == 4) {
+        EXPECT_EQ(status, AMDF_STATUS_OK);
+      } else {
+        EXPECT_EQ(amdf_status_domain(status), AMDF_STATUS_DOMAIN_FIRMWARE);
+        EXPECT_EQ(amdf_status_code(status), state);
+      }
+      EXPECT_EQ(command_words[word_index], response);
+      EXPECT_EQ(command_words[word_index + 1], 0xA5A5A5A5u);
+      if (word_index != 0) {
+        EXPECT_EQ(command_words[word_index - 1], 0xA5A5A5A5u);
+      }
     }
-    EXPECT_EQ(command_words[0], 1u);
-    EXPECT_EQ(command_words[2], response);
-    EXPECT_EQ(command_words[3], 0xA5A5A5A5u);
   }
 }
 

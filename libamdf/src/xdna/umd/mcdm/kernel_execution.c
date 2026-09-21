@@ -20,7 +20,8 @@
 
 enum {
   AMDF_WINDOWS_WAIT_SIGNALED = 0,
-  AMDF_WINDOWS_XDNA_KERNEL_EXECUTION_ALLOCATION_SIZE = 8192,
+  // Page-rounded transport extent, including every supported native header.
+  AMDF_WINDOWS_XDNA_KERNEL_EXECUTION_PACKET_STRIDE = 8192,
 };
 
 typedef enum amdf_windows_xdna_kernel_execution_preparation_phase_e {
@@ -28,13 +29,6 @@ typedef enum amdf_windows_xdna_kernel_execution_preparation_phase_e {
   AMDF_WINDOWS_XDNA_KERNEL_EXECUTION_PHASE_COMMAND_STORAGE_READY,
   AMDF_WINDOWS_XDNA_KERNEL_EXECUTION_PHASE_READY,
 } amdf_windows_xdna_kernel_execution_preparation_phase_t;
-
-typedef struct amdf_windows_xdna_kernel_packet_t {
-  // Native transport bytes retained until checked command retirement.
-  amdf_windows_xdna_private_allocation_t packet;
-  // Native response cell retained independently for this command.
-  amdf_windows_xdna_private_allocation_t response;
-} amdf_windows_xdna_kernel_packet_t;
 
 struct amdf_windows_xdna_kernel_execution_t {
   // Platform device borrowed until destruction succeeds.
@@ -64,10 +58,10 @@ struct amdf_windows_xdna_kernel_execution_t {
   uint64_t wait_event_submission;
   // Native completion and context-initialization allocation.
   amdf_windows_xdna_private_allocation_t command_allocation;
-  // Packet/result storage owned only while the public queue leases execution.
-  amdf_windows_xdna_kernel_packet_t* packets;
-  // Number of initialized pairs, including partial construction for rollback.
-  uint32_t packet_count;
+  // Queue-owned fixed-stride packet ring, resident through checked retirement.
+  amdf_windows_xdna_private_allocation_t packet_storage;
+  // Queue-owned backing with one eight-byte response cell per existing slot.
+  amdf_windows_xdna_private_allocation_t responses;
   // One after the context's singular native instruction binding is claimed.
   uint32_t instruction_binding_claimed;
   // One while a public queue exclusively leases the hardware queue.
@@ -435,24 +429,21 @@ static void amdf_windows_xdna_kernel_execution_initialize_storage(
       execution->device, &command_descriptor, &execution->command_allocation);
 }
 
-static void amdf_windows_xdna_kernel_packet_initialize(
-    amdf_windows_xdna_kernel_execution_t* execution,
-    amdf_windows_xdna_kernel_packet_t* packet) {
-  amdf_windows_xdna_private_allocation_initialize(
-      execution->device, &execution->command_allocation.descriptor,
-      &packet->response);
+static void amdf_windows_xdna_kernel_packet_storage_initialize(
+    amdf_windows_xdna_kernel_execution_t* execution, uint32_t capacity,
+    amdf_windows_xdna_private_allocation_t* packet) {
+  const uint64_t byte_length =
+      (uint64_t)capacity * AMDF_WINDOWS_XDNA_KERNEL_EXECUTION_PACKET_STRIDE;
   const amdf_windows_xdna_private_allocation_descriptor_t packet_descriptor = {
-      .requested_byte_length =
-          4096 + amdf_windows_xdna_submission_header_size(execution->protocol),
-      .allocation_byte_length =
-          AMDF_WINDOWS_XDNA_KERNEL_EXECUTION_ALLOCATION_SIZE,
+      .requested_byte_length = byte_length,
+      .allocation_byte_length = byte_length,
       .type = 0x3328,
       .policy = 2,
       .xcl_flags = 0x80000000u,
       .flags = AMDF_WINDOWS_XDNA_PRIVATE_ALLOCATION_FLAG_DEVICE_ADDRESS,
   };
-  amdf_windows_xdna_private_allocation_initialize(
-      execution->device, &packet_descriptor, &packet->packet);
+  amdf_windows_xdna_private_allocation_initialize(execution->device,
+                                                  &packet_descriptor, packet);
 }
 
 amdf_status_t amdf_windows_xdna_kernel_execution_create(
@@ -562,28 +553,24 @@ amdf_status_t amdf_windows_xdna_kernel_execution_destroy(
   return status;
 }
 
-static amdf_status_t amdf_windows_xdna_kernel_execution_release_packets(
+static amdf_status_t amdf_windows_xdna_kernel_execution_release_queue_storage(
     amdf_windows_xdna_kernel_execution_t* execution) {
-  amdf_status_t status = AMDF_STATUS_OK;
-  for (uint32_t i = 0; i < execution->packet_count; ++i) {
-    amdf_windows_xdna_kernel_packet_t* packet = &execution->packets[i];
-    const amdf_status_t packet_status =
-        amdf_windows_xdna_private_allocation_destroy(&packet->packet);
-    const amdf_status_t response_status =
-        amdf_windows_xdna_private_allocation_destroy(&packet->response);
-    if (amdf_status_is_ok(status)) {
-      status =
-          amdf_status_is_ok(packet_status) ? response_status : packet_status;
-    }
-  }
-  amdf_free(execution->device->host_allocator, execution->packets);
-  execution->packets = NULL;
-  execution->packet_count = 0;
-  return status;
+  const amdf_status_t status =
+      amdf_windows_xdna_private_allocation_destroy(&execution->packet_storage);
+  const amdf_status_t response_status =
+      amdf_windows_xdna_private_allocation_destroy(&execution->responses);
+  // Final release consumes both owners even if native cleanup fails.
+  memset(&execution->packet_storage, 0, sizeof(execution->packet_storage));
+  memset(&execution->responses, 0, sizeof(execution->responses));
+  return amdf_status_is_ok(status) ? response_status : status;
 }
 
 amdf_status_t amdf_windows_xdna_kernel_execution_acquire_queue(
     amdf_windows_xdna_kernel_execution_t* execution, uint32_t capacity) {
+  // The native response descriptor has a 32-bit allocation-relative offset.
+  if (capacity > UINT32_MAX / sizeof(uint64_t) + 1) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
+  }
   amdf_status_t status = amdf_windows_xdna_kernel_execution_prepare_through(
       execution, AMDF_WINDOWS_XDNA_KERNEL_EXECUTION_PHASE_READY);
   if (!amdf_status_is_ok(status)) {
@@ -593,30 +580,34 @@ amdf_status_t amdf_windows_xdna_kernel_execution_acquire_queue(
   if (execution->queue_lease_count != 0) {
     status = amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
   } else {
-    status = amdf_calloc_array(execution->device->host_allocator, capacity,
-                               sizeof(execution->packets[0]),
-                               amdf_alignof(amdf_windows_xdna_kernel_packet_t),
-                               (void**)&execution->packets);
-    for (uint32_t i = 0; i < capacity && amdf_status_is_ok(status); ++i) {
-      amdf_windows_xdna_kernel_packet_t* packet = &execution->packets[i];
-      amdf_windows_xdna_kernel_packet_initialize(execution, packet);
-      ++execution->packet_count;
-      status = amdf_windows_xdna_private_allocation_realize(&packet->response);
-      if (amdf_status_is_ok(status)) {
-        status = amdf_windows_xdna_private_allocation_lock(&packet->response);
-      }
-      if (amdf_status_is_ok(status)) {
-        status = amdf_windows_xdna_private_allocation_realize(&packet->packet);
-      }
-      if (amdf_status_is_ok(status)) {
-        status = amdf_windows_xdna_private_allocation_lock(&packet->packet);
-      }
+    amdf_windows_xdna_private_allocation_descriptor_t response_descriptor =
+        execution->command_allocation.descriptor;
+    const uint64_t response_byte_length =
+        ((uint64_t)capacity * sizeof(uint64_t) + 4095) & ~UINT64_C(4095);
+    response_descriptor.requested_byte_length = response_byte_length;
+    response_descriptor.allocation_byte_length = response_byte_length;
+    amdf_windows_xdna_private_allocation_initialize(
+        execution->device, &response_descriptor, &execution->responses);
+    amdf_windows_xdna_kernel_packet_storage_initialize(
+        execution, capacity, &execution->packet_storage);
+    status =
+        amdf_windows_xdna_private_allocation_realize(&execution->responses);
+    if (amdf_status_is_ok(status)) {
+      status = amdf_windows_xdna_private_allocation_lock(&execution->responses);
+    }
+    if (amdf_status_is_ok(status)) {
+      status = amdf_windows_xdna_private_allocation_realize(
+          &execution->packet_storage);
+    }
+    if (amdf_status_is_ok(status)) {
+      status =
+          amdf_windows_xdna_private_allocation_lock(&execution->packet_storage);
     }
     if (amdf_status_is_ok(status)) {
       execution->queue_lease_count = 1;
     } else {
       const amdf_status_t release_status =
-          amdf_windows_xdna_kernel_execution_release_packets(execution);
+          amdf_windows_xdna_kernel_execution_release_queue_storage(execution);
       if (!amdf_status_is_ok(release_status)) {
         status = release_status;
       }
@@ -632,7 +623,7 @@ amdf_status_t amdf_windows_xdna_kernel_execution_release_queue(
   amdf_assert(execution->queue_lease_count == 1 &&
               "releasing an unowned XDNA hardware queue");
   const amdf_status_t status =
-      amdf_windows_xdna_kernel_execution_release_packets(execution);
+      amdf_windows_xdna_kernel_execution_release_queue_storage(execution);
   execution->queue_lease_count = 0;
   ReleaseSRWLockExclusive(&execution->state_lock);
   return status;
@@ -642,34 +633,40 @@ amdf_status_t amdf_windows_xdna_kernel_execution_submit(
     amdf_windows_xdna_kernel_execution_t* execution, uint32_t slot,
     uint64_t instruction_address, uint32_t instruction_byte_length,
     uint64_t* out_native_submission) {
-  amdf_windows_xdna_kernel_packet_t* storage = &execution->packets[slot];
+  amdf_windows_xdna_private_allocation_t* storage = &execution->packet_storage;
+  const uint64_t packet_byte_offset =
+      (uint64_t)slot * AMDF_WINDOWS_XDNA_KERNEL_EXECUTION_PACKET_STRIDE;
+  uint8_t* packet_pointer =
+      (uint8_t*)storage->host_pointer + packet_byte_offset;
   amdf_xdna_transaction_interpreter_packet_t* packet =
-      storage->packet.host_pointer;
+      (amdf_xdna_transaction_interpreter_packet_t*)packet_pointer;
   amdf_xdna_transaction_interpreter_packet_build(
       instruction_address, instruction_byte_length, packet);
   amdf_windows_xdna_submission_t submission;
+  const uint32_t response_byte_offset = slot * sizeof(uint64_t);
   amdf_windows_xdna_submission_build_execute(
-      execution->protocol, &storage->packet, &storage->response, packet,
-      &submission);
+      execution->protocol, storage, &execution->responses, response_byte_offset,
+      packet, &submission);
   const amdf_status_t status = amdf_windows_xdna_private_allocation_publish(
-      &storage->packet, 0, sizeof(*packet));
+      storage, packet_byte_offset, sizeof(*packet));
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  uint64_t* command_words = storage->response.host_pointer;
-  command_words[0] = 1;
-  command_words[1] = 0;
+  // The existing queue slot and checked retirement own this cell; no separate
+  // response cursor, allocation, lock or lifetime tracking is needed.
+  uint64_t* responses = execution->responses.host_pointer;
+  responses[slot] = 0;
   return amdf_windows_xdna_kernel_execution_submit_native(
-      execution, storage->packet.device_address,
-      (uint32_t)storage->packet.descriptor.requested_byte_length, &submission,
-      out_native_submission);
+      execution, storage->device_address + packet_byte_offset,
+      4096 + amdf_windows_xdna_submission_header_size(execution->protocol),
+      &submission, out_native_submission);
 }
 
 void amdf_windows_xdna_kernel_execution_retire_command(
     amdf_windows_xdna_kernel_execution_t* execution, uint32_t slot) {
   const amdf_status_t status =
       amdf_windows_xdna_submission_query_execute_result(
-          &execution->packets[slot].response);
+          &execution->responses, slot * sizeof(uint64_t));
   if (!amdf_status_is_ok(status)) {
     amdf_windows_xdna_kernel_execution_record_failure(execution, status);
   }

@@ -30,6 +30,13 @@ struct Allocation {
   bool resident = false;
   // Number of native final-release attempts, including failed attempts.
   uint32_t release_count = 0;
+  // Last range published to this allocation through the native cache API.
+  struct {
+    // Allocation-relative byte offset of the published range.
+    uint64_t byte_offset = 0;
+    // Byte length of the published range.
+    uint64_t byte_length = 0;
+  } publication;
 };
 
 struct NativeState {
@@ -238,6 +245,8 @@ NTSTATUS APIENTRY Submit(const D3DKMT_SUBMITCOMMANDTOHWQUEUE* submit) {
     EXPECT_EQ(ReadU64(bytes, response_address_offset),
               reinterpret_cast<uintptr_t>(response_allocation.pointer) +
                   ReadU32(bytes, response_address_offset - 8));
+    EXPECT_LE(uint64_t{ReadU32(bytes, response_address_offset - 8)} + 8,
+              response_allocation.byte_length);
   }
   if (opcode == 2 || opcode == 9) {
     EXPECT_EQ(submit->PrivateDriverDataSize, header_length);
@@ -266,12 +275,30 @@ NTSTATUS APIENTRY Submit(const D3DKMT_SUBMITCOMMANDTOHWQUEUE* submit) {
     EXPECT_EQ(submit->PrivateDriverDataSize, header_length + 512);
     auto* response =
         reinterpret_cast<uint64_t*>(ReadU64(bytes, response_address_offset));
+    EXPECT_EQ(*response, 0u);
     *response = native_state->execution_result;
     const auto& allocation = native_state->allocations[ReadU64(bytes, 0x08)];
-    EXPECT_EQ(submit->CommandBuffer, allocation.device_address);
+    if (submit->CommandBuffer < allocation.device_address ||
+        submit->CommandLength > allocation.byte_length ||
+        submit->CommandBuffer - allocation.device_address >
+            allocation.byte_length - submit->CommandLength) {
+      ADD_FAILURE() << "Command range exceeds its resident native backing";
+      return static_cast<NTSTATUS>(0xC000000Du);
+    }
+    const uint64_t byte_offset =
+        submit->CommandBuffer - allocation.device_address;
+    const auto* packet =
+        static_cast<const uint8_t*>(allocation.pointer) + byte_offset;
+    EXPECT_EQ(allocation.type, 0x3328u);
+    EXPECT_TRUE(allocation.resident);
+    EXPECT_EQ(allocation.publication.byte_offset, byte_offset);
+    EXPECT_EQ(allocation.publication.byte_length, ReadU64(bytes, 0x10));
+    EXPECT_EQ(
+        std::memcmp(packet, static_cast<const uint8_t*>(bytes) + header_length,
+                    ReadU64(bytes, 0x10)),
+        0);
     native_state->commands.push_back(
-        {static_cast<const uint8_t*>(allocation.pointer), response,
-         native_state->instruction_address});
+        {packet, response, native_state->instruction_address});
   } else {
     ADD_FAILURE() << "Unexpected native opcode " << opcode;
   }
@@ -298,7 +325,12 @@ class WindowsXdnaKernelExecutionTest
     kmt_.unlock = [](const D3DKMT_UNLOCK2*) -> NTSTATUS { return 0; };
     kmt_.invalidate_cache =
         [](const D3DKMT_INVALIDATECACHE* invalidate) -> NTSTATUS {
-      if (native_state->allocations[invalidate->hAllocation].type == 0x3323) {
+      auto& allocation = native_state->allocations[invalidate->hAllocation];
+      EXPECT_LE(invalidate->Offset + invalidate->Length,
+                allocation.byte_length);
+      allocation.publication.byte_offset = invalidate->Offset;
+      allocation.publication.byte_length = invalidate->Length;
+      if (allocation.type == 0x3323) {
         auto& publication = native_state->bootstrap_publication;
         ++publication.count;
         publication.byte_offset = invalidate->Offset;
@@ -646,24 +678,102 @@ TEST_P(WindowsXdnaKernelExecutionTest,
   }
 }
 
-TEST_P(WindowsXdnaKernelExecutionTest, PartialPacketCreationReleasesTheLease) {
+TEST_P(WindowsXdnaKernelExecutionTest,
+       FixedRingsRetainPendingSlotsWithoutPerSlotAllocations) {
   amdf_xdna_umd_memory_result_t result = {};
   ASSERT_EQ(amdf_xdna_umd_memory_prepare_private(&context_, &profile_, &create_,
                                                  &memory_, &result),
             AMDF_STATUS_OK);
   auto* execution = context_.kernel_execution;
+  // Cross a native page boundary and include both ends of the owned region.
+  constexpr uint32_t capacity = 4096 / sizeof(uint64_t) + 1;
   const size_t initial_count = native_.allocations.size();
-  native_.failed_allocation = initial_count + 3;
-  EXPECT_EQ(amdf_windows_xdna_kernel_execution_acquire_queue(execution, 3),
-            amdf_kmt_make_status(static_cast<NTSTATUS>(0xC0000017u)));
-  for (size_t i = initial_count; i < native_.allocations.size(); ++i) {
-    EXPECT_EQ(native_.allocations[i].pointer, nullptr);
+  // One packet ring and one result region must serve the whole window.
+  native_.failed_allocation = initial_count + 2;
+  ASSERT_EQ(
+      amdf_windows_xdna_kernel_execution_acquire_queue(execution, capacity),
+      AMDF_STATUS_OK);
+  const size_t allocation_count = native_.allocations.size();
+  native_.deferred_opcode = 3;
+  const std::array<uint32_t, 3> slots = {0, capacity - 2, capacity - 1};
+  uint64_t last = 0;
+  for (uint32_t slot : slots) {
+    ASSERT_EQ(
+        amdf_windows_xdna_kernel_execution_submit(
+            execution, slot, result.device_address + slot * 256, 64, &last),
+        AMDF_STATUS_OK);
   }
-  native_.failed_allocation = SIZE_MAX;
-  ASSERT_EQ(amdf_windows_xdna_kernel_execution_acquire_queue(execution, 3),
+  ASSERT_EQ(native_.commands.size(), slots.size());
+  for (size_t i = 0; i < slots.size(); ++i) {
+    EXPECT_EQ(ReadU64(native_.commands[i].packet, 0x10),
+              result.device_address + slots[i] * 256);
+    EXPECT_EQ(native_.commands[i].response,
+              native_.commands[0].response + slots[i]);
+    EXPECT_EQ(*native_.commands[i].response, 4u);
+  }
+  native_.progress = last;
+  amdf_windows_xdna_kernel_execution_retire_command(execution, slots[0]);
+  EXPECT_EQ(amdf_windows_xdna_kernel_execution_query_terminal_status(execution),
             AMDF_STATUS_OK);
+  // Reusing the first slot must not overwrite another pending packet or result.
+  *native_.commands[2].response = 5;
+  ASSERT_EQ(amdf_windows_xdna_kernel_execution_submit(
+                execution, slots[0], result.device_address + 512, 64, &last),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(*native_.commands[2].response, 5u);
+  EXPECT_EQ(ReadU64(native_.commands[2].packet, 0x10),
+            result.device_address + slots[2] * 256);
+  EXPECT_EQ(native_.commands.back().packet, native_.commands[0].packet);
+  EXPECT_EQ(ReadU64(native_.commands.back().packet, 0x10),
+            result.device_address + 512);
+  native_.progress = last;
+  amdf_windows_xdna_kernel_execution_retire_command(execution, slots[1]);
+  EXPECT_EQ(amdf_windows_xdna_kernel_execution_query_terminal_status(execution),
+            AMDF_STATUS_OK);
+  amdf_windows_xdna_kernel_execution_retire_command(execution, slots[2]);
+  EXPECT_EQ(amdf_windows_xdna_kernel_execution_query_terminal_status(execution),
+            amdf_make_status(AMDF_STATUS_DOMAIN_FIRMWARE, 5));
+  amdf_windows_xdna_kernel_execution_retire_command(execution, slots[0]);
+  EXPECT_EQ(native_.allocations.size(), allocation_count);
   EXPECT_EQ(amdf_windows_xdna_kernel_execution_release_queue(execution),
             AMDF_STATUS_OK);
+  for (size_t i = initial_count; i < allocation_count; ++i) {
+    EXPECT_EQ(native_.allocations[i].pointer, nullptr);
+    EXPECT_EQ(native_.allocations[i].release_count, 1u);
+  }
+}
+
+TEST_P(WindowsXdnaKernelExecutionTest,
+       ResponseOffsetOverflowFailsBeforeNativePreparation) {
+  const size_t initial_count = native_.allocations.size();
+  EXPECT_EQ(amdf_windows_xdna_kernel_execution_acquire_queue(
+                context_.kernel_execution, UINT32_MAX),
+            amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE));
+  EXPECT_EQ(native_.allocations.size(), initial_count);
+  EXPECT_TRUE(native_.opcodes.empty());
+}
+
+TEST_P(WindowsXdnaKernelExecutionTest, PartialRingCreationReleasesTheLease) {
+  amdf_xdna_umd_memory_result_t result = {};
+  ASSERT_EQ(amdf_xdna_umd_memory_prepare_private(&context_, &profile_, &create_,
+                                                 &memory_, &result),
+            AMDF_STATUS_OK);
+  auto* execution = context_.kernel_execution;
+  for (size_t failure_index : {0u, 1u}) {
+    SCOPED_TRACE(failure_index);
+    const size_t initial_count = native_.allocations.size();
+    native_.failed_allocation = initial_count + failure_index;
+    EXPECT_EQ(amdf_windows_xdna_kernel_execution_acquire_queue(execution, 3),
+              amdf_kmt_make_status(static_cast<NTSTATUS>(0xC0000017u)));
+    for (size_t i = initial_count; i < native_.allocations.size(); ++i) {
+      EXPECT_EQ(native_.allocations[i].pointer, nullptr);
+    }
+    native_.failed_allocation = SIZE_MAX;
+    ASSERT_EQ(amdf_windows_xdna_kernel_execution_acquire_queue(execution, 3),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(amdf_windows_xdna_kernel_execution_release_queue(execution),
+              AMDF_STATUS_OK);
+  }
 }
 
 TEST_P(WindowsXdnaKernelExecutionTest,
@@ -759,36 +869,40 @@ TEST_P(WindowsXdnaKernelExecutionTest,
             AMDF_STATUS_OK);
 }
 
-TEST_P(WindowsXdnaKernelExecutionTest, PacketReleaseFailureConsumesTheLease) {
+TEST_P(WindowsXdnaKernelExecutionTest,
+       QueueStorageReleaseFailureConsumesTheLease) {
   amdf_xdna_umd_memory_result_t result = {};
   ASSERT_EQ(amdf_xdna_umd_memory_prepare_private(&context_, &profile_, &create_,
                                                  &memory_, &result),
             AMDF_STATUS_OK);
   auto* execution = context_.kernel_execution;
-  const size_t initial_count = native_.allocations.size();
-  ASSERT_EQ(amdf_windows_xdna_kernel_execution_acquire_queue(execution, 3),
-            AMDF_STATUS_OK);
-  native_.failed_release = initial_count + 1;
-  EXPECT_EQ(amdf_windows_xdna_kernel_execution_release_queue(execution),
-            amdf_kmt_make_status(static_cast<NTSTATUS>(0xC0000001u)));
-  for (size_t i = initial_count; i < native_.allocations.size(); ++i) {
-    EXPECT_EQ(native_.allocations[i].release_count, 1u);
-    if (i != native_.failed_release) {
-      EXPECT_EQ(native_.allocations[i].pointer, nullptr);
+  for (size_t failure_index : {0u, 1u}) {
+    SCOPED_TRACE(failure_index);
+    const size_t initial_count = native_.allocations.size();
+    ASSERT_EQ(amdf_windows_xdna_kernel_execution_acquire_queue(execution, 3),
+              AMDF_STATUS_OK);
+    native_.failed_release = initial_count + failure_index;
+    EXPECT_EQ(amdf_windows_xdna_kernel_execution_release_queue(execution),
+              amdf_kmt_make_status(static_cast<NTSTATUS>(0xC0000001u)));
+    for (size_t i = initial_count; i < native_.allocations.size(); ++i) {
+      EXPECT_EQ(native_.allocations[i].release_count, 1u);
+      if (i != native_.failed_release) {
+        EXPECT_EQ(native_.allocations[i].pointer, nullptr);
+      }
     }
+    ASSERT_EQ(amdf_windows_xdna_kernel_execution_acquire_queue(execution, 3),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(amdf_windows_xdna_kernel_execution_release_queue(execution),
+              AMDF_STATUS_OK);
+    // Native failure can leak that allocation, but does not retain a public
+    // lease or create a hidden retry owner. Release the dependency's simulated
+    // leak explicitly; production teardown must not have retried it.
+    auto& leaked = native_.allocations[native_.failed_release];
+    EXPECT_EQ(leaked.release_count, 1u);
+    EXPECT_NE(leaked.pointer, nullptr);
+    EXPECT_TRUE(VirtualFree(leaked.pointer, 0, MEM_RELEASE));
+    leaked.pointer = nullptr;
   }
-  ASSERT_EQ(amdf_windows_xdna_kernel_execution_acquire_queue(execution, 3),
-            AMDF_STATUS_OK);
-  EXPECT_EQ(amdf_windows_xdna_kernel_execution_release_queue(execution),
-            AMDF_STATUS_OK);
-  // Native failure can leak that allocation, but does not retain a public
-  // lease or create a hidden retry owner. Release the dependency's simulated
-  // leak explicitly; production teardown must not have retried it.
-  auto& leaked = native_.allocations[native_.failed_release];
-  EXPECT_EQ(leaked.release_count, 1u);
-  EXPECT_NE(leaked.pointer, nullptr);
-  EXPECT_TRUE(VirtualFree(leaked.pointer, 0, MEM_RELEASE));
-  leaked.pointer = nullptr;
 }
 
 TEST_P(WindowsXdnaKernelExecutionTest,

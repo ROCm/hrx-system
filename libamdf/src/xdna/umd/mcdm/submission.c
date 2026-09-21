@@ -114,7 +114,8 @@ void amdf_windows_xdna_submission_build_accounting(
 void amdf_windows_xdna_submission_build_execute(
     amdf_windows_xdna_protocol_t protocol,
     const amdf_windows_xdna_private_allocation_t* execution_allocation,
-    const amdf_windows_xdna_private_allocation_t* command_allocation,
+    const amdf_windows_xdna_private_allocation_t* response_allocation,
+    uint32_t response_byte_offset,
     const amdf_xdna_transaction_interpreter_packet_t* packet,
     amdf_windows_xdna_submission_t* out_submission) {
   amdf_windows_xdna_submission_initialize(
@@ -126,8 +127,8 @@ void amdf_windows_xdna_submission_build_execute(
                                          execution_allocation->allocation);
   amdf_windows_xdna_submission_write_u64(out_submission->bytes, 0x10,
                                          sizeof(*packet));
-  amdf_windows_xdna_submission_write_response(protocol, command_allocation, 8,
-                                              out_submission);
+  amdf_windows_xdna_submission_write_response(
+      protocol, response_allocation, response_byte_offset, out_submission);
   memcpy(out_submission->bytes +
              amdf_windows_xdna_submission_header_size(protocol),
          packet, sizeof(*packet));
@@ -146,11 +147,12 @@ amdf_status_t amdf_windows_xdna_submission_query_initialize_result(
 }
 
 amdf_status_t amdf_windows_xdna_submission_query_execute_result(
-    const amdf_windows_xdna_private_allocation_t* command_allocation) {
+    const amdf_windows_xdna_private_allocation_t* response_allocation,
+    uint32_t response_byte_offset) {
   const volatile uint32_t* response =
       (const volatile uint32_t*)((const uint8_t*)
-                                     command_allocation->host_pointer +
-                                 8);
+                                     response_allocation->host_pointer +
+                                 response_byte_offset);
   const uint32_t state = *response & 0xf;
   if (state == 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);

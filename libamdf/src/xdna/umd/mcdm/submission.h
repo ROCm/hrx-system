@@ -51,11 +51,14 @@ void amdf_windows_xdna_submission_build_accounting(
     const amdf_windows_xdna_private_allocation_t* instruction_allocation,
     uint64_t live_byte_length, amdf_windows_xdna_submission_t* out_submission);
 
-// Builds the private execution record adjoining one ERT packet.
+// Builds the private execution record adjoining one ERT packet. The caller
+// owns the eight-byte cell at response_byte_offset in response_allocation
+// through checked retirement; the offset is allocation-relative in bytes.
 void amdf_windows_xdna_submission_build_execute(
     amdf_windows_xdna_protocol_t protocol,
     const amdf_windows_xdna_private_allocation_t* execution_allocation,
-    const amdf_windows_xdna_private_allocation_t* command_allocation,
+    const amdf_windows_xdna_private_allocation_t* response_allocation,
+    uint32_t response_byte_offset,
     const amdf_xdna_transaction_interpreter_packet_t* packet,
     amdf_windows_xdna_submission_t* out_submission);
 
@@ -70,7 +73,8 @@ amdf_status_t amdf_windows_xdna_submission_query_initialize_result(
 // not the caller's execution packet. The caller holds the allocation borrow
 // and prevents response reuse until this read; the result is not fence proof.
 amdf_status_t amdf_windows_xdna_submission_query_execute_result(
-    const amdf_windows_xdna_private_allocation_t* command_allocation);
+    const amdf_windows_xdna_private_allocation_t* response_allocation,
+    uint32_t response_byte_offset);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -52,7 +52,12 @@ amdf_status_t amdf_windows_xdna_kernel_execution_destroy(
     amdf_windows_xdna_kernel_execution_t* execution);
 
 // Acquires the context's exclusive public KMQ lease and prepares every native
-// packet/result slot. Failure publishes no lease and owns its local rollback.
+// packet/result slot. One resident fixed-stride packet ring and one response
+// allocation serve all slots; native creation and teardown counts are constant
+// in capacity. Responses use a separate native role for kernel CPU access.
+// Submission derives host/GPU addresses and cache ranges from the slot offset,
+// without allocation or storage locks. Checked retirement owns slot reuse.
+// Success publishes fully prepared storage. Failure rolls back without a lease.
 amdf_status_t amdf_windows_xdna_kernel_execution_acquire_queue(
     amdf_windows_xdna_kernel_execution_t* execution, uint32_t capacity);
 

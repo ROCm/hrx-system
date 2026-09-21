@@ -473,7 +473,8 @@ class XdnaExecutionFixture : public XdnaDeviceFixture {
   }
 
   void PrepareExecution(const ResolvedBindings& bindings, Execution* execution,
-                        uint32_t logical_column_count = 1) {
+                        uint32_t logical_column_count = 1,
+                        uint32_t command_capacity = 1) {
     amdf_xdna_context_create_info_t context_create = {};
     context_create.type = AMDF_STRUCTURE_TYPE_XDNA_CONTEXT_CREATE_INFO;
     context_create.structure_size = sizeof(context_create);
@@ -493,7 +494,12 @@ class XdnaExecutionFixture : public XdnaDeviceFixture {
         tables, iree_hal_amd_xdna_image_tables_allocation_use(
                     tables, entry.first_allocation_use));
     ASSERT_EQ(requirement.domain, IREE_XDNA_ELF_ALLOCATION_DOMAIN_COMMAND);
-    execution->byte_length = requirement.byte_length;
+    // Reserve an aligned immutable instruction slice per pending command.
+    const uint64_t alignment =
+        std::max<uint64_t>(requirement.alignment, instruction_alignment_);
+    execution->byte_length =
+        ((requirement.byte_length + alignment - 1) / alignment) * alignment *
+        command_capacity;
     amdf_memory_scope_t* scope = nullptr;
     uint32_t count = 0;
     ASSERT_EQ(xdna_api_->context_enumerate_memory_scopes(execution->context, 1,
@@ -562,9 +568,9 @@ class XdnaExecutionFixture : public XdnaDeviceFixture {
     queue_create.type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_CREATE_INFO;
     queue_create.structure_size = sizeof(queue_create);
     queue_create.queue_family_ordinal = queue_family_ordinal_;
-    // RunExecution retires each command before submitting the next. Reserve
-    // only its one live slot; pipelined capacity is covered by the queue CTS.
-    queue_create.maximum_pending_submission_count = 1;
+    // Serial callers need one slot; pipelined callers reserve their live
+    // window.
+    queue_create.maximum_pending_submission_count = command_capacity;
     ASSERT_EQ(xdna_api_->kernel_queue_create(execution->context, &queue_create,
                                              &execution->queue),
               AMDF_STATUS_OK);
@@ -575,7 +581,7 @@ class XdnaExecutionFixture : public XdnaDeviceFixture {
               AMDF_STATUS_OK);
     ASSERT_EQ(queue_info.queue_family_ordinal, queue_family_ordinal_);
     ASSERT_EQ(queue_info.command_type, AMDF_QUEUE_COMMAND_TYPE_XDNA);
-    ASSERT_GE(queue_info.maximum_pending_submission_count, 1u);
+    ASSERT_GE(queue_info.maximum_pending_submission_count, command_capacity);
     ASSERT_GE(queue_info.maximum_command_count, 1u);
   }
 

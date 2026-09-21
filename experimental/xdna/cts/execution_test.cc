@@ -18,6 +18,148 @@
 
 namespace iree::experimental::xdna::testing {
 
+class XdnaConcurrentQueuesTest : public XdnaExecutionFixture {};
+
+TEST_F(XdnaConcurrentQueuesTest, PipelinesDistinctCommandsAndReusesSlots) {
+  ASSERT_NO_FATAL_FAILURE(CreateBindings(AMDF_MEMORY_PROFILE_ROLE_CREATE));
+  if (IsSkipped()) {
+    return;
+  }
+  ASSERT_NO_FATAL_FAILURE(PrepareExecution(resolved_bindings_, &first_, 1, 2));
+
+  // A: (lhs, rhs) -> intermediate; B: (intermediate, rhs) -> lhs. Both
+  // immutable commands share one context and instruction allocation.
+  const ResolvedBindings consumer_bindings = {
+      resolved_bindings_[2], resolved_bindings_[1], resolved_bindings_[0]};
+  iree_hal_amd_xdna_executable_storage_t storage = {};
+  storage.memory = first_.instructions.memory;
+  storage.memory_byte_offset = first_.byte_length / 2;
+  storage.mapping = iree_make_byte_span(
+      first_.instructions.pointer + storage.memory_byte_offset,
+      first_.byte_length - storage.memory_byte_offset);
+  ASSERT_EQ(api_->memory_query_address(storage.memory, 0,
+                                       AMDF_MEMORY_ADDRESS_XDNA_FIRMWARE,
+                                       &storage.device_address),
+            AMDF_STATUS_OK);
+  storage.device_address += storage.memory_byte_offset;
+  IREE_ASSERT_OK(iree_hal_amd_xdna_executable_load(executable_, entry_ordinal_,
+                                                   1, &storage));
+  IREE_ASSERT_OK(iree_hal_amd_xdna_executable_bind(
+      executable_, entry_ordinal_, 1, &storage, consumer_bindings.size(),
+      consumer_bindings.data()));
+  amdf_xdna_kernel_command_t consumer_command = {};
+  IREE_ASSERT_OK(iree_hal_amd_xdna_executable_query_invocation(
+      executable_, entry_ordinal_, 1, &storage, &consumer_command));
+  first_.original_instructions.assign(
+      first_.instructions.pointer,
+      first_.instructions.pointer + first_.byte_length);
+  ASSERT_EQ(api_->host_mapping_cache_control(first_.instructions.mapping,
+                                             AMDF_HOST_CACHE_OPERATION_FLUSH, 0,
+                                             first_.byte_length),
+            AMDF_STATUS_OK);
+
+  for (uint32_t iteration = 0; iteration < 3; ++iteration) {
+    SCOPED_TRACE(iteration);
+    std::array<BindingValues, 3> expected;
+    BindingValues poisoned;
+    for (size_t i = 0; i < kElementCount; ++i) {
+      expected[0][i] = kValues[(i + iteration) % kElementCount];
+      expected[1][i] = static_cast<uint32_t>(i * 2 + iteration * 2 + 3);
+      expected[2][i] = expected[0][i] * expected[1][i];
+      poisoned[i] = ~expected[2][i];
+    }
+    ASSERT_NO_FATAL_FAILURE(WriteBinding(0, expected[0]));
+    ASSERT_NO_FATAL_FAILURE(WriteBinding(1, expected[1]));
+    ASSERT_NO_FATAL_FAILURE(WriteBinding(2, poisoned));
+    uint64_t last_submission = 0;
+    for (const auto* command : {&first_.command, &consumer_command}) {
+      amdf_xdna_kernel_queue_submission_info_t submit = {};
+      submit.type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_SUBMISSION_INFO;
+      submit.structure_size = sizeof(submit);
+      submit.command_count = 1;
+      submit.commands = command;
+      ASSERT_EQ(xdna_api_->kernel_queue_submit(first_.queue, &submit,
+                                               &last_submission),
+                AMDF_STATUS_OK);
+    }
+    ASSERT_EQ(api_->kernel_queue_wait(first_.queue, last_submission,
+                                      AMDF_TIMEOUT_INFINITE, 0),
+              AMDF_STATUS_OK);
+    amdf_kernel_queue_status_t status = {};
+    status.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS;
+    status.structure_size = sizeof(status);
+    ASSERT_EQ(api_->kernel_queue_query_status(first_.queue, &status),
+              AMDF_STATUS_OK);
+    ASSERT_EQ(status.retired_submission, last_submission);
+    ASSERT_EQ(status.terminal_status, AMDF_STATUS_OK);
+    for (size_t i = 0; i < kElementCount; ++i) {
+      expected[0][i] = expected[2][i] * expected[1][i];
+    }
+    ASSERT_NO_FATAL_FAILURE(VerifyBindings(expected));
+    ASSERT_NO_FATAL_FAILURE(VerifyInstructions(first_));
+  }
+}
+
+TEST_F(XdnaConcurrentQueuesTest,
+       RecreatesDefaultQueuesWithInstructionsRetained) {
+  ASSERT_NO_FATAL_FAILURE(CreateBindings(AMDF_MEMORY_PROFILE_ROLE_CREATE));
+  if (IsSkipped()) {
+    return;
+  }
+  ASSERT_NO_FATAL_FAILURE(PrepareExecution(resolved_bindings_, &first_));
+  const ResolvedBindings consumer_bindings = {
+      resolved_bindings_[2], resolved_bindings_[1], resolved_bindings_[0]};
+  ASSERT_NO_FATAL_FAILURE(PrepareExecution(consumer_bindings, &second_));
+
+  // Replace the serial fixture's queues with two default-sized windows while
+  // their independently scoped instructions and shared data remain live.
+  for (auto* execution : {&first_, &second_}) {
+    amdf_kernel_queue_info_t info = {};
+    info.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO;
+    info.structure_size = sizeof(info);
+    ASSERT_EQ(api_->kernel_queue_query_info(execution->queue, &info),
+              AMDF_STATUS_OK);
+    const auto status = api_->kernel_queue_destroy(execution->queue);
+    if (status != amdf_make_api_status(AMDF_STATUS_CODE_BUSY)) {
+      execution->queue = nullptr;
+    }
+    ASSERT_EQ(status, AMDF_STATUS_OK);
+    amdf_xdna_kernel_queue_create_info_t create = {};
+    create.type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_CREATE_INFO;
+    create.structure_size = sizeof(create);
+    create.queue_family_ordinal = info.queue_family_ordinal;
+    ASSERT_EQ(xdna_api_->kernel_queue_create(execution->context, &create,
+                                             &execution->queue),
+              AMDF_STATUS_OK);
+    ASSERT_EQ(api_->kernel_queue_query_info(execution->queue, &info),
+              AMDF_STATUS_OK);
+    ASSERT_NE(info.maximum_pending_submission_count, 0u);
+  }
+
+  // The windows coexist; the data dependency between contexts is explicit.
+  // Full-window publication and wraparound have dedicated queue CTS coverage.
+  for (uint32_t iteration = 0; iteration < 3; ++iteration) {
+    SCOPED_TRACE(iteration);
+    std::array<BindingValues, 3> expected;
+    BindingValues poisoned;
+    for (size_t i = 0; i < kElementCount; ++i) {
+      expected[0][i] = kValues[(i + iteration) % kElementCount];
+      expected[1][i] = static_cast<uint32_t>(i * 2 + iteration * 2 + 3);
+      expected[2][i] = expected[0][i] * expected[1][i];
+      poisoned[i] = ~expected[2][i];
+    }
+    ASSERT_NO_FATAL_FAILURE(WriteBinding(0, expected[0]));
+    ASSERT_NO_FATAL_FAILURE(WriteBinding(1, expected[1]));
+    ASSERT_NO_FATAL_FAILURE(WriteBinding(2, poisoned));
+    ASSERT_NO_FATAL_FAILURE(RunExecution(first_));
+    ASSERT_NO_FATAL_FAILURE(RunExecution(second_));
+    for (size_t i = 0; i < kElementCount; ++i) {
+      expected[0][i] = expected[2][i] * expected[1][i];
+    }
+    ASSERT_NO_FATAL_FAILURE(VerifyBindings(expected));
+  }
+}
+
 class XdnaExecutionTest
     : public XdnaExecutionFixture,
       public ::testing::WithParamInterface<amdf_memory_profile_roles_t> {};
