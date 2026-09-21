@@ -614,21 +614,27 @@ void VulkanMemoryInteropTest::DestroyNativeQueue() {
     std::abort();
   }
   if (queue_mapping_) {
-    ASSERT_EQ(api_->user_queue_mapping_destroy(queue_mapping_), AMDF_STATUS_OK);
+    const auto status = api_->user_queue_mapping_destroy(queue_mapping_);
+    if (!amdf_status_is_ok(status)) {
+      ADD_FAILURE() << "Native queue mapping teardown failed: " << status;
+      std::abort();
+    }
     queue_mapping_ = nullptr;
   }
   if (queue_) {
-    ASSERT_EQ(api_->user_queue_destroy(queue_), AMDF_STATUS_OK);
+    const auto status = api_->user_queue_destroy(queue_);
+    // A native cleanup error consumes the queue handle without proving that
+    // its backing is safe to release. Stop before retrying or freeing it.
+    if (!amdf_status_is_ok(status)) {
+      ADD_FAILURE() << "Native queue teardown failed: " << status;
+      std::abort();
+    }
     queue_ = nullptr;
   }
 }
 
 void VulkanMemoryInteropTest::TearDown() {
   DestroyNativeQueue();
-  if (queue_mapping_ || queue_) {
-    ADD_FAILURE() << "Native queue teardown failed; backing is still reachable";
-    std::abort();
-  }
   if (api_) {
     api_->external_memory_release(&exported_);
     DestroyMemory(control_);
