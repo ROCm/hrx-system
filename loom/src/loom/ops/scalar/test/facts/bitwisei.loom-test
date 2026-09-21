@@ -178,3 +178,104 @@ func.def @bitfield_extracts_range(%x: i32) -> (i64, i64) {
   %hi = scalar.constant 127 : i64
   func.return %lo, %hi : i64, i64
 }
+
+// ====
+
+// Nonzero predicates bound both zero counts below the declared width and
+// population count above zero, including when the signed range spans zero.
+func.def @nonzero_bit_counts_i8(%input: i8) -> (i64, i64, i64, i64) {
+  %value = scalar.assume %input [ne(%input, 0)] : i8
+  %leading = scalar.ctlzi %value : i8
+  %trailing = scalar.cttzi %value : i8
+  %population = scalar.ctpopi %value : i8
+  %leading_hi = test.fact_range_hi %leading : i8 -> i64
+  %trailing_hi = test.fact_range_hi %trailing : i8 -> i64
+  %population_lo = test.fact_range_lo %population : i8 -> i64
+  %population_hi = test.fact_range_hi %population : i8 -> i64
+  func.return %leading_hi, %trailing_hi, %population_lo, %population_hi : i64, i64, i64, i64
+}
+// ----
+func.def @nonzero_bit_counts_i8(%input: i8) -> (i64, i64, i64, i64) {
+  %leading_hi = scalar.constant 7 : i64
+  %trailing_hi = scalar.constant 7 : i64
+  %population_lo = scalar.constant 1 : i64
+  %population_hi = scalar.constant 8 : i64
+  func.return %leading_hi, %trailing_hi, %population_lo, %population_hi : i64, i64, i64, i64
+}
+
+// ====
+
+func.def @nonzero_bit_counts_i64(%input: i64) -> (i64, i64, i64, i64) {
+  %value = scalar.assume %input [ne(%input, 0)] : i64
+  %leading = scalar.ctlzi %value : i64
+  %trailing = scalar.cttzi %value : i64
+  %population = scalar.ctpopi %value : i64
+  %leading_hi = test.fact_range_hi %leading : i64 -> i64
+  %trailing_hi = test.fact_range_hi %trailing : i64 -> i64
+  %population_lo = test.fact_range_lo %population : i64 -> i64
+  %population_hi = test.fact_range_hi %population : i64 -> i64
+  func.return %leading_hi, %trailing_hi, %population_lo, %population_hi : i64, i64, i64, i64
+}
+// ----
+func.def @nonzero_bit_counts_i64(%input: i64) -> (i64, i64, i64, i64) {
+  %leading_hi = scalar.constant 63 : i64
+  %trailing_hi = scalar.constant 63 : i64
+  %population_lo = scalar.constant 1 : i64
+  %population_hi = scalar.constant 64 : i64
+  func.return %leading_hi, %trailing_hi, %population_lo, %population_hi : i64, i64, i64, i64
+}
+
+// ====
+
+// Unconstrained inputs can be zero, so zero counts must retain the full width.
+func.def @unknown_bit_counts_i32(%value: i32) -> (i64, i64, i64) {
+  %leading = scalar.ctlzi %value : i32
+  %trailing = scalar.cttzi %value : i32
+  %population = scalar.ctpopi %value : i32
+  %leading_hi = test.fact_range_hi %leading : i32 -> i64
+  %trailing_hi = test.fact_range_hi %trailing : i32 -> i64
+  %population_lo = test.fact_range_lo %population : i32 -> i64
+  func.return %leading_hi, %trailing_hi, %population_lo : i64, i64, i64
+}
+// ----
+func.def @unknown_bit_counts_i32(%value: i32) -> (i64, i64, i64) {
+  %leading_hi = scalar.constant 32 : i64
+  %trailing_hi = scalar.constant 32 : i64
+  %population_lo = scalar.constant 0 : i64
+  func.return %leading_hi, %trailing_hi, %population_lo : i64, i64, i64
+}
+
+// ====
+
+// RUN: pass canonicalize,canonicalize
+
+// A guarded scan needs no extra assumption to produce a valid 32-lane index.
+// The first canonicalization retains the branch fact on the operand; the next
+// consumes the tightened bit-count range.
+func.def @guarded_first_set_bit(%mask: i32) -> (i32, i1) {
+  %c0 = scalar.constant 0 : i32
+  %width = scalar.constant 32 : i32
+  %has_bit = scalar.cmpi ne, %mask, %c0 : i32
+  %lane = scf.if %has_bit -> (i32) {
+    %first = scalar.cttzi %mask : i32
+    scf.yield %first : i32
+  } else {
+    scf.yield %c0 : i32
+  }
+  %bounded = scalar.cmpi ult, %lane, %width : i32
+  func.return %lane, %bounded : i32, i1
+}
+// ----
+func.def @guarded_first_set_bit(%mask: i32) -> (i32, i1) {
+  %c0 = scalar.constant 0 : i32
+  %has_bit = scalar.cmpi ne, %mask, %c0 : i32
+  %lane = scf.if %has_bit -> (i32) {
+    %9 = scalar.assume %mask [ne(%mask, 0)] : i32
+    %first = scalar.cttzi %9 : i32
+    scf.yield %first : i32
+  } else {
+    scf.yield %c0 : i32
+  }
+  %bounded = scalar.constant true : i1
+  func.return %lane, %bounded : i32, i1
+}

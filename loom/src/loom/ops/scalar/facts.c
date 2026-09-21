@@ -550,37 +550,41 @@ iree_status_t loom_scalar_rotri_facts(loom_fact_context_t* context,
   return iree_ok_status();
 }
 
-// Bit counting is bounded by the declared integer width.
-#define BIT_COUNT_FACTS(name, result_accessor, fn)                      \
-  iree_status_t name(loom_fact_context_t* context,                      \
-                     const loom_module_t* module, const loom_op_t* op,  \
-                     const loom_value_facts_t* operand_facts,           \
-                     loom_value_facts_t* result_facts) {                \
-    loom_type_t result_type =                                           \
-        loom_module_value_type(module, result_accessor(op));            \
-    int32_t bitwidth =                                                  \
-        loom_scalar_type_bitwidth(loom_type_element_type(result_type)); \
-    if (bitwidth <= 0) {                                                \
-      result_facts[0] = loom_value_facts_unknown();                     \
-      return iree_ok_status();                                          \
-    }                                                                   \
-    if (loom_value_facts_is_exact(operand_facts[0])) {                  \
-      result_facts[0] = loom_value_facts_exact_i64(                     \
-          fn((uint64_t)operand_facts[0].range_lo, bitwidth));           \
-    } else {                                                            \
-      result_facts[0] = loom_value_facts_make(0, bitwidth, 1);          \
-    }                                                                   \
-    loom_value_facts_propagate_unary_distribution(operand_facts[0],     \
-                                                  &result_facts[0]);    \
-    return iree_ok_status();                                            \
+// Bit counting is bounded by the declared integer width. A proven nonzero
+// input excludes the all-zero result for population count and the full-width
+// result for leading/trailing zero counts.
+#define BIT_COUNT_FACTS(name, result_accessor, fn, nonzero_lo, nonzero_hi) \
+  iree_status_t name(loom_fact_context_t* context,                         \
+                     const loom_module_t* module, const loom_op_t* op,     \
+                     const loom_value_facts_t* operand_facts,              \
+                     loom_value_facts_t* result_facts) {                   \
+    loom_type_t result_type =                                              \
+        loom_module_value_type(module, result_accessor(op));               \
+    int32_t bitwidth =                                                     \
+        loom_scalar_type_bitwidth(loom_type_element_type(result_type));    \
+    if (bitwidth <= 0) {                                                   \
+      result_facts[0] = loom_value_facts_unknown();                        \
+      return iree_ok_status();                                             \
+    }                                                                      \
+    if (loom_value_facts_is_exact(operand_facts[0])) {                     \
+      result_facts[0] = loom_value_facts_exact_i64(                        \
+          fn((uint64_t)operand_facts[0].range_lo, bitwidth));              \
+    } else if (loom_value_facts_is_non_zero(operand_facts[0])) {           \
+      result_facts[0] = loom_value_facts_make(nonzero_lo, nonzero_hi, 1);  \
+    } else {                                                               \
+      result_facts[0] = loom_value_facts_make(0, bitwidth, 1);             \
+    }                                                                      \
+    loom_value_facts_propagate_unary_distribution(operand_facts[0],        \
+                                                  &result_facts[0]);       \
+    return iree_ok_status();                                               \
   }
 
 BIT_COUNT_FACTS(loom_scalar_ctlzi_facts, loom_scalar_ctlzi_result,
-                iree_math_count_leading_zeros_u64_width)
+                iree_math_count_leading_zeros_u64_width, 0, bitwidth - 1)
 BIT_COUNT_FACTS(loom_scalar_cttzi_facts, loom_scalar_cttzi_result,
-                iree_math_count_trailing_zeros_u64_width)
+                iree_math_count_trailing_zeros_u64_width, 0, bitwidth - 1)
 BIT_COUNT_FACTS(loom_scalar_ctpopi_facts, loom_scalar_ctpopi_result,
-                iree_math_count_ones_u64_width)
+                iree_math_count_ones_u64_width, 1, bitwidth)
 
 #undef BIT_COUNT_FACTS
 
