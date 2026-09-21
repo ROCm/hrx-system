@@ -29,6 +29,14 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "pm4_commands",
+    testonly = True,
+    srcs = ["pm4_commands.cc"],
+    hdrs = ["pm4_commands.h"],
+    visibility = ["//libamdf/cts/interop/gpu:__subpackages__"],
+)
+
+amdf_cc_library(
     name = "user_queue_memory",
     testonly = True,
     srcs = ["user_queue_memory.cc"],
@@ -74,7 +82,7 @@ amdf_cc_library(
     deps = [
         ":user_queue_memory",
         "//third_party:google_test",
-    ],
+    ] + ([":pm4_commands"] if name == "pm4_queue" else []),
 ) for name in [
     "pm4_queue",
     "sdma_queue",
