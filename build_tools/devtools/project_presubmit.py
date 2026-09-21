@@ -110,13 +110,19 @@ def validate_cmake_build_tree(project_name: str, build_dir: Path) -> bool:
 
 
 def run_command(
-    project_name: str, command: list[str], description: str, *, cwd: Path
+    project_name: str,
+    command: list[str],
+    description: str,
+    *,
+    cwd: Path,
+    success_exit_codes: tuple[int, ...] = (0,),
+    verbose: bool = False,
 ) -> bool:
     print(f"{project_name} presubmit: {description}")
-    print("  " + " ".join(command))
-    sys.stdout.flush()
+    if verbose:
+        print("  " + subprocess.list2cmdline(command), flush=True)
     result = subprocess.run(command, cwd=cwd)
-    if result.returncode == 0:
+    if result.returncode in success_exit_codes:
         return True
     print(
         f"{project_name} presubmit: {description} failed with exit code "

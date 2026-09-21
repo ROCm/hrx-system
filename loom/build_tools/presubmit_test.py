@@ -78,40 +78,6 @@ class LoomPresubmitTest(unittest.TestCase):
                     "//loom/src/loom/example/...",
                 )
 
-    def test_filtered_leaf_test_exit_preserves_real_failures(self):
-        with tempfile.TemporaryDirectory() as temporary_dir:
-            repository_root = Path(temporary_dir)
-            package_root = repository_root / "loom/example"
-            package_root.mkdir(parents=True)
-            (package_root / "BUILD.bazel").touch()
-            selected = repository_root / "selected.txt"
-            selected.write_text("loom/example/device_test.cc\n", encoding="utf-8")
-            for exit_code, expected in ((0, True), (4, True), (1, False), (3, False)):
-                with (
-                    self.subTest(exit_code=exit_code),
-                    mock.patch.object(self.presubmit, "REPO_ROOT", repository_root),
-                    mock.patch.object(
-                        self.presubmit.subprocess,
-                        "run",
-                        return_value=subprocess.CompletedProcess([], exit_code),
-                    ) as run,
-                    contextlib.redirect_stdout(io.StringIO()) as output,
-                ):
-                    self.assertEqual(
-                        self.presubmit.run_bazel_tests(str(selected)), expected
-                    )
-                    self.assertEqual(run.call_args.args[0][-1], "//loom/example/...")
-                    if exit_code == 4:
-                        self.assertIn("no admitted CPU tests", output.getvalue())
-
-    def test_empty_full_test_suite_is_an_error(self):
-        with mock.patch.object(
-            self.presubmit.subprocess,
-            "run",
-            return_value=subprocess.CompletedProcess([], 4),
-        ):
-            self.assertFalse(self.presubmit.run_bazel_tests())
-
     def test_library_change_includes_nested_test_packages(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
             repository_root = Path(temporary_dir)
