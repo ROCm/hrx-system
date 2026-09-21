@@ -518,6 +518,7 @@ loom_check_test_suite(
     "test/array_plan/unused_worker_inputs.loom-test"
     "test/array_plan/worker_column_spread.loom-test"
     "test/array_plan/worker_column_spread_dual_stream.loom-test"
+    "test/array_plan/worker_column_spread_wide.loom-test"
     "test/array_plan/worker_cycles.loom-test"
     "test/descriptors/bf16_comparison.loom-test"
     "test/descriptors/bfp_move.loom-test"
