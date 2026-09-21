@@ -79,11 +79,12 @@ typedef struct loom_vm_module_plan_t {
 // Emits VM functions in a prepared mixed-target module as one immutable .vm
 // artifact. Signature and export tables are sorted for runtime consumption;
 // the common compiler has already resolved the functions participating in the
-// module. Referenced read-only payloads retain their source alignment and map
-// to module-owned immutable buffers. Bytes are appended once to a segmented
-// stream and fixed table rows are backpatched. No instruction sizing pass or
-// contiguous image is required. Success transfers the byte sequence to
-// |out_artifact|; failure publishes none.
+// module. Modules without definitions are valid; callable and function sections
+// are omitted when empty. Referenced read-only payloads retain their source
+// alignment and map to module-owned immutable buffers. Bytes are appended once
+// to a segmented stream and fixed table rows are backpatched. No instruction
+// sizing pass or contiguous image is required. Success transfers the byte
+// sequence to |out_artifact|; failure publishes none.
 iree_status_t loom_vm_module_emit(const loom_target_emit_request_t* request,
                                   loom_target_emit_artifact_t* out_artifact);
 

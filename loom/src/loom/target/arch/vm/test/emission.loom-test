@@ -1,5 +1,54 @@
 // RUN: emit vm-dis
 
+// Unselected source functions do not require any bytecode function sections.
+func.def @unused(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+// ----
+vm.module core(0.0) {
+}
+
+// ====
+
+// An empty source module emits only the bytecode image header.
+
+// ----
+vm.module core(0.0) {
+}
+
+// ====
+
+vm.target<core> @vm
+
+// Retained imports require callable tables but no local function definitions.
+low.func.decl retain import(native, "observe", module = "host") target<vm.core>(@vm) @observe(%value: reg<vm.value : i32>)
+
+// ----
+vm.module core(0.0) {
+  section strings alignment(8) {
+    string @string0 = "host"
+    string @string1 = "observe"
+  }
+
+  section signatures alignment(8) {
+    signature @signature0 (i32) -> ()
+  }
+
+  section callable_types alignment(8) {
+    callable @callable0 flags([]) depth(0) : @signature0
+  }
+
+  section imports alignment(8) {
+    group @import_group0 module_name(@string0) {
+      import @import0 name(@string1) flags([]) : @callable0
+    }
+  }
+
+}
+
+// ====
+
 vm.target<core> @vm
 
 // An artifact with no data references does not serialize unused payloads.
