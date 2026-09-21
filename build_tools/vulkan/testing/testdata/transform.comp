@@ -1,0 +1,31 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#version 450
+#extension GL_EXT_buffer_reference : require
+
+layout(local_size_x = 64) in;
+
+// Each access is a uint; the caller supplies a four-byte-aligned view address.
+layout(buffer_reference, std430, buffer_reference_align = 4) buffer Payload {
+  uint words[];
+};
+
+// Native test ABI: address at byte 0, salt at byte 8, word count at byte 12.
+layout(push_constant, std430) uniform Parameters {
+  Payload payload;
+  uint salt;
+  uint count;
+} parameters;
+
+void main() {
+  uint i = gl_GlobalInvocationID.x;
+  if (i < parameters.count) {
+    parameters.payload.words[i] =
+        (parameters.payload.words[i] ^ parameters.salt) * 1664525u +
+        1013904223u + i;
+  }
+}

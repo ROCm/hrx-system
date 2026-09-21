@@ -477,6 +477,18 @@ IREE_API_EXPORT void iree_hal_vulkan_device_options_initialize(
     iree_hal_vulkan_device_options_t* out_options);
 
 // Creates a Vulkan HAL device that wraps an existing VkDevice.
+// The caller retains ownership of the native loader, instance and device on
+// both success and failure. They must outlive the returned wrapper and all HAL
+// children. |external_device_params| describes features/extensions actually
+// enabled at native device creation, not merely supported by the physical
+// device.
+//
+// Add the returned device to an iree_hal_device_group_t before submitting work
+// so its queues receive topology and frontier assignments. Complete HAL work
+// and release the group, wrapper and children before resuming native host
+// access to its supplied VkQueues; the HAL's queue locks do not synchronize
+// external native submissions. Other native objects remain owned by the caller
+// and usable after HAL teardown.
 IREE_API_EXPORT iree_status_t iree_hal_vulkan_wrap_device(
     iree_string_view_t identifier,
     const iree_hal_vulkan_device_options_t* options,

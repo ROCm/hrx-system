@@ -1,0 +1,24 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+load("//build_tools/vulkan/requirements:defs.bzl", "VULKAN_API")
+
+package(default_visibility = ["//visibility:public"])
+
+iree_c_embed_data(
+    name = "transform_spv",
+    testonly = True,
+    srcs = ["transform.spv"],
+    c_file_output = "transform_spv.c",
+    h_file_output = "transform_spv.h",
+    identifier = "iree_vulkan_test_transform",
+    tags = ["iree-build-requirement=" + VULKAN_API.id],
+    target_compatible_with = select({
+        VULKAN_API.enabled_by: [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)

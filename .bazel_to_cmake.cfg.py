@@ -8,7 +8,14 @@ import bazel_to_cmake_config
 
 BAZEL_TO_CMAKE_REPO_ROOT = True
 
-DEFAULT_ROOT_DIRS = ["runtime/src/iree", "libamdf", "libhrx", "loom", "experimental"]
+DEFAULT_ROOT_DIRS = [
+    "build_tools/vulkan/testing",
+    "runtime/src/iree",
+    "libamdf",
+    "libhrx",
+    "loom",
+    "experimental",
+]
 
 REPO_MAP = {
     "@hrx": "",

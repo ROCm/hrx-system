@@ -1,0 +1,54 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:cc.bzl", "iree_cc_library")
+load("//build_tools/vulkan/requirements:defs.bzl", "VULKAN_API")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+_VULKAN_COMPATIBILITY = select({
+    VULKAN_API.enabled_by: [],
+    "//conditions:default": ["@platforms//:incompatible"],
+})
+
+iree_cc_library(
+    name = "context",
+    testonly = True,
+    srcs = ["context.cc"],
+    hdrs = ["context.h"],
+    tags = ["iree-build-requirement=" + VULKAN_API.id],
+    target_compatible_with = _VULKAN_COMPATIBILITY,
+    deps = [
+        "//build_tools/bazel:dl",
+        "//third_party:google_test",
+        "//third_party:vulkan_headers",
+    ],
+)
+
+[
+    iree_cc_library(
+        name = component,
+        testonly = True,
+        srcs = [component + ".cc"],
+        hdrs = [component + ".h"],
+        tags = ["iree-build-requirement=" + VULKAN_API.id],
+        target_compatible_with = _VULKAN_COMPATIBILITY,
+        deps = [
+            ":context",
+            "//third_party:google_test",
+            "//third_party:vulkan_headers",
+        ],
+    )
+    for component in [
+        "buffer",
+        "compute",
+        "submission",
+    ]
+]
