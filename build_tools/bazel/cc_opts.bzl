@@ -145,10 +145,14 @@ _SANITIZER_FRAME_POINTER_COPTS = select({
     "//conditions:default": [],
 })
 
-# Unix links AddressSanitizer through the compiler driver. Windows runtime
-# dependencies are supplied by the selected C/C++ runtimes toolchain.
+# Unix links AddressSanitizer through the compiler driver. Clang's C driver
+# also needs the C++ runtime to intercept new/delete in C++ dependencies.
+# Windows runtime dependencies come from the selected C/C++ runtimes toolchain.
 _ADDRESS_SANITIZER_LINKOPTS = select({
-    "//build_tools/bazel:address_sanitizer_cc_compiler_clang": ["-fsanitize=address"],
+    "//build_tools/bazel:address_sanitizer_cc_compiler_clang": [
+        "-fsanitize=address",
+        "-fsanitize-link-c++-runtime",
+    ],
     "//build_tools/bazel:address_sanitizer_cc_compiler_gcc": ["-fsanitize=address"],
     "//conditions:default": [],
 })
