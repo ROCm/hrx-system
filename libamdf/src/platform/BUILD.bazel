@@ -51,6 +51,12 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "native_event",
+    hdrs = ["native_event.h"],
+    visibility = ["//libamdf/src:__subpackages__"],
+)
+
+amdf_cc_library(
     name = "native_instance",
     target_compatible_with = select({
         "@platforms//os:linux": [],

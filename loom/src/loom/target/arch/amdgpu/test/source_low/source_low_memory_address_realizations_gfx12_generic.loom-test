@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_address_realizations.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amdgpu:gfx12-generic output=low
 
-amdgpu.target<gfx12-generic> @target
-
-kernel.def target(@target) @address_guarded_rows() {
+kernel.def @address_guarded_rows() {
   %unit = index.constant 1 : index
   %groups = index.constant 4 : index
   %lanes = index.constant 64 : index
@@ -31,7 +29,7 @@ kernel.def target(@target) @address_guarded_rows() {
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx12.generic.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "row_limit"}, direct_arg_offsets = [16], direct_arg_parameter_indices = [2], direct_arg_sizes = [8], parameter_count = 3, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(4, 1, 1) @address_guarded_rows(%row_limit: reg<amdgpu.sgpr x2>) asm {
+low.kernel.def target<amdgpu.gfx12.generic.core> abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "row_limit"}, direct_arg_offsets = [16], direct_arg_parameter_indices = [2], direct_arg_sizes = [8], parameter_count = 3, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(4, 1, 1) @address_guarded_rows(%row_limit: reg<amdgpu.sgpr x2>) asm {
   %group = live_in<amdgpu.cluster_id_x> : reg<amdgpu.sgpr>
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
@@ -67,9 +65,7 @@ low.kernel.def target<amdgpu.gfx12.generic.core>(@target) abi_layout({constant_c
 
 // ====
 
-amdgpu.target<gfx12-generic> @target
-
-kernel.def target(@target) @address_linearized_static_rows() {
+kernel.def @address_linearized_static_rows() {
   %unit = index.constant 1 : index
   %groups = index.constant 4 : index
   %lanes = index.constant 64 : index
@@ -97,7 +93,7 @@ kernel.def target(@target) @address_linearized_static_rows() {
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx12.generic.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "row_limit"}, direct_arg_offsets = [16], direct_arg_parameter_indices = [2], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(4, 1, 1) @address_linearized_static_rows(%row_limit: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.gfx12.generic.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "row_limit"}, direct_arg_offsets = [16], direct_arg_parameter_indices = [2], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(4, 1, 1) @address_linearized_static_rows(%row_limit: reg<amdgpu.sgpr>) asm {
   %group = live_in<amdgpu.cluster_id_x> : reg<amdgpu.sgpr>
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 2048} : reg<amdgpu.sgpr x2>
@@ -146,9 +142,7 @@ low.kernel.def target<amdgpu.gfx12.generic.core>(@target) abi_layout({constant_c
 
 // ====
 
-amdgpu.target<gfx12-generic> @target
-
-kernel.def target(@target) @address_without_materialized_index() {
+kernel.def @address_without_materialized_index() {
   %unit = index.constant 1 : index
   %groups = index.constant 4 : index
   %lanes = index.constant 64 : index
@@ -167,7 +161,7 @@ kernel.def target(@target) @address_without_materialized_index() {
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx12.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(4, 1, 1) @address_without_materialized_index() asm {
+low.kernel.def target<amdgpu.gfx12.generic.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(4, 1, 1) @address_without_materialized_index() asm {
   %group = live_in<amdgpu.cluster_id_x> : reg<amdgpu.sgpr>
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -193,9 +187,7 @@ low.kernel.def target<amdgpu.gfx12.generic.core>(@target) abi_layout({constant_c
 
 // ====
 
-amdgpu.target<gfx12-generic> @target
-
-kernel.def target(@target) @address_reuse_with_wide_scalar_base() {
+kernel.def @address_reuse_with_wide_scalar_base() {
   %unit = index.constant 1 : index
   %groups = index.constant 4 : index
   %lanes = index.constant 64 : index
@@ -218,7 +210,7 @@ kernel.def target(@target) @address_reuse_with_wide_scalar_base() {
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx12.generic.core>(@target) abi_layout({constant_count = 3, direct_arg_count = 2, direct_arg_names = {arg0 = "base_input", arg1 = "limit"}, direct_arg_offsets = [16, 24], direct_arg_parameter_indices = [2, 3], direct_arg_sizes = [8, 4], parameter_count = 4, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(4, 1, 1) @address_reuse_with_wide_scalar_base(%base: reg<amdgpu.sgpr x2>, %limit: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.gfx12.generic.core> abi_layout({constant_count = 3, direct_arg_count = 2, direct_arg_names = {arg0 = "base_input", arg1 = "limit"}, direct_arg_offsets = [16, 24], direct_arg_parameter_indices = [2, 3], direct_arg_sizes = [8, 4], parameter_count = 4, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(4, 1, 1) @address_reuse_with_wide_scalar_base(%base: reg<amdgpu.sgpr x2>, %limit: reg<amdgpu.sgpr>) asm {
   %group = live_in<amdgpu.cluster_id_x> : reg<amdgpu.sgpr>
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
@@ -256,9 +248,7 @@ low.kernel.def target<amdgpu.gfx12.generic.core>(@target) abi_layout({constant_c
 
 // ====
 
-amdgpu.target<gfx12-generic> @target
-
-kernel.def target(@target) @address_partially_materialized_axes() {
+kernel.def @address_partially_materialized_axes() {
   %unit = index.constant 1 : index
   %groups = index.constant 4 : index
   %columns = index.constant 16 : index
@@ -284,7 +274,7 @@ kernel.def target(@target) @address_partially_materialized_axes() {
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx12.generic.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "limit"}, direct_arg_offsets = [16], direct_arg_parameter_indices = [2], direct_arg_sizes = [8], parameter_count = 3, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(16, 2, 1) workgroup_count(4, 1, 1) @address_partially_materialized_axes(%limit: reg<amdgpu.sgpr x2>) asm {
+low.kernel.def target<amdgpu.gfx12.generic.core> abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "limit"}, direct_arg_offsets = [16], direct_arg_parameter_indices = [2], direct_arg_sizes = [8], parameter_count = 3, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(16, 2, 1) workgroup_count(4, 1, 1) @address_partially_materialized_axes(%limit: reg<amdgpu.sgpr x2>) asm {
   %group = live_in<amdgpu.cluster_id_x> : reg<amdgpu.sgpr>
   %packed_tid = live_in<amdgpu.workitem_id.packed.xy> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
@@ -335,9 +325,7 @@ low.kernel.def target<amdgpu.gfx12.generic.core>(@target) abi_layout({constant_c
 
 // ====
 
-amdgpu.target<gfx12-generic> @target
-
-kernel.def target(@target) @address_materialized_axes_distinct_roots() {
+kernel.def @address_materialized_axes_distinct_roots() {
   %unit = index.constant 1 : index
   %groups = index.constant 4 : index
   %columns = index.constant 16 : index
@@ -370,7 +358,7 @@ kernel.def target(@target) @address_materialized_axes_distinct_roots() {
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx12.generic.core>(@target) abi_layout({constant_count = 3, direct_arg_count = 2, direct_arg_names = {arg0 = "row_limit", arg1 = "column_limit"}, direct_arg_offsets = [24, 32], direct_arg_parameter_indices = [3, 4], direct_arg_sizes = [8, 4], parameter_count = 5, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(16, 2, 1) workgroup_count(4, 1, 1) @address_materialized_axes_distinct_roots(%row_limit: reg<amdgpu.sgpr x2>, %column_limit: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.gfx12.generic.core> abi_layout({constant_count = 3, direct_arg_count = 2, direct_arg_names = {arg0 = "row_limit", arg1 = "column_limit"}, direct_arg_offsets = [24, 32], direct_arg_parameter_indices = [3, 4], direct_arg_sizes = [8, 4], parameter_count = 5, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(16, 2, 1) workgroup_count(4, 1, 1) @address_materialized_axes_distinct_roots(%row_limit: reg<amdgpu.sgpr x2>, %column_limit: reg<amdgpu.sgpr>) asm {
   %group = live_in<amdgpu.cluster_id_x> : reg<amdgpu.sgpr>
   %packed_tid = live_in<amdgpu.workitem_id.packed.xy> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
@@ -416,9 +404,7 @@ low.kernel.def target<amdgpu.gfx12.generic.core>(@target) abi_layout({constant_c
 
 // ====
 
-amdgpu.target<gfx12-generic> @target
-
-kernel.def target(@target) @address_materialized_wide_offset() {
+kernel.def @address_materialized_wide_offset() {
   %unit = index.constant 1 : index
   %lanes = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lanes, %unit, %unit) : index
@@ -440,7 +426,7 @@ kernel.def target(@target) @address_materialized_wide_offset() {
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx12.generic.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "base_input"}, direct_arg_offsets = [16], direct_arg_parameter_indices = [2], direct_arg_sizes = [8], parameter_count = 3, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @address_materialized_wide_offset(%base: reg<amdgpu.sgpr x2>) asm {
+low.kernel.def target<amdgpu.gfx12.generic.core> abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "base_input"}, direct_arg_offsets = [16], direct_arg_parameter_indices = [2], direct_arg_sizes = [8], parameter_count = 3, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @address_materialized_wide_offset(%base: reg<amdgpu.sgpr x2>) asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -483,9 +469,7 @@ low.kernel.def target<amdgpu.gfx12.generic.core>(@target) abi_layout({constant_c
 
 // ====
 
-amdgpu.target<gfx12-generic> @target
-
-kernel.def target(@target) @address_guarded_atomic() {
+kernel.def @address_guarded_atomic() {
   %unit = index.constant 1 : index
   %groups = index.constant 4 : index
   %lanes = index.constant 64 : index
@@ -508,7 +492,7 @@ kernel.def target(@target) @address_guarded_atomic() {
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx12.generic.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "limit"}, direct_arg_offsets = [16], direct_arg_parameter_indices = [2], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(4, 1, 1) @address_guarded_atomic(%limit: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.gfx12.generic.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "limit"}, direct_arg_offsets = [16], direct_arg_parameter_indices = [2], direct_arg_sizes = [4], parameter_count = 3, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(4, 1, 1) @address_guarded_atomic(%limit: reg<amdgpu.sgpr>) asm {
   %group = live_in<amdgpu.cluster_id_x> : reg<amdgpu.sgpr>
   %increment = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>

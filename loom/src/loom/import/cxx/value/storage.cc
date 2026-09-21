@@ -18,6 +18,8 @@
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
+#include "loom/ops/vector/ops.h"
+#include "loom/ops/view/ops.h"
 
 namespace loom::cxx_import {
 
@@ -91,6 +93,31 @@ StorageAccess Storage::dereference(Pointer base, const cxx::Type* element_type,
   check(loom_buffer_view_build(&builder_, base.root, base.byte_offset,
                                view_type, locations_.get(owner), &view));
   return {loom_op_results(view)[0], std::nullopt};
+}
+
+loom_value_id_t Storage::load(const StorageAccess& access,
+                              const cxx::Type* element_type, cxx::AST* owner) {
+  int64_t selector = access.index ? INT64_MIN : 0;
+  auto build = types_.vector(element_type) ? loom_vector_load_build
+                                           : loom_view_load_build;
+  loom_op_t* op;
+  check(build(&builder_, 0, types_.memory_access_flags(element_type),
+              access.view, access.index ? &*access.index : nullptr,
+              access.index ? 1 : 0, &selector, 1, 0, 0,
+              types_.get(element_type, owner), locations_.get(owner), &op));
+  return loom_op_results(op)[0];
+}
+
+void Storage::store(const StorageAccess& access, loom_value_id_t value,
+                    const cxx::Type* element_type, cxx::AST* owner) {
+  int64_t selector = access.index ? INT64_MIN : 0;
+  auto build = types_.vector(element_type) ? loom_vector_store_build
+                                           : loom_view_store_build;
+  loom_op_t* op;
+  check(build(&builder_, 0, types_.memory_access_flags(element_type), value,
+              access.view, access.index ? &*access.index : nullptr,
+              access.index ? 1 : 0, &selector, 1, 0, 0, locations_.get(owner),
+              &op));
 }
 
 StorageAccess Storage::subscript(Pointer base, loom_value_id_t index,

@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_reduce.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
-aie2p.target<core> @target
-
-func.def target(@target) @i32_reduce_add(%input: buffer, %output: buffer) {
+func.def @i32_reduce_add(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xi32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
@@ -16,7 +14,7 @@ func.def target(@target) @i32_reduce_add(%input: buffer, %output: buffer) {
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32_reduce_add() asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32_reduce_add() asm {
   %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %21 = lda.u8 %input_view, 0
@@ -108,9 +106,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32_redu
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @f32_reduce_add(%input: buffer, %output: buffer) {
+func.def @f32_reduce_add(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xf32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xf32>
@@ -123,7 +119,7 @@ func.def target(@target) @f32_reduce_add(%input: buffer, %output: buffer) {
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @f32_reduce_add() asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f32_reduce_add() asm {
   %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %init = mov.i32 0
@@ -242,9 +238,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @f32_redu
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @f32_reduce_add_fastmath(%input: buffer, %output: buffer) {
+func.def @f32_reduce_add_fastmath(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xf32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xf32>
@@ -257,7 +251,7 @@ func.def target(@target) @f32_reduce_add_fastmath(%input: buffer, %output: buffe
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @f32_reduce_add_fastmath() asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f32_reduce_add_fastmath() asm {
   %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %20 = lda.u8 %input_view, 0
@@ -365,9 +359,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @f32_redu
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @f32x64_reduce_add_fastmath(%input: buffer, %output: buffer) {
+func.def @f32x64_reduce_add_fastmath(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xf32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xf32>
@@ -380,7 +372,7 @@ func.def target(@target) @f32x64_reduce_add_fastmath(%input: buffer, %output: bu
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @f32x64_reduce_add_fastmath() asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f32x64_reduce_add_fastmath() asm {
   %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %init = mov.i32 0
@@ -590,11 +582,9 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @f32x64_r
 // ====
 
 // XFAIL: AIE2P tile functions do not use GPU workitem/global-memory execution semantics.
-aie2p.target<core> @target
-
 config.def @runtime.vector_width = 4 : index
 
-kernel.def target(@target) @f32_configured_width_square_reduce() {
+kernel.def @f32_configured_width_square_reduce() {
   %singleton_dimension = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%singleton_dimension, %singleton_dimension, %singleton_dimension) workgroup_size(%workgroup_size, %singleton_dimension, %singleton_dimension) : index
@@ -620,11 +610,9 @@ kernel.def target(@target) @f32_configured_width_square_reduce() {
 
 // ====
 
-aie2p.target<core> @target
-
 config.def @runtime.vector_width = 4 : index
 
-func.def target(@target) @i32_configured_width_sum(%input: buffer, %output: buffer) {
+func.def @i32_configured_width_sum(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %vector_width = config.get @runtime.vector_width : index
   %vector_width_bounded = index.assume %vector_width [range(%vector_width, 2, 4)] : index
@@ -639,7 +627,7 @@ func.def target(@target) @i32_configured_width_sum(%input: buffer, %output: buff
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32_configured_width_sum() asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32_configured_width_sum() asm {
   %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %24 = lda.u8 %input_view, 0
@@ -731,9 +719,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32_conf
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @i32_reduce_minui_select_sentinel(%values: vector<4xi32>) -> (i32) {
+func.def @i32_reduce_minui_select_sentinel(%values: vector<4xi32>) -> (i32) {
   %empty_value = scalar.constant 0 : i32
   %zeros = vector.splat %empty_value : vector<4xi32>
   %is_zero = vector.cmpi eq, %values, %zeros : vector<4xi32> -> vector<4xi1>
@@ -748,7 +734,7 @@ func.def target(@target) @i32_reduce_minui_select_sentinel(%values: vector<4xi32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32_reduce_minui_select_sentinel(%values: reg<aie2p.vec256 x2>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32_reduce_minui_select_sentinel(%values: reg<aie2p.vec256 x2>) -> (reg<aie2p.er>) asm {
   %45 = mov.short 0
   %46 = mov.short 1
   %47 = mov.short 2
@@ -783,9 +769,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32_redu
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @i32x3_reduce_combining_kinds(%values: vector<3xi32>, %init: i32) -> (i32, i32, i32, i32, i32, i32, i32, i32) {
+func.def @i32x3_reduce_combining_kinds(%values: vector<3xi32>, %init: i32) -> (i32, i32, i32, i32, i32, i32, i32, i32) {
   %product = vector.reduce<muli> %values, %init : vector<3xi32>, i32
   %signed_minimum = vector.reduce<minsi> %values, %init : vector<3xi32>, i32
   %signed_maximum = vector.reduce<maxsi> %values, %init : vector<3xi32>, i32
@@ -798,7 +782,7 @@ func.def target(@target) @i32x3_reduce_combining_kinds(%values: vector<3xi32>, %
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32x3_reduce_combining_kinds(%values: reg<aie2p.vec256 x2>, %init: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32x3_reduce_combining_kinds(%values: reg<aie2p.vec256 x2>, %init: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
   %76 = vextract.32.imm %values, 0
   %77 = mul %init, %76
   %78 = vextract.32.imm %values, 1
@@ -843,15 +827,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32x3_re
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @i32x2x3_reduce_columns(%values: vector<2x3xi32>, %init: vector<3xi32>) -> (vector<3xi32>) {
+func.def @i32x2x3_reduce_columns(%values: vector<2x3xi32>, %init: vector<3xi32>) -> (vector<3xi32>) {
   %result = vector.reduce.axes<addi> %values, %init axes [0] : vector<2x3xi32>, vector<3xi32>
   func.return %result : vector<3xi32>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32x2x3_reduce_columns(%values: reg<aie2p.vec256 x2>, %init: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32x2x3_reduce_columns(%values: reg<aie2p.vec256 x2>, %init: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %38 = vextract.32.imm %init, 0
   %39 = vextract.32.imm %values, 0
   %40 = add.rr %38, %39
@@ -879,15 +861,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32x2x3_
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @f32x2x2x3_reduce_planes(%values: vector<2x2x3xf32>, %init: vector<2xf32>) -> (vector<2xf32>) {
+func.def @f32x2x2x3_reduce_planes(%values: vector<2x2x3xf32>, %init: vector<2xf32>) -> (vector<2xf32>) {
   %result = vector.reduce.axes<addf> %values, %init axes [1, 2] : vector<2x2x3xf32>, vector<2xf32>
   func.return %result : vector<2xf32>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @f32x2x2x3_reduce_planes(%values: reg<aie2p.vec256 x2>, %init: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f32x2x2x3_reduce_planes(%values: reg<aie2p.vec256 x2>, %init: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %60 = vextract.32.imm %init, 0
   %61 = vextract.32.imm %values, 0
   %62 = vbcst.32 %60

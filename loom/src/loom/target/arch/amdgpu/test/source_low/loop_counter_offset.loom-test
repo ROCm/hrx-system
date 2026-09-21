@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/loop_counter_offset.loom-test
-// RUN: with-checks emit source-low output=low
+// RUN: with-checks emit source-low target=amdgpu:gfx1151 output=low
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @offset_counter(%lower: offset, %upper: offset, %step: offset, %initial: i32) -> (i32) {
+func.def @offset_counter(%lower: offset, %upper: offset, %step: offset, %initial: i32) -> (i32) {
   %positive_step = index.assume %step [range(%step, 1, 2147483647)] : offset
   %increment = scalar.constant 1 : i32
   %result = scf.for %iv = [%lower to %upper step %positive_step](%count = %initial : i32) -> (i32) {

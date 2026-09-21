@@ -82,8 +82,11 @@ typedef uint32_t amdf_abi_version_t;
 /// Final queue destruction consumes handles on native cleanup failure.
 #define AMDF_ABI_VERSION_4 ((amdf_abi_version_t)4)
 
+/// Activated kernel queue information includes native notification types.
+#define AMDF_ABI_VERSION_5 ((amdf_abi_version_t)5)
+
 /// The most recent ABI version described by this header.
-#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION_4
+#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION_5
 
 /// The unmangled symbol used to acquire the immutable API table.
 #define AMDF_QUERY_API_SYMBOL "amdf_query_api"

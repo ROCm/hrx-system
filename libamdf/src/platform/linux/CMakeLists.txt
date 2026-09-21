@@ -101,6 +101,20 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND AMDF_BUILD)
 iree_cc_library(
   NAME
+    native_event
+  SRCS
+    "native_event.c"
+  DEPS
+    ::file
+    amdf::headers
+    libamdf::src::platform::native_event
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND AMDF_BUILD)
+iree_cc_library(
+  NAME
     endpoint
   HDRS
     "endpoint.h"

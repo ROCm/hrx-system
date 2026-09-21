@@ -42,12 +42,14 @@ iree_status_t loom_low_allocation_spill_plan_layout(
     uint16_t alloc_unit_bits, uint32_t* out_byte_size,
     uint32_t* out_byte_alignment);
 
-// Returns true when |slice_op| can be materialized as a reload from one unit of
-// a spilled value with |spill_byte_size| bytes.
-bool loom_low_allocation_spill_plan_slice_reload_byte_offset(
+// Returns true and the complete result byte size when |use_op| is a slice of
+// a spilled register range whose units can be addressed individually in bytes.
+// The assignment and operation belong to verified Low IR.
+bool loom_low_allocation_spill_plan_slice_reload_byte_size(
+    const loom_module_t* module,
     const loom_low_allocation_assignment_t* assignment,
-    uint32_t spill_byte_size, const loom_op_t* slice_op, uint16_t operand_index,
-    uint32_t* out_unit_byte_size, int64_t* out_reload_offset);
+    uint32_t spill_byte_size, const loom_op_t* use_op,
+    uint32_t* out_reload_byte_size);
 
 // Returns true when a block-local slice group should share one full reload.
 bool loom_low_allocation_spill_plan_use_full_slice_reload(

@@ -30,9 +30,9 @@
           },                                                   \
   }
 
-#define LOOM_X86_NATIVE_TARGET_PROFILE(symbol_suffix, native_bundle_key,  \
-                                       snapshot_name, descriptor_set_key, \
-                                       feature_bits)                      \
+#define LOOM_X86_NATIVE_TARGET_PROFILE(                           \
+    symbol_suffix, target_kind, selector_name, native_bundle_key, \
+    snapshot_name, descriptor_set_key, feature_bits)              \
   LOOM_X86_LOW_SNAPSHOT(kX86##symbol_suffix##Snapshot, snapshot_name);
 #include "loom/target/arch/x86/records/target_profiles.inl"
 #undef LOOM_X86_NATIVE_TARGET_PROFILE
@@ -44,34 +44,34 @@ static const loom_target_export_plan_t kX86_64ObjectExportPlan = {
     .linkage = LOOM_TARGET_LINKAGE_DSO_LOCAL,
 };
 
-#define LOOM_X86_NATIVE_TARGET_PROFILE(symbol_suffix, native_bundle_key,  \
-                                       snapshot_name, descriptor_set_key, \
-                                       feature_bits)                      \
-  static const loom_target_config_t kX86##symbol_suffix##Config = {       \
-      .name = IREE_SVL(descriptor_set_key),                               \
-      .contract_set_key = IREE_SVL(descriptor_set_key),                   \
-      .contract_feature_bits = feature_bits,                              \
+#define LOOM_X86_NATIVE_TARGET_PROFILE(                             \
+    symbol_suffix, target_kind, selector_name, native_bundle_key,   \
+    snapshot_name, descriptor_set_key, feature_bits)                \
+  static const loom_target_config_t kX86##symbol_suffix##Config = { \
+      .name = IREE_SVL(descriptor_set_key),                         \
+      .contract_set_key = IREE_SVL(descriptor_set_key),             \
+      .contract_feature_bits = feature_bits,                        \
   };
 #include "loom/target/arch/x86/records/target_profiles.inl"
 #undef LOOM_X86_NATIVE_TARGET_PROFILE
 
-#define LOOM_X86_NATIVE_TARGET_PROFILE(symbol_suffix, native_bundle_key,   \
-                                       snapshot_name, descriptor_set_key,  \
-                                       feature_bits)                       \
-  static const loom_target_bundle_t kX86LowTargetBundle##symbol_suffix = { \
-      .name = IREE_SVL(native_bundle_key),                                 \
-      .snapshot = &kX86##symbol_suffix##Snapshot,                          \
-      .export_plan = &kX86_64ObjectExportPlan,                             \
-      .config = &kX86##symbol_suffix##Config,                              \
+#define LOOM_X86_NATIVE_TARGET_PROFILE(                             \
+    symbol_suffix, target_kind, selector_name, native_bundle_key,   \
+    snapshot_name, descriptor_set_key, feature_bits)                \
+  const loom_target_bundle_t kX86LowTargetBundle##symbol_suffix = { \
+      .name = IREE_SVL(native_bundle_key),                          \
+      .snapshot = &kX86##symbol_suffix##Snapshot,                   \
+      .export_plan = &kX86_64ObjectExportPlan,                      \
+      .config = &kX86##symbol_suffix##Config,                       \
   };
 #include "loom/target/arch/x86/records/target_profiles.inl"
 #undef LOOM_X86_NATIVE_TARGET_PROFILE
 
 static const loom_target_bundle_t* const kX86TargetBundleValues[] = {
     NULL,
-#define LOOM_X86_NATIVE_TARGET_PROFILE(symbol_suffix, native_bundle_key,  \
-                                       snapshot_name, descriptor_set_key, \
-                                       feature_bits)                      \
+#define LOOM_X86_NATIVE_TARGET_PROFILE(                           \
+    symbol_suffix, target_kind, selector_name, native_bundle_key, \
+    snapshot_name, descriptor_set_key, feature_bits)              \
   &kX86LowTargetBundle##symbol_suffix,
 #include "loom/target/arch/x86/records/target_profiles.inl"
 #undef LOOM_X86_NATIVE_TARGET_PROFILE

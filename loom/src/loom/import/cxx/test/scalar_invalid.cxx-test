@@ -16,16 +16,6 @@ unsigned entry() {
 
 // ====
 // Increment rejects unprojected lvalues and source types.
-// ERROR@+1: LOWERING/059 "mutation requires an owned automatic source binding"
-unsigned entry(unsigned* pointer) { return (*pointer)++; }
-
-// ====
-// Increment rejects unprojected lvalues and source types.
-// ERROR@+1: LOWERING/059 "mutation requires an owned automatic source binding"
-unsigned entry(unsigned* pointer) { return ++pointer[0u]; }
-
-// ====
-// Increment rejects unprojected lvalues and source types.
 // ERROR@+1: LOWERING/059 "increment requires an integer or pointer binding"
 float entry(float value) { return value++; }
 
@@ -52,3 +42,18 @@ int entry() { return 1; }
 extern int counter;
 // ERROR@+1: LOWERING/059 "mutation requires an owned automatic source binding"
 void entry() { counter = 3; }
+
+// ====
+// Storage updates preserve the pointee qualifier.
+// ERROR@+1: LOWERING/059 "mutation requires a non-const destination"
+void entry(const unsigned* words) { *words |= 1u; }
+
+// ====
+// User-defined operators do not acquire builtin read/modify/write semantics.
+struct Word {
+  // Stored arithmetic state.
+  unsigned value;
+  Word& operator+=(unsigned);
+};
+// ERROR@+1: LOWERING/059 "overloaded compound assignment is not admitted"
+void entry(Word word) { word += 1u; }

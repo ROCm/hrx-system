@@ -48,17 +48,27 @@ typedef struct loom_check_source_low_request_t {
   loom_target_control_flow_lowering_t control_flow_lowering;
   // Requested sanitizer instrumentation and reporting policy.
   loom_sanitizer_options_t sanitizer;
-  // Optional source function to specialize; present exactly when TARGET is set.
+  // Optional source function to specialize. With TARGET but no name, select
+  // the sole definition or the unique public entry among private helpers.
   iree_string_view_t function_name;
   // Parsed target profile specification for the selected function.
   loom_target_specification_t target;
 } loom_check_source_low_request_t;
 
-// Parses optional @function and source-low options. An explicit function and
-// target=family:selector must appear together; pipeline-text modes accept
-// neither.
+// Parses optional @function and source-low options. An explicit function
+// requires target=family:selector; pipeline-text modes accept neither.
 iree_status_t loom_check_source_low_parse(
     iree_string_view_t text, loom_check_source_low_request_t* request);
+
+// Resolves an explicit compile target for a source entry. An empty function
+// name selects the sole definition or the unique public entry among private
+// helpers. The returned name borrows from the request or module; the selected
+// profile belongs to the environment. Authored IR is unchanged.
+iree_status_t loom_check_resolve_source_target(
+    const loom_module_t* module, const loom_target_environment_t* environment,
+    iree_string_view_t function_name,
+    const loom_target_specification_t* specification,
+    loom_target_specialization_request_t* out_request);
 
 // Source-to-target-low preparation options for emit providers.
 typedef struct loom_check_prepare_source_low_options_t {

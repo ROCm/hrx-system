@@ -1,9 +1,10 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/ml_attention.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @online_softmax_update(%old_max: f32, %old_sum: f32, %old_acc: vector<4xf32>, %score: f32, %value: vector<4xf32>) -> (f32, f32, vector<4xf32>) {
+// Online attention keeps numerically stable softmax state across score blocks:
+// the running max rescales the previous sum/accumulator and the new score
+// contributes one weighted value vector.
+func.def @online_softmax_update(%old_max: f32, %old_sum: f32, %old_acc: vector<4xf32>, %score: f32, %value: vector<4xf32>) -> (f32, f32, vector<4xf32>) {
   %new_max = scalar.maxnumf %old_max, %score : f32
   %old_delta = scalar.subf %old_max, %new_max : f32
   %score_delta = scalar.subf %score, %new_max : f32
@@ -18,7 +19,7 @@ func.def target(@target) @online_softmax_update(%old_max: f32, %old_sum: f32, %o
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @online_softmax_update(%old_max: reg<amdgpu.vgpr>, %old_sum: reg<amdgpu.vgpr>, %old_acc: reg<amdgpu.vgpr x4>, %score: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @online_softmax_update(%old_max: reg<amdgpu.vgpr>, %old_sum: reg<amdgpu.vgpr>, %old_acc: reg<amdgpu.vgpr x4>, %score: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>) asm {
   %new_max = v_max_f32 %old_max, %score
   %old_delta = v_sub_f32 %old_max, %new_max
   %score_delta = v_sub_f32 %score, %new_max
@@ -49,9 +50,10 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @online_
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @attention_probability_value_mma_repack() {
+// Flash-style attention feeds the QK probability/result tile into the PV MMA.
+// The direct result-to-LHS repack avoids a workgroup-memory round trip while
+// preserving the same BF16 operand contract expected by the second MMA.
+kernel.def @attention_probability_value_mma_repack() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -74,7 +76,7 @@ kernel.def target(@target) @attention_probability_value_mma_repack() {
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 24, direct_arg_count = 3, direct_arg_names = {arg0 = "probabilities", arg1 = "values", arg2 = "init_accumulator"}, direct_arg_offsets = [0, 32, 64], direct_arg_parameter_indices = [0, 1, 2], direct_arg_sizes = [32, 32, 32], parameter_count = 4, resource_count = 1, resource_offsets = [96], resource_parameter_indices = [3], uses_kernarg_segment_ptr = true}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @attention_probability_value_mma_repack(%probability_fragment: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>) asm {
+low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 24, direct_arg_count = 3, direct_arg_names = {arg0 = "probabilities", arg1 = "values", arg2 = "init_accumulator"}, direct_arg_offsets = [0, 32, 64], direct_arg_parameter_indices = [0, 1, 2], direct_arg_sizes = [32, 32, 32], parameter_count = 4, resource_count = 1, resource_offsets = [96], resource_parameter_indices = [3], uses_kernarg_segment_ptr = true}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @attention_probability_value_mma_repack(%probability_fragment: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>) asm {
   %22 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %24 = slice %probability_fragment[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
@@ -192,9 +194,9 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @attention_loop_carried_accumulator_barrier() {
+// Online attention can keep a matrix accumulator payload live across the
+// probability-scratch barrier instead of materializing it through LDS.
+kernel.def @attention_loop_carried_accumulator_barrier() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -226,7 +228,7 @@ kernel.def target(@target) @attention_loop_carried_accumulator_barrier() {
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 32, direct_arg_count = 4, direct_arg_names = {arg0 = "lhs_values", arg1 = "rhs_values0", arg2 = "rhs_values1", arg3 = "init_accumulator"}, direct_arg_offsets = [0, 32, 64, 96], direct_arg_parameter_indices = [0, 1, 2, 3], direct_arg_sizes = [32, 32, 32, 32], parameter_count = 5, resource_count = 1, resource_offsets = [128], resource_parameter_indices = [4], uses_kernarg_segment_ptr = true}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @attention_loop_carried_accumulator_barrier(%lhs: reg<amdgpu.vgpr x8>, %rhs0: reg<amdgpu.vgpr x8>, %rhs1: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>) asm {
+low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 32, direct_arg_count = 4, direct_arg_names = {arg0 = "lhs_values", arg1 = "rhs_values0", arg2 = "rhs_values1", arg3 = "init_accumulator"}, direct_arg_offsets = [0, 32, 64, 96], direct_arg_parameter_indices = [0, 1, 2, 3], direct_arg_sizes = [32, 32, 32, 32], parameter_count = 5, resource_count = 1, resource_offsets = [128], resource_parameter_indices = [4], uses_kernarg_segment_ptr = true}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @attention_loop_carried_accumulator_barrier(%lhs: reg<amdgpu.vgpr x8>, %rhs0: reg<amdgpu.vgpr x8>, %rhs1: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>) asm {
   %32 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %34 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
@@ -256,9 +258,9 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @attention_tail_peel_accumulator_merge() {
+// A peeled tail block in online attention applies one final score/value tile to
+// the loop-carried accumulator when the dynamic sequence has a tail tile.
+kernel.def @attention_tail_peel_accumulator_merge() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -296,7 +298,7 @@ kernel.def target(@target) @attention_tail_peel_accumulator_merge() {
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 33, direct_arg_count = 5, direct_arg_names = {arg0 = "lhs_values", arg1 = "rhs_values0", arg2 = "rhs_values1", arg3 = "init_accumulator", arg4 = "tail_tile_count"}, direct_arg_offsets = [0, 32, 64, 96, 128], direct_arg_parameter_indices = [0, 1, 2, 3, 4], direct_arg_sizes = [32, 32, 32, 32, 4], parameter_count = 6, resource_count = 1, resource_offsets = [136], resource_parameter_indices = [5], uses_kernarg_segment_ptr = true}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @attention_tail_peel_accumulator_merge(%lhs: reg<amdgpu.vgpr x8>, %rhs0: reg<amdgpu.vgpr x8>, %rhs1: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>, %tail_tile_count: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 33, direct_arg_count = 5, direct_arg_names = {arg0 = "lhs_values", arg1 = "rhs_values0", arg2 = "rhs_values1", arg3 = "init_accumulator", arg4 = "tail_tile_count"}, direct_arg_offsets = [0, 32, 64, 96, 128], direct_arg_parameter_indices = [0, 1, 2, 3, 4], direct_arg_sizes = [32, 32, 32, 32, 4], parameter_count = 6, resource_count = 1, resource_offsets = [136], resource_parameter_indices = [5], uses_kernarg_segment_ptr = true}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @attention_tail_peel_accumulator_merge(%lhs: reg<amdgpu.vgpr x8>, %rhs0: reg<amdgpu.vgpr x8>, %rhs1: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>, %tail_tile_count: reg<amdgpu.sgpr>) asm {
   %39 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %no_tail_tiles = s_mov_b32 0
@@ -341,9 +343,8 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @tail_masked_score_block(%scores: vector<4xf32>, %valid_count: i32) -> (f32, f32) {
+// Tail handling for a score block should mask invalid lanes before reductions.
+func.def @tail_masked_score_block(%scores: vector<4xf32>, %valid_count: i32) -> (f32, f32) {
   %start = scalar.constant 0 : i32
   %step = scalar.constant 1 : i32
   %lanes = vector.iota %start step %step : vector<4xi32>
@@ -361,7 +362,7 @@ func.def target(@target) @tail_masked_score_block(%scores: vector<4xf32>, %valid
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @tail_masked_score_block(%scores: reg<amdgpu.vgpr x4>, %valid_count: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @tail_masked_score_block(%scores: reg<amdgpu.vgpr x4>, %valid_count: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %37 = v_mov_b32_copy %valid_count
   %40 = v_cmp_lt_i32_src0_inline %37 {lhs = 0}
   %42 = v_cmp_lt_i32_src0_inline %37 {lhs = 1}
@@ -391,9 +392,8 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @tail_ma
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @paged_kv_cache_block_load(%page_table: buffer, %page_pool: buffer, %sequence0: index, %block0: index, %lane0: index) -> (i32, vector<4xbf16>) {
+// Paged key/value traversal is byte-offset math over a page table and page pool.
+func.def @paged_kv_cache_block_load(%page_table: buffer, %page_pool: buffer, %sequence0: index, %block0: index, %lane0: index) -> (i32, vector<4xbf16>) {
   %sequence = index.assume %sequence0 [range(%sequence0, 0, 63)] : index
   %block = index.assume %block0 [range(%block0, 0, 127)] : index
   %lane = index.assume %lane0 [range(%lane0, 0, 15)] : index
@@ -419,7 +419,7 @@ func.def target(@target) @paged_kv_cache_block_load(%page_table: buffer, %page_p
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @paged_kv_cache_block_load(%sequence: reg<amdgpu.sgpr>, %block: reg<amdgpu.sgpr>, %lane: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @paged_kv_cache_block_load(%sequence: reg<amdgpu.sgpr>, %block: reg<amdgpu.sgpr>, %lane: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm {
   %page_entry_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %kv_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %42 = v_mov_b32 0
@@ -442,9 +442,9 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @paged_k
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @rope_pair_rotate(%even: f32, %odd: f32, %angle: f32) -> (f32, f32) {
+// RoPE-style pair rotation keeps the math explicit so targets can choose sin/cos
+// recipes or native approximations without hiding the dataflow from analysis.
+func.def @rope_pair_rotate(%even: f32, %odd: f32, %angle: f32) -> (f32, f32) {
   %sine = scalar.sinf<afn> %angle : f32
   %cosine = scalar.cosf<afn> %angle : f32
   %even_cos = scalar.mulf<reassoc|nnan|nsz|contract> %even, %cosine : f32
@@ -457,7 +457,7 @@ func.def target(@target) @rope_pair_rotate(%even: f32, %odd: f32, %angle: f32) -
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @rope_pair_rotate(%even: reg<amdgpu.vgpr>, %odd: reg<amdgpu.vgpr>, %angle: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @rope_pair_rotate(%even: reg<amdgpu.vgpr>, %odd: reg<amdgpu.vgpr>, %angle: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %24 = v_mul_f32_src0_inline %angle, "f32_inv_2pi"
   %sine = v_sin_f32 %24
   %cosine = v_cos_f32 %24
@@ -472,9 +472,9 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @rope_pa
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @routing_top2_update(%score: f32, %expert: i32, %best_score: f32, %best_expert: i32, %second_score: f32, %second_expert: i32) -> (f32, i32, f32, i32) {
+// Top-2 routing updates are small but branchy; keeping them scalar source IR
+// gives targets a chance to select compare/cndmask forms instead of CFG.
+func.def @routing_top2_update(%score: f32, %expert: i32, %best_score: f32, %best_expert: i32, %second_score: f32, %second_expert: i32) -> (f32, i32, f32, i32) {
   %beats_best = scalar.cmpf olt, %best_score, %score : f32
   %beats_second = scalar.cmpf olt, %second_score, %score : f32
   %candidate_second_score = scf.select %beats_second, %score, %second_score : f32
@@ -487,7 +487,7 @@ func.def target(@target) @routing_top2_update(%score: f32, %expert: i32, %best_s
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @routing_top2_update(%score: reg<amdgpu.vgpr>, %expert: reg<amdgpu.sgpr>, %best_score: reg<amdgpu.vgpr>, %best_expert: reg<amdgpu.sgpr>, %second_score: reg<amdgpu.vgpr>, %second_expert: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @routing_top2_update(%score: reg<amdgpu.vgpr>, %expert: reg<amdgpu.sgpr>, %best_score: reg<amdgpu.vgpr>, %best_expert: reg<amdgpu.sgpr>, %second_score: reg<amdgpu.vgpr>, %second_expert: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %beats_best = v_cmp_lt_f32 %best_score, %score
   %beats_second = v_cmp_lt_f32 %second_score, %score
   %candidate_second_score = v_cndmask_b32 %second_score, %score, %beats_second

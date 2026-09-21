@@ -1,15 +1,13 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_scalar_i64_subtract.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amdgpu:gfx1201 output=low
 
-amdgpu.target<gfx1201> @target
-
-func.def target(@target) @uniform_subtract(%lhs: i64, %rhs: i64) -> (i64) {
+func.def @uniform_subtract(%lhs: i64, %rhs: i64) -> (i64) {
   %difference = scalar.subi %lhs, %rhs : i64
   func.return %difference : i64
 }
 
 // ----
-low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @uniform_subtract(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @uniform_subtract(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
   %7 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %8 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %9 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -22,9 +20,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @uniform_subtrac
 
 // ====
 
-amdgpu.target<gfx1201> @target
-
-func.def target(@target) @constant_subtract(%value: i64) -> (i64, i64, i64) {
+func.def @constant_subtract(%value: i64) -> (i64, i64, i64) {
   %c0 = scalar.constant 0 : i64
   %wide = scalar.constant 4294967297 : i64
   %negated = scalar.subi %c0, %value : i64
@@ -34,7 +30,7 @@ func.def target(@target) @constant_subtract(%value: i64) -> (i64, i64, i64) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @constant_subtract(%value: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @constant_subtract(%value: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
   %15 = s_mov_b32 0
   %18 = s_mov_b32 1
   %23 = slice %value[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -55,9 +51,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @constant_subtra
 
 // ====
 
-amdgpu.target<gfx1201> @target
-
-func.def target(@target) @mixed_subtract(%uniform: i64, %values: vector<2xi64>) -> (i64, i64) {
+func.def @mixed_subtract(%uniform: i64, %values: vector<2xi64>) -> (i64, i64) {
   %varying = vector.extract %values[0] : vector<2xi64> -> i64
   %uniform_left = scalar.subi %uniform, %varying : i64
   %uniform_right = scalar.subi %varying, %uniform : i64
@@ -65,7 +59,7 @@ func.def target(@target) @mixed_subtract(%uniform: i64, %values: vector<2xi64>) 
 }
 
 // ----
-low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @mixed_subtract(%uniform: reg<amdgpu.sgpr x2>, %values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @mixed_subtract(%uniform: reg<amdgpu.sgpr x2>, %values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
   %11 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %12 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %14 = slice %uniform[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>

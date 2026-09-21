@@ -16,6 +16,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/symbol_references.h"
+#include "loom/ir/function_version.h"
 #include "loom/ir/ir.h"
 
 #ifdef __cplusplus
@@ -106,6 +107,10 @@ typedef struct loom_symbol_liveness_options_t {
     // Number of entries in values.
     iree_host_size_t count;
   } root_symbol_ids;
+
+  // Borrowed compiler versions. RETAIN versions seed roots through their
+  // current implementing function, independently of authored symbol flags.
+  const loom_function_version_list_t* function_versions;
 } loom_symbol_liveness_options_t;
 
 // Immutable liveness result for one module snapshot.

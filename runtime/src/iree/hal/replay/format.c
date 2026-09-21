@@ -103,8 +103,6 @@ IREE_API_EXPORT const char* iree_hal_replay_operation_code_string(
       return "allocator.allocate_buffer";
     case IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_IMPORT_BUFFER:
       return "allocator.import_buffer";
-    case IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_EXPORT_BUFFER:
-      return "allocator.export_buffer";
     case IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_VIRTUAL_MEMORY_QUERY_GRANULARITY:
       return "allocator.virtual_memory_query_granularity";
     case IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_VIRTUAL_MEMORY_RESERVE:
@@ -131,6 +129,8 @@ IREE_API_EXPORT const char* iree_hal_replay_operation_code_string(
       return "buffer.invalidate_range";
     case IREE_HAL_REPLAY_OPERATION_CODE_BUFFER_FLUSH_RANGE:
       return "buffer.flush_range";
+    case IREE_HAL_REPLAY_OPERATION_CODE_BUFFER_EXPORT:
+      return "buffer.export";
     case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_BEGIN:
       return "command_buffer.begin";
     case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_END:

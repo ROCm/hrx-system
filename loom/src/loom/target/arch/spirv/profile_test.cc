@@ -159,6 +159,30 @@ TEST(SpirvTargetProfileTest, PreservesExplicitZeroAndPresetValues) {
   iree_arena_block_pool_deinitialize(&block_pool);
 }
 
+TEST(SpirvTargetProfileTest, SelectsExplicitTypeAndAbiRequirements) {
+  const loom_spirv_target_profile_t* profile = nullptr;
+  IREE_ASSERT_OK(loom_spirv_target_profile_select(
+      IREE_SV("vulkan1.3+bda+extended-types"), &profile));
+  EXPECT_TRUE(loom_target_fact_field_set_contains(
+      profile->base.explicit_fields,
+      LOOM_TARGET_FACT_FIELD_CONTRACT_FEATURE_BITS));
+  EXPECT_TRUE(iree_all_bits_set(
+      profile->base.target_bundle->config->contract_feature_bits,
+      LOOM_SPIRV_FEATURE_PROFILE_VULKAN_1_3_BDA | LOOM_SPIRV_FEATURE_FLOAT16 |
+          LOOM_SPIRV_FEATURE_FLOAT64 | LOOM_SPIRV_FEATURE_INT8 |
+          LOOM_SPIRV_FEATURE_INT16 |
+          LOOM_SPIRV_FEATURE_STORAGE_BUFFER_8BIT_ACCESS |
+          LOOM_SPIRV_FEATURE_STORAGE_BUFFER_16BIT_ACCESS |
+          LOOM_SPIRV_FEATURE_BFLOAT16_TYPE_KHR));
+
+  IREE_ASSERT_OK(
+      loom_spirv_target_profile_select(IREE_SV("vulkan1.3+bda+hal"), &profile));
+  EXPECT_TRUE(loom_target_fact_field_set_contains(profile->base.explicit_fields,
+                                                  LOOM_TARGET_FACT_FIELD_ABI));
+  EXPECT_EQ(profile->base.target_bundle->export_plan->abi_kind,
+            LOOM_TARGET_ABI_HAL_KERNEL);
+}
+
 TEST(SpirvTargetProfileTest, RejectsUnknownNamedProfile) {
   const loom_spirv_target_profile_t* profile = nullptr;
   IREE_EXPECT_STATUS_IS(

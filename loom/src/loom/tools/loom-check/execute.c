@@ -28,6 +28,7 @@
 #include "loom/tools/loom-check/diagnostics.h"
 #include "loom/tools/loom-check/input.h"
 #include "loom/tools/loom-check/requirements.h"
+#include "loom/tools/loom-check/source_low.h"
 #include "loom/tools/loom-format/convert.h"
 #include "loom/util/diff.h"
 #include "loom/util/json.h"
@@ -328,11 +329,13 @@ iree_status_t loom_check_execute_case(
   return iree_ok_status();
 }
 
-static iree_status_t loom_check_verify_pass_output(
+static iree_status_t loom_check_verify_pass_module(
     loom_source_resolver_t source_resolver,
     const loom_check_environment_t* environment,
     loom_check_diagnostic_collector_t* diagnostic_collector,
-    loom_module_t* module, bool* out_failed_verification) {
+    loom_module_t* module,
+    const loom_function_version_list_t* function_versions,
+    bool* out_failed_verification) {
   *out_failed_verification = false;
   loom_verify_options_t verify_options = {
       .sink = {.fn = loom_check_diagnostic_collector_sink,
@@ -366,6 +369,7 @@ static iree_status_t loom_check_verify_pass_output(
               .user_data = &low_diagnostic_capture,
           },
       .provider_list = environment->low_verify_provider_list,
+      .function_versions = function_versions,
       .max_errors = 100,
   };
   loom_low_verify_result_t low_verify_result = {0};
@@ -431,6 +435,48 @@ static loom_text_print_flags_t loom_check_pass_print_flags(
     flags |= LOOM_TEXT_PRINT_LOCATIONS;
   }
   return flags;
+}
+
+// Compile options precede the pipeline, whose own pass options remain opaque
+// to this front door. A named pipeline starts with '@', so an explicit entry
+// uses entry=@function instead of overloading the pipeline spelling.
+static iree_status_t loom_check_parse_pass_target(
+    iree_string_view_t* pipeline, loom_check_source_low_request_t* request) {
+  *request = (loom_check_source_low_request_t){0};
+  *pipeline = iree_string_view_trim(*pipeline);
+  while (iree_string_view_starts_with(*pipeline, IREE_SV("target=")) ||
+         iree_string_view_starts_with(*pipeline, IREE_SV("entry="))) {
+    iree_string_view_t token;
+    iree_string_view_split(*pipeline, ' ', &token, pipeline);
+    *pipeline = iree_string_view_trim(*pipeline);
+    iree_string_view_t name;
+    iree_string_view_t value;
+    iree_string_view_split(token, '=', &name, &value);
+    if (iree_string_view_equal(name, IREE_SV("target"))) {
+      if (iree_any_bit_set(request->options,
+                           LOOM_CHECK_SOURCE_LOW_OPTION_TARGET)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "duplicate pass option 'target'");
+      }
+      IREE_RETURN_IF_ERROR(
+          loom_target_specification_parse(value, &request->target));
+      request->options |= LOOM_CHECK_SOURCE_LOW_OPTION_TARGET;
+    } else {
+      if (value.size <= 1 || value.data[0] != '@' ||
+          !iree_string_view_is_empty(request->function_name)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "pass expects at most one entry=@function");
+      }
+      request->function_name = value;
+    }
+  }
+  if (!iree_string_view_is_empty(request->function_name) &&
+      !iree_any_bit_set(request->options,
+                        LOOM_CHECK_SOURCE_LOW_OPTION_TARGET)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "pass entry requires target=family:selector");
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_check_execute_pass_with_output(
@@ -510,6 +556,39 @@ static iree_status_t loom_check_execute_pass_with_output(
       .user_data = &pass_diagnostic_capture,
   };
   loom_pass_run_result_t run_result = {0};
+  loom_function_version_owner_t function_versions;
+  loom_function_version_owner_initialize(&diagnostic_arena, &function_versions);
+  iree_string_view_t pipeline = test_case->pipeline;
+  loom_check_source_low_request_t target_request;
+  if (iree_status_is_ok(status)) {
+    status = loom_check_parse_pass_target(&pipeline, &target_request);
+  }
+  if (iree_status_is_ok(status) &&
+      iree_any_bit_set(target_request.options,
+                       LOOM_CHECK_SOURCE_LOW_OPTION_TARGET)) {
+    bool failed_verification = false;
+    status = loom_check_verify_pass_module(
+        source_resolver, environment, &diagnostic_collector, module,
+        &function_versions.list, &failed_verification);
+    if (iree_status_is_ok(status) && !failed_verification) {
+      loom_target_specialization_request_t specialization;
+      status = loom_check_resolve_source_target(
+          module, environment->target_environment, target_request.function_name,
+          &target_request.target, &specialization);
+      if (iree_status_is_ok(status)) {
+        loom_target_specialization_result_t specialization_result = {0};
+        status = loom_target_specialize_functions(
+            environment->target_environment, module,
+            (loom_target_specialization_request_list_t){&specialization, 1},
+            (loom_target_declaration_binding_list_t){0},
+            pass_diagnostic_emitter, &diagnostic_arena, &specialization_result);
+        function_versions = specialization_result.function_versions;
+        run_result.error_count = specialization_result.error_count;
+      }
+    } else if (failed_verification) {
+      run_result.error_count = 1;
+    }
+  }
   loom_pass_report_t pass_report = {0};
   loom_pass_report_t* pass_report_ref = NULL;
   if (iree_status_is_ok(status) &&
@@ -539,7 +618,7 @@ static iree_status_t loom_check_execute_pass_with_output(
         LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_INSERTION_ROWS;
     compile_report_ref = &compile_report;
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && run_result.error_count == 0) {
     loom_low_lower_policy_registry_t low_lower_policy_registry = {0};
     const loom_low_lower_policy_registry_t* low_lower_policy_registry_ref =
         NULL;
@@ -590,9 +669,6 @@ static iree_status_t loom_check_execute_pass_with_output(
           legalizer_provider_list, iree_arena_allocator(&diagnostic_arena),
           &legalizer_registry_storage);
     }
-    loom_function_version_owner_t function_versions;
-    loom_function_version_owner_initialize(&diagnostic_arena,
-                                           &function_versions);
     loom_pass_tool_run_options_t run_options = {
         .registry = pass_registry,
         .environment = loom_low_pass_environment_storage_initialize_mutable(
@@ -611,8 +687,6 @@ static iree_status_t loom_check_execute_pass_with_output(
         .report = pass_report_ref,
     };
     if (iree_status_is_ok(status)) {
-      const iree_string_view_t pipeline =
-          iree_string_view_trim(test_case->pipeline);
       if (pipeline.size > 0 && pipeline.data[0] == '@') {
         status = loom_pass_tool_run_pipeline_symbol(module, pipeline,
                                                     &run_options, &run_result);
@@ -647,9 +721,9 @@ static iree_status_t loom_check_execute_pass_with_output(
     }
   } else {
     bool failed_verification = false;
-    status = loom_check_verify_pass_output(source_resolver, environment,
-                                           &diagnostic_collector, module,
-                                           &failed_verification);
+    status = loom_check_verify_pass_module(
+        source_resolver, environment, &diagnostic_collector, module,
+        &function_versions.list, &failed_verification);
     bool diagnostics_failed = false;
     if (iree_status_is_ok(status)) {
       status = loom_check_finish_diagnostics_if_needed(

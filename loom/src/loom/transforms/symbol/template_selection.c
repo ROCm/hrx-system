@@ -278,6 +278,9 @@ typedef struct loom_template_selection_state_t {
   // Target-refined versions observed against the current module symbols.
   const loom_target_function_version_snapshot_t* target_versions;
 
+  // Invocation-owned entry demands consumed by symbol liveness.
+  const loom_function_version_list_t* function_versions;
+
   // Symbol facts backing the provider catalog.
   loom_symbol_fact_table_t fact_table;
 
@@ -1223,6 +1226,7 @@ static iree_status_t loom_template_selection_build_liveness(
       .root_query_user_data = &state->pruning_options,
       .contributors = &contributor,
       .contributor_count = 1,
+      .function_versions = state->function_versions,
       .root_symbol_ids =
           {
               .values = state->root_symbol_ids.values,
@@ -1415,6 +1419,8 @@ iree_status_t loom_template_selection_run(loom_pass_t* pass,
       .module = module,
       .mode = loom_template_selection_mode(pass),
       .target_versions = &target_versions,
+      .function_versions =
+          loom_target_pass_capability_function_versions(target_capability),
       .catalog = &catalog,
       .reports_enabled = loom_pass_report_is_enabled(pass),
       .inline_calls = pass->state &&

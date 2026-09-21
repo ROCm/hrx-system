@@ -1,15 +1,13 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/vector_large_insert.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amdgpu:gfx1151 output=low
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @i64x16_insert_static(%values: vector<16xi64>, %value: i64) -> (vector<16xi64>) {
+func.def @i64x16_insert_static(%values: vector<16xi64>, %value: i64) -> (vector<16xi64>) {
   %result = vector.insert %value into %values[1] : i64, vector<16xi64>
   func.return %result : vector<16xi64>
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @i64x16_insert_static(%values: reg<amdgpu.vgpr x32>, %value: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x32>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @i64x16_insert_static(%values: reg<amdgpu.vgpr x32>, %value: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x32>) asm {
   %7 = slice %value[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %8 = v_mov_b32_copy %7
   %9 = slice %value[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -50,15 +48,13 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @i64x16_insert
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @i32x32_insert_static(%values: vector<32xi32>, %value: i32) -> (vector<32xi32>) {
+func.def @i32x32_insert_static(%values: vector<32xi32>, %value: i32) -> (vector<32xi32>) {
   %result = vector.insert %value into %values[17] : i32, vector<32xi32>
   func.return %result : vector<32xi32>
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @i32x32_insert_static(%values: reg<amdgpu.vgpr x32>, %value: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x32>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @i32x32_insert_static(%values: reg<amdgpu.vgpr x32>, %value: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x32>) asm {
   %7 = v_mov_b32_copy %value
   %8 = slice %values[0] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
   %9 = slice %values[1] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
@@ -97,15 +93,13 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @i32x32_insert
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @i64x16_insert_dynamic(%values: vector<16xi64>, %value: i64, %position: index) -> (vector<16xi64>) {
+func.def @i64x16_insert_dynamic(%values: vector<16xi64>, %value: i64, %position: index) -> (vector<16xi64>) {
   %result = vector.insert %value into %values[%position] : i64, vector<16xi64>
   func.return %result : vector<16xi64>
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @i64x16_insert_dynamic(%values: reg<amdgpu.vgpr x32>, %value: reg<amdgpu.sgpr x2>, %position: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x32>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @i64x16_insert_dynamic(%values: reg<amdgpu.vgpr x32>, %value: reg<amdgpu.sgpr x2>, %position: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x32>) asm {
   %9 = slice %value[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %10 = v_mov_b32_copy %9
   %11 = slice %value[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -213,9 +207,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @i64x16_insert
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @i32x2x2_insert_static(%values: vector<2x2xi32>, %value: i32) -> (vector<2x2xi32>) {
+func.def @i32x2x2_insert_static(%values: vector<2x2xi32>, %value: i32) -> (vector<2x2xi32>) {
   // ERROR@+1: TARGET/004 {op_name="vector.insert", subject_name="static_indices", constraint_key="array_count", expected_count="1"}
   %result = vector.insert %value into %values[1, 1] : i32, vector<2x2xi32>
   func.return %result : vector<2x2xi32>
@@ -223,15 +215,13 @@ func.def target(@target) @i32x2x2_insert_static(%values: vector<2x2xi32>, %value
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @i32x16_insert_static(%values: vector<16xi32>, %value: i32) -> (vector<16xi32>) {
+func.def @i32x16_insert_static(%values: vector<16xi32>, %value: i32) -> (vector<16xi32>) {
   %result = vector.insert %value into %values[15] : i32, vector<16xi32>
   func.return %result : vector<16xi32>
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @i32x16_insert_static(%values: reg<amdgpu.vgpr x16>, %value: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x16>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @i32x16_insert_static(%values: reg<amdgpu.vgpr x16>, %value: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x16>) asm {
   %7 = v_mov_b32_copy %value
   %8 = slice %values[0] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
   %9 = slice %values[1] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>

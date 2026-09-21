@@ -1,24 +1,20 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_scalar_i64_subtract.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=vm:core output=low
 
-vm.target<core> @target
-
-func.def target(@target) @uniform_subtract(%lhs: i64, %rhs: i64) -> (i64) {
+func.def @uniform_subtract(%lhs: i64, %rhs: i64) -> (i64) {
   %difference = scalar.subi %lhs, %rhs : i64
   func.return %difference : i64
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @uniform_subtract(%lhs: reg<vm.value : i64>, %rhs: reg<vm.value : i64>) -> (reg<vm.value : i64>) asm {
+low.func.def target<vm.core> abi(vm_function) @uniform_subtract(%lhs: reg<vm.value : i64>, %rhs: reg<vm.value : i64>) -> (reg<vm.value : i64>) asm {
   %difference = integer.sub.i64 %lhs, %rhs
   return %difference
 }
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @constant_subtract(%value: i64) -> (i64, i64, i64) {
+func.def @constant_subtract(%value: i64) -> (i64, i64, i64) {
   %c0 = scalar.constant 0 : i64
   %wide = scalar.constant 4294967297 : i64
   %negated = scalar.subi %c0, %value : i64
@@ -28,7 +24,7 @@ func.def target(@target) @constant_subtract(%value: i64) -> (i64, i64, i64) {
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @constant_subtract(%value: reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) asm {
+low.func.def target<vm.core> abi(vm_function) @constant_subtract(%value: reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) asm {
   %c0 = constant.i64 0
   %wide = constant.i64 4294967297
   %negated = integer.sub.i64 %c0, %value
@@ -40,10 +36,8 @@ low.func.def target<vm.core>(@target) abi(vm_function) @constant_subtract(%value
 
 // ====
 
-vm.target<core> @target
-
 // ERROR@+1: TARGET/033 {field_name="argument", actual_type="vector<2xi64>"}
-func.def target(@target) @mixed_subtract(%uniform: i64, %values: vector<2xi64>) -> (i64, i64) {
+func.def @mixed_subtract(%uniform: i64, %values: vector<2xi64>) -> (i64, i64) {
   // ERROR@+1: TARGET/001 {op_name="vector.extract"}
   %varying = vector.extract %values[0] : vector<2xi64> -> i64
   %uniform_left = scalar.subi %uniform, %varying : i64

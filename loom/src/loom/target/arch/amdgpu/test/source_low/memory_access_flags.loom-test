@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_access_flags.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amdgpu:gfx1151 output=low
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @observe_scalar(%input: buffer) -> (i32, i32) {
+func.def @observe_scalar(%input: buffer) -> (i32, i32) {
   %base = index.constant 0 : offset
   %aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %source = buffer.view %aligned[%base] : buffer -> view<1xi32>
@@ -13,7 +11,7 @@ func.def target(@target) @observe_scalar(%input: buffer) -> (i32, i32) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @observe_scalar() -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @observe_scalar() -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %source = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %11 = v_mov_b32 0
   %first = global_load_b32_saddr<volatile> %11, %source
@@ -23,9 +21,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @observe_scala
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @observe_unused(%input: buffer) {
+func.def @observe_unused(%input: buffer) {
   %base = index.constant 0 : offset
   %aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %source = buffer.view %aligned[%base] : buffer -> view<2xi32>
@@ -35,7 +31,7 @@ func.def target(@target) @observe_unused(%input: buffer) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @observe_unused() asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @observe_unused() asm {
   %source = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 8} : reg<amdgpu.sgpr x2>
   %7 = v_mov_b32 0
   %first = global_load_b32_saddr<volatile> %7, %source
@@ -45,9 +41,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @observe_unuse
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @repeat_store(%output: buffer, %value: i32) {
+func.def @repeat_store(%output: buffer, %value: i32) {
   %base = index.constant 0 : offset
   %aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
   %destination = buffer.view %aligned[%base] : buffer -> view<1xi32>
@@ -57,7 +51,7 @@ func.def target(@target) @repeat_store(%output: buffer, %value: i32) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @repeat_store(%value: reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @repeat_store(%value: reg<amdgpu.sgpr>) asm {
   %destination = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %7 = v_mov_b32_copy %value
   %8 = v_mov_b32 0
@@ -68,9 +62,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @repeat_store(
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @observe_vector(%input: buffer, %output: buffer) {
+func.def @observe_vector(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %source_aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
   %destination_aligned = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
@@ -84,7 +76,7 @@ func.def target(@target) @observe_vector(%input: buffer, %output: buffer) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @observe_vector() asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @observe_vector() asm {
   %source = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 64} : reg<amdgpu.sgpr x2>
   %destination = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
   %11 = v_mov_b32 0
@@ -109,9 +101,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @observe_vecto
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @observe_byte(%input: buffer, %output: buffer) {
+func.def @observe_byte(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %source = buffer.view %input[%base] : buffer -> view<1xi8>
   %destination = buffer.view %output[%base] : buffer -> view<2xi8>
@@ -123,7 +113,7 @@ func.def target(@target) @observe_byte(%input: buffer, %output: buffer) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @observe_byte() asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @observe_byte() asm {
   %source = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1} : reg<amdgpu.sgpr x2>
   %destination = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 2} : reg<amdgpu.sgpr x2>
   %9 = v_mov_b32 0
@@ -136,9 +126,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @observe_byte(
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @observe_dynamic_address(%input: buffer, %byte_offset: offset) -> (i32, i32) {
+func.def @observe_dynamic_address(%input: buffer, %byte_offset: offset) -> (i32, i32) {
   %base = index.assume %byte_offset [range(%byte_offset, 0, 4092), mul(%byte_offset, 4)] : offset
   %aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %source = buffer.view %aligned[%base] : buffer -> view<2xi32>
@@ -148,7 +136,7 @@ func.def target(@target) @observe_dynamic_address(%input: buffer, %byte_offset: 
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @observe_dynamic_address(%base: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @observe_dynamic_address(%base: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %13 = v_mov_b32 0
   %14 = slice %base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -168,9 +156,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @observe_dynam
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @ordinary_scalar(%input: buffer) -> (i32, i32) {
+func.def @ordinary_scalar(%input: buffer) -> (i32, i32) {
   %base = index.constant 0 : offset
   %aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %source = buffer.view %aligned[%base] : buffer -> view<1xi32>
@@ -180,7 +166,7 @@ func.def target(@target) @ordinary_scalar(%input: buffer) -> (i32, i32) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @ordinary_scalar() -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @ordinary_scalar() -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %source = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %11 = v_mov_b32 0
   %first = global_load_b32_saddr %11, %source

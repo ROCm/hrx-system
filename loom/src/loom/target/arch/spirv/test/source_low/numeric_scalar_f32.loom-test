@@ -1,10 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_scalar_f32.loom-test
-// RUN: emit source-low output=low control-flow=structured-low
+// RUN: emit source-low target=spirv:vulkan1.3+bda output=low control-flow=structured-low
 
 // XFAIL: SPIR-V fused multiply-add lowering is unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @scalar_f32_arith(%lhs: f32, %rhs: f32, %bias: f32) -> (f32) {
+func.def @scalar_f32_arith(%lhs: f32, %rhs: f32, %bias: f32) -> (f32) {
   %sum = scalar.addf %lhs, %rhs : f32
   %difference = scalar.subf %sum, %bias : f32
   %product = scalar.mulf %difference, %rhs : f32
@@ -15,9 +13,7 @@ func.def target(@target) @scalar_f32_arith(%lhs: f32, %rhs: f32, %bias: f32) -> 
 // ====
 
 // XFAIL: SPIR-V floating-point sign-bit lowering is unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @scalar_f32_sign_bits(%input: f32) -> (f32, f32) {
+func.def @scalar_f32_sign_bits(%input: f32) -> (f32, f32) {
   %negated = scalar.negf %input : f32
   %absolute = scalar.absf %input : f32
   func.return %negated, %absolute : f32, f32
@@ -26,9 +22,7 @@ func.def target(@target) @scalar_f32_sign_bits(%input: f32) -> (f32, f32) {
 // ====
 
 // XFAIL: SPIR-V vector argument lowering and sign-bit operations are unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @vector_f32_sign_bits(%input: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
+func.def @vector_f32_sign_bits(%input: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
   %negated = vector.negf %input : vector<4xf32>
   %absolute = vector.absf %input : vector<4xf32>
   func.return %negated, %absolute : vector<4xf32>, vector<4xf32>

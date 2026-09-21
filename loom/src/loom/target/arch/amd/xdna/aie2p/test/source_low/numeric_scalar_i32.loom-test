@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_scalar_i32.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_i32_uniform_sgpr(%lhs: i32, %rhs: i32, %shift: i32) -> (i32) {
+func.def @scalar_i32_uniform_sgpr(%lhs: i32, %rhs: i32, %shift: i32) -> (i32) {
   %add = scalar.addi %lhs, %rhs : i32
   %sub = scalar.subi %add, %rhs : i32
   %product = scalar.muli %sub, %rhs : i32
@@ -17,7 +15,7 @@ func.def target(@target) @scalar_i32_uniform_sgpr(%lhs: i32, %rhs: i32, %shift: 
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_i32_uniform_sgpr(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %shift: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_i32_uniform_sgpr(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %shift: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %product = mul %lhs, %rhs
   %and = and %product, %lhs
   %or = or %and, %rhs
@@ -33,9 +31,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_i
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_i32_bitfield_sgpr(%word: i32) -> (i32, i32, i32, i32) {
+func.def @scalar_i32_bitfield_sgpr(%word: i32) -> (i32, i32, i32, i32) {
   %unsigned_byte = scalar.bitfield.extractu %word {offset = 8, width = 8} : i32 -> i32
   %signed_byte = scalar.bitfield.extracts %word {offset = 16, width = 8} : i32 -> i32
   %unsigned_nibble = scalar.bitfield.extractu %word {offset = 4, width = 4} : i32 -> i32
@@ -44,7 +40,7 @@ func.def target(@target) @scalar_i32_bitfield_sgpr(%word: i32) -> (i32, i32, i32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_i32_bitfield_sgpr(%word: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_i32_bitfield_sgpr(%word: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
   %14 = mov.short 16
   %15 = lshl %word, %14
   %16 = mov.short -24
@@ -62,31 +58,27 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_i
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_i32_compare_scc(%lhs: i32, %rhs: i32) -> (i1) {
+func.def @scalar_i32_compare_scc(%lhs: i32, %rhs: i32) -> (i1) {
   %cmp = scalar.cmpi slt, %lhs, %rhs : i32
   func.return %cmp : i1
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_i32_compare_scc(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_i32_compare_scc(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %cmp = lt %lhs, %rhs
   return %cmp
 }
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_i1_constants_scc() -> (i1, i1) {
+func.def @scalar_i1_constants_scc() -> (i1, i1) {
   %true = scalar.constant true : i1
   %false = scalar.constant false : i1
   func.return %true, %false : i1, i1
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_i1_constants_scc() -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_i1_constants_scc() -> (reg<aie2p.er>, reg<aie2p.er>) asm {
   %true = mov.short 1
   %false = mov.short 0
   return %true, %false
@@ -94,9 +86,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_i
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_i1_bitwise_scc(%lhs: i32, %rhs: i32) -> (i1) {
+func.def @scalar_i1_bitwise_scc(%lhs: i32, %rhs: i32) -> (i1) {
   %inactive_condition = scalar.constant 0 : i32
   %lhs_nonzero = scalar.cmpi ne, %lhs, %inactive_condition : i32
   %rhs_nonzero = scalar.cmpi ne, %rhs, %inactive_condition : i32
@@ -107,7 +97,7 @@ func.def target(@target) @scalar_i1_bitwise_scc(%lhs: i32, %rhs: i32) -> (i1) {
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_i1_bitwise_scc(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_i1_bitwise_scc(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %lhs_nonzero = nez %lhs
   %rhs_nonzero = nez %rhs
   %both_nonzero = and %lhs_nonzero, %rhs_nonzero

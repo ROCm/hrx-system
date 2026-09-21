@@ -1,11 +1,10 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/nested_view_selection.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
 
-amdgpu.target<gfx11-generic> @target
-
+// A derived selection retains both the selected buffer and its byte base.
 // ERROR@+2: TARGET/033 {op_name="func.def", field_name="source", actual_type="buffer"}
 // ERROR@+1: TARGET/033 {op_name="func.def", field_name="source", actual_type="buffer"}
-func.def target(@target) @derived_selection(%first: buffer, %second: buffer, %third: buffer, %position_input: index, %select_first: i1, %select_pair: i1) -> (i32) {
+func.def @derived_selection(%first: buffer, %second: buffer, %third: buffer, %position_input: index, %select_first: i1, %select_pair: i1) -> (i32) {
   %position = index.assume %position_input [range(%position_input, 1, 2)] : index
   %base0 = index.constant 4 : offset
   %base1 = index.constant 8 : offset
@@ -26,11 +25,10 @@ func.def target(@target) @derived_selection(%first: buffer, %second: buffer, %th
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
+// Nested selections compose with structured side effects and explicit CFG.
 // ERROR@+2: TARGET/033 {op_name="func.def", field_name="source", actual_type="buffer"}
 // ERROR@+1: TARGET/033 {op_name="func.def", field_name="source", actual_type="buffer"}
-func.def target(@target) @selection_with_side_effects(%first: buffer, %second: buffer, %third: buffer, %select_first: i1, %select_pair: i1, %enter: i1, %side: i1, %initial: i32) -> (i32) {
+func.def @selection_with_side_effects(%first: buffer, %second: buffer, %third: buffer, %select_first: i1, %select_pair: i1, %enter: i1, %side: i1, %initial: i32) -> (i32) {
   %base = index.constant 0 : offset
   %first_aligned = buffer.assume.alignment %first {minimum_alignment = 4} : buffer
   %second_aligned = buffer.assume.alignment %second {minimum_alignment = 4} : buffer

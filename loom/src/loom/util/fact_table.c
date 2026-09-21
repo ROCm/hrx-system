@@ -351,6 +351,7 @@ void loom_value_fact_table_clear_scope(loom_value_fact_table_t* table) {
   table->uniform_scale_origins.touched_count = 0;
   table->contextual_query_origins.touched_count = 0;
   table->contextual_query_origins.origin_count = 0;
+  table->layout_origins = NULL;
   table->select_dependencies.index = NULL;
   table->select_dependencies.roots = NULL;
   table->select_dependencies.capacity = 0;
@@ -627,6 +628,9 @@ iree_status_t loom_value_fact_table_define(loom_value_fact_table_t* table,
 
 void loom_value_fact_table_undefine(loom_value_fact_table_t* table,
                                     loom_value_id_t value_id) {
+  if (table->layout_origins) {
+    loom_value_fact_table_clear_layout_strides(table, value_id);
+  }
   if (value_id < table->capacity) {
     table->entries[value_id] = (loom_value_facts_t){0};
   }
@@ -1243,6 +1247,11 @@ iree_status_t loom_value_fact_table_clone_values(
     IREE_RETURN_IF_ERROR(loom_value_fact_table_set_identity(
         target, value_id,
         loom_value_fact_table_query_identity(source, value_id)));
+    if (source->layout_origins || target->layout_origins) {
+      IREE_RETURN_IF_ERROR(loom_value_fact_table_define_layout_strides(
+          target, value_id,
+          loom_value_fact_table_query_layout_strides(source, value_id)));
+    }
     loom_value_id_t scalar_origin = LOOM_VALUE_ID_INVALID;
     if (loom_value_fact_table_lookup_uniform_element_origin(source, value_id,
                                                             &scalar_origin)) {
@@ -1393,6 +1402,10 @@ iree_status_t loom_value_fact_table_propagate_origins(
         table, operands[0], results[0]));
     IREE_RETURN_IF_ERROR(loom_value_fact_table_forward_contextual_query_origin(
         table, operands[0], results[0]));
+    if (table->layout_origins) {
+      IREE_RETURN_IF_ERROR(loom_value_fact_table_forward_layout_strides(
+          table, operands[0], results[0]));
+    }
   }
   if (loom_traits_are_fact_identity(traits)) {
     const uint16_t pair_count = op->operand_count < op->result_count
@@ -1410,6 +1423,10 @@ iree_status_t loom_value_fact_table_propagate_origins(
       IREE_RETURN_IF_ERROR(
           loom_value_fact_table_forward_contextual_query_origin(
               table, operands[i], results[i]));
+      if (table->layout_origins) {
+        IREE_RETURN_IF_ERROR(loom_value_fact_table_forward_layout_strides(
+            table, operands[i], results[i]));
+      }
     }
   }
   return iree_ok_status();

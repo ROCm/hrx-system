@@ -42,9 +42,11 @@ typedef struct loom_vm_function_signature_t {
 // register permutations. Reference overflow uses an independent local-ref
 // prefix ahead of caller snapshots. Returning a ref through overflow preserves
 // its source in one local-ref slot until all aliased results are published.
-// All compiler scratch belongs to
-// |request|'s arena. Structured frame errors are forwarded to its diagnostic
-// emitter and terminate emission with a failure status.
+// All compiler scratch belongs to |request|'s arena and can be released when
+// this call returns. The emitted stream, scalar |out_row| fields, and
+// module-owned rodata references retain no planning storage. Structured frame
+// errors are forwarded to its diagnostic emitter and terminate emission with
+// a failure status.
 // |functions| supplies callable signatures and symbol ordinals; data operands
 // append their referenced payload once to its read-only section plan.
 iree_status_t loom_vm_function_emit(

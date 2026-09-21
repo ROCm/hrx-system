@@ -1,16 +1,14 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_address_widening.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amdgpu:gfx1100 output=low
 
-amdgpu.target<gfx1100> @target
-
-func.def target(@target) @widen_address_domains(%coordinate: index, %byte_offset: offset) -> (i64, i64) {
+func.def @widen_address_domains(%coordinate: index, %byte_offset: offset) -> (i64, i64) {
   %signed = index.cast %coordinate : index to i64
   %unsigned = index.cast %byte_offset : offset to i64
   func.return %signed, %unsigned : i64, i64
 }
 
 // ----
-low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @widen_address_domains(%coordinate: reg<amdgpu.sgpr>, %unsigned: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.rdna3.core> abi(hal_kernel) @widen_address_domains(%coordinate: reg<amdgpu.sgpr>, %unsigned: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
   %10 = s_ashr_i32_rhs_inline %coordinate, 31
   %signed = concat(%coordinate, %10) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   return %signed, %unsigned
@@ -18,9 +16,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @widen_address_d
 
 // ====
 
-amdgpu.target<gfx1100> @target
-
-func.def target(@target) @widen_address_payload(%input: i32) -> (i64, i64) {
+func.def @widen_address_payload(%input: i32) -> (i64, i64) {
   %coordinate = index.cast %input : i32 to index
   %byte_offset = index.cast %input : i32 to offset
   %signed = index.cast %coordinate : index to i64
@@ -29,7 +25,7 @@ func.def target(@target) @widen_address_payload(%input: i32) -> (i64, i64) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @widen_address_payload(%byte_offset: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.rdna3.core> abi(hal_kernel) @widen_address_payload(%byte_offset: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
   %10 = s_ashr_i32_rhs_inline %byte_offset, 31
   %signed = concat(%byte_offset, %10) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %12 = s_mov_b32 0
@@ -39,9 +35,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @widen_address_p
 
 // ====
 
-amdgpu.target<gfx1100> @target
-
-func.def target(@target) @widen_constant_addresses() -> (i64, i64, i64, i64) {
+func.def @widen_constant_addresses() -> (i64, i64, i64, i64) {
   %high_bit = scalar.constant -2147483648 : i32
   %all_bits = scalar.constant -1 : i32
   %minimum_index = index.cast %high_bit : i32 to index
@@ -56,7 +50,7 @@ func.def target(@target) @widen_constant_addresses() -> (i64, i64, i64, i64) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @widen_constant_addresses() -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.rdna3.core> abi(hal_kernel) @widen_constant_addresses() -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
   %22 = s_mov_b32 2147483648
   %23 = s_mov_b32 4294967295
   %minimum = concat(%22, %23) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
@@ -69,9 +63,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @widen_constant_
 
 // ====
 
-amdgpu.target<gfx1100> @target
-
-func.def target(@target) @widen_varying_address_payload(%values: vector<4xi32>) -> (i64, i64) {
+func.def @widen_varying_address_payload(%values: vector<4xi32>) -> (i64, i64) {
   %input = vector.extract %values[0] : vector<4xi32> -> i32
   %coordinate = index.cast %input : i32 to index
   %byte_offset = index.cast %input : i32 to offset
@@ -81,7 +73,7 @@ func.def target(@target) @widen_varying_address_payload(%values: vector<4xi32>) 
 }
 
 // ----
-low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @widen_varying_address_payload(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.rdna3.core> abi(hal_kernel) @widen_varying_address_payload(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
   %byte_offset = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %12 = v_ashrrev_i32_src0_inline %byte_offset, 31
   %signed = concat(%byte_offset, %12) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
@@ -92,9 +84,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @widen_varying_a
 
 // ====
 
-amdgpu.target<gfx1100> @target
-
-func.def target(@target) @widen_nonnegative_addresses(%coordinate: index, %byte_offset: offset) -> (i64, i64) {
+func.def @widen_nonnegative_addresses(%coordinate: index, %byte_offset: offset) -> (i64, i64) {
   %bounded_coordinate = index.assume %coordinate [range(%coordinate, 0, 2147483647)] : index
   %bounded_offset = index.assume %byte_offset [range(%byte_offset, 0, 4294967295)] : offset
   %signed = index.cast %bounded_coordinate : index to i64
@@ -103,7 +93,7 @@ func.def target(@target) @widen_nonnegative_addresses(%coordinate: index, %byte_
 }
 
 // ----
-low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @widen_nonnegative_addresses(%bounded_coordinate: reg<amdgpu.sgpr>, %bounded_offset: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.rdna3.core> abi(hal_kernel) @widen_nonnegative_addresses(%bounded_coordinate: reg<amdgpu.sgpr>, %bounded_offset: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
   %12 = s_mov_b32 0
   %signed = concat(%bounded_coordinate, %12) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %14 = slice %bounded_offset[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>

@@ -9,6 +9,7 @@
 
 #include "amdf/base.h"
 #include "amdf/memory.h"
+#include "amdf/native_event.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -189,6 +190,9 @@ typedef struct amdf_queue_family_info_t {
 /// An infinite timeout accepted by operations that explicitly wait.
 #define AMDF_TIMEOUT_INFINITE UINT64_MAX
 
+/// Default pending capacity for configurable kernel-mediated queues.
+#define AMDF_KERNEL_QUEUE_DEFAULT_PENDING_SUBMISSION_COUNT 4096u
+
 /// Lifecycle state shared by native user and kernel queues.
 typedef uint32_t amdf_queue_state_t;
 enum amdf_queue_state_e {
@@ -331,10 +335,14 @@ typedef struct amdf_kernel_queue_info_t {
   uint32_t queue_family_ordinal;
   /// Native command representation accepted by the queue.
   amdf_queue_command_type_t command_type;
-  /// Maximum accepted submissions that may remain unretired.
+  /// Nonzero maximum accepted submissions that may remain unretired.
+  /// Native resource exhaustion may reject work before this bound is reached.
   uint32_t maximum_pending_submission_count;
   /// Maximum commands accepted by one submission.
   uint32_t maximum_command_count;
+  /// Native wake destinations accepted by kernel_queue_request_notification.
+  /// Zero means notification is unavailable; all bits are resolved at creation.
+  amdf_native_event_types_t notification_types;
 } amdf_kernel_queue_info_t;
 
 /// Current retirement and terminal state of one kernel-mediated queue.

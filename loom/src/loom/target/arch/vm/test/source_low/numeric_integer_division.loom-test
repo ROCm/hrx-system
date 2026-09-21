@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_integer_division.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=vm:core output=low
 
-vm.target<core> @vm
-
-func.def target(@vm) @integer_division_i32(%dividend: i32, %divisor: i32) -> (i32, i32, i32, i32) {
+func.def @integer_division_i32(%dividend: i32, %divisor: i32) -> (i32, i32, i32, i32) {
   %signed_quotient = scalar.divsi %dividend, %divisor : i32
   %signed_remainder = scalar.remsi %dividend, %divisor : i32
   %unsigned_quotient = scalar.divui %dividend, %divisor : i32
@@ -12,7 +10,7 @@ func.def target(@vm) @integer_division_i32(%dividend: i32, %divisor: i32) -> (i3
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @integer_division_i32(%dividend: reg<vm.value : i32>, %divisor: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) asm {
+low.func.def target<vm.core> abi(vm_function) @integer_division_i32(%dividend: reg<vm.value : i32>, %divisor: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) asm {
   %signed_quotient = integer.div.s32 %dividend, %divisor
   %signed_remainder = integer.rem.s32 %dividend, %divisor
   %unsigned_quotient = integer.div.u32 %dividend, %divisor
@@ -22,9 +20,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @integer_division_i32(%divide
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @integer_division_i64(%dividend: i64, %divisor: i64) -> (i64, i64, i64, i64) {
+func.def @integer_division_i64(%dividend: i64, %divisor: i64) -> (i64, i64, i64, i64) {
   %signed_quotient = scalar.divsi %dividend, %divisor : i64
   %signed_remainder = scalar.remsi %dividend, %divisor : i64
   %unsigned_quotient = scalar.divui %dividend, %divisor : i64
@@ -33,7 +29,7 @@ func.def target(@vm) @integer_division_i64(%dividend: i64, %divisor: i64) -> (i6
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @integer_division_i64(%dividend: reg<vm.value : i64>, %divisor: reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) asm {
+low.func.def target<vm.core> abi(vm_function) @integer_division_i64(%dividend: reg<vm.value : i64>, %divisor: reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) asm {
   %signed_quotient = integer.div.s64 %dividend, %divisor
   %signed_remainder = integer.rem.s64 %dividend, %divisor
   %unsigned_quotient = integer.div.u64 %dividend, %divisor

@@ -146,6 +146,25 @@ static const loom_spirv_target_profile_t kSpirvVulkan13BdaTargetProfile = {
         },
 };
 
+static const loom_spirv_target_profile_t kSpirvExtendedTypesProfile = {
+    .base =
+        {
+            .type = &loom_spirv_target_profile_type,
+            .target_bundle = &loom_spirv_low_target_bundle_extended_types,
+            .explicit_fields = UINT64_C(1)
+                               << LOOM_TARGET_FACT_FIELD_CONTRACT_FEATURE_BITS,
+        },
+};
+
+static const loom_spirv_target_profile_t kSpirvHalKernelProfile = {
+    .base =
+        {
+            .type = &loom_spirv_target_profile_type,
+            .target_bundle = &loom_spirv_low_target_bundle_hal_kernel,
+            .explicit_fields = UINT64_C(1) << LOOM_TARGET_FACT_FIELD_ABI,
+        },
+};
+
 void loom_spirv_target_profile_initialize(
     const loom_target_bundle_t* target_bundle,
     loom_target_fact_field_set_t explicit_fields,
@@ -168,12 +187,19 @@ iree_status_t loom_spirv_target_profile_select(
     const loom_spirv_target_profile_t** out_profile) {
   IREE_ASSERT_ARGUMENT(out_profile);
   *out_profile = NULL;
-  if (!iree_string_view_equal(selector, IREE_SV("vulkan1.3+bda"))) {
+  if (iree_string_view_equal(selector, IREE_SV("vulkan1.3+bda"))) {
+    *out_profile = &kSpirvVulkan13BdaTargetProfile;
+  } else if (iree_string_view_equal(selector,
+                                    IREE_SV("vulkan1.3+bda+extended-types"))) {
+    *out_profile = &kSpirvExtendedTypesProfile;
+  } else if (iree_string_view_equal(selector, IREE_SV("vulkan1.3+bda+hal"))) {
+    *out_profile = &kSpirvHalKernelProfile;
+  } else {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "unknown SPIR-V target selector '%.*s'; expected vulkan1.3+bda",
+        "unknown SPIR-V target selector '%.*s'; expected vulkan1.3+bda, "
+        "vulkan1.3+bda+extended-types, or vulkan1.3+bda+hal",
         (int)selector.size, selector.data);
   }
-  *out_profile = &kSpirvVulkan13BdaTargetProfile;
   return iree_ok_status();
 }

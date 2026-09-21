@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/ir/module.h"
+#include "loom/ops/op_defs.h"
 
 typedef struct loom_symbol_liveness_worklist_t {
   // Symbol ids still waiting for dependency expansion.
@@ -115,6 +116,15 @@ static iree_status_t loom_symbol_liveness_mark_concrete_symbol_id(
 
 static iree_status_t loom_symbol_liveness_seed_roots(
     loom_symbol_liveness_state_t* state) {
+  const loom_function_version_list_t* versions =
+      state->options.function_versions;
+  for (iree_host_size_t i = 0; versions != NULL && i < versions->count; ++i) {
+    const loom_function_version_t* version = versions->values[i];
+    if (iree_any_bit_set(version->flags, LOOM_FUNCTION_VERSION_FLAG_RETAIN)) {
+      IREE_RETURN_IF_ERROR(loom_symbol_liveness_mark_concrete_symbol_id(
+          state, loom_func_like_callee(version->function).symbol_id));
+    }
+  }
   for (iree_host_size_t i = 0; i < state->options.root_symbol_ids.count; ++i) {
     IREE_RETURN_IF_ERROR(loom_symbol_liveness_mark_concrete_symbol_id(
         state, state->options.root_symbol_ids.values[i]));

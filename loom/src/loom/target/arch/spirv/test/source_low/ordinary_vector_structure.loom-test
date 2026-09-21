@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/ordinary_vector_structure.loom-test
-// RUN: emit source-low output=low control-flow=structured-low
+// RUN: emit source-low target=spirv:vulkan1.3+bda+hal output=low control-flow=structured-low
 
-spirv.target<vulkan1_3> @target {abi = hal_kernel}
-
-kernel.def target(@target) @ordinary_vector_structure_i32() {
+kernel.def @ordinary_vector_structure_i32() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
@@ -49,7 +47,7 @@ kernel.def target(@target) @ordinary_vector_structure_i32() {
 }
 
 // ----
-low.kernel.def target<spirv.logical.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @ordinary_vector_structure_i32() asm {
+low.kernel.def target<spirv.logical.core> workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @ordinary_vector_structure_i32() asm {
   %input_aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %36 = OpConstant.offset64 0

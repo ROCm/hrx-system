@@ -29,6 +29,7 @@ iree_cc_library(
     "hrx_internal.h"
     "mem_pool.h"
     "transfer.h"
+    "vmm_slab_provider.h"
   SRCS
     "allocator.c"
     "buffer.c"
@@ -51,7 +52,6 @@ iree_cc_library(
     "stream.c"
     "transfer.c"
     "vmm_slab_provider.c"
-    "vmm_slab_provider.h"
   DEPS
     ${CMAKE_DL_LIBS}
     iree::async
@@ -102,6 +102,7 @@ iree_cc_library(
     "hrx_internal.h"
     "mem_pool.h"
     "transfer.h"
+    "vmm_slab_provider.h"
   SRCS
     "allocator.c"
     "buffer.c"
@@ -124,7 +125,6 @@ iree_cc_library(
     "stream.c"
     "transfer.c"
     "vmm_slab_provider.c"
-    "vmm_slab_provider.h"
   DEPS
     ${CMAKE_DL_LIBS}
     iree::async
@@ -214,6 +214,27 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     libhrx_defs
+)
+
+iree_cc_test(
+  NAME
+    vmm_slab_provider_test
+  SRCS
+    "vmm_slab_provider_test.cc"
+  DEPS
+    ::hrx_static
+    iree::base
+    iree::hal
+    iree::hal::memory::slab_provider
+    iree::hal::memory::tlsf_pool
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/workgroup_reduce_tree.loom-test
-// RUN: with-checks emit source-low output=low
+// RUN: with-checks emit source-low target=amdgpu:gfx11-generic output=low
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @workgroup_tree_float_leader() {
+kernel.def @workgroup_tree_float_leader() {
   %unit = index.constant 1 : index
   %size = index.constant 256 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%size, %unit, %unit) : index
@@ -28,9 +26,7 @@ CHECK-NOT: * = ds_bpermute_b32 *
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @workgroup_tree_integer_leader() {
+kernel.def @workgroup_tree_integer_leader() {
   %unit = index.constant 1 : index
   %size = index.constant 256 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%size, %unit, %unit) : index
@@ -56,9 +52,7 @@ CHECK-NOT: * = ds_bpermute_b32 *
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @workgroup_tree_vector_all() {
+kernel.def @workgroup_tree_vector_all() {
   %unit = index.constant 1 : index
   %size = index.constant 256 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%size, %unit, %unit) : index
@@ -80,9 +74,7 @@ CHECK-NOT: * = ds_bpermute_b32 *
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @workgroup_tree_three_waves() {
+kernel.def @workgroup_tree_three_waves() {
   %unit = index.constant 1 : index
   %size = index.constant 96 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%size, %unit, %unit) : index
@@ -107,9 +99,7 @@ CHECK: * = v_cndmask_b32 *
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @workgroup_tree_row_exchange() {
+kernel.def @workgroup_tree_row_exchange() {
   %unit = index.constant 1 : index
   %size = index.constant 1024 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%size, %unit, %unit) : index
@@ -135,9 +125,7 @@ CHECK-NOT: * = ds_bpermute_b32 *
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @workgroup_tree_subgroup_leaders() {
+kernel.def @workgroup_tree_subgroup_leaders() {
   %unit = index.constant 1 : index
   %size = index.constant 256 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%size, %unit, %unit) : index
@@ -163,9 +151,7 @@ CHECK-NOT: * = ds_bpermute_b32 *
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @workgroup_tree_float_all() {
+kernel.def @workgroup_tree_float_all() {
   %unit = index.constant 1 : index
   %size = index.constant 256 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%size, %unit, %unit) : index

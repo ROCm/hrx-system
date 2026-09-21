@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_bitfield.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=vm:core output=low
 
-vm.target<core> @target
-
-func.def target(@target) @bitfield_full_width(%byte: i8, %word: i32, %wide: i64) -> (i8, i32, i64) {
+func.def @bitfield_full_width(%byte: i8, %word: i32, %wide: i64) -> (i8, i32, i64) {
   %byte_bits = scalar.bitfield.extracts %byte {offset = 0, width = 8} : i8 -> i8
   %word_bits = scalar.bitfield.extractu %word {offset = 0, width = 32} : i32 -> i32
   %wide_bits = scalar.bitfield.extracts %wide {offset = 0, width = 64} : i64 -> i64
@@ -11,15 +9,13 @@ func.def target(@target) @bitfield_full_width(%byte: i8, %word: i32, %wide: i64)
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @bitfield_full_width(%byte: reg<vm.value : i8>, %word: reg<vm.value : i32>, %wide: reg<vm.value : i64>) -> (reg<vm.value : i8>, reg<vm.value : i32>, reg<vm.value : i64>) asm {
+low.func.def target<vm.core> abi(vm_function) @bitfield_full_width(%byte: reg<vm.value : i8>, %word: reg<vm.value : i32>, %wide: reg<vm.value : i64>) -> (reg<vm.value : i8>, reg<vm.value : i32>, reg<vm.value : i64>) asm {
   return %byte, %word, %wide
 }
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @bitfield_widen(%byte: i8, %half: i16) -> (i32, i64, i16, i64) {
+func.def @bitfield_widen(%byte: i8, %half: i16) -> (i32, i64, i16, i64) {
   %low = scalar.bitfield.extractu %byte {offset = 0, width = 4} : i8 -> i32
   %high = scalar.bitfield.extracts %byte {offset = 4, width = 4} : i8 -> i64
   %middle = scalar.bitfield.extractu %half {offset = 3, width = 8} : i16 -> i16
@@ -28,7 +24,7 @@ func.def target(@target) @bitfield_widen(%byte: i8, %half: i16) -> (i32, i64, i1
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @bitfield_widen(%byte: reg<vm.value : i8>, %half: reg<vm.value : i16>) -> (reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : i16>, reg<vm.value : i64>) asm {
+low.func.def target<vm.core> abi(vm_function) @bitfield_widen(%byte: reg<vm.value : i8>, %half: reg<vm.value : i16>) -> (reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : i16>, reg<vm.value : i64>) asm {
   %37 = conversion.integer %byte, "u8.to.i32" : reg<vm.value : i32>
   %38 = constant.i32 15
   %low = integer.and.i32 %37, %38
@@ -52,9 +48,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @bitfield_widen(%byte: re
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @bitfield_narrow(%wide: i64) -> (i8, i16, i64, i64) {
+func.def @bitfield_narrow(%wide: i64) -> (i8, i16, i64, i64) {
   %byte = scalar.bitfield.extractu %wide {offset = 32, width = 8} : i64 -> i8
   %half = scalar.bitfield.extracts %wide {offset = 40, width = 12} : i64 -> i16
   %sign = scalar.bitfield.extracts %wide {offset = 63, width = 1} : i64 -> i64
@@ -63,7 +57,7 @@ func.def target(@target) @bitfield_narrow(%wide: i64) -> (i8, i16, i64, i64) {
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @bitfield_narrow(%wide: reg<vm.value : i64>) -> (reg<vm.value : i8>, reg<vm.value : i16>, reg<vm.value : i64>, reg<vm.value : i64>) asm {
+low.func.def target<vm.core> abi(vm_function) @bitfield_narrow(%wide: reg<vm.value : i64>) -> (reg<vm.value : i8>, reg<vm.value : i16>, reg<vm.value : i64>, reg<vm.value : i64>) asm {
   %28 = constant.i64 32
   %29 = integer.shift.right.u64 %wide, %28
   %30 = constant.i64 255
@@ -83,9 +77,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @bitfield_narrow(%wide: r
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @bitfield_predicate(%condition: i1, %word: i32) -> (i1, i32, i64, i1) {
+func.def @bitfield_predicate(%condition: i1, %word: i32) -> (i1, i32, i64, i1) {
   %identity = scalar.bitfield.extractu %condition {offset = 0, width = 1} : i1 -> i1
   %unsigned = scalar.bitfield.extractu %condition {offset = 0, width = 1} : i1 -> i32
   %signed = scalar.bitfield.extracts %condition {offset = 0, width = 1} : i1 -> i64
@@ -94,7 +86,7 @@ func.def target(@target) @bitfield_predicate(%condition: i1, %word: i32) -> (i1,
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @bitfield_predicate(%condition: reg<vm.value : i1>, %word: reg<vm.value : i32>) -> (reg<vm.value : i1>, reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : i1>) asm {
+low.func.def target<vm.core> abi(vm_function) @bitfield_predicate(%condition: reg<vm.value : i1>, %word: reg<vm.value : i32>) -> (reg<vm.value : i1>, reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : i1>) asm {
   %unsigned = conversion.integer %condition, "u1.to.i32" : reg<vm.value : i32>
   %signed = conversion.integer %condition, "s1.to.i64"
   %23 = constant.i32 31

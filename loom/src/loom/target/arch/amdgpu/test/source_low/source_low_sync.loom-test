@@ -1,30 +1,26 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/sync_barrier.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @workgroup_barrier() {
+func.def @workgroup_barrier() {
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   func.return
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @workgroup_barrier() asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @workgroup_barrier() asm {
   s_barrier
   return
 }
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @subgroup_shared_memory_barrier() {
+func.def @subgroup_shared_memory_barrier() {
   kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
   func.return
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @subgroup_shared_memory_barrier() asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @subgroup_shared_memory_barrier() asm {
   s_waitcnt {lgkmcnt = 0}
   return
 }

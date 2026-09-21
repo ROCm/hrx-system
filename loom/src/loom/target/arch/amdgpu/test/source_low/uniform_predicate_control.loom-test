@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/uniform_predicate_control.loom-test
-// RUN: with-checks emit source-low output=low
+// RUN: with-checks emit source-low target=amdgpu:gfx1151 output=low
 
-amdgpu.target<gfx1151> @target
-
-kernel.def target(@target) @uniform_select_guard() {
+kernel.def @uniform_select_guard() {
   %unit = index.constant 1 : index
   %width = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
@@ -41,9 +39,7 @@ CHECK-NOT: *s_mov_b64_exec *
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-kernel.def target(@target) @uniform_float_guard() {
+kernel.def @uniform_float_guard() {
   %unit = index.constant 1 : index
   %width = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
@@ -81,9 +77,7 @@ CHECK-NOT: *s_mov_b64_exec *
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-kernel.def target(@target) @varying_select_guard() {
+kernel.def @varying_select_guard() {
   %unit = index.constant 1 : index
   %width = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index

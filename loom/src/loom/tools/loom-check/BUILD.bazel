@@ -106,6 +106,18 @@ _TARGET_X86_CHECK_DEPS = iree_select({
     "//conditions:default": [],
 })
 
+_TARGET_XDNA_CHECK_COPTS = iree_select({
+    "//loom/config/target/arch:xdna": ["-DLOOM_CHECK_HAVE_TARGET_XDNA=1"],
+    "//conditions:default": [],
+})
+
+_TARGET_XDNA_CHECK_DEPS = iree_select({
+    "//loom/config/target/arch:xdna": [
+        "//loom/src/loom/target/arch/amd/xdna/aie2p:check_provider",
+    ],
+    "//conditions:default": [],
+})
+
 _LOOM_CHECK_PROVIDER_COPTS = (
     _EMIT_AMDGPU_CHECK_COPTS +
     _TARGET_SPIRV_CHECK_COPTS +
@@ -113,7 +125,8 @@ _LOOM_CHECK_PROVIDER_COPTS = (
     _TARGET_WASM_CHECK_COPTS +
     _TARGET_VM_CHECK_COPTS +
     _EMIT_WASM_CHECK_COPTS +
-    _TARGET_X86_CHECK_COPTS
+    _TARGET_X86_CHECK_COPTS +
+    _TARGET_XDNA_CHECK_COPTS
 )
 
 _LOOM_CHECK_PROVIDER_DEPS = (
@@ -123,7 +136,8 @@ _LOOM_CHECK_PROVIDER_DEPS = (
     _TARGET_WASM_CHECK_DEPS +
     _TARGET_VM_CHECK_DEPS +
     _EMIT_WASM_CHECK_DEPS +
-    _TARGET_X86_CHECK_DEPS
+    _TARGET_X86_CHECK_DEPS +
+    _TARGET_XDNA_CHECK_DEPS
 )
 
 loom_cc_library(
@@ -302,7 +316,6 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
-        "//loom/src/loom/link:linker",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/testing:test_file",
         "//runtime/src/iree/base",

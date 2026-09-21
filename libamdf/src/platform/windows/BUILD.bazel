@@ -33,6 +33,15 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "native_event",
+    srcs = ["native_event.c"],
+    linkopts = ["mincore.lib"],
+    target_compatible_with = WINDOWS_COMPATIBILITY,
+    visibility = ["//libamdf/src:__subpackages__"],
+    deps = ["//libamdf/src/platform:native_event"],
+)
+
+amdf_cc_library(
     name = "host_memory",
     srcs = ["host_memory.c"],
     target_compatible_with = WINDOWS_COMPATIBILITY,

@@ -1,9 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/nested_view_selection.loom-test
-// RUN: emit source-low output=low control-flow=structured-low
+// RUN: emit source-low target=spirv:vulkan1.3+bda output=low control-flow=structured-low
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @derived_selection(%first: buffer, %second: buffer, %third: buffer, %position_input: index, %select_first: i1, %select_pair: i1) -> (i32) {
+// A derived selection retains both the selected buffer and its byte base.
+func.def @derived_selection(%first: buffer, %second: buffer, %third: buffer, %position_input: index, %select_first: i1, %select_pair: i1) -> (i32) {
   %position = index.assume %position_input [range(%position_input, 1, 2)] : index
   %base0 = index.constant 4 : offset
   %base1 = index.constant 8 : offset
@@ -23,7 +22,7 @@ func.def target(@target) @derived_selection(%first: buffer, %second: buffer, %th
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @derived_selection(%first_aligned: reg<spirv.ptr.storage_buffer>, %second_aligned: reg<spirv.ptr.storage_buffer>, %third_aligned: reg<spirv.ptr.storage_buffer>, %position: reg<spirv.id : index>, %select_first: reg<spirv.id : i1>, %select_pair: reg<spirv.id : i1>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @derived_selection(%first_aligned: reg<spirv.ptr.storage_buffer>, %second_aligned: reg<spirv.ptr.storage_buffer>, %third_aligned: reg<spirv.ptr.storage_buffer>, %position: reg<spirv.id : index>, %select_first: reg<spirv.id : i1>, %select_pair: reg<spirv.id : i1>) -> (reg<spirv.id : i32>) asm {
   %base0 = OpConstant.offset64 4
   %base1 = OpConstant.offset64 8
   %base2 = OpConstant.offset64 12
@@ -50,10 +49,9 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @derive
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
+// Nested selections compose with structured side effects and explicit CFG.
 // ERROR@+1: TARGET/089 {function_name="selection_with_side_effects", op_name="func.def"}
-func.def target(@target) @selection_with_side_effects(%first: buffer, %second: buffer, %third: buffer, %select_first: i1, %select_pair: i1, %enter: i1, %side: i1, %initial: i32) -> (i32) {
+func.def @selection_with_side_effects(%first: buffer, %second: buffer, %third: buffer, %select_first: i1, %select_pair: i1, %enter: i1, %side: i1, %initial: i32) -> (i32) {
   %base = index.constant 0 : offset
   %first_aligned = buffer.assume.alignment %first {minimum_alignment = 4} : buffer
   %second_aligned = buffer.assume.alignment %second {minimum_alignment = 4} : buffer

@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_offset_wide.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
-aie2p.target<core> @target
-
-func.def target(@target) @offset_scale_unbounded(%element: index) -> (offset) {
+func.def @offset_scale_unbounded(%element: index) -> (offset) {
   %stride = index.constant 4 : offset
   // ERROR@+1: TARGET/004
   %bytes = index.scale %element, %stride : index, offset -> offset
@@ -12,9 +10,7 @@ func.def target(@target) @offset_scale_unbounded(%element: index) -> (offset) {
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @offset_scale_unsigned_wrap(%base: i32, %increment: i32) -> (offset) {
+func.def @offset_scale_unsigned_wrap(%base: i32, %increment: i32) -> (offset) {
   %wrapped = scalar.addi %base, %increment : i32
   %unsigned = index.cast %wrapped : i32 to offset
   // ERROR@+1: TARGET/005
@@ -27,9 +23,7 @@ func.def target(@target) @offset_scale_unsigned_wrap(%base: i32, %increment: i32
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @offset_scale_large_stride(%element: index) -> (offset) {
+func.def @offset_scale_large_stride(%element: index) -> (offset) {
   // ERROR@+1: TARGET/005
   %stride = index.constant 4294967296 : offset
   // ERROR@+1: TARGET/004
@@ -39,9 +33,7 @@ func.def target(@target) @offset_scale_large_stride(%element: index) -> (offset)
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @offset_scale_dynamic_stride(%element: index, %stride: offset) -> (offset) {
+func.def @offset_scale_dynamic_stride(%element: index, %stride: offset) -> (offset) {
   // ERROR@+1: TARGET/004
   %bytes = index.scale %element, %stride : index, offset -> offset
   func.return %bytes : offset
@@ -49,9 +41,7 @@ func.def target(@target) @offset_scale_dynamic_stride(%element: index, %stride: 
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @offset_scale_lane(%elements: vector<4xi32>, %stride: offset) -> (offset) {
+func.def @offset_scale_lane(%elements: vector<4xi32>, %stride: offset) -> (offset) {
   %raw = vector.extract %elements[0] : vector<4xi32> -> i32
   %unsigned = index.cast %raw : i32 to offset
   // ERROR@+1: TARGET/005
@@ -63,9 +53,7 @@ func.def target(@target) @offset_scale_lane(%elements: vector<4xi32>, %stride: o
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @offset_scale_bounded(%element: index) -> (offset) {
+func.def @offset_scale_bounded(%element: index) -> (offset) {
   %bounded = index.assume %element [range(%element, 0, 1023)] : index
   %stride = index.constant 4 : offset
   %bytes = index.scale %bounded, %stride : index, offset -> offset
@@ -73,7 +61,7 @@ func.def target(@target) @offset_scale_bounded(%element: index) -> (offset) {
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @offset_scale_bounded(%bounded: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @offset_scale_bounded(%bounded: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %stride = mov.short 4
   %bytes = mul %bounded, %stride
   return %bytes
@@ -81,9 +69,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @offset_s
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @offset_scale_nonnegative(%element_input: index, %stride: offset) -> (offset) {
+func.def @offset_scale_nonnegative(%element_input: index, %stride: offset) -> (offset) {
   %element = index.assume %element_input [range(%element_input, 0, 2147483647)] : index
   // ERROR@+1: TARGET/004
   %bytes = index.scale %element, %stride : index, offset -> offset
@@ -92,9 +78,7 @@ func.def target(@target) @offset_scale_nonnegative(%element_input: index, %strid
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @offset_scale_join(%element_input: index, %choice: i32) -> (offset) {
+func.def @offset_scale_join(%element_input: index, %choice: i32) -> (offset) {
   %element = index.assume %element_input [range(%element_input, 0, 2147483647)] : index
   %stride = index.constant 4 : offset
   // ERROR@+1: TARGET/004
@@ -111,9 +95,7 @@ func.def target(@target) @offset_scale_join(%element_input: index, %choice: i32)
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @offset_scale_loop(%element_input: index, %stride: offset, %count: index) -> (offset) {
+func.def @offset_scale_loop(%element_input: index, %stride: offset, %count: index) -> (offset) {
   %element = index.assume %element_input [range(%element_input, 0, 2147483647)] : index
   // ERROR@+1: TARGET/004
   %bytes = index.scale %element, %stride : index, offset -> offset

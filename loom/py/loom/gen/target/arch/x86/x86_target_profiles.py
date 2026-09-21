@@ -97,13 +97,15 @@ def _emit_native_profiles_inl(profiles: tuple[X86TargetProfileInfo, ...]) -> str
         "",
         "#ifdef LOOM_X86_NATIVE_TARGET_PROFILE",
     ]
-    for profile in profiles:
+    for target_kind, profile in enumerate(profiles, start=1):
         native_bundle_key = profile.native_bundle_key
         if native_bundle_key is None:
             raise ValueError(f"x86 profile {profile.profile_key} has no native bundle")
         lines.append(
             "LOOM_X86_NATIVE_TARGET_PROFILE("
             f"{_symbol_suffix(profile.profile_key)}, "
+            f"{target_kind}, "
+            f"{_c_arg(profile.profile_key.removeprefix('x86.'))}, "
             f"{_c_arg(native_bundle_key)}, "
             f"{_c_arg(_snapshot_name(native_bundle_key))}, "
             f"{_c_arg(profile.descriptor_set_key)}, "

@@ -1,10 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/shared_conditional_values.loom-test
-// RUN: emit source-low output=low control-flow=structured-low
-
-wasm.target<simd128> @target
+// RUN: emit source-low target=wasm:simd128 output=low control-flow=structured-low
 
 // ERROR@+1: TARGET/089 {descriptor_set="wasm.core.simd128", function_name="shared_conditional_values", op_name="func.def"}
-func.def target(@target) @shared_conditional_values(%input: buffer, %output: buffer) {
+func.def @shared_conditional_values(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %c0 = scalar.constant 0 : i32
   %completed = scalar.constant 1 : i32

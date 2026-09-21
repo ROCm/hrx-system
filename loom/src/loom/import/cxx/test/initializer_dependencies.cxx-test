@@ -1,0 +1,42 @@
+// RUN: verify
+// A declaration's own name denotes the local scalar, not the outer function.
+unsigned factor();
+unsigned entry() {
+  // ERROR@+1: PARSE/036 "called object of type 'const unsigned int' is not a function or function pointer"
+  const unsigned factor = factor();
+  return factor;
+}
+
+// ====
+// Static members use the same initializer-dependence boundary.
+struct Parameters {
+  // ERROR@+1: PARSE/036 "called object of type 'const int' is not a function or function pointer"
+  static const int factor = factor();
+};
+
+// ====
+// A concrete scalar remains non-callable inside a template definition.
+template <typename T>
+int entry() {
+  // ERROR@+1: PARSE/036 "called object of type 'const int' is not a function or function pointer"
+  const int factor = factor();
+  return factor;
+}
+
+// ====
+// A self-reference in a discarded operand does not prevent constant evaluation.
+static constexpr int entry() {
+  const int value = false ? value : 7;
+  return value;
+}
+static_assert(entry() == 7);
+
+// ====
+// A dependent operand remains dependent even after following a self-reference.
+template <int Count>
+static constexpr int selected() {
+  const int value = false ? value : Count;
+  return value;
+}
+static_assert(selected<7>() == 7);
+static_assert(selected<11>() == 11);

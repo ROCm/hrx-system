@@ -98,9 +98,11 @@ loom_cc_library(
     ::legalization
     ::math_policy
     iree::base
+    loom::ir
     loom::target::arch::x86::descriptors::low_registry
     loom::target::arch::x86::lower
     loom::target::arch::x86::ops
+    loom::target::arch::x86::records::target_records
     loom::target::provider
   PUBLIC
 )

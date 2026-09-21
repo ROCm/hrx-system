@@ -125,24 +125,42 @@ amdf_status_t publish_instructions(
 }
 ```
 
-NPU4, NPU5 and NPU6 queues admit one instruction range per submission and one
-unretired submission per queue. The publication call performs no allocation,
+Queues admit one instruction range per submission and a configurable number of
+unretired submissions. Set `maximum_pending_submission_count` at queue creation;
+zero selects the default of 4096, and `kernel_queue_query_info` reports the
+effective capacity. The library publication path performs no allocation,
 instruction parsing, relocation, argument resolution, native submission retry,
 sleep or host wait.
-The queue preallocates its mandatory native packet storage. Multiple contexts
-can independently own instruction backing and queues. Those backing lifetimes
-are distinct from residency of application state in the physical tiles.
 
-The returned submission number identifies accepted work. The caller performs
-checked retirement with
-`kernel_queue_wait(queue, submission, AMDF_TIMEOUT_INFINITE, 0)`, or uses a
-zero-time wait to refresh without blocking. Retirement includes native
-completion and command-result inspection.
+The queue preallocates native packet and result storage for the complete window.
+Completed slots are reclaimed when submission reaches that bound, without an
+intermediate host wait. If all slots remain occupied, submission returns `BUSY`
+and leaves the output unchanged. Native resource exhaustion can reject a command
+before the configured bound. The native driver can also block admission waiting
+for its own job credits, independently of the library's packet capacity. KMQ
+publication is therefore not a nonblocking OS contract. Multiple contexts can
+independently own instruction backing and queues. Those backing lifetimes are
+distinct from residency of application state in the physical tiles.
+
+The returned increasing, opaque submission number identifies accepted work.
+Several commands can be published before waiting for the last accepted point;
+that wait covers the queue's accepted prefix. The caller performs checked
+retirement with `kernel_queue_refresh_status(queue, &status)` to consume the
+available completed prefix without waiting, or
+`kernel_queue_wait(queue, submission, AMDF_TIMEOUT_INFINITE, 0)` to wait for an
+exact accepted point. A zero-time wait polls that point; unlike batch refresh,
+it need not discover earlier completion while the requested point is pending.
+Retirement includes native completion and command-result inspection.
 `kernel_queue_query_status` is a read-only snapshot of retirement already
-established by synchronization; it does not advance retirement, even if the
-hardware has finished. A timeout or wait error is not cancellation and does not
-by itself permit instruction storage reuse. The status query reports established
-retirement separately from sticky terminal failure.
+established by synchronization or capacity reclamation; it does not advance
+retirement, even if the hardware has finished. A timeout or wait error is not
+cancellation and does not by itself permit instruction storage reuse. The status
+query reports established retirement separately from sticky terminal failure.
+Batch refresh makes the same distinction: its return status describes native
+observation, while the returned snapshot carries checked progress and execution
+failure. A successful refresh may report no new progress, including when another
+host caller is consuming results. Native observation failure leaves the output
+unchanged and does not cancel accepted work.
 
 The [canonical ELF consumer](../../experimental/xdna/cts/execution_test.cc)
 shows the complete flow, including target selection, image loading, relocation,
@@ -153,6 +171,56 @@ loading or require an indirect data-buffer list. Each independent submission
 uses the complete setup-and-execution range to establish its application tile
 state; time-sliced context lifetime alone does not guarantee that state survives
 between submissions.
+
+## Asynchronous host observation
+
+A caller can keep one native event and one persistent event-loop registration
+for a queue. `kernel_queue_query_info` reports `notification_types` for that
+activated queue. A zero mask means native event notification is unavailable;
+checked refresh and synchronous waits remain available independently.
+
+The caller creates its event and establishes event-loop ownership before calling
+`kernel_queue_request_notification(queue, submission, &event)`. The point must
+already have been accepted by that exact queue. The descriptor is borrowed only
+during the call; the caller keeps the native event live through delivery. The
+library stores neither the descriptor nor a subscription.
+
+| Native destination | Registration | Readiness consumption |
+| --- | --- | --- |
+| Linux nonblocking eventfd | DRM syncobj eventfd request on the exact native fence. | Drain the eventfd counter before requesting another edge. |
+| Windows event HANDLE | Asynchronous KMT wait on the exact monitored fence value. | An auto-reset event is consumed by its wait; a manual-reset event is reset by its owner. |
+
+The request is one-shot. It may signal before returning, and repeated requests
+add fresh wake obligations rather than replace an earlier request. Notifications
+can coalesce; their count is not a completion count. A request for an already
+checked point signals immediately, including after its packet slot has been
+reused. Submission never implicitly arms or rearms the event.
+
+In the normal single-request flow, the event-loop callback consumes readiness,
+calls `kernel_queue_refresh_status`, and processes the checked prefix through its
+ordinary completion/release path. If accepted work remains, it requests a wake
+for the first unchecked point. When another host caller owns result consumption,
+refresh can return unchanged progress: requesting that same point again produces
+a fresh hint, without a writer handoff or second retirement mechanism. A caller
+publishing work to an idle queue establishes this wake obligation before
+returning to sleep; the library has no hidden subscription to do it later.
+
+Readiness is an opportunity to check progress, not successful execution or
+permission to release storage. Native first-fence capture contention can produce
+an early recheck hint; checked retirement remains authoritative. A notification
+error does not reject or replay accepted work. Cancelling an event-loop callback
+does not cancel its native request or device execution. Normal teardown consumes
+the outstanding wake and reconciles checked last use before releasing the queue
+and native event. This single-request flow requires no per-submission event
+allocation or notification history.
+
+Each explicit request pays its native registration or signal cost; the kernel
+may allocate callback state. Queue creation qualifies the transport. Neither
+requesting a notification nor refreshing progress creates a libamdf observer,
+event ring, worker, or subscriber registry, and these operations add no work to
+the free-capacity submission path. Synchronous callers retain native fence waits
+without creating an event. Host observation does not mediate device-to-device
+ordering or resident program signaling.
 
 ## Ownership
 

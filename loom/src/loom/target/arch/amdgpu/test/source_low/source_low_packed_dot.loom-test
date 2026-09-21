@@ -1,60 +1,52 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/packed_dot_integer.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @dot4i_s8s8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+func.def @dot4i_s8s8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot4i<s8s8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
   func.return %dot : vector<1xi32>
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dot4i_s8s8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @dot4i_s8s8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %dot = v_dot4_i32_i8 %lhs, %rhs, %acc
   return %dot
 }
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @dot4i_u8u8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+func.def @dot4i_u8u8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot4i<u8u8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
   func.return %dot : vector<1xi32>
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dot4i_u8u8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @dot4i_u8u8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %dot = v_dot4_u32_u8 %lhs, %rhs, %acc
   return %dot
 }
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @dot8i4_u4u4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+func.def @dot8i4_u4u4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot8i4<u4u4> %lhs, %rhs, %acc : vector<1xi32>
   func.return %dot : vector<1xi32>
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dot8i4_u4u4(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @dot8i4_u4u4(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %dot = v_dot8_u32_u4 %lhs, %rhs, %acc
   return %dot
 }
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @dot4i_u8s8_128(%lhs: vector<16xi8>, %rhs: vector<16xi8>, %acc: vector<4xi32>) -> (vector<4xi32>) {
+func.def @dot4i_u8s8_128(%lhs: vector<16xi8>, %rhs: vector<16xi8>, %acc: vector<4xi32>) -> (vector<4xi32>) {
   %dot = vector.dot4i<u8s8> %lhs, %rhs, %acc : vector<16xi8>, vector<16xi8>, vector<4xi32>
   func.return %dot : vector<4xi32>
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dot4i_u8s8_128(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @dot4i_u8s8_128(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %9 = slice %lhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %10 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %11 = slice %acc[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -77,15 +69,13 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dot4i_u
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @dot4i_u8s8(%lhs: vector<64xi8>, %rhs: vector<64xi8>, %acc: vector<16xi32>) -> (vector<16xi32>) {
+func.def @dot4i_u8s8(%lhs: vector<64xi8>, %rhs: vector<64xi8>, %acc: vector<16xi32>) -> (vector<16xi32>) {
   %dot = vector.dot4i<u8s8> %lhs, %rhs, %acc : vector<64xi8>, vector<64xi8>, vector<16xi32>
   func.return %dot : vector<16xi32>
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dot4i_u8s8(%lhs: reg<amdgpu.vgpr x16>, %rhs: reg<amdgpu.vgpr x16>, %acc: reg<amdgpu.vgpr x16>) -> (reg<amdgpu.vgpr x16>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @dot4i_u8s8(%lhs: reg<amdgpu.vgpr x16>, %rhs: reg<amdgpu.vgpr x16>, %acc: reg<amdgpu.vgpr x16>) -> (reg<amdgpu.vgpr x16>) asm {
   %9 = slice %lhs[0] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
   %10 = slice %rhs[0] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
   %11 = slice %acc[0] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
@@ -156,69 +146,61 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dot4i_u
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @dot4i_s8u8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+func.def @dot4i_s8u8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot4i<s8u8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
   func.return %dot : vector<1xi32>
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dot4i_s8u8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @dot4i_s8u8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %dot = v_dot4_i32_iu8_s8u8 %lhs, %rhs, %acc
   return %dot
 }
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @dot8i4_s4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+func.def @dot8i4_s4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot8i4<s4s4> %lhs, %rhs, %acc : vector<1xi32>
   func.return %dot : vector<1xi32>
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dot8i4_s4s4(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @dot8i4_s4s4(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %dot = v_dot8_i32_i4 %lhs, %rhs, %acc
   return %dot
 }
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @dot8i4_u4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+func.def @dot8i4_u4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot8i4<u4s4> %lhs, %rhs, %acc : vector<1xi32>
   func.return %dot : vector<1xi32>
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dot8i4_u4s4(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @dot8i4_u4s4(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %dot = v_dot8_i32_iu4_u4s4 %lhs, %rhs, %acc
   return %dot
 }
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @dot8i4_s4u4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+func.def @dot8i4_s4u4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot8i4<s4u4> %lhs, %rhs, %acc : vector<1xi32>
   func.return %dot : vector<1xi32>
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dot8i4_s4u4(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @dot8i4_s4u4(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %dot = v_dot8_i32_iu4_s4u4 %lhs, %rhs, %acc
   return %dot
 }
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @dot8i4_s4u4_q4_offset_binary(%rows: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+// Q4 offset-binary storage can stay packed for dot8i4. Xoring each nibble with
+// 8 converts the left operand from code-8 into signed i4 bits.
+func.def @dot8i4_s4u4_q4_offset_binary(%rows: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %offset_to_signed_mask = vector.constant -2004318072 : vector<1xi32>
   %signed_rows = vector.xori %rows, %offset_to_signed_mask : vector<1xi32>
   %dot = vector.dot8i4<s4u4> %signed_rows, %rhs, %acc : vector<1xi32>
@@ -226,7 +208,7 @@ func.def target(@target) @dot8i4_s4u4_q4_offset_binary(%rows: vector<1xi32>, %rh
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dot8i4_s4u4_q4_offset_binary(%rows: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @dot8i4_s4u4_q4_offset_binary(%rows: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %signed_rows = v_xor_b32_lit %rows, 2290649224
   %dot = v_dot8_i32_iu4_s4u4 %signed_rows, %rhs, %acc
   return %dot
@@ -234,9 +216,9 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dot8i4_
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @dot4i_s8s8_q6_offset_binary(%codes: vector<1xi32>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+// Q6 offset-binary storage can stay packed for dot4i. Subtracting 32 from each
+// byte converts the left operand from code-32 into signed i8 bits.
+func.def @dot4i_s8s8_q6_offset_binary(%codes: vector<1xi32>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %offset_to_signed_bias = vector.constant -32 : vector<4xi8>
   %bytes = vector.bitcast %codes : vector<1xi32> to vector<4xi8>
   %signed_bytes = vector.addi %bytes, %offset_to_signed_bias : vector<4xi8>
@@ -245,7 +227,7 @@ func.def target(@target) @dot4i_s8s8_q6_offset_binary(%codes: vector<1xi32>, %rh
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @dot4i_s8s8_q6_offset_binary(%bytes: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @dot4i_s8s8_q6_offset_binary(%bytes: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %offset_to_signed_bias = v_mov_b32 3772834016
   %13 = v_and_b32_lit %bytes, 2139062143
   %14 = v_and_b32_lit %offset_to_signed_bias, 2139062143

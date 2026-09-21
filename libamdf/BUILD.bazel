@@ -39,6 +39,7 @@ amdf_library(
         "include/amdf/base.h",
         "include/amdf/gpu.h",
         "include/amdf/memory.h",
+        "include/amdf/native_event.h",
         "include/amdf/queue.h",
         "include/amdf/xdna.h",
     ],

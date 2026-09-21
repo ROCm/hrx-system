@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/view_access.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=vm:core output=low
 
-vm.target<core> @vm
-
-func.def target(@vm) @indexed_view_bytes(%base_value: i64, %row_value: i64, %column_value: i64, %pattern: i32) -> (i32, i32) {
+func.def @indexed_view_bytes(%base_value: i64, %row_value: i64, %column_value: i64, %pattern: i32) -> (i32, i32) {
   %length = index.constant 64 : offset
   %origin = index.constant 0 : offset
   %storage = buffer.alloca<private> align(8) %length : buffer
@@ -28,7 +26,7 @@ func.def target(@vm) @indexed_view_bytes(%base_value: i64, %row_value: i64, %col
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @indexed_view_bytes(%base: reg<vm.value : i64>, %row: reg<vm.value : i64>, %column: reg<vm.value : i64>, %pattern: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>) asm {
+low.func.def target<vm.core> abi(vm_function) @indexed_view_bytes(%base: reg<vm.value : i64>, %row: reg<vm.value : i64>, %column: reg<vm.value : i64>, %pattern: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>) asm {
   %length = constant.i64 64
   %origin = constant.i64 0
   %matrix = buffer.allocate %length, 3 : reg<vm.ref : buffer>
@@ -51,9 +49,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @indexed_view_bytes(%base: re
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @reverse_view_bytes(%index_value: i64, %pattern: i32) -> (i32, i32) {
+func.def @reverse_view_bytes(%index_value: i64, %pattern: i32) -> (i32, i32) {
   %length = index.constant 16 : offset
   %origin = index.constant 0 : offset
   %last_word = index.constant 12 : offset
@@ -74,7 +70,7 @@ func.def target(@vm) @reverse_view_bytes(%index_value: i64, %pattern: i32) -> (i
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @reverse_view_bytes(%index: reg<vm.value : i64>, %pattern: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>) asm {
+low.func.def target<vm.core> abi(vm_function) @reverse_view_bytes(%index: reg<vm.value : i64>, %pattern: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>) asm {
   %length = constant.i64 16
   %origin = constant.i64 0
   %last_word = constant.i64 12
@@ -95,9 +91,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @reverse_view_bytes(%index: r
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @view_payloads(%input_i8: i8, %input_i16: i16, %input_i32: i32, %input_i64: i64, %input_f8E4M3: f8E4M3, %input_f8E5M2: f8E5M2, %input_f16: f16, %input_bf16: bf16, %input_f32: f32, %input_f64: f64) -> (i8, i16, i32, i64, f8E4M3, f8E5M2, f16, bf16, f32, f64) {
+func.def @view_payloads(%input_i8: i8, %input_i16: i16, %input_i32: i32, %input_i64: i64, %input_f8E4M3: f8E4M3, %input_f8E5M2: f8E5M2, %input_f16: f16, %input_bf16: bf16, %input_f32: f32, %input_f64: f64) -> (i8, i16, i32, i64, f8E4M3, f8E5M2, f16, bf16, f32, f64) {
   %length = index.constant 64 : offset
   %origin = index.constant 0 : offset
   %storage = buffer.alloca<private> align(8) %length : buffer
@@ -135,7 +129,7 @@ func.def target(@vm) @view_payloads(%input_i8: i8, %input_i16: i16, %input_i32: 
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @view_payloads(%input_i8: reg<vm.value : i8>, %input_i16: reg<vm.value : i16>, %input_i32: reg<vm.value : i32>, %input_i64: reg<vm.value : i64>, %input_f8E4M3: reg<vm.value : f8E4M3>, %input_f8E5M2: reg<vm.value : f8E5M2>, %input_f16: reg<vm.value : f16>, %input_bf16: reg<vm.value : bf16>, %input_f32: reg<vm.value : f32>, %input_f64: reg<vm.value : f64>) -> (reg<vm.value : i8>, reg<vm.value : i16>, reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : f8E4M3>, reg<vm.value : f8E5M2>, reg<vm.value : f16>, reg<vm.value : bf16>, reg<vm.value : f32>, reg<vm.value : f64>) asm {
+low.func.def target<vm.core> abi(vm_function) @view_payloads(%input_i8: reg<vm.value : i8>, %input_i16: reg<vm.value : i16>, %input_i32: reg<vm.value : i32>, %input_i64: reg<vm.value : i64>, %input_f8E4M3: reg<vm.value : f8E4M3>, %input_f8E5M2: reg<vm.value : f8E5M2>, %input_f16: reg<vm.value : f16>, %input_bf16: reg<vm.value : bf16>, %input_f32: reg<vm.value : f32>, %input_f64: reg<vm.value : f64>) -> (reg<vm.value : i8>, reg<vm.value : i16>, reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : f8E4M3>, reg<vm.value : f8E5M2>, reg<vm.value : f16>, reg<vm.value : bf16>, reg<vm.value : f32>, reg<vm.value : f64>) asm {
   %length = constant.i64 64
   %view_f64 = buffer.allocate %length, 3 : reg<vm.ref : buffer>
   %65 = constant.i64 0
@@ -173,9 +167,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @view_payloads(%input_i8: reg
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @view_tail_sum(%column_count: i64, %pattern: i32) -> (i32, i32) {
+func.def @view_tail_sum(%column_count: i64, %pattern: i32) -> (i32, i32) {
   %column_input = index.cast %column_count : i64 to index
   %columns = index.assume %column_input [range(%column_input, 1, 4)] : index
   %length = index.constant 64 : offset
@@ -208,7 +200,7 @@ func.def target(@vm) @view_tail_sum(%column_count: i64, %pattern: i32) -> (i32, 
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @view_tail_sum(%columns: reg<vm.value : i64>, %pattern: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>) asm {
+low.func.def target<vm.core> abi(vm_function) @view_tail_sum(%columns: reg<vm.value : i64>, %pattern: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>) asm {
   %length = constant.i64 64
   %origin = constant.i64 0
   %base = constant.i64 4

@@ -278,3 +278,195 @@ check.case public @subview_vector_aligned_guards {
   check.expect.event<device> {count = 0, type = "asan_report"}
   check.return
 }
+
+func.def @make_storage_crop(%input: buffer, %origin: offset, %columns: index) -> (%result_storage: encoding<storage>, view<2x3xf32, %result_storage>) {
+  %layout = encoding.layout.strided [%columns, 1] : encoding<layout>
+  %schema = encoding.define #encoding.f32 : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %source = buffer.view %input_aligned[%origin] : buffer -> view<4x[%columns]xf32, %storage>
+  %crop = view.subview %source[1, 2] : view<4x[%columns]xf32, %storage> -> view<2x3xf32, %storage>
+  func.return %storage, %crop : encoding<storage>, view<2x3xf32, %storage>
+}
+
+func.def @read_storage_crop(%storage: encoding<storage>, %crop: view<2x3xf32, %storage>) -> (f32) {
+  %value = view.load %crop[1, 1] : view<2x3xf32, %storage> -> f32
+  func.return %value : f32
+}
+
+kernel.def @subview_composed_helpers() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %width: index) {
+  %columns = index.assume %width [range(%width, 8, 12)] : index
+  %origin = index.constant 8 : offset
+  %storage, %crop = func.call @make_storage_crop(%input, %origin, %columns) : (buffer, offset, index) -> (encoding<storage>, view<2x3xf32, %storage>)
+  %value = func.call @read_storage_crop(%storage, %crop) : (encoding<storage>, view<2x3xf32, %storage>) -> (f32)
+  %output_origin = index.constant 4 : offset
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %destination = buffer.view %output_aligned[%output_origin] : buffer -> view<1xf32>
+  view.store %value, %destination[0] : f32, view<1xf32>
+  kernel.return
+}
+
+kernel.def @subview_composed_refined_nested() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %base: offset, %row_pitch: index, %column_pitch: index) {
+  %origin = index.assume %base [range(%base, 4, 12), mul(%base, 4)] : offset
+  %row_stride = index.assume %row_pitch [range(%row_pitch, 8, 12)] : index
+  %column_stride = index.assume %column_pitch [range(%column_pitch, 1, 2)] : index
+  %layout = encoding.layout.strided [%row_stride, %column_stride] : encoding<layout>
+  %refined_layout = encoding.layout.assume.strided %layout {rank = 2} : encoding<layout>
+  %schema = encoding.define #encoding.f32 : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %refined_layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %source = buffer.view %input_aligned[%origin] : buffer -> view<4x4xf32, %storage>
+  %outer = view.subview %source[1, 1] : view<4x4xf32, %storage> -> view<3x3xf32, %storage>
+  %inner = view.subview %outer[1, 1] : view<3x3xf32, %storage> -> view<2x2xf32, %storage>
+  %value = view.load %inner[1, 0] : view<2x2xf32, %storage> -> f32
+  %output_origin = index.constant 4 : offset
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %destination = buffer.view %output_aligned[%output_origin] : buffer -> view<1xf32>
+  view.store %value, %destination[0] : f32, view<1xf32>
+  kernel.return
+}
+
+kernel.def @subview_composed_distinct_bindings() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %first_width: index, %second_width: index) {
+  %first_columns = index.assume %first_width [range(%first_width, 8, 12)] : index
+  %second_columns = index.assume %second_width [range(%second_width, 8, 12)] : index
+  %origin = index.constant 8 : offset
+  %first_storage, %first_crop = func.call @make_storage_crop(%input, %origin, %first_columns) : (buffer, offset, index) -> (encoding<storage>, view<2x3xf32, %first_storage>)
+  %second_storage, %second_crop = func.call @make_storage_crop(%input, %origin, %second_columns) : (buffer, offset, index) -> (encoding<storage>, view<2x3xf32, %second_storage>)
+  %first = func.call @read_storage_crop(%first_storage, %first_crop) : (encoding<storage>, view<2x3xf32, %first_storage>) -> (f32)
+  %second = func.call @read_storage_crop(%second_storage, %second_crop) : (encoding<storage>, view<2x3xf32, %second_storage>) -> (f32)
+  %value = scalar.subf %first, %second : f32
+  %output_origin = index.constant 4 : offset
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %destination = buffer.view %output_aligned[%output_origin] : buffer -> view<1xf32>
+  view.store %value, %destination[0] : f32, view<1xf32>
+  kernel.return
+}
+
+check.case public @subview_composed_helpers_8 {
+  %width = check.literal value(8) : index
+  %input = check.generate.iota offset(0.0) step(1.0) : tensor<64xf32>
+  %input_expected = check.generate.iota offset(0.0) step(1.0) : tensor<64xf32>
+  %output = check.generate.fill value(-99.0) : tensor<3xf32>
+  kernel.launch @subview_composed_helpers(%input, %output, %width) : (tensor<64xf32>, tensor<3xf32>, index)
+  %actual = check.tensor.view %output offset(4) : tensor<3xf32> -> tensor<1xf32>
+  %expected = check.generate.fill value(21.0) : tensor<1xf32>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<1xf32>
+  %prefix = check.tensor.view %output offset(0) : tensor<3xf32> -> tensor<1xf32>
+  %suffix = check.tensor.view %output offset(8) : tensor<3xf32> -> tensor<1xf32>
+  %guard = check.generate.fill value(-99.0) : tensor<1xf32>
+  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<1xf32>
+  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<1xf32>
+  check.expect.bitwise actual(%input) expected(%input_expected) : tensor<64xf32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+check.case public @subview_composed_helpers_11 {
+  %width = check.literal value(11) : index
+  %input = check.generate.iota offset(0.0) step(1.0) : tensor<64xf32>
+  %input_expected = check.generate.iota offset(0.0) step(1.0) : tensor<64xf32>
+  %output = check.generate.fill value(-99.0) : tensor<3xf32>
+  kernel.launch @subview_composed_helpers(%input, %output, %width) : (tensor<64xf32>, tensor<3xf32>, index)
+  %actual = check.tensor.view %output offset(4) : tensor<3xf32> -> tensor<1xf32>
+  %expected = check.generate.fill value(27.0) : tensor<1xf32>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<1xf32>
+  %prefix = check.tensor.view %output offset(0) : tensor<3xf32> -> tensor<1xf32>
+  %suffix = check.tensor.view %output offset(8) : tensor<3xf32> -> tensor<1xf32>
+  %guard = check.generate.fill value(-99.0) : tensor<1xf32>
+  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<1xf32>
+  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<1xf32>
+  check.expect.bitwise actual(%input) expected(%input_expected) : tensor<64xf32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+check.case public @subview_composed_refined_nested_4_8_1 {
+  %base = check.literal value(4) : offset
+  %row_pitch = check.literal value(8) : index
+  %column_pitch = check.literal value(1) : index
+  %input = check.generate.iota offset(0.0) step(1.0) : tensor<64xf32>
+  %input_expected = check.generate.iota offset(0.0) step(1.0) : tensor<64xf32>
+  %output = check.generate.fill value(-99.0) : tensor<3xf32>
+  kernel.launch @subview_composed_refined_nested(%input, %output, %base, %row_pitch, %column_pitch) : (tensor<64xf32>, tensor<3xf32>, offset, index, index)
+  %actual = check.tensor.view %output offset(4) : tensor<3xf32> -> tensor<1xf32>
+  %expected = check.generate.fill value(27.0) : tensor<1xf32>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<1xf32>
+  %prefix = check.tensor.view %output offset(0) : tensor<3xf32> -> tensor<1xf32>
+  %suffix = check.tensor.view %output offset(8) : tensor<3xf32> -> tensor<1xf32>
+  %guard = check.generate.fill value(-99.0) : tensor<1xf32>
+  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<1xf32>
+  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<1xf32>
+  check.expect.bitwise actual(%input) expected(%input_expected) : tensor<64xf32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+check.case public @subview_composed_refined_nested_12_11_2 {
+  %base = check.literal value(12) : offset
+  %row_pitch = check.literal value(11) : index
+  %column_pitch = check.literal value(2) : index
+  %input = check.generate.iota offset(0.0) step(1.0) : tensor<64xf32>
+  %input_expected = check.generate.iota offset(0.0) step(1.0) : tensor<64xf32>
+  %output = check.generate.fill value(-99.0) : tensor<3xf32>
+  kernel.launch @subview_composed_refined_nested(%input, %output, %base, %row_pitch, %column_pitch) : (tensor<64xf32>, tensor<3xf32>, offset, index, index)
+  %actual = check.tensor.view %output offset(4) : tensor<3xf32> -> tensor<1xf32>
+  %expected = check.generate.fill value(40.0) : tensor<1xf32>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<1xf32>
+  %prefix = check.tensor.view %output offset(0) : tensor<3xf32> -> tensor<1xf32>
+  %suffix = check.tensor.view %output offset(8) : tensor<3xf32> -> tensor<1xf32>
+  %guard = check.generate.fill value(-99.0) : tensor<1xf32>
+  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<1xf32>
+  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<1xf32>
+  check.expect.bitwise actual(%input) expected(%input_expected) : tensor<64xf32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+check.case public @subview_composed_distinct_bindings_8_11 {
+  %first_width = check.literal value(8) : index
+  %second_width = check.literal value(11) : index
+  %input = check.generate.iota offset(0.0) step(1.0) : tensor<64xf32>
+  %input_expected = check.generate.iota offset(0.0) step(1.0) : tensor<64xf32>
+  %output = check.generate.fill value(-99.0) : tensor<3xf32>
+  kernel.launch @subview_composed_distinct_bindings(%input, %output, %first_width, %second_width) : (tensor<64xf32>, tensor<3xf32>, index, index)
+  %actual = check.tensor.view %output offset(4) : tensor<3xf32> -> tensor<1xf32>
+  %expected = check.generate.fill value(-6.0) : tensor<1xf32>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<1xf32>
+  %prefix = check.tensor.view %output offset(0) : tensor<3xf32> -> tensor<1xf32>
+  %suffix = check.tensor.view %output offset(8) : tensor<3xf32> -> tensor<1xf32>
+  %guard = check.generate.fill value(-99.0) : tensor<1xf32>
+  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<1xf32>
+  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<1xf32>
+  check.expect.bitwise actual(%input) expected(%input_expected) : tensor<64xf32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+check.case public @subview_composed_distinct_bindings_11_8 {
+  %first_width = check.literal value(11) : index
+  %second_width = check.literal value(8) : index
+  %input = check.generate.iota offset(0.0) step(1.0) : tensor<64xf32>
+  %input_expected = check.generate.iota offset(0.0) step(1.0) : tensor<64xf32>
+  %output = check.generate.fill value(-99.0) : tensor<3xf32>
+  kernel.launch @subview_composed_distinct_bindings(%input, %output, %first_width, %second_width) : (tensor<64xf32>, tensor<3xf32>, index, index)
+  %actual = check.tensor.view %output offset(4) : tensor<3xf32> -> tensor<1xf32>
+  %expected = check.generate.fill value(6.0) : tensor<1xf32>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<1xf32>
+  %prefix = check.tensor.view %output offset(0) : tensor<3xf32> -> tensor<1xf32>
+  %suffix = check.tensor.view %output offset(8) : tensor<3xf32> -> tensor<1xf32>
+  %guard = check.generate.fill value(-99.0) : tensor<1xf32>
+  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<1xf32>
+  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<1xf32>
+  check.expect.bitwise actual(%input) expected(%input_expected) : tensor<64xf32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}

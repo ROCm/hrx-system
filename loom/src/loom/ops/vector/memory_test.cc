@@ -694,12 +694,9 @@ TEST_F(VectorMemoryTest, StridedLayoutSupportsDynamicStride) {
   loom_vector_memory_access_t access;
   ASSERT_TRUE(Describe(view_type, vector_type, &access));
   EXPECT_EQ(access.layout_kind, LOOM_VECTOR_MEMORY_LAYOUT_STRIDED);
-  ASSERT_EQ(access.layout_operands.static_strides.kind, LOOM_ATTR_I64_ARRAY);
-  ASSERT_EQ(access.layout_operands.static_strides.count, 2u);
-  EXPECT_EQ(access.layout_operands.static_strides.i64_array[0], INT64_MIN);
-  EXPECT_EQ(access.layout_operands.static_strides.i64_array[1], 1);
-  ASSERT_EQ(access.layout_operands.dynamic_stride_count, 1u);
-  EXPECT_EQ(access.layout_operands.dynamic_stride_values[0], dynamic_stride);
+  ASSERT_EQ(access.layout_stride_values.count, 2u);
+  EXPECT_EQ(access.layout_stride_values.values[0], dynamic_stride);
+  EXPECT_EQ(access.layout_stride_values.values[1], LOOM_VALUE_ID_INVALID);
 
   int64_t row_stride = 0;
   int64_t column_stride = 0;
@@ -726,7 +723,7 @@ TEST_F(VectorMemoryTest, StridedLayoutSupportsDynamicStride) {
 }
 
 TEST_F(VectorMemoryTest,
-       PhysicalStorageCompositionPreservesDynamicLayoutOperands) {
+       PhysicalStorageCompositionPreservesDynamicLayoutStrides) {
   const int64_t static_strides[] = {INT64_MIN, 1};
   loom_value_id_t dynamic_stride = LOOM_VALUE_ID_INVALID;
   IREE_ASSERT_OK(loom_builder_define_block_arg(
@@ -750,10 +747,9 @@ TEST_F(VectorMemoryTest,
 
   loom_vector_memory_access_t access;
   ASSERT_TRUE(Describe(view_type, vector_type, &access));
-  ASSERT_EQ(access.layout_operands.static_strides.kind, LOOM_ATTR_I64_ARRAY);
-  ASSERT_EQ(access.layout_operands.static_strides.count, 2u);
-  ASSERT_EQ(access.layout_operands.dynamic_stride_count, 1u);
-  EXPECT_EQ(access.layout_operands.dynamic_stride_values[0], dynamic_stride);
+  ASSERT_EQ(access.layout_stride_values.count, 2u);
+  EXPECT_EQ(access.layout_stride_values.values[0], dynamic_stride);
+  EXPECT_EQ(access.layout_stride_values.values[1], LOOM_VALUE_ID_INVALID);
 }
 
 TEST_F(VectorMemoryTest, ByteOffsetRejectsSubByteElementType) {

@@ -1,15 +1,13 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_conversion_float8.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @scalar_extf_f8e4m3_to_f32(%input: f8E4M3) -> (f32) {
+func.def @scalar_extf_f8e4m3_to_f32(%input: f8E4M3) -> (f32) {
   %converted = scalar.extf %input : f8E4M3 to f32
   func.return %converted : f32
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_extf_f8e4m3_to_f32(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @scalar_extf_f8e4m3_to_f32(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %64 = v_and_b32_lit %input, 255
   %65 = v_and_b32_lit %64, 128
   %66 = v_lshlrev_b32_lit %65, 24
@@ -50,15 +48,13 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @scalar_extf_f8e5m2_to_f32(%input: f8E5M2) -> (f32) {
+func.def @scalar_extf_f8e5m2_to_f32(%input: f8E5M2) -> (f32) {
   %converted = scalar.extf %input : f8E5M2 to f32
   func.return %converted : f32
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_extf_f8e5m2_to_f32(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @scalar_extf_f8e5m2_to_f32(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %59 = v_and_b32_lit %input, 255
   %60 = v_and_b32_lit %59, 128
   %61 = v_lshlrev_b32_lit %60, 24
@@ -96,15 +92,13 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @vector_extf_f8e4m3x3_to_bf16x3(%input: vector<3xf8E4M3>) -> (vector<3xbf16>) {
+func.def @vector_extf_f8e4m3x3_to_bf16x3(%input: vector<3xf8E4M3>) -> (vector<3xbf16>) {
   %converted = vector.extf %input : vector<3xf8E4M3> to vector<3xbf16>
   func.return %converted : vector<3xbf16>
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_extf_f8e4m3x3_to_bf16x3(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @vector_extf_f8e4m3x3_to_bf16x3(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
   %5 = s_mov_b32 1048592
   %6 = v_perm_b32_src1_zero_src2_lit %input, 327684
   %7 = v_and_b32_lit %6, 8323199
@@ -167,15 +161,13 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @vector_extf_f8e5m2x3_to_f16x3(%input: vector<3xf8E5M2>) -> (vector<3xf16>) {
+func.def @vector_extf_f8e5m2x3_to_f16x3(%input: vector<3xf8E5M2>) -> (vector<3xf16>) {
   %converted = vector.extf %input : vector<3xf8E5M2> to vector<3xf16>
   func.return %converted : vector<3xf16>
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_extf_f8e5m2x3_to_f16x3(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @vector_extf_f8e5m2x3_to_f16x3(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
   %5 = s_mov_b32 2097184
   %6 = v_perm_b32_src1_zero_src2_lit %input, 327684
   %7 = v_and_b32_lit %6, 8323199
@@ -255,15 +247,13 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @scalar_fptrunc_f32_to_f8e4m3(%input: f32) -> (f8E4M3) {
+func.def @scalar_fptrunc_f32_to_f8e4m3(%input: f32) -> (f8E4M3) {
   %converted = scalar.fptrunc %input : f32 to f8E4M3
   func.return %converted : f8E4M3
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_fptrunc_f32_to_f8e4m3(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @scalar_fptrunc_f32_to_f8e4m3(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %5 = v_mov_b32 1138753536
   %6 = v_mov_b32 2139095040
   %7 = v_mov_b32 1015021568
@@ -287,15 +277,13 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @scalar_fptrunc_f32_to_f8e5m2(%input: f32) -> (f8E5M2) {
+func.def @scalar_fptrunc_f32_to_f8e5m2(%input: f32) -> (f8E5M2) {
   %converted = scalar.fptrunc %input : f32 to f8E5M2
   func.return %converted : f8E5M2
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_fptrunc_f32_to_f8e5m2(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @scalar_fptrunc_f32_to_f8e5m2(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %5 = v_mov_b32 1198522368
   %6 = v_mov_b32 2139095040
   %7 = v_mov_b32 947912704
@@ -319,15 +307,13 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @scalar_fptrunc_f16_to_f8e4m3(%input: f16) -> (f8E4M3) {
+func.def @scalar_fptrunc_f16_to_f8e4m3(%input: f16) -> (f8E4M3) {
   %converted = scalar.fptrunc %input : f16 to f8E4M3
   func.return %converted : f8E4M3
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_fptrunc_f16_to_f8e4m3(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @scalar_fptrunc_f16_to_f8e4m3(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %5 = v_mov_b32 1138753536
   %6 = v_mov_b32 2139095040
   %7 = v_mov_b32 1015021568
@@ -352,15 +338,13 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @scalar_fptrunc_bf16_to_f8e5m2(%input: bf16) -> (f8E5M2) {
+func.def @scalar_fptrunc_bf16_to_f8e5m2(%input: bf16) -> (f8E5M2) {
   %converted = scalar.fptrunc %input : bf16 to f8E5M2
   func.return %converted : f8E5M2
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_fptrunc_bf16_to_f8e5m2(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @scalar_fptrunc_bf16_to_f8e5m2(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %5 = v_mov_b32 1198522368
   %6 = v_mov_b32 2139095040
   %7 = v_mov_b32 947912704
@@ -385,15 +369,13 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @vector_fptrunc_f32x3_to_f8e4m3x3(%input: vector<3xf32>) -> (vector<3xf8E4M3>) {
+func.def @vector_fptrunc_f32x3_to_f8e4m3x3(%input: vector<3xf32>) -> (vector<3xf8E4M3>) {
   %converted = vector.fptrunc %input : vector<3xf32> to vector<3xf8E4M3>
   func.return %converted : vector<3xf8E4M3>
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_fptrunc_f32x3_to_f8e4m3x3(%input: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @vector_fptrunc_f32x3_to_f8e4m3x3(%input: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr>) asm {
   %5 = v_mov_b32 1138753536
   %6 = v_mov_b32 2139095040
   %7 = v_mov_b32 1015021568
@@ -449,15 +431,13 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @vector_fptrunc_f16x3_to_f8e5m2x3(%input: vector<3xf16>) -> (vector<3xf8E5M2>) {
+func.def @vector_fptrunc_f16x3_to_f8e5m2x3(%input: vector<3xf16>) -> (vector<3xf8E5M2>) {
   %converted = vector.fptrunc %input : vector<3xf16> to vector<3xf8E5M2>
   func.return %converted : vector<3xf8E5M2>
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_fptrunc_f16x3_to_f8e5m2x3(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @vector_fptrunc_f16x3_to_f8e5m2x3(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %5 = s_mov_b32 524296
   %6 = s_mov_b32 8323199
   %7 = s_mov_b32 67044351

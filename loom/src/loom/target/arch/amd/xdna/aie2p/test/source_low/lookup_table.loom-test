@@ -1,10 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/lookup_table.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
 // XFAIL: AIE2P has no GPU workitem-addressed global memory surface
-aie2p.target<core> @target
-
-kernel.def target(@target) @f32_table_lookup_i8_codes() {
+kernel.def @f32_table_lookup_i8_codes() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 2 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -28,9 +26,7 @@ kernel.def target(@target) @f32_table_lookup_i8_codes() {
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @f32_table_lookup_i32_codes(%codes: vector<2xi32>) -> (vector<2xf32>) {
+func.def @f32_table_lookup_i32_codes(%codes: vector<2xi32>) -> (vector<2xf32>) {
   %g0 = scalar.constant 2.0 : f32
   %g1 = scalar.constant -3.0 : f32
   %g2 = scalar.constant 5.0 : f32
@@ -40,7 +36,7 @@ func.def target(@target) @f32_table_lookup_i32_codes(%codes: vector<2xi32>) -> (
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @f32_table_lookup_i32_codes(%codes: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f32_table_lookup_i32_codes(%codes: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %g1 = mov.i32 -1069547520
   %g2 = mov.i32 1084227584
   %24 = mov.i32 1073741824
@@ -63,15 +59,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @f32_tabl
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @f32_table_lookup_dynamic_grid(%grid: vector<3xf32>, %codes: vector<2xi32>) -> (vector<2xf32>) {
+func.def @f32_table_lookup_dynamic_grid(%grid: vector<3xf32>, %codes: vector<2xi32>) -> (vector<2xf32>) {
   %decoded = vector.table.lookup %grid[%codes] : vector<3xf32>, vector<2xi32> -> vector<2xf32>
   func.return %decoded : vector<2xf32>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @f32_table_lookup_dynamic_grid(%grid: reg<aie2p.vec256 x2>, %codes: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f32_table_lookup_dynamic_grid(%grid: reg<aie2p.vec256 x2>, %codes: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %16 = vextract.32.imm %codes, 0
   %17 = vextract.32.reg %grid, %16
   %18 = vextract.32.imm %codes, 1
@@ -85,9 +79,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @f32_tabl
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @i8_table_lookup_fact_known_codes(%grid: vector<4xi8>) -> (vector<4xi8>) {
+func.def @i8_table_lookup_fact_known_codes(%grid: vector<4xi8>) -> (vector<4xi8>) {
   %c0 = scalar.constant 0 : i8
   %c1 = scalar.constant 1 : i8
   %c2 = scalar.constant 2 : i8
@@ -98,7 +90,7 @@ func.def target(@target) @i8_table_lookup_fact_known_codes(%grid: vector<4xi8>) 
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8_table_lookup_fact_known_codes(%grid: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8_table_lookup_fact_known_codes(%grid: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %27 = vextract.8.imm %grid, 2
   %28 = vextract.8.imm %grid, 0
   %29 = vextract.8.imm %grid, 3
@@ -118,9 +110,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8_table
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @i8_table_lookup_constant_table() -> (vector<4xi8>) {
+func.def @i8_table_lookup_constant_table() -> (vector<4xi8>) {
   %g0 = scalar.constant -4 : i8
   %g1 = scalar.constant -1 : i8
   %g2 = scalar.constant 2 : i8
@@ -136,7 +126,7 @@ func.def target(@target) @i8_table_lookup_constant_table() -> (vector<4xi8>) {
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8_table_lookup_constant_table() -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8_table_lookup_constant_table() -> (reg<aie2p.vec256 x2>) asm {
   %38 = mov.short 2
   %39 = mov.short -1
   %40 = mov.short -4
@@ -155,16 +145,14 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8_table
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @i8_table_lookup_u4_dynamic_table(%grid: vector<16xi8>, %packed: vector<2xi8>) -> (vector<4xi8>) {
+func.def @i8_table_lookup_u4_dynamic_table(%grid: vector<16xi8>, %packed: vector<2xi8>) -> (vector<4xi8>) {
   %codes = vector.bitunpacku<4> %packed : vector<2xi8> -> vector<4xi8>
   %decoded = vector.table.lookup %grid[%codes] : vector<16xi8>, vector<4xi8> -> vector<4xi8>
   func.return %decoded : vector<4xi8>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8_table_lookup_u4_dynamic_table(%grid: reg<aie2p.vec256 x2>, %packed: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8_table_lookup_u4_dynamic_table(%grid: reg<aie2p.vec256 x2>, %packed: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %53 = vextract.8.imm %packed, 0
   %54 = extend.u8 %53
   %55 = mov.short 15
@@ -198,9 +186,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8_table
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @i8_table_lookup_u4_constant_table(%packed: vector<2xi8>) -> (vector<4xi8>) {
+func.def @i8_table_lookup_u4_constant_table(%packed: vector<2xi8>) -> (vector<4xi8>) {
   %g0 = scalar.constant 0 : i8
   %g1 = scalar.constant -1 : i8
   %g2 = scalar.constant 2 : i8
@@ -224,7 +210,7 @@ func.def target(@target) @i8_table_lookup_u4_constant_table(%packed: vector<2xi8
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8_table_lookup_u4_constant_table(%packed: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8_table_lookup_u4_constant_table(%packed: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %g1 = mov.short -1
   %g2 = mov.short 2
   %g3 = mov.short -3

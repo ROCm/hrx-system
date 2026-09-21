@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_workgroup_indexed.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @wave_sized_workgroup_memory_workitem_x_b32() {
+kernel.def @wave_sized_workgroup_memory_workitem_x_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -21,7 +19,7 @@ kernel.def target(@target) @wave_sized_workgroup_memory_workitem_x_b32() {
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_workitem_x_b32() asm {
+low.kernel.def target<amdgpu.gfx11.generic.core> workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_workitem_x_b32() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %10 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
   %stored_value = v_mov_b32 1
@@ -34,9 +32,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @wave_sized_workgroup_memory_workitem_x_i8x4() {
+kernel.def @wave_sized_workgroup_memory_workitem_x_i8x4() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -54,7 +50,7 @@ kernel.def target(@target) @wave_sized_workgroup_memory_workitem_x_i8x4() {
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_workitem_x_i8x4() asm {
+low.kernel.def target<amdgpu.gfx11.generic.core> workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_workitem_x_i8x4() asm {
   %10 = storage {byte_alignment = 16, byte_length = 64} : low.storage<workgroup>
   %stored_value = v_mov_b32 16843009
   %13 = s_mov_b32_m0_imm 0
@@ -68,9 +64,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @cross_wave_workgroup_memory_workitem_x_b32() {
+kernel.def @cross_wave_workgroup_memory_workitem_x_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -88,7 +82,7 @@ kernel.def target(@target) @cross_wave_workgroup_memory_workitem_x_b32() {
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @cross_wave_workgroup_memory_workitem_x_b32() asm {
+low.kernel.def target<amdgpu.gfx11.generic.core> workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @cross_wave_workgroup_memory_workitem_x_b32() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %10 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
   %stored_value = v_mov_b32 1
@@ -101,9 +95,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @workgroup_memory_scalar_loop_index_b32() {
+kernel.def @workgroup_memory_scalar_loop_index_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 8 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -125,7 +117,7 @@ kernel.def target(@target) @workgroup_memory_scalar_loop_index_b32() {
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(8, 1, 1) workgroup_count(1, 1, 1) @workgroup_memory_scalar_loop_index_b32() asm {
+low.kernel.def target<amdgpu.gfx11.generic.core> workgroup_size(8, 1, 1) workgroup_count(1, 1, 1) @workgroup_memory_scalar_loop_index_b32() asm {
   %17 = storage {byte_alignment = 16, byte_length = 32} : low.storage<workgroup>
   %loop_begin = s_mov_b32 0
   %loop_end = s_mov_b32 8
@@ -149,9 +141,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(8, 1, 1
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @wave_sized_workgroup_memory_workitem_x_b32_static_offset() {
+kernel.def @wave_sized_workgroup_memory_workitem_x_b32_static_offset() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -171,7 +161,7 @@ kernel.def target(@target) @wave_sized_workgroup_memory_workitem_x_b32_static_of
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_workitem_x_b32_static_offset() asm {
+low.kernel.def target<amdgpu.gfx11.generic.core> workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_workitem_x_b32_static_offset() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %12 = storage {byte_alignment = 16, byte_length = 160} : low.storage<workgroup>
   %stored_value = v_mov_b32 1
@@ -184,9 +174,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @wave_sized_workgroup_memory_second_allocation_b32() {
+kernel.def @wave_sized_workgroup_memory_second_allocation_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -208,7 +196,7 @@ kernel.def target(@target) @wave_sized_workgroup_memory_second_allocation_b32() 
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_second_allocation_b32() asm {
+low.kernel.def target<amdgpu.gfx11.generic.core> workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_second_allocation_b32() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %13 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
   %14 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
@@ -224,9 +212,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @wave_sized_workgroup_memory_view_base_and_element_offset_b32() {
+kernel.def @wave_sized_workgroup_memory_view_base_and_element_offset_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -246,7 +232,7 @@ kernel.def target(@target) @wave_sized_workgroup_memory_view_base_and_element_of
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_view_base_and_element_offset_b32() asm {
+low.kernel.def target<amdgpu.gfx11.generic.core> workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_view_base_and_element_offset_b32() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %12 = storage {byte_alignment = 16, byte_length = 224} : low.storage<workgroup>
   %stored_value = v_mov_b32 1
@@ -259,9 +245,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @wave_sized_workgroup_memory_interleaved_addtid_and_vaddr_b32() {
+kernel.def @wave_sized_workgroup_memory_interleaved_addtid_and_vaddr_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -283,7 +267,7 @@ kernel.def target(@target) @wave_sized_workgroup_memory_interleaved_addtid_and_v
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_interleaved_addtid_and_vaddr_b32() asm {
+low.kernel.def target<amdgpu.gfx11.generic.core> workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_interleaved_addtid_and_vaddr_b32() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %15 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
   %lane_value = v_mov_b32 1
@@ -299,9 +283,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @wave_sized_workgroup_memory_roundtrip_lane_cast_b32() {
+kernel.def @wave_sized_workgroup_memory_roundtrip_lane_cast_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -321,7 +303,7 @@ kernel.def target(@target) @wave_sized_workgroup_memory_roundtrip_lane_cast_b32(
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_roundtrip_lane_cast_b32() asm {
+low.kernel.def target<amdgpu.gfx11.generic.core> workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_roundtrip_lane_cast_b32() asm {
   %lane_index = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %12 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
   %stored_value = v_mov_b32 1
@@ -334,9 +316,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @wave_sized_workgroup_memory_select_same_lane_b32() {
+kernel.def @wave_sized_workgroup_memory_select_same_lane_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -357,7 +337,7 @@ kernel.def target(@target) @wave_sized_workgroup_memory_select_same_lane_b32() {
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_select_same_lane_b32() asm {
+low.kernel.def target<amdgpu.gfx11.generic.core> workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_select_same_lane_b32() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %13 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
   %stored_value = v_mov_b32 1
@@ -370,9 +350,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @wave_sized_workgroup_memory_select_scaled_lane_b32() {
+kernel.def @wave_sized_workgroup_memory_select_scaled_lane_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -395,7 +373,7 @@ kernel.def target(@target) @wave_sized_workgroup_memory_select_scaled_lane_b32()
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_select_scaled_lane_b32() asm {
+low.kernel.def target<amdgpu.gfx11.generic.core> workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_select_scaled_lane_b32() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %17 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
   %scaled_lane = v_lshlrev_b32_lit %lane, 1
@@ -411,9 +389,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @wave_sized_workgroup_memory_guarded_lane_store_b32() {
+kernel.def @wave_sized_workgroup_memory_guarded_lane_store_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -437,7 +413,7 @@ kernel.def target(@target) @wave_sized_workgroup_memory_guarded_lane_store_b32()
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_guarded_lane_store_b32() asm {
+low.kernel.def target<amdgpu.gfx11.generic.core> workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_guarded_lane_store_b32() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %14 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
   %initial = v_mov_b32 0
@@ -461,9 +437,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @wave_sized_workgroup_memory_guarded_lane_load_b32() {
+kernel.def @wave_sized_workgroup_memory_guarded_lane_load_b32() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -485,7 +459,7 @@ kernel.def target(@target) @wave_sized_workgroup_memory_guarded_lane_load_b32() 
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_guarded_lane_load_b32() asm {
+low.kernel.def target<amdgpu.gfx11.generic.core> workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_guarded_lane_load_b32() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %13 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
   %stored_value = v_mov_b32 1

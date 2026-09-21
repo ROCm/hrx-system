@@ -174,16 +174,13 @@ TEST_F(TemplateSyncTest, PreservesMatchingTargetEvidenceAndDirectives) {
 TEST_F(TemplateSyncTest, ExcludesExactCasesAndPreservesRemainingEvidence) {
   const char* names[] = {"alpha", "beta", "gamma"};
   const char* cases[] = {
-      "func.decl @target()\n"
-      "func.def target(@target) @alpha() {\n}\n"
+      "func.def @alpha() {\n}\n"
       "\n// ----\nalpha evidence\n\n",
       "// REQUIRES: fake-target\n"
       "// ERROR@+1: \"unsupported\"\n"
-      "func.decl @target()\n"
-      "func.def target(@target) @beta() {\n}\n"
+      "func.def @beta() {\n}\n"
       "\n// ----\nbeta evidence\n\n",
-      "func.decl @target()\n"
-      "func.def target(@target) @gamma() {\n}\n"
+      "func.def @gamma() {\n}\n"
       "\n// ----\ngamma evidence\n\n",
   };
   const char* template_source =
@@ -229,8 +226,8 @@ TEST_F(TemplateSyncTest, ExcludesExactCasesAndPreservesRemainingEvidence) {
         Build(expected.c_str(), extended_template.c_str(), &result, &changed));
     EXPECT_TRUE(changed);
     EXPECT_EQ(result, expected +
-                          "// ====\n\nfunc.decl @target()\n"
-                          "func.def target(@target) @delta() {\n}\n");
+                          "// ====\n\n"
+                          "func.def @delta() {\n}\n");
   }
 }
 
@@ -365,7 +362,7 @@ TEST_F(TemplateSyncTest, PreservesTargetAnnotationsAtAnchoredInputLines) {
             std::string::npos);
 }
 
-TEST_F(TemplateSyncTest, PreservesAnnotationsOnBoundDefinition) {
+TEST_F(TemplateSyncTest, PreservesAnnotationsOnSourceDefinition) {
   const char* template_source =
       "// RUN: roundtrip\n"
       "\n"
@@ -375,12 +372,11 @@ TEST_F(TemplateSyncTest, PreservesAnnotationsOnBoundDefinition) {
     std::string target_source =
         "// TEMPLATE: loom/src/loom/test/corpus/source_low/example.loom-test\n"
         "// RUN: emit source-low output=low\n"
-        "\n"
-        "func.decl @target()\n";
+        "\n";
     if (!follows_definition) {
       target_source += "// ERROR@+1: TARGET/033 {actual_type=\"i64\"}\n";
     }
-    target_source += "func.def target(@target) @entry(%value: i64) {\n";
+    target_source += "func.def @entry(%value: i64) {\n";
     if (follows_definition) {
       target_source += "// ERROR@-1: TARGET/033 {actual_type=\"i64\"}\n";
     }
@@ -394,66 +390,6 @@ TEST_F(TemplateSyncTest, PreservesAnnotationsOnBoundDefinition) {
     EXPECT_FALSE(changed);
     EXPECT_EQ(result, target_source);
   }
-}
-
-TEST_F(TemplateSyncTest, PreservesScopedDefinitionOverlay) {
-  const char* template_source =
-      "pipeline.def @entry() launch() {\n"
-      "  pipeline.return\n"
-      "}\n";
-  const char* target_source =
-      "// TEMPLATE: loom/src/loom/test/corpus/pipeline/example.loom-test\n"
-      "// RUN: roundtrip\n"
-      "\n"
-      "func.decl @target()\n"
-      "pipeline.def<kernel> public retain target(@target) @entry() launch() {\n"
-      "  pipeline.return\n"
-      "}\n";
-
-  std::string result;
-  bool changed = true;
-  IREE_ASSERT_OK(Build(target_source, template_source, &result, &changed));
-  EXPECT_FALSE(changed);
-  EXPECT_EQ(result, target_source);
-}
-
-TEST_F(TemplateSyncTest, KeepsPreludeAnnotationsLocalToTheirCase) {
-  const char* target_source =
-      "// TEMPLATE: loom/src/loom/test/corpus/source_low/example.loom-test\n"
-      "// RUN: emit source-low output=low\n"
-      "\n"
-      "// REMARK@+1: \"target declaration\"\n"
-      "func.decl @target()\n"
-      "// ERROR@+1: TARGET/033 {actual_type=\"i64\"}\n"
-      "func.def target(@target) @entry(%value: i64) {\n"
-      "}\n";
-  const char* template_source =
-      "// RUN: roundtrip\n"
-      "\n"
-      "func.def @entry(%value: i64) {\n"
-      "}\n"
-      "\n"
-      "// ====\n"
-      "\n"
-      "func.def @new_entry() {\n"
-      "}\n";
-
-  std::string first_result;
-  bool changed = false;
-  IREE_ASSERT_OK(
-      Build(target_source, template_source, &first_result, &changed));
-  EXPECT_TRUE(changed);
-  EXPECT_EQ(first_result, std::string(target_source) +
-                              "\n// ====\n\n"
-                              "func.decl @target()\n"
-                              "func.def target(@target) @new_entry() {\n"
-                              "}\n");
-
-  std::string second_result;
-  IREE_ASSERT_OK(
-      Build(first_result.c_str(), template_source, &second_result, &changed));
-  EXPECT_FALSE(changed);
-  EXPECT_EQ(second_result, first_result);
 }
 
 TEST_F(TemplateSyncTest, RejectsAnnotationOnChangedSignature) {
@@ -476,294 +412,32 @@ TEST_F(TemplateSyncTest, RejectsAnnotationOnChangedSignature) {
             &result, &changed));
 }
 
-TEST_F(TemplateSyncTest, PreservesTargetDeclarationOverlay) {
-  std::string result;
-  bool changed = false;
-  IREE_ASSERT_OK(Build(
-      "// TEMPLATE: loom/src/loom/test/corpus/source_low/example.loom-test\n"
-      "// RUN: emit source-low output=low\n"
-      "\n"
-      "func.decl @target()\n"
-      "kernel.def target(@target) @entry() {\n"
-      "  %c1 = index.constant 1 : index\n"
-      "  kernel.launch.config workgroups(%c1, %c1, %c1) "
-      "workgroup_size(%c1, %c1, %c1) : index\n"
-      "} launch() {\n"
-      "  kernel.return\n"
-      "}\n"
-      "\n"
-      "// ----\n"
-      "old target evidence\n",
-      "// RUN: roundtrip\n"
-      "\n"
-      "kernel.def @entry() {\n"
-      "  %c1 = index.constant 1 : index\n"
-      "  kernel.launch.config workgroups(%c1, %c1, %c1) "
-      "workgroup_size(%c1, %c1, %c1) : index\n"
-      "} launch() {\n"
-      "  %id = kernel.workgroup.id<x> : index\n"
-      "  kernel.return\n"
-      "}\n",
-      &result, &changed));
-
-  EXPECT_TRUE(changed);
-  EXPECT_NE(result.find("func.decl @target()\n"
-                        "kernel.def target(@target) @entry() {\n"
-                        "  %c1 = index.constant 1 : index\n"
-                        "  kernel.launch.config workgroups(%c1, %c1, %c1) "
-                        "workgroup_size(%c1, %c1, %c1) : index\n"
-                        "} launch() {\n"
-                        "  %id = kernel.workgroup.id<x> : index\n"
-                        "  kernel.return\n"),
-            std::string::npos);
-  EXPECT_NE(result.find("old target evidence\n"), std::string::npos);
-}
-
-TEST_F(TemplateSyncTest, PreservesFuncTargetDeclarationOverlay) {
-  std::string result;
-  bool changed = false;
-  IREE_ASSERT_OK(Build(
-      "// TEMPLATE: loom/src/loom/test/corpus/source_low/example.loom-test\n"
-      "// RUN: emit source-low output=low\n"
-      "\n"
-      "func.decl @target()\n"
-      "func.def target(@target) @entry(%old_value: i32) {\n"
-      "}\n"
-      "\n"
-      "// ----\n"
-      "old target evidence\n",
-      "// RUN: roundtrip\n"
-      "\n"
-      "func.def @entry(%value: i32) {\n"
-      "  %zero = scalar.constant 0 : i32\n"
-      "}\n",
-      &result, &changed));
-
-  EXPECT_TRUE(changed);
-  EXPECT_NE(result.find("func.decl @target()\n"
-                        "func.def target(@target) @entry(%value: i32) {\n"
-                        "  %zero = scalar.constant 0 : i32\n"),
-            std::string::npos);
-  EXPECT_NE(result.find("old target evidence\n"), std::string::npos);
-}
-
-TEST_F(TemplateSyncTest, AppliesDefaultOverlayToNewTargetCases) {
-  std::string result;
-  bool changed = false;
-  IREE_ASSERT_OK(Build(
-      "// TEMPLATE: loom/src/loom/test/corpus/source_low/example.loom-test\n"
-      "// RUN: emit source-low output=low\n"
-      "\n"
-      "func.decl @target()\n"
-      "func.def target(@target) @alpha() {\n"
-      "}\n"
-      "\n"
-      "// ----\n"
-      "old target evidence\n"
-      "\n"
-      "// ====\n"
-      "\n"
-      "func.def @beta() {\n"
-      "}\n",
-      "// RUN: roundtrip\n"
-      "\n"
-      "func.def @alpha() {\n"
-      "}\n"
-      "\n"
-      "// ====\n"
-      "\n"
-      "func.def @beta() {\n"
-      "}\n",
-      &result, &changed));
-
-  EXPECT_TRUE(changed);
-  EXPECT_NE(result.find("func.decl @target()\n"
-                        "func.def target(@target) @alpha() {\n"),
-            std::string::npos);
-  EXPECT_NE(result.find("func.decl @target()\n"
-                        "func.def target(@target) @beta() {\n"),
-            std::string::npos);
-  EXPECT_NE(result.find("old target evidence\n"), std::string::npos);
-}
-
-TEST_F(TemplateSyncTest, PreservesMaterializedTemplatePreludeOnce) {
-  const char* target_source =
-      "// TEMPLATE: loom/src/loom/test/corpus/source_low/example.loom-test\n"
-      "// RUN: emit source-low output=low\n"
-      "\n"
-      "func.decl @target()\n"
-      "func.decl @shared()\n"
-      "func.def target(@target) @entry() {\n"
-      "}\n";
+TEST_F(TemplateSyncTest, NewCasesHaveOnlyTemplateSource) {
+  const char* preamble =
+      "// TEMPLATE: corpus.loom-test\n"
+      "// RUN: emit source-low target=vm:core output=low\n\n";
+  std::string target_source =
+      std::string(preamble) +
+      "func.decl @local_target()\n"
+      "func.def public retain target(@local_target) @alpha() {\n}\n"
+      "\n// ----\nold target evidence\n";
   const char* template_source =
-      "// RUN: roundtrip\n"
-      "\n"
-      "func.decl @shared()\n"
-      "func.def @entry() {\n"
-      "}\n";
-
+      "func.def @alpha() {\n}\n"
+      "\n// ====\n\nfunc.def @beta() {\n}\n";
   std::string result;
-  bool changed = true;
-  IREE_ASSERT_OK(Build(target_source, template_source, &result, &changed));
-
-  EXPECT_FALSE(changed);
-  EXPECT_EQ(result, target_source);
-}
-
-TEST_F(TemplateSyncTest, ReplacesSatisfiedTemplateDeclaration) {
-  const char* target_source =
-      "// TEMPLATE: loom/src/loom/test/corpus/source_low/example.loom-test\n"
-      "// RUN: emit source-low output=low\n"
-      "\n"
-      "config.def @batch_size = 8 : index\n"
-      "func.def @entry() {\n"
-      "}\n";
-  const char* template_source =
-      "// RUN: roundtrip\n"
-      "\n"
-      "config.decl @batch_size : %value: index where "
-      "[range(%value, 1, 16)]\n"
-      "func.def @entry() {\n"
-      "  %value = index.constant 0 : index\n"
-      "}\n";
-
-  std::string first_result;
-  bool first_changed = false;
+  bool changed = false;
   IREE_ASSERT_OK(
-      Build(target_source, template_source, &first_result, &first_changed));
-  EXPECT_TRUE(first_changed);
-  EXPECT_NE(first_result.find("config.def @batch_size = 8 : index\n"),
-            std::string::npos);
-  EXPECT_EQ(first_result.find("config.decl @batch_size"), std::string::npos);
-  EXPECT_NE(first_result.find("  %value = index.constant 0 : index\n"),
-            std::string::npos);
-
-  std::string second_result;
-  bool second_changed = true;
-  IREE_ASSERT_OK(Build(first_result.c_str(), template_source, &second_result,
-                       &second_changed));
-  EXPECT_FALSE(second_changed);
-  EXPECT_EQ(second_result, first_result);
-}
-
-TEST_F(TemplateSyncTest, KeepsPartiallySatisfiedTemplatePreludeOnce) {
-  const char* target_source =
-      "// TEMPLATE: loom/src/loom/test/corpus/source_low/example.loom-test\n"
-      "// RUN: roundtrip\n"
-      "\n"
-      "config.def @batch_size = 8 : index\n"
-      "func.decl @shared()\n"
-      "func.def @entry() {\n"
-      "}\n";
-  const char* template_source =
-      "config.decl @batch_size : %value: index where "
-      "[range(%value, 1, 16)]\n"
-      "func.decl @shared()\n"
-      "func.def @entry() {\n"
-      "}\n";
-
-  std::string result;
-  bool changed = true;
-  IREE_ASSERT_OK(Build(target_source, template_source, &result, &changed));
-  EXPECT_FALSE(changed);
-  EXPECT_EQ(result, target_source);
-}
-
-TEST_F(TemplateSyncTest, RejectsIncompatibleTemplateDeclaration) {
-  std::string result;
-  bool changed = false;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      Build("// TEMPLATE: "
-            "loom/src/loom/test/corpus/source_low/example.loom-test\n"
-            "// RUN: emit source-low output=low\n"
-            "\n"
-            "config.def @batch_size = 32 : index\n"
-            "func.def @entry() {\n"
-            "}\n",
-            "// RUN: roundtrip\n"
-            "\n"
-            "config.decl @batch_size : %value: index where "
-            "[range(%value, 1, 16)]\n"
-            "func.def @entry() {\n"
-            "}\n",
-            &result, &changed));
-}
-
-TEST_F(TemplateSyncTest, RepairsRepeatedMaterializedTemplatePrelude) {
-  const char* target_source =
-      "// TEMPLATE: loom/src/loom/test/corpus/source_low/example.loom-test\n"
-      "// RUN: emit source-low output=low\n"
-      "\n"
-      "func.decl @target()\n"
-      "func.decl @shared()\n"
-      "func.decl @shared()\n"
-      "func.decl @shared()\n"
-      "func.def target(@target) @entry() {\n"
-      "}\n";
-  const char* expected_source =
-      "// TEMPLATE: loom/src/loom/test/corpus/source_low/example.loom-test\n"
-      "// RUN: emit source-low output=low\n"
-      "\n"
-      "func.decl @target()\n"
-      "func.decl @shared()\n"
-      "func.def target(@target) @entry() {\n"
-      "}\n";
-  const char* template_source =
-      "// RUN: roundtrip\n"
-      "\n"
-      "func.decl @shared()\n"
-      "func.def @entry() {\n"
-      "}\n";
-
-  std::string result;
-  bool changed = false;
-  IREE_ASSERT_OK(Build(target_source, template_source, &result, &changed));
-
+      Build(target_source.c_str(), template_source, &result, &changed));
   EXPECT_TRUE(changed);
-  EXPECT_EQ(result, expected_source);
-}
-
-TEST_F(TemplateSyncTest, KeepsDistinctTargetPreludeForNewCases) {
-  const char* target_source =
-      "// TEMPLATE: loom/src/loom/test/corpus/source_low/example.loom-test\n"
-      "// RUN: emit source-low output=low\n"
-      "\n"
-      "func.decl @target()\n"
-      "func.decl @target_helper()\n"
-      "func.decl @shared()\n"
-      "func.def target(@target) @alpha() {\n"
-      "}\n";
-  const char* template_source =
-      "// RUN: roundtrip\n"
-      "\n"
-      "func.decl @shared()\n"
-      "func.def @alpha() {\n"
-      "}\n"
-      "\n"
-      "// ====\n"
-      "\n"
-      "func.decl @shared()\n"
-      "func.def @beta() {\n"
-      "}\n";
-
-  std::string first_result;
-  bool first_changed = false;
-  IREE_ASSERT_OK(
-      Build(target_source, template_source, &first_result, &first_changed));
-  EXPECT_TRUE(first_changed);
-  EXPECT_NE(first_result.find("func.decl @target()\n"
-                              "func.decl @target_helper()\n"
-                              "func.decl @shared()\n"
-                              "func.def target(@target) @beta()"),
-            std::string::npos);
-
+  EXPECT_EQ(result, std::string(preamble) +
+                        "func.def @alpha() {\n}\n"
+                        "\n// ----\nold target evidence\n"
+                        "\n// ====\n\nfunc.def @beta() {\n}\n");
   std::string second_result;
-  bool second_changed = true;
-  IREE_ASSERT_OK(Build(first_result.c_str(), template_source, &second_result,
-                       &second_changed));
-  EXPECT_FALSE(second_changed);
-  EXPECT_EQ(second_result, first_result);
+  IREE_ASSERT_OK(
+      Build(result.c_str(), template_source, &second_result, &changed));
+  EXPECT_FALSE(changed);
+  EXPECT_EQ(second_result, result);
 }
 
 TEST_F(TemplateSyncTest, PreservesAnnotationLineOccurrence) {
@@ -860,12 +534,11 @@ TEST_F(TemplateSyncTest, UpdatesHelpersAroundPublicEntry) {
   IREE_ASSERT_OK(
       Build(target_source, template_source, &first_result, &first_changed));
   EXPECT_TRUE(first_changed);
-  EXPECT_NE(first_result.find("func.def public target(@target) @entry"),
-            std::string::npos);
+  EXPECT_NE(first_result.find("func.def public @entry"), std::string::npos);
   EXPECT_NE(first_result.find("func.call @twice(%value)"), std::string::npos);
   EXPECT_EQ(first_result.find("func.def @helper"),
             first_result.rfind("func.def @helper"));
-  EXPECT_NE(first_result.find("func.def public target(@target) @next_entry"),
+  EXPECT_NE(first_result.find("func.def public @next_entry"),
             std::string::npos);
   EXPECT_NE(first_result.find("retained target expectation"),
             std::string::npos);
@@ -875,6 +548,33 @@ TEST_F(TemplateSyncTest, UpdatesHelpersAroundPublicEntry) {
   IREE_ASSERT_OK(Build(first_result.c_str(), template_source, &second_result,
                        &second_changed));
   EXPECT_FALSE(second_changed);
+  EXPECT_EQ(second_result, first_result);
+}
+
+TEST_F(TemplateSyncTest, NewHelperCasePreservesSourceVisibility) {
+  const char* target_source =
+      "// TEMPLATE: loom/src/loom/test/corpus/source_low/callables.loom-test\n"
+      "// RUN: emit source-low output=module\n\n"
+      "func.decl @target()\n\n"
+      "func.def target(@target) @first() {\n  func.return\n}\n";
+  const char* template_source =
+      "// RUN: roundtrip\n\n"
+      "func.def @first() {\n  func.return\n}\n"
+      "\n// ====\n\n"
+      "func.def @helper() {\n  func.return\n}\n\n"
+      "func.def public @entry() {\n"
+      "  func.call @helper() : () -> ()\n"
+      "  func.return\n}\n";
+  std::string first_result;
+  bool changed = false;
+  IREE_ASSERT_OK(
+      Build(target_source, template_source, &first_result, &changed));
+  EXPECT_TRUE(changed);
+  EXPECT_NE(first_result.find("func.def public @entry"), std::string::npos);
+  std::string second_result;
+  IREE_ASSERT_OK(
+      Build(first_result.c_str(), template_source, &second_result, &changed));
+  EXPECT_FALSE(changed);
   EXPECT_EQ(second_result, first_result);
 }
 
@@ -895,23 +595,20 @@ TEST_F(TemplateSyncTest, RejectsAmbiguousMultiFunctionCases) {
   }
 }
 
-TEST_F(TemplateSyncTest, RejectsTargetCaseRunDirectives) {
+TEST_F(TemplateSyncTest, PreservesCaseCompileOptions) {
+  const char* target_source =
+      "// TEMPLATE: corpus.loom-test\n"
+      "// RUN: emit source-low target=spirv:vulkan1.3+bda output=low\n\n"
+      "// REQUIRES: fake-target\n"
+      "// RUN: emit source-low target=spirv:vulkan1.3+bda+hal output=low\n"
+      "// XFAIL: pending target support\n"
+      "func.def @alpha() {\n}\n";
+  const char* template_source = "// RUN: roundtrip\n\nfunc.def @alpha() {\n}\n";
   std::string result;
-  bool changed = false;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      Build("// TEMPLATE: "
-            "loom/src/loom/test/corpus/vector/arithmetic.loom-test\n"
-            "// RUN: emit source-low output=module\n"
-            "\n"
-            "// RUN: verify\n"
-            "func.def @alpha() {\n"
-            "}\n",
-            "// RUN: roundtrip\n"
-            "\n"
-            "func.def @alpha() {\n"
-            "}\n",
-            &result, &changed));
+  bool changed = true;
+  IREE_ASSERT_OK(Build(target_source, template_source, &result, &changed));
+  EXPECT_FALSE(changed);
+  EXPECT_EQ(result, target_source);
 }
 
 TEST_F(TemplateSyncTest, RejectsEmptyTemplate) {
@@ -945,6 +642,90 @@ TEST_F(TemplateSyncTest, RejectsDuplicateTemplateFunctions) {
             "func.def @alpha() {\n"
             "}\n",
             &result, &changed));
+}
+
+TEST_F(TemplateSyncTest, SourceOwnsDeclarationModifiersAndSignatures) {
+  const char* preamble =
+      "// TEMPLATE: corpus.loom-test\n"
+      "// RUN: emit source-low target=vm:core output=low\n\n";
+  const char* sources[] = {
+      "func.def @entry() {\n  func.return\n}\n",
+      "func.def public retain pure noinline @entry(\n"
+      "    %integer: i32, %real: f32) -> (i32, f32) {\n"
+      "  // Preserve both returned values and their distinct types.\n"
+      "  func.return %integer, %real : i32, f32\n}\n",
+      "func.def @entry() {\n  func.return\n}\n",
+  };
+  std::string result = std::string(preamble) + sources[0];
+  for (const char* source : sources) {
+    SCOPED_TRACE(source);
+    std::string previous = result;
+    bool changed = false;
+    IREE_ASSERT_OK(Build(previous.c_str(), source, &result, &changed));
+    EXPECT_EQ(result, std::string(preamble) + source);
+    std::string repeated;
+    IREE_ASSERT_OK(Build(result.c_str(), source, &repeated, &changed));
+    EXPECT_FALSE(changed);
+    EXPECT_EQ(repeated, result);
+  }
+}
+
+TEST_F(TemplateSyncTest, CopiesScopedDefinitionsAndSourceComments) {
+  const char* preamble = "// TEMPLATE: corpus.loom-test\n// RUN: roundtrip\n\n";
+  std::string target_source =
+      std::string(preamble) +
+      "func.decl @local_target()\n"
+      "pipeline.def retain target(@local_target) @entry() launch() {\n"
+      "  pipeline.return\n}\n";
+  const char* template_source =
+      "// A scoped pipeline owns this source contract.\n"
+      "pipeline.def <kernel> public retain @entry() launch() {\n"
+      "  // The body is copied without rewriting its header.\n"
+      "  pipeline.return\n}\n";
+  std::string result;
+  bool changed = false;
+  IREE_ASSERT_OK(
+      Build(target_source.c_str(), template_source, &result, &changed));
+  EXPECT_TRUE(changed);
+  EXPECT_EQ(result, std::string(preamble) + template_source);
+  std::string repeated;
+  IREE_ASSERT_OK(Build(result.c_str(), template_source, &repeated, &changed));
+  EXPECT_FALSE(changed);
+  EXPECT_EQ(repeated, result);
+}
+
+TEST_F(TemplateSyncTest, SharedDeclarationsRemainDeclarations) {
+  const char* preamble = "// TEMPLATE: corpus.loom-test\n// RUN: roundtrip\n\n";
+  std::string target_source = std::string(preamble) +
+                              "config.def @batch_size = 32 : index\n"
+                              "func.decl @local_helper()\n"
+                              "func.def @entry() {\n}\n";
+  const char* template_source =
+      "config.decl @batch_size : %value: index where [range(%value, 1, 16)]\n"
+      "func.decl @shared_helper()\n"
+      "func.def @entry() {\n}\n";
+  std::string result;
+  bool changed = false;
+  IREE_ASSERT_OK(
+      Build(target_source.c_str(), template_source, &result, &changed));
+  EXPECT_TRUE(changed);
+  EXPECT_EQ(result, std::string(preamble) + template_source);
+  std::string repeated;
+  IREE_ASSERT_OK(Build(result.c_str(), template_source, &repeated, &changed));
+  EXPECT_FALSE(changed);
+  EXPECT_EQ(repeated, result);
+}
+
+TEST_F(TemplateSyncTest, RejectsAnnotationOnRemovedSourceLine) {
+  std::string result;
+  bool changed = false;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      Build("// TEMPLATE: corpus.loom-test\n// RUN: roundtrip\n\n"
+            "// REMARK@+1: \"local declaration\"\n"
+            "func.decl @local_target()\n"
+            "func.def @entry() {\n}\n",
+            "func.def @entry() {\n}\n", &result, &changed));
 }
 
 }  // namespace

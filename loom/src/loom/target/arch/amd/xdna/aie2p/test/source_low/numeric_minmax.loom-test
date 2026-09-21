@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_minmax.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_f32_minnum_maxnum(%lhs: f32, %rhs: f32) -> (f32) {
+func.def @scalar_f32_minnum_maxnum(%lhs: f32, %rhs: f32) -> (f32) {
   %min = scalar.minnumf %lhs, %rhs : f32
   %max = scalar.maxnumf %lhs, %rhs : f32
   %sum = scalar.addf %min, %max : f32
@@ -11,7 +9,7 @@ func.def target(@target) @scalar_f32_minnum_maxnum(%lhs: f32, %rhs: f32) -> (f32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f32_minnum_maxnum(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_f32_minnum_maxnum(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %9 = mov.i32 2147483647
   %10 = mov.i32 -2147483648
   %11 = mov.short -1
@@ -80,9 +78,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @vector_f32_minnum_maxnum(%lhs: vector<2xf32>, %rhs: vector<2xf32>) -> (vector<2xf32>) {
+func.def @vector_f32_minnum_maxnum(%lhs: vector<2xf32>, %rhs: vector<2xf32>) -> (vector<2xf32>) {
   %min = vector.minnumf %lhs, %rhs : vector<2xf32>
   %max = vector.maxnumf %lhs, %rhs : vector<2xf32>
   %sum = vector.addf %min, %max : vector<2xf32>
@@ -90,7 +86,7 @@ func.def target(@target) @vector_f32_minnum_maxnum(%lhs: vector<2xf32>, %rhs: ve
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f32_minnum_maxnum(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @vector_f32_minnum_maxnum(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %27 = vextract.32.imm %lhs, 0
   %28 = vextract.32.imm %rhs, 0
   %29 = mov.i32 2147483647
@@ -212,9 +208,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_f32_minimum_maximum(%lhs: f32, %rhs: f32) -> (f32) {
+func.def @scalar_f32_minimum_maximum(%lhs: f32, %rhs: f32) -> (f32) {
   %min = scalar.minimumf %lhs, %rhs : f32
   %max = scalar.maximumf %lhs, %rhs : f32
   %sum = scalar.addf %min, %max : f32
@@ -222,7 +216,7 @@ func.def target(@target) @scalar_f32_minimum_maximum(%lhs: f32, %rhs: f32) -> (f
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f32_minimum_maximum(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_f32_minimum_maximum(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %9 = mov.i32 2147483647
   %10 = mov.i32 -2147483648
   %11 = mov.short -1
@@ -288,9 +282,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @vector_f32_minimum_maximum(%lhs: vector<2xf32>, %rhs: vector<2xf32>) -> (vector<2xf32>) {
+func.def @vector_f32_minimum_maximum(%lhs: vector<2xf32>, %rhs: vector<2xf32>) -> (vector<2xf32>) {
   %min = vector.minimumf %lhs, %rhs : vector<2xf32>
   %max = vector.maximumf %lhs, %rhs : vector<2xf32>
   %sum = vector.addf %min, %max : vector<2xf32>
@@ -298,7 +290,7 @@ func.def target(@target) @vector_f32_minimum_maximum(%lhs: vector<2xf32>, %rhs: 
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f32_minimum_maximum(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @vector_f32_minimum_maximum(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %27 = vextract.32.imm %lhs, 0
   %28 = vextract.32.imm %rhs, 0
   %29 = mov.i32 2147483647
@@ -414,9 +406,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_f32_clampf_number(%input: f32) -> (f32) {
+func.def @scalar_f32_clampf_number(%input: f32) -> (f32) {
   %lower = scalar.constant -1.0 : f32
   %upper = scalar.constant 1.0 : f32
   %result = scalar.clampf<number, nnan|nsz> %input, %lower, %upper : f32
@@ -424,7 +414,7 @@ func.def target(@target) @scalar_f32_clampf_number(%input: f32) -> (f32) {
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f32_clampf_number(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_f32_clampf_number(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %lower = mov.i32 -1082130432
   %upper = mov.i32 1065353216
   %9 = mov.i32 2147483647
@@ -495,9 +485,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @vector_f32_clampf_number(%input: vector<2xf32>) -> (vector<2xf32>) {
+func.def @vector_f32_clampf_number(%input: vector<2xf32>) -> (vector<2xf32>) {
   %lower = vector.constant -1.0 : vector<2xf32>
   %upper = vector.constant 1.0 : vector<2xf32>
   %result = vector.clampf<number, nnan|nsz> %input, %lower, %upper : vector<2xf32>
@@ -505,7 +493,7 @@ func.def target(@target) @vector_f32_clampf_number(%input: vector<2xf32>) -> (ve
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f32_clampf_number(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @vector_f32_clampf_number(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %18 = vextract.32.imm %input, 0
   %19 = mov.i32 -1082130432
   %20 = mov.i32 1065353216
@@ -630,15 +618,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_f32_clampf_ordered(%input: f32, %lower: f32, %upper: f32) -> (f32) {
+func.def @scalar_f32_clampf_ordered(%input: f32, %lower: f32, %upper: f32) -> (f32) {
   %result = scalar.clampf<ordered> %input, %lower, %upper : f32
   func.return %result : f32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f32_clampf_ordered(%input: reg<aie2p.er>, %lower: reg<aie2p.er>, %upper: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_f32_clampf_ordered(%input: reg<aie2p.er>, %lower: reg<aie2p.er>, %upper: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %9 = mov.i32 2147483647
   %10 = mov.i32 -2147483648
   %11 = mov.short -1
@@ -697,15 +683,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @vector_f32_clampf_ordered(%input: vector<2xf32>, %lower: vector<2xf32>, %upper: vector<2xf32>) -> (vector<2xf32>) {
+func.def @vector_f32_clampf_ordered(%input: vector<2xf32>, %lower: vector<2xf32>, %upper: vector<2xf32>) -> (vector<2xf32>) {
   %result = vector.clampf<ordered> %input, %lower, %upper : vector<2xf32>
   func.return %result : vector<2xf32>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f32_clampf_ordered(%input: reg<aie2p.vec256 x2>, %lower: reg<aie2p.vec256 x2>, %upper: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @vector_f32_clampf_ordered(%input: reg<aie2p.vec256 x2>, %lower: reg<aie2p.vec256 x2>, %upper: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %20 = vextract.32.imm %input, 0
   %21 = vextract.32.imm %lower, 0
   %22 = vextract.32.imm %upper, 0
@@ -821,15 +805,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_f32_clampf_ieee(%input: f32, %lower: f32, %upper: f32) -> (f32) {
+func.def @scalar_f32_clampf_ieee(%input: f32, %lower: f32, %upper: f32) -> (f32) {
   %result = scalar.clampf<ieee> %input, %lower, %upper : f32
   func.return %result : f32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f32_clampf_ieee(%input: reg<aie2p.er>, %lower: reg<aie2p.er>, %upper: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_f32_clampf_ieee(%input: reg<aie2p.er>, %lower: reg<aie2p.er>, %upper: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %9 = mov.i32 2147483647
   %10 = mov.i32 -2147483648
   %11 = mov.short -1
@@ -896,15 +878,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @vector_f32_clampf_ieee(%input: vector<2xf32>, %lower: vector<2xf32>, %upper: vector<2xf32>) -> (vector<2xf32>) {
+func.def @vector_f32_clampf_ieee(%input: vector<2xf32>, %lower: vector<2xf32>, %upper: vector<2xf32>) -> (vector<2xf32>) {
   %result = vector.clampf<ieee> %input, %lower, %upper : vector<2xf32>
   func.return %result : vector<2xf32>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f32_clampf_ieee(%input: reg<aie2p.vec256 x2>, %lower: reg<aie2p.vec256 x2>, %upper: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @vector_f32_clampf_ieee(%input: reg<aie2p.vec256 x2>, %lower: reg<aie2p.vec256 x2>, %upper: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %20 = vextract.32.imm %input, 0
   %21 = vextract.32.imm %lower, 0
   %22 = vextract.32.imm %upper, 0
@@ -1037,9 +1017,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @index_minmax_sgpr(%lhs0: index, %rhs0: index) -> (index) {
+func.def @index_minmax_sgpr(%lhs0: index, %rhs0: index) -> (index) {
   %lhs = index.assume %lhs0 [range(%lhs0, -1024, 1024)] : index
   %rhs = index.assume %rhs0 [range(%rhs0, -1024, 1024)] : index
   %min = index.min %lhs, %rhs : index
@@ -1049,7 +1027,7 @@ func.def target(@target) @index_minmax_sgpr(%lhs0: index, %rhs0: index) -> (inde
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_minmax_sgpr(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @index_minmax_sgpr(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %11 = lt.select %lhs, %rhs
   %min = sel.nez %lhs, %rhs, %11
   %13 = lt.select %rhs, %lhs
@@ -1060,16 +1038,14 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_mi
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scf_select_sgpr(%lhs: i32, %rhs: i32, %a: i32, %b: i32) -> (i32) {
+func.def @scf_select_sgpr(%lhs: i32, %rhs: i32, %a: i32, %b: i32) -> (i32) {
   %cond = scalar.cmpi slt, %lhs, %rhs : i32
   %selected = scf.select %cond, %a, %b : i32
   func.return %selected : i32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_select_sgpr(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %a: reg<aie2p.er>, %b: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scf_select_sgpr(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %a: reg<aie2p.er>, %b: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %cond = lt %lhs, %rhs
   %13 = copy %cond : reg<aie2p.er> -> reg<aie2p.mr27_select>
   %selected = sel.nez %a, %b, %13
@@ -1078,16 +1054,14 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_sele
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scf_select_i64_sgpr(%lhs: i32, %rhs: i32, %a: i64, %b: i64) -> (i64) {
+func.def @scf_select_i64_sgpr(%lhs: i32, %rhs: i32, %a: i64, %b: i64) -> (i64) {
   %cond = scalar.cmpi slt, %lhs, %rhs : i32
   %selected = scf.select %cond, %a, %b : i64
   func.return %selected : i64
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_select_i64_sgpr(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %a: reg<aie2p.er x2>, %b: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scf_select_i64_sgpr(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %a: reg<aie2p.er x2>, %b: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
   %cond = lt %lhs, %rhs
   %13 = slice %a[0] : reg<aie2p.er x2> -> reg<aie2p.er>
   %14 = slice %a[1] : reg<aie2p.er x2> -> reg<aie2p.er>
@@ -1103,9 +1077,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_sele
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scf_select_q6_nibble_i8(%code: i32, %use_high: i32) -> (i8) {
+func.def @scf_select_q6_nibble_i8(%code: i32, %use_high: i32) -> (i8) {
   %low_selector = scalar.constant 0 : i32
   %nibble_shift = scalar.constant 4 : i32
   %mask = scalar.constant 15 : i32
@@ -1120,7 +1092,7 @@ func.def target(@target) @scf_select_q6_nibble_i8(%code: i32, %use_high: i32) ->
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_select_q6_nibble_i8(%code: reg<aie2p.er>, %use_high: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scf_select_q6_nibble_i8(%code: reg<aie2p.er>, %use_high: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %mask = mov.short 15
   %17 = mov.short -4
   %high_shifted = lshl %code, %17
@@ -1134,9 +1106,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_sele
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scf_select_scale_piece_i16(%packed: i32, %use_high: i32) -> (i16) {
+func.def @scf_select_scale_piece_i16(%packed: i32, %use_high: i32) -> (i16) {
   %low_selector = scalar.constant 0 : i32
   %halfword_shift = scalar.constant 16 : i32
   %low = scalar.trunci %packed : i32 to i16
@@ -1148,7 +1118,7 @@ func.def target(@target) @scf_select_scale_piece_i16(%packed: i32, %use_high: i3
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_select_scale_piece_i16(%low: reg<aie2p.er>, %use_high: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scf_select_scale_piece_i16(%low: reg<aie2p.er>, %use_high: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %13 = mov.short -16
   %high = lshl %low, %13
   %cond = nez %use_high
@@ -1159,16 +1129,14 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_sele
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scf_select_vgpr(%lhs: f32, %rhs: f32, %a: f32, %b: f32) -> (f32) {
+func.def @scf_select_vgpr(%lhs: f32, %rhs: f32, %a: f32, %b: f32) -> (f32) {
   %cond = scalar.cmpf olt, %lhs, %rhs : f32
   %selected = scf.select %cond, %a, %b : f32
   func.return %selected : f32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_select_vgpr(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %a: reg<aie2p.er>, %b: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scf_select_vgpr(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %a: reg<aie2p.er>, %b: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %12 = mov.i32 2147483647
   %13 = mov.i32 -2147483648
   %14 = mov.short -1
@@ -1203,9 +1171,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_sele
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scf_select_chained_vgpr_i32(%values: vector<2xi32>, %limit: i32, %fallback: i32) -> (i32) {
+func.def @scf_select_chained_vgpr_i32(%values: vector<2xi32>, %limit: i32, %fallback: i32) -> (i32) {
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
   %is_lane = scalar.cmpi slt, %lane, %limit : i32
   %selected = scf.select %is_lane, %lane, %fallback : i32
@@ -1215,7 +1181,7 @@ func.def target(@target) @scf_select_chained_vgpr_i32(%values: vector<2xi32>, %l
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_select_chained_vgpr_i32(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %fallback: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scf_select_chained_vgpr_i32(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %fallback: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %lane = vextract.32.imm %values, 0
   %is_lane = lt %lane, %limit
   %15 = copy %is_lane : reg<aie2p.er> -> reg<aie2p.mr27_select>
@@ -1228,9 +1194,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_sele
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scf_select_tail_zero_i32(%values: vector<2xi32>, %limit: i32) -> (i32) {
+func.def @scf_select_tail_zero_i32(%values: vector<2xi32>, %limit: i32) -> (i32) {
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
   %tail_fill = scalar.constant 0 : i32
   %cond = scalar.cmpi slt, %lane, %limit : i32
@@ -1239,7 +1203,7 @@ func.def target(@target) @scf_select_tail_zero_i32(%values: vector<2xi32>, %limi
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_select_tail_zero_i32(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scf_select_tail_zero_i32(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %lane = vextract.32.imm %values, 0
   %tail_fill = mov.short 0
   %cond = lt %lane, %limit
@@ -1250,9 +1214,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_sele
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scf_select_vgpr_i64(%values: vector<2xi32>, %limit: i32, %fallback: i32) -> (i64) {
+func.def @scf_select_vgpr_i64(%values: vector<2xi32>, %limit: i32, %fallback: i32) -> (i64) {
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
   %wide_lane = scalar.extsi %lane : i32 to i64
   %wide_fallback = scalar.extsi %fallback : i32 to i64
@@ -1262,7 +1224,7 @@ func.def target(@target) @scf_select_vgpr_i64(%values: vector<2xi32>, %limit: i3
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_select_vgpr_i64(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %fallback: reg<aie2p.er>) -> (reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scf_select_vgpr_i64(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %fallback: reg<aie2p.er>) -> (reg<aie2p.er x2>) asm {
   %lane = vextract.32.imm %values, 0
   %14 = mov.short -31
   %15 = ashl %lane, %14
@@ -1278,9 +1240,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_sele
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scf_select_vgpr_extui_i64(%values: vector<2xi32>, %limit: i32, %fallback: i32) -> (i64) {
+func.def @scf_select_vgpr_extui_i64(%values: vector<2xi32>, %limit: i32, %fallback: i32) -> (i64) {
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
   %wide_lane = scalar.extui %lane : i32 to i64
   %wide_fallback = scalar.extui %fallback : i32 to i64
@@ -1290,7 +1250,7 @@ func.def target(@target) @scf_select_vgpr_extui_i64(%values: vector<2xi32>, %lim
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_select_vgpr_extui_i64(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %fallback: reg<aie2p.er>) -> (reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scf_select_vgpr_extui_i64(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %fallback: reg<aie2p.er>) -> (reg<aie2p.er x2>) asm {
   %lane = vextract.32.imm %values, 0
   %14 = mov.short 0
   %cond = lt %lane, %limit
@@ -1304,9 +1264,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_sele
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scf_select_vector_extract_i64(%values: vector<2xi64>, %guards: vector<2xi32>, %limit: i32, %fallback: i64) -> (i64) {
+func.def @scf_select_vector_extract_i64(%values: vector<2xi64>, %guards: vector<2xi32>, %limit: i32, %fallback: i64) -> (i64) {
   %lane = vector.extract %guards[0] : vector<2xi32> -> i32
   %extracted = vector.extract %values[0] : vector<2xi64> -> i64
   %cond = scalar.cmpi slt, %lane, %limit : i32
@@ -1315,7 +1273,7 @@ func.def target(@target) @scf_select_vector_extract_i64(%values: vector<2xi64>, 
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_select_vector_extract_i64(%values: reg<aie2p.vec256 x2>, %guards: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %fallback: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scf_select_vector_extract_i64(%values: reg<aie2p.vec256 x2>, %guards: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %fallback: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
   %lane = vextract.32.imm %guards, 0
   %extracted = vextract.64.imm %values, 0
   %cond = lt %lane, %limit
@@ -1333,9 +1291,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_sele
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scf_select_i1_mask_condition(%values: vector<2xi32>, %limit: i32, %fallback_condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
+func.def @scf_select_i1_mask_condition(%values: vector<2xi32>, %limit: i32, %fallback_condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
   %lane_condition = scalar.cmpi slt, %lane, %limit : i32
   %selected_condition = scf.select %lane_condition, %lane_condition, %fallback_condition : i1
@@ -1344,7 +1300,7 @@ func.def target(@target) @scf_select_i1_mask_condition(%values: vector<2xi32>, %
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_select_i1_mask_condition(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %fallback_condition: reg<aie2p.er>, %true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scf_select_i1_mask_condition(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %fallback_condition: reg<aie2p.er>, %true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %lane = vextract.32.imm %values, 0
   %lane_condition = lt %lane, %limit
   %18 = copy %lane_condition : reg<aie2p.er> -> reg<aie2p.mr27_select>
@@ -1356,9 +1312,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_sele
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scf_select_i1_false_condition(%values: vector<2xi32>, %limit: i32, %upper: i32, %true_value: f32, %false_value: f32) -> (f32) {
+func.def @scf_select_i1_false_condition(%values: vector<2xi32>, %limit: i32, %upper: i32, %true_value: f32, %false_value: f32) -> (f32) {
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
   %lane_condition = scalar.cmpi slt, %lane, %limit : i32
   %inside_upper = scalar.cmpi slt, %lane, %upper : i32
@@ -1368,7 +1322,7 @@ func.def target(@target) @scf_select_i1_false_condition(%values: vector<2xi32>, 
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_select_i1_false_condition(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %upper: reg<aie2p.er>, %true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scf_select_i1_false_condition(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %upper: reg<aie2p.er>, %true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %lane = vextract.32.imm %values, 0
   %lane_condition = lt %lane, %limit
   %inside_upper = lt %lane, %upper
@@ -1381,9 +1335,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_sele
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scf_select_i1_assume_second_condition(%values: vector<2xi32>, %limit: i32, %upper: i32, %true_value: f32, %false_value: f32) -> (f32) {
+func.def @scf_select_i1_assume_second_condition(%values: vector<2xi32>, %limit: i32, %upper: i32, %true_value: f32, %false_value: f32) -> (f32) {
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
   %lane_condition = scalar.cmpi slt, %lane, %limit : i32
   %scalar_condition = scalar.cmpi slt, %limit, %upper : i32
@@ -1393,7 +1345,7 @@ func.def target(@target) @scf_select_i1_assume_second_condition(%values: vector<
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_select_i1_assume_second_condition(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %upper: reg<aie2p.er>, %true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scf_select_i1_assume_second_condition(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %upper: reg<aie2p.er>, %true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %checked_scalar_condition = lt %limit, %upper
   %21 = copy %checked_scalar_condition : reg<aie2p.er> -> reg<aie2p.mr27_select>
   %result = sel.nez %true_value, %false_value, %21
@@ -1402,9 +1354,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_sele
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scf_select_i1_true_false_constants(%values: vector<2xi32>, %limit: i32, %true_value: f32, %false_value: f32) -> (f32) {
+func.def @scf_select_i1_true_false_constants(%values: vector<2xi32>, %limit: i32, %true_value: f32, %false_value: f32) -> (f32) {
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
   %lane_condition = scalar.cmpi slt, %lane, %limit : i32
   %true = scalar.constant true : i1
@@ -1415,7 +1365,7 @@ func.def target(@target) @scf_select_i1_true_false_constants(%values: vector<2xi
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_select_i1_true_false_constants(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scf_select_i1_true_false_constants(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %lane = vextract.32.imm %values, 0
   %lane_condition = lt %lane, %limit
   %18 = copy %lane_condition : reg<aie2p.er> -> reg<aie2p.mr27_select>
@@ -1425,9 +1375,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_sele
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scf_select_i1_false_true_constants(%values: vector<2xi32>, %limit: i32, %true_value: f32, %false_value: f32) -> (f32) {
+func.def @scf_select_i1_false_true_constants(%values: vector<2xi32>, %limit: i32, %true_value: f32, %false_value: f32) -> (f32) {
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
   %lane_condition = scalar.cmpi slt, %lane, %limit : i32
   %false = scalar.constant false : i1
@@ -1438,7 +1386,7 @@ func.def target(@target) @scf_select_i1_false_true_constants(%values: vector<2xi
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_select_i1_false_true_constants(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scf_select_i1_false_true_constants(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %lane = vextract.32.imm %values, 0
   %lane_condition = lt %lane, %limit
   %false = mov.short 0
@@ -1452,9 +1400,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_sele
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scf_select_i1_true_payload(%values: vector<2xi32>, %limit: i32, %fallback_condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
+func.def @scf_select_i1_true_payload(%values: vector<2xi32>, %limit: i32, %fallback_condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
   %lane_condition = scalar.cmpi slt, %lane, %limit : i32
   %true = scalar.constant true : i1
@@ -1464,7 +1410,7 @@ func.def target(@target) @scf_select_i1_true_payload(%values: vector<2xi32>, %li
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_select_i1_true_payload(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %fallback_condition: reg<aie2p.er>, %true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scf_select_i1_true_payload(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %fallback_condition: reg<aie2p.er>, %true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %lane = vextract.32.imm %values, 0
   %lane_condition = lt %lane, %limit
   %true = mov.short 1
@@ -1477,9 +1423,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_sele
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scf_select_i1_false_payload(%values: vector<2xi32>, %limit: i32, %fallback_condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
+func.def @scf_select_i1_false_payload(%values: vector<2xi32>, %limit: i32, %fallback_condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
   %lane_condition = scalar.cmpi slt, %lane, %limit : i32
   %false = scalar.constant false : i1
@@ -1489,7 +1433,7 @@ func.def target(@target) @scf_select_i1_false_payload(%values: vector<2xi32>, %l
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_select_i1_false_payload(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %fallback_condition: reg<aie2p.er>, %true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scf_select_i1_false_payload(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %fallback_condition: reg<aie2p.er>, %true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %lane = vextract.32.imm %values, 0
   %lane_condition = lt %lane, %limit
   %false = mov.short 0
@@ -1502,9 +1446,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_sele
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scf_select_i1_true_fallback(%values: vector<2xi32>, %limit: i32, %fallback_condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
+func.def @scf_select_i1_true_fallback(%values: vector<2xi32>, %limit: i32, %fallback_condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
   %lane_condition = scalar.cmpi slt, %lane, %limit : i32
   %true = scalar.constant true : i1
@@ -1514,7 +1456,7 @@ func.def target(@target) @scf_select_i1_true_fallback(%values: vector<2xi32>, %l
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_select_i1_true_fallback(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %fallback_condition: reg<aie2p.er>, %true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scf_select_i1_true_fallback(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %fallback_condition: reg<aie2p.er>, %true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %lane = vextract.32.imm %values, 0
   %lane_condition = lt %lane, %limit
   %true = mov.short 1
@@ -1527,9 +1469,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_sele
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scf_select_i1_false_fallback(%values: vector<2xi32>, %limit: i32, %fallback_condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
+func.def @scf_select_i1_false_fallback(%values: vector<2xi32>, %limit: i32, %fallback_condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
   %lane_condition = scalar.cmpi slt, %lane, %limit : i32
   %false = scalar.constant false : i1
@@ -1539,7 +1479,7 @@ func.def target(@target) @scf_select_i1_false_fallback(%values: vector<2xi32>, %
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_select_i1_false_fallback(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %fallback_condition: reg<aie2p.er>, %true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scf_select_i1_false_fallback(%values: reg<aie2p.vec256 x2>, %limit: reg<aie2p.er>, %fallback_condition: reg<aie2p.er>, %true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %lane = vextract.32.imm %values, 0
   %lane_condition = lt %lane, %limit
   %false = mov.short 0
@@ -1552,39 +1492,33 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_sele
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scf_select_i1_true_condition(%true_value: f32, %false_value: f32) -> (f32) {
+func.def @scf_select_i1_true_condition(%true_value: f32, %false_value: f32) -> (f32) {
   %condition = scalar.constant true : i1
   %result = scf.select %condition, %true_value, %false_value : f32
   func.return %result : f32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_select_i1_true_condition(%true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scf_select_i1_true_condition(%true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   return %true_value
 }
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scf_select_i1_false_condition_constant(%true_value: f32, %false_value: f32) -> (f32) {
+func.def @scf_select_i1_false_condition_constant(%true_value: f32, %false_value: f32) -> (f32) {
   %condition = scalar.constant false : i1
   %result = scf.select %condition, %true_value, %false_value : f32
   func.return %result : f32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_select_i1_false_condition_constant(%true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scf_select_i1_false_condition_constant(%true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   return %false_value
 }
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scf_select_i1_scc_condition(%lhs: i32, %rhs: i32, %alt: i32, %true_value: f32, %false_value: f32) -> (f32) {
+func.def @scf_select_i1_scc_condition(%lhs: i32, %rhs: i32, %alt: i32, %true_value: f32, %false_value: f32) -> (f32) {
   %inactive_condition = scalar.constant 0 : i32
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   %lhs_nonzero = scalar.cmpi ne, %lhs, %inactive_condition : i32
@@ -1595,7 +1529,7 @@ func.def target(@target) @scf_select_i1_scc_condition(%lhs: i32, %rhs: i32, %alt
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_select_i1_scc_condition(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %alt: reg<aie2p.er>, %true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scf_select_i1_scc_condition(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %alt: reg<aie2p.er>, %true_value: reg<aie2p.er>, %false_value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %condition = lt %lhs, %rhs
   %lhs_nonzero = nez %lhs
   %alt_nonzero = nez %alt
@@ -1609,9 +1543,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scf_sele
 // ====
 
 // XFAIL: AIE2P has no GPU workitem-addressed global memory surface
-aie2p.target<core> @target
-
-kernel.def target(@target) @index_minmax_vgpr_select() {
+kernel.def @index_minmax_vgpr_select() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -1631,9 +1563,7 @@ kernel.def target(@target) @index_minmax_vgpr_select() {
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @f32_reduce_minnum_maxnum(%input: buffer, %output: buffer) {
+func.def @f32_reduce_minnum_maxnum(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xf32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<2xf32>
@@ -1648,7 +1578,7 @@ func.def target(@target) @f32_reduce_minnum_maxnum(%input: buffer, %output: buff
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @f32_reduce_minnum_maxnum() asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f32_reduce_minnum_maxnum() asm {
   %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %min_init = mov.i32 1148846080

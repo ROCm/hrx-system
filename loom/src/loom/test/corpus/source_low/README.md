@@ -4,8 +4,10 @@ This directory contains positive, target-reusable source programs for
 source-to-low lowering coverage. A corpus case should be a program we want every
 compatible target to accept, lower, and eventually execute or compare against an
 oracle. Each applicable backend participates through a `TEMPLATE` fixture with
-its own target binding, RUN mode, and output assertions. A backend that does not
-yet implement the required capability records the precise structured diagnostic
+its own target compiler options, RUN mode, and output assertions. TEMPLATE copies
+the common source without adding declarations, changing modifiers, or binding
+targets in the IR. A backend that does not yet implement the required capability
+records the precise structured diagnostic
 in its fixture. This keeps the positive source shared and makes newly supported
 behavior visible when that diagnostic stops appearing. Profile-specific
 instruction selection and pass-mode checks can use separate fixtures consuming
@@ -29,9 +31,10 @@ inapplicable corpus has no fixture. Missing lowering implementations continue
 to use precise diagnostics in applicable target fixtures.
 
 A case containing several functions has one public entry and private helpers.
-The entry identifies the case and receives the target fixture's binding;
-call-graph specialization supplies helper targets. Helpers remain part of the
-shared input, including when a target preserves their call boundaries.
+The entry identifies the case and receives the requested compiler profile;
+call-graph specialization supplies helper targets in compiler-owned function
+versions. Helpers remain part of the shared input, including when a target
+preserves their call boundaries. Compiler options preserve source visibility.
 
 Shared analysis and report semantics have focused tests beside the owning
 analysis or pass. The shared source-to-low tests use the backend-independent

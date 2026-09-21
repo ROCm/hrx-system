@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_float_selectors.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=vm:core output=low
 
-vm.target<core> @vm
-
-func.def target(@vm) @float_predicates_f32(%a: f32, %b: f32) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1) {
+func.def @float_predicates_f32(%a: f32, %b: f32) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1) {
   %oeq = scalar.cmpf oeq, %a, %b : f32
   %ogt = scalar.cmpf ogt, %a, %b : f32
   %oge = scalar.cmpf oge, %a, %b : f32
@@ -22,7 +20,7 @@ func.def target(@vm) @float_predicates_f32(%a: f32, %b: f32) -> (i1, i1, i1, i1,
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @float_predicates_f32(%a: reg<vm.value : f32>, %b: reg<vm.value : f32>) -> (reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>) asm {
+low.func.def target<vm.core> abi(vm_function) @float_predicates_f32(%a: reg<vm.value : f32>, %b: reg<vm.value : f32>) -> (reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>) asm {
   %oeq = float.compare.f32 %a, %b, "oeq"
   %ogt = float.compare.f32 %a, %b, "ogt"
   %oge = float.compare.f32 %a, %b, "oge"
@@ -42,9 +40,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @float_predicates_f32(%a: reg
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @float_selected_f32(%a: f32, %b: f32, %c: f32) -> (f32, f32, f32, f32, i1, i1, i1, f32, f32, f32, f32) {
+func.def @float_selected_f32(%a: f32, %b: f32, %c: f32) -> (f32, f32, f32, f32, i1, i1, i1, f32, f32, f32, f32) {
   %minimum = scalar.minimumf %a, %b : f32
   %maximum = scalar.maximumf %a, %b : f32
   %minnum = scalar.minnumf %a, %b : f32
@@ -60,7 +56,7 @@ func.def target(@vm) @float_selected_f32(%a: f32, %b: f32, %c: f32) -> (f32, f32
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @float_selected_f32(%a: reg<vm.value : f32>, %b: reg<vm.value : f32>, %c: reg<vm.value : f32>) -> (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) asm {
+low.func.def target<vm.core> abi(vm_function) @float_selected_f32(%a: reg<vm.value : f32>, %b: reg<vm.value : f32>, %c: reg<vm.value : f32>) -> (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) asm {
   %minimum = float.minmax.f32 %a, %b, "minimum"
   %maximum = float.minmax.f32 %a, %b, "maximum"
   %minnum = float.minmax.f32 %a, %b, "minnum"
@@ -77,16 +73,14 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @float_selected_f32(%a: reg<v
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @float_bitcasts_f32(%bits: i32, %number: f32) -> (f32, i32) {
+func.def @float_bitcasts_f32(%bits: i32, %number: f32) -> (f32, i32) {
   %as_number = scalar.bitcast %bits : i32 to f32
   %as_bits = scalar.bitcast %number : f32 to i32
   func.return %as_number, %as_bits : f32, i32
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @float_bitcasts_f32(%bits: reg<vm.value : i32>, %number: reg<vm.value : f32>) -> (reg<vm.value : f32>, reg<vm.value : i32>) asm {
+low.func.def target<vm.core> abi(vm_function) @float_bitcasts_f32(%bits: reg<vm.value : i32>, %number: reg<vm.value : f32>) -> (reg<vm.value : f32>, reg<vm.value : i32>) asm {
   %as_number = value.copy %bits : reg<vm.value : f32>
   %as_bits = value.copy %number : reg<vm.value : i32>
   return %as_number, %as_bits
@@ -94,9 +88,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @float_bitcasts_f32(%bits: re
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @float_predicates_f64(%a: f64, %b: f64) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1) {
+func.def @float_predicates_f64(%a: f64, %b: f64) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, i1) {
   %oeq = scalar.cmpf oeq, %a, %b : f64
   %ogt = scalar.cmpf ogt, %a, %b : f64
   %oge = scalar.cmpf oge, %a, %b : f64
@@ -115,7 +107,7 @@ func.def target(@vm) @float_predicates_f64(%a: f64, %b: f64) -> (i1, i1, i1, i1,
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @float_predicates_f64(%a: reg<vm.value : f64>, %b: reg<vm.value : f64>) -> (reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>) asm {
+low.func.def target<vm.core> abi(vm_function) @float_predicates_f64(%a: reg<vm.value : f64>, %b: reg<vm.value : f64>) -> (reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>) asm {
   %oeq = float.compare.f64 %a, %b, "oeq"
   %ogt = float.compare.f64 %a, %b, "ogt"
   %oge = float.compare.f64 %a, %b, "oge"
@@ -135,9 +127,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @float_predicates_f64(%a: reg
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @float_selected_f64(%a: f64, %b: f64, %c: f64) -> (f64, f64, f64, f64, i1, i1, i1, f64, f64, f64, f64) {
+func.def @float_selected_f64(%a: f64, %b: f64, %c: f64) -> (f64, f64, f64, f64, i1, i1, i1, f64, f64, f64, f64) {
   %minimum = scalar.minimumf %a, %b : f64
   %maximum = scalar.maximumf %a, %b : f64
   %minnum = scalar.minnumf %a, %b : f64
@@ -153,7 +143,7 @@ func.def target(@vm) @float_selected_f64(%a: f64, %b: f64, %c: f64) -> (f64, f64
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @float_selected_f64(%a: reg<vm.value : f64>, %b: reg<vm.value : f64>, %c: reg<vm.value : f64>) -> (reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>) asm {
+low.func.def target<vm.core> abi(vm_function) @float_selected_f64(%a: reg<vm.value : f64>, %b: reg<vm.value : f64>, %c: reg<vm.value : f64>) -> (reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>) asm {
   %minimum = float.minmax.f64 %a, %b, "minimum"
   %maximum = float.minmax.f64 %a, %b, "maximum"
   %minnum = float.minmax.f64 %a, %b, "minnum"
@@ -170,16 +160,14 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @float_selected_f64(%a: reg<v
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @float_bitcasts_f64(%bits: i64, %number: f64) -> (f64, i64) {
+func.def @float_bitcasts_f64(%bits: i64, %number: f64) -> (f64, i64) {
   %as_number = scalar.bitcast %bits : i64 to f64
   %as_bits = scalar.bitcast %number : f64 to i64
   func.return %as_number, %as_bits : f64, i64
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @float_bitcasts_f64(%bits: reg<vm.value : i64>, %number: reg<vm.value : f64>) -> (reg<vm.value : f64>, reg<vm.value : i64>) asm {
+low.func.def target<vm.core> abi(vm_function) @float_bitcasts_f64(%bits: reg<vm.value : i64>, %number: reg<vm.value : f64>) -> (reg<vm.value : f64>, reg<vm.value : i64>) asm {
   %as_number = value.copy %bits : reg<vm.value : f64>
   %as_bits = value.copy %number
   return %as_number, %as_bits
@@ -187,16 +175,14 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @float_bitcasts_f64(%bits: re
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @exponentials_f32(%input: f32) -> (f32, f32) {
+func.def @exponentials_f32(%input: f32) -> (f32, f32) {
   %base_two = scalar.exp2f<afn> %input : f32
   %natural = scalar.expf<afn> %input : f32
   func.return %base_two, %natural : f32, f32
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @exponentials_f32(%input: reg<vm.value : f32>) -> (reg<vm.value : f32>, reg<vm.value : f32>) asm {
+low.func.def target<vm.core> abi(vm_function) @exponentials_f32(%input: reg<vm.value : f32>) -> (reg<vm.value : f32>, reg<vm.value : f32>) asm {
   %11 = constant.i32 3271294976 : reg<vm.value : f32>
   %12 = constant.i32 1115684864 : reg<vm.value : f32>
   %13 = constant.i32 0 : reg<vm.value : f32>
@@ -221,46 +207,40 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @exponentials_f32(%input: reg
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @float_sign_f32(%value: f32) -> (f32) {
+func.def @float_sign_f32(%value: f32) -> (f32) {
   %result = scalar.signf %value : f32
   func.return %result : f32
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @float_sign_f32(%value: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+low.func.def target<vm.core> abi(vm_function) @float_sign_f32(%value: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
   %result = float.math.unary.f32 %value, "sign"
   return %result
 }
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @float_sign_f64(%value: f64) -> (f64) {
+func.def @float_sign_f64(%value: f64) -> (f64) {
   %result = scalar.signf %value : f64
   func.return %result : f64
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @float_sign_f64(%value: reg<vm.value : f64>) -> (reg<vm.value : f64>) asm {
+low.func.def target<vm.core> abi(vm_function) @float_sign_f64(%value: reg<vm.value : f64>) -> (reg<vm.value : f64>) asm {
   %result = float.math.unary.f64 %value, "sign"
   return %result
 }
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @roots_f32(%value: f32) -> (f32, f32) {
+func.def @roots_f32(%value: f32) -> (f32, f32) {
   %root = scalar.sqrtf %value : f32
   %inverse = scalar.rsqrtf %value : f32
   func.return %root, %inverse : f32, f32
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @roots_f32(%value: reg<vm.value : f32>) -> (reg<vm.value : f32>, reg<vm.value : f32>) asm {
+low.func.def target<vm.core> abi(vm_function) @roots_f32(%value: reg<vm.value : f32>) -> (reg<vm.value : f32>, reg<vm.value : f32>) asm {
   %8 = constant.i32 8388608 : reg<vm.value : f32>
   %9 = constant.i32 1266679808 : reg<vm.value : f32>
   %10 = constant.i32 964689920 : reg<vm.value : f32>
@@ -281,15 +261,13 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @roots_f32(%value: reg<vm.val
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @log2_f32(%value: f32) -> (f32) {
+func.def @log2_f32(%value: f32) -> (f32) {
   %result = scalar.log2f<afn> %value : f32
   func.return %result : f32
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @log2_f32(%value: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+low.func.def target<vm.core> abi(vm_function) @log2_f32(%value: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
   %5 = constant.i32 8388608 : reg<vm.value : f32>
   %6 = constant.i32 1266679808 : reg<vm.value : f32>
   %7 = constant.i32 1103101952 : reg<vm.value : f32>
@@ -307,15 +285,13 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @log2_f32(%value: reg<vm.valu
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @log_f32(%value: f32) -> (f32) {
+func.def @log_f32(%value: f32) -> (f32) {
   %result = scalar.logf<afn> %value : f32
   func.return %result : f32
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @log_f32(%value: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
+low.func.def target<vm.core> abi(vm_function) @log_f32(%value: reg<vm.value : f32>) -> (reg<vm.value : f32>) asm {
   %8 = constant.i32 1060205080 : reg<vm.value : f32>
   %9 = constant.i32 8388608 : reg<vm.value : f32>
   %10 = constant.i32 1266679808 : reg<vm.value : f32>

@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/async_gather.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amdgpu:gfx950 output=low
 
-amdgpu.target<gfx950> @target
-
-kernel.def target(@target) @async_gather_dword() {
+kernel.def @async_gather_dword() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%input: buffer) {
@@ -22,7 +20,7 @@ kernel.def target(@target) @async_gather_dword() {
 }
 
 // ----
-low.kernel.def target<amdgpu.cdna4.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_dword() asm {
+low.kernel.def target<amdgpu.cdna4.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_dword() asm {
   %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %14 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
   %16 = v_mov_b32 0
@@ -34,9 +32,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) abi_layout({constant_count = 0
 
 // ====
 
-amdgpu.target<gfx950> @target
-
-kernel.def target(@target) @async_gather_b128() {
+kernel.def @async_gather_b128() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%input: buffer) {
@@ -55,7 +51,7 @@ kernel.def target(@target) @async_gather_b128() {
 }
 
 // ----
-low.kernel.def target<amdgpu.cdna4.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_b128() asm {
+low.kernel.def target<amdgpu.cdna4.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_b128() asm {
   %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %14 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
   %16 = v_mov_b32 0
@@ -67,9 +63,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) abi_layout({constant_count = 0
 
 // ====
 
-amdgpu.target<gfx950> @target
-
-kernel.def target(@target) @async_gather_two_stage() {
+kernel.def @async_gather_two_stage() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%input: buffer) {
@@ -93,7 +87,7 @@ kernel.def target(@target) @async_gather_two_stage() {
 }
 
 // ----
-low.kernel.def target<amdgpu.cdna4.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_two_stage() asm {
+low.kernel.def target<amdgpu.cdna4.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_two_stage() asm {
   %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %18 = storage {byte_alignment = 16, byte_length = 2048} : low.storage<workgroup>
   %20 = v_mov_b32 0
@@ -108,9 +102,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) abi_layout({constant_count = 0
 
 // ====
 
-amdgpu.target<gfx950> @target
-
-kernel.def target(@target) @async_gather_multi_packet_newer_group() {
+kernel.def @async_gather_multi_packet_newer_group() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%input: buffer) {
@@ -137,7 +129,7 @@ kernel.def target(@target) @async_gather_multi_packet_newer_group() {
 }
 
 // ----
-low.kernel.def target<amdgpu.cdna4.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_multi_packet_newer_group() asm {
+low.kernel.def target<amdgpu.cdna4.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_multi_packet_newer_group() asm {
   %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %21 = storage {byte_alignment = 16, byte_length = 3072} : low.storage<workgroup>
   %23 = v_mov_b32 0
@@ -154,9 +146,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) abi_layout({constant_count = 0
 
 // ====
 
-amdgpu.target<gfx950> @target
-
-kernel.def target(@target) @async_gather_second_lds_slot() {
+kernel.def @async_gather_second_lds_slot() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%input: buffer) {
@@ -177,7 +167,7 @@ kernel.def target(@target) @async_gather_second_lds_slot() {
 }
 
 // ----
-low.kernel.def target<amdgpu.cdna4.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_second_lds_slot() asm {
+low.kernel.def target<amdgpu.cdna4.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_second_lds_slot() asm {
   %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %16 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
   %18 = v_mov_b32 0
@@ -189,9 +179,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) abi_layout({constant_count = 0
 
 // ====
 
-amdgpu.target<gfx950> @target
-
-kernel.def target(@target) @async_gather_uniform_source() {
+kernel.def @async_gather_uniform_source() {
   %unit = index.constant 1 : index
   %width = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
@@ -211,7 +199,7 @@ kernel.def target(@target) @async_gather_uniform_source() {
 }
 
 // ----
-low.kernel.def target<amdgpu.cdna4.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "position"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @async_gather_uniform_source(%slot: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.cdna4.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "position"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @async_gather_uniform_source(%slot: reg<amdgpu.sgpr>) asm {
   %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %16 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
   %18 = v_mov_b32_copy %slot
@@ -224,9 +212,7 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) abi_layout({constant_count = 1
 
 // ====
 
-amdgpu.target<gfx950> @target
-
-kernel.def target(@target) @async_gather_uniform_row() {
+kernel.def @async_gather_uniform_row() {
   %unit = index.constant 1 : index
   %width = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
@@ -247,7 +233,7 @@ kernel.def target(@target) @async_gather_uniform_row() {
 }
 
 // ----
-low.kernel.def target<amdgpu.cdna4.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "row_input"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @async_gather_uniform_row(%row: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.cdna4.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "row_input"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @async_gather_uniform_row(%row: reg<amdgpu.sgpr>) asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4096} : reg<amdgpu.sgpr x2>
   %18 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>

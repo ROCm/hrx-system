@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_logical_constants.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=vm:core output=low
 
-vm.target<core> @vm
-
-func.def target(@vm) @logical_constants() -> (f32, f64, i1, i1) {
+func.def @logical_constants() -> (f32, f64, i1, i1) {
   %narrow = scalar.constant 1.25 : f32
   %wide = scalar.constant 4294967297.5 : f64
   %yes = scalar.constant true : i1
@@ -12,7 +10,7 @@ func.def target(@vm) @logical_constants() -> (f32, f64, i1, i1) {
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @logical_constants() -> (reg<vm.value : f32>, reg<vm.value : f64>, reg<vm.value : i1>, reg<vm.value : i1>) asm {
+low.func.def target<vm.core> abi(vm_function) @logical_constants() -> (reg<vm.value : f32>, reg<vm.value : f64>, reg<vm.value : i1>, reg<vm.value : i1>) asm {
   %narrow = constant.i32 1067450368 : reg<vm.value : f32>
   %wide = constant.i64 4751297606877446144 : reg<vm.value : f64>
   %yes = constant.i32 1 : reg<vm.value : i1>
@@ -22,9 +20,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @logical_constants() -> (reg<
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @boolean_logic(%a: i1, %b: i1) -> (i1, i1, i1) {
+func.def @boolean_logic(%a: i1, %b: i1) -> (i1, i1, i1) {
   %both = scalar.andi %a, %b : i1
   %either = scalar.ori %a, %b : i1
   %exclusive = scalar.xori %a, %b : i1
@@ -32,7 +28,7 @@ func.def target(@vm) @boolean_logic(%a: i1, %b: i1) -> (i1, i1, i1) {
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @boolean_logic(%a: reg<vm.value : i1>, %b: reg<vm.value : i1>) -> (reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>) asm {
+low.func.def target<vm.core> abi(vm_function) @boolean_logic(%a: reg<vm.value : i1>, %b: reg<vm.value : i1>) -> (reg<vm.value : i1>, reg<vm.value : i1>, reg<vm.value : i1>) asm {
   %both = integer.and.i32 %a, %b : reg<vm.value : i1>
   %either = integer.or.i32 %a, %b : reg<vm.value : i1>
   %exclusive = integer.xor.i32 %a, %b : reg<vm.value : i1>
@@ -41,9 +37,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @boolean_logic(%a: reg<vm.val
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @integer_constant_boundaries() -> (i64, i64, i64, i64, i64, i64, i64, i64) {
+func.def @integer_constant_boundaries() -> (i64, i64, i64, i64, i64, i64, i64, i64) {
   %c0 = scalar.constant 0 : i64
   %negative = scalar.constant -1 : i64
   %signed_min = scalar.constant -32768 : i64
@@ -56,7 +50,7 @@ func.def target(@vm) @integer_constant_boundaries() -> (i64, i64, i64, i64, i64,
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @integer_constant_boundaries() -> (reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) asm {
+low.func.def target<vm.core> abi(vm_function) @integer_constant_boundaries() -> (reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) asm {
   %c0 = constant.i64 0
   %negative = constant.i64 -1
   %signed_min = constant.i64 -32768
@@ -70,9 +64,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @integer_constant_boundaries(
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @narrow_integer_constant_boundaries() -> (i32, i32, i32, i32, i32) {
+func.def @narrow_integer_constant_boundaries() -> (i32, i32, i32, i32, i32) {
   %c0 = scalar.constant 0 : i32
   %negative = scalar.constant -1 : i32
   %signed_min = scalar.constant -32768 : i32
@@ -82,7 +74,7 @@ func.def target(@vm) @narrow_integer_constant_boundaries() -> (i32, i32, i32, i3
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @narrow_integer_constant_boundaries() -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) asm {
+low.func.def target<vm.core> abi(vm_function) @narrow_integer_constant_boundaries() -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) asm {
   %c0 = constant.i32 0
   %negative = constant.i32 4294967295
   %signed_min = constant.i32 4294934528

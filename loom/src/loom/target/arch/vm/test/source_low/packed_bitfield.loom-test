@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/packed_bitfield.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=vm:core output=low
 
-vm.target<core> @target
-
-func.def target(@target) @i32_bitfield_extractu(%input: buffer, %output: buffer) {
+func.def @i32_bitfield_extractu(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<1xi32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
@@ -14,7 +12,7 @@ func.def target(@target) @i32_bitfield_extractu(%input: buffer, %output: buffer)
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @i32_bitfield_extractu(%input_view: reg<vm.ref : buffer>, %output_view: reg<vm.ref : buffer>) asm {
+low.func.def target<vm.core> abi(vm_function) @i32_bitfield_extractu(%input_view: reg<vm.ref : buffer>, %output_view: reg<vm.ref : buffer>) asm {
   %17 = constant.i64 0
   %18 = buffer.load %input_view, %17, %17, 0, "i32.x1" : reg<vm.value : i32>
   %19 = constant.i32 4
@@ -27,9 +25,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @i32_bitfield_extractu(%i
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @i32_bitfield_extracts(%input: buffer, %output: buffer) {
+func.def @i32_bitfield_extracts(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<1xi32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
@@ -40,7 +36,7 @@ func.def target(@target) @i32_bitfield_extracts(%input: buffer, %output: buffer)
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @i32_bitfield_extracts(%input_view: reg<vm.ref : buffer>, %output_view: reg<vm.ref : buffer>) asm {
+low.func.def target<vm.core> abi(vm_function) @i32_bitfield_extracts(%input_view: reg<vm.ref : buffer>, %output_view: reg<vm.ref : buffer>) asm {
   %17 = constant.i64 0
   %18 = buffer.load %input_view, %17, %17, 0, "i32.x1" : reg<vm.value : i32>
   %19 = constant.i32 24
@@ -53,9 +49,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @i32_bitfield_extracts(%i
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @i32_bitfield_extractu_full_width_alias(%input: buffer, %output: buffer) {
+func.def @i32_bitfield_extractu_full_width_alias(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<1xi32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
@@ -66,7 +60,7 @@ func.def target(@target) @i32_bitfield_extractu_full_width_alias(%input: buffer,
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @i32_bitfield_extractu_full_width_alias(%input_view: reg<vm.ref : buffer>, %output_view: reg<vm.ref : buffer>) asm {
+low.func.def target<vm.core> abi(vm_function) @i32_bitfield_extractu_full_width_alias(%input_view: reg<vm.ref : buffer>, %output_view: reg<vm.ref : buffer>) asm {
   %13 = constant.i64 0
   %14 = buffer.load %input_view, %13, %13, 0, "i32.x1" : reg<vm.value : i32>
   buffer.store %output_view, %13, %13, %14, 0, "i32.x1"
@@ -75,9 +69,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @i32_bitfield_extractu_fu
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @i32_bitfield_extracts_top_aligned(%input: buffer, %output: buffer) {
+func.def @i32_bitfield_extracts_top_aligned(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<1xi32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
@@ -88,7 +80,7 @@ func.def target(@target) @i32_bitfield_extracts_top_aligned(%input: buffer, %out
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @i32_bitfield_extracts_top_aligned(%input_view: reg<vm.ref : buffer>, %output_view: reg<vm.ref : buffer>) asm {
+low.func.def target<vm.core> abi(vm_function) @i32_bitfield_extracts_top_aligned(%input_view: reg<vm.ref : buffer>, %output_view: reg<vm.ref : buffer>) asm {
   %15 = constant.i64 0
   %16 = buffer.load %input_view, %15, %15, 0, "i32.x1" : reg<vm.value : i32>
   %17 = constant.i32 28
@@ -99,9 +91,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @i32_bitfield_extracts_to
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @i32_bitfield_insert(%field_buffer: buffer, %base_buffer: buffer, %output: buffer) {
+func.def @i32_bitfield_insert(%field_buffer: buffer, %base_buffer: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %field_view = buffer.view %field_buffer[%buffer_base] : buffer -> view<1xi32>
   %base_view = buffer.view %base_buffer[%buffer_base] : buffer -> view<1xi32>
@@ -114,7 +104,7 @@ func.def target(@target) @i32_bitfield_insert(%field_buffer: buffer, %base_buffe
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @i32_bitfield_insert(%field_view: reg<vm.ref : buffer>, %base_view: reg<vm.ref : buffer>, %output_view: reg<vm.ref : buffer>) asm {
+low.func.def target<vm.core> abi(vm_function) @i32_bitfield_insert(%field_view: reg<vm.ref : buffer>, %base_view: reg<vm.ref : buffer>, %output_view: reg<vm.ref : buffer>) asm {
   %27 = constant.i64 0
   %28 = buffer.load %field_view, %27, %27, 0, "i32.x1" : reg<vm.value : i32>
   %30 = buffer.load %base_view, %27, %27, 0, "i32.x1" : reg<vm.value : i32>
@@ -131,9 +121,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @i32_bitfield_insert(%fie
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @i32_bitfield_insert_offset0(%field_buffer: buffer, %base_buffer: buffer, %output: buffer) {
+func.def @i32_bitfield_insert_offset0(%field_buffer: buffer, %base_buffer: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %field_view = buffer.view %field_buffer[%buffer_base] : buffer -> view<1xi32>
   %base_view = buffer.view %base_buffer[%buffer_base] : buffer -> view<1xi32>
@@ -146,7 +134,7 @@ func.def target(@target) @i32_bitfield_insert_offset0(%field_buffer: buffer, %ba
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @i32_bitfield_insert_offset0(%field_view: reg<vm.ref : buffer>, %base_view: reg<vm.ref : buffer>, %output_view: reg<vm.ref : buffer>) asm {
+low.func.def target<vm.core> abi(vm_function) @i32_bitfield_insert_offset0(%field_view: reg<vm.ref : buffer>, %base_view: reg<vm.ref : buffer>, %output_view: reg<vm.ref : buffer>) asm {
   %25 = constant.i64 0
   %26 = buffer.load %field_view, %25, %25, 0, "i32.x1" : reg<vm.value : i32>
   %28 = buffer.load %base_view, %25, %25, 0, "i32.x1" : reg<vm.value : i32>
@@ -161,9 +149,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @i32_bitfield_insert_offs
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @i32_bitfield_insert_full_width_alias(%field_buffer: buffer, %base_buffer: buffer, %output: buffer) {
+func.def @i32_bitfield_insert_full_width_alias(%field_buffer: buffer, %base_buffer: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %field_view = buffer.view %field_buffer[%buffer_base] : buffer -> view<1xi32>
   %base_view = buffer.view %base_buffer[%buffer_base] : buffer -> view<1xi32>
@@ -176,7 +162,7 @@ func.def target(@target) @i32_bitfield_insert_full_width_alias(%field_buffer: bu
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @i32_bitfield_insert_full_width_alias(%field_view: reg<vm.ref : buffer>, %base_buffer: reg<vm.ref : buffer>, %output_view: reg<vm.ref : buffer>) asm {
+low.func.def target<vm.core> abi(vm_function) @i32_bitfield_insert_full_width_alias(%field_view: reg<vm.ref : buffer>, %base_buffer: reg<vm.ref : buffer>, %output_view: reg<vm.ref : buffer>) asm {
   %16 = constant.i64 0
   %17 = buffer.load %field_view, %16, %16, 0, "i32.x1" : reg<vm.value : i32>
   buffer.store %output_view, %16, %16, %17, 0, "i32.x1"
@@ -185,9 +171,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @i32_bitfield_insert_full
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @i32_bitfield_b128_shape(%input: buffer, %output: buffer) {
+func.def @i32_bitfield_b128_shape(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xi32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<4xi32>
@@ -202,7 +186,7 @@ func.def target(@target) @i32_bitfield_b128_shape(%input: buffer, %output: buffe
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @i32_bitfield_b128_shape(%input_view: reg<vm.ref : buffer>, %output_view: reg<vm.ref : buffer>) asm {
+low.func.def target<vm.core> abi(vm_function) @i32_bitfield_b128_shape(%input_view: reg<vm.ref : buffer>, %output_view: reg<vm.ref : buffer>) asm {
   %114 = constant.i64 0
   %115 = buffer.load %input_view, %114, %114, 0, "i32.x1" : reg<vm.value : i32>
   %116 = constant.i32 4

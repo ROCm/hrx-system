@@ -13,6 +13,7 @@
 #include "loom/target/tool/spirv.h"
 #include "loom/tooling/compile/pipeline.h"
 #include "loom/tools/loom-check/diagnostics.h"
+#include "loom/tools/loom-check/source_low.h"
 #include "loom/verify/verify.h"
 
 typedef enum loom_spirv_loom_check_input_e {
@@ -23,6 +24,7 @@ typedef enum loom_spirv_loom_check_input_e {
 typedef enum loom_spirv_loom_check_emit_flag_bits_e {
   LOOM_SPIRV_LOOM_CHECK_EMIT_FLAG_NONE = 0u,
   LOOM_SPIRV_LOOM_CHECK_EMIT_FLAG_VALIDATE = 1u << 0,
+  LOOM_SPIRV_LOOM_CHECK_EMIT_FLAG_TARGET = 1u << 1,
 } loom_spirv_loom_check_emit_flag_bits_t;
 typedef uint32_t loom_spirv_loom_check_emit_flags_t;
 
@@ -33,6 +35,10 @@ typedef struct loom_spirv_loom_check_emit_request_t {
   loom_target_control_flow_lowering_t control_flow_lowering;
   // Additional emit behavior requested by the RUN line.
   loom_spirv_loom_check_emit_flags_t flags;
+  // Optional source function selected for target specialization.
+  iree_string_view_t function_name;
+  // Invocation-selected profile when the TARGET flag is present.
+  loom_target_specification_t target;
 } loom_spirv_loom_check_emit_request_t;
 
 static bool loom_spirv_loom_check_case_has_requirement(
@@ -113,16 +119,30 @@ static iree_status_t loom_spirv_loom_check_parse_emit_request(
       continue;
     }
     if (iree_string_view_starts_with(token, IREE_SV("@"))) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "spirv-dis emits the whole split test-case module; RUN lines must "
-          "not select a function symbol");
+      if (token.size == 1 ||
+          !iree_string_view_is_empty(out_request->function_name)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "spirv-dis expects at most one @function");
+      }
+      out_request->function_name = token;
+      continue;
     }
     iree_string_view_t option_name = iree_string_view_empty();
     iree_string_view_t option_value = iree_string_view_empty();
     iree_string_view_split(token, '=', &option_name, &option_value);
     option_name = iree_string_view_trim(option_name);
     option_value = iree_string_view_trim(option_value);
+    if (iree_string_view_equal(option_name, IREE_SV("target"))) {
+      if (iree_any_bit_set(out_request->flags,
+                           LOOM_SPIRV_LOOM_CHECK_EMIT_FLAG_TARGET)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "duplicate spirv-dis option 'target'");
+      }
+      IREE_RETURN_IF_ERROR(
+          loom_target_specification_parse(option_value, &out_request->target));
+      out_request->flags |= LOOM_SPIRV_LOOM_CHECK_EMIT_FLAG_TARGET;
+      continue;
+    }
     if (iree_string_view_equal(option_name, IREE_SV("input"))) {
       if (iree_any_bit_set(parse_options,
                            LOOM_SPIRV_LOOM_CHECK_PARSE_OPTION_INPUT)) {
@@ -170,12 +190,21 @@ static iree_status_t loom_spirv_loom_check_parse_emit_request(
                             "unknown spirv-dis option '%.*s'", (int)token.size,
                             token.data);
   }
-  if (out_request->input == LOOM_SPIRV_LOOM_CHECK_INPUT_LOW &&
-      out_request->control_flow_lowering !=
-          LOOM_TARGET_CONTROL_FLOW_LOWERING_CFG) {
+  if (!iree_string_view_is_empty(out_request->function_name) &&
+      !iree_any_bit_set(out_request->flags,
+                        LOOM_SPIRV_LOOM_CHECK_EMIT_FLAG_TARGET)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "spirv-dis option 'control-flow' requires input=source-low");
+        "spirv-dis @function requires target=family:selector");
+  }
+  if (out_request->input == LOOM_SPIRV_LOOM_CHECK_INPUT_LOW &&
+      (out_request->control_flow_lowering !=
+           LOOM_TARGET_CONTROL_FLOW_LOWERING_CFG ||
+       iree_any_bit_set(out_request->flags,
+                        LOOM_SPIRV_LOOM_CHECK_EMIT_FLAG_TARGET))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "spirv-dis target and control-flow options require input=source-low");
   }
   return iree_ok_status();
 }
@@ -243,44 +272,6 @@ static iree_status_t loom_spirv_loom_check_strip_disassembly_comments(
   return iree_ok_status();
 }
 
-static iree_status_t loom_spirv_loom_check_run_source_low_pipeline(
-    const loom_check_emit_provider_request_t* request,
-    const loom_spirv_loom_check_emit_request_t* emit_request) {
-  if (request->environment->target_environment == NULL) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "spirv-dis input=source-low requires a target "
-                            "environment");
-  }
-
-  loom_compile_pipeline_options_t compile_options = {0};
-  loom_compile_pipeline_options_initialize(&compile_options);
-  compile_options.pipeline = IREE_SV("default");
-  compile_options.default_pipeline = LOOM_COMPILE_DEFAULT_PIPELINE_SOURCE_LOW;
-  compile_options.target_pipeline_options.control_flow_lowering =
-      emit_request->control_flow_lowering;
-  compile_options.target_environment = request->environment->target_environment;
-  compile_options.low_descriptor_registry = request->low_registry;
-  compile_options.diagnostic_sink =
-      (loom_diagnostic_sink_t){.fn = loom_check_diagnostic_collector_sink,
-                               .user_data = request->diagnostic_collector};
-  compile_options.source_resolver = request->source_resolver;
-  compile_options.max_errors = 20;
-
-  loom_compile_pipeline_result_t pipeline_result = {0};
-  iree_status_t status = loom_compile_run_pipeline(
-      request->module, &compile_options, request->case_arena->block_pool,
-      &pipeline_result);
-  const uint32_t error_count = pipeline_result.pass.error_count;
-  loom_compile_pipeline_result_deinitialize(&pipeline_result);
-  IREE_RETURN_IF_ERROR(status);
-  if (error_count != 0 && request->diagnostic_collector->count == 0) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "source-low pipeline reported errors without diagnostics");
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_spirv_loom_check_verify_low_module(
     const loom_check_emit_provider_request_t* request) {
   const loom_target_entry_options_t entry_options = {
@@ -340,22 +331,41 @@ static iree_status_t loom_spirv_loom_check_emit_provider_execute(
       .user_data = &capture,
   };
 
+  loom_compile_pipeline_result_t pipeline_result = {0};
+  iree_status_t status = iree_ok_status();
   if (emit_request.input == LOOM_SPIRV_LOOM_CHECK_INPUT_SOURCE_LOW) {
-    IREE_RETURN_IF_ERROR(
-        loom_spirv_loom_check_run_source_low_pipeline(request, &emit_request));
-    if (request->diagnostic_collector->count != 0) {
-      return iree_ok_status();
+    loom_check_prepare_source_low_options_t prepare_options;
+    loom_check_prepare_source_low_options_initialize(&prepare_options);
+    prepare_options.default_pipeline = LOOM_COMPILE_DEFAULT_PIPELINE_SOURCE_LOW;
+    prepare_options.control_flow_lowering = emit_request.control_flow_lowering;
+    loom_target_specialization_request_t specialization = {0};
+    if (iree_any_bit_set(emit_request.flags,
+                         LOOM_SPIRV_LOOM_CHECK_EMIT_FLAG_TARGET)) {
+      IREE_RETURN_IF_ERROR(loom_check_resolve_source_target(
+          request->module, request->environment->target_environment,
+          emit_request.function_name, &emit_request.target, &specialization));
+      prepare_options.target_specializations =
+          (loom_target_specialization_request_list_t){&specialization, 1};
     }
+    status = loom_check_prepare_source_low_module(
+        request->module, &prepare_options, request->low_registry,
+        request->environment, request->source_resolver,
+        request->diagnostic_collector, request->block_pool, &pipeline_result);
+  } else {
+    status = loom_spirv_loom_check_verify_low_module(request);
   }
-  IREE_RETURN_IF_ERROR(loom_spirv_loom_check_verify_low_module(request));
-  if (request->diagnostic_collector->count != 0) {
-    return iree_ok_status();
+  if (!iree_status_is_ok(status) || request->diagnostic_collector->count != 0) {
+    loom_compile_pipeline_result_deinitialize(&pipeline_result);
+    return status;
   }
 
+  const loom_spirv_emit_low_module_options_t emit_options = {
+      .function_versions = &pipeline_result.function_versions.list,
+  };
   loom_spirv_module_binary_t module = {0};
-  iree_status_t status = loom_spirv_emit_low_module(
+  status = loom_spirv_emit_low_module(
       request->module, &request->low_registry->registry, diagnostic_emitter,
-      request->case_arena, /*options=*/NULL, &module, request->host_allocator);
+      request->case_arena, &emit_options, &module, request->host_allocator);
 
   loom_spirv_toolchain_t toolchain;
   loom_spirv_toolchain_initialize_from_environment(&toolchain);
@@ -381,6 +391,7 @@ static iree_status_t loom_spirv_loom_check_emit_provider_execute(
 
   loom_tool_output_deinitialize(&disassembly, request->host_allocator);
   loom_spirv_module_binary_deinitialize(&module, request->host_allocator);
+  loom_compile_pipeline_result_deinitialize(&pipeline_result);
   return status;
 }
 

@@ -58,8 +58,10 @@ loom_cc_library(
     ::low_verify
     ::math_policy
     iree::base
+    loom::ir
     loom::target::arch::wasm::descriptors::low_registry
     loom::target::arch::wasm::ops
+    loom::target::arch::wasm::records::target_records
     loom::target::emit::wasm::lower
     loom::target::provider
   PUBLIC

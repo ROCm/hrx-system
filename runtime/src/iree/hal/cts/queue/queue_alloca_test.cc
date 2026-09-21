@@ -259,6 +259,75 @@ TEST_P(QueueAllocaTest, WaitDependencyControlsReadiness) {
   DeallocaAndWait(transfer_queue_, IREE_ARRAYSIZE(buffers), buffers);
 }
 
+TEST_P(QueueAllocaTest, ExportFollowsAllocationLifetime) {
+  Ref<iree_hal_pool_t> pool;
+  IREE_ASSERT_OK(CreateTLSFPool(/*range_length=*/4096, pool.out()));
+  auto request = MakeRequest(transfer_queue_, /*size=*/256);
+  iree_hal_pool_capabilities_t capabilities;
+  iree_hal_pool_query_capabilities(pool, &capabilities);
+  request.params.usage |=
+      capabilities.supported_usage & IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT;
+
+  Ref<iree_hal_buffer_t> buffer;
+  SemaphoreList alloca_wait(device_, {0}, {1});
+  SemaphoreList alloca_signal(device_, {0}, {1});
+  IREE_ASSERT_OK(
+      iree_hal_queue_alloca(transfer_queue_, alloca_wait, alloca_signal, pool,
+                            /*request_count=*/1, &request, buffer.out()));
+  Ref<iree_hal_buffer_t> subspan;
+  IREE_ASSERT_OK(iree_hal_buffer_subspan(
+      buffer, 64, 64, iree_allocator_system(), subspan.out()));
+
+  iree_hal_external_buffer_t external_buffer = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      iree_hal_buffer_export(
+          subspan, IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION,
+          IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE, &external_buffer));
+  EXPECT_EQ(IREE_HAL_EXTERNAL_BUFFER_TYPE_NONE, external_buffer.type);
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_list_signal(alloca_wait, /*frontier=*/nullptr));
+  Wait(alloca_signal);
+
+  constexpr uint32_t kPattern = 0xA11CA7EDu;
+  FillAndWait(transfer_queue_, buffer, kPattern);
+  iree_status_t export_status = iree_hal_buffer_export(
+      subspan, IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION,
+      IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE, &external_buffer);
+  if (iree_status_is_ok(export_status)) {
+    EXPECT_EQ(IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION,
+              external_buffer.type);
+    EXPECT_EQ(64u, external_buffer.size);
+    iree_hal_external_buffer_t root_export = {};
+    IREE_ASSERT_OK(iree_hal_buffer_export(
+        buffer, IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION,
+        IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE, &root_export));
+    EXPECT_EQ(root_export.handle.device_allocation.ptr + 64,
+              external_buffer.handle.device_allocation.ptr);
+    for (uint32_t value : ReadBufferData<uint32_t>(subspan)) {
+      EXPECT_EQ(kPattern, value);
+    }
+  } else {
+    // External pointer support is optional; allocation readiness is not.
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE, export_status);
+    EXPECT_EQ(IREE_HAL_EXTERNAL_BUFFER_TYPE_NONE, external_buffer.type);
+  }
+
+  iree_hal_buffer_t* buffers[] = {buffer.get()};
+  DeallocaAndWait(transfer_queue_, IREE_ARRAYSIZE(buffers), buffers);
+  iree_hal_pool_stats_t stats;
+  iree_hal_pool_query_stats(pool, &stats);
+  EXPECT_EQ(0u, stats.reservation_count);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      iree_hal_buffer_export(
+          subspan, IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION,
+          IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE, &external_buffer));
+  EXPECT_EQ(IREE_HAL_EXTERNAL_BUFFER_TYPE_NONE, external_buffer.type);
+  EXPECT_EQ(0u, external_buffer.size);
+  EXPECT_EQ(nullptr, external_buffer.handle.host_allocation.ptr);
+}
+
 TEST_P(QueueAllocaTest, ValidationFailureLeavesOutputsUntouched) {
   Ref<iree_hal_pool_t> pool;
   IREE_ASSERT_OK(CreatePassthroughPool(pool.out()));

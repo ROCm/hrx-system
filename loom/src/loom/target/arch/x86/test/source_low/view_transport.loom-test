@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/view_transport.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=x86:avx2 output=low
 
-x86.target<avx2> @target
-
-func.def target(@target) @wide_subview_selection(%input: buffer, %byte_base0: offset, %condition: i1) -> (i32) {
+func.def @wide_subview_selection(%input: buffer, %byte_base0: offset, %condition: i1) -> (i32) {
   %byte_base = index.assume %byte_base0 [range(%byte_base0, 2147483648, 4294967296), mul(%byte_base0, 4)] : offset
   %aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %root = buffer.view %aligned[%byte_base] : buffer -> view<4xi32>
@@ -15,7 +13,7 @@ func.def target(@target) @wide_subview_selection(%input: buffer, %byte_base0: of
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @wide_subview_selection(%selected: reg<x86.gpr64>, %byte_base: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @wide_subview_selection(%selected: reg<x86.gpr64>, %byte_base: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %24 = mov.imm64 4
   %25 = copy %byte_base : reg<x86.gpr64> -> reg<x86.gpr64>
   %26 = add.gpr64 %25, %24
@@ -30,9 +28,7 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @wide_subview_s
 
 // ====
 
-x86.target<avx2> @target
-
-func.def target(@target) @distinct_root_selection(%first: buffer, %second: buffer, %condition: i1) -> (i32) {
+func.def @distinct_root_selection(%first: buffer, %second: buffer, %condition: i1) -> (i32) {
   %first_offset = index.constant 4 : offset
   %second_offset = index.constant 8 : offset
   %first_aligned = buffer.assume.alignment %first {minimum_alignment = 4} : buffer
@@ -45,7 +41,7 @@ func.def target(@target) @distinct_root_selection(%first: buffer, %second: buffe
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @distinct_root_selection(%first_aligned: reg<x86.gpr64>, %second_aligned: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @distinct_root_selection(%first_aligned: reg<x86.gpr64>, %second_aligned: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %first_offset = mov.imm64 4
   %second_offset = mov.imm64 8
   low.cond_br %condition, ^_bb1, ^_bb2 : reg<x86.gpr32>
@@ -60,9 +56,7 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @distinct_root_
 
 // ====
 
-x86.target<avx2> @target
-
-func.def target(@target) @rotate_buffer_views(%input: buffer, %count_input: index, %seed: i32) -> (i32) {
+func.def public @rotate_buffer_views(%input: buffer, %count_input: index, %seed: i32) -> (i32) {
   %count = index.assume %count_input [range(%count_input, 0, 257)] : index
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
@@ -102,7 +96,7 @@ func.def target(@target) @rotate_buffer_views(%input: buffer, %count_input: inde
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @rotate_buffer_views(%last0: reg<x86.gpr64>, %count: reg<x86.gpr64>, %seed: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def public target<x86.avx2.core> abi(object_function) @rotate_buffer_views(%last0: reg<x86.gpr64>, %count: reg<x86.gpr64>, %seed: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %begin = mov.imm64 0
   %depth = mov.imm32 4
   mov.store.gpr32 %seed, %last0 {disp32 = 0}
@@ -155,9 +149,7 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @rotate_buffer_
 
 // ====
 
-x86.target<avx2> @target
-
-func.def target(@target) @correlated_duplicate_rotation(%input: buffer, %count_input: index, %first_offset_input: offset, %second_offset_input: offset) -> (i32) {
+func.def @correlated_duplicate_rotation(%input: buffer, %count_input: index, %first_offset_input: offset, %second_offset_input: offset) -> (i32) {
   %count = index.assume %count_input [range(%count_input, 0, 257)] : index
   %first_offset = index.assume %first_offset_input [range(%first_offset_input, 0, 4092), mul(%first_offset_input, 4)] : offset
   %second_offset = index.assume %second_offset_input [range(%second_offset_input, 0, 4092), mul(%second_offset_input, 4)] : offset
@@ -184,7 +176,7 @@ func.def target(@target) @correlated_duplicate_rotation(%input: buffer, %count_i
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @correlated_duplicate_rotation(%last_a_view: reg<x86.gpr64>, %count: reg<x86.gpr64>, %first_offset: reg<x86.gpr64>, %second_offset: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @correlated_duplicate_rotation(%last_a_view: reg<x86.gpr64>, %count: reg<x86.gpr64>, %first_offset: reg<x86.gpr64>, %second_offset: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
   %begin = mov.imm64 0
   low.br ^_bb1(%begin: reg<x86.gpr64>, %first_offset: reg<x86.gpr64>, %second_offset: reg<x86.gpr64>)
 ^_bb1(%i: reg<x86.gpr64>, %a_offset: reg<x86.gpr64>, %b_offset: reg<x86.gpr64>):
@@ -209,9 +201,7 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @correlated_dup
 
 // ====
 
-x86.target<avx2> @target
-
-func.def target(@target) @correlated_cfg_rotation(%input: buffer, %select: i1, %again: i1, %left_offset_input: offset, %right_offset_input: offset) -> (i32) {
+func.def @correlated_cfg_rotation(%input: buffer, %select: i1, %again: i1, %left_offset_input: offset, %right_offset_input: offset) -> (i32) {
   %left_offset = index.assume %left_offset_input [range(%left_offset_input, 0, 4092), mul(%left_offset_input, 4)] : offset
   %right_offset = index.assume %right_offset_input [range(%right_offset_input, 0, 4092), mul(%right_offset_input, 4)] : offset
   %storage = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
@@ -234,7 +224,7 @@ func.def target(@target) @correlated_cfg_rotation(%input: buffer, %select: i1, %
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @correlated_cfg_rotation(%view: reg<x86.gpr64>, %select: reg<x86.gpr32>, %again: reg<x86.gpr32>, %left_offset: reg<x86.gpr64>, %right_offset: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @correlated_cfg_rotation(%view: reg<x86.gpr64>, %select: reg<x86.gpr32>, %again: reg<x86.gpr32>, %left_offset: reg<x86.gpr64>, %right_offset: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
   low.cond_br %select, ^left, ^right : reg<x86.gpr32>
 ^left:
   low.br ^loop(%left_offset: reg<x86.gpr64>)

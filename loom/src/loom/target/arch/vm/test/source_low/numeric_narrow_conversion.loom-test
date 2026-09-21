@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_narrow_conversion.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=vm:core output=low
 
-vm.target<core> @vm
-
-func.def target(@vm) @extend_narrow(%arg0: f8E4M3, %arg1: f8E5M2, %arg2: f16, %arg3: bf16) -> (f32, f32, f32, f32) {
+func.def @extend_narrow(%arg0: f8E4M3, %arg1: f8E5M2, %arg2: f16, %arg3: bf16) -> (f32, f32, f32, f32) {
   %result0 = scalar.extf %arg0 : f8E4M3 to f32
   %result1 = scalar.extf %arg1 : f8E5M2 to f32
   %result2 = scalar.extf %arg2 : f16 to f32
@@ -12,7 +10,7 @@ func.def target(@vm) @extend_narrow(%arg0: f8E4M3, %arg1: f8E5M2, %arg2: f16, %a
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @extend_narrow(%arg0: reg<vm.value : f8E4M3>, %arg1: reg<vm.value : f8E5M2>, %arg2: reg<vm.value : f16>, %arg3: reg<vm.value : bf16>) -> (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) asm {
+low.func.def target<vm.core> abi(vm_function) @extend_narrow(%arg0: reg<vm.value : f8E4M3>, %arg1: reg<vm.value : f8E5M2>, %arg2: reg<vm.value : f16>, %arg3: reg<vm.value : bf16>) -> (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) asm {
   %result0 = conversion.float.extend %arg0, "f8e4m3.to.f32" : reg<vm.value : f32>
   %result1 = conversion.float.extend %arg1, "f8e5m2.to.f32" : reg<vm.value : f32>
   %result2 = conversion.float.extend %arg2, "f16.to.f32" : reg<vm.value : f32>
@@ -22,9 +20,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @extend_narrow(%arg0: reg<vm.
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @truncate_single(%input: f32) -> (f8E4M3, f8E5M2, f16, bf16) {
+func.def @truncate_single(%input: f32) -> (f8E4M3, f8E5M2, f16, bf16) {
   %result0 = scalar.fptrunc %input : f32 to f8E4M3
   %result1 = scalar.fptrunc %input : f32 to f8E5M2
   %result2 = scalar.fptrunc %input : f32 to f16
@@ -33,7 +29,7 @@ func.def target(@vm) @truncate_single(%input: f32) -> (f8E4M3, f8E5M2, f16, bf16
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @truncate_single(%input: reg<vm.value : f32>) -> (reg<vm.value : f8E4M3>, reg<vm.value : f8E5M2>, reg<vm.value : f16>, reg<vm.value : bf16>) asm {
+low.func.def target<vm.core> abi(vm_function) @truncate_single(%input: reg<vm.value : f32>) -> (reg<vm.value : f8E4M3>, reg<vm.value : f8E5M2>, reg<vm.value : f16>, reg<vm.value : bf16>) asm {
   %result0 = conversion.float.truncate %input, "f32.to.f8e4m3" : reg<vm.value : f8E4M3>
   %result1 = conversion.float.truncate %input, "f32.to.f8e5m2" : reg<vm.value : f8E5M2>
   %result2 = conversion.float.truncate %input, "f32.to.f16" : reg<vm.value : f16>
@@ -43,9 +39,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @truncate_single(%input: reg<
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @truncate_double(%input: f64) -> (f8E4M3, f8E5M2, f16, bf16) {
+func.def @truncate_double(%input: f64) -> (f8E4M3, f8E5M2, f16, bf16) {
   %result0 = scalar.fptrunc %input : f64 to f8E4M3
   %result1 = scalar.fptrunc %input : f64 to f8E5M2
   %result2 = scalar.fptrunc %input : f64 to f16
@@ -54,7 +48,7 @@ func.def target(@vm) @truncate_double(%input: f64) -> (f8E4M3, f8E5M2, f16, bf16
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @truncate_double(%input: reg<vm.value : f64>) -> (reg<vm.value : f8E4M3>, reg<vm.value : f8E5M2>, reg<vm.value : f16>, reg<vm.value : bf16>) asm {
+low.func.def target<vm.core> abi(vm_function) @truncate_double(%input: reg<vm.value : f64>) -> (reg<vm.value : f8E4M3>, reg<vm.value : f8E5M2>, reg<vm.value : f16>, reg<vm.value : bf16>) asm {
   %result0 = conversion.float.truncate %input, "f64.to.f8e4m3" : reg<vm.value : f8E4M3>
   %result1 = conversion.float.truncate %input, "f64.to.f8e5m2" : reg<vm.value : f8E5M2>
   %result2 = conversion.float.truncate %input, "f64.to.f16" : reg<vm.value : f16>
@@ -64,9 +58,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @truncate_double(%input: reg<
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @narrow_bits(%byte: i8, %word: i16, %condition: i1) -> (i8, i16) {
+func.def @narrow_bits(%byte: i8, %word: i16, %condition: i1) -> (i8, i16) {
   %e4m3 = scalar.bitcast %byte : i8 to f8E4M3
   %e5m2 = scalar.bitcast %byte : i8 to f8E5M2
   %other_byte = scalar.bitcast %e5m2 : f8E5M2 to f8E4M3
@@ -81,7 +73,7 @@ func.def target(@vm) @narrow_bits(%byte: i8, %word: i16, %condition: i1) -> (i8,
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @narrow_bits(%byte: reg<vm.value : i8>, %word: reg<vm.value : i16>, %condition: reg<vm.value : i1>) -> (reg<vm.value : i8>, reg<vm.value : i16>) asm {
+low.func.def target<vm.core> abi(vm_function) @narrow_bits(%byte: reg<vm.value : i8>, %word: reg<vm.value : i16>, %condition: reg<vm.value : i1>) -> (reg<vm.value : i8>, reg<vm.value : i16>) asm {
   %e4m3 = value.copy %byte : reg<vm.value : f8E4M3>
   %e5m2 = value.copy %byte : reg<vm.value : f8E5M2>
   %other_byte = value.copy %e5m2 : reg<vm.value : f8E4M3>
@@ -97,9 +89,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @narrow_bits(%byte: reg<vm.va
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @integer_to_bf16(%word: i32, %wide: i64) -> (bf16, bf16, bf16, bf16) {
+func.def @integer_to_bf16(%word: i32, %wide: i64) -> (bf16, bf16, bf16, bf16) {
   %signed_word = scalar.sitofp %word : i32 to bf16
   %unsigned_word = scalar.uitofp %word : i32 to bf16
   %signed_wide = scalar.sitofp %wide : i64 to bf16
@@ -108,7 +98,7 @@ func.def target(@vm) @integer_to_bf16(%word: i32, %wide: i64) -> (bf16, bf16, bf
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @integer_to_bf16(%word: reg<vm.value : i32>, %wide: reg<vm.value : i64>) -> (reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>) asm {
+low.func.def target<vm.core> abi(vm_function) @integer_to_bf16(%word: reg<vm.value : i32>, %wide: reg<vm.value : i64>) -> (reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : bf16>) asm {
   %signed_word = conversion.integer.to.float %word, "s32.to.bf16" : reg<vm.value : bf16>
   %unsigned_word = conversion.integer.to.float %word, "u32.to.bf16" : reg<vm.value : bf16>
   %signed_wide = conversion.integer.to.float %wide, "s64.to.bf16" : reg<vm.value : bf16>
@@ -118,9 +108,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @integer_to_bf16(%word: reg<v
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @narrow_constants() -> (i8, i16, f16, bf16) {
+func.def @narrow_constants() -> (i8, i16, f16, bf16) {
   %byte = scalar.constant -127 : i8
   %word = scalar.constant -32767 : i16
   %half = scalar.constant -1.5 : f16
@@ -129,7 +117,7 @@ func.def target(@vm) @narrow_constants() -> (i8, i16, f16, bf16) {
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @narrow_constants() -> (reg<vm.value : i8>, reg<vm.value : i16>, reg<vm.value : f16>, reg<vm.value : bf16>) asm {
+low.func.def target<vm.core> abi(vm_function) @narrow_constants() -> (reg<vm.value : i8>, reg<vm.value : i16>, reg<vm.value : f16>, reg<vm.value : bf16>) asm {
   %byte = constant.i32 4294967169 : reg<vm.value : i8>
   %word = constant.i32 4294934529 : reg<vm.value : i16>
   %half = constant.i32 48640 : reg<vm.value : f16>
@@ -139,9 +127,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @narrow_constants() -> (reg<v
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @float8_constants() -> (f8E4M3, f8E5M2, f8E4M3, f8E5M2) {
+func.def @float8_constants() -> (f8E4M3, f8E5M2, f8E4M3, f8E5M2) {
   %finite_e4 = scalar.constant -1.5 : f8E4M3
   %finite_e5 = scalar.constant 1.25 : f8E5M2
   %zero_e4 = scalar.constant -0.0 : f8E4M3
@@ -150,7 +136,7 @@ func.def target(@vm) @float8_constants() -> (f8E4M3, f8E5M2, f8E4M3, f8E5M2) {
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @float8_constants() -> (reg<vm.value : f8E4M3>, reg<vm.value : f8E5M2>, reg<vm.value : f8E4M3>, reg<vm.value : f8E5M2>) asm {
+low.func.def target<vm.core> abi(vm_function) @float8_constants() -> (reg<vm.value : f8E4M3>, reg<vm.value : f8E5M2>, reg<vm.value : f8E4M3>, reg<vm.value : f8E5M2>) asm {
   %finite_e4 = constant.i32 188 : reg<vm.value : f8E4M3>
   %finite_e5 = constant.i32 61 : reg<vm.value : f8E5M2>
   %zero_e4 = constant.i32 128 : reg<vm.value : f8E4M3>
@@ -160,9 +146,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @float8_constants() -> (reg<v
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @float_nan_constants() -> (f8E4M3, f8E5M2, f16, bf16, f32, f64) {
+func.def @float_nan_constants() -> (f8E4M3, f8E5M2, f16, bf16, f32, f64) {
   %e4 = scalar.constant nan : f8E4M3
   %e5 = scalar.constant nan : f8E5M2
   %half = scalar.constant nan : f16
@@ -173,7 +157,7 @@ func.def target(@vm) @float_nan_constants() -> (f8E4M3, f8E5M2, f16, bf16, f32, 
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @float_nan_constants() -> (reg<vm.value : f8E4M3>, reg<vm.value : f8E5M2>, reg<vm.value : f16>, reg<vm.value : bf16>, reg<vm.value : f32>, reg<vm.value : f64>) asm {
+low.func.def target<vm.core> abi(vm_function) @float_nan_constants() -> (reg<vm.value : f8E4M3>, reg<vm.value : f8E5M2>, reg<vm.value : f16>, reg<vm.value : bf16>, reg<vm.value : f32>, reg<vm.value : f64>) asm {
   %e4 = constant.i32 127 : reg<vm.value : f8E4M3>
   %e5 = constant.i32 127 : reg<vm.value : f8E5M2>
   %half = constant.i32 32767 : reg<vm.value : f16>
@@ -185,9 +169,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @float_nan_constants() -> (re
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @float_conversion_paths(%e4: f8E4M3, %e5: f8E5M2, %half: f16, %brain: bf16) -> (f16, bf16, f64, f64, f8E4M3, f8E5M2, i8, i16, i32, i64) {
+func.def @float_conversion_paths(%e4: f8E4M3, %e5: f8E5M2, %half: f16, %brain: bf16) -> (f16, bf16, f64, f64, f8E4M3, f8E5M2, i8, i16, i32, i64) {
   %r0 = scalar.extf %e4 : f8E4M3 to f16
   %r1 = scalar.extf %e5 : f8E5M2 to bf16
   %r2 = scalar.extf %half : f16 to f64
@@ -202,7 +184,7 @@ func.def target(@vm) @float_conversion_paths(%e4: f8E4M3, %e5: f8E5M2, %half: f1
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @float_conversion_paths(%e4: reg<vm.value : f8E4M3>, %e5: reg<vm.value : f8E5M2>, %half: reg<vm.value : f16>, %brain: reg<vm.value : bf16>) -> (reg<vm.value : f16>, reg<vm.value : bf16>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f8E4M3>, reg<vm.value : f8E5M2>, reg<vm.value : i8>, reg<vm.value : i16>, reg<vm.value : i32>, reg<vm.value : i64>) asm {
+low.func.def target<vm.core> abi(vm_function) @float_conversion_paths(%e4: reg<vm.value : f8E4M3>, %e5: reg<vm.value : f8E5M2>, %half: reg<vm.value : f16>, %brain: reg<vm.value : bf16>) -> (reg<vm.value : f16>, reg<vm.value : bf16>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f8E4M3>, reg<vm.value : f8E5M2>, reg<vm.value : i8>, reg<vm.value : i16>, reg<vm.value : i32>, reg<vm.value : i64>) asm {
   %38 = conversion.float.extend %e4, "f8e4m3.to.f32" : reg<vm.value : f32>
   %r0 = conversion.float.truncate %38, "f32.to.f16" : reg<vm.value : f16>
   %40 = conversion.float.extend %e5, "f8e5m2.to.f32" : reg<vm.value : f32>
@@ -222,9 +204,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @float_conversion_paths(%e4: 
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @small_integer_float(%flag: i1, %byte: i8, %word: i16) -> (f8E4M3, f16, f32, f64, bf16, bf16, f8E5M2) {
+func.def @small_integer_float(%flag: i1, %byte: i8, %word: i16) -> (f8E4M3, f16, f32, f64, bf16, bf16, f8E5M2) {
   %r0 = scalar.sitofp %flag : i1 to f8E4M3
   %r1 = scalar.uitofp %flag : i1 to f16
   %r2 = scalar.sitofp %byte : i8 to f32
@@ -236,7 +216,7 @@ func.def target(@vm) @small_integer_float(%flag: i1, %byte: i8, %word: i16) -> (
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @small_integer_float(%flag: reg<vm.value : i1>, %byte: reg<vm.value : i8>, %word: reg<vm.value : i16>) -> (reg<vm.value : f8E4M3>, reg<vm.value : f16>, reg<vm.value : f32>, reg<vm.value : f64>, reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : f8E5M2>) asm {
+low.func.def target<vm.core> abi(vm_function) @small_integer_float(%flag: reg<vm.value : i1>, %byte: reg<vm.value : i8>, %word: reg<vm.value : i16>) -> (reg<vm.value : f8E4M3>, reg<vm.value : f16>, reg<vm.value : f32>, reg<vm.value : f64>, reg<vm.value : bf16>, reg<vm.value : bf16>, reg<vm.value : f8E5M2>) asm {
   %27 = conversion.integer %flag, "s1.to.i32" : reg<vm.value : i32>
   %28 = conversion.integer.to.float %27, "s32.to.f32" : reg<vm.value : f32>
   %r0 = conversion.float.truncate %28, "f32.to.f8e4m3" : reg<vm.value : f8E4M3>
@@ -257,9 +237,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @small_integer_float(%flag: r
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @wide_integer_narrow_float(%wide: i64) -> (f16, f8E4M3, f8E5M2, f16, f8E4M3, f8E5M2) {
+func.def @wide_integer_narrow_float(%wide: i64) -> (f16, f8E4M3, f8E5M2, f16, f8E4M3, f8E5M2) {
   %r0 = scalar.sitofp %wide : i64 to f16
   %r1 = scalar.sitofp %wide : i64 to f8E4M3
   %r2 = scalar.sitofp %wide : i64 to f8E5M2
@@ -270,7 +248,7 @@ func.def target(@vm) @wide_integer_narrow_float(%wide: i64) -> (f16, f8E4M3, f8E
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @wide_integer_narrow_float(%wide: reg<vm.value : i64>) -> (reg<vm.value : f16>, reg<vm.value : f8E4M3>, reg<vm.value : f8E5M2>, reg<vm.value : f16>, reg<vm.value : f8E4M3>, reg<vm.value : f8E5M2>) asm {
+low.func.def target<vm.core> abi(vm_function) @wide_integer_narrow_float(%wide: reg<vm.value : i64>) -> (reg<vm.value : f16>, reg<vm.value : f8E4M3>, reg<vm.value : f8E5M2>, reg<vm.value : f16>, reg<vm.value : f8E4M3>, reg<vm.value : f8E5M2>) asm {
   %20 = conversion.integer.to.float %wide, "s64.to.f32" : reg<vm.value : f32>
   %r0 = conversion.float.truncate %20, "f32.to.f16" : reg<vm.value : f16>
   %r1 = conversion.float.truncate %20, "f32.to.f8e4m3" : reg<vm.value : f8E4M3>

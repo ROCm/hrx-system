@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_scalar_i64.loom-test
-// RUN: emit source-low output=low control-flow=structured-low
+// RUN: emit source-low target=spirv:vulkan1.3+bda output=low control-flow=structured-low
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @scalar_i64_bitwise_sgpr(%lhs: i64, %rhs: i64) -> (i64, i64, i64) {
+func.def @scalar_i64_bitwise_sgpr(%lhs: i64, %rhs: i64) -> (i64, i64, i64) {
   %and = scalar.andi %lhs, %rhs : i64
   %or = scalar.ori %and, %lhs : i64
   %xor = scalar.xori %or, %rhs : i64
@@ -11,7 +9,7 @@ func.def target(@target) @scalar_i64_bitwise_sgpr(%lhs: i64, %rhs: i64) -> (i64,
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_i64_bitwise_sgpr(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>) -> (reg<spirv.id : i64>, reg<spirv.id : i64>, reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_i64_bitwise_sgpr(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>) -> (reg<spirv.id : i64>, reg<spirv.id : i64>, reg<spirv.id : i64>) asm {
   %and = OpBitwiseAnd.i64 %lhs, %rhs
   %or = OpBitwiseOr.i64 %and, %lhs
   %xor = OpBitwiseXor.i64 %or, %rhs
@@ -20,11 +18,9 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
 // ERROR@+2: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<2xi64>"}
 // ERROR@+1: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<2xi64>"}
-func.def target(@target) @scalar_i64_addi_vgpr(%lhs_values: vector<2xi64>, %rhs_values: vector<2xi64>) -> (i64) {
+func.def @scalar_i64_addi_vgpr(%lhs_values: vector<2xi64>, %rhs_values: vector<2xi64>) -> (i64) {
   %lhs = vector.extract %lhs_values[0] : vector<2xi64> -> i64
   %rhs = vector.extract %rhs_values[0] : vector<2xi64> -> i64
   %sum = scalar.addi %lhs, %rhs : i64
@@ -33,11 +29,9 @@ func.def target(@target) @scalar_i64_addi_vgpr(%lhs_values: vector<2xi64>, %rhs_
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
 // ERROR@+2: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<2xi64>"}
 // ERROR@+1: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<2xi64>"}
-func.def target(@target) @scalar_i64_subi_vgpr(%lhs_values: vector<2xi64>, %rhs_values: vector<2xi64>) -> (i64) {
+func.def @scalar_i64_subi_vgpr(%lhs_values: vector<2xi64>, %rhs_values: vector<2xi64>) -> (i64) {
   %lhs = vector.extract %lhs_values[0] : vector<2xi64> -> i64
   %rhs = vector.extract %rhs_values[0] : vector<2xi64> -> i64
   %difference = scalar.subi %lhs, %rhs : i64
@@ -46,11 +40,9 @@ func.def target(@target) @scalar_i64_subi_vgpr(%lhs_values: vector<2xi64>, %rhs_
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
 // ERROR@+2: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<2xi64>"}
 // ERROR@+1: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<2xi64>"}
-func.def target(@target) @scalar_i64_shli_vgpr(%value_values: vector<2xi64>, %shift_values: vector<2xi64>) -> (i64) {
+func.def @scalar_i64_shli_vgpr(%value_values: vector<2xi64>, %shift_values: vector<2xi64>) -> (i64) {
   %value = vector.extract %value_values[0] : vector<2xi64> -> i64
   %shift = vector.extract %shift_values[0] : vector<2xi64> -> i64
   %shifted = scalar.shli %value, %shift : i64
@@ -59,12 +51,10 @@ func.def target(@target) @scalar_i64_shli_vgpr(%value_values: vector<2xi64>, %sh
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
 // ERROR@+3: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<2xi64>"}
 // ERROR@+2: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<2xi64>"}
 // ERROR@+1: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<2xi64>"}
-func.def target(@target) @scalar_i64_muli_bitwise_vgpr(%lhs_values: vector<2xi64>, %rhs_values: vector<2xi64>, %mask_values: vector<2xi64>) -> (i64) {
+func.def @scalar_i64_muli_bitwise_vgpr(%lhs_values: vector<2xi64>, %rhs_values: vector<2xi64>, %mask_values: vector<2xi64>) -> (i64) {
   %lhs = vector.extract %lhs_values[0] : vector<2xi64> -> i64
   %rhs = vector.extract %rhs_values[0] : vector<2xi64> -> i64
   %mask = vector.extract %mask_values[0] : vector<2xi64> -> i64
@@ -75,54 +65,46 @@ func.def target(@target) @scalar_i64_muli_bitwise_vgpr(%lhs_values: vector<2xi64
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @scalar_i64_compare_eq_scc(%lhs: i64, %rhs: i64) -> (i1) {
+func.def @scalar_i64_compare_eq_scc(%lhs: i64, %rhs: i64) -> (i1) {
   %cmp = scalar.cmpi eq, %lhs, %rhs : i64
   func.return %cmp : i1
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_i64_compare_eq_scc(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>) -> (reg<spirv.id : i1>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_i64_compare_eq_scc(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>) -> (reg<spirv.id : i1>) asm {
   %cmp = OpIEqual.i64 %lhs, %rhs
   return %cmp
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @scalar_i64_compare_ne_scc(%lhs: i64, %rhs: i64) -> (i1) {
+func.def @scalar_i64_compare_ne_scc(%lhs: i64, %rhs: i64) -> (i1) {
   %cmp = scalar.cmpi ne, %lhs, %rhs : i64
   func.return %cmp : i1
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_i64_compare_ne_scc(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>) -> (reg<spirv.id : i1>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_i64_compare_ne_scc(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>) -> (reg<spirv.id : i1>) asm {
   %cmp = OpINotEqual.i64 %lhs, %rhs
   return %cmp
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @scalar_i64_compare_slt_return(%lhs: i64, %rhs: i64) -> (i1) {
+func.def @scalar_i64_compare_slt_return(%lhs: i64, %rhs: i64) -> (i1) {
   %cmp = scalar.cmpi slt, %lhs, %rhs : i64
   func.return %cmp : i1
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_i64_compare_slt_return(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>) -> (reg<spirv.id : i1>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_i64_compare_slt_return(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>) -> (reg<spirv.id : i1>) asm {
   %cmp = OpSLessThan.i64 %lhs, %rhs
   return %cmp
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @scalar_i64_compare_slt_if(%lhs: i64, %rhs: i64, %then_value: i32, %else_value: i32) -> (i32) {
+func.def @scalar_i64_compare_slt_if(%lhs: i64, %rhs: i64, %then_value: i32, %else_value: i32) -> (i32) {
   %cmp = scalar.cmpi slt, %lhs, %rhs : i64
   %result = scf.if %cmp -> (i32) {
     scf.yield %then_value : i32
@@ -133,7 +115,7 @@ func.def target(@target) @scalar_i64_compare_slt_if(%lhs: i64, %rhs: i64, %then_
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_i64_compare_slt_if(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>, %then_value: reg<spirv.id : i32>, %else_value: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_i64_compare_slt_if(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>, %then_value: reg<spirv.id : i32>, %else_value: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
   %cmp = OpSLessThan.i64 %lhs, %rhs
   %result = OpSelect %cmp, %then_value, %else_value
   return %result
@@ -141,9 +123,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @scalar_i64_compare_constant_select(%lhs: i64, %true_value: f32, %false_value: f32) -> (f32) {
+func.def @scalar_i64_compare_constant_select(%lhs: i64, %true_value: f32, %false_value: f32) -> (f32) {
   %limit = scalar.constant 4294967296 : i64
   %cmp = scalar.cmpi ult, %lhs, %limit : i64
   %result = scf.select %cmp, %true_value, %false_value : f32
@@ -151,7 +131,7 @@ func.def target(@target) @scalar_i64_compare_constant_select(%lhs: i64, %true_va
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_i64_compare_constant_select(%lhs: reg<spirv.id : i64>, %true_value: reg<spirv.id : f32>, %false_value: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_i64_compare_constant_select(%lhs: reg<spirv.id : i64>, %true_value: reg<spirv.id : f32>, %false_value: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
   %limit = OpConstant.i64 4294967296
   %12 = OpBitcast.i64.u64 %lhs
   %13 = OpBitcast.i64.u64 %limit
@@ -162,11 +142,9 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
 // ERROR@+2: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<2xi64>"}
 // ERROR@+1: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<2xi64>"}
-func.def target(@target) @scalar_i64_compare_all_predicates_vgpr_select(%lhs_values: vector<2xi64>, %rhs_values: vector<2xi64>, %true_value: f32, %false_value: f32) -> (f32, f32, f32, f32, f32, f32, f32, f32, f32, f32) {
+func.def @scalar_i64_compare_all_predicates_vgpr_select(%lhs_values: vector<2xi64>, %rhs_values: vector<2xi64>, %true_value: f32, %false_value: f32) -> (f32, f32, f32, f32, f32, f32, f32, f32, f32, f32) {
   %lhs = vector.extract %lhs_values[0] : vector<2xi64> -> i64
   %rhs = vector.extract %rhs_values[0] : vector<2xi64> -> i64
   %eq = scalar.cmpi eq, %lhs, %rhs : i64
@@ -194,54 +172,46 @@ func.def target(@target) @scalar_i64_compare_all_predicates_vgpr_select(%lhs_val
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @scalar_i64_addi_uniform(%lhs: i64, %rhs: i64) -> (i64) {
+func.def @scalar_i64_addi_uniform(%lhs: i64, %rhs: i64) -> (i64) {
   %result = scalar.addi %lhs, %rhs : i64
   func.return %result : i64
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_i64_addi_uniform(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>) -> (reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_i64_addi_uniform(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>) -> (reg<spirv.id : i64>) asm {
   %result = OpIAdd.i64 %lhs, %rhs
   return %result
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @scalar_i64_muli_uniform(%lhs: i64, %rhs: i64) -> (i64) {
+func.def @scalar_i64_muli_uniform(%lhs: i64, %rhs: i64) -> (i64) {
   %result = scalar.muli %lhs, %rhs : i64
   func.return %result : i64
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_i64_muli_uniform(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>) -> (reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_i64_muli_uniform(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>) -> (reg<spirv.id : i64>) asm {
   %result = OpIMul.i64 %lhs, %rhs
   return %result
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @scalar_i64_shli_uniform(%lhs: i64, %rhs: i64) -> (i64) {
+func.def @scalar_i64_shli_uniform(%lhs: i64, %rhs: i64) -> (i64) {
   %result = scalar.shli %lhs, %rhs : i64
   func.return %result : i64
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_i64_shli_uniform(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>) -> (reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_i64_shli_uniform(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>) -> (reg<spirv.id : i64>) asm {
   %result = OpShiftLeftLogical.i64 %lhs, %rhs
   return %result
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @scalar_f64_constant_select_bitcast(%condition: i1, %fallback: f64) -> (i64) {
+func.def @scalar_f64_constant_select_bitcast(%condition: i1, %fallback: f64) -> (i64) {
   // ERROR@+1: TARGET/003 {op_name="scalar.constant", subject_role="descriptor", subject_name="spirv.op_constant.f64", constraint_key="descriptor_available"}
   %constant = scalar.constant -1.1000000000000001 : f64
   // ERROR@+1: TARGET/003 {op_name="scf.select", subject_role="descriptor", subject_name="spirv.op_select.f64", constraint_key="descriptor_available"}
@@ -253,10 +223,8 @@ func.def target(@target) @scalar_f64_constant_select_bitcast(%condition: i1, %fa
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
 // ERROR@+1: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<2xi64>"}
-func.def target(@target) @scalar_i64_lanes(%values: vector<2xi64>, %replacement: i64) -> (i64, i64, vector<2xi64>, vector<2xi64>) {
+func.def @scalar_i64_lanes(%values: vector<2xi64>, %replacement: i64) -> (i64, i64, vector<2xi64>, vector<2xi64>) {
   %first = vector.extract %values[0] : vector<2xi64> -> i64
   %second = vector.extract %values[1] : vector<2xi64> -> i64
   %replace_first = vector.insert %replacement into %values[0] : i64, vector<2xi64>
@@ -268,9 +236,7 @@ func.def target(@target) @scalar_i64_lanes(%values: vector<2xi64>, %replacement:
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @scalar_f64_lanes(%values: vector<2xf64>, %replacement: f64) -> (f64, f64, vector<2xf64>, vector<2xf64>) {
+func.def @scalar_f64_lanes(%values: vector<2xf64>, %replacement: f64) -> (f64, f64, vector<2xf64>, vector<2xf64>) {
   // ERROR@+1: TARGET/003 {op_name="vector.extract", subject_role="descriptor", subject_name="spirv.op_composite_extract.v2f64.f64", constraint_key="descriptor_available"}
   %first = vector.extract %values[0] : vector<2xf64> -> f64
   // ERROR@+1: TARGET/003 {op_name="vector.extract", subject_role="descriptor", subject_name="spirv.op_composite_extract.v2f64.f64", constraint_key="descriptor_available"}
@@ -284,9 +250,7 @@ func.def target(@target) @scalar_f64_lanes(%values: vector<2xf64>, %replacement:
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @scalar_i64_right_shift_select(%value: i64, %condition: i1) -> (i64, i64, i64, i64, i64) {
+func.def @scalar_i64_right_shift_select(%value: i64, %condition: i1) -> (i64, i64, i64, i64, i64) {
   %word_count = scalar.constant 32 : i64
   %sign_count = scalar.constant 63 : i64
   %logical_word = scalar.shrui %value, %word_count : i64
@@ -298,7 +262,7 @@ func.def target(@target) @scalar_i64_right_shift_select(%value: i64, %condition:
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_i64_right_shift_select(%value: reg<spirv.id : i64>, %condition: reg<spirv.id : i1>) -> (reg<spirv.id : i64>, reg<spirv.id : i64>, reg<spirv.id : i64>, reg<spirv.id : i64>, reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_i64_right_shift_select(%value: reg<spirv.id : i64>, %condition: reg<spirv.id : i1>) -> (reg<spirv.id : i64>, reg<spirv.id : i64>, reg<spirv.id : i64>, reg<spirv.id : i64>, reg<spirv.id : i64>) asm {
   %word_count = OpConstant.i64 32
   %sign_count = OpConstant.i64 63
   %logical_word = OpShiftRightLogical.i64 %value, %word_count
@@ -311,9 +275,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @scalar_i32_control(%lhs: i32, %rhs: i32) -> (i32) {
+func.def @scalar_i32_control(%lhs: i32, %rhs: i32) -> (i32) {
   %product = scalar.muli %lhs, %rhs : i32
   %mixed = scalar.xori %product, %rhs : i32
   %less = scalar.cmpi slt, %lhs, %rhs : i32
@@ -322,7 +284,7 @@ func.def target(@target) @scalar_i32_control(%lhs: i32, %rhs: i32) -> (i32) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_i32_control(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_i32_control(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
   %product = OpIMul %lhs, %rhs
   %mixed = OpBitwiseXor %product, %rhs
   %less = OpSLessThan %lhs, %rhs
@@ -332,9 +294,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @scalar_i64_insert_dynamic(%values: vector<2xi64>, %replacement: i64, %lane: index) -> (vector<2xi64>) {
+func.def @scalar_i64_insert_dynamic(%values: vector<2xi64>, %replacement: i64, %lane: index) -> (vector<2xi64>) {
   // ERROR@+1: TARGET/004 {op_name="vector.insert", subject_role="operand_segment", subject_name="indices", constraint_key="operand_segment_count", expected_count="0"}
   %updated = vector.insert %replacement into %values[%lane] : i64, vector<2xi64>
   func.return %updated : vector<2xi64>
@@ -342,9 +302,7 @@ func.def target(@target) @scalar_i64_insert_dynamic(%values: vector<2xi64>, %rep
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @scalar_f64_insert_dynamic(%values: vector<2xf64>, %replacement: f64, %lane: index) -> (vector<2xf64>) {
+func.def @scalar_f64_insert_dynamic(%values: vector<2xf64>, %replacement: f64, %lane: index) -> (vector<2xf64>) {
   // ERROR@+1: TARGET/004 {op_name="vector.insert", subject_role="operand_segment", subject_name="indices", constraint_key="operand_segment_count", expected_count="0"}
   %updated = vector.insert %replacement into %values[%lane] : f64, vector<2xf64>
   func.return %updated : vector<2xf64>
@@ -352,24 +310,20 @@ func.def target(@target) @scalar_f64_insert_dynamic(%values: vector<2xf64>, %rep
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @scalar_f32_select(%condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
+func.def @scalar_f32_select(%condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
   %result = scf.select %condition, %true_value, %false_value : f32
   func.return %result : f32
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_f32_select(%condition: reg<spirv.id : i1>, %true_value: reg<spirv.id : f32>, %false_value: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_f32_select(%condition: reg<spirv.id : i1>, %true_value: reg<spirv.id : f32>, %false_value: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
   %result = OpSelect.f32 %condition, %true_value, %false_value
   return %result
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @scalar_f64_select(%condition: i1, %true_value: f64, %false_value: f64) -> (f64) {
+func.def @scalar_f64_select(%condition: i1, %true_value: f64, %false_value: f64) -> (f64) {
   // ERROR@+1: TARGET/003 {op_name="scf.select", subject_role="descriptor", subject_name="spirv.op_select.f64", constraint_key="descriptor_available"}
   %result = scf.select %condition, %true_value, %false_value : f64
   func.return %result : f64
@@ -377,24 +331,20 @@ func.def target(@target) @scalar_f64_select(%condition: i1, %true_value: f64, %f
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @scalar_f32_select_reuse(%condition: i1, %true_value: f32, %false_value: f32) -> (f32, f32, f32, i1) {
+func.def @scalar_f32_select_reuse(%condition: i1, %true_value: f32, %false_value: f32) -> (f32, f32, f32, i1) {
   %result = scf.select %condition, %true_value, %false_value : f32
   func.return %result, %true_value, %false_value, %condition : f32, f32, f32, i1
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_f32_select_reuse(%condition: reg<spirv.id : i1>, %true_value: reg<spirv.id : f32>, %false_value: reg<spirv.id : f32>) -> (reg<spirv.id : f32>, reg<spirv.id : f32>, reg<spirv.id : f32>, reg<spirv.id : i1>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_f32_select_reuse(%condition: reg<spirv.id : i1>, %true_value: reg<spirv.id : f32>, %false_value: reg<spirv.id : f32>) -> (reg<spirv.id : f32>, reg<spirv.id : f32>, reg<spirv.id : f32>, reg<spirv.id : i1>) asm {
   %result = OpSelect.f32 %condition, %true_value, %false_value
   return %result, %true_value, %false_value, %condition
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @scalar_f64_select_reuse(%condition: i1, %true_value: f64, %false_value: f64) -> (f64, f64, f64, i1) {
+func.def @scalar_f64_select_reuse(%condition: i1, %true_value: f64, %false_value: f64) -> (f64, f64, f64, i1) {
   // ERROR@+1: TARGET/003 {op_name="scf.select", subject_role="descriptor", subject_name="spirv.op_select.f64", constraint_key="descriptor_available"}
   %result = scf.select %condition, %true_value, %false_value : f64
   func.return %result, %true_value, %false_value, %condition : f64, f64, f64, i1

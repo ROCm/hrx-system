@@ -6,6 +6,8 @@
 
 #include "loom/codegen/low/allocation/spill_plan.h"
 
+#include <vector>
+
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -78,84 +80,93 @@ TEST_F(LowAllocationSpillPlanTest, ComputesByteLayout) {
   EXPECT_EQ(byte_alignment, 16u);
 }
 
-TEST_F(LowAllocationSpillPlanTest, PredictsSliceReloadBytes) {
+struct SliceRange {
+  // First source register unit projected by the slice.
+  int64_t offset;
+  // Number of register units in the result.
+  uint32_t unit_count;
+};
+
+struct SliceReloadCase {
+  // Stable case name reported by the parameterized test.
+  const char* name;
+  // Number of register units in the spilled value.
+  uint32_t source_unit_count;
+  // Bit width of one allocation unit.
+  uint16_t alloc_unit_bits;
+  // Slice uses in one block, including overlapping ranges.
+  std::vector<SliceRange> slices;
+  // Number of reload operations after block-local grouping.
+  uint32_t reload_count;
+  // Total bytes reloaded after block-local grouping.
+  uint64_t reload_bytes;
+};
+
+class LowAllocationSliceReloadTest
+    : public LowAllocationSpillPlanTest,
+      public ::testing::WithParamInterface<SliceReloadCase> {};
+
+TEST_P(LowAllocationSliceReloadTest, PredictsTraffic) {
+  const auto& test_case = GetParam();
   loom_module_t* module = AllocateModule();
-  loom_type_t wide_type =
-      loom_low_register_type(/*descriptor_set_stable_id=*/23,
-                             /*register_class_id=*/0, /*unit_count=*/4);
-  IREE_ASSERT_OK(loom_module_intern_type(module, wide_type, &wide_type));
-  loom_type_t lane_type =
-      loom_low_register_carrier_type_with_unit_count(wide_type,
-                                                     /*unit_count=*/1);
-  IREE_ASSERT_OK(loom_module_intern_type(module, lane_type, &lane_type));
+  loom_type_t source_type = loom_low_register_type(
+      /*descriptor_set_stable_id=*/23, /*register_class_id=*/0,
+      test_case.source_unit_count);
+  IREE_ASSERT_OK(loom_module_intern_type(module, source_type, &source_type));
 
   loom_value_id_t source_value = LOOM_VALUE_ID_INVALID;
-  IREE_ASSERT_OK(loom_module_define_value(module, wide_type, &source_value));
+  IREE_ASSERT_OK(loom_module_define_value(module, source_type, &source_value));
   loom_builder_t builder;
   loom_builder_initialize(module, &module->arena, loom_module_block(module),
                           &builder);
-  loom_op_t* slice0 = nullptr;
-  IREE_ASSERT_OK(loom_low_slice_build(&builder, source_value, /*offset=*/0,
-                                      lane_type, LOOM_LOCATION_UNKNOWN,
-                                      &slice0));
-  loom_op_t* slice3 = nullptr;
-  IREE_ASSERT_OK(loom_low_slice_build(&builder, source_value, /*offset=*/3,
-                                      lane_type, LOOM_LOCATION_UNKNOWN,
-                                      &slice3));
-
-  const loom_low_allocation_assignment_t assignment =
-      Assignment(source_value, /*unit_count=*/4);
-  loom_cfg_graph_t cfg_graph = {};
-  IREE_ASSERT_OK(
-      loom_cfg_graph_build(module, module->body, &arena_, &cfg_graph));
-  loom_low_allocation_spill_plan_traffic_t traffic = {};
-  IREE_ASSERT_OK(loom_low_allocation_spill_plan_traffic(
-      module, &cfg_graph, &assignment, /*alloc_unit_bits=*/32, &traffic));
-  EXPECT_EQ(traffic.store_count, 1u);
-  EXPECT_EQ(traffic.store_bytes, 16u);
-  EXPECT_EQ(traffic.reload_count, 2u);
-  EXPECT_EQ(traffic.reload_bytes, 8u);
-
-  loom_module_free(module);
-}
-
-TEST_F(LowAllocationSpillPlanTest, PredictsDenseSliceReloadTraffic) {
-  loom_module_t* module = AllocateModule();
-  loom_type_t wide_type =
-      loom_low_register_type(/*descriptor_set_stable_id=*/23,
-                             /*register_class_id=*/0, /*unit_count=*/8);
-  IREE_ASSERT_OK(loom_module_intern_type(module, wide_type, &wide_type));
-  loom_type_t lane_type =
-      loom_low_register_carrier_type_with_unit_count(wide_type,
-                                                     /*unit_count=*/1);
-  IREE_ASSERT_OK(loom_module_intern_type(module, lane_type, &lane_type));
-
-  loom_value_id_t source_value = LOOM_VALUE_ID_INVALID;
-  IREE_ASSERT_OK(loom_module_define_value(module, wide_type, &source_value));
-  loom_builder_t builder;
-  loom_builder_initialize(module, &module->arena, loom_module_block(module),
-                          &builder);
-  for (int64_t i = 0; i < 8; ++i) {
+  for (const auto& range : test_case.slices) {
+    loom_type_t result_type = loom_low_register_carrier_type_with_unit_count(
+        source_type, range.unit_count);
+    IREE_ASSERT_OK(loom_module_intern_type(module, result_type, &result_type));
     loom_op_t* slice = nullptr;
-    IREE_ASSERT_OK(loom_low_slice_build(&builder, source_value, i, lane_type,
-                                        LOOM_LOCATION_UNKNOWN, &slice));
+    IREE_ASSERT_OK(loom_low_slice_build(&builder, source_value, range.offset,
+                                        result_type, LOOM_LOCATION_UNKNOWN,
+                                        &slice));
   }
 
   const loom_low_allocation_assignment_t assignment =
-      Assignment(source_value, /*unit_count=*/8);
+      Assignment(source_value, test_case.source_unit_count);
   loom_cfg_graph_t cfg_graph = {};
   IREE_ASSERT_OK(
       loom_cfg_graph_build(module, module->body, &arena_, &cfg_graph));
   loom_low_allocation_spill_plan_traffic_t traffic = {};
   IREE_ASSERT_OK(loom_low_allocation_spill_plan_traffic(
-      module, &cfg_graph, &assignment, /*alloc_unit_bits=*/32, &traffic));
+      module, &cfg_graph, &assignment, test_case.alloc_unit_bits, &traffic));
   EXPECT_EQ(traffic.store_count, 1u);
-  EXPECT_EQ(traffic.store_bytes, 32u);
-  EXPECT_EQ(traffic.reload_count, 1u);
-  EXPECT_EQ(traffic.reload_bytes, 32u);
+  EXPECT_EQ(
+      traffic.store_bytes,
+      (test_case.source_unit_count * test_case.alloc_unit_bits + 7u) / 8u);
+  EXPECT_EQ(traffic.reload_count, test_case.reload_count);
+  EXPECT_EQ(traffic.reload_bytes, test_case.reload_bytes);
 
   loom_module_free(module);
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    SliceWidths, LowAllocationSliceReloadTest,
+    ::testing::Values(
+        SliceReloadCase{"SparseScalars", 4, 32, {{0, 1}, {3, 1}}, 2, 8},
+        SliceReloadCase{"SingleWideSlice", 4, 32, {{1, 3}}, 1, 12},
+        SliceReloadCase{"MixedWidths", 4, 32, {{0, 1}, {2, 2}}, 2, 12},
+        SliceReloadCase{"EqualBytes", 4, 32, {{0, 1}, {1, 3}}, 2, 16},
+        SliceReloadCase{"OverlappingWidths", 4, 32, {{0, 3}, {2, 2}}, 1, 16},
+        SliceReloadCase{"HalfwordUnits", 4, 16, {{0, 3}, {2, 2}}, 1, 8},
+        SliceReloadCase{
+            "DenseScalarUses",
+            8,
+            32,
+            {{0, 1}, {1, 1}, {2, 1}, {3, 1}, {4, 1}, {5, 1}, {6, 1}, {7, 1}},
+            1,
+            32},
+        SliceReloadCase{"PackedBitUnits", 8, 1, {{0, 1}, {4, 4}}, 2, 2}),
+    [](const ::testing::TestParamInfo<SliceReloadCase>& info) {
+      return info.param.name;
+    });
 
 TEST_F(LowAllocationSpillPlanTest, RecordsSpillRemarks) {
   loom_low_allocation_remark_t remarks[1] = {};

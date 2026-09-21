@@ -1,18 +1,14 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_unsigned_remainder.loom-test
-// RUN: emit source-low output=none
+// RUN: emit source-low target=amd.xdna.aie2p:core output=none
 
-aie2p.target<core> @target
-
-func.def target(@target) @unsigned_remainder_i32(%value: i32, %divisor: i32) -> (i32) {
+func.def @unsigned_remainder_i32(%value: i32, %divisor: i32) -> (i32) {
   %remainder = scalar.remui %value, %divisor : i32
   func.return %remainder : i32
 }
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @unsigned_remainder_i64(%value: i64, %divisor: i64) -> (i64) {
+func.def @unsigned_remainder_i64(%value: i64, %divisor: i64) -> (i64) {
   // ERROR@+1: TARGET/002 {op_name="scalar.remui"}
   %remainder = scalar.remui %value, %divisor : i64
   func.return %remainder : i64
@@ -20,9 +16,7 @@ func.def target(@target) @unsigned_remainder_i64(%value: i64, %divisor: i64) -> 
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @unsigned_remainder_index(%value: index, %divisor: index) -> (index) {
+func.def @unsigned_remainder_index(%value: index, %divisor: index) -> (index) {
   %bounded_value = index.assume %value [range(%value, 0, 4294967295)] : index
   %bounded_divisor = index.assume %divisor [range(%divisor, 1, 4294967295)] : index
   %remainder = index.rem %bounded_value, %bounded_divisor : index

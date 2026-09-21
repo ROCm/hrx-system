@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_index_operands.loom-test
-// RUN: emit source-low output=none control-flow=structured-low
+// RUN: emit source-low target=spirv:vulkan1.3+bda output=none control-flow=structured-low
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @uniform_lhs_index_operands(%input: buffer, %uniform: index) -> (index, index, index, index, index) {
+func.def @uniform_lhs_index_operands(%input: buffer, %uniform: index) -> (index, index, index, index, index) {
   %base = index.constant 0 : offset
   %aligned_input = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %input_view = buffer.view %aligned_input[%base] : buffer -> view<1xi32>
@@ -19,9 +17,7 @@ func.def target(@target) @uniform_lhs_index_operands(%input: buffer, %uniform: i
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @uniform_rhs_index_operands(%input: buffer, %uniform: index) -> (index, index, index, index, index) {
+func.def @uniform_rhs_index_operands(%input: buffer, %uniform: index) -> (index, index, index, index, index) {
   %base = index.constant 0 : offset
   %aligned_input = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %input_view = buffer.view %aligned_input[%base] : buffer -> view<1xi32>
@@ -37,9 +33,7 @@ func.def target(@target) @uniform_rhs_index_operands(%input: buffer, %uniform: i
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @constant_index_operands(%input: buffer) -> (index, index, index, index) {
+func.def @constant_index_operands(%input: buffer) -> (index, index, index, index) {
   %base = index.constant 0 : offset
   %aligned_input = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %input_view = buffer.view %aligned_input[%base] : buffer -> view<1xi32>
@@ -58,9 +52,7 @@ func.def target(@target) @constant_index_operands(%input: buffer) -> (index, ind
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @uniform_index_operands(%lhs: index, %rhs: index) -> (index, index, index, index, index) {
+func.def @uniform_index_operands(%lhs: index, %rhs: index) -> (index, index, index, index, index) {
   %multiply = index.mul %lhs, %rhs : index
   %and = index.andi %lhs, %rhs : index
   %or = index.ori %lhs, %rhs : index
@@ -71,9 +63,7 @@ func.def target(@target) @uniform_index_operands(%lhs: index, %rhs: index) -> (i
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @varying_index_operands(%input: buffer) -> (index, index, index, index, index) {
+func.def @varying_index_operands(%input: buffer) -> (index, index, index, index, index) {
   %base = index.constant 0 : offset
   %aligned_input = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %input_view = buffer.view %aligned_input[%base] : buffer -> view<2xi32>
@@ -91,9 +81,7 @@ func.def target(@target) @varying_index_operands(%input: buffer) -> (index, inde
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @bounded_offset_difference(%input: buffer, %wide_limit: offset) -> (offset) {
+func.def @bounded_offset_difference(%input: buffer, %wide_limit: offset) -> (offset) {
   %base = index.constant 0 : offset
   %aligned_input = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %input_view = buffer.view %aligned_input[%base] : buffer -> view<1xi32>
@@ -107,9 +95,7 @@ func.def target(@target) @bounded_offset_difference(%input: buffer, %wide_limit:
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @address_constant_boundaries() -> (index, index, offset, offset, offset, offset) {
+func.def @address_constant_boundaries() -> (index, index, offset, offset, offset, offset) {
   %minimum_index = index.constant -2147483648 : index
   %maximum_index = index.constant 2147483647 : index
   %compact_offset = index.constant 1023 : offset
@@ -121,9 +107,7 @@ func.def target(@target) @address_constant_boundaries() -> (index, index, offset
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @offset_from_constant_payloads() -> (offset, offset) {
+func.def @offset_from_constant_payloads() -> (offset, offset) {
   %high_bit = scalar.constant -2147483648 : i32
   %all_bits = scalar.constant -1 : i32
   %high_bit_offset = index.cast %high_bit : i32 to offset
@@ -133,9 +117,7 @@ func.def target(@target) @offset_from_constant_payloads() -> (offset, offset) {
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @high_bit_offset_add(%input: offset) -> (i64) {
+func.def @high_bit_offset_add(%input: offset) -> (i64) {
   %bounded = index.assume %input [range(%input, 0, 1023)] : offset
   %base = index.constant 2147483648 : offset
   %sum = index.add %base, %bounded : offset
@@ -145,9 +127,8 @@ func.def target(@target) @high_bit_offset_add(%input: offset) -> (i64) {
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @bounded_addresses(%row: index, %column: index, %byte_offset: offset) -> (index, index, offset) {
+// Every result keeps its matching input, including mixed address domains.
+func.def @bounded_addresses(%row: index, %column: index, %byte_offset: offset) -> (index, index, offset) {
   %bounded_row, %bounded_column, %aligned_offset = index.assume %row, %column, %byte_offset [range(%row, 0, 31), range(%column, 0, 63), mul(%byte_offset, 16)] : index, index, offset
   func.return %bounded_row, %bounded_column, %aligned_offset : index, index, offset
 }

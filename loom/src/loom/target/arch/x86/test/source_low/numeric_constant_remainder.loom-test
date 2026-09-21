@@ -1,16 +1,14 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_constant_remainder.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=x86:avx2 output=low
 
-x86.target<avx2> @target
-
-func.def target(@target) @constant_remainder_uniform(%value: i32) -> (i32) {
+func.def @constant_remainder_uniform(%value: i32) -> (i32) {
   %divisor = scalar.constant 3 : i32
   %remainder = scalar.remui %value, %divisor : i32
   func.return %remainder : i32
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @constant_remainder_uniform(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @constant_remainder_uniform(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %6 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
   %7 = movzx.gpr64.gpr32 %6
   %8 = mov.imm64 2863311531
@@ -26,9 +24,7 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @constant_remai
 
 // ====
 
-x86.target<avx2> @target
-
-func.def target(@target) @constant_remainder_loaded(%input: buffer) -> (i32, index) {
+func.def @constant_remainder_loaded(%input: buffer) -> (i32, index) {
   %base = index.constant 0 : offset
   %aligned_input = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %input_view = buffer.view %aligned_input[%base] : buffer -> view<1xi32>
@@ -44,7 +40,7 @@ func.def target(@target) @constant_remainder_loaded(%input: buffer) -> (i32, ind
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @constant_remainder_loaded(%input_view: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @constant_remainder_loaded(%input_view: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr64>) asm {
   %value = mov.load.gpr32 %input_view {disp32 = 0}
   %18 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
   %19 = movzx.gpr64.gpr32 %18
@@ -72,9 +68,7 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @constant_remai
 
 // ====
 
-x86.target<avx2> @target
-
-func.def target(@target) @constant_remainder_factors(%word: i32, %position: index) -> (i32, i32, index, index) {
+func.def @constant_remainder_factors(%word: i32, %position: index) -> (i32, i32, index, index) {
   %bounded = index.assume %position [range(%position, 0, 4294967295)] : index
   %c5 = scalar.constant 5 : i32
   %c9 = scalar.constant 9 : i32
@@ -88,7 +82,7 @@ func.def target(@target) @constant_remainder_factors(%word: i32, %position: inde
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @constant_remainder_factors(%word: reg<x86.gpr32>, %bounded: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr64>, reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @constant_remainder_factors(%word: reg<x86.gpr32>, %bounded: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr64>, reg<x86.gpr64>) asm {
   %21 = copy %word : reg<x86.gpr32> -> reg<x86.gpr32>
   %22 = movzx.gpr64.gpr32 %21
   %23 = mov.imm64 3435973837
@@ -130,9 +124,7 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @constant_remai
 
 // ====
 
-x86.target<avx2> @target
-
-func.def target(@target) @constant_remainder_by_seven(%word: i32, %position: index) -> (i32, index, i32, index) {
+func.def @constant_remainder_by_seven(%word: i32, %position: index) -> (i32, index, i32, index) {
   %bounded = index.assume %position [range(%position, 0, 4294967295)] : index
   %word_divisor = scalar.constant 7 : i32
   %index_divisor = index.constant 7 : index
@@ -142,7 +134,7 @@ func.def target(@target) @constant_remainder_by_seven(%word: i32, %position: ind
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @constant_remainder_by_seven(%word: reg<x86.gpr32>, %bounded: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr64>, reg<x86.gpr32>, reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @constant_remainder_by_seven(%word: reg<x86.gpr32>, %bounded: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr64>, reg<x86.gpr32>, reg<x86.gpr64>) asm {
   %17 = movzx.gpr64.gpr32 %word
   %18 = mov.imm64 2635249153387078803
   %19 = copy %17 : reg<x86.gpr64> -> reg<x86.gpr64>

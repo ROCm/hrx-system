@@ -170,10 +170,10 @@ iree_status_t loom_check_source_low_parse(
   }
   const bool has_target =
       iree_any_bit_set(request->options, LOOM_CHECK_SOURCE_LOW_OPTION_TARGET);
-  if (has_target != !iree_string_view_is_empty(request->function_name)) {
+  if (!has_target && !iree_string_view_is_empty(request->function_name)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "source-low specialization requires both @function "
-                            "and target=family:selector");
+                            "source-low @function requires "
+                            "target=family:selector");
   }
   if (has_target &&
       (request->output == LOOM_CHECK_EMIT_SOURCE_LOW_OUTPUT_PIPELINE ||
@@ -184,6 +184,46 @@ iree_status_t loom_check_source_low_parse(
         "source-low specialization requires module, low, or none output");
   }
   return iree_ok_status();
+}
+
+iree_status_t loom_check_resolve_source_target(
+    const loom_module_t* module, const loom_target_environment_t* environment,
+    iree_string_view_t function_name,
+    const loom_target_specification_t* specification,
+    loom_target_specialization_request_t* out_request) {
+  *out_request = (loom_target_specialization_request_t){0};
+  if (iree_string_view_is_empty(function_name)) {
+    iree_host_size_t definition_count = 0;
+    iree_host_size_t public_count = 0;
+    for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
+      const loom_symbol_t* symbol = &module->symbols.entries[i];
+      const loom_func_like_t function =
+          loom_func_like_cast(module, symbol->defining_op);
+      if (loom_func_like_body(function) == NULL) {
+        continue;
+      }
+      ++definition_count;
+      const bool is_public =
+          iree_any_bit_set(symbol->flags, LOOM_SYMBOL_FLAG_PUBLIC);
+      public_count += is_public;
+      if (definition_count == 1 || is_public) {
+        function_name =
+            loom_string_table_get(&module->strings, symbol->name_id);
+      }
+    }
+    if (definition_count == 0 || (definition_count > 1 && public_count != 1)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "target compile option requires one function definition or one "
+          "public entry with private helpers; specify @function for an "
+          "ambiguous module (got %" PRIhsz " definitions and %" PRIhsz
+          " public entries)",
+          definition_count, public_count);
+    }
+  }
+  out_request->function_name = function_name;
+  return loom_target_environment_select_profile(environment, specification,
+                                                &out_request->target_profile);
 }
 
 static void loom_check_emit_initialize_source_low_print_options(
@@ -509,10 +549,9 @@ iree_status_t loom_check_source_low_emit(
   prepare_options.sanitizer = request->sanitizer;
   loom_target_specialization_request_t specialization = {0};
   if (iree_any_bit_set(request->options, LOOM_CHECK_SOURCE_LOW_OPTION_TARGET)) {
-    specialization.function_name = request->function_name;
-    IREE_RETURN_IF_ERROR(loom_target_environment_select_profile(
-        environment->target_environment, &request->target,
-        &specialization.target_profile));
+    IREE_RETURN_IF_ERROR(loom_check_resolve_source_target(
+        module, environment->target_environment, request->function_name,
+        &request->target, &specialization));
     prepare_options.target_specializations =
         (loom_target_specialization_request_list_t){&specialization, 1};
   }

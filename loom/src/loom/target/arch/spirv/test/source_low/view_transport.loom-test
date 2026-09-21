@@ -1,10 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/view_transport.loom-test
 // TEMPLATE-EXCLUDE: @correlated_cfg_rotation SPIR-V requires structured control flow.
-// RUN: emit source-low output=low control-flow=structured-low
+// RUN: emit source-low target=spirv:vulkan1.3+bda output=low control-flow=structured-low
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @wide_subview_selection(%input: buffer, %byte_base0: offset, %condition: i1) -> (i32) {
+func.def @wide_subview_selection(%input: buffer, %byte_base0: offset, %condition: i1) -> (i32) {
   %byte_base = index.assume %byte_base0 [range(%byte_base0, 2147483648, 4294967296), mul(%byte_base0, 4)] : offset
   %aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %root = buffer.view %aligned[%byte_base] : buffer -> view<4xi32>
@@ -16,7 +14,7 @@ func.def target(@target) @wide_subview_selection(%input: buffer, %byte_base0: of
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @wide_subview_selection(%aligned: reg<spirv.ptr.storage_buffer>, %byte_base: reg<spirv.offset64>, %condition: reg<spirv.id : i1>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @wide_subview_selection(%aligned: reg<spirv.ptr.storage_buffer>, %byte_base: reg<spirv.offset64>, %condition: reg<spirv.id : i1>) -> (reg<spirv.id : i32>) asm {
   %24 = OpBitcast.offset64.i64 %byte_base
   %25 = OpConstant.i64 4
   %26 = OpIAdd.i64 %24, %25
@@ -32,9 +30,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @wide_s
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @distinct_root_selection(%first: buffer, %second: buffer, %condition: i1) -> (i32) {
+func.def @distinct_root_selection(%first: buffer, %second: buffer, %condition: i1) -> (i32) {
   %first_offset = index.constant 4 : offset
   %second_offset = index.constant 8 : offset
   %first_aligned = buffer.assume.alignment %first {minimum_alignment = 4} : buffer
@@ -47,7 +43,7 @@ func.def target(@target) @distinct_root_selection(%first: buffer, %second: buffe
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @distinct_root_selection(%first_aligned: reg<spirv.ptr.storage_buffer>, %second_aligned: reg<spirv.ptr.storage_buffer>, %condition: reg<spirv.id : i1>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @distinct_root_selection(%first_aligned: reg<spirv.ptr.storage_buffer>, %second_aligned: reg<spirv.ptr.storage_buffer>, %condition: reg<spirv.id : i1>) -> (reg<spirv.id : i32>) asm {
   %first_offset = OpConstant.offset64 4
   %second_offset = OpConstant.offset64 8
   %selected_root, %selected_offset = low.scf.if %condition -> (reg<spirv.ptr.storage_buffer>, reg<spirv.offset64>) {
@@ -62,9 +58,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @distin
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def public target(@target) @rotate_buffer_views(%input: buffer, %count_input: index, %seed: i32) -> (i32) {
+func.def public @rotate_buffer_views(%input: buffer, %count_input: index, %seed: i32) -> (i32) {
   %count = index.assume %count_input [range(%count_input, 0, 257)] : index
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
@@ -104,7 +98,7 @@ func.def public target(@target) @rotate_buffer_views(%input: buffer, %count_inpu
 }
 
 // ----
-low.func.def public target<spirv.logical.core>(@target) abi(shader_entry_point) @rotate_buffer_views(%storage: reg<spirv.ptr.storage_buffer>, %count: reg<spirv.id : index>, %seed: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+low.func.def public target<spirv.logical.core> abi(shader_entry_point) @rotate_buffer_views(%storage: reg<spirv.ptr.storage_buffer>, %count: reg<spirv.id : index>, %seed: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
   %begin = OpConstant.i32 0 : reg<spirv.id : index>
   %step = OpConstant.i32 1 : reg<spirv.id : index>
   %depth = OpConstant.i32 4
@@ -142,9 +136,7 @@ low.func.def public target<spirv.logical.core>(@target) abi(shader_entry_point) 
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @correlated_duplicate_rotation(%input: buffer, %count_input: index, %first_offset_input: offset, %second_offset_input: offset) -> (i32) {
+func.def @correlated_duplicate_rotation(%input: buffer, %count_input: index, %first_offset_input: offset, %second_offset_input: offset) -> (i32) {
   %count = index.assume %count_input [range(%count_input, 0, 257)] : index
   %first_offset = index.assume %first_offset_input [range(%first_offset_input, 0, 4092), mul(%first_offset_input, 4)] : offset
   %second_offset = index.assume %second_offset_input [range(%second_offset_input, 0, 4092), mul(%second_offset_input, 4)] : offset
@@ -171,7 +163,7 @@ func.def target(@target) @correlated_duplicate_rotation(%input: buffer, %count_i
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @correlated_duplicate_rotation(%storage: reg<spirv.ptr.storage_buffer>, %count: reg<spirv.id : index>, %first_offset: reg<spirv.offset64>, %second_offset: reg<spirv.offset64>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @correlated_duplicate_rotation(%storage: reg<spirv.ptr.storage_buffer>, %count: reg<spirv.id : index>, %first_offset: reg<spirv.offset64>, %second_offset: reg<spirv.offset64>) -> (reg<spirv.id : i32>) asm {
   %begin = OpConstant.i32 0 : reg<spirv.id : index>
   %step = OpConstant.i32 1 : reg<spirv.id : index>
   %last_a_offset, %last_b_offset = low.scf.for signed [%begin to %count step %step] iter_args(%first_offset: reg<spirv.offset64>, %second_offset: reg<spirv.offset64>) -> (reg<spirv.offset64>, reg<spirv.offset64>) do(%i: reg<spirv.id : index>, %a_offset: reg<spirv.offset64>, %b_offset: reg<spirv.offset64>) {

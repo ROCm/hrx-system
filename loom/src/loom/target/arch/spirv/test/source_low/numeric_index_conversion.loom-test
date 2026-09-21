@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_index_conversion.loom-test
-// RUN: emit source-low output=low control-flow=structured-low
+// RUN: emit source-low target=spirv:vulkan1.3+bda+extended-types output=low control-flow=structured-low
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @index_constants() -> (index, index, offset) {
+func.def @index_constants() -> (index, index, offset) {
   %minimum = index.constant -2147483648 : index
   %maximum = index.constant 2147483647 : index
   %byte_limit = index.constant 9223372036854775807 : offset
@@ -11,7 +9,7 @@ func.def target(@target) @index_constants() -> (index, index, offset) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @index_constants() -> (reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.offset64>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @index_constants() -> (reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.offset64>) asm {
   %minimum = OpConstant.i32 -2147483648 : reg<spirv.id : index>
   %maximum = OpConstant.i32 2147483647 : reg<spirv.id : index>
   %byte_limit = OpConstant.offset64 9223372036854775807
@@ -20,23 +18,19 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @index_
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @index_assume_ordinals(%coordinate0: index, %byte_offset0: offset) -> (index, offset) {
+func.def @index_assume_ordinals(%coordinate0: index, %byte_offset0: offset) -> (index, offset) {
   %coordinate, %byte_offset = index.assume %coordinate0, %byte_offset0 [range(%coordinate0, 0, 1024), range(%byte_offset0, 0, 4096)] : index, offset
   func.return %coordinate, %byte_offset : index, offset
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @index_assume_ordinals(%coordinate: reg<spirv.id : index>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.id : index>, reg<spirv.offset64>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @index_assume_ordinals(%coordinate: reg<spirv.id : index>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.id : index>, reg<spirv.offset64>) asm {
   return %coordinate, %byte_offset
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @boolean_address_cast_family(%flag: i1, %coordinate: index, %byte_offset: offset) -> (index, offset, i1, i1) {
+func.def @boolean_address_cast_family(%flag: i1, %coordinate: index, %byte_offset: offset) -> (index, offset, i1, i1) {
   %flag_index = index.cast %flag : i1 to index
   %flag_offset = index.cast %flag : i1 to offset
   %index_low_bit = index.cast %coordinate : index to i1
@@ -45,7 +39,7 @@ func.def target(@target) @boolean_address_cast_family(%flag: i1, %coordinate: in
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @boolean_address_cast_family(%flag: reg<spirv.id : i1>, %coordinate: reg<spirv.id : index>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.id : index>, reg<spirv.offset64>, reg<spirv.id : i1>, reg<spirv.id : i1>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @boolean_address_cast_family(%flag: reg<spirv.id : i1>, %coordinate: reg<spirv.id : index>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.id : index>, reg<spirv.offset64>, reg<spirv.id : i1>, reg<spirv.id : i1>) asm {
   %18 = OpConstant.i32 1 : reg<spirv.id : index>
   %19 = OpConstant.i32 0 : reg<spirv.id : index>
   %flag_index = OpSelect %flag, %18, %19 : reg<spirv.id : index>
@@ -63,9 +57,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @boolea
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @index_payload_cast_family(%i8: i8, %i16: i16, %i32: i32, %i64_raw: i64, %coordinate: index) -> (index, index, index, index, i8, i16, i32, i64) {
+func.def @index_payload_cast_family(%i8: i8, %i16: i16, %i32: i32, %i64_raw: i64, %coordinate: index) -> (index, index, index, index, i8, i16, i32, i64) {
   %i64 = scalar.assume %i64_raw [range(%i64_raw, -2147483648, 2147483647)] : i64
   %from_i8 = index.cast %i8 : i8 to index
   %from_i16 = index.cast %i16 : i16 to index
@@ -79,7 +71,7 @@ func.def target(@target) @index_payload_cast_family(%i8: i8, %i16: i16, %i32: i3
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @index_payload_cast_family(%i8: reg<spirv.id : i8>, %i16: reg<spirv.id : i16>, %i32: reg<spirv.id : i32>, %i64: reg<spirv.id : i64>, %coordinate: reg<spirv.id : index>) -> (reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : i8>, reg<spirv.id : i16>, reg<spirv.id : i32>, reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @index_payload_cast_family(%i8: reg<spirv.id : i8>, %i16: reg<spirv.id : i16>, %i32: reg<spirv.id : i32>, %i64: reg<spirv.id : i64>, %coordinate: reg<spirv.id : index>) -> (reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : i8>, reg<spirv.id : i16>, reg<spirv.id : i32>, reg<spirv.id : i64>) asm {
   %from_i8 = OpSConvert.i8.i32 %i8 : reg<spirv.id : index>
   %from_i16 = OpSConvert.i16.i32 %i16 : reg<spirv.id : index>
   %from_i32 = OpCopyObject.i32 %i32 : reg<spirv.id : index>
@@ -93,9 +85,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @index_
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @offset_payload_cast_family(%i8: i8, %i16: i16, %i32: i32, %i64_raw: i64, %byte_offset: offset) -> (offset, offset, offset, offset, i8, i16, i32, i64) {
+func.def @offset_payload_cast_family(%i8: i8, %i16: i16, %i32: i32, %i64_raw: i64, %byte_offset: offset) -> (offset, offset, offset, offset, i8, i16, i32, i64) {
   %i64 = scalar.assume %i64_raw [range(%i64_raw, 0, 9223372036854775807)] : i64
   %from_i8 = index.cast %i8 : i8 to offset
   %from_i16 = index.cast %i16 : i16 to offset
@@ -109,7 +99,7 @@ func.def target(@target) @offset_payload_cast_family(%i8: i8, %i16: i16, %i32: i
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @offset_payload_cast_family(%i8: reg<spirv.id : i8>, %i16: reg<spirv.id : i16>, %i32: reg<spirv.id : i32>, %i64: reg<spirv.id : i64>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.offset64>, reg<spirv.offset64>, reg<spirv.offset64>, reg<spirv.offset64>, reg<spirv.id : i8>, reg<spirv.id : i16>, reg<spirv.id : i32>, reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @offset_payload_cast_family(%i8: reg<spirv.id : i8>, %i16: reg<spirv.id : i16>, %i32: reg<spirv.id : i32>, %i64: reg<spirv.id : i64>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.offset64>, reg<spirv.offset64>, reg<spirv.offset64>, reg<spirv.offset64>, reg<spirv.id : i8>, reg<spirv.id : i16>, reg<spirv.id : i32>, reg<spirv.id : i64>) asm {
   %35 = OpBitcast.i8.u8 %i8
   %from_i8 = OpUConvert.u8.offset64 %35
   %37 = OpBitcast.i16.u16 %i16
@@ -129,9 +119,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @offset
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @address_domain_cast_family(%coordinate0: index, %byte_offset0: offset) -> (offset, index) {
+func.def @address_domain_cast_family(%coordinate0: index, %byte_offset0: offset) -> (offset, index) {
   %coordinate, %byte_offset = index.assume %coordinate0, %byte_offset0 [range(%coordinate0, 0, 2147483647), range(%byte_offset0, 0, 2147483647)] : index, offset
   %as_offset = index.cast %coordinate : index to offset
   %as_index = index.cast %byte_offset : offset to index
@@ -139,7 +127,7 @@ func.def target(@target) @address_domain_cast_family(%coordinate0: index, %byte_
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @address_domain_cast_family(%coordinate: reg<spirv.id : index>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.offset64>, reg<spirv.id : index>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @address_domain_cast_family(%coordinate: reg<spirv.id : index>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.offset64>, reg<spirv.id : index>) asm {
   %12 = OpBitcast.i32.u32 %coordinate
   %as_offset = OpUConvert.u32.offset64 %12
   %14 = OpUConvert.offset64.u32 %byte_offset

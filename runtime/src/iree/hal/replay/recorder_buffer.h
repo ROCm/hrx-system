@@ -43,7 +43,8 @@ iree_status_t iree_hal_replay_recorder_buffer_create_proxy(
     iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer);
 
 // Allocates uninitialized proxy storage so a caller can complete all fallible
-// host allocation before submitting a queue operation.
+// host allocation before transferring ownership or submitting a queue
+// operation.
 iree_status_t iree_hal_replay_recorder_buffer_allocate_proxy(
     iree_allocator_t host_allocator,
     iree_hal_replay_recorder_buffer_t** out_buffer);

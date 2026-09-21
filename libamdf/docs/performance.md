@@ -21,7 +21,7 @@ not promise a wall-clock deadline for kernel submission.
 | Immutable object and address queries | Validate the public request and copy or directly index retained facts. | Locks, allocation, lazy initialization, ownership-counter updates and native queries. |
 | Scope-profile and visibility planning | Qualify a proposed consumer set and exact producer/consumer pair, using temporary host storage. | Device activation, native allocation, mapping and execution. This is not an allocation-free per-dispatch query. |
 | Device, memory, context and queue creation | Acquire the native resources, address mappings, residency, packet storage and completion objects required by the requested resource. | Deferring that resource's preparation to a metadata query or its first publication. |
-| Kernel publication | Claim a queue slot, resolve the caller-owned command range, fill required transport fields and publish natively. | Library locks, allocation, lazy setup, command parsing/copying, indirect-buffer scans and completion waits. |
+| Kernel publication | Claim publication, check pending capacity, resolve the caller-owned command range, fill required transport fields and publish natively. Capacity pressure can reclaim completed credits; XDNA also consumes completed command results before packet reuse. | Library locks, allocation, lazy setup, command parsing/copying, indirect-buffer scans and completion waits. |
 | Kernel progress observation | Read established retirement and cached terminal state without mutating either. | Native completion checks, command-result consumption, retirement, library locks, allocation, lazy setup, system calls and active polling. |
 | Explicit waiting | Refresh native progress, inspect command results and establish retirement; query clocks, poll within the requested budget, yield and enter native waits. | Allocation or first-wait resource creation. Wait-event serialization consumes the same deadline. |
 
@@ -48,11 +48,37 @@ runtime controls sharing and scheduling above this boundary. A wrapper that
 adds a mutex to every handle or a reference-count operation to every metadata
 read changes the steady-state contract.
 
+GPU and XDNA kernel queues have a configurable pending-submission capacity,
+defaulting to 4096. The native publication claim lasts only through the driver
+call; it does not serialize submissions against execution completion. Accepted and
+checked-retired fence points account for the pending window without a
+per-submission allocation, command copy, or memory-retention list. When the
+window fills, submission refreshes native progress without waiting and reclaims
+completed credits before returning `BUSY` if capacity is still unavailable.
+GPU queues need only the fence counters. XDNA additionally retains preallocated
+packet/result slots and consumes each completed result before reusing its slot;
+reclamation cost is proportional to the completed prefix. A caller can pipeline
+commands without intermediate host waits. Native resource exhaustion can reject
+work before the configured admission bound is reached.
+
+Windows uses its mapped progress fence. Linux XDNA uses a native timeline query
+when reclaiming capacity; its ambiguous first point additionally needs a
+zero-time check of an exact fence snapshot. The snapshot object is created with
+the queue. A one-time transfer captures the first accepted fence before either
+waiting on it or publishing a second command; this preserves identity without
+allocating another object or waiting for completion. Concurrent capture returns
+`BUSY` to a publisher instead of delaying publication behind the observer.
+
+This capacity counts unfinished submissions, unlike a user queue's byte-sized
+command ring. Native ring consumption permits those bytes to be reused but
+does not establish completion of the work they described.
+
 The wait path is deliberately different. Windows native waits reuse an event
 prepared during queue creation and serialize access to it. That serialization
 belongs to waiting, not submission or status sampling. Linux DRM progress
 without a mapped fence is refreshed by explicit waits, including a zero-time
-wait; the status method returns cached progress rather than hiding an ioctl.
+wait, or by submission under capacity pressure; the status method returns
+established retirement rather than hiding an ioctl.
 
 GPU user-queue status has another contract: it may query native queue or VM
 fault state. It is not interchangeable with the syscall-free kernel-queue

@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/owned_buffers.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=vm:core output=low
 
-vm.target<core> @vm
-
-func.def target(@vm) @owned_bytes(%byte_count: i64, %byte_start: i64, %pattern: i32) -> (i32, i32, i32) {
+func.def @owned_bytes(%byte_count: i64, %byte_start: i64, %pattern: i32) -> (i32, i32, i32) {
   %count_input = scalar.assume %byte_count [range(%byte_count, 0, 9223372036854775807)] : i64
   %length = index.cast %count_input : i64 to offset
   %start_input = scalar.assume %byte_start [range(%byte_start, 0, 9223372036854775807)] : i64
@@ -26,7 +24,7 @@ func.def target(@vm) @owned_bytes(%byte_count: i64, %byte_start: i64, %pattern: 
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @owned_bytes(%length: reg<vm.value : i64>, %start: reg<vm.value : i64>, %pattern: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) asm {
+low.func.def target<vm.core> abi(vm_function) @owned_bytes(%length: reg<vm.value : i64>, %start: reg<vm.value : i64>, %pattern: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) asm {
   %base_offset = constant.i64 0
   %extent = integer.add.i64 %start, %length
   %source = buffer.allocate %extent, 6 : reg<vm.ref : buffer>
@@ -46,9 +44,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @owned_bytes(%length: reg<vm.
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @buffer_generations(%count: i32, %byte_count: i64) -> (i32) {
+func.def @buffer_generations(%count: i32, %byte_count: i64) -> (i32) {
   %count_input = scalar.assume %byte_count [range(%byte_count, 0, 9223372036854775807)] : i64
   %length = index.cast %count_input : i64 to offset
   %base_offset = index.constant 0 : offset
@@ -76,7 +72,7 @@ func.def target(@vm) @buffer_generations(%count: i32, %byte_count: i64) -> (i32)
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @buffer_generations(%count: reg<vm.value : i32>, %length: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
+low.func.def target<vm.core> abi(vm_function) @buffer_generations(%count: reg<vm.value : i32>, %length: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
   %base_offset = constant.i64 0
   %first = buffer.allocate %length, 3 : reg<vm.ref : buffer>
   %second = buffer.allocate %length, 3 : reg<vm.ref : buffer>
@@ -104,9 +100,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @buffer_generations(%count: r
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @floating_patterns(%byte_count: i64, %half: bf16, %byte: f8E4M3, %wide: f64) -> (i32, i32, i32) {
+func.def @floating_patterns(%byte_count: i64, %half: bf16, %byte: f8E4M3, %wide: f64) -> (i32, i32, i32) {
   %count_input = scalar.assume %byte_count [range(%byte_count, 0, 9223372036854775807)] : i64
   %length = index.cast %count_input : i64 to offset
   %base_offset = index.constant 0 : offset
@@ -128,7 +122,7 @@ func.def target(@vm) @floating_patterns(%byte_count: i64, %half: bf16, %byte: f8
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @floating_patterns(%length: reg<vm.value : i64>, %half: reg<vm.value : bf16>, %byte: reg<vm.value : f8E4M3>, %wide: reg<vm.value : f64>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) asm {
+low.func.def target<vm.core> abi(vm_function) @floating_patterns(%length: reg<vm.value : i64>, %half: reg<vm.value : bf16>, %byte: reg<vm.value : f8E4M3>, %wide: reg<vm.value : f64>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) asm {
   %base_offset = constant.i64 0
   %left = buffer.allocate %length, 3 : reg<vm.ref : buffer>
   %right = buffer.allocate %length, 3 : reg<vm.ref : buffer>

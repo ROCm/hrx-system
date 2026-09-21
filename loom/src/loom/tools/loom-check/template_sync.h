@@ -9,9 +9,11 @@
 // A target suite may declare a file-level `// TEMPLATE: <path>` directive.
 // Every loom-check run uses the template's cases as the authoritative case list
 // and verifies that the concrete target file is current. --update materializes
-// that list while preserving the target suite's file-level RUN directive and
-// any case-local REQUIRES/XFAIL directives already in the target file. Case
-// identity is the single func-like definition in each case body, or the unique
+// that list and source text while preserving the target suite's file-level RUN
+// directive and case-local RUN/REQUIRES/XFAIL directives. Targets are compiler
+// options in those directives; synchronization adds no target declarations,
+// bindings, or other program text. Case identity is the single func-like
+// definition in each case body, or the unique
 // public func-like definition when a case also contains private helper bodies.
 // File-level `// TEMPLATE-EXCLUDE: @<case> <reason>` directives omit exact
 // named cases from synchronization. Exclusions must name existing template
@@ -36,7 +38,7 @@ extern "C" {
 // The target file preamble is preserved, including its authoritative RUN line.
 // Template RUN lines, diagnostic annotations, and expected sections are not
 // copied. Existing target cases with matching func-like definitions keep their
-// expected section, case-local REQUIRES/XFAIL directives, and diagnostic
+// expected section, case-local RUN/REQUIRES/XFAIL directives, and diagnostic
 // annotations; stale target-only cases are omitted. The rebuilt text is written
 // into |new_source|;
 // |*out_changed| reports whether it differs from |target_source|.

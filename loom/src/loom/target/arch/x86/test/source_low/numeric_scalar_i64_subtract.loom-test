@@ -1,15 +1,13 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_scalar_i64_subtract.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=x86:avx2 output=low
 
-x86.target<avx2> @target
-
-func.def target(@target) @uniform_subtract(%lhs: i64, %rhs: i64) -> (i64) {
+func.def @uniform_subtract(%lhs: i64, %rhs: i64) -> (i64) {
   %difference = scalar.subi %lhs, %rhs : i64
   func.return %difference : i64
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @uniform_subtract(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @uniform_subtract(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %7 = copy %lhs : reg<x86.gpr64> -> reg<x86.gpr64>
   %difference = sub.gpr64 %7, %rhs
   return %difference
@@ -17,9 +15,7 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @uniform_subtra
 
 // ====
 
-x86.target<avx2> @target
-
-func.def target(@target) @constant_subtract(%value: i64) -> (i64, i64, i64) {
+func.def @constant_subtract(%value: i64) -> (i64, i64, i64) {
   %c0 = scalar.constant 0 : i64
   %wide = scalar.constant 4294967297 : i64
   %negated = scalar.subi %c0, %value : i64
@@ -29,7 +25,7 @@ func.def target(@target) @constant_subtract(%value: i64) -> (i64, i64, i64) {
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @constant_subtract(%value: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @constant_subtract(%value: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>) asm {
   %c0 = mov.imm64 0
   %wide = mov.imm64 4294967297
   %17 = copy %c0 : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -44,9 +40,7 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @constant_subtr
 
 // ====
 
-x86.target<avx2> @target
-
-func.def target(@target) @mixed_subtract(%uniform: i64, %values: vector<2xi64>) -> (i64, i64) {
+func.def @mixed_subtract(%uniform: i64, %values: vector<2xi64>) -> (i64, i64) {
   %varying = vector.extract %values[0] : vector<2xi64> -> i64
   %uniform_left = scalar.subi %uniform, %varying : i64
   %uniform_right = scalar.subi %varying, %uniform : i64
@@ -54,7 +48,7 @@ func.def target(@target) @mixed_subtract(%uniform: i64, %values: vector<2xi64>) 
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @mixed_subtract(%uniform: reg<x86.gpr64>, %values: reg<x86.xmm>) -> (reg<x86.gpr64>, reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @mixed_subtract(%uniform: reg<x86.gpr64>, %values: reg<x86.xmm>) -> (reg<x86.gpr64>, reg<x86.gpr64>) asm {
   %varying = vpextrq.xmm %values, 0
   %12 = copy %uniform : reg<x86.gpr64> -> reg<x86.gpr64>
   %uniform_left = sub.gpr64 %12, %varying

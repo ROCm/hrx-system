@@ -381,8 +381,11 @@ static ReplayRecordSummary ParseReplayRecordSummary(
             IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_IMPORT_BUFFER) {
           ++summary.unsupported_import_buffer_record_count;
         } else if (record.header.operation_code ==
-                   IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_EXPORT_BUFFER) {
+                   IREE_HAL_REPLAY_OPERATION_CODE_BUFFER_EXPORT) {
           ++summary.unsupported_export_buffer_record_count;
+          EXPECT_EQ(IREE_HAL_REPLAY_OBJECT_TYPE_BUFFER,
+                    record.header.object_type);
+          EXPECT_NE(IREE_HAL_REPLAY_OBJECT_ID_NONE, record.header.object_id);
         } else if (record.header.operation_code ==
                    IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_HOST_CALL) {
           ++summary.unsupported_host_call_record_count;
@@ -792,8 +795,7 @@ TEST(ReplayRecorderTest, WrappedDeviceRecordsHostCallAsUnsupported) {
   EXPECT_EQ(1u, summary.unsupported_host_call_record_count);
 }
 
-TEST(ReplayRecorderTest,
-     WrappedAllocatorSnapshotsHostAllocationImportsAndMarksExportsUnsupported) {
+TEST(ReplayRecorderTest, WrappedImportsAndExportsPreserveNativeBufferViews) {
   std::vector<uint8_t> storage(32768, 0);
   iree_hal_replay_recorder_t* recorder = CreateHostAllocationRecorder(&storage);
 
@@ -813,7 +815,8 @@ TEST(ReplayRecorderTest,
   params.usage =
       IREE_HAL_BUFFER_USAGE_MAPPING | IREE_HAL_BUFFER_USAGE_SHARING_EXPORT;
 
-  alignas(64) uint8_t imported_storage[16] = {0};
+  alignas(64) uint8_t imported_storage[16] = {0, 1, 2,  3,  4,  5,  6,  7,
+                                              8, 9, 10, 11, 12, 13, 14, 15};
   iree_hal_external_buffer_t external_buffer = {};
   external_buffer.type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION;
   external_buffer.size = sizeof(imported_storage);
@@ -827,15 +830,30 @@ TEST(ReplayRecorderTest,
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       allocator, params, sizeof(imported_storage), &allocated_buffer));
   iree_hal_external_buffer_t exported_buffer = {};
-  IREE_ASSERT_OK(iree_hal_allocator_export_buffer(
-      allocator, allocated_buffer,
-      IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
+  IREE_ASSERT_OK(iree_hal_buffer_export(
+      allocated_buffer, IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
       IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE, &exported_buffer));
   EXPECT_EQ(IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
             exported_buffer.type);
 
-  iree_hal_buffer_release(allocated_buffer);
+  iree_hal_buffer_t* subspan = nullptr;
+  IREE_ASSERT_OK(iree_hal_buffer_subspan(imported_buffer, 4, 8,
+                                         iree_allocator_system(), &subspan));
+  iree_hal_buffer_t* nested_subspan = nullptr;
+  IREE_ASSERT_OK(iree_hal_buffer_subspan(subspan, 2, 4, iree_allocator_system(),
+                                         &nested_subspan));
+  iree_hal_buffer_release(subspan);
   iree_hal_buffer_release(imported_buffer);
+  IREE_ASSERT_OK(iree_hal_buffer_export(
+      nested_subspan, IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
+      IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE, &exported_buffer));
+  EXPECT_EQ(imported_storage + 6, exported_buffer.handle.host_allocation.ptr);
+  EXPECT_EQ(4u, exported_buffer.size);
+  const uint8_t expected[] = {6, 7, 8, 9};
+  EXPECT_EQ(0, memcmp(expected, exported_buffer.handle.host_allocation.ptr,
+                      sizeof(expected)));
+  iree_hal_buffer_release(nested_subspan);
+  iree_hal_buffer_release(allocated_buffer);
 
   IREE_ASSERT_OK(iree_hal_replay_recorder_close(recorder));
   iree_hal_replay_recorder_release(recorder);
@@ -848,7 +866,7 @@ TEST(ReplayRecorderTest,
   EXPECT_EQ(sizeof(imported_storage),
             summary.import_buffer_captured_data_length);
   EXPECT_EQ(0u, summary.unsupported_import_buffer_record_count);
-  EXPECT_EQ(1u, summary.unsupported_export_buffer_record_count);
+  EXPECT_EQ(2u, summary.unsupported_export_buffer_record_count);
   EXPECT_EQ(2u, summary.buffer_object_record_count);
 }
 
@@ -1804,7 +1822,6 @@ const iree_hal_allocator_vtable_t recorder_vmm_allocator_vtable = {
     /*.allocate_buffer=*/RecorderVmmAllocatorAllocateBuffer,
     /*.deallocate_buffer=*/nullptr,
     /*.import_buffer=*/nullptr,
-    /*.export_buffer=*/nullptr,
     /*.supports_virtual_memory=*/RecorderVmmAllocatorSupportsVirtualMemory,
     /*.virtual_memory_query_granularity=*/
     RecorderVmmAllocatorQueryGranularity,

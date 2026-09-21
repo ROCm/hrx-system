@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_scalar_conversion.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=vm:core output=low
 
-vm.target<core> @vm
-
-func.def target(@vm) @integer_widths(%boolean: i1, %word: i32, %wide: i64) -> (i32, i64, i64, i64, i1, i32) {
+func.def @integer_widths(%boolean: i1, %word: i32, %wide: i64) -> (i32, i64, i64, i64, i1, i32) {
   %signed_boolean = scalar.extsi %boolean : i1 to i32
   %unsigned_boolean = scalar.extui %boolean : i1 to i64
   %signed_word = scalar.extsi %word : i32 to i64
@@ -14,7 +12,7 @@ func.def target(@vm) @integer_widths(%boolean: i1, %word: i32, %wide: i64) -> (i
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @integer_widths(%boolean: reg<vm.value : i1>, %word: reg<vm.value : i32>, %wide: reg<vm.value : i64>) -> (reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i1>, reg<vm.value : i32>) asm {
+low.func.def target<vm.core> abi(vm_function) @integer_widths(%boolean: reg<vm.value : i1>, %word: reg<vm.value : i32>, %wide: reg<vm.value : i64>) -> (reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i1>, reg<vm.value : i32>) asm {
   %signed_boolean = conversion.integer %boolean, "s1.to.i32" : reg<vm.value : i32>
   %unsigned_boolean = conversion.integer %boolean, "u1.to.i64"
   %signed_word = conversion.integer %word, "s32.to.i64"
@@ -26,16 +24,14 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @integer_widths(%boolean: reg
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @float_widths(%single: f32, %double: f64) -> (f64, f32) {
+func.def @float_widths(%single: f32, %double: f64) -> (f64, f32) {
   %wide = scalar.extf %single : f32 to f64
   %narrow = scalar.fptrunc %double : f64 to f32
   func.return %wide, %narrow : f64, f32
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @float_widths(%single: reg<vm.value : f32>, %double: reg<vm.value : f64>) -> (reg<vm.value : f64>, reg<vm.value : f32>) asm {
+low.func.def target<vm.core> abi(vm_function) @float_widths(%single: reg<vm.value : f32>, %double: reg<vm.value : f64>) -> (reg<vm.value : f64>, reg<vm.value : f32>) asm {
   %wide = conversion.float.width %single, "f32.to.f64" : reg<vm.value : f64>
   %narrow = conversion.float.width %double, "f64.to.f32" : reg<vm.value : f32>
   return %wide, %narrow
@@ -43,9 +39,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @float_widths(%single: reg<vm
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @integer_to_float(%word: i32, %wide: i64) -> (f32, f64, f32, f64, f32, f64, f32, f64) {
+func.def @integer_to_float(%word: i32, %wide: i64) -> (f32, f64, f32, f64, f32, f64, f32, f64) {
   %signed_word_f32 = scalar.sitofp %word : i32 to f32
   %signed_word_f64 = scalar.sitofp %word : i32 to f64
   %unsigned_word_f32 = scalar.uitofp %word : i32 to f32
@@ -58,7 +52,7 @@ func.def target(@vm) @integer_to_float(%word: i32, %wide: i64) -> (f32, f64, f32
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @integer_to_float(%word: reg<vm.value : i32>, %wide: reg<vm.value : i64>) -> (reg<vm.value : f32>, reg<vm.value : f64>, reg<vm.value : f32>, reg<vm.value : f64>, reg<vm.value : f32>, reg<vm.value : f64>, reg<vm.value : f32>, reg<vm.value : f64>) asm {
+low.func.def target<vm.core> abi(vm_function) @integer_to_float(%word: reg<vm.value : i32>, %wide: reg<vm.value : i64>) -> (reg<vm.value : f32>, reg<vm.value : f64>, reg<vm.value : f32>, reg<vm.value : f64>, reg<vm.value : f32>, reg<vm.value : f64>, reg<vm.value : f32>, reg<vm.value : f64>) asm {
   %signed_word_f32 = conversion.integer.to.float %word, "s32.to.f32" : reg<vm.value : f32>
   %signed_word_f64 = conversion.integer.to.float %word, "s32.to.f64" : reg<vm.value : f64>
   %unsigned_word_f32 = conversion.integer.to.float %word, "u32.to.f32" : reg<vm.value : f32>
@@ -72,9 +66,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @integer_to_float(%word: reg<
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @float_to_integer(%single: f32, %double: f64) -> (i32, i64, i32, i64, i32, i64, i32, i64) {
+func.def @float_to_integer(%single: f32, %double: f64) -> (i32, i64, i32, i64, i32, i64, i32, i64) {
   %signed_single_i32 = scalar.fptosi %single : f32 to i32
   %signed_single_i64 = scalar.fptosi %single : f32 to i64
   %unsigned_single_i32 = scalar.fptoui %single : f32 to i32
@@ -87,7 +79,7 @@ func.def target(@vm) @float_to_integer(%single: f32, %double: f64) -> (i32, i64,
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @float_to_integer(%single: reg<vm.value : f32>, %double: reg<vm.value : f64>) -> (reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : i32>, reg<vm.value : i64>) asm {
+low.func.def target<vm.core> abi(vm_function) @float_to_integer(%single: reg<vm.value : f32>, %double: reg<vm.value : f64>) -> (reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : i32>, reg<vm.value : i64>) asm {
   %signed_single_i32 = conversion.float.to.integer %single, "f32.to.s32" : reg<vm.value : i32>
   %signed_single_i64 = conversion.float.to.integer %single, "f32.to.s64"
   %unsigned_single_i32 = conversion.float.to.integer %single, "f32.to.u32" : reg<vm.value : i32>

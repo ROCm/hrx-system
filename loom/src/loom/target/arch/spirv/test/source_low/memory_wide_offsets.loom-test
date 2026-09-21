@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_wide_offsets.loom-test
-// RUN: emit source-low output=low control-flow=structured-low
+// RUN: emit source-low target=spirv:vulkan1.3+bda+extended-types output=low control-flow=structured-low
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-kernel.def target(@target) @wide_offset_unsigned_index() {
+kernel.def @wide_offset_unsigned_index() {
   %unit = index.constant 1 : index
   %lane_count = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lane_count, %unit, %unit) : index
@@ -29,9 +27,7 @@ kernel.def target(@target) @wide_offset_unsigned_index() {
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-kernel.def target(@target) @wide_offset_uniform() {
+kernel.def @wide_offset_uniform() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%input_storage: buffer, %output_storage: buffer, %byte_offset_input: offset) {
@@ -47,7 +43,7 @@ kernel.def target(@target) @wide_offset_uniform() {
 }
 
 // ----
-low.kernel.def target<spirv.logical.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @wide_offset_uniform(%byte_offset: reg<spirv.offset64>) asm {
+low.kernel.def target<spirv.logical.core> workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @wide_offset_uniform(%byte_offset: reg<spirv.offset64>) asm {
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %14 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %byte_offset
@@ -60,9 +56,7 @@ low.kernel.def target<spirv.logical.core>(@target) workgroup_size(1, 1, 1) workg
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-kernel.def target(@target) @wide_offset_loaded_lane() {
+kernel.def @wide_offset_loaded_lane() {
   %unit = index.constant 1 : index
   %lanes = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lanes, %unit, %unit) : index
@@ -85,7 +79,7 @@ kernel.def target(@target) @wide_offset_loaded_lane() {
 }
 
 // ----
-low.kernel.def target<spirv.logical.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @wide_offset_loaded_lane() asm {
+low.kernel.def target<spirv.logical.core> workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @wide_offset_loaded_lane() asm {
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %offsets = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
@@ -110,9 +104,7 @@ low.kernel.def target<spirv.logical.core>(@target) workgroup_size(64, 1, 1) work
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-kernel.def target(@target) @wide_offset_varying_record_stride() {
+kernel.def @wide_offset_varying_record_stride() {
   %unit = index.constant 1 : index
   %lanes = index.constant 2 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lanes, %unit, %unit) : index
@@ -129,7 +121,7 @@ kernel.def target(@target) @wide_offset_varying_record_stride() {
 }
 
 // ----
-low.kernel.def target<spirv.logical.core>(@target) workgroup_size(2, 1, 1) workgroup_count(1, 1, 1) @wide_offset_varying_record_stride() asm {
+low.kernel.def target<spirv.logical.core> workgroup_size(2, 1, 1) workgroup_count(1, 1, 1) @wide_offset_varying_record_stride() asm {
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %lane = OpLoadBuiltin.local_invocation_id.x
@@ -148,9 +140,7 @@ low.kernel.def target<spirv.logical.core>(@target) workgroup_size(2, 1, 1) workg
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-kernel.def target(@target) @wide_offset_varying_dynamic_dimensions() {
+kernel.def @wide_offset_varying_dynamic_dimensions() {
   %unit = index.constant 1 : index
   %lanes = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lanes, %unit, %unit) : index
@@ -168,7 +158,7 @@ kernel.def target(@target) @wide_offset_varying_dynamic_dimensions() {
 }
 
 // ----
-low.kernel.def target<spirv.logical.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @wide_offset_varying_dynamic_dimensions(%columns: reg<spirv.id : index>) asm {
+low.kernel.def target<spirv.logical.core> workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @wide_offset_varying_dynamic_dimensions(%columns: reg<spirv.id : index>) asm {
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %lane = OpLoadBuiltin.local_invocation_id.x
@@ -189,9 +179,7 @@ low.kernel.def target<spirv.logical.core>(@target) workgroup_size(64, 1, 1) work
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-kernel.def target(@target) @wide_offset_multiple_dynamic_factors() {
+kernel.def @wide_offset_multiple_dynamic_factors() {
   %unit = index.constant 1 : index
   %lanes = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lanes, %unit, %unit) : index
@@ -210,7 +198,7 @@ kernel.def target(@target) @wide_offset_multiple_dynamic_factors() {
 }
 
 // ----
-low.kernel.def target<spirv.logical.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @wide_offset_multiple_dynamic_factors(%rows: reg<spirv.id : index>, %columns: reg<spirv.id : index>) asm {
+low.kernel.def target<spirv.logical.core> workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @wide_offset_multiple_dynamic_factors(%rows: reg<spirv.id : index>, %columns: reg<spirv.id : index>) asm {
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %lane = OpLoadBuiltin.local_invocation_id.x
@@ -234,9 +222,7 @@ low.kernel.def target<spirv.logical.core>(@target) workgroup_size(64, 1, 1) work
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-kernel.def target(@target) @wide_offset_varying_stride_factor() {
+kernel.def @wide_offset_varying_stride_factor() {
   %unit = index.constant 1 : index
   %groups = index.constant 2 : index
   %lanes = index.constant 64 : index
@@ -257,7 +243,7 @@ kernel.def target(@target) @wide_offset_varying_stride_factor() {
 }
 
 // ----
-low.kernel.def target<spirv.logical.core>(@target) workgroup_size(64, 1, 1) workgroup_count(2, 1, 1) @wide_offset_varying_stride_factor(%columns_base: reg<spirv.id : index>) asm {
+low.kernel.def target<spirv.logical.core> workgroup_size(64, 1, 1) workgroup_count(2, 1, 1) @wide_offset_varying_stride_factor(%columns_base: reg<spirv.id : index>) asm {
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %group = OpLoadBuiltin.workgroup_id.x
@@ -285,9 +271,7 @@ low.kernel.def target<spirv.logical.core>(@target) workgroup_size(64, 1, 1) work
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-kernel.def target(@target) @wide_offset_large_power_two_stride() {
+kernel.def @wide_offset_large_power_two_stride() {
   %unit = index.constant 1 : index
   %lanes = index.constant 2 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lanes, %unit, %unit) : index
@@ -306,7 +290,7 @@ kernel.def target(@target) @wide_offset_large_power_two_stride() {
 }
 
 // ----
-low.kernel.def target<spirv.logical.core>(@target) workgroup_size(2, 1, 1) workgroup_count(1, 1, 1) @wide_offset_large_power_two_stride() asm {
+low.kernel.def target<spirv.logical.core> workgroup_size(2, 1, 1) workgroup_count(1, 1, 1) @wide_offset_large_power_two_stride() asm {
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %lane = OpLoadBuiltin.local_invocation_id.x
@@ -325,9 +309,7 @@ low.kernel.def target<spirv.logical.core>(@target) workgroup_size(2, 1, 1) workg
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-kernel.def target(@target) @wide_offset_large_record_stride() {
+kernel.def @wide_offset_large_record_stride() {
   %unit = index.constant 1 : index
   %rows = index.constant 2 : index
   %lanes = index.constant 64 : index
@@ -346,7 +328,7 @@ kernel.def target(@target) @wide_offset_large_record_stride() {
 }
 
 // ----
-low.kernel.def target<spirv.logical.core>(@target) workgroup_size(64, 1, 1) workgroup_count(2, 1, 1) @wide_offset_large_record_stride() asm {
+low.kernel.def target<spirv.logical.core> workgroup_size(64, 1, 1) workgroup_count(2, 1, 1) @wide_offset_large_record_stride() asm {
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %row = OpLoadBuiltin.workgroup_id.x
@@ -372,9 +354,7 @@ low.kernel.def target<spirv.logical.core>(@target) workgroup_size(64, 1, 1) work
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-kernel.def target(@target) @wide_offset_dynamic_stride() {
+kernel.def @wide_offset_dynamic_stride() {
   %unit = index.constant 1 : index
   %lanes = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lanes, %unit, %unit) : index
@@ -393,7 +373,7 @@ kernel.def target(@target) @wide_offset_dynamic_stride() {
 }
 
 // ----
-low.kernel.def target<spirv.logical.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @wide_offset_dynamic_stride(%stride: reg<spirv.offset64>) asm {
+low.kernel.def target<spirv.logical.core> workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @wide_offset_dynamic_stride(%stride: reg<spirv.offset64>) asm {
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %lane = OpLoadBuiltin.local_invocation_id.x
@@ -411,9 +391,7 @@ low.kernel.def target<spirv.logical.core>(@target) workgroup_size(64, 1, 1) work
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-kernel.def target(@target) @wide_offset_dynamic_dimensions() {
+kernel.def @wide_offset_dynamic_dimensions() {
   %unit = index.constant 1 : index
   %rows = index.constant 2 : index
   %lanes = index.constant 64 : index
@@ -433,7 +411,7 @@ kernel.def target(@target) @wide_offset_dynamic_dimensions() {
 }
 
 // ----
-low.kernel.def target<spirv.logical.core>(@target) workgroup_size(64, 1, 1) workgroup_count(2, 1, 1) @wide_offset_dynamic_dimensions(%columns: reg<spirv.id : index>) asm {
+low.kernel.def target<spirv.logical.core> workgroup_size(64, 1, 1) workgroup_count(2, 1, 1) @wide_offset_dynamic_dimensions(%columns: reg<spirv.id : index>) asm {
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %row = OpLoadBuiltin.workgroup_id.x
@@ -461,9 +439,7 @@ low.kernel.def target<spirv.logical.core>(@target) workgroup_size(64, 1, 1) work
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-kernel.def target(@target) @wide_offset_mixed_terms() {
+kernel.def @wide_offset_mixed_terms() {
   %unit = index.constant 1 : index
   %lanes = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lanes, %unit, %unit) : index
@@ -484,7 +460,7 @@ kernel.def target(@target) @wide_offset_mixed_terms() {
 }
 
 // ----
-low.kernel.def target<spirv.logical.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @wide_offset_mixed_terms(%base: reg<spirv.offset64>, %stride: reg<spirv.offset64>) asm {
+low.kernel.def target<spirv.logical.core> workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @wide_offset_mixed_terms(%base: reg<spirv.offset64>, %stride: reg<spirv.offset64>) asm {
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %lane = OpLoadBuiltin.local_invocation_id.x

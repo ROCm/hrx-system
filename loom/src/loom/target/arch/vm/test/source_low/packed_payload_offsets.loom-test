@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/packed_payload_offsets.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=vm:core output=low
 
-vm.target<core> @target
-
-func.def target(@target) @packed4_payload_word_offset(%weights: buffer, %block0: index, %word0: index) -> (i32) {
+func.def @packed4_payload_word_offset(%weights: buffer, %block0: index, %word0: index) -> (i32) {
   %block = index.assume %block0 [range(%block0, 0, 63)] : index
   %word = index.assume %word0 [range(%word0, 0, 3)] : index
   %block_byte_stride = index.constant 18 : offset
@@ -20,7 +18,7 @@ func.def target(@target) @packed4_payload_word_offset(%weights: buffer, %block0:
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @packed4_payload_word_offset(%word_view: reg<vm.ref : buffer>, %block: reg<vm.value : i64>, %word: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
+low.func.def target<vm.core> abi(vm_function) @packed4_payload_word_offset(%word_view: reg<vm.ref : buffer>, %block: reg<vm.value : i64>, %word: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
   %20 = constant.i64 2
   %21 = constant.i64 18 : reg<vm.value>
   %22 = integer.mul.i64 %block, %21
@@ -34,9 +32,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @packed4_payload_word_off
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @packed5_split_payload_offsets(%weights: buffer, %block0: index, %word0: index) -> (i32, i32) {
+func.def @packed5_split_payload_offsets(%weights: buffer, %block0: index, %word0: index) -> (i32, i32) {
   %block = index.assume %block0 [range(%block0, 0, 63)] : index
   %word = index.assume %word0 [range(%word0, 0, 3)] : index
   %block_byte_stride = index.constant 22 : offset
@@ -57,7 +53,7 @@ func.def target(@target) @packed5_split_payload_offsets(%weights: buffer, %block
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @packed5_split_payload_offsets(%low_bits_view: reg<vm.ref : buffer>, %block: reg<vm.value : i64>, %word: reg<vm.value : i64>) -> (reg<vm.value : i32>, reg<vm.value : i32>) asm {
+low.func.def target<vm.core> abi(vm_function) @packed5_split_payload_offsets(%low_bits_view: reg<vm.ref : buffer>, %block: reg<vm.value : i64>, %word: reg<vm.value : i64>) -> (reg<vm.value : i32>, reg<vm.value : i32>) asm {
   %26 = constant.i64 2
   %27 = constant.i64 22 : reg<vm.value>
   %28 = integer.mul.i64 %block, %27
@@ -74,9 +70,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @packed5_split_payload_of
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @packed6_split_payload_offsets(%weights: buffer, %block0: index, %low_word0: index, %high_word0: index, %scale0: index) -> (i32, i32, f16) {
+func.def @packed6_split_payload_offsets(%weights: buffer, %block0: index, %low_word0: index, %high_word0: index, %scale0: index) -> (i32, i32, f16) {
   %block = index.assume %block0 [range(%block0, 0, 63)] : index
   %low_word = index.assume %low_word0 [range(%low_word0, 0, 31)] : index
   %high_word = index.assume %high_word0 [range(%high_word0, 0, 15)] : index
@@ -108,7 +102,7 @@ func.def target(@target) @packed6_split_payload_offsets(%weights: buffer, %block
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @packed6_split_payload_offsets(%scale_view: reg<vm.ref : buffer>, %block: reg<vm.value : i64>, %low_word: reg<vm.value : i64>, %high_word: reg<vm.value : i64>, %scale: reg<vm.value : i64>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : f16>) asm {
+low.func.def target<vm.core> abi(vm_function) @packed6_split_payload_offsets(%scale_view: reg<vm.ref : buffer>, %block: reg<vm.value : i64>, %low_word: reg<vm.value : i64>, %high_word: reg<vm.value : i64>, %scale: reg<vm.value : i64>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : f16>) asm {
   %43 = constant.i64 210 : reg<vm.value>
   %44 = integer.mul.i64 %block, %43
   %45 = constant.i64 2 : reg<vm.value>

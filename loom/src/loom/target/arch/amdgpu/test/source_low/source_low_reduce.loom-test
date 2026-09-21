@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_reduce.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i32_reduce_add(%input: buffer, %output: buffer) {
+func.def @i32_reduce_add(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xi32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
@@ -16,7 +14,7 @@ func.def target(@target) @i32_reduce_add(%input: buffer, %output: buffer) {
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_reduce_add() asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i32_reduce_add() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %12 = v_mov_b32 0
@@ -34,9 +32,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_red
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @f32_reduce_add(%input: buffer, %output: buffer) {
+func.def @f32_reduce_add(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xf32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xf32>
@@ -49,7 +45,7 @@ func.def target(@target) @f32_reduce_add(%input: buffer, %output: buffer) {
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_reduce_add() asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @f32_reduce_add() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %12 = v_mov_b32 0
@@ -68,9 +64,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_red
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @f32_reduce_add_fastmath(%input: buffer, %output: buffer) {
+func.def @f32_reduce_add_fastmath(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xf32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xf32>
@@ -83,7 +77,7 @@ func.def target(@target) @f32_reduce_add_fastmath(%input: buffer, %output: buffe
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_reduce_add_fastmath() asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @f32_reduce_add_fastmath() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %12 = v_mov_b32 0
@@ -101,9 +95,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_red
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @f32x64_reduce_add_fastmath(%input: buffer, %output: buffer) {
+func.def @f32x64_reduce_add_fastmath(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xf32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xf32>
@@ -116,7 +108,7 @@ func.def target(@target) @f32x64_reduce_add_fastmath(%input: buffer, %output: bu
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32x64_reduce_add_fastmath() asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @f32x64_reduce_add_fastmath() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %init = v_mov_b32 0
@@ -152,11 +144,9 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32x64_
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
 config.def @runtime.vector_width = 4 : index
 
-kernel.def target(@target) @f32_configured_width_square_reduce() {
+kernel.def @f32_configured_width_square_reduce() {
   %singleton_dimension = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%singleton_dimension, %singleton_dimension, %singleton_dimension) workgroup_size(%workgroup_size, %singleton_dimension, %singleton_dimension) : index
@@ -181,7 +171,7 @@ kernel.def target(@target) @f32_configured_width_square_reduce() {
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_configured_width_square_reduce() asm {
+low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_configured_width_square_reduce() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
@@ -206,11 +196,9 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
 config.def @runtime.vector_width = 4 : index
 
-func.def target(@target) @i32_configured_width_sum(%input: buffer, %output: buffer) {
+func.def @i32_configured_width_sum(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %vector_width = config.get @runtime.vector_width : index
   %vector_width_bounded = index.assume %vector_width [range(%vector_width, 2, 4)] : index
@@ -225,7 +213,7 @@ func.def target(@target) @i32_configured_width_sum(%input: buffer, %output: buff
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_configured_width_sum() asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i32_configured_width_sum() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %15 = v_mov_b32 0
@@ -243,9 +231,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_con
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i32_reduce_minui_select_sentinel(%values: vector<4xi32>) -> (i32) {
+func.def @i32_reduce_minui_select_sentinel(%values: vector<4xi32>) -> (i32) {
   %empty_value = scalar.constant 0 : i32
   %zeros = vector.splat %empty_value : vector<4xi32>
   %is_zero = vector.cmpi eq, %values, %zeros : vector<4xi32> -> vector<4xi1>
@@ -260,7 +246,7 @@ func.def target(@target) @i32_reduce_minui_select_sentinel(%values: vector<4xi32
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_reduce_minui_select_sentinel(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i32_reduce_minui_select_sentinel(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm {
   %26 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %27 = v_cmp_eq_i32_src1_inline %26 {rhs = 0}
   %28 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -281,9 +267,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_red
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i32x3_reduce_combining_kinds(%values: vector<3xi32>, %init: i32) -> (i32, i32, i32, i32, i32, i32, i32, i32) {
+func.def @i32x3_reduce_combining_kinds(%values: vector<3xi32>, %init: i32) -> (i32, i32, i32, i32, i32, i32, i32, i32) {
   %product = vector.reduce<muli> %values, %init : vector<3xi32>, i32
   %signed_minimum = vector.reduce<minsi> %values, %init : vector<3xi32>, i32
   %signed_maximum = vector.reduce<maxsi> %values, %init : vector<3xi32>, i32
@@ -296,7 +280,7 @@ func.def target(@target) @i32x3_reduce_combining_kinds(%values: vector<3xi32>, %
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32x3_reduce_combining_kinds(%values: reg<amdgpu.vgpr x3>, %init: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i32x3_reduce_combining_kinds(%values: reg<amdgpu.vgpr x3>, %init: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %28 = v_mov_b32_copy %init
   %29 = slice %values[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
   %30 = v_mul_lo_u32 %28, %29
@@ -330,15 +314,13 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32x3_r
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i32x2x3_reduce_columns(%values: vector<2x3xi32>, %init: vector<3xi32>) -> (vector<3xi32>) {
+func.def @i32x2x3_reduce_columns(%values: vector<2x3xi32>, %init: vector<3xi32>) -> (vector<3xi32>) {
   %result = vector.reduce.axes<addi> %values, %init axes [0] : vector<2x3xi32>, vector<3xi32>
   func.return %result : vector<3xi32>
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32x2x3_reduce_columns(%values: reg<amdgpu.vgpr x6>, %init: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr x3>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i32x2x3_reduce_columns(%values: reg<amdgpu.vgpr x6>, %init: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr x3>) asm {
   %23 = slice %init[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
   %24 = slice %values[0] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr>
   %25 = v_add_u32 %23, %24
@@ -360,15 +342,13 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32x2x3
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @f32x2x2x3_reduce_planes(%values: vector<2x2x3xf32>, %init: vector<2xf32>) -> (vector<2xf32>) {
+func.def @f32x2x2x3_reduce_planes(%values: vector<2x2x3xf32>, %init: vector<2xf32>) -> (vector<2xf32>) {
   %result = vector.reduce.axes<addf> %values, %init axes [1, 2] : vector<2x2x3xf32>, vector<2xf32>
   func.return %result : vector<2xf32>
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32x2x2x3_reduce_planes(%values: reg<amdgpu.vgpr x12>, %init: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @f32x2x2x3_reduce_planes(%values: reg<amdgpu.vgpr x12>, %init: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %34 = slice %init[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %35 = slice %values[0] : reg<amdgpu.vgpr x12> -> reg<amdgpu.vgpr>
   %36 = v_add_f32 %34, %35

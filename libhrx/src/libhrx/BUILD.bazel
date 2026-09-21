@@ -40,7 +40,6 @@ HRX_SRCS = [
     "stream.c",
     "transfer.c",
     "vmm_slab_provider.c",
-    "vmm_slab_provider.h",
 ]
 
 HRX_HDRS = [
@@ -48,6 +47,7 @@ HRX_HDRS = [
     "hrx_internal.h",
     "mem_pool.h",
     "transfer.h",
+    "vmm_slab_provider.h",
     "//libhrx/src:iree_hal_compat.h",
 ]
 
@@ -160,6 +160,25 @@ hrx_cc_test(
         ":hrx_static",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "vmm_slab_provider_test",
+    srcs = ["vmm_slab_provider_test.cc"],
+    resource_group = "iree-hal-drivers-amdgpu-tests",
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
+    deps = [
+        ":hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/memory:slab_provider",
+        "//runtime/src/iree/hal/memory:tlsf_pool",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

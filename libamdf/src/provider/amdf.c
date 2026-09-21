@@ -18,9 +18,9 @@
 #include "libamdf/src/provider/extension.h"
 #include "libamdf/src/user_queue.h"
 
-static const amdf_api_t amdf_api_v4 = {
+static const amdf_api_t amdf_api_v5 = {
     .structure_size = sizeof(amdf_api_t),
-    .abi_version = AMDF_ABI_VERSION_4,
+    .abi_version = AMDF_ABI_VERSION_5,
     .instance_create = amdf_instance_create,
     .instance_destroy = amdf_instance_destroy,
     .endpoint_enumerate = amdf_endpoint_enumerate,
@@ -59,6 +59,8 @@ static const amdf_api_t amdf_api_v4 = {
     .user_queue_destroy = amdf_user_queue_destroy,
     .memory_query_address = amdf_memory_query_address,
     .memory_scope_query_pair_info = amdf_memory_scope_query_pair_info,
+    .kernel_queue_refresh_status = amdf_kernel_queue_refresh_status,
+    .kernel_queue_request_notification = amdf_kernel_queue_request_notification,
 };
 
 amdf_status_t AMDF_CALL amdf_query_api(amdf_abi_version_t minimum_version,
@@ -70,10 +72,10 @@ amdf_status_t AMDF_CALL amdf_query_api(amdf_abi_version_t minimum_version,
   if (minimum_version > maximum_version) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
-  if (minimum_version > AMDF_ABI_VERSION_4 ||
-      maximum_version < AMDF_ABI_VERSION_4) {
+  if (minimum_version > AMDF_ABI_VERSION_5 ||
+      maximum_version < AMDF_ABI_VERSION_5) {
     return amdf_make_api_status(AMDF_STATUS_CODE_VERSION_MISMATCH);
   }
-  *out_api = &amdf_api_v4;
+  *out_api = &amdf_api_v5;
   return AMDF_STATUS_OK;
 }

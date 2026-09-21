@@ -1,15 +1,13 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/packed_dot_integer.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
-aie2p.target<core> @target
-
-func.def target(@target) @dot4i_s8s8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+func.def @dot4i_s8s8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot4i<s8s8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
   func.return %dot : vector<1xi32>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_s8s8(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @dot4i_s8s8(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %9 = mova.i32 0
   %10 = vbcst.8 %9
   %11 = slice %10[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
@@ -38,15 +36,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_s8
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @dot4i_u8u8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+func.def @dot4i_u8u8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot4i<u8u8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
   func.return %dot : vector<1xi32>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_u8u8(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @dot4i_u8u8(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %9 = mova.i32 0
   %10 = vbcst.8 %9
   %11 = slice %10[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
@@ -75,15 +71,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_u8
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @dot8i4_u4u4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+func.def @dot8i4_u4u4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot8i4<u4u4> %lhs, %rhs, %acc : vector<1xi32>
   func.return %dot : vector<1xi32>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot8i4_u4u4(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @dot8i4_u4u4(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %68 = vextract.32.imm %lhs, 0
   %69 = vextract.32.imm %rhs, 0
   %70 = vextract.32.imm %acc, 0
@@ -147,15 +141,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot8i4_u
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @dot4i_u8s8_128(%lhs: vector<16xi8>, %rhs: vector<16xi8>, %acc: vector<4xi32>) -> (vector<4xi32>) {
+func.def @dot4i_u8s8_128(%lhs: vector<16xi8>, %rhs: vector<16xi8>, %acc: vector<4xi32>) -> (vector<4xi32>) {
   %dot = vector.dot4i<u8s8> %lhs, %rhs, %acc : vector<16xi8>, vector<16xi8>, vector<4xi32>
   func.return %dot : vector<4xi32>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_u8s8_128(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @dot4i_u8s8_128(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %9 = mova.i32 0
   %10 = vbcst.8 %9
   %11 = slice %10[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
@@ -184,15 +176,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_u8
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @dot4i_u8s8(%lhs: vector<64xi8>, %rhs: vector<64xi8>, %acc: vector<16xi32>) -> (vector<16xi32>) {
+func.def @dot4i_u8s8(%lhs: vector<64xi8>, %rhs: vector<64xi8>, %acc: vector<16xi32>) -> (vector<16xi32>) {
   %dot = vector.dot4i<u8s8> %lhs, %rhs, %acc : vector<64xi8>, vector<64xi8>, vector<16xi32>
   func.return %dot : vector<16xi32>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_u8s8(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @dot4i_u8s8(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %9 = mova.i32 0
   %10 = vbcst.8 %9
   %11 = slice %10[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
@@ -236,15 +226,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_u8
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @dot4i_s8u8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+func.def @dot4i_s8u8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot4i<s8u8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
   func.return %dot : vector<1xi32>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_s8u8(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @dot4i_s8u8(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %9 = mova.i32 0
   %10 = vbcst.8 %9
   %11 = slice %10[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
@@ -273,15 +261,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_s8
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @dot8i4_s4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+func.def @dot8i4_s4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot8i4<s4s4> %lhs, %rhs, %acc : vector<1xi32>
   func.return %dot : vector<1xi32>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot8i4_s4s4(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @dot8i4_s4s4(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %100 = vextract.32.imm %lhs, 0
   %101 = vextract.32.imm %rhs, 0
   %102 = vextract.32.imm %acc, 0
@@ -378,15 +364,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot8i4_s
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @dot8i4_u4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+func.def @dot8i4_u4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot8i4<u4s4> %lhs, %rhs, %acc : vector<1xi32>
   func.return %dot : vector<1xi32>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot8i4_u4s4(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @dot8i4_u4s4(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %84 = vextract.32.imm %lhs, 0
   %85 = vextract.32.imm %rhs, 0
   %86 = vextract.32.imm %acc, 0
@@ -467,15 +451,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot8i4_u
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @dot8i4_s4u4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+func.def @dot8i4_s4u4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %dot = vector.dot8i4<s4u4> %lhs, %rhs, %acc : vector<1xi32>
   func.return %dot : vector<1xi32>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot8i4_s4u4(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @dot8i4_s4u4(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %84 = vextract.32.imm %lhs, 0
   %85 = vextract.32.imm %rhs, 0
   %86 = vextract.32.imm %acc, 0
@@ -556,9 +538,9 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot8i4_s
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @dot8i4_s4u4_q4_offset_binary(%rows: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+// Q4 offset-binary storage can stay packed for dot8i4. Xoring each nibble with
+// 8 converts the left operand from code-8 into signed i4 bits.
+func.def @dot8i4_s4u4_q4_offset_binary(%rows: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %offset_to_signed_mask = vector.constant -2004318072 : vector<1xi32>
   %signed_rows = vector.xori %rows, %offset_to_signed_mask : vector<1xi32>
   %dot = vector.dot8i4<s4u4> %signed_rows, %rhs, %acc : vector<1xi32>
@@ -566,7 +548,7 @@ func.def target(@target) @dot8i4_s4u4_q4_offset_binary(%rows: vector<1xi32>, %rh
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot8i4_s4u4_q4_offset_binary(%rows: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @dot8i4_s4u4_q4_offset_binary(%rows: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %88 = vextract.32.imm %rows, 0
   %89 = mov.i32 -2004318072
   %90 = xor %88, %89
@@ -649,9 +631,9 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot8i4_s
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @dot4i_s8s8_q6_offset_binary(%codes: vector<1xi32>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
+// Q6 offset-binary storage can stay packed for dot4i. Subtracting 32 from each
+// byte converts the left operand from code-32 into signed i8 bits.
+func.def @dot4i_s8s8_q6_offset_binary(%codes: vector<1xi32>, %rhs: vector<4xi8>, %acc: vector<1xi32>) -> (vector<1xi32>) {
   %offset_to_signed_bias = vector.constant -32 : vector<4xi8>
   %bytes = vector.bitcast %codes : vector<1xi32> to vector<4xi8>
   %signed_bytes = vector.addi %bytes, %offset_to_signed_bias : vector<4xi8>
@@ -660,7 +642,7 @@ func.def target(@target) @dot4i_s8s8_q6_offset_binary(%codes: vector<1xi32>, %rh
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot4i_s8s8_q6_offset_binary(%bytes: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @dot4i_s8s8_q6_offset_binary(%bytes: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %acc: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %12 = mov.short -32
   %offset_to_signed_bias = vbcst.8 %12
   %signed_bytes = vadd.8 %bytes, %offset_to_signed_bias

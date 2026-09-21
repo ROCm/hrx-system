@@ -1,15 +1,13 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_conversion_float8.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_extf_f8e4m3_to_f32(%input: f8E4M3) -> (f32) {
+func.def @scalar_extf_f8e4m3_to_f32(%input: f8E4M3) -> (f32) {
   %converted = scalar.extf %input : f8E4M3 to f32
   func.return %converted : f32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_extf_f8e4m3_to_f32(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_extf_f8e4m3_to_f32(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %5 = mov.short 128
   %6 = mov.short 127
   %7 = mov.short 7
@@ -56,15 +54,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_e
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_extf_f8e5m2_to_f32(%input: f8E5M2) -> (f32) {
+func.def @scalar_extf_f8e5m2_to_f32(%input: f8E5M2) -> (f32) {
   %converted = scalar.extf %input : f8E5M2 to f32
   func.return %converted : f32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_extf_f8e5m2_to_f32(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_extf_f8e5m2_to_f32(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %5 = mov.short 128
   %7 = mov.short 3
   %8 = mov.short 124
@@ -115,15 +111,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_e
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @vector_extf_f8e4m3x3_to_bf16x3(%input: vector<3xf8E4M3>) -> (vector<3xbf16>) {
+func.def @vector_extf_f8e4m3x3_to_bf16x3(%input: vector<3xf8E4M3>) -> (vector<3xbf16>) {
   %converted = vector.extf %input : vector<3xf8E4M3> to vector<3xbf16>
   func.return %converted : vector<3xbf16>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_extf_f8e4m3x3_to_bf16x3(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @vector_extf_f8e4m3x3_to_bf16x3(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %15 = vextract.8.imm %input, 0
   %16 = mov.short 128
   %17 = mov.short 127
@@ -242,15 +236,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_e
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @vector_extf_f8e5m2x3_to_f16x3(%input: vector<3xf8E5M2>) -> (vector<3xf16>) {
+func.def @vector_extf_f8e5m2x3_to_f16x3(%input: vector<3xf8E5M2>) -> (vector<3xf16>) {
   %converted = vector.extf %input : vector<3xf8E5M2> to vector<3xf16>
   func.return %converted : vector<3xf16>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_extf_f8e5m2x3_to_f16x3(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @vector_extf_f8e5m2x3_to_f16x3(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %15 = vextract.8.imm %input, 0
   %16 = mov.short 255
   %17 = and %15, %16
@@ -274,15 +266,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_e
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_fptrunc_f32_to_f8e4m3(%input: f32) -> (f8E4M3) {
+func.def @scalar_fptrunc_f32_to_f8e4m3(%input: f32) -> (f8E4M3) {
   %converted = scalar.fptrunc %input : f32 to f8E4M3
   func.return %converted : f8E4M3
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_fptrunc_f32_to_f8e4m3(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_fptrunc_f32_to_f8e4m3(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %5 = mov.i32 -2147483648
   %6 = mov.i32 2147483647
   %7 = mov.i32 8388607
@@ -351,15 +341,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_fptrunc_f32_to_f8e5m2(%input: f32) -> (f8E5M2) {
+func.def @scalar_fptrunc_f32_to_f8e5m2(%input: f32) -> (f8E5M2) {
   %converted = scalar.fptrunc %input : f32 to f8E5M2
   func.return %converted : f8E5M2
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_fptrunc_f32_to_f8e5m2(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_fptrunc_f32_to_f8e5m2(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %5 = mov.i32 -2147483648
   %6 = mov.i32 2147483647
   %7 = mov.i32 8388607
@@ -429,15 +417,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_fptrunc_f16_to_f8e4m3(%input: f16) -> (f8E4M3) {
+func.def @scalar_fptrunc_f16_to_f8e4m3(%input: f16) -> (f8E4M3) {
   %converted = scalar.fptrunc %input : f16 to f8E4M3
   func.return %converted : f8E4M3
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_fptrunc_f16_to_f8e4m3(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_fptrunc_f16_to_f8e4m3(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %5 = mov.i32 32768
   %6 = mov.i32 32767
   %7 = mov.short 16
@@ -533,15 +519,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_fptrunc_bf16_to_f8e5m2(%input: bf16) -> (f8E5M2) {
+func.def @scalar_fptrunc_bf16_to_f8e5m2(%input: bf16) -> (f8E5M2) {
   %converted = scalar.fptrunc %input : bf16 to f8E5M2
   func.return %converted : f8E5M2
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_fptrunc_bf16_to_f8e5m2(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_fptrunc_bf16_to_f8e5m2(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %5 = mov.short 16
   %6 = lshl %input, %5
   %7 = mov.i32 -2147483648
@@ -613,15 +597,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @vector_fptrunc_f32x3_to_f8e4m3x3(%input: vector<3xf32>) -> (vector<3xf8E4M3>) {
+func.def @vector_fptrunc_f32x3_to_f8e4m3x3(%input: vector<3xf32>) -> (vector<3xf8E4M3>) {
   %converted = vector.fptrunc %input : vector<3xf32> to vector<3xf8E4M3>
   func.return %converted : vector<3xf8E4M3>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_fptrunc_f32x3_to_f8e4m3x3(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @vector_fptrunc_f32x3_to_f8e4m3x3(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %15 = vextract.32.imm %input, 0
   %16 = mov.i32 -2147483648
   %17 = mov.i32 2147483647
@@ -785,15 +767,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @vector_fptrunc_f16x3_to_f8e5m2x3(%input: vector<3xf16>) -> (vector<3xf8E5M2>) {
+func.def @vector_fptrunc_f16x3_to_f8e5m2x3(%input: vector<3xf16>) -> (vector<3xf8E5M2>) {
   %converted = vector.fptrunc %input : vector<3xf16> to vector<3xf8E5M2>
   func.return %converted : vector<3xf8E5M2>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_fptrunc_f16x3_to_f8e5m2x3(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @vector_fptrunc_f16x3_to_f8e5m2x3(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %15 = vextract.16.imm %input, 0
   %16 = mov.i32 32767
   %17 = mov.i32 32768

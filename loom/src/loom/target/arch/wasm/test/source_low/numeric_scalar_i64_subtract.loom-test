@@ -1,24 +1,20 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_scalar_i64_subtract.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=wasm:simd128 output=low
 
-wasm.target<simd128> @target
-
-func.def target(@target) @uniform_subtract(%lhs: i64, %rhs: i64) -> (i64) {
+func.def @uniform_subtract(%lhs: i64, %rhs: i64) -> (i64) {
   %difference = scalar.subi %lhs, %rhs : i64
   func.return %difference : i64
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @uniform_subtract(%lhs: reg<wasm.i64>, %rhs: reg<wasm.i64>) -> (reg<wasm.i64>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @uniform_subtract(%lhs: reg<wasm.i64>, %rhs: reg<wasm.i64>) -> (reg<wasm.i64>) asm {
   %difference = i64.sub %lhs, %rhs
   return %difference
 }
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @constant_subtract(%value: i64) -> (i64, i64, i64) {
+func.def @constant_subtract(%value: i64) -> (i64, i64, i64) {
   %c0 = scalar.constant 0 : i64
   %wide = scalar.constant 4294967297 : i64
   %negated = scalar.subi %c0, %value : i64
@@ -28,7 +24,7 @@ func.def target(@target) @constant_subtract(%value: i64) -> (i64, i64, i64) {
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @constant_subtract(%value: reg<wasm.i64>) -> (reg<wasm.i64>, reg<wasm.i64>, reg<wasm.i64>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @constant_subtract(%value: reg<wasm.i64>) -> (reg<wasm.i64>, reg<wasm.i64>, reg<wasm.i64>) asm {
   %c0 = i64.const 0
   %wide = i64.const 4294967297
   %negated = i64.sub %c0, %value
@@ -40,9 +36,7 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @constant_sub
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @mixed_subtract(%uniform: i64, %values: vector<2xi64>) -> (i64, i64) {
+func.def @mixed_subtract(%uniform: i64, %values: vector<2xi64>) -> (i64, i64) {
   %varying = vector.extract %values[0] : vector<2xi64> -> i64
   %uniform_left = scalar.subi %uniform, %varying : i64
   %uniform_right = scalar.subi %varying, %uniform : i64
@@ -50,7 +44,7 @@ func.def target(@target) @mixed_subtract(%uniform: i64, %values: vector<2xi64>) 
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @mixed_subtract(%uniform: reg<wasm.i64>, %values: reg<wasm.v128>) -> (reg<wasm.i64>, reg<wasm.i64>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @mixed_subtract(%uniform: reg<wasm.i64>, %values: reg<wasm.v128>) -> (reg<wasm.i64>, reg<wasm.i64>) asm {
   %varying = i64x2.extract_lane %values, 0
   %uniform_left = i64.sub %uniform, %varying
   %uniform_right = i64.sub %varying, %uniform

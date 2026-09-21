@@ -1,4 +1,3 @@
-// TEMPLATE: loom/src/loom/ops/pipeline/test/output_record_shapes.loom-test
 // RUN: pass aie2p-lower-pipeline
 
 aie2p.target<array> @array_target

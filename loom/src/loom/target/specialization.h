@@ -81,8 +81,9 @@ typedef struct loom_target_specialization_result_t {
 // function-local contracts are resolved before any versions are published. A
 // declaration binding seeds every target-assignable function authored against
 // that declaration. Direct function requests and declaration-derived requests
-// must be disjoint. The module and its authored target witnesses remain
-// unchanged. Source incompatibilities emit structured diagnostics and return
+// must be disjoint. Selected definitions become retained compiler entries
+// without changing source visibility, retention flags, or target witnesses.
+// Source incompatibilities emit structured diagnostics and return
 // OK with a nonzero |error_count|; malformed external requests and
 // infrastructure failures return a status.
 //

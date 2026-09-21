@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/matrix_multiply.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
-aie2p.target<core> @target
-
-func.def target(@target) @matrix_multiply_s8s8_m8n8k8(%lhs: buffer, %rhs: buffer, %output: buffer) {
+func.def @matrix_multiply_s8s8_m8n8k8(%lhs: buffer, %rhs: buffer, %output: buffer) {
   %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
   %base = index.constant 0 : offset
   %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<64xi8>
@@ -24,7 +22,7 @@ func.def target(@target) @matrix_multiply_s8s8_m8n8k8(%lhs: buffer, %rhs: buffer
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_multiply_s8s8_m8n8k8() asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @matrix_multiply_s8s8_m8n8k8() asm {
   %lhs_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %rhs_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
@@ -45,9 +43,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_m
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @matrix_multiply_u8s8_m8n8k8(%lhs: buffer, %rhs: buffer, %output: buffer) {
+func.def @matrix_multiply_u8s8_m8n8k8(%lhs: buffer, %rhs: buffer, %output: buffer) {
   %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
   %base = index.constant 0 : offset
   %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<64xi8>
@@ -69,7 +65,7 @@ func.def target(@target) @matrix_multiply_u8s8_m8n8k8(%lhs: buffer, %rhs: buffer
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_multiply_u8s8_m8n8k8() asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @matrix_multiply_u8s8_m8n8k8() asm {
   %lhs_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %rhs_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
@@ -90,9 +86,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_m
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @matrix_multiply_s8u8_m8n8k8(%lhs: buffer, %rhs: buffer, %output: buffer) {
+func.def @matrix_multiply_s8u8_m8n8k8(%lhs: buffer, %rhs: buffer, %output: buffer) {
   %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
   %base = index.constant 0 : offset
   %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<64xi8>
@@ -114,7 +108,7 @@ func.def target(@target) @matrix_multiply_s8u8_m8n8k8(%lhs: buffer, %rhs: buffer
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_multiply_s8u8_m8n8k8() asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @matrix_multiply_s8u8_m8n8k8() asm {
   %lhs_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %rhs_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
@@ -135,9 +129,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_m
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @matrix_multiply_u8u8_m8n8k8(%lhs: buffer, %rhs: buffer, %output: buffer) {
+func.def @matrix_multiply_u8u8_m8n8k8(%lhs: buffer, %rhs: buffer, %output: buffer) {
   %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
   %base = index.constant 0 : offset
   %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<64xi8>
@@ -160,7 +152,7 @@ func.def target(@target) @matrix_multiply_u8u8_m8n8k8(%lhs: buffer, %rhs: buffer
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_multiply_u8u8_m8n8k8() asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @matrix_multiply_u8u8_m8n8k8() asm {
   %lhs_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %rhs_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
@@ -181,9 +173,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_m
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @matrix_accumulate_u8s8_m8n8k8(%lhs: buffer, %rhs: buffer, %accumulator: vector<64xi32>, %output: buffer) {
+func.def @matrix_accumulate_u8s8_m8n8k8(%lhs: buffer, %rhs: buffer, %accumulator: vector<64xi32>, %output: buffer) {
   %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
   %base = index.constant 0 : offset
   %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<64xi8>
@@ -204,7 +194,7 @@ func.def target(@target) @matrix_accumulate_u8s8_m8n8k8(%lhs: buffer, %rhs: buff
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_accumulate_u8s8_m8n8k8(%accumulator_fragment: reg<aie2p.mbms x4>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @matrix_accumulate_u8s8_m8n8k8(%accumulator_fragment: reg<aie2p.mbms x4>) asm {
   %lhs_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %rhs_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 3, source_type = buffer} : reg<aie2p.ep>
@@ -225,9 +215,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_a
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @matrix_multiply_packed_u4s8_m8n8k8(%packed_lhs: buffer, %rhs: buffer, %output: buffer) {
+func.def @matrix_multiply_packed_u4s8_m8n8k8(%packed_lhs: buffer, %rhs: buffer, %output: buffer) {
   %packed_lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %packed_lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
   %base = index.constant 0 : offset
   %packed_lhs_view = buffer.view %packed_lhs_aligned[%base] : buffer -> view<32xi8>
@@ -250,7 +238,7 @@ func.def target(@target) @matrix_multiply_packed_u4s8_m8n8k8(%packed_lhs: buffer
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_multiply_packed_u4s8_m8n8k8() asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @matrix_multiply_packed_u4s8_m8n8k8() asm {
   %packed_lhs_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %rhs_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
@@ -272,9 +260,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_m
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @matrix_multiply_packed_u5s8_m8n8k8(%packed_lhs: buffer, %high_lhs: buffer, %rhs: buffer, %output: buffer) {
+func.def @matrix_multiply_packed_u5s8_m8n8k8(%packed_lhs: buffer, %high_lhs: buffer, %rhs: buffer, %output: buffer) {
   %packed_lhs_aligned, %high_lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %packed_lhs, %high_lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer, buffer
   %base = index.constant 0 : offset
   %packed_lhs_view = buffer.view %packed_lhs_aligned[%base] : buffer -> view<32xi8>
@@ -304,7 +290,7 @@ func.def target(@target) @matrix_multiply_packed_u5s8_m8n8k8(%packed_lhs: buffer
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_multiply_packed_u5s8_m8n8k8() asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @matrix_multiply_packed_u5s8_m8n8k8() asm {
   %packed_lhs_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %high_lhs_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %rhs_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
@@ -337,9 +323,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_m
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @matrix_multiply_packed_s4s8_m8n8k8(%packed_lhs: buffer, %rhs: buffer, %output: buffer) {
+func.def @matrix_multiply_packed_s4s8_m8n8k8(%packed_lhs: buffer, %rhs: buffer, %output: buffer) {
   %packed_lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %packed_lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
   %base = index.constant 0 : offset
   %packed_lhs_view = buffer.view %packed_lhs_aligned[%base] : buffer -> view<32xi8>
@@ -361,7 +345,7 @@ func.def target(@target) @matrix_multiply_packed_s4s8_m8n8k8(%packed_lhs: buffer
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_multiply_packed_s4s8_m8n8k8() asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @matrix_multiply_packed_s4s8_m8n8k8() asm {
   %packed_lhs_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %rhs_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>

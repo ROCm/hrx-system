@@ -1,0 +1,14 @@
+// RUN: emit source-low @update target=amdgpu:gfx1151 output=none
+// Signed division reaches the same target admission boundary through updates.
+// ERROR@+1: TARGET/001 "no target-low contract for 'scalar.divsi'"
+int update(signed char* bytes) { return bytes[0] /= 3; }
+
+// ====
+// An explicit load/update/store control requires the same signed quotient.
+int update(signed char* bytes) {
+  int value = bytes[0];
+  // ERROR@+1: TARGET/001 "no target-low contract for 'scalar.divsi'"
+  value = value / 3;
+  bytes[0] = value;
+  return value;
+}

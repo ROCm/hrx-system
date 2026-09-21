@@ -20,6 +20,13 @@ extern const loom_target_bundle_table_t loom_spirv_target_bundles;
 // Vulkan 1.3 SPIR-V target bundle.
 extern const loom_target_bundle_t loom_spirv_low_target_bundle_vulkan1_3;
 
+// Vulkan 1.3 BDA environment with f16/f64/i8/i16/bf16 arithmetic and narrow
+// storage-buffer access. Callers require these optional device capabilities.
+extern const loom_target_bundle_t loom_spirv_low_target_bundle_extended_types;
+
+// Vulkan 1.3 BDA environment using the HAL kernel entry ABI.
+extern const loom_target_bundle_t loom_spirv_low_target_bundle_hal_kernel;
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

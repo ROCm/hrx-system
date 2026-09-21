@@ -340,6 +340,28 @@ static void iree_hal_vulkan_transient_buffer_destroy(
   IREE_TRACE_ZONE_END(z0);
 }
 
+static iree_status_t iree_hal_vulkan_transient_buffer_export_range(
+    iree_hal_buffer_t* base_buffer, iree_device_size_t local_byte_offset,
+    iree_device_size_t local_byte_length,
+    iree_hal_external_buffer_type_t requested_type,
+    iree_hal_external_buffer_flags_t requested_flags,
+    iree_hal_external_buffer_t* out_external_buffer) {
+  iree_hal_vulkan_transient_buffer_t* buffer =
+      iree_hal_vulkan_transient_buffer_cast(base_buffer);
+  iree_hal_buffer_t* committed = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_vulkan_transient_buffer_retain_host_backing(buffer, &committed));
+  iree_status_t status =
+      iree_hal_vulkan_transient_buffer_committed_vtable(committed)
+          ->export_range(
+              committed,
+              iree_hal_buffer_byte_offset(committed) + local_byte_offset,
+              local_byte_length, requested_type, requested_flags,
+              out_external_buffer);
+  iree_hal_buffer_release(committed);
+  return status;
+}
+
 static iree_status_t iree_hal_vulkan_transient_buffer_map_range(
     iree_hal_buffer_t* base_buffer, iree_hal_mapping_mode_t mapping_mode,
     iree_hal_memory_access_t memory_access,
@@ -420,6 +442,7 @@ static const iree_hal_buffer_vtable_t iree_hal_vulkan_transient_buffer_vtable =
     {
         .recycle = iree_hal_buffer_recycle,
         .destroy = iree_hal_vulkan_transient_buffer_destroy,
+        .export_range = iree_hal_vulkan_transient_buffer_export_range,
         .map_range = iree_hal_vulkan_transient_buffer_map_range,
         .unmap_range = iree_hal_vulkan_transient_buffer_unmap_range,
         .invalidate_range = iree_hal_vulkan_transient_buffer_invalidate_range,

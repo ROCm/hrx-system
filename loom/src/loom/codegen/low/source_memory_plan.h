@@ -152,7 +152,7 @@ typedef struct loom_low_source_memory_axis_byte_stride_t {
 
 // Describes one physical view-axis byte stride as a bounded materializable
 // product. Dense layouts source runtime factors from suffix dimensions;
-// explicit strided layouts source them from the authored layout operands.
+// explicit strided layouts use the fact table's retained per-axis bindings.
 // Exact facts fold into the static coefficient. Fact-only non-exact strides
 // are reported as UNMATERIALIZED instead of inventing an SSA source.
 void loom_low_source_memory_query_axis_byte_stride(
@@ -217,7 +217,8 @@ typedef struct loom_low_source_memory_access_plan_t {
   uint32_t element_byte_count;
   // Static number of vector lanes addressed by the operation.
   uint32_t vector_lane_count;
-  // Byte stride between adjacent vector lanes along the vector axis.
+  // Byte stride between adjacent vector lanes along the vector axis. A
+  // single-lane access uses element_byte_count as its contiguous packet stride.
   int64_t vector_lane_byte_stride;
   // Classification of any per-lane offset vector carried by the source op.
   loom_low_source_memory_vector_offset_kind_t vector_offset_kind;

@@ -1,16 +1,14 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_unsigned_constant_division.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
-aie2p.target<core> @target
-
-func.def target(@target) @quotient_by_three(%input: i32) -> (i32) {
+func.def @quotient_by_three(%input: i32) -> (i32) {
   %divisor = scalar.constant 3 : i32
   %quotient = scalar.divui %input, %divisor : i32
   func.return %quotient : i32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @quotient_by_three(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @quotient_by_three(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %6 = mov.i32 -1431655765
   %7 = mov.i32 65535
   %8 = mov.short -16
@@ -36,16 +34,14 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @quotient
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @quotient_by_seven(%input: i32) -> (i32) {
+func.def @quotient_by_seven(%input: i32) -> (i32) {
   %divisor = scalar.constant 7 : i32
   %quotient = scalar.divui %input, %divisor : i32
   func.return %quotient : i32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @quotient_by_seven(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @quotient_by_seven(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %6 = mov.i32 613566757
   %7 = mov.i32 65535
   %8 = mov.short -16
@@ -75,16 +71,14 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @quotient
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @remainder_by_twenty(%input: i32) -> (i32) {
+func.def @remainder_by_twenty(%input: i32) -> (i32) {
   %divisor = scalar.constant 20 : i32
   %remainder = scalar.remui %input, %divisor : i32
   func.return %remainder : i32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @remainder_by_twenty(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @remainder_by_twenty(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %divisor = mov.short 20
   %7 = mov.i32 -858993459
   %8 = mov.i32 65535
@@ -113,16 +107,14 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @remainde
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @remainder_by_seven(%input: i32) -> (i32) {
+func.def @remainder_by_seven(%input: i32) -> (i32) {
   %divisor = scalar.constant 7 : i32
   %remainder = scalar.remui %input, %divisor : i32
   func.return %remainder : i32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @remainder_by_seven(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @remainder_by_seven(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %divisor = mov.short 7
   %7 = mov.i32 613566757
   %8 = mov.i32 65535
@@ -155,9 +147,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @remainde
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @pair_by_twenty(%input: i32) -> (i32, i32) {
+func.def @pair_by_twenty(%input: i32) -> (i32, i32) {
   %divisor = scalar.constant 20 : i32
   %quotient = scalar.divui %input, %divisor : i32
   %remainder = scalar.remui %input, %divisor : i32
@@ -165,7 +155,7 @@ func.def target(@target) @pair_by_twenty(%input: i32) -> (i32, i32) {
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @pair_by_twenty(%input: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @pair_by_twenty(%input: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
   %divisor = mov.short 20
   %10 = mov.i32 -858993459
   %11 = mov.i32 65535
@@ -204,9 +194,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @pair_by_
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @pair_by_seven(%input: i32) -> (i32, i32) {
+func.def @pair_by_seven(%input: i32) -> (i32, i32) {
   %divisor = scalar.constant 7 : i32
   %quotient = scalar.divui %input, %divisor : i32
   %remainder = scalar.remui %input, %divisor : i32
@@ -214,7 +202,7 @@ func.def target(@target) @pair_by_seven(%input: i32) -> (i32, i32) {
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @pair_by_seven(%input: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @pair_by_seven(%input: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
   %divisor = mov.short 7
   %10 = mov.i32 613566757
   %11 = mov.i32 65535
@@ -260,9 +248,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @pair_by_
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @pair_by_one(%input: i32) -> (i32, i32) {
+func.def @pair_by_one(%input: i32) -> (i32, i32) {
   %divisor = scalar.constant 1 : i32
   %quotient = scalar.divui %input, %divisor : i32
   %remainder = scalar.remui %input, %divisor : i32
@@ -270,16 +256,14 @@ func.def target(@target) @pair_by_one(%input: i32) -> (i32, i32) {
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @pair_by_one(%input: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @pair_by_one(%input: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
   %remainder = mov.short 0
   return %input, %remainder
 }
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @pair_by_power_of_two(%input: i32) -> (i32, i32) {
+func.def @pair_by_power_of_two(%input: i32) -> (i32, i32) {
   %divisor = scalar.constant 16 : i32
   %quotient = scalar.divui %input, %divisor : i32
   %remainder = scalar.remui %input, %divisor : i32
@@ -287,7 +271,7 @@ func.def target(@target) @pair_by_power_of_two(%input: i32) -> (i32, i32) {
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @pair_by_power_of_two(%input: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @pair_by_power_of_two(%input: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
   %13 = mov.short -4
   %quotient = lshl %input, %13
   %15 = mov.short 15
@@ -297,9 +281,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @pair_by_
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @pair_by_high_power_of_two(%input: i32) -> (i32, i32) {
+func.def @pair_by_high_power_of_two(%input: i32) -> (i32, i32) {
   %divisor = scalar.constant -2147483648 : i32
   %quotient = scalar.divui %input, %divisor : i32
   %remainder = scalar.remui %input, %divisor : i32
@@ -307,7 +289,7 @@ func.def target(@target) @pair_by_high_power_of_two(%input: i32) -> (i32, i32) {
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @pair_by_high_power_of_two(%input: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @pair_by_high_power_of_two(%input: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
   %13 = mov.short -31
   %quotient = lshl %input, %13
   %15 = mov.i32 2147483647
@@ -317,9 +299,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @pair_by_
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @pair_by_high_bit(%input: i32) -> (i32, i32) {
+func.def @pair_by_high_bit(%input: i32) -> (i32, i32) {
   %divisor = scalar.constant -2147483647 : i32
   %quotient = scalar.divui %input, %divisor : i32
   %remainder = scalar.remui %input, %divisor : i32
@@ -327,7 +307,7 @@ func.def target(@target) @pair_by_high_bit(%input: i32) -> (i32, i32) {
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @pair_by_high_bit(%input: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @pair_by_high_bit(%input: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
   %divisor = mov.i32 -2147483647
   %10 = ltu %input, %divisor
   %11 = mov.short 1
@@ -340,9 +320,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @pair_by_
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @pair_by_largest(%input: i32) -> (i32, i32) {
+func.def @pair_by_largest(%input: i32) -> (i32, i32) {
   %divisor = scalar.constant -1 : i32
   %quotient = scalar.divui %input, %divisor : i32
   %remainder = scalar.remui %input, %divisor : i32
@@ -350,7 +328,7 @@ func.def target(@target) @pair_by_largest(%input: i32) -> (i32, i32) {
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @pair_by_largest(%input: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @pair_by_largest(%input: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
   %divisor = mov.short -1
   %10 = ltu %input, %divisor
   %11 = mov.short 1
@@ -363,9 +341,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @pair_by_
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @pair_below_high_bit(%input: i32) -> (i32, i32) {
+func.def @pair_below_high_bit(%input: i32) -> (i32, i32) {
   %divisor = scalar.constant 2147483647 : i32
   %quotient = scalar.divui %input, %divisor : i32
   %remainder = scalar.remui %input, %divisor : i32
@@ -373,7 +349,7 @@ func.def target(@target) @pair_below_high_bit(%input: i32) -> (i32, i32) {
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @pair_below_high_bit(%input: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @pair_below_high_bit(%input: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
   %divisor = mov.i32 2147483647
   %10 = mov.i32 3
   %11 = mov.i32 65535
@@ -419,16 +395,14 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @pair_bel
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @runtime_divisor(%input: i32, %divisor: i32) -> (i32, i32) {
+func.def @runtime_divisor(%input: i32, %divisor: i32) -> (i32, i32) {
   %quotient = scalar.divui %input, %divisor : i32
   %remainder = scalar.remui %input, %divisor : i32
   func.return %quotient, %remainder : i32, i32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @runtime_divisor(%input: reg<aie2p.er>, %divisor: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @runtime_divisor(%input: reg<aie2p.er>, %divisor: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
   %10 = mov.dividend %input
   %11 = mov.short 0
   %12, %13 = divs %10, %11, %divisor
@@ -502,9 +476,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @runtime_
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @index_pair_by_7(%input: index) -> (index, index) {
+func.def @index_pair_by_7(%input: index) -> (index, index) {
   %bounded = index.assume %input [range(%input, 0, 4294967295)] : index
   %divisor = index.constant 7 : index
   %quotient = index.div %bounded, %divisor : index
@@ -513,7 +485,7 @@ func.def target(@target) @index_pair_by_7(%input: index) -> (index, index) {
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_pair_by_7(%bounded: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @index_pair_by_7(%bounded: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
   %divisor = mov.short 7
   %11 = mov.i32 613566757
   %12 = mov.i32 65535
@@ -559,9 +531,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_pa
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @index_pair_by_20(%input: index) -> (index, index) {
+func.def @index_pair_by_20(%input: index) -> (index, index) {
   %bounded = index.assume %input [range(%input, 0, 4294967295)] : index
   %divisor = index.constant 20 : index
   %quotient = index.div %bounded, %divisor : index
@@ -570,7 +540,7 @@ func.def target(@target) @index_pair_by_20(%input: index) -> (index, index) {
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_pair_by_20(%bounded: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @index_pair_by_20(%bounded: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
   %divisor = mov.short 20
   %11 = mov.i32 -858993459
   %12 = mov.i32 65535
@@ -609,9 +579,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_pa
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @index_boundary_pairs(%input: index) -> (index, index, index, index) {
+func.def @index_boundary_pairs(%input: index) -> (index, index, index, index) {
   %bounded = index.assume %input [range(%input, 0, 4294967295)] : index
   %power = index.constant 2147483648 : index
   // ERROR@+1: TARGET/005 {op_name="index.constant", subject_name="value", constraint_key="i64_attr_range", minimum="-1024", maximum="1023"}

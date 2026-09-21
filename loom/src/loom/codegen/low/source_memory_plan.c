@@ -338,34 +338,6 @@ static bool loom_low_source_memory_access_power_of_two_shift(
   return true;
 }
 
-static bool loom_low_source_memory_access_explicit_stride_value(
-    const loom_vector_memory_access_t* vector_access, uint8_t view_axis,
-    loom_value_id_t* out_value) {
-  *out_value = LOOM_VALUE_ID_INVALID;
-  const loom_encoding_address_layout_operands_t* operands =
-      &vector_access->layout_operands;
-  if (operands->static_strides.kind != LOOM_ATTR_I64_ARRAY ||
-      operands->static_strides.count != vector_access->view_rank ||
-      view_axis >= operands->static_strides.count) {
-    return false;
-  }
-  uint16_t dynamic_ordinal = 0;
-  for (uint16_t axis = 0; axis < operands->static_strides.count; ++axis) {
-    if (operands->static_strides.i64_array[axis] != INT64_MIN) {
-      continue;
-    }
-    if (axis == view_axis) {
-      if (dynamic_ordinal >= operands->dynamic_stride_count) {
-        return false;
-      }
-      *out_value = operands->dynamic_stride_values[dynamic_ordinal];
-      return true;
-    }
-    ++dynamic_ordinal;
-  }
-  return false;
-}
-
 void loom_low_source_memory_query_axis_byte_stride(
     const loom_value_fact_table_t* fact_table,
     const loom_vector_memory_access_t* vector_access, uint8_t view_axis,
@@ -439,16 +411,17 @@ void loom_low_source_memory_query_axis_byte_stride(
         return;
       }
     } else {
-      loom_value_id_t stride_value = LOOM_VALUE_ID_INVALID;
-      if (!loom_low_source_memory_access_explicit_stride_value(
-              vector_access, view_axis, &stride_value)) {
+      const loom_value_fact_layout_strides_t stride_values =
+          vector_access->layout_stride_values;
+      if (view_axis >= stride_values.count ||
+          stride_values.values[view_axis] == LOOM_VALUE_ID_INVALID) {
         out_stride->kind =
             LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_UNMATERIALIZED;
         out_stride->byte_facts = byte_facts;
         return;
       }
       out_stride->dynamic_factors[out_stride->dynamic_factor_count++] =
-          stride_value;
+          stride_values.values[view_axis];
     }
   } else {
     return;
@@ -1250,6 +1223,10 @@ static bool loom_low_source_memory_access_plan_from_components(
       return false;
     }
     out_plan->vector_lane_byte_stride = out_plan->element_byte_count;
+  } else if (out_plan->vector_lane_count == 1) {
+    // A single element is contiguous regardless of the view's axis stride.
+    // Its coordinates still use that stride when constructing the address.
+    out_plan->vector_lane_byte_stride = out_plan->element_byte_count;
   } else {
     loom_low_source_memory_axis_byte_stride_t vector_axis_stride;
     loom_low_source_memory_query_axis_byte_stride(
@@ -1259,9 +1236,6 @@ static bool loom_low_source_memory_access_plan_from_components(
         LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_STATIC) {
       out_plan->vector_lane_byte_stride =
           vector_axis_stride.static_byte_coefficient;
-    } else if (out_plan->vector_lane_count == 1) {
-      // A one-lane access has no adjacent-lane address delta to materialize.
-      out_plan->vector_lane_byte_stride = 0;
     } else {
       out_diagnostic->rejection_bits |=
           LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VECTOR_AXIS_STRIDE;

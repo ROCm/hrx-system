@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/buffer_calls.loom-test
-// RUN: emit vm-dis
+// RUN: emit vm-dis target=vm:core
 
-vm.target<core> @vm
-
-func.def target(@vm) @buffer_pair(%a: buffer, %tag: i64, %b: buffer) -> (buffer, i64, buffer) {
+func.def @buffer_pair(%a: buffer, %tag: i64, %b: buffer) -> (buffer, i64, buffer) {
   func.return %b, %tag, %a : buffer, i64, buffer
 }
 
@@ -43,9 +41,7 @@ vm.module core(0.0) {
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @buffer_cycle(%a: buffer, %tag: i32, %b: buffer, %c: buffer) -> (buffer, i32, buffer, buffer) {
+func.def @buffer_cycle(%a: buffer, %tag: i32, %b: buffer, %c: buffer) -> (buffer, i32, buffer, buffer) {
   func.return %a, %tag, %c, %b : buffer, i32, buffer, buffer
 }
 
@@ -85,9 +81,7 @@ vm.module core(0.0) {
 
 // ====
 
-vm.target<core> @vm
-
-func.def public target(@vm) @duplicate_buffer(%a: buffer) -> (buffer, buffer) {
+func.def public @duplicate_buffer(%a: buffer) -> (buffer, buffer) {
   func.return %a, %a : buffer, buffer
 }
 

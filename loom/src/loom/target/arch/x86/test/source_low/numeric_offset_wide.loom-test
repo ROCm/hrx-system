@@ -1,25 +1,21 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_offset_wide.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=x86:avx2 output=low
 
-x86.target<avx2> @target
-
-func.def target(@target) @offset_scale_unbounded(%element: index) -> (offset) {
+func.def @offset_scale_unbounded(%element: index) -> (offset) {
   %stride = index.constant 4 : offset
   %bytes = index.scale %element, %stride : index, offset -> offset
   func.return %bytes : offset
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @offset_scale_unbounded(%element: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @offset_scale_unbounded(%element: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %bytes = lea.scale %element {disp32 = 0, scale = 4}
   return %bytes
 }
 
 // ====
 
-x86.target<avx2> @target
-
-func.def target(@target) @offset_scale_unsigned_wrap(%base: i32, %increment: i32) -> (offset) {
+func.def @offset_scale_unsigned_wrap(%base: i32, %increment: i32) -> (offset) {
   %wrapped = scalar.addi %base, %increment : i32
   %unsigned = index.cast %wrapped : i32 to offset
   %element = index.cast %unsigned : offset to index
@@ -29,7 +25,7 @@ func.def target(@target) @offset_scale_unsigned_wrap(%base: i32, %increment: i32
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @offset_scale_unsigned_wrap(%base: reg<x86.gpr32>, %increment: reg<x86.gpr32>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @offset_scale_unsigned_wrap(%base: reg<x86.gpr32>, %increment: reg<x86.gpr32>) -> (reg<x86.gpr64>) asm {
   %11 = copy %base : reg<x86.gpr32> -> reg<x86.gpr32>
   %wrapped = add.gpr32 %11, %increment
   %element = movzx.gpr64.gpr32 %wrapped
@@ -39,16 +35,14 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @offset_scale_u
 
 // ====
 
-x86.target<avx2> @target
-
-func.def target(@target) @offset_scale_large_stride(%element: index) -> (offset) {
+func.def @offset_scale_large_stride(%element: index) -> (offset) {
   %stride = index.constant 4294967296 : offset
   %bytes = index.scale %element, %stride : index, offset -> offset
   func.return %bytes : offset
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @offset_scale_large_stride(%element: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @offset_scale_large_stride(%element: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %stride = mov.imm64 4294967296
   %7 = copy %element : reg<x86.gpr64> -> reg<x86.gpr64>
   %bytes = imul.gpr64 %7, %stride
@@ -57,15 +51,13 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @offset_scale_l
 
 // ====
 
-x86.target<avx2> @target
-
-func.def target(@target) @offset_scale_dynamic_stride(%element: index, %stride: offset) -> (offset) {
+func.def @offset_scale_dynamic_stride(%element: index, %stride: offset) -> (offset) {
   %bytes = index.scale %element, %stride : index, offset -> offset
   func.return %bytes : offset
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @offset_scale_dynamic_stride(%element: reg<x86.gpr64>, %stride: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @offset_scale_dynamic_stride(%element: reg<x86.gpr64>, %stride: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %7 = copy %element : reg<x86.gpr64> -> reg<x86.gpr64>
   %bytes = imul.gpr64 %7, %stride
   return %bytes
@@ -73,9 +65,7 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @offset_scale_d
 
 // ====
 
-x86.target<avx2> @target
-
-func.def target(@target) @offset_scale_lane(%elements: vector<4xi32>, %stride: offset) -> (offset) {
+func.def @offset_scale_lane(%elements: vector<4xi32>, %stride: offset) -> (offset) {
   %raw = vector.extract %elements[0] : vector<4xi32> -> i32
   %unsigned = index.cast %raw : i32 to offset
   %element = index.cast %unsigned : offset to index
@@ -84,7 +74,7 @@ func.def target(@target) @offset_scale_lane(%elements: vector<4xi32>, %stride: o
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @offset_scale_lane(%elements: reg<x86.xmm>, %stride: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @offset_scale_lane(%elements: reg<x86.xmm>, %stride: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %raw = vpextrd.xmm %elements, 0
   %element = movzx.gpr64.gpr32 %raw
   %12 = copy %element : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -94,9 +84,7 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @offset_scale_l
 
 // ====
 
-x86.target<avx2> @target
-
-func.def target(@target) @offset_scale_bounded(%element: index) -> (offset) {
+func.def @offset_scale_bounded(%element: index) -> (offset) {
   %bounded = index.assume %element [range(%element, 0, 1023)] : index
   %stride = index.constant 4 : offset
   %bytes = index.scale %bounded, %stride : index, offset -> offset
@@ -104,23 +92,21 @@ func.def target(@target) @offset_scale_bounded(%element: index) -> (offset) {
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @offset_scale_bounded(%bounded: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @offset_scale_bounded(%bounded: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %bytes = lea.scale %bounded {disp32 = 0, scale = 4}
   return %bytes
 }
 
 // ====
 
-x86.target<avx2> @target
-
-func.def target(@target) @offset_scale_nonnegative(%element_input: index, %stride: offset) -> (offset) {
+func.def @offset_scale_nonnegative(%element_input: index, %stride: offset) -> (offset) {
   %element = index.assume %element_input [range(%element_input, 0, 2147483647)] : index
   %bytes = index.scale %element, %stride : index, offset -> offset
   func.return %bytes : offset
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @offset_scale_nonnegative(%element: reg<x86.gpr64>, %stride: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @offset_scale_nonnegative(%element: reg<x86.gpr64>, %stride: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %8 = copy %element : reg<x86.gpr64> -> reg<x86.gpr64>
   %bytes = imul.gpr64 %8, %stride
   return %bytes
@@ -128,9 +114,7 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @offset_scale_n
 
 // ====
 
-x86.target<avx2> @target
-
-func.def target(@target) @offset_scale_join(%element_input: index, %choice: i32) -> (offset) {
+func.def @offset_scale_join(%element_input: index, %choice: i32) -> (offset) {
   %element = index.assume %element_input [range(%element_input, 0, 2147483647)] : index
   %stride = index.constant 4 : offset
   %bytes = index.scale %element, %stride : index, offset -> offset
@@ -145,7 +129,7 @@ func.def target(@target) @offset_scale_join(%element_input: index, %choice: i32)
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @offset_scale_join(%element: reg<x86.gpr64>, %choice: reg<x86.gpr32>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @offset_scale_join(%element: reg<x86.gpr64>, %choice: reg<x86.gpr32>) -> (reg<x86.gpr64>) asm {
   %stride = mov.imm64 4
   %bytes = lea.scale %element {disp32 = 0, scale = 4}
   %condition = cmp.ne.imm.gpr32 %choice, 0
@@ -156,9 +140,7 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @offset_scale_j
 
 // ====
 
-x86.target<avx2> @target
-
-func.def target(@target) @offset_scale_loop(%element_input: index, %stride: offset, %count: index) -> (offset) {
+func.def @offset_scale_loop(%element_input: index, %stride: offset, %count: index) -> (offset) {
   %element = index.assume %element_input [range(%element_input, 0, 2147483647)] : index
   %bytes = index.scale %element, %stride : index, offset -> offset
   %begin = index.constant 0 : index
@@ -172,7 +154,7 @@ func.def target(@target) @offset_scale_loop(%element_input: index, %stride: offs
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @offset_scale_loop(%element: reg<x86.gpr64>, %stride: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @offset_scale_loop(%element: reg<x86.gpr64>, %stride: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %25 = copy %element : reg<x86.gpr64> -> reg<x86.gpr64>
   %bytes = imul.gpr64 %25, %stride
   %begin = mov.imm64 0

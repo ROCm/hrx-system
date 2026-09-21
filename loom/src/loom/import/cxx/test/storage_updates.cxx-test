@@ -1,0 +1,226 @@
+// RUN: pass canonicalize,cse,dce
+// Bitmap updates reuse one resolved address for both accesses.
+unsigned update(unsigned* words, unsigned index, unsigned mask) {
+  return words[index] |= mask;
+}
+
+// ----
+func.def public @update(%words: buffer, %words_byte_offset: offset, %index: i32, %mask: i32) -> (i32) {
+  %5 = scalar.extui %index : i32 to i64
+  %15 = scalar.constant 2 : i64
+  %16 = scalar.shli %5, %15 : i64
+  %8 = index.cast %words_byte_offset : offset to i64
+  %9 = scalar.addi %8, %16 : i64
+  %10 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
+  %11 = index.cast %10 : i64 to offset
+  %12 = buffer.view %words[%11] : buffer -> view<1xi32>
+  %13 = view.load %12[0] : view<1xi32> -> i32
+  %14 = scalar.ori %13, %mask : i32
+  view.store %14, %12[0] : i32, view<1xi32>
+  func.return %14 : i32
+}
+
+// ====
+// Address and RHS effects execute once, with the RHS sequenced first.
+unsigned update(unsigned* words, unsigned index, unsigned mask) {
+  unsigned result = words[index++] |= (index += 1, mask);
+  return result + index;
+}
+
+// ----
+func.def public @update(%words: buffer, %words_byte_offset: offset, %index$2: i32, %mask: i32) -> (i32) {
+  %5 = scalar.constant 1 : i32
+  %index$6 = scalar.addi %index$2, %5 : i32
+  %22 = scalar.constant 2 : i32
+  %index$23 = scalar.addi %index$2, %22 : i32
+  %9 = scalar.extui %index$6 : i32 to i64
+  %20 = scalar.constant 2 : i64
+  %21 = scalar.shli %9, %20 : i64
+  %12 = index.cast %words_byte_offset : offset to i64
+  %13 = scalar.addi %12, %21 : i64
+  %14 = scalar.assume %13 [range(%13, 0, 9223372036854775807)] : i64
+  %15 = index.cast %14 : i64 to offset
+  %16 = buffer.view %words[%15] : buffer -> view<1xi32>
+  %17 = view.load %16[0] : view<1xi32> -> i32
+  %result = scalar.ori %17, %mask : i32
+  view.store %result, %16[0] : i32, view<1xi32>
+  %19 = scalar.addi %result, %index$23 : i32
+  func.return %19 : i32
+}
+
+// ====
+// Pointer effects preserve the location selected for the update.
+unsigned update(unsigned* words) {
+  unsigned previous = (*words++)++;
+  return previous + ++words[0];
+}
+
+// ----
+func.def public @update(%words: buffer, %words_byte_offset$1: offset) -> (i32) {
+  %28 = scalar.constant 4 : i64
+  %7 = index.cast %words_byte_offset$1 : offset to i64
+  %8 = scalar.addi %7, %28 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %words_byte_offset$10 = index.cast %9 : i64 to offset
+  %11 = buffer.view %words[%words_byte_offset$1] : buffer -> view<1xi32>
+  %previous = view.load %11[0] : view<1xi32> -> i32
+  %13 = scalar.constant 1 : i32
+  %14 = scalar.addi %previous, %13 : i32
+  view.store %14, %11[0] : i32, view<1xi32>
+  %19 = index.cast %words_byte_offset$10 : offset to i64
+  %21 = scalar.assume %19 [range(%19, 0, 9223372036854775807)] : i64
+  %22 = index.cast %21 : i64 to offset
+  %23 = buffer.view %words[%22] : buffer -> view<1xi32>
+  %24 = view.load %23[0] : view<1xi32> -> i32
+  %26 = scalar.addi %24, %13 : i32
+  view.store %26, %23[0] : i32, view<1xi32>
+  %27 = scalar.addi %previous, %26 : i32
+  func.return %27 : i32
+}
+
+// ====
+// Both signed and unsigned narrow elements use promoted arithmetic.
+int update(unsigned char* bytes, signed char* signed_bytes, int amount) {
+  unsigned first = bytes[0] += amount;
+  int second = signed_bytes[0] /= amount;
+  return first + second;
+}
+
+// ----
+func.def public @update(%bytes: buffer, %bytes_byte_offset: offset, %signed_bytes: buffer, %signed_bytes_byte_offset: offset, %amount: i32) -> (i32) {
+  %10 = index.cast %bytes_byte_offset : offset to i64
+  %12 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
+  %13 = index.cast %12 : i64 to offset
+  %14 = buffer.view %bytes[%13] : buffer -> view<1xi8>
+  %15 = view.load %14[0] : view<1xi8> -> i8
+  %16 = scalar.extui %15 : i8 to i32
+  %17 = scalar.addi %16, %amount : i32
+  %18 = scalar.trunci %17 : i32 to i8
+  view.store %18, %14[0] : i8, view<1xi8>
+  %first = scalar.extui %18 : i8 to i32
+  %24 = index.cast %signed_bytes_byte_offset : offset to i64
+  %26 = scalar.assume %24 [range(%24, 0, 9223372036854775807)] : i64
+  %27 = index.cast %26 : i64 to offset
+  %28 = buffer.view %signed_bytes[%27] : buffer -> view<1xi8>
+  %29 = view.load %28[0] : view<1xi8> -> i8
+  %30 = scalar.extsi %29 : i8 to i32
+  %31 = scalar.divsi %30, %amount : i32
+  %32 = scalar.trunci %31 : i32 to i8
+  view.store %32, %28[0] : i8, view<1xi8>
+  %second = scalar.extsi %32 : i8 to i32
+  %34 = scalar.addi %first, %second : i32
+  func.return %34 : i32
+}
+
+// ====
+// Vector storage retains its lane footprint and observable access flags.
+using Words = unsigned __attribute__((vector_size(16)));
+Words update(volatile Words* words, Words mask) { return *words ^= mask; }
+
+// ----
+func.def public @update(%words: buffer, %words_byte_offset: offset, %mask: vector<4xi32>) -> (vector<4xi32>) {
+  %4 = buffer.view %words[%words_byte_offset] : buffer -> view<4xi32>
+  %5 = vector.load<volatile> %4[0] : view<4xi32> -> vector<4xi32>
+  %6 = vector.xori %5, %mask : vector<4xi32>
+  vector.store<volatile> %6, %4[0] : vector<4xi32>, view<4xi32>
+  func.return %6 : vector<4xi32>
+}
+
+// ====
+// Fixed workgroup arrays retain their indexed view for both accesses.
+#include <loomcxx/kernel.h>
+[[loom::kernel, loom::workgroup_size(64, 1, 1)]]
+void update(unsigned* output) {
+  [[loom::workgroup]] volatile unsigned words[64];
+  unsigned index = loom::workitem_id.x;
+  words[index] = index;
+  words[index] += 5;
+  output[index] = words[index];
+}
+
+// ----
+kernel.def @update() {
+  %workgroup_count_x = config.get @update.workgroup_count.x : index
+  %workgroup_count_y = config.get @update.workgroup_count.y : index
+  %workgroup_count_z = config.get @update.workgroup_count.z : index
+  %7 = index.constant 64 : index
+  %8 = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroup_count_x, %workgroup_count_y, %workgroup_count_z) workgroup_size(%7, %8, %8) : index
+} launch(%output: buffer) {
+  %11 = index.constant 256 : offset
+  %words = buffer.alloca<workgroup> align(4) %11 : buffer
+  %words_byte_offset = index.constant 0 : offset
+  %words_view = buffer.view %words[%words_byte_offset] : buffer -> view<64xi32>
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %index = index.cast %workitem_id_x : index to i32
+  %17 = index.cast %index : i32 to offset
+  %18 = index.cast %17 : offset to index
+  view.store<volatile> %index, %words_view[%18] : i32, view<64xi32>
+  %19 = scalar.constant 5 : i32
+  %22 = view.load<volatile> %words_view[%18] : view<64xi32> -> i32
+  %23 = scalar.addi %22, %19 : i32
+  view.store<volatile> %23, %words_view[%18] : i32, view<64xi32>
+  %26 = view.load<volatile> %words_view[%18] : view<64xi32> -> i32
+  %27 = scalar.extui %index : i32 to i64
+  %35 = scalar.constant 2 : i64
+  %36 = scalar.shli %27, %35 : i64
+  %32 = scalar.assume %36 [range(%36, 0, 9223372036854775807)] : i64
+  %33 = index.cast %32 : i64 to offset
+  %34 = buffer.view %output[%33] : buffer -> view<1xi32>
+  view.store %26, %34[0] : i32, view<1xi32>
+  kernel.return
+}
+
+config.decl @update.workgroup_count.x : index
+
+config.decl @update.workgroup_count.y : index
+
+config.decl @update.workgroup_count.z : index
+
+// ====
+// Discarded compound results emit exactly one volatile read and write.
+void update(volatile unsigned* words, unsigned mask) {
+  *words |= mask;
+  ++words[0];
+  (*words)--;
+}
+
+// ----
+func.def public @update(%words: buffer, %words_byte_offset: offset, %mask: i32) {
+  %3 = buffer.view %words[%words_byte_offset] : buffer -> view<1xi32>
+  %4 = view.load<volatile> %3[0] : view<1xi32> -> i32
+  %5 = scalar.ori %4, %mask : i32
+  view.store<volatile> %5, %3[0] : i32, view<1xi32>
+  %10 = index.cast %words_byte_offset : offset to i64
+  %12 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
+  %13 = index.cast %12 : i64 to offset
+  %14 = buffer.view %words[%13] : buffer -> view<1xi32>
+  %15 = view.load<volatile> %14[0] : view<1xi32> -> i32
+  %16 = scalar.constant 1 : i32
+  %17 = scalar.addi %15, %16 : i32
+  view.store<volatile> %17, %14[0] : i32, view<1xi32>
+  %19 = view.load<volatile> %3[0] : view<1xi32> -> i32
+  %22 = scalar.constant -1 : i32
+  %23 = scalar.addi %19, %22 : i32
+  view.store<volatile> %23, %3[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// C compound assignment uses the same promoted load/update/store contract.
+// INPUT: cxx std=c23
+unsigned update(unsigned char* bytes, unsigned amount) {
+  return *bytes += amount;
+}
+
+// ----
+func.def public @update(%bytes: buffer, %bytes_byte_offset: offset, %amount: i32) -> (i32) {
+  %4 = buffer.view %bytes[%bytes_byte_offset] : buffer -> view<1xi8>
+  %5 = view.load %4[0] : view<1xi8> -> i8
+  %6 = scalar.extui %5 : i8 to i32
+  %7 = scalar.addi %6, %amount : i32
+  %8 = scalar.trunci %7 : i32 to i8
+  view.store %8, %4[0] : i8, view<1xi8>
+  %9 = scalar.extui %8 : i8 to i32
+  func.return %9 : i32
+}

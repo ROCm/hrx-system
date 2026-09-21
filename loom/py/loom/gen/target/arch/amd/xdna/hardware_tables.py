@@ -383,6 +383,7 @@ def emit_aie2p_target_profiles() -> str:
                 "            .type = &loom_aie2p_target_profile_type,",
                 "            .target_bundle = &loom_aie2p_array_target_bundle,",
                 "        },",
+                "        .kind = LOOM_AIE2P_TARGET_KIND_ARRAY,",
                 f"        .device_profile = &loom_xdna_device_profiles[{index}],",
                 "    },",
             ]

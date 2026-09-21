@@ -307,7 +307,8 @@ static bool loom_inline_symbol_is_transferable(const loom_module_t* module,
   if (!symbol || !symbol->defining_op) {
     return false;
   }
-  if (iree_any_bit_set(symbol->flags, LOOM_SYMBOL_FLAG_PUBLIC)) {
+  if (iree_any_bit_set(symbol->flags,
+                       LOOM_SYMBOL_FLAG_PUBLIC | LOOM_SYMBOL_FLAG_RETAIN)) {
     return false;
   }
   if (!loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_FUNC_LIKE)) {
@@ -1003,9 +1004,12 @@ static bool loom_inline_symbol_can_transfer(
   if (!loom_inline_symbol_is_transferable(state->module, info->symbol)) {
     return false;
   }
-  if (state->version_owner == NULL &&
+  const loom_function_version_t* version =
       loom_target_function_version_snapshot_handle_at(
-          state->options.target_versions, symbol_id) != NULL) {
+          state->options.target_versions, symbol_id);
+  if (version != NULL &&
+      (state->version_owner == NULL ||
+       iree_any_bit_set(version->flags, LOOM_FUNCTION_VERSION_FLAG_RETAIN))) {
     return false;
   }
   const loom_symbol_ref_t family =

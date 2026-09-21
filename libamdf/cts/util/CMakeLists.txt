@@ -44,6 +44,69 @@ endif()
 if(AMDF_BUILD)
 iree_cc_library(
   NAME
+    native_event_headers
+  HDRS
+    "native_event.h"
+  DEPS
+    amdf::headers
+    iree::third_party::google_test
+  TESTONLY
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>"
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND AMDF_BUILD)
+iree_cc_library(
+  NAME
+    native_event_linux
+  SRCS
+    "linux/native_event.cc"
+  DEPS
+    ::native_event_headers
+    amdf::headers
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND AMDF_BUILD)
+iree_cc_library(
+  NAME
+    native_event_windows
+  SRCS
+    "windows/native_event.cc"
+  DEPS
+    ::native_event_headers
+    amdf::headers
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+set(_native_event_platform_deps "")
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+  list(APPEND _native_event_platform_deps ::native_event_windows)
+else()
+  list(APPEND _native_event_platform_deps ::native_event_linux)
+endif()
+iree_cc_library(
+  NAME
+    native_event
+  DEPS
+    amdf::headers
+    ${_native_event_platform_deps}
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
     test_main
   SRCS
     "test_main.cc"

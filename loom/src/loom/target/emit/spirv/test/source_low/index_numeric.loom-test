@@ -1,10 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_index.loom-test
-// RUN: emit spirv-dis input=source-low validate
+// RUN: emit spirv-dis target=spirv:vulkan1.3+bda+extended-types input=source-low validate
 // REQUIRES: spirv-dis, spirv-val
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @index_arithmetic(%lhs0: index, %rhs0: index, %stride: offset) -> (index, index, index, index, index, index, index, index, offset) {
+func.def @index_arithmetic(%lhs0: index, %rhs0: index, %stride: offset) -> (index, index, index, index, index, index, index, index, offset) {
   %lhs, %rhs = index.assume %lhs0, %rhs0 [range(%lhs0, 0, 2147483647), range(%rhs0, 1, 1024)] : index, index
   %add = index.add %lhs, %rhs : index
   %sub = index.sub %lhs, %rhs : index
@@ -152,9 +150,7 @@ func.def target(@target) @index_arithmetic(%lhs0: index, %rhs0: index, %stride: 
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @offset_arithmetic(%lhs: offset, %rhs: offset) -> (offset, offset) {
+func.def @offset_arithmetic(%lhs: offset, %rhs: offset) -> (offset, offset) {
   %add = index.add %lhs, %rhs : offset
   %sub = index.sub %lhs, %rhs : offset
   func.return %add, %sub : offset, offset
@@ -224,9 +220,7 @@ func.def target(@target) @offset_arithmetic(%lhs: offset, %rhs: offset) -> (offs
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @index_bitwise(%input: index, %other: index, %amount0: index) -> (index, index, index, index, index, index, index, index, index, index, index) {
+func.def @index_bitwise(%input: index, %other: index, %amount0: index) -> (index, index, index, index, index, index, index, index, index, index, index) {
   %amount = index.assume %amount0 [range(%amount0, 1, 31)] : index
   %and = index.andi %input, %other : index
   %or = index.ori %input, %other : index
@@ -400,9 +394,7 @@ func.def target(@target) @index_bitwise(%input: index, %other: index, %amount0: 
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @index_compare_select(%lhs: index, %rhs: index) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, index) {
+func.def @index_compare_select(%lhs: index, %rhs: index) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, index) {
   %eq = index.cmp eq, %lhs, %rhs : index
   %ne = index.cmp ne, %lhs, %rhs : index
   %slt = index.cmp slt, %lhs, %rhs : index
@@ -558,9 +550,7 @@ func.def target(@target) @index_compare_select(%lhs: index, %rhs: index) -> (i1,
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @offset_compare_select(%lhs: offset, %rhs: offset) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, offset) {
+func.def @offset_compare_select(%lhs: offset, %rhs: offset) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, offset) {
   %eq = index.cmp eq, %lhs, %rhs : offset
   %ne = index.cmp ne, %lhs, %rhs : offset
   %slt = index.cmp slt, %lhs, %rhs : offset

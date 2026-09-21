@@ -10,6 +10,7 @@
 
 #include "iree/async/cts/util/registry.h"
 #include "iree/async/cts/util/test_base.h"
+#include "iree/async/event.h"
 #include "iree/async/proactor.h"
 
 namespace iree::async::cts {
@@ -141,6 +142,39 @@ TEST_P(EventSourceWindowsTest, RearmsAfterEachCallback) {
 
   WaitForEventSourceUnregistration(source);
   EXPECT_TRUE(CloseHandle(event_handle));
+}
+
+TEST_P(EventSourceWindowsTest, ConsumptionPreservesSignalFollowingNativeWait) {
+  iree_async_event_t* event = nullptr;
+  IREE_ASSERT_OK(iree_async_event_create(proactor_, &event));
+  struct CallbackState {
+    // Caller event whose first signal is consumed by the native wait.
+    iree_async_event_t* event;
+    // Number of callbacks received over the one registration.
+    int count = 0;
+  } state = {event};
+  iree_async_event_source_callback_t callback = {
+      +[](void* user_data, iree_async_event_source_t*,
+          iree_async_poll_events_t events) {
+        auto* state = static_cast<CallbackState*>(user_data);
+        EXPECT_TRUE(iree_all_bits_set(events, IREE_ASYNC_POLL_EVENT_IN));
+        if (++state->count == 1) {
+          // The native wait has consumed the first signal. This second signal
+          // must survive the portable consumption of the delivered hint.
+          iree_async_event_set(state->event);
+        }
+        IREE_EXPECT_OK(iree_async_event_consume(state->event));
+      },
+      &state,
+  };
+  iree_async_event_source_t* source = nullptr;
+  IREE_ASSERT_OK(iree_async_proactor_register_event_source(
+      proactor_, event->native.wait_primitive, callback, &source));
+  iree_async_event_set(event);
+  PollUntilCondition([&] { return state.count >= 2; });
+  EXPECT_EQ(state.count, 2);
+  WaitForEventSourceUnregistration(source);
+  iree_async_event_release(event);
 }
 
 TEST_P(EventSourceWindowsTest, SignalBeforeUnregisterRemovesCompletion) {

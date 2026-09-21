@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_float_arithmetic.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=vm:core output=low
 
-vm.target<core> @vm
-
-func.def target(@vm) @float_arithmetic_f32(%a: f32, %b: f32) -> (f32, f32, f32, f32, f32, f32, f32, f32) {
+func.def @float_arithmetic_f32(%a: f32, %b: f32) -> (f32, f32, f32, f32, f32, f32, f32, f32) {
   %sum = scalar.addf %a, %b : f32
   %difference = scalar.subf %a, %b : f32
   %product = scalar.mulf %a, %b : f32
@@ -16,7 +14,7 @@ func.def target(@vm) @float_arithmetic_f32(%a: f32, %b: f32) -> (f32, f32, f32, 
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @float_arithmetic_f32(%a: reg<vm.value : f32>, %b: reg<vm.value : f32>) -> (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) asm {
+low.func.def target<vm.core> abi(vm_function) @float_arithmetic_f32(%a: reg<vm.value : f32>, %b: reg<vm.value : f32>) -> (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) asm {
   %sum = float.add.f32 %a, %b
   %difference = float.sub.f32 %a, %b
   %product = float.mul.f32 %a, %b
@@ -30,9 +28,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @float_arithmetic_f32(%a: reg
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @float_arithmetic_f64(%a: f64, %b: f64) -> (f64, f64, f64, f64, f64, f64, f64, f64) {
+func.def @float_arithmetic_f64(%a: f64, %b: f64) -> (f64, f64, f64, f64, f64, f64, f64, f64) {
   %sum = scalar.addf %a, %b : f64
   %difference = scalar.subf %a, %b : f64
   %product = scalar.mulf %a, %b : f64
@@ -45,7 +41,7 @@ func.def target(@vm) @float_arithmetic_f64(%a: f64, %b: f64) -> (f64, f64, f64, 
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @float_arithmetic_f64(%a: reg<vm.value : f64>, %b: reg<vm.value : f64>) -> (reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>) asm {
+low.func.def target<vm.core> abi(vm_function) @float_arithmetic_f64(%a: reg<vm.value : f64>, %b: reg<vm.value : f64>) -> (reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>) asm {
   %sum = float.add.f64 %a, %b
   %difference = float.sub.f64 %a, %b
   %product = float.mul.f64 %a, %b
@@ -59,16 +55,14 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @float_arithmetic_f64(%a: reg
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @float_arithmetic_f16(%a: f16, %b: f16) -> (f16, f16) {
+func.def @float_arithmetic_f16(%a: f16, %b: f16) -> (f16, f16) {
   %sum = scalar.addf %a, %b : f16
   %product = scalar.mulf %a, %b : f16
   func.return %sum, %product : f16, f16
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @float_arithmetic_f16(%a: reg<vm.value : f16>, %b: reg<vm.value : f16>) -> (reg<vm.value : f16>, reg<vm.value : f16>) asm {
+low.func.def target<vm.core> abi(vm_function) @float_arithmetic_f16(%a: reg<vm.value : f16>, %b: reg<vm.value : f16>) -> (reg<vm.value : f16>, reg<vm.value : f16>) asm {
   %18 = conversion.float.extend %a, "f16.to.f32" : reg<vm.value : f32>
   %19 = conversion.float.extend %b, "f16.to.f32" : reg<vm.value : f32>
   %20 = float.add.f32 %18, %19
@@ -80,16 +74,14 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @float_arithmetic_f16(%a: reg
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @float_arithmetic_bf16(%a: bf16, %b: bf16) -> (bf16, bf16) {
+func.def @float_arithmetic_bf16(%a: bf16, %b: bf16) -> (bf16, bf16) {
   %sum = scalar.addf %a, %b : bf16
   %product = scalar.mulf %a, %b : bf16
   func.return %sum, %product : bf16, bf16
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @float_arithmetic_bf16(%a: reg<vm.value : bf16>, %b: reg<vm.value : bf16>) -> (reg<vm.value : bf16>, reg<vm.value : bf16>) asm {
+low.func.def target<vm.core> abi(vm_function) @float_arithmetic_bf16(%a: reg<vm.value : bf16>, %b: reg<vm.value : bf16>) -> (reg<vm.value : bf16>, reg<vm.value : bf16>) asm {
   %18 = conversion.float.extend %a, "bf16.to.f32" : reg<vm.value : f32>
   %19 = conversion.float.extend %b, "bf16.to.f32" : reg<vm.value : f32>
   %20 = float.add.f32 %18, %19

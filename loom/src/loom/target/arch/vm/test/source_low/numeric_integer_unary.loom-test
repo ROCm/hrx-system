@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_integer_unary.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=vm:core output=low
 
-vm.target<core> @vm
-
-func.def target(@vm) @integer_unary_i32(%value: i32) -> (i32, i32, i32, i32, i32) {
+func.def @integer_unary_i32(%value: i32) -> (i32, i32, i32, i32, i32) {
   %negated = scalar.negi %value : i32
   %absolute = scalar.absi %value : i32
   %leading = scalar.ctlzi %value : i32
@@ -13,7 +11,7 @@ func.def target(@vm) @integer_unary_i32(%value: i32) -> (i32, i32, i32, i32, i32
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @integer_unary_i32(%value: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) asm {
+low.func.def target<vm.core> abi(vm_function) @integer_unary_i32(%value: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) asm {
   %negated = integer.neg.i32 %value
   %absolute = integer.abs.s32 %value
   %leading = integer.count.leading.zeros.i32 %value
@@ -24,9 +22,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @integer_unary_i32(%value: re
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @integer_unary_i64(%value: i64) -> (i64, i64, i64, i64, i64) {
+func.def @integer_unary_i64(%value: i64) -> (i64, i64, i64, i64, i64) {
   %negated = scalar.negi %value : i64
   %absolute = scalar.absi %value : i64
   %leading = scalar.ctlzi %value : i64
@@ -36,7 +32,7 @@ func.def target(@vm) @integer_unary_i64(%value: i64) -> (i64, i64, i64, i64, i64
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @integer_unary_i64(%value: reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) asm {
+low.func.def target<vm.core> abi(vm_function) @integer_unary_i64(%value: reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) asm {
   %negated = integer.neg.i64 %value
   %absolute = integer.abs.s64 %value
   %leading = integer.count.leading.zeros.i64 %value

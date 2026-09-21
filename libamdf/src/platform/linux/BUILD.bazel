@@ -79,6 +79,17 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "native_event",
+    srcs = ["native_event.c"],
+    target_compatible_with = ["@platforms//os:linux"],
+    visibility = ["//libamdf/src:__subpackages__"],
+    deps = [
+        ":file",
+        "//libamdf/src/platform:native_event",
+    ],
+)
+
+amdf_cc_library(
     name = "endpoint",
     srcs = ["endpoint.c"],
     hdrs = ["endpoint.h"],

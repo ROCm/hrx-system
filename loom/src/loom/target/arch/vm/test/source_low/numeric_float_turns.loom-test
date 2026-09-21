@@ -1,16 +1,14 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_float_turns.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=vm:core output=low
 
-vm.target<core> @vm
-
-func.def target(@vm) @turns_f32(%value: f32) -> (f32, f32) {
+func.def @turns_f32(%value: f32) -> (f32, f32) {
   %sin = scalar.sinturnsf %value : f32
   %cos = scalar.costurnsf %value : f32
   func.return %sin, %cos : f32, f32
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @turns_f32(%value: reg<vm.value : f32>) -> (reg<vm.value : f32>, reg<vm.value : f32>) asm {
+low.func.def target<vm.core> abi(vm_function) @turns_f32(%value: reg<vm.value : f32>) -> (reg<vm.value : f32>, reg<vm.value : f32>) asm {
   %sin = float.math.unary.f32 %value, "sin_turns.approx"
   %cos = float.math.unary.f32 %value, "cos_turns.approx"
   return %sin, %cos
@@ -18,16 +16,14 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @turns_f32(%value: reg<vm.val
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @radians_afn_f32(%value: f32) -> (f32, f32) {
+func.def @radians_afn_f32(%value: f32) -> (f32, f32) {
   %sin = scalar.sinf<afn> %value : f32
   %cos = scalar.cosf<afn> %value : f32
   func.return %sin, %cos : f32, f32
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @radians_afn_f32(%value: reg<vm.value : f32>) -> (reg<vm.value : f32>, reg<vm.value : f32>) asm {
+low.func.def target<vm.core> abi(vm_function) @radians_afn_f32(%value: reg<vm.value : f32>) -> (reg<vm.value : f32>, reg<vm.value : f32>) asm {
   %14 = constant.i32 1042479491 : reg<vm.value : f32>
   %15 = float.mul.f32 %value, %14
   %sin = float.math.unary.f32 %15, "sin_turns.approx"

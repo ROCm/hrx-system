@@ -604,6 +604,7 @@ loom_cc_library(
     loom::ops::op_defs
     loom::ops::type_registry
     loom::rewrite::rewriter
+    loom::target::registers
   PUBLIC
 )
 

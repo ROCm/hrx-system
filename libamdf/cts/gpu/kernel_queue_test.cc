@@ -4,9 +4,11 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <thread>
 #include <utility>
 
 #include "amdf/amdf.h"
@@ -135,15 +137,17 @@ class GpuKernelQueueTest : public GpuDeviceFixture {
     return AMDF_STATUS_OK;
   }
 
-  amdf_status_t CreateQueue(uint32_t family_ordinal) {
+  amdf_status_t CreateQueue(uint32_t family_ordinal,
+                            uint32_t pending_capacity = 0) {
     amdf_gpu_kernel_queue_create_info_t create_info = {};
     create_info.type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_CREATE_INFO;
     create_info.structure_size = sizeof(create_info);
     create_info.queue_family_ordinal = family_ordinal;
+    create_info.maximum_pending_submission_count = pending_capacity;
     return gpu_api_->kernel_queue_create(device_, &create_info, &queue_);
   }
 
-  uint64_t CreateCommandMemory() {
+  uint64_t CreateCommandMemory(uint64_t byte_length = kMemoryByteLength) {
     const amdf_memory_device_access_t access = {
         device_,
         {.access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
@@ -159,7 +163,7 @@ class GpuKernelQueueTest : public GpuDeviceFixture {
         system_scope_,
         AMDF_MEMORY_PROFILE_ROLE_CREATE | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP,
         create_info.required_flags, access.requirements);
-    create_info.byte_length = kMemoryByteLength;
+    create_info.byte_length = byte_length;
     amdf_memory_profile_t profile = {};
     profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
     profile.structure_size = sizeof(profile);
@@ -198,11 +202,12 @@ class GpuKernelQueueTest : public GpuDeviceFixture {
     return address;
   }
 
-  amdf_host_mapping_info_t MapCommandMemory() {
+  amdf_host_mapping_info_t MapCommandMemory(
+      uint64_t byte_length = kMemoryByteLength) {
     amdf_memory_map_info_t map_info = {};
     map_info.type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO;
     map_info.structure_size = sizeof(map_info);
-    map_info.byte_length = kMemoryByteLength;
+    map_info.byte_length = byte_length;
     map_info.flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
     EXPECT_TRUE(
         amdf_status_is_ok(api_->memory_map(memory_, &map_info, &mapping_)));
@@ -282,6 +287,100 @@ class GpuKernelQueueTest : public GpuDeviceFixture {
     return address;
   }
 
+  void RunPipelinedCopies(uint32_t pending_capacity) {
+    ASSERT_EQ(CreateQueue(family_.ordinal, pending_capacity), AMDF_STATUS_OK);
+    amdf_kernel_queue_info_t info = {};
+    info.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO;
+    info.structure_size = sizeof(info);
+    ASSERT_EQ(api_->kernel_queue_query_info(queue_, &info), AMDF_STATUS_OK);
+    ASSERT_NE(info.maximum_pending_submission_count, 0u);
+    // Bound the workload independently of a provider's advertised capacity.
+    const uint32_t command_count =
+        std::min(info.maximum_pending_submission_count, uint32_t{4096});
+    constexpr uint64_t kCommandStride = 32;
+    const uint64_t data_offset = command_count * kCommandStride;
+    const uint64_t data_byte_length = (uint64_t{command_count} + 1) * 4;
+    const uint64_t memory_byte_length =
+        std::max(kMemoryByteLength, data_offset + data_byte_length);
+    const uint64_t address = CreateCommandMemory(memory_byte_length);
+    ASSERT_NE(memory_, nullptr);
+    const auto mapping_info = MapCommandMemory(memory_byte_length);
+    ASSERT_NE(mapping_, nullptr);
+    ASSERT_NE(mapping_info.pointer, nullptr);
+    auto* bytes = static_cast<uint8_t*>(mapping_info.pointer);
+    const uint64_t command_byte_length =
+        (command_type_ == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4
+             ? kCopyDataDwordCount
+             : kSdmaCopyDwordCount) *
+        sizeof(uint32_t);
+    for (uint32_t i = 0; i < command_count; ++i) {
+      const uint64_t source = address + data_offset + i * 4;
+      const uint64_t target = source + 4;
+      if (command_type_ == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4) {
+        const auto command = MakeCopyData32(source, target);
+        std::memcpy(bytes + i * kCommandStride, command.data(),
+                    sizeof(command));
+      } else {
+        const auto command =
+            MakeSdmaCopy32(family_.format_features, source, target);
+        std::memcpy(bytes + i * kCommandStride, command.data(),
+                    sizeof(command));
+      }
+    }
+    amdf_gpu_kernel_command_t command = {};
+    command.memory = memory_;
+    command.byte_length = command_byte_length;
+    amdf_gpu_kernel_queue_submission_info_t submit = {};
+    submit.type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_SUBMISSION_INFO;
+    submit.structure_size = sizeof(submit);
+    submit.command_count = 1;
+    submit.commands = &command;
+    uint64_t previous_submission = 0;
+    for (uint32_t round = 0; round < 3; ++round) {
+      const uint32_t expected = 0x13579bdfu + round * 0x1020304u;
+      std::memset(bytes + data_offset, 0xa5, data_byte_length);
+      std::memcpy(bytes + data_offset, &expected, sizeof(expected));
+      ASSERT_EQ(
+          api_->host_mapping_cache_control(
+              mapping_, AMDF_HOST_CACHE_OPERATION_FLUSH, 0, memory_byte_length),
+          AMDF_STATUS_OK);
+      amdf_status_t submit_status = AMDF_STATUS_OK;
+      uint64_t last_submission = 0;
+      for (uint32_t i = 0;
+           i < command_count && amdf_status_is_ok(submit_status); ++i) {
+        command.byte_offset = i * kCommandStride;
+        uint64_t submission = 0;
+        submit_status =
+            gpu_api_->kernel_queue_submit(queue_, &submit, &submission);
+        if (amdf_status_is_ok(submit_status)) {
+          indirect_memory_may_be_in_use_ = true;
+          EXPECT_GT(submission, previous_submission);
+          previous_submission = last_submission = submission;
+        }
+      }
+      // Even a later rejection leaves earlier commands accepted. Drain that
+      // exact prefix before reporting rejection or reusing any backing.
+      if (last_submission != 0) {
+        const auto wait_status = api_->kernel_queue_wait(
+            queue_, last_submission, AMDF_TIMEOUT_INFINITE, 0);
+        if (amdf_status_is_ok(wait_status)) {
+          indirect_memory_may_be_in_use_ = false;
+        }
+        ASSERT_EQ(wait_status, AMDF_STATUS_OK);
+      }
+      ASSERT_EQ(submit_status, AMDF_STATUS_OK);
+      ASSERT_EQ(api_->host_mapping_cache_control(
+                    mapping_, AMDF_HOST_CACHE_OPERATION_INVALIDATE, data_offset,
+                    data_byte_length),
+                AMDF_STATUS_OK);
+      for (uint32_t i = 1; i <= command_count; ++i) {
+        uint32_t actual = 0;
+        std::memcpy(&actual, bytes + data_offset + i * 4, sizeof(actual));
+        EXPECT_EQ(actual, expected) << "round=" << round << " command=" << i;
+      }
+    }
+  }
+
   // Complete encoding facts retained from queue-family selection.
   amdf_queue_family_info_t family_ = {};
   // Command representation implemented by this scenario's encoder.
@@ -339,8 +438,8 @@ TEST_F(Pm4KernelQueueTest, ExecutesMaterializedCopyData) {
       amdf_status_is_ok(api_->kernel_queue_query_info(queue_, &queue_info)));
   EXPECT_EQ(queue_info.queue_family_ordinal, family_ordinal);
   EXPECT_EQ(queue_info.command_type, AMDF_QUEUE_COMMAND_TYPE_GPU_PM4);
-  EXPECT_EQ(queue_info.maximum_pending_submission_count, 1u);
-  EXPECT_EQ(queue_info.maximum_command_count, 1u);
+  ASSERT_GE(queue_info.maximum_pending_submission_count, 1u);
+  ASSERT_GE(queue_info.maximum_command_count, 1u);
 
   const uint64_t address = CreateCommandMemory();
   ASSERT_NE(memory_, nullptr);
@@ -389,7 +488,7 @@ TEST_F(Pm4KernelQueueTest, ExecutesMaterializedCopyData) {
   uint64_t submission = 42;
   ASSERT_TRUE(amdf_status_is_ok(
       gpu_api_->kernel_queue_submit(queue_, &submission_info, &submission)));
-  EXPECT_EQ(submission, 1u);
+  indirect_memory_may_be_in_use_ = true;
 
   amdf_kernel_queue_status_t queue_status = {};
   queue_status.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS;
@@ -398,17 +497,21 @@ TEST_F(Pm4KernelQueueTest, ExecutesMaterializedCopyData) {
             AMDF_STATUS_OK);
   EXPECT_EQ(queue_status.retired_submission, 0u);
   EXPECT_EQ(queue_status.terminal_status, AMDF_STATUS_OK);
-  uint64_t rejected_submission = 42;
-  EXPECT_EQ(amdf_status_code(gpu_api_->kernel_queue_submit(
-                queue_, &submission_info, &rejected_submission)),
-            AMDF_STATUS_CODE_BUSY);
-  EXPECT_EQ(rejected_submission, 42u);
 
   ASSERT_TRUE(amdf_status_is_ok(api_->host_mapping_destroy(mapping_)));
   mapping_ = nullptr;
 
-  ASSERT_TRUE(amdf_status_is_ok(api_->kernel_queue_wait(
-      queue_, submission, AMDF_TIMEOUT_INFINITE, UINT64_C(50000))));
+  // Poll checked progress without an exact-point native wait. The outer CTS
+  // harness bounds a hang; successful retirement still gates result access.
+  while (queue_status.retired_submission < submission) {
+    ASSERT_EQ(api_->kernel_queue_refresh_status(queue_, &queue_status),
+              AMDF_STATUS_OK);
+    ASSERT_EQ(queue_status.terminal_status, AMDF_STATUS_OK);
+    if (queue_status.retired_submission < submission) {
+      std::this_thread::yield();
+    }
+  }
+  indirect_memory_may_be_in_use_ = false;
   ASSERT_TRUE(amdf_status_is_ok(
       api_->kernel_queue_query_status(queue_, &queue_status)));
   EXPECT_EQ(queue_status.retired_submission, submission);
@@ -431,6 +534,22 @@ TEST_F(Pm4KernelQueueTest, ExecutesMaterializedCopyData) {
   ASSERT_TRUE(
       amdf_status_is_ok(api_->memory_destroy(std::exchange(memory_, nullptr))));
   ASSERT_EQ(DestroyQueue(), AMDF_STATUS_OK);
+}
+
+TEST_F(Pm4KernelQueueTest, PipelinesCommandsAtConfiguredCapacity) {
+  RunPipelinedCopies(8);
+}
+
+TEST_F(Pm4KernelQueueTest, PipelinesCommandsAtDefaultCapacity) {
+  RunPipelinedCopies(0);
+}
+
+TEST_F(SdmaKernelQueueTest, PipelinesCommandsAtConfiguredCapacity) {
+  RunPipelinedCopies(8);
+}
+
+TEST_F(SdmaKernelQueueTest, PipelinesCommandsAtDefaultCapacity) {
+  RunPipelinedCopies(0);
 }
 
 TEST_F(SdmaKernelQueueTest, ExecutesMaterializedSdmaCopy) {

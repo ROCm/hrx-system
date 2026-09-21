@@ -333,7 +333,7 @@ enum iree_hal_buffer_usage_bits_t {
 
   // ==== IREE_HAL_BUFFER_USAGE_SHARING_* ======================================
 
-  // Buffer can be exported via iree_hal_allocator_export_buffer.
+  // Buffer can be exported via iree_hal_buffer_export.
   // Exported buffers may require special allocation behavior (dedicated
   // allocations, higher alignment, etc) and may impose lifetime restrictions.
   IREE_HAL_BUFFER_USAGE_SHARING_EXPORT = 1u << 16,
@@ -465,6 +465,115 @@ enum iree_hal_mapping_mode_bits_t {
   IREE_HAL_MAPPING_MODE_PERSISTENT = 1u << 1,
 };
 typedef uint32_t iree_hal_mapping_mode_t;
+
+//===----------------------------------------------------------------------===//
+// External buffers
+//===----------------------------------------------------------------------===//
+
+// Defines the type of an external buffer handle.
+// Each type may only be usable in a subset of implementations and platforms and
+// may even vary based on the runtime device properties or buffer instance.
+//
+// See the notes on each type for requirements; compatibility often requires
+// the handle to check and trying to import/export is the most reliable way to
+// check for support.
+//
+// The Vulkan documentation on external memory covers a lot of the design
+// decisions made here:
+// https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VK_KHR_external_memory.html
+typedef enum iree_hal_external_buffer_type_e {
+  IREE_HAL_EXTERNAL_BUFFER_TYPE_NONE = 0,
+
+  // A host pointer allocated from an external allocator.
+  // This is a borrowed pointer: the caller keeps the source allocation live
+  // while an imported buffer or exported pointer is in use.
+  //
+  // CPU:
+  //  When using the default heap allocator this is just a host pointer.
+  //
+  // Vulkan:
+  //  Requires VK_EXT_external_memory_host.
+  //  Uses VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT.
+  IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
+
+  // A device pointer allocated from an external allocator.
+  // This is a borrowed pointer: the caller keeps the source allocation live
+  // while an imported buffer or exported pointer is in use.
+  //
+  // CPU:
+  //  When using the default heap allocator this is just a host pointer.
+  //
+  // Vulkan:
+  //  Requires VK_KHR_buffer_device_address.
+  //  Treats the pointer as VkDeviceAddress.
+  IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION,
+
+  // A driver/device-specific POSIX file descriptor handle.
+  // The handle supports dup, dup2, close, and transport using the SCM_RIGHTS
+  // control message. All other usage with system APIs is undefined.
+  // An imported/exported handle owns a reference to the underlying allocator
+  // memory. May only be shared with the same underlying driver and device.
+  //
+  // Vulkan:
+  //  Requires device support.
+  //  Uses VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT.
+  IREE_HAL_EXTERNAL_BUFFER_TYPE_OPAQUE_FD,
+
+  // A driver/device-specific Win32 HANDLE.
+  // The handle supports DuplicateHandle, CompareObjectHandles, CloseHandle, and
+  // Get/SetHandleInformation. All other usage with system APIs is undefined.
+  // An imported/exported handle owns a reference to the underlying allocator
+  // memory. Must only be shared with the same underlying driver and device.
+  //
+  // Vulkan:
+  //  Requires device support.
+  //  Uses VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT.
+  IREE_HAL_EXTERNAL_BUFFER_TYPE_OPAQUE_WIN32,
+} iree_hal_external_buffer_type_t;
+
+// Flags for controlling iree_hal_external_buffer_t implementation details.
+enum iree_hal_external_buffer_flag_bits_t {
+  IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE = 0u,
+};
+typedef uint32_t iree_hal_external_buffer_flags_t;
+
+// Handle to a typed external buffer.
+// The caller manages its lifetime according to iree_hal_external_buffer_type_t.
+// Pointer values borrow the source allocation; native handles may own a
+// reference to its backing. Neither extends a queue allocation's lifetime:
+// queue_dealloca must be ordered after all external uses of the allocation.
+typedef struct iree_hal_external_buffer_t {
+  // Type of the resource used to interpret the handle.
+  iree_hal_external_buffer_type_t type;
+  // Flags indicating buffer compatibility.
+  iree_hal_external_buffer_flags_t flags;
+  // Size of the external resource view in bytes.
+  iree_device_size_t size;
+  // Native representation selected by |type|.
+  union {
+    // IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION.
+    struct {
+      // Host memory pointer.
+      void* ptr;
+    } host_allocation;
+    // IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION.
+    struct {
+      // Device memory pointer. Pointer width may vary across devices so it is
+      // always treated as a 64-bit integer here.
+      uint64_t ptr;
+    } device_allocation;
+    // IREE_HAL_EXTERNAL_BUFFER_TYPE_OPAQUE_FD.
+    struct {
+      // POSIX file descriptor referencing the backing memory.
+      int fd;
+    } opaque_fd;
+    // IREE_HAL_EXTERNAL_BUFFER_TYPE_OPAQUE_WIN32.
+    struct {
+      // Win32 handle referencing the backing memory.
+      void* handle;
+    } opaque_win32;
+  } handle;
+} iree_hal_external_buffer_t;
 
 //===----------------------------------------------------------------------===//
 // iree_hal_buffer_placement_t
@@ -755,9 +864,12 @@ IREE_API_EXPORT iree_hal_buffer_overlap_t iree_hal_buffer_test_overlap(
 // If |byte_length| is IREE_HAL_WHOLE_BUFFER the remaining bytes in the buffer
 // after |byte_offset| (possibly 0) will be selected.
 //
-// The parent buffer will remain alive for the lifetime of the subspan
-// returned. If the subspan is a small portion this may cause additional
-// memory to remain allocated longer than required.
+// Retains the backing allocation and any owner responsible for releasing the
+// parent view's range. Ordinary intermediate views need not remain alive. If
+// the subspan is a small portion this may keep the entire parent range
+// allocated longer than required. This does not extend an asynchronous
+// allocation epoch: all uses of the subspan must still precede explicit queue
+// deallocation.
 //
 // Returns the given |buffer| if the requested span covers the entire range.
 // |out_buffer| must be released by the caller.
@@ -906,6 +1018,28 @@ iree_hal_memory_access_t iree_hal_buffer_allowed_access(
 IREE_API_EXPORT
 iree_hal_buffer_usage_t iree_hal_buffer_allowed_usage(
     const iree_hal_buffer_t* buffer);
+
+// Exports the logical view of |buffer| to an external buffer handle.
+// Pointer exports include the buffer's byte offset and report its byte length,
+// not the entire underlying allocation. See iree_hal_external_buffer_type_t for
+// ownership and driver/device compatibility requirements. The caller is
+// responsible for the exported value's lifetime, including keeping the source
+// allocation live while a borrowed pointer is in use.
+//
+// Export does not synchronize, retain |buffer|, or preserve its pool
+// allocation. An asynchronously allocated buffer must be committed before
+// export: the caller waits for its alloca signal semaphores and orders
+// queue_dealloca after every external use. Retaining a buffer object alone does
+// not prevent queue_dealloca from ending the allocation's lifetime.
+//
+// Fails with IREE_STATUS_UNAVAILABLE if the buffer cannot be represented by the
+// requested type, or IREE_STATUS_FAILED_PRECONDITION if its backing has not
+// been committed or has already been deallocated. On failure
+// |out_external_buffer| is empty. No ownership transfers on failure.
+IREE_API_EXPORT iree_status_t iree_hal_buffer_export(
+    iree_hal_buffer_t* buffer, iree_hal_external_buffer_type_t requested_type,
+    iree_hal_external_buffer_flags_t requested_flags,
+    iree_hal_external_buffer_t* out_external_buffer);
 
 // Sets a range of the buffer to binary zero.
 //
@@ -1078,21 +1212,29 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_mapping_subspan(
 // iree_hal_subspan_buffer_t
 //===----------------------------------------------------------------------===//
 
-// Creates a buffer referencing a subspan of some base allocation.
+// Creates a buffer referencing a range of |source_buffer|. |byte_offset| is
+// allocation-relative, not relative to the source view. The range must be
+// contained within the source view. Retains its backing allocation and release
+// owner independently so nested views preserve ownership without adding address
+// indirection. Use iree_hal_buffer_subspan for checked, view-relative slicing.
 IREE_API_EXPORT iree_status_t iree_hal_subspan_buffer_create(
-    iree_hal_buffer_t* allocated_buffer, iree_device_size_t byte_offset,
+    iree_hal_buffer_t* source_buffer, iree_device_size_t byte_offset,
     iree_device_size_t byte_length, iree_allocator_t host_allocator,
     iree_hal_buffer_t** out_buffer);
 
-// Creates a buffer referencing a subspan of some base allocation and invokes
-// |release_callback| after the subspan releases its retained base buffer.
+// Creates a subspan with the same range semantics as
+// iree_hal_subspan_buffer_create and an additional release obligation.
+// |release_callback| is invoked after releasing the retained backing allocation
+// and before releasing any inherited lifetime owner. The callback transfers to
+// the new view only on success and runs once after its final dependent view is
+// released, with the original view and range (not one of its children).
 //
 // This is used by allocators that need pool bookkeeping to observe the final
 // lifetime of a materialized view. The callback is intentionally sequenced
 // after the base release so it may release a pool slab without invalidating the
 // subspan while its final reference is being destroyed.
 IREE_API_EXPORT iree_status_t iree_hal_subspan_buffer_create_with_callback(
-    iree_hal_buffer_t* allocated_buffer, iree_device_size_t byte_offset,
+    iree_hal_buffer_t* source_buffer, iree_device_size_t byte_offset,
     iree_device_size_t byte_length,
     iree_hal_buffer_release_callback_t release_callback,
     iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer);
@@ -1124,6 +1266,17 @@ typedef struct iree_hal_buffer_vtable_t {
   // Must be iree_hal_buffer_recycle.
   void(IREE_API_PTR* recycle)(iree_hal_buffer_t* buffer);
   void(IREE_API_PTR* destroy)(iree_hal_buffer_t* buffer);
+
+  // Exports an allocation-relative range already resolved from the caller's
+  // logical view. Subspans forward it unchanged; wrappers around a different
+  // backing view translate it into that backing's allocation coordinates.
+  // On failure |out_external_buffer| must remain empty and unowned.
+  iree_status_t(IREE_API_PTR* export_range)(
+      iree_hal_buffer_t* buffer, iree_device_size_t local_byte_offset,
+      iree_device_size_t local_byte_length,
+      iree_hal_external_buffer_type_t requested_type,
+      iree_hal_external_buffer_flags_t requested_flags,
+      iree_hal_external_buffer_t* out_external_buffer);
 
   iree_status_t(IREE_API_PTR* map_range)(iree_hal_buffer_t* buffer,
                                          iree_hal_mapping_mode_t mapping_mode,

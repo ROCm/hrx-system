@@ -48,6 +48,38 @@ const loom_target_bundle_t loom_spirv_low_target_bundle_vulkan1_3 = {
     .config = &kSpirvVulkan13Config,
 };
 
+static const loom_target_config_t kSpirvExtendedTypesConfig = {
+    .name = IREE_SVL("spirv.logical.core"),
+    .contract_set_key = IREE_SVL("spirv.logical.core"),
+    .contract_feature_bits =
+        LOOM_SPIRV_FEATURE_PROFILE_VULKAN_1_3_BDA | LOOM_SPIRV_FEATURE_FLOAT16 |
+        LOOM_SPIRV_FEATURE_FLOAT64 | LOOM_SPIRV_FEATURE_INT8 |
+        LOOM_SPIRV_FEATURE_INT16 |
+        LOOM_SPIRV_FEATURE_STORAGE_BUFFER_8BIT_ACCESS |
+        LOOM_SPIRV_FEATURE_STORAGE_BUFFER_16BIT_ACCESS |
+        LOOM_SPIRV_FEATURE_BFLOAT16_TYPE_KHR,
+};
+
+const loom_target_bundle_t loom_spirv_low_target_bundle_extended_types = {
+    .name = IREE_SVL("spirv-vulkan1.3-extended-types"),
+    .snapshot = &kSpirvVulkan13Snapshot,
+    .export_plan = &kSpirvVulkan13ExportPlan,
+    .config = &kSpirvExtendedTypesConfig,
+};
+
+static const loom_target_export_plan_t kSpirvHalKernelExportPlan = {
+    .name = IREE_SVL("spirv-hal-kernel"),
+    .abi_kind = LOOM_TARGET_ABI_HAL_KERNEL,
+    .linkage = LOOM_TARGET_LINKAGE_DEFAULT,
+};
+
+const loom_target_bundle_t loom_spirv_low_target_bundle_hal_kernel = {
+    .name = IREE_SVL("spirv-vulkan1.3-hal-kernel"),
+    .snapshot = &kSpirvVulkan13Snapshot,
+    .export_plan = &kSpirvHalKernelExportPlan,
+    .config = &kSpirvVulkan13Config,
+};
+
 static const loom_target_bundle_t* const kSpirvTargetBundleValues[] = {
     NULL,
     &loom_spirv_low_target_bundle_vulkan1_3,

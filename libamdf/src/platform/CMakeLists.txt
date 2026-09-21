@@ -63,6 +63,18 @@ iree_cc_library(
 )
 endif()
 
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    native_event
+  HDRS
+    "native_event.h"
+  DEPS
+    amdf::headers
+  PUBLIC
+)
+endif()
+
 if(AMDF_BUILD AND (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
 set(_native_instance_platform_deps "")
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

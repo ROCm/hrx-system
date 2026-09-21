@@ -22,6 +22,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 #include "iree/base/api.h"
@@ -50,7 +51,6 @@
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/ops.h"
-#include "loom/ops/view/ops.h"
 
 namespace loom::cxx_import {
 namespace {
@@ -286,6 +286,37 @@ class Translator {
     }
   }
 
+  void initialize_variable(cxx::VariableSymbol* variable,
+                           cxx::ExpressionAST* initializer, cxx::AST* owner) {
+    if (!initializer) {
+      fail(owner, "locals require initializers");
+    }
+    if (cxx::type_cast<cxx::BoundedArrayType>(
+            types_.unqualified(variable->type()))) {
+      fail(owner, "local arrays require __shared__ in this slice");
+    }
+    types_.partition(variable->type(), owner);
+    admit_copy(variable->constructor(), variable->type(), owner);
+    values_[variable] =
+        name(expression(initializer), cxx::to_string(variable->name()));
+  }
+
+  void initialize_condition(cxx::VariableSymbol* variable) {
+    if (!variable) {
+      return;
+    }
+    auto* declaration = control_->condition_declaration(variable);
+    reject_global_binding_attributes(unit_, diagnostics_,
+                                     declaration->attributeList);
+    reject_global_binding_declarator(unit_, diagnostics_,
+                                     declaration->declarator);
+    if (variable->isStatic() || variable->isExtern() ||
+        variable->isThreadLocal()) {
+      fail(declaration, "condition storage duration must be automatic");
+    }
+    initialize_variable(variable, declaration->initializer, declaration);
+  }
+
   // Source-selected branches are transparent to every statement/exit path.
   // Their initializers still execute once; a discarded arm contributes no IR.
   cxx::StatementAST* selected_statement(cxx::StatementAST* ast) {
@@ -296,6 +327,7 @@ class Translator {
       if (branch->initializer) {
         statement(branch->initializer);
       }
+      initialize_condition(branch->decisionVariable);
       ast = *branch->constexprValue ? branch->statement : branch->elseStatement;
     }
     return ast;
@@ -305,6 +337,7 @@ class Translator {
     if (branch->initializer) {
       statement(branch->initializer);
     }
+    initialize_condition(branch->decisionVariable);
     return expression(branch->condition).ssa();
   }
 
@@ -457,49 +490,60 @@ class Translator {
   }
 
   loom_value_id_t load(cxx::ExpressionAST* ast) {
-    auto access = address(ast);
-    loom_op_t* op;
-    int64_t selector = access.index ? INT64_MIN : 0;
-    auto build = types_.vector(ast->type) ? loom_vector_load_build
-                                          : loom_view_load_build;
-    check(build(&builder_, 0, types_.memory_access_flags(ast->type),
-                access.view, access.index ? &*access.index : nullptr,
-                access.index ? 1 : 0, &selector, 1, 0, 0,
-                types_.get(ast->type, ast), locations_.get(ast), &op));
-    return result(op);
+    return storage_.load(address(ast), ast->type, ast);
   }
 
   enum class IncrementResult { Previous, Updated };
 
-  Destination destination(cxx::ExpressionAST* expression, cxx::AST* owner) {
-    auto destination = control_->destination(expression);
-    if (!destination || !values_.contains(destination->binding)) {
-      fail(owner, "mutation requires an owned automatic source binding");
-    }
+  // Resolving the source lvalue executes its address expressions once. Reads
+  // and writes then share that location even when another binding changes.
+  struct Lvalue {
+    // Source element type retains qualifiers and arithmetic conversion rules.
+    const cxx::Type* type;
+    // An automatic SSA partition or an evaluated storage projection.
+    std::variant<Destination, StorageAccess> location;
+  };
+
+  Lvalue destination(cxx::ExpressionAST* expression, cxx::AST* owner) {
     types_.require_mutable(expression->type, expression);
-    return *destination;
+    if (auto destination = control_->destination(expression)) {
+      if (!values_.contains(destination->binding)) {
+        fail(owner, "mutation requires an owned automatic source binding");
+      }
+      return {expression->type, *destination};
+    }
+    return {expression->type, address(expression)};
   }
 
-  Value read(Destination destination) {
-    auto value = values_.at(destination.binding);
-    return destination.member ? value.project(*destination.member,
-                                              destination.component_offset)
-                              : value;
+  Value read(const Lvalue& target, cxx::AST* owner) {
+    if (auto* destination = std::get_if<Destination>(&target.location)) {
+      auto value = values_.at(destination->binding);
+      return destination->member ? value.project(*destination->member,
+                                                 destination->component_offset)
+                                 : value;
+    }
+    return storage_.load(std::get<StorageAccess>(target.location), target.type,
+                         owner);
   }
 
-  void write(Destination destination, Value value) {
-    auto& binding = values_.at(destination.binding);
-    binding = name(
-        destination.member
-            ? value_arena_.replace(binding, destination.component_offset, value)
-            : value,
-        cxx::to_string(destination.binding->name()));
+  void write(const Lvalue& target, Value value, cxx::AST* owner) {
+    if (auto* destination = std::get_if<Destination>(&target.location)) {
+      auto& binding = values_.at(destination->binding);
+      binding = name(destination->member
+                         ? value_arena_.replace(
+                               binding, destination->component_offset, value)
+                         : value,
+                     cxx::to_string(destination->binding->name()));
+    } else {
+      storage_.store(std::get<StorageAccess>(target.location), value.ssa(),
+                     target.type, owner);
+    }
   }
 
   Value increment(cxx::ExpressionAST* destination, cxx::TokenKind token,
                   IncrementResult selected, cxx::AST* owner) {
     auto target = this->destination(destination, owner);
-    auto previous = read(target);
+    auto previous = read(target, destination);
     auto source = locations_.get(owner);
     auto operation = token == cxx::TokenKind::T_MINUS_MINUS
                          ? cxx::TokenKind::T_MINUS
@@ -528,7 +572,7 @@ class Translator {
       value = scalars_.binary(operation, value, one, promoted, promoted, owner);
       updated = scalars_.convert(value, promoted, destination->type, owner);
     }
-    write(target, updated);
+    write(target, updated, owner);
     return selected == IncrementResult::Previous ? previous : updated;
   }
 
@@ -536,18 +580,18 @@ class Translator {
     auto* ast = assignment;
     auto* destination = assignment->targetExpression;
     if (assignment->symbol) {
-      fail(ast, "compound assignment requires a builtin local");
+      fail(ast, "overloaded compound assignment is not admitted");
     }
-    auto target = this->destination(destination, ast);
     auto value = expression(assignment->rightExpression);
-    // The right operand is sequenced before the destination's value read.
-    auto old = read(target);
+    // The right operand precedes both the address evaluation and value read.
+    auto target = this->destination(destination, ast);
+    auto old = read(target, destination);
     if (old.is_pointer()) {
       auto updated =
           storage_.advance(old.pointer(), value.ssa(), destination->type,
                            assignment->rightExpression->type,
                            cxx::get_underlying_binary_op(assignment->op), ast);
-      write(target, Value(updated));
+      write(target, Value(updated), ast);
       return Value(updated);
     }
     auto* promoted = assignment->leftExpression->type;
@@ -557,7 +601,7 @@ class Translator {
     auto updated = binary(cxx::get_underlying_binary_op(assignment->op),
                           old.ssa(), value.ssa(), promoted, promoted, ast);
     updated = numeric_convert(updated, promoted, destination->type, ast);
-    write(target, updated);
+    write(target, updated, ast);
     return updated;
   }
 
@@ -580,24 +624,8 @@ class Translator {
         assignment->op != cxx::TokenKind::T_EQUAL) {
       fail(ast, "only builtin plain assignment is admitted here");
     }
-    types_.require_mutable(assignment->leftExpression->type,
-                           assignment->leftExpression);
     auto value = expression(assignment->rightExpression);
-    if (auto target = control_->destination(assignment->leftExpression)) {
-      write(destination(assignment->leftExpression, ast), value);
-      return value;
-    }
-    auto access = address(assignment->leftExpression);
-    int64_t selector = access.index ? INT64_MIN : 0;
-    loom_op_t* op;
-    auto build = types_.vector(assignment->leftExpression->type)
-                     ? loom_vector_store_build
-                     : loom_view_store_build;
-    check(build(&builder_, 0,
-                types_.memory_access_flags(assignment->leftExpression->type),
-                value.ssa(), access.view,
-                access.index ? &*access.index : nullptr, access.index ? 1 : 0,
-                &selector, 1, 0, 0, locations_.get(ast), &op));
+    write(destination(assignment->leftExpression, ast), value, ast);
     return value;
   }
 
@@ -848,6 +876,9 @@ class Translator {
           [&] { return expression(select->iffalseExpression); });
     }
 
+    if (auto* decision = cxx::ast_cast<cxx::ConditionExpressionAST>(ast)) {
+      return values_.at(decision->symbol);
+    }
     if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(ast)) {
       if (auto found = values_.find(id->symbol); found != values_.end()) {
         return found->second;
@@ -952,6 +983,10 @@ class Translator {
     if (auto* binary = cxx::ast_cast<cxx::BinaryExpressionAST>(ast)) {
       if (binary->symbol) {
         fail(ast, "overloaded arithmetic is not admitted");
+      }
+      if (binary->op == cxx::TokenKind::T_COMMA) {
+        effect(binary->leftExpression);
+        return expression(binary->rightExpression);
       }
       auto left = expression(binary->leftExpression);
       if (binary->op == cxx::TokenKind::T_AMP_AMP ||
@@ -1347,19 +1382,7 @@ class Translator {
           name(allocation.view, spelling + "_view");
           continue;
         }
-        if (!variable->initializer || !variable->symbol) {
-          fail(ast, "locals require initializers");
-        }
-        if (cxx::type_cast<cxx::BoundedArrayType>(
-                types_.unqualified(variable->symbol->type()))) {
-          fail(ast, "local arrays require __shared__ in this slice");
-        }
-        types_.partition(variable->symbol->type(), variable);
-        admit_copy(source_variable->constructor(), variable->symbol->type(),
-                   variable);
-        values_[variable->symbol] =
-            name(expression(variable->initializer),
-                 cxx::to_string(variable->symbol->name()));
+        initialize_variable(source_variable, variable->initializer, variable);
       }
       return;
     }
@@ -1422,7 +1445,7 @@ class Translator {
             "loop scheduling requires a nonwrapping unsigned counted for loop");
       }
       conditional_loop(ast, loop->condition, loop->statement, loop->expression,
-                       LoopTest::BeforeBody);
+                       LoopTest::BeforeBody, loop->decisionVariable);
       return;
     }
     if (auto* loop = cxx::ast_cast<cxx::WhileStatementAST>(ast)) {
@@ -1430,7 +1453,7 @@ class Translator {
         fail(ast, "loop scheduling requires a counted for loop");
       }
       conditional_loop(ast, loop->condition, loop->statement, nullptr,
-                       LoopTest::BeforeBody);
+                       LoopTest::BeforeBody, loop->decisionVariable);
       return;
     }
     if (auto* loop = cxx::ast_cast<cxx::DoStatementAST>(ast)) {
@@ -1438,7 +1461,7 @@ class Translator {
         fail(ast, "loop scheduling requires a counted for loop");
       }
       conditional_loop(ast, loop->expression, loop->statement, nullptr,
-                       LoopTest::AfterBody);
+                       LoopTest::AfterBody, nullptr);
       return;
     }
     if (auto* expression_statement =
@@ -1460,8 +1483,13 @@ class Translator {
   void conditional_loop(cxx::StatementAST* ast,
                         cxx::ExpressionAST* condition_expression,
                         cxx::StatementAST* body, cxx::ExpressionAST* step,
-                        LoopTest test) {
+                        LoopTest test, cxx::VariableSymbol* decision) {
+    initialize_condition(decision);
     auto written = live_mutations(ast);
+    if (decision) {
+      std::erase(written, decision);
+      written.push_back(decision);
+    }
     auto initial = current(written);
     auto outer_values = values_;
     auto source = locations_.get(ast);
@@ -1490,12 +1518,21 @@ class Translator {
     if (step) {
       effect(step);
     }
+    // A decision object is recreated after the body and for-loop increment.
+    // The preheader supplied its first value, so every check sees a real value.
+    if (decision) {
+      values_[decision] = name(expression(decision->initializer()),
+                               cxx::to_string(decision->name()));
+    }
     auto yielded = current(written);
     check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
                                source, &terminator));
     loom_builder_restore(&builder_, saved);
     values_ = outer_values;
     bind_values(written, loom_op_results(op));
+    if (decision) {
+      values_.erase(decision);
+    }
   }
 
   loom_value_id_t unsigned_offset(loom_value_id_t value,
@@ -1593,6 +1630,12 @@ class Translator {
   }
 
   void effect(cxx::ExpressionAST* ast) {
+    if (auto* binary = cxx::ast_cast<cxx::BinaryExpressionAST>(ast);
+        binary && !binary->symbol && binary->op == cxx::TokenKind::T_COMMA) {
+      effect(binary->leftExpression);
+      effect(binary->rightExpression);
+      return;
+    }
     if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(ast)) {
       effect(nested->expression);
       return;

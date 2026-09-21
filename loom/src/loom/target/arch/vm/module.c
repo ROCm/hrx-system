@@ -546,6 +546,12 @@ static iree_status_t loom_vm_module_write(
       stream, function_count * sizeof(iree_vm_bytecode_v0_function_row_t),
       &zero, 1));
   const iree_io_stream_pos_t bytecode_base = iree_io_stream_offset(stream);
+  // Only emitted bytes, scalar row fields, and module-owned rodata references
+  // survive each function. Reuse its planning storage across the module.
+  iree_arena_allocator_t function_arena;
+  iree_arena_initialize(request->scratch_arena->block_pool, &function_arena);
+  loom_target_emit_request_t function_request = *request;
+  function_request.scratch_arena = &function_arena;
   for (uint32_t i = 0; i < function_count && iree_status_is_ok(status); ++i) {
     const iree_io_stream_pos_t offset =
         iree_io_stream_offset(stream) - bytecode_base;
@@ -558,9 +564,11 @@ static iree_status_t loom_vm_module_write(
         .callable_type_ordinal_u16 = definitions[i]->callable_ordinal,
         .bytecode_offset_u32 = (uint32_t)offset,
     };
-    status = loom_vm_function_emit(
-        request, definitions[i]->function, definitions[i]->target_facts,
-        &definitions[i]->signature, &functions, stream, &row);
+    status = loom_vm_function_emit(&function_request, definitions[i]->function,
+                                   definitions[i]->target_facts,
+                                   &definitions[i]->signature, &functions,
+                                   stream, &row);
+    iree_arena_reset(&function_arena);
     if (iree_status_is_ok(status)) {
       functions_header.maximum_block_count_u32 = iree_max(
           functions_header.maximum_block_count_u32, row.block_count_u32);
@@ -569,6 +577,7 @@ static iree_status_t loom_vm_module_write(
           iree_make_const_byte_span(&row, sizeof(row)));
     }
   }
+  iree_arena_deinitialize(&function_arena);
   IREE_RETURN_IF_ERROR(status);
   directory[section++].byte_length_u64 = iree_io_stream_offset(stream) - start;
   IREE_RETURN_IF_ERROR(loom_vm_stream_patch(

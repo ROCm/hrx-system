@@ -1,9 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/workgroup_reduce_publication.loom-test
-// RUN: with-checks compile-report scf-to-cfg,cfg-simplify,source-to-low,low-dce
+// RUN: with-checks compile-report target=amdgpu:gfx11-generic scf-to-cfg,cfg-simplify,source-to-low,low-dce
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @workgroup_reduce_tail_65_all() {
+// Tail capacity determines whether every subgroup can combine the partials.
+kernel.def @workgroup_reduce_tail_65_all() {
   %unit = index.constant 1 : index
   %size = index.constant 65 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%size, %unit, %unit) : index
@@ -23,9 +22,7 @@ CHECK: COMPILE-REPORT: source_low[*] * source_op=kernel.workgroup.reduce selecti
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @workgroup_reduce_tail_66_all() {
+kernel.def @workgroup_reduce_tail_66_all() {
   %unit = index.constant 1 : index
   %size = index.constant 66 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%size, %unit, %unit) : index
@@ -45,9 +42,7 @@ CHECK: COMPILE-REPORT: source_low[*] * source_op=kernel.workgroup.reduce selecti
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @workgroup_reduce_tail_67_all() {
+kernel.def @workgroup_reduce_tail_67_all() {
   %unit = index.constant 1 : index
   %size = index.constant 67 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%size, %unit, %unit) : index
@@ -67,9 +62,7 @@ CHECK: COMPILE-REPORT: source_low[*] * source_op=kernel.workgroup.reduce selecti
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @workgroup_reduce_tail_65_subgroup_leader() {
+kernel.def @workgroup_reduce_tail_65_subgroup_leader() {
   %unit = index.constant 1 : index
   %size = index.constant 65 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%size, %unit, %unit) : index
@@ -94,9 +87,7 @@ CHECK: COMPILE-REPORT: source_low[*] * source_op=kernel.workgroup.reduce selecti
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @workgroup_reduce_tail_67_subgroup_leader() {
+kernel.def @workgroup_reduce_tail_67_subgroup_leader() {
   %unit = index.constant 1 : index
   %size = index.constant 67 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%size, %unit, %unit) : index
@@ -121,9 +112,7 @@ CHECK: COMPILE-REPORT: source_low[*] * source_op=kernel.workgroup.reduce selecti
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @workgroup_reduce_tail_65_workgroup_leader() {
+kernel.def @workgroup_reduce_tail_65_workgroup_leader() {
   %unit = index.constant 1 : index
   %size = index.constant 65 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%size, %unit, %unit) : index

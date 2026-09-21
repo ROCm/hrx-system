@@ -1313,6 +1313,8 @@ static inline iree_status_t iree_async_proactor_register_slab(
 //   callback: Function to invoke when the handle is signaled. The callback
 //     receives poll events and should drain the handle (e.g., ibv_poll_cq for
 //     RDMA CQ channels) and re-arm if needed (e.g., ibv_req_notify_cq).
+//     For an iree_async_event_t, use iree_async_event_consume() before checking
+//     the state announced by the event; it accounts for native auto-reset.
 //   out_event_source: Receives the event source handle for later
 //     unregistration.
 //

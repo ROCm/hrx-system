@@ -18,7 +18,7 @@ struct amdf_xdna_umd_kernel_queue_t {
 };
 
 amdf_status_t amdf_xdna_umd_kernel_queue_create(
-    amdf_xdna_umd_context_t* context,
+    amdf_xdna_umd_context_t* context, uint32_t capacity,
     amdf_xdna_umd_kernel_queue_t** out_queue) {
   amdf_xdna_umd_device_t* device = context->device;
   amdf_xdna_umd_kernel_queue_t* queue = NULL;
@@ -30,7 +30,7 @@ amdf_status_t amdf_xdna_umd_kernel_queue_create(
   }
   queue->host_allocator = device->host_allocator;
   status = amdf_windows_xdna_kernel_execution_acquire_queue(
-      context->kernel_execution);
+      context->kernel_execution, capacity);
   if (amdf_status_is_ok(status)) {
     queue->execution = context->kernel_execution;
     *out_queue = queue;
@@ -41,11 +41,25 @@ amdf_status_t amdf_xdna_umd_kernel_queue_create(
 }
 
 amdf_status_t amdf_xdna_umd_kernel_queue_submit(
-    amdf_xdna_umd_kernel_queue_t* queue, uint64_t instruction_address,
-    uint32_t instruction_byte_length, uint64_t* out_native_submission) {
+    amdf_xdna_umd_kernel_queue_t* queue, uint32_t slot,
+    uint64_t instruction_address, uint32_t instruction_byte_length,
+    uint64_t* out_native_submission) {
   return amdf_windows_xdna_kernel_execution_submit(
-      queue->execution, instruction_address, instruction_byte_length,
+      queue->execution, slot, instruction_address, instruction_byte_length,
       out_native_submission);
+}
+
+amdf_native_event_types_t amdf_xdna_umd_kernel_queue_query_notification_types(
+    const amdf_xdna_umd_kernel_queue_t* queue) {
+  (void)queue;
+  return AMDF_NATIVE_EVENT_TYPE_BIT_WIN32_EVENT;
+}
+
+amdf_status_t amdf_xdna_umd_kernel_queue_request_notification(
+    amdf_xdna_umd_kernel_queue_t* queue, uint64_t native_submission,
+    const amdf_native_event_t* event) {
+  return amdf_windows_xdna_kernel_execution_request_notification(
+      queue->execution, native_submission, event);
 }
 
 uint64_t amdf_xdna_umd_kernel_queue_query_progress(
@@ -53,10 +67,16 @@ uint64_t amdf_xdna_umd_kernel_queue_query_progress(
   return amdf_windows_xdna_kernel_execution_query_progress(queue->execution);
 }
 
-void amdf_xdna_umd_kernel_queue_retire_command(
+amdf_status_t amdf_xdna_umd_kernel_queue_refresh_progress(
     amdf_xdna_umd_kernel_queue_t* queue) {
-  // MCDM writes the outcome into the exclusively leased context response cell.
-  amdf_windows_xdna_kernel_execution_retire_command(queue->execution);
+  // The progress reader already samples the mapped native fence.
+  (void)queue;
+  return AMDF_STATUS_OK;
+}
+
+void amdf_xdna_umd_kernel_queue_retire_command(
+    amdf_xdna_umd_kernel_queue_t* queue, uint32_t slot) {
+  amdf_windows_xdna_kernel_execution_retire_command(queue->execution, slot);
 }
 
 amdf_status_t amdf_xdna_umd_kernel_queue_wait(
@@ -74,7 +94,8 @@ amdf_status_t amdf_xdna_umd_kernel_queue_query_terminal_status(
 
 amdf_status_t amdf_xdna_umd_kernel_queue_destroy(
     amdf_xdna_umd_kernel_queue_t* queue) {
-  amdf_windows_xdna_kernel_execution_release_queue(queue->execution);
+  const amdf_status_t status =
+      amdf_windows_xdna_kernel_execution_release_queue(queue->execution);
   amdf_free(queue->host_allocator, queue);
-  return AMDF_STATUS_OK;
+  return status;
 }

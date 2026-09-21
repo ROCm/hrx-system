@@ -17,7 +17,7 @@ static iree_status_t loom_aie2p_target_profile_project_facts(
       loom_aie2p_target_profile_cast(base_profile);
   IREE_ASSERT(profile != NULL);
   loom_aie2p_target_facts_t* facts = (loom_aie2p_target_facts_t*)base_facts;
-  facts->base.selector = LOOM_AIE2P_TARGET_KIND_ARRAY;
+  facts->base.selector = profile->kind;
   facts->device_profile = profile->device_profile;
   return iree_ok_status();
 }
@@ -30,12 +30,25 @@ const loom_target_profile_type_t loom_aie2p_target_profile_type = {
 
 #include "loom/target/arch/amd/xdna/device/aie2p_profile_tables.inl"
 
+static const loom_aie2p_target_profile_t kCoreProfile = {
+    .base =
+        {
+            .type = &loom_aie2p_target_profile_type,
+            .target_bundle = &loom_aie2p_core_target_bundle,
+        },
+    .kind = LOOM_AIE2P_TARGET_KIND_CORE,
+};
+
 iree_status_t loom_aie2p_target_profile_select(
     iree_string_view_t selector,
     const loom_aie2p_target_profile_t** out_profile) {
   IREE_ASSERT_ARGUMENT(out_profile);
   *out_profile = NULL;
   selector = iree_string_view_trim(selector);
+  if (iree_string_view_equal(selector, IREE_SV("core"))) {
+    *out_profile = &kCoreProfile;
+    return iree_ok_status();
+  }
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kLoomAie2pTargetProfiles);
        ++i) {
     const loom_aie2p_target_profile_t* profile = &kLoomAie2pTargetProfiles[i];

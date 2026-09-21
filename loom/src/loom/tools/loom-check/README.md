@@ -46,17 +46,27 @@ case separators, and expected output.
 ### Shared Corpus Templates
 
 A target fixture opts into a shared corpus with a file-preamble `TEMPLATE`
-directive. Normal runs reject stale source; `--update` synchronizes the source
-while preserving target bindings, case directives, and output expectations.
+directive. Normal runs reject stale source; `--update` copies each common case's
+source, including its declarations, modifiers, helpers, and comments. The
+consumer keeps its RUN options, REQUIRES/XFAIL directives, output expectations,
+and diagnostic annotations. An annotation whose source line changes requires an
+explicit update.
 Case identity is the sole function-like definition, or the unique public entry
 when a case includes private helpers.
+
+Homogeneous target selection belongs in the RUN compiler options. Synchronizing
+a template adds no declarations or target bindings and never substitutes a local
+definition for a common declaration. Source edits apply equally to old and new
+cases. A case-local RUN can select a different profile or ABI explicitly. A
+heterogeneous program with authored target relationships belongs in a dedicated
+target fixture.
 
 Architecturally inapplicable cases in a mixed fixture have explicit exclusions:
 
 ```text
 // TEMPLATE: loom/src/loom/test/corpus/source_low/view_transport.loom-test
 // TEMPLATE-EXCLUDE: @correlated_cfg_rotation SPIR-V requires structured control flow.
-// RUN: emit source-low output=low control-flow=structured-low
+// RUN: emit source-low target=spirv:vulkan1.3+bda output=low control-flow=structured-low
 ```
 
 Each exclusion names one exact case and gives a reason. Duplicate or unknown
@@ -120,11 +130,29 @@ unsigned entry(unsigned value) { return value + 1u; }
 
 In a `.cxx-test`, import produces the source function and specialization supplies
 its target facts, including reachable helpers. The same request works with
-`.loom-test` source IR. `output=low` compares the resulting Low assembly;
+`.loom-test` source IR. With `target=...`, omitting `@entry` selects the sole
+function definition or the unique public entry among private helpers. This lets
+a file-level RUN select one target across cases with different entry names.
+`output=low` compares the resulting Low assembly;
 `output=module` includes the rest of the module, and `output=none` checks only
 source-located diagnostics. Functions with authored target bindings can use the
 existing whole-module form without a function or target option. Pipeline-text
 outputs describe the pipeline itself and do not accept specialization requests.
+
+Pass, pass-report, and compile-report modes accept the same target selection
+before the pipeline. An optional `entry=@function` selects an explicit entry;
+otherwise the sole definition or unique public entry is selected:
+
+```text
+// RUN: with-checks compile-report target=vm:core source-to-low,low-dce
+// RUN: pass target=vm:core entry=@entry @named_pipeline
+```
+
+Binary output uses `emit vm-dis target=vm:core` or
+`emit spirv-dis target=spirv:vulkan1.3+bda input=source-low`. These modes also
+accept `@function` for an explicit entry. The selected entry remains a compiler
+root even when private; specialization does not change source visibility or
+add an export. Its reachable helpers may be inlined and removed normally.
 
 ### Running Fixtures
 

@@ -387,9 +387,10 @@ typedef struct amdf_api_t {
   ///
   /// This is a read-only snapshot, not a native completion check. It does not
   /// consume command results or retire submissions, even when the native
-  /// completion fence has advanced. Use `kernel_queue_wait`, including a
-  /// zero-time wait, to refresh native progress and perform checked retirement
-  /// before reusing command storage.
+  /// completion fence has advanced. Use `kernel_queue_refresh_status` or
+  /// `kernel_queue_wait` to refresh native progress and perform checked
+  /// retirement before reusing command storage. Submission may also reclaim
+  /// completed capacity as specified by its engine; this query never does so.
   /// The operation is thread-safe with submission and waits. It performs no
   /// allocation, system call, sleep, active polling, locking, lazy
   /// initialization or ownership-counter updates. No output is modified when
@@ -401,6 +402,7 @@ typedef struct amdf_api_t {
       amdf_kernel_queue_t* queue, amdf_kernel_queue_status_t* out_status);
 
   /// Waits until `submission` retires, a failure is observed, or time expires.
+  /// `submission` must be a completion point returned by this exact queue.
   ///
   /// `timeout_nanoseconds` includes host contention, active polling, and native
   /// waiting under one deadline. A zero timeout attempts checked retirement
@@ -574,6 +576,63 @@ typedef struct amdf_api_t {
   amdf_status_t(AMDF_CALL* memory_scope_query_pair_info)(
       amdf_memory_scope_t* scope, const amdf_memory_profile_pair_query_t* query,
       amdf_memory_pair_info_t* out_info);
+
+  /// Refreshes native progress and checks available completed command results.
+  ///
+  /// Unlike the read-only status query, this synchronization operation advances
+  /// checked retirement for the completed accepted prefix without waiting for
+  /// a particular submission. Success returns a snapshot in `out_status`,
+  /// including any sticky execution failure in `terminal_status`. Success does
+  /// not mean that every accepted command has completed. Failure returns the
+  /// observation error and leaves `out_status` unchanged; independently checked
+  /// progress remains available through `kernel_queue_query_status`.
+  ///
+  /// The operation is thread-safe with submission, queries, refreshes and
+  /// waits. If another caller owns result consumption, it returns the
+  /// established frontier without waiting for that caller. It performs no host
+  /// allocation, resource creation, lazy initialization, sleep or active
+  /// polling. Native observation may require nonblocking system calls. Result
+  /// inspection is proportional to newly completed commands, not configured
+  /// queue capacity.
+  amdf_status_t(AMDF_CALL* kernel_queue_refresh_status)(
+      amdf_kernel_queue_t* queue, amdf_kernel_queue_status_t* out_status);
+
+  /// Requests one native-progress wake for an already-accepted queue point.
+  ///
+  /// `submission` must have been returned by this exact queue. `event` borrows
+  /// a caller-owned destination of a type reported in notification_types.
+  /// An unsupported type returns UNSUPPORTED. Invalid descriptor tags, payload
+  /// shapes, reserved fields or point zero return INVALID_ARGUMENT; an
+  /// unaccepted point returns OUT_OF_RANGE. Native registration errors retain
+  /// their native status domain.
+  ///
+  /// This is one-shot, not a subscription. Repeating a request adds a fresh
+  /// wake obligation; it does not replace or cancel an earlier request. An
+  /// already-checked point signals immediately, even after packet-slot reuse.
+  /// Delivery may precede return. Notifications may coalesce and contain no
+  /// completion value. A wake is an opportunity to refresh checked status,
+  /// not proof of successful execution or permission to reuse storage. A
+  /// provider may emit an immediate recheck hint if a concurrent caller owns
+  /// native fence capture; no checked progress is implied by that hint.
+  ///
+  /// The caller prepares event-loop ownership before requesting a wake and
+  /// keeps the native event live through delivery. Cancelling an event-loop
+  /// callback does not cancel native notifications or device execution. A
+  /// request error never rejects, replays or retires the accepted submission.
+  /// Existing checked progress and synchronous waits remain independently
+  /// usable. Normal teardown reconciles outstanding native notifications
+  /// before releasing the event and queue.
+  ///
+  /// The operation is thread-safe with submission, queries, refreshes and
+  /// waits. It consumes no command results, stores no event descriptor, and
+  /// creates no libamdf observer or subscription. It performs no library
+  /// allocation, locking, lazy initialization, polling, sleep or execution
+  /// wait. Native registration/signaling calls are explicit costs and may
+  /// allocate native callback state. Library submission paths never arm
+  /// notifications implicitly.
+  amdf_status_t(AMDF_CALL* kernel_queue_request_notification)(
+      amdf_kernel_queue_t* queue, uint64_t submission,
+      const amdf_native_event_t* event);
 } amdf_api_t;
 
 /// Function type used to acquire the immutable API table.

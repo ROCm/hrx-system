@@ -23,6 +23,7 @@
 
 #include "loom/ir/encoding.h"
 #include "loom/ir/module.h"
+#include "loom/util/fact_layout.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,19 +37,6 @@ typedef struct loom_value_fact_encoding_summary_t
     loom_value_fact_encoding_summary_t;
 typedef struct loom_value_fact_storage_schema_t
     loom_value_fact_storage_schema_t;
-
-// Authored operands that materialize one explicit strided address layout.
-// The slices borrow storage from the defining encoding.layout.strided op and
-// remain valid for the lifetime of the module.
-typedef struct loom_encoding_address_layout_operands_t {
-  // Full-rank element strides with INT64_MIN sentinels for dynamic operands.
-  loom_attribute_t static_strides;
-  // Dynamic element-stride SSA values in sentinel order. Borrowed from the
-  // defining operation.
-  const loom_value_id_t* dynamic_stride_values;
-  // Number of entries in dynamic_stride_values.
-  uint16_t dynamic_stride_count;
-} loom_encoding_address_layout_operands_t;
 
 // Registers the storage-composition family with |context|. Built-in
 // context setup calls this through the encoding family registry.
@@ -125,14 +113,13 @@ bool loom_encoding_query_type_address_layout(
     iree_host_size_t stride_capacity,
     loom_value_fact_address_layout_t* out_layout);
 
-// Queries the authored operands that materialize a shaped type's explicit
-// strided address layout. This follows verified encoding refinement and
-// storage-composition values but does not recover provenance from facts or
-// inspect callers. Returns false for dense/static layouts and for non-exact
-// fact-only layouts whose stride values do not cross the type boundary.
-bool loom_encoding_query_type_address_layout_operands(
-    const loom_module_t* module, loom_type_t type,
-    loom_encoding_address_layout_operands_t* out_operands);
+// Queries retained per-axis SSA stride bindings for a shaped type. Static axes
+// use INVALID; their values live in the numeric layout summary. An empty slice
+// means no scoped materialization is available. Storage is owned by |context|'s
+// fact table and survives until its scope is cleared. This does not inspect IR
+// producers or recover bindings from portable numeric facts.
+loom_value_fact_layout_strides_t loom_encoding_query_type_layout_strides(
+    const loom_fact_context_t* context, loom_type_t type);
 
 // Queries a shaped type's storage-schema summary from static encodings or
 // context-owned SSA encoding facts. This mirrors

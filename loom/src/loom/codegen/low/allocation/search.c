@@ -417,9 +417,8 @@ static void loom_low_allocation_search_find_location_for_release_policy(
 }
 
 // Returns the exclusive upper frontier where scalar values should pack from
-// high to low. A bounded class only benefits from separating scalars from the
-// interiors of wider values when its liveness lower bound still fits the
-// requested capacity.
+// high to low. Semantic pressure can count overlapping aliases separately, so
+// exceeding the capacity does not prove that physical storage cannot fit.
 static uint32_t loom_low_allocation_search_scalar_packing_frontier(
     const loom_low_allocation_search_context_t* context,
     const loom_liveness_interval_t* interval,
@@ -437,7 +436,7 @@ static uint32_t loom_low_allocation_search_scalar_packing_frontier(
   const uint32_t frontier =
       context->scalar_packing
           .frontiers_by_reg_class[capacity->descriptor_reg_class_id];
-  return frontier <= capacity->max_units ? frontier : 0;
+  return iree_min(frontier, capacity->max_units);
 }
 
 static void

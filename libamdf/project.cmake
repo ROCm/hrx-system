@@ -13,4 +13,4 @@ option(AMDF_FAMILY_CDNA "Admit CDNA implementation packages." ON)
 option(AMDF_FAMILY_XDNA "Admit XDNA implementation packages." ON)
 
 set(AMDF_VERSION "0.1.0")
-set(AMDF_ABI_VERSION "4")
+set(AMDF_ABI_VERSION "5")

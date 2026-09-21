@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_scalar_wide_offsets.loom-test
-// RUN: emit source-low output=low control-flow=structured-low
+// RUN: emit source-low target=spirv:vulkan1.3+bda+extended-types output=low control-flow=structured-low
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_wide_byte_offset(%input_storage: buffer, %output_storage: buffer, %byte_offset_input: offset) -> (i32) {
+func.def @scalar_wide_byte_offset(%input_storage: buffer, %output_storage: buffer, %byte_offset_input: offset) -> (i32) {
   %input = buffer.assume.alignment %input_storage {minimum_alignment = 4} : buffer
   %output = buffer.assume.alignment %output_storage {minimum_alignment = 4} : buffer
   %byte_offset = index.assume %byte_offset_input [mul(%byte_offset_input, 4)] : offset
@@ -15,7 +13,7 @@ func.def target(@target) @scalar_wide_byte_offset(%input_storage: buffer, %outpu
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_wide_byte_offset(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_wide_byte_offset(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.id : i32>) asm {
   %14 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %byte_offset
   %loaded = OpLoad.storage_buffer.i32 %14
   %16 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %byte_offset
@@ -25,9 +23,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_wide_scaled_index(%input_storage: buffer, %output_storage: buffer, %element_input: index) -> (i32) {
+func.def @scalar_wide_scaled_index(%input_storage: buffer, %output_storage: buffer, %element_input: index) -> (i32) {
   %input = buffer.assume.alignment %input_storage {minimum_alignment = 4} : buffer
   %output = buffer.assume.alignment %output_storage {minimum_alignment = 4} : buffer
   %element = index.assume %element_input [range(%element_input, 0, 2147483647)] : index
@@ -41,7 +37,7 @@ func.def target(@target) @scalar_wide_scaled_index(%input_storage: buffer, %outp
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_wide_scaled_index(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>, %element: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_wide_scaled_index(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>, %element: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
   %element_bytes = OpConstant.offset64 4
   %17 = OpBitcast.i32.u32 %element
   %18 = OpUConvert.u32.offset64 %17
@@ -55,9 +51,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_wide_static_base(%input_storage: buffer, %output_storage: buffer) -> (i32) {
+func.def @scalar_wide_static_base(%input_storage: buffer, %output_storage: buffer) -> (i32) {
   %input = buffer.assume.alignment %input_storage {minimum_alignment = 4} : buffer
   %output = buffer.assume.alignment %output_storage {minimum_alignment = 4} : buffer
   %byte_offset = index.constant 1099511627784 : offset
@@ -69,7 +63,7 @@ func.def target(@target) @scalar_wide_static_base(%input_storage: buffer, %outpu
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_wide_static_base(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_wide_static_base(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>) -> (reg<spirv.id : i32>) asm {
   %12 = OpConstant.offset64 1099511627784
   %13 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %12
   %loaded = OpLoad.storage_buffer.i32 %13
@@ -80,9 +74,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_wide_dynamic_dimensions(%input_storage: buffer, %output_storage: buffer, %row_input: index, %columns_input: index) -> (i32) {
+func.def @scalar_wide_dynamic_dimensions(%input_storage: buffer, %output_storage: buffer, %row_input: index, %columns_input: index) -> (i32) {
   %input = buffer.assume.alignment %input_storage {minimum_alignment = 4} : buffer
   %output = buffer.assume.alignment %output_storage {minimum_alignment = 4} : buffer
   %row = index.assume %row_input [range(%row_input, 0, 1)] : index
@@ -96,7 +88,7 @@ func.def target(@target) @scalar_wide_dynamic_dimensions(%input_storage: buffer,
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_wide_dynamic_dimensions(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>, %row: reg<spirv.id : index>, %columns: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_wide_dynamic_dimensions(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>, %row: reg<spirv.id : index>, %columns: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
   %18 = OpBitcast.i32.u32 %row
   %19 = OpUConvert.u32.offset64 %18
   %20 = OpBitcast.i32.u32 %columns
@@ -113,9 +105,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_wide_mixed_base(%input_storage: buffer, %output_storage: buffer, %byte_offset_input: offset) -> (i32) {
+func.def @scalar_wide_mixed_base(%input_storage: buffer, %output_storage: buffer, %byte_offset_input: offset) -> (i32) {
   %input = buffer.assume.alignment %input_storage {minimum_alignment = 4} : buffer
   %output = buffer.assume.alignment %output_storage {minimum_alignment = 4} : buffer
   %byte_offset = index.assume %byte_offset_input [mul(%byte_offset_input, 4)] : offset
@@ -129,7 +119,7 @@ func.def target(@target) @scalar_wide_mixed_base(%input_storage: buffer, %output
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_wide_mixed_base(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_wide_mixed_base(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.id : i32>) asm {
   %static_base = OpConstant.offset64 1099511627784
   %combined_offset = OpIAdd.offset64 %byte_offset, %static_base
   %18 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %combined_offset
@@ -141,9 +131,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_wide_static_base(%input_storage: buffer, %output_storage: buffer) {
+func.def @vector_wide_static_base(%input_storage: buffer, %output_storage: buffer) {
   %input = buffer.assume.alignment %input_storage {minimum_alignment = 16} : buffer
   %output = buffer.assume.alignment %output_storage {minimum_alignment = 16} : buffer
   %byte_offset = index.constant 1099511627792 : offset
@@ -155,7 +143,7 @@ func.def target(@target) @vector_wide_static_base(%input_storage: buffer, %outpu
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @vector_wide_static_base(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @vector_wide_static_base(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>) asm {
   %15 = OpConstant.offset64 1099511627792
   %16 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %15
   %17 = OpLoad.storage_buffer.i32 %16
@@ -181,9 +169,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @vector
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_wide_dynamic_dimensions(%input_storage: buffer, %output_storage: buffer, %row_input: index, %columns_input: index) {
+func.def @vector_wide_dynamic_dimensions(%input_storage: buffer, %output_storage: buffer, %row_input: index, %columns_input: index) {
   %input = buffer.assume.alignment %input_storage {minimum_alignment = 16} : buffer
   %output = buffer.assume.alignment %output_storage {minimum_alignment = 16} : buffer
   %row = index.assume %row_input [range(%row_input, 0, 1)] : index
@@ -197,7 +183,7 @@ func.def target(@target) @vector_wide_dynamic_dimensions(%input_storage: buffer,
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @vector_wide_dynamic_dimensions(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>, %row: reg<spirv.id : index>, %columns: reg<spirv.id : index>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @vector_wide_dynamic_dimensions(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>, %row: reg<spirv.id : index>, %columns: reg<spirv.id : index>) asm {
   %29 = OpBitcast.i32.u32 %row
   %30 = OpUConvert.u32.offset64 %29
   %31 = OpBitcast.i32.u32 %columns

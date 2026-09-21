@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/shared_conditional_values.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=x86:avx2 output=low
 
-x86.target<avx2> @target
-
-func.def target(@target) @shared_conditional_values(%input: buffer, %output: buffer) {
+func.def @shared_conditional_values(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %c0 = scalar.constant 0 : i32
   %completed = scalar.constant 1 : i32
@@ -33,7 +31,7 @@ func.def target(@target) @shared_conditional_values(%input: buffer, %output: buf
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @shared_conditional_values(%in: reg<x86.gpr64>, %out: reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @shared_conditional_values(%in: reg<x86.gpr64>, %out: reg<x86.gpr64>) asm {
   %completed = mov.imm32 1
   %outer_value = mov.load.gpr32 %in {disp32 = 0}
   %outer = cmp.ne.imm.gpr32 %outer_value, 0

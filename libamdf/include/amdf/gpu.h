@@ -282,8 +282,10 @@ typedef struct amdf_gpu_kernel_queue_create_info_t {
   const void* next;
   /// Endpoint-local PM4 or SDMA family supporting kernel publication.
   uint32_t queue_family_ordinal;
-  /// Reserved for compatible growth and must be zero.
-  uint32_t reserved;
+  /// Maximum accepted submissions that may remain unretired, or zero for
+  /// AMDF_KERNEL_QUEUE_DEFAULT_PENDING_SUBMISSION_COUNT. This admission bound
+  /// does not reserve native driver capacity or retain command memory.
+  uint32_t maximum_pending_submission_count;
 } amdf_gpu_kernel_queue_create_info_t;
 
 /// One bounded kernel-mediated GPU submission.
@@ -378,13 +380,20 @@ typedef struct amdf_gpu_api_t {
   /// Native rejection leaves `out_submission` unchanged. Because command bytes
   /// are opaque, the caller keeps every indirectly referenced memory or native
   /// object live until the submission retires.
+  /// Successful calls return increasing queue-local completion points. Callers
+  /// use returned points without assuming a starting value or dense numbering.
+  /// A successful wait for one point covers all earlier accepted submissions
+  /// on this queue, not independently scheduled work on other queues.
   ///
   /// This hot path takes no library lock and performs no lazy initialization,
   /// mapping, pinning or indirect-buffer scan. It is thread-safe with other
-  /// submissions and progress operations. Queue-slot contention returns BUSY
-  /// rather than waiting. This is not a wait-free guarantee. Native publication
-  /// may enter the driver; it does not initialize a host scheduler or translate
-  /// commands.
+  /// submissions and progress operations. Concurrent publication returns BUSY
+  /// rather than waiting. The publication claim ends when the native call
+  /// returns, not when execution completes. At the configured pending bound,
+  /// one nonblocking native progress check reclaims completed capacity before
+  /// returning BUSY if the queue remains full. No intermediate host wait is
+  /// required. This is not a wait-free guarantee. Native publication may enter
+  /// the driver; it does not initialize a host scheduler or translate commands.
   amdf_status_t(AMDF_CALL* kernel_queue_submit)(
       amdf_kernel_queue_t* queue,
       const amdf_gpu_kernel_queue_submission_info_t* submission_info,

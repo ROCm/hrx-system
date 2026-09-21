@@ -187,6 +187,7 @@ loom_cc_library(
         "fact_cfg.c",
         "fact_extensions.c",
         "fact_induction.c",
+        "fact_layout.c",
         "fact_loop.c",
         "fact_table.c",
         "fact_table_compute.c",
@@ -196,6 +197,7 @@ loom_cc_library(
         "fact_cfg.h",
         "fact_extensions.h",
         "fact_induction.h",
+        "fact_layout.h",
         "fact_loop.h",
         "fact_table.h",
         "reference_transfer.h",
@@ -220,6 +222,17 @@ loom_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "fact_layout_test",
+    srcs = ["fact_layout_test.cc"],
+    deps = [
+        ":fact_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

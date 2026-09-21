@@ -1,10 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_conversion_wide.loom-test
-// RUN: emit source-low output=low control-flow=structured-low
+// RUN: emit source-low target=spirv:vulkan1.3+bda output=low control-flow=structured-low
 
 // XFAIL: SPIR-V ordinary BF16 vector conversion is unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @vector_extf_bf16x32(%input: vector<32xbf16>) -> (vector<32xf32>) {
+func.def @vector_extf_bf16x32(%input: vector<32xbf16>) -> (vector<32xf32>) {
   %converted = vector.extf %input : vector<32xbf16> to vector<32xf32>
   func.return %converted : vector<32xf32>
 }
@@ -12,9 +10,7 @@ func.def target(@target) @vector_extf_bf16x32(%input: vector<32xbf16>) -> (vecto
 // ====
 
 // XFAIL: SPIR-V ordinary BF16 vector conversion is unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @vector_fptrunc_bf16x32(%input: vector<32xf32>) -> (vector<32xbf16>) {
+func.def @vector_fptrunc_bf16x32(%input: vector<32xf32>) -> (vector<32xbf16>) {
   %converted = vector.fptrunc %input : vector<32xf32> to vector<32xbf16>
   func.return %converted : vector<32xbf16>
 }
@@ -22,9 +18,7 @@ func.def target(@target) @vector_fptrunc_bf16x32(%input: vector<32xf32>) -> (vec
 // ====
 
 // XFAIL: SPIR-V ordinary BF16 vector-to-integer conversion is unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @vector_fptosi_bf16x16_i32x16(%input: vector<16xbf16>) -> (vector<16xi32>) {
+func.def @vector_fptosi_bf16x16_i32x16(%input: vector<16xbf16>) -> (vector<16xi32>) {
   %converted = vector.fptosi %input : vector<16xbf16> to vector<16xi32>
   func.return %converted : vector<16xi32>
 }
@@ -32,9 +26,7 @@ func.def target(@target) @vector_fptosi_bf16x16_i32x16(%input: vector<16xbf16>) 
 // ====
 
 // XFAIL: SPIR-V ordinary wide integer vector conversion is unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @vector_extui_i16x16_i32x16(%input: vector<16xi16>) -> (vector<16xi32>) {
+func.def @vector_extui_i16x16_i32x16(%input: vector<16xi16>) -> (vector<16xi32>) {
   %converted = vector.extui %input : vector<16xi16> to vector<16xi32>
   func.return %converted : vector<16xi32>
 }
@@ -42,9 +34,7 @@ func.def target(@target) @vector_extui_i16x16_i32x16(%input: vector<16xi16>) -> 
 // ====
 
 // XFAIL: SPIR-V ordinary wide integer vector conversion is unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @vector_extsi_i16x16_i32x16(%input: vector<16xi16>) -> (vector<16xi32>) {
+func.def @vector_extsi_i16x16_i32x16(%input: vector<16xi16>) -> (vector<16xi32>) {
   %converted = vector.extsi %input : vector<16xi16> to vector<16xi32>
   func.return %converted : vector<16xi32>
 }
@@ -52,9 +42,7 @@ func.def target(@target) @vector_extsi_i16x16_i32x16(%input: vector<16xi16>) -> 
 // ====
 
 // XFAIL: SPIR-V ordinary wide integer vector conversion is unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @vector_extui_i32x8_i64x8(%input: vector<8xi32>) -> (vector<8xi64>) {
+func.def @vector_extui_i32x8_i64x8(%input: vector<8xi32>) -> (vector<8xi64>) {
   %converted = vector.extui %input : vector<8xi32> to vector<8xi64>
   func.return %converted : vector<8xi64>
 }
@@ -62,9 +50,7 @@ func.def target(@target) @vector_extui_i32x8_i64x8(%input: vector<8xi32>) -> (ve
 // ====
 
 // XFAIL: SPIR-V ordinary wide integer vector conversion is unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @vector_extsi_i32x8_i64x8(%input: vector<8xi32>) -> (vector<8xi64>) {
+func.def @vector_extsi_i32x8_i64x8(%input: vector<8xi32>) -> (vector<8xi64>) {
   %converted = vector.extsi %input : vector<8xi32> to vector<8xi64>
   func.return %converted : vector<8xi64>
 }
@@ -72,9 +58,7 @@ func.def target(@target) @vector_extsi_i32x8_i64x8(%input: vector<8xi32>) -> (ve
 // ====
 
 // XFAIL: SPIR-V ordinary wide integer vector conversion is unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @vector_extui_i8x32_i32x32(%input: vector<32xi8>) -> (vector<32xi32>) {
+func.def @vector_extui_i8x32_i32x32(%input: vector<32xi8>) -> (vector<32xi32>) {
   %converted = vector.extui %input : vector<32xi8> to vector<32xi32>
   func.return %converted : vector<32xi32>
 }
@@ -82,9 +66,7 @@ func.def target(@target) @vector_extui_i8x32_i32x32(%input: vector<32xi8>) -> (v
 // ====
 
 // XFAIL: SPIR-V ordinary wide integer vector conversion is unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @vector_extsi_i8x32_i32x32(%input: vector<32xi8>) -> (vector<32xi32>) {
+func.def @vector_extsi_i8x32_i32x32(%input: vector<32xi8>) -> (vector<32xi32>) {
   %converted = vector.extsi %input : vector<32xi8> to vector<32xi32>
   func.return %converted : vector<32xi32>
 }
@@ -92,9 +74,7 @@ func.def target(@target) @vector_extsi_i8x32_i32x32(%input: vector<32xi8>) -> (v
 // ====
 
 // XFAIL: SPIR-V ordinary wide integer vector conversion is unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @vector_extui_i16x16_i64x16(%input: vector<16xi16>) -> (vector<16xi64>) {
+func.def @vector_extui_i16x16_i64x16(%input: vector<16xi16>) -> (vector<16xi64>) {
   %converted = vector.extui %input : vector<16xi16> to vector<16xi64>
   func.return %converted : vector<16xi64>
 }
@@ -102,9 +82,7 @@ func.def target(@target) @vector_extui_i16x16_i64x16(%input: vector<16xi16>) -> 
 // ====
 
 // XFAIL: SPIR-V ordinary wide integer vector conversion is unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @vector_extsi_i16x16_i64x16(%input: vector<16xi16>) -> (vector<16xi64>) {
+func.def @vector_extsi_i16x16_i64x16(%input: vector<16xi16>) -> (vector<16xi64>) {
   %converted = vector.extsi %input : vector<16xi16> to vector<16xi64>
   func.return %converted : vector<16xi64>
 }
@@ -112,9 +90,7 @@ func.def target(@target) @vector_extsi_i16x16_i64x16(%input: vector<16xi16>) -> 
 // ====
 
 // XFAIL: SPIR-V ordinary wide integer vector conversion is unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @vector_extui_i16x32_i32x32(%input: vector<32xi16>) -> (vector<32xi32>) {
+func.def @vector_extui_i16x32_i32x32(%input: vector<32xi16>) -> (vector<32xi32>) {
   %converted = vector.extui %input : vector<32xi16> to vector<32xi32>
   func.return %converted : vector<32xi32>
 }
@@ -122,9 +98,7 @@ func.def target(@target) @vector_extui_i16x32_i32x32(%input: vector<32xi16>) -> 
 // ====
 
 // XFAIL: SPIR-V ordinary wide integer vector conversion is unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @vector_extsi_i16x32_i32x32(%input: vector<32xi16>) -> (vector<32xi32>) {
+func.def @vector_extsi_i16x32_i32x32(%input: vector<32xi16>) -> (vector<32xi32>) {
   %converted = vector.extsi %input : vector<32xi16> to vector<32xi32>
   func.return %converted : vector<32xi32>
 }
@@ -132,9 +106,7 @@ func.def target(@target) @vector_extsi_i16x32_i32x32(%input: vector<32xi16>) -> 
 // ====
 
 // XFAIL: SPIR-V ordinary wide integer vector conversion is unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @vector_extui_i32x16_i64x16(%input: vector<16xi32>) -> (vector<16xi64>) {
+func.def @vector_extui_i32x16_i64x16(%input: vector<16xi32>) -> (vector<16xi64>) {
   %converted = vector.extui %input : vector<16xi32> to vector<16xi64>
   func.return %converted : vector<16xi64>
 }
@@ -142,9 +114,7 @@ func.def target(@target) @vector_extui_i32x16_i64x16(%input: vector<16xi32>) -> 
 // ====
 
 // XFAIL: SPIR-V ordinary wide integer vector conversion is unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @vector_extsi_i32x16_i64x16(%input: vector<16xi32>) -> (vector<16xi64>) {
+func.def @vector_extsi_i32x16_i64x16(%input: vector<16xi32>) -> (vector<16xi64>) {
   %converted = vector.extsi %input : vector<16xi32> to vector<16xi64>
   func.return %converted : vector<16xi64>
 }
@@ -152,9 +122,7 @@ func.def target(@target) @vector_extsi_i32x16_i64x16(%input: vector<16xi32>) -> 
 // ====
 
 // XFAIL: SPIR-V ordinary wide integer vector conversion is unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @vector_extui_i8x64_i32x64(%input: vector<64xi8>) -> (vector<64xi32>) {
+func.def @vector_extui_i8x64_i32x64(%input: vector<64xi8>) -> (vector<64xi32>) {
   %converted = vector.extui %input : vector<64xi8> to vector<64xi32>
   func.return %converted : vector<64xi32>
 }
@@ -162,9 +130,7 @@ func.def target(@target) @vector_extui_i8x64_i32x64(%input: vector<64xi8>) -> (v
 // ====
 
 // XFAIL: SPIR-V ordinary wide integer vector conversion is unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @vector_extsi_i8x64_i32x64(%input: vector<64xi8>) -> (vector<64xi32>) {
+func.def @vector_extsi_i8x64_i32x64(%input: vector<64xi8>) -> (vector<64xi32>) {
   %converted = vector.extsi %input : vector<64xi8> to vector<64xi32>
   func.return %converted : vector<64xi32>
 }
@@ -172,9 +138,7 @@ func.def target(@target) @vector_extsi_i8x64_i32x64(%input: vector<64xi8>) -> (v
 // ====
 
 // XFAIL: SPIR-V ordinary wide integer vector conversion is unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @vector_extui_i16x32_i64x32(%input: vector<32xi16>) -> (vector<32xi64>) {
+func.def @vector_extui_i16x32_i64x32(%input: vector<32xi16>) -> (vector<32xi64>) {
   %converted = vector.extui %input : vector<32xi16> to vector<32xi64>
   func.return %converted : vector<32xi64>
 }
@@ -182,9 +146,7 @@ func.def target(@target) @vector_extui_i16x32_i64x32(%input: vector<32xi16>) -> 
 // ====
 
 // XFAIL: SPIR-V ordinary wide integer vector conversion is unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @vector_extsi_i16x32_i64x32(%input: vector<32xi16>) -> (vector<32xi64>) {
+func.def @vector_extsi_i16x32_i64x32(%input: vector<32xi16>) -> (vector<32xi64>) {
   %converted = vector.extsi %input : vector<32xi16> to vector<32xi64>
   func.return %converted : vector<32xi64>
 }
@@ -192,9 +154,7 @@ func.def target(@target) @vector_extsi_i16x32_i64x32(%input: vector<32xi16>) -> 
 // ====
 
 // XFAIL: SPIR-V ordinary wide integer vector conversion is unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @vector_trunci_i16x32_i8x32(%input: vector<32xi16>) -> (vector<32xi8>) {
+func.def @vector_trunci_i16x32_i8x32(%input: vector<32xi16>) -> (vector<32xi8>) {
   %converted = vector.trunci %input : vector<32xi16> to vector<32xi8>
   func.return %converted : vector<32xi8>
 }
@@ -202,9 +162,7 @@ func.def target(@target) @vector_trunci_i16x32_i8x32(%input: vector<32xi16>) -> 
 // ====
 
 // XFAIL: SPIR-V ordinary wide integer vector conversion is unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @vector_trunci_i16x64_i8x64(%input: vector<64xi16>) -> (vector<64xi8>) {
+func.def @vector_trunci_i16x64_i8x64(%input: vector<64xi16>) -> (vector<64xi8>) {
   %converted = vector.trunci %input : vector<64xi16> to vector<64xi8>
   func.return %converted : vector<64xi8>
 }
@@ -212,9 +170,7 @@ func.def target(@target) @vector_trunci_i16x64_i8x64(%input: vector<64xi16>) -> 
 // ====
 
 // XFAIL: SPIR-V packed byte bitpack is unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @vector_bitpack_i8x64_i4x64(%input: vector<64xi8>) -> (vector<32xi8>) {
+func.def @vector_bitpack_i8x64_i4x64(%input: vector<64xi8>) -> (vector<32xi8>) {
   %converted = vector.bitpack<4> %input : vector<64xi8> -> vector<32xi8>
   func.return %converted : vector<32xi8>
 }
@@ -222,9 +178,7 @@ func.def target(@target) @vector_bitpack_i8x64_i4x64(%input: vector<64xi8>) -> (
 // ====
 
 // XFAIL: SPIR-V packed byte bitpack is unsupported
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @vector_bitpack_i8x128_i4x128(%input: vector<128xi8>) -> (vector<64xi8>) {
+func.def @vector_bitpack_i8x128_i4x128(%input: vector<128xi8>) -> (vector<64xi8>) {
   %converted = vector.bitpack<4> %input : vector<128xi8> -> vector<64xi8>
   func.return %converted : vector<64xi8>
 }

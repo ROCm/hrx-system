@@ -1,10 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_conversion.loom-test
-// RUN: emit source-low output=low control-flow=structured-low
+// RUN: emit source-low target=spirv:vulkan1.3+bda+extended-types output=low control-flow=structured-low
 
 // XFAIL: SPIR-V ordinary vector math legalization is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_sitofp_i32x2(%input: vector<2xi32>, %scale: vector<2xf32>) -> (vector<2xf32>) {
+func.def @vector_sitofp_i32x2(%input: vector<2xi32>, %scale: vector<2xf32>) -> (vector<2xf32>) {
   %converted = vector.sitofp %input : vector<2xi32> to vector<2xf32>
   %scaled = vector.mulf %converted, %scale : vector<2xf32>
   func.return %scaled : vector<2xf32>
@@ -13,9 +11,7 @@ func.def target(@target) @vector_sitofp_i32x2(%input: vector<2xi32>, %scale: vec
 // ====
 
 // XFAIL: SPIR-V float8 source and conversion support is unavailable
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_decode_splat_f8_scale(%input: buffer, %base: offset, %scale: vector<1xf32>) -> (vector<2xf32>) {
+func.def @vector_decode_splat_f8_scale(%input: buffer, %base: offset, %scale: vector<1xf32>) -> (vector<2xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %input_view = buffer.view %input[%base] : buffer -> view<1xf8E4M3, %layout>
   %raw = view.load %input_view[0] : view<1xf8E4M3, %layout> -> f8E4M3
@@ -28,9 +24,7 @@ func.def target(@target) @vector_decode_splat_f8_scale(%input: buffer, %base: of
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_sitofp_i8x4(%input: vector<4xi8>) -> (vector<4xf32>) {
+func.def @vector_sitofp_i8x4(%input: vector<4xi8>) -> (vector<4xf32>) {
   %converted = vector.sitofp %input : vector<4xi8> to vector<4xf32>
   func.return %converted : vector<4xf32>
 }
@@ -38,9 +32,7 @@ func.def target(@target) @vector_sitofp_i8x4(%input: vector<4xi8>) -> (vector<4x
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_uitofp_i8x4(%input: vector<4xi8>) -> (vector<4xf32>) {
+func.def @vector_uitofp_i8x4(%input: vector<4xi8>) -> (vector<4xf32>) {
   %converted = vector.uitofp %input : vector<4xi8> to vector<4xf32>
   func.return %converted : vector<4xf32>
 }
@@ -48,9 +40,7 @@ func.def target(@target) @vector_uitofp_i8x4(%input: vector<4xi8>) -> (vector<4x
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_uitofp_i8x8(%input: vector<8xi8>) -> (vector<8xf32>) {
+func.def @vector_uitofp_i8x8(%input: vector<8xi8>) -> (vector<8xf32>) {
   %converted = vector.uitofp %input : vector<8xi8> to vector<8xf32>
   func.return %converted : vector<8xf32>
 }
@@ -58,9 +48,7 @@ func.def target(@target) @vector_uitofp_i8x8(%input: vector<8xi8>) -> (vector<8x
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_sitofp_i16x2(%input: vector<2xi16>) -> (vector<2xf32>) {
+func.def @vector_sitofp_i16x2(%input: vector<2xi16>) -> (vector<2xf32>) {
   %converted = vector.sitofp %input : vector<2xi16> to vector<2xf32>
   func.return %converted : vector<2xf32>
 }
@@ -68,9 +56,7 @@ func.def target(@target) @vector_sitofp_i16x2(%input: vector<2xi16>) -> (vector<
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_uitofp_i16x2(%input: vector<2xi16>) -> (vector<2xf32>) {
+func.def @vector_uitofp_i16x2(%input: vector<2xi16>) -> (vector<2xf32>) {
   %converted = vector.uitofp %input : vector<2xi16> to vector<2xf32>
   func.return %converted : vector<2xf32>
 }
@@ -78,9 +64,7 @@ func.def target(@target) @vector_uitofp_i16x2(%input: vector<2xi16>) -> (vector<
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_fptosi_i32x4(%input: vector<4xf32>) -> (vector<4xi32>) {
+func.def @vector_fptosi_i32x4(%input: vector<4xf32>) -> (vector<4xi32>) {
   %converted = vector.fptosi %input : vector<4xf32> to vector<4xi32>
   func.return %converted : vector<4xi32>
 }
@@ -88,9 +72,7 @@ func.def target(@target) @vector_fptosi_i32x4(%input: vector<4xf32>) -> (vector<
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_fptoui_i32x4(%input: vector<4xf32>) -> (vector<4xi32>) {
+func.def @vector_fptoui_i32x4(%input: vector<4xf32>) -> (vector<4xi32>) {
   %converted = vector.fptoui %input : vector<4xf32> to vector<4xi32>
   func.return %converted : vector<4xi32>
 }
@@ -98,9 +80,7 @@ func.def target(@target) @vector_fptoui_i32x4(%input: vector<4xf32>) -> (vector<
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_fptosi_i8x4(%input: vector<4xf32>) -> (vector<4xi8>) {
+func.def @vector_fptosi_i8x4(%input: vector<4xf32>) -> (vector<4xi8>) {
   %converted = vector.fptosi %input : vector<4xf32> to vector<4xi8>
   func.return %converted : vector<4xi8>
 }
@@ -108,9 +88,7 @@ func.def target(@target) @vector_fptosi_i8x4(%input: vector<4xf32>) -> (vector<4
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_fptosi_i8x8(%input: vector<8xf32>) -> (vector<8xi8>) {
+func.def @vector_fptosi_i8x8(%input: vector<8xf32>) -> (vector<8xi8>) {
   %converted = vector.fptosi %input : vector<8xf32> to vector<8xi8>
   func.return %converted : vector<8xi8>
 }
@@ -118,9 +96,7 @@ func.def target(@target) @vector_fptosi_i8x8(%input: vector<8xf32>) -> (vector<8
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_fptoui_i8x4(%input: vector<4xf32>) -> (vector<4xi8>) {
+func.def @vector_fptoui_i8x4(%input: vector<4xf32>) -> (vector<4xi8>) {
   %converted = vector.fptoui %input : vector<4xf32> to vector<4xi8>
   func.return %converted : vector<4xi8>
 }
@@ -128,9 +104,7 @@ func.def target(@target) @vector_fptoui_i8x4(%input: vector<4xf32>) -> (vector<4
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_fptoui_i8x3(%input: vector<3xf32>) -> (vector<3xi8>) {
+func.def @vector_fptoui_i8x3(%input: vector<3xf32>) -> (vector<3xi8>) {
   %converted = vector.fptoui %input : vector<3xf32> to vector<3xi8>
   func.return %converted : vector<3xi8>
 }
@@ -138,9 +112,7 @@ func.def target(@target) @vector_fptoui_i8x3(%input: vector<3xf32>) -> (vector<3
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_fptoui_i8x8(%input: vector<8xf32>) -> (vector<8xi8>) {
+func.def @vector_fptoui_i8x8(%input: vector<8xf32>) -> (vector<8xi8>) {
   %converted = vector.fptoui %input : vector<8xf32> to vector<8xi8>
   func.return %converted : vector<8xi8>
 }
@@ -148,9 +120,7 @@ func.def target(@target) @vector_fptoui_i8x8(%input: vector<8xf32>) -> (vector<8
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_fptosi_i16x2(%input: vector<2xf32>) -> (vector<2xi16>) {
+func.def @vector_fptosi_i16x2(%input: vector<2xf32>) -> (vector<2xi16>) {
   %converted = vector.fptosi %input : vector<2xf32> to vector<2xi16>
   func.return %converted : vector<2xi16>
 }
@@ -158,9 +128,7 @@ func.def target(@target) @vector_fptosi_i16x2(%input: vector<2xf32>) -> (vector<
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_fptoui_i16x2(%input: vector<2xf32>) -> (vector<2xi16>) {
+func.def @vector_fptoui_i16x2(%input: vector<2xf32>) -> (vector<2xi16>) {
   %converted = vector.fptoui %input : vector<2xf32> to vector<2xi16>
   func.return %converted : vector<2xi16>
 }
@@ -168,9 +136,7 @@ func.def target(@target) @vector_fptoui_i16x2(%input: vector<2xf32>) -> (vector<
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_trunci_i32_to_i8x4(%input: vector<4xi32>) -> (vector<4xi8>) {
+func.def @vector_trunci_i32_to_i8x4(%input: vector<4xi32>) -> (vector<4xi8>) {
   %converted = vector.trunci %input : vector<4xi32> to vector<4xi8>
   func.return %converted : vector<4xi8>
 }
@@ -178,9 +144,7 @@ func.def target(@target) @vector_trunci_i32_to_i8x4(%input: vector<4xi32>) -> (v
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_trunci_i32_to_i16x2(%input: vector<2xi32>) -> (vector<2xi16>) {
+func.def @vector_trunci_i32_to_i16x2(%input: vector<2xi32>) -> (vector<2xi16>) {
   %converted = vector.trunci %input : vector<2xi32> to vector<2xi16>
   func.return %converted : vector<2xi16>
 }
@@ -188,9 +152,7 @@ func.def target(@target) @vector_trunci_i32_to_i16x2(%input: vector<2xi32>) -> (
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_trunci_i16_to_i8x4(%input: vector<4xi16>) -> (vector<4xi8>) {
+func.def @vector_trunci_i16_to_i8x4(%input: vector<4xi16>) -> (vector<4xi8>) {
   %converted = vector.trunci %input : vector<4xi16> to vector<4xi8>
   func.return %converted : vector<4xi8>
 }
@@ -198,9 +160,7 @@ func.def target(@target) @vector_trunci_i16_to_i8x4(%input: vector<4xi16>) -> (v
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_trunci_i64_to_i32x2(%input: vector<2xi64>) -> (vector<2xi32>) {
+func.def @vector_trunci_i64_to_i32x2(%input: vector<2xi64>) -> (vector<2xi32>) {
   %converted = vector.trunci %input : vector<2xi64> to vector<2xi32>
   func.return %converted : vector<2xi32>
 }
@@ -208,9 +168,7 @@ func.def target(@target) @vector_trunci_i64_to_i32x2(%input: vector<2xi64>) -> (
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_trunci_i64_to_i16x2(%input: vector<2xi64>) -> (vector<2xi16>) {
+func.def @vector_trunci_i64_to_i16x2(%input: vector<2xi64>) -> (vector<2xi16>) {
   %converted = vector.trunci %input : vector<2xi64> to vector<2xi16>
   func.return %converted : vector<2xi16>
 }
@@ -218,9 +176,7 @@ func.def target(@target) @vector_trunci_i64_to_i16x2(%input: vector<2xi64>) -> (
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_trunci_i64_to_i8x4(%input: vector<4xi64>) -> (vector<4xi8>) {
+func.def @vector_trunci_i64_to_i8x4(%input: vector<4xi64>) -> (vector<4xi8>) {
   %converted = vector.trunci %input : vector<4xi64> to vector<4xi8>
   func.return %converted : vector<4xi8>
 }
@@ -228,9 +184,7 @@ func.def target(@target) @vector_trunci_i64_to_i8x4(%input: vector<4xi64>) -> (v
 // ====
 
 // XFAIL: SPIR-V ordinary vector rounding legalization is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_quantize_round_f32_to_i8x4(%values: vector<4xf32>, %inverse_scale: f32) -> (vector<4xi8>) {
+func.def @vector_quantize_round_f32_to_i8x4(%values: vector<4xf32>, %inverse_scale: f32) -> (vector<4xi8>) {
   %scale = vector.splat %inverse_scale : vector<4xf32>
   %scaled = vector.mulf %values, %scale : vector<4xf32>
   %rounded = vector.roundf %scaled : vector<4xf32>
@@ -242,9 +196,7 @@ func.def target(@target) @vector_quantize_round_f32_to_i8x4(%values: vector<4xf3
 // ====
 
 // XFAIL: SPIR-V ordinary vector rounding legalization is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_quantize_round_afn_f32_to_i8x4(%values: vector<4xf32>, %inverse_scale: f32) -> (vector<4xi8>) {
+func.def @vector_quantize_round_afn_f32_to_i8x4(%values: vector<4xf32>, %inverse_scale: f32) -> (vector<4xi8>) {
   %scale = vector.splat %inverse_scale : vector<4xf32>
   %scaled = vector.mulf %values, %scale : vector<4xf32>
   %rounded = vector.roundf<afn> %scaled : vector<4xf32>
@@ -256,9 +208,7 @@ func.def target(@target) @vector_quantize_round_afn_f32_to_i8x4(%values: vector<
 // ====
 
 // XFAIL: SPIR-V ordinary vector rounding legalization is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_quantize_arcp_round_afn_f32_to_i8x4(%values: vector<4xf32>, %amax: f32) -> (vector<4xi8>) {
+func.def @vector_quantize_arcp_round_afn_f32_to_i8x4(%values: vector<4xf32>, %amax: f32) -> (vector<4xi8>) {
   %scale_limit = scalar.constant 127.0 : f32
   %inverse_scale = scalar.divf<nnan|ninf|nsz|arcp> %scale_limit, %amax : f32
   %scale = vector.splat %inverse_scale : vector<4xf32>
@@ -272,9 +222,7 @@ func.def target(@target) @vector_quantize_arcp_round_afn_f32_to_i8x4(%values: ve
 // ====
 
 // XFAIL: SPIR-V ordinary vector rounding legalization is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_quantize_roundeven_f32_to_i8x4(%values: vector<4xf32>, %inverse_scale: f32) -> (vector<4xi8>) {
+func.def @vector_quantize_roundeven_f32_to_i8x4(%values: vector<4xf32>, %inverse_scale: f32) -> (vector<4xi8>) {
   %scale = vector.splat %inverse_scale : vector<4xf32>
   %scaled = vector.mulf %values, %scale : vector<4xf32>
   %rounded = vector.roundevenf %scaled : vector<4xf32>
@@ -286,9 +234,7 @@ func.def target(@target) @vector_quantize_roundeven_f32_to_i8x4(%values: vector<
 // ====
 
 // XFAIL: SPIR-V ordinary vector rounding legalization is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_quantize_scalarized_roundeven_f32_to_i8x4(%values: vector<4xf32>, %inverse_scale: f32) -> (vector<4xi8>) {
+func.def @vector_quantize_scalarized_roundeven_f32_to_i8x4(%values: vector<4xf32>, %inverse_scale: f32) -> (vector<4xi8>) {
   %scale = vector.splat %inverse_scale : vector<4xf32>
   %scaled = vector.mulf %values, %scale : vector<4xf32>
   %lane0 = vector.extract %scaled[0] : vector<4xf32> -> f32
@@ -314,9 +260,7 @@ func.def target(@target) @vector_quantize_scalarized_roundeven_f32_to_i8x4(%valu
 // ====
 
 // XFAIL: SPIR-V ordinary vector rounding legalization is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_quantize_scalarized_roundeven_f32_to_i8x4_with_sum(%values: vector<4xf32>, %inverse_scale: f32) -> (vector<4xi8>, vector<4xf32>) {
+func.def @vector_quantize_scalarized_roundeven_f32_to_i8x4_with_sum(%values: vector<4xf32>, %inverse_scale: f32) -> (vector<4xi8>, vector<4xf32>) {
   %scale = vector.splat %inverse_scale : vector<4xf32>
   %scaled = vector.mulf %values, %scale : vector<4xf32>
   %rounded = vector.roundevenf %scaled : vector<4xf32>
@@ -343,15 +287,13 @@ func.def target(@target) @vector_quantize_scalarized_roundeven_f32_to_i8x4_with_
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_uitofp_i32(%input: i32) -> (f32) {
+func.def @scalar_uitofp_i32(%input: i32) -> (f32) {
   %converted = scalar.uitofp %input : i32 to f32
   func.return %converted : f32
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_uitofp_i32(%input: reg<spirv.id : i32>) -> (reg<spirv.id : f32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_uitofp_i32(%input: reg<spirv.id : i32>) -> (reg<spirv.id : f32>) asm {
   %5 = OpBitcast.i32.u32 %input
   %converted = OpConvertUToF.u32.f32 %5
   return %converted
@@ -359,15 +301,13 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_uitofp_i8(%input: i8) -> (f32) {
+func.def @scalar_uitofp_i8(%input: i8) -> (f32) {
   %converted = scalar.uitofp %input : i8 to f32
   func.return %converted : f32
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_uitofp_i8(%input: reg<spirv.id : i8>) -> (reg<spirv.id : f32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_uitofp_i8(%input: reg<spirv.id : i8>) -> (reg<spirv.id : f32>) asm {
   %5 = OpBitcast.i8.u8 %input
   %converted = OpConvertUToF.u8.f32 %5
   return %converted
@@ -375,15 +315,13 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_uitofp_i16(%input: i16) -> (f32) {
+func.def @scalar_uitofp_i16(%input: i16) -> (f32) {
   %converted = scalar.uitofp %input : i16 to f32
   func.return %converted : f32
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_uitofp_i16(%input: reg<spirv.id : i16>) -> (reg<spirv.id : f32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_uitofp_i16(%input: reg<spirv.id : i16>) -> (reg<spirv.id : f32>) asm {
   %5 = OpBitcast.i16.u16 %input
   %converted = OpConvertUToF.u16.f32 %5
   return %converted
@@ -391,30 +329,26 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_sitofp_i32(%input: i32) -> (f32) {
+func.def @scalar_sitofp_i32(%input: i32) -> (f32) {
   %converted = scalar.sitofp %input : i32 to f32
   func.return %converted : f32
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_sitofp_i32(%input: reg<spirv.id : i32>) -> (reg<spirv.id : f32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_sitofp_i32(%input: reg<spirv.id : i32>) -> (reg<spirv.id : f32>) asm {
   %converted = OpConvertSToF.i32.f32 %input
   return %converted
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_sitofp_i32_to_f16(%input: i32) -> (f16) {
+func.def @scalar_sitofp_i32_to_f16(%input: i32) -> (f16) {
   %converted = scalar.sitofp %input : i32 to f16
   func.return %converted : f16
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_sitofp_i32_to_f16(%input: reg<spirv.id : i32>) -> (reg<spirv.id : f16>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_sitofp_i32_to_f16(%input: reg<spirv.id : i32>) -> (reg<spirv.id : f16>) asm {
   %converted = OpConvertSToF.i32.f16 %input
   return %converted
 }
@@ -422,9 +356,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 // ====
 
 // XFAIL: SPIR-V structured lowering does not accept authored CFG input
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_f16_cfg_cond_join(%lhs: i32, %rhs: i32, %then_input: i32, %else_input: i32) -> (f16) {
+func.def @scalar_f16_cfg_cond_join(%lhs: i32, %rhs: i32, %then_input: i32, %else_input: i32) -> (f16) {
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   cfg.cond_br %condition, ^then, ^else
 ^then:
@@ -439,45 +371,39 @@ func.def target(@target) @scalar_f16_cfg_cond_join(%lhs: i32, %rhs: i32, %then_i
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_sitofp_i16(%input: i16) -> (f32) {
+func.def @scalar_sitofp_i16(%input: i16) -> (f32) {
   %converted = scalar.sitofp %input : i16 to f32
   func.return %converted : f32
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_sitofp_i16(%input: reg<spirv.id : i16>) -> (reg<spirv.id : f32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_sitofp_i16(%input: reg<spirv.id : i16>) -> (reg<spirv.id : f32>) asm {
   %converted = OpConvertSToF.i16.f32 %input
   return %converted
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_fptosi_i32(%input: f32) -> (i32) {
+func.def @scalar_fptosi_i32(%input: f32) -> (i32) {
   %converted = scalar.fptosi %input : f32 to i32
   func.return %converted : i32
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_fptosi_i32(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_fptosi_i32(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i32>) asm {
   %converted = OpConvertFToS.f32.i32 %input
   return %converted
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_fptoui_i32(%input: f32) -> (i32) {
+func.def @scalar_fptoui_i32(%input: f32) -> (i32) {
   %converted = scalar.fptoui %input : f32 to i32
   func.return %converted : i32
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_fptoui_i32(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_fptoui_i32(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i32>) asm {
   %5 = OpConvertFToU.f32.u32 %input
   %converted = OpBitcast.u32.i32 %5
   return %converted
@@ -485,45 +411,39 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_fptosi_i8(%input: f32) -> (i8) {
+func.def @scalar_fptosi_i8(%input: f32) -> (i8) {
   %converted = scalar.fptosi %input : f32 to i8
   func.return %converted : i8
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_fptosi_i8(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i8>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_fptosi_i8(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i8>) asm {
   %converted = OpConvertFToS.f32.i8 %input
   return %converted
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_fptosi_i16(%input: f32) -> (i16) {
+func.def @scalar_fptosi_i16(%input: f32) -> (i16) {
   %converted = scalar.fptosi %input : f32 to i16
   func.return %converted : i16
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_fptosi_i16(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i16>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_fptosi_i16(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i16>) asm {
   %converted = OpConvertFToS.f32.i16 %input
   return %converted
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_fptoui_i8(%input: f32) -> (i8) {
+func.def @scalar_fptoui_i8(%input: f32) -> (i8) {
   %converted = scalar.fptoui %input : f32 to i8
   func.return %converted : i8
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_fptoui_i8(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i8>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_fptoui_i8(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i8>) asm {
   %5 = OpConvertFToU.f32.u8 %input
   %converted = OpBitcast.u8.i8 %5
   return %converted
@@ -531,15 +451,13 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_fptoui_i16(%input: f32) -> (i16) {
+func.def @scalar_fptoui_i16(%input: f32) -> (i16) {
   %converted = scalar.fptoui %input : f32 to i16
   func.return %converted : i16
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_fptoui_i16(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i16>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_fptoui_i16(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i16>) asm {
   %5 = OpConvertFToU.f32.u16 %input
   %converted = OpBitcast.u16.i16 %5
   return %converted
@@ -547,90 +465,78 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_trunci_i32_to_i8(%input: i32) -> (i8) {
+func.def @scalar_trunci_i32_to_i8(%input: i32) -> (i8) {
   %converted = scalar.trunci %input : i32 to i8
   func.return %converted : i8
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_trunci_i32_to_i8(%input: reg<spirv.id : i32>) -> (reg<spirv.id : i8>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_trunci_i32_to_i8(%input: reg<spirv.id : i32>) -> (reg<spirv.id : i8>) asm {
   %converted = OpSConvert.i32.i8 %input
   return %converted
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_trunci_i16_to_i8(%input: i16) -> (i8) {
+func.def @scalar_trunci_i16_to_i8(%input: i16) -> (i8) {
   %converted = scalar.trunci %input : i16 to i8
   func.return %converted : i8
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_trunci_i16_to_i8(%input: reg<spirv.id : i16>) -> (reg<spirv.id : i8>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_trunci_i16_to_i8(%input: reg<spirv.id : i16>) -> (reg<spirv.id : i8>) asm {
   %converted = OpSConvert.i16.i8 %input
   return %converted
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_trunci_i32_to_i16(%input: i32) -> (i16) {
+func.def @scalar_trunci_i32_to_i16(%input: i32) -> (i16) {
   %converted = scalar.trunci %input : i32 to i16
   func.return %converted : i16
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_trunci_i32_to_i16(%input: reg<spirv.id : i32>) -> (reg<spirv.id : i16>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_trunci_i32_to_i16(%input: reg<spirv.id : i32>) -> (reg<spirv.id : i16>) asm {
   %converted = OpSConvert.i32.i16 %input
   return %converted
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_trunci_i64_to_i8(%input: i64) -> (i8) {
+func.def @scalar_trunci_i64_to_i8(%input: i64) -> (i8) {
   %converted = scalar.trunci %input : i64 to i8
   func.return %converted : i8
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_trunci_i64_to_i8(%input: reg<spirv.id : i64>) -> (reg<spirv.id : i8>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_trunci_i64_to_i8(%input: reg<spirv.id : i64>) -> (reg<spirv.id : i8>) asm {
   %converted = OpSConvert.i64.i8 %input
   return %converted
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_trunci_i64_to_i16(%input: i64) -> (i16) {
+func.def @scalar_trunci_i64_to_i16(%input: i64) -> (i16) {
   %converted = scalar.trunci %input : i64 to i16
   func.return %converted : i16
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_trunci_i64_to_i16(%input: reg<spirv.id : i64>) -> (reg<spirv.id : i16>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_trunci_i64_to_i16(%input: reg<spirv.id : i64>) -> (reg<spirv.id : i16>) asm {
   %converted = OpSConvert.i64.i16 %input
   return %converted
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_trunci_i64_to_i32(%input: i64) -> (i32) {
+func.def @scalar_trunci_i64_to_i32(%input: i64) -> (i32) {
   %converted = scalar.trunci %input : i64 to i32
   func.return %converted : i32
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_trunci_i64_to_i32(%input: reg<spirv.id : i64>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_trunci_i64_to_i32(%input: reg<spirv.id : i64>) -> (reg<spirv.id : i32>) asm {
   %converted = OpSConvert.i64.i32 %input
   return %converted
 }
@@ -638,9 +544,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 // ====
 
 // XFAIL: SPIR-V ordinary vector construction lowering is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_f16_dequant_pair(%q0: i32, %q1: i32, %scale: f16) -> (vector<2xf16>) {
+func.def @scalar_f16_dequant_pair(%q0: i32, %q1: i32, %scale: f16) -> (vector<2xf16>) {
   %q0_half = scalar.sitofp %q0 : i32 to f16
   %dequant0 = scalar.mulf %q0_half, %scale : f16
   %q1_half = scalar.sitofp %q1 : i32 to f16
@@ -652,9 +556,7 @@ func.def target(@target) @scalar_f16_dequant_pair(%q0: i32, %q1: i32, %scale: f1
 // ====
 
 // XFAIL: Source memory alignment facts do not prove the SPIR-V requirement
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-kernel.def target(@target) @scalar_sitofp_i8_load_store() {
+kernel.def @scalar_sitofp_i8_load_store() {
   %count = index.constant 1 : index
   kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
 } launch(%input: buffer, %output: buffer) {
@@ -673,15 +575,13 @@ kernel.def target(@target) @scalar_sitofp_i8_load_store() {
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_extf_f16(%input: f16) -> (f32) {
+func.def @scalar_extf_f16(%input: f16) -> (f32) {
   %converted = scalar.extf %input : f16 to f32
   func.return %converted : f32
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extf_f16(%input: reg<spirv.id : f16>) -> (reg<spirv.id : f32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_extf_f16(%input: reg<spirv.id : f16>) -> (reg<spirv.id : f32>) asm {
   %converted = OpFConvert.f16.f32 %input
   return %converted
 }
@@ -689,9 +589,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 // ====
 
 // XFAIL: SPIR-V BF16 conversion and bitcast support is unavailable
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_extf_bf16(%input: bf16) -> (f32) {
+func.def @scalar_extf_bf16(%input: bf16) -> (f32) {
   %converted = scalar.extf %input : bf16 to f32
   func.return %converted : f32
 }
@@ -699,9 +597,7 @@ func.def target(@target) @scalar_extf_bf16(%input: bf16) -> (f32) {
 // ====
 
 // XFAIL: SPIR-V BF16 conversion and bitcast support is unavailable
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-kernel.def target(@target) @scalar_extf_bf16_load_store() {
+kernel.def @scalar_extf_bf16_load_store() {
   %count = index.constant 1 : index
   kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
 } launch(%input: buffer, %output: buffer) {
@@ -721,9 +617,7 @@ kernel.def target(@target) @scalar_extf_bf16_load_store() {
 // ====
 
 // XFAIL: Source memory alignment facts do not prove the SPIR-V requirement
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_fptrunc_f32_store(%output: buffer, %input: f32) {
+func.def @scalar_fptrunc_f32_store(%output: buffer, %input: f32) {
   %base = index.constant 0 : offset
   %output_view = buffer.view %output[%base] : buffer -> view<1xf16>
   %converted = scalar.fptrunc %input : f32 to f16
@@ -734,9 +628,7 @@ func.def target(@target) @scalar_fptrunc_f32_store(%output: buffer, %input: f32)
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_extf_f16x2(%input: vector<2xf16>) -> (vector<2xf32>) {
+func.def @vector_extf_f16x2(%input: vector<2xf16>) -> (vector<2xf32>) {
   %converted = vector.extf %input : vector<2xf16> to vector<2xf32>
   func.return %converted : vector<2xf32>
 }
@@ -744,9 +636,7 @@ func.def target(@target) @vector_extf_f16x2(%input: vector<2xf16>) -> (vector<2x
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_extf_f16x3(%input: vector<3xf16>) -> (vector<3xf32>) {
+func.def @vector_extf_f16x3(%input: vector<3xf16>) -> (vector<3xf32>) {
   %converted = vector.extf %input : vector<3xf16> to vector<3xf32>
   func.return %converted : vector<3xf32>
 }
@@ -754,9 +644,7 @@ func.def target(@target) @vector_extf_f16x3(%input: vector<3xf16>) -> (vector<3x
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_fptrunc_f16x3(%input: vector<3xf32>) -> (vector<3xf16>) {
+func.def @vector_fptrunc_f16x3(%input: vector<3xf32>) -> (vector<3xf16>) {
   %converted = vector.fptrunc %input : vector<3xf32> to vector<3xf16>
   func.return %converted : vector<3xf16>
 }
@@ -764,9 +652,7 @@ func.def target(@target) @vector_fptrunc_f16x3(%input: vector<3xf32>) -> (vector
 // ====
 
 // XFAIL: SPIR-V BF16 conversion and bitcast support is unavailable
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_fptrunc_bf16_store(%output: buffer, %input: f32) {
+func.def @scalar_fptrunc_bf16_store(%output: buffer, %input: f32) {
   %base = index.constant 0 : offset
   %output_view = buffer.view %output[%base] : buffer -> view<1xbf16>
   %converted = scalar.fptrunc %input : f32 to bf16
@@ -777,9 +663,7 @@ func.def target(@target) @scalar_fptrunc_bf16_store(%output: buffer, %input: f32
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_extf_bf16x3(%input: vector<3xbf16>) -> (vector<3xf32>) {
+func.def @vector_extf_bf16x3(%input: vector<3xbf16>) -> (vector<3xf32>) {
   %converted = vector.extf %input : vector<3xbf16> to vector<3xf32>
   func.return %converted : vector<3xf32>
 }
@@ -787,9 +671,7 @@ func.def target(@target) @vector_extf_bf16x3(%input: vector<3xbf16>) -> (vector<
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_fptrunc_bf16x3(%input: vector<3xf32>) -> (vector<3xbf16>) {
+func.def @vector_fptrunc_bf16x3(%input: vector<3xf32>) -> (vector<3xbf16>) {
   %converted = vector.fptrunc %input : vector<3xf32> to vector<3xbf16>
   func.return %converted : vector<3xbf16>
 }
@@ -797,9 +679,7 @@ func.def target(@target) @vector_fptrunc_bf16x3(%input: vector<3xf32>) -> (vecto
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_extf_fptrunc_bf16_origin_alias(%input: vector<4xbf16>) -> (vector<4xbf16>) {
+func.def @vector_extf_fptrunc_bf16_origin_alias(%input: vector<4xbf16>) -> (vector<4xbf16>) {
   %wide = vector.extf %input : vector<4xbf16> to vector<4xf32>
   %rounded = vector.fptrunc %wide : vector<4xf32> to vector<4xbf16>
   func.return %rounded : vector<4xbf16>
@@ -807,210 +687,182 @@ func.def target(@target) @vector_extf_fptrunc_bf16_origin_alias(%input: vector<4
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_bitcast_f32_to_i32(%input: f32) -> (i32) {
+func.def @scalar_bitcast_f32_to_i32(%input: f32) -> (i32) {
   %bits = scalar.bitcast %input : f32 to i32
   func.return %bits : i32
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_bitcast_f32_to_i32(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_bitcast_f32_to_i32(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i32>) asm {
   %bits = OpBitcast.f32.i32 %input
   return %bits
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_bitcast_i64_to_f64(%input: i64) -> (f64) {
+func.def @scalar_bitcast_i64_to_f64(%input: i64) -> (f64) {
   %value = scalar.bitcast %input : i64 to f64
   func.return %value : f64
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_bitcast_i64_to_f64(%input: reg<spirv.id : i64>) -> (reg<spirv.id : f64>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_bitcast_i64_to_f64(%input: reg<spirv.id : i64>) -> (reg<spirv.id : f64>) asm {
   %value = OpBitcast.i64.f64 %input
   return %value
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_bitcast_f64_to_i64(%input: f64) -> (i64) {
+func.def @scalar_bitcast_f64_to_i64(%input: f64) -> (i64) {
   %bits = scalar.bitcast %input : f64 to i64
   func.return %bits : i64
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_bitcast_f64_to_i64(%input: reg<spirv.id : f64>) -> (reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_bitcast_f64_to_i64(%input: reg<spirv.id : f64>) -> (reg<spirv.id : i64>) asm {
   %bits = OpBitcast.f64.i64 %input
   return %bits
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_bitcast_f16_to_i16(%input: f16) -> (i16) {
+func.def @scalar_bitcast_f16_to_i16(%input: f16) -> (i16) {
   %bits = scalar.bitcast %input : f16 to i16
   func.return %bits : i16
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_bitcast_f16_to_i16(%input: reg<spirv.id : f16>) -> (reg<spirv.id : i16>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_bitcast_f16_to_i16(%input: reg<spirv.id : f16>) -> (reg<spirv.id : i16>) asm {
   %bits = OpBitcast.f16.i16 %input
   return %bits
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_bitcast_i16_to_f16(%input: i16) -> (f16) {
+func.def @scalar_bitcast_i16_to_f16(%input: i16) -> (f16) {
   %half = scalar.bitcast %input : i16 to f16
   func.return %half : f16
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_bitcast_i16_to_f16(%input: reg<spirv.id : i16>) -> (reg<spirv.id : f16>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_bitcast_i16_to_f16(%input: reg<spirv.id : i16>) -> (reg<spirv.id : f16>) asm {
   %half = OpBitcast.i16.f16 %input
   return %half
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_bitcast_bf16_to_i16(%input: bf16) -> (i16) {
+func.def @scalar_bitcast_bf16_to_i16(%input: bf16) -> (i16) {
   %bits = scalar.bitcast %input : bf16 to i16
   func.return %bits : i16
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_bitcast_bf16_to_i16(%input: reg<spirv.id : bf16>) -> (reg<spirv.id : i16>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_bitcast_bf16_to_i16(%input: reg<spirv.id : bf16>) -> (reg<spirv.id : i16>) asm {
   %bits = OpBitcast.bf16.i16 %input
   return %bits
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_bitcast_i16_to_bf16(%input: i16) -> (bf16) {
+func.def @scalar_bitcast_i16_to_bf16(%input: i16) -> (bf16) {
   %half = scalar.bitcast %input : i16 to bf16
   func.return %half : bf16
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_bitcast_i16_to_bf16(%input: reg<spirv.id : i16>) -> (reg<spirv.id : bf16>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_bitcast_i16_to_bf16(%input: reg<spirv.id : i16>) -> (reg<spirv.id : bf16>) asm {
   %half = OpBitcast.i16.bf16 %input
   return %half
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_extsi_i8_to_i16(%input: i8) -> (i16) {
+func.def @scalar_extsi_i8_to_i16(%input: i8) -> (i16) {
   %converted = scalar.extsi %input : i8 to i16
   func.return %converted : i16
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extsi_i8_to_i16(%input: reg<spirv.id : i8>) -> (reg<spirv.id : i16>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_extsi_i8_to_i16(%input: reg<spirv.id : i8>) -> (reg<spirv.id : i16>) asm {
   %converted = OpSConvert.i8.i16 %input
   return %converted
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_extsi_i8_to_i32(%input: i8) -> (i32) {
+func.def @scalar_extsi_i8_to_i32(%input: i8) -> (i32) {
   %converted = scalar.extsi %input : i8 to i32
   func.return %converted : i32
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extsi_i8_to_i32(%input: reg<spirv.id : i8>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_extsi_i8_to_i32(%input: reg<spirv.id : i8>) -> (reg<spirv.id : i32>) asm {
   %converted = OpSConvert.i8.i32 %input
   return %converted
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_extsi_i8_to_i64(%input: i8) -> (i64) {
+func.def @scalar_extsi_i8_to_i64(%input: i8) -> (i64) {
   %converted = scalar.extsi %input : i8 to i64
   func.return %converted : i64
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extsi_i8_to_i64(%input: reg<spirv.id : i8>) -> (reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_extsi_i8_to_i64(%input: reg<spirv.id : i8>) -> (reg<spirv.id : i64>) asm {
   %converted = OpSConvert.i8.i64 %input
   return %converted
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_extsi_i16_to_i32(%input: i16) -> (i32) {
+func.def @scalar_extsi_i16_to_i32(%input: i16) -> (i32) {
   %converted = scalar.extsi %input : i16 to i32
   func.return %converted : i32
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extsi_i16_to_i32(%input: reg<spirv.id : i16>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_extsi_i16_to_i32(%input: reg<spirv.id : i16>) -> (reg<spirv.id : i32>) asm {
   %converted = OpSConvert.i16.i32 %input
   return %converted
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_extsi_i16_to_i64(%input: i16) -> (i64) {
+func.def @scalar_extsi_i16_to_i64(%input: i16) -> (i64) {
   %converted = scalar.extsi %input : i16 to i64
   func.return %converted : i64
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extsi_i16_to_i64(%input: reg<spirv.id : i16>) -> (reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_extsi_i16_to_i64(%input: reg<spirv.id : i16>) -> (reg<spirv.id : i64>) asm {
   %converted = OpSConvert.i16.i64 %input
   return %converted
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_extsi_i32_to_i64(%input: i32) -> (i64) {
+func.def @scalar_extsi_i32_to_i64(%input: i32) -> (i64) {
   %converted = scalar.extsi %input : i32 to i64
   func.return %converted : i64
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extsi_i32_to_i64(%input: reg<spirv.id : i32>) -> (reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_extsi_i32_to_i64(%input: reg<spirv.id : i32>) -> (reg<spirv.id : i64>) asm {
   %converted = OpSConvert.i32.i64 %input
   return %converted
 }
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_extui_i1_to_i32(%input: i1) -> (i32) {
+func.def @scalar_extui_i1_to_i32(%input: i1) -> (i32) {
   %converted = scalar.extui %input : i1 to i32
   func.return %converted : i32
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extui_i1_to_i32(%input: reg<spirv.id : i1>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_extui_i1_to_i32(%input: reg<spirv.id : i1>) -> (reg<spirv.id : i32>) asm {
   %8 = OpConstant.i32 1
   %9 = OpConstant.i32 0
   %converted = OpSelect %input, %8, %9
@@ -1019,15 +871,13 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_extui_i8_to_i16(%input: i8) -> (i16) {
+func.def @scalar_extui_i8_to_i16(%input: i8) -> (i16) {
   %converted = scalar.extui %input : i8 to i16
   func.return %converted : i16
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extui_i8_to_i16(%input: reg<spirv.id : i8>) -> (reg<spirv.id : i16>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_extui_i8_to_i16(%input: reg<spirv.id : i8>) -> (reg<spirv.id : i16>) asm {
   %5 = OpBitcast.i8.u8 %input
   %6 = OpUConvert.u8.u16 %5
   %converted = OpBitcast.u16.i16 %6
@@ -1036,15 +886,13 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_extui_i8_to_i32(%input: i8) -> (i32) {
+func.def @scalar_extui_i8_to_i32(%input: i8) -> (i32) {
   %converted = scalar.extui %input : i8 to i32
   func.return %converted : i32
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extui_i8_to_i32(%input: reg<spirv.id : i8>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_extui_i8_to_i32(%input: reg<spirv.id : i8>) -> (reg<spirv.id : i32>) asm {
   %5 = OpBitcast.i8.u8 %input
   %6 = OpUConvert.u8.u32 %5
   %converted = OpBitcast.u32.i32 %6
@@ -1053,15 +901,13 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_extui_i8_to_i64(%input: i8) -> (i64) {
+func.def @scalar_extui_i8_to_i64(%input: i8) -> (i64) {
   %converted = scalar.extui %input : i8 to i64
   func.return %converted : i64
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extui_i8_to_i64(%input: reg<spirv.id : i8>) -> (reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_extui_i8_to_i64(%input: reg<spirv.id : i8>) -> (reg<spirv.id : i64>) asm {
   %5 = OpBitcast.i8.u8 %input
   %6 = OpUConvert.u8.u64 %5
   %converted = OpBitcast.u64.i64 %6
@@ -1070,15 +916,13 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_extui_i16_to_i32(%input: i16) -> (i32) {
+func.def @scalar_extui_i16_to_i32(%input: i16) -> (i32) {
   %converted = scalar.extui %input : i16 to i32
   func.return %converted : i32
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extui_i16_to_i32(%input: reg<spirv.id : i16>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_extui_i16_to_i32(%input: reg<spirv.id : i16>) -> (reg<spirv.id : i32>) asm {
   %5 = OpBitcast.i16.u16 %input
   %6 = OpUConvert.u16.u32 %5
   %converted = OpBitcast.u32.i32 %6
@@ -1087,15 +931,13 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_extui_i16_to_i64(%input: i16) -> (i64) {
+func.def @scalar_extui_i16_to_i64(%input: i16) -> (i64) {
   %converted = scalar.extui %input : i16 to i64
   func.return %converted : i64
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extui_i16_to_i64(%input: reg<spirv.id : i16>) -> (reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_extui_i16_to_i64(%input: reg<spirv.id : i16>) -> (reg<spirv.id : i64>) asm {
   %5 = OpBitcast.i16.u16 %input
   %6 = OpUConvert.u16.u64 %5
   %converted = OpBitcast.u64.i64 %6
@@ -1104,15 +946,13 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_extui_i32_to_i64(%input: i32) -> (i64) {
+func.def @scalar_extui_i32_to_i64(%input: i32) -> (i64) {
   %converted = scalar.extui %input : i32 to i64
   func.return %converted : i64
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extui_i32_to_i64(%input: reg<spirv.id : i32>) -> (reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_extui_i32_to_i64(%input: reg<spirv.id : i32>) -> (reg<spirv.id : i64>) asm {
   %5 = OpBitcast.i32.u32 %input
   %6 = OpUConvert.u32.u64 %5
   %converted = OpBitcast.u64.i64 %6
@@ -1122,9 +962,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 // ====
 
 // XFAIL: Source memory alignment facts do not prove the SPIR-V requirement
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-kernel.def target(@target) @scalar_bitcast_direct_i32_arg_f32_store() {
+kernel.def @scalar_bitcast_direct_i32_arg_f32_store() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%output: buffer, %scale_bits: i32) {
@@ -1141,9 +979,7 @@ kernel.def target(@target) @scalar_bitcast_direct_i32_arg_f32_store() {
 // ====
 
 // XFAIL: Source memory alignment facts do not prove the SPIR-V requirement
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-kernel.def target(@target) @scalar_bitcast_lane_byte_decode_select_tree_store() {
+kernel.def @scalar_bitcast_lane_byte_decode_select_tree_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -1211,9 +1047,7 @@ kernel.def target(@target) @scalar_bitcast_lane_byte_decode_select_tree_store() 
 // ====
 
 // XFAIL: SPIR-V float8 source and conversion support is unavailable
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-kernel.def target(@target) @scalar_extf_direct_f8e4m3_load_store() {
+kernel.def @scalar_extf_direct_f8e4m3_load_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -1231,9 +1065,7 @@ kernel.def target(@target) @scalar_extf_direct_f8e4m3_load_store() {
 // ====
 
 // XFAIL: SPIR-V float8 source and conversion support is unavailable
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-kernel.def target(@target) @scalar_extf_direct_f8e5m2_load_store() {
+kernel.def @scalar_extf_direct_f8e5m2_load_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -1251,9 +1083,7 @@ kernel.def target(@target) @scalar_extf_direct_f8e5m2_load_store() {
 // ====
 
 // XFAIL: SPIR-V float8 source and conversion support is unavailable
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-kernel.def target(@target) @vector_extf_direct_f8e4m3_load_store() {
+kernel.def @vector_extf_direct_f8e4m3_load_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -1271,9 +1101,7 @@ kernel.def target(@target) @vector_extf_direct_f8e4m3_load_store() {
 // ====
 
 // XFAIL: SPIR-V float8 source and conversion support is unavailable
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-kernel.def target(@target) @vector_extf_scaled_f8e4m3_to_bf16_store() {
+kernel.def @vector_extf_scaled_f8e4m3_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -1296,9 +1124,7 @@ kernel.def target(@target) @vector_extf_scaled_f8e4m3_to_bf16_store() {
 // ====
 
 // XFAIL: SPIR-V float8 source and conversion support is unavailable
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-kernel.def target(@target) @vector_extf_direct_f8e4m3_to_bf16_store() {
+kernel.def @vector_extf_direct_f8e4m3_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -1316,9 +1142,7 @@ kernel.def target(@target) @vector_extf_direct_f8e4m3_to_bf16_store() {
 // ====
 
 // XFAIL: SPIR-V float8 source and conversion support is unavailable
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-kernel.def target(@target) @vector_extf_direct_f8e5m2_load_store() {
+kernel.def @vector_extf_direct_f8e5m2_load_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -1336,9 +1160,7 @@ kernel.def target(@target) @vector_extf_direct_f8e5m2_load_store() {
 // ====
 
 // XFAIL: SPIR-V float8 source and conversion support is unavailable
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-kernel.def target(@target) @vector_extf_direct_f8e5m2_to_bf16_store() {
+kernel.def @vector_extf_direct_f8e5m2_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -1356,9 +1178,7 @@ kernel.def target(@target) @vector_extf_direct_f8e5m2_to_bf16_store() {
 // ====
 
 // XFAIL: SPIR-V float8 source and conversion support is unavailable
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-kernel.def target(@target) @vector_extf_scaled_f8e5m2_to_bf16_store() {
+kernel.def @vector_extf_scaled_f8e5m2_to_bf16_store() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -1381,9 +1201,7 @@ kernel.def target(@target) @vector_extf_scaled_f8e5m2_to_bf16_store() {
 // ====
 
 // XFAIL: SPIR-V float8 source and conversion support is unavailable
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_extf_splat_finite_f8e4m3_to_bf16_store(%input: buffer, %output: buffer) {
+func.def @vector_extf_splat_finite_f8e4m3_to_bf16_store(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %input_view = buffer.view %input[%base] : buffer -> view<1xf8E4M3>
   %output_view = buffer.view %output[%base] : buffer -> view<2xbf16>
@@ -1398,9 +1216,7 @@ func.def target(@target) @vector_extf_splat_finite_f8e4m3_to_bf16_store(%input: 
 // ====
 
 // XFAIL: SPIR-V float8 source and conversion support is unavailable
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_extf_splat_finite_f8e5m2_to_bf16_store(%input: buffer, %output: buffer) {
+func.def @vector_extf_splat_finite_f8e5m2_to_bf16_store(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %input_view = buffer.view %input[%base] : buffer -> view<1xf8E5M2>
   %output_view = buffer.view %output[%base] : buffer -> view<2xbf16>
@@ -1415,9 +1231,7 @@ func.def target(@target) @vector_extf_splat_finite_f8e5m2_to_bf16_store(%input: 
 // ====
 
 // XFAIL: SPIR-V float8 source and conversion support is unavailable
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_extf_splat_not_nan_f8e5m2_to_bf16_store(%input: buffer, %output: buffer) {
+func.def @vector_extf_splat_not_nan_f8e5m2_to_bf16_store(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %input_view = buffer.view %input[%base] : buffer -> view<1xf8E5M2>
   %output_view = buffer.view %output[%base] : buffer -> view<2xbf16>
@@ -1432,9 +1246,7 @@ func.def target(@target) @vector_extf_splat_not_nan_f8e5m2_to_bf16_store(%input:
 // ====
 
 // XFAIL: SPIR-V float8 source and conversion support is unavailable
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_extf_splat_not_inf_f8e5m2_to_bf16_store(%input: buffer, %output: buffer) {
+func.def @vector_extf_splat_not_inf_f8e5m2_to_bf16_store(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %input_view = buffer.view %input[%base] : buffer -> view<1xf8E5M2>
   %output_view = buffer.view %output[%base] : buffer -> view<2xbf16>
@@ -1449,9 +1261,7 @@ func.def target(@target) @vector_extf_splat_not_inf_f8e5m2_to_bf16_store(%input:
 // ====
 
 // XFAIL: SPIR-V ordinary vector value mapping is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @vector_uitofp_i32x2(%input: vector<2xi32>) -> (vector<2xf32>) {
+func.def @vector_uitofp_i32x2(%input: vector<2xi32>) -> (vector<2xf32>) {
   %converted = vector.uitofp %input : vector<2xi32> to vector<2xf32>
   func.return %converted : vector<2xf32>
 }
@@ -1459,9 +1269,7 @@ func.def target(@target) @vector_uitofp_i32x2(%input: vector<2xi32>) -> (vector<
 // ====
 
 // XFAIL: Source memory alignment facts do not prove the SPIR-V requirement
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_extsi_i32_store(%output: buffer, %input: i32) {
+func.def @scalar_extsi_i32_store(%output: buffer, %input: i32) {
   %base = index.constant 0 : offset
   %output_view = buffer.view %output[%base] : buffer -> view<1xi64>
   %converted = scalar.extsi %input : i32 to i64
@@ -1472,9 +1280,7 @@ func.def target(@target) @scalar_extsi_i32_store(%output: buffer, %input: i32) {
 // ====
 
 // XFAIL: Source memory alignment facts do not prove the SPIR-V requirement
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_extui_i32_store(%output: buffer, %input: i32) {
+func.def @scalar_extui_i32_store(%output: buffer, %input: i32) {
   %base = index.constant 0 : offset
   %output_view = buffer.view %output[%base] : buffer -> view<1xi64>
   %converted = scalar.extui %input : i32 to i64
@@ -1485,9 +1291,7 @@ func.def target(@target) @scalar_extui_i32_store(%output: buffer, %input: i32) {
 // ====
 
 // XFAIL: SPIR-V ordinary vector construction and masked memory lowering is unsupported
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @scalar_extui_i32_store_mask(%output: buffer, %input: i32) {
+func.def @scalar_extui_i32_store_mask(%output: buffer, %input: i32) {
   %base = index.constant 0 : offset
   %output_view = buffer.view %output[%base] : buffer -> view<1xi64>
   %true = scalar.constant true : i1

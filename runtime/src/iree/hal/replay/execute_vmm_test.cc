@@ -304,7 +304,6 @@ const iree_hal_allocator_vtable_t vmm_test_allocator_vtable = {
     /*.allocate_buffer=*/nullptr,
     /*.deallocate_buffer=*/nullptr,
     /*.import_buffer=*/nullptr,
-    /*.export_buffer=*/nullptr,
     /*.supports_virtual_memory=*/vmm_test_allocator_supports_virtual_memory,
     /*.virtual_memory_query_granularity=*/
     vmm_test_allocator_query_granularity,

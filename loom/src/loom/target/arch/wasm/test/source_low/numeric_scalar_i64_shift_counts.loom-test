@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_scalar_i64_shift_counts.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=wasm:simd128 output=low
 
-wasm.target<simd128> @target
-
-func.def target(@target) @wide_shift_constant(%values: vector<2xi64>) -> (i64) {
+func.def @wide_shift_constant(%values: vector<2xi64>) -> (i64) {
   %value = vector.extract %values[0] : vector<2xi64> -> i64
   %count = scalar.constant 31 : i64
   %shifted = scalar.shli %value, %count : i64
@@ -11,7 +9,7 @@ func.def target(@target) @wide_shift_constant(%values: vector<2xi64>) -> (i64) {
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_shift_constant(%values: reg<wasm.v128>) -> (reg<wasm.i64>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @wide_shift_constant(%values: reg<wasm.v128>) -> (reg<wasm.i64>) asm {
   %value = i64x2.extract_lane %values, 0
   %count = i64.const 31
   %shifted = i64.shl %value, %count
@@ -20,16 +18,14 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_shift_c
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @wide_shift_uniform(%values: vector<2xi64>, %count: i64) -> (i64) {
+func.def @wide_shift_uniform(%values: vector<2xi64>, %count: i64) -> (i64) {
   %value = vector.extract %values[0] : vector<2xi64> -> i64
   %shifted = scalar.shli %value, %count : i64
   func.return %shifted : i64
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_shift_uniform(%values: reg<wasm.v128>, %count: reg<wasm.i64>) -> (reg<wasm.i64>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @wide_shift_uniform(%values: reg<wasm.v128>, %count: reg<wasm.i64>) -> (reg<wasm.i64>) asm {
   %value = i64x2.extract_lane %values, 0
   %shifted = i64.shl %value, %count
   return %shifted
@@ -37,9 +33,7 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_shift_u
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @wide_shift_varying(%values: vector<2xi64>, %counts: vector<2xi64>) -> (i64) {
+func.def @wide_shift_varying(%values: vector<2xi64>, %counts: vector<2xi64>) -> (i64) {
   %value = vector.extract %values[0] : vector<2xi64> -> i64
   %count = vector.extract %counts[0] : vector<2xi64> -> i64
   %shifted = scalar.shli %value, %count : i64
@@ -47,7 +41,7 @@ func.def target(@target) @wide_shift_varying(%values: vector<2xi64>, %counts: ve
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_shift_varying(%values: reg<wasm.v128>, %counts: reg<wasm.v128>) -> (reg<wasm.i64>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @wide_shift_varying(%values: reg<wasm.v128>, %counts: reg<wasm.v128>) -> (reg<wasm.i64>) asm {
   %value = i64x2.extract_lane %values, 0
   %count = i64x2.extract_lane %counts, 0
   %shifted = i64.shl %value, %count
@@ -56,16 +50,14 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_shift_v
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @wide_right_shift_uniform(%value: i64, %count: i64) -> (i64, i64) {
+func.def @wide_right_shift_uniform(%value: i64, %count: i64) -> (i64, i64) {
   %logical = scalar.shrui %value, %count : i64
   %signed = scalar.shrsi %value, %count : i64
   func.return %logical, %signed : i64, i64
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_right_shift_uniform(%value: reg<wasm.i64>, %count: reg<wasm.i64>) -> (reg<wasm.i64>, reg<wasm.i64>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @wide_right_shift_uniform(%value: reg<wasm.i64>, %count: reg<wasm.i64>) -> (reg<wasm.i64>, reg<wasm.i64>) asm {
   %logical = i64.shr_u %value, %count
   %signed = i64.shr_s %value, %count
   return %logical, %signed
@@ -73,9 +65,7 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_right_s
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @wide_right_shift_uniform_count(%values: vector<2xi64>, %count: i64) -> (i64, i64) {
+func.def @wide_right_shift_uniform_count(%values: vector<2xi64>, %count: i64) -> (i64, i64) {
   %value = vector.extract %values[1] : vector<2xi64> -> i64
   %logical = scalar.shrui %value, %count : i64
   %signed = scalar.shrsi %value, %count : i64
@@ -83,7 +73,7 @@ func.def target(@target) @wide_right_shift_uniform_count(%values: vector<2xi64>,
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_right_shift_uniform_count(%values: reg<wasm.v128>, %count: reg<wasm.i64>) -> (reg<wasm.i64>, reg<wasm.i64>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @wide_right_shift_uniform_count(%values: reg<wasm.v128>, %count: reg<wasm.i64>) -> (reg<wasm.i64>, reg<wasm.i64>) asm {
   %value = i64x2.extract_lane %values, 1
   %logical = i64.shr_u %value, %count
   %signed = i64.shr_s %value, %count
@@ -92,9 +82,7 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_right_s
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @wide_right_shift_varying_count(%values: vector<2xi64>, %counts: vector<2xi64>) -> (i64, i64) {
+func.def @wide_right_shift_varying_count(%values: vector<2xi64>, %counts: vector<2xi64>) -> (i64, i64) {
   %value = vector.extract %values[1] : vector<2xi64> -> i64
   %count = vector.extract %counts[1] : vector<2xi64> -> i64
   %logical = scalar.shrui %value, %count : i64
@@ -103,7 +91,7 @@ func.def target(@target) @wide_right_shift_varying_count(%values: vector<2xi64>,
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_right_shift_varying_count(%values: reg<wasm.v128>, %counts: reg<wasm.v128>) -> (reg<wasm.i64>, reg<wasm.i64>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @wide_right_shift_varying_count(%values: reg<wasm.v128>, %counts: reg<wasm.v128>) -> (reg<wasm.i64>, reg<wasm.i64>) asm {
   %value = i64x2.extract_lane %values, 1
   %count = i64x2.extract_lane %counts, 1
   %logical = i64.shr_u %value, %count
@@ -113,9 +101,7 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_right_s
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @wide_right_shift_constant(%values: vector<2xi64>) -> (i64, i64) {
+func.def @wide_right_shift_constant(%values: vector<2xi64>) -> (i64, i64) {
   %value = vector.extract %values[1] : vector<2xi64> -> i64
   %count = scalar.constant 31 : i64
   %logical = scalar.shrui %value, %count : i64
@@ -124,7 +110,7 @@ func.def target(@target) @wide_right_shift_constant(%values: vector<2xi64>) -> (
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_right_shift_constant(%values: reg<wasm.v128>) -> (reg<wasm.i64>, reg<wasm.i64>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @wide_right_shift_constant(%values: reg<wasm.v128>) -> (reg<wasm.i64>, reg<wasm.i64>) asm {
   %value = i64x2.extract_lane %values, 1
   %count = i64.const 31
   %logical = i64.shr_u %value, %count
@@ -134,9 +120,7 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_right_s
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @wide_shift_word_boundaries(%value: i64) -> (i64, i64, i64, i64) {
+func.def @wide_shift_word_boundaries(%value: i64) -> (i64, i64, i64, i64) {
   %identity_count = scalar.constant 0 : i64
   %last_low = scalar.constant 31 : i64
   %first_high = scalar.constant 32 : i64
@@ -149,7 +133,7 @@ func.def target(@target) @wide_shift_word_boundaries(%value: i64) -> (i64, i64, 
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_shift_word_boundaries(%value: reg<wasm.i64>) -> (reg<wasm.i64>, reg<wasm.i64>, reg<wasm.i64>, reg<wasm.i64>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @wide_shift_word_boundaries(%value: reg<wasm.i64>) -> (reg<wasm.i64>, reg<wasm.i64>, reg<wasm.i64>, reg<wasm.i64>) asm {
   %last_low = i64.const 31
   %first_high = i64.const 32
   %last_high = i64.const 63
@@ -161,9 +145,7 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_shift_w
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @wide_shift_low_word(%value: i64) -> (i32) {
+func.def @wide_shift_low_word(%value: i64) -> (i32) {
   %count = scalar.constant 6 : i64
   %shifted = scalar.shli %value, %count : i64
   %result = scalar.trunci %shifted : i64 to i32
@@ -171,7 +153,7 @@ func.def target(@target) @wide_shift_low_word(%value: i64) -> (i32) {
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_shift_low_word(%value: reg<wasm.i64>) -> (reg<wasm.i32>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @wide_shift_low_word(%value: reg<wasm.i64>) -> (reg<wasm.i32>) asm {
   %count = i64.const 6
   %shifted = i64.shl %value, %count
   %result = i32.wrap_i64 %shifted
@@ -180,73 +162,64 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_shift_l
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @wide_shift_bounded_low(%value: i64, %count_input: i64) -> (i64) {
+func.def @wide_shift_bounded_low(%value: i64, %count_input: i64) -> (i64) {
   %count = scalar.assume %count_input [range(%count_input, 0, 31)] : i64
   %shifted = scalar.shli %value, %count : i64
   func.return %shifted : i64
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_shift_bounded_low(%value: reg<wasm.i64>, %count: reg<wasm.i64>) -> (reg<wasm.i64>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @wide_shift_bounded_low(%value: reg<wasm.i64>, %count: reg<wasm.i64>) -> (reg<wasm.i64>) asm {
   %shifted = i64.shl %value, %count
   return %shifted
 }
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @wide_shift_bounded_high(%value: i64, %count_input: i64) -> (i64) {
+func.def @wide_shift_bounded_high(%value: i64, %count_input: i64) -> (i64) {
   %count = scalar.assume %count_input [range(%count_input, 32, 63)] : i64
   %shifted = scalar.shli %value, %count : i64
   func.return %shifted : i64
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_shift_bounded_high(%value: reg<wasm.i64>, %count: reg<wasm.i64>) -> (reg<wasm.i64>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @wide_shift_bounded_high(%value: reg<wasm.i64>, %count: reg<wasm.i64>) -> (reg<wasm.i64>) asm {
   %shifted = i64.shl %value, %count
   return %shifted
 }
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @wide_shift_crossing_words(%value: i64, %count_input: i64) -> (i64) {
+func.def @wide_shift_crossing_words(%value: i64, %count_input: i64) -> (i64) {
   %count = scalar.assume %count_input [range(%count_input, 31, 32)] : i64
   %shifted = scalar.shli %value, %count : i64
   func.return %shifted : i64
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_shift_crossing_words(%value: reg<wasm.i64>, %count: reg<wasm.i64>) -> (reg<wasm.i64>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @wide_shift_crossing_words(%value: reg<wasm.i64>, %count: reg<wasm.i64>) -> (reg<wasm.i64>) asm {
   %shifted = i64.shl %value, %count
   return %shifted
 }
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @wide_shift_bounded_nonzero_low(%value: i64, %count_input: i64) -> (i64) {
+func.def @wide_shift_bounded_nonzero_low(%value: i64, %count_input: i64) -> (i64) {
   %count = scalar.assume %count_input [range(%count_input, 1, 31)] : i64
   %shifted = scalar.shli %value, %count : i64
   func.return %shifted : i64
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_shift_bounded_nonzero_low(%value: reg<wasm.i64>, %count: reg<wasm.i64>) -> (reg<wasm.i64>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @wide_shift_bounded_nonzero_low(%value: reg<wasm.i64>, %count: reg<wasm.i64>) -> (reg<wasm.i64>) asm {
   %shifted = i64.shl %value, %count
   return %shifted
 }
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @word_right_shift_constants(%value: i32) -> (i32, i32, i32, i32, i32, i32, i32) {
+// Word controls qualify the native pieces used by split-word lowering.
+func.def @word_right_shift_constants(%value: i32) -> (i32, i32, i32, i32, i32, i32, i32) {
   %identity_count = scalar.constant 0 : i32
   %single_bit = scalar.constant 1 : i32
   %middle = scalar.constant 16 : i32
@@ -262,7 +235,7 @@ func.def target(@target) @word_right_shift_constants(%value: i32) -> (i32, i32, 
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @word_right_shift_constants(%value: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @word_right_shift_constants(%value: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) asm {
   %single_bit = i32.const 1
   %middle = i32.const 16
   %last = i32.const 31
@@ -277,16 +250,14 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @word_right_s
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @word_right_shift_dynamic(%value: i32, %count: i32) -> (i32, i32) {
+func.def @word_right_shift_dynamic(%value: i32, %count: i32) -> (i32, i32) {
   %logical = scalar.shrui %value, %count : i32
   %signed = scalar.shrsi %value, %count : i32
   func.return %logical, %signed : i32, i32
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @word_right_shift_dynamic(%value: reg<wasm.i32>, %count: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @word_right_shift_dynamic(%value: reg<wasm.i32>, %count: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>) asm {
   %logical = i32.shr_u %value, %count
   %signed = i32.shr_s %value, %count
   return %logical, %signed
@@ -294,9 +265,7 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @word_right_s
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @wide_right_shift_word_boundaries(%value: i64) -> (i64, i64, i64, i64, i64, i64, i64, i64) {
+func.def @wide_right_shift_word_boundaries(%value: i64) -> (i64, i64, i64, i64, i64, i64, i64, i64) {
   %identity_count = scalar.constant 0 : i64
   %last_low = scalar.constant 31 : i64
   %first_high = scalar.constant 32 : i64
@@ -313,7 +282,7 @@ func.def target(@target) @wide_right_shift_word_boundaries(%value: i64) -> (i64,
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_right_shift_word_boundaries(%value: reg<wasm.i64>) -> (reg<wasm.i64>, reg<wasm.i64>, reg<wasm.i64>, reg<wasm.i64>, reg<wasm.i64>, reg<wasm.i64>, reg<wasm.i64>, reg<wasm.i64>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @wide_right_shift_word_boundaries(%value: reg<wasm.i64>) -> (reg<wasm.i64>, reg<wasm.i64>, reg<wasm.i64>, reg<wasm.i64>, reg<wasm.i64>, reg<wasm.i64>, reg<wasm.i64>, reg<wasm.i64>) asm {
   %last_low = i64.const 31
   %first_high = i64.const 32
   %last_high = i64.const 63
@@ -328,9 +297,7 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_right_s
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @wide_right_shift_bounded_low(%value: i64, %count_input: i64) -> (i64, i64) {
+func.def @wide_right_shift_bounded_low(%value: i64, %count_input: i64) -> (i64, i64) {
   %count = scalar.assume %count_input [range(%count_input, 0, 31)] : i64
   %logical = scalar.shrui %value, %count : i64
   %signed = scalar.shrsi %value, %count : i64
@@ -338,7 +305,7 @@ func.def target(@target) @wide_right_shift_bounded_low(%value: i64, %count_input
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_right_shift_bounded_low(%value: reg<wasm.i64>, %count: reg<wasm.i64>) -> (reg<wasm.i64>, reg<wasm.i64>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @wide_right_shift_bounded_low(%value: reg<wasm.i64>, %count: reg<wasm.i64>) -> (reg<wasm.i64>, reg<wasm.i64>) asm {
   %logical = i64.shr_u %value, %count
   %signed = i64.shr_s %value, %count
   return %logical, %signed
@@ -346,9 +313,7 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_right_s
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @wide_right_shift_bounded_nonzero_low(%value: i64, %count_input: i64) -> (i64, i64) {
+func.def @wide_right_shift_bounded_nonzero_low(%value: i64, %count_input: i64) -> (i64, i64) {
   %count = scalar.assume %count_input [range(%count_input, 1, 31)] : i64
   %logical = scalar.shrui %value, %count : i64
   %signed = scalar.shrsi %value, %count : i64
@@ -356,7 +321,7 @@ func.def target(@target) @wide_right_shift_bounded_nonzero_low(%value: i64, %cou
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_right_shift_bounded_nonzero_low(%value: reg<wasm.i64>, %count: reg<wasm.i64>) -> (reg<wasm.i64>, reg<wasm.i64>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @wide_right_shift_bounded_nonzero_low(%value: reg<wasm.i64>, %count: reg<wasm.i64>) -> (reg<wasm.i64>, reg<wasm.i64>) asm {
   %logical = i64.shr_u %value, %count
   %signed = i64.shr_s %value, %count
   return %logical, %signed
@@ -364,9 +329,7 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_right_s
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @wide_right_shift_bounded_high(%value: i64, %count_input: i64) -> (i64, i64) {
+func.def @wide_right_shift_bounded_high(%value: i64, %count_input: i64) -> (i64, i64) {
   %count = scalar.assume %count_input [range(%count_input, 32, 63)] : i64
   %logical = scalar.shrui %value, %count : i64
   %signed = scalar.shrsi %value, %count : i64
@@ -374,7 +337,7 @@ func.def target(@target) @wide_right_shift_bounded_high(%value: i64, %count_inpu
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_right_shift_bounded_high(%value: reg<wasm.i64>, %count: reg<wasm.i64>) -> (reg<wasm.i64>, reg<wasm.i64>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @wide_right_shift_bounded_high(%value: reg<wasm.i64>, %count: reg<wasm.i64>) -> (reg<wasm.i64>, reg<wasm.i64>) asm {
   %logical = i64.shr_u %value, %count
   %signed = i64.shr_s %value, %count
   return %logical, %signed
@@ -382,9 +345,7 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_right_s
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @wide_right_shift_crossing_words(%value: i64, %count_input: i64) -> (i64, i64) {
+func.def @wide_right_shift_crossing_words(%value: i64, %count_input: i64) -> (i64, i64) {
   %count = scalar.assume %count_input [range(%count_input, 31, 32)] : i64
   %logical = scalar.shrui %value, %count : i64
   %signed = scalar.shrsi %value, %count : i64
@@ -392,7 +353,7 @@ func.def target(@target) @wide_right_shift_crossing_words(%value: i64, %count_in
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_right_shift_crossing_words(%value: reg<wasm.i64>, %count: reg<wasm.i64>) -> (reg<wasm.i64>, reg<wasm.i64>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @wide_right_shift_crossing_words(%value: reg<wasm.i64>, %count: reg<wasm.i64>) -> (reg<wasm.i64>, reg<wasm.i64>) asm {
   %logical = i64.shr_u %value, %count
   %signed = i64.shr_s %value, %count
   return %logical, %signed
@@ -400,10 +361,8 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_right_s
 
 // ====
 
-wasm.target<simd128> @target
-
 // All three shifts preserve their input and the count for later arithmetic.
-func.def target(@target) @word_shifts_reuse_input(%value: i32, %count: i32) -> (i32) {
+func.def @word_shifts_reuse_input(%value: i32, %count: i32) -> (i32) {
   %left = scalar.shli %value, %count : i32
   %logical = scalar.shrui %value, %count : i32
   %signed = scalar.shrsi %value, %count : i32
@@ -415,7 +374,7 @@ func.def target(@target) @word_shifts_reuse_input(%value: i32, %count: i32) -> (
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @word_shifts_reuse_input(%value: reg<wasm.i32>, %count: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @word_shifts_reuse_input(%value: reg<wasm.i32>, %count: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
   %left = i32.shl %value, %count
   %logical = i32.shr_u %value, %count
   %signed = i32.shr_s %value, %count
@@ -428,9 +387,7 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @word_shifts_
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @wide_shifts_reuse_counts(%value: i64, %left_count: i64, %right_count: i64) -> (i64) {
+func.def @wide_shifts_reuse_counts(%value: i64, %left_count: i64, %right_count: i64) -> (i64) {
   %left = scalar.shli %value, %left_count : i64
   %logical = scalar.shrui %value, %right_count : i64
   %signed = scalar.shrsi %left, %left_count : i64
@@ -442,7 +399,7 @@ func.def target(@target) @wide_shifts_reuse_counts(%value: i64, %left_count: i64
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_shifts_reuse_counts(%value: reg<wasm.i64>, %left_count: reg<wasm.i64>, %right_count: reg<wasm.i64>) -> (reg<wasm.i64>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @wide_shifts_reuse_counts(%value: reg<wasm.i64>, %left_count: reg<wasm.i64>, %right_count: reg<wasm.i64>) -> (reg<wasm.i64>) asm {
   %left = i64.shl %value, %left_count
   %logical = i64.shr_u %value, %right_count
   %signed = i64.shr_s %left, %left_count
@@ -455,9 +412,7 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_shifts_
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @wide_shift_value_is_count(%input: i64) -> (i64) {
+func.def @wide_shift_value_is_count(%input: i64) -> (i64) {
   %mask = scalar.constant 63 : i64
   %value = scalar.andi %input, %mask : i64
   %result = scalar.shli %value, %value : i64
@@ -465,7 +420,7 @@ func.def target(@target) @wide_shift_value_is_count(%input: i64) -> (i64) {
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_shift_value_is_count(%input: reg<wasm.i64>) -> (reg<wasm.i64>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @wide_shift_value_is_count(%input: reg<wasm.i64>) -> (reg<wasm.i64>) asm {
   %mask = i64.const 63
   %value = i64.and %input, %mask
   %result = i64.shl %value, %value
@@ -474,16 +429,14 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @wide_shift_v
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @index_shift_dynamic(%value: index, %count: index) -> (index, index) {
+func.def @index_shift_dynamic(%value: index, %count: index) -> (index, index) {
   %left = index.shli %value, %count : index
   %right = index.shrui %value, %count : index
   func.return %left, %right : index, index
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @index_shift_dynamic(%value: reg<wasm.i32>, %count: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @index_shift_dynamic(%value: reg<wasm.i32>, %count: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>) asm {
   %left = i32.shl %value, %count
   %right = i32.shr_u %value, %count
   return %left, %right
@@ -491,16 +444,14 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @index_shift_
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @index_shift_constant_four(%value: index) -> (index) {
+func.def @index_shift_constant_four(%value: index) -> (index) {
   %count = index.constant 4 : index
   %result = index.shli %value, %count : index
   func.return %result : index
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @index_shift_constant_four(%value: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @index_shift_constant_four(%value: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
   %count = i32.const 4
   %result = i32.shl %value, %count
   return %result
@@ -508,24 +459,20 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @index_shift_
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @index_shift_arithmetic(%value: index, %count: index) -> (index) {
+func.def @index_shift_arithmetic(%value: index, %count: index) -> (index) {
   %result = index.shrsi %value, %count : index
   func.return %result : index
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @index_shift_arithmetic(%value: reg<wasm.i32>, %count: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @index_shift_arithmetic(%value: reg<wasm.i32>, %count: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
   %result = i32.shr_s %value, %count
   return %result
 }
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @index_shift_bounded(%value: index, %count_input: index) -> (index, index, index) {
+func.def @index_shift_bounded(%value: index, %count_input: index) -> (index, index, index) {
   %count = index.assume %count_input [range(%count_input, 0, 31)] : index
   %left = index.shli %value, %count : index
   %logical = index.shrui %value, %count : index
@@ -534,7 +481,7 @@ func.def target(@target) @index_shift_bounded(%value: index, %count_input: index
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @index_shift_bounded(%value: reg<wasm.i32>, %count: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @index_shift_bounded(%value: reg<wasm.i32>, %count: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) asm {
   %left = i32.shl %value, %count
   %logical = i32.shr_u %value, %count
   %signed = i32.shr_s %value, %count
@@ -543,9 +490,7 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @index_shift_
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @index_shift_constant_boundaries(%value: index) -> (index, index, index, index, index, index) {
+func.def @index_shift_constant_boundaries(%value: index) -> (index, index, index, index, index, index) {
   %identity_count = index.constant 0 : index
   %last = index.constant 31 : index
   %left_zero = index.shli %value, %identity_count : index
@@ -558,7 +503,7 @@ func.def target(@target) @index_shift_constant_boundaries(%value: index) -> (ind
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @index_shift_constant_boundaries(%value: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @index_shift_constant_boundaries(%value: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) asm {
   %last = i32.const 31
   %left_last = i32.shl %value, %last
   %logical_last = i32.shr_u %value, %last
@@ -568,9 +513,7 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @index_shift_
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @index_shift_arithmetic_reuse(%value: index, %count: index) -> (index) {
+func.def @index_shift_arithmetic_reuse(%value: index, %count: index) -> (index) {
   %shifted = index.shrsi %value, %count : index
   %with_count = index.add %shifted, %count : index
   %result = index.xori %with_count, %value : index
@@ -578,7 +521,7 @@ func.def target(@target) @index_shift_arithmetic_reuse(%value: index, %count: in
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @index_shift_arithmetic_reuse(%value: reg<wasm.i32>, %count: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @index_shift_arithmetic_reuse(%value: reg<wasm.i32>, %count: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
   %shifted = i32.shr_s %value, %count
   %with_count = i32.add %shifted, %count
   %result = i32.xor %with_count, %value

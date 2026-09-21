@@ -261,6 +261,7 @@ loom_cc_library(
         ":table",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:registers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
     ],

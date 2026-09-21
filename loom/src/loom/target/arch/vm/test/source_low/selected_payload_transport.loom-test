@@ -1,10 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/selected_payload_transport.loom-test
-// RUN: pass source-to-low
-
-vm.target<core> @target
+// RUN: pass target=vm:core source-to-low
 
 // ERROR@+1: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<4xi32>"}
-func.def public target(@target) @selected_truncated(%input: vector<4xi32>, %left: i64, %right: i64) -> (i32) {
+func.def public @selected_truncated(%input: vector<4xi32>, %left: i64, %right: i64) -> (i32) {
   // ERROR@+1: TARGET/001 {op_name="vector.extract"}
   %value = vector.extract %input[0] : vector<4xi32> -> i32
   %threshold = scalar.constant 0 : i32
@@ -18,10 +16,8 @@ func.def public target(@target) @selected_truncated(%input: vector<4xi32>, %left
 
 // ====
 
-vm.target<core> @target
-
 // ERROR@+1: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<4xi32>"}
-func.def public target(@target) @selected_coordinate(%input: vector<4xi32>, %left: i32, %right: i32) -> (index) {
+func.def public @selected_coordinate(%input: vector<4xi32>, %left: i32, %right: i32) -> (index) {
   // ERROR@+1: TARGET/001 {op_name="vector.extract"}
   %value = vector.extract %input[0] : vector<4xi32> -> i32
   %threshold = scalar.constant 0 : i32
@@ -35,10 +31,8 @@ func.def public target(@target) @selected_coordinate(%input: vector<4xi32>, %lef
 
 // ====
 
-vm.target<core> @target
-
 // ERROR@+1: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<4xi32>"}
-func.def public target(@target) @selected_offset(%input: vector<4xi32>, %left: i32, %right: i32) -> (offset) {
+func.def public @selected_offset(%input: vector<4xi32>, %left: i32, %right: i32) -> (offset) {
   // ERROR@+1: TARGET/001 {op_name="vector.extract"}
   %value = vector.extract %input[0] : vector<4xi32> -> i32
   %threshold = scalar.constant 0 : i32
@@ -52,10 +46,8 @@ func.def public target(@target) @selected_offset(%input: vector<4xi32>, %left: i
 
 // ====
 
-vm.target<core> @target
-
 // ERROR@+1: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<4xi32>"}
-func.def public target(@target) @selected_extended_truncation(%input: vector<4xi32>, %left: i64, %right: i64) -> (i64) {
+func.def public @selected_extended_truncation(%input: vector<4xi32>, %left: i64, %right: i64) -> (i64) {
   // ERROR@+1: TARGET/001 {op_name="vector.extract"}
   %value = vector.extract %input[0] : vector<4xi32> -> i32
   %threshold = scalar.constant 0 : i32
@@ -70,9 +62,7 @@ func.def public target(@target) @selected_extended_truncation(%input: vector<4xi
 
 // ====
 
-vm.target<core> @target
-
-func.def public target(@target) @uniform_selected_truncated(%value: i32, %left: i64, %right: i64) -> (i32) {
+func.def public @uniform_selected_truncated(%value: i32, %left: i64, %right: i64) -> (i32) {
   %threshold = scalar.constant 0 : i32
   %condition = scalar.cmpi sgt, %value, %threshold : i32
   %selected = scf.select %condition, %left, %right : i64
@@ -83,9 +73,7 @@ func.def public target(@target) @uniform_selected_truncated(%value: i32, %left: 
 }
 
 // ----
-vm.target<core> @target
-
-low.func.def public target<vm.core>(@target) abi(vm_function) @uniform_selected_truncated(%value: reg<vm.value : i32>, %left: reg<vm.value : i64>, %right: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
+low.func.def public target<vm.core> abi(vm_function) @uniform_selected_truncated(%value: reg<vm.value : i32>, %left: reg<vm.value : i64>, %right: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
   %threshold = constant.i32 0
   %condition = integer.compare.i32 %value, %threshold, "sgt"
   %selected = value.select %condition, %left, %right
@@ -97,10 +85,8 @@ low.func.def public target<vm.core>(@target) abi(vm_function) @uniform_selected_
 
 // ====
 
-vm.target<core> @target
-
 // ERROR@+1: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<4xi32>"}
-func.def public target(@target) @independent_assumption_payload(%input: vector<4xi32>, %left: i32, %right: i32, %scalar: i32) -> (i32) {
+func.def public @independent_assumption_payload(%input: vector<4xi32>, %left: i32, %right: i32, %scalar: i32) -> (i32) {
   // ERROR@+1: TARGET/001 {op_name="vector.extract"}
   %value = vector.extract %input[0] : vector<4xi32> -> i32
   %threshold = scalar.constant 0 : i32
@@ -114,10 +100,8 @@ func.def public target(@target) @independent_assumption_payload(%input: vector<4
 
 // ====
 
-vm.target<core> @target
-
 // ERROR@+1: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<4xi32>"}
-func.def public target(@target) @selected_assumption_payload(%input: vector<4xi32>, %left: i32, %right: i32, %scalar: i32) -> (i32) {
+func.def public @selected_assumption_payload(%input: vector<4xi32>, %left: i32, %right: i32, %scalar: i32) -> (i32) {
   // ERROR@+1: TARGET/001 {op_name="vector.extract"}
   %value = vector.extract %input[0] : vector<4xi32> -> i32
   %threshold = scalar.constant 0 : i32
@@ -131,10 +115,8 @@ func.def public target(@target) @selected_assumption_payload(%input: vector<4xi3
 
 // ====
 
-vm.target<core> @target
-
 // ERROR@+1: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<4xi32>"}
-func.def public target(@target) @independent_transformed_assumption_payload(%input: vector<4xi32>, %left: i32, %right: i32, %scalar: i32) -> (i32) {
+func.def public @independent_transformed_assumption_payload(%input: vector<4xi32>, %left: i32, %right: i32, %scalar: i32) -> (i32) {
   // ERROR@+1: TARGET/001 {op_name="vector.extract"}
   %value = vector.extract %input[0] : vector<4xi32> -> i32
   %threshold = scalar.constant 0 : i32
@@ -150,10 +132,8 @@ func.def public target(@target) @independent_transformed_assumption_payload(%inp
 
 // ====
 
-vm.target<core> @target
-
 // ERROR@+1: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<4xi32>"}
-func.def public target(@target) @selected_transformed_assumption_payload(%input: vector<4xi32>, %left: i32, %right: i32, %scalar: i32) -> (i32) {
+func.def public @selected_transformed_assumption_payload(%input: vector<4xi32>, %left: i32, %right: i32, %scalar: i32) -> (i32) {
   // ERROR@+1: TARGET/001 {op_name="vector.extract"}
   %value = vector.extract %input[0] : vector<4xi32> -> i32
   %threshold = scalar.constant 0 : i32
@@ -169,10 +149,8 @@ func.def public target(@target) @selected_transformed_assumption_payload(%input:
 
 // ====
 
-vm.target<core> @target
-
 // ERROR@+1: TARGET/033 {op_name="func.def", field_name="argument", actual_type="vector<4xi32>"}
-func.def public target(@target) @independent_predicate_payload(%input: vector<4xi32>, %left: i32, %right: i32, %scalar: i32) -> (i32) {
+func.def public @independent_predicate_payload(%input: vector<4xi32>, %left: i32, %right: i32, %scalar: i32) -> (i32) {
   // ERROR@+1: TARGET/001 {op_name="vector.extract"}
   %value = vector.extract %input[0] : vector<4xi32> -> i32
   %threshold = scalar.constant 0 : i32

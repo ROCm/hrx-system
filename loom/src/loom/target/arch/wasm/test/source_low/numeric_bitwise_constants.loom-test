@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_bitwise_constants.loom-test
-// RUN: emit source-low output=none
+// RUN: emit source-low target=wasm:simd128 output=none
 
-wasm.target<simd128> @target
-
-func.def target(@target) @bitwise_word_constants(%input: i32, %mask_input: i32) -> (i32, i32, i32) {
+func.def @bitwise_word_constants(%input: i32, %mask_input: i32) -> (i32, i32, i32) {
   %mask = scalar.assume %mask_input [range(%mask_input, 255, 255)] : i32
   %tag = scalar.constant -2147483648 : i32
   %toggle = scalar.constant 2147483647 : i32
@@ -15,9 +13,7 @@ func.def target(@target) @bitwise_word_constants(%input: i32, %mask_input: i32) 
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @bitwise_wide_signed_constants(%input: i64) -> (i64, i64, i64) {
+func.def @bitwise_wide_signed_constants(%input: i64) -> (i64, i64, i64) {
   %mask = scalar.constant -2147483648 : i64
   %tag = scalar.constant 2147483647 : i64
   %toggle = scalar.constant -1 : i64
@@ -29,9 +25,7 @@ func.def target(@target) @bitwise_wide_signed_constants(%input: i64) -> (i64, i6
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @bitwise_wide_constant_boundaries(%input: i64) -> (i64, i64, i64) {
+func.def @bitwise_wide_constant_boundaries(%input: i64) -> (i64, i64, i64) {
   %mask = scalar.constant 4294967295 : i64
   %tag = scalar.constant 2147483648 : i64
   %toggle = scalar.constant -2147483649 : i64
@@ -43,9 +37,7 @@ func.def target(@target) @bitwise_wide_constant_boundaries(%input: i64) -> (i64,
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @bitwise_index_signed_constants(%input: index) -> (index, index, index) {
+func.def @bitwise_index_signed_constants(%input: index) -> (index, index, index) {
   %mask = index.constant -2147483648 : index
   %tag = index.constant 2147483647 : index
   %toggle = index.constant -1 : index
@@ -57,9 +49,7 @@ func.def target(@target) @bitwise_index_signed_constants(%input: index) -> (inde
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @bitwise_index_constant_boundaries(%input: index) -> (index, index, index) {
+func.def @bitwise_index_constant_boundaries(%input: index) -> (index, index, index) {
   %mask = index.constant 4294967295 : index
   %tag = index.constant 2147483648 : index
   %toggle = index.constant 4294967294 : index

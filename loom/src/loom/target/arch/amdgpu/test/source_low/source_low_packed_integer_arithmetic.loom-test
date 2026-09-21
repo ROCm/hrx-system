@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/packed_integer_arithmetic.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i8x8_bitwise_storage_tuple(%lhs: vector<8xi8>, %rhs: vector<8xi8>) -> (vector<8xi8>, vector<8xi8>, vector<8xi8>) {
+func.def @i8x8_bitwise_storage_tuple(%lhs: vector<8xi8>, %rhs: vector<8xi8>) -> (vector<8xi8>, vector<8xi8>, vector<8xi8>) {
   %and = vector.andi %lhs, %rhs : vector<8xi8>
   %or = vector.ori %lhs, %rhs : vector<8xi8>
   %xor = vector.xori %lhs, %rhs : vector<8xi8>
@@ -11,7 +9,7 @@ func.def target(@target) @i8x8_bitwise_storage_tuple(%lhs: vector<8xi8>, %rhs: v
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x8_bitwise_storage_tuple(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i8x8_bitwise_storage_tuple(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
   %13 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %14 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %15 = v_and_b32 %13, %14
@@ -30,9 +28,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x8_bi
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i16x4_bitwise_storage_tuple(%lhs: vector<4xi16>, %rhs: vector<4xi16>) -> (vector<4xi16>, vector<4xi16>, vector<4xi16>) {
+func.def @i16x4_bitwise_storage_tuple(%lhs: vector<4xi16>, %rhs: vector<4xi16>) -> (vector<4xi16>, vector<4xi16>, vector<4xi16>) {
   %and = vector.andi %lhs, %rhs : vector<4xi16>
   %or = vector.ori %lhs, %rhs : vector<4xi16>
   %xor = vector.xori %lhs, %rhs : vector<4xi16>
@@ -40,7 +36,7 @@ func.def target(@target) @i16x4_bitwise_storage_tuple(%lhs: vector<4xi16>, %rhs:
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x4_bitwise_storage_tuple(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i16x4_bitwise_storage_tuple(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
   %13 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %14 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %15 = v_and_b32 %13, %14
@@ -59,16 +55,14 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x4_b
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i16x4_add_sub_storage_tuple(%lhs: vector<4xi16>, %rhs: vector<4xi16>) -> (vector<4xi16>, vector<4xi16>) {
+func.def @i16x4_add_sub_storage_tuple(%lhs: vector<4xi16>, %rhs: vector<4xi16>) -> (vector<4xi16>, vector<4xi16>) {
   %sum = vector.addi %lhs, %rhs : vector<4xi16>
   %diff = vector.subi %lhs, %rhs : vector<4xi16>
   func.return %sum, %diff : vector<4xi16>, vector<4xi16>
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x4_add_sub_storage_tuple(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i16x4_add_sub_storage_tuple(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
   %10 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %11 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %12 = v_pk_add_u16 %10, %11
@@ -84,9 +78,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x4_a
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i16x4_mul_minmax_storage_tuple(%lhs: vector<4xi16>, %rhs: vector<4xi16>) -> (vector<4xi16>, vector<4xi16>, vector<4xi16>, vector<4xi16>, vector<4xi16>) {
+func.def @i16x4_mul_minmax_storage_tuple(%lhs: vector<4xi16>, %rhs: vector<4xi16>) -> (vector<4xi16>, vector<4xi16>, vector<4xi16>, vector<4xi16>, vector<4xi16>) {
   %product = vector.muli %lhs, %rhs : vector<4xi16>
   %smin = vector.minsi %lhs, %rhs : vector<4xi16>
   %smax = vector.maxsi %lhs, %rhs : vector<4xi16>
@@ -96,7 +88,7 @@ func.def target(@target) @i16x4_mul_minmax_storage_tuple(%lhs: vector<4xi16>, %r
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x4_mul_minmax_storage_tuple(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i16x4_mul_minmax_storage_tuple(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
   %19 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %20 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %21 = v_pk_mul_lo_u16 %19, %20
@@ -121,9 +113,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x4_m
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i16x4_shift_storage_tuple(%value: vector<4xi16>, %shift: vector<4xi16>) -> (vector<4xi16>, vector<4xi16>, vector<4xi16>) {
+func.def @i16x4_shift_storage_tuple(%value: vector<4xi16>, %shift: vector<4xi16>) -> (vector<4xi16>, vector<4xi16>, vector<4xi16>) {
   %left = vector.shli %value, %shift : vector<4xi16>
   %signed_right = vector.shrsi %value, %shift : vector<4xi16>
   %unsigned_right = vector.shrui %value, %shift : vector<4xi16>
@@ -131,7 +121,7 @@ func.def target(@target) @i16x4_shift_storage_tuple(%value: vector<4xi16>, %shif
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x4_shift_storage_tuple(%value: reg<amdgpu.vgpr x2>, %shift: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i16x4_shift_storage_tuple(%value: reg<amdgpu.vgpr x2>, %shift: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
   %13 = slice %shift[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %14 = slice %value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %15 = v_pk_lshlrev_b16 %13, %14
@@ -150,9 +140,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x4_s
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i16x4_bitcast_mul_maxui_chain(%packed: vector<2xi32>, %scale: vector<4xi16>, %limit: vector<4xi16>) -> (vector<4xi16>) {
+func.def @i16x4_bitcast_mul_maxui_chain(%packed: vector<2xi32>, %scale: vector<4xi16>, %limit: vector<4xi16>) -> (vector<4xi16>) {
   %lanes = vector.bitcast %packed : vector<2xi32> to vector<4xi16>
   %product = vector.muli %lanes, %scale : vector<4xi16>
   %result = vector.maxui %product, %limit : vector<4xi16>
@@ -160,7 +148,7 @@ func.def target(@target) @i16x4_bitcast_mul_maxui_chain(%packed: vector<2xi32>, 
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x4_bitcast_mul_maxui_chain(%lanes: reg<amdgpu.vgpr x2>, %scale: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i16x4_bitcast_mul_maxui_chain(%lanes: reg<amdgpu.vgpr x2>, %scale: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %11 = slice %lanes[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %12 = slice %scale[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %13 = v_pk_mul_lo_u16 %11, %12
@@ -177,9 +165,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x4_b
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i16x4_select_xori(%lhs: i32, %rhs: i32, %true_value: vector<4xi16>, %false_value: vector<4xi16>, %mask: vector<4xi16>) -> (vector<4xi16>) {
+func.def @i16x4_select_xori(%lhs: i32, %rhs: i32, %true_value: vector<4xi16>, %false_value: vector<4xi16>, %mask: vector<4xi16>) -> (vector<4xi16>) {
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   %predicate = vector.splat %condition : vector<4xi1>
   %selected = vector.select %predicate, %true_value, %false_value : vector<4xi16>
@@ -188,7 +174,7 @@ func.def target(@target) @i16x4_select_xori(%lhs: i32, %rhs: i32, %true_value: v
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x4_select_xori(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr x2>, %false_value: reg<amdgpu.vgpr x2>, %mask: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i16x4_select_xori(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr x2>, %false_value: reg<amdgpu.vgpr x2>, %mask: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %17 = v_mov_b32_copy %lhs
   %18 = v_mov_b32_copy %rhs
   %condition = v_cmp_lt_i32 %17, %18
@@ -208,9 +194,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x4_s
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i16x4_cfg_arg_andi(%lhs: i32, %rhs: i32, %true_value: vector<4xi16>, %false_value: vector<4xi16>, %mask: vector<4xi16>) -> (vector<4xi16>) {
+func.def @i16x4_cfg_arg_andi(%lhs: i32, %rhs: i32, %true_value: vector<4xi16>, %false_value: vector<4xi16>, %mask: vector<4xi16>) -> (vector<4xi16>) {
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   cfg.cond_br %condition, ^then, ^else
 ^then:
@@ -223,7 +207,7 @@ func.def target(@target) @i16x4_cfg_arg_andi(%lhs: i32, %rhs: i32, %true_value: 
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x4_cfg_arg_andi(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr x2>, %false_value: reg<amdgpu.vgpr x2>, %mask: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i16x4_cfg_arg_andi(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr x2>, %false_value: reg<amdgpu.vgpr x2>, %mask: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %condition = s_cmp_lt_i32 %lhs, %rhs
   low.cond_br %condition, ^then, ^else : reg<amdgpu.scc>
 ^then:

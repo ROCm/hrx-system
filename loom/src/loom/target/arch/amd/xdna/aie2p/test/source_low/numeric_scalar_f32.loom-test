@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_scalar_f32.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_f32_arith(%lhs: f32, %rhs: f32, %bias: f32) -> (f32) {
+func.def @scalar_f32_arith(%lhs: f32, %rhs: f32, %bias: f32) -> (f32) {
   %sum = scalar.addf %lhs, %rhs : f32
   %difference = scalar.subf %sum, %bias : f32
   %product = scalar.mulf %difference, %rhs : f32
@@ -12,7 +10,7 @@ func.def target(@target) @scalar_f32_arith(%lhs: f32, %rhs: f32, %bias: f32) -> 
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f32_arith(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %bias: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_f32_arith(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %bias: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %12 = vbcst.32 %lhs
   %13 = vbcst.32 %rhs
   %14 = acc.clear.f32x64
@@ -507,16 +505,14 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_f32_sign_bits(%input: f32) -> (f32, f32) {
+func.def @scalar_f32_sign_bits(%input: f32) -> (f32, f32) {
   %negated = scalar.negf %input : f32
   %absolute = scalar.absf %input : f32
   func.return %negated, %absolute : f32, f32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f32_sign_bits(%input: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_f32_sign_bits(%input: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
   %8 = mov.i32 -2147483648
   %negated = xor %input, %8
   %10 = mov.i32 2147483647
@@ -526,16 +522,14 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @vector_f32_sign_bits(%input: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
+func.def @vector_f32_sign_bits(%input: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
   %negated = vector.negf %input : vector<4xf32>
   %absolute = vector.absf %input : vector<4xf32>
   func.return %negated, %absolute : vector<4xf32>, vector<4xf32>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f32_sign_bits(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @vector_f32_sign_bits(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) asm {
   %8 = mov.i32 -2147483648
   %9 = vbcst.32 %8
   %10 = vbor %input, %9

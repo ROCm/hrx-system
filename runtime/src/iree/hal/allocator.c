@@ -224,23 +224,6 @@ IREE_API_EXPORT iree_status_t iree_hal_allocator_import_buffer(
   return status;
 }
 
-IREE_API_EXPORT iree_status_t iree_hal_allocator_export_buffer(
-    iree_hal_allocator_t* IREE_RESTRICT allocator,
-    iree_hal_buffer_t* IREE_RESTRICT buffer,
-    iree_hal_external_buffer_type_t requested_type,
-    iree_hal_external_buffer_flags_t requested_flags,
-    iree_hal_external_buffer_t* IREE_RESTRICT out_external_buffer) {
-  IREE_ASSERT_ARGUMENT(allocator);
-  IREE_ASSERT_ARGUMENT(buffer);
-  IREE_ASSERT_ARGUMENT(out_external_buffer);
-  memset(out_external_buffer, 0, sizeof(*out_external_buffer));
-  IREE_TRACE_ZONE_BEGIN(z0);
-  iree_status_t status = _VTABLE_DISPATCH(allocator, export_buffer)(
-      allocator, buffer, requested_type, requested_flags, out_external_buffer);
-  IREE_TRACE_ZONE_END(z0);
-  return status;
-}
-
 //===----------------------------------------------------------------------===//
 // Virtual Memory Management
 //===----------------------------------------------------------------------===//

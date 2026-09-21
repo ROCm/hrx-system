@@ -78,6 +78,63 @@ amdf_status_t AMDF_CALL amdf_kernel_queue_query_status(
   return AMDF_STATUS_OK;
 }
 
+amdf_status_t AMDF_CALL amdf_kernel_queue_refresh_status(
+    amdf_kernel_queue_t* queue, amdf_kernel_queue_status_t* out_status) {
+  if (queue == NULL) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  const amdf_status_t status = amdf_structure_validate_output(
+      out_status, AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS,
+      (uint32_t)sizeof(amdf_kernel_queue_status_t));
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+
+  amdf_kernel_queue_status_t value = {0};
+  value.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS;
+  value.structure_size = sizeof(value);
+  const amdf_status_t refresh_status =
+      queue->vtable->refresh_status(queue, &value);
+  if (!amdf_status_is_ok(refresh_status)) {
+    return refresh_status;
+  }
+  const uint32_t structure_size = out_status->structure_size;
+  void* const next = out_status->next;
+  *out_status = value;
+  out_status->structure_size = structure_size;
+  out_status->next = next;
+  return AMDF_STATUS_OK;
+}
+
+amdf_status_t AMDF_CALL amdf_kernel_queue_request_notification(
+    amdf_kernel_queue_t* queue, uint64_t submission,
+    const amdf_native_event_t* event) {
+  if (queue == NULL || submission == 0 || event == NULL ||
+      event->reserved != 0) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  switch (event->type) {
+    case AMDF_NATIVE_EVENT_TYPE_EVENTFD:
+      if (event->payload.file_descriptor < 0 ||
+          event->payload.file_descriptor > INT32_MAX) {
+        return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+      }
+      break;
+    case AMDF_NATIVE_EVENT_TYPE_WIN32_EVENT:
+      if (event->payload.native_handle == NULL ||
+          (uintptr_t)event->payload.native_handle == UINTPTR_MAX) {
+        return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+      }
+      break;
+    default:
+      return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  if ((queue->info.notification_types & (UINT64_C(1) << event->type)) == 0) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  return queue->vtable->request_notification(queue, submission, event);
+}
+
 amdf_status_t AMDF_CALL amdf_kernel_queue_wait(
     amdf_kernel_queue_t* queue, uint64_t submission,
     uint64_t timeout_nanoseconds, uint64_t poll_duration_nanoseconds) {

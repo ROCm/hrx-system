@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/shared_conditional_values.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=vm:core output=low
 
-vm.target<core> @target
-
-func.def target(@target) @shared_conditional_values(%input: buffer, %output: buffer) {
+func.def @shared_conditional_values(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %c0 = scalar.constant 0 : i32
   %completed = scalar.constant 1 : i32
@@ -33,7 +31,7 @@ func.def target(@target) @shared_conditional_values(%input: buffer, %output: buf
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @shared_conditional_values(%in: reg<vm.ref : buffer>, %out: reg<vm.ref : buffer>) asm {
+low.func.def target<vm.core> abi(vm_function) @shared_conditional_values(%in: reg<vm.ref : buffer>, %out: reg<vm.ref : buffer>) asm {
   %c0 = constant.i32 0
   %completed = constant.i32 1
   %19 = constant.i64 0

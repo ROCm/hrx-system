@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_scalar_wide_offsets.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @scalar_wide_byte_offset(%input_storage: buffer, %output_storage: buffer, %byte_offset_input: offset) -> (i32) {
+func.def @scalar_wide_byte_offset(%input_storage: buffer, %output_storage: buffer, %byte_offset_input: offset) -> (i32) {
   %input = buffer.assume.alignment %input_storage {minimum_alignment = 4} : buffer
   %output = buffer.assume.alignment %output_storage {minimum_alignment = 4} : buffer
   %byte_offset = index.assume %byte_offset_input [mul(%byte_offset_input, 4)] : offset
@@ -15,7 +13,7 @@ func.def target(@target) @scalar_wide_byte_offset(%input_storage: buffer, %outpu
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_wide_byte_offset(%byte_offset: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @scalar_wide_byte_offset(%byte_offset: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %14 = v_mov_b32 0
@@ -38,9 +36,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @scalar_wide_scaled_index(%input_storage: buffer, %output_storage: buffer, %element_input: index) -> (i32) {
+func.def @scalar_wide_scaled_index(%input_storage: buffer, %output_storage: buffer, %element_input: index) -> (i32) {
   %input = buffer.assume.alignment %input_storage {minimum_alignment = 4} : buffer
   %output = buffer.assume.alignment %output_storage {minimum_alignment = 4} : buffer
   %element = index.assume %element_input [range(%element_input, 0, 2147483647)] : index
@@ -54,7 +50,7 @@ func.def target(@target) @scalar_wide_scaled_index(%input_storage: buffer, %outp
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_wide_scaled_index(%element: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @scalar_wide_scaled_index(%element: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %32 = v_mov_b32 0
@@ -85,9 +81,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @scalar_wide_static_base(%input_storage: buffer, %output_storage: buffer) -> (i32) {
+func.def @scalar_wide_static_base(%input_storage: buffer, %output_storage: buffer) -> (i32) {
   %input = buffer.assume.alignment %input_storage {minimum_alignment = 4} : buffer
   %output = buffer.assume.alignment %output_storage {minimum_alignment = 4} : buffer
   %byte_offset = index.constant 1099511627784 : offset
@@ -99,7 +93,7 @@ func.def target(@target) @scalar_wide_static_base(%input_storage: buffer, %outpu
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_wide_static_base() -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @scalar_wide_static_base() -> (reg<amdgpu.vgpr>) asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1099511627788} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1099511627788} : reg<amdgpu.sgpr x2>
   %12 = v_mov_b32 0
@@ -122,9 +116,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @scalar_wide_dynamic_dimensions(%input_storage: buffer, %output_storage: buffer, %row_input: index, %columns_input: index) -> (i32) {
+func.def @scalar_wide_dynamic_dimensions(%input_storage: buffer, %output_storage: buffer, %row_input: index, %columns_input: index) -> (i32) {
   %input = buffer.assume.alignment %input_storage {minimum_alignment = 4} : buffer
   %output = buffer.assume.alignment %output_storage {minimum_alignment = 4} : buffer
   %row = index.assume %row_input [range(%row_input, 0, 1)] : index
@@ -138,7 +130,7 @@ func.def target(@target) @scalar_wide_dynamic_dimensions(%input_storage: buffer,
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_wide_dynamic_dimensions(%row: reg<amdgpu.sgpr>, %columns: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @scalar_wide_dynamic_dimensions(%row: reg<amdgpu.sgpr>, %columns: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %18 = v_mov_b32 0
@@ -174,9 +166,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @scalar_wide_mixed_base(%input_storage: buffer, %output_storage: buffer, %byte_offset_input: offset) -> (i32) {
+func.def @scalar_wide_mixed_base(%input_storage: buffer, %output_storage: buffer, %byte_offset_input: offset) -> (i32) {
   %input = buffer.assume.alignment %input_storage {minimum_alignment = 4} : buffer
   %output = buffer.assume.alignment %output_storage {minimum_alignment = 4} : buffer
   %byte_offset = index.assume %byte_offset_input [mul(%byte_offset_input, 4)] : offset
@@ -190,7 +180,7 @@ func.def target(@target) @scalar_wide_mixed_base(%input_storage: buffer, %output
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_wide_mixed_base(%byte_offset: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @scalar_wide_mixed_base(%byte_offset: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %28 = v_mov_b32 0
@@ -219,9 +209,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @vector_wide_static_base(%input_storage: buffer, %output_storage: buffer) {
+func.def @vector_wide_static_base(%input_storage: buffer, %output_storage: buffer) {
   %input = buffer.assume.alignment %input_storage {minimum_alignment = 16} : buffer
   %output = buffer.assume.alignment %output_storage {minimum_alignment = 16} : buffer
   %byte_offset = index.constant 1099511627792 : offset
@@ -233,7 +221,7 @@ func.def target(@target) @vector_wide_static_base(%input_storage: buffer, %outpu
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_wide_static_base() asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @vector_wide_static_base() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1099511627808} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1099511627808} : reg<amdgpu.sgpr x2>
   %10 = v_mov_b32 0
@@ -256,9 +244,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @vector_wide_dynamic_dimensions(%input_storage: buffer, %output_storage: buffer, %row_input: index, %columns_input: index) {
+func.def @vector_wide_dynamic_dimensions(%input_storage: buffer, %output_storage: buffer, %row_input: index, %columns_input: index) {
   %input = buffer.assume.alignment %input_storage {minimum_alignment = 16} : buffer
   %output = buffer.assume.alignment %output_storage {minimum_alignment = 16} : buffer
   %row = index.assume %row_input [range(%row_input, 0, 1)] : index
@@ -272,7 +258,7 @@ func.def target(@target) @vector_wide_dynamic_dimensions(%input_storage: buffer,
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_wide_dynamic_dimensions(%row: reg<amdgpu.sgpr>, %columns: reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @vector_wide_dynamic_dimensions(%row: reg<amdgpu.sgpr>, %columns: reg<amdgpu.sgpr>) asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %16 = v_mov_b32 0

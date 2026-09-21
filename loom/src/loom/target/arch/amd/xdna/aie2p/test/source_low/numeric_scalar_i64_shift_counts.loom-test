@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_scalar_i64_shift_counts.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
-aie2p.target<core> @target
-
-func.def target(@target) @wide_shift_constant(%values: vector<2xi64>) -> (i64) {
+func.def @wide_shift_constant(%values: vector<2xi64>) -> (i64) {
   %value = vector.extract %values[0] : vector<2xi64> -> i64
   %count = scalar.constant 31 : i64
   %shifted = scalar.shli %value, %count : i64
@@ -11,7 +9,7 @@ func.def target(@target) @wide_shift_constant(%values: vector<2xi64>) -> (i64) {
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_shift_constant(%values: reg<aie2p.vec256 x2>) -> (reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_shift_constant(%values: reg<aie2p.vec256 x2>) -> (reg<aie2p.er x2>) asm {
   %value = vextract.64.imm %values, 0
   %8 = mov.i32 31
   %11 = slice %value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
@@ -27,16 +25,14 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_shi
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @wide_shift_uniform(%values: vector<2xi64>, %count: i64) -> (i64) {
+func.def @wide_shift_uniform(%values: vector<2xi64>, %count: i64) -> (i64) {
   %value = vector.extract %values[0] : vector<2xi64> -> i64
   %shifted = scalar.shli %value, %count : i64
   func.return %shifted : i64
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_shift_uniform(%values: reg<aie2p.vec256 x2>, %count: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_shift_uniform(%values: reg<aie2p.vec256 x2>, %count: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
   %value = vextract.64.imm %values, 0
   %9 = slice %value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
   %10 = slice %value[1] : reg<aie2p.er x2> -> reg<aie2p.er>
@@ -63,9 +59,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_shi
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @wide_shift_varying(%values: vector<2xi64>, %counts: vector<2xi64>) -> (i64) {
+func.def @wide_shift_varying(%values: vector<2xi64>, %counts: vector<2xi64>) -> (i64) {
   %value = vector.extract %values[0] : vector<2xi64> -> i64
   %count = vector.extract %counts[0] : vector<2xi64> -> i64
   %shifted = scalar.shli %value, %count : i64
@@ -73,7 +67,7 @@ func.def target(@target) @wide_shift_varying(%values: vector<2xi64>, %counts: ve
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_shift_varying(%values: reg<aie2p.vec256 x2>, %counts: reg<aie2p.vec256 x2>) -> (reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_shift_varying(%values: reg<aie2p.vec256 x2>, %counts: reg<aie2p.vec256 x2>) -> (reg<aie2p.er x2>) asm {
   %value = vextract.64.imm %values, 0
   %count = vextract.64.imm %counts, 0
   %11 = slice %value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
@@ -101,16 +95,14 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_shi
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @wide_right_shift_uniform(%value: i64, %count: i64) -> (i64, i64) {
+func.def @wide_right_shift_uniform(%value: i64, %count: i64) -> (i64, i64) {
   %logical = scalar.shrui %value, %count : i64
   %signed = scalar.shrsi %value, %count : i64
   func.return %logical, %signed : i64, i64
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_right_shift_uniform(%value: reg<aie2p.er x2>, %count: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_right_shift_uniform(%value: reg<aie2p.er x2>, %count: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
   %10 = slice %value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
   %11 = slice %value[1] : reg<aie2p.er x2> -> reg<aie2p.er>
   %12 = slice %count[0] : reg<aie2p.er x2> -> reg<aie2p.er>
@@ -150,9 +142,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_rig
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @wide_right_shift_uniform_count(%values: vector<2xi64>, %count: i64) -> (i64, i64) {
+func.def @wide_right_shift_uniform_count(%values: vector<2xi64>, %count: i64) -> (i64, i64) {
   %value = vector.extract %values[1] : vector<2xi64> -> i64
   %logical = scalar.shrui %value, %count : i64
   %signed = scalar.shrsi %value, %count : i64
@@ -160,7 +150,7 @@ func.def target(@target) @wide_right_shift_uniform_count(%values: vector<2xi64>,
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_right_shift_uniform_count(%values: reg<aie2p.vec256 x2>, %count: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_right_shift_uniform_count(%values: reg<aie2p.vec256 x2>, %count: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
   %value = vextract.64.imm %values, 1
   %12 = slice %value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
   %13 = slice %value[1] : reg<aie2p.er x2> -> reg<aie2p.er>
@@ -201,9 +191,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_rig
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @wide_right_shift_varying_count(%values: vector<2xi64>, %counts: vector<2xi64>) -> (i64, i64) {
+func.def @wide_right_shift_varying_count(%values: vector<2xi64>, %counts: vector<2xi64>) -> (i64, i64) {
   %value = vector.extract %values[1] : vector<2xi64> -> i64
   %count = vector.extract %counts[1] : vector<2xi64> -> i64
   %logical = scalar.shrui %value, %count : i64
@@ -212,7 +200,7 @@ func.def target(@target) @wide_right_shift_varying_count(%values: vector<2xi64>,
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_right_shift_varying_count(%values: reg<aie2p.vec256 x2>, %counts: reg<aie2p.vec256 x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_right_shift_varying_count(%values: reg<aie2p.vec256 x2>, %counts: reg<aie2p.vec256 x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
   %value = vextract.64.imm %values, 1
   %count = vextract.64.imm %counts, 1
   %14 = slice %value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
@@ -254,9 +242,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_rig
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @wide_right_shift_constant(%values: vector<2xi64>) -> (i64, i64) {
+func.def @wide_right_shift_constant(%values: vector<2xi64>) -> (i64, i64) {
   %value = vector.extract %values[1] : vector<2xi64> -> i64
   %count = scalar.constant 31 : i64
   %logical = scalar.shrui %value, %count : i64
@@ -265,7 +251,7 @@ func.def target(@target) @wide_right_shift_constant(%values: vector<2xi64>) -> (
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_right_shift_constant(%values: reg<aie2p.vec256 x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_right_shift_constant(%values: reg<aie2p.vec256 x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
   %value = vextract.64.imm %values, 1
   %11 = mov.i32 31
   %14 = slice %value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
@@ -290,9 +276,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_rig
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @wide_shift_word_boundaries(%value: i64) -> (i64, i64, i64, i64) {
+func.def @wide_shift_word_boundaries(%value: i64) -> (i64, i64, i64, i64) {
   %identity_count = scalar.constant 0 : i64
   %last_low = scalar.constant 31 : i64
   %first_high = scalar.constant 32 : i64
@@ -305,7 +289,7 @@ func.def target(@target) @wide_shift_word_boundaries(%value: i64) -> (i64, i64, 
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_shift_word_boundaries(%value: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_shift_word_boundaries(%value: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
   %18 = mov.i32 31
   %21 = mov.i32 32
   %24 = mov.i32 63
@@ -329,9 +313,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_shi
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @wide_shift_low_word(%value: i64) -> (i32) {
+func.def @wide_shift_low_word(%value: i64) -> (i32) {
   %count = scalar.constant 6 : i64
   %shifted = scalar.shli %value, %count : i64
   %result = scalar.trunci %shifted : i64 to i32
@@ -339,7 +321,7 @@ func.def target(@target) @wide_shift_low_word(%value: i64) -> (i32) {
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_shift_low_word(%value: reg<aie2p.er x2>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_shift_low_word(%value: reg<aie2p.er x2>) -> (reg<aie2p.er>) asm {
   %7 = mov.i32 6
   %10 = slice %value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
   %14 = lshl %10, %7
@@ -348,16 +330,14 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_shi
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @wide_shift_bounded_low(%value: i64, %count_input: i64) -> (i64) {
+func.def @wide_shift_bounded_low(%value: i64, %count_input: i64) -> (i64) {
   %count = scalar.assume %count_input [range(%count_input, 0, 31)] : i64
   %shifted = scalar.shli %value, %count : i64
   func.return %shifted : i64
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_shift_bounded_low(%value: reg<aie2p.er x2>, %count: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_shift_bounded_low(%value: reg<aie2p.er x2>, %count: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
   %8 = slice %value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
   %9 = slice %value[1] : reg<aie2p.er x2> -> reg<aie2p.er>
   %10 = slice %count[0] : reg<aie2p.er x2> -> reg<aie2p.er>
@@ -383,16 +363,14 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_shi
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @wide_shift_bounded_high(%value: i64, %count_input: i64) -> (i64) {
+func.def @wide_shift_bounded_high(%value: i64, %count_input: i64) -> (i64) {
   %count = scalar.assume %count_input [range(%count_input, 32, 63)] : i64
   %shifted = scalar.shli %value, %count : i64
   func.return %shifted : i64
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_shift_bounded_high(%value: reg<aie2p.er x2>, %count: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_shift_bounded_high(%value: reg<aie2p.er x2>, %count: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
   %8 = slice %value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
   %10 = slice %count[0] : reg<aie2p.er x2> -> reg<aie2p.er>
   %11 = add %10, -32
@@ -404,16 +382,14 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_shi
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @wide_shift_crossing_words(%value: i64, %count_input: i64) -> (i64) {
+func.def @wide_shift_crossing_words(%value: i64, %count_input: i64) -> (i64) {
   %count = scalar.assume %count_input [range(%count_input, 31, 32)] : i64
   %shifted = scalar.shli %value, %count : i64
   func.return %shifted : i64
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_shift_crossing_words(%value: reg<aie2p.er x2>, %count: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_shift_crossing_words(%value: reg<aie2p.er x2>, %count: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
   %8 = slice %value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
   %9 = slice %value[1] : reg<aie2p.er x2> -> reg<aie2p.er>
   %10 = slice %count[0] : reg<aie2p.er x2> -> reg<aie2p.er>
@@ -439,16 +415,14 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_shi
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @wide_shift_bounded_nonzero_low(%value: i64, %count_input: i64) -> (i64) {
+func.def @wide_shift_bounded_nonzero_low(%value: i64, %count_input: i64) -> (i64) {
   %count = scalar.assume %count_input [range(%count_input, 1, 31)] : i64
   %shifted = scalar.shli %value, %count : i64
   func.return %shifted : i64
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_shift_bounded_nonzero_low(%value: reg<aie2p.er x2>, %count: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_shift_bounded_nonzero_low(%value: reg<aie2p.er x2>, %count: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
   %8 = slice %value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
   %9 = slice %value[1] : reg<aie2p.er x2> -> reg<aie2p.er>
   %10 = slice %count[0] : reg<aie2p.er x2> -> reg<aie2p.er>
@@ -463,9 +437,8 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_shi
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @word_right_shift_constants(%value: i32) -> (i32, i32, i32, i32, i32, i32, i32) {
+// Word controls qualify the native pieces used by split-word lowering.
+func.def @word_right_shift_constants(%value: i32) -> (i32, i32, i32, i32, i32, i32, i32) {
   %identity_count = scalar.constant 0 : i32
   %single_bit = scalar.constant 1 : i32
   %middle = scalar.constant 16 : i32
@@ -481,7 +454,7 @@ func.def target(@target) @word_right_shift_constants(%value: i32) -> (i32, i32, 
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @word_right_shift_constants(%value: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @word_right_shift_constants(%value: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
   %27 = mov.short -1
   %logical_one = lshl %value, %27
   %signed_one = ashl %value, %27
@@ -496,16 +469,14 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @word_rig
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @word_right_shift_dynamic(%value: i32, %count: i32) -> (i32, i32) {
+func.def @word_right_shift_dynamic(%value: i32, %count: i32) -> (i32, i32) {
   %logical = scalar.shrui %value, %count : i32
   %signed = scalar.shrsi %value, %count : i32
   func.return %logical, %signed : i32, i32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @word_right_shift_dynamic(%value: reg<aie2p.er>, %count: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @word_right_shift_dynamic(%value: reg<aie2p.er>, %count: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
   %10 = mov.short 0
   %11 = sub %10, %count
   %logical = lshl %value, %11
@@ -516,9 +487,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @word_rig
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @wide_right_shift_word_boundaries(%value: i64) -> (i64, i64, i64, i64, i64, i64, i64, i64) {
+func.def @wide_right_shift_word_boundaries(%value: i64) -> (i64, i64, i64, i64, i64, i64, i64, i64) {
   %identity_count = scalar.constant 0 : i64
   %last_low = scalar.constant 31 : i64
   %first_high = scalar.constant 32 : i64
@@ -535,7 +504,7 @@ func.def target(@target) @wide_right_shift_word_boundaries(%value: i64) -> (i64,
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_right_shift_word_boundaries(%value: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_right_shift_word_boundaries(%value: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
   %30 = mov.i32 31
   %33 = mov.i32 32
   %36 = mov.i32 63
@@ -576,9 +545,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_rig
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @wide_right_shift_bounded_low(%value: i64, %count_input: i64) -> (i64, i64) {
+func.def @wide_right_shift_bounded_low(%value: i64, %count_input: i64) -> (i64, i64) {
   %count = scalar.assume %count_input [range(%count_input, 0, 31)] : i64
   %logical = scalar.shrui %value, %count : i64
   %signed = scalar.shrsi %value, %count : i64
@@ -586,7 +553,7 @@ func.def target(@target) @wide_right_shift_bounded_low(%value: i64, %count_input
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_right_shift_bounded_low(%value: reg<aie2p.er x2>, %count: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_right_shift_bounded_low(%value: reg<aie2p.er x2>, %count: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
   %11 = slice %value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
   %12 = slice %value[1] : reg<aie2p.er x2> -> reg<aie2p.er>
   %13 = slice %count[0] : reg<aie2p.er x2> -> reg<aie2p.er>
@@ -612,9 +579,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_rig
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @wide_right_shift_bounded_nonzero_low(%value: i64, %count_input: i64) -> (i64, i64) {
+func.def @wide_right_shift_bounded_nonzero_low(%value: i64, %count_input: i64) -> (i64, i64) {
   %count = scalar.assume %count_input [range(%count_input, 1, 31)] : i64
   %logical = scalar.shrui %value, %count : i64
   %signed = scalar.shrsi %value, %count : i64
@@ -622,7 +587,7 @@ func.def target(@target) @wide_right_shift_bounded_nonzero_low(%value: i64, %cou
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_right_shift_bounded_nonzero_low(%value: reg<aie2p.er x2>, %count: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_right_shift_bounded_nonzero_low(%value: reg<aie2p.er x2>, %count: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
   %11 = slice %value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
   %12 = slice %value[1] : reg<aie2p.er x2> -> reg<aie2p.er>
   %13 = slice %count[0] : reg<aie2p.er x2> -> reg<aie2p.er>
@@ -646,9 +611,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_rig
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @wide_right_shift_bounded_high(%value: i64, %count_input: i64) -> (i64, i64) {
+func.def @wide_right_shift_bounded_high(%value: i64, %count_input: i64) -> (i64, i64) {
   %count = scalar.assume %count_input [range(%count_input, 32, 63)] : i64
   %logical = scalar.shrui %value, %count : i64
   %signed = scalar.shrsi %value, %count : i64
@@ -656,7 +619,7 @@ func.def target(@target) @wide_right_shift_bounded_high(%value: i64, %count_inpu
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_right_shift_bounded_high(%value: reg<aie2p.er x2>, %count: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_right_shift_bounded_high(%value: reg<aie2p.er x2>, %count: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
   %12 = slice %value[1] : reg<aie2p.er x2> -> reg<aie2p.er>
   %13 = slice %count[0] : reg<aie2p.er x2> -> reg<aie2p.er>
   %14 = mov.short 32
@@ -674,9 +637,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_rig
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @wide_right_shift_crossing_words(%value: i64, %count_input: i64) -> (i64, i64) {
+func.def @wide_right_shift_crossing_words(%value: i64, %count_input: i64) -> (i64, i64) {
   %count = scalar.assume %count_input [range(%count_input, 31, 32)] : i64
   %logical = scalar.shrui %value, %count : i64
   %signed = scalar.shrsi %value, %count : i64
@@ -684,7 +645,7 @@ func.def target(@target) @wide_right_shift_crossing_words(%value: i64, %count_in
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_right_shift_crossing_words(%value: reg<aie2p.er x2>, %count: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_right_shift_crossing_words(%value: reg<aie2p.er x2>, %count: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
   %11 = slice %value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
   %12 = slice %value[1] : reg<aie2p.er x2> -> reg<aie2p.er>
   %13 = slice %count[0] : reg<aie2p.er x2> -> reg<aie2p.er>
@@ -724,10 +685,8 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_rig
 
 // ====
 
-aie2p.target<core> @target
-
 // All three shifts preserve their input and the count for later arithmetic.
-func.def target(@target) @word_shifts_reuse_input(%value: i32, %count: i32) -> (i32) {
+func.def @word_shifts_reuse_input(%value: i32, %count: i32) -> (i32) {
   %left = scalar.shli %value, %count : i32
   %logical = scalar.shrui %value, %count : i32
   %signed = scalar.shrsi %value, %count : i32
@@ -739,7 +698,7 @@ func.def target(@target) @word_shifts_reuse_input(%value: i32, %count: i32) -> (
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @word_shifts_reuse_input(%value: reg<aie2p.er>, %count: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @word_shifts_reuse_input(%value: reg<aie2p.er>, %count: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %left = lshl %value, %count
   %14 = mov.short 0
   %15 = sub %14, %count
@@ -755,9 +714,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @word_shi
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @wide_shifts_reuse_counts(%value: i64, %left_count: i64, %right_count: i64) -> (i64) {
+func.def @wide_shifts_reuse_counts(%value: i64, %left_count: i64, %right_count: i64) -> (i64) {
   %left = scalar.shli %value, %left_count : i64
   %logical = scalar.shrui %value, %right_count : i64
   %signed = scalar.shrsi %left, %left_count : i64
@@ -769,7 +726,7 @@ func.def target(@target) @wide_shifts_reuse_counts(%value: i64, %left_count: i64
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_shifts_reuse_counts(%value: reg<aie2p.er x2>, %left_count: reg<aie2p.er x2>, %right_count: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_shifts_reuse_counts(%value: reg<aie2p.er x2>, %left_count: reg<aie2p.er x2>, %right_count: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
   %15 = slice %value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
   %16 = slice %value[1] : reg<aie2p.er x2> -> reg<aie2p.er>
   %17 = slice %left_count[0] : reg<aie2p.er x2> -> reg<aie2p.er>
@@ -833,9 +790,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_shi
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @wide_shift_value_is_count(%input: i64) -> (i64) {
+func.def @wide_shift_value_is_count(%input: i64) -> (i64) {
   %mask = scalar.constant 63 : i64
   %value = scalar.andi %input, %mask : i64
   %result = scalar.shli %value, %value : i64
@@ -843,7 +798,7 @@ func.def target(@target) @wide_shift_value_is_count(%input: i64) -> (i64) {
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_shift_value_is_count(%input: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_shift_value_is_count(%input: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
   %7 = mov.i32 63
   %8 = mov.i32 0
   %10 = slice %input[0] : reg<aie2p.er x2> -> reg<aie2p.er>
@@ -872,16 +827,14 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @wide_shi
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @index_shift_dynamic(%value: index, %count: index) -> (index, index) {
+func.def @index_shift_dynamic(%value: index, %count: index) -> (index, index) {
   %left = index.shli %value, %count : index
   %right = index.shrui %value, %count : index
   func.return %left, %right : index, index
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_shift_dynamic(%value: reg<aie2p.er>, %count: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @index_shift_dynamic(%value: reg<aie2p.er>, %count: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
   %left = lshl %value, %count
   %11 = mov.short 0
   %12 = sub %11, %count
@@ -891,16 +844,14 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_sh
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @index_shift_constant_four(%value: index) -> (index) {
+func.def @index_shift_constant_four(%value: index) -> (index) {
   %count = index.constant 4 : index
   %result = index.shli %value, %count : index
   func.return %result : index
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_shift_constant_four(%value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @index_shift_constant_four(%value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %count = mov.short 4
   %result = lshl %value, %count
   return %result
@@ -908,15 +859,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_sh
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @index_shift_arithmetic(%value: index, %count: index) -> (index) {
+func.def @index_shift_arithmetic(%value: index, %count: index) -> (index) {
   %result = index.shrsi %value, %count : index
   func.return %result : index
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_shift_arithmetic(%value: reg<aie2p.er>, %count: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @index_shift_arithmetic(%value: reg<aie2p.er>, %count: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %7 = mov.short 0
   %8 = sub %7, %count
   %result = ashl %value, %8
@@ -925,9 +874,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_sh
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @index_shift_bounded(%value: index, %count_input: index) -> (index, index, index) {
+func.def @index_shift_bounded(%value: index, %count_input: index) -> (index, index, index) {
   %count = index.assume %count_input [range(%count_input, 0, 31)] : index
   %left = index.shli %value, %count : index
   %logical = index.shrui %value, %count : index
@@ -936,7 +883,7 @@ func.def target(@target) @index_shift_bounded(%value: index, %count_input: index
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_shift_bounded(%value: reg<aie2p.er>, %count: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @index_shift_bounded(%value: reg<aie2p.er>, %count: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
   %left = lshl %value, %count
   %15 = mov.short 0
   %16 = sub %15, %count
@@ -948,9 +895,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_sh
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @index_shift_constant_boundaries(%value: index) -> (index, index, index, index, index, index) {
+func.def @index_shift_constant_boundaries(%value: index) -> (index, index, index, index, index, index) {
   %identity_count = index.constant 0 : index
   %last = index.constant 31 : index
   %left_zero = index.shli %value, %identity_count : index
@@ -963,7 +908,7 @@ func.def target(@target) @index_shift_constant_boundaries(%value: index) -> (ind
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_shift_constant_boundaries(%value: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @index_shift_constant_boundaries(%value: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
   %last = mov.short 31
   %left_last = lshl %value, %last
   %24 = mov.short -31
@@ -974,9 +919,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_sh
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @index_shift_arithmetic_reuse(%value: index, %count: index) -> (index) {
+func.def @index_shift_arithmetic_reuse(%value: index, %count: index) -> (index) {
   %shifted = index.shrsi %value, %count : index
   %with_count = index.add %shifted, %count : index
   %result = index.xori %with_count, %value : index
@@ -984,7 +927,7 @@ func.def target(@target) @index_shift_arithmetic_reuse(%value: index, %count: in
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_shift_arithmetic_reuse(%value: reg<aie2p.er>, %count: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @index_shift_arithmetic_reuse(%value: reg<aie2p.er>, %count: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %9 = mov.short 0
   %10 = sub %9, %count
   %shifted = ashl %value, %10

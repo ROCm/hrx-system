@@ -10,6 +10,7 @@
 #define LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_PROFILE_H_
 
 #include "loom/target/arch/amd/xdna/aie2p/facts.h"
+#include "loom/target/arch/amd/xdna/aie2p/ops/ops.h"
 #include "loom/target/profile.h"
 
 #ifdef __cplusplus
@@ -20,14 +21,18 @@ extern "C" {
 extern const loom_target_profile_type_t loom_aie2p_target_profile_type;
 
 typedef struct loom_aie2p_target_profile_t {
-  // Target-neutral family identity and array-program bundle projection.
+  // Target-neutral family identity and bundle projection.
   loom_target_profile_t base;
 
-  // Exact physical deployment profile.
+  // Core compilation or array-program target represented by this profile.
+  loom_aie2p_target_kind_t kind;
+
+  // Exact physical deployment profile, or NULL for standalone core compilation.
   const loom_xdna_device_profile_t* device_profile;
 } loom_aie2p_target_profile_t;
 
-// Selects an immutable generated AIE2P profile by device-profile key.
+// Selects an immutable AIE2P array profile by device-profile key, or "core"
+// for standalone compute-tile compilation without an array deployment.
 iree_status_t loom_aie2p_target_profile_select(
     iree_string_view_t selector,
     const loom_aie2p_target_profile_t** out_profile);

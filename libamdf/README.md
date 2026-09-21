@@ -58,6 +58,14 @@ transport. GPU packet construction and XDNA executable loading, relocation,
 and scheduling stay above the library. XDNA data memory is resident for its
 allocation lifetime, without a per-invocation list of indirect data buffers.
 
+Kernel-mediated queues admit a configurable window of pending submissions,
+defaulting to 4096. Callers can publish independent immutable command ranges
+without waiting between them, then use synchronous waits or nonwaiting checked
+status refresh to reclaim completed work. XDNA queues can notify a caller-owned
+native event for an accepted point, allowing one persistent event-loop
+registration to serve the queue. Notifications prompt a status refresh; they
+are not a second completion or retirement mechanism.
+
 This is the device-access foundation for a runtime that owns its execution
 model. It replaces the need to adopt XRT or ROCr for native access while
 keeping the compiler, loader, and scheduler with their caller. Family-selective
@@ -116,6 +124,10 @@ The [enumeration example](examples/enumerate.c) shows ABI negotiation and
 passive selection. The [XDNA numerical consumer](../experimental/xdna/cts/execution_test.cc)
 loads canonical images, prepares instruction ranges, executes them against
 allocated, registered and imported data, and checks results and teardown.
+The [shared-pool consumer](../experimental/xdna/cts/shared_mapping_process_test.cc)
+transfers a native memory handle between processes, independently maps and
+registers the backing, and executes after the producer releases its mapping and
+memory handle. One registration covers the pool; bindings use explicit offsets.
 
 Focused design documents describe the contracts:
 

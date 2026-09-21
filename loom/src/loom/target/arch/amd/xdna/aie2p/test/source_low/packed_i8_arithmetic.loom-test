@@ -1,69 +1,59 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/packed_i8_arithmetic.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
-aie2p.target<core> @target
-
-func.def target(@target) @i8x4_addi_arguments(%lhs: vector<4xi8>, %rhs: vector<4xi8>) -> (vector<4xi8>) {
+func.def @i8x4_addi_arguments(%lhs: vector<4xi8>, %rhs: vector<4xi8>) -> (vector<4xi8>) {
   %sum = vector.addi %lhs, %rhs : vector<4xi8>
   func.return %sum : vector<4xi8>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8x4_addi_arguments(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x4_addi_arguments(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %sum = vadd.8 %lhs, %rhs
   return %sum
 }
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @i8x8_addi_storage_tuple(%lhs: vector<8xi8>, %rhs: vector<8xi8>) -> (vector<8xi8>) {
+func.def @i8x8_addi_storage_tuple(%lhs: vector<8xi8>, %rhs: vector<8xi8>) -> (vector<8xi8>) {
   %sum = vector.addi %lhs, %rhs : vector<8xi8>
   func.return %sum : vector<8xi8>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8x8_addi_storage_tuple(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x8_addi_storage_tuple(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %sum = vadd.8 %lhs, %rhs
   return %sum
 }
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @i8x4_subi_arguments(%lhs: vector<4xi8>, %rhs: vector<4xi8>) -> (vector<4xi8>) {
+func.def @i8x4_subi_arguments(%lhs: vector<4xi8>, %rhs: vector<4xi8>) -> (vector<4xi8>) {
   %diff = vector.subi %lhs, %rhs : vector<4xi8>
   func.return %diff : vector<4xi8>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8x4_subi_arguments(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x4_subi_arguments(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %diff = vsub.8 %lhs, %rhs
   return %diff
 }
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @i8x8_subi_storage_tuple(%lhs: vector<8xi8>, %rhs: vector<8xi8>) -> (vector<8xi8>) {
+func.def @i8x8_subi_storage_tuple(%lhs: vector<8xi8>, %rhs: vector<8xi8>) -> (vector<8xi8>) {
   %diff = vector.subi %lhs, %rhs : vector<8xi8>
   func.return %diff : vector<8xi8>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8x8_subi_storage_tuple(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x8_subi_storage_tuple(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %diff = vsub.8 %lhs, %rhs
   return %diff
 }
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @i8x4_addi_chain(%packed: vector<1xi32>, %bias: vector<4xi8>, %delta: vector<4xi8>) -> (vector<4xi8>) {
+func.def @i8x4_addi_chain(%packed: vector<1xi32>, %bias: vector<4xi8>, %delta: vector<4xi8>) -> (vector<4xi8>) {
   %bytes = vector.bitcast %packed : vector<1xi32> to vector<4xi8>
   %biased = vector.addi %bytes, %bias : vector<4xi8>
   %result = vector.addi %biased, %delta : vector<4xi8>
@@ -71,7 +61,7 @@ func.def target(@target) @i8x4_addi_chain(%packed: vector<1xi32>, %bias: vector<
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8x4_addi_chain(%bytes: reg<aie2p.vec256 x2>, %bias: reg<aie2p.vec256 x2>, %delta: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x4_addi_chain(%bytes: reg<aie2p.vec256 x2>, %bias: reg<aie2p.vec256 x2>, %delta: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %biased = vadd.8 %bytes, %bias
   %result = vadd.8 %biased, %delta
   return %result
@@ -79,9 +69,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8x4_add
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @i8x4_select_addi(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>, %bias: vector<4xi8>) -> (vector<4xi8>) {
+func.def @i8x4_select_addi(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>, %bias: vector<4xi8>) -> (vector<4xi8>) {
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   %mask = vector.splat %condition : vector<4xi1>
   %selected = vector.select %mask, %true_value, %false_value : vector<4xi8>
@@ -90,7 +78,7 @@ func.def target(@target) @i8x4_select_addi(%lhs: i32, %rhs: i32, %true_value: ve
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8x4_select_addi(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %true_value: reg<aie2p.vec256 x2>, %false_value: reg<aie2p.vec256 x2>, %bias: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x4_select_addi(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %true_value: reg<aie2p.vec256 x2>, %false_value: reg<aie2p.vec256 x2>, %bias: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %condition = lt %lhs, %rhs
   %18 = select.mask %condition, -1
   %selected = vsel.32 %true_value, %false_value, %18
@@ -100,9 +88,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8x4_sel
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @i8x4_select_subi(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>, %bias: vector<4xi8>) -> (vector<4xi8>) {
+func.def @i8x4_select_subi(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>, %bias: vector<4xi8>) -> (vector<4xi8>) {
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   %mask = vector.splat %condition : vector<4xi1>
   %selected = vector.select %mask, %true_value, %false_value : vector<4xi8>
@@ -111,7 +97,7 @@ func.def target(@target) @i8x4_select_subi(%lhs: i32, %rhs: i32, %true_value: ve
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8x4_select_subi(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %true_value: reg<aie2p.vec256 x2>, %false_value: reg<aie2p.vec256 x2>, %bias: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x4_select_subi(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %true_value: reg<aie2p.vec256 x2>, %false_value: reg<aie2p.vec256 x2>, %bias: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %condition = lt %lhs, %rhs
   %18 = select.mask %condition, -1
   %selected = vsel.32 %true_value, %false_value, %18
@@ -121,9 +107,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8x4_sel
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @i8x4_scf_if_addi(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>, %bias: vector<4xi8>) -> (vector<4xi8>) {
+func.def @i8x4_scf_if_addi(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>, %bias: vector<4xi8>) -> (vector<4xi8>) {
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   %selected = scf.if %condition -> (vector<4xi8>) {
     scf.yield %true_value : vector<4xi8>
@@ -135,7 +119,7 @@ func.def target(@target) @i8x4_scf_if_addi(%lhs: i32, %rhs: i32, %true_value: ve
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8x4_scf_if_addi(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %true_value: reg<aie2p.vec256 x2>, %false_value: reg<aie2p.vec256 x2>, %bias: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x4_scf_if_addi(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %true_value: reg<aie2p.vec256 x2>, %false_value: reg<aie2p.vec256 x2>, %bias: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %condition = lt %lhs, %rhs
   %17 = select.mask %condition, -1
   %selected = vsel.32 %true_value, %false_value, %17
@@ -145,9 +129,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8x4_scf
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @i8x4_cfg_arg_addi(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>, %bias: vector<4xi8>) -> (vector<4xi8>) {
+func.def @i8x4_cfg_arg_addi(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>, %bias: vector<4xi8>) -> (vector<4xi8>) {
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   cfg.cond_br %condition, ^then, ^else
 ^then:
@@ -160,7 +142,7 @@ func.def target(@target) @i8x4_cfg_arg_addi(%lhs: i32, %rhs: i32, %true_value: v
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i8x4_cfg_arg_addi(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %true_value: reg<aie2p.vec256 x2>, %false_value: reg<aie2p.vec256 x2>, %bias: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x4_cfg_arg_addi(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %true_value: reg<aie2p.vec256 x2>, %false_value: reg<aie2p.vec256 x2>, %bias: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %condition = lt %lhs, %rhs
   low.cond_br %condition, ^then, ^else : reg<aie2p.er>
 ^then:

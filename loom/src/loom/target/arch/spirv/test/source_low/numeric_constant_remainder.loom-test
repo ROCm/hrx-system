@@ -1,16 +1,14 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_constant_remainder.loom-test
-// RUN: emit source-low output=low control-flow=structured-low
+// RUN: emit source-low target=spirv:vulkan1.3+bda output=low control-flow=structured-low
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @constant_remainder_uniform(%value: i32) -> (i32) {
+func.def @constant_remainder_uniform(%value: i32) -> (i32) {
   %divisor = scalar.constant 3 : i32
   %remainder = scalar.remui %value, %divisor : i32
   func.return %remainder : i32
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @constant_remainder_uniform(%value: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @constant_remainder_uniform(%value: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
   %divisor = OpConstant.i32 3
   %7 = OpBitcast.i32.u32 %value
   %8 = OpBitcast.i32.u32 %divisor
@@ -21,9 +19,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @consta
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @constant_remainder_loaded(%input: buffer) -> (i32, index) {
+func.def @constant_remainder_loaded(%input: buffer) -> (i32, index) {
   %base = index.constant 0 : offset
   %aligned_input = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %input_view = buffer.view %aligned_input[%base] : buffer -> view<1xi32>
@@ -39,7 +35,7 @@ func.def target(@target) @constant_remainder_loaded(%input: buffer) -> (i32, ind
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @constant_remainder_loaded(%aligned_input: reg<spirv.ptr.storage_buffer>) -> (reg<spirv.id : i32>, reg<spirv.id : index>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @constant_remainder_loaded(%aligned_input: reg<spirv.ptr.storage_buffer>) -> (reg<spirv.id : i32>, reg<spirv.id : index>) asm {
   %17 = OpConstant.offset64 0
   %18 = OpPtrAccessChain.storage_buffer.i32.byte_offset %aligned_input, %17
   %value = OpLoad.storage_buffer.i32 %18
@@ -61,9 +57,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @consta
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @constant_remainder_factors(%word: i32, %position: index) -> (i32, i32, index, index) {
+func.def @constant_remainder_factors(%word: i32, %position: index) -> (i32, i32, index, index) {
   %bounded = index.assume %position [range(%position, 0, 4294967295)] : index
   %c5 = scalar.constant 5 : i32
   %c9 = scalar.constant 9 : i32
@@ -77,7 +71,7 @@ func.def target(@target) @constant_remainder_factors(%word: i32, %position: inde
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @constant_remainder_factors(%word: reg<spirv.id : i32>, %bounded: reg<spirv.id : index>) -> (reg<spirv.id : i32>, reg<spirv.id : i32>, reg<spirv.id : index>, reg<spirv.id : index>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @constant_remainder_factors(%word: reg<spirv.id : i32>, %bounded: reg<spirv.id : index>) -> (reg<spirv.id : i32>, reg<spirv.id : i32>, reg<spirv.id : index>, reg<spirv.id : index>) asm {
   %c5 = OpConstant.i32 5
   %c9 = OpConstant.i32 9
   %c5_index = OpConstant.i32 5 : reg<spirv.id : index>
@@ -101,9 +95,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @consta
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @constant_remainder_by_seven(%word: i32, %position: index) -> (i32, index, i32, index) {
+func.def @constant_remainder_by_seven(%word: i32, %position: index) -> (i32, index, i32, index) {
   %bounded = index.assume %position [range(%position, 0, 4294967295)] : index
   %word_divisor = scalar.constant 7 : i32
   %index_divisor = index.constant 7 : index
@@ -113,7 +105,7 @@ func.def target(@target) @constant_remainder_by_seven(%word: i32, %position: ind
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @constant_remainder_by_seven(%word: reg<spirv.id : i32>, %bounded: reg<spirv.id : index>) -> (reg<spirv.id : i32>, reg<spirv.id : index>, reg<spirv.id : i32>, reg<spirv.id : index>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @constant_remainder_by_seven(%word: reg<spirv.id : i32>, %bounded: reg<spirv.id : index>) -> (reg<spirv.id : i32>, reg<spirv.id : index>, reg<spirv.id : i32>, reg<spirv.id : index>) asm {
   %word_divisor = OpConstant.i32 7
   %index_divisor = OpConstant.i32 7 : reg<spirv.id : index>
   %19 = OpBitcast.i32.u32 %word

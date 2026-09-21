@@ -373,7 +373,6 @@ loom_cc_library(
 
 loom_cc_library(
     name = "check_provider",
-    testonly = True,
     srcs = [
         "check/array_plan.c",
         "check/leaf.c",
@@ -384,6 +383,7 @@ loom_cc_library(
         "check/leaf.h",
         "check/provider.h",
     ],
+    visibility = ["//loom/src/loom/tools/loom-check:__pkg__"],
     deps = [
         ":array_plan",
         ":array_program",
@@ -524,8 +524,6 @@ loom_check_test_suite(
         "test/source_low/vector_structural.loom-test",
     ],
     data = [
-        "//loom/src/loom/ops/pipeline/test:output_record_shapes.loom-test",
-        "//loom/src/loom/test/corpus/pipeline:record_shapes.loom-test",
         "//loom/src/loom/test/corpus/source_low:callable_values.loom-test",
         "//loom/src/loom/test/corpus/source_low:carried_counter_store.loom-test",
         "//loom/src/loom/test/corpus/source_low:lookup_table.loom-test",

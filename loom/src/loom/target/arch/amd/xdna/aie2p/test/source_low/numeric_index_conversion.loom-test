@@ -1,10 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_index_conversion.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
 // XFAIL: AIE2P 32-bit offset carriers cannot represent INT64_MAX
-aie2p.target<core> @target
-
-func.def target(@target) @index_constants() -> (index, index, offset) {
+func.def @index_constants() -> (index, index, offset) {
   %minimum = index.constant -2147483648 : index
   %maximum = index.constant 2147483647 : index
   %byte_limit = index.constant 9223372036854775807 : offset
@@ -13,23 +11,19 @@ func.def target(@target) @index_constants() -> (index, index, offset) {
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @index_assume_ordinals(%coordinate0: index, %byte_offset0: offset) -> (index, offset) {
+func.def @index_assume_ordinals(%coordinate0: index, %byte_offset0: offset) -> (index, offset) {
   %coordinate, %byte_offset = index.assume %coordinate0, %byte_offset0 [range(%coordinate0, 0, 1024), range(%byte_offset0, 0, 4096)] : index, offset
   func.return %coordinate, %byte_offset : index, offset
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_assume_ordinals(%coordinate: reg<aie2p.er>, %byte_offset: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @index_assume_ordinals(%coordinate: reg<aie2p.er>, %byte_offset: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
   return %coordinate, %byte_offset
 }
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @boolean_address_cast_family(%flag: i1, %coordinate: index, %byte_offset: offset) -> (index, offset, i1, i1) {
+func.def @boolean_address_cast_family(%flag: i1, %coordinate: index, %byte_offset: offset) -> (index, offset, i1, i1) {
   %flag_index = index.cast %flag : i1 to index
   %flag_offset = index.cast %flag : i1 to offset
   %index_low_bit = index.cast %coordinate : index to i1
@@ -38,7 +32,7 @@ func.def target(@target) @boolean_address_cast_family(%flag: i1, %coordinate: in
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @boolean_address_cast_family(%flag_offset: reg<aie2p.er>, %coordinate: reg<aie2p.er>, %byte_offset: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @boolean_address_cast_family(%flag_offset: reg<aie2p.er>, %coordinate: reg<aie2p.er>, %byte_offset: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
   %18 = mov.short 1
   %index_low_bit = and %coordinate, %18
   %offset_low_bit = and %byte_offset, %18
@@ -47,9 +41,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @boolean_
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @index_payload_cast_family(%i8: i8, %i16: i16, %i32: i32, %i64_raw: i64, %coordinate: index) -> (index, index, index, index, i8, i16, i32, i64) {
+func.def @index_payload_cast_family(%i8: i8, %i16: i16, %i32: i32, %i64_raw: i64, %coordinate: index) -> (index, index, index, index, i8, i16, i32, i64) {
   %i64 = scalar.assume %i64_raw [range(%i64_raw, -2147483648, 2147483647)] : i64
   %from_i8 = index.cast %i8 : i8 to index
   %from_i16 = index.cast %i16 : i16 to index
@@ -63,7 +55,7 @@ func.def target(@target) @index_payload_cast_family(%i8: i8, %i16: i16, %i32: i3
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_payload_cast_family(%i8: reg<aie2p.er>, %i16: reg<aie2p.er>, %from_i32: reg<aie2p.er>, %i64: reg<aie2p.er x2>, %to_i32: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @index_payload_cast_family(%i8: reg<aie2p.er>, %i16: reg<aie2p.er>, %from_i32: reg<aie2p.er>, %i64: reg<aie2p.er x2>, %to_i32: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er x2>) asm {
   %from_i8 = extend.s8 %i8
   %from_i16 = extend.s16 %i16
   %from_i64 = slice %i64[0] : reg<aie2p.er x2> -> reg<aie2p.er>
@@ -76,9 +68,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @index_pa
 // ====
 
 // XFAIL: source facts do not prove the value fits AIE2P's 32-bit offset carrier
-aie2p.target<core> @target
-
-func.def target(@target) @offset_payload_cast_family(%i8: i8, %i16: i16, %i32: i32, %i64_raw: i64, %byte_offset: offset) -> (offset, offset, offset, offset, i8, i16, i32, i64) {
+func.def @offset_payload_cast_family(%i8: i8, %i16: i16, %i32: i32, %i64_raw: i64, %byte_offset: offset) -> (offset, offset, offset, offset, i8, i16, i32, i64) {
   %i64 = scalar.assume %i64_raw [range(%i64_raw, 0, 9223372036854775807)] : i64
   %from_i8 = index.cast %i8 : i8 to offset
   %from_i16 = index.cast %i16 : i16 to offset
@@ -93,9 +83,7 @@ func.def target(@target) @offset_payload_cast_family(%i8: i8, %i16: i16, %i32: i
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @address_domain_cast_family(%coordinate0: index, %byte_offset0: offset) -> (offset, index) {
+func.def @address_domain_cast_family(%coordinate0: index, %byte_offset0: offset) -> (offset, index) {
   %coordinate, %byte_offset = index.assume %coordinate0, %byte_offset0 [range(%coordinate0, 0, 2147483647), range(%byte_offset0, 0, 2147483647)] : index, offset
   %as_offset = index.cast %coordinate : index to offset
   %as_index = index.cast %byte_offset : offset to index
@@ -103,6 +91,6 @@ func.def target(@target) @address_domain_cast_family(%coordinate0: index, %byte_
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @address_domain_cast_family(%as_offset: reg<aie2p.er>, %as_index: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @address_domain_cast_family(%as_offset: reg<aie2p.er>, %as_index: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
   return %as_offset, %as_index
 }

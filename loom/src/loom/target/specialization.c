@@ -425,6 +425,7 @@ static iree_status_t loom_target_specialization_prepare_versions(
             {
                 .type = &loom_target_function_version_type,
                 .function = specialization->function,
+                .flags = LOOM_FUNCTION_VERSION_FLAG_RETAIN,
             },
         .authored_target_name = specialization->authored_target_name,
         .target_requirement_facts =

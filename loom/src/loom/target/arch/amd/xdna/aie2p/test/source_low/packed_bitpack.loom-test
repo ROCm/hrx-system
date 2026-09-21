@@ -1,15 +1,13 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/packed_bitpack.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
-aie2p.target<core> @target
-
-func.def target(@target) @i32x4_to_i8x4_bitpack(%codes: vector<4xi32>) -> (vector<4xi8>) {
+func.def @i32x4_to_i8x4_bitpack(%codes: vector<4xi32>) -> (vector<4xi8>) {
   %packed = vector.bitpack<8> %codes : vector<4xi32> -> vector<4xi8>
   func.return %packed : vector<4xi8>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32x4_to_i8x4_bitpack(%codes: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32x4_to_i8x4_bitpack(%codes: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %34 = vextract.32.imm %codes, 0
   %35 = mov.short 255
   %36 = and %34, %35
@@ -34,15 +32,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32x4_to
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @i32x8_to_i4x8_bitpack(%codes: vector<8xi32>) -> (vector<4xi8>) {
+func.def @i32x8_to_i4x8_bitpack(%codes: vector<8xi32>) -> (vector<4xi8>) {
   %packed = vector.bitpack<4> %codes : vector<8xi32> -> vector<4xi8>
   func.return %packed : vector<4xi8>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32x8_to_i4x8_bitpack(%codes: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32x8_to_i4x8_bitpack(%codes: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %58 = vextract.32.imm %codes, 0
   %59 = mov.short 15
   %60 = and %58, %59
@@ -84,15 +80,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32x8_to
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @i32x16_to_i2x16_bitpack(%codes: vector<16xi32>) -> (vector<4xi8>) {
+func.def @i32x16_to_i2x16_bitpack(%codes: vector<16xi32>) -> (vector<4xi8>) {
   %packed = vector.bitpack<2> %codes : vector<16xi32> -> vector<4xi8>
   func.return %packed : vector<4xi8>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32x16_to_i2x16_bitpack(%codes: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32x16_to_i2x16_bitpack(%codes: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %106 = vextract.32.imm %codes, 0
   %107 = mov.short 3
   %108 = and %106, %107
@@ -166,15 +160,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32x16_t
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @i32x32_to_i1x32_bitpack(%mask: vector<32xi32>) -> (vector<4xi8>) {
+func.def @i32x32_to_i1x32_bitpack(%mask: vector<32xi32>) -> (vector<4xi8>) {
   %packed = vector.bitpack<1> %mask : vector<32xi32> -> vector<4xi8>
   func.return %packed : vector<4xi8>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32x32_to_i1x32_bitpack(%mask: reg<aie2p.vec256 x4>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32x32_to_i1x32_bitpack(%mask: reg<aie2p.vec256 x4>) -> (reg<aie2p.vec256 x2>) asm {
   %202 = slice %mask[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
   %203 = vextract.32.imm %202, 0
   %204 = mov.short 1
@@ -317,9 +309,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32x32_t
 // ====
 
 // XFAIL: AIE2P has no GPU workitem-addressed global memory surface
-aie2p.target<core> @target
-
-kernel.def target(@target) @uniform_global_i32x4_to_i8x4_bitpack_store() {
+kernel.def @uniform_global_i32x4_to_i8x4_bitpack_store() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%values: buffer, %output: buffer) {

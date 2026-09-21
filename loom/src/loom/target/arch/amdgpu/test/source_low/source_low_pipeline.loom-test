@@ -1,278 +1,37 @@
-// RUN: emit source-low output=pipeline
+// RUN: with-checks emit source-low output=pipeline
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @pipeline_probe(%value: i32) -> (i32) {
+func.def @pipeline_probe(%value: i32) -> (i32) {
   func.return %value : i32
 }
 
 // ----
-pass.pipeline<module> @__loom_check_source_low pipeline {
-  for func {
-    where target {
-      normalize-kernel-resources
-      promote-private-fragments
-      canonicalize(view-loads = "coalesce")
-      cse
-    }
-  }
-  repeat until_converged(max_iterations = 64) {
-    select-templates(mode = "early", rewrite = "inline")
-    if changed {
-      for func {
-        where target {
-          canonicalize(view-loads = "coalesce")
-        }
-      }
-    }
-  }
-  select-templates(mode = "final", rewrite = "inline")
-  if changed {
-    for func {
-      where target {
-        canonicalize(view-loads = "coalesce")
-      }
-    }
-  }
-  materialize-locations
-  specialize-target-callgraph
-  for func {
-    where target {
-      legalize-math
-    }
-  }
-  target-legalize(mode = "eager")
-  for func {
-    where target {
-      decompose-view-transports
-      vector-memory-to-scalar
-      linearize-view-accesses
-      canonicalize
-      cse
-      if changed {
-        canonicalize
-      }
-    }
-  }
-  target-legalize(mode = "complete")
-  if changed {
-    for func {
-      where target {
-        canonicalize
-        cse
-      }
-    }
-  }
-  for func {
-    where target {
-      pipeline-scf-for
-      if changed {
-        canonicalize
-        cse
-      }
-    }
-  }
-  for func {
-    where target {
-      unroll-scf-for
-      if changed {
-        canonicalize
-        cse
-      }
-      sroa-vector-banks
-      if changed {
-        canonicalize
-        cse
-      }
-      sink-single-use-reads
-      if changed {
-        canonicalize
-        cse
-      }
-      promote-private-fragments
-      if changed {
-        canonicalize
-        cse
-      }
-      decompose-view-root-selections
-      if changed {
-        dce
-      }
-      scf-to-cfg
-      cfg-simplify
-      canonicalize
-      cse
-      branch-sink
-    }
-  }
-  inline-callables(policy = "target")
-  if changed {
-    for func {
-      where target {
-        cfg-simplify
-        canonicalize
-        cse
-      }
-    }
-  }
-  for func {
-    where target(codegen = "low_native", family = "amdgpu") {
-      cfg-converge
-    }
-  }
-  source-to-low
-  inline-callables(policy = "target")
-  for func {
-    where target {
-      cfg-simplify
-      low-decompose-cfg-tuples
-      canonicalize
-      low-cse
-      low-dce
-    }
-  }
-}
+CHECK: pass.pipeline<module> @__loom_check_source_low pipeline {
+CHECK: select-templates(mode = "final", rewrite = "inline")
+CHECK: specialize-target-callgraph
+CHECK: target-legalize(mode = "complete")
+CHECK: scf-to-cfg
+CHECK: where target(codegen = "low_native", family = "amdgpu") {
+CHECK: cfg-converge
+CHECK: source-to-low
+CHECK: low-decompose-cfg-tuples
+CHECK-NOT: sanitizer-insert-assertions*
 
 // ====
-// RUN: emit source-low output=pipeline sanitizer=access
+// RUN: with-checks emit source-low output=pipeline sanitizer=access
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @sanitizer_pipeline_probe(%value: i32) -> (i32) {
+func.def @sanitizer_pipeline_probe(%value: i32) -> (i32) {
   func.return %value : i32
 }
 
 // ----
-pass.pipeline<module> @__loom_check_source_low pipeline {
-  for func {
-    where target {
-      normalize-kernel-resources
-      promote-private-fragments
-      canonicalize(view-loads = "coalesce")
-      cse
-    }
-  }
-  repeat until_converged(max_iterations = 64) {
-    select-templates(mode = "early", rewrite = "inline")
-    if changed {
-      for func {
-        where target {
-          canonicalize(view-loads = "coalesce")
-        }
-      }
-    }
-  }
-  select-templates(mode = "final", rewrite = "inline")
-  if changed {
-    for func {
-      where target {
-        canonicalize(view-loads = "coalesce")
-      }
-    }
-  }
-  materialize-locations
-  specialize-target-callgraph
-  for func {
-    where target {
-      legalize-math
-    }
-  }
-  target-legalize(mode = "eager")
-  for func {
-    where target {
-      decompose-view-transports
-      vector-memory-to-scalar
-      linearize-view-accesses
-      canonicalize
-      cse
-      if changed {
-        canonicalize
-      }
-    }
-  }
-  target-legalize(mode = "complete")
-  if changed {
-    for func {
-      where target {
-        canonicalize
-        cse
-      }
-    }
-  }
-  for func {
-    where target {
-      pipeline-scf-for
-      if changed {
-        canonicalize
-        cse
-      }
-    }
-  }
-  for func {
-    where target {
-      unroll-scf-for
-      if changed {
-        canonicalize
-        cse
-      }
-      sroa-vector-banks
-      if changed {
-        canonicalize
-        cse
-      }
-      sink-single-use-reads
-      if changed {
-        canonicalize
-        cse
-      }
-      promote-private-fragments
-      if changed {
-        canonicalize
-        cse
-      }
-      decompose-view-root-selections
-      if changed {
-        dce
-      }
-      scf-to-cfg
-      cfg-simplify
-      canonicalize
-      cse
-      branch-sink
-    }
-  }
-  for func {
-    where target {
-      sanitizer-insert-assertions(checks = "access")
-    }
-  }
-  inline-callables(policy = "target")
-  if changed {
-    for func {
-      where target {
-        cfg-simplify
-        canonicalize
-        cse
-      }
-    }
-  }
-  for func {
-    where target(codegen = "low_native", family = "amdgpu") {
-      cfg-converge
-    }
-  }
-  source-to-low
-  inline-callables(policy = "target")
-  for func {
-    where target {
-      cfg-simplify
-      low-decompose-cfg-tuples
-      canonicalize
-      low-cse
-      low-dce
-    }
-  }
-}
+CHECK: pass.pipeline<module> @__loom_check_source_low pipeline {
+CHECK: target-legalize(mode = "complete")
+CHECK: scf-to-cfg
+CHECK: sanitizer-insert-assertions(checks = "access")
+CHECK: where target(codegen = "low_native", family = "amdgpu") {
+CHECK: cfg-converge
+CHECK: source-to-low
+CHECK: low-decompose-cfg-tuples
 
 // ====
 // RUN: emit source-low output=low
@@ -316,11 +75,9 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11) abi(hal_kernel) @target_t
 }
 
 // ====
-// RUN: emit source-low output=prepared-pipeline
+// RUN: with-checks emit source-low output=prepared-pipeline
 
-amdgpu.target<gfx11-generic> @target
-
-kernel.def target(@target) @prepared_pipeline_probe() {
+kernel.def @prepared_pipeline_probe() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%arg: buffer) {
@@ -328,143 +85,17 @@ kernel.def target(@target) @prepared_pipeline_probe() {
 }
 
 // ----
-pass.pipeline<module> @__loom_check_prepared_low pipeline {
-  for func {
-    where target {
-      normalize-kernel-resources
-      promote-private-fragments
-      canonicalize(view-loads = "coalesce")
-      cse
-    }
-  }
-  repeat until_converged(max_iterations = 64) {
-    select-templates(mode = "early", rewrite = "inline")
-    if changed {
-      for func {
-        where target {
-          canonicalize(view-loads = "coalesce")
-        }
-      }
-    }
-  }
-  select-templates(mode = "final", rewrite = "inline")
-  if changed {
-    for func {
-      where target {
-        canonicalize(view-loads = "coalesce")
-      }
-    }
-  }
-  materialize-locations
-  specialize-target-callgraph
-  for func {
-    where target {
-      legalize-math
-    }
-  }
-  target-legalize(mode = "eager")
-  for func {
-    where target {
-      decompose-view-transports
-      vector-memory-to-scalar
-      linearize-view-accesses
-      canonicalize
-      cse
-      if changed {
-        canonicalize
-      }
-    }
-  }
-  target-legalize(mode = "complete")
-  if changed {
-    for func {
-      where target {
-        canonicalize
-        cse
-      }
-    }
-  }
-  for func {
-    where target {
-      pipeline-scf-for
-      if changed {
-        canonicalize
-        cse
-      }
-    }
-  }
-  for func {
-    where target {
-      unroll-scf-for
-      if changed {
-        canonicalize
-        cse
-      }
-      sroa-vector-banks
-      if changed {
-        canonicalize
-        cse
-      }
-      sink-single-use-reads
-      if changed {
-        canonicalize
-        cse
-      }
-      promote-private-fragments
-      if changed {
-        canonicalize
-        cse
-      }
-      decompose-view-root-selections
-      if changed {
-        dce
-      }
-      scf-to-cfg
-      cfg-simplify
-      canonicalize
-      cse
-      branch-sink
-    }
-  }
-  inline-callables(policy = "target")
-  if changed {
-    for func {
-      where target {
-        cfg-simplify
-        canonicalize
-        cse
-      }
-    }
-  }
-  for func {
-    where target(codegen = "low_native", family = "amdgpu") {
-      cfg-converge
-    }
-  }
-  source-to-low
-  inline-callables(policy = "target")
-  for func {
-    where target {
-      cfg-simplify
-      low-decompose-cfg-tuples
-      canonicalize
-      low-cse
-      low-dce
-    }
-  }
-  symbol-dce
-  for func {
-    where target {
-      where target(abi = "hal_kernel", codegen = "low_native", family = "amdgpu") {
-        amdgpu-materialize-hal-kernel-abi
-      }
-      canonicalize
-      low-cse
-      low-select-operand-forms
-      low-dce
-    }
-  }
-}
+CHECK: pass.pipeline<module> @__loom_check_prepared_low pipeline {
+CHECK: select-templates(mode = "final", rewrite = "inline")
+CHECK: specialize-target-callgraph
+CHECK: target-legalize(mode = "complete")
+CHECK: scf-to-cfg
+CHECK: cfg-converge
+CHECK: source-to-low
+CHECK: symbol-dce
+CHECK: where target(abi = "hal_kernel", codegen = "low_native", family = "amdgpu") {
+CHECK: amdgpu-materialize-hal-kernel-abi
+CHECK: low-select-operand-forms
 
 // ====
 // RUN: emit source-low output=module

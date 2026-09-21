@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_unsigned_constant_division.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amdgpu:gfx1151 output=low
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @quotient_by_three(%input: i32) -> (i32) {
+func.def @quotient_by_three(%input: i32) -> (i32) {
   %divisor = scalar.constant 3 : i32
   // ERROR@+1: TARGET/001 {op_name="scalar.divui"}
   %quotient = scalar.divui %input, %divisor : i32
@@ -12,9 +10,7 @@ func.def target(@target) @quotient_by_three(%input: i32) -> (i32) {
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @quotient_by_seven(%input: i32) -> (i32) {
+func.def @quotient_by_seven(%input: i32) -> (i32) {
   %divisor = scalar.constant 7 : i32
   // ERROR@+1: TARGET/001 {op_name="scalar.divui"}
   %quotient = scalar.divui %input, %divisor : i32
@@ -23,16 +19,14 @@ func.def target(@target) @quotient_by_seven(%input: i32) -> (i32) {
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @remainder_by_twenty(%input: i32) -> (i32) {
+func.def @remainder_by_twenty(%input: i32) -> (i32) {
   %divisor = scalar.constant 20 : i32
   %remainder = scalar.remui %input, %divisor : i32
   func.return %remainder : i32
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @remainder_by_twenty(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @remainder_by_twenty(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
   %divisor = s_mov_b32 20
   %7 = s_mov_b32 3435973837
   %8 = s_mul_hi_u32 %input, %7
@@ -45,16 +39,14 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @remainder_by_
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @remainder_by_seven(%input: i32) -> (i32) {
+func.def @remainder_by_seven(%input: i32) -> (i32) {
   %divisor = scalar.constant 7 : i32
   %remainder = scalar.remui %input, %divisor : i32
   func.return %remainder : i32
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @remainder_by_seven(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @remainder_by_seven(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
   %divisor = s_mov_b32 7
   %7 = s_mov_b32 613566757
   %8 = s_mul_hi_u32 %input, %7
@@ -71,9 +63,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @remainder_by_
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @pair_by_twenty(%input: i32) -> (i32, i32) {
+func.def @pair_by_twenty(%input: i32) -> (i32, i32) {
   %divisor = scalar.constant 20 : i32
   // ERROR@+1: TARGET/001 {op_name="scalar.divui"}
   %quotient = scalar.divui %input, %divisor : i32
@@ -83,9 +73,7 @@ func.def target(@target) @pair_by_twenty(%input: i32) -> (i32, i32) {
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @pair_by_seven(%input: i32) -> (i32, i32) {
+func.def @pair_by_seven(%input: i32) -> (i32, i32) {
   %divisor = scalar.constant 7 : i32
   // ERROR@+1: TARGET/001 {op_name="scalar.divui"}
   %quotient = scalar.divui %input, %divisor : i32
@@ -95,9 +83,7 @@ func.def target(@target) @pair_by_seven(%input: i32) -> (i32, i32) {
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @pair_by_one(%input: i32) -> (i32, i32) {
+func.def @pair_by_one(%input: i32) -> (i32, i32) {
   %divisor = scalar.constant 1 : i32
   %quotient = scalar.divui %input, %divisor : i32
   %remainder = scalar.remui %input, %divisor : i32
@@ -105,16 +91,14 @@ func.def target(@target) @pair_by_one(%input: i32) -> (i32, i32) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @pair_by_one(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @pair_by_one(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
   %remainder = s_mov_b32 0
   return %input, %remainder
 }
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @pair_by_power_of_two(%input: i32) -> (i32, i32) {
+func.def @pair_by_power_of_two(%input: i32) -> (i32, i32) {
   %divisor = scalar.constant 16 : i32
   %quotient = scalar.divui %input, %divisor : i32
   %remainder = scalar.remui %input, %divisor : i32
@@ -122,7 +106,7 @@ func.def target(@target) @pair_by_power_of_two(%input: i32) -> (i32, i32) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @pair_by_power_of_two(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @pair_by_power_of_two(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
   %13 = s_mov_b32 4
   %quotient = s_lshr_b32 %input, %13
   %remainder = s_and_b32_rhs_inline %input, 15
@@ -131,9 +115,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @pair_by_power
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @pair_by_high_power_of_two(%input: i32) -> (i32, i32) {
+func.def @pair_by_high_power_of_two(%input: i32) -> (i32, i32) {
   %divisor = scalar.constant -2147483648 : i32
   %quotient = scalar.divui %input, %divisor : i32
   %remainder = scalar.remui %input, %divisor : i32
@@ -141,7 +123,7 @@ func.def target(@target) @pair_by_high_power_of_two(%input: i32) -> (i32, i32) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @pair_by_high_power_of_two(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @pair_by_high_power_of_two(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
   %13 = s_mov_b32 31
   %quotient = s_lshr_b32 %input, %13
   %remainder = s_and_b32_lit %input, 2147483647
@@ -150,9 +132,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @pair_by_high_
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @pair_by_high_bit(%input: i32) -> (i32, i32) {
+func.def @pair_by_high_bit(%input: i32) -> (i32, i32) {
   %divisor = scalar.constant -2147483647 : i32
   // ERROR@+1: TARGET/001 {op_name="scalar.divui"}
   %quotient = scalar.divui %input, %divisor : i32
@@ -162,9 +142,7 @@ func.def target(@target) @pair_by_high_bit(%input: i32) -> (i32, i32) {
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @pair_by_largest(%input: i32) -> (i32, i32) {
+func.def @pair_by_largest(%input: i32) -> (i32, i32) {
   %divisor = scalar.constant -1 : i32
   // ERROR@+1: TARGET/001 {op_name="scalar.divui"}
   %quotient = scalar.divui %input, %divisor : i32
@@ -174,9 +152,7 @@ func.def target(@target) @pair_by_largest(%input: i32) -> (i32, i32) {
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @pair_below_high_bit(%input: i32) -> (i32, i32) {
+func.def @pair_below_high_bit(%input: i32) -> (i32, i32) {
   %divisor = scalar.constant 2147483647 : i32
   // ERROR@+1: TARGET/001 {op_name="scalar.divui"}
   %quotient = scalar.divui %input, %divisor : i32
@@ -186,9 +162,7 @@ func.def target(@target) @pair_below_high_bit(%input: i32) -> (i32, i32) {
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @runtime_divisor(%input: i32, %divisor: i32) -> (i32, i32) {
+func.def @runtime_divisor(%input: i32, %divisor: i32) -> (i32, i32) {
   %quotient = scalar.divui %input, %divisor : i32
   // ERROR@+1: TARGET/003 {op_name="scalar.remui", subject_role="divisor", subject_name="u32", constraint_key="amdgpu.divisor.positive_u32"}
   %remainder = scalar.remui %input, %divisor : i32
@@ -197,9 +171,7 @@ func.def target(@target) @runtime_divisor(%input: i32, %divisor: i32) -> (i32, i
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @index_pair_by_7(%input: index) -> (index, index) {
+func.def @index_pair_by_7(%input: index) -> (index, index) {
   %bounded = index.assume %input [range(%input, 0, 4294967295)] : index
   %divisor = index.constant 7 : index
   %quotient = index.div %bounded, %divisor : index
@@ -208,7 +180,7 @@ func.def target(@target) @index_pair_by_7(%input: index) -> (index, index) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @index_pair_by_7(%bounded: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @index_pair_by_7(%bounded: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
   %divisor = s_mov_b32 7
   %11 = s_mov_b32 613566757
   %12 = s_mul_hi_u32 %bounded, %11
@@ -229,9 +201,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @index_pair_by
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @index_pair_by_20(%input: index) -> (index, index) {
+func.def @index_pair_by_20(%input: index) -> (index, index) {
   %bounded = index.assume %input [range(%input, 0, 4294967295)] : index
   %divisor = index.constant 20 : index
   %quotient = index.div %bounded, %divisor : index
@@ -240,7 +210,7 @@ func.def target(@target) @index_pair_by_20(%input: index) -> (index, index) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @index_pair_by_20(%bounded: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @index_pair_by_20(%bounded: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
   %divisor = s_mov_b32 20
   %11 = s_mov_b32 3435973837
   %12 = s_mul_hi_u32 %bounded, %11
@@ -254,9 +224,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @index_pair_by
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @index_boundary_pairs(%input: index) -> (index, index, index, index) {
+func.def @index_boundary_pairs(%input: index) -> (index, index, index, index) {
   %bounded = index.assume %input [range(%input, 0, 4294967295)] : index
   %power = index.constant 2147483648 : index
   %largest = index.constant 4294967295 : index
@@ -268,7 +236,7 @@ func.def target(@target) @index_boundary_pairs(%input: index) -> (index, index, 
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @index_boundary_pairs(%bounded: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @index_boundary_pairs(%bounded: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
   %largest = s_mov_b32 4294967295
   %22 = s_mov_b32 31
   %power_quotient = s_lshr_b32 %bounded, %22

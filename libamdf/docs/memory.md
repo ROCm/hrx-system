@@ -619,6 +619,39 @@ through registration and every device use. An application importing external
 memory follows the transport's ownership contract. Both then operate with
 handles and ranges through the same scope-based interface.
 
+A server can hand a shared host pool to an accelerator worker without copying
+its payload or keeping the originating process alive. Native handle transfer
+establishes the worker's independent host mapping; REGISTER establishes device
+access to that mapping. An ordinary shared-file or section handle belongs to
+the OS mapping layer, not a device-specific external-memory import format.
+
+1. The worker initializes its selected devices and queries a SYSTEM scope's
+   REGISTER profile for the complete consumer set. The profile supplies the
+   source-pointer alignment, length granularity and accepted cacheability.
+2. The producer creates compatible shared backing and transfers its native
+   handle. The worker opens an independent mapping and acknowledges import
+   before the producer releases its mapping and handle. Send completion alone
+   does not establish receiver ownership on every platform.
+3. The worker calls `memory_create` with the queried profile, its own mapped
+   base, the pool extent and `registered_host_cacheability`. One memory handle
+   represents the registered pool; buffer ranges are offsets into it.
+4. The worker resolves device addresses from that handle and its access
+   ordinals. Requests identify pool ranges and dependencies, not another
+   process's pointers. Registration and address resolution stay outside the
+   per-request dispatch path.
+5. The worker applies the queried visibility operations, executes work, and
+   establishes checked device completion before publishing results or recycling
+   ranges. It releases its host views and registration before unmapping the
+   pool; the devices remain live through registration teardown.
+
+The producer can release its ownership after the handoff because the worker
+owns an independent mapping. This does not extend any libamdf device lifetime.
+The application retains the whole pool through device use and manages its own
+suballocations. A transient message payload span is a different contract: it
+supplies only its leased bytes, not ownership of surrounding pages suitable for
+registration. Persistent registered pools keep data ownership separate from
+connection and message lifetimes.
+
 The memory ABI establishes native address mappings as part of construction. It
 does not expose separate virtual-address reservation, alias/remap operations or
 live budget accounting. Those are distinct services, not hidden side effects

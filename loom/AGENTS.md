@@ -275,9 +275,11 @@ stack into each unit-test executable.
 
 Positive source-lowering regressions with a shared source contract belong in
 the [common corpus](src/loom/test/corpus/source_low/README.md). Target fixtures
-consume them through `TEMPLATE`, retaining their own profiles, lowering modes,
-and output assertions. A bug discovered on one backend contributes coverage to
-every applicable backend: supported lowering or an exercised, precise
+consume them through `TEMPLATE`, which copies the authoritative source without
+declaration overlays or semantic additions. Target profiles are compiler options
+in RUN directives; target fixtures own lowering modes and output assertions.
+A bug discovered on one backend contributes coverage to every applicable backend:
+supported lowering or an exercised, precise
 unsupported diagnostic for a missing implementation. Architectural
 non-applicability is different: entirely inapplicable corpora need no target
 fixture, and mixed fixtures use `TEMPLATE-EXCLUDE: @case <reason>` for the exact

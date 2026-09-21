@@ -1,0 +1,145 @@
+// Updates execute through native launches with exact values and guard cells.
+kernel.decl @storage_words_kernel() launch(%storage: buffer, %output: buffer)
+
+kernel.decl @storage_volatile_kernel() launch(%storage: buffer, %output: buffer)
+
+kernel.decl @storage_bytes_kernel() launch(%storage: buffer, %output: buffer)
+
+kernel.decl @storage_signed_kernel() launch(%storage: buffer, %output: buffer)
+
+kernel.decl @storage_floats_kernel() launch(%storage: buffer, %output: buffer)
+
+check.case @words_values {
+  %storage = check.generate.fill value(37) : tensor<4xi32>
+  %output = check.generate.fill value(37) : tensor<3xi32>
+  kernel.launch @storage_words_kernel(%storage, %output) : (tensor<4xi32>, tensor<3xi32>)
+  %before = check.tensor.view %storage offset(0) : tensor<4xi32> -> tensor<1xi32>
+  %first = check.tensor.view %storage offset(4) : tensor<4xi32> -> tensor<1xi32>
+  %second = check.tensor.view %storage offset(8) : tensor<4xi32> -> tensor<1xi32>
+  %after = check.tensor.view %storage offset(12) : tensor<4xi32> -> tensor<1xi32>
+  %output_before = check.tensor.view %output offset(0) : tensor<3xi32> -> tensor<1xi32>
+  %returned = check.tensor.view %output offset(4) : tensor<3xi32> -> tensor<1xi32>
+  %output_after = check.tensor.view %output offset(8) : tensor<3xi32> -> tensor<1xi32>
+  %guard = check.generate.fill value(37) : tensor<1xi32>
+  %expected_first = check.generate.fill value(38) : tensor<1xi32>
+  %expected_second = check.generate.fill value(12) : tensor<1xi32>
+  %expected_returned = check.generate.fill value(1489) : tensor<1xi32>
+  %output_guard = check.generate.fill value(37) : tensor<1xi32>
+  check.expect.bitwise actual(%before) expected(%guard) : tensor<1xi32>
+  check.expect.bitwise actual(%first) expected(%expected_first) : tensor<1xi32>
+  check.expect.bitwise actual(%second) expected(%expected_second) : tensor<1xi32>
+  check.expect.bitwise actual(%after) expected(%guard) : tensor<1xi32>
+  check.expect.bitwise actual(%returned) expected(%expected_returned) : tensor<1xi32>
+  check.expect.bitwise actual(%output_before) expected(%output_guard) : tensor<1xi32>
+  check.expect.bitwise actual(%output_after) expected(%output_guard) : tensor<1xi32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+check.case @volatile_values {
+  %storage = check.generate.fill value(37) : tensor<4xi32>
+  %output = check.generate.fill value(37) : tensor<3xi32>
+  kernel.launch @storage_volatile_kernel(%storage, %output) : (tensor<4xi32>, tensor<3xi32>)
+  %before = check.tensor.view %storage offset(0) : tensor<4xi32> -> tensor<1xi32>
+  %first = check.tensor.view %storage offset(4) : tensor<4xi32> -> tensor<1xi32>
+  %second = check.tensor.view %storage offset(8) : tensor<4xi32> -> tensor<1xi32>
+  %after = check.tensor.view %storage offset(12) : tensor<4xi32> -> tensor<1xi32>
+  %output_before = check.tensor.view %output offset(0) : tensor<3xi32> -> tensor<1xi32>
+  %returned = check.tensor.view %output offset(4) : tensor<3xi32> -> tensor<1xi32>
+  %output_after = check.tensor.view %output offset(8) : tensor<3xi32> -> tensor<1xi32>
+  %guard = check.generate.fill value(37) : tensor<1xi32>
+  %expected_first = check.generate.fill value(38) : tensor<1xi32>
+  %expected_second = check.generate.fill value(12) : tensor<1xi32>
+  %expected_returned = check.generate.fill value(1489) : tensor<1xi32>
+  %output_guard = check.generate.fill value(37) : tensor<1xi32>
+  check.expect.bitwise actual(%before) expected(%guard) : tensor<1xi32>
+  check.expect.bitwise actual(%first) expected(%expected_first) : tensor<1xi32>
+  check.expect.bitwise actual(%second) expected(%expected_second) : tensor<1xi32>
+  check.expect.bitwise actual(%after) expected(%guard) : tensor<1xi32>
+  check.expect.bitwise actual(%returned) expected(%expected_returned) : tensor<1xi32>
+  check.expect.bitwise actual(%output_before) expected(%output_guard) : tensor<1xi32>
+  check.expect.bitwise actual(%output_after) expected(%output_guard) : tensor<1xi32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+check.case @bytes_values {
+  %storage = check.generate.fill value(37) : tensor<4xi8>
+  %output = check.generate.fill value(37) : tensor<3xi32>
+  kernel.launch @storage_bytes_kernel(%storage, %output) : (tensor<4xi8>, tensor<3xi32>)
+  %before = check.tensor.view %storage offset(0) : tensor<4xi8> -> tensor<1xi8>
+  %first = check.tensor.view %storage offset(1) : tensor<4xi8> -> tensor<1xi8>
+  %second = check.tensor.view %storage offset(2) : tensor<4xi8> -> tensor<1xi8>
+  %after = check.tensor.view %storage offset(3) : tensor<4xi8> -> tensor<1xi8>
+  %output_before = check.tensor.view %output offset(0) : tensor<3xi32> -> tensor<1xi32>
+  %returned = check.tensor.view %output offset(4) : tensor<3xi32> -> tensor<1xi32>
+  %output_after = check.tensor.view %output offset(8) : tensor<3xi32> -> tensor<1xi32>
+  %guard = check.generate.fill value(37) : tensor<1xi8>
+  %expected_first = check.generate.fill value(0) : tensor<1xi8>
+  %expected_second = check.generate.fill value(3) : tensor<1xi8>
+  %expected_returned = check.generate.fill value(555) : tensor<1xi32>
+  %output_guard = check.generate.fill value(37) : tensor<1xi32>
+  check.expect.bitwise actual(%before) expected(%guard) : tensor<1xi8>
+  check.expect.bitwise actual(%first) expected(%expected_first) : tensor<1xi8>
+  check.expect.bitwise actual(%second) expected(%expected_second) : tensor<1xi8>
+  check.expect.bitwise actual(%after) expected(%guard) : tensor<1xi8>
+  check.expect.bitwise actual(%returned) expected(%expected_returned) : tensor<1xi32>
+  check.expect.bitwise actual(%output_before) expected(%output_guard) : tensor<1xi32>
+  check.expect.bitwise actual(%output_after) expected(%output_guard) : tensor<1xi32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+check.case @signed_values {
+  %storage = check.generate.fill value(37) : tensor<4xi8>
+  %output = check.generate.fill value(37) : tensor<3xi32>
+  kernel.launch @storage_signed_kernel(%storage, %output) : (tensor<4xi8>, tensor<3xi32>)
+  %before = check.tensor.view %storage offset(0) : tensor<4xi8> -> tensor<1xi8>
+  %first = check.tensor.view %storage offset(1) : tensor<4xi8> -> tensor<1xi8>
+  %second = check.tensor.view %storage offset(2) : tensor<4xi8> -> tensor<1xi8>
+  %after = check.tensor.view %storage offset(3) : tensor<4xi8> -> tensor<1xi8>
+  %output_before = check.tensor.view %output offset(0) : tensor<3xi32> -> tensor<1xi32>
+  %returned = check.tensor.view %output offset(4) : tensor<3xi32> -> tensor<1xi32>
+  %output_after = check.tensor.view %output offset(8) : tensor<3xi32> -> tensor<1xi32>
+  %guard = check.generate.fill value(37) : tensor<1xi8>
+  %expected_first = check.generate.fill value(63) : tensor<1xi8>
+  %expected_second = check.generate.fill value(-126) : tensor<1xi8>
+  %expected_returned = check.generate.fill value(-12373) : tensor<1xi32>
+  %output_guard = check.generate.fill value(37) : tensor<1xi32>
+  check.expect.bitwise actual(%before) expected(%guard) : tensor<1xi8>
+  check.expect.bitwise actual(%first) expected(%expected_first) : tensor<1xi8>
+  check.expect.bitwise actual(%second) expected(%expected_second) : tensor<1xi8>
+  check.expect.bitwise actual(%after) expected(%guard) : tensor<1xi8>
+  check.expect.bitwise actual(%returned) expected(%expected_returned) : tensor<1xi32>
+  check.expect.bitwise actual(%output_before) expected(%output_guard) : tensor<1xi32>
+  check.expect.bitwise actual(%output_after) expected(%output_guard) : tensor<1xi32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+check.case @floats_values {
+  %storage = check.generate.fill value(37.0) : tensor<4xf32>
+  %output = check.generate.fill value(37.0) : tensor<3xf32>
+  kernel.launch @storage_floats_kernel(%storage, %output) : (tensor<4xf32>, tensor<3xf32>)
+  %before = check.tensor.view %storage offset(0) : tensor<4xf32> -> tensor<1xf32>
+  %first = check.tensor.view %storage offset(4) : tensor<4xf32> -> tensor<1xf32>
+  %second = check.tensor.view %storage offset(8) : tensor<4xf32> -> tensor<1xf32>
+  %after = check.tensor.view %storage offset(12) : tensor<4xf32> -> tensor<1xf32>
+  %output_before = check.tensor.view %output offset(0) : tensor<3xf32> -> tensor<1xf32>
+  %returned = check.tensor.view %output offset(4) : tensor<3xf32> -> tensor<1xf32>
+  %output_after = check.tensor.view %output offset(8) : tensor<3xf32> -> tensor<1xf32>
+  %guard = check.generate.fill value(37.0) : tensor<1xf32>
+  %expected_first = check.generate.fill value(3.25) : tensor<1xf32>
+  %expected_second = check.generate.fill value(-2.0) : tensor<1xf32>
+  %expected_returned = check.generate.fill value(1.5) : tensor<1xf32>
+  %output_guard = check.generate.fill value(37.0) : tensor<1xf32>
+  check.expect.bitwise actual(%before) expected(%guard) : tensor<1xf32>
+  check.expect.bitwise actual(%first) expected(%expected_first) : tensor<1xf32>
+  check.expect.bitwise actual(%second) expected(%expected_second) : tensor<1xf32>
+  check.expect.bitwise actual(%after) expected(%guard) : tensor<1xf32>
+  check.expect.bitwise actual(%returned) expected(%expected_returned) : tensor<1xf32>
+  check.expect.bitwise actual(%output_before) expected(%output_guard) : tensor<1xf32>
+  check.expect.bitwise actual(%output_after) expected(%output_guard) : tensor<1xf32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}

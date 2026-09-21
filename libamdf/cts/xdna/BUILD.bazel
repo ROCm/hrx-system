@@ -42,7 +42,10 @@ amdf_cc_library(
         "//libamdf/cts/util:device_cache",
         "//libamdf/cts/util:provider_headers",
         "//third_party:google_test",
-    ],
+    ] + ([
+        "//libamdf/cts/util:native_event",
+        "//libamdf/cts/util:native_event_headers",
+    ] if name == "kernel_queue" else []),
 ) for name in [
     "kernel_queue",
     "memory",

@@ -299,8 +299,10 @@ typedef struct amdf_xdna_kernel_queue_create_info_t {
   const void* next;
   /// Endpoint-local XDNA family supporting kernel publication.
   uint32_t queue_family_ordinal;
-  /// Reserved for compatible growth and must be zero.
-  uint32_t reserved;
+  /// Maximum accepted submissions that may remain unretired, or zero for
+  /// AMDF_KERNEL_QUEUE_DEFAULT_PENDING_SUBMISSION_COUNT. Native packet/result
+  /// storage for this capacity is allocated before creation returns.
+  uint32_t maximum_pending_submission_count;
 } amdf_xdna_kernel_queue_create_info_t;
 
 /// One caller-owned target-native instruction range.
@@ -406,7 +408,7 @@ typedef struct amdf_xdna_api_t {
   /// grant EXECUTE access. Caller writes must be published before submission;
   /// libamdf neither reads, copies nor modifies instruction bytes. The native
   /// provider fills its preallocated transport packet with address and length.
-  /// Submission performs no allocation, format parsing, lowering, relocation,
+  /// The library performs no allocation, format parsing, lowering, relocation,
   /// binding resolution, native submission retry, sleep or host wait. Native
   /// retirement consumes the command result. The caller keeps instruction
   /// memory live until retirement; libamdf neither retains nor tracks it.
@@ -417,10 +419,21 @@ typedef struct amdf_xdna_api_t {
   ///
   /// This hot path takes no library lock and performs no lazy initialization,
   /// mapping, pinning or indirect-buffer scan. It is thread-safe with other
-  /// submissions and progress operations. Queue-slot contention returns BUSY
-  /// rather than waiting. This is not a wait-free guarantee. Native publication
-  /// may enter the driver and publish the queue-owned packet's cache lines, not
-  /// the caller's instruction or data bytes.
+  /// submissions and progress operations. Concurrent publication returns BUSY
+  /// rather than waiting; its claim ends at native acceptance, not execution
+  /// completion. At the configured pending bound, a nonblocking native refresh
+  /// and checked result consumption reclaim completed packet slots before
+  /// returning BUSY if capacity remains unavailable. No intermediate host wait
+  /// is required. Native resource exhaustion can reject work earlier.
+  /// Returned points increase within this queue, without a caller-visible
+  /// starting value or dense-numbering guarantee. Waiting for one point covers
+  /// earlier accepted commands, not independently scheduled descendants.
+  /// This is not a wait-free guarantee. Native publication can block acquiring
+  /// driver admission credits even when library packet capacity remains. It
+  /// may publish queue-owned packet cache lines, not caller instruction/data
+  /// bytes. Preserving the first native completion identity can require a
+  /// one-time fence transfer after acceptance and before later publication;
+  /// its native storage is already prepared at queue creation.
   amdf_status_t(AMDF_CALL* kernel_queue_submit)(
       amdf_kernel_queue_t* queue,
       const amdf_xdna_kernel_queue_submission_info_t* submission_info,

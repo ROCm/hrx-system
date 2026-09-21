@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_access_flags.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=x86:avx2 output=low
 
-x86.target<avx2> @target
-
-func.def target(@target) @observe_scalar(%input: buffer) -> (i32, i32) {
+func.def @observe_scalar(%input: buffer) -> (i32, i32) {
   %base = index.constant 0 : offset
   %aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %source = buffer.view %aligned[%base] : buffer -> view<1xi32>
@@ -13,7 +11,7 @@ func.def target(@target) @observe_scalar(%input: buffer) -> (i32, i32) {
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @observe_scalar(%source: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @observe_scalar(%source: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr32>) asm {
   %first = mov.load.gpr32<volatile> %source {disp32 = 0}
   %second = mov.load.gpr32<volatile> %source {disp32 = 0}
   return %first, %second
@@ -21,9 +19,7 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @observe_scalar
 
 // ====
 
-x86.target<avx2> @target
-
-func.def target(@target) @observe_unused(%input: buffer) {
+func.def @observe_unused(%input: buffer) {
   %base = index.constant 0 : offset
   %aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %source = buffer.view %aligned[%base] : buffer -> view<2xi32>
@@ -33,7 +29,7 @@ func.def target(@target) @observe_unused(%input: buffer) {
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @observe_unused(%source: reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @observe_unused(%source: reg<x86.gpr64>) asm {
   %first = mov.load.gpr32<volatile> %source {disp32 = 0}
   %second = mov.load.gpr32<volatile> %source {disp32 = 4}
   return
@@ -41,9 +37,7 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @observe_unused
 
 // ====
 
-x86.target<avx2> @target
-
-func.def target(@target) @repeat_store(%output: buffer, %value: i32) {
+func.def @repeat_store(%output: buffer, %value: i32) {
   %base = index.constant 0 : offset
   %aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
   %destination = buffer.view %aligned[%base] : buffer -> view<1xi32>
@@ -53,7 +47,7 @@ func.def target(@target) @repeat_store(%output: buffer, %value: i32) {
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @repeat_store(%destination: reg<x86.gpr64>, %value: reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @repeat_store(%destination: reg<x86.gpr64>, %value: reg<x86.gpr32>) asm {
   mov.store.gpr32<volatile> %value, %destination {disp32 = 0}
   mov.store.gpr32<volatile> %value, %destination {disp32 = 0}
   return
@@ -61,9 +55,7 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @repeat_store(%
 
 // ====
 
-x86.target<avx2> @target
-
-func.def target(@target) @observe_vector(%input: buffer, %output: buffer) {
+func.def @observe_vector(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %source_aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
   %destination_aligned = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
@@ -77,7 +69,7 @@ func.def target(@target) @observe_vector(%input: buffer, %output: buffer) {
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @observe_vector(%source: reg<x86.gpr64>, %destination: reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @observe_vector(%source: reg<x86.gpr64>, %destination: reg<x86.gpr64>) asm {
   %109 = mov.load.gpr32<volatile> %source {disp32 = 0}
   %110 = mov.load.gpr32<volatile> %source {disp32 = 4}
   %111 = mov.load.gpr32<volatile> %source {disp32 = 8}
@@ -148,9 +140,7 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @observe_vector
 // ====
 
 // XFAIL: Scalar i8 view loads and stores lack x86 carrier lowering.
-x86.target<avx2> @target
-
-func.def target(@target) @observe_byte(%input: buffer, %output: buffer) {
+func.def @observe_byte(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %source = buffer.view %input[%base] : buffer -> view<1xi8>
   %destination = buffer.view %output[%base] : buffer -> view<2xi8>
@@ -163,9 +153,7 @@ func.def target(@target) @observe_byte(%input: buffer, %output: buffer) {
 
 // ====
 
-x86.target<avx2> @target
-
-func.def target(@target) @observe_dynamic_address(%input: buffer, %byte_offset: offset) -> (i32, i32) {
+func.def @observe_dynamic_address(%input: buffer, %byte_offset: offset) -> (i32, i32) {
   %base = index.assume %byte_offset [range(%byte_offset, 0, 4092), mul(%byte_offset, 4)] : offset
   %aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %source = buffer.view %aligned[%base] : buffer -> view<2xi32>
@@ -175,7 +163,7 @@ func.def target(@target) @observe_dynamic_address(%input: buffer, %byte_offset: 
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @observe_dynamic_address(%source: reg<x86.gpr64>, %base: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @observe_dynamic_address(%source: reg<x86.gpr64>, %base: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr32>) asm {
   %first = mov.load.indexed.gpr32<volatile> %source, %base {disp32 = 0, scale = 1}
   %second = mov.load.indexed.gpr32<volatile> %source, %base {disp32 = 4, scale = 1}
   return %first, %second
@@ -183,9 +171,7 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @observe_dynami
 
 // ====
 
-x86.target<avx2> @target
-
-func.def target(@target) @ordinary_scalar(%input: buffer) -> (i32, i32) {
+func.def @ordinary_scalar(%input: buffer) -> (i32, i32) {
   %base = index.constant 0 : offset
   %aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %source = buffer.view %aligned[%base] : buffer -> view<1xi32>
@@ -195,7 +181,7 @@ func.def target(@target) @ordinary_scalar(%input: buffer) -> (i32, i32) {
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @ordinary_scalar(%source: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) @ordinary_scalar(%source: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr32>) asm {
   %first = mov.load.gpr32 %source {disp32 = 0}
   return %first, %first
 }

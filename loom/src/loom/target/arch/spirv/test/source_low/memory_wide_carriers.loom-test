@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_wide_carriers.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=spirv:vulkan1.3+bda output=low
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @copy_wide_origin_vectors(%input: buffer, %output: buffer, %byte_offset_input: i64) {
+func.def @copy_wide_origin_vectors(%input: buffer, %output: buffer, %byte_offset_input: i64) {
   %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
   %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
   %byte_offset = scalar.assume %byte_offset_input [range(%byte_offset_input, 0, 4096), mul(%byte_offset_input, 64)] : i64
@@ -19,7 +17,7 @@ func.def target(@target) @copy_wide_origin_vectors(%input: buffer, %output: buff
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @copy_wide_origin_vectors(%source: reg<spirv.ptr.storage_buffer>, %destination: reg<spirv.ptr.storage_buffer>, %byte_offset: reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @copy_wide_origin_vectors(%source: reg<spirv.ptr.storage_buffer>, %destination: reg<spirv.ptr.storage_buffer>, %byte_offset: reg<spirv.id : i64>) asm {
   %prefix = OpConstant.i64 64
   %source_origin = OpIAdd.i64 %byte_offset, %prefix
   %source_offset = OpBitcast.i64.offset64 %source_origin
@@ -138,9 +136,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @copy_w
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @copy_wide_origin_scalar(%input: buffer, %output: buffer, %byte_offset_input: i64) {
+func.def @copy_wide_origin_scalar(%input: buffer, %output: buffer, %byte_offset_input: i64) {
   %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
   %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
   %byte_offset = scalar.assume %byte_offset_input [range(%byte_offset_input, 0, 4096), mul(%byte_offset_input, 64)] : i64
@@ -156,7 +152,7 @@ func.def target(@target) @copy_wide_origin_scalar(%input: buffer, %output: buffe
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @copy_wide_origin_scalar(%source: reg<spirv.ptr.storage_buffer>, %destination: reg<spirv.ptr.storage_buffer>, %byte_offset: reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @copy_wide_origin_scalar(%source: reg<spirv.ptr.storage_buffer>, %destination: reg<spirv.ptr.storage_buffer>, %byte_offset: reg<spirv.id : i64>) asm {
   %prefix = OpConstant.i64 64
   %source_origin = OpIAdd.i64 %byte_offset, %prefix
   %source_offset = OpBitcast.i64.offset64 %source_origin
@@ -170,9 +166,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @copy_w
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @exchange_wide_origin(%buffer: buffer, %base_input: i64, %position_input: index, %value: i32) -> (i32) {
+func.def @exchange_wide_origin(%buffer: buffer, %base_input: i64, %position_input: index, %value: i32) -> (i32) {
   %aligned_buffer = buffer.assume.alignment %buffer {minimum_alignment = 8} : buffer
   %wide_base = scalar.assume %base_input [range(%base_input, 0, 128), mul(%base_input, 8)] : i64
   %base = index.cast %wide_base : i64 to offset
@@ -186,7 +180,7 @@ func.def target(@target) @exchange_wide_origin(%buffer: buffer, %base_input: i64
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @exchange_wide_origin(%aligned_buffer: reg<spirv.ptr.storage_buffer>, %wide_base: reg<spirv.id : i64>, %position: reg<spirv.id : index>, %value: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @exchange_wide_origin(%aligned_buffer: reg<spirv.ptr.storage_buffer>, %wide_base: reg<spirv.id : i64>, %position: reg<spirv.id : index>, %value: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
   %base = OpBitcast.i64.offset64 %wide_base
   %prefix = OpConstant.offset64 16
   %origin = OpIAdd.offset64 %base, %prefix
@@ -203,9 +197,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @exchan
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @exchange_signed_coordinate(%buffer: buffer, %base_input: offset, %position_input: i32, %value: i32) -> (i32) {
+func.def @exchange_signed_coordinate(%buffer: buffer, %base_input: offset, %position_input: i32, %value: i32) -> (i32) {
   %aligned_buffer = buffer.assume.alignment %buffer {minimum_alignment = 8} : buffer
   %base = index.assume %base_input [range(%base_input, 64, 128), mul(%base_input, 8)] : offset
   %signed_position = scalar.assume %position_input [range(%position_input, -8, -1)] : i32

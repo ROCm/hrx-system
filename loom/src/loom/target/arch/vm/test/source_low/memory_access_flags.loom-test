@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_access_flags.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=vm:core output=low
 
-vm.target<core> @target
-
-func.def target(@target) @observe_scalar(%input: buffer) -> (i32, i32) {
+func.def @observe_scalar(%input: buffer) -> (i32, i32) {
   %base = index.constant 0 : offset
   %aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %source = buffer.view %aligned[%base] : buffer -> view<1xi32>
@@ -13,7 +11,7 @@ func.def target(@target) @observe_scalar(%input: buffer) -> (i32, i32) {
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @observe_scalar(%source: reg<vm.ref : buffer>) -> (reg<vm.value : i32>, reg<vm.value : i32>) asm {
+low.func.def target<vm.core> abi(vm_function) @observe_scalar(%source: reg<vm.ref : buffer>) -> (reg<vm.value : i32>, reg<vm.value : i32>) asm {
   %11 = constant.i64 0
   %first = buffer.load<volatile> %source, %11, %11, 0, "i32.x1" : reg<vm.value : i32>
   %second = buffer.load<volatile> %source, %11, %11, 0, "i32.x1" : reg<vm.value : i32>
@@ -22,9 +20,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @observe_scalar(%source: 
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @observe_unused(%input: buffer) {
+func.def @observe_unused(%input: buffer) {
   %base = index.constant 0 : offset
   %aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %source = buffer.view %aligned[%base] : buffer -> view<2xi32>
@@ -34,7 +30,7 @@ func.def target(@target) @observe_unused(%input: buffer) {
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @observe_unused(%source: reg<vm.ref : buffer>) asm {
+low.func.def target<vm.core> abi(vm_function) @observe_unused(%source: reg<vm.ref : buffer>) asm {
   %7 = constant.i64 0
   %first = buffer.load<volatile> %source, %7, %7, 0, "i32.x1" : reg<vm.value : i32>
   %9 = constant.i64 4
@@ -44,9 +40,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @observe_unused(%source: 
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @repeat_store(%output: buffer, %value: i32) {
+func.def @repeat_store(%output: buffer, %value: i32) {
   %base = index.constant 0 : offset
   %aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
   %destination = buffer.view %aligned[%base] : buffer -> view<1xi32>
@@ -56,7 +50,7 @@ func.def target(@target) @repeat_store(%output: buffer, %value: i32) {
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @repeat_store(%destination: reg<vm.ref : buffer>, %value: reg<vm.value : i32>) asm {
+low.func.def target<vm.core> abi(vm_function) @repeat_store(%destination: reg<vm.ref : buffer>, %value: reg<vm.value : i32>) asm {
   %7 = constant.i64 0
   buffer.store<volatile> %destination, %7, %7, %value, 0, "i32.x1"
   buffer.store<volatile> %destination, %7, %7, %value, 0, "i32.x1"
@@ -65,9 +59,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @repeat_store(%destinatio
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @observe_vector(%input: buffer, %output: buffer) {
+func.def @observe_vector(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %source_aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
   %destination_aligned = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
@@ -81,7 +73,7 @@ func.def target(@target) @observe_vector(%input: buffer, %output: buffer) {
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @observe_vector(%source: reg<vm.ref : buffer>, %destination: reg<vm.ref : buffer>) asm {
+low.func.def target<vm.core> abi(vm_function) @observe_vector(%source: reg<vm.ref : buffer>, %destination: reg<vm.ref : buffer>) asm {
   %109 = constant.i64 0
   %110 = buffer.load<volatile> %source, %109, %109, 0, "i32.x1" : reg<vm.value : i32>
   %111 = constant.i64 4
@@ -183,9 +175,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @observe_vector(%source: 
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @observe_byte(%input: buffer, %output: buffer) {
+func.def @observe_byte(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %source = buffer.view %input[%base] : buffer -> view<1xi8>
   %destination = buffer.view %output[%base] : buffer -> view<2xi8>
@@ -197,7 +187,7 @@ func.def target(@target) @observe_byte(%input: buffer, %output: buffer) {
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @observe_byte(%source: reg<vm.ref : buffer>, %destination: reg<vm.ref : buffer>) asm {
+low.func.def target<vm.core> abi(vm_function) @observe_byte(%source: reg<vm.ref : buffer>, %destination: reg<vm.ref : buffer>) asm {
   %9 = constant.i64 0
   %first = buffer.load<volatile> %source, %9, %9, 0, "i8.x1" : reg<vm.value : i8>
   %second = buffer.load<volatile> %source, %9, %9, 0, "i8.x1" : reg<vm.value : i8>
@@ -209,9 +199,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @observe_byte(%source: re
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @observe_dynamic_address(%input: buffer, %byte_offset: offset) -> (i32, i32) {
+func.def @observe_dynamic_address(%input: buffer, %byte_offset: offset) -> (i32, i32) {
   %base = index.assume %byte_offset [range(%byte_offset, 0, 4092), mul(%byte_offset, 4)] : offset
   %aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %source = buffer.view %aligned[%base] : buffer -> view<2xi32>
@@ -221,7 +209,7 @@ func.def target(@target) @observe_dynamic_address(%input: buffer, %byte_offset: 
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @observe_dynamic_address(%source: reg<vm.ref : buffer>, %base: reg<vm.value : i64>) -> (reg<vm.value : i32>, reg<vm.value : i32>) asm {
+low.func.def target<vm.core> abi(vm_function) @observe_dynamic_address(%source: reg<vm.ref : buffer>, %base: reg<vm.value : i64>) -> (reg<vm.value : i32>, reg<vm.value : i32>) asm {
   %first = buffer.load<volatile> %source, %base, %base, 0, "i32.x1" : reg<vm.value : i32>
   %14 = constant.i64 4
   %15 = integer.add.i64 %base, %14
@@ -231,9 +219,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @observe_dynamic_address(
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @ordinary_scalar(%input: buffer) -> (i32, i32) {
+func.def @ordinary_scalar(%input: buffer) -> (i32, i32) {
   %base = index.constant 0 : offset
   %aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %source = buffer.view %aligned[%base] : buffer -> view<1xi32>
@@ -243,7 +229,7 @@ func.def target(@target) @ordinary_scalar(%input: buffer) -> (i32, i32) {
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @ordinary_scalar(%source: reg<vm.ref : buffer>) -> (reg<vm.value : i32>, reg<vm.value : i32>) asm {
+low.func.def target<vm.core> abi(vm_function) @ordinary_scalar(%source: reg<vm.ref : buffer>) -> (reg<vm.value : i32>, reg<vm.value : i32>) asm {
   %11 = constant.i64 0
   %first = buffer.load %source, %11, %11, 0, "i32.x1" : reg<vm.value : i32>
   return %first, %first

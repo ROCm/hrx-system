@@ -1,15 +1,13 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_scalar_i64_subtract.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
-aie2p.target<core> @target
-
-func.def target(@target) @uniform_subtract(%lhs: i64, %rhs: i64) -> (i64) {
+func.def @uniform_subtract(%lhs: i64, %rhs: i64) -> (i64) {
   %difference = scalar.subi %lhs, %rhs : i64
   func.return %difference : i64
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @uniform_subtract(%lhs: reg<aie2p.er x2>, %rhs: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @uniform_subtract(%lhs: reg<aie2p.er x2>, %rhs: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
   %7 = slice %lhs[0] : reg<aie2p.er x2> -> reg<aie2p.er>
   %8 = slice %lhs[1] : reg<aie2p.er x2> -> reg<aie2p.er>
   %9 = slice %rhs[0] : reg<aie2p.er x2> -> reg<aie2p.er>
@@ -22,9 +20,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @uniform_
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @constant_subtract(%value: i64) -> (i64, i64, i64) {
+func.def @constant_subtract(%value: i64) -> (i64, i64, i64) {
   %c0 = scalar.constant 0 : i64
   %wide = scalar.constant 4294967297 : i64
   %negated = scalar.subi %c0, %value : i64
@@ -34,7 +30,7 @@ func.def target(@target) @constant_subtract(%value: i64) -> (i64, i64, i64) {
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @constant_subtract(%value: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @constant_subtract(%value: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
   %15 = mov.i32 0
   %18 = mov.i32 1
   %23 = slice %value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
@@ -55,9 +51,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @constant
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @mixed_subtract(%uniform: i64, %values: vector<2xi64>) -> (i64, i64) {
+func.def @mixed_subtract(%uniform: i64, %values: vector<2xi64>) -> (i64, i64) {
   %varying = vector.extract %values[0] : vector<2xi64> -> i64
   %uniform_left = scalar.subi %uniform, %varying : i64
   %uniform_right = scalar.subi %varying, %uniform : i64
@@ -65,7 +59,7 @@ func.def target(@target) @mixed_subtract(%uniform: i64, %values: vector<2xi64>) 
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @mixed_subtract(%uniform: reg<aie2p.er x2>, %values: reg<aie2p.vec256 x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @mixed_subtract(%uniform: reg<aie2p.er x2>, %values: reg<aie2p.vec256 x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
   %varying = vextract.64.imm %values, 0
   %12 = slice %uniform[0] : reg<aie2p.er x2> -> reg<aie2p.er>
   %13 = slice %uniform[1] : reg<aie2p.er x2> -> reg<aie2p.er>

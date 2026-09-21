@@ -40,6 +40,9 @@
 #ifndef LOOM_CHECK_HAVE_TARGET_X86
 #define LOOM_CHECK_HAVE_TARGET_X86 0
 #endif  // LOOM_CHECK_HAVE_TARGET_X86
+#ifndef LOOM_CHECK_HAVE_TARGET_XDNA
+#define LOOM_CHECK_HAVE_TARGET_XDNA 0
+#endif  // LOOM_CHECK_HAVE_TARGET_XDNA
 
 #if LOOM_CHECK_HAVE_EMIT_AMDGPU
 #include "loom/target/arch/amdgpu/check/provider.h"
@@ -62,6 +65,9 @@
 #if LOOM_CHECK_HAVE_TARGET_X86
 #include "loom/target/arch/x86/check/provider.h"
 #endif  // LOOM_CHECK_HAVE_TARGET_X86
+#if LOOM_CHECK_HAVE_TARGET_XDNA
+#include "loom/target/arch/amd/xdna/aie2p/check/provider.h"
+#endif  // LOOM_CHECK_HAVE_TARGET_XDNA
 
 static const loom_check_provider_t* const kLoomCheckProviders[] = {
 #if LOOM_CHECK_HAVE_TEST_PROVIDER
@@ -89,6 +95,9 @@ static const loom_check_provider_t* const kLoomCheckProviders[] = {
 #if LOOM_CHECK_HAVE_TARGET_X86
     &loom_x86_check_provider,
 #endif  // LOOM_CHECK_HAVE_TARGET_X86
+#if LOOM_CHECK_HAVE_TARGET_XDNA
+    &loom_aie2p_check_provider,
+#endif  // LOOM_CHECK_HAVE_TARGET_XDNA
 };
 
 static const loom_check_provider_set_t kLoomCheckProviderSet = {

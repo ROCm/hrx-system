@@ -227,9 +227,8 @@ static iree_status_t hrx_vmm_slab_provider_acquire_slab(
 
   iree_hal_external_buffer_t external_buffer;
   if (iree_status_is_ok(status)) {
-    status = iree_hal_allocator_export_buffer(
-        provider->allocator, slab->virtual_buffer,
-        IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION,
+    status = iree_hal_buffer_export(
+        slab->virtual_buffer, IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION,
         IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE, &external_buffer);
   }
   if (iree_status_is_ok(status) &&

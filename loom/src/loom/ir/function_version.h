@@ -23,6 +23,12 @@ extern "C" {
 
 typedef struct loom_function_version_t loom_function_version_t;
 
+typedef enum loom_function_version_flag_bits_e {
+  // Requested artifact entry retained independently of source visibility.
+  LOOM_FUNCTION_VERSION_FLAG_RETAIN = 1u << 0,
+} loom_function_version_flag_bits_t;
+typedef uint32_t loom_function_version_flags_t;
+
 // Static identity for one compiler-owned function-version representation.
 typedef struct loom_function_version_type_t {
   // Stable diagnostic name for the representation.
@@ -36,6 +42,9 @@ struct loom_function_version_t {
 
   // Current live IR function implementing this version.
   loom_func_like_t function;
+
+  // Invocation-owned lifetime requirements, preserved when IR is replaced.
+  loom_function_version_flags_t flags;
 };
 
 // Borrowed concrete function versions participating in one compilation.

@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_offset_wide.loom-test
-// RUN: emit source-low output=low control-flow=structured-low
+// RUN: emit source-low target=spirv:vulkan1.3+bda+extended-types output=low control-flow=structured-low
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @offset_scale_unbounded(%element: index) -> (offset) {
+func.def @offset_scale_unbounded(%element: index) -> (offset) {
   %stride = index.constant 4 : offset
   // ERROR@+1: SPIRV/027 {constraint_key="spirv.index.scale_coordinate.non_negative_s32"}
   %bytes = index.scale %element, %stride : index, offset -> offset
@@ -12,9 +10,7 @@ func.def target(@target) @offset_scale_unbounded(%element: index) -> (offset) {
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @offset_scale_unsigned_wrap(%base: i32, %increment: i32) -> (offset) {
+func.def @offset_scale_unsigned_wrap(%base: i32, %increment: i32) -> (offset) {
   %wrapped = scalar.addi %base, %increment : i32
   %unsigned = index.cast %wrapped : i32 to offset
   // ERROR@+1: SPIRV/026 {constraint_key="index_cast.s32_exact"}
@@ -27,9 +23,7 @@ func.def target(@target) @offset_scale_unsigned_wrap(%base: i32, %increment: i32
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @offset_scale_large_stride(%element: index) -> (offset) {
+func.def @offset_scale_large_stride(%element: index) -> (offset) {
   %stride = index.constant 4294967296 : offset
   // ERROR@+1: SPIRV/027 {constraint_key="spirv.index.scale_coordinate.non_negative_s32"}
   %bytes = index.scale %element, %stride : index, offset -> offset
@@ -38,9 +32,7 @@ func.def target(@target) @offset_scale_large_stride(%element: index) -> (offset)
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @offset_scale_dynamic_stride(%element: index, %stride: offset) -> (offset) {
+func.def @offset_scale_dynamic_stride(%element: index, %stride: offset) -> (offset) {
   // ERROR@+1: SPIRV/027 {constraint_key="spirv.index.scale_coordinate.non_negative_s32"}
   %bytes = index.scale %element, %stride : index, offset -> offset
   func.return %bytes : offset
@@ -48,9 +40,7 @@ func.def target(@target) @offset_scale_dynamic_stride(%element: index, %stride: 
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @offset_scale_lane(%elements: vector<4xi32>, %stride: offset) -> (offset) {
+func.def @offset_scale_lane(%elements: vector<4xi32>, %stride: offset) -> (offset) {
   %raw = vector.extract %elements[0] : vector<4xi32> -> i32
   %unsigned = index.cast %raw : i32 to offset
   // ERROR@+1: SPIRV/026 {constraint_key="index_cast.s32_exact"}
@@ -62,9 +52,7 @@ func.def target(@target) @offset_scale_lane(%elements: vector<4xi32>, %stride: o
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @offset_scale_bounded(%element: index) -> (offset) {
+func.def @offset_scale_bounded(%element: index) -> (offset) {
   %bounded = index.assume %element [range(%element, 0, 1023)] : index
   %stride = index.constant 4 : offset
   %bytes = index.scale %bounded, %stride : index, offset -> offset
@@ -72,7 +60,7 @@ func.def target(@target) @offset_scale_bounded(%element: index) -> (offset) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @offset_scale_bounded(%bounded: reg<spirv.id : index>) -> (reg<spirv.offset64>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @offset_scale_bounded(%bounded: reg<spirv.id : index>) -> (reg<spirv.offset64>) asm {
   %stride = OpConstant.offset64 4
   %8 = OpBitcast.i32.u32 %bounded
   %9 = OpUConvert.u32.offset64 %8
@@ -82,16 +70,14 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @offset
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @offset_scale_nonnegative(%element_input: index, %stride: offset) -> (offset) {
+func.def @offset_scale_nonnegative(%element_input: index, %stride: offset) -> (offset) {
   %element = index.assume %element_input [range(%element_input, 0, 2147483647)] : index
   %bytes = index.scale %element, %stride : index, offset -> offset
   func.return %bytes : offset
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @offset_scale_nonnegative(%element: reg<spirv.id : index>, %stride: reg<spirv.offset64>) -> (reg<spirv.offset64>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @offset_scale_nonnegative(%element: reg<spirv.id : index>, %stride: reg<spirv.offset64>) -> (reg<spirv.offset64>) asm {
   %8 = OpBitcast.i32.u32 %element
   %9 = OpUConvert.u32.offset64 %8
   %bytes = OpIMul.offset64 %9, %stride
@@ -100,9 +86,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @offset
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @offset_scale_join(%element_input: index, %choice: i32) -> (offset) {
+func.def @offset_scale_join(%element_input: index, %choice: i32) -> (offset) {
   %element = index.assume %element_input [range(%element_input, 0, 2147483647)] : index
   %stride = index.constant 4 : offset
   %bytes = index.scale %element, %stride : index, offset -> offset
@@ -117,7 +101,7 @@ func.def target(@target) @offset_scale_join(%element_input: index, %choice: i32)
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @offset_scale_join(%element: reg<spirv.id : index>, %choice: reg<spirv.id : i32>) -> (reg<spirv.offset64>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @offset_scale_join(%element: reg<spirv.id : index>, %choice: reg<spirv.id : i32>) -> (reg<spirv.offset64>) asm {
   %stride = OpConstant.offset64 4
   %14 = OpBitcast.i32.u32 %element
   %15 = OpUConvert.u32.offset64 %14
@@ -130,9 +114,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @offset
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @offset_scale_loop(%element_input: index, %stride: offset, %count: index) -> (offset) {
+func.def @offset_scale_loop(%element_input: index, %stride: offset, %count: index) -> (offset) {
   %element = index.assume %element_input [range(%element_input, 0, 2147483647)] : index
   %bytes = index.scale %element, %stride : index, offset -> offset
   %begin = index.constant 0 : index
@@ -146,7 +128,7 @@ func.def target(@target) @offset_scale_loop(%element_input: index, %stride: offs
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @offset_scale_loop(%element: reg<spirv.id : index>, %stride: reg<spirv.offset64>, %count: reg<spirv.id : index>) -> (reg<spirv.offset64>) asm {
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @offset_scale_loop(%element: reg<spirv.id : index>, %stride: reg<spirv.offset64>, %count: reg<spirv.id : index>) -> (reg<spirv.offset64>) asm {
   %17 = OpBitcast.i32.u32 %element
   %18 = OpUConvert.u32.offset64 %17
   %bytes = OpIMul.offset64 %18, %stride

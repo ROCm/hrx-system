@@ -12,7 +12,9 @@
 //
 // Semantics: set() makes the event signaled (thread-safe, may be called from
 // any context). The proactor detects the signaled state during poll() and
-// delivers the completion and consumes the signal.
+// delivers the completion. One-shot event waits consume their signal before
+// completion; persistent source callbacks call consume() before inspecting
+// the state whose change the event announces.
 //
 // Platform mapping:
 //   Linux:   eventfd (write to signal, read to reset)
@@ -77,6 +79,32 @@ IREE_API_EXPORT void iree_async_event_native_deinitialize(
 // until every concurrent signal call and borrowed wait has retired.
 IREE_API_EXPORT void iree_async_event_native_set(
     const iree_async_event_native_t* event);
+
+// Consumes a delivered readiness hint in a persistent event-source callback.
+//
+// Register event->wait_primitive with
+// iree_async_proactor_register_event_source(), then call this at the start of
+// each callback, before inspecting authoritative state and requesting another
+// notification from an external producer. The event must remain live through
+// terminal source unregistration. Use one serialized consumer; do not
+// concurrently submit EVENT_WAIT operations on the same event.
+//
+// Linux drains the nonblocking eventfd counter with one read; pipe-backed
+// platforms drain available bytes. Already-drained readiness is successful.
+// Windows performs no work: the native wait already consumed the delivered
+// auto-reset signal, and resetting again could clear a newer signal. Signals
+// may coalesce during consumption; the caller must check authoritative state
+// rather than infer progress from a callback or a count.
+//
+// This is not a general event reset or cancellation operation. It does not
+// consume a Windows event outside a delivered callback, suppress queued
+// callbacks, or change the persistent registration. EVENT_WAIT operations
+// already consume their signal and do not require this call.
+//
+// No allocation, locking, lazy initialization, or blocking wait occurs. POSIX
+// read failures propagate; an empty nonblocking read is ordinary success.
+IREE_API_EXPORT iree_status_t
+iree_async_event_native_consume(const iree_async_event_native_t* event);
 
 //===----------------------------------------------------------------------===//
 // Managed event
@@ -150,6 +178,14 @@ IREE_API_EXPORT void iree_async_event_release(iree_async_event_t* event);
 // Idempotent: multiple calls before the wait completes are coalesced.
 // Publication is infallible; completion is observed through accepted waits.
 IREE_API_EXPORT void iree_async_event_set(iree_async_event_t* event);
+
+// Consumes a managed event's delivered persistent-source readiness hint using
+// iree_async_event_native_consume(). Register event->native.wait_primitive and
+// retain the event through terminal source unregistration. This is not a reset
+// or cancellation operation; one-shot EVENT_WAIT operations already consume
+// their signal.
+IREE_API_EXPORT iree_status_t
+iree_async_event_consume(iree_async_event_t* event);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -291,6 +291,7 @@ loom_cc_library(
     iree::base::internal
     loom::ir
     loom::ops::low
+    loom::target::registers
   PUBLIC
 )
 

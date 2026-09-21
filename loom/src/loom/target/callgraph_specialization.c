@@ -641,7 +641,9 @@ static iree_status_t loom_target_callgraph_seed_versions(
     loom_target_callgraph_row_id_t row_id =
         LOOM_TARGET_CALLGRAPH_ROW_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_target_callgraph_append_row(
-        state, symbol_id, context, version, /*artifact_root=*/true,
+        state, symbol_id, context, version,
+        iree_any_bit_set(version->base.flags,
+                         LOOM_FUNCTION_VERSION_FLAG_RETAIN),
         /*demanding_call=*/NULL, &row_id));
     if (!state->plan_valid) {
       return iree_ok_status();
@@ -989,6 +991,8 @@ static iree_status_t loom_target_callgraph_prepare_materializations(
         .base =
             {
                 .type = &loom_target_function_version_type,
+                .flags =
+                    row->artifact_root ? LOOM_FUNCTION_VERSION_FLAG_RETAIN : 0,
             },
         .authored_target_name = info->authored_target_name,
         .target_requirement_facts = info->authored_target_requirement,

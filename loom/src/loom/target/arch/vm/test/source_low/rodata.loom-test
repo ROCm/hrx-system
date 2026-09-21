@@ -1,13 +1,11 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/rodata.loom-test
-// RUN: emit vm-dis
-
-vm.target<core> @vm
+// RUN: emit vm-dis target=vm:core
 
 global.rodata.def @unused = align(4096) bytes("aabbcc")
 
 global.rodata.def @table = align(64) bytes("1122334480ff007e")
 
-func.def target(@vm) @table_byte(%position: offset) -> (i32) {
+func.def @table_byte(%position: offset) -> (i32) {
   %table = global.load @table : buffer
   %result = buffer.load.i8.u %table[%position]
   func.return %result : i32
@@ -41,15 +39,13 @@ vm.module core(0.0) {
 
 // ====
 
-vm.target<core> @vm
-
 global.rodata.def @empty = bytes("")
 
 global.rodata.def @odd = align(2) bytes("abcdef")
 
 global.rodata.def @wide = align(128) bytes("01020304")
 
-func.def target(@vm) @data_roots() -> (buffer, buffer, buffer) {
+func.def @data_roots() -> (buffer, buffer, buffer) {
   %empty = global.load @empty : buffer
   %odd = global.load @odd : buffer
   %wide = global.load @wide : buffer
@@ -98,11 +94,9 @@ vm.module core(0.0) {
 
 // ====
 
-vm.target<core> @vm
-
 global.rodata.def @shared = align(8) bytes("0102030405060708")
 
-func.def target(@vm) @data_copy(%target: buffer, %start: offset, %length: offset) {
+func.def @data_copy(%target: buffer, %start: offset, %length: offset) {
   %source = global.load @shared : buffer
   %target_offset = index.constant 0 : offset
   buffer.copy %source[%start], %target[%target_offset], %length

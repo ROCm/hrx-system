@@ -51,6 +51,11 @@ struct loom_encoding_family_summary_t {
   // Final encoding-fact payload populated directly by family callbacks.
   loom_value_fact_encoding_summary_t encoding;
 
+  // Immediate SSA layout parameter whose scoped stride binding is preserved by
+  // this composition, or INVALID. This is an inference input, never part of the
+  // transferable encoding-fact payload.
+  loom_value_id_t address_layout_value_id;
+
   // Exact nested static specifications selected by a composition family.
   struct {
     // One-based nested address-layout encoding ID, or zero when absent.
@@ -84,7 +89,9 @@ loom_encoding_summarize_resolved(
     const loom_encoding_vtable_t* vtable,
     const loom_encoding_family_summary_request_t* request,
     loom_encoding_family_summary_t* out_summary) {
-  *out_summary = (loom_encoding_family_summary_t){0};
+  *out_summary = (loom_encoding_family_summary_t){
+      .address_layout_value_id = LOOM_VALUE_ID_INVALID,
+  };
   const loom_encoding_family_fixed_metadata_t* fixed_metadata =
       vtable->descriptor->fixed_metadata;
   if (fixed_metadata) {

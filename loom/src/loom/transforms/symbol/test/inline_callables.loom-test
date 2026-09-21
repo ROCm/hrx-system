@@ -1074,3 +1074,22 @@ func.def public @entry(%arg: i32) -> (i32) {
 ^_bb3(%result$10: i32):
   func.return %result$10 : i32
 }
+
+// ====
+
+// RUN: with-checks pass inline-callables,symbol-dce
+
+func.def retain inline @retained(%value: i32) -> (i32) {
+  %result = scalar.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def public @caller(%value: i32) -> (i32) {
+  %result = func.call @retained(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+CHECK: func.def retain inline @retained*
+CHECK: func.def public @caller*
+CHECK-NOT: *func.call*

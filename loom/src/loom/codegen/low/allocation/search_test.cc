@@ -637,12 +637,12 @@ TEST_F(LowAllocationSearchTest,
       &context, &intervals[2], Capacity(/*max_units=*/8), &location_base));
   EXPECT_EQ(location_base, 0u);
 
-  // A pressure lower bound above the capacity proves that packing direction
-  // cannot make the whole class fit and retains ordinary first-fit behavior.
+  // Semantic pressure may count aliases separately. A smaller capacity caps
+  // the packing preference; concrete storage conflicts decide whether it fits.
   location_base = UINT32_MAX;
   EXPECT_TRUE(loom_low_allocation_search_find_free_location(
       &context, &intervals[0], Capacity(/*max_units=*/4), &location_base));
-  EXPECT_EQ(location_base, 0u);
+  EXPECT_EQ(location_base, 3u);
 
   loom_low_allocation_resolved_reserved_range_t reserved_range = {
       /*.descriptor_reg_class_id=*/0,

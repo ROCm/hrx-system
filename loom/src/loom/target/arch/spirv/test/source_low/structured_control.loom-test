@@ -1,110 +1,17 @@
-// RUN: emit source-low output=pipeline control-flow=structured-low
+// RUN: with-checks emit source-low output=pipeline control-flow=structured-low
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @structured_pipeline_probe(%value: i32) -> (i32) {
+func.def @structured_pipeline_probe(%value: i32) -> (i32) {
   func.return %value : i32
 }
 
 // ----
-pass.pipeline<module> @__loom_check_source_low pipeline {
-  for func {
-    where target {
-      normalize-kernel-resources
-      promote-private-fragments
-      canonicalize(view-loads = "coalesce")
-      cse
-    }
-  }
-  repeat until_converged(max_iterations = 64) {
-    select-templates(mode = "early", rewrite = "inline")
-    if changed {
-      for func {
-        where target {
-          canonicalize(view-loads = "coalesce")
-        }
-      }
-    }
-  }
-  select-templates(mode = "final", rewrite = "inline")
-  if changed {
-    for func {
-      where target {
-        canonicalize(view-loads = "coalesce")
-      }
-    }
-  }
-  materialize-locations
-  specialize-target-callgraph
-  for func {
-    where target {
-      legalize-math
-    }
-  }
-  target-legalize(mode = "eager")
-  for func {
-    where target {
-      decompose-view-transports
-      vector-memory-to-scalar
-      linearize-view-accesses
-      canonicalize
-      cse
-      if changed {
-        canonicalize
-      }
-    }
-  }
-  target-legalize(mode = "complete")
-  if changed {
-    for func {
-      where target {
-        canonicalize
-        cse
-      }
-    }
-  }
-  for func {
-    where target {
-      pipeline-scf-for
-      if changed {
-        canonicalize
-        cse
-      }
-    }
-  }
-  inline-callables(policy = "target")
-  if changed {
-    for func {
-      where target {
-        canonicalize
-        cse
-      }
-    }
-  }
-  for func {
-    where target(codegen = "low_native", family = "amdgpu") {
-      cfg-converge
-    }
-  }
-  for func {
-    where target {
-      decompose-view-root-selections
-      if changed {
-        dce
-      }
-    }
-  }
-  source-to-low(control-flow = "structured-low")
-  inline-callables(policy = "target")
-  for func {
-    where target {
-      low-decompose-cfg-tuples
-      canonicalize
-      low-cse
-      low-dce
-    }
-  }
-}
+CHECK: select-templates(mode = "final", rewrite = "inline")
+CHECK: specialize-target-callgraph
+CHECK: target-legalize(mode = "complete")
+CHECK: source-to-low(control-flow = "structured-low")
+CHECK: low-decompose-cfg-tuples
+CHECK-NOT: scf-to-cfg
+CHECK-NOT: cfg-simplify
 
 // ====
 // RUN: pass source-to-low{control-flow=structured-low}

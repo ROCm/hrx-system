@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/packed_bitfield.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i32_bitfield_extractu(%input: buffer, %output: buffer) {
+func.def @i32_bitfield_extractu(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<1xi32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
@@ -14,7 +12,7 @@ func.def target(@target) @i32_bitfield_extractu(%input: buffer, %output: buffer)
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_bitfield_extractu() asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i32_bitfield_extractu() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %9 = v_mov_b32 0
@@ -26,9 +24,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_bit
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i32_bitfield_extracts(%input: buffer, %output: buffer) {
+func.def @i32_bitfield_extracts(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<1xi32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
@@ -39,7 +35,7 @@ func.def target(@target) @i32_bitfield_extracts(%input: buffer, %output: buffer)
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_bitfield_extracts() asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i32_bitfield_extracts() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %9 = v_mov_b32 0
@@ -51,9 +47,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_bit
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i32_bitfield_extractu_full_width_alias(%input: buffer, %output: buffer) {
+func.def @i32_bitfield_extractu_full_width_alias(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<1xi32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
@@ -64,7 +58,7 @@ func.def target(@target) @i32_bitfield_extractu_full_width_alias(%input: buffer,
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_bitfield_extractu_full_width_alias() asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i32_bitfield_extractu_full_width_alias() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %9 = v_mov_b32 0
@@ -75,9 +69,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_bit
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i32_bitfield_extracts_top_aligned(%input: buffer, %output: buffer) {
+func.def @i32_bitfield_extracts_top_aligned(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<1xi32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
@@ -88,7 +80,7 @@ func.def target(@target) @i32_bitfield_extracts_top_aligned(%input: buffer, %out
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_bitfield_extracts_top_aligned() asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i32_bitfield_extracts_top_aligned() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %9 = v_mov_b32 0
@@ -100,9 +92,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_bit
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i32_bitfield_insert(%field_buffer: buffer, %base_buffer: buffer, %output: buffer) {
+func.def @i32_bitfield_insert(%field_buffer: buffer, %base_buffer: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %field_view = buffer.view %field_buffer[%buffer_base] : buffer -> view<1xi32>
   %base_view = buffer.view %base_buffer[%buffer_base] : buffer -> view<1xi32>
@@ -115,7 +105,7 @@ func.def target(@target) @i32_bitfield_insert(%field_buffer: buffer, %base_buffe
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_bitfield_insert() asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i32_bitfield_insert() asm {
   %field_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %base_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
@@ -130,9 +120,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_bit
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i32_bitfield_insert_offset0(%field_buffer: buffer, %base_buffer: buffer, %output: buffer) {
+func.def @i32_bitfield_insert_offset0(%field_buffer: buffer, %base_buffer: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %field_view = buffer.view %field_buffer[%buffer_base] : buffer -> view<1xi32>
   %base_view = buffer.view %base_buffer[%buffer_base] : buffer -> view<1xi32>
@@ -145,7 +133,7 @@ func.def target(@target) @i32_bitfield_insert_offset0(%field_buffer: buffer, %ba
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_bitfield_insert_offset0() asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i32_bitfield_insert_offset0() asm {
   %field_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %base_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
@@ -159,9 +147,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_bit
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i32_bitfield_insert_full_width_alias(%field_buffer: buffer, %base_buffer: buffer, %output: buffer) {
+func.def @i32_bitfield_insert_full_width_alias(%field_buffer: buffer, %base_buffer: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %field_view = buffer.view %field_buffer[%buffer_base] : buffer -> view<1xi32>
   %base_view = buffer.view %base_buffer[%buffer_base] : buffer -> view<1xi32>
@@ -174,7 +160,7 @@ func.def target(@target) @i32_bitfield_insert_full_width_alias(%field_buffer: bu
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_bitfield_insert_full_width_alias() asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i32_bitfield_insert_full_width_alias() asm {
   %field_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %13 = v_mov_b32 0
@@ -185,9 +171,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_bit
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i32_bitfield_b128_shape(%input: buffer, %output: buffer) {
+func.def @i32_bitfield_b128_shape(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xi32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<4xi32>
@@ -202,7 +186,7 @@ func.def target(@target) @i32_bitfield_b128_shape(%input: buffer, %output: buffe
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_bitfield_b128_shape() asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i32_bitfield_b128_shape() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %13 = v_mov_b32 0

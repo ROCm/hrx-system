@@ -1,15 +1,13 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/async_empty.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @async_empty_group_wait() {
+func.def @async_empty_group_wait() {
   %group = kernel.async.group -> kernel.async.group
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group
   func.return
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @async_empty_group_wait() asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @async_empty_group_wait() asm {
   return
 }

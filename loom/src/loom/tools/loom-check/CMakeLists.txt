@@ -202,7 +202,6 @@ loom_cc_library(
     iree::base::internal::arena
     loom::format::text::parser
     loom::ir
-    loom::link::linker
     loom::ops::op_defs
     loom::testing::test_file
   PUBLIC
@@ -440,6 +439,9 @@ endif()
 if(LOOM_TARGET_ARCH_X86)
   list(APPEND _loom_check_platform_copts "-DLOOM_CHECK_HAVE_TARGET_X86=1")
 endif()
+if(LOOM_TARGET_ARCH_XDNA)
+  list(APPEND _loom_check_platform_copts "-DLOOM_CHECK_HAVE_TARGET_XDNA=1")
+endif()
 set(_loom_check_platform_deps "")
 if(LOOM_EMIT_AMDGPU)
   list(APPEND _loom_check_platform_deps loom::target::arch::amdgpu::check::provider)
@@ -461,6 +463,9 @@ if(LOOM_EMIT_WASM)
 endif()
 if(LOOM_TARGET_ARCH_X86)
   list(APPEND _loom_check_platform_deps loom::target::arch::x86::check::check_provider)
+endif()
+if(LOOM_TARGET_ARCH_XDNA)
+  list(APPEND _loom_check_platform_deps loom::target::arch::amd::xdna::aie2p::check_provider)
 endif()
 loom_cc_binary(
   NAME
@@ -499,6 +504,9 @@ endif()
 if(LOOM_TARGET_ARCH_X86)
   list(APPEND _loom_check_test_platform_copts "-DLOOM_CHECK_HAVE_TARGET_X86=1")
 endif()
+if(LOOM_TARGET_ARCH_XDNA)
+  list(APPEND _loom_check_test_platform_copts "-DLOOM_CHECK_HAVE_TARGET_XDNA=1")
+endif()
 set(_loom_check_test_platform_deps "")
 if(LOOM_EMIT_AMDGPU)
   list(APPEND _loom_check_test_platform_deps loom::target::arch::amdgpu::check::provider)
@@ -520,6 +528,9 @@ if(LOOM_EMIT_WASM)
 endif()
 if(LOOM_TARGET_ARCH_X86)
   list(APPEND _loom_check_test_platform_deps loom::target::arch::x86::check::check_provider)
+endif()
+if(LOOM_TARGET_ARCH_XDNA)
+  list(APPEND _loom_check_test_platform_deps loom::target::arch::amd::xdna::aie2p::check_provider)
 endif()
 loom_cc_binary(
   NAME

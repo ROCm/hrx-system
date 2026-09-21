@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/vector_large_insert.loom-test
-// RUN: pass target-legalize{mode=final},source-to-low
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final},source-to-low
 
-aie2p.target<core> @target
-
-func.def target(@target) @i64x16_insert_static(%values: vector<16xi64>, %value: i64) -> (vector<16xi64>) {
+func.def @i64x16_insert_static(%values: vector<16xi64>, %value: i64) -> (vector<16xi64>) {
   // ERROR@+1: TARGET/002 {op_name="vector.insert", field_name="dest"}
   %result = vector.insert %value into %values[1] : i64, vector<16xi64>
   func.return %result : vector<16xi64>
@@ -11,9 +9,7 @@ func.def target(@target) @i64x16_insert_static(%values: vector<16xi64>, %value: 
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @i32x32_insert_static(%values: vector<32xi32>, %value: i32) -> (vector<32xi32>) {
+func.def @i32x32_insert_static(%values: vector<32xi32>, %value: i32) -> (vector<32xi32>) {
   // ERROR@+1: TARGET/002 {op_name="vector.insert", field_name="dest"}
   %result = vector.insert %value into %values[17] : i32, vector<32xi32>
   func.return %result : vector<32xi32>
@@ -21,9 +17,7 @@ func.def target(@target) @i32x32_insert_static(%values: vector<32xi32>, %value: 
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @i64x16_insert_dynamic(%values: vector<16xi64>, %value: i64, %position: index) -> (vector<16xi64>) {
+func.def @i64x16_insert_dynamic(%values: vector<16xi64>, %value: i64, %position: index) -> (vector<16xi64>) {
   // ERROR@+1: TARGET/002 {op_name="vector.insert", field_name="dest"}
   %result = vector.insert %value into %values[%position] : i64, vector<16xi64>
   func.return %result : vector<16xi64>
@@ -31,17 +25,13 @@ func.def target(@target) @i64x16_insert_dynamic(%values: vector<16xi64>, %value:
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @i32x2x2_insert_static(%values: vector<2x2xi32>, %value: i32) -> (vector<2x2xi32>) {
+func.def @i32x2x2_insert_static(%values: vector<2x2xi32>, %value: i32) -> (vector<2x2xi32>) {
   %result = vector.insert %value into %values[1, 1] : i32, vector<2x2xi32>
   func.return %result : vector<2x2xi32>
 }
 
 // ----
-aie2p.target<core> @target
-
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32x2x2_insert_static(%values: reg<aie2p.vec256 x2>, %value: reg<aie2p.er>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32x2x2_insert_static(%values: reg<aie2p.vec256 x2>, %value: reg<aie2p.er>) -> (reg<aie2p.vec256 x2>) asm {
   %22 = vextract.32.imm %values, 0
   %23 = vextract.32.imm %values, 1
   %24 = vextract.32.imm %values, 2
@@ -60,17 +50,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32x2x2_
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @i32x16_insert_static(%values: vector<16xi32>, %value: i32) -> (vector<16xi32>) {
+func.def @i32x16_insert_static(%values: vector<16xi32>, %value: i32) -> (vector<16xi32>) {
   %result = vector.insert %value into %values[15] : i32, vector<16xi32>
   func.return %result : vector<16xi32>
 }
 
 // ----
-aie2p.target<core> @target
-
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @i32x16_insert_static(%values: reg<aie2p.vec256 x2>, %value: reg<aie2p.er>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32x16_insert_static(%values: reg<aie2p.vec256 x2>, %value: reg<aie2p.er>) -> (reg<aie2p.vec256 x2>) asm {
   %7 = mov.short 15
   %8 = copy %7 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
   %result = vinsert.32.reg %values, %8, %value

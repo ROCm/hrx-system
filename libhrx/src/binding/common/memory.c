@@ -347,9 +347,8 @@ static iree_status_t iree_hal_streaming_buffer_wrap_hrx_buffer(
   // Try to export as device allocation (works for device-local memory
   // and mapped host memory).
   if (wrapper->buffer) {
-    iree_status_t device_status = iree_hal_allocator_export_buffer(
-        context->device_allocator, wrapper->buffer,
-        IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION,
+    iree_status_t device_status = iree_hal_buffer_export(
+        wrapper->buffer, IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION,
         IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE, &external_ptr);
     if (iree_status_is_ok(device_status)) {
       wrapper->device_ptr = (iree_hal_streaming_deviceptr_t)
@@ -364,9 +363,8 @@ static iree_status_t iree_hal_streaming_buffer_wrap_hrx_buffer(
   // This is needed for hipHostMalloc which returns host pointers.
   if (wrapper->buffer &&
       (wrapper->memory_type & IREE_HAL_MEMORY_TYPE_HOST_LOCAL)) {
-    iree_status_t host_status = iree_hal_allocator_export_buffer(
-        context->device_allocator, wrapper->buffer,
-        IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
+    iree_status_t host_status = iree_hal_buffer_export(
+        wrapper->buffer, IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
         IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE, &external_ptr);
     if (iree_status_is_ok(host_status)) {
       wrapper->host_ptr = (void*)external_ptr.handle.host_allocation.ptr;
@@ -399,7 +397,7 @@ static iree_status_t iree_hal_streaming_buffer_wrap_hrx_buffer(
   }
 
   // We need at least a device pointer for the buffer table.
-  // For remote HAL buffers the allocator may not support export_buffer;
+  // Remote HAL buffers may not support exporting a device pointer;
   // generate a synthetic device pointer so the buffer table can still map
   // this wrapper.
   if (!have_device_ptr && imported_host_ptr) {

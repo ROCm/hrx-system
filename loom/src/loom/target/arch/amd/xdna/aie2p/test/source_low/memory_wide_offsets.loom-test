@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_scalar_wide_offsets.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_wide_byte_offset(%input_storage: buffer, %output_storage: buffer, %byte_offset_input: offset) -> (i32) {
+func.def @scalar_wide_byte_offset(%input_storage: buffer, %output_storage: buffer, %byte_offset_input: offset) -> (i32) {
   %input = buffer.assume.alignment %input_storage {minimum_alignment = 4} : buffer
   %output = buffer.assume.alignment %output_storage {minimum_alignment = 4} : buffer
   %byte_offset = index.assume %byte_offset_input [mul(%byte_offset_input, 4)] : offset
@@ -18,9 +16,7 @@ func.def target(@target) @scalar_wide_byte_offset(%input_storage: buffer, %outpu
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_wide_scaled_index(%input_storage: buffer, %output_storage: buffer, %element_input: index) -> (i32) {
+func.def @scalar_wide_scaled_index(%input_storage: buffer, %output_storage: buffer, %element_input: index) -> (i32) {
   %input = buffer.assume.alignment %input_storage {minimum_alignment = 4} : buffer
   %output = buffer.assume.alignment %output_storage {minimum_alignment = 4} : buffer
   %element = index.assume %element_input [range(%element_input, 0, 2147483647)] : index
@@ -38,9 +34,7 @@ func.def target(@target) @scalar_wide_scaled_index(%input_storage: buffer, %outp
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_wide_static_base(%input_storage: buffer, %output_storage: buffer) -> (i32) {
+func.def @scalar_wide_static_base(%input_storage: buffer, %output_storage: buffer) -> (i32) {
   %input = buffer.assume.alignment %input_storage {minimum_alignment = 4} : buffer
   %output = buffer.assume.alignment %output_storage {minimum_alignment = 4} : buffer
   // ERROR@+1: TARGET/005
@@ -56,9 +50,7 @@ func.def target(@target) @scalar_wide_static_base(%input_storage: buffer, %outpu
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_wide_dynamic_dimensions(%input_storage: buffer, %output_storage: buffer, %row_input: index, %columns_input: index) -> (i32) {
+func.def @scalar_wide_dynamic_dimensions(%input_storage: buffer, %output_storage: buffer, %row_input: index, %columns_input: index) -> (i32) {
   %input = buffer.assume.alignment %input_storage {minimum_alignment = 4} : buffer
   %output = buffer.assume.alignment %output_storage {minimum_alignment = 4} : buffer
   %row = index.assume %row_input [range(%row_input, 0, 1)] : index
@@ -75,9 +67,7 @@ func.def target(@target) @scalar_wide_dynamic_dimensions(%input_storage: buffer,
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_wide_mixed_base(%input_storage: buffer, %output_storage: buffer, %byte_offset_input: offset) -> (i32) {
+func.def @scalar_wide_mixed_base(%input_storage: buffer, %output_storage: buffer, %byte_offset_input: offset) -> (i32) {
   %input = buffer.assume.alignment %input_storage {minimum_alignment = 4} : buffer
   %output = buffer.assume.alignment %output_storage {minimum_alignment = 4} : buffer
   %byte_offset = index.assume %byte_offset_input [mul(%byte_offset_input, 4)] : offset
@@ -95,9 +85,7 @@ func.def target(@target) @scalar_wide_mixed_base(%input_storage: buffer, %output
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @vector_wide_static_base(%input_storage: buffer, %output_storage: buffer) {
+func.def @vector_wide_static_base(%input_storage: buffer, %output_storage: buffer) {
   %input = buffer.assume.alignment %input_storage {minimum_alignment = 16} : buffer
   %output = buffer.assume.alignment %output_storage {minimum_alignment = 16} : buffer
   // ERROR@+1: TARGET/005
@@ -119,9 +107,7 @@ func.def target(@target) @vector_wide_static_base(%input_storage: buffer, %outpu
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @vector_wide_dynamic_dimensions(%input_storage: buffer, %output_storage: buffer, %row_input: index, %columns_input: index) {
+func.def @vector_wide_dynamic_dimensions(%input_storage: buffer, %output_storage: buffer, %row_input: index, %columns_input: index) {
   %input = buffer.assume.alignment %input_storage {minimum_alignment = 16} : buffer
   %output = buffer.assume.alignment %output_storage {minimum_alignment = 16} : buffer
   %row = index.assume %row_input [range(%row_input, 0, 1)] : index

@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/callable_values.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=x86:avx2 output=low
 
-x86.target<avx2> @target
-
-func.def public target(@target) @call_mixed_i32(%input: vector<1xi32>, %delta: i32) -> (i32, i32) {
+func.def public @call_mixed_i32(%input: vector<1xi32>, %delta: i32) -> (i32, i32) {
   // ERROR@+1: TARGET/002 {op_name="vector.extract", field_name="source"}
   %value = vector.extract %input[0] : vector<1xi32> -> i32
   %mixed = func.call @add_i32(%value, %delta) : (i32, i32) -> (i32)
@@ -23,9 +21,7 @@ func.def @add_i32(%value: i32, %delta: i32) -> (i32) {
 
 // ====
 
-x86.target<avx2> @target
-
-func.def public target(@target) @call_mixed_i64(%input: vector<1xi64>, %delta: i64) -> (i64, i64) {
+func.def public @call_mixed_i64(%input: vector<1xi64>, %delta: i64) -> (i64, i64) {
   // ERROR@+1: TARGET/002 {op_name="vector.extract", field_name="source"}
   %value = vector.extract %input[0] : vector<1xi64> -> i64
   %mixed = func.call @add_i64(%value, %delta) : (i64, i64) -> (i64)
@@ -40,9 +36,7 @@ func.def @add_i64(%value: i64, %delta: i64) -> (i64) {
 
 // ====
 
-x86.target<avx2> @target
-
-func.def public target(@target) @call_vector_result(%input: i32, %lane: index) -> (i32) where [range(%lane, 0, 3)] {
+func.def public @call_vector_result(%input: i32, %lane: index) -> (i32) where [range(%lane, 0, 3)] {
   %c1 = scalar.constant 1 : i32
   %c2 = scalar.constant 2 : i32
   %c3 = scalar.constant 3 : i32
@@ -59,9 +53,7 @@ func.def @select_lane(%values: vector<4xi32>, %lane: index) -> (i32) where [rang
 
 // ====
 
-x86.target<avx2> @target
-
-func.def public target(@target) @call_loop(%input: vector<1xi32>, %delta: i32, %count: index) -> (i32) {
+func.def public @call_loop(%input: vector<1xi32>, %delta: i32, %count: index) -> (i32) {
   // ERROR@+1: TARGET/002 {op_name="vector.extract", field_name="source"}
   %value = vector.extract %input[0] : vector<1xi32> -> i32
   %result = func.call @repeat_add(%value, %delta, %count) : (i32, i32, index) -> (i32)
@@ -85,9 +77,7 @@ func.def @advance_i32(%value: i32, %delta: i32) -> (i32) {
 
 // ====
 
-x86.target<avx2> @target
-
-func.def public target(@target) @call_scalar(%value: i32, %delta: i32) -> (i32) {
+func.def public @call_scalar(%value: i32, %delta: i32) -> (i32) {
   %result = func.call @scalar_add(%value, %delta) : (i32, i32) -> (i32)
   func.return %result : i32
 }
@@ -98,7 +88,7 @@ func.def @scalar_add(%value: i32, %delta: i32) -> (i32) {
 }
 
 // ----
-low.func.def public target<x86.avx2.core>(@target) abi(object_function) @call_scalar(%value: reg<x86.gpr32>, %delta: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def public target<x86.avx2.core> abi(object_function) @call_scalar(%value: reg<x86.gpr32>, %delta: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %11 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
   %result = add.gpr32 %11, %delta
   return %result

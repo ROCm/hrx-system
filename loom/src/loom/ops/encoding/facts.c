@@ -88,14 +88,27 @@ iree_status_t loom_encoding_layout_strided_facts(
   loom_attribute_t static_strides =
       loom_encoding_layout_strided_static_strides(op);
   loom_value_facts_t strides[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK] = {0};
+  loom_value_id_t stride_values[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK];
+  const loom_value_slice_t dynamic_strides =
+      loom_encoding_layout_strided_strides(op);
   uint16_t dynamic_ordinal = 0;
   for (uint16_t i = 0; i < static_strides.count; ++i) {
     int64_t static_stride = static_strides.i64_array[i];
     if (static_stride == INT64_MIN) {
+      stride_values[i] = dynamic_strides.values[dynamic_ordinal];
       strides[i] = operand_facts[dynamic_ordinal++];
     } else {
+      stride_values[i] = LOOM_VALUE_ID_INVALID;
       strides[i] = loom_value_facts_exact_i64(static_stride);
     }
+  }
+
+  if (dynamic_ordinal || context->table->layout_origins) {
+    IREE_RETURN_IF_ERROR(loom_value_fact_table_define_layout_strides(
+        context->table, loom_encoding_layout_strided_result(op),
+        (loom_value_fact_layout_strides_t){
+            .values = stride_values,
+            .count = dynamic_ordinal ? static_strides.count : 0}));
   }
 
   loom_value_fact_address_layout_t address_layout = {
@@ -128,6 +141,27 @@ iree_status_t loom_encoding_layout_assume_strided_facts(
         context, LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
         /*static_spec_encoding_id=*/0, (loom_value_fact_address_layout_t){0},
         (loom_value_fact_storage_schema_t){0}, &result_facts[0]);
+  }
+
+  loom_value_fact_encoding_summary_t source_summary;
+  if (loom_value_facts_query_encoding_summary(context, operand_facts[0],
+                                              &source_summary) &&
+      source_summary.address_layout.kind ==
+          LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED &&
+      source_summary.address_layout.rank == rank) {
+    if (context->table->layout_origins) {
+      IREE_RETURN_IF_ERROR(loom_value_fact_table_forward_layout_strides(
+          context->table, loom_encoding_layout_assume_strided_layout(op),
+          loom_encoding_layout_assume_strided_result(op)));
+    }
+    return loom_encoding_facts_make_summary(
+        context, LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+        source_summary.static_spec_encoding_id, source_summary.address_layout,
+        (loom_value_fact_storage_schema_t){0}, &result_facts[0]);
+  }
+  if (context->table->layout_origins) {
+    loom_value_fact_table_clear_layout_strides(
+        context->table, loom_encoding_layout_assume_strided_result(op));
   }
 
   loom_value_facts_t strides[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK] = {0};
@@ -173,6 +207,11 @@ iree_status_t loom_encoding_define_facts(
   loom_encoding_summarize_verified_define(
       vtable, context, module, op, &params, operand_facts, stride_storage,
       IREE_ARRAYSIZE(stride_storage), &family_summary);
+  if (context->table->layout_origins) {
+    IREE_RETURN_IF_ERROR(loom_value_fact_table_forward_layout_strides(
+        context->table, family_summary.address_layout_value_id,
+        loom_encoding_define_result(op)));
+  }
 
   const bool has_dynamic_params =
       loom_encoding_define_has_dynamic_params(&params);

@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_prefetch.loom-test
-// RUN: emit source-low diagnostics=memory output=low
+// RUN: emit source-low target=amdgpu:gfx1200 diagnostics=memory output=low
 
-amdgpu.target<gfx1200> @target
-
-func.def target(@target) @prefetch_static(%input: buffer) {
+func.def @prefetch_static(%input: buffer) {
   %base = index.constant 16 : offset
   %input_view = buffer.view %input[%base] : buffer -> view<64xi32>
   // REMARK@+1: BACKEND/041 "selected prefetch 'read/l1'" "decision 'prefetch.s_buffer_prefetch_data'" "immediate offset 32" "dynamic index 'none'"
@@ -12,7 +10,7 @@ func.def target(@target) @prefetch_static(%input: buffer) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @prefetch_static() asm {
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @prefetch_static() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 272} : reg<amdgpu.sgpr x2>
   %4 = s_mov_b32 0
   %6 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -29,9 +27,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @prefetch_static
 
 // ====
 
-amdgpu.target<gfx1200> @target
-
-kernel.def target(@target) @prefetch_workgroup_id() {
+kernel.def @prefetch_workgroup_id() {
   %unit = index.constant 1 : index
   %workgroups = index.constant 1025 : index
   kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -45,7 +41,7 @@ kernel.def target(@target) @prefetch_workgroup_id() {
 }
 
 // ----
-low.kernel.def target<amdgpu.rdna4.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1025, 1, 1) @prefetch_workgroup_id() asm {
+low.kernel.def target<amdgpu.rdna4.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1025, 1, 1) @prefetch_workgroup_id() asm {
   %workgroup = live_in<amdgpu.cluster_id_x> : reg<amdgpu.sgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4100} : reg<amdgpu.sgpr x2>
   %8 = s_lshl_b32_rhs_inline %workgroup, 2
@@ -63,9 +59,7 @@ low.kernel.def target<amdgpu.rdna4.core>(@target) abi_layout({constant_count = 0
 
 // ====
 
-amdgpu.target<gfx1200> @target
-
-kernel.def target(@target) @prefetch_fixed_query_offset() {
+kernel.def @prefetch_fixed_query_offset() {
   %c1 = index.constant 1 : index
   %c8 = index.constant 8 : index
   %c4 = index.constant 4 : index
@@ -86,7 +80,7 @@ kernel.def target(@target) @prefetch_fixed_query_offset() {
 }
 
 // ----
-low.kernel.def target<amdgpu.rdna4.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) @prefetch_fixed_query_offset() asm {
+low.kernel.def target<amdgpu.rdna4.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) @prefetch_fixed_query_offset() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %14 = s_mov_b32 0
   %16 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -103,9 +97,7 @@ low.kernel.def target<amdgpu.rdna4.core>(@target) abi_layout({constant_count = 0
 
 // ====
 
-amdgpu.target<gfx1200> @target
-
-kernel.def target(@target) @prefetch_workitem_dropped() {
+kernel.def @prefetch_workitem_dropped() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -119,6 +111,6 @@ kernel.def target(@target) @prefetch_workitem_dropped() {
 }
 
 // ----
-low.kernel.def target<amdgpu.rdna4.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @prefetch_workitem_dropped() asm {
+low.kernel.def target<amdgpu.rdna4.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @prefetch_workitem_dropped() asm {
   return
 }

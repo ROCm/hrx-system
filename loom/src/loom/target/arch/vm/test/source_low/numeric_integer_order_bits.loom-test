@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_integer_order_bits.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=vm:core output=low
 
-vm.target<core> @vm
-
-func.def target(@vm) @integer_order_bits_i32(%lhs: i32, %rhs: i32, %count: i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) {
+func.def @integer_order_bits_i32(%lhs: i32, %rhs: i32, %count: i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) {
   %signed_min = scalar.minsi %lhs, %rhs : i32
   %unsigned_min = scalar.minui %lhs, %rhs : i32
   %signed_max = scalar.maxsi %lhs, %rhs : i32
@@ -20,7 +18,7 @@ func.def target(@vm) @integer_order_bits_i32(%lhs: i32, %rhs: i32, %count: i32) 
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @integer_order_bits_i32(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>, %count: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) asm {
+low.func.def target<vm.core> abi(vm_function) @integer_order_bits_i32(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>, %count: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) asm {
   %signed_min = integer.min.s32 %lhs, %rhs
   %unsigned_min = integer.min.u32 %lhs, %rhs
   %signed_max = integer.max.s32 %lhs, %rhs
@@ -38,9 +36,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @integer_order_bits_i32(%lhs:
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @integer_order_bits_i64(%lhs: i64, %rhs: i64, %count: i64) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) {
+func.def @integer_order_bits_i64(%lhs: i64, %rhs: i64, %count: i64) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) {
   %signed_min = scalar.minsi %lhs, %rhs : i64
   %unsigned_min = scalar.minui %lhs, %rhs : i64
   %signed_max = scalar.maxsi %lhs, %rhs : i64
@@ -57,7 +53,7 @@ func.def target(@vm) @integer_order_bits_i64(%lhs: i64, %rhs: i64, %count: i64) 
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @integer_order_bits_i64(%lhs: reg<vm.value : i64>, %rhs: reg<vm.value : i64>, %count: reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) asm {
+low.func.def target<vm.core> abi(vm_function) @integer_order_bits_i64(%lhs: reg<vm.value : i64>, %rhs: reg<vm.value : i64>, %count: reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>, reg<vm.value : i64>) asm {
   %signed_min = integer.min.s64 %lhs, %rhs
   %unsigned_min = integer.min.u64 %lhs, %rhs
   %signed_max = integer.max.s64 %lhs, %rhs

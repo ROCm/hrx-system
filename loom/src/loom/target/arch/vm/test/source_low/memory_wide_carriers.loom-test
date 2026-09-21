@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_wide_carriers.loom-test
-// RUN: with-checks emit source-low output=low
+// RUN: with-checks emit source-low target=vm:core output=low
 
-vm.target<core> @target
-
-func.def target(@target) @copy_wide_origin_vectors(%input: buffer, %output: buffer, %byte_offset_input: i64) {
+func.def @copy_wide_origin_vectors(%input: buffer, %output: buffer, %byte_offset_input: i64) {
   %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
   %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
   %byte_offset = scalar.assume %byte_offset_input [range(%byte_offset_input, 0, 4096), mul(%byte_offset_input, 64)] : i64
@@ -27,9 +25,7 @@ CHECK: buffer.store %destination_view, *, *, *, 0, "i32.x1"
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @copy_wide_origin_scalar(%input: buffer, %output: buffer, %byte_offset_input: i64) {
+func.def @copy_wide_origin_scalar(%input: buffer, %output: buffer, %byte_offset_input: i64) {
   %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
   %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
   %byte_offset = scalar.assume %byte_offset_input [range(%byte_offset_input, 0, 4096), mul(%byte_offset_input, 64)] : i64
@@ -51,9 +47,7 @@ CHECK: buffer.store %destination_view, %destination_offset, %destination_offset,
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @exchange_wide_origin(%buffer: buffer, %base_input: i64, %position_input: index, %value: i32) -> (i32) {
+func.def @exchange_wide_origin(%buffer: buffer, %base_input: i64, %position_input: index, %value: i32) -> (i32) {
   %aligned_buffer = buffer.assume.alignment %buffer {minimum_alignment = 8} : buffer
   %wide_base = scalar.assume %base_input [range(%base_input, 0, 128), mul(%base_input, 8)] : i64
   %base = index.cast %wide_base : i64 to offset
@@ -73,9 +67,7 @@ CHECK: buffer.store %view, *, %value, 0, "i32.x1"
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @exchange_signed_coordinate(%buffer: buffer, %base_input: offset, %position_input: i32, %value: i32) -> (i32) {
+func.def @exchange_signed_coordinate(%buffer: buffer, %base_input: offset, %position_input: i32, %value: i32) -> (i32) {
   %aligned_buffer = buffer.assume.alignment %buffer {minimum_alignment = 8} : buffer
   %base = index.assume %base_input [range(%base_input, 64, 128), mul(%base_input, 8)] : offset
   %signed_position = scalar.assume %position_input [range(%position_input, -8, -1)] : i32

@@ -20,6 +20,14 @@ extern "C" {
 // Stable target-family identity for x86 low descriptor sets.
 #define LOOM_X86_TARGET_STABLE_ID UINT64_C(0x3f1e78197f70e441)
 
+// Native bundle constants shared by authored records and named profiles.
+#define LOOM_X86_NATIVE_TARGET_PROFILE(                           \
+    symbol_suffix, target_kind, selector_name, native_bundle_key, \
+    snapshot_name, descriptor_set_key, feature_bits)              \
+  extern const loom_target_bundle_t kX86LowTargetBundle##symbol_suffix;
+#include "loom/target/arch/x86/records/target_profiles.inl"
+#undef LOOM_X86_NATIVE_TARGET_PROFILE
+
 extern const loom_target_bundle_table_t loom_x86_target_bundles;
 
 #ifdef __cplusplus

@@ -1,15 +1,13 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_nonlinear.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_f32_exp(%input: f32) -> (f32) {
+func.def @scalar_f32_exp(%input: f32) -> (f32) {
   %result = scalar.expf<afn> %input : f32
   func.return %result : f32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f32_exp(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_f32_exp(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %5 = vbcst.32 %input
   %6 = vmov.vector512.to.accumulator512 %5
   set.rounding 12
@@ -29,15 +27,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @vector_f32_exp(%input: vector<4xf32>) -> (vector<4xf32>) {
+func.def @vector_f32_exp(%input: vector<4xf32>) -> (vector<4xf32>) {
   %result = vector.expf<afn> %input : vector<4xf32>
   func.return %result : vector<4xf32>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f32_exp(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @vector_f32_exp(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %5 = vmov.vector512.to.accumulator512 %input
   set.rounding 12
   %6 = vconv.bf16.fp32x16 %5
@@ -55,15 +51,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_f32_exp2(%input: f32) -> (f32) {
+func.def @scalar_f32_exp2(%input: f32) -> (f32) {
   %result = scalar.exp2f<afn> %input : f32
   func.return %result : f32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f32_exp2(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_f32_exp2(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %5 = vbcst.32 %input
   %6 = vmov.vector512.to.accumulator512 %5
   %7 = vexp2.bf16x16 %6
@@ -75,15 +69,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @vector_f32_exp2(%input: vector<4xf32>) -> (vector<4xf32>) {
+func.def @vector_f32_exp2(%input: vector<4xf32>) -> (vector<4xf32>) {
   %result = vector.exp2f<afn> %input : vector<4xf32>
   func.return %result : vector<4xf32>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f32_exp2(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @vector_f32_exp2(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %5 = vmov.vector512.to.accumulator512 %input
   %6 = vexp2.bf16x16 %5
   %7 = vconv.fp32.bf16x16 %6
@@ -93,15 +85,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_f32_tanh(%input: f32) -> (f32) {
+func.def @scalar_f32_tanh(%input: f32) -> (f32) {
   %result = scalar.tanhf<afn> %input : f32
   func.return %result : f32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f32_tanh(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_f32_tanh(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %5 = vbcst.32 %input
   %6 = vmov.vector512.to.accumulator512 %5
   %7 = vtanh.bf16x16 %6
@@ -113,15 +103,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @vector_f32_tanh(%input: vector<4xf32>) -> (vector<4xf32>) {
+func.def @vector_f32_tanh(%input: vector<4xf32>) -> (vector<4xf32>) {
   %result = vector.tanhf<afn> %input : vector<4xf32>
   func.return %result : vector<4xf32>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f32_tanh(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @vector_f32_tanh(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %5 = vmov.vector512.to.accumulator512 %input
   %6 = vtanh.bf16x16 %5
   %7 = vconv.fp32.bf16x16 %6
@@ -131,45 +119,39 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_f32_sqrt(%input: f32) -> (f32) {
+func.def @scalar_f32_sqrt(%input: f32) -> (f32) {
   %result = scalar.sqrtf<afn> %input : f32
   func.return %result : f32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f32_sqrt(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_f32_sqrt(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %result = sqrt.f32 %input
   return %result
 }
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_f32_rsqrt(%input: f32) -> (f32) {
+func.def @scalar_f32_rsqrt(%input: f32) -> (f32) {
   %result = scalar.rsqrtf<afn> %input : f32
   func.return %result : f32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f32_rsqrt(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_f32_rsqrt(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %result = invsqrt.f32 %input
   return %result
 }
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_f32_sin(%input: f32) -> (f32) {
+func.def @scalar_f32_sin(%input: f32) -> (f32) {
   %result = scalar.sinf<afn> %input : f32
   func.return %result : f32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f32_sin(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_f32_sin(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %5 = vbcst.32 %input
   %6 = vmov.vector512.to.accumulator512 %5
   set.rounding 12
@@ -269,15 +251,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_f32_cos(%input: f32) -> (f32) {
+func.def @scalar_f32_cos(%input: f32) -> (f32) {
   %result = scalar.cosf<afn> %input : f32
   func.return %result : f32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f32_cos(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_f32_cos(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %5 = vbcst.32 %input
   %6 = vmov.vector512.to.accumulator512 %5
   set.rounding 12
@@ -374,15 +354,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_f32_sin_turns(%input: f32) -> (f32) {
+func.def @scalar_f32_sin_turns(%input: f32) -> (f32) {
   %result = scalar.sinturnsf<afn> %input : f32
   func.return %result : f32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f32_sin_turns(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_f32_sin_turns(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %5 = mov.flt2fx-scale 0
   %6 = convert.round-nearest.f32.to.signed.i32 %input, %5
   %7 = mov.fx2flt-scale 0
@@ -470,15 +448,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_f32_cos_turns(%input: f32) -> (f32) {
+func.def @scalar_f32_cos_turns(%input: f32) -> (f32) {
   %result = scalar.costurnsf<afn> %input : f32
   func.return %result : f32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f32_cos_turns(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_f32_cos_turns(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %5 = mov.flt2fx-scale 0
   %6 = convert.round-nearest.f32.to.signed.i32 %input, %5
   %7 = mov.fx2flt-scale 0
@@ -563,15 +539,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_f32_silu(%input: f32) -> (f32) {
+func.def @scalar_f32_silu(%input: f32) -> (f32) {
   %result = scalar.siluf<arcp|afn> %input : f32
   func.return %result : f32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f32_silu(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_f32_silu(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %13 = mov.i32 -1078416837
   %14 = mov.i32 1065353216
   %15 = mov.i32 2147483647
@@ -1016,15 +990,13 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @scalar_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @vector_f32_silu(%input: vector<2xf32>) -> (vector<2xf32>) {
+func.def @vector_f32_silu(%input: vector<2xf32>) -> (vector<2xf32>) {
   %result = vector.siluf<arcp|afn> %input : vector<2xf32>
   func.return %result : vector<2xf32>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f32_silu(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @vector_f32_silu(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %36 = vextract.32.imm %input, 0
   %37 = mov.i32 1065353216
   %38 = mov.i32 -1078416837
@@ -1873,9 +1845,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @vector_f
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_f32_logistic_requires_approximation(%input: f32) -> (f32) {
+func.def @scalar_f32_logistic_requires_approximation(%input: f32) -> (f32) {
   // ERROR@+1: LOWERING/036 {op_name="scalar.logisticf", phase_name="legalize-math", policy_name="aie2p-math", math_op="logisticf", lane_domain="scalar", element_type="f32", constraint_key="math.logistic.exact_f32"}
   %result = scalar.logisticf %input : f32
   func.return %result : f32
@@ -1883,9 +1853,7 @@ func.def target(@target) @scalar_f32_logistic_requires_approximation(%input: f32
 
 // ====
 
-aie2p.target<core> @target
-
-func.def target(@target) @scalar_f32_silu_requires_approximation(%input: f32) -> (f32) {
+func.def @scalar_f32_silu_requires_approximation(%input: f32) -> (f32) {
   // ERROR@+1: LOWERING/036 {op_name="scalar.siluf", phase_name="legalize-math", policy_name="aie2p-math", math_op="siluf", lane_domain="scalar", element_type="f32", constraint_key="math.silu.exact_f32"}
   %result = scalar.siluf %input : f32
   func.return %result : f32

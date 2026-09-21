@@ -216,6 +216,7 @@ loom_cc_library(
     "fact_cfg.h"
     "fact_extensions.h"
     "fact_induction.h"
+    "fact_layout.h"
     "fact_loop.h"
     "fact_table.h"
     "reference_transfer.h"
@@ -223,6 +224,7 @@ loom_cc_library(
     "fact_cfg.c"
     "fact_extensions.c"
     "fact_induction.c"
+    "fact_layout.c"
     "fact_loop.c"
     "fact_table.c"
     "fact_table_compute.c"
@@ -248,6 +250,18 @@ loom_cc_library(
     loom::ops::op_defs
     loom::target::facts
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    fact_layout_test
+  SRCS
+    "fact_layout_test.cc"
+  DEPS
+    ::fact_table
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 loom_cc_test(

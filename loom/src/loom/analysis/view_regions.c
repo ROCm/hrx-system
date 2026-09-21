@@ -13,7 +13,6 @@
 #include "loom/ir/attribute.h"
 #include "loom/ir/context.h"
 #include "loom/ops/buffer/ops.h"
-#include "loom/ops/encoding/ops.h"
 #include "loom/ops/encoding/storage.h"
 #include "loom/ops/view/ops.h"
 
@@ -246,33 +245,6 @@ static iree_status_t loom_view_region_static_or_dynamic_expr(
   return iree_ok_status();
 }
 
-static iree_status_t loom_view_region_direct_strided_stride_expr(
-    loom_view_region_table_t* table, loom_type_t view_type, uint8_t axis,
-    loom_symbolic_expr_t* out_expression, bool* out_known) {
-  *out_known = false;
-  if (!loom_type_has_ssa_encoding(view_type)) {
-    return iree_ok_status();
-  }
-  loom_value_id_t layout_value_id =
-      (loom_value_id_t)loom_type_encoding_value_id(view_type);
-  const loom_module_t* module = table->expression_context->module;
-  if (layout_value_id >= module->values.count) {
-    return iree_ok_status();
-  }
-  const loom_value_t* layout_value = loom_module_value(module, layout_value_id);
-  if (loom_value_is_block_arg(layout_value)) {
-    return iree_ok_status();
-  }
-  const loom_op_t* op = loom_value_def_op(layout_value);
-  if (!op || !loom_encoding_layout_strided_isa(op)) {
-    return iree_ok_status();
-  }
-  return loom_view_region_static_or_dynamic_expr(
-      table, loom_encoding_layout_strided_static_strides(op),
-      loom_encoding_layout_strided_strides(op), axis, out_expression,
-      out_known);
-}
-
 static iree_status_t loom_view_region_dense_axis_stride_expr(
     loom_view_region_table_t* table, loom_type_t view_type, uint8_t axis,
     loom_symbolic_expr_t* out_expression, bool* out_known) {
@@ -318,20 +290,22 @@ static iree_status_t loom_view_region_axis_stride_expr(
     loom_symbolic_expr_unknown(loom_value_facts_unknown(), out_expression);
     return iree_ok_status();
   }
-  bool direct_known = false;
-  IREE_RETURN_IF_ERROR(loom_view_region_direct_strided_stride_expr(
-      table, view_type, axis, out_expression, &direct_known));
-  if (direct_known) {
-    loom_view_region_expression_refine_facts(out_expression,
-                                             layout.summary.strides[axis]);
-    *out_known = true;
-    return iree_ok_status();
-  }
   loom_value_facts_t stride_facts = layout.summary.strides[axis];
   if (loom_value_facts_is_exact(stride_facts) &&
       !loom_value_facts_is_float(stride_facts)) {
     loom_symbolic_expr_constant(stride_facts.range_lo, out_expression);
     out_expression->facts = stride_facts;
+    *out_known = true;
+    return iree_ok_status();
+  }
+  const loom_value_fact_layout_strides_t stride_values =
+      loom_encoding_query_type_layout_strides(
+          &table->expression_context->fact_table->context, view_type);
+  if (axis < stride_values.count &&
+      stride_values.values[axis] != LOOM_VALUE_ID_INVALID) {
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_from_value(
+        table->expression_context, stride_values.values[axis], out_expression));
+    loom_view_region_expression_refine_facts(out_expression, stride_facts);
     *out_known = true;
     return iree_ok_status();
   }

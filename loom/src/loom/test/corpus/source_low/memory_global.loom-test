@@ -330,9 +330,7 @@ func.def @descriptor_dynamic_base_extent_store_f32x4(%output: buffer, %value: ve
 
 // ====
 
-target.decl @target
-
-kernel.def target(@target) @i32_readonly_uniform_smem() {
+kernel.def @i32_readonly_uniform_smem() {
   %unit = index.constant 1 : index
   %workgroups = index.constant 16 : index
   %workgroup_size = index.constant 64 : index
@@ -354,9 +352,7 @@ kernel.def target(@target) @i32_readonly_uniform_smem() {
 
 // ====
 
-target.decl @target
-
-kernel.def target(@target) @f32x4_readonly_uniform_smem_copy() {
+kernel.def @f32x4_readonly_uniform_smem_copy() {
   %unit = index.constant 1 : index
   %workgroups = index.constant 16 : index
   kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -381,9 +377,7 @@ kernel.def target(@target) @f32x4_readonly_uniform_smem_copy() {
 
 // ====
 
-target.decl @target
-
-kernel.def target(@target) @f32x8_readonly_uniform_smem_copy() {
+kernel.def @f32x8_readonly_uniform_smem_copy() {
   %unit = index.constant 1 : index
   %workgroups = index.constant 16 : index
   kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -408,9 +402,7 @@ kernel.def target(@target) @f32x8_readonly_uniform_smem_copy() {
 
 // ====
 
-target.decl @target
-
-kernel.def target(@target) @i32_workgroup_global_saddr() {
+kernel.def @i32_workgroup_global_saddr() {
   %unit = index.constant 1 : index
   %workgroups = index.constant 16 : index
   %workgroup_size = index.constant 64 : index
@@ -428,9 +420,7 @@ kernel.def target(@target) @i32_workgroup_global_saddr() {
 
 // ====
 
-target.decl @target
-
-kernel.def target(@target) @i32_zero_workgroup_saddr_term() {
+kernel.def @i32_zero_workgroup_saddr_term() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -449,9 +439,7 @@ kernel.def target(@target) @i32_zero_workgroup_saddr_term() {
 
 // ====
 
-target.decl @target
-
-kernel.def target(@target) @i32_dynamic_leading_dim_global_saddr() {
+kernel.def @i32_dynamic_leading_dim_global_saddr() {
   %unit = index.constant 1 : index
   %workgroups_x = index.constant 2 : index
   %workgroup_size = index.constant 32 : index
@@ -471,9 +459,7 @@ kernel.def target(@target) @i32_dynamic_leading_dim_global_saddr() {
 
 // ====
 
-target.decl @target
-
-kernel.def target(@target) @i32_readonly_uniform_smem_non_power_two_stride() {
+kernel.def @i32_readonly_uniform_smem_non_power_two_stride() {
   %unit = index.constant 1 : index
   %workgroups = index.constant 2 : index
   %workgroup_size = index.constant 64 : index
@@ -493,9 +479,7 @@ kernel.def target(@target) @i32_readonly_uniform_smem_non_power_two_stride() {
 
 // ====
 
-target.decl @target
-
-kernel.def target(@target) @i32_readonly_uniform_smem_scalar_branch() {
+kernel.def @i32_readonly_uniform_smem_scalar_branch() {
   %unit = index.constant 1 : index
   %workgroups = index.constant 16 : index
   %workgroup_size = index.constant 64 : index
@@ -522,9 +506,7 @@ kernel.def target(@target) @i32_readonly_uniform_smem_scalar_branch() {
 
 // ====
 
-target.decl @target
-
-kernel.def target(@target) @i32_readonly_uniform_smem_loop_bound() {
+kernel.def @i32_readonly_uniform_smem_loop_bound() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -551,9 +533,7 @@ kernel.def target(@target) @i32_readonly_uniform_smem_loop_bound() {
 
 // ====
 
-target.decl @target
-
-kernel.def target(@target) @f32_readonly_uniform_smem_vector_math() {
+kernel.def @f32_readonly_uniform_smem_vector_math() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -577,9 +557,7 @@ kernel.def target(@target) @f32_readonly_uniform_smem_vector_math() {
 
 // ====
 
-target.decl @target
-
-kernel.def target(@target) @i32_readonly_uniform_smem_address() {
+kernel.def @i32_readonly_uniform_smem_address() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%control: buffer, %output: buffer) {
@@ -599,9 +577,7 @@ kernel.def target(@target) @i32_readonly_uniform_smem_address() {
 
 // ====
 
-target.decl @target
-
-kernel.def target(@target) @i32_readonly_uniform_smem_guarded_index_address() {
+kernel.def @i32_readonly_uniform_smem_guarded_index_address() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%control: buffer, %output: buffer) {
@@ -624,9 +600,7 @@ kernel.def target(@target) @i32_readonly_uniform_smem_guarded_index_address() {
 
 // ====
 
-target.decl @target
-
-kernel.def target(@target) @i64_readonly_uniform_smem_guarded_index_address() {
+kernel.def @i64_readonly_uniform_smem_guarded_index_address() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%control: buffer, %output: buffer) {
@@ -1271,9 +1245,7 @@ kernel.def @rank2_vector_tile_transpose() {
 
 // ====
 
-target.decl @target
-
-kernel.def target(@target) @grid_stride_store_offset() {
+kernel.def @grid_stride_store_offset() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index

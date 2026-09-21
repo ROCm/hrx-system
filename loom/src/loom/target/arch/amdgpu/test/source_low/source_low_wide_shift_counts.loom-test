@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_scalar_i64_shift_counts.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amdgpu:gfx1151 output=low
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @wide_shift_constant(%values: vector<2xi64>) -> (i64) {
+func.def @wide_shift_constant(%values: vector<2xi64>) -> (i64) {
   %value = vector.extract %values[0] : vector<2xi64> -> i64
   %count = scalar.constant 31 : i64
   %shifted = scalar.shli %value, %count : i64
@@ -11,7 +9,7 @@ func.def target(@target) @wide_shift_constant(%values: vector<2xi64>) -> (i64) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_shift_constant(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @wide_shift_constant(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>) asm {
   %7 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %8 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %value = concat(%7, %8) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
@@ -22,16 +20,14 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_shift_co
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @wide_shift_uniform(%values: vector<2xi64>, %count: i64) -> (i64) {
+func.def @wide_shift_uniform(%values: vector<2xi64>, %count: i64) -> (i64) {
   %value = vector.extract %values[0] : vector<2xi64> -> i64
   %shifted = scalar.shli %value, %count : i64
   func.return %shifted : i64
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_shift_uniform(%values: reg<amdgpu.vgpr x4>, %count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @wide_shift_uniform(%values: reg<amdgpu.vgpr x4>, %count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %8 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %9 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %value = concat(%8, %9) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
@@ -42,9 +38,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_shift_un
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @wide_shift_varying(%values: vector<2xi64>, %counts: vector<2xi64>) -> (i64) {
+func.def @wide_shift_varying(%values: vector<2xi64>, %counts: vector<2xi64>) -> (i64) {
   %value = vector.extract %values[0] : vector<2xi64> -> i64
   %count = vector.extract %counts[0] : vector<2xi64> -> i64
   %shifted = scalar.shli %value, %count : i64
@@ -52,7 +46,7 @@ func.def target(@target) @wide_shift_varying(%values: vector<2xi64>, %counts: ve
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_shift_varying(%values: reg<amdgpu.vgpr x4>, %counts: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @wide_shift_varying(%values: reg<amdgpu.vgpr x4>, %counts: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>) asm {
   %9 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %10 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %value = concat(%9, %10) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
@@ -63,16 +57,14 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_shift_va
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @wide_right_shift_uniform(%value: i64, %count: i64) -> (i64, i64) {
+func.def @wide_right_shift_uniform(%value: i64, %count: i64) -> (i64, i64) {
   %logical = scalar.shrui %value, %count : i64
   %signed = scalar.shrsi %value, %count : i64
   func.return %logical, %signed : i64, i64
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_right_shift_uniform(%value: reg<amdgpu.sgpr x2>, %count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @wide_right_shift_uniform(%value: reg<amdgpu.sgpr x2>, %count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
   %10 = slice %count[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %logical = s_lshr_b64 %value, %10
   %signed = s_ashr_i64 %value, %10
@@ -81,9 +73,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_right_sh
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @wide_right_shift_uniform_count(%values: vector<2xi64>, %count: i64) -> (i64, i64) {
+func.def @wide_right_shift_uniform_count(%values: vector<2xi64>, %count: i64) -> (i64, i64) {
   %value = vector.extract %values[1] : vector<2xi64> -> i64
   %logical = scalar.shrui %value, %count : i64
   %signed = scalar.shrsi %value, %count : i64
@@ -91,7 +81,7 @@ func.def target(@target) @wide_right_shift_uniform_count(%values: vector<2xi64>,
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_right_shift_uniform_count(%values: reg<amdgpu.vgpr x4>, %count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @wide_right_shift_uniform_count(%values: reg<amdgpu.vgpr x4>, %count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
   %11 = slice %values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %12 = slice %values[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %value = concat(%11, %12) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
@@ -103,9 +93,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_right_sh
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @wide_right_shift_varying_count(%values: vector<2xi64>, %counts: vector<2xi64>) -> (i64, i64) {
+func.def @wide_right_shift_varying_count(%values: vector<2xi64>, %counts: vector<2xi64>) -> (i64, i64) {
   %value = vector.extract %values[1] : vector<2xi64> -> i64
   %count = vector.extract %counts[1] : vector<2xi64> -> i64
   %logical = scalar.shrui %value, %count : i64
@@ -114,7 +102,7 @@ func.def target(@target) @wide_right_shift_varying_count(%values: vector<2xi64>,
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_right_shift_varying_count(%values: reg<amdgpu.vgpr x4>, %counts: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @wide_right_shift_varying_count(%values: reg<amdgpu.vgpr x4>, %counts: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
   %12 = slice %values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %13 = slice %values[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %value = concat(%12, %13) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
@@ -126,9 +114,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_right_sh
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @wide_right_shift_constant(%values: vector<2xi64>) -> (i64, i64) {
+func.def @wide_right_shift_constant(%values: vector<2xi64>) -> (i64, i64) {
   %value = vector.extract %values[1] : vector<2xi64> -> i64
   %count = scalar.constant 31 : i64
   %logical = scalar.shrui %value, %count : i64
@@ -137,7 +123,7 @@ func.def target(@target) @wide_right_shift_constant(%values: vector<2xi64>) -> (
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_right_shift_constant(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @wide_right_shift_constant(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
   %10 = slice %values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %11 = slice %values[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %value = concat(%10, %11) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
@@ -153,9 +139,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_right_sh
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @wide_shift_word_boundaries(%value: i64) -> (i64, i64, i64, i64) {
+func.def @wide_shift_word_boundaries(%value: i64) -> (i64, i64, i64, i64) {
   %identity_count = scalar.constant 0 : i64
   %last_low = scalar.constant 31 : i64
   %first_high = scalar.constant 32 : i64
@@ -168,7 +152,7 @@ func.def target(@target) @wide_shift_word_boundaries(%value: i64) -> (i64, i64, 
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_shift_word_boundaries(%value: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @wide_shift_word_boundaries(%value: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
   %18 = s_mov_b32 31
   %21 = s_mov_b32 32
   %24 = s_mov_b32 63
@@ -180,9 +164,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_shift_wo
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @wide_shift_low_word(%value: i64) -> (i32) {
+func.def @wide_shift_low_word(%value: i64) -> (i32) {
   %count = scalar.constant 6 : i64
   %shifted = scalar.shli %value, %count : i64
   %result = scalar.trunci %shifted : i64 to i32
@@ -190,7 +172,7 @@ func.def target(@target) @wide_shift_low_word(%value: i64) -> (i32) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_shift_low_word(%value: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @wide_shift_low_word(%value: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) asm {
   %7 = s_mov_b32 6
   %shifted = s_lshl_b64 %value, %7
   %result = slice %shifted[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -199,16 +181,14 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_shift_lo
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @wide_shift_bounded_low(%value: i64, %count_input: i64) -> (i64) {
+func.def @wide_shift_bounded_low(%value: i64, %count_input: i64) -> (i64) {
   %count = scalar.assume %count_input [range(%count_input, 0, 31)] : i64
   %shifted = scalar.shli %value, %count : i64
   func.return %shifted : i64
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_shift_bounded_low(%value: reg<amdgpu.sgpr x2>, %count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @wide_shift_bounded_low(%value: reg<amdgpu.sgpr x2>, %count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
   %8 = slice %count[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %shifted = s_lshl_b64 %value, %8
   return %shifted
@@ -216,16 +196,14 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_shift_bo
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @wide_shift_bounded_high(%value: i64, %count_input: i64) -> (i64) {
+func.def @wide_shift_bounded_high(%value: i64, %count_input: i64) -> (i64) {
   %count = scalar.assume %count_input [range(%count_input, 32, 63)] : i64
   %shifted = scalar.shli %value, %count : i64
   func.return %shifted : i64
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_shift_bounded_high(%value: reg<amdgpu.sgpr x2>, %count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @wide_shift_bounded_high(%value: reg<amdgpu.sgpr x2>, %count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
   %8 = slice %count[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %shifted = s_lshl_b64 %value, %8
   return %shifted
@@ -233,16 +211,14 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_shift_bo
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @wide_shift_crossing_words(%value: i64, %count_input: i64) -> (i64) {
+func.def @wide_shift_crossing_words(%value: i64, %count_input: i64) -> (i64) {
   %count = scalar.assume %count_input [range(%count_input, 31, 32)] : i64
   %shifted = scalar.shli %value, %count : i64
   func.return %shifted : i64
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_shift_crossing_words(%value: reg<amdgpu.sgpr x2>, %count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @wide_shift_crossing_words(%value: reg<amdgpu.sgpr x2>, %count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
   %8 = slice %count[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %shifted = s_lshl_b64 %value, %8
   return %shifted
@@ -250,16 +226,14 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_shift_cr
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @wide_shift_bounded_nonzero_low(%value: i64, %count_input: i64) -> (i64) {
+func.def @wide_shift_bounded_nonzero_low(%value: i64, %count_input: i64) -> (i64) {
   %count = scalar.assume %count_input [range(%count_input, 1, 31)] : i64
   %shifted = scalar.shli %value, %count : i64
   func.return %shifted : i64
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_shift_bounded_nonzero_low(%value: reg<amdgpu.sgpr x2>, %count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @wide_shift_bounded_nonzero_low(%value: reg<amdgpu.sgpr x2>, %count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
   %8 = slice %count[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %shifted = s_lshl_b64 %value, %8
   return %shifted
@@ -267,9 +241,8 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_shift_bo
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @word_right_shift_constants(%value: i32) -> (i32, i32, i32, i32, i32, i32, i32) {
+// Word controls qualify the native pieces used by split-word lowering.
+func.def @word_right_shift_constants(%value: i32) -> (i32, i32, i32, i32, i32, i32, i32) {
   %identity_count = scalar.constant 0 : i32
   %single_bit = scalar.constant 1 : i32
   %middle = scalar.constant 16 : i32
@@ -285,7 +258,7 @@ func.def target(@target) @word_right_shift_constants(%value: i32) -> (i32, i32, 
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @word_right_shift_constants(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @word_right_shift_constants(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
   %single_bit = s_mov_b32 1
   %middle = s_mov_b32 16
   %last = s_mov_b32 31
@@ -300,16 +273,14 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @word_right_sh
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @word_right_shift_dynamic(%value: i32, %count: i32) -> (i32, i32) {
+func.def @word_right_shift_dynamic(%value: i32, %count: i32) -> (i32, i32) {
   %logical = scalar.shrui %value, %count : i32
   %signed = scalar.shrsi %value, %count : i32
   func.return %logical, %signed : i32, i32
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @word_right_shift_dynamic(%value: reg<amdgpu.sgpr>, %count: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @word_right_shift_dynamic(%value: reg<amdgpu.sgpr>, %count: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
   %logical = s_lshr_b32 %value, %count
   %signed = s_ashr_i32 %value, %count
   return %logical, %signed
@@ -317,9 +288,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @word_right_sh
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @wide_right_shift_word_boundaries(%value: i64) -> (i64, i64, i64, i64, i64, i64, i64, i64) {
+func.def @wide_right_shift_word_boundaries(%value: i64) -> (i64, i64, i64, i64, i64, i64, i64, i64) {
   %identity_count = scalar.constant 0 : i64
   %last_low = scalar.constant 31 : i64
   %first_high = scalar.constant 32 : i64
@@ -336,7 +305,7 @@ func.def target(@target) @wide_right_shift_word_boundaries(%value: i64) -> (i64,
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_right_shift_word_boundaries(%value: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @wide_right_shift_word_boundaries(%value: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
   %30 = s_mov_b32 31
   %33 = s_mov_b32 32
   %36 = s_mov_b32 63
@@ -351,9 +320,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_right_sh
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @wide_right_shift_bounded_low(%value: i64, %count_input: i64) -> (i64, i64) {
+func.def @wide_right_shift_bounded_low(%value: i64, %count_input: i64) -> (i64, i64) {
   %count = scalar.assume %count_input [range(%count_input, 0, 31)] : i64
   %logical = scalar.shrui %value, %count : i64
   %signed = scalar.shrsi %value, %count : i64
@@ -361,7 +328,7 @@ func.def target(@target) @wide_right_shift_bounded_low(%value: i64, %count_input
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_right_shift_bounded_low(%value: reg<amdgpu.sgpr x2>, %count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @wide_right_shift_bounded_low(%value: reg<amdgpu.sgpr x2>, %count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
   %11 = slice %count[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %logical = s_lshr_b64 %value, %11
   %signed = s_ashr_i64 %value, %11
@@ -370,9 +337,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_right_sh
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @wide_right_shift_bounded_nonzero_low(%value: i64, %count_input: i64) -> (i64, i64) {
+func.def @wide_right_shift_bounded_nonzero_low(%value: i64, %count_input: i64) -> (i64, i64) {
   %count = scalar.assume %count_input [range(%count_input, 1, 31)] : i64
   %logical = scalar.shrui %value, %count : i64
   %signed = scalar.shrsi %value, %count : i64
@@ -380,7 +345,7 @@ func.def target(@target) @wide_right_shift_bounded_nonzero_low(%value: i64, %cou
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_right_shift_bounded_nonzero_low(%value: reg<amdgpu.sgpr x2>, %count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @wide_right_shift_bounded_nonzero_low(%value: reg<amdgpu.sgpr x2>, %count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
   %11 = slice %count[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %logical = s_lshr_b64 %value, %11
   %signed = s_ashr_i64 %value, %11
@@ -389,9 +354,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_right_sh
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @wide_right_shift_bounded_high(%value: i64, %count_input: i64) -> (i64, i64) {
+func.def @wide_right_shift_bounded_high(%value: i64, %count_input: i64) -> (i64, i64) {
   %count = scalar.assume %count_input [range(%count_input, 32, 63)] : i64
   %logical = scalar.shrui %value, %count : i64
   %signed = scalar.shrsi %value, %count : i64
@@ -399,7 +362,7 @@ func.def target(@target) @wide_right_shift_bounded_high(%value: i64, %count_inpu
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_right_shift_bounded_high(%value: reg<amdgpu.sgpr x2>, %count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @wide_right_shift_bounded_high(%value: reg<amdgpu.sgpr x2>, %count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
   %11 = slice %count[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %logical = s_lshr_b64 %value, %11
   %signed = s_ashr_i64 %value, %11
@@ -408,9 +371,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_right_sh
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @wide_right_shift_crossing_words(%value: i64, %count_input: i64) -> (i64, i64) {
+func.def @wide_right_shift_crossing_words(%value: i64, %count_input: i64) -> (i64, i64) {
   %count = scalar.assume %count_input [range(%count_input, 31, 32)] : i64
   %logical = scalar.shrui %value, %count : i64
   %signed = scalar.shrsi %value, %count : i64
@@ -418,7 +379,7 @@ func.def target(@target) @wide_right_shift_crossing_words(%value: i64, %count_in
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_right_shift_crossing_words(%value: reg<amdgpu.sgpr x2>, %count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @wide_right_shift_crossing_words(%value: reg<amdgpu.sgpr x2>, %count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
   %11 = slice %count[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %logical = s_lshr_b64 %value, %11
   %signed = s_ashr_i64 %value, %11
@@ -427,10 +388,8 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_right_sh
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
 // All three shifts preserve their input and the count for later arithmetic.
-func.def target(@target) @word_shifts_reuse_input(%value: i32, %count: i32) -> (i32) {
+func.def @word_shifts_reuse_input(%value: i32, %count: i32) -> (i32) {
   %left = scalar.shli %value, %count : i32
   %logical = scalar.shrui %value, %count : i32
   %signed = scalar.shrsi %value, %count : i32
@@ -442,7 +401,7 @@ func.def target(@target) @word_shifts_reuse_input(%value: i32, %count: i32) -> (
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @word_shifts_reuse_input(%value: reg<amdgpu.sgpr>, %count: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @word_shifts_reuse_input(%value: reg<amdgpu.sgpr>, %count: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
   %left = s_lshl_b32 %value, %count
   %logical = s_lshr_b32 %value, %count
   %signed = s_ashr_i32 %value, %count
@@ -455,9 +414,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @word_shifts_r
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @wide_shifts_reuse_counts(%value: i64, %left_count: i64, %right_count: i64) -> (i64) {
+func.def @wide_shifts_reuse_counts(%value: i64, %left_count: i64, %right_count: i64) -> (i64) {
   %left = scalar.shli %value, %left_count : i64
   %logical = scalar.shrui %value, %right_count : i64
   %signed = scalar.shrsi %left, %left_count : i64
@@ -469,7 +426,7 @@ func.def target(@target) @wide_shifts_reuse_counts(%value: i64, %left_count: i64
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_shifts_reuse_counts(%value: reg<amdgpu.sgpr x2>, %left_count: reg<amdgpu.sgpr x2>, %right_count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @wide_shifts_reuse_counts(%value: reg<amdgpu.sgpr x2>, %left_count: reg<amdgpu.sgpr x2>, %right_count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
   %15 = slice %left_count[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %left = s_lshl_b64 %value, %15
   %17 = slice %right_count[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -491,9 +448,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_shifts_r
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @wide_shift_value_is_count(%input: i64) -> (i64) {
+func.def @wide_shift_value_is_count(%input: i64) -> (i64) {
   %mask = scalar.constant 63 : i64
   %value = scalar.andi %input, %mask : i64
   %result = scalar.shli %value, %value : i64
@@ -501,7 +456,7 @@ func.def target(@target) @wide_shift_value_is_count(%input: i64) -> (i64) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_shift_value_is_count(%input: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @wide_shift_value_is_count(%input: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
   %7 = s_mov_b32 63
   %8 = s_mov_b32 0
   %mask = concat(%7, %8) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
@@ -513,16 +468,14 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @wide_shift_va
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @index_shift_dynamic(%value: index, %count: index) -> (index, index) {
+func.def @index_shift_dynamic(%value: index, %count: index) -> (index, index) {
   %left = index.shli %value, %count : index
   %right = index.shrui %value, %count : index
   func.return %left, %right : index, index
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @index_shift_dynamic(%value: reg<amdgpu.sgpr>, %count: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @index_shift_dynamic(%value: reg<amdgpu.sgpr>, %count: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
   %left = s_lshl_b32 %value, %count
   %right = s_lshr_b32 %value, %count
   return %left, %right
@@ -530,16 +483,14 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @index_shift_d
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @index_shift_constant_four(%value: index) -> (index) {
+func.def @index_shift_constant_four(%value: index) -> (index) {
   %count = index.constant 4 : index
   %result = index.shli %value, %count : index
   func.return %result : index
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @index_shift_constant_four(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @index_shift_constant_four(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
   %count = s_mov_b32 4
   %result = s_lshl_b32 %value, %count
   return %result
@@ -547,24 +498,20 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @index_shift_c
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @index_shift_arithmetic(%value: index, %count: index) -> (index) {
+func.def @index_shift_arithmetic(%value: index, %count: index) -> (index) {
   %result = index.shrsi %value, %count : index
   func.return %result : index
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @index_shift_arithmetic(%value: reg<amdgpu.sgpr>, %count: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @index_shift_arithmetic(%value: reg<amdgpu.sgpr>, %count: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
   %result = s_ashr_i32 %value, %count
   return %result
 }
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @index_shift_bounded(%value: index, %count_input: index) -> (index, index, index) {
+func.def @index_shift_bounded(%value: index, %count_input: index) -> (index, index, index) {
   %count = index.assume %count_input [range(%count_input, 0, 31)] : index
   %left = index.shli %value, %count : index
   %logical = index.shrui %value, %count : index
@@ -573,7 +520,7 @@ func.def target(@target) @index_shift_bounded(%value: index, %count_input: index
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @index_shift_bounded(%value: reg<amdgpu.sgpr>, %count: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @index_shift_bounded(%value: reg<amdgpu.sgpr>, %count: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
   %left = s_lshl_b32 %value, %count
   %logical = s_lshr_b32 %value, %count
   %signed = s_ashr_i32 %value, %count
@@ -582,9 +529,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @index_shift_b
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @index_shift_constant_boundaries(%value: index) -> (index, index, index, index, index, index) {
+func.def @index_shift_constant_boundaries(%value: index) -> (index, index, index, index, index, index) {
   %identity_count = index.constant 0 : index
   %last = index.constant 31 : index
   %left_zero = index.shli %value, %identity_count : index
@@ -597,7 +542,7 @@ func.def target(@target) @index_shift_constant_boundaries(%value: index) -> (ind
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @index_shift_constant_boundaries(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @index_shift_constant_boundaries(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
   %last = s_mov_b32 31
   %left_last = s_lshl_b32 %value, %last
   %logical_last = s_lshr_b32 %value, %last
@@ -607,9 +552,7 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @index_shift_c
 
 // ====
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @index_shift_arithmetic_reuse(%value: index, %count: index) -> (index) {
+func.def @index_shift_arithmetic_reuse(%value: index, %count: index) -> (index) {
   %shifted = index.shrsi %value, %count : index
   %with_count = index.add %shifted, %count : index
   %result = index.xori %with_count, %value : index
@@ -617,7 +560,7 @@ func.def target(@target) @index_shift_arithmetic_reuse(%value: index, %count: in
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @index_shift_arithmetic_reuse(%value: reg<amdgpu.sgpr>, %count: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @index_shift_arithmetic_reuse(%value: reg<amdgpu.sgpr>, %count: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
   %shifted = s_ashr_i32 %value, %count
   %with_count = s_add_u32 %shifted, %count
   %result = s_xor_b32 %with_count, %value

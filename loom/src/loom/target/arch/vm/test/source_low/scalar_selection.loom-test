@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/scalar_selection.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=vm:core output=low
 
-vm.target<core> @vm
-
-func.def target(@vm) @scalar_selection(%condition: i1, %a_i1: i1, %b_i1: i1, %a_i32: i32, %b_i32: i32, %a_i64: i64, %b_i64: i64, %a_f32: f32, %b_f32: f32, %a_f64: f64, %b_f64: f64) -> (i1, i32, i64, f32, f64) {
+func.def @scalar_selection(%condition: i1, %a_i1: i1, %b_i1: i1, %a_i32: i32, %b_i32: i32, %a_i64: i64, %b_i64: i64, %a_f32: f32, %b_f32: f32, %a_f64: f64, %b_f64: f64) -> (i1, i32, i64, f32, f64) {
   %r_i1 = scf.select %condition, %a_i1, %b_i1 : i1
   %r_i32 = scf.select %condition, %a_i32, %b_i32 : i32
   %r_i64 = scf.select %condition, %a_i64, %b_i64 : i64
@@ -13,7 +11,7 @@ func.def target(@vm) @scalar_selection(%condition: i1, %a_i1: i1, %b_i1: i1, %a_
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @scalar_selection(%condition: reg<vm.value : i1>, %a_i1: reg<vm.value : i1>, %b_i1: reg<vm.value : i1>, %a_i32: reg<vm.value : i32>, %b_i32: reg<vm.value : i32>, %a_i64: reg<vm.value : i64>, %b_i64: reg<vm.value : i64>, %a_f32: reg<vm.value : f32>, %b_f32: reg<vm.value : f32>, %a_f64: reg<vm.value : f64>, %b_f64: reg<vm.value : f64>) -> (reg<vm.value : i1>, reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : f32>, reg<vm.value : f64>) asm {
+low.func.def target<vm.core> abi(vm_function) @scalar_selection(%condition: reg<vm.value : i1>, %a_i1: reg<vm.value : i1>, %b_i1: reg<vm.value : i1>, %a_i32: reg<vm.value : i32>, %b_i32: reg<vm.value : i32>, %a_i64: reg<vm.value : i64>, %b_i64: reg<vm.value : i64>, %a_f32: reg<vm.value : f32>, %b_f32: reg<vm.value : f32>, %a_f64: reg<vm.value : f64>, %b_f64: reg<vm.value : f64>) -> (reg<vm.value : i1>, reg<vm.value : i32>, reg<vm.value : i64>, reg<vm.value : f32>, reg<vm.value : f64>) asm {
   %r_i1 = value.select %condition, %a_i1, %b_i1 : reg<vm.value : i1>
   %r_i32 = value.select %condition, %a_i32, %b_i32 : reg<vm.value : i32>
   %r_i64 = value.select %condition, %a_i64, %b_i64

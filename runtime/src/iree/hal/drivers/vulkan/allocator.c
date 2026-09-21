@@ -2144,23 +2144,6 @@ static iree_status_t iree_hal_vulkan_allocator_import_buffer(
   return status;
 }
 
-static iree_status_t iree_hal_vulkan_allocator_export_buffer(
-    iree_hal_allocator_t* IREE_RESTRICT base_allocator,
-    iree_hal_buffer_t* IREE_RESTRICT buffer,
-    iree_hal_external_buffer_type_t requested_type,
-    iree_hal_external_buffer_flags_t requested_flags,
-    iree_hal_external_buffer_t* IREE_RESTRICT out_external_buffer) {
-  IREE_ASSERT_ARGUMENT(out_external_buffer);
-  (void)base_allocator;
-  (void)buffer;
-  (void)requested_type;
-  (void)requested_flags;
-  memset(out_external_buffer, 0, sizeof(*out_external_buffer));
-  return iree_make_status(
-      IREE_STATUS_UNIMPLEMENTED,
-      "Vulkan external buffer export requires the slab/sparse allocator");
-}
-
 static iree_status_t iree_hal_vulkan_allocator_validate_sparse_range(
     iree_device_size_t offset, iree_device_size_t size,
     iree_device_size_t container_size, iree_device_size_t page_size,
@@ -2904,7 +2887,6 @@ static const iree_hal_allocator_vtable_t iree_hal_vulkan_allocator_vtable = {
     .allocate_buffer = iree_hal_vulkan_allocator_allocate_buffer,
     .deallocate_buffer = iree_hal_vulkan_allocator_deallocate_buffer,
     .import_buffer = iree_hal_vulkan_allocator_import_buffer,
-    .export_buffer = iree_hal_vulkan_allocator_export_buffer,
     .supports_virtual_memory =
         iree_hal_vulkan_allocator_supports_virtual_memory,
     .virtual_memory_query_granularity =

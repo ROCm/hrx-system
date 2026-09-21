@@ -491,6 +491,27 @@ static void iree_hal_replay_recorder_buffer_destroy(
   IREE_TRACE_ZONE_END(z0);
 }
 
+static iree_status_t iree_hal_replay_recorder_buffer_export_range(
+    iree_hal_buffer_t* base_buffer, iree_device_size_t local_byte_offset,
+    iree_device_size_t local_byte_length,
+    iree_hal_external_buffer_type_t requested_type,
+    iree_hal_external_buffer_flags_t requested_flags,
+    iree_hal_external_buffer_t* out_external_buffer) {
+  iree_hal_replay_recorder_buffer_t* buffer =
+      iree_hal_replay_recorder_buffer_cast(base_buffer);
+  iree_hal_replay_pending_record_t pending_record;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_recorder_buffer_begin_operation(
+      buffer, IREE_HAL_REPLAY_OPERATION_CODE_BUFFER_EXPORT,
+      IREE_HAL_REPLAY_PAYLOAD_TYPE_NONE, &pending_record));
+  iree_hal_replay_recorder_mark_unsupported(&pending_record);
+  return iree_hal_replay_recorder_end_operation(
+      &pending_record,
+      IREE_HAL_REPLAY_VTABLE_DISPATCH(buffer->base_buffer, iree_hal_buffer,
+                                      export_range)(
+          buffer->base_buffer, local_byte_offset, local_byte_length,
+          requested_type, requested_flags, out_external_buffer));
+}
+
 static iree_status_t iree_hal_replay_recorder_buffer_map_range(
     iree_hal_buffer_t* base_buffer, iree_hal_mapping_mode_t mapping_mode,
     iree_hal_memory_access_t memory_access,
@@ -681,6 +702,7 @@ static iree_status_t iree_hal_replay_recorder_buffer_flush_range(
 static const iree_hal_buffer_vtable_t iree_hal_replay_recorder_buffer_vtable = {
     .recycle = iree_hal_buffer_recycle,
     .destroy = iree_hal_replay_recorder_buffer_destroy,
+    .export_range = iree_hal_replay_recorder_buffer_export_range,
     .map_range = iree_hal_replay_recorder_buffer_map_range,
     .unmap_range = iree_hal_replay_recorder_buffer_unmap_range,
     .invalidate_range = iree_hal_replay_recorder_buffer_invalidate_range,

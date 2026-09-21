@@ -121,14 +121,13 @@ loom_low_allocation_make_interval_assignment_context(
 }
 
 // Probes the fragmentation-repair coloring in isolated mutable state. The
-// caller only commits this strategy when the probe proves that it eliminates
-// every spill, leaving the ordinary first-fit result authoritative otherwise.
-static iree_status_t loom_low_allocation_fragmentation_repair_eliminates_spills(
+// caller only commits this strategy when the probe produces a complete,
+// spill-free assignment, retaining the first-fit result otherwise.
+static iree_status_t loom_low_allocation_probe_fragmentation_repair(
     loom_low_allocation_build_state_t* state,
     const loom_low_function_model_t* model,
-    const loom_local_value_domain_t* value_domain,
-    bool* out_eliminates_spills) {
-  *out_eliminates_spills = false;
+    const loom_local_value_domain_t* value_domain, bool* out_is_spill_free) {
+  *out_is_spill_free = false;
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(state->arena->block_pool, &scratch_arena);
 
@@ -136,6 +135,7 @@ static iree_status_t loom_low_allocation_fragmentation_repair_eliminates_spills(
       state->target_constraints;
   scratch_target_constraints.emitter = (iree_diagnostic_emitter_t){0};
   scratch_target_constraints.error_count = 0;
+  scratch_target_constraints.failure = (loom_low_allocation_failure_t){0};
   scratch_target_constraints.max_assigned_location_end_by_reg_class = NULL;
 
   iree_status_t status = iree_ok_status();
@@ -178,9 +178,9 @@ static iree_status_t loom_low_allocation_fragmentation_repair_eliminates_spills(
                                                            &scratch_result);
   }
   if (iree_status_is_ok(status)) {
-    *out_eliminates_spills = scratch_target_constraints.error_count == 0 &&
-                             scratch_result.spill_count == 0 &&
-                             scratch_result.spill_plan_count == 0;
+    *out_is_spill_free = scratch_target_constraints.error_count == 0 &&
+                         scratch_result.spill_count == 0 &&
+                         scratch_result.spill_plan_count == 0;
   }
 
   iree_arena_deinitialize(&scratch_arena);
@@ -317,14 +317,22 @@ iree_status_t loom_low_allocate_function(
     status = loom_low_allocation_interval_assignment_build(
         &interval_assignment_context, &state.interval_assignment);
   }
-  if (iree_status_is_ok(status) && state.target_constraints.error_count == 0 &&
-      state.interval_assignment.spill_count != 0 &&
-      state.interval_assignment.has_packable_aggregates) {
-    bool fragmentation_repair_eliminates_spills = false;
-    status = loom_low_allocation_fragmentation_repair_eliminates_spills(
-        &state, model, value_domain, &fragmentation_repair_eliminates_spills);
-    if (iree_status_is_ok(status) && fragmentation_repair_eliminates_spills) {
+  // Required register values can fail first-fit placement through fragmentation
+  // just as spillable values can. Their retained failure is provisional until
+  // the alternative packing has also been considered.
+  if (iree_status_is_ok(status) &&
+      state.interval_assignment.has_packable_aggregates &&
+      ((state.target_constraints.error_count == 0 &&
+        state.interval_assignment.spill_count != 0) ||
+       loom_low_allocation_failure_is_present(
+           &state.target_constraints.failure))) {
+    bool fragmentation_repair_is_spill_free = false;
+    status = loom_low_allocation_probe_fragmentation_repair(
+        &state, model, value_domain, &fragmentation_repair_is_spill_free);
+    if (iree_status_is_ok(status) && fragmentation_repair_is_spill_free) {
       iree_arena_checkpoint_restore(&interval_assignment_checkpoint);
+      state.target_constraints.error_count = 0;
+      state.target_constraints.failure = (loom_low_allocation_failure_t){0};
       loom_low_allocation_target_constraints_rebuild_assignment_location_ends(
           &state.target_constraints, /*assignments=*/NULL,
           /*assignment_count=*/0);

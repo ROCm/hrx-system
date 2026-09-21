@@ -16,120 +16,49 @@
 #include "libamdf/src/gpu/umd/kernel_queue.h"
 #include "libamdf/src/kernel_queue.h"
 #include "libamdf/src/memory.h"
-#include "libamdf/src/platform/wait.h"
 #include "libamdf/src/structure.h"
 #include "libamdf/src/wait.h"
-
-typedef uint32_t amdf_gpu_kernel_queue_occupancy_t;
-enum amdf_gpu_kernel_queue_occupancy_e {
-  AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_FREE = 0,
-  AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_RESERVING = 1,
-  AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_PENDING = 2,
-  AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_RETIRING = 3,
-};
-
-enum {
-  AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_BITS = 2,
-};
-
-#define AMDF_GPU_KERNEL_QUEUE_MAXIMUM_SUBMISSION \
-  (UINT64_MAX >> AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_BITS)
 
 typedef struct amdf_gpu_kernel_queue_t {
   // Generic kernel-queue state shared by every engine implementation.
   amdf_kernel_queue_t base;
   // Exact native kernel-mediated GPU queue lease.
   amdf_gpu_umd_kernel_queue_t* umd;
-  // Submission sequence and ownership state of the single pending slot.
-  amdf_atomic_uint64_t slot_state;
-  // Native progress value covering the pending submission.
-  amdf_atomic_uint64_t pending_native_submission;
+  // Nonzero only while one host caller publishes a native submission.
+  amdf_atomic_uint32_t publishing;
+  // Greatest successfully accepted native progress point.
+  amdf_atomic_uint64_t submitted;
+  // Greatest accepted point with independently confirmed native completion.
+  amdf_atomic_uint64_t retired;
 } amdf_gpu_kernel_queue_t;
 
 _Static_assert(offsetof(amdf_gpu_kernel_queue_t, base) == 0,
                "GPU kernel queue base must be the first field");
 
-static uint64_t amdf_gpu_kernel_queue_make_slot_state(
-    uint64_t submission, amdf_gpu_kernel_queue_occupancy_t occupancy) {
-  return (submission << AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_BITS) | occupancy;
-}
-
-static uint64_t amdf_gpu_kernel_queue_slot_submission(uint64_t slot_state) {
-  return slot_state >> AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_BITS;
-}
-
-static amdf_gpu_kernel_queue_occupancy_t amdf_gpu_kernel_queue_slot_occupancy(
-    uint64_t slot_state) {
-  return (
-      amdf_gpu_kernel_queue_occupancy_t)(slot_state &
-                                         ((UINT64_C(1)
-                                           << AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_BITS) -
-                                          1));
-}
-
-// Samples native progress and claims completed software retirement exactly
-// once. A true result proves that `submission` has completely retired.
-static bool amdf_gpu_kernel_queue_try_retire(amdf_gpu_kernel_queue_t* queue,
-                                             uint64_t submission) {
-  uint64_t slot_state = amdf_atomic_uint64_load_acquire(&queue->slot_state);
-  const uint64_t slot_submission =
-      amdf_gpu_kernel_queue_slot_submission(slot_state);
-  const amdf_gpu_kernel_queue_occupancy_t occupancy =
-      amdf_gpu_kernel_queue_slot_occupancy(slot_state);
-  if (submission < slot_submission ||
-      (submission == slot_submission &&
-       (occupancy == AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_FREE ||
-        occupancy == AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_RESERVING))) {
-    return true;
+// Refreshes the completed prefix without waiting. Native execution can finish
+// before submit publishes its accepted point; cap completion at that snapshot.
+static uint64_t amdf_gpu_kernel_queue_refresh_retirement(
+    amdf_gpu_kernel_queue_t* queue) {
+  const uint64_t submitted = amdf_atomic_uint64_load_acquire(&queue->submitted);
+  uint64_t retired = amdf_atomic_uint64_load_acquire(&queue->retired);
+  if (retired >= submitted) {
+    return retired;
   }
-  if (submission != slot_submission ||
-      occupancy != AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_PENDING) {
-    return false;
+  const uint64_t progress =
+      amdf_gpu_umd_kernel_queue_query_progress(queue->umd);
+  const uint64_t completed = progress < submitted ? progress : submitted;
+  while (retired < completed && !amdf_atomic_uint64_compare_exchange_acq_rel(
+                                    &queue->retired, &retired, completed)) {
   }
-
-  const uint64_t pending_native_submission =
-      amdf_atomic_uint64_load_acquire(&queue->pending_native_submission);
-  if (amdf_gpu_umd_kernel_queue_query_progress(queue->umd) <
-      pending_native_submission) {
-    return false;
-  }
-
-  const uint64_t retiring_state = amdf_gpu_kernel_queue_make_slot_state(
-      submission, AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_RETIRING);
-  if (!amdf_atomic_uint64_compare_exchange_acq_rel(
-          &queue->slot_state, &slot_state, retiring_state)) {
-    const uint64_t observed_submission =
-        amdf_gpu_kernel_queue_slot_submission(slot_state);
-    const amdf_gpu_kernel_queue_occupancy_t observed_occupancy =
-        amdf_gpu_kernel_queue_slot_occupancy(slot_state);
-    return submission < observed_submission ||
-           (submission == observed_submission &&
-            (observed_occupancy == AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_FREE ||
-             observed_occupancy == AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_RESERVING));
-  }
-
-  amdf_atomic_uint64_store_release(
-      &queue->slot_state,
-      amdf_gpu_kernel_queue_make_slot_state(
-          submission, AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_FREE));
-  return true;
+  return retired < completed ? completed : retired;
 }
 
 static amdf_status_t amdf_gpu_kernel_queue_query_status(
     amdf_kernel_queue_t* base_queue, amdf_kernel_queue_status_t* out_status) {
   const amdf_gpu_kernel_queue_t* queue =
       (const amdf_gpu_kernel_queue_t*)base_queue;
-  const uint64_t slot_state =
-      amdf_atomic_uint64_load_acquire(&queue->slot_state);
-  const uint64_t slot_submission =
-      amdf_gpu_kernel_queue_slot_submission(slot_state);
-  const amdf_gpu_kernel_queue_occupancy_t occupancy =
-      amdf_gpu_kernel_queue_slot_occupancy(slot_state);
   out_status->retired_submission =
-      occupancy == AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_FREE ||
-              occupancy == AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_RESERVING
-          ? slot_submission
-          : slot_submission - 1;
+      amdf_atomic_uint64_load_acquire(&queue->retired);
   out_status->terminal_status =
       amdf_gpu_umd_kernel_queue_query_terminal_status(queue->umd);
   out_status->state = amdf_status_is_ok(out_status->terminal_status)
@@ -138,12 +67,27 @@ static amdf_status_t amdf_gpu_kernel_queue_query_status(
   return AMDF_STATUS_OK;
 }
 
+static amdf_status_t amdf_gpu_kernel_queue_refresh_status(
+    amdf_kernel_queue_t* base_queue, amdf_kernel_queue_status_t* out_status) {
+  amdf_gpu_kernel_queue_refresh_retirement(
+      (amdf_gpu_kernel_queue_t*)base_queue);
+  return amdf_gpu_kernel_queue_query_status(base_queue, out_status);
+}
+
+static amdf_status_t amdf_gpu_kernel_queue_request_notification(
+    amdf_kernel_queue_t* base_queue, uint64_t submission,
+    const amdf_native_event_t* event) {
+  (void)base_queue;
+  (void)submission;
+  (void)event;
+  return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+}
+
 static amdf_status_t amdf_gpu_kernel_queue_wait(
     amdf_kernel_queue_t* base_queue, uint64_t submission,
     uint64_t timeout_nanoseconds, uint64_t poll_duration_nanoseconds) {
   amdf_gpu_kernel_queue_t* queue = (amdf_gpu_kernel_queue_t*)base_queue;
-  uint64_t slot_state = amdf_atomic_uint64_load_acquire(&queue->slot_state);
-  if (submission > amdf_gpu_kernel_queue_slot_submission(slot_state)) {
+  if (submission > amdf_atomic_uint64_load_acquire(&queue->submitted)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
   }
   amdf_wait_deadline_t deadline;
@@ -152,76 +96,26 @@ static amdf_status_t amdf_gpu_kernel_queue_wait(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  // Even an expired deadline permits the first nonblocking native refresh.
-  bool native_polled = false;
-  for (;;) {
-    const bool retired = amdf_gpu_kernel_queue_try_retire(queue, submission);
-    const amdf_status_t terminal_status =
-        amdf_gpu_umd_kernel_queue_query_terminal_status(queue->umd);
-    if (!amdf_status_is_ok(terminal_status) || retired) {
-      return terminal_status;
-    }
 
-    slot_state = amdf_atomic_uint64_load_acquire(&queue->slot_state);
-    const uint64_t slot_submission =
-        amdf_gpu_kernel_queue_slot_submission(slot_state);
-    const amdf_gpu_kernel_queue_occupancy_t occupancy =
-        amdf_gpu_kernel_queue_slot_occupancy(slot_state);
-    if (submission < slot_submission ||
-        (submission == slot_submission &&
-         (occupancy == AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_FREE ||
-          occupancy == AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_RESERVING))) {
-      return amdf_gpu_umd_kernel_queue_query_terminal_status(queue->umd);
-    }
-    amdf_wait_budget_t remaining;
-    status = amdf_wait_deadline_query_remaining(&deadline, &remaining);
-    if (!amdf_status_is_ok(status)) {
-      return status;
-    }
-    if (remaining.timeout == 0 &&
-        (native_polled ||
-         occupancy == AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_RETIRING)) {
-      return amdf_make_api_status(AMDF_STATUS_CODE_DEADLINE_EXCEEDED);
-    }
-    if (occupancy == AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_RETIRING) {
-      amdf_platform_wait_yield();
-      continue;
-    }
-    if (occupancy != AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_PENDING ||
-        submission != slot_submission) {
-      return amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
-    }
-    const uint64_t pending_native_submission =
-        amdf_atomic_uint64_load_acquire(&queue->pending_native_submission);
-    if (slot_state != amdf_atomic_uint64_load_acquire(&queue->slot_state)) {
-      continue;
-    }
-    native_polled = true;
-    status = amdf_gpu_umd_kernel_queue_wait(
-        queue->umd, pending_native_submission, &deadline);
-    // A wait error is observable even if another thread established progress.
-    // Still record retirement when independently confirmed completion permits
-    // it.
-    amdf_gpu_kernel_queue_try_retire(queue, submission);
-    if (!amdf_status_is_ok(status)) {
-      return status;
-    }
+  const uint64_t retired = amdf_gpu_kernel_queue_refresh_retirement(queue);
+  status = amdf_gpu_umd_kernel_queue_query_terminal_status(queue->umd);
+  if (!amdf_status_is_ok(status) || retired >= submission) {
+    return status;
   }
+  status = amdf_gpu_umd_kernel_queue_wait(queue->umd, submission, &deadline);
+  // A native error is observable even when independent progress proves that
+  // accepted commands have completed. Neither fact substitutes for the other.
+  amdf_gpu_kernel_queue_refresh_retirement(queue);
+  return amdf_status_is_ok(status)
+             ? amdf_gpu_umd_kernel_queue_query_terminal_status(queue->umd)
+             : status;
 }
 
 static amdf_status_t amdf_gpu_kernel_queue_destroy_native(
     amdf_kernel_queue_t* base_queue) {
   amdf_gpu_kernel_queue_t* queue = (amdf_gpu_kernel_queue_t*)base_queue;
-  uint64_t slot_state = amdf_atomic_uint64_load_acquire(&queue->slot_state);
-  const uint64_t slot_submission =
-      amdf_gpu_kernel_queue_slot_submission(slot_state);
-  if (amdf_gpu_kernel_queue_slot_occupancy(slot_state) ==
-      AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_PENDING) {
-    amdf_gpu_kernel_queue_try_retire(queue, slot_submission);
-    slot_state = amdf_atomic_uint64_load_acquire(&queue->slot_state);
-  }
-  if (amdf_gpu_kernel_queue_slot_occupancy(slot_state) !=
-      AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_FREE) {
+  if (amdf_gpu_kernel_queue_refresh_retirement(queue) <
+      amdf_atomic_uint64_load_acquire(&queue->submitted)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_BUSY);
   }
   const amdf_status_t status = amdf_gpu_umd_kernel_queue_destroy(queue->umd);
@@ -231,6 +125,8 @@ static amdf_status_t amdf_gpu_kernel_queue_destroy_native(
 
 static const amdf_kernel_queue_vtable_t amdf_gpu_kernel_queue_vtable = {
     .query_status = amdf_gpu_kernel_queue_query_status,
+    .refresh_status = amdf_gpu_kernel_queue_refresh_status,
+    .request_notification = amdf_gpu_kernel_queue_request_notification,
     .wait = amdf_gpu_kernel_queue_wait,
     .destroy_native = amdf_gpu_kernel_queue_destroy_native,
 };
@@ -252,9 +148,6 @@ amdf_status_t AMDF_CALL amdf_gpu_kernel_queue_create(
       (uint32_t)sizeof(amdf_gpu_kernel_queue_create_info_t));
   if (!amdf_status_is_ok(status)) {
     return status;
-  }
-  if (create_info->reserved != 0) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
 
   amdf_queue_family_info_t family_info = {
@@ -288,13 +181,15 @@ amdf_status_t AMDF_CALL amdf_gpu_kernel_queue_create(
       .reset_epoch = device_info->reset_epoch,
       .queue_family_ordinal = family_info.ordinal,
       .command_type = family_info.command_type,
-      .maximum_pending_submission_count = 1,
+      .maximum_pending_submission_count =
+          create_info->maximum_pending_submission_count != 0
+              ? create_info->maximum_pending_submission_count
+              : AMDF_KERNEL_QUEUE_DEFAULT_PENDING_SUBMISSION_COUNT,
       .maximum_command_count = 1,
   };
-  amdf_atomic_uint64_initialize(&queue->slot_state,
-                                amdf_gpu_kernel_queue_make_slot_state(
-                                    0, AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_FREE));
-  amdf_atomic_uint64_initialize(&queue->pending_native_submission, 0);
+  amdf_atomic_uint32_initialize(&queue->publishing, 0);
+  amdf_atomic_uint64_initialize(&queue->submitted, 0);
+  amdf_atomic_uint64_initialize(&queue->retired, 0);
   status = amdf_kernel_queue_initialize(
       &queue->base, &amdf_gpu_kernel_queue_vtable, device, &info);
   if (amdf_status_is_ok(status)) {
@@ -366,43 +261,40 @@ amdf_status_t AMDF_CALL amdf_gpu_kernel_queue_submit(
   }
 
   amdf_gpu_kernel_queue_t* queue = (amdf_gpu_kernel_queue_t*)base_queue;
-  uint64_t slot_state = amdf_atomic_uint64_load_acquire(&queue->slot_state);
+  uint32_t expected = 0;
+  if (!amdf_atomic_uint32_compare_exchange_acq_rel(&queue->publishing,
+                                                   &expected, 1)) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_BUSY);
+  }
+
   const uint64_t last_submitted =
-      amdf_gpu_kernel_queue_slot_submission(slot_state);
-  if (last_submitted == AMDF_GPU_KERNEL_QUEUE_MAXIMUM_SUBMISSION) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
+      amdf_atomic_uint64_load_acquire(&queue->submitted);
+  uint64_t retired = amdf_atomic_uint64_load_acquire(&queue->retired);
+  if (last_submitted - retired >=
+      base_queue->info.maximum_pending_submission_count) {
+    retired = amdf_gpu_kernel_queue_refresh_retirement(queue);
+    status = amdf_gpu_umd_kernel_queue_query_terminal_status(queue->umd);
+    if (amdf_status_is_ok(status) &&
+        last_submitted - retired >=
+            base_queue->info.maximum_pending_submission_count) {
+      status = amdf_make_api_status(AMDF_STATUS_CODE_BUSY);
+    }
   }
-  if (amdf_gpu_kernel_queue_slot_occupancy(slot_state) !=
-      AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_FREE) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_BUSY);
+  // UINT64_MAX is reserved for native monitored-fence reset notification.
+  if (amdf_status_is_ok(status) && last_submitted == UINT64_MAX - 1) {
+    status = amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
   }
-  const uint64_t reserving_state = amdf_gpu_kernel_queue_make_slot_state(
-      last_submitted, AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_RESERVING);
-  if (!amdf_atomic_uint64_compare_exchange_acq_rel(
-          &queue->slot_state, &slot_state, reserving_state)) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_BUSY);
+  if (amdf_status_is_ok(status)) {
+    const uint64_t submission = last_submitted + 1;
+    status = amdf_gpu_umd_kernel_queue_submit(
+        queue->umd,
+        access->addresses[AMDF_MEMORY_ADDRESS_GPU] + command->byte_offset,
+        command->byte_length, submission);
+    if (amdf_status_is_ok(status)) {
+      amdf_atomic_uint64_store_release(&queue->submitted, submission);
+      *out_submission = submission;
+    }
   }
-
-  uint64_t native_submission = 0;
-  status = amdf_gpu_umd_kernel_queue_submit(
-      queue->umd,
-      access->addresses[AMDF_MEMORY_ADDRESS_GPU] + command->byte_offset,
-      command->byte_length, &native_submission);
-  if (!amdf_status_is_ok(status)) {
-    amdf_atomic_uint64_store_release(
-        &queue->slot_state,
-        amdf_gpu_kernel_queue_make_slot_state(
-            last_submitted, AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_FREE));
-    return status;
-  }
-
-  const uint64_t submission = last_submitted + 1;
-  amdf_atomic_uint64_store_release(&queue->pending_native_submission,
-                                   native_submission);
-  amdf_atomic_uint64_store_release(
-      &queue->slot_state,
-      amdf_gpu_kernel_queue_make_slot_state(
-          submission, AMDF_GPU_KERNEL_QUEUE_OCCUPANCY_PENDING));
-  *out_submission = submission;
-  return AMDF_STATUS_OK;
+  amdf_atomic_uint32_store_release(&queue->publishing, 0);
+  return status;
 }

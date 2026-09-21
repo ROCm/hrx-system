@@ -1,10 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_workgroup_scalar_addressing.loom-test
-// RUN: emit spirv-dis input=source-low validate
+// RUN: emit spirv-dis target=spirv:vulkan1.3+bda+extended-types input=source-low validate
 // REQUIRES: spirv-dis, spirv-val
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @workgroup_static_rank2_i32(%value: i32) -> (i32) {
+func.def @workgroup_static_rank2_i32(%value: i32) -> (i32) {
   %byte_length = index.constant 256 : offset
   %base = index.constant 8 : offset
   %scratch = buffer.alloca<workgroup> align(4) %byte_length : buffer
@@ -81,9 +79,7 @@ func.def target(@target) @workgroup_static_rank2_i32(%value: i32) -> (i32) {
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @workgroup_dynamic_base_and_index_i32(%value: i32, %base_element: index, %element: index) -> (i32) {
+func.def @workgroup_dynamic_base_and_index_i32(%value: i32, %base_element: index, %element: index) -> (i32) {
   %byte_length = index.constant 128 : offset
   %element_byte_count = index.constant 4 : index
   %base_element_bounded = index.assume %base_element [range(%base_element, 0, 15)] : index
@@ -176,9 +172,7 @@ func.def target(@target) @workgroup_dynamic_base_and_index_i32(%value: i32, %bas
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @workgroup_dynamic_stride_rank2_i32(%value: i32, %column_count: index, %row: index, %column: index) -> (i32) {
+func.def @workgroup_dynamic_stride_rank2_i32(%value: i32, %column_count: index, %row: index, %column: index) -> (i32) {
   %byte_length = index.constant 128 : offset
   %scratch_base = index.constant 0 : offset
   %column_count_bounded = index.assume %column_count [range(%column_count, 1, 8)] : index
@@ -278,9 +272,7 @@ func.def target(@target) @workgroup_dynamic_stride_rank2_i32(%value: i32, %colum
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @workgroup_subview_refine_i32(%value: i32, %element: index) -> (i32) {
+func.def @workgroup_subview_refine_i32(%value: i32, %element: index) -> (i32) {
   %byte_length = index.constant 64 : offset
   %base = index.constant 4 : offset
   %element_bounded = index.assume %element [range(%element, 0, 3)] : index
@@ -368,9 +360,7 @@ func.def target(@target) @workgroup_subview_refine_i32(%value: i32, %element: in
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @workgroup_integer_scalar_widths(%value_i8: i8, %value_i16: i16, %value_i32: i32, %value_i64: i64) -> (i8, i16, i32, i64) {
+func.def @workgroup_integer_scalar_widths(%value_i8: i8, %value_i16: i16, %value_i32: i32, %value_i64: i64) -> (i8, i16, i32, i64) {
   %byte_length = index.constant 16 : offset
   %scratch_base = index.constant 0 : offset
   %scratch_i8 = buffer.alloca<workgroup> align(1) %byte_length : buffer
@@ -545,9 +535,7 @@ func.def target(@target) @workgroup_integer_scalar_widths(%value_i8: i8, %value_
 
 // ====
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
-
-func.def target(@target) @workgroup_float_scalar_widths(%value_f16: f16, %value_bf16: bf16, %value_f32: f32, %value_f64: f64) -> (f16, bf16, f32, f64) {
+func.def @workgroup_float_scalar_widths(%value_f16: f16, %value_bf16: bf16, %value_f32: f32, %value_f64: f64) -> (f16, bf16, f32, f64) {
   %byte_length = index.constant 16 : offset
   %scratch_base = index.constant 0 : offset
   %scratch_f16 = buffer.alloca<workgroup> align(2) %byte_length : buffer

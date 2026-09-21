@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/uniform_predicate_control.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
-aie2p.target<core> @target
-
-kernel.def target(@target) @uniform_select_guard() {
+kernel.def @uniform_select_guard() {
   %unit = index.constant 1 : index
   %width = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
@@ -35,9 +33,7 @@ kernel.def target(@target) @uniform_select_guard() {
 
 // ====
 
-aie2p.target<core> @target
-
-kernel.def target(@target) @uniform_float_guard() {
+kernel.def @uniform_float_guard() {
   %unit = index.constant 1 : index
   %width = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
@@ -69,9 +65,7 @@ kernel.def target(@target) @uniform_float_guard() {
 
 // ====
 
-aie2p.target<core> @target
-
-kernel.def target(@target) @varying_select_guard() {
+kernel.def @varying_select_guard() {
   %unit = index.constant 1 : index
   %width = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index

@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_access_flags.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=wasm:simd128 output=low
 
-wasm.target<simd128> @target
-
-func.def target(@target) @observe_scalar(%input: buffer) -> (i32, i32) {
+func.def @observe_scalar(%input: buffer) -> (i32, i32) {
   %base = index.constant 0 : offset
   %aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %source = buffer.view %aligned[%base] : buffer -> view<1xi32>
@@ -13,7 +11,7 @@ func.def target(@target) @observe_scalar(%input: buffer) -> (i32, i32) {
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @observe_scalar(%source: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @observe_scalar(%source: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>) asm {
   %first = i32.load<volatile> %source
   %second = i32.load<volatile> %source
   return %first, %second
@@ -21,9 +19,7 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @observe_scal
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @observe_unused(%input: buffer) {
+func.def @observe_unused(%input: buffer) {
   %base = index.constant 0 : offset
   %aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %source = buffer.view %aligned[%base] : buffer -> view<2xi32>
@@ -33,7 +29,7 @@ func.def target(@target) @observe_unused(%input: buffer) {
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @observe_unused(%source: reg<wasm.i32>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @observe_unused(%source: reg<wasm.i32>) asm {
   %first = i32.load<volatile> %source
   %second = i32.load<volatile> %source {offset = 4}
   return
@@ -41,9 +37,7 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @observe_unus
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @repeat_store(%output: buffer, %value: i32) {
+func.def @repeat_store(%output: buffer, %value: i32) {
   %base = index.constant 0 : offset
   %aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
   %destination = buffer.view %aligned[%base] : buffer -> view<1xi32>
@@ -53,7 +47,7 @@ func.def target(@target) @repeat_store(%output: buffer, %value: i32) {
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @repeat_store(%destination: reg<wasm.i32>, %value: reg<wasm.i32>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @repeat_store(%destination: reg<wasm.i32>, %value: reg<wasm.i32>) asm {
   i32.store<volatile> %destination, %value
   i32.store<volatile> %destination, %value
   return
@@ -61,9 +55,7 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @repeat_store
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @observe_vector(%input: buffer, %output: buffer) {
+func.def @observe_vector(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %source_aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
   %destination_aligned = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
@@ -77,7 +69,7 @@ func.def target(@target) @observe_vector(%input: buffer, %output: buffer) {
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @observe_vector(%source: reg<wasm.i32>, %destination: reg<wasm.i32>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @observe_vector(%source: reg<wasm.i32>, %destination: reg<wasm.i32>) asm {
   %109 = i32.load<volatile> %source
   %110 = i32.load<volatile> %source {offset = 4}
   %111 = i32.load<volatile> %source {offset = 8}
@@ -148,9 +140,7 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @observe_vect
 // ====
 
 // XFAIL: Scalar i8 view loads and stores lack Wasm carrier lowering.
-wasm.target<simd128> @target
-
-func.def target(@target) @observe_byte(%input: buffer, %output: buffer) {
+func.def @observe_byte(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %source = buffer.view %input[%base] : buffer -> view<1xi8>
   %destination = buffer.view %output[%base] : buffer -> view<2xi8>
@@ -163,9 +153,7 @@ func.def target(@target) @observe_byte(%input: buffer, %output: buffer) {
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @observe_dynamic_address(%input: buffer, %byte_offset: offset) -> (i32, i32) {
+func.def @observe_dynamic_address(%input: buffer, %byte_offset: offset) -> (i32, i32) {
   %base = index.assume %byte_offset [range(%byte_offset, 0, 4092), mul(%byte_offset, 4)] : offset
   %aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %source = buffer.view %aligned[%base] : buffer -> view<2xi32>
@@ -175,7 +163,7 @@ func.def target(@target) @observe_dynamic_address(%input: buffer, %byte_offset: 
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @observe_dynamic_address(%source: reg<wasm.i32>, %base: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @observe_dynamic_address(%source: reg<wasm.i32>, %base: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>) asm {
   %13 = i32.add %source, %base
   %first = i32.load<volatile> %13
   %second = i32.load<volatile> %13 {offset = 4}
@@ -184,9 +172,7 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @observe_dyna
 
 // ====
 
-wasm.target<simd128> @target
-
-func.def target(@target) @ordinary_scalar(%input: buffer) -> (i32, i32) {
+func.def @ordinary_scalar(%input: buffer) -> (i32, i32) {
   %base = index.constant 0 : offset
   %aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %source = buffer.view %aligned[%base] : buffer -> view<1xi32>
@@ -196,7 +182,7 @@ func.def target(@target) @ordinary_scalar(%input: buffer) -> (i32, i32) {
 }
 
 // ----
-low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @ordinary_scalar(%source: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>) asm {
+low.func.def target<wasm.core.simd128> abi(wasm_function) @ordinary_scalar(%source: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>) asm {
   %first = i32.load %source
   return %first, %first
 }

@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/callable_values.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
-aie2p.target<core> @target
-
-func.def public target(@target) @call_mixed_i32(%input: vector<1xi32>, %delta: i32) -> (i32, i32) {
+func.def public @call_mixed_i32(%input: vector<1xi32>, %delta: i32) -> (i32, i32) {
   %value = vector.extract %input[0] : vector<1xi32> -> i32
   %mixed = func.call @add_i32(%value, %delta) : (i32, i32) -> (i32)
   %uniform = func.call @add_i32(%delta, %delta) : (i32, i32) -> (i32)
@@ -19,7 +17,7 @@ func.def @add_i32(%value: i32, %delta: i32) -> (i32) {
 }
 
 // ----
-low.func.def public target<amd.xdna.aie2p.core>(@target) abi(object_function) @call_mixed_i32(%input: reg<aie2p.vec256 x2>, %delta: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+low.func.def public target<amd.xdna.aie2p.core> abi(object_function) @call_mixed_i32(%input: reg<aie2p.vec256 x2>, %delta: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
   %value = vextract.32.imm %input, 0
   %31, %32 = add.carry %value, %delta
   %41, %42 = add.carry %delta, %delta
@@ -28,9 +26,7 @@ low.func.def public target<amd.xdna.aie2p.core>(@target) abi(object_function) @c
 
 // ====
 
-aie2p.target<core> @target
-
-func.def public target(@target) @call_mixed_i64(%input: vector<1xi64>, %delta: i64) -> (i64, i64) {
+func.def public @call_mixed_i64(%input: vector<1xi64>, %delta: i64) -> (i64, i64) {
   %value = vector.extract %input[0] : vector<1xi64> -> i64
   %mixed = func.call @add_i64(%value, %delta) : (i64, i64) -> (i64)
   %uniform = func.call @add_i64(%delta, %delta) : (i64, i64) -> (i64)
@@ -43,7 +39,7 @@ func.def @add_i64(%value: i64, %delta: i64) -> (i64) {
 }
 
 // ----
-low.func.def public target<amd.xdna.aie2p.core>(@target) abi(object_function) @call_mixed_i64(%input: reg<aie2p.vec256 x2>, %delta: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
+low.func.def public target<amd.xdna.aie2p.core> abi(object_function) @call_mixed_i64(%input: reg<aie2p.vec256 x2>, %delta: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
   %value = vextract.64.imm %input, 0
   %17 = slice %value[0] : reg<aie2p.er x2> -> reg<aie2p.er>
   %18 = slice %value[1] : reg<aie2p.er x2> -> reg<aie2p.er>
@@ -60,9 +56,7 @@ low.func.def public target<amd.xdna.aie2p.core>(@target) abi(object_function) @c
 
 // ====
 
-aie2p.target<core> @target
-
-func.def public target(@target) @call_vector_result(%input: i32, %lane: index) -> (i32) where [range(%lane, 0, 3)] {
+func.def public @call_vector_result(%input: i32, %lane: index) -> (i32) where [range(%lane, 0, 3)] {
   %c1 = scalar.constant 1 : i32
   %c2 = scalar.constant 2 : i32
   %c3 = scalar.constant 3 : i32
@@ -77,7 +71,7 @@ func.def @select_lane(%values: vector<4xi32>, %lane: index) -> (i32) where [rang
 }
 
 // ----
-low.func.def public target<amd.xdna.aie2p.core>(@target) abi(object_function) @call_vector_result(%input: reg<aie2p.er>, %lane: reg<aie2p.er>) -> (reg<aie2p.er>) where [range(%lane, 0, 3)] asm {
+low.func.def public target<amd.xdna.aie2p.core> abi(object_function) @call_vector_result(%input: reg<aie2p.er>, %lane: reg<aie2p.er>) -> (reg<aie2p.er>) where [range(%lane, 0, 3)] asm {
   %c1 = mov.short 1
   %c2 = mov.short 2
   %c3 = mov.short 3
@@ -94,9 +88,7 @@ low.func.def public target<amd.xdna.aie2p.core>(@target) abi(object_function) @c
 
 // ====
 
-aie2p.target<core> @target
-
-func.def public target(@target) @call_loop(%input: vector<1xi32>, %delta: i32, %count: index) -> (i32) {
+func.def public @call_loop(%input: vector<1xi32>, %delta: i32, %count: index) -> (i32) {
   %value = vector.extract %input[0] : vector<1xi32> -> i32
   %result = func.call @repeat_add(%value, %delta, %count) : (i32, i32, index) -> (i32)
   func.return %result : i32
@@ -118,7 +110,7 @@ func.def @advance_i32(%value: i32, %delta: i32) -> (i32) {
 }
 
 // ----
-low.func.def public target<amd.xdna.aie2p.core>(@target) abi(object_function) @call_loop(%input: reg<aie2p.vec256 x2>, %delta: reg<aie2p.er>, %count: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def public target<amd.xdna.aie2p.core> abi(object_function) @call_loop(%input: reg<aie2p.vec256 x2>, %delta: reg<aie2p.er>, %count: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %value = vextract.32.imm %input, 0
   %c0 = mov.short 0
   %c1 = mov.short 1
@@ -136,9 +128,7 @@ low.func.def public target<amd.xdna.aie2p.core>(@target) abi(object_function) @c
 
 // ====
 
-aie2p.target<core> @target
-
-func.def public target(@target) @call_scalar(%value: i32, %delta: i32) -> (i32) {
+func.def public @call_scalar(%value: i32, %delta: i32) -> (i32) {
   %result = func.call @scalar_add(%value, %delta) : (i32, i32) -> (i32)
   func.return %result : i32
 }
@@ -149,7 +139,7 @@ func.def @scalar_add(%value: i32, %delta: i32) -> (i32) {
 }
 
 // ----
-low.func.def public target<amd.xdna.aie2p.core>(@target) abi(object_function) @call_scalar(%value: reg<aie2p.er>, %delta: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+low.func.def public target<amd.xdna.aie2p.core> abi(object_function) @call_scalar(%value: reg<aie2p.er>, %delta: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %result = add.rr %value, %delta
   return %result
 }

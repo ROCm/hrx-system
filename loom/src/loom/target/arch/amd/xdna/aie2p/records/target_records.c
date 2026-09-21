@@ -39,7 +39,7 @@ static const loom_target_config_t kAie2pCoreConfig = {
     .contract_feature_bits = 0,
 };
 
-static const loom_target_bundle_t kAie2pCoreBundle = {
+const loom_target_bundle_t loom_aie2p_core_target_bundle = {
     .name = IREE_SVL("aie2p-core"),
     .snapshot = &kAie2pCoreSnapshot,
     .export_plan = &kAie2pCoreExportPlan,
@@ -86,7 +86,7 @@ const loom_target_bundle_t loom_aie2p_array_target_bundle = {
 
 static const loom_target_bundle_t* const kAie2pTargetBundleValues[] = {
     NULL,
-    &kAie2pCoreBundle,
+    &loom_aie2p_core_target_bundle,
     &loom_aie2p_array_target_bundle,
 };
 

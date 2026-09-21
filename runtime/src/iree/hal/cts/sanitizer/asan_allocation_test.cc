@@ -101,13 +101,12 @@ static iree_status_t DispatchAsanAllocationRawAddress(
                                       IREE_ASYNC_WAIT_FLAG_NONE);
 }
 
-static iree_status_t ExportDeviceAddress(iree_hal_allocator_t* allocator,
-                                         iree_hal_buffer_t* buffer,
+static iree_status_t ExportDeviceAddress(iree_hal_buffer_t* buffer,
                                          uint64_t* out_address) {
   *out_address = 0;
   iree_hal_external_buffer_t external_buffer = {};
-  IREE_RETURN_IF_ERROR(iree_hal_allocator_export_buffer(
-      allocator, buffer, IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION,
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_export(
+      buffer, IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION,
       IREE_HAL_EXTERNAL_BUFFER_FLAG_NONE, &external_buffer));
   *out_address = external_buffer.handle.device_allocation.ptr;
   return iree_ok_status();
@@ -288,7 +287,7 @@ TEST_P(AsanAllocationTest, ReleasedAllocatorBufferReports) {
       buffer.out()));
 
   uint64_t stale_address = 0;
-  IREE_ASSERT_OK(ExportDeviceAddress(allocator(), buffer, &stale_address));
+  IREE_ASSERT_OK(ExportDeviceAddress(buffer, &stale_address));
   ASSERT_NE(stale_address, 0u);
   buffer.reset();
 
@@ -330,7 +329,7 @@ TEST_P(AsanAllocationTest, QueueDeallocaReleaseReportsAfterSignal) {
       alloca_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
   uint64_t stale_address = 0;
-  IREE_ASSERT_OK(ExportDeviceAddress(allocator(), buffer, &stale_address));
+  IREE_ASSERT_OK(ExportDeviceAddress(buffer, &stale_address));
   ASSERT_NE(stale_address, 0u);
 
   SemaphoreList dealloca_signal(device(), {0}, {1});

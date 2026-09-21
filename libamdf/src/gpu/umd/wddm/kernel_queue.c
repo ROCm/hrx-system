@@ -34,10 +34,9 @@ struct amdf_gpu_umd_kernel_queue_t {
   SRWLOCK wait_lock;
   // Manual-reset event reused by externally serialized native waits.
   HANDLE wait_event;
-  // Native submission registered to signal `wait_event`, or zero when idle.
+  // Native point whose notification a waiter can reuse, or zero when idle.
+  // Older registrations may still signal the same event after a consumed wake.
   uint64_t wait_event_submission;
-  // Greatest progress value assigned to a native submission.
-  uint64_t last_native_submission;
 };
 
 amdf_status_t amdf_gpu_umd_kernel_queue_create(
@@ -100,15 +99,11 @@ amdf_status_t amdf_gpu_umd_kernel_queue_create(
 
 amdf_status_t amdf_gpu_umd_kernel_queue_submit(
     amdf_gpu_umd_kernel_queue_t* queue, uint64_t command_buffer_address,
-    uint64_t command_buffer_byte_length, uint64_t* out_native_submission) {
+    uint64_t command_buffer_byte_length, uint64_t submission) {
   const amdf_status_t terminal_status =
       amdf_gpu_umd_kernel_queue_query_terminal_status(queue);
   if (!amdf_status_is_ok(terminal_status)) {
     return terminal_status;
-  }
-  // UINT64_MAX is reserved for the monitored fence's reset indication.
-  if (queue->last_native_submission >= UINT64_MAX - 1) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
   }
   if (command_buffer_address == 0 || command_buffer_byte_length == 0 ||
       command_buffer_address % queue->command_buffer_alignment != 0 ||
@@ -119,15 +114,11 @@ amdf_status_t amdf_gpu_umd_kernel_queue_submit(
     return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
   }
 
-  const uint64_t native_submission = queue->last_native_submission + 1;
   MemoryBarrier();
   const amdf_status_t status = amdf_gpu_wddm_wkmi_adapter_submit_kernel_queue(
       &queue->device->wkmi_adapter, queue->native, command_buffer_address,
-      command_buffer_byte_length, native_submission);
-  if (amdf_status_is_ok(status)) {
-    queue->last_native_submission = native_submission;
-    *out_native_submission = native_submission;
-  } else {
+      command_buffer_byte_length, submission);
+  if (!amdf_status_is_ok(status)) {
     return amdf_kmt_device_status_observe_error(&queue->device->status,
                                                 queue->device->kmt,
                                                 queue->device->device, status);
@@ -206,7 +197,10 @@ amdf_status_t amdf_gpu_umd_kernel_queue_wait(
       status = amdf_make_api_status(AMDF_STATUS_CODE_DEADLINE_EXCEEDED);
       break;
     }
-    if (queue->wait_event_submission == 0) {
+    // A timed-out later wait cannot supply an earlier point's wake. Register
+    // that earlier point independently; all wakes still require a fence check.
+    if (queue->wait_event_submission == 0 ||
+        native_submission < queue->wait_event_submission) {
       if (!ResetEvent(queue->wait_event)) {
         status = amdf_make_status(AMDF_STATUS_DOMAIN_WIN32, GetLastError());
         break;

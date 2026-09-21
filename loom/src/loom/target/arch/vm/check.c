@@ -26,12 +26,24 @@ static iree_status_t loom_vm_check_write(void* user_data,
 static iree_status_t loom_vm_check_emit(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request) {
-  if (!iree_string_view_is_empty(request->target_options)) {
+  loom_check_source_low_request_t source_request;
+  IREE_RETURN_IF_ERROR(
+      loom_check_source_low_parse(request->target_options, &source_request));
+  if (source_request.options & ~LOOM_CHECK_SOURCE_LOW_OPTION_TARGET) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "vm-dis does not accept options");
+                            "vm-dis accepts only @function and target options");
   }
   loom_check_prepare_source_low_options_t prepare_options;
   loom_check_prepare_source_low_options_initialize(&prepare_options);
+  loom_target_specialization_request_t specialization = {0};
+  if (iree_any_bit_set(source_request.options,
+                       LOOM_CHECK_SOURCE_LOW_OPTION_TARGET)) {
+    IREE_RETURN_IF_ERROR(loom_check_resolve_source_target(
+        request->module, request->environment->target_environment,
+        source_request.function_name, &source_request.target, &specialization));
+    prepare_options.target_specializations =
+        (loom_target_specialization_request_list_t){&specialization, 1};
+  }
   loom_compile_pipeline_result_t pipeline_result = {0};
   iree_status_t status = loom_check_prepare_source_low_module(
       request->module, &prepare_options, request->low_registry,

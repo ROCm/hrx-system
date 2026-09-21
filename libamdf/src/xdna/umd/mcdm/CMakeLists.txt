@@ -215,7 +215,9 @@ iree_cc_library(
     amdf::headers
     libamdf::src::allocator
     libamdf::src::atomics
+    libamdf::src::platform::native_event
     libamdf::src::platform::wait
+    libamdf::src::platform::windows::native_event
     libamdf::src::wait
     libamdf::src::xdna::bootstrap
     libamdf::src::xdna::transaction_interpreter

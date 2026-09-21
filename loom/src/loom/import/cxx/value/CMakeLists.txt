@@ -135,6 +135,8 @@ loom_cc_library(
     loom::ops::buffer
     loom::ops::index
     loom::ops::scalar
+    loom::ops::vector
+    loom::ops::view
   PUBLIC
 )
 endif()
@@ -259,6 +261,8 @@ loom_cc_test(
     loom::ops::buffer
     loom::ops::index
     loom::ops::scalar
+    loom::ops::vector
+    loom::ops::view
   LABELS
     "iree-build-requirement=loom.import.cxx"
 )

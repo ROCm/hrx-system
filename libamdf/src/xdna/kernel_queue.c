@@ -21,119 +21,67 @@
 #include "libamdf/src/xdna/device.h"
 #include "libamdf/src/xdna/umd/kernel_queue.h"
 
-typedef uint32_t amdf_xdna_kernel_queue_occupancy_t;
-enum amdf_xdna_kernel_queue_occupancy_e {
-  AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_FREE = 0,
-  AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_RESERVING = 1,
-  AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_PENDING = 2,
-  AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_RETIRING = 3,
-};
-
-enum {
-  AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_BITS = 2,
-};
-
-#define AMDF_XDNA_KERNEL_QUEUE_MAXIMUM_SUBMISSION \
-  (UINT64_MAX >> AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_BITS)
-
 typedef struct amdf_xdna_kernel_queue_t {
   // Generic kernel-queue state shared by every engine implementation.
   amdf_kernel_queue_t base;
   // Exact scheduling context borrowed by this queue.
   amdf_xdna_context_t* context;
-  // Exact native kernel-mediated queue lease.
+  // Native queue and its preallocated packet/result slots.
   amdf_xdna_umd_kernel_queue_t* umd;
-  // Submission sequence and ownership state of the single pending slot.
-  amdf_atomic_uint64_t slot_state;
-  // Native progress value covering the pending submission.
-  amdf_atomic_uint64_t pending_native_submission;
+  // Nonzero only while one host caller publishes a native submission.
+  amdf_atomic_uint32_t publishing;
+  // Nonzero while one observer consumes completed command results.
+  amdf_atomic_uint32_t retiring;
+  // Greatest publicly accepted queue-local point.
+  amdf_atomic_uint64_t submitted;
+  // Greatest accepted point whose native completion and result were checked.
+  amdf_atomic_uint64_t retired;
+  // Native identities for occupied slots. Atomic because an old waiter may
+  // read a slot concurrently with reuse, then recheck retirement.
+  amdf_atomic_uint64_t native_submissions[];
 } amdf_xdna_kernel_queue_t;
 
 _Static_assert(offsetof(amdf_xdna_kernel_queue_t, base) == 0,
                "XDNA kernel queue base must be the first field");
 
-static uint64_t amdf_xdna_kernel_queue_make_slot_state(
-    uint64_t submission, amdf_xdna_kernel_queue_occupancy_t occupancy) {
-  return (submission << AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_BITS) | occupancy;
-}
-
-static uint64_t amdf_xdna_kernel_queue_slot_submission(uint64_t slot_state) {
-  return slot_state >> AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_BITS;
-}
-
-static amdf_xdna_kernel_queue_occupancy_t amdf_xdna_kernel_queue_slot_occupancy(
-    uint64_t slot_state) {
-  return (
-      amdf_xdna_kernel_queue_occupancy_t)(slot_state &
-                                          ((UINT64_C(1)
-                                            << AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_BITS) -
-                                           1));
-}
-
-// Samples native progress and claims completed software retirement exactly
-// once. A true result proves that `submission` has completely retired.
-static bool amdf_xdna_kernel_queue_try_retire(amdf_xdna_kernel_queue_t* queue,
-                                              uint64_t submission) {
-  uint64_t slot_state = amdf_atomic_uint64_load_acquire(&queue->slot_state);
-  const uint64_t slot_submission =
-      amdf_xdna_kernel_queue_slot_submission(slot_state);
-  const amdf_xdna_kernel_queue_occupancy_t occupancy =
-      amdf_xdna_kernel_queue_slot_occupancy(slot_state);
-  if (submission < slot_submission ||
-      (submission == slot_submission &&
-       (occupancy == AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_FREE ||
-        occupancy == AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_RESERVING))) {
-    return true;
+// Consumes a completed prefix exactly once before publishing reusable credits.
+// The accepted snapshot excludes native work not yet published by submit.
+static uint64_t amdf_xdna_kernel_queue_refresh_retirement(
+    amdf_xdna_kernel_queue_t* queue) {
+  uint64_t retired = amdf_atomic_uint64_load_acquire(&queue->retired);
+  const uint64_t submitted = amdf_atomic_uint64_load_acquire(&queue->submitted);
+  if (retired >= submitted) {
+    return retired;
   }
-  if (submission != slot_submission ||
-      occupancy != AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_PENDING) {
-    return false;
+  uint32_t expected = 0;
+  if (!amdf_atomic_uint32_compare_exchange_acq_rel(&queue->retiring, &expected,
+                                                   1)) {
+    return amdf_atomic_uint64_load_acquire(&queue->retired);
   }
-
-  const uint64_t pending_native_submission =
-      amdf_atomic_uint64_load_acquire(&queue->pending_native_submission);
-  if (amdf_xdna_umd_kernel_queue_query_progress(queue->umd) <
-      pending_native_submission) {
-    return false;
+  retired = amdf_atomic_uint64_load_acquire(&queue->retired);
+  const uint64_t progress =
+      amdf_xdna_umd_kernel_queue_query_progress(queue->umd);
+  while (retired < submitted) {
+    const uint32_t slot =
+        retired % queue->base.info.maximum_pending_submission_count;
+    if (amdf_atomic_uint64_load_acquire(&queue->native_submissions[slot]) >
+        progress) {
+      break;
+    }
+    amdf_xdna_umd_kernel_queue_retire_command(queue->umd, slot);
+    ++retired;
   }
-
-  const uint64_t retiring_state = amdf_xdna_kernel_queue_make_slot_state(
-      submission, AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_RETIRING);
-  if (!amdf_atomic_uint64_compare_exchange_acq_rel(
-          &queue->slot_state, &slot_state, retiring_state)) {
-    const uint64_t observed_submission =
-        amdf_xdna_kernel_queue_slot_submission(slot_state);
-    const amdf_xdna_kernel_queue_occupancy_t observed_occupancy =
-        amdf_xdna_kernel_queue_slot_occupancy(slot_state);
-    return submission < observed_submission ||
-           (submission == observed_submission &&
-            (observed_occupancy == AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_FREE ||
-             observed_occupancy == AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_RESERVING));
-  }
-
-  amdf_xdna_umd_kernel_queue_retire_command(queue->umd);
-  amdf_atomic_uint64_store_release(
-      &queue->slot_state,
-      amdf_xdna_kernel_queue_make_slot_state(
-          submission, AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_FREE));
-  return true;
+  amdf_atomic_uint64_store_release(&queue->retired, retired);
+  amdf_atomic_uint32_store_release(&queue->retiring, 0);
+  return retired;
 }
 
 static amdf_status_t amdf_xdna_kernel_queue_query_status(
     amdf_kernel_queue_t* base_queue, amdf_kernel_queue_status_t* out_status) {
   const amdf_xdna_kernel_queue_t* queue =
       (const amdf_xdna_kernel_queue_t*)base_queue;
-  const uint64_t slot_state =
-      amdf_atomic_uint64_load_acquire(&queue->slot_state);
-  const uint64_t slot_submission =
-      amdf_xdna_kernel_queue_slot_submission(slot_state);
-  const amdf_xdna_kernel_queue_occupancy_t occupancy =
-      amdf_xdna_kernel_queue_slot_occupancy(slot_state);
   out_status->retired_submission =
-      occupancy == AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_FREE ||
-              occupancy == AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_RESERVING
-          ? slot_submission
-          : slot_submission - 1;
+      amdf_atomic_uint64_load_acquire(&queue->retired);
   out_status->terminal_status =
       amdf_xdna_umd_kernel_queue_query_terminal_status(queue->umd);
   out_status->state = amdf_status_is_ok(out_status->terminal_status)
@@ -142,12 +90,50 @@ static amdf_status_t amdf_xdna_kernel_queue_query_status(
   return AMDF_STATUS_OK;
 }
 
+static amdf_status_t amdf_xdna_kernel_queue_refresh_status(
+    amdf_kernel_queue_t* base_queue, amdf_kernel_queue_status_t* out_status) {
+  amdf_xdna_kernel_queue_t* queue = (amdf_xdna_kernel_queue_t*)base_queue;
+  if (amdf_atomic_uint64_load_acquire(&queue->retired) <
+      amdf_atomic_uint64_load_acquire(&queue->submitted)) {
+    const amdf_status_t status =
+        amdf_xdna_umd_kernel_queue_refresh_progress(queue->umd);
+    // Independent known progress remains usable even if observation fails.
+    amdf_xdna_kernel_queue_refresh_retirement(queue);
+    if (!amdf_status_is_ok(status)) {
+      return status;
+    }
+  }
+  return amdf_xdna_kernel_queue_query_status(base_queue, out_status);
+}
+
+static amdf_status_t amdf_xdna_kernel_queue_request_notification(
+    amdf_kernel_queue_t* base_queue, uint64_t submission,
+    const amdf_native_event_t* event) {
+  amdf_xdna_kernel_queue_t* queue = (amdf_xdna_kernel_queue_t*)base_queue;
+  if (submission > amdf_atomic_uint64_load_acquire(&queue->submitted)) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
+  }
+  uint64_t native_submission = 0;
+  if (amdf_atomic_uint64_load_acquire(&queue->retired) < submission) {
+    const uint32_t slot =
+        (submission - 1) % base_queue->info.maximum_pending_submission_count;
+    native_submission =
+        amdf_atomic_uint64_load_acquire(&queue->native_submissions[slot]);
+    // A slot's new native identity is published after its old point retires.
+    // An old-point request must never become a wait for that replacement.
+    if (amdf_atomic_uint64_load_acquire(&queue->retired) >= submission) {
+      native_submission = 0;
+    }
+  }
+  return amdf_xdna_umd_kernel_queue_request_notification(
+      queue->umd, native_submission, event);
+}
+
 static amdf_status_t amdf_xdna_kernel_queue_wait(
     amdf_kernel_queue_t* base_queue, uint64_t submission,
     uint64_t timeout_nanoseconds, uint64_t poll_duration_nanoseconds) {
   amdf_xdna_kernel_queue_t* queue = (amdf_xdna_kernel_queue_t*)base_queue;
-  uint64_t slot_state = amdf_atomic_uint64_load_acquire(&queue->slot_state);
-  if (submission > amdf_xdna_kernel_queue_slot_submission(slot_state)) {
+  if (submission > amdf_atomic_uint64_load_acquire(&queue->submitted)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
   }
   amdf_wait_deadline_t deadline;
@@ -156,57 +142,49 @@ static amdf_status_t amdf_xdna_kernel_queue_wait(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  // Even an expired deadline permits the first nonblocking native refresh.
   bool native_polled = false;
   for (;;) {
-    const bool retired = amdf_xdna_kernel_queue_try_retire(queue, submission);
+    const uint64_t retired = amdf_xdna_kernel_queue_refresh_retirement(queue);
     const amdf_status_t terminal_status =
         amdf_xdna_umd_kernel_queue_query_terminal_status(queue->umd);
-    if (!amdf_status_is_ok(terminal_status) || retired) {
+    if (retired >= submission) {
       return terminal_status;
     }
-
-    slot_state = amdf_atomic_uint64_load_acquire(&queue->slot_state);
-    const uint64_t slot_submission =
-        amdf_xdna_kernel_queue_slot_submission(slot_state);
-    const amdf_xdna_kernel_queue_occupancy_t occupancy =
-        amdf_xdna_kernel_queue_slot_occupancy(slot_state);
-    if (submission < slot_submission ||
-        (submission == slot_submission &&
-         (occupancy == AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_FREE ||
-          occupancy == AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_RESERVING))) {
-      return amdf_xdna_umd_kernel_queue_query_terminal_status(queue->umd);
+    if (!amdf_status_is_ok(terminal_status)) {
+      // Failure is not completion. A nonblocking refresh can still establish
+      // independent retirement of accepted commands after an execution error.
+      status = amdf_xdna_umd_kernel_queue_refresh_progress(queue->umd);
+      amdf_xdna_kernel_queue_refresh_retirement(queue);
+      return amdf_status_is_ok(status) ? terminal_status : status;
     }
     amdf_wait_budget_t remaining;
     status = amdf_wait_deadline_query_remaining(&deadline, &remaining);
     if (!amdf_status_is_ok(status)) {
       return status;
     }
-    if (remaining.timeout == 0 &&
-        (native_polled ||
-         occupancy == AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_RETIRING)) {
+    if (native_polled && remaining.timeout == 0) {
       return amdf_make_api_status(AMDF_STATUS_CODE_DEADLINE_EXCEEDED);
     }
-    if (occupancy == AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_RETIRING) {
+    const uint32_t slot =
+        (submission - 1) % base_queue->info.maximum_pending_submission_count;
+    const uint64_t native_submission =
+        amdf_atomic_uint64_load_acquire(&queue->native_submissions[slot]);
+    // Reuse release-publishes the new native identity after retirement. An old
+    // waiter that reads that identity must not wait for the new command.
+    if (amdf_atomic_uint64_load_acquire(&queue->retired) >= submission) {
+      return amdf_xdna_umd_kernel_queue_query_terminal_status(queue->umd);
+    }
+    if (amdf_xdna_umd_kernel_queue_query_progress(queue->umd) >=
+        native_submission) {
+      native_polled = true;
       amdf_platform_wait_yield();
       continue;
     }
-    if (occupancy != AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_PENDING ||
-        submission != slot_submission) {
-      return amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
-    }
-    const uint64_t pending_native_submission =
-        amdf_atomic_uint64_load_acquire(&queue->pending_native_submission);
-    if (slot_state != amdf_atomic_uint64_load_acquire(&queue->slot_state)) {
-      continue;
-    }
     native_polled = true;
-    status = amdf_xdna_umd_kernel_queue_wait(
-        queue->umd, pending_native_submission, &deadline);
-    // A wait error is observable even if another thread established progress.
-    // Still record retirement when independently confirmed completion permits
-    // it.
-    amdf_xdna_kernel_queue_try_retire(queue, submission);
+    status = amdf_xdna_umd_kernel_queue_wait(queue->umd, native_submission,
+                                             &deadline);
+    // Native wait errors remain observable independently of confirmed progress.
+    amdf_xdna_kernel_queue_refresh_retirement(queue);
     if (!amdf_status_is_ok(status)) {
       return status;
     }
@@ -216,16 +194,8 @@ static amdf_status_t amdf_xdna_kernel_queue_wait(
 static amdf_status_t amdf_xdna_kernel_queue_destroy_native(
     amdf_kernel_queue_t* base_queue) {
   amdf_xdna_kernel_queue_t* queue = (amdf_xdna_kernel_queue_t*)base_queue;
-  uint64_t slot_state = amdf_atomic_uint64_load_acquire(&queue->slot_state);
-  const uint64_t slot_submission =
-      amdf_xdna_kernel_queue_slot_submission(slot_state);
-  if (amdf_xdna_kernel_queue_slot_occupancy(slot_state) ==
-      AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_PENDING) {
-    amdf_xdna_kernel_queue_try_retire(queue, slot_submission);
-    slot_state = amdf_atomic_uint64_load_acquire(&queue->slot_state);
-  }
-  if (amdf_xdna_kernel_queue_slot_occupancy(slot_state) !=
-      AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_FREE) {
+  if (amdf_xdna_kernel_queue_refresh_retirement(queue) <
+      amdf_atomic_uint64_load_acquire(&queue->submitted)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_BUSY);
   }
   const amdf_status_t status = amdf_xdna_umd_kernel_queue_destroy(queue->umd);
@@ -237,6 +207,8 @@ static amdf_status_t amdf_xdna_kernel_queue_destroy_native(
 
 static const amdf_kernel_queue_vtable_t amdf_xdna_kernel_queue_vtable = {
     .query_status = amdf_xdna_kernel_queue_query_status,
+    .refresh_status = amdf_xdna_kernel_queue_refresh_status,
+    .request_notification = amdf_xdna_kernel_queue_request_notification,
     .wait = amdf_xdna_kernel_queue_wait,
     .destroy_native = amdf_xdna_kernel_queue_destroy_native,
 };
@@ -258,10 +230,6 @@ amdf_status_t AMDF_CALL amdf_xdna_kernel_queue_create(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  if (create_info->reserved != 0) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
-  }
-
   amdf_queue_family_info_t family_info = {
       .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
       .structure_size = sizeof(family_info),
@@ -279,8 +247,19 @@ amdf_status_t AMDF_CALL amdf_xdna_kernel_queue_create(
 
   const amdf_allocator_t host_allocator = amdf_device_host_allocator(device);
   amdf_xdna_kernel_queue_t* queue = NULL;
-  status = amdf_calloc(host_allocator, sizeof(*queue),
-                       amdf_alignof(amdf_xdna_kernel_queue_t), (void**)&queue);
+  const uint32_t capacity =
+      create_info->maximum_pending_submission_count != 0
+          ? create_info->maximum_pending_submission_count
+          : AMDF_KERNEL_QUEUE_DEFAULT_PENDING_SUBMISSION_COUNT;
+  const size_t slot_count = capacity;
+  if (slot_count >
+      (SIZE_MAX - sizeof(*queue)) / sizeof(queue->native_submissions[0])) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
+  }
+  status = amdf_calloc(
+      host_allocator,
+      sizeof(*queue) + slot_count * sizeof(queue->native_submissions[0]),
+      amdf_alignof(amdf_xdna_kernel_queue_t), (void**)&queue);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
@@ -293,13 +272,16 @@ amdf_status_t AMDF_CALL amdf_xdna_kernel_queue_create(
       .reset_epoch = context_info->reset_epoch,
       .queue_family_ordinal = family_info.ordinal,
       .command_type = family_info.command_type,
-      .maximum_pending_submission_count = 1,
+      .maximum_pending_submission_count = capacity,
       .maximum_command_count = 1,
   };
-  amdf_atomic_uint64_initialize(&queue->slot_state,
-                                amdf_xdna_kernel_queue_make_slot_state(
-                                    0, AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_FREE));
-  amdf_atomic_uint64_initialize(&queue->pending_native_submission, 0);
+  amdf_atomic_uint32_initialize(&queue->publishing, 0);
+  amdf_atomic_uint32_initialize(&queue->retiring, 0);
+  amdf_atomic_uint64_initialize(&queue->submitted, 0);
+  amdf_atomic_uint64_initialize(&queue->retired, 0);
+  for (uint32_t i = 0; i < capacity; ++i) {
+    amdf_atomic_uint64_initialize(&queue->native_submissions[i], 0);
+  }
   status = amdf_xdna_context_register_child(context);
   const bool context_registered = amdf_status_is_ok(status);
   if (amdf_status_is_ok(status)) {
@@ -309,9 +291,11 @@ amdf_status_t AMDF_CALL amdf_xdna_kernel_queue_create(
   if (amdf_status_is_ok(status)) {
     queue->context = context;
     status = amdf_xdna_umd_kernel_queue_create(
-        amdf_xdna_context_get_umd(context), &queue->umd);
+        amdf_xdna_context_get_umd(context), capacity, &queue->umd);
   }
   if (amdf_status_is_ok(status)) {
+    queue->base.info.notification_types =
+        amdf_xdna_umd_kernel_queue_query_notification_types(queue->umd);
     *out_queue = &queue->base;
   } else {
     if (queue->base.device != NULL) {
@@ -384,42 +368,45 @@ amdf_status_t AMDF_CALL amdf_xdna_kernel_queue_submit(
     return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
   }
 
-  uint64_t slot_state = amdf_atomic_uint64_load_acquire(&queue->slot_state);
+  uint32_t expected = 0;
+  if (!amdf_atomic_uint32_compare_exchange_acq_rel(&queue->publishing,
+                                                   &expected, 1)) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_BUSY);
+  }
   const uint64_t last_submitted =
-      amdf_xdna_kernel_queue_slot_submission(slot_state);
-  if (last_submitted == AMDF_XDNA_KERNEL_QUEUE_MAXIMUM_SUBMISSION) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
+      amdf_atomic_uint64_load_acquire(&queue->submitted);
+  uint64_t retired = amdf_atomic_uint64_load_acquire(&queue->retired);
+  if (last_submitted - retired >=
+      base_queue->info.maximum_pending_submission_count) {
+    status = amdf_xdna_umd_kernel_queue_refresh_progress(queue->umd);
+    retired = amdf_xdna_kernel_queue_refresh_retirement(queue);
+    if (amdf_status_is_ok(status)) {
+      status = amdf_xdna_umd_kernel_queue_query_terminal_status(queue->umd);
+    }
+    if (amdf_status_is_ok(status) &&
+        last_submitted - retired >=
+            base_queue->info.maximum_pending_submission_count) {
+      status = amdf_make_api_status(AMDF_STATUS_CODE_BUSY);
+    }
   }
-  if (amdf_xdna_kernel_queue_slot_occupancy(slot_state) !=
-      AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_FREE) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_BUSY);
+  if (amdf_status_is_ok(status) && last_submitted == UINT64_MAX) {
+    status = amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
   }
-  const uint64_t reserving_state = amdf_xdna_kernel_queue_make_slot_state(
-      last_submitted, AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_RESERVING);
-  if (!amdf_atomic_uint64_compare_exchange_acq_rel(
-          &queue->slot_state, &slot_state, reserving_state)) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_BUSY);
+  if (amdf_status_is_ok(status)) {
+    const uint32_t slot =
+        last_submitted % base_queue->info.maximum_pending_submission_count;
+    uint64_t native_submission = 0;
+    status = amdf_xdna_umd_kernel_queue_submit(
+        queue->umd, slot, instruction_address, (uint32_t)command->byte_length,
+        &native_submission);
+    if (amdf_status_is_ok(status)) {
+      const uint64_t submission = last_submitted + 1;
+      amdf_atomic_uint64_store_release(&queue->native_submissions[slot],
+                                       native_submission);
+      amdf_atomic_uint64_store_release(&queue->submitted, submission);
+      *out_submission = submission;
+    }
   }
-
-  uint64_t native_submission = 0;
-  status = amdf_xdna_umd_kernel_queue_submit(queue->umd, instruction_address,
-                                             (uint32_t)command->byte_length,
-                                             &native_submission);
-  if (!amdf_status_is_ok(status)) {
-    amdf_atomic_uint64_store_release(
-        &queue->slot_state,
-        amdf_xdna_kernel_queue_make_slot_state(
-            last_submitted, AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_FREE));
-    return status;
-  }
-
-  const uint64_t submission = last_submitted + 1;
-  amdf_atomic_uint64_store_release(&queue->pending_native_submission,
-                                   native_submission);
-  amdf_atomic_uint64_store_release(
-      &queue->slot_state,
-      amdf_xdna_kernel_queue_make_slot_state(
-          submission, AMDF_XDNA_KERNEL_QUEUE_OCCUPANCY_PENDING));
-  *out_submission = submission;
-  return AMDF_STATUS_OK;
+  amdf_atomic_uint32_store_release(&queue->publishing, 0);
+  return status;
 }

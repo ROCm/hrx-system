@@ -63,6 +63,8 @@ static iree_status_t loom_symbol_dce_compute_live_symbols(
       // Until there is encoding-table DCE, their symbol refs are roots.
       .flags = LOOM_SYMBOL_LIVENESS_INCLUDE_MODULE_EDGES,
       .root_query = loom_symbol_pruning_symbol_is_root,
+      .function_versions = loom_target_pass_capability_function_versions(
+          loom_target_pass_capability_from_pass(state->pass)),
   };
   return loom_symbol_liveness_compute(state->module, &state->references,
                                       &options, state->pass->arena,

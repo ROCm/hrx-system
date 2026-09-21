@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_unsigned_remainder.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=x86:avx2 output=low
 
-x86.target<avx2> @target
-
-func.def target(@target) @unsigned_remainder_i32(%value: i32, %divisor: i32) -> (i32) {
+func.def @unsigned_remainder_i32(%value: i32, %divisor: i32) -> (i32) {
   // ERROR@+1: TARGET/003 {op_name="scalar.remui", constraint_key="x86.scalar.constant_divisor"}
   %remainder = scalar.remui %value, %divisor : i32
   func.return %remainder : i32
@@ -11,9 +9,7 @@ func.def target(@target) @unsigned_remainder_i32(%value: i32, %divisor: i32) -> 
 
 // ====
 
-x86.target<avx2> @target
-
-func.def target(@target) @unsigned_remainder_i64(%value: i64, %divisor: i64) -> (i64) {
+func.def @unsigned_remainder_i64(%value: i64, %divisor: i64) -> (i64) {
   // ERROR@+1: TARGET/002 {op_name="scalar.remui", field_name="lhs", actual_type="i64"}
   %remainder = scalar.remui %value, %divisor : i64
   func.return %remainder : i64
@@ -21,9 +17,7 @@ func.def target(@target) @unsigned_remainder_i64(%value: i64, %divisor: i64) -> 
 
 // ====
 
-x86.target<avx2> @target
-
-func.def target(@target) @unsigned_remainder_index(%value: index, %divisor: index) -> (index) {
+func.def @unsigned_remainder_index(%value: index, %divisor: index) -> (index) {
   %bounded_value = index.assume %value [range(%value, 0, 4294967295)] : index
   %bounded_divisor = index.assume %divisor [range(%divisor, 1, 4294967295)] : index
   // ERROR@+1: TARGET/003 {op_name="index.rem", constraint_key="x86.scalar.constant_divisor"}

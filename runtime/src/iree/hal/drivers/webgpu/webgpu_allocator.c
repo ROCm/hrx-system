@@ -427,17 +427,6 @@ static iree_status_t iree_hal_webgpu_allocator_import_buffer(
                           "WebGPU does not support external buffer import");
 }
 
-static iree_status_t iree_hal_webgpu_allocator_export_buffer(
-    iree_hal_allocator_t* IREE_RESTRICT base_allocator,
-    iree_hal_buffer_t* IREE_RESTRICT buffer,
-    iree_hal_external_buffer_type_t requested_type,
-    iree_hal_external_buffer_flags_t requested_flags,
-    iree_hal_external_buffer_t* IREE_RESTRICT out_external_buffer) {
-  // WebGPU does not support exporting buffer handles.
-  return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                          "WebGPU does not support external buffer export");
-}
-
 static const iree_hal_allocator_vtable_t iree_hal_webgpu_allocator_vtable = {
     .destroy = iree_hal_webgpu_allocator_destroy,
     .host_allocator = iree_hal_webgpu_allocator_host_allocator,
@@ -449,5 +438,4 @@ static const iree_hal_allocator_vtable_t iree_hal_webgpu_allocator_vtable = {
     .allocate_buffer = iree_hal_webgpu_allocator_allocate_buffer,
     .deallocate_buffer = iree_hal_webgpu_allocator_deallocate_buffer,
     .import_buffer = iree_hal_webgpu_allocator_import_buffer,
-    .export_buffer = iree_hal_webgpu_allocator_export_buffer,
 };

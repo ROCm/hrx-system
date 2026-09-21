@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_unsigned_remainder.loom-test
-// RUN: with-checks emit source-low output=low control-flow=structured-low
+// RUN: with-checks emit source-low target=spirv:vulkan1.3+bda output=low control-flow=structured-low
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @unsigned_remainder_i32(%value: i32, %divisor: i32) -> (i32) {
+func.def @unsigned_remainder_i32(%value: i32, %divisor: i32) -> (i32) {
   %remainder = scalar.remui %value, %divisor : i32
   func.return %remainder : i32
 }
@@ -14,9 +12,7 @@ CHECK: return %remainder
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @unsigned_remainder_i64(%value: i64, %divisor: i64) -> (i64) {
+func.def @unsigned_remainder_i64(%value: i64, %divisor: i64) -> (i64) {
   %remainder = scalar.remui %value, %divisor : i64
   func.return %remainder : i64
 }
@@ -27,9 +23,7 @@ CHECK: return %remainder
 
 // ====
 
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @unsigned_remainder_index(%value: index, %divisor: index) -> (index) {
+func.def @unsigned_remainder_index(%value: index, %divisor: index) -> (index) {
   %bounded_value = index.assume %value [range(%value, 0, 4294967295)] : index
   %bounded_divisor = index.assume %divisor [range(%divisor, 1, 4294967295)] : index
   %remainder = index.rem %bounded_value, %bounded_divisor : index

@@ -1,16 +1,14 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/vector_mask_select.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i32_cmpi_select(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %true_value: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
+func.def @i32_cmpi_select(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %true_value: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
   %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
   %selected = vector.select %mask, %true_value, %false_value : vector<2xi32>
   func.return %selected : vector<2xi32>
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_cmpi_select(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %true_value: reg<amdgpu.vgpr x2>, %false_value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i32_cmpi_select(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %true_value: reg<amdgpu.vgpr x2>, %false_value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %12 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %13 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %14 = v_cmp_lt_i32 %12, %13
@@ -29,16 +27,14 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_cmp
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @f32_cmpf_select(%lhs: vector<1xf32>, %rhs: vector<1xf32>, %true_value: vector<1xf32>, %false_value: vector<1xf32>) -> (vector<1xf32>) {
+func.def @f32_cmpf_select(%lhs: vector<1xf32>, %rhs: vector<1xf32>, %true_value: vector<1xf32>, %false_value: vector<1xf32>) -> (vector<1xf32>) {
   %mask = vector.cmpf olt, %lhs, %rhs : vector<1xf32> -> vector<1xi1>
   %selected = vector.select %mask, %true_value, %false_value : vector<1xf32>
   func.return %selected : vector<1xf32>
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_cmpf_select(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @f32_cmpf_select(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %mask = v_cmp_lt_f32 %lhs, %rhs
   %selected = v_cndmask_b32 %false_value, %true_value, %mask
   return %selected
@@ -46,41 +42,35 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_cmp
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @scalar_cmpf_rhs_zero_inline(%value: f32) -> (i1) {
+func.def @scalar_cmpf_rhs_zero_inline(%value: f32) -> (i1) {
   %comparison_rhs = scalar.constant 0.0 : f32
   %mask = scalar.cmpf one, %value, %comparison_rhs : f32
   func.return %mask : i1
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_cmpf_rhs_zero_inline(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @scalar_cmpf_rhs_zero_inline(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>) asm {
   %mask = v_cmp_lg_f32_src1_inline %value {rhs = "f32_0_0"}
   return %mask
 }
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @scalar_cmpf_lhs_one_inline(%value: f32) -> (i1) {
+func.def @scalar_cmpf_lhs_one_inline(%value: f32) -> (i1) {
   %comparison_lhs = scalar.constant 1.0 : f32
   %mask = scalar.cmpf olt, %comparison_lhs, %value : f32
   func.return %mask : i1
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_cmpf_lhs_one_inline(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @scalar_cmpf_lhs_one_inline(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>) asm {
   %mask = v_cmp_lt_f32_src0_inline %value {lhs = "f32_1_0"}
   return %mask
 }
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @vector_cmpf_rhs_zero_inline(%value: vector<2xf32>) -> (vector<2xi1>) {
+func.def @vector_cmpf_rhs_zero_inline(%value: vector<2xf32>) -> (vector<2xi1>) {
   %comparison_rhs_element = scalar.constant 0.0 : f32
   %comparison_rhs = vector.splat %comparison_rhs_element : vector<2xf32>
   %mask = vector.cmpf one, %value, %comparison_rhs : vector<2xf32> -> vector<2xi1>
@@ -88,7 +78,7 @@ func.def target(@target) @vector_cmpf_rhs_zero_inline(%value: vector<2xf32>) -> 
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_cmpf_rhs_zero_inline(%value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.sgpr x4>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @vector_cmpf_rhs_zero_inline(%value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.sgpr x4>) asm {
   %11 = slice %value[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %12 = v_cmp_lg_f32_src1_inline %11 {rhs = "f32_0_0"}
   %13 = slice %value[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
@@ -99,9 +89,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i32_cmpi_select_zero_inline(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
+func.def @i32_cmpi_select_zero_inline(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
   %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
   %true_element = scalar.constant 0 : i32
   %true_value = vector.splat %true_element : vector<2xi32>
@@ -110,7 +98,7 @@ func.def target(@target) @i32_cmpi_select_zero_inline(%lhs: vector<2xi32>, %rhs:
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_cmpi_select_zero_inline(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %false_value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i32_cmpi_select_zero_inline(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %false_value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %13 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %14 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %15 = v_cmp_lt_i32 %13, %14
@@ -127,9 +115,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_cmp
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i32_cmpi_select_small_inline(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
+func.def @i32_cmpi_select_small_inline(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
   %small = scalar.constant 3 : i32
   %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
   %true_value = vector.splat %small : vector<2xi32>
@@ -138,7 +124,7 @@ func.def target(@target) @i32_cmpi_select_small_inline(%lhs: vector<2xi32>, %rhs
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_cmpi_select_small_inline(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %false_value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i32_cmpi_select_small_inline(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %false_value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %13 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %14 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %15 = v_cmp_lt_i32 %13, %14
@@ -155,9 +141,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_cmp
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i32_cmpi_select_noninline_constant(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
+func.def @i32_cmpi_select_noninline_constant(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
   %constant = scalar.constant 65 : i32
   %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
   %true_value = vector.splat %constant : vector<2xi32>
@@ -166,7 +150,7 @@ func.def target(@target) @i32_cmpi_select_noninline_constant(%lhs: vector<2xi32>
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_cmpi_select_noninline_constant(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %false_value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i32_cmpi_select_noninline_constant(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %false_value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %13 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %14 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %15 = v_cmp_lt_i32 %13, %14
@@ -183,16 +167,14 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_cmp
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i64_vector_mask_select(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %true_value: vector<2xi64>, %false_value: vector<2xi64>) -> (vector<2xi64>) {
+func.def @i64_vector_mask_select(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %true_value: vector<2xi64>, %false_value: vector<2xi64>) -> (vector<2xi64>) {
   %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
   %selected = vector.select %mask, %true_value, %false_value : vector<2xi64>
   func.return %selected : vector<2xi64>
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i64_vector_mask_select(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %true_value: reg<amdgpu.vgpr x4>, %false_value: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i64_vector_mask_select(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %true_value: reg<amdgpu.vgpr x4>, %false_value: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %12 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %13 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %14 = v_cmp_lt_i32 %12, %13
@@ -217,16 +199,14 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i64_vec
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @f64_vector_mask_select(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %true_value: vector<2xf64>, %false_value: vector<2xf64>) -> (vector<2xf64>) {
+func.def @f64_vector_mask_select(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %true_value: vector<2xf64>, %false_value: vector<2xf64>) -> (vector<2xf64>) {
   %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
   %selected = vector.select %mask, %true_value, %false_value : vector<2xf64>
   func.return %selected : vector<2xf64>
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f64_vector_mask_select(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %true_value: reg<amdgpu.vgpr x4>, %false_value: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @f64_vector_mask_select(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %true_value: reg<amdgpu.vgpr x4>, %false_value: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %12 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %13 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %14 = v_cmp_lt_i32 %12, %13
@@ -251,9 +231,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f64_vec
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i8_scalar_mask_select(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>) -> (vector<4xi8>) {
+func.def @i8_scalar_mask_select(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>) -> (vector<4xi8>) {
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   %mask = vector.splat %condition : vector<4xi1>
   %selected = vector.select %mask, %true_value, %false_value : vector<4xi8>
@@ -261,7 +239,7 @@ func.def target(@target) @i8_scalar_mask_select(%lhs: i32, %rhs: i32, %true_valu
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8_scalar_mask_select(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i8_scalar_mask_select(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %14 = v_mov_b32_copy %lhs
   %15 = v_mov_b32_copy %rhs
   %condition = v_cmp_lt_i32 %14, %15
@@ -271,9 +249,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8_scal
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i8_repeated_element_scalar_mask_select(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>) -> (vector<4xi8>) {
+func.def @i8_repeated_element_scalar_mask_select(%lhs: i32, %rhs: i32, %true_value: vector<4xi8>, %false_value: vector<4xi8>) -> (vector<4xi8>) {
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   %mask = vector.from_elements %condition, %condition, %condition, %condition : vector<4xi1>
   %selected = vector.select %mask, %true_value, %false_value : vector<4xi8>
@@ -281,7 +257,7 @@ func.def target(@target) @i8_repeated_element_scalar_mask_select(%lhs: i32, %rhs
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8_repeated_element_scalar_mask_select(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i8_repeated_element_scalar_mask_select(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %15 = v_mov_b32_copy %lhs
   %16 = v_mov_b32_copy %rhs
   %condition = v_cmp_lt_i32 %15, %16
@@ -291,9 +267,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8_repe
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i16_scalar_mask_select(%lhs: i32, %rhs: i32, %true_value: vector<2xi16>, %false_value: vector<2xi16>) -> (vector<2xi16>) {
+func.def @i16_scalar_mask_select(%lhs: i32, %rhs: i32, %true_value: vector<2xi16>, %false_value: vector<2xi16>) -> (vector<2xi16>) {
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   %mask = vector.splat %condition : vector<2xi1>
   %selected = vector.select %mask, %true_value, %false_value : vector<2xi16>
@@ -301,7 +275,7 @@ func.def target(@target) @i16_scalar_mask_select(%lhs: i32, %rhs: i32, %true_val
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16_scalar_mask_select(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i16_scalar_mask_select(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %14 = v_mov_b32_copy %lhs
   %15 = v_mov_b32_copy %rhs
   %condition = v_cmp_lt_i32 %14, %15
@@ -311,9 +285,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16_sca
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @bf16_scalar_mask_select_v4(%lhs: i32, %rhs: i32, %true_value: vector<4xbf16>, %false_value: vector<4xbf16>) -> (vector<4xbf16>) {
+func.def @bf16_scalar_mask_select_v4(%lhs: i32, %rhs: i32, %true_value: vector<4xbf16>, %false_value: vector<4xbf16>) -> (vector<4xbf16>) {
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   %mask = vector.splat %condition : vector<4xi1>
   %selected = vector.select %mask, %true_value, %false_value : vector<4xbf16>
@@ -321,7 +293,7 @@ func.def target(@target) @bf16_scalar_mask_select_v4(%lhs: i32, %rhs: i32, %true
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bf16_scalar_mask_select_v4(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr x2>, %false_value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @bf16_scalar_mask_select_v4(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr x2>, %false_value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %14 = v_mov_b32_copy %lhs
   %15 = v_mov_b32_copy %rhs
   %condition = v_cmp_lt_i32 %14, %15
@@ -337,9 +309,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bf16_sc
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @bf16_scalar_mask_select_v16(%lhs: i32, %rhs: i32, %true_value: vector<16xbf16>, %false_value: vector<16xbf16>) -> (vector<16xbf16>) {
+func.def @bf16_scalar_mask_select_v16(%lhs: i32, %rhs: i32, %true_value: vector<16xbf16>, %false_value: vector<16xbf16>) -> (vector<16xbf16>) {
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   %mask = vector.splat %condition : vector<16xi1>
   %selected = vector.select %mask, %true_value, %false_value : vector<16xbf16>
@@ -347,7 +317,7 @@ func.def target(@target) @bf16_scalar_mask_select_v16(%lhs: i32, %rhs: i32, %tru
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bf16_scalar_mask_select_v16(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr x8>, %false_value: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @bf16_scalar_mask_select_v16(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr x8>, %false_value: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm {
   %14 = v_mov_b32_copy %lhs
   %15 = v_mov_b32_copy %rhs
   %condition = v_cmp_lt_i32 %14, %15
@@ -381,9 +351,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bf16_sc
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @f16_scalar_mask_select_v4(%lhs: i32, %rhs: i32, %true_value: vector<4xf16>, %false_value: vector<4xf16>) -> (vector<4xf16>) {
+func.def @f16_scalar_mask_select_v4(%lhs: i32, %rhs: i32, %true_value: vector<4xf16>, %false_value: vector<4xf16>) -> (vector<4xf16>) {
   %condition = scalar.cmpi slt, %lhs, %rhs : i32
   %mask = vector.splat %condition : vector<4xi1>
   %selected = vector.select %mask, %true_value, %false_value : vector<4xf16>
@@ -391,7 +359,7 @@ func.def target(@target) @f16_scalar_mask_select_v4(%lhs: i32, %rhs: i32, %true_
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f16_scalar_mask_select_v4(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr x2>, %false_value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @f16_scalar_mask_select_v4(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr x2>, %false_value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %14 = v_mov_b32_copy %lhs
   %15 = v_mov_b32_copy %rhs
   %condition = v_cmp_lt_i32 %14, %15
@@ -407,15 +375,13 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f16_sca
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i64_splat(%value: i64) -> (vector<2xi64>) {
+func.def @i64_splat(%value: i64) -> (vector<2xi64>) {
   %splat = vector.splat %value : vector<2xi64>
   func.return %splat : vector<2xi64>
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i64_splat(%value: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x4>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i64_splat(%value: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x4>) asm {
   %5 = slice %value[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %6 = v_mov_b32_copy %5
   %7 = slice %value[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -427,24 +393,20 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i64_spl
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @f64_splat(%value: f64) -> (vector<2xf64>) {
+func.def @f64_splat(%value: f64) -> (vector<2xf64>) {
   %splat = vector.splat %value : vector<2xf64>
   func.return %splat : vector<2xf64>
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f64_splat(%value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x4>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @f64_splat(%value: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x4>) asm {
   %splat = concat(%value, %value) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
   return %splat
 }
 
 // ====
 
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @f32_compare_masks(%lhs: f32, %rhs: f32, %tie_mask: i1) -> (i1) {
+func.def @f32_compare_masks(%lhs: f32, %rhs: f32, %tie_mask: i1) -> (i1) {
   %equal = scalar.cmpf oeq, %lhs, %rhs : f32
   %greater = scalar.cmpf ogt, %lhs, %rhs : f32
   %equal_masked = scalar.andi %equal, %tie_mask : i1
@@ -453,7 +415,7 @@ func.def target(@target) @f32_compare_masks(%lhs: f32, %rhs: f32, %tie_mask: i1)
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_compare_masks(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %tie_mask: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @f32_compare_masks(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %tie_mask: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr x2>) asm {
   %equal = v_cmp_eq_f32 %lhs, %rhs
   %greater = v_cmp_gt_f32 %lhs, %rhs
   %14 = s_cmp_lg_i32_src1_inline %tie_mask {rhs = 0}

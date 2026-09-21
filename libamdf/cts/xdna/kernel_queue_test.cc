@@ -4,15 +4,18 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include "amdf/amdf.h"
 #include "amdf/xdna.h"
 #include "gtest/gtest.h"
+#include "util/native_event.h"
 #include "xdna_device_fixture.h"
 
 namespace {
@@ -226,15 +229,90 @@ class XdnaKernelQueueTest : public XdnaContextFixture {
     return UINT32_MAX;
   }
 
-  void CreateQueue() {
+  void CreateQueue(uint32_t capacity = 0) {
     std::cerr << "[XDNA] Acquiring queue and admitting firmware" << std::endl;
     amdf_xdna_kernel_queue_create_info_t create_info = {};
     create_info.type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_CREATE_INFO;
     create_info.structure_size = sizeof(create_info);
     create_info.queue_family_ordinal = QueryKernelQueueFamily();
+    create_info.maximum_pending_submission_count = capacity;
     ASSERT_NE(create_info.queue_family_ordinal, UINT32_MAX);
     ASSERT_TRUE(amdf_status_is_ok(
         xdna_api_->kernel_queue_create(context_, &create_info, &queue_)));
+  }
+
+  void RunPipelinedTransactions(uint32_t capacity) {
+    amdf_xdna_endpoint_info_t identity = {};
+    identity.type = AMDF_STRUCTURE_TYPE_XDNA_ENDPOINT_INFO;
+    identity.structure_size = sizeof(identity);
+    ASSERT_EQ(xdna_api_->endpoint_query_info(endpoint_, &identity),
+              AMDF_STATUS_OK);
+    if (identity.architecture != AMDF_XDNA_ARCHITECTURE_AIE2P) {
+      GTEST_SKIP() << "register transaction encoder requires AIE2P";
+    }
+    auto first = MakeNoOpTransaction();
+    auto second = MakeNoOpTransaction();
+    // Each independent command establishes and checks its own SRAM contents.
+    // No state is assumed to survive scheduling between native submissions.
+    for (uint32_t word = 0; word < 16; ++word) {
+      const uint32_t address = (1u << 20) + 0x1000 + word * 4;
+      const uint32_t value = 0x13579bdfu + word * 0x10203u;
+      AppendRegisterOperation(first, RegisterOperation::kWrite, address, value,
+                              UINT32_MAX);
+      AppendRegisterOperation(first, RegisterOperation::kPoll, address, value,
+                              UINT32_MAX);
+      AppendRegisterOperation(second, RegisterOperation::kWrite, address,
+                              ~value, UINT32_MAX);
+      AppendRegisterOperation(second, RegisterOperation::kPoll, address, ~value,
+                              UINT32_MAX);
+    }
+    ASSERT_NO_FATAL_FAILURE(CreateInstructions(first, second));
+    ASSERT_NO_FATAL_FAILURE(CreateQueue(capacity));
+    amdf_kernel_queue_info_t info = {};
+    info.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO;
+    info.structure_size = sizeof(info);
+    ASSERT_EQ(api_->kernel_queue_query_info(queue_, &info), AMDF_STATUS_OK);
+    ASSERT_NE(info.maximum_pending_submission_count, 0u);
+    const uint32_t command_count =
+        std::min(info.maximum_pending_submission_count, uint32_t{4096});
+    amdf_xdna_kernel_command_t command = {};
+    command.memory = memory_;
+    command.byte_length = first.size();
+    amdf_xdna_kernel_queue_submission_info_t submit = {};
+    submit.type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_SUBMISSION_INFO;
+    submit.structure_size = sizeof(submit);
+    submit.command_count = 1;
+    submit.commands = &command;
+    uint64_t previous = 0;
+    for (uint32_t round = 0; round < 3; ++round) {
+      amdf_status_t status = AMDF_STATUS_OK;
+      uint64_t last = 0;
+      for (uint32_t i = 0; i < command_count && amdf_status_is_ok(status);
+           ++i) {
+        command.byte_offset = ((i + round) % 2) * instruction_stride_;
+        uint64_t point = 0;
+        status = xdna_api_->kernel_queue_submit(queue_, &submit, &point);
+        if (amdf_status_is_ok(status)) {
+          EXPECT_GT(point, previous);
+          previous = last = point;
+        }
+      }
+      // A rejected suffix does not cancel its accepted prefix.
+      if (last != 0) {
+        ASSERT_EQ(
+            api_->kernel_queue_wait(queue_, last, AMDF_TIMEOUT_INFINITE, 0),
+            AMDF_STATUS_OK);
+      }
+      ASSERT_EQ(status, AMDF_STATUS_OK);
+    }
+    ASSERT_EQ(api_->host_mapping_cache_control(
+                  mapping_, AMDF_HOST_CACHE_OPERATION_INVALIDATE, 0,
+                  instruction_stride_ + second.size()),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(std::memcmp(pointer_, first.data(), first.size()), 0);
+    EXPECT_EQ(std::memcmp(pointer_ + instruction_stride_, second.data(),
+                          second.size()),
+              0);
   }
 
   // Caller-owned instruction backing, released before the context.
@@ -256,6 +334,166 @@ class XdnaKernelQueueTest : public XdnaContextFixture {
   } sibling_;
 };
 
+class XdnaKernelQueueNotificationTest : public XdnaKernelQueueTest {
+ protected:
+  void TearDown() override {
+    if (notification_pending_) {
+      const auto consumed = amdf::cts::WaitNativeEvent(event_);
+      EXPECT_TRUE(consumed);
+      if (!consumed) {
+        return;
+      }
+      notification_pending_ = false;
+    }
+    XdnaKernelQueueTest::TearDown();
+    if (queue_ == nullptr && event_.type != AMDF_NATIVE_EVENT_TYPE_NONE) {
+      EXPECT_TRUE(amdf::cts::DestroyNativeEvent(&event_));
+    }
+  }
+
+  void CreateEvent() {
+    amdf_kernel_queue_info_t info = {};
+    info.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO;
+    info.structure_size = sizeof(info);
+    ASSERT_EQ(api_->kernel_queue_query_info(queue_, &info), AMDF_STATUS_OK);
+    if ((info.notification_types &
+         (UINT64_C(1) << amdf::cts::NativeEventType())) == 0) {
+      GTEST_SKIP() << "queue does not support this platform's native events";
+    }
+    ASSERT_TRUE(amdf::cts::CreateNativeEvent(&event_));
+  }
+
+  void RequestNotification(uint64_t submission) {
+    // This stack descriptor expires before delivery. Only the native event
+    // itself remains owned by the caller.
+    const amdf_native_event_t borrowed = event_;
+    ASSERT_EQ(
+        api_->kernel_queue_request_notification(queue_, submission, &borrowed),
+        AMDF_STATUS_OK);
+    notification_pending_ = true;
+  }
+
+  void ConsumeNotification() {
+    ASSERT_TRUE(amdf::cts::WaitNativeEvent(event_));
+    notification_pending_ = false;
+  }
+
+  void RefreshThroughNotification(uint64_t last) {
+    amdf_kernel_queue_status_t checked = {};
+    checked.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS;
+    checked.structure_size = sizeof(checked);
+    ASSERT_EQ(api_->kernel_queue_query_status(queue_, &checked),
+              AMDF_STATUS_OK);
+    while (checked.retired_submission < last) {
+      // Use an actual accepted point; public identities need not be dense.
+      ASSERT_NO_FATAL_FAILURE(RequestNotification(last));
+      ASSERT_NO_FATAL_FAILURE(ConsumeNotification());
+      ASSERT_EQ(api_->kernel_queue_refresh_status(queue_, &checked),
+                AMDF_STATUS_OK);
+      ASSERT_EQ(checked.terminal_status, AMDF_STATUS_OK);
+    }
+  }
+
+  // Caller-owned event, separate from queue packet storage and checked
+  // progress.
+  amdf_native_event_t event_ = {};
+  // One outstanding wake in this client flow, reconciled even on test failure.
+  bool notification_pending_ = false;
+};
+
+TEST_F(XdnaKernelQueueNotificationTest,
+       ChecksCompletedBatchesAndReusesPacketStorage) {
+  const auto transaction = MakeNoOpTransaction();
+  ASSERT_NO_FATAL_FAILURE(CreateInstructions(transaction, transaction));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(3));
+  ASSERT_NO_FATAL_FAILURE(CreateEvent());
+  if (IsSkipped()) {
+    return;
+  }
+  amdf_xdna_kernel_command_t command = {};
+  command.memory = memory_;
+  command.byte_length = transaction.size();
+  amdf_xdna_kernel_queue_submission_info_t submit = {};
+  submit.type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_SUBMISSION_INFO;
+  submit.structure_size = sizeof(submit);
+  submit.command_count = 1;
+  submit.commands = &command;
+
+  // Notify the first accepted native point before a successor can capture it.
+  uint64_t last = 0;
+  ASSERT_EQ(xdna_api_->kernel_queue_submit(queue_, &submit, &last),
+            AMDF_STATUS_OK);
+  ASSERT_NO_FATAL_FAILURE(RefreshThroughNotification(last));
+  for (uint32_t round = 0; round < 3; ++round) {
+    for (uint32_t i = 0; i < 3; ++i) {
+      command.byte_offset = ((round + i) % 2) * instruction_stride_;
+      ASSERT_EQ(xdna_api_->kernel_queue_submit(queue_, &submit, &last),
+                AMDF_STATUS_OK);
+    }
+    ASSERT_NO_FATAL_FAILURE(RefreshThroughNotification(last));
+  }
+  ASSERT_EQ(api_->host_mapping_cache_control(
+                mapping_, AMDF_HOST_CACHE_OPERATION_INVALIDATE, 0,
+                instruction_stride_ + transaction.size()),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(std::memcmp(pointer_, transaction.data(), transaction.size()), 0);
+  EXPECT_EQ(std::memcmp(pointer_ + instruction_stride_, transaction.data(),
+                        transaction.size()),
+            0);
+}
+
+TEST_F(XdnaKernelQueueNotificationTest,
+       OneShotRequestsRemainFreshAfterCompletionAndSlotReuse) {
+  const auto transaction = MakeNoOpTransaction();
+  ASSERT_NO_FATAL_FAILURE(CreateInstructions(transaction, transaction));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(1));
+  ASSERT_NO_FATAL_FAILURE(CreateEvent());
+  if (IsSkipped()) {
+    return;
+  }
+  amdf_xdna_kernel_command_t command = {};
+  command.memory = memory_;
+  command.byte_length = transaction.size();
+  amdf_xdna_kernel_queue_submission_info_t submit = {};
+  submit.type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_SUBMISSION_INFO;
+  submit.structure_size = sizeof(submit);
+  submit.command_count = 1;
+  submit.commands = &command;
+  uint64_t first = 0;
+  ASSERT_EQ(xdna_api_->kernel_queue_submit(queue_, &submit, &first),
+            AMDF_STATUS_OK);
+  ASSERT_EQ(api_->kernel_queue_wait(queue_, first, AMDF_TIMEOUT_INFINITE, 0),
+            AMDF_STATUS_OK);
+
+  // Already-checked requests signal before return, so both notifications are
+  // delivered before consumption and may coalesce into one readiness edge.
+  ASSERT_NO_FATAL_FAILURE(RequestNotification(first));
+  ASSERT_NO_FATAL_FAILURE(RequestNotification(first));
+  ASSERT_NO_FATAL_FAILURE(ConsumeNotification());
+  bool ready = false;
+  ASSERT_TRUE(amdf::cts::TryConsumeNativeEvent(event_, &ready));
+  EXPECT_FALSE(ready);
+
+  uint64_t second = 0;
+  command.byte_offset = instruction_stride_;
+  ASSERT_EQ(xdna_api_->kernel_queue_submit(queue_, &submit, &second),
+            AMDF_STATUS_OK);
+  ASSERT_TRUE(amdf::cts::TryConsumeNativeEvent(event_, &ready));
+  EXPECT_FALSE(ready);  // Submission did not implicitly rearm the event.
+  ASSERT_NO_FATAL_FAILURE(RequestNotification(first));
+  ASSERT_NO_FATAL_FAILURE(ConsumeNotification());
+  amdf_kernel_queue_status_t checked = {};
+  checked.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS;
+  checked.structure_size = sizeof(checked);
+  ASSERT_EQ(api_->kernel_queue_query_status(queue_, &checked), AMDF_STATUS_OK);
+  EXPECT_EQ(checked.retired_submission, first);
+  ASSERT_NO_FATAL_FAILURE(RefreshThroughNotification(second));
+  ASSERT_NO_FATAL_FAILURE(RequestNotification(first));
+  ASSERT_NO_FATAL_FAILURE(ConsumeNotification());
+  ASSERT_TRUE(amdf::cts::TryConsumeNativeEvent(event_, &ready));
+  EXPECT_FALSE(ready);
+}
+
 TEST_F(XdnaKernelQueueTest, SubmitsImmutableRangesAndReacquiresQueue) {
   const auto transaction = MakeNoOpTransaction();
   ASSERT_NO_FATAL_FAILURE(CreateInstructions(transaction, transaction));
@@ -269,32 +507,29 @@ TEST_F(XdnaKernelQueueTest, SubmitsImmutableRangesAndReacquiresQueue) {
   submit.command_count = 1;
   submit.commands = &command;
 
+  uint64_t previous_submission = 0;
   for (uint64_t i = 0; i < 3; ++i) {
     command.byte_offset = (i % 2) * instruction_stride_;
     uint64_t submission = 0;
     ASSERT_EQ(xdna_api_->kernel_queue_submit(queue_, &submit, &submission),
               AMDF_STATUS_OK);
-    EXPECT_EQ(submission, i + 1);
+    EXPECT_GT(submission, previous_submission);
     // Observation does not release command ownership, even if the device has
-    // already completed this short transaction. Only explicit synchronization
-    // establishes the next reusable submission slot.
+    // already completed this short transaction. This batch has no capacity
+    // pressure; checked retirement occurs in the explicit wait below.
     amdf_kernel_queue_status_t status = {};
     status.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS;
     status.structure_size = sizeof(status);
     ASSERT_EQ(api_->kernel_queue_query_status(queue_, &status), AMDF_STATUS_OK);
-    EXPECT_EQ(status.retired_submission, i);
+    EXPECT_EQ(status.retired_submission, previous_submission);
     EXPECT_EQ(status.terminal_status, AMDF_STATUS_OK);
-    uint64_t rejected_submission = UINT64_MAX;
-    EXPECT_EQ(amdf_status_code(xdna_api_->kernel_queue_submit(
-                  queue_, &submit, &rejected_submission)),
-              AMDF_STATUS_CODE_BUSY);
-    EXPECT_EQ(rejected_submission, UINT64_MAX);
     ASSERT_EQ(
         api_->kernel_queue_wait(queue_, submission, AMDF_TIMEOUT_INFINITE, 0),
         AMDF_STATUS_OK);
     ASSERT_EQ(api_->kernel_queue_query_status(queue_, &status), AMDF_STATUS_OK);
     EXPECT_EQ(status.retired_submission, submission);
     EXPECT_EQ(status.terminal_status, AMDF_STATUS_OK);
+    previous_submission = submission;
   }
   const auto expected = MakeNoOpTransaction();
   ASSERT_EQ(api_->host_mapping_cache_control(
@@ -311,10 +546,71 @@ TEST_F(XdnaKernelQueueTest, SubmitsImmutableRangesAndReacquiresQueue) {
   uint64_t submission = 0;
   ASSERT_EQ(xdna_api_->kernel_queue_submit(queue_, &submit, &submission),
             AMDF_STATUS_OK);
-  EXPECT_EQ(submission, 1u);
+  EXPECT_NE(submission, 0u);
   ASSERT_EQ(
       api_->kernel_queue_wait(queue_, submission, AMDF_TIMEOUT_INFINITE, 0),
       AMDF_STATUS_OK);
+}
+
+TEST_F(XdnaKernelQueueTest, PipelinesCommandsAtConfiguredCapacity) {
+  RunPipelinedTransactions(8);
+}
+
+TEST_F(XdnaKernelQueueTest, PipelinesCommandsAtDefaultCapacity) {
+  RunPipelinedTransactions(0);
+}
+
+TEST_F(XdnaKernelQueueTest, RefreshRetiresBatchesAndReusesPacketStorage) {
+  const auto transaction = MakeNoOpTransaction();
+  ASSERT_NO_FATAL_FAILURE(CreateInstructions(transaction, transaction));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(3));
+  amdf_kernel_queue_status_t checked = {};
+  checked.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS;
+  checked.structure_size = sizeof(checked);
+  ASSERT_EQ(api_->kernel_queue_refresh_status(queue_, &checked),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(checked.retired_submission, 0u);
+  amdf_xdna_kernel_command_t command = {};
+  command.memory = memory_;
+  command.byte_length = transaction.size();
+  amdf_xdna_kernel_queue_submission_info_t submit = {};
+  submit.type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_SUBMISSION_INFO;
+  submit.structure_size = sizeof(submit);
+  submit.command_count = 1;
+  submit.commands = &command;
+  uint64_t last = 0;
+  for (uint32_t round = 0; round < 3; ++round) {
+    for (uint32_t i = 0; i < 3; ++i) {
+      command.byte_offset = ((round + i) % 2) * instruction_stride_;
+      ASSERT_EQ(xdna_api_->kernel_queue_submit(queue_, &submit, &last),
+                AMDF_STATUS_OK);
+    }
+    // This caller explicitly polls checked progress. The outer CTS harness
+    // bounds a hang; no execution deadline or native wait changes the result.
+    while (checked.retired_submission < last) {
+      const uint64_t previous = checked.retired_submission;
+      ASSERT_EQ(api_->kernel_queue_refresh_status(queue_, &checked),
+                AMDF_STATUS_OK);
+      ASSERT_EQ(checked.terminal_status, AMDF_STATUS_OK);
+      EXPECT_GE(checked.retired_submission, previous);
+      ASSERT_LE(checked.retired_submission, last);
+      if (checked.retired_submission < last) {
+        std::this_thread::yield();
+      }
+    }
+    ASSERT_EQ(api_->kernel_queue_query_status(queue_, &checked),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(checked.retired_submission, last);
+    EXPECT_EQ(checked.state, AMDF_QUEUE_STATE_ACTIVE);
+  }
+  ASSERT_EQ(api_->host_mapping_cache_control(
+                mapping_, AMDF_HOST_CACHE_OPERATION_INVALIDATE, 0,
+                instruction_stride_ + transaction.size()),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(std::memcmp(pointer_, transaction.data(), transaction.size()), 0);
+  EXPECT_EQ(std::memcmp(pointer_ + instruction_stride_, transaction.data(),
+                        transaction.size()),
+            0);
 }
 
 TEST_F(XdnaKernelQueueTest, PrivateBackingIsQualifiedByExactContext) {

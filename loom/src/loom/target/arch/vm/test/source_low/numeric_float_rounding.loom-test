@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_float_rounding.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=vm:core output=low
 
-vm.target<core> @vm
-
-func.def target(@vm) @rounding_f32(%value: f32) -> (f32, f32, f32, f32, f32) {
+func.def @rounding_f32(%value: f32) -> (f32, f32, f32, f32, f32) {
   %ceil = scalar.ceilf %value : f32
   %floor = scalar.floorf %value : f32
   %roundeven = scalar.roundevenf %value : f32
@@ -13,7 +11,7 @@ func.def target(@vm) @rounding_f32(%value: f32) -> (f32, f32, f32, f32, f32) {
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @rounding_f32(%value: reg<vm.value : f32>) -> (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) asm {
+low.func.def target<vm.core> abi(vm_function) @rounding_f32(%value: reg<vm.value : f32>) -> (reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>, reg<vm.value : f32>) asm {
   %ceil = float.math.unary.f32 %value, "ceil"
   %floor = float.math.unary.f32 %value, "floor"
   %roundeven = float.math.unary.f32 %value, "round_even"
@@ -31,9 +29,7 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @rounding_f32(%value: reg<vm.
 
 // ====
 
-vm.target<core> @vm
-
-func.def target(@vm) @rounding_f64(%value: f64) -> (f64, f64, f64, f64, f64) {
+func.def @rounding_f64(%value: f64) -> (f64, f64, f64, f64, f64) {
   %ceil = scalar.ceilf %value : f64
   %floor = scalar.floorf %value : f64
   %roundeven = scalar.roundevenf %value : f64
@@ -43,7 +39,7 @@ func.def target(@vm) @rounding_f64(%value: f64) -> (f64, f64, f64, f64, f64) {
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @rounding_f64(%value: reg<vm.value : f64>) -> (reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>) asm {
+low.func.def target<vm.core> abi(vm_function) @rounding_f64(%value: reg<vm.value : f64>) -> (reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>, reg<vm.value : f64>) asm {
   %ceil = float.math.unary.f64 %value, "ceil"
   %floor = float.math.unary.f64 %value, "floor"
   %roundeven = float.math.unary.f64 %value, "round_even"

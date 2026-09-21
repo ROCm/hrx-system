@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_generic_atomic.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amdgpu:gfx1200 output=low
 
-amdgpu.target<gfx1200> @target
-
-func.def target(@target) @generic_atomic_i32_static(%input: buffer) {
+func.def @generic_atomic_i32_static(%input: buffer) {
   %buffer_base = index.constant 0 : offset
   %generic = buffer.assume.memory_space<generic> %input : buffer
   %view = buffer.view %generic[%buffer_base] : buffer -> view<1xi32>
@@ -14,7 +12,7 @@ func.def target(@target) @generic_atomic_i32_static(%input: buffer) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @generic_atomic_i32_static() asm {
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @generic_atomic_i32_static() asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %8 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %9 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -30,9 +28,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @generic_atomic_
 
 // ====
 
-amdgpu.target<gfx1200> @target
-
-func.def target(@target) @generic_atomic_cmpxchg_i32_static(%input: buffer) {
+func.def @generic_atomic_cmpxchg_i32_static(%input: buffer) {
   %buffer_base = index.constant 0 : offset
   %generic = buffer.assume.memory_space<generic> %input : buffer
   %view = buffer.view %generic[%buffer_base] : buffer -> view<1xi32>
@@ -43,7 +39,7 @@ func.def target(@target) @generic_atomic_cmpxchg_i32_static(%input: buffer) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @generic_atomic_cmpxchg_i32_static() asm {
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @generic_atomic_cmpxchg_i32_static() asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %10 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %11 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>

@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_scalar_i32.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=vm:core output=low
 
-vm.target<core> @target
-
-func.def target(@target) @scalar_i32_uniform_sgpr(%lhs: i32, %rhs: i32, %shift: i32) -> (i32) {
+func.def @scalar_i32_uniform_sgpr(%lhs: i32, %rhs: i32, %shift: i32) -> (i32) {
   %add = scalar.addi %lhs, %rhs : i32
   %sub = scalar.subi %add, %rhs : i32
   %product = scalar.muli %sub, %rhs : i32
@@ -17,7 +15,7 @@ func.def target(@target) @scalar_i32_uniform_sgpr(%lhs: i32, %rhs: i32, %shift: 
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @scalar_i32_uniform_sgpr(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>, %shift: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+low.func.def target<vm.core> abi(vm_function) @scalar_i32_uniform_sgpr(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>, %shift: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
   %product = integer.mul.i32 %lhs, %rhs
   %and = integer.and.i32 %product, %lhs
   %or = integer.or.i32 %and, %rhs
@@ -30,9 +28,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @scalar_i32_uniform_sgpr(
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @scalar_i32_bitfield_sgpr(%word: i32) -> (i32, i32, i32, i32) {
+func.def @scalar_i32_bitfield_sgpr(%word: i32) -> (i32, i32, i32, i32) {
   %unsigned_byte = scalar.bitfield.extractu %word {offset = 8, width = 8} : i32 -> i32
   %signed_byte = scalar.bitfield.extracts %word {offset = 16, width = 8} : i32 -> i32
   %unsigned_nibble = scalar.bitfield.extractu %word {offset = 4, width = 4} : i32 -> i32
@@ -41,7 +37,7 @@ func.def target(@target) @scalar_i32_bitfield_sgpr(%word: i32) -> (i32, i32, i32
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @scalar_i32_bitfield_sgpr(%word: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) asm {
+low.func.def target<vm.core> abi(vm_function) @scalar_i32_bitfield_sgpr(%word: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i32>) asm {
   %30 = constant.i32 8
   %31 = integer.shift.right.u32 %word, %30
   %32 = constant.i32 255
@@ -61,31 +57,27 @@ low.func.def target<vm.core>(@target) abi(vm_function) @scalar_i32_bitfield_sgpr
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @scalar_i32_compare_scc(%lhs: i32, %rhs: i32) -> (i1) {
+func.def @scalar_i32_compare_scc(%lhs: i32, %rhs: i32) -> (i1) {
   %cmp = scalar.cmpi slt, %lhs, %rhs : i32
   func.return %cmp : i1
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @scalar_i32_compare_scc(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>) -> (reg<vm.value : i1>) asm {
+low.func.def target<vm.core> abi(vm_function) @scalar_i32_compare_scc(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>) -> (reg<vm.value : i1>) asm {
   %cmp = integer.compare.i32 %lhs, %rhs, "slt"
   return %cmp
 }
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @scalar_i1_constants_scc() -> (i1, i1) {
+func.def @scalar_i1_constants_scc() -> (i1, i1) {
   %true = scalar.constant true : i1
   %false = scalar.constant false : i1
   func.return %true, %false : i1, i1
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @scalar_i1_constants_scc() -> (reg<vm.value : i1>, reg<vm.value : i1>) asm {
+low.func.def target<vm.core> abi(vm_function) @scalar_i1_constants_scc() -> (reg<vm.value : i1>, reg<vm.value : i1>) asm {
   %true = constant.i32 1 : reg<vm.value : i1>
   %false = constant.i32 0 : reg<vm.value : i1>
   return %true, %false
@@ -93,9 +85,7 @@ low.func.def target<vm.core>(@target) abi(vm_function) @scalar_i1_constants_scc(
 
 // ====
 
-vm.target<core> @target
-
-func.def target(@target) @scalar_i1_bitwise_scc(%lhs: i32, %rhs: i32) -> (i1) {
+func.def @scalar_i1_bitwise_scc(%lhs: i32, %rhs: i32) -> (i1) {
   %inactive_condition = scalar.constant 0 : i32
   %lhs_nonzero = scalar.cmpi ne, %lhs, %inactive_condition : i32
   %rhs_nonzero = scalar.cmpi ne, %rhs, %inactive_condition : i32
@@ -106,7 +96,7 @@ func.def target(@target) @scalar_i1_bitwise_scc(%lhs: i32, %rhs: i32) -> (i1) {
 }
 
 // ----
-low.func.def target<vm.core>(@target) abi(vm_function) @scalar_i1_bitwise_scc(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>) -> (reg<vm.value : i1>) asm {
+low.func.def target<vm.core> abi(vm_function) @scalar_i1_bitwise_scc(%lhs: reg<vm.value : i32>, %rhs: reg<vm.value : i32>) -> (reg<vm.value : i1>) asm {
   %inactive_condition = constant.i32 0
   %lhs_nonzero = integer.compare.i32 %lhs, %inactive_condition, "ne"
   %rhs_nonzero = integer.compare.i32 %rhs, %inactive_condition, "ne"

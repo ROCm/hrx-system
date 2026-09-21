@@ -189,3 +189,127 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @d16_tied_sources_assemble_ali
   ds_write_b32 v0, v14 offset:88
   ds_write_b32 v0, v15 offset:92
   s_endpgm
+
+// ====
+
+// Slice identities inflate semantic pressure without consuming new registers.
+// Packing the address above the tuple leaves room for the tied partial write
+// while preserving the original word and sibling, without spilling the address.
+// RUN: emit amdgpu-assembly @pack_address_above_reloaded_tuple strategy=source amdgpu.vgpr=6
+
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @pack_address_above_reloaded_tuple(%address: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>) asm {
+  %storage = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
+  %loaded = global_load_b128_saddr %address, %input
+  low.spill %loaded, %storage : reg<amdgpu.vgpr x4>, low.storage<private>
+  %reloaded = low.reload %storage : low.storage<private> -> reg<amdgpu.vgpr x4>
+  %original = slice %reloaded[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %editable = copy %original : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
+  %continued = ds_load_u16_d16_hi %editable, %address
+  %sibling = slice %reloaded[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %combined = v_add_u32 %continued, %original
+  %result = v_add_u32 %combined, %sibling
+  ds_write_b32 %address, %result {offset = 16}
+  return
+}
+
+// ----
+  global_load_b128 v[0:3], v5, s[0:1] offset:0
+  s_mov_b64_exec_read s[2:3]
+  s_mov_b64 exec, -1
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  scratch_store_b128 off, v[0:3], off offset:0 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[2:3]
+  s_mov_b64_exec_read s[2:3]
+  s_mov_b64 exec, -1
+  s_waitcnt_vscnt vscnt(0)
+  scratch_load_b128 v[0:3], off, off offset:0 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[2:3]
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_mov_b32 v4, v1
+  ds_load_u16_d16_hi v4, v5 offset:0
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  v_add_u32 v0, v4, v1
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v0, v0, v3
+  ds_write_b32 v5, v0 offset:16
+  s_endpgm
+
+// ====
+
+// Both spill operands need physical VGPRs at entry. Packing must recover from
+// a failed first-fit assignment before native spill packets are expanded.
+// RUN: emit amdgpu-assembly @pack_required_spill_operands strategy=source amdgpu.vgpr=5
+
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @pack_required_spill_operands(%scalar: reg<amdgpu.vgpr>, %wide: reg<amdgpu.vgpr x4>) asm {
+  %storage = storage {byte_alignment = 16, byte_length = 32} : low.storage<private>
+  low.spill %scalar, %storage {offset = 16} : reg<amdgpu.vgpr>, low.storage<private>
+  low.spill %wide, %storage : reg<amdgpu.vgpr x4>, low.storage<private>
+  return
+}
+
+// ----
+  s_mov_b64_exec_read s[0:1]
+  s_mov_b64 exec, -1
+  scratch_store_b32 off, v4, off offset:16 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[0:1]
+  s_mov_b64_exec_read s[0:1]
+  s_mov_b64 exec, -1
+  scratch_store_b128 off, v[0:3], off offset:0 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[0:1]
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+
+// A shared full reload replaces three narrow scratch loads after temporary
+// pressure spills the tuple. The live scalar packs above the reloaded range.
+// RUN: emit amdgpu-assembly @overlapping_slice_reloads strategy=source amdgpu.vgpr=5
+
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @overlapping_slice_reloads(%blocker: reg<amdgpu.vgpr>, %wide: reg<amdgpu.vgpr x4>, %output: reg<amdgpu.sgpr x2>) asm {
+  %temporary = v_add_u32 %blocker, %blocker
+  %pressure = v_add_u32 %blocker, %temporary
+  %head = slice %wide[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x3>
+  %first = slice %head[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %second = slice %head[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %sum = v_add_u32 %first, %second
+  %tail = slice %wide[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %third = slice %tail[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %fourth = slice %tail[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %sum1 = v_add_u32 %sum, %third
+  %sum2 = v_add_u32 %sum1, %fourth
+  %out = v_add_u32 %sum2, %pressure
+  %address = v_mov_b32 0
+  global_store_b32_saddr %address, %out, %output
+  return
+}
+
+// ----
+  s_mov_b64_exec_read s[2:3]
+  s_mov_b64 exec, -1
+  scratch_store_b128 off, v[0:3], off offset:0 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[2:3]
+  v_add_u32 v0, v4, v4
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v4, v4, v0
+  s_mov_b64_exec_read s[2:3]
+  s_mov_b64 exec, -1
+  s_waitcnt_vscnt vscnt(0)
+  scratch_load_b128 v[0:3], off, off offset:0 glc:0 slc:0 dlc:0
+  s_mov_b64 exec, s[2:3]
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_add_u32 v1, v0, v1
+  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
+  v_add_u32 v0, v1, v2
+  v_add_u32 v0, v0, v3
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v0, v0, v4
+  v_mov_b32 v1, 0
+  global_store_b32 v1, v0, s[0:1] offset:0
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm

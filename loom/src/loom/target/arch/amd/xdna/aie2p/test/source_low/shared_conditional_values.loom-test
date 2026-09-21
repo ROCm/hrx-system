@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/shared_conditional_values.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
-aie2p.target<core> @target
-
-func.def target(@target) @shared_conditional_values(%input: buffer, %output: buffer) {
+func.def @shared_conditional_values(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %c0 = scalar.constant 0 : i32
   %completed = scalar.constant 1 : i32
@@ -33,7 +31,7 @@ func.def target(@target) @shared_conditional_values(%input: buffer, %output: buf
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @shared_conditional_values() asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @shared_conditional_values() asm {
   %in = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %out = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %completed = mov.short 1

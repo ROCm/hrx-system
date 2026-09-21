@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_subview.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amdgpu:gfx12-generic output=low
 
-amdgpu.target<gfx12-generic> @target
-
-func.def target(@target) @subview_scalar_strided(%input: buffer, %output: buffer) -> (f32) {
+func.def @subview_scalar_strided(%input: buffer, %output: buffer) -> (f32) {
   %input_base = index.constant 8 : offset
   %output_base = index.constant 12 : offset
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
@@ -19,7 +17,7 @@ func.def target(@target) @subview_scalar_strided(%input: buffer, %output: buffer
 }
 
 // ----
-low.func.def target<amdgpu.gfx12.generic.core>(@target) abi(hal_kernel) @subview_scalar_strided() -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx12.generic.core> abi(hal_kernel) @subview_scalar_strided() -> (reg<amdgpu.vgpr>) asm {
   %source = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 136} : reg<amdgpu.sgpr x2>
   %destination = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 140} : reg<amdgpu.sgpr x2>
   %16 = v_mov_b32 0
@@ -30,9 +28,7 @@ low.func.def target<amdgpu.gfx12.generic.core>(@target) abi(hal_kernel) @subview
 
 // ====
 
-amdgpu.target<gfx12-generic> @target
-
-func.def target(@target) @subview_nested_dynamic(%input: buffer, %output: buffer, %base: offset, %row: index, %column: index) -> (i32) {
+func.def @subview_nested_dynamic(%input: buffer, %output: buffer, %base: offset, %row: index, %column: index) -> (i32) {
   %origin = index.assume %base [range(%base, 4, 16), mul(%base, 4)] : offset
   %row_bounded = index.assume %row [range(%row, 0, 1)] : index
   %column_bounded = index.assume %column [range(%column, 0, 2)] : index
@@ -52,7 +48,7 @@ func.def target(@target) @subview_nested_dynamic(%input: buffer, %output: buffer
 }
 
 // ----
-low.func.def target<amdgpu.gfx12.generic.core>(@target) abi(hal_kernel) @subview_nested_dynamic(%origin: reg<amdgpu.sgpr x2>, %row_bounded: reg<amdgpu.sgpr>, %column_bounded: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx12.generic.core> abi(hal_kernel) @subview_nested_dynamic(%origin: reg<amdgpu.sgpr x2>, %row_bounded: reg<amdgpu.sgpr>, %column_bounded: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
   %source_refined = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %destination = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %26 = v_mov_b32 0
@@ -83,9 +79,7 @@ low.func.def target<amdgpu.gfx12.generic.core>(@target) abi(hal_kernel) @subview
 
 // ====
 
-amdgpu.target<gfx12-generic> @target
-
-func.def target(@target) @subview_vector_strided(%input: buffer, %output: buffer) {
+func.def @subview_vector_strided(%input: buffer, %output: buffer) {
   %input_base = index.constant 16 : offset
   %output_base = index.constant 32 : offset
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
@@ -101,7 +95,7 @@ func.def target(@target) @subview_vector_strided(%input: buffer, %output: buffer
 }
 
 // ----
-low.func.def target<amdgpu.gfx12.generic.core>(@target) abi(hal_kernel) @subview_vector_strided() asm {
+low.func.def target<amdgpu.gfx12.generic.core> abi(hal_kernel) @subview_vector_strided() asm {
   %source = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 208} : reg<amdgpu.sgpr x2>
   %destination = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 224} : reg<amdgpu.sgpr x2>
   %14 = v_mov_b32 0
@@ -112,9 +106,7 @@ low.func.def target<amdgpu.gfx12.generic.core>(@target) abi(hal_kernel) @subview
 
 // ====
 
-amdgpu.target<gfx12-generic> @target
-
-func.def target(@target) @subview_vector_aligned(%input: buffer, %output: buffer) {
+func.def @subview_vector_aligned(%input: buffer, %output: buffer) {
   %input_base = index.constant 32 : offset
   %output_base = index.constant 64 : offset
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 32} : buffer
@@ -130,7 +122,7 @@ func.def target(@target) @subview_vector_aligned(%input: buffer, %output: buffer
 }
 
 // ----
-low.func.def target<amdgpu.gfx12.generic.core>(@target) abi(hal_kernel) @subview_vector_aligned() asm {
+low.func.def target<amdgpu.gfx12.generic.core> abi(hal_kernel) @subview_vector_aligned() asm {
   %source = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 416} : reg<amdgpu.sgpr x2>
   %destination = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 448} : reg<amdgpu.sgpr x2>
   %14 = v_mov_b32 0
@@ -143,9 +135,7 @@ low.func.def target<amdgpu.gfx12.generic.core>(@target) abi(hal_kernel) @subview
 
 // ====
 
-amdgpu.target<gfx12-generic> @target
-
-func.def target(@target) @subview_atomic_strided(%buffer: buffer) -> (i32) {
+func.def @subview_atomic_strided(%buffer: buffer) -> (i32) {
   %base = index.constant 8 : offset
   %global = buffer.assume.memory_space<global> %buffer : buffer
   %aligned = buffer.assume.alignment %global {minimum_alignment = 4} : buffer
@@ -161,7 +151,7 @@ func.def target(@target) @subview_atomic_strided(%buffer: buffer) -> (i32) {
 }
 
 // ----
-low.func.def target<amdgpu.gfx12.generic.core>(@target) abi(hal_kernel) @subview_atomic_strided() -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx12.generic.core> abi(hal_kernel) @subview_atomic_strided() -> (reg<amdgpu.vgpr>) asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 136} : reg<amdgpu.sgpr x2>
   %15 = v_mov_b32 0
   %16 = v_mov_b32 1
@@ -175,9 +165,7 @@ low.func.def target<amdgpu.gfx12.generic.core>(@target) abi(hal_kernel) @subview
 
 // ====
 
-amdgpu.target<gfx12-generic> @target
-
-func.def target(@target) @subview_prefetch_strided(%input: buffer) {
+func.def @subview_prefetch_strided(%input: buffer) {
   %base = index.constant 8 : offset
   %layout = encoding.layout.strided [8, 1] : encoding<layout>
   %view = buffer.view %input[%base] : buffer -> view<4x8xi32, %layout>
@@ -188,7 +176,7 @@ func.def target(@target) @subview_prefetch_strided(%input: buffer) {
 }
 
 // ----
-low.func.def target<amdgpu.gfx12.generic.core>(@target) abi(hal_kernel) @subview_prefetch_strided() asm {
+low.func.def target<amdgpu.gfx12.generic.core> abi(hal_kernel) @subview_prefetch_strided() asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 136} : reg<amdgpu.sgpr x2>
   %7 = s_mov_b32 0
   %9 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -205,9 +193,7 @@ low.func.def target<amdgpu.gfx12.generic.core>(@target) abi(hal_kernel) @subview
 
 // ====
 
-amdgpu.target<gfx12-generic> @target
-
-func.def target(@target) @subview_dense_rows(%input: buffer, %output: buffer) -> (i32) {
+func.def @subview_dense_rows(%input: buffer, %output: buffer) -> (i32) {
   %base = index.constant 4 : offset
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
@@ -221,11 +207,164 @@ func.def target(@target) @subview_dense_rows(%input: buffer, %output: buffer) ->
 }
 
 // ----
-low.func.def target<amdgpu.gfx12.generic.core>(@target) abi(hal_kernel) @subview_dense_rows() -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.gfx12.generic.core> abi(hal_kernel) @subview_dense_rows() -> (reg<amdgpu.vgpr>) asm {
   %source = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 132} : reg<amdgpu.sgpr x2>
   %destination = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 132} : reg<amdgpu.sgpr x2>
   %14 = v_mov_b32 0
   %value = global_load_b32_saddr %14, %source {offset = 80}
   global_store_b32_saddr %14, %value, %destination {offset = 84}
   return %value
+}
+
+// ====
+
+func.def @make_storage_crop(%input: buffer, %origin: offset, %columns: index) -> (%result_storage: encoding<storage>, view<2x3xf32, %result_storage>) {
+  %layout = encoding.layout.strided [%columns, 1] : encoding<layout>
+  %schema = encoding.define #encoding.f32 : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %source = buffer.view %input_aligned[%origin] : buffer -> view<4x[%columns]xf32, %storage>
+  %crop = view.subview %source[1, 2] : view<4x[%columns]xf32, %storage> -> view<2x3xf32, %storage>
+  func.return %storage, %crop : encoding<storage>, view<2x3xf32, %storage>
+}
+
+func.def @read_storage_crop(%storage: encoding<storage>, %crop: view<2x3xf32, %storage>) -> (f32) {
+  %value = view.load %crop[1, 1] : view<2x3xf32, %storage> -> f32
+  func.return %value : f32
+}
+
+func.def public @subview_composed_helpers(%input: buffer, %output: buffer, %width: index) {
+  %columns = index.assume %width [range(%width, 8, 12)] : index
+  %origin = index.constant 8 : offset
+  %storage, %crop = func.call @make_storage_crop(%input, %origin, %columns) : (buffer, offset, index) -> (encoding<storage>, view<2x3xf32, %storage>)
+  %value = func.call @read_storage_crop(%storage, %crop) : (encoding<storage>, view<2x3xf32, %storage>) -> (f32)
+  %output_origin = index.constant 4 : offset
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %destination = buffer.view %output_aligned[%output_origin] : buffer -> view<1xf32>
+  view.store %value, %destination[0] : f32, view<1xf32>
+  func.return
+}
+
+// ----
+low.func.def public target<amdgpu.gfx12.generic.core> abi(hal_kernel) @subview_composed_helpers(%columns: reg<amdgpu.sgpr>) asm {
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %destination = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 8} : reg<amdgpu.sgpr x2>
+  %29 = v_mov_b32 0
+  %30 = s_lshl_b32_rhs_inline %columns, 2
+  %31 = s_lshl_b32_rhs_inline %columns, 2
+  %32 = s_add_u32 %30, %31
+  %33 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %34 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %35 = s_mov_b32 0
+  %36, %37 = s_add_co_u32 %33, %32
+  %38, %39 = s_addc_u32 %34, %35, %37
+  %40 = concat(%36, %38) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %value = global_load_b32_saddr %29, %40 {offset = 20}
+  global_store_b32_saddr %29, %value, %destination {offset = 4}
+  return
+}
+
+// ====
+
+func.def public @subview_composed_refined_nested(%input: buffer, %output: buffer, %base: offset, %row_pitch: index, %column_pitch: index) {
+  %origin = index.assume %base [range(%base, 4, 12), mul(%base, 4)] : offset
+  %row_stride = index.assume %row_pitch [range(%row_pitch, 8, 12)] : index
+  %column_stride = index.assume %column_pitch [range(%column_pitch, 1, 2)] : index
+  %layout = encoding.layout.strided [%row_stride, %column_stride] : encoding<layout>
+  %refined_layout = encoding.layout.assume.strided %layout {rank = 2} : encoding<layout>
+  %schema = encoding.define #encoding.f32 : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %refined_layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %source = buffer.view %input_aligned[%origin] : buffer -> view<4x4xf32, %storage>
+  %outer = view.subview %source[1, 1] : view<4x4xf32, %storage> -> view<3x3xf32, %storage>
+  %inner = view.subview %outer[1, 1] : view<3x3xf32, %storage> -> view<2x2xf32, %storage>
+  %value = view.load %inner[1, 0] : view<2x2xf32, %storage> -> f32
+  %output_origin = index.constant 4 : offset
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %destination = buffer.view %output_aligned[%output_origin] : buffer -> view<1xf32>
+  view.store %value, %destination[0] : f32, view<1xf32>
+  func.return
+}
+
+// ----
+low.func.def public target<amdgpu.gfx12.generic.core> abi(hal_kernel) @subview_composed_refined_nested(%origin: reg<amdgpu.sgpr x2>, %row_stride: reg<amdgpu.sgpr>, %column_stride: reg<amdgpu.sgpr>) asm {
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %destination = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 8} : reg<amdgpu.sgpr x2>
+  %25 = v_mov_b32 0
+  %26 = slice %origin[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %27 = s_lshl_b32_rhs_inline %row_stride, 3
+  %28 = s_add_u32 %26, %27
+  %29 = s_lshl_b32_rhs_inline %column_stride, 3
+  %30 = s_add_u32 %28, %29
+  %31 = s_lshl_b32_rhs_inline %row_stride, 2
+  %32 = s_add_u32 %30, %31
+  %33 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %34 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %35 = s_mov_b32 0
+  %36, %37 = s_add_co_u32 %33, %32
+  %38, %39 = s_addc_u32 %34, %35, %37
+  %40 = concat(%36, %38) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %value = global_load_b32_saddr %25, %40
+  global_store_b32_saddr %25, %value, %destination {offset = 4}
+  return
+}
+
+// ====
+
+func.def @make_storage_crop(%input: buffer, %origin: offset, %columns: index) -> (%result_storage: encoding<storage>, view<2x3xf32, %result_storage>) {
+  %layout = encoding.layout.strided [%columns, 1] : encoding<layout>
+  %schema = encoding.define #encoding.f32 : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %source = buffer.view %input_aligned[%origin] : buffer -> view<4x[%columns]xf32, %storage>
+  %crop = view.subview %source[1, 2] : view<4x[%columns]xf32, %storage> -> view<2x3xf32, %storage>
+  func.return %storage, %crop : encoding<storage>, view<2x3xf32, %storage>
+}
+
+func.def @read_storage_crop(%storage: encoding<storage>, %crop: view<2x3xf32, %storage>) -> (f32) {
+  %value = view.load %crop[1, 1] : view<2x3xf32, %storage> -> f32
+  func.return %value : f32
+}
+
+func.def public @subview_composed_distinct_bindings(%input: buffer, %output: buffer, %first_width: index, %second_width: index) {
+  %first_columns = index.assume %first_width [range(%first_width, 8, 12)] : index
+  %second_columns = index.assume %second_width [range(%second_width, 8, 12)] : index
+  %origin = index.constant 8 : offset
+  %first_storage, %first_crop = func.call @make_storage_crop(%input, %origin, %first_columns) : (buffer, offset, index) -> (encoding<storage>, view<2x3xf32, %first_storage>)
+  %second_storage, %second_crop = func.call @make_storage_crop(%input, %origin, %second_columns) : (buffer, offset, index) -> (encoding<storage>, view<2x3xf32, %second_storage>)
+  %first = func.call @read_storage_crop(%first_storage, %first_crop) : (encoding<storage>, view<2x3xf32, %first_storage>) -> (f32)
+  %second = func.call @read_storage_crop(%second_storage, %second_crop) : (encoding<storage>, view<2x3xf32, %second_storage>) -> (f32)
+  %value = scalar.subf %first, %second : f32
+  %output_origin = index.constant 4 : offset
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %destination = buffer.view %output_aligned[%output_origin] : buffer -> view<1xf32>
+  view.store %value, %destination[0] : f32, view<1xf32>
+  func.return
+}
+
+// ----
+low.func.def public target<amdgpu.gfx12.generic.core> abi(hal_kernel) @subview_composed_distinct_bindings(%first_columns: reg<amdgpu.sgpr>, %second_columns: reg<amdgpu.sgpr>) asm {
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %destination = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 8} : reg<amdgpu.sgpr x2>
+  %43 = v_mov_b32 0
+  %44 = s_lshl_b32_rhs_inline %first_columns, 2
+  %45 = s_lshl_b32_rhs_inline %first_columns, 2
+  %46 = s_add_u32 %44, %45
+  %47 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %48 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %49 = s_mov_b32 0
+  %50, %51 = s_add_co_u32 %47, %46
+  %52, %53 = s_addc_u32 %48, %49, %51
+  %54 = concat(%50, %52) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %value$55 = global_load_b32_saddr %43, %54 {offset = 20}
+  %57 = s_lshl_b32_rhs_inline %second_columns, 2
+  %58 = s_lshl_b32_rhs_inline %second_columns, 2
+  %59 = s_add_u32 %57, %58
+  %63, %64 = s_add_co_u32 %47, %59
+  %65, %66 = s_addc_u32 %48, %49, %64
+  %67 = concat(%63, %65) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %value$68 = global_load_b32_saddr %43, %67 {offset = 20}
+  %value$69 = v_sub_f32 %value$55, %value$68
+  global_store_b32_saddr %43, %value$69, %destination {offset = 4}
+  return
 }

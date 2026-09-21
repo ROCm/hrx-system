@@ -51,18 +51,20 @@ amdf_status_t amdf_windows_xdna_kernel_execution_prepare_context_destroy(
 amdf_status_t amdf_windows_xdna_kernel_execution_destroy(
     amdf_windows_xdna_kernel_execution_t* execution);
 
-// Acquires the context's single known-correct public KMQ lease.
+// Acquires the context's exclusive public KMQ lease and prepares every native
+// packet/result slot. Failure publishes no lease and owns its local rollback.
 amdf_status_t amdf_windows_xdna_kernel_execution_acquire_queue(
-    amdf_windows_xdna_kernel_execution_t* execution);
+    amdf_windows_xdna_kernel_execution_t* execution, uint32_t capacity);
 
-// Releases one queue lease after all accepted work has retired.
-void amdf_windows_xdna_kernel_execution_release_queue(
+// Consumes one idle queue lease and its packet storage, including on native
+// cleanup failure. No packet metadata remains for a later retry.
+amdf_status_t amdf_windows_xdna_kernel_execution_release_queue(
     amdf_windows_xdna_kernel_execution_t* execution);
 
 // Frames and publishes one validated instruction range without touching its
 // bytes or allocating submission storage.
 amdf_status_t amdf_windows_xdna_kernel_execution_submit(
-    amdf_windows_xdna_kernel_execution_t* execution,
+    amdf_windows_xdna_kernel_execution_t* execution, uint32_t slot,
     uint64_t instruction_address, uint32_t instruction_byte_length,
     uint64_t* out_native_submission);
 
@@ -70,10 +72,17 @@ amdf_status_t amdf_windows_xdna_kernel_execution_submit(
 uint64_t amdf_windows_xdna_kernel_execution_query_progress(
     const amdf_windows_xdna_kernel_execution_t* execution);
 
-// Consumes the single pending command's result after native fence proof. The
-// caller exclusively owns software retirement and prevents response reuse.
+// Requests one asynchronous native-fence wake into a validated caller event.
+// Zero or an already-completed point signals immediately. This neither uses
+// the synchronous wait event nor retains any notification state.
+amdf_status_t amdf_windows_xdna_kernel_execution_request_notification(
+    amdf_windows_xdna_kernel_execution_t* execution, uint64_t native_submission,
+    const amdf_native_event_t* event);
+
+// Consumes this slot's result after native fence proof. The caller exclusively
+// owns checked retirement and prevents response reuse.
 void amdf_windows_xdna_kernel_execution_retire_command(
-    amdf_windows_xdna_kernel_execution_t* execution);
+    amdf_windows_xdna_kernel_execution_t* execution, uint32_t slot);
 
 // Returns the observed context or device terminal failure without polling.
 amdf_status_t amdf_windows_xdna_kernel_execution_query_terminal_status(

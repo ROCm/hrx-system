@@ -1,10 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/ordinary_vector_structure.loom-test
-// RUN: emit spirv-dis input=source-low control-flow=structured-low validate
+// RUN: emit spirv-dis target=spirv:vulkan1.3+bda+hal input=source-low control-flow=structured-low validate
 // REQUIRES: spirv-dis, spirv-val
 
-spirv.target<vulkan1_3> @target {abi = hal_kernel}
-
-kernel.def target(@target) @ordinary_vector_structure_i32() {
+kernel.def @ordinary_vector_structure_i32() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {

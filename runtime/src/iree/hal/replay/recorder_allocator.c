@@ -331,17 +331,17 @@ static iree_status_t iree_hal_replay_recorder_allocator_import_buffer(
     iree_hal_replay_recorder_mark_unsupported(&pending_record);
   }
 
+  // Complete fallible wrapper construction before native import can take
+  // ownership of the caller's release callback.
+  iree_hal_replay_recorder_buffer_t* proxy_buffer = NULL;
+  iree_status_t status = iree_hal_replay_recorder_buffer_allocate_proxy(
+      allocator->host_allocator, &proxy_buffer);
   iree_hal_buffer_t* base_buffer = NULL;
-  iree_hal_buffer_t* replay_buffer = NULL;
-  iree_status_t status = IREE_HAL_REPLAY_VTABLE_DISPATCH(
-      allocator->base_allocator, iree_hal_allocator, import_buffer)(
-      allocator->base_allocator, params, external_buffer, release_callback,
-      &base_buffer);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_replay_recorder_buffer_create_proxy(
-        allocator->recorder, allocator->device_id, buffer_id,
-        IREE_HAL_REPLAY_OBJECT_ID_NONE, allocator->placement_device,
-        base_buffer, allocator->host_allocator, &replay_buffer);
+    status = IREE_HAL_REPLAY_VTABLE_DISPATCH(allocator->base_allocator,
+                                             iree_hal_allocator, import_buffer)(
+        allocator->base_allocator, params, external_buffer, release_callback,
+        &base_buffer);
   }
 
   iree_hal_replay_buffer_object_payload_t object_payload;
@@ -359,34 +359,16 @@ static iree_status_t iree_hal_replay_recorder_allocator_import_buffer(
       IREE_HAL_REPLAY_PAYLOAD_TYPE_BUFFER_OBJECT, 1, &object_iovec);
 
   if (iree_status_is_ok(status)) {
-    *out_buffer = replay_buffer;
+    *out_buffer = iree_hal_replay_recorder_buffer_initialize_proxy(
+        allocator->recorder, allocator->device_id, buffer_id,
+        IREE_HAL_REPLAY_OBJECT_ID_NONE, allocator->placement_device,
+        base_buffer, allocator->host_allocator, proxy_buffer);
   } else {
-    iree_hal_buffer_release(replay_buffer);
+    iree_hal_replay_recorder_buffer_free_proxy(allocator->host_allocator,
+                                               proxy_buffer);
   }
   iree_hal_buffer_release(base_buffer);
   return status;
-}
-
-static iree_status_t iree_hal_replay_recorder_allocator_export_buffer(
-    iree_hal_allocator_t* IREE_RESTRICT base_allocator,
-    iree_hal_buffer_t* IREE_RESTRICT buffer,
-    iree_hal_external_buffer_type_t requested_type,
-    iree_hal_external_buffer_flags_t requested_flags,
-    iree_hal_external_buffer_t* IREE_RESTRICT out_external_buffer) {
-  iree_hal_replay_recorder_allocator_t* allocator =
-      iree_hal_replay_recorder_allocator_cast(base_allocator);
-  iree_hal_replay_pending_record_t pending_record;
-  IREE_RETURN_IF_ERROR(iree_hal_replay_recorder_allocator_begin_operation(
-      allocator, IREE_HAL_REPLAY_OBJECT_ID_NONE,
-      IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_EXPORT_BUFFER,
-      IREE_HAL_REPLAY_PAYLOAD_TYPE_NONE, &pending_record));
-  iree_hal_replay_recorder_mark_unsupported(&pending_record);
-  return iree_hal_replay_recorder_end_operation(
-      &pending_record,
-      iree_hal_allocator_export_buffer(
-          allocator->base_allocator,
-          iree_hal_replay_recorder_buffer_base_or_self(buffer), requested_type,
-          requested_flags, out_external_buffer));
 }
 
 static bool iree_hal_replay_recorder_allocator_supports_virtual_memory(
@@ -853,7 +835,6 @@ static const iree_hal_allocator_vtable_t
         .deallocate_buffer =
             iree_hal_replay_recorder_allocator_deallocate_buffer,
         .import_buffer = iree_hal_replay_recorder_allocator_import_buffer,
-        .export_buffer = iree_hal_replay_recorder_allocator_export_buffer,
         .supports_virtual_memory =
             iree_hal_replay_recorder_allocator_supports_virtual_memory,
         .virtual_memory_query_granularity =

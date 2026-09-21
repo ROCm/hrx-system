@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/buffer_access.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=vm:core output=low
 
-vm.target<core> @vm
-
-func.def target(@vm) @byte_checksum(%byte_count: i64, %byte_start: i64, %pattern: i32) -> (i32) {
+func.def @byte_checksum(%byte_count: i64, %byte_start: i64, %pattern: i32) -> (i32) {
   %count_input = scalar.assume %byte_count [range(%byte_count, 0, 9223372036854775807)] : i64
   %length = index.cast %count_input : i64 to offset
   %start_input = scalar.assume %byte_start [range(%byte_start, 0, 9223372036854775807)] : i64
@@ -27,7 +25,7 @@ func.def target(@vm) @byte_checksum(%byte_count: i64, %byte_start: i64, %pattern
 }
 
 // ----
-low.func.def target<vm.core>(@vm) abi(vm_function) @byte_checksum(%length: reg<vm.value : i64>, %start: reg<vm.value : i64>, %pattern: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+low.func.def target<vm.core> abi(vm_function) @byte_checksum(%length: reg<vm.value : i64>, %start: reg<vm.value : i64>, %pattern: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
   %extent = integer.add.i64 %length, %start
   %storage = buffer.allocate %extent, 3 : reg<vm.ref : buffer>
   %begin = constant.i64 0

@@ -194,6 +194,8 @@ iree_cc_library(
     libamdf::src::atomics
     libamdf::src::platform::linux::file
     libamdf::src::platform::linux::host_cache
+    libamdf::src::platform::linux::native_event
+    libamdf::src::platform::native_event
     libamdf::src::platform::wait
     libamdf::src::wait
     libamdf::src::xdna::umd::kernel_queue

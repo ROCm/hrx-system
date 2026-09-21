@@ -1,9 +1,7 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/shared_conditional_values.loom-test
-// RUN: emit source-low output=low
+// RUN: emit source-low target=amdgpu:gfx1151 output=low
 
-amdgpu.target<gfx1151> @target
-
-func.def target(@target) @shared_conditional_values(%input: buffer, %output: buffer) {
+func.def @shared_conditional_values(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %c0 = scalar.constant 0 : i32
   %completed = scalar.constant 1 : i32
@@ -33,7 +31,7 @@ func.def target(@target) @shared_conditional_values(%input: buffer, %output: buf
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @shared_conditional_values() asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @shared_conditional_values() asm {
   %in = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 12} : reg<amdgpu.sgpr x2>
   %out = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 12} : reg<amdgpu.sgpr x2>
   %28 = v_mov_b32 0

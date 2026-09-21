@@ -1,10 +1,8 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/index_addressing.loom-test
-// RUN: emit source-low output=low control-flow=structured-low
+// RUN: emit source-low target=spirv:vulkan1.3+bda output=low control-flow=structured-low
 
 // XFAIL: SPIR-V ordinary vector memory lowering is unsupported
-spirv.target<vulkan1_3> @target
-
-kernel.def target(@target) @index_madd_global_b32() {
+kernel.def @index_madd_global_b32() {
   %unit = index.constant 1 : index
   %tile = index.constant 4 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%tile, %tile, %unit) : index
@@ -24,9 +22,7 @@ kernel.def target(@target) @index_madd_global_b32() {
 // ====
 
 // XFAIL: SPIR-V ordinary vector memory lowering is unsupported
-spirv.target<vulkan1_3> @target
-
-kernel.def target(@target) @index_madd_u24_global_b32() {
+kernel.def @index_madd_u24_global_b32() {
   %unit = index.constant 1 : index
   %columns = index.constant 8 : index
   %rows = index.constant 4 : index
@@ -47,9 +43,7 @@ kernel.def target(@target) @index_madd_u24_global_b32() {
 // ====
 
 // XFAIL: SPIR-V ordinary vector memory lowering is unsupported
-spirv.target<vulkan1_3> @target
-
-kernel.def target(@target) @index_madd_u24_literal_lhs_global_b32() {
+kernel.def @index_madd_u24_literal_lhs_global_b32() {
   %unit = index.constant 1 : index
   %columns = index.constant 8 : index
   %rows = index.constant 4 : index
@@ -70,9 +64,7 @@ kernel.def target(@target) @index_madd_u24_literal_lhs_global_b32() {
 // ====
 
 // XFAIL: SPIR-V ordinary vector memory lowering is unsupported
-spirv.target<vulkan1_3> @target
-
-kernel.def target(@target) @index_madd_u24_literal_addend_global_b32() {
+kernel.def @index_madd_u24_literal_addend_global_b32() {
   %unit = index.constant 1 : index
   %columns = index.constant 8 : index
   %rows = index.constant 4 : index
@@ -93,9 +85,7 @@ kernel.def target(@target) @index_madd_u24_literal_addend_global_b32() {
 // ====
 
 // XFAIL: SPIR-V ordinary vector memory lowering is unsupported
-spirv.target<vulkan1_3> @target
-
-kernel.def target(@target) @index_madd_constant_addend_global_b32() {
+kernel.def @index_madd_constant_addend_global_b32() {
   %unit = index.constant 1 : index
   %row_count = index.constant 4 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%row_count, %unit, %unit) : index
@@ -115,9 +105,7 @@ kernel.def target(@target) @index_madd_constant_addend_global_b32() {
 // ====
 
 // XFAIL: SPIR-V ordinary vector memory lowering is unsupported
-spirv.target<vulkan1_3> @target
-
-kernel.def target(@target) @index_madd_nested_scale_global_b32() {
+kernel.def @index_madd_nested_scale_global_b32() {
   %unit = index.constant 1 : index
   %row_count = index.constant 4 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%row_count, %unit, %unit) : index
@@ -139,9 +127,7 @@ kernel.def target(@target) @index_madd_nested_scale_global_b32() {
 // ====
 
 // XFAIL: SPIR-V ordinary vector memory lowering is unsupported
-spirv.target<vulkan1_3> @target
-
-kernel.def target(@target) @index_shli_global_b32() {
+kernel.def @index_shli_global_b32() {
   %unit = index.constant 1 : index
   %lane_count = index.constant 4 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lane_count, %unit, %unit) : index
@@ -160,9 +146,7 @@ kernel.def target(@target) @index_shli_global_b32() {
 // ====
 
 // XFAIL: SPIR-V ordinary vector memory lowering is unsupported
-spirv.target<vulkan1_3> @target
-
-kernel.def target(@target) @index_scale_byte_offset_global_b32() {
+kernel.def @index_scale_byte_offset_global_b32() {
   %unit = index.constant 1 : index
   %element_count = index.constant 4 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%element_count, %unit, %unit) : index
@@ -181,9 +165,7 @@ kernel.def target(@target) @index_scale_byte_offset_global_b32() {
 // ====
 
 // XFAIL: SPIR-V ordinary vector memory lowering is unsupported
-spirv.target<vulkan1_3> @target
-
-kernel.def target(@target) @index_shli_previous_row_global_b128() {
+kernel.def @index_shli_previous_row_global_b128() {
   %unit = index.constant 1 : index
   %active_lanes = index.constant 31 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%active_lanes, %unit, %unit) : index
@@ -205,9 +187,7 @@ kernel.def target(@target) @index_shli_previous_row_global_b128() {
 // ====
 
 // XFAIL: Structured-low vector footprint analysis is incomplete
-spirv.target<vulkan1_3> @target
-
-kernel.def target(@target) @index_edge_loop_dynamic_lower_bound_global_b32() {
+kernel.def @index_edge_loop_dynamic_lower_bound_global_b32() {
   %unit = index.constant 1 : index
   %lane_count = index.constant 1024 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lane_count, %unit, %unit) : index
@@ -242,9 +222,7 @@ kernel.def target(@target) @index_edge_loop_dynamic_lower_bound_global_b32() {
 // ====
 
 // XFAIL: SPIR-V ordinary vector memory lowering is unsupported
-spirv.target<vulkan1_3> @target
-
-kernel.def target(@target) @index_div_rem_power_of_two_global_b32() {
+kernel.def @index_div_rem_power_of_two_global_b32() {
   %unit = index.constant 1 : index
   %lane_count = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lane_count, %unit, %unit) : index
@@ -264,9 +242,7 @@ kernel.def target(@target) @index_div_rem_power_of_two_global_b32() {
 // ====
 
 // XFAIL: SPIR-V ordinary vector memory lowering is unsupported
-spirv.target<vulkan1_3> @target
-
-kernel.def target(@target) @index_div_rem_magic_mul_global_b32() {
+kernel.def @index_div_rem_magic_mul_global_b32() {
   %unit = index.constant 1 : index
   %lane_count = index.constant 25 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lane_count, %unit, %unit) : index
@@ -286,9 +262,7 @@ kernel.def target(@target) @index_div_rem_magic_mul_global_b32() {
 // ====
 
 // XFAIL: SPIR-V ordinary vector memory lowering is unsupported
-spirv.target<vulkan1_3> @target
-
-kernel.def target(@target) @index_div_rem_magic_add_global_b32() {
+kernel.def @index_div_rem_magic_add_global_b32() {
   %unit = index.constant 1 : index
   %lane_count = index.constant 49 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lane_count, %unit, %unit) : index
@@ -308,9 +282,7 @@ kernel.def target(@target) @index_div_rem_magic_add_global_b32() {
 // ====
 
 // XFAIL: SPIR-V workgroup view and vector memory lowering is unsupported
-spirv.target<vulkan1_3> @target
-
-kernel.def target(@target) @workitem_y_lds_uses_explicit_vaddr() {
+kernel.def @workitem_y_lds_uses_explicit_vaddr() {
   %unit = index.constant 1 : index
   %row_count = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %row_count, %unit) : index
@@ -332,9 +304,7 @@ kernel.def target(@target) @workitem_y_lds_uses_explicit_vaddr() {
 // ====
 
 // XFAIL: SPIR-V ordinary vector construction and memory lowering is unsupported
-spirv.target<vulkan1_3> @target
-
-kernel.def target(@target) @dispatch_id_xy_global_b32() {
+kernel.def @dispatch_id_xy_global_b32() {
   %unit = index.constant 1 : index
   %workgroups_x = index.constant 4 : index
   %workgroups_y = index.constant 4 : index

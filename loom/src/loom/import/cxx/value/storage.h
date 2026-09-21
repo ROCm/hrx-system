@@ -67,6 +67,14 @@ class Storage {
   // Projects an object's scalar lane footprint at the pointer's current origin.
   StorageAccess dereference(Pointer base, const cxx::Type* element_type,
                             cxx::AST* owner);
+  // Reads an already resolved scalar/vector element. Reusing an
+  // access preserves its address across a source read/modify/write operation.
+  // The source element type supplies the footprint and memory qualifiers.
+  loom_value_id_t load(const StorageAccess& access,
+                       const cxx::Type* element_type, cxx::AST* owner);
+  // Writes to the same resolved location with the source element qualifiers.
+  void store(const StorageAccess& access, loom_value_id_t value,
+             const cxx::Type* element_type, cxx::AST* owner);
   // Allocates a fixed workgroup scalar array using its source layout and any
   // explicit alignment. The driver admits the declaration's storage duration,
   // initialization and enclosing kernel contract before calling this method.

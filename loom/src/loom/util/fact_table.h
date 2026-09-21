@@ -39,6 +39,7 @@
 #include "loom/ir/ir.h"
 #include "loom/ir/type_dependencies.h"
 #include "loom/util/fact_extensions.h"
+#include "loom/util/fact_layout.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -248,6 +249,10 @@ struct loom_value_fact_table_t {
     // Allocated sparse origin entry count.
     iree_host_size_t origin_capacity;
   } contextual_query_origins;
+
+  // Scope-local per-axis SSA layout strides. Allocated only for dynamic
+  // explicit layouts; separate from numeric extensions that cross call scopes.
+  loom_value_fact_layout_origins_t* layout_origins;
 
   // Canonical transitive select conditions keyed by SSA value ID. Both the
   // index and dense roots have populated-scope lifetime and remain absent for

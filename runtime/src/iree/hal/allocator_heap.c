@@ -270,43 +270,6 @@ static iree_status_t iree_hal_heap_allocator_import_buffer(
       release_callback, allocator->host_allocator, out_buffer);
 }
 
-static iree_status_t iree_hal_heap_allocator_export_buffer(
-    iree_hal_allocator_t* IREE_RESTRICT base_allocator,
-    iree_hal_buffer_t* IREE_RESTRICT buffer,
-    iree_hal_external_buffer_type_t requested_type,
-    iree_hal_external_buffer_flags_t requested_flags,
-    iree_hal_external_buffer_t* IREE_RESTRICT out_external_buffer) {
-  // For the heap allocator on CPUs, we can directly export requests for
-  // both a host allocation and a device allocation as they are one and the
-  // same. We switch below to store the pointer in the right part of the
-  // union.
-  if (requested_type != IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION &&
-      requested_type != IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION) {
-    return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "external buffer type not supported");
-  }
-
-  // Map the entire buffer persistently, if possible.
-  iree_hal_buffer_mapping_t mapping;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_buffer_map_range(buffer, IREE_HAL_MAPPING_MODE_PERSISTENT,
-                                iree_hal_buffer_allowed_access(buffer), 0,
-                                IREE_HAL_WHOLE_BUFFER, &mapping));
-
-  // Note that the returned pointer is unowned.
-  out_external_buffer->type = requested_type;
-  out_external_buffer->flags = requested_flags;
-  out_external_buffer->size = mapping.contents.data_length;
-  if (requested_type == IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION) {
-    out_external_buffer->handle.host_allocation.ptr = mapping.contents.data;
-  } else if (requested_type ==
-             IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION) {
-    out_external_buffer->handle.device_allocation.ptr =
-        (uint64_t)(uintptr_t)mapping.contents.data;
-  }
-  return iree_ok_status();
-}
-
 static bool iree_hal_heap_allocator_supports_virtual_memory(
     iree_hal_allocator_t* IREE_RESTRICT base_allocator) {
   return false;
@@ -407,7 +370,6 @@ static const iree_hal_allocator_vtable_t iree_hal_heap_allocator_vtable = {
     .allocate_buffer = iree_hal_heap_allocator_allocate_buffer,
     .deallocate_buffer = iree_hal_heap_allocator_deallocate_buffer,
     .import_buffer = iree_hal_heap_allocator_import_buffer,
-    .export_buffer = iree_hal_heap_allocator_export_buffer,
     .supports_virtual_memory = iree_hal_heap_allocator_supports_virtual_memory,
     .virtual_memory_query_granularity =
         iree_hal_heap_allocator_virtual_memory_query_granularity,

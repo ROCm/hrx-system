@@ -20,11 +20,11 @@ amdf_status_t amdf_gpu_umd_kernel_queue_create(
 
 amdf_status_t amdf_gpu_umd_kernel_queue_submit(
     amdf_gpu_umd_kernel_queue_t* queue, uint64_t command_buffer_address,
-    uint64_t command_buffer_byte_length, uint64_t* out_native_submission) {
+    uint64_t command_buffer_byte_length, uint64_t submission) {
   (void)queue;
   (void)command_buffer_address;
   (void)command_buffer_byte_length;
-  (void)out_native_submission;
+  (void)submission;
   return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
 }
 
