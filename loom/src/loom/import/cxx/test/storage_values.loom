@@ -1,0 +1,191 @@
+// Real storage crosses the ordinary C++ callable boundary.
+
+func.decl @storage_words(%storage: buffer, %origin: offset) -> (i32)
+
+func.def @words_observations() -> (i32, i32, i32, i32, i32) {
+  %bytes = index.constant 16 : offset
+  %storage = buffer.alloca<private> align(4) %bytes : buffer
+  %origin = index.constant 0 : offset
+  %view = buffer.view %storage[%origin] : buffer -> view<4xi32>
+  %guard = scalar.constant 37 : i32
+  view.store %guard, %view[0] : i32, view<4xi32>
+  view.store %guard, %view[3] : i32, view<4xi32>
+  %returned = func.call @storage_words(%storage, %origin) : (buffer, offset) -> (i32)
+  %before = view.load %view[0] : view<4xi32> -> i32
+  %first = view.load %view[1] : view<4xi32> -> i32
+  %second = view.load %view[2] : view<4xi32> -> i32
+  %after = view.load %view[3] : view<4xi32> -> i32
+  func.return %returned, %before, %first, %second, %after : i32, i32, i32, i32, i32
+}
+
+check.case @words_values {
+  %returned, %before, %first, %second, %after = func.call @words_observations() : () -> (i32, i32, i32, i32, i32)
+  %expected_returned = check.literal value(1489) : i32
+  %guard = check.literal value(37) : i32
+  %expected_first = check.literal value(38) : i32
+  %expected_second = check.literal value(12) : i32
+  check.expect.equal actual(%returned) expected(%expected_returned) : i32
+  check.expect.equal actual(%before) expected(%guard) : i32
+  check.expect.equal actual(%first) expected(%expected_first) : i32
+  check.expect.equal actual(%second) expected(%expected_second) : i32
+  check.expect.equal actual(%after) expected(%guard) : i32
+  check.return
+}
+
+func.decl @storage_volatile(%storage: buffer, %origin: offset) -> (i32)
+
+func.def @volatile_observations() -> (i32, i32, i32, i32, i32) {
+  %bytes = index.constant 16 : offset
+  %storage = buffer.alloca<private> align(4) %bytes : buffer
+  %origin = index.constant 0 : offset
+  %view = buffer.view %storage[%origin] : buffer -> view<4xi32>
+  %guard = scalar.constant 37 : i32
+  view.store %guard, %view[0] : i32, view<4xi32>
+  view.store %guard, %view[3] : i32, view<4xi32>
+  %returned = func.call @storage_volatile(%storage, %origin) : (buffer, offset) -> (i32)
+  %before = view.load %view[0] : view<4xi32> -> i32
+  %first = view.load %view[1] : view<4xi32> -> i32
+  %second = view.load %view[2] : view<4xi32> -> i32
+  %after = view.load %view[3] : view<4xi32> -> i32
+  func.return %returned, %before, %first, %second, %after : i32, i32, i32, i32, i32
+}
+
+check.case @volatile_values {
+  %returned, %before, %first, %second, %after = func.call @volatile_observations() : () -> (i32, i32, i32, i32, i32)
+  %expected_returned = check.literal value(1489) : i32
+  %guard = check.literal value(37) : i32
+  %expected_first = check.literal value(38) : i32
+  %expected_second = check.literal value(12) : i32
+  check.expect.equal actual(%returned) expected(%expected_returned) : i32
+  check.expect.equal actual(%before) expected(%guard) : i32
+  check.expect.equal actual(%first) expected(%expected_first) : i32
+  check.expect.equal actual(%second) expected(%expected_second) : i32
+  check.expect.equal actual(%after) expected(%guard) : i32
+  check.return
+}
+
+func.decl @storage_bytes(%storage: buffer, %origin: offset) -> (i32)
+
+func.def @bytes_observations() -> (i32, i8, i8, i8, i8) {
+  %bytes = index.constant 4 : offset
+  %storage = buffer.alloca<private> align(1) %bytes : buffer
+  %origin = index.constant 0 : offset
+  %view = buffer.view %storage[%origin] : buffer -> view<4xi8>
+  %guard = scalar.constant 37 : i8
+  view.store %guard, %view[0] : i8, view<4xi8>
+  view.store %guard, %view[3] : i8, view<4xi8>
+  %returned = func.call @storage_bytes(%storage, %origin) : (buffer, offset) -> (i32)
+  %before = view.load %view[0] : view<4xi8> -> i8
+  %first = view.load %view[1] : view<4xi8> -> i8
+  %second = view.load %view[2] : view<4xi8> -> i8
+  %after = view.load %view[3] : view<4xi8> -> i8
+  func.return %returned, %before, %first, %second, %after : i32, i8, i8, i8, i8
+}
+
+check.case @bytes_values {
+  %returned, %before, %first, %second, %after = func.call @bytes_observations() : () -> (i32, i8, i8, i8, i8)
+  %expected_returned = check.literal value(555) : i32
+  %guard = check.literal value(37) : i8
+  %expected_first = check.literal value(0) : i8
+  %expected_second = check.literal value(3) : i8
+  check.expect.equal actual(%returned) expected(%expected_returned) : i32
+  check.expect.equal actual(%before) expected(%guard) : i8
+  check.expect.equal actual(%first) expected(%expected_first) : i8
+  check.expect.equal actual(%second) expected(%expected_second) : i8
+  check.expect.equal actual(%after) expected(%guard) : i8
+  check.return
+}
+
+func.decl @storage_signed(%storage: buffer, %origin: offset) -> (i32)
+
+func.def @signed_observations() -> (i32, i8, i8, i8, i8) {
+  %bytes = index.constant 4 : offset
+  %storage = buffer.alloca<private> align(1) %bytes : buffer
+  %origin = index.constant 0 : offset
+  %view = buffer.view %storage[%origin] : buffer -> view<4xi8>
+  %guard = scalar.constant 37 : i8
+  view.store %guard, %view[0] : i8, view<4xi8>
+  view.store %guard, %view[3] : i8, view<4xi8>
+  %returned = func.call @storage_signed(%storage, %origin) : (buffer, offset) -> (i32)
+  %before = view.load %view[0] : view<4xi8> -> i8
+  %first = view.load %view[1] : view<4xi8> -> i8
+  %second = view.load %view[2] : view<4xi8> -> i8
+  %after = view.load %view[3] : view<4xi8> -> i8
+  func.return %returned, %before, %first, %second, %after : i32, i8, i8, i8, i8
+}
+
+check.case @signed_values {
+  %returned, %before, %first, %second, %after = func.call @signed_observations() : () -> (i32, i8, i8, i8, i8)
+  %expected_returned = check.literal value(-12373) : i32
+  %guard = check.literal value(37) : i8
+  %expected_first = check.literal value(63) : i8
+  %expected_second = check.literal value(-126) : i8
+  check.expect.equal actual(%returned) expected(%expected_returned) : i32
+  check.expect.equal actual(%before) expected(%guard) : i8
+  check.expect.equal actual(%first) expected(%expected_first) : i8
+  check.expect.equal actual(%second) expected(%expected_second) : i8
+  check.expect.equal actual(%after) expected(%guard) : i8
+  check.return
+}
+
+func.decl @storage_floats(%storage: buffer, %origin: offset) -> (f32)
+
+func.def @floats_observations() -> (f32, f32, f32, f32, f32) {
+  %bytes = index.constant 16 : offset
+  %storage = buffer.alloca<private> align(4) %bytes : buffer
+  %origin = index.constant 0 : offset
+  %view = buffer.view %storage[%origin] : buffer -> view<4xf32>
+  %guard = scalar.constant 37.0 : f32
+  view.store %guard, %view[0] : f32, view<4xf32>
+  view.store %guard, %view[3] : f32, view<4xf32>
+  %returned = func.call @storage_floats(%storage, %origin) : (buffer, offset) -> (f32)
+  %before = view.load %view[0] : view<4xf32> -> f32
+  %first = view.load %view[1] : view<4xf32> -> f32
+  %second = view.load %view[2] : view<4xf32> -> f32
+  %after = view.load %view[3] : view<4xf32> -> f32
+  func.return %returned, %before, %first, %second, %after : f32, f32, f32, f32, f32
+}
+
+check.case @floats_values {
+  %returned, %before, %first, %second, %after = func.call @floats_observations() : () -> (f32, f32, f32, f32, f32)
+  %expected_returned = check.literal value(1.5) : f32
+  %guard = check.literal value(37.0) : f32
+  %expected_first = check.literal value(3.25) : f32
+  %expected_second = check.literal value(-2.0) : f32
+  check.expect.equal actual(%returned) expected(%expected_returned) : f32
+  check.expect.equal actual(%before) expected(%guard) : f32
+  check.expect.equal actual(%first) expected(%expected_first) : f32
+  check.expect.equal actual(%second) expected(%expected_second) : f32
+  check.expect.equal actual(%after) expected(%guard) : f32
+  check.return
+}
+
+// Signed division is admitted by the importer and executes on the VM.
+func.decl @storage_divide(%storage: buffer, %origin: offset) -> (i32)
+
+func.def @division_observations() -> (i32, i8, i8, i8) {
+  %bytes = index.constant 3 : offset
+  %storage = buffer.alloca<private> align(1) %bytes : buffer
+  %origin = index.constant 0 : offset
+  %view = buffer.view %storage[%origin] : buffer -> view<3xi8>
+  %guard = scalar.constant 37 : i8
+  view.store %guard, %view[0] : i8, view<3xi8>
+  view.store %guard, %view[2] : i8, view<3xi8>
+  %returned = func.call @storage_divide(%storage, %origin) : (buffer, offset) -> (i32)
+  %before = view.load %view[0] : view<3xi8> -> i8
+  %value = view.load %view[1] : view<3xi8> -> i8
+  %after = view.load %view[2] : view<3xi8> -> i8
+  func.return %returned, %before, %value, %after : i32, i8, i8, i8
+}
+
+check.case @division_values {
+  %returned, %before, %value, %after = func.call @division_observations() : () -> (i32, i8, i8, i8)
+  %expected_returned = check.literal value(-41) : i32
+  %expected_value = check.literal value(-41) : i8
+  %guard = check.literal value(37) : i8
+  check.expect.equal actual(%returned) expected(%expected_returned) : i32
+  check.expect.equal actual(%before) expected(%guard) : i8
+  check.expect.equal actual(%value) expected(%expected_value) : i8
+  check.expect.equal actual(%after) expected(%guard) : i8
+  check.return
+}

@@ -7,6 +7,7 @@
 load("//build_tools/sanitizer:suppressions.bzl", "rocm_suppressions")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:defs.bzl", "loom_test")
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test")
 load("//loom/target/amdgpu:execution_profiles.bzl", "amdgpu_execution_profile")
 
 package(default_visibility = ["//visibility:public"])
@@ -45,6 +46,7 @@ _MODULES = [
     "scheduled_sum",
     "shaped_intrinsics",
     "short_circuit",
+    "storage_updates",
     "structured_continue",
     "symbol_exports",
     "typed_views",
@@ -67,4 +69,14 @@ _MODULES = [
 test_suite(
     name = "kernels_test",
     tests = [":" + module + "_test" for module in _MODULES],
+)
+
+loom_check_test(
+    name = "storage_division",
+    src = "storage_division.cxx-test",
+    runner = "//loom/src/loom/tools/loom-check",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/target/arch:amdgpu",
+    ]),
 )

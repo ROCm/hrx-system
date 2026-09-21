@@ -22,6 +22,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 #include "iree/base/api.h"
@@ -50,7 +51,6 @@
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/ops.h"
-#include "loom/ops/view/ops.h"
 
 namespace loom::cxx_import {
 namespace {
@@ -490,49 +490,60 @@ class Translator {
   }
 
   loom_value_id_t load(cxx::ExpressionAST* ast) {
-    auto access = address(ast);
-    loom_op_t* op;
-    int64_t selector = access.index ? INT64_MIN : 0;
-    auto build = types_.vector(ast->type) ? loom_vector_load_build
-                                          : loom_view_load_build;
-    check(build(&builder_, 0, types_.memory_access_flags(ast->type),
-                access.view, access.index ? &*access.index : nullptr,
-                access.index ? 1 : 0, &selector, 1, 0, 0,
-                types_.get(ast->type, ast), locations_.get(ast), &op));
-    return result(op);
+    return storage_.load(address(ast), ast->type, ast);
   }
 
   enum class IncrementResult { Previous, Updated };
 
-  Destination destination(cxx::ExpressionAST* expression, cxx::AST* owner) {
-    auto destination = control_->destination(expression);
-    if (!destination || !values_.contains(destination->binding)) {
-      fail(owner, "mutation requires an owned automatic source binding");
-    }
+  // Resolving the source lvalue executes its address expressions once. Reads
+  // and writes then share that location even when another binding changes.
+  struct Lvalue {
+    // Source element type retains qualifiers and arithmetic conversion rules.
+    const cxx::Type* type;
+    // An automatic SSA partition or an evaluated storage projection.
+    std::variant<Destination, StorageAccess> location;
+  };
+
+  Lvalue destination(cxx::ExpressionAST* expression, cxx::AST* owner) {
     types_.require_mutable(expression->type, expression);
-    return *destination;
+    if (auto destination = control_->destination(expression)) {
+      if (!values_.contains(destination->binding)) {
+        fail(owner, "mutation requires an owned automatic source binding");
+      }
+      return {expression->type, *destination};
+    }
+    return {expression->type, address(expression)};
   }
 
-  Value read(Destination destination) {
-    auto value = values_.at(destination.binding);
-    return destination.member ? value.project(*destination.member,
-                                              destination.component_offset)
-                              : value;
+  Value read(const Lvalue& target, cxx::AST* owner) {
+    if (auto* destination = std::get_if<Destination>(&target.location)) {
+      auto value = values_.at(destination->binding);
+      return destination->member ? value.project(*destination->member,
+                                                 destination->component_offset)
+                                 : value;
+    }
+    return storage_.load(std::get<StorageAccess>(target.location), target.type,
+                         owner);
   }
 
-  void write(Destination destination, Value value) {
-    auto& binding = values_.at(destination.binding);
-    binding = name(
-        destination.member
-            ? value_arena_.replace(binding, destination.component_offset, value)
-            : value,
-        cxx::to_string(destination.binding->name()));
+  void write(const Lvalue& target, Value value, cxx::AST* owner) {
+    if (auto* destination = std::get_if<Destination>(&target.location)) {
+      auto& binding = values_.at(destination->binding);
+      binding = name(destination->member
+                         ? value_arena_.replace(
+                               binding, destination->component_offset, value)
+                         : value,
+                     cxx::to_string(destination->binding->name()));
+    } else {
+      storage_.store(std::get<StorageAccess>(target.location), value.ssa(),
+                     target.type, owner);
+    }
   }
 
   Value increment(cxx::ExpressionAST* destination, cxx::TokenKind token,
                   IncrementResult selected, cxx::AST* owner) {
     auto target = this->destination(destination, owner);
-    auto previous = read(target);
+    auto previous = read(target, destination);
     auto source = locations_.get(owner);
     auto operation = token == cxx::TokenKind::T_MINUS_MINUS
                          ? cxx::TokenKind::T_MINUS
@@ -561,7 +572,7 @@ class Translator {
       value = scalars_.binary(operation, value, one, promoted, promoted, owner);
       updated = scalars_.convert(value, promoted, destination->type, owner);
     }
-    write(target, updated);
+    write(target, updated, owner);
     return selected == IncrementResult::Previous ? previous : updated;
   }
 
@@ -569,18 +580,18 @@ class Translator {
     auto* ast = assignment;
     auto* destination = assignment->targetExpression;
     if (assignment->symbol) {
-      fail(ast, "compound assignment requires a builtin local");
+      fail(ast, "overloaded compound assignment is not admitted");
     }
-    auto target = this->destination(destination, ast);
     auto value = expression(assignment->rightExpression);
-    // The right operand is sequenced before the destination's value read.
-    auto old = read(target);
+    // The right operand precedes both the address evaluation and value read.
+    auto target = this->destination(destination, ast);
+    auto old = read(target, destination);
     if (old.is_pointer()) {
       auto updated =
           storage_.advance(old.pointer(), value.ssa(), destination->type,
                            assignment->rightExpression->type,
                            cxx::get_underlying_binary_op(assignment->op), ast);
-      write(target, Value(updated));
+      write(target, Value(updated), ast);
       return Value(updated);
     }
     auto* promoted = assignment->leftExpression->type;
@@ -590,7 +601,7 @@ class Translator {
     auto updated = binary(cxx::get_underlying_binary_op(assignment->op),
                           old.ssa(), value.ssa(), promoted, promoted, ast);
     updated = numeric_convert(updated, promoted, destination->type, ast);
-    write(target, updated);
+    write(target, updated, ast);
     return updated;
   }
 
@@ -613,24 +624,8 @@ class Translator {
         assignment->op != cxx::TokenKind::T_EQUAL) {
       fail(ast, "only builtin plain assignment is admitted here");
     }
-    types_.require_mutable(assignment->leftExpression->type,
-                           assignment->leftExpression);
     auto value = expression(assignment->rightExpression);
-    if (auto target = control_->destination(assignment->leftExpression)) {
-      write(destination(assignment->leftExpression, ast), value);
-      return value;
-    }
-    auto access = address(assignment->leftExpression);
-    int64_t selector = access.index ? INT64_MIN : 0;
-    loom_op_t* op;
-    auto build = types_.vector(assignment->leftExpression->type)
-                     ? loom_vector_store_build
-                     : loom_view_store_build;
-    check(build(&builder_, 0,
-                types_.memory_access_flags(assignment->leftExpression->type),
-                value.ssa(), access.view,
-                access.index ? &*access.index : nullptr, access.index ? 1 : 0,
-                &selector, 1, 0, 0, locations_.get(ast), &op));
+    write(destination(assignment->leftExpression, ast), value, ast);
     return value;
   }
 

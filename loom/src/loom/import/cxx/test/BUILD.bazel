@@ -65,6 +65,7 @@ loom_check_test_suite(
         "shaped_intrinsics.cxx-test",
         "shaped_intrinsics_invalid.cxx-test",
         "standards.cxx-test",
+        "storage_updates.cxx-test",
         "symbols.cxx-test",
         "symbols_invalid.cxx-test",
         "template_calls.cxx-test",
@@ -120,6 +121,16 @@ loom_test(
 loom_test(
     name = "constexpr_values_test",
     srcs = ["constexpr_values.cpp"],
+    execution_profiles = [VM_REFERENCE_PROFILE],
+    target_compatible_with = _HOST_COMPATIBILITY,
+)
+
+loom_test(
+    name = "storage_values_test",
+    srcs = [
+        "storage_updates.cpp",
+        "storage_values.loom",
+    ],
     execution_profiles = [VM_REFERENCE_PROFILE],
     target_compatible_with = _HOST_COMPATIBILITY,
 )
@@ -191,6 +202,15 @@ loom_check_test_suite(
     name = "vm_compiler_test",
     srcs = ["vm_lowering.cxx-test"],
     target_compatible_with = _HOST_COMPATIBILITY,
+)
+
+loom_test_module(
+    name = "storage_updates_module",
+    srcs = [
+        "storage_kernels.loom",
+        "storage_updates.cpp",
+    ],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
 # A source file and its independent reference cases form one test module.

@@ -883,6 +883,64 @@ if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 loom_execution_test(
   NAME
+    storage_updates_test_execute_amdgpu_test
+  MODULE
+    "loom::import::cxx::test::storage_updates_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+  SANITIZER_SUPPRESSIONS
+    lsan
+    rocm
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    storage_updates_test_execute_amdgpu_access_test
+  MODULE
+    "loom::import::cxx::test::storage_updates_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=access"
+    "--sanitizer-reporting=report-only"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+  SANITIZER_SUPPRESSIONS
+    lsan
+    rocm
+)
+endif()
+endif()
+
+if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
     structured_continue_test_execute_amdgpu_test
   MODULE
     "loom::import::cxx::test::structured_continue_module"
@@ -1283,6 +1341,19 @@ loom_execution_test(
     rocm
 )
 endif()
+endif()
+
+if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+iree_native_test(
+  NAME
+    "storage_division"
+  ARGS
+    "${CMAKE_CURRENT_SOURCE_DIR}/storage_division.cxx-test"
+  SRC
+    loom::tools::loom-check
+  LABELS
+    "loom-check"
+)
 endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

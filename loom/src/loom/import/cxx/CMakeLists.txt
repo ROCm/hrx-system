@@ -74,7 +74,6 @@ loom_cc_library(
     loom::ops::scalar
     loom::ops::scf
     loom::ops::vector
-    loom::ops::view
     loom::verify
   PUBLIC
 )

@@ -869,13 +869,29 @@ can move backward within its allocation.
 
 Pointer addition, subtraction by an integer, unary plus, dereference, address-of
 an existing storage element, and prefix/postfix increments are admitted.
-Integer and pointer increments update an owned automatic binding and return
-its previous or updated value; `*output++ = *input++` preserves both pointer
-origins. Conditional expressions and short-circuit operands carry binding
-updates only along the executed path. Incrementing memory elements, vectors or
-floating-point values requires additional lvalue/type projections and produces
-a source diagnostic. Pointer differences, comparisons, truth conversions, and
-addresses of automatic scalar locals also produce source diagnostics.
+Integer increments update automatic bindings or storage-backed elements and
+return the previous or updated value. Pointer increments update automatic
+bindings; `*output++ = *input++` preserves both pointer origins. Compound
+assignment supports scalar and vector storage through pointers and workgroup
+arrays. The right operand executes before the destination is resolved, and one
+resolved address supplies both the load and store. Arithmetic uses the source
+promotions and converts back to the element type before storing or returning:
+
+```cpp
+unsigned mark(unsigned* words, unsigned index, unsigned mask) {
+  return words[index] |= mask;
+}
+
+unsigned advance(unsigned char* counts) {
+  return (*counts)++;  // Promotes, increments, then converts back to a byte.
+}
+```
+
+Conditional expressions and short-circuit operands carry binding updates only
+along the executed path. Incrementing vectors or floating-point values requires
+additional type projections and produces a source diagnostic. Pointer
+differences, comparisons, truth conversions, and addresses of automatic scalar
+locals also produce source diagnostics.
 Distinct-root choices import as ordinary buffer values; executing them requires
 the selected Loom target to support buffer transport through those control-flow
 edges. Objects with constructors, exceptions and indirect calls need additional

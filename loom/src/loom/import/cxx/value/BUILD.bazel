@@ -109,6 +109,8 @@ loom_cc_library(
         "//loom/src/loom/ops/buffer",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/ops/view",
         "//third_party:cxx_parser",
     ],
 )
@@ -208,6 +210,8 @@ loom_cc_test(
         "//loom/src/loom/ops/buffer",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/vector",
+        "//loom/src/loom/ops/view",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//third_party:cxx_parser",

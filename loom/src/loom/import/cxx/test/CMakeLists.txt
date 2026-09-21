@@ -56,6 +56,7 @@ loom_check_test_suite(
     "shaped_intrinsics.cxx-test"
     "shaped_intrinsics_invalid.cxx-test"
     "standards.cxx-test"
+    "storage_updates.cxx-test"
     "symbols.cxx-test"
     "symbols_invalid.cxx-test"
     "template_calls.cxx-test"
@@ -119,6 +120,33 @@ loom_execution_test(
     constexpr_values_test_execute_vm_reference_test
   MODULE
     "::constexpr_values_test_module"
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+    "loom-execution-profile=vm_reference"
+    "loom-target-family=vm"
+    "loom-target-class=cpu"
+    "loom-executor=reference"
+)
+endif()
+endif()
+
+if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_VM)
+loom_test_module(
+  NAME
+    storage_values_test_module
+  SRCS
+    "storage_updates.cpp"
+    "storage_values.loom"
+)
+endif()
+
+if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_VM)
+if(LOOM_TARGET_ARCH_VM)
+loom_execution_test(
+  NAME
+    storage_values_test_execute_vm_reference_test
+  MODULE
+    "::storage_values_test_module"
   LABELS
     "iree-build-requirement=loom.target.arch.vm"
     "loom-execution-profile=vm_reference"
@@ -777,6 +805,16 @@ loom_check_test_suite(
     vm_compiler_test
   SRCS
     "vm_lowering.cxx-test"
+)
+endif()
+
+if(LOOM_IMPORT_CXX)
+loom_test_module(
+  NAME
+    storage_updates_module
+  SRCS
+    "storage_kernels.loom"
+    "storage_updates.cpp"
 )
 endif()
 
