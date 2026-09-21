@@ -51,6 +51,20 @@ typedef struct loom_aie2p_pipeline_placement_t {
   // Candidate coordinate order scratch for each recursive placement depth.
   uint32_t* candidate_order;
 
+  // Resident instances currently assigned to each physical column, indexed
+  // by column and maintained incrementally as placement commits and
+  // backtracks. Steers instances with no worker-to-worker edge (see
+  // loom_aie2p_pipeline_candidate_precedes) away from a column whose shim
+  // already carries as many external DMA streams as it has channels in one
+  // direction.
+  uint32_t* column_instance_counts;
+
+  // External DMA channels available in one transfer direction on a shim
+  // tile, shared symmetrically by MM2S and S2MM. A column packed past this
+  // many DMA-terminal instances can no longer serve them from its own shim
+  // and starts borrowing channels from a neighboring column instead.
+  uint8_t shim_dma_channel_count;
+
   // Scratch arena owning placement storage.
   iree_arena_allocator_t* arena;
 } loom_aie2p_pipeline_placement_t;
@@ -105,6 +119,17 @@ static iree_status_t loom_aie2p_pipeline_placement_initialize(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "AIE2P target has no compute tiles");
   }
+  placement->shim_dma_channel_count = 0;
+  for (uint8_t i = 0; i < family->tile_count; ++i) {
+    if (family->tiles[i].kind == LOOM_XDNA_TILE_KIND_SHIM_NOC) {
+      placement->shim_dma_channel_count =
+          family->tiles[i].dma.channel_count_per_direction;
+      break;
+    }
+  }
+  IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_allocate_array(
+      arena, family->column_count, sizeof(*placement->column_instance_counts),
+      (void**)&placement->column_instance_counts));
   IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_allocate_array(
       arena, placement->compute_coordinate_count,
       sizeof(*placement->neighbor_capacities),
@@ -289,6 +314,27 @@ static bool loom_aie2p_pipeline_candidate_precedes(
       return lhs_capacity > rhs_capacity;
     }
   }
+  // An instance with no worker-to-worker edge gains nothing from column
+  // adjacency: neighbor memory only helps a producer and consumer that share
+  // one. Prefer a column that has not yet reached the shim DMA channel
+  // budget over one that has, so independent DMA-terminal instances spread
+  // across columns instead of packing one column past what its own shim can
+  // serve and forcing every excess channel to route through a neighbor.
+  if (degree == 0) {
+    const loom_xdna_tile_coordinate_t lhs_coordinate =
+        placement->compute_coordinates[lhs_index];
+    const loom_xdna_tile_coordinate_t rhs_coordinate =
+        placement->compute_coordinates[rhs_index];
+    const bool lhs_under_budget =
+        placement->column_instance_counts[lhs_coordinate.column] <
+        placement->shim_dma_channel_count;
+    const bool rhs_under_budget =
+        placement->column_instance_counts[rhs_coordinate.column] <
+        placement->shim_dma_channel_count;
+    if (lhs_under_budget != rhs_under_budget) {
+      return lhs_under_budget;
+    }
+  }
   return lhs_index < rhs_index;
 }
 
@@ -355,10 +401,12 @@ static bool loom_aie2p_pipeline_place_next(
         placement->compute_coordinates[coordinate_index];
     coordinate_used[coordinate_index] = true;
     placement->instance_coordinates[selected_instance] = coordinate;
+    ++placement->column_instance_counts[coordinate.column];
     if (loom_aie2p_pipeline_place_next(placement, coordinate_used,
                                        placed_count + 1, require_adjacency)) {
       return true;
     }
+    --placement->column_instance_counts[coordinate.column];
     placement->instance_coordinates[selected_instance] =
         (loom_xdna_tile_coordinate_t){
             .column = UINT16_MAX,
@@ -390,6 +438,9 @@ static iree_status_t loom_aie2p_pipeline_place_instances(
       sizeof(*coordinate_used), (void**)&coordinate_used));
   memset(coordinate_used, 0,
          placement->compute_coordinate_count * sizeof(*coordinate_used));
+  memset(placement->column_instance_counts, 0,
+         placement->family->column_count *
+             sizeof(*placement->column_instance_counts));
   if (loom_aie2p_pipeline_may_embed_with_neighbor_memory(placement) &&
       loom_aie2p_pipeline_place_next(placement, coordinate_used, 0,
                                      /*require_adjacency=*/true)) {
@@ -397,6 +448,9 @@ static iree_status_t loom_aie2p_pipeline_place_instances(
   }
   memset(coordinate_used, 0,
          placement->compute_coordinate_count * sizeof(*coordinate_used));
+  memset(placement->column_instance_counts, 0,
+         placement->family->column_count *
+             sizeof(*placement->column_instance_counts));
   for (uint32_t i = 0; i < placement->plan->instance_count; ++i) {
     placement->instance_coordinates[i] = (loom_xdna_tile_coordinate_t){
         .column = UINT16_MAX,
