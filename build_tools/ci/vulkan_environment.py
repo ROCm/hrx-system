@@ -7,8 +7,9 @@
 
 """Selects the CI render node and verifies Vulkan device zero uses that hardware.
 
-The runner controller may name its allocation in PARENT_GPU_DEVICES. Without
-an explicit allocation, prefer discrete hardware on hosts with multiple GPUs.
+The runner controller may name its comma-separated allocation in
+PARENT_GPU_DEVICES. Prefer discrete hardware among the allocated devices, or
+among all accessible devices when there is no explicit allocation.
 Mesa selects the physical card by PCI address, independently of its product ID.
 Khronos vulkaninfo supplies native device properties before the CTS runs.
 """
@@ -79,13 +80,17 @@ def render_device_candidates(
     devices: list[RenderDevice], allocation: str | None
 ) -> list[RenderDevice]:
     if allocation:
-        for device in devices:
-            if device.path == Path(allocation):
-                return [device]
-        raise RuntimeError(
-            f"PARENT_GPU_DEVICES={allocation!r} does not identify one accessible "
-            "AMD render node; refusing to test a different GPU"
-        )
+        accessible = {device.path: device for device in devices}
+        candidates = []
+        for path in allocation.split(","):
+            device = accessible.get(Path(path))
+            if device is None:
+                raise RuntimeError(
+                    f"PARENT_GPU_DEVICES={allocation!r} contains an inaccessible "
+                    f"AMD render node {path!r}; refusing to test a different GPU"
+                )
+            candidates.append(device)
+        return candidates
     if not devices:
         raise RuntimeError("No accessible AMD DRM render node is exposed to this job")
     return devices
