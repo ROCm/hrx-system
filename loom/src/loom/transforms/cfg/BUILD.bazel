@@ -108,6 +108,22 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "branch_folding",
+    srcs = ["branch_folding.c"],
+    hdrs = ["branch_folding.h"],
+    deps = [
+        "//loom/src/loom/analysis:cfg_condition_facts",
+        "//loom/src/loom/analysis:condition_fact_scope",
+        "//loom/src/loom/analysis:condition_facts",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "cfg_simplify",
     srcs = ["cfg_simplify.c"],
     hdrs = ["cfg_simplify.h"],
@@ -115,6 +131,7 @@ loom_cc_library(
         ":block_arguments",
         ":block_forwarding",
         ":block_fusion",
+        ":branch_folding",
         "//loom/src/loom/analysis:cfg_condition_facts",
         "//loom/src/loom/analysis:cfg_value_identity",
         "//loom/src/loom/analysis:condition_fact_scope",

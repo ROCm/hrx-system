@@ -124,6 +124,25 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    branch_folding
+  HDRS
+    "branch_folding.h"
+  SRCS
+    "branch_folding.c"
+  DEPS
+    iree::base
+    loom::analysis::cfg_condition_facts
+    loom::analysis::condition_fact_scope
+    loom::analysis::condition_facts
+    loom::ir
+    loom::ops::cfg
+    loom::rewrite::rewriter
+    loom::util::fact_table
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     cfg_simplify
   HDRS
     "cfg_simplify.h"
@@ -133,6 +152,7 @@ loom_cc_library(
     ::block_arguments
     ::block_forwarding
     ::block_fusion
+    ::branch_folding
     iree::base
     loom::analysis::cfg_condition_facts
     loom::analysis::cfg_value_identity

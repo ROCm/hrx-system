@@ -25,6 +25,7 @@
 #include "loom/transforms/cfg/block_arguments.h"
 #include "loom/transforms/cfg/block_forwarding.h"
 #include "loom/transforms/cfg/block_fusion.h"
+#include "loom/transforms/cfg/branch_folding.h"
 #include "loom/util/cfg_graph.h"
 #include "loom/util/dominance.h"
 #include "loom/util/fact_cfg.h"
@@ -253,60 +254,6 @@ static iree_status_t loom_cfg_simplify_replace_direct_br(
   return loom_rewriter_erase(state->rewriter, old_br);
 }
 
-static iree_status_t loom_cfg_simplify_replace_cond_br_with_br(
-    loom_cfg_simplify_state_t* state, loom_op_t* cond_br, loom_block_t* dest) {
-  IREE_RETURN_IF_ERROR(
-      loom_cfg_simplify_replace_br(state, cond_br, dest, NULL, 0));
-  ++state->statistics->branches_folded;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_cfg_simplify_fold_cond_br(
-    loom_cfg_simplify_state_t* state, loom_op_t* op, bool* out_changed) {
-  if (!loom_cfg_cond_br_isa(op)) {
-    return iree_ok_status();
-  }
-  loom_block_t* true_dest = loom_cfg_cond_br_true_dest(op);
-  loom_block_t* false_dest = loom_cfg_cond_br_false_dest(op);
-  if (true_dest == false_dest && true_dest && true_dest->arg_count == 0) {
-    IREE_RETURN_IF_ERROR(
-        loom_cfg_simplify_replace_cond_br_with_br(state, op, true_dest));
-    *out_changed = true;
-    return iree_ok_status();
-  }
-
-  bool condition = false;
-  loom_value_facts_t facts = loom_value_fact_table_lookup(
-      state->fact_table, loom_cfg_cond_br_condition(op));
-  if (!loom_value_facts_as_exact_bool(facts, &condition)) {
-    return iree_ok_status();
-  }
-  loom_block_t* chosen_dest = condition ? true_dest : false_dest;
-  if (!chosen_dest || chosen_dest->arg_count != 0) {
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(
-      loom_cfg_simplify_replace_cond_br_with_br(state, op, chosen_dest));
-  *out_changed = true;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_cfg_simplify_fold_block_branches(
-    loom_cfg_simplify_state_t* state, loom_block_t* block, bool* out_changed) {
-  loom_op_t* op = block->first_op;
-  while (op) {
-    loom_op_t* next_op = op->next_op;
-    IREE_RETURN_IF_ERROR(
-        loom_cfg_simplify_fold_cond_br(state, op, out_changed));
-    if (*out_changed) {
-      return iree_ok_status();
-    }
-    IREE_RETURN_IF_ERROR(loom_cfg_simplify_push_child_regions(state, op));
-    op = next_op;
-  }
-  return iree_ok_status();
-}
-
 //===----------------------------------------------------------------------===//
 // Terminal block duplication
 //===----------------------------------------------------------------------===//
@@ -491,36 +438,6 @@ static iree_status_t loom_cfg_simplify_entry_facts_prove_bool(
       out_value, out_proven);
 }
 
-static iree_status_t loom_cfg_simplify_fold_path_sensitive_cond_br(
-    loom_cfg_simplify_state_t* state,
-    const loom_cfg_condition_relation_table_t* table,
-    const loom_cfg_condition_relation_view_t* view, loom_op_t* op,
-    bool* out_changed) {
-  if (!loom_cfg_cond_br_isa(op)) {
-    return iree_ok_status();
-  }
-
-  loom_value_id_t condition_value = loom_cfg_cond_br_condition(op);
-  bool condition = false;
-  bool condition_proven = false;
-  IREE_RETURN_IF_ERROR(loom_cfg_simplify_entry_facts_prove_bool(
-      state, table, view, condition_value, &condition, &condition_proven));
-  if (!condition_proven) {
-    return iree_ok_status();
-  }
-
-  loom_block_t* true_dest = loom_cfg_cond_br_true_dest(op);
-  loom_block_t* false_dest = loom_cfg_cond_br_false_dest(op);
-  loom_block_t* chosen_dest = condition ? true_dest : false_dest;
-  if (!chosen_dest || chosen_dest->arg_count != 0) {
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(
-      loom_cfg_simplify_replace_cond_br_with_br(state, op, chosen_dest));
-  *out_changed = true;
-  return iree_ok_status();
-}
-
 static iree_status_t loom_cfg_simplify_thread_predecessor_to_block(
     loom_cfg_simplify_state_t* state, loom_block_t* old_dest,
     loom_block_t* new_dest, const loom_cfg_edge_info_t* predecessor_edge,
@@ -673,38 +590,6 @@ static iree_status_t loom_cfg_simplify_thread_fact_known_branches(
       if (*out_changed) {
         return iree_ok_status();
       }
-    }
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_cfg_simplify_fold_path_sensitive_branches(
-    loom_cfg_simplify_state_t* state, const loom_cfg_graph_t* graph,
-    const loom_cfg_condition_relation_table_t* table, bool* out_changed) {
-  if (graph->malformed) {
-    return iree_ok_status();
-  }
-  for (uint16_t block_index = 1; block_index < graph->block_count;
-       ++block_index) {
-    if (!loom_cfg_graph_block_is_reachable(graph, block_index)) {
-      continue;
-    }
-    loom_block_t* block = (loom_block_t*)graph->blocks[block_index].block;
-    if (!block) {
-      continue;
-    }
-
-    loom_op_t* op = block->first_op;
-    while (op) {
-      loom_op_t* next_op = op->next_op;
-      IREE_RETURN_IF_ERROR(loom_cfg_simplify_fold_path_sensitive_cond_br(
-          state, table,
-          loom_cfg_condition_relation_table_block(table, block_index), op,
-          out_changed));
-      if (*out_changed) {
-        return iree_ok_status();
-      }
-      op = next_op;
     }
   }
   return iree_ok_status();
@@ -1978,9 +1863,13 @@ static iree_status_t loom_cfg_simplify_process_cfg_region(
   if (*out_changed) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_cfg_simplify_fold_path_sensitive_branches(
-      state, graph, &path_fact_table, out_changed));
-  if (*out_changed) {
+  uint16_t branches_folded = 0;
+  IREE_RETURN_IF_ERROR(loom_cfg_fold_path_sensitive_branches(
+      state->rewriter, graph, &path_fact_table, &state->condition_query,
+      state->analysis_arena, &branches_folded));
+  if (branches_folded != 0) {
+    state->statistics->branches_folded += branches_folded;
+    *out_changed = true;
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_cfg_simplify_fold_path_sensitive_i1_ops(
@@ -2049,12 +1938,20 @@ static iree_status_t loom_cfg_simplify_process_function_once(
       break;
     }
 
+    uint16_t branches_folded = 0;
+    IREE_RETURN_IF_ERROR(loom_cfg_fold_constant_branches(
+        state->rewriter, region, state->analysis_arena, &branches_folded));
+    if (branches_folded != 0) {
+      state->statistics->branches_folded += branches_folded;
+      *out_changed = true;
+      return loom_rewriter_refresh_cfg_facts(state->rewriter, region);
+    }
+
     loom_block_t* block = NULL;
     loom_region_for_each_block(region, block) {
-      IREE_RETURN_IF_ERROR(
-          loom_cfg_simplify_fold_block_branches(state, block, out_changed));
-      if (*out_changed) {
-        return loom_rewriter_refresh_cfg_facts(state->rewriter, region);
+      loom_op_t* op = NULL;
+      loom_block_for_each_op(block, op) {
+        IREE_RETURN_IF_ERROR(loom_cfg_simplify_push_child_regions(state, op));
       }
     }
 

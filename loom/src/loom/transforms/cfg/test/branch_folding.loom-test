@@ -1,0 +1,158 @@
+// RUN: with-checks pass-report cfg-simplify
+
+// Exact true/false conditions and equal destinations share one structural edit.
+// The remaining iterations remove the dead block, fuse the chain, and confirm.
+func.def @constant_batch(%condition: i1, %input: i32) -> (i32) {
+  %true = scalar.constant true : i1
+  %false = scalar.constant false : i1
+  cfg.br ^first
+^first:
+  test.use %input : i32
+  cfg.cond_br %true, ^second, ^other
+^second:
+  test.use %input : i32
+  cfg.cond_br %false, ^other, ^third
+^third:
+  test.use %input : i32
+  cfg.cond_br %condition, ^fourth, ^fourth
+^fourth:
+  test.use %input : i32
+  cfg.cond_br %true, ^exit, ^other
+^exit:
+  func.return %input : i32
+^other:
+  %c0 = scalar.constant 0 : i32
+  func.return %c0 : i32
+}
+
+// ----
+CHECK: *"changed":true,*
+CHECK: *"iterations":4,*
+CHECK: *"branches-folded":4,*
+CHECK: *"blocks-removed":1,*
+
+// ====
+// RUN: with-checks pass-report cfg-simplify
+
+// The entry condition proves all three later branches before any edge changes.
+// The side effects require executing each block instead of threading around it.
+func.def @path_batch(%condition: i1, %input: i32) -> (i32) {
+  cfg.cond_br %condition, ^first, ^other
+^first:
+  test.use %input : i32
+  cfg.cond_br %condition, ^second, ^other
+^second:
+  test.use %input : i32
+  cfg.cond_br %condition, ^third, ^other
+^third:
+  test.use %input : i32
+  cfg.cond_br %condition, ^exit, ^other
+^exit:
+  func.return %input : i32
+^other:
+  %c0 = scalar.constant 0 : i32
+  func.return %c0 : i32
+}
+
+// ----
+CHECK: *"changed":true,*
+CHECK: *"iterations":3,*
+CHECK: *"branches-folded":3,*
+CHECK: *"blocks-removed":0,*
+
+// ====
+// RUN: pass cfg-simplify
+
+// Opposite branch proofs can fold together without escaping through their join.
+func.def @joined_conditions(%condition: i1, %left: i32, %right: i32) -> (i32) {
+  cfg.cond_br %condition, ^true_guard, ^false_guard
+^true_guard:
+  test.use %left : i32
+  cfg.cond_br %condition, ^true_value, ^unreachable
+^false_guard:
+  test.use %right : i32
+  cfg.cond_br %condition, ^unreachable, ^false_value
+^true_value:
+  cfg.br ^join(%left: i32)
+^false_value:
+  cfg.br ^join(%right: i32)
+^join(%value: i32):
+  test.use %value : i32
+  cfg.cond_br %condition, ^add, ^subtract
+^add:
+  %sum = scalar.addi %value, %left : i32
+  func.return %sum : i32
+^subtract:
+  %difference = scalar.subi %value, %right : i32
+  func.return %difference : i32
+^unreachable:
+  %c0 = scalar.constant 0 : i32
+  func.return %c0 : i32
+}
+
+// ----
+func.def @joined_conditions(%condition: i1, %left: i32, %right: i32) -> (i32) {
+  cfg.cond_br %condition, ^true_guard, ^false_guard
+^true_guard:
+  test.use %left : i32
+  cfg.br ^join(%left: i32)
+^false_guard:
+  test.use %right : i32
+  cfg.br ^join(%right: i32)
+^join(%value: i32):
+  test.use %value : i32
+  cfg.cond_br %condition, ^add, ^subtract
+^add:
+  %sum = scalar.addi %value, %left : i32
+  func.return %sum : i32
+^subtract:
+  %difference = scalar.subi %value, %right : i32
+  func.return %difference : i32
+}
+
+// ====
+// RUN: pass cfg-simplify
+
+// Folding several branches in a cycle retains its backedge and carried values.
+func.def @loop_batch(%count: i32, %input: i32) -> (i32) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %true = scalar.constant true : i1
+  %false = scalar.constant false : i1
+  cfg.br ^header(%c0: i32, %input: i32)
+^header(%iteration: i32, %value: i32):
+  %more = scalar.cmpi slt, %iteration, %count : i32
+  cfg.cond_br %more, ^first, ^exit
+^first:
+  %incremented = scalar.addi %value, %c1 : i32
+  cfg.cond_br %true, ^second, ^other
+^second:
+  test.use %incremented : i32
+  cfg.cond_br %false, ^other, ^latch
+^latch:
+  %next_iteration = scalar.addi %iteration, %c1 : i32
+  cfg.br ^header(%next_iteration: i32, %incremented: i32)
+^exit:
+  func.return %value : i32
+^other:
+  func.return %c0 : i32
+}
+
+// ----
+func.def @loop_batch(%count: i32, %input: i32) -> (i32) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %true = scalar.constant true : i1
+  %false = scalar.constant false : i1
+  cfg.br ^header(%c0: i32, %input: i32)
+^header(%iteration: i32, %value: i32):
+  %more = scalar.cmpi slt, %iteration, %count : i32
+  cfg.cond_br %more, ^first, ^exit
+^first:
+  %incremented = scalar.addi %value, %c1 : i32
+  test.use %incremented : i32
+  %next_iteration = scalar.addi %iteration, %c1 : i32
+  cfg.br ^header(%next_iteration: i32, %incremented: i32)
+^exit:
+  func.return %value : i32
+}
