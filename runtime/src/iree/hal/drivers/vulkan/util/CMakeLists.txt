@@ -29,4 +29,21 @@ iree_cc_library(
 )
 endif()
 
+if(IREE_HAL_DRIVER_VULKAN)
+iree_cc_test(
+  NAME
+    libvulkan_test
+  SRCS
+    "libvulkan_test.cc"
+  DEPS
+    ::libvulkan
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::third_party::vulkan_headers
+  LABELS
+    "iree-build-requirement=runtime.hal.vulkan"
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
