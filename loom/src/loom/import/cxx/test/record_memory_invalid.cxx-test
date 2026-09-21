@@ -57,23 +57,6 @@ struct Record { bool value; };
 bool read(const Record* record) { return record->value; }
 
 // ====
-struct [[gnu::packed]] Record { unsigned char tag; unsigned value; };
-// ERROR@+1: LOWERING/059 "packed record storage is not supported"
-unsigned read(const Record* record) { return record->value; }
-
-// ====
-struct Record { unsigned char tag; unsigned value [[gnu::packed]]; };
-// ERROR@+1: LOWERING/059 "packed record storage is not supported"
-unsigned read(const Record* record) { return record->value; }
-
-// ====
-#pragma pack(push, 1)
-struct Record { unsigned char tag; unsigned value; };
-#pragma pack(pop)
-// ERROR@+1: LOWERING/059 "packed record storage is not supported"
-unsigned read(const Record* record) { return record->value; }
-
-// ====
 #include <loomcxx/view.h>
 // ERROR@+1: LOWERING/059 "Loom source types require SSA value transport"
 void read(const loom::type::view<float, 4, 4>* view) {}

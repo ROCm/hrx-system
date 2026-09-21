@@ -93,6 +93,11 @@ TEST(TypesTest, RecordMemoryUsesSourceLayoutIndependentlyOfValuePartitions) {
     struct Padded { unsigned char tag; float value; unsigned short count; };
     struct Nested { unsigned prefix; Padded payload; };
     struct Observed { volatile unsigned value; };
+    struct [[gnu::packed]] Packed { unsigned char tag; float value; };
+    struct FieldPacked { unsigned char tag; unsigned value [[gnu::packed]]; };
+    #pragma pack(push, 2)
+    struct Capped { unsigned char tag; double value; };
+    #pragma pack(pop)
     struct Transport { unsigned* pointer; bool valid; };
     template<class T> struct Box { unsigned char tag; T value; };
     using Concrete = Box<unsigned>;
@@ -108,6 +113,9 @@ TEST(TypesTest, RecordMemoryUsesSourceLayoutIndependentlyOfValuePartitions) {
   EXPECT_EQ(types.storage_size(padded, owner), 12);
   EXPECT_EQ(types.storage_size(source_type("Nested"), owner), 16);
   EXPECT_EQ(types.storage_size(source_type("Concrete"), owner), 8);
+  EXPECT_EQ(types.storage_size(source_type("Packed"), owner), 5);
+  EXPECT_EQ(types.storage_size(source_type("FieldPacked"), owner), 5);
+  EXPECT_EQ(types.storage_size(source_type("Capped"), owner), 10);
   EXPECT_EQ(loom_type_kind(types.get(control->getPointerType(padded), owner)),
             LOOM_TYPE_BUFFER);
   auto* partition = types.record(padded, owner);

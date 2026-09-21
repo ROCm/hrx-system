@@ -1,0 +1,121 @@
+// RUN: pass canonicalize,cse,dce
+// Class packing retains both the odd stride and the one-byte member origin.
+struct [[gnu::packed]] Record { unsigned char tag; unsigned value; };
+unsigned read(const Record* records, unsigned index) {
+  return records[index].value;
+}
+
+// ----
+func.def public @read(%records: buffer, %records_byte_offset: offset, %index: i32) -> (i32) {
+  %4 = scalar.extui %index : i32 to i64
+  %5 = scalar.constant 5 : i64
+  %6 = scalar.muli %4, %5 : i64
+  %7 = index.cast %records_byte_offset : offset to i64
+  %8 = scalar.addi %7, %6 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %10 = index.cast %9 : i64 to offset
+  %11 = index.constant 1 : offset
+  %12 = index.add %10, %11 : offset
+  %13 = buffer.view %records[%12] : buffer -> view<1xi32>
+  %value = view.load %13[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ====
+// Member packing uses the same projection contract.
+struct Record { unsigned char tag; unsigned value [[gnu::packed]]; };
+void update(Record* records) { records[1].value /= 2u; }
+
+// ----
+func.def public @update(%records: buffer, %records_byte_offset: offset) {
+  %18 = scalar.constant 5 : i64
+  %7 = index.cast %records_byte_offset : offset to i64
+  %8 = scalar.addi %7, %18 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %10 = index.cast %9 : i64 to offset
+  %11 = index.constant 1 : offset
+  %12 = index.add %10, %11 : offset
+  %13 = buffer.view %records[%12] : buffer -> view<1xi32>
+  %14 = view.load %13[0] : view<1xi32> -> i32
+  %16 = scalar.constant 1 : i32
+  %17 = scalar.shrui %14, %16 : i32
+  view.store %17, %13[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// A packing cap changes outer placement, not a nested record's own layout.
+struct Payload { unsigned char tag; float value; };
+#pragma pack(push, 2)
+struct Record { unsigned char tag; Payload payload; };
+#pragma pack(pop)
+void update(volatile Record* records) { records[1].payload.value += 2.0f; }
+
+// ----
+func.def public @update(%records: buffer, %records_byte_offset: offset) {
+  %2 = scalar.constant 2.0 : f32
+  %18 = scalar.constant 10 : i64
+  %7 = index.cast %records_byte_offset : offset to i64
+  %8 = scalar.addi %7, %18 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %10 = index.cast %9 : i64 to offset
+  %11 = index.constant 2 : offset
+  %12 = index.add %10, %11 : offset
+  %13 = index.constant 4 : offset
+  %14 = index.add %12, %13 : offset
+  %15 = buffer.view %records[%14] : buffer -> view<1xf32>
+  %16 = view.load<volatile> %15[0] : view<1xf32> -> f32
+  %17 = scalar.addf %16, %2 : f32
+  view.store<volatile> %17, %15[0] : f32, view<1xf32>
+  func.return
+}
+
+// ====
+// Record alignment raises the stride without changing the packed field offset.
+struct alignas(16) __attribute__((packed)) Record {
+  unsigned char tag;
+  double value;
+};
+void copy(Record* output, const Record* input) {
+  output[1].value = input[2].value;
+}
+
+// ----
+func.def public @copy(%output: buffer, %output_byte_offset: offset, %input: buffer, %input_byte_offset: offset) {
+  %28 = scalar.constant 32 : i64
+  %8 = index.cast %input_byte_offset : offset to i64
+  %9 = scalar.addi %8, %28 : i64
+  %10 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
+  %11 = index.cast %10 : i64 to offset
+  %12 = index.constant 1 : offset
+  %13 = index.add %11, %12 : offset
+  %14 = buffer.view %input[%13] : buffer -> view<1xf64>
+  %value = view.load %14[0] : view<1xf64> -> f64
+  %27 = scalar.constant 16 : i64
+  %20 = index.cast %output_byte_offset : offset to i64
+  %21 = scalar.addi %20, %27 : i64
+  %22 = scalar.assume %21 [range(%21, 0, 9223372036854775807)] : i64
+  %23 = index.cast %22 : i64 to offset
+  %25 = index.add %23, %12 : offset
+  %26 = buffer.view %output[%25] : buffer -> view<1xf64>
+  view.store %value, %26[0] : f64, view<1xf64>
+  func.return
+}
+
+// ====
+// Vector accesses retain the whole footprint at the exact packed origin.
+typedef unsigned U4 __attribute__((vector_size(16)));
+struct [[gnu::packed]] Record { unsigned char tag; U4 value; };
+void copy(Record* output, const Record* input) { output->value = input->value; }
+
+// ----
+func.def public @copy(%output: buffer, %output_byte_offset: offset, %input: buffer, %input_byte_offset: offset) {
+  %4 = index.constant 1 : offset
+  %5 = index.add %input_byte_offset, %4 : offset
+  %6 = buffer.view %input[%5] : buffer -> view<4xi32>
+  %value = vector.load %6[0] : view<4xi32> -> vector<4xi32>
+  %9 = index.add %output_byte_offset, %4 : offset
+  %10 = buffer.view %output[%9] : buffer -> view<4xi32>
+  vector.store %value, %10[0] : vector<4xi32>, view<4xi32>
+  func.return
+}

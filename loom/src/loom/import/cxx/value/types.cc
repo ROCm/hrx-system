@@ -452,9 +452,6 @@ void Types::require_record_storage(const cxx::ClassType* input,
         "record storage requires a complete aggregate without unions, bases "
         "or nontrivial lifecycle operations");
   }
-  if (source->isPacked() || source->packAlignment()) {
-    diagnostics_.reject(unit_, owner, "packed record storage is not supported");
-  }
   for (auto* symbol : source->members()) {
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(symbol);
     if (!field || field->isStatic()) {
@@ -465,10 +462,6 @@ void Types::require_record_storage(const cxx::ClassType* input,
           unit_, owner,
           "record storage requires named fields without bitfields or "
           "no_unique_address");
-    }
-    if (field->isPacked()) {
-      diagnostics_.reject(unit_, owner,
-                          "packed record storage is not supported");
     }
     storage_size(field->type(), owner);
   }

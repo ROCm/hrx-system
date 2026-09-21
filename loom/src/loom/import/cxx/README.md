@@ -620,9 +620,30 @@ destruction, without bases, unions, bitfields or `no_unique_address`. Stored
 pointers, references, arrays and Loom view/encoding objects require additional
 memory representations and receive source diagnostics. Whole-record loads and
 stores also diagnose: the by-value SSA partition is not an object-copy operation.
-Packed record accesses require an unaligned memory projection and are rejected
-independently of the supported packed layout queries below. Volatile record
-pointers and volatile fields retain observable accesses through nested members.
+Volatile record pointers and volatile fields retain observable accesses through
+nested members.
+
+Packed fields use the same typed memory operations, with their exact byte
+origins and record strides:
+
+```cpp
+struct [[gnu::packed]] Sample {
+  unsigned char tag;
+  float value;
+};
+
+void scale(Sample* samples, unsigned index, float factor) {
+  samples[index].value *= factor;
+}
+```
+
+This advances by five bytes per sample, then loads and stores a `view<1xf32>`
+at byte offset one within the record. The importer preserves the allocation
+identity and does not assert natural alignment for the float. Shared target
+lowering selects legal accesses from the retained alignment facts, including
+bytewise accesses when needed. Class packing, member packing and pragma packing
+compose with nested records and explicit alignment. A target without an
+implementation for the requested memory operation reports that at compilation.
 
 Record layout queries honor GNU `packed`, explicit `aligned(N)`, standard
 `alignas`, and `#pragma pack`. Requests stay attached to their declarations

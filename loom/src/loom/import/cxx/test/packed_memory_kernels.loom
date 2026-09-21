@@ -1,0 +1,68 @@
+// Copy fields across every alignment residue, then check every byte.
+kernel.decl @packed_copy_kernel() launch(%input: buffer, %output: buffer)
+
+check.case @packed_origins {
+  %input = check.generate.iota offset(-128) step(1) : tensor<256xi8>
+  %output = check.generate.fill value(19) : tensor<256xi8>
+  kernel.launch @packed_copy_kernel(%input, %output) : (tensor<256xi8>, tensor<256xi8>)
+  %before = check.tensor.view %output offset(0) : tensor<256xi8> -> tensor<5xi8>
+  %payload = check.tensor.view %output offset(5) : tensor<256xi8> -> tensor<120xi8>
+  %after = check.tensor.view %output offset(125) : tensor<256xi8> -> tensor<131xi8>
+  %expected_input = check.generate.iota offset(-128) step(1) : tensor<256xi8>
+  %expected_before = check.generate.fill value(37) : tensor<5xi8>
+  %expected_payload = check.generate.iota offset(-127) step(1) : tensor<120xi8>
+  %expected_after = check.generate.fill value(37) : tensor<131xi8>
+  check.expect.bitwise actual(%input) expected(%expected_input) : tensor<256xi8>
+  check.expect.bitwise actual(%before) expected(%expected_before) : tensor<5xi8>
+  check.expect.bitwise actual(%payload) expected(%expected_payload) : tensor<120xi8>
+  check.expect.bitwise actual(%after) expected(%expected_after) : tensor<131xi8>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+kernel.decl @packed_vector_kernel() launch(%input: buffer, %output: buffer)
+
+check.case @packed_vector {
+  %input = check.generate.iota offset(0) step(1) : tensor<64xi8>
+  %output = check.generate.fill value(37) : tensor<64xi8>
+  kernel.launch @packed_vector_kernel(%input, %output) : (tensor<64xi8>, tensor<64xi8>)
+  %before = check.tensor.view %output offset(0) : tensor<64xi8> -> tensor<1xi8>
+  %payload = check.tensor.view %output offset(1) : tensor<64xi8> -> tensor<16xi8>
+  %after = check.tensor.view %output offset(17) : tensor<64xi8> -> tensor<47xi8>
+  %expected_input = check.generate.iota offset(0) step(1) : tensor<64xi8>
+  %expected_before = check.generate.fill value(37) : tensor<1xi8>
+  %expected_payload = check.generate.iota offset(1) step(1) : tensor<16xi8>
+  %expected_after = check.generate.fill value(37) : tensor<47xi8>
+  check.expect.bitwise actual(%input) expected(%expected_input) : tensor<64xi8>
+  check.expect.bitwise actual(%before) expected(%expected_before) : tensor<1xi8>
+  check.expect.bitwise actual(%payload) expected(%expected_payload) : tensor<16xi8>
+  check.expect.bitwise actual(%after) expected(%expected_after) : tensor<47xi8>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+kernel.decl @packed_update_kernel() launch(%output: buffer)
+
+// Nested records combine class packing, member packing and a two-byte cap.
+// Typed comparisons cover all changed bytes; byte views cover all padding.
+check.case @packed_updates {
+  %output = check.generate.fill value(37) : tensor<64xi8>
+  kernel.launch @packed_update_kernel(%output) : (tensor<64xi8>)
+  %before = check.tensor.view %output offset(0) : tensor<64xi8> -> tensor<29xi8>
+  %real = check.tensor.view %output offset(29) : tensor<64xi8> -> tensor<1xf32>
+  %tag = check.tensor.view %output offset(33) : tensor<64xi8> -> tensor<1xi8>
+  %value = check.tensor.view %output offset(34) : tensor<64xi8> -> tensor<1xi32>
+  %after = check.tensor.view %output offset(38) : tensor<64xi8> -> tensor<26xi8>
+  %expected_before = check.generate.fill value(37) : tensor<29xi8>
+  %expected_real = check.generate.fill value(2.5) : tensor<1xf32>
+  %expected_tag = check.generate.fill value(0) : tensor<1xi8>
+  %expected_value = check.generate.fill value(1073741825) : tensor<1xi32>
+  %expected_after = check.generate.fill value(37) : tensor<26xi8>
+  check.expect.bitwise actual(%before) expected(%expected_before) : tensor<29xi8>
+  check.expect.bitwise actual(%real) expected(%expected_real) : tensor<1xf32>
+  check.expect.bitwise actual(%tag) expected(%expected_tag) : tensor<1xi8>
+  check.expect.bitwise actual(%value) expected(%expected_value) : tensor<1xi32>
+  check.expect.bitwise actual(%after) expected(%expected_after) : tensor<26xi8>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}

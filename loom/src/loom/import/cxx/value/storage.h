@@ -59,6 +59,7 @@ class Storage {
                   cxx::TokenKind operation, cxx::AST* owner);
   // Projects an admitted record field using its retained C++ byte offset.
   // The allocation identity is preserved, including for nested records.
+  // Packing changes the origin, without asserting natural field alignment.
   Pointer member(Pointer base, cxx::FieldSymbol* field, cxx::AST* owner);
   // Constructs addressing for an integral subscript without narrowing pointer
   // byte arithmetic through target-selected index.

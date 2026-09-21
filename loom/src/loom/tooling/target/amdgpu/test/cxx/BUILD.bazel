@@ -41,6 +41,7 @@ _MODULES = [
     "increment_values",
     "integer_increment",
     "llama_rms_norm",
+    "packed_memory",
     "pointer_walk",
     "record_memory",
     "record_values",

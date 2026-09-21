@@ -45,6 +45,7 @@ loom_check_test_suite(
     "macro_operators.cxx-test"
     "offsetof.cxx-test"
     "offsetof_roundtrip.cxx-test"
+    "packed_memory.cxx-test"
     "pointers.cxx-test"
     "record_memory.cxx-test"
     "record_memory_invalid.cxx-test"
@@ -149,6 +150,33 @@ loom_execution_test(
     storage_values_test_execute_vm_reference_test
   MODULE
     "::storage_values_test_module"
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+    "loom-execution-profile=vm_reference"
+    "loom-target-family=vm"
+    "loom-target-class=cpu"
+    "loom-executor=reference"
+)
+endif()
+endif()
+
+if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_VM)
+loom_test_module(
+  NAME
+    packed_memory_values_test_module
+  SRCS
+    "packed_memory.cpp"
+    "packed_memory_values.loom"
+)
+endif()
+
+if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_VM)
+if(LOOM_TARGET_ARCH_VM)
+loom_execution_test(
+  NAME
+    packed_memory_values_test_execute_vm_reference_test
+  MODULE
+    "::packed_memory_values_test_module"
   LABELS
     "iree-build-requirement=loom.target.arch.vm"
     "loom-execution-profile=vm_reference"
@@ -844,6 +872,16 @@ loom_test_module(
   SRCS
     "storage_kernels.loom"
     "storage_updates.cpp"
+)
+endif()
+
+if(LOOM_IMPORT_CXX)
+loom_test_module(
+  NAME
+    packed_memory_module
+  SRCS
+    "packed_memory.cpp"
+    "packed_memory_kernels.loom"
 )
 endif()
 

@@ -1,0 +1,26 @@
+aie2p.target<array> @array_target
+aie2p.target<core> @core_target
+
+pipeline.def<kernel> public retain target(@array_target) @packed_packets() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 2 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<2x3x64xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<2x3x64xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<2x3x64xi32>, group -> pipeline.flow<tile<64xi32>>
+  %copies = pipeline.stage @copy_entry on %workers(%packets) : (group, pipeline.flow<tile<64xi32>>) -> (pipeline.flow<tile<64xi32>>)
+  pipeline.write %copies to %output_view : pipeline.flow<tile<64xi32>>, view<2x3x64xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @copy_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  func.call @packed_copy(%source, %origin, %destination, %origin) : (buffer, offset, buffer, offset)
+  func.call @packed_update(%destination, %origin) : (buffer, offset)
+  func.return
+}
+
+func.decl @packed_copy(%input: buffer, %input_origin: offset, %output: buffer, %output_origin: offset)
+
+func.decl @packed_update(%output: buffer, %output_origin: offset)

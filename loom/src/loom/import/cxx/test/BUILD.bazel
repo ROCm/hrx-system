@@ -18,6 +18,7 @@ exports_files([
     "aiter_swiglu_f16.cpp",
     "flash_attention.cpp",
     "llama_rms_norm.cpp",
+    "packed_memory.cpp",
 ])
 
 loom_check_test_suite(
@@ -54,6 +55,7 @@ loom_check_test_suite(
         "macro_operators.cxx-test",
         "offsetof.cxx-test",
         "offsetof_roundtrip.cxx-test",
+        "packed_memory.cxx-test",
         "pointers.cxx-test",
         "record_memory.cxx-test",
         "record_memory_invalid.cxx-test",
@@ -132,6 +134,16 @@ loom_test(
     srcs = [
         "storage_updates.cpp",
         "storage_values.loom",
+    ],
+    execution_profiles = [VM_REFERENCE_PROFILE],
+    target_compatible_with = _HOST_COMPATIBILITY,
+)
+
+loom_test(
+    name = "packed_memory_values_test",
+    srcs = [
+        "packed_memory.cpp",
+        "packed_memory_values.loom",
     ],
     execution_profiles = [VM_REFERENCE_PROFILE],
     target_compatible_with = _HOST_COMPATIBILITY,
@@ -221,6 +233,15 @@ loom_test_module(
     srcs = [
         "storage_kernels.loom",
         "storage_updates.cpp",
+    ],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
+loom_test_module(
+    name = "packed_memory_module",
+    srcs = [
+        "packed_memory.cpp",
+        "packed_memory_kernels.loom",
     ],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
