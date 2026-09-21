@@ -80,10 +80,15 @@ static iree_status_t loom_cxx_cli_write_module(loom_module_t* module,
   return iree_status_join(status, loom_tooling_output_stream_close(&output));
 }
 
+// Sets *out_succeeded only after importing and writing the module. Diagnosed
+// source rejection returns OK with *out_succeeded=false; infrastructure and
+// option failures return a non-OK status for main to report.
 static iree_status_t loom_cxx_cli_import(iree_string_view_t filename,
                                          loom_context_t* context,
                                          iree_arena_block_pool_t* pool,
-                                         iree_allocator_t allocator) {
+                                         iree_allocator_t allocator,
+                                         bool* out_succeeded) {
+  *out_succeeded = false;
   loom_cxx_import_options_t options;
   loom_cxx_import_options_initialize(&options);
   options.diagnostic_sink.fn = loom_diagnostic_stderr_sink;
@@ -145,11 +150,7 @@ static iree_status_t loom_cxx_cli_import(iree_string_view_t filename,
         loom_cxx_import(loom_tooling_file_contents_string_view(contents),
                         filename, context, pool, &options, allocator, &module);
   }
-  if (iree_status_is_ok(status) && !module) {
-    status =
-        iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "C/C++ source rejected");
-  }
-  if (iree_status_is_ok(status) && FLAG_cleanup) {
+  if (iree_status_is_ok(status) && module && FLAG_cleanup) {
     loom_pass_tool_run_options_t pass_options = {
         .registry = loom_pass_builtin_registry(),
         .block_pool = pool,
@@ -161,7 +162,7 @@ static iree_status_t loom_cxx_cli_import(iree_string_view_t filename,
       status = iree_make_status(IREE_STATUS_INTERNAL, "import cleanup failed");
     }
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && module) {
     loom_verify_options_t verification_options = {.sink =
                                                       options.diagnostic_sink};
     loom_verify_result_t result = {0};
@@ -171,9 +172,10 @@ static iree_status_t loom_cxx_cli_import(iree_string_view_t filename,
                                 "import cleanup produced invalid IR");
     }
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && module) {
     status = loom_cxx_cli_write_module(module, pool, allocator);
   }
+  *out_succeeded = iree_status_is_ok(status) && module != NULL;
   loom_module_free(module);
   iree_io_file_contents_free(contents);
   iree_allocator_free(allocator, defines);
@@ -202,16 +204,16 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status)) {
     status = loom_context_finalize(&context);
   }
+  bool import_succeeded = false;
   if (iree_status_is_ok(status)) {
     status = loom_cxx_cli_import(iree_make_cstring_view(argv[1]), &context,
-                                 &pool, allocator);
+                                 &pool, allocator, &import_succeeded);
   }
   loom_context_deinitialize(&context);
   iree_arena_block_pool_deinitialize(&pool);
-  int result = iree_status_is_ok(status) ? 0 : 1;
-  if (result) {
+  if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
   }
   iree_status_free(status);
-  return result;
+  return import_succeeded ? 0 : 1;
 }

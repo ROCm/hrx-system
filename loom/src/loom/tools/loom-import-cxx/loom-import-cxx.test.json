@@ -75,13 +75,113 @@
       ]
     },
     {
+      "name": "reports syntax errors without an internal failure or output file",
+      "run": {
+        "tool": "loom-import-cxx",
+        "args": ["--to=bc", "--output={tmp}/rejected.loombc", "-"]
+      },
+      "stdin": {"text": "int broken() { return 42 }\n"},
+      "exit": {"code": 1},
+      "stdout": {"empty": true},
+      "stderr": {
+        "contains": [
+          "-:1:26: error [PARSE/036]: expected ';'",
+          "int broken() { return 42 }",
+          "^"
+        ],
+        "not_contains": ["INVALID_ARGUMENT", "C/C++ source rejected", "stack:"]
+      },
+      "files": [{"path": "{tmp}/rejected.loombc", "exists": false}]
+    },
+    {
+      "name": "preserves template errors and instantiation notes",
+      "run": {
+        "tool": "loom-import-cxx",
+        "args": ["-"]
+      },
+      "stdin": {
+        "text": "template<class T> int member(T value) { return value.missing; }\nint entry() { return member(42); }\n"
+      },
+      "exit": {"code": 1},
+      "stdout": {"empty": true},
+      "stderr": {
+        "contains": [
+          "-:1:48: error [PARSE/036]: invalid member access into expression of type 'int'",
+          "value.missing",
+          "-:2:22: remark [PARSE/036]: in instantiation of function template specialization 'member <int>' requested here",
+          "member(42)"
+        ],
+        "not_contains": ["INVALID_ARGUMENT", "C/C++ source rejected", "stack:"]
+      }
+    },
+    {
+      "name": "reports unsupported source without emitting partial IR",
+      "run": {
+        "tool": "loom-import-cxx",
+        "args": ["--cleanup=false", "-"]
+      },
+      "stdin": {
+        "text": "int entry(int x) { while (x) { break; } return x; }\n"
+      },
+      "exit": {"code": 1},
+      "stdout": {"empty": true},
+      "stderr": {
+        "contains": [
+          "-:1:32: error [LOWERING/059]: cannot import source construct: unsupported statement: break-statement",
+          "while (x) { break; }",
+          "^^^^^"
+        ],
+        "not_contains": ["INVALID_ARGUMENT", "C/C++ source rejected", "stack:"]
+      }
+    },
+    {
+      "name": "imports successfully after a source warning",
+      "run": {
+        "tool": "loom-import-cxx",
+        "args": ["-"]
+      },
+      "stdin": {
+        "text": "#warning source warning\nint entry() { return 42; }\n"
+      },
+      "stdout": {"contains": ["func.def public @entry", "scalar.constant 42"]},
+      "stderr": {
+        "contains": ["-:1:2: warning [PARSE/036]: #warning source warning"],
+        "not_contains": ["error", "INVALID_ARGUMENT", "stack:"]
+      }
+    },
+    {
+      "name": "reports input file failures through status diagnostics",
+      "run": {
+        "tool": "loom-import-cxx",
+        "args": ["{tmp}/absent.cpp"]
+      },
+      "exit": {"code": 1},
+      "stdout": {"empty": true},
+      "stderr": {"contains": {"unordered": ["NOT_FOUND", "absent.cpp"]}}
+    },
+    {
+      "name": "fails if imported IR cannot be written",
+      "run": {
+        "tool": "loom-import-cxx",
+        "args": ["--output={tmp}/missing/output.loom", "{srcdir}/testdata/functions.cpp"]
+      },
+      "exit": {"code": 1},
+      "stdout": {"empty": true},
+      "stderr": {"contains": {"unordered": ["NOT_FOUND", "output.loom"]}},
+      "files": [{"path": "{tmp}/missing/output.loom", "exists": false}]
+    },
+    {
       "name": "reports a missing root",
       "run": {
         "tool": "loom-import-cxx",
         "args": ["--root=absent", "{srcdir}/testdata/functions.cpp"]
       },
       "exit": {"code": 1},
-      "stderr": {"contains": {"unordered": ["root has no concrete definition: absent"]}}
+      "stdout": {"empty": true},
+      "stderr": {
+        "contains": ["root has no concrete definition: absent"],
+        "not_contains": ["INVALID_ARGUMENT", "C/C++ source rejected", "stack:"]
+      }
     }
   ]
 }
