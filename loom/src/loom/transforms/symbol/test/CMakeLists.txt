@@ -15,6 +15,7 @@ loom_check_test_suite(
   SRCS
     "inline_callable_types.loom-test"
     "inline_callables.loom-test"
+    "inline_cfg_batches.loom-test"
     "inline_dependent_types.loom-test"
     "refine_boundaries.loom-test"
     "symbol_dce.loom-test"

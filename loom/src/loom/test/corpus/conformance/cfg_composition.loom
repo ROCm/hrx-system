@@ -1,0 +1,90 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Reusable bounds checks compose through shared, branch-containing helpers.
+// The caller retains every intermediate row so incorrect captures or return
+// continuations cannot hide behind the final clamped value.
+func.def inline @cfg_composition_clamp_row(%row: i32, %length: i32) -> (i32) {
+  %c0 = scalar.constant 0 : i32
+  %negative = scalar.cmpi slt, %row, %c0 : i32
+  cfg.cond_br %negative, ^lower, ^upper_check
+^lower:
+  func.return %c0 : i32
+^upper_check:
+  %too_large = scalar.cmpi sge, %row, %length : i32
+  cfg.cond_br %too_large, ^upper, ^inside
+^upper:
+  %c1 = scalar.constant 1 : i32
+  %last = scalar.subi %length, %c1 : i32
+  func.return %last : i32
+^inside:
+  func.return %row : i32
+}
+
+func.def inline @cfg_composition_advance_row(%row: i32, %delta: i32, %length: i32) -> (i32) {
+  %next = scalar.addi %row, %delta : i32
+  %bounded = func.call @cfg_composition_clamp_row(%next, %length) : (i32, i32) -> (i32)
+  func.return %bounded : i32
+}
+
+kernel.def @cfg_composition_walk_rows() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%start: i32, %delta: i32, %length: i32, %output: buffer) {
+  %first = func.call @cfg_composition_advance_row(%start, %delta, %length) : (i32, i32, i32) -> (i32)
+  %second = func.call @cfg_composition_advance_row(%first, %delta, %length) : (i32, i32, i32) -> (i32)
+  %third = func.call @cfg_composition_advance_row(%second, %delta, %length) : (i32, i32, i32) -> (i32)
+  %fourth = func.call @cfg_composition_advance_row(%third, %delta, %length) : (i32, i32, i32) -> (i32)
+  %base = index.constant 0 : offset
+  %aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %rows = buffer.view %aligned[%base] : buffer -> view<4xi32>
+  view.store %first, %rows[0] : i32, view<4xi32>
+  view.store %second, %rows[1] : i32, view<4xi32>
+  view.store %third, %rows[2] : i32, view<4xi32>
+  view.store %fourth, %rows[3] : i32, view<4xi32>
+  kernel.return
+}
+
+check.case public @cfg_composition_advance_across_bounds {
+  %start = check.literal value(-5) : i32
+  %delta = check.literal value(3) : i32
+  %length = check.literal value(7) : i32
+  %actual = check.generate.fill value(-1) : tensor<4xi32>
+  kernel.launch @cfg_composition_walk_rows(%start, %delta, %length, %actual) : (i32, i32, i32, tensor<4xi32>)
+  %ascending = check.tensor.view %actual offset(0) : tensor<4xi32> -> tensor<3xi32>
+  %clamped = check.tensor.view %actual offset(12) : tensor<4xi32> -> tensor<1xi32>
+  %expected_ascending = check.generate.iota offset(0) step(3) : tensor<3xi32>
+  %expected_clamped = check.generate.fill value(6) : tensor<1xi32>
+  check.expect.equal actual(%ascending) expected(%expected_ascending) : tensor<3xi32>
+  check.expect.equal actual(%clamped) expected(%expected_clamped) : tensor<1xi32>
+  check.return
+}
+
+check.case public @cfg_composition_retreat_to_lower_bound {
+  %start = check.literal value(8) : i32
+  %delta = check.literal value(-3) : i32
+  %length = check.literal value(7) : i32
+  %actual = check.generate.fill value(-1) : tensor<4xi32>
+  kernel.launch @cfg_composition_walk_rows(%start, %delta, %length, %actual) : (i32, i32, i32, tensor<4xi32>)
+  %descending = check.tensor.view %actual offset(0) : tensor<4xi32> -> tensor<2xi32>
+  %clamped = check.tensor.view %actual offset(8) : tensor<4xi32> -> tensor<2xi32>
+  %expected_descending = check.generate.iota offset(5) step(-3) : tensor<2xi32>
+  %expected_clamped = check.generate.fill value(0) : tensor<2xi32>
+  check.expect.equal actual(%descending) expected(%expected_descending) : tensor<2xi32>
+  check.expect.equal actual(%clamped) expected(%expected_clamped) : tensor<2xi32>
+  check.return
+}
+
+check.case public @cfg_composition_single_row {
+  %start = check.param.choice values([-7, 0, 9]) : i32
+  %delta = check.param.choice values([-3, 0, 2]) : i32
+  %length = check.literal value(1) : i32
+  %actual = check.generate.fill value(-1) : tensor<4xi32>
+  kernel.launch @cfg_composition_walk_rows(%start, %delta, %length, %actual) : (i32, i32, i32, tensor<4xi32>)
+  %expected = check.generate.fill value(0) : tensor<4xi32>
+  check.expect.equal actual(%actual) expected(%expected) : tensor<4xi32>
+  check.return
+}

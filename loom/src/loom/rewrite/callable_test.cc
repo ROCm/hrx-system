@@ -988,5 +988,101 @@ TEST_F(CallableInlineTest, CloneDefinitionRemapsOnlySelfReferences) {
             helper_ref.symbol_id);
 }
 
+class CallableBatchTest : public CallableInlineTest,
+                          public ::testing::WithParamInterface<bool> {};
+
+TEST_P(CallableBatchTest, PublishesBlockOrderAcrossInterleavedCallers) {
+  const bool external_result_use = GetParam();
+  const loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
+  const loom_symbol_ref_t callee_ref = MakeSymbol(IREE_SV("negate"));
+  loom_op_t* callee_op = BuildNegateFunction(callee_ref, f32);
+  loom_func_like_t callee = loom_func_like_cast(module_, callee_op);
+  loom_region_t* callee_body = loom_func_like_body(callee);
+  loom_block_t* callee_entry = loom_region_entry_block(callee_body);
+  loom_block_t* callee_exit = nullptr;
+  IREE_ASSERT_OK(loom_region_append_block(module_, callee_body, &callee_exit));
+  loom_rewriter_t rewriter = {};
+  IREE_ASSERT_OK(
+      loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_));
+  IREE_ASSERT_OK(loom_rewriter_move_to_block_end(
+      &rewriter, callee_entry->last_op, callee_exit, callee_op));
+  loom_builder_t callee_builder = BodyBuilder(callee_op);
+  loom_op_t* branch = nullptr;
+  IREE_ASSERT_OK(loom_cfg_br_build(&callee_builder, callee_exit, nullptr, 0,
+                                   LOOM_LOCATION_UNKNOWN, &branch));
+
+  loom_callable_inline_site_t sites[4];
+  loom_region_t* callers[2];
+  loom_block_t* original_exits[2];
+  const iree_string_view_t names[] = {IREE_SV("left"), IREE_SV("right")};
+  for (int i = 0; i < 2; ++i) {
+    loom_op_t* first_call = nullptr;
+    loom_op_t* caller_op =
+        BuildCaller(MakeSymbol(names[i]), callee_ref, f32, &first_call);
+    callers[i] = loom_func_like_body(loom_func_like_cast(module_, caller_op));
+    loom_block_t* entry = loom_region_entry_block(callers[i]);
+    loom_op_t* return_op = entry->last_op;
+    loom_builder_t builder = BodyBuilder(caller_op);
+    loom_builder_set_before(&builder, return_op);
+    const loom_value_id_t input =
+        external_result_use ? loom_func_call_results(first_call).values[0]
+                            : loom_block_arg_id(entry, 0);
+    loom_op_t* second_call = nullptr;
+    IREE_ASSERT_OK(loom_func_call_build(&builder, 0, 0, 0, 0, callee_ref,
+                                        &input, 1, &f32, 1, nullptr, 0,
+                                        LOOM_LOCATION_UNKNOWN, &second_call));
+    IREE_ASSERT_OK(loom_rewriter_set_operand(
+        &rewriter, return_op, 0,
+        loom_func_call_results(second_call).values[0]));
+    IREE_ASSERT_OK(
+        loom_region_append_block(module_, callers[i], &original_exits[i]));
+    if (external_result_use) {
+      IREE_ASSERT_OK(loom_rewriter_move_to_block_end(
+          &rewriter, return_op, original_exits[i], caller_op));
+      loom_builder_set_block(&builder, entry);
+      IREE_ASSERT_OK(loom_cfg_br_build(&builder, original_exits[i], nullptr, 0,
+                                       LOOM_LOCATION_UNKNOWN, &branch));
+    } else {
+      loom_builder_set_block(&builder, original_exits[i]);
+      const loom_value_id_t argument = loom_block_arg_id(entry, 0);
+      IREE_ASSERT_OK(loom_func_return_build(&builder, &argument, 1,
+                                            LOOM_LOCATION_UNKNOWN, &return_op));
+    }
+    // Interleave the two destinations, preserving right-to-left call order.
+    sites[i] = {second_call, callee, loom_cfg_br_build};
+    sites[i + 2] = {first_call, callee, loom_cfg_br_build};
+  }
+  IREE_ASSERT_OK(loom_callable_inline_calls_with_branch(&rewriter, nullptr, 0));
+  IREE_ASSERT_OK(loom_callable_inline_calls_with_branch(&rewriter, sites,
+                                                        IREE_ARRAYSIZE(sites)));
+  loom_rewriter_deinitialize(&rewriter);
+
+  for (int i = 0; i < 2; ++i) {
+    loom_region_t* body = callers[i];
+    ASSERT_EQ(body->block_count, 8u);
+    EXPECT_EQ(body->blocks[external_result_use ? 7 : 1], original_exits[i]);
+    const uint16_t first_index = external_result_use ? 1 : 5;
+    const uint16_t second_index = external_result_use ? 4 : 2;
+    EXPECT_EQ(loom_cfg_br_dest(body->blocks[0]->last_op),
+              body->blocks[first_index]);
+    EXPECT_EQ(loom_cfg_br_dest(body->blocks[first_index + 2]->last_op),
+              body->blocks[second_index]);
+    for (uint16_t j = 0; j < body->block_count; ++j) {
+      EXPECT_EQ(body->blocks[j]->parent_region, body);
+      EXPECT_EQ(body->blocks[j]->region_index, j);
+    }
+  }
+  EXPECT_EQ(callee_body->block_count, 2u);
+  const loom_verify_options_t verify_options = {
+      /*.sink=*/{loom_diagnostic_stderr_sink, nullptr},
+  };
+  loom_verify_result_t verify_result = {};
+  IREE_ASSERT_OK(loom_verify_module(module_, &verify_options, &verify_result));
+  EXPECT_EQ(verify_result.error_count, 0u);
+}
+
+INSTANTIATE_TEST_SUITE_P(AppendAndOrdered, CallableBatchTest,
+                         ::testing::Bool());
+
 }  // namespace
 }  // namespace loom

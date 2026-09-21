@@ -1,0 +1,173 @@
+// Independent calls append their clones without moving the existing
+// unreachable block.
+// RUN: with-checks pass inline-callables
+
+func.def inline @forward(%value: i32) -> (i32) {
+  cfg.br ^exit
+^exit:
+  func.return %value : i32
+}
+
+func.def public @caller(%input: i32) -> (i32) {
+  %first = func.call @forward(%input) : (i32) -> (i32)
+  %second = func.call @forward(%input) : (i32) -> (i32)
+  %last = func.call @forward(%input) : (i32) -> (i32)
+  func.return %last : i32
+^unreachable:
+  func.return %input : i32
+}
+
+// ----
+CHECK: func.return %last* : i32
+CHECK: func.return %input : i32
+CHECK-NOT: *func.call*
+CHECK-NOT: *func.def inline*
+
+// ====
+
+// Co-result dimensions remain attached to each continuation before the next
+// clone uses them.
+// RUN: with-checks pass inline-callables
+
+func.def inline @forward(%width: index, %input: vector<[%width]xf32>) -> (%extent: index, vector<[%extent]xf32>) {
+  cfg.br ^exit
+^exit:
+  func.return %width, %input : index, vector<[%width]xf32>
+}
+
+func.def public @caller(%width: index, %input: vector<[%width]xf32>) {
+  %first_width, %first = func.call @forward(%width, %input) : (index, vector<[%width]xf32>) -> (index, vector<[%first_width]xf32>)
+  %second_width, %second = func.call @forward(%first_width, %first) : (index, vector<[%first_width]xf32>) -> (index, vector<[%second_width]xf32>)
+  %last_width, %last = func.call @forward(%second_width, %second) : (index, vector<[%second_width]xf32>) -> (index, vector<[%last_width]xf32>)
+  cfg.br ^exit
+^exit:
+  test.use %last : vector<[%last_width]xf32>
+  func.return
+}
+
+// ----
+CHECK: *%first_width*: index, %first*: vector<[%first_width*]xf32>*
+CHECK: *%second_width*: index, %second*: vector<[%second_width*]xf32>*
+CHECK: test.use %last* : vector<[%last_width*]xf32>
+CHECK-NOT: *func.call*
+CHECK-NOT: *func.def inline*
+
+// ====
+
+// Attribute-only result users stay after their definitions through two clones
+// and the consuming call.
+// RUN: with-checks pass inline-callables
+
+func.def inline @forward(%value: i32) -> (i32) {
+  cfg.br ^exit
+^exit:
+  func.return %value : i32
+}
+
+func.def public @caller(%limit: i32, %input: i32) -> (i32) {
+  %first = func.call @forward(%limit) : (i32) -> (i32)
+  %second = func.call @forward(%limit) : (i32) -> (i32)
+  %third = func.call @forward(%limit) : (i32) -> (i32)
+  cfg.br ^exit
+^exit:
+  %bounded = scalar.assume %input [lt(%input, %first), lt(%input, %second), lt(%input, %third)] : i32
+  func.return %bounded : i32
+}
+
+// ----
+CHECK: * = scalar.assume %input [lt(%input, %first*), lt(%input, %second*), lt(%input, %third*)] : i32
+CHECK-NOT: *func.call*
+CHECK-NOT: *func.def inline*
+
+// ====
+
+// Every cloned entry backedge keeps its arguments while calls feed later
+// cloned CFGs.
+// RUN: with-checks pass inline-callables
+
+func.def inline @repeat(%again: i1, %value: i32) -> (i32) {
+^entry:
+  cfg.cond_br %again, ^body, ^exit
+^body:
+  cfg.br ^entry(%again: i1, %value: i32)
+^exit:
+  func.return %value : i32
+}
+
+func.def public @caller(%again: i1, %input: i32) -> (i32) {
+  %first = func.call @repeat(%again, %input) : (i1, i32) -> (i32)
+  %second = func.call @repeat(%again, %first) : (i1, i32) -> (i32)
+  %last = func.call @repeat(%again, %second) : (i1, i32) -> (i32)
+  func.return %last : i32
+^unreachable:
+  func.return %input : i32
+}
+
+// ----
+CHECK: cfg.cond_br %again*, *
+CHECK: cfg.br *(%again*: i1, %input: i32)
+CHECK: cfg.br *(%again*: i1, %first*: i32)
+CHECK: cfg.br *(%again*: i1, %second*: i32)
+CHECK: func.return %last* : i32
+CHECK-NOT: *func.call*
+CHECK-NOT: *func.def inline*
+
+// ====
+
+// RUN: pass inline-callables
+
+// Two ready CFG clones publish their block layout before the final consuming
+// call. Each invocation keeps its own phased schedule across the continuation.
+test.target<low_core> @batch_target
+
+low.func.def inline schedule(phased) target<test.low.core>(@batch_target) @batch_helper(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %sum = test.add.i32 %value, %value
+  low.br ^exit
+^exit:
+  low.schedule.phase
+  return %sum
+}
+
+low.func.def public target<test.low.core>(@batch_target) @batch_entry(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %first = low.func.call @batch_helper(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  %second = low.func.call @batch_helper(%first) : (reg<test.i32>) -> (reg<test.i32>)
+  %third = low.func.call @batch_helper(%second) : (reg<test.i32>) -> (reg<test.i32>)
+  return %third
+}
+
+// ----
+test.target<low_core> @batch_target
+
+low.func.def public target<test.low.core>(@batch_target) @batch_entry(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  low.br ^_bb1
+^_bb1:
+  low.schedule.begin
+  %sum$12 = test.add.i32 %value, %value
+  low.br ^_bb2
+^_bb2:
+  low.schedule.phase
+  low.schedule.end
+  low.br ^_bb3(%sum$12: reg<test.i32>)
+^_bb3(%first: reg<test.i32>):
+  low.br ^_bb4
+^_bb4:
+  low.schedule.begin
+  %sum$9 = test.add.i32 %first, %first
+  low.br ^_bb5
+^_bb5:
+  low.schedule.phase
+  low.schedule.end
+  low.br ^_bb6(%sum$9: reg<test.i32>)
+^_bb6(%second: reg<test.i32>):
+  low.br ^_bb7
+^_bb7:
+  low.schedule.begin
+  %sum$2 = test.add.i32 %second, %second
+  low.br ^_bb8
+^_bb8:
+  low.schedule.phase
+  low.schedule.end
+  low.br ^_bb9(%sum$2: reg<test.i32>)
+^_bb9(%third: reg<test.i32>):
+  return %third
+}

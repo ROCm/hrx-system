@@ -182,6 +182,7 @@ loom_cc_library(
     loom::ir
     loom::ops::cfg
     loom::ops::op_defs
+    loom::util::adaptive_sort
   PUBLIC
 )
 

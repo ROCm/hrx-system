@@ -54,6 +54,8 @@ enum class CompositionShape : uint8_t {
   kSharedCfgFanout = 2,
   // A shared two-block helper first composes another two-block helper.
   kNestedSharedCfgFanout = 3,
+  // Independent calls keep every splice append-only, even in a large region.
+  kIndependentSharedCfgFanout = 4,
 };
 
 enum class DefinitionRole : uint8_t {
@@ -240,7 +242,10 @@ static std::string BuildSharedFanoutSource(
   std::string operand_name = "%value";
   for (uint32_t call_index = 0; call_index < workload.scale; ++call_index) {
     const std::string result_name = "%result_" + std::to_string(call_index);
-    AppendCall(source, syntax, result_name, "shared", operand_name);
+    AppendCall(source, syntax, result_name, "shared",
+               workload.shape == CompositionShape::kIndependentSharedCfgFanout
+                   ? "%value"
+                   : operand_name);
     operand_name = result_name;
   }
   AppendReturn(source, syntax, operand_name);
@@ -257,6 +262,7 @@ static std::string BuildCompositionSource(const CompositionWorkload& workload) {
     case CompositionShape::kCfgChain:
       return BuildChainSource(workload);
     case CompositionShape::kSharedCfgFanout:
+    case CompositionShape::kIndependentSharedCfgFanout:
     case CompositionShape::kNestedSharedCfgFanout:
       return BuildSharedFanoutSource(workload);
   }
@@ -503,6 +509,7 @@ class InlineCallablesBenchmarkFixture {
         return 4;
       case CompositionShape::kCfgChain:
       case CompositionShape::kSharedCfgFanout:
+      case CompositionShape::kIndependentSharedCfgFanout:
         return 1 + 3 * workload_.scale;
       case CompositionShape::kNestedSharedCfgFanout:
         return 1 + 6 * workload_.scale;
@@ -515,6 +522,7 @@ class InlineCallablesBenchmarkFixture {
       case CompositionShape::kLinearCfgLeaf:
       case CompositionShape::kCfgChain:
       case CompositionShape::kSharedCfgFanout:
+      case CompositionShape::kIndependentSharedCfgFanout:
         return workload_.scale;
       case CompositionShape::kNestedSharedCfgFanout:
         return workload_.scale + 1;
@@ -528,6 +536,7 @@ class InlineCallablesBenchmarkFixture {
       case CompositionShape::kCfgChain:
         return workload_.scale;
       case CompositionShape::kSharedCfgFanout:
+      case CompositionShape::kIndependentSharedCfgFanout:
         return 1;
       case CompositionShape::kNestedSharedCfgFanout:
         return 2;
@@ -677,6 +686,13 @@ BENCHMARK_CAPTURE(BM_InlineComposition, Func_SharedCfgFanout,
     ->Unit(benchmark::kMicrosecond)
     ->Complexity();
 
+BENCHMARK_CAPTURE(BM_InlineComposition, Func_IndependentSharedCfgFanout,
+                  CallableMode::kAuthoredFunc,
+                  CompositionShape::kIndependentSharedCfgFanout)
+    ->Apply(RegisterCompositionScales)
+    ->Unit(benchmark::kMicrosecond)
+    ->Complexity();
+
 BENCHMARK_CAPTURE(BM_InlineComposition, Func_NestedSharedCfgFanout,
                   CallableMode::kAuthoredFunc,
                   CompositionShape::kNestedSharedCfgFanout)
@@ -698,6 +714,13 @@ BENCHMARK_CAPTURE(BM_InlineComposition, LowTarget_CfgChain,
 
 BENCHMARK_CAPTURE(BM_InlineComposition, LowTarget_SharedCfgFanout,
                   CallableMode::kTargetLow, CompositionShape::kSharedCfgFanout)
+    ->Apply(RegisterCompositionScales)
+    ->Unit(benchmark::kMicrosecond)
+    ->Complexity();
+
+BENCHMARK_CAPTURE(BM_InlineComposition, LowTarget_IndependentSharedCfgFanout,
+                  CallableMode::kTargetLow,
+                  CompositionShape::kIndependentSharedCfgFanout)
     ->Apply(RegisterCompositionScales)
     ->Unit(benchmark::kMicrosecond)
     ->Complexity();

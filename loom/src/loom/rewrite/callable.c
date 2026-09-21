@@ -10,6 +10,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/cfg/ops.h"
 #include "loom/rewrite/materialize.h"
+#include "loom/util/adaptive_sort.h"
 
 static bool loom_callable_get_call_symbol_ref(const loom_module_t* module,
                                               const loom_op_t* call_op,
@@ -542,10 +543,57 @@ static bool loom_callable_tail_can_append(const loom_module_t* module,
   return true;
 }
 
+// Physical block indices remain stable while a batch appends its clones.
+// Each splice records its logical insertion directly; publishing that order
+// once avoids shifting the growing block table at every dependent call.
+typedef struct loom_callable_block_order_t {
+  // Logical successor for each physical index, or UINT16_MAX at the end.
+  // Allocated only when a splice requires ordered insertion.
+  uint16_t* next_blocks;
+  // Scratch block table used to publish the recorded order.
+  loom_block_t** ordered_blocks;
+  // Maximum final block count established by the batch's callee bodies.
+  uint16_t block_capacity;
+  // Physical index of the last block in logical order.
+  uint16_t last_block;
+} loom_callable_block_order_t;
+
+static iree_status_t loom_callable_initialize_block_order(
+    loom_rewriter_t* rewriter, const loom_region_t* region,
+    loom_callable_block_order_t* order) {
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      rewriter->arena, order->block_capacity, sizeof(*order->next_blocks),
+      (void**)&order->next_blocks));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      rewriter->arena, order->block_capacity, sizeof(*order->ordered_blocks),
+      (void**)&order->ordered_blocks));
+  for (uint16_t i = 0; i < region->block_count; ++i) {
+    order->next_blocks[i] = i + 1;
+  }
+  order->last_block = region->block_count - 1;
+  order->next_blocks[order->last_block] = UINT16_MAX;
+  return iree_ok_status();
+}
+
+static void loom_callable_record_block_order(loom_callable_block_order_t* order,
+                                             uint16_t predecessor,
+                                             uint16_t first_block,
+                                             uint16_t block_count) {
+  for (uint16_t i = first_block; i + 1 < block_count; ++i) {
+    order->next_blocks[i] = i + 1;
+  }
+  order->next_blocks[block_count - 1] = order->next_blocks[predecessor];
+  order->next_blocks[predecessor] = first_block;
+  if (order->last_block == predecessor) {
+    order->last_block = block_count - 1;
+  }
+}
+
 static iree_status_t loom_callable_inline_cfg_call(
     loom_rewriter_t* rewriter, loom_op_t* call_op, loom_func_like_t callee,
     loom_call_like_t call, const loom_callable_cfg_body_t* body,
-    loom_callable_build_branch_fn_t build_branch) {
+    loom_callable_build_branch_fn_t build_branch,
+    loom_callable_block_order_t* block_order) {
   if (!build_branch) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -609,15 +657,20 @@ static iree_status_t loom_callable_inline_cfg_call(
   const loom_location_id_t call_location = call_op->location;
   loom_op_t* caller_parent_op = call_op->parent_op;
 
-  loom_builder_ip_t saved_ip = loom_builder_save(&rewriter->builder);
-  rewriter->builder.ip.parent_op = caller_parent_op;
   // Appending avoids shifting an accumulated CFG. Uses outside the call tail
   // require the ordered path so their blocks remain after the replacement
   // continuation in Loom's lexical SSA scope.
-  const uint16_t cloned_block_index =
-      loom_callable_tail_can_append(rewriter->module, call_op)
-          ? caller_region->block_count
-          : caller_block_index + 1;
+  const bool append_blocks =
+      loom_callable_tail_can_append(rewriter->module, call_op);
+  if (block_order && !append_blocks && !block_order->next_blocks) {
+    IREE_RETURN_IF_ERROR(loom_callable_initialize_block_order(
+        rewriter, caller_region, block_order));
+  }
+  const uint16_t cloned_block_index = block_order || append_blocks
+                                          ? caller_region->block_count
+                                          : caller_block_index + 1;
+  loom_builder_ip_t saved_ip = loom_builder_save(&rewriter->builder);
+  rewriter->builder.ip.parent_op = caller_parent_op;
   iree_status_t status =
       loom_ir_clone_region_blocks(&rewriter->builder, body->region,
                                   caller_region, cloned_block_index, &remap);
@@ -703,13 +756,20 @@ static iree_status_t loom_callable_inline_cfg_call(
                           capture_entry_arguments ? 0 : call_operands.count,
                           call_location, &entry_branch);
   }
+  if (iree_status_is_ok(status) && block_order && block_order->next_blocks) {
+    loom_callable_record_block_order(
+        block_order,
+        append_blocks ? block_order->last_block : caller_block_index,
+        cloned_block_index, caller_region->block_count);
+  }
   loom_builder_restore(&rewriter->builder, saved_ip);
   return status;
 }
 
-iree_status_t loom_callable_inline_call_with_branch(
+static iree_status_t loom_callable_inline_call_impl(
     loom_rewriter_t* rewriter, loom_op_t* call_op, loom_func_like_t callee,
-    loom_callable_build_branch_fn_t build_branch) {
+    loom_callable_build_branch_fn_t build_branch,
+    loom_callable_block_order_t* block_order) {
   if (!call_op || !call_op->parent_block ||
       iree_any_bit_set(call_op->flags, LOOM_OP_FLAG_DEAD)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -730,7 +790,111 @@ iree_status_t loom_callable_inline_call_with_branch(
     return loom_callable_inline_single_block_call(rewriter, call_op, callee);
   }
   return loom_callable_inline_cfg_call(rewriter, call_op, callee, call, &body,
-                                       build_branch);
+                                       build_branch, block_order);
+}
+
+iree_status_t loom_callable_inline_call_with_branch(
+    loom_rewriter_t* rewriter, loom_op_t* call_op, loom_func_like_t callee,
+    loom_callable_build_branch_fn_t build_branch) {
+  return loom_callable_inline_call_impl(rewriter, call_op, callee, build_branch,
+                                        NULL);
+}
+
+static bool loom_callable_inline_site_less(
+    const loom_callable_inline_site_t* const* lhs,
+    const loom_callable_inline_site_t* const* rhs) {
+  const loom_region_t* lhs_region =
+      (*lhs)->call_op->parent_block->parent_region;
+  const loom_region_t* rhs_region =
+      (*rhs)->call_op->parent_block->parent_region;
+  // Group independent destination regions without changing execution order
+  // within a region. The sites belong to one contiguous input array.
+  return lhs_region != rhs_region
+             ? (uintptr_t)lhs_region < (uintptr_t)rhs_region
+             : *lhs < *rhs;
+}
+
+typedef const loom_callable_inline_site_t* loom_callable_inline_site_ptr_t;
+LOOM_DEFINE_ADAPTIVE_SORT(loom_callable_sort_inline_sites,
+                          loom_callable_inline_site_ptr_t,
+                          loom_callable_inline_site_less)
+
+static iree_status_t loom_callable_inline_region_calls(
+    loom_rewriter_t* rewriter, const loom_callable_inline_site_t* const* sites,
+    iree_host_size_t site_count) {
+  if (site_count == 1) {
+    return loom_callable_inline_call_with_branch(
+        rewriter, sites[0]->call_op, sites[0]->callee, sites[0]->build_branch);
+  }
+
+  loom_region_t* region = sites[0]->call_op->parent_block->parent_region;
+  iree_host_size_t final_block_count = region->block_count;
+  for (iree_host_size_t i = 0; i < site_count; ++i) {
+    final_block_count += loom_func_like_body(sites[i]->callee)->block_count + 1;
+    if (final_block_count > UINT16_MAX) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "inlined caller block count exceeds UINT16_MAX");
+    }
+  }
+
+  loom_callable_block_order_t order = {
+      .block_capacity = (uint16_t)final_block_count,
+  };
+  IREE_RETURN_IF_ERROR(loom_region_reserve_block_capacity(
+      rewriter->module, region, final_block_count));
+
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < site_count && iree_status_is_ok(status);
+       ++i) {
+    const loom_callable_inline_site_t* site = sites[i];
+    status = loom_callable_inline_call_impl(
+        rewriter, site->call_op, site->callee, site->build_branch, &order);
+  }
+  if (iree_status_is_ok(status) && order.next_blocks) {
+    uint16_t physical_index = 0;
+    for (uint16_t i = 0; i < region->block_count; ++i) {
+      loom_block_t* block = region->blocks[physical_index];
+      order.ordered_blocks[i] = block;
+      block->region_index = i;
+      physical_index = order.next_blocks[physical_index];
+    }
+    memcpy(
+        region->blocks, order.ordered_blocks,
+        (iree_host_size_t)region->block_count * sizeof(*order.ordered_blocks));
+  }
+  return status;
+}
+
+iree_status_t loom_callable_inline_calls_with_branch(
+    loom_rewriter_t* rewriter, const loom_callable_inline_site_t* sites,
+    iree_host_size_t site_count) {
+  if (site_count == 0) {
+    return iree_ok_status();
+  }
+  loom_callable_inline_site_ptr_t* ordered_sites = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(rewriter->arena, site_count,
+                                                 sizeof(*ordered_sites),
+                                                 (void**)&ordered_sites));
+  for (iree_host_size_t i = 0; i < site_count; ++i) {
+    ordered_sites[i] = &sites[i];
+  }
+  loom_callable_sort_inline_sites(ordered_sites, site_count);
+
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t begin = 0;
+       begin < site_count && iree_status_is_ok(status);) {
+    const loom_region_t* region =
+        ordered_sites[begin]->call_op->parent_block->parent_region;
+    iree_host_size_t end = begin + 1;
+    while (end < site_count &&
+           ordered_sites[end]->call_op->parent_block->parent_region == region) {
+      ++end;
+    }
+    status = loom_callable_inline_region_calls(rewriter, ordered_sites + begin,
+                                               end - begin);
+    begin = end;
+  }
+  return status;
 }
 
 iree_status_t loom_callable_inline_call(loom_rewriter_t* rewriter,

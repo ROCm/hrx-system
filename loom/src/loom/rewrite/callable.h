@@ -79,6 +79,29 @@ iree_status_t loom_callable_inline_call_with_branch(
     loom_rewriter_t* rewriter, loom_op_t* call_op, loom_func_like_t callee,
     loom_callable_build_branch_fn_t build_branch);
 
+// One verified CFG clone selected by the caller's dependency plan.
+typedef struct loom_callable_inline_site_t {
+  // Live call whose operands and results form the complete call payload.
+  loom_op_t* call_op;
+  // Same-module callee whose body stays immutable throughout the batch.
+  loom_func_like_t callee;
+  // Dialect-specific constructor for entry and continuation branches.
+  loom_callable_build_branch_fn_t build_branch;
+} loom_callable_inline_site_t;
+
+// Clones independent CFG calls in the supplied execution order per region.
+//
+// The dependency owner proves that no site mutates another site's callee.
+// Sites in one original block are supplied right to left to bound tail moves.
+// Block placement follows the single-call splice contract, but the batch owns
+// intermediate lexical ordering and publishes each region's dense block order
+// once. No availability analysis or callee-body consumer may observe that
+// intermediate layout. Branch targets, value identities, use lists and parent
+// ownership remain current through ordinary clone and rewrite operations.
+iree_status_t loom_callable_inline_calls_with_branch(
+    loom_rewriter_t* rewriter, const loom_callable_inline_site_t* sites,
+    iree_host_size_t site_count);
+
 // Resolves |call_op|'s direct callee and then inlines it.
 iree_status_t loom_callable_inline_direct_call(loom_rewriter_t* rewriter,
                                                loom_op_t* call_op);
