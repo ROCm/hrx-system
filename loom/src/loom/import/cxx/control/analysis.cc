@@ -51,6 +51,10 @@ std::span<cxx::Symbol* const> ControlFlow::written(cxx::AST* owner) const {
                                 : found->second;
 }
 
+bool ControlFlow::storage_backed(cxx::MemberExpressionAST* expression) const {
+  return storage_expressions_.contains(expression);
+}
+
 const CountedLoop* ControlFlow::counted(cxx::ForStatementAST* loop) const {
   auto found = counted_.find(loop);
   return found == counted_.end() ? nullptr : &found->second;
@@ -98,6 +102,11 @@ bool ControlFlow::preVisit(cxx::AST* ast) {
 }
 
 void ControlFlow::postVisit(cxx::AST* ast) {
+  if (auto* expression = cxx::ast_cast<cxx::ExpressionAST>(ast)) {
+    if (classify_storage(expression)) {
+      storage_expressions_.insert(expression);
+    }
+  }
   if (auto* statement = cxx::ast_cast<cxx::StatementAST>(ast)) {
     auto outcomes = classify_paths(statement);
     if (outcomes != Fallthrough) {
@@ -203,43 +212,72 @@ bool ControlFlow::structured(cxx::AST* ast) {
 }
 
 void ControlFlow::record(cxx::ExpressionAST* expression) {
-  auto* destination = expression;
-  size_t component_offset = 0;
-  const Partition* partition = nullptr;
-  for (;;) {
-    if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(expression)) {
-      expression = nested->expression;
-      continue;
-    }
-    auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression);
-    if (!member || member->accessOp != cxx::TokenKind::T_DOT) {
-      break;
-    }
-    auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
-    if (!field || field->isStatic()) {
-      return;
-    }
-    const auto& slice = types_.member(field, member);
-    if (!partition) {
-      partition = slice.partition;
-    }
-    component_offset += slice.component_offset;
-    expression = member->baseExpression;
-  }
-  auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression);
-  if (!id) {
+  auto target = classify_destination(expression);
+  if (!target) {
     return;
   }
-  if (expression != destination) {
-    destinations_.emplace(destination,
-                          Destination{id->symbol, component_offset, partition});
+  if (!cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
+    destinations_.emplace(expression, *target);
   }
   for (auto* owner : owners_) {
     auto& writes = writes_[owner];
-    if (std::ranges::find(writes, id->symbol) == writes.end()) {
-      writes.push_back(id->symbol);
+    if (std::ranges::find(writes, target->binding) == writes.end()) {
+      writes.push_back(target->binding);
     }
   }
+}
+
+std::optional<Destination> ControlFlow::classify_destination(
+    cxx::ExpressionAST* expression) {
+  if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
+    return Destination{id->symbol, 0, nullptr};
+  }
+  if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(expression)) {
+    return classify_destination(nested->expression);
+  }
+  auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression);
+  if (!member || member->accessOp != cxx::TokenKind::T_DOT) {
+    return std::nullopt;
+  }
+  auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
+  if (!field || field->isStatic()) {
+    return std::nullopt;
+  }
+  // Establish the automatic owner before requesting any SSA partition: a dot
+  // member can also project a record reached through a pointer or subscript.
+  auto target = classify_destination(member->baseExpression);
+  if (target) {
+    const auto& slice = types_.member(field, member);
+    target->component_offset += slice.component_offset;
+    target->member = slice.partition;
+  }
+  return target;
+}
+
+bool ControlFlow::classify_storage(cxx::ExpressionAST* expression) const {
+  if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression)) {
+    auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
+    return field && !field->isStatic() &&
+           (member->accessOp == cxx::TokenKind::T_MINUS_GREATER ||
+            storage_expressions_.contains(member->baseExpression));
+  }
+  if (!expression->type || !unit_.typeTraits().is_class(expression->type)) {
+    return false;
+  }
+  if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(expression)) {
+    return storage_expressions_.contains(nested->expression);
+  }
+  if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expression)) {
+    return storage_expressions_.contains(cast->expression);
+  }
+  if (auto* subscript =
+          cxx::ast_cast<cxx::SubscriptExpressionAST>(expression)) {
+    return !subscript->symbol;
+  }
+  if (auto* unary = cxx::ast_cast<cxx::UnaryExpressionAST>(expression)) {
+    return !unary->symbol && unary->op == cxx::TokenKind::T_STAR;
+  }
+  return false;
 }
 
 // The unit-step unsigned interval cannot wrap before its strict upper bound.

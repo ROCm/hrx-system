@@ -86,6 +86,46 @@ TEST(TypesTest, RecordPartitionsRetainNominalMembersAndStaticTransport) {
   EXPECT_EQ(loom_type_element_type(signature[4]), LOOM_SCALAR_TYPE_I1);
 }
 
+TEST(TypesTest, RecordMemoryUsesSourceLayoutIndependentlyOfValuePartitions) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct Padded { unsigned char tag; float value; unsigned short count; };
+    struct Nested { unsigned prefix; Padded payload; };
+    struct Observed { volatile unsigned value; };
+    struct Transport { unsigned* pointer; bool valid; };
+    template<class T> struct Box { unsigned char tag; T value; };
+    using Concrete = Box<unsigned>;
+  )"),
+                IREE_SV("record_memory.cpp"), options);
+  Types types(source.unit(), source.diagnostics());
+  auto* owner = source.unit().ast();
+  auto* control = source.unit().control();
+  auto source_type = [&](const char* name) {
+    return (*source.unit().globalScope()->find(name).begin())->type();
+  };
+  auto* padded = source_type("Padded");
+  EXPECT_EQ(types.storage_size(padded, owner), 12);
+  EXPECT_EQ(types.storage_size(source_type("Nested"), owner), 16);
+  EXPECT_EQ(types.storage_size(source_type("Concrete"), owner), 8);
+  EXPECT_EQ(loom_type_kind(types.get(control->getPointerType(padded), owner)),
+            LOOM_TYPE_BUFFER);
+  auto* partition = types.record(padded, owner);
+  ASSERT_NE(partition, nullptr);
+  ASSERT_EQ(partition->members.size(), 3u);
+  EXPECT_EQ(partition->members[1].field->offsetInClass(), 4u);
+  EXPECT_EQ(partition->members[1].component_offset, 1u);
+  EXPECT_EQ(types.storage_size(padded, owner), 12);
+  auto* observed = source_type("Observed");
+  EXPECT_EQ(types.storage_size(observed, owner), 4);
+  EXPECT_EQ(types.partition(control->getPointerType(observed), owner).kind,
+            ValueKind::Pointer);
+  EXPECT_THROW(types.partition(observed, owner), SourceRejected);
+  auto* transport = source_type("Transport");
+  EXPECT_EQ(types.partition(transport, owner).component_count, 3u);
+  EXPECT_THROW(types.storage_size(transport, owner), SourceRejected);
+}
+
 TEST(TypesTest, ViewPartitionsBindEachDestinationShapeAndLayoutIdentity) {
   loom_cxx_import_options_t options;
   loom_cxx_import_options_initialize(&options);

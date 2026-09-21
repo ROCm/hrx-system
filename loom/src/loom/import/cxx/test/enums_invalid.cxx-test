@@ -296,5 +296,5 @@ bool entry(E value) { return value == F::value; }
 // INPUT: cxx
 // Boolean values have no byte-addressable source storage contract.
 enum class E : bool { no, yes };
-// ERROR@+1: LOWERING/059 "pointers require a supported non-boolean scalar or vector element"
+// ERROR@+1: LOWERING/059 "memory objects require non-boolean scalar, vector or plain record storage"
 E entry(const E* input) { return input[0]; }

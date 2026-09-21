@@ -1,0 +1,79 @@
+// RUN: verify
+// Whole-object copies have no admitted memory operation.
+struct Record { unsigned value; };
+// ERROR@+1: LOWERING/059 "unsupported C++ type: const ::Record"
+Record read(const Record* record) { return *record; }
+
+// ====
+struct Record { unsigned value; };
+// ERROR@+1: LOWERING/059 "unsupported C++ type: ::Record"
+void write(Record* record, Record value) { *record = value; }
+
+// ====
+struct Incomplete;
+// ERROR@+1: LOWERING/059 "record storage requires a complete aggregate without unions, bases or nontrivial lifecycle operations"
+const Incomplete* advance(const Incomplete* value) { return value; }
+
+// ====
+union Record { unsigned integer; float real; };
+// ERROR@+1: LOWERING/059 "record storage requires a complete aggregate without unions, bases or nontrivial lifecycle operations"
+unsigned read(const Record* record) { return record->integer; }
+
+// ====
+struct Base { unsigned first; };
+struct Record : Base { unsigned second; };
+// ERROR@+1: LOWERING/059 "record storage requires a complete aggregate without unions, bases or nontrivial lifecycle operations"
+unsigned read(const Record* record) { return record->second; }
+
+// ====
+struct Record { unsigned value; ~Record() {} };
+// ERROR@+1: LOWERING/059 "record storage requires a complete aggregate without unions, bases or nontrivial lifecycle operations"
+unsigned read(const Record* record) { return record->value; }
+
+// ====
+struct Record { unsigned value : 7; };
+// ERROR@+1: LOWERING/059 "record storage requires named fields without bitfields or no_unique_address"
+unsigned read(const Record* record) { return record->value; }
+
+// ====
+struct Empty {};
+struct Record { [[no_unique_address]] Empty empty; unsigned value; };
+// ERROR@+1: LOWERING/059 "record storage requires named fields without bitfields or no_unique_address"
+unsigned read(const Record* record) { return record->value; }
+
+// ====
+struct Record { unsigned* pointer; };
+// ERROR@+1: LOWERING/059 "stored pointers, references and arrays require an object storage representation"
+unsigned read(const Record* record) { return *record->pointer; }
+
+// ====
+struct Record { unsigned values[4]; };
+// ERROR@+1: LOWERING/059 "stored pointers, references and arrays require an object storage representation"
+unsigned read(const Record* record) { return record->values[0]; }
+
+// ====
+struct Record { bool value; };
+// ERROR@+1: LOWERING/059 "memory objects require non-boolean scalar, vector or plain record storage"
+bool read(const Record* record) { return record->value; }
+
+// ====
+struct [[gnu::packed]] Record { unsigned char tag; unsigned value; };
+// ERROR@+1: LOWERING/059 "packed record storage is not supported"
+unsigned read(const Record* record) { return record->value; }
+
+// ====
+struct Record { unsigned char tag; unsigned value [[gnu::packed]]; };
+// ERROR@+1: LOWERING/059 "packed record storage is not supported"
+unsigned read(const Record* record) { return record->value; }
+
+// ====
+#pragma pack(push, 1)
+struct Record { unsigned char tag; unsigned value; };
+#pragma pack(pop)
+// ERROR@+1: LOWERING/059 "packed record storage is not supported"
+unsigned read(const Record* record) { return record->value; }
+
+// ====
+#include <loomcxx/view.h>
+// ERROR@+1: LOWERING/059 "Loom source types require SSA value transport"
+void read(const loom::type::view<float, 4, 4>* view) {}

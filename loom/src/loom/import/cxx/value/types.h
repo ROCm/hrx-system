@@ -16,6 +16,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "loom/import/cxx/source/source.h"
@@ -91,6 +92,10 @@ class Types {
   // semantics belong to memory_access_flags(). Unsupported representations
   // diagnose at owner and throw SourceRejected.
   loom_type_t get(const cxx::Type* input, cxx::AST* owner);
+  // Admits an addressable scalar, vector or plain record and returns its
+  // source-owned byte footprint. Memory admission is independent of the SSA
+  // partition: field projection does not load or copy a complete record.
+  int64_t storage_size(const cxx::Type* input, cxx::AST* owner);
   // Admits a source value and returns its stable, identity-free partition.
   // Leaf carriers are static; admitted records are owned by this Types object.
   // Volatile objects cannot use SSA-only transport without addressable storage.
@@ -131,6 +136,7 @@ class Types {
   bool is_float(const cxx::Type* type);
 
  private:
+  void require_record_storage(const cxx::ClassType* input, cxx::AST* owner);
   const Partition* special(const cxx::Type* input, cxx::AST* owner);
   const EncodingPartition* encoding(const cxx::ClassType* input,
                                     cxx::AST* owner);
@@ -153,6 +159,8 @@ class Types {
   std::unordered_map<cxx::ClassSymbol*, std::unique_ptr<ViewPartition>> views_;
   // Member identity indexes the slice established by record admission.
   std::unordered_map<cxx::FieldSymbol*, MemberPartition> members_;
+  // Completed memory admission; layouts remain owned by the source symbols.
+  std::unordered_set<cxx::ClassSymbol*> storage_records_;
 };
 
 }  // namespace loom::cxx_import

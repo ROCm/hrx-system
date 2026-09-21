@@ -1,0 +1,67 @@
+// Byte storage crosses the ordinary imported record-pointer call boundary.
+func.decl @record_update(%records: buffer, %records_origin: offset, %input: buffer, %input_origin: offset, %index: i32) -> (i32)
+
+func.def @record_observations() -> (i32, i32, i32, i32, i32, i1) {
+  %storage_bytes = index.constant 48 : offset
+  %input_bytes = index.constant 32 : offset
+  %storage = buffer.alloca<private> align(4) %storage_bytes : buffer
+  %input = buffer.alloca<private> align(4) %input_bytes : buffer
+  %origin = index.constant 0 : offset
+  %words = buffer.view %storage[%origin] : buffer -> view<12xi32>
+  %source = buffer.view %input[%origin] : buffer -> view<8xi32>
+  %guard = scalar.constant 623191333 : i32
+  // Each source word is both -1.0f and the unsigned bit pattern 0xbf800000.
+  %source_bits = scalar.constant -1082130432 : i32
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c12 = index.constant 12 : index
+  scf.for %i = [%c0 to %c12 step %c1] {
+    view.store %guard, %words[%i] : i32, view<12xi32>
+  }
+  scf.for %i = [%c0 to %c8 step %c1] {
+    view.store %source_bits, %source[%i] : i32, view<8xi32>
+  }
+  %index = scalar.constant 1 : i32
+  %returned = func.call @record_update(%storage, %origin, %input, %origin, %index) : (buffer, offset, buffer, offset, i32) -> (i32)
+  %tag_padding = view.load %words[4] : view<12xi32> -> i32
+  %position = view.load %words[5] : view<12xi32> -> i32
+  %flags = view.load %words[6] : view<12xi32> -> i32
+  %tail = view.load %words[7] : view<12xi32> -> i32
+  %true = scalar.constant true : i1
+  %guards = scf.for %i = [%c0 to %c4 step %c1](%valid = %true : i1) -> (i1) {
+    %last_index = index.add %i, %c8 : index
+    %first = view.load %words[%i] : view<12xi32> -> i32
+    %last = view.load %words[%last_index] : view<12xi32> -> i32
+    %first_ok = scalar.cmpi eq, %first, %guard : i32
+    %last_ok = scalar.cmpi eq, %last, %guard : i32
+    %both = scalar.andi %first_ok, %last_ok : i1
+    %all = scalar.andi %valid, %both : i1
+    scf.yield %all : i1
+  }
+  %unchanged = scf.for %i = [%c0 to %c8 step %c1](%valid = %guards : i1) -> (i1) {
+    %word = view.load %source[%i] : view<8xi32> -> i32
+    %equal = scalar.cmpi eq, %word, %source_bits : i32
+    %all = scalar.andi %valid, %equal : i1
+    scf.yield %all : i1
+  }
+  func.return %returned, %tag_padding, %position, %flags, %tail, %unchanged : i32, i32, i32, i32, i32, i1
+}
+
+check.case @record_memory {
+  %returned, %tag_padding, %position, %flags, %tail, %unchanged = func.call @record_observations() : () -> (i32, i32, i32, i32, i32, i1)
+  %expected_returned = check.literal value(385) : i32
+  %expected_tag = check.literal value(623191296) : i32
+  %expected_position = check.literal value(1075838976) : i32
+  %expected_flags = check.literal value(1606418433) : i32
+  %expected_tail = check.literal value(629080065) : i32
+  %expected_unchanged = check.literal value(true) : i1
+  check.expect.equal actual(%returned) expected(%expected_returned) : i32
+  check.expect.equal actual(%tag_padding) expected(%expected_tag) : i32
+  check.expect.equal actual(%position) expected(%expected_position) : i32
+  check.expect.equal actual(%flags) expected(%expected_flags) : i32
+  check.expect.equal actual(%tail) expected(%expected_tail) : i32
+  check.expect.equal actual(%unchanged) expected(%expected_unchanged) : i1
+  check.return
+}

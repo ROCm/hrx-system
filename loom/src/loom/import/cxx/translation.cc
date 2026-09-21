@@ -431,6 +431,9 @@ class Translator {
     if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(ast)) {
       return address(nested->expression);
     }
+    if (cxx::ast_cast<cxx::MemberExpressionAST>(ast)) {
+      return storage_.dereference(address_of(ast).pointer(), ast->type, ast);
+    }
     if (auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(ast)) {
       if (subscript->symbol) {
         fail(ast, "overloaded indexing is not admitted");
@@ -455,13 +458,24 @@ class Translator {
         return storage_.dereference(base.pointer(), ast->type, ast);
       }
     }
-    fail(ast, "memory access requires a builtin subscript or dereference");
+    fail(ast,
+         "memory access requires a builtin subscript, dereference or field");
   }
 
   Value address_of(cxx::ExpressionAST* ast) {
     ast = cxx::Initializer::stripImplicitCasts(ast);
     if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(ast)) {
       return address_of(nested->expression);
+    }
+    if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(ast)) {
+      auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
+      if (!field || field->isStatic()) {
+        fail(ast, "record storage access requires a non-static data member");
+      }
+      auto base = member->accessOp == cxx::TokenKind::T_MINUS_GREATER
+                      ? expression(member->baseExpression)
+                      : address_of(member->baseExpression);
+      return storage_.member(base.pointer(), field, ast);
     }
     if (auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(ast)) {
       if (subscript->symbol) {
@@ -931,8 +945,8 @@ class Translator {
     }
     if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(ast)) {
       auto* base = cxx::ast_cast<cxx::IdExpressionAST>(member->baseExpression);
-      if (!member->symbol || member->accessOp != cxx::TokenKind::T_DOT) {
-        fail(ast, "record member access requires an SSA source value");
+      if (control_->storage_backed(member)) {
+        return name(load(ast), cxx::to_string(member->symbol->name()));
       }
       bool topology = base && (annotated(base->symbol, "workitem_id") ||
                                annotated(base->symbol, "workgroup_id") ||

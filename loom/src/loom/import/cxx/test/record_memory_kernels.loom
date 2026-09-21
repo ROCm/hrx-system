@@ -1,0 +1,97 @@
+// Independent byte oracles include natural padding, neighboring records and input.
+kernel.decl @record_update_kernel() launch(%records: buffer, %input: buffer, %output: buffer)
+
+kernel.decl @record_volatile_kernel() launch(%records: buffer, %input: buffer, %output: buffer)
+
+kernel.decl @record_vector_kernel() launch(%records: buffer, %input: buffer)
+
+check.case @mixed_fields {
+  %storage = check.generate.fill value(37) : tensor<48xi8>
+  %input = check.generate.fill value(-1082130432) : tensor<8xi32>
+  %output = check.generate.fill value(37) : tensor<3xi32>
+  kernel.launch @record_update_kernel(%storage, %input, %output) : (tensor<48xi8>, tensor<8xi32>, tensor<3xi32>)
+  %before = check.tensor.view %storage offset(0) : tensor<48xi8> -> tensor<16xi8>
+  %tag = check.tensor.view %storage offset(16) : tensor<48xi8> -> tensor<1xi32>
+  %position = check.tensor.view %storage offset(20) : tensor<48xi8> -> tensor<1xf32>
+  %flags = check.tensor.view %storage offset(24) : tensor<48xi8> -> tensor<1xi32>
+  %tail = check.tensor.view %storage offset(28) : tensor<48xi8> -> tensor<1xi32>
+  %after = check.tensor.view %storage offset(32) : tensor<48xi8> -> tensor<16xi8>
+  %output_before = check.tensor.view %output offset(0) : tensor<3xi32> -> tensor<1xi32>
+  %returned = check.tensor.view %output offset(4) : tensor<3xi32> -> tensor<1xi32>
+  %output_after = check.tensor.view %output offset(8) : tensor<3xi32> -> tensor<1xi32>
+  %guard = check.generate.fill value(37) : tensor<16xi8>
+  %output_guard = check.generate.fill value(37) : tensor<1xi32>
+  %expected_input = check.generate.fill value(-1082130432) : tensor<8xi32>
+  %expected_tag = check.generate.fill value(623191296) : tensor<1xi32>
+  %expected_position = check.generate.fill value(2.5) : tensor<1xf32>
+  %expected_flags = check.generate.fill value(1606418433) : tensor<1xi32>
+  %expected_tail = check.generate.fill value(629080065) : tensor<1xi32>
+  %expected_returned = check.generate.fill value(385) : tensor<1xi32>
+  check.expect.bitwise actual(%before) expected(%guard) : tensor<16xi8>
+  check.expect.bitwise actual(%tag) expected(%expected_tag) : tensor<1xi32>
+  check.expect.bitwise actual(%position) expected(%expected_position) : tensor<1xf32>
+  check.expect.bitwise actual(%flags) expected(%expected_flags) : tensor<1xi32>
+  check.expect.bitwise actual(%tail) expected(%expected_tail) : tensor<1xi32>
+  check.expect.bitwise actual(%after) expected(%guard) : tensor<16xi8>
+  check.expect.bitwise actual(%input) expected(%expected_input) : tensor<8xi32>
+  check.expect.bitwise actual(%returned) expected(%expected_returned) : tensor<1xi32>
+  check.expect.bitwise actual(%output_before) expected(%output_guard) : tensor<1xi32>
+  check.expect.bitwise actual(%output_after) expected(%output_guard) : tensor<1xi32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+check.case @volatile_fields {
+  %storage = check.generate.fill value(37) : tensor<48xi8>
+  %input = check.generate.fill value(-1082130432) : tensor<8xi32>
+  %output = check.generate.fill value(37) : tensor<3xi32>
+  kernel.launch @record_volatile_kernel(%storage, %input, %output) : (tensor<48xi8>, tensor<8xi32>, tensor<3xi32>)
+  %before = check.tensor.view %storage offset(0) : tensor<48xi8> -> tensor<16xi8>
+  %tag = check.tensor.view %storage offset(16) : tensor<48xi8> -> tensor<1xi32>
+  %position = check.tensor.view %storage offset(20) : tensor<48xi8> -> tensor<1xf32>
+  %flags = check.tensor.view %storage offset(24) : tensor<48xi8> -> tensor<1xi32>
+  %tail = check.tensor.view %storage offset(28) : tensor<48xi8> -> tensor<1xi32>
+  %after = check.tensor.view %storage offset(32) : tensor<48xi8> -> tensor<16xi8>
+  %output_before = check.tensor.view %output offset(0) : tensor<3xi32> -> tensor<1xi32>
+  %returned = check.tensor.view %output offset(4) : tensor<3xi32> -> tensor<1xi32>
+  %output_after = check.tensor.view %output offset(8) : tensor<3xi32> -> tensor<1xi32>
+  %guard = check.generate.fill value(37) : tensor<16xi8>
+  %output_guard = check.generate.fill value(37) : tensor<1xi32>
+  %expected_input = check.generate.fill value(-1082130432) : tensor<8xi32>
+  %expected_tag = check.generate.fill value(623191296) : tensor<1xi32>
+  %expected_position = check.generate.fill value(2.5) : tensor<1xf32>
+  %expected_flags = check.generate.fill value(1606418433) : tensor<1xi32>
+  %expected_tail = check.generate.fill value(629080065) : tensor<1xi32>
+  %expected_returned = check.generate.fill value(385) : tensor<1xi32>
+  check.expect.bitwise actual(%before) expected(%guard) : tensor<16xi8>
+  check.expect.bitwise actual(%tag) expected(%expected_tag) : tensor<1xi32>
+  check.expect.bitwise actual(%position) expected(%expected_position) : tensor<1xf32>
+  check.expect.bitwise actual(%flags) expected(%expected_flags) : tensor<1xi32>
+  check.expect.bitwise actual(%tail) expected(%expected_tail) : tensor<1xi32>
+  check.expect.bitwise actual(%after) expected(%guard) : tensor<16xi8>
+  check.expect.bitwise actual(%input) expected(%expected_input) : tensor<8xi32>
+  check.expect.bitwise actual(%returned) expected(%expected_returned) : tensor<1xi32>
+  check.expect.bitwise actual(%output_before) expected(%output_guard) : tensor<1xi32>
+  check.expect.bitwise actual(%output_after) expected(%output_guard) : tensor<1xi32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+check.case @nested_aligned_vector {
+  %storage = check.generate.fill value(37) : tensor<288xi8>
+  %input = check.generate.fill value(-1.0) : tensor<8xf32>
+  kernel.launch @record_vector_kernel(%storage, %input) : (tensor<288xi8>, tensor<8xf32>)
+  %before = check.tensor.view %storage offset(0) : tensor<288xi8> -> tensor<144xi8>
+  %vector = check.tensor.view %storage offset(144) : tensor<288xi8> -> tensor<4xf32>
+  %after = check.tensor.view %storage offset(160) : tensor<288xi8> -> tensor<128xi8>
+  %expected_before = check.generate.fill value(37) : tensor<144xi8>
+  %expected_vector = check.generate.iota offset(1.0) step(1.0) : tensor<4xf32>
+  %expected_after = check.generate.fill value(37) : tensor<128xi8>
+  %expected_input = check.generate.fill value(-1.0) : tensor<8xf32>
+  check.expect.bitwise actual(%before) expected(%expected_before) : tensor<144xi8>
+  check.expect.bitwise actual(%vector) expected(%expected_vector) : tensor<4xf32>
+  check.expect.bitwise actual(%after) expected(%expected_after) : tensor<128xi8>
+  check.expect.bitwise actual(%input) expected(%expected_input) : tensor<8xf32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}

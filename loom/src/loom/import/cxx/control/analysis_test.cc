@@ -268,6 +268,48 @@ TEST(ControlFlowTest, NestedMemberWritesRetainTheOwningBindingAndSlice) {
   EXPECT_EQ(pointer->member, &kPointerPartition);
 }
 
+TEST(ControlFlowTest, MemoryMembersRetainStorageIdentityAndAddressSideEffects) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct Payload { volatile unsigned value; };
+    struct Envelope { unsigned prefix; Payload payload; };
+    void entry(Envelope* packets, unsigned index) {
+      packets[index++].payload.value += 1;
+      (*packets).payload.value += 2;
+      (packets++)->payload.value += 3;
+    }
+  )"),
+                IREE_SV("memory_members.cpp"), options);
+  auto* function = definition(source);
+  ASSERT_NE(function, nullptr);
+  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                   function->functionBody)
+                   ->statement;
+  Types types(source.unit(), source.diagnostics());
+  ControlFlow analysis(source.unit(), types, body);
+  auto writes = analysis.written(body);
+  ASSERT_EQ(writes.size(), 2u);
+  EXPECT_EQ(writes[0], function->symbol->parameters()[1]);
+  EXPECT_EQ(writes[1], function->symbol->parameters()[0]);
+  for (auto* statement : cxx::ListView{body->statementList}) {
+    auto* expression = cxx::ast_cast<cxx::ExpressionStatementAST>(statement);
+    ASSERT_NE(expression, nullptr);
+    auto* assignment = cxx::ast_cast<cxx::CompoundAssignmentExpressionAST>(
+        expression->expression);
+    ASSERT_NE(assignment, nullptr);
+    auto* member =
+        cxx::ast_cast<cxx::MemberExpressionAST>(assignment->targetExpression);
+    ASSERT_NE(member, nullptr);
+    EXPECT_FALSE(analysis.destination(member).has_value());
+    EXPECT_TRUE(analysis.storage_backed(member));
+    auto* nested =
+        cxx::ast_cast<cxx::MemberExpressionAST>(member->baseExpression);
+    ASSERT_NE(nested, nullptr);
+    EXPECT_TRUE(analysis.storage_backed(nested));
+  }
+}
+
 TEST(ControlFlowTest, ReturnSummariesRetainFallthroughAndNestedExits) {
   struct Case {
     // Source body whose nested outcomes are aggregated once.

@@ -8,6 +8,7 @@
 
 #include <cxx/control.h>
 #include <cxx/memory_layout.h>
+#include <cxx/symbols.h>
 #include <cxx/token.h>
 #include <cxx/types.h>
 
@@ -43,11 +44,7 @@ Pointer Storage::advance(Pointer base, loom_value_id_t displacement,
                         "pointer arithmetic requires an integral displacement");
   }
   auto* element_type = pointer ? pointer->elementType() : array->elementType();
-  types_.get(element_type, owner);
-  auto bytes = unit_.control()->memoryLayout()->sizeOf(element_type);
-  if (!bytes) {
-    diagnostics_.reject(unit_, owner, "unknown element size");
-  }
+  auto bytes = types_.storage_size(element_type, owner);
   auto source = locations_.get(owner);
   auto wide_type = loom_type_scalar(LOOM_SCALAR_TYPE_I64);
   auto offset_type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
@@ -56,7 +53,7 @@ Pointer Storage::advance(Pointer base, loom_value_id_t displacement,
   // within the allocation (or one-past), so that final origin is nonnegative.
   auto wide = scalars_.convert(displacement, index_type,
                                unit_.control()->getLongLongIntType(), owner);
-  auto size = scalars_.integer(*bytes, LOOM_SCALAR_TYPE_I64, source);
+  auto size = scalars_.integer(bytes, LOOM_SCALAR_TYPE_I64, source);
   loom_op_t* op;
   check(
       loom_scalar_muli_build(&builder_, 0, wide, size, wide_type, source, &op));
@@ -79,6 +76,18 @@ Pointer Storage::advance(Pointer base, loom_value_id_t displacement,
                                  &wide_type, 1, source, &op));
   check(loom_index_cast_build(&builder_, loom_op_results(op)[0], wide_type,
                               offset_type, source, &op));
+  return {base.root, loom_op_results(op)[0]};
+}
+
+Pointer Storage::member(Pointer base, cxx::FieldSymbol* field,
+                        cxx::AST* owner) {
+  auto source = locations_.get(owner);
+  auto field_offset = scalars_.integer(*field->offsetInClass(),
+                                       LOOM_SCALAR_TYPE_OFFSET, source);
+  loom_op_t* op;
+  check(loom_index_add_build(&builder_, base.byte_offset, field_offset,
+                             loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET), source,
+                             &op));
   return {base.root, loom_op_results(op)[0]};
 }
 

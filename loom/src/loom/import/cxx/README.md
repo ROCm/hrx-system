@@ -582,11 +582,47 @@ and destruction, and no unions or base classes. Fields recursively admit scalar,
 vector, pointer, and record values. Braced construction includes normalized
 positional, designated and omitted-field initialization, plus default member
 expressions that do not access the object under construction. Bitfields,
-references, array fields, addresses of automatic records and raw object storage
-are rejected. Implicit default construction such as `Result()` and default
-member expressions accessing another member require source object initialization
-phases and receive explicit diagnostics; substituting aggregate braces would
-not preserve their semantics.
+references, array fields and addresses of automatic records are rejected.
+Implicit default construction such as `Result()` and default member expressions
+accessing another member require source object initialization phases and receive
+explicit diagnostics; substituting aggregate braces would not preserve their
+semantics.
+
+Record pointers project named fields from existing storage using the C++ object
+layout. Nested fields, field addresses, pointer arithmetic and scalar/vector
+updates share the ordinary buffer plus byte-origin representation:
+
+```cpp
+struct Particle {
+  float position;
+  float velocity;
+  unsigned flags;
+};
+
+void step(Particle* particles, unsigned index, float dt) {
+  particles[index].position += particles[index].velocity * dt;
+  particles[index].flags |= 1u;
+}
+```
+
+Here the pointer advances by `sizeof(Particle)` (12 bytes), and the fields use
+offsets 0, 4 and 8. Float accesses become `view<1xf32>` loads and stores; the
+unsigned field uses `view<1xi32>` with unsigned arithmetic and conversion
+operations when signedness matters. Each view retains the same allocation
+identity. Natural padding, explicit alignment and concrete template layouts
+come from the frontend's completed object layout; field stores leave padding
+and neighboring fields untouched. `&particles[index].flags` can pass through an
+ordinary helper as a typed pointer.
+
+Memory records admit non-boolean scalar, enum, vector and nested named fields.
+The admitted object must be a complete aggregate with trivial copying and
+destruction, without bases, unions, bitfields or `no_unique_address`. Stored
+pointers, references, arrays and Loom view/encoding objects require additional
+memory representations and receive source diagnostics. Whole-record loads and
+stores also diagnose: the by-value SSA partition is not an object-copy operation.
+Packed record accesses require an unaligned memory projection and are rejected
+independently of the supported packed layout queries below. Volatile record
+pointers and volatile fields retain observable accesses through nested members.
 
 Record layout queries honor GNU `packed`, explicit `aligned(N)`, standard
 `alignas`, and `#pragma pack`. Requests stay attached to their declarations
@@ -856,10 +892,10 @@ running the importer.
 
 The current translation surface covers scalar and explicit vector arithmetic,
 conversions, typed-pointer indexing and arithmetic, aggregate record values,
-local SSA values, conditional regions, short-circuit `&&` and `||`, counted and
-general `for` loops, `while` and `do/while` loops, fixed workgroup arrays, and
-direct calls. Unsupported reachable
-types and statements produce source diagnostics. Integral subscripts preserve
+record field storage, local SSA values, conditional regions, short-circuit `&&`
+and `||`, counted and general `for` loops, `while` and `do/while` loops, fixed
+workgroup arrays, and direct calls. Unsupported reachable types and statements
+produce source diagnostics. Integral subscripts preserve
 their source width and signedness. Interior pointers carry a buffer root and an
 object-relative byte offset through helper arguments, returns, conditional
 regions, and loop-carried values. Kernel pointer parameters retain their
@@ -872,10 +908,11 @@ an existing storage element, and prefix/postfix increments are admitted.
 Integer increments update automatic bindings or storage-backed elements and
 return the previous or updated value. Pointer increments update automatic
 bindings; `*output++ = *input++` preserves both pointer origins. Compound
-assignment supports scalar and vector storage through pointers and workgroup
-arrays. The right operand executes before the destination is resolved, and one
-resolved address supplies both the load and store. Arithmetic uses the source
-promotions and converts back to the element type before storing or returning:
+assignment supports scalar and vector storage through pointers, record fields
+and workgroup arrays. The right operand executes before the destination is
+resolved, and one resolved address supplies both the load and store. Arithmetic
+uses the source promotions and converts back to the element type before storing
+or returning:
 
 ```cpp
 unsigned mark(unsigned* words, unsigned index, unsigned mask) {
@@ -920,7 +957,7 @@ preserves its element qualifier through copies, helpers and subviews;
 `loom::view::load` returns an ordinary scalar and `loom::view::store` accepts
 one. A `const volatile` element permits observations but rejects stores.
 Volatile supplies observable accesses, without atomicity, synchronization or a
-cache-coherence guarantee. Automatic scalar objects and record fields currently
+cache-coherence guarantee. Automatic scalar objects and automatic record values
 use SSA transport and cannot represent volatile object storage; those
 declarations produce an explicit source diagnostic. Namespace-scope volatile
 objects require global-storage projection and cannot fold to their initializer.

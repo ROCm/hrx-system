@@ -14,6 +14,7 @@
 #include <optional>
 #include <span>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -69,6 +70,9 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Retained automatic-object destination, or no value for a memory access or
   // unsupported lvalue. Whole identifiers need no indexed projection record.
   std::optional<Destination> destination(cxx::ExpressionAST* expression) const;
+  // Whether this member projects existing memory instead of an SSA record.
+  // Object identity is propagated from visited children once during analysis.
+  bool storage_backed(cxx::MemberExpressionAST* expression) const;
   // Null retains ordinary while semantics; a result permits scf.for lowering.
   const CountedLoop* counted(cxx::ForStatementAST* loop) const;
   // Declaration for a nonnull decisionVariable retained by a statement in this
@@ -94,6 +98,9 @@ class ControlFlow final : private cxx::ASTVisitor {
   void visit(cxx::UnaryExpressionAST* ast) override;
   static bool structured(cxx::AST* ast);
   void record(cxx::ExpressionAST* expression);
+  std::optional<Destination> classify_destination(
+      cxx::ExpressionAST* expression);
+  bool classify_storage(cxx::ExpressionAST* expression) const;
   std::optional<CountedLoop> classify(cxx::ForStatementAST* loop);
   unsigned paths(cxx::StatementAST* statement) const;
   unsigned classify_paths(cxx::StatementAST* statement) const;
@@ -109,6 +116,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   std::unordered_map<cxx::AST*, std::vector<cxx::Symbol*>> writes_;
   // Nested lvalue ownership and transitive component offsets computed once.
   std::unordered_map<cxx::ExpressionAST*, Destination> destinations_;
+  // Memory record objects and member projections, including nested fields.
+  std::unordered_set<cxx::ExpressionAST*> storage_expressions_;
   // Proven intervals retained after each source loop's children are visited.
   std::unordered_map<cxx::ForStatementAST*, CountedLoop> counted_;
   // Declaration syntax indexed by the statement's retained decision variable.

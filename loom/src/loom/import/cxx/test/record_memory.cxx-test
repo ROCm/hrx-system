@@ -1,0 +1,263 @@
+// RUN: pass canonicalize,cse,dce
+// Typed fields share an allocation and retain ordinary scalar semantics.
+struct Particle { float position; float velocity; unsigned flags; };
+void step(Particle* particles, unsigned index, float dt) {
+  particles[index].position += particles[index].velocity * dt;
+  particles[index].flags |= 1u;
+}
+
+// ----
+func.def public @step(%particles: buffer, %particles_byte_offset: offset, %index: i32, %dt: f32) {
+  %4 = scalar.extui %index : i32 to i64
+  %5 = scalar.constant 12 : i64
+  %6 = scalar.muli %4, %5 : i64
+  %7 = index.cast %particles_byte_offset : offset to i64
+  %8 = scalar.addi %7, %6 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %10 = index.cast %9 : i64 to offset
+  %11 = index.constant 4 : offset
+  %12 = index.add %10, %11 : offset
+  %13 = buffer.view %particles[%12] : buffer -> view<1xf32>
+  %velocity = view.load %13[0] : view<1xf32> -> f32
+  %15 = scalar.mulf %velocity, %dt : f32
+  %25 = buffer.view %particles[%10] : buffer -> view<1xf32>
+  %26 = view.load %25[0] : view<1xf32> -> f32
+  %27 = scalar.addf %26, %15 : f32
+  view.store %27, %25[0] : f32, view<1xf32>
+  %28 = scalar.constant 1 : i32
+  %36 = index.constant 8 : offset
+  %37 = index.add %10, %36 : offset
+  %38 = buffer.view %particles[%37] : buffer -> view<1xi32>
+  %39 = view.load %38[0] : view<1xi32> -> i32
+  %40 = scalar.ori %39, %28 : i32
+  view.store %40, %38[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// Nested fields and field addresses preserve both enclosing record strides.
+#include "record_layout.h"
+unsigned nested(Nested* records, unsigned index) {
+  auto* value = &records[index].value;
+  auto* count = &value->count;
+  *count += 7;
+  return value->last + 1u + *count;
+}
+void aligned(Aligned* records, unsigned index, unsigned value) {
+  (records + index)->count = value;
+}
+
+// ----
+func.def public @nested(%records: buffer, %records_byte_offset: offset, %index: i32) -> (i32) {
+  %4 = scalar.extui %index : i32 to i64
+  %5 = scalar.constant 20 : i64
+  %6 = scalar.muli %4, %5 : i64
+  %7 = index.cast %records_byte_offset : offset to i64
+  %8 = scalar.addi %7, %6 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %10 = index.cast %9 : i64 to offset
+  %11 = index.constant 4 : offset
+  %value_byte_offset = index.add %10, %11 : offset
+  %count_byte_offset = index.add %value_byte_offset, %11 : offset
+  %15 = scalar.constant 7 : i32
+  %16 = buffer.view %records[%count_byte_offset] : buffer -> view<1xi32>
+  %17 = view.load %16[0] : view<1xi32> -> i32
+  %18 = scalar.addi %17, %15 : i32
+  view.store %18, %16[0] : i32, view<1xi32>
+  %19 = index.constant 8 : offset
+  %20 = index.add %value_byte_offset, %19 : offset
+  %21 = buffer.view %records[%20] : buffer -> view<1xi16>
+  %last = view.load %21[0] : view<1xi16> -> i16
+  %23 = scalar.extui %last : i16 to i32
+  %24 = scalar.constant 1 : i32
+  %25 = scalar.addi %23, %24 : i32
+  %27 = view.load %16[0] : view<1xi32> -> i32
+  %28 = scalar.addi %25, %27 : i32
+  func.return %28 : i32
+}
+
+func.def public @aligned(%records: buffer, %records_byte_offset: offset, %index: i32, %value: i32) {
+  %33 = scalar.extui %index : i32 to i64
+  %43 = scalar.constant 5 : i64
+  %44 = scalar.shli %33, %43 : i64
+  %36 = index.cast %records_byte_offset : offset to i64
+  %37 = scalar.addi %36, %44 : i64
+  %38 = scalar.assume %37 [range(%37, 0, 9223372036854775807)] : i64
+  %39 = index.cast %38 : i64 to offset
+  %40 = index.constant 16 : offset
+  %41 = index.add %39, %40 : offset
+  %42 = buffer.view %records[%41] : buffer -> view<1xi32>
+  view.store %value, %42[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// Pointer updates execute once; volatile propagates through the object type.
+struct Payload { unsigned count; };
+struct Packet { unsigned prefix; Payload payload; };
+unsigned observed(volatile Packet* packets) {
+  unsigned previous = (packets++)->payload.count++;
+  return previous + ++(*packets).payload.count;
+}
+
+// ----
+func.def public @observed(%packets: buffer, %packets_byte_offset$1: offset) -> (i32) {
+  %28 = scalar.constant 8 : i64
+  %7 = index.cast %packets_byte_offset$1 : offset to i64
+  %8 = scalar.addi %7, %28 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %packets_byte_offset$10 = index.cast %9 : i64 to offset
+  %11 = index.constant 4 : offset
+  %12 = index.add %packets_byte_offset$1, %11 : offset
+  %15 = buffer.view %packets[%12] : buffer -> view<1xi32>
+  %previous = view.load<volatile> %15[0] : view<1xi32> -> i32
+  %17 = scalar.constant 1 : i32
+  %18 = scalar.addi %previous, %17 : i32
+  view.store<volatile> %18, %15[0] : i32, view<1xi32>
+  %20 = index.add %packets_byte_offset$10, %11 : offset
+  %23 = buffer.view %packets[%20] : buffer -> view<1xi32>
+  %24 = view.load<volatile> %23[0] : view<1xi32> -> i32
+  %26 = scalar.addi %24, %17 : i32
+  view.store<volatile> %26, %23[0] : i32, view<1xi32>
+  %27 = scalar.addi %previous, %26 : i32
+  func.return %27 : i32
+}
+
+// ====
+// Mutable removes const from the field without removing volatile observation.
+struct Observed { mutable unsigned value; };
+unsigned update(const volatile Observed* record) { return ++record->value; }
+
+// ----
+func.def public @update(%record: buffer, %record_byte_offset: offset) -> (i32) {
+  %5 = buffer.view %record[%record_byte_offset] : buffer -> view<1xi32>
+  %6 = view.load<volatile> %5[0] : view<1xi32> -> i32
+  %7 = scalar.constant 1 : i32
+  %8 = scalar.addi %6, %7 : i32
+  view.store<volatile> %8, %5[0] : i32, view<1xi32>
+  func.return %8 : i32
+}
+
+// ====
+// Signedness is source semantics; both word fields use signless integer views.
+struct Counters { unsigned high; int low; };
+float convert(const Counters* values) {
+  return float(values->high / 3u) + float(values->low / 3);
+}
+
+// ----
+func.def public @convert(%values: buffer, %values_byte_offset: offset) -> (f32) {
+  %5 = buffer.view %values[%values_byte_offset] : buffer -> view<1xi32>
+  %high = view.load %5[0] : view<1xi32> -> i32
+  %7 = scalar.constant 3 : i32
+  %8 = scalar.divui %high, %7 : i32
+  %9 = scalar.uitofp %8 : i32 to f32
+  %10 = index.constant 4 : offset
+  %11 = index.add %values_byte_offset, %10 : offset
+  %12 = buffer.view %values[%11] : buffer -> view<1xi32>
+  %low = view.load %12[0] : view<1xi32> -> i32
+  %15 = scalar.divsi %low, %7 : i32
+  %16 = scalar.sitofp %15 : i32 to f32
+  %17 = scalar.addf %9, %16 : f32
+  func.return %17 : f32
+}
+
+// ====
+// Concrete templates retain their own completed layout and scalar views.
+template<class T> struct Box { unsigned char tag; T value; };
+float read(const Box<float>* boxes, unsigned index) {
+  return boxes[index].value;
+}
+
+// ----
+func.def public @read(%boxes: buffer, %boxes_byte_offset: offset, %index: i32) -> (f32) {
+  %4 = scalar.extui %index : i32 to i64
+  %15 = scalar.constant 3 : i64
+  %16 = scalar.shli %4, %15 : i64
+  %7 = index.cast %boxes_byte_offset : offset to i64
+  %8 = scalar.addi %7, %16 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %10 = index.cast %9 : i64 to offset
+  %11 = index.constant 4 : offset
+  %12 = index.add %10, %11 : offset
+  %13 = buffer.view %boxes[%12] : buffer -> view<1xf32>
+  %value = view.load %13[0] : view<1xf32> -> f32
+  func.return %value : f32
+}
+
+// ====
+// Vector members retain their complete lane footprint.
+typedef float float4 __attribute__((vector_size(16)));
+struct VectorRecord { unsigned tag; float4 value; };
+float4 update(VectorRecord* records, unsigned index, float4 delta) {
+  return records[index].value += delta;
+}
+
+// ----
+func.def public @update(%records: buffer, %records_byte_offset: offset, %index: i32, %delta: vector<4xf32>) -> (vector<4xf32>) {
+  %5 = scalar.extui %index : i32 to i64
+  %17 = scalar.constant 5 : i64
+  %18 = scalar.shli %5, %17 : i64
+  %8 = index.cast %records_byte_offset : offset to i64
+  %9 = scalar.addi %8, %18 : i64
+  %10 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
+  %11 = index.cast %10 : i64 to offset
+  %12 = index.constant 16 : offset
+  %13 = index.add %11, %12 : offset
+  %14 = buffer.view %records[%13] : buffer -> view<4xf32>
+  %15 = vector.load %14[0] : view<4xf32> -> vector<4xf32>
+  %16 = vector.addf %15, %delta : vector<4xf32>
+  vector.store %16, %14[0] : vector<4xf32>, view<4xf32>
+  func.return %16 : vector<4xf32>
+}
+
+// ====
+// INPUT: cxx std=c23
+// C records use the same object layout and address projection.
+struct Record { unsigned char tag; unsigned value; };
+unsigned read(const struct Record* records, unsigned index) {
+  return records[index].value;
+}
+
+// ----
+func.def public @read(%records: buffer, %records_byte_offset: offset, %index: i32) -> (i32) {
+  %4 = scalar.extui %index : i32 to i64
+  %15 = scalar.constant 3 : i64
+  %16 = scalar.shli %4, %15 : i64
+  %7 = index.cast %records_byte_offset : offset to i64
+  %8 = scalar.addi %7, %16 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %10 = index.cast %9 : i64 to offset
+  %11 = index.constant 4 : offset
+  %12 = index.add %10, %11 : offset
+  %13 = buffer.view %records[%12] : buffer -> view<1xi32>
+  %value = view.load %13[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ====
+// INPUT: cxx std=c++26
+// A field's own qualifier survives discarded-value evaluation and cleanup.
+struct Device { unsigned tag; volatile unsigned status; };
+void observe(Device* device) {
+  device->tag;
+  device->status;
+  static_cast<void>(device[1].status);
+}
+
+// ----
+func.def public @observe(%device: buffer, %device_byte_offset: offset) {
+  %6 = index.constant 4 : offset
+  %7 = index.add %device_byte_offset, %6 : offset
+  %8 = buffer.view %device[%7] : buffer -> view<1xi32>
+  %status$9 = view.load<volatile> %8[0] : view<1xi32> -> i32
+  %22 = scalar.constant 8 : i64
+  %14 = index.cast %device_byte_offset : offset to i64
+  %15 = scalar.addi %14, %22 : i64
+  %16 = scalar.assume %15 [range(%15, 0, 9223372036854775807)] : i64
+  %17 = index.cast %16 : i64 to offset
+  %19 = index.add %17, %6 : offset
+  %20 = buffer.view %device[%19] : buffer -> view<1xi32>
+  %status$21 = view.load<volatile> %20[0] : view<1xi32> -> i32
+  func.return
+}

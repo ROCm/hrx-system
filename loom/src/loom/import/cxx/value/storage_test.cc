@@ -6,7 +6,9 @@
 
 #include "loom/import/cxx/value/storage.h"
 
+#include <cxx/symbols.h>
 #include <cxx/token.h>
+#include <cxx/views/symbol_chain.h>
 
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/value/builder_test.h"
@@ -20,6 +22,52 @@
 namespace loom::cxx_import {
 namespace {
 using StorageTest = ValueBuilderTest;
+
+TEST_F(StorageTest, MemberProjectionRetainsRootAndNestedSourceOffsets) {
+  Source source(IREE_SV("struct Inner { char tag; float value; }; "
+                        "struct Outer { unsigned prefix; Inner inner; };"),
+                IREE_SV("storage_records.cpp"), options());
+  Types types(source.unit(), source.diagnostics());
+  Locations locations(source.unit(), source.diagnostics(), module_);
+  Scalars scalars(source.unit(), source.diagnostics(), types, locations,
+                  builder_);
+  Storage storage(source.unit(), source.diagnostics(), types, scalars,
+                  locations, builder_);
+  auto* owner = source.unit().ast();
+  auto* outer = cxx::symbol_cast<cxx::ClassSymbol>(
+      *source.unit().globalScope()->find("Outer").begin());
+  ASSERT_NE(outer, nullptr);
+  EXPECT_EQ(types.storage_size(outer->type(), owner), 12);
+  auto* inner_field =
+      cxx::symbol_cast<cxx::FieldSymbol>(*outer->find("inner").begin());
+  ASSERT_NE(inner_field, nullptr);
+  auto* inner =
+      cxx::type_cast<cxx::ClassType>(inner_field->type())->definition();
+  auto* value_field =
+      cxx::symbol_cast<cxx::FieldSymbol>(*inner->find("value").begin());
+  ASSERT_NE(value_field, nullptr);
+  auto allocation =
+      storage.workgroup(source.unit().control()->getBoundedArrayType(
+                            source.unit().control()->getUnsignedCharType(), 64),
+                        4, owner);
+  auto parent = storage.member(allocation.pointer, inner_field, owner);
+  auto field = storage.member(parent, value_field, owner);
+  EXPECT_EQ(parent.root, allocation.pointer.root);
+  EXPECT_EQ(field.root, allocation.pointer.root);
+  auto* offset = producer(field.byte_offset);
+  ASSERT_TRUE(loom_index_add_isa(offset));
+  EXPECT_EQ(loom_op_operands(offset)[0], parent.byte_offset);
+  EXPECT_EQ(loom_attr_as_i64(loom_index_constant_value(
+                producer(loom_op_operands(offset)[1]))),
+            4);
+  auto access = storage.dereference(field, value_field->type(), owner);
+  EXPECT_EQ(loom_buffer_view_buffer(producer(access.view)), field.root);
+  EXPECT_EQ(loom_buffer_view_byte_offset(producer(access.view)),
+            field.byte_offset);
+  EXPECT_TRUE(loom_type_equal(
+      loom_module_value_type(module_, access.view),
+      loom_type_shaped_1d(LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_F32, 1, 0)));
+}
 
 TEST_F(StorageTest, RetainsArrayShapeAndExplicitAlignment) {
   Locations locations(source_.unit(), source_.diagnostics(), module_);

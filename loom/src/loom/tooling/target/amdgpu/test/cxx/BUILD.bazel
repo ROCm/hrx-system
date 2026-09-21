@@ -42,6 +42,7 @@ _MODULES = [
     "integer_increment",
     "llama_rms_norm",
     "pointer_walk",
+    "record_memory",
     "record_values",
     "scheduled_sum",
     "shaped_intrinsics",

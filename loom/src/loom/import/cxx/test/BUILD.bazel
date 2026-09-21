@@ -55,6 +55,8 @@ loom_check_test_suite(
         "offsetof.cxx-test",
         "offsetof_roundtrip.cxx-test",
         "pointers.cxx-test",
+        "record_memory.cxx-test",
+        "record_memory_invalid.cxx-test",
         "records.cxx-test",
         "records_invalid.cxx-test",
         "scalar.cxx-test",
@@ -136,6 +138,16 @@ loom_test(
 )
 
 loom_test(
+    name = "record_memory_values_test",
+    srcs = [
+        "record_memory.cpp",
+        "record_memory_values.loom",
+    ],
+    execution_profiles = [VM_REFERENCE_PROFILE],
+    target_compatible_with = _HOST_COMPATIBILITY,
+)
+
+loom_test(
     name = "volatile_values_test",
     srcs = [
         "volatile_memory.cpp",
@@ -209,6 +221,15 @@ loom_test_module(
     srcs = [
         "storage_kernels.loom",
         "storage_updates.cpp",
+    ],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
+loom_test_module(
+    name = "record_memory_module",
+    srcs = [
+        "record_memory.cpp",
+        "record_memory_kernels.loom",
     ],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )

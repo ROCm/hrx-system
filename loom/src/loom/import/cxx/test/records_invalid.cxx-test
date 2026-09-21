@@ -56,7 +56,7 @@ Value entry(Value value) { return value; }
 // ====
 // Aggregate object addresses need real object storage.
 struct Value { unsigned member; };
-// ERROR@+1: LOWERING/059 "unsupported C++ type: ::Value"
+// ERROR@+1: LOWERING/059 "address-of requires an existing storage-backed element"
 unsigned entry(Value value) { auto* pointer = &value; return pointer->member; }
 
 // ====

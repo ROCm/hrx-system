@@ -419,20 +419,89 @@ loom_type_t Types::get(const cxx::Type* input, cxx::AST* ast) {
     }
     case cxx::TypeKind::kPointer: {
       auto* pointer = cxx::type_cast<cxx::PointerType>(unqualified(input));
-      auto element = get(pointer->elementType(), ast);
-      if ((loom_type_kind(element) != LOOM_TYPE_SCALAR &&
-           loom_type_kind(element) != LOOM_TYPE_VECTOR) ||
-          loom_type_element_type(element) == LOOM_SCALAR_TYPE_I1) {
-        diagnostics_.reject(unit_, ast,
-                            "pointers require a supported non-boolean scalar "
-                            "or vector element");
-      }
+      storage_size(pointer->elementType(), ast);
       return loom_type_buffer();
     }
     default:
       diagnostics_.reject(unit_, ast,
                           "unsupported C++ type: " + cxx::to_string(input));
   }
+}
+
+void Types::require_record_storage(const cxx::ClassType* input,
+                                   cxx::AST* owner) {
+  auto* source = input->definition();
+  if (storage_records_.contains(source)) {
+    return;
+  }
+  auto traits = unit_.typeTraits();
+  if (source) {
+    traits.requireCompleteClass(source);
+    source = input->definition();
+  }
+  if (type_binding(source)) {
+    diagnostics_.reject(unit_, owner,
+                        "Loom source types require SSA value transport");
+  }
+  if (!source || !source->isComplete() || source->isUnion() ||
+      !source->baseClasses().empty() || !traits.is_aggregate(input) ||
+      !traits.is_trivially_copyable(input) ||
+      !traits.has_trivial_destructor(input)) {
+    diagnostics_.reject(
+        unit_, owner,
+        "record storage requires a complete aggregate without unions, bases "
+        "or nontrivial lifecycle operations");
+  }
+  if (source->isPacked() || source->packAlignment()) {
+    diagnostics_.reject(unit_, owner, "packed record storage is not supported");
+  }
+  for (auto* symbol : source->members()) {
+    auto* field = cxx::symbol_cast<cxx::FieldSymbol>(symbol);
+    if (!field || field->isStatic()) {
+      continue;
+    }
+    if (!field->name() || field->isBitField() || field->isNoUniqueAddress()) {
+      diagnostics_.reject(
+          unit_, owner,
+          "record storage requires named fields without bitfields or "
+          "no_unique_address");
+    }
+    if (field->isPacked()) {
+      diagnostics_.reject(unit_, owner,
+                          "packed record storage is not supported");
+    }
+    storage_size(field->type(), owner);
+  }
+  storage_records_.insert(source);
+}
+
+int64_t Types::storage_size(const cxx::Type* input, cxx::AST* owner) {
+  auto traits = unit_.typeTraits();
+  if (traits.is_pointer(input) || traits.is_reference(input) ||
+      traits.is_array(input)) {
+    diagnostics_.reject(
+        unit_, owner,
+        "stored pointers, references and arrays require an object storage "
+        "representation");
+  }
+  if (auto* record = cxx::type_cast<cxx::ClassType>(unqualified(input))) {
+    require_record_storage(record, owner);
+  } else {
+    auto type = get(input, owner);
+    if ((loom_type_kind(type) != LOOM_TYPE_SCALAR &&
+         loom_type_kind(type) != LOOM_TYPE_VECTOR) ||
+        loom_type_element_type(type) == LOOM_SCALAR_TYPE_I1) {
+      diagnostics_.reject(
+          unit_, owner,
+          "memory objects require non-boolean scalar, vector or plain record "
+          "storage");
+    }
+  }
+  auto bytes = unit_.control()->memoryLayout()->sizeOf(input);
+  if (!bytes || *bytes > INT64_MAX) {
+    diagnostics_.reject(unit_, owner, "unknown or unrepresentable object size");
+  }
+  return static_cast<int64_t>(*bytes);
 }
 
 bool Types::is_unsigned(const cxx::Type* type) {
