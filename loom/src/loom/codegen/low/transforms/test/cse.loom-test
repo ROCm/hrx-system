@@ -660,39 +660,6 @@ low.func.def target<test.low.core>(@test_target) @unreachable_blocks_receive_loc
 // ====
 
 
-// Entry is the root of the scope tree even when a backedge reaches it. Local
-// and dominated reuse remain valid without making entry its own parent scope.
-// RUN: pass low-cse
-test.target<low_core> @test_target
-
-low.func.def target<test.low.core>(@test_target) @entry_backedge_cse(%cond: reg<test.i32>, %row: reg<test.i32>) -> (reg<test.i32>) asm {
-^entry:
-  %row_bytes = test.add.i32 %row, %row
-  low.cond_br %cond, ^repeat, ^finish : reg<test.i32>
-^repeat:
-  low.br ^entry(%cond: reg<test.i32>, %row: reg<test.i32>)
-^finish:
-  %result = test.add.i32 %row, %row
-  return %result
-}
-
-// ----
-test.target<low_core> @test_target
-
-low.func.def target<test.low.core>(@test_target) @entry_backedge_cse(%cond: reg<test.i32>, %row: reg<test.i32>) -> (reg<test.i32>) asm {
-^entry:
-  %row_bytes = test.add.i32 %row, %row
-  low.cond_br %cond, ^repeat, ^finish : reg<test.i32>
-^repeat:
-  low.br ^entry(%cond: reg<test.i32>, %row: reg<test.i32>)
-^finish:
-  return %row_bytes
-}
-
-
-// ====
-
-
 // Empty CFG scopes must still reach candidates inserted by their dominator
 // after the scopes were allocated. A barrier in one subtree invalidates the
 // shared root before a later subtree tries to reuse its expression.

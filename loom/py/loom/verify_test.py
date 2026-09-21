@@ -510,6 +510,33 @@ def test_verifier_reports_missing_region_terminator() -> None:
     )
 
 
+def test_verifier_rejects_function_entry_successor() -> None:
+    for from_entry in (False, True):
+        entry = Block()
+        backedge = Block(ops=[Operation(name="test.br", successors=[entry])])
+        entry.ops.append(
+            Operation(name="test.br", successors=[entry if from_entry else backedge])
+        )
+        module = Module()
+        module.add_symbol(_symbol("f", _func(Region(blocks=[entry, backedge]))))
+
+        diagnostics = verify_module(module, ops=ALL_TEST_OPS)
+
+        assert _diagnostic_text_contains(diagnostics, "targets the function entry")
+
+
+def test_verifier_accepts_non_entry_loop_header() -> None:
+    header = Block()
+    header.ops.append(Operation(name="test.br", successors=[header]))
+    entry = Block(ops=[Operation(name="test.br", successors=[header])])
+    module = Module()
+    module.add_symbol(_symbol("f", _func(Region(blocks=[entry, header]))))
+
+    diagnostics = verify_module(module, ops=ALL_TEST_OPS)
+
+    assert not diagnostics.has_errors
+
+
 def test_verifier_reports_empty_block_missing_region_terminator() -> None:
     module = Module()
     module.add_symbol(_symbol("f", _func()))

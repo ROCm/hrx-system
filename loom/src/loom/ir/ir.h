@@ -1180,8 +1180,10 @@ typedef struct loom_func_like_vtable_t {
   // staged group.
   uint8_t specialization_count_attr_index;
 
-  // Body region index. LOOM_REGION_INDEX_NONE for bodyless ops
-  // (func.decl, template.ukernel) that only declare a signature.
+  // Body region index. Its entry block is entered only by calls and has no
+  // internal predecessors: signature arguments retain their initial values.
+  // LOOM_REGION_INDEX_NONE for bodyless ops (func.decl, template.ukernel) that
+  // only declare a signature.
   uint8_t body_region_index;
 
   // Index of the template-family symbol attr on implementation providers.

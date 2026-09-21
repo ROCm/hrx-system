@@ -81,17 +81,18 @@ CHECK-NOT: *func.def inline*
 
 // ====
 
-// Every cloned entry backedge keeps its arguments while calls feed later
+// Every cloned loop header keeps its arguments while calls feed later
 // cloned CFGs.
 // RUN: with-checks pass inline-callables
 
 func.def inline @repeat(%again: i1, %value: i32) -> (i32) {
-^entry:
+  cfg.br ^header(%value: i32)
+^header(%carried: i32):
   cfg.cond_br %again, ^body, ^exit
 ^body:
-  cfg.br ^entry(%again: i1, %value: i32)
+  cfg.br ^header(%carried: i32)
 ^exit:
-  func.return %value : i32
+  func.return %carried : i32
 }
 
 func.def public @caller(%again: i1, %input: i32) -> (i32) {
@@ -104,10 +105,10 @@ func.def public @caller(%again: i1, %input: i32) -> (i32) {
 }
 
 // ----
-CHECK: cfg.cond_br %again*, *
-CHECK: cfg.br *(%again*: i1, %input: i32)
-CHECK: cfg.br *(%again*: i1, %first*: i32)
-CHECK: cfg.br *(%again*: i1, %second*: i32)
+CHECK: cfg.br *(%input: i32)
+CHECK: cfg.cond_br %again, *
+CHECK: cfg.br *(%first*: i32)
+CHECK: cfg.br *(%second*: i32)
 CHECK: func.return %last* : i32
 CHECK-NOT: *func.call*
 CHECK-NOT: *func.def inline*

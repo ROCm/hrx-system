@@ -995,13 +995,13 @@ low.func.def public target<test.low.core>(@target) @retain_phased(%value: reg<te
 }
 
 // ====
-// RUN: pass inline-callables
+// RUN: with-checks pass inline-callables
 
-// An entry backedge carries both the updated value and the remaining count.
-// Cloning the first call must retain those block arguments; consuming the last
-// call preserves the same loop and returns its final value through the join.
-func.def inline @countdown(%value: i32, %remaining: i32) -> (i32) {
-^repeat:
+// A loop header carries both the updated value and the remaining count.
+// Clone and consume preserve both recurrences and the final return value.
+func.def inline @countdown(%input: i32, %count: i32) -> (i32) {
+  cfg.br ^repeat(%input: i32, %count: i32)
+^repeat(%value: i32, %remaining: i32):
   %c0 = scalar.constant 0 : i32
   %has_more = scalar.cmpi sgt, %remaining, %c0 : i32
   cfg.cond_br %has_more, ^step, ^exit
@@ -1025,39 +1025,15 @@ func.def public @consume_countdown(%input: i32, %count: i32) -> (i32) {
 }
 
 // ----
-func.def public @clone_countdown(%input: i32, %count: i32) -> (i32) {
-  cfg.br ^_bb1(%input: i32, %count: i32)
-^_bb1(%value: i32, %remaining: i32):
-  %c0 = scalar.constant 0 : i32
-  %has_more = scalar.cmpi sgt, %remaining, %c0 : i32
-  cfg.cond_br %has_more, ^_bb2, ^_bb3
-^_bb2:
-  %c1 = scalar.constant 1 : i32
-  %updated = test.addi %value, %remaining : i32
-  %next = scalar.subi %remaining, %c1 : i32
-  cfg.br ^_bb1(%updated: i32, %next: i32)
-^_bb3:
-  cfg.br ^_bb4(%value: i32)
-^_bb4(%result: i32):
-  func.return %result : i32
-}
-
-func.def public @consume_countdown(%input: i32, %count: i32) -> (i32) {
-  cfg.br ^_bb1(%input: i32, %count: i32)
-^_bb1(%value: i32, %remaining: i32):
-  %c0 = scalar.constant 0 : i32
-  %has_more = scalar.cmpi sgt, %remaining, %c0 : i32
-  cfg.cond_br %has_more, ^_bb2, ^_bb3
-^_bb2:
-  %c1 = scalar.constant 1 : i32
-  %updated = test.addi %value, %remaining : i32
-  %next = scalar.subi %remaining, %c1 : i32
-  cfg.br ^_bb1(%updated: i32, %next: i32)
-^_bb3:
-  cfg.br ^_bb4(%value: i32)
-^_bb4(%result: i32):
-  func.return %result : i32
-}
+CHECK: func.def public @clone_countdown*
+CHECK: * = test.addi %value*, %remaining* : i32
+CHECK: * = scalar.subi %remaining*, %c1* : i32
+CHECK: cfg.br *(%updated*: i32, %next*: i32)
+CHECK: func.def public @consume_countdown*
+CHECK: * = test.addi %value*, %remaining* : i32
+CHECK: * = scalar.subi %remaining*, %c1* : i32
+CHECK: cfg.br *(%updated*: i32, %next*: i32)
+CHECK-NOT: *func.call*
 
 // ====
 

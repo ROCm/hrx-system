@@ -1391,7 +1391,17 @@ iree_status_t loom_amdgpu_build_feedback_reservation(
               "AMDGPU feedback reservation must be built at the end of a low "
               "block");
 
-  loom_block_t* check_block = builder->ip.block;
+  // Retrying a reservation must not reexecute the caller's preceding work or
+  // reenter a function with assumptions about its initial arguments.
+  loom_block_t* entry_block = builder->ip.block;
+  loom_block_t* check_block = NULL;
+  IREE_RETURN_IF_ERROR(loom_region_insert_block(
+      builder->module, entry_block->parent_region,
+      (uint16_t)(entry_block->region_index + 1), &check_block));
+  loom_op_t* entry_branch_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_br_build(builder, check_block, NULL, 0,
+                                         location, &entry_branch_op));
+  loom_builder_set_block(builder, check_block);
   loom_block_t* attempt_block = NULL;
   IREE_RETURN_IF_ERROR(loom_region_insert_block(
       builder->module, check_block->parent_region,

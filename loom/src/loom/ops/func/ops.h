@@ -252,7 +252,7 @@ typedef enum loom_func_retain_e {
   LOOM_FUNC_RETAIN_COUNT_ = 2,
 } loom_func_retain_t;
 
-// LOOM_OP_FUNC_DEF: Function definition. Callable by name via func.call.
+// LOOM_OP_FUNC_DEF: Function definition. Callable by name via func.call. Function arguments retain their initial values throughout the body, including in dependent result types and predicates. The entry block has no internal predecessors; CFG loops carry changing values on separate header blocks.
 // func.def @negate(%input: f32) -> (f32) {
 //   func.return %input : f32
 // }

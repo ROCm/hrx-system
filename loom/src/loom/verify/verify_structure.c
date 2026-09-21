@@ -657,6 +657,20 @@ void loom_verify_successor_targets(loom_verify_state_t* state,
       };
       loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_024, params,
                                   IREE_ARRAYSIZE(params));
+    } else if (successors[i] == loom_region_const_entry_block(parent_region)) {
+      const loom_func_like_t function =
+          loom_func_like_const_cast(state->module, op->parent_op);
+      if (loom_func_like_isa(function) &&
+          loom_func_like_body(function) == parent_region) {
+        // Signature types and predicates refer to the initial call arguments.
+        // Loop-carried values belong to a separate block's argument tuple.
+        loom_diagnostic_param_t params[] = {
+            loom_param_string(op_name),
+            loom_param_with_field_ref(loom_param_u32(i), successor_ref),
+        };
+        loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_055, params,
+                                    IREE_ARRAYSIZE(params));
+      }
     }
   }
 }

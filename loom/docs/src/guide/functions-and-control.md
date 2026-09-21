@@ -35,6 +35,13 @@ configuration, and target queries make every input source explicit. That
 isolation lets a linker move a function with its dependency closure and lets a
 specializer reason about one callable without hidden lexical state.
 
+Function arguments keep their initial values throughout an invocation. A
+dependent result such as `vector<[%width]xf32>` names the width supplied by the
+caller, and argument predicates describe those same inputs. Structured loops
+bind separate carried values. When authoring CFG directly, a separate loop
+header owns the changing block arguments; branches cannot target the function
+entry block. This contract also applies to template, kernel, and Low bodies.
+
 Functions may return several values. Results remain ordinary SSA values at the
 call site:
 

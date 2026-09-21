@@ -909,6 +909,25 @@ ERR_STRUCTURE_054 = ErrorDef(
     ),
 )
 
+# ERR_STRUCTURE_055: Branch targets a function entry block.
+ERR_STRUCTURE_055 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=55,
+    severity=Severity.ERROR,
+    summary="Branch targets a function entry block.",
+    message=(
+        "successor {successor_index} of '{op_name}' targets the function entry block"
+    ),
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("successor_index", ParamKind.U32),
+    ),
+    fix_hint=(
+        "Branch to a separate loop header so function arguments retain their "
+        "initial values"
+    ),
+)
+
 ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_001,
     ERR_STRUCTURE_002,
@@ -963,4 +982,5 @@ ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_052,
     ERR_STRUCTURE_053,
     ERR_STRUCTURE_054,
+    ERR_STRUCTURE_055,
 )

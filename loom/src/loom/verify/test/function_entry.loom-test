@@ -1,0 +1,110 @@
+// Function signature predicates constrain the initial argument, not each
+// iteration of a recurrence. Entry backedges would invalidate those facts.
+// RUN: verify
+func.def @count_down(%count: i32) -> (i32) where [eq(%count, 3)] {
+^entry:
+  %c0 = scalar.constant 0 : i32
+  %again = scalar.cmpi sgt, %count, %c0 : i32
+  cfg.cond_br %again, ^step, ^exit
+^step:
+  %c1 = scalar.constant 1 : i32
+  %next = scalar.subi %count, %c1 : i32
+  // ERROR@+1: STRUCTURE/055 {op_name="cfg.br", successor_index="0"}
+  cfg.br ^entry(%next: i32)
+^exit:
+  func.return %count : i32
+}
+
+// ====
+
+// A dependent result names the original input width. Rebinding it at the
+// entry could otherwise make a different-shaped value satisfy that signature.
+func.def @swap_widths(%left_width: index, %right_width: index, %left: vector<[%left_width]xf32>, %right: vector<[%right_width]xf32>, %again: i1) -> (vector<[%left_width]xf32>) {
+^entry:
+  cfg.cond_br %again, ^step, ^exit
+^step:
+  // ERROR@+1: STRUCTURE/055
+  cfg.br ^entry(%right_width: index, %left_width: index, %right: vector<[%right_width]xf32>, %left: vector<[%left_width]xf32>, %again: i1)
+^exit:
+  func.return %left : vector<[%left_width]xf32>
+}
+
+// ====
+
+// The entry rule is structural even without arguments or a returning path.
+func.def @spin() {
+^entry:
+  // ERROR@+1: STRUCTURE/055
+  cfg.br ^entry
+}
+
+// ====
+
+// Unreachable edges still obey the function boundary.
+func.def @unreachable_entry_edge() {
+^entry:
+  func.return
+^unreachable:
+  // ERROR@+1: STRUCTURE/055
+  cfg.br ^entry
+}
+
+// ====
+
+// Conditional edges use the same target contract as unconditional branches.
+func.def @conditional_entry_edge() {
+^entry:
+  %repeat = scalar.constant false : i1
+  // ERROR@+1: STRUCTURE/055 {op_name="cfg.cond_br", successor_index="1"}
+  cfg.cond_br %repeat, ^exit, ^entry
+^exit:
+  func.return
+}
+
+// ====
+
+// Template materialization preserves the same immutable signature boundary.
+template.decl @repeat()
+template.def<@repeat> @repeat_impl() {
+^entry:
+  // ERROR@+1: STRUCTURE/055
+  cfg.br ^entry
+}
+
+// ====
+
+kernel.def @kernel_entry() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch() {
+^entry:
+  // ERROR@+1: STRUCTURE/055
+  cfg.br ^entry
+}
+
+// ====
+
+// Low control flow is checked by the shared verifier, independently of the
+// source CFG dialect and without a selected physical target.
+low.func.def target<test.low.core> @low_entry() asm {
+^entry:
+  // ERROR@+1: STRUCTURE/055 {op_name="low.br", successor_index="0"}
+  low.br ^entry
+}
+
+// ====
+
+low.kernel.def target<test.low.core> @low_kernel_entry() asm {
+^entry:
+  // ERROR@+1: STRUCTURE/055
+  low.br ^entry
+}
+
+// ====
+
+// A non-entry header may loop forever, including with no block arguments.
+func.def @ordinary_spin() {
+  cfg.br ^header
+^header:
+  cfg.br ^header
+}

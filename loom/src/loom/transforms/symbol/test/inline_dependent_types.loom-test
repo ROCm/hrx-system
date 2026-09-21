@@ -86,3 +86,70 @@ CHECK: * = scf.if %condition -> (vector<[%width]xf32>) {
 CHECK: scf.yield * : vector<[%width]xf32>
 CHECK: func.return %result : vector<[%width]xf32>
 CHECK-NOT: *template.*
+
+// ====
+
+// Function inputs stay immutable while an ordinary loop header carries both
+// the changing vector and the counter. Two calls exercise clone and consume
+// with distinct dimension identities.
+// RUN: with-checks pass inline-callables
+
+func.def inline @repeat(%width: index, %value: vector<[%width]xf32>, %count: i32) -> (vector<[%width]xf32>) {
+  cfg.br ^header(%value: vector<[%width]xf32>, %count: i32)
+^header(%carried: vector<[%width]xf32>, %remaining: i32):
+  %c0 = scalar.constant 0 : i32
+  %again = scalar.cmpi sgt, %remaining, %c0 : i32
+  cfg.cond_br %again, ^step, ^exit
+^step:
+  %c1 = scalar.constant 1 : i32
+  %next_count = scalar.subi %remaining, %c1 : i32
+  %next_value = vector.addf %carried, %carried : vector<[%width]xf32>
+  cfg.br ^header(%next_value: vector<[%width]xf32>, %next_count: i32)
+^exit:
+  func.return %carried : vector<[%width]xf32>
+}
+
+func.def public @entry(%left_width: index, %right_width: index, %left: vector<[%left_width]xf32>, %right: vector<[%right_width]xf32>, %count: i32) -> (vector<[%left_width]xf32>, vector<[%right_width]xf32>) {
+  %first = func.call @repeat(%left_width, %left, %count) : (index, vector<[%left_width]xf32>, i32) -> (vector<[%left_width]xf32>)
+  %second = func.call @repeat(%right_width, %right, %count) : (index, vector<[%right_width]xf32>, i32) -> (vector<[%right_width]xf32>)
+  func.return %first, %second : vector<[%left_width]xf32>, vector<[%right_width]xf32>
+}
+
+// ----
+CHECK: * = vector.addf %carried*, %carried* : vector<[%left_width]xf32>
+CHECK: * = vector.addf %carried*, %carried* : vector<[%right_width]xf32>
+CHECK: func.return * : vector<[%left_width]xf32>, vector<[%right_width]xf32>
+CHECK-NOT: *func.call*
+
+// ====
+
+// A changing dimension travels with its vector through the loop header and
+// the returned tuple. It is independent of either original input width.
+// RUN: with-checks pass inline-callables
+
+func.def inline @swap(%left_width: index, %right_width: index, %left: vector<[%left_width]xf32>, %right: vector<[%right_width]xf32>, %count: i32) -> (%width: index, vector<[%width]xf32>) {
+  cfg.br ^header(%left_width: index, %right_width: index, %left: vector<[%left_width]xf32>, %right: vector<[%right_width]xf32>, %count: i32)
+^header(%current_width: index, %other_width: index, %current: vector<[%current_width]xf32>, %other: vector<[%other_width]xf32>, %remaining: i32):
+  %c0 = scalar.constant 0 : i32
+  %again = scalar.cmpi sgt, %remaining, %c0 : i32
+  cfg.cond_br %again, ^step, ^exit
+^step:
+  %c1 = scalar.constant 1 : i32
+  %next_count = scalar.subi %remaining, %c1 : i32
+  cfg.br ^header(%other_width: index, %current_width: index, %other: vector<[%other_width]xf32>, %current: vector<[%current_width]xf32>, %next_count: i32)
+^exit:
+  func.return %current_width, %current : index, vector<[%current_width]xf32>
+}
+
+func.def public @entry(%left_width: index, %right_width: index, %left: vector<[%left_width]xf32>, %right: vector<[%right_width]xf32>, %count: i32) -> (%first_width: index, vector<[%first_width]xf32>, %second_width: index, vector<[%second_width]xf32>) {
+  %first_width, %first = func.call @swap(%left_width, %right_width, %left, %right, %count) : (index, index, vector<[%left_width]xf32>, vector<[%right_width]xf32>, i32) -> (index, vector<[%first_width]xf32>)
+  %second_width, %second = func.call @swap(%right_width, %first_width, %right, %first, %count) : (index, index, vector<[%right_width]xf32>, vector<[%first_width]xf32>, i32) -> (index, vector<[%second_width]xf32>)
+  func.return %first_width, %first, %second_width, %second : index, vector<[%first_width]xf32>, index, vector<[%second_width]xf32>
+}
+
+// ----
+CHECK: cfg.br *(%other_width*: index, %current_width*: index, %other*: vector<[%other_width*]xf32>, %current*: vector<[%current_width*]xf32>, %next_count*: i32)
+CHECK: *%first_width*: index, %first*: vector<[%first_width*]xf32>*
+CHECK: *%second_width*: index, %second*: vector<[%second_width*]xf32>*
+CHECK: func.return *
+CHECK-NOT: *func.call*

@@ -1,0 +1,138 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Function inputs bind the vector shape while separate header arguments carry
+// changing values. Independent calls instantiate different widths and counts.
+func.def inline @callable_repeat(%width: index, %value: vector<[%width]xf32>, %count: i32) -> (vector<[%width]xf32>) {
+  cfg.br ^header(%value: vector<[%width]xf32>, %count: i32)
+^header(%carried: vector<[%width]xf32>, %remaining: i32):
+  %c0 = scalar.constant 0 : i32
+  %again = scalar.cmpi sgt, %remaining, %c0 : i32
+  cfg.cond_br %again, ^step, ^exit
+^step:
+  %c1 = scalar.constant 1 : i32
+  %next_count = scalar.subi %remaining, %c1 : i32
+  %next_value = vector.addf %carried, %carried : vector<[%width]xf32>
+  cfg.br ^header(%next_value: vector<[%width]xf32>, %next_count: i32)
+^exit:
+  func.return %carried : vector<[%width]xf32>
+}
+
+// The precondition constrains the initial count; the carried count decreases.
+func.def inline @callable_countdown(%count: i32) -> (i32) where [eq(%count, 3)] {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  cfg.br ^header(%count: i32, %c0: i32)
+^header(%remaining: i32, %total: i32):
+  %again = scalar.cmpi sgt, %remaining, %c0 : i32
+  cfg.cond_br %again, ^step, ^exit
+^step:
+  %next_count = scalar.subi %remaining, %c1 : i32
+  %next_total = scalar.addi %total, %remaining : i32
+  cfg.br ^header(%next_count: i32, %next_total: i32)
+^exit:
+  func.return %total : i32
+}
+
+kernel.def @callable_loops() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%left_count: i32, %right_count: i32, %input: buffer, %output: buffer) {
+  %pair_width = index.constant 2 : index
+  %quad_width = index.constant 4 : index
+  %base = index.constant 0 : offset
+  %quad_base = index.constant 8 : offset
+  %total_base = index.constant 24 : offset
+  %aligned_input = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %aligned_output = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %pair_input = buffer.view %aligned_input[%base] : buffer -> view<2xf32>
+  %quad_input = buffer.view %aligned_input[%quad_base] : buffer -> view<4xf32>
+  %pair_output = buffer.view %aligned_output[%base] : buffer -> view<2xf32>
+  %quad_output = buffer.view %aligned_output[%quad_base] : buffer -> view<4xf32>
+  %total_output = buffer.view %aligned_output[%total_base] : buffer -> view<1xi32>
+  %pair = vector.load %pair_input[0] : view<2xf32> -> vector<[%pair_width]xf32>
+  %quad = vector.load %quad_input[0] : view<4xf32> -> vector<[%quad_width]xf32>
+  %left = func.call @callable_repeat(%pair_width, %pair, %left_count) : (index, vector<[%pair_width]xf32>, i32) -> (vector<[%pair_width]xf32>)
+  %right = func.call @callable_repeat(%quad_width, %quad, %right_count) : (index, vector<[%quad_width]xf32>, i32) -> (vector<[%quad_width]xf32>)
+  %initial_count = scalar.constant 3 : i32
+  %total = func.call @callable_countdown(%initial_count) : (i32) -> (i32)
+  vector.store %left, %pair_output[0] : vector<[%pair_width]xf32>, view<2xf32>
+  vector.store %right, %quad_output[0] : vector<[%quad_width]xf32>, view<4xf32>
+  view.store %total, %total_output[0] : i32, view<1xi32>
+  kernel.return
+}
+
+check.case public @callable_loops_zero {
+  %left_count = check.literal value(0) : i32
+  %right_count = check.literal value(0) : i32
+  %input = check.generate.iota offset(1.0) step(1.0) : tensor<6xf32>
+  %actual = check.generate.fill value(-1.0) : tensor<7xf32>
+  kernel.launch @callable_loops(%left_count, %right_count, %input, %actual) : (i32, i32, tensor<6xf32>, tensor<7xf32>)
+  %left = check.tensor.view %actual offset(0) : tensor<7xf32> -> tensor<2xf32>
+  %right = check.tensor.view %actual offset(8) : tensor<7xf32> -> tensor<4xf32>
+  %total = check.tensor.view %actual offset(24) : tensor<7xf32> -> tensor<1xi32>
+  %expected_left = check.generate.iota offset(1.0) step(1.0) : tensor<2xf32>
+  %expected_right = check.generate.iota offset(3.0) step(1.0) : tensor<4xf32>
+  %expected_total = check.generate.fill value(6) : tensor<1xi32>
+  check.expect.equal actual(%left) expected(%expected_left) : tensor<2xf32>
+  check.expect.equal actual(%right) expected(%expected_right) : tensor<4xf32>
+  check.expect.equal actual(%total) expected(%expected_total) : tensor<1xi32>
+  check.return
+}
+
+check.case public @callable_loops_one {
+  %left_count = check.literal value(1) : i32
+  %right_count = check.literal value(1) : i32
+  %input = check.generate.iota offset(1.0) step(1.0) : tensor<6xf32>
+  %actual = check.generate.fill value(-1.0) : tensor<7xf32>
+  kernel.launch @callable_loops(%left_count, %right_count, %input, %actual) : (i32, i32, tensor<6xf32>, tensor<7xf32>)
+  %left = check.tensor.view %actual offset(0) : tensor<7xf32> -> tensor<2xf32>
+  %right = check.tensor.view %actual offset(8) : tensor<7xf32> -> tensor<4xf32>
+  %total = check.tensor.view %actual offset(24) : tensor<7xf32> -> tensor<1xi32>
+  %expected_left = check.generate.iota offset(2.0) step(2.0) : tensor<2xf32>
+  %expected_right = check.generate.iota offset(6.0) step(2.0) : tensor<4xf32>
+  %expected_total = check.generate.fill value(6) : tensor<1xi32>
+  check.expect.equal actual(%left) expected(%expected_left) : tensor<2xf32>
+  check.expect.equal actual(%right) expected(%expected_right) : tensor<4xf32>
+  check.expect.equal actual(%total) expected(%expected_total) : tensor<1xi32>
+  check.return
+}
+
+check.case public @callable_loops_different_counts {
+  %left_count = check.literal value(3) : i32
+  %right_count = check.literal value(5) : i32
+  %input = check.generate.iota offset(1.0) step(1.0) : tensor<6xf32>
+  %actual = check.generate.fill value(-1.0) : tensor<7xf32>
+  kernel.launch @callable_loops(%left_count, %right_count, %input, %actual) : (i32, i32, tensor<6xf32>, tensor<7xf32>)
+  %left = check.tensor.view %actual offset(0) : tensor<7xf32> -> tensor<2xf32>
+  %right = check.tensor.view %actual offset(8) : tensor<7xf32> -> tensor<4xf32>
+  %total = check.tensor.view %actual offset(24) : tensor<7xf32> -> tensor<1xi32>
+  %expected_left = check.generate.iota offset(8.0) step(8.0) : tensor<2xf32>
+  %expected_right = check.generate.iota offset(96.0) step(32.0) : tensor<4xf32>
+  %expected_total = check.generate.fill value(6) : tensor<1xi32>
+  check.expect.equal actual(%left) expected(%expected_left) : tensor<2xf32>
+  check.expect.equal actual(%right) expected(%expected_right) : tensor<4xf32>
+  check.expect.equal actual(%total) expected(%expected_total) : tensor<1xi32>
+  check.return
+}
+
+check.case public @callable_loops_empty_left {
+  %left_count = check.literal value(0) : i32
+  %right_count = check.literal value(3) : i32
+  %input = check.generate.iota offset(1.0) step(1.0) : tensor<6xf32>
+  %actual = check.generate.fill value(-1.0) : tensor<7xf32>
+  kernel.launch @callable_loops(%left_count, %right_count, %input, %actual) : (i32, i32, tensor<6xf32>, tensor<7xf32>)
+  %left = check.tensor.view %actual offset(0) : tensor<7xf32> -> tensor<2xf32>
+  %right = check.tensor.view %actual offset(8) : tensor<7xf32> -> tensor<4xf32>
+  %total = check.tensor.view %actual offset(24) : tensor<7xf32> -> tensor<1xi32>
+  %expected_left = check.generate.iota offset(1.0) step(1.0) : tensor<2xf32>
+  %expected_right = check.generate.iota offset(24.0) step(8.0) : tensor<4xf32>
+  %expected_total = check.generate.fill value(6) : tensor<1xi32>
+  check.expect.equal actual(%left) expected(%expected_left) : tensor<2xf32>
+  check.expect.equal actual(%right) expected(%expected_right) : tensor<4xf32>
+  check.expect.equal actual(%total) expected(%expected_total) : tensor<1xi32>
+  check.return
+}

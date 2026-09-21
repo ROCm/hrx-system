@@ -36,9 +36,9 @@ iree_status_t loom_callable_resolve_direct_callee(const loom_module_t* module,
 // The callee must be a same-module function-like op. A body consisting of one
 // returning block is spliced linearly. Every other body is cloned into the
 // caller region and requires the default cfg.br operation to express entry and
-// continuation edges. Entry arguments without an internal predecessor are
-// captured directly from the call operands; entry arguments targeted by a
-// callee backedge remain on the cloned block. Every declared return terminator
+// continuation edges. Entry arguments are captured directly from the call
+// operands; verified function entries have no internal predecessors. Loop
+// headers retain their own block arguments. Every declared return terminator
 // branches to one continuation block, whose arguments replace the call results.
 iree_status_t loom_callable_inline_call(loom_rewriter_t* rewriter,
                                         loom_op_t* call_op,

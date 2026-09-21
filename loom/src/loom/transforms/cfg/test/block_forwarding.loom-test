@@ -112,23 +112,25 @@ func.def @odd_forwarding_cycle(%enter: i1, %value: i32) -> (i32) {
 // ====
 // RUN: pass cfg-simplify
 
-// A forwarding cycle may lead back to the function entry. Its effects remain
-// inside the loop; the entry block cannot be selected for removal.
-func.def @entry_cycle() {
-^entry:
+// A forwarding cycle preserves effects in its header. Simplification keeps
+// the function entry outside the loop.
+func.def @effectful_cycle() {
+  cfg.br ^header
+^header:
   %value = index.constant 1 : index
   test.use %value : index
   cfg.br ^forward
 ^forward:
-  cfg.br ^entry
+  cfg.br ^header
 }
 
 // ----
-func.def @entry_cycle() {
-^entry:
+func.def @effectful_cycle() {
+  cfg.br ^header
+^header:
   %value = index.constant 1 : index
   test.use %value : index
-  cfg.br ^entry
+  cfg.br ^header
 }
 
 // ====

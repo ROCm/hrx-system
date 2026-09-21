@@ -845,6 +845,16 @@ class ModuleVerifier:
         *,
         parent_stack: tuple[Operation, ...],
     ) -> None:
+        function_body = None
+        if op_decl is not None:
+            function_body = next(
+                (
+                    interface.body
+                    for interface in op_decl.interfaces
+                    if isinstance(interface, FuncLikeInterface)
+                ),
+                None,
+            )
         for region_index, region in enumerate(operation.regions):
             region_path = f"{path}.regions[{region_index}]"
             region_decl = (
@@ -868,6 +878,9 @@ class ModuleVerifier:
                     block,
                     f"{region_path}.blocks[{block_index}]",
                     region_blocks=region_blocks,
+                    function_entry=region.blocks[0]
+                    if region_decl is not None and region_decl.name == function_body
+                    else None,
                     region_terminator=region_decl.terminator
                     if region_decl is not None
                     else None,
@@ -880,6 +893,7 @@ class ModuleVerifier:
         path: str,
         *,
         region_blocks: set[int],
+        function_entry: Block | None,
         region_terminator: str | None,
         parent_stack: tuple[Operation, ...],
     ) -> None:
@@ -892,6 +906,12 @@ class ModuleVerifier:
                     self.diagnostics.error(
                         "successor is outside the enclosing region",
                         source=op_path,
+                    )
+                elif successor is function_entry:
+                    self.diagnostics.error(
+                        "successor targets the function entry block",
+                        source=op_path,
+                        details=("branch to a separate loop header",),
                     )
             if (
                 op_decl is not None

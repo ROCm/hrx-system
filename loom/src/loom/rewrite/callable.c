@@ -230,8 +230,6 @@ typedef struct loom_callable_cfg_body_t {
   loom_op_kind_t return_op_kind;
   // Number of return exits across all body blocks.
   uint16_t return_count;
-  // Whether an internal edge carries arguments back to the entry block.
-  bool entry_has_predecessor;
 } loom_callable_cfg_body_t;
 
 static iree_status_t loom_callable_validate_cfg_body(
@@ -260,7 +258,6 @@ static iree_status_t loom_callable_validate_cfg_body(
 
   loom_block_t* entry_block = loom_region_entry_block(body);
   uint16_t return_count = 0;
-  bool entry_has_predecessor = false;
   for (uint16_t block_index = 0; block_index < body->block_count;
        ++block_index) {
     loom_block_t* block = loom_region_block(body, block_index);
@@ -283,7 +280,6 @@ static iree_status_t loom_callable_validate_cfg_body(
             IREE_STATUS_FAILED_PRECONDITION,
             "callee terminator successor leaves the callable body");
       }
-      entry_has_predecessor |= successor == entry_block;
     }
     if (terminator->kind != body_descriptor->terminator) {
       continue;
@@ -296,7 +292,6 @@ static iree_status_t loom_callable_validate_cfg_body(
       .entry_block = entry_block,
       .return_op_kind = body_descriptor->terminator,
       .return_count = return_count,
-      .entry_has_predecessor = entry_has_predecessor,
   };
   return iree_ok_status();
 }
@@ -645,15 +640,6 @@ static iree_status_t loom_callable_inline_cfg_call(
                                rewriter->arena, &remap_options, &remap));
 
   const loom_value_slice_t call_operands = loom_call_like_operands(call);
-  const bool capture_entry_arguments = !body->entry_has_predecessor;
-  loom_value_id_t* entry_arguments = NULL;
-  if (!capture_entry_arguments && call_operands.count > 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        rewriter->arena, call_operands.count, sizeof(*entry_arguments),
-        (void**)&entry_arguments));
-    memcpy(entry_arguments, call_operands.values,
-           (iree_host_size_t)call_operands.count * sizeof(*entry_arguments));
-  }
   const loom_location_id_t call_location = call_op->location;
   loom_op_t* caller_parent_op = call_op->parent_op;
 
@@ -677,10 +663,8 @@ static iree_status_t loom_callable_inline_cfg_call(
   loom_block_t* cloned_entry_block = NULL;
   if (iree_status_is_ok(status)) {
     cloned_entry_block = loom_region_block(caller_region, cloned_block_index);
-    if (capture_entry_arguments) {
-      status = loom_callable_capture_cfg_entry_arguments(
-          rewriter, cloned_entry_block, call_operands);
-    }
+    status = loom_callable_capture_cfg_entry_arguments(
+        rewriter, cloned_entry_block, call_operands);
   }
   loom_block_t* continuation_block = NULL;
   if (iree_status_is_ok(status)) {
@@ -751,9 +735,7 @@ static iree_status_t loom_callable_inline_cfg_call(
     loom_builder_set_block(&rewriter->builder, caller_block);
     rewriter->builder.ip.parent_op = caller_parent_op;
     loom_op_t* entry_branch = NULL;
-    status = build_branch(&rewriter->builder, cloned_entry_block,
-                          capture_entry_arguments ? NULL : entry_arguments,
-                          capture_entry_arguments ? 0 : call_operands.count,
+    status = build_branch(&rewriter->builder, cloned_entry_block, NULL, 0,
                           call_location, &entry_branch);
   }
   if (iree_status_is_ok(status) && block_order && block_order->next_blocks) {
@@ -967,15 +949,6 @@ static iree_status_t loom_callable_inline_consuming_cfg_call(
     IREE_RETURN_IF_ERROR(loom_callable_collect_return_ops(body, return_ops));
   }
   const loom_value_slice_t call_operands = loom_call_like_operands(call);
-  const bool capture_entry_arguments = !body->entry_has_predecessor;
-  loom_value_id_t* entry_arguments = NULL;
-  if (!capture_entry_arguments && call_operands.count > 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        rewriter->arena, call_operands.count, sizeof(*entry_arguments),
-        (void**)&entry_arguments));
-    memcpy(entry_arguments, call_operands.values,
-           (iree_host_size_t)call_operands.count * sizeof(*entry_arguments));
-  }
   const loom_value_slice_t call_results = loom_call_like_results(call);
   loom_value_id_t* continuation_arguments = NULL;
   if (call_results.count > 0) {
@@ -1001,7 +974,7 @@ static iree_status_t loom_callable_inline_consuming_cfg_call(
   iree_status_t status = loom_rewriter_move_region_blocks(
       rewriter, body->region, callee.op, caller_region, moved_block_index,
       caller_parent_op, &moved_entry_block);
-  if (iree_status_is_ok(status) && capture_entry_arguments) {
+  if (iree_status_is_ok(status)) {
     status = loom_callable_capture_cfg_entry_arguments(
         rewriter, moved_entry_block, call_operands);
   }
@@ -1052,10 +1025,8 @@ static iree_status_t loom_callable_inline_consuming_cfg_call(
     loom_builder_set_block(&rewriter->builder, caller_block);
     rewriter->builder.ip.parent_op = caller_parent_op;
     loom_op_t* entry_branch = NULL;
-    status =
-        build_branch(&rewriter->builder, moved_entry_block, entry_arguments,
-                     capture_entry_arguments ? 0 : call_operands.count,
-                     call_location, &entry_branch);
+    status = build_branch(&rewriter->builder, moved_entry_block, NULL, 0,
+                          call_location, &entry_branch);
   }
   if (iree_status_is_ok(status)) {
     status = loom_rewriter_erase(rewriter, callee.op);

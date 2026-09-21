@@ -321,7 +321,12 @@ func_def = Op(
     "func.def",
     group=func_ops,
     phase=OpPhase.EXECUTABLE,
-    doc="Function definition. Callable by name via func.call.",
+    doc=(
+        "Function definition. Callable by name via func.call. Function arguments "
+        "retain their initial values throughout the body, including in dependent "
+        "result types and predicates. The entry block has no internal "
+        "predecessors; CFG loops carry changing values on separate header blocks."
+    ),
     traits=[SYMBOL_DEFINE, ISOLATED_FROM_ABOVE],
     attrs=[*_MODIFIER_ATTRS, *_CONTRACT_ATTRS, _RETAIN_ATTR],
     symbol_def=SymbolDefinition(

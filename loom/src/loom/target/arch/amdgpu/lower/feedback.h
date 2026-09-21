@@ -268,7 +268,9 @@ iree_status_t loom_amdgpu_build_feedback_reservation_attempt(
 // length including header and padded payload.
 //
 // This helper emits from the current low block and leaves |builder| positioned
-// at a newly inserted continuation block. The returned values are block
+// at a newly inserted continuation block. A separate retry header contains
+// the capacity checks, so CAS retries preserve preceding caller operations
+// and the channel configuration values. The returned values are block
 // arguments in that continuation. |reserved_mask| is non-zero on the reserved
 // path and zero on the dropped path; producers that must abort can branch on it
 // to choose between report+trap and trap-only paths.

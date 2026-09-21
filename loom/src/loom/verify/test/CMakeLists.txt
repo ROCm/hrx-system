@@ -15,6 +15,7 @@ loom_check_test_suite(
   SRCS
     "attribute_visibility.loom-test"
     "dominance.loom-test"
+    "function_entry.loom-test"
     "isolation.loom-test"
     "operand_dictionary.loom-test"
     "type_visibility.loom-test"

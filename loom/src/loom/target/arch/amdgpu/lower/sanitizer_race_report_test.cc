@@ -592,28 +592,35 @@ TEST_F(AmdgpuSanitizerRaceReportTest, EmitsFatalRaceReportProducerCfg) {
   VerifyModuleOk();
   VerifyLowModuleOk();
 
-  loom_region_t* body = body_block_->parent_region;
-  ASSERT_EQ(body->block_count, 8u);
-  loom_block_t* config_block = body_block_;
-  loom_block_t* feedback_block = loom_region_block(body, 1);
-  loom_block_t* attempt_block = loom_region_block(body, 2);
-  loom_block_t* reserved_block = loom_region_block(body, 3);
-  loom_block_t* continuation_block = loom_region_block(body, 4);
-  loom_block_t* report_block = loom_region_block(body, 5);
-  loom_block_t* dropped_block = loom_region_block(body, 6);
-  loom_block_t* terminal_block = loom_region_block(body, 7);
-
-  const loom_op_t* config_terminator = loom_block_const_last_op(config_block);
+  const loom_op_t* config_terminator = loom_block_const_last_op(body_block_);
   ASSERT_TRUE(loom_low_cond_br_isa(config_terminator));
-  EXPECT_EQ(loom_low_cond_br_true_dest(config_terminator), feedback_block);
-  EXPECT_EQ(loom_low_cond_br_false_dest(config_terminator), terminal_block);
+  loom_block_t* feedback_block = loom_low_cond_br_true_dest(config_terminator);
+  loom_block_t* terminal_block = loom_low_cond_br_false_dest(config_terminator);
+  const loom_op_t* feedback_terminator =
+      loom_block_const_last_op(feedback_block);
+  ASSERT_TRUE(loom_low_br_isa(feedback_terminator));
+  loom_block_t* check_block = loom_low_br_dest(feedback_terminator);
+  const loom_op_t* check_terminator = loom_block_const_last_op(check_block);
+  ASSERT_TRUE(loom_low_cond_br_isa(check_terminator));
+  loom_block_t* attempt_block = loom_low_cond_br_true_dest(check_terminator);
+  loom_block_t* dropped_block = loom_low_cond_br_false_dest(check_terminator);
+  const loom_op_t* attempt_terminator = loom_block_const_last_op(attempt_block);
+  ASSERT_TRUE(loom_low_cond_br_isa(attempt_terminator));
+  // A failed CAS retries capacity checks without reloading channel setup.
+  EXPECT_EQ(loom_low_cond_br_false_dest(attempt_terminator), check_block);
+  EXPECT_NE(check_block, feedback_block);
+  loom_block_t* reserved_block = loom_low_cond_br_true_dest(attempt_terminator);
+  ASSERT_TRUE(loom_low_br_isa(loom_block_const_last_op(reserved_block)));
+  loom_block_t* continuation_block =
+      loom_low_br_dest(loom_block_const_last_op(reserved_block));
   ExpectRegisterType(loom_low_cond_br_condition(config_terminator),
                      LOOM_AMDGPU_REG_CLASS_ID_SCC, 1);
 
   const loom_op_t* continuation_terminator =
       loom_block_const_last_op(continuation_block);
   ASSERT_TRUE(loom_low_cond_br_isa(continuation_terminator));
-  EXPECT_EQ(loom_low_cond_br_true_dest(continuation_terminator), report_block);
+  loom_block_t* report_block =
+      loom_low_cond_br_true_dest(continuation_terminator);
   EXPECT_EQ(loom_low_cond_br_false_dest(continuation_terminator),
             terminal_block);
   ExpectRegisterType(loom_low_cond_br_condition(continuation_terminator),
@@ -630,10 +637,9 @@ TEST_F(AmdgpuSanitizerRaceReportTest, EmitsFatalRaceReportProducerCfg) {
       terminal_block, LOOM_AMDGPU_DESCRIPTOR_REF_S_TRAP);
   EXPECT_TRUE(trap_ops.empty());
 
-  ASSERT_TRUE(loom_low_cond_br_isa(loom_block_const_last_op(feedback_block)));
-  ASSERT_TRUE(loom_low_cond_br_isa(loom_block_const_last_op(attempt_block)));
-  ASSERT_TRUE(loom_low_br_isa(loom_block_const_last_op(reserved_block)));
   ASSERT_TRUE(loom_low_br_isa(loom_block_const_last_op(dropped_block)));
+  EXPECT_EQ(loom_low_br_dest(loom_block_const_last_op(dropped_block)),
+            continuation_block);
 
   std::vector<loom_op_t*> report_b32_stores = OpsForDescriptorRefInBlock(
       report_block, LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_STORE_B32_SADDR);

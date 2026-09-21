@@ -1334,13 +1334,21 @@ TEST_F(AmdgpuFeedbackTest, BuildsReservationCfgWithHotFallthrough) {
       LOOM_LOCATION_UNKNOWN, &reservation));
 
   loom_region_t* body = body_block_->parent_region;
-  ASSERT_EQ(body->block_count, 5u);
-  loom_block_t* check_block = body_block_;
-  loom_block_t* attempt_block = loom_region_block(body, 1);
-  loom_block_t* reserved_block = loom_region_block(body, 2);
-  loom_block_t* continuation_block = loom_region_block(body, 3);
-  loom_block_t* dropped_block = loom_region_block(body, 4);
+  ASSERT_EQ(body->block_count, 6u);
+  loom_block_t* check_block = loom_region_block(body, 1);
+  loom_block_t* attempt_block = loom_region_block(body, 2);
+  loom_block_t* reserved_block = loom_region_block(body, 3);
+  loom_block_t* continuation_block = loom_region_block(body, 4);
+  loom_block_t* dropped_block = loom_region_block(body, 5);
   EXPECT_EQ(builder_.ip.block, continuation_block);
+
+  // Configuration loads stay outside the retry cycle.
+  ASSERT_TRUE(loom_low_br_isa(body_block_->last_op));
+  EXPECT_EQ(loom_low_br_dest(body_block_->last_op), check_block);
+  EXPECT_EQ(
+      loom_value_def_op(loom_module_value(module_, channel_values.ring_base))
+          ->parent_block,
+      body_block_);
 
   EXPECT_EQ(reservation.packet_address.base, channel_values.ring_base);
   EXPECT_EQ(reservation.sequence,
@@ -1449,8 +1457,8 @@ TEST_F(AmdgpuFeedbackTest, TestsReservationSucceededMask) {
   ExpectRegisterType(reserved_scc, LOOM_AMDGPU_REG_CLASS_ID_SCC, 1);
 
   loom_region_t* body = body_block_->parent_region;
-  ASSERT_EQ(body->block_count, 5u);
-  loom_block_t* continuation_block = loom_region_block(body, 3);
+  ASSERT_EQ(body->block_count, 6u);
+  loom_block_t* continuation_block = loom_region_block(body, 4);
   std::vector<loom_op_t*> compare_ops = OpsForDescriptorRefInBlock(
       continuation_block, LOOM_AMDGPU_DESCRIPTOR_REF_S_CMP_LG_U64);
   ASSERT_EQ(compare_ops.size(), 1u);

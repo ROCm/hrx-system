@@ -67,9 +67,11 @@ def test_loop_successors_keep_identity_with_reused_labels(label: str) -> None:
     module = parser.parse(
         "func.def @loop(%condition: i1) {\n"
         "^entry:\n"
+        "  cfg.br ^header\n"
+        "^header:\n"
         "  cfg.br ^body\n"
         "^body:\n"
-        "  cfg.cond_br %condition, ^entry, ^exit\n"
+        "  cfg.cond_br %condition, ^header, ^exit\n"
         "^exit:\n"
         "  func.return\n"
         "}\n",
@@ -83,13 +85,14 @@ def test_loop_successors_keep_identity_with_reused_labels(label: str) -> None:
     assert all(
         block is original for block, original in zip(blocks, before, strict=True)
     )
-    assert [block.label for block in blocks] == [label] * 3
-    entry, body, exit = loaded.body.ops[0].regions[0].blocks
-    assert entry.ops[0].successors[0] is body
-    assert body.ops[0].successors[0] is entry
+    assert [block.label for block in blocks] == [label] * 4
+    entry, header, body, exit = loaded.body.ops[0].regions[0].blocks
+    assert entry.ops[0].successors[0] is header
+    assert header.ops[0].successors[0] is body
+    assert body.ops[0].successors[0] is header
     assert body.ops[0].successors[1] is exit
     assert body.ops[0].operands[0] == entry.arg_ids[0]
-    assert len({entry.label, body.label, exit.label}) == 3
+    assert len({entry.label, header.label, body.label, exit.label}) == 4
     # Single-op printing uses the containing module's label plan too.
     assert printer.print_operation(blocks[0].ops[0], module).startswith("cfg.br ^")
 

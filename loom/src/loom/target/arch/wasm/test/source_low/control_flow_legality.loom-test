@@ -20,8 +20,9 @@ wasm.target<simd128> @target
 // Selecting CFG lowering cannot override a target representation requirement.
 // ERROR@+1: TARGET/089 {descriptor_set="wasm.core.simd128", function_name="source_self_loop", op_name="func.def"}
 func.def target(@target) @source_self_loop() {
-^entry:
-  cfg.br ^entry
+  cfg.br ^header
+^header:
+  cfg.br ^header
 }
 
 // ====
@@ -60,11 +61,12 @@ CHECK-NOT: low.func.def *
 
 wasm.target<simd128> @target
 
-// An entry self-loop has one block but still requires CFG emission.
+// An ordinary loop header requires CFG emission.
 // ERROR@+1: TARGET/089 {descriptor_set="wasm.core.simd128", function_name="low_self_loop", op_name="low.func.def"}
 low.func.def target<wasm.core.simd128>(@target) @low_self_loop() asm {
-^entry:
-  low.br ^entry
+  low.br ^header
+^header:
+  low.br ^header
 }
 
 // ====
