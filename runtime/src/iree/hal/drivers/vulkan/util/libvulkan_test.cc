@@ -64,7 +64,7 @@ TEST(LibVulkanTest, LoadsEnabledHostMemoryExtension) {
       &instance_syms, reinterpret_cast<VkDevice>(&resolver), &device_syms));
   EXPECT_EQ(reinterpret_cast<PFN_vkVoidFunction>(
                 device_syms.vkGetMemoryHostPointerPropertiesEXT),
-            ResolvedFunction);
+            &ResolvedFunction);
 }
 
 TEST(LibVulkanTest, RejectsMissingRequiredCoreSymbol) {
