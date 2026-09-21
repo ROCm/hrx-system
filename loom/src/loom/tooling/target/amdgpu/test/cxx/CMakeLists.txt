@@ -1248,7 +1248,7 @@ loom_execution_test(
     "loom-target-class=gpu"
     "loom-executor=hardware"
   RESOURCE_GROUP
-    "loom-amdgpu-tests"
+    "gpu-device"
   SANITIZER_SUPPRESSIONS
     lsan
     rocm
@@ -1277,7 +1277,7 @@ loom_execution_test(
     "loom-target-class=gpu"
     "loom-executor=hardware"
   RESOURCE_GROUP
-    "loom-amdgpu-tests"
+    "gpu-device"
   SANITIZER_SUPPRESSIONS
     lsan
     rocm

@@ -1,0 +1,58 @@
+diff --git a/src/parser/cxx/dependent_types.cc b/src/parser/cxx/dependent_types.cc
+--- a/src/parser/cxx/dependent_types.cc
++++ b/src/parser/cxx/dependent_types.cc
+@@ -37,10 +37,19 @@
+   return scope;
+ }
+
+ struct IsDependent {
++  struct InitializerVisit {
++    // Initializer borrowed from the source while this visit is active.
++    ExpressionAST* initializer;
++    // Previous active visit in the same dependency query.
++    const InitializerVisit* previous;
++  };
++
+   TranslationUnit* unit = nullptr;
+   std::vector<const Type*> typesUnderExamination;
++  // Stack-local visits bound semantic cycles without allocating query storage.
++  const InitializerVisit* activeInitializer = nullptr;
+
+   [[nodiscard]] auto isDependent(ExpressionAST* ast) -> bool {
+     if (!ast) return false;
+     return visit(*this, ast);
+@@ -224,9 +233,22 @@
+                                                   ExpressionAST* initializer,
+                                                   bool isConstexpr) -> bool {
+     if (!initializer || !isPotentiallyConstant(symbol, isConstexpr))
+       return false;
+-    return isDependent(initializer);
++    return isDependentInitializer(initializer);
++  }
++
++  [[nodiscard]] auto isDependentInitializer(ExpressionAST* initializer) -> bool {
++    for (auto visit = activeInitializer; visit; visit = visit->previous) {
++      // The active visit still checks the initializer's other operands. A back
++      // edge adds no dependence and does not cache a result for the symbol.
++      if (visit->initializer == initializer) return false;
++    }
++    const InitializerVisit visit{initializer, activeInitializer};
++    activeInitializer = &visit;
++    const auto dependent = isDependent(initializer);
++    activeInitializer = visit.previous;
++    return dependent;
+   }
+
+   [[nodiscard]] auto isDependent(const Type* type) -> bool {
+     if (!type) return false;
+@@ -351,9 +373,9 @@
+
+     if (auto var = symbol_cast<VariableSymbol>(symbol)) {
+       if (!var->constValue().has_value()) {
+         if (!var->initializer()) return true;
+-        if (isDependent(var->initializer())) return true;
++        if (isDependentInitializer(var->initializer())) return true;
+       }
+     }
+
+     if (!symbol->type()) return true;

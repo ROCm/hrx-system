@@ -147,6 +147,7 @@ set(IREE_DEP_CXX_PATCHES
   "//build_tools/third_party/cxx:template_lookahead.patch"
   "//build_tools/third_party/cxx:constexpr_branches.patch"
   "//build_tools/third_party/cxx:qualified_template_calls.patch"
+  "//build_tools/third_party/cxx:initializer_dependencies.patch"
 )
 set(IREE_DEP_CXX_PATCH_ARGS
   "-p1"

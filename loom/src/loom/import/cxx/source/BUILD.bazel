@@ -107,6 +107,19 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "dependency_test",
+    srcs = ["dependency_test.cc"],
+    cxxopts = select(CXX_COMPILER_OPTIONS),
+    deps = [
+        ":options",
+        ":source",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//third_party:cxx_parser",
+    ],
+)
+
+loom_cc_test(
     name = "layout_test",
     srcs = ["layout_test.cc"],
     cxxopts = select(CXX_COMPILER_OPTIONS),
@@ -205,6 +218,7 @@ foreach(_target IN ITEMS
     loom_import_cxx_source_locations.objects
     loom_import_cxx_source_constants.objects
     loom_import_cxx_source_constexpr_test
+    loom_import_cxx_source_dependency_test
     loom_import_cxx_source_layout_test
     loom_import_cxx_source_constants_test
     loom_import_cxx_source_source_test

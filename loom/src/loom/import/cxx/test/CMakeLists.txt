@@ -31,6 +31,7 @@ loom_check_test_suite(
     "enums_invalid.cxx-test"
     "frontend.cxx-test"
     "functions.cxx-test"
+    "initializer_dependencies.cxx-test"
     "intrinsics_invalid.cxx-test"
     "kernel_intrinsics.cxx-test"
     "kernel_intrinsics_invalid.cxx-test"

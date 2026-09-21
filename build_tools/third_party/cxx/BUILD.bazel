@@ -18,6 +18,7 @@ exports_files([
     "enum_semantics.patch",
     "include_continuation.patch",
     "include_paths.patch",
+    "initializer_dependencies.patch",
     "macro_operator_locations.patch",
     "member_definition_attributes.patch",
     "packed_bitfields.patch",
