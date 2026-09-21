@@ -103,6 +103,27 @@ def test_scalar_physical_ownership_is_shared_by_core_profiles() -> None:
         assert OperandFlag.STATE_WRITE in operands["low"].flags
 
 
+def test_narrow_memory_widths_are_independent_of_scalar_carriers() -> None:
+    for info in sorted_descriptor_set_infos():
+        if "x86.gpr32" not in info.register_classes:
+            continue
+        spec = x86_descriptors._descriptor_set_for_info(info)
+        descriptors = {descriptor.key: descriptor for descriptor in spec.descriptors}
+        for width in (8, 16):
+            for operation, mnemonic, role in (
+                ("load", "movzx", OperandRole.RESULT),
+                ("store", "mov", OperandRole.OPERAND),
+            ):
+                for addressing in ("", ".indexed"):
+                    descriptor = descriptors[f"x86.scalar.{mnemonic}.{operation}{addressing}.u{width}.gpr32"]
+                    value = descriptor.operands[0]
+                    assert value.role is role
+                    assert tuple(alt.reg_class for alt in value.reg_alts) == ("x86.gpr32",)
+                    assert len(descriptor.effects) == 1
+                    assert descriptor.effects[0].width_bits == width
+                    assert descriptor.mnemonic == mnemonic
+
+
 def test_bitwise_immediate_forms_are_shared_by_scalar_profiles() -> None:
     for info in sorted_descriptor_set_infos():
         # Packed-dot-only profiles do not expose scalar register classes.

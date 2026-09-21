@@ -415,7 +415,8 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
     ),
     *memory_descriptors(
         key_prefix="x86.avx2",
-        mnemonic="vmovdqu32",
+        load_mnemonic="vmovdqu32",
+        store_mnemonic="vmovdqu32",
         register_class=_REG_XMM,
         register_suffix="xmm",
         semantic_type="v128",
@@ -427,7 +428,8 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
     ),
     *memory_descriptors(
         key_prefix="x86.avx2",
-        mnemonic="vmovdqu32",
+        load_mnemonic="vmovdqu32",
+        store_mnemonic="vmovdqu32",
         register_class=_REG_YMM,
         register_suffix="ymm",
         semantic_type="v256",

@@ -39,9 +39,9 @@ class WasmArtifactTest(unittest.TestCase):
                 self._execute_source(source, Path(source).with_suffix(".mjs"))
 
     def test_source_corpora(self):
-        for source_path, oracle in _ARGS.corpus:
-            with self.subTest(source=source_path):
-                source = Path(source_path).read_text()
+        for *source_paths, oracle in _ARGS.corpus:
+            with self.subTest(sources=source_paths):
+                source = "\n".join(Path(path).read_text() for path in source_paths)
                 source = source.replace("func.def @", "func.def public @")
                 source = "wasm.target<simd128> @target\n\n" + source.replace(
                     "func.def public @", "func.def public target(@target) @"
@@ -57,7 +57,14 @@ if __name__ == "__main__":
     parser.add_argument("compiler")
     parser.add_argument("sources", nargs="*")
     parser.add_argument(
-        "--corpus", action="append", nargs=2, default=[], metavar=("SOURCE", "ORACLE")
+        "--corpus",
+        action="append",
+        nargs="+",
+        default=[],
+        metavar="SOURCE_OR_ORACLE",
+        help="One or more source files followed by the JavaScript oracle.",
     )
     _ARGS = parser.parse_args()
+    if any(len(corpus) < 2 for corpus in _ARGS.corpus):
+        parser.error("--corpus requires source files followed by an oracle")
     unittest.main(argv=[sys.argv[0]])

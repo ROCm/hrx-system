@@ -695,7 +695,8 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
         ),
         *memory_descriptors(
             key_prefix="x86.avx512",
-            mnemonic="vmovdqu32",
+            load_mnemonic="vmovdqu32",
+            store_mnemonic="vmovdqu32",
             register_class=_REG_ZMM,
             register_suffix="zmm",
             semantic_type="v512",

@@ -1,0 +1,85 @@
+// RUN: roundtrip
+
+func.def @copy_narrow_static(%input: buffer, %output: buffer) {
+  %byte_base = index.constant 0 : offset
+  %word_base = index.constant 1 : offset
+  %source_bytes = buffer.view %input[%byte_base] : buffer -> view<8xi8>
+  %source_words = buffer.view %input[%word_base] : buffer -> view<4xi16>
+  %destination_bytes = buffer.view %output[%byte_base] : buffer -> view<8xi8>
+  %destination_words = buffer.view %output[%word_base] : buffer -> view<4xi16>
+  %byte = view.load %source_bytes[3] : view<8xi8> -> i8
+  %word = view.load %source_words[2] : view<4xi16> -> i16
+  view.store %byte, %destination_bytes[3] : i8, view<8xi8>
+  view.store %word, %destination_words[2] : i16, view<4xi16>
+  func.return
+}
+
+// ====
+
+func.def @copy_narrow_index(%input: buffer, %output: buffer, %element: index) {
+  %position = index.assume %element [range(%element, 0, 15)] : index
+  %byte_base = index.constant 1 : offset
+  %word_base = index.constant 33 : offset
+  %source_bytes = buffer.view %input[%byte_base] : buffer -> view<16xi8>
+  %source_words = buffer.view %input[%word_base] : buffer -> view<16xi16>
+  %destination_bytes = buffer.view %output[%byte_base] : buffer -> view<16xi8>
+  %destination_words = buffer.view %output[%word_base] : buffer -> view<16xi16>
+  %byte = view.load %source_bytes[%position] : view<16xi8> -> i8
+  %word = view.load %source_words[%position] : view<16xi16> -> i16
+  view.store %byte, %destination_bytes[%position] : i8, view<16xi8>
+  view.store %word, %destination_words[%position] : i16, view<16xi16>
+  func.return
+}
+
+// ====
+
+func.def @copy_narrow_origin(%input: buffer, %output: buffer, %byte_offset: offset, %element: index) {
+  %base = index.assume %byte_offset [range(%byte_offset, 0, 128)] : offset
+  %position = index.assume %element [range(%element, 0, 15)] : index
+  %prefix = index.constant 33 : offset
+  %word_base = index.add %base, %prefix : offset
+  %source_bytes = buffer.view %input[%base] : buffer -> view<16xi8>
+  %source_words = buffer.view %input[%word_base] : buffer -> view<16xi16>
+  %destination_bytes = buffer.view %output[%base] : buffer -> view<16xi8>
+  %destination_words = buffer.view %output[%word_base] : buffer -> view<16xi16>
+  %byte = view.load<volatile> %source_bytes[%position] : view<16xi8> -> i8
+  %word = view.load<volatile> %source_words[%position] : view<16xi16> -> i16
+  view.store<volatile> %byte, %destination_bytes[%position] : i8, view<16xi8>
+  view.store<volatile> %word, %destination_words[%position] : i16, view<16xi16>
+  func.return
+}
+
+// ====
+
+func.def @copy_narrow_stride(%input: buffer, %output: buffer, %column_count: index, %row_index: index, %column_index: index) {
+  %columns = index.assume %column_count [range(%column_count, 1, 16)] : index
+  %row = index.assume %row_index [range(%row_index, 0, 3)] : index
+  %column = index.assume %column_index [range(%column_index, 0, 15), lt(%column_index, %columns)] : index
+  %byte_base = index.constant 1 : offset
+  %word_base = index.constant 65 : offset
+  %source_bytes = buffer.view %input[%byte_base] : buffer -> view<4x[%columns]xi8>
+  %source_words = buffer.view %input[%word_base] : buffer -> view<4x[%columns]xi16>
+  %destination_bytes = buffer.view %output[%byte_base] : buffer -> view<4x[%columns]xi8>
+  %destination_words = buffer.view %output[%word_base] : buffer -> view<4x[%columns]xi16>
+  %byte = view.load %source_bytes[%row, %column] : view<4x[%columns]xi8> -> i8
+  %word = view.load %source_words[%row, %column] : view<4x[%columns]xi16> -> i16
+  view.store %byte, %destination_bytes[%row, %column] : i8, view<4x[%columns]xi8>
+  view.store %word, %destination_words[%row, %column] : i16, view<4x[%columns]xi16>
+  func.return
+}
+
+// ====
+
+func.def @exchange_narrow(%buffer: buffer, %byte_value: i8, %word_value: i16) -> (i32, i32) {
+  %byte_base = index.constant 0 : offset
+  %word_base = index.constant 1 : offset
+  %bytes = buffer.view %buffer[%byte_base] : buffer -> view<1xi8>
+  %words = buffer.view %buffer[%word_base] : buffer -> view<1xi16>
+  %previous_byte = view.load %bytes[0] : view<1xi8> -> i8
+  %previous_word = view.load %words[0] : view<1xi16> -> i16
+  view.store %byte_value, %bytes[0] : i8, view<1xi8>
+  view.store %word_value, %words[0] : i16, view<1xi16>
+  %byte_bits = scalar.extui %previous_byte : i8 to i32
+  %word_bits = scalar.extui %previous_word : i16 to i32
+  func.return %byte_bits, %word_bits : i32, i32
+}

@@ -1,0 +1,37 @@
+// RUN: emit x86-asm @narrow_static fixed=%input:physical_register:7:1 fixed=%output:physical_register:6:1 fixed=%byte:physical_register:8:1 fixed=%word:physical_register:15:1
+x86.target<scalar> @target
+
+low.func.def target<x86.scalar.core>(@target) @narrow_static(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
+  %byte = movzx.load.u8.gpr32 %input {disp32 = 3}
+  %word = movzx.load.u16.gpr32 %input {disp32 = 5}
+  mov.store.u8.gpr32 %byte, %output {disp32 = 3}
+  mov.store.u16.gpr32 %word, %output {disp32 = 5}
+  return
+}
+
+// ----
+  movzx r8d, byte ptr [rdi + 3]
+  movzx r15d, word ptr [rdi + 5]
+  mov byte ptr [rsi + 3], r8b
+  mov word ptr [rsi + 5], r15w
+  ret
+
+// ====
+
+// RUN: emit x86-asm @narrow_indexed fixed=%input:physical_register:12:1 fixed=%output:physical_register:13:1 fixed=%index:physical_register:14:1 fixed=%byte:physical_register:6:1 fixed=%word:physical_register:7:1
+x86.target<scalar> @target
+
+low.func.def target<x86.scalar.core>(@target) @narrow_indexed(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %index: reg<x86.gpr64>) asm {
+  %byte = movzx.load.indexed.u8.gpr32 %input, %index {disp32 = -1, scale = 1}
+  %word = movzx.load.indexed.u16.gpr32 %input, %index {disp32 = 3, scale = 2}
+  mov.store.indexed.u8.gpr32 %byte, %output, %index {disp32 = -1, scale = 1}
+  mov.store.indexed.u16.gpr32 %word, %output, %index {disp32 = 3, scale = 2}
+  return
+}
+
+// ----
+  movzx esi, byte ptr [r12 + r14 - 1]
+  movzx edi, word ptr [r12 + r14 * 2 + 3]
+  mov byte ptr [r13 + r14 - 1], sil
+  mov word ptr [r13 + r14 * 2 + 3], di
+  ret

@@ -211,11 +211,13 @@ _OP_I64_LOAD = 0x29
 _OP_F32_LOAD = 0x2A
 _OP_F64_LOAD = 0x2B
 _OP_I32_LOAD8_U = 0x2D
+_OP_I32_LOAD16_U = 0x2F
 _OP_I32_STORE = 0x36
 _OP_I64_STORE = 0x37
 _OP_F32_STORE = 0x38
 _OP_F64_STORE = 0x39
 _OP_I32_STORE8 = 0x3A
+_OP_I32_STORE16 = 0x3B
 _OP_I32_CONST = 0x41
 _OP_I64_CONST = 0x42
 _OP_F32_CONST = 0x43
@@ -335,20 +337,6 @@ _STORE_EFFECT = Effect(
     width_bits=128,
 )
 
-_BYTE_LOAD_EFFECT = Effect(
-    EffectKind.READ,
-    memory_space=MemorySpace.WASM_MEMORY,
-    flags=(EffectFlag.DEPENDENCY,),
-    width_bits=8,
-)
-
-_BYTE_STORE_EFFECT = Effect(
-    EffectKind.WRITE,
-    memory_space=MemorySpace.WASM_MEMORY,
-    flags=(EffectFlag.DEPENDENCY,),
-    width_bits=8,
-)
-
 _CONTROL_EFFECT = Effect(
     EffectKind.CONTROL,
     flags=(EffectFlag.ORDERED,),
@@ -389,12 +377,15 @@ def _scalar_memory_descriptors(
     width_bits: int,
     load_opcode: int,
     store_opcode: int,
+    *,
+    load_suffix: str = "",
+    store_suffix: str = "",
 ) -> tuple[Descriptor, ...]:
     return (
         Descriptor(
-            key=f"wasm.{type_name}.load",
-            mnemonic=f"{type_name}.load",
-            semantic_tag=f"memory.load.{type_name}",
+            key=f"wasm.{type_name}.load{load_suffix}",
+            mnemonic=f"{type_name}.load{load_suffix}",
+            semantic_tag=f"memory.load{load_suffix}.{type_name}",
             encoding_id=load_opcode,
             operands=(
                 Operand("dst", OperandRole.RESULT, (RegClassAlt(register_class),)),
@@ -416,9 +407,9 @@ def _scalar_memory_descriptors(
             flags=(DescriptorFlag.SIDE_EFFECTING,),
         ),
         Descriptor(
-            key=f"wasm.{type_name}.store",
-            mnemonic=f"{type_name}.store",
-            semantic_tag=f"memory.store.{type_name}",
+            key=f"wasm.{type_name}.store{store_suffix}",
+            mnemonic=f"{type_name}.store{store_suffix}",
+            semantic_tag=f"memory.store{store_suffix}.{type_name}",
             encoding_id=store_opcode,
             operands=(
                 _i32_resource("address"),
@@ -1138,31 +1129,21 @@ WASM_CORE_SIMD128_DESCRIPTOR_SET = DescriptorSet(
                 type_name, register_class, width_bits, load_opcode, store_opcode
             )
         ),
-        Descriptor(
-            key="wasm.i32.load8_u",
-            mnemonic="i32.load8_u",
-            semantic_tag="memory.load.u8.i32",
-            encoding_id=_OP_I32_LOAD8_U,
-            operands=(_i32_result(), _i32_resource("address")),
-            immediates=(_MEMORY_OFFSET_IMMEDIATE,),
-            asm_forms=_asm(
-                results=("dst",), operands=("address",), immediates=("offset",)
-            ),
-            effects=(_BYTE_LOAD_EFFECT,),
-            schedule_class=_SCHEDULE_MEMORY_LOAD,
-            flags=(DescriptorFlag.SIDE_EFFECTING,),
-        ),
-        Descriptor(
-            key="wasm.i32.store8",
-            mnemonic="i32.store8",
-            semantic_tag="memory.store.i8",
-            encoding_id=_OP_I32_STORE8,
-            operands=(_i32_resource("address"), _i32_operand("value")),
-            immediates=(_MEMORY_OFFSET_IMMEDIATE,),
-            asm_forms=_asm(operands=("address", "value"), immediates=("offset",)),
-            effects=(_BYTE_STORE_EFFECT,),
-            schedule_class=_SCHEDULE_MEMORY_STORE,
-            flags=(DescriptorFlag.SIDE_EFFECTING,),
+        *(
+            descriptor
+            for width_bits, load_opcode, store_opcode in (
+                (8, _OP_I32_LOAD8_U, _OP_I32_STORE8),
+                (16, _OP_I32_LOAD16_U, _OP_I32_STORE16),
+            )
+            for descriptor in _scalar_memory_descriptors(
+                "i32",
+                _REG_I32,
+                width_bits,
+                load_opcode,
+                store_opcode,
+                load_suffix=f"{width_bits}_u",
+                store_suffix=str(width_bits),
+            )
         ),
         Descriptor(
             key="wasm.v128.load",

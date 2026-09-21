@@ -1,0 +1,9 @@
+func.def @read_byte(%buffer: buffer, %position: offset) -> (i32) {
+  %byte = buffer.load.i8.u %buffer[%position]
+  func.return %byte : i32
+}
+
+func.def @write_byte(%buffer: buffer, %position: offset, %value: i32) {
+  buffer.store.i8 %value, %buffer[%position]
+  func.return
+}

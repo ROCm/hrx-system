@@ -139,7 +139,6 @@ low.func.def target<x86.avx2.core> abi(object_function) @observe_vector(%source:
 
 // ====
 
-// XFAIL: Scalar i8 view loads and stores lack x86 carrier lowering.
 func.def @observe_byte(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %source = buffer.view %input[%base] : buffer -> view<1xi8>
@@ -149,6 +148,15 @@ func.def @observe_byte(%input: buffer, %output: buffer) {
   view.store<volatile> %first, %destination[0] : i8, view<2xi8>
   view.store<volatile> %second, %destination[1] : i8, view<2xi8>
   func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @observe_byte(%source: reg<x86.gpr64>, %destination: reg<x86.gpr64>) asm {
+  %first = movzx.load.u8.gpr32<volatile> %source {disp32 = 0}
+  %second = movzx.load.u8.gpr32<volatile> %source {disp32 = 0}
+  mov.store.u8.gpr32<volatile> %first, %destination {disp32 = 0}
+  mov.store.u8.gpr32<volatile> %second, %destination {disp32 = 1}
+  return
 }
 
 // ====

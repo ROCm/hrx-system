@@ -36,11 +36,13 @@ enum {
   LOOM_WASM_OPCODE_F32_LOAD = 0x2A,
   LOOM_WASM_OPCODE_F64_LOAD = 0x2B,
   LOOM_WASM_OPCODE_I32_LOAD8_U = 0x2D,
+  LOOM_WASM_OPCODE_I32_LOAD16_U = 0x2F,
   LOOM_WASM_OPCODE_I32_STORE = 0x36,
   LOOM_WASM_OPCODE_I64_STORE = 0x37,
   LOOM_WASM_OPCODE_F32_STORE = 0x38,
   LOOM_WASM_OPCODE_F64_STORE = 0x39,
   LOOM_WASM_OPCODE_I32_STORE8 = 0x3A,
+  LOOM_WASM_OPCODE_I32_STORE16 = 0x3B,
   LOOM_WASM_OPCODE_I32_CONST = 0x41,
   LOOM_WASM_OPCODE_I64_CONST = 0x42,
   LOOM_WASM_OPCODE_I32_EQZ = 0x45,
@@ -883,6 +885,9 @@ static iree_status_t loom_wasm_emit_descriptor_packet(
     case LOOM_WASM_OPCODE_I32_LOAD8_U:
       return loom_wasm_emit_memory_load(state, op, descriptor,
                                         /*alignment_exponent=*/0);
+    case LOOM_WASM_OPCODE_I32_LOAD16_U:
+      return loom_wasm_emit_memory_load(state, op, descriptor,
+                                        /*alignment_exponent=*/1);
     case LOOM_WASM_OPCODE_I32_LOAD:
     case LOOM_WASM_OPCODE_F32_LOAD:
       return loom_wasm_emit_memory_load(state, op, descriptor,
@@ -894,6 +899,9 @@ static iree_status_t loom_wasm_emit_descriptor_packet(
     case LOOM_WASM_OPCODE_I32_STORE8:
       return loom_wasm_emit_memory_store(state, op, descriptor,
                                          /*alignment_exponent=*/0);
+    case LOOM_WASM_OPCODE_I32_STORE16:
+      return loom_wasm_emit_memory_store(state, op, descriptor,
+                                         /*alignment_exponent=*/1);
     case LOOM_WASM_OPCODE_I32_STORE:
     case LOOM_WASM_OPCODE_F32_STORE:
       return loom_wasm_emit_memory_store(state, op, descriptor,

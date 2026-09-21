@@ -11,6 +11,8 @@ low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @offset_forms
   v128.store %address, %vector {offset = 32}
   %byte = i32.load8_u %address {offset = 128}
   i32.store8 %address, %byte {offset = 255}
+  %word = i32.load16_u %address {offset = 129}
+  i32.store16 %address, %word {offset = 257}
   return %scalar
 }
 
@@ -43,6 +45,12 @@ Disassembly of section CODE:
   local.get  0
   local.get  3
   i32.store8  255
+  local.get  0
+  i32.load16_u  129
+  local.set  3
+  local.get  0
+  local.get  3
+  i32.store16  257
   local.get  1
   return
   end

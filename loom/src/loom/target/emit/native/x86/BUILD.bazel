@@ -67,6 +67,7 @@ loom_check_test_suite(
         "test/copies.loom-test",
         "test/high_product.loom-test",
         "test/lanes.loom-test",
+        "test/memory.loom-test",
         "test/schedule_scopes.loom-test",
         "test/selects.loom-test",
         "test/shifts.loom-test",

@@ -29,6 +29,11 @@ static const char* const kX86Gpr8Names[] = {
     "r8b", "r9b", "r10b", "r11b", "r12b", "r13b", "r14b", "r15b",
 };
 
+static const char* const kX86Gpr16Names[] = {
+    "ax",  "cx",  "dx",   "bx",   "sp",   "bp",   "si",   "di",
+    "r8w", "r9w", "r10w", "r11w", "r12w", "r13w", "r14w", "r15w",
+};
+
 static iree_string_view_t loom_x86_descriptor_key(
     const loom_native_assembly_packet_context_t* context) {
   return loom_native_assembly_descriptor_string(
@@ -980,6 +985,10 @@ static iree_status_t loom_x86_append_load_packet(
       memory_effects.read_unknown_width_count == 0) {
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(context->builder, "byte ptr "));
+  } else if (memory_effects.read_byte_count == 2 &&
+             memory_effects.read_unknown_width_count == 0) {
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(context->builder, "word ptr "));
   }
   return loom_x86_append_memory_operand(context, 0, index_operand_index, scale,
                                         displacement);
@@ -1013,14 +1022,26 @@ static iree_status_t loom_x86_append_store_packet(
           context->packet->descriptor);
   const bool is_byte_store = memory_effects.write_byte_count == 1 &&
                              memory_effects.write_unknown_width_count == 0;
+  const bool is_word_store = memory_effects.write_byte_count == 2 &&
+                             memory_effects.write_unknown_width_count == 0;
   if (is_byte_store) {
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(context->builder, "byte ptr "));
+  } else if (is_word_store) {
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(context->builder, "word ptr "));
   }
   IREE_RETURN_IF_ERROR(loom_x86_append_memory_operand(
       context, 1, index_operand_index, scale, displacement));
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(context->builder, ", "));
+  if (is_word_store) {
+    const loom_low_allocation_assignment_t* assignment =
+        loom_low_packet_operand_assignment(context->allocation, context->packet,
+                                           0);
+    return iree_string_builder_append_cstring(
+        context->builder, kX86Gpr16Names[assignment->location_base]);
+  }
   return is_byte_store ? loom_x86_append_gpr8_operand(context, 0)
                        : loom_x86_append_operand(context, 0);
 }

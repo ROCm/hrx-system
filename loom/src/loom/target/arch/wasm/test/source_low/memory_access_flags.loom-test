@@ -139,7 +139,6 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @observe_vector(%sourc
 
 // ====
 
-// XFAIL: Scalar i8 view loads and stores lack Wasm carrier lowering.
 func.def @observe_byte(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %source = buffer.view %input[%base] : buffer -> view<1xi8>
@@ -149,6 +148,15 @@ func.def @observe_byte(%input: buffer, %output: buffer) {
   view.store<volatile> %first, %destination[0] : i8, view<2xi8>
   view.store<volatile> %second, %destination[1] : i8, view<2xi8>
   func.return
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @observe_byte(%source: reg<wasm.i32>, %destination: reg<wasm.i32>) asm {
+  %first = i32.load8_u<volatile> %source
+  %second = i32.load8_u<volatile> %source
+  i32.store8<volatile> %destination, %first
+  i32.store8<volatile> %destination, %second {offset = 1}
+  return
 }
 
 // ====

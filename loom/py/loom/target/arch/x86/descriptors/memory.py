@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Memory effects and full-width x86 load/store descriptor families."""
+"""Memory effects and exact-width x86 load/store descriptor families."""
 
 from __future__ import annotations
 
@@ -49,7 +49,8 @@ def _store_effect(width_bits: int) -> Effect:
 def memory_descriptors(
     *,
     key_prefix: str,
-    mnemonic: str,
+    load_mnemonic: str,
+    store_mnemonic: str,
     register_class: str,
     register_suffix: str,
     semantic_type: str,
@@ -62,15 +63,17 @@ def memory_descriptors(
     """Declares static/indexed loads followed by static/indexed stores."""
     register_alternatives = (RegClassAlt(register_class),)
     descriptors = []
-    for operation, value, effect, schedule_class in (
+    for operation, mnemonic, value, effect, schedule_class in (
         (
             "load",
+            load_mnemonic,
             Operand("dst", OperandRole.RESULT, register_alternatives),
             _load_effect(width_bits),
             load_schedule_class,
         ),
         (
             "store",
+            store_mnemonic,
             Operand("value", OperandRole.OPERAND, register_alternatives),
             _store_effect(width_bits),
             store_schedule_class,

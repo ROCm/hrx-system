@@ -67,10 +67,9 @@ from .common import (
     _gpr32_operand,
     _gpr32_result,
     _gpr64_operand,
-    _gpr64_resource,
     _gpr64_result,
 )
-from .memory import _load_effect, _store_effect, memory_descriptors
+from .memory import memory_descriptors
 
 # Physical IDs follow the native GPR encoding order, including width aliases.
 _GPR_NAMES = (
@@ -624,50 +623,26 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         schedule_class=_SCHEDULE_SCALAR,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     ),
-    Descriptor(
-        key="x86.scalar.movzx.load.indexed.u8.gpr32",
-        mnemonic="movzx",
-        semantic_tag="memory.load.indexed.u8.i32",
-        operands=(
-            _gpr32_result(),
-            _gpr64_resource("base"),
-            _gpr64_resource("index"),
-        ),
-        immediates=(_DISP32_IMMEDIATE, _ADDRESS_SCALE_IMMEDIATE),
-        asm_forms=_asm(
-            mnemonic="movzx.load.indexed.u8.gpr32",
-            results=("dst",),
-            operands=("base", "index"),
-            immediates=("disp32", "scale"),
-            named_immediates=True,
-        ),
-        effects=(_load_effect(8),),
-        schedule_class=_SCHEDULE_MEMORY_LOAD_GPR32,
-        flags=(DescriptorFlag.SIDE_EFFECTING,),
-    ),
-    Descriptor(
-        key="x86.scalar.mov.store.indexed.u8.gpr32",
-        mnemonic="mov",
-        semantic_tag="memory.store.indexed.i8",
-        operands=(
-            _gpr32_operand("value"),
-            _gpr64_resource("base"),
-            _gpr64_resource("index"),
-        ),
-        immediates=(_DISP32_IMMEDIATE, _ADDRESS_SCALE_IMMEDIATE),
-        asm_forms=_asm(
-            mnemonic="mov.store.indexed.u8.gpr32",
-            operands=("value", "base", "index"),
-            immediates=("disp32", "scale"),
-            named_immediates=True,
-        ),
-        effects=(_store_effect(8),),
-        schedule_class=_SCHEDULE_MEMORY_STORE_GPR32,
-        flags=(DescriptorFlag.SIDE_EFFECTING,),
+    *(
+        descriptor
+        for width_bits in (8, 16)
+        for descriptor in memory_descriptors(
+            key_prefix="x86.scalar",
+            load_mnemonic="movzx",
+            store_mnemonic="mov",
+            register_class=_REG_GPR32,
+            register_suffix=f"u{width_bits}.gpr32",
+            semantic_type=f"i{width_bits}",
+            width_bits=width_bits,
+            load_schedule_class=_SCHEDULE_MEMORY_LOAD_GPR32,
+            store_schedule_class=_SCHEDULE_MEMORY_STORE_GPR32,
+            assembly_suffix=f".u{width_bits}.gpr32",
+        )
     ),
     *memory_descriptors(
         key_prefix="x86.scalar",
-        mnemonic="mov",
+        load_mnemonic="mov",
+        store_mnemonic="mov",
         register_class=_REG_GPR32,
         register_suffix="gpr32",
         semantic_type="i32",
@@ -678,7 +653,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
     ),
     *memory_descriptors(
         key_prefix="x86.scalar",
-        mnemonic="mov",
+        load_mnemonic="mov",
+        store_mnemonic="mov",
         register_class=_REG_GPR64,
         register_suffix="gpr64",
         semantic_type="i64",

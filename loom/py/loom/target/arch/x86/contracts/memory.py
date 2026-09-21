@@ -392,15 +392,18 @@ def x86_scalar_memory_rules(
         (_MemoryAddressing.STATIC,),
         tuple(addressing for addressing in _MemoryAddressing if addressing.is_dynamic),
     )
-    for value_type, element_byte_count, register_suffix in (
-        (Scalar("i32"), 4, "gpr32"),
-        (_I64, 8, "gpr64"),
+    for value_type, element_byte_count, register_suffix, load_mnemonic in (
+        (Scalar("i32"), 4, "gpr32", "mov"),
+        (_I64, 8, "gpr64", "mov"),
+        (Scalar("i8"), 1, "u8.gpr32", "movzx"),
+        (Scalar("i16"), 2, "u16.gpr32", "movzx"),
     ):
+        operations = (
+            (view.view_load, SourceMemoryOperation.LOAD, load_mnemonic),
+            (view.view_store, SourceMemoryOperation.STORE, "mov"),
+        )
         for addressings in addressing_groups:
-            for source_op, operation in (
-                (view.view_load, SourceMemoryOperation.LOAD),
-                (view.view_store, SourceMemoryOperation.STORE),
-            ):
+            for source_op, operation, mnemonic in operations:
                 rules.extend(
                     _memory_rule(
                         source_op,
@@ -410,7 +413,7 @@ def x86_scalar_memory_rules(
                         lane_count=1,
                         addressing=addressing,
                         descriptor_key=_memory_descriptor_key(
-                            "x86.scalar.mov",
+                            f"x86.scalar.{mnemonic}",
                             operation,
                             addressing=addressing,
                             register_suffix=register_suffix,
@@ -420,10 +423,7 @@ def x86_scalar_memory_rules(
                     )
                     for addressing in addressings
                 )
-        for source_op, operation in (
-            (view.view_load, SourceMemoryOperation.LOAD),
-            (view.view_store, SourceMemoryOperation.STORE),
-        ):
+        for source_op, operation, mnemonic in operations:
             rules.extend(
                 _full_width_memory_rules(
                     source_op,
@@ -432,7 +432,7 @@ def x86_scalar_memory_rules(
                     element_byte_count=element_byte_count,
                     lane_count=1,
                     descriptor_key=_memory_descriptor_key(
-                        "x86.scalar.mov",
+                        f"x86.scalar.{mnemonic}",
                         operation,
                         addressing=_MemoryAddressing.MATERIALIZE_BYTE_OFFSET,
                         register_suffix=register_suffix,

@@ -1002,25 +1002,65 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
                 load_op if operation is SourceMemoryOperation.LOAD else store_op,
                 operation,
                 value_type,
-                f"wasm.{type_name}.{operation.value}",
+                "wasm."
+                + (
+                    load_descriptor
+                    if operation is SourceMemoryOperation.LOAD
+                    else store_descriptor
+                ),
                 element_byte_count=element_byte_count,
                 lane_count=lane_count,
                 dynamic=dynamic,
             )
             for (
                 value_type,
-                type_name,
+                load_descriptor,
+                store_descriptor,
                 element_byte_count,
                 lane_count,
                 load_op,
                 store_op,
             ) in (
-                (_I32, "i32", 4, 1, view.view_load, view.view_store),
-                (_I64, "i64", 8, 1, view.view_load, view.view_store),
-                (_F32, "f32", 4, 1, view.view_load, view.view_store),
-                (_F64, "f64", 8, 1, view.view_load, view.view_store),
-                (_V4I32, "v128", 4, 4, vector.vector_load, vector.vector_store),
-                (_V4F32, "v128", 4, 4, vector.vector_load, vector.vector_store),
+                (_I32, "i32.load", "i32.store", 4, 1, view.view_load, view.view_store),
+                (_I64, "i64.load", "i64.store", 8, 1, view.view_load, view.view_store),
+                (_F32, "f32.load", "f32.store", 4, 1, view.view_load, view.view_store),
+                (_F64, "f64.load", "f64.store", 8, 1, view.view_load, view.view_store),
+                (
+                    _I8,
+                    "i32.load8_u",
+                    "i32.store8",
+                    1,
+                    1,
+                    view.view_load,
+                    view.view_store,
+                ),
+                (
+                    _I16,
+                    "i32.load16_u",
+                    "i32.store16",
+                    2,
+                    1,
+                    view.view_load,
+                    view.view_store,
+                ),
+                (
+                    _V4I32,
+                    "v128.load",
+                    "v128.store",
+                    4,
+                    4,
+                    vector.vector_load,
+                    vector.vector_store,
+                ),
+                (
+                    _V4F32,
+                    "v128.load",
+                    "v128.store",
+                    4,
+                    4,
+                    vector.vector_load,
+                    vector.vector_store,
+                ),
             )
             for operation in (SourceMemoryOperation.LOAD, SourceMemoryOperation.STORE)
             for dynamic in (True, False)
