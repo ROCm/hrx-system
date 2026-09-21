@@ -479,10 +479,20 @@ def run_bazel_tests(files_from: str | None = None) -> bool:
             "command-line limit; running the full Loom suite"
         )
         command = bazel_test_command()
-    return run_command(
-        command,
-        "Bazel tests",
-    )
+    print("loom presubmit: Bazel tests")
+    print("  " + " ".join(command))
+    sys.stdout.flush()
+    result = subprocess.run(command, cwd=REPO_ROOT)
+    if result.returncode == 0:
+        return True
+    # Bazel reports exit 4 when a valid selection has no tests after filtering.
+    # A hardware-only leaf package has no CPU presubmit tests; the full Loom
+    # suite must always contain tests admitted by these filters.
+    if result.returncode == 4 and BAZEL_FULL_TEST_TARGET not in command:
+        print("loom presubmit: affected packages have no admitted CPU tests")
+        return True
+    print(f"loom presubmit: Bazel tests failed with exit code {result.returncode}")
+    return False
 
 
 def run_cmake_tests() -> bool:
