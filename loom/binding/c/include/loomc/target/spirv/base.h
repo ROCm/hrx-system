@@ -27,6 +27,9 @@ extern "C" {
 
 /// Creates a target environment containing the SPIR-V target package.
 ///
+/// The environment provides target metadata and profile support. Builds with
+/// SPIR-V emission enabled also register the SPIR-V artifact emitter.
+///
 /// @param allocator Host allocator used for target-environment storage.
 /// @param out_target_environment Receives one retained target environment on
 /// success.

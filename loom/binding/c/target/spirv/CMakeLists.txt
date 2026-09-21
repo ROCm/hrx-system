@@ -9,10 +9,22 @@
 
 iree_add_all_subdirs()
 
-if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
+if(LOOM_TARGET_ARCH_SPIRV)
+set(_spirv_platform_copts "")
+if(LOOM_EMIT_SPIRV)
+  list(APPEND _spirv_platform_copts "-DLOOMC_TARGET_SPIRV_EMIT=1")
+else()
+  list(APPEND _spirv_platform_copts "-DLOOMC_TARGET_SPIRV_EMIT=0")
+endif()
+set(_spirv_platform_deps "")
+if(LOOM_EMIT_SPIRV)
+  list(APPEND _spirv_platform_deps loom::target::emit::spirv::module_emitter)
+endif()
 loom_cc_library(
   NAME
     spirv
+  COPTS
+    ${_spirv_platform_copts}
   HDRS
     "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/spirv.h"
     "${PROJECT_SOURCE_DIR}/loom/binding/c/include/loomc/target/spirv/base.h"
@@ -32,8 +44,8 @@ loom_cc_library(
     loom::target::arch::spirv::profile
     loom::target::arch::spirv::provider
     loom::target::arch::spirv::records::target_records
-    loom::target::emit::spirv::module_emitter
     loom::target::types
+    ${_spirv_platform_deps}
   ALWAYSLINK
   PUBLIC
 )

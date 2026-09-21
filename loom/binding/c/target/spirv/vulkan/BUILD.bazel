@@ -20,7 +20,6 @@ loom_cc_library(
     deps = [
         "//loom/binding/c:loomc",
         "//loom/binding/c/target/spirv",
-        "//runtime/src/iree/base/internal",
         "//third_party:vulkan_headers",
     ],
     alwayslink = True,

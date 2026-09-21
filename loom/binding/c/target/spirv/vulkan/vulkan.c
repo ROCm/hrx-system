@@ -8,8 +8,6 @@
 
 #include <string.h>
 
-#include "iree/base/internal/debugging.h"
-
 enum {
   LOOMC_SPIRV_VULKAN_FEATURE_FACT_CAPACITY = 24,
   LOOMC_SPIRV_VULKAN_LIMIT_FACT_CAPACITY = 16,
@@ -247,10 +245,8 @@ static loomc_status_t loomc_spirv_vulkan_query_extensions(
   }
 
   uint32_t extension_count = 0;
-  IREE_LEAK_CHECK_DISABLE_PUSH();
   VkResult result = options->functions->enumerate_device_extension_properties(
       options->physical_device, NULL, &extension_count, NULL);
-  IREE_LEAK_CHECK_DISABLE_POP();
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_status_from_result(result));
   if (extension_count == 0) {
     return loomc_ok_status();
@@ -275,10 +271,8 @@ static loomc_status_t loomc_spirv_vulkan_query_extensions(
       break;
     }
     uint32_t written_extension_count = extension_count;
-    IREE_LEAK_CHECK_DISABLE_PUSH();
     result = options->functions->enumerate_device_extension_properties(
         options->physical_device, NULL, &written_extension_count, extensions);
-    IREE_LEAK_CHECK_DISABLE_POP();
     if (result == VK_INCOMPLETE) {
       extension_count = written_extension_count > extension_count
                             ? written_extension_count
@@ -317,10 +311,8 @@ static loomc_status_t loomc_spirv_vulkan_query_properties(
   VkPhysicalDeviceProperties2 properties2 = {
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
   };
-  IREE_LEAK_CHECK_DISABLE_PUSH();
   options->functions->get_physical_device_properties2(options->physical_device,
                                                       &properties2);
-  IREE_LEAK_CHECK_DISABLE_POP();
   *out_api_version = properties2.properties.apiVersion;
 
   const uint32_t max_spirv_version =
@@ -375,10 +367,8 @@ static loomc_status_t loomc_spirv_vulkan_query_properties(
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
       .pNext = &subgroup_properties,
   };
-  IREE_LEAK_CHECK_DISABLE_PUSH();
   options->functions->get_physical_device_properties2(options->physical_device,
                                                       &properties2);
-  IREE_LEAK_CHECK_DISABLE_POP();
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
       facts,
       (subgroup_properties.supportedOperations &
@@ -451,10 +441,8 @@ static loomc_status_t loomc_spirv_vulkan_query_features(
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
       .pNext = feature_chain,
   };
-  IREE_LEAK_CHECK_DISABLE_PUSH();
   options->functions->get_physical_device_features2(options->physical_device,
                                                     &features2);
-  IREE_LEAK_CHECK_DISABLE_POP();
 
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_feature_fact(
       facts, LOOMC_SPIRV_FEATURE_VULKAN_SHADER, LOOMC_TARGET_FACT_STATE_TRUE,
@@ -542,7 +530,6 @@ loomc_status_t loomc_target_profile_create_spirv_vulkan(
   loomc_spirv_vulkan_profile_facts_t facts = {0};
   uint32_t api_version = 0;
   loomc_spirv_vulkan_extensions_t extensions = {0};
-  IREE_LEAK_CHECK_DISABLE_PUSH();
   loomc_status_t status =
       loomc_spirv_vulkan_query_properties(options, &facts, &api_version);
   if (loomc_status_is_ok(status)) {
@@ -553,7 +540,6 @@ loomc_status_t loomc_target_profile_create_spirv_vulkan(
     status = loomc_spirv_vulkan_query_features(options, api_version,
                                                &extensions, &facts);
   }
-  IREE_LEAK_CHECK_DISABLE_POP();
   LOOMC_RETURN_IF_ERROR(status);
 
   loomc_spirv_profile_options_t profile_options = {

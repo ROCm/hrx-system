@@ -70,6 +70,28 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "vulkan_device_test",
+    srcs = ["vulkan_device_test.cc"],
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = [
+        "iree-build-requirement=vulkan.api",
+        "iree-run-requirement=vulkan.resource.device",
+        "runtime-resource=vulkan-device",
+    ],
+    target_compatible_with = LOOMC_TARGET_SPIRV_VULKAN_COMPATIBLE_WITH,
+    deps = [
+        "//build_tools/vulkan/testing:context",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/spirv",
+        "//loom/binding/c/target/spirv/vulkan",
+        "//loom/binding/c/test:test_util",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//third_party:vulkan_headers",
+    ],
+)
+
+loom_cc_test(
     name = "iree_hal_test",
     srcs = ["iree_hal_test.cc"],
     target_compatible_with = LOOMC_TARGET_SPIRV_IREE_HAL_COMPATIBLE_WITH,

@@ -5,9 +5,11 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "loom/target/arch/spirv/provider.h"
-#include "loom/target/emit/spirv/module_emitter.h"
 #include "loomc/target/spirv/base.h"
 #include "target.h"
+
+#if LOOMC_TARGET_SPIRV_EMIT
+#include "loom/target/emit/spirv/module_emitter.h"
 
 static iree_status_t loomc_spirv_emit_module_artifact(
     const loom_target_emit_request_t* request,
@@ -61,10 +63,13 @@ static const loom_target_provider_t loomc_spirv_emit_target_provider = {
             .count = IREE_ARRAYSIZE(kLoomcSpirvEmitters),
         },
 };
+#endif  // LOOMC_TARGET_SPIRV_EMIT
 
 static const loom_target_provider_t* const kLoomcSpirvTargetProviders[] = {
     &loom_spirv_target_provider,
+#if LOOMC_TARGET_SPIRV_EMIT
     &loomc_spirv_emit_target_provider,
+#endif  // LOOMC_TARGET_SPIRV_EMIT
 };
 
 static const loom_target_provider_set_t loomc_spirv_target_provider_set = {

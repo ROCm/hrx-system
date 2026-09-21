@@ -18,7 +18,6 @@ package(
 
 _SPIRV_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/target/arch:spirv",
-    "//loom/config/emit:spirv",
 ])
 
 loom_cc_library(
@@ -35,6 +34,10 @@ loom_cc_library(
         "//loom/binding/c:include/loomc/target/spirv/emit.h",
         "//loom/binding/c:include/loomc/target/spirv/profile.h",
     ],
+    copts = select({
+        "//loom/config/emit:spirv": ["-DLOOMC_TARGET_SPIRV_EMIT=1"],
+        "//conditions:default": ["-DLOOMC_TARGET_SPIRV_EMIT=0"],
+    }),
     linkstatic = True,
     target_compatible_with = _SPIRV_COMPATIBLE_WITH,
     deps = [
@@ -46,8 +49,10 @@ loom_cc_library(
         "//loom/src/loom/target/arch/spirv:profile",
         "//loom/src/loom/target/arch/spirv:provider",
         "//loom/src/loom/target/arch/spirv/records:target_records",
-        "//loom/src/loom/target/emit/spirv:module_emitter",
         "//runtime/src/iree/base",
-    ],
+    ] + select({
+        "//loom/config/emit:spirv": ["//loom/src/loom/target/emit/spirv:module_emitter"],
+        "//conditions:default": [],
+    }),
     alwayslink = True,
 )

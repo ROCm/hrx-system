@@ -18,7 +18,6 @@ loom_cc_library(
   SRCS
     "vulkan.c"
   DEPS
-    iree::base::internal
     iree::third_party::vulkan_headers
     loom::binding::c::loomc
     loom::binding::c::target::spirv

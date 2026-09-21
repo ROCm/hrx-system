@@ -13,8 +13,8 @@
 /// @file
 /// SPIR-V emission option space.
 ///
-/// Link the SPIR-V target binding package to make the generic
-/// `loomc_emit_module` operation capable of producing
+/// Link the SPIR-V target binding package with SPIR-V emission enabled to make
+/// the generic `loomc_emit_module` operation capable of producing
 /// `LOOMC_ARTIFACT_FORMAT_SPIRV` artifacts. This header owns SPIR-V-specific
 /// emission descriptors that may be attached to `loomc_emit_options_t::next`.
 ///

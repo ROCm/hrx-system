@@ -66,6 +66,31 @@ loom_cc_test(
 )
 endif()
 
+if(IREE_VULKAN_AVAILABLE AND LOOM_TARGET_ARCH_SPIRV)
+loom_cc_test(
+  NAME
+    vulkan_device_test
+  SRCS
+    "vulkan_device_test.cc"
+  DEPS
+    iree::build_tools::vulkan::testing::context
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::third_party::vulkan_headers
+    loom::binding::c::loomc
+    loom::binding::c::target::spirv
+    loom::binding::c::target::spirv::vulkan
+    loom::binding::c::test::test_util
+  LABELS
+    "iree-build-requirement=vulkan.api"
+    "iree-run-requirement=vulkan.resource.device"
+    "runtime-resource=vulkan-device"
+    "iree-build-requirement=loom.target.arch.spirv"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
 if(LOOM_BUILD AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND IREE_HAL_DRIVER_VULKAN AND LOOM_TARGET_ARCH_SPIRV)
 loom_cc_test(
   NAME
