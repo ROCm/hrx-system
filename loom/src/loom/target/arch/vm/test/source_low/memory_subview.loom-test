@@ -1,0 +1,239 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_subview.loom-test
+// RUN: emit source-low output=low
+
+vm.target<core> @target
+
+func.def target(@target) @subview_scalar_strided(%input: buffer, %output: buffer) -> (f32) {
+  %input_base = index.constant 8 : offset
+  %output_base = index.constant 12 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %layout = encoding.layout.strided [8, 1] : encoding<layout>
+  %source = buffer.view %input_aligned[%input_base] : buffer -> view<4x8xf32, %layout>
+  %destination = buffer.view %output_aligned[%output_base] : buffer -> view<4x8xf32, %layout>
+  %source_crop = view.subview %source[1, 2] : view<4x8xf32, %layout> -> view<2x3xf32, %layout>
+  %destination_crop = view.subview %destination[1, 1] : view<4x8xf32, %layout> -> view<2x4xf32, %layout>
+  %value = view.load %source_crop[1, 1] : view<2x3xf32, %layout> -> f32
+  view.store %value, %destination_crop[1, 2] : f32, view<2x4xf32, %layout>
+  func.return %value : f32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @subview_scalar_strided(%source_crop: reg<vm.ref : buffer>, %destination_crop: reg<vm.ref : buffer>) -> (reg<vm.value : f32>) asm {
+  %16 = constant.i64 84
+  %value = buffer.load %source_crop, %16, %16, 0, 8 : reg<vm.value : f32>
+  %18 = constant.i64 88
+  buffer.store %destination_crop, %18, %18, %value, 0, 8
+  return %value
+}
+
+// ====
+
+vm.target<core> @target
+
+func.def target(@target) @subview_nested_dynamic(%input: buffer, %output: buffer, %base: offset, %row: index, %column: index) -> (i32) {
+  %origin = index.assume %base [range(%base, 4, 16), mul(%base, 4)] : offset
+  %row_bounded = index.assume %row [range(%row, 0, 1)] : index
+  %column_bounded = index.assume %column [range(%column, 0, 2)] : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %layout = encoding.layout.strided [8, 1] : encoding<layout>
+  %source = buffer.view %input_aligned[%origin] : buffer -> view<6x8xi32, %layout>
+  %destination = buffer.view %output_aligned[%origin] : buffer -> view<6x8xi32, %layout>
+  %source_outer = view.subview %source[1, 1] : view<6x8xi32, %layout> -> view<4x6xi32, %layout>
+  %source_inner = view.subview %source_outer[1, 2] : view<4x6xi32, %layout> -> view<2x3xi32, %layout>
+  %source_refined = view.refine %source_inner : view<2x3xi32, %layout> -> view<2x3xi32, %layout>
+  %destination_outer = view.subview %destination[1, 0] : view<6x8xi32, %layout> -> view<4x6xi32, %layout>
+  %destination_inner = view.subview %destination_outer[1, 1] : view<4x6xi32, %layout> -> view<2x3xi32, %layout>
+  %value = view.load %source_refined[%row_bounded, %column_bounded] : view<2x3xi32, %layout> -> i32
+  view.store %value, %destination_inner[%row_bounded, %column_bounded] : i32, view<2x3xi32, %layout>
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @subview_nested_dynamic(%source_refined: reg<vm.ref : buffer>, %destination_inner: reg<vm.ref : buffer>, %origin: reg<vm.value : i64>, %row_bounded: reg<vm.value : i64>, %column_bounded: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
+  %26 = constant.i64 76
+  %27 = constant.i64 5 : reg<vm.value>
+  %28 = integer.shift.left.i64 %row_bounded, %27
+  %29 = integer.add.i64 %origin, %28
+  %30 = constant.i64 2 : reg<vm.value>
+  %31 = integer.shift.left.i64 %column_bounded, %30
+  %32 = integer.add.i64 %29, %31
+  %33 = integer.add.i64 %32, %26
+  %value = buffer.load %source_refined, %33, %33, 0, 8 : reg<vm.value : i32>
+  %35 = constant.i64 68
+  %42 = integer.add.i64 %32, %35
+  buffer.store %destination_inner, %42, %42, %value, 0, 8
+  return %value
+}
+
+// ====
+
+vm.target<core> @target
+
+func.def target(@target) @subview_vector_strided(%input: buffer, %output: buffer) {
+  %input_base = index.constant 16 : offset
+  %output_base = index.constant 32 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %layout = encoding.layout.strided [12, 1] : encoding<layout>
+  %source = buffer.view %input_aligned[%input_base] : buffer -> view<4x12xi32, %layout>
+  %destination = buffer.view %output_aligned[%output_base] : buffer -> view<4x12xi32, %layout>
+  %source_crop = view.subview %source[1, 2] : view<4x12xi32, %layout> -> view<2x8xi32, %layout>
+  %destination_crop = view.subview %destination[1, 1] : view<4x12xi32, %layout> -> view<2x8xi32, %layout>
+  %value = vector.load %source_crop[1, 1] : view<2x8xi32, %layout> -> vector<4xi32>
+  vector.store %value, %destination_crop[0, 1] : vector<4xi32>, view<2x8xi32, %layout>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @subview_vector_strided(%source_crop: reg<vm.ref : buffer>, %destination_crop: reg<vm.ref : buffer>) asm {
+  %22 = constant.i64 124
+  %23 = buffer.load %source_crop, %22, %22, 0, 8 : reg<vm.value : i32>
+  %24 = constant.i64 128
+  %25 = buffer.load %source_crop, %24, %24, 0, 8 : reg<vm.value : i32>
+  %26 = constant.i64 132
+  %27 = buffer.load %source_crop, %26, %26, 0, 8 : reg<vm.value : i32>
+  %28 = constant.i64 136
+  %29 = buffer.load %source_crop, %28, %28, 0, 8 : reg<vm.value : i32>
+  %30 = constant.i64 88
+  buffer.store %destination_crop, %30, %30, %23, 0, 8
+  %31 = constant.i64 92
+  buffer.store %destination_crop, %31, %31, %25, 0, 8
+  %32 = constant.i64 96
+  buffer.store %destination_crop, %32, %32, %27, 0, 8
+  %33 = constant.i64 100
+  buffer.store %destination_crop, %33, %33, %29, 0, 8
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+func.def target(@target) @subview_vector_aligned(%input: buffer, %output: buffer) {
+  %input_base = index.constant 32 : offset
+  %output_base = index.constant 64 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 32} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 32} : buffer
+  %layout = encoding.layout.strided [24, 1] : encoding<layout>
+  %source = buffer.view %input_aligned[%input_base] : buffer -> view<4x24xi32, %layout>
+  %destination = buffer.view %output_aligned[%output_base] : buffer -> view<4x24xi32, %layout>
+  %source_crop = view.subview %source[1, 8] : view<4x24xi32, %layout> -> view<2x8xi32, %layout>
+  %destination_crop = view.subview %destination[1, 0] : view<4x24xi32, %layout> -> view<2x16xi32, %layout>
+  %value = vector.load %source_crop[1, 0] : view<2x8xi32, %layout> -> vector<8xi32>
+  vector.store %value, %destination_crop[0, 8] : vector<8xi32>, view<2x16xi32, %layout>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @subview_vector_aligned(%source_crop: reg<vm.ref : buffer>, %destination_crop: reg<vm.ref : buffer>) asm {
+  %30 = constant.i64 256
+  %31 = buffer.load %source_crop, %30, %30, 0, 8 : reg<vm.value : i32>
+  %32 = constant.i64 260
+  %33 = buffer.load %source_crop, %32, %32, 0, 8 : reg<vm.value : i32>
+  %34 = constant.i64 264
+  %35 = buffer.load %source_crop, %34, %34, 0, 8 : reg<vm.value : i32>
+  %36 = constant.i64 268
+  %37 = buffer.load %source_crop, %36, %36, 0, 8 : reg<vm.value : i32>
+  %38 = constant.i64 272
+  %39 = buffer.load %source_crop, %38, %38, 0, 8 : reg<vm.value : i32>
+  %40 = constant.i64 276
+  %41 = buffer.load %source_crop, %40, %40, 0, 8 : reg<vm.value : i32>
+  %42 = constant.i64 280
+  %43 = buffer.load %source_crop, %42, %42, 0, 8 : reg<vm.value : i32>
+  %44 = constant.i64 284
+  %45 = buffer.load %source_crop, %44, %44, 0, 8 : reg<vm.value : i32>
+  %46 = constant.i64 192
+  buffer.store %destination_crop, %46, %46, %31, 0, 8
+  %47 = constant.i64 196
+  buffer.store %destination_crop, %47, %47, %33, 0, 8
+  %48 = constant.i64 200
+  buffer.store %destination_crop, %48, %48, %35, 0, 8
+  %49 = constant.i64 204
+  buffer.store %destination_crop, %49, %49, %37, 0, 8
+  %50 = constant.i64 208
+  buffer.store %destination_crop, %50, %50, %39, 0, 8
+  %51 = constant.i64 212
+  buffer.store %destination_crop, %51, %51, %41, 0, 8
+  %52 = constant.i64 216
+  buffer.store %destination_crop, %52, %52, %43, 0, 8
+  %53 = constant.i64 220
+  buffer.store %destination_crop, %53, %53, %45, 0, 8
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+func.def target(@target) @subview_atomic_strided(%buffer: buffer) -> (i32) {
+  %base = index.constant 8 : offset
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %aligned = buffer.assume.alignment %global {minimum_alignment = 4} : buffer
+  %layout = encoding.layout.strided [8, 1] : encoding<layout>
+  %view = buffer.view %aligned[%base] : buffer -> view<4x8xi32, %layout>
+  %crop = view.subview %view[1, 2] : view<4x8xi32, %layout> -> view<2x3xi32, %layout>
+  %increment = scalar.constant 1 : i32
+  view.atomic.reduce<addi> %increment, %crop[1, 1] {ordering = relaxed, scope = device} : i32, view<2x3xi32, %layout>
+  %old = view.atomic.rmw<addi> %increment, %crop[1, 1] {ordering = relaxed, scope = device} : i32, view<2x3xi32, %layout> -> i32
+  %replacement = scalar.constant 99 : i32
+  %observed = view.atomic.cmpxchg %old, %replacement, %crop[1, 1] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : i32, view<2x3xi32, %layout> -> i32
+  func.return %observed : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @subview_atomic_strided(%crop: reg<vm.ref : buffer>) -> (reg<vm.value : i32>) asm {
+  %increment = constant.i32 1
+  %15 = constant.i64 84
+  buffer.atomic.reduce %crop, %15, %increment, 0, 2, 0, 3
+  %old = buffer.atomic.rmw %crop, %15, %increment, 0, 2, 0, 3 : reg<vm.value : i32>
+  %replacement = constant.i32 99
+  %observed = buffer.atomic.cmpxchg %crop, %15, %old, %replacement, 0, 0, 3 : reg<vm.value : i32>
+  return %observed
+}
+
+// ====
+
+vm.target<core> @target
+
+func.def target(@target) @subview_prefetch_strided(%input: buffer) {
+  %base = index.constant 8 : offset
+  %layout = encoding.layout.strided [8, 1] : encoding<layout>
+  %view = buffer.view %input[%base] : buffer -> view<4x8xi32, %layout>
+  %outer = view.subview %view[1, 1] : view<4x8xi32, %layout> -> view<3x6xi32, %layout>
+  %inner = view.subview %outer[1, 1] : view<3x6xi32, %layout> -> view<2x3xi32, %layout>
+  view.prefetch %inner[0, 1] {intent = read, locality = l1} : view<2x3xi32, %layout>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @subview_prefetch_strided(%input: reg<vm.ref : buffer>) asm {
+  return
+}
+
+// ====
+
+vm.target<core> @target
+
+func.def target(@target) @subview_dense_rows(%input: buffer, %output: buffer) -> (i32) {
+  %base = index.constant 4 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %source = buffer.view %input_aligned[%base] : buffer -> view<4x8xi32>
+  %destination = buffer.view %output_aligned[%base] : buffer -> view<4x8xi32>
+  %source_crop = view.subview %source[1, 0] : view<4x8xi32> -> view<2x8xi32>
+  %destination_crop = view.subview %destination[2, 0] : view<4x8xi32> -> view<2x8xi32>
+  %value = view.load %source_crop[1, 3] : view<2x8xi32> -> i32
+  view.store %value, %destination_crop[0, 4] : i32, view<2x8xi32>
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<vm.core>(@target) abi(vm_function) @subview_dense_rows(%source_crop: reg<vm.ref : buffer>, %destination_crop: reg<vm.ref : buffer>) -> (reg<vm.value : i32>) asm {
+  %14 = constant.i64 80
+  %value = buffer.load %source_crop, %14, %14, 0, 8 : reg<vm.value : i32>
+  %16 = constant.i64 84
+  buffer.store %destination_crop, %16, %16, %value, 0, 8
+  return %value
+}

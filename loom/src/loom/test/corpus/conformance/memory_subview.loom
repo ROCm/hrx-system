@@ -1,0 +1,280 @@
+kernel.def @subview_scalar_strided() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %input_base = index.constant 8 : offset
+  %output_base = index.constant 12 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %layout = encoding.layout.strided [8, 1] : encoding<layout>
+  %source = buffer.view %input_aligned[%input_base] : buffer -> view<4x8xf32, %layout>
+  %destination = buffer.view %output_aligned[%output_base] : buffer -> view<4x8xf32, %layout>
+  %source_crop = view.subview %source[1, 2] : view<4x8xf32, %layout> -> view<2x3xf32, %layout>
+  %destination_crop = view.subview %destination[1, 1] : view<4x8xf32, %layout> -> view<2x4xf32, %layout>
+  %value = view.load %source_crop[1, 1] : view<2x3xf32, %layout> -> f32
+  view.store %value, %destination_crop[1, 2] : f32, view<2x4xf32, %layout>
+  kernel.return
+}
+
+kernel.def @subview_nested_dynamic() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %base: offset, %row: index, %column: index) {
+  %origin = index.assume %base [range(%base, 4, 16), mul(%base, 4)] : offset
+  %row_bounded = index.assume %row [range(%row, 0, 1)] : index
+  %column_bounded = index.assume %column [range(%column, 0, 2)] : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %layout = encoding.layout.strided [8, 1] : encoding<layout>
+  %source = buffer.view %input_aligned[%origin] : buffer -> view<6x8xi32, %layout>
+  %destination = buffer.view %output_aligned[%origin] : buffer -> view<6x8xi32, %layout>
+  %source_outer = view.subview %source[1, 1] : view<6x8xi32, %layout> -> view<4x6xi32, %layout>
+  %source_inner = view.subview %source_outer[1, 2] : view<4x6xi32, %layout> -> view<2x3xi32, %layout>
+  %source_refined = view.refine %source_inner : view<2x3xi32, %layout> -> view<2x3xi32, %layout>
+  %destination_outer = view.subview %destination[1, 0] : view<6x8xi32, %layout> -> view<4x6xi32, %layout>
+  %destination_inner = view.subview %destination_outer[1, 1] : view<4x6xi32, %layout> -> view<2x3xi32, %layout>
+  %value = view.load %source_refined[%row_bounded, %column_bounded] : view<2x3xi32, %layout> -> i32
+  view.store %value, %destination_inner[%row_bounded, %column_bounded] : i32, view<2x3xi32, %layout>
+  kernel.return
+}
+
+kernel.def @subview_vector_strided() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %input_base = index.constant 16 : offset
+  %output_base = index.constant 32 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %layout = encoding.layout.strided [12, 1] : encoding<layout>
+  %source = buffer.view %input_aligned[%input_base] : buffer -> view<4x12xi32, %layout>
+  %destination = buffer.view %output_aligned[%output_base] : buffer -> view<4x12xi32, %layout>
+  %source_crop = view.subview %source[1, 2] : view<4x12xi32, %layout> -> view<2x8xi32, %layout>
+  %destination_crop = view.subview %destination[1, 1] : view<4x12xi32, %layout> -> view<2x8xi32, %layout>
+  %value = vector.load %source_crop[1, 1] : view<2x8xi32, %layout> -> vector<4xi32>
+  vector.store %value, %destination_crop[0, 1] : vector<4xi32>, view<2x8xi32, %layout>
+  kernel.return
+}
+
+kernel.def @subview_dense_rows() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 4 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %source = buffer.view %input_aligned[%base] : buffer -> view<4x8xi32>
+  %destination = buffer.view %output_aligned[%base] : buffer -> view<4x8xi32>
+  %source_crop = view.subview %source[1, 0] : view<4x8xi32> -> view<2x8xi32>
+  %destination_crop = view.subview %destination[2, 0] : view<4x8xi32> -> view<2x8xi32>
+  %value = view.load %source_crop[1, 3] : view<2x8xi32> -> i32
+  view.store %value, %destination_crop[0, 4] : i32, view<2x8xi32>
+  kernel.return
+}
+
+// Source word: 2 + (1 + 1) * 8 + (2 + 1) = 21.
+// Destination word: 3 + (1 + 1) * 8 + (1 + 2) = 22.
+check.case public @subview_scalar_origins {
+  %input = check.generate.iota offset(100.0) step(1.0) : tensor<36xf32>
+  %input_expected = check.generate.iota offset(100.0) step(1.0) : tensor<36xf32>
+  %output = check.generate.fill value(-99.0) : tensor<36xf32>
+  kernel.launch @subview_scalar_strided(%input, %output) : (tensor<36xf32>, tensor<36xf32>)
+  %actual = check.tensor.view %output offset(88) : tensor<36xf32> -> tensor<1xf32>
+  %expected = check.generate.iota offset(121.0) step(1.0) : tensor<1xf32>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<1xf32>
+  %prefix = check.tensor.view %output offset(0) : tensor<36xf32> -> tensor<22xf32>
+  %prefix_expected = check.generate.fill value(-99.0) : tensor<22xf32>
+  check.expect.bitwise actual(%prefix) expected(%prefix_expected) : tensor<22xf32>
+  %suffix = check.tensor.view %output offset(92) : tensor<36xf32> -> tensor<13xf32>
+  %suffix_expected = check.generate.fill value(-99.0) : tensor<13xf32>
+  check.expect.bitwise actual(%suffix) expected(%suffix_expected) : tensor<13xf32>
+  check.expect.bitwise actual(%input) expected(%input_expected) : tensor<36xf32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+check.case public @subview_nested_base4_row0_column0 {
+  %base = check.literal value(4) : offset
+  %row = check.literal value(0) : index
+  %column = check.literal value(0) : index
+  %input = check.generate.iota offset(100) step(1) : tensor<52xi32>
+  %input_expected = check.generate.iota offset(100) step(1) : tensor<52xi32>
+  %output = check.generate.fill value(-99) : tensor<52xi32>
+  kernel.launch @subview_nested_dynamic(%input, %output, %base, %row, %column) : (tensor<52xi32>, tensor<52xi32>, offset, index, index)
+  %actual = check.tensor.view %output offset(72) : tensor<52xi32> -> tensor<1xi32>
+  %expected = check.generate.iota offset(120) step(1) : tensor<1xi32>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<1xi32>
+  %prefix = check.tensor.view %output offset(0) : tensor<52xi32> -> tensor<18xi32>
+  %prefix_expected = check.generate.fill value(-99) : tensor<18xi32>
+  check.expect.bitwise actual(%prefix) expected(%prefix_expected) : tensor<18xi32>
+  %suffix = check.tensor.view %output offset(76) : tensor<52xi32> -> tensor<33xi32>
+  %suffix_expected = check.generate.fill value(-99) : tensor<33xi32>
+  check.expect.bitwise actual(%suffix) expected(%suffix_expected) : tensor<33xi32>
+  check.expect.bitwise actual(%input) expected(%input_expected) : tensor<52xi32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+check.case public @subview_nested_base12_row1_column2 {
+  %base = check.literal value(12) : offset
+  %row = check.literal value(1) : index
+  %column = check.literal value(2) : index
+  %input = check.generate.iota offset(100) step(1) : tensor<52xi32>
+  %input_expected = check.generate.iota offset(100) step(1) : tensor<52xi32>
+  %output = check.generate.fill value(-99) : tensor<52xi32>
+  kernel.launch @subview_nested_dynamic(%input, %output, %base, %row, %column) : (tensor<52xi32>, tensor<52xi32>, offset, index, index)
+  %actual = check.tensor.view %output offset(120) : tensor<52xi32> -> tensor<1xi32>
+  %expected = check.generate.iota offset(132) step(1) : tensor<1xi32>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<1xi32>
+  %prefix = check.tensor.view %output offset(0) : tensor<52xi32> -> tensor<30xi32>
+  %prefix_expected = check.generate.fill value(-99) : tensor<30xi32>
+  check.expect.bitwise actual(%prefix) expected(%prefix_expected) : tensor<30xi32>
+  %suffix = check.tensor.view %output offset(124) : tensor<52xi32> -> tensor<21xi32>
+  %suffix_expected = check.generate.fill value(-99) : tensor<21xi32>
+  check.expect.bitwise actual(%suffix) expected(%suffix_expected) : tensor<21xi32>
+  check.expect.bitwise actual(%input) expected(%input_expected) : tensor<52xi32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+check.case public @subview_nested_base16_row1_column1 {
+  %base = check.literal value(16) : offset
+  %row = check.literal value(1) : index
+  %column = check.literal value(1) : index
+  %input = check.generate.iota offset(100) step(1) : tensor<52xi32>
+  %input_expected = check.generate.iota offset(100) step(1) : tensor<52xi32>
+  %output = check.generate.fill value(-99) : tensor<52xi32>
+  kernel.launch @subview_nested_dynamic(%input, %output, %base, %row, %column) : (tensor<52xi32>, tensor<52xi32>, offset, index, index)
+  %actual = check.tensor.view %output offset(120) : tensor<52xi32> -> tensor<1xi32>
+  %expected = check.generate.iota offset(132) step(1) : tensor<1xi32>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<1xi32>
+  %prefix = check.tensor.view %output offset(0) : tensor<52xi32> -> tensor<30xi32>
+  %prefix_expected = check.generate.fill value(-99) : tensor<30xi32>
+  check.expect.bitwise actual(%prefix) expected(%prefix_expected) : tensor<30xi32>
+  %suffix = check.tensor.view %output offset(124) : tensor<52xi32> -> tensor<21xi32>
+  %suffix_expected = check.generate.fill value(-99) : tensor<21xi32>
+  check.expect.bitwise actual(%suffix) expected(%suffix_expected) : tensor<21xi32>
+  check.expect.bitwise actual(%input) expected(%input_expected) : tensor<52xi32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+// Source words 4 + (1 + 1) * 12 + (2 + 1) = 31 through 34.
+// Destination words 8 + 1 * 12 + (1 + 1) = 22 through 25.
+check.case public @subview_vector_origins {
+  %input = check.generate.iota offset(100) step(1) : tensor<56xi32>
+  %input_expected = check.generate.iota offset(100) step(1) : tensor<56xi32>
+  %output = check.generate.fill value(-99) : tensor<56xi32>
+  kernel.launch @subview_vector_strided(%input, %output) : (tensor<56xi32>, tensor<56xi32>)
+  %actual = check.tensor.view %output offset(88) : tensor<56xi32> -> tensor<4xi32>
+  %expected = check.generate.iota offset(131) step(1) : tensor<4xi32>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<4xi32>
+  %prefix = check.tensor.view %output offset(0) : tensor<56xi32> -> tensor<22xi32>
+  %prefix_expected = check.generate.fill value(-99) : tensor<22xi32>
+  check.expect.bitwise actual(%prefix) expected(%prefix_expected) : tensor<22xi32>
+  %suffix = check.tensor.view %output offset(104) : tensor<56xi32> -> tensor<30xi32>
+  %suffix_expected = check.generate.fill value(-99) : tensor<30xi32>
+  check.expect.bitwise actual(%suffix) expected(%suffix_expected) : tensor<30xi32>
+  check.expect.bitwise actual(%input) expected(%input_expected) : tensor<56xi32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+check.case public @subview_dense_leading_extent {
+  %input = check.generate.iota offset(100) step(1) : tensor<36xi32>
+  %input_expected = check.generate.iota offset(100) step(1) : tensor<36xi32>
+  %output = check.generate.fill value(-99) : tensor<36xi32>
+  kernel.launch @subview_dense_rows(%input, %output) : (tensor<36xi32>, tensor<36xi32>)
+  %actual = check.tensor.view %output offset(84) : tensor<36xi32> -> tensor<1xi32>
+  %expected = check.generate.iota offset(120) step(1) : tensor<1xi32>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<1xi32>
+  %prefix = check.tensor.view %output offset(0) : tensor<36xi32> -> tensor<21xi32>
+  %prefix_expected = check.generate.fill value(-99) : tensor<21xi32>
+  check.expect.bitwise actual(%prefix) expected(%prefix_expected) : tensor<21xi32>
+  %suffix = check.tensor.view %output offset(88) : tensor<36xi32> -> tensor<14xi32>
+  %suffix_expected = check.generate.fill value(-99) : tensor<14xi32>
+  check.expect.bitwise actual(%suffix) expected(%suffix_expected) : tensor<14xi32>
+  check.expect.bitwise actual(%input) expected(%input_expected) : tensor<36xi32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+kernel.def @subview_atomic_origins() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 8 : offset
+  %output_base = index.constant 0 : offset
+  %aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %layout = encoding.layout.strided [8, 1] : encoding<layout>
+  %view = buffer.view %aligned[%base] : buffer -> view<4x8xi32, %layout>
+  %crop = view.subview %view[1, 2] : view<4x8xi32, %layout> -> view<2x3xi32, %layout>
+  %increment = scalar.constant 1 : i32
+  view.atomic.reduce<addi> %increment, %crop[1, 1] {ordering = relaxed, scope = device} : i32, view<2x3xi32, %layout>
+  %old = view.atomic.rmw<addi> %increment, %crop[1, 1] {ordering = relaxed, scope = device} : i32, view<2x3xi32, %layout> -> i32
+  %expected = scalar.addi %old, %increment : i32
+  %replacement = scalar.constant 99 : i32
+  %observed = view.atomic.cmpxchg %expected, %replacement, %crop[1, 1] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : i32, view<2x3xi32, %layout> -> i32
+  %results = buffer.view %output[%output_base] : buffer -> view<2xi32>
+  view.store %old, %results[0] : i32, view<2xi32>
+  view.store %observed, %results[1] : i32, view<2xi32>
+  kernel.return
+}
+
+check.case public @subview_atomic_returns_and_guards {
+  %input = check.generate.iota offset(100) step(1) : tensor<36xi32>
+  %output = check.generate.fill value(-99) : tensor<2xi32>
+  kernel.launch @subview_atomic_origins(%input, %output) : (tensor<36xi32>, tensor<2xi32>)
+  %expected = check.generate.iota offset(122) step(1) : tensor<2xi32>
+  check.expect.bitwise actual(%output) expected(%expected) : tensor<2xi32>
+  %changed = check.tensor.view %input offset(84) : tensor<36xi32> -> tensor<1xi32>
+  %replacement = check.generate.fill value(99) : tensor<1xi32>
+  check.expect.bitwise actual(%changed) expected(%replacement) : tensor<1xi32>
+  %prefix = check.tensor.view %input offset(0) : tensor<36xi32> -> tensor<21xi32>
+  %prefix_expected = check.generate.iota offset(100) step(1) : tensor<21xi32>
+  check.expect.bitwise actual(%prefix) expected(%prefix_expected) : tensor<21xi32>
+  %suffix = check.tensor.view %input offset(88) : tensor<36xi32> -> tensor<14xi32>
+  %suffix_expected = check.generate.iota offset(122) step(1) : tensor<14xi32>
+  check.expect.bitwise actual(%suffix) expected(%suffix_expected) : tensor<14xi32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+kernel.def @subview_vector_aligned() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %input_base = index.constant 32 : offset
+  %output_base = index.constant 64 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 32} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 32} : buffer
+  %layout = encoding.layout.strided [24, 1] : encoding<layout>
+  %source = buffer.view %input_aligned[%input_base] : buffer -> view<4x24xi32, %layout>
+  %destination = buffer.view %output_aligned[%output_base] : buffer -> view<4x24xi32, %layout>
+  %source_crop = view.subview %source[1, 8] : view<4x24xi32, %layout> -> view<2x8xi32, %layout>
+  %destination_crop = view.subview %destination[1, 0] : view<4x24xi32, %layout> -> view<2x16xi32, %layout>
+  %value = vector.load %source_crop[1, 0] : view<2x8xi32, %layout> -> vector<8xi32>
+  vector.store %value, %destination_crop[0, 8] : vector<8xi32>, view<2x16xi32, %layout>
+  kernel.return
+}
+
+// Source words 8 + (1 + 1) * 24 + 8 = 64 through 71.
+// Destination words 16 + 1 * 24 + 8 = 48 through 55.
+check.case public @subview_vector_aligned_guards {
+  %input = check.generate.iota offset(100) step(1) : tensor<112xi32>
+  %input_expected = check.generate.iota offset(100) step(1) : tensor<112xi32>
+  %output = check.generate.fill value(-99) : tensor<112xi32>
+  kernel.launch @subview_vector_aligned(%input, %output) : (tensor<112xi32>, tensor<112xi32>)
+  %actual = check.tensor.view %output offset(192) : tensor<112xi32> -> tensor<8xi32>
+  %expected = check.generate.iota offset(164) step(1) : tensor<8xi32>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<8xi32>
+  %prefix = check.tensor.view %output offset(0) : tensor<112xi32> -> tensor<48xi32>
+  %prefix_expected = check.generate.fill value(-99) : tensor<48xi32>
+  check.expect.bitwise actual(%prefix) expected(%prefix_expected) : tensor<48xi32>
+  %suffix = check.tensor.view %output offset(224) : tensor<112xi32> -> tensor<56xi32>
+  %suffix_expected = check.generate.fill value(-99) : tensor<56xi32>
+  check.expect.bitwise actual(%suffix) expected(%suffix_expected) : tensor<56xi32>
+  check.expect.bitwise actual(%input) expected(%input_expected) : tensor<112xi32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}

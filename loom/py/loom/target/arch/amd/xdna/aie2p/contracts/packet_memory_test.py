@@ -240,10 +240,7 @@ def test_fused_packet_memory_rules_preserve_graph_and_state_contracts() -> None:
         source_node = rule.source_nodes[0]
         memory_emit = _source_memory_emit(rule)
         assert memory_emit.descriptor == rule.descriptor
-        assert (
-            memory_emit.source_memory.address_layout
-            is SourceMemoryAddressLayout.COMPACT_ROW_MAJOR
-        )
+        assert memory_emit.source_memory.address_layout is SourceMemoryAddressLayout.ANY
 
         if rule.source_op is vector.vector_load:
             assert source_node.relation is SourceNodeRelation.ADJACENT_UNIQUE_USER

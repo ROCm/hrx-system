@@ -1,0 +1,265 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_subview.loom-test
+// RUN: emit source-low output=low control-flow=structured-low
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @subview_scalar_strided(%input: buffer, %output: buffer) -> (f32) {
+  %input_base = index.constant 8 : offset
+  %output_base = index.constant 12 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %layout = encoding.layout.strided [8, 1] : encoding<layout>
+  %source = buffer.view %input_aligned[%input_base] : buffer -> view<4x8xf32, %layout>
+  %destination = buffer.view %output_aligned[%output_base] : buffer -> view<4x8xf32, %layout>
+  %source_crop = view.subview %source[1, 2] : view<4x8xf32, %layout> -> view<2x3xf32, %layout>
+  %destination_crop = view.subview %destination[1, 1] : view<4x8xf32, %layout> -> view<2x4xf32, %layout>
+  %value = view.load %source_crop[1, 1] : view<2x3xf32, %layout> -> f32
+  view.store %value, %destination_crop[1, 2] : f32, view<2x4xf32, %layout>
+  func.return %value : f32
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @subview_scalar_strided(%input_aligned: reg<spirv.ptr.storage_buffer>, %output_aligned: reg<spirv.ptr.storage_buffer>) -> (reg<spirv.id : f32>) asm {
+  %16 = OpConstant.offset64 84
+  %17 = OpPtrAccessChain.storage_buffer.f32.byte_offset %input_aligned, %16
+  %value = OpLoad.storage_buffer.f32 %17
+  %19 = OpConstant.offset64 88
+  %20 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output_aligned, %19
+  OpStore.storage_buffer.f32 %20, %value
+  return %value
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @subview_nested_dynamic(%input: buffer, %output: buffer, %base: offset, %row: index, %column: index) -> (i32) {
+  %origin = index.assume %base [range(%base, 4, 16), mul(%base, 4)] : offset
+  %row_bounded = index.assume %row [range(%row, 0, 1)] : index
+  %column_bounded = index.assume %column [range(%column, 0, 2)] : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %layout = encoding.layout.strided [8, 1] : encoding<layout>
+  %source = buffer.view %input_aligned[%origin] : buffer -> view<6x8xi32, %layout>
+  %destination = buffer.view %output_aligned[%origin] : buffer -> view<6x8xi32, %layout>
+  %source_outer = view.subview %source[1, 1] : view<6x8xi32, %layout> -> view<4x6xi32, %layout>
+  %source_inner = view.subview %source_outer[1, 2] : view<4x6xi32, %layout> -> view<2x3xi32, %layout>
+  %source_refined = view.refine %source_inner : view<2x3xi32, %layout> -> view<2x3xi32, %layout>
+  %destination_outer = view.subview %destination[1, 0] : view<6x8xi32, %layout> -> view<4x6xi32, %layout>
+  %destination_inner = view.subview %destination_outer[1, 1] : view<4x6xi32, %layout> -> view<2x3xi32, %layout>
+  %value = view.load %source_refined[%row_bounded, %column_bounded] : view<2x3xi32, %layout> -> i32
+  view.store %value, %destination_inner[%row_bounded, %column_bounded] : i32, view<2x3xi32, %layout>
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @subview_nested_dynamic(%input_aligned: reg<spirv.ptr.storage_buffer>, %output_aligned: reg<spirv.ptr.storage_buffer>, %origin: reg<spirv.offset64>, %row_bounded: reg<spirv.id : index>, %column_bounded: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
+  %26 = OpBitcast.i32.u32 %row_bounded
+  %27 = OpUConvert.u32.offset64 %26
+  %28 = OpConstant.offset64 32
+  %29 = OpIMul.offset64 %27, %28
+  %30 = OpIAdd.offset64 %origin, %29
+  %31 = OpBitcast.i32.u32 %column_bounded
+  %32 = OpUConvert.u32.offset64 %31
+  %33 = OpConstant.offset64 4
+  %34 = OpIMul.offset64 %32, %33
+  %35 = OpIAdd.offset64 %30, %34
+  %36 = OpConstant.offset64 76
+  %37 = OpIAdd.offset64 %35, %36
+  %38 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %37
+  %value = OpLoad.storage_buffer.i32 %38
+  %50 = OpConstant.offset64 68
+  %51 = OpIAdd.offset64 %35, %50
+  %52 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %51
+  OpStore.storage_buffer.i32 %52, %value
+  return %value
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @subview_vector_strided(%input: buffer, %output: buffer) {
+  %input_base = index.constant 16 : offset
+  %output_base = index.constant 32 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %layout = encoding.layout.strided [12, 1] : encoding<layout>
+  %source = buffer.view %input_aligned[%input_base] : buffer -> view<4x12xi32, %layout>
+  %destination = buffer.view %output_aligned[%output_base] : buffer -> view<4x12xi32, %layout>
+  %source_crop = view.subview %source[1, 2] : view<4x12xi32, %layout> -> view<2x8xi32, %layout>
+  %destination_crop = view.subview %destination[1, 1] : view<4x12xi32, %layout> -> view<2x8xi32, %layout>
+  %value = vector.load %source_crop[1, 1] : view<2x8xi32, %layout> -> vector<4xi32>
+  vector.store %value, %destination_crop[0, 1] : vector<4xi32>, view<2x8xi32, %layout>
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @subview_vector_strided(%input_aligned: reg<spirv.ptr.storage_buffer>, %output_aligned: reg<spirv.ptr.storage_buffer>) asm {
+  %19 = OpConstant.offset64 124
+  %20 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %19
+  %21 = OpLoad.storage_buffer.i32 %20
+  %22 = OpConstant.offset64 128
+  %23 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %22
+  %24 = OpLoad.storage_buffer.i32 %23
+  %25 = OpConstant.offset64 132
+  %26 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %25
+  %27 = OpLoad.storage_buffer.i32 %26
+  %28 = OpConstant.offset64 136
+  %29 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %28
+  %30 = OpLoad.storage_buffer.i32 %29
+  %31 = OpConstant.offset64 88
+  %32 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %31
+  OpStore.storage_buffer.i32 %32, %21
+  %33 = OpConstant.offset64 92
+  %34 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %33
+  OpStore.storage_buffer.i32 %34, %24
+  %35 = OpConstant.offset64 96
+  %36 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %35
+  OpStore.storage_buffer.i32 %36, %27
+  %37 = OpConstant.offset64 100
+  %38 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %37
+  OpStore.storage_buffer.i32 %38, %30
+  return
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @subview_vector_aligned(%input: buffer, %output: buffer) {
+  %input_base = index.constant 32 : offset
+  %output_base = index.constant 64 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 32} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 32} : buffer
+  %layout = encoding.layout.strided [24, 1] : encoding<layout>
+  %source = buffer.view %input_aligned[%input_base] : buffer -> view<4x24xi32, %layout>
+  %destination = buffer.view %output_aligned[%output_base] : buffer -> view<4x24xi32, %layout>
+  %source_crop = view.subview %source[1, 8] : view<4x24xi32, %layout> -> view<2x8xi32, %layout>
+  %destination_crop = view.subview %destination[1, 0] : view<4x24xi32, %layout> -> view<2x16xi32, %layout>
+  %value = vector.load %source_crop[1, 0] : view<2x8xi32, %layout> -> vector<8xi32>
+  vector.store %value, %destination_crop[0, 8] : vector<8xi32>, view<2x16xi32, %layout>
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @subview_vector_aligned(%input_aligned: reg<spirv.ptr.storage_buffer>, %output_aligned: reg<spirv.ptr.storage_buffer>) asm {
+  %31 = OpConstant.offset64 256
+  %32 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %31
+  %33 = OpLoad.storage_buffer.i32 %32
+  %34 = OpConstant.offset64 260
+  %35 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %34
+  %36 = OpLoad.storage_buffer.i32 %35
+  %37 = OpConstant.offset64 264
+  %38 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %37
+  %39 = OpLoad.storage_buffer.i32 %38
+  %40 = OpConstant.offset64 268
+  %41 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %40
+  %42 = OpLoad.storage_buffer.i32 %41
+  %43 = OpConstant.offset64 272
+  %44 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %43
+  %45 = OpLoad.storage_buffer.i32 %44
+  %46 = OpConstant.offset64 276
+  %47 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %46
+  %48 = OpLoad.storage_buffer.i32 %47
+  %49 = OpConstant.offset64 280
+  %50 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %49
+  %51 = OpLoad.storage_buffer.i32 %50
+  %52 = OpConstant.offset64 284
+  %53 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %52
+  %54 = OpLoad.storage_buffer.i32 %53
+  %55 = OpConstant.offset64 192
+  %56 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %55
+  OpStore.storage_buffer.i32 %56, %33
+  %57 = OpConstant.offset64 196
+  %58 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %57
+  OpStore.storage_buffer.i32 %58, %36
+  %59 = OpConstant.offset64 200
+  %60 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %59
+  OpStore.storage_buffer.i32 %60, %39
+  %61 = OpConstant.offset64 204
+  %62 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %61
+  OpStore.storage_buffer.i32 %62, %42
+  %63 = OpConstant.offset64 208
+  %64 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %63
+  OpStore.storage_buffer.i32 %64, %45
+  %65 = OpConstant.offset64 212
+  %66 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %65
+  OpStore.storage_buffer.i32 %66, %48
+  %67 = OpConstant.offset64 216
+  %68 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %67
+  OpStore.storage_buffer.i32 %68, %51
+  %69 = OpConstant.offset64 220
+  %70 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %69
+  OpStore.storage_buffer.i32 %70, %54
+  return
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @subview_atomic_strided(%buffer: buffer) -> (i32) {
+  %base = index.constant 8 : offset
+  %global = buffer.assume.memory_space<global> %buffer : buffer
+  %aligned = buffer.assume.alignment %global {minimum_alignment = 4} : buffer
+  %layout = encoding.layout.strided [8, 1] : encoding<layout>
+  %view = buffer.view %aligned[%base] : buffer -> view<4x8xi32, %layout>
+  %crop = view.subview %view[1, 2] : view<4x8xi32, %layout> -> view<2x3xi32, %layout>
+  %increment = scalar.constant 1 : i32
+  // ERROR@+1: TARGET/003 {constraint_key="descriptor_available"}
+  view.atomic.reduce<addi> %increment, %crop[1, 1] {ordering = relaxed, scope = device} : i32, view<2x3xi32, %layout>
+  // ERROR@+1: TARGET/003 {constraint_key="descriptor_available"}
+  %old = view.atomic.rmw<addi> %increment, %crop[1, 1] {ordering = relaxed, scope = device} : i32, view<2x3xi32, %layout> -> i32
+  %replacement = scalar.constant 99 : i32
+  // ERROR@+1: TARGET/003 {constraint_key="descriptor_available"}
+  %observed = view.atomic.cmpxchg %old, %replacement, %crop[1, 1] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : i32, view<2x3xi32, %layout> -> i32
+  func.return %observed : i32
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @subview_prefetch_strided(%input: buffer) {
+  %base = index.constant 8 : offset
+  %layout = encoding.layout.strided [8, 1] : encoding<layout>
+  %view = buffer.view %input[%base] : buffer -> view<4x8xi32, %layout>
+  %outer = view.subview %view[1, 1] : view<4x8xi32, %layout> -> view<3x6xi32, %layout>
+  %inner = view.subview %outer[1, 1] : view<3x6xi32, %layout> -> view<2x3xi32, %layout>
+  view.prefetch %inner[0, 1] {intent = read, locality = l1} : view<2x3xi32, %layout>
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @subview_prefetch_strided(%input: reg<spirv.ptr.storage_buffer>) asm {
+  return
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @subview_dense_rows(%input: buffer, %output: buffer) -> (i32) {
+  %base = index.constant 4 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %source = buffer.view %input_aligned[%base] : buffer -> view<4x8xi32>
+  %destination = buffer.view %output_aligned[%base] : buffer -> view<4x8xi32>
+  %source_crop = view.subview %source[1, 0] : view<4x8xi32> -> view<2x8xi32>
+  %destination_crop = view.subview %destination[2, 0] : view<4x8xi32> -> view<2x8xi32>
+  %value = view.load %source_crop[1, 3] : view<2x8xi32> -> i32
+  view.store %value, %destination_crop[0, 4] : i32, view<2x8xi32>
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @subview_dense_rows(%input_aligned: reg<spirv.ptr.storage_buffer>, %output_aligned: reg<spirv.ptr.storage_buffer>) -> (reg<spirv.id : i32>) asm {
+  %14 = OpConstant.offset64 80
+  %15 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %14
+  %value = OpLoad.storage_buffer.i32 %15
+  %17 = OpConstant.offset64 84
+  %18 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %17
+  OpStore.storage_buffer.i32 %18, %value
+  return %value
+}

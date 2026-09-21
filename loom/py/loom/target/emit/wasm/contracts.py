@@ -605,12 +605,19 @@ def _shuffle_rule(type_pattern: TypePattern) -> DescriptorRule:
     )
 
 
-def _buffer_view_rule() -> ValueAliasRule:
-    return ValueAliasRule(
-        source_op=buffer.buffer_view,
-        source=ValueRef.operand("buffer"),
-        result=ValueRef.result("result"),
-    )
+def _view_alias_rules() -> Iterable[ValueAliasRule]:
+    # The retained memory plan owns every byte origin; view values carry only
+    # the underlying resource identity.
+    for source_op, operand in (
+        (buffer.buffer_view, "buffer"),
+        (view.view_subview, "source"),
+        (view.view_refine, "source"),
+    ):
+        yield ValueAliasRule(
+            source_op=source_op,
+            source=ValueRef.operand(operand),
+            result=ValueRef.result("result"),
+        )
 
 
 def _buffer_byte_address_emits(
@@ -771,7 +778,7 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
     descriptor_set=WASM_CORE_SIMD128_DESCRIPTOR_SET,
     public_header="loom/target/emit/wasm/contracts/core_simd128.h",
     cases=(
-        _buffer_view_rule(),
+        *_view_alias_rules(),
         _buffer_load_i8_u_rule(),
         _buffer_store_i8_rule(),
         *(

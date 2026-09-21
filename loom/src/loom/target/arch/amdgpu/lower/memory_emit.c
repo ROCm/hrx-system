@@ -920,14 +920,6 @@ iree_status_t loom_amdgpu_make_memory_attrs(
                                                attr_capacity, out_attr_count);
 }
 
-static loom_value_id_t loom_amdgpu_memory_load_view(
-    const loom_module_t* module, const loom_op_t* source_op) {
-  const loom_memory_access_t access =
-      loom_memory_access_cast(module, source_op);
-  IREE_ASSERT(loom_memory_access_isa(access));
-  return loom_memory_access_view(access);
-}
-
 static loom_value_id_t loom_amdgpu_memory_load_result(
     const loom_op_t* source_op) {
   IREE_ASSERT_EQ(source_op->result_count, 1u);
@@ -1017,14 +1009,6 @@ static loom_value_id_t loom_amdgpu_memory_store_value(
   return value;
 }
 
-static loom_value_id_t loom_amdgpu_memory_store_view(
-    const loom_module_t* module, const loom_op_t* source_op) {
-  const loom_memory_access_t access =
-      loom_memory_access_cast(module, source_op);
-  IREE_ASSERT(loom_memory_access_isa(access));
-  return loom_memory_access_view(access);
-}
-
 static iree_status_t loom_amdgpu_bind_memory_load_result(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t low_result) {
@@ -1057,8 +1041,7 @@ static iree_status_t loom_amdgpu_lower_memory_packet_load(
   if (loom_amdgpu_memory_access_needs_hal_resource(access)) {
     IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
         context,
-        loom_amdgpu_memory_load_view(loom_low_lower_context_module(context),
-                                     source_op),
+        loom_low_source_memory_access_base_view_value_id(&access->source),
         &low_resource));
   }
 
@@ -1265,8 +1248,7 @@ static iree_status_t loom_amdgpu_lower_memory_packet_store(
   if (loom_amdgpu_memory_access_needs_hal_resource(access)) {
     IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
         context,
-        loom_amdgpu_memory_store_view(loom_low_lower_context_module(context),
-                                      source_op),
+        loom_low_source_memory_access_base_view_value_id(&access->source),
         &low_resource));
   }
 

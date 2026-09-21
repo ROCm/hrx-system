@@ -175,6 +175,16 @@ loom_test(
 )
 
 loom_test(
+    name = "subview_test",
+    srcs = ["//loom/src/loom/test/corpus/conformance:memory_subview.loom"],
+    compile_targets = ["//loom/target/amdgpu:" + target for target in LOOM_AMDGPU_SUPPORTED_TARGETS],
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
     name = "wide_subtract_hardware_test",
     srcs = ["//loom/src/loom/test/corpus/conformance:integer_wide_subtract.loom"],
     execution_profiles = [AMDGPU_HARDWARE_PROFILE],

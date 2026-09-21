@@ -204,8 +204,7 @@ def test_scalar_memory_rules_cover_every_address_form() -> None:
                         assert constraint.operation is operation
                         assert constraint.root_kind is root_kind
                         assert (
-                            constraint.address_layout
-                            is SourceMemoryAddressLayout.COMPACT_ROW_MAJOR
+                            constraint.address_layout is SourceMemoryAddressLayout.ANY
                         )
                         assert constraint.memory_spaces == memory_spaces
                         assert constraint.element_byte_count == element_byte_count
@@ -340,8 +339,7 @@ def test_bytewise_scalar_memory_rules_preserve_unknown_alignment() -> None:
                         assert constraint.operation is operation
                         assert constraint.root_kind is root_kind
                         assert (
-                            constraint.address_layout
-                            is SourceMemoryAddressLayout.COMPACT_ROW_MAJOR
+                            constraint.address_layout is SourceMemoryAddressLayout.ANY
                         )
                         assert constraint.memory_spaces == memory_spaces
                         assert constraint.element_byte_count == element_byte_count
@@ -436,10 +434,7 @@ def test_two_lane_16bit_load_rules_preserve_exact_access_bounds() -> None:
                     assert constraint is not None
                     assert constraint.operation is SourceMemoryOperation.LOAD
                     assert constraint.root_kind is root_kind
-                    assert (
-                        constraint.address_layout
-                        is SourceMemoryAddressLayout.COMPACT_ROW_MAJOR
-                    )
+                    assert constraint.address_layout is SourceMemoryAddressLayout.ANY
                     assert constraint.memory_spaces == memory_spaces
                     assert constraint.element_byte_count == 2
                     assert constraint.vector_lane_count == 2
@@ -636,10 +631,7 @@ def test_vector_memory_rules_cover_every_native_width_and_address_form() -> None
                 assert constraint is not None
                 assert constraint.operation is operation
                 assert constraint.root_kind is root_kind
-                assert (
-                    constraint.address_layout
-                    is SourceMemoryAddressLayout.COMPACT_ROW_MAJOR
-                )
+                assert constraint.address_layout is SourceMemoryAddressLayout.ANY
                 assert constraint.memory_spaces == memory_spaces
                 assert constraint.element_byte_count == element_byte_count
                 assert constraint.vector_lane_count == vector_lane_count
@@ -799,10 +791,7 @@ def test_accumulator_memory_rules_decompose_raw_payloads_into_native_chunks() ->
                     assert constraint is not None
                     assert constraint.operation is operation
                     assert constraint.root_kind is root_kind
-                    assert (
-                        constraint.address_layout
-                        is SourceMemoryAddressLayout.COMPACT_ROW_MAJOR
-                    )
+                    assert constraint.address_layout is SourceMemoryAddressLayout.ANY
                     assert constraint.memory_spaces == memory_spaces
                     assert constraint.element_byte_count == element_byte_count
                     assert constraint.vector_lane_count == vector_lane_count

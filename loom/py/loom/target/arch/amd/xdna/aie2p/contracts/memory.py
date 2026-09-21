@@ -164,6 +164,7 @@ def _memory_constraint(
     immediate_offset_minimum: int,
     immediate_offset_maximum: int,
     maximum_additional_static_byte_offset: int = 0,
+    address_layout: SourceMemoryAddressLayout = SourceMemoryAddressLayout.ANY,
 ) -> SourceMemoryConstraint:
     dynamic = address_form in (
         _MemoryAddressForm.DYNAMIC_ZERO_STATIC,
@@ -188,7 +189,7 @@ def _memory_constraint(
     return SourceMemoryConstraint(
         operation=operation,
         root_kind=root_kind,
-        address_layout=SourceMemoryAddressLayout.COMPACT_ROW_MAJOR,
+        address_layout=address_layout,
         memory_spaces=memory_spaces,
         element_byte_count=element_byte_count,
         vector_lane_count=vector_lane_count,
@@ -485,6 +486,7 @@ def _accumulator_memory_rule(
     value_type: TypePattern,
     volatile: bool,
     guards: tuple[Guard, ...] = (),
+    address_layout: SourceMemoryAddressLayout = SourceMemoryAddressLayout.ANY,
 ) -> DescriptorRule:
     is_load = operation is SourceMemoryOperation.LOAD
     immediate_memory = address_form is _MemoryAddressForm.IMMEDIATE
@@ -507,6 +509,7 @@ def _accumulator_memory_rule(
         immediate_offset_minimum=-512,
         immediate_offset_maximum=448,
         maximum_additional_static_byte_offset=(_ACCUMULATOR_CHUNK_BYTE_OFFSETS[-1]),
+        address_layout=address_layout,
     )
 
     emits: list[ContractEmit] = []
@@ -1410,6 +1413,7 @@ def _matrix_fragment_store_rules() -> tuple[DescriptorRule, ...]:
             SourceMemoryOperation.STORE,
             address_form,
             source_op=vector.vector_fragment_store,
+            address_layout=SourceMemoryAddressLayout.COMPACT_ROW_MAJOR,
             root_kind=root_kind,
             memory_spaces=memory_spaces,
             element_byte_count=4,

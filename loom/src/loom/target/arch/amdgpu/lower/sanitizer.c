@@ -902,17 +902,6 @@ static iree_status_t loom_amdgpu_sanitizer_get_trap_island(
   return iree_ok_status();
 }
 
-static loom_value_id_t loom_amdgpu_sanitizer_access_view_value(
-    const loom_op_t* op) {
-  if (loom_sanitizer_assert_access_isa(op)) {
-    return loom_sanitizer_assert_access_view(op);
-  }
-  if (loom_sanitizer_assert_accesses_isa(op)) {
-    return loom_sanitizer_assert_accesses_view(op);
-  }
-  return LOOM_VALUE_ID_INVALID;
-}
-
 static void loom_amdgpu_sanitizer_access_plan_for_repeat(
     const loom_amdgpu_sanitizer_access_plan_t* plan, uint16_t repeat_ordinal,
     loom_amdgpu_memory_access_t* out_access) {
@@ -1033,7 +1022,8 @@ iree_status_t loom_amdgpu_lower_sanitizer_assert_access(
 
   loom_value_id_t low_resource = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
-      context, loom_amdgpu_sanitizer_access_view_value(source_op),
+      context,
+      loom_low_source_memory_access_base_view_value_id(&plan->address.source),
       &low_resource));
 
   loom_amdgpu_sanitizer_lower_state_t* state = NULL;

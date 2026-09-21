@@ -22,6 +22,7 @@ from loom.dialect.scalar import conversion as scalar_conversion
 from loom.dialect.scf import ALL_SCF_OPS
 from loom.dialect.scf import defs as scf
 from loom.dialect.view import ALL_VIEW_OPS
+from loom.dialect.view import defs as view
 from loom.dsl import Op
 from loom.target.arch.x86.contracts.integer_division import (
     unsigned_constant_division_rules,
@@ -422,12 +423,19 @@ def _integer_compare_rule(
     )
 
 
-def _buffer_view_rule() -> ValueAliasRule:
-    return ValueAliasRule(
-        source_op=buffer.buffer_view,
-        source=ValueRef.operand("buffer"),
-        result=ValueRef.result("result"),
-    )
+def _view_alias_rules() -> Iterable[ValueAliasRule]:
+    # The retained memory plan owns every byte origin; view values carry only
+    # the underlying resource identity.
+    for source_op, operand in (
+        (buffer.buffer_view, "buffer"),
+        (view.view_subview, "source"),
+        (view.view_refine, "source"),
+    ):
+        yield ValueAliasRule(
+            source_op=source_op,
+            source=ValueRef.operand(operand),
+            result=ValueRef.result("result"),
+        )
 
 
 def _buffer_load_i8_u_rule(
@@ -907,7 +915,7 @@ def _madd_address_rules(
 def _cases() -> Sequence[ContractCase]:
     descriptor_lookup = _descriptor
     return (
-        _buffer_view_rule(),
+        *_view_alias_rules(),
         _buffer_load_i8_u_rule(descriptor_lookup),
         _buffer_store_i8_rule(descriptor_lookup),
         *binary_descriptor_rules(
