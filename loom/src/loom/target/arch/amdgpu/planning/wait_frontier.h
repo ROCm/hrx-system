@@ -96,6 +96,10 @@ typedef struct loom_amdgpu_wait_frontier_t {
     iree_host_size_t lease_count;
     // Number of packed state words per block.
     iree_host_size_t word_count;
+    // First lease per producer node, or UINT32_MAX. Present when exact incoming
+    // result completions are retained; records for each producer are
+    // contiguous.
+    const uint32_t* first_indices_by_node;
     // Lease membership grouped by release counter.
     struct {
       // Inline words for a one-word storage frontier.
@@ -180,10 +184,12 @@ uint32_t loom_amdgpu_wait_frontier_memory_dependency_mask(
     const loom_amdgpu_wait_frontier_t* frontier,
     const loom_amdgpu_wait_frontier_node_t* node);
 
-// Returns true when incoming memory state proves |producer_node|'s work in
-// |counter_mask| complete. The producer must be in a different block from the
-// active consumer. Untracked counters and possibly pending aliasing work are
-// inconclusive. Unresolved predecessors and backedges retain conservative
+// Returns true when incoming memory or result-lease state proves
+// |producer_node|'s incoming work in |counter_mask| complete. A producer in the
+// active block must not have issued yet; this query cannot prove completion of
+// a locally issued instance. Exact result completion remains valid while
+// unrelated work in the same memory space is pending. Untracked counters are
+// inconclusive; unresolved predecessors and backedges retain conservative
 // state.
 bool loom_amdgpu_wait_frontier_producer_is_complete(
     const loom_amdgpu_wait_frontier_t* frontier, uint32_t producer_node,

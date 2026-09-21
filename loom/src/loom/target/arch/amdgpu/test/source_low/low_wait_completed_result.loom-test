@@ -1,0 +1,371 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// RUN: emit amdgpu-assembly @completed_vector_result strategy=source fixed=%old:physical_register:4:2 fixed=%fresh:physical_register:8:1 fixed=%offset:physical_register:0:1 fixed=%first:physical_register:6:1 fixed=%old_again:physical_register:7:1 fixed=%result:physical_register:9:1
+
+// Reading one lane completes the whole load. A younger pending load must not
+// force another wait before the second lane's independent arithmetic.
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @completed_vector_result(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %old = global_load_b64_saddr %offset, %base
+  low.br ^stage
+^stage:
+  %lane0 = slice %old[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %first = v_add_f32 %lane0, %offset
+  %fresh = global_load_b32_saddr %offset, %base {offset = 8}
+  low.br ^consume
+^consume:
+  %lane1 = slice %old[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %old_again = v_mul_f32 %lane1, %first
+  %result = v_add_u32 %fresh, %old_again
+  return %result
+}
+
+// ----
+  global_load_b64 v[4:5], v0, s[0:1] offset:0
+.Lbb1:
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_add_f32 v6, v4, v0
+  global_load_b32 v8, v0, s[0:1] offset:8
+.Lbb2:
+  v_mul_f32 v7, v5, v6
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v9, v8, v7
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @completed_cdna_result strategy=source fixed=%old:physical_register:4:2 fixed=%fresh:physical_register:8:1 fixed=%offset:physical_register:0:1 fixed=%first:physical_register:6:1 fixed=%old_again:physical_register:7:1 fixed=%result:physical_register:9:1
+
+// Reading one lane completes the whole load. A younger pending load must not
+// force another wait before the second lane's independent arithmetic.
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @completed_cdna_result(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %m0 = s_mov_b32_m0_imm 0
+  %old = global_load_dwordx2_saddr %offset, %base, %m0
+  low.br ^stage
+^stage:
+  %lane0 = slice %old[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %first = v_add_f32 %lane0, %offset
+  %fresh = global_load_dword_saddr %offset, %base, %m0 {offset = 8}
+  low.br ^consume
+^consume:
+  %lane1 = slice %old[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %old_again = v_mul_f32 %lane1, %first
+  %result = v_add_u32 %fresh, %old_again
+  return %result
+}
+
+// ----
+  s_mov_b32 m0, 0
+  global_load_dwordx2 v[4:5], v0, s[0:1] offset:0
+.Lbb1:
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  v_add_f32 v6, v4, v0
+  global_load_dword v8, v0, s[0:1] offset:8
+.Lbb2:
+  v_mul_f32 v7, v5, v6
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  v_add_u32 v9, v8, v7
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @completed_load_counter_result strategy=source fixed=%old:physical_register:4:2 fixed=%fresh:physical_register:8:1 fixed=%offset:physical_register:0:1 fixed=%first:physical_register:6:1 fixed=%old_again:physical_register:7:1 fixed=%result:physical_register:9:1
+
+// Reading one lane completes the whole load. A younger pending load must not
+// force another wait before the second lane's independent arithmetic.
+amdgpu.target<gfx1250> @target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @completed_load_counter_result(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %old = global_load_b64_saddr %offset, %base
+  low.br ^stage
+^stage:
+  %lane0 = slice %old[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %first = v_add_f32 %lane0, %offset
+  %fresh = global_load_b32_saddr %offset, %base {offset = 8}
+  low.br ^consume
+^consume:
+  %lane1 = slice %old[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %old_again = v_mul_f32 %lane1, %first
+  %result = v_add_u32 %fresh, %old_again
+  return %result
+}
+
+// ----
+  global_load_b64 v[4:5], v0, s[0:1] offset:0
+.Lbb1:
+  s_wait_loadcnt loadcnt(0)
+  v_add_f32 v6, v4, v0
+  global_load_b32 v8, v0, s[0:1] offset:8
+.Lbb2:
+  v_mul_f32 v7, v5, v6
+  s_wait_loadcnt loadcnt(0)
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v9, v8, v7
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @completed_lds_result strategy=source fixed=%old:physical_register:4:2 fixed=%fresh:physical_register:8:1 fixed=%offset:physical_register:0:1 fixed=%first:physical_register:6:1 fixed=%old_again:physical_register:7:1 fixed=%result:physical_register:9:1
+
+// Reading one lane completes the whole load. A younger pending load must not
+// force another wait before the second lane's independent arithmetic.
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @completed_lds_result(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %old = ds_read_b64 %offset
+  low.br ^stage
+^stage:
+  %lane0 = slice %old[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %first = v_add_f32 %lane0, %offset
+  %fresh = ds_read_b32 %offset {offset = 8}
+  low.br ^consume
+^consume:
+  %lane1 = slice %old[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %old_again = v_mul_f32 %lane1, %first
+  %result = v_add_u32 %fresh, %old_again
+  return %result
+}
+
+// ----
+  ds_read_b64 v[4:5], v0 offset:0
+.Lbb1:
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  v_add_f32 v6, v4, v0
+  ds_read_b32 v8, v0 offset:8
+.Lbb2:
+  v_mul_f32 v7, v5, v6
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v9, v8, v7
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @completed_scalar_result strategy=source fixed=%old:physical_register:4:2 fixed=%fresh:physical_register:8:1 fixed=%offset:physical_register:2:1 fixed=%first:physical_register:6:1 fixed=%old_again:physical_register:7:1 fixed=%result:physical_register:9:1
+
+// Reading one lane completes the whole load. A younger pending load must not
+// force another wait before the second lane's independent arithmetic.
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @completed_scalar_result(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %old = s_load_dwordx2 %base, %offset
+  low.br ^stage
+^stage:
+  %lane0 = slice %old[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %first = s_add_u32 %lane0, %offset
+  %fresh = s_load_dword %base, %offset {offset = 8}
+  low.br ^consume
+^consume:
+  %lane1 = slice %old[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %old_again = s_xor_b32 %lane1, %first
+  %result = s_add_u32 %fresh, %old_again
+  return %result
+}
+
+// ----
+  s_load_dwordx2 s[4:5], s[0:1], s2 offset:0
+.Lbb1:
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_add_u32 s6, s4, s2
+  s_load_dword s8, s[0:1], s2 offset:8
+.Lbb2:
+  s_xor_b32 s7, s5, s6
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_add_u32 s9, s8, s7
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @both_paths_complete_result strategy=source fixed=%old:physical_register:4:2 fixed=%left_fresh:physical_register:8:1 fixed=%right_fresh:physical_register:8:1 fixed=%pending:physical_register:8:1 fixed=%offset:physical_register:0:1 fixed=%old_again:physical_register:7:1 fixed=%result:physical_register:9:1
+
+// Both paths complete the old result and issue fresh work. The join reuses
+// the completed lane before waiting for that fresh work.
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @both_paths_complete_result(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.vgpr>, %condition: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
+  %old = global_load_b64_saddr %offset, %base
+  low.cond_br %condition, ^left, ^right : reg<amdgpu.scc>
+^left:
+  %left_lane = slice %old[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %left_use = v_add_f32 %left_lane, %offset
+  %left_fresh = global_load_b32_saddr %offset, %base {offset = 8}
+  low.br ^join(%left_fresh: reg<amdgpu.vgpr>)
+^right:
+  %right_lane = slice %old[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %right_use = v_add_f32 %right_lane, %offset
+  %right_fresh = global_load_b32_saddr %offset, %base {offset = 12}
+  low.br ^join(%right_fresh: reg<amdgpu.vgpr>)
+^join(%pending: reg<amdgpu.vgpr>):
+  %lane1 = slice %old[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %old_again = v_mul_f32 %lane1, %offset
+  %result = v_add_u32 %pending, %old_again
+  return %result
+}
+
+// ----
+  global_load_b64 v[4:5], v0, s[0:1] offset:0
+  s_cbranch_scc0 .Lbb2
+.Lbb1:
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_add_f32 v1, v4, v0
+  global_load_b32 v8, v0, s[0:1] offset:8
+  s_branch .Lbb3
+.Lbb2:
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_add_f32 v1, v4, v0
+  global_load_b32 v8, v0, s[0:1] offset:12
+.Lbb3:
+  v_mul_f32 v7, v5, v0
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v9, v8, v7
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @bypass_retains_pending_result strategy=source fixed=%old:physical_register:4:2 fixed=%left_fresh:physical_register:8:1 fixed=%right_fresh:physical_register:8:1 fixed=%pending:physical_register:8:1 fixed=%offset:physical_register:0:1 fixed=%old_again:physical_register:7:1 fixed=%result:physical_register:9:1
+
+// The bypass leaves the old result pending. The join must still wait.
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @bypass_retains_pending_result(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.vgpr>, %condition: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
+  %old = global_load_b64_saddr %offset, %base
+  low.cond_br %condition, ^left, ^right : reg<amdgpu.scc>
+^left:
+  %left_lane = slice %old[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %left_use = v_add_f32 %left_lane, %offset
+  %left_fresh = global_load_b32_saddr %offset, %base {offset = 8}
+  low.br ^join(%left_fresh: reg<amdgpu.vgpr>)
+^right:
+  %right_fresh = global_load_b32_saddr %offset, %base {offset = 12}
+  low.br ^join(%right_fresh: reg<amdgpu.vgpr>)
+^join(%pending: reg<amdgpu.vgpr>):
+  %lane1 = slice %old[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %old_again = v_mul_f32 %lane1, %offset
+  %result = v_add_u32 %pending, %old_again
+  return %result
+}
+
+// ----
+  global_load_b64 v[4:5], v0, s[0:1] offset:0
+  s_cbranch_scc0 .Lbb2
+.Lbb1:
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_add_f32 v1, v4, v0
+  global_load_b32 v8, v0, s[0:1] offset:8
+  s_branch .Lbb3
+.Lbb2:
+  global_load_b32 v8, v0, s[0:1] offset:12
+.Lbb3:
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_mul_f32 v7, v5, v0
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v9, v8, v7
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @copied_lane_completes_backedge strategy=source fixed=%offset:physical_register:0:1 fixed=%seed:physical_register:8:2 fixed=%first:physical_register:4:1 fixed=%second:physical_register:9:1 fixed=%future:physical_register:12:1 fixed=%used:physical_register:6:1 fixed=%sum:physical_register:7:1 fixed=%next:physical_register:8:2
+
+// One lane moves on the backedge; the other stays coalesced. The copy must
+// complete the whole load, so the next iteration's arithmetic can overlap
+// its fresh request. Both real load consumers retain their waits.
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @copied_lane_completes_backedge(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.vgpr>, %count: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %begin = s_mov_b32 0
+  %step = s_mov_b32 1
+  %seed = global_load_b64_saddr %offset, %base
+  %seed_first = slice %seed[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %seed_second = slice %seed[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  low.br ^loop(%begin: reg<amdgpu.sgpr>, %seed_first: reg<amdgpu.vgpr>, %seed_second: reg<amdgpu.vgpr>)
+^loop(%index: reg<amdgpu.sgpr>, %first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>):
+  %more = s_cmp_lt_i32 %index, %count
+  low.cond_br %more, ^body, ^exit : reg<amdgpu.scc>
+^body:
+  %future = global_load_b32_saddr %offset, %base {offset = 8}
+  %used = v_mul_f32 %second, %first
+  %sum = v_add_u32 %future, %used
+  %next = global_load_b64_saddr %offset, %base {offset = 16}
+  low.br ^advance
+^advance:
+  %next_first = slice %next[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %next_second = slice %next[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %advanced = s_add_u32 %index, %step
+  low.br ^loop(%advanced: reg<amdgpu.sgpr>, %next_first: reg<amdgpu.vgpr>, %next_second: reg<amdgpu.vgpr>)
+^exit:
+  return %first
+}
+
+// ----
+  s_mov_b32 s3, 0
+  s_mov_b32 s4, 1
+  global_load_b64 v[8:9], v0, s[0:1] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_mov_b32 v4, v8
+.Lbb1:
+  s_cmp_lt_i32 s3, s2
+  s_delay_alu instid0(SALU_CYCLE_1)
+  s_cbranch_scc0 .Lbb4
+.Lbb2:
+  global_load_b32 v12, v0, s[0:1] offset:8
+  v_mul_f32 v6, v9, v4
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v7, v12, v6
+  global_load_b64 v[8:9], v0, s[0:1] offset:16
+.Lbb3:
+  s_add_u32 s3, s3, s4
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_mov_b32 v4, v8
+  s_branch .Lbb1
+.Lbb4:
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @reissued_result_stays_pending strategy=source fixed=%offset:physical_register:0:1 fixed=%loaded:physical_register:4:1 fixed=%younger:physical_register:8:1 fixed=%used:physical_register:6:1 fixed=%sum:physical_register:7:1
+
+// Completion of the previous iteration cannot retire a new instance of the
+// same producer. The consumer must still wait before using the new results.
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @reissued_result_stays_pending(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.vgpr>, %count: reg<amdgpu.sgpr>) asm {
+  %begin = s_mov_b32 0
+  %step = s_mov_b32 1
+  low.br ^loop(%begin: reg<amdgpu.sgpr>)
+^loop(%index: reg<amdgpu.sgpr>):
+  %more = s_cmp_lt_i32 %index, %count
+  low.cond_br %more, ^load, ^exit : reg<amdgpu.scc>
+^load:
+  %loaded = global_load_b32_saddr %offset, %base
+  %younger = global_load_b32_saddr %offset, %base {offset = 4}
+  low.br ^consume
+^consume:
+  %used = v_mul_f32 %loaded, %offset
+  %sum = v_add_u32 %younger, %used
+  %advanced = s_add_u32 %index, %step
+  low.br ^loop(%advanced: reg<amdgpu.sgpr>)
+^exit:
+  return
+}
+
+// ----
+  s_mov_b32 s3, 0
+  s_mov_b32 s4, 1
+.Lbb1:
+  s_cmp_lt_i32 s3, s2
+  s_delay_alu instid0(SALU_CYCLE_1)
+  s_cbranch_scc0 .Lbb4
+.Lbb2:
+  global_load_b32 v4, v0, s[0:1] offset:0
+  global_load_b32 v8, v0, s[0:1] offset:4
+.Lbb3:
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  v_mul_f32 v6, v4, v0
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v7, v8, v6
+  s_add_u32 s3, s3, s4
+  s_branch .Lbb1
+.Lbb4:
+  s_endpgm

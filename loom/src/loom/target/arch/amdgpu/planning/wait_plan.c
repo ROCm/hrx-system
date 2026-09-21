@@ -3200,6 +3200,12 @@ static iree_status_t loom_amdgpu_wait_plan_handle_consumer(
           target_count = 0;
         }
       } else if (producer_block == consumer_block) {
+        // The producer has not reissued in this block yet. Incoming completion
+        // therefore describes the older instance carried by this use.
+        if (loom_amdgpu_wait_frontier_producer_is_complete(
+                &builder->frontier, link->producer_node, counter_mask)) {
+          continue;
+        }
         const loom_cfg_loop_interval_t* cyclic_interval =
             loom_amdgpu_wait_loop_analysis_cyclic_interval(
                 &builder->loop_analysis, link->producer_node, node_index);

@@ -512,6 +512,7 @@ static iree_status_t loom_amdgpu_wait_frontier_build_result_completions(
   for (iree_host_size_t i = frontier->storage_leases.lease_count; i > 0; --i) {
     first_leases[records[i - 1].node_index] = (uint32_t)(i - 1);
   }
+  frontier->storage_leases.first_indices_by_node = first_leases;
   for (iree_host_size_t i = first_dependency; i < dependency_count; ++i) {
     const loom_amdgpu_wait_dependency_t* dependency = &dependencies[i];
     const uint32_t counter_mask =
@@ -962,7 +963,8 @@ bool loom_amdgpu_wait_frontier_producer_is_complete(
       &frontier->nodes[producer_node];
   const uint32_t tracked_counter_mask =
       node->read_counter_mask | node->write_counter_mask;
-  if (!iree_all_bits_set(tracked_counter_mask, counter_mask)) {
+  if (frontier->memory.static_outgoing_states == NULL ||
+      !iree_all_bits_set(tracked_counter_mask, counter_mask)) {
     return false;
   }
   const uint32_t pending_reads = loom_amdgpu_wait_frontier_memory_query(
@@ -971,7 +973,45 @@ bool loom_amdgpu_wait_frontier_producer_is_complete(
   const uint32_t pending_writes = loom_amdgpu_wait_frontier_memory_query(
       frontier, node->write_space_flags,
       LOOM_AMDGPU_WAIT_MEMORY_ACCESS_FLAG_WRITE);
-  return !iree_any_bit_set(pending_reads | pending_writes, counter_mask);
+  const uint32_t pending_counter_mask =
+      (pending_reads | pending_writes) & counter_mask;
+  if (pending_counter_mask == 0) {
+    return true;
+  }
+  if (frontier->storage_leases.first_indices_by_node == NULL) {
+    return false;
+  }
+  // Incoming result bits retain exact producer completion across copies and
+  // joins. A newer load in the same memory space must not obscure that fact.
+  // Missing result records provide no proof, and every matching result lease
+  // must be complete before its counter class can be considered complete.
+  const loom_low_storage_lease_record_t* records =
+      frontier->allocation->storage_leases.records;
+  uint32_t completed_result_mask = 0;
+  uint32_t pending_result_mask = 0;
+  for (iree_host_size_t lease_index =
+           frontier->storage_leases.first_indices_by_node[producer_node];
+       lease_index < frontier->storage_leases.lease_count &&
+       records[lease_index].node_index == producer_node;
+       ++lease_index) {
+    const loom_low_storage_lease_record_t* record = &records[lease_index];
+    if (record->kind != LOOM_LOW_STORAGE_LEASE_RESULT_WRITE ||
+        record->release_scope !=
+            LOOM_LOW_STORAGE_LEASE_RELEASE_SCOPE_PROGRESS_CLASS ||
+        !loom_amdgpu_wait_counter_id_is_valid(record->release_class_id)) {
+      continue;
+    }
+    const uint32_t result_counter_mask =
+        loom_amdgpu_wait_counter_mask(record->release_class_id);
+    if (loom_amdgpu_wait_storage_lease_state_test(
+            frontier->storage_leases.active_words, lease_index)) {
+      pending_result_mask |= result_counter_mask;
+    } else {
+      completed_result_mask |= result_counter_mask;
+    }
+  }
+  return iree_all_bits_set(completed_result_mask & ~pending_result_mask,
+                           pending_counter_mask);
 }
 
 bool loom_amdgpu_wait_frontier_storage_lease_is_active(
