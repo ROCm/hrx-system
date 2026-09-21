@@ -1,0 +1,46 @@
+// RUN: with-checks emit aie2p-array-plan @add_6_workers_1_records
+
+// Six workers with two external inputs and one output each: ingress demand
+// is two streams per worker, so the shim's two-channel budget is spent by
+// the first worker placed in a column. Placement puts one per column
+// instead of two, which an instance-count budget could not see.
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+pipeline.def<kernel> public retain target(@array_target) @add_6_workers_1_records() launch(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %lanes = index.constant 6 : index
+  %zero = index.constant 0 : offset
+  %workers = group.create %lanes : index -> group
+  %lhs_view = buffer.view %lhs[%zero] : buffer -> view<6x1x4xi32>
+  %rhs_view = buffer.view %rhs[%zero] : buffer -> view<6x1x4xi32>
+  %output_view = buffer.view %output[%zero] : buffer -> view<6x1x4xi32>
+  %lhs_flow = pipeline.scatter %lhs_view across %workers : view<6x1x4xi32>, group -> pipeline.flow<tile<4xi32>>
+  %rhs_flow = pipeline.scatter %rhs_view across %workers : view<6x1x4xi32>, group -> pipeline.flow<tile<4xi32>>
+  %output_flow = pipeline.stage @add on %workers(%lhs_flow, %rhs_flow) : (group, pipeline.flow<tile<4xi32>>, pipeline.flow<tile<4xi32>>) -> (pipeline.flow<tile<4xi32>>)
+  pipeline.write %output_flow to %output_view : pipeline.flow<tile<4xi32>>, view<6x1x4xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @add(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 4} : buffer, buffer, buffer
+  %base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<4xi32>
+  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<4xi32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<4xi32>
+  %lhs_value = vector.load %lhs_view[0] : view<4xi32> -> vector<4xi32>
+  %rhs_value = vector.load %rhs_view[0] : view<4xi32> -> vector<4xi32>
+  %sum = vector.addi %lhs_value, %rhs_value : vector<4xi32>
+  vector.store %sum, %output_view[0] : vector<4xi32>, view<4xi32>
+  func.return
+}
+
+// ----
+CHECK: array @add_6_workers_1_records * workers=6 *
+CHECK: worker index=0 group=0 lane=0 entry=@add tile=(0,2) *
+CHECK: worker index=1 group=0 lane=1 entry=@add tile=(1,2) *
+CHECK: worker index=2 group=0 lane=2 entry=@add tile=(2,2) *
+CHECK: worker index=3 group=0 lane=3 entry=@add tile=(3,2) *
+CHECK: worker index=4 group=0 lane=4 entry=@add tile=(4,2) *
+CHECK: worker index=5 group=0 lane=5 entry=@add tile=(5,2) *
