@@ -2044,7 +2044,11 @@ TEST_F(AllocatorTest, AsanHostLocalDeviceVisibleAllocationPublishesShadow) {
   }
 }
 
-TEST_F(AllocatorTest, AsanPremappedShadowModeCoversUnpublishedAddresses) {
+// Full-range premapping can fault in the native GPU VM and leave ROCr spinning
+// with GPU memory retained, starving other GPU clients. Disabled while the
+// mapping failure and post-fault cleanup remain unresolved.
+TEST_F(AllocatorTest,
+       DISABLED_AsanPremappedShadowModeCoversUnpublishedAddresses) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   options.asan.enabled = 1;
