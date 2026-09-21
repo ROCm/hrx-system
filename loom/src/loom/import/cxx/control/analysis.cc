@@ -56,6 +56,11 @@ const CountedLoop* ControlFlow::counted(cxx::ForStatementAST* loop) const {
   return found == counted_.end() ? nullptr : &found->second;
 }
 
+cxx::ConditionExpressionAST* ControlFlow::condition_declaration(
+    cxx::VariableSymbol* variable) const {
+  return conditions_.at(variable);
+}
+
 unsigned ControlFlow::paths(cxx::StatementAST* statement) const {
   auto found = paths_.find(statement);
   return found == paths_.end() ? unsigned(Fallthrough) : found->second;
@@ -149,10 +154,16 @@ unsigned ControlFlow::classify_paths(cxx::StatementAST* statement) const {
 void ControlFlow::visit(cxx::IfStatementAST* ast) {
   if (ast->constexprValue.has_value()) {
     accept(ast->initializer);
+    accept(ast->condition);
     accept(*ast->constexprValue ? ast->statement : ast->elseStatement);
   } else {
     cxx::ASTVisitor::visit(ast);
   }
+}
+
+void ControlFlow::visit(cxx::ConditionExpressionAST* ast) {
+  conditions_.emplace(ast->symbol, ast);
+  cxx::ASTVisitor::visit(ast);
 }
 
 void ControlFlow::visit(cxx::AssignmentExpressionAST* ast) {

@@ -12,6 +12,7 @@ exports_files([
     "braced_vector_initialization.patch",
     "builtin_macro_locations.patch",
     "compound_offsetof.patch",
+    "condition_declarations.patch",
     "constant_arithmetic.patch",
     "constexpr_branches.patch",
     "cxx.BUILD.bazel",

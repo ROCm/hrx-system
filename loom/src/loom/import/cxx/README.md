@@ -266,6 +266,32 @@ if (unsigned original = value++; selected) return value + original;
 if constexpr (++visits; false) { /* Discarded. */ }
 ```
 
+The condition itself can declare its scalar decision variable. Its name remains
+available in both arms; `if constexpr` requires the variable read to be a
+constant expression:
+
+```cpp
+if (unsigned remaining = count - offset) return remaining;
+if constexpr (const unsigned width = 4) return width;
+```
+
+`while` and `for` also admit scalar decision declarations. Each check creates
+a new value, including the final false check. The body and the `for` increment
+can read or update it:
+
+```cpp
+unsigned total = 0;
+for (unsigned remaining = count; unsigned chunk = remaining;
+     remaining -= chunk) {
+  if (chunk > 4) chunk = 4;
+  total += chunk;
+}
+```
+
+These loops lower to `scf.while` with named decision values. Initializers run
+in the preheader and after each body/increment, preserving side effects and
+`continue` sequencing.
+
 Discarded template arms are not instantiated. Outside templates, both arms
 remain subject to C++ source checking even though only one is imported.
 

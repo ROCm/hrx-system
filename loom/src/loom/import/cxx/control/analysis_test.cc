@@ -155,6 +155,34 @@ TEST(ControlFlowTest, SourceSelectionRetainsInitializerAndSelectedWrites) {
   EXPECT_TRUE(std::ranges::equal(writes, analysis.written(body)));
 }
 
+TEST(ControlFlowTest, DecisionSyntaxAndInitializerWritesStayWithTheBinding) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(
+      IREE_SV("void entry(int input) { if (int value = input++) ++value; "
+              "if constexpr (const int value = 3) ++input; }"),
+      IREE_SV("decisions.cpp"), options);
+  auto* function = definition(source);
+  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                   function->functionBody)
+                   ->statement;
+  Types types(source.unit(), source.diagnostics());
+  ControlFlow analysis(source.unit(), types, body);
+  for (auto* statement : cxx::ListView{body->statementList}) {
+    auto* branch = cxx::ast_cast<cxx::IfStatementAST>(statement);
+    ASSERT_NE(branch, nullptr);
+    auto* declaration =
+        analysis.condition_declaration(branch->decisionVariable);
+    ASSERT_NE(declaration, nullptr);
+    EXPECT_EQ(declaration->symbol, branch->decisionVariable);
+    EXPECT_EQ(declaration->initializer,
+              branch->decisionVariable->initializer());
+    auto writes = analysis.written(branch);
+    ASSERT_FALSE(writes.empty());
+    EXPECT_EQ(writes.front(), function->symbol->parameters()[0]);
+  }
+}
+
 TEST(ControlFlowTest, NestedWritesPreserveOrderAndShadowedSymbolIdentity) {
   loom_cxx_import_options_t options;
   loom_cxx_import_options_initialize(&options);

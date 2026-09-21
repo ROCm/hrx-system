@@ -1,0 +1,93 @@
+// RUN: verify
+// Selection reads the declared constant and retains its name in the chosen arm.
+template <int Choice>
+static constexpr int selected() {
+  if constexpr (const int value = Choice) return value + 10;
+  else return value + 20;
+}
+static_assert(selected<1>() == 11);
+static_assert(selected<0>() == 20);
+
+// ====
+// A mutable variable is not made a constant by its literal initializer.
+int entry() {
+  // ERROR@+1: PARSE/036 "condition of 'if constexpr' is not a constant expression"
+  if constexpr (int value = 1) return value;
+  else return 0;
+}
+
+// ====
+int entry(int input) {
+  // ERROR@+1: PARSE/036 "condition of 'if constexpr' is not a constant expression"
+  if constexpr (const int value = input) return value;
+  else return 0;
+}
+
+// ====
+int entry() {
+  // ERROR@+1: PARSE/036 "condition of 'if constexpr' is not a constant expression"
+  if constexpr (const volatile int value = 1) return value;
+  else return 0;
+}
+
+// ====
+// Ordinary conditions initialize the variable during constexpr function execution.
+static constexpr int ordinary(int input) {
+  if (int value = input) return ++value;
+  else return value + 10;
+}
+static_assert(ordinary(4) == 5);
+static_assert(ordinary(0) == 10);
+static constexpr int switched() {
+  switch (int value = 3) {
+    case 3: return value + 10;
+    default: return 0;
+  }
+}
+static_assert(switched() == 13);
+
+// ====
+// Class decisions live through the body/increment, including continue, and
+// destruction also runs after a false condition or break.
+struct Decision {
+  // Value read by the contextual boolean conversion.
+  int value;
+  // Counter updated when the condition object leaves its scope.
+  int* destroyed;
+  constexpr operator bool() const { return value != 0; }
+  constexpr ~Decision() { ++*destroyed; }
+};
+static constexpr int while_lifetimes() {
+  int destroyed = 0;
+  int remaining = 2;
+  while (Decision value{remaining--, &destroyed}) {
+    if (value.value == 2) continue;
+    if (destroyed != 1) return 0;
+  }
+  return destroyed;
+}
+static constexpr int for_lifetimes() {
+  int destroyed = 0;
+  int remaining = 2;
+  int increments = 0;
+  for (; Decision value{remaining--, &destroyed};
+       increments += 10 * destroyed + value.value) {
+    continue;
+  }
+  return increments + 100 * destroyed;
+}
+static constexpr int break_lifetime() {
+  int destroyed = 0;
+  while (Decision value{1, &destroyed}) break;
+  return destroyed;
+}
+static_assert(while_lifetimes() == 3);
+static_assert(for_lifetimes() == 313);
+static_assert(break_lifetime() == 1);
+
+// ====
+int entry(int input) {
+  // ERROR@+1: LOWERING/059 "config bindings require namespace-scope scalar variables with a leading attribute"
+  if ([[loom::config("local")]] const int value = input) return value;
+  return 0;
+}

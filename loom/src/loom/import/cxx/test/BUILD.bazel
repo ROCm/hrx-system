@@ -26,6 +26,7 @@ loom_check_test_suite(
         "assumptions.cxx-test",
         "assumptions_invalid.cxx-test",
         "check.cxx-test",
+        "condition_declarations.cxx-test",
         "conditionals.cxx-test",
         "config.cxx-test",
         "config_cleanup.cxx-test",
@@ -108,6 +109,13 @@ _HOST_COMPATIBILITY = loom_config_compatible_with([
     "//loom/config/import:cxx",
     "//loom/config/target/arch:vm",
 ])
+
+loom_test(
+    name = "condition_values_test",
+    srcs = ["condition_values.cpp"],
+    execution_profiles = [VM_REFERENCE_PROFILE],
+    target_compatible_with = _HOST_COMPATIBILITY,
+)
 
 loom_test(
     name = "constexpr_values_test",

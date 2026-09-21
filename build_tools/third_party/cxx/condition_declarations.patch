@@ -1,0 +1,989 @@
+diff --git a/src/parser/cxx/archive.h b/src/parser/cxx/archive.h
+--- a/src/parser/cxx/archive.h
++++ b/src/parser/cxx/archive.h
+@@ -69,9 +69,9 @@
+
+ class ArchiveWriter {
+  public:
+   static constexpr std::string_view kMagic = "CXXARCH";
+-  static constexpr std::uint32_t kSchemaMajor = 10;
++  static constexpr std::uint32_t kSchemaMajor = 11;
+   static constexpr std::uint32_t kSchemaMinor = 0;
+
+   void setEnvelope(ArchiveEnvelope envelope) {
+     envelope_ = std::move(envelope);
+diff --git a/src/parser/cxx/ast.cc b/src/parser/cxx/ast.cc
+--- a/src/parser/cxx/ast.cc
++++ b/src/parser/cxx/ast.cc
+@@ -6979,8 +6979,9 @@
+
+   if (elseStatement) node->elseStatement = elseStatement->clone(arena);
+
+   node->symbol = symbol;
++  node->decisionVariable = decisionVariable;
+   node->constexprValue = constexprValue;
+
+   return node;
+ }
+@@ -6996,9 +6997,10 @@
+                             SourceLocation lparenLoc, StatementAST* initializer,
+                             ExpressionAST* condition, SourceLocation rparenLoc,
+                             StatementAST* statement, SourceLocation elseLoc,
+                             StatementAST* elseStatement, BlockSymbol* symbol,
+-                            std::optional<bool> constexprValue)
++                            std::optional<bool> constexprValue,
++                            VariableSymbol* decisionVariable)
+     -> IfStatementAST* {
+   auto node = new (arena) IfStatementAST();
+   node->attributeList = attributeList;
+   node->ifLoc = ifLoc;
+@@ -7010,8 +7012,9 @@
+   node->statement = statement;
+   node->elseLoc = elseLoc;
+   node->elseStatement = elseStatement;
+   node->symbol = symbol;
++  node->decisionVariable = decisionVariable;
+   node->constexprValue = constexprValue;
+   return node;
+ }
+
+@@ -7019,17 +7022,19 @@
+                             List<AttributeSpecifierAST*>* attributeList,
+                             StatementAST* initializer, ExpressionAST* condition,
+                             StatementAST* statement,
+                             StatementAST* elseStatement, BlockSymbol* symbol,
+-                            std::optional<bool> constexprValue)
++                            std::optional<bool> constexprValue,
++                            VariableSymbol* decisionVariable)
+     -> IfStatementAST* {
+   auto node = new (arena) IfStatementAST();
+   node->attributeList = attributeList;
+   node->initializer = initializer;
+   node->condition = condition;
+   node->statement = statement;
+   node->elseStatement = elseStatement;
+   node->symbol = symbol;
++  node->decisionVariable = decisionVariable;
+   node->constexprValue = constexprValue;
+   return node;
+ }
+
+@@ -7115,8 +7120,9 @@
+
+   if (statement) node->statement = statement->clone(arena);
+
+   node->symbol = symbol;
++  node->decisionVariable = decisionVariable;
+
+   return node;
+ }
+
+@@ -7128,10 +7134,10 @@
+ auto SwitchStatementAST::create(
+     Arena* arena, List<AttributeSpecifierAST*>* attributeList,
+     SourceLocation switchLoc, SourceLocation lparenLoc,
+     StatementAST* initializer, ExpressionAST* condition,
+-    SourceLocation rparenLoc, StatementAST* statement, BlockSymbol* symbol)
+-    -> SwitchStatementAST* {
++    SourceLocation rparenLoc, StatementAST* statement, BlockSymbol* symbol,
++    VariableSymbol* decisionVariable) -> SwitchStatementAST* {
+   auto node = new (arena) SwitchStatementAST();
+   node->attributeList = attributeList;
+   node->switchLoc = switchLoc;
+   node->lparenLoc = lparenLoc;
+@@ -7139,23 +7145,26 @@
+   node->condition = condition;
+   node->rparenLoc = rparenLoc;
+   node->statement = statement;
+   node->symbol = symbol;
++  node->decisionVariable = decisionVariable;
+   return node;
+ }
+
+ auto SwitchStatementAST::create(Arena* arena,
+                                 List<AttributeSpecifierAST*>* attributeList,
+                                 StatementAST* initializer,
+                                 ExpressionAST* condition,
+-                                StatementAST* statement, BlockSymbol* symbol)
++                                StatementAST* statement, BlockSymbol* symbol,
++                                VariableSymbol* decisionVariable)
+     -> SwitchStatementAST* {
+   auto node = new (arena) SwitchStatementAST();
+   node->attributeList = attributeList;
+   node->initializer = initializer;
+   node->condition = condition;
+   node->statement = statement;
+   node->symbol = symbol;
++  node->decisionVariable = decisionVariable;
+   return node;
+ }
+
+ auto WhileStatementAST::clone(Arena* arena) -> WhileStatementAST* {
+@@ -7178,8 +7187,9 @@
+
+   if (statement) node->statement = statement->clone(arena);
+
+   node->symbol = symbol;
++  node->decisionVariable = decisionVariable;
+
+   return node;
+ }
+
+@@ -7190,31 +7200,34 @@
+
+ auto WhileStatementAST::create(
+     Arena* arena, List<AttributeSpecifierAST*>* attributeList,
+     SourceLocation whileLoc, SourceLocation lparenLoc, ExpressionAST* condition,
+-    SourceLocation rparenLoc, StatementAST* statement, BlockSymbol* symbol)
+-    -> WhileStatementAST* {
++    SourceLocation rparenLoc, StatementAST* statement, BlockSymbol* symbol,
++    VariableSymbol* decisionVariable) -> WhileStatementAST* {
+   auto node = new (arena) WhileStatementAST();
+   node->attributeList = attributeList;
+   node->whileLoc = whileLoc;
+   node->lparenLoc = lparenLoc;
+   node->condition = condition;
+   node->rparenLoc = rparenLoc;
+   node->statement = statement;
+   node->symbol = symbol;
++  node->decisionVariable = decisionVariable;
+   return node;
+ }
+
+ auto WhileStatementAST::create(Arena* arena,
+                                List<AttributeSpecifierAST*>* attributeList,
+                                ExpressionAST* condition,
+-                               StatementAST* statement, BlockSymbol* symbol)
++                               StatementAST* statement, BlockSymbol* symbol,
++                               VariableSymbol* decisionVariable)
+     -> WhileStatementAST* {
+   auto node = new (arena) WhileStatementAST();
+   node->attributeList = attributeList;
+   node->condition = condition;
+   node->statement = statement;
+   node->symbol = symbol;
++  node->decisionVariable = decisionVariable;
+   return node;
+ }
+
+ auto DoStatementAST::clone(Arena* arena) -> DoStatementAST* {
+@@ -7446,8 +7459,9 @@
+
+   if (statement) node->statement = statement->clone(arena);
+
+   node->symbol = symbol;
++  node->decisionVariable = decisionVariable;
+
+   return node;
+ }
+
+@@ -7460,9 +7474,10 @@
+     Arena* arena, List<AttributeSpecifierAST*>* attributeList,
+     SourceLocation forLoc, SourceLocation lparenLoc, StatementAST* initializer,
+     ExpressionAST* condition, SourceLocation semicolonLoc,
+     ExpressionAST* expression, SourceLocation rparenLoc,
+-    StatementAST* statement, BlockSymbol* symbol) -> ForStatementAST* {
++    StatementAST* statement, BlockSymbol* symbol,
++    VariableSymbol* decisionVariable) -> ForStatementAST* {
+   auto node = new (arena) ForStatementAST();
+   node->attributeList = attributeList;
+   node->forLoc = forLoc;
+   node->lparenLoc = lparenLoc;
+@@ -7472,24 +7487,25 @@
+   node->expression = expression;
+   node->rparenLoc = rparenLoc;
+   node->statement = statement;
+   node->symbol = symbol;
+-  return node;
+-}
+-
+-auto ForStatementAST::create(Arena* arena,
+-                             List<AttributeSpecifierAST*>* attributeList,
+-                             StatementAST* initializer,
+-                             ExpressionAST* condition,
+-                             ExpressionAST* expression, StatementAST* statement,
+-                             BlockSymbol* symbol) -> ForStatementAST* {
++  node->decisionVariable = decisionVariable;
++  return node;
++}
++
++auto ForStatementAST::create(
++    Arena* arena, List<AttributeSpecifierAST*>* attributeList,
++    StatementAST* initializer, ExpressionAST* condition,
++    ExpressionAST* expression, StatementAST* statement, BlockSymbol* symbol,
++    VariableSymbol* decisionVariable) -> ForStatementAST* {
+   auto node = new (arena) ForStatementAST();
+   node->attributeList = attributeList;
+   node->initializer = initializer;
+   node->condition = condition;
+   node->expression = expression;
+   node->statement = statement;
+   node->symbol = symbol;
++  node->decisionVariable = decisionVariable;
+   return node;
+ }
+
+ auto BreakStatementAST::clone(Arena* arena) -> BreakStatementAST* {
+diff --git a/src/parser/cxx/ast.h b/src/parser/cxx/ast.h
+--- a/src/parser/cxx/ast.h
++++ b/src/parser/cxx/ast.h
+@@ -2380,8 +2380,11 @@
+   BlockSymbol* symbol = nullptr;
+   // Selected arm of a checked nondependent constexpr condition. An empty
+   // value denotes an ordinary if, a dependent condition, or diagnosed input.
+   std::optional<bool> constexprValue;
++  // Decision variable initialized by statement execution; null for an
++  // expression condition.
++  VariableSymbol* decisionVariable = nullptr;
+
+   void accept(ASTVisitor* visitor) override { visitor->visit(this); }
+
+   [[nodiscard]] auto clone(Arena* arena) -> IfStatementAST* override;
+@@ -2397,18 +2400,16 @@
+       SourceLocation lparenLoc, StatementAST* initializer,
+       ExpressionAST* condition, SourceLocation rparenLoc,
+       StatementAST* statement, SourceLocation elseLoc,
+       StatementAST* elseStatement, BlockSymbol* symbol,
+-      std::optional<bool> constexprValue) -> IfStatementAST*;
+-
+-  [[nodiscard]] static auto create(Arena* arena,
+-                                   List<AttributeSpecifierAST*>* attributeList,
+-                                   StatementAST* initializer,
+-                                   ExpressionAST* condition,
+-                                   StatementAST* statement,
+-                                   StatementAST* elseStatement,
+-                                   BlockSymbol* symbol,
+-                                   std::optional<bool> constexprValue)
++      std::optional<bool> constexprValue, VariableSymbol* decisionVariable)
++      -> IfStatementAST*;
++
++  [[nodiscard]] static auto create(
++      Arena* arena, List<AttributeSpecifierAST*>* attributeList,
++      StatementAST* initializer, ExpressionAST* condition,
++      StatementAST* statement, StatementAST* elseStatement, BlockSymbol* symbol,
++      std::optional<bool> constexprValue, VariableSymbol* decisionVariable)
+       -> IfStatementAST*;
+
+  protected:
+   IfStatementAST() : StatementAST(Kind) {}
+@@ -2464,8 +2465,11 @@
+   ExpressionAST* condition = nullptr;
+   SourceLocation rparenLoc;
+   StatementAST* statement = nullptr;
+   BlockSymbol* symbol = nullptr;
++  // Decision variable initialized by statement execution; null for an
++  // expression condition.
++  VariableSymbol* decisionVariable = nullptr;
+
+   void accept(ASTVisitor* visitor) override { visitor->visit(this); }
+
+   [[nodiscard]] auto clone(Arena* arena) -> SwitchStatementAST* override;
+@@ -2478,16 +2482,17 @@
+   [[nodiscard]] static auto create(
+       Arena* arena, List<AttributeSpecifierAST*>* attributeList,
+       SourceLocation switchLoc, SourceLocation lparenLoc,
+       StatementAST* initializer, ExpressionAST* condition,
+-      SourceLocation rparenLoc, StatementAST* statement, BlockSymbol* symbol)
+-      -> SwitchStatementAST*;
++      SourceLocation rparenLoc, StatementAST* statement, BlockSymbol* symbol,
++      VariableSymbol* decisionVariable) -> SwitchStatementAST*;
+
+   [[nodiscard]] static auto create(Arena* arena,
+                                    List<AttributeSpecifierAST*>* attributeList,
+                                    StatementAST* initializer,
+                                    ExpressionAST* condition,
+-                                   StatementAST* statement, BlockSymbol* symbol)
++                                   StatementAST* statement, BlockSymbol* symbol,
++                                   VariableSymbol* decisionVariable)
+       -> SwitchStatementAST*;
+
+  protected:
+   SwitchStatementAST() : StatementAST(Kind) {}
+@@ -2503,8 +2508,11 @@
+   ExpressionAST* condition = nullptr;
+   SourceLocation rparenLoc;
+   StatementAST* statement = nullptr;
+   BlockSymbol* symbol = nullptr;
++  // Decision variable initialized by statement execution; null for an
++  // expression condition.
++  VariableSymbol* decisionVariable = nullptr;
+
+   void accept(ASTVisitor* visitor) override { visitor->visit(this); }
+
+   [[nodiscard]] auto clone(Arena* arena) -> WhileStatementAST* override;
+@@ -2517,14 +2525,16 @@
+   [[nodiscard]] static auto create(
+       Arena* arena, List<AttributeSpecifierAST*>* attributeList,
+       SourceLocation whileLoc, SourceLocation lparenLoc,
+       ExpressionAST* condition, SourceLocation rparenLoc,
+-      StatementAST* statement, BlockSymbol* symbol) -> WhileStatementAST*;
++      StatementAST* statement, BlockSymbol* symbol,
++      VariableSymbol* decisionVariable) -> WhileStatementAST*;
+
+   [[nodiscard]] static auto create(Arena* arena,
+                                    List<AttributeSpecifierAST*>* attributeList,
+                                    ExpressionAST* condition,
+-                                   StatementAST* statement, BlockSymbol* symbol)
++                                   StatementAST* statement, BlockSymbol* symbol,
++                                   VariableSymbol* decisionVariable)
+       -> WhileStatementAST*;
+
+  protected:
+   WhileStatementAST() : StatementAST(Kind) {}
+@@ -2656,8 +2666,11 @@
+   ExpressionAST* expression = nullptr;
+   SourceLocation rparenLoc;
+   StatementAST* statement = nullptr;
+   BlockSymbol* symbol = nullptr;
++  // Decision variable initialized by statement execution; null for an
++  // expression condition.
++  VariableSymbol* decisionVariable = nullptr;
+
+   void accept(ASTVisitor* visitor) override { visitor->visit(this); }
+
+   [[nodiscard]] auto clone(Arena* arena) -> ForStatementAST* override;
+@@ -2671,18 +2684,16 @@
+       Arena* arena, List<AttributeSpecifierAST*>* attributeList,
+       SourceLocation forLoc, SourceLocation lparenLoc,
+       StatementAST* initializer, ExpressionAST* condition,
+       SourceLocation semicolonLoc, ExpressionAST* expression,
+-      SourceLocation rparenLoc, StatementAST* statement, BlockSymbol* symbol)
+-      -> ForStatementAST*;
+-
+-  [[nodiscard]] static auto create(Arena* arena,
+-                                   List<AttributeSpecifierAST*>* attributeList,
+-                                   StatementAST* initializer,
+-                                   ExpressionAST* condition,
+-                                   ExpressionAST* expression,
+-                                   StatementAST* statement, BlockSymbol* symbol)
+-      -> ForStatementAST*;
++      SourceLocation rparenLoc, StatementAST* statement, BlockSymbol* symbol,
++      VariableSymbol* decisionVariable) -> ForStatementAST*;
++
++  [[nodiscard]] static auto create(
++      Arena* arena, List<AttributeSpecifierAST*>* attributeList,
++      StatementAST* initializer, ExpressionAST* condition,
++      ExpressionAST* expression, StatementAST* statement, BlockSymbol* symbol,
++      VariableSymbol* decisionVariable) -> ForStatementAST*;
+
+  protected:
+   ForStatementAST() : StatementAST(Kind) {}
+ };
+diff --git a/src/parser/cxx/ast_interpreter.h b/src/parser/cxx/ast_interpreter.h
+--- a/src/parser/cxx/ast_interpreter.h
++++ b/src/parser/cxx/ast_interpreter.h
+@@ -327,8 +327,12 @@
+       -> ConstValue*;
+
+   void bindReference(const Symbol* sym, ConstValue* target);
+
++  // Initialization executes in statement scope; evaluating a decision reads it.
++  void interpretVariable(VariableSymbol* variable, ExpressionAST* initializer);
++  [[nodiscard]] auto readVariable(VariableSymbol* variable) -> ExpressionResult;
++
+   void interpretInitDeclarator(InitDeclaratorAST* initDecl);
+
+   void interpretStructuredBinding(StructuredBindingDeclarationAST* ast);
+
+diff --git a/src/parser/cxx/ast_interpreter_expressions.cc b/src/parser/cxx/ast_interpreter_expressions.cc
+--- a/src/parser/cxx/ast_interpreter_expressions.cc
++++ b/src/parser/cxx/ast_interpreter_expressions.cc
+@@ -902,8 +902,11 @@
+     }
+     break;
+   }
+
++  if (auto condition = ast_cast<ConditionExpressionAST>(ast))
++    return lookupLocalSlot(condition->symbol);
++
+   if (auto id = ast_cast<IdExpressionAST>(ast)) {
+     auto sym = id->symbol;
+     if (!sym) return nullptr;
+
+@@ -1325,8 +1328,28 @@
+     NestedStatementExpressionAST* ast) -> ExpressionResult {
+   return std::nullopt;
+ }
+
++auto ASTInterpreter::readVariable(VariableSymbol* variable)
++    -> ExpressionResult {
++  if (!variable || traits.is_volatile(variable->type())) return std::nullopt;
++  if (variable->isConstexpr()) {
++    if (traits.is_reference(variable->type())) {
++      auto value = variable->constValue();
++      if (!value) return std::nullopt;
++      auto address = std::get_if<std::shared_ptr<ConstAddress>>(&*value);
++      if (!address || !*address) return std::nullopt;
++      return loadAddress(**address, 0);
++    }
++    return variable->constValue();
++  }
++  if (variable->constValue() && traits.is_const(variable->type()) &&
++      (traits.is_integral_or_enum(traits.remove_cvref(variable->type())) ||
++       isDependent(unit_, variable->type())))
++    return variable->constValue();
++  return lookupLocal(variable);
++}
++
+ auto ASTInterpreter::ExpressionVisitor::operator()(IdExpressionAST* ast)
+     -> ExpressionResult {
+   auto nestedNameSpecifierResult =
+       interp.nestedNameSpecifier(ast->nestedNameSpecifier);
+@@ -1344,28 +1367,10 @@
+     if (!satisfied.has_value()) return std::nullopt;
+     return ConstValue{*satisfied};
+   }
+
+-  if (auto var = symbol_cast<VariableSymbol>(ast->symbol);
+-      var && var->isConstexpr()) {
+-    if (unit()->typeTraits().is_reference(var->type())) {
+-      auto value = var->constValue();
+-      if (!value) return std::nullopt;
+-      auto address = std::get_if<std::shared_ptr<ConstAddress>>(&*value);
+-      if (!address || !*address) return std::nullopt;
+-      return interp.loadAddress(**address, 0);
+-    }
+-    return var->constValue();
+-  }
+-
+-  if (auto var = symbol_cast<VariableSymbol>(ast->symbol);
+-      var && !var->isConstexpr() && var->constValue().has_value() &&
+-      unit()->typeTraits().is_const(var->type()) &&
+-      (unit()->typeTraits().is_integral_or_enum(
+-           unit()->typeTraits().remove_cvref(var->type())) ||
+-       isDependent(unit(), var->type()))) {
+-    return var->constValue();
+-  }
++  if (auto variable = symbol_cast<VariableSymbol>(ast->symbol))
++    return interp.readVariable(variable);
+
+   if (auto field = symbol_cast<FieldSymbol>(ast->symbol);
+       field && field->isStatic()) {
+     return interp.evaluateStaticField(field);
+@@ -3071,20 +3076,9 @@
+ }
+
+ auto ASTInterpreter::ExpressionVisitor::operator()(ConditionExpressionAST* ast)
+     -> ExpressionResult {
+-  for (auto node : ListView{ast->attributeList}) {
+-    auto value = interp.attributeSpecifier(node);
+-  }
+-
+-  for (auto node : ListView{ast->declSpecifierList}) {
+-    auto value = interp.specifier(node);
+-  }
+-
+-  auto declaratorResult = interp.declarator(ast->declarator);
+-  auto initializerResult = interp.expression(ast->initializer);
+-
+-  return ExpressionResult{std::nullopt};
++  return interp.readVariable(ast->symbol);
+ }
+
+ auto ASTInterpreter::ExpressionVisitor::operator()(EqualInitializerAST* ast)
+     -> ExpressionResult {
+diff --git a/src/parser/cxx/ast_interpreter_statements.cc b/src/parser/cxx/ast_interpreter_statements.cc
+--- a/src/parser/cxx/ast_interpreter_statements.cc
++++ b/src/parser/cxx/ast_interpreter_statements.cc
+@@ -166,8 +166,11 @@
+     -> StatementResult {
+   auto mark = interp.beginAutomaticScope();
+   auto result = [&]() -> StatementResult {
+     (void)interp.statement(ast->initializer);
++    if (ast->decisionVariable)
++      interp.interpretVariable(ast->decisionVariable,
++                               ast->decisionVariable->initializer());
+     if (interp.aborted()) return {};
+     if (ast->constexprValue.has_value())
+       return interp.statement(*ast->constexprValue ? ast->statement
+                                                   : ast->elseStatement);
+@@ -203,8 +206,11 @@
+     -> StatementResult {
+   auto mark = interp.beginAutomaticScope();
+   auto switchResult = [&]() -> StatementResult {
+     (void)interp.statement(ast->initializer);
++    if (ast->decisionVariable)
++      interp.interpretVariable(ast->decisionVariable,
++                               ast->decisionVariable->initializer());
+
+     auto conditionResult = interp.expression(ast->condition);
+     if (!conditionResult.has_value()) return {};
+     auto condValue = interp.toInt(*conditionResult);
+@@ -250,21 +256,26 @@
+ auto ASTInterpreter::StatementVisitor::operator()(WhileStatementAST* ast)
+     -> StatementResult {
+   for (;;) {
+     if (!interp.tick()) return {};
+-
+-    auto conditionResult = interp.expression(ast->condition);
+-    if (!conditionResult.has_value()) return {};
+-    auto boolVal = interp.toBool(*conditionResult);
+-    if (!boolVal.has_value()) return {};
+-    if (!*boolVal) break;
+-
+-    auto result = interp.statement(ast->statement);
+-    if (interp.aborted()) return {};
++    auto mark = interp.beginAutomaticScope();
++    auto result = [&]() -> StatementResult {
++      if (ast->decisionVariable)
++        interp.interpretVariable(ast->decisionVariable,
++                                 ast->decisionVariable->initializer());
++      auto condition = interp.expression(ast->condition);
++      auto taken = condition ? interp.toBool(*condition) : std::nullopt;
++      if (!taken) {
++        interp.aborted_ = true;
++        return {};
++      }
++      if (!*taken) return {ControlFlow::kBreak};
++      return interp.statement(ast->statement);
++    }();
++    if (!interp.endAutomaticScope(mark) || interp.aborted()) return {};
+     if (result.flow == ControlFlow::kBreak) break;
+     if (result.flow == ControlFlow::kReturn) return result;
+   }
+-
+   return {};
+ }
+
+ auto ASTInterpreter::StatementVisitor::operator()(DoStatementAST* ast)
+@@ -529,33 +540,40 @@
+     -> StatementResult {
+   auto mark = interp.beginAutomaticScope();
+   auto loopResult = [&]() -> StatementResult {
+     (void)interp.statement(ast->initializer);
+-
++    if (interp.aborted()) return {};
+     for (;;) {
+       if (!interp.tick()) return {};
+-
+-      if (ast->condition) {
+-        auto conditionResult = interp.expression(ast->condition);
+-        if (!conditionResult.has_value()) return {};
+-        auto boolVal = interp.toBool(*conditionResult);
+-        if (!boolVal.has_value()) return {};
+-        if (!*boolVal) break;
+-      }
+-
+-      auto result = interp.statement(ast->statement);
+-      if (interp.aborted()) return {};
++      auto iterationMark = interp.beginAutomaticScope();
++      auto result = [&]() -> StatementResult {
++        if (ast->decisionVariable)
++          interp.interpretVariable(ast->decisionVariable,
++                                   ast->decisionVariable->initializer());
++        if (ast->condition) {
++          auto condition = interp.expression(ast->condition);
++          auto taken = condition ? interp.toBool(*condition) : std::nullopt;
++          if (!taken) {
++            interp.aborted_ = true;
++            return {};
++          }
++          if (!*taken) return {ControlFlow::kBreak};
++        }
++        auto result = interp.statement(ast->statement);
++        if (interp.aborted() || result.flow == ControlFlow::kBreak ||
++            result.flow == ControlFlow::kReturn)
++          return result;
++        if (ast->expression && !interp.expression(ast->expression))
++          interp.aborted_ = true;
++        return {};
++      }();
++      if (!interp.endAutomaticScope(iterationMark) || interp.aborted())
++        return {};
+       if (result.flow == ControlFlow::kBreak) break;
+       if (result.flow == ControlFlow::kReturn) return result;
+-
+-      if (ast->expression) {
+-        auto expressionResult = interp.expression(ast->expression);
+-        if (!expressionResult.has_value()) return {};
+-      }
+     }
+     return {};
+   }();
+-
+   if (!interp.endAutomaticScope(mark)) return {};
+   return loopResult;
+ }
+
+@@ -602,43 +620,49 @@
+     -> StatementResult {
+   return {};
+ }
+
++void ASTInterpreter::interpretVariable(VariableSymbol* var,
++                                       ExpressionAST* initializer) {
++  if (!var || aborted_) return;
++
++  if (traits.is_reference(var->type())) {
++    auto initExpr = Initializer{initializer}.clause();
++    if (auto slot = lvalue(initExpr)) {
++      bindReference(var, slot);
++    } else {
++      aborted_ = true;
++    }
++    return;
++  }
++
++  ExpressionResult initVal;
++  if (var->constructor() &&
++      !ast_cast<ConstExpressionAST>(Initializer{initializer}.clause())) {
++    initVal = evaluateConstructorFromExprs(
++        var->constructor(), var->type(), Initializer{initializer}.arguments());
++  } else {
++    initVal = expression(initializer);
++  }
++
++  if (!initVal.has_value() && !initializer) {
++    initVal = defaultConstruct(var->type());
++  }
++
++  if (initVal.has_value()) {
++    if (traits.is_class(traits.remove_cv(var->type())))
++      initVal = cloneValue(*initVal);
++    setLocal(var, *initVal);
++    registerAutomaticObject(var);
++  } else {
++    aborted_ = true;
++  }
++}
++
+ void ASTInterpreter::interpretInitDeclarator(InitDeclaratorAST* initDecl) {
+-  if (!initDecl || !initDecl->symbol) return;
+-
+-  auto var = symbol_cast<VariableSymbol>(initDecl->symbol);
+-
+-  if (var && traits.is_reference(var->type())) {
+-    auto initExpr = Initializer{initDecl->initializer}.clause();
+-    if (auto slot = lvalue(initExpr)) {
+-      bindReference(initDecl->symbol, slot);
+-    }
+-    return;
+-  }
+-
+-  ExpressionResult initVal;
+-  if (var && var->constructor() &&
+-      !ast_cast<ConstExpressionAST>(
+-          Initializer{initDecl->initializer}.clause())) {
+-    initVal = evaluateConstructorFromExprs(
+-        var->constructor(), var->type(),
+-        Initializer{initDecl->initializer}.arguments());
+-  } else {
+-    initVal = expression(initDecl->initializer);
+-  }
+-
+-  if (!initVal.has_value() && !initDecl->initializer) {
+-    if (var) initVal = defaultConstruct(var->type());
+-  }
+-
+-  if (initVal.has_value()) {
+-    if (var && !traits.is_reference(var->type()) &&
+-        traits.is_class(traits.remove_cv(var->type())))
+-      initVal = cloneValue(*initVal);
+-    setLocal(initDecl->symbol, *initVal);
+-    if (var) registerAutomaticObject(var);
+-  }
++  if (!initDecl) return;
++  interpretVariable(symbol_cast<VariableSymbol>(initDecl->symbol),
++                    initDecl->initializer);
+ }
+
+ void ASTInterpreter::interpretStructuredBinding(
+     StructuredBindingDeclarationAST* ast) {
+diff --git a/src/parser/cxx/ast_rewriter_expressions.cc b/src/parser/cxx/ast_rewriter_expressions.cc
+--- a/src/parser/cxx/ast_rewriter_expressions.cc
++++ b/src/parser/cxx/ast_rewriter_expressions.cc
+@@ -1959,19 +1959,17 @@
+
+   copy->declarator = rewrite.declarator(ast->declarator);
+
+   auto declaratorDecl = Decl{declSpecifierListCtx, copy->declarator};
+-  auto declaratorType = getDeclaratorType(translationUnit(), copy->declarator,
+-                                          declSpecifierListCtx.type());
+-  copy->initializer = rewrite.expression(ast->initializer);
+-
+   copy->symbol = binder()->declareVariable(copy->declarator, declaratorDecl,
+                                            /*addSymbolToParentScope=*/true);
+
+   if (ast->symbol && copy->symbol) {
+     rewrite.addSymbolRemap(ast->symbol, copy->symbol);
+   }
+
++  // The decision variable is in scope within its own initializer.
++  copy->initializer = rewrite.expression(ast->initializer);
+   typeChecker().check_condition_declaration(copy);
+
+   return copy;
+ }
+diff --git a/src/parser/cxx/ast_rewriter_statements.cc b/src/parser/cxx/ast_rewriter_statements.cc
+--- a/src/parser/cxx/ast_rewriter_statements.cc
++++ b/src/parser/cxx/ast_rewriter_statements.cc
+@@ -421,8 +421,10 @@
+   copy->constexprLoc = ast->constexprLoc;
+   copy->lparenLoc = ast->lparenLoc;
+   copy->initializer = rewrite.statement(ast->initializer);
+   copy->condition = rewrite.expression(ast->condition);
++  copy->decisionVariable =
++      symbol_cast<VariableSymbol>(rewrite.remapSymbol(ast->decisionVariable));
+   copy->constexprValue = ast->constexprValue;
+   typeChecker().check_if_statement(copy);
+   copy->rparenLoc = ast->rparenLoc;
+
+@@ -483,8 +485,10 @@
+   copy->switchLoc = ast->switchLoc;
+   copy->lparenLoc = ast->lparenLoc;
+   copy->initializer = rewrite.statement(ast->initializer);
+   copy->condition = rewrite.expression(ast->condition);
++  copy->decisionVariable =
++      symbol_cast<VariableSymbol>(rewrite.remapSymbol(ast->decisionVariable));
+   typeChecker().check_integral_condition(copy->condition);
+   copy->rparenLoc = ast->rparenLoc;
+   copy->statement = rewrite.statement(ast->statement);
+
+@@ -510,8 +514,10 @@
+
+   copy->whileLoc = ast->whileLoc;
+   copy->lparenLoc = ast->lparenLoc;
+   copy->condition = rewrite.expression(ast->condition);
++  copy->decisionVariable =
++      symbol_cast<VariableSymbol>(rewrite.remapSymbol(ast->decisionVariable));
+   typeChecker().check_bool_condition(copy->condition);
+   copy->rparenLoc = ast->rparenLoc;
+   copy->statement = rewrite.statement(ast->statement);
+
+@@ -615,8 +621,10 @@
+   copy->forLoc = ast->forLoc;
+   copy->lparenLoc = ast->lparenLoc;
+   copy->initializer = rewrite.statement(ast->initializer);
+   copy->condition = rewrite.expression(ast->condition);
++  copy->decisionVariable =
++      symbol_cast<VariableSymbol>(rewrite.remapSymbol(ast->decisionVariable));
+   typeChecker().check_bool_condition(copy->condition);
+   copy->semicolonLoc = ast->semicolonLoc;
+   copy->expression = rewrite.expression(ast->expression);
+   copy->rparenLoc = ast->rparenLoc;
+diff --git a/src/parser/cxx/parser.cc b/src/parser/cxx/parser.cc
+--- a/src/parser/cxx/parser.cc
++++ b/src/parser/cxx/parser.cc
+@@ -4177,9 +4177,11 @@
+   ast->expression = expression;
+   ast->semicolonLoc = semicolonLoc;
+ }
+
+-void Parser::parse_condition(ExpressionAST*& yyast, const ExprContext& ctx) {
++void Parser::parse_condition(ExpressionAST*& yyast,
++                             VariableSymbol*& decisionVariable,
++                             const ExprContext& ctx) {
+   auto lookat_condition = [&] {
+     if (!isCxx()) return false;
+
+     LookaheadParser lookahead{this};
+@@ -4219,8 +4221,9 @@
+     ast->declSpecifierList = declSpecifierList;
+     ast->declarator = declarator;
+     ast->initializer = initializer;
+     ast->symbol = symbol;
++    decisionVariable = symbol;
+
+     check(&yyast);
+
+     return true;
+@@ -4514,9 +4517,9 @@
+   expect(TokenKind::T_LPAREN, ast->lparenLoc);
+
+   parse_init_statement(ast->initializer);
+
+-  parse_condition(ast->condition, ExprContext{});
++  parse_condition(ast->condition, ast->decisionVariable, ExprContext{});
+   TypeChecker check{unit_};
+   check.setScope(scope());
+   check.setReportErrors(config().checkTypes);
+   check.check_if_statement(ast);
+@@ -4572,9 +4575,9 @@
+   expect(TokenKind::T_LPAREN, ast->lparenLoc);
+
+   parse_init_statement(ast->initializer);
+
+-  parse_condition(ast->condition, ExprContext{});
++  parse_condition(ast->condition, ast->decisionVariable, ExprContext{});
+   check_integral_condition(ast->condition);
+
+   expect(TokenKind::T_RPAREN, ast->rparenLoc);
+
+@@ -4604,9 +4607,9 @@
+   ast->whileLoc = whileLoc;
+
+   expect(TokenKind::T_LPAREN, ast->lparenLoc);
+
+-  parse_condition(ast->condition, ExprContext{});
++  parse_condition(ast->condition, ast->decisionVariable, ExprContext{});
+   check_bool_condition(ast->condition);
+
+   expect(TokenKind::T_RPAREN, ast->rparenLoc);
+
+@@ -4717,9 +4720,9 @@
+   ast->lparenLoc = lparenLoc;
+   ast->initializer = initializer;
+
+   if (!match(TokenKind::T_SEMICOLON, ast->semicolonLoc)) {
+-    parse_condition(ast->condition, ExprContext{});
++    parse_condition(ast->condition, ast->decisionVariable, ExprContext{});
+     check_bool_condition(ast->condition);
+     expect(TokenKind::T_SEMICOLON, ast->semicolonLoc);
+   }
+
+diff --git a/src/parser/cxx/parser.h b/src/parser/cxx/parser.h
+--- a/src/parser/cxx/parser.h
++++ b/src/parser/cxx/parser.h
+@@ -435,9 +435,10 @@
+   [[nodiscard]] auto parse_maybe_statement(StatementAST*& yyast,
+                                            bool isSubstatement = false) -> bool;
+
+   void parse_init_statement(StatementAST*& yyast);
+-  void parse_condition(ExpressionAST*& yyast, const ExprContext& ctx);
++  void parse_condition(ExpressionAST*& yyast, VariableSymbol*& decisionVariable,
++                       const ExprContext& ctx);
+
+   [[nodiscard]] auto parse_labeled_statement(StatementAST*& yyast) -> bool;
+   [[nodiscard]] auto parse_case_statement(StatementAST*& yyast) -> bool;
+   [[nodiscard]] auto parse_default_statement(StatementAST*& yyast) -> bool;
+diff --git a/src/parser/cxx/private/semantic_model.h b/src/parser/cxx/private/semantic_model.h
+--- a/src/parser/cxx/private/semantic_model.h
++++ b/src/parser/cxx/private/semantic_model.h
+@@ -881,8 +881,10 @@
+      ""},
+     {"::cxx::IfStatementAST", "symbol", FieldPersistence::kPersisted, ""},
+     {"::cxx::IfStatementAST", "constexprValue", FieldPersistence::kPersisted,
+      ""},
++    {"::cxx::IfStatementAST", "decisionVariable", FieldPersistence::kPersisted,
++     ""},
+     {"::cxx::ConstevalIfStatementAST", "attributeList",
+      FieldPersistence::kPersisted, ""},
+     {"::cxx::ConstevalIfStatementAST", "ifLoc", FieldPersistence::kPersisted,
+      ""},
+@@ -912,16 +914,20 @@
+      ""},
+     {"::cxx::SwitchStatementAST", "statement", FieldPersistence::kPersisted,
+      ""},
+     {"::cxx::SwitchStatementAST", "symbol", FieldPersistence::kPersisted, ""},
++    {"::cxx::SwitchStatementAST", "decisionVariable",
++     FieldPersistence::kPersisted, ""},
+     {"::cxx::WhileStatementAST", "attributeList", FieldPersistence::kPersisted,
+      ""},
+     {"::cxx::WhileStatementAST", "whileLoc", FieldPersistence::kPersisted, ""},
+     {"::cxx::WhileStatementAST", "lparenLoc", FieldPersistence::kPersisted, ""},
+     {"::cxx::WhileStatementAST", "condition", FieldPersistence::kPersisted, ""},
+     {"::cxx::WhileStatementAST", "rparenLoc", FieldPersistence::kPersisted, ""},
+     {"::cxx::WhileStatementAST", "statement", FieldPersistence::kPersisted, ""},
+     {"::cxx::WhileStatementAST", "symbol", FieldPersistence::kPersisted, ""},
++    {"::cxx::WhileStatementAST", "decisionVariable",
++     FieldPersistence::kPersisted, ""},
+     {"::cxx::DoStatementAST", "attributeList", FieldPersistence::kPersisted,
+      ""},
+     {"::cxx::DoStatementAST", "doLoc", FieldPersistence::kPersisted, ""},
+     {"::cxx::DoStatementAST", "statement", FieldPersistence::kPersisted, ""},
+@@ -993,8 +999,10 @@
+     {"::cxx::ForStatementAST", "expression", FieldPersistence::kPersisted, ""},
+     {"::cxx::ForStatementAST", "rparenLoc", FieldPersistence::kPersisted, ""},
+     {"::cxx::ForStatementAST", "statement", FieldPersistence::kPersisted, ""},
+     {"::cxx::ForStatementAST", "symbol", FieldPersistence::kPersisted, ""},
++    {"::cxx::ForStatementAST", "decisionVariable", FieldPersistence::kPersisted,
++     ""},
+     {"::cxx::BreakStatementAST", "attributeList", FieldPersistence::kPersisted,
+      ""},
+     {"::cxx::BreakStatementAST", "breakLoc", FieldPersistence::kPersisted, ""},
+     {"::cxx::BreakStatementAST", "semicolonLoc", FieldPersistence::kPersisted,
+diff --git a/src/parser/cxx/semantic_codec.cc b/src/parser/cxx/semantic_codec.cc
+--- a/src/parser/cxx/semantic_codec.cc
++++ b/src/parser/cxx/semantic_codec.cc
+@@ -4256,8 +4256,10 @@
+   out.varU32(static_cast<std::uint32_t>(symbolRef(self->symbol)));
+   // ::cxx::IfStatementAST::constexprValue
+   out.boolean(self->constexprValue.has_value());
+   if (self->constexprValue.has_value()) out.boolean(*self->constexprValue);
++  // ::cxx::IfStatementAST::decisionVariable
++  out.varU32(static_cast<std::uint32_t>(symbolRef(self->decisionVariable)));
+ }
+
+ void SemanticEncoder::writeAstConstevalIfStatementAST(
+     ByteWriter& out, [[maybe_unused]] cxx::ConstevalIfStatementAST* self) {
+@@ -4296,8 +4298,10 @@
+   // ::cxx::SwitchStatementAST::statement
+   out.varU32(static_cast<std::uint32_t>(astRef(self->statement)));
+   // ::cxx::SwitchStatementAST::symbol
+   out.varU32(static_cast<std::uint32_t>(symbolRef(self->symbol)));
++  // ::cxx::SwitchStatementAST::decisionVariable
++  out.varU32(static_cast<std::uint32_t>(symbolRef(self->decisionVariable)));
+ }
+
+ void SemanticEncoder::writeAstWhileStatementAST(
+     ByteWriter& out, [[maybe_unused]] cxx::WhileStatementAST* self) {
+@@ -4314,8 +4318,10 @@
+   // ::cxx::WhileStatementAST::statement
+   out.varU32(static_cast<std::uint32_t>(astRef(self->statement)));
+   // ::cxx::WhileStatementAST::symbol
+   out.varU32(static_cast<std::uint32_t>(symbolRef(self->symbol)));
++  // ::cxx::WhileStatementAST::decisionVariable
++  out.varU32(static_cast<std::uint32_t>(symbolRef(self->decisionVariable)));
+ }
+
+ void SemanticEncoder::writeAstDoStatementAST(
+     ByteWriter& out, [[maybe_unused]] cxx::DoStatementAST* self) {
+@@ -4416,8 +4422,10 @@
+   // ::cxx::ForStatementAST::statement
+   out.varU32(static_cast<std::uint32_t>(astRef(self->statement)));
+   // ::cxx::ForStatementAST::symbol
+   out.varU32(static_cast<std::uint32_t>(symbolRef(self->symbol)));
++  // ::cxx::ForStatementAST::decisionVariable
++  out.varU32(static_cast<std::uint32_t>(symbolRef(self->decisionVariable)));
+ }
+
+ void SemanticEncoder::writeAstBreakStatementAST(
+     ByteWriter& out, [[maybe_unused]] cxx::BreakStatementAST* self) {
+@@ -13673,8 +13681,11 @@
+     bool value13 = in.boolean();
+     value12 = std::move(value13);
+   }
+   self->constexprValue = std::move(value12);
++  // ::cxx::IfStatementAST::decisionVariable
++  self->decisionVariable =
++      symbol_cast<VariableSymbol>(symbolAt(SymbolRef{in.varU32()}));
+ }
+
+ void SemanticDecoder::readAstConstevalIfStatementAST(
+     [[maybe_unused]] ByteReader& in,
+@@ -13739,8 +13750,11 @@
+   // ::cxx::SwitchStatementAST::symbol
+   cxx::BlockSymbol* value8 =
+       symbol_cast<BlockSymbol>(symbolAt(SymbolRef{in.varU32()}));
+   self->symbol = std::move(value8);
++  // ::cxx::SwitchStatementAST::decisionVariable
++  self->decisionVariable =
++      symbol_cast<VariableSymbol>(symbolAt(SymbolRef{in.varU32()}));
+ }
+
+ void SemanticDecoder::readAstWhileStatementAST(
+     [[maybe_unused]] ByteReader& in,
+@@ -13769,8 +13783,11 @@
+   // ::cxx::WhileStatementAST::symbol
+   cxx::BlockSymbol* value7 =
+       symbol_cast<BlockSymbol>(symbolAt(SymbolRef{in.varU32()}));
+   self->symbol = std::move(value7);
++  // ::cxx::WhileStatementAST::decisionVariable
++  self->decisionVariable =
++      symbol_cast<VariableSymbol>(symbolAt(SymbolRef{in.varU32()}));
+ }
+
+ void SemanticDecoder::readAstDoStatementAST(
+     [[maybe_unused]] ByteReader& in,
+@@ -13947,8 +13964,11 @@
+   // ::cxx::ForStatementAST::symbol
+   cxx::BlockSymbol* value10 =
+       symbol_cast<BlockSymbol>(symbolAt(SymbolRef{in.varU32()}));
+   self->symbol = std::move(value10);
++  // ::cxx::ForStatementAST::decisionVariable
++  self->decisionVariable =
++      symbol_cast<VariableSymbol>(symbolAt(SymbolRef{in.varU32()}));
+ }
+
+ void SemanticDecoder::readAstBreakStatementAST(
+     [[maybe_unused]] ByteReader& in,
