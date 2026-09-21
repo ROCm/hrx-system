@@ -287,10 +287,6 @@ loom_test(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/conformance/global_atomic_add_f32.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/conformance/loop_rotating_values.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/conformance/loop_rotating_views.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/conformance/loop_termination.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/buffer_bulk_hal_actual.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/dynamic_workgroup_hal_actual.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/launch_schedule_hal_actual.loom"
 )
 
 if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)

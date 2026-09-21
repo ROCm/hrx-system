@@ -132,9 +132,6 @@ loom_test(
   SRCS
     "amdgpu_hal_actual.loom"
     "generated_tensor_cases.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/buffer_bulk_hal_actual.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/dynamic_workgroup_hal_actual.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/launch_schedule_hal_actual.loom"
 )
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
@@ -232,7 +229,7 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 loom_test(
   NAME
-    address_carrier_hardware_test
+    address_carrier_test
   SRCS
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/conformance/address_carrier_casts.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/conformance/address_carrier_loops.loom"
@@ -242,9 +239,9 @@ loom_test(
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 loom_execution_test(
   NAME
-    address_carrier_hardware_test_execute_amdgpu_hardware_test
+    address_carrier_test_execute_amdgpu_hardware_test
   MODULE
-    "::address_carrier_hardware_test_module"
+    "::address_carrier_test_module"
   RUNNER_ARGS
     "--device=amdgpu"
   LABELS
@@ -263,11 +260,37 @@ loom_execution_test(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    address_carrier_test_execute_amdgpu_access_test
+  MODULE
+    "::address_carrier_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=access"
+  LABELS
+    "notsan"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "loom-amdgpu-tests"
+)
+endif()
+
 loom_check_compile_tests(
   NAME
-    "address_carrier_hardware_test"
+    "address_carrier_test"
   SRC
-    "::address_carrier_hardware_test_module"
+    "::address_carrier_test_module"
   TARGETS
     loom::target::amdgpu::gfx11-generic
     loom::target::amdgpu::gfx1100
@@ -299,44 +322,7 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 loom_test(
   NAME
-    address_carrier_access_test
-  SRCS
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/conformance/address_carrier_casts.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/conformance/address_carrier_loops.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/conformance/address_widening.loom"
-)
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-loom_execution_test(
-  NAME
-    address_carrier_access_test_execute_amdgpu_access_test
-  MODULE
-    "::address_carrier_access_test_module"
-  RUNNER_ARGS
-    "--device=amdgpu"
-    "--sanitizer=access"
-  LABELS
-    "notsan"
-    "iree-build-requirement=loom.target.arch.amdgpu"
-    "iree-build-requirement=loom.emit.amdgpu"
-    "iree-build-requirement=loom.execute.iree_hal"
-    "iree-build-requirement=runtime.hal.amdgpu"
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "runtime-resource=amd-gpu"
-    "loom-execution-profile=amdgpu_access"
-    "loom-target-family=amdgpu"
-    "loom-target-class=gpu"
-    "loom-executor=hardware"
-  RESOURCE_GROUP
-    "loom-amdgpu-tests"
-)
-endif()
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_test(
-  NAME
-    address_uniform_add_hardware_test
+    address_uniform_add_test
   SRCS
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/conformance/address_uniform_add.loom"
 )
@@ -344,9 +330,9 @@ loom_test(
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 loom_execution_test(
   NAME
-    address_uniform_add_hardware_test_execute_amdgpu_hardware_test
+    address_uniform_add_test_execute_amdgpu_hardware_test
   MODULE
-    "::address_uniform_add_hardware_test_module"
+    "::address_uniform_add_test_module"
   RUNNER_ARGS
     "--device=amdgpu"
   LABELS
@@ -364,22 +350,13 @@ loom_execution_test(
     "loom-amdgpu-tests"
 )
 endif()
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_test(
-  NAME
-    address_uniform_add_access_test
-  SRCS
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/conformance/address_uniform_add.loom"
-)
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 loom_execution_test(
   NAME
-    address_uniform_add_access_test_execute_amdgpu_access_test
+    address_uniform_add_test_execute_amdgpu_access_test
   MODULE
-    "::address_uniform_add_access_test_module"
+    "::address_uniform_add_test_module"
   RUNNER_ARGS
     "--device=amdgpu"
     "--sanitizer=access"
@@ -495,7 +472,7 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 loom_test(
   NAME
-    wide_subtract_hardware_test
+    wide_subtract_test
   SRCS
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/conformance/integer_wide_subtract.loom"
 )
@@ -503,9 +480,9 @@ loom_test(
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 loom_execution_test(
   NAME
-    wide_subtract_hardware_test_execute_amdgpu_hardware_test
+    wide_subtract_test_execute_amdgpu_hardware_test
   MODULE
-    "::wide_subtract_hardware_test_module"
+    "::wide_subtract_test_module"
   RUNNER_ARGS
     "--device=amdgpu"
   LABELS
@@ -523,22 +500,13 @@ loom_execution_test(
     "loom-amdgpu-tests"
 )
 endif()
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_test(
-  NAME
-    wide_subtract_access_test
-  SRCS
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/conformance/integer_wide_subtract.loom"
-)
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 loom_execution_test(
   NAME
-    wide_subtract_access_test_execute_amdgpu_access_test
+    wide_subtract_test_execute_amdgpu_access_test
   MODULE
-    "::wide_subtract_access_test_module"
+    "::wide_subtract_test_module"
   RUNNER_ARGS
     "--device=amdgpu"
     "--sanitizer=access"
@@ -596,7 +564,7 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 loom_test(
   NAME
-    kernarg_hardware_test
+    kernarg_test
   SRCS
     "amdgpu_unused_kernargs.loom"
 )
@@ -604,9 +572,9 @@ loom_test(
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 loom_execution_test(
   NAME
-    kernarg_hardware_test_execute_amdgpu_hardware_test
+    kernarg_test_execute_amdgpu_hardware_test
   MODULE
-    "::kernarg_hardware_test_module"
+    "::kernarg_test_module"
   RUNNER_ARGS
     "--device=amdgpu"
   LABELS
@@ -624,55 +592,13 @@ loom_execution_test(
     "loom-amdgpu-tests"
 )
 endif()
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_test(
-  NAME
-    callable_values_hardware_test
-  SRCS
-    "callable_values.loom"
-)
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 loom_execution_test(
   NAME
-    callable_values_hardware_test_execute_amdgpu_hardware_test
+    kernarg_test_execute_amdgpu_access_test
   MODULE
-    "::callable_values_hardware_test_module"
-  RUNNER_ARGS
-    "--device=amdgpu"
-  LABELS
-    "iree-build-requirement=loom.target.arch.amdgpu"
-    "iree-build-requirement=loom.emit.amdgpu"
-    "iree-build-requirement=loom.execute.iree_hal"
-    "iree-build-requirement=runtime.hal.amdgpu"
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "runtime-resource=amd-gpu"
-    "loom-execution-profile=amdgpu_hardware"
-    "loom-target-family=amdgpu"
-    "loom-target-class=gpu"
-    "loom-executor=hardware"
-  RESOURCE_GROUP
-    "loom-amdgpu-tests"
-)
-endif()
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_test(
-  NAME
-    callable_values_access_test
-  SRCS
-    "callable_values.loom"
-)
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-loom_execution_test(
-  NAME
-    callable_values_access_test_execute_amdgpu_access_test
-  MODULE
-    "::callable_values_access_test_module"
+    "::kernarg_test_module"
   RUNNER_ARGS
     "--device=amdgpu"
     "--sanitizer=access"
@@ -697,17 +623,17 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 loom_test(
   NAME
-    narrow_argument_hardware_test
+    callable_values_test
   SRCS
-    "narrow_arguments.loom"
+    "callable_values.loom"
 )
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 loom_execution_test(
   NAME
-    narrow_argument_hardware_test_execute_amdgpu_hardware_test
+    callable_values_test_execute_amdgpu_hardware_test
   MODULE
-    "::narrow_argument_hardware_test_module"
+    "::callable_values_test_module"
   RUNNER_ARGS
     "--device=amdgpu"
   LABELS
@@ -725,12 +651,38 @@ loom_execution_test(
     "loom-amdgpu-tests"
 )
 endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    callable_values_test_execute_amdgpu_access_test
+  MODULE
+    "::callable_values_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=access"
+  LABELS
+    "notsan"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "loom-amdgpu-tests"
+)
+endif()
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 loom_test(
   NAME
-    narrow_argument_access_test
+    narrow_argument_test
   SRCS
     "narrow_arguments.loom"
 )
@@ -738,9 +690,33 @@ loom_test(
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 loom_execution_test(
   NAME
-    narrow_argument_access_test_execute_amdgpu_access_test
+    narrow_argument_test_execute_amdgpu_hardware_test
   MODULE
-    "::narrow_argument_access_test_module"
+    "::narrow_argument_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "loom-amdgpu-tests"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    narrow_argument_test_execute_amdgpu_access_test
+  MODULE
+    "::narrow_argument_test_module"
   RUNNER_ARGS
     "--device=amdgpu"
     "--sanitizer=access"
@@ -866,74 +842,6 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 loom_test(
   NAME
-    loop_termination_hardware_test
-  SRCS
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/conformance/loop_termination.loom"
-)
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-loom_execution_test(
-  NAME
-    loop_termination_hardware_test_execute_amdgpu_hardware_test
-  MODULE
-    "::loop_termination_hardware_test_module"
-  RUNNER_ARGS
-    "--device=amdgpu"
-  LABELS
-    "iree-build-requirement=loom.target.arch.amdgpu"
-    "iree-build-requirement=loom.emit.amdgpu"
-    "iree-build-requirement=loom.execute.iree_hal"
-    "iree-build-requirement=runtime.hal.amdgpu"
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "runtime-resource=amd-gpu"
-    "loom-execution-profile=amdgpu_hardware"
-    "loom-target-family=amdgpu"
-    "loom-target-class=gpu"
-    "loom-executor=hardware"
-  RESOURCE_GROUP
-    "loom-amdgpu-tests"
-)
-endif()
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_test(
-  NAME
-    loop_termination_access_test
-  SRCS
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/conformance/loop_termination.loom"
-)
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-loom_execution_test(
-  NAME
-    loop_termination_access_test_execute_amdgpu_access_test
-  MODULE
-    "::loop_termination_access_test_module"
-  RUNNER_ARGS
-    "--device=amdgpu"
-    "--sanitizer=access"
-  LABELS
-    "notsan"
-    "iree-build-requirement=loom.target.arch.amdgpu"
-    "iree-build-requirement=loom.emit.amdgpu"
-    "iree-build-requirement=loom.execute.iree_hal"
-    "iree-build-requirement=runtime.hal.amdgpu"
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "runtime-resource=amd-gpu"
-    "loom-execution-profile=amdgpu_access"
-    "loom-target-family=amdgpu"
-    "loom-target-class=gpu"
-    "loom-executor=hardware"
-  RESOURCE_GROUP
-    "loom-amdgpu-tests"
-)
-endif()
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_test(
-  NAME
     collective_loop_access_test
   SRCS
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/conformance/collective_loop_state.loom"
@@ -1002,7 +910,7 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 loom_test(
   NAME
-    conditional_guards_hardware_test
+    conditional_guards_test
   SRCS
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/conformance/conditional_guards.loom"
 )
@@ -1010,9 +918,9 @@ loom_test(
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 loom_execution_test(
   NAME
-    conditional_guards_hardware_test_execute_amdgpu_hardware_test
+    conditional_guards_test_execute_amdgpu_hardware_test
   MODULE
-    "::conditional_guards_hardware_test_module"
+    "::conditional_guards_test_module"
   RUNNER_ARGS
     "--device=amdgpu"
   LABELS
@@ -1030,22 +938,13 @@ loom_execution_test(
     "loom-amdgpu-tests"
 )
 endif()
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_test(
-  NAME
-    conditional_guards_access_test
-  SRCS
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/conformance/conditional_guards.loom"
-)
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 loom_execution_test(
   NAME
-    conditional_guards_access_test_execute_amdgpu_access_test
+    conditional_guards_test_execute_amdgpu_access_test
   MODULE
-    "::conditional_guards_access_test_module"
+    "::conditional_guards_test_module"
   RUNNER_ARGS
     "--device=amdgpu"
     "--sanitizer=access"
@@ -1070,7 +969,7 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 loom_test(
   NAME
-    conditional_effects_hardware_test
+    conditional_effects_test
   SRCS
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/conformance/conditional_effects.loom"
 )
@@ -1078,9 +977,9 @@ loom_test(
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 loom_execution_test(
   NAME
-    conditional_effects_hardware_test_execute_amdgpu_hardware_test
+    conditional_effects_test_execute_amdgpu_hardware_test
   MODULE
-    "::conditional_effects_hardware_test_module"
+    "::conditional_effects_test_module"
   RUNNER_ARGS
     "--device=amdgpu"
   LABELS
@@ -1098,22 +997,13 @@ loom_execution_test(
     "loom-amdgpu-tests"
 )
 endif()
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_test(
-  NAME
-    conditional_effects_access_test
-  SRCS
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/conformance/conditional_effects.loom"
-)
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 loom_execution_test(
   NAME
-    conditional_effects_access_test_execute_amdgpu_access_test
+    conditional_effects_test_execute_amdgpu_access_test
   MODULE
-    "::conditional_effects_access_test_module"
+    "::conditional_effects_test_module"
   RUNNER_ARGS
     "--device=amdgpu"
     "--sanitizer=access"
@@ -1138,7 +1028,7 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 loom_test(
   NAME
-    conditional_results_hardware_test
+    conditional_results_test
   SRCS
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/conformance/conditional_results.loom"
 )
@@ -1146,9 +1036,9 @@ loom_test(
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 loom_execution_test(
   NAME
-    conditional_results_hardware_test_execute_amdgpu_hardware_test
+    conditional_results_test_execute_amdgpu_hardware_test
   MODULE
-    "::conditional_results_hardware_test_module"
+    "::conditional_results_test_module"
   RUNNER_ARGS
     "--device=amdgpu"
   LABELS
@@ -1166,22 +1056,13 @@ loom_execution_test(
     "loom-amdgpu-tests"
 )
 endif()
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_test(
-  NAME
-    conditional_results_access_test
-  SRCS
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/conformance/conditional_results.loom"
-)
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 loom_execution_test(
   NAME
-    conditional_results_access_test_execute_amdgpu_access_test
+    conditional_results_test_execute_amdgpu_access_test
   MODULE
-    "::conditional_results_access_test_module"
+    "::conditional_results_test_module"
   RUNNER_ARGS
     "--device=amdgpu"
     "--sanitizer=access"
@@ -1217,41 +1098,6 @@ loom_execution_test(
     uniform_predicate_control_access_test_execute_amdgpu_access_test
   MODULE
     "::uniform_predicate_control_access_test_module"
-  RUNNER_ARGS
-    "--device=amdgpu"
-    "--sanitizer=access"
-  LABELS
-    "notsan"
-    "iree-build-requirement=loom.target.arch.amdgpu"
-    "iree-build-requirement=loom.emit.amdgpu"
-    "iree-build-requirement=loom.execute.iree_hal"
-    "iree-build-requirement=runtime.hal.amdgpu"
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "runtime-resource=amd-gpu"
-    "loom-execution-profile=amdgpu_access"
-    "loom-target-family=amdgpu"
-    "loom-target-class=gpu"
-    "loom-executor=hardware"
-  RESOURCE_GROUP
-    "loom-amdgpu-tests"
-)
-endif()
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_test(
-  NAME
-    kernarg_access_test
-  SRCS
-    "amdgpu_unused_kernargs.loom"
-)
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-loom_execution_test(
-  NAME
-    kernarg_access_test_execute_amdgpu_access_test
-  MODULE
-    "::kernarg_access_test_module"
   RUNNER_ARGS
     "--device=amdgpu"
     "--sanitizer=access"

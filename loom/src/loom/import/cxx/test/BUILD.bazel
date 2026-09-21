@@ -168,22 +168,34 @@ _KERNEL_COMPATIBILITY = loom_config_compatible_with([
     "//loom/config/execute:amdgpu_hal",
 ])
 
-_CXX_AMDGPU_PROFILE = loom_execution_profile(
-    name = "amdgpu",
-    build_requirements = [
-        TARGET_ARCH_AMDGPU,
-        EMIT_AMDGPU,
-        EXECUTE_IREE_HAL,
-        HAL_AMDGPU,
-    ],
-    executor = "hardware",
-    resource_group = "loom-amdgpu-tests",
-    run_requirements = [AMDGPU_RESOURCE],
-    runner_args = ["--device=amdgpu"],
-    sanitizer_suppressions = rocm_suppressions,
-    target_class = "gpu",
-    target_family = "amdgpu",
-)
+_CXX_AMDGPU_PROFILES = [
+    loom_execution_profile(
+        name = profile_name,
+        build_requirements = [
+            TARGET_ARCH_AMDGPU,
+            EMIT_AMDGPU,
+            EXECUTE_IREE_HAL,
+            HAL_AMDGPU,
+        ],
+        executor = "hardware",
+        resource_group = "loom-amdgpu-tests",
+        run_requirements = [AMDGPU_RESOURCE],
+        runner_args = ["--device=amdgpu"] + sanitizer_args,
+        sanitizer_suppressions = rocm_suppressions,
+        target_class = "gpu",
+        target_family = "amdgpu",
+    )
+    for profile_name, sanitizer_args in [
+        ("amdgpu", []),
+        (
+            "amdgpu_access",
+            [
+                "--sanitizer=access",
+                "--sanitizer-reporting=report-only",
+            ],
+        ),
+    ]
+]
 
 # A source file and its independent reference cases form one test module.
 # Kernel names, launch configuration, and schedule variants belong to those files.
@@ -236,14 +248,13 @@ _KERNEL_SOURCES = [
 
 [
     loom_test(
-        name = source + suffix + "_test",
+        name = source + "_kernel_test",
         srcs = [
             source + ".cpp",
             ":" + source + "_checks.loom",
         ],
-        args = args,
         data = [":" + source + "_checks_gen"],
-        execution_profiles = [_CXX_AMDGPU_PROFILE],
+        execution_profiles = _CXX_AMDGPU_PROFILES,
         inputopts = ["cxx:approximate-functions=true"] if source in [
             "aiter_swiglu_f16",
             "flash_attention",
@@ -252,24 +263,11 @@ _KERNEL_SOURCES = [
         target_compatible_with = _KERNEL_COMPATIBILITY,
     )
     for source in _KERNEL_SOURCES
-    for suffix, args in [
-        ("_source", []),
-        (
-            "_access",
-            [
-                "--sanitizer=access",
-                "--sanitizer-reporting=report-only",
-            ],
-        ),
-    ]
 ]
 
 test_suite(
     name = "kernels_test",
-    tests = [":" + source + suffix + "_test" for source in _KERNEL_SOURCES for suffix in [
-        "_source",
-        "_access",
-    ]],
+    tests = [":" + source + "_kernel_test" for source in _KERNEL_SOURCES],
 )
 
 test_suite(

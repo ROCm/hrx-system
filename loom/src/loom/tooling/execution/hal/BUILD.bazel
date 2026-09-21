@@ -10,6 +10,8 @@ load(
     "loom_cc_test",
     "loom_config_compatible_with",
 )
+load("//loom/build_tools/bazel:defs.bzl", "loom_test")
+load("//loom/target:execution_profiles.bzl", "GPU_HARDWARE_PROFILES")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -26,6 +28,16 @@ exports_files([
     "testdata/dynamic_workgroup_hal_actual.loom",
     "testdata/launch_schedule_hal_actual.loom",
 ])
+
+loom_test(
+    name = "hardware_test",
+    srcs = [
+        "testdata/buffer_bulk_hal_actual.loom",
+        "testdata/dynamic_workgroup_hal_actual.loom",
+        "testdata/launch_schedule_hal_actual.loom",
+    ],
+    execution_profiles = GPU_HARDWARE_PROFILES,
+)
 
 loom_cc_library(
     name = "artifact",

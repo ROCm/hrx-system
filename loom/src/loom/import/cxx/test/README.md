@@ -61,11 +61,14 @@ compatibility with complete upstream libraries.
 `functions_test` aggregates scalar-result VM cases. `kernels_test` aggregates
 native source modules, each run normally and with device access sanitization.
 Every case checks for zero access reports. Individual targets such as `integer_functions_test`,
-`structured_continue_source_test`, and `structured_continue_access_test` can be
-run directly. Compiler rejection witnesses live in `.cxx-test`, including
-scheduled-loop lowering and unsupported VM aggregate transport. The corpus has
-no JSON execution manifests; JSON fixtures under `tooling/` exercise CLI options,
-report fields, and process exit behavior.
+`structured_continue_kernel_test_execute_amdgpu_test`, and
+`structured_continue_kernel_test_execute_amdgpu_access_test` can be run directly.
+Both native profiles share one imported and linked module, with the generated
+reference arrays retained as runtime data. Access instrumentation applies to
+correctness and benchmark smoke alike. Compiler rejection witnesses live in
+`.cxx-test`, including scheduled-loop lowering and unsupported VM aggregate
+transport. The corpus has no JSON execution manifests; JSON fixtures under
+`tooling/` exercise CLI options, report fields, and process exit behavior.
 
 | Source | Numerical coverage | Provenance |
 | --- | --- | --- |

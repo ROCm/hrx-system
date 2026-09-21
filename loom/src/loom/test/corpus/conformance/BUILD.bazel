@@ -34,3 +34,9 @@ loom_test(
     ],
     execution_profiles = GPU_HARDWARE_PROFILES + [AMDGPU_ACCESS_PROFILE],
 )
+
+loom_test(
+    name = "loop_termination_test",
+    srcs = ["loop_termination.loom"],
+    execution_profiles = GPU_HARDWARE_PROFILES + [AMDGPU_ACCESS_PROFILE],
+)
