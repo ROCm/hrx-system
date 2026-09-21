@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "libamdf/cts/gpu/gpu_device_fixture.h"
+#include "libamdf/cts/gpu/pm4_commands.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -29,24 +30,6 @@ constexpr uint64_t kByteLength = 65536;
 constexpr uint64_t kSourceOffset = 4096;
 constexpr uint64_t kDestinationOffset = 8192;
 constexpr uint32_t kWordCount = 128;
-
-uint32_t MakePm4Header(uint32_t opcode, uint32_t count) {
-  return (3u << 30) | (opcode << 8) | ((count - 2) << 16);
-}
-
-void AppendSystemBarrier(std::vector<uint32_t>& words) {
-  enum : uint32_t {
-    kEventWriteOpcode = 0x46,
-    kAcquireMemoryOpcode = 0x58,
-    kComputeShaderPartialFlush = 7 | (4 << 8),
-    kConservativeGcrControl = (3 << 0) | (1 << 4) | (1 << 5) | (1 << 7) |
-                              (1 << 8) | (1 << 9) | (1 << 14) | (1 << 15),
-  };
-  words.insert(words.end(),
-               {MakePm4Header(kEventWriteOpcode, 2), kComputeShaderPartialFlush,
-                MakePm4Header(kAcquireMemoryOpcode, 8), 0, UINT32_MAX, 0xff, 0,
-                0, 0x0a, kConservativeGcrControl});
-}
 
 class D3D12MemoryInteropTest : public GpuDeviceFixture {
  protected:
@@ -318,34 +301,15 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
     mapped.structure_size = sizeof(mapped);
     ASSERT_EQ(api_->host_mapping_query_info(command_mapping_, &mapped),
               AMDF_STATUS_OK);
-    std::vector<uint32_t> words;
-    AppendSystemBarrier(words);
-    enum : uint32_t {
-      kCopyDataOpcode = 0x40,
-      kSourceTcL2 = 2 << 0,
-      kTargetTcL2 = 2 << 8,
-      kWaitForConfirmation = 1 << 20,
-    };
+    Pm4CommandWriter commands(static_cast<uint32_t*>(mapped.pointer));
+    commands.SystemBarrier();
     for (uint32_t i = 0; i < kWordCount; ++i) {
-      const uint64_t source = address_ + kSourceOffset + i * 4;
-      const uint64_t destination = address_ + kDestinationOffset + i * 4;
-      words.insert(
-          words.end(),
-          {MakePm4Header(kCopyDataOpcode, 6),
-           kSourceTcL2 | kTargetTcL2 | kWaitForConfirmation,
-           static_cast<uint32_t>(source), static_cast<uint32_t>(source >> 32),
-           static_cast<uint32_t>(destination),
-           static_cast<uint32_t>(destination >> 32)});
+      commands.CopyData32(address_ + kSourceOffset + i * sizeof(uint32_t),
+                          address_ + kDestinationOffset + i * sizeof(uint32_t));
     }
-    AppendSystemBarrier(words);
-    size_t padding = 8 - words.size() % 8;
-    if (padding == 1) {
-      padding += 8;
-    }
-    words.push_back(MakePm4Header(0x10, static_cast<uint32_t>(padding)));
-    words.resize(words.size() + padding - 1);
-    command_byte_length_ = words.size() * sizeof(uint32_t);
-    std::memcpy(mapped.pointer, words.data(), command_byte_length_);
+    commands.SystemBarrier();
+    commands.PadToEightWords();
+    command_byte_length_ = commands.word_count() * sizeof(uint32_t);
     ASSERT_EQ(api_->host_mapping_cache_control(command_mapping_,
                                                AMDF_HOST_CACHE_OPERATION_FLUSH,
                                                0, create.byte_length),

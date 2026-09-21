@@ -25,6 +25,21 @@ iree_cc_library(
 )
 endif()
 
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_cc_library(
+  NAME
+    pm4_commands
+  HDRS
+    "pm4_commands.h"
+  SRCS
+    "pm4_commands.cc"
+  DEPS
+    amdf::headers
+  TESTONLY
+  PUBLIC
+)
+endif()
+
 if(IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
 iree_cc_library(
   NAME
@@ -765,6 +780,7 @@ iree_cc_library(
   SRCS
     "pm4_queue_test.cc"
   DEPS
+    ::pm4_commands
     ::user_queue_memory
     amdf::headers
     iree::third_party::google_test

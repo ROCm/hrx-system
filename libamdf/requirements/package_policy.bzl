@@ -20,6 +20,11 @@ load(
     "D3D12_DEVICE_RESOURCE",
 )
 load(
+    "//build_tools/vulkan/requirements:defs.bzl",
+    "VULKAN_API",
+    "VULKAN_DEVICE_RESOURCE",
+)
+load(
     "//libamdf/requirements:defs.bzl",
     "AMDGPU_RESOURCE",
     "LIBAMDF",
@@ -85,6 +90,11 @@ PACKAGE_POLICIES = [
         packages = ["libamdf/cts/interop/gpu/d3d12/..."],
         build_requirements = [D3D12_API],
         run_requirements = [D3D12_DEVICE_RESOURCE],
+    ),
+    package_policy(
+        packages = ["libamdf/cts/interop/gpu/vulkan/..."],
+        build_requirements = [VULKAN_API],
+        run_requirements = [VULKAN_DEVICE_RESOURCE],
     ),
     package_policy(
         packages = ["libamdf/cts/interop/gpu/xdna/..."],

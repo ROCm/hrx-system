@@ -261,6 +261,16 @@ requirements. GPU/XDNA interoperability has a separate corpus requiring both
 families and both resources. Native suites share the AMD hardware resource group
 with those interop cases.
 
+The Linux [Vulkan interop corpus](cts/interop/gpu/vulkan/linux/memory_test.cc)
+requires both native AMD GPU and Vulkan device resources. It alternates BDA
+compute through two DMA-BUF imports with native PM4 copies, checks the complete
+allocation after the chained stages, and verifies each alias survives release
+of its source owner. Intermediate stages synchronize completion without host
+readback of the shared payload. The native API support under
+[`build_tools/vulkan/testing`](../build_tools/vulkan/testing/) owns Vulkan
+objects; the corpus owns transport, barriers and the numerical oracle. This
+test needs neither a HAL driver nor a shader compiler.
+
 XDNA device and numerical suites require successful activation and the baseline
 allocated execution path. Missing hardware, failed activation or a missing
 compatible image fixture fails the hardware job. Optional registration, import

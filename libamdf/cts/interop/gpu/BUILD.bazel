@@ -13,6 +13,7 @@ test_suite(
     name = "gpu",
     tests = [
         "//libamdf/cts/interop/gpu/d3d12:memory",
+        "//libamdf/cts/interop/gpu/vulkan",
         "//libamdf/cts/interop/gpu/xdna",
     ],
     visibility = ["//visibility:public"],
