@@ -291,6 +291,7 @@ iree_cc_library(
     "webgpu_executable_format.c"
   DEPS
     iree::base
+    iree::base::core_headers
   PUBLIC
 )
 endif()
@@ -304,6 +305,7 @@ iree_cc_test(
   DEPS
     ::webgpu_executable_format
     iree::base
+    iree::base::core_headers
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
