@@ -775,7 +775,22 @@ static bool loom_cfg_simplify_is_alpha_merge_candidate(
   return true;
 }
 
+// Acyclic successors finish before their predecessors in DFS postorder, so
+// their planned destinations are final. Cyclic successors retain original
+// identities: their destinations may still change after this key is inserted.
+static uint16_t loom_cfg_simplify_successor_key(const loom_cfg_graph_t* graph,
+                                                const uint16_t* destinations,
+                                                const loom_block_t* successor) {
+  const uint16_t block_index = successor->region_index;
+  if (!destinations || graph->blocks[block_index].component_is_cyclic ||
+      destinations[block_index] == 0) {
+    return block_index;
+  }
+  return destinations[block_index];
+}
+
 static bool loom_cfg_simplify_successors_equal_after_map(
+    const loom_cfg_graph_t* graph, const uint16_t* destinations,
     const loom_block_t* source_block, const loom_block_t* target_block,
     const loom_op_t* source_op, const loom_op_t* target_op) {
   loom_block_t* const* source_successors = loom_op_const_successors(source_op);
@@ -787,7 +802,11 @@ static bool loom_cfg_simplify_successors_equal_after_map(
         target_successor == source_block || target_successor == target_block) {
       return false;
     }
-    if (source_successor != target_successor) {
+    if (source_successor != target_successor &&
+        loom_cfg_simplify_successor_key(graph, destinations,
+                                        source_successor) !=
+            loom_cfg_simplify_successor_key(graph, destinations,
+                                            target_successor)) {
       return false;
     }
   }
@@ -807,7 +826,8 @@ static bool loom_cfg_simplify_attributes_equal(const loom_op_t* source_op,
 }
 
 static bool loom_cfg_simplify_ops_equal_after_map(
-    const loom_cfg_simplify_state_t* state, const loom_block_t* source_block,
+    const loom_cfg_simplify_state_t* state, const loom_cfg_graph_t* graph,
+    const uint16_t* destinations, const loom_block_t* source_block,
     const loom_block_t* target_block, const loom_op_t* source_op,
     const loom_op_t* target_op, loom_cfg_simplify_value_map_t* map) {
   if (source_op->kind != target_op->kind ||
@@ -854,7 +874,8 @@ static bool loom_cfg_simplify_ops_equal_after_map(
   }
 
   return loom_cfg_simplify_successors_equal_after_map(
-             source_block, target_block, source_op, target_op) &&
+             graph, destinations, source_block, target_block, source_op,
+             target_op) &&
          loom_cfg_simplify_attributes_equal(source_op, target_op);
 }
 
@@ -885,7 +906,8 @@ static bool loom_cfg_simplify_block_args_equal_after_map(
 }
 
 static bool loom_cfg_simplify_blocks_alpha_equivalent(
-    const loom_cfg_simplify_state_t* state, const loom_block_t* source_block,
+    const loom_cfg_simplify_state_t* state, const loom_cfg_graph_t* graph,
+    const uint16_t* destinations, const loom_block_t* source_block,
     const loom_block_t* target_block) {
   if (source_block->op_count != target_block->op_count) {
     return false;
@@ -900,8 +922,9 @@ static bool loom_cfg_simplify_blocks_alpha_equivalent(
   const loom_op_t* source_op = source_block->first_op;
   const loom_op_t* target_op = target_block->first_op;
   while (source_op && target_op) {
-    if (!loom_cfg_simplify_ops_equal_after_map(
-            state, source_block, target_block, source_op, target_op, &map)) {
+    if (!loom_cfg_simplify_ops_equal_after_map(state, graph, destinations,
+                                               source_block, target_block,
+                                               source_op, target_op, &map)) {
       return false;
     }
     source_op = source_op->next_op;
@@ -938,6 +961,7 @@ static uint32_t loom_cfg_simplify_hash_alpha_operand(
 // Types are intentionally omitted because their dynamic fields may reference
 // block-local SSA values. Exact comparison checks every type after remapping.
 static bool loom_cfg_simplify_alpha_block_fingerprint(
+    const loom_cfg_graph_t* graph, const uint16_t* destinations,
     const loom_block_t* block, uint32_t* out_fingerprint) {
   uint32_t fingerprint = 2166136261u;
   fingerprint = loom_cfg_simplify_hash_u32(block->arg_count, fingerprint);
@@ -974,8 +998,9 @@ static bool loom_cfg_simplify_alpha_block_fingerprint(
 
     loom_block_t* const* successors = loom_op_const_successors(op);
     for (uint8_t i = 0; i < op->successor_count; ++i) {
-      fingerprint =
-          loom_cfg_simplify_hash_u32(successors[i]->region_index, fingerprint);
+      fingerprint = loom_cfg_simplify_hash_u32(
+          loom_cfg_simplify_successor_key(graph, destinations, successors[i]),
+          fingerprint);
     }
 
     const loom_value_id_t* results = loom_op_const_results(op);
@@ -1044,13 +1069,15 @@ static bool loom_cfg_simplify_can_redirect_block_predecessors(
 // transitive resolution and remain live throughout the structural edit.
 static uint16_t loom_cfg_simplify_find_equivalent_block(
     const loom_cfg_simplify_state_t* state, const loom_cfg_graph_t* graph,
-    loom_cfg_simplify_block_hash_table_t* table, uint16_t block_index) {
+    loom_cfg_simplify_block_hash_table_t* table, const uint16_t* destinations,
+    uint16_t block_index) {
   if (!loom_cfg_simplify_is_alpha_merge_candidate(state, graph, block_index)) {
     return 0;
   }
   const loom_block_t* block = graph->blocks[block_index].block;
   uint32_t fingerprint = 0;
-  if (!loom_cfg_simplify_alpha_block_fingerprint(block, &fingerprint)) {
+  if (!loom_cfg_simplify_alpha_block_fingerprint(graph, destinations, block,
+                                                 &fingerprint)) {
     return 0;
   }
   iree_host_size_t slot = fingerprint & (table->capacity - 1);
@@ -1059,8 +1086,8 @@ static uint16_t loom_cfg_simplify_find_equivalent_block(
     if (entry->fingerprint == fingerprint) {
       loom_block_t* canonical_block =
           (loom_block_t*)graph->blocks[entry->block_index].block;
-      if (loom_cfg_simplify_blocks_alpha_equivalent(state, block,
-                                                    canonical_block) &&
+      if (loom_cfg_simplify_blocks_alpha_equivalent(state, graph, destinations,
+                                                    block, canonical_block) &&
           loom_cfg_simplify_can_redirect_block_predecessors(
               state, graph, block_index, canonical_block)) {
         return entry->block_index;
@@ -1108,11 +1135,14 @@ static iree_status_t loom_cfg_simplify_merge_equivalent_blocks(
   bool* remove_blocks = NULL;
   uint16_t merge_count = 0;
   iree_status_t status = iree_ok_status();
-  for (uint16_t block_index = 1;
-       block_index < graph->block_count && iree_status_is_ok(status);
-       ++block_index) {
+  // Reuse the graph owner's DFS completion order. Each acyclic successor's
+  // merge is decided before its predecessors are compared, so a complete
+  // equivalent tail can share this edit without another analysis refresh.
+  for (iree_host_size_t i = graph->reverse_postorder.count;
+       i > 0 && iree_status_is_ok(status); --i) {
+    const uint16_t block_index = graph->reverse_postorder.values[i - 1];
     uint16_t destination = loom_cfg_simplify_find_equivalent_block(
-        state, graph, &table, block_index);
+        state, graph, &table, destinations, block_index);
     if (destination == 0) {
       continue;
     }
@@ -1141,9 +1171,10 @@ static iree_status_t loom_cfg_simplify_merge_equivalent_blocks(
   }
 
   // Definitions in discarded blocks have no nonlocal uses. Each destination
-  // survives, and equivalent blocks had identical outgoing successors before
-  // mutation. Redirecting all incoming edges therefore preserves each group's
-  // equivalence, even when the predecessor belongs to another merge group.
+  // survives, and equivalent blocks have identical outgoing successors after
+  // applying the already-proved successor merges. Redirecting all incoming
+  // edges therefore preserves each group's equivalence, even when the
+  // predecessor belongs to another merge group.
   // During mutation, original edge records serve only as stable edit locations.
   // The caller refreshes analyses after the complete structural edit.
   for (uint16_t block_index = 1;
