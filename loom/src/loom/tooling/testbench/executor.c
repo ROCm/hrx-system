@@ -110,13 +110,16 @@ iree_status_t loom_testbench_run_case_sample(
     loom_testbench_device_event_capture_reset(executor->device_event_capture);
   }
 
-  IREE_RETURN_IF_ERROR(loom_testbench_materialize_case_sample(
+  iree_status_t status = loom_testbench_materialize_case_sample(
       &executor->materializer_options, case_plan, sample_ordinal,
-      &executor->value_table));
-  IREE_RETURN_IF_ERROR(loom_testbench_run_case_invocations(
-      &executor->invocation_executor, sample_ordinal, &executor->value_table));
-  const bool has_sample_issues = executor->invocation_executor.issue_count != 0;
-  if (!has_sample_issues) {
+      &executor->value_table);
+  if (iree_status_is_ok(status)) {
+    status = loom_testbench_run_case_invocations(
+        &executor->invocation_executor, sample_ordinal, &executor->value_table);
+  }
+  const bool has_sample_issues = iree_status_is_ok(status) &&
+                                 executor->invocation_executor.issue_count != 0;
+  if (iree_status_is_ok(status) && !has_sample_issues) {
     loom_testbench_case_sample_observations_t observations =
         loom_testbench_case_sample_observations_empty();
     loom_testbench_device_event_list_t device_events = {0};
@@ -125,17 +128,22 @@ iree_status_t loom_testbench_run_case_sample(
                                                  &device_events);
       observations.device_events = &device_events;
     }
-    IREE_RETURN_IF_ERROR(loom_testbench_evaluate_case_expectations(
+    status = loom_testbench_evaluate_case_expectations(
         &executor->prepared_case->expectation_schedule, &executor->value_table,
-        &observations, &executor->expectation_report));
+        &observations, &executor->expectation_report);
   }
 
   const bool case_failed =
       has_sample_issues || executor->expectation_report.failure_count != 0;
-  if (!has_sample_issues) {
-    IREE_RETURN_IF_ERROR(loom_testbench_write_case_files(
-        &executor->materializer_options, case_plan, &executor->value_table,
-        case_failed));
+  if (iree_status_is_ok(status) && !has_sample_issues) {
+    status = loom_testbench_write_case_files(&executor->materializer_options,
+                                             case_plan, &executor->value_table,
+                                             case_failed);
+  }
+  if (!iree_status_is_ok(status)) {
+    return iree_status_annotate_f(
+        status, "executing check.case '@%.*s' sample %" PRIhsz,
+        (int)case_plan->name.size, case_plan->name.data, sample_ordinal);
   }
 
   out_result->case_plan = case_plan;

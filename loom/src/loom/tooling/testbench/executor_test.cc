@@ -24,6 +24,8 @@ namespace {
 typedef struct DeltaProviderState {
   // Value added to each i32 input.
   int32_t delta;
+  // True when the provider returns an error after observing its input.
+  bool fail_invocation;
   // Number of times the provider has been invoked.
   iree_host_size_t invocation_count;
   // Last i32 input observed by the provider.
@@ -102,6 +104,10 @@ class ExecutorTest : public ::testing::Test {
     }
     ++state->invocation_count;
     state->last_input = input_value->storage.i32;
+    if (state->fail_invocation) {
+      return iree_make_status(IREE_STATUS_ABORTED,
+                              "delta provider invocation failed");
+    }
     out_results[0] = {};
     out_results[0].kind = LOOM_TESTBENCH_VALUE_KIND_SCALAR;
     out_results[0].scalar.kind = IREE_TOOLING_VALUE_KIND_I32;
@@ -250,6 +256,56 @@ check.case @mismatch {
   EXPECT_THAT(json, ::testing::HasSubstr("\"failure_count\":1"));
   EXPECT_THAT(json, ::testing::HasSubstr("actual i32 value 5"));
   EXPECT_THAT(json, ::testing::HasSubstr("expected 6"));
+
+  loom_testbench_case_executor_deinitialize(&executor);
+  loom_module_free(module);
+}
+
+TEST_F(ExecutorTest, AnnotatesProviderFailureWithCaseAndSample) {
+  loom_module_t* module = ParseModule(R"(
+test.func @callee(%input: i32) -> (i32) {
+  test.yield %input : i32
+}
+
+check.case @provider_error {
+  %input = check.param.choice values([5, 7]) : i32
+  %actual = test.invoke @callee(%input) : (i32) -> (i32)
+  %expected = check.oracle.call<reference.scalar> callee(@callee) inputs(%input) : (i32) -> (i32)
+  check.expect.equal actual(%actual) expected(%expected) : i32
+  check.return
+}
+)");
+  ASSERT_NE(module, nullptr);
+  loom_testbench_module_plan_t plan = PlanModule(module);
+  ASSERT_EQ(plan.case_count, 1u);
+  ASSERT_EQ(plan.issue_count, 0u);
+  ASSERT_EQ(plan.cases[0].sample_count, 2u);
+
+  DeltaProviderState actual_state = {};
+  actual_state.fail_invocation = true;
+  DeltaProviderState oracle_state = {};
+  loom_testbench_oracle_provider_t oracle_providers[1] = {};
+  loom_testbench_case_execution_options_t options =
+      DeltaExecutionOptions(&actual_state, &oracle_state, oracle_providers);
+
+  loom_testbench_prepared_case_t prepared_case = {};
+  IREE_ASSERT_OK(loom_testbench_prepare_case_execution(
+      &options, &plan, 0, &execution_arena_, &prepared_case));
+  loom_testbench_case_executor_t executor = {};
+  IREE_ASSERT_OK(loom_testbench_case_executor_initialize(&prepared_case,
+                                                         &options, &executor));
+
+  loom_testbench_case_sample_result_t result = {};
+  iree::Status status(loom_testbench_run_case_sample(&executor, 1, &result));
+  EXPECT_THAT(status,
+              iree::testing::status::StatusIs(iree::StatusCode::kAborted));
+  EXPECT_THAT(status.ToString(),
+              ::testing::HasSubstr("delta provider invocation failed"));
+  EXPECT_THAT(status.ToString(),
+              ::testing::HasSubstr("check.case '@provider_error' sample 1"));
+  EXPECT_EQ(actual_state.invocation_count, 1u);
+  EXPECT_EQ(actual_state.last_input, 7);
+  EXPECT_EQ(oracle_state.invocation_count, 0u);
 
   loom_testbench_case_executor_deinitialize(&executor);
   loom_module_free(module);
