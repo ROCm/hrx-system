@@ -211,3 +211,57 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @predicat
   %dynamic = vextract.8.reg %14, %lane
   return %static, %dynamic
 }
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @true_predicate_constant() -> (vector<64xi1>) {
+  %mask = vector.constant true : vector<64xi1>
+  func.return %mask : vector<64xi1>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @true_predicate_constant() -> (reg<aie2p.elpredicate>) asm {
+  %3 = mov.short 1
+  %4 = vbcst.8 %3
+  %5 = vsub.8 %4, %4
+  %mask = vlt.u8x64 %5, %4
+  return %mask
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @false_predicate_constant() -> (vector<17xi1>) {
+  %mask = vector.constant false : vector<17xi1>
+  func.return %mask : vector<17xi1>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @false_predicate_constant() -> (reg<aie2p.elpredicate>) asm {
+  %3 = mov.short 0
+  %4 = vbcst.8 %3
+  %5 = vsub.8 %4, %4
+  %mask = vlt.u8x64 %5, %4
+  return %mask
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @integer_predicate_constant() -> (vector<33xi1>) {
+  %mask = vector.constant 1 : vector<33xi1>
+  func.return %mask : vector<33xi1>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @integer_predicate_constant() -> (reg<aie2p.elpredicate>) asm {
+  %3 = mov.short 1
+  %4 = vbcst.8 %3
+  %5 = vsub.8 %4, %4
+  %mask = vlt.u8x64 %5, %4
+  return %mask
+}

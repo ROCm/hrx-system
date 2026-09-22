@@ -161,9 +161,11 @@ loom_cc_library(
     legalization
   HDRS
     "legalization.h"
+    "legalization_compare.h"
     "legalization_table.h"
   SRCS
     "legalization.c"
+    "legalization_compare.c"
     "legalization_table.c"
   DEPS
     ::core_descriptors
@@ -613,6 +615,8 @@ loom_check_test_suite(
     "test/source_low/shared_conditional_values.loom-test"
     "test/source_low/uniform_predicate_control.loom-test"
     "test/source_low/vector_bitcast.loom-test"
+    "test/source_low/vector_compare_bf16.loom-test"
+    "test/source_low/vector_compare_f16.loom-test"
     "test/source_low/vector_concat_16.loom-test"
     "test/source_low/vector_concat_32.loom-test"
     "test/source_low/vector_concat_64.loom-test"

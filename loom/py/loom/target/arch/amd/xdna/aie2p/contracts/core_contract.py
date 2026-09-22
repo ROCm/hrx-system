@@ -732,6 +732,7 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             )
         ),
         core_rules._vector_predicate_splat_rule(),
+        core_rules._vector_predicate_constant_rule(),
         *(
             core_rules._vector_select_rule(value_type, descriptor_key)
             for value_type, descriptor_key in (

@@ -253,6 +253,7 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         "amd.xdna.aie2p.splat.i32x16",
         "amd.xdna.aie2p.accumulator.clear.i32x64",
         "amd.xdna.aie2p.accumulator.clear.f32x64",
+        "amd.xdna.aie2p.cmp.lt.unsigned.i8x64",
     ]
     assert [len(rule.emit) for rule in vector_constant_rules] == [
         2,
@@ -265,6 +266,7 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         2,
         1,
         1,
+        4,
     ]
     assert [
         rule.emit[0].immediates["i"].kind for rule in vector_constant_rules[5:8]

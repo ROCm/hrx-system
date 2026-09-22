@@ -601,40 +601,68 @@ def _vector_splat_rule(
     )
 
 
+def _vector_predicate_splat_emits(
+    source: ValueRef, result: ValueRef
+) -> tuple[EmitDescriptorOp, ...]:
+    return (
+        _op_emit(
+            _descriptor("amd.xdna.aie2p.splat.i8x64"),
+            operands={"src": source},
+            results={"dst": ValueRef.temporary("broadcast_condition")},
+            result_types={"dst": DescriptorResultType()},
+        ),
+        _op_emit(
+            _descriptor("amd.xdna.aie2p.sub.i8x64"),
+            operands={
+                "s1": ValueRef.temporary("broadcast_condition"),
+                "s2": ValueRef.temporary("broadcast_condition"),
+            },
+            results={"d": ValueRef.temporary("zero")},
+            result_types={"d": DescriptorResultType()},
+        ),
+        _op_emit(
+            _descriptor("amd.xdna.aie2p.cmp.lt.unsigned.i8x64"),
+            operands={
+                "s1": ValueRef.temporary("zero"),
+                "s2": ValueRef.temporary("broadcast_condition"),
+            },
+            results={"cmp": result},
+        ),
+    )
+
+
 def _vector_predicate_splat_rule() -> DescriptorRule:
-    broadcast = _descriptor("amd.xdna.aie2p.splat.i8x64")
-    subtract = _descriptor("amd.xdna.aie2p.sub.i8x64")
-    compare = _descriptor("amd.xdna.aie2p.cmp.lt.unsigned.i8x64")
     return DescriptorRule(
         source_op=vector.vector_splat,
-        descriptor=compare,
+        descriptor=_descriptor("amd.xdna.aie2p.cmp.lt.unsigned.i8x64"),
         guards=(
             Guard.value_type("scalar", _I1),
             Guard.value_type("result", _I1_VECTOR),
         ),
+        emit=_vector_predicate_splat_emits(
+            ValueRef.operand("scalar"), ValueRef.result("result")
+        ),
+    )
+
+
+def _vector_predicate_constant_rule() -> DescriptorRule:
+    return DescriptorRule(
+        source_op=vector.vector_constant,
+        descriptor=_descriptor("amd.xdna.aie2p.cmp.lt.unsigned.i8x64"),
+        guards=(
+            Guard.value_type("result", _I1_VECTOR),
+            Guard.value_exact_i64("result"),
+            Guard.value_i64_range("result", 0, 1),
+        ),
         emit=(
-            _op_emit(
-                broadcast,
-                operands={"src": ValueRef.operand("scalar")},
-                results={"dst": ValueRef.temporary("broadcast_condition")},
-                result_types={"dst": DescriptorResultType()},
+            _const_emit(
+                _descriptor("amd.xdna.aie2p.constant.i32.short"),
+                ValueRef.temporary("condition"),
+                ValueProject.exact_i64("result"),
+                result_type=DescriptorResultType(),
             ),
-            _op_emit(
-                subtract,
-                operands={
-                    "s1": ValueRef.temporary("broadcast_condition"),
-                    "s2": ValueRef.temporary("broadcast_condition"),
-                },
-                results={"d": ValueRef.temporary("zero")},
-                result_types={"d": DescriptorResultType()},
-            ),
-            _op_emit(
-                compare,
-                operands={
-                    "s1": ValueRef.temporary("zero"),
-                    "s2": ValueRef.temporary("broadcast_condition"),
-                },
-                results={"cmp": ValueRef.result("result")},
+            *_vector_predicate_splat_emits(
+                ValueRef.temporary("condition"), ValueRef.result("result")
             ),
         ),
     )

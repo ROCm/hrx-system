@@ -1,0 +1,240 @@
+// Each result lane packs the fourteen IEEE comparison predicates.
+aie2p.target<array> @array_target
+aie2p.target<core> @core_target
+
+pipeline.def<kernel> public retain target(@array_target) @compare_f16() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x4128x64xf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x4128x32xi16>
+  %packets = pipeline.scatter %input_view across %workers : view<1x4128x64xf16>, group -> pipeline.flow<tile<64xf16>>
+  %results = pipeline.stage @compare_f16_entry on %workers(%packets) : (group, pipeline.flow<tile<64xf16>>) -> (pipeline.flow<tile<32xi16>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<32xi16>>, view<1x4128x32xi16>
+  pipeline.return
+}
+
+func.def target(@core_target) @compare_f16_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %source_view = buffer.view %source[%origin] : buffer -> view<64xf16>
+  %destination_view = buffer.view %destination[%origin] : buffer -> view<32xi16>
+  %lhs = vector.load %source_view[0] : view<64xf16> -> vector<32xf16>
+  %rhs = vector.load %source_view[32] : view<64xf16> -> vector<32xf16>
+  %clear_flags = vector.constant 0 : vector<32xi16>
+  %oeq = vector.cmpf oeq, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %oeq_bit = vector.constant 1 : vector<32xi16>
+  %oeq_mask = vector.select %oeq, %oeq_bit, %clear_flags : vector<32xi16>
+  %ogt = vector.cmpf ogt, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %ogt_bit = vector.constant 2 : vector<32xi16>
+  %ogt_mask = vector.select %ogt, %ogt_bit, %clear_flags : vector<32xi16>
+  %ogt_flags = vector.ori %oeq_mask, %ogt_mask : vector<32xi16>
+  %oge = vector.cmpf oge, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %oge_bit = vector.constant 4 : vector<32xi16>
+  %oge_mask = vector.select %oge, %oge_bit, %clear_flags : vector<32xi16>
+  %oge_flags = vector.ori %ogt_flags, %oge_mask : vector<32xi16>
+  %olt = vector.cmpf olt, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %olt_bit = vector.constant 8 : vector<32xi16>
+  %olt_mask = vector.select %olt, %olt_bit, %clear_flags : vector<32xi16>
+  %olt_flags = vector.ori %oge_flags, %olt_mask : vector<32xi16>
+  %ole = vector.cmpf ole, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %ole_bit = vector.constant 16 : vector<32xi16>
+  %ole_mask = vector.select %ole, %ole_bit, %clear_flags : vector<32xi16>
+  %ole_flags = vector.ori %olt_flags, %ole_mask : vector<32xi16>
+  %one = vector.cmpf one, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %ordered_not_equal_flag = vector.constant 32 : vector<32xi16>
+  %one_mask = vector.select %one, %ordered_not_equal_flag, %clear_flags : vector<32xi16>
+  %one_flags = vector.ori %ole_flags, %one_mask : vector<32xi16>
+  %ord = vector.cmpf ord, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %ord_bit = vector.constant 64 : vector<32xi16>
+  %ord_mask = vector.select %ord, %ord_bit, %clear_flags : vector<32xi16>
+  %ord_flags = vector.ori %one_flags, %ord_mask : vector<32xi16>
+  %ueq = vector.cmpf ueq, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %ueq_bit = vector.constant 128 : vector<32xi16>
+  %ueq_mask = vector.select %ueq, %ueq_bit, %clear_flags : vector<32xi16>
+  %ueq_flags = vector.ori %ord_flags, %ueq_mask : vector<32xi16>
+  %ugt = vector.cmpf ugt, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %ugt_bit = vector.constant 256 : vector<32xi16>
+  %ugt_mask = vector.select %ugt, %ugt_bit, %clear_flags : vector<32xi16>
+  %ugt_flags = vector.ori %ueq_flags, %ugt_mask : vector<32xi16>
+  %uge = vector.cmpf uge, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %uge_bit = vector.constant 512 : vector<32xi16>
+  %uge_mask = vector.select %uge, %uge_bit, %clear_flags : vector<32xi16>
+  %uge_flags = vector.ori %ugt_flags, %uge_mask : vector<32xi16>
+  %ult = vector.cmpf ult, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %ult_bit = vector.constant 1024 : vector<32xi16>
+  %ult_mask = vector.select %ult, %ult_bit, %clear_flags : vector<32xi16>
+  %ult_flags = vector.ori %uge_flags, %ult_mask : vector<32xi16>
+  %ule = vector.cmpf ule, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %ule_bit = vector.constant 2048 : vector<32xi16>
+  %ule_mask = vector.select %ule, %ule_bit, %clear_flags : vector<32xi16>
+  %ule_flags = vector.ori %ult_flags, %ule_mask : vector<32xi16>
+  %une = vector.cmpf une, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %une_bit = vector.constant 4096 : vector<32xi16>
+  %une_mask = vector.select %une, %une_bit, %clear_flags : vector<32xi16>
+  %une_flags = vector.ori %ule_flags, %une_mask : vector<32xi16>
+  %uno = vector.cmpf uno, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %uno_bit = vector.constant 8192 : vector<32xi16>
+  %uno_mask = vector.select %uno, %uno_bit, %clear_flags : vector<32xi16>
+  %uno_flags = vector.ori %une_flags, %uno_mask : vector<32xi16>
+  vector.store %uno_flags, %destination_view[0] : vector<32xi16>, view<32xi16>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @compare_bf16() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x4128x64xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x4128x32xi16>
+  %packets = pipeline.scatter %input_view across %workers : view<1x4128x64xbf16>, group -> pipeline.flow<tile<64xbf16>>
+  %results = pipeline.stage @compare_bf16_entry on %workers(%packets) : (group, pipeline.flow<tile<64xbf16>>) -> (pipeline.flow<tile<32xi16>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<32xi16>>, view<1x4128x32xi16>
+  pipeline.return
+}
+
+func.def target(@core_target) @compare_bf16_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %source_view = buffer.view %source[%origin] : buffer -> view<64xbf16>
+  %destination_view = buffer.view %destination[%origin] : buffer -> view<32xi16>
+  %lhs = vector.load %source_view[0] : view<64xbf16> -> vector<32xbf16>
+  %rhs = vector.load %source_view[32] : view<64xbf16> -> vector<32xbf16>
+  %clear_flags = vector.constant 0 : vector<32xi16>
+  %oeq = vector.cmpf oeq, %lhs, %rhs : vector<32xbf16> -> vector<32xi1>
+  %oeq_bit = vector.constant 1 : vector<32xi16>
+  %oeq_mask = vector.select %oeq, %oeq_bit, %clear_flags : vector<32xi16>
+  %ogt = vector.cmpf ogt, %lhs, %rhs : vector<32xbf16> -> vector<32xi1>
+  %ogt_bit = vector.constant 2 : vector<32xi16>
+  %ogt_mask = vector.select %ogt, %ogt_bit, %clear_flags : vector<32xi16>
+  %ogt_flags = vector.ori %oeq_mask, %ogt_mask : vector<32xi16>
+  %oge = vector.cmpf oge, %lhs, %rhs : vector<32xbf16> -> vector<32xi1>
+  %oge_bit = vector.constant 4 : vector<32xi16>
+  %oge_mask = vector.select %oge, %oge_bit, %clear_flags : vector<32xi16>
+  %oge_flags = vector.ori %ogt_flags, %oge_mask : vector<32xi16>
+  %olt = vector.cmpf olt, %lhs, %rhs : vector<32xbf16> -> vector<32xi1>
+  %olt_bit = vector.constant 8 : vector<32xi16>
+  %olt_mask = vector.select %olt, %olt_bit, %clear_flags : vector<32xi16>
+  %olt_flags = vector.ori %oge_flags, %olt_mask : vector<32xi16>
+  %ole = vector.cmpf ole, %lhs, %rhs : vector<32xbf16> -> vector<32xi1>
+  %ole_bit = vector.constant 16 : vector<32xi16>
+  %ole_mask = vector.select %ole, %ole_bit, %clear_flags : vector<32xi16>
+  %ole_flags = vector.ori %olt_flags, %ole_mask : vector<32xi16>
+  %one = vector.cmpf one, %lhs, %rhs : vector<32xbf16> -> vector<32xi1>
+  %ordered_not_equal_flag = vector.constant 32 : vector<32xi16>
+  %one_mask = vector.select %one, %ordered_not_equal_flag, %clear_flags : vector<32xi16>
+  %one_flags = vector.ori %ole_flags, %one_mask : vector<32xi16>
+  %ord = vector.cmpf ord, %lhs, %rhs : vector<32xbf16> -> vector<32xi1>
+  %ord_bit = vector.constant 64 : vector<32xi16>
+  %ord_mask = vector.select %ord, %ord_bit, %clear_flags : vector<32xi16>
+  %ord_flags = vector.ori %one_flags, %ord_mask : vector<32xi16>
+  %ueq = vector.cmpf ueq, %lhs, %rhs : vector<32xbf16> -> vector<32xi1>
+  %ueq_bit = vector.constant 128 : vector<32xi16>
+  %ueq_mask = vector.select %ueq, %ueq_bit, %clear_flags : vector<32xi16>
+  %ueq_flags = vector.ori %ord_flags, %ueq_mask : vector<32xi16>
+  %ugt = vector.cmpf ugt, %lhs, %rhs : vector<32xbf16> -> vector<32xi1>
+  %ugt_bit = vector.constant 256 : vector<32xi16>
+  %ugt_mask = vector.select %ugt, %ugt_bit, %clear_flags : vector<32xi16>
+  %ugt_flags = vector.ori %ueq_flags, %ugt_mask : vector<32xi16>
+  %uge = vector.cmpf uge, %lhs, %rhs : vector<32xbf16> -> vector<32xi1>
+  %uge_bit = vector.constant 512 : vector<32xi16>
+  %uge_mask = vector.select %uge, %uge_bit, %clear_flags : vector<32xi16>
+  %uge_flags = vector.ori %ugt_flags, %uge_mask : vector<32xi16>
+  %ult = vector.cmpf ult, %lhs, %rhs : vector<32xbf16> -> vector<32xi1>
+  %ult_bit = vector.constant 1024 : vector<32xi16>
+  %ult_mask = vector.select %ult, %ult_bit, %clear_flags : vector<32xi16>
+  %ult_flags = vector.ori %uge_flags, %ult_mask : vector<32xi16>
+  %ule = vector.cmpf ule, %lhs, %rhs : vector<32xbf16> -> vector<32xi1>
+  %ule_bit = vector.constant 2048 : vector<32xi16>
+  %ule_mask = vector.select %ule, %ule_bit, %clear_flags : vector<32xi16>
+  %ule_flags = vector.ori %ult_flags, %ule_mask : vector<32xi16>
+  %une = vector.cmpf une, %lhs, %rhs : vector<32xbf16> -> vector<32xi1>
+  %une_bit = vector.constant 4096 : vector<32xi16>
+  %une_mask = vector.select %une, %une_bit, %clear_flags : vector<32xi16>
+  %une_flags = vector.ori %ule_flags, %une_mask : vector<32xi16>
+  %uno = vector.cmpf uno, %lhs, %rhs : vector<32xbf16> -> vector<32xi1>
+  %uno_bit = vector.constant 8192 : vector<32xi16>
+  %uno_mask = vector.select %uno, %uno_bit, %clear_flags : vector<32xi16>
+  %uno_flags = vector.ori %une_flags, %uno_mask : vector<32xi16>
+  vector.store %uno_flags, %destination_view[0] : vector<32xi16>, view<32xi16>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @compare_f32() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x578x32xf32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x578x16xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x578x32xf32>, group -> pipeline.flow<tile<32xf32>>
+  %results = pipeline.stage @compare_f32_entry on %workers(%packets) : (group, pipeline.flow<tile<32xf32>>) -> (pipeline.flow<tile<16xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<16xi32>>, view<1x578x16xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @compare_f32_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %source_view = buffer.view %source[%origin] : buffer -> view<32xf32>
+  %destination_view = buffer.view %destination[%origin] : buffer -> view<16xi32>
+  %lhs = vector.load %source_view[0] : view<32xf32> -> vector<16xf32>
+  %rhs = vector.load %source_view[16] : view<32xf32> -> vector<16xf32>
+  %clear_flags = vector.constant 0 : vector<16xi32>
+  %oeq = vector.cmpf oeq, %lhs, %rhs : vector<16xf32> -> vector<16xi1>
+  %oeq_bit = vector.constant 1 : vector<16xi32>
+  %oeq_mask = vector.select %oeq, %oeq_bit, %clear_flags : vector<16xi32>
+  %ogt = vector.cmpf ogt, %lhs, %rhs : vector<16xf32> -> vector<16xi1>
+  %ogt_bit = vector.constant 2 : vector<16xi32>
+  %ogt_mask = vector.select %ogt, %ogt_bit, %clear_flags : vector<16xi32>
+  %ogt_flags = vector.ori %oeq_mask, %ogt_mask : vector<16xi32>
+  %oge = vector.cmpf oge, %lhs, %rhs : vector<16xf32> -> vector<16xi1>
+  %oge_bit = vector.constant 4 : vector<16xi32>
+  %oge_mask = vector.select %oge, %oge_bit, %clear_flags : vector<16xi32>
+  %oge_flags = vector.ori %ogt_flags, %oge_mask : vector<16xi32>
+  %olt = vector.cmpf olt, %lhs, %rhs : vector<16xf32> -> vector<16xi1>
+  %olt_bit = vector.constant 8 : vector<16xi32>
+  %olt_mask = vector.select %olt, %olt_bit, %clear_flags : vector<16xi32>
+  %olt_flags = vector.ori %oge_flags, %olt_mask : vector<16xi32>
+  %ole = vector.cmpf ole, %lhs, %rhs : vector<16xf32> -> vector<16xi1>
+  %ole_bit = vector.constant 16 : vector<16xi32>
+  %ole_mask = vector.select %ole, %ole_bit, %clear_flags : vector<16xi32>
+  %ole_flags = vector.ori %olt_flags, %ole_mask : vector<16xi32>
+  %one = vector.cmpf one, %lhs, %rhs : vector<16xf32> -> vector<16xi1>
+  %ordered_not_equal_flag = vector.constant 32 : vector<16xi32>
+  %one_mask = vector.select %one, %ordered_not_equal_flag, %clear_flags : vector<16xi32>
+  %one_flags = vector.ori %ole_flags, %one_mask : vector<16xi32>
+  %ord = vector.cmpf ord, %lhs, %rhs : vector<16xf32> -> vector<16xi1>
+  %ord_bit = vector.constant 64 : vector<16xi32>
+  %ord_mask = vector.select %ord, %ord_bit, %clear_flags : vector<16xi32>
+  %ord_flags = vector.ori %one_flags, %ord_mask : vector<16xi32>
+  %ueq = vector.cmpf ueq, %lhs, %rhs : vector<16xf32> -> vector<16xi1>
+  %ueq_bit = vector.constant 128 : vector<16xi32>
+  %ueq_mask = vector.select %ueq, %ueq_bit, %clear_flags : vector<16xi32>
+  %ueq_flags = vector.ori %ord_flags, %ueq_mask : vector<16xi32>
+  %ugt = vector.cmpf ugt, %lhs, %rhs : vector<16xf32> -> vector<16xi1>
+  %ugt_bit = vector.constant 256 : vector<16xi32>
+  %ugt_mask = vector.select %ugt, %ugt_bit, %clear_flags : vector<16xi32>
+  %ugt_flags = vector.ori %ueq_flags, %ugt_mask : vector<16xi32>
+  %uge = vector.cmpf uge, %lhs, %rhs : vector<16xf32> -> vector<16xi1>
+  %uge_bit = vector.constant 512 : vector<16xi32>
+  %uge_mask = vector.select %uge, %uge_bit, %clear_flags : vector<16xi32>
+  %uge_flags = vector.ori %ugt_flags, %uge_mask : vector<16xi32>
+  %ult = vector.cmpf ult, %lhs, %rhs : vector<16xf32> -> vector<16xi1>
+  %ult_bit = vector.constant 1024 : vector<16xi32>
+  %ult_mask = vector.select %ult, %ult_bit, %clear_flags : vector<16xi32>
+  %ult_flags = vector.ori %uge_flags, %ult_mask : vector<16xi32>
+  %ule = vector.cmpf ule, %lhs, %rhs : vector<16xf32> -> vector<16xi1>
+  %ule_bit = vector.constant 2048 : vector<16xi32>
+  %ule_mask = vector.select %ule, %ule_bit, %clear_flags : vector<16xi32>
+  %ule_flags = vector.ori %ult_flags, %ule_mask : vector<16xi32>
+  %une = vector.cmpf une, %lhs, %rhs : vector<16xf32> -> vector<16xi1>
+  %une_bit = vector.constant 4096 : vector<16xi32>
+  %une_mask = vector.select %une, %une_bit, %clear_flags : vector<16xi32>
+  %une_flags = vector.ori %ule_flags, %une_mask : vector<16xi32>
+  %uno = vector.cmpf uno, %lhs, %rhs : vector<16xf32> -> vector<16xi1>
+  %uno_bit = vector.constant 8192 : vector<16xi32>
+  %uno_mask = vector.select %uno, %uno_bit, %clear_flags : vector<16xi32>
+  %uno_flags = vector.ori %une_flags, %uno_mask : vector<16xi32>
+  vector.store %uno_flags, %destination_view[0] : vector<16xi32>, view<16xi32>
+  func.return
+}

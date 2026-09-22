@@ -1,0 +1,387 @@
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @compare_f16_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %source_view = buffer.view %source[%origin] : buffer -> view<64xf16>
+  %destination_view = buffer.view %destination[%origin] : buffer -> view<32xi16>
+  %lhs = vector.load %source_view[0] : view<64xf16> -> vector<32xf16>
+  %rhs = vector.load %source_view[32] : view<64xf16> -> vector<32xf16>
+  %clear_flags = vector.constant 0 : vector<32xi16>
+  %oeq = vector.cmpf oeq, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %oeq_bit = vector.constant 1 : vector<32xi16>
+  %oeq_mask = vector.select %oeq, %oeq_bit, %clear_flags : vector<32xi16>
+  %ogt = vector.cmpf ogt, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %ogt_bit = vector.constant 2 : vector<32xi16>
+  %ogt_mask = vector.select %ogt, %ogt_bit, %clear_flags : vector<32xi16>
+  %ogt_flags = vector.ori %oeq_mask, %ogt_mask : vector<32xi16>
+  %oge = vector.cmpf oge, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %oge_bit = vector.constant 4 : vector<32xi16>
+  %oge_mask = vector.select %oge, %oge_bit, %clear_flags : vector<32xi16>
+  %oge_flags = vector.ori %ogt_flags, %oge_mask : vector<32xi16>
+  %olt = vector.cmpf olt, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %olt_bit = vector.constant 8 : vector<32xi16>
+  %olt_mask = vector.select %olt, %olt_bit, %clear_flags : vector<32xi16>
+  %olt_flags = vector.ori %oge_flags, %olt_mask : vector<32xi16>
+  %ole = vector.cmpf ole, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %ole_bit = vector.constant 16 : vector<32xi16>
+  %ole_mask = vector.select %ole, %ole_bit, %clear_flags : vector<32xi16>
+  %ole_flags = vector.ori %olt_flags, %ole_mask : vector<32xi16>
+  %one = vector.cmpf one, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %ordered_not_equal_flag = vector.constant 32 : vector<32xi16>
+  %one_mask = vector.select %one, %ordered_not_equal_flag, %clear_flags : vector<32xi16>
+  %one_flags = vector.ori %ole_flags, %one_mask : vector<32xi16>
+  %ord = vector.cmpf ord, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %ord_bit = vector.constant 64 : vector<32xi16>
+  %ord_mask = vector.select %ord, %ord_bit, %clear_flags : vector<32xi16>
+  %ord_flags = vector.ori %one_flags, %ord_mask : vector<32xi16>
+  %ueq = vector.cmpf ueq, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %ueq_bit = vector.constant 128 : vector<32xi16>
+  %ueq_mask = vector.select %ueq, %ueq_bit, %clear_flags : vector<32xi16>
+  %ueq_flags = vector.ori %ord_flags, %ueq_mask : vector<32xi16>
+  %ugt = vector.cmpf ugt, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %ugt_bit = vector.constant 256 : vector<32xi16>
+  %ugt_mask = vector.select %ugt, %ugt_bit, %clear_flags : vector<32xi16>
+  %ugt_flags = vector.ori %ueq_flags, %ugt_mask : vector<32xi16>
+  %uge = vector.cmpf uge, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %uge_bit = vector.constant 512 : vector<32xi16>
+  %uge_mask = vector.select %uge, %uge_bit, %clear_flags : vector<32xi16>
+  %uge_flags = vector.ori %ugt_flags, %uge_mask : vector<32xi16>
+  %ult = vector.cmpf ult, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %ult_bit = vector.constant 1024 : vector<32xi16>
+  %ult_mask = vector.select %ult, %ult_bit, %clear_flags : vector<32xi16>
+  %ult_flags = vector.ori %uge_flags, %ult_mask : vector<32xi16>
+  %ule = vector.cmpf ule, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %ule_bit = vector.constant 2048 : vector<32xi16>
+  %ule_mask = vector.select %ule, %ule_bit, %clear_flags : vector<32xi16>
+  %ule_flags = vector.ori %ult_flags, %ule_mask : vector<32xi16>
+  %une = vector.cmpf une, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %une_bit = vector.constant 4096 : vector<32xi16>
+  %une_mask = vector.select %une, %une_bit, %clear_flags : vector<32xi16>
+  %une_flags = vector.ori %ule_flags, %une_mask : vector<32xi16>
+  %uno = vector.cmpf uno, %lhs, %rhs : vector<32xf16> -> vector<32xi1>
+  %uno_bit = vector.constant 8192 : vector<32xi16>
+  %uno_mask = vector.select %uno, %uno_bit, %clear_flags : vector<32xi16>
+  %uno_flags = vector.ori %une_flags, %uno_mask : vector<32xi16>
+  vector.store %uno_flags, %destination_view[0] : vector<32xi16>, view<32xi16>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @compare_f16_entry() asm {
+  %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %destination_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %407 = mov.short 0
+  %clear_flags = vbcst.16 %407
+  %lhs = vlda.512.i16x32 %source_view, 0
+  %rhs = vlda.512.i16x32 %source_view, 64
+  %411 = mov.i32 32767
+  %412 = vbcst.16 %411
+  %413 = vband %lhs, %412
+  %414 = vband %rhs, %412
+  %415 = mov.i32 31744
+  %416 = vbcst.16 %415
+  %417 = vlt.u16x32.el.low32 %416, %413
+  %418 = predicate.complete.zero.high32 %417, 0
+  %419 = vlt.u16x32.el.low32 %416, %414
+  %420 = predicate.complete.zero.high32 %419, 0
+  %421 = predicate.or.low32 %418, %420
+  %422 = predicate.or.high32 %418, %420, %421
+  %423 = mov.i32 -32768
+  %424 = vbcst.16 %423
+  %425 = mov.short -1
+  %426 = vbcst.16 %425
+  %427 = vsub.16 %413, %clear_flags
+  %428 = veqz.16.el.low32 %427
+  %429 = predicate.complete.zero.high32 %428, 0
+  %430 = vsel.16.mask64 %lhs, %clear_flags, %429
+  %431 = vlt.s16x32.el.low32 %430, %clear_flags
+  %432 = predicate.complete.zero.high32 %431, 0
+  %433 = vadd.16 %430, %424
+  %434 = vsub.16 %426, %430
+  %435 = vsel.16.mask64 %433, %434, %432
+  %436 = vsub.16 %414, %clear_flags
+  %437 = veqz.16.el.low32 %436
+  %438 = predicate.complete.zero.high32 %437, 0
+  %439 = vsel.16.mask64 %rhs, %clear_flags, %438
+  %440 = vlt.s16x32.el.low32 %439, %clear_flags
+  %441 = predicate.complete.zero.high32 %440, 0
+  %442 = vadd.16 %439, %424
+  %443 = vsub.16 %426, %439
+  %444 = vsel.16.mask64 %442, %443, %441
+  %445 = vsub.16 %435, %444
+  %446 = veqz.16.el.low32 %445
+  %447 = predicate.complete.zero.high32 %446, 0
+  %448 = predicate.and.low32 %447, %422
+  %449 = predicate.and.high32 %447, %422, %448
+  %450 = predicate.xor.low32 %447, %449
+  %oeq = predicate.xor.high32 %447, %449, %450
+  %452 = mov.short 1
+  %oeq_bit = vbcst.16 %452
+  %oeq_mask = vsel.16.mask64 %clear_flags, %oeq_bit, %oeq
+  %455 = vlt.u16x32.el.low32 %444, %435
+  %456 = predicate.complete.zero.high32 %455, 0
+  %457 = predicate.and.low32 %456, %422
+  %458 = predicate.and.high32 %456, %422, %457
+  %459 = predicate.xor.low32 %456, %458
+  %ogt = predicate.xor.high32 %456, %458, %459
+  %461 = mov.short 2
+  %ogt_bit = vbcst.16 %461
+  %ogt_mask = vsel.16.mask64 %clear_flags, %ogt_bit, %ogt
+  %ogt_flags = vbor %oeq_mask, %ogt_mask
+  %465 = vge.u16x32.el.low32 %435, %444
+  %466 = predicate.complete.zero.high32 %465, 0
+  %467 = predicate.and.low32 %466, %422
+  %468 = predicate.and.high32 %466, %422, %467
+  %469 = predicate.xor.low32 %466, %468
+  %oge = predicate.xor.high32 %466, %468, %469
+  %471 = mov.short 4
+  %oge_bit = vbcst.16 %471
+  %oge_mask = vsel.16.mask64 %clear_flags, %oge_bit, %oge
+  %oge_flags = vbor %ogt_flags, %oge_mask
+  %475 = vlt.u16x32.el.low32 %435, %444
+  %476 = predicate.complete.zero.high32 %475, 0
+  %477 = predicate.and.low32 %476, %422
+  %478 = predicate.and.high32 %476, %422, %477
+  %479 = predicate.xor.low32 %476, %478
+  %olt = predicate.xor.high32 %476, %478, %479
+  %481 = mov.short 8
+  %olt_bit = vbcst.16 %481
+  %olt_mask = vsel.16.mask64 %clear_flags, %olt_bit, %olt
+  %olt_flags = vbor %oge_flags, %olt_mask
+  %485 = vge.u16x32.el.low32 %444, %435
+  %486 = predicate.complete.zero.high32 %485, 0
+  %487 = predicate.and.low32 %486, %422
+  %488 = predicate.and.high32 %486, %422, %487
+  %489 = predicate.xor.low32 %486, %488
+  %ole = predicate.xor.high32 %486, %488, %489
+  %491 = mov.short 16
+  %ole_bit = vbcst.16 %491
+  %ole_mask = vsel.16.mask64 %clear_flags, %ole_bit, %ole
+  %ole_flags = vbor %olt_flags, %ole_mask
+  %495 = vlt.u16x32.el.low32 %435, %444
+  %496 = vlt.u16x32.el.low32 %444, %435
+  %497 = predicate.or.low32 %495, %496
+  %498 = predicate.complete.zero.high32 %497, 0
+  %499 = predicate.and.low32 %498, %422
+  %500 = predicate.and.high32 %498, %422, %499
+  %501 = predicate.xor.low32 %498, %500
+  %one = predicate.xor.high32 %498, %500, %501
+  %503 = mov.short 32
+  %ordered_not_equal_flag = vbcst.16 %503
+  %one_mask = vsel.16.mask64 %clear_flags, %ordered_not_equal_flag, %one
+  %one_flags = vbor %ole_flags, %one_mask
+  %508 = vbcst.8 %452
+  %509 = vsub.8 %508, %508
+  %510 = vlt.u8x64 %509, %508
+  %511 = predicate.xor.low32 %510, %422
+  %ord = predicate.xor.high32 %510, %422, %511
+  %513 = mov.short 64
+  %ord_bit = vbcst.16 %513
+  %ord_mask = vsel.16.mask64 %clear_flags, %ord_bit, %ord
+  %ord_flags = vbor %one_flags, %ord_mask
+  %517 = predicate.or.low32 %447, %422
+  %ueq = predicate.or.high32 %447, %422, %517
+  %519 = mov.short 128
+  %ueq_bit = vbcst.16 %519
+  %ueq_mask = vsel.16.mask64 %clear_flags, %ueq_bit, %ueq
+  %ueq_flags = vbor %ord_flags, %ueq_mask
+  %523 = predicate.or.low32 %456, %422
+  %ugt = predicate.or.high32 %456, %422, %523
+  %525 = mov.short 256
+  %ugt_bit = vbcst.16 %525
+  %ugt_mask = vsel.16.mask64 %clear_flags, %ugt_bit, %ugt
+  %ugt_flags = vbor %ueq_flags, %ugt_mask
+  %529 = predicate.or.low32 %466, %422
+  %uge = predicate.or.high32 %466, %422, %529
+  %531 = mov.short 512
+  %uge_bit = vbcst.16 %531
+  %uge_mask = vsel.16.mask64 %clear_flags, %uge_bit, %uge
+  %uge_flags = vbor %ugt_flags, %uge_mask
+  %535 = predicate.or.low32 %476, %422
+  %ult = predicate.or.high32 %476, %422, %535
+  %537 = mov.i32 1024
+  %ult_bit = vbcst.16 %537
+  %ult_mask = vsel.16.mask64 %clear_flags, %ult_bit, %ult
+  %ult_flags = vbor %uge_flags, %ult_mask
+  %541 = predicate.or.low32 %486, %422
+  %ule = predicate.or.high32 %486, %422, %541
+  %543 = mov.i32 2048
+  %ule_bit = vbcst.16 %543
+  %ule_mask = vsel.16.mask64 %clear_flags, %ule_bit, %ule
+  %ule_flags = vbor %ult_flags, %ule_mask
+  %547 = predicate.or.low32 %498, %422
+  %une = predicate.or.high32 %498, %422, %547
+  %549 = mov.i32 4096
+  %une_bit = vbcst.16 %549
+  %une_mask = vsel.16.mask64 %clear_flags, %une_bit, %une
+  %une_flags = vbor %ule_flags, %une_mask
+  %553 = mov.i32 8192
+  %uno_bit = vbcst.16 %553
+  %uno_mask = vsel.16.mask64 %clear_flags, %uno_bit, %422
+  %uno_flags = vbor %une_flags, %uno_mask
+  vst.512.i16x32 %uno_flags, %destination_view, 0
+  return
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @compare_f16_1(%lhs: vector<1xf16>, %rhs: vector<1xf16>) -> (vector<1xi8>) {
+  %test = vector.cmpf uno, %lhs, %rhs : vector<1xf16> -> vector<1xi1>
+  %yes = vector.constant 19 : vector<1xi8>
+  %no = vector.constant 7 : vector<1xi8>
+  %result = vector.select %test, %yes, %no : vector<1xi8>
+  func.return %result : vector<1xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @compare_f16_1(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %19 = mov.i32 32767
+  %20 = vbcst.16 %19
+  %21 = vband %lhs, %20
+  %22 = vband %rhs, %20
+  %23 = mov.i32 31744
+  %24 = vbcst.16 %23
+  %25 = vlt.u16x32.el.low32 %24, %21
+  %26 = predicate.complete.zero.high32 %25, 0
+  %27 = vlt.u16x32.el.low32 %24, %22
+  %28 = predicate.complete.zero.high32 %27, 0
+  %29 = predicate.or.low32 %26, %28
+  %test = predicate.or.high32 %26, %28, %29
+  %31 = mov.short 19
+  %yes = vbcst.8 %31
+  %33 = mov.short 7
+  %no = vbcst.8 %33
+  %result = vsel.8 %no, %yes, %test
+  return %result
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @compare_f16_7(%lhs: vector<7xf16>, %rhs: vector<7xf16>) -> (vector<7xi8>) {
+  %test = vector.cmpf ole, %lhs, %rhs : vector<7xf16> -> vector<7xi1>
+  %yes = vector.constant 19 : vector<7xi8>
+  %no = vector.constant 7 : vector<7xi8>
+  %result = vector.select %test, %yes, %no : vector<7xi8>
+  func.return %result : vector<7xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @compare_f16_7(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %37 = mov.i32 32767
+  %38 = vbcst.16 %37
+  %39 = vband %lhs, %38
+  %40 = vband %rhs, %38
+  %41 = mov.i32 31744
+  %42 = vbcst.16 %41
+  %43 = vlt.u16x32.el.low32 %42, %39
+  %44 = predicate.complete.zero.high32 %43, 0
+  %45 = vlt.u16x32.el.low32 %42, %40
+  %46 = predicate.complete.zero.high32 %45, 0
+  %47 = predicate.or.low32 %44, %46
+  %48 = predicate.or.high32 %44, %46, %47
+  %49 = mov.short 0
+  %50 = vbcst.16 %49
+  %51 = mov.i32 -32768
+  %52 = vbcst.16 %51
+  %53 = mov.short -1
+  %54 = vbcst.16 %53
+  %55 = vsub.16 %39, %50
+  %56 = veqz.16.el.low32 %55
+  %57 = predicate.complete.zero.high32 %56, 0
+  %58 = vsel.16.mask64 %lhs, %50, %57
+  %59 = vlt.s16x32.el.low32 %58, %50
+  %60 = predicate.complete.zero.high32 %59, 0
+  %61 = vadd.16 %58, %52
+  %62 = vsub.16 %54, %58
+  %63 = vsel.16.mask64 %61, %62, %60
+  %64 = vsub.16 %40, %50
+  %65 = veqz.16.el.low32 %64
+  %66 = predicate.complete.zero.high32 %65, 0
+  %67 = vsel.16.mask64 %rhs, %50, %66
+  %68 = vlt.s16x32.el.low32 %67, %50
+  %69 = predicate.complete.zero.high32 %68, 0
+  %70 = vadd.16 %67, %52
+  %71 = vsub.16 %54, %67
+  %72 = vsel.16.mask64 %70, %71, %69
+  %73 = vge.u16x32.el.low32 %72, %63
+  %74 = predicate.complete.zero.high32 %73, 0
+  %75 = predicate.and.low32 %74, %48
+  %76 = predicate.and.high32 %74, %48, %75
+  %77 = predicate.xor.low32 %74, %76
+  %test = predicate.xor.high32 %74, %76, %77
+  %79 = mov.short 19
+  %yes = vbcst.8 %79
+  %81 = mov.short 7
+  %no = vbcst.8 %81
+  %result = vsel.8 %no, %yes, %test
+  return %result
+}
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @compare_f16_17(%lhs: vector<17xf16>, %rhs: vector<17xf16>) -> (vector<17xi8>) {
+  %test = vector.cmpf ugt, %lhs, %rhs : vector<17xf16> -> vector<17xi1>
+  %yes = vector.constant 19 : vector<17xi8>
+  %no = vector.constant 7 : vector<17xi8>
+  %result = vector.select %test, %yes, %no : vector<17xi8>
+  func.return %result : vector<17xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @compare_f16_17(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %36 = mov.i32 32767
+  %37 = vbcst.16 %36
+  %38 = vband %lhs, %37
+  %39 = vband %rhs, %37
+  %40 = mov.i32 31744
+  %41 = vbcst.16 %40
+  %42 = vlt.u16x32.el.low32 %41, %38
+  %43 = predicate.complete.zero.high32 %42, 0
+  %44 = vlt.u16x32.el.low32 %41, %39
+  %45 = predicate.complete.zero.high32 %44, 0
+  %46 = predicate.or.low32 %43, %45
+  %47 = predicate.or.high32 %43, %45, %46
+  %48 = mov.short 0
+  %49 = vbcst.16 %48
+  %50 = mov.i32 -32768
+  %51 = vbcst.16 %50
+  %52 = mov.short -1
+  %53 = vbcst.16 %52
+  %54 = vsub.16 %38, %49
+  %55 = veqz.16.el.low32 %54
+  %56 = predicate.complete.zero.high32 %55, 0
+  %57 = vsel.16.mask64 %lhs, %49, %56
+  %58 = vlt.s16x32.el.low32 %57, %49
+  %59 = predicate.complete.zero.high32 %58, 0
+  %60 = vadd.16 %57, %51
+  %61 = vsub.16 %53, %57
+  %62 = vsel.16.mask64 %60, %61, %59
+  %63 = vsub.16 %39, %49
+  %64 = veqz.16.el.low32 %63
+  %65 = predicate.complete.zero.high32 %64, 0
+  %66 = vsel.16.mask64 %rhs, %49, %65
+  %67 = vlt.s16x32.el.low32 %66, %49
+  %68 = predicate.complete.zero.high32 %67, 0
+  %69 = vadd.16 %66, %51
+  %70 = vsub.16 %53, %66
+  %71 = vsel.16.mask64 %69, %70, %68
+  %72 = vlt.u16x32.el.low32 %71, %62
+  %73 = predicate.complete.zero.high32 %72, 0
+  %74 = predicate.or.low32 %73, %47
+  %test = predicate.or.high32 %73, %47, %74
+  %76 = mov.short 19
+  %yes = vbcst.8 %76
+  %78 = mov.short 7
+  %no = vbcst.8 %78
+  %result = vsel.8 %no, %yes, %test
+  return %result
+}
