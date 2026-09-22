@@ -37,6 +37,23 @@ INTEGER_EXTREMA_DESCRIPTOR_SPECS = (
 )
 
 PREDICATE_DESCRIPTOR_SPECS = (
+    # Scalar AND reads either 32-bit word through its physical eR alias.
+    *(
+        _DescriptorSpec(
+            "AND",
+            f"{_TARGET_KEY}.predicate.mask.{word}",
+            f"integer.predicate.mask.{word}",
+            "II_AND",
+            storage_overrides=(("s0", "eLPredicate"),),
+            asm_mnemonic=f"predicate.mask.{word}",
+            operand_register_parts=(("s0", register_part),),
+            encoding_adapter_overrides=(("s0", f"LOOM_eL_{word}"),),
+        )
+        for word, register_part in (
+            ("low32", _EL_LOW32_PART),
+            ("high32", _EL_HIGH32_PART),
+        )
+    ),
     _DescriptorSpec(
         "VEQZ_8",
         f"{_TARGET_KEY}.cmp.eqz.i8x64",

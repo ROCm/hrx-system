@@ -1,0 +1,192 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_boolean_reduce.loom-test
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @i1x1_any_all(%values: vector<1xi1>, %init: i1) -> (i1, i1, i1, i1) {
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %any = vector.reduce<ori> %values, %false : vector<1xi1>, i1
+  %all = vector.reduce<andi> %values, %true : vector<1xi1>, i1
+  %any_with_init = vector.reduce<ori> %values, %init : vector<1xi1>, i1
+  %all_with_init = vector.reduce<andi> %values, %init : vector<1xi1>, i1
+  func.return %any, %all, %any_with_init, %all_with_init : i1, i1, i1, i1
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i1x1_any_all(%values: reg<aie2p.elpredicate>, %init: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %18 = mov.short 1
+  %19 = predicate.mask.low32 %values, %18
+  %any = nez %19
+  %all = eq %19, %18
+  %any_with_init = or %any, %init
+  %all_with_init = and %all, %init
+  return %any, %all, %any_with_init, %all_with_init
+}
+
+// ====
+
+func.def @i1x17_any_all(%values: vector<17xi1>, %init: i1) -> (i1, i1, i1, i1) {
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %any = vector.reduce<ori> %values, %false : vector<17xi1>, i1
+  %all = vector.reduce<andi> %values, %true : vector<17xi1>, i1
+  %any_with_init = vector.reduce<ori> %values, %init : vector<17xi1>, i1
+  %all_with_init = vector.reduce<andi> %values, %init : vector<17xi1>, i1
+  func.return %any, %all, %any_with_init, %all_with_init : i1, i1, i1, i1
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i1x17_any_all(%values: reg<aie2p.elpredicate>, %init: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %18 = mov.i32 131071
+  %19 = predicate.mask.low32 %values, %18
+  %any = nez %19
+  %all = eq %19, %18
+  %any_with_init = or %any, %init
+  %all_with_init = and %all, %init
+  return %any, %all, %any_with_init, %all_with_init
+}
+
+// ====
+
+func.def @i1x31_any_all(%values: vector<31xi1>, %init: i1) -> (i1, i1, i1, i1) {
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %any = vector.reduce<ori> %values, %false : vector<31xi1>, i1
+  %all = vector.reduce<andi> %values, %true : vector<31xi1>, i1
+  %any_with_init = vector.reduce<ori> %values, %init : vector<31xi1>, i1
+  %all_with_init = vector.reduce<andi> %values, %init : vector<31xi1>, i1
+  func.return %any, %all, %any_with_init, %all_with_init : i1, i1, i1, i1
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i1x31_any_all(%values: reg<aie2p.elpredicate>, %init: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %18 = mov.i32 2147483647
+  %19 = predicate.mask.low32 %values, %18
+  %any = nez %19
+  %all = eq %19, %18
+  %any_with_init = or %any, %init
+  %all_with_init = and %all, %init
+  return %any, %all, %any_with_init, %all_with_init
+}
+
+// ====
+
+func.def @i1x32_any_all(%values: vector<32xi1>, %init: i1) -> (i1, i1, i1, i1) {
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %any = vector.reduce<ori> %values, %false : vector<32xi1>, i1
+  %all = vector.reduce<andi> %values, %true : vector<32xi1>, i1
+  %any_with_init = vector.reduce<ori> %values, %init : vector<32xi1>, i1
+  %all_with_init = vector.reduce<andi> %values, %init : vector<32xi1>, i1
+  func.return %any, %all, %any_with_init, %all_with_init : i1, i1, i1, i1
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i1x32_any_all(%values: reg<aie2p.elpredicate>, %init: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %18 = mov.short -1
+  %19 = predicate.mask.low32 %values, %18
+  %any = nez %19
+  %all = eq %19, %18
+  %any_with_init = or %any, %init
+  %all_with_init = and %all, %init
+  return %any, %all, %any_with_init, %all_with_init
+}
+
+// ====
+
+func.def @i1x33_any_all(%values: vector<33xi1>, %init: i1) -> (i1, i1, i1, i1) {
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %any = vector.reduce<ori> %values, %false : vector<33xi1>, i1
+  %all = vector.reduce<andi> %values, %true : vector<33xi1>, i1
+  %any_with_init = vector.reduce<ori> %values, %init : vector<33xi1>, i1
+  %all_with_init = vector.reduce<andi> %values, %init : vector<33xi1>, i1
+  func.return %any, %all, %any_with_init, %all_with_init : i1, i1, i1, i1
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i1x33_any_all(%values: reg<aie2p.elpredicate>, %init: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %18 = mov.short -1
+  %19 = predicate.mask.low32 %values, %18
+  %20 = mov.short 1
+  %21 = predicate.mask.high32 %values, %20
+  %22 = or %19, %21
+  %any = nez %22
+  %26 = eq %19, %18
+  %29 = eq %21, %20
+  %all = and %26, %29
+  %any_with_init = or %any, %init
+  %all_with_init = and %all, %init
+  return %any, %all, %any_with_init, %all_with_init
+}
+
+// ====
+
+func.def @i1x64_any_all(%values: vector<64xi1>, %init: i1) -> (i1, i1, i1, i1) {
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %any = vector.reduce<ori> %values, %false : vector<64xi1>, i1
+  %all = vector.reduce<andi> %values, %true : vector<64xi1>, i1
+  %any_with_init = vector.reduce<ori> %values, %init : vector<64xi1>, i1
+  %all_with_init = vector.reduce<andi> %values, %init : vector<64xi1>, i1
+  func.return %any, %all, %any_with_init, %all_with_init : i1, i1, i1, i1
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i1x64_any_all(%values: reg<aie2p.elpredicate>, %init: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %18 = mov.short -1
+  %19 = predicate.mask.low32 %values, %18
+  %21 = predicate.mask.high32 %values, %18
+  %22 = or %19, %21
+  %any = nez %22
+  %26 = eq %19, %18
+  %29 = eq %21, %18
+  %all = and %26, %29
+  %any_with_init = or %any, %init
+  %all_with_init = and %all, %init
+  return %any, %all, %any_with_init, %all_with_init
+}
+
+// ====
+
+func.def @i1x2x8_any_all(%values: vector<2x8xi1>, %init: i1) -> (i1, i1, i1, i1) {
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %any = vector.reduce<ori> %values, %false : vector<2x8xi1>, i1
+  %all = vector.reduce<andi> %values, %true : vector<2x8xi1>, i1
+  %any_with_init = vector.reduce<ori> %values, %init : vector<2x8xi1>, i1
+  %all_with_init = vector.reduce<andi> %values, %init : vector<2x8xi1>, i1
+  func.return %any, %all, %any_with_init, %all_with_init : i1, i1, i1, i1
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i1x2x8_any_all(%values: reg<aie2p.elpredicate>, %init: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %18 = mov.i32 65535
+  %19 = predicate.mask.low32 %values, %18
+  %any = nez %19
+  %all = eq %19, %18
+  %any_with_init = or %any, %init
+  %all_with_init = and %all, %init
+  return %any, %all, %any_with_init, %all_with_init
+}
+
+// ====
+
+func.def @any_negative_i32x16(%values: vector<16xi32>) -> (i1) {
+  %sign_boundary = vector.constant 0 : vector<16xi32>
+  %negative = vector.cmpi slt, %values, %sign_boundary : vector<16xi32> -> vector<16xi1>
+  %false = scalar.constant false : i1
+  %any = vector.reduce<ori> %negative, %false : vector<16xi1>, i1
+  func.return %any : i1
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @any_negative_i32x16(%values: reg<aie2p.vec256 x2>) -> (reg<aie2p.er>) asm {
+  %8 = mov.short 0
+  %sign_boundary = vbcst.32 %8
+  %10 = vlt.s32x16.el.low32 %values, %sign_boundary
+  %negative = predicate.complete.zero.high32 %10, 0
+  %12 = mov.i32 65535
+  %13 = predicate.mask.low32 %negative, %12
+  %any = nez %13
+  return %any
+}

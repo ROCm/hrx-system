@@ -7,6 +7,7 @@
 """AMD XDNA AIE2P vector reduction selection rules."""
 
 from loom.dialect.vector import defs as vector
+from loom.target.arch.amd.xdna.aie2p.contracts.scalar_program import ScalarProgram
 from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
     AIE2P_CORE_DESCRIPTOR_SET,
 )
@@ -143,8 +144,79 @@ def _reduce_add_i32_rule(
     )
 
 
+def _reduce_i1_rule(
+    lane_count: int, kind: str, *, identity_init: bool
+) -> DescriptorRule:
+    # The carrier is 64 bits; bits outside the logical vector are undefined.
+    program = ScalarProgram()
+    result_name = None if identity_init else "reduced"
+    word_count = (lane_count + 31) // 32
+    words = []
+    for word_index, word in enumerate(("low32", "high32")[:word_count]):
+        width = min(32, lane_count - 32 * word_index)
+        mask = program.constant(f"mask_{word}", -1 if width == 32 else (1 << width) - 1)
+        active = program.binary(
+            f"active_{word}", f"predicate.mask.{word}", ValueRef.operand("input"), mask
+        )
+        words.append(
+            program.binary(
+                result_name if word_count == 1 else f"all_{word}",
+                "cmp.eq.i32",
+                active,
+                mask,
+            )
+            if kind == "andi"
+            else active
+        )
+    combined = (
+        program.binary(
+            result_name if kind == "andi" else "combined",
+            "and.i32" if kind == "andi" else "or.i32",
+            *words,
+        )
+        if len(words) == 2
+        else words[0]
+    )
+    if kind == "ori":
+        program.unary(result_name, "cmp.nez.i32", combined)
+    if not identity_init:
+        program.binary(
+            None,
+            "and.i32" if kind == "andi" else "or.i32",
+            ValueRef.temporary("reduced"),
+            ValueRef.operand("init"),
+        )
+    guards = [
+        Guard.enum_attr_equals("kind", kind),
+        Guard.value_type(
+            "input",
+            Vector(
+                "i1",
+                minimum_static_elements=lane_count,
+                maximum_static_elements=lane_count,
+            ),
+        ),
+        Guard.value_type("init", Scalar("i1")),
+        Guard.value_type("result", Scalar("i1")),
+    ]
+    if identity_init:
+        identity = int(kind == "andi")
+        guards.append(Guard.value_i64_range("init", identity, identity))
+    return DescriptorRule(
+        source_op=vector.vector_reduce,
+        descriptor=program.emits[-1].descriptor,
+        guards=tuple(guards),
+        emit=tuple(program.emits),
+    )
+
+
 AIE2P_REDUCTION_RULES = tuple(
     _reduce_add_i32_rule(lane_count, controls, zero_init=zero_init)
     for lane_count, controls in _I32_REDUCTION_CONTROLS
     for zero_init in (True, False)
+) + tuple(
+    _reduce_i1_rule(lane_count, kind, identity_init=identity_init)
+    for kind in ("ori", "andi")
+    for lane_count in range(1, 65)
+    for identity_init in (True, False)
 )

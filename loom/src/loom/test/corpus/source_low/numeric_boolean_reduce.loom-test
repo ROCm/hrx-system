@@ -1,0 +1,91 @@
+func.def @i1x1_any_all(%values: vector<1xi1>, %init: i1) -> (i1, i1, i1, i1) {
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %any = vector.reduce<ori> %values, %false : vector<1xi1>, i1
+  %all = vector.reduce<andi> %values, %true : vector<1xi1>, i1
+  %any_with_init = vector.reduce<ori> %values, %init : vector<1xi1>, i1
+  %all_with_init = vector.reduce<andi> %values, %init : vector<1xi1>, i1
+  func.return %any, %all, %any_with_init, %all_with_init : i1, i1, i1, i1
+}
+
+// ====
+
+func.def @i1x17_any_all(%values: vector<17xi1>, %init: i1) -> (i1, i1, i1, i1) {
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %any = vector.reduce<ori> %values, %false : vector<17xi1>, i1
+  %all = vector.reduce<andi> %values, %true : vector<17xi1>, i1
+  %any_with_init = vector.reduce<ori> %values, %init : vector<17xi1>, i1
+  %all_with_init = vector.reduce<andi> %values, %init : vector<17xi1>, i1
+  func.return %any, %all, %any_with_init, %all_with_init : i1, i1, i1, i1
+}
+
+// ====
+
+func.def @i1x31_any_all(%values: vector<31xi1>, %init: i1) -> (i1, i1, i1, i1) {
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %any = vector.reduce<ori> %values, %false : vector<31xi1>, i1
+  %all = vector.reduce<andi> %values, %true : vector<31xi1>, i1
+  %any_with_init = vector.reduce<ori> %values, %init : vector<31xi1>, i1
+  %all_with_init = vector.reduce<andi> %values, %init : vector<31xi1>, i1
+  func.return %any, %all, %any_with_init, %all_with_init : i1, i1, i1, i1
+}
+
+// ====
+
+func.def @i1x32_any_all(%values: vector<32xi1>, %init: i1) -> (i1, i1, i1, i1) {
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %any = vector.reduce<ori> %values, %false : vector<32xi1>, i1
+  %all = vector.reduce<andi> %values, %true : vector<32xi1>, i1
+  %any_with_init = vector.reduce<ori> %values, %init : vector<32xi1>, i1
+  %all_with_init = vector.reduce<andi> %values, %init : vector<32xi1>, i1
+  func.return %any, %all, %any_with_init, %all_with_init : i1, i1, i1, i1
+}
+
+// ====
+
+func.def @i1x33_any_all(%values: vector<33xi1>, %init: i1) -> (i1, i1, i1, i1) {
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %any = vector.reduce<ori> %values, %false : vector<33xi1>, i1
+  %all = vector.reduce<andi> %values, %true : vector<33xi1>, i1
+  %any_with_init = vector.reduce<ori> %values, %init : vector<33xi1>, i1
+  %all_with_init = vector.reduce<andi> %values, %init : vector<33xi1>, i1
+  func.return %any, %all, %any_with_init, %all_with_init : i1, i1, i1, i1
+}
+
+// ====
+
+func.def @i1x64_any_all(%values: vector<64xi1>, %init: i1) -> (i1, i1, i1, i1) {
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %any = vector.reduce<ori> %values, %false : vector<64xi1>, i1
+  %all = vector.reduce<andi> %values, %true : vector<64xi1>, i1
+  %any_with_init = vector.reduce<ori> %values, %init : vector<64xi1>, i1
+  %all_with_init = vector.reduce<andi> %values, %init : vector<64xi1>, i1
+  func.return %any, %all, %any_with_init, %all_with_init : i1, i1, i1, i1
+}
+
+// ====
+
+func.def @i1x2x8_any_all(%values: vector<2x8xi1>, %init: i1) -> (i1, i1, i1, i1) {
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %any = vector.reduce<ori> %values, %false : vector<2x8xi1>, i1
+  %all = vector.reduce<andi> %values, %true : vector<2x8xi1>, i1
+  %any_with_init = vector.reduce<ori> %values, %init : vector<2x8xi1>, i1
+  %all_with_init = vector.reduce<andi> %values, %init : vector<2x8xi1>, i1
+  func.return %any, %all, %any_with_init, %all_with_init : i1, i1, i1, i1
+}
+
+// ====
+
+func.def @any_negative_i32x16(%values: vector<16xi32>) -> (i1) {
+  %sign_boundary = vector.constant 0 : vector<16xi32>
+  %negative = vector.cmpi slt, %values, %sign_boundary : vector<16xi32> -> vector<16xi1>
+  %false = scalar.constant false : i1
+  %any = vector.reduce<ori> %negative, %false : vector<16xi1>, i1
+  func.return %any : i1
+}

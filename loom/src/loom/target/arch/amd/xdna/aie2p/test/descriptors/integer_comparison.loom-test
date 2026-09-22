@@ -83,3 +83,25 @@ low.func.def target<amd.xdna.aie2p.core> @subtract_masks(%left: reg<aie2p.vec256
   %greater_difference, %greater = vsub_ge.s32x16 %left, %right
   return %less_difference, %less, %greater_difference, %greater, %less_difference, %less
 }
+
+// ====
+
+// Predicate-word masks read distinct halves of the same carrier. Repeated
+// reads merge only when both the selected word and the logical mask agree.
+// RUN: with-low-asm pass low-cse,low-dce
+
+low.func.def target<amd.xdna.aie2p.core> @predicate_words(%predicate: reg<aie2p.elpredicate>, %mask: reg<aie2p.er>, %other_mask: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %low = predicate.mask.low32 %predicate, %mask
+  %high = predicate.mask.high32 %predicate, %mask
+  %repeated_low = predicate.mask.low32 %predicate, %mask
+  %other_low = predicate.mask.low32 %predicate, %other_mask
+  return %low, %high, %repeated_low, %other_low
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> @predicate_words(%predicate: reg<aie2p.elpredicate>, %mask: reg<aie2p.er>, %other_mask: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %low = predicate.mask.low32 %predicate, %mask
+  %high = predicate.mask.high32 %predicate, %mask
+  %other_low = predicate.mask.low32 %predicate, %other_mask
+  return %low, %high, %low, %other_low
+}
