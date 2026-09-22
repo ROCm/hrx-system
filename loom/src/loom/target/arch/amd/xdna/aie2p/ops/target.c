@@ -34,6 +34,11 @@ static void loom_aie2p_target_facts_project(
         loom_target_record_view_string(record, profile_attr));
     IREE_ASSERT(facts->device_profile != NULL);
   }
+  const loom_attribute_t trace_attr = loom_target_record_view_attribute(
+      record, loom_aie2p_target_trace_ATTR_INDEX);
+  if (!loom_attr_is_absent(trace_attr)) {
+    facts->trace_enabled = loom_attr_as_bool(trace_attr);
+  }
 }
 
 const loom_target_fact_projector_t loom_aie2p_target_fact_projector = {
@@ -79,6 +84,11 @@ iree_status_t loom_aie2p_target_materialize_definition(
         builder, iree_make_cstring_view(facts->device_profile->key),
         &device_profile));
   }
+  bool trace = false;
+  if (facts->trace_enabled) {
+    build_flags |= LOOM_AIE2P_TARGET_BUILD_FLAG_HAS_TRACE;
+    trace = true;
+  }
 
   const loom_target_snapshot_t* snapshot = &facts->base.storage.snapshot;
   const loom_target_export_plan_t* export_plan =
@@ -101,7 +111,7 @@ iree_status_t loom_aie2p_target_materialize_definition(
       snapshot->memory_spaces.private_memory, snapshot->memory_spaces.host,
       snapshot->memory_spaces.descriptor, export_plan->abi_kind, export_symbol,
       export_plan->linkage, contract_set_key, config->contract_feature_bits,
-      device_profile, location, &target_op);
+      device_profile, trace, location, &target_op);
 }
 
 iree_status_t loom_aie2p_target_record_verify(

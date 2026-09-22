@@ -22,6 +22,10 @@ typedef struct loom_aie2p_target_facts_t {
 
   // Exact physical deployment profile, or NULL for a generic authored target.
   const loom_xdna_device_profile_t* device_profile;
+
+  // Whether this array program's core tiles compile with hardware event
+  // trace. False for a generic authored target or an untraced build.
+  bool trace_enabled;
 } loom_aie2p_target_facts_t;
 
 // Static fact type shared by AIE2P target records and structured profiles.

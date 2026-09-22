@@ -9,6 +9,7 @@
 from loom.assembly import AttrDict, SymbolRef, TemplateParam
 from loom.dialect.target import target_record_attrs
 from loom.dsl import (
+    ATTR_TYPE_BOOL,
     ATTR_TYPE_STRING,
     SYMBOL_DEFINE,
     AttrDef,
@@ -72,10 +73,27 @@ aie2p_target = Op(
             optional=True,
             doc="Exact physical XDNA deployment profile key.",
         ),
+        AttrDef(
+            "trace",
+            ATTR_TYPE_BOOL,
+            optional=True,
+            doc=(
+                "Opt in to hardware event trace for this array program's core "
+                "tiles. Absent or false compiles without trace resources. "
+                "Trace routes share the per-link stream-switch capacity pool "
+                "with data routes, so a densely packed multi-worker array "
+                "(e.g. 2 workers/column) can exhaust it; planning fails with "
+                "RESOURCE_EXHAUSTED rather than silently dropping trace."
+            ),
+        ),
     ],
     verify="loom_aie2p_target_record_verify",
     format=[TemplateParam("kind"), SymbolRef("symbol"), AttrDict()],
-    examples=["aie2p.target<core> @tile", "aie2p.target<array> @array"],
+    examples=[
+        "aie2p.target<core> @tile",
+        "aie2p.target<array> @array",
+        "aie2p.target<array> @array_traced trace=true",
+    ],
 )
 
 ALL_AIE2P_OPS: tuple[Op, ...] = (aie2p_target,)
