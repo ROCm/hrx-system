@@ -173,3 +173,27 @@ int entry() {
   // ERROR@+1: LOWERING/059 "buffer.fence requires void()"
   return custom<1, 4>();
 }
+
+// ====
+unsigned entry(const unsigned* source, int ordering) {
+  // ERROR@+1: LOWERING/059 "atomic ordering requires a pure integer constant"
+  return __atomic_load_n(source, ordering);
+}
+
+// ====
+void entry(unsigned* destination) {
+  // ERROR@+1: LOWERING/059 "unsupported atomic ordering or target modifier"
+  __atomic_store_n(destination, 1u, __ATOMIC_RELEASE | 65536);
+}
+
+// ====
+unsigned entry(const unsigned* source) {
+  // ERROR@+1: LOWERING/059 "ordering is not permitted for this operation"
+  return __atomic_load_n(source, __ATOMIC_RELEASE);
+}
+
+// ====
+void entry(const unsigned* destination) {
+  // ERROR@+1: LOWERING/059 "atomic destination requires a mutable pointer"
+  __atomic_store_n(destination, 1u, __ATOMIC_RELAXED);
+}

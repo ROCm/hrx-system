@@ -66,6 +66,7 @@ loom_cc_library(
     "atomic.cc"
   DEPS
     iree::third_party::cxx_parser
+    loom::import::cxx::source::constants
     loom::import::cxx::source::error
     loom::import::cxx::value::storage
     loom::ops::atomic

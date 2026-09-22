@@ -7,6 +7,7 @@
 #ifndef LOOM_IMPORT_CXX_BINDING_ATOMIC_H_
 #define LOOM_IMPORT_CXX_BINDING_ATOMIC_H_
 
+#include <cxx/ast_fwd.h>
 #include <cxx/attributes.h>
 #include <cxx/symbols_fwd.h>
 
@@ -38,6 +39,12 @@ class AtomicIntrinsic {
                                                 const cxx::Attribute& attribute,
                                                 cxx::AST* owner);
 
+  // Admits GCC load_n/store_n calls with constant ordering and system scope.
+  // Other builtins return nullopt. The parser owns the concrete call signature.
+  static std::optional<AtomicIntrinsic> resolve_builtin(
+      cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types,
+      cxx::CallExpressionAST* call);
+
   // Emits one atomic access using already evaluated source arguments and the
   // ordinary storage projection. Store and reduction have no result; load,
   // RMW, and CAS return the observed memory value. Target lowering owns width,
@@ -46,6 +53,13 @@ class AtomicIntrinsic {
   std::optional<Value> call(std::span<const Value> arguments, Storage& storage,
                             cxx::AST* owner, loom_builder_t* builder,
                             loom_location_id_t location) const;
+
+  // Normalizes evaluated builtin operands (pointer first, ordering omitted)
+  // into the same memory emission as the typed facade.
+  std::optional<Value> call_builtin(std::span<const Value> arguments,
+                                    Storage& storage, cxx::AST* owner,
+                                    loom_builder_t* builder,
+                                    loom_location_id_t location) const;
 
   bool equivalent(const AtomicIntrinsic& other) const;
 
@@ -94,6 +108,12 @@ class FenceIntrinsic {
                                                cxx::FunctionSymbol* function,
                                                const cxx::Attribute& attribute,
                                                cxx::AST* owner);
+
+  // Admits GCC thread fences with constant ordering and system scope.
+  // A relaxed fence emits no operation; other orderings use buffer.fence.
+  static std::optional<FenceIntrinsic> resolve_builtin(
+      cxx::TranslationUnit& unit, Diagnostics& diagnostics,
+      cxx::CallExpressionAST* call);
 
   void call(loom_builder_t* builder, loom_location_id_t location) const;
 

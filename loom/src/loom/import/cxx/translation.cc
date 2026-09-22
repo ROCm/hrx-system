@@ -777,6 +777,30 @@ class Translator {
     return result(op);
   }
 
+  std::optional<IntrinsicCallResult> atomic_builtin(
+      cxx::CallExpressionAST* call) {
+    if (auto atomic = AtomicIntrinsic::resolve_builtin(unit_, diagnostics_,
+                                                       types_, call)) {
+      std::array<Value, 2> arguments;
+      size_t count = 0;
+      // Admission consumed the final constant ordering. Evaluate only the
+      // pointer/value operands, once each, in source order.
+      for (auto* argument = call->expressionList; argument->next;
+           argument = argument->next) {
+        arguments[count++] = expression(argument->value);
+      }
+      return IntrinsicCallResult{
+          atomic->call_builtin(std::span(arguments).first(count), storage_,
+                               call, &builder_, locations_.get(call))};
+    }
+    if (auto fence =
+            FenceIntrinsic::resolve_builtin(unit_, diagnostics_, call)) {
+      fence->call(&builder_, locations_.get(call));
+      return IntrinsicCallResult{std::nullopt};
+    }
+    return std::nullopt;
+  }
+
   Value expression(cxx::ExpressionAST* ast) {
     if (!ast) {
       throw std::runtime_error("missing expression");
@@ -1132,6 +1156,9 @@ class Translator {
       return load(ast);
     }
     if (auto* call = cxx::ast_cast<cxx::CallExpressionAST>(ast)) {
+      if (auto called = atomic_builtin(call)) {
+        return *called->value;
+      }
       auto* callee = cxx::ast_cast<cxx::IdExpressionAST>(call->baseExpression);
       auto* function =
           callee ? cxx::symbol_cast<cxx::FunctionSymbol>(callee->symbol)
@@ -1688,6 +1715,9 @@ class Translator {
       }
     }
     if (auto* call = cxx::ast_cast<cxx::CallExpressionAST>(ast)) {
+      if (atomic_builtin(call)) {
+        return;
+      }
       auto* id = cxx::ast_cast<cxx::IdExpressionAST>(call->baseExpression);
       if (id && annotated(id->symbol, "assume")) {
         auto bounds = assumption_bounds(unit_, diagnostics_, call);

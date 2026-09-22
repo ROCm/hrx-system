@@ -548,6 +548,15 @@ Native support follows the corresponding High operation. The importer does not
 choose cache policies, insert host locks, or replace observations with
 read-modify-write operations.
 
+The GCC builtins `__atomic_load_n`, `__atomic_store_n`, and
+`__atomic_thread_fence` use the same High operations in C and C++ without a
+facade header. Their ordering argument must be a pure integer constant; use
+the predefined `__ATOMIC_*` values. These calls preserve system scope.
+`__ATOMIC_CONSUME` uses acquire semantics, and a relaxed thread fence has no
+effect. Runtime orderings, target-specific modifier bits, and storage outside
+the non-boolean integer subset diagnose at import. The typed facade provides
+the remaining RMW and compare-exchange operations with explicit scope.
+
 ## Embedded Low assembly
 
 `loom::low::assembly` embeds a typed descriptor-backed instruction fragment in

@@ -6,6 +6,7 @@
 
 #include "loom/import/cxx/binding/atomic.h"
 
+#include <cxx/ast.h>
 #include <cxx/names.h>
 #include <cxx/symbols.h>
 #include <cxx/types.h>
@@ -15,6 +16,7 @@
 #include <utility>
 #include <variant>
 
+#include "loom/import/cxx/source/constants.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/view/ops.h"
@@ -56,6 +58,47 @@ void require_ordering(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
     diagnostics.reject(unit, owner,
                        "ordering is not permitted for this operation");
   }
+}
+
+loom_atomic_ordering_t builtin_ordering(cxx::TranslationUnit& unit,
+                                        Diagnostics& diagnostics,
+                                        cxx::ExpressionAST* expression) {
+  auto value = integer_constant(unit, expression);
+  if (!value) {
+    diagnostics.reject(unit, expression,
+                       "atomic ordering requires a pure integer constant");
+  }
+  // GCC includes consume, so its remaining enum values differ from High.
+  // Consume uses acquire semantics; architecture-specific modifier bits reject.
+  switch (*value) {
+    case 0:
+      return LOOM_ATOMIC_ORDERING_RELAXED;
+    case 1:
+    case 2:
+      return LOOM_ATOMIC_ORDERING_ACQUIRE;
+    case 3:
+      return LOOM_ATOMIC_ORDERING_RELEASE;
+    case 4:
+      return LOOM_ATOMIC_ORDERING_ACQ_REL;
+    case 5:
+      return LOOM_ATOMIC_ORDERING_SEQ_CST;
+    default:
+      diagnostics.reject(unit, expression,
+                         "unsupported atomic ordering or target modifier");
+  }
+}
+
+void require_observation_ordering(cxx::TranslationUnit& unit,
+                                  Diagnostics& diagnostics, cxx::AST* owner,
+                                  loom_op_kind_t kind,
+                                  loom_atomic_ordering_t ordering) {
+  auto field = kind == LOOM_OP_VIEW_ATOMIC_LOAD
+                   ? loom_view_atomic_load_ordering_diagnostic_ref()
+                   : loom_view_atomic_store_ordering_diagnostic_ref();
+  require_ordering(
+      unit, diagnostics, owner,
+      loom_view_dialect_vtables(nullptr)[loom_op_dialect_index(kind)], field,
+      ordering);
 }
 
 }  // namespace
@@ -120,13 +163,7 @@ std::optional<AtomicIntrinsic> AtomicIntrinsic::resolve(
   if (operation == Operation::Load || operation == Operation::Store) {
     auto kind = operation == Operation::Load ? LOOM_OP_VIEW_ATOMIC_LOAD
                                              : LOOM_OP_VIEW_ATOMIC_STORE;
-    auto field = operation == Operation::Load
-                     ? loom_view_atomic_load_ordering_diagnostic_ref()
-                     : loom_view_atomic_store_ordering_diagnostic_ref();
-    require_ordering(
-        unit, diagnostics, owner,
-        loom_view_dialect_vtables(nullptr)[loom_op_dialect_index(kind)], field,
-        ordering);
+    require_observation_ordering(unit, diagnostics, owner, kind, ordering);
   }
   auto selected_scope = selectors[selector_count - 1];
   if (!loom_atomic_scope_is_valid(selected_scope)) {
@@ -188,6 +225,46 @@ std::optional<AtomicIntrinsic> AtomicIntrinsic::resolve(
                          failure_ordering, scope);
 }
 
+std::optional<AtomicIntrinsic> AtomicIntrinsic::resolve_builtin(
+    cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types,
+    cxx::CallExpressionAST* call) {
+  auto* callee = cxx::ast_cast<cxx::IdExpressionAST>(call->baseExpression);
+  auto kind = cxx::resolveBuiltinFunctionKind(callee);
+  if (kind != cxx::BuiltinFunctionKind::T___ATOMIC_LOAD_N &&
+      kind != cxx::BuiltinFunctionKind::T___ATOMIC_STORE_N) {
+    return std::nullopt;
+  }
+  auto operation = kind == cxx::BuiltinFunctionKind::T___ATOMIC_LOAD_N
+                       ? Operation::Load
+                       : Operation::Store;
+  auto* operands = call->expressionList;
+  auto* pointer = cxx::type_cast<cxx::PointerType>(
+      unit.typeTraits().decay(operands->value->type));
+  auto* element = types.unqualified(pointer->elementType());
+  if (!unit.typeTraits().is_integral(element) ||
+      element->kind() == cxx::TypeKind::kBool) {
+    diagnostics.reject(unit, call,
+                       "atomic builtin requires non-boolean integer storage");
+  }
+  if (operation == Operation::Store &&
+      unit.typeTraits().is_const(pointer->elementType())) {
+    diagnostics.reject(unit, call,
+                       "atomic destination requires a mutable pointer");
+  }
+  auto* order = operation == Operation::Load ? operands->next->value
+                                             : operands->next->next->value;
+  auto ordering = builtin_ordering(unit, diagnostics, order);
+  require_observation_ordering(unit, diagnostics, call,
+                               operation == Operation::Load
+                                   ? LOOM_OP_VIEW_ATOMIC_LOAD
+                                   : LOOM_OP_VIEW_ATOMIC_STORE,
+                               ordering);
+  return AtomicIntrinsic(operation, pointer->elementType(),
+                         types.get(element, call), LOOM_ATOMIC_KIND_XCHGI,
+                         ordering, LOOM_ATOMIC_ORDERING_RELAXED,
+                         LOOM_ATOMIC_SCOPE_SYSTEM);
+}
+
 std::optional<Value> AtomicIntrinsic::call(std::span<const Value> arguments,
                                            Storage& storage, cxx::AST* owner,
                                            loom_builder_t* builder,
@@ -225,6 +302,16 @@ std::optional<Value> AtomicIntrinsic::call(std::span<const Value> arguments,
       return Value(loom_op_results(op)[0]);
   }
   std::unreachable();
+}
+
+std::optional<Value> AtomicIntrinsic::call_builtin(
+    std::span<const Value> arguments, Storage& storage, cxx::AST* owner,
+    loom_builder_t* builder, loom_location_id_t location) const {
+  if (operation_ == Operation::Load) {
+    return call(arguments, storage, owner, builder, location);
+  }
+  std::array<Value, 2> normalized = {arguments[1], arguments[0]};
+  return call(normalized, storage, owner, builder, location);
 }
 
 bool AtomicIntrinsic::equivalent(const AtomicIntrinsic& other) const {
@@ -266,8 +353,24 @@ std::optional<FenceIntrinsic> FenceIntrinsic::resolve(
                         static_cast<loom_atomic_scope_t>(selectors[1]));
 }
 
+std::optional<FenceIntrinsic> FenceIntrinsic::resolve_builtin(
+    cxx::TranslationUnit& unit, Diagnostics& diagnostics,
+    cxx::CallExpressionAST* call) {
+  auto* callee = cxx::ast_cast<cxx::IdExpressionAST>(call->baseExpression);
+  if (cxx::resolveBuiltinFunctionKind(callee) !=
+      cxx::BuiltinFunctionKind::T___ATOMIC_THREAD_FENCE) {
+    return std::nullopt;
+  }
+  return FenceIntrinsic(
+      builtin_ordering(unit, diagnostics, call->expressionList->value),
+      LOOM_ATOMIC_SCOPE_SYSTEM);
+}
+
 void FenceIntrinsic::call(loom_builder_t* builder,
                           loom_location_id_t location) const {
+  if (ordering_ == LOOM_ATOMIC_ORDERING_RELAXED) {
+    return;
+  }
   loom_op_t* op;
   check(loom_buffer_fence_build(builder, scope_, ordering_, location, &op));
 }
