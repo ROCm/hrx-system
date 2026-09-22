@@ -35,6 +35,7 @@ load(
     ":loom_target_profile_rules_test.bzl",
     "loom_target_profile_rules_test_suite",
 )
+load(":loom_toolchain_rules_test.bzl", "loom_toolchain_rules_test_suite")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -175,6 +176,8 @@ loom_library_rules_test_suite(name = "loom_library_rules_tests")
 loom_binary_rules_test_suite(name = "loom_binary_rules_tests")
 
 loom_target_profile_rules_test_suite(name = "loom_target_profile_rules_tests")
+
+loom_toolchain_rules_test_suite(name = "loom_toolchain_rules_tests")
 
 loom_module(
     name = "linked_module",

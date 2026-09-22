@@ -34,18 +34,24 @@ def _loom_toolchain_impl(ctx):
         ),
     ]
 
-_loom_toolchain = rule(
-    implementation = _loom_toolchain_impl,
-    attrs = {
-        "tool": attr.label(
-            cfg = "exec",
-            executable = True,
-            mandatory = True,
-            doc = "Executable implementing one Loom authoring tool role.",
-        ),
-    },
-    doc = "Binds one Loom authoring tool role to an executable.",
-)
+def _loom_toolchain_rule(configuration):
+    return rule(
+        implementation = _loom_toolchain_impl,
+        attrs = {
+            "tool": attr.label(
+                cfg = configuration,
+                executable = True,
+                mandatory = True,
+                doc = "Executable implementing one Loom authoring tool role.",
+            ),
+        },
+        doc = "Binds one Loom authoring tool role to an executable.",
+    )
+
+# Build actions need tools for their execution platform. Test launchers carry
+# destination executables, including sanitizer and compilation-mode settings.
+_loom_build_toolchain = _loom_toolchain_rule("exec")
+_loom_run_toolchain = _loom_toolchain_rule("target")
 
 def loom_tools_toolchains(
         name,
@@ -67,6 +73,10 @@ def loom_tools_toolchains(
     format, lint, link, and test roles. Splitting the roles prevents a rule
     using one executable from configuring the dependency graphs of the other
     tools.
+
+    Compile and link roles execute during the build. Benchmark, test, format,
+    and lint roles execute through destination test launchers and preserve the
+    consuming target's platform, instrumentation, and compilation mode.
 
     Args:
       name: Prefix for generated implementation and registration targets.
@@ -92,7 +102,8 @@ def loom_tools_toolchains(
     }
     for role, tool in tools.items():
         implementation_name = "%s_%s" % (name, role)
-        _loom_toolchain(
+        toolchain_rule = _loom_build_toolchain if role in ["compile", "link"] else _loom_run_toolchain
+        toolchain_rule(
             name = implementation_name,
             tags = tags,
             tool = tool,
