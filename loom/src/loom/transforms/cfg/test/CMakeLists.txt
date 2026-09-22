@@ -16,6 +16,7 @@ loom_check_test_suite(
     "block_forwarding.loom-test"
     "block_fusion.loom-test"
     "block_merging.loom-test"
+    "boolean_folding.loom-test"
     "branch_folding.loom-test"
     "branch_fusion.loom-test"
     "branch_sink.loom-test"

@@ -1,0 +1,215 @@
+// RUN: with-checks pass-report @measure
+
+// Exact substitutions share one scan before the analysis refresh.
+pass.pipeline<func> @measure pipeline {
+  cfg-simplify
+}
+
+func.def @fold_independent_comparisons(%x: i32, %y: i32, %value: i32) -> (i32) {
+  %gate = scalar.cmpi slt, %x, %y : i32
+  cfg.cond_br %gate, ^selected, ^other
+^selected:
+  %predicate_0 = scalar.cmpi slt, %x, %y : i32
+  %bit_0 = scalar.extui %predicate_0 : i1 to i32
+  %sum_0 = scalar.addi %value, %bit_0 : i32
+  %predicate_1 = scalar.cmpi slt, %x, %y : i32
+  %bit_1 = scalar.extui %predicate_1 : i1 to i32
+  %sum_1 = scalar.addi %sum_0, %bit_1 : i32
+  %predicate_2 = scalar.cmpi slt, %x, %y : i32
+  %bit_2 = scalar.extui %predicate_2 : i1 to i32
+  %sum_2 = scalar.addi %sum_1, %bit_2 : i32
+  %predicate_3 = scalar.cmpi slt, %x, %y : i32
+  %bit_3 = scalar.extui %predicate_3 : i1 to i32
+  %sum_3 = scalar.addi %sum_2, %bit_3 : i32
+  func.return %sum_3 : i32
+^other:
+  func.return %value : i32
+}
+
+// ----
+CHECK: *"iterations":2,*
+CHECK: *"branches-folded":0,*
+
+// ====
+// RUN: with-checks pass-report @measure
+
+// Exact substitutions share one scan before the analysis refresh.
+pass.pipeline<func> @measure pipeline {
+  cfg-simplify
+}
+
+func.def @fold_dependent_conjunctions(%x: i32, %y: i32, %value: i32) -> (i32) {
+  %gate = scalar.cmpi slt, %x, %y : i32
+  cfg.cond_br %gate, ^selected, ^other
+^selected:
+  %predicate_0 = scalar.andi %gate, %gate : i1
+  %bit_0 = scalar.extui %predicate_0 : i1 to i32
+  %sum_0 = scalar.addi %value, %bit_0 : i32
+  %predicate_1 = scalar.andi %predicate_0, %gate : i1
+  %bit_1 = scalar.extui %predicate_1 : i1 to i32
+  %sum_1 = scalar.addi %sum_0, %bit_1 : i32
+  %predicate_2 = scalar.andi %predicate_1, %gate : i1
+  %bit_2 = scalar.extui %predicate_2 : i1 to i32
+  %sum_2 = scalar.addi %sum_1, %bit_2 : i32
+  %predicate_3 = scalar.andi %predicate_2, %gate : i1
+  %bit_3 = scalar.extui %predicate_3 : i1 to i32
+  %sum_3 = scalar.addi %sum_2, %bit_3 : i32
+  func.return %sum_3 : i32
+^other:
+  func.return %value : i32
+}
+
+// ----
+CHECK: *"iterations":2,*
+CHECK: *"branches-folded":0,*
+
+// ====
+// RUN: pass cfg-simplify
+
+// Entry facts do not prove comparisons against an independent value.
+func.def @preserve_unproved_comparisons(%x: i32, %y: i32, %value: i32) -> (i32) {
+  %gate = scalar.cmpi slt, %x, %y : i32
+  cfg.cond_br %gate, ^selected, ^other
+^selected:
+  %predicate_0 = scalar.cmpi slt, %x, %value : i32
+  %bit_0 = scalar.extui %predicate_0 : i1 to i32
+  %sum_0 = scalar.addi %value, %bit_0 : i32
+  %predicate_1 = scalar.cmpi slt, %x, %value : i32
+  %bit_1 = scalar.extui %predicate_1 : i1 to i32
+  %sum_1 = scalar.addi %sum_0, %bit_1 : i32
+  func.return %sum_1 : i32
+^other:
+  func.return %value : i32
+}
+
+// ====
+// RUN: pass cfg-simplify
+
+// Opposite entry facts remain distinct while dependent users see new constants.
+func.def @fold_opposite_entry_facts(%x: i32, %y: i32, %value: i32) -> (i32) {
+  %truth = scalar.constant true : i1
+  %gate = scalar.cmpi slt, %x, %y : i32
+  cfg.cond_br %gate, ^less, ^otherwise
+^otherwise:
+  %again_false = scalar.cmpi slt, %x, %y : i32
+  %negated_false = scalar.xori %again_false, %truth : i1
+  %false_bit = scalar.extui %again_false : i1 to i32
+  %opposite_bit = scalar.extui %negated_false : i1 to i32
+  %first = scalar.addi %value, %false_bit : i32
+  %otherwise_result = scalar.addi %first, %opposite_bit : i32
+  func.return %otherwise_result : i32
+^less:
+  %again_true = scalar.cmpi slt, %x, %y : i32
+  %negated_true = scalar.xori %again_true, %truth : i1
+  %true_bit = scalar.extui %again_true : i1 to i32
+  %inverse_bit = scalar.extui %negated_true : i1 to i32
+  %second = scalar.addi %value, %true_bit : i32
+  %less_result = scalar.addi %second, %inverse_bit : i32
+  func.return %less_result : i32
+}
+
+// ----
+func.def @fold_opposite_entry_facts(%x: i32, %y: i32, %value: i32) -> (i32) {
+  %truth = scalar.constant true : i1
+  %gate = scalar.cmpi slt, %x, %y : i32
+  cfg.cond_br %gate, ^less, ^otherwise
+^otherwise:
+  %again_false = scalar.constant false : i1
+  %negated_false = scalar.constant true : i1
+  %false_bit = scalar.extui %again_false : i1 to i32
+  %opposite_bit = scalar.extui %negated_false : i1 to i32
+  %first = scalar.addi %value, %false_bit : i32
+  %otherwise_result = scalar.addi %first, %opposite_bit : i32
+  func.return %otherwise_result : i32
+^less:
+  %again_true = scalar.constant true : i1
+  %negated_true = scalar.constant false : i1
+  %true_bit = scalar.extui %again_true : i1 to i32
+  %inverse_bit = scalar.extui %negated_true : i1 to i32
+  %second = scalar.addi %value, %true_bit : i32
+  %less_result = scalar.addi %second, %inverse_bit : i32
+  func.return %less_result : i32
+}
+
+// ====
+// RUN: pass cfg-simplify
+
+// Substitutions update branch conditions and payloads before the structural
+// simplifications consume them.
+func.def @fold_branch_payload(%x: i32, %y: i32, %value: i32) -> (i32) {
+  %truth = scalar.constant true : i1
+  %gate = scalar.cmpi slt, %x, %y : i32
+  cfg.cond_br %gate, ^selected, ^other
+^selected:
+  %same = scalar.cmpi slt, %x, %y : i32
+  %opposite = scalar.xori %same, %truth : i1
+  cfg.cond_br %opposite, ^other, ^forward
+^forward:
+  %still_same = scalar.cmpi slt, %x, %y : i32
+  cfg.br ^consumer(%still_same: i1)
+^consumer(%carried: i1):
+  %combined = scalar.andi %carried, %gate : i1
+  %bit = scalar.extui %combined : i1 to i32
+  %result = scalar.addi %value, %bit : i32
+  func.return %result : i32
+^other:
+  func.return %value : i32
+}
+
+// ----
+func.def @fold_branch_payload(%x: i32, %y: i32, %value: i32) -> (i32) {
+  %truth = scalar.constant true : i1
+  %gate = scalar.cmpi slt, %x, %y : i32
+  cfg.cond_br %gate, ^forward, ^other
+^forward:
+  %still_same = scalar.constant true : i1
+  %combined = scalar.constant true : i1
+  %bit = scalar.extui %combined : i1 to i32
+  %result = scalar.addi %value, %bit : i32
+  func.return %result : i32
+^other:
+  func.return %value : i32
+}
+
+// ====
+// RUN: pass cfg-simplify
+
+// Loop-carried Boolean payloads preserve their meaning across substitutions.
+func.def @fold_loop_payload(%y: i32, %value: i32) -> (i32) {
+  %initial = scalar.constant 0 : i32
+  %inactive = scalar.constant false : i1
+  cfg.br ^header(%initial: i32, %inactive: i1)
+^header(%index: i32, %last: i1):
+  %more = scalar.cmpi slt, %index, %y : i32
+  cfg.cond_br %more, ^body, ^exit
+^exit:
+  %finished = scalar.extui %last : i1 to i32
+  %result = scalar.addi %value, %finished : i32
+  func.return %result : i32
+^body:
+  %inside = scalar.cmpi slt, %index, %y : i32
+  %advance = scalar.extui %inside : i1 to i32
+  %next = scalar.addi %index, %advance : i32
+  %same = scalar.andi %inside, %more : i1
+  cfg.br ^header(%next: i32, %same: i1)
+}
+
+// ----
+func.def @fold_loop_payload(%y: i32, %value: i32) -> (i32) {
+  %initial = scalar.constant 0 : i32
+  %inactive = scalar.constant false : i1
+  cfg.br ^header(%initial: i32, %inactive: i1)
+^header(%index: i32, %last: i1):
+  %more = scalar.cmpi slt, %index, %y : i32
+  cfg.cond_br %more, ^body, ^exit
+^exit:
+  %finished = scalar.extui %last : i1 to i32
+  %result = scalar.addi %value, %finished : i32
+  func.return %result : i32
+^body:
+  %inside = scalar.constant true : i1
+  %advance = scalar.extui %inside : i1 to i32
+  %next = scalar.addi %index, %advance : i32
+  %same = scalar.constant true : i1
+  cfg.br ^header(%next: i32, %same: i1)
+}

@@ -252,7 +252,7 @@ static iree_status_t loom_cfg_simplify_replace_direct_br(
 }
 
 //===----------------------------------------------------------------------===//
-// Terminal block duplication
+// Direct branch access
 //===----------------------------------------------------------------------===//
 
 static bool loom_cfg_simplify_direct_branch(const loom_op_t* op,
@@ -545,6 +545,10 @@ static iree_status_t loom_cfg_simplify_fold_path_sensitive_i1_ops(
   if (graph->malformed) {
     return iree_ok_status();
   }
+  // Exact substitutions preserve CFG shape and existing value meanings. The
+  // rewriter queues affected users without executing them, so retained entry
+  // relations stay valid throughout this scan. New constants have facts, and
+  // the condition query extends its value domain on demand.
   for (uint16_t block_index = 1; block_index < graph->block_count;
        ++block_index) {
     if (!loom_cfg_graph_block_is_reachable(graph, block_index)) {
@@ -571,7 +575,6 @@ static iree_status_t loom_cfg_simplify_fold_path_sensitive_i1_ops(
             IREE_RETURN_IF_ERROR(
                 loom_cfg_simplify_replace_with_bool_constant(state, op, value));
             *out_changed = true;
-            return iree_ok_status();
           }
         }
       }
