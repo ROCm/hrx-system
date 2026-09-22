@@ -229,7 +229,7 @@ static iree_status_t loom_amdgpu_dotf_emit_tied_accumulator_diagnostic(
   const loom_low_descriptor_set_t* descriptor_set =
       loom_low_lower_context_descriptor_set(context);
   const iree_string_view_t descriptor_name = loom_low_descriptor_set_string(
-      descriptor_set, descriptor.descriptor->key_string_offset);
+      descriptor_set, descriptor.descriptor->key_string_ref);
   const iree_string_view_t descriptor_set_name =
       loom_amdgpu_descriptor_set_key(descriptor_set);
   const iree_string_view_t accumulator_kind =

@@ -1551,7 +1551,7 @@ static iree_string_view_t loom_amdgpu_tensor_memory_plan_key(
   }
   return loom_low_descriptor_set_string(
       loom_low_lower_context_descriptor_set(context),
-      plan->descriptor.descriptor->key_string_offset);
+      plan->descriptor.descriptor->key_string_ref);
 }
 #endif  // LOOM_AMDGPU_LOWER_CAPABILITY_ASYNC_TENSOR_LOAD_TO_LDS
 

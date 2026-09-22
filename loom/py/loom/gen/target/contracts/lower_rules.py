@@ -16,7 +16,7 @@ from loom.dsl import Op
 from loom.gen.support.c import c_identifier as _c_identifier
 from loom.gen.support.files import write_text_file
 from loom.gen.support.generated_file import line_comment_header
-from loom.gen.support.string_pool import CStringPool, emit_c_string_table
+from loom.gen.support.string_pool import CStringPool, emit_c_string_pool
 from loom.gen.target.contracts import lower_rule_rows, lower_rule_spelling
 from loom.target.contracts import (
     LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS,
@@ -274,10 +274,7 @@ def _generate_source(
         c_enum_prefix=f"{_c_identifier(table.name).upper()}_LOWER",
     )
     string_data_name = f"k{c_table_prefix}StringData"
-    lines.extend(emit_c_string_table(string_pool, string_data_name))
-    if string_pool.entries:
-        lines.append(f'static_assert({string_pool.c_enum_prefix}_STRING_END == sizeof({string_data_name}) - 1, "lower-rule string offsets must cover the table payload");')
-        lines.append("")
+    lines.extend(emit_c_string_pool(string_pool, string_data_name))
 
     type_patterns_name = f"k{c_table_prefix}TypePatterns"
     lines.extend(
@@ -339,8 +336,8 @@ def _generate_source(
                 lower_rule_rows.source_memory_byte_offset_materializer_row(
                     descriptor_refs,
                     row,
-                    immediate_string_offset=string_pool.ref(_source_memory_byte_offset_string_label(index)),
-                    conversion_immediate_string_offsets={
+                    immediate_string_ref=string_pool.ref(_source_memory_byte_offset_string_label(index)),
+                    conversion_immediate_string_refs={
                         conversion.source_type: string_pool.ref(_source_memory_conversion_string_label(index, conversion.source_type))
                         for conversion in row.integer_conversions
                         if conversion.immediate is not None
@@ -360,7 +357,7 @@ def _generate_source(
                 lower_rule_rows.source_memory_address_materializer_row(
                     descriptor_refs,
                     row,
-                    immediate_string_offset=string_pool.ref(_source_memory_address_string_label(index)),
+                    immediate_string_ref=string_pool.ref(_source_memory_address_string_label(index)),
                 )
                 for index, row in enumerate(source_memory_address_materializers)
             ],
@@ -422,7 +419,7 @@ def _generate_source(
             [
                 lower_rule_rows.diagnostic_param_row(
                     row,
-                    string_value_offset=(string_pool.ref(_diagnostic_param_string_label(source_index)) if row.kind == DiagnosticParamKind.STRING_LITERAL else None),
+                    string_value_ref=(string_pool.ref(_diagnostic_param_string_label(source_index)) if row.kind == DiagnosticParamKind.STRING_LITERAL else None),
                 )
                 for row, source_index in unique_diagnostic_params
             ],
@@ -474,7 +471,7 @@ def _generate_source(
             [
                 lower_rule_rows.attr_copy_row(
                     row,
-                    target_name_string_offset=string_pool.ref(_attr_copy_string_label(index)),
+                    target_name_string_ref=string_pool.ref(_attr_copy_string_label(index)),
                 )
                 for index, row in enumerate(table.attr_copies)
             ],
@@ -513,7 +510,7 @@ def _generate_source(
     lines.extend(
         lower_rule_rows.emit_optional_value_array(
             report_keys_name,
-            "loom_bstring_table_offset_t",
+            "loom_string_ref_t",
             [string_pool.ref(_report_key_string_label(index)) for index, _ in enumerate(report_keys)],
         )
     )

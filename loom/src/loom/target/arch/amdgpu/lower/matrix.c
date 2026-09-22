@@ -559,7 +559,7 @@ iree_status_t loom_amdgpu_descriptor_matrix_attrs(
     const loom_low_immediate_t* immediate =
         &descriptor_set->immediates[immediate_row];
     const iree_string_view_t field_name = loom_low_descriptor_set_string(
-        descriptor_set, immediate->field_name_string_offset);
+        descriptor_set, immediate->field_name_string_ref);
     IREE_RETURN_IF_ERROR(loom_module_intern_string(
         loom_low_lower_context_module(context), field_name, &attrs[i].name_id));
     attrs[i].value = loom_attr_i64(

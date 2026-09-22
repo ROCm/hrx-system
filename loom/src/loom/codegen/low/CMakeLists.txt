@@ -22,8 +22,8 @@ loom_cc_library(
     iree::base
     loom::ir
     loom::target::types
-    loom::util::bstring
     loom::util::stable_id
+    loom::util::string_pool
   PUBLIC
 )
 
@@ -126,7 +126,7 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::ir
-    loom::util::bstring
+    loom::util::string_pool
 )
 
 loom_cc_test(

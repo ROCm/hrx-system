@@ -682,7 +682,7 @@ static iree_status_t loom_cmd_lower_create_function(
   IREE_RETURN_IF_ERROR(loom_module_intern_string(
       state->module,
       loom_low_descriptor_set_string(state->descriptor_set,
-                                     state->descriptor_set->key_string_offset),
+                                     state->descriptor_set->key_string_ref),
       &descriptor_set_key));
 
   loom_low_func_def_build_flags_t build_flags =

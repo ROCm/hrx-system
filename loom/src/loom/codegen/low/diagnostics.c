@@ -108,7 +108,7 @@ iree_string_view_t loom_low_diagnostic_value_class_name(
   const loom_low_reg_class_t* reg_class =
       &descriptor_set->reg_classes[value_class.register_class_id];
   return loom_low_descriptor_set_string(descriptor_set,
-                                        reg_class->name_string_offset);
+                                        reg_class->name_string_ref);
 }
 
 iree_string_view_t loom_low_diagnostic_block_name(const loom_module_t* module,

@@ -814,7 +814,7 @@ static iree_status_t loom_check_emit_index_pressure_cliffs(
        ++reg_class_id) {
     names[reg_class_id] = loom_low_descriptor_set_string(
         descriptor_set,
-        descriptor_set->reg_classes[reg_class_id].name_string_offset);
+        descriptor_set->reg_classes[reg_class_id].name_string_ref);
   }
 
   uint16_t previous_reg_class_id = LOOM_LOW_REG_CLASS_NONE;
@@ -1201,7 +1201,7 @@ static iree_status_t loom_check_emit_write_low_allocation_summary(
         &table.target.descriptor_set->reg_classes[i];
     const iree_string_view_t register_class_name =
         loom_low_descriptor_set_string(table.target.descriptor_set,
-                                       reg_class->name_string_offset);
+                                       reg_class->name_string_ref);
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         &result->actual_output,
         "  %.*s: assignments=%" PRIhsz " units=%" PRIu64 " target_ids=%" PRIu64

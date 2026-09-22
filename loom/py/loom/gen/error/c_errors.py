@@ -206,7 +206,7 @@ def generate_error_catalog_c(
             if param.kind.value >= (1 << 3):
                 raise ValueError(f"{error.error_id}: parameter kind exceeds compact encoding")
             string_pool.intern(_error_param_string_label(error, param_index), param.name)
-    if string_pool.next_offset >= (1 << 29):
+    if sum(len(entry.value.encode()) + 1 for entry in string_pool.entries) >= (1 << 29):
         raise ValueError("error catalog string data exceeds compact parameter offset encoding")
 
     string_data_symbol = _catalog_string_data_symbol(catalog_symbol)

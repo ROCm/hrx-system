@@ -32,6 +32,27 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    string_pool
+  HDRS
+    "string_pool.h"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    string_pool_test
+  SRCS
+    "string_pool_test.cc"
+  DEPS
+    ::string_pool
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_library(
+  NAME
     adaptive_sort
   HDRS
     "adaptive_sort.h"

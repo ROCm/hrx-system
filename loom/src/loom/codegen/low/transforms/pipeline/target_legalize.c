@@ -836,11 +836,11 @@ static iree_string_view_t loom_low_target_legalize_report_descriptor_key(
     const loom_target_contract_query_result_t* query_result) {
   const loom_low_descriptor_t* descriptor = query_result->selected_descriptor;
   if (descriptor == NULL ||
-      descriptor->key_string_offset == LOOM_LOW_STRING_OFFSET_NONE) {
+      descriptor->key_string_ref == LOOM_STRING_REF_NONE) {
     return iree_string_view_empty();
   }
   return loom_low_descriptor_set_string(state->descriptor_set,
-                                        descriptor->key_string_offset);
+                                        descriptor->key_string_ref);
 }
 
 static bool loom_low_target_legalize_report_wants_rows(

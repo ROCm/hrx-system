@@ -62,7 +62,7 @@ static iree_string_view_t loom_low_repr_descriptor_key_impl(
     return iree_string_view_empty();
   }
   return loom_low_descriptor_set_string(descriptor_set,
-                                        descriptor->key_string_offset);
+                                        descriptor->key_string_ref);
 }
 
 static iree_status_t loom_low_repr_resolve_packet_attributes_impl(
@@ -102,7 +102,7 @@ static iree_string_view_t loom_low_repr_enum_value_token_impl(
         &descriptor_set->enum_values[domain->value_start + i];
     if (entry->value == value) {
       return loom_low_descriptor_set_string(descriptor_set,
-                                            entry->token_string_offset);
+                                            entry->token_string_ref);
     }
   }
   return iree_string_view_empty();

@@ -22,8 +22,8 @@ static iree_status_t loom_low_validate_register_type_parts(
                             "register type unit count must be non-zero");
   }
   if (reg_class_id >= descriptor_set->reg_class_count ||
-      descriptor_set->reg_classes[reg_class_id].name_string_offset ==
-          LOOM_LOW_STRING_OFFSET_NONE) {
+      descriptor_set->reg_classes[reg_class_id].name_string_ref ==
+          LOOM_STRING_REF_NONE) {
     return iree_make_status(IREE_STATUS_NOT_FOUND,
                             "target-low register class ID %" PRIu16
                             " is not present in the selected descriptor set",

@@ -216,19 +216,19 @@ TEST(LowAllocationStorageTest, MatchesExplicitRegisterAtomicStorage) {
   const uint16_t atomic_units[] = {0, 1, 0, 2, 3};
   const loom_low_physical_register_t physical_registers[] = {
       {
-          /*.name_string_offset=*/0,
+          /*.name_string_ref=*/0,
           /*.atomic_unit_start=*/0,
           /*.atomic_unit_count=*/2,
           /*.reserved=*/0,
       },
       {
-          /*.name_string_offset=*/0,
+          /*.name_string_ref=*/0,
           /*.atomic_unit_start=*/2,
           /*.atomic_unit_count=*/1,
           /*.reserved=*/0,
       },
       {
-          /*.name_string_offset=*/0,
+          /*.name_string_ref=*/0,
           /*.atomic_unit_start=*/3,
           /*.atomic_unit_count=*/2,
           /*.reserved=*/0,

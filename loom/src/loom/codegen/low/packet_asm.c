@@ -38,9 +38,9 @@ static iree_string_view_t loom_low_packet_asm_module_string(
 
 static iree_status_t loom_low_packet_asm_append_descriptor_string(
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_bstring_table_offset_t string_offset, iree_string_builder_t* builder) {
+    loom_string_ref_t string_ref, iree_string_builder_t* builder) {
   iree_string_view_t value =
-      loom_low_descriptor_set_string(descriptor_set, string_offset);
+      loom_low_descriptor_set_string(descriptor_set, string_ref);
   if (iree_string_view_is_empty(value)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low packet asm descriptor string is empty");
@@ -165,11 +165,11 @@ static iree_status_t loom_low_packet_asm_append_immediates(
         &descriptor_set->immediates[descriptor->immediate_start +
                                     asm_immediate->immediate_index];
     iree_string_view_t field_name = loom_low_descriptor_set_string(
-        descriptor_set, immediate->field_name_string_offset);
+        descriptor_set, immediate->field_name_string_ref);
     iree_string_view_t spelling = field_name;
-    if (asm_immediate->name_string_offset != LOOM_LOW_STRING_OFFSET_NONE) {
-      spelling = loom_low_descriptor_set_string(
-          descriptor_set, asm_immediate->name_string_offset);
+    if (asm_immediate->name_string_ref != LOOM_STRING_REF_NONE) {
+      spelling = loom_low_descriptor_set_string(descriptor_set,
+                                                asm_immediate->name_string_ref);
     }
     if (iree_string_view_is_empty(spelling)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -257,7 +257,7 @@ static iree_status_t loom_low_packet_asm_append_descriptor_packet(
         iree_string_builder_append_cstring(state->builder, " = "));
   }
   IREE_RETURN_IF_ERROR(loom_low_packet_asm_append_descriptor_string(
-      descriptor_set, asm_form->mnemonic_string_offset, state->builder));
+      descriptor_set, asm_form->mnemonic_string_ref, state->builder));
   if (asm_form->operand_index_count > 0) {
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(state->builder, " "));

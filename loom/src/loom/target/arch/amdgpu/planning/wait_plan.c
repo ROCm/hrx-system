@@ -1542,7 +1542,7 @@ static bool loom_amdgpu_wait_plan_node_is_smem_schedule_class(
     return false;
   }
   const iree_string_view_t schedule_class_name = loom_low_descriptor_set_string(
-      descriptor_set, node->schedule_class->name_string_offset);
+      descriptor_set, node->schedule_class->name_string_ref);
   return iree_string_view_equal(schedule_class_name,
                                 IREE_SV("amdgpu.smem.load")) ||
          iree_string_view_equal(schedule_class_name,
@@ -1579,7 +1579,7 @@ static bool loom_amdgpu_wait_plan_descriptor_writes_exec(
       }
       const iree_string_view_t reg_class_name = loom_low_descriptor_set_string(
           descriptor_set,
-          descriptor_set->reg_classes[reg_class_id].name_string_offset);
+          descriptor_set->reg_classes[reg_class_id].name_string_ref);
       if (iree_string_view_equal(reg_class_name, IREE_SV("amdgpu.exec"))) {
         return true;
       }

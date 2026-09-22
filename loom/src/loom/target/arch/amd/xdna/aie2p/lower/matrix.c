@@ -425,7 +425,7 @@ void loom_aie2p_describe_matrix_plan(loom_low_lower_context_t* context,
           (const loom_aie2p_matrix_mma_plan_t*)plan.target_data;
       out_report->plan_key = loom_low_descriptor_set_string(
           loom_low_lower_context_descriptor_set(context),
-          matrix_plan->operation_descriptor.descriptor->mnemonic_string_offset);
+          matrix_plan->operation_descriptor.descriptor->mnemonic_string_ref);
       return;
     }
   }

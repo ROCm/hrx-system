@@ -27,7 +27,7 @@ uint32_t loom_low_bind_immediate_presence(
           &descriptor_set->immediates[descriptor->immediate_start + j];
       if (iree_string_view_equal(
               name, loom_low_descriptor_set_string(
-                        descriptor_set, immediate->field_name_string_offset))) {
+                        descriptor_set, immediate->field_name_string_ref))) {
         presence |= immediate->attribute_mask;
         break;
       }
@@ -46,7 +46,7 @@ static bool loom_low_resolve_immediate_enum(
     if (immediate->kind != LOOM_LOW_IMMEDIATE_KIND_ENUM ||
         !iree_string_view_equal(
             name, loom_low_descriptor_set_string(
-                      descriptor_set, immediate->field_name_string_offset))) {
+                      descriptor_set, immediate->field_name_string_ref))) {
       continue;
     }
     const loom_low_enum_domain_t* domain =
@@ -55,8 +55,8 @@ static bool loom_low_resolve_immediate_enum(
       const loom_low_enum_value_t* value =
           &descriptor_set->enum_values[domain->value_start + j];
       if (iree_string_view_equal(
-              token, loom_low_descriptor_set_string(
-                         descriptor_set, value->token_string_offset))) {
+              token, loom_low_descriptor_set_string(descriptor_set,
+                                                    value->token_string_ref))) {
         *out_value = value->value;
         return true;
       }

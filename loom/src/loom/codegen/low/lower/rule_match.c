@@ -135,7 +135,7 @@ iree_status_t loom_low_lower_rule_resolve_descriptor_ref(
   IREE_ASSERT(match_context->descriptor_set != NULL);
   IREE_ASSERT(rule_set->descriptor_refs != NULL);
   const iree_string_view_t key = loom_low_lower_rule_set_string(
-      rule_set, rule_set->descriptor_refs[descriptor_ref].key_string_offset);
+      rule_set, rule_set->descriptor_refs[descriptor_ref].key_string_ref);
   const uint32_t descriptor_ordinal = loom_low_descriptor_set_lookup_descriptor(
       match_context->descriptor_set, key);
   if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
@@ -1550,7 +1550,7 @@ iree_status_t loom_low_lower_rule_match_descriptor_ref_from_lowering(
   uint32_t cached_ordinal = map->descriptor_ordinals[descriptor_ref];
   if (cached_ordinal == 0) {
     const iree_string_view_t key = loom_low_lower_rule_set_string(
-        rule_set, rule_set->descriptor_refs[descriptor_ref].key_string_offset);
+        rule_set, rule_set->descriptor_refs[descriptor_ref].key_string_ref);
     const uint32_t descriptor_ordinal =
         loom_low_descriptor_set_lookup_descriptor(match_context->descriptor_set,
                                                   key);
@@ -1704,7 +1704,7 @@ void loom_low_lower_rule_materialize_diagnostic_params(
       case LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL:
         out_params[param_index] =
             loom_param_string(loom_low_lower_rule_set_string(
-                rule_set, row->value.string_value_offset));
+                rule_set, row->value.string_value_ref));
         break;
       case LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_VALUE_TYPE: {
         const loom_value_id_t value_id = loom_low_lower_rule_source_value(

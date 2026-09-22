@@ -215,8 +215,10 @@ def test_storage_generation_emits_current_public_views() -> None:
     assert source.count(".descriptor_views = kX86ScalarCoreDescriptorViews,") == 2
     assert source.count(".descriptor_refs = kX86ScalarCoreDescriptorRefs,") == 2
     assert source.count(".asm_forms = kX86ScalarCoreAsmForms,") == 2
-    assert '"avx_vnni.vpdpbusd.ymm"' in source
-    assert '"vpdpbusd.ymm"' in source
+    # A shared spelling may span adjacent literals in the compact byte pool.
+    string_data = source.replace('"\n    "', "")
+    assert "avx_vnni.vpdpbusd.ymm" in string_data
+    assert "vpdpbusd.ymm" in string_data
     assert "loom_x86_avx512_core_descriptor_set" in avx512_header
     assert "loom_x86_avx2_core_descriptor_set" in avx2_header
     assert "loom_x86_avx_vnni_core_descriptor_set" in avx_vnni_header

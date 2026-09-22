@@ -12,12 +12,11 @@
 
 static iree_string_view_t loom_low_descriptor_set_string_view(
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_bstring_table_offset_t string_offset) {
-  if (string_offset == LOOM_LOW_STRING_OFFSET_NONE) {
+    loom_string_ref_t string_ref) {
+  if (string_ref == LOOM_STRING_REF_NONE) {
     return iree_string_view_empty();
   }
-  return loom_bstring_view(
-      loom_bstring_table_get(&descriptor_set->string_table, string_offset));
+  return loom_string_pool_get(&descriptor_set->string_pool, string_ref);
 }
 
 iree_string_view_t loom_low_descriptor_set_timing_event_name(
@@ -28,7 +27,7 @@ iree_string_view_t loom_low_descriptor_set_timing_event_name(
   IREE_ASSERT_LT(timing_event_id, descriptor_set->timing_event_count);
   return loom_low_descriptor_set_string_view(
       descriptor_set,
-      descriptor_set->timing_events[timing_event_id].name_string_offset);
+      descriptor_set->timing_events[timing_event_id].name_string_ref);
 }
 
 const loom_low_event_separation_t*
@@ -275,7 +274,7 @@ uint16_t loom_low_descriptor_operand_packet_index(
 static iree_string_view_t loom_low_descriptor_set_key(
     const loom_low_descriptor_set_t* descriptor_set) {
   return loom_low_descriptor_set_string_view(descriptor_set,
-                                             descriptor_set->key_string_offset);
+                                             descriptor_set->key_string_ref);
 }
 
 iree_host_size_t loom_low_descriptor_registry_descriptor_set_count(
@@ -356,8 +355,8 @@ const loom_low_descriptor_set_t* loom_low_descriptor_registry_lookup_by_id(
 
 iree_string_view_t loom_low_descriptor_set_string(
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_bstring_table_offset_t string_offset) {
-  return loom_low_descriptor_set_string_view(descriptor_set, string_offset);
+    loom_string_ref_t string_ref) {
+  return loom_low_descriptor_set_string_view(descriptor_set, string_ref);
 }
 
 bool loom_low_descriptor_set_lookup_register_class(
@@ -374,12 +373,12 @@ bool loom_low_descriptor_set_lookup_register_class(
        ++i) {
     const loom_low_reg_class_t* register_class =
         &descriptor_set->reg_classes[i];
-    if (register_class->name_string_offset == LOOM_LOW_STRING_OFFSET_NONE) {
+    if (register_class->name_string_ref == LOOM_STRING_REF_NONE) {
       continue;
     }
     iree_string_view_t descriptor_register_class_name =
         loom_low_descriptor_set_string_view(descriptor_set,
-                                            register_class->name_string_offset);
+                                            register_class->name_string_ref);
     if (!iree_string_view_equal(register_class_name,
                                 descriptor_register_class_name)) {
       continue;
@@ -494,7 +493,7 @@ uint32_t loom_low_descriptor_set_lookup_descriptor(
     const loom_low_descriptor_ref_t* descriptor_ref =
         &descriptor_set->descriptor_refs[mid];
     iree_string_view_t descriptor_ref_key = loom_low_descriptor_set_string_view(
-        descriptor_set, descriptor_ref->key_string_offset);
+        descriptor_set, descriptor_ref->key_string_ref);
     const int comparison = iree_string_view_compare(descriptor_ref_key, key);
     if (comparison == 0) {
       return descriptor_ref->descriptor_ordinal;
@@ -517,7 +516,7 @@ uint32_t loom_low_descriptor_set_lookup_asm_form(
     const uint32_t mid = low + (high - low) / 2;
     const loom_low_asm_form_t* asm_form = &descriptor_set->asm_forms[mid];
     iree_string_view_t asm_mnemonic = loom_low_descriptor_set_string_view(
-        descriptor_set, asm_form->mnemonic_string_offset);
+        descriptor_set, asm_form->mnemonic_string_ref);
     const int comparison = iree_string_view_compare(asm_mnemonic, mnemonic);
     if (comparison == 0) {
       if (asm_form->descriptor_ordinal >= descriptor_set->descriptor_count) {

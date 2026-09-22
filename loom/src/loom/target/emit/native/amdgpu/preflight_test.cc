@@ -50,7 +50,7 @@ uint16_t FindRegisterClassId(const loom_low_descriptor_set_t* descriptor_set,
   for (uint16_t i = 0; i < descriptor_set->reg_class_count; ++i) {
     const loom_low_reg_class_t* reg_class = &descriptor_set->reg_classes[i];
     const iree_string_view_t reg_class_name = loom_low_descriptor_set_string(
-        descriptor_set, reg_class->name_string_offset);
+        descriptor_set, reg_class->name_string_ref);
     if (iree_string_view_equal(reg_class_name, name)) {
       return i;
     }
@@ -134,7 +134,7 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_builder_intern_string(
         &module_builder,
         loom_low_descriptor_set_string(descriptor_set,
-                                       descriptor_set->key_string_offset),
+                                       descriptor_set->key_string_ref),
         &representation_contract));
     IREE_ASSERT_OK(loom_low_func_def_build(
         &module_builder, LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TARGET,
@@ -165,7 +165,7 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
         loom_target_facts_identity_name(&target_facts_.base),
         /*.descriptor_set_key=*/
         loom_low_descriptor_set_string(descriptor_set,
-                                       descriptor_set->key_string_offset),
+                                       descriptor_set->key_string_ref),
         /*.feature_bits=*/target_bundle->config->contract_feature_bits,
         /*.descriptor_set=*/descriptor_set,
     };

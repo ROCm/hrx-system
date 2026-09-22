@@ -56,8 +56,8 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/ir",
         "//loom/src/loom/target:types",
-        "//loom/src/loom/util:bstring",
         "//loom/src/loom/util:stable_id",
+        "//loom/src/loom/util:string_pool",
         "//runtime/src/iree/base",
     ],
 )
@@ -143,7 +143,7 @@ loom_cc_test(
         ":descriptors",
         ":immediates",
         "//loom/src/loom/ir",
-        "//loom/src/loom/util:bstring",
+        "//loom/src/loom/util:string_pool",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

@@ -14,55 +14,38 @@
 namespace loom {
 namespace {
 
-// clang-format off
-static const uint8_t kRequirementStrings[] =
-    LOOM_BSTRING_LITERAL(0, "")
-    LOOM_BSTRING_LITERAL(9, "test.core")
-    LOOM_BSTRING_LITERAL(11, "test.target")
-    LOOM_BSTRING_LITERAL(13, "test.features")
-    LOOM_BSTRING_LITERAL(8, "test.gpr")
-    LOOM_BSTRING_LITERAL(3, "dst")
-    LOOM_BSTRING_LITERAL(3, "lhs")
-    LOOM_BSTRING_LITERAL(3, "rhs")
-    LOOM_BSTRING_LITERAL(8, "test.alu")
-    LOOM_BSTRING_LITERAL(12, "test.alu.i32")
-    LOOM_BSTRING_LITERAL(12, "test.add.i32")
-    LOOM_BSTRING_LITERAL(7, "add.i32")
-    LOOM_BSTRING_LITERAL(15, "integer.add.i32");
-// clang-format on
+static const char kRequirementStrings[] =
+    ""
+    "test.core"
+    "test.target"
+    "test.features"
+    "test.gpr"
+    "dst"
+    "lhs"
+    "rhs"
+    "test.alu"
+    "test.alu.i32"
+    "test.add.i32"
+    "add.i32"
+    "integer.add.i32";
 
-enum {
-  REQUIREMENT_STRING_empty = 0,
-  REQUIREMENT_STRING_set_key = REQUIREMENT_STRING_empty + sizeof(""),
-  REQUIREMENT_STRING_target_key =
-      REQUIREMENT_STRING_set_key + sizeof("test.core"),
-  REQUIREMENT_STRING_feature_key =
-      REQUIREMENT_STRING_target_key + sizeof("test.target"),
-  REQUIREMENT_STRING_reg_gpr =
-      REQUIREMENT_STRING_feature_key + sizeof("test.features"),
-  REQUIREMENT_STRING_field_dst =
-      REQUIREMENT_STRING_reg_gpr + sizeof("test.gpr"),
-  REQUIREMENT_STRING_field_lhs = REQUIREMENT_STRING_field_dst + sizeof("dst"),
-  REQUIREMENT_STRING_field_rhs = REQUIREMENT_STRING_field_lhs + sizeof("lhs"),
-  REQUIREMENT_STRING_resource_alu =
-      REQUIREMENT_STRING_field_rhs + sizeof("rhs"),
-  REQUIREMENT_STRING_schedule_alu =
-      REQUIREMENT_STRING_resource_alu + sizeof("test.alu"),
-  REQUIREMENT_STRING_descriptor_add =
-      REQUIREMENT_STRING_schedule_alu + sizeof("test.alu.i32"),
-  REQUIREMENT_STRING_mnemonic_add =
-      REQUIREMENT_STRING_descriptor_add + sizeof("test.add.i32"),
-  REQUIREMENT_STRING_semantic_add =
-      REQUIREMENT_STRING_mnemonic_add + sizeof("add.i32"),
-  REQUIREMENT_STRING_END =
-      REQUIREMENT_STRING_semantic_add + sizeof("integer.add.i32"),
+enum : loom_string_ref_t {
+  REQUIREMENT_STRING_empty = LOOM_STRING_REF(0, 0),
+  REQUIREMENT_STRING_set_key = LOOM_STRING_REF(0, 9),
+  REQUIREMENT_STRING_target_key = LOOM_STRING_REF(9, 11),
+  REQUIREMENT_STRING_feature_key = LOOM_STRING_REF(20, 13),
+  REQUIREMENT_STRING_reg_gpr = LOOM_STRING_REF(33, 8),
+  REQUIREMENT_STRING_field_dst = LOOM_STRING_REF(41, 3),
+  REQUIREMENT_STRING_field_lhs = LOOM_STRING_REF(44, 3),
+  REQUIREMENT_STRING_field_rhs = LOOM_STRING_REF(47, 3),
+  REQUIREMENT_STRING_resource_alu = LOOM_STRING_REF(50, 8),
+  REQUIREMENT_STRING_schedule_alu = LOOM_STRING_REF(58, 12),
+  REQUIREMENT_STRING_descriptor_add = LOOM_STRING_REF(70, 12),
+  REQUIREMENT_STRING_mnemonic_add = LOOM_STRING_REF(82, 7),
+  REQUIREMENT_STRING_semantic_add = LOOM_STRING_REF(89, 15),
 };
 
-static_assert(REQUIREMENT_STRING_END == sizeof(kRequirementStrings) - 1,
-              "requirement test string offsets must cover the table payload");
-
-#define REQUIREMENT_STRING_OFFSET(field) \
-  static_cast<loom_bstring_table_offset_t>(REQUIREMENT_STRING_##field)
+#define REQUIREMENT_STRING_REF(field) REQUIREMENT_STRING_##field
 
 struct RequirementTables {
   // Descriptor rows owned by the test descriptor set.
@@ -96,8 +79,7 @@ void InitializeRequirementTables(RequirementTables* tables) {
     reg_class.full_register_part_mask = 1;
   }
 
-  tables->reg_classes[0].name_string_offset =
-      REQUIREMENT_STRING_OFFSET(reg_gpr);
+  tables->reg_classes[0].name_string_ref = REQUIREMENT_STRING_REF(reg_gpr);
   tables->reg_classes[0].flags = LOOM_LOW_REG_CLASS_FLAG_VIRTUAL_ONLY;
   tables->reg_classes[0].alloc_unit_bits = 32;
   tables->reg_classes[0].spill_class_id = LOOM_LOW_REG_CLASS_NONE;
@@ -106,29 +88,25 @@ void InitializeRequirementTables(RequirementTables* tables) {
   tables->reg_class_alts[0].reg_class_id = 0;
   tables->reg_class_alts[0].flags = LOOM_LOW_REG_CLASS_ALT_FLAG_PREFERRED;
 
-  tables->operands[0].field_name_string_offset =
-      REQUIREMENT_STRING_OFFSET(field_dst);
+  tables->operands[0].field_name_string_ref = REQUIREMENT_STRING_REF(field_dst);
   tables->operands[0].role = LOOM_LOW_OPERAND_ROLE_RESULT;
   tables->operands[0].reg_class_alt_start = 0;
   tables->operands[0].reg_class_alt_count = 1;
   tables->operands[0].unit_count = 1;
 
-  tables->operands[1].field_name_string_offset =
-      REQUIREMENT_STRING_OFFSET(field_lhs);
+  tables->operands[1].field_name_string_ref = REQUIREMENT_STRING_REF(field_lhs);
   tables->operands[1].role = LOOM_LOW_OPERAND_ROLE_OPERAND;
   tables->operands[1].reg_class_alt_start = 0;
   tables->operands[1].reg_class_alt_count = 1;
   tables->operands[1].unit_count = 1;
 
-  tables->operands[2].field_name_string_offset =
-      REQUIREMENT_STRING_OFFSET(field_rhs);
+  tables->operands[2].field_name_string_ref = REQUIREMENT_STRING_REF(field_rhs);
   tables->operands[2].role = LOOM_LOW_OPERAND_ROLE_OPERAND;
   tables->operands[2].reg_class_alt_start = 0;
   tables->operands[2].reg_class_alt_count = 1;
   tables->operands[2].unit_count = 1;
 
-  tables->resources[0].name_string_offset =
-      REQUIREMENT_STRING_OFFSET(resource_alu);
+  tables->resources[0].name_string_ref = REQUIREMENT_STRING_REF(resource_alu);
   tables->resources[0].capacity_per_cycle = 1;
   tables->resources[0].kind = LOOM_LOW_RESOURCE_KIND_SCALAR_ALU;
 
@@ -136,8 +114,8 @@ void InitializeRequirementTables(RequirementTables* tables) {
   tables->issue_uses[0].cycles = 1;
   tables->issue_uses[0].units = 1;
 
-  tables->schedule_classes[0].name_string_offset =
-      REQUIREMENT_STRING_OFFSET(schedule_alu);
+  tables->schedule_classes[0].name_string_ref =
+      REQUIREMENT_STRING_REF(schedule_alu);
   tables->schedule_classes[0].latency_cycles = 1;
   tables->schedule_classes[0].latency_kind = LOOM_LOW_LATENCY_KIND_EXACT;
   tables->schedule_classes[0].issue_use_start = 0;
@@ -145,14 +123,14 @@ void InitializeRequirementTables(RequirementTables* tables) {
   tables->schedule_classes[0].minimum_issue_cycles = 1;
   tables->schedule_classes[0].model_quality = LOOM_LOW_MODEL_QUALITY_EXACT;
 
-  tables->descriptors[0].key_string_offset =
-      REQUIREMENT_STRING_OFFSET(descriptor_add);
+  tables->descriptors[0].key_string_ref =
+      REQUIREMENT_STRING_REF(descriptor_add);
   tables->descriptors[0].stable_id =
       loom_low_descriptor_stable_id_from_key(IREE_SV("test.add.i32"));
-  tables->descriptors[0].mnemonic_string_offset =
-      REQUIREMENT_STRING_OFFSET(mnemonic_add);
-  tables->descriptors[0].semantic_tag_string_offset =
-      REQUIREMENT_STRING_OFFSET(semantic_add);
+  tables->descriptors[0].mnemonic_string_ref =
+      REQUIREMENT_STRING_REF(mnemonic_add);
+  tables->descriptors[0].semantic_tag_string_ref =
+      REQUIREMENT_STRING_REF(semantic_add);
   tables->descriptor_views[0].canonical_asm_form_ordinal =
       LOOM_LOW_ASM_FORM_ORDINAL_NONE;
   tables->descriptors[0].encoding_id = 1;
@@ -163,8 +141,8 @@ void InitializeRequirementTables(RequirementTables* tables) {
   tables->descriptor_views[0].schedule_class_id = 0;
   tables->descriptors[0].flags = LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE;
 
-  tables->descriptor_refs[0].key_string_offset =
-      REQUIREMENT_STRING_OFFSET(descriptor_add);
+  tables->descriptor_refs[0].key_string_ref =
+      REQUIREMENT_STRING_REF(descriptor_add);
   tables->descriptor_refs[0].descriptor_ordinal = 0;
 
   tables->set.abi_version = LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION;
@@ -173,12 +151,11 @@ void InitializeRequirementTables(RequirementTables* tables) {
       loom_low_descriptor_stable_id_from_key(IREE_SV("test.core"));
   tables->set.target_stable_id =
       loom_low_descriptor_stable_id_from_key(IREE_SV("test.target"));
-  tables->set.key_string_offset = REQUIREMENT_STRING_OFFSET(set_key);
-  tables->set.target_key_string_offset = REQUIREMENT_STRING_OFFSET(target_key);
-  tables->set.feature_key_string_offset =
-      REQUIREMENT_STRING_OFFSET(feature_key);
-  tables->set.string_table.data = kRequirementStrings;
-  tables->set.string_table.data_length = sizeof(kRequirementStrings) - 1;
+  tables->set.key_string_ref = REQUIREMENT_STRING_REF(set_key);
+  tables->set.target_key_string_ref = REQUIREMENT_STRING_REF(target_key);
+  tables->set.feature_key_string_ref = REQUIREMENT_STRING_REF(feature_key);
+  tables->set.string_pool.data = kRequirementStrings;
+  tables->set.string_pool.data_length = sizeof(kRequirementStrings) - 1;
   tables->set.descriptors = tables->descriptors;
   tables->set.descriptor_views = tables->descriptor_views;
   tables->set.descriptor_count = IREE_ARRAYSIZE(tables->descriptors);
@@ -222,7 +199,7 @@ TEST(LowRegisterTypeResolverTest, ResolvesCompactRegisterTypes) {
   EXPECT_EQ(descriptor_register_class_id, 0);
   EXPECT_TRUE(iree_string_view_equal(
       loom_low_descriptor_set_string(
-          &tables.set, descriptor_register_class->name_string_offset),
+          &tables.set, descriptor_register_class->name_string_ref),
       IREE_SV("test.gpr")));
 }
 
@@ -274,7 +251,7 @@ TEST(LowRegisterClassLookupTest, LooksUpDescriptorRegisterClassNames) {
   EXPECT_EQ(descriptor_register_class_id, 0);
   EXPECT_TRUE(iree_string_view_equal(
       loom_low_descriptor_set_string(
-          &tables.set, descriptor_register_class->name_string_offset),
+          &tables.set, descriptor_register_class->name_string_ref),
       IREE_SV("test.gpr")));
 
   found = loom_low_descriptor_set_lookup_register_class(
@@ -288,7 +265,7 @@ TEST(LowRegisterClassLookupTest, LooksUpDescriptorRegisterClassNames) {
 TEST(LowDescriptorRequirementsTest, RejectsMissingMnemonic) {
   RequirementTables tables;
   InitializeRequirementTables(&tables);
-  tables.descriptors[0].mnemonic_string_offset = LOOM_LOW_STRING_OFFSET_NONE;
+  tables.descriptors[0].mnemonic_string_ref = LOOM_STRING_REF_NONE;
 
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
@@ -299,8 +276,7 @@ TEST(LowDescriptorRequirementsTest, RejectsMissingMnemonic) {
 TEST(LowDescriptorRequirementsTest, RejectsMissingSemanticTag) {
   RequirementTables tables;
   InitializeRequirementTables(&tables);
-  tables.descriptors[0].semantic_tag_string_offset =
-      LOOM_LOW_STRING_OFFSET_NONE;
+  tables.descriptors[0].semantic_tag_string_ref = LOOM_STRING_REF_NONE;
 
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,

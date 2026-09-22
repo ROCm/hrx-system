@@ -80,7 +80,7 @@ loom_low_lower_rule_source_memory_emit_dynamic_byte_offset_const(
   return loom_low_lower_rule_source_memory_emit_resolved_integer_const(
       context, &descriptor,
       loom_low_lower_rule_set_string(
-          rule_set, materializer->constant_immediate_string_offset),
+          rule_set, materializer->constant_immediate_string_ref),
       value, result_type, location, out_value_id);
 }
 
@@ -109,7 +109,7 @@ loom_low_lower_rule_source_memory_emit_address_coordinate_const(
   return loom_low_lower_rule_source_memory_emit_resolved_integer_const(
       context, &descriptor,
       loom_low_lower_rule_set_string(
-          rule_set, materializer->const_coordinate_immediate_string_offset),
+          rule_set, materializer->const_coordinate_immediate_string_ref),
       value, result_type, source_op->location, out_value_id);
 }
 
@@ -310,12 +310,11 @@ static iree_status_t loom_low_lower_rule_source_memory_lookup_byte_offset(
     if (conversion->descriptor_ref != LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE) {
       loom_named_attr_t attribute = {0};
       loom_named_attr_slice_t attributes = loom_named_attr_slice_empty();
-      if (conversion->immediate_string_offset !=
-          LOOM_BSTRING_TABLE_OFFSET_NONE) {
+      if (conversion->immediate_string_ref != LOOM_STRING_REF_NONE) {
         IREE_RETURN_IF_ERROR(loom_module_intern_string(
             loom_low_lower_context_module(context),
             loom_low_lower_rule_set_string(rule_set,
-                                           conversion->immediate_string_offset),
+                                           conversion->immediate_string_ref),
             &attribute.name_id));
         attribute.value = loom_attr_i64(conversion->immediate_value);
         attributes = loom_make_named_attr_slice(&attribute, 1);

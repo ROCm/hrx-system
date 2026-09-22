@@ -163,13 +163,13 @@ iree_status_t loom_low_storage_lease_query_descriptor_rows(
         .release_scope = row->release_scope,
         .release_class_id = row->release_class_id,
         .release_class_name = loom_low_descriptor_set_string(
-            descriptor_set, row->release_class_name_string_offset),
+            descriptor_set, row->release_class_name_string_ref),
         .release_action_id = row->release_action_id,
         .release_action_name = loom_low_descriptor_set_string(
-            descriptor_set, row->release_action_name_string_offset),
+            descriptor_set, row->release_action_name_string_ref),
         .release_reason_id = row->release_reason_id,
         .release_reason_name = loom_low_descriptor_set_string(
-            descriptor_set, row->release_reason_name_string_offset),
+            descriptor_set, row->release_reason_name_string_ref),
         .flags = row->flags,
     };
     IREE_RETURN_IF_ERROR(emit(emit_user_data, &event));

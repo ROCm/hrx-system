@@ -62,8 +62,8 @@ static const loom_low_descriptor_t* loom_low_descriptor_text_asm_descriptor(
 
 static iree_status_t loom_low_descriptor_text_asm_string(
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_bstring_table_offset_t string_offset, iree_string_view_t* out_string) {
-  *out_string = loom_low_descriptor_set_string(descriptor_set, string_offset);
+    loom_string_ref_t string_ref, iree_string_view_t* out_string) {
+  *out_string = loom_low_descriptor_set_string(descriptor_set, string_ref);
   if (iree_string_view_is_empty(*out_string)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low asm descriptor table has an empty required "
@@ -90,7 +90,7 @@ static iree_status_t loom_low_descriptor_text_asm_immediate_info(
   const loom_low_immediate_t* immediate =
       &descriptor_set->immediates[immediate_index];
   IREE_RETURN_IF_ERROR(loom_low_descriptor_text_asm_string(
-      descriptor_set, immediate->field_name_string_offset,
+      descriptor_set, immediate->field_name_string_ref,
       &out_immediate->field_name));
   out_immediate->has_default_value =
       iree_any_bit_set(immediate->flags, LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE);
@@ -98,9 +98,9 @@ static iree_status_t loom_low_descriptor_text_asm_immediate_info(
   out_immediate->enum_domain = immediate->kind == LOOM_LOW_IMMEDIATE_KIND_ENUM
                                    ? immediate->enum_domain_id
                                    : UINT16_MAX;
-  if (asm_immediate->name_string_offset != LOOM_LOW_STRING_OFFSET_NONE) {
+  if (asm_immediate->name_string_ref != LOOM_STRING_REF_NONE) {
     IREE_RETURN_IF_ERROR(loom_low_descriptor_text_asm_string(
-        descriptor_set, asm_immediate->name_string_offset,
+        descriptor_set, asm_immediate->name_string_ref,
         &out_immediate->spelling));
   } else {
     out_immediate->spelling = out_immediate->field_name;
@@ -126,7 +126,7 @@ static iree_status_t loom_low_descriptor_text_asm_descriptor_immediate_info(
   const loom_low_immediate_t* immediate =
       &descriptor_set->immediates[immediate_index];
   IREE_RETURN_IF_ERROR(loom_low_descriptor_text_asm_string(
-      descriptor_set, immediate->field_name_string_offset,
+      descriptor_set, immediate->field_name_string_ref,
       &out_immediate->field_name));
   out_immediate->has_default_value =
       iree_any_bit_set(immediate->flags, LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE);
@@ -168,11 +168,11 @@ static iree_status_t loom_low_descriptor_text_asm_make_packet(
     loom_text_low_asm_packet_descriptor_t* out_packet) {
   iree_string_view_t descriptor_key = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_low_descriptor_text_asm_string(
-      descriptor_set, descriptor->key_string_offset, &descriptor_key));
+      descriptor_set, descriptor->key_string_ref, &descriptor_key));
 
   iree_string_view_t mnemonic = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_low_descriptor_text_asm_string(
-      descriptor_set, asm_form->mnemonic_string_offset, &mnemonic));
+      descriptor_set, asm_form->mnemonic_string_ref, &mnemonic));
 
   if (asm_form->immediate_start > descriptor_set->asm_immediate_count ||
       asm_form->immediate_count >
@@ -185,7 +185,7 @@ static iree_status_t loom_low_descriptor_text_asm_make_packet(
     const loom_low_asm_immediate_t* asm_immediate =
         &descriptor_set
              ->asm_immediates[asm_form->immediate_start + (uint32_t)i];
-    if (asm_immediate->name_string_offset != LOOM_LOW_STRING_OFFSET_NONE) {
+    if (asm_immediate->name_string_ref != LOOM_STRING_REF_NONE) {
       has_named_immediates = true;
       break;
     }
@@ -518,8 +518,7 @@ static iree_status_t loom_low_descriptor_text_asm_append_reg_type(
   }
   iree_string_view_t reg_class_name = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_low_descriptor_text_asm_string(
-      descriptor_set,
-      descriptor_set->reg_classes[reg_class_id].name_string_offset,
+      descriptor_set, descriptor_set->reg_classes[reg_class_id].name_string_ref,
       &reg_class_name));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "reg<"));
   IREE_RETURN_IF_ERROR(
@@ -1310,7 +1309,7 @@ static iree_status_t loom_low_descriptor_text_asm_describe_packet(
 
   out_statement->kind = LOOM_TEXT_LOW_ASM_STATEMENT_UNAVAILABLE;
   IREE_RETURN_IF_ERROR(loom_low_descriptor_text_asm_string(
-      descriptor_set, descriptor->key_string_offset,
+      descriptor_set, descriptor->key_string_ref,
       &out_statement->packet.descriptor_key));
 
   loom_text_low_asm_packet_descriptor_t packet = {0};
@@ -1475,7 +1474,7 @@ static iree_status_t loom_low_descriptor_text_asm_describe_register_type(
   const loom_low_reg_class_t* register_class =
       &descriptor_set->reg_classes[register_class_id];
   *out_register_class_name = loom_low_descriptor_set_string(
-      descriptor_set, register_class->name_string_offset);
+      descriptor_set, register_class->name_string_ref);
   *out_unit_count = loom_low_register_type_unit_count(type);
   *out_found = true;
   return iree_ok_status();

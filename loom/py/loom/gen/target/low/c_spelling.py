@@ -33,7 +33,7 @@ def flag_expr(flags: Iterable[CEnum]) -> str:
 
 def optional_string_expr(string_pool: CStringPool, label: str | None) -> str:
     if label is None:
-        return "LOOM_LOW_STRING_OFFSET_NONE"
+        return "LOOM_STRING_REF_NONE"
     return string_pool.ref(label)
 
 

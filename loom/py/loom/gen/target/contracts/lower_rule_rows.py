@@ -387,8 +387,8 @@ def source_memory_byte_offset_materializer_row(
     descriptor_refs: Mapping[str, int],
     row: SourceMemoryByteOffsetMaterializer,
     *,
-    immediate_string_offset: str,
-    conversion_immediate_string_offsets: Mapping[str, str],
+    immediate_string_ref: str,
+    conversion_immediate_string_refs: Mapping[str, str],
 ) -> list[str]:
     conversions = {conversion.source_type: conversion for conversion in row.integer_conversions}
     conversion_rows = []
@@ -398,12 +398,12 @@ def source_memory_byte_offset_materializer_row(
         immediate = conversion.immediate if conversion is not None else None
         conversion_rows.append(
             "{" + f".immediate_value = {_c_i64_literal(immediate[1] if immediate is not None else 0)}, "
-            f".immediate_string_offset = {conversion_immediate_string_offsets.get(source_type, 'LOOM_BSTRING_TABLE_OFFSET_NONE')}, "
+            f".immediate_string_ref = {conversion_immediate_string_refs.get(source_type, 'LOOM_STRING_REF_NONE')}, "
             f".descriptor_ref = {_descriptor_ref_index(descriptor_refs, descriptor)}" + "}"
         )
     return [
         ".integer_conversions = {" + ", ".join(conversion_rows) + "}",
-        f".constant_immediate_string_offset = {immediate_string_offset}",
+        f".constant_immediate_string_ref = {immediate_string_ref}",
         f".constant_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.constant)}",
         f".add_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.add)}",
         f".multiply_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.multiply)}",
@@ -415,13 +415,13 @@ def source_memory_address_materializer_row(
     descriptor_refs: Mapping[str, int],
     row: SourceMemoryAddressMaterializer,
     *,
-    immediate_string_offset: str,
+    immediate_string_ref: str,
 ) -> list[str]:
     return [
         f".coordinate_minimum = {_c_i64_literal(row.coordinate_minimum)}",
         f".coordinate_maximum = {_c_i64_literal(row.coordinate_maximum)}",
         f".coordinate_unit_byte_count = {row.coordinate_unit_byte_count}",
-        f".const_coordinate_immediate_string_offset = {immediate_string_offset}",
+        f".const_coordinate_immediate_string_ref = {immediate_string_ref}",
         f".const_coordinate_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.const_coordinate)}",
         f".add_coordinate_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.add_coordinate)}",
         f".mul_coordinate_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.mul_coordinate)}",
@@ -469,8 +469,8 @@ def descriptor_ref_keys(table: CompiledLowerRuleSet, source_contract: ContractFr
     return tuple(descriptor.key for descriptor in source_contract.descriptor_set.descriptors if descriptor.key in used_keys)
 
 
-def descriptor_ref_row(key_string_offset: str) -> list[str]:
-    return [f".key_string_offset = {key_string_offset}"]
+def descriptor_ref_row(key_string_ref: str) -> list[str]:
+    return [f".key_string_ref = {key_string_ref}"]
 
 
 def _descriptor_ref_index(descriptor_refs: Mapping[str, int], descriptor: Descriptor | None) -> int:
@@ -611,16 +611,16 @@ def guard_row(descriptor_refs: Mapping[str, int], row: LowerGuard) -> list[str]:
 def attr_copy_row(
     row: LowerAttrCopy,
     *,
-    target_name_string_offset: str | None = None,
+    target_name_string_ref: str | None = None,
 ) -> list[str]:
-    if target_name_string_offset is None:
-        raise ValueError("attribute-copy row is missing its target-name string offset")
+    if target_name_string_ref is None:
+        raise ValueError("attribute-copy row is missing its target-name string reference")
     fields: list[str] = []
     _append_field(fields, "kind", lower_rule_spelling.ATTR_COPY_KIND_C_NAMES[row.kind], always=True)
     _append_field(
         fields,
-        "target_name_string_offset",
-        target_name_string_offset,
+        "target_name_string_ref",
+        target_name_string_ref,
         always=True,
     )
     if row.kind in (
@@ -927,12 +927,12 @@ def rule_set_row(
     if source_contract.target_contract_query:
         fields.append(".flags = LOOM_LOW_LOWER_RULE_SET_FLAG_TARGET_CONTRACT_QUERY")
     if string_pool.entries:
-        fields.append(f".string_table = {{.data = {string_data_name}, .data_length = sizeof({string_data_name}) - 1}}")
+        fields.append(f".string_pool = {{.data = {string_data_name}, .data_length = sizeof({string_data_name}) - 1}}")
     _append_table_fields(fields, "spans", table.spans, spans_name)
     _append_table_fields(fields, "rules", table.rules, rules_name)
     _append_table_fields(
         fields,
-        "report_key_string_offsets",
+        "report_key_string_refs",
         report_keys,
         report_keys_name,
     )
@@ -1032,7 +1032,7 @@ def _table_count_field_name(field_name: str) -> str:
         return "diagnostic_param_ref_count"
     if field_name == "guard_refs":
         return "guard_ref_count"
-    if field_name == "report_key_string_offsets":
+    if field_name == "report_key_string_refs":
         return "report_key_count"
     return f"{field_name[:-1]}_count"
 
@@ -1040,10 +1040,10 @@ def _table_count_field_name(field_name: str) -> str:
 def diagnostic_param_row(
     row: LowerDiagnosticParam,
     *,
-    string_value_offset: str | None = None,
+    string_value_ref: str | None = None,
 ) -> list[str]:
-    if row.kind == DiagnosticParamKind.STRING_LITERAL and string_value_offset is None:
-        raise ValueError("diagnostic string literal is missing its string offset")
+    if row.kind == DiagnosticParamKind.STRING_LITERAL and string_value_ref is None:
+        raise ValueError("diagnostic string literal is missing its string reference")
     fields: list[str] = []
     _append_field(
         fields,
@@ -1055,7 +1055,7 @@ def diagnostic_param_row(
         _append_field(
             fields,
             "value",
-            f"{{.string_value_offset = {string_value_offset}}}",
+            f"{{.string_value_ref = {string_value_ref}}}",
             always=True,
         )
     if row.kind == DiagnosticParamKind.VALUE_TYPE:

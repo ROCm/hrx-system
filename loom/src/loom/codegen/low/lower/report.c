@@ -66,12 +66,11 @@ void loom_low_lower_report_initialize(loom_low_lower_context_t* context) {
 
 static iree_string_view_t loom_low_lower_report_descriptor_string(
     const loom_low_lower_context_t* context,
-    const loom_low_descriptor_t* descriptor,
-    loom_bstring_table_offset_t string_offset) {
-  if (descriptor == NULL || string_offset == LOOM_LOW_STRING_OFFSET_NONE) {
+    const loom_low_descriptor_t* descriptor, loom_string_ref_t string_ref) {
+  if (descriptor == NULL || string_ref == LOOM_STRING_REF_NONE) {
     return iree_string_view_empty();
   }
-  return loom_low_descriptor_set_string(context->descriptor_set, string_offset);
+  return loom_low_descriptor_set_string(context->descriptor_set, string_ref);
 }
 
 static void loom_low_lower_report_populate_descriptor(
@@ -81,9 +80,9 @@ static void loom_low_lower_report_populate_descriptor(
     return;
   }
   row->descriptor_key = loom_low_lower_report_descriptor_string(
-      context, descriptor, descriptor->key_string_offset);
+      context, descriptor, descriptor->key_string_ref);
   row->descriptor_semantic_tag = loom_low_lower_report_descriptor_string(
-      context, descriptor, descriptor->semantic_tag_string_offset);
+      context, descriptor, descriptor->semantic_tag_string_ref);
 }
 
 static void loom_low_lower_report_row_list_deinitialize(
@@ -183,7 +182,7 @@ iree_status_t loom_low_lower_report_record_selected_plan(
                      selected_plan->rule_set->report_key_count);
       row.plan_key = loom_low_lower_rule_set_string(
           selected_plan->rule_set,
-          selected_plan->rule_set->report_key_string_offsets[report_key_index]);
+          selected_plan->rule_set->report_key_string_refs[report_key_index]);
     }
     if (selected_plan->rule->emit_count != 0 &&
         selected_plan->rule->metadata.emit.primary_emit_ordinal !=

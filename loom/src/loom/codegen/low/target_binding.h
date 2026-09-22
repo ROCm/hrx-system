@@ -170,7 +170,7 @@ static inline iree_string_view_t loom_low_descriptor_packet_diagnostic_key(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_packet_t* packet) {
   return loom_low_descriptor_set_string(descriptor_set,
-                                        packet->descriptor->key_string_offset);
+                                        packet->descriptor->key_string_ref);
 }
 
 // Resolves the function target facts and descriptor set for |low_func_op|

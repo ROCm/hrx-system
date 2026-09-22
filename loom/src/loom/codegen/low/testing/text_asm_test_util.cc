@@ -92,7 +92,7 @@ iree_status_t LowTextAsmTypeInferenceHarness::MakeRegisterType(
       loom_low_repr_lookup_descriptor_set(
           &environment_.low_repr,
           loom_low_descriptor_set_string(descriptor_set,
-                                         descriptor_set->key_string_offset));
+                                         descriptor_set->key_string_ref));
   IREE_ASSERT(descriptor_set_handle != nullptr,
               "harness descriptor provider must be registered");
   bool found = false;

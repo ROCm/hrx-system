@@ -51,7 +51,7 @@ static iree_status_t loom_amdgpu_emit_memory_cache_policy_rejection(
       loom_param_string(loom_amdgpu_cache_policy_temporal_param(policy));
   params[LOOM_AMDGPU_LOW_LEGALITY_CONTEXT_PARAM_COUNT + 4] =
       loom_param_string(loom_low_descriptor_set_string(
-          descriptor_set, descriptor_set->key_string_offset));
+          descriptor_set, descriptor_set->key_string_ref));
   return loom_target_low_legality_emit_error_ref(
       context, op, LOOM_ERR_AMDGPU_024_REF, params, IREE_ARRAYSIZE(params));
 }

@@ -176,7 +176,7 @@ static iree_status_t loom_wasm_module_read_value_type(
   if (loom_low_register_type_descriptor_set_stable_id(type) !=
       descriptor_set->stable_id) {
     iree_string_view_t descriptor_set_key = loom_low_descriptor_set_string(
-        descriptor_set, descriptor_set->key_string_offset);
+        descriptor_set, descriptor_set->key_string_ref);
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "Wasm signature value %u does not use descriptor set '%.*s'",

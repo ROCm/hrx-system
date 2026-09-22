@@ -147,7 +147,7 @@ static iree_status_t loom_amdgpu_record_fragment_memory_packet(
   iree_string_view_t packet_key = iree_string_view_empty();
   if (descriptor != NULL) {
     packet_key = loom_low_descriptor_set_string(descriptor_set,
-                                                descriptor->key_string_offset);
+                                                descriptor->key_string_ref);
   }
   int64_t static_offset_bytes = plan->source.static_byte_offset;
   (void)loom_amdgpu_fragment_memory_packet_static_offset(

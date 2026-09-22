@@ -66,7 +66,7 @@ void ExpectOperandAddressMap(const loom_low_descriptor_set_t* descriptor_set,
         descriptor_set->operands[descriptor.operand_start + i];
     if (!iree_string_view_equal(
             loom_low_descriptor_set_string(descriptor_set,
-                                           operand.field_name_string_offset),
+                                           operand.field_name_string_ref),
             field_name)) {
       continue;
     }
@@ -111,12 +111,12 @@ TEST(X86RegisterClassesTest, ViewsPreserveRegisterVocabularyAndCapacity) {
   for (const Case& test_case : cases) {
     const auto* descriptor_set = test_case.descriptor_set;
     SCOPED_TRACE(ToString(loom_low_descriptor_set_string(
-        descriptor_set, descriptor_set->key_string_offset)));
+        descriptor_set, descriptor_set->key_string_ref)));
     for (uint16_t kind = 0; kind < IREE_ARRAYSIZE(register_classes); ++kind) {
       const auto register_class = register_classes[kind];
       const uint16_t storage_id = register_class;
       const iree_string_view_t name = loom_low_descriptor_set_string(
-          storage, storage->reg_classes[storage_id].name_string_offset);
+          storage, storage->reg_classes[storage_id].name_string_ref);
       SCOPED_TRACE(ToString(name));
       uint16_t class_id = LOOM_LOW_REG_CLASS_NONE;
       const loom_low_reg_class_t* reg_class = nullptr;
@@ -155,7 +155,7 @@ TEST(X86RegisterClassesTest, CountClassesAliasTheSamePhysicalRegister) {
            loom_x86_avx512_packed_dot_core_descriptor_set(),
        }) {
     SCOPED_TRACE(ToString(loom_low_descriptor_set_string(
-        descriptor_set, descriptor_set->key_string_offset)));
+        descriptor_set, descriptor_set->key_string_ref)));
     uint16_t general_class_id = LOOM_LOW_REG_CLASS_NONE;
     const loom_low_reg_class_t* general_class = nullptr;
     ASSERT_TRUE(loom_low_descriptor_set_lookup_register_class(

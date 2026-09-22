@@ -246,7 +246,7 @@ static bool loom_low_descriptor_is_select(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor) {
   const iree_string_view_t semantic_tag = loom_low_descriptor_set_string(
-      descriptor_set, descriptor->semantic_tag_string_offset);
+      descriptor_set, descriptor->semantic_tag_string_ref);
   return loom_low_semantic_tag_has_token(semantic_tag, IREE_SV("select"));
 }
 
@@ -255,7 +255,7 @@ static bool loom_low_operand_field_is(
     const loom_low_operand_t* operand, iree_string_view_t field_name) {
   return iree_string_view_equal(
       loom_low_descriptor_set_string(descriptor_set,
-                                     operand->field_name_string_offset),
+                                     operand->field_name_string_ref),
       field_name);
 }
 
@@ -387,7 +387,7 @@ static iree_string_view_t loom_low_descriptor_key(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor) {
   return loom_low_descriptor_set_string(descriptor_set,
-                                        descriptor->key_string_offset);
+                                        descriptor->key_string_ref);
 }
 
 static iree_string_view_t loom_low_descriptor_operand_name(
@@ -402,7 +402,7 @@ static iree_string_view_t loom_low_descriptor_operand_name(
       &descriptor_set
            ->operands[descriptor->operand_start + descriptor_operand_index];
   return loom_low_descriptor_set_string(descriptor_set,
-                                        operand->field_name_string_offset);
+                                        operand->field_name_string_ref);
 }
 
 static iree_string_view_t loom_low_descriptor_immediate_name(
@@ -416,7 +416,7 @@ static iree_string_view_t loom_low_descriptor_immediate_name(
       &descriptor_set
            ->immediates[descriptor->immediate_start + immediate_index];
   return loom_low_descriptor_set_string(descriptor_set,
-                                        immediate->field_name_string_offset);
+                                        immediate->field_name_string_ref);
 }
 
 static uint16_t loom_low_select_operand_form_diagnostic_source_operand_index(
@@ -963,7 +963,7 @@ static iree_status_t loom_low_select_operand_form_read_i64_immediate(
       &descriptor_set
            ->immediates[descriptor->immediate_start + immediate_index];
   iree_string_view_t immediate_name = loom_low_descriptor_set_string(
-      descriptor_set, immediate->field_name_string_offset);
+      descriptor_set, immediate->field_name_string_ref);
   loom_string_id_t immediate_name_id = LOOM_STRING_ID_INVALID;
   IREE_RETURN_IF_ERROR(
       loom_module_intern_string(module, immediate_name, &immediate_name_id));
@@ -1060,7 +1060,7 @@ static iree_status_t loom_low_select_operand_form_build_attrs(
   IREE_ASSERT(loom_low_immediate_accepts_i64(descriptor_set, immediate,
                                              immediate_value));
   iree_string_view_t immediate_name = loom_low_descriptor_set_string(
-      descriptor_set, immediate->field_name_string_offset);
+      descriptor_set, immediate->field_name_string_ref);
   loom_string_id_t immediate_name_id = LOOM_STRING_ID_INVALID;
   IREE_RETURN_IF_ERROR(
       loom_module_intern_string(module, immediate_name, &immediate_name_id));

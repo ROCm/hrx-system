@@ -805,7 +805,7 @@ TEST(DescriptorEncodingTest, PhysicalRegisterRowsAlignWithMachineTable) {
         (loom_aie2p_physical_register_id_t)register_id, &machine_register));
     EXPECT_TRUE(iree_string_view_equal(
         loom_low_descriptor_set_string(descriptor_set,
-                                       descriptor_register->name_string_offset),
+                                       descriptor_register->name_string_ref),
         machine_register.name));
 
     uint16_t atomic_unit_count = 0;

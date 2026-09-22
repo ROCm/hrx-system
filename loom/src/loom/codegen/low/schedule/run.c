@@ -811,7 +811,7 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
       const loom_low_resource_t* resource = &descriptor_set->resources[i];
       IREE_ASSERT(resource->capacity_per_cycle != 0);
       iree_string_view_t resource_name = loom_low_descriptor_set_string(
-          descriptor_set, resource->name_string_offset);
+          descriptor_set, resource->name_string_ref);
       state->resource_summaries[i] = (loom_low_schedule_resource_summary_t){
           .resource_id = (uint16_t)i,
           .resource_name = resource_name,

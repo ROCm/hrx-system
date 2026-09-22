@@ -65,46 +65,33 @@ static bool loom_low_signed_value_is_multiple(int64_t value,
 
 static iree_status_t loom_low_descriptor_set_string_impl(
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_bstring_table_offset_t string_offset, bool allow_none,
+    loom_string_ref_t string_ref, bool allow_none,
     iree_string_view_t* out_string) {
   *out_string = iree_string_view_empty();
-  if (string_offset == LOOM_LOW_STRING_OFFSET_NONE) {
+  if (string_ref == LOOM_STRING_REF_NONE) {
     if (allow_none) {
       return iree_ok_status();
     }
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "required low descriptor string offset is NONE");
+                            "required low descriptor string reference is NONE");
   }
-  if (descriptor_set->string_table.data == NULL ||
-      descriptor_set->string_table.data_length == 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "low descriptor string table is empty");
-  }
-  if (string_offset >= descriptor_set->string_table.data_length) {
+  if (!loom_string_pool_contains(&descriptor_set->string_pool, string_ref)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "low descriptor string offset %" PRIu32
-                            " exceeds string table length %" PRIu32,
-                            string_offset,
-                            descriptor_set->string_table.data_length);
+                            "low descriptor string reference 0x%08" PRIx32
+                            " exceeds string pool length %" PRIu32,
+                            string_ref,
+                            descriptor_set->string_pool.data_length);
   }
-  loom_bstring_t bstring = NULL;
-  if (!loom_bstring_table_try_get(&descriptor_set->string_table, string_offset,
-                                  &bstring)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "low descriptor string offset %" PRIu32
-                            " does not name a complete B-string",
-                            string_offset);
-  }
-  *out_string = loom_bstring_view(bstring);
+  *out_string = loom_string_pool_get(&descriptor_set->string_pool, string_ref);
   return iree_ok_status();
 }
 
 static iree_status_t loom_low_verify_required_string(
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_bstring_table_offset_t string_offset, const char* field_name) {
+    loom_string_ref_t string_ref, const char* field_name) {
   iree_string_view_t value = iree_string_view_empty();
   iree_status_t status = loom_low_descriptor_set_string_impl(
-      descriptor_set, string_offset, /*allow_none=*/false, &value);
+      descriptor_set, string_ref, /*allow_none=*/false, &value);
   if (!iree_status_is_ok(status)) {
     return iree_status_annotate_f(status, "invalid required string field '%s'",
                                   field_name);
@@ -114,10 +101,10 @@ static iree_status_t loom_low_verify_required_string(
 
 static iree_status_t loom_low_verify_optional_string(
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_bstring_table_offset_t string_offset, const char* field_name) {
+    loom_string_ref_t string_ref, const char* field_name) {
   iree_string_view_t value = iree_string_view_empty();
   iree_status_t status = loom_low_descriptor_set_string_impl(
-      descriptor_set, string_offset, /*allow_none=*/true, &value);
+      descriptor_set, string_ref, /*allow_none=*/true, &value);
   if (!iree_status_is_ok(status)) {
     return iree_status_annotate_f(status, "invalid optional string field '%s'",
                                   field_name);
@@ -127,11 +114,11 @@ static iree_status_t loom_low_verify_optional_string(
 
 static iree_status_t loom_low_verify_non_empty_required_string(
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_bstring_table_offset_t string_offset, const char* field_name,
+    loom_string_ref_t string_ref, const char* field_name,
     iree_string_view_t* out_value) {
   iree_string_view_t value = iree_string_view_empty();
   iree_status_t status = loom_low_descriptor_set_string_impl(
-      descriptor_set, string_offset, /*allow_none=*/false, &value);
+      descriptor_set, string_ref, /*allow_none=*/false, &value);
   if (!iree_status_is_ok(status)) {
     return iree_status_annotate_f(status, "invalid required string field '%s'",
                                   field_name);
@@ -297,7 +284,7 @@ static iree_status_t loom_low_verify_descriptor_refs(
         &descriptor_set->descriptor_refs[i];
     iree_string_view_t ref_key = iree_string_view_empty();
     IREE_RETURN_IF_ERROR(loom_low_descriptor_set_string_impl(
-        descriptor_set, descriptor_ref->key_string_offset, /*allow_none=*/false,
+        descriptor_set, descriptor_ref->key_string_ref, /*allow_none=*/false,
         &ref_key));
     if (i > 0 && iree_string_view_compare(previous_key, ref_key) >= 0) {
       return iree_make_status(
@@ -318,7 +305,7 @@ static iree_status_t loom_low_verify_descriptor_refs(
     IREE_RETURN_IF_ERROR(loom_low_descriptor_set_string_impl(
         descriptor_set,
         descriptor_set->descriptors[descriptor_ref->descriptor_ordinal]
-            .key_string_offset,
+            .key_string_ref,
         /*allow_none=*/false, &descriptor_key));
     if (!iree_string_view_equal(ref_key, descriptor_key)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -438,9 +425,9 @@ static iree_status_t loom_low_verify_asm_immediates(
 
     iree_string_view_t name = iree_string_view_empty();
     IREE_RETURN_IF_ERROR(loom_low_descriptor_set_string_impl(
-        descriptor_set, asm_immediate->name_string_offset, /*allow_none=*/true,
+        descriptor_set, asm_immediate->name_string_ref, /*allow_none=*/true,
         &name));
-    if (asm_immediate->name_string_offset != LOOM_LOW_STRING_OFFSET_NONE &&
+    if (asm_immediate->name_string_ref != LOOM_STRING_REF_NONE &&
         iree_string_view_is_empty(name)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "low asm form for descriptor %" PRIu32
@@ -453,7 +440,7 @@ static iree_status_t loom_low_verify_asm_immediates(
             &descriptor_set->asm_immediates[asm_form->immediate_start + j];
         iree_string_view_t previous_name = iree_string_view_empty();
         IREE_RETURN_IF_ERROR(loom_low_descriptor_set_string_impl(
-            descriptor_set, previous->name_string_offset, /*allow_none=*/true,
+            descriptor_set, previous->name_string_ref, /*allow_none=*/true,
             &previous_name));
         if (iree_string_view_equal(previous_name, name)) {
           return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -502,8 +489,8 @@ static iree_status_t loom_low_verify_native_asm_values(
         value->kind == LOOM_LOW_NATIVE_ASM_VALUE_KIND_MODIFIER_LITERAL) {
       iree_string_view_t literal = iree_string_view_empty();
       IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
-          descriptor_set, value->literal_string_offset,
-          "native_asm_value.literal", &literal));
+          descriptor_set, value->literal_string_ref, "native_asm_value.literal",
+          &literal));
       (void)literal;
       if (value->index != 0 || value->bit_width != 0 ||
           value->target_format_id != 0) {
@@ -516,7 +503,7 @@ static iree_status_t loom_low_verify_native_asm_values(
       continue;
     }
     if (value->kind != LOOM_LOW_NATIVE_ASM_VALUE_KIND_IMMEDIATE_TARGET_FORMAT &&
-        value->literal_string_offset != LOOM_LOW_STRING_OFFSET_NONE) {
+        value->literal_string_ref != LOOM_STRING_REF_NONE) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "low asm form for descriptor %" PRIu32
                               " non-literal native value has a literal string",
@@ -695,10 +682,10 @@ static iree_status_t loom_low_verify_native_asm_values(
               " native target-format immediate must set target format",
               descriptor_index);
         }
-        if (value->literal_string_offset != LOOM_LOW_STRING_OFFSET_NONE) {
+        if (value->literal_string_ref != LOOM_STRING_REF_NONE) {
           iree_string_view_t literal = iree_string_view_empty();
           IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
-              descriptor_set, value->literal_string_offset,
+              descriptor_set, value->literal_string_ref,
               "native_asm_value.literal", &literal));
           (void)literal;
         }
@@ -718,12 +705,11 @@ static iree_status_t loom_low_verify_asm_form(
       &descriptor_set->asm_forms[asm_form_index];
   iree_string_view_t mnemonic = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
-      descriptor_set, asm_form->mnemonic_string_offset, "asm_form.mnemonic",
+      descriptor_set, asm_form->mnemonic_string_ref, "asm_form.mnemonic",
       &mnemonic));
-  if (asm_form->native_assembly_mnemonic_string_offset !=
-      LOOM_LOW_STRING_OFFSET_NONE) {
+  if (asm_form->native_assembly_mnemonic_string_ref != LOOM_STRING_REF_NONE) {
     IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
-        descriptor_set, asm_form->native_assembly_mnemonic_string_offset,
+        descriptor_set, asm_form->native_assembly_mnemonic_string_ref,
         "asm_form.native_assembly_mnemonic", NULL));
   }
   if (asm_form->descriptor_ordinal >= descriptor_set->descriptor_count) {
@@ -958,12 +944,12 @@ static iree_status_t loom_low_verify_asm_forms(
       // set views. Smaller views keep those rows sorted for lookup, but the
       // extension view owns full payload validation.
       IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
-          descriptor_set, asm_form->mnemonic_string_offset, "asm_form.mnemonic",
+          descriptor_set, asm_form->mnemonic_string_ref, "asm_form.mnemonic",
           &mnemonic));
-      if (asm_form->native_assembly_mnemonic_string_offset !=
-          LOOM_LOW_STRING_OFFSET_NONE) {
+      if (asm_form->native_assembly_mnemonic_string_ref !=
+          LOOM_STRING_REF_NONE) {
         IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
-            descriptor_set, asm_form->native_assembly_mnemonic_string_offset,
+            descriptor_set, asm_form->native_assembly_mnemonic_string_ref,
             "asm_form.native_assembly_mnemonic", NULL));
       }
     } else {
@@ -2177,13 +2163,13 @@ static iree_status_t loom_low_verify_storage_lease(
         "low storage lease %" PRIu32 " has no release reason", lease_index);
   }
   IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
-      descriptor_set, lease->release_class_name_string_offset,
+      descriptor_set, lease->release_class_name_string_ref,
       "storage_lease.release_class", NULL));
   IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
-      descriptor_set, lease->release_action_name_string_offset,
+      descriptor_set, lease->release_action_name_string_ref,
       "storage_lease.release_action", NULL));
   IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
-      descriptor_set, lease->release_reason_name_string_offset,
+      descriptor_set, lease->release_reason_name_string_ref,
       "storage_lease.release_reason", NULL));
 
   uint16_t attachment_unit_count = 0;
@@ -2223,7 +2209,7 @@ static iree_status_t loom_low_verify_descriptor(
       "descriptor", descriptor_index));
   iree_string_view_t descriptor_key = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
-      descriptor_set, descriptor->key_string_offset, "descriptor.key",
+      descriptor_set, descriptor->key_string_ref, "descriptor.key",
       &descriptor_key));
   if (descriptor->stable_id == LOOM_LOW_STABLE_ID_NONE) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -2243,10 +2229,9 @@ static iree_status_t loom_low_verify_descriptor(
                             expected_stable_id);
   }
   IREE_RETURN_IF_ERROR(loom_low_verify_optional_string(
-      descriptor_set, descriptor->mnemonic_string_offset,
-      "descriptor.mnemonic"));
+      descriptor_set, descriptor->mnemonic_string_ref, "descriptor.mnemonic"));
   IREE_RETURN_IF_ERROR(loom_low_verify_optional_string(
-      descriptor_set, descriptor->semantic_tag_string_offset,
+      descriptor_set, descriptor->semantic_tag_string_ref,
       "descriptor.semantic_tag"));
   IREE_RETURN_IF_ERROR(loom_low_verify_span(
       descriptor->feature_mask_word_start, descriptor->feature_mask_word_count,
@@ -2331,7 +2316,7 @@ static iree_status_t loom_low_verify_operand(
           LOOM_LOW_OPERAND_FLAG_VARIADIC,
       "operand", operand_index));
   IREE_RETURN_IF_ERROR(loom_low_verify_required_string(
-      descriptor_set, operand->field_name_string_offset, "operand.field_name"));
+      descriptor_set, operand->field_name_string_ref, "operand.field_name"));
   if (operand->role == LOOM_LOW_OPERAND_ROLE_UNKNOWN) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low operand %" PRIu32 " has unknown role",
@@ -2471,7 +2456,7 @@ static iree_status_t loom_low_verify_immediate(
           LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE,
       "immediate", immediate_index));
   IREE_RETURN_IF_ERROR(loom_low_verify_required_string(
-      descriptor_set, immediate->field_name_string_offset,
+      descriptor_set, immediate->field_name_string_ref,
       "immediate.field_name"));
   if (immediate->kind == LOOM_LOW_IMMEDIATE_KIND_UNKNOWN) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -2675,7 +2660,7 @@ static iree_status_t loom_low_verify_enum_domain(
   const loom_low_enum_domain_t* domain =
       &descriptor_set->enum_domains[enum_domain_index];
   IREE_RETURN_IF_ERROR(loom_low_verify_required_string(
-      descriptor_set, domain->name_string_offset, "enum_domain.name"));
+      descriptor_set, domain->name_string_ref, "enum_domain.name"));
   IREE_RETURN_IF_ERROR(
       loom_low_verify_span(domain->value_start, domain->value_count,
                            descriptor_set->enum_value_count, "enum_values"));
@@ -2691,8 +2676,7 @@ static iree_status_t loom_low_verify_enum_domain(
         &descriptor_set->enum_values[value_index];
     iree_string_view_t token = iree_string_view_empty();
     IREE_RETURN_IF_ERROR(loom_low_descriptor_set_string_impl(
-        descriptor_set, value->token_string_offset, /*allow_none=*/false,
-        &token));
+        descriptor_set, value->token_string_ref, /*allow_none=*/false, &token));
     if (i != 0 && iree_string_view_compare(previous_token, token) >= 0) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "low enum domain %" PRIu32
@@ -2710,14 +2694,14 @@ static iree_status_t loom_low_verify_enum_value(
   const loom_low_enum_value_t* value =
       &descriptor_set->enum_values[enum_value_index];
   return loom_low_verify_required_string(
-      descriptor_set, value->token_string_offset, "enum_value.token");
+      descriptor_set, value->token_string_ref, "enum_value.token");
 }
 
 static iree_status_t loom_low_verify_reg_class(
     const loom_low_descriptor_set_t* descriptor_set, uint32_t reg_class_index) {
   const loom_low_reg_class_t* reg_class =
       &descriptor_set->reg_classes[reg_class_index];
-  if (reg_class->name_string_offset == LOOM_LOW_STRING_OFFSET_NONE) {
+  if (reg_class->name_string_ref == LOOM_STRING_REF_NONE) {
     if (reg_class->target_bank_id != 0 || reg_class->flags != 0 ||
         reg_class->alloc_unit_bits != 0 || reg_class->allocatable_count != 0 ||
         reg_class->fixed_location_base != 0 ||
@@ -2740,7 +2724,7 @@ static iree_status_t loom_low_verify_reg_class(
           LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS,
       "register class", reg_class_index));
   IREE_RETURN_IF_ERROR(loom_low_verify_required_string(
-      descriptor_set, reg_class->name_string_offset, "reg_class.name"));
+      descriptor_set, reg_class->name_string_ref, "reg_class.name"));
   if (reg_class->alloc_unit_bits == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low register class %" PRIu32
@@ -2877,7 +2861,7 @@ static iree_status_t loom_low_verify_physical_register(
   const loom_low_physical_register_t* physical_register =
       &descriptor_set->physical_registers[physical_register_index];
   IREE_RETURN_IF_ERROR(loom_low_verify_required_string(
-      descriptor_set, physical_register->name_string_offset,
+      descriptor_set, physical_register->name_string_ref,
       "physical_register.name"));
   if (physical_register->atomic_unit_count == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -2949,7 +2933,7 @@ static iree_status_t loom_low_verify_register_part(
   const loom_low_register_part_t* register_part =
       &descriptor_set->register_parts[register_part_index];
   IREE_RETURN_IF_ERROR(loom_low_verify_required_string(
-      descriptor_set, register_part->name_string_offset, "register_part.name"));
+      descriptor_set, register_part->name_string_ref, "register_part.name"));
   if (register_part->reg_class_id >= descriptor_set->reg_class_count) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "low register part %" PRIu32
@@ -2966,7 +2950,7 @@ static iree_status_t loom_low_verify_register_part(
   const loom_low_reg_class_t* reg_class =
       &descriptor_set->reg_classes[register_part->reg_class_id];
   // Shared part tables retain rows used only by other descriptor views.
-  if (reg_class->name_string_offset == LOOM_LOW_STRING_OFFSET_NONE) {
+  if (reg_class->name_string_ref == LOOM_STRING_REF_NONE) {
     return iree_ok_status();
   }
   if ((register_part->mask & ~reg_class->full_register_part_mask) != 0) {
@@ -3024,8 +3008,7 @@ static iree_status_t loom_low_verify_schedule_class(
           LOOM_LOW_SCHEDULE_CLASS_FLAG_DISJOINT_ISSUE_USES,
       "schedule class", schedule_class_index));
   IREE_RETURN_IF_ERROR(loom_low_verify_required_string(
-      descriptor_set, schedule_class->name_string_offset,
-      "schedule_class.name"));
+      descriptor_set, schedule_class->name_string_ref, "schedule_class.name"));
   if (schedule_class->latency_kind == LOOM_LOW_LATENCY_KIND_UNKNOWN) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low schedule class %" PRIu32
@@ -3124,7 +3107,7 @@ static iree_status_t loom_low_verify_resource(
   const loom_low_resource_t* resource =
       &descriptor_set->resources[resource_index];
   IREE_RETURN_IF_ERROR(loom_low_verify_required_string(
-      descriptor_set, resource->name_string_offset, "resource.name"));
+      descriptor_set, resource->name_string_ref, "resource.name"));
   if (resource->kind == LOOM_LOW_RESOURCE_KIND_UNKNOWN) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low resource %" PRIu32 " has unknown kind",
@@ -3307,18 +3290,17 @@ iree_status_t loom_low_descriptor_set_verify(
   IREE_RETURN_IF_ERROR(loom_low_verify_tables_present(descriptor_set));
   iree_string_view_t set_key = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
-      descriptor_set, descriptor_set->key_string_offset, "set.key", &set_key));
+      descriptor_set, descriptor_set->key_string_ref, "set.key", &set_key));
   iree_string_view_t target_key = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_low_descriptor_set_string_impl(
-      descriptor_set, descriptor_set->target_key_string_offset,
+      descriptor_set, descriptor_set->target_key_string_ref,
       /*allow_none=*/true, &target_key));
   IREE_RETURN_IF_ERROR(loom_low_verify_stable_id_field(
       descriptor_set->stable_id, set_key, "stable_id"));
   IREE_RETURN_IF_ERROR(loom_low_verify_stable_id_field(
       descriptor_set->target_stable_id, target_key, "target_stable_id"));
   IREE_RETURN_IF_ERROR(loom_low_verify_optional_string(
-      descriptor_set, descriptor_set->feature_key_string_offset,
-      "set.feature"));
+      descriptor_set, descriptor_set->feature_key_string_ref, "set.feature"));
 
   for (uint32_t i = 0; i < descriptor_set->descriptor_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_low_verify_descriptor(descriptor_set, i));
@@ -3391,7 +3373,7 @@ static iree_status_t loom_low_descriptor_set_key(
                             "low descriptor set is required");
   }
   IREE_RETURN_IF_ERROR(loom_low_descriptor_set_string_impl(
-      descriptor_set, descriptor_set->key_string_offset, /*allow_none=*/false,
+      descriptor_set, descriptor_set->key_string_ref, /*allow_none=*/false,
       out_key));
   if (iree_string_view_is_empty(*out_key)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,

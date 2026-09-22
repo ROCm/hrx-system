@@ -270,7 +270,7 @@ TEST(LowAllocationLiveRangeTest, PreservesSparseGapsAgainstContiguousStorage) {
   const uint16_t candidate_ordinals[] = {0};
   const uint16_t allocation_ordinals[] = {0};
   const loom_low_physical_register_t physical_registers[] = {
-      {/*.name_string_offset=*/0, /*.atomic_unit_start=*/0,
+      {/*.name_string_ref=*/0, /*.atomic_unit_start=*/0,
        /*.atomic_unit_count=*/1, /*.reserved=*/0},
   };
   const loom_liveness_segment_t segments[] = {{0, 4}, {20, 30}};

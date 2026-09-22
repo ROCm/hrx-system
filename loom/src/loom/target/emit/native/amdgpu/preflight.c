@@ -110,7 +110,7 @@ loom_amdgpu_native_preflight_assignment_register_class_name(
       &allocation->target.descriptor_set
            ->reg_classes[assignment->descriptor_reg_class_id];
   return loom_low_descriptor_set_string(allocation->target.descriptor_set,
-                                        reg_class->name_string_offset);
+                                        reg_class->name_string_ref);
 }
 
 static iree_status_t

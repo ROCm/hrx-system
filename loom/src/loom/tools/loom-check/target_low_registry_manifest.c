@@ -14,11 +14,11 @@ loom_check_target_low_manifest_write_descriptor_set_summary(
     loom_output_stream_t* stream,
     const loom_low_descriptor_set_t* descriptor_set) {
   iree_string_view_t key = loom_low_descriptor_set_string(
-      descriptor_set, descriptor_set->key_string_offset);
+      descriptor_set, descriptor_set->key_string_ref);
   iree_string_view_t target = loom_low_descriptor_set_string(
-      descriptor_set, descriptor_set->target_key_string_offset);
+      descriptor_set, descriptor_set->target_key_string_ref);
   iree_string_view_t feature_namespace = loom_low_descriptor_set_string(
-      descriptor_set, descriptor_set->feature_key_string_offset);
+      descriptor_set, descriptor_set->feature_key_string_ref);
 
   loom_json_object_writer_t object;
   IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));

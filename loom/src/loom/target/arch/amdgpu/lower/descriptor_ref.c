@@ -27,7 +27,7 @@ iree_string_view_t loom_amdgpu_descriptor_set_key(
     return IREE_SV("<missing>");
   }
   const iree_string_view_t descriptor_set_key = loom_low_descriptor_set_string(
-      descriptor_set, descriptor_set->key_string_offset);
+      descriptor_set, descriptor_set->key_string_ref);
   return iree_string_view_is_empty(descriptor_set_key) ? IREE_SV("<empty>")
                                                        : descriptor_set_key;
 }
@@ -90,7 +90,7 @@ bool loom_amdgpu_descriptor_has_immediate(
         &descriptor_set->immediates[descriptor->immediate_start + i];
     if (iree_string_view_equal(
             loom_low_descriptor_set_string(descriptor_set,
-                                           immediate->field_name_string_offset),
+                                           immediate->field_name_string_ref),
             name)) {
       return true;
     }

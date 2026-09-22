@@ -958,8 +958,8 @@ static iree_status_t loom_aie2p_pipeline_create_low_function(
   loom_string_id_t descriptor_set_key = LOOM_STRING_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_module_intern_string(
       emitter->module,
-      loom_low_descriptor_set_string(
-          emitter->descriptor_set, emitter->descriptor_set->key_string_offset),
+      loom_low_descriptor_set_string(emitter->descriptor_set,
+                                     emitter->descriptor_set->key_string_ref),
       &descriptor_set_key));
 
   loom_low_func_def_build_flags_t build_flags =

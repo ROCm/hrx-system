@@ -62,8 +62,8 @@ static iree_status_t loom_spirv_emit_validate_target(
   if (target->descriptor_set->stable_id !=
       SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID) {
     const iree_string_view_t descriptor_set_key =
-        loom_low_descriptor_set_string(
-            target->descriptor_set, target->descriptor_set->key_string_offset);
+        loom_low_descriptor_set_string(target->descriptor_set,
+                                       target->descriptor_set->key_string_ref);
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "verified SPIR-V low function selected descriptor set '%.*s'; "

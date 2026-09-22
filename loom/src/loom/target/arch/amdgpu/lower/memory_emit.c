@@ -130,7 +130,7 @@ static iree_status_t loom_amdgpu_record_memory_packet_report(
       loom_low_descriptor_memory_effect_summary(descriptor_set,
                                                 packet->access.descriptor);
   const iree_string_view_t packet_key = loom_low_descriptor_set_string(
-      descriptor_set, packet->access.descriptor->key_string_offset);
+      descriptor_set, packet->access.descriptor->key_string_ref);
   const loom_low_source_memory_operation_kind_t operation_kind =
       source->operation_kind;
   iree_string_view_t fallback_reason = iree_string_view_empty();
@@ -753,7 +753,7 @@ static bool loom_amdgpu_memory_packet_operand_matches_field(
     return false;
   }
   const iree_string_view_t operand_field_name = loom_low_descriptor_set_string(
-      descriptor_set, operand->field_name_string_offset);
+      descriptor_set, operand->field_name_string_ref);
   return iree_string_view_equal(operand_field_name, field_name);
 }
 

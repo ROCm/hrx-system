@@ -543,11 +543,11 @@ static iree_status_t loom_aie2p_bundle_plan_encode_move(
       loom_aie2p_descriptor_select_move(move.source, move.destination);
   if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
     const iree_string_view_t destination_name = loom_low_descriptor_set_string(
-        descriptor_set, descriptor_set->physical_registers[move.destination]
-                            .name_string_offset);
+        descriptor_set,
+        descriptor_set->physical_registers[move.destination].name_string_ref);
     const iree_string_view_t source_name = loom_low_descriptor_set_string(
         descriptor_set,
-        descriptor_set->physical_registers[move.source].name_string_offset);
+        descriptor_set->physical_registers[move.source].name_string_ref);
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
         "AIE2P has no selected physical move route from %.*s to %.*s",

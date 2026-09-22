@@ -113,7 +113,7 @@ class AmdgpuSystemMemoryTest : public ::testing::Test {
     IREE_CHECK_OK(loom_builder_intern_string(
         &builder_,
         loom_low_descriptor_set_string(descriptor_set_,
-                                       descriptor_set_->key_string_offset),
+                                       descriptor_set_->key_string_ref),
         &representation_contract));
     loom_op_t* function_op = NULL;
     IREE_CHECK_OK(loom_low_func_def_build(

@@ -22,9 +22,7 @@
 //   static const uint8_t my_keyword[] = LOOM_BSTRING_LITERAL(5, "hello");
 //   if (loom_bstring_equal(my_keyword, token.text)) { ... }
 //
-// Large generated descriptor databases should use loom_bstring_table_t:
-// descriptor rows store 32-bit offsets into a packed B-string byte table while
-// consumers still recover ordinary loom_bstring_t values.
+// Generated descriptor databases use compact slices from util/string_pool.h.
 //
 // Literal helpers take the byte length as a decimal integer. The macro
 // expands that length to a complete one-byte string literal before adjacent
@@ -44,19 +42,6 @@ extern "C" {
 
 // A pointer to a length-prefixed byte string: [length][data...].
 typedef const uint8_t* loom_bstring_t;
-
-// Offset into a packed B-string table.
-typedef uint32_t loom_bstring_table_offset_t;
-
-// Sentinel for absent B-string table offsets.
-#define LOOM_BSTRING_TABLE_OFFSET_NONE UINT32_MAX
-
-typedef struct loom_bstring_table_t {
-  // Packed B-string bytes stored as repeated [length][data...] entries.
-  const uint8_t* data;
-  // Total number of bytes in data.
-  uint32_t data_length;
-} loom_bstring_table_t;
 
 // Returns the character count of a B-string.
 static inline uint8_t loom_bstring_length(loom_bstring_t bstring) {
@@ -86,40 +71,6 @@ static inline bool loom_bstring_equal(loom_bstring_t bstring,
     return false;
   }
   return length == 0 || memcmp(view.data, bstring + 1, length) == 0;
-}
-
-// Returns whether |offset| names a complete B-string inside |table|.
-static inline bool loom_bstring_table_contains(
-    const loom_bstring_table_t* table, loom_bstring_table_offset_t offset) {
-  if (offset == LOOM_BSTRING_TABLE_OFFSET_NONE || table == NULL ||
-      table->data == NULL || offset >= table->data_length) {
-    return false;
-  }
-  const uint32_t remaining = table->data_length - offset;
-  return remaining > 0 && table->data[offset] < remaining;
-}
-
-// Returns the B-string at |offset|. The offset must be valid in |table|.
-static inline loom_bstring_t loom_bstring_table_get(
-    const loom_bstring_table_t* table, loom_bstring_table_offset_t offset) {
-  IREE_ASSERT(loom_bstring_table_contains(table, offset));
-  return table->data + offset;
-}
-
-// Returns true and sets |out_bstring| when |offset| names a complete B-string.
-static inline bool loom_bstring_table_try_get(
-    const loom_bstring_table_t* table, loom_bstring_table_offset_t offset,
-    loom_bstring_t* out_bstring) {
-  if (out_bstring != NULL) {
-    *out_bstring = NULL;
-  }
-  if (!loom_bstring_table_contains(table, offset)) {
-    return false;
-  }
-  if (out_bstring != NULL) {
-    *out_bstring = loom_bstring_table_get(table, offset);
-  }
-  return true;
 }
 
 //===----------------------------------------------------------------------===//

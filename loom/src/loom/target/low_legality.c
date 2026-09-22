@@ -944,7 +944,7 @@ iree_status_t loom_target_low_verify_function_legality(
           LOOM_LOW_DESCRIPTOR_SET_FLAG_REQUIRES_STRUCTURED_CONTROL_FLOW)) {
     const loom_diagnostic_param_t params[] = {
         loom_param_string(loom_low_descriptor_set_string(
-            descriptor_set, descriptor_set->key_string_offset)),
+            descriptor_set, descriptor_set->key_string_ref)),
         loom_param_string(loom_target_low_legality_function_name(&context)),
         loom_param_string(loom_op_name(module, function.op)),
     };

@@ -350,7 +350,7 @@ TEST_F(LowLowerSourceQueryTest, SelectsGeneratedTargetContract) {
   ASSERT_NE(result.selected_descriptor, nullptr);
   const iree_string_view_t semantic_tag = loom_low_descriptor_set_string(
       mapping_context_.descriptor_set,
-      result.selected_descriptor->semantic_tag_string_offset);
+      result.selected_descriptor->semantic_tag_string_ref);
   EXPECT_TRUE(iree_string_view_equal(semantic_tag, IREE_SV("integer.add.i32")));
 }
 

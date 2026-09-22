@@ -440,7 +440,7 @@ static iree_status_t loom_low_lower_rule_build_attrs(
     IREE_RETURN_IF_ERROR(loom_module_intern_string(
         loom_low_lower_context_module(context),
         loom_low_lower_rule_set_string(rule_set,
-                                       attr_copy->target_name_string_offset),
+                                       attr_copy->target_name_string_ref),
         &attrs[i].name_id));
     switch (attr_copy->kind) {
       case LOOM_LOW_LOWER_ATTR_COPY_I64_LOG2:

@@ -10,9 +10,9 @@
 
 static iree_status_t loom_low_requirements_get_string(
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_bstring_table_offset_t string_offset, const char* field_name,
+    loom_string_ref_t string_ref, const char* field_name,
     iree_string_view_t* out_string) {
-  *out_string = loom_low_descriptor_set_string(descriptor_set, string_offset);
+  *out_string = loom_low_descriptor_set_string(descriptor_set, string_ref);
   if (out_string->size == 0) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "low descriptor %s is required by the selected "
@@ -26,7 +26,7 @@ static iree_status_t loom_low_requirements_descriptor_key(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, iree_string_view_t* out_key) {
   return loom_low_requirements_get_string(
-      descriptor_set, descriptor->key_string_offset, "key", out_key);
+      descriptor_set, descriptor->key_string_ref, "key", out_key);
 }
 
 static iree_status_t loom_low_requirements_verify_core_tables(
@@ -139,7 +139,7 @@ static iree_status_t loom_low_requirements_verify_descriptor_schedule(
 
   iree_string_view_t schedule_name = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_low_requirements_get_string(
-      descriptor_set, schedule_class->name_string_offset, "schedule class name",
+      descriptor_set, schedule_class->name_string_ref, "schedule class name",
       &schedule_name));
   return iree_make_status(
       IREE_STATUS_FAILED_PRECONDITION,
@@ -161,7 +161,7 @@ static iree_status_t loom_low_requirements_verify_descriptor(
                        LOOM_LOW_DESCRIPTOR_REQUIREMENT_MNEMONICS)) {
     iree_string_view_t mnemonic = iree_string_view_empty();
     IREE_RETURN_IF_ERROR(loom_low_requirements_get_string(
-                             descriptor_set, descriptor->mnemonic_string_offset,
+                             descriptor_set, descriptor->mnemonic_string_ref,
                              "mnemonic", &mnemonic),
                          "low descriptor set '%.*s' descriptor '%.*s'",
                          (int)set_key.size, set_key.data,
@@ -172,7 +172,7 @@ static iree_status_t loom_low_requirements_verify_descriptor(
     iree_string_view_t semantic_tag = iree_string_view_empty();
     IREE_RETURN_IF_ERROR(
         loom_low_requirements_get_string(descriptor_set,
-                                         descriptor->semantic_tag_string_offset,
+                                         descriptor->semantic_tag_string_ref,
                                          "semantic tag", &semantic_tag),
         "low descriptor set '%.*s' descriptor '%.*s'", (int)set_key.size,
         set_key.data, (int)descriptor_key.size, descriptor_key.data);
@@ -195,7 +195,7 @@ iree_status_t loom_low_descriptor_set_verify_requirements(
     loom_low_descriptor_requirement_flags_t requirements) {
   iree_string_view_t set_key = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_low_requirements_get_string(
-      descriptor_set, descriptor_set->key_string_offset, "set key", &set_key));
+      descriptor_set, descriptor_set->key_string_ref, "set key", &set_key));
   if (iree_any_bit_set(requirements,
                        LOOM_LOW_DESCRIPTOR_REQUIREMENT_CORE_TABLES)) {
     IREE_RETURN_IF_ERROR(

@@ -12,7 +12,7 @@ from collections.abc import Sequence
 
 from loom.gen.support import c_arrays
 from loom.gen.support.generated_file import line_comment_header
-from loom.gen.support.string_pool import emit_c_string_table
+from loom.gen.support.string_pool import emit_c_string_pool
 from loom.gen.target.low import attr_indices, c_spelling, validation
 from loom.gen.target.low.compiled import (
     CompiledAsmForm,
@@ -165,17 +165,15 @@ def emit_header(compiled: CompiledDescriptorSet) -> str:
     return emit_header_for_spec(compiled, compiled.spec)
 
 
-def _emit_string_table(compiled: CompiledDescriptorSet, lines: list[str]) -> None:
+def _emit_string_pool(compiled: CompiledDescriptorSet, lines: list[str]) -> None:
     spec = compiled.spec
     pool = compiled.string_pool
     lines.extend(
-        emit_c_string_table(
+        emit_c_string_pool(
             pool,
             f"k{spec.c_table_prefix}StringData",
         )
     )
-    lines.append(f'static_assert({pool.c_enum_prefix}_STRING_END == sizeof(k{spec.c_table_prefix}StringData) - 1, "descriptor string offsets must cover the table payload");')
-    lines.append("")
 
 
 def _emit_array(
@@ -218,10 +216,10 @@ def _descriptor_row_lines(
     pool = compiled.string_pool
     return [
         [
-            f".key_string_offset = {pool.ref(f'descriptor_{descriptor.key}')},",
+            f".key_string_ref = {pool.ref(f'descriptor_{descriptor.key}')},",
             f".stable_id = {c_spelling.hex_u64_literal(descriptor_stable_id(descriptor.key))},",
-            f".mnemonic_string_offset = {c_spelling.optional_string_expr(pool, f'mnemonic_{descriptor.key}' if descriptor.mnemonic is not None else None)},",
-            f".semantic_tag_string_offset = {c_spelling.optional_string_expr(pool, f'semantic_{descriptor.key}' if descriptor.semantic_tag is not None else None)},",
+            f".mnemonic_string_ref = {c_spelling.optional_string_expr(pool, f'mnemonic_{descriptor.key}' if descriptor.mnemonic is not None else None)},",
+            f".semantic_tag_string_ref = {c_spelling.optional_string_expr(pool, f'semantic_{descriptor.key}' if descriptor.semantic_tag is not None else None)},",
             f".feature_mask_word_start = {descriptor_rows[i]['feature_mask_word_start']},",
             f".feature_mask_word_count = {descriptor_rows[i]['feature_mask_word_count']},",
             f".encoding_field_value_start = {descriptor_rows[i]['encoding_field_value_start']},",
@@ -276,11 +274,11 @@ def _storage_lease_row_lines(compiled: CompiledDescriptorSet) -> list[list[str]]
             f".unit_count = {lease.unit_count},",
             f".release_scope = {lease.release_scope.c_name},",
             f".release_class_id = {lease.release_class_id},",
-            f".release_class_name_string_offset = {pool.ref(f'storage_lease_{descriptor_key}_{lease_index}_class')},",
+            f".release_class_name_string_ref = {pool.ref(f'storage_lease_{descriptor_key}_{lease_index}_class')},",
             f".release_action_id = {lease.release_action_id},",
-            f".release_action_name_string_offset = {pool.ref(f'storage_lease_{descriptor_key}_{lease_index}_action')},",
+            f".release_action_name_string_ref = {pool.ref(f'storage_lease_{descriptor_key}_{lease_index}_action')},",
             f".release_reason_id = {lease.release_reason_id},",
-            f".release_reason_name_string_offset = {pool.ref(f'storage_lease_{descriptor_key}_{lease_index}_reason')},",
+            f".release_reason_name_string_ref = {pool.ref(f'storage_lease_{descriptor_key}_{lease_index}_reason')},",
             f".flags = {c_spelling.flag_expr(lease.flags)},",
         ]
         for (descriptor_key, lease_index), lease in zip(compiled.storage_lease_labels, compiled.storage_leases, strict=True)
@@ -313,8 +311,8 @@ def _asm_form_row_lines(
     pool = compiled.string_pool
     return [
         [
-            f".mnemonic_string_offset = {pool.ref(asm_form.mnemonic_label)},",
-            f".native_assembly_mnemonic_string_offset = {c_spelling.optional_string_expr(pool, asm_form.native_assembly_mnemonic_label)},",
+            f".mnemonic_string_ref = {pool.ref(asm_form.mnemonic_label)},",
+            f".native_assembly_mnemonic_string_ref = {c_spelling.optional_string_expr(pool, asm_form.native_assembly_mnemonic_label)},",
             f".descriptor_ordinal = {asm_form.descriptor_ordinal},",
             f".result_operand_index_start = {asm_form.result_index_start},",
             f".result_value_type_start = {asm_form.result_value_type_start if asm_form.result_value_type_start is not None else 'LOOM_LOW_ASM_RESULT_VALUE_TYPE_START_NONE'},",
@@ -362,7 +360,7 @@ def _native_asm_value_row_lines(
             f".index = {value.index},",
             f".bit_width = {value.bit_width},",
             f".target_format_id = {value.target_format_id},",
-            f".literal_string_offset = {c_spelling.optional_string_expr(pool, value.literal_label)},",
+            f".literal_string_ref = {c_spelling.optional_string_expr(pool, value.literal_label)},",
         ]
         for value in values
     ]
@@ -376,7 +374,7 @@ def _register_class_row_lines(
     physical_register_widths = {register.name: len(register.atomic_units) for register in compiled.physical_registers}
     return [
         [
-            f".name_string_offset = {pool.ref(f'reg_{reg_class.name}')},",
+            f".name_string_ref = {pool.ref(f'reg_{reg_class.name}')},",
             f".target_bank_id = {reg_class.target_bank_id},",
             f".flags = {c_spelling.flag_expr(reg_class.flags)},",
             f".alloc_unit_bits = {reg_class.alloc_unit_bits},",
@@ -397,7 +395,7 @@ def _register_class_row_lines(
         ]
         if reg_class is not None
         else [
-            ".name_string_offset = LOOM_LOW_STRING_OFFSET_NONE,",
+            ".name_string_ref = LOOM_STRING_REF_NONE,",
             ".spill_class_id = LOOM_LOW_REG_CLASS_NONE,",
         ]
         for reg_class in reg_classes
@@ -434,7 +432,7 @@ def emit_source_for_views(
         lines.append(f"const loom_low_descriptor_set_t* {view.spec.function_name}(void);")
     if len(views) > 1:
         lines.append("")
-    _emit_string_table(compiled, lines)
+    _emit_string_pool(compiled, lines)
 
     view_array_emitter = c_arrays.StaticArrayEmitter(lines)
     if any(view.reg_classes == tuple(compiled.reg_classes) for view in views):
@@ -458,7 +456,7 @@ def emit_source_for_views(
         "PhysicalRegisters",
         [
             [
-                ".name_string_offset = " + pool.ref(f"physical_register_{physical_register.name}") + ",",
+                ".name_string_ref = " + pool.ref(f"physical_register_{physical_register.name}") + ",",
                 ".atomic_unit_start = " + str(compiled.physical_register_atomic_unit_starts[i]) + ",",
                 f".atomic_unit_count = {len(physical_register.atomic_units)},",
                 ".reserved = 0,",
@@ -478,7 +476,7 @@ def emit_source_for_views(
         "RegisterPackingResources",
         [
             [
-                ".name_string_offset = " + pool.ref(f"register_packing_resource_{resource.source.name}") + ",",
+                ".name_string_ref = " + pool.ref(f"register_packing_resource_{resource.source.name}") + ",",
                 f".capacity = {resource.source.capacity},",
                 f".member_start = {resource.member_start},",
                 f".member_count = {resource.member_count},",
@@ -560,7 +558,7 @@ def emit_source_for_views(
         "RegisterParts",
         [
             [
-                f".name_string_offset = {pool.ref(f'register_part_{part.name}')},",
+                f".name_string_ref = {pool.ref(f'register_part_{part.name}')},",
                 f".reg_class_id = {compiled.reg_class_ids[part.reg_class]},",
                 ".reserved = 0,",
                 f".mask = {c_spelling.hex_u32_literal(part.mask)},",
@@ -588,7 +586,7 @@ def emit_source_for_views(
         "Operands",
         [
             [
-                f".field_name_string_offset = {pool.ref(f'field_{operand.field_name}')},",
+                f".field_name_string_ref = {pool.ref(f'field_{operand.field_name}')},",
                 ".source_value_index = " + ("LOOM_LOW_ID_NONE" if compiled.operand_source_value_indices[i] is None else str(compiled.operand_source_value_indices[i])) + ",",
                 f".role = {operand.role.c_name},",
                 f".source_binding = {operand_source_binding(operand.field_name, operand.role).c_name},",
@@ -618,7 +616,7 @@ def emit_source_for_views(
         "Immediates",
         [
             [
-                f".field_name_string_offset = {pool.ref(f'immediate_{immediate.field_name}')},",
+                f".field_name_string_ref = {pool.ref(f'immediate_{immediate.field_name}')},",
                 f".encoding_slice_start = {compiled.immediate_encoding_slice_starts[i]},",
                 f".kind = {immediate.kind.c_name},",
                 f".flags = {c_spelling.flag_expr(immediate.flags)},",
@@ -657,7 +655,7 @@ def emit_source_for_views(
         "EnumDomains",
         [
             [
-                f".name_string_offset = {pool.ref(f'enum_domain_{domain.name}')},",
+                f".name_string_ref = {pool.ref(f'enum_domain_{domain.name}')},",
                 f".value_start = {compiled.enum_domain_rows[i]['value_start']},",
                 f".value_count = {compiled.enum_domain_rows[i]['value_count']},",
             ]
@@ -671,7 +669,7 @@ def emit_source_for_views(
         "EnumValues",
         [
             [
-                f".token_string_offset = {pool.ref(f'enum_value_{domain.name}_{value.token}')},",
+                f".token_string_ref = {pool.ref(f'enum_value_{domain.name}_{value.token}')},",
                 f".value = {c_spelling.i64_literal(value.value)},",
             ]
             for domain in compiled.enum_domains
@@ -730,7 +728,7 @@ def emit_source_for_views(
         start, count, maximum = event_separation_ranges.get(timing_event.name, (0, 0, 0))
         timing_event_rows.append(
             [
-                f".name_string_offset = {pool.ref(f'timing_event_{timing_event.name}')},",
+                f".name_string_ref = {pool.ref(f'timing_event_{timing_event.name}')},",
                 f".separation_start = {start},",
                 f".separation_count = {count},",
                 f".maximum_issue_separation_cycles = {maximum},",
@@ -765,7 +763,7 @@ def emit_source_for_views(
         "Resources",
         [
             [
-                f".name_string_offset = {pool.ref(f'resource_{resource.name}')},",
+                f".name_string_ref = {pool.ref(f'resource_{resource.name}')},",
                 f".capacity_per_cycle = {resource.capacity_per_cycle},",
                 f".flags = {c_spelling.flag_expr(resource.flags)},",
                 f".kind = {resource.kind.c_name},",
@@ -833,7 +831,7 @@ def emit_source_for_views(
         "ScheduleClasses",
         [
             [
-                f".name_string_offset = {pool.ref(f'schedule_{schedule_class.name}')},",
+                f".name_string_ref = {pool.ref(f'schedule_{schedule_class.name}')},",
                 f".latency_cycles = {schedule_class.latency_cycles},",
                 f".schedule_distance_cycles = {schedule_class.schedule_distance_cycles},",
                 f".minimum_issue_separation_cycles = {schedule_class.minimum_issue_separation_cycles},",
@@ -989,7 +987,7 @@ def emit_source_for_views(
             f"k{view.spec.c_table_prefix}DescriptorRefs",
             [
                 [
-                    f".key_string_offset = {pool.ref(f'descriptor_{descriptor_key}')},",
+                    f".key_string_ref = {pool.ref(f'descriptor_{descriptor_key}')},",
                     f".descriptor_ordinal = {descriptor_ordinal},",
                 ]
                 for descriptor_key, descriptor_ordinal in view.descriptor_refs
@@ -1031,7 +1029,7 @@ def emit_source_for_views(
         [
             [
                 f".immediate_index = {immediate.immediate_index},",
-                f".name_string_offset = {c_spelling.optional_string_expr(pool, immediate.name_label)},",
+                f".name_string_ref = {c_spelling.optional_string_expr(pool, immediate.name_label)},",
             ]
             for immediate in asm_table_storage.immediates
         ],
@@ -1149,10 +1147,10 @@ def emit_source_for_views(
                 else []
             ),
             f"    .descriptor_set_ordinal = {c_spelling.u16_literal(view_spec.descriptor_set_ordinal if view_spec.descriptor_set_ordinal is not None else LOW_DESCRIPTOR_SET_ORDINAL_NONE)},",
-            f"    .key_string_offset = {pool.ref(_metadata_string_label(spec, view_spec, 'set_key'))},",
-            f"    .target_key_string_offset = {c_spelling.optional_string_expr(pool, _metadata_string_label(spec, view_spec, 'target_key') if view_spec.target_key is not None else None)},",
-            f"    .feature_key_string_offset = {c_spelling.optional_string_expr(pool, _metadata_string_label(spec, view_spec, 'feature_key') if view_spec.feature_key is not None else None)},",
-            "    .string_table =",
+            f"    .key_string_ref = {pool.ref(_metadata_string_label(spec, view_spec, 'set_key'))},",
+            f"    .target_key_string_ref = {c_spelling.optional_string_expr(pool, _metadata_string_label(spec, view_spec, 'target_key') if view_spec.target_key is not None else None)},",
+            f"    .feature_key_string_ref = {c_spelling.optional_string_expr(pool, _metadata_string_label(spec, view_spec, 'feature_key') if view_spec.feature_key is not None else None)},",
+            "    .string_pool =",
             "        {",
             f"            .data = k{spec.c_table_prefix}StringData,",
             f"            .data_length = sizeof(k{spec.c_table_prefix}StringData) - 1,",

@@ -31,6 +31,22 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "string_pool",
+    hdrs = ["string_pool.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_test(
+    name = "string_pool_test",
+    srcs = ["string_pool_test.cc"],
+    deps = [
+        ":string_pool",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "adaptive_sort",
     hdrs = ["adaptive_sort.h"],
     deps = [

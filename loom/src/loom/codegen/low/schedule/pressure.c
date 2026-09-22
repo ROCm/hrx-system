@@ -61,8 +61,7 @@ static iree_string_view_t loom_low_schedule_reg_class_name(
   IREE_ASSERT_LT(reg_class_id, state->target.descriptor_set->reg_class_count);
   return loom_low_descriptor_set_string(
       state->target.descriptor_set,
-      state->target.descriptor_set->reg_classes[reg_class_id]
-          .name_string_offset);
+      state->target.descriptor_set->reg_classes[reg_class_id].name_string_ref);
 }
 
 iree_string_view_t loom_low_schedule_pressure_source_name(
@@ -82,7 +81,7 @@ iree_string_view_t loom_low_schedule_pressure_source_name(
       return loom_low_descriptor_set_string(
           state->target.descriptor_set,
           state->target.descriptor_set->register_packing_resources[source_id]
-              .name_string_offset);
+              .name_string_ref);
     default:
       return iree_string_view_empty();
   }

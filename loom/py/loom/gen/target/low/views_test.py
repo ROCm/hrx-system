@@ -88,7 +88,7 @@ def test_equal_view_register_tables_share_storage() -> None:
     assert source.count(".reg_classes = kTestLowRegisterViewCoreRegClasses,") == 2
     assert "kTestLowRegisterAliasCoreRegClasses[]" not in source
     assert "kTestLowCoreRegClasses[]" not in source
-    assert ".name_string_offset = LOOM_LOW_STRING_OFFSET_NONE," in source
+    assert ".name_string_ref = LOOM_STRING_REF_NONE," in source
     assert source.count(".operands = kTestLowCoreOperands,") == 2
 
 

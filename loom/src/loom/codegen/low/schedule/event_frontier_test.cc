@@ -32,7 +32,7 @@ class ScheduleEventFrontierTest : public ::testing::Test {
   uint16_t NamedIndex(const T* rows, uint32_t count, const char* name) {
     for (uint32_t i = 0; i < count; ++i) {
       if (iree_string_view_equal(loom_low_descriptor_set_string(
-                                     descriptors_, rows[i].name_string_offset),
+                                     descriptors_, rows[i].name_string_ref),
                                  iree_make_cstring_view(name))) {
         return (uint16_t)i;
       }

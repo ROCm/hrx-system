@@ -251,19 +251,19 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   reg_class.spill_class_id = LOOM_LOW_REG_CLASS_NONE;
   loom_low_physical_register_t physical_registers[] = {
       {
-          /*.name_string_offset=*/0,
+          /*.name_string_ref=*/0,
           /*.atomic_unit_start=*/0,
           /*.atomic_unit_count=*/2,
           /*.reserved=*/0,
       },
       {
-          /*.name_string_offset=*/0,
+          /*.name_string_ref=*/0,
           /*.atomic_unit_start=*/2,
           /*.atomic_unit_count=*/2,
           /*.reserved=*/0,
       },
       {
-          /*.name_string_offset=*/0,
+          /*.name_string_ref=*/0,
           /*.atomic_unit_start=*/4,
           /*.atomic_unit_count=*/4,
           /*.reserved=*/0,
@@ -272,7 +272,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
            /*.class_count=*/1},
       },
       {
-          /*.name_string_offset=*/0,
+          /*.name_string_ref=*/0,
           /*.atomic_unit_start=*/8,
           /*.atomic_unit_count=*/4,
           /*.reserved=*/0,

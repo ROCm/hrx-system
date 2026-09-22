@@ -67,7 +67,7 @@ void ExpectRegisterClass(const loom_low_descriptor_set_t* descriptor_set,
     *out_descriptor_reg_class_id = descriptor_reg_class_id;
   }
   EXPECT_EQ(ToString(loom_low_descriptor_set_string(
-                descriptor_set, reg_class->name_string_offset)),
+                descriptor_set, reg_class->name_string_ref)),
             ToString(expected_name));
   EXPECT_EQ(reg_class->alloc_unit_bits, expected_alloc_unit_bits)
       << ToString(expected_name);

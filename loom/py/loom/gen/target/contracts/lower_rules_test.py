@@ -966,10 +966,10 @@ def test_generate_lower_rule_set_emits_report_key_ordinals() -> None:
 
     generated = generate_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS})
 
-    assert 'LOOM_BSTRING_LITERAL(32, "test.scalar_mulf.strategy.native")' in generated.source
-    assert "static const loom_bstring_table_offset_t" in generated.source
+    assert "test.scalar_mulf.strategy.native" in generated.source
+    assert "static const loom_string_ref_t" in generated.source
     assert ".report_key_ordinal = 1," in generated.source
-    assert ".report_key_string_offsets = " in generated.source
+    assert ".report_key_string_refs = " in generated.source
     assert ".report_key_count = IREE_ARRAYSIZE(" in generated.source
     assert "static const loom_low_lower_emit_ref_t" in generated.source
     assert ".emit_refs = " in generated.source
@@ -1183,10 +1183,10 @@ def test_attr_copy_row_emits_portable_signed_i64_literal() -> None:
             target_name="value",
             literal_i64=-(1 << 31),
         ),
-        target_name_string_offset="TEST_STRING_VALUE",
+        target_name_string_ref="TEST_STRING_VALUE",
     )
 
-    assert ".target_name_string_offset = TEST_STRING_VALUE" in fields
+    assert ".target_name_string_ref = TEST_STRING_VALUE" in fields
     assert ".literal_i64 = (-INT64_C(2147483648))" in fields
 
 
@@ -1198,10 +1198,10 @@ def test_attr_copy_row_emits_attr_minus_literal_payload() -> None:
             source_attr_index=2,
             literal_i64=32,
         ),
-        target_name_string_offset="TEST_STRING_SHIFT",
+        target_name_string_ref="TEST_STRING_SHIFT",
     )
 
-    assert ".target_name_string_offset = TEST_STRING_SHIFT" in fields
+    assert ".target_name_string_ref = TEST_STRING_SHIFT" in fields
     assert ".source_attr_index = 2" in fields
     assert ".literal_i64 = INT64_C(32)" in fields
 
@@ -1213,10 +1213,10 @@ def test_attr_copy_row_emits_source_memory_offset_literal_payload() -> None:
             target_name="offset",
             literal_i64=192,
         ),
-        target_name_string_offset="TEST_STRING_OFFSET",
+        target_name_string_ref="TEST_STRING_OFFSET",
     )
 
-    assert ".target_name_string_offset = TEST_STRING_OFFSET" in fields
+    assert ".target_name_string_ref = TEST_STRING_OFFSET" in fields
     assert ".literal_i64 = INT64_C(192)" in fields
 
 
@@ -1445,8 +1445,8 @@ def test_generate_lower_rule_set_emits_source_instance_flags_projection() -> Non
     generated = generate_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS})
 
     assert "LOOM_LOW_LOWER_ATTR_COPY_SOURCE_OP_INSTANCE_FLAGS" in generated.source
-    assert 'LOOM_BSTRING_LITERAL(15, "fast_math_flags")' in generated.source
-    assert ".target_name_string_offset = " in generated.source
+    assert "fast_math_flags" in generated.source
+    assert ".target_name_string_ref = " in generated.source
 
 
 def test_generate_lower_rule_set_emits_balanced_accumulator_flag() -> None:
@@ -1832,7 +1832,7 @@ def test_source_memory_rows_split_complete_address_materializer() -> None:
     materializer_fields = source_memory_address_materializer_row(
         descriptor_refs,
         materializer,
-        immediate_string_offset="TEST_STRING_I32_VALUE",
+        immediate_string_ref="TEST_STRING_I32_VALUE",
     )
 
     assert ".diagnostics_index = 0" in fields
@@ -1845,7 +1845,7 @@ def test_source_memory_rows_split_complete_address_materializer() -> None:
     assert ".coordinate_minimum = INT64_C(0)" in materializer_fields
     assert ".coordinate_maximum = INT64_C(2147483647)" in materializer_fields
     assert ".const_coordinate_descriptor_ref = 0" in materializer_fields
-    assert (".const_coordinate_immediate_string_offset = TEST_STRING_I32_VALUE") in materializer_fields
+    assert (".const_coordinate_immediate_string_ref = TEST_STRING_I32_VALUE") in materializer_fields
     assert ".add_coordinate_descriptor_ref = 1" in materializer_fields
     assert ".shl_coordinate_descriptor_ref = 65535" in materializer_fields
     assert ".index_to_coordinate_input_descriptor_ref = 65535" in materializer_fields
@@ -1874,11 +1874,11 @@ def test_source_memory_rows_split_byte_offset_materializer() -> None:
     materializer_fields = source_memory_byte_offset_materializer_row(
         descriptor_refs,
         materializer,
-        immediate_string_offset="TEST_STRING_I32_VALUE",
-        conversion_immediate_string_offsets={},
+        immediate_string_ref="TEST_STRING_I32_VALUE",
+        conversion_immediate_string_refs={},
     )
 
-    assert ".constant_immediate_string_offset = TEST_STRING_I32_VALUE" in materializer_fields
+    assert ".constant_immediate_string_ref = TEST_STRING_I32_VALUE" in materializer_fields
     assert ".constant_descriptor_ref = 0" in materializer_fields
     assert ".add_descriptor_ref = 1" in materializer_fields
     assert ".multiply_descriptor_ref = 2" in materializer_fields
@@ -1913,14 +1913,14 @@ def test_source_memory_conversion_rows_keep_source_kind_and_selector() -> None:
     fields = source_memory_byte_offset_materializer_row(
         references,
         materializer,
-        immediate_string_offset="VALUE",
-        conversion_immediate_string_offsets={"i8": "SELECTOR"},
+        immediate_string_ref="VALUE",
+        conversion_immediate_string_refs={"i8": "SELECTOR"},
     )
     conversions = fields[0].removeprefix(".integer_conversions = {").removesuffix("}").split("}, {")
     assert len(conversions) == 5
     assert ".descriptor_ref = 3" in conversions[1]
     assert ".immediate_value = INT64_C(18)" in conversions[1]
-    assert ".immediate_string_offset = SELECTOR" in conversions[1]
+    assert ".immediate_string_ref = SELECTOR" in conversions[1]
     assert all(".descriptor_ref = 65535" in conversions[index] for index in (0, 2, 3, 4))
     row = LowerSourceMemory(
         constraint=SourceMemoryConstraint(

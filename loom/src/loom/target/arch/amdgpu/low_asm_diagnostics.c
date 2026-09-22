@@ -17,7 +17,7 @@ static bool loom_amdgpu_low_asm_descriptor_set_is_amdgpu(
     return false;
   }
   *out_descriptor_set_name = loom_low_descriptor_set_string(
-      descriptor_set, descriptor_set->key_string_offset);
+      descriptor_set, descriptor_set->key_string_ref);
   return iree_string_view_starts_with(*out_descriptor_set_name,
                                       IREE_SV("amdgpu."));
 }

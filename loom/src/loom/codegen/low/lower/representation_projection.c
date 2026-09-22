@@ -123,7 +123,7 @@ static iree_status_t loom_low_representation_project_register_type(
   if (source_class_id >= projection->source_descriptor_set->reg_class_count) {
     const iree_string_view_t source_set_name = loom_low_descriptor_set_string(
         projection->source_descriptor_set,
-        projection->source_descriptor_set->key_string_offset);
+        projection->source_descriptor_set->key_string_ref);
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "low function register class %u is outside descriptor set '%.*s'",
@@ -134,17 +134,17 @@ static iree_status_t loom_low_representation_project_register_type(
   const loom_low_reg_class_t* source_class =
       &projection->source_descriptor_set->reg_classes[source_class_id];
   const iree_string_view_t source_class_name = loom_low_descriptor_set_string(
-      projection->source_descriptor_set, source_class->name_string_offset);
+      projection->source_descriptor_set, source_class->name_string_ref);
   uint16_t target_class_id = LOOM_LOW_REG_CLASS_NONE;
   if (!loom_low_descriptor_set_lookup_register_class(
           projection->target_descriptor_set, source_class_name,
           &target_class_id, /*out_descriptor_register_class=*/NULL)) {
     const iree_string_view_t source_set_name = loom_low_descriptor_set_string(
         projection->source_descriptor_set,
-        projection->source_descriptor_set->key_string_offset);
+        projection->source_descriptor_set->key_string_ref);
     const iree_string_view_t target_set_name = loom_low_descriptor_set_string(
         projection->target_descriptor_set,
-        projection->target_descriptor_set->key_string_offset);
+        projection->target_descriptor_set->key_string_ref);
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "low representation '%.*s' claims compatibility with '%.*s' but "
@@ -204,16 +204,16 @@ static iree_status_t loom_low_representation_plan_descriptor(
         source_ordinal);
   }
   const iree_string_view_t descriptor_key = loom_low_descriptor_set_string(
-      projection->source_descriptor_set, source_descriptor->key_string_offset);
+      projection->source_descriptor_set, source_descriptor->key_string_ref);
   const uint32_t target_ordinal = loom_low_descriptor_set_lookup_descriptor(
       projection->target_descriptor_set, descriptor_key);
   if (target_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
     const iree_string_view_t source_set_name = loom_low_descriptor_set_string(
         projection->source_descriptor_set,
-        projection->source_descriptor_set->key_string_offset);
+        projection->source_descriptor_set->key_string_ref);
     const iree_string_view_t target_set_name = loom_low_descriptor_set_string(
         projection->target_descriptor_set,
-        projection->target_descriptor_set->key_string_offset);
+        projection->target_descriptor_set->key_string_ref);
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "low representation '%.*s' claims compatibility with '%.*s' but "

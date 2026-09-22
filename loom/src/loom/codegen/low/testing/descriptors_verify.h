@@ -23,7 +23,7 @@ extern "C" {
 #endif
 
 // Verifies structural integrity of a descriptor set. This checks table spans,
-// string offsets, descriptor key uniqueness, and cross-table references; it
+// string slices, descriptor key uniqueness, and cross-table references; it
 // does not perform full target legality.
 iree_status_t loom_low_descriptor_set_verify(
     const loom_low_descriptor_set_t* descriptor_set);

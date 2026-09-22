@@ -79,10 +79,10 @@ static iree_string_view_t loom_low_schedule_node_diagnostic_label(
   if (node == NULL) {
     return IREE_SV("<unknown>");
   }
-  return node->descriptor != NULL ? loom_low_descriptor_set_string(
-                                        table->target.descriptor_set,
-                                        node->descriptor->key_string_offset)
-                                  : loom_op_name(table->module, node->op);
+  return node->descriptor != NULL
+             ? loom_low_descriptor_set_string(table->target.descriptor_set,
+                                              node->descriptor->key_string_ref)
+             : loom_op_name(table->module, node->op);
 }
 
 static iree_string_view_t loom_low_schedule_operand_index_name(

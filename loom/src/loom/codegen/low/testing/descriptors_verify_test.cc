@@ -15,67 +15,56 @@
 namespace loom {
 namespace {
 
-// clang-format off
-static const uint8_t kTestStrings[] =
-    LOOM_BSTRING_LITERAL(0, "")
-    LOOM_BSTRING_LITERAL(9, "test.core")
-    LOOM_BSTRING_LITERAL(11, "test.target")
-    LOOM_BSTRING_LITERAL(13, "test.features")
-    LOOM_BSTRING_LITERAL(8, "test.gpr")
-    LOOM_BSTRING_LITERAL(3, "dst")
-    LOOM_BSTRING_LITERAL(3, "lhs")
-    LOOM_BSTRING_LITERAL(3, "rhs")
-    LOOM_BSTRING_LITERAL(5, "value")
-    LOOM_BSTRING_LITERAL(8, "test.alu")
-    LOOM_BSTRING_LITERAL(10, "test.const")
-    LOOM_BSTRING_LITERAL(12, "test.alu.i32")
-    LOOM_BSTRING_LITERAL(14, "test.const.i32")
-    LOOM_BSTRING_LITERAL(12, "test.add.i32")
-    LOOM_BSTRING_LITERAL(9, "const.i32")
-    LOOM_BSTRING_LITERAL(7, "add.i32")
-    LOOM_BSTRING_LITERAL(17, "integer.const.i32")
-    LOOM_BSTRING_LITERAL(15, "integer.add.i32")
-    LOOM_BSTRING_LITERAL(4, "mode")
-    LOOM_BSTRING_LITERAL(9, "test.mode")
-    LOOM_BSTRING_LITERAL(4, "fast")
-    LOOM_BSTRING_LITERAL(4, "slow");
-// clang-format on
+static const char kTestStrings[] =
+    ""
+    "test.core"
+    "test.target"
+    "test.features"
+    "test.gpr"
+    "dst"
+    "lhs"
+    "rhs"
+    "value"
+    "test.alu"
+    "test.const"
+    "test.alu.i32"
+    "test.const.i32"
+    "test.add.i32"
+    "const.i32"
+    "add.i32"
+    "integer.const.i32"
+    "integer.add.i32"
+    "mode"
+    "test.mode"
+    "fast"
+    "slow";
 
-enum {
-  TEST_STRING_empty = 0,
-  TEST_STRING_set_key = TEST_STRING_empty + sizeof(""),
-  TEST_STRING_target_key = TEST_STRING_set_key + sizeof("test.core"),
-  TEST_STRING_feature_key = TEST_STRING_target_key + sizeof("test.target"),
-  TEST_STRING_reg_gpr = TEST_STRING_feature_key + sizeof("test.features"),
-  TEST_STRING_field_dst = TEST_STRING_reg_gpr + sizeof("test.gpr"),
-  TEST_STRING_field_lhs = TEST_STRING_field_dst + sizeof("dst"),
-  TEST_STRING_field_rhs = TEST_STRING_field_lhs + sizeof("lhs"),
-  TEST_STRING_field_value = TEST_STRING_field_rhs + sizeof("rhs"),
-  TEST_STRING_resource_alu = TEST_STRING_field_value + sizeof("value"),
-  TEST_STRING_schedule_const = TEST_STRING_resource_alu + sizeof("test.alu"),
-  TEST_STRING_schedule_alu = TEST_STRING_schedule_const + sizeof("test.const"),
-  TEST_STRING_descriptor_const =
-      TEST_STRING_schedule_alu + sizeof("test.alu.i32"),
-  TEST_STRING_descriptor_add =
-      TEST_STRING_descriptor_const + sizeof("test.const.i32"),
-  TEST_STRING_mnemonic_const =
-      TEST_STRING_descriptor_add + sizeof("test.add.i32"),
-  TEST_STRING_mnemonic_add = TEST_STRING_mnemonic_const + sizeof("const.i32"),
-  TEST_STRING_semantic_const = TEST_STRING_mnemonic_add + sizeof("add.i32"),
-  TEST_STRING_semantic_add =
-      TEST_STRING_semantic_const + sizeof("integer.const.i32"),
-  TEST_STRING_field_mode = TEST_STRING_semantic_add + sizeof("integer.add.i32"),
-  TEST_STRING_enum_mode = TEST_STRING_field_mode + sizeof("mode"),
-  TEST_STRING_enum_fast = TEST_STRING_enum_mode + sizeof("test.mode"),
-  TEST_STRING_enum_slow = TEST_STRING_enum_fast + sizeof("fast"),
-  TEST_STRING_END = TEST_STRING_enum_slow + sizeof("slow"),
+enum : loom_string_ref_t {
+  TEST_STRING_empty = LOOM_STRING_REF(0, 0),
+  TEST_STRING_set_key = LOOM_STRING_REF(0, 9),
+  TEST_STRING_target_key = LOOM_STRING_REF(9, 11),
+  TEST_STRING_feature_key = LOOM_STRING_REF(20, 13),
+  TEST_STRING_reg_gpr = LOOM_STRING_REF(33, 8),
+  TEST_STRING_field_dst = LOOM_STRING_REF(41, 3),
+  TEST_STRING_field_lhs = LOOM_STRING_REF(44, 3),
+  TEST_STRING_field_rhs = LOOM_STRING_REF(47, 3),
+  TEST_STRING_field_value = LOOM_STRING_REF(50, 5),
+  TEST_STRING_resource_alu = LOOM_STRING_REF(55, 8),
+  TEST_STRING_schedule_const = LOOM_STRING_REF(63, 10),
+  TEST_STRING_schedule_alu = LOOM_STRING_REF(73, 12),
+  TEST_STRING_descriptor_const = LOOM_STRING_REF(85, 14),
+  TEST_STRING_descriptor_add = LOOM_STRING_REF(99, 12),
+  TEST_STRING_mnemonic_const = LOOM_STRING_REF(111, 9),
+  TEST_STRING_mnemonic_add = LOOM_STRING_REF(120, 7),
+  TEST_STRING_semantic_const = LOOM_STRING_REF(127, 17),
+  TEST_STRING_semantic_add = LOOM_STRING_REF(144, 15),
+  TEST_STRING_field_mode = LOOM_STRING_REF(159, 4),
+  TEST_STRING_enum_mode = LOOM_STRING_REF(163, 9),
+  TEST_STRING_enum_fast = LOOM_STRING_REF(172, 4),
+  TEST_STRING_enum_slow = LOOM_STRING_REF(176, 4),
 };
 
-static_assert(TEST_STRING_END == sizeof(kTestStrings) - 1,
-              "test descriptor string offsets must cover the table payload");
-
-#define TEST_STRING_OFFSET(field) \
-  static_cast<loom_bstring_table_offset_t>(TEST_STRING_##field)
+#define TEST_STRING_REF(field) TEST_STRING_##field
 
 struct TestTables {
   loom_low_descriptor_t descriptors[2];
@@ -114,7 +103,7 @@ void InitializeTestTables(TestTables* tables) {
   for (loom_low_reg_class_t& reg_class : tables->reg_classes) {
     reg_class.full_register_part_mask = 1;
   }
-  tables->reg_classes[0].name_string_offset = TEST_STRING_OFFSET(reg_gpr);
+  tables->reg_classes[0].name_string_ref = TEST_STRING_REF(reg_gpr);
   tables->reg_classes[0].flags = LOOM_LOW_REG_CLASS_FLAG_VIRTUAL_ONLY;
   tables->reg_classes[0].alloc_unit_bits = 32;
   tables->reg_classes[0].spill_class_id = LOOM_LOW_REG_CLASS_NONE;
@@ -123,21 +112,21 @@ void InitializeTestTables(TestTables* tables) {
   tables->reg_class_alts[0].reg_class_id = 0;
   tables->reg_class_alts[0].flags = LOOM_LOW_REG_CLASS_ALT_FLAG_PREFERRED;
 
-  tables->operands[0].field_name_string_offset = TEST_STRING_OFFSET(field_dst);
+  tables->operands[0].field_name_string_ref = TEST_STRING_REF(field_dst);
   tables->operands[0].source_value_index = 0;
   tables->operands[0].role = LOOM_LOW_OPERAND_ROLE_RESULT;
   tables->operands[0].reg_class_alt_start = 0;
   tables->operands[0].reg_class_alt_count = 1;
   tables->operands[0].unit_count = 1;
 
-  tables->operands[1].field_name_string_offset = TEST_STRING_OFFSET(field_dst);
+  tables->operands[1].field_name_string_ref = TEST_STRING_REF(field_dst);
   tables->operands[1].source_value_index = 0;
   tables->operands[1].role = LOOM_LOW_OPERAND_ROLE_RESULT;
   tables->operands[1].reg_class_alt_start = 0;
   tables->operands[1].reg_class_alt_count = 1;
   tables->operands[1].unit_count = 1;
 
-  tables->operands[2].field_name_string_offset = TEST_STRING_OFFSET(field_lhs);
+  tables->operands[2].field_name_string_ref = TEST_STRING_REF(field_lhs);
   tables->operands[2].source_value_index = 0;
   tables->operands[2].role = LOOM_LOW_OPERAND_ROLE_OPERAND;
   tables->operands[2].reg_class_alt_start = 0;
@@ -145,7 +134,7 @@ void InitializeTestTables(TestTables* tables) {
   tables->operands[2].unit_count = 1;
   tables->operands[2].read_stage = 0;
 
-  tables->operands[3].field_name_string_offset = TEST_STRING_OFFSET(field_rhs);
+  tables->operands[3].field_name_string_ref = TEST_STRING_REF(field_rhs);
   tables->operands[3].source_value_index = 1;
   tables->operands[3].role = LOOM_LOW_OPERAND_ROLE_OPERAND;
   tables->operands[3].reg_class_alt_start = 0;
@@ -153,8 +142,7 @@ void InitializeTestTables(TestTables* tables) {
   tables->operands[3].unit_count = 1;
   tables->operands[3].read_stage = 0;
 
-  tables->immediates[0].field_name_string_offset =
-      TEST_STRING_OFFSET(field_value);
+  tables->immediates[0].field_name_string_ref = TEST_STRING_REF(field_value);
   tables->immediates[0].kind = LOOM_LOW_IMMEDIATE_KIND_SIGNED;
   tables->immediates[0].bit_width = 32;
   tables->immediates[0].value_step = 1;
@@ -162,16 +150,16 @@ void InitializeTestTables(TestTables* tables) {
   tables->immediates[0].signed_min = INT32_MIN;
   tables->immediates[0].unsigned_max = INT32_MAX;
 
-  tables->enum_domains[0].name_string_offset = TEST_STRING_OFFSET(enum_mode);
+  tables->enum_domains[0].name_string_ref = TEST_STRING_REF(enum_mode);
   tables->enum_domains[0].value_start = 0;
   tables->enum_domains[0].value_count = 2;
 
-  tables->enum_values[0].token_string_offset = TEST_STRING_OFFSET(enum_fast);
+  tables->enum_values[0].token_string_ref = TEST_STRING_REF(enum_fast);
   tables->enum_values[0].value = 0;
-  tables->enum_values[1].token_string_offset = TEST_STRING_OFFSET(enum_slow);
+  tables->enum_values[1].token_string_ref = TEST_STRING_REF(enum_slow);
   tables->enum_values[1].value = 1;
 
-  tables->resources[0].name_string_offset = TEST_STRING_OFFSET(resource_alu);
+  tables->resources[0].name_string_ref = TEST_STRING_REF(resource_alu);
   tables->resources[0].capacity_per_cycle = 1;
   tables->resources[0].kind = LOOM_LOW_RESOURCE_KIND_SCALAR_ALU;
 
@@ -189,13 +177,11 @@ void InitializeTestTables(TestTables* tables) {
   tables->pressure_deltas[0].reg_class_id = 0;
   tables->pressure_deltas[0].delta = -1;
 
-  tables->schedule_classes[0].name_string_offset =
-      TEST_STRING_OFFSET(schedule_const);
+  tables->schedule_classes[0].name_string_ref = TEST_STRING_REF(schedule_const);
   tables->schedule_classes[0].latency_kind = LOOM_LOW_LATENCY_KIND_EXACT;
   tables->schedule_classes[0].model_quality = LOOM_LOW_MODEL_QUALITY_EXACT;
 
-  tables->schedule_classes[1].name_string_offset =
-      TEST_STRING_OFFSET(schedule_alu);
+  tables->schedule_classes[1].name_string_ref = TEST_STRING_REF(schedule_alu);
   tables->schedule_classes[1].latency_cycles = 1;
   tables->schedule_classes[1].latency_kind = LOOM_LOW_LATENCY_KIND_EXACT;
   tables->schedule_classes[1].issue_use_start = 0;
@@ -205,14 +191,12 @@ void InitializeTestTables(TestTables* tables) {
 
   tables->feature_mask_words[0] = UINT64_C(0x5);
 
-  tables->descriptors[0].key_string_offset =
-      TEST_STRING_OFFSET(descriptor_const);
+  tables->descriptors[0].key_string_ref = TEST_STRING_REF(descriptor_const);
   tables->descriptors[0].stable_id =
       loom_low_descriptor_stable_id_from_key(IREE_SV("test.const.i32"));
-  tables->descriptors[0].mnemonic_string_offset =
-      TEST_STRING_OFFSET(mnemonic_const);
-  tables->descriptors[0].semantic_tag_string_offset =
-      TEST_STRING_OFFSET(semantic_const);
+  tables->descriptors[0].mnemonic_string_ref = TEST_STRING_REF(mnemonic_const);
+  tables->descriptors[0].semantic_tag_string_ref =
+      TEST_STRING_REF(semantic_const);
   tables->descriptors[0].operand_start = 0;
   tables->descriptors[0].operand_count = 1;
   tables->descriptors[0].result_count = 1;
@@ -224,13 +208,12 @@ void InitializeTestTables(TestTables* tables) {
   tables->descriptor_views[0].canonical_asm_form_ordinal =
       LOOM_LOW_ASM_FORM_ORDINAL_NONE;
 
-  tables->descriptors[1].key_string_offset = TEST_STRING_OFFSET(descriptor_add);
+  tables->descriptors[1].key_string_ref = TEST_STRING_REF(descriptor_add);
   tables->descriptors[1].stable_id =
       loom_low_descriptor_stable_id_from_key(IREE_SV("test.add.i32"));
-  tables->descriptors[1].mnemonic_string_offset =
-      TEST_STRING_OFFSET(mnemonic_add);
-  tables->descriptors[1].semantic_tag_string_offset =
-      TEST_STRING_OFFSET(semantic_add);
+  tables->descriptors[1].mnemonic_string_ref = TEST_STRING_REF(mnemonic_add);
+  tables->descriptors[1].semantic_tag_string_ref =
+      TEST_STRING_REF(semantic_add);
   tables->descriptors[1].feature_mask_word_start = 0;
   tables->descriptors[1].feature_mask_word_count = 1;
   tables->descriptors[1].operand_start = 1;
@@ -242,11 +225,9 @@ void InitializeTestTables(TestTables* tables) {
   tables->descriptor_views[1].canonical_asm_form_ordinal =
       LOOM_LOW_ASM_FORM_ORDINAL_NONE;
 
-  tables->descriptor_refs[0].key_string_offset =
-      TEST_STRING_OFFSET(descriptor_add);
+  tables->descriptor_refs[0].key_string_ref = TEST_STRING_REF(descriptor_add);
   tables->descriptor_refs[0].descriptor_ordinal = 1;
-  tables->descriptor_refs[1].key_string_offset =
-      TEST_STRING_OFFSET(descriptor_const);
+  tables->descriptor_refs[1].key_string_ref = TEST_STRING_REF(descriptor_const);
   tables->descriptor_refs[1].descriptor_ordinal = 0;
 
   tables->set.abi_version = LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION;
@@ -255,11 +236,11 @@ void InitializeTestTables(TestTables* tables) {
       loom_low_descriptor_stable_id_from_key(IREE_SV("test.core"));
   tables->set.target_stable_id =
       loom_low_descriptor_stable_id_from_key(IREE_SV("test.target"));
-  tables->set.key_string_offset = TEST_STRING_OFFSET(set_key);
-  tables->set.target_key_string_offset = TEST_STRING_OFFSET(target_key);
-  tables->set.feature_key_string_offset = TEST_STRING_OFFSET(feature_key);
-  tables->set.string_table.data = kTestStrings;
-  tables->set.string_table.data_length = sizeof(kTestStrings) - 1;
+  tables->set.key_string_ref = TEST_STRING_REF(set_key);
+  tables->set.target_key_string_ref = TEST_STRING_REF(target_key);
+  tables->set.feature_key_string_ref = TEST_STRING_REF(feature_key);
+  tables->set.string_pool.data = kTestStrings;
+  tables->set.string_pool.data_length = sizeof(kTestStrings) - 1;
   tables->set.descriptors = tables->descriptors;
   tables->set.descriptor_views = tables->descriptor_views;
   tables->set.descriptor_count = IREE_ARRAYSIZE(tables->descriptors);
@@ -304,12 +285,11 @@ void AddAsmForms(TestTables* tables) {
   tables->asm_operand_indices[3] = 0;
 
   tables->asm_immediates[0].immediate_index = 0;
-  tables->asm_immediates[0].name_string_offset = LOOM_LOW_STRING_OFFSET_NONE;
+  tables->asm_immediates[0].name_string_ref = LOOM_STRING_REF_NONE;
 
-  tables->asm_forms[0].mnemonic_string_offset =
-      TEST_STRING_OFFSET(mnemonic_add);
-  tables->asm_forms[0].native_assembly_mnemonic_string_offset =
-      LOOM_LOW_STRING_OFFSET_NONE;
+  tables->asm_forms[0].mnemonic_string_ref = TEST_STRING_REF(mnemonic_add);
+  tables->asm_forms[0].native_assembly_mnemonic_string_ref =
+      LOOM_STRING_REF_NONE;
   tables->asm_forms[0].descriptor_ordinal = 1;
   tables->asm_forms[0].result_operand_index_start = 0;
   tables->asm_forms[0].result_value_type_start =
@@ -320,10 +300,9 @@ void AddAsmForms(TestTables* tables) {
   tables->asm_forms[0].immediate_start = 0;
   tables->asm_forms[0].immediate_count = 0;
 
-  tables->asm_forms[1].mnemonic_string_offset =
-      TEST_STRING_OFFSET(mnemonic_const);
-  tables->asm_forms[1].native_assembly_mnemonic_string_offset =
-      LOOM_LOW_STRING_OFFSET_NONE;
+  tables->asm_forms[1].mnemonic_string_ref = TEST_STRING_REF(mnemonic_const);
+  tables->asm_forms[1].native_assembly_mnemonic_string_ref =
+      LOOM_STRING_REF_NONE;
   tables->asm_forms[1].descriptor_ordinal = 0;
   tables->asm_forms[1].result_operand_index_start = 3;
   tables->asm_forms[1].result_value_type_start =
@@ -371,10 +350,10 @@ void AddAddDescriptorConstraint(TestTables* tables,
 
 void ConfigureAddStorageContinuation(TestTables* tables) {
   tables->reg_classes[0].full_register_part_mask = 0x3;
-  tables->register_parts[0].name_string_offset = TEST_STRING_OFFSET(field_lhs);
+  tables->register_parts[0].name_string_ref = TEST_STRING_REF(field_lhs);
   tables->register_parts[0].reg_class_id = 0;
   tables->register_parts[0].mask = 0x1;
-  tables->register_parts[1].name_string_offset = TEST_STRING_OFFSET(field_rhs);
+  tables->register_parts[1].name_string_ref = TEST_STRING_REF(field_rhs);
   tables->register_parts[1].reg_class_id = 0;
   tables->register_parts[1].mask = 0x2;
   tables->set.register_parts = tables->register_parts;
@@ -1616,8 +1595,7 @@ TEST(LowDescriptorsTest, RejectsScheduleClassMissingEffectFlag) {
 TEST(LowDescriptorsTest, RejectsDuplicateKeys) {
   TestTables tables;
   InitializeTestTables(&tables);
-  tables.descriptors[1].key_string_offset =
-      tables.descriptors[0].key_string_offset;
+  tables.descriptors[1].key_string_ref = tables.descriptors[0].key_string_ref;
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));
@@ -1626,11 +1604,9 @@ TEST(LowDescriptorsTest, RejectsDuplicateKeys) {
 TEST(LowDescriptorsTest, RejectsUnsortedDescriptorReferences) {
   TestTables tables;
   InitializeTestTables(&tables);
-  tables.descriptor_refs[0].key_string_offset =
-      TEST_STRING_OFFSET(descriptor_const);
+  tables.descriptor_refs[0].key_string_ref = TEST_STRING_REF(descriptor_const);
   tables.descriptor_refs[0].descriptor_ordinal = 0;
-  tables.descriptor_refs[1].key_string_offset =
-      TEST_STRING_OFFSET(descriptor_add);
+  tables.descriptor_refs[1].key_string_ref = TEST_STRING_REF(descriptor_add);
   tables.descriptor_refs[1].descriptor_ordinal = 1;
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -1824,8 +1800,8 @@ TEST(LowDescriptorsTest, AcceptsAsmFormNativeAssemblyMnemonic) {
   TestTables tables;
   InitializeTestTables(&tables);
   AddAsmForms(&tables);
-  tables.asm_forms[0].native_assembly_mnemonic_string_offset =
-      TEST_STRING_OFFSET(mnemonic_const);
+  tables.asm_forms[0].native_assembly_mnemonic_string_ref =
+      TEST_STRING_REF(mnemonic_const);
 
   IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
 }
@@ -1834,8 +1810,8 @@ TEST(LowDescriptorsTest, RejectsEmptyAsmFormNativeAssemblyMnemonic) {
   TestTables tables;
   InitializeTestTables(&tables);
   AddAsmForms(&tables);
-  tables.asm_forms[0].native_assembly_mnemonic_string_offset =
-      TEST_STRING_OFFSET(empty);
+  tables.asm_forms[0].native_assembly_mnemonic_string_ref =
+      TEST_STRING_REF(empty);
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));
@@ -1846,8 +1822,7 @@ TEST(LowDescriptorsTest, HidesSharedExtensionAsmFormsFromBaseView) {
   InitializeTestTables(&tables);
   AddAsmForms(&tables);
   tables.set.descriptor_count = 1;
-  tables.descriptor_refs[0].key_string_offset =
-      TEST_STRING_OFFSET(descriptor_const);
+  tables.descriptor_refs[0].key_string_ref = TEST_STRING_REF(descriptor_const);
   tables.descriptor_refs[0].descriptor_ordinal = 0;
   tables.set.descriptor_ref_count = 1;
 
@@ -1879,9 +1854,8 @@ TEST(LowDescriptorsTest, RejectsUnsortedAsmForms) {
   TestTables tables;
   InitializeTestTables(&tables);
   AddAsmForms(&tables);
-  tables.asm_forms[0].mnemonic_string_offset =
-      TEST_STRING_OFFSET(mnemonic_const);
-  tables.asm_forms[1].mnemonic_string_offset = TEST_STRING_OFFSET(mnemonic_add);
+  tables.asm_forms[0].mnemonic_string_ref = TEST_STRING_REF(mnemonic_const);
+  tables.asm_forms[1].mnemonic_string_ref = TEST_STRING_REF(mnemonic_add);
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));
@@ -1891,7 +1865,7 @@ TEST(LowDescriptorsTest, RejectsDuplicateAsmFormMnemonics) {
   TestTables tables;
   InitializeTestTables(&tables);
   AddAsmForms(&tables);
-  tables.asm_forms[1].mnemonic_string_offset = TEST_STRING_OFFSET(mnemonic_add);
+  tables.asm_forms[1].mnemonic_string_ref = TEST_STRING_REF(mnemonic_add);
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));
@@ -2026,8 +2000,7 @@ TEST(LowDescriptorsTest, RejectsUnknownScheduleModelData) {
 TEST(LowDescriptorsTest, AcceptsEnumImmediateDomain) {
   TestTables tables;
   InitializeTestTables(&tables);
-  tables.immediates[0].field_name_string_offset =
-      TEST_STRING_OFFSET(field_mode);
+  tables.immediates[0].field_name_string_ref = TEST_STRING_REF(field_mode);
   tables.immediates[0].kind = LOOM_LOW_IMMEDIATE_KIND_ENUM;
   tables.immediates[0].enum_domain_id = 0;
   tables.set.enum_domain_count = 1;
@@ -2039,8 +2012,7 @@ TEST(LowDescriptorsTest, AcceptsEnumImmediateDomain) {
 TEST(LowDescriptorsTest, AcceptsEnumImmediateDefaultInDomain) {
   TestTables tables;
   InitializeTestTables(&tables);
-  tables.immediates[0].field_name_string_offset =
-      TEST_STRING_OFFSET(field_mode);
+  tables.immediates[0].field_name_string_ref = TEST_STRING_REF(field_mode);
   tables.immediates[0].kind = LOOM_LOW_IMMEDIATE_KIND_ENUM;
   tables.immediates[0].flags = LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE;
   tables.immediates[0].enum_domain_id = 0;
@@ -2054,8 +2026,7 @@ TEST(LowDescriptorsTest, AcceptsEnumImmediateDefaultInDomain) {
 TEST(LowDescriptorsTest, RejectsEnumImmediateDefaultOutsideDomain) {
   TestTables tables;
   InitializeTestTables(&tables);
-  tables.immediates[0].field_name_string_offset =
-      TEST_STRING_OFFSET(field_mode);
+  tables.immediates[0].field_name_string_ref = TEST_STRING_REF(field_mode);
   tables.immediates[0].kind = LOOM_LOW_IMMEDIATE_KIND_ENUM;
   tables.immediates[0].flags = LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE;
   tables.immediates[0].enum_domain_id = 0;
@@ -2111,8 +2082,8 @@ TEST(LowDescriptorsTest, RejectsEnumDomainWithoutValues) {
 TEST(LowDescriptorsTest, RejectsUnsortedEnumDomainValues) {
   TestTables tables;
   InitializeTestTables(&tables);
-  tables.enum_values[0].token_string_offset = TEST_STRING_OFFSET(enum_slow);
-  tables.enum_values[1].token_string_offset = TEST_STRING_OFFSET(enum_fast);
+  tables.enum_values[0].token_string_ref = TEST_STRING_REF(enum_slow);
+  tables.enum_values[1].token_string_ref = TEST_STRING_REF(enum_fast);
   tables.set.enum_domain_count = 1;
   tables.set.enum_value_count = 2;
 

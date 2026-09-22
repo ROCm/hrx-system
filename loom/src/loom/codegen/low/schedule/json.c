@@ -180,8 +180,8 @@ static iree_status_t loom_low_schedule_json_descriptor_key(
   if (node->descriptor == NULL) {
     return iree_ok_status();
   }
-  *out_key = loom_low_descriptor_set_string(
-      table->target.descriptor_set, node->descriptor->key_string_offset);
+  *out_key = loom_low_descriptor_set_string(table->target.descriptor_set,
+                                            node->descriptor->key_string_ref);
   return iree_ok_status();
 }
 
@@ -454,7 +454,7 @@ iree_status_t loom_low_schedule_format_json(
     if (source_descriptor != NULL && source_descriptor != node->descriptor) {
       const iree_string_view_t source_descriptor_key =
           loom_low_descriptor_set_string(table->target.descriptor_set,
-                                         source_descriptor->key_string_offset);
+                                         source_descriptor->key_string_ref);
       IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
           &node_object, IREE_SV("source_descriptor"), source_descriptor_key));
     }
@@ -462,7 +462,7 @@ iree_status_t loom_low_schedule_format_json(
     iree_string_view_t schedule_class_name = iree_string_view_empty();
     if (schedule_class != NULL) {
       schedule_class_name = loom_low_descriptor_set_string(
-          table->target.descriptor_set, schedule_class->name_string_offset);
+          table->target.descriptor_set, schedule_class->name_string_ref);
     }
     IREE_RETURN_IF_ERROR(
         loom_json_object_begin_field(&node_object, IREE_SV("schedule_class")));
@@ -860,7 +860,7 @@ iree_status_t loom_low_schedule_format_json(
         IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
             &use_object, IREE_SV("resource"),
             loom_low_descriptor_set_string(descriptor_set,
-                                           resource->name_string_offset)));
+                                           resource->name_string_ref)));
         const iree_string_view_t resource_kind_name =
             loom_low_resource_kind_name(resource->kind);
         IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(

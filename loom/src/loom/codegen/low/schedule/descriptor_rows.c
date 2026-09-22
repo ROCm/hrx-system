@@ -244,7 +244,7 @@ iree_status_t loom_low_schedule_note_descriptor_rows_for_node(
     }
     if (model_summary->use_count == 0) {
       iree_string_view_t schedule_class_name = loom_low_descriptor_set_string(
-          state->target.descriptor_set, schedule_class->name_string_offset);
+          state->target.descriptor_set, schedule_class->name_string_ref);
       *model_summary = (loom_low_schedule_model_summary_t){
           .first_node = node_index,
           .schedule_class_id = schedule_class_id,
@@ -300,7 +300,7 @@ iree_status_t loom_low_schedule_note_descriptor_rows_for_node(
       const loom_low_resource_t* resource =
           &state->target.descriptor_set->resources[hazard->reference_id];
       resource_name = loom_low_descriptor_set_string(
-          state->target.descriptor_set, resource->name_string_offset);
+          state->target.descriptor_set, resource->name_string_ref);
     }
     IREE_RETURN_IF_ERROR(loom_low_schedule_append_hazard_use(
         state, (loom_low_schedule_hazard_use_t){

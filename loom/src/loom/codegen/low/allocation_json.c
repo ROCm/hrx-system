@@ -288,7 +288,7 @@ static iree_status_t loom_low_allocation_json_write_value_class(
     IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
         &object, IREE_SV("register_class"),
         loom_low_descriptor_set_string(table->target.descriptor_set,
-                                       reg_class->name_string_offset)));
+                                       reg_class->name_string_ref)));
   } else {
     IREE_RETURN_IF_ERROR(
         loom_json_object_write_null_field(&object, IREE_SV("register_class")));
@@ -362,7 +362,7 @@ static iree_status_t loom_low_allocation_json_write_register_class_or_null(
       &table->target.descriptor_set->reg_classes[descriptor_reg_class_id];
   return loom_json_write_escaped_string(
       stream, loom_low_descriptor_set_string(table->target.descriptor_set,
-                                             reg_class->name_string_offset));
+                                             reg_class->name_string_ref));
 }
 
 static iree_status_t loom_low_allocation_json_write_storage_lease_record(

@@ -1716,9 +1716,8 @@ static iree_status_t loom_amdgpu_vopd_plan_write_packet_descriptor_json(
         "AMDGPU VOPD packet descriptor row does not belong to the selected "
         "descriptor set");
   }
-  iree_string_view_t descriptor_key =
-      loom_low_descriptor_set_string(plan->schedule->target.descriptor_set,
-                                     packet.descriptor->key_string_offset);
+  iree_string_view_t descriptor_key = loom_low_descriptor_set_string(
+      plan->schedule->target.descriptor_set, packet.descriptor->key_string_ref);
   return loom_json_write_escaped_string(stream, descriptor_key);
 }
 

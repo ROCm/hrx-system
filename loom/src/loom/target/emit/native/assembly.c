@@ -22,8 +22,8 @@ iree_string_view_t loom_native_assembly_module_string(
 
 iree_string_view_t loom_native_assembly_descriptor_string(
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_bstring_table_offset_t string_offset) {
-  return loom_low_descriptor_set_string(descriptor_set, string_offset);
+    loom_string_ref_t string_ref) {
+  return loom_low_descriptor_set_string(descriptor_set, string_ref);
 }
 
 const loom_named_attr_t* loom_native_assembly_find_attr(

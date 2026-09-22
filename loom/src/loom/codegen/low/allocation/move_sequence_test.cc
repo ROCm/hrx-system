@@ -30,7 +30,7 @@ const loom_low_descriptor_set_t* IndependentDescriptorSet() {
 const loom_low_descriptor_set_t* AliasDescriptorSet() {
   static const loom_low_reg_class_t kRegClasses[] = {
       {
-          /*.name_string_offset=*/{},
+          /*.name_string_ref=*/{},
           /*.target_bank_id=*/{},
           /*.flags=*/{},
           /*.alloc_unit_bits=*/{},
@@ -42,7 +42,7 @@ const loom_low_descriptor_set_t* AliasDescriptorSet() {
           /*.alias_set_id=*/1,
       },
       {
-          /*.name_string_offset=*/{},
+          /*.name_string_ref=*/{},
           /*.target_bank_id=*/{},
           /*.flags=*/{},
           /*.alloc_unit_bits=*/{},

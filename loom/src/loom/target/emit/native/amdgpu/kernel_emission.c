@@ -102,12 +102,11 @@ loom_amdgpu_kernel_emission_wait_endpoint(
   }
   if (node->descriptor != NULL) {
     endpoint.descriptor_key = loom_low_descriptor_set_string(
-        schedule->target.descriptor_set, node->descriptor->key_string_offset);
-    if (node->descriptor->semantic_tag_string_offset !=
-        LOOM_LOW_STRING_OFFSET_NONE) {
+        schedule->target.descriptor_set, node->descriptor->key_string_ref);
+    if (node->descriptor->semantic_tag_string_ref != LOOM_STRING_REF_NONE) {
       endpoint.semantic_tag = loom_low_descriptor_set_string(
           schedule->target.descriptor_set,
-          node->descriptor->semantic_tag_string_offset);
+          node->descriptor->semantic_tag_string_ref);
     }
   }
   return endpoint;
@@ -289,12 +288,12 @@ static iree_status_t loom_amdgpu_kernel_emission_record_native_insertions(
                                                 insertion->descriptor_ref);
       IREE_ASSERT(packet_descriptor != NULL);
       packet_key = loom_low_descriptor_set_string(
-          descriptor_set, packet_descriptor->key_string_offset);
+          descriptor_set, packet_descriptor->key_string_ref);
     }
     iree_string_view_t boundary_descriptor_key = iree_string_view_empty();
     if (node->descriptor != NULL) {
       boundary_descriptor_key = loom_low_descriptor_set_string(
-          descriptor_set, node->descriptor->key_string_offset);
+          descriptor_set, node->descriptor->key_string_ref);
     }
     loom_target_compile_report_target_insertion_row_t row = {
         .function_name = report->function_name,

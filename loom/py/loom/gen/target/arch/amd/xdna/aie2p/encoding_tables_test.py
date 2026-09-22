@@ -65,8 +65,10 @@ def test_outputs_contain_owned_tables() -> None:
     assert ".encoding_adapter_id = " in descriptor_source_contents
     assert ".physical_register_count = IREE_ARRAYSIZE(kAie2pCorePhysicalRegisters)" in descriptor_source_contents
     assert "loom_aie2p_array_descriptor_set" in array_descriptor_header_contents
-    assert "amd.xdna.aie2p.array.worker" in array_descriptor_source_contents
-    assert "aie2p.array.binding_access" in array_descriptor_source_contents
+    # A shared spelling may span adjacent literals in the compact byte pool.
+    string_data = array_descriptor_source_contents.replace('"\n    "', "")
+    assert "amd.xdna.aie2p.array.worker" in string_data
+    assert "aie2p.array.binding_access" in string_data
 
 
 def test_check_validates_without_output() -> None:

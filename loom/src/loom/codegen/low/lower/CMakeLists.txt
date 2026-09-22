@@ -102,10 +102,10 @@ loom_cc_library(
     loom::target::low_legality
     loom::target::registers
     loom::target::types
-    loom::util::bstring
     loom::util::cfg_graph
     loom::util::cfg_loop_nest
     loom::util::fact_table
+    loom::util::string_pool
   PUBLIC
 )
 

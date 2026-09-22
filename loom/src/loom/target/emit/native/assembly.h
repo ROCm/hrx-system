@@ -87,7 +87,7 @@ iree_string_view_t loom_native_assembly_module_string(
 // Returns a verified string from |descriptor_set|.
 iree_string_view_t loom_native_assembly_descriptor_string(
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_bstring_table_offset_t string_offset);
+    loom_string_ref_t string_ref);
 
 // Finds a named attribute by textual key in |attrs|.
 const loom_named_attr_t* loom_native_assembly_find_attr(

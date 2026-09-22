@@ -510,7 +510,7 @@ iree_status_t loom_amdgpu_emit_fmaf_literal_operand_form_diagnostic(
   const iree_string_view_t descriptor_name = loom_low_lower_rule_set_string(
       &loom_amdgpu_arithmetic_lower_rule_set,
       loom_amdgpu_arithmetic_lower_rule_set.descriptor_refs[descriptor_ref]
-          .key_string_offset);
+          .key_string_ref);
   const bool selected_literal =
       iree_string_view_equal(descriptor_name, IREE_SV("amdgpu.v_fmaak_f32")) ||
       iree_string_view_equal(descriptor_name, IREE_SV("amdgpu.v_fmamk_f32"));
@@ -568,7 +568,7 @@ static iree_status_t loom_amdgpu_emit_mulf_mix_operand_form_diagnostic(
   const loom_low_descriptor_set_t* descriptor_set =
       loom_low_lower_context_descriptor_set(context);
   const iree_string_view_t descriptor_name = loom_low_descriptor_set_string(
-      descriptor_set, descriptor.descriptor->key_string_offset);
+      descriptor_set, descriptor.descriptor->key_string_ref);
   const iree_string_view_t descriptor_set_name =
       loom_amdgpu_descriptor_set_key(descriptor_set);
   const iree_string_view_t decision_key =

@@ -42,51 +42,36 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   constexpr uint32_t kSourceAssignmentIndex = 0;
   constexpr uint32_t kResultAssignmentIndex = 1;
   constexpr uint32_t kEdgeCopyCount = 1;
-  constexpr uint32_t kRegisterCopyTagOffset = 0;
-  constexpr uint32_t kMemoryGlobalTagOffset =
-      kRegisterCopyTagOffset + sizeof("register.copy.b32");
-  constexpr uint32_t kMemoryStackLoadTagOffset =
-      kMemoryGlobalTagOffset + sizeof("memory.global.load.u32");
-  constexpr uint32_t kMemoryStackStoreTagOffset =
-      kMemoryStackLoadTagOffset + sizeof("memory.stack.load.u32");
-  constexpr uint32_t kMatrixWmmaTagOffset =
-      kMemoryStackStoreTagOffset + sizeof("memory.stack.store.u128");
-  constexpr uint32_t kMatrixSwmmacTagOffset =
-      kMatrixWmmaTagOffset + sizeof("matrix.wmma.f32");
-  constexpr uint32_t kMatrixSmfmacTagOffset =
-      kMatrixSwmmacTagOffset + sizeof("matrix.swmmac.f32");
-  constexpr uint32_t kRegisterClassGprOffset =
-      kMatrixSmfmacTagOffset + sizeof("matrix.smfmac.f32");
-  static const uint8_t kDescriptorStringTable[] =
-      "\x11"
+  static const char kDescriptorStringPool[] =
       "register.copy.b32"
-      "\x16"
       "memory.global.load.u32"
-      "\x15"
       "memory.stack.load.u32"
-      "\x17"
       "memory.stack.store.u128"
-      "\x0f"
       "matrix.wmma.f32"
-      "\x11"
       "matrix.swmmac.f32"
-      "\x11"
       "matrix.smfmac.f32"
-      "\x08"
       "test.gpr";
+  constexpr loom_string_ref_t kRegisterCopyTag = LOOM_STRING_REF(0, 17);
+  constexpr loom_string_ref_t kMemoryGlobalTag = LOOM_STRING_REF(17, 22);
+  constexpr loom_string_ref_t kMemoryStackLoadTag = LOOM_STRING_REF(39, 21);
+  constexpr loom_string_ref_t kMemoryStackStoreTag = LOOM_STRING_REF(60, 23);
+  constexpr loom_string_ref_t kMatrixWmmaTag = LOOM_STRING_REF(83, 15);
+  constexpr loom_string_ref_t kMatrixSwmmacTag = LOOM_STRING_REF(98, 17);
+  constexpr loom_string_ref_t kMatrixSmfmacTag = LOOM_STRING_REF(115, 17);
+  constexpr loom_string_ref_t kRegisterClassGpr = LOOM_STRING_REF(132, 8);
   loom_low_descriptor_t descriptors[8] = {};
   loom_low_descriptor_view_t descriptor_views[8] = {};
-  descriptors[0].semantic_tag_string_offset = kRegisterCopyTagOffset;
-  descriptors[1].semantic_tag_string_offset = kMemoryGlobalTagOffset;
-  descriptors[2].semantic_tag_string_offset = kMemoryStackLoadTagOffset;
+  descriptors[0].semantic_tag_string_ref = kRegisterCopyTag;
+  descriptors[1].semantic_tag_string_ref = kMemoryGlobalTag;
+  descriptors[2].semantic_tag_string_ref = kMemoryStackLoadTag;
   descriptors[2].effect_count = 1;
-  descriptors[3].semantic_tag_string_offset = kMemoryStackStoreTagOffset;
+  descriptors[3].semantic_tag_string_ref = kMemoryStackStoreTag;
   descriptors[3].effect_start = 1;
   descriptors[3].effect_count = 1;
-  descriptors[4].semantic_tag_string_offset = kMatrixWmmaTagOffset;
-  descriptors[5].semantic_tag_string_offset = kMemoryGlobalTagOffset;
-  descriptors[6].semantic_tag_string_offset = kMatrixSwmmacTagOffset;
-  descriptors[7].semantic_tag_string_offset = kMatrixSmfmacTagOffset;
+  descriptors[4].semantic_tag_string_ref = kMatrixWmmaTag;
+  descriptors[5].semantic_tag_string_ref = kMemoryGlobalTag;
+  descriptors[6].semantic_tag_string_ref = kMatrixSwmmacTag;
+  descriptors[7].semantic_tag_string_ref = kMatrixSmfmacTag;
   const loom_low_effect_t effects[] = {
       {
           /*.kind=*/LOOM_LOW_EFFECT_KIND_READ,
@@ -108,7 +93,7 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   const loom_low_schedule_class_t schedule_classes[5] = {};
   const loom_low_reg_class_t reg_classes[] = {
       {
-          /*.name_string_offset=*/kRegisterClassGprOffset,
+          /*.name_string_ref=*/kRegisterClassGpr,
           /*.target_bank_id=*/{},
           /*.flags=*/LOOM_LOW_REG_CLASS_FLAG_PHYSICAL,
           /*.alloc_unit_bits=*/32,
@@ -125,9 +110,9 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   };
   loom_low_descriptor_set_t descriptor_set = {};
   descriptor_set.stable_id = 1;
-  descriptor_set.string_table = {
-      /*.data=*/kDescriptorStringTable,
-      /*.data_length=*/sizeof(kDescriptorStringTable) - 1,
+  descriptor_set.string_pool = {
+      /*.data=*/kDescriptorStringPool,
+      /*.data_length=*/sizeof(kDescriptorStringPool) - 1,
   };
   descriptor_set.descriptors = descriptors;
   descriptor_set.descriptor_views = descriptor_views;

@@ -31,29 +31,24 @@ namespace {
 constexpr loom_op_kind_t kSourceOpKind = LOOM_OP_KIND(7, 3);
 constexpr uint64_t kDescriptorId = UINT64_C(0x123456789abcdef0);
 
-const uint8_t kRuleStringData[] = LOOM_BSTRING_LITERAL(15, "test.descriptor")
-    LOOM_BSTRING_LITERAL(11, "test.source") LOOM_BSTRING_LITERAL(5, "field")
-        LOOM_BSTRING_LITERAL(5, "value") LOOM_BSTRING_LITERAL(9, "attr_kind");
+const char kRuleStringData[] = "test.descriptortest.sourcefieldvalueattr_kind";
 
-enum : loom_bstring_table_offset_t {
-  kRuleStringDescriptor = 0,
-  kRuleStringSource = kRuleStringDescriptor + sizeof("test.descriptor"),
-  kRuleStringField = kRuleStringSource + sizeof("test.source"),
-  kRuleStringValue = kRuleStringField + sizeof("field"),
-  kRuleStringAttrKind = kRuleStringValue + sizeof("value"),
-  kRuleStringEnd = kRuleStringAttrKind + sizeof("attr_kind"),
+enum : loom_string_ref_t {
+  kRuleStringDescriptor = LOOM_STRING_REF(0, 15),
+  kRuleStringSource = LOOM_STRING_REF(15, 11),
+  kRuleStringField = LOOM_STRING_REF(26, 5),
+  kRuleStringValue = LOOM_STRING_REF(31, 5),
+  kRuleStringAttrKind = LOOM_STRING_REF(36, 9),
 };
 
-const loom_bstring_table_t kRuleStringTable = {
+const loom_string_pool_t kRuleStringPool = {
     /*.data=*/kRuleStringData,
     /*.data_length=*/sizeof(kRuleStringData) - 1,
 };
 
-static_assert(kRuleStringEnd == sizeof(kRuleStringData) - 1);
-
 const loom_low_descriptor_t kDescriptor = {
     /*.stable_id=*/kDescriptorId,
-    /*.key_string_offset=*/0,
+    /*.key_string_ref=*/kRuleStringDescriptor,
 };
 
 iree_status_t ResolveTestDescriptorRef(
@@ -269,17 +264,17 @@ TEST_F(LowContractQuerySourceMemoryTest,
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL,
           /*.reserved=*/{},
-          /*.value=*/{/*.string_value_offset=*/kRuleStringField},
+          /*.value=*/{/*.string_value_ref=*/kRuleStringField},
       },
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL,
           /*.reserved=*/{},
-          /*.value=*/{/*.string_value_offset=*/kRuleStringValue},
+          /*.value=*/{/*.string_value_ref=*/kRuleStringValue},
       },
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL,
           /*.reserved=*/{},
-          /*.value=*/{/*.string_value_offset=*/kRuleStringAttrKind},
+          /*.value=*/{/*.string_value_ref=*/kRuleStringAttrKind},
       },
   };
   const loom_low_lower_diagnostic_param_ref_t diagnostic_param_refs[] = {0, 1,
@@ -291,7 +286,7 @@ TEST_F(LowContractQuerySourceMemoryTest,
       /*.flags=*/LOOM_LOW_LOWER_DIAGNOSTIC_FLAG_IMPLICIT_TARGET_CONTEXT,
   };
   loom_low_lower_rule_set_t rule_set = {};
-  rule_set.string_table = kRuleStringTable;
+  rule_set.string_pool = kRuleStringPool;
   rule_set.diagnostic_params = diagnostic_params;
   rule_set.diagnostic_param_count = IREE_ARRAYSIZE(diagnostic_params);
   rule_set.diagnostic_param_refs = diagnostic_param_refs;
@@ -319,7 +314,7 @@ TEST_F(LowContractQuerySourceMemoryTest,
 
 TEST(LowContractQueryTest, ContractIndexDescriptorRuleSelectsLegalCase) {
   loom_low_lower_rule_descriptor_ref_t descriptor_ref = {
-      /*.key_string_offset=*/kRuleStringDescriptor,
+      /*.key_string_ref=*/kRuleStringDescriptor,
   };
   loom_low_lower_emit_t emit = {};
   emit.kind = LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP;
@@ -329,7 +324,7 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleSelectsLegalCase) {
   rule.source_op_kind = kSourceOpKind;
   rule.emit_count = 1;
   loom_low_lower_rule_set_t rule_set = {};
-  rule_set.string_table = kRuleStringTable;
+  rule_set.string_pool = kRuleStringPool;
   rule_set.rules = &rule;
   rule_set.rule_count = 1;
   rule_set.descriptor_refs = &descriptor_ref;
@@ -404,22 +399,22 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleReportsRejectedCase) {
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL,
           /*.reserved=*/{},
-          /*.value=*/{/*.string_value_offset=*/kRuleStringSource},
+          /*.value=*/{/*.string_value_ref=*/kRuleStringSource},
       },
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL,
           /*.reserved=*/{},
-          /*.value=*/{/*.string_value_offset=*/kRuleStringField},
+          /*.value=*/{/*.string_value_ref=*/kRuleStringField},
       },
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL,
           /*.reserved=*/{},
-          /*.value=*/{/*.string_value_offset=*/kRuleStringValue},
+          /*.value=*/{/*.string_value_ref=*/kRuleStringValue},
       },
       {
           /*.kind=*/LOOM_LOW_LOWER_DIAGNOSTIC_PARAM_STRING_LITERAL,
           /*.reserved=*/{},
-          /*.value=*/{/*.string_value_offset=*/kRuleStringAttrKind},
+          /*.value=*/{/*.string_value_ref=*/kRuleStringAttrKind},
       },
   };
   const loom_low_lower_diagnostic_param_ref_t diagnostic_param_refs[] = {
@@ -432,7 +427,7 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleReportsRejectedCase) {
   rule.source_op_kind = kSourceOpKind;
   rule.guard_count = 1;
   loom_low_lower_rule_set_t rule_set = {};
-  rule_set.string_table = kRuleStringTable;
+  rule_set.string_pool = kRuleStringPool;
   rule_set.rules = &rule;
   rule_set.rule_count = 1;
   rule_set.guards = &guard;

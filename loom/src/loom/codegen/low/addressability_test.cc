@@ -16,36 +16,24 @@
 namespace loom {
 namespace {
 
-// clang-format off
-static const uint8_t kAddressabilityStrings[] =
-    LOOM_BSTRING_LITERAL(0, "")
-    LOOM_BSTRING_LITERAL(9, "test.core")
-    LOOM_BSTRING_LITERAL(8, "test.gpr")
-    LOOM_BSTRING_LITERAL(12, "test.packet")
-    LOOM_BSTRING_LITERAL(3, "dst")
-    LOOM_BSTRING_LITERAL(3, "src");
-// clang-format on
+static const char kAddressabilityStrings[] =
+    ""
+    "test.core"
+    "test.gpr"
+    "test.packet"
+    "dst"
+    "src";
 
-enum {
-  ADDRESSABILITY_STRING_empty = 0,
-  ADDRESSABILITY_STRING_set_key = ADDRESSABILITY_STRING_empty + sizeof(""),
-  ADDRESSABILITY_STRING_reg_gpr =
-      ADDRESSABILITY_STRING_set_key + sizeof("test.core"),
-  ADDRESSABILITY_STRING_descriptor_packet =
-      ADDRESSABILITY_STRING_reg_gpr + sizeof("test.gpr"),
-  ADDRESSABILITY_STRING_field_dst =
-      ADDRESSABILITY_STRING_descriptor_packet + sizeof("test.packet"),
-  ADDRESSABILITY_STRING_field_src =
-      ADDRESSABILITY_STRING_field_dst + sizeof("dst"),
-  ADDRESSABILITY_STRING_END = ADDRESSABILITY_STRING_field_src + sizeof("src"),
+enum : loom_string_ref_t {
+  ADDRESSABILITY_STRING_empty = LOOM_STRING_REF(0, 0),
+  ADDRESSABILITY_STRING_set_key = LOOM_STRING_REF(0, 9),
+  ADDRESSABILITY_STRING_reg_gpr = LOOM_STRING_REF(9, 8),
+  ADDRESSABILITY_STRING_descriptor_packet = LOOM_STRING_REF(17, 11),
+  ADDRESSABILITY_STRING_field_dst = LOOM_STRING_REF(28, 3),
+  ADDRESSABILITY_STRING_field_src = LOOM_STRING_REF(31, 3),
 };
 
-static_assert(
-    ADDRESSABILITY_STRING_END == sizeof(kAddressabilityStrings) - 1,
-    "addressability test string offsets must cover the table payload");
-
-#define ADDRESSABILITY_STRING_OFFSET(field) \
-  static_cast<loom_bstring_table_offset_t>(ADDRESSABILITY_STRING_##field)
+#define ADDRESSABILITY_STRING_REF(field) ADDRESSABILITY_STRING_##field
 
 struct AddressabilityTestState {
   loom_low_reg_class_t reg_classes[1] = {};
@@ -95,10 +83,9 @@ void InitializeAddressabilityTestState(
     AddressabilityTestState* state, uint32_t assigned_count = 1) {
   *state = {};
   state->descriptor_set.stable_id = 0x1000u;
-  state->descriptor_set.key_string_offset =
-      ADDRESSABILITY_STRING_OFFSET(set_key);
-  state->descriptor_set.string_table.data = kAddressabilityStrings;
-  state->descriptor_set.string_table.data_length =
+  state->descriptor_set.key_string_ref = ADDRESSABILITY_STRING_REF(set_key);
+  state->descriptor_set.string_pool.data = kAddressabilityStrings;
+  state->descriptor_set.string_pool.data_length =
       sizeof(kAddressabilityStrings) - 1;
   state->descriptor_set.reg_classes = state->reg_classes;
   state->descriptor_set.reg_class_count = IREE_ARRAYSIZE(state->reg_classes);
@@ -123,14 +110,13 @@ void InitializeAddressabilityTestState(
       /*.descriptor_set=*/&state->descriptor_set,
   };
 
-  state->reg_classes[0].name_string_offset =
-      ADDRESSABILITY_STRING_OFFSET(reg_gpr);
+  state->reg_classes[0].name_string_ref = ADDRESSABILITY_STRING_REF(reg_gpr);
   state->reg_class_alts[0] = (loom_low_reg_class_alt_t){
       /*.reg_class_id=*/0,
       /*.flags=*/LOOM_LOW_REG_CLASS_ALT_FLAG_PREFERRED,
   };
   state->operands[0] = (loom_low_operand_t){
-      /*.field_name_string_offset=*/ADDRESSABILITY_STRING_OFFSET(field_dst),
+      /*.field_name_string_ref=*/ADDRESSABILITY_STRING_REF(field_dst),
       /*.encoding_field_id=*/{},
       /*.source_value_index=*/0,
       /*.role=*/LOOM_LOW_OPERAND_ROLE_RESULT,
@@ -147,7 +133,7 @@ void InitializeAddressabilityTestState(
       /*.register_part_id=*/LOOM_LOW_REGISTER_PART_NONE,
   };
   state->operands[1] = (loom_low_operand_t){
-      /*.field_name_string_offset=*/ADDRESSABILITY_STRING_OFFSET(field_src),
+      /*.field_name_string_ref=*/ADDRESSABILITY_STRING_REF(field_src),
       /*.encoding_field_id=*/{},
       /*.source_value_index=*/0,
       /*.role=*/LOOM_LOW_OPERAND_ROLE_OPERAND,
@@ -163,8 +149,8 @@ void InitializeAddressabilityTestState(
       /*.data_format_id=*/{},
       /*.register_part_id=*/LOOM_LOW_REGISTER_PART_NONE,
   };
-  state->descriptors[0].key_string_offset =
-      ADDRESSABILITY_STRING_OFFSET(descriptor_packet);
+  state->descriptors[0].key_string_ref =
+      ADDRESSABILITY_STRING_REF(descriptor_packet);
   state->descriptors[0].operand_start = 0;
   state->descriptors[0].operand_count = IREE_ARRAYSIZE(state->operands);
   state->descriptors[0].result_count = 1;

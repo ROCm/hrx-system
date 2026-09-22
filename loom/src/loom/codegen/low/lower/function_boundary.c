@@ -27,7 +27,7 @@ static iree_status_t loom_low_lower_intern_descriptor_set_key(
     loom_low_lower_context_t* context,
     loom_string_id_t* out_descriptor_set_key) {
   iree_string_view_t descriptor_set_key = loom_low_descriptor_set_string(
-      context->descriptor_set, context->descriptor_set->key_string_offset);
+      context->descriptor_set, context->descriptor_set->key_string_ref);
   IREE_ASSERT_FALSE(iree_string_view_is_empty(descriptor_set_key));
   return loom_module_intern_string(context->module, descriptor_set_key,
                                    out_descriptor_set_key);

@@ -619,9 +619,9 @@ static iree_status_t loom_low_packet_json_write_generic_attrs(
 
 static iree_status_t loom_low_packet_json_write_descriptor_string_or_null(
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_bstring_table_offset_t string_offset, loom_output_stream_t* stream) {
+    loom_string_ref_t string_ref, loom_output_stream_t* stream) {
   iree_string_view_t value =
-      loom_low_descriptor_set_string(descriptor_set, string_offset);
+      loom_low_descriptor_set_string(descriptor_set, string_ref);
   return loom_low_packet_json_write_string_view_or_null(value, stream);
 }
 
@@ -689,7 +689,7 @@ static iree_status_t loom_low_packet_json_write_low_packet_attrs(
     const loom_low_immediate_t* immediate =
         &descriptor_set->immediates[immediate_index];
     iree_string_view_t name = loom_low_descriptor_set_string(
-        descriptor_set, immediate->field_name_string_offset);
+        descriptor_set, immediate->field_name_string_ref);
     loom_json_object_writer_t immediate_object;
     IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &immediate_object));
     IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
@@ -769,7 +769,7 @@ static iree_status_t loom_low_packet_json_write_packet(
     IREE_RETURN_IF_ERROR(
         loom_json_object_begin_field(&object, IREE_SV("descriptor")));
     IREE_RETURN_IF_ERROR(loom_low_packet_json_write_descriptor_string_or_null(
-        descriptor_set, descriptor->key_string_offset, stream));
+        descriptor_set, descriptor->key_string_ref, stream));
   } else {
     IREE_RETURN_IF_ERROR(
         loom_json_object_write_null_field(&object, IREE_SV("descriptor")));
@@ -778,7 +778,7 @@ static iree_status_t loom_low_packet_json_write_packet(
     IREE_RETURN_IF_ERROR(
         loom_json_object_begin_field(&object, IREE_SV("mnemonic")));
     IREE_RETURN_IF_ERROR(loom_low_packet_json_write_descriptor_string_or_null(
-        descriptor_set, descriptor->mnemonic_string_offset, stream));
+        descriptor_set, descriptor->mnemonic_string_ref, stream));
   } else {
     IREE_RETURN_IF_ERROR(
         loom_json_object_write_null_field(&object, IREE_SV("mnemonic")));
@@ -801,7 +801,7 @@ static iree_status_t loom_low_packet_json_write_packet(
   iree_string_view_t schedule_class_name = iree_string_view_empty();
   if (schedule_class != NULL) {
     schedule_class_name = loom_low_descriptor_set_string(
-        descriptor_set, schedule_class->name_string_offset);
+        descriptor_set, schedule_class->name_string_ref);
   }
   IREE_RETURN_IF_ERROR(
       loom_json_object_begin_field(&object, IREE_SV("schedule_class")));

@@ -10,15 +10,15 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/ir/context.h"
-#include "loom/util/bstring.h"
+#include "loom/util/string_pool.h"
 
 namespace loom {
 namespace {
 
-static const uint8_t kStrings[] = LOOM_BSTRING_LITERAL(4, "mode")
-    LOOM_BSTRING_LITERAL(7, "reverse") LOOM_BSTRING_LITERAL(7, "forward");
-static constexpr uint32_t kReverseOffset = 1 + 4;
-static constexpr uint32_t kForwardOffset = kReverseOffset + 1 + 7;
+static const char kStrings[] = "modereverseforward";
+static constexpr loom_string_ref_t kMode = LOOM_STRING_REF(0, 4);
+static constexpr loom_string_ref_t kReverse = LOOM_STRING_REF(4, 7);
+static constexpr loom_string_ref_t kForward = LOOM_STRING_REF(11, 7);
 
 class LowImmediatesTest : public ::testing::Test {
  protected:
@@ -30,10 +30,11 @@ class LowImmediatesTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"),
                                         &block_pool_, nullptr,
                                         iree_allocator_system(), &module_));
+    immediate_.field_name_string_ref = kMode;
     immediate_.kind = LOOM_LOW_IMMEDIATE_KIND_ENUM;
     immediate_.value_step = 1;
     domain_.value_count = IREE_ARRAYSIZE(values_);
-    descriptor_set_.string_table = {kStrings, sizeof(kStrings)};
+    descriptor_set_.string_pool = {kStrings, sizeof(kStrings) - 1};
     descriptor_set_.immediates = &immediate_;
     descriptor_set_.immediate_count = 1;
     descriptor_set_.enum_domains = &domain_;
@@ -67,8 +68,7 @@ class LowImmediatesTest : public ::testing::Test {
   // Domain whose semantic values differ from their table positions.
   loom_low_enum_domain_t domain_ = {};
   // Sparse signed values exercising semantic rather than ordinal resolution.
-  loom_low_enum_value_t values_[2] = {{kReverseOffset, -5},
-                                      {kForwardOffset, 7}};
+  loom_low_enum_value_t values_[2] = {{kReverse, -5}, {kForward, 7}};
   // Metadata reached by the descriptor during enum resolution.
   loom_low_descriptor_set_t descriptor_set_ = {};
   // Descriptor owning the mode field.
@@ -81,7 +81,7 @@ TEST_F(LowImmediatesTest, ResolvesSemanticValuesWithoutMutatingSharedInput) {
         {/*.name_id=*/Intern(IREE_SV("mode")),
          /*.reserved=*/0, /*.value=*/
          loom_attr_string(Intern(loom_low_descriptor_set_string(
-             &descriptor_set_, value.token_string_offset)))},
+             &descriptor_set_, value.token_string_ref)))},
         {/*.name_id=*/Intern(IREE_SV("other")),
          /*.reserved=*/0,
          /*.value=*/loom_attr_string(Intern(IREE_SV("forward")))},
@@ -109,21 +109,19 @@ TEST_F(LowImmediatesTest, ResolvesSemanticValuesWithoutMutatingSharedInput) {
 }
 
 TEST_F(LowImmediatesTest, BindsEverySparseDictionaryShape) {
-  static const uint8_t strings[] =
-      LOOM_BSTRING_LITERAL(1, "z") LOOM_BSTRING_LITERAL(1, "a")
-          LOOM_BSTRING_LITERAL(1, "m") LOOM_BSTRING_LITERAL(1, "b");
+  static const char strings[] = "zamb";
   loom_low_immediate_t fields[4] = {};
   const uint32_t masks[] = {8, 1, 4, 2};
   const char* names[] = {"z", "a", "m", "b"};
   for (uint32_t i = 0; i < IREE_ARRAYSIZE(fields); ++i) {
-    fields[i].field_name_string_offset = i * 2;
+    fields[i].field_name_string_ref = LOOM_STRING_REF(i, 1);
     fields[i].attribute_mask = masks[i];
     fields[i].kind = LOOM_LOW_IMMEDIATE_KIND_UNSIGNED;
     fields[i].flags = LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE;
     fields[i].value_step = 1;
     fields[i].unsigned_max = UINT32_MAX;
   }
-  descriptor_set_.string_table = {strings, sizeof(strings)};
+  descriptor_set_.string_pool = {strings, sizeof(strings) - 1};
   descriptor_set_.immediates = fields;
   descriptor_set_.immediate_count = IREE_ARRAYSIZE(fields);
   descriptor_.immediate_count = IREE_ARRAYSIZE(fields);

@@ -203,7 +203,7 @@ static void ExpectFunctionPacketIdentity(
   EXPECT_TRUE(iree_string_view_equal(
       loom_string_table_get(&module->strings, contract_id),
       loom_low_descriptor_set_string(descriptor_set,
-                                     descriptor_set->key_string_offset)));
+                                     descriptor_set->key_string_ref)));
 
   loom_region_t* body_region = loom_low_func_def_body(function_op);
   ASSERT_NE(body_region, nullptr);

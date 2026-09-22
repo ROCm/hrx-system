@@ -38,7 +38,7 @@ static iree_string_view_t loom_x86_descriptor_key(
     const loom_native_assembly_packet_context_t* context) {
   return loom_native_assembly_descriptor_string(
       context->schedule->target.descriptor_set,
-      context->packet->descriptor->key_string_offset);
+      context->packet->descriptor->key_string_ref);
 }
 
 static iree_string_view_t loom_x86_descriptor_mnemonic(
@@ -49,20 +49,18 @@ static iree_string_view_t loom_x86_descriptor_mnemonic(
   const loom_low_descriptor_view_t* descriptor_view =
       loom_low_descriptor_set_descriptor_view_at(
           descriptor_set, context->packet->descriptor_ordinal);
-  loom_bstring_table_offset_t string_offset =
-      descriptor->mnemonic_string_offset;
+  loom_string_ref_t string_ref = descriptor->mnemonic_string_ref;
   if (descriptor_view->canonical_asm_form_ordinal !=
       LOOM_LOW_ASM_FORM_ORDINAL_NONE) {
     const loom_low_asm_form_t* form = loom_low_descriptor_set_asm_form_at(
         descriptor_set, descriptor_view->canonical_asm_form_ordinal);
     IREE_ASSERT(form != NULL,
                 "x86 descriptor canonical asm form must be present");
-    if (form->native_assembly_mnemonic_string_offset !=
-        LOOM_LOW_STRING_OFFSET_NONE) {
-      string_offset = form->native_assembly_mnemonic_string_offset;
+    if (form->native_assembly_mnemonic_string_ref != LOOM_STRING_REF_NONE) {
+      string_ref = form->native_assembly_mnemonic_string_ref;
     }
   }
-  return loom_native_assembly_descriptor_string(descriptor_set, string_offset);
+  return loom_native_assembly_descriptor_string(descriptor_set, string_ref);
 }
 
 static iree_status_t loom_x86_append_mnemonic(
@@ -311,7 +309,7 @@ static iree_status_t loom_x86_read_packet_immediate(
   const loom_low_immediate_t* immediate =
       &descriptor_set->immediates[immediate_row];
   const iree_string_view_t field_name = loom_native_assembly_descriptor_string(
-      descriptor_set, immediate->field_name_string_offset);
+      descriptor_set, immediate->field_name_string_ref);
   const loom_named_attr_t* attr = loom_native_assembly_find_attr(
       context->schedule->module, loom_x86_packet_attrs(context), field_name);
   if (attr == NULL) {
@@ -353,7 +351,7 @@ static iree_status_t loom_x86_descriptor_immediate_index_by_name(
         &descriptor_set->immediates[descriptor->immediate_start + i];
     const iree_string_view_t candidate_name =
         loom_native_assembly_descriptor_string(
-            descriptor_set, immediate->field_name_string_offset);
+            descriptor_set, immediate->field_name_string_ref);
     if (!iree_string_view_equal(candidate_name, field_name)) {
       continue;
     }
@@ -1054,8 +1052,8 @@ static iree_status_t loom_x86_append_const_packet(
   const loom_low_immediate_t* immediate =
       &descriptor_set->immediates[descriptor->immediate_start];
   const iree_string_view_t immediate_name =
-      loom_native_assembly_descriptor_string(
-          descriptor_set, immediate->field_name_string_offset);
+      loom_native_assembly_descriptor_string(descriptor_set,
+                                             immediate->field_name_string_ref);
   int64_t value = 0;
   IREE_RETURN_IF_ERROR(
       loom_x86_read_packet_i64_attr(context, immediate_name, &value));
@@ -1336,7 +1334,7 @@ iree_status_t loom_x86_emit_assembly_fragment(
     iree_string_builder_t* builder, iree_arena_allocator_t* scratch_arena) {
   const iree_string_view_t target_key = loom_native_assembly_descriptor_string(
       schedule->target.descriptor_set,
-      schedule->target.descriptor_set->target_key_string_offset);
+      schedule->target.descriptor_set->target_key_string_ref);
   if (!iree_string_view_equal(target_key, IREE_SV("x86"))) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "x86 assembly emitter received target '%.*s'",

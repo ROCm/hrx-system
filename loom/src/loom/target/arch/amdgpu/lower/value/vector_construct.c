@@ -758,7 +758,7 @@ static iree_status_t loom_amdgpu_emit_fma_mix_half_result_diagnostic(
     descriptor_name =
         descriptor_present
             ? loom_low_descriptor_set_string(
-                  descriptor_set, descriptor.descriptor->key_string_offset)
+                  descriptor_set, descriptor.descriptor->key_string_ref)
             : IREE_SV("<unavailable>");
   }
 

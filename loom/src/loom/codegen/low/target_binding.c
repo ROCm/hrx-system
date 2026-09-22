@@ -41,7 +41,7 @@ bool loom_low_register_type_resolver_try_resolve(
       descriptor_register_class_id >=
           resolver->descriptor_set->reg_class_count ||
       resolver->descriptor_set->reg_classes[descriptor_register_class_id]
-              .name_string_offset == LOOM_LOW_STRING_OFFSET_NONE) {
+              .name_string_ref == LOOM_STRING_REF_NONE) {
     return false;
   }
   *out_descriptor_register_class_id = descriptor_register_class_id;

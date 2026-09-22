@@ -188,6 +188,6 @@ iree_status_t loom_low_allocation_assignment_register_class_name(
       &table->target.descriptor_set
            ->reg_classes[assignment->descriptor_reg_class_id];
   *out_register_class_name = loom_low_descriptor_set_string(
-      table->target.descriptor_set, reg_class->name_string_offset);
+      table->target.descriptor_set, reg_class->name_string_ref);
   return iree_ok_status();
 }

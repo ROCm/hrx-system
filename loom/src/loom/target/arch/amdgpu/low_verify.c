@@ -176,7 +176,7 @@ static iree_status_t loom_amdgpu_low_verify_dpp_control(
     return iree_ok_status();
   }
   const iree_string_view_t immediate_name = loom_low_descriptor_set_string(
-      descriptor_set, immediate->field_name_string_offset);
+      descriptor_set, immediate->field_name_string_ref);
   uint16_t attrs_attr_index = UINT16_MAX;
   int64_t value = 0;
   const loom_module_t* module = loom_low_verify_context_module(context);

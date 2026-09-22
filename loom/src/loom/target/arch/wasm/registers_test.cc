@@ -16,9 +16,9 @@ namespace loom {
 namespace {
 
 std::string DescriptorString(const loom_low_descriptor_set_t* descriptor_set,
-                             loom_bstring_table_offset_t string_offset) {
+                             loom_string_ref_t string_ref) {
   iree_string_view_t value =
-      loom_low_descriptor_set_string(descriptor_set, string_offset);
+      loom_low_descriptor_set_string(descriptor_set, string_ref);
   return std::string(value.data, value.size);
 }
 
@@ -39,7 +39,7 @@ TEST(WasmRegisterTypeResolverTest, ResolvesRealDescriptorIds) {
   EXPECT_EQ(descriptor_register_class_id, WASM_CORE_SIMD128_REG_CLASS_ID_V128);
   ASSERT_NE(descriptor_register_class, nullptr);
   EXPECT_EQ(DescriptorString(descriptor_set,
-                             descriptor_register_class->name_string_offset),
+                             descriptor_register_class->name_string_ref),
             "wasm.v128");
 }
 
