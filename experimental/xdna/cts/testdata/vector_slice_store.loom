@@ -1,0 +1,643 @@
+// Static slices and partial stores preserve captured input bytes.
+aie2p.target<array> @array_target
+aie2p.target<core> @core_target
+
+pipeline.def<kernel> public retain target(@array_target) @store_i8() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x64xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x64xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x64xi32>, group -> pipeline.flow<tile<64xi32>>
+  %results = pipeline.stage @store_i8_entry on %workers(%packets) : (group, pipeline.flow<tile<64xi32>>) -> (pipeline.flow<tile<64xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<64xi32>>, view<1x16x64xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @store_i8_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %padding = vector.constant -1515870811 : vector<16xi32>
+  %cleared = vector.constant 0 : vector<16xi32>
+
+  %offset0 = index.constant 0 : offset
+  %source_view0 = buffer.view %source[%offset0] : buffer -> view<64xi8>
+  %padding_view0 = buffer.view %destination[%offset0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0[0] : vector<16xi32>, view<16xi32>
+  %snapshot0 = vector.load %source_view0[0] : view<64xi8> -> vector<64xi8>
+  %slice0 = vector.slice %snapshot0[0] : vector<64xi8> -> vector<33xi8>
+  %overwrite_view0 = buffer.view %source[%offset0] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view0[0] : vector<16xi32>, view<16xi32>
+  %destination_view0 = buffer.view %destination[%offset0] : buffer -> view<33xi8>
+  vector.store %slice0, %destination_view0[0] : vector<33xi8>, view<33xi8>
+
+  %offset1 = index.constant 64 : offset
+  %source_view1 = buffer.view %source[%offset1] : buffer -> view<64xi8>
+  %padding_view1 = buffer.view %destination[%offset1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1[0] : vector<16xi32>, view<16xi32>
+  %snapshot1 = vector.load %source_view1[0] : view<64xi8> -> vector<64xi8>
+  %slice1 = vector.slice %snapshot1[1] : vector<64xi8> -> vector<63xi8>
+  %overwrite_view1 = buffer.view %source[%offset1] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view1[0] : vector<16xi32>, view<16xi32>
+  %destination_view1 = buffer.view %destination[%offset1] : buffer -> view<63xi8>
+  vector.store %slice1, %destination_view1[0] : vector<63xi8>, view<63xi8>
+
+  %offset2 = index.constant 128 : offset
+  %source_view2 = buffer.view %source[%offset2] : buffer -> view<64xi8>
+  %padding_view2 = buffer.view %destination[%offset2] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2[0] : vector<16xi32>, view<16xi32>
+  %snapshot2 = vector.load %source_view2[0] : view<64xi8> -> vector<64xi8>
+  %slice2 = vector.slice %snapshot2[16] : vector<64xi8> -> vector<32xi8>
+  %overwrite_view2 = buffer.view %source[%offset2] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view2[0] : vector<16xi32>, view<16xi32>
+  %destination_view2 = buffer.view %destination[%offset2] : buffer -> view<32xi8>
+  vector.store %slice2, %destination_view2[0] : vector<32xi8>, view<32xi8>
+
+  %offset3 = index.constant 192 : offset
+  %source_view3 = buffer.view %source[%offset3] : buffer -> view<64xi8>
+  %padding_view3 = buffer.view %destination[%offset3] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3[0] : vector<16xi32>, view<16xi32>
+  %snapshot3 = vector.load %source_view3[0] : view<64xi8> -> vector<64xi8>
+  %slice3 = vector.slice %snapshot3[63] : vector<64xi8> -> vector<1xi8>
+  %overwrite_view3 = buffer.view %source[%offset3] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view3[0] : vector<16xi32>, view<16xi32>
+  %destination_view3 = buffer.view %destination[%offset3] : buffer -> view<1xi8>
+  vector.store %slice3, %destination_view3[0] : vector<1xi8>, view<1xi8>
+
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @store_f8E4M3() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x64xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x64xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x64xi32>, group -> pipeline.flow<tile<64xi32>>
+  %results = pipeline.stage @store_f8E4M3_entry on %workers(%packets) : (group, pipeline.flow<tile<64xi32>>) -> (pipeline.flow<tile<64xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<64xi32>>, view<1x16x64xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @store_f8E4M3_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %padding = vector.constant -1515870811 : vector<16xi32>
+  %cleared = vector.constant 0 : vector<16xi32>
+
+  %offset0 = index.constant 0 : offset
+  %source_view0 = buffer.view %source[%offset0] : buffer -> view<64xf8E4M3>
+  %padding_view0 = buffer.view %destination[%offset0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0[0] : vector<16xi32>, view<16xi32>
+  %snapshot0 = vector.load %source_view0[0] : view<64xf8E4M3> -> vector<64xf8E4M3>
+  %slice0 = vector.slice %snapshot0[0] : vector<64xf8E4M3> -> vector<33xf8E4M3>
+  %overwrite_view0 = buffer.view %source[%offset0] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view0[0] : vector<16xi32>, view<16xi32>
+  %destination_view0 = buffer.view %destination[%offset0] : buffer -> view<33xf8E4M3>
+  vector.store %slice0, %destination_view0[0] : vector<33xf8E4M3>, view<33xf8E4M3>
+
+  %offset1 = index.constant 64 : offset
+  %source_view1 = buffer.view %source[%offset1] : buffer -> view<64xf8E4M3>
+  %padding_view1 = buffer.view %destination[%offset1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1[0] : vector<16xi32>, view<16xi32>
+  %snapshot1 = vector.load %source_view1[0] : view<64xf8E4M3> -> vector<64xf8E4M3>
+  %slice1 = vector.slice %snapshot1[1] : vector<64xf8E4M3> -> vector<63xf8E4M3>
+  %overwrite_view1 = buffer.view %source[%offset1] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view1[0] : vector<16xi32>, view<16xi32>
+  %destination_view1 = buffer.view %destination[%offset1] : buffer -> view<63xf8E4M3>
+  vector.store %slice1, %destination_view1[0] : vector<63xf8E4M3>, view<63xf8E4M3>
+
+  %offset2 = index.constant 128 : offset
+  %source_view2 = buffer.view %source[%offset2] : buffer -> view<64xf8E4M3>
+  %padding_view2 = buffer.view %destination[%offset2] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2[0] : vector<16xi32>, view<16xi32>
+  %snapshot2 = vector.load %source_view2[0] : view<64xf8E4M3> -> vector<64xf8E4M3>
+  %slice2 = vector.slice %snapshot2[16] : vector<64xf8E4M3> -> vector<32xf8E4M3>
+  %overwrite_view2 = buffer.view %source[%offset2] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view2[0] : vector<16xi32>, view<16xi32>
+  %destination_view2 = buffer.view %destination[%offset2] : buffer -> view<32xf8E4M3>
+  vector.store %slice2, %destination_view2[0] : vector<32xf8E4M3>, view<32xf8E4M3>
+
+  %offset3 = index.constant 192 : offset
+  %source_view3 = buffer.view %source[%offset3] : buffer -> view<64xf8E4M3>
+  %padding_view3 = buffer.view %destination[%offset3] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3[0] : vector<16xi32>, view<16xi32>
+  %snapshot3 = vector.load %source_view3[0] : view<64xf8E4M3> -> vector<64xf8E4M3>
+  %slice3 = vector.slice %snapshot3[63] : vector<64xf8E4M3> -> vector<1xf8E4M3>
+  %overwrite_view3 = buffer.view %source[%offset3] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view3[0] : vector<16xi32>, view<16xi32>
+  %destination_view3 = buffer.view %destination[%offset3] : buffer -> view<1xf8E4M3>
+  vector.store %slice3, %destination_view3[0] : vector<1xf8E4M3>, view<1xf8E4M3>
+
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @store_f8E5M2() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x64xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x64xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x64xi32>, group -> pipeline.flow<tile<64xi32>>
+  %results = pipeline.stage @store_f8E5M2_entry on %workers(%packets) : (group, pipeline.flow<tile<64xi32>>) -> (pipeline.flow<tile<64xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<64xi32>>, view<1x16x64xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @store_f8E5M2_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %padding = vector.constant -1515870811 : vector<16xi32>
+  %cleared = vector.constant 0 : vector<16xi32>
+
+  %offset0 = index.constant 0 : offset
+  %source_view0 = buffer.view %source[%offset0] : buffer -> view<64xf8E5M2>
+  %padding_view0 = buffer.view %destination[%offset0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0[0] : vector<16xi32>, view<16xi32>
+  %snapshot0 = vector.load %source_view0[0] : view<64xf8E5M2> -> vector<64xf8E5M2>
+  %slice0 = vector.slice %snapshot0[0] : vector<64xf8E5M2> -> vector<33xf8E5M2>
+  %overwrite_view0 = buffer.view %source[%offset0] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view0[0] : vector<16xi32>, view<16xi32>
+  %destination_view0 = buffer.view %destination[%offset0] : buffer -> view<33xf8E5M2>
+  vector.store %slice0, %destination_view0[0] : vector<33xf8E5M2>, view<33xf8E5M2>
+
+  %offset1 = index.constant 64 : offset
+  %source_view1 = buffer.view %source[%offset1] : buffer -> view<64xf8E5M2>
+  %padding_view1 = buffer.view %destination[%offset1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1[0] : vector<16xi32>, view<16xi32>
+  %snapshot1 = vector.load %source_view1[0] : view<64xf8E5M2> -> vector<64xf8E5M2>
+  %slice1 = vector.slice %snapshot1[1] : vector<64xf8E5M2> -> vector<63xf8E5M2>
+  %overwrite_view1 = buffer.view %source[%offset1] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view1[0] : vector<16xi32>, view<16xi32>
+  %destination_view1 = buffer.view %destination[%offset1] : buffer -> view<63xf8E5M2>
+  vector.store %slice1, %destination_view1[0] : vector<63xf8E5M2>, view<63xf8E5M2>
+
+  %offset2 = index.constant 128 : offset
+  %source_view2 = buffer.view %source[%offset2] : buffer -> view<64xf8E5M2>
+  %padding_view2 = buffer.view %destination[%offset2] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2[0] : vector<16xi32>, view<16xi32>
+  %snapshot2 = vector.load %source_view2[0] : view<64xf8E5M2> -> vector<64xf8E5M2>
+  %slice2 = vector.slice %snapshot2[16] : vector<64xf8E5M2> -> vector<32xf8E5M2>
+  %overwrite_view2 = buffer.view %source[%offset2] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view2[0] : vector<16xi32>, view<16xi32>
+  %destination_view2 = buffer.view %destination[%offset2] : buffer -> view<32xf8E5M2>
+  vector.store %slice2, %destination_view2[0] : vector<32xf8E5M2>, view<32xf8E5M2>
+
+  %offset3 = index.constant 192 : offset
+  %source_view3 = buffer.view %source[%offset3] : buffer -> view<64xf8E5M2>
+  %padding_view3 = buffer.view %destination[%offset3] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3[0] : vector<16xi32>, view<16xi32>
+  %snapshot3 = vector.load %source_view3[0] : view<64xf8E5M2> -> vector<64xf8E5M2>
+  %slice3 = vector.slice %snapshot3[63] : vector<64xf8E5M2> -> vector<1xf8E5M2>
+  %overwrite_view3 = buffer.view %source[%offset3] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view3[0] : vector<16xi32>, view<16xi32>
+  %destination_view3 = buffer.view %destination[%offset3] : buffer -> view<1xf8E5M2>
+  vector.store %slice3, %destination_view3[0] : vector<1xf8E5M2>, view<1xf8E5M2>
+
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @store_i16() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x64xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x64xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x64xi32>, group -> pipeline.flow<tile<64xi32>>
+  %results = pipeline.stage @store_i16_entry on %workers(%packets) : (group, pipeline.flow<tile<64xi32>>) -> (pipeline.flow<tile<64xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<64xi32>>, view<1x16x64xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @store_i16_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %padding = vector.constant -1515870811 : vector<16xi32>
+  %cleared = vector.constant 0 : vector<16xi32>
+
+  %offset0 = index.constant 0 : offset
+  %source_view0 = buffer.view %source[%offset0] : buffer -> view<32xi16>
+  %padding_view0 = buffer.view %destination[%offset0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0[0] : vector<16xi32>, view<16xi32>
+  %snapshot0 = vector.load %source_view0[0] : view<32xi16> -> vector<32xi16>
+  %slice0 = vector.slice %snapshot0[0] : vector<32xi16> -> vector<17xi16>
+  %overwrite_view0 = buffer.view %source[%offset0] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view0[0] : vector<16xi32>, view<16xi32>
+  %destination_view0 = buffer.view %destination[%offset0] : buffer -> view<17xi16>
+  vector.store %slice0, %destination_view0[0] : vector<17xi16>, view<17xi16>
+
+  %offset1 = index.constant 64 : offset
+  %source_view1 = buffer.view %source[%offset1] : buffer -> view<32xi16>
+  %padding_view1 = buffer.view %destination[%offset1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1[0] : vector<16xi32>, view<16xi32>
+  %snapshot1 = vector.load %source_view1[0] : view<32xi16> -> vector<32xi16>
+  %slice1 = vector.slice %snapshot1[1] : vector<32xi16> -> vector<31xi16>
+  %overwrite_view1 = buffer.view %source[%offset1] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view1[0] : vector<16xi32>, view<16xi32>
+  %destination_view1 = buffer.view %destination[%offset1] : buffer -> view<31xi16>
+  vector.store %slice1, %destination_view1[0] : vector<31xi16>, view<31xi16>
+
+  %offset2 = index.constant 128 : offset
+  %source_view2 = buffer.view %source[%offset2] : buffer -> view<32xi16>
+  %padding_view2 = buffer.view %destination[%offset2] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2[0] : vector<16xi32>, view<16xi32>
+  %snapshot2 = vector.load %source_view2[0] : view<32xi16> -> vector<32xi16>
+  %slice2 = vector.slice %snapshot2[8] : vector<32xi16> -> vector<16xi16>
+  %overwrite_view2 = buffer.view %source[%offset2] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view2[0] : vector<16xi32>, view<16xi32>
+  %destination_view2 = buffer.view %destination[%offset2] : buffer -> view<16xi16>
+  vector.store %slice2, %destination_view2[0] : vector<16xi16>, view<16xi16>
+
+  %offset3 = index.constant 192 : offset
+  %source_view3 = buffer.view %source[%offset3] : buffer -> view<32xi16>
+  %padding_view3 = buffer.view %destination[%offset3] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3[0] : vector<16xi32>, view<16xi32>
+  %snapshot3 = vector.load %source_view3[0] : view<32xi16> -> vector<32xi16>
+  %slice3 = vector.slice %snapshot3[31] : vector<32xi16> -> vector<1xi16>
+  %overwrite_view3 = buffer.view %source[%offset3] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view3[0] : vector<16xi32>, view<16xi32>
+  %destination_view3 = buffer.view %destination[%offset3] : buffer -> view<1xi16>
+  vector.store %slice3, %destination_view3[0] : vector<1xi16>, view<1xi16>
+
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @store_f16() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x64xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x64xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x64xi32>, group -> pipeline.flow<tile<64xi32>>
+  %results = pipeline.stage @store_f16_entry on %workers(%packets) : (group, pipeline.flow<tile<64xi32>>) -> (pipeline.flow<tile<64xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<64xi32>>, view<1x16x64xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @store_f16_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %padding = vector.constant -1515870811 : vector<16xi32>
+  %cleared = vector.constant 0 : vector<16xi32>
+
+  %offset0 = index.constant 0 : offset
+  %source_view0 = buffer.view %source[%offset0] : buffer -> view<32xf16>
+  %padding_view0 = buffer.view %destination[%offset0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0[0] : vector<16xi32>, view<16xi32>
+  %snapshot0 = vector.load %source_view0[0] : view<32xf16> -> vector<32xf16>
+  %slice0 = vector.slice %snapshot0[0] : vector<32xf16> -> vector<17xf16>
+  %overwrite_view0 = buffer.view %source[%offset0] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view0[0] : vector<16xi32>, view<16xi32>
+  %destination_view0 = buffer.view %destination[%offset0] : buffer -> view<17xf16>
+  vector.store %slice0, %destination_view0[0] : vector<17xf16>, view<17xf16>
+
+  %offset1 = index.constant 64 : offset
+  %source_view1 = buffer.view %source[%offset1] : buffer -> view<32xf16>
+  %padding_view1 = buffer.view %destination[%offset1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1[0] : vector<16xi32>, view<16xi32>
+  %snapshot1 = vector.load %source_view1[0] : view<32xf16> -> vector<32xf16>
+  %slice1 = vector.slice %snapshot1[1] : vector<32xf16> -> vector<31xf16>
+  %overwrite_view1 = buffer.view %source[%offset1] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view1[0] : vector<16xi32>, view<16xi32>
+  %destination_view1 = buffer.view %destination[%offset1] : buffer -> view<31xf16>
+  vector.store %slice1, %destination_view1[0] : vector<31xf16>, view<31xf16>
+
+  %offset2 = index.constant 128 : offset
+  %source_view2 = buffer.view %source[%offset2] : buffer -> view<32xf16>
+  %padding_view2 = buffer.view %destination[%offset2] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2[0] : vector<16xi32>, view<16xi32>
+  %snapshot2 = vector.load %source_view2[0] : view<32xf16> -> vector<32xf16>
+  %slice2 = vector.slice %snapshot2[8] : vector<32xf16> -> vector<16xf16>
+  %overwrite_view2 = buffer.view %source[%offset2] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view2[0] : vector<16xi32>, view<16xi32>
+  %destination_view2 = buffer.view %destination[%offset2] : buffer -> view<16xf16>
+  vector.store %slice2, %destination_view2[0] : vector<16xf16>, view<16xf16>
+
+  %offset3 = index.constant 192 : offset
+  %source_view3 = buffer.view %source[%offset3] : buffer -> view<32xf16>
+  %padding_view3 = buffer.view %destination[%offset3] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3[0] : vector<16xi32>, view<16xi32>
+  %snapshot3 = vector.load %source_view3[0] : view<32xf16> -> vector<32xf16>
+  %slice3 = vector.slice %snapshot3[31] : vector<32xf16> -> vector<1xf16>
+  %overwrite_view3 = buffer.view %source[%offset3] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view3[0] : vector<16xi32>, view<16xi32>
+  %destination_view3 = buffer.view %destination[%offset3] : buffer -> view<1xf16>
+  vector.store %slice3, %destination_view3[0] : vector<1xf16>, view<1xf16>
+
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @store_bf16() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x64xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x64xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x64xi32>, group -> pipeline.flow<tile<64xi32>>
+  %results = pipeline.stage @store_bf16_entry on %workers(%packets) : (group, pipeline.flow<tile<64xi32>>) -> (pipeline.flow<tile<64xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<64xi32>>, view<1x16x64xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @store_bf16_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %padding = vector.constant -1515870811 : vector<16xi32>
+  %cleared = vector.constant 0 : vector<16xi32>
+
+  %offset0 = index.constant 0 : offset
+  %source_view0 = buffer.view %source[%offset0] : buffer -> view<32xbf16>
+  %padding_view0 = buffer.view %destination[%offset0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0[0] : vector<16xi32>, view<16xi32>
+  %snapshot0 = vector.load %source_view0[0] : view<32xbf16> -> vector<32xbf16>
+  %slice0 = vector.slice %snapshot0[0] : vector<32xbf16> -> vector<17xbf16>
+  %overwrite_view0 = buffer.view %source[%offset0] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view0[0] : vector<16xi32>, view<16xi32>
+  %destination_view0 = buffer.view %destination[%offset0] : buffer -> view<17xbf16>
+  vector.store %slice0, %destination_view0[0] : vector<17xbf16>, view<17xbf16>
+
+  %offset1 = index.constant 64 : offset
+  %source_view1 = buffer.view %source[%offset1] : buffer -> view<32xbf16>
+  %padding_view1 = buffer.view %destination[%offset1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1[0] : vector<16xi32>, view<16xi32>
+  %snapshot1 = vector.load %source_view1[0] : view<32xbf16> -> vector<32xbf16>
+  %slice1 = vector.slice %snapshot1[1] : vector<32xbf16> -> vector<31xbf16>
+  %overwrite_view1 = buffer.view %source[%offset1] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view1[0] : vector<16xi32>, view<16xi32>
+  %destination_view1 = buffer.view %destination[%offset1] : buffer -> view<31xbf16>
+  vector.store %slice1, %destination_view1[0] : vector<31xbf16>, view<31xbf16>
+
+  %offset2 = index.constant 128 : offset
+  %source_view2 = buffer.view %source[%offset2] : buffer -> view<32xbf16>
+  %padding_view2 = buffer.view %destination[%offset2] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2[0] : vector<16xi32>, view<16xi32>
+  %snapshot2 = vector.load %source_view2[0] : view<32xbf16> -> vector<32xbf16>
+  %slice2 = vector.slice %snapshot2[8] : vector<32xbf16> -> vector<16xbf16>
+  %overwrite_view2 = buffer.view %source[%offset2] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view2[0] : vector<16xi32>, view<16xi32>
+  %destination_view2 = buffer.view %destination[%offset2] : buffer -> view<16xbf16>
+  vector.store %slice2, %destination_view2[0] : vector<16xbf16>, view<16xbf16>
+
+  %offset3 = index.constant 192 : offset
+  %source_view3 = buffer.view %source[%offset3] : buffer -> view<32xbf16>
+  %padding_view3 = buffer.view %destination[%offset3] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3[0] : vector<16xi32>, view<16xi32>
+  %snapshot3 = vector.load %source_view3[0] : view<32xbf16> -> vector<32xbf16>
+  %slice3 = vector.slice %snapshot3[31] : vector<32xbf16> -> vector<1xbf16>
+  %overwrite_view3 = buffer.view %source[%offset3] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view3[0] : vector<16xi32>, view<16xi32>
+  %destination_view3 = buffer.view %destination[%offset3] : buffer -> view<1xbf16>
+  vector.store %slice3, %destination_view3[0] : vector<1xbf16>, view<1xbf16>
+
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @store_i32() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x64xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x64xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x64xi32>, group -> pipeline.flow<tile<64xi32>>
+  %results = pipeline.stage @store_i32_entry on %workers(%packets) : (group, pipeline.flow<tile<64xi32>>) -> (pipeline.flow<tile<64xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<64xi32>>, view<1x16x64xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @store_i32_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %padding = vector.constant -1515870811 : vector<16xi32>
+  %cleared = vector.constant 0 : vector<16xi32>
+
+  %offset0 = index.constant 0 : offset
+  %source_view0 = buffer.view %source[%offset0] : buffer -> view<16xi32>
+  %padding_view0 = buffer.view %destination[%offset0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0[0] : vector<16xi32>, view<16xi32>
+  %snapshot0 = vector.load %source_view0[0] : view<16xi32> -> vector<16xi32>
+  %slice0 = vector.slice %snapshot0[0] : vector<16xi32> -> vector<9xi32>
+  %overwrite_view0 = buffer.view %source[%offset0] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view0[0] : vector<16xi32>, view<16xi32>
+  %destination_view0 = buffer.view %destination[%offset0] : buffer -> view<9xi32>
+  vector.store %slice0, %destination_view0[0] : vector<9xi32>, view<9xi32>
+
+  %offset1 = index.constant 64 : offset
+  %source_view1 = buffer.view %source[%offset1] : buffer -> view<16xi32>
+  %padding_view1 = buffer.view %destination[%offset1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1[0] : vector<16xi32>, view<16xi32>
+  %snapshot1 = vector.load %source_view1[0] : view<16xi32> -> vector<16xi32>
+  %slice1 = vector.slice %snapshot1[1] : vector<16xi32> -> vector<15xi32>
+  %overwrite_view1 = buffer.view %source[%offset1] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view1[0] : vector<16xi32>, view<16xi32>
+  %destination_view1 = buffer.view %destination[%offset1] : buffer -> view<15xi32>
+  vector.store %slice1, %destination_view1[0] : vector<15xi32>, view<15xi32>
+
+  %offset2 = index.constant 128 : offset
+  %source_view2 = buffer.view %source[%offset2] : buffer -> view<16xi32>
+  %padding_view2 = buffer.view %destination[%offset2] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2[0] : vector<16xi32>, view<16xi32>
+  %snapshot2 = vector.load %source_view2[0] : view<16xi32> -> vector<16xi32>
+  %slice2 = vector.slice %snapshot2[4] : vector<16xi32> -> vector<8xi32>
+  %overwrite_view2 = buffer.view %source[%offset2] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view2[0] : vector<16xi32>, view<16xi32>
+  %destination_view2 = buffer.view %destination[%offset2] : buffer -> view<8xi32>
+  vector.store %slice2, %destination_view2[0] : vector<8xi32>, view<8xi32>
+
+  %offset3 = index.constant 192 : offset
+  %source_view3 = buffer.view %source[%offset3] : buffer -> view<16xi32>
+  %padding_view3 = buffer.view %destination[%offset3] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3[0] : vector<16xi32>, view<16xi32>
+  %snapshot3 = vector.load %source_view3[0] : view<16xi32> -> vector<16xi32>
+  %slice3 = vector.slice %snapshot3[15] : vector<16xi32> -> vector<1xi32>
+  %overwrite_view3 = buffer.view %source[%offset3] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view3[0] : vector<16xi32>, view<16xi32>
+  %destination_view3 = buffer.view %destination[%offset3] : buffer -> view<1xi32>
+  vector.store %slice3, %destination_view3[0] : vector<1xi32>, view<1xi32>
+
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @store_f32() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x64xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x64xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x64xi32>, group -> pipeline.flow<tile<64xi32>>
+  %results = pipeline.stage @store_f32_entry on %workers(%packets) : (group, pipeline.flow<tile<64xi32>>) -> (pipeline.flow<tile<64xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<64xi32>>, view<1x16x64xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @store_f32_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %padding = vector.constant -1515870811 : vector<16xi32>
+  %cleared = vector.constant 0 : vector<16xi32>
+
+  %offset0 = index.constant 0 : offset
+  %source_view0 = buffer.view %source[%offset0] : buffer -> view<16xf32>
+  %padding_view0 = buffer.view %destination[%offset0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0[0] : vector<16xi32>, view<16xi32>
+  %snapshot0 = vector.load %source_view0[0] : view<16xf32> -> vector<16xf32>
+  %slice0 = vector.slice %snapshot0[0] : vector<16xf32> -> vector<9xf32>
+  %overwrite_view0 = buffer.view %source[%offset0] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view0[0] : vector<16xi32>, view<16xi32>
+  %destination_view0 = buffer.view %destination[%offset0] : buffer -> view<9xf32>
+  vector.store %slice0, %destination_view0[0] : vector<9xf32>, view<9xf32>
+
+  %offset1 = index.constant 64 : offset
+  %source_view1 = buffer.view %source[%offset1] : buffer -> view<16xf32>
+  %padding_view1 = buffer.view %destination[%offset1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1[0] : vector<16xi32>, view<16xi32>
+  %snapshot1 = vector.load %source_view1[0] : view<16xf32> -> vector<16xf32>
+  %slice1 = vector.slice %snapshot1[1] : vector<16xf32> -> vector<15xf32>
+  %overwrite_view1 = buffer.view %source[%offset1] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view1[0] : vector<16xi32>, view<16xi32>
+  %destination_view1 = buffer.view %destination[%offset1] : buffer -> view<15xf32>
+  vector.store %slice1, %destination_view1[0] : vector<15xf32>, view<15xf32>
+
+  %offset2 = index.constant 128 : offset
+  %source_view2 = buffer.view %source[%offset2] : buffer -> view<16xf32>
+  %padding_view2 = buffer.view %destination[%offset2] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2[0] : vector<16xi32>, view<16xi32>
+  %snapshot2 = vector.load %source_view2[0] : view<16xf32> -> vector<16xf32>
+  %slice2 = vector.slice %snapshot2[4] : vector<16xf32> -> vector<8xf32>
+  %overwrite_view2 = buffer.view %source[%offset2] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view2[0] : vector<16xi32>, view<16xi32>
+  %destination_view2 = buffer.view %destination[%offset2] : buffer -> view<8xf32>
+  vector.store %slice2, %destination_view2[0] : vector<8xf32>, view<8xf32>
+
+  %offset3 = index.constant 192 : offset
+  %source_view3 = buffer.view %source[%offset3] : buffer -> view<16xf32>
+  %padding_view3 = buffer.view %destination[%offset3] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3[0] : vector<16xi32>, view<16xi32>
+  %snapshot3 = vector.load %source_view3[0] : view<16xf32> -> vector<16xf32>
+  %slice3 = vector.slice %snapshot3[15] : vector<16xf32> -> vector<1xf32>
+  %overwrite_view3 = buffer.view %source[%offset3] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view3[0] : vector<16xi32>, view<16xi32>
+  %destination_view3 = buffer.view %destination[%offset3] : buffer -> view<1xf32>
+  vector.store %slice3, %destination_view3[0] : vector<1xf32>, view<1xf32>
+
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @store_i64() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x64xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x64xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x64xi32>, group -> pipeline.flow<tile<64xi32>>
+  %results = pipeline.stage @store_i64_entry on %workers(%packets) : (group, pipeline.flow<tile<64xi32>>) -> (pipeline.flow<tile<64xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<64xi32>>, view<1x16x64xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @store_i64_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %padding = vector.constant -1515870811 : vector<16xi32>
+  %cleared = vector.constant 0 : vector<16xi32>
+
+  %offset0 = index.constant 0 : offset
+  %source_view0 = buffer.view %source[%offset0] : buffer -> view<8xi64>
+  %padding_view0 = buffer.view %destination[%offset0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0[0] : vector<16xi32>, view<16xi32>
+  %snapshot0 = vector.load %source_view0[0] : view<8xi64> -> vector<8xi64>
+  %slice0 = vector.slice %snapshot0[0] : vector<8xi64> -> vector<5xi64>
+  %overwrite_view0 = buffer.view %source[%offset0] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view0[0] : vector<16xi32>, view<16xi32>
+  %destination_view0 = buffer.view %destination[%offset0] : buffer -> view<5xi64>
+  vector.store %slice0, %destination_view0[0] : vector<5xi64>, view<5xi64>
+
+  %offset1 = index.constant 64 : offset
+  %source_view1 = buffer.view %source[%offset1] : buffer -> view<8xi64>
+  %padding_view1 = buffer.view %destination[%offset1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1[0] : vector<16xi32>, view<16xi32>
+  %snapshot1 = vector.load %source_view1[0] : view<8xi64> -> vector<8xi64>
+  %slice1 = vector.slice %snapshot1[1] : vector<8xi64> -> vector<7xi64>
+  %overwrite_view1 = buffer.view %source[%offset1] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view1[0] : vector<16xi32>, view<16xi32>
+  %destination_view1 = buffer.view %destination[%offset1] : buffer -> view<7xi64>
+  vector.store %slice1, %destination_view1[0] : vector<7xi64>, view<7xi64>
+
+  %offset2 = index.constant 128 : offset
+  %source_view2 = buffer.view %source[%offset2] : buffer -> view<8xi64>
+  %padding_view2 = buffer.view %destination[%offset2] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2[0] : vector<16xi32>, view<16xi32>
+  %snapshot2 = vector.load %source_view2[0] : view<8xi64> -> vector<8xi64>
+  %slice2 = vector.slice %snapshot2[2] : vector<8xi64> -> vector<4xi64>
+  %overwrite_view2 = buffer.view %source[%offset2] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view2[0] : vector<16xi32>, view<16xi32>
+  %destination_view2 = buffer.view %destination[%offset2] : buffer -> view<4xi64>
+  vector.store %slice2, %destination_view2[0] : vector<4xi64>, view<4xi64>
+
+  %offset3 = index.constant 192 : offset
+  %source_view3 = buffer.view %source[%offset3] : buffer -> view<8xi64>
+  %padding_view3 = buffer.view %destination[%offset3] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3[0] : vector<16xi32>, view<16xi32>
+  %snapshot3 = vector.load %source_view3[0] : view<8xi64> -> vector<8xi64>
+  %slice3 = vector.slice %snapshot3[7] : vector<8xi64> -> vector<1xi64>
+  %overwrite_view3 = buffer.view %source[%offset3] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view3[0] : vector<16xi32>, view<16xi32>
+  %destination_view3 = buffer.view %destination[%offset3] : buffer -> view<1xi64>
+  vector.store %slice3, %destination_view3[0] : vector<1xi64>, view<1xi64>
+
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @store_f64() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x64xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x64xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x64xi32>, group -> pipeline.flow<tile<64xi32>>
+  %results = pipeline.stage @store_f64_entry on %workers(%packets) : (group, pipeline.flow<tile<64xi32>>) -> (pipeline.flow<tile<64xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<64xi32>>, view<1x16x64xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @store_f64_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %padding = vector.constant -1515870811 : vector<16xi32>
+  %cleared = vector.constant 0 : vector<16xi32>
+
+  %offset0 = index.constant 0 : offset
+  %source_view0 = buffer.view %source[%offset0] : buffer -> view<8xf64>
+  %padding_view0 = buffer.view %destination[%offset0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0[0] : vector<16xi32>, view<16xi32>
+  %snapshot0 = vector.load %source_view0[0] : view<8xf64> -> vector<8xf64>
+  %slice0 = vector.slice %snapshot0[0] : vector<8xf64> -> vector<5xf64>
+  %overwrite_view0 = buffer.view %source[%offset0] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view0[0] : vector<16xi32>, view<16xi32>
+  %destination_view0 = buffer.view %destination[%offset0] : buffer -> view<5xf64>
+  vector.store %slice0, %destination_view0[0] : vector<5xf64>, view<5xf64>
+
+  %offset1 = index.constant 64 : offset
+  %source_view1 = buffer.view %source[%offset1] : buffer -> view<8xf64>
+  %padding_view1 = buffer.view %destination[%offset1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1[0] : vector<16xi32>, view<16xi32>
+  %snapshot1 = vector.load %source_view1[0] : view<8xf64> -> vector<8xf64>
+  %slice1 = vector.slice %snapshot1[1] : vector<8xf64> -> vector<7xf64>
+  %overwrite_view1 = buffer.view %source[%offset1] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view1[0] : vector<16xi32>, view<16xi32>
+  %destination_view1 = buffer.view %destination[%offset1] : buffer -> view<7xf64>
+  vector.store %slice1, %destination_view1[0] : vector<7xf64>, view<7xf64>
+
+  %offset2 = index.constant 128 : offset
+  %source_view2 = buffer.view %source[%offset2] : buffer -> view<8xf64>
+  %padding_view2 = buffer.view %destination[%offset2] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2[0] : vector<16xi32>, view<16xi32>
+  %snapshot2 = vector.load %source_view2[0] : view<8xf64> -> vector<8xf64>
+  %slice2 = vector.slice %snapshot2[2] : vector<8xf64> -> vector<4xf64>
+  %overwrite_view2 = buffer.view %source[%offset2] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view2[0] : vector<16xi32>, view<16xi32>
+  %destination_view2 = buffer.view %destination[%offset2] : buffer -> view<4xf64>
+  vector.store %slice2, %destination_view2[0] : vector<4xf64>, view<4xf64>
+
+  %offset3 = index.constant 192 : offset
+  %source_view3 = buffer.view %source[%offset3] : buffer -> view<8xf64>
+  %padding_view3 = buffer.view %destination[%offset3] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3[0] : vector<16xi32>, view<16xi32>
+  %snapshot3 = vector.load %source_view3[0] : view<8xf64> -> vector<8xf64>
+  %slice3 = vector.slice %snapshot3[7] : vector<8xf64> -> vector<1xf64>
+  %overwrite_view3 = buffer.view %source[%offset3] : buffer -> view<16xi32>
+  vector.store %cleared, %overwrite_view3[0] : vector<16xi32>, view<16xi32>
+  %destination_view3 = buffer.view %destination[%offset3] : buffer -> view<1xf64>
+  vector.store %slice3, %destination_view3[0] : vector<1xf64>, view<1xf64>
+
+  func.return
+}

@@ -1,0 +1,244 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_partial32.loom-test
+// RUN: with-checks emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @store_i32_9(%value: vector<9xi32>, %output: buffer) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %offset = index.constant 0 : offset
+  %view = buffer.view %destination[%offset] : buffer -> view<9xi32>
+  vector.store %value, %view[0] : vector<9xi32>, view<9xi32>
+  func.return
+}
+
+// ----
+CHECK: vst.256.*
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @store_i32_9_dynamic(%value: vector<9xi32>, %output: buffer, %position: i32) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %coordinate = scalar.assume %position [range(%position, 0, 4096), mul(%position, 64)] : i32
+  %offset = index.cast %coordinate : i32 to offset
+  %view = buffer.view %destination[%offset] : buffer -> view<9xi32>
+  vector.store %value, %view[0] : vector<9xi32>, view<9xi32>
+  func.return
+}
+
+// ----
+CHECK: vst.256.*
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @store_i32_15(%value: vector<15xi32>, %output: buffer) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %offset = index.constant 0 : offset
+  %view = buffer.view %destination[%offset] : buffer -> view<15xi32>
+  vector.store %value, %view[0] : vector<15xi32>, view<15xi32>
+  func.return
+}
+
+// ----
+CHECK: vst.256.*
+CHECK: vst.128.*
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @store_i32_15_dynamic(%value: vector<15xi32>, %output: buffer, %position: i32) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %coordinate = scalar.assume %position [range(%position, 0, 4096), mul(%position, 64)] : i32
+  %offset = index.cast %coordinate : i32 to offset
+  %view = buffer.view %destination[%offset] : buffer -> view<15xi32>
+  vector.store %value, %view[0] : vector<15xi32>, view<15xi32>
+  func.return
+}
+
+// ----
+CHECK: vst.256.*
+CHECK: vst.128.*
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @store_i32_17(%value: vector<17xi32>, %output: buffer) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %offset = index.constant 0 : offset
+  %view = buffer.view %destination[%offset] : buffer -> view<17xi32>
+  vector.store %value, %view[0] : vector<17xi32>, view<17xi32>
+  func.return
+}
+
+// ----
+CHECK: vst.512.*
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @store_i32_17_dynamic(%value: vector<17xi32>, %output: buffer, %position: i32) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %coordinate = scalar.assume %position [range(%position, 0, 4096), mul(%position, 64)] : i32
+  %offset = index.cast %coordinate : i32 to offset
+  %view = buffer.view %destination[%offset] : buffer -> view<17xi32>
+  vector.store %value, %view[0] : vector<17xi32>, view<17xi32>
+  func.return
+}
+
+// ----
+CHECK: vst.512.*
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @store_i32_31(%value: vector<31xi32>, %output: buffer) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %offset = index.constant 0 : offset
+  %view = buffer.view %destination[%offset] : buffer -> view<31xi32>
+  vector.store %value, %view[0] : vector<31xi32>, view<31xi32>
+  func.return
+}
+
+// ----
+CHECK: vst.512.*
+CHECK: vst.256.*
+CHECK: vst.128.*
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @store_i32_31_dynamic(%value: vector<31xi32>, %output: buffer, %position: i32) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %coordinate = scalar.assume %position [range(%position, 0, 4096), mul(%position, 64)] : i32
+  %offset = index.cast %coordinate : i32 to offset
+  %view = buffer.view %destination[%offset] : buffer -> view<31xi32>
+  vector.store %value, %view[0] : vector<31xi32>, view<31xi32>
+  func.return
+}
+
+// ----
+CHECK: vst.512.*
+CHECK: vst.256.*
+CHECK: vst.128.*
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @store_f32_9(%value: vector<9xf32>, %output: buffer) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %offset = index.constant 0 : offset
+  %view = buffer.view %destination[%offset] : buffer -> view<9xf32>
+  vector.store %value, %view[0] : vector<9xf32>, view<9xf32>
+  func.return
+}
+
+// ----
+CHECK: vst.256.*
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @store_f32_9_dynamic(%value: vector<9xf32>, %output: buffer, %position: i32) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %coordinate = scalar.assume %position [range(%position, 0, 4096), mul(%position, 64)] : i32
+  %offset = index.cast %coordinate : i32 to offset
+  %view = buffer.view %destination[%offset] : buffer -> view<9xf32>
+  vector.store %value, %view[0] : vector<9xf32>, view<9xf32>
+  func.return
+}
+
+// ----
+CHECK: vst.256.*
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @store_f32_15(%value: vector<15xf32>, %output: buffer) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %offset = index.constant 0 : offset
+  %view = buffer.view %destination[%offset] : buffer -> view<15xf32>
+  vector.store %value, %view[0] : vector<15xf32>, view<15xf32>
+  func.return
+}
+
+// ----
+CHECK: vst.256.*
+CHECK: vst.128.*
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @store_f32_15_dynamic(%value: vector<15xf32>, %output: buffer, %position: i32) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %coordinate = scalar.assume %position [range(%position, 0, 4096), mul(%position, 64)] : i32
+  %offset = index.cast %coordinate : i32 to offset
+  %view = buffer.view %destination[%offset] : buffer -> view<15xf32>
+  vector.store %value, %view[0] : vector<15xf32>, view<15xf32>
+  func.return
+}
+
+// ----
+CHECK: vst.256.*
+CHECK: vst.128.*
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @store_f32_17(%value: vector<17xf32>, %output: buffer) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %offset = index.constant 0 : offset
+  %view = buffer.view %destination[%offset] : buffer -> view<17xf32>
+  vector.store %value, %view[0] : vector<17xf32>, view<17xf32>
+  func.return
+}
+
+// ----
+CHECK: vst.512.*
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @store_f32_17_dynamic(%value: vector<17xf32>, %output: buffer, %position: i32) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %coordinate = scalar.assume %position [range(%position, 0, 4096), mul(%position, 64)] : i32
+  %offset = index.cast %coordinate : i32 to offset
+  %view = buffer.view %destination[%offset] : buffer -> view<17xf32>
+  vector.store %value, %view[0] : vector<17xf32>, view<17xf32>
+  func.return
+}
+
+// ----
+CHECK: vst.512.*
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @store_f32_31(%value: vector<31xf32>, %output: buffer) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %offset = index.constant 0 : offset
+  %view = buffer.view %destination[%offset] : buffer -> view<31xf32>
+  vector.store %value, %view[0] : vector<31xf32>, view<31xf32>
+  func.return
+}
+
+// ----
+CHECK: vst.512.*
+CHECK: vst.256.*
+CHECK: vst.128.*
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @store_f32_31_dynamic(%value: vector<31xf32>, %output: buffer, %position: i32) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %coordinate = scalar.assume %position [range(%position, 0, 4096), mul(%position, 64)] : i32
+  %offset = index.cast %coordinate : i32 to offset
+  %view = buffer.view %destination[%offset] : buffer -> view<31xf32>
+  vector.store %value, %view[0] : vector<31xf32>, view<31xf32>
+  func.return
+}
+
+// ----
+CHECK: vst.512.*
+CHECK: vst.256.*
+CHECK: vst.128.*
+CHECK-NOT: vinsert

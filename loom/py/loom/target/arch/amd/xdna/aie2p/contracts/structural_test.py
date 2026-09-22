@@ -8,10 +8,8 @@
 
 from loom.dialect.vector import defs as vector
 from loom.target.arch.amd.xdna.aie2p.contracts.structural import (
-    _HALF_CARRIER_SLICE_SPECS,
     _I16_INTERLEAVE_CONTROL,
     _I32_F32_TRANSPOSE_4X4_CONTROL,
-    _I32_SLICE_HIGH_BYTE_OFFSET,
     _WIDE_VECTOR_EXTRACT_SPECS,
     AIE2P_STRUCTURAL_RULES,
 )
@@ -23,6 +21,7 @@ from loom.target.contracts import (
     EmitRegisterSlice,
     Guard,
     ValueAliasRule,
+    Vector,
 )
 
 
@@ -123,40 +122,44 @@ def test_wide_pair_extract_selects_each_scalar_word() -> None:
     )
 
 
-def test_half_carrier_slices_alias_low_and_shift_high() -> None:
-    for source_type, result_type, half_lane_count in _HALF_CARRIER_SLICE_SPECS:
-        common_guards = (
-            Guard.value_type("source", source_type),
-            Guard.value_type("result", result_type),
-            Guard.operand_segment_count("offsets", 0),
-            Guard.i64_array_count("static_offsets", 1),
-        )
-        low_rule = next(
-            rule
-            for rule in AIE2P_STRUCTURAL_RULES
-            if isinstance(rule, ValueAliasRule)
-            and all(guard in rule.guards for guard in common_guards)
-            and Guard.i64_array_element_range("static_offsets", 0, 0, 0) in rule.guards
-        )
-        high_rule = next(
-            rule
-            for rule in AIE2P_STRUCTURAL_RULES
-            if isinstance(rule, DescriptorRule)
-            and rule.source_op is vector.vector_slice
-            and all(guard in rule.guards for guard in common_guards)
-            and Guard.i64_array_element_range(
-                "static_offsets", 0, half_lane_count, half_lane_count
-            )
-            in rule.guards
-        )
+def test_partial_carrier_slices_preserve_the_physical_carrier() -> None:
+    source_type = Vector(("i8", "f8E4M3", "f8E5M2"), minimum_lanes=1, maximum_lanes=64)
+    rules = [
+        rule
+        for rule in AIE2P_STRUCTURAL_RULES
+        if rule.source_op is vector.vector_slice
+        and Guard.value_type("source", source_type) in rule.guards
+    ]
+    assert len(rules) == 64
+    assert isinstance(rules[0], ValueAliasRule)
+    for offset, rule in enumerate(rules[1:], 1):
+        assert rule.emit[0].immediates == {"i": offset}
+        assert rule.emit[1].descriptor.key == "amd.xdna.aie2p.shift.bytes.x.configured"
+        assert rule.emit[1].operands["s1"].field == "source"
+        assert rule.emit[1].operands["s2"].field == "source"
 
-        assert low_rule.source.field == "source"
-        assert low_rule.result.field == "result"
-        assert [emit.descriptor.key for emit in high_rule.emit] == [
-            "amd.xdna.aie2p.constant.i32.mova",
-            "amd.xdna.aie2p.shift.bytes.x.configured",
-        ]
-        assert high_rule.emit[0].immediates == {"i": _I32_SLICE_HIGH_BYTE_OFFSET}
+
+def test_wide_slices_join_adjacent_carriers_and_exclude_accumulators() -> None:
+    source_type = Vector("f32", minimum_lanes=17, maximum_lanes=31)
+    rules = [
+        rule
+        for rule in AIE2P_STRUCTURAL_RULES
+        if rule.source_op is vector.vector_slice
+        and Guard.value_type("source", source_type) in rule.guards
+    ]
+    assert len(rules) == 31
+    assert len(rules[0].emit) == len(rules[16].emit) == 1
+    assert rules[0].emit[0].unit_offset == 0
+    assert rules[16].emit[0].unit_offset == 2
+    crossing = rules[15].emit
+    assert [emit.unit_offset for emit in crossing[:2]] == [0, 2]
+    assert crossing[2].immediates == {"i": 60}
+    assert crossing[3].operands["s1"].field == "low"
+    assert crossing[3].operands["s2"].field == "high"
+    high = rules[17].emit
+    assert high[0].unit_offset == 2
+    assert high[1].immediates == {"i": 4}
+    assert high[2].operands["s1"] == high[2].operands["s2"]
 
 
 def test_i32_f32_4x4_transpose_uses_native_shuffle_mode() -> None:

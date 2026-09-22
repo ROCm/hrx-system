@@ -908,6 +908,36 @@ static bool loom_vector_packet_static_store_is_bounded(
          operation_count <= LOOM_VECTOR_PACKET_STATIC_OP_LIMIT;
 }
 
+static iree_status_t loom_vector_packet_store_captured_value(
+    loom_vector_packetization_t* packetization,
+    const loom_vector_memory_footprint_t* store_footprint,
+    const loom_vector_packet_memory_chunk_shape_t* shape,
+    loom_vector_memory_cache_policy_t store_cache_policy, loom_op_t* store_op) {
+  loom_builder_t* builder = &packetization->context->rewriter->builder;
+  for (uint32_t chunk_index = 0; chunk_index < shape->chunk_count;
+       ++chunk_index) {
+    const uint32_t lane_offset = chunk_index * shape->chunk_lane_count;
+    const loom_vector_packet_slice_t slice = {
+        .dynamic_lane_offset = LOOM_VALUE_ID_INVALID,
+        .static_lane_offset = lane_offset,
+        .lane_count =
+            iree_min(shape->lane_count - lane_offset, shape->chunk_lane_count),
+    };
+    const int64_t static_offset = lane_offset;
+    const loom_type_t packet_type = loom_vector_packet_memory_chunk_type(
+        store_footprint->vector_type, slice.lane_count);
+    loom_op_t* slice_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_vector_slice_build(
+        builder, store_footprint->value, /*offsets=*/NULL, /*offsets_count=*/0,
+        &static_offset, /*static_offsets_count=*/1, packet_type,
+        store_op->location, &slice_op));
+    IREE_RETURN_IF_ERROR(loom_vector_packet_store(
+        packetization, store_footprint, &slice,
+        loom_vector_slice_result(slice_op), store_cache_policy, store_op));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_vector_packet_static_store(
     loom_vector_packetization_t* packetization,
     const loom_vector_memory_footprint_t* store_footprint,
@@ -1297,18 +1327,28 @@ iree_status_t loom_vector_packet_legalize_store(
       &packetization, store_footprint.value, &shape, &producer_selected));
 
   loom_vector_memory_cache_policy_t store_cache_policy = {0};
-  if (!producer_selected ||
-      !loom_vector_memory_cache_policy_from_op(context->module, op,
+  if (!loom_vector_memory_cache_policy_from_op(context->module, op,
                                                &store_cache_policy) ||
       !loom_vector_packet_memory_can_build_chunk_origins(
           context, &store_footprint, &shape) ||
-      !loom_vector_packet_can_materialize(&packetization, &shape)) {
+      (producer_selected &&
+       !loom_vector_packet_can_materialize(&packetization, &shape))) {
     return iree_ok_status();
   }
 
   loom_rewriter_t* rewriter = context->rewriter;
   loom_builder_t* builder = &rewriter->builder;
   loom_builder_set_before(builder, op);
+  if (!producer_selected) {
+    // The stored SSA value already owns its snapshot. Producer decomposition
+    // is only needed to stream oversized computations; native memory packets
+    // can also consume slices of a captured value without replaying its reads.
+    IREE_RETURN_IF_ERROR(loom_vector_packet_store_captured_value(
+        &packetization, &store_footprint, &shape, store_cache_policy, op));
+    IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, op));
+    *out_rewritten = true;
+    return iree_ok_status();
+  }
   if (!loom_vector_packet_store_can_interleave(&packetization,
                                                &store_footprint)) {
     if (loom_vector_packet_static_store_is_bounded(&packetization, &shape)) {

@@ -1,0 +1,165 @@
+func.def @store_i64_5(%value: vector<5xi64>, %output: buffer) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %offset = index.constant 0 : offset
+  %view = buffer.view %destination[%offset] : buffer -> view<5xi64>
+  vector.store %value, %view[0] : vector<5xi64>, view<5xi64>
+  func.return
+}
+
+// ====
+
+func.def @store_i64_5_dynamic(%value: vector<5xi64>, %output: buffer, %position: i32) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %coordinate = scalar.assume %position [range(%position, 0, 4096), mul(%position, 64)] : i32
+  %offset = index.cast %coordinate : i32 to offset
+  %view = buffer.view %destination[%offset] : buffer -> view<5xi64>
+  vector.store %value, %view[0] : vector<5xi64>, view<5xi64>
+  func.return
+}
+
+// ====
+
+func.def @store_i64_7(%value: vector<7xi64>, %output: buffer) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %offset = index.constant 0 : offset
+  %view = buffer.view %destination[%offset] : buffer -> view<7xi64>
+  vector.store %value, %view[0] : vector<7xi64>, view<7xi64>
+  func.return
+}
+
+// ====
+
+func.def @store_i64_7_dynamic(%value: vector<7xi64>, %output: buffer, %position: i32) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %coordinate = scalar.assume %position [range(%position, 0, 4096), mul(%position, 64)] : i32
+  %offset = index.cast %coordinate : i32 to offset
+  %view = buffer.view %destination[%offset] : buffer -> view<7xi64>
+  vector.store %value, %view[0] : vector<7xi64>, view<7xi64>
+  func.return
+}
+
+// ====
+
+func.def @store_i64_9(%value: vector<9xi64>, %output: buffer) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %offset = index.constant 0 : offset
+  %view = buffer.view %destination[%offset] : buffer -> view<9xi64>
+  vector.store %value, %view[0] : vector<9xi64>, view<9xi64>
+  func.return
+}
+
+// ====
+
+func.def @store_i64_9_dynamic(%value: vector<9xi64>, %output: buffer, %position: i32) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %coordinate = scalar.assume %position [range(%position, 0, 4096), mul(%position, 64)] : i32
+  %offset = index.cast %coordinate : i32 to offset
+  %view = buffer.view %destination[%offset] : buffer -> view<9xi64>
+  vector.store %value, %view[0] : vector<9xi64>, view<9xi64>
+  func.return
+}
+
+// ====
+
+func.def @store_i64_15(%value: vector<15xi64>, %output: buffer) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %offset = index.constant 0 : offset
+  %view = buffer.view %destination[%offset] : buffer -> view<15xi64>
+  vector.store %value, %view[0] : vector<15xi64>, view<15xi64>
+  func.return
+}
+
+// ====
+
+func.def @store_i64_15_dynamic(%value: vector<15xi64>, %output: buffer, %position: i32) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %coordinate = scalar.assume %position [range(%position, 0, 4096), mul(%position, 64)] : i32
+  %offset = index.cast %coordinate : i32 to offset
+  %view = buffer.view %destination[%offset] : buffer -> view<15xi64>
+  vector.store %value, %view[0] : vector<15xi64>, view<15xi64>
+  func.return
+}
+
+// ====
+
+func.def @store_f64_5(%value: vector<5xf64>, %output: buffer) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %offset = index.constant 0 : offset
+  %view = buffer.view %destination[%offset] : buffer -> view<5xf64>
+  vector.store %value, %view[0] : vector<5xf64>, view<5xf64>
+  func.return
+}
+
+// ====
+
+func.def @store_f64_5_dynamic(%value: vector<5xf64>, %output: buffer, %position: i32) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %coordinate = scalar.assume %position [range(%position, 0, 4096), mul(%position, 64)] : i32
+  %offset = index.cast %coordinate : i32 to offset
+  %view = buffer.view %destination[%offset] : buffer -> view<5xf64>
+  vector.store %value, %view[0] : vector<5xf64>, view<5xf64>
+  func.return
+}
+
+// ====
+
+func.def @store_f64_7(%value: vector<7xf64>, %output: buffer) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %offset = index.constant 0 : offset
+  %view = buffer.view %destination[%offset] : buffer -> view<7xf64>
+  vector.store %value, %view[0] : vector<7xf64>, view<7xf64>
+  func.return
+}
+
+// ====
+
+func.def @store_f64_7_dynamic(%value: vector<7xf64>, %output: buffer, %position: i32) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %coordinate = scalar.assume %position [range(%position, 0, 4096), mul(%position, 64)] : i32
+  %offset = index.cast %coordinate : i32 to offset
+  %view = buffer.view %destination[%offset] : buffer -> view<7xf64>
+  vector.store %value, %view[0] : vector<7xf64>, view<7xf64>
+  func.return
+}
+
+// ====
+
+func.def @store_f64_9(%value: vector<9xf64>, %output: buffer) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %offset = index.constant 0 : offset
+  %view = buffer.view %destination[%offset] : buffer -> view<9xf64>
+  vector.store %value, %view[0] : vector<9xf64>, view<9xf64>
+  func.return
+}
+
+// ====
+
+func.def @store_f64_9_dynamic(%value: vector<9xf64>, %output: buffer, %position: i32) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %coordinate = scalar.assume %position [range(%position, 0, 4096), mul(%position, 64)] : i32
+  %offset = index.cast %coordinate : i32 to offset
+  %view = buffer.view %destination[%offset] : buffer -> view<9xf64>
+  vector.store %value, %view[0] : vector<9xf64>, view<9xf64>
+  func.return
+}
+
+// ====
+
+func.def @store_f64_15(%value: vector<15xf64>, %output: buffer) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %offset = index.constant 0 : offset
+  %view = buffer.view %destination[%offset] : buffer -> view<15xf64>
+  vector.store %value, %view[0] : vector<15xf64>, view<15xf64>
+  func.return
+}
+
+// ====
+
+func.def @store_f64_15_dynamic(%value: vector<15xf64>, %output: buffer, %position: i32) {
+  %destination = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %coordinate = scalar.assume %position [range(%position, 0, 4096), mul(%position, 64)] : i32
+  %offset = index.cast %coordinate : i32 to offset
+  %view = buffer.view %destination[%offset] : buffer -> view<15xf64>
+  vector.store %value, %view[0] : vector<15xf64>, view<15xf64>
+  func.return
+}

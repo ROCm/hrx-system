@@ -1,0 +1,985 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "i8 slices and partial stores preserve snapshots and guards on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "1"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/vector_slice_store.loom",
+              "--root=@store_i8",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/store.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/store.xdna",
+              "--columns=1",
+              "--entry=store_i8",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "f8E4M3 slices and partial stores preserve snapshots and guards on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "1"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/vector_slice_store.loom",
+              "--root=@store_f8E4M3",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/store.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/store.xdna",
+              "--columns=1",
+              "--entry=store_f8E4M3",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "f8E5M2 slices and partial stores preserve snapshots and guards on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "1"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/vector_slice_store.loom",
+              "--root=@store_f8E5M2",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/store.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/store.xdna",
+              "--columns=1",
+              "--entry=store_f8E5M2",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "i16 slices and partial stores preserve snapshots and guards on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "2"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/vector_slice_store.loom",
+              "--root=@store_i16",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/store.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/store.xdna",
+              "--columns=1",
+              "--entry=store_i16",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "f16 slices and partial stores preserve snapshots and guards on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "2"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/vector_slice_store.loom",
+              "--root=@store_f16",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/store.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/store.xdna",
+              "--columns=1",
+              "--entry=store_f16",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "bf16 slices and partial stores preserve snapshots and guards on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "2"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/vector_slice_store.loom",
+              "--root=@store_bf16",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/store.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/store.xdna",
+              "--columns=1",
+              "--entry=store_bf16",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "i32 slices and partial stores preserve snapshots and guards on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "4"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/vector_slice_store.loom",
+              "--root=@store_i32",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/store.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/store.xdna",
+              "--columns=1",
+              "--entry=store_i32",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "f32 slices and partial stores preserve snapshots and guards on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "4"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/vector_slice_store.loom",
+              "--root=@store_f32",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/store.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/store.xdna",
+              "--columns=1",
+              "--entry=store_f32",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "i64 slices and partial stores preserve snapshots and guards on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "8"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/vector_slice_store.loom",
+              "--root=@store_i64",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/store.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/store.xdna",
+              "--columns=1",
+              "--entry=store_i64",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "f64 slices and partial stores preserve snapshots and guards on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "8"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/vector_slice_store.loom",
+              "--root=@store_f64",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/store.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/store.xdna",
+              "--columns=1",
+              "--entry=store_f64",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Wide byte slices 0 through 15 preserve captured data and guards on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "wide",
+              "0"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/vector_slice_wide.loom",
+              "--root=@slice_bytes_0",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/store.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/store.xdna",
+              "--columns=1",
+              "--entry=slice_bytes_0",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Wide byte slices 16 through 31 preserve captured data and guards on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "wide",
+              "16"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/vector_slice_wide.loom",
+              "--root=@slice_bytes_16",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/store.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/store.xdna",
+              "--columns=1",
+              "--entry=slice_bytes_16",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Wide byte slices 32 through 47 preserve captured data and guards on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "wide",
+              "32"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/vector_slice_wide.loom",
+              "--root=@slice_bytes_32",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/store.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/store.xdna",
+              "--columns=1",
+              "--entry=slice_bytes_32",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Wide byte slices 48 through 63 preserve captured data and guards on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "wide",
+              "48"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/vector_slice_wide.loom",
+              "--root=@slice_bytes_48",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/store.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/store.xdna",
+              "--columns=1",
+              "--entry=slice_bytes_48",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Wide byte slices 64 through 79 preserve captured data and guards on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "wide",
+              "64"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/vector_slice_wide.loom",
+              "--root=@slice_bytes_64",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/store.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/store.xdna",
+              "--columns=1",
+              "--entry=slice_bytes_64",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Wide byte slices 80 through 95 preserve captured data and guards on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "wide",
+              "80"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/vector_slice_wide.loom",
+              "--root=@slice_bytes_80",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/store.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/store.xdna",
+              "--columns=1",
+              "--entry=slice_bytes_80",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Wide byte slices 96 through 111 preserve captured data and guards on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "wide",
+              "96"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/vector_slice_wide.loom",
+              "--root=@slice_bytes_96",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/store.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/store.xdna",
+              "--columns=1",
+              "--entry=slice_bytes_96",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Wide byte slices 112 through 127 preserve captured data and guards on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "wide",
+              "112"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/vector_slice_wide.loom",
+              "--root=@slice_bytes_112",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/store.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/store.xdna",
+              "--columns=1",
+              "--entry=slice_bytes_112",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

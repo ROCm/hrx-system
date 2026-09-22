@@ -37,7 +37,6 @@ from loom.target.arch.amd.xdna.aie2p.contracts.reduction import (
 )
 from loom.target.arch.amd.xdna.aie2p.contracts.structural import (
     _I8_DEINTERLEAVE_CONTROLS,
-    _I32_SLICE_HIGH_BYTE_OFFSET,
     AIE2P_STRUCTURAL_RULES,
 )
 from loom.target.contracts import (
@@ -951,27 +950,6 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         == _I8_DEINTERLEAVE_CONTROLS
     )
 
-    high_slice = next(
-        rule
-        for rule in rules
-        if rule.source_op is vector.vector_slice
-        and Guard.value_type("source", Vector(("i32", "f32"), lanes=16)) in rule.guards
-        and Guard.value_type("result", Vector(("i32", "f32"), lanes=8)) in rule.guards
-        and Guard.i64_array_element_range(
-            "static_offsets", element=0, minimum=8, maximum=8
-        )
-        in rule.guards
-    )
-    assert high_slice.descriptor.key == "amd.xdna.aie2p.shift.bytes.x.configured"
-    assert [emit.descriptor.key for emit in high_slice.emit] == [
-        "amd.xdna.aie2p.constant.i32.mova",
-        "amd.xdna.aie2p.shift.bytes.x.configured",
-    ]
-    assert high_slice.emit[0].immediates == {"i": _I32_SLICE_HIGH_BYTE_OFFSET}
-    assert high_slice.emit[1].operands["s1"].field == "source"
-    assert high_slice.emit[1].operands["s2"].field == "source"
-    assert high_slice.emit[1].results["d"].field == "result"
-
     concat = next(
         rule
         for rule in rules
@@ -1371,16 +1349,6 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         for source_type in bitcast_types
         for result_type in bitcast_types
     ]
-    assert any(
-        rule.source_op is vector.vector_slice
-        and Guard.value_type("source", Vector(("i32", "f32"), lanes=16)) in rule.guards
-        and Guard.value_type("result", Vector(("i32", "f32"), lanes=8)) in rule.guards
-        and Guard.i64_array_element_range(
-            "static_offsets", element=0, minimum=0, maximum=0
-        )
-        in rule.guards
-        for rule in alias_rules
-    )
     packed_predicate_aliases = [
         rule for rule in alias_rules if rule.source_op is vector.vector_bitunpacku
     ]

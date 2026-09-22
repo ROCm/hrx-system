@@ -143,6 +143,39 @@ endif()
 
 iree_py_library(
   NAME
+    vector_slice_store_cases
+  MAIN
+    "vector_slice_store_cases.py"
+  SRCS
+    "vector_slice_store_cases.py"
+)
+
+if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND LOOM_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
+iree_execution_test_suite(
+  NAME
+    vector_slice_store_npu2_test
+  MANIFESTS
+    "vector_slice_store_npu2.test.json"
+  TOOLS
+    "generate-cases=::vector_slice_store_cases"
+    "iree-xdna-run=iree::experimental::xdna::iree-xdna-run"
+    "loom-compile=loom::tools::loom-compile"
+  DATA
+    "${PROJECT_SOURCE_DIR}/experimental/xdna/cts/testdata/vector_slice_store.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/xdna/cts/testdata/vector_slice_wide.loom"
+  LABELS
+    "manual"
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.xdna"
+    "iree-run-requirement=libamdf.resource.xdna"
+    "runtime-resource=amd-xdna"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+iree_py_library(
+  NAME
     packed_memory_cases
   MAIN
     "packed_memory_cases.py"
