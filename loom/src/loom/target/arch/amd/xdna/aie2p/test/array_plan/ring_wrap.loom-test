@@ -92,7 +92,7 @@ control-relocation index=0 record=0 word=1 binding=0 addend=0 alignment=4
 control-relocation index=1 record=2 word=1 binding=1 addend=0 alignment=4
 
 resident-program workers=1
-resident worker=0 entry=@coprime_ring_array$worker$0 tile=(0,2) code-bytes=320 resources=0 fixups=5
+resident worker=0 entry=@coprime_ring_array$worker$0 tile=(0,2) code-bytes=288 resources=0 fixups=5
 
 low.func.def retain target<amd.xdna.aie2p.core>(@coprime_core_target) @coprime_ring_array$worker$0() asm {
   %acquire_delta = mov.short -1
@@ -104,8 +104,6 @@ low.func.def retain target<amd.xdna.aie2p.core>(@coprime_core_target) @coprime_r
 ^_bb1(%32: reg<aie2p.ep>, %34: reg<aie2p.ep>, %35: reg<aie2p.er>):
   acq %acquire_delta, 49
   acq %acquire_delta, 51
-  low.br ^_bb2
-^_bb2:
   %input0 = copy %32 : reg<aie2p.ep> -> reg<aie2p.ep>
   %input1 = copy %34 : reg<aie2p.ep> -> reg<aie2p.ep>
   %offset = mova.modifier 1
@@ -114,8 +112,6 @@ low.func.def retain target<amd.xdna.aie2p.core>(@coprime_core_target) @coprime_r
   %rhs = lda.u8 %input1, 0
   %sum = add.rr %lhs, %rhs
   st.s8 %sum, %cursor, 0
-  low.br ^_bb3
-^_bb3:
   rel %release_delta, 48
   rel %release_delta, 50
   %37 = mov.address-to-scalar %32
@@ -124,23 +120,23 @@ low.func.def retain target<amd.xdna.aie2p.core>(@coprime_core_target) @coprime_r
   %40 = mov.scalar-to-address %39
   %43 = mov.short 0
   %44 = eq %35, %43
-  low.cond_br %44, ^_bb6, ^_bb4 : reg<aie2p.er>
-^_bb4:
+  low.cond_br %44, ^_bb4, ^_bb2 : reg<aie2p.er>
+^_bb2:
   %45 = mov.short 1
   %46 = eq %35, %45
-  low.cond_br %46, ^_bb7, ^_bb5 : reg<aie2p.er>
-^_bb5:
+  low.cond_br %46, ^_bb5, ^_bb3 : reg<aie2p.er>
+^_bb3:
   %47 = mov.local-address 491520
   %48 = mov.short 0
-  low.br ^_bb8(%47: reg<aie2p.ep>, %48: reg<aie2p.er>)
-^_bb6:
+  low.br ^_bb6(%47: reg<aie2p.ep>, %48: reg<aie2p.er>)
+^_bb4:
   %49 = mov.local-address 507904
   %50 = mov.short 1
-  low.br ^_bb8(%49: reg<aie2p.ep>, %50: reg<aie2p.er>)
-^_bb7:
+  low.br ^_bb6(%49: reg<aie2p.ep>, %50: reg<aie2p.er>)
+^_bb5:
   %51 = mov.local-address 458816
   %52 = mov.short 2
-  low.br ^_bb8(%51: reg<aie2p.ep>, %52: reg<aie2p.er>)
-^_bb8(%41: reg<aie2p.ep>, %42: reg<aie2p.er>):
+  low.br ^_bb6(%51: reg<aie2p.ep>, %52: reg<aie2p.er>)
+^_bb6(%41: reg<aie2p.ep>, %42: reg<aie2p.er>):
   low.br ^_bb1(%40: reg<aie2p.ep>, %41: reg<aie2p.ep>, %42: reg<aie2p.er>)
 }

@@ -188,8 +188,6 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @parallel_folded_c
   acq %acquire_delta, 49
   acq %acquire_delta, 51
   acq %acquire_delta, 33
-  low.br ^_bb3
-^_bb3:
   %input_view = copy %214 : reg<aie2p.ep> -> reg<aie2p.ep>
   %lhs_view$217 = copy %216 : reg<aie2p.ep> -> reg<aie2p.ep>
   %lhs_view$219 = copy %218 : reg<aie2p.ep> -> reg<aie2p.ep>
@@ -227,8 +225,6 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @parallel_folded_c
   %212 = vmov.accumulator512.to.vector512 %211
   %sum$213 = vextract.32.imm %212, 0
   st %sum$213, %output_view$223, 0
-  low.br ^_bb4
-^_bb4:
   %237 = lda %220, 0
   %238 = vbcst.32 %237
   %239 = lda %222, 0
@@ -238,13 +234,13 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @parallel_folded_c
   %243 = vmov.vector512.to.accumulator512 %242
   %244 = concat(%243, %243, %243, %243) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
   %245 = nez %231
-  low.cond_br %245, ^_bb5, ^_bb6 : reg<aie2p.er>
-^_bb5:
-  low.br ^_bb7(%244: reg<aie2p.mbms x4>)
-^_bb6:
+  low.cond_br %245, ^_bb3, ^_bb4 : reg<aie2p.er>
+^_bb3:
+  low.br ^_bb5(%244: reg<aie2p.mbms x4>)
+^_bb4:
   %246 = vadd.f32x64 %229, %244, %fold_mode
-  low.br ^_bb7(%246: reg<aie2p.mbms x4>)
-^_bb7(%236: reg<aie2p.mbms x4>):
+  low.br ^_bb5(%246: reg<aie2p.mbms x4>)
+^_bb5(%236: reg<aie2p.mbms x4>):
   rel %release_delta, 48
   rel %release_delta, 50
   rel %release_delta, 32
@@ -261,10 +257,10 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @parallel_folded_c
   %257 = mov.scalar-to-address %256
   %258 = sub %230, %release_delta
   %259 = nez %258
-  low.cond_br %259, ^_bb8, ^_bb9 : reg<aie2p.er>
-^_bb8:
+  low.cond_br %259, ^_bb6, ^_bb7 : reg<aie2p.er>
+^_bb6:
   low.br ^_bb2(%250: reg<aie2p.ep>, %254: reg<aie2p.ep>, %257: reg<aie2p.ep>, %220: reg<aie2p.ep>, %222: reg<aie2p.ep>, %236: reg<aie2p.mbms x4>, %258: reg<aie2p.er>, %fold_zero: reg<aie2p.er>)
-^_bb9:
+^_bb7:
   %260 = slice %236[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
   %261 = vmov.accumulator512.to.vector512 %260
   %262 = vextract.32.imm %261, 0

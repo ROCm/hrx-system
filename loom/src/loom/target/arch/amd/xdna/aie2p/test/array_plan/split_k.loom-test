@@ -264,9 +264,9 @@ control-relocation index=4 record=8 word=1 binding=2 addend=0 alignment=4
 control-relocation index=5 record=10 word=1 binding=3 addend=0 alignment=4
 
 resident-program workers=3
-resident worker=0 entry=@split_k_array$worker$0 tile=(0,2) code-bytes=270 resources=0 fixups=1
-resident worker=1 entry=@split_k_array$worker$1 tile=(1,4) code-bytes=270 resources=0 fixups=1
-resident worker=2 entry=@split_k_array$worker$2 tile=(0,3) code-bytes=290 resources=0 fixups=1
+resident worker=0 entry=@split_k_array$worker$0 tile=(0,2) code-bytes=268 resources=0 fixups=1
+resident worker=1 entry=@split_k_array$worker$1 tile=(1,4) code-bytes=268 resources=0 fixups=1
+resident worker=2 entry=@split_k_array$worker$2 tile=(0,3) code-bytes=274 resources=0 fixups=1
 
 low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$worker$0() asm {
   %acquire_delta = mov.short -1
@@ -279,8 +279,6 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$wor
   acq %acquire_delta, 49
   acq %acquire_delta, 51
   acq %acquire_delta, 52
-  low.br ^_bb2
-^_bb2:
   %lhs_view = copy %156 : reg<aie2p.ep> -> reg<aie2p.ep>
   %rhs_view = copy %158 : reg<aie2p.ep> -> reg<aie2p.ep>
   %partial_view = copy %160 : reg<aie2p.ep> -> reg<aie2p.ep>
@@ -306,8 +304,6 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$wor
   vst.acc %154, %partial_view, 128
   %155 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
   vst.acc %155, %partial_view, 192
-  low.br ^_bb3
-^_bb3:
   rel %release_delta, 53
   rel %release_delta, 48
   rel %release_delta, 50
@@ -335,8 +331,6 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$wor
   acq %acquire_delta, 49
   acq %acquire_delta, 51
   acq %acquire_delta, 52
-  low.br ^_bb2
-^_bb2:
   %lhs_view = copy %198 : reg<aie2p.ep> -> reg<aie2p.ep>
   %rhs_view = copy %200 : reg<aie2p.ep> -> reg<aie2p.ep>
   %partial_view = copy %202 : reg<aie2p.ep> -> reg<aie2p.ep>
@@ -362,8 +356,6 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$wor
   vst.acc %196, %partial_view, 128
   %197 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
   vst.acc %197, %partial_view, 192
-  low.br ^_bb3
-^_bb3:
   rel %release_delta, 53
   rel %release_delta, 48
   rel %release_delta, 50
@@ -393,8 +385,6 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$wor
   acq %acquire_delta, 5
   acq %acquire_delta, 53
   acq %acquire_delta, 50
-  low.br ^_bb2
-^_bb2:
   %partial0_view = copy %245 : reg<aie2p.ep> -> reg<aie2p.ep>
   %partial1_view = copy %247 : reg<aie2p.ep> -> reg<aie2p.ep>
   %bias_view = copy %249 : reg<aie2p.ep> -> reg<aie2p.ep>
@@ -425,8 +415,6 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @split_k_array$wor
   vst.acc %243, %output_view, 128
   %244 = slice %biased[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
   vst.acc %244, %output_view, 192
-  low.br ^_bb3
-^_bb3:
   rel %release_delta, 51
   rel %release_delta, 48
   rel %release_delta, 4

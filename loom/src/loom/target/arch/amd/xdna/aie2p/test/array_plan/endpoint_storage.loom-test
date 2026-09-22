@@ -122,7 +122,7 @@ control-relocation index=1 record=3 word=1 binding=1 addend=0 alignment=4
 control-relocation index=2 record=6 word=1 binding=2 addend=0 alignment=4
 
 resident-program workers=1
-resident worker=0 entry=@neighbor_egress$worker$0 tile=(0,2) code-bytes=174 resources=0 fixups=1
+resident worker=0 entry=@neighbor_egress$worker$0 tile=(0,2) code-bytes=164 resources=0 fixups=1
 
 low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @neighbor_egress$worker$0() asm {
   %acquire_delta = mov.short -1
@@ -135,8 +135,6 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @neighbor_egress$w
   acq %acquire_delta, 48
   acq %acquire_delta, 50
   acq %acquire_delta, 32
-  low.br ^_bb2
-^_bb2:
   %output0 = copy %34 : reg<aie2p.ep> -> reg<aie2p.ep>
   %output1 = copy %36 : reg<aie2p.ep> -> reg<aie2p.ep>
   %output2 = copy %38 : reg<aie2p.ep> -> reg<aie2p.ep>
@@ -146,8 +144,6 @@ low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @neighbor_egress$w
   st %value0, %output0, 0
   st %value1, %output1, 0
   st %value2, %output2, 0
-  low.br ^_bb3
-^_bb3:
   rel %release_delta, 49
   rel %release_delta, 51
   rel %release_delta, 33

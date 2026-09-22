@@ -92,7 +92,7 @@ control-relocation index=0 record=0 word=1 binding=0 addend=64 alignment=4
 control-relocation index=1 record=2 word=1 binding=1 addend=0 alignment=4
 
 resident-program workers=1
-resident worker=0 entry=@temporal_fold_array$worker$0 tile=(0,2) code-bytes=388 resources=0 fixups=5
+resident worker=0 entry=@temporal_fold_array$worker$0 tile=(0,2) code-bytes=372 resources=0 fixups=5
 
 low.func.def retain target<amd.xdna.aie2p.core>(@temporal_fold_core_target) @temporal_fold_array$worker$0() asm {
   %acquire_delta = mov.short -1
@@ -110,27 +110,23 @@ low.func.def retain target<amd.xdna.aie2p.core>(@temporal_fold_core_target) @tem
   low.br ^_bb2(%34: reg<aie2p.ep>, %35: reg<aie2p.ep>, %42: reg<aie2p.mbms x4>, %fold_record_count: reg<aie2p.er>, %release_delta: reg<aie2p.er>)
 ^_bb2(%30: reg<aie2p.ep>, %32: reg<aie2p.ep>, %36: reg<aie2p.mbms x4>, %37: reg<aie2p.er>, %38: reg<aie2p.er>):
   acq %acquire_delta, 49
-  low.br ^_bb3
-^_bb3:
   %input = copy %30 : reg<aie2p.ep> -> reg<aie2p.ep>
   %output = copy %32 : reg<aie2p.ep> -> reg<aie2p.ep>
   %low = vlda.acc %input, 0
   %high = vlda.acc %input, 64
   vst.acc %low, %output, 0
   vst.acc %high, %output, 64
-  low.br ^_bb4
-^_bb4:
   %45 = vlda.acc %32, 0
   %46 = vlda.acc %32, 64
   %47 = concat(%45, %46, %43, %43) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
   %48 = nez %38
-  low.cond_br %48, ^_bb5, ^_bb6 : reg<aie2p.er>
-^_bb5:
-  low.br ^_bb7(%47: reg<aie2p.mbms x4>)
-^_bb6:
+  low.cond_br %48, ^_bb3, ^_bb4 : reg<aie2p.er>
+^_bb3:
+  low.br ^_bb5(%47: reg<aie2p.mbms x4>)
+^_bb4:
   %49 = vadd.f32x64 %36, %47, %fold_mode
-  low.br ^_bb7(%49: reg<aie2p.mbms x4>)
-^_bb7(%44: reg<aie2p.mbms x4>):
+  low.br ^_bb5(%49: reg<aie2p.mbms x4>)
+^_bb5(%44: reg<aie2p.mbms x4>):
   rel %release_delta, 48
   %50 = mov.address-to-scalar %30
   %51 = mov.i32 16384
@@ -138,10 +134,10 @@ low.func.def retain target<amd.xdna.aie2p.core>(@temporal_fold_core_target) @tem
   %53 = mov.scalar-to-address %52
   %54 = sub %37, %release_delta
   %55 = nez %54
-  low.cond_br %55, ^_bb8, ^_bb9 : reg<aie2p.er>
-^_bb8:
+  low.cond_br %55, ^_bb6, ^_bb7 : reg<aie2p.er>
+^_bb6:
   low.br ^_bb2(%53: reg<aie2p.ep>, %32: reg<aie2p.ep>, %44: reg<aie2p.mbms x4>, %54: reg<aie2p.er>, %fold_zero: reg<aie2p.er>)
-^_bb9:
+^_bb7:
   %56 = slice %44[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
   vst.acc %56, %32, 0
   %57 = slice %44[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>

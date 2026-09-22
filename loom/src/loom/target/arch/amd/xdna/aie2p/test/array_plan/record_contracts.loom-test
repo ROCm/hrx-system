@@ -124,7 +124,7 @@ control-relocation index=0 record=0 word=1 binding=0 addend=0 alignment=4
 control-relocation index=1 record=2 word=1 binding=1 addend=0 alignment=4
 
 resident-program workers=1
-resident worker=0 entry=@temporal_fold_array$worker$0 tile=(0,2) code-bytes=396 resources=0 fixups=5
+resident worker=0 entry=@temporal_fold_array$worker$0 tile=(0,2) code-bytes=380 resources=0 fixups=5
 
 low.func.def retain target<amd.xdna.aie2p.core>(@temporal_fold_core_target) @temporal_fold_array$worker$0() asm {
   %acquire_delta = mov.short -1
@@ -141,26 +141,22 @@ low.func.def retain target<amd.xdna.aie2p.core>(@temporal_fold_core_target) @tem
   low.br ^_bb2(%29: reg<aie2p.ep>, %30: reg<aie2p.ep>, %37: reg<aie2p.mbms x4>, %fold_record_count: reg<aie2p.er>, %release_delta: reg<aie2p.er>)
 ^_bb2(%25: reg<aie2p.ep>, %27: reg<aie2p.ep>, %31: reg<aie2p.mbms x4>, %32: reg<aie2p.er>, %33: reg<aie2p.er>):
   acq %acquire_delta, 49
-  low.br ^_bb3
-^_bb3:
   %input = copy %25 : reg<aie2p.ep> -> reg<aie2p.ep>
   %output = copy %27 : reg<aie2p.ep> -> reg<aie2p.ep>
   %value = lda %input, 0
   st %value, %output, 0
-  low.br ^_bb4
-^_bb4:
   %39 = lda %27, 0
   %40 = vbcst.32 %39
   %41 = vmov.vector512.to.accumulator512 %40
   %42 = concat(%41, %41, %41, %41) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
   %43 = nez %33
-  low.cond_br %43, ^_bb5, ^_bb6 : reg<aie2p.er>
-^_bb5:
-  low.br ^_bb7(%42: reg<aie2p.mbms x4>)
-^_bb6:
+  low.cond_br %43, ^_bb3, ^_bb4 : reg<aie2p.er>
+^_bb3:
+  low.br ^_bb5(%42: reg<aie2p.mbms x4>)
+^_bb4:
   %44 = vadd.f32x64 %31, %42, %fold_mode
-  low.br ^_bb7(%44: reg<aie2p.mbms x4>)
-^_bb7(%38: reg<aie2p.mbms x4>):
+  low.br ^_bb5(%44: reg<aie2p.mbms x4>)
+^_bb5(%38: reg<aie2p.mbms x4>):
   rel %release_delta, 48
   %45 = mov.address-to-scalar %25
   %46 = mov.i32 16384
@@ -168,10 +164,10 @@ low.func.def retain target<amd.xdna.aie2p.core>(@temporal_fold_core_target) @tem
   %48 = mov.scalar-to-address %47
   %49 = sub %32, %release_delta
   %50 = nez %49
-  low.cond_br %50, ^_bb8, ^_bb9 : reg<aie2p.er>
-^_bb8:
+  low.cond_br %50, ^_bb6, ^_bb7 : reg<aie2p.er>
+^_bb6:
   low.br ^_bb2(%48: reg<aie2p.ep>, %27: reg<aie2p.ep>, %38: reg<aie2p.mbms x4>, %49: reg<aie2p.er>, %fold_zero: reg<aie2p.er>)
-^_bb9:
+^_bb7:
   %51 = slice %38[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
   %52 = vmov.accumulator512.to.vector512 %51
   %53 = vextract.32.imm %52, 0

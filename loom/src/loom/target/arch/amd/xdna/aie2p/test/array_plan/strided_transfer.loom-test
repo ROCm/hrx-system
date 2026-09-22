@@ -96,7 +96,7 @@ control-relocation index=0 record=0 word=1 binding=0 addend=256 alignment=4
 control-relocation index=1 record=2 word=1 binding=1 addend=0 alignment=4
 
 resident-program workers=1
-resident worker=0 entry=@repeated_sliding_window_array$worker$0 tile=(0,2) code-bytes=170 resources=0 fixups=1
+resident worker=0 entry=@repeated_sliding_window_array$worker$0 tile=(0,2) code-bytes=154 resources=0 fixups=1
 
 low.func.def retain target<amd.xdna.aie2p.core>(@repeated_sliding_window_core_target) @repeated_sliding_window_array$worker$0() asm {
   %acquire_delta = mov.short -1
@@ -107,8 +107,6 @@ low.func.def retain target<amd.xdna.aie2p.core>(@repeated_sliding_window_core_ta
 ^_bb1(%32: reg<aie2p.ep>, %34: reg<aie2p.ep>):
   acq %acquire_delta, 49
   acq %acquire_delta, 50
-  low.br ^_bb2
-^_bb2:
   %input = copy %32 : reg<aie2p.ep> -> reg<aie2p.ep>
   %output = copy %34 : reg<aie2p.ep> -> reg<aie2p.ep>
   %value0 = lda %input, 0
@@ -119,8 +117,6 @@ low.func.def retain target<amd.xdna.aie2p.core>(@repeated_sliding_window_core_ta
   st %value1, %output, 4
   st %value2, %output, 8
   st %value3, %output, 12
-  low.br ^_bb3
-^_bb3:
   rel %release_delta, 51
   rel %release_delta, 48
   %36 = mov.address-to-scalar %32

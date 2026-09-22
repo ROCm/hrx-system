@@ -306,7 +306,11 @@ loom_cc_library(
     loom::ops::op_defs
     loom::rewrite::materialize
     loom::rewrite::remap
+    loom::rewrite::rewriter
     loom::target::arch::amd::xdna::array_facts
+    loom::transforms::cfg::block_fusion
+    loom::util::cfg_graph
+    loom::util::dominance
   PUBLIC
 )
 endif()

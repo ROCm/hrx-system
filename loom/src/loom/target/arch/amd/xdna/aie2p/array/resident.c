@@ -17,8 +17,12 @@
 #include "loom/ops/op_defs.h"
 #include "loom/rewrite/materialize.h"
 #include "loom/rewrite/remap.h"
+#include "loom/rewrite/rewriter.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 #include "loom/target/arch/amd/xdna/array/facts.h"
+#include "loom/transforms/cfg/block_fusion.h"
+#include "loom/util/cfg_graph.h"
+#include "loom/util/dominance.h"
 
 enum { LOOM_AIE2P_ARRAY_SCALAR_FOLD_PACK_WIDTH = 16 };
 
@@ -1361,6 +1365,38 @@ static iree_status_t loom_aie2p_array_resident_materialize_folded_body(
       port_state_count, location);
 }
 
+// Materialization introduces unconditional edges around the cloned firing.
+// Contract them before scheduling so protocol boundaries do not force unrelated
+// register work or outstanding memory operations to drain an entire block.
+static iree_status_t loom_aie2p_array_resident_fuse_blocks(
+    loom_module_t* module, loom_region_t* body,
+    iree_arena_block_pool_t* block_pool) {
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(block_pool, &scratch_arena);
+  loom_rewriter_t rewriter;
+  loom_rewriter_initialize(&rewriter, module, &scratch_arena);
+  loom_cfg_graph_t graph;
+  iree_status_t status =
+      loom_cfg_graph_build(module, body, &scratch_arena, &graph);
+  loom_dominance_info_t dominance = {
+      .module = module,
+      .arena = &scratch_arena,
+  };
+  if (iree_status_is_ok(status)) {
+    status = loom_dominance_info_add_cfg_graph(&dominance, &graph, NULL);
+  }
+  if (iree_status_is_ok(status)) {
+    uint16_t fused_count = 0;
+    status = loom_cfg_fuse_single_predecessor_blocks(
+        &rewriter, &graph, &dominance, &scratch_arena, &fused_count);
+  }
+  // Fusion invalidates the snapshot. Leaf compilation builds its own facts
+  // from the finished resident CFG after this temporary storage is released.
+  loom_rewriter_deinitialize(&rewriter);
+  iree_arena_deinitialize(&scratch_arena);
+  return status;
+}
+
 static iree_status_t loom_aie2p_array_resident_materialize_worker(
     loom_aie2p_array_resident_builder_t* builder, uint32_t worker_index,
     loom_aie2p_array_resident_worker_t* out_worker) {
@@ -1457,6 +1493,8 @@ static iree_status_t loom_aie2p_array_resident_materialize_worker(
         preheader, port_states, port_state_count, acquire_delta, release_delta,
         source_function->location));
   }
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_fuse_blocks(
+      builder->module, resident_body, builder->arena->block_pool));
   *out_worker = (loom_aie2p_array_resident_worker_t){
       .worker_index = worker_index,
       .entry = resident_ref,

@@ -118,7 +118,7 @@ control-relocation index=1 record=2 word=1 binding=1 addend=0 alignment=4
 control-relocation index=2 record=4 word=1 binding=2 addend=0 alignment=4
 
 resident-program workers=1
-resident worker=0 entry=@canonical_q5_stream_array$worker$0 tile=(0,2) code-bytes=190 resources=0 fixups=1
+resident worker=0 entry=@canonical_q5_stream_array$worker$0 tile=(0,2) code-bytes=174 resources=0 fixups=1
 
 low.func.def retain target<amd.xdna.aie2p.core>(@canonical_q5_stream_core_target) @canonical_q5_stream_array$worker$0() asm {
   %acquire_delta = mov.short -1
@@ -131,8 +131,6 @@ low.func.def retain target<amd.xdna.aie2p.core>(@canonical_q5_stream_core_target
   acq %acquire_delta, 49
   acq %acquire_delta, 51
   acq %acquire_delta, 52
-  low.br ^_bb2
-^_bb2:
   %weight = copy %37 : reg<aie2p.ep> -> reg<aie2p.ep>
   %activation = copy %39 : reg<aie2p.ep> -> reg<aie2p.ep>
   %output = copy %41 : reg<aie2p.ep> -> reg<aie2p.ep>
@@ -140,8 +138,6 @@ low.func.def retain target<amd.xdna.aie2p.core>(@canonical_q5_stream_core_target
   %activation_head = vlda.512.i8x64 %activation, 0
   %sum = vadd.8 %weight_head, %activation_head
   vst.512.i8x64 %sum, %output, 0
-  low.br ^_bb3
-^_bb3:
   rel %release_delta, 53
   rel %release_delta, 48
   rel %release_delta, 50
