@@ -420,8 +420,8 @@ type, and Loom retains the shape and layout facts through the helper calls.
 
 ## Integer atomics
 
-`<loomcxx/atomic.h>` exposes scalar atomic updates through ordinary typed
-pointers. The kind, ordering and scope use the same names as High IR, with
+`<loomcxx/atomic.h>` exposes scalar atomic observations and updates through typed
+pointers. The kind, ordering, and scope use the same names as High IR, with
 explicit template arguments. Pointer arithmetic and helper calls preserve the
 original allocation and byte origin.
 
@@ -469,15 +469,40 @@ equal `expected`, without spurious failure or an output parameter. Failure
 ordering cannot release or be stronger than success ordering. The declaration
 binding validates this pair using the same contract as High IR.
 
+`load<ordering, scope>(pointer)` observes an object without changing it;
+`store<ordering, scope>(value, pointer)` publishes a value without reading the
+old one. Loads accept relaxed, acquire, or sequentially consistent ordering.
+Stores accept relaxed, release, or sequentially consistent ordering.
+
+```cpp
+unsigned consume(const unsigned* ready, const unsigned* payload) {
+  while (loom::view::atomic::load<ordering::relaxed, scope::system>(ready) == 0) {}
+  loom::buffer::fence<ordering::acquire, scope::system>();
+  return *payload;
+}
+
+void publish(unsigned* ready, unsigned* payload, unsigned value) {
+  *payload = value;
+  loom::view::atomic::store<ordering::release, scope::system>(1u, ready);
+}
+```
+
+The caller supplies shared storage with the requested synchronization domain
+and keeps the payload live and unchanged until the consumer finishes. The
+consumer's load and fence become `view.atomic.load` and `buffer.fence`; using
+an acquire load directly also orders the payload read. These operations work
+in ordinary functions. A fence orders the executing thread's memory accesses;
+it does not rendezvous with other invocations or complete asynchronous DMA.
+Fence ordering is acquire, release, acquire-release, or sequentially consistent.
+
 Pointers identify live, naturally aligned, non-boolean integer objects.
-Volatile pointers are accepted, and const destinations reject. These bindings
-preserve the chosen scope; the target diagnoses unsupported widths, memory
-spaces and synchronization contracts. For example, AMDGPU global storage uses
-device scope and workgroup storage uses workgroup scope. System-scope native
-publication requires a target provider and backing-memory contract that the
-current AMDGPU provider does not yet admit. Atomic load/store and standalone
-fence bindings likewise require their shared High contracts; an RMW or barrier
-does not substitute for them.
+Loads accept const pointers, and updates require mutable storage. Volatile
+pointers are accepted; every atomic load remains observable even when its
+result is discarded. These bindings preserve the chosen scope; the target
+diagnoses unsupported widths, memory spaces, and synchronization contracts.
+Native support follows the corresponding High operation. The importer does not
+choose cache policies, insert host locks, or replace observations with
+read-modify-write operations.
 
 ## Embedded Low assembly
 

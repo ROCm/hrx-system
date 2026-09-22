@@ -89,3 +89,46 @@ func.def public @replace_half(%expected: i16, %replacement: i16, %destination: b
   %12 = view.atomic.cmpxchg %expected, %replacement, %11[0] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : i16, view<1xi16> -> i16
   func.return %12 : i16
 }
+
+// ====
+#include <loomcxx/atomic.h>
+using loom::atomic::ordering;
+using loom::atomic::scope;
+
+struct Publication {
+  // Unobserved leading field establishes an interior pointer origin.
+  unsigned padding;
+  // Publication counter observed through const volatile storage.
+  unsigned generation;
+};
+
+// Const affects mutation permission, not the observability of an atomic load.
+unsigned observe(const volatile Publication* source) {
+  return loom::view::atomic::load<ordering::acquire, scope::system>(
+      &source->generation);
+}
+
+// Fences are ordinary function operations, without a kernel context or pointer.
+void publish(unsigned value, volatile unsigned* destination) {
+  loom::buffer::fence<ordering::release, scope::system>();
+  loom::view::atomic::store<ordering::relaxed, scope::system>(value, destination);
+  (void)loom::view::atomic::load<ordering::seq_cst, scope::system>(destination);
+}
+
+// ----
+func.def public @observe(%source: buffer, %source_byte_offset: offset) -> (i32) {
+  %3 = index.constant 4 : offset
+  %4 = index.add %source_byte_offset, %3 : offset
+  %5 = buffer.view %source[%4] : buffer -> view<1xi32>
+  %6 = view.atomic.load %5[0] {ordering = acquire, scope = system} : view<1xi32> -> i32
+  func.return %6 : i32
+}
+
+func.def public @publish(%value: i32, %destination: buffer, %destination_byte_offset: offset) {
+  buffer.fence scope(system) ordering(release)
+  %10 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi32>
+  view.atomic.store %value, %10[0] {ordering = relaxed, scope = system} : i32, view<1xi32>
+  %11 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi32>
+  %12 = view.atomic.load %11[0] {ordering = seq_cst, scope = system} : view<1xi32> -> i32
+  func.return
+}

@@ -69,6 +69,7 @@ loom_cc_library(
     loom::import::cxx::source::error
     loom::import::cxx::value::storage
     loom::ops::atomic
+    loom::ops::buffer
     loom::ops::view
   PUBLIC
 )

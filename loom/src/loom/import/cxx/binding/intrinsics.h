@@ -62,9 +62,9 @@ class Intrinsics {
       return loom_type_equal(type, other.type);
     }
   };
-  using Binding =
-      std::variant<ScalarBinding, ShapedIntrinsic, ViewIntrinsic,
-                   AtomicIntrinsic, AssemblyIntrinsic, EqualityBinding>;
+  using Binding = std::variant<ScalarBinding, ShapedIntrinsic, ViewIntrinsic,
+                               AtomicIntrinsic, FenceIntrinsic,
+                               AssemblyIntrinsic, EqualityBinding>;
 
   Intrinsics(cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types)
       : unit_(unit), diagnostics_(diagnostics), types_(types) {}

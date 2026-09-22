@@ -77,11 +77,22 @@ enum class scope {
 
 // Scalar integer pointer projections. The pointer identifies one live,
 // naturally aligned integer object; its buffer and byte origin are retained.
-// Const storage and boolean payloads are rejected. Volatile pointers are
-// accepted: each operation is already an observable atomic memory effect.
+// Loads accept const storage; updates require mutable storage. Boolean payloads
+// are rejected. Volatile pointers are accepted: each operation is already an
+// observable atomic memory effect.
 // Ordering and scope are explicit. The selected target must implement the
-// requested width, memory space and synchronization contract.
+// requested width, memory space, and synchronization contract.
 namespace loom::view::atomic {
+
+// Observes one object without modifying it. Ordering is relaxed, acquire, or
+// seq_cst. Every call is a distinct observation, including discarded results.
+template <loom::atomic::ordering Ordering, loom::atomic::scope Scope, class T>
+[[loom::op("view.atomic.load")]] T load(const volatile T* source);
+
+// Publishes one object without reading its old value. Ordering is relaxed,
+// release, or seq_cst.
+template <loom::atomic::ordering Ordering, loom::atomic::scope Scope, class T>
+[[loom::op("view.atomic.store")]] void store(T value, volatile T* destination);
 
 // Atomically combines value with memory and returns the old memory value.
 // Signed and unsigned minimum/maximum kinds match the integer source type.
@@ -105,5 +116,17 @@ template <loom::atomic::ordering Success, loom::atomic::ordering Failure,
                                               volatile T* destination);
 
 }  // namespace loom::view::atomic
+
+namespace loom::buffer {
+
+// Orders the executing thread's memory accesses across storage objects.
+// Ordering is acquire, release, acq_rel, or seq_cst. Matching atomic
+// observations and publications establish synchronization. The fence does not
+// rendezvous with other threads or complete independent asynchronous transfers.
+// It is valid in ordinary functions as well as kernels.
+template <loom::atomic::ordering Ordering, loom::atomic::scope Scope>
+[[loom::op("buffer.fence")]] void fence();
+
+}  // namespace loom::buffer
 
 #endif  // LOOMCXX_ATOMIC_H_

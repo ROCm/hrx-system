@@ -118,6 +118,7 @@ void Intrinsics::declaration(cxx::FunctionSymbol* function,
     } else if (selected->arguments.size() != 1 ||
                (!ViewIntrinsic::supports(selected->arguments[0]->name()) &&
                 !AtomicIntrinsic::supports(selected->arguments[0]->name()) &&
+                !FenceIntrinsic::supports(selected->arguments[0]->name()) &&
                 !AssemblyIntrinsic::supports(selected->arguments[0]->name()))) {
       diagnostics_.reject(unit_, owner,
                           "function template operation has no C++ projection");
@@ -184,6 +185,10 @@ Intrinsics::Binding Intrinsics::resolve(cxx::FunctionSymbol* function,
   if (auto atomic = AtomicIntrinsic::resolve(unit_, diagnostics_, types_,
                                              function, attribute, owner)) {
     return *atomic;
+  }
+  if (auto fence = FenceIntrinsic::resolve(unit_, diagnostics_, function,
+                                           attribute, owner)) {
+    return *fence;
   }
   if (auto view = ViewIntrinsic::resolve(unit_, diagnostics_, types_, signature,
                                          attribute, owner)) {
@@ -295,6 +300,10 @@ IntrinsicCallResult Intrinsics::call(const Binding& admitted,
   }
   if (auto* atomic = std::get_if<AtomicIntrinsic>(binding)) {
     return {atomic->call(arguments, storage, owner, builder, location)};
+  }
+  if (auto* fence = std::get_if<FenceIntrinsic>(binding)) {
+    fence->call(builder, location);
+    return {std::nullopt};
   }
   std::array<loom_value_id_t, 8> inline_values;
   std::vector<loom_value_id_t> overflow;

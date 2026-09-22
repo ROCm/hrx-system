@@ -81,6 +81,16 @@ loom_test(
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
+loom_test(
+    name = "atomic_publication_test",
+    srcs = [
+        "atomic_publication.cpp",
+        "atomic_publication.loom",
+    ],
+    execution_profiles = _EXECUTION_PROFILES,
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
 loom_check_test(
     name = "storage_division",
     src = "storage_division.cxx-test",

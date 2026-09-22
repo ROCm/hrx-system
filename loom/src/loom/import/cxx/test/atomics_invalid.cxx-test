@@ -109,7 +109,7 @@ int entry(int* pointer) {
 template <int Kind, int Ordering, int Scope>
 [[loom::op("view.atomic.reduce")]] int custom(int, int*);
 int entry(int* pointer) {
-  // ERROR@+1: LOWERING/059 "atomic result must be the destination element type, or void for reduction"
+  // ERROR@+1: LOWERING/059 "atomic result must be the destination element type, or void for store/reduction"
   return custom<2, 0, 3>(1, pointer);
 }
 
@@ -132,4 +132,44 @@ template <auto Kind, auto Ordering, auto Scope>
 int entry(int* pointer) {
   // ERROR@+1: LOWERING/059 "atomic selectors require constant enum values"
   return custom<2.5, 0, 3>(1, pointer);
+}
+
+// ====
+#include <loomcxx/atomic.h>
+using namespace loom::atomic;
+unsigned entry(const unsigned* source) {
+  // ERROR@+1: LOWERING/059 "ordering is not permitted for this operation"
+  return loom::view::atomic::load<ordering::release, scope::system>(source);
+}
+
+// ====
+#include <loomcxx/atomic.h>
+using namespace loom::atomic;
+void entry(unsigned* destination) {
+  // ERROR@+1: LOWERING/059 "ordering is not permitted for this operation"
+  loom::view::atomic::store<ordering::acquire, scope::system>(1u, destination);
+}
+
+// ====
+#include <loomcxx/atomic.h>
+using namespace loom::atomic;
+void entry() {
+  // ERROR@+1: LOWERING/059 "ordering is not permitted for this operation"
+  loom::buffer::fence<ordering::relaxed, scope::system>();
+}
+
+// ====
+template <int Ordering, int Scope>
+[[loom::op("view.atomic.store")]] void custom(unsigned, const unsigned*);
+void entry(const unsigned* pointer) {
+  // ERROR@+1: LOWERING/059 "atomic destination requires a mutable pointer"
+  custom<2, 4>(1u, pointer);
+}
+
+// ====
+template <int Ordering, int Scope>
+[[loom::op("buffer.fence")]] int custom();
+int entry() {
+  // ERROR@+1: LOWERING/059 "buffer.fence requires void()"
+  return custom<1, 4>();
 }

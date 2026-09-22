@@ -1,0 +1,34 @@
+func.decl @publication_value(%storage: buffer, %origin: offset) -> (i32)
+
+// The tensor allocator owns the binding alignment. The imported source helper
+// retains the interior element's origin without strengthening the buffer root.
+kernel.def @observe_publication() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%storage: buffer, %output: buffer) {
+  %aligned = buffer.assume.alignment %storage {minimum_alignment = 4} : buffer
+  %origin = index.constant 0 : offset
+  %result = func.call @publication_value(%aligned, %origin) : (buffer, offset) -> (i32)
+  %view = buffer.view %output[%origin] : buffer -> view<1xi32>
+  view.store %result, %view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+check.case @interior_atomic_observations {
+  // This native witness uses the RDNA 3.5 ordered load/store providers.
+  check.requires<hal.amdgpu.descriptor_set> {descriptor_set = "amdgpu.rdna3_5.core"}
+  %storage = check.generate.fill value(41) : tensor<3xi32>
+  %output = check.generate.fill value(0) : tensor<1xi32>
+  kernel.launch @observe_publication(%storage, %output) : (tensor<3xi32>, tensor<1xi32>)
+  %before = check.tensor.view %storage offset(0) : tensor<3xi32> -> tensor<1xi32>
+  %published = check.tensor.view %storage offset(4) : tensor<3xi32> -> tensor<1xi32>
+  %after = check.tensor.view %storage offset(8) : tensor<3xi32> -> tensor<1xi32>
+  %expected = check.generate.fill value(-2147483607) : tensor<1xi32>
+  %guard = check.generate.fill value(41) : tensor<1xi32>
+  check.expect.bitwise actual(%output) expected(%expected) : tensor<1xi32>
+  check.expect.bitwise actual(%published) expected(%expected) : tensor<1xi32>
+  check.expect.bitwise actual(%before) expected(%guard) : tensor<1xi32>
+  check.expect.bitwise actual(%after) expected(%guard) : tensor<1xi32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
