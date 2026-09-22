@@ -168,6 +168,65 @@ CHECK: *"iterations":2,*
 CHECK: *"blocks-fused":3,*
 
 // ====
+// RUN: with-checks pass-report cfg-simplify
+
+// Independent terminal paths contract together, without cloning returns and
+// restarting analysis for each resulting unreachable block.
+func.def @terminal_paths(%choose_side: i1, %choose_value: i1, %value: i32) {
+  cfg.cond_br %choose_side, ^left, ^right
+^left:
+  cfg.cond_br %choose_value, ^first, ^second
+^right:
+  cfg.cond_br %choose_value, ^third, ^fourth
+^first:
+  test.use %value : i32
+  cfg.br ^first_exit
+^first_exit:
+  func.return
+^second:
+  test.use %value : i32
+  cfg.br ^second_exit
+^second_exit:
+  func.return
+^third:
+  test.use %value : i32
+  cfg.br ^third_exit
+^third_exit:
+  func.return
+^fourth:
+  test.use %value : i32
+  cfg.br ^fourth_exit
+^fourth_exit:
+  func.return
+}
+
+// ----
+CHECK: *"changed":true,*
+CHECK: *"iterations":2,*
+CHECK: *"blocks-fused":4,*
+
+// ====
+// RUN: with-checks pass-report cfg-simplify
+
+test.target<low_core> @target
+
+// A Low chain ending in an operandless return contracts in one edit.
+low.kernel.def target<test.low.core>(@target) @terminal_chain() asm {
+  low.br ^start
+^start:
+  low.br ^middle
+^middle:
+  low.br ^exit
+^exit:
+  return
+}
+
+// ----
+CHECK: *"changed":true,*
+CHECK: *"iterations":2,*
+CHECK: *"blocks-fused":3,*
+
+// ====
 // RUN: pass cfg-simplify
 
 test.target<low_core> @target

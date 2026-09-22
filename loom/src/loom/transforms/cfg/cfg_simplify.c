@@ -34,25 +34,22 @@
 // Statistics
 //===----------------------------------------------------------------------===//
 
-#define LOOM_CFG_SIMPLIFY_STATISTICS(V, statistics_type)                       \
-  V(statistics_type, iterations, "iterations",                                 \
-    "Number of fixed-point simplification iterations.")                        \
-  V(statistics_type, branches_folded, "branches-folded",                       \
-    "Number of conditional branches folded to direct branches.")               \
-  V(statistics_type, edges_forwarded, "edges-forwarded",                       \
-    "Number of predecessor edges forwarded through trivial blocks.")           \
-  V(statistics_type, blocks_removed, "blocks-removed",                         \
-    "Number of unreachable CFG blocks removed.")                               \
-  V(statistics_type, block_args_removed, "block-args-removed",                 \
-    "Number of redundant CFG block arguments removed.")                        \
-  V(statistics_type, blocks_fused, "blocks-fused",                             \
-    "Number of single-predecessor CFG blocks fused into their "                \
-    "predecessors.")                                                           \
-  V(statistics_type, duplicate_blocks_merged, "duplicate-blocks-merged",       \
-    "Number of duplicate terminal CFG blocks merged.")                         \
-  V(statistics_type, terminal_blocks_duplicated, "terminal-blocks-duplicated", \
-    "Number of direct branches replaced by duplicated terminal "               \
-    "successors.")
+#define LOOM_CFG_SIMPLIFY_STATISTICS(V, statistics_type)                 \
+  V(statistics_type, iterations, "iterations",                           \
+    "Number of fixed-point simplification iterations.")                  \
+  V(statistics_type, branches_folded, "branches-folded",                 \
+    "Number of conditional branches folded to direct branches.")         \
+  V(statistics_type, edges_forwarded, "edges-forwarded",                 \
+    "Number of predecessor edges forwarded through trivial blocks.")     \
+  V(statistics_type, blocks_removed, "blocks-removed",                   \
+    "Number of unreachable CFG blocks removed.")                         \
+  V(statistics_type, block_args_removed, "block-args-removed",           \
+    "Number of redundant CFG block arguments removed.")                  \
+  V(statistics_type, blocks_fused, "blocks-fused",                       \
+    "Number of single-predecessor CFG blocks fused into their "          \
+    "predecessors.")                                                     \
+  V(statistics_type, duplicate_blocks_merged, "duplicate-blocks-merged", \
+    "Number of equivalent CFG blocks merged.")
 
 LOOM_PASS_STATISTICS_DEFINE(loom_cfg_simplify_statistics,
                             loom_cfg_simplify_statistics_t,
@@ -274,108 +271,6 @@ static bool loom_cfg_simplify_direct_branch(const loom_op_t* op,
   *out_dest = NULL;
   *out_args = (loom_value_slice_t){0};
   return false;
-}
-
-static bool loom_cfg_simplify_operandless_terminal_block(
-    const loom_cfg_simplify_state_t* state, const loom_block_t* block,
-    const loom_op_t** out_terminator) {
-  *out_terminator = NULL;
-  if (!block || block->arg_count != 0 || block->first_op != block->last_op ||
-      !block->first_op) {
-    return false;
-  }
-
-  const loom_op_t* terminator = block->first_op;
-  loom_trait_flags_t traits =
-      loom_op_effective_traits(state->module, terminator);
-  if (!iree_all_bits_set(traits, LOOM_TRAIT_TERMINATOR | LOOM_TRAIT_PURE) ||
-      loom_traits_are_convergent(traits) || terminator->operand_count != 0 ||
-      terminator->successor_count != 0 || terminator->result_count != 0 ||
-      terminator->region_count != 0) {
-    return false;
-  }
-  *out_terminator = terminator;
-  return true;
-}
-
-static bool loom_cfg_simplify_can_duplicate_terminal_successor(
-    const loom_cfg_graph_t* graph, uint16_t dest_block_index) {
-  // A shared terminal block is a real reconvergence point even when the
-  // terminator itself is cheap to clone.
-  if (graph->blocks[dest_block_index].predecessor_count > 1) {
-    return false;
-  }
-  return true;
-}
-
-static iree_status_t loom_cfg_simplify_clone_terminal_before_branch(
-    loom_cfg_simplify_state_t* state, loom_op_t* branch_op,
-    const loom_op_t* terminator) {
-  loom_builder_ip_t saved_ip = loom_builder_save(&state->rewriter->builder);
-  loom_builder_set_before(&state->rewriter->builder, branch_op);
-
-  loom_ir_remap_t remap = {0};
-  const loom_ir_remap_options_t remap_options = {
-      .allow_unmapped_values = true,
-  };
-  iree_status_t status =
-      loom_ir_remap_initialize(state->module, state->module,
-                               state->analysis_arena, &remap_options, &remap);
-  if (iree_status_is_ok(status)) {
-    loom_op_t* cloned_op = NULL;
-    status = loom_ir_clone_op(&state->rewriter->builder, terminator, &remap,
-                              &cloned_op);
-    (void)cloned_op;
-  }
-
-  loom_builder_restore(&state->rewriter->builder, saved_ip);
-  if (!iree_status_is_ok(status)) {
-    return status;
-  }
-  return loom_rewriter_erase(state->rewriter, branch_op);
-}
-
-static iree_status_t loom_cfg_simplify_duplicate_terminal_successors(
-    loom_cfg_simplify_state_t* state, const loom_cfg_graph_t* graph,
-    bool* out_changed) {
-  if (graph->malformed) {
-    return iree_ok_status();
-  }
-  for (uint16_t block_index = 0; block_index < graph->block_count;
-       ++block_index) {
-    loom_block_t* block = (loom_block_t*)graph->blocks[block_index].block;
-    if (!block || !block->last_op) {
-      continue;
-    }
-
-    loom_block_t* dest = NULL;
-    loom_value_slice_t args = {0};
-    if (!loom_cfg_simplify_direct_branch(block->last_op, &dest, &args) ||
-        args.count != 0 || dest == block) {
-      continue;
-    }
-
-    const loom_op_t* terminator = NULL;
-    if (!loom_cfg_simplify_operandless_terminal_block(state, dest,
-                                                      &terminator)) {
-      continue;
-    }
-    const iree_host_size_t dest_block_index =
-        loom_cfg_graph_block_index(graph, dest);
-    if (dest_block_index == IREE_HOST_SIZE_MAX ||
-        !loom_cfg_simplify_can_duplicate_terminal_successor(
-            graph, (uint16_t)dest_block_index)) {
-      continue;
-    }
-
-    IREE_RETURN_IF_ERROR(loom_cfg_simplify_clone_terminal_before_branch(
-        state, block->last_op, terminator));
-    ++state->statistics->terminal_blocks_duplicated;
-    state->rewriter->flags |= LOOM_REWRITER_FLAG_CHANGED;
-    *out_changed = true;
-    return iree_ok_status();
-  }
-  return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//
@@ -1874,11 +1769,6 @@ static iree_status_t loom_cfg_simplify_process_cfg_region(
   }
   IREE_RETURN_IF_ERROR(loom_cfg_simplify_fold_path_sensitive_i1_ops(
       state, graph, &path_fact_table, out_changed));
-  if (*out_changed) {
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(loom_cfg_simplify_duplicate_terminal_successors(
-      state, graph, out_changed));
   if (*out_changed) {
     return iree_ok_status();
   }
