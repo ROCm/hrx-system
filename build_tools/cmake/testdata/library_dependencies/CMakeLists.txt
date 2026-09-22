@@ -19,19 +19,28 @@ include("${IREE_REPO_ROOT}/build_tools/cmake/iree_install_support.cmake")
 include("${IREE_REPO_ROOT}/build_tools/cmake/iree_cc_library.cmake")
 include("${IREE_REPO_ROOT}/build_tools/cmake/iree_cc_binary.cmake")
 
+# An existing source wins over a same-named file in the binary directory.
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/library.c" "#error Binary shadow source\n")
+foreach(_EXTENSION hpp inc inl)
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/private.${_EXTENSION}" "#pragma once\n")
+endforeach()
 iree_cc_library(NAME headers
+  SRCS inactive/generated.h
+    "${CMAKE_CURRENT_BINARY_DIR}/private.hpp"
+    "${CMAKE_CURRENT_BINARY_DIR}/private.inc"
+    "${CMAKE_CURRENT_BINARY_DIR}/private.inl"
   TEXTUAL_HDRS "${CMAKE_CURRENT_BINARY_DIR}/producer/generated.h")
-iree_cc_library(NAME leaf SRCS leaf.c DEFINES TRANSITIVE_VALUE=3)
+iree_cc_library(NAME leaf
+  SRCS "${CMAKE_CURRENT_SOURCE_DIR}/leaf.hpp.c" DEFINES TRANSITIVE_VALUE=3)
 # A false condition excludes the entire list; active system includes keep their
 # order. The inactive header catches either a leaked path or reordered includes.
-iree_cc_library(NAME library SRCS library.c DEPS ::leaf ::headers
+iree_cc_library(NAME library
+  SRCS library.c producer/generated.c DEPS ::leaf ::headers
   INCLUDES "$<0:${CMAKE_CURRENT_BINARY_DIR}/unused;${CMAKE_CURRENT_SOURCE_DIR}/inactive>"
   SYSTEM_INCLUDES "$<1:${CMAKE_CURRENT_BINARY_DIR}/producer;${CMAKE_CURRENT_SOURCE_DIR}/inactive>")
-iree_cc_binary(NAME probe
-  SRCS main.c "${CMAKE_CURRENT_BINARY_DIR}/producer/generated.c" DEPS ::library)
+iree_cc_binary(NAME probe SRCS main.c DEPS ::library)
 iree_cc_unified_library(NAME unified ROOT ::library)
-iree_cc_binary(NAME unified_probe
-  SRCS main.c "${CMAKE_CURRENT_BINARY_DIR}/producer/generated.c" DEPS ::unified)
+iree_cc_binary(NAME unified_probe SRCS main.c DEPS ::unified)
 
 # Private link requirements stay link-only when forwarded to the unified target.
 add_library(private_usage INTERFACE)
@@ -40,7 +49,7 @@ target_link_libraries(iree_fixture_library PRIVATE private_usage)
 target_compile_definitions(iree_fixture_library PRIVATE LATE_VALUE=11)
 
 # Independent forward producers in another directory must reach both the
-# interface header's consumer and each binary's generated source.
+# interface header's consumer and the library's generated source.
 add_subdirectory(producer)
 iree_finalize_target_dependencies()
 

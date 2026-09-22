@@ -26,7 +26,10 @@ class CMakeLibraryDependenciesTest(unittest.TestCase):
     def test_generated_inputs_and_transitive_links_stay_fresh(self):
         with tempfile.TemporaryDirectory(prefix="cmake library fixture ") as temporary:
             root = Path(temporary)
-            source, build = root / "source with spaces", root / "build with spaces"
+            source, build = (
+                root / "source.headers with spaces",
+                root / "build with spaces",
+            )
             shutil.copytree(FIXTURE, source)
             configure_project(source, build)
             leaf, *programs = [
@@ -49,9 +52,10 @@ class CMakeLibraryDependenciesTest(unittest.TestCase):
             timestamps = [path.stat().st_mtime_ns for path in programs]
             check(40)
             self.assertEqual([path.stat().st_mtime_ns for path in programs], timestamps)
+            configure_project(source, build)
             (source / "value.txt").write_text("11\n")
             check(48)
-            leaf_source = source / "leaf.c"
+            leaf_source = source / "leaf.hpp.c"
             leaf_source.write_text(
                 leaf_source.read_text().replace("return 5;", "return 6;")
             )
