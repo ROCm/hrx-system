@@ -27,6 +27,23 @@ enum {
   LOOM_AIE2P_TASK_COMPLETION_PACKET_MASK = 31,
 };
 
+// AIE2P core-module trace event codes for the fixed trace event set (core
+// active/idle, memory/stream/lock stalls, lock acquire/release). Values from
+// third_party/aie-rt driver/src/events/xaie_events_aie2p.h (pinned at
+// AIE_RT_SOURCE_COMMIT in npu2.py); cross-checked against mlir-aie's event
+// table in python/utils/trace/__init__.py.
+enum loom_aie2p_trace_core_event_e {
+  LOOM_AIE2P_TRACE_EVENT_NONE = 0,
+  LOOM_AIE2P_TRACE_EVENT_TRUE = 1,
+  LOOM_AIE2P_TRACE_EVENT_CORE_MEMORY_STALL = 23,
+  LOOM_AIE2P_TRACE_EVENT_CORE_STREAM_STALL = 24,
+  LOOM_AIE2P_TRACE_EVENT_CORE_LOCK_STALL = 26,
+  LOOM_AIE2P_TRACE_EVENT_CORE_ACTIVE = 28,
+  LOOM_AIE2P_TRACE_EVENT_CORE_DISABLED = 29,
+  LOOM_AIE2P_TRACE_EVENT_CORE_INSTR_LOCK_ACQUIRE_REQ = 44,
+  LOOM_AIE2P_TRACE_EVENT_CORE_INSTR_LOCK_RELEASE_REQ = 45,
+};
+
 typedef enum loom_aie2p_compute_dma_reset_state_e {
   LOOM_AIE2P_COMPUTE_DMA_RESET_RELEASED = 0,
   LOOM_AIE2P_COMPUTE_DMA_RESET_ASSERTED = 1,
@@ -375,6 +392,79 @@ static iree_status_t loom_aie2p_program_append_core_reset(
       loom_aie2p_program_merge_register_update(&disable, &reset));
   loom_aie2p_program_append_register_mask_write32(
       &builder->array, reset.address, reset.mask, reset.value);
+  return iree_ok_status();
+}
+
+// Configures one traced core's trace unit: the fixed event set in
+// Trace_Event0/1, and Trace_Control0's start/stop event plus mode-0
+// (event-time). Trace_Control1 (packet type/ID) stays at its reset default --
+// the route is a plain circuit connection, so no packet header applies. Must
+// run before the core's reset releases: start_event=TRUE begins capture
+// immediately.
+static iree_status_t loom_aie2p_program_append_trace_configuration(
+    loom_aie2p_array_program_builder_t* builder,
+    loom_xdna_tile_coordinate_t coordinate) {
+  loom_aie2p_register_update_t control0 = {0};
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_resolve_field_update(
+      builder->plan, LOOM_XDNA_REGISTER_FIELD_CORE_TRACE_CONTROL0_MODE,
+      coordinate, 0, NULL, 0, &control0));
+  loom_aie2p_register_update_t start_event = {0};
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_resolve_field_update(
+      builder->plan, LOOM_XDNA_REGISTER_FIELD_CORE_TRACE_CONTROL0_START_EVENT,
+      coordinate, 0, NULL, LOOM_AIE2P_TRACE_EVENT_TRUE, &start_event));
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_program_merge_register_update(&start_event, &control0));
+  loom_aie2p_register_update_t stop_event = {0};
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_resolve_field_update(
+      builder->plan, LOOM_XDNA_REGISTER_FIELD_CORE_TRACE_CONTROL0_STOP_EVENT,
+      coordinate, 0, NULL, LOOM_AIE2P_TRACE_EVENT_NONE, &stop_event));
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_program_merge_register_update(&stop_event, &control0));
+  loom_aie2p_program_append_register_write32(&builder->array, control0.address,
+                                             control0.value);
+
+  static const struct {
+    loom_xdna_register_field_id_t field;
+    int64_t event;
+  } kEventSlots[] = {
+      {LOOM_XDNA_REGISTER_FIELD_CORE_TRACE_EVENT0_EVENT0,
+       LOOM_AIE2P_TRACE_EVENT_CORE_ACTIVE},
+      {LOOM_XDNA_REGISTER_FIELD_CORE_TRACE_EVENT0_EVENT1,
+       LOOM_AIE2P_TRACE_EVENT_CORE_DISABLED},
+      {LOOM_XDNA_REGISTER_FIELD_CORE_TRACE_EVENT0_EVENT2,
+       LOOM_AIE2P_TRACE_EVENT_CORE_MEMORY_STALL},
+      {LOOM_XDNA_REGISTER_FIELD_CORE_TRACE_EVENT0_EVENT3,
+       LOOM_AIE2P_TRACE_EVENT_CORE_STREAM_STALL},
+      {LOOM_XDNA_REGISTER_FIELD_CORE_TRACE_EVENT1_EVENT4,
+       LOOM_AIE2P_TRACE_EVENT_CORE_LOCK_STALL},
+      {LOOM_XDNA_REGISTER_FIELD_CORE_TRACE_EVENT1_EVENT5,
+       LOOM_AIE2P_TRACE_EVENT_CORE_INSTR_LOCK_ACQUIRE_REQ},
+      {LOOM_XDNA_REGISTER_FIELD_CORE_TRACE_EVENT1_EVENT6,
+       LOOM_AIE2P_TRACE_EVENT_CORE_INSTR_LOCK_RELEASE_REQ},
+      {LOOM_XDNA_REGISTER_FIELD_CORE_TRACE_EVENT1_EVENT7,
+       LOOM_AIE2P_TRACE_EVENT_NONE},
+  };
+  loom_aie2p_register_update_t event0 = {0};
+  loom_aie2p_register_update_t event1 = {0};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kEventSlots); ++i) {
+    loom_aie2p_register_update_t* group = i < 4 ? &event0 : &event1;
+    loom_aie2p_register_update_t field = {0};
+    IREE_RETURN_IF_ERROR(loom_aie2p_program_resolve_field_update(
+        builder->plan, kEventSlots[i].field, coordinate, 0, NULL,
+        kEventSlots[i].event, &field));
+    // The first field resolved into each group's register sets its address;
+    // later fields in the same group merge into that address.
+    if (i == 0 || i == 4) {
+      *group = field;
+    } else {
+      IREE_RETURN_IF_ERROR(
+          loom_aie2p_program_merge_register_update(&field, group));
+    }
+  }
+  loom_aie2p_program_append_register_write32(&builder->array, event0.address,
+                                             event0.value);
+  loom_aie2p_program_append_register_write32(&builder->array, event1.address,
+                                             event1.value);
   return iree_ok_status();
 }
 
@@ -1032,6 +1122,7 @@ static iree_status_t loom_aie2p_program_count_storage(
       }
     }
   }
+  iree_host_size_t traced_worker_count = 0;
   for (iree_host_size_t i = 0; i < plan->worker_plan_count; ++i) {
     const loom_xdna_tile_facts_t* tile = NULL;
     IREE_RETURN_IF_ERROR(loom_xdna_array_tile_facts(
@@ -1041,10 +1132,15 @@ static iree_status_t loom_aie2p_program_count_storage(
         tile->dma.channel_count_per_direction,
         2 * IREE_ARRAYSIZE(loom_aie2p_compute_dma_reset_fields),
         &compute_dma_lifecycle_record_count));
+    traced_worker_count += plan->worker_plans[i].trace_enabled;
   }
   iree_host_size_t array_record_capacity = 0;
   IREE_RETURN_IF_ERROR(loom_aie2p_program_add_scaled_capacity(
       plan->worker_plan_count, 4, &array_record_capacity));
+  // One register write per traced core for each of Trace_Control0,
+  // Trace_Event0, and Trace_Event1.
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_add_scaled_capacity(
+      traced_worker_count, 3, &array_record_capacity));
   IREE_RETURN_IF_ERROR(loom_aie2p_program_add_capacity(dma_service_tile_count,
                                                        &array_record_capacity));
   IREE_RETURN_IF_ERROR(loom_aie2p_program_add_capacity(
@@ -1090,6 +1186,13 @@ static iree_status_t loom_aie2p_program_build_array(
     loom_aie2p_array_program_builder_t* builder) {
   for (iree_host_size_t i = 0; i < builder->plan->worker_plan_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_aie2p_program_append_core_reset(
+        builder, builder->plan->worker_plans[i].coordinate));
+  }
+  for (iree_host_size_t i = 0; i < builder->plan->worker_plan_count; ++i) {
+    if (!builder->plan->worker_plans[i].trace_enabled) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(loom_aie2p_program_append_trace_configuration(
         builder, builder->plan->worker_plans[i].coordinate));
   }
   IREE_RETURN_IF_ERROR(

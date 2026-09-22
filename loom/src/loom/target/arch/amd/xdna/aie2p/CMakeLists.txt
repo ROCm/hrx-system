@@ -511,6 +511,8 @@ loom_check_test_suite(
     "test/array_plan/split_k.loom-test"
     "test/array_plan/strided_transfer.loom-test"
     "test/array_plan/temporal_fold.loom-test"
+    "test/array_plan/trace.loom-test"
+    "test/array_plan/trace_headroom.loom-test"
     "test/array_plan/worker_cycles.loom-test"
     "test/descriptors/bf16_comparison.loom-test"
     "test/descriptors/bfp_move.loom-test"

@@ -273,6 +273,38 @@ iree_status_t loom_aie2p_array_route_egress(
   return iree_ok_status();
 }
 
+iree_status_t loom_aie2p_array_route_trace_egress(
+    loom_aie2p_array_route_builder_t* builder, uint32_t channel_index,
+    loom_xdna_tile_coordinate_t worker_coordinate,
+    loom_xdna_tile_coordinate_t shim_coordinate, uint8_t shim_dma_channel) {
+  loom_xdna_tile_coordinate_t coordinate = worker_coordinate;
+  // Each compute or memory tile exposes exactly one TRACE slave port
+  // (StreamPort.TRACE, count=1 in the NPU2 stream-port corpus), so the trace
+  // unit's own output is always channel 0 of that port class.
+  uint8_t current_channel = 0;
+  loom_xdna_stream_port_t incoming_port = LOOM_XDNA_STREAM_PORT_TRACE;
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_vertical_route_segment(
+      builder, channel_index, shim_coordinate.row, &coordinate, &incoming_port,
+      &current_channel));
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_horizontal_route_segment(
+      builder, channel_index, shim_coordinate.column, &coordinate,
+      &incoming_port, &current_channel));
+
+  uint8_t shim_link_channel = 0;
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_dma_stream_channel(
+      builder, shim_coordinate, LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY,
+      shim_dma_channel, &shim_link_channel));
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_append_route(
+      builder, channel_index, coordinate,
+      LOOM_AIE2P_ARRAY_SWITCH_KIND_STREAM_SWITCH, incoming_port,
+      current_channel, LOOM_XDNA_STREAM_PORT_SOUTH, shim_link_channel));
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_append_route(
+      builder, channel_index, shim_coordinate,
+      LOOM_AIE2P_ARRAY_SWITCH_KIND_SHIM_MUX, LOOM_XDNA_STREAM_PORT_NORTH,
+      shim_link_channel, LOOM_XDNA_STREAM_PORT_DMA, shim_dma_channel));
+  return iree_ok_status();
+}
+
 iree_status_t loom_aie2p_array_route_workers(
     loom_aie2p_array_route_builder_t* builder, uint32_t channel_index,
     loom_xdna_tile_coordinate_t sender_coordinate, uint8_t sender_dma_channel,

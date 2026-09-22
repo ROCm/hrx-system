@@ -25,6 +25,9 @@
 
 enum {
   LOOM_AIE2P_ARRAY_CHANNEL_ALIGNMENT = 64,
+  // First-slice fixed per-tile trace buffer size: 2048 mode-0 event-time
+  // words. Not yet caller-configurable; see the plan_build doc comment.
+  LOOM_AIE2P_ARRAY_TRACE_BUFFER_BYTE_LENGTH = 8192,
 };
 
 typedef enum loom_aie2p_array_entity_kind_e {
@@ -1804,11 +1807,175 @@ static iree_status_t loom_aie2p_array_finalize_physical_counts(
   return iree_ok_status();
 }
 
+// Grows the shared binding_plans/completion_routes allocation by
+// |extra_binding_plans| rows, preserving the trailing-array layout that
+// loom_aie2p_array_allocate_physical_plan establishes.
+static iree_status_t loom_aie2p_array_plan_grow_binding_plans(
+    loom_aie2p_array_plan_builder_t* builder,
+    iree_host_size_t extra_binding_plans) {
+  if (extra_binding_plans == 0) {
+    return iree_ok_status();
+  }
+  const iree_host_size_t old_binding_plan_count =
+      builder->plan->binding_plan_count;
+  const iree_host_size_t old_completion_route_count =
+      builder->plan->completion_route_count;
+  iree_host_size_t new_binding_plan_count = 0;
+  if (!iree_host_size_checked_add(old_binding_plan_count, extra_binding_plans,
+                                  &new_binding_plan_count)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "AIE2P trace binding-plan count overflowed");
+  }
+  loom_aie2p_array_binding_plan_t* new_binding_plans = NULL;
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_array(
+      builder->arena, new_binding_plan_count,
+      sizeof(*new_binding_plans) + sizeof(*builder->completion_routes),
+      (void**)&new_binding_plans));
+  memcpy(new_binding_plans, builder->binding_plans,
+         old_binding_plan_count * sizeof(*new_binding_plans));
+  loom_aie2p_array_completion_route_t* new_completion_routes =
+      (loom_aie2p_array_completion_route_t*)(new_binding_plans +
+                                             new_binding_plan_count);
+  memcpy(new_completion_routes, builder->completion_routes,
+         old_completion_route_count * sizeof(*new_completion_routes));
+  builder->binding_plans = new_binding_plans;
+  builder->completion_routes = new_completion_routes;
+  builder->plan->binding_plans = new_binding_plans;
+  builder->plan->completion_routes = new_completion_routes;
+  return iree_ok_status();
+}
+
+// Appends one write-only trace-buffer binding, shim DMA channel, and circuit
+// route per traced core worker. These resources have no source SSA entity, so
+// they extend the plan's arrays (each grown into a fresh, larger arena
+// allocation copying the existing prefix) after loom_aie2p_array_plan_channels
+// commits the source-derived topology; the existing per-tile allocation
+// cursors continue directly from where that left them, so no physical
+// resource is double-allocated. They carry channel_index=UINT32_MAX, which
+// loom_aie2p_array_route_trace_egress and the ordinary route/report helpers
+// treat as "no plan->channels entry" rather than dereferencing it.
+static iree_status_t loom_aie2p_array_plan_append_trace(
+    loom_aie2p_array_plan_builder_t* builder, bool trace_enabled) {
+  const iree_host_size_t worker_count = builder->plan->worker_plan_count;
+  if (!trace_enabled || worker_count == 0) {
+    return iree_ok_status();
+  }
+
+  const iree_host_size_t old_binding_count = builder->plan->binding_count;
+  iree_host_size_t new_binding_count = 0;
+  if (!iree_host_size_checked_add(old_binding_count, worker_count,
+                                  &new_binding_count)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "AIE2P trace binding count overflowed");
+  }
+  loom_aie2p_array_binding_t* new_bindings = NULL;
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_array(
+      builder->arena, new_binding_count, sizeof(*new_bindings),
+      (void**)&new_bindings));
+  memcpy(new_bindings, builder->bindings,
+         old_binding_count * sizeof(*new_bindings));
+  builder->bindings = new_bindings;
+  builder->plan->bindings = new_bindings;
+  builder->plan->binding_count = new_binding_count;
+
+  const iree_host_size_t old_dma_channel_count =
+      builder->plan->dma_channel_count;
+  iree_host_size_t new_dma_channel_count = 0;
+  if (!iree_host_size_checked_add(old_dma_channel_count, worker_count,
+                                  &new_dma_channel_count)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "AIE2P trace DMA channel count overflowed");
+  }
+  loom_aie2p_array_dma_plan_t* new_dma_channels = NULL;
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_array(
+      builder->arena, new_dma_channel_count, sizeof(*new_dma_channels),
+      (void**)&new_dma_channels));
+  memcpy(new_dma_channels, builder->dma_channels,
+         old_dma_channel_count * sizeof(*new_dma_channels));
+  builder->dma_channels = new_dma_channels;
+  builder->plan->dma_channels = new_dma_channels;
+
+  // Same worst-case per-connection hop bound as the source-derived route
+  // capacity in loom_aie2p_array_allocate_physical_plan: one hop per column
+  // plus one per row.
+  iree_host_size_t route_growth = 0;
+  if (!iree_host_size_checked_mul(
+          worker_count,
+          (iree_host_size_t)builder->family->column_count +
+              builder->family->row_count,
+          &route_growth)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "AIE2P trace route count overflowed");
+  }
+  const iree_host_size_t old_route_count = builder->route_builder.route_count;
+  iree_host_size_t new_route_capacity = 0;
+  if (!iree_host_size_checked_add(old_route_count, route_growth,
+                                  &new_route_capacity)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "AIE2P trace route count overflowed");
+  }
+  loom_aie2p_array_route_plan_t* new_routes = NULL;
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_array(
+      builder->arena, new_route_capacity, sizeof(*new_routes),
+      (void**)&new_routes));
+  memcpy(new_routes, builder->route_builder.routes,
+         old_route_count * sizeof(*new_routes));
+  builder->route_builder.routes = new_routes;
+  builder->plan->routes = new_routes;
+
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_array_plan_grow_binding_plans(builder, worker_count));
+
+  for (iree_host_size_t i = 0; i < worker_count; ++i) {
+    builder->worker_plans[i].trace_enabled = true;
+    const loom_xdna_tile_coordinate_t worker_coordinate =
+        builder->worker_plans[i].coordinate;
+    const uint32_t binding_index = (uint32_t)(old_binding_count + i);
+    builder->bindings[binding_index] = (loom_aie2p_array_binding_t){
+        .value_id = LOOM_VALUE_ID_INVALID,
+        .ordinal = binding_index,
+        .access = LOOM_AIE2P_ARRAY_BINDING_ACCESS_WRITE,
+    };
+
+    uint32_t dma_index = 0;
+    IREE_RETURN_IF_ERROR(loom_aie2p_array_select_shim_dma(
+        builder, /*channel_index=*/UINT32_MAX, worker_coordinate.column,
+        LOOM_AIE2P_ARRAY_DMA_DIRECTION_STREAM_TO_MEMORY,
+        /*descriptor_count=*/1, &dma_index));
+    const loom_aie2p_array_dma_plan_t* dma = &builder->dma_channels[dma_index];
+
+    IREE_RETURN_IF_ERROR(loom_aie2p_array_route_trace_egress(
+        &builder->route_builder, /*channel_index=*/UINT32_MAX,
+        worker_coordinate, dma->coordinate, dma->dma_channel));
+
+    const uint32_t completion_route_index =
+        loom_aie2p_array_plan_completion_route(builder, dma->coordinate);
+    builder->binding_plans[builder->binding_plan_cursor++] =
+        (loom_aie2p_array_binding_plan_t){
+            .binding_index = binding_index,
+            .channel_index = UINT32_MAX,
+            .dma_index = dma_index,
+            .partition_lane_count = 1,
+            .completion_route_index = completion_route_index,
+            .binding_byte_offset = 0,
+            .binding_span_byte_length =
+                LOOM_AIE2P_ARRAY_TRACE_BUFFER_BYTE_LENGTH,
+            .transfer_byte_length = LOOM_AIE2P_ARRAY_TRACE_BUFFER_BYTE_LENGTH,
+            .task_repeat_count = 1,
+        };
+  }
+
+  builder->plan->route_count = builder->route_builder.route_count;
+  builder->plan->dma_channel_count = builder->dma_channel_cursor;
+  builder->plan->binding_plan_count = builder->binding_plan_cursor;
+  return iree_ok_status();
+}
+
 iree_status_t loom_aie2p_array_plan_build(
     const loom_module_t* module, const loom_op_t* function_op,
     const loom_aie2p_array_leaf_t* leaves, iree_host_size_t leaf_count,
-    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
-    loom_aie2p_array_plan_t* out_plan) {
+    bool trace_enabled, iree_diagnostic_emitter_t diagnostic_emitter,
+    iree_arena_allocator_t* arena, loom_aie2p_array_plan_t* out_plan) {
   *out_plan = (loom_aie2p_array_plan_t){0};
   if (!module || !function_op || !arena ||
       !loom_low_func_def_isa(function_op)) {
@@ -1863,5 +2030,6 @@ iree_status_t loom_aie2p_array_plan_build(
   IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_physical_plan(&builder));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_workers(&builder));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_channels(&builder));
-  return loom_aie2p_array_finalize_physical_counts(&builder);
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_finalize_physical_counts(&builder));
+  return loom_aie2p_array_plan_append_trace(&builder, trace_enabled);
 }

@@ -31,8 +31,12 @@ static bool loom_aie2p_array_plan_check_matches(
   return iree_string_view_equal(target_name, IREE_SV("aie2p-array-plan"));
 }
 
+// Parses "@symbol" optionally followed by a trailing "trace" token that
+// exercises loom_aie2p_array_plan_build's trace_enabled option from a
+// .loom-test fixture without resolving a compiled target's facts.
 static iree_status_t loom_aie2p_array_plan_check_parse_symbol(
-    iree_string_view_t target_options, iree_string_view_t* out_symbol_name) {
+    iree_string_view_t target_options, iree_string_view_t* out_symbol_name,
+    bool* out_trace_enabled) {
   target_options = iree_string_view_trim(target_options);
   if (!iree_string_view_starts_with(target_options, IREE_SV("@")) ||
       target_options.size == 1) {
@@ -43,10 +47,13 @@ static iree_status_t loom_aie2p_array_plan_check_parse_symbol(
   iree_string_view_t symbol = iree_string_view_empty();
   iree_string_view_t remaining = iree_string_view_empty();
   iree_string_view_split(target_options, ' ', &symbol, &remaining);
-  if (!iree_string_view_is_empty(iree_string_view_trim(remaining))) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "aie2p-array-plan accepts no options after the "
-                            "array function symbol");
+  remaining = iree_string_view_trim(remaining);
+  *out_trace_enabled = iree_string_view_equal(remaining, IREE_SV("trace"));
+  if (!iree_string_view_is_empty(remaining) && !*out_trace_enabled) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "aie2p-array-plan accepts only a trailing \"trace\" option after "
+        "the array function symbol");
   }
   *out_symbol_name = iree_string_view_substr(symbol, 1, IREE_HOST_SIZE_MAX);
   return iree_ok_status();
@@ -666,8 +673,9 @@ static iree_status_t loom_aie2p_array_plan_check_execute(
     const loom_check_emit_provider_request_t* request) {
   (void)provider;
   iree_string_view_t function_symbol_name = iree_string_view_empty();
+  bool trace_enabled = false;
   IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_check_parse_symbol(
-      request->target_options, &function_symbol_name));
+      request->target_options, &function_symbol_name, &trace_enabled));
 
   loom_check_prepare_source_low_options_t prepare_options = {0};
   loom_check_prepare_source_low_options_initialize(&prepare_options);
@@ -712,9 +720,9 @@ static iree_status_t loom_aie2p_array_plan_check_execute(
   }
 
   loom_aie2p_array_plan_t plan = {0};
-  status = loom_aie2p_array_plan_build(request->module, array_function, leaves,
-                                       leaf_count, diagnostic_emitter,
-                                       request->case_arena, &plan);
+  status = loom_aie2p_array_plan_build(
+      request->module, array_function, leaves, leaf_count, trace_enabled,
+      diagnostic_emitter, request->case_arena, &plan);
   if (iree_status_is_invalid_argument(status) &&
       request->diagnostic_collector->count != 0) {
     // The structured diagnostic is the result checked by the caller.

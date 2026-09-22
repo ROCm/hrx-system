@@ -187,6 +187,11 @@ typedef struct loom_aie2p_array_worker_plan_t {
   uint32_t first_port;
   // Number of contiguous ports, ordered by their first channel binding.
   uint32_t port_count;
+  // Whether loom_aie2p_array_plan_build's trace_enabled option gave this
+  // core its own trace-buffer binding, DMA channel, and route. Set once by
+  // that option and read by array-program emission; not recovered from the
+  // resource tables it caused to grow.
+  bool trace_enabled;
 } loom_aie2p_array_worker_plan_t;
 
 // Final local-data placement for one compiled worker storage domain.
@@ -446,11 +451,23 @@ typedef struct loom_aie2p_array_plan_t {
 // their registers.
 // Invalid user input returns an error; structured diagnostics, when available,
 // are delivered through |diagnostic_emitter| before returning.
+//
+// |trace_enabled| opts every core worker into hardware event trace: each
+// traced tile's trace unit is configured with a fixed event set and routed to
+// a dedicated shim DMA channel, and the plan gains one extra write-only
+// external binding per traced worker (appended after the source-declared
+// bindings) that the caller supplies as the trace buffer at invocation time.
+// That buffer is a fixed 8 KiB per tile
+// (LOOM_AIE2P_ARRAY_TRACE_BUFFER_BYTE_LENGTH, not yet caller-configurable)
+// and the trace unit is programmed with no stop event, so the S2MM DMA
+// completes on byte count rather than on the trace unit stopping: once the
+// buffer fills, later events are silently dropped. How many cycles that
+// spans depends on how often the traced events fire, not a fixed count.
 iree_status_t loom_aie2p_array_plan_build(
     const loom_module_t* module, const loom_op_t* function_op,
     const loom_aie2p_array_leaf_t* leaves, iree_host_size_t leaf_count,
-    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
-    loom_aie2p_array_plan_t* out_plan);
+    bool trace_enabled, iree_diagnostic_emitter_t diagnostic_emitter,
+    iree_arena_allocator_t* arena, loom_aie2p_array_plan_t* out_plan);
 
 #ifdef __cplusplus
 }  // extern "C"

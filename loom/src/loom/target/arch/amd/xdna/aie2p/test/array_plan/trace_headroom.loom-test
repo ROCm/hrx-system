@@ -1,0 +1,31 @@
+// RUN: emit aie2p-array-plan @copy8_array trace
+
+// XFAIL: 8 workers packed 2/column exhaust the per-link stream-switch
+// channel pool once trace routes compete with the data routes for it; see
+// the "trace" attribute's doc comment in dialect.py. The untraced kernel
+// plans fine at this worker count (routes=104).
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+pipeline.def<kernel> public retain target(@array_target) @copy8_array() launch(%input: buffer, %output: buffer) {
+  %lane_count = index.constant 8 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %lane_count : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<8x16xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<8x16xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<8x16xi32>, group -> pipeline.flow<tile<16xi32>>
+  %copies = pipeline.stage @copy_i32x16 on %workers(%packets) : (group, pipeline.flow<tile<16xi32>>) -> (pipeline.flow<tile<16xi32>>)
+  pipeline.write %copies to %output_view : pipeline.flow<tile<16xi32>>, view<8x16xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @copy_i32x16(%input: buffer, %output: buffer) {
+  %input_aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<16xi32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16xi32>
+  %value = vector.load %input_view[0] : view<16xi32> -> vector<16xi32>
+  vector.store %value, %output_view[0] : vector<16xi32>, view<16xi32>
+  func.return
+}

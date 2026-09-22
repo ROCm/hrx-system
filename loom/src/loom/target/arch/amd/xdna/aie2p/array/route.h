@@ -58,6 +58,17 @@ iree_status_t loom_aie2p_array_route_workers(
     loom_xdna_tile_coordinate_t receiver_coordinate,
     uint8_t receiver_dma_channel);
 
+// Connects a worker's trace-unit output port to a shim stream-to-memory DMA
+// channel. Unlike loom_aie2p_array_route_egress, the source is the tile's
+// single fixed LOOM_XDNA_STREAM_PORT_TRACE slave port rather than a compute
+// DMA channel: the trace unit feeds the stream switch directly. This is a
+// plain circuit-switched connection; it does not carry a packet header, so it
+// occupies no shim packet-arbitration resources.
+iree_status_t loom_aie2p_array_route_trace_egress(
+    loom_aie2p_array_route_builder_t* builder, uint32_t channel_index,
+    loom_xdna_tile_coordinate_t worker_coordinate,
+    loom_xdna_tile_coordinate_t shim_coordinate, uint8_t shim_dma_channel);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

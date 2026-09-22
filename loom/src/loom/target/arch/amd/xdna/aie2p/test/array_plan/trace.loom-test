@@ -1,0 +1,126 @@
+// RUN: emit aie2p-array-plan @traced_copy_array trace
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+// The check target's trailing "trace" option exercises
+// loom_aie2p_array_plan_build's trace_enabled path independently of the
+// compiled aie2p.target<array> "trace" attribute, which check/array_plan.c
+// does not resolve. A single worker gains one extra write-only binding, one
+// shim DMA channel, a trace-unit circuit route, and Trace_Control0/Event0/
+// Event1 register writes.
+pipeline.def<kernel> public retain target(@array_target) @traced_copy_array() launch(%input: buffer, %output: buffer) {
+  %lane_count = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %lane_count : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<16xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi32>
+  %input_flow = pipeline.read %input_view on %workers : view<16xi32>, group -> pipeline.flow<tile<16xi32>>
+  %output_flow = pipeline.stage @copy_i32x16 on %workers(%input_flow) : (group, pipeline.flow<tile<16xi32>>) -> (pipeline.flow<tile<16xi32>>)
+  pipeline.write %output_flow to %output_view : pipeline.flow<tile<16xi32>>, view<16xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @copy_i32x16(%input: buffer, %output: buffer) {
+  %input_aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<16xi32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16xi32>
+  %value = vector.load %input_view[0] : view<16xi32> -> vector<16xi32>
+  vector.store %value, %output_view[0] : vector<16xi32>, view<16xi32>
+  func.return
+}
+
+// ----
+array @traced_copy_array family=amd.xdna.npu2 groups=1 workers=1 bindings=3 channels=2 slots=4 locks=4 dma=5 routes=12
+binding index=0 ordinal=0 access=read
+binding index=1 ordinal=1 access=write
+binding index=2 ordinal=2 access=write
+worker index=0 group=0 lane=0 entry=@copy_i32x16 tile=(0,2) resources=2 storage-domains=0
+channel index=0 transport=external-dma record-bytes=64 capacity=2 records=1 sender=binding[0]:0 receiver=worker[0]:0
+channel index=1 transport=external-dma record-bytes=64 capacity=2 records=1 sender=worker[0]:1 receiver=binding[1]:0
+worker-port worker=0 port=0 direction=receive channel=0 first-slot=0
+worker-port worker=0 port=1 direction=send channel=1 first-slot=2
+slot channel=0 index=0 owner=(0,2) offset=0x00000 bytes=64 sender=external receiver=0x70000
+slot channel=0 index=1 owner=(0,2) offset=0x04000 bytes=64 sender=external receiver=0x74000
+slot channel=1 index=0 owner=(0,2) offset=0x08000 bytes=64 sender=0x78000 receiver=external
+slot channel=1 index=1 owner=(0,2) offset=0x0c000 bytes=64 sender=0x7c000 receiver=external
+lock channel=0 tile=(0,2) id=0 ring=receive role=credit initial=2
+lock channel=0 tile=(0,2) id=1 ring=receive role=ready initial=0
+lock channel=1 tile=(0,2) id=2 ring=send role=credit initial=2
+lock channel=1 tile=(0,2) id=3 ring=send role=ready initial=0
+dma channel=0 tile=(0,2) side=compute direction=stream-to-memory engine-channel=0 bd-start=0 bd-count=2
+dma channel=0 tile=(0,0) side=shim direction=memory-to-stream engine-channel=0 bd-start=0 bd-count=1
+dma channel=1 tile=(0,2) side=compute direction=memory-to-stream engine-channel=0 bd-start=2 bd-count=2
+dma channel=1 tile=(0,0) side=shim direction=stream-to-memory engine-channel=0 bd-start=1 bd-count=1
+dma channel=4294967295 tile=(0,0) side=shim direction=stream-to-memory engine-channel=1 bd-start=2 bd-count=1
+route channel=0 tile=(0,0) kind=shim-mux source=dma[0] destination=north[3]
+route channel=0 tile=(0,0) kind=switch source=south[3] destination=north[0]
+route channel=0 tile=(0,1) kind=switch source=south[0] destination=north[0]
+route channel=0 tile=(0,2) kind=switch source=south[0] destination=dma[0]
+route channel=1 tile=(0,2) kind=switch source=dma[0] destination=south[0]
+route channel=1 tile=(0,1) kind=switch source=north[0] destination=south[0]
+route channel=1 tile=(0,0) kind=switch source=north[0] destination=south[2]
+route channel=1 tile=(0,0) kind=shim-mux source=north[2] destination=dma[0]
+route channel=4294967295 tile=(0,2) kind=switch source=trace[0] destination=south[1]
+route channel=4294967295 tile=(0,1) kind=switch source=north[1] destination=south[1]
+route channel=4294967295 tile=(0,0) kind=switch source=north[1] destination=south[3]
+route channel=4294967295 tile=(0,0) kind=shim-mux source=north[3] destination=dma[1]
+completion-route index=0 shim=(0,0) source=0 destination=2 packet=0 arbiter=0 master-select=0 rule-slot=0
+binding-patch ordinal=0 channel=0 shim=(0,0) direction=memory-to-stream dma-channel=0 partition=0/1 offset=0 span=64 transfer=64 repeat=1
+binding-patch ordinal=1 channel=1 shim=(0,0) direction=stream-to-memory dma-channel=0 partition=0/1 offset=0 span=64 transfer=64 repeat=1 completion-route=0
+binding-patch ordinal=2 channel=4294967295 shim=(0,0) direction=stream-to-memory dma-channel=1 partition=0/1 offset=0 span=8192 transfer=8192 repeat=1 completion-route=0
+
+array-program records=48 writes=30 masked-writes=13 block-writes=4 tile-loads=1 waits=0
+array-block record=35 address=0x0021d000 words=[0x00000010,0x00000000,0x00000000,0x00000000,0x00000000,0x0e043fe0]
+array-block record=36 address=0x0021d020 words=[0x04000010,0x00000000,0x00000000,0x00000000,0x00000000,0x06043fe0]
+array-block record=37 address=0x0021d040 words=[0x08000010,0x00000000,0x00000000,0x00000000,0x00000000,0x1e045fe3]
+array-block record=38 address=0x0021d060 words=[0x0c000010,0x00000000,0x00000000,0x00000000,0x00000000,0x16045fe3]
+array-tile-load record=39 tile-program=0
+control-program records=10 writes=3 masked-writes=2 block-writes=3 tile-loads=0 waits=2 relocations=3
+control-block record=0 address=0x0001d000 words=[0x00000010,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
+control-write record=1 address=0x0001d214 value=0x00000000
+control-block record=2 address=0x0001d020 words=[0x00000010,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
+control-mask-write record=3 address=0x0001d200 mask=0x00001f00 value=0x00000000
+control-write record=4 address=0x0001d204 value=0x80000001
+control-block record=5 address=0x0001d040 words=[0x00000800,0x00000000,0x00000000,0x00000000,0xc0000000,0x02000000,0x00000000,0x02000000]
+control-mask-write record=6 address=0x0001d208 mask=0x00001f00 value=0x00000000
+control-write record=7 address=0x0001d20c value=0x80000002
+control-wait record=8 tile=(0,0) direction=stream-to-memory dma-channel=0 columns=1 rows=1
+control-wait record=9 tile=(0,0) direction=stream-to-memory dma-channel=1 columns=1 rows=1
+control-relocation index=0 record=0 word=1 binding=0 addend=0 alignment=4
+control-relocation index=1 record=2 word=1 binding=1 addend=0 alignment=4
+control-relocation index=2 record=5 word=1 binding=2 addend=0 alignment=4
+
+resident-program workers=1
+resident worker=0 entry=@traced_copy_array$worker$0 tile=(0,2) code-bytes=154 resources=0 fixups=1
+
+low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @traced_copy_array$worker$0() asm {
+  %acquire_delta = mov.short -1
+  %release_delta = mov.short 1
+  %54 = mov.local-address 458752
+  %55 = mov.local-address 491520
+  low.br ^_bb1(%54: reg<aie2p.ep>, %55: reg<aie2p.ep>)
+^_bb1(%43: reg<aie2p.ep>, %45: reg<aie2p.ep>):
+  acq %acquire_delta, 49
+  acq %acquire_delta, 50
+  low.br ^_bb2
+^_bb2:
+  %input_view = copy %43 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %output_view = copy %45 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %value = vlda.512.i32x16 %input_view, 0
+  vst.512.i32x16 %value, %output_view, 0
+  low.br ^_bb3
+^_bb3:
+  rel %release_delta, 51
+  rel %release_delta, 48
+  %47 = mov.address-to-scalar %43
+  %48 = mov.i32 16384
+  %49 = xor %47, %48
+  %50 = mov.scalar-to-address %49
+  %51 = mov.address-to-scalar %45
+  %52 = xor %51, %48
+  %53 = mov.scalar-to-address %52
+  low.br ^_bb1(%50: reg<aie2p.ep>, %53: reg<aie2p.ep>)
+}

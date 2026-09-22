@@ -366,10 +366,15 @@ iree_status_t loom_aie2p_xdna_artifact_emit(
       loom_target_compile_report_record_low_kernel_workload(
           request->compile_report, source_entry->function_op);
     }
+    const loom_aie2p_target_facts_t* entry_target_facts =
+        loom_aie2p_target_facts_cast(loom_aie2p_xdna_function_target_facts(
+            request, source_entry->function_op));
+    const bool trace_enabled =
+        entry_target_facts != NULL && entry_target_facts->trace_enabled;
     IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_build(
         request->module, source_entry->function_op, source_leaves,
-        source_leaf_count, request->diagnostic_emitter, request->scratch_arena,
-        &array_plans[i]));
+        source_leaf_count, trace_enabled, request->diagnostic_emitter,
+        request->scratch_arena, &array_plans[i]));
     IREE_RETURN_IF_ERROR(loom_aie2p_array_program_build(
         &array_plans[i], request->scratch_arena, &array_programs[i]));
     loom_aie2p_array_resident_program_t resident_program = {0};
