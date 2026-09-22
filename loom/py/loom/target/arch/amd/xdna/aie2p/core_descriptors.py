@@ -578,7 +578,7 @@ def _reg_classes() -> tuple[RegClass, ...]:
                     if machine_name == "eD"
                     else 0x3
                     if machine_name
-                    in ("eLPredicate", "eWL", "VEC256", "eLdFifoReg", "mStFifo")
+                    in ("eLPredicate", "VEC256", "eLdFifoReg", "mStFifo")
                     else 0x1
                 ),
                 physical_registers=machine_class.candidates,
@@ -665,8 +665,6 @@ def _register_packing_resources() -> tuple[RegisterPackingResource, ...]:
         raise ValueError(
             "AIE2P VEC256 does not cover both W halves of every X register"
         )
-    if len(_MACHINE_CLASSES["eWL"].candidates) != x_register_count:
-        raise ValueError("AIE2P eWL does not cover one W half of every X register")
 
     physical_registers = {
         register.name: register for register in CORE_MACHINE_TABLE.physical_registers
@@ -701,7 +699,6 @@ def _register_packing_resources() -> tuple[RegisterPackingResource, ...]:
             name=f"{descriptor_specs._TARGET_KEY}.register.x.pairs",
             capacity=x_register_count,
             members=(
-                RegisterPackingResourceMember("aie2p.ewl"),
                 RegisterPackingResourceMember(
                     "aie2p.vec256",
                     register_unit_count=2,

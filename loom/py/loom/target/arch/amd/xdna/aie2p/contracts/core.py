@@ -63,7 +63,6 @@ _F8E5M2_VECTOR = Vector("f8E5M2", minimum_static_elements=1, maximum_static_elem
 _I16_VECTOR = Vector("i16", minimum_static_elements=1, maximum_static_elements=32)
 _F16_VECTOR = Vector("f16", minimum_static_elements=1, maximum_static_elements=32)
 _BF16_VECTOR = Vector("bf16", minimum_static_elements=1, maximum_static_elements=32)
-_BF16X8_VECTOR = Vector("bf16", lanes=8)
 _I32_VECTOR = Vector("i32", minimum_static_elements=1, maximum_static_elements=16)
 _F32_VECTOR = Vector("f32", minimum_static_elements=1, maximum_static_elements=16)
 _I32_MATRIX_ACCUMULATOR = Vector("i32", lanes=64)

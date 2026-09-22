@@ -550,6 +550,7 @@ loom_check_test_suite(
     "test/pipeline_record_shapes.loom-test"
     "test/pipeline_reduce.loom-test"
     "test/pipeline_rejection.loom-test"
+    "test/source_low/bf16_vectors.loom-test"
     "test/source_low/callable_values.loom-test"
     "test/source_low/carried_counter_store.loom-test"
     "test/source_low/function_storage.loom-test"
@@ -612,6 +613,7 @@ loom_check_test_suite(
   RUNNER
     ::loom-check
   DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/bf16_vectors.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/callable_values.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/carried_counter_store.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/lookup_table.loom-test"

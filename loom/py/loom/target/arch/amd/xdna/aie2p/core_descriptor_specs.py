@@ -61,12 +61,10 @@ _LOCK_EFFECT = Effect(
 )
 _VEC256_LOW128_PART = "aie2p.vec256.low128"
 _VEC256_HIGH128_PART = "aie2p.vec256.high128"
-_EWL_LOW128_PART = "aie2p.ewl.low128"
 _REGISTER_PARTS = (
     *PREDICATE_REGISTER_PARTS,
     RegisterPart(_VEC256_LOW128_PART, "aie2p.vec256", 0x1),
     RegisterPart(_VEC256_HIGH128_PART, "aie2p.vec256", 0x2),
-    RegisterPart(_EWL_LOW128_PART, "aie2p.ewl", 0x1),
     *FIFO_REGISTER_PARTS,
     *DIMENSION_REGISTER_PARTS,
 )
@@ -117,7 +115,6 @@ AIE2P_VECTOR_MEMORY_ELEMENT_TYPES = (
 
 def _vector_memory_operand_overrides(
     width_bits: int,
-    element_type: str,
     operand_name: str,
     native_adapter: str | None,
 ) -> tuple[
@@ -133,14 +130,7 @@ def _vector_memory_operand_overrides(
         raise ValueError("128-bit vector memory forms need an encoding adapter")
     # Native loads define fresh W storage without preserving a destination
     # input. Stores consume only the low 128 bits of their source register.
-    part = _EWL_LOW128_PART if element_type == "bf16" else _VEC256_LOW128_PART
-    parts = ((operand_name, part),) if operand_name == "src" else ()
-    if element_type == "bf16":
-        return (
-            ((operand_name, "eWL"),),
-            parts,
-            ((operand_name, f"LOOM_eWL_{native_adapter}"),),
-        )
+    parts = ((operand_name, _VEC256_LOW128_PART),) if operand_name == "src" else ()
     return (
         (),
         parts,
@@ -163,7 +153,6 @@ def _vector_memory_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
                 operation = "store" if family == "store" else "load"
                 overrides = _vector_memory_operand_overrides(
                     width_bits,
-                    element_type,
                     "src" if family == "store" else "dst",
                     forms[2],
                 )
@@ -959,10 +948,7 @@ _BASE_DESCRIPTOR_SPECS = (
         f"{_TARGET_KEY}.broadcast.bf16x8.to.bf16x32",
         "floating.broadcast.bf16x8.to.bf16x32",
         "II_VEXTBCST_128_vec_extract_broadcast_imm",
-        storage_overrides=(("s1", "eWL"),),
         asm_mnemonic="vbroadcast.bf16x8.to.bf16x32",
-        operand_register_parts=(("s1", _EWL_LOW128_PART),),
-        encoding_adapter_overrides=(("s1", "LOOM_eWL_OP_mXm"),),
     ),
     _DescriptorSpec(
         "VSHUFFLE_vec_shuffle_x",
@@ -1383,34 +1369,10 @@ _BASE_DESCRIPTOR_SPECS = (
         "II_VINSERT_16_mIdxImm0",
     ),
     _DescriptorSpec(
-        "VINSERT_16_mIdxImm0",
-        f"{_TARGET_KEY}.insert.bf16x8.zero",
-        "integer.insert.bf16x8",
-        "II_VINSERT_16_mIdxImm0",
-        storage_overrides=(("dst", "eWL"), ("s1", "eWL")),
-        asm_mnemonic="vinsert.16.ewl.zero",
-        encoding_adapter_overrides=(
-            ("dst", "LOOM_eWL_OP_mXm"),
-            ("s1", "LOOM_eWL_OP_mXm"),
-        ),
-    ),
-    _DescriptorSpec(
         "VINSERT_16_mR29_insert",
         f"{_TARGET_KEY}.insert.i16.register",
         "integer.insert.i16",
         "II_VINSERT_16_mR29_insert",
-    ),
-    _DescriptorSpec(
-        "VINSERT_16_mR29_insert",
-        f"{_TARGET_KEY}.insert.bf16x8.register",
-        "integer.insert.bf16x8",
-        "II_VINSERT_16_mR29_insert",
-        storage_overrides=(("dst", "eWL"), ("s1", "eWL")),
-        asm_mnemonic="vinsert.16.ewl.reg",
-        encoding_adapter_overrides=(
-            ("dst", "LOOM_eWL_OP_mXm"),
-            ("s1", "LOOM_eWL_OP_mXm"),
-        ),
     ),
     _DescriptorSpec(
         "VINSERT_32_mIdxImm0",

@@ -1178,9 +1178,7 @@ def _vector_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
             immediate_offset_minimum=-(width_bits),
             immediate_offset_maximum=width_bits - width_bits // 8,
             volatile=volatile,
-            expand_to_x_carrier=(
-                width_bits < 512 and not (width_bits == 128 and element_type == "bf16")
-            ),
+            expand_to_x_carrier=width_bits < 512,
         )
         for root_kind, memory_spaces in _MEMORY_ROOTS
         for (

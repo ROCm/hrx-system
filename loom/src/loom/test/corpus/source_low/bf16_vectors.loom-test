@@ -1,0 +1,35 @@
+func.def @bf16x8_lookup(%table: vector<8xbf16>, %indices: vector<8xi16>) -> (vector<8xbf16>) {
+  %values = vector.table.lookup %table[%indices] : vector<8xbf16>, vector<8xi16> -> vector<8xbf16>
+  func.return %values : vector<8xbf16>
+}
+
+// ====
+
+func.def @bf16x8_table(%table: vector<8xbf16>, %indices: vector<32xi16>) -> (vector<32xbf16>) {
+  %values = vector.table.lookup %table[%indices] : vector<8xbf16>, vector<32xi16> -> vector<32xbf16>
+  func.return %values : vector<32xbf16>
+}
+
+// ====
+
+func.def @bf16x8_result(%table: vector<16xbf16>, %indices: vector<8xi16>) -> (vector<8xbf16>) {
+  %values = vector.table.lookup %table[%indices] : vector<16xbf16>, vector<8xi16> -> vector<8xbf16>
+  func.return %values : vector<8xbf16>
+}
+
+// ====
+
+func.def @bf16x8_bitcast_select(%bits: vector<8xi16>, %other: vector<8xbf16>, %mask: vector<8xi1>) -> (vector<8xi16>) {
+  %values = vector.bitcast %bits : vector<8xi16> to vector<8xbf16>
+  %selected = vector.select %mask, %values, %other : vector<8xbf16>
+  %result = vector.bitcast %selected : vector<8xbf16> to vector<8xi16>
+  func.return %result : vector<8xi16>
+}
+
+// ====
+
+func.def @bf16x8_dynamic_extract_insert(%values: vector<8xbf16>, %position: index) -> (vector<8xbf16>) {
+  %value = vector.extract %values[%position] : vector<8xbf16> -> bf16
+  %result = vector.insert %value into %values[0] : bf16, vector<8xbf16>
+  func.return %result : vector<8xbf16>
+}

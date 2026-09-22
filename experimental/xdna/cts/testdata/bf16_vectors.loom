@@ -1,0 +1,80 @@
+// BF16 values cross memory, ordinary vector operations, and matrix operands.
+aie2p.target<array> @array_target
+aie2p.target<core> @core_target
+
+pipeline.def<kernel> public retain target(@array_target) @bf16_packets() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x64x32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x64x96xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x64x32xi32>, group -> pipeline.flow<tile<32xi32>>
+  %results = pipeline.stage @bf16_entry on %workers(%packets) : (group, pipeline.flow<tile<32xi32>>) -> (pipeline.flow<tile<96xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<96xi32>>, view<1x64x96xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @bf16_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %rhs_offset = index.constant 16 : offset
+  %codes_offset = index.constant 32 : offset
+  %bits_offset = index.constant 48 : offset
+  %acc_offset = index.constant 64 : offset
+  %table_view = buffer.view %source[%origin] : buffer -> view<8xbf16>
+  %rhs_view = buffer.view %source[%rhs_offset] : buffer -> view<8xbf16>
+  %codes_view = buffer.view %source[%codes_offset] : buffer -> view<8xi16>
+  %bits_view = buffer.view %source[%bits_offset] : buffer -> view<8xbf16>
+  %acc_view = buffer.view %source[%acc_offset] : buffer -> view<4xf32>
+  %table = vector.load %table_view[0] : view<8xbf16> -> vector<8xbf16>
+  %rhs = vector.load %rhs_view[0] : view<8xbf16> -> vector<8xbf16>
+  %codes = vector.load %codes_view[0] : view<8xi16> -> vector<8xi16>
+  %bits = vector.load %bits_view[0] : view<8xbf16> -> vector<8xbf16>
+  %initial = vector.load %acc_view[0] : view<4xf32> -> vector<4xf32>
+  %decoded = vector.table.lookup %table[%codes] : vector<8xbf16>, vector<8xi16> -> vector<8xbf16>
+  %negative = vector.negf %bits : vector<8xbf16>
+  %absolute = vector.absf %bits : vector<8xbf16>
+  %copied = vector.copysignf %bits, %rhs : vector<8xbf16>
+  %last = vector.extract %table[7] : vector<8xbf16> -> bf16
+  %updated = vector.insert %last into %decoded[5] : bf16, vector<8xbf16>
+  %splat = vector.splat %last : vector<8xbf16>
+  %zero = vector.constant 0.0 : vector<4xf32>
+  %dot_zero = vector.dot2f %decoded, %rhs, %zero : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
+  %dot_initial = vector.dot2f %decoded, %rhs, %initial : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
+  %offset_decoded = index.constant 0 : offset
+  %view_decoded = buffer.view %destination[%offset_decoded] : buffer -> view<8xbf16>
+  vector.store %decoded, %view_decoded[0] : vector<8xbf16>, view<8xbf16>
+  %offset_negative = index.constant 16 : offset
+  %view_negative = buffer.view %destination[%offset_negative] : buffer -> view<8xbf16>
+  vector.store %negative, %view_negative[0] : vector<8xbf16>, view<8xbf16>
+  %offset_absolute = index.constant 32 : offset
+  %view_absolute = buffer.view %destination[%offset_absolute] : buffer -> view<8xbf16>
+  vector.store %absolute, %view_absolute[0] : vector<8xbf16>, view<8xbf16>
+  %offset_copied = index.constant 48 : offset
+  %view_copied = buffer.view %destination[%offset_copied] : buffer -> view<8xbf16>
+  vector.store %copied, %view_copied[0] : vector<8xbf16>, view<8xbf16>
+  %offset_updated = index.constant 64 : offset
+  %view_updated = buffer.view %destination[%offset_updated] : buffer -> view<8xbf16>
+  vector.store %updated, %view_updated[0] : vector<8xbf16>, view<8xbf16>
+  %offset_splat = index.constant 80 : offset
+  %view_splat = buffer.view %destination[%offset_splat] : buffer -> view<8xbf16>
+  vector.store %splat, %view_splat[0] : vector<8xbf16>, view<8xbf16>
+  %offset_dot_zero = index.constant 96 : offset
+  %view_dot_zero = buffer.view %destination[%offset_dot_zero] : buffer -> view<4xf32>
+  vector.store %dot_zero, %view_dot_zero[0] : vector<4xf32>, view<4xf32>
+  %offset_dot_initial = index.constant 112 : offset
+  %view_dot_initial = buffer.view %destination[%offset_dot_initial] : buffer -> view<4xf32>
+  vector.store %dot_initial, %view_dot_initial[0] : vector<4xf32>, view<4xf32>
+  %m = index.constant 8 : index
+  %n = index.constant 8 : index
+  %k = index.constant 1 : index
+  %lhs_fragment = vector.fragment<lhs> %decoded shape [%m, %k] : vector<8xbf16>
+  %rhs_fragment = vector.fragment<rhs> %rhs shape [%k, %n] : vector<8xbf16>
+  %accumulator = vector.constant 0.0 : vector<64xf32>
+  %acc_fragment = vector.fragment<init> %accumulator shape [%m, %n] : vector<64xf32>
+  %product = vector.mma %lhs_fragment, %rhs_fragment, %acc_fragment : vector<8xbf16>, vector<8xbf16>, vector<64xf32>
+  %product_offset = index.constant 128 : offset
+  %product_view = buffer.view %destination[%product_offset] : buffer -> view<64xf32>
+  vector.store %product, %product_view[0] : vector<64xf32>, view<64xf32>
+  func.return
+}

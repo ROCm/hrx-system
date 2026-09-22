@@ -102,9 +102,6 @@ def test_el_subregister_adapters_are_derived_from_owned_register_facts() -> None
 
 
 def test_vector_storage_adapters_are_derived_from_owned_register_facts() -> None:
-    registers = {
-        register.name: register for register in CORE_MACHINE_TABLE.physical_registers
-    }
     classes = {
         register_class.name: register_class
         for register_class in CORE_MACHINE_TABLE.register_classes
@@ -112,29 +109,6 @@ def test_vector_storage_adapters_are_derived_from_owned_register_facts() -> None
     adapters = {
         adapter.name: adapter for adapter in CORE_MACHINE_TABLE.register_adapters
     }
-
-    for native_name in ("OP_mWa", "OP_mWb", "OP_mWs"):
-        native_values = dict(adapters[native_name].effective_register_encodings)
-        projected_values = dict(
-            adapters[f"LOOM_eWL_{native_name}"].effective_register_encodings
-        )
-        assert tuple(projected_values) == classes["eWL"].candidates
-        assert all(
-            projected_values[register_name] == native_values[register_name]
-            for register_name in classes["eWL"].candidates
-        )
-
-    xm_values = dict(adapters["OP_mXm"].effective_register_encodings)
-    ewl_as_x = dict(adapters["LOOM_eWL_OP_mXm"].effective_register_encodings)
-    assert tuple(ewl_as_x) == classes["eWL"].candidates
-    for register_name in classes["eWL"].candidates:
-        x_register = next(
-            register
-            for register in registers.values()
-            if register.name in classes["mXm"].candidates
-            and register.subregisters[0] == register_name
-        )
-        assert ewl_as_x[register_name] == xm_values[x_register.name]
 
     for native_name, derived_name, register_class_name in (
         ("OP_mMvBMXDst", "LOOM_mXm_OP_mMvBMXDst", "mXm"),

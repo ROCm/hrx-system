@@ -577,7 +577,7 @@ def test_vector_memory_rules_cover_every_native_width_and_address_form() -> None
         assert [rule.descriptor.key for rule in rules] == expected_descriptor_keys
         for family_index, (
             width_bits,
-            element_type,
+            _element_type,
             descriptor_element_type,
             element_byte_count,
             vector_lane_count,
@@ -600,9 +600,7 @@ def test_vector_memory_rules_cover_every_native_width_and_address_form() -> None
                 immediate_maximum=width_bits - width_bits // 8,
             )
             for rule in operation_rules:
-                expands_logical_carrier = width_bits < 512 and not (
-                    width_bits == 128 and element_type == "bf16"
-                )
+                expands_logical_carrier = width_bits < 512
                 slices = [
                     emit for emit in rule.emit if isinstance(emit, EmitRegisterSlice)
                 ]
@@ -617,9 +615,6 @@ def test_vector_memory_rules_cover_every_native_width_and_address_form() -> None
                 elif expands_logical_carrier:
                     assert len(slices) == 1
                     assert slices[0].unit_count == 1
-                    assert not concats
-                elif width_bits == 128 and operation is SourceMemoryOperation.LOAD:
-                    assert not slices
                     assert not concats
                 else:
                     assert not slices

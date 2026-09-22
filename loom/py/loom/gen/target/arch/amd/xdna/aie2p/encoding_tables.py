@@ -367,7 +367,6 @@ def _register_part_unit_masks() -> list[int]:
     paths = {
         "aie2p.elpredicate": (("sub_l_even",), ("sub_l_odd",)),
         "aie2p.vec256": ((), ()),
-        "aie2p.ewl": ((), ()),
         "aie2p.eldfiforeg": (("sub_lo_fifo",), ("sub_hi_fifo",)),
         "aie2p.mstfifo": (("sub_lo_fifo",), ("sub_hi_fifo",)),
         **{f"aie2p.{name.lower()}": tuple(path for _, path, _ in fields) for name, fields in DIMENSION_FIELDS.items()},

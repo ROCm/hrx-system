@@ -384,11 +384,11 @@ func.def @bf16x8_insert_static_constant(%values: vector<8xbf16>) -> (vector<8xbf
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core> abi(object_function) @bf16x8_insert_static_constant(%values: reg<aie2p.ewl>) -> (reg<aie2p.ewl>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @bf16x8_insert_static_constant(%values: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %replacement = mov.i32 0
   %7 = mov.short 5
   %8 = copy %7 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
-  %updated = vinsert.16.ewl.reg %values, %8, %replacement
+  %updated = vinsert.16.reg %values, %8, %replacement
   return %updated
 }
 

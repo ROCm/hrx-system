@@ -1298,24 +1298,12 @@ def _derive_el_subregister_adapters(
 def _derive_vector_storage_adapters(
     source_adapters: tuple[RegisterAdapter, ...],
     register_classes: tuple[RegisterClass, ...],
-    physical_registers: tuple[PhysicalRegister, ...],
 ) -> tuple[RegisterAdapter, ...]:
-    """Derives exact operand encodings for Loom vector storage domains.
-
-    A 128-bit BF16 outer-product operand occupies the low half of one W
-    register. Loads and stores therefore need the native W operand encodings
-    restricted to eWL, while VEXTBCST needs each eWL candidate encoded as its
-    containing X register. VMOV's source classes include X, accumulator, FIFO,
-    and state registers; the final two adapters retain only its X domain so a
-    descriptor can expose the result as ordinary VEC256 storage. Accumulator
-    adapters expose the same instruction's native 512-bit vector/accumulator
-    transfer without admitting FIFO or state registers.
-    """
+    """Restricts VMOV encodings to its vector and accumulator storage domains."""
 
     classes = {
         register_class.name: register_class for register_class in register_classes
     }
-    registers = {register.name: register for register in physical_registers}
     adapters = {adapter.name: adapter for adapter in source_adapters}
 
     def restrict_adapter(
@@ -1337,34 +1325,7 @@ def _derive_vector_storage_adapters(
             ),
         )
 
-    xm_values = dict(adapters["OP_mXm"].effective_register_encodings)
-    ewl_candidates = classes["eWL"].candidates
-    ewl_as_x: dict[str, int] = {}
-    for x_name in classes["mXm"].candidates:
-        x_register = registers[x_name]
-        if x_register.subregister_indices != ("sub_256_lo", "sub_256_hi"):
-            raise ValueError(
-                f"{x_name}: X register has unexpected subregister order "
-                f"{x_register.subregister_indices}"
-            )
-        low_w_name = x_register.subregisters[0]
-        if low_w_name in ewl_candidates:
-            ewl_as_x[low_w_name] = xm_values[x_name]
-    if set(ewl_as_x) != set(ewl_candidates):
-        raise ValueError("AIE2P eWL candidates do not map exactly onto X low halves")
-
     return (
-        restrict_adapter("LOOM_eWL_OP_mWa", "OP_mWa", "eWL"),
-        restrict_adapter("LOOM_eWL_OP_mWb", "OP_mWb", "eWL"),
-        restrict_adapter("LOOM_eWL_OP_mWs", "OP_mWs", "eWL"),
-        RegisterAdapter(
-            name="LOOM_eWL_OP_mXm",
-            register_class="eWL",
-            register_encodings=tuple(
-                (register_name, ewl_as_x[register_name])
-                for register_name in ewl_candidates
-            ),
-        ),
         restrict_adapter("LOOM_mXm_OP_mMvBMXDst", "OP_mMvBMXDst", "mXm"),
         restrict_adapter("LOOM_mXm_OP_mMvBMXSrc", "OP_mMvBMXSrc", "mXm"),
         restrict_adapter("LOOM_mBMs_OP_mMvBMXDst", "OP_mMvBMXDst", "mBMs"),
@@ -1510,7 +1471,6 @@ _REGISTER_ADAPTERS = (
     *_derive_vector_storage_adapters(
         _SOURCE_REGISTER_ADAPTERS,
         _REGISTER_CLASSES,
-        _PHYSICAL_REGISTERS,
     ),
     *_derive_fifo_storage_adapters(
         _SOURCE_REGISTER_ADAPTERS,

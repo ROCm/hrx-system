@@ -222,7 +222,7 @@ low.func.def target<amd.xdna.aie2p.core> @fresh_vector_loads(%pointer: reg<aie2p
 // an input destination, including register-indexed addresses.
 // RUN: verify
 
-low.func.def target<amd.xdna.aie2p.core> @fresh_indexed_vectors(%pointer: reg<aie2p.ep>, %index: reg<aie2p.edj>) -> (reg<aie2p.vec256>, reg<aie2p.ewl>, reg<aie2p.ewl>) asm {
+low.func.def target<amd.xdna.aie2p.core> @fresh_indexed_vectors(%pointer: reg<aie2p.ep>, %index: reg<aie2p.edj>) -> (reg<aie2p.vec256>, reg<aie2p.vec256>, reg<aie2p.vec256>) asm {
   %bytes = vldb.128.i8x16.index %pointer, %index
   %bf16_a = vlda.128.bf16x8.index %pointer, %index
   %bf16_b = vldb.128.bf16x8 %pointer, 16

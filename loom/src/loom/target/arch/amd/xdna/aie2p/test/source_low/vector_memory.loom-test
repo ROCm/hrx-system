@@ -343,14 +343,14 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_flo
   vst.256.i8x32 %271, %output_f32x16_view, 32
   %277 = vlda.128.i16x8 %source_f32x16_view, 16
   vst.128.i16x8 %277, %output_f32x16_view, 16
-  %bf16x8 = vlda.128.bf16x8 %source_f32x16_view, 16
-  vst.128.bf16x8 %bf16x8, %output_f32x16_view, 16
-  %284 = vlda.128.f32x4 %source_f32x16_view, 16
-  vst.128.f32x4 %284, %output_f32x16_view, 16
-  %290 = vlda.256.bf16x16 %source_f32x16_view, 32
-  vst.256.bf16x16 %290, %output_f32x16_view, 32
-  %296 = vlda.256.f32x8 %source_f32x16_view, 32
-  vst.256.f32x8 %296, %output_f32x16_view, 32
+  %283 = vlda.128.bf16x8 %source_f32x16_view, 16
+  vst.128.bf16x8 %283, %output_f32x16_view, 16
+  %289 = vlda.128.f32x4 %source_f32x16_view, 16
+  vst.128.f32x4 %289, %output_f32x16_view, 16
+  %295 = vlda.256.bf16x16 %source_f32x16_view, 32
+  vst.256.bf16x16 %295, %output_f32x16_view, 32
+  %301 = vlda.256.f32x8 %source_f32x16_view, 32
+  vst.256.f32x8 %301, %output_f32x16_view, 32
   %bf16x32 = vlda.512.bf16x32 %source_f32x16_view, 64
   vst.512.bf16x32 %bf16x32, %output_f32x16_view, 64
   %f32x16 = vlda.512.f32x16 %source_f32x16_view, 64
@@ -366,26 +366,26 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @add_f32x
   %lhs_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %rhs_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
-  %314 = vlda.acc %lhs_view, 0
-  %315 = vlda.acc %lhs_view, 64
-  %316 = vlda.acc %lhs_view, 128
-  %317 = vlda.acc %lhs_view, 192
-  %lhs_value = concat(%314, %315, %316, %317) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %319 = vlda.acc %rhs_view, 0
-  %320 = vlda.acc %rhs_view, 64
-  %321 = vlda.acc %rhs_view, 128
-  %322 = vlda.acc %rhs_view, 192
-  %rhs_value = concat(%319, %320, %321, %322) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %324 = mova.i32 60
-  %sum = vadd.f32x64 %lhs_value, %rhs_value, %324
-  %326 = slice %sum[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %326, %output_view, 0
-  %327 = slice %sum[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %327, %output_view, 64
-  %328 = slice %sum[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %328, %output_view, 128
-  %329 = slice %sum[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %329, %output_view, 192
+  %319 = vlda.acc %lhs_view, 0
+  %320 = vlda.acc %lhs_view, 64
+  %321 = vlda.acc %lhs_view, 128
+  %322 = vlda.acc %lhs_view, 192
+  %lhs_value = concat(%319, %320, %321, %322) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %324 = vlda.acc %rhs_view, 0
+  %325 = vlda.acc %rhs_view, 64
+  %326 = vlda.acc %rhs_view, 128
+  %327 = vlda.acc %rhs_view, 192
+  %rhs_value = concat(%324, %325, %326, %327) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %329 = mova.i32 60
+  %sum = vadd.f32x64 %lhs_value, %rhs_value, %329
+  %331 = slice %sum[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %331, %output_view, 0
+  %332 = slice %sum[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %332, %output_view, 64
+  %333 = slice %sum[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %333, %output_view, 128
+  %334 = slice %sum[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %334, %output_view, 192
   return
 }
 
@@ -397,23 +397,23 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot2_bf1
   %lhs_value = vlda.512.bf16x32 %lhs_view, 0
   %rhs_value = vlda.512.bf16x32 %rhs_view, 0
   %acc_value = vlda.512.f32x16 %acc_view, 0
-  %337 = mova.i32 2
-  %338 = vshuffle %lhs_value, %lhs_value, %337
-  %339 = vshuffle %rhs_value, %rhs_value, %337
-  %340 = mova.i32 3
-  %341 = vshuffle %lhs_value, %lhs_value, %340
-  %342 = vshuffle %rhs_value, %rhs_value, %340
-  %343 = acc.clear.f32x64
-  %344 = slice %343[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %345 = slice %343[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %346 = slice %343[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %347 = vmov.vector512.to.accumulator512 %acc_value
-  %348 = concat(%347, %344, %345, %346) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %349 = mova.i32 60
-  %350 = vmac.bf16x32 %348, %338, %339, %349
-  %351 = vmac.bf16x32 %350, %341, %342, %349
-  %352 = slice %351[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %result = vmov.accumulator512.to.vector512 %352
+  %342 = mova.i32 2
+  %343 = vshuffle %lhs_value, %lhs_value, %342
+  %344 = vshuffle %rhs_value, %rhs_value, %342
+  %345 = mova.i32 3
+  %346 = vshuffle %lhs_value, %lhs_value, %345
+  %347 = vshuffle %rhs_value, %rhs_value, %345
+  %348 = acc.clear.f32x64
+  %349 = slice %348[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %350 = slice %348[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %351 = slice %348[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %352 = vmov.vector512.to.accumulator512 %acc_value
+  %353 = concat(%352, %349, %350, %351) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %354 = mova.i32 60
+  %355 = vmac.bf16x32 %353, %343, %344, %354
+  %356 = vmac.bf16x32 %355, %346, %347, %354
+  %357 = slice %356[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %result = vmov.accumulator512.to.vector512 %357
   vst.512.f32x16 %result, %output_view, 0
   return
 }
@@ -465,20 +465,25 @@ func.def target(@target) @outer_product_bf16bf16_m8n8k1(%lhs: buffer, %rhs: buff
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @outer_product_bf16bf16_m8n8k1() -> (reg<aie2p.mbms x4>) asm {
   %lhs_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %rhs_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %lhs_fragment = vlda.128.bf16x8 %lhs_view, 0
-  %rhs_fragment = vlda.128.bf16x8 %rhs_view, 0
+  %21 = mov.short 0
+  %22 = vbcst.16 %21
+  %23 = slice %22[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %24 = vlda.128.bf16x8 %lhs_view, 0
+  %lhs_fragment = concat(%24, %23) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %29 = vlda.128.bf16x8 %rhs_view, 0
+  %rhs_fragment = concat(%29, %23) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
   %accumulator_fragment = acc.clear.f32x64
-  %24 = vbroadcast.bf16x8.to.bf16x32 %lhs_fragment, 0
-  %25 = mova.i32 52
-  %26 = vshuffle %24, %24, %25
-  %27 = mova.i32 53
-  %28 = vshuffle %24, %24, %27
-  %29 = concat(%26, %28) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
-  %30 = vbroadcast.bf16x8.to.bf16x32 %rhs_fragment, 0
-  %31 = vmov.512 %30
-  %32 = concat(%30, %31) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
-  %33 = mova.i32 60
-  %product = mma.bf16bf16.m8n8k1 %accumulator_fragment, %29, %32, %33
+  %32 = vbroadcast.bf16x8.to.bf16x32 %lhs_fragment, 0
+  %33 = mova.i32 52
+  %34 = vshuffle %32, %32, %33
+  %35 = mova.i32 53
+  %36 = vshuffle %32, %32, %35
+  %37 = concat(%34, %36) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %38 = vbroadcast.bf16x8.to.bf16x32 %rhs_fragment, 0
+  %39 = vmov.512 %38
+  %40 = concat(%38, %39) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %41 = mova.i32 60
+  %product = mma.bf16bf16.m8n8k1 %accumulator_fragment, %37, %40, %41
   return %product
 }
 
@@ -501,8 +506,8 @@ func.def target(@target) @copy_bf16x8_exact_ssa_index(%source: buffer, %output: 
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_bf16x8_exact_ssa_index() asm {
   %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %value = vlda.128.bf16x8 %source_view, 16
-  vst.128.bf16x8 %value, %output_view, 16
+  %14 = vlda.128.bf16x8 %source_view, 16
+  vst.128.bf16x8 %14, %output_view, 16
   return
 }
 
@@ -553,32 +558,32 @@ func.def target(@target) @roundtrip_bf16x14(%input: buffer, %output: buffer) {
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @roundtrip_bf16x14() asm {
   %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %46 = vlda.128.bf16x8 %input_view, 0
-  %47 = mov.static-byte-offset 16
-  %48 = mov.address-index %47
-  %49 = lda.i16.index %input_view, %48
-  %50 = mov.static-byte-offset 18
-  %51 = mov.address-index %50
-  %52 = lda.i16.index %input_view, %51
-  %53 = mov.static-byte-offset 20
-  %54 = mov.address-index %53
-  %55 = lda.i16.index %input_view, %54
-  %56 = mov.static-byte-offset 22
-  %57 = mov.address-index %56
-  %58 = lda.i16.index %input_view, %57
-  %59 = mov.static-byte-offset 24
-  %60 = mov.address-index %59
-  %61 = lda.i16.index %input_view, %60
-  %62 = mov.static-byte-offset 26
-  %63 = mov.address-index %62
-  %64 = lda.i16.index %input_view, %63
-  vst.128.bf16x8 %46, %output_view, 0
-  st.i16.index %49, %output_view, %48
-  st.i16.index %52, %output_view, %51
-  st.i16.index %55, %output_view, %54
-  st.i16.index %58, %output_view, %57
-  st.i16.index %61, %output_view, %60
-  st.i16.index %64, %output_view, %63
+  %49 = vlda.128.bf16x8 %input_view, 0
+  %51 = mov.static-byte-offset 16
+  %52 = mov.address-index %51
+  %53 = lda.i16.index %input_view, %52
+  %54 = mov.static-byte-offset 18
+  %55 = mov.address-index %54
+  %56 = lda.i16.index %input_view, %55
+  %57 = mov.static-byte-offset 20
+  %58 = mov.address-index %57
+  %59 = lda.i16.index %input_view, %58
+  %60 = mov.static-byte-offset 22
+  %61 = mov.address-index %60
+  %62 = lda.i16.index %input_view, %61
+  %63 = mov.static-byte-offset 24
+  %64 = mov.address-index %63
+  %65 = lda.i16.index %input_view, %64
+  %66 = mov.static-byte-offset 26
+  %67 = mov.address-index %66
+  %68 = lda.i16.index %input_view, %67
+  vst.128.bf16x8 %49, %output_view, 0
+  st.i16.index %53, %output_view, %52
+  st.i16.index %56, %output_view, %55
+  st.i16.index %59, %output_view, %58
+  st.i16.index %62, %output_view, %61
+  st.i16.index %65, %output_view, %64
+  st.i16.index %68, %output_view, %67
   return
 }
 
@@ -761,34 +766,36 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot2_bf1
   %rhs_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %acc_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 3, source_type = buffer} : reg<aie2p.ep>
-  %lhs_value = vlda.128.bf16x8 %lhs_view, 0
-  %rhs_value = vlda.128.bf16x8 %rhs_view, 0
-  %40 = mov.short 0
-  %41 = vbcst.32 %40
-  %42 = slice %41[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %43 = vlda.128.f32x4 %acc_view, 0
-  %acc_value = concat(%43, %42) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
-  %45 = vbroadcast.bf16x8.to.bf16x32 %lhs_value, 0
-  %46 = vbroadcast.bf16x8.to.bf16x32 %rhs_value, 0
-  %47 = mova.i32 2
-  %48 = vshuffle %45, %45, %47
-  %49 = vshuffle %46, %46, %47
-  %50 = mova.i32 3
-  %51 = vshuffle %45, %45, %50
-  %52 = vshuffle %46, %46, %50
-  %53 = acc.clear.f32x64
-  %54 = slice %53[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %55 = slice %53[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %56 = slice %53[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %57 = vmov.vector512.to.accumulator512 %acc_value
-  %58 = concat(%57, %54, %55, %56) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %59 = mova.i32 60
-  %60 = vmac.bf16x32 %58, %48, %49, %59
-  %61 = vmac.bf16x32 %60, %51, %52, %59
-  %62 = slice %61[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %result = vmov.accumulator512.to.vector512 %62
-  %64 = slice %result[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  vst.128.f32x4 %64, %output_view, 0
+  %38 = mov.short 0
+  %39 = vbcst.16 %38
+  %40 = slice %39[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %41 = vlda.128.bf16x8 %lhs_view, 0
+  %lhs_value = concat(%41, %40) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %46 = vlda.128.bf16x8 %rhs_view, 0
+  %rhs_value = concat(%46, %40) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %49 = vbcst.32 %38
+  %50 = slice %49[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %51 = vlda.128.f32x4 %acc_view, 0
+  %acc_value = concat(%51, %50) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %53 = mova.i32 2
+  %54 = vshuffle %lhs_value, %lhs_value, %53
+  %55 = vshuffle %rhs_value, %rhs_value, %53
+  %56 = mova.i32 3
+  %57 = vshuffle %lhs_value, %lhs_value, %56
+  %58 = vshuffle %rhs_value, %rhs_value, %56
+  %59 = acc.clear.f32x64
+  %60 = slice %59[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %61 = slice %59[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %62 = slice %59[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %63 = vmov.vector512.to.accumulator512 %acc_value
+  %64 = concat(%63, %60, %61, %62) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %65 = mova.i32 60
+  %66 = vmac.bf16x32 %64, %54, %55, %65
+  %67 = vmac.bf16x32 %66, %57, %58, %65
+  %68 = slice %67[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %result = vmov.accumulator512.to.vector512 %68
+  %70 = slice %result[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  vst.128.f32x4 %70, %output_view, 0
   return
 }
 
@@ -797,36 +804,36 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot2_bf1
   %rhs_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %acc_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
   %output_view = resource<native_pointer> {index = 3, source_type = buffer} : reg<aie2p.ep>
-  %69 = mov.short 0
-  %70 = vbcst.16 %69
-  %71 = slice %70[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %72 = vlda.256.bf16x16 %lhs_view, 0
-  %lhs_value = concat(%72, %71) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
-  %77 = vlda.256.bf16x16 %rhs_view, 0
-  %rhs_value = concat(%77, %71) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
-  %80 = vbcst.32 %69
-  %81 = slice %80[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %82 = vlda.256.f32x8 %acc_view, 0
-  %acc_value = concat(%82, %81) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
-  %84 = mova.i32 2
-  %85 = vshuffle %lhs_value, %lhs_value, %84
-  %86 = vshuffle %rhs_value, %rhs_value, %84
-  %87 = mova.i32 3
-  %88 = vshuffle %lhs_value, %lhs_value, %87
-  %89 = vshuffle %rhs_value, %rhs_value, %87
-  %90 = acc.clear.f32x64
-  %91 = slice %90[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %92 = slice %90[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %93 = slice %90[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %94 = vmov.vector512.to.accumulator512 %acc_value
-  %95 = concat(%94, %91, %92, %93) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %96 = mova.i32 60
-  %97 = vmac.bf16x32 %95, %85, %86, %96
-  %98 = vmac.bf16x32 %97, %88, %89, %96
-  %99 = slice %98[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %result = vmov.accumulator512.to.vector512 %99
-  %101 = slice %result[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  vst.256.f32x8 %101, %output_view, 0
+  %75 = mov.short 0
+  %76 = vbcst.16 %75
+  %77 = slice %76[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %78 = vlda.256.bf16x16 %lhs_view, 0
+  %lhs_value = concat(%78, %77) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %83 = vlda.256.bf16x16 %rhs_view, 0
+  %rhs_value = concat(%83, %77) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %86 = vbcst.32 %75
+  %87 = slice %86[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %88 = vlda.256.f32x8 %acc_view, 0
+  %acc_value = concat(%88, %87) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %90 = mova.i32 2
+  %91 = vshuffle %lhs_value, %lhs_value, %90
+  %92 = vshuffle %rhs_value, %rhs_value, %90
+  %93 = mova.i32 3
+  %94 = vshuffle %lhs_value, %lhs_value, %93
+  %95 = vshuffle %rhs_value, %rhs_value, %93
+  %96 = acc.clear.f32x64
+  %97 = slice %96[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %98 = slice %96[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %99 = slice %96[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %100 = vmov.vector512.to.accumulator512 %acc_value
+  %101 = concat(%100, %97, %98, %99) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %102 = mova.i32 60
+  %103 = vmac.bf16x32 %101, %91, %92, %102
+  %104 = vmac.bf16x32 %103, %94, %95, %102
+  %105 = slice %104[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %result = vmov.accumulator512.to.vector512 %105
+  %107 = slice %result[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  vst.256.f32x8 %107, %output_view, 0
   return
 }
 
@@ -1087,21 +1094,19 @@ func.def target(@target) @dot2_bf16x8_positive_zero(%lhs: vector<8xbf16>, %rhs: 
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot2_bf16x8_positive_zero(%lhs: reg<aie2p.ewl>, %rhs: reg<aie2p.ewl>) -> (reg<aie2p.vec256 x2>) asm {
-  %8 = vbroadcast.bf16x8.to.bf16x32 %lhs, 0
-  %9 = vbroadcast.bf16x8.to.bf16x32 %rhs, 0
-  %10 = mova.i32 2
-  %11 = vshuffle %8, %8, %10
-  %12 = vshuffle %9, %9, %10
-  %13 = mova.i32 3
-  %14 = vshuffle %8, %8, %13
-  %15 = vshuffle %9, %9, %13
-  %16 = acc.clear.f32x64
-  %17 = mova.i32 60
-  %18 = vmac.bf16x32 %16, %11, %12, %17
-  %19 = vmac.bf16x32 %18, %14, %15, %17
-  %20 = slice %19[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %result = vmov.accumulator512.to.vector512 %20
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot2_bf16x8_positive_zero(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %8 = mova.i32 2
+  %9 = vshuffle %lhs, %lhs, %8
+  %10 = vshuffle %rhs, %rhs, %8
+  %11 = mova.i32 3
+  %12 = vshuffle %lhs, %lhs, %11
+  %13 = vshuffle %rhs, %rhs, %11
+  %14 = acc.clear.f32x64
+  %15 = mova.i32 60
+  %16 = vmac.bf16x32 %14, %9, %10, %15
+  %17 = vmac.bf16x32 %16, %12, %13, %15
+  %18 = slice %17[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %result = vmov.accumulator512.to.vector512 %18
   return %result
 }
 

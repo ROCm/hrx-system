@@ -54,7 +54,6 @@ _BF16_DOT2_VECTOR = Vector(
 _BF16X32_VECTOR = Vector("bf16", lanes=32)
 _BF16X64_VECTOR = Vector("bf16", lanes=64)
 _F32_VECTOR = Vector("f32", minimum_static_elements=1, maximum_static_elements=16)
-_F32X4_VECTOR = Vector("f32", lanes=4)
 _F32X16_VECTOR = Vector("f32", lanes=16)
 _F32X64_ACCUMULATOR = Vector("f32", lanes=64)
 
@@ -166,13 +165,11 @@ def _vector_dot2f_bf16_rule(
     input_type: TypePattern,
     result_type: TypePattern,
     *,
-    broadcast_inputs: bool,
     initial_accumulator: Literal["source", "zero"],
     report_key: str,
     rhs_form: Literal["packed", "interleaved"] = "packed",
 ) -> DescriptorRule:
     config_constant = _descriptor("amd.xdna.aie2p.constant.i32.mova")
-    broadcast = _descriptor("amd.xdna.aie2p.broadcast.bf16x8.to.bf16x32")
     shuffle = _descriptor("amd.xdna.aie2p.shuffle.x.configured")
     clear = _descriptor("amd.xdna.aie2p.accumulator.clear.f32x64")
     move_to_accumulator = _descriptor("amd.xdna.aie2p.move.vector512.to.accumulator512")
@@ -185,20 +182,6 @@ def _vector_dot2f_bf16_rule(
     input_values = {
         operand_name: ValueRef.operand(operand_name) for operand_name in ("lhs", "rhs")
     }
-    if broadcast_inputs:
-        for operand_name in ("lhs", "rhs"):
-            broadcast_value = ValueRef.temporary(f"{operand_name}_broadcast")
-            emits.append(
-                EmitDescriptorOp(
-                    descriptor=broadcast,
-                    operands={"s1": ValueRef.operand(operand_name)},
-                    results={"dst": broadcast_value},
-                    result_types={"dst": DescriptorResultType()},
-                    immediates={"idx": 0},
-                    form=DescriptorEmitForm.OP,
-                )
-            )
-            input_values[operand_name] = broadcast_value
     for lane_group, control in zip(
         ("even", "odd"), _BF16_DOT2_DEINTERLEAVE_CONTROLS, strict=True
     ):
@@ -704,28 +687,9 @@ AIE2P_FLOATING_RULES = (
             ),
         )
     ),
-    # A vector<8xbf16> is the native outer-product operand type and therefore
-    # uses the narrow EWL carrier. Broadcast it into the ordinary X carrier
-    # before using the same VMAC realization. Specialized rules precede ranged
-    # rules.
-    _vector_dot2f_bf16_rule(
-        _BF16X8_VECTOR,
-        _F32X4_VECTOR,
-        broadcast_inputs=True,
-        initial_accumulator="zero",
-        report_key="bf16_dot2_x8_zero",
-    ),
-    _vector_dot2f_bf16_rule(
-        _BF16X8_VECTOR,
-        _F32X4_VECTOR,
-        broadcast_inputs=True,
-        initial_accumulator="source",
-        report_key="bf16_dot2_x8_broadcast",
-    ),
     _vector_dot2f_bf16_rule(
         _BF16X32_VECTOR,
         _F32X16_VECTOR,
-        broadcast_inputs=False,
         initial_accumulator="zero",
         rhs_form="interleaved",
         report_key="bf16_dot2_interleaved_rhs_zero",
@@ -733,7 +697,6 @@ AIE2P_FLOATING_RULES = (
     _vector_dot2f_bf16_rule(
         _BF16X32_VECTOR,
         _F32X16_VECTOR,
-        broadcast_inputs=False,
         initial_accumulator="source",
         rhs_form="interleaved",
         report_key="bf16_dot2_interleaved_rhs",
@@ -741,14 +704,12 @@ AIE2P_FLOATING_RULES = (
     _vector_dot2f_bf16_rule(
         _BF16_DOT2_VECTOR,
         _F32_VECTOR,
-        broadcast_inputs=False,
         initial_accumulator="zero",
         report_key="bf16_dot2_zero",
     ),
     _vector_dot2f_bf16_rule(
         _BF16_DOT2_VECTOR,
         _F32_VECTOR,
-        broadcast_inputs=False,
         initial_accumulator="source",
         report_key="bf16_dot2",
     ),

@@ -21,8 +21,6 @@ from loom.target.contracts import (
     DescriptorResultType,
     DescriptorRule,
     EmitDescriptorOp,
-    EmitRegisterCopy,
-    EmitRegisterSlice,
     Guard,
     Scalar,
     ValueRef,
@@ -71,47 +69,16 @@ def _vector_sign_rule(
     element_type: str,
     width: int,
     operation: _SignOperation,
-    *,
-    broadcast_inputs: bool = False,
 ) -> DescriptorRule:
-    source_type = (
-        Vector("bf16", lanes=8)
-        if broadcast_inputs
-        else Vector(
-            element_type,
-            minimum_static_elements=1,
-            maximum_static_elements=512 // width,
-        )
+    source_type = Vector(
+        element_type, minimum_static_elements=1, maximum_static_elements=512 // width
     )
     input_fields = ("lhs", "rhs") if operation == "copysign" else ("input",)
     input_values = {field: ValueRef.operand(field) for field in input_fields}
     emits: list[ContractEmit] = []
-    if broadcast_inputs:
-        # Eight BF16 lanes use the outer-product's narrow EWL carrier. The
-        # bitwise ALU consumes X registers; its low W slice retains the result.
-        for field in input_fields:
-            widened = ValueRef.temporary(f"{field}_broadcast")
-            emits.append(
-                EmitDescriptorOp(
-                    descriptor=descriptor_by_key(
-                        AIE2P_CORE_DESCRIPTOR_SET,
-                        "amd.xdna.aie2p.broadcast.bf16x8.to.bf16x32",
-                    ),
-                    operands={"s1": input_values[field]},
-                    results={"dst": widened},
-                    result_types={"dst": DescriptorResultType()},
-                    immediates={"idx": 0},
-                    form=DescriptorEmitForm.OP,
-                )
-            )
-            input_values[field] = widened
     input_value = input_values[input_fields[0]]
-    vector_type = DescriptorResultType() if broadcast_inputs else input_value
-    output_value = (
-        ValueRef.temporary("wide_result")
-        if broadcast_inputs
-        else ValueRef.result("result")
-    )
+    vector_type = input_value
+    output_value = ValueRef.result("result")
 
     def mask(name: str, bits: int) -> ValueRef:
         scalar = ValueRef.temporary(f"{name}_scalar")
@@ -177,14 +144,6 @@ def _vector_sign_rule(
         sign = binary("sign", "and.bits512", input_values["rhs"], sign_mask)
         binary(None, "or.bits512", magnitude, sign)
     descriptor = emits[-1].descriptor
-    if broadcast_inputs:
-        low_half = ValueRef.temporary("low_half")
-        emits.extend(
-            (
-                EmitRegisterSlice(source=output_value, result=low_half, unit_count=1),
-                EmitRegisterCopy(source=low_half, result=ValueRef.result("result")),
-            )
-        )
     fields = (
         ("lhs", "rhs", "result") if operation == "copysign" else ("input", "result")
     )
@@ -205,9 +164,6 @@ _SIGN_OPERATIONS: tuple[tuple[Op, Op, _SignOperation], ...] = (
 )
 
 AIE2P_FLOATING_SIGN_RULES = tuple(
-    _vector_sign_rule(vector_op, "bf16", 16, operation, broadcast_inputs=True)
-    for _, vector_op, operation in _SIGN_OPERATIONS
-) + tuple(
     build_rule(source_op, element_type, width, operation)
     for element_type, width in (("f32", 32), ("bf16", 16))
     for scalar_op, vector_op, operation in _SIGN_OPERATIONS

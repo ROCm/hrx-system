@@ -440,22 +440,6 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             1,
             "amd.xdna.aie2p.extract.predicate64.immediate",
         ),
-        core_rules._vector_insert_zero_rule(
-            core_rules._BF16,
-            core_rules._BF16X8_VECTOR,
-            "amd.xdna.aie2p.insert.bf16x8.zero",
-        ),
-        core_rules._vector_insert_static_rule(
-            core_rules._BF16,
-            core_rules._BF16X8_VECTOR,
-            7,
-            "amd.xdna.aie2p.insert.bf16x8.register",
-        ),
-        core_rules._vector_insert_dynamic_rule(
-            core_rules._BF16,
-            core_rules._BF16X8_VECTOR,
-            "amd.xdna.aie2p.insert.bf16x8.register",
-        ),
         *(
             rule
             for scalar_type, vector_type, maximum_index, zero_key, register_key in (
