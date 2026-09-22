@@ -339,3 +339,185 @@ issue cycles: 58
 code bytes: 224
 coissued bundles: 2
 coissued components: 5
+
+// ====
+
+// Partial packets share address offsets across two overlapping loads. Index
+// copies and rematerialized address moves must wait until their consumers
+// become actionable, so later setup cannot occupy the earlier lanes' storage.
+// RUN: emit aie2p-leaf @partial_packet_setup report=emission
+
+low.func.def target<amd.xdna.aie2p.core> @partial_packet_setup(%source: reg<aie2p.ep>, %destination: reg<aie2p.ep>) asm {
+  %first_byte = lda.u8 %source, 0
+  %left1 = vbcst.8 %first_byte
+  %offset_112 = mov.static-byte-offset 112
+  %address_112 = mov.address-index %offset_112
+  %first_tail_lane0 = lda.i8.index %source, %address_112
+  %offset_113 = mov.static-byte-offset 113
+  %address_113 = mov.address-index %offset_113
+  %first_tail_lane1 = lda.i8.index %source, %address_113
+  %offset_114 = mov.static-byte-offset 114
+  %address_114 = mov.address-index %offset_114
+  %first_tail_lane2 = lda.i8.index %source, %address_114
+  %offset_115 = mov.static-byte-offset 115
+  %address_115 = mov.address-index %offset_115
+  %first_tail_lane3 = lda.i8.index %source, %address_115
+  %offset_116 = mov.static-byte-offset 116
+  %address_116 = mov.address-index %offset_116
+  %first_tail_lane4 = lda.i8.index %source, %address_116
+  %offset_117 = mov.static-byte-offset 117
+  %address_117 = mov.address-index %offset_117
+  %first_tail_lane5 = lda.i8.index %source, %address_117
+  %offset_118 = mov.static-byte-offset 118
+  %address_118 = mov.address-index %offset_118
+  %first_tail_lane6 = lda.i8.index %source, %address_118
+  %offset_119 = mov.static-byte-offset 119
+  %address_119 = mov.address-index %offset_119
+  %first_tail_lane7 = lda.i8.index %source, %address_119
+  %offset_120 = mov.static-byte-offset 120
+  %address_120 = mov.address-index %offset_120
+  %first_tail_lane8 = lda.i8.index %source, %address_120
+  %offset_121 = mov.static-byte-offset 121
+  %address_121 = mov.address-index %offset_121
+  %first_tail_lane9 = lda.i8.index %source, %address_121
+  %offset_122 = mov.static-byte-offset 122
+  %address_122 = mov.address-index %offset_122
+  %first_tail_lane10 = lda.i8.index %source, %address_122
+  %offset_123 = mov.static-byte-offset 123
+  %address_123 = mov.address-index %offset_123
+  %first_tail_lane11 = lda.i8.index %source, %address_123
+  %offset_124 = mov.static-byte-offset 124
+  %address_124 = mov.address-index %offset_124
+  %first_tail_lane12 = lda.i8.index %source, %address_124
+  %offset_125 = mov.static-byte-offset 125
+  %address_125 = mov.address-index %offset_125
+  %first_tail_lane13 = lda.i8.index %source, %address_125
+  %offset_126 = mov.static-byte-offset 126
+  %address_126 = mov.address-index %offset_126
+  %first_tail_lane14 = lda.i8.index %source, %address_126
+  %first_tail_splat = vbcst.8 %first_tail_lane0
+  %position1 = mov.short 1
+  %first_index1 = copy %position1 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %first_tail2 = vinsert.8.reg %first_tail_splat, %first_index1, %first_tail_lane1
+  %position2 = mov.short 2
+  %first_index2 = copy %position2 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %first_tail3 = vinsert.8.reg %first_tail2, %first_index2, %first_tail_lane2
+  %position3 = mov.short 3
+  %first_index3 = copy %position3 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %first_tail4 = vinsert.8.reg %first_tail3, %first_index3, %first_tail_lane3
+  %position4 = mov.short 4
+  %first_index4 = copy %position4 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %first_tail5 = vinsert.8.reg %first_tail4, %first_index4, %first_tail_lane4
+  %position5 = mov.short 5
+  %first_index5 = copy %position5 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %first_tail6 = vinsert.8.reg %first_tail5, %first_index5, %first_tail_lane5
+  %position6 = mov.short 6
+  %first_index6 = copy %position6 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %first_tail7 = vinsert.8.reg %first_tail6, %first_index6, %first_tail_lane6
+  %position7 = mov.short 7
+  %first_index7 = copy %position7 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %first_tail8 = vinsert.8.reg %first_tail7, %first_index7, %first_tail_lane7
+  %position8 = mov.short 8
+  %first_index8 = copy %position8 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %first_tail9 = vinsert.8.reg %first_tail8, %first_index8, %first_tail_lane8
+  %position9 = mov.short 9
+  %first_index9 = copy %position9 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %first_tail10 = vinsert.8.reg %first_tail9, %first_index9, %first_tail_lane9
+  %position10 = mov.short 10
+  %first_index10 = copy %position10 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %first_tail11 = vinsert.8.reg %first_tail10, %first_index10, %first_tail_lane10
+  %position11 = mov.short 11
+  %first_index11 = copy %position11 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %first_tail12 = vinsert.8.reg %first_tail11, %first_index11, %first_tail_lane11
+  %position12 = mov.short 12
+  %first_index12 = copy %position12 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %first_tail13 = vinsert.8.reg %first_tail12, %first_index12, %first_tail_lane12
+  %position13 = mov.short 13
+  %first_index13 = copy %position13 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %first_tail14 = vinsert.8.reg %first_tail13, %first_index13, %first_tail_lane13
+  %position14 = mov.short 14
+  %first_index14 = copy %position14 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %first_tail15 = vinsert.8.reg %first_tail14, %first_index14, %first_tail_lane14
+  %zero = mov.short 0
+  %padding = vbcst.8 %zero
+  %padding_half = slice %padding[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %first_middle = vlda.128.i8x16 %source, 96
+  %first_middle_packet = concat(%first_middle, %padding_half) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %middle_bytes = mova.i32 16
+  %first_middle_rotated = vshift %first_middle_packet, %first_middle_packet, %middle_bytes
+  %tail_shift_bytes = mova.i32 48
+  %first_middle_tail = vshift %first_middle_rotated, %first_tail15, %tail_shift_bytes
+  %first_head = vlda.256.i8x32 %source, 64
+  %first_tail_half = slice %first_middle_tail[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %right1 = concat(%first_head, %first_tail_half) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %left1_bytes = mova.i32 1
+  %left1_rotated = vshift %left1, %left1, %left1_bytes
+  %right1_bytes = mova.i32 63
+  %joined1 = vshift %left1_rotated, %right1, %right1_bytes
+  vst.512.i8x64 %joined1, %destination, 0
+  %second_first_byte = lda.u8 %source, 0
+  %second_next_byte = lda.u8 %source, 1
+  %second_splat = vbcst.8 %second_first_byte
+  %left_index1 = copy %position1 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %left2 = vinsert.8.reg %second_splat, %left_index1, %second_next_byte
+  %second_tail_lane0 = lda.i8.index %source, %address_112
+  %second_tail_lane1 = lda.i8.index %source, %address_113
+  %second_tail_lane2 = lda.i8.index %source, %address_114
+  %second_tail_lane3 = lda.i8.index %source, %address_115
+  %second_tail_lane4 = lda.i8.index %source, %address_116
+  %second_tail_lane5 = lda.i8.index %source, %address_117
+  %second_tail_lane6 = lda.i8.index %source, %address_118
+  %second_tail_lane7 = lda.i8.index %source, %address_119
+  %second_tail_lane8 = lda.i8.index %source, %address_120
+  %second_tail_lane9 = lda.i8.index %source, %address_121
+  %second_tail_lane10 = lda.i8.index %source, %address_122
+  %second_tail_lane11 = lda.i8.index %source, %address_123
+  %second_tail_lane12 = lda.i8.index %source, %address_124
+  %second_tail_lane13 = lda.i8.index %source, %address_125
+  %second_tail_splat = vbcst.8 %second_tail_lane0
+  %second_index1 = copy %position1 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %second_tail2 = vinsert.8.reg %second_tail_splat, %second_index1, %second_tail_lane1
+  %second_index2 = copy %position2 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %second_tail3 = vinsert.8.reg %second_tail2, %second_index2, %second_tail_lane2
+  %second_index3 = copy %position3 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %second_tail4 = vinsert.8.reg %second_tail3, %second_index3, %second_tail_lane3
+  %second_index4 = copy %position4 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %second_tail5 = vinsert.8.reg %second_tail4, %second_index4, %second_tail_lane4
+  %second_index5 = copy %position5 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %second_tail6 = vinsert.8.reg %second_tail5, %second_index5, %second_tail_lane5
+  %second_index6 = copy %position6 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %second_tail7 = vinsert.8.reg %second_tail6, %second_index6, %second_tail_lane6
+  %second_index7 = copy %position7 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %second_tail8 = vinsert.8.reg %second_tail7, %second_index7, %second_tail_lane7
+  %second_index8 = copy %position8 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %second_tail9 = vinsert.8.reg %second_tail8, %second_index8, %second_tail_lane8
+  %second_index9 = copy %position9 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %second_tail10 = vinsert.8.reg %second_tail9, %second_index9, %second_tail_lane9
+  %second_index10 = copy %position10 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %second_tail11 = vinsert.8.reg %second_tail10, %second_index10, %second_tail_lane10
+  %second_index11 = copy %position11 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %second_tail12 = vinsert.8.reg %second_tail11, %second_index11, %second_tail_lane11
+  %second_index12 = copy %position12 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %second_tail13 = vinsert.8.reg %second_tail12, %second_index12, %second_tail_lane12
+  %second_index13 = copy %position13 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %second_tail14 = vinsert.8.reg %second_tail13, %second_index13, %second_tail_lane13
+  %second_middle = vlda.128.i8x16 %source, 96
+  %second_middle_packet = concat(%second_middle, %padding_half) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %second_middle_rotated = vshift %second_middle_packet, %second_middle_packet, %middle_bytes
+  %second_middle_tail = vshift %second_middle_rotated, %second_tail14, %tail_shift_bytes
+  %second_head = vlda.256.i8x32 %source, 64
+  %second_tail_half = slice %second_middle_tail[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %right2 = concat(%second_head, %second_tail_half) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %left2_bytes = mova.i32 2
+  %left2_rotated = vshift %left2, %left2, %left2_bytes
+  %right2_bytes = mova.i32 62
+  %joined2 = vshift %left2_rotated, %right2, %right2_bytes
+  vst.512.i8x64 %joined2, %destination, 64
+  return
+}
+
+// ----
+issue cycles: 240
+code bytes: 876
+coissued bundles: 40
+coissued components: 84

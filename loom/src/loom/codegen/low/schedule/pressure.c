@@ -1493,8 +1493,8 @@ void loom_low_schedule_pressure_score_candidate(
   uint32_t killed_live_value_count = 0;
   uint64_t produced_live_units = 0;
   uint32_t produced_live_value_count = 0;
-  bool rematerializable_leaf =
-      node->descriptor != NULL && node->operand_count == 0 &&
+  bool rematerializable =
+      node->descriptor != NULL &&
       !iree_any_bit_set(node->traits, LOOM_TRAIT_OBSERVABLE_EFFECT);
   const uint16_t storage_relation_count = node->storage_relation_count;
   const bool has_early_clobber =
@@ -1553,8 +1553,8 @@ void loom_low_schedule_pressure_score_candidate(
     produced_live_units += unit_count;
     if (unit_count != 0) {
       ++produced_live_value_count;
-      rematerializable_leaf =
-          rematerializable_leaf &&
+      rematerializable =
+          rematerializable &&
           loom_low_descriptor_result_can_rematerialize(
               state->target.descriptor_set, node->descriptor, result_index);
     }
@@ -1644,9 +1644,11 @@ void loom_low_schedule_pressure_score_candidate(
           (uint16_t)((node->flags &
                       LOOM_LOW_SCHEDULE_NODE_FLAG_PAIR_TRANSPARENT)
                      << 1u) |
-          (is_storage_setup ? LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_STORAGE_SETUP
-                            : 0) |
-          (rematerializable_leaf && produced_live_value_count != 0
+          ((is_storage_setup || (rematerializable && node->operand_count != 0))
+               ? LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_STORAGE_SETUP
+               : 0) |
+          (rematerializable && node->operand_count == 0 &&
+                   produced_live_value_count != 0
                ? LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_REMATERIALIZABLE_LEAF
                : 0),
   };
@@ -1663,7 +1665,7 @@ void loom_low_schedule_pressure_score_candidate(
           state, pressure_state, node_index)) {
     out_score->flags |=
         LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_CONSTRAINED_COMPLETION;
-    if (rematerializable_leaf) {
+    if (rematerializable && node->operand_count == 0) {
       out_score->active_register_packing_completion_capacity = iree_min(
           out_score->active_register_packing_completion_capacity,
           loom_low_schedule_target_pressure_active_packing_completion_capacity(

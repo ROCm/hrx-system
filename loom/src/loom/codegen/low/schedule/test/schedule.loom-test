@@ -1710,3 +1710,21 @@ low.func.def target<test.low.core>(@test_target) @register_packing_fanout_repeat
   %r2 = test.packing.retire %third, %third
   return %r0, %r1, %r2
 }
+
+// ====
+
+// Descriptor transfers can be rematerialized just like structural copies.
+// Keep setup beside its consumer instead of carrying it across blocked work.
+// RUN: with-checks emit low-schedule-json @deferred_descriptor_setup strategy=resource-stall
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @deferred_descriptor_setup(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  %prepared_operand = test.rematerialize.i32 %lhs
+  %prepared_consumer = test.add.i32 %rhs, %rhs
+  %result = test.add.i32 %prepared_operand, %prepared_consumer
+  return %result
+}
+
+// ----
+CHECK: *"scheduled_node_indices":[1,0,2,3]*

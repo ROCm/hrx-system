@@ -310,8 +310,9 @@ enum loom_low_schedule_candidate_flag_bits_e {
   // Candidate itself requires more physical storage than an unspillable
   // register class or wholly unspillable alias set can provide.
   LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY = 1u << 5,
-  // Candidate establishes storage for a later operation. Storage setup is
-  // actionable only when it also advances storage or unlocks a descriptor.
+  // Candidate establishes storage through a structural operation or a
+  // rematerializable descriptor with operands. Setup is actionable when it
+  // reduces live storage, advances storage, or unlocks a descriptor.
   LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_STORAGE_SETUP = 1u << 7,
   // Candidate is an operand-free descriptor whose live results can all be
   // rematerialized. Keep it behind ordinary work so repair-time clones remain
