@@ -29,6 +29,13 @@ static_assert((uint32_t)LOOM_PIPELINE_BINDING_ACCESS_FLAG_WRITE ==
                   (uint32_t)LOOM_AIE2P_ARRAY_BINDING_ACCESS_WRITE,
               "pipeline and AIE2P write access must have identical encodings");
 
+// Per-direction external DMA stream count: a fixed instance demand, or a
+// mutable per-column commitment against the shim's channel budget.
+typedef struct loom_aie2p_pipeline_stream_demand_t {
+  uint32_t ingress;
+  uint32_t egress;
+} loom_aie2p_pipeline_stream_demand_t;
+
 typedef struct loom_aie2p_pipeline_placement_t {
   // Immutable target-independent concrete pipeline plan.
   const loom_pipeline_plan_t* plan;
@@ -51,11 +58,13 @@ typedef struct loom_aie2p_pipeline_placement_t {
   // Candidate coordinate order scratch for each recursive placement depth.
   uint32_t* candidate_order;
 
-  // External ingress DMA streams committed to each physical column so far.
-  uint32_t* column_ingress_counts;
+  // External DMA streams committed to each physical column so far, indexed
+  // by column.
+  loom_aie2p_pipeline_stream_demand_t* column_dma_demand;
 
-  // External egress DMA streams committed to each physical column so far.
-  uint32_t* column_egress_counts;
+  // Immutable external DMA stream demand for each resident instance,
+  // computed once during placement initialization.
+  loom_aie2p_pipeline_stream_demand_t* instance_dma_demand;
 
   // Shim DMA channels available per direction, shared by MM2S and S2MM.
   uint8_t shim_dma_channel_count;
@@ -123,11 +132,8 @@ static iree_status_t loom_aie2p_pipeline_placement_initialize(
     }
   }
   IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_allocate_array(
-      arena, family->column_count, sizeof(*placement->column_ingress_counts),
-      (void**)&placement->column_ingress_counts));
-  IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_allocate_array(
-      arena, family->column_count, sizeof(*placement->column_egress_counts),
-      (void**)&placement->column_egress_counts));
+      arena, family->column_count, sizeof(*placement->column_dma_demand),
+      (void**)&placement->column_dma_demand));
   IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_allocate_array(
       arena, placement->compute_coordinate_count,
       sizeof(*placement->neighbor_capacities),
@@ -157,6 +163,25 @@ static iree_status_t loom_aie2p_pipeline_placement_initialize(
   IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_allocate_array(
       arena, plan->instance_count, sizeof(*placement->instance_coordinates),
       (void**)&placement->instance_coordinates));
+  IREE_RETURN_IF_ERROR(loom_aie2p_pipeline_allocate_array(
+      arena, plan->instance_count, sizeof(*placement->instance_dma_demand),
+      (void**)&placement->instance_dma_demand));
+  for (uint32_t i = 0; i < plan->instance_count; ++i) {
+    placement->instance_dma_demand[i] =
+        (loom_aie2p_pipeline_stream_demand_t){0};
+  }
+  // Each edge contributes to exactly one endpoint's demand, so one pass over
+  // the edge table populates every instance's fixed ingress/egress count.
+  for (uint32_t i = 0; i < plan->edge_count; ++i) {
+    const loom_pipeline_plan_edge_t* edge = &plan->edges[i];
+    if (edge->target_kind == LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE &&
+        edge->source_kind == LOOM_PIPELINE_ENDPOINT_KIND_BINDING) {
+      ++placement->instance_dma_demand[edge->target_index].ingress;
+    } else if (edge->source_kind == LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE &&
+               edge->target_kind == LOOM_PIPELINE_ENDPOINT_KIND_BINDING) {
+      ++placement->instance_dma_demand[edge->source_index].egress;
+    }
+  }
   iree_host_size_t candidate_order_count = 0;
   if (!iree_host_size_checked_mul(plan->instance_count,
                                   placement->compute_coordinate_count,
@@ -207,27 +232,6 @@ static uint32_t loom_aie2p_pipeline_instance_degree(
   }
   *out_assigned_neighbor_count = assigned_neighbor_count;
   return degree;
-}
-
-static void loom_aie2p_pipeline_instance_external_stream_counts(
-    const loom_aie2p_pipeline_placement_t* placement, uint32_t instance_index,
-    uint32_t* out_ingress_count, uint32_t* out_egress_count) {
-  uint32_t ingress_count = 0;
-  uint32_t egress_count = 0;
-  for (uint32_t i = 0; i < placement->plan->edge_count; ++i) {
-    const loom_pipeline_plan_edge_t* edge = &placement->plan->edges[i];
-    if (edge->target_kind == LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE &&
-        edge->target_index == instance_index &&
-        edge->source_kind == LOOM_PIPELINE_ENDPOINT_KIND_BINDING) {
-      ++ingress_count;
-    } else if (edge->source_kind == LOOM_PIPELINE_ENDPOINT_KIND_INSTANCE &&
-               edge->source_index == instance_index &&
-               edge->target_kind == LOOM_PIPELINE_ENDPOINT_KIND_BINDING) {
-      ++egress_count;
-    }
-  }
-  *out_ingress_count = ingress_count;
-  *out_egress_count = egress_count;
 }
 
 static bool loom_aie2p_pipeline_coordinate_compatible(
@@ -336,28 +340,22 @@ static bool loom_aie2p_pipeline_candidate_precedes(
   // No worker-to-worker edge: prefer a column whose shim still has budget,
   // in both directions, for this instance's external streams.
   if (degree == 0) {
-    uint32_t ingress_demand = 0;
-    uint32_t egress_demand = 0;
-    loom_aie2p_pipeline_instance_external_stream_counts(
-        placement, instance_index, &ingress_demand, &egress_demand);
-    const loom_xdna_tile_coordinate_t lhs_coordinate =
-        placement->compute_coordinates[lhs_index];
-    const loom_xdna_tile_coordinate_t rhs_coordinate =
-        placement->compute_coordinates[rhs_index];
-    const bool lhs_under_budget =
-        placement->column_ingress_counts[lhs_coordinate.column] +
-                ingress_demand <=
-            placement->shim_dma_channel_count &&
-        placement->column_egress_counts[lhs_coordinate.column] +
-                egress_demand <=
-            placement->shim_dma_channel_count;
-    const bool rhs_under_budget =
-        placement->column_ingress_counts[rhs_coordinate.column] +
-                ingress_demand <=
-            placement->shim_dma_channel_count &&
-        placement->column_egress_counts[rhs_coordinate.column] +
-                egress_demand <=
-            placement->shim_dma_channel_count;
+    const loom_aie2p_pipeline_stream_demand_t demand =
+        placement->instance_dma_demand[instance_index];
+    const loom_aie2p_pipeline_stream_demand_t lhs_committed =
+        placement->column_dma_demand[placement->compute_coordinates[lhs_index]
+                                         .column];
+    const loom_aie2p_pipeline_stream_demand_t rhs_committed =
+        placement->column_dma_demand[placement->compute_coordinates[rhs_index]
+                                         .column];
+    const bool lhs_under_budget = lhs_committed.ingress + demand.ingress <=
+                                      placement->shim_dma_channel_count &&
+                                  lhs_committed.egress + demand.egress <=
+                                      placement->shim_dma_channel_count;
+    const bool rhs_under_budget = rhs_committed.ingress + demand.ingress <=
+                                      placement->shim_dma_channel_count &&
+                                  rhs_committed.egress + demand.egress <=
+                                      placement->shim_dma_channel_count;
     if (lhs_under_budget != rhs_under_budget) {
       return lhs_under_budget;
     }
@@ -421,10 +419,8 @@ static bool loom_aie2p_pipeline_place_next(
     ++candidate_count;
   }
 
-  uint32_t ingress_demand = 0;
-  uint32_t egress_demand = 0;
-  loom_aie2p_pipeline_instance_external_stream_counts(
-      placement, selected_instance, &ingress_demand, &egress_demand);
+  const loom_aie2p_pipeline_stream_demand_t demand =
+      placement->instance_dma_demand[selected_instance];
   for (uint32_t candidate_index = 0; candidate_index < candidate_count;
        ++candidate_index) {
     const uint32_t coordinate_index = candidate_order[candidate_index];
@@ -432,14 +428,14 @@ static bool loom_aie2p_pipeline_place_next(
         placement->compute_coordinates[coordinate_index];
     coordinate_used[coordinate_index] = true;
     placement->instance_coordinates[selected_instance] = coordinate;
-    placement->column_ingress_counts[coordinate.column] += ingress_demand;
-    placement->column_egress_counts[coordinate.column] += egress_demand;
+    placement->column_dma_demand[coordinate.column].ingress += demand.ingress;
+    placement->column_dma_demand[coordinate.column].egress += demand.egress;
     if (loom_aie2p_pipeline_place_next(placement, coordinate_used,
                                        placed_count + 1, require_adjacency)) {
       return true;
     }
-    placement->column_ingress_counts[coordinate.column] -= ingress_demand;
-    placement->column_egress_counts[coordinate.column] -= egress_demand;
+    placement->column_dma_demand[coordinate.column].ingress -= demand.ingress;
+    placement->column_dma_demand[coordinate.column].egress -= demand.egress;
     placement->instance_coordinates[selected_instance] =
         (loom_xdna_tile_coordinate_t){
             .column = UINT16_MAX,
@@ -471,25 +467,19 @@ static iree_status_t loom_aie2p_pipeline_place_instances(
       sizeof(*coordinate_used), (void**)&coordinate_used));
   memset(coordinate_used, 0,
          placement->compute_coordinate_count * sizeof(*coordinate_used));
-  memset(placement->column_ingress_counts, 0,
-         placement->family->column_count *
-             sizeof(*placement->column_ingress_counts));
-  memset(placement->column_egress_counts, 0,
-         placement->family->column_count *
-             sizeof(*placement->column_egress_counts));
+  memset(
+      placement->column_dma_demand, 0,
+      placement->family->column_count * sizeof(*placement->column_dma_demand));
   if (loom_aie2p_pipeline_may_embed_with_neighbor_memory(placement) &&
       loom_aie2p_pipeline_place_next(placement, coordinate_used, 0,
                                      /*require_adjacency=*/true)) {
     return iree_ok_status();
   }
+  // Every unsuccessful candidate above rolled back its own column_dma_demand
+  // contribution, and a skipped adjacency attempt never touched it, so it is
+  // still zeroed here; only coordinate_used needs a fresh reset.
   memset(coordinate_used, 0,
          placement->compute_coordinate_count * sizeof(*coordinate_used));
-  memset(placement->column_ingress_counts, 0,
-         placement->family->column_count *
-             sizeof(*placement->column_ingress_counts));
-  memset(placement->column_egress_counts, 0,
-         placement->family->column_count *
-             sizeof(*placement->column_egress_counts));
   for (uint32_t i = 0; i < placement->plan->instance_count; ++i) {
     placement->instance_coordinates[i] = (loom_xdna_tile_coordinate_t){
         .column = UINT16_MAX,
