@@ -7,7 +7,9 @@
 #include "loom/format/text/printer/format_tables.h"
 
 #include <inttypes.h>
+#include <string.h>
 
+#include "iree/base/internal/arena.h"
 #include "loom/format/text/printer/atoms.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
@@ -170,6 +172,83 @@ iree_status_t loom_print_inline_attr_dict(
   return iree_ok_status();
 }
 
+static iree_status_t loom_print_operand_dict_entries(
+    loom_print_context_t* ctx, const loom_op_t* op,
+    const loom_format_element_t* element, loom_value_slice_t operand_span,
+    loom_attribute_t names_attr, uint64_t* ordinal_bits) {
+  uint16_t start = (uint16_t)(operand_span.values - loom_op_const_operands(op));
+  uint16_t operand_count = operand_span.count;
+  IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
+  iree_host_size_t dict_start = ctx->stream->offset;
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '{'));
+  for (uint16_t i = 0; i < names_attr.count; ++i) {
+    if (i > 0) {
+      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(ctx->stream, ", "));
+    }
+    const loom_named_attr_t* entry = &names_attr.dict_entries[i];
+    if (entry->name_id >= ctx->module->strings.count) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "OPERAND_DICT key string id %u out of range (module has %" PRIhsz
+          " strings)",
+          entry->name_id, ctx->module->strings.count);
+    }
+    if (i > 0) {
+      int comparison = iree_string_view_compare(
+          loom_string_table_get(&ctx->module->strings,
+                                names_attr.dict_entries[i - 1].name_id),
+          loom_string_table_get(&ctx->module->strings, entry->name_id));
+      if (comparison >= 0) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "OPERAND_DICT names attr keys are not "
+                                "canonical sorted unique keys");
+      }
+    }
+    if (entry->value.kind != LOOM_ATTR_I64) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "OPERAND_DICT key attr expected I64 ordinal but found %d",
+          (int)entry->value.kind);
+    }
+    int64_t ordinal = entry->value.i64;
+    if (ordinal < 0 || ordinal >= operand_count) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "OPERAND_DICT key ordinal %" PRId64
+                              " out of range for %u operands",
+                              ordinal, operand_count);
+    }
+    uint64_t* word = &ordinal_bits[ordinal / 64];
+    uint64_t bit = UINT64_C(1) << (ordinal % 64);
+    if (*word & bit) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "OPERAND_DICT key ordinal %" PRId64 " is duplicated", ordinal);
+    }
+    *word |= bit;
+
+    IREE_RETURN_IF_ERROR(loom_output_stream_write(
+        ctx->stream,
+        loom_string_table_get(&ctx->module->strings, entry->name_id)));
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(ctx->stream, " = "));
+    uint16_t operand_index = (uint16_t)(start + (uint16_t)ordinal);
+    iree_host_size_t value_start = ctx->stream->offset;
+    IREE_RETURN_IF_ERROR(
+        loom_print_value_ref(ctx, loom_op_const_operands(op)[operand_index]));
+    loom_print_report_field(
+        ctx, loom_print_field_ref(LOOM_PRINT_FIELD_OPERAND, operand_index),
+        value_start, ctx->stream->offset);
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(ctx->stream, " : "));
+    IREE_RETURN_IF_ERROR(
+        loom_print_value_type(ctx, loom_op_const_operands(op)[operand_index]));
+  }
+  IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '}'));
+  loom_print_did_write(ctx);
+  loom_print_report_field(
+      ctx, loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, element->data),
+      dict_start, ctx->stream->offset);
+  return iree_ok_status();
+}
+
 iree_status_t loom_print_operand_dict(loom_print_context_t* ctx,
                                       const loom_op_t* op,
                                       const loom_op_vtable_t* vtable,
@@ -177,9 +256,6 @@ iree_status_t loom_print_operand_dict(loom_print_context_t* ctx,
   loom_value_slice_t operand_span =
       loom_op_operand_field_span(vtable, op, element->field_index);
   const loom_value_id_t* operand_base = loom_op_const_operands(op);
-  uint16_t start = operand_span.count > 0
-                       ? (uint16_t)(operand_span.values - operand_base)
-                       : 0;
   if (operand_span.count > 0 && (operand_span.values < operand_base ||
                                  operand_span.values + operand_span.count >
                                      operand_base + op->operand_count)) {
@@ -233,75 +309,27 @@ iree_status_t loom_print_operand_dict(loom_print_context_t* ctx,
                             names_attr.count, operand_count);
   }
 
-  IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
-  iree_host_size_t dict_start = ctx->stream->offset;
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '{'));
-  for (uint16_t i = 0; i < names_attr.count; ++i) {
-    if (i > 0) {
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(ctx->stream, ", "));
-    }
-    const loom_named_attr_t* entry = &names_attr.dict_entries[i];
-    if (entry->name_id >= ctx->module->strings.count) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "OPERAND_DICT key string id %u out of range (module has %" PRIhsz
-          " strings)",
-          entry->name_id, ctx->module->strings.count);
-    }
-    if (i > 0) {
-      int comparison = iree_string_view_compare(
-          loom_string_table_get(&ctx->module->strings,
-                                names_attr.dict_entries[i - 1].name_id),
-          loom_string_table_get(&ctx->module->strings, entry->name_id));
-      if (comparison >= 0) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "OPERAND_DICT names attr keys are not "
-                                "canonical sorted unique keys");
-      }
-    }
-    if (entry->value.kind != LOOM_ATTR_I64) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "OPERAND_DICT key attr expected I64 ordinal but found %d",
-          (int)entry->value.kind);
-    }
-    int64_t ordinal = entry->value.i64;
-    if (ordinal < 0 || ordinal >= operand_count) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "OPERAND_DICT key ordinal %" PRId64
-                              " out of range for %u operands",
-                              ordinal, operand_count);
-    }
-    for (uint16_t j = 0; j < i; ++j) {
-      if (names_attr.dict_entries[j].value.kind == LOOM_ATTR_I64 &&
-          names_attr.dict_entries[j].value.i64 == ordinal) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "OPERAND_DICT key ordinal %" PRId64 " is duplicated", ordinal);
-      }
-    }
-
-    IREE_RETURN_IF_ERROR(loom_output_stream_write(
-        ctx->stream,
-        loom_string_table_get(&ctx->module->strings, entry->name_id)));
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(ctx->stream, " = "));
-    uint16_t operand_index = (uint16_t)(start + (uint16_t)ordinal);
-    iree_host_size_t value_start = ctx->stream->offset;
-    IREE_RETURN_IF_ERROR(
-        loom_print_value_ref(ctx, loom_op_const_operands(op)[operand_index]));
-    loom_print_report_field(
-        ctx, loom_print_field_ref(LOOM_PRINT_FIELD_OPERAND, operand_index),
-        value_start, ctx->stream->offset);
-    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(ctx->stream, " : "));
-    IREE_RETURN_IF_ERROR(
-        loom_print_value_type(ctx, loom_op_const_operands(op)[operand_index]));
+  // Ordinals form a permutation, independently of canonical key order. Small
+  // dictionaries need one stack word; larger ones own scratch only until this
+  // dictionary finishes, including validation and output failures.
+  uint64_t inline_bits = 0;
+  if (operand_count <= 64) {
+    return loom_print_operand_dict_entries(ctx, op, element, operand_span,
+                                           names_attr, &inline_bits);
   }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_char(ctx->stream, '}'));
-  loom_print_did_write(ctx);
-  loom_print_report_field(
-      ctx, loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, element->data),
-      dict_start, ctx->stream->offset);
-  return iree_ok_status();
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(ctx->module->arena.block_pool, &arena);
+  iree_host_size_t word_count = ((iree_host_size_t)operand_count + 63) / 64;
+  uint64_t* ordinal_bits = NULL;
+  iree_status_t status = iree_arena_allocate_array(
+      &arena, word_count, sizeof(*ordinal_bits), (void**)&ordinal_bits);
+  if (iree_status_is_ok(status)) {
+    memset(ordinal_bits, 0, word_count * sizeof(*ordinal_bits));
+    status = loom_print_operand_dict_entries(ctx, op, element, operand_span,
+                                             names_attr, ordinal_bits);
+  }
+  iree_arena_deinitialize(&arena);
+  return status;
 }
 
 static iree_status_t loom_print_attr_table_row_values(loom_print_context_t* ctx,

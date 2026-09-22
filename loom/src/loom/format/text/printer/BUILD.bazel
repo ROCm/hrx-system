@@ -88,6 +88,18 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "format_tables_test",
+    srcs = ["format_tables_test.cc"],
+    deps = [
+        ":printer_impl",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/test",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "name_plan_test",
     srcs = ["name_plan_test.cc"],
     deps = [

@@ -86,6 +86,19 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
+    format_tables_test
+  SRCS
+    "format_tables_test.cc"
+  DEPS
+    ::printer_impl
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::ops::test
+)
+
+loom_cc_test(
+  NAME
     name_plan_test
   SRCS
     "name_plan_test.cc"
