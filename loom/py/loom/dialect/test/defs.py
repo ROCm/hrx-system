@@ -3048,6 +3048,15 @@ test_memory_fence = Op(
     examples=["%result = test.memory_fence %input : i32"],
 )
 
+test_result_pair = Op(
+    "test.result_pair",
+    group=test_ops,
+    doc="Independently typed results whose type spelling reverses result order.",
+    results=[Result("first", ANY), Result("second", ANY)],
+    format=[COLON, ResultType("second"), ARROW, ResultType("first")],
+    examples=["%first, %second = test.result_pair : bf16 -> i32"],
+)
+
 # ============================================================================
 # Registry: all test ops in declaration order
 # ============================================================================
@@ -3171,4 +3180,5 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_partitioned_call,
     test_module_metadata,
     test_memory_fence,
+    test_result_pair,
 )

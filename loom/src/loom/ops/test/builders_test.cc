@@ -175,6 +175,24 @@ TEST_F(BuilderStorageTest,
   }
 }
 
+TEST_F(BuilderStorageTest, SeparateResultTypesFollowDeclaredFields) {
+  const loom_type_t first_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  const loom_type_t second_type = loom_type_scalar(LOOM_SCALAR_TYPE_BF16);
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_test_result_pair_build(&builder_, second_type, first_type,
+                                             LOOM_LOCATION_UNKNOWN, &op));
+
+  const loom_value_id_t first = loom_test_result_pair_first(op);
+  const loom_value_id_t second = loom_test_result_pair_second(op);
+  ASSERT_NE(first, LOOM_VALUE_ID_INVALID);
+  ASSERT_NE(second, LOOM_VALUE_ID_INVALID);
+  EXPECT_NE(first, second);
+  EXPECT_TRUE(
+      loom_type_equal(loom_module_value_type(module_, first), first_type));
+  EXPECT_TRUE(
+      loom_type_equal(loom_module_value_type(module_, second), second_type));
+}
+
 TEST_F(BuilderStorageTest, IntegerArraysOutliveCallerStorage) {
   for (iree_host_size_t count : {0u, 2u}) {
     int64_t keys[] = {-7, 42};

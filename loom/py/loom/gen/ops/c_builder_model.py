@@ -542,8 +542,9 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
                     else:
                         params.append(
                             {
-                                "name": "result_type",
+                                "name": f"{name}_type" if len(op.results) > 1 else "result_type",
                                 "kind": "result_type",
+                                "result_index": field_desc.index,
                             }
                         )
 
@@ -829,7 +830,7 @@ def build_c_param_list(op: Op, params: list[dict[str, object]], layout: FieldLay
                 c_params.append(f"{consume}const loom_value_id_t* {name}")
                 c_params.append(f"iree_host_size_t {name}_count")
             case "result_type":
-                c_params.append("loom_type_t result_type")
+                c_params.append(f"loom_type_t {name}")
             case "result_types":
                 if layout.variadic_result:
                     c_params.append("const loom_type_t* result_types")

@@ -1,5 +1,16 @@
 // RUN: roundtrip
 
+// Independently typed results retain their declared slots even when the
+// assembly spells their types in the opposite order.
+test.func @separate_result_types() {
+  %first, %second = test.result_pair : bf16 -> i32
+  test.use %first : i32
+  test.use %second : bf16
+  test.yield
+}
+
+// ====
+
 // Multi-region function-like op with region-local projections of one logical
 // function signature. The body receives the signature args through FuncArgs;
 // the config region spells its own block args so the two regions have distinct

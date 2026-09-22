@@ -112,6 +112,16 @@ def test_dynamic_builder_synthesizes_exact_result_type() -> None:
     assert result.type == I32
 
 
+def test_separate_result_types_follow_declared_fields() -> None:
+    block, builder = _builder()
+    results = builder.test.result_pair(results=[I32, F32], names=["first", "second"])
+
+    assert isinstance(results, list)
+    assert [result.type for result in results] == [I32, F32]
+    assert [result.name for result in results] == ["first", "second"]
+    assert block.ops[0].results == [result.id for result in results]
+
+
 def test_dynamic_builder_inserts_module_scope_operation_without_block() -> None:
     module, builder = module_builder(ops=ALL_TEST_OPS)
 

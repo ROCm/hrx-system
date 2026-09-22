@@ -1016,7 +1016,7 @@ def _generate_builder_implementation(
     for param in params:
         if param["kind"] == "result_type":
             lines.append("  IREE_RETURN_IF_ERROR(loom_builder_define_result(")
-            lines.append("      builder, result_type, &loom_op_results(*out_op)[0]));")
+            lines.append(f"      builder, {_c_parameter_name(param['name'])}, &loom_op_results(*out_op)[{param['result_index']}]));")
         elif param["kind"] == "result_types" and result_count_source is None:
             if has_variadic_result:
                 lines.append("  IREE_RETURN_IF_ERROR(loom_builder_define_results(")

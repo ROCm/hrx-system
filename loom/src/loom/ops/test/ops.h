@@ -311,7 +311,8 @@ enum {
   LOOM_OP_TEST_PARTITIONED_CALL = LOOM_OP_KIND(LOOM_DIALECT_TEST, 115),
   LOOM_OP_TEST_MODULE_METADATA = LOOM_OP_KIND(LOOM_DIALECT_TEST, 116),
   LOOM_OP_TEST_MEMORY_FENCE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 117),
-  LOOM_OP_TEST_COUNT_ = 118,
+  LOOM_OP_TEST_RESULT_PAIR = LOOM_OP_KIND(LOOM_DIALECT_TEST, 118),
+  LOOM_OP_TEST_COUNT_ = 119,
 };
 
 // Synthetic flags for TemplateParamFlags parser/printer coverage.
@@ -2366,6 +2367,18 @@ LOOM_DEFINE_RESULT(loom_test_memory_fence_result, 0)
 iree_status_t loom_test_memory_fence_build(
     loom_builder_t* builder, loom_value_id_t input,
     loom_type_t result_type, loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_TEST_RESULT_PAIR: Independently typed results whose type spelling reverses result order.
+// %first, %second = test.result_pair : bf16 -> i32
+LOOM_DEFINE_ISA(loom_test_result_pair_isa, LOOM_OP_TEST_RESULT_PAIR)
+LOOM_DEFINE_RESULT(loom_test_result_pair_first, 0)
+LOOM_DEFINE_RESULT(loom_test_result_pair_second, 1)
+iree_status_t loom_test_result_pair_build(
+    loom_builder_t* builder,
+    loom_type_t second_type,
+    loom_type_t first_type,
+    loom_location_id_t location,
     loom_op_t** out_op);
 
 // Returns the vtable array for the test dialect.

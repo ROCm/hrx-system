@@ -8,7 +8,7 @@
 
 import pytest
 
-from loom.assembly import Attr, AttrDict, OptionalGroup, PredicateList, Ref
+from loom.assembly import ARROW, Attr, AttrDict, OptionalGroup, PredicateList, Ref, ResultType
 from loom.dsl import ANY, AttrDef, Dialect, Op, Operand, Result
 from loom.gen.ops.c_builder_model import build_flag_params, build_flags_storage_type, detect_builder_pattern, extract_c_params
 from loom.gen.ops.c_ops_header import generate_ops_h
@@ -75,3 +75,19 @@ def test_compact_builders_require_matching_parameter_names() -> None:
         )
         assert (detect_builder_pattern(op) is not None) == (names == ("lhs", "rhs"))
         assert [param["name"] for param in extract_c_params(op, {}) if param["kind"] == "operand"] == list(names)
+
+
+@pytest.mark.parametrize("order", [("access", "view"), ("view", "access")])
+def test_fixed_result_types_follow_fields_not_format_position(order: tuple[str, str]) -> None:
+    op = Op(
+        "test.selected_record",
+        group=Dialect("test"),
+        results=[Result("access", ANY), Result("view", ANY)],
+        format=[ResultType(order[0]), ARROW, ResultType(order[1])],
+    )
+    parameters = [param for param in extract_c_params(op, {}) if param["kind"] == "result_type"]
+    assert [(param["name"], param["result_index"]) for param in parameters] == [(f"{name}_type", ("access", "view").index(name)) for name in order]
+    header = generate_ops_h("test", 0, [op])
+    assert "loom_type_t access_type," in header
+    assert "loom_type_t view_type," in header
+    assert "loom_type_t result_type," not in header

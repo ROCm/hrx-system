@@ -577,25 +577,20 @@ def _extract_params(op: Op) -> list[BuilderParam]:  # noqa: C901
                     )
                     covered_attrs.add(keys_field)
 
-                case ResultType(field=name):
-                    params.append(
-                        BuilderParam(
-                            name="results",
-                            kind=BuilderParamKind.RESULT_TYPES,
-                            type_hint="list[Type | TiedResultSpec]",
-                            doc=f"Result type: {name}",
+                case ResultType() | ResultTypeList():
+                    # Python builders accept one list in declaration order,
+                    # independent of how the format spells individual types.
+                    if not any(
+                        param.kind == BuilderParamKind.RESULT_TYPES for param in params
+                    ):
+                        params.append(
+                            BuilderParam(
+                                name="results",
+                                kind=BuilderParamKind.RESULT_TYPES,
+                                type_hint="list[Type | TiedResultSpec]",
+                                doc="Result types in declaration order.",
+                            )
                         )
-                    )
-
-                case ResultTypeList(field=name):
-                    params.append(
-                        BuilderParam(
-                            name="results",
-                            kind=BuilderParamKind.RESULT_TYPES,
-                            type_hint="list[Type | TiedResultSpec]",
-                            doc=f"Result types: {name}",
-                        )
-                    )
 
                 case RegionFmt(field=name):
                     region_def = region_defs.get(name)
