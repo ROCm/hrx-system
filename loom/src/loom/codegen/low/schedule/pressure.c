@@ -1575,7 +1575,6 @@ void loom_low_schedule_pressure_score_candidate(
       loom_low_schedule_score_candidate_pressure_demand(
           state, pressure_state, ready_policy, indegrees, node_index,
           storage_relation_count, killed_live_units, produced_live_units);
-  loom_low_schedule_reset_candidate_operand_uses(state, pressure_state);
   const uint16_t dependency_latency_cycles =
       state->node_dependency_latency_cycles != NULL
           ? state->node_dependency_latency_cycles[node_index]
@@ -1685,6 +1684,7 @@ void loom_low_schedule_pressure_score_candidate(
   }
   loom_low_schedule_select_candidate_schedule_class(state, node, node_index,
                                                     out_score);
+  loom_low_schedule_reset_candidate_operand_uses(state, pressure_state);
 }
 
 void loom_low_schedule_pressure_note_node_scheduled(

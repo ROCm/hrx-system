@@ -646,7 +646,9 @@ static uint64_t loom_low_schedule_node_register_packing_working_set(
 }
 
 static bool loom_low_schedule_candidate_advances_register_packing_completion(
-    const loom_low_schedule_build_state_t* state, uint32_t candidate_node_index,
+    const loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_pressure_state_t* pressure_state,
+    uint32_t candidate_node_index,
     const loom_low_register_packing_resource_t* resource) {
   if (candidate_node_index == LOOM_LOW_SCHEDULE_NODE_NONE) {
     return false;
@@ -693,7 +695,13 @@ static bool loom_low_schedule_candidate_advances_register_packing_completion(
        ++operand_index) {
     const loom_low_schedule_value_record_t* value =
         &state->values[operand_ordinals[operand_index]];
+    // The working-set comparison assumes the candidate replaces its producer.
+    // A non-final use retains that storage and can expand an arbitrarily large
+    // fanout before the operands needed to retire any result are ready.
     if (!iree_any_bit_set(value->flags, LOOM_LOW_SCHEDULE_VALUE_FLAG_LIVE) ||
+        value->remaining_use_count !=
+            pressure_state->candidate_operand_use_counts
+                [operand_ordinals[operand_index]] ||
         value->producer_node == LOOM_LOW_SCHEDULE_NODE_NONE ||
         state->nodes[value->producer_node].block_index !=
             candidate->block_index) {
@@ -831,7 +839,7 @@ static void loom_low_schedule_score_candidate_register_packing_resources(
         &descriptor_set->register_packing_resources[resource_id];
     const bool advances_packing_completion =
         loom_low_schedule_candidate_advances_register_packing_completion(
-            state, candidate_node_index, resource);
+            state, pressure_state, candidate_node_index, resource);
     if (advances_packing_completion) {
       score->flags |=
           LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_CONSTRAINED_COMPLETION;

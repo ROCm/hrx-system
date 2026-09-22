@@ -270,3 +270,72 @@ issue cycles: 82
 code bytes: 462
 coissued bundles: 26
 coissued components: 71
+
+// ====
+
+// A broadcast retains its table until the final use. Opening every leaf before
+// preparing the predicates exceeds vector capacity even though the selection
+// tree fits when its live branches can retire incrementally.
+// RUN: emit aie2p-leaf @selection_tree report=emission
+
+low.func.def target<amd.xdna.aie2p.core> @selection_tree(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>) asm {
+  %table = vlda.512.i8x64 %input, 0
+  %codes = vlda.512.i8x64 %input, 64
+  %zero = mov.short 0
+  %zeros = vbcst.8 %zero
+  %bit0 = mov.short 1
+  %mask0 = vbcst.8 %bit0
+  %masked0 = vband %codes, %mask0
+  %predicate0 = vlt.u8x64 %zeros, %masked0
+  %bit1 = mov.short 2
+  %mask1 = vbcst.8 %bit1
+  %masked1 = vband %codes, %mask1
+  %predicate1 = vlt.u8x64 %zeros, %masked1
+  %bit2 = mov.short 4
+  %mask2 = vbcst.8 %bit2
+  %masked2 = vband %codes, %mask2
+  %predicate2 = vlt.u8x64 %zeros, %masked2
+  %bit3 = mov.short 8
+  %mask3 = vbcst.8 %bit3
+  %masked3 = vband %codes, %mask3
+  %predicate3 = vlt.u8x64 %zeros, %masked3
+  %entry0 = vextbcst.8 %table, 0
+  %entry1 = vextbcst.8 %table, 1
+  %select0_2 = vsel.8 %entry0, %entry1, %predicate0
+  %entry2 = vextbcst.8 %table, 2
+  %entry3 = vextbcst.8 %table, 3
+  %select2_2 = vsel.8 %entry2, %entry3, %predicate0
+  %select0_4 = vsel.8 %select0_2, %select2_2, %predicate1
+  %entry4 = vextbcst.8 %table, 4
+  %entry5 = vextbcst.8 %table, 5
+  %select4_2 = vsel.8 %entry4, %entry5, %predicate0
+  %entry6 = vextbcst.8 %table, 6
+  %entry7 = vextbcst.8 %table, 7
+  %select6_2 = vsel.8 %entry6, %entry7, %predicate0
+  %select4_4 = vsel.8 %select4_2, %select6_2, %predicate1
+  %select0_8 = vsel.8 %select0_4, %select4_4, %predicate2
+  %entry8 = vextbcst.8 %table, 8
+  %entry9 = vextbcst.8 %table, 9
+  %select8_2 = vsel.8 %entry8, %entry9, %predicate0
+  %entry10 = vextbcst.8 %table, 10
+  %entry11 = vextbcst.8 %table, 11
+  %select10_2 = vsel.8 %entry10, %entry11, %predicate0
+  %select8_4 = vsel.8 %select8_2, %select10_2, %predicate1
+  %entry12 = vextbcst.8 %table, 12
+  %entry13 = vextbcst.8 %table, 13
+  %select12_2 = vsel.8 %entry12, %entry13, %predicate0
+  %entry14 = vextbcst.8 %table, 14
+  %entry15 = vextbcst.8 %table, 15
+  %select14_2 = vsel.8 %entry14, %entry15, %predicate0
+  %select12_4 = vsel.8 %select12_2, %select14_2, %predicate1
+  %select8_8 = vsel.8 %select8_4, %select12_4, %predicate2
+  %select0_16 = vsel.8 %select0_8, %select8_8, %predicate3
+  vst.512.i8x64 %select0_16, %output, 0
+  return
+}
+
+// ----
+issue cycles: 58
+code bytes: 224
+coissued bundles: 2
+coissued components: 5
