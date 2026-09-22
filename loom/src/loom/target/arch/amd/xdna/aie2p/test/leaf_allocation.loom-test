@@ -549,7 +549,101 @@ low.func.def target<amd.xdna.aie2p.core> @partial_packet_setup(%source: reg<aie2
 }
 
 // ----
-issue cycles: 240
-code bytes: 876
+issue cycles: 239
+code bytes: 874
 coissued bundles: 40
 coissued components: 84
+
+// ====
+
+// The resident loop retains its pointer sources across the backedge. Each
+// indexed store needs both the destination copy and address-index setup.
+// Materialize those operands before accumulating more adjusted packets:
+// the captured originals remain live for the second set of stores.
+// RUN: emit aie2p-leaf @shared_snapshot_operand_setup report=emission
+
+low.func.def retain target<amd.xdna.aie2p.core> @shared_snapshot_operand_setup() asm {
+  %acquire_delta = mov.short -1
+  %release_delta = mov.short 1
+  %source_base = mov.local-address 458752
+  %destination_base = mov.local-address 491520
+  low.br ^acquire(%source_base: reg<aie2p.ep>, %destination_base: reg<aie2p.ep>)
+^acquire(%source_address: reg<aie2p.ep>, %destination_address: reg<aie2p.ep>):
+  acq %acquire_delta, 49
+  acq %acquire_delta, 50
+  low.br ^body
+^body:
+  %source_view = copy %source_address : reg<aie2p.ep> -> reg<aie2p.ep>
+  %destination_view = copy %destination_address : reg<aie2p.ep> -> reg<aie2p.ep>
+  %captured0 = vlda.512.i32x16.volatile<volatile> %source_view, 0
+  %captured1 = vlda.512.i32x16.volatile<volatile> %source_view, 64
+  %captured2 = vlda.512.i32x16.volatile<volatile> %source_view, 128
+  %captured3 = vlda.512.i32x16.volatile<volatile> %source_view, 192
+  %captured4 = vlda.512.i32x16.volatile<volatile> %source_view, 256
+  %captured5 = vlda.512.i32x16.volatile<volatile> %source_view, 320
+  %captured6 = vlda.512.i32x16.volatile<volatile> %source_view, 384
+  %captured7 = vlda.512.i32x16.volatile<volatile> %source_view, 448
+  %replacement_bits = mov.i32 -1234567
+  %replacement = vbcst.32 %replacement_bits
+  vst.512.i32x16 %replacement, %source_view, 0
+  %increment_bits = mov.short 7
+  %increment = vbcst.32 %increment_bits
+  %adjusted0 = vadd.32 %captured0, %increment
+  %offset0 = mov.static-byte-offset 512
+  %address_index0 = mov.address-index %offset0
+  vst.512.i32x16.index %adjusted0, %destination_view, %address_index0
+  %adjusted1 = vadd.32 %captured1, %increment
+  %offset1 = mov.static-byte-offset 576
+  %address_index1 = mov.address-index %offset1
+  vst.512.i32x16.index %adjusted1, %destination_view, %address_index1
+  %adjusted2 = vadd.32 %captured2, %increment
+  %offset2 = mov.static-byte-offset 640
+  %address_index2 = mov.address-index %offset2
+  vst.512.i32x16.index %adjusted2, %destination_view, %address_index2
+  %adjusted3 = vadd.32 %captured3, %increment
+  %offset3 = mov.static-byte-offset 704
+  %address_index3 = mov.address-index %offset3
+  vst.512.i32x16.index %adjusted3, %destination_view, %address_index3
+  %adjusted4 = vadd.32 %captured4, %increment
+  %offset4 = mov.static-byte-offset 768
+  %address_index4 = mov.address-index %offset4
+  vst.512.i32x16.index %adjusted4, %destination_view, %address_index4
+  %adjusted5 = vadd.32 %captured5, %increment
+  %offset5 = mov.static-byte-offset 832
+  %address_index5 = mov.address-index %offset5
+  vst.512.i32x16.index %adjusted5, %destination_view, %address_index5
+  %adjusted6 = vadd.32 %captured6, %increment
+  %offset6 = mov.static-byte-offset 896
+  %address_index6 = mov.address-index %offset6
+  vst.512.i32x16.index %adjusted6, %destination_view, %address_index6
+  %adjusted7 = vadd.32 %captured7, %increment
+  %offset7 = mov.static-byte-offset 960
+  %address_index7 = mov.address-index %offset7
+  vst.512.i32x16.index %adjusted7, %destination_view, %address_index7
+  vst.512.i32x16 %captured0, %destination_view, 0
+  vst.512.i32x16 %captured1, %destination_view, 64
+  vst.512.i32x16 %captured2, %destination_view, 128
+  vst.512.i32x16 %captured3, %destination_view, 192
+  vst.512.i32x16 %captured4, %destination_view, 256
+  vst.512.i32x16 %captured5, %destination_view, 320
+  vst.512.i32x16 %captured6, %destination_view, 384
+  vst.512.i32x16 %captured7, %destination_view, 448
+  low.br ^release
+^release:
+  rel %release_delta, 51
+  rel %release_delta, 48
+  %source_bits = mov.address-to-scalar %source_address
+  %ring_mask = mov.i32 16384
+  %next_source_bits = xor %source_bits, %ring_mask
+  %next_source_address = mov.scalar-to-address %next_source_bits
+  %destination_bits = mov.address-to-scalar %destination_address
+  %next_destination_bits = xor %destination_bits, %ring_mask
+  %next_destination_address = mov.scalar-to-address %next_destination_bits
+  low.br ^acquire(%next_source_address: reg<aie2p.ep>, %next_destination_address: reg<aie2p.ep>)
+}
+
+// ----
+issue cycles: 91
+code bytes: 362
+coissued bundles: 10
+coissued components: 20

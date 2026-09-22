@@ -1728,3 +1728,23 @@ low.func.def target<test.low.core>(@test_target) @rematerializable_computation(%
 
 // ----
 CHECK: *"scheduled_node_indices":[0,1,2,3]*
+
+// ====
+
+// Both operand copies are needed before the fixed-register consumer can run.
+// Although neither copy alone unlocks it, deferring both would create a
+// third live value in a register class with only two available registers.
+// RUN: with-checks emit low-schedule-json @joint_operand_setup strategy=resource-stall
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @joint_operand_setup(%packed0: reg<test.packed.narrow>, %packed1: reg<test.packed.narrow>, %lhs: reg<test.phys>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.phys>, reg<test.packed.narrow>, reg<test.packed.narrow>) asm {
+  %fixed = copy %packed0 : reg<test.packed.narrow> -> reg<test.fixed.r0>
+  %prepared = copy %lhs : reg<test.phys> -> reg<test.i32>
+  %result = test.fixed.select.i32 %prepared, %rhs, %fixed
+  %next = test.const.packed.narrow 1
+  return %result, %lhs, %packed1, %next
+}
+
+// ----
+CHECK: *"scheduled_node_indices":[0,1,2,3,4]*
