@@ -85,9 +85,9 @@ low.func.def target<amd.xdna.aie2p.core> @insert_lane(%vector: reg<aie2p.vec256 
 
 // ====
 
-// Nine loop-invariant offsets exceed the eight address-index registers. The
-// native emitter recreates pure index moves near their loads instead of
-// retaining every index through the loop or requiring spill storage.
+// Seventeen loop-invariant offsets exceed the eight address-index registers.
+// Repair must recreate more than eight independent index values near their
+// loads while preserving the loop and avoiding spill storage.
 // RUN: emit aie2p-leaf @indexed_loop report=emission
 
 low.func.def target<amd.xdna.aie2p.core> @indexed_loop(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>, %count: reg<aie2p.er>) asm {
@@ -111,6 +111,22 @@ low.func.def target<amd.xdna.aie2p.core> @indexed_loop(%input: reg<aie2p.ep>, %o
   %index7 = mov.address-index %offset7
   %offset8 = mov.static-byte-offset 576
   %index8 = mov.address-index %offset8
+  %offset9 = mov.static-byte-offset 640
+  %index9 = mov.address-index %offset9
+  %offset10 = mov.static-byte-offset 704
+  %index10 = mov.address-index %offset10
+  %offset11 = mov.static-byte-offset 768
+  %index11 = mov.address-index %offset11
+  %offset12 = mov.static-byte-offset 832
+  %index12 = mov.address-index %offset12
+  %offset13 = mov.static-byte-offset 896
+  %index13 = mov.address-index %offset13
+  %offset14 = mov.static-byte-offset 960
+  %index14 = mov.address-index %offset14
+  %offset15 = mov.static-byte-offset 1024
+  %index15 = mov.address-index %offset15
+  %offset16 = mov.static-byte-offset 1088
+  %index16 = mov.address-index %offset16
   low.br ^loop(%count: reg<aie2p.er>)
 ^loop(%remaining: reg<aie2p.er>):
   %value0 = lda.i32.index %input, %index0
@@ -131,7 +147,23 @@ low.func.def target<amd.xdna.aie2p.core> @indexed_loop(%input: reg<aie2p.ep>, %o
   %sum7 = add.rr %sum6, %value7
   %value8 = lda.i32.index %input, %index8
   %sum8 = add.rr %sum7, %value8
-  st %sum8, %output, 0
+  %value9 = lda.i32.index %input, %index9
+  %sum9 = add.rr %sum8, %value9
+  %value10 = lda.i32.index %input, %index10
+  %sum10 = add.rr %sum9, %value10
+  %value11 = lda.i32.index %input, %index11
+  %sum11 = add.rr %sum10, %value11
+  %value12 = lda.i32.index %input, %index12
+  %sum12 = add.rr %sum11, %value12
+  %value13 = lda.i32.index %input, %index13
+  %sum13 = add.rr %sum12, %value13
+  %value14 = lda.i32.index %input, %index14
+  %sum14 = add.rr %sum13, %value14
+  %value15 = lda.i32.index %input, %index15
+  %sum15 = add.rr %sum14, %value15
+  %value16 = lda.i32.index %input, %index16
+  %sum16 = add.rr %sum15, %value16
+  st %sum16, %output, 0
   %next = sub %remaining, %one
   %more = nez %next
   low.cond_br %more, ^again, ^done : reg<aie2p.er>
@@ -142,10 +174,10 @@ low.func.def target<amd.xdna.aie2p.core> @indexed_loop(%input: reg<aie2p.ep>, %o
 }
 
 // ----
-issue cycles: 65
-code bytes: 254
-coissued bundles: 10
-coissued components: 20
+issue cycles: 137
+code bytes: 478
+coissued bundles: 18
+coissued components: 36
 
 // ====
 
