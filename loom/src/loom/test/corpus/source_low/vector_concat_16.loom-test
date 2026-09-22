@@ -1,0 +1,753 @@
+func.def @concat_i16_1_31(%left: vector<1xi16>, %right: vector<31xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<1xi16>, vector<31xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_2_30(%left: vector<2xi16>, %right: vector<30xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<2xi16>, vector<30xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_3_29(%left: vector<3xi16>, %right: vector<29xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<3xi16>, vector<29xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_4_28(%left: vector<4xi16>, %right: vector<28xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<4xi16>, vector<28xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_5_27(%left: vector<5xi16>, %right: vector<27xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<5xi16>, vector<27xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_6_26(%left: vector<6xi16>, %right: vector<26xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<6xi16>, vector<26xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_7_25(%left: vector<7xi16>, %right: vector<25xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<7xi16>, vector<25xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_8_24(%left: vector<8xi16>, %right: vector<24xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<8xi16>, vector<24xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_9_23(%left: vector<9xi16>, %right: vector<23xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<9xi16>, vector<23xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_10_22(%left: vector<10xi16>, %right: vector<22xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<10xi16>, vector<22xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_11_21(%left: vector<11xi16>, %right: vector<21xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<11xi16>, vector<21xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_12_20(%left: vector<12xi16>, %right: vector<20xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<12xi16>, vector<20xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_13_19(%left: vector<13xi16>, %right: vector<19xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<13xi16>, vector<19xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_14_18(%left: vector<14xi16>, %right: vector<18xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<14xi16>, vector<18xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_15_17(%left: vector<15xi16>, %right: vector<17xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<15xi16>, vector<17xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_16_16(%left: vector<16xi16>, %right: vector<16xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<16xi16>, vector<16xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_17_15(%left: vector<17xi16>, %right: vector<15xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<17xi16>, vector<15xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_18_14(%left: vector<18xi16>, %right: vector<14xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<18xi16>, vector<14xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_19_13(%left: vector<19xi16>, %right: vector<13xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<19xi16>, vector<13xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_20_12(%left: vector<20xi16>, %right: vector<12xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<20xi16>, vector<12xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_21_11(%left: vector<21xi16>, %right: vector<11xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<21xi16>, vector<11xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_22_10(%left: vector<22xi16>, %right: vector<10xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<22xi16>, vector<10xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_23_9(%left: vector<23xi16>, %right: vector<9xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<23xi16>, vector<9xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_24_8(%left: vector<24xi16>, %right: vector<8xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<24xi16>, vector<8xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_25_7(%left: vector<25xi16>, %right: vector<7xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<25xi16>, vector<7xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_26_6(%left: vector<26xi16>, %right: vector<6xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<26xi16>, vector<6xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_27_5(%left: vector<27xi16>, %right: vector<5xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<27xi16>, vector<5xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_28_4(%left: vector<28xi16>, %right: vector<4xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<28xi16>, vector<4xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_29_3(%left: vector<29xi16>, %right: vector<3xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<29xi16>, vector<3xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_30_2(%left: vector<30xi16>, %right: vector<2xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<30xi16>, vector<2xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_31_1(%left: vector<31xi16>, %right: vector<1xi16>) -> (vector<32xi16>) {
+  %result = vector.concat<0> %left, %right : vector<31xi16>, vector<1xi16> -> vector<32xi16>
+  func.return %result : vector<32xi16>
+}
+
+// ====
+
+func.def @concat_i16_1_1(%left: vector<1xi16>, %right: vector<1xi16>) -> (vector<2xi16>) {
+  %result = vector.concat<0> %left, %right : vector<1xi16>, vector<1xi16> -> vector<2xi16>
+  func.return %result : vector<2xi16>
+}
+
+// ====
+
+func.def @concat_i16_16_1(%left: vector<16xi16>, %right: vector<1xi16>) -> (vector<17xi16>) {
+  %result = vector.concat<0> %left, %right : vector<16xi16>, vector<1xi16> -> vector<17xi16>
+  func.return %result : vector<17xi16>
+}
+
+// ====
+
+func.def @concat_i16_32_1(%left: vector<32xi16>, %right: vector<1xi16>) -> (vector<33xi16>) {
+  %result = vector.concat<0> %left, %right : vector<32xi16>, vector<1xi16> -> vector<33xi16>
+  func.return %result : vector<33xi16>
+}
+
+// ====
+
+func.def @concat_i16_32_31(%left: vector<32xi16>, %right: vector<31xi16>) -> (vector<63xi16>) {
+  %result = vector.concat<0> %left, %right : vector<32xi16>, vector<31xi16> -> vector<63xi16>
+  func.return %result : vector<63xi16>
+}
+
+// ====
+
+func.def @concat_i16_32_32(%left: vector<32xi16>, %right: vector<32xi16>) -> (vector<64xi16>) {
+  %result = vector.concat<0> %left, %right : vector<32xi16>, vector<32xi16> -> vector<64xi16>
+  func.return %result : vector<64xi16>
+}
+
+// ====
+
+func.def @concat_f16_1_31(%left: vector<1xf16>, %right: vector<31xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<1xf16>, vector<31xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_2_30(%left: vector<2xf16>, %right: vector<30xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<2xf16>, vector<30xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_3_29(%left: vector<3xf16>, %right: vector<29xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<3xf16>, vector<29xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_4_28(%left: vector<4xf16>, %right: vector<28xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<4xf16>, vector<28xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_5_27(%left: vector<5xf16>, %right: vector<27xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<5xf16>, vector<27xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_6_26(%left: vector<6xf16>, %right: vector<26xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<6xf16>, vector<26xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_7_25(%left: vector<7xf16>, %right: vector<25xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<7xf16>, vector<25xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_8_24(%left: vector<8xf16>, %right: vector<24xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<8xf16>, vector<24xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_9_23(%left: vector<9xf16>, %right: vector<23xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<9xf16>, vector<23xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_10_22(%left: vector<10xf16>, %right: vector<22xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<10xf16>, vector<22xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_11_21(%left: vector<11xf16>, %right: vector<21xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<11xf16>, vector<21xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_12_20(%left: vector<12xf16>, %right: vector<20xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<12xf16>, vector<20xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_13_19(%left: vector<13xf16>, %right: vector<19xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<13xf16>, vector<19xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_14_18(%left: vector<14xf16>, %right: vector<18xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<14xf16>, vector<18xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_15_17(%left: vector<15xf16>, %right: vector<17xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<15xf16>, vector<17xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_16_16(%left: vector<16xf16>, %right: vector<16xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<16xf16>, vector<16xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_17_15(%left: vector<17xf16>, %right: vector<15xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<17xf16>, vector<15xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_18_14(%left: vector<18xf16>, %right: vector<14xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<18xf16>, vector<14xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_19_13(%left: vector<19xf16>, %right: vector<13xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<19xf16>, vector<13xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_20_12(%left: vector<20xf16>, %right: vector<12xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<20xf16>, vector<12xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_21_11(%left: vector<21xf16>, %right: vector<11xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<21xf16>, vector<11xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_22_10(%left: vector<22xf16>, %right: vector<10xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<22xf16>, vector<10xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_23_9(%left: vector<23xf16>, %right: vector<9xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<23xf16>, vector<9xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_24_8(%left: vector<24xf16>, %right: vector<8xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<24xf16>, vector<8xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_25_7(%left: vector<25xf16>, %right: vector<7xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<25xf16>, vector<7xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_26_6(%left: vector<26xf16>, %right: vector<6xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<26xf16>, vector<6xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_27_5(%left: vector<27xf16>, %right: vector<5xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<27xf16>, vector<5xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_28_4(%left: vector<28xf16>, %right: vector<4xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<28xf16>, vector<4xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_29_3(%left: vector<29xf16>, %right: vector<3xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<29xf16>, vector<3xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_30_2(%left: vector<30xf16>, %right: vector<2xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<30xf16>, vector<2xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_31_1(%left: vector<31xf16>, %right: vector<1xf16>) -> (vector<32xf16>) {
+  %result = vector.concat<0> %left, %right : vector<31xf16>, vector<1xf16> -> vector<32xf16>
+  func.return %result : vector<32xf16>
+}
+
+// ====
+
+func.def @concat_f16_1_1(%left: vector<1xf16>, %right: vector<1xf16>) -> (vector<2xf16>) {
+  %result = vector.concat<0> %left, %right : vector<1xf16>, vector<1xf16> -> vector<2xf16>
+  func.return %result : vector<2xf16>
+}
+
+// ====
+
+func.def @concat_f16_16_1(%left: vector<16xf16>, %right: vector<1xf16>) -> (vector<17xf16>) {
+  %result = vector.concat<0> %left, %right : vector<16xf16>, vector<1xf16> -> vector<17xf16>
+  func.return %result : vector<17xf16>
+}
+
+// ====
+
+func.def @concat_f16_32_1(%left: vector<32xf16>, %right: vector<1xf16>) -> (vector<33xf16>) {
+  %result = vector.concat<0> %left, %right : vector<32xf16>, vector<1xf16> -> vector<33xf16>
+  func.return %result : vector<33xf16>
+}
+
+// ====
+
+func.def @concat_f16_32_31(%left: vector<32xf16>, %right: vector<31xf16>) -> (vector<63xf16>) {
+  %result = vector.concat<0> %left, %right : vector<32xf16>, vector<31xf16> -> vector<63xf16>
+  func.return %result : vector<63xf16>
+}
+
+// ====
+
+func.def @concat_f16_32_32(%left: vector<32xf16>, %right: vector<32xf16>) -> (vector<64xf16>) {
+  %result = vector.concat<0> %left, %right : vector<32xf16>, vector<32xf16> -> vector<64xf16>
+  func.return %result : vector<64xf16>
+}
+
+// ====
+
+func.def @concat_bf16_1_31(%left: vector<1xbf16>, %right: vector<31xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<1xbf16>, vector<31xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_2_30(%left: vector<2xbf16>, %right: vector<30xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<2xbf16>, vector<30xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_3_29(%left: vector<3xbf16>, %right: vector<29xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<3xbf16>, vector<29xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_4_28(%left: vector<4xbf16>, %right: vector<28xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<4xbf16>, vector<28xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_5_27(%left: vector<5xbf16>, %right: vector<27xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<5xbf16>, vector<27xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_6_26(%left: vector<6xbf16>, %right: vector<26xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<6xbf16>, vector<26xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_7_25(%left: vector<7xbf16>, %right: vector<25xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<7xbf16>, vector<25xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_8_24(%left: vector<8xbf16>, %right: vector<24xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<8xbf16>, vector<24xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_9_23(%left: vector<9xbf16>, %right: vector<23xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<9xbf16>, vector<23xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_10_22(%left: vector<10xbf16>, %right: vector<22xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<10xbf16>, vector<22xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_11_21(%left: vector<11xbf16>, %right: vector<21xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<11xbf16>, vector<21xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_12_20(%left: vector<12xbf16>, %right: vector<20xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<12xbf16>, vector<20xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_13_19(%left: vector<13xbf16>, %right: vector<19xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<13xbf16>, vector<19xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_14_18(%left: vector<14xbf16>, %right: vector<18xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<14xbf16>, vector<18xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_15_17(%left: vector<15xbf16>, %right: vector<17xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<15xbf16>, vector<17xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_16_16(%left: vector<16xbf16>, %right: vector<16xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_17_15(%left: vector<17xbf16>, %right: vector<15xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<17xbf16>, vector<15xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_18_14(%left: vector<18xbf16>, %right: vector<14xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<18xbf16>, vector<14xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_19_13(%left: vector<19xbf16>, %right: vector<13xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<19xbf16>, vector<13xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_20_12(%left: vector<20xbf16>, %right: vector<12xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<20xbf16>, vector<12xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_21_11(%left: vector<21xbf16>, %right: vector<11xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<21xbf16>, vector<11xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_22_10(%left: vector<22xbf16>, %right: vector<10xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<22xbf16>, vector<10xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_23_9(%left: vector<23xbf16>, %right: vector<9xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<23xbf16>, vector<9xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_24_8(%left: vector<24xbf16>, %right: vector<8xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<24xbf16>, vector<8xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_25_7(%left: vector<25xbf16>, %right: vector<7xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<25xbf16>, vector<7xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_26_6(%left: vector<26xbf16>, %right: vector<6xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<26xbf16>, vector<6xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_27_5(%left: vector<27xbf16>, %right: vector<5xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<27xbf16>, vector<5xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_28_4(%left: vector<28xbf16>, %right: vector<4xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<28xbf16>, vector<4xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_29_3(%left: vector<29xbf16>, %right: vector<3xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<29xbf16>, vector<3xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_30_2(%left: vector<30xbf16>, %right: vector<2xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<30xbf16>, vector<2xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_31_1(%left: vector<31xbf16>, %right: vector<1xbf16>) -> (vector<32xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<31xbf16>, vector<1xbf16> -> vector<32xbf16>
+  func.return %result : vector<32xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_1_1(%left: vector<1xbf16>, %right: vector<1xbf16>) -> (vector<2xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<1xbf16>, vector<1xbf16> -> vector<2xbf16>
+  func.return %result : vector<2xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_16_1(%left: vector<16xbf16>, %right: vector<1xbf16>) -> (vector<17xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<16xbf16>, vector<1xbf16> -> vector<17xbf16>
+  func.return %result : vector<17xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_32_1(%left: vector<32xbf16>, %right: vector<1xbf16>) -> (vector<33xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<32xbf16>, vector<1xbf16> -> vector<33xbf16>
+  func.return %result : vector<33xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_32_31(%left: vector<32xbf16>, %right: vector<31xbf16>) -> (vector<63xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<32xbf16>, vector<31xbf16> -> vector<63xbf16>
+  func.return %result : vector<63xbf16>
+}
+
+// ====
+
+func.def @concat_bf16_32_32(%left: vector<32xbf16>, %right: vector<32xbf16>) -> (vector<64xbf16>) {
+  %result = vector.concat<0> %left, %right : vector<32xbf16>, vector<32xbf16> -> vector<64xbf16>
+  func.return %result : vector<64xbf16>
+}

@@ -193,3 +193,72 @@ def test_16bit_interleave_uses_alternating_native_shuffle() -> None:
     assert rule.emit[1].operands["s1"].field == "even"
     assert rule.emit[1].operands["s2"].field == "odd"
     assert Guard.i64_range("axis", 0, 0) in rule.guards
+
+
+def _concat_rule(input_type, result_type) -> DescriptorRule:
+    return next(
+        rule
+        for rule in AIE2P_STRUCTURAL_RULES
+        if isinstance(rule, DescriptorRule)
+        and rule.source_op is vector.vector_concat
+        and Guard.value_type("inputs", input_type) in rule.guards
+        and Guard.value_type("result", result_type) in rule.guards
+        and Guard.operand_segment_count("inputs", 2) in rule.guards
+        and Guard.i64_range("axis", 0, 0) in rule.guards
+    )
+
+
+def test_partial_concat_keeps_padding_outside_the_logical_result() -> None:
+    for elements, byte_count in (
+        (("i8", "f8E4M3", "f8E5M2"), 1),
+        (("i16", "f16", "bf16"), 2),
+        (("i32", "f32"), 4),
+        (("i64", "f64"), 8),
+    ):
+        for left_lanes in (1, 32 // byte_count, 64 // byte_count - 1):
+            rule = _concat_rule(
+                Vector(elements, lanes=left_lanes),
+                Vector(
+                    elements,
+                    minimum_lanes=left_lanes + 1,
+                    maximum_lanes=64 // byte_count,
+                ),
+            )
+            if left_lanes * byte_count == 32:
+                assert all(
+                    isinstance(emit, EmitRegisterSlice) for emit in rule.emit[:2]
+                )
+                assert [emit.source.element for emit in rule.emit[:2]] == [0, 1]
+                assert all(emit.unit_count == 1 for emit in rule.emit[:2])
+                assert isinstance(rule.emit[2], EmitRegisterConcat)
+            else:
+                assert [emit.immediates for emit in rule.emit[::2]] == [
+                    {"i": left_lanes * byte_count},
+                    {"i": 64 - left_lanes * byte_count},
+                ]
+                assert all(
+                    emit.descriptor.key == "amd.xdna.aie2p.shift.bytes.x.configured"
+                    for emit in rule.emit[1::2]
+                )
+                assert rule.emit[1].operands["s1"] == rule.emit[1].operands["s2"]
+                assert rule.emit[1].operands["s1"].element == 0
+                assert rule.emit[3].operands["s2"].element == 1
+
+
+def test_wide_concat_preserves_partial_tails_and_accumulator_exclusion() -> None:
+    for elements, lanes, maximum in (
+        (("i8", "f8E4M3", "f8E5M2"), 64, 128),
+        (("i16", "f16", "bf16"), 32, 64),
+        ("i32", 16, 32),
+        ("f32", 16, 31),
+        (("i64", "f64"), 8, 16),
+    ):
+        rule = _concat_rule(
+            Vector(elements, lanes=lanes),
+            Vector(elements, minimum_lanes=lanes + 1, maximum_lanes=maximum),
+        )
+        assert len(rule.emit) == 1
+        assert isinstance(rule.emit[0], EmitRegisterConcat)
+        assert [source.field for source in rule.emit[0].sources] == ["inputs", "inputs"]
+        assert [source.element for source in rule.emit[0].sources] == [0, 1]
+        assert rule.emit[0].result.field == "result"

@@ -104,6 +104,33 @@ xdna_execution_test_suite(
 )
 
 iree_py_binary(
+    name = "vector_concat_cases",
+    testonly = True,
+    srcs = ["vector_concat_cases.py"],
+    main = "vector_concat_cases.py",
+)
+
+xdna_execution_test_suite(
+    name = "vector_concat_npu2_test",
+    data = ["testdata/vector_concat.loom"],
+    manifests = ["vector_concat_npu2.test.json"],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//loom/config/target:xdna_artifacts": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }) + select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    tools = {
+        "generate-cases": ":vector_concat_cases",
+        "iree-xdna-run": "//experimental/xdna:iree-xdna-run",
+        "loom-compile": "//loom/src/loom/tools/loom-compile",
+    },
+)
+
+iree_py_binary(
     name = "vector_memory_cases",
     testonly = True,
     srcs = ["vector_memory_cases.py"],

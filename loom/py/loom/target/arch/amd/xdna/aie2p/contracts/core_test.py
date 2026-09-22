@@ -950,51 +950,6 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         == _I8_DEINTERLEAVE_CONTROLS
     )
 
-    concat = next(
-        rule
-        for rule in rules
-        if rule.source_op is vector.vector_concat
-        and Guard.i64_range("axis", 0, 0) in rule.guards
-        and Guard.value_type("inputs", Vector("i8", lanes=32)) in rule.guards
-        and Guard.value_type("result", Vector("i8", lanes=64)) in rule.guards
-    )
-    assert concat.descriptor is None
-    assert len(concat.emit) == 3
-    assert all(isinstance(emit, EmitRegisterSlice) for emit in concat.emit[:2])
-    assert isinstance(concat.emit[2], EmitRegisterConcat)
-    assert [emit.source.element for emit in concat.emit[:2]] == [0, 1]
-    assert all(emit.unit_count == 1 for emit in concat.emit[:2])
-    assert [source.field for source in concat.emit[2].sources] == ["low", "high"]
-    assert concat.emit[2].result.field == "result"
-
-    for input_type, result_type in (
-        (
-            Vector(("i8", "f8E4M3", "f8E5M2"), lanes=64),
-            Vector(("i8", "f8E4M3", "f8E5M2"), lanes=128),
-        ),
-        (
-            Vector(("i16", "f16", "bf16"), lanes=32),
-            Vector(("i16", "f16", "bf16"), lanes=64),
-        ),
-        (Vector("i32", lanes=16), Vector("i32", lanes=32)),
-    ):
-        wide_concat = next(
-            rule
-            for rule in rules
-            if rule.source_op is vector.vector_concat
-            and Guard.value_type("inputs", input_type) in rule.guards
-            and Guard.value_type("result", result_type) in rule.guards
-        )
-        assert wide_concat.descriptor is None
-        assert len(wide_concat.emit) == 1
-        assert isinstance(wide_concat.emit[0], EmitRegisterConcat)
-        assert [source.field for source in wide_concat.emit[0].sources] == [
-            "inputs",
-            "inputs",
-        ]
-        assert [source.element for source in wide_concat.emit[0].sources] == [0, 1]
-        assert wide_concat.emit[0].result.field == "result"
-
     f32_add_rules = [rule for rule in rules if rule.source_op is vector.vector_addf]
     assert len(f32_add_rules) == 2
     f32_add = f32_add_rules[0]

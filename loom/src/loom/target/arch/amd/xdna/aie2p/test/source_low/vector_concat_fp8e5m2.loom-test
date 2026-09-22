@@ -1,0 +1,1009 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/vector_concat_fp8e5m2.loom-test
+// RUN: with-checks emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @concat_f8E5M2_1_63(%left: vector<1xf8E5M2>, %right: vector<63xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<1xf8E5M2>, vector<63xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 1
+CHECK: * = vshift *
+CHECK: * = mova.i32 63
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_2_62(%left: vector<2xf8E5M2>, %right: vector<62xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<2xf8E5M2>, vector<62xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 2
+CHECK: * = vshift *
+CHECK: * = mova.i32 62
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_3_61(%left: vector<3xf8E5M2>, %right: vector<61xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<3xf8E5M2>, vector<61xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 3
+CHECK: * = vshift *
+CHECK: * = mova.i32 61
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_4_60(%left: vector<4xf8E5M2>, %right: vector<60xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<4xf8E5M2>, vector<60xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 4
+CHECK: * = vshift *
+CHECK: * = mova.i32 60
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_5_59(%left: vector<5xf8E5M2>, %right: vector<59xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<5xf8E5M2>, vector<59xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 5
+CHECK: * = vshift *
+CHECK: * = mova.i32 59
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_6_58(%left: vector<6xf8E5M2>, %right: vector<58xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<6xf8E5M2>, vector<58xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 6
+CHECK: * = vshift *
+CHECK: * = mova.i32 58
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_7_57(%left: vector<7xf8E5M2>, %right: vector<57xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<7xf8E5M2>, vector<57xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 7
+CHECK: * = vshift *
+CHECK: * = mova.i32 57
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_8_56(%left: vector<8xf8E5M2>, %right: vector<56xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<8xf8E5M2>, vector<56xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 8
+CHECK: * = vshift *
+CHECK: * = mova.i32 56
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_9_55(%left: vector<9xf8E5M2>, %right: vector<55xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<9xf8E5M2>, vector<55xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 9
+CHECK: * = vshift *
+CHECK: * = mova.i32 55
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_10_54(%left: vector<10xf8E5M2>, %right: vector<54xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<10xf8E5M2>, vector<54xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 10
+CHECK: * = vshift *
+CHECK: * = mova.i32 54
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_11_53(%left: vector<11xf8E5M2>, %right: vector<53xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<11xf8E5M2>, vector<53xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 11
+CHECK: * = vshift *
+CHECK: * = mova.i32 53
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_12_52(%left: vector<12xf8E5M2>, %right: vector<52xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<12xf8E5M2>, vector<52xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 12
+CHECK: * = vshift *
+CHECK: * = mova.i32 52
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_13_51(%left: vector<13xf8E5M2>, %right: vector<51xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<13xf8E5M2>, vector<51xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 13
+CHECK: * = vshift *
+CHECK: * = mova.i32 51
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_14_50(%left: vector<14xf8E5M2>, %right: vector<50xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<14xf8E5M2>, vector<50xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 14
+CHECK: * = vshift *
+CHECK: * = mova.i32 50
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_15_49(%left: vector<15xf8E5M2>, %right: vector<49xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<15xf8E5M2>, vector<49xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 15
+CHECK: * = vshift *
+CHECK: * = mova.i32 49
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_16_48(%left: vector<16xf8E5M2>, %right: vector<48xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<16xf8E5M2>, vector<48xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 16
+CHECK: * = vshift *
+CHECK: * = mova.i32 48
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_17_47(%left: vector<17xf8E5M2>, %right: vector<47xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<17xf8E5M2>, vector<47xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 17
+CHECK: * = vshift *
+CHECK: * = mova.i32 47
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_18_46(%left: vector<18xf8E5M2>, %right: vector<46xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<18xf8E5M2>, vector<46xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 18
+CHECK: * = vshift *
+CHECK: * = mova.i32 46
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_19_45(%left: vector<19xf8E5M2>, %right: vector<45xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<19xf8E5M2>, vector<45xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 19
+CHECK: * = vshift *
+CHECK: * = mova.i32 45
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_20_44(%left: vector<20xf8E5M2>, %right: vector<44xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<20xf8E5M2>, vector<44xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 20
+CHECK: * = vshift *
+CHECK: * = mova.i32 44
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_21_43(%left: vector<21xf8E5M2>, %right: vector<43xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<21xf8E5M2>, vector<43xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 21
+CHECK: * = vshift *
+CHECK: * = mova.i32 43
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_22_42(%left: vector<22xf8E5M2>, %right: vector<42xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<22xf8E5M2>, vector<42xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 22
+CHECK: * = vshift *
+CHECK: * = mova.i32 42
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_23_41(%left: vector<23xf8E5M2>, %right: vector<41xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<23xf8E5M2>, vector<41xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 23
+CHECK: * = vshift *
+CHECK: * = mova.i32 41
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_24_40(%left: vector<24xf8E5M2>, %right: vector<40xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<24xf8E5M2>, vector<40xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 24
+CHECK: * = vshift *
+CHECK: * = mova.i32 40
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_25_39(%left: vector<25xf8E5M2>, %right: vector<39xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<25xf8E5M2>, vector<39xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 25
+CHECK: * = vshift *
+CHECK: * = mova.i32 39
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_26_38(%left: vector<26xf8E5M2>, %right: vector<38xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<26xf8E5M2>, vector<38xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 26
+CHECK: * = vshift *
+CHECK: * = mova.i32 38
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_27_37(%left: vector<27xf8E5M2>, %right: vector<37xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<27xf8E5M2>, vector<37xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 27
+CHECK: * = vshift *
+CHECK: * = mova.i32 37
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_28_36(%left: vector<28xf8E5M2>, %right: vector<36xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<28xf8E5M2>, vector<36xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 28
+CHECK: * = vshift *
+CHECK: * = mova.i32 36
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_29_35(%left: vector<29xf8E5M2>, %right: vector<35xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<29xf8E5M2>, vector<35xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 29
+CHECK: * = vshift *
+CHECK: * = mova.i32 35
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_30_34(%left: vector<30xf8E5M2>, %right: vector<34xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<30xf8E5M2>, vector<34xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 30
+CHECK: * = vshift *
+CHECK: * = mova.i32 34
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_31_33(%left: vector<31xf8E5M2>, %right: vector<33xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<31xf8E5M2>, vector<33xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 31
+CHECK: * = vshift *
+CHECK: * = mova.i32 33
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_32_32(%left: vector<32xf8E5M2>, %right: vector<32xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<32xf8E5M2>, vector<32xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = slice *
+CHECK: * = slice *
+CHECK: * = concat(*
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_33_31(%left: vector<33xf8E5M2>, %right: vector<31xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<33xf8E5M2>, vector<31xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 33
+CHECK: * = vshift *
+CHECK: * = mova.i32 31
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_34_30(%left: vector<34xf8E5M2>, %right: vector<30xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<34xf8E5M2>, vector<30xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 34
+CHECK: * = vshift *
+CHECK: * = mova.i32 30
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_35_29(%left: vector<35xf8E5M2>, %right: vector<29xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<35xf8E5M2>, vector<29xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 35
+CHECK: * = vshift *
+CHECK: * = mova.i32 29
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_36_28(%left: vector<36xf8E5M2>, %right: vector<28xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<36xf8E5M2>, vector<28xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 36
+CHECK: * = vshift *
+CHECK: * = mova.i32 28
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_37_27(%left: vector<37xf8E5M2>, %right: vector<27xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<37xf8E5M2>, vector<27xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 37
+CHECK: * = vshift *
+CHECK: * = mova.i32 27
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_38_26(%left: vector<38xf8E5M2>, %right: vector<26xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<38xf8E5M2>, vector<26xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 38
+CHECK: * = vshift *
+CHECK: * = mova.i32 26
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_39_25(%left: vector<39xf8E5M2>, %right: vector<25xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<39xf8E5M2>, vector<25xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 39
+CHECK: * = vshift *
+CHECK: * = mova.i32 25
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_40_24(%left: vector<40xf8E5M2>, %right: vector<24xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<40xf8E5M2>, vector<24xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 40
+CHECK: * = vshift *
+CHECK: * = mova.i32 24
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_41_23(%left: vector<41xf8E5M2>, %right: vector<23xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<41xf8E5M2>, vector<23xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 41
+CHECK: * = vshift *
+CHECK: * = mova.i32 23
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_42_22(%left: vector<42xf8E5M2>, %right: vector<22xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<42xf8E5M2>, vector<22xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 42
+CHECK: * = vshift *
+CHECK: * = mova.i32 22
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_43_21(%left: vector<43xf8E5M2>, %right: vector<21xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<43xf8E5M2>, vector<21xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 43
+CHECK: * = vshift *
+CHECK: * = mova.i32 21
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_44_20(%left: vector<44xf8E5M2>, %right: vector<20xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<44xf8E5M2>, vector<20xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 44
+CHECK: * = vshift *
+CHECK: * = mova.i32 20
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_45_19(%left: vector<45xf8E5M2>, %right: vector<19xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<45xf8E5M2>, vector<19xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 45
+CHECK: * = vshift *
+CHECK: * = mova.i32 19
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_46_18(%left: vector<46xf8E5M2>, %right: vector<18xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<46xf8E5M2>, vector<18xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 46
+CHECK: * = vshift *
+CHECK: * = mova.i32 18
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_47_17(%left: vector<47xf8E5M2>, %right: vector<17xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<47xf8E5M2>, vector<17xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 47
+CHECK: * = vshift *
+CHECK: * = mova.i32 17
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_48_16(%left: vector<48xf8E5M2>, %right: vector<16xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<48xf8E5M2>, vector<16xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 48
+CHECK: * = vshift *
+CHECK: * = mova.i32 16
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_49_15(%left: vector<49xf8E5M2>, %right: vector<15xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<49xf8E5M2>, vector<15xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 49
+CHECK: * = vshift *
+CHECK: * = mova.i32 15
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_50_14(%left: vector<50xf8E5M2>, %right: vector<14xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<50xf8E5M2>, vector<14xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 50
+CHECK: * = vshift *
+CHECK: * = mova.i32 14
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_51_13(%left: vector<51xf8E5M2>, %right: vector<13xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<51xf8E5M2>, vector<13xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 51
+CHECK: * = vshift *
+CHECK: * = mova.i32 13
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_52_12(%left: vector<52xf8E5M2>, %right: vector<12xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<52xf8E5M2>, vector<12xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 52
+CHECK: * = vshift *
+CHECK: * = mova.i32 12
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_53_11(%left: vector<53xf8E5M2>, %right: vector<11xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<53xf8E5M2>, vector<11xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 53
+CHECK: * = vshift *
+CHECK: * = mova.i32 11
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_54_10(%left: vector<54xf8E5M2>, %right: vector<10xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<54xf8E5M2>, vector<10xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 54
+CHECK: * = vshift *
+CHECK: * = mova.i32 10
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_55_9(%left: vector<55xf8E5M2>, %right: vector<9xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<55xf8E5M2>, vector<9xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 55
+CHECK: * = vshift *
+CHECK: * = mova.i32 9
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_56_8(%left: vector<56xf8E5M2>, %right: vector<8xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<56xf8E5M2>, vector<8xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 56
+CHECK: * = vshift *
+CHECK: * = mova.i32 8
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_57_7(%left: vector<57xf8E5M2>, %right: vector<7xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<57xf8E5M2>, vector<7xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 57
+CHECK: * = vshift *
+CHECK: * = mova.i32 7
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_58_6(%left: vector<58xf8E5M2>, %right: vector<6xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<58xf8E5M2>, vector<6xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 58
+CHECK: * = vshift *
+CHECK: * = mova.i32 6
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_59_5(%left: vector<59xf8E5M2>, %right: vector<5xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<59xf8E5M2>, vector<5xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 59
+CHECK: * = vshift *
+CHECK: * = mova.i32 5
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_60_4(%left: vector<60xf8E5M2>, %right: vector<4xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<60xf8E5M2>, vector<4xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 60
+CHECK: * = vshift *
+CHECK: * = mova.i32 4
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_61_3(%left: vector<61xf8E5M2>, %right: vector<3xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<61xf8E5M2>, vector<3xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 61
+CHECK: * = vshift *
+CHECK: * = mova.i32 3
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_62_2(%left: vector<62xf8E5M2>, %right: vector<2xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<62xf8E5M2>, vector<2xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 62
+CHECK: * = vshift *
+CHECK: * = mova.i32 2
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_63_1(%left: vector<63xf8E5M2>, %right: vector<1xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<63xf8E5M2>, vector<1xf8E5M2> -> vector<64xf8E5M2>
+  func.return %result : vector<64xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 63
+CHECK: * = vshift *
+CHECK: * = mova.i32 1
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_1_1(%left: vector<1xf8E5M2>, %right: vector<1xf8E5M2>) -> (vector<2xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<1xf8E5M2>, vector<1xf8E5M2> -> vector<2xf8E5M2>
+  func.return %result : vector<2xf8E5M2>
+}
+
+// ----
+CHECK: * = mova.i32 1
+CHECK: * = vshift *
+CHECK: * = mova.i32 63
+CHECK: * = vshift *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_32_1(%left: vector<32xf8E5M2>, %right: vector<1xf8E5M2>) -> (vector<33xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<32xf8E5M2>, vector<1xf8E5M2> -> vector<33xf8E5M2>
+  func.return %result : vector<33xf8E5M2>
+}
+
+// ----
+CHECK: * = slice *
+CHECK: * = slice *
+CHECK: * = concat(*
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_64_1(%left: vector<64xf8E5M2>, %right: vector<1xf8E5M2>) -> (vector<65xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<64xf8E5M2>, vector<1xf8E5M2> -> vector<65xf8E5M2>
+  func.return %result : vector<65xf8E5M2>
+}
+
+// ----
+CHECK: * = concat(*
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_64_63(%left: vector<64xf8E5M2>, %right: vector<63xf8E5M2>) -> (vector<127xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<64xf8E5M2>, vector<63xf8E5M2> -> vector<127xf8E5M2>
+  func.return %result : vector<127xf8E5M2>
+}
+
+// ----
+CHECK: * = concat(*
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @concat_f8E5M2_64_64(%left: vector<64xf8E5M2>, %right: vector<64xf8E5M2>) -> (vector<128xf8E5M2>) {
+  %result = vector.concat<0> %left, %right : vector<64xf8E5M2>, vector<64xf8E5M2> -> vector<128xf8E5M2>
+  func.return %result : vector<128xf8E5M2>
+}
+
+// ----
+CHECK: * = concat(*
+CHECK-NOT: vextract
+CHECK-NOT: vinsert

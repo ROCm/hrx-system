@@ -1,0 +1,473 @@
+func.def @concat_f8E4M3_1_63(%left: vector<1xf8E4M3>, %right: vector<63xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<1xf8E4M3>, vector<63xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_2_62(%left: vector<2xf8E4M3>, %right: vector<62xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<2xf8E4M3>, vector<62xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_3_61(%left: vector<3xf8E4M3>, %right: vector<61xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<3xf8E4M3>, vector<61xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_4_60(%left: vector<4xf8E4M3>, %right: vector<60xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<4xf8E4M3>, vector<60xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_5_59(%left: vector<5xf8E4M3>, %right: vector<59xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<5xf8E4M3>, vector<59xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_6_58(%left: vector<6xf8E4M3>, %right: vector<58xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<6xf8E4M3>, vector<58xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_7_57(%left: vector<7xf8E4M3>, %right: vector<57xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<7xf8E4M3>, vector<57xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_8_56(%left: vector<8xf8E4M3>, %right: vector<56xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<8xf8E4M3>, vector<56xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_9_55(%left: vector<9xf8E4M3>, %right: vector<55xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<9xf8E4M3>, vector<55xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_10_54(%left: vector<10xf8E4M3>, %right: vector<54xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<10xf8E4M3>, vector<54xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_11_53(%left: vector<11xf8E4M3>, %right: vector<53xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<11xf8E4M3>, vector<53xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_12_52(%left: vector<12xf8E4M3>, %right: vector<52xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<12xf8E4M3>, vector<52xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_13_51(%left: vector<13xf8E4M3>, %right: vector<51xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<13xf8E4M3>, vector<51xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_14_50(%left: vector<14xf8E4M3>, %right: vector<50xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<14xf8E4M3>, vector<50xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_15_49(%left: vector<15xf8E4M3>, %right: vector<49xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<15xf8E4M3>, vector<49xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_16_48(%left: vector<16xf8E4M3>, %right: vector<48xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<16xf8E4M3>, vector<48xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_17_47(%left: vector<17xf8E4M3>, %right: vector<47xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<17xf8E4M3>, vector<47xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_18_46(%left: vector<18xf8E4M3>, %right: vector<46xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<18xf8E4M3>, vector<46xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_19_45(%left: vector<19xf8E4M3>, %right: vector<45xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<19xf8E4M3>, vector<45xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_20_44(%left: vector<20xf8E4M3>, %right: vector<44xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<20xf8E4M3>, vector<44xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_21_43(%left: vector<21xf8E4M3>, %right: vector<43xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<21xf8E4M3>, vector<43xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_22_42(%left: vector<22xf8E4M3>, %right: vector<42xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<22xf8E4M3>, vector<42xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_23_41(%left: vector<23xf8E4M3>, %right: vector<41xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<23xf8E4M3>, vector<41xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_24_40(%left: vector<24xf8E4M3>, %right: vector<40xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<24xf8E4M3>, vector<40xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_25_39(%left: vector<25xf8E4M3>, %right: vector<39xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<25xf8E4M3>, vector<39xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_26_38(%left: vector<26xf8E4M3>, %right: vector<38xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<26xf8E4M3>, vector<38xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_27_37(%left: vector<27xf8E4M3>, %right: vector<37xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<27xf8E4M3>, vector<37xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_28_36(%left: vector<28xf8E4M3>, %right: vector<36xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<28xf8E4M3>, vector<36xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_29_35(%left: vector<29xf8E4M3>, %right: vector<35xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<29xf8E4M3>, vector<35xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_30_34(%left: vector<30xf8E4M3>, %right: vector<34xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<30xf8E4M3>, vector<34xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_31_33(%left: vector<31xf8E4M3>, %right: vector<33xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<31xf8E4M3>, vector<33xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_32_32(%left: vector<32xf8E4M3>, %right: vector<32xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<32xf8E4M3>, vector<32xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_33_31(%left: vector<33xf8E4M3>, %right: vector<31xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<33xf8E4M3>, vector<31xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_34_30(%left: vector<34xf8E4M3>, %right: vector<30xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<34xf8E4M3>, vector<30xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_35_29(%left: vector<35xf8E4M3>, %right: vector<29xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<35xf8E4M3>, vector<29xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_36_28(%left: vector<36xf8E4M3>, %right: vector<28xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<36xf8E4M3>, vector<28xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_37_27(%left: vector<37xf8E4M3>, %right: vector<27xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<37xf8E4M3>, vector<27xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_38_26(%left: vector<38xf8E4M3>, %right: vector<26xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<38xf8E4M3>, vector<26xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_39_25(%left: vector<39xf8E4M3>, %right: vector<25xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<39xf8E4M3>, vector<25xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_40_24(%left: vector<40xf8E4M3>, %right: vector<24xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<40xf8E4M3>, vector<24xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_41_23(%left: vector<41xf8E4M3>, %right: vector<23xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<41xf8E4M3>, vector<23xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_42_22(%left: vector<42xf8E4M3>, %right: vector<22xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<42xf8E4M3>, vector<22xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_43_21(%left: vector<43xf8E4M3>, %right: vector<21xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<43xf8E4M3>, vector<21xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_44_20(%left: vector<44xf8E4M3>, %right: vector<20xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<44xf8E4M3>, vector<20xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_45_19(%left: vector<45xf8E4M3>, %right: vector<19xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<45xf8E4M3>, vector<19xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_46_18(%left: vector<46xf8E4M3>, %right: vector<18xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<46xf8E4M3>, vector<18xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_47_17(%left: vector<47xf8E4M3>, %right: vector<17xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<47xf8E4M3>, vector<17xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_48_16(%left: vector<48xf8E4M3>, %right: vector<16xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<48xf8E4M3>, vector<16xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_49_15(%left: vector<49xf8E4M3>, %right: vector<15xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<49xf8E4M3>, vector<15xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_50_14(%left: vector<50xf8E4M3>, %right: vector<14xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<50xf8E4M3>, vector<14xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_51_13(%left: vector<51xf8E4M3>, %right: vector<13xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<51xf8E4M3>, vector<13xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_52_12(%left: vector<52xf8E4M3>, %right: vector<12xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<52xf8E4M3>, vector<12xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_53_11(%left: vector<53xf8E4M3>, %right: vector<11xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<53xf8E4M3>, vector<11xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_54_10(%left: vector<54xf8E4M3>, %right: vector<10xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<54xf8E4M3>, vector<10xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_55_9(%left: vector<55xf8E4M3>, %right: vector<9xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<55xf8E4M3>, vector<9xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_56_8(%left: vector<56xf8E4M3>, %right: vector<8xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<56xf8E4M3>, vector<8xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_57_7(%left: vector<57xf8E4M3>, %right: vector<7xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<57xf8E4M3>, vector<7xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_58_6(%left: vector<58xf8E4M3>, %right: vector<6xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<58xf8E4M3>, vector<6xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_59_5(%left: vector<59xf8E4M3>, %right: vector<5xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<59xf8E4M3>, vector<5xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_60_4(%left: vector<60xf8E4M3>, %right: vector<4xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<60xf8E4M3>, vector<4xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_61_3(%left: vector<61xf8E4M3>, %right: vector<3xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<61xf8E4M3>, vector<3xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_62_2(%left: vector<62xf8E4M3>, %right: vector<2xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<62xf8E4M3>, vector<2xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_63_1(%left: vector<63xf8E4M3>, %right: vector<1xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<63xf8E4M3>, vector<1xf8E4M3> -> vector<64xf8E4M3>
+  func.return %result : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_1_1(%left: vector<1xf8E4M3>, %right: vector<1xf8E4M3>) -> (vector<2xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<1xf8E4M3>, vector<1xf8E4M3> -> vector<2xf8E4M3>
+  func.return %result : vector<2xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_32_1(%left: vector<32xf8E4M3>, %right: vector<1xf8E4M3>) -> (vector<33xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<32xf8E4M3>, vector<1xf8E4M3> -> vector<33xf8E4M3>
+  func.return %result : vector<33xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_64_1(%left: vector<64xf8E4M3>, %right: vector<1xf8E4M3>) -> (vector<65xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<64xf8E4M3>, vector<1xf8E4M3> -> vector<65xf8E4M3>
+  func.return %result : vector<65xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_64_63(%left: vector<64xf8E4M3>, %right: vector<63xf8E4M3>) -> (vector<127xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<64xf8E4M3>, vector<63xf8E4M3> -> vector<127xf8E4M3>
+  func.return %result : vector<127xf8E4M3>
+}
+
+// ====
+
+func.def @concat_f8E4M3_64_64(%left: vector<64xf8E4M3>, %right: vector<64xf8E4M3>) -> (vector<128xf8E4M3>) {
+  %result = vector.concat<0> %left, %right : vector<64xf8E4M3>, vector<64xf8E4M3> -> vector<128xf8E4M3>
+  func.return %result : vector<128xf8E4M3>
+}

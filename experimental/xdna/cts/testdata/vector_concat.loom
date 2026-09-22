@@ -1,0 +1,1609 @@
+// Packed concatenation preserves raw payloads and exact partial extents.
+aie2p.target<array> @array_target
+aie2p.target<core> @core_target
+
+pipeline.def<kernel> public retain target(@array_target) @concat_bytes_1_16() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x256xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x32xi32>, group -> pipeline.flow<tile<32xi32>>
+  %results = pipeline.stage @concat_bytes_1_16_entry on %workers(%packets) : (group, pipeline.flow<tile<32xi32>>) -> (pipeline.flow<tile<256xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<256xi32>>, view<1x16x256xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @concat_bytes_1_16_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %zero = index.constant 0 : offset
+  %right_offset = index.constant 64 : offset
+  %left_view0 = buffer.view %source[%zero] : buffer -> view<1xi8>
+  %right_view0 = buffer.view %source[%right_offset] : buffer -> view<63xi8>
+  %left0 = vector.load %left_view0[0] : view<1xi8> -> vector<1xi8>
+  %right0 = vector.load %right_view0[0] : view<63xi8> -> vector<63xi8>
+  %joined0 = vector.concat<0> %left0, %right0 : vector<1xi8>, vector<63xi8> -> vector<64xi8>
+  %offset0 = index.constant 0 : offset
+  %view0 = buffer.view %destination[%offset0] : buffer -> view<64xi8>
+  vector.store %joined0, %view0[0] : vector<64xi8>, view<64xi8>
+  %left_view1 = buffer.view %source[%zero] : buffer -> view<2xi8>
+  %right_view1 = buffer.view %source[%right_offset] : buffer -> view<62xi8>
+  %left1 = vector.load %left_view1[0] : view<2xi8> -> vector<2xi8>
+  %right1 = vector.load %right_view1[0] : view<62xi8> -> vector<62xi8>
+  %joined1 = vector.concat<0> %left1, %right1 : vector<2xi8>, vector<62xi8> -> vector<64xi8>
+  %offset1 = index.constant 64 : offset
+  %view1 = buffer.view %destination[%offset1] : buffer -> view<64xi8>
+  vector.store %joined1, %view1[0] : vector<64xi8>, view<64xi8>
+  %left_view2 = buffer.view %source[%zero] : buffer -> view<3xi8>
+  %right_view2 = buffer.view %source[%right_offset] : buffer -> view<61xi8>
+  %left2 = vector.load %left_view2[0] : view<3xi8> -> vector<3xi8>
+  %right2 = vector.load %right_view2[0] : view<61xi8> -> vector<61xi8>
+  %joined2 = vector.concat<0> %left2, %right2 : vector<3xi8>, vector<61xi8> -> vector<64xi8>
+  %offset2 = index.constant 128 : offset
+  %view2 = buffer.view %destination[%offset2] : buffer -> view<64xi8>
+  vector.store %joined2, %view2[0] : vector<64xi8>, view<64xi8>
+  %left_view3 = buffer.view %source[%zero] : buffer -> view<4xi8>
+  %right_view3 = buffer.view %source[%right_offset] : buffer -> view<60xi8>
+  %left3 = vector.load %left_view3[0] : view<4xi8> -> vector<4xi8>
+  %right3 = vector.load %right_view3[0] : view<60xi8> -> vector<60xi8>
+  %joined3 = vector.concat<0> %left3, %right3 : vector<4xi8>, vector<60xi8> -> vector<64xi8>
+  %offset3 = index.constant 192 : offset
+  %view3 = buffer.view %destination[%offset3] : buffer -> view<64xi8>
+  vector.store %joined3, %view3[0] : vector<64xi8>, view<64xi8>
+  %left_view4 = buffer.view %source[%zero] : buffer -> view<5xi8>
+  %right_view4 = buffer.view %source[%right_offset] : buffer -> view<59xi8>
+  %left4 = vector.load %left_view4[0] : view<5xi8> -> vector<5xi8>
+  %right4 = vector.load %right_view4[0] : view<59xi8> -> vector<59xi8>
+  %joined4 = vector.concat<0> %left4, %right4 : vector<5xi8>, vector<59xi8> -> vector<64xi8>
+  %offset4 = index.constant 256 : offset
+  %view4 = buffer.view %destination[%offset4] : buffer -> view<64xi8>
+  vector.store %joined4, %view4[0] : vector<64xi8>, view<64xi8>
+  %left_view5 = buffer.view %source[%zero] : buffer -> view<6xi8>
+  %right_view5 = buffer.view %source[%right_offset] : buffer -> view<58xi8>
+  %left5 = vector.load %left_view5[0] : view<6xi8> -> vector<6xi8>
+  %right5 = vector.load %right_view5[0] : view<58xi8> -> vector<58xi8>
+  %joined5 = vector.concat<0> %left5, %right5 : vector<6xi8>, vector<58xi8> -> vector<64xi8>
+  %offset5 = index.constant 320 : offset
+  %view5 = buffer.view %destination[%offset5] : buffer -> view<64xi8>
+  vector.store %joined5, %view5[0] : vector<64xi8>, view<64xi8>
+  %left_view6 = buffer.view %source[%zero] : buffer -> view<7xi8>
+  %right_view6 = buffer.view %source[%right_offset] : buffer -> view<57xi8>
+  %left6 = vector.load %left_view6[0] : view<7xi8> -> vector<7xi8>
+  %right6 = vector.load %right_view6[0] : view<57xi8> -> vector<57xi8>
+  %joined6 = vector.concat<0> %left6, %right6 : vector<7xi8>, vector<57xi8> -> vector<64xi8>
+  %offset6 = index.constant 384 : offset
+  %view6 = buffer.view %destination[%offset6] : buffer -> view<64xi8>
+  vector.store %joined6, %view6[0] : vector<64xi8>, view<64xi8>
+  %left_view7 = buffer.view %source[%zero] : buffer -> view<8xi8>
+  %right_view7 = buffer.view %source[%right_offset] : buffer -> view<56xi8>
+  %left7 = vector.load %left_view7[0] : view<8xi8> -> vector<8xi8>
+  %right7 = vector.load %right_view7[0] : view<56xi8> -> vector<56xi8>
+  %joined7 = vector.concat<0> %left7, %right7 : vector<8xi8>, vector<56xi8> -> vector<64xi8>
+  %offset7 = index.constant 448 : offset
+  %view7 = buffer.view %destination[%offset7] : buffer -> view<64xi8>
+  vector.store %joined7, %view7[0] : vector<64xi8>, view<64xi8>
+  %left_view8 = buffer.view %source[%zero] : buffer -> view<9xi8>
+  %right_view8 = buffer.view %source[%right_offset] : buffer -> view<55xi8>
+  %left8 = vector.load %left_view8[0] : view<9xi8> -> vector<9xi8>
+  %right8 = vector.load %right_view8[0] : view<55xi8> -> vector<55xi8>
+  %joined8 = vector.concat<0> %left8, %right8 : vector<9xi8>, vector<55xi8> -> vector<64xi8>
+  %offset8 = index.constant 512 : offset
+  %view8 = buffer.view %destination[%offset8] : buffer -> view<64xi8>
+  vector.store %joined8, %view8[0] : vector<64xi8>, view<64xi8>
+  %left_view9 = buffer.view %source[%zero] : buffer -> view<10xi8>
+  %right_view9 = buffer.view %source[%right_offset] : buffer -> view<54xi8>
+  %left9 = vector.load %left_view9[0] : view<10xi8> -> vector<10xi8>
+  %right9 = vector.load %right_view9[0] : view<54xi8> -> vector<54xi8>
+  %joined9 = vector.concat<0> %left9, %right9 : vector<10xi8>, vector<54xi8> -> vector<64xi8>
+  %offset9 = index.constant 576 : offset
+  %view9 = buffer.view %destination[%offset9] : buffer -> view<64xi8>
+  vector.store %joined9, %view9[0] : vector<64xi8>, view<64xi8>
+  %left_view10 = buffer.view %source[%zero] : buffer -> view<11xi8>
+  %right_view10 = buffer.view %source[%right_offset] : buffer -> view<53xi8>
+  %left10 = vector.load %left_view10[0] : view<11xi8> -> vector<11xi8>
+  %right10 = vector.load %right_view10[0] : view<53xi8> -> vector<53xi8>
+  %joined10 = vector.concat<0> %left10, %right10 : vector<11xi8>, vector<53xi8> -> vector<64xi8>
+  %offset10 = index.constant 640 : offset
+  %view10 = buffer.view %destination[%offset10] : buffer -> view<64xi8>
+  vector.store %joined10, %view10[0] : vector<64xi8>, view<64xi8>
+  %left_view11 = buffer.view %source[%zero] : buffer -> view<12xi8>
+  %right_view11 = buffer.view %source[%right_offset] : buffer -> view<52xi8>
+  %left11 = vector.load %left_view11[0] : view<12xi8> -> vector<12xi8>
+  %right11 = vector.load %right_view11[0] : view<52xi8> -> vector<52xi8>
+  %joined11 = vector.concat<0> %left11, %right11 : vector<12xi8>, vector<52xi8> -> vector<64xi8>
+  %offset11 = index.constant 704 : offset
+  %view11 = buffer.view %destination[%offset11] : buffer -> view<64xi8>
+  vector.store %joined11, %view11[0] : vector<64xi8>, view<64xi8>
+  %left_view12 = buffer.view %source[%zero] : buffer -> view<13xi8>
+  %right_view12 = buffer.view %source[%right_offset] : buffer -> view<51xi8>
+  %left12 = vector.load %left_view12[0] : view<13xi8> -> vector<13xi8>
+  %right12 = vector.load %right_view12[0] : view<51xi8> -> vector<51xi8>
+  %joined12 = vector.concat<0> %left12, %right12 : vector<13xi8>, vector<51xi8> -> vector<64xi8>
+  %offset12 = index.constant 768 : offset
+  %view12 = buffer.view %destination[%offset12] : buffer -> view<64xi8>
+  vector.store %joined12, %view12[0] : vector<64xi8>, view<64xi8>
+  %left_view13 = buffer.view %source[%zero] : buffer -> view<14xi8>
+  %right_view13 = buffer.view %source[%right_offset] : buffer -> view<50xi8>
+  %left13 = vector.load %left_view13[0] : view<14xi8> -> vector<14xi8>
+  %right13 = vector.load %right_view13[0] : view<50xi8> -> vector<50xi8>
+  %joined13 = vector.concat<0> %left13, %right13 : vector<14xi8>, vector<50xi8> -> vector<64xi8>
+  %offset13 = index.constant 832 : offset
+  %view13 = buffer.view %destination[%offset13] : buffer -> view<64xi8>
+  vector.store %joined13, %view13[0] : vector<64xi8>, view<64xi8>
+  %left_view14 = buffer.view %source[%zero] : buffer -> view<15xi8>
+  %right_view14 = buffer.view %source[%right_offset] : buffer -> view<49xi8>
+  %left14 = vector.load %left_view14[0] : view<15xi8> -> vector<15xi8>
+  %right14 = vector.load %right_view14[0] : view<49xi8> -> vector<49xi8>
+  %joined14 = vector.concat<0> %left14, %right14 : vector<15xi8>, vector<49xi8> -> vector<64xi8>
+  %offset14 = index.constant 896 : offset
+  %view14 = buffer.view %destination[%offset14] : buffer -> view<64xi8>
+  vector.store %joined14, %view14[0] : vector<64xi8>, view<64xi8>
+  %left_view15 = buffer.view %source[%zero] : buffer -> view<16xi8>
+  %right_view15 = buffer.view %source[%right_offset] : buffer -> view<48xi8>
+  %left15 = vector.load %left_view15[0] : view<16xi8> -> vector<16xi8>
+  %right15 = vector.load %right_view15[0] : view<48xi8> -> vector<48xi8>
+  %joined15 = vector.concat<0> %left15, %right15 : vector<16xi8>, vector<48xi8> -> vector<64xi8>
+  %offset15 = index.constant 960 : offset
+  %view15 = buffer.view %destination[%offset15] : buffer -> view<64xi8>
+  vector.store %joined15, %view15[0] : vector<64xi8>, view<64xi8>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @concat_bytes_17_32() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x256xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x32xi32>, group -> pipeline.flow<tile<32xi32>>
+  %results = pipeline.stage @concat_bytes_17_32_entry on %workers(%packets) : (group, pipeline.flow<tile<32xi32>>) -> (pipeline.flow<tile<256xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<256xi32>>, view<1x16x256xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @concat_bytes_17_32_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %zero = index.constant 0 : offset
+  %right_offset = index.constant 64 : offset
+  %left_view0 = buffer.view %source[%zero] : buffer -> view<17xi8>
+  %right_view0 = buffer.view %source[%right_offset] : buffer -> view<47xi8>
+  %left0 = vector.load %left_view0[0] : view<17xi8> -> vector<17xi8>
+  %right0 = vector.load %right_view0[0] : view<47xi8> -> vector<47xi8>
+  %joined0 = vector.concat<0> %left0, %right0 : vector<17xi8>, vector<47xi8> -> vector<64xi8>
+  %offset0 = index.constant 0 : offset
+  %view0 = buffer.view %destination[%offset0] : buffer -> view<64xi8>
+  vector.store %joined0, %view0[0] : vector<64xi8>, view<64xi8>
+  %left_view1 = buffer.view %source[%zero] : buffer -> view<18xi8>
+  %right_view1 = buffer.view %source[%right_offset] : buffer -> view<46xi8>
+  %left1 = vector.load %left_view1[0] : view<18xi8> -> vector<18xi8>
+  %right1 = vector.load %right_view1[0] : view<46xi8> -> vector<46xi8>
+  %joined1 = vector.concat<0> %left1, %right1 : vector<18xi8>, vector<46xi8> -> vector<64xi8>
+  %offset1 = index.constant 64 : offset
+  %view1 = buffer.view %destination[%offset1] : buffer -> view<64xi8>
+  vector.store %joined1, %view1[0] : vector<64xi8>, view<64xi8>
+  %left_view2 = buffer.view %source[%zero] : buffer -> view<19xi8>
+  %right_view2 = buffer.view %source[%right_offset] : buffer -> view<45xi8>
+  %left2 = vector.load %left_view2[0] : view<19xi8> -> vector<19xi8>
+  %right2 = vector.load %right_view2[0] : view<45xi8> -> vector<45xi8>
+  %joined2 = vector.concat<0> %left2, %right2 : vector<19xi8>, vector<45xi8> -> vector<64xi8>
+  %offset2 = index.constant 128 : offset
+  %view2 = buffer.view %destination[%offset2] : buffer -> view<64xi8>
+  vector.store %joined2, %view2[0] : vector<64xi8>, view<64xi8>
+  %left_view3 = buffer.view %source[%zero] : buffer -> view<20xi8>
+  %right_view3 = buffer.view %source[%right_offset] : buffer -> view<44xi8>
+  %left3 = vector.load %left_view3[0] : view<20xi8> -> vector<20xi8>
+  %right3 = vector.load %right_view3[0] : view<44xi8> -> vector<44xi8>
+  %joined3 = vector.concat<0> %left3, %right3 : vector<20xi8>, vector<44xi8> -> vector<64xi8>
+  %offset3 = index.constant 192 : offset
+  %view3 = buffer.view %destination[%offset3] : buffer -> view<64xi8>
+  vector.store %joined3, %view3[0] : vector<64xi8>, view<64xi8>
+  %left_view4 = buffer.view %source[%zero] : buffer -> view<21xi8>
+  %right_view4 = buffer.view %source[%right_offset] : buffer -> view<43xi8>
+  %left4 = vector.load %left_view4[0] : view<21xi8> -> vector<21xi8>
+  %right4 = vector.load %right_view4[0] : view<43xi8> -> vector<43xi8>
+  %joined4 = vector.concat<0> %left4, %right4 : vector<21xi8>, vector<43xi8> -> vector<64xi8>
+  %offset4 = index.constant 256 : offset
+  %view4 = buffer.view %destination[%offset4] : buffer -> view<64xi8>
+  vector.store %joined4, %view4[0] : vector<64xi8>, view<64xi8>
+  %left_view5 = buffer.view %source[%zero] : buffer -> view<22xi8>
+  %right_view5 = buffer.view %source[%right_offset] : buffer -> view<42xi8>
+  %left5 = vector.load %left_view5[0] : view<22xi8> -> vector<22xi8>
+  %right5 = vector.load %right_view5[0] : view<42xi8> -> vector<42xi8>
+  %joined5 = vector.concat<0> %left5, %right5 : vector<22xi8>, vector<42xi8> -> vector<64xi8>
+  %offset5 = index.constant 320 : offset
+  %view5 = buffer.view %destination[%offset5] : buffer -> view<64xi8>
+  vector.store %joined5, %view5[0] : vector<64xi8>, view<64xi8>
+  %left_view6 = buffer.view %source[%zero] : buffer -> view<23xi8>
+  %right_view6 = buffer.view %source[%right_offset] : buffer -> view<41xi8>
+  %left6 = vector.load %left_view6[0] : view<23xi8> -> vector<23xi8>
+  %right6 = vector.load %right_view6[0] : view<41xi8> -> vector<41xi8>
+  %joined6 = vector.concat<0> %left6, %right6 : vector<23xi8>, vector<41xi8> -> vector<64xi8>
+  %offset6 = index.constant 384 : offset
+  %view6 = buffer.view %destination[%offset6] : buffer -> view<64xi8>
+  vector.store %joined6, %view6[0] : vector<64xi8>, view<64xi8>
+  %left_view7 = buffer.view %source[%zero] : buffer -> view<24xi8>
+  %right_view7 = buffer.view %source[%right_offset] : buffer -> view<40xi8>
+  %left7 = vector.load %left_view7[0] : view<24xi8> -> vector<24xi8>
+  %right7 = vector.load %right_view7[0] : view<40xi8> -> vector<40xi8>
+  %joined7 = vector.concat<0> %left7, %right7 : vector<24xi8>, vector<40xi8> -> vector<64xi8>
+  %offset7 = index.constant 448 : offset
+  %view7 = buffer.view %destination[%offset7] : buffer -> view<64xi8>
+  vector.store %joined7, %view7[0] : vector<64xi8>, view<64xi8>
+  %left_view8 = buffer.view %source[%zero] : buffer -> view<25xi8>
+  %right_view8 = buffer.view %source[%right_offset] : buffer -> view<39xi8>
+  %left8 = vector.load %left_view8[0] : view<25xi8> -> vector<25xi8>
+  %right8 = vector.load %right_view8[0] : view<39xi8> -> vector<39xi8>
+  %joined8 = vector.concat<0> %left8, %right8 : vector<25xi8>, vector<39xi8> -> vector<64xi8>
+  %offset8 = index.constant 512 : offset
+  %view8 = buffer.view %destination[%offset8] : buffer -> view<64xi8>
+  vector.store %joined8, %view8[0] : vector<64xi8>, view<64xi8>
+  %left_view9 = buffer.view %source[%zero] : buffer -> view<26xi8>
+  %right_view9 = buffer.view %source[%right_offset] : buffer -> view<38xi8>
+  %left9 = vector.load %left_view9[0] : view<26xi8> -> vector<26xi8>
+  %right9 = vector.load %right_view9[0] : view<38xi8> -> vector<38xi8>
+  %joined9 = vector.concat<0> %left9, %right9 : vector<26xi8>, vector<38xi8> -> vector<64xi8>
+  %offset9 = index.constant 576 : offset
+  %view9 = buffer.view %destination[%offset9] : buffer -> view<64xi8>
+  vector.store %joined9, %view9[0] : vector<64xi8>, view<64xi8>
+  %left_view10 = buffer.view %source[%zero] : buffer -> view<27xi8>
+  %right_view10 = buffer.view %source[%right_offset] : buffer -> view<37xi8>
+  %left10 = vector.load %left_view10[0] : view<27xi8> -> vector<27xi8>
+  %right10 = vector.load %right_view10[0] : view<37xi8> -> vector<37xi8>
+  %joined10 = vector.concat<0> %left10, %right10 : vector<27xi8>, vector<37xi8> -> vector<64xi8>
+  %offset10 = index.constant 640 : offset
+  %view10 = buffer.view %destination[%offset10] : buffer -> view<64xi8>
+  vector.store %joined10, %view10[0] : vector<64xi8>, view<64xi8>
+  %left_view11 = buffer.view %source[%zero] : buffer -> view<28xi8>
+  %right_view11 = buffer.view %source[%right_offset] : buffer -> view<36xi8>
+  %left11 = vector.load %left_view11[0] : view<28xi8> -> vector<28xi8>
+  %right11 = vector.load %right_view11[0] : view<36xi8> -> vector<36xi8>
+  %joined11 = vector.concat<0> %left11, %right11 : vector<28xi8>, vector<36xi8> -> vector<64xi8>
+  %offset11 = index.constant 704 : offset
+  %view11 = buffer.view %destination[%offset11] : buffer -> view<64xi8>
+  vector.store %joined11, %view11[0] : vector<64xi8>, view<64xi8>
+  %left_view12 = buffer.view %source[%zero] : buffer -> view<29xi8>
+  %right_view12 = buffer.view %source[%right_offset] : buffer -> view<35xi8>
+  %left12 = vector.load %left_view12[0] : view<29xi8> -> vector<29xi8>
+  %right12 = vector.load %right_view12[0] : view<35xi8> -> vector<35xi8>
+  %joined12 = vector.concat<0> %left12, %right12 : vector<29xi8>, vector<35xi8> -> vector<64xi8>
+  %offset12 = index.constant 768 : offset
+  %view12 = buffer.view %destination[%offset12] : buffer -> view<64xi8>
+  vector.store %joined12, %view12[0] : vector<64xi8>, view<64xi8>
+  %left_view13 = buffer.view %source[%zero] : buffer -> view<30xi8>
+  %right_view13 = buffer.view %source[%right_offset] : buffer -> view<34xi8>
+  %left13 = vector.load %left_view13[0] : view<30xi8> -> vector<30xi8>
+  %right13 = vector.load %right_view13[0] : view<34xi8> -> vector<34xi8>
+  %joined13 = vector.concat<0> %left13, %right13 : vector<30xi8>, vector<34xi8> -> vector<64xi8>
+  %offset13 = index.constant 832 : offset
+  %view13 = buffer.view %destination[%offset13] : buffer -> view<64xi8>
+  vector.store %joined13, %view13[0] : vector<64xi8>, view<64xi8>
+  %left_view14 = buffer.view %source[%zero] : buffer -> view<31xi8>
+  %right_view14 = buffer.view %source[%right_offset] : buffer -> view<33xi8>
+  %left14 = vector.load %left_view14[0] : view<31xi8> -> vector<31xi8>
+  %right14 = vector.load %right_view14[0] : view<33xi8> -> vector<33xi8>
+  %joined14 = vector.concat<0> %left14, %right14 : vector<31xi8>, vector<33xi8> -> vector<64xi8>
+  %offset14 = index.constant 896 : offset
+  %view14 = buffer.view %destination[%offset14] : buffer -> view<64xi8>
+  vector.store %joined14, %view14[0] : vector<64xi8>, view<64xi8>
+  %left_view15 = buffer.view %source[%zero] : buffer -> view<32xi8>
+  %right_view15 = buffer.view %source[%right_offset] : buffer -> view<32xi8>
+  %left15 = vector.load %left_view15[0] : view<32xi8> -> vector<32xi8>
+  %right15 = vector.load %right_view15[0] : view<32xi8> -> vector<32xi8>
+  %joined15 = vector.concat<0> %left15, %right15 : vector<32xi8>, vector<32xi8> -> vector<64xi8>
+  %offset15 = index.constant 960 : offset
+  %view15 = buffer.view %destination[%offset15] : buffer -> view<64xi8>
+  vector.store %joined15, %view15[0] : vector<64xi8>, view<64xi8>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @concat_bytes_33_48() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x256xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x32xi32>, group -> pipeline.flow<tile<32xi32>>
+  %results = pipeline.stage @concat_bytes_33_48_entry on %workers(%packets) : (group, pipeline.flow<tile<32xi32>>) -> (pipeline.flow<tile<256xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<256xi32>>, view<1x16x256xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @concat_bytes_33_48_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %zero = index.constant 0 : offset
+  %right_offset = index.constant 64 : offset
+  %left_view0 = buffer.view %source[%zero] : buffer -> view<33xi8>
+  %right_view0 = buffer.view %source[%right_offset] : buffer -> view<31xi8>
+  %left0 = vector.load %left_view0[0] : view<33xi8> -> vector<33xi8>
+  %right0 = vector.load %right_view0[0] : view<31xi8> -> vector<31xi8>
+  %joined0 = vector.concat<0> %left0, %right0 : vector<33xi8>, vector<31xi8> -> vector<64xi8>
+  %offset0 = index.constant 0 : offset
+  %view0 = buffer.view %destination[%offset0] : buffer -> view<64xi8>
+  vector.store %joined0, %view0[0] : vector<64xi8>, view<64xi8>
+  %left_view1 = buffer.view %source[%zero] : buffer -> view<34xi8>
+  %right_view1 = buffer.view %source[%right_offset] : buffer -> view<30xi8>
+  %left1 = vector.load %left_view1[0] : view<34xi8> -> vector<34xi8>
+  %right1 = vector.load %right_view1[0] : view<30xi8> -> vector<30xi8>
+  %joined1 = vector.concat<0> %left1, %right1 : vector<34xi8>, vector<30xi8> -> vector<64xi8>
+  %offset1 = index.constant 64 : offset
+  %view1 = buffer.view %destination[%offset1] : buffer -> view<64xi8>
+  vector.store %joined1, %view1[0] : vector<64xi8>, view<64xi8>
+  %left_view2 = buffer.view %source[%zero] : buffer -> view<35xi8>
+  %right_view2 = buffer.view %source[%right_offset] : buffer -> view<29xi8>
+  %left2 = vector.load %left_view2[0] : view<35xi8> -> vector<35xi8>
+  %right2 = vector.load %right_view2[0] : view<29xi8> -> vector<29xi8>
+  %joined2 = vector.concat<0> %left2, %right2 : vector<35xi8>, vector<29xi8> -> vector<64xi8>
+  %offset2 = index.constant 128 : offset
+  %view2 = buffer.view %destination[%offset2] : buffer -> view<64xi8>
+  vector.store %joined2, %view2[0] : vector<64xi8>, view<64xi8>
+  %left_view3 = buffer.view %source[%zero] : buffer -> view<36xi8>
+  %right_view3 = buffer.view %source[%right_offset] : buffer -> view<28xi8>
+  %left3 = vector.load %left_view3[0] : view<36xi8> -> vector<36xi8>
+  %right3 = vector.load %right_view3[0] : view<28xi8> -> vector<28xi8>
+  %joined3 = vector.concat<0> %left3, %right3 : vector<36xi8>, vector<28xi8> -> vector<64xi8>
+  %offset3 = index.constant 192 : offset
+  %view3 = buffer.view %destination[%offset3] : buffer -> view<64xi8>
+  vector.store %joined3, %view3[0] : vector<64xi8>, view<64xi8>
+  %left_view4 = buffer.view %source[%zero] : buffer -> view<37xi8>
+  %right_view4 = buffer.view %source[%right_offset] : buffer -> view<27xi8>
+  %left4 = vector.load %left_view4[0] : view<37xi8> -> vector<37xi8>
+  %right4 = vector.load %right_view4[0] : view<27xi8> -> vector<27xi8>
+  %joined4 = vector.concat<0> %left4, %right4 : vector<37xi8>, vector<27xi8> -> vector<64xi8>
+  %offset4 = index.constant 256 : offset
+  %view4 = buffer.view %destination[%offset4] : buffer -> view<64xi8>
+  vector.store %joined4, %view4[0] : vector<64xi8>, view<64xi8>
+  %left_view5 = buffer.view %source[%zero] : buffer -> view<38xi8>
+  %right_view5 = buffer.view %source[%right_offset] : buffer -> view<26xi8>
+  %left5 = vector.load %left_view5[0] : view<38xi8> -> vector<38xi8>
+  %right5 = vector.load %right_view5[0] : view<26xi8> -> vector<26xi8>
+  %joined5 = vector.concat<0> %left5, %right5 : vector<38xi8>, vector<26xi8> -> vector<64xi8>
+  %offset5 = index.constant 320 : offset
+  %view5 = buffer.view %destination[%offset5] : buffer -> view<64xi8>
+  vector.store %joined5, %view5[0] : vector<64xi8>, view<64xi8>
+  %left_view6 = buffer.view %source[%zero] : buffer -> view<39xi8>
+  %right_view6 = buffer.view %source[%right_offset] : buffer -> view<25xi8>
+  %left6 = vector.load %left_view6[0] : view<39xi8> -> vector<39xi8>
+  %right6 = vector.load %right_view6[0] : view<25xi8> -> vector<25xi8>
+  %joined6 = vector.concat<0> %left6, %right6 : vector<39xi8>, vector<25xi8> -> vector<64xi8>
+  %offset6 = index.constant 384 : offset
+  %view6 = buffer.view %destination[%offset6] : buffer -> view<64xi8>
+  vector.store %joined6, %view6[0] : vector<64xi8>, view<64xi8>
+  %left_view7 = buffer.view %source[%zero] : buffer -> view<40xi8>
+  %right_view7 = buffer.view %source[%right_offset] : buffer -> view<24xi8>
+  %left7 = vector.load %left_view7[0] : view<40xi8> -> vector<40xi8>
+  %right7 = vector.load %right_view7[0] : view<24xi8> -> vector<24xi8>
+  %joined7 = vector.concat<0> %left7, %right7 : vector<40xi8>, vector<24xi8> -> vector<64xi8>
+  %offset7 = index.constant 448 : offset
+  %view7 = buffer.view %destination[%offset7] : buffer -> view<64xi8>
+  vector.store %joined7, %view7[0] : vector<64xi8>, view<64xi8>
+  %left_view8 = buffer.view %source[%zero] : buffer -> view<41xi8>
+  %right_view8 = buffer.view %source[%right_offset] : buffer -> view<23xi8>
+  %left8 = vector.load %left_view8[0] : view<41xi8> -> vector<41xi8>
+  %right8 = vector.load %right_view8[0] : view<23xi8> -> vector<23xi8>
+  %joined8 = vector.concat<0> %left8, %right8 : vector<41xi8>, vector<23xi8> -> vector<64xi8>
+  %offset8 = index.constant 512 : offset
+  %view8 = buffer.view %destination[%offset8] : buffer -> view<64xi8>
+  vector.store %joined8, %view8[0] : vector<64xi8>, view<64xi8>
+  %left_view9 = buffer.view %source[%zero] : buffer -> view<42xi8>
+  %right_view9 = buffer.view %source[%right_offset] : buffer -> view<22xi8>
+  %left9 = vector.load %left_view9[0] : view<42xi8> -> vector<42xi8>
+  %right9 = vector.load %right_view9[0] : view<22xi8> -> vector<22xi8>
+  %joined9 = vector.concat<0> %left9, %right9 : vector<42xi8>, vector<22xi8> -> vector<64xi8>
+  %offset9 = index.constant 576 : offset
+  %view9 = buffer.view %destination[%offset9] : buffer -> view<64xi8>
+  vector.store %joined9, %view9[0] : vector<64xi8>, view<64xi8>
+  %left_view10 = buffer.view %source[%zero] : buffer -> view<43xi8>
+  %right_view10 = buffer.view %source[%right_offset] : buffer -> view<21xi8>
+  %left10 = vector.load %left_view10[0] : view<43xi8> -> vector<43xi8>
+  %right10 = vector.load %right_view10[0] : view<21xi8> -> vector<21xi8>
+  %joined10 = vector.concat<0> %left10, %right10 : vector<43xi8>, vector<21xi8> -> vector<64xi8>
+  %offset10 = index.constant 640 : offset
+  %view10 = buffer.view %destination[%offset10] : buffer -> view<64xi8>
+  vector.store %joined10, %view10[0] : vector<64xi8>, view<64xi8>
+  %left_view11 = buffer.view %source[%zero] : buffer -> view<44xi8>
+  %right_view11 = buffer.view %source[%right_offset] : buffer -> view<20xi8>
+  %left11 = vector.load %left_view11[0] : view<44xi8> -> vector<44xi8>
+  %right11 = vector.load %right_view11[0] : view<20xi8> -> vector<20xi8>
+  %joined11 = vector.concat<0> %left11, %right11 : vector<44xi8>, vector<20xi8> -> vector<64xi8>
+  %offset11 = index.constant 704 : offset
+  %view11 = buffer.view %destination[%offset11] : buffer -> view<64xi8>
+  vector.store %joined11, %view11[0] : vector<64xi8>, view<64xi8>
+  %left_view12 = buffer.view %source[%zero] : buffer -> view<45xi8>
+  %right_view12 = buffer.view %source[%right_offset] : buffer -> view<19xi8>
+  %left12 = vector.load %left_view12[0] : view<45xi8> -> vector<45xi8>
+  %right12 = vector.load %right_view12[0] : view<19xi8> -> vector<19xi8>
+  %joined12 = vector.concat<0> %left12, %right12 : vector<45xi8>, vector<19xi8> -> vector<64xi8>
+  %offset12 = index.constant 768 : offset
+  %view12 = buffer.view %destination[%offset12] : buffer -> view<64xi8>
+  vector.store %joined12, %view12[0] : vector<64xi8>, view<64xi8>
+  %left_view13 = buffer.view %source[%zero] : buffer -> view<46xi8>
+  %right_view13 = buffer.view %source[%right_offset] : buffer -> view<18xi8>
+  %left13 = vector.load %left_view13[0] : view<46xi8> -> vector<46xi8>
+  %right13 = vector.load %right_view13[0] : view<18xi8> -> vector<18xi8>
+  %joined13 = vector.concat<0> %left13, %right13 : vector<46xi8>, vector<18xi8> -> vector<64xi8>
+  %offset13 = index.constant 832 : offset
+  %view13 = buffer.view %destination[%offset13] : buffer -> view<64xi8>
+  vector.store %joined13, %view13[0] : vector<64xi8>, view<64xi8>
+  %left_view14 = buffer.view %source[%zero] : buffer -> view<47xi8>
+  %right_view14 = buffer.view %source[%right_offset] : buffer -> view<17xi8>
+  %left14 = vector.load %left_view14[0] : view<47xi8> -> vector<47xi8>
+  %right14 = vector.load %right_view14[0] : view<17xi8> -> vector<17xi8>
+  %joined14 = vector.concat<0> %left14, %right14 : vector<47xi8>, vector<17xi8> -> vector<64xi8>
+  %offset14 = index.constant 896 : offset
+  %view14 = buffer.view %destination[%offset14] : buffer -> view<64xi8>
+  vector.store %joined14, %view14[0] : vector<64xi8>, view<64xi8>
+  %left_view15 = buffer.view %source[%zero] : buffer -> view<48xi8>
+  %right_view15 = buffer.view %source[%right_offset] : buffer -> view<16xi8>
+  %left15 = vector.load %left_view15[0] : view<48xi8> -> vector<48xi8>
+  %right15 = vector.load %right_view15[0] : view<16xi8> -> vector<16xi8>
+  %joined15 = vector.concat<0> %left15, %right15 : vector<48xi8>, vector<16xi8> -> vector<64xi8>
+  %offset15 = index.constant 960 : offset
+  %view15 = buffer.view %destination[%offset15] : buffer -> view<64xi8>
+  vector.store %joined15, %view15[0] : vector<64xi8>, view<64xi8>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @concat_bytes_49_63() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x240xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x32xi32>, group -> pipeline.flow<tile<32xi32>>
+  %results = pipeline.stage @concat_bytes_49_63_entry on %workers(%packets) : (group, pipeline.flow<tile<32xi32>>) -> (pipeline.flow<tile<240xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<240xi32>>, view<1x16x240xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @concat_bytes_49_63_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %zero = index.constant 0 : offset
+  %right_offset = index.constant 64 : offset
+  %left_view0 = buffer.view %source[%zero] : buffer -> view<49xi8>
+  %right_view0 = buffer.view %source[%right_offset] : buffer -> view<15xi8>
+  %left0 = vector.load %left_view0[0] : view<49xi8> -> vector<49xi8>
+  %right0 = vector.load %right_view0[0] : view<15xi8> -> vector<15xi8>
+  %joined0 = vector.concat<0> %left0, %right0 : vector<49xi8>, vector<15xi8> -> vector<64xi8>
+  %offset0 = index.constant 0 : offset
+  %view0 = buffer.view %destination[%offset0] : buffer -> view<64xi8>
+  vector.store %joined0, %view0[0] : vector<64xi8>, view<64xi8>
+  %left_view1 = buffer.view %source[%zero] : buffer -> view<50xi8>
+  %right_view1 = buffer.view %source[%right_offset] : buffer -> view<14xi8>
+  %left1 = vector.load %left_view1[0] : view<50xi8> -> vector<50xi8>
+  %right1 = vector.load %right_view1[0] : view<14xi8> -> vector<14xi8>
+  %joined1 = vector.concat<0> %left1, %right1 : vector<50xi8>, vector<14xi8> -> vector<64xi8>
+  %offset1 = index.constant 64 : offset
+  %view1 = buffer.view %destination[%offset1] : buffer -> view<64xi8>
+  vector.store %joined1, %view1[0] : vector<64xi8>, view<64xi8>
+  %left_view2 = buffer.view %source[%zero] : buffer -> view<51xi8>
+  %right_view2 = buffer.view %source[%right_offset] : buffer -> view<13xi8>
+  %left2 = vector.load %left_view2[0] : view<51xi8> -> vector<51xi8>
+  %right2 = vector.load %right_view2[0] : view<13xi8> -> vector<13xi8>
+  %joined2 = vector.concat<0> %left2, %right2 : vector<51xi8>, vector<13xi8> -> vector<64xi8>
+  %offset2 = index.constant 128 : offset
+  %view2 = buffer.view %destination[%offset2] : buffer -> view<64xi8>
+  vector.store %joined2, %view2[0] : vector<64xi8>, view<64xi8>
+  %left_view3 = buffer.view %source[%zero] : buffer -> view<52xi8>
+  %right_view3 = buffer.view %source[%right_offset] : buffer -> view<12xi8>
+  %left3 = vector.load %left_view3[0] : view<52xi8> -> vector<52xi8>
+  %right3 = vector.load %right_view3[0] : view<12xi8> -> vector<12xi8>
+  %joined3 = vector.concat<0> %left3, %right3 : vector<52xi8>, vector<12xi8> -> vector<64xi8>
+  %offset3 = index.constant 192 : offset
+  %view3 = buffer.view %destination[%offset3] : buffer -> view<64xi8>
+  vector.store %joined3, %view3[0] : vector<64xi8>, view<64xi8>
+  %left_view4 = buffer.view %source[%zero] : buffer -> view<53xi8>
+  %right_view4 = buffer.view %source[%right_offset] : buffer -> view<11xi8>
+  %left4 = vector.load %left_view4[0] : view<53xi8> -> vector<53xi8>
+  %right4 = vector.load %right_view4[0] : view<11xi8> -> vector<11xi8>
+  %joined4 = vector.concat<0> %left4, %right4 : vector<53xi8>, vector<11xi8> -> vector<64xi8>
+  %offset4 = index.constant 256 : offset
+  %view4 = buffer.view %destination[%offset4] : buffer -> view<64xi8>
+  vector.store %joined4, %view4[0] : vector<64xi8>, view<64xi8>
+  %left_view5 = buffer.view %source[%zero] : buffer -> view<54xi8>
+  %right_view5 = buffer.view %source[%right_offset] : buffer -> view<10xi8>
+  %left5 = vector.load %left_view5[0] : view<54xi8> -> vector<54xi8>
+  %right5 = vector.load %right_view5[0] : view<10xi8> -> vector<10xi8>
+  %joined5 = vector.concat<0> %left5, %right5 : vector<54xi8>, vector<10xi8> -> vector<64xi8>
+  %offset5 = index.constant 320 : offset
+  %view5 = buffer.view %destination[%offset5] : buffer -> view<64xi8>
+  vector.store %joined5, %view5[0] : vector<64xi8>, view<64xi8>
+  %left_view6 = buffer.view %source[%zero] : buffer -> view<55xi8>
+  %right_view6 = buffer.view %source[%right_offset] : buffer -> view<9xi8>
+  %left6 = vector.load %left_view6[0] : view<55xi8> -> vector<55xi8>
+  %right6 = vector.load %right_view6[0] : view<9xi8> -> vector<9xi8>
+  %joined6 = vector.concat<0> %left6, %right6 : vector<55xi8>, vector<9xi8> -> vector<64xi8>
+  %offset6 = index.constant 384 : offset
+  %view6 = buffer.view %destination[%offset6] : buffer -> view<64xi8>
+  vector.store %joined6, %view6[0] : vector<64xi8>, view<64xi8>
+  %left_view7 = buffer.view %source[%zero] : buffer -> view<56xi8>
+  %right_view7 = buffer.view %source[%right_offset] : buffer -> view<8xi8>
+  %left7 = vector.load %left_view7[0] : view<56xi8> -> vector<56xi8>
+  %right7 = vector.load %right_view7[0] : view<8xi8> -> vector<8xi8>
+  %joined7 = vector.concat<0> %left7, %right7 : vector<56xi8>, vector<8xi8> -> vector<64xi8>
+  %offset7 = index.constant 448 : offset
+  %view7 = buffer.view %destination[%offset7] : buffer -> view<64xi8>
+  vector.store %joined7, %view7[0] : vector<64xi8>, view<64xi8>
+  %left_view8 = buffer.view %source[%zero] : buffer -> view<57xi8>
+  %right_view8 = buffer.view %source[%right_offset] : buffer -> view<7xi8>
+  %left8 = vector.load %left_view8[0] : view<57xi8> -> vector<57xi8>
+  %right8 = vector.load %right_view8[0] : view<7xi8> -> vector<7xi8>
+  %joined8 = vector.concat<0> %left8, %right8 : vector<57xi8>, vector<7xi8> -> vector<64xi8>
+  %offset8 = index.constant 512 : offset
+  %view8 = buffer.view %destination[%offset8] : buffer -> view<64xi8>
+  vector.store %joined8, %view8[0] : vector<64xi8>, view<64xi8>
+  %left_view9 = buffer.view %source[%zero] : buffer -> view<58xi8>
+  %right_view9 = buffer.view %source[%right_offset] : buffer -> view<6xi8>
+  %left9 = vector.load %left_view9[0] : view<58xi8> -> vector<58xi8>
+  %right9 = vector.load %right_view9[0] : view<6xi8> -> vector<6xi8>
+  %joined9 = vector.concat<0> %left9, %right9 : vector<58xi8>, vector<6xi8> -> vector<64xi8>
+  %offset9 = index.constant 576 : offset
+  %view9 = buffer.view %destination[%offset9] : buffer -> view<64xi8>
+  vector.store %joined9, %view9[0] : vector<64xi8>, view<64xi8>
+  %left_view10 = buffer.view %source[%zero] : buffer -> view<59xi8>
+  %right_view10 = buffer.view %source[%right_offset] : buffer -> view<5xi8>
+  %left10 = vector.load %left_view10[0] : view<59xi8> -> vector<59xi8>
+  %right10 = vector.load %right_view10[0] : view<5xi8> -> vector<5xi8>
+  %joined10 = vector.concat<0> %left10, %right10 : vector<59xi8>, vector<5xi8> -> vector<64xi8>
+  %offset10 = index.constant 640 : offset
+  %view10 = buffer.view %destination[%offset10] : buffer -> view<64xi8>
+  vector.store %joined10, %view10[0] : vector<64xi8>, view<64xi8>
+  %left_view11 = buffer.view %source[%zero] : buffer -> view<60xi8>
+  %right_view11 = buffer.view %source[%right_offset] : buffer -> view<4xi8>
+  %left11 = vector.load %left_view11[0] : view<60xi8> -> vector<60xi8>
+  %right11 = vector.load %right_view11[0] : view<4xi8> -> vector<4xi8>
+  %joined11 = vector.concat<0> %left11, %right11 : vector<60xi8>, vector<4xi8> -> vector<64xi8>
+  %offset11 = index.constant 704 : offset
+  %view11 = buffer.view %destination[%offset11] : buffer -> view<64xi8>
+  vector.store %joined11, %view11[0] : vector<64xi8>, view<64xi8>
+  %left_view12 = buffer.view %source[%zero] : buffer -> view<61xi8>
+  %right_view12 = buffer.view %source[%right_offset] : buffer -> view<3xi8>
+  %left12 = vector.load %left_view12[0] : view<61xi8> -> vector<61xi8>
+  %right12 = vector.load %right_view12[0] : view<3xi8> -> vector<3xi8>
+  %joined12 = vector.concat<0> %left12, %right12 : vector<61xi8>, vector<3xi8> -> vector<64xi8>
+  %offset12 = index.constant 768 : offset
+  %view12 = buffer.view %destination[%offset12] : buffer -> view<64xi8>
+  vector.store %joined12, %view12[0] : vector<64xi8>, view<64xi8>
+  %left_view13 = buffer.view %source[%zero] : buffer -> view<62xi8>
+  %right_view13 = buffer.view %source[%right_offset] : buffer -> view<2xi8>
+  %left13 = vector.load %left_view13[0] : view<62xi8> -> vector<62xi8>
+  %right13 = vector.load %right_view13[0] : view<2xi8> -> vector<2xi8>
+  %joined13 = vector.concat<0> %left13, %right13 : vector<62xi8>, vector<2xi8> -> vector<64xi8>
+  %offset13 = index.constant 832 : offset
+  %view13 = buffer.view %destination[%offset13] : buffer -> view<64xi8>
+  vector.store %joined13, %view13[0] : vector<64xi8>, view<64xi8>
+  %left_view14 = buffer.view %source[%zero] : buffer -> view<63xi8>
+  %right_view14 = buffer.view %source[%right_offset] : buffer -> view<1xi8>
+  %left14 = vector.load %left_view14[0] : view<63xi8> -> vector<63xi8>
+  %right14 = vector.load %right_view14[0] : view<1xi8> -> vector<1xi8>
+  %joined14 = vector.concat<0> %left14, %right14 : vector<63xi8>, vector<1xi8> -> vector<64xi8>
+  %offset14 = index.constant 896 : offset
+  %view14 = buffer.view %destination[%offset14] : buffer -> view<64xi8>
+  vector.store %joined14, %view14[0] : vector<64xi8>, view<64xi8>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @concat_i8() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x192xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x32xi32>, group -> pipeline.flow<tile<32xi32>>
+  %results = pipeline.stage @concat_i8_entry on %workers(%packets) : (group, pipeline.flow<tile<32xi32>>) -> (pipeline.flow<tile<192xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<192xi32>>, view<1x16x192xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @concat_i8_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %zero = index.constant 0 : offset
+  %right_offset = index.constant 64 : offset
+  %padding = vector.constant -1515870811 : vector<16xi32>
+  %padding_offset0_0 = index.constant 0 : offset
+  %padding_view0_0 = buffer.view %destination[%padding_offset0_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset0_1 = index.constant 64 : offset
+  %padding_view0_1 = buffer.view %destination[%padding_offset0_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0_1[0] : vector<16xi32>, view<16xi32>
+  %left_view0 = buffer.view %source[%zero] : buffer -> view<1xi8>
+  %right_view0 = buffer.view %source[%right_offset] : buffer -> view<63xi8>
+  %left0 = vector.load %left_view0[0] : view<1xi8> -> vector<1xi8>
+  %right0 = vector.load %right_view0[0] : view<63xi8> -> vector<63xi8>
+  %joined0 = vector.concat<0> %left0, %right0 : vector<1xi8>, vector<63xi8> -> vector<64xi8>
+  %offset0 = index.constant 0 : offset
+  %view0 = buffer.view %destination[%offset0] : buffer -> view<64xi8>
+  vector.store %joined0, %view0[0] : vector<64xi8>, view<64xi8>
+  %padding_offset1_0 = index.constant 128 : offset
+  %padding_view1_0 = buffer.view %destination[%padding_offset1_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset1_1 = index.constant 192 : offset
+  %padding_view1_1 = buffer.view %destination[%padding_offset1_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1_1[0] : vector<16xi32>, view<16xi32>
+  %left_view1 = buffer.view %source[%zero] : buffer -> view<1xi8>
+  %right_view1 = buffer.view %source[%right_offset] : buffer -> view<1xi8>
+  %left1 = vector.load %left_view1[0] : view<1xi8> -> vector<1xi8>
+  %right1 = vector.load %right_view1[0] : view<1xi8> -> vector<1xi8>
+  %joined1 = vector.concat<0> %left1, %right1 : vector<1xi8>, vector<1xi8> -> vector<2xi8>
+  %offset1 = index.constant 128 : offset
+  %view1 = buffer.view %destination[%offset1] : buffer -> view<2xi8>
+  vector.store %joined1, %view1[0] : vector<2xi8>, view<2xi8>
+  %padding_offset2_0 = index.constant 256 : offset
+  %padding_view2_0 = buffer.view %destination[%padding_offset2_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset2_1 = index.constant 320 : offset
+  %padding_view2_1 = buffer.view %destination[%padding_offset2_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2_1[0] : vector<16xi32>, view<16xi32>
+  %left_view2 = buffer.view %source[%zero] : buffer -> view<32xi8>
+  %right_view2 = buffer.view %source[%right_offset] : buffer -> view<1xi8>
+  %left2 = vector.load %left_view2[0] : view<32xi8> -> vector<32xi8>
+  %right2 = vector.load %right_view2[0] : view<1xi8> -> vector<1xi8>
+  %joined2 = vector.concat<0> %left2, %right2 : vector<32xi8>, vector<1xi8> -> vector<33xi8>
+  %offset2 = index.constant 256 : offset
+  %view2 = buffer.view %destination[%offset2] : buffer -> view<33xi8>
+  vector.store %joined2, %view2[0] : vector<33xi8>, view<33xi8>
+  %padding_offset3_0 = index.constant 384 : offset
+  %padding_view3_0 = buffer.view %destination[%padding_offset3_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset3_1 = index.constant 448 : offset
+  %padding_view3_1 = buffer.view %destination[%padding_offset3_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3_1[0] : vector<16xi32>, view<16xi32>
+  %left_view3 = buffer.view %source[%zero] : buffer -> view<64xi8>
+  %right_view3 = buffer.view %source[%right_offset] : buffer -> view<1xi8>
+  %left3 = vector.load %left_view3[0] : view<64xi8> -> vector<64xi8>
+  %right3 = vector.load %right_view3[0] : view<1xi8> -> vector<1xi8>
+  %joined3 = vector.concat<0> %left3, %right3 : vector<64xi8>, vector<1xi8> -> vector<65xi8>
+  %offset3 = index.constant 384 : offset
+  %view3 = buffer.view %destination[%offset3] : buffer -> view<65xi8>
+  vector.store %joined3, %view3[0] : vector<65xi8>, view<65xi8>
+  %padding_offset4_0 = index.constant 512 : offset
+  %padding_view4_0 = buffer.view %destination[%padding_offset4_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view4_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset4_1 = index.constant 576 : offset
+  %padding_view4_1 = buffer.view %destination[%padding_offset4_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view4_1[0] : vector<16xi32>, view<16xi32>
+  %left_view4 = buffer.view %source[%zero] : buffer -> view<64xi8>
+  %right_view4 = buffer.view %source[%right_offset] : buffer -> view<63xi8>
+  %left4 = vector.load %left_view4[0] : view<64xi8> -> vector<64xi8>
+  %right4 = vector.load %right_view4[0] : view<63xi8> -> vector<63xi8>
+  %joined4 = vector.concat<0> %left4, %right4 : vector<64xi8>, vector<63xi8> -> vector<127xi8>
+  %offset4 = index.constant 512 : offset
+  %view4 = buffer.view %destination[%offset4] : buffer -> view<127xi8>
+  vector.store %joined4, %view4[0] : vector<127xi8>, view<127xi8>
+  %padding_offset5_0 = index.constant 640 : offset
+  %padding_view5_0 = buffer.view %destination[%padding_offset5_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view5_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset5_1 = index.constant 704 : offset
+  %padding_view5_1 = buffer.view %destination[%padding_offset5_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view5_1[0] : vector<16xi32>, view<16xi32>
+  %left_view5 = buffer.view %source[%zero] : buffer -> view<64xi8>
+  %right_view5 = buffer.view %source[%right_offset] : buffer -> view<64xi8>
+  %left5 = vector.load %left_view5[0] : view<64xi8> -> vector<64xi8>
+  %right5 = vector.load %right_view5[0] : view<64xi8> -> vector<64xi8>
+  %joined5 = vector.concat<0> %left5, %right5 : vector<64xi8>, vector<64xi8> -> vector<128xi8>
+  %offset5 = index.constant 640 : offset
+  %view5 = buffer.view %destination[%offset5] : buffer -> view<128xi8>
+  vector.store %joined5, %view5[0] : vector<128xi8>, view<128xi8>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @concat_f8E4M3() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x192xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x32xi32>, group -> pipeline.flow<tile<32xi32>>
+  %results = pipeline.stage @concat_f8E4M3_entry on %workers(%packets) : (group, pipeline.flow<tile<32xi32>>) -> (pipeline.flow<tile<192xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<192xi32>>, view<1x16x192xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @concat_f8E4M3_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %zero = index.constant 0 : offset
+  %right_offset = index.constant 64 : offset
+  %padding = vector.constant -1515870811 : vector<16xi32>
+  %padding_offset0_0 = index.constant 0 : offset
+  %padding_view0_0 = buffer.view %destination[%padding_offset0_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset0_1 = index.constant 64 : offset
+  %padding_view0_1 = buffer.view %destination[%padding_offset0_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0_1[0] : vector<16xi32>, view<16xi32>
+  %left_view0 = buffer.view %source[%zero] : buffer -> view<1xf8E4M3>
+  %right_view0 = buffer.view %source[%right_offset] : buffer -> view<63xf8E4M3>
+  %left0 = vector.load %left_view0[0] : view<1xf8E4M3> -> vector<1xf8E4M3>
+  %right0 = vector.load %right_view0[0] : view<63xf8E4M3> -> vector<63xf8E4M3>
+  %joined0 = vector.concat<0> %left0, %right0 : vector<1xf8E4M3>, vector<63xf8E4M3> -> vector<64xf8E4M3>
+  %offset0 = index.constant 0 : offset
+  %view0 = buffer.view %destination[%offset0] : buffer -> view<64xf8E4M3>
+  vector.store %joined0, %view0[0] : vector<64xf8E4M3>, view<64xf8E4M3>
+  %padding_offset1_0 = index.constant 128 : offset
+  %padding_view1_0 = buffer.view %destination[%padding_offset1_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset1_1 = index.constant 192 : offset
+  %padding_view1_1 = buffer.view %destination[%padding_offset1_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1_1[0] : vector<16xi32>, view<16xi32>
+  %left_view1 = buffer.view %source[%zero] : buffer -> view<1xf8E4M3>
+  %right_view1 = buffer.view %source[%right_offset] : buffer -> view<1xf8E4M3>
+  %left1 = vector.load %left_view1[0] : view<1xf8E4M3> -> vector<1xf8E4M3>
+  %right1 = vector.load %right_view1[0] : view<1xf8E4M3> -> vector<1xf8E4M3>
+  %joined1 = vector.concat<0> %left1, %right1 : vector<1xf8E4M3>, vector<1xf8E4M3> -> vector<2xf8E4M3>
+  %offset1 = index.constant 128 : offset
+  %view1 = buffer.view %destination[%offset1] : buffer -> view<2xf8E4M3>
+  vector.store %joined1, %view1[0] : vector<2xf8E4M3>, view<2xf8E4M3>
+  %padding_offset2_0 = index.constant 256 : offset
+  %padding_view2_0 = buffer.view %destination[%padding_offset2_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset2_1 = index.constant 320 : offset
+  %padding_view2_1 = buffer.view %destination[%padding_offset2_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2_1[0] : vector<16xi32>, view<16xi32>
+  %left_view2 = buffer.view %source[%zero] : buffer -> view<32xf8E4M3>
+  %right_view2 = buffer.view %source[%right_offset] : buffer -> view<1xf8E4M3>
+  %left2 = vector.load %left_view2[0] : view<32xf8E4M3> -> vector<32xf8E4M3>
+  %right2 = vector.load %right_view2[0] : view<1xf8E4M3> -> vector<1xf8E4M3>
+  %joined2 = vector.concat<0> %left2, %right2 : vector<32xf8E4M3>, vector<1xf8E4M3> -> vector<33xf8E4M3>
+  %offset2 = index.constant 256 : offset
+  %view2 = buffer.view %destination[%offset2] : buffer -> view<33xf8E4M3>
+  vector.store %joined2, %view2[0] : vector<33xf8E4M3>, view<33xf8E4M3>
+  %padding_offset3_0 = index.constant 384 : offset
+  %padding_view3_0 = buffer.view %destination[%padding_offset3_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset3_1 = index.constant 448 : offset
+  %padding_view3_1 = buffer.view %destination[%padding_offset3_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3_1[0] : vector<16xi32>, view<16xi32>
+  %left_view3 = buffer.view %source[%zero] : buffer -> view<64xf8E4M3>
+  %right_view3 = buffer.view %source[%right_offset] : buffer -> view<1xf8E4M3>
+  %left3 = vector.load %left_view3[0] : view<64xf8E4M3> -> vector<64xf8E4M3>
+  %right3 = vector.load %right_view3[0] : view<1xf8E4M3> -> vector<1xf8E4M3>
+  %joined3 = vector.concat<0> %left3, %right3 : vector<64xf8E4M3>, vector<1xf8E4M3> -> vector<65xf8E4M3>
+  %offset3 = index.constant 384 : offset
+  %view3 = buffer.view %destination[%offset3] : buffer -> view<65xf8E4M3>
+  vector.store %joined3, %view3[0] : vector<65xf8E4M3>, view<65xf8E4M3>
+  %padding_offset4_0 = index.constant 512 : offset
+  %padding_view4_0 = buffer.view %destination[%padding_offset4_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view4_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset4_1 = index.constant 576 : offset
+  %padding_view4_1 = buffer.view %destination[%padding_offset4_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view4_1[0] : vector<16xi32>, view<16xi32>
+  %left_view4 = buffer.view %source[%zero] : buffer -> view<64xf8E4M3>
+  %right_view4 = buffer.view %source[%right_offset] : buffer -> view<63xf8E4M3>
+  %left4 = vector.load %left_view4[0] : view<64xf8E4M3> -> vector<64xf8E4M3>
+  %right4 = vector.load %right_view4[0] : view<63xf8E4M3> -> vector<63xf8E4M3>
+  %joined4 = vector.concat<0> %left4, %right4 : vector<64xf8E4M3>, vector<63xf8E4M3> -> vector<127xf8E4M3>
+  %offset4 = index.constant 512 : offset
+  %view4 = buffer.view %destination[%offset4] : buffer -> view<127xf8E4M3>
+  vector.store %joined4, %view4[0] : vector<127xf8E4M3>, view<127xf8E4M3>
+  %padding_offset5_0 = index.constant 640 : offset
+  %padding_view5_0 = buffer.view %destination[%padding_offset5_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view5_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset5_1 = index.constant 704 : offset
+  %padding_view5_1 = buffer.view %destination[%padding_offset5_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view5_1[0] : vector<16xi32>, view<16xi32>
+  %left_view5 = buffer.view %source[%zero] : buffer -> view<64xf8E4M3>
+  %right_view5 = buffer.view %source[%right_offset] : buffer -> view<64xf8E4M3>
+  %left5 = vector.load %left_view5[0] : view<64xf8E4M3> -> vector<64xf8E4M3>
+  %right5 = vector.load %right_view5[0] : view<64xf8E4M3> -> vector<64xf8E4M3>
+  %joined5 = vector.concat<0> %left5, %right5 : vector<64xf8E4M3>, vector<64xf8E4M3> -> vector<128xf8E4M3>
+  %offset5 = index.constant 640 : offset
+  %view5 = buffer.view %destination[%offset5] : buffer -> view<128xf8E4M3>
+  vector.store %joined5, %view5[0] : vector<128xf8E4M3>, view<128xf8E4M3>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @concat_f8E5M2() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x192xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x32xi32>, group -> pipeline.flow<tile<32xi32>>
+  %results = pipeline.stage @concat_f8E5M2_entry on %workers(%packets) : (group, pipeline.flow<tile<32xi32>>) -> (pipeline.flow<tile<192xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<192xi32>>, view<1x16x192xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @concat_f8E5M2_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %zero = index.constant 0 : offset
+  %right_offset = index.constant 64 : offset
+  %padding = vector.constant -1515870811 : vector<16xi32>
+  %padding_offset0_0 = index.constant 0 : offset
+  %padding_view0_0 = buffer.view %destination[%padding_offset0_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset0_1 = index.constant 64 : offset
+  %padding_view0_1 = buffer.view %destination[%padding_offset0_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0_1[0] : vector<16xi32>, view<16xi32>
+  %left_view0 = buffer.view %source[%zero] : buffer -> view<1xf8E5M2>
+  %right_view0 = buffer.view %source[%right_offset] : buffer -> view<63xf8E5M2>
+  %left0 = vector.load %left_view0[0] : view<1xf8E5M2> -> vector<1xf8E5M2>
+  %right0 = vector.load %right_view0[0] : view<63xf8E5M2> -> vector<63xf8E5M2>
+  %joined0 = vector.concat<0> %left0, %right0 : vector<1xf8E5M2>, vector<63xf8E5M2> -> vector<64xf8E5M2>
+  %offset0 = index.constant 0 : offset
+  %view0 = buffer.view %destination[%offset0] : buffer -> view<64xf8E5M2>
+  vector.store %joined0, %view0[0] : vector<64xf8E5M2>, view<64xf8E5M2>
+  %padding_offset1_0 = index.constant 128 : offset
+  %padding_view1_0 = buffer.view %destination[%padding_offset1_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset1_1 = index.constant 192 : offset
+  %padding_view1_1 = buffer.view %destination[%padding_offset1_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1_1[0] : vector<16xi32>, view<16xi32>
+  %left_view1 = buffer.view %source[%zero] : buffer -> view<1xf8E5M2>
+  %right_view1 = buffer.view %source[%right_offset] : buffer -> view<1xf8E5M2>
+  %left1 = vector.load %left_view1[0] : view<1xf8E5M2> -> vector<1xf8E5M2>
+  %right1 = vector.load %right_view1[0] : view<1xf8E5M2> -> vector<1xf8E5M2>
+  %joined1 = vector.concat<0> %left1, %right1 : vector<1xf8E5M2>, vector<1xf8E5M2> -> vector<2xf8E5M2>
+  %offset1 = index.constant 128 : offset
+  %view1 = buffer.view %destination[%offset1] : buffer -> view<2xf8E5M2>
+  vector.store %joined1, %view1[0] : vector<2xf8E5M2>, view<2xf8E5M2>
+  %padding_offset2_0 = index.constant 256 : offset
+  %padding_view2_0 = buffer.view %destination[%padding_offset2_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset2_1 = index.constant 320 : offset
+  %padding_view2_1 = buffer.view %destination[%padding_offset2_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2_1[0] : vector<16xi32>, view<16xi32>
+  %left_view2 = buffer.view %source[%zero] : buffer -> view<32xf8E5M2>
+  %right_view2 = buffer.view %source[%right_offset] : buffer -> view<1xf8E5M2>
+  %left2 = vector.load %left_view2[0] : view<32xf8E5M2> -> vector<32xf8E5M2>
+  %right2 = vector.load %right_view2[0] : view<1xf8E5M2> -> vector<1xf8E5M2>
+  %joined2 = vector.concat<0> %left2, %right2 : vector<32xf8E5M2>, vector<1xf8E5M2> -> vector<33xf8E5M2>
+  %offset2 = index.constant 256 : offset
+  %view2 = buffer.view %destination[%offset2] : buffer -> view<33xf8E5M2>
+  vector.store %joined2, %view2[0] : vector<33xf8E5M2>, view<33xf8E5M2>
+  %padding_offset3_0 = index.constant 384 : offset
+  %padding_view3_0 = buffer.view %destination[%padding_offset3_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset3_1 = index.constant 448 : offset
+  %padding_view3_1 = buffer.view %destination[%padding_offset3_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3_1[0] : vector<16xi32>, view<16xi32>
+  %left_view3 = buffer.view %source[%zero] : buffer -> view<64xf8E5M2>
+  %right_view3 = buffer.view %source[%right_offset] : buffer -> view<1xf8E5M2>
+  %left3 = vector.load %left_view3[0] : view<64xf8E5M2> -> vector<64xf8E5M2>
+  %right3 = vector.load %right_view3[0] : view<1xf8E5M2> -> vector<1xf8E5M2>
+  %joined3 = vector.concat<0> %left3, %right3 : vector<64xf8E5M2>, vector<1xf8E5M2> -> vector<65xf8E5M2>
+  %offset3 = index.constant 384 : offset
+  %view3 = buffer.view %destination[%offset3] : buffer -> view<65xf8E5M2>
+  vector.store %joined3, %view3[0] : vector<65xf8E5M2>, view<65xf8E5M2>
+  %padding_offset4_0 = index.constant 512 : offset
+  %padding_view4_0 = buffer.view %destination[%padding_offset4_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view4_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset4_1 = index.constant 576 : offset
+  %padding_view4_1 = buffer.view %destination[%padding_offset4_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view4_1[0] : vector<16xi32>, view<16xi32>
+  %left_view4 = buffer.view %source[%zero] : buffer -> view<64xf8E5M2>
+  %right_view4 = buffer.view %source[%right_offset] : buffer -> view<63xf8E5M2>
+  %left4 = vector.load %left_view4[0] : view<64xf8E5M2> -> vector<64xf8E5M2>
+  %right4 = vector.load %right_view4[0] : view<63xf8E5M2> -> vector<63xf8E5M2>
+  %joined4 = vector.concat<0> %left4, %right4 : vector<64xf8E5M2>, vector<63xf8E5M2> -> vector<127xf8E5M2>
+  %offset4 = index.constant 512 : offset
+  %view4 = buffer.view %destination[%offset4] : buffer -> view<127xf8E5M2>
+  vector.store %joined4, %view4[0] : vector<127xf8E5M2>, view<127xf8E5M2>
+  %padding_offset5_0 = index.constant 640 : offset
+  %padding_view5_0 = buffer.view %destination[%padding_offset5_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view5_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset5_1 = index.constant 704 : offset
+  %padding_view5_1 = buffer.view %destination[%padding_offset5_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view5_1[0] : vector<16xi32>, view<16xi32>
+  %left_view5 = buffer.view %source[%zero] : buffer -> view<64xf8E5M2>
+  %right_view5 = buffer.view %source[%right_offset] : buffer -> view<64xf8E5M2>
+  %left5 = vector.load %left_view5[0] : view<64xf8E5M2> -> vector<64xf8E5M2>
+  %right5 = vector.load %right_view5[0] : view<64xf8E5M2> -> vector<64xf8E5M2>
+  %joined5 = vector.concat<0> %left5, %right5 : vector<64xf8E5M2>, vector<64xf8E5M2> -> vector<128xf8E5M2>
+  %offset5 = index.constant 640 : offset
+  %view5 = buffer.view %destination[%offset5] : buffer -> view<128xf8E5M2>
+  vector.store %joined5, %view5[0] : vector<128xf8E5M2>, view<128xf8E5M2>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @concat_i16() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x192xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x32xi32>, group -> pipeline.flow<tile<32xi32>>
+  %results = pipeline.stage @concat_i16_entry on %workers(%packets) : (group, pipeline.flow<tile<32xi32>>) -> (pipeline.flow<tile<192xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<192xi32>>, view<1x16x192xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @concat_i16_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %zero = index.constant 0 : offset
+  %right_offset = index.constant 64 : offset
+  %padding = vector.constant -1515870811 : vector<16xi32>
+  %padding_offset0_0 = index.constant 0 : offset
+  %padding_view0_0 = buffer.view %destination[%padding_offset0_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset0_1 = index.constant 64 : offset
+  %padding_view0_1 = buffer.view %destination[%padding_offset0_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0_1[0] : vector<16xi32>, view<16xi32>
+  %left_view0 = buffer.view %source[%zero] : buffer -> view<1xi16>
+  %right_view0 = buffer.view %source[%right_offset] : buffer -> view<31xi16>
+  %left0 = vector.load %left_view0[0] : view<1xi16> -> vector<1xi16>
+  %right0 = vector.load %right_view0[0] : view<31xi16> -> vector<31xi16>
+  %joined0 = vector.concat<0> %left0, %right0 : vector<1xi16>, vector<31xi16> -> vector<32xi16>
+  %offset0 = index.constant 0 : offset
+  %view0 = buffer.view %destination[%offset0] : buffer -> view<32xi16>
+  vector.store %joined0, %view0[0] : vector<32xi16>, view<32xi16>
+  %padding_offset1_0 = index.constant 128 : offset
+  %padding_view1_0 = buffer.view %destination[%padding_offset1_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset1_1 = index.constant 192 : offset
+  %padding_view1_1 = buffer.view %destination[%padding_offset1_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1_1[0] : vector<16xi32>, view<16xi32>
+  %left_view1 = buffer.view %source[%zero] : buffer -> view<1xi16>
+  %right_view1 = buffer.view %source[%right_offset] : buffer -> view<1xi16>
+  %left1 = vector.load %left_view1[0] : view<1xi16> -> vector<1xi16>
+  %right1 = vector.load %right_view1[0] : view<1xi16> -> vector<1xi16>
+  %joined1 = vector.concat<0> %left1, %right1 : vector<1xi16>, vector<1xi16> -> vector<2xi16>
+  %offset1 = index.constant 128 : offset
+  %view1 = buffer.view %destination[%offset1] : buffer -> view<2xi16>
+  vector.store %joined1, %view1[0] : vector<2xi16>, view<2xi16>
+  %padding_offset2_0 = index.constant 256 : offset
+  %padding_view2_0 = buffer.view %destination[%padding_offset2_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset2_1 = index.constant 320 : offset
+  %padding_view2_1 = buffer.view %destination[%padding_offset2_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2_1[0] : vector<16xi32>, view<16xi32>
+  %left_view2 = buffer.view %source[%zero] : buffer -> view<16xi16>
+  %right_view2 = buffer.view %source[%right_offset] : buffer -> view<1xi16>
+  %left2 = vector.load %left_view2[0] : view<16xi16> -> vector<16xi16>
+  %right2 = vector.load %right_view2[0] : view<1xi16> -> vector<1xi16>
+  %joined2 = vector.concat<0> %left2, %right2 : vector<16xi16>, vector<1xi16> -> vector<17xi16>
+  %offset2 = index.constant 256 : offset
+  %view2 = buffer.view %destination[%offset2] : buffer -> view<17xi16>
+  vector.store %joined2, %view2[0] : vector<17xi16>, view<17xi16>
+  %padding_offset3_0 = index.constant 384 : offset
+  %padding_view3_0 = buffer.view %destination[%padding_offset3_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset3_1 = index.constant 448 : offset
+  %padding_view3_1 = buffer.view %destination[%padding_offset3_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3_1[0] : vector<16xi32>, view<16xi32>
+  %left_view3 = buffer.view %source[%zero] : buffer -> view<32xi16>
+  %right_view3 = buffer.view %source[%right_offset] : buffer -> view<1xi16>
+  %left3 = vector.load %left_view3[0] : view<32xi16> -> vector<32xi16>
+  %right3 = vector.load %right_view3[0] : view<1xi16> -> vector<1xi16>
+  %joined3 = vector.concat<0> %left3, %right3 : vector<32xi16>, vector<1xi16> -> vector<33xi16>
+  %offset3 = index.constant 384 : offset
+  %view3 = buffer.view %destination[%offset3] : buffer -> view<33xi16>
+  vector.store %joined3, %view3[0] : vector<33xi16>, view<33xi16>
+  %padding_offset4_0 = index.constant 512 : offset
+  %padding_view4_0 = buffer.view %destination[%padding_offset4_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view4_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset4_1 = index.constant 576 : offset
+  %padding_view4_1 = buffer.view %destination[%padding_offset4_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view4_1[0] : vector<16xi32>, view<16xi32>
+  %left_view4 = buffer.view %source[%zero] : buffer -> view<32xi16>
+  %right_view4 = buffer.view %source[%right_offset] : buffer -> view<31xi16>
+  %left4 = vector.load %left_view4[0] : view<32xi16> -> vector<32xi16>
+  %right4 = vector.load %right_view4[0] : view<31xi16> -> vector<31xi16>
+  %joined4 = vector.concat<0> %left4, %right4 : vector<32xi16>, vector<31xi16> -> vector<63xi16>
+  %offset4 = index.constant 512 : offset
+  %view4 = buffer.view %destination[%offset4] : buffer -> view<63xi16>
+  vector.store %joined4, %view4[0] : vector<63xi16>, view<63xi16>
+  %padding_offset5_0 = index.constant 640 : offset
+  %padding_view5_0 = buffer.view %destination[%padding_offset5_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view5_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset5_1 = index.constant 704 : offset
+  %padding_view5_1 = buffer.view %destination[%padding_offset5_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view5_1[0] : vector<16xi32>, view<16xi32>
+  %left_view5 = buffer.view %source[%zero] : buffer -> view<32xi16>
+  %right_view5 = buffer.view %source[%right_offset] : buffer -> view<32xi16>
+  %left5 = vector.load %left_view5[0] : view<32xi16> -> vector<32xi16>
+  %right5 = vector.load %right_view5[0] : view<32xi16> -> vector<32xi16>
+  %joined5 = vector.concat<0> %left5, %right5 : vector<32xi16>, vector<32xi16> -> vector<64xi16>
+  %offset5 = index.constant 640 : offset
+  %view5 = buffer.view %destination[%offset5] : buffer -> view<64xi16>
+  vector.store %joined5, %view5[0] : vector<64xi16>, view<64xi16>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @concat_f16() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x192xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x32xi32>, group -> pipeline.flow<tile<32xi32>>
+  %results = pipeline.stage @concat_f16_entry on %workers(%packets) : (group, pipeline.flow<tile<32xi32>>) -> (pipeline.flow<tile<192xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<192xi32>>, view<1x16x192xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @concat_f16_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %zero = index.constant 0 : offset
+  %right_offset = index.constant 64 : offset
+  %padding = vector.constant -1515870811 : vector<16xi32>
+  %padding_offset0_0 = index.constant 0 : offset
+  %padding_view0_0 = buffer.view %destination[%padding_offset0_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset0_1 = index.constant 64 : offset
+  %padding_view0_1 = buffer.view %destination[%padding_offset0_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0_1[0] : vector<16xi32>, view<16xi32>
+  %left_view0 = buffer.view %source[%zero] : buffer -> view<1xf16>
+  %right_view0 = buffer.view %source[%right_offset] : buffer -> view<31xf16>
+  %left0 = vector.load %left_view0[0] : view<1xf16> -> vector<1xf16>
+  %right0 = vector.load %right_view0[0] : view<31xf16> -> vector<31xf16>
+  %joined0 = vector.concat<0> %left0, %right0 : vector<1xf16>, vector<31xf16> -> vector<32xf16>
+  %offset0 = index.constant 0 : offset
+  %view0 = buffer.view %destination[%offset0] : buffer -> view<32xf16>
+  vector.store %joined0, %view0[0] : vector<32xf16>, view<32xf16>
+  %padding_offset1_0 = index.constant 128 : offset
+  %padding_view1_0 = buffer.view %destination[%padding_offset1_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset1_1 = index.constant 192 : offset
+  %padding_view1_1 = buffer.view %destination[%padding_offset1_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1_1[0] : vector<16xi32>, view<16xi32>
+  %left_view1 = buffer.view %source[%zero] : buffer -> view<1xf16>
+  %right_view1 = buffer.view %source[%right_offset] : buffer -> view<1xf16>
+  %left1 = vector.load %left_view1[0] : view<1xf16> -> vector<1xf16>
+  %right1 = vector.load %right_view1[0] : view<1xf16> -> vector<1xf16>
+  %joined1 = vector.concat<0> %left1, %right1 : vector<1xf16>, vector<1xf16> -> vector<2xf16>
+  %offset1 = index.constant 128 : offset
+  %view1 = buffer.view %destination[%offset1] : buffer -> view<2xf16>
+  vector.store %joined1, %view1[0] : vector<2xf16>, view<2xf16>
+  %padding_offset2_0 = index.constant 256 : offset
+  %padding_view2_0 = buffer.view %destination[%padding_offset2_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset2_1 = index.constant 320 : offset
+  %padding_view2_1 = buffer.view %destination[%padding_offset2_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2_1[0] : vector<16xi32>, view<16xi32>
+  %left_view2 = buffer.view %source[%zero] : buffer -> view<16xf16>
+  %right_view2 = buffer.view %source[%right_offset] : buffer -> view<1xf16>
+  %left2 = vector.load %left_view2[0] : view<16xf16> -> vector<16xf16>
+  %right2 = vector.load %right_view2[0] : view<1xf16> -> vector<1xf16>
+  %joined2 = vector.concat<0> %left2, %right2 : vector<16xf16>, vector<1xf16> -> vector<17xf16>
+  %offset2 = index.constant 256 : offset
+  %view2 = buffer.view %destination[%offset2] : buffer -> view<17xf16>
+  vector.store %joined2, %view2[0] : vector<17xf16>, view<17xf16>
+  %padding_offset3_0 = index.constant 384 : offset
+  %padding_view3_0 = buffer.view %destination[%padding_offset3_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset3_1 = index.constant 448 : offset
+  %padding_view3_1 = buffer.view %destination[%padding_offset3_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3_1[0] : vector<16xi32>, view<16xi32>
+  %left_view3 = buffer.view %source[%zero] : buffer -> view<32xf16>
+  %right_view3 = buffer.view %source[%right_offset] : buffer -> view<1xf16>
+  %left3 = vector.load %left_view3[0] : view<32xf16> -> vector<32xf16>
+  %right3 = vector.load %right_view3[0] : view<1xf16> -> vector<1xf16>
+  %joined3 = vector.concat<0> %left3, %right3 : vector<32xf16>, vector<1xf16> -> vector<33xf16>
+  %offset3 = index.constant 384 : offset
+  %view3 = buffer.view %destination[%offset3] : buffer -> view<33xf16>
+  vector.store %joined3, %view3[0] : vector<33xf16>, view<33xf16>
+  %padding_offset4_0 = index.constant 512 : offset
+  %padding_view4_0 = buffer.view %destination[%padding_offset4_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view4_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset4_1 = index.constant 576 : offset
+  %padding_view4_1 = buffer.view %destination[%padding_offset4_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view4_1[0] : vector<16xi32>, view<16xi32>
+  %left_view4 = buffer.view %source[%zero] : buffer -> view<32xf16>
+  %right_view4 = buffer.view %source[%right_offset] : buffer -> view<31xf16>
+  %left4 = vector.load %left_view4[0] : view<32xf16> -> vector<32xf16>
+  %right4 = vector.load %right_view4[0] : view<31xf16> -> vector<31xf16>
+  %joined4 = vector.concat<0> %left4, %right4 : vector<32xf16>, vector<31xf16> -> vector<63xf16>
+  %offset4 = index.constant 512 : offset
+  %view4 = buffer.view %destination[%offset4] : buffer -> view<63xf16>
+  vector.store %joined4, %view4[0] : vector<63xf16>, view<63xf16>
+  %padding_offset5_0 = index.constant 640 : offset
+  %padding_view5_0 = buffer.view %destination[%padding_offset5_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view5_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset5_1 = index.constant 704 : offset
+  %padding_view5_1 = buffer.view %destination[%padding_offset5_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view5_1[0] : vector<16xi32>, view<16xi32>
+  %left_view5 = buffer.view %source[%zero] : buffer -> view<32xf16>
+  %right_view5 = buffer.view %source[%right_offset] : buffer -> view<32xf16>
+  %left5 = vector.load %left_view5[0] : view<32xf16> -> vector<32xf16>
+  %right5 = vector.load %right_view5[0] : view<32xf16> -> vector<32xf16>
+  %joined5 = vector.concat<0> %left5, %right5 : vector<32xf16>, vector<32xf16> -> vector<64xf16>
+  %offset5 = index.constant 640 : offset
+  %view5 = buffer.view %destination[%offset5] : buffer -> view<64xf16>
+  vector.store %joined5, %view5[0] : vector<64xf16>, view<64xf16>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @concat_bf16() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x192xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x32xi32>, group -> pipeline.flow<tile<32xi32>>
+  %results = pipeline.stage @concat_bf16_entry on %workers(%packets) : (group, pipeline.flow<tile<32xi32>>) -> (pipeline.flow<tile<192xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<192xi32>>, view<1x16x192xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @concat_bf16_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %zero = index.constant 0 : offset
+  %right_offset = index.constant 64 : offset
+  %padding = vector.constant -1515870811 : vector<16xi32>
+  %padding_offset0_0 = index.constant 0 : offset
+  %padding_view0_0 = buffer.view %destination[%padding_offset0_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset0_1 = index.constant 64 : offset
+  %padding_view0_1 = buffer.view %destination[%padding_offset0_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0_1[0] : vector<16xi32>, view<16xi32>
+  %left_view0 = buffer.view %source[%zero] : buffer -> view<1xbf16>
+  %right_view0 = buffer.view %source[%right_offset] : buffer -> view<31xbf16>
+  %left0 = vector.load %left_view0[0] : view<1xbf16> -> vector<1xbf16>
+  %right0 = vector.load %right_view0[0] : view<31xbf16> -> vector<31xbf16>
+  %joined0 = vector.concat<0> %left0, %right0 : vector<1xbf16>, vector<31xbf16> -> vector<32xbf16>
+  %offset0 = index.constant 0 : offset
+  %view0 = buffer.view %destination[%offset0] : buffer -> view<32xbf16>
+  vector.store %joined0, %view0[0] : vector<32xbf16>, view<32xbf16>
+  %padding_offset1_0 = index.constant 128 : offset
+  %padding_view1_0 = buffer.view %destination[%padding_offset1_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset1_1 = index.constant 192 : offset
+  %padding_view1_1 = buffer.view %destination[%padding_offset1_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1_1[0] : vector<16xi32>, view<16xi32>
+  %left_view1 = buffer.view %source[%zero] : buffer -> view<1xbf16>
+  %right_view1 = buffer.view %source[%right_offset] : buffer -> view<1xbf16>
+  %left1 = vector.load %left_view1[0] : view<1xbf16> -> vector<1xbf16>
+  %right1 = vector.load %right_view1[0] : view<1xbf16> -> vector<1xbf16>
+  %joined1 = vector.concat<0> %left1, %right1 : vector<1xbf16>, vector<1xbf16> -> vector<2xbf16>
+  %offset1 = index.constant 128 : offset
+  %view1 = buffer.view %destination[%offset1] : buffer -> view<2xbf16>
+  vector.store %joined1, %view1[0] : vector<2xbf16>, view<2xbf16>
+  %padding_offset2_0 = index.constant 256 : offset
+  %padding_view2_0 = buffer.view %destination[%padding_offset2_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset2_1 = index.constant 320 : offset
+  %padding_view2_1 = buffer.view %destination[%padding_offset2_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2_1[0] : vector<16xi32>, view<16xi32>
+  %left_view2 = buffer.view %source[%zero] : buffer -> view<16xbf16>
+  %right_view2 = buffer.view %source[%right_offset] : buffer -> view<1xbf16>
+  %left2 = vector.load %left_view2[0] : view<16xbf16> -> vector<16xbf16>
+  %right2 = vector.load %right_view2[0] : view<1xbf16> -> vector<1xbf16>
+  %joined2 = vector.concat<0> %left2, %right2 : vector<16xbf16>, vector<1xbf16> -> vector<17xbf16>
+  %offset2 = index.constant 256 : offset
+  %view2 = buffer.view %destination[%offset2] : buffer -> view<17xbf16>
+  vector.store %joined2, %view2[0] : vector<17xbf16>, view<17xbf16>
+  %padding_offset3_0 = index.constant 384 : offset
+  %padding_view3_0 = buffer.view %destination[%padding_offset3_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset3_1 = index.constant 448 : offset
+  %padding_view3_1 = buffer.view %destination[%padding_offset3_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3_1[0] : vector<16xi32>, view<16xi32>
+  %left_view3 = buffer.view %source[%zero] : buffer -> view<32xbf16>
+  %right_view3 = buffer.view %source[%right_offset] : buffer -> view<1xbf16>
+  %left3 = vector.load %left_view3[0] : view<32xbf16> -> vector<32xbf16>
+  %right3 = vector.load %right_view3[0] : view<1xbf16> -> vector<1xbf16>
+  %joined3 = vector.concat<0> %left3, %right3 : vector<32xbf16>, vector<1xbf16> -> vector<33xbf16>
+  %offset3 = index.constant 384 : offset
+  %view3 = buffer.view %destination[%offset3] : buffer -> view<33xbf16>
+  vector.store %joined3, %view3[0] : vector<33xbf16>, view<33xbf16>
+  %padding_offset4_0 = index.constant 512 : offset
+  %padding_view4_0 = buffer.view %destination[%padding_offset4_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view4_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset4_1 = index.constant 576 : offset
+  %padding_view4_1 = buffer.view %destination[%padding_offset4_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view4_1[0] : vector<16xi32>, view<16xi32>
+  %left_view4 = buffer.view %source[%zero] : buffer -> view<32xbf16>
+  %right_view4 = buffer.view %source[%right_offset] : buffer -> view<31xbf16>
+  %left4 = vector.load %left_view4[0] : view<32xbf16> -> vector<32xbf16>
+  %right4 = vector.load %right_view4[0] : view<31xbf16> -> vector<31xbf16>
+  %joined4 = vector.concat<0> %left4, %right4 : vector<32xbf16>, vector<31xbf16> -> vector<63xbf16>
+  %offset4 = index.constant 512 : offset
+  %view4 = buffer.view %destination[%offset4] : buffer -> view<63xbf16>
+  vector.store %joined4, %view4[0] : vector<63xbf16>, view<63xbf16>
+  %padding_offset5_0 = index.constant 640 : offset
+  %padding_view5_0 = buffer.view %destination[%padding_offset5_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view5_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset5_1 = index.constant 704 : offset
+  %padding_view5_1 = buffer.view %destination[%padding_offset5_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view5_1[0] : vector<16xi32>, view<16xi32>
+  %left_view5 = buffer.view %source[%zero] : buffer -> view<32xbf16>
+  %right_view5 = buffer.view %source[%right_offset] : buffer -> view<32xbf16>
+  %left5 = vector.load %left_view5[0] : view<32xbf16> -> vector<32xbf16>
+  %right5 = vector.load %right_view5[0] : view<32xbf16> -> vector<32xbf16>
+  %joined5 = vector.concat<0> %left5, %right5 : vector<32xbf16>, vector<32xbf16> -> vector<64xbf16>
+  %offset5 = index.constant 640 : offset
+  %view5 = buffer.view %destination[%offset5] : buffer -> view<64xbf16>
+  vector.store %joined5, %view5[0] : vector<64xbf16>, view<64xbf16>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @concat_i32() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x192xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x32xi32>, group -> pipeline.flow<tile<32xi32>>
+  %results = pipeline.stage @concat_i32_entry on %workers(%packets) : (group, pipeline.flow<tile<32xi32>>) -> (pipeline.flow<tile<192xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<192xi32>>, view<1x16x192xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @concat_i32_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %zero = index.constant 0 : offset
+  %right_offset = index.constant 64 : offset
+  %padding = vector.constant -1515870811 : vector<16xi32>
+  %padding_offset0_0 = index.constant 0 : offset
+  %padding_view0_0 = buffer.view %destination[%padding_offset0_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset0_1 = index.constant 64 : offset
+  %padding_view0_1 = buffer.view %destination[%padding_offset0_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0_1[0] : vector<16xi32>, view<16xi32>
+  %left_view0 = buffer.view %source[%zero] : buffer -> view<1xi32>
+  %right_view0 = buffer.view %source[%right_offset] : buffer -> view<15xi32>
+  %left0 = vector.load %left_view0[0] : view<1xi32> -> vector<1xi32>
+  %right0 = vector.load %right_view0[0] : view<15xi32> -> vector<15xi32>
+  %joined0 = vector.concat<0> %left0, %right0 : vector<1xi32>, vector<15xi32> -> vector<16xi32>
+  %offset0 = index.constant 0 : offset
+  %view0 = buffer.view %destination[%offset0] : buffer -> view<16xi32>
+  vector.store %joined0, %view0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset1_0 = index.constant 128 : offset
+  %padding_view1_0 = buffer.view %destination[%padding_offset1_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset1_1 = index.constant 192 : offset
+  %padding_view1_1 = buffer.view %destination[%padding_offset1_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1_1[0] : vector<16xi32>, view<16xi32>
+  %left_view1 = buffer.view %source[%zero] : buffer -> view<1xi32>
+  %right_view1 = buffer.view %source[%right_offset] : buffer -> view<1xi32>
+  %left1 = vector.load %left_view1[0] : view<1xi32> -> vector<1xi32>
+  %right1 = vector.load %right_view1[0] : view<1xi32> -> vector<1xi32>
+  %joined1 = vector.concat<0> %left1, %right1 : vector<1xi32>, vector<1xi32> -> vector<2xi32>
+  %offset1 = index.constant 128 : offset
+  %view1 = buffer.view %destination[%offset1] : buffer -> view<2xi32>
+  vector.store %joined1, %view1[0] : vector<2xi32>, view<2xi32>
+  %padding_offset2_0 = index.constant 256 : offset
+  %padding_view2_0 = buffer.view %destination[%padding_offset2_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset2_1 = index.constant 320 : offset
+  %padding_view2_1 = buffer.view %destination[%padding_offset2_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2_1[0] : vector<16xi32>, view<16xi32>
+  %left_view2 = buffer.view %source[%zero] : buffer -> view<8xi32>
+  %right_view2 = buffer.view %source[%right_offset] : buffer -> view<1xi32>
+  %left2 = vector.load %left_view2[0] : view<8xi32> -> vector<8xi32>
+  %right2 = vector.load %right_view2[0] : view<1xi32> -> vector<1xi32>
+  %joined2 = vector.concat<0> %left2, %right2 : vector<8xi32>, vector<1xi32> -> vector<9xi32>
+  %offset2 = index.constant 256 : offset
+  %view2 = buffer.view %destination[%offset2] : buffer -> view<9xi32>
+  vector.store %joined2, %view2[0] : vector<9xi32>, view<9xi32>
+  %padding_offset3_0 = index.constant 384 : offset
+  %padding_view3_0 = buffer.view %destination[%padding_offset3_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset3_1 = index.constant 448 : offset
+  %padding_view3_1 = buffer.view %destination[%padding_offset3_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3_1[0] : vector<16xi32>, view<16xi32>
+  %left_view3 = buffer.view %source[%zero] : buffer -> view<16xi32>
+  %right_view3 = buffer.view %source[%right_offset] : buffer -> view<1xi32>
+  %left3 = vector.load %left_view3[0] : view<16xi32> -> vector<16xi32>
+  %right3 = vector.load %right_view3[0] : view<1xi32> -> vector<1xi32>
+  %joined3 = vector.concat<0> %left3, %right3 : vector<16xi32>, vector<1xi32> -> vector<17xi32>
+  %offset3 = index.constant 384 : offset
+  %view3 = buffer.view %destination[%offset3] : buffer -> view<17xi32>
+  vector.store %joined3, %view3[0] : vector<17xi32>, view<17xi32>
+  %padding_offset4_0 = index.constant 512 : offset
+  %padding_view4_0 = buffer.view %destination[%padding_offset4_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view4_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset4_1 = index.constant 576 : offset
+  %padding_view4_1 = buffer.view %destination[%padding_offset4_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view4_1[0] : vector<16xi32>, view<16xi32>
+  %left_view4 = buffer.view %source[%zero] : buffer -> view<16xi32>
+  %right_view4 = buffer.view %source[%right_offset] : buffer -> view<15xi32>
+  %left4 = vector.load %left_view4[0] : view<16xi32> -> vector<16xi32>
+  %right4 = vector.load %right_view4[0] : view<15xi32> -> vector<15xi32>
+  %joined4 = vector.concat<0> %left4, %right4 : vector<16xi32>, vector<15xi32> -> vector<31xi32>
+  %offset4 = index.constant 512 : offset
+  %view4 = buffer.view %destination[%offset4] : buffer -> view<31xi32>
+  vector.store %joined4, %view4[0] : vector<31xi32>, view<31xi32>
+  %padding_offset5_0 = index.constant 640 : offset
+  %padding_view5_0 = buffer.view %destination[%padding_offset5_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view5_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset5_1 = index.constant 704 : offset
+  %padding_view5_1 = buffer.view %destination[%padding_offset5_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view5_1[0] : vector<16xi32>, view<16xi32>
+  %left_view5 = buffer.view %source[%zero] : buffer -> view<16xi32>
+  %right_view5 = buffer.view %source[%right_offset] : buffer -> view<16xi32>
+  %left5 = vector.load %left_view5[0] : view<16xi32> -> vector<16xi32>
+  %right5 = vector.load %right_view5[0] : view<16xi32> -> vector<16xi32>
+  %joined5 = vector.concat<0> %left5, %right5 : vector<16xi32>, vector<16xi32> -> vector<32xi32>
+  %offset5 = index.constant 640 : offset
+  %view5 = buffer.view %destination[%offset5] : buffer -> view<32xi32>
+  vector.store %joined5, %view5[0] : vector<32xi32>, view<32xi32>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @concat_f32() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x160xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x32xi32>, group -> pipeline.flow<tile<32xi32>>
+  %results = pipeline.stage @concat_f32_entry on %workers(%packets) : (group, pipeline.flow<tile<32xi32>>) -> (pipeline.flow<tile<160xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<160xi32>>, view<1x16x160xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @concat_f32_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %zero = index.constant 0 : offset
+  %right_offset = index.constant 64 : offset
+  %padding = vector.constant -1515870811 : vector<16xi32>
+  %padding_offset0_0 = index.constant 0 : offset
+  %padding_view0_0 = buffer.view %destination[%padding_offset0_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset0_1 = index.constant 64 : offset
+  %padding_view0_1 = buffer.view %destination[%padding_offset0_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0_1[0] : vector<16xi32>, view<16xi32>
+  %left_view0 = buffer.view %source[%zero] : buffer -> view<1xf32>
+  %right_view0 = buffer.view %source[%right_offset] : buffer -> view<15xf32>
+  %left0 = vector.load %left_view0[0] : view<1xf32> -> vector<1xf32>
+  %right0 = vector.load %right_view0[0] : view<15xf32> -> vector<15xf32>
+  %joined0 = vector.concat<0> %left0, %right0 : vector<1xf32>, vector<15xf32> -> vector<16xf32>
+  %offset0 = index.constant 0 : offset
+  %view0 = buffer.view %destination[%offset0] : buffer -> view<16xf32>
+  vector.store %joined0, %view0[0] : vector<16xf32>, view<16xf32>
+  %padding_offset1_0 = index.constant 128 : offset
+  %padding_view1_0 = buffer.view %destination[%padding_offset1_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset1_1 = index.constant 192 : offset
+  %padding_view1_1 = buffer.view %destination[%padding_offset1_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1_1[0] : vector<16xi32>, view<16xi32>
+  %left_view1 = buffer.view %source[%zero] : buffer -> view<1xf32>
+  %right_view1 = buffer.view %source[%right_offset] : buffer -> view<1xf32>
+  %left1 = vector.load %left_view1[0] : view<1xf32> -> vector<1xf32>
+  %right1 = vector.load %right_view1[0] : view<1xf32> -> vector<1xf32>
+  %joined1 = vector.concat<0> %left1, %right1 : vector<1xf32>, vector<1xf32> -> vector<2xf32>
+  %offset1 = index.constant 128 : offset
+  %view1 = buffer.view %destination[%offset1] : buffer -> view<2xf32>
+  vector.store %joined1, %view1[0] : vector<2xf32>, view<2xf32>
+  %padding_offset2_0 = index.constant 256 : offset
+  %padding_view2_0 = buffer.view %destination[%padding_offset2_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset2_1 = index.constant 320 : offset
+  %padding_view2_1 = buffer.view %destination[%padding_offset2_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2_1[0] : vector<16xi32>, view<16xi32>
+  %left_view2 = buffer.view %source[%zero] : buffer -> view<8xf32>
+  %right_view2 = buffer.view %source[%right_offset] : buffer -> view<1xf32>
+  %left2 = vector.load %left_view2[0] : view<8xf32> -> vector<8xf32>
+  %right2 = vector.load %right_view2[0] : view<1xf32> -> vector<1xf32>
+  %joined2 = vector.concat<0> %left2, %right2 : vector<8xf32>, vector<1xf32> -> vector<9xf32>
+  %offset2 = index.constant 256 : offset
+  %view2 = buffer.view %destination[%offset2] : buffer -> view<9xf32>
+  vector.store %joined2, %view2[0] : vector<9xf32>, view<9xf32>
+  %padding_offset3_0 = index.constant 384 : offset
+  %padding_view3_0 = buffer.view %destination[%padding_offset3_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset3_1 = index.constant 448 : offset
+  %padding_view3_1 = buffer.view %destination[%padding_offset3_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3_1[0] : vector<16xi32>, view<16xi32>
+  %left_view3 = buffer.view %source[%zero] : buffer -> view<16xf32>
+  %right_view3 = buffer.view %source[%right_offset] : buffer -> view<1xf32>
+  %left3 = vector.load %left_view3[0] : view<16xf32> -> vector<16xf32>
+  %right3 = vector.load %right_view3[0] : view<1xf32> -> vector<1xf32>
+  %joined3 = vector.concat<0> %left3, %right3 : vector<16xf32>, vector<1xf32> -> vector<17xf32>
+  %offset3 = index.constant 384 : offset
+  %view3 = buffer.view %destination[%offset3] : buffer -> view<17xf32>
+  vector.store %joined3, %view3[0] : vector<17xf32>, view<17xf32>
+  %padding_offset4_0 = index.constant 512 : offset
+  %padding_view4_0 = buffer.view %destination[%padding_offset4_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view4_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset4_1 = index.constant 576 : offset
+  %padding_view4_1 = buffer.view %destination[%padding_offset4_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view4_1[0] : vector<16xi32>, view<16xi32>
+  %left_view4 = buffer.view %source[%zero] : buffer -> view<16xf32>
+  %right_view4 = buffer.view %source[%right_offset] : buffer -> view<15xf32>
+  %left4 = vector.load %left_view4[0] : view<16xf32> -> vector<16xf32>
+  %right4 = vector.load %right_view4[0] : view<15xf32> -> vector<15xf32>
+  %joined4 = vector.concat<0> %left4, %right4 : vector<16xf32>, vector<15xf32> -> vector<31xf32>
+  %offset4 = index.constant 512 : offset
+  %view4 = buffer.view %destination[%offset4] : buffer -> view<31xf32>
+  vector.store %joined4, %view4[0] : vector<31xf32>, view<31xf32>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @concat_i64() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x192xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x32xi32>, group -> pipeline.flow<tile<32xi32>>
+  %results = pipeline.stage @concat_i64_entry on %workers(%packets) : (group, pipeline.flow<tile<32xi32>>) -> (pipeline.flow<tile<192xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<192xi32>>, view<1x16x192xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @concat_i64_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %zero = index.constant 0 : offset
+  %right_offset = index.constant 64 : offset
+  %padding = vector.constant -1515870811 : vector<16xi32>
+  %padding_offset0_0 = index.constant 0 : offset
+  %padding_view0_0 = buffer.view %destination[%padding_offset0_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset0_1 = index.constant 64 : offset
+  %padding_view0_1 = buffer.view %destination[%padding_offset0_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0_1[0] : vector<16xi32>, view<16xi32>
+  %left_view0 = buffer.view %source[%zero] : buffer -> view<1xi64>
+  %right_view0 = buffer.view %source[%right_offset] : buffer -> view<7xi64>
+  %left0 = vector.load %left_view0[0] : view<1xi64> -> vector<1xi64>
+  %right0 = vector.load %right_view0[0] : view<7xi64> -> vector<7xi64>
+  %joined0 = vector.concat<0> %left0, %right0 : vector<1xi64>, vector<7xi64> -> vector<8xi64>
+  %offset0 = index.constant 0 : offset
+  %view0 = buffer.view %destination[%offset0] : buffer -> view<8xi64>
+  vector.store %joined0, %view0[0] : vector<8xi64>, view<8xi64>
+  %padding_offset1_0 = index.constant 128 : offset
+  %padding_view1_0 = buffer.view %destination[%padding_offset1_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset1_1 = index.constant 192 : offset
+  %padding_view1_1 = buffer.view %destination[%padding_offset1_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1_1[0] : vector<16xi32>, view<16xi32>
+  %left_view1 = buffer.view %source[%zero] : buffer -> view<1xi64>
+  %right_view1 = buffer.view %source[%right_offset] : buffer -> view<1xi64>
+  %left1 = vector.load %left_view1[0] : view<1xi64> -> vector<1xi64>
+  %right1 = vector.load %right_view1[0] : view<1xi64> -> vector<1xi64>
+  %joined1 = vector.concat<0> %left1, %right1 : vector<1xi64>, vector<1xi64> -> vector<2xi64>
+  %offset1 = index.constant 128 : offset
+  %view1 = buffer.view %destination[%offset1] : buffer -> view<2xi64>
+  vector.store %joined1, %view1[0] : vector<2xi64>, view<2xi64>
+  %padding_offset2_0 = index.constant 256 : offset
+  %padding_view2_0 = buffer.view %destination[%padding_offset2_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset2_1 = index.constant 320 : offset
+  %padding_view2_1 = buffer.view %destination[%padding_offset2_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2_1[0] : vector<16xi32>, view<16xi32>
+  %left_view2 = buffer.view %source[%zero] : buffer -> view<4xi64>
+  %right_view2 = buffer.view %source[%right_offset] : buffer -> view<1xi64>
+  %left2 = vector.load %left_view2[0] : view<4xi64> -> vector<4xi64>
+  %right2 = vector.load %right_view2[0] : view<1xi64> -> vector<1xi64>
+  %joined2 = vector.concat<0> %left2, %right2 : vector<4xi64>, vector<1xi64> -> vector<5xi64>
+  %offset2 = index.constant 256 : offset
+  %view2 = buffer.view %destination[%offset2] : buffer -> view<5xi64>
+  vector.store %joined2, %view2[0] : vector<5xi64>, view<5xi64>
+  %padding_offset3_0 = index.constant 384 : offset
+  %padding_view3_0 = buffer.view %destination[%padding_offset3_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset3_1 = index.constant 448 : offset
+  %padding_view3_1 = buffer.view %destination[%padding_offset3_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3_1[0] : vector<16xi32>, view<16xi32>
+  %left_view3 = buffer.view %source[%zero] : buffer -> view<8xi64>
+  %right_view3 = buffer.view %source[%right_offset] : buffer -> view<1xi64>
+  %left3 = vector.load %left_view3[0] : view<8xi64> -> vector<8xi64>
+  %right3 = vector.load %right_view3[0] : view<1xi64> -> vector<1xi64>
+  %joined3 = vector.concat<0> %left3, %right3 : vector<8xi64>, vector<1xi64> -> vector<9xi64>
+  %offset3 = index.constant 384 : offset
+  %view3 = buffer.view %destination[%offset3] : buffer -> view<9xi64>
+  vector.store %joined3, %view3[0] : vector<9xi64>, view<9xi64>
+  %padding_offset4_0 = index.constant 512 : offset
+  %padding_view4_0 = buffer.view %destination[%padding_offset4_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view4_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset4_1 = index.constant 576 : offset
+  %padding_view4_1 = buffer.view %destination[%padding_offset4_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view4_1[0] : vector<16xi32>, view<16xi32>
+  %left_view4 = buffer.view %source[%zero] : buffer -> view<8xi64>
+  %right_view4 = buffer.view %source[%right_offset] : buffer -> view<7xi64>
+  %left4 = vector.load %left_view4[0] : view<8xi64> -> vector<8xi64>
+  %right4 = vector.load %right_view4[0] : view<7xi64> -> vector<7xi64>
+  %joined4 = vector.concat<0> %left4, %right4 : vector<8xi64>, vector<7xi64> -> vector<15xi64>
+  %offset4 = index.constant 512 : offset
+  %view4 = buffer.view %destination[%offset4] : buffer -> view<15xi64>
+  vector.store %joined4, %view4[0] : vector<15xi64>, view<15xi64>
+  %padding_offset5_0 = index.constant 640 : offset
+  %padding_view5_0 = buffer.view %destination[%padding_offset5_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view5_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset5_1 = index.constant 704 : offset
+  %padding_view5_1 = buffer.view %destination[%padding_offset5_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view5_1[0] : vector<16xi32>, view<16xi32>
+  %left_view5 = buffer.view %source[%zero] : buffer -> view<8xi64>
+  %right_view5 = buffer.view %source[%right_offset] : buffer -> view<8xi64>
+  %left5 = vector.load %left_view5[0] : view<8xi64> -> vector<8xi64>
+  %right5 = vector.load %right_view5[0] : view<8xi64> -> vector<8xi64>
+  %joined5 = vector.concat<0> %left5, %right5 : vector<8xi64>, vector<8xi64> -> vector<16xi64>
+  %offset5 = index.constant 640 : offset
+  %view5 = buffer.view %destination[%offset5] : buffer -> view<16xi64>
+  vector.store %joined5, %view5[0] : vector<16xi64>, view<16xi64>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @concat_f64() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x192xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x32xi32>, group -> pipeline.flow<tile<32xi32>>
+  %results = pipeline.stage @concat_f64_entry on %workers(%packets) : (group, pipeline.flow<tile<32xi32>>) -> (pipeline.flow<tile<192xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<192xi32>>, view<1x16x192xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @concat_f64_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %zero = index.constant 0 : offset
+  %right_offset = index.constant 64 : offset
+  %padding = vector.constant -1515870811 : vector<16xi32>
+  %padding_offset0_0 = index.constant 0 : offset
+  %padding_view0_0 = buffer.view %destination[%padding_offset0_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset0_1 = index.constant 64 : offset
+  %padding_view0_1 = buffer.view %destination[%padding_offset0_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view0_1[0] : vector<16xi32>, view<16xi32>
+  %left_view0 = buffer.view %source[%zero] : buffer -> view<1xf64>
+  %right_view0 = buffer.view %source[%right_offset] : buffer -> view<7xf64>
+  %left0 = vector.load %left_view0[0] : view<1xf64> -> vector<1xf64>
+  %right0 = vector.load %right_view0[0] : view<7xf64> -> vector<7xf64>
+  %joined0 = vector.concat<0> %left0, %right0 : vector<1xf64>, vector<7xf64> -> vector<8xf64>
+  %offset0 = index.constant 0 : offset
+  %view0 = buffer.view %destination[%offset0] : buffer -> view<8xf64>
+  vector.store %joined0, %view0[0] : vector<8xf64>, view<8xf64>
+  %padding_offset1_0 = index.constant 128 : offset
+  %padding_view1_0 = buffer.view %destination[%padding_offset1_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset1_1 = index.constant 192 : offset
+  %padding_view1_1 = buffer.view %destination[%padding_offset1_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view1_1[0] : vector<16xi32>, view<16xi32>
+  %left_view1 = buffer.view %source[%zero] : buffer -> view<1xf64>
+  %right_view1 = buffer.view %source[%right_offset] : buffer -> view<1xf64>
+  %left1 = vector.load %left_view1[0] : view<1xf64> -> vector<1xf64>
+  %right1 = vector.load %right_view1[0] : view<1xf64> -> vector<1xf64>
+  %joined1 = vector.concat<0> %left1, %right1 : vector<1xf64>, vector<1xf64> -> vector<2xf64>
+  %offset1 = index.constant 128 : offset
+  %view1 = buffer.view %destination[%offset1] : buffer -> view<2xf64>
+  vector.store %joined1, %view1[0] : vector<2xf64>, view<2xf64>
+  %padding_offset2_0 = index.constant 256 : offset
+  %padding_view2_0 = buffer.view %destination[%padding_offset2_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset2_1 = index.constant 320 : offset
+  %padding_view2_1 = buffer.view %destination[%padding_offset2_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view2_1[0] : vector<16xi32>, view<16xi32>
+  %left_view2 = buffer.view %source[%zero] : buffer -> view<4xf64>
+  %right_view2 = buffer.view %source[%right_offset] : buffer -> view<1xf64>
+  %left2 = vector.load %left_view2[0] : view<4xf64> -> vector<4xf64>
+  %right2 = vector.load %right_view2[0] : view<1xf64> -> vector<1xf64>
+  %joined2 = vector.concat<0> %left2, %right2 : vector<4xf64>, vector<1xf64> -> vector<5xf64>
+  %offset2 = index.constant 256 : offset
+  %view2 = buffer.view %destination[%offset2] : buffer -> view<5xf64>
+  vector.store %joined2, %view2[0] : vector<5xf64>, view<5xf64>
+  %padding_offset3_0 = index.constant 384 : offset
+  %padding_view3_0 = buffer.view %destination[%padding_offset3_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset3_1 = index.constant 448 : offset
+  %padding_view3_1 = buffer.view %destination[%padding_offset3_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view3_1[0] : vector<16xi32>, view<16xi32>
+  %left_view3 = buffer.view %source[%zero] : buffer -> view<8xf64>
+  %right_view3 = buffer.view %source[%right_offset] : buffer -> view<1xf64>
+  %left3 = vector.load %left_view3[0] : view<8xf64> -> vector<8xf64>
+  %right3 = vector.load %right_view3[0] : view<1xf64> -> vector<1xf64>
+  %joined3 = vector.concat<0> %left3, %right3 : vector<8xf64>, vector<1xf64> -> vector<9xf64>
+  %offset3 = index.constant 384 : offset
+  %view3 = buffer.view %destination[%offset3] : buffer -> view<9xf64>
+  vector.store %joined3, %view3[0] : vector<9xf64>, view<9xf64>
+  %padding_offset4_0 = index.constant 512 : offset
+  %padding_view4_0 = buffer.view %destination[%padding_offset4_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view4_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset4_1 = index.constant 576 : offset
+  %padding_view4_1 = buffer.view %destination[%padding_offset4_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view4_1[0] : vector<16xi32>, view<16xi32>
+  %left_view4 = buffer.view %source[%zero] : buffer -> view<8xf64>
+  %right_view4 = buffer.view %source[%right_offset] : buffer -> view<7xf64>
+  %left4 = vector.load %left_view4[0] : view<8xf64> -> vector<8xf64>
+  %right4 = vector.load %right_view4[0] : view<7xf64> -> vector<7xf64>
+  %joined4 = vector.concat<0> %left4, %right4 : vector<8xf64>, vector<7xf64> -> vector<15xf64>
+  %offset4 = index.constant 512 : offset
+  %view4 = buffer.view %destination[%offset4] : buffer -> view<15xf64>
+  vector.store %joined4, %view4[0] : vector<15xf64>, view<15xf64>
+  %padding_offset5_0 = index.constant 640 : offset
+  %padding_view5_0 = buffer.view %destination[%padding_offset5_0] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view5_0[0] : vector<16xi32>, view<16xi32>
+  %padding_offset5_1 = index.constant 704 : offset
+  %padding_view5_1 = buffer.view %destination[%padding_offset5_1] : buffer -> view<16xi32>
+  vector.store %padding, %padding_view5_1[0] : vector<16xi32>, view<16xi32>
+  %left_view5 = buffer.view %source[%zero] : buffer -> view<8xf64>
+  %right_view5 = buffer.view %source[%right_offset] : buffer -> view<8xf64>
+  %left5 = vector.load %left_view5[0] : view<8xf64> -> vector<8xf64>
+  %right5 = vector.load %right_view5[0] : view<8xf64> -> vector<8xf64>
+  %joined5 = vector.concat<0> %left5, %right5 : vector<8xf64>, vector<8xf64> -> vector<16xf64>
+  %offset5 = index.constant 640 : offset
+  %view5 = buffer.view %destination[%offset5] : buffer -> view<16xf64>
+  vector.store %joined5, %view5[0] : vector<16xf64>, view<16xf64>
+  func.return
+}
