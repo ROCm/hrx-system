@@ -426,6 +426,48 @@ _FIXED_REGISTER_PATTERNS = (
         0x32000,
         (_field("reset", 1), _field("enable", 0)),
     ),
+    # Core trace unit, from aie-rt's XAIE2PGBL_CORE_MODULE_TRACE_* definitions.
+    _pattern(
+        "core.trace_control0",
+        RegisterModule.CORE,
+        0x340D0,
+        (
+            _field("stop_event", 24, 7),
+            _field("start_event", 16, 7),
+            _field("mode", 0, 2),
+        ),
+    ),
+    _pattern(
+        "core.trace_control1",
+        RegisterModule.CORE,
+        0x340D4,
+        (
+            _field("packet_type", 12, 3),
+            _field("packet_id", 0, 5),
+        ),
+    ),
+    _pattern(
+        "core.trace_event0",
+        RegisterModule.CORE,
+        0x340E0,
+        (
+            _field("event3", 24, 7),
+            _field("event2", 16, 7),
+            _field("event1", 8, 7),
+            _field("event0", 0, 7),
+        ),
+    ),
+    _pattern(
+        "core.trace_event1",
+        RegisterModule.CORE,
+        0x340E4,
+        (
+            _field("event7", 24, 7),
+            _field("event6", 16, 7),
+            _field("event5", 8, 7),
+            _field("event4", 0, 7),
+        ),
+    ),
     _pattern(
         "shim_noc.mux_config",
         RegisterModule.SHIM_NOC,

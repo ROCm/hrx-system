@@ -161,8 +161,10 @@ def test_validator_rejects_loopback_pairs_outside_dma_channels(
 def test_register_patterns_cover_complete_seed_resource_families() -> None:
     family = NPU2_ARRAY_FAMILY
 
-    assert len(family.registers) == 49
-    assert register_field_count(family) == 173
+    # 49 base patterns plus the 4 core-module trace patterns (control0,
+    # control1, event0, event1) added for hardware event trace.
+    assert len(family.registers) == 53
+    assert register_field_count(family) == 186
     assert all(
         pattern.provenance & (Provenance.AIE_RT | Provenance.REGISTER_DATABASE)
         == (Provenance.AIE_RT | Provenance.REGISTER_DATABASE)

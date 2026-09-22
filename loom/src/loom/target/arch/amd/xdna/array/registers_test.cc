@@ -12,7 +12,9 @@
 namespace {
 
 TEST(XdnaRegisterFactsTest, ExposesCrossVerifiedSemanticCorpus) {
-  EXPECT_EQ(loom_xdna_register_field_count(), 173u);
+  // 173 plus the 13 core-module trace fields (control0 x3, control1 x2,
+  // event0/event1 x4 each) added for hardware event trace.
+  EXPECT_EQ(loom_xdna_register_field_count(), 186u);
   const loom_xdna_register_field_id_t field_id =
       LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_DMA_BD_WORD5_LOCK_ACQUIRE_VALUE;
   loom_xdna_register_field_info_t info = {};
