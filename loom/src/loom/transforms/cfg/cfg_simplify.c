@@ -582,27 +582,6 @@ static iree_status_t loom_cfg_simplify_fold_path_sensitive_i1_ops(
 }
 
 //===----------------------------------------------------------------------===//
-// Block removal
-//===----------------------------------------------------------------------===//
-
-static iree_status_t loom_cfg_simplify_remove_cfg_block(
-    loom_cfg_simplify_state_t* state, const loom_cfg_graph_t* graph,
-    uint16_t block_index) {
-  bool* remove_blocks = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->analysis_arena, graph->block_count, sizeof(*remove_blocks),
-      (void**)&remove_blocks));
-  memset(remove_blocks, 0, graph->block_count * sizeof(*remove_blocks));
-  remove_blocks[block_index] = true;
-
-  uint16_t removed_count = 0;
-  IREE_RETURN_IF_ERROR(loom_region_remove_blocks(
-      state->module, (loom_region_t*)graph->region, remove_blocks,
-      (uint16_t)graph->block_count, state->analysis_arena, &removed_count));
-  return iree_ok_status();
-}
-
-//===----------------------------------------------------------------------===//
 // Duplicate block merging
 //===----------------------------------------------------------------------===//
 
@@ -627,8 +606,11 @@ typedef struct loom_cfg_simplify_block_hash_table_t {
 } loom_cfg_simplify_block_hash_table_t;
 
 typedef struct loom_cfg_simplify_value_map_t {
+  // Original block-local definitions in the equivalence comparison.
   loom_value_id_t source_values[LOOM_CFG_SIMPLIFY_ALPHA_EQUIV_MAX_VALUES];
+  // Corresponding definitions in the surviving candidate block.
   loom_value_id_t target_values[LOOM_CFG_SIMPLIFY_ALPHA_EQUIV_MAX_VALUES];
+  // Number of established source-to-target value pairs.
   iree_host_size_t count;
 } loom_cfg_simplify_value_map_t;
 
@@ -667,109 +649,6 @@ static iree_status_t loom_cfg_simplify_block_hash_table_initialize(
                                                  (void**)&table->entries));
   memset(table->entries, 0, table->capacity * sizeof(*table->entries));
   return iree_ok_status();
-}
-
-static void loom_cfg_simplify_block_hash_table_reset(
-    loom_cfg_simplify_block_hash_table_t* table) {
-  memset(table->entries, 0, table->capacity * sizeof(*table->entries));
-}
-
-static bool loom_cfg_simplify_is_mergeable_terminal_block(
-    const loom_cfg_simplify_state_t* state, const loom_cfg_graph_t* graph,
-    uint16_t block_index) {
-  if (block_index == 0 ||
-      !loom_cfg_graph_block_is_reachable(graph, block_index)) {
-    return false;
-  }
-  const loom_block_t* block = graph->blocks[block_index].block;
-  if (!block || block->arg_count != 0 || block->first_op != block->last_op ||
-      !block->first_op) {
-    return false;
-  }
-
-  const loom_op_t* terminator = block->first_op;
-  loom_trait_flags_t traits =
-      loom_op_effective_traits(state->module, terminator);
-  return iree_all_bits_set(traits, LOOM_TRAIT_TERMINATOR | LOOM_TRAIT_PURE) &&
-         !loom_traits_are_convergent(traits) &&
-         terminator->successor_count == 0 && terminator->result_count == 0 &&
-         terminator->region_count == 0;
-}
-
-static bool loom_cfg_simplify_terminal_ops_equal(const loom_op_t* lhs,
-                                                 const loom_op_t* rhs) {
-  if (lhs->kind != rhs->kind || lhs->operand_count != rhs->operand_count ||
-      lhs->attribute_count != rhs->attribute_count ||
-      lhs->instance_flags != rhs->instance_flags) {
-    return false;
-  }
-
-  const loom_value_id_t* lhs_operands = loom_op_operands((loom_op_t*)lhs);
-  const loom_value_id_t* rhs_operands = loom_op_operands((loom_op_t*)rhs);
-  if (memcmp(lhs_operands, rhs_operands,
-             (iree_host_size_t)lhs->operand_count * sizeof(*lhs_operands)) !=
-      0) {
-    return false;
-  }
-
-  const loom_attribute_t* lhs_attrs = loom_op_attrs((loom_op_t*)lhs);
-  const loom_attribute_t* rhs_attrs = loom_op_attrs((loom_op_t*)rhs);
-  for (uint8_t i = 0; i < lhs->attribute_count; ++i) {
-    if (!loom_attribute_equal(&lhs_attrs[i], &rhs_attrs[i])) {
-      return false;
-    }
-  }
-  return true;
-}
-
-static uint32_t loom_cfg_simplify_terminal_op_fingerprint(const loom_op_t* op) {
-  uint32_t fingerprint = 2166136261u;
-  fingerprint = loom_cfg_simplify_hash_u32(op->kind, fingerprint);
-  fingerprint = loom_cfg_simplify_hash_u32(op->operand_count, fingerprint);
-  fingerprint = loom_cfg_simplify_hash_u32(op->attribute_count, fingerprint);
-  fingerprint = loom_cfg_simplify_hash_u32(op->instance_flags, fingerprint);
-  fingerprint = loom_cfg_simplify_hash_bytes(
-      loom_op_const_operands(op),
-      (iree_host_size_t)op->operand_count * sizeof(loom_value_id_t),
-      fingerprint);
-  const loom_attribute_t* attributes = loom_op_const_attrs(op);
-  for (uint8_t i = 0; i < op->attribute_count; ++i) {
-    uint32_t attribute_hash = loom_attribute_hash(&attributes[i]);
-    fingerprint = loom_cfg_simplify_hash_u32(attribute_hash, fingerprint);
-  }
-  return fingerprint;
-}
-
-static bool loom_cfg_simplify_find_duplicate_terminal_block(
-    const loom_cfg_simplify_state_t* state, const loom_cfg_graph_t* graph,
-    loom_cfg_simplify_block_hash_table_t* table, uint16_t block_index,
-    loom_block_t** out_canonical_block) {
-  *out_canonical_block = NULL;
-  if (!loom_cfg_simplify_is_mergeable_terminal_block(state, graph,
-                                                     block_index)) {
-    return false;
-  }
-  const loom_block_t* block = graph->blocks[block_index].block;
-  const loom_op_t* terminator = block->first_op;
-  uint32_t fingerprint = loom_cfg_simplify_terminal_op_fingerprint(terminator);
-  iree_host_size_t slot = fingerprint & (table->capacity - 1);
-  while (table->entries[slot].block_index != 0) {
-    const loom_cfg_simplify_block_hash_entry_t* entry = &table->entries[slot];
-    if (!*out_canonical_block && entry->fingerprint == fingerprint) {
-      loom_block_t* canonical_block =
-          (loom_block_t*)graph->blocks[entry->block_index].block;
-      if (loom_cfg_simplify_terminal_ops_equal(canonical_block->first_op,
-                                               terminator)) {
-        *out_canonical_block = canonical_block;
-      }
-    }
-    slot = (slot + 1) & (table->capacity - 1);
-  }
-  table->entries[slot] = (loom_cfg_simplify_block_hash_entry_t){
-      .fingerprint = fingerprint,
-      .block_index = block_index,
-  };
-  return *out_canonical_block != NULL;
 }
 
 static bool loom_cfg_simplify_value_map_append(
@@ -1107,39 +986,6 @@ static bool loom_cfg_simplify_alpha_block_fingerprint(
   return true;
 }
 
-static bool loom_cfg_simplify_find_alpha_equivalent_block(
-    const loom_cfg_simplify_state_t* state, const loom_cfg_graph_t* graph,
-    loom_cfg_simplify_block_hash_table_t* table, uint16_t block_index,
-    loom_block_t** out_canonical_block) {
-  *out_canonical_block = NULL;
-  if (!loom_cfg_simplify_is_alpha_merge_candidate(state, graph, block_index)) {
-    return false;
-  }
-  const loom_block_t* block = graph->blocks[block_index].block;
-  uint32_t fingerprint = 0;
-  if (!loom_cfg_simplify_alpha_block_fingerprint(block, &fingerprint)) {
-    return false;
-  }
-  iree_host_size_t slot = fingerprint & (table->capacity - 1);
-  while (table->entries[slot].block_index != 0) {
-    const loom_cfg_simplify_block_hash_entry_t* entry = &table->entries[slot];
-    if (!*out_canonical_block && entry->fingerprint == fingerprint) {
-      loom_block_t* canonical_block =
-          (loom_block_t*)graph->blocks[entry->block_index].block;
-      if (loom_cfg_simplify_blocks_alpha_equivalent(state, block,
-                                                    canonical_block)) {
-        *out_canonical_block = canonical_block;
-      }
-    }
-    slot = (slot + 1) & (table->capacity - 1);
-  }
-  table->entries[slot] = (loom_cfg_simplify_block_hash_entry_t){
-      .fingerprint = fingerprint,
-      .block_index = block_index,
-  };
-  return *out_canonical_block != NULL;
-}
-
 static bool loom_cfg_simplify_can_redirect_successor(
     const loom_cfg_simplify_state_t* state, const loom_op_t* terminator,
     const loom_block_t* old_dest, const loom_block_t* new_dest) {
@@ -1189,107 +1035,135 @@ static bool loom_cfg_simplify_can_redirect_block_predecessors(
   return true;
 }
 
-static iree_status_t loom_cfg_simplify_redirect_successor(
-    loom_cfg_simplify_state_t* state, loom_op_t* terminator,
-    loom_block_t* old_dest, loom_block_t* new_dest) {
-  if (loom_cfg_br_isa(terminator)) {
-    loom_value_slice_t args = loom_cfg_br_args(terminator);
-    return loom_cfg_simplify_replace_br(state, terminator, new_dest,
-                                        args.values, args.count);
+// Retains only surviving representatives in the existing candidate table.
+// A matched block never becomes a representative, so destinations need no
+// transitive resolution and remain live throughout the structural edit.
+static uint16_t loom_cfg_simplify_find_equivalent_block(
+    const loom_cfg_simplify_state_t* state, const loom_cfg_graph_t* graph,
+    loom_cfg_simplify_block_hash_table_t* table, uint16_t block_index) {
+  if (!loom_cfg_simplify_is_alpha_merge_candidate(state, graph, block_index)) {
+    return 0;
   }
-
-  loom_block_t** successors = loom_op_successors(terminator);
-  bool changed = false;
-  for (uint8_t successor_index = 0;
-       successor_index < terminator->successor_count; ++successor_index) {
-    if (successors[successor_index] != old_dest) {
-      continue;
+  const loom_block_t* block = graph->blocks[block_index].block;
+  uint32_t fingerprint = 0;
+  if (!loom_cfg_simplify_alpha_block_fingerprint(block, &fingerprint)) {
+    return 0;
+  }
+  iree_host_size_t slot = fingerprint & (table->capacity - 1);
+  while (table->entries[slot].block_index != 0) {
+    const loom_cfg_simplify_block_hash_entry_t* entry = &table->entries[slot];
+    if (entry->fingerprint == fingerprint) {
+      loom_block_t* canonical_block =
+          (loom_block_t*)graph->blocks[entry->block_index].block;
+      if (loom_cfg_simplify_blocks_alpha_equivalent(state, block,
+                                                    canonical_block) &&
+          loom_cfg_simplify_can_redirect_block_predecessors(
+              state, graph, block_index, canonical_block)) {
+        return entry->block_index;
+      }
     }
-    successors[successor_index] = new_dest;
-    changed = true;
+    slot = (slot + 1) & (table->capacity - 1);
   }
-  if (!changed) {
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_add_to_worklist(state->rewriter, terminator));
-  state->rewriter->flags |= LOOM_REWRITER_FLAG_CHANGED;
-  return iree_ok_status();
+  table->entries[slot] = (loom_cfg_simplify_block_hash_entry_t){
+      .fingerprint = fingerprint,
+      .block_index = block_index,
+  };
+  return 0;
 }
 
 static iree_status_t loom_cfg_simplify_redirect_block_predecessors(
     loom_cfg_simplify_state_t* state, const loom_cfg_graph_t* graph,
     uint16_t block_index, loom_block_t* new_dest) {
-  loom_block_t* old_dest = (loom_block_t*)graph->blocks[block_index].block;
-  loom_cfg_block_index_span_t predecessors =
-      loom_cfg_graph_predecessors(graph, block_index);
-  for (iree_host_size_t i = 0; i < predecessors.count; ++i) {
-    loom_block_t* predecessor =
-        (loom_block_t*)graph->blocks[predecessors.values[i]].block;
-    IREE_RETURN_IF_ERROR(loom_cfg_simplify_redirect_successor(
-        state, predecessor->last_op, old_dest, new_dest));
+  const loom_cfg_edge_index_span_t edges =
+      loom_cfg_graph_predecessor_edges(graph, block_index);
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < edges.count && iree_status_is_ok(status);
+       ++i) {
+    const loom_cfg_edge_info_t* edge =
+        loom_cfg_graph_edge(graph, edges.values[i]);
+    loom_op_t* terminator = (loom_op_t*)edge->terminator;
+    // Argument replacement was proved before mutation. Keeping the operation
+    // and its operands preserves every original edge's edit location.
+    loom_op_successors(terminator)[edge->successor_index] = new_dest;
+    status = loom_rewriter_add_to_worklist(state->rewriter, terminator);
   }
-  return iree_ok_status();
+  return status;
 }
 
-static iree_status_t loom_cfg_simplify_merge_alpha_equivalent_blocks(
+static iree_status_t loom_cfg_simplify_merge_equivalent_blocks(
     loom_cfg_simplify_state_t* state, const loom_cfg_graph_t* graph,
-    loom_cfg_simplify_block_hash_table_t* table, bool* out_changed) {
+    bool* out_changed) {
   if (graph->malformed) {
     return iree_ok_status();
   }
-  for (uint16_t block_index = 1; block_index < graph->block_count;
+  loom_cfg_simplify_block_hash_table_t table = {0};
+  IREE_RETURN_IF_ERROR(loom_cfg_simplify_block_hash_table_initialize(
+      state->analysis_arena, graph->block_count, &table));
+
+  uint16_t* destinations = NULL;
+  bool* remove_blocks = NULL;
+  uint16_t merge_count = 0;
+  iree_status_t status = iree_ok_status();
+  for (uint16_t block_index = 1;
+       block_index < graph->block_count && iree_status_is_ok(status);
        ++block_index) {
-    loom_block_t* canonical_block = NULL;
-    if (!loom_cfg_simplify_find_alpha_equivalent_block(
-            state, graph, table, block_index, &canonical_block)) {
+    uint16_t destination = loom_cfg_simplify_find_equivalent_block(
+        state, graph, &table, block_index);
+    if (destination == 0) {
       continue;
     }
-    if (!loom_cfg_simplify_can_redirect_block_predecessors(
-            state, graph, block_index, canonical_block)) {
-      continue;
+    if (!destinations) {
+      // The destinations and the removal API's mask share one lazy allocation.
+      // Zero destinations mean no edit; entry block zero is never a candidate.
+      status = iree_arena_allocate_array(
+          state->analysis_arena, graph->block_count,
+          sizeof(*destinations) + sizeof(*remove_blocks),
+          (void**)&destinations);
+      if (iree_status_is_ok(status)) {
+        remove_blocks = (bool*)(destinations + graph->block_count);
+        memset(destinations, 0,
+               graph->block_count *
+                   (sizeof(*destinations) + sizeof(*remove_blocks)));
+      }
     }
-
-    IREE_RETURN_IF_ERROR(loom_cfg_simplify_redirect_block_predecessors(
-        state, graph, block_index, canonical_block));
-    IREE_RETURN_IF_ERROR(
-        loom_cfg_simplify_remove_cfg_block(state, graph, block_index));
-    ++state->statistics->duplicate_blocks_merged;
-    state->rewriter->flags |= LOOM_REWRITER_FLAG_CHANGED;
-    *out_changed = true;
-    return iree_ok_status();
+    if (iree_status_is_ok(status)) {
+      destinations[block_index] = destination;
+      remove_blocks[block_index] = true;
+      ++merge_count;
+    }
   }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_cfg_simplify_merge_duplicate_terminal_blocks(
-    loom_cfg_simplify_state_t* state, const loom_cfg_graph_t* graph,
-    loom_cfg_simplify_block_hash_table_t* table, bool* out_changed) {
-  if (graph->malformed) {
-    return iree_ok_status();
+  if (!iree_status_is_ok(status) || merge_count == 0) {
+    return status;
   }
-  for (uint16_t block_index = 1; block_index < graph->block_count;
+
+  // Definitions in discarded blocks have no nonlocal uses. Each destination
+  // survives, and equivalent blocks had identical outgoing successors before
+  // mutation. Redirecting all incoming edges therefore preserves each group's
+  // equivalence, even when the predecessor belongs to another merge group.
+  // During mutation, original edge records serve only as stable edit locations.
+  // The caller refreshes analyses after the complete structural edit.
+  for (uint16_t block_index = 1;
+       block_index < graph->block_count && iree_status_is_ok(status);
        ++block_index) {
-    loom_block_t* canonical_block = NULL;
-    if (!loom_cfg_simplify_find_duplicate_terminal_block(
-            state, graph, table, block_index, &canonical_block)) {
+    if (destinations[block_index] == 0) {
       continue;
     }
-
-    if (!loom_cfg_simplify_can_redirect_block_predecessors(
-            state, graph, block_index, canonical_block)) {
-      continue;
-    }
-    IREE_RETURN_IF_ERROR(loom_cfg_simplify_redirect_block_predecessors(
-        state, graph, block_index, canonical_block));
-    IREE_RETURN_IF_ERROR(
-        loom_cfg_simplify_remove_cfg_block(state, graph, block_index));
-    ++state->statistics->duplicate_blocks_merged;
-    state->rewriter->flags |= LOOM_REWRITER_FLAG_CHANGED;
-    *out_changed = true;
-    return iree_ok_status();
+    status = loom_cfg_simplify_redirect_block_predecessors(
+        state, graph, block_index,
+        (loom_block_t*)graph->blocks[destinations[block_index]].block);
   }
-  return iree_ok_status();
+  if (iree_status_is_ok(status)) {
+    uint16_t removed_count = 0;
+    status = loom_region_remove_blocks(
+        state->module, (loom_region_t*)graph->region, remove_blocks,
+        graph->block_count, state->analysis_arena, &removed_count);
+    if (iree_status_is_ok(status)) {
+      state->statistics->duplicate_blocks_merged += removed_count;
+      state->rewriter->flags |= LOOM_REWRITER_FLAG_CHANGED;
+      *out_changed = true;
+    }
+  }
+  return status;
 }
 
 //===----------------------------------------------------------------------===//
@@ -1792,17 +1666,8 @@ static iree_status_t loom_cfg_simplify_process_cfg_region(
     return iree_ok_status();
   }
 
-  loom_cfg_simplify_block_hash_table_t block_hash_table = {0};
-  IREE_RETURN_IF_ERROR(loom_cfg_simplify_block_hash_table_initialize(
-      state->analysis_arena, graph->block_count, &block_hash_table));
-  IREE_RETURN_IF_ERROR(loom_cfg_simplify_merge_duplicate_terminal_blocks(
-      state, graph, &block_hash_table, out_changed));
-  if (*out_changed) {
-    return iree_ok_status();
-  }
-  loom_cfg_simplify_block_hash_table_reset(&block_hash_table);
-  IREE_RETURN_IF_ERROR(loom_cfg_simplify_merge_alpha_equivalent_blocks(
-      state, graph, &block_hash_table, out_changed));
+  IREE_RETURN_IF_ERROR(
+      loom_cfg_simplify_merge_equivalent_blocks(state, graph, out_changed));
   if (*out_changed) {
     return iree_ok_status();
   }

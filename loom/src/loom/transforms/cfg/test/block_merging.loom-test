@@ -1,0 +1,211 @@
+// RUN: with-checks pass-report @measure
+
+// Independent equivalent paths share one structural edit.
+pass.pipeline<func> @measure pipeline {
+  cfg-simplify
+}
+
+func.def @merge_terminal_paths(%selector: i32, %value: i32) -> (i32) {
+  %otherwise = scalar.constant 9 : i32
+  cfg.br ^check_0
+^check_0:
+  %key_0 = scalar.constant 0 : i32
+  %choose_0 = scalar.cmpi eq, %selector, %key_0 : i32
+  cfg.cond_br %choose_0, ^case_0, ^check_1
+^check_1:
+  %key_1 = scalar.constant 1 : i32
+  %choose_1 = scalar.cmpi eq, %selector, %key_1 : i32
+  cfg.cond_br %choose_1, ^case_1, ^check_2
+^check_2:
+  %key_2 = scalar.constant 2 : i32
+  %choose_2 = scalar.cmpi eq, %selector, %key_2 : i32
+  cfg.cond_br %choose_2, ^case_2, ^check_3
+^check_3:
+  %key_3 = scalar.constant 3 : i32
+  %choose_3 = scalar.cmpi eq, %selector, %key_3 : i32
+  cfg.cond_br %choose_3, ^case_3, ^check_4
+^check_4:
+  func.return %otherwise : i32
+^case_0:
+  func.return %value : i32
+^case_1:
+  func.return %value : i32
+^case_2:
+  func.return %value : i32
+^case_3:
+  func.return %value : i32
+}
+
+// ----
+CHECK: *"iterations":3,*
+CHECK: *"duplicate-blocks-merged":3}*
+
+// ====
+// RUN: with-checks pass-report @measure
+
+// Independent equivalent paths share one structural edit.
+pass.pipeline<func> @measure pipeline {
+  cfg-simplify
+}
+
+func.def @merge_alpha_paths(%selector: i32, %value: i32) -> (i32) {
+  %bias = scalar.constant 11 : i32
+  %otherwise = scalar.constant 9 : i32
+  cfg.br ^check_0
+^check_0:
+  %key_0 = scalar.constant 0 : i32
+  %choose_0 = scalar.cmpi eq, %selector, %key_0 : i32
+  cfg.cond_br %choose_0, ^case_0, ^check_1
+^check_1:
+  %key_1 = scalar.constant 1 : i32
+  %choose_1 = scalar.cmpi eq, %selector, %key_1 : i32
+  cfg.cond_br %choose_1, ^case_1, ^check_2
+^check_2:
+  %key_2 = scalar.constant 2 : i32
+  %choose_2 = scalar.cmpi eq, %selector, %key_2 : i32
+  cfg.cond_br %choose_2, ^case_2, ^check_3
+^check_3:
+  %key_3 = scalar.constant 3 : i32
+  %choose_3 = scalar.cmpi eq, %selector, %key_3 : i32
+  cfg.cond_br %choose_3, ^case_3, ^check_4
+^check_4:
+  func.return %otherwise : i32
+^case_0:
+  %result_0 = scalar.addi %value, %bias : i32
+  func.return %result_0 : i32
+^case_1:
+  %result_1 = scalar.addi %value, %bias : i32
+  func.return %result_1 : i32
+^case_2:
+  %result_2 = scalar.addi %value, %bias : i32
+  func.return %result_2 : i32
+^case_3:
+  %result_3 = scalar.addi %value, %bias : i32
+  func.return %result_3 : i32
+}
+
+// ----
+CHECK: *"iterations":3,*
+CHECK: *"duplicate-blocks-merged":3}*
+
+// ====
+// RUN: pass cfg-simplify
+
+// A removed predecessor and its destination belong to separate merge groups.
+// All redirects use original edge slots before either block is removed.
+func.def @merge_adjacent_groups(%choose: i1, %pick: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %choose, ^seeds, ^sums
+^seeds:
+  cfg.cond_br %pick, ^first_seed, ^second_seed
+^first_seed:
+  cfg.br ^seed_result(%a: i32)
+^second_seed:
+  cfg.br ^seed_result(%b: i32)
+^seed_result(%seed: i32):
+  func.return %seed : i32
+^sums:
+  cfg.cond_br %pick, ^first_sum, ^second_sum
+^first_sum:
+  %left = scalar.addi %a, %b : i32
+  cfg.br ^sum_result(%left: i32)
+^second_sum:
+  %right = scalar.addi %a, %b : i32
+  cfg.br ^sum_result(%right: i32)
+^sum_result(%sum: i32):
+  func.return %sum : i32
+}
+
+// ----
+func.def @merge_adjacent_groups(%choose: i1, %pick: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %choose, ^seeds, ^sums
+^seeds:
+  cfg.cond_br %pick, ^first_seed, ^second_seed
+^first_seed:
+  cfg.br ^seed_result(%a: i32)
+^second_seed:
+  cfg.br ^seed_result(%b: i32)
+^seed_result(%seed: i32):
+  func.return %seed : i32
+^sums:
+  %left = scalar.addi %a, %b : i32
+  cfg.br ^seed_result(%left: i32)
+}
+
+// ====
+// RUN: pass cfg-simplify
+
+// Equivalent loop paths preserve the carried value and shared loop header.
+func.def @merge_loop_paths(%choose: i1, %limit: i32) -> (i32) {
+  %initial = scalar.constant 0 : i32
+  %step = scalar.constant 1 : i32
+  cfg.br ^header(%initial: i32)
+^header(%index: i32):
+  %continue = scalar.cmpi slt, %index, %limit : i32
+  cfg.cond_br %continue, ^dispatch, ^exit
+^dispatch:
+  cfg.cond_br %choose, ^left, ^right
+^left:
+  %left_next = scalar.addi %index, %step : i32
+  cfg.br ^header(%left_next: i32)
+^right:
+  %right_next = scalar.addi %index, %step : i32
+  cfg.br ^header(%right_next: i32)
+^exit:
+  func.return %index : i32
+}
+
+// ----
+func.def @merge_loop_paths(%choose: i1, %limit: i32) -> (i32) {
+  %initial = scalar.constant 0 : i32
+  %step = scalar.constant 1 : i32
+  cfg.br ^header(%initial: i32)
+^header(%index: i32):
+  %continue = scalar.cmpi slt, %index, %limit : i32
+  cfg.cond_br %continue, ^dispatch, ^exit
+^dispatch:
+  %left_next = scalar.addi %index, %step : i32
+  cfg.br ^header(%left_next: i32)
+^exit:
+  func.return %index : i32
+}
+
+// ====
+// RUN: pass cfg-simplify
+
+// The initial sum is used in another block and cannot become a discarded
+// definition, even though the repeat block computes the same expression.
+func.def @preserve_nonlocal_definition(%choose: i1, %repeat: i1, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %choose, ^first, ^second
+^first:
+  test.use %a : i32
+  cfg.br ^initial
+^second:
+  test.use %b : i32
+  cfg.br ^initial
+^initial:
+  %sum = scalar.addi %a, %b : i32
+  cfg.br ^header
+^header:
+  test.use %sum : i32
+  cfg.cond_br %repeat, ^body, ^exit
+^body:
+  %repeated_sum = scalar.addi %a, %b : i32
+  cfg.br ^header
+^exit:
+  func.return %sum : i32
+}
+
+// ====
+// RUN: pass cfg-simplify
+
+// Convergent returns remain distinct program points.
+kernel.def @preserve_convergent_returns() {
+  %launch_size = index.constant 1 : index
+  kernel.launch.config workgroups(%launch_size, %launch_size, %launch_size) workgroup_size(%launch_size, %launch_size, %launch_size) : index
+} launch(%choose: i1) {
+  cfg.cond_br %choose, ^left, ^right
+^left:
+  kernel.return
+^right:
+  kernel.return
+}
