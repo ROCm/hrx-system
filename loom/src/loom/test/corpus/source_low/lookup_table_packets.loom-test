@@ -1,0 +1,465 @@
+func.def @i8_non_power_table_i8(%table: vector<3xi8>, %indices: vector<64xi8>) -> (vector<64xi8>) {
+  %values = vector.table.lookup %table[%indices] : vector<3xi8>, vector<64xi8> -> vector<64xi8>
+  func.return %values : vector<64xi8>
+}
+
+// ====
+
+func.def @i8_last_table_entry_i8(%table: vector<64xi8>) -> (vector<64xi8>) {
+  %indices = vector.constant 63 : vector<64xi8>
+  %values = vector.table.lookup %table[%indices] : vector<64xi8>, vector<64xi8> -> vector<64xi8>
+  func.return %values : vector<64xi8>
+}
+
+// ====
+
+func.def @i8_non_power_table_i16(%table: vector<3xi8>, %indices: vector<32xi16>) -> (vector<32xi8>) {
+  %values = vector.table.lookup %table[%indices] : vector<3xi8>, vector<32xi16> -> vector<32xi8>
+  func.return %values : vector<32xi8>
+}
+
+// ====
+
+func.def @i8_last_table_entry_i16(%table: vector<64xi8>) -> (vector<32xi8>) {
+  %indices = vector.constant 63 : vector<32xi16>
+  %values = vector.table.lookup %table[%indices] : vector<64xi8>, vector<32xi16> -> vector<32xi8>
+  func.return %values : vector<32xi8>
+}
+
+// ====
+
+func.def @i8_non_power_table_i32(%table: vector<3xi8>, %indices: vector<16xi32>) -> (vector<16xi8>) {
+  %values = vector.table.lookup %table[%indices] : vector<3xi8>, vector<16xi32> -> vector<16xi8>
+  func.return %values : vector<16xi8>
+}
+
+// ====
+
+func.def @i8_last_table_entry_i32(%table: vector<64xi8>) -> (vector<16xi8>) {
+  %indices = vector.constant 63 : vector<16xi32>
+  %values = vector.table.lookup %table[%indices] : vector<64xi8>, vector<16xi32> -> vector<16xi8>
+  func.return %values : vector<16xi8>
+}
+
+// ====
+
+func.def @f8E4M3_non_power_table_i8(%table: vector<3xf8E4M3>, %indices: vector<64xi8>) -> (vector<64xf8E4M3>) {
+  %values = vector.table.lookup %table[%indices] : vector<3xf8E4M3>, vector<64xi8> -> vector<64xf8E4M3>
+  func.return %values : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @f8E4M3_last_table_entry_i8(%table: vector<64xf8E4M3>) -> (vector<64xf8E4M3>) {
+  %indices = vector.constant 63 : vector<64xi8>
+  %values = vector.table.lookup %table[%indices] : vector<64xf8E4M3>, vector<64xi8> -> vector<64xf8E4M3>
+  func.return %values : vector<64xf8E4M3>
+}
+
+// ====
+
+func.def @f8E4M3_non_power_table_i16(%table: vector<3xf8E4M3>, %indices: vector<32xi16>) -> (vector<32xf8E4M3>) {
+  %values = vector.table.lookup %table[%indices] : vector<3xf8E4M3>, vector<32xi16> -> vector<32xf8E4M3>
+  func.return %values : vector<32xf8E4M3>
+}
+
+// ====
+
+func.def @f8E4M3_last_table_entry_i16(%table: vector<64xf8E4M3>) -> (vector<32xf8E4M3>) {
+  %indices = vector.constant 63 : vector<32xi16>
+  %values = vector.table.lookup %table[%indices] : vector<64xf8E4M3>, vector<32xi16> -> vector<32xf8E4M3>
+  func.return %values : vector<32xf8E4M3>
+}
+
+// ====
+
+func.def @f8E4M3_non_power_table_i32(%table: vector<3xf8E4M3>, %indices: vector<16xi32>) -> (vector<16xf8E4M3>) {
+  %values = vector.table.lookup %table[%indices] : vector<3xf8E4M3>, vector<16xi32> -> vector<16xf8E4M3>
+  func.return %values : vector<16xf8E4M3>
+}
+
+// ====
+
+func.def @f8E4M3_last_table_entry_i32(%table: vector<64xf8E4M3>) -> (vector<16xf8E4M3>) {
+  %indices = vector.constant 63 : vector<16xi32>
+  %values = vector.table.lookup %table[%indices] : vector<64xf8E4M3>, vector<16xi32> -> vector<16xf8E4M3>
+  func.return %values : vector<16xf8E4M3>
+}
+
+// ====
+
+func.def @f8E5M2_non_power_table_i8(%table: vector<3xf8E5M2>, %indices: vector<64xi8>) -> (vector<64xf8E5M2>) {
+  %values = vector.table.lookup %table[%indices] : vector<3xf8E5M2>, vector<64xi8> -> vector<64xf8E5M2>
+  func.return %values : vector<64xf8E5M2>
+}
+
+// ====
+
+func.def @f8E5M2_last_table_entry_i8(%table: vector<64xf8E5M2>) -> (vector<64xf8E5M2>) {
+  %indices = vector.constant 63 : vector<64xi8>
+  %values = vector.table.lookup %table[%indices] : vector<64xf8E5M2>, vector<64xi8> -> vector<64xf8E5M2>
+  func.return %values : vector<64xf8E5M2>
+}
+
+// ====
+
+func.def @f8E5M2_non_power_table_i16(%table: vector<3xf8E5M2>, %indices: vector<32xi16>) -> (vector<32xf8E5M2>) {
+  %values = vector.table.lookup %table[%indices] : vector<3xf8E5M2>, vector<32xi16> -> vector<32xf8E5M2>
+  func.return %values : vector<32xf8E5M2>
+}
+
+// ====
+
+func.def @f8E5M2_last_table_entry_i16(%table: vector<64xf8E5M2>) -> (vector<32xf8E5M2>) {
+  %indices = vector.constant 63 : vector<32xi16>
+  %values = vector.table.lookup %table[%indices] : vector<64xf8E5M2>, vector<32xi16> -> vector<32xf8E5M2>
+  func.return %values : vector<32xf8E5M2>
+}
+
+// ====
+
+func.def @f8E5M2_non_power_table_i32(%table: vector<3xf8E5M2>, %indices: vector<16xi32>) -> (vector<16xf8E5M2>) {
+  %values = vector.table.lookup %table[%indices] : vector<3xf8E5M2>, vector<16xi32> -> vector<16xf8E5M2>
+  func.return %values : vector<16xf8E5M2>
+}
+
+// ====
+
+func.def @f8E5M2_last_table_entry_i32(%table: vector<64xf8E5M2>) -> (vector<16xf8E5M2>) {
+  %indices = vector.constant 63 : vector<16xi32>
+  %values = vector.table.lookup %table[%indices] : vector<64xf8E5M2>, vector<16xi32> -> vector<16xf8E5M2>
+  func.return %values : vector<16xf8E5M2>
+}
+
+// ====
+
+func.def @i16_non_power_table_i8(%table: vector<3xi16>, %indices: vector<32xi8>) -> (vector<32xi16>) {
+  %values = vector.table.lookup %table[%indices] : vector<3xi16>, vector<32xi8> -> vector<32xi16>
+  func.return %values : vector<32xi16>
+}
+
+// ====
+
+func.def @i16_last_table_entry_i8(%table: vector<32xi16>) -> (vector<32xi16>) {
+  %indices = vector.constant 31 : vector<32xi8>
+  %values = vector.table.lookup %table[%indices] : vector<32xi16>, vector<32xi8> -> vector<32xi16>
+  func.return %values : vector<32xi16>
+}
+
+// ====
+
+func.def @i16_non_power_table_i16(%table: vector<3xi16>, %indices: vector<32xi16>) -> (vector<32xi16>) {
+  %values = vector.table.lookup %table[%indices] : vector<3xi16>, vector<32xi16> -> vector<32xi16>
+  func.return %values : vector<32xi16>
+}
+
+// ====
+
+func.def @i16_last_table_entry_i16(%table: vector<32xi16>) -> (vector<32xi16>) {
+  %indices = vector.constant 31 : vector<32xi16>
+  %values = vector.table.lookup %table[%indices] : vector<32xi16>, vector<32xi16> -> vector<32xi16>
+  func.return %values : vector<32xi16>
+}
+
+// ====
+
+func.def @i16_non_power_table_i32(%table: vector<3xi16>, %indices: vector<16xi32>) -> (vector<16xi16>) {
+  %values = vector.table.lookup %table[%indices] : vector<3xi16>, vector<16xi32> -> vector<16xi16>
+  func.return %values : vector<16xi16>
+}
+
+// ====
+
+func.def @i16_last_table_entry_i32(%table: vector<32xi16>) -> (vector<16xi16>) {
+  %indices = vector.constant 31 : vector<16xi32>
+  %values = vector.table.lookup %table[%indices] : vector<32xi16>, vector<16xi32> -> vector<16xi16>
+  func.return %values : vector<16xi16>
+}
+
+// ====
+
+func.def @f16_non_power_table_i8(%table: vector<3xf16>, %indices: vector<32xi8>) -> (vector<32xf16>) {
+  %values = vector.table.lookup %table[%indices] : vector<3xf16>, vector<32xi8> -> vector<32xf16>
+  func.return %values : vector<32xf16>
+}
+
+// ====
+
+func.def @f16_last_table_entry_i8(%table: vector<32xf16>) -> (vector<32xf16>) {
+  %indices = vector.constant 31 : vector<32xi8>
+  %values = vector.table.lookup %table[%indices] : vector<32xf16>, vector<32xi8> -> vector<32xf16>
+  func.return %values : vector<32xf16>
+}
+
+// ====
+
+func.def @f16_non_power_table_i16(%table: vector<3xf16>, %indices: vector<32xi16>) -> (vector<32xf16>) {
+  %values = vector.table.lookup %table[%indices] : vector<3xf16>, vector<32xi16> -> vector<32xf16>
+  func.return %values : vector<32xf16>
+}
+
+// ====
+
+func.def @f16_last_table_entry_i16(%table: vector<32xf16>) -> (vector<32xf16>) {
+  %indices = vector.constant 31 : vector<32xi16>
+  %values = vector.table.lookup %table[%indices] : vector<32xf16>, vector<32xi16> -> vector<32xf16>
+  func.return %values : vector<32xf16>
+}
+
+// ====
+
+func.def @f16_non_power_table_i32(%table: vector<3xf16>, %indices: vector<16xi32>) -> (vector<16xf16>) {
+  %values = vector.table.lookup %table[%indices] : vector<3xf16>, vector<16xi32> -> vector<16xf16>
+  func.return %values : vector<16xf16>
+}
+
+// ====
+
+func.def @f16_last_table_entry_i32(%table: vector<32xf16>) -> (vector<16xf16>) {
+  %indices = vector.constant 31 : vector<16xi32>
+  %values = vector.table.lookup %table[%indices] : vector<32xf16>, vector<16xi32> -> vector<16xf16>
+  func.return %values : vector<16xf16>
+}
+
+// ====
+
+func.def @bf16_non_power_table_i8(%table: vector<3xbf16>, %indices: vector<32xi8>) -> (vector<32xbf16>) {
+  %values = vector.table.lookup %table[%indices] : vector<3xbf16>, vector<32xi8> -> vector<32xbf16>
+  func.return %values : vector<32xbf16>
+}
+
+// ====
+
+func.def @bf16_last_table_entry_i8(%table: vector<32xbf16>) -> (vector<32xbf16>) {
+  %indices = vector.constant 31 : vector<32xi8>
+  %values = vector.table.lookup %table[%indices] : vector<32xbf16>, vector<32xi8> -> vector<32xbf16>
+  func.return %values : vector<32xbf16>
+}
+
+// ====
+
+func.def @bf16_non_power_table_i16(%table: vector<3xbf16>, %indices: vector<32xi16>) -> (vector<32xbf16>) {
+  %values = vector.table.lookup %table[%indices] : vector<3xbf16>, vector<32xi16> -> vector<32xbf16>
+  func.return %values : vector<32xbf16>
+}
+
+// ====
+
+func.def @bf16_last_table_entry_i16(%table: vector<32xbf16>) -> (vector<32xbf16>) {
+  %indices = vector.constant 31 : vector<32xi16>
+  %values = vector.table.lookup %table[%indices] : vector<32xbf16>, vector<32xi16> -> vector<32xbf16>
+  func.return %values : vector<32xbf16>
+}
+
+// ====
+
+func.def @bf16_non_power_table_i32(%table: vector<3xbf16>, %indices: vector<16xi32>) -> (vector<16xbf16>) {
+  %values = vector.table.lookup %table[%indices] : vector<3xbf16>, vector<16xi32> -> vector<16xbf16>
+  func.return %values : vector<16xbf16>
+}
+
+// ====
+
+func.def @bf16_last_table_entry_i32(%table: vector<32xbf16>) -> (vector<16xbf16>) {
+  %indices = vector.constant 31 : vector<16xi32>
+  %values = vector.table.lookup %table[%indices] : vector<32xbf16>, vector<16xi32> -> vector<16xbf16>
+  func.return %values : vector<16xbf16>
+}
+
+// ====
+
+func.def @i32_non_power_table_i8(%table: vector<3xi32>, %indices: vector<16xi8>) -> (vector<16xi32>) {
+  %values = vector.table.lookup %table[%indices] : vector<3xi32>, vector<16xi8> -> vector<16xi32>
+  func.return %values : vector<16xi32>
+}
+
+// ====
+
+func.def @i32_last_table_entry_i8(%table: vector<16xi32>) -> (vector<16xi32>) {
+  %indices = vector.constant 15 : vector<16xi8>
+  %values = vector.table.lookup %table[%indices] : vector<16xi32>, vector<16xi8> -> vector<16xi32>
+  func.return %values : vector<16xi32>
+}
+
+// ====
+
+func.def @i32_non_power_table_i16(%table: vector<3xi32>, %indices: vector<16xi16>) -> (vector<16xi32>) {
+  %values = vector.table.lookup %table[%indices] : vector<3xi32>, vector<16xi16> -> vector<16xi32>
+  func.return %values : vector<16xi32>
+}
+
+// ====
+
+func.def @i32_last_table_entry_i16(%table: vector<16xi32>) -> (vector<16xi32>) {
+  %indices = vector.constant 15 : vector<16xi16>
+  %values = vector.table.lookup %table[%indices] : vector<16xi32>, vector<16xi16> -> vector<16xi32>
+  func.return %values : vector<16xi32>
+}
+
+// ====
+
+func.def @i32_non_power_table_i32(%table: vector<3xi32>, %indices: vector<16xi32>) -> (vector<16xi32>) {
+  %values = vector.table.lookup %table[%indices] : vector<3xi32>, vector<16xi32> -> vector<16xi32>
+  func.return %values : vector<16xi32>
+}
+
+// ====
+
+func.def @i32_last_table_entry_i32(%table: vector<16xi32>) -> (vector<16xi32>) {
+  %indices = vector.constant 15 : vector<16xi32>
+  %values = vector.table.lookup %table[%indices] : vector<16xi32>, vector<16xi32> -> vector<16xi32>
+  func.return %values : vector<16xi32>
+}
+
+// ====
+
+func.def @f32_non_power_table_i8(%table: vector<3xf32>, %indices: vector<16xi8>) -> (vector<16xf32>) {
+  %values = vector.table.lookup %table[%indices] : vector<3xf32>, vector<16xi8> -> vector<16xf32>
+  func.return %values : vector<16xf32>
+}
+
+// ====
+
+func.def @f32_last_table_entry_i8(%table: vector<16xf32>) -> (vector<16xf32>) {
+  %indices = vector.constant 15 : vector<16xi8>
+  %values = vector.table.lookup %table[%indices] : vector<16xf32>, vector<16xi8> -> vector<16xf32>
+  func.return %values : vector<16xf32>
+}
+
+// ====
+
+func.def @f32_non_power_table_i16(%table: vector<3xf32>, %indices: vector<16xi16>) -> (vector<16xf32>) {
+  %values = vector.table.lookup %table[%indices] : vector<3xf32>, vector<16xi16> -> vector<16xf32>
+  func.return %values : vector<16xf32>
+}
+
+// ====
+
+func.def @f32_last_table_entry_i16(%table: vector<16xf32>) -> (vector<16xf32>) {
+  %indices = vector.constant 15 : vector<16xi16>
+  %values = vector.table.lookup %table[%indices] : vector<16xf32>, vector<16xi16> -> vector<16xf32>
+  func.return %values : vector<16xf32>
+}
+
+// ====
+
+func.def @f32_non_power_table_i32(%table: vector<3xf32>, %indices: vector<16xi32>) -> (vector<16xf32>) {
+  %values = vector.table.lookup %table[%indices] : vector<3xf32>, vector<16xi32> -> vector<16xf32>
+  func.return %values : vector<16xf32>
+}
+
+// ====
+
+func.def @f32_last_table_entry_i32(%table: vector<16xf32>) -> (vector<16xf32>) {
+  %indices = vector.constant 15 : vector<16xi32>
+  %values = vector.table.lookup %table[%indices] : vector<16xf32>, vector<16xi32> -> vector<16xf32>
+  func.return %values : vector<16xf32>
+}
+
+// ====
+
+func.def @i64_last_table_entry_i8(%table: vector<8xi64>) -> (vector<8xi64>) {
+  %indices = vector.constant 7 : vector<8xi8>
+  %values = vector.table.lookup %table[%indices] : vector<8xi64>, vector<8xi8> -> vector<8xi64>
+  func.return %values : vector<8xi64>
+}
+
+// ====
+
+func.def @i64_last_table_entry_i16(%table: vector<8xi64>) -> (vector<8xi64>) {
+  %indices = vector.constant 7 : vector<8xi16>
+  %values = vector.table.lookup %table[%indices] : vector<8xi64>, vector<8xi16> -> vector<8xi64>
+  func.return %values : vector<8xi64>
+}
+
+// ====
+
+func.def @i64_last_table_entry_i32(%table: vector<8xi64>) -> (vector<8xi64>) {
+  %indices = vector.constant 7 : vector<8xi32>
+  %values = vector.table.lookup %table[%indices] : vector<8xi64>, vector<8xi32> -> vector<8xi64>
+  func.return %values : vector<8xi64>
+}
+
+// ====
+
+func.def @f64_last_table_entry_i8(%table: vector<8xf64>) -> (vector<8xf64>) {
+  %indices = vector.constant 7 : vector<8xi8>
+  %values = vector.table.lookup %table[%indices] : vector<8xf64>, vector<8xi8> -> vector<8xf64>
+  func.return %values : vector<8xf64>
+}
+
+// ====
+
+func.def @f64_last_table_entry_i16(%table: vector<8xf64>) -> (vector<8xf64>) {
+  %indices = vector.constant 7 : vector<8xi16>
+  %values = vector.table.lookup %table[%indices] : vector<8xf64>, vector<8xi16> -> vector<8xf64>
+  func.return %values : vector<8xf64>
+}
+
+// ====
+
+func.def @f64_last_table_entry_i32(%table: vector<8xf64>) -> (vector<8xf64>) {
+  %indices = vector.constant 7 : vector<8xi32>
+  %values = vector.table.lookup %table[%indices] : vector<8xf64>, vector<8xi32> -> vector<8xf64>
+  func.return %values : vector<8xf64>
+}
+
+// ====
+
+func.def @i8_dynamic_u4_packet(%table: vector<16xi8>, %indices: vector<64xi8>) -> (vector<64xi8>) {
+  %values = vector.table.lookup %table[%indices] : vector<16xi8>, vector<64xi8> -> vector<64xi8>
+  func.return %values : vector<64xi8>
+}
+
+// ====
+
+func.def @i8_full_table_packet(%table: vector<64xi8>, %indices: vector<64xi8>) -> (vector<64xi8>) {
+  %values = vector.table.lookup %table[%indices] : vector<64xi8>, vector<64xi8> -> vector<64xi8>
+  func.return %values : vector<64xi8>
+}
+
+// ====
+
+func.def @i16_full_table_packet(%table: vector<32xi16>, %indices: vector<32xi16>) -> (vector<32xi16>) {
+  %values = vector.table.lookup %table[%indices] : vector<32xi16>, vector<32xi16> -> vector<32xi16>
+  func.return %values : vector<32xi16>
+}
+
+// ====
+
+func.def @f32_full_table_packet(%table: vector<16xf32>, %indices: vector<16xi32>) -> (vector<16xf32>) {
+  %values = vector.table.lookup %table[%indices] : vector<16xf32>, vector<16xi32> -> vector<16xf32>
+  func.return %values : vector<16xf32>
+}
+
+// ====
+
+func.def @i8_single_entry_packet(%table: vector<1xi8>, %indices: vector<64xi8>) -> (vector<64xi8>) {
+  %values = vector.table.lookup %table[%indices] : vector<1xi8>, vector<64xi8> -> vector<64xi8>
+  func.return %values : vector<64xi8>
+}
+
+// ====
+
+func.def @bf16_rank_two_packet(%table: vector<5xbf16>, %indices: vector<2x8xi16>) -> (vector<2x8xbf16>) {
+  %values = vector.table.lookup %table[%indices] : vector<5xbf16>, vector<2x8xi16> -> vector<2x8xbf16>
+  func.return %values : vector<2x8xbf16>
+}
+
+// ====
+
+func.def @i16_small_result(%table: vector<32xi16>, %indices: vector<2xi16>) -> (vector<2xi16>) {
+  %values = vector.table.lookup %table[%indices] : vector<32xi16>, vector<2xi16> -> vector<2xi16>
+  func.return %values : vector<2xi16>
+}
+
+// ====
+
+func.def @i8_partly_known_indices(%table: vector<4xi8>, %index: i8) -> (vector<4xi8>) {
+  %c0 = scalar.constant 0 : i8
+  %c2 = scalar.constant 2 : i8
+  %c3 = scalar.constant 3 : i8
+  %indices = vector.from_elements %c0, %index, %c2, %c3 : vector<4xi8>
+  %values = vector.table.lookup %table[%indices] : vector<4xi8>, vector<4xi8> -> vector<4xi8>
+  func.return %values : vector<4xi8>
+}

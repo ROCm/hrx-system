@@ -104,6 +104,60 @@ xdna_execution_test_suite(
 )
 
 iree_py_binary(
+    name = "table_lookup_cases",
+    testonly = True,
+    srcs = ["table_lookup_cases.py"],
+    main = "table_lookup_cases.py",
+)
+
+xdna_execution_test_suite(
+    name = "table_lookup_npu2_test",
+    data = ["testdata/table_lookup.loom"],
+    manifests = ["table_lookup_npu2.test.json"],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//loom/config/target:xdna_artifacts": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }) + select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    tools = {
+        "generate-cases": ":table_lookup_cases",
+        "iree-xdna-run": "//experimental/xdna:iree-xdna-run",
+        "loom-compile": "//loom/src/loom/tools/loom-compile",
+    },
+)
+
+iree_py_binary(
+    name = "table_decode_dot_cases",
+    testonly = True,
+    srcs = ["table_decode_dot_cases.py"],
+    main = "table_decode_dot_cases.py",
+)
+
+xdna_execution_test_suite(
+    name = "table_decode_dot_npu2_test",
+    data = ["testdata/table_decode_dot.loom"],
+    manifests = ["table_decode_dot_npu2.test.json"],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//loom/config/target:xdna_artifacts": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }) + select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    tools = {
+        "generate-cases": ":table_decode_dot_cases",
+        "iree-xdna-run": "//experimental/xdna:iree-xdna-run",
+        "loom-compile": "//loom/src/loom/tools/loom-compile",
+    },
+)
+
+iree_py_binary(
     name = "vector_concat_cases",
     testonly = True,
     srcs = ["vector_concat_cases.py"],

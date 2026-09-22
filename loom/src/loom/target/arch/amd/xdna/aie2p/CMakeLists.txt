@@ -161,16 +161,20 @@ loom_cc_library(
     legalization
   HDRS
     "legalization.h"
+    "legalization_table.h"
   SRCS
     "legalization.c"
+    "legalization_table.c"
   DEPS
     ::core_descriptors
     iree::base
+    loom::ir
     loom::ops::vector
     loom::target::legalization
     loom::transforms::vector::packet_legalization
     loom::transforms::vector::target_legalization
     loom::transforms::vector::to_scalar
+    loom::util::fact_table
   PUBLIC
 )
 endif()
@@ -557,6 +561,7 @@ loom_check_test_suite(
     "test/source_low/fused_packet_memory.loom-test"
     "test/source_low/index_conversion.loom-test"
     "test/source_low/lookup_table.loom-test"
+    "test/source_low/lookup_table_packets.loom-test"
     "test/source_low/loop_counter_offset.loom-test"
     "test/source_low/matrix_bfp.loom-test"
     "test/source_low/matrix_multiply.loom-test"
@@ -628,6 +633,7 @@ loom_check_test_suite(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/callable_values.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/carried_counter_store.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/lookup_table.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/lookup_table_packets.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/loop_counter_offset.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/math_contraction.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/matrix_multiply.loom-test"

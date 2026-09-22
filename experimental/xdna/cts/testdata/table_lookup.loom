@@ -1,0 +1,354 @@
+// Register tables preserve payload bits through dynamic and uniform lookups.
+aie2p.target<array> @array_target
+aie2p.target<core> @core_target
+
+pipeline.def<kernel> public retain target(@array_target) @i8_odd() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x64x32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x64x32xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x64x32xi32>, group -> pipeline.flow<tile<32xi32>>
+  %results = pipeline.stage @i8_odd_entry on %workers(%packets) : (group, pipeline.flow<tile<32xi32>>) -> (pipeline.flow<tile<32xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<32xi32>>, view<1x64x32xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @i8_odd_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %offset = index.constant 64 : offset
+  %table_view = buffer.view %source[%origin] : buffer -> view<3xi8>
+  %table = vector.load %table_view[0] : view<3xi8> -> vector<3xi8>
+  %codes_view = buffer.view %source[%offset] : buffer -> view<64xi8>
+  %codes = vector.load %codes_view[0] : view<64xi8> -> vector<64xi8>
+  // Overwrite both source packets after their SSA values are captured.
+  %overwrite = vector.constant -1515870811 : vector<16xi32>
+  %overwrite_view = buffer.view %source[%origin] : buffer -> view<32xi32>
+  vector.store %overwrite, %overwrite_view[0] : vector<16xi32>, view<32xi32>
+  vector.store %overwrite, %overwrite_view[16] : vector<16xi32>, view<32xi32>
+  %decoded = vector.table.lookup %table[%codes] : vector<3xi8>, vector<64xi8> -> vector<64xi8>
+  %last = vector.constant 2 : vector<64xi8>
+  %broadcast = vector.table.lookup %table[%last] : vector<3xi8>, vector<64xi8> -> vector<64xi8>
+  %decoded_view = buffer.view %destination[%origin] : buffer -> view<64xi8>
+  %broadcast_view = buffer.view %destination[%offset] : buffer -> view<64xi8>
+  vector.store %decoded, %decoded_view[0] : vector<64xi8>, view<64xi8>
+  vector.store %broadcast, %broadcast_view[0] : vector<64xi8>, view<64xi8>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @i8_full() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x64x32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x64x32xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x64x32xi32>, group -> pipeline.flow<tile<32xi32>>
+  %results = pipeline.stage @i8_full_entry on %workers(%packets) : (group, pipeline.flow<tile<32xi32>>) -> (pipeline.flow<tile<32xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<32xi32>>, view<1x64x32xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @i8_full_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %offset = index.constant 64 : offset
+  %table_view = buffer.view %source[%origin] : buffer -> view<64xi8>
+  %table = vector.load %table_view[0] : view<64xi8> -> vector<64xi8>
+  %codes_view = buffer.view %source[%offset] : buffer -> view<64xi8>
+  %codes = vector.load %codes_view[0] : view<64xi8> -> vector<64xi8>
+  // Overwrite both source packets after their SSA values are captured.
+  %overwrite = vector.constant -1515870811 : vector<16xi32>
+  %overwrite_view = buffer.view %source[%origin] : buffer -> view<32xi32>
+  vector.store %overwrite, %overwrite_view[0] : vector<16xi32>, view<32xi32>
+  vector.store %overwrite, %overwrite_view[16] : vector<16xi32>, view<32xi32>
+  %decoded = vector.table.lookup %table[%codes] : vector<64xi8>, vector<64xi8> -> vector<64xi8>
+  %last = vector.constant 63 : vector<64xi8>
+  %broadcast = vector.table.lookup %table[%last] : vector<64xi8>, vector<64xi8> -> vector<64xi8>
+  %decoded_view = buffer.view %destination[%origin] : buffer -> view<64xi8>
+  %broadcast_view = buffer.view %destination[%offset] : buffer -> view<64xi8>
+  vector.store %decoded, %decoded_view[0] : vector<64xi8>, view<64xi8>
+  vector.store %broadcast, %broadcast_view[0] : vector<64xi8>, view<64xi8>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @f16_odd() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x64x32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x64x32xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x64x32xi32>, group -> pipeline.flow<tile<32xi32>>
+  %results = pipeline.stage @f16_odd_entry on %workers(%packets) : (group, pipeline.flow<tile<32xi32>>) -> (pipeline.flow<tile<32xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<32xi32>>, view<1x64x32xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @f16_odd_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %offset = index.constant 64 : offset
+  %table_view = buffer.view %source[%origin] : buffer -> view<3xf16>
+  %table = vector.load %table_view[0] : view<3xf16> -> vector<3xf16>
+  %codes_view = buffer.view %source[%offset] : buffer -> view<32xi16>
+  %codes = vector.load %codes_view[0] : view<32xi16> -> vector<32xi16>
+  // Overwrite both source packets after their SSA values are captured.
+  %overwrite = vector.constant -1515870811 : vector<16xi32>
+  %overwrite_view = buffer.view %source[%origin] : buffer -> view<32xi32>
+  vector.store %overwrite, %overwrite_view[0] : vector<16xi32>, view<32xi32>
+  vector.store %overwrite, %overwrite_view[16] : vector<16xi32>, view<32xi32>
+  %decoded = vector.table.lookup %table[%codes] : vector<3xf16>, vector<32xi16> -> vector<32xf16>
+  %last = vector.constant 2 : vector<32xi16>
+  %broadcast = vector.table.lookup %table[%last] : vector<3xf16>, vector<32xi16> -> vector<32xf16>
+  %decoded_view = buffer.view %destination[%origin] : buffer -> view<32xf16>
+  %broadcast_view = buffer.view %destination[%offset] : buffer -> view<32xf16>
+  vector.store %decoded, %decoded_view[0] : vector<32xf16>, view<32xf16>
+  vector.store %broadcast, %broadcast_view[0] : vector<32xf16>, view<32xf16>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @bf16_odd() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x64x32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x64x32xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x64x32xi32>, group -> pipeline.flow<tile<32xi32>>
+  %results = pipeline.stage @bf16_odd_entry on %workers(%packets) : (group, pipeline.flow<tile<32xi32>>) -> (pipeline.flow<tile<32xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<32xi32>>, view<1x64x32xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @bf16_odd_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %offset = index.constant 64 : offset
+  %table_view = buffer.view %source[%origin] : buffer -> view<5xbf16>
+  %table = vector.load %table_view[0] : view<5xbf16> -> vector<5xbf16>
+  %codes_view = buffer.view %source[%offset] : buffer -> view<32xi8>
+  %codes = vector.load %codes_view[0] : view<32xi8> -> vector<32xi8>
+  // Overwrite both source packets after their SSA values are captured.
+  %overwrite = vector.constant -1515870811 : vector<16xi32>
+  %overwrite_view = buffer.view %source[%origin] : buffer -> view<32xi32>
+  vector.store %overwrite, %overwrite_view[0] : vector<16xi32>, view<32xi32>
+  vector.store %overwrite, %overwrite_view[16] : vector<16xi32>, view<32xi32>
+  %decoded = vector.table.lookup %table[%codes] : vector<5xbf16>, vector<32xi8> -> vector<32xbf16>
+  %last = vector.constant 4 : vector<32xi8>
+  %broadcast = vector.table.lookup %table[%last] : vector<5xbf16>, vector<32xi8> -> vector<32xbf16>
+  %decoded_view = buffer.view %destination[%origin] : buffer -> view<32xbf16>
+  %broadcast_view = buffer.view %destination[%offset] : buffer -> view<32xbf16>
+  vector.store %decoded, %decoded_view[0] : vector<32xbf16>, view<32xbf16>
+  vector.store %broadcast, %broadcast_view[0] : vector<32xbf16>, view<32xbf16>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @i16_full() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x64x32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x64x32xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x64x32xi32>, group -> pipeline.flow<tile<32xi32>>
+  %results = pipeline.stage @i16_full_entry on %workers(%packets) : (group, pipeline.flow<tile<32xi32>>) -> (pipeline.flow<tile<32xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<32xi32>>, view<1x64x32xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @i16_full_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %offset = index.constant 64 : offset
+  %table_view = buffer.view %source[%origin] : buffer -> view<32xi16>
+  %table = vector.load %table_view[0] : view<32xi16> -> vector<32xi16>
+  %codes_view = buffer.view %source[%offset] : buffer -> view<32xi16>
+  %codes = vector.load %codes_view[0] : view<32xi16> -> vector<32xi16>
+  // Overwrite both source packets after their SSA values are captured.
+  %overwrite = vector.constant -1515870811 : vector<16xi32>
+  %overwrite_view = buffer.view %source[%origin] : buffer -> view<32xi32>
+  vector.store %overwrite, %overwrite_view[0] : vector<16xi32>, view<32xi32>
+  vector.store %overwrite, %overwrite_view[16] : vector<16xi32>, view<32xi32>
+  %decoded = vector.table.lookup %table[%codes] : vector<32xi16>, vector<32xi16> -> vector<32xi16>
+  %last = vector.constant 31 : vector<32xi16>
+  %broadcast = vector.table.lookup %table[%last] : vector<32xi16>, vector<32xi16> -> vector<32xi16>
+  %decoded_view = buffer.view %destination[%origin] : buffer -> view<32xi16>
+  %broadcast_view = buffer.view %destination[%offset] : buffer -> view<32xi16>
+  vector.store %decoded, %decoded_view[0] : vector<32xi16>, view<32xi16>
+  vector.store %broadcast, %broadcast_view[0] : vector<32xi16>, view<32xi16>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @f32_odd() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x64x32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x64x32xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x64x32xi32>, group -> pipeline.flow<tile<32xi32>>
+  %results = pipeline.stage @f32_odd_entry on %workers(%packets) : (group, pipeline.flow<tile<32xi32>>) -> (pipeline.flow<tile<32xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<32xi32>>, view<1x64x32xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @f32_odd_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %offset = index.constant 64 : offset
+  %table_view = buffer.view %source[%origin] : buffer -> view<7xf32>
+  %table = vector.load %table_view[0] : view<7xf32> -> vector<7xf32>
+  %codes_view = buffer.view %source[%offset] : buffer -> view<16xi32>
+  %codes = vector.load %codes_view[0] : view<16xi32> -> vector<16xi32>
+  // Overwrite both source packets after their SSA values are captured.
+  %overwrite = vector.constant -1515870811 : vector<16xi32>
+  %overwrite_view = buffer.view %source[%origin] : buffer -> view<32xi32>
+  vector.store %overwrite, %overwrite_view[0] : vector<16xi32>, view<32xi32>
+  vector.store %overwrite, %overwrite_view[16] : vector<16xi32>, view<32xi32>
+  %decoded = vector.table.lookup %table[%codes] : vector<7xf32>, vector<16xi32> -> vector<16xf32>
+  %last = vector.constant 6 : vector<16xi32>
+  %broadcast = vector.table.lookup %table[%last] : vector<7xf32>, vector<16xi32> -> vector<16xf32>
+  %decoded_view = buffer.view %destination[%origin] : buffer -> view<16xf32>
+  %broadcast_view = buffer.view %destination[%offset] : buffer -> view<16xf32>
+  vector.store %decoded, %decoded_view[0] : vector<16xf32>, view<16xf32>
+  vector.store %broadcast, %broadcast_view[0] : vector<16xf32>, view<16xf32>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @f32_full() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x64x32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x64x32xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x64x32xi32>, group -> pipeline.flow<tile<32xi32>>
+  %results = pipeline.stage @f32_full_entry on %workers(%packets) : (group, pipeline.flow<tile<32xi32>>) -> (pipeline.flow<tile<32xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<32xi32>>, view<1x64x32xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @f32_full_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %offset = index.constant 64 : offset
+  %table_view = buffer.view %source[%origin] : buffer -> view<16xf32>
+  %table = vector.load %table_view[0] : view<16xf32> -> vector<16xf32>
+  %codes_view = buffer.view %source[%offset] : buffer -> view<16xi8>
+  %codes = vector.load %codes_view[0] : view<16xi8> -> vector<16xi8>
+  // Overwrite both source packets after their SSA values are captured.
+  %overwrite = vector.constant -1515870811 : vector<16xi32>
+  %overwrite_view = buffer.view %source[%origin] : buffer -> view<32xi32>
+  vector.store %overwrite, %overwrite_view[0] : vector<16xi32>, view<32xi32>
+  vector.store %overwrite, %overwrite_view[16] : vector<16xi32>, view<32xi32>
+  %decoded = vector.table.lookup %table[%codes] : vector<16xf32>, vector<16xi8> -> vector<16xf32>
+  %last = vector.constant 15 : vector<16xi8>
+  %broadcast = vector.table.lookup %table[%last] : vector<16xf32>, vector<16xi8> -> vector<16xf32>
+  %decoded_view = buffer.view %destination[%origin] : buffer -> view<16xf32>
+  %broadcast_view = buffer.view %destination[%offset] : buffer -> view<16xf32>
+  vector.store %decoded, %decoded_view[0] : vector<16xf32>, view<16xf32>
+  vector.store %broadcast, %broadcast_view[0] : vector<16xf32>, view<16xf32>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @fp8_e4m3() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x64x32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x64x32xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x64x32xi32>, group -> pipeline.flow<tile<32xi32>>
+  %results = pipeline.stage @fp8_e4m3_entry on %workers(%packets) : (group, pipeline.flow<tile<32xi32>>) -> (pipeline.flow<tile<32xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<32xi32>>, view<1x64x32xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @fp8_e4m3_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %offset = index.constant 64 : offset
+  %table_view = buffer.view %source[%origin] : buffer -> view<16xf8E4M3>
+  %table = vector.load %table_view[0] : view<16xf8E4M3> -> vector<16xf8E4M3>
+  %codes_view = buffer.view %source[%offset] : buffer -> view<64xi8>
+  %codes = vector.load %codes_view[0] : view<64xi8> -> vector<64xi8>
+  // Overwrite both source packets after their SSA values are captured.
+  %overwrite = vector.constant -1515870811 : vector<16xi32>
+  %overwrite_view = buffer.view %source[%origin] : buffer -> view<32xi32>
+  vector.store %overwrite, %overwrite_view[0] : vector<16xi32>, view<32xi32>
+  vector.store %overwrite, %overwrite_view[16] : vector<16xi32>, view<32xi32>
+  %decoded = vector.table.lookup %table[%codes] : vector<16xf8E4M3>, vector<64xi8> -> vector<64xf8E4M3>
+  %last = vector.constant 15 : vector<64xi8>
+  %broadcast = vector.table.lookup %table[%last] : vector<16xf8E4M3>, vector<64xi8> -> vector<64xf8E4M3>
+  %decoded_view = buffer.view %destination[%origin] : buffer -> view<64xf8E4M3>
+  %broadcast_view = buffer.view %destination[%offset] : buffer -> view<64xf8E4M3>
+  vector.store %decoded, %decoded_view[0] : vector<64xf8E4M3>, view<64xf8E4M3>
+  vector.store %broadcast, %broadcast_view[0] : vector<64xf8E4M3>, view<64xf8E4M3>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @fp8_e5m2() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x64x32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x64x32xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x64x32xi32>, group -> pipeline.flow<tile<32xi32>>
+  %results = pipeline.stage @fp8_e5m2_entry on %workers(%packets) : (group, pipeline.flow<tile<32xi32>>) -> (pipeline.flow<tile<32xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<32xi32>>, view<1x64x32xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @fp8_e5m2_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %offset = index.constant 64 : offset
+  %table_view = buffer.view %source[%origin] : buffer -> view<16xf8E5M2>
+  %table = vector.load %table_view[0] : view<16xf8E5M2> -> vector<16xf8E5M2>
+  %codes_view = buffer.view %source[%offset] : buffer -> view<64xi8>
+  %codes = vector.load %codes_view[0] : view<64xi8> -> vector<64xi8>
+  // Overwrite both source packets after their SSA values are captured.
+  %overwrite = vector.constant -1515870811 : vector<16xi32>
+  %overwrite_view = buffer.view %source[%origin] : buffer -> view<32xi32>
+  vector.store %overwrite, %overwrite_view[0] : vector<16xi32>, view<32xi32>
+  vector.store %overwrite, %overwrite_view[16] : vector<16xi32>, view<32xi32>
+  %decoded = vector.table.lookup %table[%codes] : vector<16xf8E5M2>, vector<64xi8> -> vector<64xf8E5M2>
+  %last = vector.constant 15 : vector<64xi8>
+  %broadcast = vector.table.lookup %table[%last] : vector<16xf8E5M2>, vector<64xi8> -> vector<64xf8E5M2>
+  %decoded_view = buffer.view %destination[%origin] : buffer -> view<64xf8E5M2>
+  %broadcast_view = buffer.view %destination[%offset] : buffer -> view<64xf8E5M2>
+  vector.store %decoded, %decoded_view[0] : vector<64xf8E5M2>, view<64xf8E5M2>
+  vector.store %broadcast, %broadcast_view[0] : vector<64xf8E5M2>, view<64xf8E5M2>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @f64_uniform() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x64x32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x64x32xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x64x32xi32>, group -> pipeline.flow<tile<32xi32>>
+  %results = pipeline.stage @f64_uniform_entry on %workers(%packets) : (group, pipeline.flow<tile<32xi32>>) -> (pipeline.flow<tile<32xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<32xi32>>, view<1x64x32xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @f64_uniform_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %offset = index.constant 64 : offset
+  %table_view = buffer.view %source[%origin] : buffer -> view<8xf64>
+  %table = vector.load %table_view[0] : view<8xf64> -> vector<8xf64>
+  %codes_view = buffer.view %source[%offset] : buffer -> view<8xi8>
+  %codes = vector.load %codes_view[0] : view<8xi8> -> vector<8xi8>
+  %first = vector.constant 0 : vector<8xi8>
+  // Overwrite both source packets after their SSA values are captured.
+  %overwrite = vector.constant -1515870811 : vector<16xi32>
+  %overwrite_view = buffer.view %source[%origin] : buffer -> view<32xi32>
+  vector.store %overwrite, %overwrite_view[0] : vector<16xi32>, view<32xi32>
+  vector.store %overwrite, %overwrite_view[16] : vector<16xi32>, view<32xi32>
+  %decoded = vector.table.lookup %table[%first] : vector<8xf64>, vector<8xi8> -> vector<8xf64>
+  %last = vector.constant 7 : vector<8xi8>
+  %broadcast = vector.table.lookup %table[%last] : vector<8xf64>, vector<8xi8> -> vector<8xf64>
+  %decoded_view = buffer.view %destination[%origin] : buffer -> view<8xf64>
+  %broadcast_view = buffer.view %destination[%offset] : buffer -> view<8xf64>
+  vector.store %decoded, %decoded_view[0] : vector<8xf64>, view<8xf64>
+  vector.store %broadcast, %broadcast_view[0] : vector<8xf64>, view<8xf64>
+  func.return
+}

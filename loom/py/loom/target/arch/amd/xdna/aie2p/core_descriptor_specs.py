@@ -1295,6 +1295,12 @@ _BASE_DESCRIPTOR_SPECS = (
         "II_VEXTBCST_32_vec_extract_broadcast_imm",
     ),
     _DescriptorSpec(
+        "VEXTBCST_64_vec_extract_broadcast_imm",
+        f"{_TARGET_KEY}.broadcast.i64x8.from-vector",
+        "integer.broadcast.i64x8.from-vector",
+        "II_VEXTBCST_64_vec_extract_broadcast_imm",
+    ),
+    _DescriptorSpec(
         "VEXTRACT_8_vec_extract_imm_vaddSign0",
         f"{_TARGET_KEY}.extract.i8.immediate",
         "integer.extract.i8",

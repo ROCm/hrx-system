@@ -33,6 +33,7 @@ iree_py_library(
     "reduction.py"
     "scalar_program.py"
     "structural.py"
+    "table.py"
   DEPS
     loom::py::loom::core
     loom::py::loom::dialect::buffer::buffer

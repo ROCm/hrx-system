@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "Register table decode feeds signed dot4 with dynamic codes on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/table_decode_dot.loom",
+              "--root=@decode_dot",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/decode.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/decode.xdna",
+              "--columns=1",
+              "--entry=decode_dot",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

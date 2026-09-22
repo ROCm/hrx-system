@@ -61,6 +61,7 @@ from loom.target.arch.amd.xdna.aie2p.contracts.reduction import (
 from loom.target.arch.amd.xdna.aie2p.contracts.structural import (
     AIE2P_STRUCTURAL_RULES,
 )
+from loom.target.arch.amd.xdna.aie2p.contracts.table import AIE2P_TABLE_RULES
 from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
     AIE2P_CORE_DESCRIPTOR_SET,
 )
@@ -116,6 +117,7 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
         *AIE2P_INTEGER_DIVISION_RULES,
         *AIE2P_REDUCTION_RULES,
         *AIE2P_STRUCTURAL_RULES,
+        *AIE2P_TABLE_RULES,
         *AIE2P_I64_RULES,
         *AIE2P_PACKET_MEMORY_RULES,
         *AIE2P_MEMORY_RULES,

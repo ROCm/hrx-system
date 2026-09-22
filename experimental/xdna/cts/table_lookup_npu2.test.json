@@ -1,0 +1,545 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "i8_odd table lookup preserves every payload bit on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "i8_odd"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/table_lookup.loom",
+              "--root=@i8_odd",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/table.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/table.xdna",
+              "--columns=1",
+              "--entry=i8_odd",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "i8_full table lookup preserves every payload bit on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "i8_full"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/table_lookup.loom",
+              "--root=@i8_full",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/table.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/table.xdna",
+              "--columns=1",
+              "--entry=i8_full",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "f16_odd table lookup preserves every payload bit on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "f16_odd"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/table_lookup.loom",
+              "--root=@f16_odd",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/table.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/table.xdna",
+              "--columns=1",
+              "--entry=f16_odd",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "bf16_odd table lookup preserves every payload bit on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "bf16_odd"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/table_lookup.loom",
+              "--root=@bf16_odd",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/table.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/table.xdna",
+              "--columns=1",
+              "--entry=bf16_odd",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "i16_full table lookup preserves every payload bit on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "i16_full"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/table_lookup.loom",
+              "--root=@i16_full",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/table.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/table.xdna",
+              "--columns=1",
+              "--entry=i16_full",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "f32_odd table lookup preserves every payload bit on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "f32_odd"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/table_lookup.loom",
+              "--root=@f32_odd",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/table.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/table.xdna",
+              "--columns=1",
+              "--entry=f32_odd",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "f32_full table lookup preserves every payload bit on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "f32_full"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/table_lookup.loom",
+              "--root=@f32_full",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/table.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/table.xdna",
+              "--columns=1",
+              "--entry=f32_full",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "fp8_e4m3 table lookup preserves every payload bit on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "fp8_e4m3"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/table_lookup.loom",
+              "--root=@fp8_e4m3",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/table.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/table.xdna",
+              "--columns=1",
+              "--entry=fp8_e4m3",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "fp8_e5m2 table lookup preserves every payload bit on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "fp8_e5m2"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/table_lookup.loom",
+              "--root=@fp8_e5m2",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/table.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/table.xdna",
+              "--columns=1",
+              "--entry=fp8_e5m2",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "f64_uniform table lookup preserves every payload bit on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "f64_uniform"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/table_lookup.loom",
+              "--root=@f64_uniform",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/table.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/table.xdna",
+              "--columns=1",
+              "--entry=f64_uniform",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

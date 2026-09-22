@@ -1,0 +1,35 @@
+aie2p.target<array> @array_target
+aie2p.target<core> @core_target
+
+pipeline.def<kernel> public retain target(@array_target) @decode_dot() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x48xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x32xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x48xi32>, group -> pipeline.flow<tile<48xi32>>
+  %results = pipeline.stage @decode_entry on %workers(%packets) : (group, pipeline.flow<tile<48xi32>>) -> (pipeline.flow<tile<32xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<32xi32>>, view<1x16x32xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @decode_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %codes_offset = index.constant 64 : offset
+  %activation_offset = index.constant 128 : offset
+  %table_view = buffer.view %source[%origin] : buffer -> view<16xi8>
+  %codes_view = buffer.view %source[%codes_offset] : buffer -> view<64xi8>
+  %activation_view = buffer.view %source[%activation_offset] : buffer -> view<64xi8>
+  %decoded_view = buffer.view %destination[%origin] : buffer -> view<64xi8>
+  %partial_view = buffer.view %destination[%codes_offset] : buffer -> view<16xi32>
+  %table = vector.load %table_view[0] : view<16xi8> -> vector<16xi8>
+  %codes = vector.load %codes_view[0] : view<64xi8> -> vector<64xi8>
+  %activation = vector.load %activation_view[0] : view<64xi8> -> vector<64xi8>
+  %decoded = vector.table.lookup %table[%codes] : vector<16xi8>, vector<64xi8> -> vector<64xi8>
+  vector.store %decoded, %decoded_view[0] : vector<64xi8>, view<64xi8>
+  %initial = vector.constant 0 : vector<16xi32>
+  %partial = vector.dot4i<s8s8> %decoded, %activation, %initial : vector<64xi8>, vector<64xi8>, vector<16xi32>
+  vector.store %partial, %partial_view[0] : vector<16xi32>, view<16xi32>
+  func.return
+}

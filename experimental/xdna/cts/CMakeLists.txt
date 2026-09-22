@@ -111,6 +111,70 @@ endif()
 
 iree_py_library(
   NAME
+    table_lookup_cases
+  MAIN
+    "table_lookup_cases.py"
+  SRCS
+    "table_lookup_cases.py"
+)
+
+if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND LOOM_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
+iree_execution_test_suite(
+  NAME
+    table_lookup_npu2_test
+  MANIFESTS
+    "table_lookup_npu2.test.json"
+  TOOLS
+    "generate-cases=::table_lookup_cases"
+    "iree-xdna-run=iree::experimental::xdna::iree-xdna-run"
+    "loom-compile=loom::tools::loom-compile"
+  DATA
+    "${PROJECT_SOURCE_DIR}/experimental/xdna/cts/testdata/table_lookup.loom"
+  LABELS
+    "manual"
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.xdna"
+    "iree-run-requirement=libamdf.resource.xdna"
+    "runtime-resource=amd-xdna"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+iree_py_library(
+  NAME
+    table_decode_dot_cases
+  MAIN
+    "table_decode_dot_cases.py"
+  SRCS
+    "table_decode_dot_cases.py"
+)
+
+if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND LOOM_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
+iree_execution_test_suite(
+  NAME
+    table_decode_dot_npu2_test
+  MANIFESTS
+    "table_decode_dot_npu2.test.json"
+  TOOLS
+    "generate-cases=::table_decode_dot_cases"
+    "iree-xdna-run=iree::experimental::xdna::iree-xdna-run"
+    "loom-compile=loom::tools::loom-compile"
+  DATA
+    "${PROJECT_SOURCE_DIR}/experimental/xdna/cts/testdata/table_decode_dot.loom"
+  LABELS
+    "manual"
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.xdna"
+    "iree-run-requirement=libamdf.resource.xdna"
+    "runtime-resource=amd-xdna"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+iree_py_library(
+  NAME
     vector_concat_cases
   MAIN
     "vector_concat_cases.py"
