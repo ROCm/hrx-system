@@ -649,8 +649,8 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @add_i32x
   %24 = vlda.512.i32x16 %rhs_view, 0
   %25 = vlda.512.i32x16 %rhs_view, 64
   %26 = vadd.32 %22, %24
-  %27 = vadd.32 %23, %25
   vst.512.i32x16 %26, %output_view, 0
+  %27 = vadd.32 %23, %25
   vst.512.i32x16 %27, %output_view, 64
   return
 }

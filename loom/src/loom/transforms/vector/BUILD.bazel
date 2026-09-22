@@ -73,7 +73,7 @@ loom_cc_library(
     srcs = ["sink_single_use_reads.c"],
     hdrs = ["sink_single_use_reads.h"],
     deps = [
-        "//loom/src/loom/analysis:motion",
+        "//loom/src/loom/analysis:read_motion",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/pass:types",
@@ -145,6 +145,8 @@ loom_cc_library(
     srcs = ["packet_legalization.c"],
     hdrs = ["packet_legalization.h"],
     deps = [
+        "//loom/src/loom/analysis:motion",
+        "//loom/src/loom/analysis:read_motion",
         "//loom/src/loom/analysis:view_regions",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/buffer",

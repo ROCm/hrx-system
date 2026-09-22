@@ -17,6 +17,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/analysis/read_motion.h"
 #include "loom/codegen/low/lower/lower.h"
 
 #ifdef __cplusplus
@@ -77,6 +78,10 @@ loom_local_value_domain_t* loom_low_lower_source_query_scope_value_domain(
 iree_status_t loom_low_lower_source_query_scope_view_regions(
     loom_low_lower_source_query_scope_t* scope,
     const loom_view_region_table_t** out_view_regions);
+
+// Returns read ordering boundaries owned by the immutable query scope.
+const loom_read_motion_t* loom_low_lower_source_query_scope_read_motion(
+    loom_low_lower_source_query_scope_t* scope);
 
 #ifdef __cplusplus
 }  // extern "C"

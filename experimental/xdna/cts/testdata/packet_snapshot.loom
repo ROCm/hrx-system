@@ -1,0 +1,130 @@
+// Captured packets retain each original read across intervening writes.
+aie2p.target<array> @array_target
+aie2p.target<core> @core_target
+pipeline.def<kernel> public retain target(@array_target) @store() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x128xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x128xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x128xi32>, group -> pipeline.flow<tile<128xi32>>
+  %results = pipeline.stage @store_entry on %workers(%packets) : (group, pipeline.flow<tile<128xi32>>) -> (pipeline.flow<tile<128xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<128xi32>>, view<1x16x128xi32>
+  pipeline.return
+}
+func.def target(@core_target) @store_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %source_view = buffer.view %source[%origin] : buffer -> view<128xi32>
+  %destination_view = buffer.view %destination[%origin] : buffer -> view<128xi32>
+  %loaded = vector.load %source_view[0] : view<128xi32> -> vector<128xi32>
+  %replacement = vector.constant -1234567 : vector<16xi32>
+  vector.store %replacement, %source_view[0] : vector<16xi32>, view<128xi32>
+  %increment = vector.constant 7 : vector<128xi32>
+  %result = vector.addi %loaded, %increment : vector<128xi32>
+  vector.store %result, %destination_view[0] : vector<128xi32>, view<128xi32>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @reduce() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x128xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x128xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x128xi32>, group -> pipeline.flow<tile<128xi32>>
+  %results = pipeline.stage @reduce_entry on %workers(%packets) : (group, pipeline.flow<tile<128xi32>>) -> (pipeline.flow<tile<128xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<128xi32>>, view<1x16x128xi32>
+  pipeline.return
+}
+func.def target(@core_target) @reduce_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %source_view = buffer.view %source[%origin] : buffer -> view<128xi32>
+  %destination_view = buffer.view %destination[%origin] : buffer -> view<128xi32>
+  %loaded = vector.load %source_view[0] : view<128xi32> -> vector<128xi32>
+  %replacement = vector.constant -1234567 : vector<16xi32>
+  vector.store %replacement, %source_view[0] : vector<16xi32>, view<128xi32>
+  %initial = scalar.constant 53 : i32
+  %sum = vector.reduce<addi> %loaded, %initial : vector<128xi32>, i32
+  %result = vector.splat %sum : vector<128xi32>
+  vector.store %result, %destination_view[0] : vector<128xi32>, view<128xi32>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @two_reads() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x128xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x128xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x128xi32>, group -> pipeline.flow<tile<128xi32>>
+  %results = pipeline.stage @two_reads_entry on %workers(%packets) : (group, pipeline.flow<tile<128xi32>>) -> (pipeline.flow<tile<128xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<128xi32>>, view<1x16x128xi32>
+  pipeline.return
+}
+func.def target(@core_target) @two_reads_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %source_view = buffer.view %source[%origin] : buffer -> view<128xi32>
+  %destination_view = buffer.view %destination[%origin] : buffer -> view<128xi32>
+  %loaded = vector.load %source_view[0] : view<128xi32> -> vector<128xi32>
+  %replacement = vector.constant -1234567 : vector<16xi32>
+  vector.store %replacement, %source_view[0] : vector<16xi32>, view<128xi32>
+  %reloaded = vector.load %source_view[0] : view<128xi32> -> vector<128xi32>
+  %result = vector.subi %loaded, %reloaded : vector<128xi32>
+  vector.store %result, %destination_view[0] : vector<128xi32>, view<128xi32>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @shared_volatile() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x128xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x256xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x128xi32>, group -> pipeline.flow<tile<128xi32>>
+  %results = pipeline.stage @shared_volatile_entry on %workers(%packets) : (group, pipeline.flow<tile<128xi32>>) -> (pipeline.flow<tile<256xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<256xi32>>, view<1x16x256xi32>
+  pipeline.return
+}
+func.def target(@core_target) @shared_volatile_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %source_view = buffer.view %source[%origin] : buffer -> view<128xi32>
+  %destination_view = buffer.view %destination[%origin] : buffer -> view<256xi32>
+  %loaded = vector.load<volatile> %source_view[0] : view<128xi32> -> vector<128xi32>
+  %replacement = vector.constant -1234567 : vector<16xi32>
+  vector.store %replacement, %source_view[0] : vector<16xi32>, view<128xi32>
+  %increment = vector.constant 7 : vector<128xi32>
+  %result = vector.addi %loaded, %increment : vector<128xi32>
+  vector.store %loaded, %destination_view[0] : vector<128xi32>, view<256xi32>
+  vector.store %result, %destination_view[128] : vector<128xi32>, view<256xi32>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @shared_volatile_reverse() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x128xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x256xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x128xi32>, group -> pipeline.flow<tile<128xi32>>
+  %results = pipeline.stage @shared_volatile_reverse_entry on %workers(%packets) : (group, pipeline.flow<tile<128xi32>>) -> (pipeline.flow<tile<256xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<256xi32>>, view<1x16x256xi32>
+  pipeline.return
+}
+func.def target(@core_target) @shared_volatile_reverse_entry(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %source_view = buffer.view %source[%origin] : buffer -> view<128xi32>
+  %destination_view = buffer.view %destination[%origin] : buffer -> view<256xi32>
+  %loaded = vector.load<volatile> %source_view[0] : view<128xi32> -> vector<128xi32>
+  %replacement = vector.constant -1234567 : vector<16xi32>
+  vector.store %replacement, %source_view[0] : vector<16xi32>, view<128xi32>
+  %increment = vector.constant 7 : vector<128xi32>
+  %result = vector.addi %loaded, %increment : vector<128xi32>
+  vector.store %result, %destination_view[128] : vector<128xi32>, view<256xi32>
+  vector.store %loaded, %destination_view[0] : vector<128xi32>, view<256xi32>
+  func.return
+}

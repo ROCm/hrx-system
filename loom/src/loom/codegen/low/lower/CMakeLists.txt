@@ -61,6 +61,7 @@ loom_cc_library(
     loom::analysis::contract_vector
     loom::analysis::kernel_async_legality
     loom::analysis::native_layout
+    loom::analysis::read_motion
     loom::analysis::symbol_facts
     loom::analysis::symbolic_expr
     loom::analysis::vector_memory_footprint

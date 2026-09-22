@@ -33,15 +33,21 @@ iree_status_t loom_vector_packet_legalize_load(
     const loom_vector_packet_policy_t* policy, bool* out_rewritten);
 
 // Packetizes a dense vector store into target-native widths. Decomposable
-// producer graphs stream packets; other SSA values retain their snapshot and
-// supply static slices. Returns false through |out_rewritten| when the access
-// or policy does not admit an exact packetization.
+// producer graphs stream only when the retained read-motion analysis proves
+// their loads can move to the store. Other graphs capture load packets at their
+// original positions, preserving shared and volatile observations, and emit
+// pure arithmetic one packet at a time beside the store.
+// Captured concatenations reuse their packets without replaying their loads.
+// Other SSA values supply static slices. Returns false through |out_rewritten|
+// when the access or policy does not admit an exact packetization.
 iree_status_t loom_vector_packet_legalize_store(
     loom_target_legalization_context_t* context, loom_op_t* op,
     const loom_vector_packet_policy_t* policy, bool* out_rewritten);
 
 // Packetizes a vector reduction's decomposable producer graph and carries the
-// scalar accumulator across native-width packets. Returns false through
+// scalar accumulator across native-width packets. Reads that cannot move to
+// the reduction retain static packets at their original positions; movable
+// graphs stream through a loop. Returns false through
 // |out_rewritten| when the graph or policy does not admit an exact
 // packetization.
 iree_status_t loom_vector_packet_legalize_reduce(

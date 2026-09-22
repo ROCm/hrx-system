@@ -139,3 +139,274 @@ func.def @sinks_fragment_rhs_load_to_mma(%rhs_buffer: buffer, %base: offset, %lh
   %result = vector.mma %lhs, %rhs, %scaled : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   func.return %result : vector<8xf32>
 }
+
+// ====
+
+func.def @keeps_read_at_fence(%source: view<8xi32>, %value: i32) -> (i32) {
+  %loaded = vector.load %source[0] : view<8xi32> -> vector<4xi32>
+  %marker = test.addi %value, %value : i32
+  %barrier = test.memory_fence %value : i32
+  %lane = vector.extract %loaded[0] : vector<4xi32> -> i32
+  func.return %lane : i32
+}
+
+// ----
+func.def @keeps_read_at_fence(%source: view<8xi32>, %value: i32) -> (i32) {
+  %loaded = vector.load %source[0] : view<8xi32> -> vector<4xi32>
+  %marker = test.addi %value, %value : i32
+  %barrier = test.memory_fence %value : i32
+  %lane = vector.extract %loaded[0] : vector<4xi32> -> i32
+  func.return %lane : i32
+}
+
+// ====
+
+func.def @keeps_read_at_convergence(%source: view<8xi32>, %value: i32) -> (i32) {
+  %loaded = vector.load %source[0] : view<8xi32> -> vector<4xi32>
+  %marker = test.addi %value, %value : i32
+  %barrier = test.convergent %value : i32
+  %lane = vector.extract %loaded[0] : vector<4xi32> -> i32
+  func.return %lane : i32
+}
+
+// ----
+func.def @keeps_read_at_convergence(%source: view<8xi32>, %value: i32) -> (i32) {
+  %loaded = vector.load %source[0] : view<8xi32> -> vector<4xi32>
+  %marker = test.addi %value, %value : i32
+  %barrier = test.convergent %value : i32
+  %lane = vector.extract %loaded[0] : vector<4xi32> -> i32
+  func.return %lane : i32
+}
+
+// ====
+
+func.def @keeps_volatile_read_at_origin(%source: view<8xi32>, %value: i32) -> (i32) {
+  %loaded = vector.load<volatile> %source[0] : view<8xi32> -> vector<4xi32>
+  %marker = test.addi %value, %value : i32
+
+  %lane = vector.extract %loaded[0] : vector<4xi32> -> i32
+  func.return %lane : i32
+}
+
+// ----
+func.def @keeps_volatile_read_at_origin(%source: view<8xi32>, %value: i32) -> (i32) {
+  %loaded = vector.load<volatile> %source[0] : view<8xi32> -> vector<4xi32>
+  %marker = test.addi %value, %value : i32
+
+  %lane = vector.extract %loaded[0] : vector<4xi32> -> i32
+  func.return %lane : i32
+}
+
+// ====
+
+func.def @keeps_read_for_effectful_consumer(%source: view<8xi32>, %value: i32) {
+  %loaded = vector.load %source[0] : view<8xi32> -> vector<4xi32>
+  %marker = test.addi %value, %value : i32
+  vector.store %loaded, %source[0] : vector<4xi32>, view<8xi32>
+  func.return
+}
+
+// ----
+func.def @keeps_read_for_effectful_consumer(%source: view<8xi32>, %value: i32) {
+  %loaded = vector.load %source[0] : view<8xi32> -> vector<4xi32>
+  %marker = test.addi %value, %value : i32
+  vector.store %loaded, %source[0] : vector<4xi32>, view<8xi32>
+  func.return
+}
+
+// ====
+
+func.def @keeps_outer_read_and_sinks_nested_read(%source: view<8xi32>, %value: i32, %condition: i1) -> (i32) {
+  %outer = vector.load %source[0] : view<8xi32> -> vector<4xi32>
+  scf.if %condition {
+    %inner = vector.load %source[0] : view<8xi32> -> vector<4xi32>
+    %marker = test.addi %value, %value : i32
+    %inner_lane = vector.extract %inner[0] : vector<4xi32> -> i32
+    view.store %inner_lane, %source[0] : i32, view<8xi32>
+  }
+  %lane = vector.extract %outer[0] : vector<4xi32> -> i32
+  func.return %lane : i32
+}
+
+// ----
+func.def @keeps_outer_read_and_sinks_nested_read(%source: view<8xi32>, %value: i32, %condition: i1) -> (i32) {
+  %outer = vector.load %source[0] : view<8xi32> -> vector<4xi32>
+  scf.if %condition {
+    %marker = test.addi %value, %value : i32
+    %inner = vector.load %source[0] : view<8xi32> -> vector<4xi32>
+    %inner_lane = vector.extract %inner[0] : vector<4xi32> -> i32
+    view.store %inner_lane, %source[0] : i32, view<8xi32>
+  }
+  %lane = vector.extract %outer[0] : vector<4xi32> -> i32
+  func.return %lane : i32
+}
+
+// ====
+
+func.def @keeps_read_outside_conditional_consumer(%source: view<8xi32>, %condition: i1) {
+  %loaded = vector.load %source[0] : view<8xi32> -> vector<4xi32>
+  scf.if %condition {
+    vector.store %loaded, %source[0] : vector<4xi32>, view<8xi32>
+  }
+  func.return
+}
+
+// ----
+func.def @keeps_read_outside_conditional_consumer(%source: view<8xi32>, %condition: i1) {
+  %loaded = vector.load %source[0] : view<8xi32> -> vector<4xi32>
+  scf.if %condition {
+    vector.store %loaded, %source[0] : vector<4xi32>, view<8xi32>
+  }
+  func.return
+}
+
+// ====
+
+func.def @retains_read_intervals_in_long_block(%source: view<8xi32>, %value: i32) -> (i32) {
+  %first = vector.load %source[0] : view<8xi32> -> vector<4xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  %last = vector.load %source[0] : view<8xi32> -> vector<4xi32>
+  %marker = test.addi %value, %value : i32
+  %last_lane = vector.extract %last[0] : vector<4xi32> -> i32
+  %first_lane = vector.extract %first[0] : vector<4xi32> -> i32
+  %sum = test.addi %first_lane, %last_lane : i32
+  func.return %sum : i32
+}
+
+// ----
+func.def @retains_read_intervals_in_long_block(%source: view<8xi32>, %value: i32) -> (i32) {
+  %first = vector.load %source[0] : view<8xi32> -> vector<4xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  view.store %value, %source[0] : i32, view<8xi32>
+  %marker = test.addi %value, %value : i32
+  %last = vector.load %source[0] : view<8xi32> -> vector<4xi32>
+  %last_lane = vector.extract %last[0] : vector<4xi32> -> i32
+  %first_lane = vector.extract %first[0] : vector<4xi32> -> i32
+  %sum = test.addi %first_lane, %last_lane : i32
+  func.return %sum : i32
+}

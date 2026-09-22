@@ -1,0 +1,275 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "store packetization preserves captured memory on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "store"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/packet_snapshot.loom",
+              "--root=@store",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/snapshot.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/snapshot.xdna",
+              "--columns=1",
+              "--entry=store",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "reduce packetization preserves captured memory on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "reduce"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/packet_snapshot.loom",
+              "--root=@reduce",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/snapshot.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/snapshot.xdna",
+              "--columns=1",
+              "--entry=reduce",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "two_reads packetization preserves captured memory on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "two_reads"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/packet_snapshot.loom",
+              "--root=@two_reads",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/snapshot.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/snapshot.xdna",
+              "--columns=1",
+              "--entry=two_reads",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "shared_volatile packetization preserves captured memory on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "shared_volatile"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/packet_snapshot.loom",
+              "--root=@shared_volatile",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/snapshot.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/snapshot.xdna",
+              "--columns=1",
+              "--entry=shared_volatile",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "shared_volatile_reverse packetization preserves captured memory on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures",
+              "shared_volatile_reverse"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/packet_snapshot.loom",
+              "--root=@shared_volatile_reverse",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/snapshot.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/snapshot.xdna",
+              "--columns=1",
+              "--entry=shared_volatile_reverse",
+              "--invocation_count=1",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/expected.bin"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -941,6 +941,20 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "read_motion",
+    srcs = ["read_motion.c"],
+    hdrs = ["read_motion.h"],
+    deps = [
+        ":motion",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/util:adaptive_sort",
+        "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "scc",
     srcs = ["scc.c"],
     hdrs = ["scc.h"],

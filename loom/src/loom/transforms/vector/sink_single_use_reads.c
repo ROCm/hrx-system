@@ -6,7 +6,7 @@
 
 #include "loom/transforms/vector/sink_single_use_reads.h"
 
-#include "loom/analysis/motion.h"
+#include "loom/analysis/read_motion.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 #include "loom/rewrite/rewriter.h"
@@ -44,6 +44,13 @@ const loom_pass_info_t* loom_sink_single_use_reads_pass_info(void) {
 // Sinking
 //===----------------------------------------------------------------------===//
 
+typedef struct loom_sink_single_use_reads_move_t {
+  // Ordinary read selected for movement.
+  loom_op_t* read_op;
+  // Consumer immediately after the new read position.
+  loom_op_t* before_op;
+} loom_sink_single_use_reads_move_t;
+
 typedef struct loom_sink_single_use_reads_context_t {
   // Pass instance owning diagnostics, statistics, and scratch storage.
   loom_pass_t* pass;
@@ -53,16 +60,12 @@ typedef struct loom_sink_single_use_reads_context_t {
   loom_rewriter_t* rewriter;
   // Typed statistics storage for this pass invocation.
   loom_sink_single_use_reads_statistics_t* statistics;
-  // Reusable block operation list.
-  loom_op_t** ops;
-  // Barrier segment for each operation in ops.
-  uint32_t* segments;
-  // Read operation selected for movement.
-  loom_op_t** move_ops;
-  // User operation that each selected read should move before.
-  loom_op_t** move_before_ops;
-  // Allocated capacity of the per-block arrays above.
-  iree_host_size_t op_capacity;
+  // Shared ordering index, preserved while ordinary reads move within blocks.
+  loom_read_motion_t read_motion;
+  // Planned movements, completed before mutating the current block.
+  loom_sink_single_use_reads_move_t* moves;
+  // Number of entries allocated in moves.
+  iree_host_size_t move_capacity;
 } loom_sink_single_use_reads_context_t;
 
 typedef struct loom_sink_single_use_reads_region_stack_t {
@@ -105,57 +108,15 @@ static loom_region_t* loom_sink_single_use_reads_region_stack_pop(
   return stack->count > 0 ? stack->regions[--stack->count] : NULL;
 }
 
-static iree_status_t loom_sink_single_use_reads_reserve_ops(
+static iree_status_t loom_sink_single_use_reads_reserve_moves(
     loom_sink_single_use_reads_context_t* context, iree_host_size_t count) {
-  if (count <= context->op_capacity) {
+  if (count <= context->move_capacity) {
     return iree_ok_status();
   }
-  if (context->op_capacity == 0) {
-    context->op_capacity = count < 16 ? 16 : count;
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(context->pass->arena, context->op_capacity,
-                                  sizeof(loom_op_t*), (void**)&context->ops));
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        context->pass->arena, context->op_capacity, sizeof(uint32_t),
-        (void**)&context->segments));
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        context->pass->arena, context->op_capacity, sizeof(loom_op_t*),
-        (void**)&context->move_ops));
-    return iree_arena_allocate_array(context->pass->arena, context->op_capacity,
-                                     sizeof(loom_op_t*),
-                                     (void**)&context->move_before_ops);
-  }
-
-  iree_host_size_t old_capacity = context->op_capacity;
-  iree_host_size_t grown_capacity = old_capacity;
-  iree_host_size_t array_capacity = old_capacity;
-  IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-      context->pass->arena, old_capacity, count, sizeof(loom_op_t*),
-      &array_capacity, (void**)&context->ops));
-  grown_capacity = array_capacity;
-  array_capacity = old_capacity;
-  IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-      context->pass->arena, old_capacity, count, sizeof(uint32_t),
-      &array_capacity, (void**)&context->segments));
-  if (array_capacity < grown_capacity) {
-    grown_capacity = array_capacity;
-  }
-  array_capacity = old_capacity;
-  IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-      context->pass->arena, old_capacity, count, sizeof(loom_op_t*),
-      &array_capacity, (void**)&context->move_ops));
-  if (array_capacity < grown_capacity) {
-    grown_capacity = array_capacity;
-  }
-  array_capacity = old_capacity;
-  IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-      context->pass->arena, old_capacity, count, sizeof(loom_op_t*),
-      &array_capacity, (void**)&context->move_before_ops));
-  if (array_capacity < grown_capacity) {
-    grown_capacity = array_capacity;
-  }
-  context->op_capacity = grown_capacity;
-  return iree_ok_status();
+  return iree_arena_grow_array(context->pass->arena, /*existing_count=*/0,
+                               count, sizeof(*context->moves),
+                               &context->move_capacity,
+                               (void**)&context->moves);
 }
 
 static bool loom_sink_single_use_reads_has_multi_lane_vector_result(
@@ -233,29 +194,9 @@ static bool loom_sink_single_use_reads_find_same_block_user(
   return true;
 }
 
-static iree_host_size_t loom_sink_single_use_reads_find_ordinal(
-    loom_op_t** ops, iree_host_size_t count, uint64_t block_ordinal) {
-  iree_host_size_t low = 0;
-  iree_host_size_t high = count;
-  while (low < high) {
-    iree_host_size_t mid = low + ((high - low) >> 1);
-    uint64_t mid_ordinal = ops[mid]->block_ordinal;
-    if (mid_ordinal < block_ordinal) {
-      low = mid + 1;
-    } else {
-      high = mid;
-    }
-  }
-  return low < count && ops[low]->block_ordinal == block_ordinal
-             ? low
-             : IREE_HOST_SIZE_MAX;
-}
-
 static bool loom_sink_single_use_reads_user_has_unique_read_producer(
-    loom_sink_single_use_reads_context_t* context, iree_host_size_t count,
-    iree_host_size_t candidate_index, iree_host_size_t user_index) {
-  loom_op_t* candidate_op = context->ops[candidate_index];
-  loom_op_t* user_op = context->ops[user_index];
+    loom_sink_single_use_reads_context_t* context, loom_op_t* candidate_op,
+    loom_op_t* user_op) {
   const loom_value_id_t* operands = loom_op_const_operands(user_op);
   iree_host_size_t read_producer_count = 0;
   bool candidate_found = false;
@@ -265,17 +206,10 @@ static bool loom_sink_single_use_reads_user_has_unique_read_producer(
       continue;
     }
     loom_op_t* def_op = loom_value_def_op(operand);
-    if (!def_op || def_op->parent_block != user_op->parent_block ||
-        def_op->block_ordinal >= user_op->block_ordinal) {
-      continue;
-    }
-    iree_host_size_t def_index = loom_sink_single_use_reads_find_ordinal(
-        context->ops, count, def_op->block_ordinal);
-    if (def_index == IREE_HOST_SIZE_MAX ||
-        context->segments[def_index] != context->segments[user_index]) {
-      continue;
-    }
-    if (!loom_sink_single_use_reads_is_read_candidate(context, def_op)) {
+    if (!def_op ||
+        !loom_sink_single_use_reads_is_read_candidate(context, def_op) ||
+        !loom_read_motion_can_sink_before(&context->read_motion, def_op,
+                                          user_op)) {
       continue;
     }
     ++read_producer_count;
@@ -287,53 +221,15 @@ static bool loom_sink_single_use_reads_user_has_unique_read_producer(
   return candidate_found && read_producer_count == 1;
 }
 
-static iree_status_t loom_sink_single_use_reads_collect_block(
-    loom_sink_single_use_reads_context_t* context, loom_block_t* block,
-    iree_host_size_t* out_count) {
-  *out_count = 0;
-  iree_host_size_t count = 0;
-  loom_op_t* op = NULL;
-  loom_block_for_each_op(block, op) {
-    if (op->flags & LOOM_OP_FLAG_DEAD) {
-      continue;
-    }
-    ++count;
-  }
-  if (count == 0) {
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(loom_sink_single_use_reads_reserve_ops(context, count));
-
-  uint32_t segment = 0;
-  iree_host_size_t index = 0;
-  loom_block_for_each_op(block, op) {
-    if (op->flags & LOOM_OP_FLAG_DEAD) {
-      continue;
-    }
-    context->ops[index] = op;
-    context->segments[index] = segment;
-    ++index;
-    if (!loom_motion_read_can_cross_op(context->module, op)) {
-      ++segment;
-    }
-  }
-  *out_count = count;
-  return iree_ok_status();
-}
-
 static iree_status_t loom_sink_single_use_reads_process_block(
     loom_sink_single_use_reads_context_t* context, loom_block_t* block) {
   ++context->statistics->blocks_checked;
-  iree_host_size_t count = 0;
   IREE_RETURN_IF_ERROR(
-      loom_sink_single_use_reads_collect_block(context, block, &count));
-  if (count == 0) {
-    return iree_ok_status();
-  }
+      loom_sink_single_use_reads_reserve_moves(context, block->op_count));
 
   iree_host_size_t move_count = 0;
-  for (iree_host_size_t i = 0; i < count; ++i) {
-    loom_op_t* op = context->ops[i];
+  loom_op_t* op = NULL;
+  loom_block_for_each_op(block, op) {
     if (!loom_sink_single_use_reads_is_read_candidate(context, op)) {
       continue;
     }
@@ -344,27 +240,26 @@ static iree_status_t loom_sink_single_use_reads_process_block(
                                                          &user_op)) {
       continue;
     }
-    iree_host_size_t user_index = loom_sink_single_use_reads_find_ordinal(
-        context->ops, count, user_op->block_ordinal);
-    if (user_index == IREE_HOST_SIZE_MAX || user_index == i + 1) {
+    if (op->next_op == user_op ||
+        !loom_read_motion_can_sink_before(&context->read_motion, op, user_op)) {
       continue;
     }
-    if (context->segments[i] != context->segments[user_index]) {
-      continue;
-    }
-    if (!loom_sink_single_use_reads_user_has_unique_read_producer(
-            context, count, i, user_index)) {
+    if (!loom_sink_single_use_reads_user_has_unique_read_producer(context, op,
+                                                                  user_op)) {
       continue;
     }
 
-    context->move_ops[move_count] = op;
-    context->move_before_ops[move_count] = user_op;
+    context->moves[move_count] = (loom_sink_single_use_reads_move_t){
+        .read_op = op,
+        .before_op = user_op,
+    };
     ++move_count;
   }
 
   for (iree_host_size_t i = 0; i < move_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_rewriter_move_before(
-        context->rewriter, context->move_ops[i], context->move_before_ops[i]));
+    IREE_RETURN_IF_ERROR(
+        loom_rewriter_move_before(context->rewriter, context->moves[i].read_op,
+                                  context->moves[i].before_op));
     ++context->statistics->read_ops_sunk;
   }
   if (move_count != 0) {
@@ -401,9 +296,13 @@ iree_status_t loom_sink_single_use_reads_run(loom_pass_t* pass,
       .statistics = loom_sink_single_use_reads_statistics(pass),
   };
 
+  status = loom_read_motion_analyze_region(
+      module, loom_func_like_body(function), pass->arena, &context.read_motion);
   loom_sink_single_use_reads_region_stack_t stack;
-  status =
-      loom_sink_single_use_reads_region_stack_initialize(pass->arena, &stack);
+  if (iree_status_is_ok(status)) {
+    status =
+        loom_sink_single_use_reads_region_stack_initialize(pass->arena, &stack);
+  }
   if (iree_status_is_ok(status)) {
     status = loom_sink_single_use_reads_region_stack_push(
         pass->arena, &stack, loom_func_like_body(function));

@@ -1073,6 +1073,23 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    read_motion
+  HDRS
+    "read_motion.h"
+  SRCS
+    "read_motion.c"
+  DEPS
+    ::motion
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::util::adaptive_sort
+    loom::util::walk
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     scc
   HDRS
     "scc.h"

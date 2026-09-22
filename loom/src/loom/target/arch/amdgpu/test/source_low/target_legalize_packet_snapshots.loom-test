@@ -1,0 +1,1509 @@
+// RUN: pass target-legalize{mode=final,policy=require-native}
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @wide_overwrite() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<128xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<128xf16>
+  %loaded = vector.load %input_view[0] : view<128xf32> -> vector<128xf32>
+  %replacement = scalar.constant 99.0 : f32
+  view.store %replacement, %input_view[0] : f32, view<128xf32>
+  %converted = vector.fptrunc %loaded : vector<128xf32> to vector<128xf16>
+  vector.store %converted, %output_view[0] : vector<128xf16>, view<128xf16>
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @wide_overwrite() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<128xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<128xf16>
+  %9 = vector.load %input_view[0] : view<128xf32> -> vector<4xf32>
+  %10 = vector.load %input_view[4] : view<128xf32> -> vector<4xf32>
+  %11 = vector.load %input_view[8] : view<128xf32> -> vector<4xf32>
+  %12 = vector.load %input_view[12] : view<128xf32> -> vector<4xf32>
+  %13 = vector.load %input_view[16] : view<128xf32> -> vector<4xf32>
+  %14 = vector.load %input_view[20] : view<128xf32> -> vector<4xf32>
+  %15 = vector.load %input_view[24] : view<128xf32> -> vector<4xf32>
+  %16 = vector.load %input_view[28] : view<128xf32> -> vector<4xf32>
+  %17 = vector.load %input_view[32] : view<128xf32> -> vector<4xf32>
+  %18 = vector.load %input_view[36] : view<128xf32> -> vector<4xf32>
+  %19 = vector.load %input_view[40] : view<128xf32> -> vector<4xf32>
+  %20 = vector.load %input_view[44] : view<128xf32> -> vector<4xf32>
+  %21 = vector.load %input_view[48] : view<128xf32> -> vector<4xf32>
+  %22 = vector.load %input_view[52] : view<128xf32> -> vector<4xf32>
+  %23 = vector.load %input_view[56] : view<128xf32> -> vector<4xf32>
+  %24 = vector.load %input_view[60] : view<128xf32> -> vector<4xf32>
+  %25 = vector.load %input_view[64] : view<128xf32> -> vector<4xf32>
+  %26 = vector.load %input_view[68] : view<128xf32> -> vector<4xf32>
+  %27 = vector.load %input_view[72] : view<128xf32> -> vector<4xf32>
+  %28 = vector.load %input_view[76] : view<128xf32> -> vector<4xf32>
+  %29 = vector.load %input_view[80] : view<128xf32> -> vector<4xf32>
+  %30 = vector.load %input_view[84] : view<128xf32> -> vector<4xf32>
+  %31 = vector.load %input_view[88] : view<128xf32> -> vector<4xf32>
+  %32 = vector.load %input_view[92] : view<128xf32> -> vector<4xf32>
+  %33 = vector.load %input_view[96] : view<128xf32> -> vector<4xf32>
+  %34 = vector.load %input_view[100] : view<128xf32> -> vector<4xf32>
+  %35 = vector.load %input_view[104] : view<128xf32> -> vector<4xf32>
+  %36 = vector.load %input_view[108] : view<128xf32> -> vector<4xf32>
+  %37 = vector.load %input_view[112] : view<128xf32> -> vector<4xf32>
+  %38 = vector.load %input_view[116] : view<128xf32> -> vector<4xf32>
+  %39 = vector.load %input_view[120] : view<128xf32> -> vector<4xf32>
+  %40 = vector.load %input_view[124] : view<128xf32> -> vector<4xf32>
+  %replacement = scalar.constant 99.0 : f32
+  view.store %replacement, %input_view[0] : f32, view<128xf32>
+  %41 = vector.fptrunc %9 : vector<4xf32> to vector<4xf16>
+  vector.store %41, %output_view[0] : vector<4xf16>, view<128xf16>
+  %42 = vector.fptrunc %10 : vector<4xf32> to vector<4xf16>
+  vector.store %42, %output_view[4] : vector<4xf16>, view<128xf16>
+  %43 = vector.fptrunc %11 : vector<4xf32> to vector<4xf16>
+  vector.store %43, %output_view[8] : vector<4xf16>, view<128xf16>
+  %44 = vector.fptrunc %12 : vector<4xf32> to vector<4xf16>
+  vector.store %44, %output_view[12] : vector<4xf16>, view<128xf16>
+  %45 = vector.fptrunc %13 : vector<4xf32> to vector<4xf16>
+  vector.store %45, %output_view[16] : vector<4xf16>, view<128xf16>
+  %46 = vector.fptrunc %14 : vector<4xf32> to vector<4xf16>
+  vector.store %46, %output_view[20] : vector<4xf16>, view<128xf16>
+  %47 = vector.fptrunc %15 : vector<4xf32> to vector<4xf16>
+  vector.store %47, %output_view[24] : vector<4xf16>, view<128xf16>
+  %48 = vector.fptrunc %16 : vector<4xf32> to vector<4xf16>
+  vector.store %48, %output_view[28] : vector<4xf16>, view<128xf16>
+  %49 = vector.fptrunc %17 : vector<4xf32> to vector<4xf16>
+  vector.store %49, %output_view[32] : vector<4xf16>, view<128xf16>
+  %50 = vector.fptrunc %18 : vector<4xf32> to vector<4xf16>
+  vector.store %50, %output_view[36] : vector<4xf16>, view<128xf16>
+  %51 = vector.fptrunc %19 : vector<4xf32> to vector<4xf16>
+  vector.store %51, %output_view[40] : vector<4xf16>, view<128xf16>
+  %52 = vector.fptrunc %20 : vector<4xf32> to vector<4xf16>
+  vector.store %52, %output_view[44] : vector<4xf16>, view<128xf16>
+  %53 = vector.fptrunc %21 : vector<4xf32> to vector<4xf16>
+  vector.store %53, %output_view[48] : vector<4xf16>, view<128xf16>
+  %54 = vector.fptrunc %22 : vector<4xf32> to vector<4xf16>
+  vector.store %54, %output_view[52] : vector<4xf16>, view<128xf16>
+  %55 = vector.fptrunc %23 : vector<4xf32> to vector<4xf16>
+  vector.store %55, %output_view[56] : vector<4xf16>, view<128xf16>
+  %56 = vector.fptrunc %24 : vector<4xf32> to vector<4xf16>
+  vector.store %56, %output_view[60] : vector<4xf16>, view<128xf16>
+  %57 = vector.fptrunc %25 : vector<4xf32> to vector<4xf16>
+  vector.store %57, %output_view[64] : vector<4xf16>, view<128xf16>
+  %58 = vector.fptrunc %26 : vector<4xf32> to vector<4xf16>
+  vector.store %58, %output_view[68] : vector<4xf16>, view<128xf16>
+  %59 = vector.fptrunc %27 : vector<4xf32> to vector<4xf16>
+  vector.store %59, %output_view[72] : vector<4xf16>, view<128xf16>
+  %60 = vector.fptrunc %28 : vector<4xf32> to vector<4xf16>
+  vector.store %60, %output_view[76] : vector<4xf16>, view<128xf16>
+  %61 = vector.fptrunc %29 : vector<4xf32> to vector<4xf16>
+  vector.store %61, %output_view[80] : vector<4xf16>, view<128xf16>
+  %62 = vector.fptrunc %30 : vector<4xf32> to vector<4xf16>
+  vector.store %62, %output_view[84] : vector<4xf16>, view<128xf16>
+  %63 = vector.fptrunc %31 : vector<4xf32> to vector<4xf16>
+  vector.store %63, %output_view[88] : vector<4xf16>, view<128xf16>
+  %64 = vector.fptrunc %32 : vector<4xf32> to vector<4xf16>
+  vector.store %64, %output_view[92] : vector<4xf16>, view<128xf16>
+  %65 = vector.fptrunc %33 : vector<4xf32> to vector<4xf16>
+  vector.store %65, %output_view[96] : vector<4xf16>, view<128xf16>
+  %66 = vector.fptrunc %34 : vector<4xf32> to vector<4xf16>
+  vector.store %66, %output_view[100] : vector<4xf16>, view<128xf16>
+  %67 = vector.fptrunc %35 : vector<4xf32> to vector<4xf16>
+  vector.store %67, %output_view[104] : vector<4xf16>, view<128xf16>
+  %68 = vector.fptrunc %36 : vector<4xf32> to vector<4xf16>
+  vector.store %68, %output_view[108] : vector<4xf16>, view<128xf16>
+  %69 = vector.fptrunc %37 : vector<4xf32> to vector<4xf16>
+  vector.store %69, %output_view[112] : vector<4xf16>, view<128xf16>
+  %70 = vector.fptrunc %38 : vector<4xf32> to vector<4xf16>
+  vector.store %70, %output_view[116] : vector<4xf16>, view<128xf16>
+  %71 = vector.fptrunc %39 : vector<4xf32> to vector<4xf16>
+  vector.store %71, %output_view[120] : vector<4xf16>, view<128xf16>
+  %72 = vector.fptrunc %40 : vector<4xf32> to vector<4xf16>
+  vector.store %72, %output_view[124] : vector<4xf16>, view<128xf16>
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @bounded_overwrite() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<72xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<72xf16>
+  %loaded = vector.load %input_view[0] : view<72xf32> -> vector<72xf32>
+  %replacement = scalar.constant 99.0 : f32
+  view.store %replacement, %input_view[0] : f32, view<72xf32>
+  %converted = vector.fptrunc %loaded : vector<72xf32> to vector<72xf16>
+  vector.store %converted, %output_view[0] : vector<72xf16>, view<72xf16>
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @bounded_overwrite() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<72xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<72xf16>
+  %9 = vector.load %input_view[0] : view<72xf32> -> vector<4xf32>
+  %10 = vector.load %input_view[4] : view<72xf32> -> vector<4xf32>
+  %11 = vector.load %input_view[8] : view<72xf32> -> vector<4xf32>
+  %12 = vector.load %input_view[12] : view<72xf32> -> vector<4xf32>
+  %13 = vector.load %input_view[16] : view<72xf32> -> vector<4xf32>
+  %14 = vector.load %input_view[20] : view<72xf32> -> vector<4xf32>
+  %15 = vector.load %input_view[24] : view<72xf32> -> vector<4xf32>
+  %16 = vector.load %input_view[28] : view<72xf32> -> vector<4xf32>
+  %17 = vector.load %input_view[32] : view<72xf32> -> vector<4xf32>
+  %18 = vector.load %input_view[36] : view<72xf32> -> vector<4xf32>
+  %19 = vector.load %input_view[40] : view<72xf32> -> vector<4xf32>
+  %20 = vector.load %input_view[44] : view<72xf32> -> vector<4xf32>
+  %21 = vector.load %input_view[48] : view<72xf32> -> vector<4xf32>
+  %22 = vector.load %input_view[52] : view<72xf32> -> vector<4xf32>
+  %23 = vector.load %input_view[56] : view<72xf32> -> vector<4xf32>
+  %24 = vector.load %input_view[60] : view<72xf32> -> vector<4xf32>
+  %25 = vector.load %input_view[64] : view<72xf32> -> vector<4xf32>
+  %26 = vector.load %input_view[68] : view<72xf32> -> vector<4xf32>
+  %replacement = scalar.constant 99.0 : f32
+  view.store %replacement, %input_view[0] : f32, view<72xf32>
+  %27 = vector.fptrunc %9 : vector<4xf32> to vector<4xf16>
+  vector.store %27, %output_view[0] : vector<4xf16>, view<72xf16>
+  %28 = vector.fptrunc %10 : vector<4xf32> to vector<4xf16>
+  vector.store %28, %output_view[4] : vector<4xf16>, view<72xf16>
+  %29 = vector.fptrunc %11 : vector<4xf32> to vector<4xf16>
+  vector.store %29, %output_view[8] : vector<4xf16>, view<72xf16>
+  %30 = vector.fptrunc %12 : vector<4xf32> to vector<4xf16>
+  vector.store %30, %output_view[12] : vector<4xf16>, view<72xf16>
+  %31 = vector.fptrunc %13 : vector<4xf32> to vector<4xf16>
+  vector.store %31, %output_view[16] : vector<4xf16>, view<72xf16>
+  %32 = vector.fptrunc %14 : vector<4xf32> to vector<4xf16>
+  vector.store %32, %output_view[20] : vector<4xf16>, view<72xf16>
+  %33 = vector.fptrunc %15 : vector<4xf32> to vector<4xf16>
+  vector.store %33, %output_view[24] : vector<4xf16>, view<72xf16>
+  %34 = vector.fptrunc %16 : vector<4xf32> to vector<4xf16>
+  vector.store %34, %output_view[28] : vector<4xf16>, view<72xf16>
+  %35 = vector.fptrunc %17 : vector<4xf32> to vector<4xf16>
+  vector.store %35, %output_view[32] : vector<4xf16>, view<72xf16>
+  %36 = vector.fptrunc %18 : vector<4xf32> to vector<4xf16>
+  vector.store %36, %output_view[36] : vector<4xf16>, view<72xf16>
+  %37 = vector.fptrunc %19 : vector<4xf32> to vector<4xf16>
+  vector.store %37, %output_view[40] : vector<4xf16>, view<72xf16>
+  %38 = vector.fptrunc %20 : vector<4xf32> to vector<4xf16>
+  vector.store %38, %output_view[44] : vector<4xf16>, view<72xf16>
+  %39 = vector.fptrunc %21 : vector<4xf32> to vector<4xf16>
+  vector.store %39, %output_view[48] : vector<4xf16>, view<72xf16>
+  %40 = vector.fptrunc %22 : vector<4xf32> to vector<4xf16>
+  vector.store %40, %output_view[52] : vector<4xf16>, view<72xf16>
+  %41 = vector.fptrunc %23 : vector<4xf32> to vector<4xf16>
+  vector.store %41, %output_view[56] : vector<4xf16>, view<72xf16>
+  %42 = vector.fptrunc %24 : vector<4xf32> to vector<4xf16>
+  vector.store %42, %output_view[60] : vector<4xf16>, view<72xf16>
+  %43 = vector.fptrunc %25 : vector<4xf32> to vector<4xf16>
+  vector.store %43, %output_view[64] : vector<4xf16>, view<72xf16>
+  %44 = vector.fptrunc %26 : vector<4xf32> to vector<4xf16>
+  vector.store %44, %output_view[68] : vector<4xf16>, view<72xf16>
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @two_observations() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<128xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<128xf16>
+  %loaded = vector.load %input_view[0] : view<128xf32> -> vector<128xf32>
+  %replacement = scalar.constant 99.0 : f32
+  view.store %replacement, %input_view[0] : f32, view<128xf32>
+  %reloaded = vector.load %input_view[0] : view<128xf32> -> vector<128xf32>
+  %sum = vector.addf %loaded, %reloaded : vector<128xf32>
+  %converted = vector.fptrunc %sum : vector<128xf32> to vector<128xf16>
+  vector.store %converted, %output_view[0] : vector<128xf16>, view<128xf16>
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @two_observations() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<128xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<128xf16>
+  %11 = vector.load %input_view[0] : view<128xf32> -> vector<4xf32>
+  %12 = vector.load %input_view[4] : view<128xf32> -> vector<4xf32>
+  %13 = vector.load %input_view[8] : view<128xf32> -> vector<4xf32>
+  %14 = vector.load %input_view[12] : view<128xf32> -> vector<4xf32>
+  %15 = vector.load %input_view[16] : view<128xf32> -> vector<4xf32>
+  %16 = vector.load %input_view[20] : view<128xf32> -> vector<4xf32>
+  %17 = vector.load %input_view[24] : view<128xf32> -> vector<4xf32>
+  %18 = vector.load %input_view[28] : view<128xf32> -> vector<4xf32>
+  %19 = vector.load %input_view[32] : view<128xf32> -> vector<4xf32>
+  %20 = vector.load %input_view[36] : view<128xf32> -> vector<4xf32>
+  %21 = vector.load %input_view[40] : view<128xf32> -> vector<4xf32>
+  %22 = vector.load %input_view[44] : view<128xf32> -> vector<4xf32>
+  %23 = vector.load %input_view[48] : view<128xf32> -> vector<4xf32>
+  %24 = vector.load %input_view[52] : view<128xf32> -> vector<4xf32>
+  %25 = vector.load %input_view[56] : view<128xf32> -> vector<4xf32>
+  %26 = vector.load %input_view[60] : view<128xf32> -> vector<4xf32>
+  %27 = vector.load %input_view[64] : view<128xf32> -> vector<4xf32>
+  %28 = vector.load %input_view[68] : view<128xf32> -> vector<4xf32>
+  %29 = vector.load %input_view[72] : view<128xf32> -> vector<4xf32>
+  %30 = vector.load %input_view[76] : view<128xf32> -> vector<4xf32>
+  %31 = vector.load %input_view[80] : view<128xf32> -> vector<4xf32>
+  %32 = vector.load %input_view[84] : view<128xf32> -> vector<4xf32>
+  %33 = vector.load %input_view[88] : view<128xf32> -> vector<4xf32>
+  %34 = vector.load %input_view[92] : view<128xf32> -> vector<4xf32>
+  %35 = vector.load %input_view[96] : view<128xf32> -> vector<4xf32>
+  %36 = vector.load %input_view[100] : view<128xf32> -> vector<4xf32>
+  %37 = vector.load %input_view[104] : view<128xf32> -> vector<4xf32>
+  %38 = vector.load %input_view[108] : view<128xf32> -> vector<4xf32>
+  %39 = vector.load %input_view[112] : view<128xf32> -> vector<4xf32>
+  %40 = vector.load %input_view[116] : view<128xf32> -> vector<4xf32>
+  %41 = vector.load %input_view[120] : view<128xf32> -> vector<4xf32>
+  %42 = vector.load %input_view[124] : view<128xf32> -> vector<4xf32>
+  %replacement = scalar.constant 99.0 : f32
+  view.store %replacement, %input_view[0] : f32, view<128xf32>
+  %43 = vector.load %input_view[0] : view<128xf32> -> vector<4xf32>
+  %44 = vector.load %input_view[4] : view<128xf32> -> vector<4xf32>
+  %45 = vector.load %input_view[8] : view<128xf32> -> vector<4xf32>
+  %46 = vector.load %input_view[12] : view<128xf32> -> vector<4xf32>
+  %47 = vector.load %input_view[16] : view<128xf32> -> vector<4xf32>
+  %48 = vector.load %input_view[20] : view<128xf32> -> vector<4xf32>
+  %49 = vector.load %input_view[24] : view<128xf32> -> vector<4xf32>
+  %50 = vector.load %input_view[28] : view<128xf32> -> vector<4xf32>
+  %51 = vector.load %input_view[32] : view<128xf32> -> vector<4xf32>
+  %52 = vector.load %input_view[36] : view<128xf32> -> vector<4xf32>
+  %53 = vector.load %input_view[40] : view<128xf32> -> vector<4xf32>
+  %54 = vector.load %input_view[44] : view<128xf32> -> vector<4xf32>
+  %55 = vector.load %input_view[48] : view<128xf32> -> vector<4xf32>
+  %56 = vector.load %input_view[52] : view<128xf32> -> vector<4xf32>
+  %57 = vector.load %input_view[56] : view<128xf32> -> vector<4xf32>
+  %58 = vector.load %input_view[60] : view<128xf32> -> vector<4xf32>
+  %59 = vector.load %input_view[64] : view<128xf32> -> vector<4xf32>
+  %60 = vector.load %input_view[68] : view<128xf32> -> vector<4xf32>
+  %61 = vector.load %input_view[72] : view<128xf32> -> vector<4xf32>
+  %62 = vector.load %input_view[76] : view<128xf32> -> vector<4xf32>
+  %63 = vector.load %input_view[80] : view<128xf32> -> vector<4xf32>
+  %64 = vector.load %input_view[84] : view<128xf32> -> vector<4xf32>
+  %65 = vector.load %input_view[88] : view<128xf32> -> vector<4xf32>
+  %66 = vector.load %input_view[92] : view<128xf32> -> vector<4xf32>
+  %67 = vector.load %input_view[96] : view<128xf32> -> vector<4xf32>
+  %68 = vector.load %input_view[100] : view<128xf32> -> vector<4xf32>
+  %69 = vector.load %input_view[104] : view<128xf32> -> vector<4xf32>
+  %70 = vector.load %input_view[108] : view<128xf32> -> vector<4xf32>
+  %71 = vector.load %input_view[112] : view<128xf32> -> vector<4xf32>
+  %72 = vector.load %input_view[116] : view<128xf32> -> vector<4xf32>
+  %73 = vector.load %input_view[120] : view<128xf32> -> vector<4xf32>
+  %74 = vector.load %input_view[124] : view<128xf32> -> vector<4xf32>
+  %75 = vector.addf %11, %43 : vector<4xf32>
+  %76 = vector.fptrunc %75 : vector<4xf32> to vector<4xf16>
+  vector.store %76, %output_view[0] : vector<4xf16>, view<128xf16>
+  %77 = vector.addf %12, %44 : vector<4xf32>
+  %78 = vector.fptrunc %77 : vector<4xf32> to vector<4xf16>
+  vector.store %78, %output_view[4] : vector<4xf16>, view<128xf16>
+  %79 = vector.addf %13, %45 : vector<4xf32>
+  %80 = vector.fptrunc %79 : vector<4xf32> to vector<4xf16>
+  vector.store %80, %output_view[8] : vector<4xf16>, view<128xf16>
+  %81 = vector.addf %14, %46 : vector<4xf32>
+  %82 = vector.fptrunc %81 : vector<4xf32> to vector<4xf16>
+  vector.store %82, %output_view[12] : vector<4xf16>, view<128xf16>
+  %83 = vector.addf %15, %47 : vector<4xf32>
+  %84 = vector.fptrunc %83 : vector<4xf32> to vector<4xf16>
+  vector.store %84, %output_view[16] : vector<4xf16>, view<128xf16>
+  %85 = vector.addf %16, %48 : vector<4xf32>
+  %86 = vector.fptrunc %85 : vector<4xf32> to vector<4xf16>
+  vector.store %86, %output_view[20] : vector<4xf16>, view<128xf16>
+  %87 = vector.addf %17, %49 : vector<4xf32>
+  %88 = vector.fptrunc %87 : vector<4xf32> to vector<4xf16>
+  vector.store %88, %output_view[24] : vector<4xf16>, view<128xf16>
+  %89 = vector.addf %18, %50 : vector<4xf32>
+  %90 = vector.fptrunc %89 : vector<4xf32> to vector<4xf16>
+  vector.store %90, %output_view[28] : vector<4xf16>, view<128xf16>
+  %91 = vector.addf %19, %51 : vector<4xf32>
+  %92 = vector.fptrunc %91 : vector<4xf32> to vector<4xf16>
+  vector.store %92, %output_view[32] : vector<4xf16>, view<128xf16>
+  %93 = vector.addf %20, %52 : vector<4xf32>
+  %94 = vector.fptrunc %93 : vector<4xf32> to vector<4xf16>
+  vector.store %94, %output_view[36] : vector<4xf16>, view<128xf16>
+  %95 = vector.addf %21, %53 : vector<4xf32>
+  %96 = vector.fptrunc %95 : vector<4xf32> to vector<4xf16>
+  vector.store %96, %output_view[40] : vector<4xf16>, view<128xf16>
+  %97 = vector.addf %22, %54 : vector<4xf32>
+  %98 = vector.fptrunc %97 : vector<4xf32> to vector<4xf16>
+  vector.store %98, %output_view[44] : vector<4xf16>, view<128xf16>
+  %99 = vector.addf %23, %55 : vector<4xf32>
+  %100 = vector.fptrunc %99 : vector<4xf32> to vector<4xf16>
+  vector.store %100, %output_view[48] : vector<4xf16>, view<128xf16>
+  %101 = vector.addf %24, %56 : vector<4xf32>
+  %102 = vector.fptrunc %101 : vector<4xf32> to vector<4xf16>
+  vector.store %102, %output_view[52] : vector<4xf16>, view<128xf16>
+  %103 = vector.addf %25, %57 : vector<4xf32>
+  %104 = vector.fptrunc %103 : vector<4xf32> to vector<4xf16>
+  vector.store %104, %output_view[56] : vector<4xf16>, view<128xf16>
+  %105 = vector.addf %26, %58 : vector<4xf32>
+  %106 = vector.fptrunc %105 : vector<4xf32> to vector<4xf16>
+  vector.store %106, %output_view[60] : vector<4xf16>, view<128xf16>
+  %107 = vector.addf %27, %59 : vector<4xf32>
+  %108 = vector.fptrunc %107 : vector<4xf32> to vector<4xf16>
+  vector.store %108, %output_view[64] : vector<4xf16>, view<128xf16>
+  %109 = vector.addf %28, %60 : vector<4xf32>
+  %110 = vector.fptrunc %109 : vector<4xf32> to vector<4xf16>
+  vector.store %110, %output_view[68] : vector<4xf16>, view<128xf16>
+  %111 = vector.addf %29, %61 : vector<4xf32>
+  %112 = vector.fptrunc %111 : vector<4xf32> to vector<4xf16>
+  vector.store %112, %output_view[72] : vector<4xf16>, view<128xf16>
+  %113 = vector.addf %30, %62 : vector<4xf32>
+  %114 = vector.fptrunc %113 : vector<4xf32> to vector<4xf16>
+  vector.store %114, %output_view[76] : vector<4xf16>, view<128xf16>
+  %115 = vector.addf %31, %63 : vector<4xf32>
+  %116 = vector.fptrunc %115 : vector<4xf32> to vector<4xf16>
+  vector.store %116, %output_view[80] : vector<4xf16>, view<128xf16>
+  %117 = vector.addf %32, %64 : vector<4xf32>
+  %118 = vector.fptrunc %117 : vector<4xf32> to vector<4xf16>
+  vector.store %118, %output_view[84] : vector<4xf16>, view<128xf16>
+  %119 = vector.addf %33, %65 : vector<4xf32>
+  %120 = vector.fptrunc %119 : vector<4xf32> to vector<4xf16>
+  vector.store %120, %output_view[88] : vector<4xf16>, view<128xf16>
+  %121 = vector.addf %34, %66 : vector<4xf32>
+  %122 = vector.fptrunc %121 : vector<4xf32> to vector<4xf16>
+  vector.store %122, %output_view[92] : vector<4xf16>, view<128xf16>
+  %123 = vector.addf %35, %67 : vector<4xf32>
+  %124 = vector.fptrunc %123 : vector<4xf32> to vector<4xf16>
+  vector.store %124, %output_view[96] : vector<4xf16>, view<128xf16>
+  %125 = vector.addf %36, %68 : vector<4xf32>
+  %126 = vector.fptrunc %125 : vector<4xf32> to vector<4xf16>
+  vector.store %126, %output_view[100] : vector<4xf16>, view<128xf16>
+  %127 = vector.addf %37, %69 : vector<4xf32>
+  %128 = vector.fptrunc %127 : vector<4xf32> to vector<4xf16>
+  vector.store %128, %output_view[104] : vector<4xf16>, view<128xf16>
+  %129 = vector.addf %38, %70 : vector<4xf32>
+  %130 = vector.fptrunc %129 : vector<4xf32> to vector<4xf16>
+  vector.store %130, %output_view[108] : vector<4xf16>, view<128xf16>
+  %131 = vector.addf %39, %71 : vector<4xf32>
+  %132 = vector.fptrunc %131 : vector<4xf32> to vector<4xf16>
+  vector.store %132, %output_view[112] : vector<4xf16>, view<128xf16>
+  %133 = vector.addf %40, %72 : vector<4xf32>
+  %134 = vector.fptrunc %133 : vector<4xf32> to vector<4xf16>
+  vector.store %134, %output_view[116] : vector<4xf16>, view<128xf16>
+  %135 = vector.addf %41, %73 : vector<4xf32>
+  %136 = vector.fptrunc %135 : vector<4xf32> to vector<4xf16>
+  vector.store %136, %output_view[120] : vector<4xf16>, view<128xf16>
+  %137 = vector.addf %42, %74 : vector<4xf32>
+  %138 = vector.fptrunc %137 : vector<4xf32> to vector<4xf16>
+  vector.store %138, %output_view[124] : vector<4xf16>, view<128xf16>
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @shared_volatile() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer, %saved: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<128xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<128xf16>
+  %loaded = vector.load<volatile> %input_view[0] : view<128xf32> -> vector<128xf32>
+  %replacement = scalar.constant 99.0 : f32
+  view.store %replacement, %input_view[0] : f32, view<128xf32>
+  %converted = vector.fptrunc %loaded : vector<128xf32> to vector<128xf16>
+  vector.store %converted, %output_view[0] : vector<128xf16>, view<128xf16>
+  %saved_view = buffer.view %saved[%base] : buffer -> view<128xf32>
+  vector.store %loaded, %saved_view[0] : vector<128xf32>, view<128xf32>
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @shared_volatile() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer, %saved: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<128xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<128xf16>
+  %11 = vector.load<volatile> %input_view[0] : view<128xf32> -> vector<4xf32>
+  %12 = vector.load<volatile> %input_view[4] : view<128xf32> -> vector<4xf32>
+  %13 = vector.load<volatile> %input_view[8] : view<128xf32> -> vector<4xf32>
+  %14 = vector.load<volatile> %input_view[12] : view<128xf32> -> vector<4xf32>
+  %15 = vector.load<volatile> %input_view[16] : view<128xf32> -> vector<4xf32>
+  %16 = vector.load<volatile> %input_view[20] : view<128xf32> -> vector<4xf32>
+  %17 = vector.load<volatile> %input_view[24] : view<128xf32> -> vector<4xf32>
+  %18 = vector.load<volatile> %input_view[28] : view<128xf32> -> vector<4xf32>
+  %19 = vector.load<volatile> %input_view[32] : view<128xf32> -> vector<4xf32>
+  %20 = vector.load<volatile> %input_view[36] : view<128xf32> -> vector<4xf32>
+  %21 = vector.load<volatile> %input_view[40] : view<128xf32> -> vector<4xf32>
+  %22 = vector.load<volatile> %input_view[44] : view<128xf32> -> vector<4xf32>
+  %23 = vector.load<volatile> %input_view[48] : view<128xf32> -> vector<4xf32>
+  %24 = vector.load<volatile> %input_view[52] : view<128xf32> -> vector<4xf32>
+  %25 = vector.load<volatile> %input_view[56] : view<128xf32> -> vector<4xf32>
+  %26 = vector.load<volatile> %input_view[60] : view<128xf32> -> vector<4xf32>
+  %27 = vector.load<volatile> %input_view[64] : view<128xf32> -> vector<4xf32>
+  %28 = vector.load<volatile> %input_view[68] : view<128xf32> -> vector<4xf32>
+  %29 = vector.load<volatile> %input_view[72] : view<128xf32> -> vector<4xf32>
+  %30 = vector.load<volatile> %input_view[76] : view<128xf32> -> vector<4xf32>
+  %31 = vector.load<volatile> %input_view[80] : view<128xf32> -> vector<4xf32>
+  %32 = vector.load<volatile> %input_view[84] : view<128xf32> -> vector<4xf32>
+  %33 = vector.load<volatile> %input_view[88] : view<128xf32> -> vector<4xf32>
+  %34 = vector.load<volatile> %input_view[92] : view<128xf32> -> vector<4xf32>
+  %35 = vector.load<volatile> %input_view[96] : view<128xf32> -> vector<4xf32>
+  %36 = vector.load<volatile> %input_view[100] : view<128xf32> -> vector<4xf32>
+  %37 = vector.load<volatile> %input_view[104] : view<128xf32> -> vector<4xf32>
+  %38 = vector.load<volatile> %input_view[108] : view<128xf32> -> vector<4xf32>
+  %39 = vector.load<volatile> %input_view[112] : view<128xf32> -> vector<4xf32>
+  %40 = vector.load<volatile> %input_view[116] : view<128xf32> -> vector<4xf32>
+  %41 = vector.load<volatile> %input_view[120] : view<128xf32> -> vector<4xf32>
+  %42 = vector.load<volatile> %input_view[124] : view<128xf32> -> vector<4xf32>
+  %replacement = scalar.constant 99.0 : f32
+  view.store %replacement, %input_view[0] : f32, view<128xf32>
+  %44 = vector.fptrunc %11 : vector<4xf32> to vector<4xf16>
+  vector.store %44, %output_view[0] : vector<4xf16>, view<128xf16>
+  %45 = vector.fptrunc %12 : vector<4xf32> to vector<4xf16>
+  vector.store %45, %output_view[4] : vector<4xf16>, view<128xf16>
+  %46 = vector.fptrunc %13 : vector<4xf32> to vector<4xf16>
+  vector.store %46, %output_view[8] : vector<4xf16>, view<128xf16>
+  %47 = vector.fptrunc %14 : vector<4xf32> to vector<4xf16>
+  vector.store %47, %output_view[12] : vector<4xf16>, view<128xf16>
+  %48 = vector.fptrunc %15 : vector<4xf32> to vector<4xf16>
+  vector.store %48, %output_view[16] : vector<4xf16>, view<128xf16>
+  %49 = vector.fptrunc %16 : vector<4xf32> to vector<4xf16>
+  vector.store %49, %output_view[20] : vector<4xf16>, view<128xf16>
+  %50 = vector.fptrunc %17 : vector<4xf32> to vector<4xf16>
+  vector.store %50, %output_view[24] : vector<4xf16>, view<128xf16>
+  %51 = vector.fptrunc %18 : vector<4xf32> to vector<4xf16>
+  vector.store %51, %output_view[28] : vector<4xf16>, view<128xf16>
+  %52 = vector.fptrunc %19 : vector<4xf32> to vector<4xf16>
+  vector.store %52, %output_view[32] : vector<4xf16>, view<128xf16>
+  %53 = vector.fptrunc %20 : vector<4xf32> to vector<4xf16>
+  vector.store %53, %output_view[36] : vector<4xf16>, view<128xf16>
+  %54 = vector.fptrunc %21 : vector<4xf32> to vector<4xf16>
+  vector.store %54, %output_view[40] : vector<4xf16>, view<128xf16>
+  %55 = vector.fptrunc %22 : vector<4xf32> to vector<4xf16>
+  vector.store %55, %output_view[44] : vector<4xf16>, view<128xf16>
+  %56 = vector.fptrunc %23 : vector<4xf32> to vector<4xf16>
+  vector.store %56, %output_view[48] : vector<4xf16>, view<128xf16>
+  %57 = vector.fptrunc %24 : vector<4xf32> to vector<4xf16>
+  vector.store %57, %output_view[52] : vector<4xf16>, view<128xf16>
+  %58 = vector.fptrunc %25 : vector<4xf32> to vector<4xf16>
+  vector.store %58, %output_view[56] : vector<4xf16>, view<128xf16>
+  %59 = vector.fptrunc %26 : vector<4xf32> to vector<4xf16>
+  vector.store %59, %output_view[60] : vector<4xf16>, view<128xf16>
+  %60 = vector.fptrunc %27 : vector<4xf32> to vector<4xf16>
+  vector.store %60, %output_view[64] : vector<4xf16>, view<128xf16>
+  %61 = vector.fptrunc %28 : vector<4xf32> to vector<4xf16>
+  vector.store %61, %output_view[68] : vector<4xf16>, view<128xf16>
+  %62 = vector.fptrunc %29 : vector<4xf32> to vector<4xf16>
+  vector.store %62, %output_view[72] : vector<4xf16>, view<128xf16>
+  %63 = vector.fptrunc %30 : vector<4xf32> to vector<4xf16>
+  vector.store %63, %output_view[76] : vector<4xf16>, view<128xf16>
+  %64 = vector.fptrunc %31 : vector<4xf32> to vector<4xf16>
+  vector.store %64, %output_view[80] : vector<4xf16>, view<128xf16>
+  %65 = vector.fptrunc %32 : vector<4xf32> to vector<4xf16>
+  vector.store %65, %output_view[84] : vector<4xf16>, view<128xf16>
+  %66 = vector.fptrunc %33 : vector<4xf32> to vector<4xf16>
+  vector.store %66, %output_view[88] : vector<4xf16>, view<128xf16>
+  %67 = vector.fptrunc %34 : vector<4xf32> to vector<4xf16>
+  vector.store %67, %output_view[92] : vector<4xf16>, view<128xf16>
+  %68 = vector.fptrunc %35 : vector<4xf32> to vector<4xf16>
+  vector.store %68, %output_view[96] : vector<4xf16>, view<128xf16>
+  %69 = vector.fptrunc %36 : vector<4xf32> to vector<4xf16>
+  vector.store %69, %output_view[100] : vector<4xf16>, view<128xf16>
+  %70 = vector.fptrunc %37 : vector<4xf32> to vector<4xf16>
+  vector.store %70, %output_view[104] : vector<4xf16>, view<128xf16>
+  %71 = vector.fptrunc %38 : vector<4xf32> to vector<4xf16>
+  vector.store %71, %output_view[108] : vector<4xf16>, view<128xf16>
+  %72 = vector.fptrunc %39 : vector<4xf32> to vector<4xf16>
+  vector.store %72, %output_view[112] : vector<4xf16>, view<128xf16>
+  %73 = vector.fptrunc %40 : vector<4xf32> to vector<4xf16>
+  vector.store %73, %output_view[116] : vector<4xf16>, view<128xf16>
+  %74 = vector.fptrunc %41 : vector<4xf32> to vector<4xf16>
+  vector.store %74, %output_view[120] : vector<4xf16>, view<128xf16>
+  %75 = vector.fptrunc %42 : vector<4xf32> to vector<4xf16>
+  vector.store %75, %output_view[124] : vector<4xf16>, view<128xf16>
+  %saved_view = buffer.view %saved[%base] : buffer -> view<128xf32>
+  vector.store %11, %saved_view[0] : vector<4xf32>, view<128xf32>
+  vector.store %12, %saved_view[4] : vector<4xf32>, view<128xf32>
+  vector.store %13, %saved_view[8] : vector<4xf32>, view<128xf32>
+  vector.store %14, %saved_view[12] : vector<4xf32>, view<128xf32>
+  vector.store %15, %saved_view[16] : vector<4xf32>, view<128xf32>
+  vector.store %16, %saved_view[20] : vector<4xf32>, view<128xf32>
+  vector.store %17, %saved_view[24] : vector<4xf32>, view<128xf32>
+  vector.store %18, %saved_view[28] : vector<4xf32>, view<128xf32>
+  vector.store %19, %saved_view[32] : vector<4xf32>, view<128xf32>
+  vector.store %20, %saved_view[36] : vector<4xf32>, view<128xf32>
+  vector.store %21, %saved_view[40] : vector<4xf32>, view<128xf32>
+  vector.store %22, %saved_view[44] : vector<4xf32>, view<128xf32>
+  vector.store %23, %saved_view[48] : vector<4xf32>, view<128xf32>
+  vector.store %24, %saved_view[52] : vector<4xf32>, view<128xf32>
+  vector.store %25, %saved_view[56] : vector<4xf32>, view<128xf32>
+  vector.store %26, %saved_view[60] : vector<4xf32>, view<128xf32>
+  vector.store %27, %saved_view[64] : vector<4xf32>, view<128xf32>
+  vector.store %28, %saved_view[68] : vector<4xf32>, view<128xf32>
+  vector.store %29, %saved_view[72] : vector<4xf32>, view<128xf32>
+  vector.store %30, %saved_view[76] : vector<4xf32>, view<128xf32>
+  vector.store %31, %saved_view[80] : vector<4xf32>, view<128xf32>
+  vector.store %32, %saved_view[84] : vector<4xf32>, view<128xf32>
+  vector.store %33, %saved_view[88] : vector<4xf32>, view<128xf32>
+  vector.store %34, %saved_view[92] : vector<4xf32>, view<128xf32>
+  vector.store %35, %saved_view[96] : vector<4xf32>, view<128xf32>
+  vector.store %36, %saved_view[100] : vector<4xf32>, view<128xf32>
+  vector.store %37, %saved_view[104] : vector<4xf32>, view<128xf32>
+  vector.store %38, %saved_view[108] : vector<4xf32>, view<128xf32>
+  vector.store %39, %saved_view[112] : vector<4xf32>, view<128xf32>
+  vector.store %40, %saved_view[116] : vector<4xf32>, view<128xf32>
+  vector.store %41, %saved_view[120] : vector<4xf32>, view<128xf32>
+  vector.store %42, %saved_view[124] : vector<4xf32>, view<128xf32>
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @conditional_snapshot() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer, %condition: i1) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<128xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<128xf16>
+  %loaded = vector.load %input_view[0] : view<128xf32> -> vector<128xf32>
+  %replacement = scalar.constant 99.0 : f32
+  view.store %replacement, %input_view[0] : f32, view<128xf32>
+  scf.if %condition {
+    %converted = vector.fptrunc %loaded : vector<128xf32> to vector<128xf16>
+    vector.store %converted, %output_view[0] : vector<128xf16>, view<128xf16>
+  }
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @conditional_snapshot() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer, %condition: i1) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<128xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<128xf16>
+  %10 = vector.load %input_view[0] : view<128xf32> -> vector<4xf32>
+  %11 = vector.load %input_view[4] : view<128xf32> -> vector<4xf32>
+  %12 = vector.load %input_view[8] : view<128xf32> -> vector<4xf32>
+  %13 = vector.load %input_view[12] : view<128xf32> -> vector<4xf32>
+  %14 = vector.load %input_view[16] : view<128xf32> -> vector<4xf32>
+  %15 = vector.load %input_view[20] : view<128xf32> -> vector<4xf32>
+  %16 = vector.load %input_view[24] : view<128xf32> -> vector<4xf32>
+  %17 = vector.load %input_view[28] : view<128xf32> -> vector<4xf32>
+  %18 = vector.load %input_view[32] : view<128xf32> -> vector<4xf32>
+  %19 = vector.load %input_view[36] : view<128xf32> -> vector<4xf32>
+  %20 = vector.load %input_view[40] : view<128xf32> -> vector<4xf32>
+  %21 = vector.load %input_view[44] : view<128xf32> -> vector<4xf32>
+  %22 = vector.load %input_view[48] : view<128xf32> -> vector<4xf32>
+  %23 = vector.load %input_view[52] : view<128xf32> -> vector<4xf32>
+  %24 = vector.load %input_view[56] : view<128xf32> -> vector<4xf32>
+  %25 = vector.load %input_view[60] : view<128xf32> -> vector<4xf32>
+  %26 = vector.load %input_view[64] : view<128xf32> -> vector<4xf32>
+  %27 = vector.load %input_view[68] : view<128xf32> -> vector<4xf32>
+  %28 = vector.load %input_view[72] : view<128xf32> -> vector<4xf32>
+  %29 = vector.load %input_view[76] : view<128xf32> -> vector<4xf32>
+  %30 = vector.load %input_view[80] : view<128xf32> -> vector<4xf32>
+  %31 = vector.load %input_view[84] : view<128xf32> -> vector<4xf32>
+  %32 = vector.load %input_view[88] : view<128xf32> -> vector<4xf32>
+  %33 = vector.load %input_view[92] : view<128xf32> -> vector<4xf32>
+  %34 = vector.load %input_view[96] : view<128xf32> -> vector<4xf32>
+  %35 = vector.load %input_view[100] : view<128xf32> -> vector<4xf32>
+  %36 = vector.load %input_view[104] : view<128xf32> -> vector<4xf32>
+  %37 = vector.load %input_view[108] : view<128xf32> -> vector<4xf32>
+  %38 = vector.load %input_view[112] : view<128xf32> -> vector<4xf32>
+  %39 = vector.load %input_view[116] : view<128xf32> -> vector<4xf32>
+  %40 = vector.load %input_view[120] : view<128xf32> -> vector<4xf32>
+  %41 = vector.load %input_view[124] : view<128xf32> -> vector<4xf32>
+  %replacement = scalar.constant 99.0 : f32
+  view.store %replacement, %input_view[0] : f32, view<128xf32>
+  scf.if %condition {
+    %42 = vector.fptrunc %10 : vector<4xf32> to vector<4xf16>
+    vector.store %42, %output_view[0] : vector<4xf16>, view<128xf16>
+    %43 = vector.fptrunc %11 : vector<4xf32> to vector<4xf16>
+    vector.store %43, %output_view[4] : vector<4xf16>, view<128xf16>
+    %44 = vector.fptrunc %12 : vector<4xf32> to vector<4xf16>
+    vector.store %44, %output_view[8] : vector<4xf16>, view<128xf16>
+    %45 = vector.fptrunc %13 : vector<4xf32> to vector<4xf16>
+    vector.store %45, %output_view[12] : vector<4xf16>, view<128xf16>
+    %46 = vector.fptrunc %14 : vector<4xf32> to vector<4xf16>
+    vector.store %46, %output_view[16] : vector<4xf16>, view<128xf16>
+    %47 = vector.fptrunc %15 : vector<4xf32> to vector<4xf16>
+    vector.store %47, %output_view[20] : vector<4xf16>, view<128xf16>
+    %48 = vector.fptrunc %16 : vector<4xf32> to vector<4xf16>
+    vector.store %48, %output_view[24] : vector<4xf16>, view<128xf16>
+    %49 = vector.fptrunc %17 : vector<4xf32> to vector<4xf16>
+    vector.store %49, %output_view[28] : vector<4xf16>, view<128xf16>
+    %50 = vector.fptrunc %18 : vector<4xf32> to vector<4xf16>
+    vector.store %50, %output_view[32] : vector<4xf16>, view<128xf16>
+    %51 = vector.fptrunc %19 : vector<4xf32> to vector<4xf16>
+    vector.store %51, %output_view[36] : vector<4xf16>, view<128xf16>
+    %52 = vector.fptrunc %20 : vector<4xf32> to vector<4xf16>
+    vector.store %52, %output_view[40] : vector<4xf16>, view<128xf16>
+    %53 = vector.fptrunc %21 : vector<4xf32> to vector<4xf16>
+    vector.store %53, %output_view[44] : vector<4xf16>, view<128xf16>
+    %54 = vector.fptrunc %22 : vector<4xf32> to vector<4xf16>
+    vector.store %54, %output_view[48] : vector<4xf16>, view<128xf16>
+    %55 = vector.fptrunc %23 : vector<4xf32> to vector<4xf16>
+    vector.store %55, %output_view[52] : vector<4xf16>, view<128xf16>
+    %56 = vector.fptrunc %24 : vector<4xf32> to vector<4xf16>
+    vector.store %56, %output_view[56] : vector<4xf16>, view<128xf16>
+    %57 = vector.fptrunc %25 : vector<4xf32> to vector<4xf16>
+    vector.store %57, %output_view[60] : vector<4xf16>, view<128xf16>
+    %58 = vector.fptrunc %26 : vector<4xf32> to vector<4xf16>
+    vector.store %58, %output_view[64] : vector<4xf16>, view<128xf16>
+    %59 = vector.fptrunc %27 : vector<4xf32> to vector<4xf16>
+    vector.store %59, %output_view[68] : vector<4xf16>, view<128xf16>
+    %60 = vector.fptrunc %28 : vector<4xf32> to vector<4xf16>
+    vector.store %60, %output_view[72] : vector<4xf16>, view<128xf16>
+    %61 = vector.fptrunc %29 : vector<4xf32> to vector<4xf16>
+    vector.store %61, %output_view[76] : vector<4xf16>, view<128xf16>
+    %62 = vector.fptrunc %30 : vector<4xf32> to vector<4xf16>
+    vector.store %62, %output_view[80] : vector<4xf16>, view<128xf16>
+    %63 = vector.fptrunc %31 : vector<4xf32> to vector<4xf16>
+    vector.store %63, %output_view[84] : vector<4xf16>, view<128xf16>
+    %64 = vector.fptrunc %32 : vector<4xf32> to vector<4xf16>
+    vector.store %64, %output_view[88] : vector<4xf16>, view<128xf16>
+    %65 = vector.fptrunc %33 : vector<4xf32> to vector<4xf16>
+    vector.store %65, %output_view[92] : vector<4xf16>, view<128xf16>
+    %66 = vector.fptrunc %34 : vector<4xf32> to vector<4xf16>
+    vector.store %66, %output_view[96] : vector<4xf16>, view<128xf16>
+    %67 = vector.fptrunc %35 : vector<4xf32> to vector<4xf16>
+    vector.store %67, %output_view[100] : vector<4xf16>, view<128xf16>
+    %68 = vector.fptrunc %36 : vector<4xf32> to vector<4xf16>
+    vector.store %68, %output_view[104] : vector<4xf16>, view<128xf16>
+    %69 = vector.fptrunc %37 : vector<4xf32> to vector<4xf16>
+    vector.store %69, %output_view[108] : vector<4xf16>, view<128xf16>
+    %70 = vector.fptrunc %38 : vector<4xf32> to vector<4xf16>
+    vector.store %70, %output_view[112] : vector<4xf16>, view<128xf16>
+    %71 = vector.fptrunc %39 : vector<4xf32> to vector<4xf16>
+    vector.store %71, %output_view[116] : vector<4xf16>, view<128xf16>
+    %72 = vector.fptrunc %40 : vector<4xf32> to vector<4xf16>
+    vector.store %72, %output_view[120] : vector<4xf16>, view<128xf16>
+    %73 = vector.fptrunc %41 : vector<4xf32> to vector<4xf16>
+    vector.store %73, %output_view[124] : vector<4xf16>, view<128xf16>
+  }
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @acquire_boundary() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<128xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<128xf16>
+  %loaded = vector.load %input_view[0] : view<128xf32> -> vector<128xf32>
+  kernel.barrier<global> scope(workgroup) ordering(acq_rel)
+  %converted = vector.fptrunc %loaded : vector<128xf32> to vector<128xf16>
+  vector.store %converted, %output_view[0] : vector<128xf16>, view<128xf16>
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @acquire_boundary() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<128xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<128xf16>
+  %8 = vector.load %input_view[0] : view<128xf32> -> vector<4xf32>
+  %9 = vector.load %input_view[4] : view<128xf32> -> vector<4xf32>
+  %10 = vector.load %input_view[8] : view<128xf32> -> vector<4xf32>
+  %11 = vector.load %input_view[12] : view<128xf32> -> vector<4xf32>
+  %12 = vector.load %input_view[16] : view<128xf32> -> vector<4xf32>
+  %13 = vector.load %input_view[20] : view<128xf32> -> vector<4xf32>
+  %14 = vector.load %input_view[24] : view<128xf32> -> vector<4xf32>
+  %15 = vector.load %input_view[28] : view<128xf32> -> vector<4xf32>
+  %16 = vector.load %input_view[32] : view<128xf32> -> vector<4xf32>
+  %17 = vector.load %input_view[36] : view<128xf32> -> vector<4xf32>
+  %18 = vector.load %input_view[40] : view<128xf32> -> vector<4xf32>
+  %19 = vector.load %input_view[44] : view<128xf32> -> vector<4xf32>
+  %20 = vector.load %input_view[48] : view<128xf32> -> vector<4xf32>
+  %21 = vector.load %input_view[52] : view<128xf32> -> vector<4xf32>
+  %22 = vector.load %input_view[56] : view<128xf32> -> vector<4xf32>
+  %23 = vector.load %input_view[60] : view<128xf32> -> vector<4xf32>
+  %24 = vector.load %input_view[64] : view<128xf32> -> vector<4xf32>
+  %25 = vector.load %input_view[68] : view<128xf32> -> vector<4xf32>
+  %26 = vector.load %input_view[72] : view<128xf32> -> vector<4xf32>
+  %27 = vector.load %input_view[76] : view<128xf32> -> vector<4xf32>
+  %28 = vector.load %input_view[80] : view<128xf32> -> vector<4xf32>
+  %29 = vector.load %input_view[84] : view<128xf32> -> vector<4xf32>
+  %30 = vector.load %input_view[88] : view<128xf32> -> vector<4xf32>
+  %31 = vector.load %input_view[92] : view<128xf32> -> vector<4xf32>
+  %32 = vector.load %input_view[96] : view<128xf32> -> vector<4xf32>
+  %33 = vector.load %input_view[100] : view<128xf32> -> vector<4xf32>
+  %34 = vector.load %input_view[104] : view<128xf32> -> vector<4xf32>
+  %35 = vector.load %input_view[108] : view<128xf32> -> vector<4xf32>
+  %36 = vector.load %input_view[112] : view<128xf32> -> vector<4xf32>
+  %37 = vector.load %input_view[116] : view<128xf32> -> vector<4xf32>
+  %38 = vector.load %input_view[120] : view<128xf32> -> vector<4xf32>
+  %39 = vector.load %input_view[124] : view<128xf32> -> vector<4xf32>
+  kernel.barrier<global> scope(workgroup) ordering(acq_rel)
+  %40 = vector.fptrunc %8 : vector<4xf32> to vector<4xf16>
+  vector.store %40, %output_view[0] : vector<4xf16>, view<128xf16>
+  %41 = vector.fptrunc %9 : vector<4xf32> to vector<4xf16>
+  vector.store %41, %output_view[4] : vector<4xf16>, view<128xf16>
+  %42 = vector.fptrunc %10 : vector<4xf32> to vector<4xf16>
+  vector.store %42, %output_view[8] : vector<4xf16>, view<128xf16>
+  %43 = vector.fptrunc %11 : vector<4xf32> to vector<4xf16>
+  vector.store %43, %output_view[12] : vector<4xf16>, view<128xf16>
+  %44 = vector.fptrunc %12 : vector<4xf32> to vector<4xf16>
+  vector.store %44, %output_view[16] : vector<4xf16>, view<128xf16>
+  %45 = vector.fptrunc %13 : vector<4xf32> to vector<4xf16>
+  vector.store %45, %output_view[20] : vector<4xf16>, view<128xf16>
+  %46 = vector.fptrunc %14 : vector<4xf32> to vector<4xf16>
+  vector.store %46, %output_view[24] : vector<4xf16>, view<128xf16>
+  %47 = vector.fptrunc %15 : vector<4xf32> to vector<4xf16>
+  vector.store %47, %output_view[28] : vector<4xf16>, view<128xf16>
+  %48 = vector.fptrunc %16 : vector<4xf32> to vector<4xf16>
+  vector.store %48, %output_view[32] : vector<4xf16>, view<128xf16>
+  %49 = vector.fptrunc %17 : vector<4xf32> to vector<4xf16>
+  vector.store %49, %output_view[36] : vector<4xf16>, view<128xf16>
+  %50 = vector.fptrunc %18 : vector<4xf32> to vector<4xf16>
+  vector.store %50, %output_view[40] : vector<4xf16>, view<128xf16>
+  %51 = vector.fptrunc %19 : vector<4xf32> to vector<4xf16>
+  vector.store %51, %output_view[44] : vector<4xf16>, view<128xf16>
+  %52 = vector.fptrunc %20 : vector<4xf32> to vector<4xf16>
+  vector.store %52, %output_view[48] : vector<4xf16>, view<128xf16>
+  %53 = vector.fptrunc %21 : vector<4xf32> to vector<4xf16>
+  vector.store %53, %output_view[52] : vector<4xf16>, view<128xf16>
+  %54 = vector.fptrunc %22 : vector<4xf32> to vector<4xf16>
+  vector.store %54, %output_view[56] : vector<4xf16>, view<128xf16>
+  %55 = vector.fptrunc %23 : vector<4xf32> to vector<4xf16>
+  vector.store %55, %output_view[60] : vector<4xf16>, view<128xf16>
+  %56 = vector.fptrunc %24 : vector<4xf32> to vector<4xf16>
+  vector.store %56, %output_view[64] : vector<4xf16>, view<128xf16>
+  %57 = vector.fptrunc %25 : vector<4xf32> to vector<4xf16>
+  vector.store %57, %output_view[68] : vector<4xf16>, view<128xf16>
+  %58 = vector.fptrunc %26 : vector<4xf32> to vector<4xf16>
+  vector.store %58, %output_view[72] : vector<4xf16>, view<128xf16>
+  %59 = vector.fptrunc %27 : vector<4xf32> to vector<4xf16>
+  vector.store %59, %output_view[76] : vector<4xf16>, view<128xf16>
+  %60 = vector.fptrunc %28 : vector<4xf32> to vector<4xf16>
+  vector.store %60, %output_view[80] : vector<4xf16>, view<128xf16>
+  %61 = vector.fptrunc %29 : vector<4xf32> to vector<4xf16>
+  vector.store %61, %output_view[84] : vector<4xf16>, view<128xf16>
+  %62 = vector.fptrunc %30 : vector<4xf32> to vector<4xf16>
+  vector.store %62, %output_view[88] : vector<4xf16>, view<128xf16>
+  %63 = vector.fptrunc %31 : vector<4xf32> to vector<4xf16>
+  vector.store %63, %output_view[92] : vector<4xf16>, view<128xf16>
+  %64 = vector.fptrunc %32 : vector<4xf32> to vector<4xf16>
+  vector.store %64, %output_view[96] : vector<4xf16>, view<128xf16>
+  %65 = vector.fptrunc %33 : vector<4xf32> to vector<4xf16>
+  vector.store %65, %output_view[100] : vector<4xf16>, view<128xf16>
+  %66 = vector.fptrunc %34 : vector<4xf32> to vector<4xf16>
+  vector.store %66, %output_view[104] : vector<4xf16>, view<128xf16>
+  %67 = vector.fptrunc %35 : vector<4xf32> to vector<4xf16>
+  vector.store %67, %output_view[108] : vector<4xf16>, view<128xf16>
+  %68 = vector.fptrunc %36 : vector<4xf32> to vector<4xf16>
+  vector.store %68, %output_view[112] : vector<4xf16>, view<128xf16>
+  %69 = vector.fptrunc %37 : vector<4xf32> to vector<4xf16>
+  vector.store %69, %output_view[116] : vector<4xf16>, view<128xf16>
+  %70 = vector.fptrunc %38 : vector<4xf32> to vector<4xf16>
+  vector.store %70, %output_view[120] : vector<4xf16>, view<128xf16>
+  %71 = vector.fptrunc %39 : vector<4xf32> to vector<4xf16>
+  vector.store %71, %output_view[124] : vector<4xf16>, view<128xf16>
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @reduction_snapshot() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<128xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %loaded = vector.load %input_view[0] : view<128xi32> -> vector<128xi32>
+  %replacement = scalar.constant 99 : i32
+  view.store %replacement, %input_view[0] : i32, view<128xi32>
+  %initial = scalar.constant 17 : i32
+  %sum = vector.reduce<addi> %loaded, %initial : vector<128xi32>, i32
+  view.store %sum, %output_view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @reduction_snapshot() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<128xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %10 = vector.load %input_view[0] : view<128xi32> -> vector<4xi32>
+  %11 = vector.load %input_view[4] : view<128xi32> -> vector<4xi32>
+  %12 = vector.load %input_view[8] : view<128xi32> -> vector<4xi32>
+  %13 = vector.load %input_view[12] : view<128xi32> -> vector<4xi32>
+  %14 = vector.load %input_view[16] : view<128xi32> -> vector<4xi32>
+  %15 = vector.load %input_view[20] : view<128xi32> -> vector<4xi32>
+  %16 = vector.load %input_view[24] : view<128xi32> -> vector<4xi32>
+  %17 = vector.load %input_view[28] : view<128xi32> -> vector<4xi32>
+  %18 = vector.load %input_view[32] : view<128xi32> -> vector<4xi32>
+  %19 = vector.load %input_view[36] : view<128xi32> -> vector<4xi32>
+  %20 = vector.load %input_view[40] : view<128xi32> -> vector<4xi32>
+  %21 = vector.load %input_view[44] : view<128xi32> -> vector<4xi32>
+  %22 = vector.load %input_view[48] : view<128xi32> -> vector<4xi32>
+  %23 = vector.load %input_view[52] : view<128xi32> -> vector<4xi32>
+  %24 = vector.load %input_view[56] : view<128xi32> -> vector<4xi32>
+  %25 = vector.load %input_view[60] : view<128xi32> -> vector<4xi32>
+  %26 = vector.load %input_view[64] : view<128xi32> -> vector<4xi32>
+  %27 = vector.load %input_view[68] : view<128xi32> -> vector<4xi32>
+  %28 = vector.load %input_view[72] : view<128xi32> -> vector<4xi32>
+  %29 = vector.load %input_view[76] : view<128xi32> -> vector<4xi32>
+  %30 = vector.load %input_view[80] : view<128xi32> -> vector<4xi32>
+  %31 = vector.load %input_view[84] : view<128xi32> -> vector<4xi32>
+  %32 = vector.load %input_view[88] : view<128xi32> -> vector<4xi32>
+  %33 = vector.load %input_view[92] : view<128xi32> -> vector<4xi32>
+  %34 = vector.load %input_view[96] : view<128xi32> -> vector<4xi32>
+  %35 = vector.load %input_view[100] : view<128xi32> -> vector<4xi32>
+  %36 = vector.load %input_view[104] : view<128xi32> -> vector<4xi32>
+  %37 = vector.load %input_view[108] : view<128xi32> -> vector<4xi32>
+  %38 = vector.load %input_view[112] : view<128xi32> -> vector<4xi32>
+  %39 = vector.load %input_view[116] : view<128xi32> -> vector<4xi32>
+  %40 = vector.load %input_view[120] : view<128xi32> -> vector<4xi32>
+  %41 = vector.load %input_view[124] : view<128xi32> -> vector<4xi32>
+  %replacement = scalar.constant 99 : i32
+  view.store %replacement, %input_view[0] : i32, view<128xi32>
+  %initial = scalar.constant 17 : i32
+  %42 = vector.reduce<addi> %10, %initial : vector<4xi32>, i32
+  %43 = vector.reduce<addi> %11, %42 : vector<4xi32>, i32
+  %44 = vector.reduce<addi> %12, %43 : vector<4xi32>, i32
+  %45 = vector.reduce<addi> %13, %44 : vector<4xi32>, i32
+  %46 = vector.reduce<addi> %14, %45 : vector<4xi32>, i32
+  %47 = vector.reduce<addi> %15, %46 : vector<4xi32>, i32
+  %48 = vector.reduce<addi> %16, %47 : vector<4xi32>, i32
+  %49 = vector.reduce<addi> %17, %48 : vector<4xi32>, i32
+  %50 = vector.reduce<addi> %18, %49 : vector<4xi32>, i32
+  %51 = vector.reduce<addi> %19, %50 : vector<4xi32>, i32
+  %52 = vector.reduce<addi> %20, %51 : vector<4xi32>, i32
+  %53 = vector.reduce<addi> %21, %52 : vector<4xi32>, i32
+  %54 = vector.reduce<addi> %22, %53 : vector<4xi32>, i32
+  %55 = vector.reduce<addi> %23, %54 : vector<4xi32>, i32
+  %56 = vector.reduce<addi> %24, %55 : vector<4xi32>, i32
+  %57 = vector.reduce<addi> %25, %56 : vector<4xi32>, i32
+  %58 = vector.reduce<addi> %26, %57 : vector<4xi32>, i32
+  %59 = vector.reduce<addi> %27, %58 : vector<4xi32>, i32
+  %60 = vector.reduce<addi> %28, %59 : vector<4xi32>, i32
+  %61 = vector.reduce<addi> %29, %60 : vector<4xi32>, i32
+  %62 = vector.reduce<addi> %30, %61 : vector<4xi32>, i32
+  %63 = vector.reduce<addi> %31, %62 : vector<4xi32>, i32
+  %64 = vector.reduce<addi> %32, %63 : vector<4xi32>, i32
+  %65 = vector.reduce<addi> %33, %64 : vector<4xi32>, i32
+  %66 = vector.reduce<addi> %34, %65 : vector<4xi32>, i32
+  %67 = vector.reduce<addi> %35, %66 : vector<4xi32>, i32
+  %68 = vector.reduce<addi> %36, %67 : vector<4xi32>, i32
+  %69 = vector.reduce<addi> %37, %68 : vector<4xi32>, i32
+  %70 = vector.reduce<addi> %38, %69 : vector<4xi32>, i32
+  %71 = vector.reduce<addi> %39, %70 : vector<4xi32>, i32
+  %72 = vector.reduce<addi> %40, %71 : vector<4xi32>, i32
+  %sum = vector.reduce<addi> %41, %72 : vector<4xi32>, i32
+  view.store %sum, %output_view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @volatile_reduction() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<128xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %loaded = vector.load<volatile> %input_view[0] : view<128xi32> -> vector<128xi32>
+  %replacement = scalar.constant 99 : i32
+  view.store %replacement, %input_view[0] : i32, view<128xi32>
+  %initial = scalar.constant 17 : i32
+  %sum = vector.reduce<addi> %loaded, %initial : vector<128xi32>, i32
+  view.store %sum, %output_view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @volatile_reduction() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<128xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %10 = vector.load<volatile> %input_view[0] : view<128xi32> -> vector<4xi32>
+  %11 = vector.load<volatile> %input_view[4] : view<128xi32> -> vector<4xi32>
+  %12 = vector.load<volatile> %input_view[8] : view<128xi32> -> vector<4xi32>
+  %13 = vector.load<volatile> %input_view[12] : view<128xi32> -> vector<4xi32>
+  %14 = vector.load<volatile> %input_view[16] : view<128xi32> -> vector<4xi32>
+  %15 = vector.load<volatile> %input_view[20] : view<128xi32> -> vector<4xi32>
+  %16 = vector.load<volatile> %input_view[24] : view<128xi32> -> vector<4xi32>
+  %17 = vector.load<volatile> %input_view[28] : view<128xi32> -> vector<4xi32>
+  %18 = vector.load<volatile> %input_view[32] : view<128xi32> -> vector<4xi32>
+  %19 = vector.load<volatile> %input_view[36] : view<128xi32> -> vector<4xi32>
+  %20 = vector.load<volatile> %input_view[40] : view<128xi32> -> vector<4xi32>
+  %21 = vector.load<volatile> %input_view[44] : view<128xi32> -> vector<4xi32>
+  %22 = vector.load<volatile> %input_view[48] : view<128xi32> -> vector<4xi32>
+  %23 = vector.load<volatile> %input_view[52] : view<128xi32> -> vector<4xi32>
+  %24 = vector.load<volatile> %input_view[56] : view<128xi32> -> vector<4xi32>
+  %25 = vector.load<volatile> %input_view[60] : view<128xi32> -> vector<4xi32>
+  %26 = vector.load<volatile> %input_view[64] : view<128xi32> -> vector<4xi32>
+  %27 = vector.load<volatile> %input_view[68] : view<128xi32> -> vector<4xi32>
+  %28 = vector.load<volatile> %input_view[72] : view<128xi32> -> vector<4xi32>
+  %29 = vector.load<volatile> %input_view[76] : view<128xi32> -> vector<4xi32>
+  %30 = vector.load<volatile> %input_view[80] : view<128xi32> -> vector<4xi32>
+  %31 = vector.load<volatile> %input_view[84] : view<128xi32> -> vector<4xi32>
+  %32 = vector.load<volatile> %input_view[88] : view<128xi32> -> vector<4xi32>
+  %33 = vector.load<volatile> %input_view[92] : view<128xi32> -> vector<4xi32>
+  %34 = vector.load<volatile> %input_view[96] : view<128xi32> -> vector<4xi32>
+  %35 = vector.load<volatile> %input_view[100] : view<128xi32> -> vector<4xi32>
+  %36 = vector.load<volatile> %input_view[104] : view<128xi32> -> vector<4xi32>
+  %37 = vector.load<volatile> %input_view[108] : view<128xi32> -> vector<4xi32>
+  %38 = vector.load<volatile> %input_view[112] : view<128xi32> -> vector<4xi32>
+  %39 = vector.load<volatile> %input_view[116] : view<128xi32> -> vector<4xi32>
+  %40 = vector.load<volatile> %input_view[120] : view<128xi32> -> vector<4xi32>
+  %41 = vector.load<volatile> %input_view[124] : view<128xi32> -> vector<4xi32>
+  %replacement = scalar.constant 99 : i32
+  view.store %replacement, %input_view[0] : i32, view<128xi32>
+  %initial = scalar.constant 17 : i32
+  %42 = vector.reduce<addi> %10, %initial : vector<4xi32>, i32
+  %43 = vector.reduce<addi> %11, %42 : vector<4xi32>, i32
+  %44 = vector.reduce<addi> %12, %43 : vector<4xi32>, i32
+  %45 = vector.reduce<addi> %13, %44 : vector<4xi32>, i32
+  %46 = vector.reduce<addi> %14, %45 : vector<4xi32>, i32
+  %47 = vector.reduce<addi> %15, %46 : vector<4xi32>, i32
+  %48 = vector.reduce<addi> %16, %47 : vector<4xi32>, i32
+  %49 = vector.reduce<addi> %17, %48 : vector<4xi32>, i32
+  %50 = vector.reduce<addi> %18, %49 : vector<4xi32>, i32
+  %51 = vector.reduce<addi> %19, %50 : vector<4xi32>, i32
+  %52 = vector.reduce<addi> %20, %51 : vector<4xi32>, i32
+  %53 = vector.reduce<addi> %21, %52 : vector<4xi32>, i32
+  %54 = vector.reduce<addi> %22, %53 : vector<4xi32>, i32
+  %55 = vector.reduce<addi> %23, %54 : vector<4xi32>, i32
+  %56 = vector.reduce<addi> %24, %55 : vector<4xi32>, i32
+  %57 = vector.reduce<addi> %25, %56 : vector<4xi32>, i32
+  %58 = vector.reduce<addi> %26, %57 : vector<4xi32>, i32
+  %59 = vector.reduce<addi> %27, %58 : vector<4xi32>, i32
+  %60 = vector.reduce<addi> %28, %59 : vector<4xi32>, i32
+  %61 = vector.reduce<addi> %29, %60 : vector<4xi32>, i32
+  %62 = vector.reduce<addi> %30, %61 : vector<4xi32>, i32
+  %63 = vector.reduce<addi> %31, %62 : vector<4xi32>, i32
+  %64 = vector.reduce<addi> %32, %63 : vector<4xi32>, i32
+  %65 = vector.reduce<addi> %33, %64 : vector<4xi32>, i32
+  %66 = vector.reduce<addi> %34, %65 : vector<4xi32>, i32
+  %67 = vector.reduce<addi> %35, %66 : vector<4xi32>, i32
+  %68 = vector.reduce<addi> %36, %67 : vector<4xi32>, i32
+  %69 = vector.reduce<addi> %37, %68 : vector<4xi32>, i32
+  %70 = vector.reduce<addi> %38, %69 : vector<4xi32>, i32
+  %71 = vector.reduce<addi> %39, %70 : vector<4xi32>, i32
+  %72 = vector.reduce<addi> %40, %71 : vector<4xi32>, i32
+  %sum = vector.reduce<addi> %41, %72 : vector<4xi32>, i32
+  view.store %sum, %output_view[0] : i32, view<1xi32>
+  kernel.return
+}
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @shared_volatile_tail() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer, %saved: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<130xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<130xf16>
+  %loaded = vector.load<volatile> %input_view[0] : view<130xf32> -> vector<130xf32>
+  %replacement = scalar.constant 99.0 : f32
+  view.store %replacement, %input_view[0] : f32, view<130xf32>
+  %converted = vector.fptrunc %loaded : vector<130xf32> to vector<130xf16>
+  vector.store %converted, %output_view[0] : vector<130xf16>, view<130xf16>
+  %saved_view = buffer.view %saved[%base] : buffer -> view<130xf32>
+  vector.store %loaded, %saved_view[0] : vector<130xf32>, view<130xf32>
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @shared_volatile_tail() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer, %saved: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<130xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<130xf16>
+  %11 = vector.load<volatile> %input_view[0] : view<130xf32> -> vector<4xf32>
+  %12 = vector.load<volatile> %input_view[4] : view<130xf32> -> vector<4xf32>
+  %13 = vector.load<volatile> %input_view[8] : view<130xf32> -> vector<4xf32>
+  %14 = vector.load<volatile> %input_view[12] : view<130xf32> -> vector<4xf32>
+  %15 = vector.load<volatile> %input_view[16] : view<130xf32> -> vector<4xf32>
+  %16 = vector.load<volatile> %input_view[20] : view<130xf32> -> vector<4xf32>
+  %17 = vector.load<volatile> %input_view[24] : view<130xf32> -> vector<4xf32>
+  %18 = vector.load<volatile> %input_view[28] : view<130xf32> -> vector<4xf32>
+  %19 = vector.load<volatile> %input_view[32] : view<130xf32> -> vector<4xf32>
+  %20 = vector.load<volatile> %input_view[36] : view<130xf32> -> vector<4xf32>
+  %21 = vector.load<volatile> %input_view[40] : view<130xf32> -> vector<4xf32>
+  %22 = vector.load<volatile> %input_view[44] : view<130xf32> -> vector<4xf32>
+  %23 = vector.load<volatile> %input_view[48] : view<130xf32> -> vector<4xf32>
+  %24 = vector.load<volatile> %input_view[52] : view<130xf32> -> vector<4xf32>
+  %25 = vector.load<volatile> %input_view[56] : view<130xf32> -> vector<4xf32>
+  %26 = vector.load<volatile> %input_view[60] : view<130xf32> -> vector<4xf32>
+  %27 = vector.load<volatile> %input_view[64] : view<130xf32> -> vector<4xf32>
+  %28 = vector.load<volatile> %input_view[68] : view<130xf32> -> vector<4xf32>
+  %29 = vector.load<volatile> %input_view[72] : view<130xf32> -> vector<4xf32>
+  %30 = vector.load<volatile> %input_view[76] : view<130xf32> -> vector<4xf32>
+  %31 = vector.load<volatile> %input_view[80] : view<130xf32> -> vector<4xf32>
+  %32 = vector.load<volatile> %input_view[84] : view<130xf32> -> vector<4xf32>
+  %33 = vector.load<volatile> %input_view[88] : view<130xf32> -> vector<4xf32>
+  %34 = vector.load<volatile> %input_view[92] : view<130xf32> -> vector<4xf32>
+  %35 = vector.load<volatile> %input_view[96] : view<130xf32> -> vector<4xf32>
+  %36 = vector.load<volatile> %input_view[100] : view<130xf32> -> vector<4xf32>
+  %37 = vector.load<volatile> %input_view[104] : view<130xf32> -> vector<4xf32>
+  %38 = vector.load<volatile> %input_view[108] : view<130xf32> -> vector<4xf32>
+  %39 = vector.load<volatile> %input_view[112] : view<130xf32> -> vector<4xf32>
+  %40 = vector.load<volatile> %input_view[116] : view<130xf32> -> vector<4xf32>
+  %41 = vector.load<volatile> %input_view[120] : view<130xf32> -> vector<4xf32>
+  %42 = vector.load<volatile> %input_view[124] : view<130xf32> -> vector<4xf32>
+  %43 = vector.load<volatile> %input_view[128] : view<130xf32> -> vector<2xf32>
+  %replacement = scalar.constant 99.0 : f32
+  view.store %replacement, %input_view[0] : f32, view<130xf32>
+  %45 = vector.fptrunc %11 : vector<4xf32> to vector<4xf16>
+  vector.store %45, %output_view[0] : vector<4xf16>, view<130xf16>
+  %46 = vector.fptrunc %12 : vector<4xf32> to vector<4xf16>
+  vector.store %46, %output_view[4] : vector<4xf16>, view<130xf16>
+  %47 = vector.fptrunc %13 : vector<4xf32> to vector<4xf16>
+  vector.store %47, %output_view[8] : vector<4xf16>, view<130xf16>
+  %48 = vector.fptrunc %14 : vector<4xf32> to vector<4xf16>
+  vector.store %48, %output_view[12] : vector<4xf16>, view<130xf16>
+  %49 = vector.fptrunc %15 : vector<4xf32> to vector<4xf16>
+  vector.store %49, %output_view[16] : vector<4xf16>, view<130xf16>
+  %50 = vector.fptrunc %16 : vector<4xf32> to vector<4xf16>
+  vector.store %50, %output_view[20] : vector<4xf16>, view<130xf16>
+  %51 = vector.fptrunc %17 : vector<4xf32> to vector<4xf16>
+  vector.store %51, %output_view[24] : vector<4xf16>, view<130xf16>
+  %52 = vector.fptrunc %18 : vector<4xf32> to vector<4xf16>
+  vector.store %52, %output_view[28] : vector<4xf16>, view<130xf16>
+  %53 = vector.fptrunc %19 : vector<4xf32> to vector<4xf16>
+  vector.store %53, %output_view[32] : vector<4xf16>, view<130xf16>
+  %54 = vector.fptrunc %20 : vector<4xf32> to vector<4xf16>
+  vector.store %54, %output_view[36] : vector<4xf16>, view<130xf16>
+  %55 = vector.fptrunc %21 : vector<4xf32> to vector<4xf16>
+  vector.store %55, %output_view[40] : vector<4xf16>, view<130xf16>
+  %56 = vector.fptrunc %22 : vector<4xf32> to vector<4xf16>
+  vector.store %56, %output_view[44] : vector<4xf16>, view<130xf16>
+  %57 = vector.fptrunc %23 : vector<4xf32> to vector<4xf16>
+  vector.store %57, %output_view[48] : vector<4xf16>, view<130xf16>
+  %58 = vector.fptrunc %24 : vector<4xf32> to vector<4xf16>
+  vector.store %58, %output_view[52] : vector<4xf16>, view<130xf16>
+  %59 = vector.fptrunc %25 : vector<4xf32> to vector<4xf16>
+  vector.store %59, %output_view[56] : vector<4xf16>, view<130xf16>
+  %60 = vector.fptrunc %26 : vector<4xf32> to vector<4xf16>
+  vector.store %60, %output_view[60] : vector<4xf16>, view<130xf16>
+  %61 = vector.fptrunc %27 : vector<4xf32> to vector<4xf16>
+  vector.store %61, %output_view[64] : vector<4xf16>, view<130xf16>
+  %62 = vector.fptrunc %28 : vector<4xf32> to vector<4xf16>
+  vector.store %62, %output_view[68] : vector<4xf16>, view<130xf16>
+  %63 = vector.fptrunc %29 : vector<4xf32> to vector<4xf16>
+  vector.store %63, %output_view[72] : vector<4xf16>, view<130xf16>
+  %64 = vector.fptrunc %30 : vector<4xf32> to vector<4xf16>
+  vector.store %64, %output_view[76] : vector<4xf16>, view<130xf16>
+  %65 = vector.fptrunc %31 : vector<4xf32> to vector<4xf16>
+  vector.store %65, %output_view[80] : vector<4xf16>, view<130xf16>
+  %66 = vector.fptrunc %32 : vector<4xf32> to vector<4xf16>
+  vector.store %66, %output_view[84] : vector<4xf16>, view<130xf16>
+  %67 = vector.fptrunc %33 : vector<4xf32> to vector<4xf16>
+  vector.store %67, %output_view[88] : vector<4xf16>, view<130xf16>
+  %68 = vector.fptrunc %34 : vector<4xf32> to vector<4xf16>
+  vector.store %68, %output_view[92] : vector<4xf16>, view<130xf16>
+  %69 = vector.fptrunc %35 : vector<4xf32> to vector<4xf16>
+  vector.store %69, %output_view[96] : vector<4xf16>, view<130xf16>
+  %70 = vector.fptrunc %36 : vector<4xf32> to vector<4xf16>
+  vector.store %70, %output_view[100] : vector<4xf16>, view<130xf16>
+  %71 = vector.fptrunc %37 : vector<4xf32> to vector<4xf16>
+  vector.store %71, %output_view[104] : vector<4xf16>, view<130xf16>
+  %72 = vector.fptrunc %38 : vector<4xf32> to vector<4xf16>
+  vector.store %72, %output_view[108] : vector<4xf16>, view<130xf16>
+  %73 = vector.fptrunc %39 : vector<4xf32> to vector<4xf16>
+  vector.store %73, %output_view[112] : vector<4xf16>, view<130xf16>
+  %74 = vector.fptrunc %40 : vector<4xf32> to vector<4xf16>
+  vector.store %74, %output_view[116] : vector<4xf16>, view<130xf16>
+  %75 = vector.fptrunc %41 : vector<4xf32> to vector<4xf16>
+  vector.store %75, %output_view[120] : vector<4xf16>, view<130xf16>
+  %76 = vector.fptrunc %42 : vector<4xf32> to vector<4xf16>
+  vector.store %76, %output_view[124] : vector<4xf16>, view<130xf16>
+  %77 = vector.fptrunc %43 : vector<2xf32> to vector<2xf16>
+  vector.store %77, %output_view[128] : vector<2xf16>, view<130xf16>
+  %saved_view = buffer.view %saved[%base] : buffer -> view<130xf32>
+  vector.store %11, %saved_view[0] : vector<4xf32>, view<130xf32>
+  vector.store %12, %saved_view[4] : vector<4xf32>, view<130xf32>
+  vector.store %13, %saved_view[8] : vector<4xf32>, view<130xf32>
+  vector.store %14, %saved_view[12] : vector<4xf32>, view<130xf32>
+  vector.store %15, %saved_view[16] : vector<4xf32>, view<130xf32>
+  vector.store %16, %saved_view[20] : vector<4xf32>, view<130xf32>
+  vector.store %17, %saved_view[24] : vector<4xf32>, view<130xf32>
+  vector.store %18, %saved_view[28] : vector<4xf32>, view<130xf32>
+  vector.store %19, %saved_view[32] : vector<4xf32>, view<130xf32>
+  vector.store %20, %saved_view[36] : vector<4xf32>, view<130xf32>
+  vector.store %21, %saved_view[40] : vector<4xf32>, view<130xf32>
+  vector.store %22, %saved_view[44] : vector<4xf32>, view<130xf32>
+  vector.store %23, %saved_view[48] : vector<4xf32>, view<130xf32>
+  vector.store %24, %saved_view[52] : vector<4xf32>, view<130xf32>
+  vector.store %25, %saved_view[56] : vector<4xf32>, view<130xf32>
+  vector.store %26, %saved_view[60] : vector<4xf32>, view<130xf32>
+  vector.store %27, %saved_view[64] : vector<4xf32>, view<130xf32>
+  vector.store %28, %saved_view[68] : vector<4xf32>, view<130xf32>
+  vector.store %29, %saved_view[72] : vector<4xf32>, view<130xf32>
+  vector.store %30, %saved_view[76] : vector<4xf32>, view<130xf32>
+  vector.store %31, %saved_view[80] : vector<4xf32>, view<130xf32>
+  vector.store %32, %saved_view[84] : vector<4xf32>, view<130xf32>
+  vector.store %33, %saved_view[88] : vector<4xf32>, view<130xf32>
+  vector.store %34, %saved_view[92] : vector<4xf32>, view<130xf32>
+  vector.store %35, %saved_view[96] : vector<4xf32>, view<130xf32>
+  vector.store %36, %saved_view[100] : vector<4xf32>, view<130xf32>
+  vector.store %37, %saved_view[104] : vector<4xf32>, view<130xf32>
+  vector.store %38, %saved_view[108] : vector<4xf32>, view<130xf32>
+  vector.store %39, %saved_view[112] : vector<4xf32>, view<130xf32>
+  vector.store %40, %saved_view[116] : vector<4xf32>, view<130xf32>
+  vector.store %41, %saved_view[120] : vector<4xf32>, view<130xf32>
+  vector.store %42, %saved_view[124] : vector<4xf32>, view<130xf32>
+  vector.store %43, %saved_view[128] : vector<2xf32>, view<130xf32>
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @shared_widening() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer, %saved: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<128xf16>
+  %output_view = buffer.view %output[%base] : buffer -> view<128xf32>
+  %loaded = vector.load<volatile> %input_view[0] : view<128xf16> -> vector<128xf16>
+  %replacement = scalar.constant 99.0 : f16
+  view.store %replacement, %input_view[0] : f16, view<128xf16>
+  %converted = vector.extf %loaded : vector<128xf16> to vector<128xf32>
+  vector.store %converted, %output_view[0] : vector<128xf32>, view<128xf32>
+  %saved_view = buffer.view %saved[%base] : buffer -> view<128xf16>
+  vector.store %loaded, %saved_view[0] : vector<128xf16>, view<128xf16>
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @shared_widening() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer, %saved: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<128xf16>
+  %output_view = buffer.view %output[%base] : buffer -> view<128xf32>
+  %11 = vector.load<volatile> %input_view[0] : view<128xf16> -> vector<8xf16>
+  %12 = vector.load<volatile> %input_view[8] : view<128xf16> -> vector<8xf16>
+  %13 = vector.load<volatile> %input_view[16] : view<128xf16> -> vector<8xf16>
+  %14 = vector.load<volatile> %input_view[24] : view<128xf16> -> vector<8xf16>
+  %15 = vector.load<volatile> %input_view[32] : view<128xf16> -> vector<8xf16>
+  %16 = vector.load<volatile> %input_view[40] : view<128xf16> -> vector<8xf16>
+  %17 = vector.load<volatile> %input_view[48] : view<128xf16> -> vector<8xf16>
+  %18 = vector.load<volatile> %input_view[56] : view<128xf16> -> vector<8xf16>
+  %19 = vector.load<volatile> %input_view[64] : view<128xf16> -> vector<8xf16>
+  %20 = vector.load<volatile> %input_view[72] : view<128xf16> -> vector<8xf16>
+  %21 = vector.load<volatile> %input_view[80] : view<128xf16> -> vector<8xf16>
+  %22 = vector.load<volatile> %input_view[88] : view<128xf16> -> vector<8xf16>
+  %23 = vector.load<volatile> %input_view[96] : view<128xf16> -> vector<8xf16>
+  %24 = vector.load<volatile> %input_view[104] : view<128xf16> -> vector<8xf16>
+  %25 = vector.load<volatile> %input_view[112] : view<128xf16> -> vector<8xf16>
+  %26 = vector.load<volatile> %input_view[120] : view<128xf16> -> vector<8xf16>
+  %28 = vector.slice %11[0] : vector<8xf16> -> vector<4xf16>
+  %29 = vector.slice %11[4] : vector<8xf16> -> vector<4xf16>
+  %30 = vector.slice %12[0] : vector<8xf16> -> vector<4xf16>
+  %31 = vector.slice %12[4] : vector<8xf16> -> vector<4xf16>
+  %32 = vector.slice %13[0] : vector<8xf16> -> vector<4xf16>
+  %33 = vector.slice %13[4] : vector<8xf16> -> vector<4xf16>
+  %34 = vector.slice %14[0] : vector<8xf16> -> vector<4xf16>
+  %35 = vector.slice %14[4] : vector<8xf16> -> vector<4xf16>
+  %36 = vector.slice %15[0] : vector<8xf16> -> vector<4xf16>
+  %37 = vector.slice %15[4] : vector<8xf16> -> vector<4xf16>
+  %38 = vector.slice %16[0] : vector<8xf16> -> vector<4xf16>
+  %39 = vector.slice %16[4] : vector<8xf16> -> vector<4xf16>
+  %40 = vector.slice %17[0] : vector<8xf16> -> vector<4xf16>
+  %41 = vector.slice %17[4] : vector<8xf16> -> vector<4xf16>
+  %42 = vector.slice %18[0] : vector<8xf16> -> vector<4xf16>
+  %43 = vector.slice %18[4] : vector<8xf16> -> vector<4xf16>
+  %44 = vector.slice %19[0] : vector<8xf16> -> vector<4xf16>
+  %45 = vector.slice %19[4] : vector<8xf16> -> vector<4xf16>
+  %46 = vector.slice %20[0] : vector<8xf16> -> vector<4xf16>
+  %47 = vector.slice %20[4] : vector<8xf16> -> vector<4xf16>
+  %48 = vector.slice %21[0] : vector<8xf16> -> vector<4xf16>
+  %49 = vector.slice %21[4] : vector<8xf16> -> vector<4xf16>
+  %50 = vector.slice %22[0] : vector<8xf16> -> vector<4xf16>
+  %51 = vector.slice %22[4] : vector<8xf16> -> vector<4xf16>
+  %52 = vector.slice %23[0] : vector<8xf16> -> vector<4xf16>
+  %53 = vector.slice %23[4] : vector<8xf16> -> vector<4xf16>
+  %54 = vector.slice %24[0] : vector<8xf16> -> vector<4xf16>
+  %55 = vector.slice %24[4] : vector<8xf16> -> vector<4xf16>
+  %56 = vector.slice %25[0] : vector<8xf16> -> vector<4xf16>
+  %57 = vector.slice %25[4] : vector<8xf16> -> vector<4xf16>
+  %58 = vector.slice %26[0] : vector<8xf16> -> vector<4xf16>
+  %59 = vector.slice %26[4] : vector<8xf16> -> vector<4xf16>
+  %replacement = scalar.constant 99.0 : f16
+  view.store %replacement, %input_view[0] : f16, view<128xf16>
+  %60 = vector.extf %28 : vector<4xf16> to vector<4xf32>
+  vector.store %60, %output_view[0] : vector<4xf32>, view<128xf32>
+  %61 = vector.extf %29 : vector<4xf16> to vector<4xf32>
+  vector.store %61, %output_view[4] : vector<4xf32>, view<128xf32>
+  %62 = vector.extf %30 : vector<4xf16> to vector<4xf32>
+  vector.store %62, %output_view[8] : vector<4xf32>, view<128xf32>
+  %63 = vector.extf %31 : vector<4xf16> to vector<4xf32>
+  vector.store %63, %output_view[12] : vector<4xf32>, view<128xf32>
+  %64 = vector.extf %32 : vector<4xf16> to vector<4xf32>
+  vector.store %64, %output_view[16] : vector<4xf32>, view<128xf32>
+  %65 = vector.extf %33 : vector<4xf16> to vector<4xf32>
+  vector.store %65, %output_view[20] : vector<4xf32>, view<128xf32>
+  %66 = vector.extf %34 : vector<4xf16> to vector<4xf32>
+  vector.store %66, %output_view[24] : vector<4xf32>, view<128xf32>
+  %67 = vector.extf %35 : vector<4xf16> to vector<4xf32>
+  vector.store %67, %output_view[28] : vector<4xf32>, view<128xf32>
+  %68 = vector.extf %36 : vector<4xf16> to vector<4xf32>
+  vector.store %68, %output_view[32] : vector<4xf32>, view<128xf32>
+  %69 = vector.extf %37 : vector<4xf16> to vector<4xf32>
+  vector.store %69, %output_view[36] : vector<4xf32>, view<128xf32>
+  %70 = vector.extf %38 : vector<4xf16> to vector<4xf32>
+  vector.store %70, %output_view[40] : vector<4xf32>, view<128xf32>
+  %71 = vector.extf %39 : vector<4xf16> to vector<4xf32>
+  vector.store %71, %output_view[44] : vector<4xf32>, view<128xf32>
+  %72 = vector.extf %40 : vector<4xf16> to vector<4xf32>
+  vector.store %72, %output_view[48] : vector<4xf32>, view<128xf32>
+  %73 = vector.extf %41 : vector<4xf16> to vector<4xf32>
+  vector.store %73, %output_view[52] : vector<4xf32>, view<128xf32>
+  %74 = vector.extf %42 : vector<4xf16> to vector<4xf32>
+  vector.store %74, %output_view[56] : vector<4xf32>, view<128xf32>
+  %75 = vector.extf %43 : vector<4xf16> to vector<4xf32>
+  vector.store %75, %output_view[60] : vector<4xf32>, view<128xf32>
+  %76 = vector.extf %44 : vector<4xf16> to vector<4xf32>
+  vector.store %76, %output_view[64] : vector<4xf32>, view<128xf32>
+  %77 = vector.extf %45 : vector<4xf16> to vector<4xf32>
+  vector.store %77, %output_view[68] : vector<4xf32>, view<128xf32>
+  %78 = vector.extf %46 : vector<4xf16> to vector<4xf32>
+  vector.store %78, %output_view[72] : vector<4xf32>, view<128xf32>
+  %79 = vector.extf %47 : vector<4xf16> to vector<4xf32>
+  vector.store %79, %output_view[76] : vector<4xf32>, view<128xf32>
+  %80 = vector.extf %48 : vector<4xf16> to vector<4xf32>
+  vector.store %80, %output_view[80] : vector<4xf32>, view<128xf32>
+  %81 = vector.extf %49 : vector<4xf16> to vector<4xf32>
+  vector.store %81, %output_view[84] : vector<4xf32>, view<128xf32>
+  %82 = vector.extf %50 : vector<4xf16> to vector<4xf32>
+  vector.store %82, %output_view[88] : vector<4xf32>, view<128xf32>
+  %83 = vector.extf %51 : vector<4xf16> to vector<4xf32>
+  vector.store %83, %output_view[92] : vector<4xf32>, view<128xf32>
+  %84 = vector.extf %52 : vector<4xf16> to vector<4xf32>
+  vector.store %84, %output_view[96] : vector<4xf32>, view<128xf32>
+  %85 = vector.extf %53 : vector<4xf16> to vector<4xf32>
+  vector.store %85, %output_view[100] : vector<4xf32>, view<128xf32>
+  %86 = vector.extf %54 : vector<4xf16> to vector<4xf32>
+  vector.store %86, %output_view[104] : vector<4xf32>, view<128xf32>
+  %87 = vector.extf %55 : vector<4xf16> to vector<4xf32>
+  vector.store %87, %output_view[108] : vector<4xf32>, view<128xf32>
+  %88 = vector.extf %56 : vector<4xf16> to vector<4xf32>
+  vector.store %88, %output_view[112] : vector<4xf32>, view<128xf32>
+  %89 = vector.extf %57 : vector<4xf16> to vector<4xf32>
+  vector.store %89, %output_view[116] : vector<4xf32>, view<128xf32>
+  %90 = vector.extf %58 : vector<4xf16> to vector<4xf32>
+  vector.store %90, %output_view[120] : vector<4xf32>, view<128xf32>
+  %91 = vector.extf %59 : vector<4xf16> to vector<4xf32>
+  vector.store %91, %output_view[124] : vector<4xf32>, view<128xf32>
+  %saved_view = buffer.view %saved[%base] : buffer -> view<128xf16>
+  vector.store %11, %saved_view[0] : vector<8xf16>, view<128xf16>
+  vector.store %12, %saved_view[8] : vector<8xf16>, view<128xf16>
+  vector.store %13, %saved_view[16] : vector<8xf16>, view<128xf16>
+  vector.store %14, %saved_view[24] : vector<8xf16>, view<128xf16>
+  vector.store %15, %saved_view[32] : vector<8xf16>, view<128xf16>
+  vector.store %16, %saved_view[40] : vector<8xf16>, view<128xf16>
+  vector.store %17, %saved_view[48] : vector<8xf16>, view<128xf16>
+  vector.store %18, %saved_view[56] : vector<8xf16>, view<128xf16>
+  vector.store %19, %saved_view[64] : vector<8xf16>, view<128xf16>
+  vector.store %20, %saved_view[72] : vector<8xf16>, view<128xf16>
+  vector.store %21, %saved_view[80] : vector<8xf16>, view<128xf16>
+  vector.store %22, %saved_view[88] : vector<8xf16>, view<128xf16>
+  vector.store %23, %saved_view[96] : vector<8xf16>, view<128xf16>
+  vector.store %24, %saved_view[104] : vector<8xf16>, view<128xf16>
+  vector.store %25, %saved_view[112] : vector<8xf16>, view<128xf16>
+  vector.store %26, %saved_view[120] : vector<8xf16>, view<128xf16>
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @uneven_captured_packets() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<72xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<72xf16>
+  %packet0 = vector.load<volatile> %input_view[0] : view<72xf32> -> vector<3xf32>
+  %packet1 = vector.load<volatile> %input_view[3] : view<72xf32> -> vector<5xf32>
+  %packet2 = vector.load<volatile> %input_view[8] : view<72xf32> -> vector<3xf32>
+  %packet3 = vector.load<volatile> %input_view[11] : view<72xf32> -> vector<5xf32>
+  %packet4 = vector.load<volatile> %input_view[16] : view<72xf32> -> vector<3xf32>
+  %packet5 = vector.load<volatile> %input_view[19] : view<72xf32> -> vector<5xf32>
+  %packet6 = vector.load<volatile> %input_view[24] : view<72xf32> -> vector<3xf32>
+  %packet7 = vector.load<volatile> %input_view[27] : view<72xf32> -> vector<5xf32>
+  %packet8 = vector.load<volatile> %input_view[32] : view<72xf32> -> vector<3xf32>
+  %packet9 = vector.load<volatile> %input_view[35] : view<72xf32> -> vector<5xf32>
+  %packet10 = vector.load<volatile> %input_view[40] : view<72xf32> -> vector<3xf32>
+  %packet11 = vector.load<volatile> %input_view[43] : view<72xf32> -> vector<5xf32>
+  %packet12 = vector.load<volatile> %input_view[48] : view<72xf32> -> vector<3xf32>
+  %packet13 = vector.load<volatile> %input_view[51] : view<72xf32> -> vector<5xf32>
+  %packet14 = vector.load<volatile> %input_view[56] : view<72xf32> -> vector<3xf32>
+  %packet15 = vector.load<volatile> %input_view[59] : view<72xf32> -> vector<5xf32>
+  %packet16 = vector.load<volatile> %input_view[64] : view<72xf32> -> vector<3xf32>
+  %packet17 = vector.load<volatile> %input_view[67] : view<72xf32> -> vector<5xf32>
+  %replacement = scalar.constant 99.0 : f32
+  view.store %replacement, %input_view[0] : f32, view<72xf32>
+  %captured = vector.concat<0> %packet0, %packet1, %packet2, %packet3, %packet4, %packet5, %packet6, %packet7, %packet8, %packet9, %packet10, %packet11, %packet12, %packet13, %packet14, %packet15, %packet16, %packet17 : vector<3xf32>, vector<5xf32>, vector<3xf32>, vector<5xf32>, vector<3xf32>, vector<5xf32>, vector<3xf32>, vector<5xf32>, vector<3xf32>, vector<5xf32>, vector<3xf32>, vector<5xf32>, vector<3xf32>, vector<5xf32>, vector<3xf32>, vector<5xf32>, vector<3xf32>, vector<5xf32> -> vector<72xf32>
+  %converted = vector.fptrunc %captured : vector<72xf32> to vector<72xf16>
+  vector.store %converted, %output_view[0] : vector<72xf16>, view<72xf16>
+  kernel.return
+}
+
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @uneven_captured_packets() {
+  %count = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %count, %count) workgroup_size(%count, %count, %count) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<72xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<72xf16>
+  %packet0 = vector.load<volatile> %input_view[0] : view<72xf32> -> vector<3xf32>
+  %packet1 = vector.load<volatile> %input_view[3] : view<72xf32> -> vector<5xf32>
+  %packet2 = vector.load<volatile> %input_view[8] : view<72xf32> -> vector<3xf32>
+  %packet3 = vector.load<volatile> %input_view[11] : view<72xf32> -> vector<5xf32>
+  %packet4 = vector.load<volatile> %input_view[16] : view<72xf32> -> vector<3xf32>
+  %packet5 = vector.load<volatile> %input_view[19] : view<72xf32> -> vector<5xf32>
+  %packet6 = vector.load<volatile> %input_view[24] : view<72xf32> -> vector<3xf32>
+  %packet7 = vector.load<volatile> %input_view[27] : view<72xf32> -> vector<5xf32>
+  %packet8 = vector.load<volatile> %input_view[32] : view<72xf32> -> vector<3xf32>
+  %packet9 = vector.load<volatile> %input_view[35] : view<72xf32> -> vector<5xf32>
+  %packet10 = vector.load<volatile> %input_view[40] : view<72xf32> -> vector<3xf32>
+  %packet11 = vector.load<volatile> %input_view[43] : view<72xf32> -> vector<5xf32>
+  %packet12 = vector.load<volatile> %input_view[48] : view<72xf32> -> vector<3xf32>
+  %packet13 = vector.load<volatile> %input_view[51] : view<72xf32> -> vector<5xf32>
+  %packet14 = vector.load<volatile> %input_view[56] : view<72xf32> -> vector<3xf32>
+  %packet15 = vector.load<volatile> %input_view[59] : view<72xf32> -> vector<5xf32>
+  %packet16 = vector.load<volatile> %input_view[64] : view<72xf32> -> vector<3xf32>
+  %packet17 = vector.load<volatile> %input_view[67] : view<72xf32> -> vector<5xf32>
+  %replacement = scalar.constant 99.0 : f32
+  view.store %replacement, %input_view[0] : f32, view<72xf32>
+  %27 = vector.slice %packet1[0] : vector<5xf32> -> vector<1xf32>
+  %28 = vector.concat<0> %packet0, %27 : vector<3xf32>, vector<1xf32> -> vector<4xf32>
+  %29 = vector.slice %packet1[1] : vector<5xf32> -> vector<4xf32>
+  %30 = vector.slice %packet3[0] : vector<5xf32> -> vector<1xf32>
+  %31 = vector.concat<0> %packet2, %30 : vector<3xf32>, vector<1xf32> -> vector<4xf32>
+  %32 = vector.slice %packet3[1] : vector<5xf32> -> vector<4xf32>
+  %33 = vector.slice %packet5[0] : vector<5xf32> -> vector<1xf32>
+  %34 = vector.concat<0> %packet4, %33 : vector<3xf32>, vector<1xf32> -> vector<4xf32>
+  %35 = vector.slice %packet5[1] : vector<5xf32> -> vector<4xf32>
+  %36 = vector.slice %packet7[0] : vector<5xf32> -> vector<1xf32>
+  %37 = vector.concat<0> %packet6, %36 : vector<3xf32>, vector<1xf32> -> vector<4xf32>
+  %38 = vector.slice %packet7[1] : vector<5xf32> -> vector<4xf32>
+  %39 = vector.slice %packet9[0] : vector<5xf32> -> vector<1xf32>
+  %40 = vector.concat<0> %packet8, %39 : vector<3xf32>, vector<1xf32> -> vector<4xf32>
+  %41 = vector.slice %packet9[1] : vector<5xf32> -> vector<4xf32>
+  %42 = vector.slice %packet11[0] : vector<5xf32> -> vector<1xf32>
+  %43 = vector.concat<0> %packet10, %42 : vector<3xf32>, vector<1xf32> -> vector<4xf32>
+  %44 = vector.slice %packet11[1] : vector<5xf32> -> vector<4xf32>
+  %45 = vector.slice %packet13[0] : vector<5xf32> -> vector<1xf32>
+  %46 = vector.concat<0> %packet12, %45 : vector<3xf32>, vector<1xf32> -> vector<4xf32>
+  %47 = vector.slice %packet13[1] : vector<5xf32> -> vector<4xf32>
+  %48 = vector.slice %packet15[0] : vector<5xf32> -> vector<1xf32>
+  %49 = vector.concat<0> %packet14, %48 : vector<3xf32>, vector<1xf32> -> vector<4xf32>
+  %50 = vector.slice %packet15[1] : vector<5xf32> -> vector<4xf32>
+  %51 = vector.slice %packet17[0] : vector<5xf32> -> vector<1xf32>
+  %52 = vector.concat<0> %packet16, %51 : vector<3xf32>, vector<1xf32> -> vector<4xf32>
+  %53 = vector.slice %packet17[1] : vector<5xf32> -> vector<4xf32>
+  %54 = vector.fptrunc %28 : vector<4xf32> to vector<4xf16>
+  vector.store %54, %output_view[0] : vector<4xf16>, view<72xf16>
+  %55 = vector.fptrunc %29 : vector<4xf32> to vector<4xf16>
+  vector.store %55, %output_view[4] : vector<4xf16>, view<72xf16>
+  %56 = vector.fptrunc %31 : vector<4xf32> to vector<4xf16>
+  vector.store %56, %output_view[8] : vector<4xf16>, view<72xf16>
+  %57 = vector.fptrunc %32 : vector<4xf32> to vector<4xf16>
+  vector.store %57, %output_view[12] : vector<4xf16>, view<72xf16>
+  %58 = vector.fptrunc %34 : vector<4xf32> to vector<4xf16>
+  vector.store %58, %output_view[16] : vector<4xf16>, view<72xf16>
+  %59 = vector.fptrunc %35 : vector<4xf32> to vector<4xf16>
+  vector.store %59, %output_view[20] : vector<4xf16>, view<72xf16>
+  %60 = vector.fptrunc %37 : vector<4xf32> to vector<4xf16>
+  vector.store %60, %output_view[24] : vector<4xf16>, view<72xf16>
+  %61 = vector.fptrunc %38 : vector<4xf32> to vector<4xf16>
+  vector.store %61, %output_view[28] : vector<4xf16>, view<72xf16>
+  %62 = vector.fptrunc %40 : vector<4xf32> to vector<4xf16>
+  vector.store %62, %output_view[32] : vector<4xf16>, view<72xf16>
+  %63 = vector.fptrunc %41 : vector<4xf32> to vector<4xf16>
+  vector.store %63, %output_view[36] : vector<4xf16>, view<72xf16>
+  %64 = vector.fptrunc %43 : vector<4xf32> to vector<4xf16>
+  vector.store %64, %output_view[40] : vector<4xf16>, view<72xf16>
+  %65 = vector.fptrunc %44 : vector<4xf32> to vector<4xf16>
+  vector.store %65, %output_view[44] : vector<4xf16>, view<72xf16>
+  %66 = vector.fptrunc %46 : vector<4xf32> to vector<4xf16>
+  vector.store %66, %output_view[48] : vector<4xf16>, view<72xf16>
+  %67 = vector.fptrunc %47 : vector<4xf32> to vector<4xf16>
+  vector.store %67, %output_view[52] : vector<4xf16>, view<72xf16>
+  %68 = vector.fptrunc %49 : vector<4xf32> to vector<4xf16>
+  vector.store %68, %output_view[56] : vector<4xf16>, view<72xf16>
+  %69 = vector.fptrunc %50 : vector<4xf32> to vector<4xf16>
+  vector.store %69, %output_view[60] : vector<4xf16>, view<72xf16>
+  %70 = vector.fptrunc %52 : vector<4xf32> to vector<4xf16>
+  vector.store %70, %output_view[64] : vector<4xf16>, view<72xf16>
+  %71 = vector.fptrunc %53 : vector<4xf32> to vector<4xf16>
+  vector.store %71, %output_view[68] : vector<4xf16>, view<72xf16>
+  kernel.return
+}

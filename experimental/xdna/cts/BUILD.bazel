@@ -104,6 +104,33 @@ xdna_execution_test_suite(
 )
 
 iree_py_binary(
+    name = "packet_snapshot_cases",
+    testonly = True,
+    srcs = ["packet_snapshot_cases.py"],
+    main = "packet_snapshot_cases.py",
+)
+
+xdna_execution_test_suite(
+    name = "packet_snapshot_npu2_test",
+    data = ["testdata/packet_snapshot.loom"],
+    manifests = ["packet_snapshot_npu2.test.json"],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//loom/config/target:xdna_artifacts": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }) + select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    tools = {
+        "generate-cases": ":packet_snapshot_cases",
+        "iree-xdna-run": "//experimental/xdna:iree-xdna-run",
+        "loom-compile": "//loom/src/loom/tools/loom-compile",
+    },
+)
+
+iree_py_binary(
     name = "table_lookup_cases",
     testonly = True,
     srcs = ["table_lookup_cases.py"],

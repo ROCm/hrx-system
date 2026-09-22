@@ -190,6 +190,8 @@ struct loom_low_lower_source_query_scope_t {
   loom_low_lower_context_t context;
   // Diagnostic and result scratch required by the lowering context.
   loom_low_lower_result_t result;
+  // Read ordering boundaries for the immutable source region tree.
+  loom_read_motion_t read_motion;
   // True after context.lowering.value_domain acquires module storage.
   bool value_domain_initialized;
 };
@@ -232,6 +234,11 @@ iree_status_t loom_low_lower_source_query_scope_create(
         module, source_body, &scope->context.function_arena,
         &scope->context.lowering.value_domain);
     scope->value_domain_initialized = iree_status_is_ok(status);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_read_motion_analyze_region(module, source_body,
+                                             &scope->context.function_arena,
+                                             &scope->read_motion);
   }
   if (iree_status_is_ok(status)) {
     loom_condition_query_initialize(module,
@@ -287,4 +294,9 @@ iree_status_t loom_low_lower_source_query_scope_view_regions(
     loom_low_lower_source_query_scope_t* scope,
     const loom_view_region_table_t** out_view_regions) {
   return loom_low_lower_context_view_regions(&scope->context, out_view_regions);
+}
+
+const loom_read_motion_t* loom_low_lower_source_query_scope_read_motion(
+    loom_low_lower_source_query_scope_t* scope) {
+  return &scope->read_motion;
 }

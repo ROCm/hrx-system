@@ -1355,6 +1355,7 @@ static void loom_low_target_legalize_deinitialize_query_scope(
   }
   state->legalization_context.value_domain = NULL;
   state->legalization_context.view_regions = NULL;
+  state->legalization_context.read_motion = NULL;
   loom_low_lower_source_query_scope_deinitialize(state->query_scope);
   state->query_scope = NULL;
 }
@@ -1369,6 +1370,8 @@ static iree_status_t loom_low_target_legalize_refresh_query_scope(
       state->query_scope_arena, &state->query_scope));
   state->legalization_context.value_domain =
       loom_low_lower_source_query_scope_value_domain(state->query_scope);
+  state->legalization_context.read_motion =
+      loom_low_lower_source_query_scope_read_motion(state->query_scope);
   IREE_RETURN_IF_ERROR(loom_low_lower_source_query_scope_view_regions(
       state->query_scope, &state->legalization_context.view_regions));
   return iree_ok_status();
