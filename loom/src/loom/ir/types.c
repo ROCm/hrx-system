@@ -12,6 +12,7 @@
 #include "loom/ir/module.h"
 #include "loom/ir/parameterized_type.h"
 #include "loom/ir/structural_hash.h"
+#include "loom/ir/type_remap_query.h"
 
 iree_status_t loom_type_function_build(const loom_type_t* arg_types,
                                        uint16_t arg_count,
@@ -192,71 +193,6 @@ bool loom_type_equal(loom_type_t a, loom_type_t b) {
   return true;
 }
 
-static loom_value_id_t loom_type_remap_value(
-    const loom_module_t* module, const loom_type_value_remap_t* remap,
-    loom_value_id_t value_id) {
-  for (const loom_type_value_remap_t* span = remap; span; span = span->next) {
-    if (iree_any_bit_set(span->flags,
-                         LOOM_TYPE_VALUE_REMAP_FLAG_SOURCE_DEFINITION_SLICE)) {
-      if (span->count == 0 || value_id >= module->values.count) {
-        continue;
-      }
-      IREE_ASSERT(span->source_values[0] < module->values.count);
-      const loom_value_t* first_value =
-          loom_module_value(module, span->source_values[0]);
-      const loom_value_t* value = loom_module_value(module, value_id);
-      if (loom_value_is_block_arg(first_value) !=
-          loom_value_is_block_arg(value)) {
-        continue;
-      }
-      uint16_t first_index = loom_value_def_index(first_value);
-      uint16_t value_index = loom_value_def_index(value);
-      if (loom_value_is_block_arg(first_value)) {
-        if (loom_value_def_block(first_value) != loom_value_def_block(value)) {
-          continue;
-        }
-      } else {
-        const loom_op_t* owner_op = loom_value_def_op(first_value);
-        if (owner_op) {
-          if (owner_op != loom_value_def_op(value)) {
-            continue;
-          }
-        } else {
-          // Declaration operands and results have independent index domains.
-          // The declaration's ordinary operand link owns its argument index.
-          IREE_ASSERT_EQ(first_value->use_count, 1);
-          if (loom_value_def_op(value) || value->use_count != 1) {
-            continue;
-          }
-          const loom_use_t first_use = loom_value_uses(first_value)[0];
-          const loom_use_t value_use = loom_value_uses(value)[0];
-          if (loom_use_user_op(first_use) != loom_use_user_op(value_use)) {
-            continue;
-          }
-          first_index = loom_use_operand_index(first_use);
-          value_index = loom_use_operand_index(value_use);
-        }
-      }
-      if (value_index < first_index) {
-        continue;
-      }
-      const uint16_t span_index = (uint16_t)(value_index - first_index);
-      if (span_index >= span->count) {
-        continue;
-      }
-      IREE_ASSERT(span->source_values[span_index] == value_id);
-      return span->target_values[span_index];
-    } else {
-      for (uint16_t i = 0; i < span->count; ++i) {
-        if (span->source_values[i] == value_id) {
-          return span->target_values[i];
-        }
-      }
-    }
-  }
-  return value_id;
-}
-
 static bool loom_type_dim_equal_after_value_remap(
     const loom_module_t* module, uint64_t source_dim, uint64_t target_dim,
     const loom_type_value_remap_t* remap) {
@@ -264,7 +200,7 @@ static bool loom_type_dim_equal_after_value_remap(
     return source_dim == target_dim;
   }
   loom_value_id_t remapped_value =
-      loom_type_remap_value(module, remap, loom_dim_value_id(source_dim));
+      loom_type_value_remap_apply(module, remap, loom_dim_value_id(source_dim));
   return loom_dim_pack_dynamic(remapped_value) == target_dim;
 }
 
@@ -277,7 +213,7 @@ static bool loom_type_encoding_equal_after_value_remap(
   if (!loom_type_has_ssa_encoding(source_type)) {
     return source_type.encoding_id == target_type.encoding_id;
   }
-  loom_value_id_t remapped_value = loom_type_remap_value(
+  loom_value_id_t remapped_value = loom_type_value_remap_apply(
       module, remap, (loom_value_id_t)loom_type_encoding_value_id(source_type));
   if (remapped_value > UINT16_MAX) {
     return false;
@@ -376,8 +312,8 @@ static bool loom_attribute_equal_after_value_remap(
           if (source->arg_tags[j] == LOOM_PRED_ARG_VALUE) {
             if (source->args[j] < 0 || target->args[j] < 0 ||
                 (loom_value_id_t)target->args[j] !=
-                    loom_type_remap_value(module, remap,
-                                          (loom_value_id_t)source->args[j])) {
+                    loom_type_value_remap_apply(
+                        module, remap, (loom_value_id_t)source->args[j])) {
               return false;
             }
           } else if (source->args[j] != target->args[j]) {
@@ -1047,7 +983,7 @@ IREE_ATTRIBUTE_NOINLINE static uint32_t loom_attribute_hash_after_value_remap(
         for (uint8_t j = 0; j < predicate->arg_count; ++j) {
           int64_t argument = predicate->args[j];
           if (predicate->arg_tags[j] == LOOM_PRED_ARG_VALUE && argument >= 0) {
-            argument = (int64_t)loom_type_remap_value(
+            argument = (int64_t)loom_type_value_remap_apply(
                 module, remap, (loom_value_id_t)argument);
           }
           hash = loom_structural_hash_mix_u64(hash, (uint64_t)argument);
@@ -1216,16 +1152,16 @@ loom_type_hash_after_value_remap(const loom_module_t* module, loom_type_t type,
   if (loom_type_is_shaped(type) || loom_type_is_pool(type)) {
     uint32_t encoding = type.encoding_id;
     if (loom_type_has_ssa_encoding(type)) {
-      encoding = loom_type_remap_value(module, remap,
-                                       loom_type_encoding_value_id(type));
+      encoding = loom_type_value_remap_apply(module, remap,
+                                             loom_type_encoding_value_id(type));
     }
     hash = loom_structural_hash_mix_u32(hash, encoding);
     const uint8_t rank = loom_type_rank(type);
     for (uint8_t i = 0; i < rank; ++i) {
       uint64_t dimension = loom_type_dim(type, i);
       if (loom_dim_is_dynamic(dimension)) {
-        dimension = loom_dim_pack_dynamic(
-            loom_type_remap_value(module, remap, loom_dim_value_id(dimension)));
+        dimension = loom_dim_pack_dynamic(loom_type_value_remap_apply(
+            module, remap, loom_dim_value_id(dimension)));
       }
       hash = loom_structural_hash_mix_u64(hash, dimension);
     }

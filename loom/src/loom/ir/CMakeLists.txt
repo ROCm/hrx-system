@@ -66,6 +66,7 @@ loom_cc_library(
     "type_descriptor.h"
     "type_identity.h"
     "type_import.h"
+    "type_remap_query.h"
     "type_table.h"
     "types.h"
     "value_refs.h"
@@ -89,6 +90,7 @@ loom_cc_library(
     "type_dependencies.c"
     "type_identity.c"
     "type_import.c"
+    "type_remap_query.c"
     "types.c"
     "value_refs.c"
     "value_replacement.c"
@@ -228,6 +230,7 @@ loom_cc_test(
     types_test
   SRCS
     "type_constraint_test.cc"
+    "type_remap_query_test.cc"
     "types_test.cc"
   DEPS
     ::ir

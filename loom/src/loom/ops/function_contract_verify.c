@@ -9,6 +9,7 @@
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ir/type_remap_query.h"
 #include "loom/ops/op_defs.h"
 #include "loom/target/condition.h"
 #include "loom/target/projection.h"
@@ -333,36 +334,44 @@ static iree_status_t loom_function_contract_verify_boundary(
       .next = &result_remap,
   };
 
-  for (uint16_t i = 0; i < argument_count; ++i) {
+  loom_type_remap_query_t query;
+  loom_type_remap_query_initialize(module, &signature_remap, &query);
+  iree_status_t status = iree_ok_status();
+  for (uint16_t i = 0; i < argument_count && iree_status_is_ok(status); ++i) {
     const loom_type_t actual_type =
         loom_module_value_type(module, boundary->argument_ids[i]);
     const loom_type_t expected_type =
         loom_module_value_type(module, signature->argument_ids[i]);
-    if (loom_type_equal_after_value_remap(module, expected_type, actual_type,
-                                          &signature_remap)) {
+    bool equal = false;
+    status =
+        loom_type_remap_query_equal(&query, expected_type, actual_type, &equal);
+    if (!iree_status_is_ok(status) || equal) {
       continue;
     }
-    IREE_RETURN_IF_ERROR(loom_function_contract_emit_type_mismatch(
+    status = loom_function_contract_emit_type_mismatch(
         boundary, signature, emitter, boundary->argument_field_kind,
         boundary->argument_prefix, "contract argument", i, actual_type,
-        expected_type));
+        expected_type);
   }
 
-  for (uint16_t i = 0; i < result_count; ++i) {
+  for (uint16_t i = 0; i < result_count && iree_status_is_ok(status); ++i) {
     const loom_type_t actual_type =
         loom_module_value_type(module, boundary->result_ids[i]);
     const loom_type_t expected_type =
         loom_module_value_type(module, signature->result_ids[i]);
-    if (loom_type_equal_after_value_remap(module, expected_type, actual_type,
-                                          &signature_remap)) {
+    bool equal = false;
+    status =
+        loom_type_remap_query_equal(&query, expected_type, actual_type, &equal);
+    if (!iree_status_is_ok(status) || equal) {
       continue;
     }
-    IREE_RETURN_IF_ERROR(loom_function_contract_emit_type_mismatch(
+    status = loom_function_contract_emit_type_mismatch(
         boundary, signature, emitter, boundary->result_field_kind,
         boundary->result_prefix, "contract result", i, actual_type,
-        expected_type));
+        expected_type);
   }
-  return iree_ok_status();
+  loom_type_remap_query_deinitialize(&query);
+  return status;
 }
 
 static iree_status_t loom_function_contract_verify_symbol_boundary(

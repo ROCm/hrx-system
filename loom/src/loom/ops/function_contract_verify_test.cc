@@ -24,6 +24,18 @@ using ::loom::testing::DiagnosticEmissionCapture;
 
 class FunctionContractVerifyTest : public ::testing::Test {
  protected:
+  static iree_status_t FailAllocation(void* self,
+                                      iree_allocator_command_t command,
+                                      const void* parameters, void** pointer) {
+    (void)self;
+    if (command != IREE_ALLOCATOR_COMMAND_FREE) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "injected allocation failure");
+    }
+    const iree_allocator_t allocator = iree_allocator_system();
+    return allocator.ctl(allocator.self, command, parameters, pointer);
+  }
+
   void SetUp() override {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(),
                                      &block_pool_);
@@ -71,6 +83,54 @@ class FunctionContractVerifyTest : public ::testing::Test {
         /*tied_results=*/nullptr, /*tied_result_count=*/0,
         /*predicates=*/nullptr, /*predicates_count=*/0, LOOM_LOCATION_UNKNOWN,
         out_op));
+  }
+
+  loom_symbol_ref_t AddDeclaration(iree_string_view_t name,
+                                   const loom_type_t* argument_types,
+                                   iree_host_size_t argument_count,
+                                   const loom_type_t* result_types,
+                                   iree_host_size_t result_count,
+                                   loom_op_t** out_op) {
+    loom_symbol_ref_t symbol = loom_symbol_ref_null();
+    AddSymbol(name, &symbol);
+    IREE_CHECK_OK(loom_func_decl_build(
+        &builder_, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0,
+        LOOM_STRING_ID_INVALID, LOOM_STRING_ID_INVALID, /*cc=*/0,
+        /*purity=*/0, /*temperature=*/0, /*inline_policy=*/0,
+        loom_symbol_ref_null(), /*abi=*/0, loom_named_attr_slice_empty(),
+        LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), symbol,
+        argument_types, argument_count, result_types, result_count,
+        /*tied_results=*/nullptr, /*tied_result_count=*/0,
+        /*predicates=*/nullptr, /*predicates_count=*/0, LOOM_LOCATION_UNKNOWN,
+        out_op));
+    return symbol;
+  }
+
+  loom_type_t AddFunctionType(loom_type_t argument_type) {
+    loom_type_t type = {};
+    IREE_CHECK_OK(loom_module_intern_function_type(module_, &argument_type, 1,
+                                                   nullptr, 0, &type));
+    return type;
+  }
+
+  loom_value_id_t AddBlockArgument(loom_type_t type) {
+    loom_value_id_t value_id = LOOM_VALUE_ID_INVALID;
+    IREE_CHECK_OK(loom_module_define_value(module_, type, &value_id));
+    IREE_CHECK_OK(
+        loom_block_add_arg(module_, loom_module_block(module_), value_id));
+    return value_id;
+  }
+
+  loom_op_t* AddCall(loom_symbol_ref_t callee, const loom_value_id_t* operands,
+                     iree_host_size_t operand_count) {
+    loom_op_t* call_op = nullptr;
+    IREE_CHECK_OK(loom_func_call_build(
+        &builder_, /*build_flags=*/0, /*purity=*/0, /*temperature=*/0,
+        /*inline_policy=*/0, callee, operands, operand_count,
+        /*result_types=*/nullptr, /*result_count=*/0,
+        /*tied_results=*/nullptr, /*tied_result_count=*/0,
+        LOOM_LOCATION_UNKNOWN, &call_op));
+    return call_op;
   }
 
   iree_arena_block_pool_t block_pool_;
@@ -180,6 +240,60 @@ TEST_F(FunctionContractVerifyTest, RejectsPredicateValueOutsideSignature) {
   EXPECT_EQ(emission.string_params[0], "func.def");
   EXPECT_EQ(emission.string_params[1], "predicates[0].arg[0]");
   EXPECT_EQ(emission.string_params[2], "a function argument or result");
+}
+
+TEST_F(FunctionContractVerifyTest, ReportsEveryMismatchAfterEnteringExactMode) {
+  const loom_type_t expected_inner =
+      AddFunctionType(loom_type_scalar(LOOM_SCALAR_TYPE_I32));
+  const loom_type_t actual_inner =
+      AddFunctionType(loom_type_scalar(LOOM_SCALAR_TYPE_F32));
+  const loom_type_t expected_outer = AddFunctionType(expected_inner);
+  const loom_type_t actual_outer = AddFunctionType(actual_inner);
+  const loom_type_t expected_types[] = {expected_inner, expected_outer};
+  loom_op_t* declaration = nullptr;
+  const loom_symbol_ref_t callee = AddDeclaration(
+      IREE_SV("mismatches"), expected_types, IREE_ARRAYSIZE(expected_types),
+      /*result_types=*/nullptr, /*result_count=*/0, &declaration);
+  ASSERT_NE(declaration, nullptr);
+  const loom_value_id_t operands[] = {
+      AddBlockArgument(actual_inner),
+      AddBlockArgument(actual_outer),
+  };
+  loom_op_t* call = AddCall(callee, operands, IREE_ARRAYSIZE(operands));
+
+  DiagnosticEmissionCapture capture;
+  IREE_EXPECT_OK(loom_function_call_contract_verify(
+      module_, call, callee, loom_func_call_operands(call),
+      loom_func_call_results(call), capture.emitter()));
+  ASSERT_EQ(capture.emissions.size(), 2u);
+  EXPECT_EQ(capture.emissions[0].error, LOOM_ERR_TYPE_001);
+  EXPECT_EQ(capture.emissions[1].error, LOOM_ERR_TYPE_001);
+}
+
+TEST_F(FunctionContractVerifyTest,
+       ScratchAllocationFailurePrecedesMismatchDiagnostics) {
+  const loom_type_t compound =
+      AddFunctionType(loom_type_scalar(LOOM_SCALAR_TYPE_I32));
+  loom_op_t* declaration = nullptr;
+  const loom_symbol_ref_t callee = AddDeclaration(
+      IREE_SV("allocation_failure"), &compound, 1,
+      /*result_types=*/nullptr, /*result_count=*/0, &declaration);
+  ASSERT_NE(declaration, nullptr);
+  const loom_value_id_t operand = AddBlockArgument(compound);
+  loom_op_t* call = AddCall(callee, &operand, 1);
+
+  iree_arena_block_pool_trim(&block_pool_);
+  const iree_allocator_t system_allocator = block_pool_.block_allocator;
+  block_pool_.block_allocator = {/*.self=*/nullptr,
+                                 /*.ctl=*/FailAllocation};
+  DiagnosticEmissionCapture capture;
+  iree_status_t status = loom_function_call_contract_verify(
+      module_, call, callee, loom_func_call_operands(call),
+      loom_func_call_results(call), capture.emitter());
+  block_pool_.block_allocator = system_allocator;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+  EXPECT_TRUE(capture.emissions.empty());
 }
 
 }  // namespace
