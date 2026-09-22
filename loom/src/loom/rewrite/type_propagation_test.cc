@@ -88,17 +88,10 @@ class TypePropagationTest : public ::testing::Test {
     iree_arena_allocator_t pass_arena;
     iree_arena_initialize(&block_pool_, &pass_arena);
     loom_rewriter_t rewriter;
-    bool rewriter_initialized = false;
-    iree_status_t status =
-        loom_rewriter_initialize(&rewriter, module_, &pass_arena);
-    if (iree_status_is_ok(status)) {
-      rewriter_initialized = true;
-    }
+    loom_rewriter_initialize(&rewriter, module_, &pass_arena);
     loom_type_propagator_t* propagator = NULL;
-    if (iree_status_is_ok(status)) {
-      status =
-          loom_type_propagator_allocate(module_, {}, &pass_arena, &propagator);
-    }
+    iree_status_t status =
+        loom_type_propagator_allocate(module_, {}, &pass_arena, &propagator);
     if (iree_status_is_ok(status)) {
       status = loom_type_propagator_prepare_function(propagator, function_);
     }
@@ -107,9 +100,7 @@ class TypePropagationTest : public ::testing::Test {
           loom_type_propagator_apply_op(propagator, &rewriter, op, out_changed);
     }
     loom_type_propagator_deinitialize(propagator);
-    if (rewriter_initialized) {
-      loom_rewriter_deinitialize(&rewriter);
-    }
+    loom_rewriter_deinitialize(&rewriter);
     iree_arena_deinitialize(&pass_arena);
     return status;
   }
@@ -120,13 +111,9 @@ class TypePropagationTest : public ::testing::Test {
     iree_arena_allocator_t pass_arena;
     iree_arena_initialize(&block_pool_, &pass_arena);
     loom_rewriter_t rewriter;
-    bool rewriter_initialized = false;
-    iree_status_t status =
-        loom_rewriter_initialize(&rewriter, module_, &pass_arena);
-    if (iree_status_is_ok(status)) {
-      rewriter_initialized = true;
-    }
-    if (iree_status_is_ok(status) && facts) {
+    loom_rewriter_initialize(&rewriter, module_, &pass_arena);
+    iree_status_t status = iree_ok_status();
+    if (facts) {
       status = loom_rewriter_enable_analysis(&rewriter, function_, facts);
     }
     loom_type_propagator_t* propagator = NULL;
@@ -143,9 +130,7 @@ class TypePropagationTest : public ::testing::Test {
           loom_type_propagator_may_apply_op(propagator, &rewriter, op, vtable);
     }
     loom_type_propagator_deinitialize(propagator);
-    if (rewriter_initialized) {
-      loom_rewriter_deinitialize(&rewriter);
-    }
+    loom_rewriter_deinitialize(&rewriter);
     iree_arena_deinitialize(&pass_arena);
     return status;
   }
@@ -450,7 +435,7 @@ TEST_F(TypePropagationTest, ValueFactsNarrowDynamicDimensions) {
       &value_fact_owner, module_,
       loom_pass_value_fact_scope_function(function_), &facts));
   loom_rewriter_t rewriter;
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, module_, &pass_arena));
+  loom_rewriter_initialize(&rewriter, module_, &pass_arena);
   IREE_ASSERT_OK(loom_rewriter_enable_analysis(&rewriter, function_, facts));
   loom_type_propagator_t* propagator = NULL;
   IREE_ASSERT_OK(
@@ -499,7 +484,8 @@ TEST_F(TypePropagationTest, TypeUseUsersAreQueuedOnCommit) {
   iree_arena_allocator_t pass_arena;
   iree_arena_initialize(&block_pool_, &pass_arena);
   loom_rewriter_t rewriter;
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, module_, &pass_arena));
+  loom_rewriter_initialize(&rewriter, module_, &pass_arena);
+  IREE_ASSERT_OK(loom_rewriter_enable_worklist(&rewriter));
   loom_type_propagator_t* propagator = NULL;
   IREE_ASSERT_OK(
       loom_type_propagator_allocate(module_, {}, &pass_arena, &propagator));

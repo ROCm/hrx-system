@@ -274,8 +274,7 @@ iree_status_t loom_kernel_resolve_launches(
   };
   IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(
       module, module, scratch_arena, /*options=*/NULL, &resolution.type_remap));
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_initialize(&resolution.rewriter, module, scratch_arena));
+  loom_rewriter_initialize(&resolution.rewriter, module, scratch_arena);
 
   iree_status_t status = iree_ok_status();
   bool valid = true;

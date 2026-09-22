@@ -1331,8 +1331,7 @@ static iree_status_t loom_inline_execute_plan(
   }
 
   loom_rewriter_t rewriter = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_initialize(&rewriter, state->module, state->pass->arena));
+  loom_rewriter_initialize(&rewriter, state->module, state->pass->arena);
 
   iree_status_t status =
       loom_inline_materialize_low_schedules(state, &rewriter);

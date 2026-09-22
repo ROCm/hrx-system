@@ -1366,8 +1366,7 @@ iree_status_t loom_linearize_view_accesses_run(loom_pass_t* pass,
       loom_linearize_view_accesses_view_map_initialize(pass->arena, &view_map));
 
   loom_rewriter_t rewriter;
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_initialize(&rewriter, module, pass->arena));
+  loom_rewriter_initialize(&rewriter, module, pass->arena);
   iree_status_t status = iree_ok_status();
   bool changed = false;
   loom_linearize_view_accesses_context_t context = {

@@ -1974,8 +1974,8 @@ iree_status_t loom_cfg_simplify_run(loom_pass_t* pass, loom_module_t* module,
   }
 
   loom_rewriter_t rewriter = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_initialize(&rewriter, module, pass->arena));
+  loom_rewriter_initialize(&rewriter, module, pass->arena);
+  IREE_RETURN_IF_ERROR(loom_rewriter_enable_worklist(&rewriter));
 
   iree_arena_allocator_t analysis_arena = {0};
   iree_arena_initialize(pass->arena->block_pool, &analysis_arena);

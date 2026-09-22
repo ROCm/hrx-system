@@ -934,8 +934,7 @@ iree_status_t loom_vector_bank_sroa_run(loom_pass_t* pass,
   }
 
   loom_rewriter_t rewriter = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_initialize(&rewriter, module, pass->arena));
+  loom_rewriter_initialize(&rewriter, module, pass->arena);
   iree_arena_allocator_t scratch_arena = {0};
   iree_arena_initialize(pass->arena->block_pool, &scratch_arena);
   loom_vector_bank_sroa_context_t context = {

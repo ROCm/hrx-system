@@ -1284,8 +1284,7 @@ static iree_status_t loom_low_select_operand_forms_function(
   }
 
   loom_rewriter_t rewriter;
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_initialize(&rewriter, module, pass->arena));
+  loom_rewriter_initialize(&rewriter, module, pass->arena);
   const loom_low_select_operand_forms_pass_state_t* pass_state =
       (const loom_low_select_operand_forms_pass_state_t*)pass->state;
   loom_low_select_operand_forms_state_t state = {

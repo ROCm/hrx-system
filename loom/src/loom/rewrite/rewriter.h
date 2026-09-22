@@ -4,12 +4,13 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Pattern rewriter: worklist-driven IR mutation with change tracking.
+// IR mutation with change tracking and optional worklist scheduling.
 //
 // The rewriter wraps a builder and tracks all IR mutations (creation,
-// erasure, operand changes, RAUW). It maintains a worklist of ops that
-// need revisiting after changes, using LOOM_OP_FLAG_ON_WORKLIST for
-// O(1) dedup.
+// erasure, operand changes, RAUW). Drivers that revisit affected operations
+// enable the worklist before mutating IR. Direct mutation passes retain SSA,
+// effect and analysis maintenance without allocating or filling an unused
+// queue. The active worklist uses LOOM_OP_FLAG_ON_WORKLIST for O(1) dedup.
 //
 // Usage (custom pass):
 //   loom_rewriter_t rewriter;
@@ -82,8 +83,8 @@ typedef iree_status_t (*loom_materialize_value_fn_t)(
 typedef struct loom_rewriter_cfg_region_t loom_rewriter_cfg_region_t;
 
 struct loom_rewriter_t {
-  // Builder for creating new ops. The rewriter installs a finalize
-  // callback that adds newly created ops to the worklist.
+  // Builder whose finalize callback records mutations and maintains facts.
+  // Newly created ops also enter the worklist when tracking is enabled.
   loom_builder_t builder;
 
   // The module being transformed.
@@ -105,9 +106,12 @@ struct loom_rewriter_t {
   // Central policy for optional SSA display names created during rewrites.
   loom_rewriter_name_policy_flags_t name_policy;
 
-  // Worklist of ops to revisit. Deduped via LOOM_OP_FLAG_ON_WORKLIST.
+  // Worklist of ops to revisit, or NULL when no driver consumes notifications.
+  // Deduped via LOOM_OP_FLAG_ON_WORKLIST while enabled.
   loom_op_t** worklist;
+  // Number of pending operations in the enabled worklist.
   iree_host_size_t worklist_count;
+  // Allocated worklist entries, retained until the pass arena is released.
   iree_host_size_t worklist_capacity;
 
   // Borrowed per-value analysis facts. Populated when a pass calls
@@ -132,19 +136,24 @@ struct loom_rewriter_t {
   loom_materialize_constant_fn_t materialize_constant;
 };
 
-// Initializes the rewriter. Installs the on_op_finalized callback on
-// the builder so newly created ops are added to the worklist.
-iree_status_t loom_rewriter_initialize(loom_rewriter_t* rewriter,
-                                       loom_module_t* module,
-                                       iree_arena_allocator_t* arena);
+// Initializes mutation tracking without allocating storage. Worklist scheduling
+// remains disabled until explicitly enabled or seeded by a rewrite driver.
+void loom_rewriter_initialize(loom_rewriter_t* rewriter, loom_module_t* module,
+                              iree_arena_allocator_t* arena);
 
 void loom_rewriter_deinitialize(loom_rewriter_t* rewriter);
 
-// Seeds the worklist with all live ops in |region| and its nested regions.
+// Enables tracking of operations affected by subsequent mutations. Calling this
+// on an enabled rewriter preserves its pending operations and allocated
+// storage. A driver enables tracking before edits whose notifications it must
+// consume; enabling does not discover edits made while scheduling was disabled.
+iree_status_t loom_rewriter_enable_worklist(loom_rewriter_t* rewriter);
+
+// Enables and seeds the worklist with live ops in |region| and nested regions.
 iree_status_t loom_rewriter_seed_region(loom_rewriter_t* rewriter,
                                         loom_region_t* region);
 
-// Seeds the worklist with all live ops in a function-like body region.
+// Enables and seeds the worklist with live ops in a function-like body region.
 iree_status_t loom_rewriter_seed_function(loom_rewriter_t* rewriter,
                                           loom_func_like_t function);
 
@@ -265,7 +274,8 @@ iree_status_t loom_rewriter_erase_if_dead(loom_rewriter_t* rewriter,
 // Worklist
 //===----------------------------------------------------------------------===//
 
-// Adds an op to the worklist (no-op if dead or already on worklist).
+// Adds an op to the enabled worklist. No-op when tracking is disabled or the
+// operation is dead or already queued.
 iree_status_t loom_rewriter_add_to_worklist(loom_rewriter_t* rewriter,
                                             loom_op_t* op);
 

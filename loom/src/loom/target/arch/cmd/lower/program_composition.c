@@ -203,7 +203,7 @@ iree_status_t loom_cmd_program_composition_flatten(
   }
 
   loom_rewriter_t rewriter = {0};
-  IREE_RETURN_IF_ERROR(loom_rewriter_initialize(&rewriter, module, arena));
+  loom_rewriter_initialize(&rewriter, module, arena);
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < sccs.count && iree_status_is_ok(status);
        ++i) {

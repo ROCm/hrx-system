@@ -242,8 +242,7 @@ static iree_status_t loom_link_kernel_config_copy_workload_predicates(
                                                     workload_predicate_count,
                                                     &target_predicates));
   loom_rewriter_t rewriter;
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_initialize(&rewriter, module, scratch_arena));
+  loom_rewriter_initialize(&rewriter, module, scratch_arena);
   const iree_status_t status = loom_rewriter_set_attr(
       &rewriter, helper_op, loom_func_def_predicates_ATTR_INDEX,
       loom_attr_predicate_list(target_predicates, workload_predicate_count));
@@ -568,8 +567,8 @@ static iree_status_t loom_link_kernel_config_copy_ir_predicates(
                                                     selected_predicate_count,
                                                     &target_predicates));
   loom_rewriter_t rewriter = {0};
-  IREE_RETURN_IF_ERROR(loom_rewriter_initialize(
-      &rewriter, projection->target_module, projection->scratch_arena));
+  loom_rewriter_initialize(&rewriter, projection->target_module,
+                           projection->scratch_arena);
   const iree_status_t status = loom_rewriter_set_attr(
       &rewriter, target_op, target_attr_index,
       loom_attr_predicate_list(target_predicates, selected_predicate_count));

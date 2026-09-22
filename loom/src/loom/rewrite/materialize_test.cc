@@ -831,7 +831,7 @@ TEST_F(MaterializeTest, MovesBlockOpsAndRemapsCapturedBlockArgs) {
                                      LOOM_LOCATION_UNKNOWN, &sentinel_op));
 
   loom_rewriter_t rewriter = {};
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, source_, &remap_arena_));
+  loom_rewriter_initialize(&rewriter, source_, &remap_arena_);
   loom_ir_remap_t remap =
       InitializeSameModuleRemap(/*allow_unmapped_values=*/true);
   IREE_ASSERT_OK(loom_ir_remap_map_value(&remap, element, replacement));
@@ -896,7 +896,7 @@ TEST_F(MaterializeTest, MovesBlockOpsAndRemapsDynamicResultTypes) {
                                      LOOM_LOCATION_UNKNOWN, &sentinel_op));
 
   loom_rewriter_t rewriter = {};
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, source_, &remap_arena_));
+  loom_rewriter_initialize(&rewriter, source_, &remap_arena_);
   loom_ir_remap_t remap =
       InitializeSameModuleRemap(/*allow_unmapped_values=*/true);
   IREE_ASSERT_OK(loom_ir_remap_map_value(&remap, source_dim, target_dim));
@@ -952,7 +952,7 @@ TEST_F(MaterializeTest, MovesBlockOpsAndRemapsPredicateAttrs) {
                                      LOOM_LOCATION_UNKNOWN, &sentinel_op));
 
   loom_rewriter_t rewriter = {};
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, source_, &remap_arena_));
+  loom_rewriter_initialize(&rewriter, source_, &remap_arena_);
   loom_ir_remap_t remap =
       InitializeSameModuleRemap(/*allow_unmapped_values=*/true);
   IREE_ASSERT_OK(loom_ir_remap_map_value(&remap, source_dim, target_dim));
@@ -1064,7 +1064,7 @@ TEST_F(MaterializeTest, RejectsMoveWithUnavailableRemappedCaptures) {
                                      LOOM_LOCATION_UNKNOWN, &sentinel_op));
 
   loom_rewriter_t rewriter = {};
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, source_, &remap_arena_));
+  loom_rewriter_initialize(&rewriter, source_, &remap_arena_);
   loom_ir_remap_t remap =
       InitializeSameModuleRemap(/*allow_unmapped_values=*/true);
   loom_availability_analysis_t availability = InitializeAvailability();
@@ -1168,7 +1168,7 @@ TEST_F(MaterializeTest, MovesNestedAndWholeRegionHintSources) {
   EXPECT_FALSE(loom_region_has_hints(target_region));
 
   loom_rewriter_t rewriter = {};
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, source_, &remap_arena_));
+  loom_rewriter_initialize(&rewriter, source_, &remap_arena_);
   IREE_ASSERT_OK(loom_rewriter_move_to_block_end(
       &rewriter, nested, loom_region_entry_block(target_region), target_owner));
   EXPECT_EQ(source_region->hint_source_count, 1u);
@@ -1208,7 +1208,7 @@ TEST_F(MaterializeTest, MovesHintSubtreeFromParentlessDetachedRegion) {
   EXPECT_FALSE(loom_region_has_hints(source_->body));
 
   loom_rewriter_t rewriter = {};
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, source_, &remap_arena_));
+  loom_rewriter_initialize(&rewriter, source_, &remap_arena_);
   IREE_ASSERT_OK(
       loom_rewriter_move_before(&rewriter, nested, insertion_target));
   EXPECT_FALSE(loom_region_has_hints(detached_region));

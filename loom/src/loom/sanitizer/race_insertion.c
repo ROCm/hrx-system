@@ -640,8 +640,7 @@ iree_status_t loom_sanitizer_insert_race_observations_run(
   }
 
   loom_rewriter_t rewriter;
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_initialize(&rewriter, module, pass->arena));
+  loom_rewriter_initialize(&rewriter, module, pass->arena);
   loom_value_fact_table_t* value_facts = NULL;
   iree_status_t status = loom_pass_value_facts_prepare(
       pass, module, loom_pass_value_fact_scope_function(function),

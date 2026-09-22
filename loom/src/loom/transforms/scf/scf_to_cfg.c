@@ -239,7 +239,6 @@ static iree_status_t loom_scf_to_cfg_move_op_to_block_end(
   op->parent_op = parent_op;
   IREE_RETURN_IF_ERROR(loom_block_append_op(module, target_block, op));
   loom_scf_to_cfg_record_subtree_summaries(module, op);
-  IREE_RETURN_IF_ERROR(loom_rewriter_add_to_worklist(state->rewriter, op));
   state->rewriter->flags |= LOOM_REWRITER_FLAG_CHANGED;
   return iree_ok_status();
 }
@@ -1439,8 +1438,7 @@ iree_status_t loom_scf_to_cfg_run(loom_pass_t* pass, loom_module_t* module,
   }
 
   loom_rewriter_t rewriter;
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_initialize(&rewriter, module, pass->arena));
+  loom_rewriter_initialize(&rewriter, module, pass->arena);
 
   iree_arena_allocator_t lowering_arena = {0};
   iree_arena_initialize(pass->arena->block_pool, &lowering_arena);

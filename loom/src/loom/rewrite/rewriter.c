@@ -273,9 +273,8 @@ static iree_status_t loom_rewriter_cfg_region_storage(
 // Rewriter lifecycle
 //===----------------------------------------------------------------------===//
 
-iree_status_t loom_rewriter_initialize(loom_rewriter_t* rewriter,
-                                       loom_module_t* module,
-                                       iree_arena_allocator_t* arena) {
+void loom_rewriter_initialize(loom_rewriter_t* rewriter, loom_module_t* module,
+                              iree_arena_allocator_t* arena) {
   memset(rewriter, 0, sizeof(*rewriter));
   rewriter->module = module;
   rewriter->arena = arena;
@@ -286,17 +285,9 @@ iree_status_t loom_rewriter_initialize(loom_rewriter_t* rewriter,
   loom_builder_initialize(module, &module->arena, loom_module_block(module),
                           &rewriter->builder);
 
-  // Install the finalize callback so new ops enter the worklist.
+  // Record effects and facts independently of optional worklist scheduling.
   rewriter->builder.on_op_finalized.fn = loom_rewriter_on_op_finalized;
   rewriter->builder.on_op_finalized.user_data = rewriter;
-
-  // Allocate initial worklist from the pass arena.
-  iree_host_size_t capacity = LOOM_REWRITER_INITIAL_WORKLIST_CAPACITY;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, capacity, sizeof(loom_op_t*), (void**)&rewriter->worklist));
-  rewriter->worklist_capacity = capacity;
-
-  return iree_ok_status();
 }
 
 void loom_rewriter_deinitialize(loom_rewriter_t* rewriter) {
@@ -310,11 +301,24 @@ void loom_rewriter_deinitialize(loom_rewriter_t* rewriter) {
   memset(rewriter, 0, sizeof(*rewriter));
 }
 
+iree_status_t loom_rewriter_enable_worklist(loom_rewriter_t* rewriter) {
+  if (rewriter->worklist) {
+    return iree_ok_status();
+  }
+  const iree_host_size_t capacity = LOOM_REWRITER_INITIAL_WORKLIST_CAPACITY;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(rewriter->arena, capacity,
+                                                 sizeof(*rewriter->worklist),
+                                                 (void**)&rewriter->worklist));
+  rewriter->worklist_capacity = capacity;
+  return iree_ok_status();
+}
+
 iree_status_t loom_rewriter_seed_region(loom_rewriter_t* rewriter,
                                         loom_region_t* region) {
   if (!region) {
     return iree_ok_status();
   }
+  IREE_RETURN_IF_ERROR(loom_rewriter_enable_worklist(rewriter));
 
   // Iterative DFS over the explicit region tree. We maintain a stack of regions
   // to visit so that ops in nested regions are added to the worklist alongside
@@ -849,7 +853,8 @@ iree_status_t loom_rewriter_erase_if_dead(loom_rewriter_t* rewriter,
 
 iree_status_t loom_rewriter_add_to_worklist(loom_rewriter_t* rewriter,
                                             loom_op_t* op) {
-  if (op->flags & (LOOM_OP_FLAG_DEAD | LOOM_OP_FLAG_ON_WORKLIST)) {
+  if (!rewriter->worklist ||
+      (op->flags & (LOOM_OP_FLAG_DEAD | LOOM_OP_FLAG_ON_WORKLIST))) {
     return iree_ok_status();
   }
   op->flags |= LOOM_OP_FLAG_ON_WORKLIST;
@@ -930,6 +935,9 @@ static void loom_rewriter_invalidate_cfg_forwarding(loom_rewriter_t* rewriter,
 // an unused definition does not change an equation in its own CFG component.
 static iree_status_t loom_rewriter_add_parent_summary_ops_to_worklist(
     loom_rewriter_t* rewriter, loom_op_t* op) {
+  if (!rewriter->worklist && !rewriter->fact_table) {
+    return iree_ok_status();
+  }
   bool has_cfg_facts =
       rewriter->fact_table && rewriter->fact_table->regions.cfg_count;
   for (loom_op_t* parent = op ? op->parent_op : NULL; parent;
@@ -1004,6 +1012,9 @@ static iree_status_t loom_rewriter_add_value_ref_provider_to_worklist(
 
 static iree_status_t loom_rewriter_add_type_ref_providers_to_worklist(
     loom_rewriter_t* rewriter, loom_type_t type) {
+  if (!rewriter->worklist) {
+    return iree_ok_status();
+  }
   return loom_type_walk_value_refs(
       rewriter->module, type, loom_rewriter_add_value_ref_provider_to_worklist,
       rewriter);
@@ -1011,6 +1022,9 @@ static iree_status_t loom_rewriter_add_type_ref_providers_to_worklist(
 
 static iree_status_t loom_rewriter_add_subtree_providers_to_worklist(
     loom_rewriter_t* rewriter, loom_op_t* op) {
+  if (!rewriter->worklist) {
+    return iree_ok_status();
+  }
   return loom_op_walk_subtree_value_refs(
       rewriter->module, op, loom_rewriter_add_value_ref_provider_to_worklist,
       rewriter);
@@ -1035,6 +1049,9 @@ static iree_status_t loom_rewriter_add_attribute_users_to_worklist(
 static iree_status_t loom_rewriter_add_users_to_worklist(
     loom_rewriter_t* rewriter, loom_value_id_t value_id,
     loom_rewriter_user_change_flags_t flags) {
+  if (!rewriter->worklist && !rewriter->fact_table) {
+    return iree_ok_status();
+  }
   loom_value_t* value = loom_module_value(rewriter->module, value_id);
   const loom_use_t* uses = loom_value_uses(value);
   for (uint32_t i = 0; i < value->use_count; ++i) {
@@ -1079,6 +1096,9 @@ static iree_status_t loom_rewriter_add_users_to_worklist(
 static iree_status_t loom_rewriter_add_operand_users_except_to_worklist(
     loom_rewriter_t* rewriter, loom_value_id_t value_id,
     const loom_op_t* except_op) {
+  if (!rewriter->worklist && !rewriter->fact_table) {
+    return iree_ok_status();
+  }
   loom_value_t* value = loom_module_value(rewriter->module, value_id);
   const loom_use_t* uses = loom_value_uses(value);
   for (uint32_t i = 0; i < value->use_count; ++i) {
@@ -1344,11 +1364,13 @@ iree_status_t loom_rewriter_move_region_blocks(
   IREE_RETURN_IF_ERROR(loom_region_reserve_block_capacity(
       rewriter->module, storage_region, final_block_count));
 
-  for (uint16_t block_index = 0; block_index < source_region->block_count;
-       ++block_index) {
-    loom_op_t* op = NULL;
-    loom_block_for_each_op(source_region->blocks[block_index], op) {
-      IREE_RETURN_IF_ERROR(loom_rewriter_add_to_worklist(rewriter, op));
+  if (rewriter->worklist) {
+    for (uint16_t block_index = 0; block_index < source_region->block_count;
+         ++block_index) {
+      loom_op_t* op = NULL;
+      loom_block_for_each_op(source_region->blocks[block_index], op) {
+        IREE_RETURN_IF_ERROR(loom_rewriter_add_to_worklist(rewriter, op));
+      }
     }
   }
   if (source_parent_op != NULL) {

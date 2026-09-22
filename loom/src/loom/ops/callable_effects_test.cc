@@ -173,8 +173,7 @@ TEST_F(CallableEffectsTest, PropagationRefreshesCallerEffects) {
   EXPECT_TRUE(iree_any_bit_set(call_op->traits, LOOM_TRAIT_CALLABLE_BOUNDARY));
 
   loom_rewriter_t rewriter = {};
-  IREE_ASSERT_OK(
-      loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_));
+  loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_);
   IREE_EXPECT_OK(loom_callable_effects_propagate_purity(
       call_op, loom_func_like_callee(pure), loom_func_call_purity_ATTR_INDEX,
       &rewriter));

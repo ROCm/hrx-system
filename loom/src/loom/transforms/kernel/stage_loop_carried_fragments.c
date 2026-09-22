@@ -1070,12 +1070,11 @@ iree_status_t loom_stage_loop_carried_fragments_run(loom_pass_t* pass,
       iree_arena_checkpoint_save(&scratch_arena);
 
   loom_rewriter_t rewriter = {0};
-  bool rewriter_initialized = false;
+  loom_rewriter_initialize(&rewriter, module, pass->arena);
   if (iree_status_is_ok(status)) {
-    status = loom_rewriter_initialize(&rewriter, module, pass->arena);
+    status = loom_rewriter_enable_worklist(&rewriter);
   }
   if (iree_status_is_ok(status)) {
-    rewriter_initialized = true;
     status = loom_rewriter_enable_analysis(&rewriter, function, facts);
   }
   if (iree_status_is_ok(status)) {
@@ -1120,9 +1119,7 @@ iree_status_t loom_stage_loop_carried_fragments_run(loom_pass_t* pass,
     }
   }
 
-  if (rewriter_initialized) {
-    loom_rewriter_deinitialize(&rewriter);
-  }
+  loom_rewriter_deinitialize(&rewriter);
   iree_arena_deinitialize(&scratch_arena);
   if ((changed || !iree_status_is_ok(status)) && pass->value_facts) {
     loom_pass_value_fact_owner_invalidate(pass->value_facts);

@@ -299,8 +299,7 @@ TEST_F(CallableInlineTest, InlinesDirectCallAndReplacesReturnOperand) {
   loom_op_t* caller_op = BuildCaller(caller_ref, callee_ref, i32, &call_op);
 
   loom_rewriter_t rewriter = {};
-  IREE_ASSERT_OK(
-      loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_));
+  loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_);
   IREE_ASSERT_OK(loom_callable_inline_direct_call(&rewriter, call_op));
   loom_rewriter_deinitialize(&rewriter);
 
@@ -376,8 +375,7 @@ TEST_F(CallableInlineTest, AppendsLexicallyClosedCfgSplice) {
       &caller_builder, nullptr, 0, LOOM_LOCATION_UNKNOWN, &preexisting_return));
 
   loom_rewriter_t rewriter = {};
-  IREE_ASSERT_OK(
-      loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_));
+  loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_);
   IREE_ASSERT_OK(loom_callable_inline_direct_call(&rewriter, call_op));
   loom_rewriter_deinitialize(&rewriter);
 
@@ -443,8 +441,7 @@ TEST_F(CallableInlineTest, OrdersCfgSpliceBeforeExternalTailResultUse) {
                                         LOOM_LOCATION_UNKNOWN, &return_op));
 
   loom_rewriter_t rewriter = {};
-  IREE_ASSERT_OK(
-      loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_));
+  loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_);
   IREE_ASSERT_OK(loom_callable_inline_direct_call(&rewriter, call_op));
   loom_rewriter_deinitialize(&rewriter);
 
@@ -550,8 +547,7 @@ TEST_F(CallableInlineTest,
   const uint32_t value_count = module_->values.count;
 
   loom_rewriter_t rewriter = {};
-  IREE_ASSERT_OK(
-      loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_));
+  loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                         loom_callable_inline_direct_call(&rewriter, call_op));
   loom_rewriter_deinitialize(&rewriter);
@@ -613,8 +609,7 @@ TEST_F(CallableInlineTest, InlinesFuncLikeWithDeclaredTerminator) {
                                         LOOM_LOCATION_UNKNOWN, &return_op));
 
   loom_rewriter_t rewriter = {};
-  IREE_ASSERT_OK(
-      loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_));
+  loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_);
   IREE_ASSERT_OK(loom_callable_inline_direct_call(&rewriter, invoke_op));
   loom_rewriter_deinitialize(&rewriter);
 
@@ -644,8 +639,7 @@ TEST_F(CallableInlineTest, ConsumingInlineMovesBodyAndErasesCallee) {
   loom_op_t* caller_op = BuildCaller(caller_ref, callee_ref, i32, &call_op);
 
   loom_rewriter_t rewriter = {};
-  IREE_ASSERT_OK(
-      loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_));
+  loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_);
   loom_availability_analysis_t availability = InitializeAvailability();
   IREE_ASSERT_OK(loom_callable_inline_consuming_call(&rewriter, &availability,
                                                      call_op, callee));
@@ -719,8 +713,7 @@ TEST_F(CallableInlineTest, ConsumingInlineMovesCfgBlocksAndErasesCallee) {
   ASSERT_EQ(caller_arg_count, 1u);
 
   loom_rewriter_t rewriter = {};
-  IREE_ASSERT_OK(
-      loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_));
+  loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_);
   loom_availability_analysis_t availability = InitializeAvailability();
   IREE_ASSERT_OK(loom_callable_inline_consuming_call(&rewriter, &availability,
                                                      call_op, callee));
@@ -813,8 +806,7 @@ TEST_F(CallableInlineTest, ConsumingInlinePreservesNonReturningLoop) {
                                         LOOM_LOCATION_UNKNOWN, &return_op));
 
   loom_rewriter_t rewriter = {};
-  IREE_ASSERT_OK(
-      loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_));
+  loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_);
   loom_availability_analysis_t availability = InitializeAvailability();
   IREE_ASSERT_OK(loom_callable_inline_consuming_call(&rewriter, &availability,
                                                      call_op, callee));
@@ -847,8 +839,7 @@ TEST_F(CallableInlineTest, InlinesExactTemplateCall) {
       BuildTemplateCaller(caller_ref, callee_ref, i32, &call_op);
 
   loom_rewriter_t rewriter = {};
-  IREE_ASSERT_OK(
-      loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_));
+  loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_);
   IREE_ASSERT_OK(loom_callable_inline_direct_call(&rewriter, call_op));
   loom_rewriter_deinitialize(&rewriter);
 
@@ -875,8 +866,7 @@ TEST_F(CallableInlineTest, InlinesMultiResultCall) {
   ASSERT_EQ(arg_count, 2u);
 
   loom_rewriter_t rewriter = {};
-  IREE_ASSERT_OK(
-      loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_));
+  loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_);
   IREE_ASSERT_OK(loom_callable_inline_direct_call(&rewriter, call_op));
   loom_rewriter_deinitialize(&rewriter);
 
@@ -924,8 +914,7 @@ TEST_F(CallableInlineTest, RejectsRecursiveSelfInline) {
                                         LOOM_LOCATION_UNKNOWN, &return_op));
 
   loom_rewriter_t rewriter = {};
-  IREE_ASSERT_OK(
-      loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_));
+  loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                         loom_callable_inline_direct_call(&rewriter, call_op));
   loom_rewriter_deinitialize(&rewriter);
@@ -941,8 +930,7 @@ TEST_F(CallableInlineTest, RejectsMoveIntoDescendantBlockBeforeMutation) {
   ASSERT_NE(body_block, nullptr);
 
   loom_rewriter_t rewriter = {};
-  IREE_ASSERT_OK(
-      loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_));
+  loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                         loom_rewriter_move_to_block_end(
                             &rewriter, function_op, body_block, function_op));
@@ -1024,8 +1012,7 @@ TEST_P(CallableBatchTest, PublishesBlockOrderAcrossInterleavedCallers) {
   loom_block_t* callee_exit = nullptr;
   IREE_ASSERT_OK(loom_region_append_block(module_, callee_body, &callee_exit));
   loom_rewriter_t rewriter = {};
-  IREE_ASSERT_OK(
-      loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_));
+  loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_);
   IREE_ASSERT_OK(loom_rewriter_move_to_block_end(
       &rewriter, callee_entry->last_op, callee_exit, callee_op));
   loom_builder_t callee_builder = BodyBuilder(callee_op);

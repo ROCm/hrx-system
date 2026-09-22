@@ -1221,8 +1221,7 @@ iree_status_t loom_amdgpu_hal_binding_materialize_buffer_descriptors(
   IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_make_sgpr_type(
       module, descriptor_set, 2, &sgpr_x2_type));
   loom_rewriter_t rewriter = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_initialize(&rewriter, module, scratch_arena));
+  loom_rewriter_initialize(&rewriter, module, scratch_arena);
   iree_status_t status =
       loom_amdgpu_hal_binding_materialize_buffer_descriptors_with_types(
           &rewriter, function_op, descriptor_set, sgpr_type, sgpr_x2_type,
@@ -1275,8 +1274,7 @@ iree_status_t loom_amdgpu_hal_binding_materialize(
   IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_make_sgpr_type(
       module, descriptor_set, 8, &sgpr_x8_type));
   loom_rewriter_t rewriter = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_initialize(&rewriter, module, scratch_arena));
+  loom_rewriter_initialize(&rewriter, module, scratch_arena);
   iree_status_t status = iree_ok_status();
   if (loom_low_kernel_def_isa(function_op) &&
       (layout.resource_count != 0 || layout.direct_arg_count != 0 ||

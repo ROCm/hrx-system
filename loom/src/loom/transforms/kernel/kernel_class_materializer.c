@@ -402,11 +402,9 @@ iree_status_t loom_kernel_class_materialize(
                                   &module_projection, &target_module);
   }
 
-  loom_rewriter_t rewriter;
-  bool rewriter_is_initialized = false;
+  loom_rewriter_t rewriter = {0};
   if (iree_status_is_ok(status)) {
-    status = loom_rewriter_initialize(&rewriter, target_module, &scratch_arena);
-    rewriter_is_initialized = iree_status_is_ok(status);
+    loom_rewriter_initialize(&rewriter, target_module, &scratch_arena);
   }
   for (uint32_t i = 0;
        i < collection->accepted_decision_count && iree_status_is_ok(status);
@@ -419,9 +417,7 @@ iree_status_t loom_kernel_class_materialize(
         operation_projections[i].target_op, &rewriter);
   }
 
-  if (rewriter_is_initialized) {
-    loom_rewriter_deinitialize(&rewriter);
-  }
+  loom_rewriter_deinitialize(&rewriter);
   const loom_symbol_ref_t target_kernel =
       target_module != NULL
           ? loom_ir_module_projection_target_symbol(

@@ -281,7 +281,61 @@ TEST_F(GreedyRewriteTest, ExplicitTargetFactsSetAnalysisScope) {
   iree_arena_deinitialize(&arena);
 }
 
-TEST_F(GreedyRewriteTest, AttributeMutationRefreshesConstantFacts) {
+TEST_F(GreedyRewriteTest, MutationTrackingDoesNotRequireAWorklist) {
+  const loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_op_t* original = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(1), i32,
+                                          LOOM_LOCATION_UNKNOWN, &original));
+  loom_value_id_t original_value = loom_test_constant_result(original);
+  loom_op_t* user = nullptr;
+  IREE_ASSERT_OK(loom_test_use_build(&builder_, &original_value, 1,
+                                     LOOM_LOCATION_UNKNOWN, &user));
+
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool_, &arena);
+  loom_rewriter_t rewriter;
+  loom_rewriter_initialize(&rewriter, module_, &arena);
+  loom_builder_set_before(&rewriter.builder, original);
+  loom_op_t* replacement = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(&rewriter.builder, loom_attr_i64(7),
+                                          i32, LOOM_LOCATION_UNKNOWN,
+                                          &replacement));
+  loom_value_id_t replacement_value = loom_test_constant_result(replacement);
+  IREE_ASSERT_OK(loom_rewriter_replace_all_uses_and_erase(
+      &rewriter, original, &replacement_value, 1));
+  EXPECT_EQ(loom_op_operands(user)[0], replacement_value);
+  EXPECT_EQ(loom_module_value(module_, original_value)->use_count, 0u);
+  EXPECT_EQ(loom_module_value(module_, replacement_value)->use_count, 1u);
+  EXPECT_TRUE(original->flags & LOOM_OP_FLAG_DEAD);
+  EXPECT_EQ(rewriter.created_op_count, 1u);
+  EXPECT_EQ(rewriter.erased_op_count, 1u);
+  EXPECT_EQ(rewriter.worklist, nullptr);
+  EXPECT_FALSE(replacement->flags & LOOM_OP_FLAG_ON_WORKLIST);
+  EXPECT_FALSE(user->flags & LOOM_OP_FLAG_ON_WORKLIST);
+
+  // Seeding starts scheduling from the current live IR, including operations
+  // created before tracking was enabled. Enabling again preserves that queue.
+  IREE_ASSERT_OK(loom_rewriter_seed_function(&rewriter, function_));
+  IREE_ASSERT_OK(loom_rewriter_enable_worklist(&rewriter));
+  EXPECT_EQ(loom_rewriter_pop(&rewriter), user);
+  EXPECT_EQ(loom_rewriter_pop(&rewriter), replacement);
+  EXPECT_EQ(loom_rewriter_pop(&rewriter), nullptr);
+
+  // Subsequent builder notifications use the same queue. Deinitialization must
+  // release membership even if its consumer stops before draining the queue.
+  loom_builder_set_before(&rewriter.builder, user);
+  loom_op_t* subsequent = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(&rewriter.builder, loom_attr_i64(9),
+                                          i32, LOOM_LOCATION_UNKNOWN,
+                                          &subsequent));
+  EXPECT_TRUE(subsequent->flags & LOOM_OP_FLAG_ON_WORKLIST);
+  loom_rewriter_deinitialize(&rewriter);
+  EXPECT_FALSE(subsequent->flags & LOOM_OP_FLAG_ON_WORKLIST);
+  iree_arena_deinitialize(&arena);
+}
+
+TEST_F(GreedyRewriteTest,
+       AttributeMutationRefreshesConstantFactsWithoutWorklist) {
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
   loom_op_t* constant_op = NULL;
   IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(1), i32,
@@ -297,7 +351,7 @@ TEST_F(GreedyRewriteTest, AttributeMutationRefreshesConstantFacts) {
       &fact_owner, module_, loom_pass_value_fact_scope_function(function_),
       &facts));
   loom_rewriter_t rewriter;
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, module_, &arena));
+  loom_rewriter_initialize(&rewriter, module_, &arena);
   IREE_ASSERT_OK(loom_rewriter_enable_analysis(&rewriter, function_, facts));
 
   int64_t value = 0;
@@ -310,6 +364,8 @@ TEST_F(GreedyRewriteTest, AttributeMutationRefreshesConstantFacts) {
   ASSERT_TRUE(loom_value_facts_as_exact_i64(
       loom_rewriter_value_facts(&rewriter, result), &value));
   EXPECT_EQ(value, 7);
+  EXPECT_EQ(rewriter.worklist, nullptr);
+  EXPECT_FALSE(constant_op->flags & LOOM_OP_FLAG_ON_WORKLIST);
 
   loom_rewriter_deinitialize(&rewriter);
   loom_pass_value_fact_owner_deinitialize(&fact_owner);
@@ -341,7 +397,8 @@ TEST_F(GreedyRewriteTest, OperandMutationRequeuesUsersWhenFactsRemainEqual) {
       &fact_owner, module_, loom_pass_value_fact_scope_function(function_),
       &facts));
   loom_rewriter_t rewriter;
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, module_, &arena));
+  loom_rewriter_initialize(&rewriter, module_, &arena);
+  IREE_ASSERT_OK(loom_rewriter_enable_worklist(&rewriter));
   loom_rewriter_attach_value_facts(&rewriter, facts);
 
   const loom_value_facts_t before =
@@ -403,7 +460,8 @@ TEST_F(GreedyRewriteTest, CyclicFactsNarrowAfterSemanticUpdates) {
   IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
       &owner, module_, loom_pass_value_fact_scope_function(function_), &facts));
   loom_rewriter_t rewriter;
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, module_, &arena));
+  loom_rewriter_initialize(&rewriter, module_, &arena);
+  IREE_ASSERT_OK(loom_rewriter_enable_worklist(&rewriter));
   loom_rewriter_attach_value_facts(&rewriter, facts);
   iree_host_size_t touched_count = facts->touched_count;
   EXPECT_TRUE(
@@ -532,7 +590,8 @@ TEST_F(GreedyRewriteTest, InductionFactsTrackSemanticAndTopologyEdits) {
   IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
       &owner, module_, loom_pass_value_fact_scope_function(function_), &facts));
   loom_rewriter_t rewriter;
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, module_, &arena));
+  loom_rewriter_initialize(&rewriter, module_, &arena);
+  IREE_ASSERT_OK(loom_rewriter_enable_worklist(&rewriter));
   loom_rewriter_attach_value_facts(&rewriter, facts);
   int check_index = 0;
   auto check = [&](int64_t expected_lo, int64_t expected_hi) {
@@ -710,7 +769,8 @@ TEST_F(GreedyRewriteTest, SelectorEditsRefreshNonlocalAndCyclicControlFacts) {
   IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
       &owner, module_, loom_pass_value_fact_scope_function(function_), &facts));
   loom_rewriter_t rewriter;
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, module_, &arena));
+  loom_rewriter_initialize(&rewriter, module_, &arena);
+  IREE_ASSERT_OK(loom_rewriter_enable_worklist(&rewriter));
   loom_rewriter_attach_value_facts(&rewriter, facts);
 
   auto check_fresh = [&](bool expected_uniform) {
@@ -856,7 +916,8 @@ TEST_P(TemporalFactsRewriteTest, TracksSelectorsAndMovedObservers) {
   IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
       &owner, module_, loom_pass_value_fact_scope_function(function_), &facts));
   loom_rewriter_t rewriter;
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, module_, &arena));
+  loom_rewriter_initialize(&rewriter, module_, &arena);
+  IREE_ASSERT_OK(loom_rewriter_enable_worklist(&rewriter));
   loom_rewriter_attach_value_facts(&rewriter, facts);
 
   auto check_fresh = [&](loom_value_id_t value, bool expected_uniform) {
@@ -995,7 +1056,8 @@ TEST_F(GreedyRewriteTest, ForwardingComponentsTrackPayloadReplacements) {
   IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
       &owner, module_, loom_pass_value_fact_scope_function(function_), &facts));
   loom_rewriter_t rewriter;
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, module_, &arena));
+  loom_rewriter_initialize(&rewriter, module_, &arena);
+  IREE_ASSERT_OK(loom_rewriter_enable_worklist(&rewriter));
   loom_rewriter_attach_value_facts(&rewriter, facts);
 
   auto check_facts = [&](bool expect_exact) {
@@ -1121,7 +1183,8 @@ TEST_P(ForwardingFactsRewriteTest, OpenQueuesRestartAcrossSemanticEdits) {
   IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
       &owner, module_, loom_pass_value_fact_scope_function(function_), &facts));
   loom_rewriter_t rewriter;
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, module_, &arena));
+  loom_rewriter_initialize(&rewriter, module_, &arena);
+  IREE_ASSERT_OK(loom_rewriter_enable_worklist(&rewriter));
   loom_rewriter_attach_value_facts(&rewriter, facts);
 
   enum class QueueState { kOpenUniform, kOpenUnknown, kClosed, kUnknownInput };
@@ -1231,7 +1294,8 @@ TEST_F(GreedyRewriteTest, NonEquationEditsPreserveCyclicFacts) {
   IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
       &owner, module_, loom_pass_value_fact_scope_function(function_), &facts));
   loom_rewriter_t rewriter;
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, module_, &arena));
+  loom_rewriter_initialize(&rewriter, module_, &arena);
+  IREE_ASSERT_OK(loom_rewriter_enable_worklist(&rewriter));
   loom_rewriter_attach_value_facts(&rewriter, facts);
   auto drain = [&]() {
     iree_host_size_t count = 0;
@@ -1367,7 +1431,8 @@ TEST_P(ConditionInductionFactsRewriteTest, SemanticEditsMatchFreshAnalysis) {
   IREE_ASSERT_OK(
       loom_pass_value_fact_owner_acquire(&owner, module_, scope, &facts));
   loom_rewriter_t rewriter;
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, module_, &arena));
+  loom_rewriter_initialize(&rewriter, module_, &arena);
+  IREE_ASSERT_OK(loom_rewriter_enable_worklist(&rewriter));
   loom_rewriter_attach_value_facts(&rewriter, facts);
   int check_index = 0;
   auto check = [&](int64_t first, int64_t last_body, int64_t terminal,
@@ -1546,7 +1611,8 @@ TEST_P(StructuredForwardingFactsRewriteTest,
   IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
       &owner, module_, loom_pass_value_fact_scope_function(function_), &facts));
   loom_rewriter_t rewriter;
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, module_, &arena));
+  loom_rewriter_initialize(&rewriter, module_, &arena);
+  IREE_ASSERT_OK(loom_rewriter_enable_worklist(&rewriter));
   loom_rewriter_attach_value_facts(&rewriter, facts);
   loom_builder_set_before(&rewriter.builder, function_yield);
 
@@ -1734,7 +1800,8 @@ TEST_F(GreedyRewriteTest,
   IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
       &owner, module_, loom_pass_value_fact_scope_function(function_), &facts));
   loom_rewriter_t rewriter;
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, module_, &arena));
+  loom_rewriter_initialize(&rewriter, module_, &arena);
+  IREE_ASSERT_OK(loom_rewriter_enable_worklist(&rewriter));
   loom_rewriter_attach_value_facts(&rewriter, facts);
   auto expect_users = [&]() {
     bool saw_predicate = false;
@@ -1773,7 +1840,7 @@ TEST_F(GreedyRewriteTest, NamePolicyCanDisableOptionalNames) {
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool_, &arena);
   loom_rewriter_t rewriter;
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, module_, &arena));
+  loom_rewriter_initialize(&rewriter, module_, &arena);
   rewriter.name_policy = 0;
 
   IREE_ASSERT_OK(loom_rewriter_copy_value_name(&rewriter, source, target));

@@ -717,8 +717,7 @@ iree_status_t loom_decompose_view_transports_run(loom_pass_t* pass,
     return iree_ok_status();
   }
   loom_rewriter_t rewriter;
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_initialize(&rewriter, module, pass->arena));
+  loom_rewriter_initialize(&rewriter, module, pass->arena);
   iree_status_t status = loom_local_value_domain_acquire_for_region_tree(
       module, body, pass->arena, &plan.domain);
   if (iree_status_is_ok(status)) {
@@ -1084,8 +1083,7 @@ iree_status_t loom_decompose_view_root_selections_run(
   }
 
   loom_rewriter_t rewriter;
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_initialize(&rewriter, module, pass->arena));
+  loom_rewriter_initialize(&rewriter, module, pass->arena);
   iree_status_t status = loom_local_value_domain_acquire_for_region_tree(
       module, body, pass->arena, &plan.domain);
   if (iree_status_is_ok(status)) {

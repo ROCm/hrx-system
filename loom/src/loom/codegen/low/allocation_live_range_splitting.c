@@ -467,7 +467,7 @@ iree_status_t loom_low_allocation_replicate_pair_sources(
 
   loom_rewriter_t rewriter = {0};
   if (iree_status_is_ok(status) && profitable_candidate_count != 0) {
-    status = loom_rewriter_initialize(&rewriter, module, &scratch_arena);
+    loom_rewriter_initialize(&rewriter, module, &scratch_arena);
   }
   for (uint32_t i = 0; i < candidate_count && iree_status_is_ok(status); ++i) {
     const loom_low_allocation_pair_replication_candidate_t* candidate =
@@ -548,7 +548,7 @@ iree_status_t loom_low_allocation_rollback_pair_replication(
     return iree_ok_status();
   }
   loom_rewriter_t rewriter = {0};
-  IREE_RETURN_IF_ERROR(loom_rewriter_initialize(&rewriter, module, arena));
+  loom_rewriter_initialize(&rewriter, module, arena);
   const iree_status_t status =
       loom_low_allocation_pair_replication_rollback_edits(&rewriter, result);
   loom_rewriter_deinitialize(&rewriter);
@@ -590,7 +590,7 @@ static iree_status_t loom_low_allocation_try_split_fixed_value(
   }
 
   loom_rewriter_t rewriter = {0};
-  IREE_RETURN_IF_ERROR(loom_rewriter_initialize(&rewriter, module, arena));
+  loom_rewriter_initialize(&rewriter, module, arena);
   loom_builder_ip_t saved_ip = loom_builder_save(&rewriter.builder);
   if (insertion_anchor != NULL) {
     loom_builder_set_after(&rewriter.builder, insertion_anchor);

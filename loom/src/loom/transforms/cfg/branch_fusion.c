@@ -670,8 +670,7 @@ iree_status_t loom_branch_fusion_run(loom_pass_t* pass, loom_module_t* module,
   }
 
   loom_rewriter_t rewriter;
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_initialize(&rewriter, module, pass->arena));
+  loom_rewriter_initialize(&rewriter, module, pass->arena);
 
   iree_arena_allocator_t fusion_arena = {0};
   iree_arena_initialize(pass->arena->block_pool, &fusion_arena);

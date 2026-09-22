@@ -121,8 +121,7 @@ iree_status_t loom_materialize_locations_run(loom_pass_t* pass,
   memset(entries, 0, capacity * sizeof(*entries));
   uint32_t next_name = 0;
   loom_rewriter_t rewriter;
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_initialize(&rewriter, module, pass->arena));
+  loom_rewriter_initialize(&rewriter, module, pass->arena);
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < captures.count && iree_status_is_ok(status);
        ++i) {

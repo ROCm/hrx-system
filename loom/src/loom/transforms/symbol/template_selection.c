@@ -1193,8 +1193,7 @@ static iree_status_t loom_template_selection_execute_rewrites(
   }
 
   loom_rewriter_t rewriter = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_initialize(&rewriter, state->module, state->pass->arena));
+  loom_rewriter_initialize(&rewriter, state->module, state->pass->arena);
 
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;

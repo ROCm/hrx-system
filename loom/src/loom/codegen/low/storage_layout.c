@@ -49,13 +49,10 @@ iree_status_t loom_low_storage_layout_hoist_reservations(
         if (op == insertion_op) {
           insertion_op = next_op;
         } else {
-          // Functions with an existing storage prefix need no rewrite arena.
           if (rewriter.module == NULL) {
-            status = loom_rewriter_initialize(&rewriter, module, arena);
+            loom_rewriter_initialize(&rewriter, module, arena);
           }
-          if (iree_status_is_ok(status)) {
-            status = loom_rewriter_move_before(&rewriter, op, insertion_op);
-          }
+          status = loom_rewriter_move_before(&rewriter, op, insertion_op);
         }
       }
       op = next_op;

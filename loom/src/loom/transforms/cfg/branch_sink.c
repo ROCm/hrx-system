@@ -465,8 +465,7 @@ iree_status_t loom_branch_sink_run(loom_pass_t* pass, loom_module_t* module,
   }
 
   loom_rewriter_t rewriter;
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_initialize(&rewriter, module, pass->arena));
+  loom_rewriter_initialize(&rewriter, module, pass->arena);
 
   loom_branch_sink_context_t context = {
       .pass = pass,

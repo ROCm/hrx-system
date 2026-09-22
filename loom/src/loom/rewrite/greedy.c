@@ -96,15 +96,14 @@ iree_status_t loom_greedy_rewrite_run_region(
                                 ? options->max_iterations
                                 : LOOM_GREEDY_REWRITE_DEFAULT_MAX_ITERATIONS;
   loom_greedy_rewrite_result_t result = {0};
-  iree_status_t status = loom_rewriter_initialize(
-      &driver->rewriter, driver->module, driver->scratch_arena);
-  if (iree_status_is_ok(status)) {
-    driver->rewriter_initialized = true;
-    loom_rewriter_attach_value_facts(&driver->rewriter, driver->fact_table);
-    if (options) {
-      driver->rewriter.materialize_constant = options->materialize_constant;
-    }
+  loom_rewriter_initialize(&driver->rewriter, driver->module,
+                           driver->scratch_arena);
+  driver->rewriter_initialized = true;
+  loom_rewriter_attach_value_facts(&driver->rewriter, driver->fact_table);
+  if (options) {
+    driver->rewriter.materialize_constant = options->materialize_constant;
   }
+  iree_status_t status = loom_rewriter_enable_worklist(&driver->rewriter);
   bool prepare_region_called = false;
   if (iree_status_is_ok(status) && callbacks && callbacks->prepare_region) {
     prepare_region_called = true;

@@ -454,8 +454,7 @@ iree_status_t loom_cfg_converge_run(loom_pass_t* pass, loom_module_t* module,
     return iree_ok_status();
   }
   loom_rewriter_t rewriter = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_initialize(&rewriter, module, pass->arena));
+  loom_rewriter_initialize(&rewriter, module, pass->arena);
   iree_arena_allocator_t arena;
   iree_arena_initialize(pass->arena->block_pool, &arena);
   loom_value_fact_table_t* facts = NULL;

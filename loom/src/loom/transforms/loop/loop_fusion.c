@@ -927,8 +927,7 @@ iree_status_t loom_loop_fusion_run(loom_pass_t* pass, loom_module_t* module,
   }
 
   loom_rewriter_t rewriter;
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_initialize(&rewriter, module, pass->arena));
+  loom_rewriter_initialize(&rewriter, module, pass->arena);
   loom_value_fact_table_t* facts = NULL;
   iree_status_t status = loom_pass_value_facts_prepare(
       pass, module,

@@ -681,8 +681,7 @@ iree_status_t loom_scf_pipeline_run(loom_pass_t* pass, loom_module_t* module,
   IREE_RETURN_IF_ERROR(
       loom_scf_pipeline_resolve_facts(pass, module, function, &loops));
   loom_rewriter_t rewriter;
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_initialize(&rewriter, module, pass->arena));
+  loom_rewriter_initialize(&rewriter, module, pass->arena);
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(pass->arena->block_pool, &scratch_arena);
   loom_scf_pipeline_context_t context = {

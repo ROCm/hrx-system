@@ -1080,8 +1080,7 @@ iree_status_t loom_amdgpu_lower_spill_traffic(
       scratch_arena));
 
   loom_rewriter_t rewriter = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_initialize(&rewriter, module, scratch_arena));
+  loom_rewriter_initialize(&rewriter, module, scratch_arena);
   // This is terminal target lowering: no later structural spill layer can
   // recursively spill its packet helpers. Preserve every created helper and
   // every existing value consumed by a lowered spill store in registers.

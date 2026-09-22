@@ -447,7 +447,8 @@ iree_status_t loom_aie2p_pipeline_composition_materialize(
   }
 
   loom_rewriter_t rewriter = {0};
-  iree_status_t status = loom_rewriter_initialize(&rewriter, module, arena);
+  loom_rewriter_initialize(&rewriter, module, arena);
+  iree_status_t status = iree_ok_status();
   for (uint32_t group_index = 0;
        group_index < plan->group_count && iree_status_is_ok(status);
        ++group_index) {

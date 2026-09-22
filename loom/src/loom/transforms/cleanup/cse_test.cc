@@ -334,7 +334,7 @@ TEST_F(CSETest, RewriterReplaceAttrDictBuildsFreshCanonicalDict) {
   iree_arena_allocator_t pass_arena;
   iree_arena_initialize(&block_pool_, &pass_arena);
   loom_rewriter_t rewriter;
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, module_, &pass_arena));
+  loom_rewriter_initialize(&rewriter, module_, &pass_arena);
   IREE_ASSERT_OK(loom_rewriter_replace_attr_dict(
       &rewriter, attrs_op, loom_test_attrs_dict_ATTR_INDEX,
       loom_make_named_attr_update_slice(updates, IREE_ARRAYSIZE(updates))));
@@ -390,7 +390,7 @@ TEST_F(CSETest, RewriterReplaceAttrDictRecordsTypeValueRefs) {
   iree_arena_allocator_t pass_arena;
   iree_arena_initialize(&block_pool_, &pass_arena);
   loom_rewriter_t rewriter;
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, module_, &pass_arena));
+  loom_rewriter_initialize(&rewriter, module_, &pass_arena);
   IREE_ASSERT_OK(loom_rewriter_replace_attr_dict(
       &rewriter, attrs_op, loom_test_attrs_dict_ATTR_INDEX,
       loom_make_named_attr_update_slice(updates, IREE_ARRAYSIZE(updates))));
@@ -430,7 +430,7 @@ TEST_F(CSETest, RewriterSetAttrRejectsMalformedDictAttr) {
   iree_arena_allocator_t pass_arena;
   iree_arena_initialize(&block_pool_, &pass_arena);
   loom_rewriter_t rewriter;
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, module_, &pass_arena));
+  loom_rewriter_initialize(&rewriter, module_, &pass_arena);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       loom_rewriter_set_attr(
@@ -469,7 +469,7 @@ TEST_F(CSETest, RewriterSetAttrRejectsNonCanonicalDictAttrOrder) {
   iree_arena_allocator_t pass_arena;
   iree_arena_initialize(&block_pool_, &pass_arena);
   loom_rewriter_t rewriter;
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, module_, &pass_arena));
+  loom_rewriter_initialize(&rewriter, module_, &pass_arena);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       loom_rewriter_set_attr(
@@ -503,7 +503,7 @@ TEST_F(CSETest, RewriterSetAttrRejectsDuplicateDictAttrKeys) {
   iree_arena_allocator_t pass_arena;
   iree_arena_initialize(&block_pool_, &pass_arena);
   loom_rewriter_t rewriter;
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, module_, &pass_arena));
+  loom_rewriter_initialize(&rewriter, module_, &pass_arena);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       loom_rewriter_set_attr(

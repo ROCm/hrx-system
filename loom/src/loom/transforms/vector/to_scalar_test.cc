@@ -306,7 +306,7 @@ TEST_F(VectorToScalarTest, TargetFragmentLayoutEnablesDistributedMmaFallback) {
   ASSERT_NE(facts, nullptr);
 
   loom_rewriter_t rewriter = {};
-  IREE_ASSERT_OK(loom_rewriter_initialize(&rewriter, module, &pass_arena));
+  loom_rewriter_initialize(&rewriter, module, &pass_arena);
   IREE_ASSERT_OK(loom_rewriter_enable_analysis(&rewriter, function, facts));
 
   const loom_pass_info_t* pass_info = loom_vector_to_scalar_pass_info();
