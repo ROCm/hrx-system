@@ -241,6 +241,7 @@ static iree_status_t loom_low_emission_frame_build_impl(
       .structural_state_reads = options->schedule_structural_state_reads,
       .structural_models = options->schedule_structural_models,
       .diagnostic_flags = options->schedule_diagnostic_flags,
+      .flags = options->schedule_flags,
       .strategy = options->schedule_strategy,
   };
   if (iree_status_is_ok(status)) {

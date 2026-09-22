@@ -14,6 +14,8 @@
 extern "C" {
 #endif
 
+typedef struct loom_low_schedule_table_t loom_low_schedule_table_t;
+
 // A concrete instruction, including helpers that have no source descriptor
 // packet. Bindings describe the selected native instruction, not the semantic
 // register class of a source SSA value. The view is borrowed for one query.
@@ -25,12 +27,17 @@ typedef struct loom_low_physical_instruction_t {
 } loom_low_physical_instruction_t;
 
 // Final issue admission for software-timed register machines. Logical ordering
-// has already established semantic dependencies. This owner adds the hard
-// dependencies exposed by concrete storage reuse and generated instructions,
-// and admits the collective resource demand of each physical issue group.
+// has already established semantic dependencies. This owner carries those
+// deadlines through native expansion, adds the hard dependencies exposed by
+// concrete storage reuse and generated instructions, and admits the collective
+// resource demand of each physical issue group.
 // Targets without software-visible event rules retain their hardware hazard
 // protocol instead of inventing fixed issue delays.
 typedef struct loom_low_physical_issue_t {
+  // Borrowed logical schedule with its retained grouped dependency index.
+  const loom_low_schedule_table_t* schedule;
+  // Physical availability deadlines indexed by source schedule node.
+  uint32_t* node_ready_cycles;
   // Register-access deadlines, including every outstanding reader and writer.
   loom_low_schedule_event_frontier_t events;
   // Resource occupancy for the realized instruction stream.
@@ -39,9 +46,26 @@ typedef struct loom_low_physical_issue_t {
   uint32_t effect_quiescent_cycle;
 } loom_low_physical_issue_t;
 
+// Initializes final issue state for a successful schedule constructed with
+// RETAIN_DEPENDENCY_INDEX. The schedule outlives this arena-owned state.
 iree_status_t loom_low_physical_issue_initialize(
-    const loom_low_descriptor_set_t* descriptor_set,
-    iree_arena_allocator_t* arena, loom_low_physical_issue_t* out_issue);
+    const loom_low_schedule_table_t* schedule, iree_arena_allocator_t* arena,
+    loom_low_physical_issue_t* out_issue);
+
+// Earliest issue from already realized semantic producers of a scheduled
+// packet. Storage setup may issue before its payload is available; native
+// moves still observe the concrete register-event rules.
+uint32_t loom_low_physical_issue_source_ready_cycle(
+    const loom_low_physical_issue_t* issue, uint32_t scheduled_packet_index);
+
+// Forwards a source packet's actual issue and payload availability to its
+// same-block consumers through the retained outgoing groups. Call in source
+// schedule order, including coalesced packets without native instructions.
+// Repeat for successive native pieces of one source packet so its last piece
+// establishes consumer deadlines. Cross-block timing belongs to quiescence.
+void loom_low_physical_issue_commit_source(loom_low_physical_issue_t* issue,
+                                           uint32_t scheduled_packet_index,
+                                           uint32_t issue_cycle);
 
 // Tests coissue without touching retained state. Instruction order is the
 // semantic order when zero-distance dependencies share one issue cycle.

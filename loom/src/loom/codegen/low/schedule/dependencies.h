@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "iree/base/internal/math.h"
 #include "loom/util/segmented_storage.h"
 
 #ifdef __cplusplus
@@ -125,6 +126,20 @@ typedef struct loom_low_schedule_dependency_graph_t {
   // Arena-backed stable segment directory.
   loom_segmented_storage_t segments;
 } loom_low_schedule_dependency_graph_t;
+
+// Applies a signed event separation, saturating at the issue-cycle limits.
+static inline uint32_t loom_low_schedule_add_signed_issue_separation(
+    uint32_t producer_issue_cycle, int32_t minimum_separation_cycles) {
+  if (minimum_separation_cycles >= 0) {
+    return iree_math_saturating_add_u32(producer_issue_cycle,
+                                        (uint32_t)minimum_separation_cycles);
+  }
+  const uint32_t magnitude = minimum_separation_cycles == INT32_MIN
+                                 ? (uint32_t)INT32_MAX + 1u
+                                 : (uint32_t)-minimum_separation_cycles;
+  return producer_issue_cycle > magnitude ? producer_issue_cycle - magnitude
+                                          : 0;
+}
 
 // Initializes an empty dependency graph. Payload segments are allocated lazily.
 void loom_low_schedule_dependency_graph_initialize(

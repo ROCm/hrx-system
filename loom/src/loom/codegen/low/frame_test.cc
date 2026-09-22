@@ -127,6 +127,7 @@ low.func.def target<test.low.core> @physical_reuse(%seed: reg<test.phys>) -> (re
   loom_low_emission_frame_options_t options = {};
   options.descriptor_registry = &registry_.registry;
   options.schedule_strategy = strategy;
+  options.schedule_flags = LOOM_LOW_SCHEDULE_FLAG_RETAIN_DEPENDENCY_INDEX;
   options.allocation_fixed_values = fixed_values;
   options.allocation_fixed_value_count = IREE_ARRAYSIZE(fixed_values);
   loom_low_emission_frame_t frame = {};
@@ -134,9 +135,11 @@ low.func.def target<test.low.core> @physical_reuse(%seed: reg<test.phys>) -> (re
                                                &arena_, &frame));
   ASSERT_EQ(frame.schedule.error_count, 0u);
   ASSERT_EQ(frame.allocation.error_count, 0u);
+  // Physical timing consumes the retained index after scheduler scratch dies.
+  iree_arena_block_pool_trim(&block_pool_);
   loom_low_physical_issue_t issue = {};
-  IREE_ASSERT_OK(loom_low_physical_issue_initialize(frame.target.descriptor_set,
-                                                    &arena_, &issue));
+  IREE_ASSERT_OK(
+      loom_low_physical_issue_initialize(&frame.schedule, &arena_, &issue));
   uint32_t cycles[3] = {};
   uint32_t next_cycle = 0;
   for (uint32_t i = 0; i < frame.schedule.scheduled_node_count; ++i) {
@@ -154,9 +157,12 @@ low.func.def target<test.low.core> @physical_reuse(%seed: reg<test.phys>) -> (re
     const loom_low_physical_instruction_t instruction = {
         packet.descriptor_ordinal, registers};
     uint32_t cycle = 0;
-    IREE_ASSERT_OK(loom_low_physical_issue_place(
-        &issue, &instruction, 1, iree_max(next_cycle, packet.node->issue_cycle),
-        &cycle));
+    const uint32_t proposed_cycle =
+        iree_max(iree_max(next_cycle, packet.node->issue_cycle),
+                 loom_low_physical_issue_source_ready_cycle(&issue, i));
+    IREE_ASSERT_OK(loom_low_physical_issue_place(&issue, &instruction, 1,
+                                                 proposed_cycle, &cycle));
+    loom_low_physical_issue_commit_source(&issue, i, cycle);
     cycles[packet.node->source_ordinal] = cycle;
     next_cycle = cycle + 1;
   }

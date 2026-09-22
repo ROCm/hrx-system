@@ -38,6 +38,8 @@ extern "C" {
 #endif
 
 typedef struct loom_low_allocation_budget_t loom_low_allocation_budget_t;
+typedef struct loom_low_schedule_dependency_index_t
+    loom_low_schedule_dependency_index_t;
 
 // Sentinel for absent schedule node indices.
 #define LOOM_LOW_SCHEDULE_NODE_NONE UINT32_MAX
@@ -154,6 +156,8 @@ enum loom_low_schedule_flag_bits_e {
   LOOM_LOW_SCHEDULE_FLAG_RETAIN_LIVENESS = 1u << 0,
   // Retains per-node pressure-model steps for detailed schedule inspection.
   LOOM_LOW_SCHEDULE_FLAG_RETAIN_PRESSURE_STEPS = 1u << 1,
+  // Retains grouped dependencies for final software-timed instruction issue.
+  LOOM_LOW_SCHEDULE_FLAG_RETAIN_DEPENDENCY_INDEX = 1u << 2,
 };
 typedef uint32_t loom_low_schedule_flags_t;
 
@@ -756,6 +760,9 @@ typedef struct loom_low_schedule_table_t {
   // Stable ordering dependency graph consumed by scheduling and target
   // planning.
   loom_low_schedule_dependency_graph_t dependencies;
+  // Immutable outgoing groups owned by the scheduling arena. Present only
+  // when RETAIN_DEPENDENCY_INDEX was requested; construction never rebuilds it.
+  const loom_low_schedule_dependency_index_t* dependency_index;
   // Number of distinct producer-to-consumer dependency groups used by list
   // scheduling.
   uint32_t dependency_group_count;

@@ -39,8 +39,8 @@ coissued components: 2
 
 // ====
 
-// Each padded accumulator is realized with multiple native moves. Logical
-// separations remain anchored at the scheduled clear, move and add packets.
+// Each padded accumulator is realized with multiple native moves. Early storage
+// slices forward the clear's payload deadline; the final move extends readiness.
 // RUN: emit aie2p-leaf @padded_accumulators report=emission
 
 low.func.def target<amd.xdna.aie2p.core> @padded_accumulators(%left: reg<aie2p.vec256 x2>, %right: reg<aie2p.vec256 x2>, %output: reg<aie2p.ep>) asm {
@@ -63,6 +63,46 @@ issue cycles: 27
 code bytes: 84
 coissued bundles: 2
 coissued components: 4
+
+// ====
+
+// The byte store reads r0 at cycle 7, so reusing r0 for the add's cycle-1 write
+// waits until cycle 6. That independent stall does not move the store-to-release
+// deadline from cycle 10. RET and its delay window end at cycle 14.
+// RUN: emit aie2p-leaf @independent_deadline fixed=%old:physical_register:253:1 fixed=%next:physical_register:253:1 report=emission
+
+low.func.def schedule(locked) target<amd.xdna.aie2p.core> @independent_deadline(%old: reg<aie2p.er>, %seed: reg<aie2p.er>, %output: reg<aie2p.ep>) asm {
+  st.s8 %old, %output, 0
+  %next = add %seed, 1
+  rel %next, 0
+  return
+}
+
+// ----
+issue cycles: 14
+code bytes: 36
+coissued bundles: 0
+coissued components: 0
+
+// ====
+
+// A second store consumes the delayed add at cycle 7. This time release must
+// follow that actual producer at cycle 17, including the full memory separation.
+// RUN: emit aie2p-leaf @dependent_deadline fixed=%old:physical_register:253:1 fixed=%next:physical_register:253:1 report=emission
+
+low.func.def schedule(locked) target<amd.xdna.aie2p.core> @dependent_deadline(%old: reg<aie2p.er>, %seed: reg<aie2p.er>, %output: reg<aie2p.ep>) asm {
+  st.s8 %old, %output, 0
+  %next = add %seed, 1
+  st.s8 %next, %output, 4
+  rel %next, 0
+  return
+}
+
+// ----
+issue cycles: 21
+code bytes: 52
+coissued bundles: 0
+coissued components: 0
 
 // ====
 

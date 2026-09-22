@@ -101,8 +101,10 @@ typedef struct loom_aie2p_bundle_plan_builder_t {
   uint32_t current_block_index;
   // Next physical issue cycle, including implicit NOP gaps.
   uint32_t next_issue_cycle;
-  // Physical origin of this block's logical cycles, rebased at descriptors.
-  uint32_t logical_issue_cycle_origin;
+  // Physical origin of this block's logical cycles, fixed at block entry.
+  uint32_t block_issue_cycle;
+  // First scheduled packet not yet represented by a native or virtual issue.
+  uint32_t next_source_packet;
   // Shared physical event and resource admission state.
   loom_low_physical_issue_t issue;
   // Scratch native bindings per slot. Not retained by the final plan.
@@ -810,20 +812,47 @@ static iree_status_t loom_aie2p_bundle_plan_commit_bundle(
   }
   const uint8_t byte_length =
       loom_aie2p_bundle_plan_format_byte_length(format, slot_count);
+  uint32_t proposed_cycle = builder->next_issue_cycle;
+  uint32_t source_packet_end = builder->next_source_packet;
+  for (iree_host_size_t i = 0; i < slot_count; ++i) {
+    const uint32_t packet_index =
+        builder->slots[slot_start + i].scheduled_packet_index;
+    if (packet_index != LOOM_AIE2P_BUNDLE_PLAN_PACKET_NONE) {
+      proposed_cycle = iree_max(
+          proposed_cycle, builder->block_issue_cycle + logical_issue_cycle);
+      proposed_cycle =
+          iree_max(proposed_cycle, loom_low_physical_issue_source_ready_cycle(
+                                       &builder->issue, packet_index));
+      source_packet_end = iree_max(source_packet_end, packet_index + 1);
+    }
+  }
+  // Coalesced packets retain source availability without splitting the native
+  // descriptor run. They are published in schedule order with this bundle.
+  for (uint32_t packet = builder->next_source_packet;
+       packet < source_packet_end; ++packet) {
+    proposed_cycle = iree_max(
+        proposed_cycle,
+        loom_low_physical_issue_source_ready_cycle(&builder->issue, packet));
+  }
   uint32_t issue_cycle = 0;
   IREE_RETURN_IF_ERROR(loom_low_physical_issue_place(
-      &builder->issue, instructions, (uint16_t)slot_count,
-      builder->next_issue_cycle, &issue_cycle));
+      &builder->issue, instructions, (uint16_t)slot_count, proposed_cycle,
+      &issue_cycle));
   IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_advance(builder, issue_cycle));
-  // Descriptor runs (including storage addresses) anchor logical time at
-  // their actual issue cycle. Moves and synthetic NOPs are standalone
-  // expansion bundles: their elapsed time can cover later logical gaps.
-  // Nondecreasing descriptor displacement preserves every logical separation.
-  if (!iree_any_bit_set(builder->slots[slot_start].flags,
-                        LOOM_AIE2P_PLANNED_SLOT_FLAG_SYNTHETIC_NOP |
-                            LOOM_AIE2P_PLANNED_SLOT_FLAG_STRUCTURAL_MOVE |
-                            LOOM_AIE2P_PLANNED_SLOT_FLAG_STRUCTURAL_CONTROL)) {
-    builder->logical_issue_cycle_origin = issue_cycle - logical_issue_cycle;
+  const uint32_t source_packet_begin = builder->next_source_packet;
+  while (builder->next_source_packet < source_packet_end) {
+    loom_low_physical_issue_commit_source(
+        &builder->issue, builder->next_source_packet++, issue_cycle);
+  }
+  // A structural copy can realize as several native moves. Each later piece
+  // extends its consumers' deadlines from the same retained source identity.
+  for (iree_host_size_t i = 0; i < slot_count; ++i) {
+    const uint32_t packet_index =
+        builder->slots[slot_start + i].scheduled_packet_index;
+    if (packet_index < source_packet_begin) {
+      loom_low_physical_issue_commit_source(&builder->issue, packet_index,
+                                            issue_cycle);
+    }
   }
   if (builder->encoded_byte_length >
       LOOM_AIE2P_CORE_PROGRAM_MEMORY_SIZE - byte_length) {
@@ -1243,8 +1272,10 @@ static iree_status_t loom_aie2p_bundle_plan_append_return(
   const uint64_t retire_cycle =
       iree_max((uint64_t)builder->next_issue_cycle,
                loom_low_physical_issue_quiescent_cycle(&builder->issue));
-  const uint64_t earliest_return_cycle =
-      retire_cycle > control_cycles ? retire_cycle - control_cycles : 0;
+  const uint64_t earliest_return_cycle = iree_max(
+      loom_low_physical_issue_source_ready_cycle(
+          &builder->issue, block_analysis->terminator_packet_index),
+      retire_cycle > control_cycles ? retire_cycle - control_cycles : 0);
   // At most one hardware delay window is inspected. Gaps remain part of
   // physical time; counting stored bundles would shorten the return window.
   iree_host_size_t candidate = builder->bundle_count;
@@ -1259,6 +1290,9 @@ static iree_status_t loom_aie2p_bundle_plan_append_return(
         &return_placed));
   }
   if (return_placed) {
+    loom_low_physical_issue_commit_source(
+        &builder->issue, block_analysis->terminator_packet_index,
+        builder->bundles[candidate - 1].issue_cycle);
     const uint32_t required_cycle =
         builder->bundles[candidate - 1].issue_cycle + control_cycles;
     while (builder->next_issue_cycle < required_cycle) {
@@ -1460,7 +1494,7 @@ static iree_status_t loom_aie2p_bundle_plan_build_impl(
       .block_count = frame->schedule.block_count,
   };
   IREE_RETURN_IF_ERROR(loom_low_physical_issue_initialize(
-      descriptor_set, scratch_arena, &builder.issue));
+      &frame->schedule, scratch_arena, &builder.issue));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       scratch_arena, slot_capacity, sizeof(*builder.slot_realizations),
       (void**)&builder.slot_realizations));
@@ -1502,7 +1536,7 @@ static iree_status_t loom_aie2p_bundle_plan_build_impl(
           &builder, analysis.blocks[block_index - 1u].terminator_issue_cycle));
     }
     builder.current_block_index = block_index;
-    builder.logical_issue_cycle_origin = builder.next_issue_cycle;
+    builder.block_issue_cycle = builder.next_issue_cycle;
     builder.block_byte_offsets[block_index] =
         (uint32_t)builder.encoded_byte_length;
     const iree_host_size_t block_bundle_start = builder.bundle_count;
@@ -1606,10 +1640,24 @@ static iree_status_t loom_aie2p_bundle_plan_build_impl(
             &builder, issue_cycle, segment_slot_start,
             builder.slot_count - segment_slot_start));
       }
+      if (group != NULL) {
+        const uint32_t packet_end =
+            group->scheduled_node_start + group->scheduled_node_count;
+        const uint32_t virtual_issue_cycle = iree_max(
+            builder.next_issue_cycle ? builder.next_issue_cycle - 1 : 0,
+            builder.block_issue_cycle + issue_cycle);
+        while (builder.next_source_packet < packet_end) {
+          const uint32_t packet_index = builder.next_source_packet++;
+          if (packet_index != block_analysis->terminator_packet_index) {
+            loom_low_physical_issue_commit_source(&builder.issue, packet_index,
+                                                  virtual_issue_cycle);
+          }
+        }
+      }
       if (builder.bundle_count == cycle_bundle_start &&
           issue_cycle != block_analysis->terminator_issue_cycle &&
           builder.next_issue_cycle <=
-              (uint64_t)builder.logical_issue_cycle_origin + issue_cycle) {
+              (uint64_t)builder.block_issue_cycle + issue_cycle) {
         IREE_RETURN_IF_ERROR(
             loom_aie2p_bundle_plan_append_nop_bundle(&builder, issue_cycle));
       }

@@ -24,6 +24,7 @@ static iree_status_t loom_aie2p_leaf_build_frame(
       .memory_access_table = loom_low_memory_access_table_empty(),
       .schedule_structural_models = loom_aie2p_low_structural_schedule_models(),
       .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,
+      .schedule_flags = LOOM_LOW_SCHEDULE_FLAG_RETAIN_DEPENDENCY_INDEX,
       .emitter = options->diagnostic_emitter,
       .statistics =
           options->compile_report != NULL ? &planning_statistics : NULL,

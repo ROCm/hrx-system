@@ -33,6 +33,7 @@ loom_cc_library(
     "dependencies.c"
   DEPS
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::util::segmented_storage
   PUBLIC
@@ -86,8 +87,10 @@ loom_cc_library(
   SRCS
     "physical_issue.c"
   DEPS
+    ::dependency_index
     ::event_frontier
     ::resource_calendar
+    ::schedule
     iree::base
     iree::base::internal::arena
     loom::codegen::low::descriptors

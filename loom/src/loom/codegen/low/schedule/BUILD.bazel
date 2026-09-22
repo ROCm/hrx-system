@@ -35,6 +35,7 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/util:segmented_storage",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
@@ -74,8 +75,10 @@ loom_cc_library(
     srcs = ["physical_issue.c"],
     hdrs = ["physical_issue.h"],
     deps = [
+        ":dependency_index",
         ":event_frontier",
         ":resource_calendar",
+        ":schedule",
         "//loom/src/loom/codegen/low:descriptors",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

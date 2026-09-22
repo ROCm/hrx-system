@@ -1290,19 +1290,6 @@ static iree_status_t loom_low_schedule_handle_dependency_cycle(
   return iree_ok_status();
 }
 
-static uint32_t loom_low_schedule_add_signed_issue_separation(
-    uint32_t producer_issue_cycle, int32_t minimum_separation_cycles) {
-  if (minimum_separation_cycles >= 0) {
-    return iree_math_saturating_add_u32(producer_issue_cycle,
-                                        (uint32_t)minimum_separation_cycles);
-  }
-  const uint32_t magnitude = minimum_separation_cycles == INT32_MIN
-                                 ? (uint32_t)INT32_MAX + 1u
-                                 : (uint32_t)-minimum_separation_cycles;
-  return producer_issue_cycle > magnitude ? producer_issue_cycle - magnitude
-                                          : 0;
-}
-
 static void loom_low_schedule_note_issue_group(
     loom_low_schedule_build_state_t* state, uint32_t node_index) {
   loom_low_schedule_node_t* node = &state->nodes[node_index];
@@ -1421,10 +1408,15 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
   iree_arena_allocator_t dependency_scratch_arena;
   iree_arena_initialize(state->arena->block_pool, &dependency_scratch_arena);
   loom_low_schedule_dependency_detail_index_t dependency_details;
+  iree_arena_allocator_t* dependency_arena =
+      iree_any_bit_set(state->options->flags,
+                       LOOM_LOW_SCHEDULE_FLAG_RETAIN_DEPENDENCY_INDEX)
+          ? state->arena
+          : state->scratch_arena;
   iree_status_t dependency_index_status =
       loom_low_schedule_dependency_index_initialize(
           &state->dependencies, (uint32_t)node_count, &dependency_scratch_arena,
-          state->scratch_arena, indegrees, &state->dependency_index,
+          dependency_arena, indegrees, &state->dependency_index,
           &dependency_details);
   if (iree_status_is_ok(dependency_index_status)) {
     loom_low_schedule_pressure_compute_node_priorities(
@@ -1859,6 +1851,17 @@ static iree_status_t loom_low_schedule_build(
     loom_low_schedule_compact_model_summaries(&state);
     loom_low_schedule_compact_resource_summaries(&state);
   }
+  loom_low_schedule_dependency_index_t* dependency_index = NULL;
+  if (iree_status_is_ok(status) && state.error_count == 0 &&
+      iree_any_bit_set(options->flags,
+                       LOOM_LOW_SCHEDULE_FLAG_RETAIN_DEPENDENCY_INDEX)) {
+    status = iree_arena_allocate(arena, sizeof(*dependency_index),
+                                 (void**)&dependency_index);
+    if (iree_status_is_ok(status)) {
+      // Segmented storage supports immutable snapshots of its retained rows.
+      *dependency_index = state.dependency_index;
+    }
+  }
   uint32_t* pressure_summary_budgets = NULL;
   if (iree_status_is_ok(status) && state.error_count == 0 &&
       iree_any_bit_set(options->diagnostic_flags,
@@ -1900,6 +1903,7 @@ static iree_status_t loom_low_schedule_build(
         .call_node_indices = state.call_node_indices,
         .call_node_count = state.call_node_count,
         .dependency_group_count = state.dependency_index.group_count,
+        .dependency_index = dependency_index,
         .unlock_summary_publication_count =
             state.unlock_summary_publication_count,
         .scheduled_node_indices = state.scheduled_node_indices,
