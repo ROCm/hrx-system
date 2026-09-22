@@ -24,8 +24,6 @@ bool loom_cfg_block_arguments_can_replace(
   for (uint16_t i = 0; i < block->arg_count; ++i) {
     loom_value_id_t replacement = replacements.values[i];
     if (!loom_value_is_available_before_op(dominance, replacement, before_op) ||
-        !loom_value_type_is_available_before_op(dominance, replacement,
-                                                before_op) ||
         !loom_type_equal_after_value_remap(
             module, loom_module_value_type(module, loom_block_arg_id(block, i)),
             loom_module_value_type(module, replacement), &remap)) {

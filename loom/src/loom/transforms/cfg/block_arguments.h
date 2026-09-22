@@ -17,9 +17,10 @@ extern "C" {
 #endif
 
 // Returns whether replacing the arguments of |block| with |replacements|
-// preserves dependent types and makes every replacement and its type available
-// immediately before |before_op|. All values belong to verified IR; a failed
-// proof rejects the proposed rewrite. This query does not allocate.
+// preserves dependent types and makes every replacement available immediately
+// before |before_op|. All values belong to verified IR; definition-site
+// verification already established the availability of their type dependencies.
+// A failed proof rejects the proposed rewrite. This query does not allocate.
 bool loom_cfg_block_arguments_can_replace(
     const loom_module_t* module, const loom_dominance_info_t* dominance,
     const loom_block_t* block, loom_value_slice_t replacements,

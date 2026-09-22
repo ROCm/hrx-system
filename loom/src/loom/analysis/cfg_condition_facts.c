@@ -1160,9 +1160,7 @@ static loom_cfg_condition_image_span_t loom_cfg_condition_relation_images(
       has_identity =
           !rebound && edge->target_block->first_op &&
           loom_value_is_available_before_op(solver->dominance, value_id,
-                                            edge->target_block->first_op) &&
-          loom_value_type_is_available_before_op(solver->dominance, value_id,
-                                                 edge->target_block->first_op);
+                                            edge->target_block->first_op);
       solver->value_availability_cache[source] =
           (target_key << 1) | has_identity;
     }

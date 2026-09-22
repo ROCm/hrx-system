@@ -1370,9 +1370,7 @@ static bool loom_cfg_simplify_find_forwarded_arg_replacement(
     return false;
   }
   if (!loom_value_is_available_before_op(state->dominance, replacement,
-                                         anchor) ||
-      !loom_value_type_is_available_before_op(state->dominance, replacement,
-                                              anchor)) {
+                                         anchor)) {
     return false;
   }
   *out_replacement = replacement;
@@ -1574,9 +1572,6 @@ static iree_status_t loom_cfg_simplify_remove_redundant_block_args_from_block(
         (!loom_cfg_simplify_type_allows_replacement(state->module, old_arg,
                                                     resolved) ||
          !loom_value_is_available_before_op(
-             state->dominance, resolved,
-             block->first_op ? block->first_op : block->last_op) ||
-         !loom_value_type_is_available_before_op(
              state->dominance, resolved,
              block->first_op ? block->first_op : block->last_op))) {
       continue;

@@ -282,9 +282,7 @@ static bool loom_cfg_value_identity_projection_value_available(
     if ((loom_value_is_block_arg(value) &&
          loom_value_def_block(value) == block) ||
         !loom_value_is_available_before_op(dominance, value_id,
-                                           block->first_op) ||
-        !loom_value_type_is_available_before_op(dominance, value_id,
-                                                block->first_op)) {
+                                           block->first_op)) {
       return false;
     }
   }

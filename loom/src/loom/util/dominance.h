@@ -161,25 +161,14 @@ bool loom_dominates_value(const loom_dominance_info_t* info,
 // available before the defining op. Invalid value IDs are treated as
 // unavailable so analyses can be conservative on malformed IR while verifiers
 // own structured user diagnostics.
+//
+// For ordinary SSA values in verified IR, definition-site verification makes
+// every value referenced by the type visible when the carrier is defined.
+// Dominance is transitive, so CFG consumers must not separately rescan the
+// carrier type after this query succeeds.
 bool loom_value_is_available_before_op(const loom_dominance_info_t* info,
                                        loom_value_id_t value_id,
                                        const loom_op_t* before_op);
-
-// Returns true if every SSA value referenced by |type| can be referenced by an
-// op inserted immediately before |before_op|.
-//
-// This walks dynamic dimensions, dynamic pool sizes, SSA encodings/layouts, and
-// nested function/dialect type parameters. Static types with no SSA references
-// are always available.
-bool loom_type_is_available_before_op(const loom_dominance_info_t* info,
-                                      loom_type_t type,
-                                      const loom_op_t* before_op);
-
-// Returns true if the type of |value_id| can be materialized immediately before
-// |before_op|. Invalid value IDs are treated as unavailable.
-bool loom_value_type_is_available_before_op(const loom_dominance_info_t* info,
-                                            loom_value_id_t value_id,
-                                            const loom_op_t* before_op);
 
 #ifdef __cplusplus
 }

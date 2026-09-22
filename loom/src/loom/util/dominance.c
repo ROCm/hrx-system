@@ -9,7 +9,6 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 #include "loom/util/cfg_dominance.h"
@@ -363,54 +362,4 @@ bool loom_value_is_available_before_op(const loom_dominance_info_t* info,
     return false;
   }
   return loom_dominates_value(info, value_id, before_op);
-}
-
-typedef struct loom_type_availability_query_t {
-  // Dominance information used for value-availability queries.
-  const loom_dominance_info_t* info;
-  // Op before which the type would be materialized.
-  const loom_op_t* before_op;
-  // Cleared when any embedded SSA reference is unavailable.
-  bool available;
-} loom_type_availability_query_t;
-
-static iree_status_t loom_type_availability_check_ref(loom_value_id_t value_id,
-                                                      void* user_data) {
-  loom_type_availability_query_t* query =
-      (loom_type_availability_query_t*)user_data;
-  if (!loom_value_is_available_before_op(query->info, value_id,
-                                         query->before_op)) {
-    query->available = false;
-  }
-  return iree_ok_status();
-}
-
-bool loom_type_is_available_before_op(const loom_dominance_info_t* info,
-                                      loom_type_t type,
-                                      const loom_op_t* before_op) {
-  if (!info || !info->module || !before_op) {
-    return false;
-  }
-  loom_type_availability_query_t query = {
-      .info = info,
-      .before_op = before_op,
-      .available = true,
-  };
-  iree_status_t status = loom_type_walk_value_refs(
-      info->module, type, loom_type_availability_check_ref, &query);
-  if (!iree_status_is_ok(status)) {
-    iree_status_free(status);
-    return false;
-  }
-  return query.available;
-}
-
-bool loom_value_type_is_available_before_op(const loom_dominance_info_t* info,
-                                            loom_value_id_t value_id,
-                                            const loom_op_t* before_op) {
-  if (!info || !info->module || value_id >= info->module->values.count) {
-    return false;
-  }
-  return loom_type_is_available_before_op(
-      info, loom_module_value_type(info->module, value_id), before_op);
 }
