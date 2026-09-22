@@ -94,6 +94,35 @@ iree_py_library(
     loom::py::loom::reporting::reporting
 )
 
+iree_py_library(
+  NAME
+    trace_decoder
+  SRCS
+    "trace_decoder.py"
+  DEPS
+    loom::py::loom::target::arch::amd::xdna::aie2p::package_init
+)
+
+iree_py_test(
+  NAME
+    trace_decoder_test
+  MAIN
+    "../../../../../tools/pytest_style_runner.py"
+  SRCS
+    "trace_decoder_test.py"
+    "../../../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.arch.amd.xdna.aie2p.trace_decoder_test"
+  DEPS
+    loom::py::loom::target::arch::amd::xdna::aie2p::trace_decoder
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    60
+)
+
 iree_py_test(
   NAME
     array_descriptors_test

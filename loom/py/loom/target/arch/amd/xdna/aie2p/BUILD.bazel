@@ -98,6 +98,25 @@ iree_py_library(
     ],
 )
 
+iree_py_library(
+    name = "trace_decoder",
+    srcs = ["trace_decoder.py"],
+    visibility = ["//visibility:public"],
+    deps = [":package_init"],
+)
+
+iree_py_test(
+    name = "trace_decoder_test",
+    size = "small",
+    srcs = [
+        "trace_decoder_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.amd.xdna.aie2p.trace_decoder_test"],
+    main = "pytest_style_runner.py",
+    deps = [":trace_decoder"],
+)
+
 iree_py_test(
     name = "array_descriptors_test",
     size = "small",
