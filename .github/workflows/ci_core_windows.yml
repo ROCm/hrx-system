@@ -33,6 +33,10 @@ on:
       - main
       - main-staging
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   actions: read
   contents: read
@@ -40,6 +44,10 @@ permissions:
 jobs:
   cmake_windows:
     name: Windows / CMake / ${{ matrix.toolchain }}
+    # Package artifacts finish on main; newer pushes replace other checks.
+    concurrency:
+      group: ${{ github.workflow }}-${{ matrix.variant }}-${{ (github.event_name == 'push' && !matrix.package && github.ref) || github.run_id }}
+      cancel-in-progress: true
     strategy:
       fail-fast: false
       matrix:

@@ -54,7 +54,7 @@ on:
       - "third_party/**"
       - "tools/**"
 
-# Main binary-size history completes independently of hardware job coalescing.
+# Main binary-size history completes independently of build/test job coalescing.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
@@ -65,6 +65,9 @@ permissions:
 jobs:
   linux_bazel_cpu:
     name: ${{ matrix.name }}
+    concurrency:
+      group: ${{ github.workflow }}-${{ matrix.command }}-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
+      cancel-in-progress: true
     runs-on: azure-linux-scale-rocm
     timeout-minutes: 45
     container:
@@ -204,6 +207,9 @@ jobs:
 
   windows_bazel:
     name: ${{ matrix.name }}
+    concurrency:
+      group: ${{ github.workflow }}-windows-${{ matrix.host_toolchain }}-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
+      cancel-in-progress: true
     runs-on: azure-windows-scale-rocm
     timeout-minutes: 60
     strategy:

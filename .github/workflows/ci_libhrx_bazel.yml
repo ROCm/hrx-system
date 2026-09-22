@@ -47,7 +47,7 @@ on:
       - "third_party/**"
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref) || github.run_id }}
   cancel-in-progress: true
 
 permissions:
