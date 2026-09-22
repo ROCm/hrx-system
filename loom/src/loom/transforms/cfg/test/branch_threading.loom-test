@@ -1,0 +1,252 @@
+// RUN: with-checks pass-report @measure
+
+pass.pipeline<func> @measure pipeline {
+  cfg-simplify
+}
+
+// Independent dispatches share one threading edit and one cleanup.
+func.def @independent_conditional_edges(%x: i32, %y: i32, %value: i32) -> (i32) {
+  cfg.br ^check_0
+^check_0:
+  %key_0 = scalar.constant 0 : i32
+  %choose_0 = scalar.cmpi eq, %x, %key_0 : i32
+  cfg.cond_br %choose_0, ^dispatch_0, ^check_1
+^check_1:
+  %key_1 = scalar.constant 1 : i32
+  %choose_1 = scalar.cmpi eq, %x, %key_1 : i32
+  cfg.cond_br %choose_1, ^dispatch_1, ^check_2
+^check_2:
+  %key_2 = scalar.constant 2 : i32
+  %choose_2 = scalar.cmpi eq, %x, %key_2 : i32
+  cfg.cond_br %choose_2, ^dispatch_2, ^check_3
+^check_3:
+  cfg.br ^other
+^dispatch_2:
+  %again_2 = scalar.cmpi eq, %x, %key_2 : i32
+  cfg.cond_br %again_2, ^selected_2, ^other
+^selected_2:
+  %result_2 = scalar.addi %value, %key_2 : i32
+  func.return %result_2 : i32
+^dispatch_1:
+  %again_1 = scalar.cmpi eq, %x, %key_1 : i32
+  cfg.cond_br %again_1, ^selected_1, ^other
+^selected_1:
+  %result_1 = scalar.addi %value, %key_1 : i32
+  func.return %result_1 : i32
+^dispatch_0:
+  %again_0 = scalar.cmpi eq, %x, %key_0 : i32
+  cfg.cond_br %again_0, ^selected_0, ^other
+^selected_0:
+  %result_0 = scalar.addi %value, %key_0 : i32
+  func.return %result_0 : i32
+^other:
+  func.return %y : i32
+}
+
+// ----
+CHECK: *"iterations":4,*
+CHECK: *"edges-forwarded":3,*
+CHECK: *"blocks-removed":3,*
+
+// ====
+
+// RUN: with-checks pass-report @measure
+
+pass.pipeline<func> @measure pipeline {
+  cfg-simplify
+}
+
+// Independent dispatches share one threading edit and one cleanup.
+func.def @independent_payload_edges(%x: i32, %y: i32, %value: i32) -> (i32) {
+  cfg.br ^check_0
+^check_0:
+  %key_0 = scalar.constant 0 : i32
+  %choose_0 = scalar.cmpi eq, %x, %key_0 : i32
+  cfg.cond_br %choose_0, ^pass_0, ^check_1
+^check_1:
+  %key_1 = scalar.constant 1 : i32
+  %choose_1 = scalar.cmpi eq, %x, %key_1 : i32
+  cfg.cond_br %choose_1, ^pass_1, ^check_2
+^check_2:
+  %key_2 = scalar.constant 2 : i32
+  %choose_2 = scalar.cmpi eq, %x, %key_2 : i32
+  cfg.cond_br %choose_2, ^pass_2, ^check_3
+^check_3:
+  cfg.br ^other
+^pass_2:
+  cfg.br ^dispatch_2(%x: i32, %key_2: i32)
+^dispatch_2(%lhs_2: i32, %rhs_2: i32):
+  %again_2 = scalar.cmpi eq, %lhs_2, %rhs_2 : i32
+  cfg.cond_br %again_2, ^selected_2, ^other
+^selected_2:
+  %result_2 = scalar.addi %value, %key_2 : i32
+  func.return %result_2 : i32
+^pass_1:
+  cfg.br ^dispatch_1(%x: i32, %key_1: i32)
+^dispatch_1(%lhs_1: i32, %rhs_1: i32):
+  %again_1 = scalar.cmpi eq, %lhs_1, %rhs_1 : i32
+  cfg.cond_br %again_1, ^selected_1, ^other
+^selected_1:
+  %result_1 = scalar.addi %value, %key_1 : i32
+  func.return %result_1 : i32
+^pass_0:
+  cfg.br ^dispatch_0(%x: i32, %key_0: i32)
+^dispatch_0(%lhs_0: i32, %rhs_0: i32):
+  %again_0 = scalar.cmpi eq, %lhs_0, %rhs_0 : i32
+  cfg.cond_br %again_0, ^selected_0, ^other
+^selected_0:
+  %result_0 = scalar.addi %value, %key_0 : i32
+  func.return %result_0 : i32
+^other:
+  func.return %y : i32
+}
+
+// ----
+CHECK: *"iterations":4,*
+CHECK: *"edges-forwarded":3,*
+CHECK: *"blocks-removed":3,*
+
+// ====
+
+// RUN: pass cfg-simplify
+
+// Both successor slots of the same conditional branch retain their edge facts.
+func.def @opposite_edge_facts(%x: i32, %y: i32, %value: i32) -> (i32) {
+  %condition = scalar.cmpi slt, %x, %y : i32
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  cfg.cond_br %condition, ^taken, ^unused
+^right:
+  cfg.cond_br %condition, ^unused, ^other
+^taken:
+  func.return %value : i32
+^other:
+  func.return %y : i32
+^unused:
+  func.return %x : i32
+}
+
+// ----
+func.def @opposite_edge_facts(%x: i32, %y: i32, %value: i32) -> (i32) {
+  %condition = scalar.cmpi slt, %x, %y : i32
+  cfg.cond_br %condition, ^taken, ^other
+^taken:
+  func.return %value : i32
+^other:
+  func.return %y : i32
+}
+
+// ====
+
+// RUN: pass cfg-simplify
+
+// A selected destination survives when another edit bypasses that block.
+func.def @overlapping_bypasses(%x: i32, %y: i32, %value: i32) -> (i32) {
+  %condition = scalar.cmpi slt, %x, %y : i32
+  cfg.cond_br %condition, ^first, ^other
+^first:
+  cfg.cond_br %condition, ^last, ^other
+^last:
+  cfg.cond_br %condition, ^taken, ^other
+^taken:
+  func.return %value : i32
+^other:
+  func.return %y : i32
+}
+
+// ----
+func.def @overlapping_bypasses(%x: i32, %y: i32, %value: i32) -> (i32) {
+  %condition = scalar.cmpi slt, %x, %y : i32
+  cfg.cond_br %condition, ^taken, ^other
+^taken:
+  func.return %value : i32
+^other:
+  func.return %y : i32
+}
+
+// ====
+
+// RUN: pass cfg-simplify
+
+// Opposite edge facts select different destinations while both payloads disappear.
+func.def @opposite_payload_facts(%x: i32, %y: i32, %value: i32) -> (i32) {
+  %condition = scalar.cmpi slt, %x, %y : i32
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  cfg.br ^dispatch(%x: i32, %y: i32)
+^right:
+  cfg.br ^dispatch(%x: i32, %y: i32)
+^dispatch(%lhs: i32, %rhs: i32):
+  %again = scalar.cmpi slt, %lhs, %rhs : i32
+  cfg.cond_br %again, ^taken, ^other
+^taken:
+  func.return %value : i32
+^other:
+  func.return %y : i32
+}
+
+// ----
+func.def @opposite_payload_facts(%x: i32, %y: i32, %value: i32) -> (i32) {
+  %condition = scalar.cmpi slt, %x, %y : i32
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  func.return %value : i32
+^right:
+  func.return %y : i32
+}
+
+// ====
+
+// RUN: pass cfg-simplify
+
+// Thread the loop-body dispatch while preserving the changing header argument.
+func.def @loop_body_dispatch(%x: i32, %y: i32) -> (i32) {
+  %step = scalar.constant 1 : i32
+  cfg.br ^loop(%x: i32)
+^loop(%index: i32):
+  %again = scalar.cmpi slt, %index, %y : i32
+  cfg.cond_br %again, ^dispatch, ^exit
+^exit:
+  func.return %index : i32
+^dispatch:
+  cfg.cond_br %again, ^body, ^exit
+^body:
+  %next = scalar.addi %index, %step : i32
+  cfg.br ^loop(%next: i32)
+}
+
+// ----
+func.def @loop_body_dispatch(%x: i32, %y: i32) -> (i32) {
+  %step = scalar.constant 1 : i32
+  cfg.br ^loop(%x: i32)
+^loop(%index: i32):
+  %again = scalar.cmpi slt, %index, %y : i32
+  cfg.cond_br %again, ^body, ^exit
+^exit:
+  func.return %index : i32
+^body:
+  %next = scalar.addi %index, %step : i32
+  cfg.br ^loop(%next: i32)
+}
+
+// ====
+
+// RUN: pass cfg-simplify
+
+// A bypass to the same block makes no progress; branch folding owns the loop.
+func.def @repeat_while_selected(%condition: i1) {
+  cfg.cond_br %condition, ^repeat, ^exit
+^repeat:
+  cfg.cond_br %condition, ^repeat, ^exit
+^exit:
+  func.return
+}
+
+// ----
+func.def @repeat_while_selected(%condition: i1) {
+  cfg.cond_br %condition, ^repeat, ^exit
+^repeat:
+  cfg.br ^repeat
+^exit:
+  func.return
+}

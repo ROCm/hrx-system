@@ -333,45 +333,6 @@ static iree_status_t loom_cfg_simplify_entry_facts_prove_bool(
       out_value, out_proven);
 }
 
-static iree_status_t loom_cfg_simplify_thread_predecessor_to_block(
-    loom_cfg_simplify_state_t* state, loom_block_t* old_dest,
-    loom_block_t* new_dest, const loom_cfg_edge_info_t* predecessor_edge,
-    bool* out_changed) {
-  if (!new_dest || new_dest->arg_count != 0) {
-    return iree_ok_status();
-  }
-  loom_op_t* predecessor_terminator = (loom_op_t*)predecessor_edge->terminator;
-  if (loom_cfg_br_isa(predecessor_terminator)) {
-    if (predecessor_edge->successor_index != 0 ||
-        loom_cfg_br_dest(predecessor_terminator) != old_dest) {
-      return iree_ok_status();
-    }
-    IREE_RETURN_IF_ERROR(loom_cfg_simplify_replace_br(
-        state, predecessor_terminator, new_dest, NULL, 0));
-    ++state->statistics->edges_forwarded;
-    *out_changed = true;
-    return iree_ok_status();
-  }
-
-  if (!loom_cfg_cond_br_isa(predecessor_terminator) ||
-      old_dest->arg_count != 0) {
-    return iree_ok_status();
-  }
-  loom_block_t** successors = loom_op_successors(predecessor_terminator);
-  const uint16_t successor_index = predecessor_edge->successor_index;
-  if (successor_index >= predecessor_terminator->successor_count ||
-      successors[successor_index] != old_dest) {
-    return iree_ok_status();
-  }
-  successors[successor_index] = new_dest;
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_add_to_worklist(state->rewriter, predecessor_terminator));
-  state->rewriter->flags |= LOOM_REWRITER_FLAG_CHANGED;
-  ++state->statistics->edges_forwarded;
-  *out_changed = true;
-  return iree_ok_status();
-}
-
 static bool loom_cfg_simplify_value_uses_stay_in_block(
     const loom_cfg_simplify_state_t* state, loom_value_id_t value_id,
     const loom_block_t* block) {
@@ -429,6 +390,10 @@ static iree_status_t loom_cfg_simplify_thread_fact_known_branches(
   if (graph->malformed) {
     return iree_ok_status();
   }
+  // Prove every bypass against the original CFG before changing any edge.
+  // Destinations stay alive throughout application; each redirect skips only
+  // pure local definitions, even when another edit bypasses its source block.
+  uint16_t* destinations = NULL;
   for (uint16_t block_index = 1; block_index < graph->block_count;
        ++block_index) {
     if (!loom_cfg_graph_block_is_reachable(graph, block_index)) {
@@ -447,6 +412,12 @@ static iree_status_t loom_cfg_simplify_thread_fact_known_branches(
       const loom_cfg_edge_index_t edge_index = predecessor_edges.values[i];
       const loom_cfg_edge_info_t* predecessor_edge =
           loom_cfg_graph_edge(graph, edge_index);
+      const loom_op_t* predecessor_terminator = predecessor_edge->terminator;
+      if (!loom_cfg_br_isa(predecessor_terminator) &&
+          (!loom_cfg_cond_br_isa(predecessor_terminator) ||
+           block->arg_count != 0)) {
+        continue;
+      }
       const uint16_t predecessor_index = predecessor_edge->source_block_index;
       if (!loom_cfg_graph_block_is_reachable(graph, predecessor_index) ||
           predecessor_index == block_index) {
@@ -477,16 +448,46 @@ static iree_status_t loom_cfg_simplify_thread_fact_known_branches(
       loom_block_t* new_dest = condition
                                    ? loom_cfg_cond_br_true_dest(terminator)
                                    : loom_cfg_cond_br_false_dest(terminator);
-      if (!new_dest || new_dest->arg_count != 0) {
+      if (new_dest == block || new_dest->arg_count != 0) {
         continue;
       }
-      IREE_RETURN_IF_ERROR(loom_cfg_simplify_thread_predecessor_to_block(
-          state, block, new_dest, predecessor_edge, out_changed));
-      if (*out_changed) {
-        return iree_ok_status();
+      if (!destinations) {
+        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+            state->analysis_arena, graph->edge_count, sizeof(*destinations),
+            (void**)&destinations));
+        memset(destinations, 0xFF, graph->edge_count * sizeof(*destinations));
       }
+      destinations[edge_index] = new_dest->region_index;
     }
   }
+  if (!destinations) {
+    return iree_ok_status();
+  }
+
+  // Original edges now identify edit locations only. A direct branch owns one
+  // slot and may be rebuilt to drop its payload; conditional branches remain
+  // intact so both successor slots can be updated. Queued users run only after
+  // the driver refreshes the completed CFG edit.
+  for (iree_host_size_t i = 0; i < graph->edge_count; ++i) {
+    if (destinations[i] == UINT16_MAX) {
+      continue;
+    }
+    const loom_cfg_edge_info_t* edge = &graph->edges[i];
+    loom_op_t* terminator = (loom_op_t*)edge->terminator;
+    loom_block_t* destination =
+        (loom_block_t*)graph->blocks[destinations[i]].block;
+    if (loom_cfg_br_isa(terminator) && terminator->operand_count != 0) {
+      IREE_RETURN_IF_ERROR(loom_cfg_simplify_replace_br(state, terminator,
+                                                        destination, NULL, 0));
+    } else {
+      loom_op_successors(terminator)[edge->successor_index] = destination;
+      IREE_RETURN_IF_ERROR(
+          loom_rewriter_add_to_worklist(state->rewriter, terminator));
+      state->rewriter->flags |= LOOM_REWRITER_FLAG_CHANGED;
+    }
+    ++state->statistics->edges_forwarded;
+  }
+  *out_changed = true;
   return iree_ok_status();
 }
 

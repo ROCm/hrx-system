@@ -22,6 +22,7 @@ loom_check_test_suite(
         "branch_folding.loom-test",
         "branch_fusion.loom-test",
         "branch_sink.loom-test",
+        "branch_threading.loom-test",
         "cfg_compatibility.loom-test",
         "cfg_converge.loom-test",
         "cfg_simplify.loom-test",
