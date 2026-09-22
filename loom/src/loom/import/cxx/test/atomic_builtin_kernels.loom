@@ -1,0 +1,84 @@
+func.decl @builtin_fetch_values(%storage: buffer, %origin: offset) -> (i32)
+
+func.decl @builtin_signed_wrap(%storage: buffer, %origin: offset) -> (i32)
+
+func.decl @builtin_compare_values(%storage: buffer, %storage_origin: offset, %evaluations: buffer, %evaluations_origin: offset) -> (i32)
+
+func.decl @builtin_wide_values(%storage: buffer, %origin: offset) -> (i32)
+
+kernel.def @builtin_updates() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%storage: buffer, %wide: buffer, %evaluations: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %signed_origin = index.constant 12 : offset
+  %compare_origin = index.constant 24 : offset
+  %fetched = func.call @builtin_fetch_values(%storage, %origin) : (buffer, offset) -> (i32)
+  %wrapped = func.call @builtin_signed_wrap(%storage, %signed_origin) : (buffer, offset) -> (i32)
+  %compared = func.call @builtin_compare_values(%storage, %compare_origin, %evaluations, %origin) : (buffer, offset, buffer, offset) -> (i32)
+  %carried = func.call @builtin_wide_values(%wide, %origin) : (buffer, offset) -> (i32)
+  %results = buffer.view %output[%origin] : buffer -> view<4xi32>
+  view.store %fetched, %results[0] : i32, view<4xi32>
+  view.store %wrapped, %results[1] : i32, view<4xi32>
+  view.store %compared, %results[2] : i32, view<4xi32>
+  view.store %carried, %results[3] : i32, view<4xi32>
+  kernel.return
+}
+
+check.case @builtin_update_values {
+  check.requires<hal.amdgpu.descriptor_set> {descriptor_set = "amdgpu.rdna3_5.core"}
+  %storage = check.generate.fill value(37) : tensor<10xi32>
+  %wide = check.generate.fill value(37) : tensor<4xi64>
+  %evaluations = check.generate.fill value(0) : tensor<6xi32>
+  %output = check.generate.fill value(37) : tensor<4xi32>
+  kernel.launch @builtin_updates(%storage, %wide, %evaluations, %output) : (tensor<10xi32>, tensor<4xi64>, tensor<6xi32>, tensor<4xi32>)
+  %no_failures = check.generate.fill value(0) : tensor<4xi32>
+  check.expect.bitwise actual(%output) expected(%no_failures) : tensor<4xi32>
+  %storage_0 = check.tensor.view %storage offset(0) : tensor<10xi32> -> tensor<1xi32>
+  %storage_0_expected = check.generate.fill value(37) : tensor<1xi32>
+  check.expect.bitwise actual(%storage_0) expected(%storage_0_expected) : tensor<1xi32>
+  %storage_1 = check.tensor.view %storage offset(4) : tensor<10xi32> -> tensor<1xi32>
+  %storage_1_expected = check.generate.fill value(49) : tensor<1xi32>
+  check.expect.bitwise actual(%storage_1) expected(%storage_1_expected) : tensor<1xi32>
+  %storage_2 = check.tensor.view %storage offset(8) : tensor<10xi32> -> tensor<2xi32>
+  %storage_2_expected = check.generate.fill value(37) : tensor<2xi32>
+  check.expect.bitwise actual(%storage_2) expected(%storage_2_expected) : tensor<2xi32>
+  %storage_4 = check.tensor.view %storage offset(16) : tensor<10xi32> -> tensor<1xi32>
+  %storage_4_expected = check.generate.fill value(2147483647) : tensor<1xi32>
+  check.expect.bitwise actual(%storage_4) expected(%storage_4_expected) : tensor<1xi32>
+  %storage_5 = check.tensor.view %storage offset(20) : tensor<10xi32> -> tensor<2xi32>
+  %storage_5_expected = check.generate.fill value(37) : tensor<2xi32>
+  check.expect.bitwise actual(%storage_5) expected(%storage_5_expected) : tensor<2xi32>
+  %storage_7 = check.tensor.view %storage offset(28) : tensor<10xi32> -> tensor<1xi32>
+  %storage_7_expected = check.generate.fill value(13) : tensor<1xi32>
+  check.expect.bitwise actual(%storage_7) expected(%storage_7_expected) : tensor<1xi32>
+  %storage_8 = check.tensor.view %storage offset(32) : tensor<10xi32> -> tensor<1xi32>
+  %storage_8_expected = check.generate.fill value(7) : tensor<1xi32>
+  check.expect.bitwise actual(%storage_8) expected(%storage_8_expected) : tensor<1xi32>
+  %storage_9 = check.tensor.view %storage offset(36) : tensor<10xi32> -> tensor<1xi32>
+  %storage_9_expected = check.generate.fill value(37) : tensor<1xi32>
+  check.expect.bitwise actual(%storage_9) expected(%storage_9_expected) : tensor<1xi32>
+  %wide_0 = check.tensor.view %wide offset(0) : tensor<4xi64> -> tensor<1xi64>
+  %wide_0_expected = check.generate.fill value(37) : tensor<1xi64>
+  check.expect.bitwise actual(%wide_0) expected(%wide_0_expected) : tensor<1xi64>
+  %wide_1 = check.tensor.view %wide offset(8) : tensor<4xi64> -> tensor<1xi64>
+  %wide_1_expected = check.generate.fill value(4294967300) : tensor<1xi64>
+  check.expect.bitwise actual(%wide_1) expected(%wide_1_expected) : tensor<1xi64>
+  %wide_2 = check.tensor.view %wide offset(16) : tensor<4xi64> -> tensor<1xi64>
+  %wide_2_expected = check.generate.fill value(4294967299) : tensor<1xi64>
+  check.expect.bitwise actual(%wide_2) expected(%wide_2_expected) : tensor<1xi64>
+  %wide_3 = check.tensor.view %wide offset(24) : tensor<4xi64> -> tensor<1xi64>
+  %wide_3_expected = check.generate.fill value(37) : tensor<1xi64>
+  check.expect.bitwise actual(%wide_3) expected(%wide_3_expected) : tensor<1xi64>
+  %evaluations_0 = check.tensor.view %evaluations offset(0) : tensor<6xi32> -> tensor<1xi32>
+  %evaluations_0_expected = check.generate.fill value(0) : tensor<1xi32>
+  check.expect.bitwise actual(%evaluations_0) expected(%evaluations_0_expected) : tensor<1xi32>
+  %evaluations_1 = check.tensor.view %evaluations offset(4) : tensor<6xi32> -> tensor<4xi32>
+  %evaluations_1_expected = check.generate.fill value(2) : tensor<4xi32>
+  check.expect.bitwise actual(%evaluations_1) expected(%evaluations_1_expected) : tensor<4xi32>
+  %evaluations_5 = check.tensor.view %evaluations offset(20) : tensor<6xi32> -> tensor<1xi32>
+  %evaluations_5_expected = check.generate.fill value(0) : tensor<1xi32>
+  check.expect.bitwise actual(%evaluations_5) expected(%evaluations_5_expected) : tensor<1xi32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}

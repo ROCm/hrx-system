@@ -594,14 +594,38 @@ Native support follows the corresponding High operation. The importer does not
 choose cache policies, insert host locks, or replace observations with
 read-modify-write operations.
 
-The GCC builtins `__atomic_load_n`, `__atomic_store_n`, and
-`__atomic_thread_fence` use the same High operations in C and C++ without a
-facade header. Their ordering argument must be a pure integer constant; use
-the predefined `__ATOMIC_*` values. These calls preserve system scope.
-`__ATOMIC_CONSUME` uses acquire semantics, and a relaxed thread fence has no
-effect. Runtime orderings, target-specific modifier bits, and storage outside
-the non-boolean integer subset diagnose at import. The typed facade provides
-the remaining RMW and compare-exchange operations with explicit scope.
+GCC atomic builtins use the same High operations in C and C++ without a facade
+header. The supported integer forms are `__atomic_load_n`, `__atomic_store_n`,
+`__atomic_exchange_n`, `__atomic_compare_exchange_n`, and both
+`__atomic_fetch_<op>` and `__atomic_<op>_fetch` for `add`, `sub`, `and`, `or`, and
+`xor`. `__atomic_thread_fence` supplies a standalone fence. These calls preserve
+system scope; the typed facade also offers explicit narrower scopes.
+
+```c
+unsigned reserve(unsigned* next, unsigned count) {
+  return __atomic_fetch_add(next, count, __ATOMIC_RELAXED);
+}
+
+bool replace(unsigned* state, unsigned* expected, unsigned replacement) {
+  return __atomic_compare_exchange_n(state, expected, replacement, false,
+                                     __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+}
+```
+
+Fetch operations return either the observed value or the updated value computed
+from it, without reloading storage. Signed integer atomic arithmetic wraps.
+Compare-exchange returns success and writes the observed value to `*expected`
+only on failure; success leaves expected storage untouched. All value arguments,
+including `weak`, are evaluated once. High uses strong compare-exchange for
+either weak value. The expected pointer uses ordinary addressable storage,
+such as an incoming pointer or array element.
+
+Ordering arguments must be pure integer constants; use the predefined
+`__ATOMIC_*` values. `__ATOMIC_CONSUME` uses acquire semantics, and a relaxed
+thread fence has no effect. Runtime orderings, target-specific modifier bits,
+generic by-reference forms, NAND, and storage outside the non-boolean integer
+subset diagnose at import. Native width, memory-space, and scope support follow
+the corresponding High operation.
 
 ## Embedded Low assembly
 

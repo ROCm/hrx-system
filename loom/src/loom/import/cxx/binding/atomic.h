@@ -39,12 +39,6 @@ class AtomicIntrinsic {
                                                 const cxx::Attribute& attribute,
                                                 cxx::AST* owner);
 
-  // Admits GCC load_n/store_n calls with constant ordering and system scope.
-  // Other builtins return nullopt. The parser owns the concrete call signature.
-  static std::optional<AtomicIntrinsic> resolve_builtin(
-      cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types,
-      cxx::CallExpressionAST* call);
-
   // Emits one atomic access using already evaluated source arguments and the
   // ordinary storage projection. Store and reduction have no result; load,
   // RMW, and CAS return the observed memory value. Target lowering owns width,
@@ -54,16 +48,11 @@ class AtomicIntrinsic {
                             cxx::AST* owner, loom_builder_t* builder,
                             loom_location_id_t location) const;
 
-  // Normalizes evaluated builtin operands (pointer first, ordering omitted)
-  // into the same memory emission as the typed facade.
-  std::optional<Value> call_builtin(std::span<const Value> arguments,
-                                    Storage& storage, cxx::AST* owner,
-                                    loom_builder_t* builder,
-                                    loom_location_id_t location) const;
-
   bool equivalent(const AtomicIntrinsic& other) const;
 
  private:
+  friend class AtomicBuiltin;
+
   enum class Operation { Load, Store, Rmw, Reduce, CompareExchange };
 
   AtomicIntrinsic(Operation operation, const cxx::Type* element_type,
@@ -93,6 +82,44 @@ class AtomicIntrinsic {
   loom_atomic_ordering_t failure_ordering_;
   // Explicit source synchronization scope, preserved without narrowing.
   loom_atomic_scope_t scope_;
+};
+
+// GCC argument and result conventions over the same typed High projection.
+// The parser owns the concrete signature and argument conversions. Admission
+// consumes constant orderings; the driver evaluates all remaining arguments.
+class AtomicBuiltin {
+ public:
+  // Admits integer load_n/store_n/exchange_n/compare_exchange_n and the
+  // add/sub/and/or/xor fetch families. Other builtins return nullopt.
+  static std::optional<AtomicBuiltin> resolve(cxx::TranslationUnit& unit,
+                                              Diagnostics& diagnostics,
+                                              Types& types,
+                                              cxx::CallExpressionAST* call);
+
+  // Number of leading value operands, including CAS's evaluated weak operand.
+  size_t argument_count() const;
+
+  // Arguments are evaluated once before the operation. CAS returns success
+  // and writes observed memory into expected storage only on failure. A strong
+  // High CAS implements either weak value without spurious failure.
+  std::optional<Value> call(std::span<const Value> arguments, Storage& storage,
+                            Scalars& scalars, cxx::AST* owner,
+                            loom_builder_t* builder,
+                            loom_location_id_t location) const;
+
+ private:
+  enum class Result { Observed, Updated, Success };
+
+  AtomicBuiltin(AtomicIntrinsic intrinsic, Result result,
+                const cxx::Type* expected_type)
+      : intrinsic_(intrinsic), result_(result), expected_type_(expected_type) {}
+
+  // The source-selected memory operation, ordering, scope, and payload type.
+  AtomicIntrinsic intrinsic_;
+  // Whether the builtin returns the observed value, updated value, or success.
+  Result result_;
+  // Source-owned CAS expected-storage element type; null for other operations.
+  const cxx::Type* expected_type_;
 };
 
 // A standalone memory fence has only ordering and scope. It carries neither a

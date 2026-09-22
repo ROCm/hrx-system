@@ -197,3 +197,16 @@ void entry(const unsigned* destination) {
   // ERROR@+1: LOWERING/059 "atomic destination requires a mutable pointer"
   __atomic_store_n(destination, 1u, __ATOMIC_RELAXED);
 }
+
+// ====
+bool entry(unsigned* destination, unsigned* expected) {
+  // ERROR@+1: LOWERING/059 "relaxed, acquire, or seq_cst failure ordering"
+  return __atomic_compare_exchange_n(destination, expected, 1u, false,
+                                    __ATOMIC_ACQ_REL, __ATOMIC_RELEASE);
+}
+
+// ====
+unsigned entry(const unsigned* destination) {
+  // ERROR@+1: LOWERING/059 "atomic destination requires a mutable pointer"
+  return __atomic_fetch_add(destination, 1u, __ATOMIC_RELAXED);
+}

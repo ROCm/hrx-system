@@ -1,0 +1,93 @@
+// The callable boundary supplies real expected storage; scalar locals remain SSA.
+func.decl @builtin_compare_values(%storage: buffer, %storage_origin: offset, %evaluations: buffer, %evaluations_origin: offset) -> (i32)
+
+func.decl @builtin_wide_values(%storage: buffer, %origin: offset) -> (i32)
+
+func.def @observe_builtin_compare() -> (i32, i32, i32, i32, i32, i32) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 40 : offset
+  %storage = buffer.alloca<private> align(4) %bytes : buffer
+  %words = buffer.view %storage[%origin] : buffer -> view<10xi32>
+  %initial = scalar.constant 37 : i32
+  view.store %initial, %words[0] : i32, view<10xi32>
+  view.store %initial, %words[1] : i32, view<10xi32>
+  view.store %initial, %words[2] : i32, view<10xi32>
+  view.store %initial, %words[3] : i32, view<10xi32>
+  %c0 = scalar.constant 0 : i32
+  %begin = index.constant 4 : index
+  %end = index.constant 10 : index
+  %step = index.constant 1 : index
+  scf.for %index = [%begin to %end step %step] {
+    view.store %c0, %words[%index] : i32, view<10xi32>
+  }
+  %evaluations_origin = index.constant 16 : offset
+  %failures = func.call @builtin_compare_values(%storage, %origin, %storage, %evaluations_origin) : (buffer, offset, buffer, offset) -> (i32)
+  %before = view.load %words[0] : view<10xi32> -> i32
+  %word = view.load %words[1] : view<10xi32> -> i32
+  %expected = view.load %words[2] : view<10xi32> -> i32
+  %after = view.load %words[3] : view<10xi32> -> i32
+  %checks = scf.for %index = [%begin to %end step %step](%failed = %c0 : i32) -> (i32) {
+    %value = view.load %words[%index] : view<10xi32> -> i32
+    %lower = index.constant 5 : index
+    %upper = index.constant 9 : index
+    %inside = index.cmp uge, %index, %lower : index
+    %bounded = index.cmp ult, %index, %upper : index
+    %counter = scalar.andi %inside, %bounded : i1
+    %expected_evaluations = scalar.constant 2 : i32
+    %wanted = scf.select %counter, %expected_evaluations, %c0 : i32
+    %mismatch = scalar.cmpi ne, %value, %wanted : i32
+    %increment = scalar.extui %mismatch : i1 to i32
+    %next = scalar.addi %failed, %increment : i32
+    scf.yield %next : i32
+  }
+  func.return %failures, %before, %word, %expected, %after, %checks : i32, i32, i32, i32, i32, i32
+}
+
+check.case @builtin_compare_semantics {
+  %failures, %before, %word, %expected, %after, %checks = func.call @observe_builtin_compare() : () -> (i32, i32, i32, i32, i32, i32)
+  %c0 = check.literal value(0) : i32
+  %guard = check.literal value(37) : i32
+  %replacement = check.literal value(13) : i32
+  %observed = check.literal value(7) : i32
+  check.expect.equal actual(%failures) expected(%c0) : i32
+  check.expect.equal actual(%before) expected(%guard) : i32
+  check.expect.equal actual(%word) expected(%replacement) : i32
+  check.expect.equal actual(%expected) expected(%observed) : i32
+  check.expect.equal actual(%after) expected(%guard) : i32
+  check.expect.equal actual(%checks) expected(%c0) : i32
+  check.return
+}
+
+func.def @observe_builtin_wide() -> (i32, i64, i64, i64, i64) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 32 : offset
+  %storage = buffer.alloca<private> align(8) %bytes : buffer
+  %words = buffer.view %storage[%origin] : buffer -> view<4xi64>
+  %initial = scalar.constant 37 : i64
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  scf.for %index = [%begin to %end step %step] {
+    view.store %initial, %words[%index] : i64, view<4xi64>
+  }
+  %failures = func.call @builtin_wide_values(%storage, %origin) : (buffer, offset) -> (i32)
+  %before = view.load %words[0] : view<4xi64> -> i64
+  %word = view.load %words[1] : view<4xi64> -> i64
+  %expected = view.load %words[2] : view<4xi64> -> i64
+  %after = view.load %words[3] : view<4xi64> -> i64
+  func.return %failures, %before, %word, %expected, %after : i32, i64, i64, i64, i64
+}
+
+check.case @builtin_wide_semantics {
+  %failures, %before, %word, %expected, %after = func.call @observe_builtin_wide() : () -> (i32, i64, i64, i64, i64)
+  %c0 = check.literal value(0) : i32
+  %guard = check.literal value(37) : i64
+  %replacement = check.literal value(4294967300) : i64
+  %observed = check.literal value(4294967299) : i64
+  check.expect.equal actual(%failures) expected(%c0) : i32
+  check.expect.equal actual(%before) expected(%guard) : i64
+  check.expect.equal actual(%word) expected(%replacement) : i64
+  check.expect.equal actual(%expected) expected(%observed) : i64
+  check.expect.equal actual(%after) expected(%guard) : i64
+  check.return
+}

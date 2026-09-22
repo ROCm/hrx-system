@@ -1,0 +1,25 @@
+// RUN: with-checks roundtrip
+// INPUT: cxx std=c23
+// Returned-new arithmetic uses the RMW result, never a second memory read.
+unsigned add_new(volatile unsigned* state, unsigned value) {
+  return __atomic_add_fetch(state, value, __ATOMIC_SEQ_CST);
+}
+// ----
+// CHECK: *view.atomic.rmw<addi>*{ordering = seq_cst, scope = system}*
+// CHECK: *scalar.addi*
+// CHECK-NOT: *view.load*
+// CHECK-NOT: *view.atomic.load*
+
+// ====
+// Both orderings and the weak argument's effect survive the source adapter.
+bool compare(volatile unsigned long long* state, unsigned long long* expected,
+             unsigned long long value, unsigned* calls) {
+  return __atomic_compare_exchange_n(state, expected, value, ++*calls != 0,
+                                    __ATOMIC_ACQ_REL, __ATOMIC_CONSUME);
+}
+// ----
+// CHECK: *view.store*
+// CHECK: *view.atomic.cmpxchg*{failure_ordering = acquire, scope = system, success_ordering = acq_rel}*
+// CHECK: *scalar.cmpi eq*
+// CHECK: *scf.if*
+// CHECK: *view.store*

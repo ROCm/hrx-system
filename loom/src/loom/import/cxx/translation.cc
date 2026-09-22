@@ -779,19 +779,19 @@ class Translator {
 
   std::optional<IntrinsicCallResult> atomic_builtin(
       cxx::CallExpressionAST* call) {
-    if (auto atomic = AtomicIntrinsic::resolve_builtin(unit_, diagnostics_,
-                                                       types_, call)) {
-      std::array<Value, 2> arguments;
-      size_t count = 0;
-      // Admission consumed the final constant ordering. Evaluate only the
-      // pointer/value operands, once each, in source order.
-      for (auto* argument = call->expressionList; argument->next;
-           argument = argument->next) {
-        arguments[count++] = expression(argument->value);
+    if (auto atomic =
+            AtomicBuiltin::resolve(unit_, diagnostics_, types_, call)) {
+      std::array<Value, 4> arguments;
+      auto* argument = call->expressionList;
+      // Admission consumed the constant orderings. Evaluate every remaining
+      // operand once, including weak even though High CAS is always strong.
+      for (size_t index = 0; index < atomic->argument_count(); ++index) {
+        arguments[index] = expression(argument->value);
+        argument = argument->next;
       }
-      return IntrinsicCallResult{
-          atomic->call_builtin(std::span(arguments).first(count), storage_,
-                               call, &builder_, locations_.get(call))};
+      return IntrinsicCallResult{atomic->call(
+          std::span(arguments).first(atomic->argument_count()), storage_,
+          scalars_, call, &builder_, locations_.get(call))};
     }
     if (auto fence =
             FenceIntrinsic::resolve_builtin(unit_, diagnostics_, call)) {

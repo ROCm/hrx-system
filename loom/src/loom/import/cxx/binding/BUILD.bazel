@@ -55,6 +55,8 @@ loom_cc_library(
         "//loom/src/loom/import/cxx/value:storage",
         "//loom/src/loom/ops:atomic",
         "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
         "//loom/src/loom/ops/view",
         "//third_party:cxx_parser",
     ],

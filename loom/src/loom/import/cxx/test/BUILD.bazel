@@ -28,6 +28,7 @@ loom_check_test_suite(
         "assembly_invalid.cxx-test",
         "assumptions.cxx-test",
         "assumptions_invalid.cxx-test",
+        "atomic_builtins.cxx-test",
         "atomics.cxx-test",
         "atomics_invalid.cxx-test",
         "bfloat16.cxx-test",
@@ -146,6 +147,8 @@ loom_test(
 loom_test(
     name = "atomic_values_test",
     srcs = [
+        "atomic_builtin_values.loom",
+        "atomic_builtins.cpp",
         "atomic_values.loom",
         "atomics.cpp",
     ],
@@ -255,6 +258,8 @@ loom_check_test_suite(
 loom_test_module(
     name = "atomics_module",
     srcs = [
+        "atomic_builtin_kernels.loom",
+        "atomic_builtins.cpp",
         "atomic_kernels.loom",
         "atomics.cpp",
     ],

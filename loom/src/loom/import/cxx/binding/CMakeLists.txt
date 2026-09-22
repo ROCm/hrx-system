@@ -71,6 +71,8 @@ loom_cc_library(
     loom::import::cxx::value::storage
     loom::ops::atomic
     loom::ops::buffer
+    loom::ops::scalar
+    loom::ops::scf
     loom::ops::view
   PUBLIC
 )

@@ -19,6 +19,8 @@
 #include "loom/import/cxx/source/constants.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/ops/buffer/ops.h"
+#include "loom/ops/scalar/ops.h"
+#include "loom/ops/scf/ops.h"
 #include "loom/ops/view/ops.h"
 
 namespace loom::cxx_import {
@@ -101,6 +103,19 @@ void require_observation_ordering(cxx::TranslationUnit& unit,
       ordering);
 }
 
+void require_compare_exchange_orderings(cxx::TranslationUnit& unit,
+                                        Diagnostics& diagnostics,
+                                        cxx::AST* owner,
+                                        loom_atomic_ordering_t success,
+                                        loom_atomic_ordering_t failure) {
+  auto error = loom_atomic_cmpxchg_ordering_validate(success, failure);
+  if (error != LOOM_ATOMIC_CMPXCHG_ORDERING_ERROR_NONE) {
+    diagnostics.reject(
+        unit, owner,
+        string(loom_atomic_cmpxchg_ordering_error_expected_constraint(error)));
+  }
+}
+
 }  // namespace
 
 bool AtomicIntrinsic::supports(std::string_view name) {
@@ -137,14 +152,8 @@ std::optional<AtomicIntrinsic> AtomicIntrinsic::resolve(
     }
     ordering = static_cast<loom_atomic_ordering_t>(selectors[0]);
     failure_ordering = static_cast<loom_atomic_ordering_t>(selectors[1]);
-    auto error =
-        loom_atomic_cmpxchg_ordering_validate(ordering, failure_ordering);
-    if (error != LOOM_ATOMIC_CMPXCHG_ORDERING_ERROR_NONE) {
-      diagnostics.reject(
-          unit, owner,
-          string(
-              loom_atomic_cmpxchg_ordering_error_expected_constraint(error)));
-    }
+    require_compare_exchange_orderings(unit, diagnostics, owner, ordering,
+                                       failure_ordering);
   } else {
     if (operation == Operation::Rmw || operation == Operation::Reduce) {
       if (!loom_atomic_kind_is_valid(selectors[0]) ||
@@ -225,18 +234,62 @@ std::optional<AtomicIntrinsic> AtomicIntrinsic::resolve(
                          failure_ordering, scope);
 }
 
-std::optional<AtomicIntrinsic> AtomicIntrinsic::resolve_builtin(
+std::optional<AtomicBuiltin> AtomicBuiltin::resolve(
     cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types,
     cxx::CallExpressionAST* call) {
   auto* callee = cxx::ast_cast<cxx::IdExpressionAST>(call->baseExpression);
-  auto kind = cxx::resolveBuiltinFunctionKind(callee);
-  if (kind != cxx::BuiltinFunctionKind::T___ATOMIC_LOAD_N &&
-      kind != cxx::BuiltinFunctionKind::T___ATOMIC_STORE_N) {
-    return std::nullopt;
+  auto builtin = cxx::resolveBuiltinFunctionKind(callee);
+  using Operation = AtomicIntrinsic::Operation;
+  using Builtin = cxx::BuiltinFunctionKind;
+  auto operation = Operation::Rmw;
+  auto kind = LOOM_ATOMIC_KIND_XCHGI;
+  auto result = Result::Observed;
+  switch (builtin) {
+    case Builtin::T___ATOMIC_LOAD_N:
+      operation = Operation::Load;
+      break;
+    case Builtin::T___ATOMIC_STORE_N:
+      operation = Operation::Store;
+      break;
+    case Builtin::T___ATOMIC_EXCHANGE_N:
+      break;
+    case Builtin::T___ATOMIC_COMPARE_EXCHANGE_N:
+      operation = Operation::CompareExchange;
+      result = Result::Success;
+      break;
+    case Builtin::T___ATOMIC_ADD_FETCH:
+      result = Result::Updated;
+      [[fallthrough]];
+    case Builtin::T___ATOMIC_FETCH_ADD:
+      kind = LOOM_ATOMIC_KIND_ADDI;
+      break;
+    case Builtin::T___ATOMIC_SUB_FETCH:
+      result = Result::Updated;
+      [[fallthrough]];
+    case Builtin::T___ATOMIC_FETCH_SUB:
+      kind = LOOM_ATOMIC_KIND_SUBI;
+      break;
+    case Builtin::T___ATOMIC_AND_FETCH:
+      result = Result::Updated;
+      [[fallthrough]];
+    case Builtin::T___ATOMIC_FETCH_AND:
+      kind = LOOM_ATOMIC_KIND_ANDI;
+      break;
+    case Builtin::T___ATOMIC_OR_FETCH:
+      result = Result::Updated;
+      [[fallthrough]];
+    case Builtin::T___ATOMIC_FETCH_OR:
+      kind = LOOM_ATOMIC_KIND_ORI;
+      break;
+    case Builtin::T___ATOMIC_XOR_FETCH:
+      result = Result::Updated;
+      [[fallthrough]];
+    case Builtin::T___ATOMIC_FETCH_XOR:
+      kind = LOOM_ATOMIC_KIND_XORI;
+      break;
+    default:
+      return std::nullopt;
   }
-  auto operation = kind == cxx::BuiltinFunctionKind::T___ATOMIC_LOAD_N
-                       ? Operation::Load
-                       : Operation::Store;
   auto* operands = call->expressionList;
   auto* pointer = cxx::type_cast<cxx::PointerType>(
       unit.typeTraits().decay(operands->value->type));
@@ -246,23 +299,40 @@ std::optional<AtomicIntrinsic> AtomicIntrinsic::resolve_builtin(
     diagnostics.reject(unit, call,
                        "atomic builtin requires non-boolean integer storage");
   }
-  if (operation == Operation::Store &&
+  if (operation != Operation::Load &&
       unit.typeTraits().is_const(pointer->elementType())) {
     diagnostics.reject(unit, call,
                        "atomic destination requires a mutable pointer");
   }
-  auto* order = operation == Operation::Load ? operands->next->value
-                                             : operands->next->next->value;
-  auto ordering = builtin_ordering(unit, diagnostics, order);
-  require_observation_ordering(unit, diagnostics, call,
-                               operation == Operation::Load
-                                   ? LOOM_OP_VIEW_ATOMIC_LOAD
-                                   : LOOM_OP_VIEW_ATOMIC_STORE,
-                               ordering);
-  return AtomicIntrinsic(operation, pointer->elementType(),
-                         types.get(element, call), LOOM_ATOMIC_KIND_XCHGI,
-                         ordering, LOOM_ATOMIC_ORDERING_RELAXED,
-                         LOOM_ATOMIC_SCOPE_SYSTEM);
+  AtomicBuiltin binding(
+      AtomicIntrinsic(operation, pointer->elementType(),
+                      types.get(element, call), kind,
+                      LOOM_ATOMIC_ORDERING_RELAXED,
+                      LOOM_ATOMIC_ORDERING_RELAXED, LOOM_ATOMIC_SCOPE_SYSTEM),
+      result, nullptr);
+  auto* order = operands;
+  for (size_t index = 0; index < binding.argument_count(); ++index) {
+    order = order->next;
+  }
+  binding.intrinsic_.ordering_ =
+      builtin_ordering(unit, diagnostics, order->value);
+  if (operation == Operation::CompareExchange) {
+    binding.intrinsic_.failure_ordering_ =
+        builtin_ordering(unit, diagnostics, order->next->value);
+    require_compare_exchange_orderings(unit, diagnostics, call,
+                                       binding.intrinsic_.ordering_,
+                                       binding.intrinsic_.failure_ordering_);
+    binding.expected_type_ =
+        cxx::type_cast<cxx::PointerType>(operands->next->value->type)
+            ->elementType();
+  } else if (operation == Operation::Load || operation == Operation::Store) {
+    require_observation_ordering(unit, diagnostics, call,
+                                 operation == Operation::Load
+                                     ? LOOM_OP_VIEW_ATOMIC_LOAD
+                                     : LOOM_OP_VIEW_ATOMIC_STORE,
+                                 binding.intrinsic_.ordering_);
+  }
+  return binding;
 }
 
 std::optional<Value> AtomicIntrinsic::call(std::span<const Value> arguments,
@@ -304,14 +374,78 @@ std::optional<Value> AtomicIntrinsic::call(std::span<const Value> arguments,
   std::unreachable();
 }
 
-std::optional<Value> AtomicIntrinsic::call_builtin(
-    std::span<const Value> arguments, Storage& storage, cxx::AST* owner,
-    loom_builder_t* builder, loom_location_id_t location) const {
-  if (operation_ == Operation::Load) {
-    return call(arguments, storage, owner, builder, location);
+size_t AtomicBuiltin::argument_count() const {
+  if (result_ == Result::Success) {
+    return 4;
+  }
+  return intrinsic_.operation_ == AtomicIntrinsic::Operation::Load ? 1 : 2;
+}
+
+std::optional<Value> AtomicBuiltin::call(std::span<const Value> arguments,
+                                         Storage& storage, Scalars& scalars,
+                                         cxx::AST* owner,
+                                         loom_builder_t* builder,
+                                         loom_location_id_t location) const {
+  if (intrinsic_.operation_ == AtomicIntrinsic::Operation::Load) {
+    return intrinsic_.call(arguments, storage, owner, builder, location);
+  }
+  if (result_ == Result::Success) {
+    auto access =
+        storage.dereference(arguments[1].pointer(), expected_type_, owner);
+    auto expected = storage.load(access, expected_type_, owner);
+    std::array<Value, 3> normalized = {Value(expected), arguments[2],
+                                       arguments[0]};
+    auto observed =
+        intrinsic_.call(normalized, storage, owner, builder, location)->ssa();
+    loom_op_t* comparison;
+    check(loom_scalar_cmpi_build(builder, LOOM_SCALAR_CMPI_PREDICATE_EQ,
+                                 observed, expected, location, &comparison));
+    auto success = loom_op_results(comparison)[0];
+    auto one = scalars.integer(1, LOOM_SCALAR_TYPE_I1, location);
+    loom_op_t* complement;
+    check(loom_scalar_xori_build(builder, success, one,
+                                 loom_type_scalar(LOOM_SCALAR_TYPE_I1),
+                                 location, &complement));
+    loom_op_t* branch;
+    check(loom_scf_if_build(builder, 0, loom_op_results(complement)[0], nullptr,
+                            0, nullptr, 0, location, &branch));
+    auto saved = loom_builder_enter_region(builder, branch,
+                                           loom_scf_if_then_region(branch));
+    loom_op_t* yield;
+    storage.store(access, observed, expected_type_, owner);
+    check(loom_scf_yield_build(builder, nullptr, 0, location, &yield));
+    loom_builder_restore(builder, saved);
+    return Value(success);
   }
   std::array<Value, 2> normalized = {arguments[1], arguments[0]};
-  return call(normalized, storage, owner, builder, location);
+  auto observed =
+      intrinsic_.call(normalized, storage, owner, builder, location);
+  if (result_ != Result::Updated) {
+    return observed;
+  }
+  cxx::TokenKind token;
+  switch (intrinsic_.kind_) {
+    case LOOM_ATOMIC_KIND_ADDI:
+      token = cxx::TokenKind::T_PLUS;
+      break;
+    case LOOM_ATOMIC_KIND_SUBI:
+      token = cxx::TokenKind::T_MINUS;
+      break;
+    case LOOM_ATOMIC_KIND_ANDI:
+      token = cxx::TokenKind::T_AMP;
+      break;
+    case LOOM_ATOMIC_KIND_ORI:
+      token = cxx::TokenKind::T_BAR;
+      break;
+    case LOOM_ATOMIC_KIND_XORI:
+      token = cxx::TokenKind::T_CARET;
+      break;
+    default:
+      std::unreachable();
+  }
+  return Value(scalars.binary(token, observed->ssa(), arguments[1].ssa(),
+                              intrinsic_.element_type_,
+                              intrinsic_.element_type_, owner));
 }
 
 bool AtomicIntrinsic::equivalent(const AtomicIntrinsic& other) const {

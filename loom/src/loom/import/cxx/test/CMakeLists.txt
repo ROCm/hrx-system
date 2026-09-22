@@ -18,6 +18,7 @@ loom_check_test_suite(
     "assembly_invalid.cxx-test"
     "assumptions.cxx-test"
     "assumptions_invalid.cxx-test"
+    "atomic_builtins.cxx-test"
     "atomics.cxx-test"
     "atomics_invalid.cxx-test"
     "bfloat16.cxx-test"
@@ -152,6 +153,8 @@ loom_test_module(
   NAME
     atomic_values_test_module
   SRCS
+    "atomic_builtin_values.loom"
+    "atomic_builtins.cpp"
     "atomic_values.loom"
     "atomics.cpp"
 )
@@ -911,6 +914,8 @@ loom_test_module(
   NAME
     atomics_module
   SRCS
+    "atomic_builtin_kernels.loom"
+    "atomic_builtins.cpp"
     "atomic_kernels.loom"
     "atomics.cpp"
 )
