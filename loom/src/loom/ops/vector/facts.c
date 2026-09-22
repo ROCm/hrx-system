@@ -134,6 +134,18 @@ static bool loom_vector_facts_query_lane(const loom_fact_context_t* context,
   return true;
 }
 
+// Merging independent vectors preserves known lanes even when another source
+// has no lane facts. Absence of a fact applies only to the selected lane.
+static loom_value_facts_t loom_vector_facts_lane_or_unknown(
+    const loom_fact_context_t* context, loom_value_facts_t facts,
+    iree_host_size_t lane) {
+  loom_value_facts_t element = loom_value_facts_unknown();
+  if (!loom_vector_facts_query_lane(context, facts, lane, &element)) {
+    return loom_value_facts_unknown();
+  }
+  return element;
+}
+
 static bool loom_vector_facts_query_binary_lane_count(
     const loom_fact_context_t* context, loom_value_facts_t lhs,
     loom_value_facts_t rhs, iree_host_size_t* out_lane_count) {
@@ -2101,10 +2113,8 @@ iree_status_t loom_vector_insert_facts(loom_fact_context_t* context,
                          result_indices[axis] == static_indices.i64_array[axis];
     }
     if (!lane_is_inserted) {
-      if (!loom_vector_facts_query_lane(context, operand_facts[1], lane,
-                                        &lanes[lane])) {
-        return loom_vector_make_unknown_facts(result_facts);
-      }
+      lanes[lane] =
+          loom_vector_facts_lane_or_unknown(context, operand_facts[1], lane);
       continue;
     }
 
@@ -2119,11 +2129,11 @@ iree_status_t loom_vector_insert_facts(loom_fact_context_t* context,
     }
     iree_host_size_t value_lane = 0;
     if (!loom_vector_static_ordinal_from_indices(value_type, value_indices,
-                                                 &value_lane) ||
-        !loom_vector_facts_query_lane(context, operand_facts[0], value_lane,
-                                      &lanes[lane])) {
+                                                 &value_lane)) {
       return loom_vector_make_unknown_facts(result_facts);
     }
+    lanes[lane] = loom_vector_facts_lane_or_unknown(context, operand_facts[0],
+                                                    value_lane);
   }
   return loom_vector_make_small_static_lane_facts(
       context, lanes, result_lane_count, &result_facts[0]);
@@ -2357,11 +2367,11 @@ iree_status_t loom_vector_concat_facts(loom_fact_context_t* context,
         input_indices[axis] = axis_index - axis_base;
         iree_host_size_t input_lane = 0;
         if (!loom_vector_static_ordinal_from_indices(input_type, input_indices,
-                                                     &input_lane) ||
-            !loom_vector_facts_query_lane(context, operand_facts[operand_index],
-                                          input_lane, &lanes[lane])) {
+                                                     &input_lane)) {
           return loom_vector_make_unknown_facts(result_facts);
         }
+        lanes[lane] = loom_vector_facts_lane_or_unknown(
+            context, operand_facts[operand_index], input_lane);
         found_input = true;
         break;
       }
@@ -2449,11 +2459,11 @@ iree_status_t loom_vector_interleave_facts(
     source_indices[axis] /= 2;
     iree_host_size_t source_lane = 0;
     if (!loom_vector_static_ordinal_from_indices(even_type, source_indices,
-                                                 &source_lane) ||
-        !loom_vector_facts_query_lane(context, operand_facts[operand_index],
-                                      source_lane, &lanes[lane])) {
+                                                 &source_lane)) {
       return loom_vector_make_unknown_facts(result_facts);
     }
+    lanes[lane] = loom_vector_facts_lane_or_unknown(
+        context, operand_facts[operand_index], source_lane);
   }
   return loom_vector_make_small_static_lane_facts(
       context, lanes, result_lane_count, &result_facts[0]);

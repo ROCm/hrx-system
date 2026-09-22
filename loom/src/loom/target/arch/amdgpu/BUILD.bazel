@@ -552,6 +552,9 @@ loom_check_test_suite(
             "//loom/target/amdgpu:gfx942",
             "//loom/target/amdgpu:gfx950",
         ],
+        "test/source_low/source_low_table_static.loom-test": [
+            "//loom/target/amdgpu:gfx11-generic",
+        ],
     },
     data = [
         "//loom/src/loom/test/corpus/source_low:async_empty.loom-test",

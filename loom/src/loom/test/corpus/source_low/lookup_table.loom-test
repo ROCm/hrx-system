@@ -52,6 +52,36 @@ func.def @i8_table_lookup_fact_known_codes(%grid: vector<4xi8>) -> (vector<4xi8>
 
 // ====
 
+func.def @f32_table_lookup_uniform_i8(%grid: vector<3xf32>) -> (vector<16xf32>) {
+  %indices = vector.constant 2 : vector<16xi8>
+  %decoded = vector.table.lookup %grid[%indices] : vector<3xf32>, vector<16xi8> -> vector<16xf32>
+  func.return %decoded : vector<16xf32>
+}
+
+// ====
+
+func.def @f32_table_lookup_static_i32(%grid: vector<3xf32>) -> (vector<4xf32>) {
+  %first = scalar.constant 0 : i32
+  %middle = scalar.constant 1 : i32
+  %last = scalar.constant 2 : i32
+  %indices = vector.from_elements %last, %first, %last, %middle : vector<4xi32>
+  %decoded = vector.table.lookup %grid[%indices] : vector<3xf32>, vector<4xi32> -> vector<4xf32>
+  func.return %decoded : vector<4xf32>
+}
+
+// ====
+
+func.def @f32_table_lookup_partial_i32(%grid: vector<3xf32>, %dynamic: vector<4xi32>) -> (vector<4xf32>) {
+  %first = scalar.constant 0 : i32
+  %last = scalar.constant 2 : i32
+  %known_first = vector.insert %first into %dynamic[1] : i32, vector<4xi32>
+  %indices = vector.insert %last into %known_first[3] : i32, vector<4xi32>
+  %decoded = vector.table.lookup %grid[%indices] : vector<3xf32>, vector<4xi32> -> vector<4xf32>
+  func.return %decoded : vector<4xf32>
+}
+
+// ====
+
 func.def @i8_table_lookup_constant_table() -> (vector<4xi8>) {
   %g0 = scalar.constant -4 : i8
   %g1 = scalar.constant -1 : i8

@@ -22,6 +22,7 @@ loom_check_test_suite(
     "float_conversion_facts.loom-test"
     "integer_partial_facts.loom-test"
     "load_extract.loom-test"
+    "partial_lane_facts.loom-test"
     "roundtrip.loom-test"
     "table_canonicalize.loom-test"
     "vector_to_scalar.loom-test"

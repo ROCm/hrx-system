@@ -789,7 +789,7 @@ typedef enum loom_amdgpu_table_lookup_strategy_e {
 typedef struct loom_amdgpu_table_lookup_plan_t {
   // Register table value selected by each index lane.
   loom_value_id_t table;
-  // Index vector selecting table lanes.
+  // Index vector selecting dynamic table lanes, or invalid when all are static.
   loom_value_id_t indices;
   // Result vector receiving selected table lanes.
   loom_value_id_t result;
@@ -815,6 +815,8 @@ typedef struct loom_amdgpu_table_lookup_plan_t {
   uint32_t result_lane_count;
   // Number of 32-bit registers occupied by the index vector.
   uint32_t index_register_count;
+  // Selected table lane for each F32 result, or UINT8_MAX for a dynamic index.
+  uint8_t table_lane_indices[LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES];
 } loom_amdgpu_table_lookup_plan_t;
 
 typedef struct loom_amdgpu_vector_compare_plan_t {

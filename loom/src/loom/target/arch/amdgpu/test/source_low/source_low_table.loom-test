@@ -140,6 +140,71 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i8_table_lookup_
 
 // ====
 
+func.def @f32_table_lookup_uniform_i8(%grid: vector<3xf32>) -> (vector<16xf32>) {
+  %indices = vector.constant 2 : vector<16xi8>
+  %decoded = vector.table.lookup %grid[%indices] : vector<3xf32>, vector<16xi8> -> vector<16xf32>
+  func.return %decoded : vector<16xf32>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @f32_table_lookup_uniform_i8(%grid: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr x16>) asm {
+  %8 = slice %grid[2] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %decoded = concat(%8, %8, %8, %8, %8, %8, %8, %8, %8, %8, %8, %8, %8, %8, %8, %8) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x16>
+  return %decoded
+}
+
+// ====
+
+func.def @f32_table_lookup_static_i32(%grid: vector<3xf32>) -> (vector<4xf32>) {
+  %first = scalar.constant 0 : i32
+  %middle = scalar.constant 1 : i32
+  %last = scalar.constant 2 : i32
+  %indices = vector.from_elements %last, %first, %last, %middle : vector<4xi32>
+  %decoded = vector.table.lookup %grid[%indices] : vector<3xf32>, vector<4xi32> -> vector<4xf32>
+  func.return %decoded : vector<4xf32>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @f32_table_lookup_static_i32(%grid: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr x4>) asm {
+  %9 = slice %grid[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %10 = slice %grid[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %11 = slice %grid[2] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %decoded = concat(%11, %9, %11, %10) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  return %decoded
+}
+
+// ====
+
+func.def @f32_table_lookup_partial_i32(%grid: vector<3xf32>, %dynamic: vector<4xi32>) -> (vector<4xf32>) {
+  %first = scalar.constant 0 : i32
+  %last = scalar.constant 2 : i32
+  %known_first = vector.insert %first into %dynamic[1] : i32, vector<4xi32>
+  %indices = vector.insert %last into %known_first[3] : i32, vector<4xi32>
+  %decoded = vector.table.lookup %grid[%indices] : vector<3xf32>, vector<4xi32> -> vector<4xf32>
+  func.return %decoded : vector<4xf32>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @f32_table_lookup_partial_i32(%grid: reg<amdgpu.vgpr x3>, %dynamic: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
+  %14 = slice %dynamic[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %16 = slice %dynamic[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %25 = slice %grid[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %26 = slice %grid[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %27 = slice %grid[2] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %29 = v_cmp_eq_i32_src1_inline %14 {rhs = 1}
+  %30 = v_cndmask_b32 %25, %26, %29
+  %31 = v_cmp_eq_i32_src1_inline %14 {rhs = 2}
+  %32 = v_cndmask_b32 %30, %27, %31
+  %34 = v_cmp_eq_i32_src1_inline %16 {rhs = 1}
+  %35 = v_cndmask_b32 %25, %26, %34
+  %36 = v_cmp_eq_i32_src1_inline %16 {rhs = 2}
+  %37 = v_cndmask_b32 %35, %27, %36
+  %decoded = concat(%32, %25, %37, %27) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  return %decoded
+}
+
+// ====
+
 func.def @i8_table_lookup_constant_table() -> (vector<4xi8>) {
   %g0 = scalar.constant -4 : i8
   %g1 = scalar.constant -1 : i8

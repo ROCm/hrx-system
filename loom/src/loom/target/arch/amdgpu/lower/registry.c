@@ -130,8 +130,10 @@ enum loom_amdgpu_storage_policy_e {
   LOOM_AMDGPU_STORAGE_ASYNC_CLUSTER = 14,
   // Subgroup shuffle plans own their payload and dynamic lane demands.
   LOOM_AMDGPU_STORAGE_SUBGROUP_SHUFFLE = 15,
+  // Table lookups omit index storage when every selected lane is static.
+  LOOM_AMDGPU_STORAGE_TABLE_LOOKUP = 16,
   // Maximum storage-policy value accepted by dispatch row policy bits.
-  LOOM_AMDGPU_STORAGE_MAX = LOOM_AMDGPU_STORAGE_SUBGROUP_SHUFFLE,
+  LOOM_AMDGPU_STORAGE_MAX = LOOM_AMDGPU_STORAGE_TABLE_LOOKUP,
 };
 
 enum loom_amdgpu_preselect_policy_e {
@@ -177,9 +179,9 @@ enum loom_amdgpu_report_key_kind_e {
 
 // Packing constants bridge the storage and preselection enum domains into the
 // byte representation; they are not themselves a semantic enum domain.
-#define LOOM_AMDGPU_LOWER_POLICY_STORAGE_MASK UINT8_C(0x0F)
-#define LOOM_AMDGPU_LOWER_POLICY_PRESELECT_SHIFT UINT8_C(4)
-#define LOOM_AMDGPU_LOWER_POLICY_PRESELECT_MASK UINT8_C(0x30)
+#define LOOM_AMDGPU_LOWER_POLICY_STORAGE_MASK UINT8_C(0x1F)
+#define LOOM_AMDGPU_LOWER_POLICY_PRESELECT_SHIFT UINT8_C(5)
+#define LOOM_AMDGPU_LOWER_POLICY_PRESELECT_MASK UINT8_C(0x60)
 
 static_assert((LOOM_AMDGPU_STORAGE_MAX &
                ~LOOM_AMDGPU_LOWER_POLICY_STORAGE_MASK) == 0,
@@ -1222,10 +1224,6 @@ LOOM_AMDGPU_ASSERT_LEADING_SOURCE_FIELD(loom_amdgpu_fragment_repack_plan_t,
                                         source, 0);
 LOOM_AMDGPU_ASSERT_LEADING_SOURCE_FIELD(loom_amdgpu_vector_deinterleave_plan_t,
                                         source, 0);
-LOOM_AMDGPU_ASSERT_LEADING_SOURCE_FIELD(loom_amdgpu_table_lookup_plan_t, table,
-                                        0);
-LOOM_AMDGPU_ASSERT_LEADING_SOURCE_FIELD(loom_amdgpu_table_lookup_plan_t,
-                                        indices, 1);
 LOOM_AMDGPU_ASSERT_LEADING_SOURCE_FIELD(loom_amdgpu_vector_slice_plan_t, source,
                                         0);
 LOOM_AMDGPU_ASSERT_LEADING_SOURCE_FIELD(loom_amdgpu_subgroup_shuffle_plan_t,
@@ -1377,6 +1375,15 @@ static void loom_amdgpu_mark_plan_storage_demands(
           context, source_op,
           (const loom_amdgpu_subgroup_shuffle_plan_t*)plan.target_data);
       return;
+    case LOOM_AMDGPU_STORAGE_TABLE_LOOKUP: {
+      const loom_amdgpu_table_lookup_plan_t* lookup =
+          (const loom_amdgpu_table_lookup_plan_t*)plan.target_data;
+      loom_low_lower_require_source_value_storage(context, lookup->table);
+      if (lookup->indices != LOOM_VALUE_ID_INVALID) {
+        loom_low_lower_require_source_value_storage(context, lookup->indices);
+      }
+      return;
+    }
     case LOOM_AMDGPU_STORAGE_NONE:
       return;
     case LOOM_AMDGPU_STORAGE_ASYNC_GATHER:
@@ -1532,7 +1539,9 @@ static iree_string_view_t loom_amdgpu_table_lookup_plan_key(
     const loom_amdgpu_table_lookup_plan_t* plan) {
   switch (plan->strategy) {
     case LOOM_AMDGPU_TABLE_LOOKUP_STRATEGY_F32_LADDER:
-      return IREE_SV("amdgpu.table_lookup.strategy.f32_ladder");
+      return plan->indices == LOOM_VALUE_ID_INVALID
+                 ? IREE_SV("amdgpu.table_lookup.strategy.f32_static")
+                 : IREE_SV("amdgpu.table_lookup.strategy.f32_ladder");
     case LOOM_AMDGPU_TABLE_LOOKUP_STRATEGY_PACKED_I8_PERMUTE:
       return IREE_SV("amdgpu.table_lookup.strategy.packed_i8_permute");
     case LOOM_AMDGPU_TABLE_LOOKUP_STRATEGY_PACKED_I8_U4_PERMUTE:

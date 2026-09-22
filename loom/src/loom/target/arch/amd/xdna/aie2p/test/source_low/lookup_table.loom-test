@@ -110,6 +110,87 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8_table_lookup_f
 
 // ====
 
+func.def @f32_table_lookup_uniform_i8(%grid: vector<3xf32>) -> (vector<16xf32>) {
+  %indices = vector.constant 2 : vector<16xi8>
+  %decoded = vector.table.lookup %grid[%indices] : vector<3xf32>, vector<16xi8> -> vector<16xf32>
+  func.return %decoded : vector<16xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f32_table_lookup_uniform_i8(%grid: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %decoded = vextbcst.32 %grid, 2
+  return %decoded
+}
+
+// ====
+
+func.def @f32_table_lookup_static_i32(%grid: vector<3xf32>) -> (vector<4xf32>) {
+  %first = scalar.constant 0 : i32
+  %middle = scalar.constant 1 : i32
+  %last = scalar.constant 2 : i32
+  %indices = vector.from_elements %last, %first, %last, %middle : vector<4xi32>
+  %decoded = vector.table.lookup %grid[%indices] : vector<3xf32>, vector<4xi32> -> vector<4xf32>
+  func.return %decoded : vector<4xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f32_table_lookup_static_i32(%grid: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %26 = vextract.32.imm %grid, 2
+  %27 = vextract.32.imm %grid, 0
+  %28 = vextract.32.imm %grid, 1
+  %29 = vbcst.32 %26
+  %30 = mov.short 1
+  %31 = copy %30 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %32 = vinsert.32.reg %29, %31, %27
+  %33 = mov.short 2
+  %34 = copy %33 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %35 = vinsert.32.reg %32, %34, %26
+  %36 = mov.short 3
+  %37 = copy %36 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %decoded = vinsert.32.reg %35, %37, %28
+  return %decoded
+}
+
+// ====
+
+func.def @f32_table_lookup_partial_i32(%grid: vector<3xf32>, %dynamic: vector<4xi32>) -> (vector<4xf32>) {
+  %first = scalar.constant 0 : i32
+  %last = scalar.constant 2 : i32
+  %known_first = vector.insert %first into %dynamic[1] : i32, vector<4xi32>
+  %indices = vector.insert %last into %known_first[3] : i32, vector<4xi32>
+  %decoded = vector.table.lookup %grid[%indices] : vector<3xf32>, vector<4xi32> -> vector<4xf32>
+  func.return %decoded : vector<4xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f32_table_lookup_partial_i32(%grid: reg<aie2p.vec256 x2>, %dynamic: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %first = mov.short 0
+  %last = mov.short 2
+  %28 = mov.short 1
+  %29 = copy %28 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %known_first = vinsert.32.reg %dynamic, %29, %first
+  %31 = mov.short 3
+  %32 = copy %31 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %indices = vinsert.32.reg %known_first, %32, %last
+  %35 = vbcst.32 %first
+  %37 = vbcst.32 %28
+  %38 = vband %indices, %37
+  %39 = vlt.u32x16.el.low32 %35, %38
+  %40 = predicate.complete.zero.high32 %39, 0
+  %42 = vbcst.32 %last
+  %43 = vband %indices, %42
+  %44 = vlt.u32x16.el.low32 %35, %43
+  %45 = predicate.complete.zero.high32 %44, 0
+  %46 = vextbcst.32 %grid, 0
+  %47 = vextbcst.32 %grid, 1
+  %48 = vsel.32.mask64 %46, %47, %40
+  %49 = vextbcst.32 %grid, 2
+  %decoded = vsel.32.mask64 %48, %49, %45
+  return %decoded
+}
+
+// ====
+
 func.def @i8_table_lookup_constant_table() -> (vector<4xi8>) {
   %g0 = scalar.constant -4 : i8
   %g1 = scalar.constant -1 : i8

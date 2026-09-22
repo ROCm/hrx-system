@@ -419,6 +419,23 @@ static bool loom_amdgpu_table_lookup_plan_from_op(
     out_plan->table_register_count = table_register_count;
     out_plan->result_lane_count = result_lane_count;
     out_plan->index_register_count = index_register_count;
+    if (row->strategy == LOOM_AMDGPU_TABLE_LOOKUP_STRATEGY_F32_LADDER) {
+      uint32_t dynamic_index_count = 0;
+      for (uint32_t lane = 0; lane < result_lane_count; ++lane) {
+        uint32_t table_index = 0;
+        if (loom_amdgpu_source_lane_as_u32_bits(
+                fact_table, module, out_plan->indices, lane, &table_index) &&
+            table_index < table_lane_count) {
+          out_plan->table_lane_indices[lane] = (uint8_t)table_index;
+        } else {
+          out_plan->table_lane_indices[lane] = UINT8_MAX;
+          ++dynamic_index_count;
+        }
+      }
+      if (dynamic_index_count == 0) {
+        out_plan->indices = LOOM_VALUE_ID_INVALID;
+      }
+    }
     *out_row = row;
     return true;
   }
@@ -763,8 +780,10 @@ iree_status_t loom_amdgpu_lower_vector_table_lookup(
   IREE_RETURN_IF_ERROR(
       loom_low_lower_lookup_value(context, plan->table, &low_table));
   loom_value_id_t low_indices = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(
-      loom_low_lower_lookup_value(context, plan->indices, &low_indices));
+  if (plan->indices != LOOM_VALUE_ID_INVALID) {
+    IREE_RETURN_IF_ERROR(
+        loom_low_lower_lookup_value(context, plan->indices, &low_indices));
+  }
 
   if (plan->strategy == LOOM_AMDGPU_TABLE_LOOKUP_STRATEGY_PACKED_I8_PERMUTE) {
     return loom_amdgpu_lower_vector_table_lookup_packed_i8_permute(
@@ -798,6 +817,10 @@ iree_status_t loom_amdgpu_lower_vector_table_lookup(
 
   loom_value_id_t result_lanes[LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES];
   for (uint32_t i = 0; i < plan->result_lane_count; ++i) {
+    if (plan->table_lane_indices[i] != UINT8_MAX) {
+      result_lanes[i] = table_lanes[plan->table_lane_indices[i]];
+      continue;
+    }
     loom_value_id_t index_lane = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_amdgpu_table_lookup_extract_index_lane(
         context, source_op, plan, low_indices, i, lane_type, &index_lane));

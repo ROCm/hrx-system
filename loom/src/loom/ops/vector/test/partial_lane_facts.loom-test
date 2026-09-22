@@ -1,0 +1,91 @@
+// RUN: pass canonicalize
+
+func.def @insert_known_lane(%values: vector<4xi32>) -> (i32, i32) {
+  %replacement = scalar.constant 9 : i32
+  %combined = vector.insert %replacement into %values[2] : i32, vector<4xi32>
+  %increment = vector.constant 1 : vector<4xi32>
+  %shifted = vector.addi %combined, %increment : vector<4xi32>
+  %static = vector.extract %shifted[2] : vector<4xi32> -> i32
+  %dynamic = vector.extract %shifted[0] : vector<4xi32> -> i32
+  func.return %static, %dynamic : i32, i32
+}
+
+// ----
+func.def @insert_known_lane(%values: vector<4xi32>) -> (i32, i32) {
+  %replacement = scalar.constant 9 : i32
+  %combined = vector.insert %replacement into %values[2] : i32, vector<4xi32>
+  %increment = vector.constant 1 : vector<4xi32>
+  %shifted = vector.addi %combined, %increment : vector<4xi32>
+  %static = scalar.constant 10 : i32
+  %dynamic = vector.extract %shifted[0] : vector<4xi32> -> i32
+  func.return %static, %dynamic : i32, i32
+}
+
+// ====
+
+func.def @insert_unknown_row(%row: vector<2xi32>) -> (i32, i32) {
+  %values = vector.constant 9 : vector<2x2xi32>
+  %combined = vector.insert %row into %values[1] : vector<2xi32>, vector<2x2xi32>
+  %increment = vector.constant 1 : vector<2x2xi32>
+  %shifted = vector.addi %combined, %increment : vector<2x2xi32>
+  %static = vector.extract %shifted[0, 1] : vector<2x2xi32> -> i32
+  %dynamic = vector.extract %shifted[1, 0] : vector<2x2xi32> -> i32
+  func.return %static, %dynamic : i32, i32
+}
+
+// ----
+func.def @insert_unknown_row(%row: vector<2xi32>) -> (i32, i32) {
+  %values = vector.constant 9 : vector<2x2xi32>
+  %combined = vector.insert %row into %values[1] : vector<2xi32>, vector<2x2xi32>
+  %increment = vector.constant 1 : vector<2x2xi32>
+  %shifted = vector.addi %combined, %increment : vector<2x2xi32>
+  %static = scalar.constant 10 : i32
+  %dynamic = vector.extract %shifted[1, 0] : vector<2x2xi32> -> i32
+  func.return %static, %dynamic : i32, i32
+}
+
+// ====
+
+func.def @concat_partial_facts(%values: vector<2xi32>) -> (i32, i32) {
+  %known = vector.constant 9 : vector<2xi32>
+  %combined = vector.concat<0> %values, %known : vector<2xi32>, vector<2xi32> -> vector<4xi32>
+  %increment = vector.constant 1 : vector<4xi32>
+  %shifted = vector.addi %combined, %increment : vector<4xi32>
+  %static = vector.extract %shifted[2] : vector<4xi32> -> i32
+  %dynamic = vector.extract %shifted[0] : vector<4xi32> -> i32
+  func.return %static, %dynamic : i32, i32
+}
+
+// ----
+func.def @concat_partial_facts(%values: vector<2xi32>) -> (i32, i32) {
+  %known = vector.constant 9 : vector<2xi32>
+  %combined = vector.concat<0> %values, %known : vector<2xi32>, vector<2xi32> -> vector<4xi32>
+  %increment = vector.constant 1 : vector<4xi32>
+  %shifted = vector.addi %combined, %increment : vector<4xi32>
+  %static = scalar.constant 10 : i32
+  %dynamic = vector.extract %shifted[0] : vector<4xi32> -> i32
+  func.return %static, %dynamic : i32, i32
+}
+
+// ====
+
+func.def @interleave_partial_facts(%values: vector<2x2xi32>) -> (i32, i32) {
+  %known = vector.constant 9 : vector<2x2xi32>
+  %combined = vector.interleave<1> %values, %known : vector<2x2xi32>, vector<2x2xi32> -> vector<2x4xi32>
+  %increment = vector.constant 1 : vector<2x4xi32>
+  %shifted = vector.addi %combined, %increment : vector<2x4xi32>
+  %static = vector.extract %shifted[1, 3] : vector<2x4xi32> -> i32
+  %dynamic = vector.extract %shifted[0, 2] : vector<2x4xi32> -> i32
+  func.return %static, %dynamic : i32, i32
+}
+
+// ----
+func.def @interleave_partial_facts(%values: vector<2x2xi32>) -> (i32, i32) {
+  %known = vector.constant 9 : vector<2x2xi32>
+  %combined = vector.interleave<1> %values, %known : vector<2x2xi32>, vector<2x2xi32> -> vector<2x4xi32>
+  %increment = vector.constant 1 : vector<2x4xi32>
+  %shifted = vector.addi %combined, %increment : vector<2x4xi32>
+  %static = scalar.constant 10 : i32
+  %dynamic = vector.extract %shifted[0, 2] : vector<2x4xi32> -> i32
+  func.return %static, %dynamic : i32, i32
+}
