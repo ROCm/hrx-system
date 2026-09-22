@@ -1,0 +1,262 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_vector64.loom-test
+// RUN: with-checks emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @copy_i64_2_static(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %offset = index.constant 0 : offset
+  %source_view = buffer.view %source[%offset] : buffer -> view<2xi64>
+  %destination_view = buffer.view %destination[%offset] : buffer -> view<2xi64>
+  %value = vector.load %source_view[0] : view<2xi64> -> vector<2xi64>
+  vector.store %value, %destination_view[0] : vector<2xi64>, view<2xi64>
+  func.return
+}
+
+// ----
+CHECK: * = vlda.128.i64x2 *
+CHECK: vst.128.i64x2 *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @copy_i64_2_dynamic(%input: buffer, %output: buffer, %position: i32) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %coordinate = scalar.assume %position [range(%position, 0, 4096), mul(%position, 64)] : i32
+  %offset = index.cast %coordinate : i32 to offset
+  %source_view = buffer.view %source[%offset] : buffer -> view<2xi64>
+  %destination_view = buffer.view %destination[%offset] : buffer -> view<2xi64>
+  %value = vector.load %source_view[0] : view<2xi64> -> vector<2xi64>
+  vector.store %value, %destination_view[0] : vector<2xi64>, view<2xi64>
+  func.return
+}
+
+// ----
+CHECK: * = vlda.128.i64x2.index *
+CHECK: vst.128.i64x2.index *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @copy_i64_4_static(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %offset = index.constant 0 : offset
+  %source_view = buffer.view %source[%offset] : buffer -> view<4xi64>
+  %destination_view = buffer.view %destination[%offset] : buffer -> view<4xi64>
+  %value = vector.load %source_view[0] : view<4xi64> -> vector<4xi64>
+  vector.store %value, %destination_view[0] : vector<4xi64>, view<4xi64>
+  func.return
+}
+
+// ----
+CHECK: * = vlda.256.i64x4 *
+CHECK: vst.256.i64x4 *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @copy_i64_4_dynamic(%input: buffer, %output: buffer, %position: i32) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %coordinate = scalar.assume %position [range(%position, 0, 4096), mul(%position, 64)] : i32
+  %offset = index.cast %coordinate : i32 to offset
+  %source_view = buffer.view %source[%offset] : buffer -> view<4xi64>
+  %destination_view = buffer.view %destination[%offset] : buffer -> view<4xi64>
+  %value = vector.load %source_view[0] : view<4xi64> -> vector<4xi64>
+  vector.store %value, %destination_view[0] : vector<4xi64>, view<4xi64>
+  func.return
+}
+
+// ----
+CHECK: * = vlda.256.i64x4.index *
+CHECK: vst.256.i64x4.index *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @copy_i64_8_static(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %offset = index.constant 0 : offset
+  %source_view = buffer.view %source[%offset] : buffer -> view<8xi64>
+  %destination_view = buffer.view %destination[%offset] : buffer -> view<8xi64>
+  %value = vector.load %source_view[0] : view<8xi64> -> vector<8xi64>
+  vector.store %value, %destination_view[0] : vector<8xi64>, view<8xi64>
+  func.return
+}
+
+// ----
+CHECK: * = vlda.512.i64x8 *
+CHECK: vst.512.i64x8 *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @copy_i64_8_dynamic(%input: buffer, %output: buffer, %position: i32) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %coordinate = scalar.assume %position [range(%position, 0, 4096), mul(%position, 64)] : i32
+  %offset = index.cast %coordinate : i32 to offset
+  %source_view = buffer.view %source[%offset] : buffer -> view<8xi64>
+  %destination_view = buffer.view %destination[%offset] : buffer -> view<8xi64>
+  %value = vector.load %source_view[0] : view<8xi64> -> vector<8xi64>
+  vector.store %value, %destination_view[0] : vector<8xi64>, view<8xi64>
+  func.return
+}
+
+// ----
+CHECK: * = vlda.512.i64x8.index *
+CHECK: vst.512.i64x8.index *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @copy_i64_split(%input: buffer, %output: buffer) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+  %destination = buffer.assume.alignment %output {minimum_alignment = 32} : buffer
+  %offset = index.constant 0 : offset
+  %source_view = buffer.view %source[%offset] : buffer -> view<4xi64>
+  %destination_view = buffer.view %destination[%offset] : buffer -> view<4xi64>
+  %value = vector.load %source_view[0] : view<4xi64> -> vector<4xi64>
+  vector.store %value, %destination_view[0] : vector<4xi64>, view<4xi64>
+  func.return
+}
+
+// ----
+CHECK: * = vlda.128.i8x16 %source_view, 0
+CHECK: * = vlda.128.i8x16 %source_view, 16
+CHECK: vst.256.i64x4 *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @copy_f64_2_static(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %offset = index.constant 0 : offset
+  %source_view = buffer.view %source[%offset] : buffer -> view<2xf64>
+  %destination_view = buffer.view %destination[%offset] : buffer -> view<2xf64>
+  %value = vector.load %source_view[0] : view<2xf64> -> vector<2xf64>
+  vector.store %value, %destination_view[0] : vector<2xf64>, view<2xf64>
+  func.return
+}
+
+// ----
+CHECK: * = vlda.128.f64x2 *
+CHECK: vst.128.f64x2 *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @copy_f64_2_dynamic(%input: buffer, %output: buffer, %position: i32) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %coordinate = scalar.assume %position [range(%position, 0, 4096), mul(%position, 64)] : i32
+  %offset = index.cast %coordinate : i32 to offset
+  %source_view = buffer.view %source[%offset] : buffer -> view<2xf64>
+  %destination_view = buffer.view %destination[%offset] : buffer -> view<2xf64>
+  %value = vector.load %source_view[0] : view<2xf64> -> vector<2xf64>
+  vector.store %value, %destination_view[0] : vector<2xf64>, view<2xf64>
+  func.return
+}
+
+// ----
+CHECK: * = vlda.128.f64x2.index *
+CHECK: vst.128.f64x2.index *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @copy_f64_4_static(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %offset = index.constant 0 : offset
+  %source_view = buffer.view %source[%offset] : buffer -> view<4xf64>
+  %destination_view = buffer.view %destination[%offset] : buffer -> view<4xf64>
+  %value = vector.load %source_view[0] : view<4xf64> -> vector<4xf64>
+  vector.store %value, %destination_view[0] : vector<4xf64>, view<4xf64>
+  func.return
+}
+
+// ----
+CHECK: * = vlda.256.f64x4 *
+CHECK: vst.256.f64x4 *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @copy_f64_4_dynamic(%input: buffer, %output: buffer, %position: i32) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %coordinate = scalar.assume %position [range(%position, 0, 4096), mul(%position, 64)] : i32
+  %offset = index.cast %coordinate : i32 to offset
+  %source_view = buffer.view %source[%offset] : buffer -> view<4xf64>
+  %destination_view = buffer.view %destination[%offset] : buffer -> view<4xf64>
+  %value = vector.load %source_view[0] : view<4xf64> -> vector<4xf64>
+  vector.store %value, %destination_view[0] : vector<4xf64>, view<4xf64>
+  func.return
+}
+
+// ----
+CHECK: * = vlda.256.f64x4.index *
+CHECK: vst.256.f64x4.index *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @copy_f64_8_static(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %offset = index.constant 0 : offset
+  %source_view = buffer.view %source[%offset] : buffer -> view<8xf64>
+  %destination_view = buffer.view %destination[%offset] : buffer -> view<8xf64>
+  %value = vector.load %source_view[0] : view<8xf64> -> vector<8xf64>
+  vector.store %value, %destination_view[0] : vector<8xf64>, view<8xf64>
+  func.return
+}
+
+// ----
+CHECK: * = vlda.512.f64x8 *
+CHECK: vst.512.f64x8 *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @copy_f64_8_dynamic(%input: buffer, %output: buffer, %position: i32) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %coordinate = scalar.assume %position [range(%position, 0, 4096), mul(%position, 64)] : i32
+  %offset = index.cast %coordinate : i32 to offset
+  %source_view = buffer.view %source[%offset] : buffer -> view<8xf64>
+  %destination_view = buffer.view %destination[%offset] : buffer -> view<8xf64>
+  %value = vector.load %source_view[0] : view<8xf64> -> vector<8xf64>
+  vector.store %value, %destination_view[0] : vector<8xf64>, view<8xf64>
+  func.return
+}
+
+// ----
+CHECK: * = vlda.512.f64x8.index *
+CHECK: vst.512.f64x8.index *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert
+
+// ====
+
+func.def @copy_f64_split(%input: buffer, %output: buffer) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+  %destination = buffer.assume.alignment %output {minimum_alignment = 32} : buffer
+  %offset = index.constant 0 : offset
+  %source_view = buffer.view %source[%offset] : buffer -> view<4xf64>
+  %destination_view = buffer.view %destination[%offset] : buffer -> view<4xf64>
+  %value = vector.load %source_view[0] : view<4xf64> -> vector<4xf64>
+  vector.store %value, %destination_view[0] : vector<4xf64>, view<4xf64>
+  func.return
+}
+
+// ----
+CHECK: * = vlda.128.i8x16 %source_view, 0
+CHECK: * = vlda.128.i8x16 %source_view, 16
+CHECK: vst.256.f64x4 *
+CHECK-NOT: vextract
+CHECK-NOT: vinsert

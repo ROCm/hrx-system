@@ -87,6 +87,7 @@ _ZERO_X_SPLAT_BY_ELEMENT_BYTE_COUNT = {
     1: "amd.xdna.aie2p.splat.i8x64",
     2: "amd.xdna.aie2p.splat.i16x32",
     4: "amd.xdna.aie2p.splat.i32x16",
+    8: "amd.xdna.aie2p.splat.i32x16",
 }
 _VECTOR_MEMORY_ELEMENT_TYPES = (
     ("i8", "i8", 8),
@@ -97,6 +98,8 @@ _VECTOR_MEMORY_ELEMENT_TYPES = (
     ("bf16", "bf16", 16),
     ("i32", "i32", 32),
     ("f32", "f32", 32),
+    ("i64", "i64", 64),
+    ("f64", "f64", 64),
 )
 _VECTOR_MEMORY_SHAPES = tuple(
     (
@@ -120,6 +123,7 @@ _SPLIT_256BIT_VECTOR_LOAD_SHAPES = (
     (1, 32, Vector(("i8", "f8E4M3", "f8E5M2"), lanes=32)),
     (2, 16, Vector(("i16", "f16", "bf16"), lanes=16)),
     (4, 8, Vector(("i32", "f32"), lanes=8)),
+    (8, 4, Vector(("i64", "f64"), lanes=4)),
 )
 
 _I32_MIN = -(2**31)

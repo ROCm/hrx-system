@@ -110,6 +110,8 @@ AIE2P_VECTOR_MEMORY_ELEMENT_TYPES = (
     ("bf16", 16),
     ("i32", 32),
     ("f32", 32),
+    ("i64", 64),
+    ("f64", 64),
 )
 
 
