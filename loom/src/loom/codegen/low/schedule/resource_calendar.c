@@ -112,10 +112,26 @@ static bool loom_low_schedule_resource_calendar_issue_fits(
           return false;
         }
         uint16_t candidate_resource_id = issue_use->resource_id;
+        // The generator has already proved that these intervals do not
+        // overlap, including resource aliases within one contention group.
         const loom_low_schedule_resource_demand_t candidate =
-            loom_low_schedule_resource_calendar_candidate_occupancy(
-                calendar, schedule_classes, schedule_class_count, resource,
-                relative_cycle, &candidate_resource_id);
+            schedule_class_count == 1 &&
+                    iree_any_bit_set(
+                        schedule_class->flags,
+                        LOOM_LOW_SCHEDULE_CLASS_FLAG_DISJOINT_ISSUE_USES)
+                ? (loom_low_schedule_resource_demand_t){
+                      .required_units =
+                          issue_use->kind == LOOM_LOW_ISSUE_USE_KIND_REQUIRED
+                              ? issue_use->units
+                              : 0,
+                      .reserved_units =
+                          issue_use->kind == LOOM_LOW_ISSUE_USE_KIND_RESERVED
+                              ? issue_use->units
+                              : 0,
+                  }
+                : loom_low_schedule_resource_calendar_candidate_occupancy(
+                      calendar, schedule_classes, schedule_class_count,
+                      resource, relative_cycle, &candidate_resource_id);
         const uint32_t slot_index =
             resource->calendar.slot_start +
             ((uint32_t)absolute_cycle & resource->calendar.slot_mask);

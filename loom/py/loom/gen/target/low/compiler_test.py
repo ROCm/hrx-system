@@ -25,6 +25,7 @@ from loom.target.low_descriptors import (
     Resource,
     ResourceKind,
     ScheduleClass,
+    ScheduleClassFlag,
 )
 from loom.target.test.descriptors import (
     TEST_LOW_ADD_I32_DESCRIPTOR,
@@ -118,6 +119,49 @@ def test_resource_calendar_retains_common_issue_demand(second_uses, expected_uni
     compiled = compiler.compile_descriptor_set(descriptor_set)
     assert compiled.resource_calendars
     assert all(calendar.minimum_issue_units == expected_units for calendar in compiled.resource_calendars)
+    classes = {schedule_class.name: schedule_class for schedule_class in compiled.schedule_classes}
+    assert ScheduleClassFlag.DISJOINT_ISSUE_USES not in classes["test.first"].flags
+    expected_flags = (ScheduleClassFlag.DISJOINT_ISSUE_USES,) if second_uses else ()
+    assert classes["test.second"].flags == expected_flags
+
+
+@pytest.mark.parametrize("second_resource", ["test.issue", "test.alias", "test.other"])
+@pytest.mark.parametrize("second_stage", [0, 1, 2, 4])
+@pytest.mark.parametrize("first_kind", [IssueUseKind.REQUIRED, IssueUseKind.RESERVED])
+@pytest.mark.parametrize("second_kind", [IssueUseKind.REQUIRED, IssueUseKind.RESERVED])
+def test_disjoint_issue_uses_respect_aliases_and_stage_intervals(second_resource, second_stage, first_kind, second_kind) -> None:
+    schedule_class = ScheduleClass(
+        "test.staged",
+        latency_kind=LatencyKind.EXACT,
+        model_quality=ModelQuality.EXACT,
+        issue_uses=(
+            IssueUse("test.issue", cycles=2, units=1, kind=first_kind),
+            IssueUse(second_resource, cycles=2, units=1, stage=second_stage, kind=second_kind),
+        ),
+    )
+    compiled = compiler.compile_descriptor_set(
+        replace(
+            TEST_LOW_CORE_DESCRIPTOR_SET,
+            resources=(
+                Resource("test.issue", capacity_per_cycle=4, kind=ResourceKind.PIPELINE, contention_group_id=1),
+                Resource("test.alias", capacity_per_cycle=4, kind=ResourceKind.PIPELINE, contention_group_id=1),
+                Resource("test.other", capacity_per_cycle=4, kind=ResourceKind.PIPELINE),
+            ),
+            schedule_classes=(schedule_class,),
+            descriptors=(replace(TEST_LOW_ADD_I32_DESCRIPTOR, schedule_class=schedule_class.name, instruction_classes=(InstructionClass.SCALAR_ALU,)),),
+        )
+    )
+    disjoint = ScheduleClassFlag.DISJOINT_ISSUE_USES in compiled.schedule_classes[0].flags
+    assert disjoint == (second_resource == "test.other" or second_stage >= 2)
+
+
+def test_schedule_class_cannot_author_disjoint_issue_use_proof() -> None:
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        schedule_classes=tuple(replace(schedule_class, flags=(*schedule_class.flags, ScheduleClassFlag.DISJOINT_ISSUE_USES)) for schedule_class in TEST_LOW_CORE_DESCRIPTOR_SET.schedule_classes),
+    )
+    with pytest.raises(ValueError, match="authors the derived disjoint-issue-uses flag"):
+        compiler.compile_descriptor_set(descriptor_set)
 
 
 @pytest.mark.parametrize("candidate_names", permutations(("test.r0", "test.r1", "test.r2", "test.r3")))

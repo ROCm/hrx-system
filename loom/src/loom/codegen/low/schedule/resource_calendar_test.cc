@@ -134,6 +134,10 @@ TEST_F(ScheduleResourceCalendarTest,
   classes[1].issue_use_count = 1;
   classes[2].issue_use_start = 2;
   classes[2].issue_use_count = 2;
+  // The last class uses the same resource in adjacent, disjoint stages.
+  for (auto& schedule_class : classes) {
+    schedule_class.flags = LOOM_LOW_SCHEDULE_CLASS_FLAG_DISJOINT_ISSUE_USES;
+  }
   loom_low_descriptor_set_t descriptor_set = {};
   descriptor_set.schedule_classes = classes;
   descriptor_set.schedule_class_count = IREE_ARRAYSIZE(classes);
@@ -240,6 +244,8 @@ TEST_F(ScheduleResourceCalendarTest, AdmitsCollectiveInstructionDemand) {
   const auto* required =
       ScheduleClass(TEST_LOW_CORE_DESCRIPTOR_REF_TEST_RESOURCE_SERIAL_I32);
   const loom_low_schedule_class_t* pair[] = {required, required};
+  ASSERT_TRUE(iree_any_bit_set(
+      required->flags, LOOM_LOW_SCHEDULE_CLASS_FLAG_DISJOINT_ISSUE_USES));
   // Each instruction alone fills the resource. Delaying the pair cannot make
   // their simultaneous demand legal, so packet formation must split them.
   EXPECT_TRUE(loom_low_schedule_resource_group_fits(descriptor_set_, pair, 1));

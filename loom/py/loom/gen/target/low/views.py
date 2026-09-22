@@ -174,8 +174,10 @@ def _view_instruction_classes(
             result.append(compiled.instruction_classes[storage_descriptor_ordinal])
             continue
         if schedule_context is None:
+            # View identity compares authored models, before generated proofs
+            # are projected into the shared runtime schedule-class flags.
             schedule_context = (
-                {schedule_class.name: schedule_class for schedule_class in compiled.schedule_classes},
+                {schedule_class.name: schedule_class for schedule_class in compiled.spec.schedule_classes if schedule_class.name in compiled.schedule_class_ids},
                 {schedule_class.name: schedule_class for schedule_class in view_spec.schedule_classes},
                 {resource.name: resource for resource in compiled.resources},
             )

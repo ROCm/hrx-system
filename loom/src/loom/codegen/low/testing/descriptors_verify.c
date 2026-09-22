@@ -3015,13 +3015,14 @@ static iree_status_t loom_low_verify_schedule_class(
     uint32_t schedule_class_index) {
   const loom_low_schedule_class_t* schedule_class =
       &descriptor_set->schedule_classes[schedule_class_index];
-  IREE_RETURN_IF_ERROR(
-      loom_low_verify_known_flags(schedule_class->flags,
-                                  LOOM_LOW_SCHEDULE_CLASS_FLAG_MAY_LOAD |
-                                      LOOM_LOW_SCHEDULE_CLASS_FLAG_MAY_STORE |
-                                      LOOM_LOW_SCHEDULE_CLASS_FLAG_MAY_CALL |
-                                      LOOM_LOW_SCHEDULE_CLASS_FLAG_CONTROL,
-                                  "schedule class", schedule_class_index));
+  IREE_RETURN_IF_ERROR(loom_low_verify_known_flags(
+      schedule_class->flags,
+      LOOM_LOW_SCHEDULE_CLASS_FLAG_MAY_LOAD |
+          LOOM_LOW_SCHEDULE_CLASS_FLAG_MAY_STORE |
+          LOOM_LOW_SCHEDULE_CLASS_FLAG_MAY_CALL |
+          LOOM_LOW_SCHEDULE_CLASS_FLAG_CONTROL |
+          LOOM_LOW_SCHEDULE_CLASS_FLAG_DISJOINT_ISSUE_USES,
+      "schedule class", schedule_class_index));
   IREE_RETURN_IF_ERROR(loom_low_verify_required_string(
       descriptor_set, schedule_class->name_string_offset,
       "schedule_class.name"));

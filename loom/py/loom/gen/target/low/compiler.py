@@ -1047,7 +1047,7 @@ def compile_descriptor_set(
     )
     if physical_register_views != spec.physical_register_views:
         spec = replace(spec, physical_register_views=physical_register_views)
-    validation.validate_schedule_model(spec)
+    disjoint_schedule_classes = validation.validate_schedule_model(spec)
     validation.validate_schedule_alternatives(spec)
     register_part_inputs = _dedupe_by_name(spec.register_parts, lambda item: item.name)
     resource_inputs = _dedupe_by_name(spec.resources, lambda item: item.name)
@@ -1282,7 +1282,11 @@ def compile_descriptor_set(
     physical_registers = list(spec.physical_registers)
     register_parts = [part for part in spec.register_parts if part.name in used_register_part_names]
     resources = [resource for resource in spec.resources if resource.name in used_resource_names]
-    schedule_classes = [schedule_class for schedule_class in spec.schedule_classes if schedule_class.name in used_schedule_names]
+    schedule_classes = [
+        replace(schedule_class, flags=(*schedule_class.flags, ScheduleClassFlag.DISJOINT_ISSUE_USES)) if schedule_class.name in disjoint_schedule_classes else schedule_class
+        for schedule_class in spec.schedule_classes
+        if schedule_class.name in used_schedule_names
+    ]
     timing_events = [timing_event for timing_event in spec.timing_events if timing_event.name in used_timing_event_names]
     enum_domains = [domain for domain in spec.enum_domains if domain.name in used_enum_domain_names]
 

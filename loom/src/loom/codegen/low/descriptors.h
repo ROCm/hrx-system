@@ -383,6 +383,11 @@ typedef uint16_t loom_low_schedule_class_flags_t;
 #define LOOM_LOW_SCHEDULE_CLASS_FLAG_MAY_CALL ((uint16_t)1u << 2)
 // Schedule class changes control flow.
 #define LOOM_LOW_SCHEDULE_CLASS_FLAG_CONTROL ((uint16_t)1u << 3)
+// Generated proof that a nonempty class has at most one issue-use row per
+// resource contention group at any relative cycle. A single class can use each
+// row's demand directly; simultaneous classes still require collective
+// admission.
+#define LOOM_LOW_SCHEDULE_CLASS_FLAG_DISJOINT_ISSUE_USES ((uint16_t)1u << 4)
 
 typedef enum loom_low_resource_kind_e {
   // Unknown or uninitialized resource kind.
@@ -993,7 +998,7 @@ typedef struct loom_low_schedule_class_t {
   uint16_t hazard_start;
   // Number of hazard rows for this schedule class.
   uint16_t hazard_count;
-  // Schedule-class flags such as load, store, call, or control.
+  // Schedule-class behavior and generated resource-use proofs.
   loom_low_schedule_class_flags_t flags;
   // Minimum steady-state issue cycles required by one use of this class.
   // Generated from resource demand and capacity; dependency latency and
