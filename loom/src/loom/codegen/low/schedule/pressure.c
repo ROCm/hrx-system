@@ -1581,6 +1581,14 @@ void loom_low_schedule_pressure_score_candidate(
           : 0;
   const bool is_storage_setup =
       iree_any_bit_set(node->flags, LOOM_LOW_SCHEDULE_NODE_FLAG_STORAGE_SETUP);
+  // Replayable arithmetic still advances a computation. Only register moves
+  // establish descriptor storage that can wait until its consumer is ready.
+  const bool is_rematerializable_move =
+      rematerializable && node->operand_count != 0 &&
+      iree_any_bit_set(loom_low_descriptor_set_descriptor_view(
+                           state->target.descriptor_set, node->descriptor)
+                           ->instruction_class_flags,
+                       LOOM_LOW_INSTRUCTION_CLASS_FLAG_REGISTER_MOVE);
   uint32_t data_ready_stall_cycles = 0;
   if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL &&
       state->node_ready_issue_cycles != NULL && !is_storage_setup) {
@@ -1639,18 +1647,17 @@ void loom_low_schedule_pressure_score_candidate(
       .active_unspillable_completion_capacity = UINT32_MAX,
       .active_register_packing_completion_capacity = UINT32_MAX,
       .source_ordinal = node->source_ordinal,
-      .flags =
-          (uint16_t)pressure_demand.candidate_flags |
-          (uint16_t)((node->flags &
-                      LOOM_LOW_SCHEDULE_NODE_FLAG_PAIR_TRANSPARENT)
-                     << 1u) |
-          ((is_storage_setup || (rematerializable && node->operand_count != 0))
-               ? LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_STORAGE_SETUP
-               : 0) |
-          (rematerializable && node->operand_count == 0 &&
-                   produced_live_value_count != 0
-               ? LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_REMATERIALIZABLE_LEAF
-               : 0),
+      .flags = (uint16_t)pressure_demand.candidate_flags |
+               (uint16_t)((node->flags &
+                           LOOM_LOW_SCHEDULE_NODE_FLAG_PAIR_TRANSPARENT)
+                          << 1u) |
+               ((is_storage_setup || is_rematerializable_move)
+                    ? LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_STORAGE_SETUP
+                    : 0) |
+               (rematerializable && node->operand_count == 0 &&
+                        produced_live_value_count != 0
+                    ? LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_REMATERIALIZABLE_LEAF
+                    : 0),
   };
   loom_low_schedule_target_pressure_score_candidate(state, pressure_state,
                                                     node_index, out_score);

@@ -1713,13 +1713,13 @@ low.func.def target<test.low.core>(@test_target) @register_packing_fanout_repeat
 
 // ====
 
-// Descriptor transfers can be rematerialized just like structural copies.
-// Keep setup beside its consumer instead of carrying it across blocked work.
-// RUN: with-checks emit low-schedule-json @deferred_descriptor_setup strategy=resource-stall
+// Rematerialization permits replay without classifying arithmetic as storage
+// setup. Advance both independent computations before their shared consumer.
+// RUN: with-checks emit low-schedule-json @rematerializable_computation strategy=resource-stall
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @deferred_descriptor_setup(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+low.func.def target<test.low.core>(@test_target) @rematerializable_computation(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
   %prepared_operand = test.rematerialize.i32 %lhs
   %prepared_consumer = test.add.i32 %rhs, %rhs
   %result = test.add.i32 %prepared_operand, %prepared_consumer
@@ -1727,4 +1727,4 @@ low.func.def target<test.low.core>(@test_target) @deferred_descriptor_setup(%lhs
 }
 
 // ----
-CHECK: *"scheduled_node_indices":[1,0,2,3]*
+CHECK: *"scheduled_node_indices":[0,1,2,3]*
