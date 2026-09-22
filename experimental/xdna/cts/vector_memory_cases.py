@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Independent raw-byte oracle for native 64-bit vector memory packets."""
+"""Independent raw-byte oracle for native vector memory packets and captured lanes."""
 
 import random
 import sys
@@ -34,14 +34,15 @@ def main():
             edges[(record + lane) % len(edges)]
             if record < len(edges)
             else generator.getrandbits(64)
-            for lane in range(64)
+            for lane in range(72)
         ]
         data = b"".join(word.to_bytes(8, "little") for word in words)
-        result = bytearray([0xA5] * 512)
+        result = bytearray([0xA5] * 576)
         for slot, size in enumerate(sizes):
             source = slot * 64 + (16 if slot >= 6 else 0)
             destination = slot * 64
             result[destination : destination + size] = data[source : source + size]
+        result[512] = data[575]
         inputs += data
         expected += result
     guard = bytes([0xA5]) * 64

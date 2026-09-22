@@ -2,7 +2,7 @@
   "version": 1,
   "cases": [
     {
-      "name": "64-bit vector memory preserves native widths, split loads, and guards on NPU2",
+      "name": "Vector memory preserves native widths, split loads, snapshots, and guards on NPU2",
       "steps": [
         {
           "name": "fixtures",

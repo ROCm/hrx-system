@@ -1326,7 +1326,9 @@ static iree_status_t loom_vector_canonicalize_extract_from_load(
   uint16_t dynamic_index_count = 0;
   uint16_t load_dynamic_index = 0;
 
-  loom_builder_set_before(&rewriter->builder, op);
+  // Narrow the memory footprint at its original observation point. The
+  // extract may follow writes or execute repeatedly in a nested region.
+  loom_builder_set_before(&rewriter->builder, source_def_op);
   loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   for (uint8_t axis = 0; axis < access.view_rank; ++axis) {
     int64_t lane_index = 0;
@@ -1352,12 +1354,12 @@ static iree_status_t loom_vector_canonicalize_extract_from_load(
       loom_op_t* lane_op = NULL;
       IREE_RETURN_IF_ERROR(loom_index_constant_build(
           &rewriter->builder, loom_attr_i64(lane_index), index_type,
-          op->location, &lane_op));
+          source_def_op->location, &lane_op));
       loom_op_t* add_op = NULL;
       IREE_RETURN_IF_ERROR(
           loom_index_add_build(&rewriter->builder, dynamic_index,
                                loom_index_constant_result(lane_op), index_type,
-                               op->location, &add_op));
+                               source_def_op->location, &add_op));
       dynamic_index = loom_index_add_result(add_op);
     }
     static_indices[axis] = INT64_MIN;
@@ -1388,7 +1390,7 @@ static iree_status_t loom_vector_canonicalize_extract_from_load(
       &rewriter->builder, build_flags, /*instance_flags=*/0, view,
       dynamic_indices, dynamic_index_count, static_indices, access.view_rank,
       cache_policy.cache_scope, cache_policy.cache_temporal, result_type,
-      op->location, &load_op));
+      source_def_op->location, &load_op));
   IREE_RETURN_IF_ERROR(loom_vector_replace_single_result_with_new_op(
       op, rewriter, load_op, value_checkpoint));
   *out_changed = true;

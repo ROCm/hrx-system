@@ -1,0 +1,126 @@
+// RUN: pass canonicalize
+
+// Narrowing the sole consumed lane keeps the original memory observation.
+func.def @intervening_write(%view: view<4xi32>, %replacement: i32) -> (i32) {
+  %packed = vector.load %view[0] : view<4xi32> -> vector<4xi32>
+  view.store %replacement, %view[2] : i32, view<4xi32>
+  %lane = vector.extract %packed[2] : vector<4xi32> -> i32
+  func.return %lane : i32
+}
+
+// ----
+func.def @intervening_write(%view: view<4xi32>, %replacement: i32) -> (i32) {
+  %lane = view.load %view[2] : view<4xi32> -> i32
+  view.store %replacement, %view[2] : i32, view<4xi32>
+  func.return %lane : i32
+}
+
+// ====
+
+// A nested use cannot turn one read into one read per loop iteration.
+func.def @nested_loop(%view: view<4xi32>, %count: index, %replacement: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %initial = scalar.constant 0 : i32
+  %packed = vector.load %view[0] : view<4xi32> -> vector<4xi32>
+  %result = scf.for %iv = [%begin to %count step %step](%sum = %initial : i32) -> (i32) {
+    view.store %replacement, %view[2] : i32, view<4xi32>
+    %lane = vector.extract %packed[2] : vector<4xi32> -> i32
+    %next = scalar.addi %sum, %lane : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @nested_loop(%view: view<4xi32>, %count: index, %replacement: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %initial = scalar.constant 0 : i32
+  %lane = view.load %view[2] : view<4xi32> -> i32
+  %result = scf.for %iv = [%begin to %count step %step](%sum = %initial : i32) -> (i32) {
+    view.store %replacement, %view[2] : i32, view<4xi32>
+    %next = scalar.addi %sum, %lane : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
+// Address arithmetic belongs at the load, even across a CFG edge.
+func.def @multidimensional_base(%view: view<8x8xi32>, %row: index, %replacement: i32) -> (i32) {
+  %packed = vector.load %view[%row, 2] : view<8x8xi32> -> vector<2x2xi32>
+  view.store %replacement, %view[%row, 3] : i32, view<8x8xi32>
+  cfg.br ^use
+^use:
+  %lane = vector.extract %packed[1, 1] : vector<2x2xi32> -> i32
+  func.return %lane : i32
+}
+
+// ----
+
+func.def @multidimensional_base(%view: view<8x8xi32>, %row: index, %replacement: i32) -> (i32) {
+  %6 = index.constant 1 : index
+  %7 = index.add %row, %6 : index
+  %lane = view.load %view[%7, 3] : view<8x8xi32> -> i32
+  view.store %replacement, %view[%row, 3] : i32, view<8x8xi32>
+  cfg.br ^use
+^use:
+  func.return %lane : i32
+}
+
+// ====
+
+// RUN: with-locations pass canonicalize
+
+// The narrowed access retains the source access policy and diagnostic site.
+func.def @load_provenance(%view: view<4xi32>, %replacement: i32) -> (i32) {
+  %packed = vector.load %view[0] {cache_scope = device, cache_temporal = non_temporal} : view<4xi32> -> vector<4xi32> loc(tagged<sanitizer_site, "0203", "memory.loom":2:1>)
+  view.store %replacement, %view[2] : i32, view<4xi32> loc("memory.loom":3:1)
+  %lane = vector.extract %packed[2] : vector<4xi32> -> i32 loc("memory.loom":4:1)
+  func.return %lane : i32 loc("memory.loom":5:1)
+} loc("memory.loom":1:1 to 6:1)
+
+// ----
+func.def @load_provenance(%view: view<4xi32>, %replacement: i32) -> (i32) {
+  %lane = view.load %view[2] {cache_scope = device, cache_temporal = non_temporal} : view<4xi32> -> i32 loc(tagged<sanitizer_site, "0203", "memory.loom":2:1>)
+  view.store %replacement, %view[2] : i32, view<4xi32> loc("memory.loom":3:1)
+  func.return %lane : i32 loc("memory.loom":5:1)
+} loc("memory.loom":1:1 to 6:1)
+
+// ====
+
+// RUN: pass canonicalize
+
+// Volatile reads keep the complete footprint even for a single consumed lane.
+func.def @volatile_footprint(%view: view<4xi32>) -> (i32) {
+  %packed = vector.load<volatile> %view[0] : view<4xi32> -> vector<4xi32>
+  %lane = vector.extract %packed[2] : vector<4xi32> -> i32
+  func.return %lane : i32
+}
+
+// ----
+func.def @volatile_footprint(%view: view<4xi32>) -> (i32) {
+  %packed = vector.load<volatile> %view[0] : view<4xi32> -> vector<4xi32>
+  %lane = vector.extract %packed[2] : vector<4xi32> -> i32
+  func.return %lane : i32
+}
+
+// ====
+
+// Multiple consumers retain one aggregate load instead of duplicating reads.
+func.def @multiple_lanes(%view: view<4xi32>) -> (i32, i32) {
+  %packed = vector.load %view[0] : view<4xi32> -> vector<4xi32>
+  %first = vector.extract %packed[0] : vector<4xi32> -> i32
+  %second = vector.extract %packed[1] : vector<4xi32> -> i32
+  func.return %first, %second : i32, i32
+}
+
+// ----
+func.def @multiple_lanes(%view: view<4xi32>) -> (i32, i32) {
+  %packed = vector.load %view[0] : view<4xi32> -> vector<4xi32>
+  %first = vector.extract %packed[0] : vector<4xi32> -> i32
+  %second = vector.extract %packed[1] : vector<4xi32> -> i32
+  func.return %first, %second : i32, i32
+}

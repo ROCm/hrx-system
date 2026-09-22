@@ -6,11 +6,11 @@ pipeline.def<kernel> public retain target(@array_target) @memory_packets() launc
   %count = index.constant 1 : index
   %origin = index.constant 0 : offset
   %workers = group.create %count : index -> group
-  %input_view = buffer.view %input[%origin] : buffer -> view<1x80x128xi32>
-  %output_view = buffer.view %output[%origin] : buffer -> view<1x80x128xi32>
-  %packets = pipeline.scatter %input_view across %workers : view<1x80x128xi32>, group -> pipeline.flow<tile<128xi32>>
-  %results = pipeline.stage @memory_entry on %workers(%packets) : (group, pipeline.flow<tile<128xi32>>) -> (pipeline.flow<tile<128xi32>>)
-  pipeline.write %results to %output_view : pipeline.flow<tile<128xi32>>, view<1x80x128xi32>
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x80x144xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x80x144xi32>
+  %packets = pipeline.scatter %input_view across %workers : view<1x80x144xi32>, group -> pipeline.flow<tile<144xi32>>
+  %results = pipeline.stage @memory_entry on %workers(%packets) : (group, pipeline.flow<tile<144xi32>>) -> (pipeline.flow<tile<144xi32>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<144xi32>>, view<1x80x144xi32>
   pipeline.return
 }
 
@@ -81,5 +81,15 @@ func.def target(@core_target) @memory_entry(%input: buffer, %output: buffer) {
   %destination_view7 = buffer.view %destination[%destination_offset7] : buffer -> view<4xf64>
   %value7 = vector.load %source_view7[0] : view<4xf64> -> vector<4xf64>
   vector.store %value7, %destination_view7[0] : vector<4xf64>, view<4xf64>
+  %snapshot_offset = index.constant 512 : offset
+  %snapshot_view = buffer.view %source[%snapshot_offset] : buffer -> view<64xi8>
+  %overwrite_view = buffer.view %source[%snapshot_offset] : buffer -> view<16xi32>
+  %snapshot_output = buffer.view %destination[%snapshot_offset] : buffer -> view<64xi8>
+  %snapshot_padding = buffer.view %destination[%snapshot_offset] : buffer -> view<16xi32>
+  vector.store %padding, %snapshot_padding[0] : vector<16xi32>, view<16xi32>
+  %snapshot = vector.load %snapshot_view[0] : view<64xi8> -> vector<64xi8>
+  vector.store %padding, %overwrite_view[0] : vector<16xi32>, view<16xi32>
+  %captured_lane = vector.extract %snapshot[63] : vector<64xi8> -> i8
+  view.store %captured_lane, %snapshot_output[0] : i8, view<64xi8>
   func.return
 }
