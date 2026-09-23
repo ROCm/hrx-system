@@ -486,8 +486,6 @@ iree_status_t iree_hal_amdgpu_pm4_dispatch_launch_state_initialize(
       iree_hal_amdgpu_pm4_compute_num_thread(workgroup_size[1]);
   out_state->start_and_threads[5] =
       iree_hal_amdgpu_pm4_compute_num_thread(workgroup_size[2]);
-  out_state->start_and_threads[6] = 0;
-  out_state->start_and_threads[7] = 0;
   out_state->user_data_dword_count =
       iree_hal_amdgpu_pm4_kernel_descriptor_user_sgpr_count(descriptor);
   out_state->kernarg_user_data_offset =
@@ -549,7 +547,7 @@ iree_status_t iree_hal_amdgpu_pm4_dispatch_emit_setup(
       &state->resource_limits, 1);
   cursor = iree_hal_amdgpu_pm4_dispatch_emit_set_sh_reg_sequence(
       cursor, IREE_HAL_AMDGPU_PM4_COMPUTE_START_X_REGISTER,
-      state->start_and_threads, 8);
+      state->start_and_threads, 6);
   *out_dword_count = (uint32_t)(cursor - target_dwords);
   return iree_ok_status();
 }

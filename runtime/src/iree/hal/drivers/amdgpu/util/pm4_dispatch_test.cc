@@ -132,8 +132,8 @@ TEST(PM4DispatchTest, InitializesLaunchStateFromDescriptor) {
   EXPECT_EQ(state.restart[2], 0u);
   EXPECT_EQ(state.resource_limits, 0u);
 
-  const uint32_t expected_start_and_threads[8] = {
-      0u, 0u, 0u, 256u, 2u, 1u, 0u, 0u,
+  const uint32_t expected_start_and_threads[6] = {
+      0u, 0u, 0u, 256u, 2u, 1u,
   };
   EXPECT_EQ(std::memcmp(state.start_and_threads, expected_start_and_threads,
                         sizeof(expected_start_and_threads)),
@@ -251,7 +251,7 @@ TEST(PM4DispatchTest, InitializesLaunchStateWithKernargPreload) {
   EXPECT_EQ(state.kernarg_preload_user_data_offset, 2u);
 }
 
-TEST(PM4DispatchTest, EmitsStaticSetupDwords) {
+TEST(PM4DispatchTest, EmitsStaticSetupWithoutProfilingRegisters) {
   iree_hal_amdgpu_kernel_descriptor_t descriptor = MakeDescriptor();
   const uint16_t workgroup_size[3] = {128, 1, 1};
   iree_hal_amdgpu_pm4_dispatch_launch_state_t state = {};
@@ -259,11 +259,13 @@ TEST(PM4DispatchTest, EmitsStaticSetupDwords) {
       &descriptor, /*kernel_object=*/0x0000123456780000ull, workgroup_size,
       IREE_HAL_AMDGPU_PM4_DISPATCH_LAUNCH_FLAG_ORDER_MODE, &state));
 
-  uint32_t dwords[IREE_HAL_AMDGPU_PM4_DISPATCH_SETUP_DWORD_COUNT] = {};
+  uint32_t dwords[35] = {};
+  dwords[34] = 0x76543210u;
   uint32_t dword_count = 0;
-  IREE_ASSERT_OK(iree_hal_amdgpu_pm4_dispatch_emit_setup(
-      &state, IREE_ARRAYSIZE(dwords), dwords, &dword_count));
-  EXPECT_EQ(dword_count, IREE_HAL_AMDGPU_PM4_DISPATCH_SETUP_DWORD_COUNT);
+  IREE_ASSERT_OK(iree_hal_amdgpu_pm4_dispatch_emit_setup(&state, 34, dwords,
+                                                         &dword_count));
+  EXPECT_EQ(dword_count, 34u);
+  EXPECT_EQ(dwords[34], 0x76543210u);
 
   const uint32_t expected[] = {
       iree_hal_amdgpu_pm4_make_header(
@@ -304,18 +306,16 @@ TEST(PM4DispatchTest, EmitsStaticSetupDwords) {
       IREE_HAL_AMDGPU_PM4_COMPUTE_RESOURCE_LIMITS_REGISTER -
           IREE_HAL_AMDGPU_PM4_PERSISTENT_SPACE_START,
       state.resource_limits,
-      iree_hal_amdgpu_pm4_make_header(
-          IREE_HAL_AMDGPU_PM4_HDR_IT_OPCODE_SET_SH_REG, 10),
-      IREE_HAL_AMDGPU_PM4_COMPUTE_START_X_REGISTER -
-          IREE_HAL_AMDGPU_PM4_PERSISTENT_SPACE_START,
-      state.start_and_threads[0],
-      state.start_and_threads[1],
-      state.start_and_threads[2],
-      state.start_and_threads[3],
-      state.start_and_threads[4],
-      state.start_and_threads[5],
-      state.start_and_threads[6],
-      state.start_and_threads[7],
+      // SET_SH_REG covers exactly 0x2e04..0x2e09. The following registers
+      // 0x2e0a/0x2e0b are PIPELINESTAT_ENABLE/PERFCOUNT_ENABLE, not padding.
+      0xc0067600u,
+      0x00000204u,
+      0u,
+      0u,
+      0u,
+      128u,
+      1u,
+      1u,
   };
   static_assert(IREE_ARRAYSIZE(expected) ==
                 IREE_HAL_AMDGPU_PM4_DISPATCH_SETUP_DWORD_COUNT);

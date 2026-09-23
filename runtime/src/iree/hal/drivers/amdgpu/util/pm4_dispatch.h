@@ -35,7 +35,7 @@ enum {
   // Maximum COMPUTE_USER_DATA_N dwords this initial PM4 dispatch path can seed.
   IREE_HAL_AMDGPU_PM4_DISPATCH_USER_DATA_DWORD_CAPACITY = 16,
   // Static shader setup dwords before dynamic userdata or dispatch packets.
-  IREE_HAL_AMDGPU_PM4_DISPATCH_SETUP_DWORD_COUNT = 36,
+  IREE_HAL_AMDGPU_PM4_DISPATCH_SETUP_DWORD_COUNT = 34,
 };
 
 typedef struct iree_hal_amdgpu_pm4_dispatch_launch_state_t {
@@ -53,9 +53,9 @@ typedef struct iree_hal_amdgpu_pm4_dispatch_launch_state_t {
   uint32_t restart[3];
   // Register value for COMPUTE_RESOURCE_LIMITS.
   uint32_t resource_limits;
-  // Register values for COMPUTE_START_X/Y/Z, COMPUTE_NUM_THREAD_X/Y/Z, and
-  // the two reserved dwords before COMPUTE_PGM_LO.
-  uint32_t start_and_threads[8];
+  // Register values for COMPUTE_START_X/Y/Z and COMPUTE_NUM_THREAD_X/Y/Z.
+  // The following pipeline-statistics and perfcount enables are native-owned.
+  uint32_t start_and_threads[6];
   // Number of COMPUTE_USER_DATA_N dwords seeded for this dispatch, including
   // compiler-required padding dwords that are zero-filled by the emitter.
   uint32_t user_data_dword_count;
