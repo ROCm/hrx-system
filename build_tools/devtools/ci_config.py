@@ -301,7 +301,6 @@ VULKAN_XFAIL_TARGETS = bazel_xfail_targets(VULKAN_XFAILS)
 
 # Fixed ASAN producer/consumer slice for native CI artifact qualification.
 NATIVE_ARTIFACT_PACKAGE_PATH = "artifacts/ci/linux-x86_64-clang-asan"
-NATIVE_ARTIFACT_PACKAGE_LABEL = f"//{NATIVE_ARTIFACT_PACKAGE_PATH}"
 NATIVE_ARTIFACT_SOURCE_TARGETS = (
     "//runtime/...",
     "//loom/...",
@@ -348,17 +347,14 @@ NATIVE_ARTIFACT_PRODUCER_OPTIONS = NATIVE_ARTIFACT_PROFILE_OPTIONS + (
 NATIVE_ARTIFACT_CONSUMER_OPTIONS = NATIVE_ARTIFACT_PROFILE_OPTIONS + (
     "--build_tests_only",
 )
-NATIVE_ARTIFACT_AMDGPU_TEST_TARGETS = (
-    f"{NATIVE_ARTIFACT_PACKAGE_LABEL}:"
+NATIVE_ARTIFACT_AMDGPU_TEST_NAMES = (
     "native_loom_binding_c_example_cxx_jit_amdgpu_test",
-    f"{NATIVE_ARTIFACT_PACKAGE_LABEL}:"
     "native_runtime_src_iree_hal_drivers_amdgpu_util_signal_pool_test",
-    f"{NATIVE_ARTIFACT_PACKAGE_LABEL}:"
     "native_libamdf_cts_gpu_gpu_extension_dynamic_instance",
 )
 NATIVE_ARTIFACT_AMDGPU_RESOURCES = AMDGPU_RESOURCES + ("libamdf.resource.amd_gpu",)
-NATIVE_ARTIFACT_TOOLCHAINS = tuple(
-    f"{NATIVE_ARTIFACT_PACKAGE_LABEL}:artifact_{role}_toolchain"
+NATIVE_ARTIFACT_TOOLCHAIN_NAMES = tuple(
+    f"artifact_{role}_toolchain"
     for role in ("benchmark", "compile", "format", "link", "lint", "test")
 )
 NATIVE_ARTIFACT_LOOM_AMDGPU_TEST_TARGETS = (

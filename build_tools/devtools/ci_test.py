@@ -629,14 +629,15 @@ class CiTest(unittest.TestCase):
             ci.steps_from_args(args)
 
     def test_native_artifact_commands_require_owned_inputs(self):
+        artifact_root = ci.REPO_ROOT / "artifacts/ci/fixture"
         cases = (
             (
                 [ci.NATIVE_ARTIFACT_PRODUCER_COMMAND],
                 "requires --native-artifact-archive",
             ),
             (
-                [ci.NATIVE_ARTIFACT_AMDGPU_COMMAND],
-                "requires --native-artifact-revision",
+                ["iree-bazel-cpu", "--native-artifact-root", str(artifact_root)],
+                "only supported by AMDGPU Bazel tests",
             ),
             (
                 [
@@ -644,15 +645,45 @@ class CiTest(unittest.TestCase):
                     "--native-artifact-revision",
                     "a" * 40,
                 ],
-                "only supported by native artifact CI commands",
+                "requires --native-artifact-root",
             ),
             (
                 [
-                    ci.NATIVE_ARTIFACT_AMDGPU_COMMAND,
+                    "iree-bazel-amdgpu-asan",
+                    "--native-artifact-root",
+                    str(artifact_root),
+                ],
+                "requires --native-artifact-revision",
+            ),
+            (
+                [
+                    "iree-bazel-amdgpu-asan",
+                    "--native-artifact-root",
+                    "/tmp/native-artifact",
+                    "--native-artifact-revision",
+                    "a" * 40,
+                ],
+                "inside the checkout",
+            ),
+            (
+                [
+                    "iree-bazel-amdgpu-asan",
+                    "--native-artifact-root",
+                    str(artifact_root),
                     "--native-artifact-revision",
                     "short",
                 ],
                 "full lowercase Git commit",
+            ),
+            (
+                [
+                    "iree-bazel-amdgpu",
+                    "--native-artifact-root",
+                    str(artifact_root),
+                    "--native-artifact-revision",
+                    "a" * 40,
+                ],
+                "current native artifact producer supplies ASAN tests",
             ),
         )
         for argv, message in cases:
@@ -671,9 +702,11 @@ class CiTest(unittest.TestCase):
         )
         consumer_args = ci.parse_arguments(
             [
-                ci.NATIVE_ARTIFACT_AMDGPU_COMMAND,
+                "iree-bazel-amdgpu-asan",
                 "--amdgpu-target",
                 "gfx-test",
+                "--native-artifact-root",
+                str(artifact_root),
                 "--native-artifact-revision",
                 "a" * 40,
             ]
@@ -692,7 +725,11 @@ class CiTest(unittest.TestCase):
             Path("artifact.tar.zst").resolve(),
             "a" * 40,
         )
-        consumer.assert_called_once_with("gfx-test", "a" * 40)
+        consumer.assert_called_once_with(
+            artifact_root.resolve(),
+            "gfx-test",
+            "a" * 40,
+        )
 
     def test_native_artifact_producer_uses_self_contained_host_profile(self):
         with mock.patch.dict(
@@ -715,12 +752,15 @@ class CiTest(unittest.TestCase):
         )
 
     def test_native_artifact_consumer_builds_only_selected_tests(self):
+        artifact_root = ci.REPO_ROOT / "artifacts/ci/fixture"
         with mock.patch.dict(
             ci.os.environ,
             {"HRX_ROCM_ROOT": "/tmp/rocm-root"},
             clear=True,
         ):
-            steps = ci.native_artifact_amdgpu_steps("gfx942", "a" * 40)
+            steps = ci.native_artifact_amdgpu_steps(
+                artifact_root, "gfx120X-all", "a" * 40
+            )
 
         test_steps = [step for step in steps if step.argv[2:4] == ("bazel", "test")]
         self.assertEqual(len(test_steps), 3)
@@ -814,7 +854,7 @@ class CiTest(unittest.TestCase):
             amdgpu_test.argv,
         )
 
-    def test_amdgpu_loom_target_scope_builds_and_tests_loom(self):
+    def test_amdgpu_loom_target_scope_tests_only_loom(self):
         args = ci.parse_arguments(
             [
                 "iree-bazel-amdgpu",
@@ -824,13 +864,11 @@ class CiTest(unittest.TestCase):
         )
 
         steps = ci.steps_from_args(args)
-        build_step = next(step for step in steps if step.name == "Build IREE / AMDGPU")
         test_step = next(step for step in steps if step.name == "Test IREE / AMDGPU")
 
-        self.assertIn("//loom/...", build_step.argv)
-        self.assertNotIn("//runtime/...", build_step.argv)
         self.assertIn("//loom/...", test_step.argv)
         self.assertNotIn("//runtime/...", test_step.argv)
+        self.assertIn("--build_tests_only", test_step.argv)
 
     def test_bazel_loom_amdgpu_command_runs_compile_coverage_without_driver(self):
         args = ci.parse_arguments(["iree-bazel-loom-amdgpu"])
@@ -1003,7 +1041,7 @@ class CiTest(unittest.TestCase):
         )
         self.assertFalse(any("bazel test" in line for line in command_lines))
 
-    def test_amdgpu_command_builds_scope_before_one_semantic_test_graph(self):
+    def test_amdgpu_command_builds_only_the_selected_test_graph(self):
         args = ci.parse_arguments(
             [
                 "iree-bazel-amdgpu",
@@ -1017,20 +1055,18 @@ class CiTest(unittest.TestCase):
         steps = ci.steps_from_args(args)
         self.assertEqual(
             [step.name for step in steps],
-            ["Configure Bazel", "Build IREE / AMDGPU", "Test IREE / AMDGPU"],
+            ["Configure Bazel", "Test IREE / AMDGPU"],
         )
-        build_step = steps[1]
-        test_step = steps[2]
+        test_step = steps[1]
+        self.assertIn("--build_tests_only", test_step.argv)
         for target in ("//runtime/...", "//loom/..."):
-            self.assertIn(target, build_step.argv)
             self.assertIn(target, test_step.argv)
         for target in ci_config.AMDGPU_BAZEL_TARGET_EXCLUDES:
-            self.assertIn(target, build_step.argv)
             self.assertIn(target, test_step.argv)
         self.assertFalse(
             any(
                 arg.startswith("-//runtime/src/iree/hal/drivers/amdgpu")
-                for arg in build_step.argv + test_step.argv
+                for arg in test_step.argv
             )
         )
 
@@ -1052,16 +1088,13 @@ class CiTest(unittest.TestCase):
             [step.name for step in steps],
             [
                 "Configure Bazel",
-                "Build IREE / AMDGPU / TSAN",
                 "Test IREE / AMDGPU / TSAN",
             ],
         )
-        tsan_build = steps[1]
-        tsan_test = steps[2]
-        self.assertIn("--config=tsan", tsan_build.argv)
+        tsan_test = steps[1]
         self.assertIn("--config=tsan", tsan_test.argv)
+        self.assertIn("--build_tests_only", tsan_test.argv)
         for target in ("//runtime/...", "//loom/..."):
-            self.assertIn(target, tsan_build.argv)
             self.assertIn(target, tsan_test.argv)
         self.assertTrue(
             any(

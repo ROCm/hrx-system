@@ -132,11 +132,36 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-  linux_gfx942:
-    name: iree-bazel-test / linux-x86_64 / clang / amd-gfx942
+  linux_amdgpu:
+    name: ${{ matrix.name }}
     needs: linux_x86_64_clang_asan
-    runs-on: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+    runs-on: ${{ matrix.runner_label }}
+    continue-on-error: ${{ matrix.optional }}
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: iree-bazel-test / linux-x86_64 / clang / amd-gfx110x
+            artifact_suffix: gfx110x
+            optional: false
+            runner_label: linux-gfx110X-gpu-rocm
+            target_selector: gfx110X-all
+          - name: iree-bazel-test / linux-x86_64 / clang / amd-gfx1150
+            artifact_suffix: gfx1150
+            optional: true
+            runner_label: linux-gfx1150-gpu-rocm
+            target_selector: gfx1150
+          - name: iree-bazel-test / linux-x86_64 / clang / amd-gfx1151
+            artifact_suffix: gfx1151
+            optional: true
+            runner_label: linux-gfx1151-gpu-rocm
+            target_selector: gfx1151
+          - name: iree-bazel-test / linux-x86_64 / clang / amd-gfx120x
+            artifact_suffix: gfx120x
+            optional: false
+            runner_label: linux-gfx120X-gpu-rocm
+            target_selector: gfx120X-all
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
       options: >-
@@ -220,8 +245,9 @@ jobs:
       - name: Run ASAN tests
         id: iree_bazel_ci
         run: |
-          python3 build_tools/devtools/ci.py iree-bazel-native-artifact-amdgpu-asan \
-            --amdgpu-target gfx942 \
+          python3 build_tools/devtools/ci.py iree-bazel-amdgpu-asan \
+            --amdgpu-target "${{ matrix.target_selector }}" \
+            --native-artifact-root "${GITHUB_WORKSPACE}/artifacts/ci/linux-x86_64-clang-asan" \
             --native-artifact-revision "${GITHUB_SHA}" \
             --bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles" \
             --keep-going
@@ -231,7 +257,7 @@ jobs:
         if: ${{ always() && steps.iree_bazel_ci.outcome != 'skipped' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: bazel-profiles-native-artifact-amd-gfx942-attempt-${{ github.run_attempt }}
+          name: bazel-profiles-native-artifact-amd-${{ matrix.artifact_suffix }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/bazel-profiles/*.profile.gz
           if-no-files-found: warn
           compression-level: 0
@@ -241,7 +267,7 @@ jobs:
         if: ${{ always() && steps.iree_bazel_ci.outcome == 'failure' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: test-results-native-artifact-amd-gfx942-attempt-${{ github.run_attempt }}
+          name: test-results-native-artifact-amd-${{ matrix.artifact_suffix }}-attempt-${{ github.run_attempt }}
           path: |
             bazel-testlogs/**/test.log
             bazel-testlogs/**/test.xml

@@ -80,7 +80,6 @@ AMDGPU_DEVICE_BINARY_PREBUILT_OPTIONS = (
     "-DIREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=none",
 )
 NATIVE_ARTIFACT_PRODUCER_COMMAND = "iree-bazel-native-artifact-asan"
-NATIVE_ARTIFACT_AMDGPU_COMMAND = "iree-bazel-native-artifact-amdgpu-asan"
 BAZEL_COMMANDS = {
     "iree-bazel-amd-client": ("amd-client", None),
     "iree-bazel-amd-client-asan": ("amd-client", "asan"),
@@ -99,7 +98,6 @@ BAZEL_COMMANDS = {
     "iree-bazel-amdgpu-tsan": ("amdgpu", "tsan"),
     "iree-bazel-amdgpu-ubsan": ("amdgpu", "ubsan"),
     NATIVE_ARTIFACT_PRODUCER_COMMAND: ("native-artifact-producer", "asan"),
-    NATIVE_ARTIFACT_AMDGPU_COMMAND: ("native-artifact-amdgpu", "asan"),
     "iree-bazel-loom-amdgpu": ("loom-amdgpu", None),
     "iree-bazel-vulkan": ("vulkan", None),
 }
@@ -639,7 +637,7 @@ def amd_client_steps(targets: tuple[str, ...], config: str | None) -> list[CiSte
     ]
 
 
-def amdgpu_build_and_test_steps(
+def amdgpu_test_steps(
     targets: tuple[str, ...],
     target_selector: str,
     config: str | None = None,
@@ -652,12 +650,6 @@ def amdgpu_build_and_test_steps(
         (f"-{ci_config.HOST_TSAN_INCOMPATIBLE_TEST_LABEL}",) if config == "tsan" else ()
     )
     return [
-        bazel_build_step(
-            f"Build IREE / AMDGPU{config_name}",
-            scoped_targets,
-            config=config,
-            bazel_options=bazel_options,
-        ),
         bazel_test_step(
             f"Test IREE / AMDGPU{config_name}",
             scoped_targets + xfail_targets,
@@ -667,7 +659,7 @@ def amdgpu_build_and_test_steps(
             ),
             available_resources=ci_config.AMDGPU_RESOURCES,
             test_env=amdgpu_libhsa_test_env(),
-            bazel_options=bazel_options,
+            bazel_options=bazel_options + ("--build_tests_only",),
         ),
     ]
 
@@ -678,7 +670,7 @@ def amdgpu_steps(targets: tuple[str, ...], target_selector: str) -> list[CiStep]
             enabled_drivers=("amdgpu",),
             enabled_loom_targets=("amdgpu",),
         ),
-        *amdgpu_build_and_test_steps(
+        *amdgpu_test_steps(
             targets,
             target_selector,
             xfail_targets=(
@@ -708,7 +700,7 @@ def amdgpu_config_steps(
         if config == "tsan"
         else ci_config.AMDGPU_SANITIZERS_XFAIL_TARGETS
     )
-    return amdgpu_build_and_test_steps(
+    return amdgpu_test_steps(
         targets,
         target_selector,
         config=config,
@@ -830,14 +822,28 @@ def validate_native_artifact_revision(revision: str) -> str:
     return revision
 
 
+def native_artifact_package_label(package_directory: Path) -> str:
+    package_directory = package_directory.expanduser().resolve()
+    try:
+        package_path = package_directory.relative_to(REPO_ROOT.resolve())
+    except ValueError as exc:
+        raise ValueError(
+            "--native-artifact-root must name a package inside the checkout"
+        ) from exc
+    if package_path == Path("."):
+        raise ValueError("--native-artifact-root must name a package directory")
+    return f"//{package_path.as_posix()}"
+
+
 def native_artifact_amdgpu_steps(
+    package_directory: Path,
     target_selector: str,
     revision: str,
 ) -> list[CiStep]:
-    package_directory = REPO_ROOT / ci_config.NATIVE_ARTIFACT_PACKAGE_PATH
+    package_label = native_artifact_package_label(package_directory)
     configure_options = ci_config.NATIVE_ARTIFACT_CONFIGURE_OPTIONS
     artifact_toolchains = "--extra_toolchains=" + ",".join(
-        ci_config.NATIVE_ARTIFACT_TOOLCHAINS
+        f"{package_label}:{name}" for name in ci_config.NATIVE_ARTIFACT_TOOLCHAIN_NAMES
     )
     bazel_options = (
         ci_config.NATIVE_ARTIFACT_CONSUMER_OPTIONS
@@ -867,7 +873,10 @@ def native_artifact_amdgpu_steps(
         ),
         bazel_test_step(
             "Test representative ASAN native paths",
-            ci_config.NATIVE_ARTIFACT_AMDGPU_TEST_TARGETS,
+            tuple(
+                f"{package_label}:{name}"
+                for name in ci_config.NATIVE_ARTIFACT_AMDGPU_TEST_NAMES
+            ),
             config="asan",
             available_resources=ci_config.NATIVE_ARTIFACT_AMDGPU_RESOURCES,
             test_env=test_environment,
@@ -1281,22 +1290,25 @@ def tilelang_importer_steps(command_name: str) -> list[CiStep]:
 
 
 def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
-    native_artifact_commands = {
-        NATIVE_ARTIFACT_PRODUCER_COMMAND,
-        NATIVE_ARTIFACT_AMDGPU_COMMAND,
-    }
-    if (
-        args.native_artifact_archive is not None
-        or args.native_artifact_revision is not None
-    ) and args.command not in native_artifact_commands:
-        raise ValueError(
-            "native artifact options are only supported by native artifact CI commands"
-        )
     bazel_target_group = BAZEL_COMMANDS.get(args.command, (None, None))[0]
     cmake_target_group = CMAKE_COMMANDS.get(args.command, (None, None))[0]
+    if (
+        args.native_artifact_archive is not None
+        and args.command != NATIVE_ARTIFACT_PRODUCER_COMMAND
+    ):
+        raise ValueError("--native-artifact-archive is only supported by the producer")
+    if args.native_artifact_root is not None and bazel_target_group != "amdgpu":
+        raise ValueError(
+            "--native-artifact-root is only supported by AMDGPU Bazel tests"
+        )
+    if (
+        args.native_artifact_revision is not None
+        and args.command != NATIVE_ARTIFACT_PRODUCER_COMMAND
+        and args.native_artifact_root is None
+    ):
+        raise ValueError("--native-artifact-revision requires --native-artifact-root")
     amdgpu_target_bazel_groups = (
         "amdgpu",
-        "native-artifact-amdgpu",
         "repository-integration",
     )
     accepts_amdgpu_target = (
@@ -1349,21 +1361,6 @@ def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
             args.native_artifact_archive.expanduser().resolve(),
             validate_native_artifact_revision(args.native_artifact_revision),
         )
-    if bazel_target == "native-artifact-amdgpu":
-        if args.target:
-            raise ValueError("--target is not supported by native artifact CI")
-        if args.native_artifact_archive is not None:
-            raise ValueError(
-                "--native-artifact-archive is only supported by the producer"
-            )
-        if args.native_artifact_revision is None:
-            raise ValueError(
-                f"{NATIVE_ARTIFACT_AMDGPU_COMMAND} requires --native-artifact-revision"
-            )
-        return native_artifact_amdgpu_steps(
-            amdgpu_target_selector,
-            validate_native_artifact_revision(args.native_artifact_revision),
-        )
     if bazel_target == "amd-client":
         return amd_client_steps(
             tuple(args.target or ()),
@@ -1400,6 +1397,24 @@ def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
             return [bazel_configure_step(), *cpu_config_steps(targets, sanitizer)]
         return cpu_steps(targets)
     if bazel_target == "amdgpu":
+        if args.native_artifact_root is not None:
+            if args.target:
+                raise ValueError(
+                    "--target is not supported with --native-artifact-root"
+                )
+            if sanitizer != "asan":
+                raise ValueError(
+                    "the current native artifact producer supplies ASAN tests"
+                )
+            if args.native_artifact_revision is None:
+                raise ValueError(
+                    "--native-artifact-root requires --native-artifact-revision"
+                )
+            return native_artifact_amdgpu_steps(
+                args.native_artifact_root.expanduser().resolve(),
+                amdgpu_target_selector,
+                validate_native_artifact_revision(args.native_artifact_revision),
+            )
         if sanitizer is not None:
             return [
                 bazel_configure_step(
@@ -1660,6 +1675,15 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         "--native-artifact-archive",
         type=Path,
         help="Output archive path for the native artifact producer.",
+    )
+    parser.add_argument(
+        "--native-artifact-root",
+        type=Path,
+        help=(
+            "Extracted native artifact package inside the checkout. AMDGPU Bazel "
+            "tests use its imported executables and Loom toolchains instead of "
+            "building those native targets from source."
+        ),
     )
     parser.add_argument(
         "--native-artifact-revision",
