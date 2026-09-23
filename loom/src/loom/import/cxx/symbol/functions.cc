@@ -7,7 +7,9 @@
 #include "loom/import/cxx/symbol/functions.h"
 
 #include <cxx/ast.h>
+#include <cxx/ast_rewriter.h>
 #include <cxx/attributes.h>
+#include <cxx/decl.h>
 #include <cxx/literals.h>
 #include <cxx/names.h>
 #include <cxx/symbols.h>
@@ -160,14 +162,14 @@ void Functions::collect(cxx::DeclarationAST* declaration,
   } else if (auto* alias =
                  cxx::ast_cast<cxx::AliasDeclarationAST>(declaration)) {
     admit_declaration(nullptr, alias->attributeList, alias, scope);
-    reject_global_binding_attributes(unit_, diagnostics_,
-                                     alias->typeId->attributeList);
-    reject_global_binding_declarator(unit_, diagnostics_,
-                                     alias->typeId->declarator);
+    reject_misplaced_binding_attributes(unit_, diagnostics_,
+                                        alias->typeId->attributeList);
+    reject_misplaced_binding_declarator(unit_, diagnostics_,
+                                        alias->typeId->declarator);
   } else if (auto* directive =
                  cxx::ast_cast<cxx::UsingDirectiveAST>(declaration)) {
-    reject_global_binding_attributes(unit_, diagnostics_,
-                                     directive->attributeList);
+    reject_misplaced_binding_attributes(unit_, diagnostics_,
+                                        directive->attributeList);
   } else if (auto* attribute =
                  cxx::ast_cast<cxx::AttributeDeclarationAST>(declaration)) {
     admit_declaration(nullptr, attribute->attributeList, attribute, scope);
@@ -224,16 +226,27 @@ void Functions::collect(cxx::DeclarationAST* declaration,
 bool Functions::admit_declaration(
     cxx::Symbol* symbol, cxx::List<cxx::AttributeSpecifierAST*>* attributes,
     cxx::AST* owner, DeclarationScope scope) {
+  auto* function = cxx::symbol_cast<cxx::FunctionSymbol>(symbol);
+  cxx::DeclaratorAST* source_declarator = nullptr;
   if (auto* declarator = cxx::ast_cast<cxx::InitDeclaratorAST>(owner)) {
-    reject_global_binding_declarator(unit_, diagnostics_,
-                                     declarator->declarator);
-  } else if (auto* function =
+    source_declarator = declarator->declarator;
+  } else if (auto* definition =
                  cxx::ast_cast<cxx::FunctionDefinitionAST>(owner)) {
-    reject_global_binding_declarator(unit_, diagnostics_, function->declarator);
+    source_declarator = definition->declarator;
   }
+  if (source_declarator) {
+    auto* prototype =
+        function ? cxx::getFunctionPrototype(source_declarator) : nullptr;
+    reject_misplaced_binding_declarator(unit_, diagnostics_, source_declarator,
+                                        prototype);
+    if (function && !function->isTemplatePattern()) {
+      parameter_alignments_.declaration(function, prototype);
+    }
+  }
+  reject_misplaced_binding_attributes(unit_, diagnostics_, attributes,
+                                      BindingAttributeScope::Declaration);
   bool is_config = configs_.declaration(symbol, attributes, owner);
   admit_symbol(symbol, attributes);
-  auto* function = cxx::symbol_cast<cxx::FunctionSymbol>(symbol);
   auto require_namespace_function = [&] {
     if (!function || scope != DeclarationScope::Namespace ||
         function->isTemplatePattern() ||
@@ -411,10 +424,21 @@ loom_symbol_ref_t Functions::declare(cxx::FunctionSymbol* function) {
       found != callees_.end()) {
     return found->second;
   }
+  auto* body = definition(function);
+  // Reaching a specialization through a kernel launch need not odr-use its
+  // body in C++. Importing it still requires the completed semantic definition.
+  if (body->hasPendingBody()) {
+    cxx::ASTRewriter::completePendingBodyFor(&unit_, body);
+    diagnostics_.finish();
+  }
   if (!function->templateArguments().empty() && function->declaration()) {
     launches_.declaration(function, function->declaration()->attributeList);
+    if (!definitions_.contains(function->canonical())) {
+      parameter_alignments_.declaration(
+          function,
+          cxx::getFunctionPrototype(function->declaration()->declarator));
+    }
   }
-  auto* body = definition(function);
   auto callee = create_symbol(function, body->declaration());
   pending_.push_back(body);
   return callee;
@@ -485,6 +509,18 @@ FunctionBody Functions::define(cxx::FunctionSymbol* symbol, Types& types,
   auto parameters = symbol->parameters();
   bool kernel = annotated(symbol, "kernel");
   bool check_case = is_check_case(symbol);
+  auto parameter_alignments = parameter_alignments_.get(symbol);
+  if (!kernel && !parameter_alignments.empty()) {
+    for (const auto& alignment : parameter_alignments) {
+      if (alignment.source) {
+        diagnostics_.reject(
+            unit_, alignment.source,
+            "assume_aligned on ordinary helper parameters requires "
+            "pointer-origin alignment support; kernel parameters are "
+            "supported");
+      }
+    }
+  }
   auto* signature = cxx::type_cast<cxx::FunctionType>(symbol->type());
   if (!signature || signature->isVariadic()) {
     diagnostics_.reject(unit_, definition,
@@ -567,7 +603,8 @@ FunctionBody Functions::define(cxx::FunctionSymbol* symbol, Types& types,
           signature->returnType(),
           check_case ? FunctionKind::CheckCase
           : kernel   ? FunctionKind::Kernel
-                     : FunctionKind::Ordinary};
+                     : FunctionKind::Ordinary,
+          parameter_alignments};
 }
 
 }  // namespace loom::cxx_import

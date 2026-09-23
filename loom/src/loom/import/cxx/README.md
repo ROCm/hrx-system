@@ -365,6 +365,41 @@ or `-`, with no leading `@`. Functions and configuration values share one Loom
 namespace; conflicting exact names diagnose instead of receiving an automatic
 suffix.
 
+## Aligned kernel arguments
+
+Kernel pointer parameters can state the byte alignment supplied by their caller:
+
+```cpp
+using Words = unsigned __attribute__((vector_size(64)));
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void copy_block([[loom::assume_aligned(64)]] const unsigned* input,
+                [[loom::assume_aligned(64)]] unsigned* output) {
+  *reinterpret_cast<Words*>(output) =
+      *reinterpret_cast<const Words*>(input + 16);
+}
+```
+
+The annotation promises alignment of the incoming pointer's address. Its
+argument is a positive power-of-two integer constant, and the attribute goes
+before the parameter type. Consistent declarations may repeat the contract;
+the definition inherits it even when parameter names differ. The importer
+emits `buffer.assume.alignment` at kernel entry, where the pointer has zero
+byte offset into its buffer binding.
+
+The sixteen-word displacement above preserves 64-byte alignment. Advancing one
+word instead guarantees only four-byte alignment, and assigning a different
+pointer to the parameter does not transfer the entry promise to that value.
+The annotation performs no allocation, realignment, or runtime check. Its
+guarantee must match the caller's buffers; the
+[memory guide](../../../../docs/src/guide/buffers-views-memory.md#aligned-bases-enable-wide-transfers)
+shows the corresponding High IR contract.
+
+Ordinary helper pointers carry an additional byte origin. Their parameter
+annotations currently diagnose because alignment of the combined address
+requires an origin-aware contract; strengthening the backing buffer alone would
+be incorrect for an aligned interior pointer.
+
 ## Named configuration values
 
 An attributed `extern const` scalar declares a Loom specialization input:

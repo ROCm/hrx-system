@@ -238,12 +238,13 @@ class Translator {
       return;
     }
     auto parameters = symbol->parameters();
-    control_.emplace(unit_, types_, body);
+    control_.emplace(unit_, diagnostics_, types_, body);
     auto saved = loom_builder_enter_region(&builder_, op, region);
     values_.clear();
     locals_.clear();
     value_arena_.reset();
     size_t argument_index = 0;
+    size_t parameter_index = 0;
     for (auto* parameter : parameters) {
       bool kernel = defined.kind == FunctionKind::Kernel;
       const auto& partition =
@@ -251,7 +252,13 @@ class Translator {
       auto value = region_value(region, argument_index,
                                 kernel ? kSSAPartition : partition);
       if (partition.kind == ValueKind::Pointer && kernel) {
-        value = storage_.root(value.ssa(), defined.source);
+        auto alignment = defined.parameter_alignments.empty()
+                             ? ParameterAlignment{}
+                             : defined.parameter_alignments[parameter_index];
+        value = storage_.root(value.ssa(), alignment.minimum_alignment,
+                              alignment.source
+                                  ? static_cast<cxx::AST*>(alignment.source)
+                                  : defined.source);
       }
       value = name(value, cxx::to_string(parameter->name()));
       if (control_->addressed(parameter)) {
@@ -260,6 +267,7 @@ class Translator {
       } else {
         values_[parameter] = value;
       }
+      ++parameter_index;
     }
     auto returned = return_sequence({body->statementList, nullptr});
     loom_op_t* terminator;
@@ -377,10 +385,10 @@ class Translator {
       return;
     }
     auto* declaration = control_->condition_declaration(variable);
-    reject_global_binding_attributes(unit_, diagnostics_,
-                                     declaration->attributeList);
-    reject_global_binding_declarator(unit_, diagnostics_,
-                                     declaration->declarator);
+    reject_misplaced_binding_attributes(unit_, diagnostics_,
+                                        declaration->attributeList);
+    reject_misplaced_binding_declarator(unit_, diagnostics_,
+                                        declaration->declarator);
     if (variable->isStatic() || variable->isExtern() ||
         variable->isThreadLocal()) {
       fail(declaration, "condition storage duration must be automatic");
@@ -1486,18 +1494,18 @@ class Translator {
       }
       if (auto* alias = cxx::ast_cast<cxx::AliasDeclarationAST>(
               declaration->declaration)) {
-        reject_global_binding_attributes(unit_, diagnostics_,
-                                         alias->attributeList);
-        reject_global_binding_attributes(unit_, diagnostics_,
-                                         alias->typeId->attributeList);
-        reject_global_binding_declarator(unit_, diagnostics_,
-                                         alias->typeId->declarator);
+        reject_misplaced_binding_attributes(unit_, diagnostics_,
+                                            alias->attributeList);
+        reject_misplaced_binding_attributes(unit_, diagnostics_,
+                                            alias->typeId->attributeList);
+        reject_misplaced_binding_declarator(unit_, diagnostics_,
+                                            alias->typeId->declarator);
         return;
       }
       if (auto* directive =
               cxx::ast_cast<cxx::UsingDirectiveAST>(declaration->declaration)) {
-        reject_global_binding_attributes(unit_, diagnostics_,
-                                         directive->attributeList);
+        reject_misplaced_binding_attributes(unit_, diagnostics_,
+                                            directive->attributeList);
         return;
       }
       if (cxx::ast_cast<cxx::UsingDeclarationAST>(declaration->declaration)) {
@@ -1508,11 +1516,11 @@ class Translator {
       if (!simple) {
         fail(ast, "unsupported local declaration");
       }
-      reject_global_binding_attributes(unit_, diagnostics_,
-                                       simple->attributeList);
+      reject_misplaced_binding_attributes(unit_, diagnostics_,
+                                          simple->attributeList);
       for (auto* variable : cxx::ListView{simple->initDeclaratorList}) {
-        reject_global_binding_declarator(unit_, diagnostics_,
-                                         variable->declarator);
+        reject_misplaced_binding_declarator(unit_, diagnostics_,
+                                            variable->declarator);
         if (cxx::symbol_cast<cxx::TypeAliasSymbol>(variable->symbol)) {
           continue;
         }

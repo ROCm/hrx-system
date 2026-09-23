@@ -19,22 +19,38 @@ namespace loom::cxx_import {
 
 class Diagnostics;
 
-// Rejects global bindings in local, parameter or type attribute positions.
-void reject_global_binding_attributes(
-    cxx::TranslationUnit& unit, Diagnostics& diagnostics,
-    cxx::List<cxx::AttributeSpecifierAST*>* attributes);
+// Source positions with distinct binding owners. Declaration bindings own
+// namespace-scope symbols/configs; parameter bindings own entry preconditions.
+enum class BindingAttributeScope { Declaration, Parameter, Local };
 
-// Visits declarator/type and parameter positions once for global bindings.
-void reject_global_binding_declarator(cxx::TranslationUnit& unit,
-                                      Diagnostics& diagnostics,
-                                      cxx::DeclaratorAST* declarator);
+// Rejects binding annotations outside their owning source positions.
+void reject_misplaced_binding_attributes(
+    cxx::TranslationUnit& unit, Diagnostics& diagnostics,
+    cxx::List<cxx::AttributeSpecifierAST*>* attributes,
+    BindingAttributeScope scope = BindingAttributeScope::Local);
+
+// Checks declarator/type positions once. Only the selected function prototype
+// admits parameter bindings; nested function types have no binding owner.
+void reject_misplaced_binding_declarator(
+    cxx::TranslationUnit& unit, Diagnostics& diagnostics,
+    cxx::DeclaratorAST* declarator,
+    cxx::FunctionDeclaratorChunkAST* parameter_owner = nullptr);
+
+// Checks one statement's leading attributes during its owner's body walk.
+void reject_misplaced_binding_statement(cxx::TranslationUnit& unit,
+                                        Diagnostics& diagnostics,
+                                        cxx::StatementAST* statement);
 
 // Queries a semantic Loom annotation attached to a resolved source symbol.
 inline bool annotated(cxx::Symbol* symbol, std::string_view spelling) {
-  if (!symbol || !symbol->attributes()) {
+  if (!symbol) {
     return false;
   }
-  for (const auto& attribute : *symbol->attributes()) {
+  const auto* attributes = symbol->canonical()->attributes();
+  if (!attributes) {
+    return false;
+  }
+  for (const auto& attribute : *attributes) {
     if (attribute.attributeNamespace && attribute.name &&
         attribute.attributeNamespace->name() == "loom" &&
         attribute.name->name() == spelling) {

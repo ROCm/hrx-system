@@ -65,8 +65,8 @@ enum class ExitFlow { None, Some, All };
 // and every returned reference.
 class ControlFlow final : private cxx::ASTVisitor {
  public:
-  ControlFlow(cxx::TranslationUnit& unit, Types& types,
-              cxx::StatementAST* body);
+  ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
+              Types& types, cxx::StatementAST* body);
   ControlFlow(const ControlFlow&) = delete;
   ControlFlow& operator=(const ControlFlow&) = delete;
 
@@ -117,6 +117,8 @@ class ControlFlow final : private cxx::ASTVisitor {
 
   // Resolved source types and literal interpretation for loop admission.
   cxx::TranslationUnit& unit_;
+  // Statement annotation admission during the existing source body walk.
+  Diagnostics& diagnostics_;
   // Admitted source member partitions outlive all retained destination slices.
   Types& types_;
   // Active structured ancestors during construction only.

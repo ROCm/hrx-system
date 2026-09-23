@@ -1,0 +1,145 @@
+// RUN: verify
+// Alignment is a checked entry precondition, never an ignored annotation.
+[[loom::kernel]] void zero(
+    // ERROR@+1: LOWERING/059 "assume_aligned requires one positive power-of-two integer constant without calls or mutation"
+    [[loom::assume_aligned(0)]] unsigned* input) {}
+
+// ====
+[[loom::kernel]] void negative(
+    // ERROR@+1: LOWERING/059 "assume_aligned requires one positive power-of-two integer constant without calls or mutation"
+    [[loom::assume_aligned(-16)]] unsigned* input) {}
+
+// ====
+[[loom::kernel]] void non_power_of_two(
+    // ERROR@+1: LOWERING/059 "assume_aligned requires one positive power-of-two integer constant without calls or mutation"
+    [[loom::assume_aligned(48)]] unsigned* input) {}
+
+// ====
+[[loom::kernel]] void non_integer(
+    // ERROR@+1: LOWERING/059 "assume_aligned requires one positive power-of-two integer constant without calls or mutation"
+    [[loom::assume_aligned(64.0)]] unsigned* input) {}
+
+// ====
+[[loom::kernel]] void missing_argument(
+    // ERROR@+1: LOWERING/059 "assume_aligned requires one positive power-of-two integer constant without calls or mutation"
+    [[loom::assume_aligned]] unsigned* input) {}
+
+// ====
+[[loom::kernel]] void extra_argument(
+    // ERROR@+1: LOWERING/059 "assume_aligned requires one positive power-of-two integer constant without calls or mutation"
+    [[loom::assume_aligned(64, 0)]] unsigned* input) {}
+
+// ====
+[[loom::kernel]] void runtime_argument(unsigned alignment,
+    // ERROR@+1: LOWERING/059 "assume_aligned requires one positive power-of-two integer constant without calls or mutation"
+    [[loom::assume_aligned(alignment)]] unsigned* input) {}
+
+// ====
+constexpr unsigned alignment() { return 64; }
+[[loom::kernel]] void called_argument(
+    // ERROR@+1: LOWERING/059 "assume_aligned requires one positive power-of-two integer constant without calls or mutation"
+    [[loom::assume_aligned(alignment())]] unsigned* input) {}
+
+// ====
+[[loom::kernel]] void scalar_parameter(
+    // ERROR@+1: LOWERING/059 "assume_aligned requires a pointer parameter"
+    [[loom::assume_aligned(64)]] unsigned input) {}
+
+// ====
+[[loom::kernel]] void duplicate(
+    [[loom::assume_aligned(64),
+      // ERROR@+1: LOWERING/059 "one assume_aligned contract per parameter is allowed"
+      loom::assume_aligned(64)]] unsigned* input) {}
+
+// ====
+[[loom::kernel]] void conflicting([[loom::assume_aligned(64)]] unsigned* first);
+void conflicting(
+    // ERROR@+1: LOWERING/059 "conflicting parameter alignment across declarations"
+    [[loom::assume_aligned(32)]] unsigned* renamed) {}
+
+// ====
+// ERROR@+1: LOWERING/059 "assume_aligned requires a leading pointer parameter attribute"
+[[loom::assume_aligned(64)]] void function_attribute(unsigned* input) {}
+
+// ====
+// ERROR@+1: LOWERING/059 "assume_aligned requires a leading pointer parameter attribute"
+[[loom::assume_aligned(64)]] extern unsigned* global;
+
+// ====
+[[loom::kernel]] void local_attribute(unsigned* input) {
+  // ERROR@+1: LOWERING/059 "assume_aligned requires a leading pointer parameter attribute"
+  [[loom::assume_aligned(64)]] unsigned* local = input;
+}
+
+// ====
+[[loom::kernel]] void type_attribute(
+    // ERROR@+1: LOWERING/059 "assume_aligned requires a leading pointer parameter attribute"
+    unsigned* [[loom::assume_aligned(64)]] input) {}
+
+// ====
+[[loom::kernel]] void trailing_attribute(
+    // ERROR@+1: LOWERING/059 "assume_aligned requires a leading pointer parameter attribute"
+    unsigned* input [[loom::assume_aligned(64)]]) {}
+
+// ====
+using Callback = void (*)(
+    // ERROR@+1: LOWERING/059 "assume_aligned requires a leading pointer parameter attribute"
+    [[loom::assume_aligned(64)]] unsigned* input);
+
+// ====
+void helper(
+    // ERROR@+1: LOWERING/059 "assume_aligned on ordinary helper parameters requires pointer-origin alignment support; kernel parameters are supported"
+    [[loom::assume_aligned(64)]] unsigned* input) {}
+
+// ====
+[[loom::kernel]] void loop_attribute(unsigned* output) {
+  // ERROR@+1: LOWERING/059 "assume_aligned requires a leading pointer parameter attribute"
+  [[loom::assume_aligned(64)]] for (unsigned i = 0; i < 16; ++i) {
+    output[i] = i;
+  }
+}
+
+// ====
+#include <loomcxx/check.h>
+template <unsigned Alignment>
+[[loom::kernel]] void invalid_instance(
+    // ERROR@+1: LOWERING/059 "assume_aligned requires one positive power-of-two integer constant without calls or mutation"
+    [[loom::assume_aligned(Alignment)]] unsigned* output) {}
+LOOM_CHECK_CASE(invalid_template_alignment) {
+  const auto output = loom::check::fill<unsigned, 16>(0u);
+  loom::check::launch<invalid_instance<48>>(output);
+}
+
+// ====
+#include <loomcxx/check.h>
+template <unsigned Alignment>
+[[loom::kernel]] void diagnosed(
+    [[loom::assume_aligned(Alignment)]] unsigned* output) {
+  // ERROR@+1: PARSE/036 "instantiated kernel diagnosis"
+  static_assert(Alignment != 64, "instantiated kernel diagnosis");
+}
+LOOM_CHECK_CASE(instantiation_error) {
+  const auto output = loom::check::fill<unsigned, 16>(0u);
+  loom::check::launch<diagnosed<64>>(output);
+}
+
+// ====
+[[loom::kernel]] void branch_attribute(unsigned* output) {
+  // ERROR@+1: LOWERING/059 "assume_aligned requires a leading pointer parameter attribute"
+  [[loom::assume_aligned(64)]] if (true) {
+    output[0] = 1;
+  }
+}
+
+// ====
+[[loom::kernel]] void statement_attribute(unsigned* output) {
+  // ERROR@+1: LOWERING/059 "assume_aligned requires a leading pointer parameter attribute"
+  [[loom::assume_aligned(64)]] output[0] = 1;
+}
+
+// ====
+#include <loomcxx/check.h>
+LOOM_CHECK_CASE(check_statement_attribute) {
+  // ERROR@+1: LOWERING/059 "assume_aligned requires a leading pointer parameter attribute"
+  [[loom::assume_aligned(64)]] loom::check::expect_equal(1, 1);
+}

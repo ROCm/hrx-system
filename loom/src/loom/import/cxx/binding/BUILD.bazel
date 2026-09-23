@@ -204,6 +204,20 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "parameter_alignment",
+    srcs = ["parameter_alignment.cc"],
+    hdrs = ["parameter_alignment.h"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        "//loom/src/loom/import/cxx/source",
+        "//loom/src/loom/import/cxx/source:attributes",
+        "//loom/src/loom/import/cxx/source:constants",
+        "//third_party:cxx_parser",
+    ],
+)
+
+loom_cc_library(
     name = "loop_schedule",
     srcs = ["loop_schedule.cc"],
     hdrs = ["loop_schedule.h"],

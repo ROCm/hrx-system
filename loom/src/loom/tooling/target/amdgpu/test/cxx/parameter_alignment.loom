@@ -1,0 +1,21 @@
+kernel.decl @copy_block() launch(%input: buffer, %output: buffer)
+
+check.case public @aligned_buffer_copy {
+  %input = check.generate.iota offset(1024) step(37) : tensor<48xi32>
+  %storage = check.generate.fill value(-37) : tensor<64xi32>
+  %output = check.tensor.view %storage offset(64) : tensor<64xi32> -> tensor<32xi32>
+  kernel.launch @copy_block(%input, %output) : (tensor<48xi32>, tensor<32xi32>)
+  %actual = check.tensor.view %output offset(0) : tensor<32xi32> -> tensor<16xi32>
+  %expected = check.generate.iota offset(1616) step(37) : tensor<16xi32>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<16xi32>
+  %prefix = check.tensor.view %storage offset(0) : tensor<64xi32> -> tensor<16xi32>
+  %prefix_guard = check.generate.fill value(-37) : tensor<16xi32>
+  check.expect.bitwise actual(%prefix) expected(%prefix_guard) : tensor<16xi32>
+  %suffix = check.tensor.view %storage offset(128) : tensor<64xi32> -> tensor<32xi32>
+  %suffix_guard = check.generate.fill value(-37) : tensor<32xi32>
+  check.expect.bitwise actual(%suffix) expected(%suffix_guard) : tensor<32xi32>
+  %unchanged = check.generate.iota offset(1024) step(37) : tensor<48xi32>
+  check.expect.bitwise actual(%input) expected(%unchanged) : tensor<48xi32>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}

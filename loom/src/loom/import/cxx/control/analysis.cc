@@ -14,6 +14,7 @@
 
 #include <algorithm>
 
+#include "loom/import/cxx/source/attributes.h"
 #include "loom/import/cxx/source/constants.h"
 
 namespace loom::cxx_import {
@@ -29,9 +30,9 @@ cxx::ExpressionAST* unwrapped(cxx::ExpressionAST* expression) {
 
 }  // namespace
 
-ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Types& types,
-                         cxx::StatementAST* body)
-    : unit_(unit), types_(types) {
+ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
+                         Types& types, cxx::StatementAST* body)
+    : unit_(unit), diagnostics_(diagnostics), types_(types) {
   accept(body);
 }
 
@@ -118,6 +119,7 @@ void ControlFlow::postVisit(cxx::AST* ast) {
     }
   }
   if (auto* statement = cxx::ast_cast<cxx::StatementAST>(ast)) {
+    reject_misplaced_binding_statement(unit_, diagnostics_, statement);
     auto outcomes = classify_paths(statement);
     if (outcomes != Fallthrough) {
       paths_.emplace(statement, outcomes);

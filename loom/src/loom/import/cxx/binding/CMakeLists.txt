@@ -286,6 +286,28 @@ endif()
 if(LOOM_IMPORT_CXX)
 loom_cc_library(
   NAME
+    parameter_alignment
+  CXX_STANDARD
+    23
+  CXX_FEATURES
+    "exceptions"
+    "rtti"
+  HDRS
+    "parameter_alignment.h"
+  SRCS
+    "parameter_alignment.cc"
+  DEPS
+    iree::third_party::cxx_parser
+    loom::import::cxx::source
+    loom::import::cxx::source::attributes
+    loom::import::cxx::source::constants
+  PUBLIC
+)
+endif()
+
+if(LOOM_IMPORT_CXX)
+loom_cc_library(
+  NAME
     loop_schedule
   CXX_STANDARD
     23

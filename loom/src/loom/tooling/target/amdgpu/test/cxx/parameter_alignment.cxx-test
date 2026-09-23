@@ -1,0 +1,25 @@
+// RUN: emit source-low @copy_block target=amdgpu:gfx1151 output=low
+// Kernel parameters retain explicit pointer-address contracts at entry.
+using Words = unsigned __attribute__((vector_size(64)));
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void copy_block([[loom::assume_aligned(64)]] const unsigned* input,
+                [[loom::assume_aligned(64)]] unsigned* output) {
+  *reinterpret_cast<Words*>(output) =
+      *reinterpret_cast<const Words*>(input + 16);
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @copy_block() asm {
+  %input = resource<hal_binding> {extent = 128, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output = resource<hal_binding> {extent = 64, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %26 = v_mov_b32 0
+  %27 = global_load_b128_saddr %26, %input {offset = 64}
+  %29 = global_load_b128_saddr %26, %input {offset = 80}
+  %31 = global_load_b128_saddr %26, %input {offset = 96}
+  %33 = global_load_b128_saddr %26, %input {offset = 112}
+  global_store_b128_saddr %26, %27, %output
+  global_store_b128_saddr %26, %29, %output {offset = 16}
+  global_store_b128_saddr %26, %31, %output {offset = 32}
+  global_store_b128_saddr %26, %33, %output {offset = 48}
+  return
+}

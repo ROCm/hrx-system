@@ -56,6 +56,7 @@ loom_cc_library(
     loom::import::cxx::binding::intrinsics
     loom::import::cxx::binding::launch
     loom::import::cxx::binding::loop_schedule
+    loom::import::cxx::binding::parameter_alignment
     loom::import::cxx::control::analysis
     loom::import::cxx::source
     loom::import::cxx::source::attributes

@@ -120,7 +120,7 @@ TEST(ControlFlowTest, CountedAdmissionRetainsTheNonwrappingIntervalProof) {
         cxx::ast_cast<cxx::ForStatementAST>(body->statementList->value);
     ASSERT_NE(loop, nullptr);
     Types types(source.unit(), source.diagnostics());
-    ControlFlow analysis(source.unit(), types, body);
+    ControlFlow analysis(source.unit(), source.diagnostics(), types, body);
     auto* counted = analysis.counted(loop);
     ASSERT_EQ(counted != nullptr, test.step != 0);
     if (counted) {
@@ -154,7 +154,7 @@ TEST(ControlFlowTest, SourceSelectionRetainsInitializerAndSelectedWrites) {
                    ->statement;
   auto* branch = cxx::ast_cast<cxx::IfStatementAST>(body->statementList->value);
   Types types(source.unit(), source.diagnostics());
-  ControlFlow analysis(source.unit(), types, body);
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body);
   auto writes = analysis.written(branch);
   ASSERT_EQ(writes.size(), 2u);
   EXPECT_EQ(writes[0], function->symbol->parameters()[2]);
@@ -174,7 +174,7 @@ TEST(ControlFlowTest, DecisionSyntaxAndInitializerWritesStayWithTheBinding) {
                    function->functionBody)
                    ->statement;
   Types types(source.unit(), source.diagnostics());
-  ControlFlow analysis(source.unit(), types, body);
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body);
   for (auto* statement : cxx::ListView{body->statementList}) {
     auto* branch = cxx::ast_cast<cxx::IfStatementAST>(statement);
     ASSERT_NE(branch, nullptr);
@@ -213,7 +213,7 @@ TEST(ControlFlowTest, NestedWritesPreserveOrderAndShadowedSymbolIdentity) {
   auto* branch = cxx::ast_cast<cxx::IfStatementAST>(body->statementList->value);
   ASSERT_NE(branch, nullptr);
   Types types(source.unit(), source.diagnostics());
-  ControlFlow analysis(source.unit(), types, body);
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body);
   auto writes = analysis.written(branch);
   ASSERT_EQ(writes.size(), 3u);
   EXPECT_EQ(writes[0], function->symbol->parameters()[1]);
@@ -258,7 +258,7 @@ TEST(ControlFlowTest, NestedMemberWritesRetainTheOwningBindingAndSlice) {
       assignment_statement->expression);
   ASSERT_NE(assignment, nullptr);
   Types types(source.unit(), source.diagnostics());
-  ControlFlow analysis(source.unit(), types, body);
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body);
   auto writes = analysis.written(branch);
   ASSERT_EQ(writes.size(), 1u);
   EXPECT_EQ(writes[0], function->symbol->parameters()[0]);
@@ -294,7 +294,7 @@ TEST(ControlFlowTest, MemoryMembersRetainStorageIdentityAndAddressSideEffects) {
                    function->functionBody)
                    ->statement;
   Types types(source.unit(), source.diagnostics());
-  ControlFlow analysis(source.unit(), types, body);
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body);
   auto writes = analysis.written(body);
   ASSERT_EQ(writes.size(), 2u);
   EXPECT_EQ(writes[0], function->symbol->parameters()[1]);
@@ -349,7 +349,7 @@ TEST(ControlFlowTest, ReturnSummariesRetainFallthroughAndNestedExits) {
                      function->functionBody)
                      ->statement;
     Types types(source.unit(), source.diagnostics());
-    ControlFlow analysis(source.unit(), types, body);
+    ControlFlow analysis(source.unit(), source.diagnostics(), types, body);
     EXPECT_EQ(analysis.returns(body), test.flow);
   }
 }
@@ -375,7 +375,7 @@ TEST(ControlFlowTest, ConditionalValuesRetainOrderedBindingMutations) {
       cxx::Initializer::stripImplicitCasts(ret->expression));
   ASSERT_NE(select, nullptr);
   Types types(source.unit(), source.diagnostics());
-  ControlFlow analysis(source.unit(), types, body);
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body);
   auto writes = analysis.written(select);
   ASSERT_EQ(writes.size(), 3u);
   auto parameters = function->symbol->parameters();
@@ -443,7 +443,7 @@ TEST(ControlFlowTest, IterationExitsStopAtTheirLoopAndExcludeUnreachablePaths) {
         cxx::ast_cast<cxx::ForStatementAST>(body->statementList->value);
     ASSERT_NE(loop, nullptr);
     Types types(source.unit(), source.diagnostics());
-    ControlFlow analysis(source.unit(), types, body);
+    ControlFlow analysis(source.unit(), source.diagnostics(), types, body);
     EXPECT_EQ(analysis.continues(loop->statement), test.continues);
     EXPECT_EQ(analysis.returns(loop->statement), test.returns);
     EXPECT_EQ(analysis.continues(loop), ExitFlow::None);

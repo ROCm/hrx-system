@@ -138,9 +138,20 @@ loom_check_test(
     for name in [
         "assembly_lowering",
         "assembly_invalid",
+        "parameter_alignment",
         "vector_lookup",
     ]
 ]
+
+loom_test(
+    name = "parameter_alignment_test",
+    srcs = [
+        "parameter_alignment.cxx",
+        "parameter_alignment.loom",
+    ],
+    execution_profiles = _EXECUTION_PROFILES,
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
 
 loom_test(
     name = "float16_test",

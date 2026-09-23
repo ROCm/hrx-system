@@ -22,6 +22,10 @@
 // are rejected. Unroll factors 0/1 and pipeline depth 1 are serial. Bare
 // loom::unroll requests full unrolling; pipeline depths must be in [1, 65535].
 // Scheduling is an explicit compiler contract; unsupported policies diagnose.
+// Kernel pointer parameters accept [[loom::assume_aligned(N)]] before the
+// parameter type. N is a positive power-of-two byte alignment of the incoming
+// pointer address. The caller supplies the guarantee; no runtime check is
+// added.
 #define LOOM_KERNEL [[loom::kernel]]
 #define LOOM_DEVICE [[loom::device]]
 #define LOOM_WORKGROUP [[loom::workgroup]]

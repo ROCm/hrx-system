@@ -1,0 +1,156 @@
+// RUN: pass canonicalize,cse
+// Kernel parameters retain explicit pointer-address contracts at entry.
+using Words = unsigned __attribute__((vector_size(64)));
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void copy_block([[loom::assume_aligned(64)]] const unsigned* input,
+                [[loom::assume_aligned(64)]] unsigned* output) {
+  *reinterpret_cast<Words*>(output) =
+      *reinterpret_cast<const Words*>(input + 16);
+}
+
+// ----
+kernel.def @copy_block() {
+  %2 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
+} launch(%0: buffer, %1: buffer) {
+  %input = buffer.assume.alignment %0 {minimum_alignment = 64} : buffer
+  %output = buffer.assume.alignment %1 {minimum_alignment = 64} : buffer
+  %output_byte_offset = index.constant 0 : offset
+  %23 = index.constant 64 : offset
+  %20 = buffer.view %input[%23] : buffer -> view<16xi32>
+  %21 = vector.load %20[0] : view<16xi32> -> vector<16xi32>
+  %22 = buffer.view %output[%output_byte_offset] : buffer -> view<16xi32>
+  vector.store %21, %22[0] : vector<16xi32>, view<16xi32>
+  kernel.return
+}
+
+// ====
+// Contracts follow parameter ordinals across renamed redeclarations.
+constexpr unsigned kAlignment = 1u << 6;
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void declared(unsigned count,
+              [[loom::assume_aligned(kAlignment)]] const float* source,
+              [[loom::assume_aligned(alignof(float))]] float* target);
+void declared(unsigned count,
+              [[loom::assume_aligned(64)]] const float* input, float* output) {
+  output[0] = input[count];
+}
+
+// ----
+kernel.def @declared() {
+  %3 = index.constant 1 : index
+  kernel.launch.config workgroups(%3, %3, %3) workgroup_size(%3, %3, %3) : index
+} launch(%count: i32, %1: buffer, %2: buffer) {
+  %input = buffer.assume.alignment %1 {minimum_alignment = 64} : buffer
+  %output = buffer.assume.alignment %2 {minimum_alignment = 4} : buffer
+  %13 = scalar.extui %count : i32 to i64
+  %32 = scalar.constant 2 : i64
+  %33 = scalar.shli %13, %32 : i64
+  %18 = scalar.assume %33 [range(%33, 0, 9223372036854775807)] : i64
+  %19 = index.cast %18 : i64 to offset
+  %20 = buffer.view %input[%19] : buffer -> view<1xf32>
+  %21 = view.load %20[0] : view<1xf32> -> f32
+  %31 = index.constant 0 : offset
+  %30 = buffer.view %output[%31] : buffer -> view<1xf32>
+  view.store %21, %30[0] : f32, view<1xf32>
+  kernel.return
+}
+
+// ====
+// Reassigning a parameter does not apply its entry promise to the new pointer.
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void reassigned([[loom::assume_aligned(64)]] float* original, float* replacement) {
+  original = replacement;
+  original[0] = 1.0f;
+}
+
+// ----
+kernel.def @reassigned() {
+  %2 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
+} launch(%0: buffer, %replacement: buffer) {
+  %11 = scalar.constant 1.0 : f32
+  %21 = index.constant 0 : offset
+  %20 = buffer.view %replacement[%21] : buffer -> view<1xf32>
+  view.store %11, %20[0] : f32, view<1xf32>
+  kernel.return
+}
+
+// ====
+// Pointer aliases and cv-qualified pointer objects keep the same entry contract.
+using Pointer = unsigned*;
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void aliased([[using loom: assume_aligned(sizeof(unsigned) * 16)]]
+             const Pointer output) {
+  output[0] = 7;
+}
+
+// ----
+kernel.def @aliased() {
+  %1 = index.constant 1 : index
+  kernel.launch.config workgroups(%1, %1, %1) workgroup_size(%1, %1, %1) : index
+} launch(%0: buffer) {
+  %output = buffer.assume.alignment %0 {minimum_alignment = 64} : buffer
+  %9 = scalar.constant 7 : i32
+  %19 = index.constant 0 : offset
+  %18 = buffer.view %output[%19] : buffer -> view<1xi32>
+  view.store %9, %18[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+// Array parameters use their adjusted pointer type.
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void adjusted([[loom::assume_aligned(64)]] unsigned output[16]) {
+  output[0] = 9;
+}
+
+// ----
+kernel.def @adjusted() {
+  %1 = index.constant 1 : index
+  kernel.launch.config workgroups(%1, %1, %1) workgroup_size(%1, %1, %1) : index
+} launch(%0: buffer) {
+  %output = buffer.assume.alignment %0 {minimum_alignment = 64} : buffer
+  %9 = scalar.constant 9 : i32
+  %19 = index.constant 0 : offset
+  %18 = buffer.view %output[%19] : buffer -> view<1xi32>
+  view.store %9, %18[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+// Concrete kernel instances admit the substituted parameter alignment.
+#include <loomcxx/check.h>
+template <unsigned Alignment>
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void instantiated([[loom::assume_aligned(Alignment)]] unsigned* output) {
+  output[0] = 7;
+}
+LOOM_CHECK_CASE(aligned_instance) {
+  const auto output = loom::check::fill<unsigned, 16>(0u);
+  loom::check::launch<instantiated<64>>(output);
+  loom::check::expect_bitwise(loom::check::slice<1>(output, 0),
+                            loom::check::fill<unsigned, 1>(7u));
+}
+
+// ----
+check.case public @aligned_instance {
+  %output = check.generate.fill value(0) : tensor<16xi32>
+  kernel.launch @instantiated_64(%output) : (tensor<16xi32>)
+  %1 = check.tensor.view %output offset(0) : tensor<16xi32> -> tensor<1xi32>
+  %2 = check.generate.fill value(7) : tensor<1xi32>
+  check.expect.bitwise actual(%1) expected(%2) : tensor<1xi32>
+  check.return
+}
+
+kernel.def @instantiated_64() {
+  %4 = index.constant 1 : index
+  kernel.launch.config workgroups(%4, %4, %4) workgroup_size(%4, %4, %4) : index
+} launch(%3: buffer) {
+  %output = buffer.assume.alignment %3 {minimum_alignment = 64} : buffer
+  %12 = scalar.constant 7 : i32
+  %22 = index.constant 0 : offset
+  %21 = buffer.view %output[%22] : buffer -> view<1xi32>
+  view.store %12, %21[0] : i32, view<1xi32>
+  kernel.return
+}

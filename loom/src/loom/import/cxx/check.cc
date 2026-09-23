@@ -42,10 +42,12 @@ class CheckBody {
         builder_(builder) {}
 
   void translate(const FunctionBody& body) {
+    reject_misplaced_binding_statement(unit_, diagnostics_, body.body);
     cxx::AST* end = body.body;
     for (auto* remaining = body.body->statementList; remaining;
          remaining = remaining->next) {
       auto* statement = remaining->value;
+      reject_misplaced_binding_statement(unit_, diagnostics_, statement);
       if (auto* returned = cxx::ast_cast<cxx::ReturnStatementAST>(statement)) {
         if (returned->expression || remaining->next) {
           fail(statement, "check case return must be bare and final");
@@ -378,11 +380,11 @@ class CheckBody {
     if (!declaration) {
       fail(statement, "check locals require immutable value bindings");
     }
-    reject_global_binding_attributes(unit_, diagnostics_,
-                                     declaration->attributeList);
+    reject_misplaced_binding_attributes(unit_, diagnostics_,
+                                        declaration->attributeList);
     for (auto* declarator : cxx::ListView{declaration->initDeclaratorList}) {
-      reject_global_binding_declarator(unit_, diagnostics_,
-                                       declarator->declarator);
+      reject_misplaced_binding_declarator(unit_, diagnostics_,
+                                          declarator->declarator);
       auto* variable =
           cxx::symbol_cast<cxx::VariableSymbol>(declarator->symbol);
       if (!variable || !declarator->initializer || variable->isStatic() ||

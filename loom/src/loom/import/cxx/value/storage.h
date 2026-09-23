@@ -57,8 +57,10 @@ class Storage {
         locations_(locations),
         builder_(builder) {}
 
-  // Forms the source pointer for a kernel buffer binding.
-  Pointer root(loom_value_id_t buffer, cxx::AST* owner);
+  // Forms a zero-origin source pointer for a kernel buffer binding. A nonzero
+  // alignment is an admitted contract on that incoming pointer's address.
+  Pointer root(loom_value_id_t buffer, int64_t minimum_alignment,
+               cxx::AST* owner);
   // Starts an object projection with its ordinary source ABI alignment.
   // Nested fields use member() instead of resetting to their nominal type.
   StorageProjection project(Pointer pointer, const cxx::Type* object_type,

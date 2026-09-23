@@ -33,6 +33,7 @@ loom_cc_library(
         "//loom/src/loom/import/cxx/binding:config",
         "//loom/src/loom/import/cxx/binding:intrinsics",
         "//loom/src/loom/import/cxx/binding:launch",
+        "//loom/src/loom/import/cxx/binding:parameter_alignment",
         "//loom/src/loom/import/cxx/source",
         "//loom/src/loom/import/cxx/source:attributes",
         "//loom/src/loom/import/cxx/source:error",

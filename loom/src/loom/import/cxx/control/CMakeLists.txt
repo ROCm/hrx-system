@@ -24,6 +24,8 @@ loom_cc_library(
     "analysis.cc"
   DEPS
     iree::third_party::cxx_parser
+    loom::import::cxx::source
+    loom::import::cxx::source::attributes
     loom::import::cxx::source::constants
     loom::import::cxx::value::types
   PUBLIC

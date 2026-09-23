@@ -73,6 +73,7 @@ loom_cc_library(
         "//loom/src/loom/import/cxx/binding:intrinsics",
         "//loom/src/loom/import/cxx/binding:launch",
         "//loom/src/loom/import/cxx/binding:loop_schedule",
+        "//loom/src/loom/import/cxx/binding:parameter_alignment",
         "//loom/src/loom/import/cxx/control:analysis",
         "//loom/src/loom/import/cxx/source",
         "//loom/src/loom/import/cxx/source:attributes",

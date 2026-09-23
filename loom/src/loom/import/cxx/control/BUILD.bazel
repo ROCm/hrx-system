@@ -20,6 +20,8 @@ loom_cc_library(
     cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = [
+        "//loom/src/loom/import/cxx/source",
+        "//loom/src/loom/import/cxx/source:attributes",
         "//loom/src/loom/import/cxx/source:constants",
         "//loom/src/loom/import/cxx/value:types",
         "//third_party:cxx_parser",
