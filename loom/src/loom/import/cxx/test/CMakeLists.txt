@@ -73,6 +73,8 @@ loom_check_test_suite(
     "packed_memory.cxx-test"
     "parameter_alignment.cxx-test"
     "parameter_alignment_invalid.cxx-test"
+    "parameter_noalias.cxx-test"
+    "parameter_noalias_invalid.cxx-test"
     "pointers.cxx-test"
     "record_arrays.cxx-test"
     "record_memory.cxx-test"

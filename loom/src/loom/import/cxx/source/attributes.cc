@@ -6,6 +6,8 @@
 
 #include "loom/import/cxx/source/attributes.h"
 
+#include <string>
+
 #include "loom/import/cxx/source/source.h"
 
 namespace loom::cxx_import {
@@ -28,11 +30,12 @@ void reject_misplaced_binding_attributes(
                              "config bindings require namespace-scope scalar "
                              "variables with a leading attribute");
         }
-        if (name == "assume_aligned" &&
+        if ((name == "assume_aligned" || name == "noalias") &&
             scope != BindingAttributeScope::Parameter) {
           diagnostics.reject(
               unit, attribute,
-              "assume_aligned requires a leading pointer parameter attribute");
+              std::string(name) +
+                  " requires a leading pointer parameter attribute");
         }
       });
 }

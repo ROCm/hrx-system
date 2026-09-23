@@ -286,21 +286,26 @@ endif()
 if(LOOM_IMPORT_CXX)
 loom_cc_library(
   NAME
-    parameter_alignment
+    parameter_contracts
   CXX_STANDARD
     23
   CXX_FEATURES
     "exceptions"
     "rtti"
   HDRS
-    "parameter_alignment.h"
+    "parameter_contracts.h"
   SRCS
-    "parameter_alignment.cc"
+    "parameter_contracts.cc"
   DEPS
     iree::third_party::cxx_parser
     loom::import::cxx::source
     loom::import::cxx::source::attributes
     loom::import::cxx::source::constants
+    loom::import::cxx::source::error
+    loom::import::cxx::source::locations
+    loom::ir
+    loom::ops::buffer
+    loom::ops::op_defs
   PUBLIC
 )
 endif()

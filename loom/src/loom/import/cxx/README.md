@@ -365,7 +365,7 @@ or `-`, with no leading `@`. Functions and configuration values share one Loom
 namespace; conflicting exact names diagnose instead of receiving an automatic
 suffix.
 
-## Aligned kernel arguments
+## Kernel pointer contracts
 
 Kernel pointer parameters can state the byte alignment supplied by their caller:
 
@@ -399,6 +399,45 @@ Ordinary helper pointers carry an additional byte origin. Their parameter
 annotations currently diagnose because alignment of the combined address
 requires an origin-aware contract; strengthening the backing buffer alone would
 be incorrect for an aligned interior pointer.
+
+Kernel pointers can also mark their incoming buffer roots as mutually
+non-overlapping with `[[loom::noalias]]`:
+
+```cpp
+#include <loomcxx/kernel.h>
+
+[[loom::kernel, loom::workgroup_size(256, 1, 1),
+  loom::workgroup_count(3, 64, 1)]]
+void gather_rows([[loom::noalias]] const float* weights,
+                 [[loom::noalias]] const unsigned* row_ids,
+                 [[loom::noalias]] float* output) {
+  unsigned row = loom::workgroup_id.y;
+  unsigned column = loom::workgroup_id.x * 256u + loom::workitem_id.x;
+  unsigned source_row = row_ids[row];
+  loom::assume(source_row < 65536u);
+  output[row * 768u + column] = weights[source_row * 768u + column];
+}
+```
+
+Each marked parameter produces `buffer.assume.noalias` at kernel entry. Distinct
+marked roots promise disjoint storage; unmarked parameters can still alias
+them. Aliases and interior pointers derived from a root retain its identity.
+Reassigning a parameter does not attach the entry promise to its replacement.
+This enables existing memory-dependence analysis and, when the address and
+memory-stability facts permit it, uniform loads such as the row-ID read above.
+
+The attribute has no arguments and composes with alignment, for example
+`[[loom::noalias, loom::assume_aligned(64)]] const float* input`. It introduces
+no runtime check, allocation, alignment or nonnull guarantee. Declarations and
+definitions reconcile contracts by parameter position, including concrete
+kernel template instances.
+
+This is Loom's buffer-root contract. C `restrict` and C++ `__restrict__` describe
+accesses during a lexical scope and can permit two read-only pointers to share
+storage. They currently contribute no alias facts during import. Applying
+`loom::noalias` to ordinary helper parameters diagnoses: helper calls need
+invocation-scoped alias contracts, including when a helper receives two
+non-overlapping slices of one backing buffer.
 
 ## Named configuration values
 

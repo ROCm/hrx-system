@@ -240,7 +240,7 @@ bool Functions::admit_declaration(
     reject_misplaced_binding_declarator(unit_, diagnostics_, source_declarator,
                                         prototype);
     if (function && !function->isTemplatePattern()) {
-      parameter_alignments_.declaration(function, prototype);
+      parameter_contracts_.declaration(function, prototype);
     }
   }
   reject_misplaced_binding_attributes(unit_, diagnostics_, attributes,
@@ -434,7 +434,7 @@ loom_symbol_ref_t Functions::declare(cxx::FunctionSymbol* function) {
   if (!function->templateArguments().empty() && function->declaration()) {
     launches_.declaration(function, function->declaration()->attributeList);
     if (!definitions_.contains(function->canonical())) {
-      parameter_alignments_.declaration(
+      parameter_contracts_.declaration(
           function,
           cxx::getFunctionPrototype(function->declaration()->declarator));
     }
@@ -509,15 +509,21 @@ FunctionBody Functions::define(cxx::FunctionSymbol* symbol, Types& types,
   auto parameters = symbol->parameters();
   bool kernel = annotated(symbol, "kernel");
   bool check_case = is_check_case(symbol);
-  auto parameter_alignments = parameter_alignments_.get(symbol);
-  if (!kernel && !parameter_alignments.empty()) {
-    for (const auto& alignment : parameter_alignments) {
-      if (alignment.source) {
+  auto parameter_contracts = parameter_contracts_.get(symbol);
+  if (!kernel && !parameter_contracts.empty()) {
+    for (const auto& contract : parameter_contracts) {
+      if (contract.alignment.source) {
         diagnostics_.reject(
-            unit_, alignment.source,
+            unit_, contract.alignment.source,
             "assume_aligned on ordinary helper parameters requires "
             "pointer-origin alignment support; kernel parameters are "
             "supported");
+      }
+      if (contract.noalias_source) {
+        diagnostics_.reject(
+            unit_, contract.noalias_source,
+            "noalias on ordinary helper parameters requires scoped alias "
+            "contracts; kernel parameters are supported");
       }
     }
   }
@@ -604,7 +610,7 @@ FunctionBody Functions::define(cxx::FunctionSymbol* symbol, Types& types,
           check_case ? FunctionKind::CheckCase
           : kernel   ? FunctionKind::Kernel
                      : FunctionKind::Ordinary,
-          parameter_alignments};
+          parameter_contracts};
 }
 
 }  // namespace loom::cxx_import

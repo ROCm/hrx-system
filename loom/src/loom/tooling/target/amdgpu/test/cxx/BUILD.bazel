@@ -148,9 +148,17 @@ loom_check_test(
         "integer_extrema",
         "opaque_pointers",
         "parameter_alignment",
+        "parameter_noalias",
         "vector_lookup",
     ]
 ]
+
+loom_test(
+    name = "parameter_noalias_test",
+    srcs = ["parameter_noalias.cxx"],
+    execution_profiles = _EXECUTION_PROFILES,
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
 
 loom_test(
     name = "parameter_alignment_test",

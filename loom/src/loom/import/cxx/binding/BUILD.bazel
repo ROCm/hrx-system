@@ -204,15 +204,20 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "parameter_alignment",
-    srcs = ["parameter_alignment.cc"],
-    hdrs = ["parameter_alignment.h"],
+    name = "parameter_contracts",
+    srcs = ["parameter_contracts.cc"],
+    hdrs = ["parameter_contracts.h"],
     cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = [
         "//loom/src/loom/import/cxx/source",
         "//loom/src/loom/import/cxx/source:attributes",
         "//loom/src/loom/import/cxx/source:constants",
+        "//loom/src/loom/import/cxx/source:error",
+        "//loom/src/loom/import/cxx/source:locations",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/buffer",
         "//third_party:cxx_parser",
     ],
 )

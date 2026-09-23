@@ -1,0 +1,150 @@
+// RUN: emit source-low @copy target=amdgpu:gfx1151 output=low
+// Comparable incoming roots permit a stable uniform scalar load.
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void copy([[loom::noalias]] const unsigned* input,
+          [[loom::noalias]] unsigned* output) {
+  output[2] = input[5];
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @copy() asm {
+  %input = resource<hal_binding> {extent = 24, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output = resource<hal_binding> {extent = 12, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %35 = s_mov_b32 0
+  %36 = s_load_dword %input, %35 {offset = 20}
+  %37 = v_mov_b32_copy %36
+  %38 = v_mov_b32 0
+  global_store_b32_saddr %38, %37, %output {offset = 8}
+  return
+}
+
+// ====
+// An unmarked output can modify the annotated input's storage.
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void copy([[loom::noalias]] const unsigned* input, unsigned* output) {
+  output[2] = input[5];
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @copy() asm {
+  %input = resource<hal_binding> {extent = 24, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output = resource<hal_binding> {extent = 12, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %34 = v_mov_b32 0
+  %35 = global_load_b32_saddr %34, %input {offset = 20}
+  global_store_b32_saddr %34, %35, %output {offset = 8}
+  return
+}
+
+// ====
+// Copies of an annotated pointer retain its storage identity.
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void copy([[loom::noalias]] unsigned* input,
+          [[loom::noalias]] unsigned* output) {
+  auto* alias = input + 1;
+  unsigned before = input[1];
+  alias[0] = before + 1;
+  output[2] = input[1];
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @copy() asm {
+  %input = resource<hal_binding> {extent = 8, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output = resource<hal_binding> {extent = 12, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %66 = v_mov_b32 0
+  %before = global_load_b32_saddr %66, %input {offset = 4}
+  %69 = v_mov_b32 1
+  %70 = v_add_u32 %before, %69
+  global_store_b32_saddr %66, %70, %input {offset = 4}
+  %73 = global_load_b32_saddr %66, %input {offset = 4}
+  global_store_b32_saddr %66, %73, %output {offset = 8}
+  return
+}
+
+// ====
+// Reassigning a parameter does not apply its old noalias promise to a new root.
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void copy([[loom::noalias]] const unsigned* input,
+          [[loom::noalias]] unsigned* output, const unsigned* replacement) {
+  input = replacement;
+  unsigned before = input[0];
+  output[0] = before + 1;
+  output[2] = input[0];
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 3, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @copy() asm {
+  %output = resource<hal_binding> {extent = 12, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %replacement = resource<hal_binding> {extent = 4, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %61 = v_mov_b32 0
+  %before = global_load_b32_saddr %61, %replacement
+  %64 = v_mov_b32 1
+  %65 = v_add_u32 %before, %64
+  global_store_b32_saddr %61, %65, %output
+  %68 = global_load_b32_saddr %61, %replacement
+  global_store_b32_saddr %61, %68, %output {offset = 8}
+  return
+}
+
+// ====
+// A loaded embedding row ID stays scalar through the input address calculation.
+#include <loomcxx/kernel.h>
+#include <stdfloat>
+using Half4 = std::float16_t __attribute__((ext_vector_type(4)));
+using Float4 = float __attribute__((ext_vector_type(4)));
+[[loom::kernel, loom::workgroup_size(256, 1, 1),
+  loom::workgroup_count(3, 64, 1)]]
+void copy([[loom::noalias]] const Half4* weights,
+          [[loom::noalias]] const unsigned* row_ids,
+          [[loom::noalias]] Float4* output) {
+  unsigned row = loom::workgroup_id.y;
+  unsigned column = loom::workgroup_id.x * 256u + loom::workitem_id.x;
+  unsigned source_row = row_ids[row];
+  loom::assume(source_row < 65536u);
+  output[row * 768u + column] =
+      __builtin_convertvector(weights[source_row * 768u + column], Float4);
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 3, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(256, 1, 1) workgroup_count(3, 64, 1) @copy() asm {
+  %workgroup_id_x = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
+  %row = live_in<amdgpu.workgroup_id.y> : reg<amdgpu.sgpr>
+  %workitem_id_x = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %weights = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %row_ids = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %90 = s_lshl_b32_rhs_inline %row, 2
+  %source_row = s_load_dword %row_ids, %90
+  %100 = v_lshlrev_b32_src0_inline %workitem_id_x, 3
+  %101 = s_lshl_b32_rhs_inline %workgroup_id_x, 11
+  %102 = s_mov_b32 6144
+  %103 = s_mul_i32 %source_row, %102
+  %104 = s_add_u32 %101, %103
+  %105 = slice %weights[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %106 = slice %weights[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %107 = s_mov_b32 0
+  %108, %109 = s_add_co_u32 %105, %104
+  %110, %111 = s_addc_u32 %106, %107, %109
+  %112 = concat(%108, %110) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %113 = global_load_b64_saddr %100, %112
+  %114 = slice %113[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %115 = v_cvt_f32_f16 %114
+  %117 = v_lshrrev_b32_src0_inline %114, 16
+  %118 = v_cvt_f32_f16 %117
+  %119 = slice %113[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %120 = v_cvt_f32_f16 %119
+  %122 = v_lshrrev_b32_src0_inline %119, 16
+  %123 = v_cvt_f32_f16 %122
+  %124 = concat(%115, %118, %120, %123) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %132 = v_lshlrev_b32_src0_inline %workitem_id_x, 4
+  %133 = s_mov_b32 12288
+  %134 = s_mul_i32 %row, %133
+  %135 = s_lshl_b32_rhs_inline %workgroup_id_x, 12
+  %136 = s_add_u32 %134, %135
+  %137 = slice %output[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %138 = slice %output[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %140, %141 = s_add_co_u32 %137, %136
+  %142, %143 = s_addc_u32 %138, %107, %141
+  %144 = concat(%140, %142) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_b128_saddr %132, %124, %144
+  return
+}

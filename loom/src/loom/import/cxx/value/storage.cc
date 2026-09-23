@@ -25,16 +25,7 @@
 
 namespace loom::cxx_import {
 
-Pointer Storage::root(loom_value_id_t buffer, int64_t minimum_alignment,
-                      cxx::AST* owner) {
-  if (minimum_alignment) {
-    auto buffer_type = loom_type_buffer();
-    loom_op_t* assumption;
-    check(loom_buffer_assume_alignment_build(
-        &builder_, &buffer, 1, minimum_alignment, &buffer_type, 1,
-        locations_.get(owner), &assumption));
-    buffer = loom_op_results(assumption)[0];
-  }
+Pointer Storage::root(loom_value_id_t buffer, cxx::AST* owner) {
   return {buffer,
           scalars_.integer(0, LOOM_SCALAR_TYPE_OFFSET, locations_.get(owner))};
 }

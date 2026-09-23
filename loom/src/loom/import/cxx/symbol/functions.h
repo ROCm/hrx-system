@@ -16,7 +16,7 @@
 #include "loom/import/cxx/binding/config.h"
 #include "loom/import/cxx/binding/intrinsics.h"
 #include "loom/import/cxx/binding/launch.h"
-#include "loom/import/cxx/binding/parameter_alignment.h"
+#include "loom/import/cxx/binding/parameter_contracts.h"
 #include "loom/import/cxx/source/locations.h"
 #include "loom/import/cxx/symbol/names.h"
 #include "loom/import/cxx/value/types.h"
@@ -41,7 +41,7 @@ struct FunctionBody {
   // Selects body projection, return terminators, and storage admission.
   FunctionKind kind;
   // Incoming pointer contracts in source parameter order, empty when absent.
-  std::span<const ParameterAlignment> parameter_alignments;
+  std::span<const ParameterContract> parameter_contracts;
 };
 
 // Owns root selection, native symbol identities and reachable function order.
@@ -60,7 +60,7 @@ class Functions {
         launches_(launches),
         configs_(configs),
         names_(names),
-        parameter_alignments_(unit, diagnostics) {}
+        parameter_contracts_(unit, diagnostics) {}
 
   // Selects explicit qualified roots or externally visible concrete
   // definitions. Called once before translating the pending worklist.
@@ -116,7 +116,7 @@ class Functions {
   // Exact callable/configuration names and generated private names.
   SymbolNames& names_;
   // Pointer entry preconditions reconciled before body construction.
-  ParameterAlignments parameter_alignments_;
+  ParameterContracts parameter_contracts_;
   struct Benchmark {
     // Semantic declaration supplying the benchmark's name.
     cxx::FunctionSymbol* function;

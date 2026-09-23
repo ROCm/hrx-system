@@ -1,0 +1,63 @@
+// RUN: verify
+// Every rejected annotation diagnoses at its source contract.
+[[loom::kernel]] void scalar(
+    // ERROR@+1: LOWERING/059 "noalias requires a pointer parameter"
+    [[loom::noalias]] unsigned input) {}
+
+// ====
+[[loom::kernel]] void duplicate(
+    [[loom::noalias,
+      // ERROR@+1: LOWERING/059 "one noalias contract per parameter is allowed"
+      loom::noalias]] unsigned* input) {}
+
+// ====
+[[loom::kernel]] void argument(
+    // ERROR@+1: LOWERING/059 "noalias takes no argument clause"
+    [[loom::noalias(1)]] unsigned* input) {}
+
+// ====
+[[loom::kernel]] void empty_clause(
+    // ERROR@+1: LOWERING/059 "noalias takes no argument clause"
+    [[loom::noalias()]] unsigned* input) {}
+
+// ====
+void helper(
+    // ERROR@+1: LOWERING/059 "noalias on ordinary helper parameters requires scoped alias contracts; kernel parameters are supported"
+    [[loom::noalias]] unsigned* input) {}
+
+// ====
+// ERROR@+1: LOWERING/059 "noalias requires a leading pointer parameter attribute"
+[[loom::noalias]] void function_attribute(unsigned* input) {}
+
+// ====
+// ERROR@+1: LOWERING/059 "noalias requires a leading pointer parameter attribute"
+[[loom::noalias]] extern unsigned* global;
+
+// ====
+[[loom::kernel]] void local_attribute(unsigned* input) {
+  // ERROR@+1: LOWERING/059 "noalias requires a leading pointer parameter attribute"
+  [[loom::noalias]] unsigned* local = input;
+}
+
+// ====
+[[loom::kernel]] void pointer_attribute(
+    // ERROR@+1: LOWERING/059 "noalias requires a leading pointer parameter attribute"
+    unsigned* [[loom::noalias]] input) {}
+
+// ====
+[[loom::kernel]] void trailing_attribute(
+    // ERROR@+1: LOWERING/059 "noalias requires a leading pointer parameter attribute"
+    unsigned* input [[loom::noalias]]) {}
+
+// ====
+using Callback = void (*)(
+    // ERROR@+1: LOWERING/059 "noalias requires a leading pointer parameter attribute"
+    [[loom::noalias]] unsigned* input);
+
+// ====
+[[loom::kernel]] void loop_attribute(unsigned* output) {
+  // ERROR@+1: LOWERING/059 "noalias requires a leading pointer parameter attribute"
+  [[loom::noalias]] for (unsigned i = 0; i < 4; ++i) {
+    output[i] = i;
+  }
+}

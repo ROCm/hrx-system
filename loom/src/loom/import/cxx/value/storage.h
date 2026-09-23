@@ -58,10 +58,9 @@ class Storage {
         locations_(locations),
         builder_(builder) {}
 
-  // Forms a zero-origin source pointer for a kernel buffer binding. A nonzero
-  // alignment is an admitted contract on that incoming pointer's address.
-  Pointer root(loom_value_id_t buffer, int64_t minimum_alignment,
-               cxx::AST* owner);
+  // Forms a zero-origin source pointer for a kernel buffer binding. The buffer
+  // already carries any admitted parameter contracts.
+  Pointer root(loom_value_id_t buffer, cxx::AST* owner);
   // Admits the object's storage layout and starts a projection with its
   // ordinary source ABI alignment. Opaque pointer transport needs neither.
   // Nested fields use member() instead of resetting to their nominal type.

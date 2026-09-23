@@ -252,13 +252,13 @@ class Translator {
       auto value = region_value(region, argument_index,
                                 kernel ? kSSAPartition : partition);
       if (partition.kind == ValueKind::Pointer && kernel) {
-        auto alignment = defined.parameter_alignments.empty()
-                             ? ParameterAlignment{}
-                             : defined.parameter_alignments[parameter_index];
-        value = storage_.root(value.ssa(), alignment.minimum_alignment,
-                              alignment.source
-                                  ? static_cast<cxx::AST*>(alignment.source)
-                                  : defined.source);
+        auto buffer = value.ssa();
+        if (!defined.parameter_contracts.empty()) {
+          buffer = apply_parameter_contract(
+              defined.parameter_contracts[parameter_index], buffer, locations_,
+              &builder_);
+        }
+        value = storage_.root(buffer, defined.source);
       }
       value = name(value, cxx::to_string(parameter->name()));
       if (control_->addressed(parameter)) {
