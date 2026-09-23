@@ -371,6 +371,55 @@ func.def @rank1_reconstructed_state(%a: i32, %b: i32, %end: index) -> (i32, i32)
 }
 
 // ====
+// RUN: pass sroa-vector-banks,canonicalize,cse
+
+// A scalar-projected state may be reconstructed a row at a time. This is the
+// natural source shape used by recurrent model kernels.
+func.def @rank2_row_reconstructed_state(%initial: vector<2x2xf32>, %increment: f32, %end: index) -> (f32, f32, f32, f32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %empty = vector.constant 0.0 : vector<2x2xf32>
+  %result = scf.for %i = [%begin to %end step %step](%state = %initial : vector<2x2xf32>) -> (vector<2x2xf32>) {
+    %x00 = vector.extract %state[0, 0] : vector<2x2xf32> -> f32
+    %x01 = vector.extract %state[0, 1] : vector<2x2xf32> -> f32
+    %x10 = vector.extract %state[1, 0] : vector<2x2xf32> -> f32
+    %x11 = vector.extract %state[1, 1] : vector<2x2xf32> -> f32
+    %next00 = scalar.addf %x00, %increment : f32
+    %next01 = scalar.addf %x01, %increment : f32
+    %next10 = scalar.addf %x10, %increment : f32
+    %next11 = scalar.addf %x11, %increment : f32
+    %row0 = vector.from_elements %next00, %next01 : vector<2xf32>
+    %row1 = vector.from_elements %next10, %next11 : vector<2xf32>
+    %with_row0 = vector.insert %row0 into %empty[0] : vector<2xf32>, vector<2x2xf32>
+    %next = vector.insert %row1 into %with_row0[1] : vector<2xf32>, vector<2x2xf32>
+    scf.yield %next : vector<2x2xf32>
+  }
+  %x00 = vector.extract %result[0, 0] : vector<2x2xf32> -> f32
+  %x01 = vector.extract %result[0, 1] : vector<2x2xf32> -> f32
+  %x10 = vector.extract %result[1, 0] : vector<2x2xf32> -> f32
+  %x11 = vector.extract %result[1, 1] : vector<2x2xf32> -> f32
+  func.return %x00, %x01, %x10, %x11 : f32, f32, f32, f32
+}
+
+// ----
+func.def @rank2_row_reconstructed_state(%initial: vector<2x2xf32>, %increment: f32, %end: index) -> (f32, f32, f32, f32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %initial_slot_0 = vector.extract %initial[0, 0] : vector<2x2xf32> -> f32
+  %initial_slot_1 = vector.extract %initial[0, 1] : vector<2x2xf32> -> f32
+  %initial_slot_2 = vector.extract %initial[1, 0] : vector<2x2xf32> -> f32
+  %initial_slot_3 = vector.extract %initial[1, 1] : vector<2x2xf32> -> f32
+  %result_slot_0, %result_slot_1, %result_slot_2, %result_slot_3 = scf.for %i = [%begin to %end step %step](%state_slot_0 = %initial_slot_0 : f32, %state_slot_1 = %initial_slot_1 : f32, %state_slot_2 = %initial_slot_2 : f32, %state_slot_3 = %initial_slot_3 : f32) -> (f32, f32, f32, f32) {
+    %next00 = scalar.addf %state_slot_0, %increment : f32
+    %next01 = scalar.addf %state_slot_1, %increment : f32
+    %next10 = scalar.addf %state_slot_2, %increment : f32
+    %next11 = scalar.addf %state_slot_3, %increment : f32
+    scf.yield %next00, %next01, %next10, %next11 : f32, f32, f32, f32
+  }
+  func.return %result_slot_0, %result_slot_1, %result_slot_2, %result_slot_3 : f32, f32, f32, f32
+}
+
+// ====
 // RUN: pass sroa-vector-banks
 
 // Scalar observations do not force an aggregate used by vector arithmetic to
