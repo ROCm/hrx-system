@@ -27,5 +27,6 @@ loom_check_test_suite(
         "conversioni.loom-test",
         "mathf_structural.loom-test",
         "poison.loom-test",
+        "shift_narrowing.loom-test",
     ],
 )

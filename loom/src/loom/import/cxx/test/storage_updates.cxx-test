@@ -162,9 +162,10 @@ kernel.def @update() {
   %25 = scalar.addi %24, %20 : i32
   view.store<volatile> %25, %words_view[%19] : i32, view<64xi32>
   %29 = view.load<volatile> %words_view[%19] : view<64xi32> -> i32
-  %38 = scalar.constant 2 : i64
-  %39 = scalar.shli %17, %38 : i64
-  %35 = scalar.assume %39 [range(%39, 0, 9223372036854775807)] : i64
+  %40 = scalar.constant 2 : i32
+  %41 = scalar.shli %index, %40 : i32
+  %42 = scalar.extui %41 : i32 to i64
+  %35 = scalar.assume %42 [range(%42, 0, 9223372036854775807)] : i64
   %36 = index.cast %35 : i64 to offset
   %37 = buffer.view %output[%36] : buffer -> view<1xi32>
   view.store %29, %37[0] : i32, view<1xi32>

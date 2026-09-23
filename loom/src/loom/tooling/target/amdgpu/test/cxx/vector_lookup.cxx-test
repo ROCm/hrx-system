@@ -27,27 +27,24 @@ low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direc
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %codebook = resource<hal_binding> {extent = 16, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %85 = v_mov_b32 0
-  %86 = concat(%position, %85) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %87 = s_mov_b32 2
-  %91 = v_lshlrev_b64 %87, %86
-  %93 = v_mov_b32 252645135
-  %94 = slice %91[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %95 = global_load_b32_saddr %94, %input
-  %indices = v_and_b32 %95, %93
-  %98 = global_load_b128_saddr %85, %codebook
-  %99 = slice %98[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %100 = slice %98[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %101 = slice %98[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %102 = slice %98[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %103 = v_and_b32_lit %indices, 117901063
-  %104 = v_perm_b32 %100, %99, %103
-  %105 = v_perm_b32 %102, %101, %103
-  %106 = v_and_b32_lit %indices, 134744072
-  %107 = v_lshrrev_b32_src0_inline %106, 1
-  %108 = v_or_b32_lit %107, 50462976
-  %109 = v_perm_b32 %105, %104, %108
-  global_store_b32_saddr %94, %109, %output
+  %91 = v_lshlrev_b32_lit %position, 2
+  %95 = v_mov_b32 252645135
+  %97 = global_load_b32_saddr %91, %input
+  %indices = v_and_b32 %97, %95
+  %99 = v_mov_b32 0
+  %100 = global_load_b128_saddr %99, %codebook
+  %101 = slice %100[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %102 = slice %100[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %103 = slice %100[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %104 = slice %100[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %105 = v_and_b32_lit %indices, 117901063
+  %106 = v_perm_b32 %102, %101, %105
+  %107 = v_perm_b32 %104, %103, %105
+  %108 = v_and_b32_lit %indices, 134744072
+  %109 = v_lshrrev_b32_src0_inline %108, 1
+  %110 = v_or_b32_lit %109, 50462976
+  %111 = v_perm_b32 %107, %106, %110
+  global_store_b32_saddr %91, %111, %output
   return
 }
 
@@ -77,26 +74,22 @@ low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direc
   %position = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %93 = v_mov_b32 3215825025
-  %94 = v_mov_b32 4142587343
-  %95 = v_mov_b32 639175937
-  %96 = v_mov_b32 1901675829
-  %98 = v_mov_b32 0
-  %99 = concat(%position, %98) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %100 = s_mov_b32 2
-  %104 = v_lshlrev_b64 %100, %99
-  %106 = v_mov_b32 252645135
-  %107 = slice %104[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %108 = global_load_b32_saddr %107, %input
-  %indices = v_and_b32 %108, %106
-  %114 = v_and_b32_lit %indices, 117901063
-  %115 = v_perm_b32 %94, %93, %114
-  %116 = v_perm_b32 %96, %95, %114
-  %117 = v_and_b32_lit %indices, 134744072
-  %118 = v_lshrrev_b32_src0_inline %117, 1
-  %119 = v_or_b32_lit %118, 50462976
-  %result = v_perm_b32 %116, %115, %119
-  global_store_b32_saddr %107, %result, %output
+  %99 = v_mov_b32 3215825025
+  %100 = v_mov_b32 4142587343
+  %101 = v_mov_b32 639175937
+  %102 = v_mov_b32 1901675829
+  %104 = v_lshlrev_b32_lit %position, 2
+  %108 = v_mov_b32 252645135
+  %110 = global_load_b32_saddr %104, %input
+  %indices = v_and_b32 %110, %108
+  %116 = v_and_b32_lit %indices, 117901063
+  %117 = v_perm_b32 %100, %99, %116
+  %118 = v_perm_b32 %102, %101, %116
+  %119 = v_and_b32_lit %indices, 134744072
+  %120 = v_lshrrev_b32_src0_inline %119, 1
+  %121 = v_or_b32_lit %120, 50462976
+  %result = v_perm_b32 %118, %117, %121
+  global_store_b32_saddr %104, %result, %output
   return
 }
 
@@ -129,26 +122,23 @@ low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direc
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %codebook = resource<hal_binding> {extent = 16, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %85 = v_mov_b32 0
-  %86 = concat(%position, %85) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %87 = s_mov_b32 2
-  %91 = v_lshlrev_b64 %87, %86
-  %93 = slice %91[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %94 = global_load_b32_saddr %93, %input
-  %95 = v_lshrrev_b32_src0_inline %94, 4
-  %indices = v_and_b32_lit %95, 252645135
-  %98 = global_load_b128_saddr %85, %codebook
-  %99 = slice %98[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %100 = slice %98[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %101 = slice %98[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %102 = slice %98[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %103 = v_and_b32_lit %indices, 117901063
-  %104 = v_perm_b32 %100, %99, %103
-  %105 = v_perm_b32 %102, %101, %103
-  %106 = v_and_b32_lit %indices, 134744072
-  %107 = v_lshrrev_b32_src0_inline %106, 1
-  %108 = v_or_b32_lit %107, 50462976
-  %109 = v_perm_b32 %105, %104, %108
-  global_store_b32_saddr %93, %109, %output
+  %91 = v_lshlrev_b32_lit %position, 2
+  %96 = global_load_b32_saddr %91, %input
+  %97 = v_lshrrev_b32_src0_inline %96, 4
+  %indices = v_and_b32_lit %97, 252645135
+  %99 = v_mov_b32 0
+  %100 = global_load_b128_saddr %99, %codebook
+  %101 = slice %100[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %102 = slice %100[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %103 = slice %100[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %104 = slice %100[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %105 = v_and_b32_lit %indices, 117901063
+  %106 = v_perm_b32 %102, %101, %105
+  %107 = v_perm_b32 %104, %103, %105
+  %108 = v_and_b32_lit %indices, 134744072
+  %109 = v_lshrrev_b32_src0_inline %108, 1
+  %110 = v_or_b32_lit %109, 50462976
+  %111 = v_perm_b32 %107, %106, %110
+  global_store_b32_saddr %91, %111, %output
   return
 }

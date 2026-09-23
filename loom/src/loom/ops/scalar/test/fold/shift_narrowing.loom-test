@@ -1,0 +1,103 @@
+// RUN: with-checks pass canonicalize
+
+// A bounded word index can be scaled before widening. Another user of the
+// original extension must keep its unscaled value.
+func.def @bounded_word_offset(%input: i32) -> (i64, i64) {
+  %word = scalar.assume %input [range(%input, 0, 524287)] : i32
+  %wide = scalar.extui %word : i32 to i64
+  %scale_shift = scalar.constant 2 : i64
+  %scaled = scalar.shli %wide, %scale_shift : i64
+  func.return %wide, %scaled : i64, i64
+}
+// ----
+CHECK: %wide = scalar.extui %word : i32 to i64
+CHECK: * = scalar.shli %word, * : i32
+CHECK: %scaled = scalar.extui * : i32 to i64
+CHECK: func.return %wide, %scaled : i64, i64
+CHECK-NOT: * = scalar.shli * : i64
+
+// ====
+
+// The narrow product reaches 0xfffffffc, which is negative as an i32. The
+// wide no-wrap flags hold, but narrow NSW would poison valid results.
+func.def @unsigned_capacity(%input: i32) -> (i64) {
+  %word = scalar.assume %input [range(%input, 0, 1073741823)] : i32
+  %wide = scalar.extui %word : i32 to i64
+  %scale_shift = scalar.constant 2 : i64
+  %scaled = scalar.shli<nsw|nuw> %wide, %scale_shift : i64
+  func.return %scaled : i64
+}
+// ----
+CHECK: * = scalar.shli %word, * : i32
+CHECK: %scaled = scalar.extui * : i32 to i64
+CHECK-NOT: *scalar.shli<*
+CHECK-NOT: *scalar.extsi*
+
+// ====
+
+// The same rule applies to smaller widths and bounds established by arithmetic.
+func.def @masked_byte(%input: i8) -> (i16) {
+  %mask = scalar.constant 63 : i8
+  %word = scalar.andi %input, %mask : i8
+  %wide = scalar.extui %word : i8 to i16
+  %scale_shift = scalar.constant 2 : i16
+  %scaled = scalar.shli %wide, %scale_shift : i16
+  func.return %scaled : i16
+}
+// ----
+CHECK: * = scalar.shli %word, * : i8
+CHECK: %scaled = scalar.extui * : i8 to i16
+CHECK-NOT: * = scalar.shli * : i16
+
+// ====
+
+// One more possible input needs bit 32 after scaling. Unknown inputs also
+// cannot narrow; the wide NUW promise does not bound the product to 32 bits.
+func.def @insufficient_bounds(%input: i32) -> (i64, i64) {
+  %word = scalar.assume %input [range(%input, 0, 1073741824)] : i32
+  %bounded = scalar.extui %word : i32 to i64
+  %unknown = scalar.extui %input : i32 to i64
+  %scale_shift = scalar.constant 2 : i64
+  %bounded_scaled = scalar.shli %bounded, %scale_shift : i64
+  %unknown_scaled = scalar.shli<nuw> %unknown, %scale_shift : i64
+  func.return %bounded_scaled, %unknown_scaled : i64, i64
+}
+// ----
+CHECK: %bounded_scaled = scalar.shli %bounded, %scale_shift : i64
+CHECK: %unknown_scaled = scalar.shli<nuw> %unknown, %scale_shift : i64
+CHECK-NOT: * = scalar.shli * : i32
+
+// ====
+
+// A shift valid in the wide type can be invalid in the source type. A dynamic
+// shift amount has no exact proof for choosing a narrower operation.
+func.def @shift_domain(%input: i32, %amount: i64) -> (i64, i64) {
+  %word = scalar.assume %input [range(%input, 0, 3)] : i32
+  %wide = scalar.extui %word : i32 to i64
+  %source_width = scalar.constant 32 : i64
+  %large = scalar.shli %wide, %source_width : i64
+  %dynamic = scalar.shli %wide, %amount : i64
+  func.return %large, %dynamic : i64, i64
+}
+// ----
+CHECK: %large = scalar.shli %wide, %source_width : i64
+CHECK: %dynamic = scalar.shli %wide, %amount : i64
+CHECK-NOT: * = scalar.shli * : i32
+
+// ====
+
+// Sign extension requires a different proof; a negative input is not an
+// unsigned value fitting the low bits of its type.
+func.def @signed_inputs(%input: i32) -> (i64, i64) {
+  %word = scalar.assume %input [range(%input, -3, 3)] : i32
+  %signed = scalar.extsi %word : i32 to i64
+  %unsigned = scalar.extui %word : i32 to i64
+  %scale_shift = scalar.constant 2 : i64
+  %signed_scaled = scalar.shli %signed, %scale_shift : i64
+  %unsigned_scaled = scalar.shli %unsigned, %scale_shift : i64
+  func.return %signed_scaled, %unsigned_scaled : i64, i64
+}
+// ----
+CHECK: %signed_scaled = scalar.shli %signed, %scale_shift : i64
+CHECK: %unsigned_scaled = scalar.shli %unsigned, %scale_shift : i64
+CHECK-NOT: * = scalar.shli * : i32

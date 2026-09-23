@@ -1535,10 +1535,38 @@ static iree_status_t loom_scalar_shift_canonicalize(
   if (!has_exact_amount) {
     return iree_ok_status();
   }
+  loom_op_t* lhs_def = loom_scalar_defining_op(rewriter, lhs);
+  if (kind == LOOM_OP_SCALAR_SHLI && lhs_def &&
+      loom_scalar_extui_isa(lhs_def)) {
+    loom_value_id_t input = loom_scalar_extui_input(lhs_def);
+    loom_type_t input_type = loom_module_value_type(rewriter->module, input);
+    int32_t input_bitwidth =
+        loom_scalar_type_bitwidth(loom_type_element_type(input_type));
+    if (amount > 0 && amount < input_bitwidth &&
+        loom_value_facts_fit_unsigned_bit_count(
+            loom_rewriter_value_facts(rewriter, input),
+            (uint8_t)(input_bitwidth - amount))) {
+      // The entire unsigned product fits the input width, so shift before
+      // extending. It may set the narrow sign bit: keep zero extension and
+      // do not transfer a wide NSW flag to the narrow shift. Both wide
+      // no-wrap contracts are redundant under this bound.
+      loom_builder_set_before(&rewriter->builder, op);
+      loom_value_id_t narrow_amount = LOOM_VALUE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(loom_scalar_materialize_or_reuse_i64_constant(
+          op, rewriter, LOOM_VALUE_ID_INVALID, amount, input_type,
+          &narrow_amount));
+      loom_op_t* narrow_shift = NULL;
+      IREE_RETURN_IF_ERROR(loom_scalar_shli_build(
+          &rewriter->builder, /*overflow=*/0, input, narrow_amount, input_type,
+          op->location, &narrow_shift));
+      return loom_scalar_replace_single_result_with_cast_op(
+          op, rewriter, LOOM_OP_SCALAR_EXTUI,
+          loom_scalar_shli_result(narrow_shift), input_type);
+    }
+  }
   if (instance_flags != 0) {
     return iree_ok_status();
   }
-  loom_op_t* lhs_def = loom_scalar_defining_op(rewriter, lhs);
   if (!lhs_def || lhs_def->kind != kind || lhs_def->instance_flags != 0) {
     return iree_ok_status();
   }

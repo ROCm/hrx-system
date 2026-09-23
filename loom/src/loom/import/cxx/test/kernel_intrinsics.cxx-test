@@ -25,24 +25,24 @@ kernel.def @entry() {
   %14 = scalar.cmpi ult, %lane, %13 : i32
   scf.if %14 {
     %46 = scalar.assume %lane [lt(%lane, 32)] : i32
-    %52 = scalar.constant 65 : i32
+    %58 = scalar.constant 65 : i32
     %23 = kernel.subgroup.size : index
     %24 = index.cast %23 : index to i32
-    %51 = scalar.addi %24, %52 : i32
-    %26 = scalar.extui %46 : i32 to i64
-    %49 = scalar.constant 2 : i64
-    %50 = scalar.shli %26, %49 : i64
-    %31 = scalar.assume %50 [range(%50, 0, 9223372036854775807)] : i64
+    %57 = scalar.addi %24, %58 : i32
+    %54 = scalar.constant 2 : i32
+    %55 = scalar.shli %46, %54 : i32
+    %56 = scalar.extui %55 : i32 to i64
+    %31 = scalar.assume %56 [range(%56, 0, 9223372036854775807)] : i64
     %32 = index.cast %31 : i64 to offset
     %33 = buffer.view %coordinates[%32] : buffer -> view<1xi32>
-    view.store %51, %33[0] : i32, view<1xi32>
+    view.store %57, %33[0] : i32, view<1xi32>
     %34 = scalar.constant 1 : i32
     %35 = scalar.constant 32 : i32
     %36, %37 = kernel.subgroup.shuffle<xor> %value, %34, %35 : f32, i32, i32
-    %38 = scalar.extui %46 : i32 to i64
-    %47 = scalar.constant 2 : i64
-    %48 = scalar.shli %38, %47 : i64
-    %43 = scalar.assume %48 [range(%48, 0, 9223372036854775807)] : i64
+    %49 = scalar.constant 2 : i32
+    %50 = scalar.shli %46, %49 : i32
+    %51 = scalar.extui %50 : i32 to i64
+    %43 = scalar.assume %51 [range(%51, 0, 9223372036854775807)] : i64
     %44 = index.cast %43 : i64 to offset
     %45 = buffer.view %output[%44] : buffer -> view<1xf32>
     view.store %36, %45[0] : f32, view<1xf32>
@@ -83,10 +83,10 @@ kernel.def @entry() {
   %workitem_id_x = kernel.workitem.id<x> : index
   %lane = index.cast %workitem_id_x : index to i32
   %13 = func.call pure @topology() : () -> (i32)
-  %14 = scalar.extui %lane : i32 to i64
-  %54 = scalar.constant 2 : i64
-  %55 = scalar.shli %14, %54 : i64
-  %19 = scalar.assume %55 [range(%55, 0, 9223372036854775807)] : i64
+  %59 = scalar.constant 2 : i32
+  %60 = scalar.shli %lane, %59 : i32
+  %61 = scalar.extui %60 : i32 to i64
+  %19 = scalar.assume %61 [range(%61, 0, 9223372036854775807)] : i64
   %20 = index.cast %19 : i64 to offset
   %21 = buffer.view %coordinates[%20] : buffer -> view<1xi32>
   view.store %13, %21[0] : i32, view<1xi32>
