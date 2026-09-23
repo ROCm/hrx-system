@@ -14,6 +14,7 @@ load("//build_tools/bazel:cc_test.bzl", "iree_cc_test")
 load("//build_tools/bazel:dynamic_library_bundle.bzl", "iree_dynamic_library_bundle")
 load("//build_tools/bazel:executable.bzl", "iree_executable_alias", "iree_executable_test")
 load("//build_tools/bazel:glob.bzl", "iree_checked_glob")
+load("//build_tools/bazel:native_test_artifact.bzl", "native_artifact_test")
 load(":cc_benchmark_rules_test.bzl", "cc_benchmark_rules_test_suite")
 load(":cc_fuzz_rules_test.bzl", "cc_fuzz_rules_test_suite")
 load(":cc_link_test.bzl", "cc_link_test_suite")
@@ -36,6 +37,26 @@ load(":query_rules_test.bzl", "query_rules_test_suite")
 package(default_visibility = ["//visibility:public"])
 
 exports_files(["empty_suppressions.txt"])
+
+native_artifact_test(
+    name = "native_artifact_import_test",
+    size = "small",
+    environment = {
+        "NATIVE_ARTIFACT_FIXTURE_PATH": "build_tools/bazel/test/native_artifact_import_fixture.data",
+    },
+    executable_path = "_main/build_tools/bazel/test/native_artifact_import_fixture.sh",
+    marked_environment = {
+        "NATIVE_ARTIFACT_FIXTURE_PATH": "__IREE_BAZEL_RUNFILE_PATH_BEGIN__build_tools/bazel/test/native_artifact_import_fixture.data__IREE_BAZEL_RUNFILE_PATH_END__",
+    },
+    payload = [
+        "runfiles/native_artifact_import_test/_main/build_tools/bazel/test/native_artifact_import_fixture.data",
+        "runfiles/native_artifact_import_test/_main/build_tools/bazel/test/native_artifact_import_fixture.sh",
+    ],
+    source_arguments = [
+        "__IREE_BAZEL_RUNFILE_PATH_BEGIN__build_tools/bazel/test/native_artifact_import_fixture.data__IREE_BAZEL_RUNFILE_PATH_END__",
+    ],
+    target_compatible_with = ["@platforms//os:linux"],
+)
 
 iree_dynamic_library_bundle(
     name = "dynamic_library_environment_bundle",

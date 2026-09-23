@@ -10,6 +10,24 @@
 load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 
 py_binary(
+    name = "native_test_artifact",
+    srcs = ["native_test_artifact.py"],
+    target_compatible_with = ["@platforms//os:linux"],
+    visibility = ["//visibility:public"],
+)
+
+py_test(
+    name = "native_test_artifact_test",
+    size = "small",
+    srcs = [
+        "native_test_artifact.py",
+        "native_test_artifact_test.py",
+    ],
+    main = "native_test_artifact_test.py",
+    target_compatible_with = ["@platforms//os:linux"],
+)
+
+py_binary(
     name = "prepare_llvm_dwp",
     srcs = ["prepare_llvm_dwp.py"],
     target_compatible_with = ["@platforms//os:linux"],
