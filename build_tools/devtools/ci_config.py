@@ -20,19 +20,15 @@ from build_tools.devtools import run_requirements
 
 IREE_TARGET_DIRECTORIES = ("runtime", "loom")
 
-# ASAN, UBSAN, and TSAN run tests. MSAN builds stay useful, but running tests
-# requires an instrumented host dependency stack that the CI images do not yet
-# provide.
+# Aggregate sanitizer commands run configurations with executable test coverage.
 SANITIZER_TEST_CONFIGS = ("asan", "ubsan", "tsan")
+# Explicit MSAN commands support local build checks. CI images lack the
+# instrumented host dependencies needed to run these tests.
 SANITIZER_BUILD_CONFIGS = ("msan",)
 # Tests whose production resource layout conflicts with host TSAN use this
 # conventional Bazel tag and CTest label.
 HOST_TSAN_INCOMPATIBLE_TEST_LABEL = "notsan"
 
-CMAKE_SANITIZER_SMOKE_LIBRARY_BUILD_TARGETS = (
-    "iree::base",
-    "loom::format::bytecode::varint",
-)
 CMAKE_SANITIZER_SMOKE_CTEST_REGEXES = (
     "^iree/base/status_test$",
     "^loom/format/bytecode/varint_test$",

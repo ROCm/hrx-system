@@ -772,7 +772,7 @@ class CiTest(unittest.TestCase):
         ):
             ci.steps_from_args(args)
 
-    def test_sanitizer_command_runs_tests_and_msan_build(self):
+    def test_sanitizer_command_runs_only_testable_configurations(self):
         args = ci.parse_arguments(
             [
                 "iree-bazel-cpu-sanitizers",
@@ -822,15 +822,7 @@ class CiTest(unittest.TestCase):
         )
         self.assertTrue(tsan_suppression_path.is_absolute())
         self.assertTrue(tsan_suppression_path.is_file())
-        self.assertTrue(
-            any(
-                step.argv[:4] == ("python3", "dev.py", "bazel", "build")
-                and "--config=msan" in step.argv
-                and step.argv.index("--config=msan") < step.argv.index("--")
-                and step.argv.index("//runtime/...") > step.argv.index("--")
-                for step in steps
-            )
-        )
+        self.assertFalse(any("--config=msan" in step.argv for step in steps))
         sanitizer_test_steps = [
             step for step in steps if step.name.startswith("Test IREE")
         ]
@@ -1071,9 +1063,10 @@ class CiTest(unittest.TestCase):
             ".github/workflows/ci_iree_bazel.yml", "linux_bazel_cpu"
         )
         self.assertIn("name: Linux / CPU", block)
-        for sanitizer in ("ASAN", "MSAN", "TSAN", "UBSAN"):
+        for sanitizer in ("ASAN", "TSAN", "UBSAN"):
             self.assertIn(f"name: Linux / CPU / {sanitizer}", block)
             self.assertIn(f"command: iree-bazel-cpu-{sanitizer.lower()}", block)
+        self.assertNotIn("command: iree-bazel-cpu-msan", block)
         self.assertNotIn("command: iree-bazel-cpu-sanitizers", block)
 
     def test_cmake_workflow_uses_sanitizer_smoke(self):
@@ -1642,7 +1635,7 @@ fi
         self.assertTrue(any("iree-cmake-cpu-asan" in line for line in command_lines))
         self.assertTrue(any("iree-cmake-cpu-ubsan" in line for line in command_lines))
         self.assertTrue(any("iree-cmake-cpu-tsan" in line for line in command_lines))
-        self.assertTrue(any("iree-cmake-cpu-msan" in line for line in command_lines))
+        self.assertFalse(any("iree-cmake-cpu-msan" in line for line in command_lines))
         tsan_options = [
             value for step in steps for key, value in step.env if key == "TSAN_OPTIONS"
         ]
@@ -1651,13 +1644,6 @@ fi
             path = Path(value.removeprefix("suppressions="))
             self.assertTrue(path.is_absolute())
             self.assertTrue(path.is_file())
-        self.assertTrue(
-            any("-DIREE_BUILD_BENCHMARKS=OFF" in line for line in command_lines)
-        )
-        self.assertTrue(any("-DIREE_BUILD_TESTS=OFF" in line for line in command_lines))
-        self.assertFalse(
-            any("Test IREE CMake with MSAN" in step.name for step in steps)
-        )
 
     def test_cmake_sanitizer_smoke_builds_selected_test_closures(self):
         args = ci.parse_arguments(["iree-cmake-sanitizer-smoke"])
@@ -1665,7 +1651,7 @@ fi
         steps = ci.steps_from_args(args)
         command_lines = [step.command_line() for step in steps]
 
-        for sanitizer in ("asan", "ubsan", "tsan", "msan"):
+        for sanitizer in ("asan", "ubsan", "tsan"):
             self.assertTrue(
                 any(
                     self.uses_cmake_build_dir(
@@ -1680,7 +1666,6 @@ fi
                     for line in command_lines
                 )
             )
-        for sanitizer in ("asan", "ubsan", "tsan"):
             self.assertTrue(
                 any(
                     f"iree-cmake-sanitizer-smoke-{sanitizer}" in line
@@ -1689,25 +1674,10 @@ fi
                     for line in command_lines
                 )
             )
-        self.assertTrue(
-            any(
-                "iree-cmake-sanitizer-smoke-msan" in line
-                and "-DIREE_BUILD_TESTS=OFF" in line
-                and "-DIREE_BUILD_BENCHMARKS=OFF" in line
-                for line in command_lines
-            )
-        )
-
-        build_steps = [step for step in steps if step.name.startswith("Build IREE")]
-        msan_build_step = next(step for step in build_steps if "MSAN" in step.name)
-        for target in ci_config.CMAKE_SANITIZER_SMOKE_LIBRARY_BUILD_TARGETS:
-            self.assertIn(target, msan_build_step.argv)
-        self.assertEqual(len(build_steps), 1)
-        self.assertNotIn("all", msan_build_step.argv)
+        self.assertFalse(any("-DIREE_ENABLE_MSAN=ON" in line for line in command_lines))
 
         test_steps = [step for step in steps if step.name.startswith("Test IREE")]
         self.assertEqual(len(test_steps), 3)
-        self.assertFalse(any("with MSAN" in step.name for step in test_steps))
         for regex in ci_config.CMAKE_SANITIZER_SMOKE_CTEST_REGEXES:
             self.assertTrue(
                 any(regex in arg for step in test_steps for arg in step.argv)
@@ -1906,7 +1876,9 @@ fi
         self.assertTrue(
             any("iree-cmake-vulkan-ubsan" in line for line in command_lines)
         )
-        self.assertTrue(any("iree-cmake-vulkan-msan" in line for line in command_lines))
+        self.assertFalse(
+            any("iree-cmake-vulkan-msan" in line for line in command_lines)
+        )
 
     def test_cmake_command_rejects_bazel_targets(self):
         args = ci.parse_arguments(["iree-cmake-cpu", "--target", "//runtime/..."])

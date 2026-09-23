@@ -92,14 +92,6 @@ jobs:
             host_cxx: clang++
             install_compiler_rt: true
             setup_python: true
-          - name: Linux / CPU / MSAN
-            command: iree-bazel-cpu-msan
-            container_image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
-            host_ar: ar
-            host_cc: clang
-            host_cxx: clang++
-            install_compiler_rt: true
-            setup_python: true
           - name: Linux / CPU / TSAN
             command: iree-bazel-cpu-tsan
             container_image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98

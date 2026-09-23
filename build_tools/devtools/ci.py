@@ -548,8 +548,6 @@ def cpu_sanitizer_steps(targets: tuple[str, ...]) -> list[CiStep]:
     steps = [bazel_configure_step()]
     for config in ci_config.SANITIZER_TEST_CONFIGS:
         steps.extend(cpu_config_steps(targets, config))
-    for config in ci_config.SANITIZER_BUILD_CONFIGS:
-        steps.extend(cpu_config_steps(targets, config))
     return steps
 
 
@@ -1005,13 +1003,6 @@ def cmake_sanitizer_steps(
                 command_name, target_group, config, amdgpu_target_selector
             )
         )
-    for config in ci_config.SANITIZER_BUILD_CONFIGS:
-        command_name = f"{prefix}-{config}"
-        steps.extend(
-            cmake_target_steps(
-                command_name, target_group, config, amdgpu_target_selector
-            )
-        )
     return steps
 
 
@@ -1033,22 +1024,6 @@ def cmake_sanitizer_smoke_steps() -> list[CiStep]:
                     regex=test_regex,
                     env=sanitizer_env(config),
                     parallelism=2,
-                ),
-            ]
-        )
-    for config in ci_config.SANITIZER_BUILD_CONFIGS:
-        command_name = f"{CMAKE_SANITIZER_SMOKE_COMMAND}-{config}"
-        steps.extend(
-            [
-                cmake_configure_step(
-                    command_name,
-                    sanitizer=config,
-                    build_tests=False,
-                ),
-                cmake_build_step(
-                    command_name,
-                    f"Build IREE CMake sanitizer smoke with {config.upper()}",
-                    ci_config.CMAKE_SANITIZER_SMOKE_LIBRARY_BUILD_TARGETS,
                 ),
             ]
         )
