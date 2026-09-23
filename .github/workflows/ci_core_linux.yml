@@ -150,7 +150,9 @@ jobs:
       artifact_run_id: ${{ github.run_id }}
       expect_stream_value_waits: true
       device: gpu:0
-      ctest_exclude_regex: ""
+      # The shared package includes fixed gfx11 corpora for gfx1151, which
+      # cannot execute on this gfx1201 runner.
+      ctest_exclude_regex: "^loom/tooling/target/amdgpu/test/corpus/gfx11(_loop_entry_access)?_test$"
       ctest_label_regex: runtime-resource=amd-gpu
       ctest_label_exclude_regex: manual
       ctest_parallelism: 1
