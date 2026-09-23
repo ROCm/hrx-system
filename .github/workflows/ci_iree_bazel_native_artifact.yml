@@ -142,21 +142,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: iree-bazel-test / linux-x86_64 / clang / amd-gfx110x
-            artifact_suffix: gfx110x
-            optional: false
-            runner_label: linux-gfx110X-gpu-rocm
-            target_selector: gfx110X-all
           - name: iree-bazel-test / linux-x86_64 / clang / amd-gfx1150
             artifact_suffix: gfx1150
             optional: true
             runner_label: linux-gfx1150-gpu-rocm
             target_selector: gfx1150
-          - name: iree-bazel-test / linux-x86_64 / clang / amd-gfx1151
-            artifact_suffix: gfx1151
-            optional: true
-            runner_label: linux-gfx1151-gpu-rocm
-            target_selector: gfx1151
           - name: iree-bazel-test / linux-x86_64 / clang / amd-gfx120x
             artifact_suffix: gfx120x
             optional: false
