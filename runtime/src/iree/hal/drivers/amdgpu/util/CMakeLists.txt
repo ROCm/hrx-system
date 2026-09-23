@@ -1015,7 +1015,9 @@ iree_cc_test(
     ::vmem
     iree::base
     iree::base::threading
+    iree::hal::drivers::amdgpu
     iree::hal::drivers::amdgpu::abi
+    iree::hal::drivers::amdgpu::headers
     iree::hal::drivers::amdgpu::target::identity
     iree::testing::gtest
     iree::testing::gtest_main

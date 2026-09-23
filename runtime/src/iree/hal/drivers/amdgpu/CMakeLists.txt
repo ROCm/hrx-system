@@ -1407,6 +1407,7 @@ iree_cc_test(
     ::headers
     iree::base
     iree::hal
+    iree::hal::drivers::amdgpu::util::packet
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS

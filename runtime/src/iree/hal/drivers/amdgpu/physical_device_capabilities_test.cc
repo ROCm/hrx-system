@@ -9,6 +9,7 @@
 #include <array>
 #include <cstring>
 
+#include "iree/hal/drivers/amdgpu/util/pm4_barrier.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -1049,8 +1050,7 @@ TEST_F(PhysicalDeviceCapabilitiesTest, SelectsRdnaPm4FamilyCapabilities) {
       "gfx1010", "gfx1011", "gfx1012", "gfx1013", "gfx1030", "gfx1031",
       "gfx1032", "gfx1033", "gfx1034", "gfx1035", "gfx1036", "gfx1100",
       "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152",
-      "gfx1153", "gfx1170", "gfx1171", "gfx1172", "gfx1200", "gfx1201",
-      "gfx1250", "gfx1251",
+      "gfx1153", "gfx1170", "gfx1171", "gfx1172",
   };
   for (const char* processor : processors) {
     SCOPED_TRACE(processor);
@@ -1058,12 +1058,7 @@ TEST_F(PhysicalDeviceCapabilitiesTest, SelectsRdnaPm4FamilyCapabilities) {
         GfxIpFromProcessor(processor);
     const iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities =
         iree_hal_amdgpu_select_vendor_packet_capabilities(version);
-    const iree_hal_amdgpu_vendor_packet_capability_flags_t expected_capabilities =
-        kExpectedCapabilities |
-        (version.major == 12
-             ? IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_CP_MEMORY_BYPASSES_GL2
-             : 0u);
-    EXPECT_EQ(capabilities, expected_capabilities);
+    EXPECT_EQ(capabilities, kExpectedCapabilities);
     EXPECT_TRUE(
         iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
             capabilities));
@@ -1073,6 +1068,58 @@ TEST_F(PhysicalDeviceCapabilitiesTest, SelectsRdnaPm4FamilyCapabilities) {
     EXPECT_TRUE(
         iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_atomic_store(
             capabilities));
+  }
+}
+
+TEST_F(PhysicalDeviceCapabilitiesTest,
+       KeepsGfx12PacketsWithoutGfx10CacheLayout) {
+  constexpr iree_hal_amdgpu_vendor_packet_capability_flags_t
+      kUnsupportedCacheCapabilities =
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM |
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX10;
+  const iree_hal_amdgpu_vendor_packet_capability_flags_t gfx11_capabilities =
+      iree_hal_amdgpu_select_vendor_packet_capabilities(GfxIp(11, 5, 1));
+  for (const char* processor : {"gfx1200", "gfx1201", "gfx1250", "gfx1251"}) {
+    SCOPED_TRACE(processor);
+    const iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities =
+        iree_hal_amdgpu_select_vendor_packet_capabilities(
+            GfxIpFromProcessor(processor));
+    EXPECT_EQ(
+        capabilities,
+        (gfx11_capabilities & ~kUnsupportedCacheCapabilities) |
+            IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_CP_MEMORY_BYPASSES_GL2);
+    EXPECT_FALSE(iree_any_bit_set(capabilities, kUnsupportedCacheCapabilities));
+    EXPECT_FALSE(
+        iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
+            capabilities));
+    EXPECT_EQ(iree_hal_amdgpu_select_wait_barrier_strategy(capabilities),
+              IREE_HAL_AMDGPU_WAIT_BARRIER_STRATEGY_PM4_WAIT_REG_MEM64);
+
+    // Both scoped data handoff and the separate shader-to-IB publication
+    // barrier must reject a target without a supported cache recipe.
+    for (const auto barrier_flags : {
+             IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_EXECUTION,
+             IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_FIXUP_TO_IB,
+         }) {
+      SCOPED_TRACE(barrier_flags);
+      const iree_hsa_fence_scope_t scope =
+          barrier_flags == IREE_HAL_AMDGPU_PM4_BARRIER_FLAG_EXECUTION
+              ? IREE_HSA_FENCE_SCOPE_SYSTEM
+              : IREE_HSA_FENCE_SCOPE_NONE;
+      EXPECT_EQ(iree_hal_amdgpu_pm4_barrier_dword_count(
+                    capabilities, barrier_flags, scope, scope),
+                0u);
+      std::array<uint32_t, IREE_HAL_AMDGPU_PM4_BARRIER_MAX_DWORD_COUNT> dwords;
+      dwords.fill(0x13579bdfu);
+      uint32_t dword_count = 0;
+      EXPECT_FALSE(iree_hal_amdgpu_pm4_barrier_emit(
+          capabilities, barrier_flags, scope, scope, dwords.size(),
+          dwords.data(), &dword_count));
+      EXPECT_EQ(dword_count, 0u);
+      for (const auto word : dwords) {
+        EXPECT_EQ(word, 0x13579bdfu);
+      }
+    }
   }
 }
 

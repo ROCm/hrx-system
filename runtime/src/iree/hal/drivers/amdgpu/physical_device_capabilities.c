@@ -19,8 +19,8 @@ enum {
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM |
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX9 |
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_DIRECT,
-  // PM4 packet families shared by supported RDNA targets using the gfx10+
-  // packet layouts.
+  // PM4 packet families shared by supported RDNA targets. Explicit cache
+  // management is selected separately because its layouts differ.
   IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_RDNA =
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_AQL_PM4_IB |
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_WAIT_REG_MEM64 |
@@ -32,8 +32,6 @@ enum {
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_REGISTER_READBACK |
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_PERFCOUNTER_READBACK |
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_IMMEDIATE_WRITE |
-      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM |
-      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX10 |
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_DIRECT |
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_INDIRECT |
       IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ATOMIC_WAIT |
@@ -801,7 +799,13 @@ iree_hal_amdgpu_select_vendor_packet_capabilities(
     capabilities |= IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_CDNA;
   } else if (iree_hal_amdgpu_gfxip_is_rdna(version)) {
     capabilities |= IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_RDNA;
-    if (version.major == 12) {
+    if (version.major <= 11) {
+      capabilities |=
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM |
+          IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX10;
+    } else {
+      // GFX12 reserves or reassigns the older GLM/GL1 fields. None of the
+      // implemented cache recipes describes its complete GCR layout.
       capabilities |=
           IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_CP_MEMORY_BYPASSES_GL2;
     }

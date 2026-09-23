@@ -79,7 +79,7 @@ enum iree_hal_amdgpu_vendor_packet_capability_bits_t {
   IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_WRITE_DATA_MEMORY = 1u << 9,
   // PM4 COPY_DATA can copy memory through TC_L2 into memory through TC_L2.
   IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COPY_DATA_MEMORY = 1u << 10,
-  // PM4 ACQUIRE_MEM can perform explicit cache-management operations.
+  // PM4 ACQUIRE_MEM has a supported explicit cache-management recipe.
   IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM = 1u << 11,
   // PM4 DISPATCH_DIRECT can launch compute work from a PM4 command stream.
   IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_COMPUTE_DISPATCH_DIRECT = 1u
@@ -90,7 +90,7 @@ enum iree_hal_amdgpu_vendor_packet_capability_bits_t {
       1u << 13,
   // PM4 ACQUIRE_MEM uses the gfx9 CP_COHER_CNTL packet layout.
   IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX9 = 1u << 14,
-  // PM4 ACQUIRE_MEM uses the gfx10+ GCR_CNTL packet layout.
+  // PM4 ACQUIRE_MEM uses the gfx10/gfx11 GCR_CNTL packet layout.
   IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX10 = 1u << 15,
   // PM4 WAIT_REG_MEM/WAIT_REG_MEM64 can implement 32/64-bit HAL atomic waits.
   IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ATOMIC_WAIT = 1u << 16,
@@ -173,8 +173,8 @@ iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_compute_dispatch_indirect
 //
 // CDNA retains its individual PM4 packet capabilities for small isolated IBs,
 // but its gfx9 CS_PARTIAL_FLUSH sequence is not a qualified command-buffer
-// execution barrier. RDNA uses the gfx10+ ACQUIRE_MEM layout and is the only
-// architecture family currently qualified for general PM4 command buffers.
+// execution barrier. Resident command buffers require the supported gfx10/gfx11
+// GCR layout; the different GFX12 cache layouts are not selected.
 static inline bool
 iree_hal_amdgpu_vendor_packet_capabilities_support_pm4_dispatch_command_buffers(
     iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities) {

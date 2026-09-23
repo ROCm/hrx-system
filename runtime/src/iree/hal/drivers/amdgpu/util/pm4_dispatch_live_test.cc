@@ -16,6 +16,7 @@
 #include "iree/base/api.h"
 #include "iree/base/threading/processor.h"
 #include "iree/hal/drivers/amdgpu/abi/kernel_descriptor.h"
+#include "iree/hal/drivers/amdgpu/physical_device_capabilities.h"
 #include "iree/hal/drivers/amdgpu/target/identity.h"
 #include "iree/hal/drivers/amdgpu/util/aql_ring.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
@@ -187,18 +188,6 @@ static bool QueryAgentCodeObjectTarget(
   *out_exact_target = query.exact_target;
   *out_code_object_target = query.code_object_target;
   return true;
-}
-
-static iree_hal_amdgpu_vendor_packet_capability_flags_t
-BarrierCapabilitiesForGfxIp(iree_hal_amdgpu_gfxip_version_t gfxip_version) {
-  iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities =
-      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_EVENT_WRITE |
-      IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM;
-  capabilities |=
-      gfxip_version.major == 9
-          ? IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX9
-          : IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX10;
-  return capabilities;
 }
 
 static iree_status_t LookupKernel(const iree_hal_amdgpu_libhsa_t* libhsa,
@@ -501,12 +490,15 @@ class PM4DispatchLiveTest : public ::testing::Test {
                                     &agent_code_object_target)) {
       GTEST_SKIP() << "could not query AMDGPU agent ISA";
     }
-    if (agent_gfxip_version.major < 9 || agent_gfxip_version.major > 12) {
-      GTEST_SKIP() << "PM4 dispatch test does not support agent "
+    agent_pm4_barrier_capabilities =
+        iree_hal_amdgpu_select_vendor_packet_capabilities(agent_gfxip_version);
+    if (!iree_hal_amdgpu_pm4_barrier_has_gfx9_acquire_mem_layout(
+            agent_pm4_barrier_capabilities) &&
+        !iree_hal_amdgpu_pm4_barrier_has_gfx10_acquire_mem_layout(
+            agent_pm4_barrier_capabilities)) {
+      GTEST_SKIP() << "no supported PM4 cache layout for agent "
                    << agent_exact_target;
     }
-    agent_pm4_barrier_capabilities =
-        BarrierCapabilitiesForGfxIp(agent_gfxip_version);
     const std::string file_name =
         TestCodeObjectFileName(agent_code_object_target);
     test_code_object_data = FindTestCodeObjectData(agent_code_object_target);

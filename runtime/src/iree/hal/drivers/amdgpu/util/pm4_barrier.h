@@ -42,7 +42,7 @@ enum {
   IREE_HAL_AMDGPU_PM4_BARRIER_GFX9_MAX_DWORD_COUNT =
       IREE_HAL_AMDGPU_PM4_EVENT_WRITE_DWORD_COUNT +
       IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GFX9_DWORD_COUNT,
-  // Maximum dwords emitted by one gfx10+ PM4 command-buffer barrier.
+  // Maximum dwords emitted by one gfx10/gfx11 PM4 command-buffer barrier.
   IREE_HAL_AMDGPU_PM4_BARRIER_GFX10_MAX_DWORD_COUNT =
       IREE_HAL_AMDGPU_PM4_EVENT_WRITE_DWORD_COUNT +
       IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GFX10_DWORD_COUNT,
@@ -85,7 +85,7 @@ static inline uint32_t iree_hal_amdgpu_pm4_barrier_gcr_cntl_for_scopes_gfx10(
   return gcr_cntl;
 }
 
-// Returns GCR_CNTL bits for one gfx10+ PM4 command-buffer barrier.
+// Returns GCR_CNTL bits for one gfx10/gfx11 PM4 command-buffer barrier.
 static inline uint32_t iree_hal_amdgpu_pm4_barrier_gcr_cntl_gfx10(
     iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities,
     iree_hal_amdgpu_pm4_barrier_flags_t barrier_flags,
@@ -153,8 +153,8 @@ static inline bool iree_hal_amdgpu_pm4_barrier_has_gfx10_acquire_mem_layout(
              IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX10;
 }
 
-// Returns the exact dword count a gfx10+ barrier would emit, or zero when the
-// arguments do not describe a valid PM4 command-buffer barrier.
+// Returns the exact dword count a gfx10/gfx11 barrier would emit, or zero when
+// the arguments do not describe a valid PM4 command-buffer barrier.
 static inline uint32_t iree_hal_amdgpu_pm4_barrier_dword_count_gfx10(
     iree_hal_amdgpu_vendor_packet_capability_flags_t capabilities,
     iree_hal_amdgpu_pm4_barrier_flags_t barrier_flags,
@@ -264,7 +264,7 @@ static inline uint32_t iree_hal_amdgpu_pm4_barrier_dword_count(
   return 0;
 }
 
-// Emits a gfx10+ PM4 command-buffer barrier into |target_dwords|.
+// Emits a gfx10/gfx11 PM4 command-buffer barrier into |target_dwords|.
 //
 // The conservative fixup-to-IB contract is intentionally stronger than normal
 // dispatch-to-dispatch visibility: a fixup dispatch writes PM4 dwords that the

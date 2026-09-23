@@ -694,6 +694,8 @@ iree_runtime_cc_test(
         ":vmem",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal/drivers/amdgpu",
+        "//runtime/src/iree/hal/drivers/amdgpu:headers",
         "//runtime/src/iree/hal/drivers/amdgpu/abi",
         "//runtime/src/iree/hal/drivers/amdgpu/target:identity",
         "//runtime/src/iree/testing:gtest",
