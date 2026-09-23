@@ -16,8 +16,9 @@
 
 namespace loom::cxx_import {
 
-// An evaluated source lvalue origin. Alignment belongs to this object
-// projection, not to the two-component pointer value transported by the ABI.
+// An evaluated source lvalue origin with an admitted storage representation.
+// Alignment belongs to this object projection, not to the two-component
+// pointer value transported by the ABI.
 struct StorageProjection {
   // Allocation identity and byte origin of the projected object.
   Pointer pointer;
@@ -61,7 +62,8 @@ class Storage {
   // alignment is an admitted contract on that incoming pointer's address.
   Pointer root(loom_value_id_t buffer, int64_t minimum_alignment,
                cxx::AST* owner);
-  // Starts an object projection with its ordinary source ABI alignment.
+  // Admits the object's storage layout and starts a projection with its
+  // ordinary source ABI alignment. Opaque pointer transport needs neither.
   // Nested fields use member() instead of resetting to their nominal type.
   StorageProjection project(Pointer pointer, const cxx::Type* object_type,
                             cxx::AST* owner);

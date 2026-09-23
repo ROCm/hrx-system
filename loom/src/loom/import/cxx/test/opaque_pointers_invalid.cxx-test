@@ -1,0 +1,75 @@
+// RUN: verify
+using Callback = unsigned (*)(unsigned);
+// ERROR@+1: LOWERING/059 "function pointers have no object pointer representation"
+Callback forward(Callback callback) { return callback; }
+
+// ====
+// Opaque transport does not provide a stored-pointer representation.
+unsigned* load(void* storage) {
+  auto** pointer = static_cast<unsigned**>(storage);
+  // ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+  return *pointer;
+}
+
+// ====
+void store(void* storage, unsigned* value) {
+  auto** pointer = static_cast<unsigned**>(storage);
+  // ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+  *pointer = value;
+}
+
+// ====
+bool load(const void* storage) {
+  auto* pointer = static_cast<const bool*>(storage);
+  // ERROR@+1: LOWERING/059 "memory objects require non-boolean scalar, vector or plain record storage"
+  return *pointer;
+}
+
+// ====
+union Payload { unsigned integer; float real; };
+unsigned load(const void* storage) {
+  auto* payload = static_cast<const Payload*>(storage);
+  // ERROR@+1: LOWERING/059 "record storage requires a complete aggregate without unions, bases or nontrivial lifecycle operations"
+  return payload->integer;
+}
+
+// ====
+struct Owned { unsigned value; ~Owned() {} };
+const Owned* advance(const void* storage) {
+  auto* pointer = static_cast<const Owned*>(storage);
+  // ERROR@+1: LOWERING/059 "record storage requires a complete aggregate without unions, bases or nontrivial lifecycle operations"
+  return pointer + 1;
+}
+
+// ====
+void store(const void* storage) {
+  auto* pointer = static_cast<const unsigned*>(storage);
+  // ERROR@+1: LOWERING/059 "mutation requires a non-const destination"
+  *pointer = 7;
+}
+
+// ====
+// Source cast checking still owns qualification conversions.
+unsigned* cast_away(const void* storage) {
+  // ERROR@+1: PARSE/036 "invalid static_cast of 'const void*' to 'unsigned int*'"
+  return static_cast<unsigned*>(storage);
+}
+
+// ====
+const void* advance(const void* storage) {
+  // ERROR@+1: LOWERING/059 "unsupported C++ type: const void"
+  return storage + 1;
+}
+
+// ====
+struct Opaque;
+Opaque* advance(Opaque* storage) {
+  // ERROR@+1: LOWERING/059 "record storage requires a complete aggregate without unions, bases or nontrivial lifecycle operations"
+  return storage + 1;
+}
+
+// ====
+unsigned long long address(void* storage) {
+  // ERROR@+1: LOWERING/059 "casts require numeric static_cast or pointer/vector reinterpret_cast"
+  return reinterpret_cast<unsigned long long>(storage);
+}

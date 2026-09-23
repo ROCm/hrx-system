@@ -487,7 +487,11 @@ loom_type_t Types::get(const cxx::Type* input, cxx::AST* ast) {
     }
     case cxx::TypeKind::kPointer: {
       auto* pointer = cxx::type_cast<cxx::PointerType>(unqualified(input));
-      storage_size(pointer->elementType(), ast);
+      if (unit_.typeTraits().is_function(pointer->elementType())) {
+        diagnostics_.reject(
+            unit_, ast,
+            "function pointers have no object pointer representation");
+      }
       return loom_type_buffer();
     }
     case cxx::TypeKind::kClass: {

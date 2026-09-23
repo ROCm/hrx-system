@@ -1189,6 +1189,18 @@ class Translator {
                          ast);
       }
       if (unary->op == cxx::TokenKind::T_AMP) {
+        auto* operand = cxx::Initializer::stripImplicitCasts(unary->expression);
+        while (auto* nested =
+                   cxx::ast_cast<cxx::NestedExpressionAST>(operand)) {
+          operand = cxx::Initializer::stripImplicitCasts(nested->expression);
+        }
+        if (auto* dereference = cxx::ast_cast<cxx::UnaryExpressionAST>(operand);
+            dereference && !dereference->symbol &&
+            dereference->op == cxx::TokenKind::T_STAR) {
+          // Taking the address of an indirect object preserves the pointer;
+          // it neither reads the object nor needs its storage layout.
+          return expression(dereference->expression);
+        }
         return object_address(unary->expression).pointer;
       }
       if (unary->op == cxx::TokenKind::T_STAR) {

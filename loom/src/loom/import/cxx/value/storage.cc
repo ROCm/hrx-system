@@ -42,6 +42,7 @@ Pointer Storage::root(loom_value_id_t buffer, int64_t minimum_alignment,
 StorageProjection Storage::project(Pointer pointer,
                                    const cxx::Type* object_type,
                                    cxx::AST* owner) {
+  types_.storage_size(object_type, owner);
   auto alignment = unit_.control()->memoryLayout()->alignmentOf(object_type);
   if (!alignment) {
     diagnostics_.reject(unit_, owner, "unknown object alignment");

@@ -10,11 +10,6 @@ struct Record { unsigned value; };
 void write(Record* record, Record value) { *record = value; }
 
 // ====
-struct Incomplete;
-// ERROR@+1: LOWERING/059 "record storage requires a complete aggregate without unions, bases or nontrivial lifecycle operations"
-const Incomplete* advance(const Incomplete* value) { return value; }
-
-// ====
 union Record { unsigned integer; float real; };
 // ERROR@+1: LOWERING/059 "record storage requires a complete aggregate without unions, bases or nontrivial lifecycle operations"
 unsigned read(const Record* record) { return record->integer; }
@@ -74,4 +69,4 @@ bool read(const Record* record) { return record->value; }
 // ====
 #include <loomcxx/view.h>
 // ERROR@+1: LOWERING/059 "Loom source types require SSA value transport"
-void read(const loom::type::view<float, 4, 4>* view) {}
+void read(const loom::type::view<float, 4, 4>* view) { auto value = *view; }

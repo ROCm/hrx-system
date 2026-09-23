@@ -1150,8 +1150,9 @@ Fixed underlying types are checked for representability, including implicit
 enumerator increments. Inferred enums select the first type in the integer
 promotion order that contains their complete value range; values above 32 bits
 and the full unsigned 64-bit range remain intact. Template-dependent definitions
-are resolved when instantiated. Boolean enums use `i1` values; pointers to them
-require a byte-storage projection and receive the same diagnostic as `bool*`.
+are resolved when instantiated. Boolean enums use `i1` values. Accessing their
+memory requires a byte-storage projection and receives the same diagnostic as
+accessing storage through `bool*`; carrying either pointer is supported.
 
 GNU `packed` enums select their smallest signed or unsigned storage while
 retaining the promotion selected from their enumerator range. An enum containing
@@ -1621,6 +1622,25 @@ regions, and loop-carried values. Kernel pointer parameters retain their
 single-buffer binding ABI. Signed displacements are combined with the current
 origin before entering the nonnegative offset domain, so an interior pointer
 can move backward within its allocation.
+
+`void*`, qualified void pointers, and pointers to forward-declared objects use
+the same representation. Copies, casts, helpers, branches, loops, and SSA record
+fields preserve the buffer and byte origin without requiring a pointee layout.
+Recovering a supported object type enables ordinary memory access:
+
+```cpp
+unsigned read_erased(const void* storage, unsigned byte_offset) {
+  auto* bytes = static_cast<const unsigned char*>(storage);
+  auto* element = reinterpret_cast<const unsigned*>(bytes + byte_offset);
+  return *element;
+}
+```
+
+Typed object projection and scaled pointer arithmetic require an admitted
+storage layout. Carrying an opaque pointer does not enable loads or stores of
+unsupported object formats. Builtin `&*pointer` preserves the pointer without
+projecting an object, so its pointee may remain incomplete. Function pointers
+have no object-pointer representation and produce a source diagnostic.
 
 Pointer addition, subtraction by an integer, unary plus, dereference, address-of
 storage elements and automatic scalar/vector/array objects, and prefix/postfix

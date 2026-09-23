@@ -86,6 +86,13 @@ loom_test(
 )
 
 loom_test(
+    name = "opaque_pointers_test",
+    srcs = ["opaque_pointers.cxx"],
+    execution_profiles = _EXECUTION_PROFILES,
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
+loom_test(
     name = "assembly_test",
     srcs = [
         "assembly.cxx",
@@ -139,6 +146,7 @@ loom_check_test(
         "assembly_lowering",
         "assembly_invalid",
         "integer_extrema",
+        "opaque_pointers",
         "parameter_alignment",
         "vector_lookup",
     ]

@@ -49,9 +49,8 @@ int entry(int* pointer) {
 // ====
 #include <loomcxx/atomic.h>
 using namespace loom::atomic;
-// Boolean object storage is rejected before the atomic call is reached.
-// ERROR@+1: LOWERING/059 "memory objects require non-boolean scalar, vector or plain record storage"
 bool entry(bool* pointer) {
+  // ERROR@+1: LOWERING/059 "atomic destination requires a non-boolean integer"
   return loom::view::atomic::rmw<kind::andi, ordering::relaxed, scope::device>(true, pointer);
 }
 

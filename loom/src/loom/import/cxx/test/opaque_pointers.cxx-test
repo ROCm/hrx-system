@@ -1,0 +1,143 @@
+// RUN: pass canonicalize,cse,dce
+// Erasing and recovering an object type does not change either pointer component.
+void* erase(unsigned* pointer) { return pointer; }
+unsigned* recover(void* pointer) { return static_cast<unsigned*>(pointer); }
+const unsigned* observe(const void* pointer) {
+  return static_cast<const unsigned*>(pointer);
+}
+
+// ----
+func.def public @erase(%pointer: buffer, %pointer_byte_offset: offset) -> (buffer, offset) {
+  func.return %pointer, %pointer_byte_offset : buffer, offset
+}
+
+func.def public @recover(%pointer: buffer, %pointer_byte_offset: offset) -> (buffer, offset) {
+  func.return %pointer, %pointer_byte_offset : buffer, offset
+}
+
+func.def public @observe(%pointer: buffer, %pointer_byte_offset: offset) -> (buffer, offset) {
+  func.return %pointer, %pointer_byte_offset : buffer, offset
+}
+
+// ====
+// A forward declaration is enough for helper calls and branch transport.
+struct Opaque;
+static const Opaque* forward(const Opaque* handle) { return handle; }
+const Opaque* select(const Opaque* first, const Opaque* second, bool choose) {
+  const Opaque* selected = forward(first);
+  if (choose) selected = forward(second);
+  return selected;
+}
+
+// ----
+func.def public @select(%first: buffer, %first_byte_offset: offset, %second: buffer, %second_byte_offset: offset, %choose: i1) -> (buffer, offset) {
+  %selected$7, %selected_byte_offset$8 = func.call pure @forward(%first, %first_byte_offset) : (buffer, offset) -> (buffer, offset)
+  %selected$9, %selected_byte_offset$10 = scf.if %choose -> (buffer, offset) {
+    %selected, %selected_byte_offset = func.call pure @forward(%second, %second_byte_offset) : (buffer, offset) -> (buffer, offset)
+    scf.yield %selected, %selected_byte_offset : buffer, offset
+  } else {
+    scf.yield %selected$7, %selected_byte_offset$8 : buffer, offset
+  }
+  func.return %selected$9, %selected_byte_offset$10 : buffer, offset
+}
+
+func.def @forward(%handle: buffer, %handle_byte_offset: offset) -> (buffer, offset) {
+  func.return %handle, %handle_byte_offset : buffer, offset
+}
+
+// ====
+// Byte displacement is applied to the retained interior origin.
+unsigned read_erased(const void* storage, unsigned byte_offset) {
+  auto* bytes = static_cast<const unsigned char*>(storage);
+  auto* element = reinterpret_cast<const unsigned*>(bytes + byte_offset);
+  return *element;
+}
+
+// ----
+func.def public @read_erased(%storage: buffer, %storage_byte_offset: offset, %byte_offset: i32) -> (i32) {
+  %4 = scalar.extui %byte_offset : i32 to i64
+  %7 = index.cast %storage_byte_offset : offset to i64
+  %8 = scalar.addi %7, %4 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %element_byte_offset = index.cast %9 : i64 to offset
+  %11 = buffer.view %storage[%element_byte_offset] : buffer -> view<1xi32>
+  %12 = view.load %11[0] : view<1xi32> -> i32
+  func.return %12 : i32
+}
+
+// ====
+// Access qualifiers survive erasure and C-style recovery.
+unsigned exchange(volatile void* storage, unsigned value) {
+  auto* pointer = (volatile unsigned*)storage;
+  auto previous = *pointer;
+  *pointer = value;
+  return previous;
+}
+
+// ----
+func.def public @exchange(%storage: buffer, %storage_byte_offset: offset, %value: i32) -> (i32) {
+  %4 = buffer.view %storage[%storage_byte_offset] : buffer -> view<1xi32>
+  %previous = view.load<volatile> %4[0] : view<1xi32> -> i32
+  view.store<volatile> %value, %4[0] : i32, view<1xi32>
+  func.return %previous : i32
+}
+
+// ====
+// An SSA record can carry opaque pointer fields without storing raw addresses.
+struct Opaque;
+struct Handle { Opaque* object; unsigned tag; };
+Handle tagged(void* pointer, unsigned tag) {
+  return {static_cast<Opaque*>(pointer), tag};
+}
+const void* untag(Handle handle) { return handle.object; }
+
+// ----
+func.def public @tagged(%pointer: buffer, %pointer_byte_offset: offset, %tag: i32) -> (buffer, offset, i32) {
+  func.return %pointer, %pointer_byte_offset, %tag : buffer, offset, i32
+}
+
+func.def public @untag(%handle_object: buffer, %handle_object_byte_offset: offset, %handle_tag: i32) -> (buffer, offset) {
+  func.return %handle_object, %handle_object_byte_offset : buffer, offset
+}
+
+// ====
+// Address/dereference cancellation does not request a complete object layout.
+struct Opaque;
+static Opaque* forward(Opaque* pointer) { return pointer; }
+Opaque* address(Opaque* pointer) { return &(*(forward(pointer))); }
+
+// ----
+func.def public @address(%pointer: buffer, %pointer_byte_offset: offset) -> (buffer, offset) {
+  %4, %5 = func.call pure @forward(%pointer, %pointer_byte_offset) : (buffer, offset) -> (buffer, offset)
+  func.return %4, %5 : buffer, offset
+}
+
+func.def @forward(%pointer: buffer, %pointer_byte_offset: offset) -> (buffer, offset) {
+  func.return %pointer, %pointer_byte_offset : buffer, offset
+}
+
+// ====
+// Pointer transport does not imply support for the pointed-to storage format.
+union Payload { unsigned integer; float real; };
+struct Owned { ~Owned() {} };
+Payload* payload(Payload* pointer) { return pointer; }
+Owned* owned(Owned* pointer) { return pointer; }
+bool* boolean(bool* pointer) { return pointer; }
+unsigned** indirect(unsigned** pointer) { return pointer; }
+
+// ----
+func.def public @payload(%pointer: buffer, %pointer_byte_offset: offset) -> (buffer, offset) {
+  func.return %pointer, %pointer_byte_offset : buffer, offset
+}
+
+func.def public @owned(%pointer: buffer, %pointer_byte_offset: offset) -> (buffer, offset) {
+  func.return %pointer, %pointer_byte_offset : buffer, offset
+}
+
+func.def public @boolean(%pointer: buffer, %pointer_byte_offset: offset) -> (buffer, offset) {
+  func.return %pointer, %pointer_byte_offset : buffer, offset
+}
+
+func.def public @indirect(%pointer: buffer, %pointer_byte_offset: offset) -> (buffer, offset) {
+  func.return %pointer, %pointer_byte_offset : buffer, offset
+}

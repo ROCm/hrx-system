@@ -58,6 +58,42 @@ TEST(TypesTest, ProjectsTheConfiguredDataModelAndRetainsSignedness) {
   }
 }
 
+TEST(TypesTest, ObjectPointersDoNotRequirePointeeStorage) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV("struct Opaque; union Payload { int a; float b; }; "
+                        "struct Owned { ~Owned() {} }; "
+                        "using Callback = void (*)();"),
+                IREE_SV("opaque.cpp"), options);
+  Types types(source.unit(), source.diagnostics());
+  auto* control = source.unit().control();
+  auto* owner = source.unit().ast();
+  auto source_type = [&](const char* name) {
+    return (*source.unit().globalScope()->find(name).begin())->type();
+  };
+  const cxx::Type* pointees[] = {
+      control->getVoidType(),
+      source.unit().typeTraits().add_const(control->getVoidType()),
+      source_type("Opaque"),
+      source_type("Payload"),
+      source_type("Owned"),
+      control->getBoolType(),
+      control->getPointerType(control->getIntType()),
+  };
+  for (auto* pointee : pointees) {
+    auto* pointer = control->getPointerType(pointee);
+    EXPECT_EQ(loom_type_kind(types.get(pointer, owner)), LOOM_TYPE_BUFFER);
+    EXPECT_EQ(types.partition(pointer, owner).kind, ValueKind::Pointer);
+    std::vector<loom_type_t> components;
+    types.append(pointer, owner, components);
+    ASSERT_EQ(components.size(), 2u);
+    EXPECT_EQ(loom_type_kind(components[0]), LOOM_TYPE_BUFFER);
+    EXPECT_EQ(loom_type_element_type(components[1]), LOOM_SCALAR_TYPE_OFFSET);
+    EXPECT_THROW(types.storage_size(pointee, owner), SourceRejected);
+  }
+  EXPECT_THROW(types.get(source_type("Callback"), owner), SourceRejected);
+}
+
 TEST(TypesTest, RecordPartitionsRetainNominalMembersAndStaticTransport) {
   loom_cxx_import_options_t options;
   loom_cxx_import_options_initialize(&options);
@@ -273,9 +309,8 @@ TEST(TypesTest, RejectsRepresentationsThatLoseSourceSemantics) {
   Types types(source.unit(), source.diagnostics());
   auto* control = source.unit().control();
   auto* owner = source.unit().ast();
-  EXPECT_THROW(
-      types.get(control->getPointerType(control->getBoolType()), owner),
-      SourceRejected);
+  EXPECT_THROW(types.storage_size(control->getBoolType(), owner),
+               SourceRejected);
   EXPECT_THROW(
       types.get(control->getLvalueReferenceType(control->getIntType()), owner),
       SourceRejected);
@@ -368,8 +403,10 @@ TEST(TypesTest, BooleanEnumsKeepTheBooleanStorageContract) {
   auto* owner = source.unit().ast();
   EXPECT_EQ(loom_type_element_type(types.get(type, owner)),
             LOOM_SCALAR_TYPE_I1);
-  EXPECT_THROW(types.get(source.unit().control()->getPointerType(type), owner),
-               SourceRejected);
+  EXPECT_EQ(loom_type_kind(types.get(
+                source.unit().control()->getPointerType(type), owner)),
+            LOOM_TYPE_BUFFER);
+  EXPECT_THROW(types.storage_size(type, owner), SourceRejected);
 }
 
 TEST(TypesTest, VectorProjectionKeepsLaneShapeAndRejectsPackedBoolAndPadding) {

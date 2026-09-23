@@ -68,6 +68,8 @@ loom_check_test_suite(
     "macro_operators.cxx-test"
     "offsetof.cxx-test"
     "offsetof_roundtrip.cxx-test"
+    "opaque_pointers.cxx-test"
+    "opaque_pointers_invalid.cxx-test"
     "packed_memory.cxx-test"
     "parameter_alignment.cxx-test"
     "parameter_alignment_invalid.cxx-test"
