@@ -30,7 +30,10 @@ static bool loom_low_schedule_setup_order_is_member(
   if (node->kind == LOOM_LOW_SCHEDULE_NODE_STRUCTURAL) {
     return true;
   }
-  if (node->result_count != 1) {
+  // Input-free materializations carry no source register lifetime. Leave them
+  // available to pressure scheduling: delaying a wide clear behind its peers
+  // can let narrow producers fragment the register bank that it needs.
+  if (node->result_count != 1 || node->operand_count == 0) {
     return false;
   }
   const loom_value_id_t value_id =

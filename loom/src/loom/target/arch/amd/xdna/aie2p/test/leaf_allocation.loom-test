@@ -109,8 +109,10 @@ CHECK: copies: coalesced=0 materialized=1
 // ====
 
 // Static byte-offset literals share scalar registers with the loop's arithmetic.
-// Their pure materializers can be recreated near use when 24 loop-invariant offsets
-// leave too few registers for the loop arithmetic and memory pipeline.
+// Their pure materializers can be recreated near use when 22 loop-invariant
+// offsets leave too few registers for the loop arithmetic and memory pipeline.
+// Input-free literals remain available to fill issue slots while their consumers
+// wait for other prerequisites, instead of inheriting the entire setup chain.
 // RUN: emit aie2p-leaf @static_offset_loop report=emission
 
 low.func.def target<amd.xdna.aie2p.core> @static_offset_loop(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>, %count: reg<aie2p.er>) asm {
@@ -138,8 +140,6 @@ low.func.def target<amd.xdna.aie2p.core> @static_offset_loop(%input: reg<aie2p.e
   %offset19 = mov.static-byte-offset 1280
   %offset20 = mov.static-byte-offset 1344
   %offset21 = mov.static-byte-offset 1408
-  %offset22 = mov.static-byte-offset 1472
-  %offset23 = mov.static-byte-offset 1536
   low.br ^loop(%count: reg<aie2p.er>)
 ^loop(%remaining: reg<aie2p.er>):
   %index0 = mov.address-index %offset0
@@ -208,13 +208,7 @@ low.func.def target<amd.xdna.aie2p.core> @static_offset_loop(%input: reg<aie2p.e
   %index21 = mov.address-index %offset21
   %value21 = lda.i32.index %input, %index21
   %sum21 = add.rr %sum20, %value21
-  %index22 = mov.address-index %offset22
-  %value22 = lda.i32.index %input, %index22
-  %sum22 = add.rr %sum21, %value22
-  %index23 = mov.address-index %offset23
-  %value23 = lda.i32.index %input, %index23
-  %sum23 = add.rr %sum22, %value23
-  st %sum23, %output, 0
+  st %sum21, %output, 0
   %next = sub %remaining, %one
   %more = nez %next
   low.cond_br %more, ^again, ^done : reg<aie2p.er>
@@ -225,10 +219,10 @@ low.func.def target<amd.xdna.aie2p.core> @static_offset_loop(%input: reg<aie2p.e
 }
 
 // ----
-issue cycles: 78
-code bytes: 462
-coissued bundles: 28
-coissued components: 76
+issue cycles: 73
+code bytes: 430
+coissued bundles: 25
+coissued components: 69
 
 // ====
 
