@@ -7,7 +7,25 @@
 # CI orchestration has no CMake target surface.
 # bazel-to-cmake: skip
 
-load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+
+py_binary(
+    name = "prepare_llvm_dwp",
+    srcs = ["prepare_llvm_dwp.py"],
+    target_compatible_with = ["@platforms//os:linux"],
+    visibility = ["//visibility:public"],
+)
+
+py_test(
+    name = "prepare_llvm_dwp_test",
+    size = "small",
+    srcs = [
+        "prepare_llvm_dwp.py",
+        "prepare_llvm_dwp_test.py",
+    ],
+    main = "prepare_llvm_dwp_test.py",
+    target_compatible_with = ["@platforms//os:linux"],
+)
 
 py_library(
     name = "windows_file_access",
