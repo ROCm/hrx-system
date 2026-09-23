@@ -34,7 +34,7 @@ low.kernel.def target<amdgpu.gfx12.generic.core> abi_layout({constant_count = 2,
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %row_in_group = v_lshrrev_b32_lit %lane, 5
+  %row_in_group = v_lshrrev_b32_src0_inline %lane, 5
   %31 = s_mov_b32 31
   %column = v_and_b32 %31, %lane
   %row = v_lshl_add_u32_shift_imm %group, %row_in_group, 1
@@ -98,7 +98,7 @@ low.kernel.def target<amdgpu.gfx12.generic.core> abi_layout({constant_count = 1,
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {extent = 2048, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {extent = 2048, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %row_in_group = v_lshrrev_b32_lit %lane, 5
+  %row_in_group = v_lshrrev_b32_src0_inline %lane, 5
   %42 = s_mov_b32 31
   %column = v_and_b32 %42, %lane
   %row = v_lshl_add_u32_shift_imm %group, %row_in_group, 1

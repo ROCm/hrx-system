@@ -11,14 +11,14 @@ func.def @float8_to_half(%e4m3: f8E4M3, %e5m2: f8E5M2) -> (f16, f16) {
 low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @float8_to_half(%e4m3: reg<amdgpu.vgpr>, %e5m2: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %127 = v_and_b32_lit %e4m3, 255
   %128 = v_and_b32_lit %127, 128
-  %129 = v_lshlrev_b32_lit %128, 24
+  %129 = v_lshlrev_b32_src0_inline %128, 24
   %131 = v_and_b32_lit %127, 120
-  %132 = v_lshrrev_b32_lit %131, 3
+  %132 = v_lshrrev_b32_src0_inline %131, 3
   %133 = v_and_b32_lit %127, 7
   %134 = v_mov_b32 120
   %135 = v_add_u32 %132, %134
-  %137 = v_lshlrev_b32_lit %135, 23
-  %138 = v_lshlrev_b32_lit %133, 20
+  %137 = v_lshlrev_b32_src0_inline %135, 23
+  %138 = v_lshlrev_b32_src0_inline %133, 20
   %139 = v_or_b32 %129, %137
   %140 = v_or_b32 %139, %138
   %143 = v_and_b32_lit %133, 2
@@ -29,7 +29,7 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @float8_to_half(%e4m3: 
   %149 = v_cndmask_b32_src1_inline %146, %148 {true_value = 2}
   %151 = v_mov_b32 118
   %152 = v_add_u32 %149, %151
-  %153 = v_lshlrev_b32_lit %152, 23
+  %153 = v_lshlrev_b32_src0_inline %152, 23
   %154 = v_mov_b32 23
   %155 = v_sub_nc_u32 %154, %149
   %156 = v_lshlrev_b32 %155, %133
@@ -47,14 +47,14 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @float8_to_half(%e4m3: 
   %half_e4m3 = v_cvt_f16_f32 %170
   %172 = v_and_b32_lit %e5m2, 255
   %173 = v_and_b32_lit %172, 128
-  %174 = v_lshlrev_b32_lit %173, 24
+  %174 = v_lshlrev_b32_src0_inline %173, 24
   %175 = v_and_b32_lit %172, 124
-  %176 = v_lshrrev_b32_lit %175, 2
+  %176 = v_lshrrev_b32_src0_inline %175, 2
   %177 = v_and_b32_lit %172, 3
   %179 = v_mov_b32 112
   %180 = v_add_u32 %176, %179
-  %181 = v_lshlrev_b32_lit %180, 23
-  %182 = v_lshlrev_b32_lit %177, 21
+  %181 = v_lshlrev_b32_src0_inline %180, 23
+  %182 = v_lshlrev_b32_src0_inline %177, 21
   %183 = v_or_b32 %174, %181
   %184 = v_or_b32 %183, %182
   %185 = v_and_b32_lit %177, 2
@@ -62,7 +62,7 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @float8_to_half(%e4m3: 
   %187 = v_cndmask_b32_src0_lit_src1_inline %186 {imm32 = 0, true_value = 1}
   %189 = v_mov_b32 111
   %190 = v_add_u32 %187, %189
-  %191 = v_lshlrev_b32_lit %190, 23
+  %191 = v_lshlrev_b32_src0_inline %190, 23
   %193 = v_sub_nc_u32 %154, %187
   %194 = v_lshlrev_b32 %193, %177
   %195 = v_and_b32_lit %194, 8388607

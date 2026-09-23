@@ -195,7 +195,6 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.v_xor_b32.lit",
     "amdgpu.v_lshlrev_b32",
     "amdgpu.v_lshlrev_b32.src0_inline",
-    "amdgpu.v_lshlrev_b32.lit",
     "amdgpu.v_lshlrev_b32.src0_16_low16",
     "amdgpu.v_lshlrev_b32.vop3_imm",
     "amdgpu.v_lshl_add_u32.shift_imm",
@@ -205,10 +204,8 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.v_bfi_b32.src0_lit",
     "amdgpu.v_ashrrev_i32",
     "amdgpu.v_ashrrev_i32.src0_inline",
-    "amdgpu.v_ashrrev_i32.lit",
     "amdgpu.v_lshrrev_b32",
     "amdgpu.v_lshrrev_b32.src0_inline",
-    "amdgpu.v_lshrrev_b32.lit",
 )
 
 _DESCRIPTOR_SET = build_amdgpu_contract_descriptor_set(
@@ -2237,7 +2234,7 @@ def _bf16_extf_rule() -> DescriptorRule:
 
 
 def _bf16_fptrunc_rule() -> DescriptorRule:
-    shift_down = _descriptor("amdgpu.v_lshrrev_b32.lit")
+    shift_down = _descriptor("amdgpu.v_lshrrev_b32.src0_inline")
     and_bits = _descriptor("amdgpu.v_and_b32.lit")
     add_literal = _descriptor("amdgpu.v_add_u32.lit")
     add = _descriptor("amdgpu.v_add_u32")
@@ -2298,13 +2295,14 @@ def _bf16_fptrunc_rule() -> DescriptorRule:
     )
 
 
-def _literal_binary_rule(
+def _constant_binary_rule(
     source_op: Op,
     descriptor_key: str,
     *,
     literal_source: str,
     nonliteral_source: str,
     descriptor_operand: str = "rhs",
+    extra_guards: tuple[Guard, ...] = (),
 ) -> DescriptorRule:
     descriptor = _descriptor(descriptor_key)
     return DescriptorRule(
@@ -2321,6 +2319,7 @@ def _literal_binary_rule(
                 32,
                 diagnostic=_LITERAL_I32_BITS_DIAGNOSTIC,
             ),
+            *extra_guards,
             Guard.descriptor_available(descriptor),
         ),
         emit=(
@@ -2431,7 +2430,7 @@ def _index_madd_power_of_two_rule(
     shift = _descriptor(
         "amdgpu.v_lshlrev_b32.vop3_imm"
         if preserve_value_register
-        else "amdgpu.v_lshlrev_b32.lit"
+        else "amdgpu.v_lshlrev_b32.src0_inline"
     )
     add = _descriptor("amdgpu.v_add_u32.lit" if literal_addend else "amdgpu.v_add_u32")
     value_guard = (
@@ -3803,13 +3802,13 @@ def _rules() -> tuple[ContractCase, ...]:
                 "amdgpu.v_pk_add_u16",
             ),
             packed_i8_add_rule(_DESCRIPTOR_SET),
-            _literal_binary_rule(
+            _constant_binary_rule(
                 vector.vector_addi,
                 "amdgpu.v_add_u32.lit",
                 literal_source="lhs",
                 nonliteral_source="rhs",
             ),
-            _literal_binary_rule(
+            _constant_binary_rule(
                 vector.vector_addi,
                 "amdgpu.v_add_u32.lit",
                 literal_source="rhs",
@@ -3880,13 +3879,13 @@ def _rules() -> tuple[ContractCase, ...]:
         )
         rules.extend(
             (
-                _literal_binary_rule(
+                _constant_binary_rule(
                     source_op,
                     f"{descriptor_key}.lit",
                     literal_source="lhs",
                     nonliteral_source="rhs",
                 ),
-                _literal_binary_rule(
+                _constant_binary_rule(
                     source_op,
                     f"{descriptor_key}.lit",
                     literal_source="rhs",
@@ -3918,12 +3917,13 @@ def _rules() -> tuple[ContractCase, ...]:
     ):
         rules.extend(
             (
-                _literal_binary_rule(
+                _constant_binary_rule(
                     source_op,
-                    f"{descriptor_key}.lit",
+                    f"{descriptor_key}.src0_inline",
                     literal_source="rhs",
                     nonliteral_source="lhs",
                     descriptor_operand="value",
+                    extra_guards=(Guard.value_i64_range("rhs", 0, 31),),
                 ),
                 _binary_rule(
                     source_op,

@@ -80,7 +80,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 0,
   %scale_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {extent = 4096, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {extent = 256, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %scale_index = v_lshrrev_b32_lit %lane, 3
+  %scale_index = v_lshrrev_b32_src0_inline %lane, 3
   %46 = v_lshlrev_b32_src0_inline %lane, 2
   %packed = global_load_b32_saddr %46, %scale_view
   %48 = v_lshlrev_b32_src0_inline %scale_index, 1

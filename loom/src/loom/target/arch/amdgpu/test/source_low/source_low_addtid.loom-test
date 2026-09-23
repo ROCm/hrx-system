@@ -376,7 +376,7 @@ kernel.def @wave_sized_workgroup_memory_select_scaled_lane_b32() {
 low.kernel.def target<amdgpu.gfx11.generic.core> workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_select_scaled_lane_b32() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %17 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
-  %scaled_lane = v_lshlrev_b32_lit %lane, 1
+  %scaled_lane = v_lshlrev_b32_src0_inline %lane, 1
   %inside = v_cmp_lt_u32_src1_inline %lane {rhs = 16}
   %element_index = v_cndmask_b32 %scaled_lane, %lane, %inside
   %stored_value = v_mov_b32 1

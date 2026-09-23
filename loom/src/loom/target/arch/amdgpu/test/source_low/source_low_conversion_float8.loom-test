@@ -10,14 +10,14 @@ func.def @scalar_extf_f8e4m3_to_f32(%input: f8E4M3) -> (f32) {
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @scalar_extf_f8e4m3_to_f32(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %64 = v_and_b32_lit %input, 255
   %65 = v_and_b32_lit %64, 128
-  %66 = v_lshlrev_b32_lit %65, 24
+  %66 = v_lshlrev_b32_src0_inline %65, 24
   %68 = v_and_b32_lit %64, 120
-  %69 = v_lshrrev_b32_lit %68, 3
+  %69 = v_lshrrev_b32_src0_inline %68, 3
   %70 = v_and_b32_lit %64, 7
   %71 = v_mov_b32 120
   %72 = v_add_u32 %69, %71
-  %74 = v_lshlrev_b32_lit %72, 23
-  %75 = v_lshlrev_b32_lit %70, 20
+  %74 = v_lshlrev_b32_src0_inline %72, 23
+  %75 = v_lshlrev_b32_src0_inline %70, 20
   %76 = v_or_b32 %66, %74
   %77 = v_or_b32 %76, %75
   %80 = v_and_b32_lit %70, 2
@@ -28,7 +28,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @scalar_extf_f8e4
   %86 = v_cndmask_b32_src1_inline %83, %85 {true_value = 2}
   %88 = v_mov_b32 118
   %89 = v_add_u32 %86, %88
-  %90 = v_lshlrev_b32_lit %89, 23
+  %90 = v_lshlrev_b32_src0_inline %89, 23
   %91 = v_mov_b32 23
   %92 = v_sub_nc_u32 %91, %86
   %93 = v_lshlrev_b32 %92, %70
@@ -57,14 +57,14 @@ func.def @scalar_extf_f8e5m2_to_f32(%input: f8E5M2) -> (f32) {
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @scalar_extf_f8e5m2_to_f32(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %59 = v_and_b32_lit %input, 255
   %60 = v_and_b32_lit %59, 128
-  %61 = v_lshlrev_b32_lit %60, 24
+  %61 = v_lshlrev_b32_src0_inline %60, 24
   %62 = v_and_b32_lit %59, 124
-  %63 = v_lshrrev_b32_lit %62, 2
+  %63 = v_lshrrev_b32_src0_inline %62, 2
   %64 = v_and_b32_lit %59, 3
   %66 = v_mov_b32 112
   %67 = v_add_u32 %63, %66
-  %69 = v_lshlrev_b32_lit %67, 23
-  %70 = v_lshlrev_b32_lit %64, 21
+  %69 = v_lshlrev_b32_src0_inline %67, 23
+  %70 = v_lshlrev_b32_src0_inline %64, 21
   %71 = v_or_b32 %61, %69
   %72 = v_or_b32 %71, %70
   %74 = v_and_b32_lit %64, 2
@@ -72,7 +72,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @scalar_extf_f8e5
   %77 = v_cndmask_b32_src0_lit_src1_inline %75 {imm32 = 0, true_value = 1}
   %79 = v_mov_b32 111
   %80 = v_add_u32 %77, %79
-  %81 = v_lshlrev_b32_lit %80, 23
+  %81 = v_lshlrev_b32_src0_inline %80, 23
   %82 = v_mov_b32 23
   %83 = v_sub_nc_u32 %82, %77
   %84 = v_lshlrev_b32 %83, %64

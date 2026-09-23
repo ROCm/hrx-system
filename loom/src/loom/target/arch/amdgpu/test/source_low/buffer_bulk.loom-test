@@ -103,8 +103,8 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @fill_i3
   %66, %67 = s_addc_u32 %61, %56, %65
   %68 = concat(%64, %66) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   global_store_b8_saddr %59, %25, %68
-  %69 = v_lshrrev_b32_lit %25, 8
-  %70 = v_lshlrev_b32_lit %25, 24
+  %69 = v_lshrrev_b32_src0_inline %25, 8
+  %70 = v_lshlrev_b32_src0_inline %25, 24
   %71 = v_or_b32 %69, %70
   %72 = s_mov_b32 0
   %78, %79 = s_add_co_u32 %83, %30
@@ -180,7 +180,7 @@ func.def target(@target) @fill_bf16(%pattern: bf16, %target: buffer, %target_off
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @fill_bf16(%pattern: reg<amdgpu.vgpr>, %target_offset: reg<amdgpu.sgpr x2>, %byte_length: reg<amdgpu.sgpr x2>) asm {
   %target = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %34 = v_and_b32_lit %pattern, 65535
-  %35 = v_lshlrev_b32_lit %34, 16
+  %35 = v_lshlrev_b32_src0_inline %34, 16
   %36 = v_or_b32 %34, %35
   %37 = s_mov_b32 0
   %38 = s_mov_b32 1
@@ -212,8 +212,8 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @fill_bf
   %73, %74 = s_addc_u32 %68, %63, %72
   %75 = concat(%71, %73) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   global_store_b8_saddr %66, %30, %75
-  %76 = v_lshrrev_b32_lit %30, 8
-  %77 = v_lshlrev_b32_lit %30, 24
+  %76 = v_lshrrev_b32_src0_inline %30, 8
+  %77 = v_lshlrev_b32_src0_inline %30, 24
   %78 = v_or_b32 %76, %77
   %79 = s_mov_b32 0
   %85, %86 = s_add_co_u32 %90, %38

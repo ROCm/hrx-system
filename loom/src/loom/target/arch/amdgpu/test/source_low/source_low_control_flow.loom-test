@@ -1334,11 +1334,11 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @uniform
   %high = v_and_b32_lit %high_i8, 255
   %scale_low = v_and_b32_lit %high, 15
   %scale_hi0 = v_and_b32_lit %low, 192
-  %scale_hi = v_lshrrev_b32_lit %scale_hi0, 2
+  %scale_hi = v_lshrrev_b32_src0_inline %scale_hi0, 2
   %scale$146 = v_or_b32 %scale_low, %scale_hi
-  %min_low = v_lshrrev_b32_lit %high, 4
+  %min_low = v_lshrrev_b32_src0_inline %high, 4
   %min_hi0 = v_and_b32_lit %mid, 192
-  %min_hi = v_lshrrev_b32_lit %min_hi0, 2
+  %min_hi = v_lshrrev_b32_src0_inline %min_hi0, 2
   %min$150 = v_or_b32 %min_low, %min_hi
   low.br ^_bb5(%scale$146: reg<amdgpu.vgpr>, %min$150: reg<amdgpu.vgpr>)
 ^_bb5(%scale_i32: reg<amdgpu.vgpr>, %min_i32: reg<amdgpu.vgpr>):
@@ -1379,7 +1379,7 @@ func.def target(@target) @divergent_if_q6_nibble_i8_result(%values: vector<2xi32
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_if_q6_nibble_i8_result(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
   %code = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %selector = slice %values[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %high_shifted = v_lshrrev_b32_lit %code, 4
+  %high_shifted = v_lshrrev_b32_src0_inline %code, 4
   %low_i32 = v_and_b32_lit %code, 15
   %high_i32 = v_and_b32_lit %high_shifted, 15
   %low = v_bfe_i32_offset_width_inline %low_i32 {offset = 0, width = 8}
@@ -2394,7 +2394,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@wave64_target) abi_layout({con
 ^_bb4:
   %86 = s_mov_b32 15
   %rhs_k_inner = v_and_b32 %86, %i
-  %rhs_col_inner = v_lshrrev_b32_lit %i, 4
+  %rhs_col_inner = v_lshrrev_b32_src0_inline %i, 4
   %89 = v_mov_b32_copy %kk
   %90 = v_add_u32 %rhs_k_inner, %89
   %91 = v_mad_u32_u24_src1_lit %rhs_col_inner, %90, 3072
@@ -2462,8 +2462,8 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %32 = v_mov_b32 0
   %index_value = global_load_b32_saddr %32, %control_view
   %padded = v_add_u32 %group_rounding_bias, %index_value
-  %group = v_lshrrev_b32_lit %padded, 3
-  %element = v_lshlrev_b32_lit %group, 2
+  %group = v_lshrrev_b32_src0_inline %padded, 3
+  %element = v_lshlrev_b32_src0_inline %group, 2
   %37 = v_readfirstlane_b32 %element
   low.br ^loop(%37: reg<amdgpu.sgpr>)
 ^loop(%active: reg<amdgpu.sgpr>):

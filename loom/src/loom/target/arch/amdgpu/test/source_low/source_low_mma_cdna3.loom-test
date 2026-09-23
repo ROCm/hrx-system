@@ -436,8 +436,8 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 0
   %input_view = resource<hal_binding> {extent = 1024, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %out_view = resource<hal_binding> {extent = 1024, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %27 = storage {byte_alignment = 16, byte_length = 4096} : low.storage<workgroup>
-  %wave = v_lshrrev_b32_lit %tid, 6
-  %wave_offset = v_lshlrev_b32_lit %wave, 10
+  %wave = v_lshrrev_b32_src0_inline %tid, 6
+  %wave_offset = v_lshlrev_b32_src0_inline %wave, 10
   %31 = v_and_b32_src0_inline %tid, 63
   %32 = v_and_b32_src0_inline %31, 15
   %33 = v_lshlrev_b32_src0_inline %32, 2

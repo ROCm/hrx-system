@@ -920,7 +920,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 0
   %out_view = resource<hal_binding> {extent = 65536, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %subgroup = v_lshrrev_b32_src0_inline %37, 6
   %42 = s_mov_b32 1
-  %quadrant_row = v_lshrrev_b32_lit %subgroup, 1
+  %quadrant_row = v_lshrrev_b32_src0_inline %subgroup, 1
   %quadrant_column = v_and_b32 %42, %subgroup
   %47 = v_and_b32_src0_inline %37, 63
   %48 = v_lshlrev_b32_src0_inline %quadrant_row, 11

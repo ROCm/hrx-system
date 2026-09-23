@@ -759,11 +759,11 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_
   %11 = v_lshlrev_b32_src0_16_low16 %lhs
   %12 = v_lshlrev_b32_src0_16_low16 %rhs
   %13 = v_add_f32 %11, %12
-  %14 = v_lshrrev_b32_lit %13, 16
+  %14 = v_lshrrev_b32_src0_inline %13, 16
   %15 = v_and_b32_lit %14, 1
   %16 = v_add_u32_lit %15, 32767
   %17 = v_add_u32 %13, %16
-  %result = v_lshrrev_b32_lit %17, 16
+  %result = v_lshrrev_b32_src0_inline %17, 16
   return %result
 }
 

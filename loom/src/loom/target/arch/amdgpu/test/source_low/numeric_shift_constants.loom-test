@@ -1,0 +1,71 @@
+// RUN: with-checks emit source-low target=amdgpu:gfx1151 output=low
+
+// Every valid constant count fits the inline encoding, including the highest
+// bit. Scalar source values can still reside in vector registers.
+func.def @word_shift_constants(%values: vector<2xi32>) -> (i32, i32, i32) {
+  %value = vector.extract %values[0] : vector<2xi32> -> i32
+  %left_count = scalar.constant 2 : i32
+  %right_count = scalar.constant 31 : i32
+  %left = scalar.shli %value, %left_count : i32
+  %logical = scalar.shrui %value, %right_count : i32
+  %signed = scalar.shrsi %value, %right_count : i32
+  func.return %left, %logical, %signed : i32, i32, i32
+}
+
+// ----
+CHECK: %left = v_lshlrev_b32_src0_inline %value, 2
+CHECK: %logical = v_lshrrev_b32_src0_inline %value, 31
+CHECK: %signed = v_ashrrev_i32_src0_inline %value, 31
+
+// ====
+
+func.def @vector_shift_constants(%value: vector<2xi32>) -> (vector<2xi32>, vector<2xi32>, vector<2xi32>) {
+  %left_count = vector.constant 31 : vector<2xi32>
+  %right_count = vector.constant 1 : vector<2xi32>
+  %left = vector.shli %value, %left_count : vector<2xi32>
+  %logical = vector.shrui %value, %right_count : vector<2xi32>
+  %signed = vector.shrsi %value, %right_count : vector<2xi32>
+  func.return %left, %logical, %signed : vector<2xi32>, vector<2xi32>, vector<2xi32>
+}
+
+// ----
+CHECK: * = v_lshlrev_b32_src0_inline *, 31
+CHECK: * = v_lshrrev_b32_src0_inline *, 1
+CHECK: * = v_ashrrev_i32_src0_inline *, 1
+CHECK-NOT: *v_*_lit*
+
+// ====
+
+func.def @coordinate_shift_constants(%values: vector<2xi32>) -> (index, index, index) {
+  %word = vector.extract %values[0] : vector<2xi32> -> i32
+  %value = index.cast %word : i32 to index
+  %count = index.constant 3 : index
+  %left = index.shli %value, %count : index
+  %logical = index.shrui %value, %count : index
+  %signed = index.shrsi %value, %count : index
+  func.return %left, %logical, %signed : index, index, index
+}
+
+// ----
+CHECK: %left = v_lshlrev_b32_src0_inline %value, 3
+CHECK: %logical = v_lshrrev_b32_src0_inline %value, 3
+CHECK: %signed = v_ashrrev_i32_src0_inline %value, 3
+
+// ====
+
+// A varying count keeps its register operand instead of selecting an immediate
+// from a range that does not establish one exact value.
+func.def @word_shift_varying(%values: vector<2xi32>) -> (i32, i32, i32) {
+  %value = vector.extract %values[0] : vector<2xi32> -> i32
+  %raw_count = vector.extract %values[1] : vector<2xi32> -> i32
+  %count = scalar.assume %raw_count [range(%raw_count, 0, 31)] : i32
+  %left = scalar.shli %value, %count : i32
+  %logical = scalar.shrui %value, %count : i32
+  %signed = scalar.shrsi %value, %count : i32
+  func.return %left, %logical, %signed : i32, i32, i32
+}
+
+// ----
+CHECK: %left = v_lshlrev_b32 %count, %value
+CHECK: %logical = v_lshrrev_b32 %count, %value
+CHECK: %signed = v_ashrrev_i32 %count, %value

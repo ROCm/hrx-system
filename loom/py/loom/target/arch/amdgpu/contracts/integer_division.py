@@ -233,7 +233,7 @@ def _magic_division_vgpr_emits(
     move = descriptor_by_key(descriptor_set, "amdgpu.v_mov_b32")
     multiply_hi = descriptor_by_key(descriptor_set, "amdgpu.v_mul_hi_u32")
     subtract = descriptor_by_key(descriptor_set, "amdgpu.v_sub_u32")
-    shift = descriptor_by_key(descriptor_set, "amdgpu.v_lshrrev_b32.lit")
+    shift = descriptor_by_key(descriptor_set, "amdgpu.v_lshrrev_b32.src0_inline")
     add = descriptor_by_key(descriptor_set, "amdgpu.v_add_u32")
     quotient_value = (
         ValueRef.temporary("adjusted_quotient")
@@ -317,7 +317,7 @@ def _magic_division_vgpr_descriptors(
     move = descriptor_by_key(descriptor_set, "amdgpu.v_mov_b32")
     multiply_hi = descriptor_by_key(descriptor_set, "amdgpu.v_mul_hi_u32")
     subtract = descriptor_by_key(descriptor_set, "amdgpu.v_sub_u32")
-    shift = descriptor_by_key(descriptor_set, "amdgpu.v_lshrrev_b32.lit")
+    shift = descriptor_by_key(descriptor_set, "amdgpu.v_lshrrev_b32.src0_inline")
     add = descriptor_by_key(descriptor_set, "amdgpu.v_add_u32")
     return (
         (move, multiply_hi, subtract, shift, add)

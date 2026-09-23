@@ -36,7 +36,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @remaind
   %value = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %8 = v_mov_b32 2863311531
   %9 = v_mul_hi_u32 %value, %8
-  %10 = v_lshrrev_b32_lit %9, 1
+  %10 = v_lshrrev_b32_src0_inline %9, 1
   %11 = v_lshl_add_u32_shift_imm %10, %10, 1
   %remainder = v_sub_nc_u32 %value, %11
   return %remainder
@@ -85,9 +85,9 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @remaind
   %9 = v_mov_b32 613566757
   %10 = v_mul_hi_u32 %value, %9
   %11 = v_sub_nc_u32 %value, %10
-  %12 = v_lshrrev_b32_lit %11, 1
+  %12 = v_lshrrev_b32_src0_inline %11, 1
   %13 = v_add_u32 %12, %10
-  %14 = v_lshrrev_b32_lit %13, 2
+  %14 = v_lshrrev_b32_src0_inline %13, 2
   %15 = v_mov_b32 7
   %16 = v_mul_lo_u32 %14, %15
   %remainder = v_sub_nc_u32 %value, %16
@@ -132,7 +132,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @remaind
   %value = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %9 = v_mov_b32 3435973837
   %10 = v_mul_hi_u32 %value, %9
-  %11 = v_lshrrev_b32_lit %10, 3
+  %11 = v_lshrrev_b32_src0_inline %10, 3
   %12 = v_mov_b32 10
   %13 = v_mul_lo_u32 %11, %12
   %remainder = v_sub_nc_u32 %value, %13

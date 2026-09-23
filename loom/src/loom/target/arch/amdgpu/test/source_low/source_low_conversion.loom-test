@@ -1274,11 +1274,11 @@ func.def @scalar_fptrunc_bf16_store(%output: buffer, %input: f32) {
 // ----
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @scalar_fptrunc_bf16_store(%input: reg<amdgpu.vgpr>) asm {
   %output_view = resource<hal_binding> {extent = 2, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %7 = v_lshrrev_b32_lit %input, 16
+  %7 = v_lshrrev_b32_src0_inline %input, 16
   %8 = v_and_b32_lit %7, 1
   %9 = v_add_u32_lit %8, 32767
   %10 = v_add_u32 %input, %9
-  %converted = v_lshrrev_b32_lit %10, 16
+  %converted = v_lshrrev_b32_src0_inline %10, 16
   %12 = v_mov_b32 0
   global_store_short_saddr %12, %converted, %output_view
   return
@@ -1705,9 +1705,9 @@ low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 0,
   %byte = global_load_i8_saddr %lane, %input_view
   %wide = v_and_b32_lit %byte, 255
   %sign = v_and_b32_lit %wide, 128
-  %sign_bits = v_lshlrev_b32_lit %sign, 24
+  %sign_bits = v_lshlrev_b32_src0_inline %sign, 24
   %exp_bits = v_and_b32_lit %wide, 120
-  %exp = v_lshrrev_b32_lit %exp_bits, 3
+  %exp = v_lshrrev_b32_src0_inline %exp_bits, 3
   %mantissa = v_and_b32_lit %wide, 7
   %mantissa_bit1 = v_and_b32_lit %mantissa, 2
   %has_mantissa_bit1 = v_cmp_ne_i32_src1_inline %mantissa_bit1 {rhs = 0}
@@ -1717,7 +1717,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 0,
   %selected_shift = v_cndmask_b32_src1_inline %shift0, %has_mantissa_bit2 {true_value = 2}
   %81 = v_mov_b32 118
   %biased_exp = v_add_u32 %selected_shift, %81
-  %f32_exp = v_lshlrev_b32_lit %biased_exp, 23
+  %f32_exp = v_lshlrev_b32_src0_inline %biased_exp, 23
   %85 = v_mov_b32 23
   %remaining_shift = v_sub_nc_u32 %85, %selected_shift
   %shifted_mantissa = v_lshlrev_b32 %remaining_shift, %mantissa
@@ -1728,7 +1728,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 0,
   %is_zero_exp = v_cmp_eq_i32_src1_inline %exp {rhs = 0}
   %93 = v_mov_b32 120
   %regular_exp = v_add_u32 %exp, %93
-  %regular_exp_bits = v_lshlrev_b32_lit %regular_exp, 23
+  %regular_exp_bits = v_lshlrev_b32_src0_inline %regular_exp, 23
   %regular_head = v_or_b32 %sign_bits, %regular_exp_bits
   %regular_bits = v_or_b32 %regular_head, %f32_mantissa
   %finite_bits = v_cndmask_b32 %regular_bits, %subnormal, %is_zero_exp
@@ -1766,14 +1766,14 @@ low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 0,
   %packed = global_load_i8_saddr %lane, %input_view
   %73 = v_and_b32_lit %packed, 255
   %74 = v_and_b32_lit %73, 128
-  %75 = v_lshlrev_b32_lit %74, 24
+  %75 = v_lshlrev_b32_src0_inline %74, 24
   %77 = v_and_b32_lit %73, 120
-  %78 = v_lshrrev_b32_lit %77, 3
+  %78 = v_lshrrev_b32_src0_inline %77, 3
   %79 = v_and_b32_lit %73, 7
   %80 = v_mov_b32 120
   %81 = v_add_u32 %78, %80
-  %83 = v_lshlrev_b32_lit %81, 23
-  %84 = v_lshlrev_b32_lit %79, 20
+  %83 = v_lshlrev_b32_src0_inline %81, 23
+  %84 = v_lshlrev_b32_src0_inline %79, 20
   %85 = v_or_b32 %75, %83
   %86 = v_or_b32 %85, %84
   %89 = v_and_b32_lit %79, 2
@@ -1784,7 +1784,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 0,
   %95 = v_cndmask_b32_src1_inline %92, %94 {true_value = 2}
   %97 = v_mov_b32 118
   %98 = v_add_u32 %95, %97
-  %99 = v_lshlrev_b32_lit %98, 23
+  %99 = v_lshlrev_b32_src0_inline %98, 23
   %100 = v_mov_b32 23
   %101 = v_sub_nc_u32 %100, %95
   %102 = v_lshlrev_b32 %101, %79
@@ -1829,14 +1829,14 @@ low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 0,
   %packed = global_load_i8_saddr %lane, %input_view
   %68 = v_and_b32_lit %packed, 255
   %69 = v_and_b32_lit %68, 128
-  %70 = v_lshlrev_b32_lit %69, 24
+  %70 = v_lshlrev_b32_src0_inline %69, 24
   %71 = v_and_b32_lit %68, 124
-  %72 = v_lshrrev_b32_lit %71, 2
+  %72 = v_lshrrev_b32_src0_inline %71, 2
   %73 = v_and_b32_lit %68, 3
   %75 = v_mov_b32 112
   %76 = v_add_u32 %72, %75
-  %78 = v_lshlrev_b32_lit %76, 23
-  %79 = v_lshlrev_b32_lit %73, 21
+  %78 = v_lshlrev_b32_src0_inline %76, 23
+  %79 = v_lshlrev_b32_src0_inline %73, 21
   %80 = v_or_b32 %70, %78
   %81 = v_or_b32 %80, %79
   %83 = v_and_b32_lit %73, 2
@@ -1844,7 +1844,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 0,
   %86 = v_cndmask_b32_src0_lit_src1_inline %84 {imm32 = 0, true_value = 1}
   %88 = v_mov_b32 111
   %89 = v_add_u32 %86, %88
-  %90 = v_lshlrev_b32_lit %89, 23
+  %90 = v_lshlrev_b32_src0_inline %89, 23
   %91 = v_mov_b32 23
   %92 = v_sub_nc_u32 %91, %86
   %93 = v_lshlrev_b32 %92, %73

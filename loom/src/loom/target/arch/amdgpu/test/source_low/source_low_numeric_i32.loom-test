@@ -63,9 +63,9 @@ low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 0,
   %output_view = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %18 = v_lshlrev_b32_src0_inline %lane, 2
   %loaded = global_load_b32_saddr %18, %input_view
-  %left = v_lshlrev_b32_lit %loaded, 3
-  %logical = v_lshrrev_b32_lit %loaded, 3
-  %arithmetic = v_ashrrev_i32_lit %loaded, 3
+  %left = v_lshlrev_b32_src0_inline %loaded, 3
+  %logical = v_lshrrev_b32_src0_inline %loaded, 3
+  %arithmetic = v_ashrrev_i32_src0_inline %loaded, 3
   %joined = v_or_b32 %left, %logical
   %result = v_xor_b32 %joined, %arithmetic
   global_store_b32_saddr %18, %result, %output_view
@@ -142,8 +142,8 @@ low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 0,
   %lane0 = slice %loaded[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %lane1 = slice %loaded[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %masked = v_and_b32_lit %lane0, 255
-  %left = v_lshlrev_b32_lit %masked, 3
-  %logical = v_lshrrev_b32_lit %lane1, 3
+  %left = v_lshlrev_b32_src0_inline %masked, 3
+  %logical = v_lshrrev_b32_src0_inline %lane1, 3
   %tagged = v_or_b32_lit %left, 240
   %mixed = v_xor_b32_lit %tagged, 4294967295
   %lane2 = slice %loaded[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>

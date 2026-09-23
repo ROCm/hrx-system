@@ -86,14 +86,14 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.v_xor_b32",
     "amdgpu.v_xor_b32.lit",
     "amdgpu.v_lshlrev_b32",
-    "amdgpu.v_lshlrev_b32.lit",
+    "amdgpu.v_lshlrev_b32.src0_inline",
     "amdgpu.v_lshlrev_b32.vop3_imm",
     "amdgpu.v_lshrrev_b32",
-    "amdgpu.v_lshrrev_b32.lit",
+    "amdgpu.v_lshrrev_b32.src0_inline",
     "amdgpu.v_bcnt_u32_b32",
     "amdgpu.v_bcnt_u32_b32.src1_zero",
     "amdgpu.v_ashrrev_i32",
-    "amdgpu.v_ashrrev_i32.lit",
+    "amdgpu.v_ashrrev_i32.src0_inline",
     "amdgpu.v_bfe_i32.offset_width_inline",
     "amdgpu.v_bfe_u32.offset_width_inline",
 )
@@ -419,7 +419,7 @@ def _i64_vgpr_per_lane_binary_rule(
     )
 
 
-def _vgpr_literal_shift_rule(
+def _vgpr_constant_shift_rule(
     source_op: Op,
     type_pattern: TypePattern,
     descriptor: Descriptor,
@@ -746,16 +746,16 @@ def _i32_shift_rules(
     source_op: Op,
     sgpr_descriptor_key: str,
     vgpr_descriptor_key: str,
-    literal_descriptor_key: str,
+    inline_descriptor_key: str,
     *,
     preserve_descriptor_key: str | None = None,
 ) -> tuple[DescriptorRule, ...]:
     sgpr_descriptor = _descriptor(sgpr_descriptor_key)
     vgpr_descriptor = _descriptor(vgpr_descriptor_key)
-    literal_descriptor = _descriptor(literal_descriptor_key)
+    inline_descriptor = _descriptor(inline_descriptor_key)
     preserve_rules = (
         (
-            _vgpr_literal_shift_rule(
+            _vgpr_constant_shift_rule(
                 source_op,
                 _I32,
                 _descriptor(preserve_descriptor_key),
@@ -769,10 +769,10 @@ def _i32_shift_rules(
     return (
         _sgpr_binary_rule(source_op, _I32, sgpr_descriptor),
         *preserve_rules,
-        _vgpr_literal_shift_rule(
+        _vgpr_constant_shift_rule(
             source_op,
             _I32,
-            literal_descriptor,
+            inline_descriptor,
             I32_VGPR_MATERIALIZER,
         ),
         _vgpr_binary_rule(
@@ -1042,13 +1042,13 @@ def _index_shift_rules(
     source_op: Op,
     sgpr_descriptor_key: str,
     vgpr_descriptor_key: str,
-    literal_descriptor_key: str,
+    inline_descriptor_key: str,
     *,
     preserve_descriptor_key: str | None = None,
 ) -> tuple[DescriptorRule, ...]:
     sgpr_descriptor = _descriptor(sgpr_descriptor_key)
     vgpr_descriptor = _descriptor(vgpr_descriptor_key)
-    literal_descriptor = _descriptor(literal_descriptor_key)
+    inline_descriptor = _descriptor(inline_descriptor_key)
     preserve_descriptor = (
         _descriptor(preserve_descriptor_key)
         if preserve_descriptor_key is not None
@@ -1064,7 +1064,7 @@ def _index_shift_rules(
     ]
     if preserve_descriptor is not None:
         rules.append(
-            _vgpr_literal_shift_rule(
+            _vgpr_constant_shift_rule(
                 source_op,
                 _INDEX,
                 preserve_descriptor,
@@ -1074,10 +1074,10 @@ def _index_shift_rules(
             )
         )
     rules.append(
-        _vgpr_literal_shift_rule(
+        _vgpr_constant_shift_rule(
             source_op,
             _INDEX,
-            literal_descriptor,
+            inline_descriptor,
             ADDRESS_VGPR_MATERIALIZER,
             register_unit_count=1,
         )
@@ -1148,7 +1148,7 @@ def _index_div_power_of_two_sgpr_rule() -> DescriptorRule:
 
 
 def _index_div_power_of_two_vgpr_rule() -> DescriptorRule:
-    shift = _descriptor("amdgpu.v_lshrrev_b32.lit")
+    shift = _descriptor("amdgpu.v_lshrrev_b32.src0_inline")
     return DescriptorRule(
         source_op=index.index_div,
         descriptor=shift,
@@ -1529,7 +1529,7 @@ def _rules() -> tuple[DescriptorRule, ...]:
             scalar_bitwise.scalar_shli,
             "amdgpu.s_lshl_b32",
             "amdgpu.v_lshlrev_b32",
-            "amdgpu.v_lshlrev_b32.lit",
+            "amdgpu.v_lshlrev_b32.src0_inline",
             preserve_descriptor_key="amdgpu.v_lshlrev_b32.vop3_imm",
         )
     )
@@ -1538,7 +1538,7 @@ def _rules() -> tuple[DescriptorRule, ...]:
             scalar_bitwise.scalar_shrsi,
             "amdgpu.s_ashr_i32",
             "amdgpu.v_ashrrev_i32",
-            "amdgpu.v_ashrrev_i32.lit",
+            "amdgpu.v_ashrrev_i32.src0_inline",
         )
     )
     rules.extend(
@@ -1546,7 +1546,7 @@ def _rules() -> tuple[DescriptorRule, ...]:
             scalar_bitwise.scalar_shrui,
             "amdgpu.s_lshr_b32",
             "amdgpu.v_lshrrev_b32",
-            "amdgpu.v_lshrrev_b32.lit",
+            "amdgpu.v_lshrrev_b32.src0_inline",
         )
     )
     rules.extend(
@@ -1628,7 +1628,7 @@ def _rules() -> tuple[DescriptorRule, ...]:
             index.index_shli,
             "amdgpu.s_lshl_b32",
             "amdgpu.v_lshlrev_b32",
-            "amdgpu.v_lshlrev_b32.lit",
+            "amdgpu.v_lshlrev_b32.src0_inline",
             preserve_descriptor_key="amdgpu.v_lshlrev_b32.vop3_imm",
         )
     )
@@ -1637,7 +1637,7 @@ def _rules() -> tuple[DescriptorRule, ...]:
             index.index_shrsi,
             "amdgpu.s_ashr_i32",
             "amdgpu.v_ashrrev_i32",
-            "amdgpu.v_ashrrev_i32.lit",
+            "amdgpu.v_ashrrev_i32.src0_inline",
         )
     )
     rules.extend(
@@ -1645,7 +1645,7 @@ def _rules() -> tuple[DescriptorRule, ...]:
             index.index_shrui,
             "amdgpu.s_lshr_b32",
             "amdgpu.v_lshrrev_b32",
-            "amdgpu.v_lshrrev_b32.lit",
+            "amdgpu.v_lshrrev_b32.src0_inline",
         )
     )
     rules.append(_index_madd_sgpr_rule())
