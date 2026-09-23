@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -43,6 +44,44 @@ class PrepareLlvmDwpTest(unittest.TestCase):
     def test_requires_immutable_source_revision(self):
         with self.assertRaisesRegex(ValueError, "does not report"):
             prepare_llvm_dwp.parse_llvm_source_identity("clang version 23.0.0\n")
+
+    def test_fetches_sources_from_exact_revision(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            repository = root / "repository"
+            subprocess.run(["git", "init", "--quiet", repository], check=True)
+
+            def git(*args: str) -> bytes:
+                return subprocess.check_output(["git", "-C", repository, *args])
+
+            git("config", "user.name", "Test")
+            git("config", "user.email", "test@example.com")
+            source_paths = (
+                "llvm/tools/llvm-dwp/llvm-dwp.cpp",
+                "llvm/tools/llvm-dwp/Opts.td",
+            )
+            for source_path, content in zip(source_paths, (b"first cpp", b"first td")):
+                path = repository / source_path
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(content)
+            git("add", *source_paths)
+            git("commit", "--quiet", "-m", "first")
+            first_commit = git("rev-parse", "HEAD").decode().strip()
+            for source_path in source_paths:
+                (repository / source_path).write_bytes(b"second")
+            git("commit", "--quiet", "-am", "second")
+
+            contents = prepare_llvm_dwp._fetch_sources(
+                str(repository), first_commit, source_paths, root / "fetch"
+            )
+
+            self.assertEqual(
+                {
+                    source_paths[0]: b"first cpp",
+                    source_paths[1]: b"first td",
+                },
+                contents,
+            )
 
     def test_cached_tool_matches_exact_installation(self):
         with tempfile.TemporaryDirectory() as temporary_directory:

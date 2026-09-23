@@ -19,7 +19,6 @@ import shlex
 import subprocess
 import tempfile
 import time
-import urllib.request
 from pathlib import Path
 
 _SOURCE_REPOSITORIES = {
@@ -68,13 +67,47 @@ def source_url(identity: LlvmSourceIdentity, source_path: str) -> str:
     )
 
 
-def _download(url: str) -> bytes:
-    request = urllib.request.Request(url, headers={"User-Agent": "iree-ci/1"})
-    with urllib.request.urlopen(request, timeout=120) as response:
-        content = response.read()
-    if not content:
-        raise ValueError(f"downloaded empty source file: {url}")
-    return content
+def _fetch_sources(
+    repository: str,
+    commit: str,
+    source_paths: tuple[str, ...],
+    destination: Path,
+) -> dict[str, bytes]:
+    source_repository = destination / "source"
+    subprocess.run(
+        ["git", "init", "--quiet", source_repository],
+        check=True,
+    )
+    # Fetch the exact commit once and materialize only the requested blobs. This
+    # avoids the raw-content endpoint's per-file rate limits.
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            source_repository,
+            "-c",
+            "protocol.version=2",
+            "fetch",
+            "--quiet",
+            "--depth=1",
+            "--filter=blob:none",
+            repository,
+            commit,
+        ],
+        check=True,
+    )
+    fetched_commit = subprocess.check_output(
+        ["git", "-C", source_repository, "rev-parse", "FETCH_HEAD"],
+        text=True,
+    ).strip()
+    if fetched_commit != commit:
+        raise ValueError(f"fetched LLVM revision {fetched_commit}, expected {commit}")
+    return {
+        source_path: subprocess.check_output(
+            ["git", "-C", source_repository, "show", f"FETCH_HEAD:{source_path}"]
+        )
+        for source_path in source_paths
+    }
 
 
 def _sha256(path: Path) -> str:
@@ -142,11 +175,16 @@ def prepare_llvm_dwp(*, llvm_root: Path, output: Path) -> dict[str, object]:
         prefix=".llvm-dwp-build-", dir=output.parent
     ) as temporary_directory:
         build_directory = Path(temporary_directory)
+        source_contents = _fetch_sources(
+            identity.repository,
+            identity.commit,
+            _SOURCE_PATHS,
+            build_directory,
+        )
         source_records = []
-        for source_path in _SOURCE_PATHS:
+        for source_path, content in source_contents.items():
             url = source_url(identity, source_path)
             destination = build_directory / Path(source_path).name
-            content = _download(url)
             destination.write_bytes(content)
             source_records.append(
                 {
