@@ -31,21 +31,20 @@ unsigned update(unsigned* words, unsigned index, unsigned mask) {
 func.def public @update(%words: buffer, %words_byte_offset: offset, %index$2: i32, %mask: i32) -> (i32) {
   %5 = scalar.constant 1 : i32
   %index$6 = scalar.addi %index$2, %5 : i32
-  %22 = scalar.constant 2 : i32
-  %index$23 = scalar.addi %index$2, %22 : i32
   %9 = scalar.extui %index$6 : i32 to i64
-  %20 = scalar.constant 2 : i64
-  %21 = scalar.shli %9, %20 : i64
+  %22 = scalar.constant 2 : i64
+  %23 = scalar.shli %9, %22 : i64
   %12 = index.cast %words_byte_offset : offset to i64
-  %13 = scalar.addi %12, %21 : i64
+  %13 = scalar.addi %12, %23 : i64
   %14 = scalar.assume %13 [range(%13, 0, 9223372036854775807)] : i64
   %15 = index.cast %14 : i64 to offset
   %16 = buffer.view %words[%15] : buffer -> view<1xi32>
   %17 = view.load %16[0] : view<1xi32> -> i32
   %result = scalar.ori %17, %mask : i32
   view.store %result, %16[0] : i32, view<1xi32>
-  %19 = scalar.addi %result, %index$23 : i32
-  func.return %19 : i32
+  %20 = scalar.addi %index$6, %result : i32
+  %21 = scalar.addi %20, %5 : i32
+  func.return %21 : i32
 }
 
 // ====

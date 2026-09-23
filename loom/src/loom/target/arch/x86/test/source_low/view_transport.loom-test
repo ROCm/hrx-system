@@ -98,46 +98,46 @@ low.func.def public target<x86.avx2.core> abi(object_function) @rotate_buffer_vi
   mov.store.gpr32 %seed, %storage {disp32 = 0}
   %offset1 = mov.imm64 4
   %ordinal1 = mov.imm32 1
-  %110 = copy %seed : reg<x86.gpr32> -> reg<x86.gpr32>
-  %initial1 = add.gpr32 %110, %ordinal1
+  %112 = copy %seed : reg<x86.gpr32> -> reg<x86.gpr32>
+  %initial1 = add.gpr32 %112, %ordinal1
   mov.store.gpr32 %initial1, %storage {disp32 = 4}
   %offset2 = mov.imm64 8
   %ordinal2 = mov.imm32 2
-  %114 = copy %seed : reg<x86.gpr32> -> reg<x86.gpr32>
-  %initial2 = add.gpr32 %114, %ordinal2
+  %116 = copy %seed : reg<x86.gpr32> -> reg<x86.gpr32>
+  %initial2 = add.gpr32 %116, %ordinal2
   mov.store.gpr32 %initial2, %storage {disp32 = 8}
   %offset3 = mov.imm64 12
   %ordinal3 = mov.imm32 3
-  %118 = copy %seed : reg<x86.gpr32> -> reg<x86.gpr32>
-  %initial3 = add.gpr32 %118, %ordinal3
+  %120 = copy %seed : reg<x86.gpr32> -> reg<x86.gpr32>
+  %initial3 = add.gpr32 %120, %ordinal3
   mov.store.gpr32 %initial3, %storage {disp32 = 12}
   low.br ^_bb1(%begin: reg<x86.gpr64>, %begin: reg<x86.gpr64>, %offset1: reg<x86.gpr64>, %offset2: reg<x86.gpr64>, %offset3: reg<x86.gpr64>)
 ^_bb1(%record: reg<x86.gpr64>, %current0_offset: reg<x86.gpr64>, %current1_offset: reg<x86.gpr64>, %current2_offset: reg<x86.gpr64>, %current3_offset: reg<x86.gpr64>):
-  %120 = cmp.slt.gpr64 %record, %count
-  low.cond_br %120, ^_bb2, ^_bb6 : reg<x86.gpr32>
+  %122 = cmp.slt.gpr64 %record, %count
+  low.cond_br %122, ^_bb2, ^_bb6 : reg<x86.gpr32>
 ^_bb2:
   %number = mov.trunc.gpr32.gpr64 %record
-  %123 = copy %number : reg<x86.gpr32> -> reg<x86.gpr32>
-  %future = add.gpr32 %123, %depth
-  %125 = copy %seed : reg<x86.gpr32> -> reg<x86.gpr32>
-  %value = add.gpr32 %125, %future
+  %125 = copy %number : reg<x86.gpr32> -> reg<x86.gpr32>
+  %126 = add.gpr32 %125, %seed
+  %127 = copy %126 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %value = add.gpr32 %127, %depth
   mov.store.indexed.gpr32 %value, %storage, %current0_offset {disp32 = 0, scale = 1}
   %record_1 = lea.disp %record {disp32 = 1}
-  %128 = cmp.slt.gpr64 %record_1, %count
-  low.cond_br %128, ^_bb3, ^_bb4 : reg<x86.gpr32>
+  %130 = cmp.slt.gpr64 %record_1, %count
+  low.cond_br %130, ^_bb3, ^_bb4 : reg<x86.gpr32>
 ^_bb3:
   %number_1 = mov.trunc.gpr32.gpr64 %record_1
-  %131 = copy %number_1 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %future_1 = add.gpr32 %131, %depth
-  %133 = copy %seed : reg<x86.gpr32> -> reg<x86.gpr32>
-  %value_1 = add.gpr32 %133, %future_1
+  %133 = copy %number_1 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %134 = add.gpr32 %133, %seed
+  %135 = copy %134 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %value_1 = add.gpr32 %135, %depth
   mov.store.indexed.gpr32 %value_1, %storage, %current1_offset {disp32 = 0, scale = 1}
   low.br ^_bb5(%current2_offset: reg<x86.gpr64>, %current3_offset: reg<x86.gpr64>, %current0_offset: reg<x86.gpr64>, %current1_offset: reg<x86.gpr64>)
 ^_bb4:
   low.br ^_bb5(%current1_offset: reg<x86.gpr64>, %current2_offset: reg<x86.gpr64>, %current3_offset: reg<x86.gpr64>, %current0_offset: reg<x86.gpr64>)
-^_bb5(%101: reg<x86.gpr64>, %102: reg<x86.gpr64>, %103: reg<x86.gpr64>, %104: reg<x86.gpr64>):
-  %135 = lea.disp %record {disp32 = 2}
-  low.br ^_bb1(%135: reg<x86.gpr64>, %101: reg<x86.gpr64>, %102: reg<x86.gpr64>, %103: reg<x86.gpr64>, %104: reg<x86.gpr64>)
+^_bb5(%103: reg<x86.gpr64>, %104: reg<x86.gpr64>, %105: reg<x86.gpr64>, %106: reg<x86.gpr64>):
+  %137 = lea.disp %record {disp32 = 2}
+  low.br ^_bb1(%137: reg<x86.gpr64>, %103: reg<x86.gpr64>, %104: reg<x86.gpr64>, %105: reg<x86.gpr64>, %106: reg<x86.gpr64>)
 ^_bb6:
   %value0 = mov.load.indexed.gpr32 %storage, %current0_offset {disp32 = 0, scale = 1}
   return %value0

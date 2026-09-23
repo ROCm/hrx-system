@@ -100,34 +100,34 @@ low.func.def public target<spirv.logical.core> abi(shader_entry_point) @rotate_b
   %step = OpConstant.i32 1 : reg<spirv.id : index>
   %depth = OpConstant.i32 4
   %offset0 = OpConstant.offset64 0
-  %57 = OpPtrAccessChain.storage_buffer.i32.byte_offset %storage, %offset0
-  OpStore.storage_buffer.i32 %57, %seed
+  %59 = OpPtrAccessChain.storage_buffer.i32.byte_offset %storage, %offset0
+  OpStore.storage_buffer.i32 %59, %seed
   %offset1 = OpConstant.offset64 4
   %ordinal1 = OpConstant.i32 1
   %initial1 = OpIAdd %seed, %ordinal1
-  %62 = OpPtrAccessChain.storage_buffer.i32.byte_offset %storage, %offset1
-  OpStore.storage_buffer.i32 %62, %initial1
+  %64 = OpPtrAccessChain.storage_buffer.i32.byte_offset %storage, %offset1
+  OpStore.storage_buffer.i32 %64, %initial1
   %offset2 = OpConstant.offset64 8
   %ordinal2 = OpConstant.i32 2
   %initial2 = OpIAdd %seed, %ordinal2
-  %67 = OpPtrAccessChain.storage_buffer.i32.byte_offset %storage, %offset2
-  OpStore.storage_buffer.i32 %67, %initial2
+  %69 = OpPtrAccessChain.storage_buffer.i32.byte_offset %storage, %offset2
+  OpStore.storage_buffer.i32 %69, %initial2
   %offset3 = OpConstant.offset64 12
   %ordinal3 = OpConstant.i32 3
   %initial3 = OpIAdd %seed, %ordinal3
-  %72 = OpPtrAccessChain.storage_buffer.i32.byte_offset %storage, %offset3
-  OpStore.storage_buffer.i32 %72, %initial3
+  %74 = OpPtrAccessChain.storage_buffer.i32.byte_offset %storage, %offset3
+  OpStore.storage_buffer.i32 %74, %initial3
   %unroll = OpConstant.i32 2 : reg<spirv.id : index>
   %last0_offset, %last1_offset, %last2_offset, %last3_offset = low.scf.for signed [%begin to %count step %step] iter_args(%offset0: reg<spirv.offset64>, %offset1: reg<spirv.offset64>, %offset2: reg<spirv.offset64>, %offset3: reg<spirv.offset64>) -> (reg<spirv.offset64>, reg<spirv.offset64>, reg<spirv.offset64>, reg<spirv.offset64>) unroll(%unroll) do(%record: reg<spirv.id : index>, %current0_offset: reg<spirv.offset64>, %current1_offset: reg<spirv.offset64>, %current2_offset: reg<spirv.offset64>, %current3_offset: reg<spirv.offset64>) {
     %number = OpCopyObject.i32 %record
-    %future = OpIAdd %number, %depth
-    %value = OpIAdd %seed, %future
-    %86 = OpPtrAccessChain.storage_buffer.i32.byte_offset %storage, %current0_offset
-    OpStore.storage_buffer.i32 %86, %value
+    %86 = OpIAdd %number, %seed
+    %value = OpIAdd %86, %depth
+    %88 = OpPtrAccessChain.storage_buffer.i32.byte_offset %storage, %current0_offset
+    OpStore.storage_buffer.i32 %88, %value
     low.scf.yield %current1_offset, %current2_offset, %current3_offset, %current0_offset : reg<spirv.offset64>, reg<spirv.offset64>, reg<spirv.offset64>, reg<spirv.offset64>
   }
-  %87 = OpPtrAccessChain.storage_buffer.i32.byte_offset %storage, %last0_offset
-  %value0 = OpLoad.storage_buffer.i32 %87
+  %89 = OpPtrAccessChain.storage_buffer.i32.byte_offset %storage, %last0_offset
+  %value0 = OpLoad.storage_buffer.i32 %89
   return %value0
 }
 

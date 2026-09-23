@@ -405,8 +405,8 @@ func.def @forwarding_extent_scope(%extent: i32, %count: i32, %input: buffer) -> 
   test.use %bounded_above : i1
   %comparison = scalar.constant 1 : i32
   %observed = view.load %view[0] : view<[%size]xi32> -> i32
-  %value = scalar.addi %observed, %comparison : i32
-  %next_sum = scalar.addi %sum, %value : i32
+  %30 = scalar.addi %observed, %sum : i32
+  %next_sum = scalar.addi %30, %comparison : i32
   %28 = scalar.constant -1 : i32
   %next = scalar.addi %remaining, %28 : i32
   cfg.br ^header(%size: i32, %next: i32, %next_sum: i32)

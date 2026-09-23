@@ -1,0 +1,202 @@
+// RUN: with-checks pass canonicalize
+
+// Locating the last word of a record combines constants across both a
+// multiply and an intervening dynamic column base, without range assumptions.
+func.def @record_tail(%record: i32, %column: i32) -> (i32) {
+  %c1 = scalar.constant 1 : i32
+  %stride = scalar.constant 144 : i32
+  %last_word = scalar.constant 143 : i32
+  %previous = scalar.subi %record, %c1 : i32
+  %base = scalar.muli %previous, %stride : i32
+  %address = scalar.addi %column, %base : i32
+  %tail = scalar.addi %address, %last_word : i32
+  func.return %tail : i32
+}
+// ----
+CHECK: * = scalar.constant -1 : i32
+CHECK: * = scalar.muli %record, %stride : i32
+CHECK: %tail = scalar.addi * : i32
+CHECK-NOT: *scalar.subi*
+CHECK-NOT: *scalar.addi %record,*
+CHECK-NOT: *scalar.constant 143*
+CHECK-NOT: *scalar.constant -144*
+
+// ====
+
+// Moving a constant to the end also works when its producer is on the left.
+func.def @left_bias(%left: i32, %right: i32) -> (i32) {
+  %inner_bias = scalar.constant 7 : i32
+  %outer_bias = scalar.constant 5 : i32
+  %biased = scalar.addi %left, %inner_bias : i32
+  %sum = scalar.addi %biased, %right : i32
+  %result = scalar.addi %sum, %outer_bias : i32
+  func.return %result : i32
+}
+// ----
+CHECK: * = scalar.constant 12 : i32
+CHECK: * = scalar.addi %left, %right : i32
+CHECK-NOT: *scalar.constant 7*
+CHECK-NOT: *scalar.constant 5*
+
+// ====
+
+// Either operand may be constant. The byte product wraps from 381 to 125;
+// the following add cancels it completely.
+func.def @commuted_byte(%value: i8) -> (i8) {
+  %bias = scalar.constant 127 : i8
+  %factor = scalar.constant 3 : i8
+  %cancel = scalar.constant -125 : i8
+  %sum = scalar.addi %bias, %value : i8
+  %product = scalar.muli %factor, %sum : i8
+  %result = scalar.addi %product, %cancel : i8
+  func.return %result : i8
+}
+// ----
+CHECK: * = scalar.muli %value, %factor : i8
+CHECK-NOT: *scalar.addi*
+
+// ====
+
+// Constant products, sums, and negation must wrap at 64 bits too. The square
+// of the signed maximum is 1 modulo 2^64, and maximum + 1 is the sign bit.
+func.def @full_width_constants(%value: i64) -> (i64, i64, i64) {
+  %maximum = scalar.constant 9223372036854775807 : i64
+  %minimum = scalar.constant -9223372036854775808 : i64
+  %c1 = scalar.constant 1 : i64
+  %biased = scalar.addi %value, %maximum : i64
+  %product = scalar.muli %biased, %maximum : i64
+  %product_offset = scalar.addi %product, %maximum : i64
+  %sum = scalar.addi %value, %maximum : i64
+  %sum_offset = scalar.addi %sum, %c1 : i64
+  %difference = scalar.subi %value, %minimum : i64
+  func.return %product_offset, %sum_offset, %difference : i64, i64, i64
+}
+// ----
+CHECK: * = scalar.muli %value, %maximum : i64
+CHECK: * = scalar.constant -9223372036854775808 : i64
+CHECK: %sum_offset = scalar.addi %value, * : i64
+CHECK: %difference = scalar.addi %value, * : i64
+CHECK-NOT: *scalar.subi*
+CHECK-NOT: *scalar.addi %value, %maximum*
+
+// ====
+
+// Distributing a power-of-two multiplier still permits strength reduction.
+// The two constant terms sum to zero modulo the 16-bit result width.
+func.def @power_of_two(%value: i16) -> (i16) {
+  %bias = scalar.constant 32767 : i16
+  %factor = scalar.constant 2 : i16
+  %sum = scalar.addi %value, %bias : i16
+  %product = scalar.muli %sum, %factor : i16
+  %result = scalar.addi %product, %factor : i16
+  func.return %result : i16
+}
+// ----
+CHECK: * = scalar.constant 1 : i16
+CHECK: * = scalar.shli %value, * : i16
+CHECK-NOT: *scalar.muli*
+CHECK-NOT: *scalar.addi*
+
+// ====
+
+// The logical one-bit domain spells its wrapped zero as false.
+func.def @logical_bias(%value: i1) -> (i1) {
+  %c1 = scalar.constant true : i1
+  %first = scalar.addi %value, %c1 : i1
+  %result = scalar.addi %first, %c1 : i1
+  func.return %result : i1
+}
+// ----
+CHECK: func.return %value : i1
+CHECK-NOT: *scalar.addi*
+
+// ====
+
+// Moving the bias would change which inputs overflow an intermediate. Check
+// each no-wrap flag on both the add and the multiply independently.
+func.def @overflow_promises(%value: i32) -> (i32, i32, i32, i32) {
+  %bias = scalar.constant 7 : i32
+  %factor = scalar.constant 3 : i32
+  %signed_sum = scalar.addi<nsw> %value, %bias : i32
+  %signed_add = scalar.muli %signed_sum, %factor : i32
+  %unsigned_sum = scalar.addi<nuw> %value, %bias : i32
+  %unsigned_add = scalar.muli %unsigned_sum, %factor : i32
+  %first_sum = scalar.addi %value, %bias : i32
+  %signed_product = scalar.muli<nsw> %first_sum, %factor : i32
+  %second_sum = scalar.addi %value, %bias : i32
+  %unsigned_product = scalar.muli<nuw> %second_sum, %factor : i32
+  func.return %signed_add, %unsigned_add, %signed_product, %unsigned_product : i32, i32, i32, i32
+}
+// ----
+CHECK: %signed_sum = scalar.addi<nsw> %value, %bias : i32
+CHECK: %signed_add = scalar.muli %signed_sum, %factor : i32
+CHECK: %unsigned_sum = scalar.addi<nuw> %value, %bias : i32
+CHECK: %unsigned_add = scalar.muli %unsigned_sum, %factor : i32
+CHECK: %signed_product = scalar.muli<nsw> %first_sum, %factor : i32
+CHECK: %unsigned_product = scalar.muli<nuw> %second_sum, %factor : i32
+
+// ====
+
+// An independently consumed sum must not be duplicated by distribution.
+func.def @shared_sum(%value: i32, %other: i32) -> (i32, i32, i32) {
+  %bias = scalar.constant 7 : i32
+  %factor = scalar.constant 3 : i32
+  %sum = scalar.addi %value, %bias : i32
+  %product = scalar.muli %sum, %factor : i32
+  %offset = scalar.addi %other, %sum : i32
+  func.return %sum, %product, %offset : i32, i32, i32
+}
+// ----
+CHECK: %sum = scalar.addi %value, %bias : i32
+CHECK: %product = scalar.muli %sum, %factor : i32
+CHECK: %offset = scalar.addi %other, %sum : i32
+
+// ====
+
+// A variable term cannot move across an overflow promise on either add.
+func.def @flagged_offsets(%left: i32, %right: i32) -> (i32, i32) {
+  %bias = scalar.constant 7 : i32
+  %signed_sum = scalar.addi<nsw> %left, %bias : i32
+  %inner_flag = scalar.addi %signed_sum, %right : i32
+  %wrapping_sum = scalar.addi %left, %bias : i32
+  %outer_flag = scalar.addi<nuw> %right, %wrapping_sum : i32
+  func.return %inner_flag, %outer_flag : i32, i32
+}
+// ----
+CHECK: %signed_sum = scalar.addi<nsw> %left, %bias : i32
+CHECK: %inner_flag = scalar.addi %signed_sum, %right : i32
+CHECK: %outer_flag = scalar.addi<nuw> %right, %wrapping_sum : i32
+
+// ====
+
+// Predicate references keep the sum live even with only one operand use.
+func.def @predicate_owner(%value: i32, %other: i32) -> (i32, i32) {
+  %bias = scalar.constant 7 : i32
+  %factor = scalar.constant 3 : i32
+  %sum = scalar.addi %value, %bias : i32
+  %product = scalar.muli %sum, %factor : i32
+  %equal = scalar.assume %other [eq(%other, %sum)] : i32
+  func.return %equal, %product : i32, i32
+}
+// ----
+CHECK: %sum = scalar.addi %value, %bias : i32
+CHECK: %product = scalar.muli %sum, %factor : i32
+CHECK: %equal = scalar.assume %other [eq(%other, %sum)] : i32
+
+// ====
+
+// A dependent view shape retains its size without an ordinary operand use.
+func.def @shape_owner(%value: i32, %storage: buffer) -> (i32, i32) {
+  %bias = scalar.constant 7 : i32
+  %factor = scalar.constant 3 : i32
+  %sum = scalar.addi %value, %bias : i32
+  %product = scalar.muli %sum, %factor : i32
+  %c0 = index.constant 0 : offset
+  %view = buffer.view %storage[%c0] : buffer -> view<[%sum]xi32>
+  %observed = view.load %view[0] : view<[%sum]xi32> -> i32
+  func.return %product, %observed : i32, i32
+}
+// ----
+CHECK: %sum = scalar.addi %value, %bias : i32
+CHECK: %product = scalar.muli %sum, %factor : i32
+CHECK: %view = buffer.view %storage[%c0] : buffer -> view<[%sum]xi32>

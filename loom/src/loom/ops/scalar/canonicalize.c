@@ -257,23 +257,21 @@ static bool loom_scalar_match_contractable_mulf(loom_rewriter_t* rewriter,
   return true;
 }
 
-static iree_status_t loom_scalar_materialize_or_reuse_i64_constant(
+static iree_status_t loom_scalar_materialize_or_reuse_integer_constant(
     loom_op_t* op, loom_rewriter_t* rewriter, loom_value_id_t candidate,
-    int64_t value, loom_type_t type, loom_value_id_t* out_value_id) {
-  // Integer rewrites use i64 intermediates, but their constants must remain
-  // in the result type's domain after wrapping arithmetic. Logical i1 keeps
-  // its zero/one spelling instead of the signed one-bit domain.
+    uint64_t raw_bits, loom_type_t type, loom_value_id_t* out_value_id) {
+  // Unsigned intermediates preserve wrapping arithmetic even at 64 bits.
+  // Normalize to the declared width, keeping logical i1's zero/one spelling.
   const int32_t bit_width =
       loom_scalar_type_bitwidth(loom_type_element_type(type));
   const loom_value_facts_t facts =
       bit_width == 1
-          ? loom_value_facts_exact_i64((uint64_t)value & 1)
-          : loom_value_facts_make_signed_raw_bits((uint64_t)value, bit_width);
-  value = facts.range_lo;
+          ? loom_value_facts_exact_i64(raw_bits & 1)
+          : loom_value_facts_make_signed_raw_bits(raw_bits, bit_width);
   int64_t candidate_value = 0;
   if (candidate != LOOM_VALUE_ID_INVALID &&
       loom_scalar_query_exact_i64(rewriter, candidate, &candidate_value) &&
-      candidate_value == value) {
+      candidate_value == facts.range_lo) {
     *out_value_id = candidate;
     return iree_ok_status();
   }
@@ -456,7 +454,7 @@ static iree_status_t loom_scalar_replace_single_result_with_scaled_shift(
 
   loom_builder_set_before(&rewriter->builder, op);
   loom_value_id_t shift_value = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_scalar_materialize_or_reuse_i64_constant(
+  IREE_RETURN_IF_ERROR(loom_scalar_materialize_or_reuse_integer_constant(
       op, rewriter, reusable_constant, shift, result_type, &shift_value));
   return loom_scalar_replace_single_result_with_binary_op(
       op, rewriter, kind, instance_flags, value, shift_value);
@@ -486,6 +484,24 @@ static bool loom_scalar_match_addi_with_exact_constant(
     return true;
   }
   return false;
+}
+
+// Matches a wrapping add that can be retired when its sole operand use moves.
+// Embedded references also retain the result and would make distribution
+// increase the operation count.
+static bool loom_scalar_match_owned_addi_with_constant(
+    loom_rewriter_t* rewriter, loom_op_t* add_op, loom_value_id_t* out_value,
+    loom_value_id_t* out_constant, int64_t* out_constant_value) {
+  if (!loom_scalar_match_addi_with_exact_constant(
+          rewriter, add_op, out_value, out_constant, out_constant_value) ||
+      !loom_scalar_op_has_no_instance_flags(add_op)) {
+    return false;
+  }
+  loom_value_id_t result = loom_scalar_addi_result(add_op);
+  const loom_value_t* value = loom_module_value(rewriter->module, result);
+  return loom_value_has_single_use(value) &&
+         !loom_value_has_attribute_uses(value) &&
+         !loom_module_value_has_type_uses(rewriter->module, result);
 }
 
 static bool loom_scalar_signed_integer_extremes(loom_type_t type,
@@ -719,7 +735,32 @@ iree_status_t loom_scalar_addi_canonicalize(loom_op_t* op,
       return loom_scalar_replace_single_result_with_addi(
           op, rewriter, loom_scalar_addi_overflow(op), rhs, lhs);
     }
-    return iree_ok_status();
+    if (!loom_scalar_op_has_no_instance_flags(op)) {
+      return iree_ok_status();
+    }
+
+    // Move an inner bias past a dynamic term: (x + c) + y -> (x + y) + c.
+    // This exposes constants to the adjacent-add combination below.
+    loom_value_id_t input = LOOM_VALUE_ID_INVALID;
+    loom_value_id_t bias = LOOM_VALUE_ID_INVALID;
+    int64_t bias_constant = 0;
+    loom_value_id_t other = rhs;
+    if (!loom_scalar_match_owned_addi_with_constant(rewriter, lhs_def, &input,
+                                                    &bias, &bias_constant)) {
+      if (!loom_scalar_match_owned_addi_with_constant(rewriter, rhs_def, &input,
+                                                      &bias, &bias_constant)) {
+        return iree_ok_status();
+      }
+      other = lhs;
+    }
+    loom_builder_set_before(&rewriter->builder, op);
+    loom_op_t* sum_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_scalar_addi_build(
+        &rewriter->builder, /*overflow=*/0, input, other,
+        loom_scalar_single_result_type(rewriter, op), op->location, &sum_op));
+    return loom_scalar_replace_single_result_with_addi(
+        op, rewriter, /*instance_flags=*/0, loom_scalar_addi_result(sum_op),
+        bias);
   }
   if (!loom_scalar_op_has_no_instance_flags(op)) {
     return iree_ok_status();
@@ -737,10 +778,8 @@ iree_status_t loom_scalar_addi_canonicalize(loom_op_t* op,
     return iree_ok_status();
   }
 
-  int64_t combined_constant = 0;
-  if (!iree_checked_add_i64(inner_constant, rhs_constant, &combined_constant)) {
-    return iree_ok_status();
-  }
+  uint64_t combined_constant =
+      (uint64_t)inner_constant + (uint64_t)rhs_constant;
   if (combined_constant == 0) {
     return loom_scalar_replace_single_result_with_value(op, rewriter,
                                                         inner_value);
@@ -748,7 +787,7 @@ iree_status_t loom_scalar_addi_canonicalize(loom_op_t* op,
 
   loom_builder_set_before(&rewriter->builder, op);
   loom_value_id_t combined_constant_value = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_scalar_materialize_or_reuse_i64_constant(
+  IREE_RETURN_IF_ERROR(loom_scalar_materialize_or_reuse_integer_constant(
       op, rewriter, reusable_constant, combined_constant,
       loom_scalar_single_result_type(rewriter, op), &combined_constant_value));
   return loom_scalar_replace_single_result_with_addi(
@@ -782,15 +821,14 @@ iree_status_t loom_scalar_subi_canonicalize(loom_op_t* op,
 
   int64_t rhs_constant = 0;
   if (!loom_scalar_op_has_no_instance_flags(op) ||
-      !loom_scalar_query_exact_i64(rewriter, rhs, &rhs_constant) ||
-      rhs_constant == INT64_MIN) {
+      !loom_scalar_query_exact_i64(rewriter, rhs, &rhs_constant)) {
     return iree_ok_status();
   }
 
   loom_builder_set_before(&rewriter->builder, op);
   loom_value_id_t negated_rhs = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_scalar_materialize_or_reuse_i64_constant(
-      op, rewriter, LOOM_VALUE_ID_INVALID, -rhs_constant,
+  IREE_RETURN_IF_ERROR(loom_scalar_materialize_or_reuse_integer_constant(
+      op, rewriter, LOOM_VALUE_ID_INVALID, UINT64_C(0) - (uint64_t)rhs_constant,
       loom_scalar_single_result_type(rewriter, op), &negated_rhs));
   return loom_scalar_replace_single_result_with_addi(
       op, rewriter, /*instance_flags=*/0, lhs, negated_rhs);
@@ -822,6 +860,44 @@ iree_status_t loom_scalar_muli_canonicalize(loom_op_t* op,
   }
   if (!loom_scalar_op_has_no_instance_flags(op)) {
     return iree_ok_status();
+  }
+
+  // Expose constants across (x + a) * b so an outer add can combine with a*b.
+  // No-wrap promises on either operation prohibit reassociation because
+  // intermediate overflow changes.
+  loom_value_id_t sum = lhs;
+  loom_value_id_t multiplier = rhs;
+  int64_t multiplier_constant = 0;
+  bool has_constant_multiplier =
+      loom_scalar_query_exact_i64(rewriter, rhs, &multiplier_constant);
+  if (!has_constant_multiplier) {
+    has_constant_multiplier =
+        loom_scalar_query_exact_i64(rewriter, lhs, &multiplier_constant);
+    sum = rhs;
+    multiplier = lhs;
+  }
+  if (has_constant_multiplier) {
+    loom_op_t* sum_op = loom_scalar_defining_op(rewriter, sum);
+    loom_value_id_t input = LOOM_VALUE_ID_INVALID;
+    loom_value_id_t bias = LOOM_VALUE_ID_INVALID;
+    int64_t bias_constant = 0;
+    if (loom_scalar_match_owned_addi_with_constant(rewriter, sum_op, &input,
+                                                   &bias, &bias_constant)) {
+      loom_builder_set_before(&rewriter->builder, op);
+      loom_type_t type = loom_scalar_single_result_type(rewriter, op);
+      loom_value_id_t scaled_bias = LOOM_VALUE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(loom_scalar_materialize_or_reuse_integer_constant(
+          op, rewriter, bias,
+          (uint64_t)bias_constant * (uint64_t)multiplier_constant, type,
+          &scaled_bias));
+      loom_op_t* product_op = NULL;
+      IREE_RETURN_IF_ERROR(
+          loom_scalar_muli_build(&rewriter->builder, /*overflow=*/0, input,
+                                 multiplier, type, op->location, &product_op));
+      return loom_scalar_replace_single_result_with_addi(
+          op, rewriter, /*instance_flags=*/0,
+          loom_scalar_muli_result(product_op), scaled_bias);
+    }
   }
 
   uint64_t factor = 0;
@@ -929,7 +1005,7 @@ iree_status_t loom_scalar_remui_canonicalize(loom_op_t* op,
 
   loom_builder_set_before(&rewriter->builder, op);
   loom_value_id_t mask_value = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_scalar_materialize_or_reuse_i64_constant(
+  IREE_RETURN_IF_ERROR(loom_scalar_materialize_or_reuse_integer_constant(
       op, rewriter, LOOM_VALUE_ID_INVALID, divisor - 1,
       loom_scalar_single_result_type(rewriter, op), &mask_value));
   return loom_scalar_replace_single_result_with_binary_op(
@@ -1552,7 +1628,7 @@ static iree_status_t loom_scalar_shift_canonicalize(
       // no-wrap contracts are redundant under this bound.
       loom_builder_set_before(&rewriter->builder, op);
       loom_value_id_t narrow_amount = LOOM_VALUE_ID_INVALID;
-      IREE_RETURN_IF_ERROR(loom_scalar_materialize_or_reuse_i64_constant(
+      IREE_RETURN_IF_ERROR(loom_scalar_materialize_or_reuse_integer_constant(
           op, rewriter, LOOM_VALUE_ID_INVALID, amount, input_type,
           &narrow_amount));
       loom_op_t* narrow_shift = NULL;
@@ -1584,7 +1660,7 @@ static iree_status_t loom_scalar_shift_canonicalize(
 
   loom_builder_set_before(&rewriter->builder, op);
   loom_value_id_t combined_amount_value = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_scalar_materialize_or_reuse_i64_constant(
+  IREE_RETURN_IF_ERROR(loom_scalar_materialize_or_reuse_integer_constant(
       op, rewriter, rhs, combined_amount, type, &combined_amount_value));
   return loom_scalar_replace_single_result_with_binary_op(
       op, rewriter, kind, /*instance_flags=*/0,
@@ -1652,7 +1728,7 @@ iree_status_t loom_scalar_rotri_canonicalize(loom_op_t* op,
 
   loom_builder_set_before(&rewriter->builder, op);
   loom_value_id_t left_amount_value = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_scalar_materialize_or_reuse_i64_constant(
+  IREE_RETURN_IF_ERROR(loom_scalar_materialize_or_reuse_integer_constant(
       op, rewriter, LOOM_VALUE_ID_INVALID, left_amount, type,
       &left_amount_value));
   return loom_scalar_replace_single_result_with_binary_op(

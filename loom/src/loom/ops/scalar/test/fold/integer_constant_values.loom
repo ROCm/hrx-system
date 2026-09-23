@@ -1,0 +1,88 @@
+// Function arguments stay dynamic through canonicalization. Expected literals
+// exercise the rewritten arithmetic at wrapping and signed-domain boundaries.
+func.def @record_tail(%record: i32, %column: i32) -> (i32) {
+  %c1 = scalar.constant 1 : i32
+  %stride = scalar.constant 144 : i32
+  %last_word = scalar.constant 143 : i32
+  %previous = scalar.subi %record, %c1 : i32
+  %base = scalar.muli %previous, %stride : i32
+  %address = scalar.addi %column, %base : i32
+  %tail = scalar.addi %address, %last_word : i32
+  func.return %tail : i32
+}
+
+func.def @byte_product(%value: i8) -> (i8) {
+  %bias = scalar.constant 127 : i8
+  %factor = scalar.constant 3 : i8
+  %sum = scalar.addi %bias, %value : i8
+  %product = scalar.muli %factor, %sum : i8
+  func.return %product : i8
+}
+
+func.def @wide_constants(%value: i64) -> (i64, i64, i64) {
+  %maximum = scalar.constant 9223372036854775807 : i64
+  %minimum = scalar.constant -9223372036854775808 : i64
+  %c1 = scalar.constant 1 : i64
+  %biased = scalar.addi %value, %maximum : i64
+  %product = scalar.muli %biased, %maximum : i64
+  %product_offset = scalar.addi %product, %maximum : i64
+  %sum = scalar.addi %value, %maximum : i64
+  %sum_offset = scalar.addi %sum, %c1 : i64
+  %difference = scalar.subi %value, %minimum : i64
+  func.return %product_offset, %sum_offset, %difference : i64, i64, i64
+}
+
+check.case public @empty_record {
+  %record = check.literal value(0) : i32
+  %column = check.literal value(0) : i32
+  %actual = func.call @record_tail(%record, %column) : (i32, i32) -> (i32)
+  %expected = check.literal value(-1) : i32
+  check.expect.equal actual(%actual) expected(%expected) : i32
+  check.return
+}
+
+check.case public @record_product_wraps {
+  %record = check.literal value(2147483647) : i32
+  %column = check.literal value(32) : i32
+  %actual = func.call @record_tail(%record, %column) : (i32, i32) -> (i32)
+  %expected = check.literal value(-113) : i32
+  check.expect.equal actual(%actual) expected(%expected) : i32
+  check.return
+}
+
+check.case public @byte_sign_boundary {
+  %value = check.literal value(1) : i8
+  %actual = func.call @byte_product(%value) : (i8) -> (i8)
+  %expected = check.literal value(-128) : i8
+  check.expect.equal actual(%actual) expected(%expected) : i8
+  check.return
+}
+
+check.case public @byte_all_ones {
+  %value = check.literal value(-1) : i8
+  %actual = func.call @byte_product(%value) : (i8) -> (i8)
+  %expected = check.literal value(122) : i8
+  check.expect.equal actual(%actual) expected(%expected) : i8
+  check.return
+}
+
+check.case public @wide_constant_overflow {
+  %value = check.literal value(0) : i64
+  %product, %sum, %difference = func.call @wide_constants(%value) : (i64) -> (i64, i64, i64)
+  %expected = check.literal value(-9223372036854775808) : i64
+  check.expect.equal actual(%product) expected(%expected) : i64
+  check.expect.equal actual(%sum) expected(%expected) : i64
+  check.expect.equal actual(%difference) expected(%expected) : i64
+  check.return
+}
+
+check.case public @wide_dynamic_overflow {
+  %value = check.literal value(9223372036854775807) : i64
+  %product, %sum, %difference = func.call @wide_constants(%value) : (i64) -> (i64, i64, i64)
+  %expected_product = check.literal value(-9223372036854775807) : i64
+  %expected_sum = check.literal value(-1) : i64
+  check.expect.equal actual(%product) expected(%expected_product) : i64
+  check.expect.equal actual(%sum) expected(%expected_sum) : i64
+  check.expect.equal actual(%difference) expected(%expected_sum) : i64
+  check.return
+}

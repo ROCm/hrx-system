@@ -70,18 +70,18 @@ func.def public @nested(%records: buffer, %records_byte_offset: offset, %index: 
   %last = view.load %21[0] : view<1xi16> -> i16
   %23 = scalar.extui %last : i16 to i32
   %24 = scalar.constant 1 : i32
-  %25 = scalar.addi %23, %24 : i32
   %27 = view.load %16[0] : view<1xi32> -> i32
-  %28 = scalar.addi %25, %27 : i32
-  func.return %28 : i32
+  %43 = scalar.addi %23, %27 : i32
+  %44 = scalar.addi %43, %24 : i32
+  func.return %44 : i32
 }
 
 func.def public @aligned(%records: buffer, %records_byte_offset: offset, %index: i32, %value: i32) {
   %33 = scalar.extui %index : i32 to i64
-  %43 = scalar.constant 5 : i64
-  %44 = scalar.shli %33, %43 : i64
+  %45 = scalar.constant 5 : i64
+  %46 = scalar.shli %33, %45 : i64
   %36 = index.cast %records_byte_offset : offset to i64
-  %37 = scalar.addi %36, %44 : i64
+  %37 = scalar.addi %36, %46 : i64
   %38 = scalar.assume %37 [range(%37, 0, 9223372036854775807)] : i64
   %39 = index.cast %38 : i64 to offset
   %40 = index.constant 16 : offset

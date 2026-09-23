@@ -30,27 +30,27 @@ func.def public target(@target) @unrolled_helpers(%lhs: i32, %rhs: i32) -> (i32)
 // ----
 low.func.def public target<x86.scalar.core>(@target) abi(object_function) @unrolled_helpers(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   low.schedule.begin
-  %value_copy$49 = copy %lhs : reg<x86.gpr32> -> reg<x86.gpr32>
-  %first$50 = add.gpr32 %value_copy$49, %lhs
+  %value_copy$51 = copy %lhs : reg<x86.gpr32> -> reg<x86.gpr32>
+  %first$52 = add.gpr32 %value_copy$51, %lhs
   low.schedule.phase
-  %first_copy$51 = copy %first$50 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %second$52 = add.gpr32 %first_copy$51, %first$50
+  %first_copy$53 = copy %first$52 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %second$54 = add.gpr32 %first_copy$53, %first$52
   low.schedule.end
   low.schedule.begin
-  %value_copy$45 = copy %rhs : reg<x86.gpr32> -> reg<x86.gpr32>
-  %first$46 = add.gpr32 %value_copy$45, %rhs
+  %value_copy$47 = copy %rhs : reg<x86.gpr32> -> reg<x86.gpr32>
+  %first$48 = add.gpr32 %value_copy$47, %rhs
   low.schedule.phase
-  %first_copy$47 = copy %first$46 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %second$48 = add.gpr32 %first_copy$47, %first$46
+  %first_copy$49 = copy %first$48 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %second$50 = add.gpr32 %first_copy$49, %first$48
   low.schedule.end
-  %33 = copy %second$52 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %pair = add.gpr32 %33, %second$48
+  %35 = copy %second$54 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %pair = add.gpr32 %35, %second$50
   low.schedule.begin
-  %value_copy$41 = copy %lhs : reg<x86.gpr32> -> reg<x86.gpr32>
-  %first$42 = add.gpr32 %value_copy$41, %lhs
+  %value_copy$43 = copy %lhs : reg<x86.gpr32> -> reg<x86.gpr32>
+  %first$44 = add.gpr32 %value_copy$43, %lhs
   low.schedule.phase
-  %first_copy$43 = copy %first$42 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %second$44 = add.gpr32 %first_copy$43, %first$42
+  %first_copy$45 = copy %first$44 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %second$46 = add.gpr32 %first_copy$45, %first$44
   low.schedule.end
   low.schedule.begin
   %value_copy$2 = copy %rhs : reg<x86.gpr32> -> reg<x86.gpr32>
@@ -59,11 +59,11 @@ low.func.def public target<x86.scalar.core>(@target) abi(object_function) @unrol
   %first_copy$4 = copy %first$3 : reg<x86.gpr32> -> reg<x86.gpr32>
   %second$5 = add.gpr32 %first_copy$4, %first$3
   low.schedule.end
-  %37 = copy %second$44 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %pair_1 = add.gpr32 %37, %second$5
-  %39 = copy %pair : reg<x86.gpr32> -> reg<x86.gpr32>
-  %next_1 = add.gpr32 %39, %pair_1
-  return %next_1
+  %39 = copy %second$46 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %pair_1 = add.gpr32 %39, %second$5
+  %41 = copy %pair : reg<x86.gpr32> -> reg<x86.gpr32>
+  %42 = add.gpr32 %41, %pair_1
+  return %42
 }
 
 // ====
