@@ -325,3 +325,113 @@ issue cycles: 248
 code bytes: 860
 coissued bundles: 6
 coissued components: 13
+
+// ====
+
+// Keep a record's 26 loaded fields resident across a seven-word stream. The
+// initial scalar pressure requires rematerializing stream offsets and shifts.
+// Their input-free clones must remain use-local while indexed memory consumers
+// are blocked, or rescheduling exceeds the same 32-register bank again.
+// RUN: emit aie2p-leaf @retained_scalar_stream report=emission
+
+low.func.def target<amd.xdna.aie2p.core> @retained_scalar_stream(%record_input: reg<aie2p.ep>, %stream_input: reg<aie2p.ep>, %stream_output: reg<aie2p.ep>, %record_output: reg<aie2p.ep>) asm {
+  %retained0, %read1 = lda.i32.post %record_input, 4
+  %retained1, %read2 = lda.i32.post %read1, 4
+  %retained2, %read3 = lda.i32.post %read2, 4
+  %retained3, %read4 = lda.i32.post %read3, 4
+  %retained4, %read5 = lda.i32.post %read4, 4
+  %retained5, %read6 = lda.i32.post %read5, 4
+  %retained6, %read7 = lda.i32.post %read6, 4
+  %retained7, %read8 = lda.i32.post %read7, 4
+  %retained8, %read9 = lda.i32.post %read8, 4
+  %retained9, %read10 = lda.i32.post %read9, 4
+  %retained10, %read11 = lda.i32.post %read10, 4
+  %retained11, %read12 = lda.i32.post %read11, 4
+  %retained12, %read13 = lda.i32.post %read12, 4
+  %retained13, %read14 = lda.i32.post %read13, 4
+  %retained14, %read15 = lda.i32.post %read14, 4
+  %retained15, %read16 = lda.i32.post %read15, 4
+  %retained16, %read17 = lda.i32.post %read16, 4
+  %retained17, %read18 = lda.i32.post %read17, 4
+  %retained18, %read19 = lda.i32.post %read18, 4
+  %retained19, %read20 = lda.i32.post %read19, 4
+  %retained20, %read21 = lda.i32.post %read20, 4
+  %retained21, %read22 = lda.i32.post %read21, 4
+  %retained22, %read23 = lda.i32.post %read22, 4
+  %retained23, %read24 = lda.i32.post %read23, 4
+  %retained24, %read25 = lda.i32.post %read24, 4
+  %retained25, %read26 = lda.i32.post %read25, 4
+  %scale_shift = mov.short 2
+  %offset0 = mov.static-byte-offset 0
+  %offset1 = mov.static-byte-offset 4
+  %offset2 = mov.static-byte-offset 8
+  %offset3 = mov.static-byte-offset 12
+  %offset4 = mov.static-byte-offset 16
+  %offset5 = mov.static-byte-offset 20
+  %offset6 = mov.static-byte-offset 24
+  low.br ^work
+^work:
+  %index0 = mov.address-index %offset0
+  %value0 = lda.i32.index %stream_input, %index0
+  %scaled0 = lshl %value0, %scale_shift
+  st.i32.index %scaled0, %stream_output, %index0
+  %index1 = mov.address-index %offset1
+  %value1 = lda.i32.index %stream_input, %index1
+  %scaled1 = lshl %value1, %scale_shift
+  st.i32.index %scaled1, %stream_output, %index1
+  %index2 = mov.address-index %offset2
+  %value2 = lda.i32.index %stream_input, %index2
+  %scaled2 = lshl %value2, %scale_shift
+  st.i32.index %scaled2, %stream_output, %index2
+  %index3 = mov.address-index %offset3
+  %value3 = lda.i32.index %stream_input, %index3
+  %scaled3 = lshl %value3, %scale_shift
+  st.i32.index %scaled3, %stream_output, %index3
+  %index4 = mov.address-index %offset4
+  %value4 = lda.i32.index %stream_input, %index4
+  %scaled4 = lshl %value4, %scale_shift
+  st.i32.index %scaled4, %stream_output, %index4
+  %index5 = mov.address-index %offset5
+  %value5 = lda.i32.index %stream_input, %index5
+  %scaled5 = lshl %value5, %scale_shift
+  st.i32.index %scaled5, %stream_output, %index5
+  %index6 = mov.address-index %offset6
+  %value6 = lda.i32.index %stream_input, %index6
+  %scaled6 = lshl %value6, %scale_shift
+  st.i32.index %scaled6, %stream_output, %index6
+  low.br ^finish
+^finish:
+  %write1 = st.i32.post %retained0, %record_output, 4
+  %write2 = st.i32.post %retained1, %write1, 4
+  %write3 = st.i32.post %retained2, %write2, 4
+  %write4 = st.i32.post %retained3, %write3, 4
+  %write5 = st.i32.post %retained4, %write4, 4
+  %write6 = st.i32.post %retained5, %write5, 4
+  %write7 = st.i32.post %retained6, %write6, 4
+  %write8 = st.i32.post %retained7, %write7, 4
+  %write9 = st.i32.post %retained8, %write8, 4
+  %write10 = st.i32.post %retained9, %write9, 4
+  %write11 = st.i32.post %retained10, %write10, 4
+  %write12 = st.i32.post %retained11, %write11, 4
+  %write13 = st.i32.post %retained12, %write12, 4
+  %write14 = st.i32.post %retained13, %write13, 4
+  %write15 = st.i32.post %retained14, %write14, 4
+  %write16 = st.i32.post %retained15, %write15, 4
+  %write17 = st.i32.post %retained16, %write16, 4
+  %write18 = st.i32.post %retained17, %write17, 4
+  %write19 = st.i32.post %retained18, %write18, 4
+  %write20 = st.i32.post %retained19, %write19, 4
+  %write21 = st.i32.post %retained20, %write20, 4
+  %write22 = st.i32.post %retained21, %write21, 4
+  %write23 = st.i32.post %retained22, %write22, 4
+  %write24 = st.i32.post %retained23, %write23, 4
+  %write25 = st.i32.post %retained24, %write24, 4
+  %write26 = st.i32.post %retained25, %write25, 4
+  return
+}
+
+// ----
+issue cycles: 138
+code bytes: 496
+coissued bundles: 13
+coissued components: 29

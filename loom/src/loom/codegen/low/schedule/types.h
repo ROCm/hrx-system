@@ -699,8 +699,9 @@ typedef struct loom_low_schedule_options_t {
   // Borrowed module-value membership retained by allocation repair. Marked
   // results were cloned next to individual users to shorten their lifetimes.
   // Nonempty membership enables static setup ordering and defers blocked
-  // operand-capturing materializations. Consumer cloning and spill insertion
-  // invalidate placement at the rematerialization owner. Empty outside repair.
+  // materializations during ready selection. Consumer cloning and spill
+  // insertion invalidate placement at the rematerialization owner. Empty
+  // outside repair.
   iree_bitmap_t per_user_rematerialized_values;
   // Optional target-provided implicit state reads for structural low
   // materializations that emit target packets without descriptor rows.

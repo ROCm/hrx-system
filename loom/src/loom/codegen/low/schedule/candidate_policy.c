@@ -64,7 +64,7 @@ static const loom_low_schedule_recovery_policy_t
 
 // Returns true when |score| establishes a new live storage value without
 // reducing live units, exposing a storage step or descriptor, or advancing
-// the pinned completion of a full unspillable register class.
+// a live constrained-storage completion.
 // Scheduling such setup early only transfers or grows liveness in its
 // destination register class and can hold scarce physical locations across
 // unrelated work. Alias establishment and storage compaction produce no value
@@ -73,10 +73,10 @@ static bool loom_low_schedule_candidate_defers_storage_setup(
     const loom_low_schedule_candidate_score_t* score) {
   const uint16_t actionable_flags =
       LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_DESCRIPTOR |
-      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_STORAGE;
+      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_STORAGE |
+      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_CONSTRAINED_COMPLETION;
   return score->produced_live_value_count != 0 &&
          score->killed_live_units <= score->produced_live_units &&
-         score->active_unspillable_completion_capacity == UINT32_MAX &&
          iree_any_bit_set(score->flags,
                           LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_STORAGE_SETUP) &&
          !iree_any_bit_set(score->flags, actionable_flags);

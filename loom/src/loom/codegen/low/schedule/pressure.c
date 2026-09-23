@@ -1558,11 +1558,10 @@ void loom_low_schedule_pressure_score_candidate(
     const uint32_t unit_count = value->unit_count - alias_units;
     produced_live_units += unit_count;
     if (unit_count != 0) {
-      // Hoisting operand-free leaves creates only their result and remains
-      // governed by the packing policy. Operand-capturing clones transfer live
-      // storage between classes and must retain their use-local placement.
+      // Repair shortened this result's lifetime by placing it next to its
+      // consumer. Keep that placement for input-free clones too; the ready
+      // policy can still advance them to complete live storage groups.
       is_per_user_rematerialization |=
-          node->operand_count != 0 &&
           value->value_id < per_user_rematerialized_values.bit_count &&
           iree_bitmap_test(per_user_rematerialized_values, value->value_id);
       ++produced_live_value_count;

@@ -219,10 +219,10 @@ low.func.def target<amd.xdna.aie2p.core> @static_offset_loop(%input: reg<aie2p.e
 }
 
 // ----
-issue cycles: 73
+issue cycles: 74
 code bytes: 430
-coissued bundles: 25
-coissued components: 69
+coissued bundles: 26
+coissued components: 70
 
 // ====
 
