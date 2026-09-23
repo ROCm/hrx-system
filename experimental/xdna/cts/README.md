@@ -4,6 +4,13 @@
 queue submission, readback and resource retirement through libamdf. They select
 the appropriate image for the available device family.
 
+`predicate_select_npu2_test` checks selection between independently computed
+predicates in full 64-element and partial 3x3 carriers. Every lane sees all
+eight Boolean input triples, with different patterns in the two mask halves.
+An independent conditional oracle checks selected bytes, partial-store tails,
+binding guards and unchanged inputs through three establishing invocations.
+It uses the explicit hardware configuration below.
+
 `bitcast_npu2_test` imports scalar/vector C++ bit casts and executes a streamed
 pipeline on Strix Halo. An independent byte oracle checks wrapping byte
 arithmetic, FP8/FP16/BF16 lane permutations and 64-bit payload transport through

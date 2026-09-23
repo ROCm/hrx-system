@@ -1140,10 +1140,13 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
     )
     assert predicate_splat.emit[-1].result_types is None
 
-    vector_select_rules = [
-        rule for rule in rules if rule.source_op is vector.vector_select
+    payload_select_rules = [
+        rule
+        for rule in rules
+        if rule.source_op is vector.vector_select
+        and rule.guards[1].type_pattern.element != "i1"
     ]
-    assert [rule.descriptor.key for rule in vector_select_rules] == [
+    assert [rule.descriptor.key for rule in payload_select_rules] == [
         "amd.xdna.aie2p.select.i8x64",
         "amd.xdna.aie2p.select.i8x64",
         "amd.xdna.aie2p.select.i8x64",
@@ -1153,7 +1156,7 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         "amd.xdna.aie2p.select.i32x16.mask64",
         "amd.xdna.aie2p.select.i32x16.mask64",
     ]
-    for rule in vector_select_rules:
+    for rule in payload_select_rules:
         select = rule.emit[0]
         assert select.operands["s1"].field == "false_value"
         assert select.operands["s2"].field == "true_value"

@@ -1,0 +1,39 @@
+func.def @predicate_select_four(%mask: vector<4xi1>, %true_value: vector<4xi1>, %false_value: vector<4xi1>) -> (vector<4xi1>) {
+  %selected = vector.select %mask, %true_value, %false_value : vector<4xi1>
+  func.return %selected : vector<4xi1>
+}
+
+// ====
+
+func.def @predicate_select_partial(%mask: vector<9xi1>, %true_value: vector<9xi1>, %false_value: vector<9xi1>) -> (vector<9xi1>) {
+  %selected = vector.select %mask, %true_value, %false_value : vector<9xi1>
+  func.return %selected : vector<9xi1>
+}
+
+// ====
+
+func.def @predicate_select_crossing(%mask: vector<33xi1>, %true_value: vector<33xi1>, %false_value: vector<33xi1>) -> (vector<33xi1>) {
+  %selected = vector.select %mask, %true_value, %false_value : vector<33xi1>
+  func.return %selected : vector<33xi1>
+}
+
+// ====
+
+func.def @predicate_select_full(%mask: vector<64xi1>, %true_value: vector<64xi1>, %false_value: vector<64xi1>) -> (vector<64xi1>) {
+  %selected = vector.select %mask, %true_value, %false_value : vector<64xi1>
+  func.return %selected : vector<64xi1>
+}
+
+// ====
+
+func.def @predicate_select_partial_matrix(%mask: vector<3x3xi1>, %true_value: vector<3x3xi1>, %false_value: vector<3x3xi1>) -> (vector<3x3xi1>) {
+  %selected = vector.select %mask, %true_value, %false_value : vector<3x3xi1>
+  func.return %selected : vector<3x3xi1>
+}
+
+// ====
+
+func.def @predicate_select_full_matrix(%mask: vector<8x8xi1>, %true_value: vector<8x8xi1>, %false_value: vector<8x8xi1>) -> (vector<8x8xi1>) {
+  %selected = vector.select %mask, %true_value, %false_value : vector<8x8xi1>
+  func.return %selected : vector<8x8xi1>
+}

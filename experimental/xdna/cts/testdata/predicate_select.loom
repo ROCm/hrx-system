@@ -1,0 +1,82 @@
+// Independent runtime predicates select other predicates before materializing
+// bytes. Partial output stores preserve the surrounding tile sentinel.
+aie2p.target<array> @array_target
+aie2p.target<core> @core_target
+
+pipeline.def<kernel> public retain target(@array_target) @predicate_select_full() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x256xi8>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x128xi8>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x256xi8>, group -> pipeline.flow<tile<256xi8>>
+  %results = pipeline.stage @select_full_predicates on %workers(%packets) : (group, pipeline.flow<tile<256xi8>>) -> (pipeline.flow<tile<128xi8>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<128xi8>>, view<1x16x128xi8>
+  pipeline.return
+}
+
+func.def target(@core_target) @select_full_predicates(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %true_origin = index.constant 64 : offset
+  %false_origin = index.constant 128 : offset
+  %mask_view = buffer.view %source[%origin] : buffer -> view<64xi8>
+  %true_view = buffer.view %source[%true_origin] : buffer -> view<64xi8>
+  %false_view = buffer.view %source[%false_origin] : buffer -> view<64xi8>
+  %output_view = buffer.view %destination[%origin] : buffer -> view<128xi8>
+  %result_view = buffer.view %destination[%origin] : buffer -> view<64xi8>
+  %sentinel = vector.constant -91 : vector<64xi8>
+  vector.store %sentinel, %output_view[0] : vector<64xi8>, view<128xi8>
+  vector.store %sentinel, %output_view[64] : vector<64xi8>, view<128xi8>
+  %mask_bytes = vector.load %mask_view[0] : view<64xi8> -> vector<64xi8>
+  %true_bytes = vector.load %true_view[0] : view<64xi8> -> vector<64xi8>
+  %false_bytes = vector.load %false_view[0] : view<64xi8> -> vector<64xi8>
+  %zero = vector.constant 0 : vector<64xi8>
+  %one = vector.constant 1 : vector<64xi8>
+  %mask = vector.cmpi ne, %mask_bytes, %zero : vector<64xi8> -> vector<64xi1>
+  %true_value = vector.cmpi ne, %true_bytes, %zero : vector<64xi8> -> vector<64xi1>
+  %false_value = vector.cmpi ne, %false_bytes, %zero : vector<64xi8> -> vector<64xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<64xi1>
+  %bytes = vector.select %selected, %one, %zero : vector<64xi8>
+  vector.store %bytes, %result_view[0] : vector<64xi8>, view<64xi8>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @predicate_select_partial() launch(%input: buffer, %output: buffer) {
+  %count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %count : index -> group
+  %input_view = buffer.view %input[%origin] : buffer -> view<1x16x256xi8>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1x16x128xi8>
+  %packets = pipeline.scatter %input_view across %workers : view<1x16x256xi8>, group -> pipeline.flow<tile<256xi8>>
+  %results = pipeline.stage @select_partial_predicates on %workers(%packets) : (group, pipeline.flow<tile<256xi8>>) -> (pipeline.flow<tile<128xi8>>)
+  pipeline.write %results to %output_view : pipeline.flow<tile<128xi8>>, view<1x16x128xi8>
+  pipeline.return
+}
+
+func.def target(@core_target) @select_partial_predicates(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %true_origin = index.constant 64 : offset
+  %false_origin = index.constant 128 : offset
+  %mask_view = buffer.view %source[%origin] : buffer -> view<3x3xi8>
+  %true_view = buffer.view %source[%true_origin] : buffer -> view<3x3xi8>
+  %false_view = buffer.view %source[%false_origin] : buffer -> view<3x3xi8>
+  %output_view = buffer.view %destination[%origin] : buffer -> view<128xi8>
+  %result_view = buffer.view %destination[%origin] : buffer -> view<3x3xi8>
+  %sentinel = vector.constant -91 : vector<64xi8>
+  vector.store %sentinel, %output_view[0] : vector<64xi8>, view<128xi8>
+  vector.store %sentinel, %output_view[64] : vector<64xi8>, view<128xi8>
+  %mask_bytes = vector.load %mask_view[0, 0] : view<3x3xi8> -> vector<3x3xi8>
+  %true_bytes = vector.load %true_view[0, 0] : view<3x3xi8> -> vector<3x3xi8>
+  %false_bytes = vector.load %false_view[0, 0] : view<3x3xi8> -> vector<3x3xi8>
+  %zero = vector.constant 0 : vector<3x3xi8>
+  %one = vector.constant 1 : vector<3x3xi8>
+  %mask = vector.cmpi ne, %mask_bytes, %zero : vector<3x3xi8> -> vector<3x3xi1>
+  %true_value = vector.cmpi ne, %true_bytes, %zero : vector<3x3xi8> -> vector<3x3xi1>
+  %false_value = vector.cmpi ne, %false_bytes, %zero : vector<3x3xi8> -> vector<3x3xi1>
+  %selected = vector.select %mask, %true_value, %false_value : vector<3x3xi1>
+  %bytes = vector.select %selected, %one, %zero : vector<3x3xi8>
+  vector.store %bytes, %result_view[0, 0] : vector<3x3xi8>, view<3x3xi8>
+  func.return
+}

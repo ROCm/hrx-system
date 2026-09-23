@@ -761,6 +761,7 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
                 (core_rules._F32_VECTOR, "amd.xdna.aie2p.select.i32x16.mask64"),
             )
         ),
+        core_rules._vector_predicate_select_rule(),
         *(
             core_rules._vector_predicate_binary_rule(source_op, operation)
             for source_op, operation in (

@@ -756,6 +756,7 @@ def _predicate_binary_emits(
                 "storage": low_result,
             },
             results={"d0": result},
+            result_types={"d0": DescriptorResultType()},
         ),
     )
 
@@ -775,6 +776,42 @@ def _vector_predicate_binary_rule(
             ValueRef.operand("rhs"),
             ValueRef.result("result"),
             temporary_prefix="predicate",
+        ),
+    )
+
+
+def _vector_predicate_select_rule() -> DescriptorRule:
+    difference = ValueRef.temporary("difference")
+    changes = ValueRef.temporary("changes")
+    return DescriptorRule(
+        source_op=vector.vector_select,
+        descriptor=_descriptor("amd.xdna.aie2p.predicate.xor.high32"),
+        guards=_typed_guards(
+            ("condition", "true_value", "false_value", "result"), _I1_VECTOR
+        ),
+        # Select each packed predicate bit without expanding its payload lane.
+        emit=(
+            *_predicate_binary_emits(
+                "xor",
+                ValueRef.operand("true_value"),
+                ValueRef.operand("false_value"),
+                difference,
+                temporary_prefix="difference",
+            ),
+            *_predicate_binary_emits(
+                "and",
+                ValueRef.operand("condition"),
+                difference,
+                changes,
+                temporary_prefix="changes",
+            ),
+            *_predicate_binary_emits(
+                "xor",
+                ValueRef.operand("false_value"),
+                changes,
+                ValueRef.result("result"),
+                temporary_prefix="selected",
+            ),
         ),
     )
 

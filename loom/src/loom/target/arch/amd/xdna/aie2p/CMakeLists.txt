@@ -628,6 +628,7 @@ loom_check_test_suite(
     "test/source_low/packet_source_reads.loom-test"
     "test/source_low/predicate_extension.loom-test"
     "test/source_low/predicate_extract.loom-test"
+    "test/source_low/predicate_select.loom-test"
     "test/source_low/selected_payload_transport.loom-test"
     "test/source_low/shared_conditional_values.loom-test"
     "test/source_low/uniform_predicate_control.loom-test"

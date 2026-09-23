@@ -193,6 +193,33 @@ xdna_execution_test_suite(
 )
 
 iree_py_binary(
+    name = "predicate_select_cases",
+    testonly = True,
+    srcs = ["predicate_select_cases.py"],
+    main = "predicate_select_cases.py",
+)
+
+xdna_execution_test_suite(
+    name = "predicate_select_npu2_test",
+    data = ["testdata/predicate_select.loom"],
+    manifests = ["predicate_select_npu2.test.json"],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//loom/config/target:xdna_artifacts": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }) + select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    tools = {
+        "generate-cases": ":predicate_select_cases",
+        "iree-xdna-run": "//experimental/xdna:iree-xdna-run",
+        "loom-compile": "//loom/src/loom/tools/loom-compile",
+    },
+)
+
+iree_py_binary(
     name = "multicast_cases",
     testonly = True,
     srcs = ["multicast_cases.py"],

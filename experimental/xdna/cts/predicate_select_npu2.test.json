@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "Full predicate values select independently on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/predicate_select.loom",
+              "--root=@predicate_select_full",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/predicate-select.xdna",
+              "--compile-report=text-details",
+              "--compile-report-output={tmp}/compile-report.txt"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/predicate-select.xdna",
+              "--columns=1",
+              "--entry=predicate_select_full",
+              "--invocation_count=3",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/full/input.bin",
+              "--binding={tmp}/fixtures/full/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/full/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/full/expected.bin"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Partial predicate values select independently on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "generate-cases",
+            "args": [
+              "{tmp}/fixtures"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/predicate_select.loom",
+              "--root=@predicate_select_partial",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/predicate-select.xdna",
+              "--compile-report=text-details",
+              "--compile-report-output={tmp}/compile-report.txt"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/predicate-select.xdna",
+              "--columns=1",
+              "--entry=predicate_select_partial",
+              "--invocation_count=3",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/partial/input.bin",
+              "--binding={tmp}/fixtures/partial/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/partial/input.bin"
+            },
+            {
+              "path": "{tmp}/output-readback.bin",
+              "equals": "{tmp}/fixtures/partial/expected.bin"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
