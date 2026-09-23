@@ -1229,6 +1229,27 @@ def test_attr_copy_row_emits_source_memory_offset_literal_payload() -> None:
     assert ".literal_i64 = INT64_C(192)" in fields
 
 
+def test_attr_copy_row_emits_static_dimension_projection_payload() -> None:
+    fields = attr_copy_row(
+        LowerAttrCopy(
+            kind=LowerAttrCopyKind.VALUE_TYPE_LITERAL_MINUS_STATIC_DIM_SCALED,
+            target_name="shift",
+            value_ref_index=3,
+            source_element_index=1,
+            source_element_count=8,
+            literal_i64=64,
+        ),
+        target_name_string_ref="TEST_STRING_SHIFT",
+    )
+
+    assert ".kind = LOOM_LOW_LOWER_ATTR_COPY_VALUE_TYPE_LITERAL_MINUS_STATIC_DIM_SCALED" in fields
+    assert ".value_ref_index = 3" in fields
+    assert ".source_element_index = 1" in fields
+    assert ".source_element_count = 8" in fields
+    assert ".literal_i64 = INT64_C(64)" in fields
+    assert not any("source_attr_index" in field for field in fields)
+
+
 def test_diagnostic_param_row_emits_portable_signed_i64_literal() -> None:
     fields = diagnostic_param_row(
         LowerDiagnosticParam(

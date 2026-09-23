@@ -98,6 +98,8 @@ _ATTR_COPY_VALUE_REF_KINDS = frozenset(
         LowerAttrCopyKind.VALUE_FLOAT_BITS,
         LowerAttrCopyKind.VALUE_FLOAT_AS_F32_I32,
         LowerAttrCopyKind.VALUE_FLOAT_AS_F64_I32_WORD,
+        LowerAttrCopyKind.VALUE_TYPE_STATIC_DIM_SCALED,
+        LowerAttrCopyKind.VALUE_TYPE_LITERAL_MINUS_STATIC_DIM_SCALED,
     )
 )
 
@@ -671,6 +673,8 @@ def attr_copy_row(
         LowerAttrCopyKind.I64_ARRAY_LANE_BYTE,
         LowerAttrCopyKind.VALUE_EXACT_I64_I32_WORD,
         LowerAttrCopyKind.VALUE_FLOAT_AS_F64_I32_WORD,
+        LowerAttrCopyKind.VALUE_TYPE_STATIC_DIM_SCALED,
+        LowerAttrCopyKind.VALUE_TYPE_LITERAL_MINUS_STATIC_DIM_SCALED,
     ):
         _append_field(
             fields,
@@ -682,6 +686,8 @@ def attr_copy_row(
         LowerAttrCopyKind.I64_ARRAY_PACK_ELEMENTS,
         LowerAttrCopyKind.ATTRS_PACK_CONSECUTIVE,
         LowerAttrCopyKind.I64_ARRAY_LANE_BYTE,
+        LowerAttrCopyKind.VALUE_TYPE_STATIC_DIM_SCALED,
+        LowerAttrCopyKind.VALUE_TYPE_LITERAL_MINUS_STATIC_DIM_SCALED,
     ):
         _append_field(
             fields,
@@ -714,6 +720,8 @@ def attr_copy_row(
         LowerAttrCopyKind.SOURCE_MEMORY_STATIC_BYTE_OFFSET_REMAINDER,
         LowerAttrCopyKind.VALUE_U32_DIVISOR_MAGIC_SHIFT,
         LowerAttrCopyKind.VALUE_U32_DIVISOR_MAGIC_MULTIPLIER,
+        LowerAttrCopyKind.VALUE_TYPE_STATIC_DIM_SCALED,
+        LowerAttrCopyKind.VALUE_TYPE_LITERAL_MINUS_STATIC_DIM_SCALED,
     ):
         _append_field(
             fields,

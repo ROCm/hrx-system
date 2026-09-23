@@ -24,6 +24,7 @@ from loom.target.contracts import (
     TypePattern,
     ValueAliasRule,
     ValueRef,
+    ValueTypeProject,
     Vector,
     descriptor_by_key,
 )
@@ -134,19 +135,36 @@ _I16_INTERLEAVE_CONTROL = 18
 # by one X register.
 _I32_F32_TRANSPOSE_4X4_CONTROL = 34
 
-# Two native X-register carriers concatenate into one ordinary 1024-bit
-# vector. These are the value shapes reachable from packetized wide loads;
-# F32x32 is excluded because it has an accumulator representation.
+# Ordinary payloads share byte-addressable X carriers regardless of element
+# interpretation. A partial packet occupies the low bytes of its carrier.
+_PACKED_VECTOR_ELEMENT_TYPES = (
+    (("i8", "f8E4M3", "f8E5M2"), 1),
+    (("i16", "f16", "bf16"), 2),
+    (("i32", "f32"), 4),
+    (("i64", "f64"), 8),
+)
+
+# A full X packet followed by a possibly partial packet occupies two X
+# carriers. F32x32 is excluded because it has an accumulator representation.
 _WIDE_VECTOR_CONCAT_SPECS = (
     (
         Vector(("i8", "f8E4M3", "f8E5M2"), lanes=64),
-        Vector(("i8", "f8E4M3", "f8E5M2"), lanes=128),
+        Vector(
+            ("i8", "f8E4M3", "f8E5M2"),
+            minimum_lanes=65,
+            maximum_lanes=128,
+        ),
     ),
     (
         Vector(("i16", "f16", "bf16"), lanes=32),
-        Vector(("i16", "f16", "bf16"), lanes=64),
+        Vector(("i16", "f16", "bf16"), minimum_lanes=33, maximum_lanes=64),
     ),
-    (Vector("i32", lanes=16), Vector("i32", lanes=32)),
+    (Vector("i32", lanes=16), Vector("i32", minimum_lanes=17, maximum_lanes=32)),
+    (Vector("f32", lanes=16), Vector("f32", minimum_lanes=17, maximum_lanes=31)),
+    (
+        Vector(("i64", "f64"), lanes=8),
+        Vector(("i64", "f64"), minimum_lanes=9, maximum_lanes=16),
+    ),
 )
 
 
@@ -738,17 +756,26 @@ def _vector_slice_rules(
     return tuple(rules)
 
 
-def _vector_concat_i8x32_pair_rule() -> DescriptorRule:
-    # Each input carries its 256 value bits in the low W unit of an ordinary X
-    # carrier. Joining those two units gives the exact 512-bit result without
-    # scalar lane extraction or insertion.
+def _vector_concat_half_carrier_rule(
+    element_types: tuple[str, ...],
+    element_byte_count: int,
+) -> DescriptorRule:
+    half_lane_count = 32 // element_byte_count
+    carrier_lane_count = 64 // element_byte_count
     return DescriptorRule(
         source_op=vector.vector_concat,
         guards=(
             Guard.i64_range("axis", 0, 0),
             Guard.operand_segment_count("inputs", 2),
-            Guard.value_type("inputs", _I8X32_VECTOR),
-            Guard.value_type("result", _I8X64_VECTOR),
+            Guard.value_type("inputs", Vector(element_types, lanes=half_lane_count)),
+            Guard.value_type(
+                "result",
+                Vector(
+                    element_types,
+                    minimum_lanes=half_lane_count + 1,
+                    maximum_lanes=carrier_lane_count,
+                ),
+            ),
         ),
         emit=(
             EmitRegisterSlice(
@@ -768,6 +795,322 @@ def _vector_concat_i8x32_pair_rule() -> DescriptorRule:
                 ),
                 result=ValueRef.result("result"),
             ),
+        ),
+        priority=1,
+    )
+
+
+def _vector_concat_merge_emits(
+    left: ValueRef,
+    right: ValueRef,
+    result: ValueRef,
+    *,
+    left_byte_count: ValueTypeProject,
+    remaining_byte_count: ValueTypeProject,
+    temporary_prefix: str = "",
+    result_type: DescriptorResultType | None = None,
+) -> tuple[ContractEmit, ...]:
+    """Joins the suffix-aligned left payload to the right carrier prefix."""
+
+    constant = _descriptor("amd.xdna.aie2p.constant.i32.mova")
+    shift = _descriptor("amd.xdna.aie2p.shift.bytes.x.configured")
+    left_bytes = ValueRef.temporary(f"{temporary_prefix}left_bytes")
+    rotated_left = ValueRef.temporary(f"{temporary_prefix}rotated_left")
+    remaining_bytes = ValueRef.temporary(f"{temporary_prefix}remaining_bytes")
+    return (
+        EmitDescriptorOp(
+            descriptor=constant,
+            results={"dst": left_bytes},
+            result_types={"dst": DescriptorResultType()},
+            immediates={"i": left_byte_count},
+            form=DescriptorEmitForm.CONST,
+        ),
+        EmitDescriptorOp(
+            descriptor=shift,
+            operands={"s1": left, "s2": left, "shift": left_bytes},
+            results={"d": rotated_left},
+            result_types={"d": DescriptorResultType()},
+            form=DescriptorEmitForm.OP,
+        ),
+        EmitDescriptorOp(
+            descriptor=constant,
+            results={"dst": remaining_bytes},
+            result_types={"dst": DescriptorResultType()},
+            immediates={"i": remaining_byte_count},
+            form=DescriptorEmitForm.CONST,
+        ),
+        EmitDescriptorOp(
+            descriptor=shift,
+            operands={
+                "s1": rotated_left,
+                "s2": right,
+                "shift": remaining_bytes,
+            },
+            results={"d": result},
+            result_types=({"d": result_type} if result_type is not None else None),
+            form=DescriptorEmitForm.OP,
+        ),
+    )
+
+
+def _vector_concat_shift_rule(
+    element_types: tuple[str, ...],
+    element_byte_count: int,
+) -> DescriptorRule:
+    shift = _descriptor("amd.xdna.aie2p.shift.bytes.x.configured")
+    left = ValueRef.operand("inputs", element=0)
+    right = ValueRef.operand("inputs", element=1)
+    carrier_lane_count = 64 // element_byte_count
+    return DescriptorRule(
+        source_op=vector.vector_concat,
+        descriptor=shift,
+        guards=(
+            Guard.i64_range("axis", 0, 0),
+            Guard.operand_segment_count("inputs", 2),
+            Guard.value_type(
+                "inputs",
+                Vector(
+                    element_types,
+                    minimum_lanes=1,
+                    maximum_lanes=carrier_lane_count - 1,
+                ),
+            ),
+            Guard.value_type(
+                "result",
+                Vector(
+                    element_types,
+                    minimum_lanes=2,
+                    maximum_lanes=carrier_lane_count,
+                ),
+            ),
+        ),
+        emit=_vector_concat_merge_emits(
+            left,
+            right,
+            ValueRef.result("result"),
+            left_byte_count=ValueTypeProject.static_dim_scaled(
+                left,
+                scale=element_byte_count,
+            ),
+            remaining_byte_count=(
+                ValueTypeProject.literal_minus_static_dim_scaled(
+                    left,
+                    scale=element_byte_count,
+                    literal=64,
+                )
+            ),
+        ),
+    )
+
+
+def _vector_concat_narrow_left_wide_result_rule(
+    element_types: tuple[str, ...],
+    element_byte_count: int,
+    wide_lane_maximum: int,
+    *,
+    right_type: TypePattern,
+    result_lane_minimum: int,
+    right_low: ValueRef,
+    right_high: ValueRef,
+    prepare_right: tuple[ContractEmit, ...],
+) -> DescriptorRule:
+    shift = _descriptor("amd.xdna.aie2p.shift.bytes.x.configured")
+    carrier_lane_count = 64 // element_byte_count
+    left = ValueRef.operand("inputs", element=0)
+    low = ValueRef.temporary("low")
+    high = ValueRef.temporary("high")
+    remaining_bytes = ValueRef.temporary("low_remaining_bytes")
+    return DescriptorRule(
+        source_op=vector.vector_concat,
+        descriptor=shift,
+        guards=(
+            Guard.i64_range("axis", 0, 0),
+            Guard.operand_segment_count("inputs", 2),
+            Guard.value_type(
+                "inputs",
+                Vector(
+                    element_types,
+                    minimum_lanes=1,
+                    maximum_lanes=carrier_lane_count - 1,
+                ),
+            ),
+            Guard.value_type("inputs", right_type, element=1),
+            Guard.value_type(
+                "result",
+                Vector(
+                    element_types,
+                    minimum_lanes=result_lane_minimum,
+                    maximum_lanes=wide_lane_maximum,
+                ),
+            ),
+        ),
+        emit=(
+            *prepare_right,
+            *_vector_concat_merge_emits(
+                left,
+                right_low,
+                low,
+                left_byte_count=ValueTypeProject.static_dim_scaled(
+                    left,
+                    scale=element_byte_count,
+                ),
+                remaining_byte_count=(
+                    ValueTypeProject.literal_minus_static_dim_scaled(
+                        left,
+                        scale=element_byte_count,
+                        literal=64,
+                    )
+                ),
+                temporary_prefix="low_",
+                result_type=DescriptorResultType(),
+            ),
+            EmitDescriptorOp(
+                descriptor=shift,
+                operands={
+                    "s1": right_low,
+                    "s2": right_high,
+                    "shift": remaining_bytes,
+                },
+                results={"d": high},
+                result_types={"d": DescriptorResultType()},
+                form=DescriptorEmitForm.OP,
+            ),
+            EmitRegisterConcat(
+                sources=(low, high),
+                result=ValueRef.result("result"),
+            ),
+        ),
+    )
+
+
+def _vector_concat_wide_left_rule(
+    element_types: tuple[str, ...],
+    element_byte_count: int,
+    wide_lane_maximum: int,
+) -> DescriptorRule:
+    carrier_lane_count = 64 // element_byte_count
+    left = ValueRef.operand("inputs", element=0)
+    right = ValueRef.operand("inputs", element=1)
+    left_low = ValueRef.temporary("left_low")
+    left_high = ValueRef.temporary("left_high")
+    result_high = ValueRef.temporary("result_high")
+    return DescriptorRule(
+        source_op=vector.vector_concat,
+        descriptor=_descriptor("amd.xdna.aie2p.shift.bytes.x.configured"),
+        guards=(
+            Guard.i64_range("axis", 0, 0),
+            Guard.operand_segment_count("inputs", 2),
+            Guard.value_type(
+                "inputs",
+                Vector(
+                    element_types,
+                    minimum_lanes=carrier_lane_count + 1,
+                    maximum_lanes=wide_lane_maximum - 1,
+                ),
+            ),
+            Guard.value_type(
+                "inputs",
+                Vector(
+                    element_types,
+                    minimum_lanes=1,
+                    maximum_lanes=carrier_lane_count - 1,
+                ),
+                element=1,
+            ),
+            Guard.value_type(
+                "result",
+                Vector(
+                    element_types,
+                    minimum_lanes=carrier_lane_count + 2,
+                    maximum_lanes=wide_lane_maximum,
+                ),
+            ),
+        ),
+        emit=(
+            EmitRegisterSlice(source=left, result=left_low, unit_count=2),
+            EmitRegisterSlice(
+                source=left,
+                result=left_high,
+                unit_offset=2,
+                unit_count=2,
+            ),
+            *_vector_concat_merge_emits(
+                left_high,
+                right,
+                result_high,
+                left_byte_count=ValueTypeProject.static_dim_scaled(
+                    left,
+                    scale=element_byte_count,
+                    addend=-64,
+                ),
+                remaining_byte_count=(
+                    ValueTypeProject.literal_minus_static_dim_scaled(
+                        left,
+                        scale=element_byte_count,
+                        literal=128,
+                    )
+                ),
+                temporary_prefix="high_",
+                result_type=DescriptorResultType(),
+            ),
+            EmitRegisterConcat(
+                sources=(left_low, result_high),
+                result=ValueRef.result("result"),
+            ),
+        ),
+    )
+
+
+def _vector_concat_split_carrier_rules(
+    element_types: tuple[str, ...],
+    element_byte_count: int,
+    wide_lane_maximum: int,
+) -> tuple[DescriptorRule, ...]:
+    carrier_lane_count = 64 // element_byte_count
+    right = ValueRef.operand("inputs", element=1)
+    right_low = ValueRef.temporary("right_low")
+    right_high = ValueRef.temporary("right_high")
+    return (
+        _vector_concat_narrow_left_wide_result_rule(
+            element_types,
+            element_byte_count,
+            wide_lane_maximum,
+            right_type=Vector(
+                element_types,
+                minimum_lanes=1,
+                maximum_lanes=carrier_lane_count,
+            ),
+            result_lane_minimum=carrier_lane_count + 1,
+            right_low=right,
+            right_high=right,
+            prepare_right=(),
+        ),
+        _vector_concat_narrow_left_wide_result_rule(
+            element_types,
+            element_byte_count,
+            wide_lane_maximum,
+            right_type=Vector(
+                element_types,
+                minimum_lanes=carrier_lane_count + 1,
+                maximum_lanes=wide_lane_maximum - 1,
+            ),
+            result_lane_minimum=carrier_lane_count + 2,
+            right_low=right_low,
+            right_high=right_high,
+            prepare_right=(
+                EmitRegisterSlice(source=right, result=right_low, unit_count=2),
+                EmitRegisterSlice(
+                    source=right,
+                    result=right_high,
+                    unit_offset=2,
+                    unit_count=2,
+                ),
+            ),
+        ),
+        _vector_concat_wide_left_rule(
+            element_types,
+            element_byte_count,
+            wide_lane_maximum,
         ),
     )
 
@@ -841,10 +1184,34 @@ AIE2P_STRUCTURAL_RULES = (
             wide_lane_maximum,
         )
     ),
-    _vector_concat_i8x32_pair_rule(),
+    *(
+        rule
+        for element_types, element_byte_count in _PACKED_VECTOR_ELEMENT_TYPES
+        for rule in (
+            _vector_concat_half_carrier_rule(
+                element_types,
+                element_byte_count,
+            ),
+            _vector_concat_shift_rule(
+                element_types,
+                element_byte_count,
+            ),
+        )
+    ),
     *(
         _wide_vector_concat_pair_rule(input_type, result_type)
         for input_type, result_type in _WIDE_VECTOR_CONCAT_SPECS
+    ),
+    *(
+        rule
+        for element_types, element_byte_count, wide_lane_maximum in (
+            _VECTOR_CARRIER_SPECS
+        )
+        for rule in _vector_concat_split_carrier_rules(
+            element_types,
+            element_byte_count,
+            wide_lane_maximum,
+        )
     ),
     _vector_deinterleave_i8x64_rule(),
     _vector_interleave_16bit_rule(),

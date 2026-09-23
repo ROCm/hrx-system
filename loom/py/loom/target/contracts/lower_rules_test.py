@@ -9,6 +9,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import replace
 
+import pytest
+
 from loom.dialect.scalar import ALL_SCALAR_OPS
 from loom.dialect.scalar import analysis as scalar_analysis
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
@@ -61,6 +63,7 @@ from loom.target.contracts import (
     ValueElideRule,
     ValueProject,
     ValueRef,
+    ValueTypeProject,
     Vector,
     binary_descriptor_rules,
     compile_lower_rule_set,
@@ -1084,6 +1087,55 @@ def test_compile_lower_rule_set_orders_variadic_arity_before_value_guards() -> N
     )
 
 
+def test_compile_lower_rule_set_selects_variadic_value_type_element() -> None:
+    table = ContractFragment(
+        name="test.variadic-value-type",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            DescriptorRule(
+                source_op=vector.vector_concat,
+                descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+                guards=(
+                    Guard.operand_segment_count("inputs", 2),
+                    Guard.value_type("inputs", Vector("i32", lanes=1)),
+                    Guard.value_type(
+                        "inputs",
+                        Vector("i32", lanes=4),
+                        element=1,
+                    ),
+                    Guard.value_type("result", Vector("i32", lanes=5)),
+                ),
+                emit=(
+                    EmitDescriptorOp(
+                        descriptor=TEST_LOW_ADD_I32_DESCRIPTOR,
+                        operands={
+                            "lhs": ValueRef.operand("inputs", element=1),
+                            "rhs": ValueRef.operand("inputs", element=1),
+                        },
+                        results={"dst": ValueRef.temporary("selected")},
+                        result_types={"dst": ValueRef.operand("inputs", element=1)},
+                    ),
+                ),
+            )
+        ],
+    )
+
+    compiled = compile_lower_rule_set(table, dialect_ops={"vector": ALL_VECTOR_OPS})
+
+    input_guards = compiled.guards[1:3]
+    assert tuple(
+        compiled.value_refs[guard.value_ref_index].element_index
+        for guard in input_guards
+    ) == (0, 1)
+    assert compiled.emits[0].kind == LowerEmitKind.DESCRIPTOR_OP_PER_LANE
+    for element, guard in enumerate(input_guards):
+        diagnostic = compiled.diagnostics[guard.diagnostic_index]
+        actual_type = next(
+            param for param in diagnostic.params if param.name == "actual_type"
+        )
+        assert compiled.value_refs[actual_type.value_ref_index].element_index == element
+
+
 def test_compile_lower_rule_set_rejects_unguarded_variadic_operand_ref() -> None:
     table = ContractFragment(
         name="test.unguarded-variadic-ref",
@@ -2100,6 +2152,98 @@ def test_compile_lower_rule_set_compiles_lane_byte_offset_projection() -> None:
     assert attr_copy.source_element_index == 0
     assert attr_copy.source_element_count == 4
     assert attr_copy.literal_i64 == -64
+
+
+def test_compile_lower_rule_set_projects_guarded_variadic_value_type_dimension() -> (
+    None
+):
+    source = ValueRef.operand("inputs", element=1)
+    table = ContractFragment(
+        name="test.value-type-dimension",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=(
+            DescriptorRule(
+                source_op=vector.vector_concat,
+                descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
+                guards=(
+                    Guard.operand_segment_count("inputs", 2),
+                    Guard.value_type(
+                        "inputs",
+                        Vector("i32", dims=(2, 4)),
+                        element=1,
+                    ),
+                ),
+                emit=(
+                    EmitDescriptorOp(
+                        descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
+                        results={"dst": ValueRef.temporary("scaled")},
+                        result_types={"dst": DescriptorResultType()},
+                        immediates={
+                            "i32_value": ValueTypeProject.static_dim_scaled(
+                                source,
+                                scale=4,
+                                dimension=1,
+                                addend=-8,
+                            )
+                        },
+                        form=DescriptorEmitForm.CONST,
+                    ),
+                    EmitDescriptorOp(
+                        descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
+                        results={"dst": ValueRef.temporary("remaining")},
+                        result_types={"dst": DescriptorResultType()},
+                        immediates={
+                            "i32_value": (
+                                ValueTypeProject.literal_minus_static_dim_scaled(
+                                    source,
+                                    scale=4,
+                                    literal=64,
+                                    dimension=1,
+                                )
+                            )
+                        },
+                        form=DescriptorEmitForm.CONST,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    insufficiently_guarded_rule = replace(
+        table.cases[0],
+        guards=(
+            Guard.operand_segment_count("inputs", 2),
+            Guard.value_type(
+                "inputs",
+                Vector("i32", lanes=4),
+                element=1,
+            ),
+        ),
+    )
+    with pytest.raises(
+        ValueError,
+        match=r"inputs\[1\].*guard proving static dimension 1",
+    ):
+        compile_lower_rule_set(
+            replace(table, cases=(insufficiently_guarded_rule,)),
+            dialect_ops={"vector": ALL_VECTOR_OPS},
+        )
+
+    compiled = compile_lower_rule_set(table, dialect_ops={"vector": ALL_VECTOR_OPS})
+
+    scaled, remaining = compiled.attr_copies
+    assert scaled.kind == LowerAttrCopyKind.VALUE_TYPE_STATIC_DIM_SCALED
+    assert scaled.source_element_index == 1
+    assert scaled.source_element_count == 4
+    assert scaled.literal_i64 == -8
+    assert (
+        remaining.kind == LowerAttrCopyKind.VALUE_TYPE_LITERAL_MINUS_STATIC_DIM_SCALED
+    )
+    assert remaining.source_element_index == 1
+    assert remaining.source_element_count == 4
+    assert remaining.literal_i64 == 64
+    assert scaled.value_ref_index == remaining.value_ref_index
+    assert compiled.value_refs[scaled.value_ref_index].element_index == 1
 
 
 def test_compile_lower_rule_set_validates_enum_immediate_literal() -> None:

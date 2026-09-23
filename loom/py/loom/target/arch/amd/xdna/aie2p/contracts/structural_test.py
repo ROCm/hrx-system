@@ -10,7 +10,9 @@ from loom.dialect.vector import defs as vector
 from loom.target.arch.amd.xdna.aie2p.contracts.structural import (
     _I16_INTERLEAVE_CONTROL,
     _I32_F32_TRANSPOSE_4X4_CONTROL,
+    _PACKED_VECTOR_ELEMENT_TYPES,
     _VECTOR_CARRIER_SPECS,
+    _WIDE_VECTOR_CONCAT_SPECS,
     _WIDE_VECTOR_EXTRACT_SPECS,
     AIE2P_STRUCTURAL_RULES,
 )
@@ -22,6 +24,8 @@ from loom.target.contracts import (
     EmitRegisterSlice,
     Guard,
     ValueAliasRule,
+    ValueRef,
+    ValueTypeProject,
     Vector,
 )
 
@@ -232,6 +236,207 @@ def test_static_slices_project_logical_lanes_into_physical_carriers() -> None:
                 bytes_per_lane=element_byte_count,
             )
         }
+
+
+def _concat_rule(
+    input_type,
+    result_type,
+    *,
+    right_type=None,
+) -> DescriptorRule:
+    return next(
+        rule
+        for rule in AIE2P_STRUCTURAL_RULES
+        if isinstance(rule, DescriptorRule)
+        and rule.source_op is vector.vector_concat
+        and Guard.value_type("inputs", input_type) in rule.guards
+        and (
+            right_type is None
+            or Guard.value_type("inputs", right_type, element=1) in rule.guards
+        )
+        and Guard.value_type("result", result_type) in rule.guards
+    )
+
+
+def test_partial_concat_projects_one_verified_byte_cut_per_element_width() -> None:
+    concat_rules = [
+        rule
+        for rule in AIE2P_STRUCTURAL_RULES
+        if rule.source_op is vector.vector_concat
+    ]
+    assert len(concat_rules) == (
+        2 * len(_PACKED_VECTOR_ELEMENT_TYPES)
+        + len(_WIDE_VECTOR_CONCAT_SPECS)
+        + 3 * len(_VECTOR_CARRIER_SPECS)
+    )
+
+    for element_types, element_byte_count in _PACKED_VECTOR_ELEMENT_TYPES:
+        carrier_lane_count = 64 // element_byte_count
+        left = ValueRef.operand("inputs", element=0)
+        shift_rule = _concat_rule(
+            Vector(
+                element_types,
+                minimum_lanes=1,
+                maximum_lanes=carrier_lane_count - 1,
+            ),
+            Vector(
+                element_types,
+                minimum_lanes=2,
+                maximum_lanes=carrier_lane_count,
+            ),
+        )
+        assert [emit.descriptor.key for emit in shift_rule.emit] == [
+            "amd.xdna.aie2p.constant.i32.mova",
+            "amd.xdna.aie2p.shift.bytes.x.configured",
+            "amd.xdna.aie2p.constant.i32.mova",
+            "amd.xdna.aie2p.shift.bytes.x.configured",
+        ]
+        assert shift_rule.emit[0].immediates == {
+            "i": ValueTypeProject.static_dim_scaled(
+                left,
+                scale=element_byte_count,
+            )
+        }
+        assert shift_rule.emit[2].immediates == {
+            "i": ValueTypeProject.literal_minus_static_dim_scaled(
+                left,
+                scale=element_byte_count,
+                literal=64,
+            )
+        }
+
+        half_lane_count = 32 // element_byte_count
+        half_rule = _concat_rule(
+            Vector(element_types, lanes=half_lane_count),
+            Vector(
+                element_types,
+                minimum_lanes=half_lane_count + 1,
+                maximum_lanes=carrier_lane_count,
+            ),
+        )
+        assert half_rule.priority == 1
+        assert [type(emit) for emit in half_rule.emit] == [
+            EmitRegisterSlice,
+            EmitRegisterSlice,
+            EmitRegisterConcat,
+        ]
+        assert [emit.source.element for emit in half_rule.emit[:2]] == [0, 1]
+        assert all(emit.unit_count == 1 for emit in half_rule.emit[:2])
+
+    for input_type, result_type in _WIDE_VECTOR_CONCAT_SPECS:
+        wide_rule = _concat_rule(input_type, result_type)
+        assert len(wide_rule.emit) == 1
+        assert isinstance(wide_rule.emit[0], EmitRegisterConcat)
+        assert [source.element for source in wide_rule.emit[0].sources] == [0, 1]
+
+
+def test_split_carrier_concat_covers_each_binary_input_partition() -> None:
+    for element_types, element_byte_count, wide_lane_maximum in _VECTOR_CARRIER_SPECS:
+        carrier_lane_count = 64 // element_byte_count
+        narrow_left = Vector(
+            element_types,
+            minimum_lanes=1,
+            maximum_lanes=carrier_lane_count - 1,
+        )
+        narrow_right = Vector(
+            element_types,
+            minimum_lanes=1,
+            maximum_lanes=carrier_lane_count,
+        )
+        partial_right = Vector(
+            element_types,
+            minimum_lanes=1,
+            maximum_lanes=carrier_lane_count - 1,
+        )
+        wide_operand = Vector(
+            element_types,
+            minimum_lanes=carrier_lane_count + 1,
+            maximum_lanes=wide_lane_maximum - 1,
+        )
+
+        narrow_pair_rule = _concat_rule(
+            narrow_left,
+            Vector(
+                element_types,
+                minimum_lanes=carrier_lane_count + 1,
+                maximum_lanes=wide_lane_maximum,
+            ),
+            right_type=narrow_right,
+        )
+        assert [type(emit) for emit in narrow_pair_rule.emit] == [
+            EmitDescriptorOp,
+            EmitDescriptorOp,
+            EmitDescriptorOp,
+            EmitDescriptorOp,
+            EmitDescriptorOp,
+            EmitRegisterConcat,
+        ]
+        assert narrow_pair_rule.emit[0].immediates == {
+            "i": ValueTypeProject.static_dim_scaled(
+                ValueRef.operand("inputs"),
+                scale=element_byte_count,
+            )
+        }
+        assert narrow_pair_rule.emit[2].immediates == {
+            "i": ValueTypeProject.literal_minus_static_dim_scaled(
+                ValueRef.operand("inputs"),
+                scale=element_byte_count,
+                literal=64,
+            )
+        }
+
+        narrow_wide_rule = _concat_rule(
+            narrow_left,
+            Vector(
+                element_types,
+                minimum_lanes=carrier_lane_count + 2,
+                maximum_lanes=wide_lane_maximum,
+            ),
+            right_type=wide_operand,
+        )
+        assert [type(emit) for emit in narrow_wide_rule.emit[:2]] == [
+            EmitRegisterSlice,
+            EmitRegisterSlice,
+        ]
+        assert [emit.source.element for emit in narrow_wide_rule.emit[:2]] == [
+            1,
+            1,
+        ]
+        assert [emit.unit_offset for emit in narrow_wide_rule.emit[:2]] == [0, 2]
+        assert isinstance(narrow_wide_rule.emit[-1], EmitRegisterConcat)
+
+        wide_narrow_rule = _concat_rule(
+            wide_operand,
+            Vector(
+                element_types,
+                minimum_lanes=carrier_lane_count + 2,
+                maximum_lanes=wide_lane_maximum,
+            ),
+            right_type=partial_right,
+        )
+        assert [type(emit) for emit in wide_narrow_rule.emit[:2]] == [
+            EmitRegisterSlice,
+            EmitRegisterSlice,
+        ]
+        assert [emit.source.element for emit in wide_narrow_rule.emit[:2]] == [
+            0,
+            0,
+        ]
+        assert wide_narrow_rule.emit[2].immediates == {
+            "i": ValueTypeProject.static_dim_scaled(
+                ValueRef.operand("inputs"),
+                scale=element_byte_count,
+                addend=-64,
+            )
+        }
+        assert wide_narrow_rule.emit[4].immediates == {
+            "i": ValueTypeProject.literal_minus_static_dim_scaled(
+                ValueRef.operand("inputs"),
+                scale=element_byte_count,
+                literal=128,
+            )
+        }
+        assert isinstance(wide_narrow_rule.emit[-1], EmitRegisterConcat)
 
 
 def test_i32_f32_4x4_transpose_uses_native_shuffle_mode() -> None:

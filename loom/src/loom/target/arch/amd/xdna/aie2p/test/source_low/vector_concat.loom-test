@@ -1,0 +1,118 @@
+// RUN: with-checks emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @concat_i64_prefix(%left: vector<1xi64>, %right: vector<7xi64>) -> (vector<8xi64>) {
+  %result = vector.concat<0> %left, %right : vector<1xi64>, vector<7xi64> -> vector<8xi64>
+  func.return %result : vector<8xi64>
+}
+
+// ----
+CHECK: * = mova.i32 8
+CHECK: * = vshift *
+CHECK: * = mova.i32 56
+CHECK: %result = vshift *
+CHECK: return %result
+CHECK-NOT: *vextract*
+CHECK-NOT: *vinsert*
+
+// ====
+
+func.def @concat_f32_prefix(%left: vector<4xf32>, %right: vector<3xf32>) -> (vector<7xf32>) {
+  %result = vector.concat<0> %left, %right : vector<4xf32>, vector<3xf32> -> vector<7xf32>
+  func.return %result : vector<7xf32>
+}
+
+// ----
+CHECK: * = mova.i32 16
+CHECK: * = vshift *
+CHECK: * = mova.i32 48
+CHECK: %result = vshift *
+CHECK: return %result
+CHECK-NOT: *vextract*
+CHECK-NOT: *vinsert*
+
+// ====
+
+func.def @concat_i16_half_carriers(%left: vector<16xi16>, %right: vector<5xi16>) -> (vector<21xi16>) {
+  %result = vector.concat<0> %left, %right : vector<16xi16>, vector<5xi16> -> vector<21xi16>
+  func.return %result : vector<21xi16>
+}
+
+// ----
+CHECK: * = slice %left[0] *
+CHECK: * = slice %right[0] *
+CHECK: %result = concat(*
+CHECK: return %result
+CHECK-NOT: *vshift*
+CHECK-NOT: *vextract*
+CHECK-NOT: *vinsert*
+
+// ====
+
+func.def @concat_i64_full_carrier_tail(%left: vector<8xi64>, %right: vector<1xi64>) -> (vector<9xi64>) {
+  %result = vector.concat<0> %left, %right : vector<8xi64>, vector<1xi64> -> vector<9xi64>
+  func.return %result : vector<9xi64>
+}
+
+// ----
+CHECK: %result = concat(*
+CHECK: return %result
+CHECK-NOT: *vshift*
+CHECK-NOT: *vextract*
+CHECK-NOT: *vinsert*
+
+// ====
+
+func.def @concat_i8_partial_pair_across_carriers(%left: vector<40xi8>, %right: vector<40xi8>) -> (vector<80xi8>) {
+  %result = vector.concat<0> %left, %right : vector<40xi8>, vector<40xi8> -> vector<80xi8>
+  func.return %result : vector<80xi8>
+}
+
+// ----
+CHECK: * = mova.i32 40
+CHECK: * = vshift *
+CHECK: * = mova.i32 24
+CHECK: * = vshift *
+CHECK: * = vshift *
+CHECK: %result = concat(*
+CHECK: return %result
+CHECK-NOT: *vextract*
+CHECK-NOT: *vinsert*
+
+// ====
+
+func.def @concat_i16_partial_before_wide(%left: vector<1xi16>, %right: vector<33xi16>) -> (vector<34xi16>) {
+  %result = vector.concat<0> %left, %right : vector<1xi16>, vector<33xi16> -> vector<34xi16>
+  func.return %result : vector<34xi16>
+}
+
+// ----
+CHECK: * = slice %right[0] *
+CHECK: * = slice %right[2] *
+CHECK: * = mova.i32 2
+CHECK: * = vshift *
+CHECK: * = mova.i32 62
+CHECK: * = vshift *
+CHECK: * = vshift *
+CHECK: %result = concat(*
+CHECK: return %result
+CHECK-NOT: *vextract*
+CHECK-NOT: *vinsert*
+
+// ====
+
+func.def @concat_i64_wide_before_partial(%left: vector<9xi64>, %right: vector<1xi64>) -> (vector<10xi64>) {
+  %result = vector.concat<0> %left, %right : vector<9xi64>, vector<1xi64> -> vector<10xi64>
+  func.return %result : vector<10xi64>
+}
+
+// ----
+CHECK: * = slice %left[0] *
+CHECK: * = slice %left[2] *
+CHECK: * = mova.i32 8
+CHECK: * = vshift *
+CHECK: * = mova.i32 56
+CHECK: * = vshift *
+CHECK: %result = concat(*
+CHECK: return %result
+CHECK-NOT: *vextract*
+CHECK-NOT: *vinsert*

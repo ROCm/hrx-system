@@ -836,6 +836,7 @@ vector_concat = Op(
     ],
     verify="loom_vector_concat_verify",
     facts="loom_vector_concat_facts",
+    canonicalize="loom_vector_concat_canonicalize",
     traits=[PURE],
     format=[
         TemplateParam("axis"),

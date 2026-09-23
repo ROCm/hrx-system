@@ -37,6 +37,8 @@ from loom.target.contracts.immediates import (
     SourceOpProject,
     ValueProject,
     ValueProjectKind,
+    ValueTypeProject,
+    ValueTypeProjectKind,
 )
 from loom.target.contracts.kinds import SourceValueKind
 from loom.target.contracts.lower_rule_bindings import (
@@ -52,6 +54,7 @@ from loom.target.contracts.lower_rule_bindings import (
     _operand_segment_counts,
     _order_operand_segment_guards,
     _require_exact_result_type_pattern,
+    _require_type_pattern,
     _source_attr_index,
     _source_operand_index,
     _value_ref_for_source_field,
@@ -289,11 +292,14 @@ class _LowerRuleSetCompiler:
         for source_node_index, source_node in enumerate(rule.source_nodes, start=1):
             self._source_ops[source_node.name] = source_node.source_op
             self._source_node_ordinals[source_node.name] = source_node_index
-        type_patterns_by_source_node: dict[int, dict[str, TypePattern]] = {}
+        type_patterns_by_source_node: dict[
+            int,
+            dict[tuple[str, int], TypePattern],
+        ] = {}
         source_node_start = len(self._source_nodes)
         for source_node_index, source_node in enumerate(rule.source_nodes, start=1):
             source_node_guard_start = len(self._guards)
-            source_node_type_patterns: dict[str, TypePattern] = {}
+            source_node_type_patterns: dict[tuple[str, int], TypePattern] = {}
             type_patterns_by_source_node[source_node_index] = source_node_type_patterns
             self._append_guards(
                 source_node.source_op,
@@ -325,7 +331,7 @@ class _LowerRuleSetCompiler:
                 )
             )
         guard_start = len(self._guards)
-        type_patterns_by_field: dict[str, TypePattern] = {}
+        type_patterns_by_field: dict[tuple[str, int], TypePattern] = {}
         type_patterns_by_source_node[0] = type_patterns_by_field
         self._append_guards(rule.source_op, rule.guards, type_patterns_by_field)
 
@@ -374,7 +380,7 @@ class _LowerRuleSetCompiler:
         self._source_ops = {"": source_op}
         self._source_node_ordinals = {"": 0}
         guard_start = len(self._guards)
-        type_patterns_by_field: dict[str, TypePattern] = {}
+        type_patterns_by_field: dict[tuple[str, int], TypePattern] = {}
         self._append_guards(source_op, guards, type_patterns_by_field)
         is_ordinal_alias = bool(flags & LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS)
         alias_ref_start = self._append_value_ref_sequence(
@@ -416,7 +422,7 @@ class _LowerRuleSetCompiler:
         self._source_ops = {"": rule.source_op}
         self._source_node_ordinals = {"": 0}
         guard_start = len(self._guards)
-        type_patterns_by_field: dict[str, TypePattern] = {}
+        type_patterns_by_field: dict[tuple[str, int], TypePattern] = {}
         self._append_guards(rule.source_op, rule.guards, type_patterns_by_field)
         elide_ref_start = self._append_value_ref_sequence(
             tuple(
@@ -446,7 +452,7 @@ class _LowerRuleSetCompiler:
         self._source_ops = {"": rule.source_op}
         self._source_node_ordinals = {"": 0}
         guard_start = len(self._guards)
-        type_patterns_by_field: dict[str, TypePattern] = {}
+        type_patterns_by_field: dict[tuple[str, int], TypePattern] = {}
         self._append_guards(rule.source_op, rule.guards, type_patterns_by_field)
         self._rules.append(
             LowerRule(
@@ -465,7 +471,7 @@ class _LowerRuleSetCompiler:
         self,
         source_op: Op,
         guards: Sequence[Guard],
-        type_patterns_by_field: dict[str, TypePattern],
+        type_patterns_by_field: dict[tuple[str, int], TypePattern],
         *,
         source_node_index: int = 0,
     ) -> None:
@@ -479,25 +485,34 @@ class _LowerRuleSetCompiler:
         self,
         source_op: Op,
         guard: Guard,
-        type_patterns_by_field: dict[str, TypePattern],
+        type_patterns_by_field: dict[tuple[str, int], TypePattern],
     ) -> None:
         if guard.kind == GuardKind.VALUE_TYPE:
             if guard.type_pattern is None:
                 raise ValueError(f"{source_op.name}: value_type guard needs a type")
-            type_patterns_by_field[guard.field] = guard.type_pattern
+            element = guard.element or 0
+            type_patterns_by_field[(guard.field, element)] = guard.type_pattern
             self._guards.append(
                 LowerGuard(
                     kind=guard.kind,
                     value_ref_index=self._append_value_ref(
                         source_op,
-                        _value_ref_for_source_field(source_op, guard.field),
+                        _value_ref_for_source_field(
+                            source_op,
+                            guard.field,
+                            element=element,
+                        ),
                     ),
                     type_pattern_index=self._append_type_pattern(guard.type_pattern),
                     diagnostic_index=self._append_diagnostic_ref(
                         source_op,
                         _guard_diagnostic(
                             guard,
-                            _value_type_diagnostic(guard.field, guard.type_pattern),
+                            _value_type_diagnostic(
+                                guard.field,
+                                guard.type_pattern,
+                                element=element,
+                            ),
                         ),
                     ),
                 )
@@ -1224,7 +1239,10 @@ class _LowerRuleSetCompiler:
         self,
         source_op: Op,
         emit: ContractEmit,
-        type_patterns_by_source_node: dict[int, dict[str, TypePattern]],
+        type_patterns_by_source_node: dict[
+            int,
+            dict[tuple[str, int], TypePattern],
+        ],
         temporary_ordinals: dict[str, int],
     ) -> None:
         if isinstance(emit, EmitDescriptorOp):
@@ -1273,7 +1291,10 @@ class _LowerRuleSetCompiler:
         self,
         source_op: Op,
         emit: EmitDescriptorOp,
-        type_patterns_by_source_node: dict[int, dict[str, TypePattern]],
+        type_patterns_by_source_node: dict[
+            int,
+            dict[tuple[str, int], TypePattern],
+        ],
         temporary_ordinals: dict[str, int],
     ) -> None:
         emit_kind = _lower_emit_kind(
@@ -1402,7 +1423,11 @@ class _LowerRuleSetCompiler:
             )
             flags |= LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS
 
-        attr_copies = self._lower_attr_copies(source_op, emit)
+        attr_copies = self._lower_attr_copies(
+            source_op,
+            emit,
+            type_patterns_by_source_node,
+        )
         attr_copy_start = self._append_attr_copy_sequence(tuple(attr_copies))
 
         tied_results, copy_operand_mask = _lower_descriptor_ties(
@@ -1669,6 +1694,10 @@ class _LowerRuleSetCompiler:
         self,
         source_op: Op,
         emit: EmitDescriptorOp,
+        type_patterns_by_source_node: dict[
+            int,
+            dict[tuple[str, int], TypePattern],
+        ],
     ) -> tuple[LowerAttrCopy, ...]:
         if not emit.immediates:
             return ()
@@ -1700,9 +1729,22 @@ class _LowerRuleSetCompiler:
             if isinstance(binding, SourceMemoryProject):
                 attr_copies.append(_lower_source_memory_project(target_name, binding))
                 continue
-            attr_copies.append(
-                self._lower_value_project(source_op, target_name, binding)
-            )
+            if isinstance(binding, ValueProject):
+                attr_copies.append(
+                    self._lower_value_project(source_op, target_name, binding)
+                )
+                continue
+            if isinstance(binding, ValueTypeProject):
+                attr_copies.append(
+                    self._lower_value_type_project(
+                        source_op,
+                        target_name,
+                        binding,
+                        type_patterns_by_source_node,
+                    )
+                )
+                continue
+            raise TypeError(f"unsupported immediate binding: {type(binding).__name__}")
         return tuple(attr_copies)
 
     def _lower_attr_project(
@@ -1949,6 +1991,65 @@ class _LowerRuleSetCompiler:
             ),
         )
 
+    def _lower_value_type_project(
+        self,
+        source_op: Op,
+        target_name: str,
+        project: ValueTypeProject,
+        type_patterns_by_source_node: dict[
+            int,
+            dict[tuple[str, int], TypePattern],
+        ],
+    ) -> LowerAttrCopy:
+        source_node_index = self._source_node_ordinals[project.source.source_node]
+        referenced_op = self._source_ops[project.source.source_node]
+        type_pattern = _require_type_pattern(
+            referenced_op,
+            project.source,
+            type_patterns_by_source_node[source_node_index],
+        )
+        dimension_is_static = (
+            project.dimension < len(type_pattern.dims)
+            if type_pattern.dims
+            else project.dimension == 0
+            and type_pattern.kind == "vector"
+            and (
+                type_pattern.lanes is not None
+                or (
+                    type_pattern.minimum_lanes is not None
+                    and type_pattern.maximum_lanes is not None
+                )
+                or (
+                    type_pattern.minimum_static_elements is not None
+                    and type_pattern.maximum_static_elements is not None
+                )
+            )
+        )
+        if not dimension_is_static:
+            raise ValueError(
+                f"{referenced_op.name}: descriptor emit field "
+                f"'{project.source.field}[{project.source.element}]' needs a "
+                f"value_type guard proving static dimension {project.dimension}"
+            )
+
+        if project.kind == ValueTypeProjectKind.STATIC_DIM_SCALED:
+            kind = LowerAttrCopyKind.VALUE_TYPE_STATIC_DIM_SCALED
+        elif project.kind == ValueTypeProjectKind.LITERAL_MINUS_STATIC_DIM_SCALED:
+            kind = LowerAttrCopyKind.VALUE_TYPE_LITERAL_MINUS_STATIC_DIM_SCALED
+        else:
+            raise ValueError(
+                f"{source_op.name}: immediate projection '{project.kind.value}' is "
+                "not representable by generated lower rules yet"
+            )
+        return LowerAttrCopy(
+            kind=kind,
+            target_name=target_name,
+            value_ref_index=self._append_value_ref(source_op, project.source),
+            source_element_index=project.dimension,
+            source_element_count=project.scale,
+            literal_i64=project.literal_i64,
+        )
+
     def _append_attr_copy_sequence(self, sequence: tuple[LowerAttrCopy, ...]) -> int:
         return _append_interned_row_sequence(self._attr_copies, sequence)
 
@@ -1993,7 +2094,11 @@ class _LowerRuleSetCompiler:
                 kind=param.kind,
                 value_ref_index=self._append_value_ref(
                     source_op,
-                    _value_ref_for_source_field(source_op, param.field),
+                    _value_ref_for_source_field(
+                        source_op,
+                        param.field,
+                        element=param.element,
+                    ),
                 ),
             )
         return LowerDiagnosticParam(

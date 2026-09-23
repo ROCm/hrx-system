@@ -1,5 +1,5 @@
 // A loop-carried vector remains a snapshot after its backing tile is poisoned.
-// Crossing and wide slices exercise both carrier boundaries and partial tails.
+// Slices and concatenations exercise carrier boundaries and partial tails.
 aie2p.target<array> @array_target
 aie2p.target<core> @core_target
 
@@ -41,9 +41,23 @@ func.def target(@core_target) @slice_snapshot(%input: buffer, %output: buffer) {
   %captured = scf.for %iteration = [%zero to %count step %one](%carried = %snapshot : vector<128xi8>) -> (vector<128xi8>) {
     vector.store %carried, %destination_view[0] : vector<128xi8>, view<512xi8>
     %crossing = vector.slice %carried[63] : vector<128xi8> -> vector<64xi8>
-    vector.store %crossing, %destination_view[160] : vector<64xi8>, view<512xi8>
+    vector.store %crossing, %destination_view[128] : vector<64xi8>, view<512xi8>
     %wide = vector.slice %carried[1] : vector<128xi8> -> vector<96xi8>
-    vector.store %wide, %destination_view[256] : vector<96xi8>, view<512xi8>
+    vector.store %wide, %destination_view[192] : vector<96xi8>, view<512xi8>
+    %pair_left = vector.slice %carried[0] : vector<128xi8> -> vector<40xi8>
+    %pair_right = vector.slice %carried[40] : vector<128xi8> -> vector<40xi8>
+    %partial_pair = vector.concat<0> %pair_left, %pair_right : vector<40xi8>, vector<40xi8> -> vector<80xi8>
+    %pivot = vector.slice %carried[80] : vector<128xi8> -> vector<1xi8>
+    %partial_wide = vector.concat<0> %pivot, %partial_pair : vector<1xi8>, vector<80xi8> -> vector<81xi8>
+    %chain_tail = vector.slice %carried[81] : vector<128xi8> -> vector<47xi8>
+    %wide_partial = vector.concat<0> %partial_wide, %chain_tail : vector<81xi8>, vector<47xi8> -> vector<128xi8>
+    vector.store %wide_partial, %destination_view[288] : vector<128xi8>, view<512xi8>
+    %prefix = vector.slice %carried[0] : vector<128xi8> -> vector<1xi8>
+    %suffix = vector.slice %carried[1] : vector<128xi8> -> vector<63xi8>
+    %joined = vector.concat<0> %prefix, %suffix : vector<1xi8>, vector<63xi8> -> vector<64xi8>
+    %direct_tail = vector.slice %carried[64] : vector<128xi8> -> vector<1xi8>
+    %wide_joined = vector.concat<0> %joined, %direct_tail : vector<64xi8>, vector<1xi8> -> vector<65xi8>
+    vector.store %wide_joined, %destination_view[416] : vector<65xi8>, view<512xi8>
     scf.yield %carried : vector<128xi8>
   }
   func.return

@@ -2735,6 +2735,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 2,
 
 // ====
 
+// RUN: with-checks emit source-low target=amdgpu:gfx11-generic output=low
 kernel.def @rank2_vector_tile_transpose() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 16 : index
@@ -2754,42 +2755,25 @@ kernel.def @rank2_vector_tile_transpose() {
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(16, 1, 1) workgroup_count(1, 1, 1) @rank2_vector_tile_transpose() asm {
-  %block = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %input_view = resource<hal_binding> {extent = 1024, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %output_view = resource<hal_binding> {extent = 1024, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %57 = v_lshlrev_b32_src0_inline %block, 4
-  %58 = global_load_b128_saddr %57, %input_view
-  %60 = global_load_b128_saddr %57, %input_view {offset = 256}
-  %62 = global_load_b128_saddr %57, %input_view {offset = 512}
-  %64 = global_load_b128_saddr %57, %input_view {offset = 768}
-  %65 = slice %58[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %66 = slice %58[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %67 = slice %58[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %68 = slice %58[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %69 = slice %60[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %70 = slice %60[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %71 = slice %60[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %72 = slice %60[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %73 = slice %62[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %74 = slice %62[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %75 = slice %62[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %76 = slice %62[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %77 = slice %64[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %78 = slice %64[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %79 = slice %64[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %80 = slice %64[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %103 = concat(%65, %69, %73, %77) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  %104 = v_lshlrev_b32_src0_inline %block, 6
-  global_store_b128_saddr %104, %103, %output_view
-  %109 = concat(%66, %70, %74, %78) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  global_store_b128_saddr %104, %109, %output_view {offset = 16}
-  %115 = concat(%67, %71, %75, %79) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  global_store_b128_saddr %104, %115, %output_view {offset = 32}
-  %121 = concat(%68, %72, %76, %80) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  global_store_b128_saddr %104, %121, %output_view {offset = 48}
-  return
-}
+CHECK: low.kernel.def target<amdgpu.gfx11.generic.core> * @rank2_vector_tile_transpose() asm {
+CHECK: %block = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+CHECK: * = v_lshlrev_b32_src0_inline %block, 4
+CHECK: * = global_load_b128_saddr *, %input_view
+CHECK: * = global_load_b128_saddr *, %input_view {offset = 256}
+CHECK: * = global_load_b128_saddr *, %input_view {offset = 512}
+CHECK: * = global_load_b128_saddr *, %input_view {offset = 768}
+CHECK: * = slice *[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+CHECK: * = slice *[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+CHECK: * = slice *[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+CHECK: * = slice *[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+CHECK: * = concat(*, *, *, *) : * -> reg<amdgpu.vgpr x4>
+CHECK: * = v_lshlrev_b32_src0_inline %block, 6
+CHECK: global_store_b128_saddr *, *, %output_view
+CHECK: global_store_b128_saddr *, *, %output_view {offset = 16}
+CHECK: global_store_b128_saddr *, *, %output_view {offset = 32}
+CHECK: global_store_b128_saddr *, *, %output_view {offset = 48}
+CHECK-NOT: *global_load_b32*
+CHECK-NOT: *global_store_b32*
 
 // ====
 

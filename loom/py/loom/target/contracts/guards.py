@@ -31,6 +31,7 @@ from loom.target.contracts.diagnostics import (
 from loom.target.contracts.memory_spaces import MEMORY_SPACE_NAMES
 from loom.target.contracts.patterns import TypePattern
 from loom.target.contracts.source import (
+    ValueRef,
     _require_attr,
     _require_operand,
     _require_value,
@@ -147,11 +148,13 @@ class Guard:
         field: str,
         type_pattern: TypePattern,
         *,
+        element: int = 0,
         diagnostic: GuardDiagnostic | None = None,
     ) -> Self:
         return cls(
             kind=GuardKind.VALUE_TYPE,
             field=field,
+            element=element,
             type_pattern=type_pattern,
             diagnostic=diagnostic,
         )
@@ -672,6 +675,12 @@ class Guard:
         subject = f"guard {self.kind.value}"
         if self.kind == GuardKind.VALUE_TYPE:
             _require_value(source_op, self.field, subject)
+            value_ref = (
+                ValueRef.operand(self.field, element=self.element or 0)
+                if source_op.operand(self.field) is not None
+                else ValueRef.result(self.field, element=self.element or 0)
+            )
+            value_ref.validate(source_op, subject)
             if self.type_pattern is None:
                 raise ValueError(f"{source_op.name}: {subject} needs a type pattern")
             return

@@ -758,6 +758,33 @@ def test_descriptor_rule_rejects_unknown_source_value_field() -> None:
         )
 
 
+def test_descriptor_rule_rejects_element_on_nonvariadic_value() -> None:
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"vector.extract: guard value_type operand field 'source' "
+            r"is not variadic"
+        ),
+    ):
+        ContractFragment(
+            name="bad.source.element",
+            descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+            cases=[
+                DescriptorRule(
+                    source_op=vector.vector_extract,
+                    descriptor=TEST_LOW_EXTRACT_LANE_I32_DESCRIPTOR,
+                    guards=[
+                        Guard.value_type(
+                            "source",
+                            Vector("i32"),
+                            element=1,
+                        )
+                    ],
+                )
+            ],
+        )
+
+
 def test_descriptor_rule_rejects_wrong_attr_kind() -> None:
     descriptor = TEST_LOW_ADD_F32_DESCRIPTOR
 

@@ -287,6 +287,12 @@ typedef enum loom_low_lower_attr_copy_kind_e {
   // Emits unsigned 32-bit reciprocal multiplier bits as a signed i32 packet
   // attribute. The divisor's unsigned arithmetic domain is unchanged.
   LOOM_LOW_LOWER_ATTR_COPY_VALUE_U32_DIVISOR_MAGIC_MULTIPLIER_AS_I32 = 32,
+  // Emits the source value static dimension selected by source_element_index,
+  // multiplied by source_element_count, then adds literal_i64.
+  LOOM_LOW_LOWER_ATTR_COPY_VALUE_TYPE_STATIC_DIM_SCALED = 33,
+  // Emits literal_i64 minus the source value static dimension selected by
+  // source_element_index, multiplied by source_element_count.
+  LOOM_LOW_LOWER_ATTR_COPY_VALUE_TYPE_LITERAL_MINUS_STATIC_DIM_SCALED = 34,
 } loom_low_lower_attr_copy_kind_t;
 
 typedef struct loom_low_lower_attr_copy_t {
@@ -298,11 +304,11 @@ typedef struct loom_low_lower_attr_copy_t {
   uint16_t source_attr_index;
   // Second source op attribute ordinal consumed by two-attr projections.
   uint16_t other_source_attr_index;
-  // First source i64_array element ordinal or i32 word ordinal consumed by the
-  // projection row.
+  // First source i64_array element ordinal, i32 word ordinal, or shaped
+  // dimension ordinal consumed by the projection row.
   uint16_t source_element_index;
-  // Number of source elements consumed by PACK_ELEMENTS rows or byte stride
-  // used by I64_ARRAY_LANE_BYTE rows.
+  // Number of source elements consumed by PACK_ELEMENTS rows, byte stride
+  // used by I64_ARRAY_LANE_BYTE rows, or scale used by VALUE_TYPE rows.
   uint16_t source_element_count;
   // Bit width of each packed source element for PACK_ELEMENTS rows.
   uint8_t source_element_bit_width;

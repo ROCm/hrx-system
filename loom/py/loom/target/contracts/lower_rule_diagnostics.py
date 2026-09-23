@@ -59,11 +59,17 @@ def _type_pattern_element_text(type_pattern: TypePattern) -> str:
     return "{" + ", ".join(type_pattern.elements) + "}"
 
 
-def _value_type_diagnostic(field: str, type_pattern: TypePattern) -> DiagnosticRef:
+def _value_type_diagnostic(
+    field: str,
+    type_pattern: TypePattern,
+    *,
+    element: int = 0,
+) -> DiagnosticRef:
+    field_name = f"{field}[{element}]" if element else field
     return target_diagnostic(
         ERR_TARGET_002,
-        string_param("field_name", field),
-        value_type_param("actual_type", field),
+        string_param("field_name", field_name),
+        value_type_param("actual_type", field, element=element),
         string_param("expected_type", _type_pattern_text(type_pattern)),
     )
 

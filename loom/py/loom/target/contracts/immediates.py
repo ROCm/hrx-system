@@ -15,7 +15,8 @@ from typing import Self
 
 from loom.dsl import ATTR_TYPE_ENUM, ATTR_TYPE_I64, ATTR_TYPE_I64_ARRAY, Op
 from loom.target.contracts.descriptors import _require_immediate
-from loom.target.contracts.source import _require_attr, _require_value
+from loom.target.contracts.kinds import SourceValueKind
+from loom.target.contracts.source import ValueRef, _require_attr, _require_value
 from loom.target.low_descriptors import Descriptor, ImmediateKind
 
 _I64_MIN = -(2**63)
@@ -59,6 +60,14 @@ class ValueProjectKind(Enum):
     FLOAT_BITS = "float_bits"
     FLOAT_AS_F32_I32 = "float_as_f32_i32"
     FLOAT_AS_F64_I32_WORD = "float_as_f64_i32_word"
+
+
+@unique
+class ValueTypeProjectKind(Enum):
+    """Projection from source value types to descriptor immediates."""
+
+    STATIC_DIM_SCALED = "static_dim_scaled"
+    LITERAL_MINUS_STATIC_DIM_SCALED = "literal_minus_static_dim_scaled"
 
 
 _I32_WORD_VALUE_PROJECT_KINDS = (
@@ -777,6 +786,112 @@ class ValueProject:
             raise ValueError(
                 f"{source_op.name}: {subject} descriptor immediate "
                 f"'{bound_immediate_name}' must be a signed 32-bit immediate"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class ValueTypeProject:
+    """Descriptor immediate projection from a source value's verified type."""
+
+    kind: ValueTypeProjectKind
+    source: ValueRef
+    scale: int
+    dimension: int = 0
+    literal_i64: int = 0
+
+    @classmethod
+    def static_dim_scaled(
+        cls,
+        source: ValueRef,
+        *,
+        scale: int,
+        dimension: int = 0,
+        addend: int = 0,
+    ) -> Self:
+        """Projects one static dimension multiplied by scale, then adds addend."""
+
+        return cls(
+            kind=ValueTypeProjectKind.STATIC_DIM_SCALED,
+            source=source,
+            scale=scale,
+            dimension=dimension,
+            literal_i64=addend,
+        )
+
+    @classmethod
+    def literal_minus_static_dim_scaled(
+        cls,
+        source: ValueRef,
+        *,
+        scale: int,
+        literal: int,
+        dimension: int = 0,
+    ) -> Self:
+        """Projects literal minus one static dimension multiplied by scale."""
+
+        return cls(
+            kind=ValueTypeProjectKind.LITERAL_MINUS_STATIC_DIM_SCALED,
+            source=source,
+            scale=scale,
+            dimension=dimension,
+            literal_i64=literal,
+        )
+
+    def __post_init__(self) -> None:
+        if self.source.kind not in (SourceValueKind.OPERAND, SourceValueKind.RESULT):
+            raise ValueError(
+                f"{self.kind.value} projection source must be an operand or result"
+            )
+        if self.source.materializer is not None:
+            raise ValueError(
+                f"{self.kind.value} projection source must not use a materializer"
+            )
+        if self.scale <= 0 or self.scale > 0xFFFF:
+            raise ValueError(f"{self.kind.value} scale must be in [1, 65535]")
+        if self.dimension < 0 or self.dimension > 1:
+            raise ValueError(
+                f"{self.kind.value} dimension must be 0 or 1 until generated "
+                "type guards represent higher dimensions"
+            )
+        if not _I64_MIN <= self.literal_i64 <= _I64_MAX:
+            raise ValueError(f"{self.kind.value} literal must fit signed i64")
+        if (
+            self.kind == ValueTypeProjectKind.LITERAL_MINUS_STATIC_DIM_SCALED
+            and self.literal_i64 < 0
+        ):
+            raise ValueError(f"{self.kind.value} literal must be non-negative")
+
+    def validate(
+        self,
+        source_op: Op,
+        descriptor: Descriptor,
+        bound_immediate_name: str | None,
+        *,
+        source_ops: Mapping[str, Op] | None = None,
+    ) -> None:
+        subject = f"immediate projection {self.kind.value}"
+        referenced_op = source_op
+        if self.source.source_node:
+            referenced_op = (
+                source_ops.get(self.source.source_node)
+                if source_ops is not None
+                else None
+            )
+            if referenced_op is None:
+                raise ValueError(
+                    f"{source_op.name}: {subject} references unknown source node "
+                    f"'{self.source.source_node}'"
+                )
+        self.source.validate(referenced_op, subject)
+        if bound_immediate_name is None:
+            raise ValueError(
+                f"{source_op.name}: {subject} must bind one descriptor immediate"
+            )
+        immediate = _require_immediate(descriptor, bound_immediate_name, subject)
+        if immediate.kind not in (ImmediateKind.SIGNED, ImmediateKind.UNSIGNED):
+            raise ValueError(
+                f"{source_op.name}: {subject} descriptor immediate "
+                f"'{bound_immediate_name}' must be an integer immediate"
             )
 
 

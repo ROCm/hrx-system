@@ -23,8 +23,10 @@ def main():
         payload = source[64:192]
         result = bytearray([0xA5] * 512)
         result[0:128] = payload
-        result[160:224] = payload[63:127]
-        result[256:352] = payload[1:97]
+        result[128:192] = payload[63:127]
+        result[192:288] = payload[1:97]
+        result[288:416] = payload[80:81] + payload[0:80] + payload[81:128]
+        result[416:481] = payload[0:65]
         inputs += source
         expected += result
     guard = bytes([0xA5]) * 64

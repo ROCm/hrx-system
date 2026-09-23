@@ -67,6 +67,7 @@ class DiagnosticParam:
     kind: DiagnosticParamKind
     string_value: str = ""
     field: str = ""
+    element: int = 0
     i64_value: int = 0
     u32_value: int = 0
     u64_value: int = 0
@@ -83,6 +84,12 @@ class DiagnosticParam:
             raise ValueError("string diagnostic parameter must be non-empty")
         if self.kind == DiagnosticParamKind.VALUE_TYPE and not self.field:
             raise ValueError("value-type diagnostic parameter needs a source field")
+        if self.element < 0:
+            raise ValueError("diagnostic parameter element must be non-negative")
+        if self.element and self.kind != DiagnosticParamKind.VALUE_TYPE:
+            raise ValueError(
+                f"{self.kind.value} diagnostic parameter cannot select an element"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,8 +173,18 @@ def string_param(name: str, value: str) -> DiagnosticParam:
     )
 
 
-def value_type_param(name: str, field: str) -> DiagnosticParam:
-    return DiagnosticParam(name, DiagnosticParamKind.VALUE_TYPE, field=field)
+def value_type_param(
+    name: str,
+    field: str,
+    *,
+    element: int = 0,
+) -> DiagnosticParam:
+    return DiagnosticParam(
+        name,
+        DiagnosticParamKind.VALUE_TYPE,
+        field=field,
+        element=element,
+    )
 
 
 def i64_param(name: str, value: int) -> DiagnosticParam:

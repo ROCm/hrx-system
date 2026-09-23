@@ -264,6 +264,40 @@ static int64_t loom_low_lower_rule_attr_copy_exact_i64(
   return value;
 }
 
+static int64_t loom_low_lower_rule_attr_copy_static_dim_scaled(
+    loom_low_lower_context_t* context,
+    const loom_low_lower_rule_set_t* rule_set,
+    const loom_low_lower_rule_emit_state_t* state,
+    const loom_low_lower_attr_copy_t* attr_copy) {
+  const loom_value_id_t source_value_id = loom_low_lower_rule_emit_source_value(
+      context->module, rule_set, state, attr_copy->value_ref_index);
+  const loom_type_t source_type = loom_module_value_type(
+      loom_low_lower_context_module(context), source_value_id);
+  IREE_ASSERT(loom_type_is_shaped(source_type));
+  const uint16_t dimension = attr_copy->source_element_index;
+  IREE_ASSERT_LT(dimension, loom_type_rank(source_type));
+  IREE_ASSERT(!loom_type_dim_is_dynamic_at(source_type, dimension));
+  const int64_t static_dimension =
+      loom_type_dim_static_size_at(source_type, dimension);
+  IREE_ASSERT_GE(static_dimension, 0);
+  IREE_ASSERT_GT(attr_copy->source_element_count, 0);
+  IREE_ASSERT_LE((uint64_t)static_dimension,
+                 (uint64_t)INT64_MAX / attr_copy->source_element_count);
+  const int64_t scaled_dimension =
+      static_dimension * attr_copy->source_element_count;
+  if (attr_copy->kind ==
+      LOOM_LOW_LOWER_ATTR_COPY_VALUE_TYPE_LITERAL_MINUS_STATIC_DIM_SCALED) {
+    IREE_ASSERT_GE(attr_copy->literal_i64, 0);
+    return attr_copy->literal_i64 - scaled_dimension;
+  }
+  IREE_ASSERT_EQ(attr_copy->kind,
+                 LOOM_LOW_LOWER_ATTR_COPY_VALUE_TYPE_STATIC_DIM_SCALED);
+  if (attr_copy->literal_i64 > 0) {
+    IREE_ASSERT_LE(scaled_dimension, INT64_MAX - attr_copy->literal_i64);
+  }
+  return scaled_dimension + attr_copy->literal_i64;
+}
+
 static void loom_low_lower_rule_set_projected_bits_attr(
     const loom_low_lower_attr_copy_t* attr_copy, uint64_t bit_pattern,
     loom_named_attr_t* attr) {
@@ -574,6 +608,12 @@ static iree_status_t loom_low_lower_rule_build_attrs(
         break;
       case LOOM_LOW_LOWER_ATTR_COPY_I64_LITERAL:
         attrs[i].value = loom_attr_i64(attr_copy->literal_i64);
+        break;
+      case LOOM_LOW_LOWER_ATTR_COPY_VALUE_TYPE_STATIC_DIM_SCALED:
+      case LOOM_LOW_LOWER_ATTR_COPY_VALUE_TYPE_LITERAL_MINUS_STATIC_DIM_SCALED:
+        attrs[i].value =
+            loom_attr_i64(loom_low_lower_rule_attr_copy_static_dim_scaled(
+                context, rule_set, state, attr_copy));
         break;
       case LOOM_LOW_LOWER_ATTR_COPY_VALUE_EXACT_I64: {
         const int64_t source_value = loom_low_lower_rule_attr_copy_exact_i64(

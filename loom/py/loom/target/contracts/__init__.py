@@ -65,6 +65,8 @@ from loom.target.contracts.immediates import (
     SourceOpProjectKind,
     ValueProject,
     ValueProjectKind,
+    ValueTypeProject,
+    ValueTypeProjectKind,
 )
 from loom.target.contracts.kinds import ContractSystem, SourceValueKind
 from loom.target.contracts.lower_rule_tables import (
@@ -236,6 +238,8 @@ __all__ = [
     "ValueMaterializer",
     "ValueProject",
     "ValueProjectKind",
+    "ValueTypeProject",
+    "ValueTypeProjectKind",
     "ValueRef",
     "Vector",
     "View",

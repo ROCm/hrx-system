@@ -32,10 +32,10 @@
               "contains": {
                 "unordered": [
                   {
-                    "regex": "COMPILE-REPORT: pipeline\\.worker\\[0\\] .* code_bytes=292 code_capacity_bytes=16384 .* max_bank_storage_bytes=512 bank_capacity_bytes=16384\\n"
+                    "regex": "COMPILE-REPORT: pipeline\\.worker\\[0\\] .* code_bytes=516 code_capacity_bytes=16384 .* max_bank_storage_bytes=512 bank_capacity_bytes=16384\\n"
                   },
                   {
-                    "regex": "COMPILE-REPORT: static_instruction_mix .* memory_read_bytes=132 memory_write_bytes=928 "
+                    "regex": "COMPILE-REPORT: static_instruction_mix .* memory_read_bytes=133 memory_write_bytes=1121 "
                   }
                 ]
               }

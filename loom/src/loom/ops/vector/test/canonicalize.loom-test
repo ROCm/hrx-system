@@ -1,5 +1,44 @@
 // RUN: pass canonicalize
 
+// A unary concat is the input value itself.
+func.def @concat_unary(%value: vector<4xi8>) -> (vector<4xi8>) {
+  %result = vector.concat<0> %value : vector<4xi8> -> vector<4xi8>
+  func.return %result : vector<4xi8>
+}
+// ----
+func.def @concat_unary(%value: vector<4xi8>) -> (vector<4xi8>) {
+  func.return %value : vector<4xi8>
+}
+
+// ====
+
+// Empty concat-axis operands do not participate in the aggregate.
+func.def @concat_ignores_empty_inputs(%empty0: vector<0xi8>, %lhs: vector<4xi8>, %empty1: vector<0xi8>, %rhs: vector<3xi8>) -> (vector<7xi8>) {
+  %result = vector.concat<0> %empty0, %lhs, %empty1, %rhs : vector<0xi8>, vector<4xi8>, vector<0xi8>, vector<3xi8> -> vector<7xi8>
+  func.return %result : vector<7xi8>
+}
+// ----
+func.def @concat_ignores_empty_inputs(%empty0: vector<0xi8>, %lhs: vector<4xi8>, %empty1: vector<0xi8>, %rhs: vector<3xi8>) -> (vector<7xi8>) {
+  %result = vector.concat<0> %lhs, %rhs : vector<4xi8>, vector<3xi8> -> vector<7xi8>
+  func.return %result : vector<7xi8>
+}
+
+// ====
+
+// Static variadic concats become a left-associated binary chain.
+func.def @concat_variadic(%lhs: vector<2x3x1xi16>, %middle: vector<2x3x2xi16>, %rhs: vector<2x3x3xi16>) -> (vector<2x3x6xi16>) {
+  %result = vector.concat<2> %lhs, %middle, %rhs : vector<2x3x1xi16>, vector<2x3x2xi16>, vector<2x3x3xi16> -> vector<2x3x6xi16>
+  func.return %result : vector<2x3x6xi16>
+}
+// ----
+func.def @concat_variadic(%lhs: vector<2x3x1xi16>, %middle: vector<2x3x2xi16>, %rhs: vector<2x3x3xi16>) -> (vector<2x3x6xi16>) {
+  %5 = vector.concat<2> %lhs, %middle : vector<2x3x1xi16>, vector<2x3x2xi16> -> vector<2x3x3xi16>
+  %result = vector.concat<2> %5, %rhs : vector<2x3x3xi16>, vector<2x3x3xi16> -> vector<2x3x6xi16>
+  func.return %result : vector<2x3x6xi16>
+}
+
+// ====
+
 // Extracting exactly the leading axes introduced by a broadcast returns the
 // original trailing vector.
 func.def @extract_broadcast_leading_axes(%value: vector<4xf32>) -> (vector<4xf32>) {

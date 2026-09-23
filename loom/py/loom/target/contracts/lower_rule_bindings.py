@@ -97,7 +97,10 @@ def _lower_source_op_project(
 def _lower_emit_kind(
     source_op: Op,
     emit: EmitDescriptorOp,
-    type_patterns_by_source_node: dict[int, dict[str, TypePattern]],
+    type_patterns_by_source_node: dict[
+        int,
+        dict[tuple[str, int], TypePattern],
+    ],
     source_node_ordinals: Mapping[str, int],
     source_ops: Mapping[str, Op],
 ) -> LowerEmitKind:
@@ -138,7 +141,7 @@ def _lower_emit_kind(
             referenced_op = source_ops[result_type_binding.source_node]
             result_type = _require_type_pattern(
                 referenced_op,
-                result_type_binding.field,
+                result_type_binding,
                 type_patterns_by_source_node[source_node_index],
             )
         if result_type.kind != "vector":
@@ -156,13 +159,18 @@ def _lower_emit_kind(
 
 def _require_type_pattern(
     source_op: Op,
-    field: str,
-    type_patterns_by_field: dict[str, TypePattern],
+    value_ref: ValueRef,
+    type_patterns_by_value: dict[tuple[str, int], TypePattern],
 ) -> TypePattern:
-    type_pattern = type_patterns_by_field.get(field)
+    type_pattern = type_patterns_by_value.get((value_ref.field, value_ref.element))
     if type_pattern is None:
+        field_name = (
+            f"{value_ref.field}[{value_ref.element}]"
+            if value_ref.element
+            else value_ref.field
+        )
         raise ValueError(
-            f"{source_op.name}: descriptor emit field '{field}' needs a "
+            f"{source_op.name}: descriptor emit field '{field_name}' needs a "
             "value_type guard"
         )
     return type_pattern
@@ -190,11 +198,16 @@ def _require_exact_result_type_pattern(
         )
 
 
-def _value_ref_for_source_field(source_op: Op, field: str) -> ValueRef:
+def _value_ref_for_source_field(
+    source_op: Op,
+    field: str,
+    *,
+    element: int = 0,
+) -> ValueRef:
     if source_op.operand(field) is not None:
-        return ValueRef.operand(field)
+        return ValueRef.operand(field, element=element)
     if source_op.result(field) is not None:
-        return ValueRef.result(field)
+        return ValueRef.result(field, element=element)
     raise ValueError(f"{source_op.name}: source field '{field}' is not a value")
 
 
