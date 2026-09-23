@@ -817,8 +817,49 @@ def compress_artifact(
     }
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+def verify_artifact(
+    *,
+    package_directory: Path,
+    expected_revision: str,
+    checkout_revision: str,
+) -> dict[str, object]:
+    """Verifies that a downloaded package belongs to the current checkout."""
+    if re.fullmatch(r"[0-9a-f]{40}", expected_revision) is None:
+        raise ValueError(
+            f"expected revision must be a full lowercase Git commit: "
+            f"{expected_revision}"
+        )
+    if checkout_revision != expected_revision:
+        raise ValueError(
+            f"checkout revision {checkout_revision} does not match expected "
+            f"revision {expected_revision}"
+        )
+
+    manifest_path = package_directory / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            f"cannot read native artifact manifest: {manifest_path}"
+        ) from exc
+    if not isinstance(manifest, dict):
+        raise ValueError(f"native artifact manifest is not an object: {manifest_path}")
+    artifact_revision = manifest.get("revision")
+    if artifact_revision != expected_revision:
+        raise ValueError(
+            f"artifact revision {artifact_revision!r} does not match expected "
+            f"revision {expected_revision}"
+        )
+    return {
+        "package_directory": os.fspath(package_directory),
+        "revision": expected_revision,
+        "target_count": manifest.get("target_count"),
+        "test_count": manifest.get("test_count"),
+        "tool_count": manifest.get("tool_count"),
+    }
+
+
+def _add_package_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--build-events", action="append", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--package-path", required=True, type=Path)
@@ -832,7 +873,34 @@ def main() -> None:
     parser.add_argument("--tar", default="tar")
     parser.add_argument("--zstd", default="zstd")
     parser.add_argument("--compression-level", default=12, type=int)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    package_parser = subparsers.add_parser(
+        "package", help="Stage and compress one native artifact package."
+    )
+    _add_package_arguments(package_parser)
+    verify_parser = subparsers.add_parser(
+        "verify", help="Verify a downloaded package against its source checkout."
+    )
+    verify_parser.add_argument("--package", required=True, type=Path)
+    verify_parser.add_argument("--revision", required=True)
+    verify_parser.add_argument("--workspace", required=True, type=Path)
     args = parser.parse_args()
+
+    if args.command == "verify":
+        checkout_revision = subprocess.check_output(
+            ["git", "-C", args.workspace, "rev-parse", "HEAD"], text=True
+        ).strip()
+        result = verify_artifact(
+            package_directory=args.package,
+            expected_revision=args.revision,
+            checkout_revision=checkout_revision,
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return
 
     def stage_and_compress(staging_root: Path) -> dict[str, object]:
         started = time.monotonic()

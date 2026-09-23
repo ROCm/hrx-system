@@ -47,6 +47,10 @@ from build_tools.devtools import ci, ci_config, run_requirements
 
 
 class CiTest(unittest.TestCase):
+    def test_bazel_configure_rejects_invocation_only_options(self):
+        with self.assertRaisesRegex(SystemExit, "Unsupported Bazel configure argument"):
+            ci.bazel_configure_step(extra_options=("--features=-thin_lto",))
+
     def test_requirement_audit_precedes_execution_and_rejects_unknown_tags(self):
         for requirement, audit_code, expected_code in (
             ("device", 0, 0),
@@ -623,6 +627,126 @@ class CiTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "only supported for AMDGPU"):
             ci.steps_from_args(args)
+
+    def test_native_artifact_commands_require_owned_inputs(self):
+        cases = (
+            (
+                [ci.NATIVE_ARTIFACT_PRODUCER_COMMAND],
+                "requires --native-artifact-archive",
+            ),
+            (
+                [ci.NATIVE_ARTIFACT_AMDGPU_COMMAND],
+                "requires --native-artifact-revision",
+            ),
+            (
+                [
+                    "iree-bazel-cpu",
+                    "--native-artifact-revision",
+                    "a" * 40,
+                ],
+                "only supported by native artifact CI commands",
+            ),
+            (
+                [
+                    ci.NATIVE_ARTIFACT_AMDGPU_COMMAND,
+                    "--native-artifact-revision",
+                    "short",
+                ],
+                "full lowercase Git commit",
+            ),
+        )
+        for argv, message in cases:
+            with self.subTest(argv=argv):
+                with self.assertRaisesRegex(ValueError, message):
+                    ci.steps_from_args(ci.parse_arguments(argv))
+
+        producer_args = ci.parse_arguments(
+            [
+                ci.NATIVE_ARTIFACT_PRODUCER_COMMAND,
+                "--native-artifact-archive",
+                "artifact.tar.zst",
+                "--native-artifact-revision",
+                "a" * 40,
+            ]
+        )
+        consumer_args = ci.parse_arguments(
+            [
+                ci.NATIVE_ARTIFACT_AMDGPU_COMMAND,
+                "--amdgpu-target",
+                "gfx-test",
+                "--native-artifact-revision",
+                "a" * 40,
+            ]
+        )
+        with (
+            mock.patch.object(
+                ci, "native_artifact_producer_steps", return_value=[]
+            ) as producer,
+            mock.patch.object(
+                ci, "native_artifact_amdgpu_steps", return_value=[]
+            ) as consumer,
+        ):
+            self.assertEqual(ci.steps_from_args(producer_args), [])
+            self.assertEqual(ci.steps_from_args(consumer_args), [])
+        producer.assert_called_once_with(
+            Path("artifact.tar.zst").resolve(),
+            "a" * 40,
+        )
+        consumer.assert_called_once_with("gfx-test", "a" * 40)
+
+    def test_native_artifact_producer_uses_self_contained_host_profile(self):
+        with mock.patch.dict(
+            ci.os.environ,
+            {"HRX_ROCM_ROOT": "/tmp/rocm-root"},
+            clear=True,
+        ):
+            steps = ci.native_artifact_producer_steps(
+                Path("/tmp/artifact.tar.zst"), "a" * 40
+            )
+
+        configure_step = next(step for step in steps if step.name == "Configure Bazel")
+        host_test_step = next(
+            step for step in steps if step.name == "Test ASAN host coverage"
+        )
+        self.assertIn("--//loom/config/import:enable=cxx", configure_step.argv)
+        self.assertIn(
+            "--@rules_python//python/config_settings:bootstrap_impl=script",
+            host_test_step.argv,
+        )
+
+    def test_native_artifact_consumer_builds_only_selected_tests(self):
+        with mock.patch.dict(
+            ci.os.environ,
+            {"HRX_ROCM_ROOT": "/tmp/rocm-root"},
+            clear=True,
+        ):
+            steps = ci.native_artifact_amdgpu_steps("gfx942", "a" * 40)
+
+        test_steps = [step for step in steps if step.argv[2:4] == ("bazel", "test")]
+        self.assertEqual(len(test_steps), 3)
+        for step in test_steps:
+            self.assertIn("--build_tests_only", step.argv)
+            self.assertTrue(
+                any(option.startswith("--extra_toolchains=") for option in step.argv)
+            )
+
+        authored_step = next(
+            step
+            for step in test_steps
+            if step.name == "Test authored Loom AMDGPU coverage"
+        )
+        self.assertIn("//loom/...", authored_step.argv)
+        self.assertIn(
+            "-//loom/src/loom/tooling/target/amdgpu/test/cxx/...",
+            authored_step.argv,
+        )
+        cxx_step = next(
+            step
+            for step in test_steps
+            if step.name == "Test representative CXX AMDGPU import"
+        )
+        for target in ci_config.NATIVE_ARTIFACT_CXX_AMDGPU_TEST_TARGETS:
+            self.assertIn(target, cxx_step.argv)
 
     def test_amdgpu_bazel_tests_pin_libhsa_from_rocm_root(self):
         args = ci.parse_arguments(

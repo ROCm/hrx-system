@@ -298,3 +298,77 @@ VULKAN_CTEST_REGEX = r"^iree/hal/drivers/vulkan/"
 VULKAN_CTEST_RESOURCE_LABEL_REGEX = "runtime-resource=vulkan-device"
 VULKAN_XFAILS = ()
 VULKAN_XFAIL_TARGETS = bazel_xfail_targets(VULKAN_XFAILS)
+
+# Fixed ASAN producer/consumer slice for native CI artifact qualification.
+NATIVE_ARTIFACT_PACKAGE_PATH = "artifacts/ci/linux-x86_64-clang-asan"
+NATIVE_ARTIFACT_PACKAGE_LABEL = f"//{NATIVE_ARTIFACT_PACKAGE_PATH}"
+NATIVE_ARTIFACT_SOURCE_TARGETS = (
+    "//runtime/...",
+    "//loom/...",
+    "//libamdf/...",
+    "//experimental/xdna/...",
+)
+NATIVE_ARTIFACT_TOOL_TARGETS = (
+    "//loom/src/loom/tools/loom-compile:loom-compile",
+    "//loom/src/loom/tools/loom-check:loom-check",
+    "//loom/src/loom/tools/loom-check:loom-check-test",
+    "//loom/src/loom/tools/loom-format:loom-format",
+    "//loom/src/loom/tools/loom-import-cxx:loom-import-cxx",
+    "//loom/src/loom/tools/loom-link:loom-link",
+    "//loom/src/loom/tools/loom-opt:loom-opt",
+    "//loom/src/loom/tools/iree-run-loom:iree-run-loom",
+    "//loom/src/loom/tools/iree-test-loom:iree-test-loom",
+    "//loom/src/loom/tools/iree-benchmark-loom:iree-benchmark-loom",
+)
+NATIVE_ARTIFACT_RESOURCE_TEST_TAGS = (
+    AMDGPU_RUN_REQUIREMENT_TAG,
+    "iree-run-requirement=libamdf.resource.amd_gpu",
+    XDNA_RUN_REQUIREMENT_TAG,
+    VULKAN_RUN_REQUIREMENT_TAG,
+    "-manual",
+)
+NATIVE_ARTIFACT_CONFIGURE_OPTIONS = (
+    "--//build_tools/vulkan/config:enabled=true",
+    "--//loom/config/execute:enable=iree_hal",
+    "--//loom/config/emit:enable=",
+    "--//libamdf/config:enabled=true",
+    "--//libamdf/config:families=rdna,cdna,xdna",
+)
+NATIVE_ARTIFACT_PROFILE_OPTIONS = NATIVE_ARTIFACT_CONFIGURE_OPTIONS + (
+    "--features=-thin_lto",
+    "--strip=never",
+    "--fission=yes",
+)
+# Wasm tests inherit PATH to discover Node. Use the shell bootstrap so that
+# rules_python still launches its hermetic interpreter from that environment.
+NATIVE_ARTIFACT_PRODUCER_OPTIONS = NATIVE_ARTIFACT_PROFILE_OPTIONS + (
+    "--@rules_python//python/config_settings:bootstrap_impl=script",
+    "--//loom/config/target/amdgpu:targets=loom_defaults",
+)
+NATIVE_ARTIFACT_CONSUMER_OPTIONS = NATIVE_ARTIFACT_PROFILE_OPTIONS + (
+    "--build_tests_only",
+)
+NATIVE_ARTIFACT_AMDGPU_TEST_TARGETS = (
+    f"{NATIVE_ARTIFACT_PACKAGE_LABEL}:"
+    "native_loom_binding_c_example_cxx_jit_amdgpu_test",
+    f"{NATIVE_ARTIFACT_PACKAGE_LABEL}:"
+    "native_runtime_src_iree_hal_drivers_amdgpu_util_signal_pool_test",
+    f"{NATIVE_ARTIFACT_PACKAGE_LABEL}:"
+    "native_libamdf_cts_gpu_gpu_extension_dynamic_instance",
+)
+NATIVE_ARTIFACT_AMDGPU_RESOURCES = AMDGPU_RESOURCES + ("libamdf.resource.amd_gpu",)
+NATIVE_ARTIFACT_TOOLCHAINS = tuple(
+    f"{NATIVE_ARTIFACT_PACKAGE_LABEL}:artifact_{role}_toolchain"
+    for role in ("benchmark", "compile", "format", "link", "lint", "test")
+)
+NATIVE_ARTIFACT_LOOM_AMDGPU_TEST_TARGETS = (
+    "//loom/...",
+    "-//loom/src/loom/tooling/target/amdgpu/test/cxx/...",
+)
+NATIVE_ARTIFACT_CXX_AMDGPU_TEST_TARGETS = (
+    "//loom/src/loom/tooling/target/amdgpu/test/cxx:"
+    "aiter_swiglu_f16_test_execute_amdgpu_access_test",
+    "//loom/src/loom/tooling/target/amdgpu/test/cxx:"
+    "aiter_swiglu_f16_test_execute_amdgpu_test",
+)
+NATIVE_ARTIFACT_LOOM_AMDGPU_TEST_TAGS = ("loom-target-family=amdgpu",)

@@ -79,6 +79,8 @@ AMDGPU_DEVICE_BINARY_PREBUILT_OPTIONS = (
     "-DIREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE=prebuilt",
     "-DIREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=none",
 )
+NATIVE_ARTIFACT_PRODUCER_COMMAND = "iree-bazel-native-artifact-asan"
+NATIVE_ARTIFACT_AMDGPU_COMMAND = "iree-bazel-native-artifact-amdgpu-asan"
 BAZEL_COMMANDS = {
     "iree-bazel-amd-client": ("amd-client", None),
     "iree-bazel-amd-client-asan": ("amd-client", "asan"),
@@ -96,6 +98,8 @@ BAZEL_COMMANDS = {
     "iree-bazel-amdgpu-asan": ("amdgpu", "asan"),
     "iree-bazel-amdgpu-tsan": ("amdgpu", "tsan"),
     "iree-bazel-amdgpu-ubsan": ("amdgpu", "ubsan"),
+    NATIVE_ARTIFACT_PRODUCER_COMMAND: ("native-artifact-producer", "asan"),
+    NATIVE_ARTIFACT_AMDGPU_COMMAND: ("native-artifact-amdgpu", "asan"),
     "iree-bazel-loom-amdgpu": ("loom-amdgpu", None),
     "iree-bazel-vulkan": ("vulkan", None),
 }
@@ -133,6 +137,7 @@ else:
     sys.path.insert(0, str(REPO_ROOT))
     from build_tools.devtools import ci_config
 
+from build_tools.bazel import configure as bazel_configure
 from build_tools.ci import windows_diagnostics
 from build_tools.devtools import run_requirements
 
@@ -283,6 +288,9 @@ def bazel_configure_step(
         command.append(
             "--//loom/config/import:enable=" + ",".join(enabled_loom_importers)
         )
+    bazel_configure.request_from_args(
+        bazel_configure.parse_arguments(list(extra_options))
+    )
     return CiStep("Configure Bazel", dev_command(*command, *extra_options))
 
 
@@ -710,6 +718,182 @@ def amdgpu_config_steps(
     )
 
 
+def native_artifact_producer_steps(
+    archive_path: Path,
+    revision: str,
+) -> list[CiStep]:
+    rocm_root_value = os.environ.get("HRX_ROCM_ROOT")
+    if not rocm_root_value:
+        raise ValueError(f"{NATIVE_ARTIFACT_PRODUCER_COMMAND} requires HRX_ROCM_ROOT")
+    rocm_root = Path(rocm_root_value)
+    work_directory = archive_path.parent
+    tests_build_events = work_directory / "native-artifact-tests.bep.jsonl"
+    tools_build_events = work_directory / "native-artifact-tools.bep.jsonl"
+    llvm_dwp = work_directory / "native-artifact-llvm-dwp"
+    aspect_options = (
+        "--aspects=//build_tools/bazel:native_test_artifact.bzl%native_test_artifact",
+        "--output_groups=native_artifact_payload,native_artifact_debug",
+    )
+    host_test_targets = (
+        ci_config.NATIVE_ARTIFACT_SOURCE_TARGETS
+        + ci_config.CPU_BAZEL_TARGET_EXCLUDES
+        + ci_config.CPU_SANITIZERS_XFAIL_TARGETS
+    )
+    package_arguments = [
+        "package",
+        "--build-events",
+        os.fspath(tests_build_events),
+        "--build-events",
+        os.fspath(tools_build_events),
+        "--output",
+        os.fspath(archive_path),
+        "--package-path",
+        ci_config.NATIVE_ARTIFACT_PACKAGE_PATH,
+        "--revision",
+        revision,
+        "--llvm-dwp",
+        os.fspath(llvm_dwp),
+        "--llvm-objcopy",
+        os.fspath(rocm_root / "lib/llvm/bin/llvm-objcopy"),
+        "--loom-toolchain",
+        "--platform-constraint",
+        "@platforms//os:linux",
+        "--platform-constraint",
+        "@platforms//cpu:x86_64",
+    ]
+    for tool_target in ci_config.NATIVE_ARTIFACT_TOOL_TARGETS:
+        package_arguments.extend(("--tool-label", tool_target))
+
+    return [
+        bazel_configure_step(
+            enabled_drivers=REPOSITORY_BUILD_HAL_DRIVERS,
+            enabled_loom_targets=REPOSITORY_BUILD_LOOM_TARGETS,
+            enabled_loom_importers=("cxx",),
+            extra_options=ci_config.NATIVE_ARTIFACT_CONFIGURE_OPTIONS,
+        ),
+        bazel_test_step(
+            "Test ASAN host coverage",
+            host_test_targets,
+            config="asan",
+            test_tag_filters=ci_config.CPU_RESOURCE_TAG_EXCLUDES,
+            bazel_options=ci_config.NATIVE_ARTIFACT_PRODUCER_OPTIONS,
+        ),
+        bazel_build_step(
+            "Build ASAN native test payload",
+            ci_config.NATIVE_ARTIFACT_SOURCE_TARGETS,
+            config="asan",
+            bazel_options=(
+                ci_config.NATIVE_ARTIFACT_PRODUCER_OPTIONS
+                + aspect_options
+                + (
+                    "--build_tests_only",
+                    "--test_tag_filters="
+                    + ",".join(ci_config.NATIVE_ARTIFACT_RESOURCE_TEST_TAGS),
+                    f"--build_event_json_file={tests_build_events}",
+                )
+            ),
+        ),
+        bazel_build_step(
+            "Build ASAN Loom tools",
+            ci_config.NATIVE_ARTIFACT_TOOL_TARGETS,
+            config="asan",
+            bazel_options=(
+                ci_config.NATIVE_ARTIFACT_PRODUCER_OPTIONS
+                + aspect_options
+                + (f"--build_event_json_file={tools_build_events}",)
+            ),
+        ),
+        CiStep(
+            "Prepare matching llvm-dwp",
+            python_command(
+                "build_tools/ci/prepare_llvm_dwp.py",
+                "--llvm-root",
+                os.fspath(rocm_root / "lib/llvm"),
+                "--output",
+                os.fspath(llvm_dwp),
+            ),
+        ),
+        CiStep(
+            "Package ASAN native tests",
+            python_command(
+                "build_tools/ci/native_test_artifact.py", *package_arguments
+            ),
+        ),
+    ]
+
+
+def validate_native_artifact_revision(revision: str) -> str:
+    if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        raise ValueError(
+            "--native-artifact-revision must be a full lowercase Git commit"
+        )
+    return revision
+
+
+def native_artifact_amdgpu_steps(
+    target_selector: str,
+    revision: str,
+) -> list[CiStep]:
+    package_directory = REPO_ROOT / ci_config.NATIVE_ARTIFACT_PACKAGE_PATH
+    configure_options = ci_config.NATIVE_ARTIFACT_CONFIGURE_OPTIONS
+    artifact_toolchains = "--extra_toolchains=" + ",".join(
+        ci_config.NATIVE_ARTIFACT_TOOLCHAINS
+    )
+    bazel_options = (
+        ci_config.NATIVE_ARTIFACT_CONSUMER_OPTIONS
+        + amdgpu_bazel_options(target_selector)
+        + (artifact_toolchains,)
+    )
+    test_environment = amdgpu_libhsa_test_env()
+    return [
+        CiStep(
+            "Verify ASAN native test artifact",
+            python_command(
+                "build_tools/ci/native_test_artifact.py",
+                "verify",
+                "--package",
+                os.fspath(package_directory),
+                "--revision",
+                revision,
+                "--workspace",
+                os.fspath(REPO_ROOT),
+            ),
+        ),
+        bazel_configure_step(
+            enabled_drivers=("amdgpu",),
+            enabled_loom_targets=("amdgpu",),
+            enabled_loom_importers=("cxx",),
+            extra_options=configure_options,
+        ),
+        bazel_test_step(
+            "Test representative ASAN native paths",
+            ci_config.NATIVE_ARTIFACT_AMDGPU_TEST_TARGETS,
+            config="asan",
+            available_resources=ci_config.NATIVE_ARTIFACT_AMDGPU_RESOURCES,
+            test_env=test_environment,
+            bazel_options=bazel_options,
+        ),
+        bazel_test_step(
+            "Test authored Loom AMDGPU coverage",
+            ci_config.NATIVE_ARTIFACT_LOOM_AMDGPU_TEST_TARGETS,
+            config="asan",
+            test_tag_filters=ci_config.NATIVE_ARTIFACT_LOOM_AMDGPU_TEST_TAGS,
+            available_resources=ci_config.NATIVE_ARTIFACT_AMDGPU_RESOURCES,
+            test_env=test_environment,
+            bazel_options=bazel_options,
+        ),
+        bazel_test_step(
+            "Test representative CXX AMDGPU import",
+            ci_config.NATIVE_ARTIFACT_CXX_AMDGPU_TEST_TARGETS,
+            config="asan",
+            test_tag_filters=ci_config.NATIVE_ARTIFACT_LOOM_AMDGPU_TEST_TAGS,
+            available_resources=ci_config.NATIVE_ARTIFACT_AMDGPU_RESOURCES,
+            test_env=test_environment,
+            bazel_options=bazel_options,
+        ),
+    ]
+
+
 def vulkan_steps(targets: tuple[str, ...]) -> list[CiStep]:
     scoped_targets = targets + ci_config.VULKAN_BAZEL_TARGET_EXCLUDES
     # A container that cannot create namespaces must fail instead of silently
@@ -1097,10 +1281,22 @@ def tilelang_importer_steps(command_name: str) -> list[CiStep]:
 
 
 def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
+    native_artifact_commands = {
+        NATIVE_ARTIFACT_PRODUCER_COMMAND,
+        NATIVE_ARTIFACT_AMDGPU_COMMAND,
+    }
+    if (
+        args.native_artifact_archive is not None
+        or args.native_artifact_revision is not None
+    ) and args.command not in native_artifact_commands:
+        raise ValueError(
+            "native artifact options are only supported by native artifact CI commands"
+        )
     bazel_target_group = BAZEL_COMMANDS.get(args.command, (None, None))[0]
     cmake_target_group = CMAKE_COMMANDS.get(args.command, (None, None))[0]
     amdgpu_target_bazel_groups = (
         "amdgpu",
+        "native-artifact-amdgpu",
         "repository-integration",
     )
     accepts_amdgpu_target = (
@@ -1138,6 +1334,36 @@ def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
         )
 
     bazel_target, sanitizer = BAZEL_COMMANDS[args.command]
+    if bazel_target == "native-artifact-producer":
+        if args.target:
+            raise ValueError("--target is not supported by native artifact CI")
+        if (
+            args.native_artifact_archive is None
+            or args.native_artifact_revision is None
+        ):
+            raise ValueError(
+                f"{NATIVE_ARTIFACT_PRODUCER_COMMAND} requires "
+                "--native-artifact-archive and --native-artifact-revision"
+            )
+        return native_artifact_producer_steps(
+            args.native_artifact_archive.expanduser().resolve(),
+            validate_native_artifact_revision(args.native_artifact_revision),
+        )
+    if bazel_target == "native-artifact-amdgpu":
+        if args.target:
+            raise ValueError("--target is not supported by native artifact CI")
+        if args.native_artifact_archive is not None:
+            raise ValueError(
+                "--native-artifact-archive is only supported by the producer"
+            )
+        if args.native_artifact_revision is None:
+            raise ValueError(
+                f"{NATIVE_ARTIFACT_AMDGPU_COMMAND} requires --native-artifact-revision"
+            )
+        return native_artifact_amdgpu_steps(
+            amdgpu_target_selector,
+            validate_native_artifact_revision(args.native_artifact_revision),
+        )
     if bazel_target == "amd-client":
         return amd_client_steps(
             tuple(args.target or ()),
@@ -1429,6 +1655,15 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
             "Bazel target pattern to build/test. Defaults to the IREE target "
             "directories present in the checkout."
         ),
+    )
+    parser.add_argument(
+        "--native-artifact-archive",
+        type=Path,
+        help="Output archive path for the native artifact producer.",
+    )
+    parser.add_argument(
+        "--native-artifact-revision",
+        help="Full Git revision built into or expected from a native artifact.",
     )
     return parser.parse_args(argv)
 

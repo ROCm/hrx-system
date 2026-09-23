@@ -78,6 +78,7 @@ py_binary(
     ],
     deps = [
         ":run_requirements",
+        "//build_tools/bazel:configure",
         "//build_tools/ci:windows_diagnostics",
     ],
 )
@@ -177,6 +178,7 @@ py_test(
     tags = _PRESUBMIT_TEST_TAGS,
     deps = [
         ":run_requirements",
+        "//build_tools/bazel:configure",
         "//build_tools/ci:windows_diagnostics",
     ],
 )

@@ -195,6 +195,46 @@ class NativeTestArtifactTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "did not finish successfully"):
                 native_test_artifact.load_build_export(build_events)
 
+    def test_verifies_artifact_and_checkout_revision(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            package = Path(temporary_directory) / "package"
+            package.mkdir()
+            revision = "a" * 40
+            package.joinpath("manifest.json").write_text(
+                json.dumps(
+                    {
+                        "revision": revision,
+                        "target_count": 12,
+                        "test_count": 10,
+                        "tool_count": 2,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = native_test_artifact.verify_artifact(
+                package_directory=package,
+                expected_revision=revision,
+                checkout_revision=revision,
+            )
+
+            self.assertEqual(12, result["target_count"])
+            self.assertEqual(10, result["test_count"])
+            self.assertEqual(2, result["tool_count"])
+
+            with self.assertRaisesRegex(ValueError, "checkout revision"):
+                native_test_artifact.verify_artifact(
+                    package_directory=package,
+                    expected_revision=revision,
+                    checkout_revision="b" * 40,
+                )
+            with self.assertRaisesRegex(ValueError, "artifact revision"):
+                native_test_artifact.verify_artifact(
+                    package_directory=package,
+                    expected_revision="b" * 40,
+                    checkout_revision="b" * 40,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
