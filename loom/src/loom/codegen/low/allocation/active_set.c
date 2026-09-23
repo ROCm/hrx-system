@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/codegen/low/allocation/live_range.h"
+#include "loom/codegen/low/allocation/storage.h"
 
 static bool loom_low_allocation_value_id_is_ignored(
     loom_value_id_t value_id, const loom_value_id_t* ignored_value_ids,
@@ -111,6 +112,42 @@ bool loom_low_allocation_active_set_conflicts(
   return loom_low_allocation_active_set_scan_conflicts(
       active_set, descriptor_set, unit_liveness, assignments, assignment_count,
       candidate, ignored_value_ids, ignored_value_count);
+}
+
+uint64_t loom_low_allocation_active_set_conflicting_locations(
+    const loom_low_allocation_active_set_t* active_set,
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
+    const loom_low_allocation_assignment_t* assignments,
+    const loom_low_allocation_assignment_t* candidate_template) {
+  uint64_t conflicts = 0;
+  for (iree_host_size_t i = 0; i < active_set->count; ++i) {
+    const loom_low_allocation_assignment_t* existing =
+        &assignments[active_set->assignment_indices[i]];
+    if (existing->location_base >= 64 ||
+        !loom_low_allocation_storage_assignment_classes_share(
+            descriptor_set, existing, candidate_template)) {
+      continue;
+    }
+    const uint32_t end =
+        (uint32_t)iree_min((uint64_t)64, (uint64_t)existing->location_base +
+                                             existing->location_count);
+    for (uint32_t location = existing->location_base; location < end;
+         ++location) {
+      const uint64_t bit = UINT64_C(1) << location;
+      if (conflicts & bit) {
+        continue;
+      }
+      loom_low_allocation_assignment_t candidate = *candidate_template;
+      candidate.location_base = location;
+      if (loom_low_allocation_active_assignment_conflicts(
+              descriptor_set, unit_liveness, existing, &candidate,
+              /*ignored_value_ids=*/NULL, /*ignored_value_count=*/0)) {
+        conflicts |= bit;
+      }
+    }
+  }
+  return conflicts;
 }
 
 void loom_low_allocation_active_set_remove(

@@ -78,6 +78,21 @@ bool loom_low_allocation_active_set_conflicts(
     const loom_low_allocation_assignment_t* candidate,
     const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count);
 
+// Returns a conflict bit for each of the first 64 linear locations of a
+// single-unit |candidate_template|. The template's location is ignored; its
+// class, sparse reservations, and unit lifetime apply to every queried
+// location. |assignments| is indexed by the active set. The result remains
+// valid only while active membership, assignments, and unit lifetimes remain
+// unchanged. Other placement constraints and locations outside the word need
+// separate checks. Construction visits the active assignments without
+// allocating.
+uint64_t loom_low_allocation_active_set_conflicting_locations(
+    const loom_low_allocation_active_set_t* active_set,
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
+    const loom_low_allocation_assignment_t* assignments,
+    const loom_low_allocation_assignment_t* candidate_template);
+
 // Removes assignments ending at or before |start_point|. Calls advance
 // monotonically; each subsequent insertion must end after the swept point.
 void loom_low_allocation_active_set_expire(

@@ -254,5 +254,87 @@ TEST(LowAllocationActiveSetTest, ReusesStorageBeforeRemovedLifetimeExpires) {
   }
 }
 
+TEST(LowAllocationActiveSetTest, ProjectsSparseScalarConflictsAcrossAliases) {
+  iree_arena_block_pool_t block_pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool, &arena);
+  loom_low_reg_class_t reg_classes[3] = {};
+  reg_classes[0].alias_set_id = 1;
+  reg_classes[1].alias_set_id = 1;
+  reg_classes[2].alias_set_id = 2;
+  const loom_low_descriptor_set_t descriptor_set =
+      DescriptorSet(reg_classes, IREE_ARRAYSIZE(reg_classes));
+  loom_low_allocation_assignment_t assignments[] = {
+      Assignment(1, 0, 12, /*location_base=*/0, /*unit_point_start=*/0),
+      Assignment(2, 0, 12, /*location_base=*/2, /*unit_point_start=*/1),
+      Assignment(3, 0, 12, /*location_base=*/7, /*unit_point_start=*/3),
+      Assignment(4, 0, 12, /*location_base=*/63, /*unit_point_start=*/4),
+  };
+  assignments[0].liveness_segments = {0, 2};
+  assignments[1].descriptor_reg_class_id = 1;
+  assignments[1].unit_count = assignments[1].location_count = 2;
+  assignments[1].flags =
+      LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REFINED_UNIT_STARTS;
+  assignments[2].descriptor_reg_class_id = 2;
+  assignments[3].unit_count = assignments[3].location_count = 2;
+  uint32_t unit_start_points[] = {0, 0, 6, 0, 0, 0, 4};
+  uint32_t unit_end_points[] = {12, 5, 12, 12, 12, 12, 6};
+  const loom_liveness_segment_t segments[] = {{0, 3}, {8, 12}, {4, 6}, {9, 10}};
+  loom_low_allocation_unit_liveness_t unit_liveness = {};
+  unit_liveness.start_points = unit_start_points;
+  unit_liveness.end_points = unit_end_points;
+  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
+  unit_liveness.storage_segments.entries = segments;
+  loom_low_allocation_active_set_t active_set = {};
+  IREE_ASSERT_OK(loom_low_allocation_active_set_initialize(
+      IREE_ARRAYSIZE(assignments), /*program_point_count=*/13,
+      /*unit_capacity=*/32, &arena, &active_set));
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(assignments); ++i) {
+    loom_low_allocation_active_set_insert(&active_set, &descriptor_set,
+                                          assignments,
+                                          IREE_ARRAYSIZE(assignments), i);
+  }
+
+  // The sparse value leaves a hole, the aliased tuple releases one unit before
+  // activating the next, and an unrelated class does not occupy this domain.
+  auto candidate = Assignment(5, 4, 6, /*location_base=*/0,
+                              /*unit_point_start=*/6);
+  const uint64_t high_bit = UINT64_C(1) << 63;
+  EXPECT_EQ(loom_low_allocation_active_set_conflicting_locations(
+                &active_set, &descriptor_set, &unit_liveness, assignments,
+                &candidate),
+            high_bit | (UINT64_C(1) << 2));
+  candidate.start_point = 6;
+  candidate.end_point = 8;
+  unit_start_points[6] = 6;
+  unit_end_points[6] = 8;
+  EXPECT_EQ(loom_low_allocation_active_set_conflicting_locations(
+                &active_set, &descriptor_set, &unit_liveness, assignments,
+                &candidate),
+            high_bit | (UINT64_C(1) << 3));
+
+  // Future sparse reservations count even when the candidate starts in a gap.
+  candidate.start_point = 4;
+  candidate.end_point = 10;
+  unit_start_points[6] = 4;
+  unit_end_points[6] = 10;
+  candidate.liveness_segments = {2, 2};
+  EXPECT_EQ(
+      loom_low_allocation_active_set_conflicting_locations(
+          &active_set, &descriptor_set, &unit_liveness, assignments,
+          &candidate),
+      high_bit | (UINT64_C(1) << 0) | (UINT64_C(1) << 2) | (UINT64_C(1) << 3));
+  // The adjacent location lies outside the word and still needs a full query.
+  candidate.location_base = 64;
+  EXPECT_TRUE(loom_low_allocation_active_set_conflicts(
+      &active_set, &descriptor_set, &unit_liveness, assignments,
+      IREE_ARRAYSIZE(assignments), &candidate, /*ignored_value_ids=*/nullptr,
+      /*ignored_value_count=*/0));
+
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&block_pool);
+}
+
 }  // namespace
 }  // namespace loom

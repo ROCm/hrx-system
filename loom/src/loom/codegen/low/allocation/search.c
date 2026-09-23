@@ -121,7 +121,9 @@ static uint32_t loom_low_allocation_search_relation_penalty(
   return iree_max((uint32_t)1, (uint32_t)relation->priority);
 }
 
-typedef struct loom_low_allocation_search_location_preference_t {
+typedef struct loom_low_allocation_search_location_query_t {
+  // Known active conflicts for the first word of scalar linear locations.
+  uint64_t active_conflicts;
   // Placement table owning the relation ranges, or NULL when inert.
   const loom_low_placement_table_t* placement;
   // Relations where the candidate is the result assignment.
@@ -130,7 +132,7 @@ typedef struct loom_low_allocation_search_location_preference_t {
   loom_low_placement_relation_range_t source_range;
   // One penalty bit per semantic candidate ordinal, or NULL when inert.
   const uint64_t* physical_domain_words;
-} loom_low_allocation_search_location_preference_t;
+} loom_low_allocation_search_location_query_t;
 
 static bool loom_low_allocation_search_relation_is_actionable(
     const loom_low_allocation_search_context_t* context,
@@ -152,73 +154,74 @@ static bool loom_low_allocation_search_relation_is_actionable(
       context->descriptor_set, candidate, counterpart);
 }
 
-static loom_low_allocation_search_location_preference_t
-loom_low_allocation_search_location_preference(
+static loom_low_allocation_search_location_query_t
+loom_low_allocation_search_location_query(
     const loom_low_allocation_search_context_t* context,
     const loom_low_allocation_assignment_t* candidate) {
-  loom_low_allocation_search_location_preference_t preference = {0};
+  loom_low_allocation_search_location_query_t query = {0};
   const loom_low_placement_table_t* placement = context->placement;
   if (placement == NULL || placement->location_relation_count == 0) {
-    return preference;
+    return query;
   }
   loom_value_ordinal_t value_ordinal = LOOM_VALUE_ORDINAL_INVALID;
   if (!loom_low_allocation_assignment_map_value_ordinal_for_value(
           context->assignment_map, candidate->value_id, &value_ordinal)) {
-    return preference;
+    return query;
   }
 
-  preference.result_range = loom_low_placement_relation_range_for_value_ordinal(
+  query.result_range = loom_low_placement_relation_range_for_value_ordinal(
       placement, value_ordinal);
-  for (uint32_t i = 0; i < preference.result_range.count; ++i) {
+  for (uint32_t i = 0; i < query.result_range.count; ++i) {
     const loom_low_placement_relation_t* relation =
-        &placement->relations[preference.result_range.start + i];
+        &placement->relations[query.result_range.start + i];
     if (loom_low_allocation_search_relation_is_actionable(context, relation,
                                                           candidate, true)) {
-      preference.placement = placement;
+      query.placement = placement;
       break;
     }
   }
-  preference.source_range =
+  query.source_range =
       loom_low_placement_relation_range_for_source_value_ordinal(placement,
                                                                  value_ordinal);
-  if (preference.placement == NULL) {
-    for (uint32_t i = 0; i < preference.source_range.count; ++i) {
+  if (query.placement == NULL) {
+    for (uint32_t i = 0; i < query.source_range.count; ++i) {
       const uint32_t relation_index =
-          placement->relation_indices_by_source_ordinal
-              [preference.source_range.start + i];
+          placement
+              ->relation_indices_by_source_ordinal[query.source_range.start +
+                                                   i];
       const loom_low_placement_relation_t* relation =
           &placement->relations[relation_index];
       if (loom_low_allocation_search_relation_is_actionable(context, relation,
                                                             candidate, false)) {
-        preference.placement = placement;
+        query.placement = placement;
         break;
       }
     }
   }
-  return preference;
+  return query;
 }
 
 static uint32_t loom_low_allocation_search_location_preference_penalty(
     const loom_low_allocation_search_context_t* context,
-    const loom_low_allocation_search_location_preference_t* preference,
+    const loom_low_allocation_search_location_query_t* query,
     const loom_low_allocation_assignment_t* candidate) {
-  const loom_low_placement_table_t* placement = preference->placement;
+  const loom_low_placement_table_t* placement = query->placement;
   if (placement == NULL) {
     return 0;
   }
 
   uint32_t penalty = 0;
-  for (uint32_t i = 0; i < preference->result_range.count; ++i) {
+  for (uint32_t i = 0; i < query->result_range.count; ++i) {
     const loom_low_placement_relation_t* relation =
-        &placement->relations[preference->result_range.start + i];
+        &placement->relations[query->result_range.start + i];
     penalty = iree_math_saturating_add_u32(
         penalty, loom_low_allocation_search_relation_penalty(context, relation,
                                                              candidate, true));
   }
-  for (uint32_t i = 0; i < preference->source_range.count; ++i) {
+  for (uint32_t i = 0; i < query->source_range.count; ++i) {
     const uint32_t relation_index =
-        placement->relation_indices_by_source_ordinal
-            [preference->source_range.start + i];
+        placement
+            ->relation_indices_by_source_ordinal[query->source_range.start + i];
     const loom_low_placement_relation_t* relation =
         &placement->relations[relation_index];
     penalty = iree_math_saturating_add_u32(
@@ -369,7 +372,7 @@ typedef struct loom_low_allocation_search_location_choice_t {
 static void loom_low_allocation_search_find_location_for_release_policy(
     loom_low_allocation_search_context_t* context,
     const loom_low_allocation_assignment_t* candidate_template,
-    const loom_low_allocation_search_location_preference_t* preference,
+    const loom_low_allocation_search_location_query_t* query,
     uint32_t last_base, uint32_t alignment, uint32_t scalar_packing_frontier,
     loom_low_allocation_storage_release_policy_t release_policy,
     loom_low_allocation_search_location_choice_t* out_choice) {
@@ -390,6 +393,11 @@ static void loom_low_allocation_search_find_location_for_release_policy(
     for (uint64_t i = 0; i < candidate_count; ++i) {
       loom_low_allocation_assignment_t candidate = *candidate_template;
       candidate.location_base = (uint32_t)(i * alignment);
+      if (candidate.location_base < 64 &&
+          (query->active_conflicts &
+           (UINT64_C(1) << candidate.location_base))) {
+        continue;
+      }
       if (!loom_low_allocation_search_assignment_conflicts(
               context, &candidate,
               /*ignored_value_ids=*/NULL, /*ignored_value_count=*/0,
@@ -411,6 +419,9 @@ static void loom_low_allocation_search_find_location_for_release_policy(
   for (uint64_t i = 0; i < candidate_count; ++i) {
     const uint64_t ordinal = i < packing_count ? packing_count - i - 1 : i;
     const uint32_t base = (uint32_t)(ordinal * alignment);
+    if (base < 64 && (query->active_conflicts & (UINT64_C(1) << base))) {
+      continue;
+    }
     if (needs_first_candidate && base < first_candidate_ordinal) {
       continue;
     }
@@ -425,8 +436,8 @@ static void loom_low_allocation_search_find_location_for_release_policy(
       continue;
     }
     const uint32_t preference_penalty =
-        loom_low_allocation_search_location_preference_penalty(
-            context, preference, &candidate);
+        loom_low_allocation_search_location_preference_penalty(context, query,
+                                                               &candidate);
     if (out_choice->found &&
         preference_penalty >= out_choice->preference_penalty) {
       continue;
@@ -474,7 +485,7 @@ static void
 loom_low_allocation_search_find_explicit_physical_register_for_release_policy(
     loom_low_allocation_search_context_t* context,
     const loom_low_allocation_assignment_t* candidate_template,
-    const loom_low_allocation_search_location_preference_t* preference,
+    const loom_low_allocation_search_location_query_t* query,
     uint16_t maximum_pressure_extent,
     loom_low_allocation_storage_release_policy_t release_policy,
     loom_low_allocation_search_location_choice_t* out_choice) {
@@ -526,8 +537,8 @@ loom_low_allocation_search_find_explicit_physical_register_for_release_policy(
       physical_register_id = view->physical_register_id;
     }
     const uint32_t domain_penalty =
-        preference->physical_domain_words
-            ? (preference->physical_domain_words[candidate_ordinal / 64] >>
+        query->physical_domain_words
+            ? (query->physical_domain_words[candidate_ordinal / 64] >>
                (candidate_ordinal % 64)) &
                   1
             : 0;
@@ -548,8 +559,8 @@ loom_low_allocation_search_find_explicit_physical_register_for_release_policy(
       continue;
     }
     uint32_t preference_penalty =
-        loom_low_allocation_search_location_preference_penalty(
-            context, preference, &candidate);
+        loom_low_allocation_search_location_preference_penalty(context, query,
+                                                               &candidate);
     preference_penalty =
         iree_math_saturating_add_u32(preference_penalty, domain_penalty);
     const uint32_t first_candidate_ordinal =
@@ -585,18 +596,18 @@ loom_low_allocation_search_find_explicit_physical_register_for_release_policy(
 static void loom_low_allocation_search_find_for_release_policy(
     loom_low_allocation_search_context_t* context,
     const loom_low_allocation_assignment_t* candidate_template,
-    const loom_low_allocation_search_location_preference_t* preference,
+    const loom_low_allocation_search_location_query_t* query,
     bool uses_explicit_physical_registers, uint16_t explicit_candidate_count,
     uint32_t last_base, uint32_t alignment, uint32_t scalar_packing_frontier,
     loom_low_allocation_storage_release_policy_t release_policy,
     loom_low_allocation_search_location_choice_t* out_choice) {
   if (uses_explicit_physical_registers) {
     loom_low_allocation_search_find_explicit_physical_register_for_release_policy(
-        context, candidate_template, preference, explicit_candidate_count,
+        context, candidate_template, query, explicit_candidate_count,
         release_policy, out_choice);
   } else {
     loom_low_allocation_search_find_location_for_release_policy(
-        context, candidate_template, preference, last_base, alignment,
+        context, candidate_template, query, last_base, alignment,
         scalar_packing_frontier, release_policy, out_choice);
   }
 }
@@ -674,11 +685,21 @@ bool loom_low_allocation_search_find_free_location(
       loom_low_allocation_search_candidate_assignment(
           context, interval, capacity.descriptor_reg_class_id,
           capacity.location_kind, /*location_base=*/0, interval->unit_count);
-  loom_low_allocation_search_location_preference_t preference =
-      loom_low_allocation_search_location_preference(context,
-                                                     &candidate_template);
+  loom_low_allocation_search_location_query_t query =
+      loom_low_allocation_search_location_query(context, &candidate_template);
+  // A word of known conflicts avoids repeated hash probes while preserving
+  // every constraint check for the remaining candidates. Bound projection
+  // work independently of function size; large active sets keep indexed probes.
+  if (!uses_explicit_physical_registers && interval->unit_count == 1 &&
+      context->active_set->count <= 64) {
+    query.active_conflicts =
+        loom_low_allocation_active_set_conflicting_locations(
+            context->active_set, context->descriptor_set,
+            context->unit_liveness, context->assignment_map->assignments,
+            &candidate_template);
+  }
   if (uses_explicit_physical_registers && interval->unit_count == 1) {
-    preference.physical_domain_words =
+    query.physical_domain_words =
         loom_low_allocation_physical_domains_for_interval(
             context->physical_domains, context->liveness, interval);
   }
@@ -693,17 +714,15 @@ bool loom_low_allocation_search_find_free_location(
                 capacity.is_bounded ? capacity.max_units : UINT32_MAX)
           : 0;
   loom_low_allocation_search_find_for_release_policy(
-      context, &candidate_template, &preference,
-      uses_explicit_physical_registers, explicit_candidate_count, last_base,
-      alignment, scalar_packing_frontier,
+      context, &candidate_template, &query, uses_explicit_physical_registers,
+      explicit_candidate_count, last_base, alignment, scalar_packing_frontier,
       LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN, &release_free);
   loom_low_allocation_search_location_choice_t pressure_release = {0};
   if (loom_low_allocation_search_has_pressure_release_records(context) &&
       (!release_free.found || release_free.first_candidate_ordinal != 0)) {
     loom_low_allocation_search_find_for_release_policy(
-        context, &candidate_template, &preference,
-        uses_explicit_physical_registers, explicit_candidate_count, last_base,
-        alignment, scalar_packing_frontier,
+        context, &candidate_template, &query, uses_explicit_physical_registers,
+        explicit_candidate_count, last_base, alignment, scalar_packing_frontier,
         LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FOR_PRESSURE, &pressure_release);
   }
   if (pressure_release.found &&
@@ -722,7 +741,7 @@ bool loom_low_allocation_search_find_free_location(
     if (loom_low_allocation_search_location_crosses_residency_cliff(
             context, &candidate_template, &release_free, &release_free_tier)) {
       loom_low_allocation_search_find_for_release_policy(
-          context, &candidate_template, &preference,
+          context, &candidate_template, &query,
           uses_explicit_physical_registers, explicit_candidate_count, last_base,
           alignment, scalar_packing_frontier,
           LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED, &release_allowed);
@@ -746,9 +765,8 @@ bool loom_low_allocation_search_find_free_location(
   }
   if (!searched_release_allowed) {
     loom_low_allocation_search_find_for_release_policy(
-        context, &candidate_template, &preference,
-        uses_explicit_physical_registers, explicit_candidate_count, last_base,
-        alignment, scalar_packing_frontier,
+        context, &candidate_template, &query, uses_explicit_physical_registers,
+        explicit_candidate_count, last_base, alignment, scalar_packing_frontier,
         LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED, &release_allowed);
   }
   if (release_allowed.found) {
