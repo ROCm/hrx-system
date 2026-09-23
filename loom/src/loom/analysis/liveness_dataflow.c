@@ -8,6 +8,9 @@
 
 #include <string.h>
 
+#include "loom/analysis/liveness_uses.h"
+#include "loom/ir/module.h"
+
 typedef struct loom_liveness_dataflow_block_state_t {
   // Mutable exact live-in value list.
   loom_value_id_t* live_in_values;
@@ -341,4 +344,236 @@ iree_status_t loom_liveness_dataflow_solve(
                    block_state->live_out_count);
   }
   return iree_ok_status();
+}
+
+typedef struct loom_liveness_block_state_t {
+  // First entry in the build state's compact block-use ordinal table.
+  iree_host_size_t use_start;
+  // Number of unique upward-exposed uses in this block.
+  iree_host_size_t use_count;
+  // First entry in the build state's compact block-definition ordinal table.
+  iree_host_size_t definition_start;
+  // Number of unique definitions in this block.
+  iree_host_size_t definition_count;
+} loom_liveness_block_state_t;
+
+// Compact transfer ordinals grouped by block, with per-value membership marks.
+typedef struct loom_liveness_transfer_values_t {
+  // Arena-owned ordinal storage shared by all block ranges.
+  loom_value_ordinal_t* ordinals;
+  // Number of initialized entries in |ordinals|.
+  iree_host_size_t count;
+  // Number of allocated entries in |ordinals|.
+  iree_host_size_t capacity;
+  // Block generation in which each local value was first included.
+  uint32_t* generations;
+} loom_liveness_transfer_values_t;
+
+typedef struct loom_liveness_dataflow_build_state_t {
+  // Module containing the immutable analyzed region.
+  const loom_module_t* module;
+  // Acquired value-ordinal map shared with snapshot consumers.
+  const loom_local_value_domain_t* value_domain;
+  // Number of entries in the local value domain.
+  loom_value_ordinal_t value_count;
+  // Temporary storage for block transfers and membership generations.
+  iree_arena_allocator_t* scratch_arena;
+  // Mutable per-block liveness state.
+  loom_liveness_block_state_t* block_states;
+  // Upward-exposed uses retained once per block.
+  loom_liveness_transfer_values_t uses;
+  // Definitions retained once per block.
+  loom_liveness_transfer_values_t definitions;
+  // Current block generation for use and definition membership marks.
+  uint32_t block_generation;
+} loom_liveness_dataflow_build_state_t;
+
+static iree_status_t loom_liveness_append_block_ordinal(
+    loom_liveness_dataflow_build_state_t* state,
+    loom_value_ordinal_t value_ordinal,
+    loom_liveness_transfer_values_t* values) {
+  if (values->count >= values->capacity) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_grow_array(state->scratch_arena, values->count,
+                              values->count + 1, sizeof(*values->ordinals),
+                              &values->capacity, (void**)&values->ordinals));
+  }
+  values->ordinals[values->count++] = value_ordinal;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_liveness_add_block_definition(
+    loom_liveness_dataflow_build_state_t* state,
+    loom_value_ordinal_t value_ordinal) {
+  if (state->definitions.generations[value_ordinal] ==
+      state->block_generation) {
+    return iree_ok_status();
+  }
+  state->definitions.generations[value_ordinal] = state->block_generation;
+  return loom_liveness_append_block_ordinal(state, value_ordinal,
+                                            &state->definitions);
+}
+
+static iree_status_t loom_liveness_add_block_use(void* user_data,
+                                                 loom_value_id_t value_id) {
+  loom_liveness_dataflow_build_state_t* build_state =
+      (loom_liveness_dataflow_build_state_t*)user_data;
+  const loom_value_ordinal_t value_ordinal =
+      loom_local_value_domain_ordinal(build_state->value_domain, value_id);
+  if (build_state->definitions.generations[value_ordinal] ==
+          build_state->block_generation ||
+      build_state->uses.generations[value_ordinal] ==
+          build_state->block_generation) {
+    return iree_ok_status();
+  }
+  build_state->uses.generations[value_ordinal] = build_state->block_generation;
+  return loom_liveness_append_block_ordinal(build_state, value_ordinal,
+                                            &build_state->uses);
+}
+
+static iree_status_t loom_liveness_collect_block_use_def(
+    loom_liveness_dataflow_build_state_t* state, const loom_block_t* block,
+    loom_liveness_block_state_t* block_state) {
+  ++state->block_generation;
+  IREE_ASSERT_NE(state->block_generation, 0u);
+  block_state->use_start = state->uses.count;
+  block_state->definition_start = state->definitions.count;
+  for (uint16_t i = 0; i < block->arg_count; ++i) {
+    const loom_value_ordinal_t value_ordinal = loom_local_value_domain_ordinal(
+        state->value_domain, loom_block_arg_id(block, i));
+    IREE_RETURN_IF_ERROR(
+        loom_liveness_add_block_definition(state, value_ordinal));
+  }
+  for (uint16_t i = 0; i < block->arg_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_liveness_for_each_type_ref(
+        state->module, loom_block_arg_type(state->module, block, i),
+        loom_liveness_value_callback_make(loom_liveness_add_block_use, state)));
+  }
+  const loom_op_t* op = NULL;
+  loom_block_for_each_op(block, op) {
+    const loom_value_id_t* results = loom_op_const_results(op);
+    for (uint16_t i = 0; i < op->result_count; ++i) {
+      const loom_value_ordinal_t value_ordinal =
+          loom_local_value_domain_ordinal(state->value_domain, results[i]);
+      IREE_RETURN_IF_ERROR(
+          loom_liveness_add_block_definition(state, value_ordinal));
+    }
+    IREE_RETURN_IF_ERROR(loom_liveness_for_each_op_use(
+        state->module, op,
+        loom_liveness_value_callback_make(loom_liveness_add_block_use, state)));
+  }
+  block_state->use_count = state->uses.count - block_state->use_start;
+  block_state->definition_count =
+      state->definitions.count - block_state->definition_start;
+  return iree_ok_status();
+}
+
+//===----------------------------------------------------------------------===//
+// Dataflow
+//===----------------------------------------------------------------------===//
+
+static iree_status_t loom_liveness_allocate_block_states(
+    loom_liveness_dataflow_build_state_t* state, iree_host_size_t block_count) {
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      state->scratch_arena, block_count, sizeof(*state->block_states),
+      (void**)&state->block_states));
+  memset(state->block_states, 0, block_count * sizeof(*state->block_states));
+  if (state->value_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->scratch_arena, state->value_count,
+        sizeof(*state->uses.generations), (void**)&state->uses.generations));
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(state->scratch_arena, state->value_count,
+                                  sizeof(*state->definitions.generations),
+                                  (void**)&state->definitions.generations));
+    memset(state->uses.generations, 0,
+           state->value_count * sizeof(*state->uses.generations));
+    memset(state->definitions.generations, 0,
+           state->value_count * sizeof(*state->definitions.generations));
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_liveness_dataflow_analyze(
+    const loom_local_value_domain_t* value_domain,
+    const loom_cfg_graph_t* cfg_graph, iree_arena_allocator_t* result_arena,
+    loom_liveness_dataflow_t* out_dataflow) {
+  IREE_ASSERT(loom_local_value_domain_is_acquired(value_domain));
+  *out_dataflow = (loom_liveness_dataflow_t){0};
+  const loom_module_t* module = value_domain->module;
+  const loom_region_t* region = value_domain->region;
+  iree_arena_allocator_t scratch_storage;
+  iree_arena_initialize(result_arena->block_pool, &scratch_storage);
+  iree_arena_allocator_t* scratch_arena = &scratch_storage;
+  loom_liveness_dataflow_build_state_t state = {
+      .module = module,
+      .value_domain = value_domain,
+      .value_count = value_domain->value_count,
+      .scratch_arena = scratch_arena,
+  };
+  iree_status_t status =
+      loom_liveness_allocate_block_states(&state, region->block_count);
+  for (uint16_t block_index = 0;
+       iree_status_is_ok(status) && block_index < region->block_count;
+       ++block_index) {
+    status = loom_liveness_collect_block_use_def(
+        &state, loom_region_const_block(region, block_index),
+        &state.block_states[block_index]);
+  }
+
+  const bool is_cfg =
+      iree_any_bit_set(region->flags, LOOM_REGION_INSTANCE_FLAG_CFG);
+  if (iree_status_is_ok(status) && is_cfg) {
+    IREE_ASSERT(cfg_graph->module == module);
+    IREE_ASSERT(cfg_graph->region == region);
+    IREE_ASSERT_EQ(cfg_graph->block_count, region->block_count);
+    if (cfg_graph->malformed) {
+      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "CFG graph is malformed; run Loom verification "
+                                "before liveness analysis");
+    }
+  }
+  loom_liveness_block_transfer_t* block_transfers = NULL;
+  loom_liveness_block_relation_t* block_relations = NULL;
+  if (iree_status_is_ok(status) && region->block_count > 0) {
+    status = iree_arena_allocate_array(scratch_arena, region->block_count,
+                                       sizeof(*block_transfers),
+                                       (void**)&block_transfers);
+  }
+  if (iree_status_is_ok(status) && region->block_count > 0) {
+    status = iree_arena_allocate_array(result_arena, region->block_count,
+                                       sizeof(*block_relations),
+                                       (void**)&block_relations);
+  }
+  if (iree_status_is_ok(status)) {
+    for (uint16_t block_index = 0; block_index < region->block_count;
+         ++block_index) {
+      const loom_liveness_block_state_t* block_state =
+          &state.block_states[block_index];
+      block_transfers[block_index] = (loom_liveness_block_transfer_t){
+          .use_ordinals = block_state->use_count > 0
+                              ? state.uses.ordinals + block_state->use_start
+                              : NULL,
+          .use_count = block_state->use_count,
+          .definition_ordinals =
+              block_state->definition_count > 0
+                  ? state.definitions.ordinals + block_state->definition_start
+                  : NULL,
+          .definition_count = block_state->definition_count,
+      };
+    }
+    status = loom_liveness_dataflow_solve(
+        is_cfg ? cfg_graph : NULL, value_domain->value_ids, state.value_count,
+        block_transfers, region->block_count, block_relations, result_arena,
+        scratch_arena);
+  }
+
+  if (iree_status_is_ok(status)) {
+    *out_dataflow = (loom_liveness_dataflow_t){
+        .blocks = block_relations,
+        .block_count = region->block_count,
+    };
+  }
+  iree_arena_deinitialize(scratch_arena);
+  return status;
 }

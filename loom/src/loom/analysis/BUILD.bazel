@@ -765,10 +765,21 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "liveness_uses",
+    srcs = ["liveness_uses.c"],
+    hdrs = ["liveness_uses.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "liveness_dataflow",
     srcs = ["liveness_dataflow.c"],
     hdrs = ["liveness_dataflow.h"],
     deps = [
+        ":liveness_uses",
         "//loom/src/loom/ir",
         "//loom/src/loom/util:cfg_graph",
         "//runtime/src/iree/base",
@@ -806,6 +817,7 @@ loom_cc_library(
     deps = [
         ":liveness_dataflow",
         ":liveness_events",
+        ":liveness_uses",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/target:registers",

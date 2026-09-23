@@ -37,9 +37,11 @@ iree_status_t loom_low_schedule_add_dependency(
 iree_status_t loom_low_schedule_fill_nodes(
     loom_low_schedule_build_state_t* state);
 
+// Builds dependencies, using |liveness| to preserve architectural-state values
+// live across block boundaries. It may be NULL when no such values exist.
 iree_status_t loom_low_schedule_build_dependencies(
     loom_low_schedule_build_state_t* state,
-    const loom_liveness_analysis_t* liveness);
+    const loom_liveness_dataflow_t* liveness);
 
 #ifdef __cplusplus
 }  // extern "C"

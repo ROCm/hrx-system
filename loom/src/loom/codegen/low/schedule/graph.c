@@ -1549,7 +1549,7 @@ iree_status_t loom_low_schedule_fill_nodes(
 
 static void loom_low_schedule_preserve_live_out_state(
     loom_low_schedule_build_state_t* state, uint32_t block_index,
-    const loom_liveness_block_info_t* liveness) {
+    const loom_liveness_block_relation_t* liveness) {
   const loom_low_schedule_block_t* block = &state->blocks[block_index];
   for (iree_host_size_t i = 0; i < liveness->live_out_count; ++i) {
     const loom_value_ordinal_t ordinal = loom_local_value_domain_ordinal(
@@ -1591,7 +1591,7 @@ static void loom_low_schedule_preserve_live_out_state(
 
 iree_status_t loom_low_schedule_build_dependencies(
     loom_low_schedule_build_state_t* state,
-    const loom_liveness_analysis_t* liveness) {
+    const loom_liveness_dataflow_t* liveness) {
   for (iree_host_size_t block_index = 0; block_index < state->body->block_count;
        ++block_index) {
     const loom_low_schedule_block_t* block_record = &state->blocks[block_index];
@@ -1705,7 +1705,7 @@ iree_status_t loom_low_schedule_build_dependencies(
       }
     }
     loom_low_schedule_reset_storage_reads(state);
-    if (liveness->block_count != 0) {
+    if (liveness != NULL) {
       loom_low_schedule_preserve_live_out_state(state, (uint32_t)block_index,
                                                 &liveness->blocks[block_index]);
       if (state->error_count != 0) {

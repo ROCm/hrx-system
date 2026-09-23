@@ -11,7 +11,7 @@
 #include "iree/base/internal/math.h"
 #include "loom/analysis/liveness_dataflow.h"
 #include "loom/analysis/liveness_events.h"
-#include "loom/ir/ancestry.h"
+#include "loom/analysis/liveness_uses.h"
 #include "loom/ir/module.h"
 #include "loom/ir/types.h"
 #include "loom/ops/op_defs.h"
@@ -44,17 +44,6 @@ typedef struct loom_liveness_bitset_t {
   uint64_t* words;
   iree_host_size_t word_count;
 } loom_liveness_bitset_t;
-
-typedef struct loom_liveness_block_state_t {
-  // First entry in the build state's compact block-use ordinal table.
-  iree_host_size_t use_start;
-  // Number of unique upward-exposed uses in this block.
-  iree_host_size_t use_count;
-  // First entry in the build state's compact block-definition ordinal table.
-  iree_host_size_t definition_start;
-  // Number of unique definitions in this block.
-  iree_host_size_t definition_count;
-} loom_liveness_block_state_t;
 
 typedef struct loom_liveness_mutable_interval_t {
   // Interval fields being assembled.
@@ -106,26 +95,6 @@ typedef struct loom_liveness_build_state_t {
   loom_value_ordinal_t value_count;
   // Number of 64-bit words in local value bitsets.
   iree_host_size_t word_count;
-  // Mutable per-block liveness state.
-  loom_liveness_block_state_t* block_states;
-  // Compact upward-exposed use ordinals grouped by block.
-  loom_value_ordinal_t* block_use_ordinals;
-  // Number of initialized entries in |block_use_ordinals|.
-  iree_host_size_t block_use_count;
-  // Number of allocated entries in |block_use_ordinals|.
-  iree_host_size_t block_use_capacity;
-  // Compact definition ordinals grouped by block.
-  loom_value_ordinal_t* block_definition_ordinals;
-  // Number of initialized entries in |block_definition_ordinals|.
-  iree_host_size_t block_definition_count;
-  // Number of allocated entries in |block_definition_ordinals|.
-  iree_host_size_t block_definition_capacity;
-  // Current block generation for use and definition membership marks.
-  uint32_t block_generation;
-  // Generation in which each local value was first used by a block.
-  uint32_t* block_use_generations;
-  // Generation in which each local value was defined by a block.
-  uint32_t* block_definition_generations;
   // Mutable intervals indexed by region-local value ordinal.
   loom_liveness_mutable_interval_t* interval_states;
   // Block-local segments collected in increasing block order.
@@ -161,24 +130,6 @@ typedef struct loom_liveness_build_state_t {
   // Mutable pressure summary state.
   loom_liveness_pressure_state_t pressure_state;
 } loom_liveness_build_state_t;
-
-typedef iree_status_t (*loom_liveness_value_fn_t)(void* user_data,
-                                                  loom_value_id_t value_id);
-
-typedef struct loom_liveness_value_callback_t {
-  // Function invoked for each visited value.
-  loom_liveness_value_fn_t fn;
-  // Opaque callback payload passed to |fn|.
-  void* user_data;
-} loom_liveness_value_callback_t;
-
-static inline loom_liveness_value_callback_t loom_liveness_value_callback_make(
-    loom_liveness_value_fn_t fn, void* user_data) {
-  return (loom_liveness_value_callback_t){
-      .fn = fn,
-      .user_data = user_data,
-  };
-}
 
 //===----------------------------------------------------------------------===//
 // Bitsets
@@ -556,269 +507,6 @@ static iree_status_t loom_liveness_region_point_shape_for_flags(
     shape.operation_count += block_shape.operation_count;
   }
   *out_shape = shape;
-  return iree_ok_status();
-}
-
-//===----------------------------------------------------------------------===//
-// Use collection
-//===----------------------------------------------------------------------===//
-
-typedef struct loom_liveness_type_ref_callback_state_t {
-  loom_liveness_value_callback_t visitor;
-} loom_liveness_type_ref_callback_state_t;
-
-static iree_status_t loom_liveness_type_ref_callback(loom_value_id_t value_id,
-                                                     void* user_data) {
-  loom_liveness_type_ref_callback_state_t* state =
-      (loom_liveness_type_ref_callback_state_t*)user_data;
-  return state->visitor.fn(state->visitor.user_data, value_id);
-}
-
-static iree_status_t loom_liveness_for_each_type_ref(
-    const loom_module_t* module, loom_type_t type,
-    loom_liveness_value_callback_t visitor) {
-  loom_liveness_type_ref_callback_state_t state = {
-      .visitor = visitor,
-  };
-  return loom_type_walk_value_refs(module, type,
-                                   loom_liveness_type_ref_callback, &state);
-}
-
-static bool loom_liveness_op_defines_value(const loom_op_t* op,
-                                           loom_value_id_t value_id) {
-  const loom_value_id_t* results = loom_op_const_results(op);
-  for (uint16_t i = 0; i < op->result_count; ++i) {
-    if (results[i] == value_id) {
-      return true;
-    }
-  }
-  return false;
-}
-
-typedef struct loom_liveness_external_use_state_t {
-  const loom_module_t* module;
-  const loom_op_t* owner_op;
-  loom_liveness_value_callback_t visitor;
-} loom_liveness_external_use_state_t;
-
-static iree_status_t loom_liveness_external_value_callback(
-    void* user_data, loom_value_id_t value_id) {
-  loom_liveness_external_use_state_t* state =
-      (loom_liveness_external_use_state_t*)user_data;
-  if (loom_op_subtree_defines_value(state->module, state->owner_op, value_id)) {
-    return iree_ok_status();
-  }
-  return state->visitor.fn(state->visitor.user_data, value_id);
-}
-
-static iree_status_t loom_liveness_for_each_region_external_use(
-    loom_liveness_external_use_state_t* state, const loom_region_t* region) {
-  const loom_block_t* block = NULL;
-  loom_region_for_each_block(region, block) {
-    for (uint16_t i = 0; i < block->arg_count; ++i) {
-      IREE_RETURN_IF_ERROR(loom_liveness_for_each_type_ref(
-          state->module, loom_block_arg_type(state->module, block, i),
-          loom_liveness_value_callback_make(
-              loom_liveness_external_value_callback, state)));
-    }
-    const loom_op_t* op = NULL;
-    loom_block_for_each_op(block, op) {
-      const loom_value_id_t* operands = loom_op_const_operands(op);
-      for (uint16_t i = 0; i < op->operand_count; ++i) {
-        IREE_RETURN_IF_ERROR(
-            loom_liveness_external_value_callback(state, operands[i]));
-        IREE_RETURN_IF_ERROR(loom_liveness_for_each_type_ref(
-            state->module, loom_module_value_type(state->module, operands[i]),
-            loom_liveness_value_callback_make(
-                loom_liveness_external_value_callback, state)));
-      }
-      const loom_value_id_t* results = loom_op_const_results(op);
-      for (uint16_t i = 0; i < op->result_count; ++i) {
-        IREE_RETURN_IF_ERROR(loom_liveness_for_each_type_ref(
-            state->module, loom_module_value_type(state->module, results[i]),
-            loom_liveness_value_callback_make(
-                loom_liveness_external_value_callback, state)));
-      }
-      loom_region_t* const* regions = loom_op_regions(op);
-      for (uint8_t i = 0; i < op->region_count; ++i) {
-        IREE_RETURN_IF_ERROR(
-            loom_liveness_for_each_region_external_use(state, regions[i]));
-      }
-    }
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_liveness_for_each_nested_external_use(
-    const loom_module_t* module, const loom_op_t* owner_op,
-    loom_liveness_value_callback_t visitor) {
-  loom_liveness_external_use_state_t state = {
-      .module = module,
-      .owner_op = owner_op,
-      .visitor = visitor,
-  };
-  loom_region_t* const* regions = loom_op_regions(owner_op);
-  for (uint8_t i = 0; i < owner_op->region_count; ++i) {
-    IREE_RETURN_IF_ERROR(
-        loom_liveness_for_each_region_external_use(&state, regions[i]));
-  }
-  return iree_ok_status();
-}
-
-typedef struct loom_liveness_result_type_ref_state_t {
-  const loom_op_t* op;
-  loom_liveness_value_callback_t visitor;
-} loom_liveness_result_type_ref_state_t;
-
-static iree_status_t loom_liveness_result_type_ref_callback(
-    loom_value_id_t value_id, void* user_data) {
-  loom_liveness_result_type_ref_state_t* state =
-      (loom_liveness_result_type_ref_state_t*)user_data;
-  if (loom_liveness_op_defines_value(state->op, value_id)) {
-    return iree_ok_status();
-  }
-  return state->visitor.fn(state->visitor.user_data, value_id);
-}
-
-static iree_status_t loom_liveness_for_each_op_direct_use(
-    const loom_module_t* module, const loom_op_t* op,
-    loom_liveness_value_callback_t visitor) {
-  const loom_value_id_t* operands = loom_op_const_operands(op);
-  for (uint16_t i = 0; i < op->operand_count; ++i) {
-    IREE_RETURN_IF_ERROR(visitor.fn(visitor.user_data, operands[i]));
-    IREE_RETURN_IF_ERROR(loom_liveness_for_each_type_ref(
-        module, loom_module_value_type(module, operands[i]), visitor));
-  }
-  const loom_value_id_t* results = loom_op_const_results(op);
-  for (uint16_t i = 0; i < op->result_count; ++i) {
-    loom_type_t result_type = loom_module_value_type(module, results[i]);
-    loom_liveness_result_type_ref_state_t state = {
-        .op = op,
-        .visitor = visitor,
-    };
-    IREE_RETURN_IF_ERROR(loom_type_walk_value_refs(
-        module, result_type, loom_liveness_result_type_ref_callback, &state));
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_liveness_for_each_op_use(
-    const loom_module_t* module, const loom_op_t* op,
-    loom_liveness_value_callback_t visitor) {
-  IREE_RETURN_IF_ERROR(
-      loom_liveness_for_each_op_direct_use(module, op, visitor));
-  return loom_liveness_for_each_nested_external_use(module, op, visitor);
-}
-
-//===----------------------------------------------------------------------===//
-// Local use/def construction
-//===----------------------------------------------------------------------===//
-
-static iree_status_t loom_liveness_append_block_ordinal(
-    loom_liveness_build_state_t* state, loom_value_ordinal_t value_ordinal,
-    loom_value_ordinal_t** inout_ordinals, iree_host_size_t* inout_count,
-    iree_host_size_t* inout_capacity) {
-  if (*inout_count >= *inout_capacity) {
-    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        state->scratch_arena, *inout_count, *inout_count + 1,
-        sizeof(**inout_ordinals), inout_capacity, (void**)inout_ordinals));
-  }
-  (*inout_ordinals)[(*inout_count)++] = value_ordinal;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_liveness_add_block_definition(
-    loom_liveness_build_state_t* state, loom_value_ordinal_t value_ordinal) {
-  if (state->block_definition_generations[value_ordinal] ==
-      state->block_generation) {
-    return iree_ok_status();
-  }
-  state->block_definition_generations[value_ordinal] = state->block_generation;
-  return loom_liveness_append_block_ordinal(
-      state, value_ordinal, &state->block_definition_ordinals,
-      &state->block_definition_count, &state->block_definition_capacity);
-}
-
-static iree_status_t loom_liveness_add_block_use(void* user_data,
-                                                 loom_value_id_t value_id) {
-  loom_liveness_build_state_t* build_state =
-      (loom_liveness_build_state_t*)user_data;
-  const loom_value_ordinal_t value_ordinal =
-      loom_liveness_value_ordinal(build_state, value_id);
-  if (build_state->block_definition_generations[value_ordinal] ==
-          build_state->block_generation ||
-      build_state->block_use_generations[value_ordinal] ==
-          build_state->block_generation) {
-    return iree_ok_status();
-  }
-  build_state->block_use_generations[value_ordinal] =
-      build_state->block_generation;
-  return loom_liveness_append_block_ordinal(
-      build_state, value_ordinal, &build_state->block_use_ordinals,
-      &build_state->block_use_count, &build_state->block_use_capacity);
-}
-
-static iree_status_t loom_liveness_collect_block_use_def(
-    loom_liveness_build_state_t* state, const loom_block_t* block,
-    loom_liveness_block_state_t* block_state) {
-  ++state->block_generation;
-  IREE_ASSERT_NE(state->block_generation, 0u);
-  block_state->use_start = state->block_use_count;
-  block_state->definition_start = state->block_definition_count;
-  for (uint16_t i = 0; i < block->arg_count; ++i) {
-    const loom_value_ordinal_t value_ordinal =
-        loom_liveness_value_ordinal(state, loom_block_arg_id(block, i));
-    IREE_RETURN_IF_ERROR(
-        loom_liveness_add_block_definition(state, value_ordinal));
-  }
-  for (uint16_t i = 0; i < block->arg_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_liveness_for_each_type_ref(
-        state->module, loom_block_arg_type(state->module, block, i),
-        loom_liveness_value_callback_make(loom_liveness_add_block_use, state)));
-  }
-  const loom_op_t* op = NULL;
-  loom_block_for_each_op(block, op) {
-    const loom_value_id_t* results = loom_op_const_results(op);
-    for (uint16_t i = 0; i < op->result_count; ++i) {
-      const loom_value_ordinal_t value_ordinal =
-          loom_liveness_value_ordinal(state, results[i]);
-      IREE_RETURN_IF_ERROR(
-          loom_liveness_add_block_definition(state, value_ordinal));
-    }
-    IREE_RETURN_IF_ERROR(loom_liveness_for_each_op_use(
-        state->module, op,
-        loom_liveness_value_callback_make(loom_liveness_add_block_use, state)));
-  }
-  block_state->use_count = state->block_use_count - block_state->use_start;
-  block_state->definition_count =
-      state->block_definition_count - block_state->definition_start;
-  return iree_ok_status();
-}
-
-//===----------------------------------------------------------------------===//
-// Dataflow
-//===----------------------------------------------------------------------===//
-
-static iree_status_t loom_liveness_allocate_block_states(
-    loom_liveness_build_state_t* state, iree_host_size_t block_count) {
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->scratch_arena, block_count, sizeof(*state->block_states),
-      (void**)&state->block_states));
-  memset(state->block_states, 0, block_count * sizeof(*state->block_states));
-  if (state->value_count != 0) {
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(state->scratch_arena, state->value_count,
-                                  sizeof(*state->block_use_generations),
-                                  (void**)&state->block_use_generations));
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->scratch_arena, state->value_count,
-        sizeof(*state->block_definition_generations),
-        (void**)&state->block_definition_generations));
-    memset(state->block_use_generations, 0,
-           state->value_count * sizeof(*state->block_use_generations));
-    memset(state->block_definition_generations, 0,
-           state->value_count * sizeof(*state->block_definition_generations));
-  }
   return iree_ok_status();
 }
 
@@ -1725,13 +1413,13 @@ iree_status_t loom_liveness_analyze_region_with_order(
 }
 
 static iree_status_t
-loom_liveness_analyze_local_value_domain_with_cfg_graph_impl(
+loom_liveness_analyze_local_value_domain_with_dataflow_impl(
     const loom_local_value_domain_t* value_domain,
-    const loom_cfg_graph_t* cfg_graph, loom_liveness_order_t order,
+    const loom_liveness_dataflow_t* dataflow, loom_liveness_order_t order,
     iree_arena_allocator_t* result_arena, iree_arena_allocator_t* scratch_arena,
     loom_liveness_analysis_t* out_analysis) {
   IREE_ASSERT(loom_local_value_domain_is_acquired(value_domain));
-  IREE_ASSERT_ARGUMENT(cfg_graph);
+  IREE_ASSERT_ARGUMENT(dataflow);
   memset(out_analysis, 0, sizeof(*out_analysis));
   loom_module_t* module = value_domain->module;
   const loom_region_t* region = value_domain->region;
@@ -1755,7 +1443,6 @@ loom_liveness_analyze_local_value_domain_with_cfg_graph_impl(
   iree_status_t status = loom_liveness_validate_order(region, order);
   if (iree_status_is_ok(status)) {
     state.word_count = loom_liveness_word_count(state.value_count);
-    status = loom_liveness_allocate_block_states(&state, region->block_count);
   }
   if (iree_status_is_ok(status) && state.value_count > 0) {
     status = iree_arena_allocate_array(scratch_arena, state.value_count,
@@ -1775,65 +1462,9 @@ loom_liveness_analyze_local_value_domain_with_cfg_graph_impl(
     }
   }
 
-  for (uint16_t block_index = 0;
-       iree_status_is_ok(status) && block_index < region->block_count;
-       ++block_index) {
-    status = loom_liveness_collect_block_use_def(
-        &state, loom_region_const_block(region, block_index),
-        &state.block_states[block_index]);
-  }
-
-  const bool is_cfg =
-      iree_any_bit_set(region->flags, LOOM_REGION_INSTANCE_FLAG_CFG);
-  if (iree_status_is_ok(status) && is_cfg) {
-    IREE_ASSERT(cfg_graph->module == module);
-    IREE_ASSERT(cfg_graph->region == region);
-    IREE_ASSERT_EQ(cfg_graph->block_count, region->block_count);
-    if (cfg_graph->malformed) {
-      status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                                "CFG graph is malformed; run Loom verification "
-                                "before liveness analysis");
-    }
-  }
-  loom_liveness_block_transfer_t* block_transfers = NULL;
-  loom_liveness_block_relation_t* block_relations = NULL;
-  if (iree_status_is_ok(status) && region->block_count > 0) {
-    status = iree_arena_allocate_array(scratch_arena, region->block_count,
-                                       sizeof(*block_transfers),
-                                       (void**)&block_transfers);
-  }
-  if (iree_status_is_ok(status) && region->block_count > 0) {
-    status = iree_arena_allocate_array(scratch_arena, region->block_count,
-                                       sizeof(*block_relations),
-                                       (void**)&block_relations);
-  }
-  if (iree_status_is_ok(status)) {
-    for (uint16_t block_index = 0; block_index < region->block_count;
-         ++block_index) {
-      const loom_liveness_block_state_t* block_state =
-          &state.block_states[block_index];
-      block_transfers[block_index] = (loom_liveness_block_transfer_t){
-          .use_ordinals =
-              block_state->use_count > 0
-                  ? state.block_use_ordinals + block_state->use_start
-                  : NULL,
-          .use_count = block_state->use_count,
-          .definition_ordinals = block_state->definition_count > 0
-                                     ? state.block_definition_ordinals +
-                                           block_state->definition_start
-                                     : NULL,
-          .definition_count = block_state->definition_count,
-      };
-    }
-    status = loom_liveness_dataflow_solve(
-        is_cfg ? cfg_graph : NULL, state.value_ids, state.value_count,
-        block_transfers, region->block_count, block_relations, result_arena,
-        scratch_arena);
-  }
-
   loom_liveness_block_info_t* block_infos = NULL;
   if (iree_status_is_ok(status)) {
-    status = loom_liveness_finalize_block_infos(&state, block_relations,
+    status = loom_liveness_finalize_block_infos(&state, dataflow->blocks,
                                                 &block_infos);
   }
   if (iree_status_is_ok(status) && state.operation_capacity > 0) {
@@ -1899,7 +1530,8 @@ loom_liveness_analyze_local_value_domain_with_cfg_graph_impl(
         .module = module,
         .region = region,
         .flags = analysis_flags,
-        .is_cfg = is_cfg,
+        .is_cfg =
+            iree_any_bit_set(region->flags, LOOM_REGION_INSTANCE_FLAG_CFG),
         .blocks = block_infos,
         .block_count = region->block_count,
         .intervals = intervals,
@@ -1940,24 +1572,29 @@ iree_status_t loom_liveness_analyze_local_value_domain(
     status = loom_cfg_graph_build(value_domain->module, region, &scratch_arena,
                                   &cfg_graph);
   }
+  loom_liveness_dataflow_t dataflow = {0};
   if (iree_status_is_ok(status)) {
-    status = loom_liveness_analyze_local_value_domain_with_cfg_graph_impl(
-        value_domain, &cfg_graph, order, arena, &scratch_arena, out_analysis);
+    status = loom_liveness_dataflow_analyze(value_domain, &cfg_graph, arena,
+                                            &dataflow);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_liveness_analyze_local_value_domain_with_dataflow_impl(
+        value_domain, &dataflow, order, arena, &scratch_arena, out_analysis);
   }
   iree_arena_deinitialize(&scratch_arena);
   return status;
 }
 
-iree_status_t loom_liveness_analyze_local_value_domain_with_cfg_graph(
+iree_status_t loom_liveness_analyze_local_value_domain_with_dataflow(
     const loom_local_value_domain_t* value_domain,
-    const loom_cfg_graph_t* cfg_graph, loom_liveness_order_t order,
+    const loom_liveness_dataflow_t* dataflow, loom_liveness_order_t order,
     iree_arena_allocator_t* arena, loom_liveness_analysis_t* out_analysis) {
   IREE_ASSERT(loom_local_value_domain_is_acquired(value_domain));
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(arena->block_pool, &scratch_arena);
   iree_status_t status =
-      loom_liveness_analyze_local_value_domain_with_cfg_graph_impl(
-          value_domain, cfg_graph, order, arena, &scratch_arena, out_analysis);
+      loom_liveness_analyze_local_value_domain_with_dataflow_impl(
+          value_domain, dataflow, order, arena, &scratch_arena, out_analysis);
   iree_arena_deinitialize(&scratch_arena);
   return status;
 }

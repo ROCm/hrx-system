@@ -278,6 +278,7 @@ loom_cc_library(
         ":function",
         ":function_requirements",
         ":target_binding",
+        "//loom/src/loom/analysis:liveness_dataflow",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/ir",
         "//loom/src/loom/util:cfg_graph",

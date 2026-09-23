@@ -285,8 +285,8 @@ iree_status_t loom_low_allocate_function(
       options->schedule != NULL ? options->schedule->operation_order
                                 : loom_liveness_order_empty();
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
-    status = loom_liveness_analyze_local_value_domain_with_cfg_graph(
-        value_domain, &model->cfg_graph, operation_order, arena,
+    status = loom_liveness_analyze_local_value_domain_with_dataflow(
+        value_domain, &model->liveness_dataflow, operation_order, arena,
         &state.liveness);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {

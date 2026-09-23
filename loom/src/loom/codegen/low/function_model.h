@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/analysis/liveness_dataflow.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/function_requirements.h"
 #include "loom/codegen/low/target_binding.h"
@@ -47,6 +48,8 @@ typedef struct loom_low_function_model_t {
   loom_local_value_domain_t value_domain;
   // Read-only control-flow graph for the function body.
   loom_cfg_graph_t cfg_graph;
+  // Canonical block liveness shared by source and scheduled-order consumers.
+  loom_liveness_dataflow_t liveness_dataflow;
   // Canonical loop intervals preserved from |cfg_graph|.
   loom_cfg_loop_forest_t loop_forest;
   // Declared interfaces, storage, and structural counts for this snapshot.

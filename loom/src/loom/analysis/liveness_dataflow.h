@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/ir/ir.h"
+#include "loom/ir/local_value_domain.h"
 #include "loom/util/cfg_graph.h"
 
 #ifdef __cplusplus
@@ -41,6 +42,28 @@ typedef struct loom_liveness_block_relation_t {
   // Number of entries in |live_out_values|.
   iree_host_size_t live_out_count;
 } loom_liveness_block_relation_t;
+
+// Canonical block-boundary facts for one immutable region snapshot. Legal
+// reordering within a block preserves these relations. Moving operations across
+// blocks, changing uses or definitions, or rewriting CFG edges invalidates
+// them. The value lists borrow SSA identities from the analyzed module and are
+// owned by the result arena; they do not borrow the acquired ordinal scratch
+// map.
+typedef struct loom_liveness_dataflow_t {
+  // Exact live-in/live-out relations in region block order.
+  const loom_liveness_block_relation_t* blocks;
+  // Number of block relations in |blocks|.
+  iree_host_size_t block_count;
+} loom_liveness_dataflow_t;
+
+// Collects canonical block transfers and solves their boundary relations once.
+// The acquired |value_domain| and |cfg_graph| must describe the same immutable
+// region. Non-CFG regions use local block relations and an identity-only graph.
+// |arena| must outlive every consumer of |out_dataflow|.
+iree_status_t loom_liveness_dataflow_analyze(
+    const loom_local_value_domain_t* value_domain,
+    const loom_cfg_graph_t* cfg_graph, iree_arena_allocator_t* arena,
+    loom_liveness_dataflow_t* out_dataflow);
 
 // Solves the least live-in/live-out fixed point for |block_transfers|.
 //

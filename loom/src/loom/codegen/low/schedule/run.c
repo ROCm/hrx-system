@@ -1763,13 +1763,10 @@ static iree_status_t loom_low_schedule_build(
   if (iree_status_is_ok(status)) {
     status = loom_low_schedule_initialize_descriptor_tables(&state, node_count);
   }
-  if (iree_status_is_ok(status) &&
-      (retain_liveness || loom_low_schedule_needs_state_liveness(&state))) {
-    iree_arena_allocator_t* liveness_arena =
-        retain_liveness ? arena : scratch_arena;
-    status = loom_liveness_analyze_local_value_domain_with_cfg_graph(
-        &model->value_domain, &model->cfg_graph, loom_liveness_order_empty(),
-        liveness_arena, &liveness);
+  if (iree_status_is_ok(status) && retain_liveness) {
+    status = loom_liveness_analyze_local_value_domain_with_dataflow(
+        &model->value_domain, &model->liveness_dataflow,
+        loom_liveness_order_empty(), arena, &liveness);
   }
   if (iree_status_is_ok(status)) {
     if (node_count != 0 &&
@@ -1779,7 +1776,10 @@ static iree_status_t loom_low_schedule_build(
     }
   }
   if (iree_status_is_ok(status)) {
-    status = loom_low_schedule_build_dependencies(&state, &liveness);
+    status = loom_low_schedule_build_dependencies(
+        &state, loom_low_schedule_needs_state_liveness(&state)
+                    ? &model->liveness_dataflow
+                    : NULL);
   }
   if (iree_status_is_ok(status) && state.error_count == 0) {
     status = loom_low_schedule_build_scope_dependencies(&state);

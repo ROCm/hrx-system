@@ -868,12 +868,26 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    liveness_uses
+  HDRS
+    "liveness_uses.h"
+  SRCS
+    "liveness_uses.c"
+  DEPS
+    iree::base
+    loom::ir
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     liveness_dataflow
   HDRS
     "liveness_dataflow.h"
   SRCS
     "liveness_dataflow.c"
   DEPS
+    ::liveness_uses
     iree::base
     iree::base::internal::arena
     loom::ir
@@ -918,6 +932,7 @@ loom_cc_library(
   DEPS
     ::liveness_dataflow
     ::liveness_events
+    ::liveness_uses
     iree::base
     iree::base::internal
     iree::base::internal::arena

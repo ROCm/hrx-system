@@ -274,6 +274,7 @@ loom_cc_library(
     ::target_binding
     iree::base
     iree::base::internal::arena
+    loom::analysis::liveness_dataflow
     loom::error::emitter
     loom::ir
     loom::util::cfg_graph

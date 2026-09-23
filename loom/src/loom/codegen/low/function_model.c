@@ -61,6 +61,11 @@ iree_status_t loom_low_function_model_initialize(
     status = loom_low_function_requirements_build(
         module, out_model->body, arena, &out_model->requirements);
   }
+  if (iree_status_is_ok(status)) {
+    status = loom_liveness_dataflow_analyze(&out_model->value_domain,
+                                            &out_model->cfg_graph, arena,
+                                            &out_model->liveness_dataflow);
+  }
   if (!iree_status_is_ok(status)) {
     loom_local_value_domain_release(&out_model->value_domain);
     return status;

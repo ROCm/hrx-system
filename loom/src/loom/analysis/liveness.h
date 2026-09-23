@@ -22,6 +22,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/analysis/liveness_dataflow.h"
 #include "loom/ir/ir.h"
 #include "loom/ir/local_value_domain.h"
 #include "loom/util/cfg_graph.h"
@@ -310,14 +311,16 @@ iree_status_t loom_liveness_analyze_local_value_domain(
     const loom_local_value_domain_t* value_domain, loom_liveness_order_t order,
     iree_arena_allocator_t* arena, loom_liveness_analysis_t* out_analysis);
 
-// Computes liveness over a local value domain and a prebuilt CFG graph.
+// Computes ordered intervals and pressure from canonical boundary relations.
 //
-// |cfg_graph| must describe the domain region and remain immutable until the
-// analysis completes. Non-CFG regions accept an identity-only graph. This entry
-// point lets adjacent analyses share CFG extraction without a hidden rebuild.
-iree_status_t loom_liveness_analyze_local_value_domain_with_cfg_graph(
+// |dataflow| must describe the domain's immutable region snapshot and outlive
+// the result: block live-in/live-out lists are borrowed. |order| may reorder
+// operations within each block without changing SSA or CFG semantics. This
+// entry point consumes the retained flow instead of collecting and solving it
+// again for every source or scheduled operation order.
+iree_status_t loom_liveness_analyze_local_value_domain_with_dataflow(
     const loom_local_value_domain_t* value_domain,
-    const loom_cfg_graph_t* cfg_graph, loom_liveness_order_t order,
+    const loom_liveness_dataflow_t* dataflow, loom_liveness_order_t order,
     iree_arena_allocator_t* arena, loom_liveness_analysis_t* out_analysis);
 
 // Computes liveness using an explicit per-block operation order.
