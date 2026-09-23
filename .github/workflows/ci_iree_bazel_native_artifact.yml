@@ -33,8 +33,8 @@ permissions:
   contents: read
 
 jobs:
-  linux_x86_64_clang_asan:
-    name: iree-bazel-build / linux-x86_64 / clang / asan
+  linux_x86_64_clang:
+    name: iree-bazel-build / linux-x86_64 / clang
     runs-on: azure-linux-scale-rocm
     timeout-minutes: 60
     container:
@@ -49,7 +49,7 @@ jobs:
       HRX_PYTHON: ${{ github.workspace }}/build/iree-bazel-native-artifact/python/bin/python3
       HRX_RELEASE_TYPE: nightly
       HRX_ROCM_ROOT: ${{ github.workspace }}/build/iree-bazel-native-artifact/rocm-root
-      NATIVE_ARTIFACT_NAME: tests-linux-x86_64-clang-asan-${{ github.sha }}
+      NATIVE_ARTIFACT_NAME: tests-linux-x86_64-clang-${{ github.sha }}
       PIP_CACHE_DIR: ${{ github.workspace }}/build/iree-bazel-native-artifact/caches/pip
     steps:
       - name: Checkout repository
@@ -92,16 +92,16 @@ jobs:
           "${HRX_ROCM_ROOT}/lib/llvm/bin/llvm-objcopy" --version
           "${HRX_ROCM_ROOT}/lib/llvm/bin/llvm-tblgen" --version
 
-      - name: Build and package ASAN tests
+      - name: Build and package tests
         id: iree_bazel_ci
         run: |
-          python3 build_tools/devtools/ci.py iree-bazel-native-artifact-asan \
+          python3 build_tools/devtools/ci.py iree-bazel-native-artifact \
             --native-artifact-archive "${RUNNER_TEMP}/${NATIVE_ARTIFACT_NAME}.tar.zst" \
             --native-artifact-revision "${GITHUB_SHA}" \
             --bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles" \
             --keep-going
 
-      - name: Upload ASAN tests
+      - name: Upload tests
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ env.NATIVE_ARTIFACT_NAME }}
@@ -115,7 +115,7 @@ jobs:
         if: ${{ always() && steps.iree_bazel_ci.outcome != 'skipped' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: bazel-profiles-native-artifact-asan-attempt-${{ github.run_attempt }}
+          name: bazel-profiles-native-artifact-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/bazel-profiles/*.profile.gz
           if-no-files-found: warn
           compression-level: 0
@@ -125,7 +125,7 @@ jobs:
         if: ${{ always() && steps.iree_bazel_ci.outcome == 'failure' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: test-results-native-artifact-asan-attempt-${{ github.run_attempt }}
+          name: test-results-native-artifact-attempt-${{ github.run_attempt }}
           path: |
             bazel-testlogs/**/test.log
             bazel-testlogs/**/test.xml
@@ -134,7 +134,7 @@ jobs:
 
   linux_amdgpu:
     name: ${{ matrix.name }}
-    needs: linux_x86_64_clang_asan
+    needs: linux_x86_64_clang
     runs-on: ${{ matrix.runner_label }}
     continue-on-error: ${{ matrix.optional }}
     timeout-minutes: 15
@@ -186,7 +186,7 @@ jobs:
       HRX_PYTHON: ${{ github.workspace }}/build/iree-bazel-native-artifact-test/python/bin/python3
       HRX_RELEASE_TYPE: nightly
       HRX_ROCM_ROOT: ${{ github.workspace }}/build/iree-bazel-native-artifact-test/rocm-root
-      NATIVE_ARTIFACT_NAME: tests-linux-x86_64-clang-asan-${{ github.sha }}
+      NATIVE_ARTIFACT_NAME: tests-linux-x86_64-clang-${{ github.sha }}
       PIP_CACHE_DIR: ${{ github.workspace }}/build/iree-bazel-native-artifact-test/caches/pip
       ROCR_VISIBLE_DEVICES: "0"
     steps:
@@ -208,13 +208,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends zstd
 
-      - name: Download ASAN tests
+      - name: Download tests
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: ${{ env.NATIVE_ARTIFACT_NAME }}
           path: ${{ runner.temp }}/native-artifact-download
 
-      - name: Extract ASAN tests
+      - name: Extract tests
         shell: bash
         run: |
           TIMEFORMAT='artifact_extraction_seconds=%R'
@@ -242,12 +242,12 @@ jobs:
         timeout-minutes: 1
         run: bash .github/scripts/check_rocm_environment.sh
 
-      - name: Run ASAN tests
+      - name: Run tests
         id: iree_bazel_ci
         run: |
-          python3 build_tools/devtools/ci.py iree-bazel-amdgpu-asan \
+          python3 build_tools/devtools/ci.py iree-bazel-amdgpu \
             --amdgpu-target "${{ matrix.target_selector }}" \
-            --native-artifact-root "${GITHUB_WORKSPACE}/artifacts/ci/linux-x86_64-clang-asan" \
+            --native-artifact-root "${GITHUB_WORKSPACE}/artifacts/ci/linux-x86_64-clang" \
             --native-artifact-revision "${GITHUB_SHA}" \
             --bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles" \
             --keep-going

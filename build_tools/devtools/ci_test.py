@@ -636,6 +636,10 @@ class CiTest(unittest.TestCase):
                 "requires --native-artifact-archive",
             ),
             (
+                [ci.NATIVE_ARTIFACT_ASAN_PRODUCER_COMMAND],
+                "requires --native-artifact-archive",
+            ),
+            (
                 ["iree-bazel-cpu", "--native-artifact-root", str(artifact_root)],
                 "only supported by AMDGPU Bazel tests",
             ),
@@ -677,13 +681,13 @@ class CiTest(unittest.TestCase):
             ),
             (
                 [
-                    "iree-bazel-amdgpu",
+                    "iree-bazel-amdgpu-tsan",
                     "--native-artifact-root",
                     str(artifact_root),
                     "--native-artifact-revision",
                     "a" * 40,
                 ],
-                "current native artifact producer supplies ASAN tests",
+                "native artifacts do not support the tsan profile",
             ),
         )
         for argv, message in cases:
@@ -702,7 +706,7 @@ class CiTest(unittest.TestCase):
         )
         consumer_args = ci.parse_arguments(
             [
-                "iree-bazel-amdgpu-asan",
+                "iree-bazel-amdgpu",
                 "--amdgpu-target",
                 "gfx-test",
                 "--native-artifact-root",
@@ -724,31 +728,69 @@ class CiTest(unittest.TestCase):
         producer.assert_called_once_with(
             Path("artifact.tar.zst").resolve(),
             "a" * 40,
+            None,
         )
         consumer.assert_called_once_with(
             artifact_root.resolve(),
             "gfx-test",
             "a" * 40,
+            None,
         )
 
     def test_native_artifact_producer_uses_self_contained_host_profile(self):
-        with mock.patch.dict(
-            ci.os.environ,
-            {"HRX_ROCM_ROOT": "/tmp/rocm-root"},
-            clear=True,
+        profiles = {
+            "ordinary": "artifacts/fixture/ordinary",
+            "asan": "artifacts/fixture/asan",
+        }
+        with (
+            mock.patch.dict(
+                ci.os.environ,
+                {"HRX_ROCM_ROOT": "/tmp/rocm-root"},
+                clear=True,
+            ),
+            mock.patch.object(
+                ci_config,
+                "NATIVE_ARTIFACT_PACKAGE_PATHS",
+                profiles,
+            ),
         ):
             steps = ci.native_artifact_producer_steps(
-                Path("/tmp/artifact.tar.zst"), "a" * 40
+                Path("/tmp/artifact.tar.zst"), "a" * 40, None
+            )
+            asan_steps = ci.native_artifact_producer_steps(
+                Path("/tmp/artifact.tar.zst"), "a" * 40, "asan"
             )
 
         configure_step = next(step for step in steps if step.name == "Configure Bazel")
         host_test_step = next(
-            step for step in steps if step.name == "Test ASAN host coverage"
+            step for step in steps if step.name == "Test host coverage"
         )
         self.assertIn("--//loom/config/import:enable=cxx", configure_step.argv)
         self.assertIn(
             "--@rules_python//python/config_settings:bootstrap_impl=script",
             host_test_step.argv,
+        )
+        package_step = next(
+            step for step in steps if step.name == "Package native tests"
+        )
+        self.assertIn("ordinary", package_step.argv)
+        self.assertIn(
+            profiles["ordinary"],
+            package_step.argv,
+        )
+        self.assertNotIn("--config=asan", host_test_step.argv)
+
+        asan_host_test_step = next(
+            step for step in asan_steps if step.name == "Test ASAN host coverage"
+        )
+        asan_package_step = next(
+            step for step in asan_steps if step.name == "Package ASAN native tests"
+        )
+        self.assertIn("--config=asan", asan_host_test_step.argv)
+        self.assertIn("asan", asan_package_step.argv)
+        self.assertIn(
+            profiles["asan"],
+            asan_package_step.argv,
         )
 
     def test_native_artifact_consumer_builds_only_selected_tests(self):
@@ -759,16 +801,22 @@ class CiTest(unittest.TestCase):
             clear=True,
         ):
             steps = ci.native_artifact_amdgpu_steps(
-                artifact_root, "gfx120X-all", "a" * 40
+                artifact_root, "gfx120X-all", "a" * 40, None
             )
 
         test_steps = [step for step in steps if step.argv[2:4] == ("bazel", "test")]
         self.assertEqual(len(test_steps), 3)
         for step in test_steps:
             self.assertIn("--build_tests_only", step.argv)
+            self.assertNotIn("--config=asan", step.argv)
             self.assertTrue(
                 any(option.startswith("--extra_toolchains=") for option in step.argv)
             )
+
+        verify_step = next(
+            step for step in steps if step.name == "Verify native test artifact"
+        )
+        self.assertIn("ordinary", verify_step.argv)
 
         authored_step = next(
             step
@@ -787,6 +835,19 @@ class CiTest(unittest.TestCase):
         )
         for target in ci_config.NATIVE_ARTIFACT_CXX_AMDGPU_TEST_TARGETS:
             self.assertIn(target, cxx_step.argv)
+
+        asan_steps = ci.native_artifact_amdgpu_steps(
+            artifact_root, "gfx120X-all", "a" * 40, "asan"
+        )
+        asan_verify_step = next(
+            step
+            for step in asan_steps
+            if step.name == "Verify ASAN native test artifact"
+        )
+        self.assertIn("asan", asan_verify_step.argv)
+        for step in asan_steps:
+            if step.argv[2:4] == ("bazel", "test"):
+                self.assertIn("--config=asan", step.argv)
 
     def test_amdgpu_bazel_tests_pin_libhsa_from_rocm_root(self):
         args = ci.parse_arguments(

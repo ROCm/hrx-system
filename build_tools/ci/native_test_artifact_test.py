@@ -146,6 +146,7 @@ class NativeTestArtifactTest(unittest.TestCase):
                 build_events_paths=[build_events],
                 staging_root=staging_root,
                 package_path=Path("artifacts/ci/fixture"),
+                profile="asan",
                 revision="a" * 40,
                 llvm_dwp=fake_dwp,
                 llvm_objcopy=fake_objcopy,
@@ -183,6 +184,7 @@ class NativeTestArtifactTest(unittest.TestCase):
             self.assertIn('"@platforms//os:linux"', generated_build)
             self.assertEqual(1, result["target_count"])
             self.assertEqual(1, result["debug_alias_count"])
+            self.assertEqual("asan", result["profile"])
 
     def test_rejects_unsuccessful_bazel_build(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -204,6 +206,7 @@ class NativeTestArtifactTest(unittest.TestCase):
                 json.dumps(
                     {
                         "revision": revision,
+                        "profile": "asan",
                         "target_count": 12,
                         "test_count": 10,
                         "tool_count": 2,
@@ -214,6 +217,7 @@ class NativeTestArtifactTest(unittest.TestCase):
 
             result = native_test_artifact.verify_artifact(
                 package_directory=package,
+                expected_profile="asan",
                 expected_revision=revision,
                 checkout_revision=revision,
             )
@@ -221,18 +225,28 @@ class NativeTestArtifactTest(unittest.TestCase):
             self.assertEqual(12, result["target_count"])
             self.assertEqual(10, result["test_count"])
             self.assertEqual(2, result["tool_count"])
+            self.assertEqual("asan", result["profile"])
 
             with self.assertRaisesRegex(ValueError, "checkout revision"):
                 native_test_artifact.verify_artifact(
                     package_directory=package,
+                    expected_profile="asan",
                     expected_revision=revision,
                     checkout_revision="b" * 40,
                 )
             with self.assertRaisesRegex(ValueError, "artifact revision"):
                 native_test_artifact.verify_artifact(
                     package_directory=package,
+                    expected_profile="asan",
                     expected_revision="b" * 40,
                     checkout_revision="b" * 40,
+                )
+            with self.assertRaisesRegex(ValueError, "artifact profile"):
+                native_test_artifact.verify_artifact(
+                    package_directory=package,
+                    expected_profile="ordinary",
+                    expected_revision=revision,
+                    checkout_revision=revision,
                 )
 
 

@@ -299,8 +299,11 @@ VULKAN_CTEST_RESOURCE_LABEL_REGEX = "runtime-resource=vulkan-device"
 VULKAN_XFAILS = ()
 VULKAN_XFAIL_TARGETS = bazel_xfail_targets(VULKAN_XFAILS)
 
-# Fixed ASAN producer/consumer slice for native CI artifact qualification.
-NATIVE_ARTIFACT_PACKAGE_PATH = "artifacts/ci/linux-x86_64-clang-asan"
+# Fixed producer/consumer slices for native CI artifact qualification.
+NATIVE_ARTIFACT_PACKAGE_PATHS = {
+    "ordinary": "artifacts/ci/linux-x86_64-clang",
+    "asan": "artifacts/ci/linux-x86_64-clang-asan",
+}
 NATIVE_ARTIFACT_SOURCE_TARGETS = (
     "//runtime/...",
     "//loom/...",

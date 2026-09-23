@@ -581,6 +581,7 @@ def stage_native_artifact(
     build_events_paths: Sequence[Path],
     staging_root: Path,
     package_path: Path,
+    profile: str,
     revision: str,
     llvm_dwp: Path,
     llvm_objcopy: Path,
@@ -593,6 +594,8 @@ def stage_native_artifact(
         raise FileExistsError(staging_root)
     if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
         raise ValueError(f"revision must be a full lowercase Git commit: {revision}")
+    if not profile:
+        raise ValueError("native artifacts require a build profile")
     if not _is_safe_relative_path(package_path):
         raise ValueError(f"package path must be relative and contained: {package_path}")
     if not platform_constraints:
@@ -727,6 +730,7 @@ def stage_native_artifact(
         "package_path": package_path.as_posix(),
         "packaged_runtime_bytes": tree.packaged_unique_bytes,
         "physical_runtime_paths": len(tree.copies),
+        "profile": profile,
         "revision": revision,
         "runtime_blob_count": len(tree.blobs),
         "source_runtime_bytes": tree.original_unique_bytes,
@@ -820,6 +824,7 @@ def compress_artifact(
 def verify_artifact(
     *,
     package_directory: Path,
+    expected_profile: str,
     expected_revision: str,
     checkout_revision: str,
 ) -> dict[str, object]:
@@ -850,8 +855,15 @@ def verify_artifact(
             f"artifact revision {artifact_revision!r} does not match expected "
             f"revision {expected_revision}"
         )
+    artifact_profile = manifest.get("profile")
+    if artifact_profile != expected_profile:
+        raise ValueError(
+            f"artifact profile {artifact_profile!r} does not match expected "
+            f"profile {expected_profile!r}"
+        )
     return {
         "package_directory": os.fspath(package_directory),
+        "profile": expected_profile,
         "revision": expected_revision,
         "target_count": manifest.get("target_count"),
         "test_count": manifest.get("test_count"),
@@ -863,6 +875,7 @@ def _add_package_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--build-events", action="append", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--package-path", required=True, type=Path)
+    parser.add_argument("--profile", required=True)
     parser.add_argument("--revision", required=True)
     parser.add_argument("--llvm-dwp", required=True, type=Path)
     parser.add_argument("--llvm-objcopy", required=True, type=Path)
@@ -886,6 +899,7 @@ def main() -> None:
         "verify", help="Verify a downloaded package against its source checkout."
     )
     verify_parser.add_argument("--package", required=True, type=Path)
+    verify_parser.add_argument("--profile", required=True)
     verify_parser.add_argument("--revision", required=True)
     verify_parser.add_argument("--workspace", required=True, type=Path)
     args = parser.parse_args()
@@ -896,6 +910,7 @@ def main() -> None:
         ).strip()
         result = verify_artifact(
             package_directory=args.package,
+            expected_profile=args.profile,
             expected_revision=args.revision,
             checkout_revision=checkout_revision,
         )
@@ -908,6 +923,7 @@ def main() -> None:
             build_events_paths=args.build_events,
             staging_root=staging_root,
             package_path=args.package_path,
+            profile=args.profile,
             revision=args.revision,
             llvm_dwp=args.llvm_dwp,
             llvm_objcopy=args.llvm_objcopy,
