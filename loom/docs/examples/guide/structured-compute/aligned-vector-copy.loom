@@ -1,0 +1,10 @@
+// The caller supplies 64-byte-aligned buffer bases with at least 64 bytes each.
+func.def public @copy_aligned_block(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %source[%base] : buffer -> view<16xi32>
+  %output_view = buffer.view %destination[%base] : buffer -> view<16xi32>
+  %values = vector.load %input_view[0] : view<16xi32> -> vector<16xi32>
+  vector.store %values, %output_view[0] : vector<16xi32>, view<16xi32>
+  func.return
+}

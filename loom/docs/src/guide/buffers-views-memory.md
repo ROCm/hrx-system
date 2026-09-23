@@ -166,6 +166,31 @@ an explicit assumption when their caller contract knows more. An assumption is
 a correctness promise: supplying a false alias, alignment, extent, or
 memory-space fact makes the program invalid.
 
+### Aligned bases enable wide transfers
+
+Examples and entry wrappers should expose the alignment guaranteed by their
+caller. For buffers allocated with at least 64-byte base alignment, an explicit
+64-byte contract gives the compiler useful freedom to select wide memory
+operations. This is particularly valuable for XDNA AIE2P's 512-bit transfers.
+
+The following example copies sixteen words from aligned buffer bases:
+
+```loom title="aligned-vector-copy.loom"
+--8<-- "examples/guide/structured-compute/aligned-vector-copy.loom"
+```
+
+On AIE2P, this copy can use one 512-bit load and one 512-bit store. With only
+the natural four-byte element requirement, the same vector copy lowers to
+sixteen scalar loads and sixteen scalar stores. The assumption supplies address
+information; it performs no allocation, realignment, or runtime check.
+
+The contract applies to each passed buffer base. A byte offset that is a
+multiple of 64 preserves the alignment; moving one `i32` element from that
+base guarantees only four-byte alignment at the new origin. Subviews retain
+these relationships without strengthening the root. When adapting an example,
+change or remove the assumption to match the embedding's actual guarantee;
+the scalar element-access requirement remains in force.
+
 ## Transfer structured values through views
 
 Scalar access names one logical element. [`vector.load`](../reference/dialects/vector/ops/load.md)

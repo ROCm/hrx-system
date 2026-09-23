@@ -32,6 +32,15 @@ nonzero byte origins, and different source/destination strides. An independent
 scalar oracle checks every output word, untouched gaps, a trailing binding guard
 and unchanged input bytes. These checks qualify correctness, not performance.
 
+The [entry wrapper](testdata/vector_copy.loom) supplies an explicit 64-byte
+alignment contract for its packet-buffer bases before calling the imported
+[C++ worker](testdata/vector_copy.cxx). The sixteen-word input header and vector
+block strides preserve that alignment. This makes the guarantee visible through
+the imported call and enables native 512-bit memory operations. The
+[memory guide](../../../loom/docs/src/guide/buffers-views-memory.md#aligned-bases-enable-wide-transfers)
+shows the same pattern for standalone buffer arguments. Adapt the assumption
+when changing the buffers supplied by the embedding.
+
 ```sh
 iree-bazel-build --config=asan --config=loom-importer-cxx \
   --//loom/config/target:enable=xdna --//loom/config/emit:enable=xdna \
