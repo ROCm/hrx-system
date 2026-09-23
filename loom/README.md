@@ -69,13 +69,15 @@ The best starting point for Loom source is:
 - [q6/q8 gate-up SwiGLU example](src/loom/test/corpus/authoring/ffn_gate_up_swiglu_q6q8.loom)
 - [MLP down-projection residual example](src/loom/test/corpus/authoring/mlp_down_projection_residual_bf16.loom)
 
-Run the host-only dry-run tests. These parse the source and prove
-`check.case`/`check.benchmark` planning without requiring a local GPU:
+Run the host-only dry-run tests. Each `loom_kernel_library` declares a
+`<name>_plan_test` that parses the source and proves
+`check.case`/`check.benchmark` planning without requiring a local GPU. The
+documentation examples carry them:
 
 ```bash
 python dev.py bazel test \
-  //loom/src/loom/test/corpus/authoring:ffn_gate_up_swiglu_q6q8_plan_test \
-  //loom/src/loom/test/corpus/authoring:mlp_down_projection_residual_bf16_plan_test
+  //loom/docs/examples/getting-started/first-kernel:saxpy_plan_test \
+  //loom/docs/examples/guide/functions-and-control:read_ahead_plan_test
 ```
 
 You can also run the benchmark planner directly:
