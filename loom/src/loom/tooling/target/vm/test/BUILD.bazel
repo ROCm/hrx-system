@@ -25,6 +25,12 @@ loom_test(
     execution_profiles = [VM_REFERENCE_PROFILE],
 )
 
+loom_test(
+    name = "callable_returns_test",
+    srcs = ["callable_returns.loom"],
+    execution_profiles = [VM_REFERENCE_PROFILE],
+)
+
 iree_execution_test_suite(
     name = "tools_test",
     data = [

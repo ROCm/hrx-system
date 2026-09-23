@@ -1398,7 +1398,7 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
     }
   }
   if (iree_status_is_ok(status)) {
-    status = loom_low_lower_function_boundary_validate(&context, source_body);
+    status = loom_low_lower_function_boundary_validate(&context);
   }
   if (iree_status_is_ok(status) &&
       !loom_low_lower_context_should_stop(&context)) {

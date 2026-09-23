@@ -7,8 +7,9 @@
 // Source-to-Low callable boundary lowering.
 //
 // A source function boundary is mapped once and then consumed throughout
-// lowering. Validation establishes the argument/result map before source-plan
-// construction. Definition creation materializes the target-Low callable,
+// lowering. Validation establishes argument mappings before source planning;
+// the source-plan traversal joins return carriers into retained result types.
+// Definition creation materializes the target-Low callable,
 // entry binding connects direct arguments, resource emission materializes
 // arguments omitted from the direct ABI, and predicate remapping translates
 // source value references after those bindings exist.
@@ -38,10 +39,20 @@ iree_status_t loom_low_lower_query_argument(
     loom_value_id_t source_argument_id,
     loom_low_lower_abi_argument_t* out_argument);
 
-// Validates and maps the source callable signature into function-local state.
-// This must run before source-plan construction and low callable creation.
+// Validates the source callable boundary, maps arguments, and allocates empty
+// result mappings. This must run before source-plan construction.
 iree_status_t loom_low_lower_function_boundary_validate(
-    loom_low_lower_context_t* context, loom_region_t* source_body);
+    loom_low_lower_context_t* context);
+
+// Joins one return's native value carriers into the retained callable result
+// types. Called once per return by the existing source-plan traversal.
+iree_status_t loom_low_lower_function_boundary_observe_return(
+    loom_low_lower_context_t* context, const loom_op_t* return_op);
+
+// Completes result mappings after all returns have been observed. A callable
+// without returning paths retains the target mapping of its declared types.
+iree_status_t loom_low_lower_function_boundary_finalize(
+    loom_low_lower_context_t* context);
 
 // Creates the target-Low function or kernel definition for the mapped source
 // callable. The definition is inserted immediately before the source op and

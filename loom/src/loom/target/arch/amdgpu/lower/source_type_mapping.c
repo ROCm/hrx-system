@@ -488,6 +488,32 @@ iree_status_t loom_amdgpu_map_value(void* user_data,
                               out_low_type);
 }
 
+loom_type_t loom_amdgpu_join_result_type(loom_type_t source_type,
+                                         loom_type_t lhs, loom_type_t rhs) {
+  const uint32_t left_count = loom_low_register_type_unit_count(lhs);
+  const uint32_t right_count = loom_low_register_type_unit_count(rhs);
+  const uint32_t unit_count = iree_max(left_count, right_count);
+  const uint64_t descriptor_set =
+      loom_low_register_type_descriptor_set_stable_id(lhs);
+  if (loom_amdgpu_type_is_i1(source_type)) {
+    // A two-word Boolean is a lane mask, not a widened integer truth value.
+    // SCC and one-word scalar truth both adapt to that mask when required.
+    return loom_low_register_type(descriptor_set, LOOM_AMDGPU_REG_CLASS_ID_SGPR,
+                                  unit_count);
+  }
+  if (left_count != right_count &&
+      !loom_amdgpu_type_is_address_scalar(source_type)) {
+    return loom_type_none();
+  }
+  const uint16_t register_class =
+      loom_low_register_type_class_id(lhs) == LOOM_AMDGPU_REG_CLASS_ID_VGPR ||
+              loom_low_register_type_class_id(rhs) ==
+                  LOOM_AMDGPU_REG_CLASS_ID_VGPR
+          ? LOOM_AMDGPU_REG_CLASS_ID_VGPR
+          : LOOM_AMDGPU_REG_CLASS_ID_SGPR;
+  return loom_low_register_type(descriptor_set, register_class, unit_count);
+}
+
 static void loom_amdgpu_map_contract_register(
     const loom_target_contract_query_environment_t* environment,
     uint16_t descriptor_register_class_id, uint32_t register_unit_count,

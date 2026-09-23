@@ -1,0 +1,63 @@
+// The call remains outlined and preserves mixed result slots on both exits.
+func.def noinline @choose_payload(%input: buffer, %load: i1, %integer: i32, %wide: i64, %real: f32) -> (i32, i64, f32) {
+  cfg.cond_br %load, ^loaded, ^argument
+^argument:
+  func.return %integer, %wide, %real : i32, i64, f32
+^loaded:
+  %integer_origin = index.constant 0 : offset
+  %real_origin = index.constant 4 : offset
+  %wide_origin = index.constant 8 : offset
+  %integers = buffer.view %input[%integer_origin] : buffer -> view<1xi32>
+  %reals = buffer.view %input[%real_origin] : buffer -> view<1xf32>
+  %wide_integers = buffer.view %input[%wide_origin] : buffer -> view<1xi64>
+  %loaded_integer = view.load %integers[0] : view<1xi32> -> i32
+  %loaded_real = view.load %reals[0] : view<1xf32> -> f32
+  %loaded_wide = view.load %wide_integers[0] : view<1xi64> -> i64
+  func.return %loaded_integer, %loaded_wide, %loaded_real : i32, i64, f32
+}
+
+func.def @exercise_returns(%load: i1, %integer: i32, %wide: i64, %real: f32) -> (i32, i64, f32) {
+  %length = index.constant 16 : offset
+  %storage = buffer.alloca<private> align(8) %length : buffer
+  %integer_origin = index.constant 0 : offset
+  %real_origin = index.constant 4 : offset
+  %wide_origin = index.constant 8 : offset
+  %integers = buffer.view %storage[%integer_origin] : buffer -> view<1xi32>
+  %reals = buffer.view %storage[%real_origin] : buffer -> view<1xf32>
+  %wide_integers = buffer.view %storage[%wide_origin] : buffer -> view<1xi64>
+  %stored_integer = scalar.constant -123 : i32
+  %stored_wide = scalar.constant 4294967313 : i64
+  %stored_real = scalar.constant 1.75 : f32
+  view.store %stored_integer, %integers[0] : i32, view<1xi32>
+  view.store %stored_wide, %wide_integers[0] : i64, view<1xi64>
+  view.store %stored_real, %reals[0] : f32, view<1xf32>
+  %result_integer, %result_wide, %result_real = func.call @choose_payload(%storage, %load, %integer, %wide, %real) : (buffer, i1, i32, i64, f32) -> (i32, i64, f32)
+  func.return %result_integer, %result_wide, %result_real : i32, i64, f32
+}
+
+check.case @forwarded_results {
+  %load = check.literal value(false) : i1
+  %integer = check.param.choice values([-2147483648, 0, 2147483647]) : i32
+  %wide = check.param.choice values([-9223372036854775808, 9223372036854775807]) : i64
+  %real = check.literal value(-2.5) : f32
+  %result_integer, %result_wide, %result_real = func.call @exercise_returns(%load, %integer, %wide, %real) : (i1, i32, i64, f32) -> (i32, i64, f32)
+  check.expect.equal actual(%result_integer) expected(%integer) : i32
+  check.expect.equal actual(%result_wide) expected(%wide) : i64
+  check.expect.equal actual(%result_real) expected(%real) : f32
+  check.return
+}
+
+check.case @loaded_results {
+  %load = check.literal value(true) : i1
+  %integer = check.param.choice values([-2147483648, 0, 2147483647]) : i32
+  %wide = check.param.choice values([-9223372036854775808, 9223372036854775807]) : i64
+  %real = check.literal value(-2.5) : f32
+  %result_integer, %result_wide, %result_real = func.call @exercise_returns(%load, %integer, %wide, %real) : (i1, i32, i64, f32) -> (i32, i64, f32)
+  %expected_integer = check.literal value(-123) : i32
+  %expected_wide = check.literal value(4294967313) : i64
+  %expected_real = check.literal value(1.75) : f32
+  check.expect.equal actual(%result_integer) expected(%expected_integer) : i32
+  check.expect.equal actual(%result_wide) expected(%expected_wide) : i64
+  check.expect.equal actual(%result_real) expected(%expected_real) : f32
+  check.return
+}

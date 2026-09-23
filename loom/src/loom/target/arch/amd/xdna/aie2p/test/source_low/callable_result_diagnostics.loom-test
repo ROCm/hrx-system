@@ -1,0 +1,14 @@
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+// Target-fragment BFP storage and ordinary bytes have the same logical type,
+// but need an explicit representation conversion before sharing a result ABI.
+func.def @return_packed_or_bytes(%input: vector<64xbf16>, %bytes: vector<72xi8>, %encode: i1) -> (vector<72xi8>) {
+  cfg.cond_br %encode, ^encoded, ^raw
+^raw:
+  func.return %bytes : vector<72xi8>
+^encoded:
+  %schema = encoding.define #encoding.operand<element_format=bfp16ebs8, payload_elements=64, payload_packing=target_fragment, payload_registers=18, rounding=flush_subnormal> : encoding<schema>
+  %encoded = vector.encode %input using %schema : vector<64xbf16>, encoding<schema> -> vector<72xi8>
+  // ERROR@+1: TARGET/091 {op_name="func.return", result_index="0", source_type="vector<72xi8>", previous_type="reg<aie2p.vec256 x4>", incoming_type="reg<aie2p.mexa>"}
+  func.return %encoded : vector<72xi8>
+}

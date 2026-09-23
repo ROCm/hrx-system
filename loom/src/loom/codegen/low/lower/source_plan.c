@@ -12,6 +12,7 @@
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/lower/context.h"
 #include "loom/codegen/low/lower/contract_query.h"
+#include "loom/codegen/low/lower/function_boundary.h"
 #include "loom/codegen/low/lower/rule_emit.h"
 #include "loom/codegen/low/lower/rule_match.h"
 #include "loom/codegen/low/lower/rule_source_memory.h"
@@ -594,6 +595,10 @@ static iree_status_t loom_low_lower_visit_region_plan_ops(
       if (is_structural) {
         loom_low_lower_mark_structural_storage_demands(context, op, traits);
       }
+      if (loom_func_return_isa(op)) {
+        IREE_RETURN_IF_ERROR(
+            loom_low_lower_function_boundary_observe_return(context, op));
+      }
       if (observer != NULL) {
         observer->observe(observer_state, context, op);
       }
@@ -639,6 +644,9 @@ static iree_status_t loom_low_lower_prepare_plan(
       &context->lowering.source_plan.read_visibility_scope));
   if (observer != NULL) {
     IREE_RETURN_IF_ERROR(observer->end(observer_state, context));
+  }
+  if (context->result->error_count == 0) {
+    IREE_RETURN_IF_ERROR(loom_low_lower_function_boundary_finalize(context));
   }
   context->lowering.source_plan.selected_plan_capacity = plan_capacity;
   context->lowering.source_plan.selected_plan_count = 0;

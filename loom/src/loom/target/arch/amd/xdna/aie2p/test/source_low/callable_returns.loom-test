@@ -1,0 +1,314 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/callable_returns.loom-test
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+// Return representation depends on all paths, regardless of block layout.
+func.def @return_loaded_or_argument(%input: buffer, %load: i1, %fallback: i32) -> (i32) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi32>
+  cfg.cond_br %load, ^loaded, ^argument
+^loaded:
+  %value = view.load %view[0] : view<1xi32> -> i32
+  func.return %value : i32
+^argument:
+  func.return %fallback : i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @return_loaded_or_argument(%load: reg<aie2p.er>, %fallback: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  low.cond_br %load, ^loaded, ^argument : reg<aie2p.er>
+^loaded:
+  %value = lda %view, 0
+  return %value
+^argument:
+  return %fallback
+}
+
+// ====
+
+func.def @return_argument_or_loaded(%input: buffer, %load: i1, %fallback: i32) -> (i32) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi32>
+  cfg.cond_br %load, ^loaded, ^argument
+^argument:
+  func.return %fallback : i32
+^loaded:
+  %value = view.load %view[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @return_argument_or_loaded(%load: reg<aie2p.er>, %fallback: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  low.cond_br %load, ^loaded, ^argument : reg<aie2p.er>
+^argument:
+  return %fallback
+^loaded:
+  %value = lda %view, 0
+  return %value
+}
+
+// ====
+
+func.def @return_wide_loaded_or_argument(%input: buffer, %load: i1, %fallback: i64) -> (i64) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi64>
+  cfg.cond_br %load, ^loaded, ^argument
+^loaded:
+  %value = view.load %view[0] : view<1xi64> -> i64
+  func.return %value : i64
+^argument:
+  func.return %fallback : i64
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @return_wide_loaded_or_argument(%load: reg<aie2p.er>, %fallback: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
+  %view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  low.cond_br %load, ^loaded, ^argument : reg<aie2p.er>
+^loaded:
+  %11 = lda %view, 0
+  %12 = lda %view, 4
+  %value = concat(%11, %12) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  return %value
+^argument:
+  return %fallback
+}
+
+// ====
+
+func.def @return_wide_argument_or_loaded(%input: buffer, %load: i1, %fallback: i64) -> (i64) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi64>
+  cfg.cond_br %load, ^loaded, ^argument
+^argument:
+  func.return %fallback : i64
+^loaded:
+  %value = view.load %view[0] : view<1xi64> -> i64
+  func.return %value : i64
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @return_wide_argument_or_loaded(%load: reg<aie2p.er>, %fallback: reg<aie2p.er x2>) -> (reg<aie2p.er x2>) asm {
+  %view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  low.cond_br %load, ^loaded, ^argument : reg<aie2p.er>
+^argument:
+  return %fallback
+^loaded:
+  %11 = lda %view, 0
+  %12 = lda %view, 4
+  %value = concat(%11, %12) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  return %value
+}
+
+// ====
+
+// Each result position has its own carrier, including unchanged uniform data.
+func.def @return_mixed_values(%input: buffer, %load: i1, %integer: i32, %real: f32, %tag: i32) -> (i32, f32, i32) {
+  %origin = index.constant 0 : offset
+  %integers = buffer.view %input[%origin] : buffer -> view<2xi32>
+  %reals = buffer.view %input[%origin] : buffer -> view<2xf32>
+  cfg.cond_br %load, ^loaded, ^argument
+^argument:
+  func.return %integer, %real, %tag : i32, f32, i32
+^loaded:
+  %loaded_integer = view.load %integers[0] : view<2xi32> -> i32
+  %loaded_real = view.load %reals[1] : view<2xf32> -> f32
+  func.return %loaded_integer, %loaded_real, %tag : i32, f32, i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @return_mixed_values(%load: reg<aie2p.er>, %integer: reg<aie2p.er>, %real: reg<aie2p.er>, %tag: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %reals = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  low.cond_br %load, ^loaded, ^argument : reg<aie2p.er>
+^argument:
+  return %integer, %real, %tag
+^loaded:
+  %loaded_integer = lda %reals, 0
+  %loaded_real = lda %reals, 4
+  return %loaded_integer, %loaded_real, %tag
+}
+
+// ====
+
+func.def @return_uniform_values(%choose: i1, %first: i32, %second: i32) -> (i32, i32) {
+  cfg.cond_br %choose, ^original, ^swapped
+^original:
+  func.return %first, %second : i32, i32
+^swapped:
+  func.return %second, %first : i32, i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @return_uniform_values(%choose: reg<aie2p.er>, %first: reg<aie2p.er>, %second: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+  low.cond_br %choose, ^original, ^swapped : reg<aie2p.er>
+^original:
+  return %first, %second
+^swapped:
+  return %second, %first
+}
+
+// ====
+
+// Width and register-bank joins are independent: the loaded offset may need
+// vector storage even though its range is narrower than the fallback address.
+func.def @return_offset(%input: buffer, %load: i1, %fallback: offset) -> (offset) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi32>
+  cfg.cond_br %load, ^loaded, ^argument
+^argument:
+  func.return %fallback : offset
+^loaded:
+  %value = view.load %view[0] : view<1xi32> -> i32
+  %byte_offset = index.cast %value : i32 to offset
+  func.return %byte_offset : offset
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @return_offset(%load: reg<aie2p.er>, %fallback: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  low.cond_br %load, ^loaded, ^argument : reg<aie2p.er>
+^argument:
+  return %fallback
+^loaded:
+  %byte_offset = lda %view, 0
+  return %byte_offset
+}
+
+// ====
+
+func.def @return_predicate(%input: buffer, %load: i1, %fallback: i1) -> (i1) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi32>
+  cfg.cond_br %load, ^loaded, ^argument
+^argument:
+  func.return %fallback : i1
+^loaded:
+  %value = view.load %view[0] : view<1xi32> -> i32
+  %threshold = scalar.constant 0 : i32
+  %positive = scalar.cmpi slt, %threshold, %value : i32
+  func.return %positive : i1
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @return_predicate(%load: reg<aie2p.er>, %fallback: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  low.cond_br %load, ^loaded, ^argument : reg<aie2p.er>
+^argument:
+  return %fallback
+^loaded:
+  %value = lda %view, 0
+  %threshold = mov.short 0
+  %positive = lt %threshold, %value
+  return %positive
+}
+
+// ====
+
+func.def @return_selected_buffer(%input: buffer, %fallback: buffer, %select: i1) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi32>
+  cfg.cond_br %select, ^selected, ^argument
+^argument:
+  func.return %fallback : buffer
+^selected:
+  %value = view.load %view[0] : view<1xi32> -> i32
+  %threshold = scalar.constant 0 : i32
+  %positive = scalar.cmpi slt, %threshold, %value : i32
+  %selected = scf.select %positive, %input, %fallback : buffer
+  func.return %selected : buffer
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @return_selected_buffer(%select: reg<aie2p.er>) -> (reg<aie2p.ep>) asm {
+  %view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %fallback = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  low.cond_br %select, ^selected, ^argument : reg<aie2p.er>
+^argument:
+  return %fallback
+^selected:
+  %value = lda %view, 0
+  %threshold = mov.short 0
+  %positive = lt %threshold, %value
+  %18 = mov.address-to-scalar %view
+  %19 = mov.address-to-scalar %fallback
+  %20 = copy %positive : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %21 = sel.nez %18, %19, %20
+  %selected = mov.scalar-to-address %21
+  return %selected
+}
+
+// ====
+
+// Targets with direct calls retain this helper boundary; inline-only targets
+// still exercise the same returned values through their normal inliner.
+func.def public @call_returned_value(%input: buffer, %load: i1, %fallback: i32) -> (i32) {
+  %value = func.call @load_or_fallback(%input, %load, %fallback) : (buffer, i1, i32) -> (i32)
+  %increment = scalar.constant 1 : i32
+  %result = scalar.addi %value, %increment : i32
+  func.return %result : i32
+}
+
+func.def @load_or_fallback(%input: buffer, %load: i1, %fallback: i32) -> (i32) {
+  cfg.cond_br %load, ^loaded, ^argument
+^argument:
+  func.return %fallback : i32
+^loaded:
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi32>
+  %value = view.load %view[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ----
+low.func.def public target<amd.xdna.aie2p.core> abi(object_function) @call_returned_value(%load: reg<aie2p.er>, %fallback: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  low.cond_br %load, ^_bb2, ^_bb1 : reg<aie2p.er>
+^_bb1:
+  low.br ^_bb3(%fallback: reg<aie2p.er>)
+^_bb2:
+  %value$20 = lda %view, 0
+  low.br ^_bb3(%value$20: reg<aie2p.er>)
+^_bb3(%value$18: reg<aie2p.er>):
+  %increment = mov.short 1
+  %result = add.rr %value$18, %increment
+  return %result
+}
+
+// ====
+
+func.def @return_uniform_predicate(%choose: i1, %fallback: i1, %input: i32) -> (i1) {
+  cfg.cond_br %choose, ^compare, ^argument
+^argument:
+  func.return %fallback : i1
+^compare:
+  %threshold = scalar.constant 0 : i32
+  %positive = scalar.cmpi slt, %threshold, %input : i32
+  func.return %positive : i1
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @return_uniform_predicate(%choose: reg<aie2p.er>, %fallback: reg<aie2p.er>, %input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  low.cond_br %choose, ^compare, ^argument : reg<aie2p.er>
+^argument:
+  return %fallback
+^compare:
+  %threshold = mov.short 0
+  %positive = lt %threshold, %input
+  return %positive
+}
+
+// ====
+
+// A non-returning body still has its declared callable result signature.
+func.def @never_returns() -> (i32) {
+  cfg.br ^loop
+^loop:
+  cfg.br ^loop
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @never_returns() -> (reg<aie2p.er>) asm {
+  low.br ^loop
+^loop:
+  low.br ^loop
+}

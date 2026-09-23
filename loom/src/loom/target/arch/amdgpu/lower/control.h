@@ -22,14 +22,22 @@ iree_status_t loom_amdgpu_prepare_branch(
     void* user_data, loom_low_lower_context_t* context,
     const loom_op_t* source_terminator, iree_arena_allocator_t* analysis_arena);
 
-// Materializes branch payload values to the register class selected for the
-// destination block argument.
+// Materializes a branch payload against its destination block argument.
 iree_status_t loom_amdgpu_materialize_branch_arg(
     void* user_data, loom_low_lower_context_t* context,
     const loom_op_t* source_terminator, uint8_t successor_index,
     uint16_t arg_index, loom_value_id_t source_value_id,
     loom_value_id_t low_value_id, loom_type_t required_low_type,
     loom_value_id_t* out_low_value_id);
+
+// Materializes structural operands to their required carrier and storage
+// contract. Callable returns share branch argument conversions without
+// replacing the source value's canonical mapping.
+iree_status_t loom_amdgpu_materialize_structural_operand(
+    void* user_data, loom_low_lower_context_t* context,
+    const loom_op_t* source_op, iree_host_size_t operand_index,
+    loom_value_id_t source_value_id, loom_value_id_t low_value_id,
+    loom_type_t required_low_type, loom_value_id_t* out_low_value_id);
 
 // Emits a conditional branch, using EXEC narrowing for divergent SGPR masks.
 // Uniform masks test the active lanes without modifying EXEC.

@@ -814,6 +814,15 @@ typedef struct loom_low_lower_policy_t {
   loom_low_lower_map_contract_value_callback_t map_contract_value;
   // Optionally maps source function arguments to non-direct ABI imports.
   loom_low_lower_map_argument_callback_t map_argument;
+  // Joins unequal native return carriers for one semantic result type. The
+  // operation is associative and commutative, and the selected carrier must
+  // losslessly accept either input through structural operand materialization.
+  // Inputs are mapped register types; none means no supported common carrier.
+  // Missing requires exact equality. This query consumes types only and must
+  // not inspect source IR or alter producer representations. Targets retaining
+  // direct calls must use the same result convention at definitions and calls.
+  loom_type_t (*join_result_type)(loom_type_t source_type, loom_type_t lhs,
+                                  loom_type_t rhs);
   // Optionally emits target live-ins or other structural preamble packets.
   loom_low_lower_emit_preamble_callback_t emit_preamble;
   // Optionally emits target entry-block setup packets after ABI imports.
@@ -826,8 +835,8 @@ typedef struct loom_low_lower_policy_t {
   // Optionally materializes branch payloads to the exact destination block
   // argument type after the canonical low value has been looked up.
   loom_low_lower_materialize_branch_arg_callback_t materialize_branch_arg;
-  // Optionally materializes structural op operands that have the correct low
-  // type but still need target-owned storage-contract adaptation.
+  // Optionally materializes structural op operands to their required low type
+  // and target storage contract, including the selected callable result type.
   loom_low_lower_materialize_structural_operand_callback_t
       materialize_structural_operand;
   // Optionally emits conditional branches that need target-specific structural

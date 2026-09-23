@@ -244,14 +244,6 @@ iree_status_t loom_amdgpu_materialize_low_vgpr_b32_registers(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t low_value, loom_value_id_t* out_low_value);
 
-// Materializes target-owned storage contracts before low structural ops consume
-// operands that otherwise have the correct low type.
-iree_status_t loom_amdgpu_materialize_structural_operand(
-    void* user_data, loom_low_lower_context_t* context,
-    const loom_op_t* source_op, iree_host_size_t operand_index,
-    loom_value_id_t source_value_id, loom_value_id_t low_value_id,
-    loom_type_t required_low_type, loom_value_id_t* out_low_value_id);
-
 // Emits one binary descriptor op with the selected register result type.
 iree_status_t loom_amdgpu_emit_binary(
     loom_low_lower_context_t* context, const loom_op_t* source_op,

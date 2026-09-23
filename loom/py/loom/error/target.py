@@ -1646,6 +1646,28 @@ ERR_TARGET_090 = ErrorDef(
     fix_hint="Apply volatile only to a descriptor-backed memory access.",
 )
 
+# ERR_TARGET_091: Returning paths have no common native result carrier.
+ERR_TARGET_091 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=91,
+    severity=Severity.ERROR,
+    summary="Returning paths have no common native result carrier.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "rejected '{op_name}' in '@{function_name}': "
+        "result {result_index} of type {source_type} cannot join native "
+        "carriers {previous_type} and {incoming_type}"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("result_index", ParamKind.U32),
+        ErrorParam("source_type", ParamKind.TYPE),
+        ErrorParam("previous_type", ParamKind.TYPE),
+        ErrorParam("incoming_type", ParamKind.TYPE),
+    ),
+    fix_hint="Convert returning values to a representation supported on every path.",
+)
+
 ALL_TARGET_ERRORS = (
     ERR_TARGET_001,
     ERR_TARGET_002,
@@ -1727,4 +1749,5 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_088,
     ERR_TARGET_089,
     ERR_TARGET_090,
+    ERR_TARGET_091,
 )

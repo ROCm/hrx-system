@@ -50,8 +50,7 @@ uint32_t loom_amdgpu_integer_scalar_type_bit_count(
 // the source type is not an ordinary integer scalar payload.
 uint32_t loom_amdgpu_type_integer_scalar_bit_count(loom_type_t type);
 
-// Returns true when the source type is an address-sized scalar lowered through
-// the current 32-bit AMDGPU scalar path.
+// Returns true when the source type is an address-sized scalar.
 bool loom_amdgpu_type_is_address_scalar(loom_type_t type);
 
 // Returns true when an address-domain source value needs full 64-bit address
@@ -327,6 +326,12 @@ iree_status_t loom_amdgpu_map_value(void* user_data,
                                     loom_value_id_t source_value_id,
                                     loom_type_t source_type,
                                     loom_type_t* out_low_type);
+
+// Joins native return carriers without changing their producers. A vector bank
+// or wider address on either path requires that capacity in the result. Boolean
+// joins retain lane masks when present and otherwise capture scalar truth.
+loom_type_t loom_amdgpu_join_result_type(loom_type_t source_type,
+                                         loom_type_t lhs, loom_type_t rhs);
 
 // Maps a source value to AMDGPU descriptor register metadata for read-only
 // target contract queries.

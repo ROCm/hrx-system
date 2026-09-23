@@ -1,0 +1,310 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/callable_returns.loom-test
+// RUN: emit source-low target=vm:core output=low
+
+// Return representation depends on all paths, regardless of block layout.
+func.def @return_loaded_or_argument(%input: buffer, %load: i1, %fallback: i32) -> (i32) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi32>
+  cfg.cond_br %load, ^loaded, ^argument
+^loaded:
+  %value = view.load %view[0] : view<1xi32> -> i32
+  func.return %value : i32
+^argument:
+  func.return %fallback : i32
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @return_loaded_or_argument(%view: reg<vm.ref : buffer>, %load: reg<vm.value : i1>, %fallback: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  low.cond_br %load, ^loaded, ^argument : reg<vm.value : i1>
+^loaded:
+  %11 = constant.i64 0
+  %value = buffer.load %view, %11, %11, 0, "i32.x1" : reg<vm.value : i32>
+  return %value
+^argument:
+  return %fallback
+}
+
+// ====
+
+func.def @return_argument_or_loaded(%input: buffer, %load: i1, %fallback: i32) -> (i32) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi32>
+  cfg.cond_br %load, ^loaded, ^argument
+^argument:
+  func.return %fallback : i32
+^loaded:
+  %value = view.load %view[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @return_argument_or_loaded(%view: reg<vm.ref : buffer>, %load: reg<vm.value : i1>, %fallback: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  low.cond_br %load, ^loaded, ^argument : reg<vm.value : i1>
+^argument:
+  return %fallback
+^loaded:
+  %11 = constant.i64 0
+  %value = buffer.load %view, %11, %11, 0, "i32.x1" : reg<vm.value : i32>
+  return %value
+}
+
+// ====
+
+func.def @return_wide_loaded_or_argument(%input: buffer, %load: i1, %fallback: i64) -> (i64) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi64>
+  cfg.cond_br %load, ^loaded, ^argument
+^loaded:
+  %value = view.load %view[0] : view<1xi64> -> i64
+  func.return %value : i64
+^argument:
+  func.return %fallback : i64
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @return_wide_loaded_or_argument(%view: reg<vm.ref : buffer>, %load: reg<vm.value : i1>, %fallback: reg<vm.value : i64>) -> (reg<vm.value : i64>) asm {
+  low.cond_br %load, ^loaded, ^argument : reg<vm.value : i1>
+^loaded:
+  %11 = constant.i64 0
+  %value = buffer.load %view, %11, %11, 0, "i64.x1"
+  return %value
+^argument:
+  return %fallback
+}
+
+// ====
+
+func.def @return_wide_argument_or_loaded(%input: buffer, %load: i1, %fallback: i64) -> (i64) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi64>
+  cfg.cond_br %load, ^loaded, ^argument
+^argument:
+  func.return %fallback : i64
+^loaded:
+  %value = view.load %view[0] : view<1xi64> -> i64
+  func.return %value : i64
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @return_wide_argument_or_loaded(%view: reg<vm.ref : buffer>, %load: reg<vm.value : i1>, %fallback: reg<vm.value : i64>) -> (reg<vm.value : i64>) asm {
+  low.cond_br %load, ^loaded, ^argument : reg<vm.value : i1>
+^argument:
+  return %fallback
+^loaded:
+  %11 = constant.i64 0
+  %value = buffer.load %view, %11, %11, 0, "i64.x1"
+  return %value
+}
+
+// ====
+
+// Each result position has its own carrier, including unchanged uniform data.
+func.def @return_mixed_values(%input: buffer, %load: i1, %integer: i32, %real: f32, %tag: i32) -> (i32, f32, i32) {
+  %origin = index.constant 0 : offset
+  %integers = buffer.view %input[%origin] : buffer -> view<2xi32>
+  %reals = buffer.view %input[%origin] : buffer -> view<2xf32>
+  cfg.cond_br %load, ^loaded, ^argument
+^argument:
+  func.return %integer, %real, %tag : i32, f32, i32
+^loaded:
+  %loaded_integer = view.load %integers[0] : view<2xi32> -> i32
+  %loaded_real = view.load %reals[1] : view<2xf32> -> f32
+  func.return %loaded_integer, %loaded_real, %tag : i32, f32, i32
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @return_mixed_values(%reals: reg<vm.ref : buffer>, %load: reg<vm.value : i1>, %integer: reg<vm.value : i32>, %real: reg<vm.value : f32>, %tag: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : f32>, reg<vm.value : i32>) asm {
+  low.cond_br %load, ^loaded, ^argument : reg<vm.value : i1>
+^argument:
+  return %integer, %real, %tag
+^loaded:
+  %21 = constant.i64 0
+  %loaded_integer = buffer.load %reals, %21, %21, 0, "i32.x1" : reg<vm.value : i32>
+  %23 = constant.i64 4
+  %loaded_real = buffer.load %reals, %23, %23, 0, "i32.x1" : reg<vm.value : f32>
+  return %loaded_integer, %loaded_real, %tag
+}
+
+// ====
+
+func.def @return_uniform_values(%choose: i1, %first: i32, %second: i32) -> (i32, i32) {
+  cfg.cond_br %choose, ^original, ^swapped
+^original:
+  func.return %first, %second : i32, i32
+^swapped:
+  func.return %second, %first : i32, i32
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @return_uniform_values(%choose: reg<vm.value : i1>, %first: reg<vm.value : i32>, %second: reg<vm.value : i32>) -> (reg<vm.value : i32>, reg<vm.value : i32>) asm {
+  low.cond_br %choose, ^original, ^swapped : reg<vm.value : i1>
+^original:
+  return %first, %second
+^swapped:
+  return %second, %first
+}
+
+// ====
+
+// Width and register-bank joins are independent: the loaded offset may need
+// vector storage even though its range is narrower than the fallback address.
+func.def @return_offset(%input: buffer, %load: i1, %fallback: offset) -> (offset) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi32>
+  cfg.cond_br %load, ^loaded, ^argument
+^argument:
+  func.return %fallback : offset
+^loaded:
+  %value = view.load %view[0] : view<1xi32> -> i32
+  %byte_offset = index.cast %value : i32 to offset
+  func.return %byte_offset : offset
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @return_offset(%view: reg<vm.ref : buffer>, %load: reg<vm.value : i1>, %fallback: reg<vm.value : i64>) -> (reg<vm.value : i64>) asm {
+  low.cond_br %load, ^loaded, ^argument : reg<vm.value : i1>
+^argument:
+  return %fallback
+^loaded:
+  %12 = constant.i64 0
+  %value = buffer.load %view, %12, %12, 0, "i32.x1" : reg<vm.value : i32>
+  %byte_offset = conversion.integer %value, "u32.to.i64"
+  return %byte_offset
+}
+
+// ====
+
+func.def @return_predicate(%input: buffer, %load: i1, %fallback: i1) -> (i1) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi32>
+  cfg.cond_br %load, ^loaded, ^argument
+^argument:
+  func.return %fallback : i1
+^loaded:
+  %value = view.load %view[0] : view<1xi32> -> i32
+  %threshold = scalar.constant 0 : i32
+  %positive = scalar.cmpi slt, %threshold, %value : i32
+  func.return %positive : i1
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @return_predicate(%view: reg<vm.ref : buffer>, %load: reg<vm.value : i1>, %fallback: reg<vm.value : i1>) -> (reg<vm.value : i1>) asm {
+  low.cond_br %load, ^loaded, ^argument : reg<vm.value : i1>
+^argument:
+  return %fallback
+^loaded:
+  %14 = constant.i64 0
+  %value = buffer.load %view, %14, %14, 0, "i32.x1" : reg<vm.value : i32>
+  %threshold = constant.i32 0
+  %positive = integer.compare.i32 %value, %threshold, "sgt"
+  return %positive
+}
+
+// ====
+
+func.def @return_selected_buffer(%input: buffer, %fallback: buffer, %select: i1) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi32>
+  cfg.cond_br %select, ^selected, ^argument
+^argument:
+  func.return %fallback : buffer
+^selected:
+  %value = view.load %view[0] : view<1xi32> -> i32
+  %threshold = scalar.constant 0 : i32
+  %positive = scalar.cmpi slt, %threshold, %value : i32
+  %selected = scf.select %positive, %input, %fallback : buffer
+  func.return %selected : buffer
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @return_selected_buffer(%view: reg<vm.ref : buffer>, %fallback: reg<vm.ref : buffer>, %select: reg<vm.value : i1>) -> (reg<vm.ref : buffer>) asm {
+  low.cond_br %select, ^selected, ^argument : reg<vm.value : i1>
+^argument:
+  return %fallback
+^selected:
+  %15 = constant.i64 0
+  %value = buffer.load %view, %15, %15, 0, "i32.x1" : reg<vm.value : i32>
+  %threshold = constant.i32 0
+  %positive = integer.compare.i32 %value, %threshold, "sgt"
+  %selected = ref.select %positive, %view, %fallback : reg<vm.ref : buffer>
+  return %selected
+}
+
+// ====
+
+// Targets with direct calls retain this helper boundary; inline-only targets
+// still exercise the same returned values through their normal inliner.
+func.def public @call_returned_value(%input: buffer, %load: i1, %fallback: i32) -> (i32) {
+  %value = func.call @load_or_fallback(%input, %load, %fallback) : (buffer, i1, i32) -> (i32)
+  %increment = scalar.constant 1 : i32
+  %result = scalar.addi %value, %increment : i32
+  func.return %result : i32
+}
+
+func.def @load_or_fallback(%input: buffer, %load: i1, %fallback: i32) -> (i32) {
+  cfg.cond_br %load, ^loaded, ^argument
+^argument:
+  func.return %fallback : i32
+^loaded:
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi32>
+  %value = view.load %view[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ----
+low.func.def public target<vm.core> abi(vm_function) @call_returned_value(%input: reg<vm.ref : buffer>, %load: reg<vm.value : i1>, %fallback: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %value = low.func.call @load_or_fallback(%input, %load, %fallback) : (reg<vm.ref : buffer>, reg<vm.value : i1>, reg<vm.value : i32>) -> (reg<vm.value : i32>)
+  %increment = constant.i32 1
+  %result = integer.add.i32 %value, %increment
+  return %result
+}
+
+low.func.def target<vm.core> @load_or_fallback(%view: reg<vm.ref : buffer>, %load: reg<vm.value : i1>, %fallback: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  low.cond_br %load, ^loaded, ^argument : reg<vm.value : i1>
+^argument:
+  return %fallback
+^loaded:
+  %25 = constant.i64 0
+  %value = buffer.load %view, %25, %25, 0, "i32.x1" : reg<vm.value : i32>
+  return %value
+}
+
+// ====
+
+func.def @return_uniform_predicate(%choose: i1, %fallback: i1, %input: i32) -> (i1) {
+  cfg.cond_br %choose, ^compare, ^argument
+^argument:
+  func.return %fallback : i1
+^compare:
+  %threshold = scalar.constant 0 : i32
+  %positive = scalar.cmpi slt, %threshold, %input : i32
+  func.return %positive : i1
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @return_uniform_predicate(%choose: reg<vm.value : i1>, %fallback: reg<vm.value : i1>, %input: reg<vm.value : i32>) -> (reg<vm.value : i1>) asm {
+  low.cond_br %choose, ^compare, ^argument : reg<vm.value : i1>
+^argument:
+  return %fallback
+^compare:
+  %threshold = constant.i32 0
+  %positive = integer.compare.i32 %input, %threshold, "sgt"
+  return %positive
+}
+
+// ====
+
+// A non-returning body still has its declared callable result signature.
+func.def @never_returns() -> (i32) {
+  cfg.br ^loop
+^loop:
+  cfg.br ^loop
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @never_returns() -> (reg<vm.value : i32>) asm {
+  low.br ^loop
+^loop:
+  low.br ^loop
+}

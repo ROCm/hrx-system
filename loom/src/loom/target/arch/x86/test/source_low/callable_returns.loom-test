@@ -1,0 +1,270 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/callable_returns.loom-test
+// TEMPLATE-EXCLUDE: @return_mixed_values Scalar f32 memory transfers have no x86 lowering.
+// RUN: emit source-low target=x86:avx2 output=low
+
+// Return representation depends on all paths, regardless of block layout.
+func.def @return_loaded_or_argument(%input: buffer, %load: i1, %fallback: i32) -> (i32) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi32>
+  cfg.cond_br %load, ^loaded, ^argument
+^loaded:
+  %value = view.load %view[0] : view<1xi32> -> i32
+  func.return %value : i32
+^argument:
+  func.return %fallback : i32
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @return_loaded_or_argument(%input: reg<x86.gpr64>, %load: reg<x86.gpr32>, %fallback: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  low.cond_br %load, ^loaded, ^argument : reg<x86.gpr32>
+^loaded:
+  %value = mov.load.gpr32 %input {disp32 = 0}
+  return %value
+^argument:
+  return %fallback
+}
+
+// ====
+
+func.def @return_argument_or_loaded(%input: buffer, %load: i1, %fallback: i32) -> (i32) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi32>
+  cfg.cond_br %load, ^loaded, ^argument
+^argument:
+  func.return %fallback : i32
+^loaded:
+  %value = view.load %view[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @return_argument_or_loaded(%input: reg<x86.gpr64>, %load: reg<x86.gpr32>, %fallback: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  low.cond_br %load, ^loaded, ^argument : reg<x86.gpr32>
+^argument:
+  return %fallback
+^loaded:
+  %value = mov.load.gpr32 %input {disp32 = 0}
+  return %value
+}
+
+// ====
+
+func.def @return_wide_loaded_or_argument(%input: buffer, %load: i1, %fallback: i64) -> (i64) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi64>
+  cfg.cond_br %load, ^loaded, ^argument
+^loaded:
+  %value = view.load %view[0] : view<1xi64> -> i64
+  func.return %value : i64
+^argument:
+  func.return %fallback : i64
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @return_wide_loaded_or_argument(%input: reg<x86.gpr64>, %load: reg<x86.gpr32>, %fallback: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  low.cond_br %load, ^loaded, ^argument : reg<x86.gpr32>
+^loaded:
+  %value = mov.load.gpr64 %input {disp32 = 0}
+  return %value
+^argument:
+  return %fallback
+}
+
+// ====
+
+func.def @return_wide_argument_or_loaded(%input: buffer, %load: i1, %fallback: i64) -> (i64) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi64>
+  cfg.cond_br %load, ^loaded, ^argument
+^argument:
+  func.return %fallback : i64
+^loaded:
+  %value = view.load %view[0] : view<1xi64> -> i64
+  func.return %value : i64
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @return_wide_argument_or_loaded(%input: reg<x86.gpr64>, %load: reg<x86.gpr32>, %fallback: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  low.cond_br %load, ^loaded, ^argument : reg<x86.gpr32>
+^argument:
+  return %fallback
+^loaded:
+  %value = mov.load.gpr64 %input {disp32 = 0}
+  return %value
+}
+
+// ====
+
+func.def @return_uniform_values(%choose: i1, %first: i32, %second: i32) -> (i32, i32) {
+  cfg.cond_br %choose, ^original, ^swapped
+^original:
+  func.return %first, %second : i32, i32
+^swapped:
+  func.return %second, %first : i32, i32
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @return_uniform_values(%choose: reg<x86.gpr32>, %first: reg<x86.gpr32>, %second: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>) asm {
+  low.cond_br %choose, ^original, ^swapped : reg<x86.gpr32>
+^original:
+  return %first, %second
+^swapped:
+  return %second, %first
+}
+
+// ====
+
+// Width and register-bank joins are independent: the loaded offset may need
+// vector storage even though its range is narrower than the fallback address.
+func.def @return_offset(%input: buffer, %load: i1, %fallback: offset) -> (offset) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi32>
+  cfg.cond_br %load, ^loaded, ^argument
+^argument:
+  func.return %fallback : offset
+^loaded:
+  %value = view.load %view[0] : view<1xi32> -> i32
+  %byte_offset = index.cast %value : i32 to offset
+  func.return %byte_offset : offset
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @return_offset(%input: reg<x86.gpr64>, %load: reg<x86.gpr32>, %fallback: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  low.cond_br %load, ^loaded, ^argument : reg<x86.gpr32>
+^argument:
+  return %fallback
+^loaded:
+  %value = mov.load.gpr32 %input {disp32 = 0}
+  %byte_offset = movzx.gpr64.gpr32 %value
+  return %byte_offset
+}
+
+// ====
+
+func.def @return_predicate(%input: buffer, %load: i1, %fallback: i1) -> (i1) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi32>
+  cfg.cond_br %load, ^loaded, ^argument
+^argument:
+  func.return %fallback : i1
+^loaded:
+  %value = view.load %view[0] : view<1xi32> -> i32
+  %threshold = scalar.constant 0 : i32
+  %positive = scalar.cmpi slt, %threshold, %value : i32
+  func.return %positive : i1
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @return_predicate(%input: reg<x86.gpr64>, %load: reg<x86.gpr32>, %fallback: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  low.cond_br %load, ^loaded, ^argument : reg<x86.gpr32>
+^argument:
+  return %fallback
+^loaded:
+  %value = mov.load.gpr32 %input {disp32 = 0}
+  %positive = cmp.sgt.imm.gpr32 %value, 0
+  return %positive
+}
+
+// ====
+
+func.def @return_selected_buffer(%input: buffer, %fallback: buffer, %select: i1) -> (buffer) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi32>
+  cfg.cond_br %select, ^selected, ^argument
+^argument:
+  func.return %fallback : buffer
+^selected:
+  %value = view.load %view[0] : view<1xi32> -> i32
+  %threshold = scalar.constant 0 : i32
+  %positive = scalar.cmpi slt, %threshold, %value : i32
+  %selected = scf.select %positive, %input, %fallback : buffer
+  func.return %selected : buffer
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @return_selected_buffer(%input: reg<x86.gpr64>, %fallback: reg<x86.gpr64>, %select: reg<x86.gpr32>) -> (reg<x86.gpr64>) asm {
+  low.cond_br %select, ^selected, ^argument : reg<x86.gpr32>
+^argument:
+  return %fallback
+^selected:
+  %value = mov.load.gpr32 %input {disp32 = 0}
+  %positive = cmp.sgt.imm.gpr32 %value, 0
+  %17 = copy %fallback : reg<x86.gpr64> -> reg<x86.gpr64>
+  %selected = select.gpr64 %positive, %input, %17
+  return %selected
+}
+
+// ====
+
+// Targets with direct calls retain this helper boundary; inline-only targets
+// still exercise the same returned values through their normal inliner.
+func.def public @call_returned_value(%input: buffer, %load: i1, %fallback: i32) -> (i32) {
+  %value = func.call @load_or_fallback(%input, %load, %fallback) : (buffer, i1, i32) -> (i32)
+  %increment = scalar.constant 1 : i32
+  %result = scalar.addi %value, %increment : i32
+  func.return %result : i32
+}
+
+func.def @load_or_fallback(%input: buffer, %load: i1, %fallback: i32) -> (i32) {
+  cfg.cond_br %load, ^loaded, ^argument
+^argument:
+  func.return %fallback : i32
+^loaded:
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<1xi32>
+  %value = view.load %view[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ----
+low.func.def public target<x86.avx2.core> abi(object_function) @call_returned_value(%input: reg<x86.gpr64>, %load: reg<x86.gpr32>, %fallback: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  low.cond_br %load, ^_bb2, ^_bb1 : reg<x86.gpr32>
+^_bb1:
+  low.br ^_bb3(%fallback: reg<x86.gpr32>)
+^_bb2:
+  %value$20 = mov.load.gpr32 %input {disp32 = 0}
+  low.br ^_bb3(%value$20: reg<x86.gpr32>)
+^_bb3(%value$19: reg<x86.gpr32>):
+  %increment = mov.imm32 1
+  %22 = copy %value$19 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %result = add.gpr32 %22, %increment
+  return %result
+}
+
+// ====
+
+func.def @return_uniform_predicate(%choose: i1, %fallback: i1, %input: i32) -> (i1) {
+  cfg.cond_br %choose, ^compare, ^argument
+^argument:
+  func.return %fallback : i1
+^compare:
+  %threshold = scalar.constant 0 : i32
+  %positive = scalar.cmpi slt, %threshold, %input : i32
+  func.return %positive : i1
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @return_uniform_predicate(%choose: reg<x86.gpr32>, %fallback: reg<x86.gpr32>, %input: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  low.cond_br %choose, ^compare, ^argument : reg<x86.gpr32>
+^argument:
+  return %fallback
+^compare:
+  %positive = cmp.sgt.imm.gpr32 %input, 0
+  return %positive
+}
+
+// ====
+
+// A non-returning body still has its declared callable result signature.
+func.def @never_returns() -> (i32) {
+  cfg.br ^loop
+^loop:
+  cfg.br ^loop
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @never_returns() -> (reg<x86.gpr32>) asm {
+  low.br ^loop
+^loop:
+  low.br ^loop
+}

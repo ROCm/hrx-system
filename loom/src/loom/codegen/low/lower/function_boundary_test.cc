@@ -403,8 +403,10 @@ TEST_P(LowLowerResultMappingTest, DefinitionConsumesPreparedResultTypes) {
       },
       &result_query_count,
   };
-  IREE_ASSERT_OK(
-      loom_low_lower_function_boundary_validate(&mapping_context_, body));
+  IREE_ASSERT_OK(loom_low_lower_function_boundary_validate(&mapping_context_));
+  IREE_ASSERT_OK(loom_low_lower_function_boundary_observe_return(
+      &mapping_context_, return_op));
+  IREE_ASSERT_OK(loom_low_lower_function_boundary_finalize(&mapping_context_));
   ASSERT_EQ(result_.error_count, 0u);
   EXPECT_EQ(result_query_count, result_count);
   EXPECT_EQ(mapping_context_.lowering.result_types != nullptr, GetParam());
@@ -476,8 +478,7 @@ TEST_P(LowLowerArgumentQueryTest, OnlyRequiredArgumentsEmitDiagnostics) {
   EXPECT_EQ(result_.error_count, 0u);
   EXPECT_EQ(mapping_context_.lowering.argument_map, nullptr);
 
-  IREE_ASSERT_OK(
-      loom_low_lower_function_boundary_validate(&mapping_context_, body));
+  IREE_ASSERT_OK(loom_low_lower_function_boundary_validate(&mapping_context_));
   EXPECT_EQ(result_.error_count, 1u);
   EXPECT_TRUE(
       loom_type_equal(native_argument.abi_type,
