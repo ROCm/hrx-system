@@ -846,8 +846,11 @@ static iree_status_t loom_symbolic_expr_expansion_prepare_frame(
       *out_complete = true;
       break;
     }
-    case LOOM_OP_INDEX_CAST: {
-      const loom_value_id_t input = loom_index_cast_input(defining_op);
+    case LOOM_OP_INDEX_CAST:
+    case LOOM_OP_SCALAR_EXTSI:
+    case LOOM_OP_SCALAR_EXTUI:
+    case LOOM_OP_SCALAR_TRUNCI: {
+      const loom_value_id_t input = loom_op_const_operands(defining_op)[0];
       loom_value_facts_t input_facts;
       IREE_RETURN_IF_ERROR(loom_symbolic_expr_context_lookup_facts(
           context, input, &input_facts));
@@ -864,6 +867,14 @@ static iree_status_t loom_symbolic_expr_expansion_prepare_frame(
       (void)loom_value_facts_scalar_type_domain(
           loom_type_element_type(value->type), &result_lower_bound,
           &result_upper_bound);
+      if (defining_op->kind == LOOM_OP_SCALAR_EXTUI) {
+        result_lower_bound = 0;
+      } else if (defining_op->kind == LOOM_OP_SCALAR_EXTSI &&
+                 loom_type_element_type(loom_module_value_type(
+                     context->module, input)) == LOOM_SCALAR_TYPE_I1) {
+        // Predicate facts use 0/1, but signed extension maps true to -1.
+        result_upper_bound = 0;
+      }
       // Narrowing and unsigned interpretation can change the numeric value.
       // Only a range contained in the destination domain makes this cast an
       // identity; otherwise its result remains an independent symbolic term.
@@ -946,6 +957,11 @@ static iree_status_t loom_symbolic_expr_expansion_prepare_frame(
       frame->kind = LOOM_SYMBOLIC_EXPR_EXPANSION_MULTIPLY;
       frame->operand_values[0] = loom_scalar_muli_lhs(defining_op);
       frame->operand_values[1] = loom_scalar_muli_rhs(defining_op);
+      break;
+    case LOOM_OP_SCALAR_SHLI:
+      frame->kind = LOOM_SYMBOLIC_EXPR_EXPANSION_SHIFT_LEFT;
+      frame->operand_values[0] = loom_scalar_shli_lhs(defining_op);
+      frame->operand_values[1] = loom_scalar_shli_rhs(defining_op);
       break;
     case LOOM_OP_SCALAR_NEGI:
       frame->kind = LOOM_SYMBOLIC_EXPR_EXPANSION_NEGATE;
@@ -1065,7 +1081,9 @@ static iree_status_t loom_symbolic_expr_expansion_step(
           }
           if (!loom_symbolic_expr_constant_value(&operand_expression,
                                                  &frame->shift_amount) ||
-              frame->shift_amount < 0 || frame->shift_amount > 62) {
+              frame->shift_amount < 0 || frame->shift_amount > 62 ||
+              (frame->integer_bit_count != 0 &&
+               frame->shift_amount >= frame->integer_bit_count)) {
             *out_complete = true;
             return loom_symbolic_expr_value(context, frame->value_id,
                                             out_expression);

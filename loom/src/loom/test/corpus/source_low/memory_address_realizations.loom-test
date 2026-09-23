@@ -205,3 +205,29 @@ kernel.def @address_guarded_atomic() {
   }
   kernel.return
 }
+
+// ====
+
+// Keep a record header's byte offset through narrow scaling and widening.
+kernel.def @address_scaled_record_field() {
+  %unit = index.constant 1 : index
+  %lanes = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lanes, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %origin = index.constant 0 : offset
+  %entries = buffer.view %input[%origin] : buffer -> view<64xi32>
+  %entry_input = view.load %entries[%lane] : view<64xi32> -> i32
+  %entry = scalar.assume %entry_input [range(%entry_input, 0, 255)] : i32
+  %header_words = scalar.constant 16 : i32
+  %word_shift = scalar.constant 2 : i32
+  %word = scalar.addi %entry, %header_words : i32
+  %byte = scalar.shli %word, %word_shift : i32
+  %wide_byte = scalar.extui %byte : i32 to i64
+  %address = index.cast %wide_byte : i64 to offset
+  %record = buffer.view %input[%address] : buffer -> view<1xi32>
+  %value = view.load %record[0] : view<1xi32> -> i32
+  %destination = buffer.view %output[%origin] : buffer -> view<64xi32>
+  view.store %value, %destination[%lane] : i32, view<64xi32>
+  kernel.return
+}

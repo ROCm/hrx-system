@@ -128,11 +128,13 @@ class QualificationTest(unittest.TestCase):
         output = self.root / "module.hal"
         native_output = self.root / "module.hsaco"
         report_path = self.root / "report.json"
+        roots = ["address_guarded_rows", "address_materialized_wide_offset"]
         result = subprocess.run(
             [
                 _ARGS.compiler,
                 _ARGS.realizations,
                 "--target=amdgpu:gfx942",
+                *[f"--root=@{root}" for root in roots],
                 f"--output={output}",
                 f"--emit-target-artifact={native_output}",
                 "--compile-report=summary",
@@ -146,8 +148,10 @@ class QualificationTest(unittest.TestCase):
         self.assertGreater(native_output.stat().st_size, 0)
         report = json.loads(report_path.read_text())
         self.assertEqual(report["target_key"], "gfx942")
-        self.assertEqual(report["entries"]["count"], 8)
-        self.assertEqual(len(report["entries"]["rows"]), 8)
+        self.assertEqual(report["entries"]["count"], len(roots))
+        self.assertCountEqual(
+            [row["source_function"] for row in report["entries"]["rows"]], roots
+        )
         self.assertTrue(
             all(row["code_byte_count"] > 0 for row in report["entries"]["rows"])
         )

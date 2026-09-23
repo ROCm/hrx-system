@@ -32,7 +32,6 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %row_i32 = v_lshrrev_b32_src0_inline %22, 5
-  %output_row_byte_base = v_lshlrev_b32_lit %row_i32, 4
   %33 = v_mov_b32 840
   %34 = v_mul_lo_u32 %row_i32, %33
   %35 = s_mov_b32 3534864
@@ -43,6 +42,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %41, %42 = s_addc_u32 %37, %38, %40
   %43 = concat(%39, %41) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %value = global_load_b128_saddr %34, %43 {offset = 4080}
-  global_store_b128_saddr %output_row_byte_base, %value, %output_view
+  %45 = v_lshlrev_b32_src0_inline %row_i32, 4
+  global_store_b128_saddr %45, %value, %output_view
   return
 }

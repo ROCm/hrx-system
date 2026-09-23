@@ -511,3 +511,42 @@ low.kernel.def target<amdgpu.gfx12.generic.core> abi_layout({constant_count = 1,
   s_mov_b64_exec %24
   return
 }
+
+// ====
+
+// Keep a record header's byte offset through narrow scaling and widening.
+kernel.def @address_scaled_record_field() {
+  %unit = index.constant 1 : index
+  %lanes = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lanes, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %origin = index.constant 0 : offset
+  %entries = buffer.view %input[%origin] : buffer -> view<64xi32>
+  %entry_input = view.load %entries[%lane] : view<64xi32> -> i32
+  %entry = scalar.assume %entry_input [range(%entry_input, 0, 255)] : i32
+  %header_words = scalar.constant 16 : i32
+  %word_shift = scalar.constant 2 : i32
+  %word = scalar.addi %entry, %header_words : i32
+  %byte = scalar.shli %word, %word_shift : i32
+  %wide_byte = scalar.extui %byte : i32 to i64
+  %address = index.cast %wide_byte : i64 to offset
+  %record = buffer.view %input[%address] : buffer -> view<1xi32>
+  %value = view.load %record[0] : view<1xi32> -> i32
+  %destination = buffer.view %output[%origin] : buffer -> view<64xi32>
+  view.store %value, %destination[%lane] : i32, view<64xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx12.generic.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @address_scaled_record_field() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %record = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %destination = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %21 = v_lshlrev_b32_src0_inline %lane, 2
+  %entry = global_load_b32_saddr %21, %record
+  %30 = v_lshlrev_b32_src0_inline %entry, 2
+  %value = global_load_b32_saddr %30, %record {offset = 64}
+  global_store_b32_saddr %21, %value, %destination
+  return
+}

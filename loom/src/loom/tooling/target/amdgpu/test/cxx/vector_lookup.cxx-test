@@ -27,9 +27,9 @@ low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direc
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %codebook = resource<hal_binding> {extent = 16, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %91 = v_lshlrev_b32_lit %position, 2
   %95 = v_mov_b32 252645135
-  %97 = global_load_b32_saddr %91, %input
+  %96 = v_lshlrev_b32_src0_inline %position, 2
+  %97 = global_load_b32_saddr %96, %input
   %indices = v_and_b32 %97, %95
   %99 = v_mov_b32 0
   %100 = global_load_b128_saddr %99, %codebook
@@ -44,7 +44,7 @@ low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direc
   %109 = v_lshrrev_b32_src0_inline %108, 1
   %110 = v_or_b32_lit %109, 50462976
   %111 = v_perm_b32 %107, %106, %110
-  global_store_b32_saddr %91, %111, %output
+  global_store_b32_saddr %96, %111, %output
   return
 }
 
@@ -78,9 +78,9 @@ low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direc
   %100 = v_mov_b32 4142587343
   %101 = v_mov_b32 639175937
   %102 = v_mov_b32 1901675829
-  %104 = v_lshlrev_b32_lit %position, 2
   %108 = v_mov_b32 252645135
-  %110 = global_load_b32_saddr %104, %input
+  %109 = v_lshlrev_b32_src0_inline %position, 2
+  %110 = global_load_b32_saddr %109, %input
   %indices = v_and_b32 %110, %108
   %116 = v_and_b32_lit %indices, 117901063
   %117 = v_perm_b32 %100, %99, %116
@@ -89,7 +89,7 @@ low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direc
   %120 = v_lshrrev_b32_src0_inline %119, 1
   %121 = v_or_b32_lit %120, 50462976
   %result = v_perm_b32 %118, %117, %121
-  global_store_b32_saddr %104, %result, %output
+  global_store_b32_saddr %109, %result, %output
   return
 }
 
@@ -122,8 +122,8 @@ low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direc
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %codebook = resource<hal_binding> {extent = 16, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %91 = v_lshlrev_b32_lit %position, 2
-  %96 = global_load_b32_saddr %91, %input
+  %95 = v_lshlrev_b32_src0_inline %position, 2
+  %96 = global_load_b32_saddr %95, %input
   %97 = v_lshrrev_b32_src0_inline %96, 4
   %indices = v_and_b32_lit %97, 252645135
   %99 = v_mov_b32 0
@@ -139,6 +139,6 @@ low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direc
   %109 = v_lshrrev_b32_src0_inline %108, 1
   %110 = v_or_b32_lit %109, 50462976
   %111 = v_perm_b32 %107, %106, %110
-  global_store_b32_saddr %91, %111, %output
+  global_store_b32_saddr %95, %111, %output
   return
 }
