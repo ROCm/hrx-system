@@ -8,21 +8,6 @@ name: CI IREE Bazel Native Artifact Trial
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - ".bazelrc"
-      - ".bazelrc.configured"
-      - ".github/scripts/**"
-      - ".github/workflows/ci_iree_bazel_native_artifact.yml"
-      - "BUILD.bazel"
-      - "MODULE.bazel"
-      - "MODULE.bazel.lock"
-      - "dev.py"
-      - "build_tools/**"
-      - "runtime/**"
-      - "loom/**"
-      - "libamdf/**"
-      - "experimental/xdna/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
