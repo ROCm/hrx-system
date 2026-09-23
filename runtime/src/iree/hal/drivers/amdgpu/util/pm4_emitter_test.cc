@@ -255,7 +255,8 @@ TEST(PM4EmitterTest, BuilderAppendsAcquireMemGfx10Packet) {
   EXPECT_EQ(dwords[4], 0u);
   EXPECT_EQ(dwords[5], 0u);
   EXPECT_EQ(dwords[6], 0x0000000Au);
-  EXPECT_EQ(dwords[7], IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_CNTL_CONSERVATIVE);
+  // GLI_ALL=1 with metadata operations and GL2 writeback/invalidation.
+  EXPECT_EQ(dwords[7], 0x0000c3b1u);
 }
 
 TEST(PM4EmitterTest, BuilderAppendsAcquireMemGfx9Packet) {

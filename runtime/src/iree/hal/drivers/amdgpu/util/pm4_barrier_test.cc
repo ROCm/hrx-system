@@ -29,11 +29,8 @@ constexpr iree_hal_amdgpu_vendor_packet_capability_flags_t
         IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM |
         IREE_HAL_AMDGPU_VENDOR_PACKET_CAPABILITY_PM4_ACQUIRE_MEM_GFX9;
 
-constexpr uint32_t kAgentGcrCntl =
-    IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_GLI_INV_ALL |
-    IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_GLK_INV |
-    IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_GLV_INV |
-    IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_GL1_INV;
+// GLI_ALL=1 plus GLK_INV, GLV_INV and GL1_INV in the GFX10/11 layout.
+constexpr uint32_t kAgentGcrCntl = 0x00000381u;
 
 TEST(PM4BarrierTest, MapsFenceScopesToGfx10GcrControl) {
   EXPECT_EQ(iree_hal_amdgpu_pm4_barrier_gcr_cntl_for_scopes_gfx10(
@@ -46,7 +43,7 @@ TEST(PM4BarrierTest, MapsFenceScopesToGfx10GcrControl) {
 
   EXPECT_EQ(iree_hal_amdgpu_pm4_barrier_gcr_cntl_for_scopes_gfx10(
                 IREE_HSA_FENCE_SCOPE_AGENT, IREE_HSA_FENCE_SCOPE_SYSTEM),
-            IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_CNTL_CONSERVATIVE);
+            0x0000c3b1u);
 }
 
 TEST(PM4BarrierTest, MapsFenceScopesToGfx9CpCoherControl) {
@@ -105,7 +102,7 @@ TEST(PM4BarrierTest, EmitsScopedExecutionBarrier) {
   EXPECT_EQ(dwords[6], 0u);
   EXPECT_EQ(dwords[7], 0u);
   EXPECT_EQ(dwords[8], IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_POLL_INTERVAL);
-  EXPECT_EQ(dwords[9], IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_CNTL_CONSERVATIVE);
+  EXPECT_EQ(dwords[9], 0x0000c3b1u);
 }
 
 TEST(PM4BarrierTest, AddsOnlyRequiredGfx12BypassGl2Operations) {
@@ -162,7 +159,7 @@ TEST(PM4BarrierTest, EmitsConservativeFixupToIbVisibilityBarrier) {
   EXPECT_EQ(dwords[1],
             IREE_HAL_AMDGPU_PM4_EVENT_WRITE_EVENT_TYPE_CS_PARTIAL_FLUSH |
                 IREE_HAL_AMDGPU_PM4_EVENT_WRITE_EVENT_INDEX_CS_PARTIAL_FLUSH);
-  EXPECT_EQ(dwords[9], IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_CNTL_CONSERVATIVE);
+  EXPECT_EQ(dwords[9], 0x0000c3b1u);
 }
 
 TEST(PM4BarrierTest, EmitsGfx9ConservativeFixupToIbVisibilityBarrier) {
