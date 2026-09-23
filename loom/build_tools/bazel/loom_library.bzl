@@ -10,6 +10,10 @@ load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//build_tools/bazel:cc_attrs.bzl", "cc_attrs")
 load("//build_tools/bazel:requirements.bzl", "apply_test_requirements")
 load("//build_tools/bazel:runfiles.bzl", "RUNFILES_PATH_BEGIN", "RUNFILES_PATH_END")
+load(
+    "//loom/requirements:package_policy.bzl",
+    "apply_loom_target_policy",
+)
 load(":loom_binary.bzl", "LoomBinaryInfo", "loom_kernel_binary")
 load(":loom_check.bzl", "loom_check_compile_tests")
 load(
@@ -620,6 +624,13 @@ def _declare_library(
         tags,
         visibility,
         target_compatible_with = []):
+    policy = apply_loom_target_policy({
+        "deps": deps,
+        "tags": tags,
+        "target_compatible_with": target_compatible_with,
+    }, name = name)
+    tags = policy["tags"]
+    target_compatible_with = policy["target_compatible_with"]
     _loom_library(
         name = name,
         srcs = srcs,
@@ -672,6 +683,7 @@ def _declare_library(
             tags = tags + ["manual"],
             testonly = True,
             visibility = ["//visibility:private"],
+            target_compatible_with = target_compatible_with,
         )
 
     if plan_benchmarks:
@@ -838,6 +850,13 @@ def loom_test_module(
     """
     if not srcs:
         fail("%s requires at least one authored test source" % name)
+    policy = apply_loom_target_policy({
+        "deps": deps,
+        "tags": tags,
+        "target_compatible_with": target_compatible_with,
+    }, name = name)
+    tags = policy["tags"]
+    target_compatible_with = policy["target_compatible_with"]
     library_name = name + "_library"
     _loom_library(
         name = library_name,
