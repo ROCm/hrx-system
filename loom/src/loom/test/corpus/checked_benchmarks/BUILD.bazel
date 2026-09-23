@@ -12,12 +12,54 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-_CASES = glob(["*.loom"])
+_PAGED_ATTENTION_CASES = [
+    "cooperative_paged_attention_f32.loom",
+    "grouped_paged_attention_f32.loom",
+    "paged_decode_attention_tile_f32.loom",
+    "paged_kv_block_gather_score_tile_f32.loom",
+    "sparse_token_attention_f32.loom",
+]
+
+_ATTENTION_MATH_CASES = [
+    "online_softmax_tail_attention_tile_f32.loom",
+    "paged_online_softmax_loop_f32.loom",
+    "rope_pair_rotate_tile_f32.loom",
+    "split_kv_online_softmax_combine_f32.loom",
+]
+
+_ROUTING_CASES = [
+    "moe_routed_combine_loop_f32.loom",
+    "routed_row_combine_f32.loom",
+    "top2_routing_expert_gather_f32.loom",
+    "weighted_expert_route_gather_f32.loom",
+    "workgroup_rank_sort_f32_i32.loom",
+]
+
+_QUANTIZATION_CASES = [
+    "packed_s8_fields_f16scale_f32dot.loom",
+    "signed_i8_tile_quantize_f32.loom",
+    "streaming_packed_s8_dot.loom",
+]
+
+_CASES = (
+    _PAGED_ATTENTION_CASES +
+    _ATTENTION_MATH_CASES +
+    _ROUTING_CASES +
+    _QUANTIZATION_CASES
+)
 
 exports_files(_CASES)
 
-loom_module(
-    name = "checked_benchmark_cases",
-    srcs = _CASES,
-    output_format = "bc",
-)
+[
+    loom_module(
+        name = name,
+        srcs = srcs,
+        output_format = "bc",
+    )
+    for name, srcs in [
+        ("paged_attention_cases", _PAGED_ATTENTION_CASES),
+        ("attention_math_cases", _ATTENTION_MATH_CASES),
+        ("routing_cases", _ROUTING_CASES),
+        ("quantization_cases", _QUANTIZATION_CASES),
+    ]
+]

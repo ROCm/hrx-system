@@ -9,16 +9,67 @@
 
 iree_add_all_subdirs()
 
-file(GLOB _GLOB_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS *.loom)
 loom_module(
   NAME
-    checked_benchmark_cases
+    paged_attention_cases
   SRCS
-    "${_GLOB_X_LOOM}"
+    "cooperative_paged_attention_f32.loom"
+    "grouped_paged_attention_f32.loom"
+    "paged_decode_attention_tile_f32.loom"
+    "paged_kv_block_gather_score_tile_f32.loom"
+    "sparse_token_attention_f32.loom"
   MODE
     "merge"
   OUTPUT
-    "checked_benchmark_cases.loombc"
+    "paged_attention_cases.loombc"
+  OUTPUT_FORMAT
+    "bc"
+)
+
+loom_module(
+  NAME
+    attention_math_cases
+  SRCS
+    "online_softmax_tail_attention_tile_f32.loom"
+    "paged_online_softmax_loop_f32.loom"
+    "rope_pair_rotate_tile_f32.loom"
+    "split_kv_online_softmax_combine_f32.loom"
+  MODE
+    "merge"
+  OUTPUT
+    "attention_math_cases.loombc"
+  OUTPUT_FORMAT
+    "bc"
+)
+
+loom_module(
+  NAME
+    routing_cases
+  SRCS
+    "moe_routed_combine_loop_f32.loom"
+    "routed_row_combine_f32.loom"
+    "top2_routing_expert_gather_f32.loom"
+    "weighted_expert_route_gather_f32.loom"
+    "workgroup_rank_sort_f32_i32.loom"
+  MODE
+    "merge"
+  OUTPUT
+    "routing_cases.loombc"
+  OUTPUT_FORMAT
+    "bc"
+)
+
+loom_module(
+  NAME
+    quantization_cases
+  SRCS
+    "packed_s8_fields_f16scale_f32dot.loom"
+    "signed_i8_tile_quantize_f32.loom"
+    "streaming_packed_s8_dot.loom"
+  MODE
+    "merge"
+  OUTPUT
+    "quantization_cases.loombc"
   OUTPUT_FORMAT
     "bc"
 )

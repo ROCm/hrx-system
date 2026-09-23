@@ -63,21 +63,65 @@ loom_test(
     ],
 )
 
-loom_test_module(
-    name = "generic_test_module",
-    srcs = [
-        "//loom/src/loom/test/corpus/authoring:authoring_cases",
-        "//loom/src/loom/test/corpus/authoring/hip:portable_cases",
-        "//loom/src/loom/test/corpus/checked_benchmarks:checked_benchmark_cases",
-        "//loom/src/loom/test/corpus/conformance:conformance_cases",
-        "//loom/src/loom/test/corpus/encoding:numeric_conversion_cases",
-    ] + glob(["generic/*.loom"]),
-)
+_GENERIC_CORPORA = [
+    (
+        "generic_authoring",
+        ["//loom/src/loom/test/corpus/authoring:authoring_cases"],
+    ),
+    (
+        "generic_hip",
+        ["//loom/src/loom/test/corpus/authoring/hip:portable_cases"],
+    ),
+    (
+        "generic_paged_attention_benchmarks",
+        ["//loom/src/loom/test/corpus/checked_benchmarks:paged_attention_cases"],
+    ),
+    (
+        "generic_attention_math_benchmarks",
+        ["//loom/src/loom/test/corpus/checked_benchmarks:attention_math_cases"],
+    ),
+    (
+        "generic_routing_benchmarks",
+        ["//loom/src/loom/test/corpus/checked_benchmarks:routing_cases"],
+    ),
+    (
+        "generic_quantization_benchmarks",
+        ["//loom/src/loom/test/corpus/checked_benchmarks:quantization_cases"],
+    ),
+    (
+        "generic_conformance",
+        ["//loom/src/loom/test/corpus/conformance:conformance_cases"],
+    ),
+    (
+        "generic_numeric_conversion",
+        ["//loom/src/loom/test/corpus/encoding:numeric_conversion_cases"],
+    ),
+    (
+        "generic_target",
+        glob(["generic/*.loom"]),
+    ),
+]
 
-loom_test(
+[
+    loom_test_module(
+        name = name + "_test_module",
+        srcs = srcs,
+    )
+    for name, srcs in _GENERIC_CORPORA
+]
+
+[
+    loom_test(
+        name = name + "_test",
+        execution_profiles = [AMDGPU_HARDWARE_PROFILE],
+        module = ":" + name + "_test_module",
+    )
+    for name, _ in _GENERIC_CORPORA
+]
+
+test_suite(
     name = "generic_test",
-    execution_profiles = [AMDGPU_HARDWARE_PROFILE],
-    module = ":generic_test_module",
+    tests = [":" + name + "_test" for name, _ in _GENERIC_CORPORA],
 )
 
 loom_test_module(
