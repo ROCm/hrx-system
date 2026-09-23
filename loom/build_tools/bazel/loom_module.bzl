@@ -6,7 +6,6 @@
 
 """Rules for linking Loom source and bytecode modules."""
 
-load("//build_tools/bazel:generate.bzl", "iree_generated_files")
 load(
     "//loom/requirements:package_policy.bzl",
     "apply_loom_target_policy",
@@ -14,6 +13,35 @@ load(
 
 _LOOM_LINK_MODES = ["merge", "link"]
 _LOOM_LINK_OUTPUT_FORMATS = ["text", "bc"]
+_LOOM_LINK_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:link_toolchain_type")
+
+def _loom_module_impl(ctx):
+    tool = ctx.toolchains[_LOOM_LINK_TOOLCHAIN_TYPE].tool
+    args = ctx.actions.args()
+    args.add_all([
+        ctx.expand_location(arg, targets = ctx.attr.srcs)
+        for arg in ctx.attr.args
+    ])
+    args.add("--output=%s" % ctx.outputs.output.path)
+    ctx.actions.run(
+        arguments = [args],
+        executable = tool.files_to_run,
+        inputs = depset(ctx.files.srcs),
+        mnemonic = "LoomLink",
+        outputs = [ctx.outputs.output],
+        progress_message = "Linking Loom module %s" % ctx.outputs.output.short_path,
+    )
+    return [DefaultInfo(files = depset([ctx.outputs.output]))]
+
+_loom_module = rule(
+    implementation = _loom_module_impl,
+    attrs = {
+        "args": attr.string_list(),
+        "output": attr.output(mandatory = True),
+        "srcs": attr.label_list(allow_files = True),
+    },
+    toolchains = [_LOOM_LINK_TOOLCHAIN_TYPE],
+)
 
 def loom_module(
         name,
@@ -94,16 +122,10 @@ def loom_module(
         rule_kwargs["visibility"] = visibility
     rule_kwargs = apply_loom_target_policy(rule_kwargs)
 
-    iree_generated_files(
+    _loom_module(
         name = name,
         srcs = srcs + libraries,
-        outs = [output],
+        output = output,
         args = args,
-        output_args = {
-            output.split("/")[-1]: "--output={path}",
-        },
-        tool = "//loom/src/loom/tools/loom-link",
-        mnemonic = "LoomLink",
-        progress_message = "Linking Loom module %s" % output,
         **rule_kwargs
     )

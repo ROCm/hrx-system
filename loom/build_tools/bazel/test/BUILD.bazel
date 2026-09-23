@@ -7,7 +7,7 @@
 # bazel-to-cmake: skip
 
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
-load("//build_tools/bazel:executable.bzl", "iree_executable_test")
+load("//build_tools/bazel:executable.bzl", "iree_executable_alias", "iree_executable_test")
 load(
     "//loom/build_tools/bazel:defs.bzl",
     "loom_amdgpu_target_profile",
@@ -18,6 +18,7 @@ load(
     "loom_target_profile",
     "loom_test",
     "loom_test_module",
+    "loom_tools_toolchains",
 )
 load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test")
 load(
@@ -183,6 +184,23 @@ loom_module(
     name = "linked_module",
     srcs = ["link_checks.loom"],
     libraries = ["link_kernels.loom"],
+)
+
+iree_executable_alias(
+    name = "module_link_tool",
+    src = "//loom/src/loom/tools/loom-link",
+    tags = ["manual"],
+)
+
+loom_tools_toolchains(
+    name = "module_tools",
+    benchmark_tool = "//loom/src/loom/tools/iree-benchmark-loom",
+    compile_tool = "//loom/src/loom/tools/loom-compile",
+    format_tool = "//loom/src/loom/tools/loom-format",
+    link_tool = ":module_link_tool",
+    lint_tool = "//loom/py/loom/tools:loom-lint",
+    tags = ["manual"],
+    test_tool = "//loom/src/loom/tools/iree-test-loom",
 )
 
 iree_executable_test(

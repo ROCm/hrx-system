@@ -4,8 +4,6 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:executable.bzl", "iree_executable_test")
-load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
 load(
     "//loom/build_tools/amdgpu:descriptor_sets.bzl",
     "loom_amdgpu_descriptor_set_compatible_with",
@@ -16,8 +14,12 @@ load(
     "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY",
 )
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
-load("//loom/build_tools/bazel:defs.bzl", "loom_module", "loom_test")
-load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE")
+load("//loom/build_tools/bazel:defs.bzl", "loom_test", "loom_test_module")
+load(
+    "//loom/target/amdgpu:execution_profiles.bzl",
+    "AMDGPU_ACCESS_PROFILE",
+    "AMDGPU_HARDWARE_PROFILE",
+)
 
 package(
     default_visibility = ["//visibility:public"],
@@ -30,31 +32,17 @@ exports_files([
     "gfx11/schedule_scopes.loom",
 ])
 
-_EXECUTION_TAGS = [
-    "iree-run-requirement=runtime.resource.amd_gpu",
-    "requires-gpu-amd",
-    "runtime-resource=amd-gpu",
-]
-
-_GENERIC_COMPATIBLE_WITH = loom_config_compatible_with([
-    "//loom/config/execute:amdgpu_hal",
-])
-
 _GFX11_GENERIC_REPRESENTATION = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.gfx11.generic.core"]
 
 _GFX11_ARTIFACT_COMPATIBLE_WITH = loom_amdgpu_descriptor_set_compatible_with(
     _GFX11_GENERIC_REPRESENTATION,
 )
 
-_GFX11_COMPATIBLE_WITH = (
-    _GENERIC_COMPATIBLE_WITH +
-    loom_amdgpu_iree_hal_representation_compatible_with(
-        _GFX11_GENERIC_REPRESENTATION,
-    )
+_GFX11_COMPATIBLE_WITH = loom_amdgpu_iree_hal_representation_compatible_with(
+    _GFX11_GENERIC_REPRESENTATION,
 )
 
 _CDNA3_COMPATIBLE_WITH = loom_config_compatible_with([
-    "//loom/config/execute:amdgpu_hal",
     "//loom/config/target/amdgpu:iree_hal_descriptor_set_cdna3_core",
 ])
 
@@ -75,7 +63,7 @@ loom_test(
     ],
 )
 
-loom_module(
+loom_test_module(
     name = "generic_test_module",
     srcs = [
         "//loom/src/loom/test/corpus/authoring:authoring_cases",
@@ -84,23 +72,15 @@ loom_module(
         "//loom/src/loom/test/corpus/conformance:conformance_cases",
         "//loom/src/loom/test/corpus/encoding:numeric_conversion_cases",
     ] + glob(["generic/*.loom"]),
-    output_format = "bc",
 )
 
-iree_executable_test(
+loom_test(
     name = "generic_test",
-    src = "//loom/src/loom/tools/iree-test-loom",
-    args = [
-        "$(rootpath :generic_test_module)",
-        "--device=amdgpu",
-    ],
-    data = [":generic_test_module"],
-    resource_group = GPU_DEVICE_RESOURCE_GROUP,
-    tags = _EXECUTION_TAGS,
-    target_compatible_with = _GENERIC_COMPATIBLE_WITH,
+    execution_profiles = [AMDGPU_HARDWARE_PROFILE],
+    module = ":generic_test_module",
 )
 
-loom_module(
+loom_test_module(
     name = "gfx11_test_module",
     srcs = [
         "//loom/binding/c/benchmark/kernels:attention/prefill_f16_wmma_amdgpu.loom",
@@ -108,130 +88,74 @@ loom_module(
         "//loom/binding/c/benchmark/kernels:synthetic/paired_scoped_matrix_helpers.loom",
         "//loom/src/loom/test/corpus/authoring/hip:gfx11_cases",
     ] + glob(["gfx11/*.loom"]),
-    output_format = "bc",
     target_compatible_with = _GFX11_ARTIFACT_COMPATIBLE_WITH,
 )
 
-iree_executable_test(
+loom_test(
     name = "gfx11_test",
-    src = "//loom/src/loom/tools/iree-test-loom",
-    args = [
-        "$(rootpath :gfx11_test_module)",
-        "--device=amdgpu",
-        "--config=benchmark.pair_count=16",
-    ],
-    data = [":gfx11_test_module"],
-    resource_group = GPU_DEVICE_RESOURCE_GROUP,
-    tags = _EXECUTION_TAGS,
+    configs = {"benchmark.pair_count": "16"},
+    execution_profiles = [AMDGPU_HARDWARE_PROFILE],
+    module = ":gfx11_test_module",
     target_compatible_with = _GFX11_COMPATIBLE_WITH,
 )
 
-loom_module(
+loom_test_module(
     name = "gfx11_loop_entry_module",
     srcs = [
         "gfx11/loop_entry.loom",
         "gfx11/loop_entry_wave32.loom",
     ],
-    output_format = "bc",
     target_compatible_with = _GFX11_ARTIFACT_COMPATIBLE_WITH,
 )
 
-iree_executable_test(
-    name = "loop_count_access_test",
-    src = "//loom/src/loom/tools/iree-test-loom",
-    args = [
-        "$(rootpath //loom/src/loom/test/corpus/conformance:loop_count.loom)",
-        "--device=amdgpu",
-        "--sanitizer=access",
-    ],
-    data = ["//loom/src/loom/test/corpus/conformance:loop_count.loom"],
-    resource_group = GPU_DEVICE_RESOURCE_GROUP,
-    tags = _EXECUTION_TAGS + ["notsan"],
-    target_compatible_with = _GENERIC_COMPATIBLE_WITH,
-)
-
-iree_executable_test(
+loom_test(
     name = "gfx11_loop_entry_access_test",
-    src = "//loom/src/loom/tools/iree-test-loom",
-    args = [
-        "$(rootpath :gfx11_loop_entry_module)",
-        "--device=amdgpu",
-        "--sanitizer=access",
-    ],
-    data = [":gfx11_loop_entry_module"],
-    resource_group = GPU_DEVICE_RESOURCE_GROUP,
-    tags = _EXECUTION_TAGS + ["notsan"],
+    execution_profiles = [AMDGPU_ACCESS_PROFILE],
+    module = ":gfx11_loop_entry_module",
     target_compatible_with = _GFX11_COMPATIBLE_WITH,
 )
 
-loom_module(
+loom_test_module(
     name = "gfx1100_test_module",
     srcs = glob(["gfx1100/*.loom"]),
-    output_format = "bc",
 )
 
-iree_executable_test(
+loom_test(
     name = "gfx1100_test",
-    src = "//loom/src/loom/tools/iree-test-loom",
-    args = [
-        "$(rootpath :gfx1100_test_module)",
-        "--device=amdgpu",
-    ],
-    data = [":gfx1100_test_module"],
-    resource_group = GPU_DEVICE_RESOURCE_GROUP,
-    tags = _EXECUTION_TAGS + ["manual"],
-    target_compatible_with = _GENERIC_COMPATIBLE_WITH,
+    execution_profiles = [AMDGPU_HARDWARE_PROFILE],
+    module = ":gfx1100_test_module",
+    tags = ["manual"],
 )
 
-loom_module(
+loom_test_module(
     name = "gfx9_4_test_module",
     srcs = glob(["gfx9_4/*.loom"]),
-    output_format = "bc",
 )
 
-iree_executable_test(
+loom_test(
     name = "gfx9_4_test",
-    src = "//loom/src/loom/tools/iree-test-loom",
-    args = [
-        "$(rootpath :gfx9_4_test_module)",
-        "--device=amdgpu",
-    ],
-    data = [":gfx9_4_test_module"],
-    resource_group = GPU_DEVICE_RESOURCE_GROUP,
-    tags = _EXECUTION_TAGS + ["manual"],
-    target_compatible_with = _GENERIC_COMPATIBLE_WITH,
+    execution_profiles = [AMDGPU_HARDWARE_PROFILE],
+    module = ":gfx9_4_test_module",
+    tags = ["manual"],
 )
 
-iree_executable_test(
+loom_test(
     name = "gfx9_4_async_gather_test",
-    src = "//loom/src/loom/tools/iree-test-loom",
-    args = [
-        "$(rootpath gfx9_4/gfx9_4_async_gather.loom)",
-        "--device=amdgpu",
-    ],
-    data = ["gfx9_4/gfx9_4_async_gather.loom"],
-    resource_group = GPU_DEVICE_RESOURCE_GROUP,
-    tags = _EXECUTION_TAGS,
+    srcs = ["gfx9_4/gfx9_4_async_gather.loom"],
+    execution_profiles = [AMDGPU_HARDWARE_PROFILE],
     target_compatible_with = _CDNA3_COMPATIBLE_WITH,
 )
 
-loom_module(
+loom_test_module(
     name = "gfx1250_test_module",
     srcs = [
         "//loom/src/loom/test/corpus/authoring/hip:gfx1250_cases",
     ],
-    output_format = "bc",
 )
 
-iree_executable_test(
+loom_test(
     name = "gfx1250_test",
-    src = "//loom/src/loom/tools/iree-test-loom",
-    args = [
-        "$(rootpath :gfx1250_test_module)",
-        "--device=amdgpu",
-    ],
-    data = [":gfx1250_test_module"],
-    resource_group = GPU_DEVICE_RESOURCE_GROUP,
-    tags = _EXECUTION_TAGS + ["manual"],
-    target_compatible_with = _GENERIC_COMPATIBLE_WITH,
+    execution_profiles = [AMDGPU_HARDWARE_PROFILE],
+    module = ":gfx1250_test_module",
+    tags = ["manual"],
 )

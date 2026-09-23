@@ -62,6 +62,24 @@ def _expect_no_arg_with_prefix_and_suffix(env, args, prefix, suffix):
         if arg.startswith(prefix) and arg.endswith(suffix):
             env.fail("unexpected argument with prefix %r and suffix %r in %r" % (prefix, suffix, args))
 
+def _test_module_uses_supplied_linker(name, **kwargs):
+    analysis_test(
+        name = name,
+        config_settings = {
+            "//command_line_option:extra_toolchains": [
+                "//loom/build_tools/bazel/test:module_tools_link_toolchain",
+            ],
+        },
+        impl = _test_module_uses_supplied_linker_impl,
+        target = ":linked_module",
+        **kwargs
+    )
+
+def _test_module_uses_supplied_linker_impl(env, target):
+    action = _find_action(env, target[TestingAspectInfo].actions, "LoomLink")
+    if not action.argv[0].endswith("/module_link_tool"):
+        env.fail("module bypassed its supplied link toolchain: %s" % action.argv[0])
+
 def _test_library_keeps_dependency_module_separate(name, **kwargs):
     analysis_test(
         name = name,
@@ -418,6 +436,7 @@ def loom_library_rules_test_suite(name):
             _test_generated_kernel_binary_is_testonly,
             _test_grouped_execution_root_sources,
             _test_library_keeps_dependency_module_separate,
+            _test_module_uses_supplied_linker,
             _test_redundant_direct_dependency_is_not_transitive,
             _test_resource_profile_preserves_direct_execution,
             _test_transitive_audit_universe_is_separate,

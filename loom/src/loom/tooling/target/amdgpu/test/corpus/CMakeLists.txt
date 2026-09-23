@@ -86,7 +86,7 @@ endif()
 
 file(GLOB _GLOB_GENERIC_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS generic/*.loom)
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_module(
+loom_test_module(
   NAME
     generic_test_module
   SRCS
@@ -96,38 +96,38 @@ loom_module(
     "loom::test::corpus::conformance::conformance_cases"
     "loom::test::corpus::encoding::numeric_conversion_cases"
     "${_GLOB_GENERIC_X_LOOM}"
-  MODE
-    "merge"
-  OUTPUT
-    "generic_test_module.loombc"
-  OUTPUT_FORMAT
-    "bc"
 )
 endif()
 
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
+loom_execution_test(
   NAME
-    "generic_test"
-  ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/generic_test_module.loombc}}"
+    generic_test_execute_amdgpu_hardware_test
+  MODULE
+    "::generic_test_module"
+  RUNNER_ARGS
     "--device=amdgpu"
-  SRC
-    loom::tools::iree-test-loom
-  DATA
-    "${CMAKE_CURRENT_BINARY_DIR}/generic_test_module.loombc"
   LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
     "iree-run-requirement=runtime.resource.amd_gpu"
-    "requires-gpu-amd"
     "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
   RESOURCE_GROUP
-    gpu-device
+    "gpu-device"
 )
+endif()
 endif()
 
 file(GLOB _GLOB_GFX11_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS gfx11/*.loom)
 if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_module(
+loom_test_module(
   NAME
     gfx11_test_module
   SRCS
@@ -136,224 +136,217 @@ loom_module(
     "${PROJECT_SOURCE_DIR}/loom/binding/c/benchmark/kernels/synthetic/paired_scoped_matrix_helpers.loom"
     "loom::test::corpus::authoring::hip::gfx11_cases"
     "${_GLOB_GFX11_X_LOOM}"
-  MODE
-    "merge"
-  OUTPUT
-    "gfx11_test_module.loombc"
-  OUTPUT_FORMAT
-    "bc"
 )
 endif()
 
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU AND (LOOM_TARGET_AMDGPU_IREE_HAL_DESCRIPTOR_SET_GFX11_GENERIC_CORE OR LOOM_TARGET_AMDGPU_IREE_HAL_DESCRIPTOR_SET_RDNA3_CORE OR LOOM_TARGET_AMDGPU_IREE_HAL_DESCRIPTOR_SET_RDNA3_5_CORE))
-iree_native_test(
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND (LOOM_TARGET_AMDGPU_IREE_HAL_DESCRIPTOR_SET_GFX11_GENERIC_CORE OR LOOM_TARGET_AMDGPU_IREE_HAL_DESCRIPTOR_SET_RDNA3_CORE OR LOOM_TARGET_AMDGPU_IREE_HAL_DESCRIPTOR_SET_RDNA3_5_CORE))
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
   NAME
-    "gfx11_test"
-  ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/gfx11_test_module.loombc}}"
+    gfx11_test_execute_amdgpu_hardware_test
+  MODULE
+    "::gfx11_test_module"
+  RUNNER_ARGS
     "--device=amdgpu"
     "--config=benchmark.pair_count=16"
-  SRC
-    loom::tools::iree-test-loom
-  DATA
-    "${CMAKE_CURRENT_BINARY_DIR}/gfx11_test_module.loombc"
   LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
     "iree-run-requirement=runtime.resource.amd_gpu"
-    "requires-gpu-amd"
     "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
   RESOURCE_GROUP
-    gpu-device
+    "gpu-device"
 )
+endif()
 endif()
 
 if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_module(
+loom_test_module(
   NAME
     gfx11_loop_entry_module
   SRCS
     "gfx11/loop_entry.loom"
     "gfx11/loop_entry_wave32.loom"
-  MODE
-    "merge"
-  OUTPUT
-    "gfx11_loop_entry_module.loombc"
-  OUTPUT_FORMAT
-    "bc"
 )
 endif()
 
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND (LOOM_TARGET_AMDGPU_IREE_HAL_DESCRIPTOR_SET_GFX11_GENERIC_CORE OR LOOM_TARGET_AMDGPU_IREE_HAL_DESCRIPTOR_SET_RDNA3_CORE OR LOOM_TARGET_AMDGPU_IREE_HAL_DESCRIPTOR_SET_RDNA3_5_CORE))
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
+loom_execution_test(
   NAME
-    "loop_count_access_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/conformance/loop_count.loom}}"
+    gfx11_loop_entry_access_test_execute_amdgpu_access_test
+  MODULE
+    "::gfx11_loop_entry_module"
+  RUNNER_ARGS
     "--device=amdgpu"
     "--sanitizer=access"
-  SRC
-    loom::tools::iree-test-loom
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/conformance/loop_count.loom"
   LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
     "notsan"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
   RESOURCE_GROUP
-    gpu-device
+    "gpu-device"
 )
 endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU AND (LOOM_TARGET_AMDGPU_IREE_HAL_DESCRIPTOR_SET_GFX11_GENERIC_CORE OR LOOM_TARGET_AMDGPU_IREE_HAL_DESCRIPTOR_SET_RDNA3_CORE OR LOOM_TARGET_AMDGPU_IREE_HAL_DESCRIPTOR_SET_RDNA3_5_CORE))
-iree_native_test(
-  NAME
-    "gfx11_loop_entry_access_test"
-  ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/gfx11_loop_entry_module.loombc}}"
-    "--device=amdgpu"
-    "--sanitizer=access"
-  SRC
-    loom::tools::iree-test-loom
-  DATA
-    "${CMAKE_CURRENT_BINARY_DIR}/gfx11_loop_entry_module.loombc"
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-    "notsan"
-  RESOURCE_GROUP
-    gpu-device
-)
 endif()
 
 file(GLOB _GLOB_GFX1100_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS gfx1100/*.loom)
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_module(
+loom_test_module(
   NAME
     gfx1100_test_module
   SRCS
     "${_GLOB_GFX1100_X_LOOM}"
-  MODE
-    "merge"
-  OUTPUT
-    "gfx1100_test_module.loombc"
-  OUTPUT_FORMAT
-    "bc"
 )
 endif()
 
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
+loom_execution_test(
   NAME
-    "gfx1100_test"
-  ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/gfx1100_test_module.loombc}}"
+    gfx1100_test_execute_amdgpu_hardware_test
+  MODULE
+    "::gfx1100_test_module"
+  RUNNER_ARGS
     "--device=amdgpu"
-  SRC
-    loom::tools::iree-test-loom
-  DATA
-    "${CMAKE_CURRENT_BINARY_DIR}/gfx1100_test_module.loombc"
   LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
     "manual"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
   RESOURCE_GROUP
-    gpu-device
+    "gpu-device"
 )
+endif()
 endif()
 
 file(GLOB _GLOB_GFX9_4_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS gfx9_4/*.loom)
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_module(
+loom_test_module(
   NAME
     gfx9_4_test_module
   SRCS
     "${_GLOB_GFX9_4_X_LOOM}"
-  MODE
-    "merge"
-  OUTPUT
-    "gfx9_4_test_module.loombc"
-  OUTPUT_FORMAT
-    "bc"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
-  NAME
-    "gfx9_4_test"
-  ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/gfx9_4_test_module.loombc}}"
-    "--device=amdgpu"
-  SRC
-    loom::tools::iree-test-loom
-  DATA
-    "${CMAKE_CURRENT_BINARY_DIR}/gfx9_4_test_module.loombc"
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-    "manual"
-  RESOURCE_GROUP
-    gpu-device
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_AMDGPU_IREE_HAL_DESCRIPTOR_SET_CDNA3_CORE)
-iree_native_test(
-  NAME
-    "gfx9_4_async_gather_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/corpus/gfx9_4/gfx9_4_async_gather.loom}}"
-    "--device=amdgpu"
-  SRC
-    loom::tools::iree-test-loom
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/corpus/gfx9_4/gfx9_4_async_gather.loom"
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-  RESOURCE_GROUP
-    gpu-device
 )
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-loom_module(
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    gfx9_4_test_execute_amdgpu_hardware_test
+  MODULE
+    "::gfx9_4_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+  LABELS
+    "manual"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+endif()
+
+if(LOOM_TARGET_AMDGPU_IREE_HAL_DESCRIPTOR_SET_CDNA3_CORE AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+loom_test_module(
+  NAME
+    gfx9_4_async_gather_test_module
+  SRCS
+    "gfx9_4/gfx9_4_async_gather.loom"
+)
+endif()
+
+if(LOOM_TARGET_AMDGPU_IREE_HAL_DESCRIPTOR_SET_CDNA3_CORE AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    gfx9_4_async_gather_test_execute_amdgpu_hardware_test
+  MODULE
+    "::gfx9_4_async_gather_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+loom_test_module(
   NAME
     gfx1250_test_module
   SRCS
     "loom::test::corpus::authoring::hip::gfx1250_cases"
-  MODE
-    "merge"
-  OUTPUT
-    "gfx1250_test_module.loombc"
-  OUTPUT_FORMAT
-    "bc"
 )
 endif()
 
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
+loom_execution_test(
   NAME
-    "gfx1250_test"
-  ARGS
-    "{{${CMAKE_CURRENT_BINARY_DIR}/gfx1250_test_module.loombc}}"
+    gfx1250_test_execute_amdgpu_hardware_test
+  MODULE
+    "::gfx1250_test_module"
+  RUNNER_ARGS
     "--device=amdgpu"
-  SRC
-    loom::tools::iree-test-loom
-  DATA
-    "${CMAKE_CURRENT_BINARY_DIR}/gfx1250_test_module.loombc"
   LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
     "manual"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
   RESOURCE_GROUP
-    gpu-device
+    "gpu-device"
 )
+endif()
 endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
