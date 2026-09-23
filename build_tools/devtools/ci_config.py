@@ -322,7 +322,9 @@ NATIVE_ARTIFACT_TOOL_TARGETS = (
     "//loom/src/loom/tools/iree-test-loom:iree-test-loom",
     "//loom/src/loom/tools/iree-benchmark-loom:iree-benchmark-loom",
 )
+NATIVE_ARTIFACT_IMPORTED_TEST_TAG = "iree-native-artifact-imported"
 NATIVE_ARTIFACT_RESOURCE_TEST_TAGS = (
+    AMDGPU_BUILD_REQUIREMENT_TAG,
     AMDGPU_RUN_REQUIREMENT_TAG,
     "iree-run-requirement=libamdf.resource.amd_gpu",
     XDNA_RUN_REQUIREMENT_TAG,
@@ -350,24 +352,13 @@ NATIVE_ARTIFACT_PRODUCER_OPTIONS = NATIVE_ARTIFACT_PROFILE_OPTIONS + (
 NATIVE_ARTIFACT_CONSUMER_OPTIONS = NATIVE_ARTIFACT_PROFILE_OPTIONS + (
     "--build_tests_only",
 )
-NATIVE_ARTIFACT_AMDGPU_TEST_NAMES = (
-    "native_loom_binding_c_example_cxx_jit_amdgpu_test",
-    "native_runtime_src_iree_hal_drivers_amdgpu_util_signal_pool_test",
-    "native_libamdf_cts_gpu_gpu_extension_dynamic_instance",
-)
 NATIVE_ARTIFACT_AMDGPU_RESOURCES = AMDGPU_RESOURCES + ("libamdf.resource.amd_gpu",)
 NATIVE_ARTIFACT_TOOLCHAIN_NAMES = tuple(
     f"artifact_{role}_toolchain"
     for role in ("benchmark", "compile", "format", "link", "lint", "test")
 )
-NATIVE_ARTIFACT_LOOM_AMDGPU_TEST_TARGETS = (
-    "//loom/...",
-    "-//loom/src/loom/tooling/target/amdgpu/test/cxx/...",
+NATIVE_ARTIFACT_AMDGPU_TEST_TARGETS = ("//loom/...",)
+NATIVE_ARTIFACT_AMDGPU_TEST_TAGS = (
+    NATIVE_ARTIFACT_IMPORTED_TEST_TAG,
+    "loom-target-family=amdgpu",
 )
-NATIVE_ARTIFACT_CXX_AMDGPU_TEST_TARGETS = (
-    "//loom/src/loom/tooling/target/amdgpu/test/cxx:"
-    "aiter_swiglu_f16_test_execute_amdgpu_access_test",
-    "//loom/src/loom/tooling/target/amdgpu/test/cxx:"
-    "aiter_swiglu_f16_test_execute_amdgpu_test",
-)
-NATIVE_ARTIFACT_LOOM_AMDGPU_TEST_TAGS = ("loom-target-family=amdgpu",)

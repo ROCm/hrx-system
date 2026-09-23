@@ -146,6 +146,7 @@ class NativeTestArtifactTest(unittest.TestCase):
                 build_events_paths=[build_events],
                 staging_root=staging_root,
                 package_path=Path("artifacts/ci/fixture"),
+                imported_test_tag="artifact-imported",
                 profile="asan",
                 revision="a" * 40,
                 llvm_dwp=fake_dwp,
@@ -182,6 +183,9 @@ class NativeTestArtifactTest(unittest.TestCase):
             self.assertIn("files/execroot/bazel-out/bin/pkg/test.dwp", generated_build)
             self.assertIn("__IREE_BAZEL_RUNFILE_PATH_BEGIN__", generated_build)
             self.assertIn('"@platforms//os:linux"', generated_build)
+            self.assertIn('"artifact-imported"', generated_build)
+            self.assertIn('"artifact-imported-source=//pkg:test"', generated_build)
+            self.assertIn('"artifact-imported-source=//pkg/..."', generated_build)
             self.assertEqual(1, result["target_count"])
             self.assertEqual(1, result["debug_alias_count"])
             self.assertEqual("asan", result["profile"])
@@ -206,6 +210,7 @@ class NativeTestArtifactTest(unittest.TestCase):
                 json.dumps(
                     {
                         "revision": revision,
+                        "imported_test_tag": "artifact-imported",
                         "profile": "asan",
                         "target_count": 12,
                         "test_count": 10,
@@ -217,6 +222,7 @@ class NativeTestArtifactTest(unittest.TestCase):
 
             result = native_test_artifact.verify_artifact(
                 package_directory=package,
+                expected_imported_test_tag="artifact-imported",
                 expected_profile="asan",
                 expected_revision=revision,
                 checkout_revision=revision,
@@ -225,11 +231,13 @@ class NativeTestArtifactTest(unittest.TestCase):
             self.assertEqual(12, result["target_count"])
             self.assertEqual(10, result["test_count"])
             self.assertEqual(2, result["tool_count"])
+            self.assertEqual("artifact-imported", result["imported_test_tag"])
             self.assertEqual("asan", result["profile"])
 
             with self.assertRaisesRegex(ValueError, "checkout revision"):
                 native_test_artifact.verify_artifact(
                     package_directory=package,
+                    expected_imported_test_tag="artifact-imported",
                     expected_profile="asan",
                     expected_revision=revision,
                     checkout_revision="b" * 40,
@@ -237,6 +245,7 @@ class NativeTestArtifactTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "artifact revision"):
                 native_test_artifact.verify_artifact(
                     package_directory=package,
+                    expected_imported_test_tag="artifact-imported",
                     expected_profile="asan",
                     expected_revision="b" * 40,
                     checkout_revision="b" * 40,
@@ -244,7 +253,16 @@ class NativeTestArtifactTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "artifact profile"):
                 native_test_artifact.verify_artifact(
                     package_directory=package,
+                    expected_imported_test_tag="artifact-imported",
                     expected_profile="ordinary",
+                    expected_revision=revision,
+                    checkout_revision=revision,
+                )
+            with self.assertRaisesRegex(ValueError, "artifact imported test tag"):
+                native_test_artifact.verify_artifact(
+                    package_directory=package,
+                    expected_imported_test_tag="other-import",
+                    expected_profile="asan",
                     expected_revision=revision,
                     checkout_revision=revision,
                 )

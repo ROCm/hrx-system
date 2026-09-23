@@ -773,6 +773,7 @@ class CiTest(unittest.TestCase):
         package_step = next(
             step for step in steps if step.name == "Package native tests"
         )
+        self.assertIn("--imported-test-tag", package_step.argv)
         self.assertIn("ordinary", package_step.argv)
         self.assertIn(
             profiles["ordinary"],
@@ -793,48 +794,59 @@ class CiTest(unittest.TestCase):
             asan_package_step.argv,
         )
 
-    def test_native_artifact_consumer_builds_only_selected_tests(self):
+    def test_native_artifact_consumer_runs_one_filtered_test_graph(self):
         artifact_root = ci.REPO_ROOT / "artifacts/ci/fixture"
-        with mock.patch.dict(
-            ci.os.environ,
-            {"HRX_ROCM_ROOT": "/tmp/rocm-root"},
-            clear=True,
+        with (
+            mock.patch.dict(
+                ci.os.environ,
+                {"HRX_ROCM_ROOT": "/tmp/rocm-root"},
+                clear=True,
+            ),
+            mock.patch.multiple(
+                ci_config,
+                AMDGPU_XFAIL_TARGETS=("-//authored:skip", "-//nested/..."),
+                NATIVE_ARTIFACT_AMDGPU_TEST_TARGETS=("//authored/...",),
+                NATIVE_ARTIFACT_AMDGPU_TEST_TAGS=(
+                    "artifact-imported",
+                    "authored-amdgpu",
+                ),
+                NATIVE_ARTIFACT_IMPORTED_TEST_TAG="artifact-imported",
+            ),
         ):
             steps = ci.native_artifact_amdgpu_steps(
-                artifact_root, "gfx120X-all", "a" * 40, None
+                artifact_root, "gfx-test", "a" * 40, None
             )
 
         test_steps = [step for step in steps if step.argv[2:4] == ("bazel", "test")]
-        self.assertEqual(len(test_steps), 3)
-        for step in test_steps:
-            self.assertIn("--build_tests_only", step.argv)
-            self.assertNotIn("--config=asan", step.argv)
-            self.assertTrue(
-                any(option.startswith("--extra_toolchains=") for option in step.argv)
+        self.assertEqual(len(test_steps), 1)
+        test_step = test_steps[0]
+        self.assertIn("--build_tests_only", test_step.argv)
+        self.assertNotIn("--config=asan", test_step.argv)
+        self.assertTrue(
+            any(option.startswith("--extra_toolchains=") for option in test_step.argv)
+        )
+        self.assertIn("//artifacts/ci/fixture:native_tests", test_step.argv)
+        self.assertIn("//authored/...", test_step.argv)
+        self.assertIn("-//authored:skip", test_step.argv)
+        self.assertIn("-//nested/...", test_step.argv)
+        test_tag_filters = next(
+            argument
+            for argument in test_step.argv
+            if argument.startswith("--test_tag_filters=")
+        )
+        self.assertTrue(
+            test_tag_filters.startswith(
+                "--test_tag_filters=artifact-imported,authored-amdgpu"
             )
+        )
+        self.assertIn("-artifact-imported-source=//authored:skip", test_tag_filters)
+        self.assertIn("-artifact-imported-source=//nested/...", test_tag_filters)
 
         verify_step = next(
             step for step in steps if step.name == "Verify native test artifact"
         )
         self.assertIn("ordinary", verify_step.argv)
-
-        authored_step = next(
-            step
-            for step in test_steps
-            if step.name == "Test authored Loom AMDGPU coverage"
-        )
-        self.assertIn("//loom/...", authored_step.argv)
-        self.assertIn(
-            "-//loom/src/loom/tooling/target/amdgpu/test/cxx/...",
-            authored_step.argv,
-        )
-        cxx_step = next(
-            step
-            for step in test_steps
-            if step.name == "Test representative CXX AMDGPU import"
-        )
-        for target in ci_config.NATIVE_ARTIFACT_CXX_AMDGPU_TEST_TARGETS:
-            self.assertIn(target, cxx_step.argv)
+        self.assertIn("--imported-test-tag", verify_step.argv)
 
         asan_steps = ci.native_artifact_amdgpu_steps(
             artifact_root, "gfx120X-all", "a" * 40, "asan"

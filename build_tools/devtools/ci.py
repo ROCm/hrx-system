@@ -760,6 +760,8 @@ def native_artifact_producer_steps(
         os.fspath(archive_path),
         "--package-path",
         package_path,
+        "--imported-test-tag",
+        ci_config.NATIVE_ARTIFACT_IMPORTED_TEST_TAG,
         "--profile",
         profile,
         "--revision",
@@ -856,6 +858,25 @@ def native_artifact_package_label(package_directory: Path) -> str:
     return f"//{package_path.as_posix()}"
 
 
+def native_artifact_xfail_tag_filters(
+    xfail_targets: tuple[str, ...],
+) -> tuple[str, ...]:
+    filters = []
+    for target in xfail_targets:
+        source_pattern = target[1:]
+        if not target.startswith("-//") or not (
+            ":" in source_pattern or source_pattern.endswith("/...")
+        ):
+            raise ValueError(
+                "native artifact xfails must use canonical main-repository patterns: "
+                + target
+            )
+        filters.append(
+            f"-{ci_config.NATIVE_ARTIFACT_IMPORTED_TEST_TAG}-source={source_pattern}"
+        )
+    return tuple(filters)
+
+
 def native_artifact_amdgpu_steps(
     package_directory: Path,
     target_selector: str,
@@ -874,6 +895,11 @@ def native_artifact_amdgpu_steps(
         + amdgpu_bazel_options(target_selector)
         + (artifact_toolchains,)
     )
+    xfail_targets = (
+        ci_config.AMDGPU_SANITIZERS_XFAIL_TARGETS
+        if config is not None
+        else ci_config.AMDGPU_XFAIL_TARGETS
+    ) + ci_config.amdgpu_bazel_xfail_targets(target_selector)
     test_environment = amdgpu_libhsa_test_env()
     return [
         CiStep(
@@ -883,6 +909,8 @@ def native_artifact_amdgpu_steps(
                 "verify",
                 "--package",
                 os.fspath(package_directory),
+                "--imported-test-tag",
+                ci_config.NATIVE_ARTIFACT_IMPORTED_TEST_TAG,
                 "--profile",
                 profile,
                 "--revision",
@@ -898,30 +926,15 @@ def native_artifact_amdgpu_steps(
             extra_options=configure_options,
         ),
         bazel_test_step(
-            f"Test representative {config_name}native paths",
-            tuple(
-                f"{package_label}:{name}"
-                for name in ci_config.NATIVE_ARTIFACT_AMDGPU_TEST_NAMES
+            f"Test {config_name}AMDGPU coverage",
+            (f"{package_label}:native_tests",)
+            + ci_config.NATIVE_ARTIFACT_AMDGPU_TEST_TARGETS
+            + xfail_targets,
+            config=config,
+            test_tag_filters=(
+                ci_config.NATIVE_ARTIFACT_AMDGPU_TEST_TAGS
+                + native_artifact_xfail_tag_filters(xfail_targets)
             ),
-            config=config,
-            available_resources=ci_config.NATIVE_ARTIFACT_AMDGPU_RESOURCES,
-            test_env=test_environment,
-            bazel_options=bazel_options,
-        ),
-        bazel_test_step(
-            "Test authored Loom AMDGPU coverage",
-            ci_config.NATIVE_ARTIFACT_LOOM_AMDGPU_TEST_TARGETS,
-            config=config,
-            test_tag_filters=ci_config.NATIVE_ARTIFACT_LOOM_AMDGPU_TEST_TAGS,
-            available_resources=ci_config.NATIVE_ARTIFACT_AMDGPU_RESOURCES,
-            test_env=test_environment,
-            bazel_options=bazel_options,
-        ),
-        bazel_test_step(
-            "Test representative CXX AMDGPU import",
-            ci_config.NATIVE_ARTIFACT_CXX_AMDGPU_TEST_TARGETS,
-            config=config,
-            test_tag_filters=ci_config.NATIVE_ARTIFACT_LOOM_AMDGPU_TEST_TAGS,
             available_resources=ci_config.NATIVE_ARTIFACT_AMDGPU_RESOURCES,
             test_env=test_environment,
             bazel_options=bazel_options,
