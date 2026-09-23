@@ -77,6 +77,7 @@ http_archive(
         "//build_tools/third_party/cxx:vector_constants.patch",
         "//build_tools/third_party/cxx:vector_conversion.patch",
         "//build_tools/third_party/cxx:auto_deduction.patch",
+        "//build_tools/third_party/cxx:vector_list_conversion.patch",
     ],
     sha256 = "39e18971b03f3b5ae2afc8cb9313bcccaf6a51176a94eb57cb8fa4e683ef290b",
     strip_prefix = "cplusplus-bccf4d1e2d266b3d5d770c49e9eac59a2eab34b9",

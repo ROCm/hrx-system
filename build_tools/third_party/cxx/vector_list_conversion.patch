@@ -1,0 +1,55 @@
+diff --git a/src/parser/cxx/standard_conversion.cc b/src/parser/cxx/standard_conversion.cc
+--- a/src/parser/cxx/standard_conversion.cc
++++ b/src/parser/cxx/standard_conversion.cc
+@@ -1171,7 +1171,7 @@
+     return complete(ImplicitCastKind::kIdentity, targetType);
+   }
+
+-  if (traits.is_array(listTarget)) {
++  if (traits.is_array(listTarget) || traits.is_vector(listTarget)) {
+     if (traits.is_lvalue_reference(targetType) &&
+         !traits.is_const(traits.remove_reference(targetType)))
+       return seq;
+diff --git a/tests/unit_tests/sema/vector_list_conversion_01.cc b/tests/unit_tests/sema/vector_list_conversion_01.cc
+new file mode 100644
+--- /dev/null
++++ b/tests/unit_tests/sema/vector_list_conversion_01.cc
+@@ -0,0 +1,38 @@
++// RUN: %cxx -verify -fsyntax-only %s
++// expected-no-diagnostics
++
++using Int4 = int __attribute__((ext_vector_type(4)));
++using UInt4 = unsigned __attribute__((vector_size(16)));
++using Float4 = float __attribute__((ext_vector_type(4)));
++struct State {
++  // Vector payload assigned through its member lvalue.
++  Int4 value;
++};
++void assign_pointer(Int4* output, int first) { *output = {first, 1, 2, 3}; }
++Int4 assign_local(int first) {
++  Int4 value{};
++  value = {first};
++  return value;
++}
++State assign_member(int first) {
++  State state{};
++  state.value = {first, 9};
++  return state;
++}
++void clear_vector(volatile UInt4* output) { *output = {}; }
++constexpr int sum(Int4 value) {
++  return value[0] + value[1] + value[2] + value[3];
++}
++int argument(int first) { return sum({first, 1, 2, 3}); }
++int argument_partial(int first) { return sum({first}); }
++static constexpr int choose(Int4 value) { return 1; }
++static constexpr int choose(Float4 value) { return 2; }
++static_assert(choose({1, 2, 3, 4}) == 1);
++static_assert(choose({1.0f, 2.0f, 3.0f, 4.0f}) == 2);
++constexpr int assigned_lane(unsigned lane) {
++  Int4 value{11, 12, 13, 14};
++  value = {7};
++  return value[lane];
++}
++static_assert(assigned_lane(0) == 7);
++static_assert(assigned_lane(3) == 0);

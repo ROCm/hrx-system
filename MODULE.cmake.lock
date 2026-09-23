@@ -160,6 +160,7 @@ set(IREE_DEP_CXX_PATCHES
   "//build_tools/third_party/cxx:vector_constants.patch"
   "//build_tools/third_party/cxx:vector_conversion.patch"
   "//build_tools/third_party/cxx:auto_deduction.patch"
+  "//build_tools/third_party/cxx:vector_list_conversion.patch"
 )
 set(IREE_DEP_CXX_PATCH_ARGS
   "-p1"

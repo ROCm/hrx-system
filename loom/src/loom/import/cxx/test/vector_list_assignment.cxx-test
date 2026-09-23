@@ -1,0 +1,124 @@
+// RUN: roundtrip
+using Int4 = int __attribute__((ext_vector_type(4)));
+void entry(Int4* output, int first) { *output = {first, 1, 2, 3}; }
+
+// ----
+func.def public @entry(%output: buffer, %output_byte_offset: offset, %first: i32) {
+  %3 = scalar.constant 1 : i32
+  %4 = scalar.constant 2 : i32
+  %5 = scalar.constant 3 : i32
+  %6 = vector.from_elements %first, %3, %4, %5 : vector<4xi32>
+  %7 = buffer.view %output[%output_byte_offset] : buffer -> view<4xi32>
+  vector.store %6, %7[0] : vector<4xi32>, view<4xi32>
+  func.return
+}
+
+// ====
+using Int4 = int __attribute__((ext_vector_type(4)));
+Int4 entry(int first) {
+  Int4 result{11, 12, 13, 14};
+  result = {first};
+  return result;
+}
+
+// ----
+func.def public @entry(%first: i32) -> (vector<4xi32>) {
+  %2 = scalar.constant 11 : i32
+  %3 = scalar.constant 12 : i32
+  %4 = scalar.constant 13 : i32
+  %5 = scalar.constant 14 : i32
+  %result$6 = vector.from_elements %2, %3, %4, %5 : vector<4xi32>
+  %7 = scalar.constant 0 : i32
+  %result$8 = vector.from_elements %first, %7, %7, %7 : vector<4xi32>
+  func.return %result$8 : vector<4xi32>
+}
+
+// ====
+using Int4 = int __attribute__((ext_vector_type(4)));
+struct State {
+  // The vector member is updated as a value projection.
+  Int4 value;
+};
+Int4 entry(int first) {
+  State state{};
+  state.value = {first, 9};
+  return state.value;
+}
+
+// ----
+func.def public @entry(%first: i32) -> (vector<4xi32>) {
+  %2 = scalar.constant 0 : i32
+  %state_value$3 = vector.from_elements %2, %2, %2, %2 : vector<4xi32>
+  %4 = scalar.constant 9 : i32
+  %5 = scalar.constant 0 : i32
+  %state_value$6 = vector.from_elements %first, %4, %5, %5 : vector<4xi32>
+  func.return %state_value$6 : vector<4xi32>
+}
+
+// ====
+using UInt4 = unsigned __attribute__((vector_size(16)));
+void entry(volatile UInt4* output) { *output = {}; }
+
+// ----
+func.def public @entry(%output: buffer, %output_byte_offset: offset) {
+  %2 = scalar.constant 0 : i32
+  %3 = vector.from_elements %2, %2, %2, %2 : vector<4xi32>
+  %4 = buffer.view %output[%output_byte_offset] : buffer -> view<4xi32>
+  vector.store<volatile> %3, %4[0] : vector<4xi32>, view<4xi32>
+  func.return
+}
+
+// ====
+using Int4 = int __attribute__((ext_vector_type(4)));
+static constexpr Int4 first_two(int first, int second) {
+  Int4 value{};
+  value = {first, second};
+  return value;
+}
+static constexpr Int4 identity(Int4 value) { return value; }
+static constexpr int sum(Int4 value) {
+  return value[0] + value[1] + value[2] + value[3];
+}
+static_assert(sum({1, 2, 3, 4}) == 10);
+static_assert(sum({7}) == 7);
+static_assert(sum({}) == 0);
+static_assert(first_two(7, 9)[3] == 0);
+Int4 entry(int first) { return identity({first, 9}); }
+
+// ----
+func.def public @entry(%first: i32) -> (vector<4xi32>) {
+  %2 = scalar.constant 9 : i32
+  %3 = scalar.constant 0 : i32
+  %4 = vector.from_elements %first, %2, %3, %3 : vector<4xi32>
+  %5 = func.call @identity(%4) : (vector<4xi32>) -> (vector<4xi32>)
+  func.return %5 : vector<4xi32>
+}
+
+func.def @identity(%value: vector<4xi32>) -> (vector<4xi32>) {
+  func.return %value : vector<4xi32>
+}
+
+// ====
+using Int4 = int __attribute__((ext_vector_type(4)));
+using Float4 = float __attribute__((ext_vector_type(4)));
+static constexpr int choose(Int4 value) { return 1; }
+static constexpr int choose(Float4 value) { return 2; }
+static_assert(choose({1, 2, 3, 4}) == 1);
+static_assert(choose({1.0f, 2.0f, 3.0f, 4.0f}) == 2);
+int entry() { return choose({1, 2, 3, 4}); }
+
+// ----
+func.def public @entry() -> (i32) {
+  %1 = scalar.constant 1 : i32
+  %2 = scalar.constant 2 : i32
+  %3 = scalar.constant 3 : i32
+  %4 = scalar.constant 4 : i32
+  %5 = vector.from_elements %1, %2, %3, %4 : vector<4xi32>
+  %6 = func.call @choose(%5) : (vector<4xi32>) -> (i32)
+  func.return %6 : i32
+}
+
+func.def @choose(%value: vector<4xi32>) -> (i32) {
+  %9 = scalar.constant 1 : i32
+  func.return %9 : i32
+}

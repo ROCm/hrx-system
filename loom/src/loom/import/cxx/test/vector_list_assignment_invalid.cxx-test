@@ -1,0 +1,27 @@
+// RUN: verify
+using Int4 = int __attribute__((ext_vector_type(4)));
+// ERROR@+1: PARSE/036 "excess elements in vector initializer"
+void entry(Int4* output) { *output = {1, 2, 3, 4, 5}; }
+
+// ====
+using Int4 = int __attribute__((ext_vector_type(4)));
+// ERROR@+2: PARSE/036 "cannot initialize array element of type 'int' with expression of type 'const int*'"
+// ERROR@+1: PARSE/036 "cannot assign expression of type"
+void entry(Int4* output, const int* pointer) { *output = {pointer}; }
+
+// ====
+using Bytes4 = unsigned char __attribute__((ext_vector_type(4)));
+// ERROR@+1: PARSE/036 "narrowing conversion from 'int' to 'unsigned char' in braced-init-list"
+void entry(Bytes4* output) { *output = {256}; }
+
+// ====
+using Int4 = int __attribute__((ext_vector_type(4)));
+// ERROR@+1: PARSE/036 "narrowing conversion from 'float' to 'int' in braced-init-list"
+void entry(Int4* output, float value) { *output = {value}; }
+
+// ====
+using Int4 = int __attribute__((ext_vector_type(4)));
+// REMARK@+1: PARSE/036 "candidate function not viable"
+static void consume(Int4& value) {}
+// ERROR@+1: PARSE/036 "no matching function for call to 'consume'"
+void entry() { consume({1, 2, 3, 4}); }

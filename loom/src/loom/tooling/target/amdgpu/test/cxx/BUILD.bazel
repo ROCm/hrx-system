@@ -186,6 +186,13 @@ loom_test(
 )
 
 loom_test(
+    name = "vector_list_assignment_test",
+    srcs = ["vector_list_assignment.cxx"],
+    execution_profiles = _EXECUTION_PROFILES,
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
+loom_test(
     name = "vector_lookup_test",
     srcs = ["vector_lookup.cxx"],
     execution_profiles = _EXECUTION_PROFILES,

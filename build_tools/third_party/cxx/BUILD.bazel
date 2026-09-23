@@ -35,4 +35,5 @@ exports_files([
     "unsigned_complement.patch",
     "vector_constants.patch",
     "vector_conversion.patch",
+    "vector_list_conversion.patch",
 ])
