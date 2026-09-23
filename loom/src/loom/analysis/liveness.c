@@ -10,12 +10,12 @@
 
 #include "iree/base/internal/math.h"
 #include "loom/analysis/liveness_dataflow.h"
+#include "loom/analysis/liveness_events.h"
 #include "loom/ir/ancestry.h"
 #include "loom/ir/module.h"
 #include "loom/ir/types.h"
 #include "loom/ops/op_defs.h"
 #include "loom/target/registers.h"
-#include "loom/util/adaptive_sort.h"
 #include "loom/util/cfg_graph.h"
 #include "loom/util/segmented_storage.h"
 
@@ -1172,36 +1172,6 @@ typedef struct loom_liveness_pressure_bucket_t {
   uint32_t live_values;
 } loom_liveness_pressure_bucket_t;
 
-typedef struct loom_liveness_pressure_event_t {
-  // Program point where the live set changes.
-  uint32_t point;
-  // SSA identity used to order simultaneous events deterministically.
-  loom_value_id_t value_id;
-  // Retained index of the interval entering or leaving the live set.
-  loom_value_ordinal_t value_ordinal;
-  // Signed value-count delta; negative end events sort before start events.
-  int8_t value_delta;
-} loom_liveness_pressure_event_t;
-
-static_assert(sizeof(loom_liveness_pressure_event_t) == 16,
-              "pressure events must remain compact for sorting");
-
-static bool loom_liveness_pressure_event_less(
-    const loom_liveness_pressure_event_t* lhs,
-    const loom_liveness_pressure_event_t* rhs) {
-  if (lhs->point != rhs->point) {
-    return lhs->point < rhs->point;
-  }
-  if (lhs->value_delta != rhs->value_delta) {
-    return lhs->value_delta < rhs->value_delta;
-  }
-  return lhs->value_id < rhs->value_id;
-}
-
-LOOM_DEFINE_ADAPTIVE_SORT(loom_liveness_pressure_event_sort,
-                          loom_liveness_pressure_event_t,
-                          loom_liveness_pressure_event_less)
-
 typedef struct loom_liveness_pressure_sweep_t {
   // Analysis build state owning summary output.
   loom_liveness_build_state_t* build_state;
@@ -1248,8 +1218,7 @@ static iree_status_t loom_liveness_pressure_sweep_bucket(
 }
 
 static iree_status_t loom_liveness_pressure_sweep_apply_event(
-    loom_liveness_pressure_sweep_t* sweep,
-    const loom_liveness_pressure_event_t* event) {
+    loom_liveness_pressure_sweep_t* sweep, const loom_liveness_event_t* event) {
   const loom_liveness_interval_t* interval =
       &sweep->build_state->interval_states[event->value_ordinal].interval;
   loom_liveness_pressure_bucket_t* bucket = NULL;
@@ -1337,7 +1306,7 @@ static iree_status_t loom_liveness_pressure_sweep_adjust_value_ordinal(
   loom_liveness_mutable_interval_t* interval_state = NULL;
   IREE_RETURN_IF_ERROR(loom_liveness_ensure_interval_by_ordinal(
       state, value_ordinal, &interval_state));
-  const loom_liveness_pressure_event_t event = {
+  const loom_liveness_event_t event = {
       .value_id = interval_state->interval.value_id,
       .value_ordinal = value_ordinal,
       .value_delta = value_delta,
@@ -1476,22 +1445,24 @@ static iree_status_t loom_liveness_compute_region_tree_pressure(
                             "liveness pressure event count exceeds host size");
   }
   const iree_host_size_t event_count = state->segment_count * 2;
-  loom_liveness_pressure_event_t* events = NULL;
+  loom_liveness_event_t* events = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       state->scratch_arena, event_count, sizeof(*events), (void**)&events));
   iree_host_size_t event_index = 0;
+  uint32_t maximum_point = 0;
   for (iree_host_size_t i = 0; i < state->segment_count; ++i) {
     const loom_liveness_mutable_segment_t* segment = &state->segments[i];
     const loom_liveness_mutable_interval_t* interval_state =
         &state->interval_states[segment->value_ordinal];
     const loom_liveness_interval_t* interval = &interval_state->interval;
-    events[event_index++] = (loom_liveness_pressure_event_t){
+    maximum_point = iree_max(maximum_point, segment->segment.end_point);
+    events[event_index++] = (loom_liveness_event_t){
         .point = segment->segment.end_point,
         .value_id = interval->value_id,
         .value_ordinal = segment->value_ordinal,
         .value_delta = -1,
     };
-    events[event_index++] = (loom_liveness_pressure_event_t){
+    events[event_index++] = (loom_liveness_event_t){
         .point = segment->segment.start_point,
         .value_id = interval->value_id,
         .value_ordinal = segment->value_ordinal,
@@ -1499,7 +1470,8 @@ static iree_status_t loom_liveness_compute_region_tree_pressure(
     };
   }
   IREE_ASSERT_EQ(event_index, event_count);
-  loom_liveness_pressure_event_sort(events, event_count);
+  IREE_RETURN_IF_ERROR(loom_liveness_events_sort(
+      events, event_count, maximum_point, state->scratch_arena));
 
   loom_liveness_pressure_sweep_t sweep = {
       .build_state = state,

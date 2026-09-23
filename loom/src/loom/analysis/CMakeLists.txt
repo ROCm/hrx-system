@@ -883,6 +883,33 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    liveness_events
+  HDRS
+    "liveness_events.h"
+  SRCS
+    "liveness_events.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+    loom::util::adaptive_sort
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    liveness_events_test
+  SRCS
+    "liveness_events_test.cc"
+  DEPS
+    ::liveness_events
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_library(
+  NAME
     liveness
   HDRS
     "liveness.h"
@@ -890,13 +917,13 @@ loom_cc_library(
     "liveness.c"
   DEPS
     ::liveness_dataflow
+    ::liveness_events
     iree::base
     iree::base::internal
     iree::base::internal::arena
     loom::ir
     loom::ops::op_defs
     loom::target::registers
-    loom::util::adaptive_sort
     loom::util::cfg_graph
     loom::util::segmented_storage
   PUBLIC

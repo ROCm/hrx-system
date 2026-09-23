@@ -777,15 +777,38 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "liveness_events",
+    srcs = ["liveness_events.c"],
+    hdrs = ["liveness_events.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/util:adaptive_sort",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "liveness_events_test",
+    srcs = ["liveness_events_test.cc"],
+    deps = [
+        ":liveness_events",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "liveness",
     srcs = ["liveness.c"],
     hdrs = ["liveness.h"],
     deps = [
         ":liveness_dataflow",
+        ":liveness_events",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/target:registers",
-        "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:cfg_graph",
         "//loom/src/loom/util:segmented_storage",
         "//runtime/src/iree/base",
