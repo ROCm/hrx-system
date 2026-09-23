@@ -60,9 +60,109 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
+  linux_bazel_native_artifact:
+    name: iree-bazel-build / linux-x86_64 / clang (system) / debug
+    runs-on: azure-linux-scale-rocm
+    timeout-minutes: 60
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+    env:
+      AR: ar
+      CC: clang
+      CXX: clang++
+      HRX_ARTIFACT_SET: core-with-llvm-dev
+      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/iree-bazel-native-artifact/downloads
+      HRX_OUTPUT_DIR: ${{ github.workspace }}/build/iree-bazel-native-artifact
+      HRX_PYTHON: ${{ github.workspace }}/build/iree-bazel-native-artifact/python/bin/python3
+      HRX_RELEASE_TYPE: nightly
+      HRX_ROCM_ROOT: ${{ github.workspace }}/build/iree-bazel-native-artifact/rocm-root
+      NATIVE_ARTIFACT_NAME: tests-linux-x86_64-clang-${{ github.sha }}
+      PIP_CACHE_DIR: ${{ github.workspace }}/build/iree-bazel-native-artifact/caches/pip
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Adjust git config
+        run: git config --global --add safe.directory "$PWD"
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+
+      - name: Install artifact tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends zstd
+
+      - name: Fetch ROCm LLVM toolchain
+        run: bash .github/scripts/fetch_rocm_toolchain.sh
+
+      - name: Install developer tools
+        run: |
+          python3 --version
+          python3 dev.py bazel setup --venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Check tool versions
+        run: |
+          bazel --version
+          zstd --version
+          bash .github/scripts/check_host_toolchain.sh
+          bash .github/scripts/check_rocm_device_toolchain.sh
+          "${HRX_ROCM_ROOT}/lib/llvm/bin/llvm-config" --version
+          "${HRX_ROCM_ROOT}/lib/llvm/bin/llvm-objcopy" --version
+          "${HRX_ROCM_ROOT}/lib/llvm/bin/llvm-tblgen" --version
+
+      - name: Build and package tests
+        id: iree_bazel_ci
+        run: |
+          python3 build_tools/devtools/ci.py iree-bazel-native-artifact \
+            --native-artifact-archive "${RUNNER_TEMP}/${NATIVE_ARTIFACT_NAME}.tar.zst" \
+            --native-artifact-revision "${GITHUB_SHA}" \
+            --bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles" \
+            --keep-going
+
+      - name: Upload tests
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ env.NATIVE_ARTIFACT_NAME }}
+          path: ${{ runner.temp }}/${{ env.NATIVE_ARTIFACT_NAME }}.tar.zst
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+      - name: Upload Bazel profiles
+        continue-on-error: true
+        if: ${{ always() && steps.iree_bazel_ci.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-profiles-native-artifact-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bazel-profiles/*.profile.gz
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 7
+
+      - name: Upload failed test results
+        if: ${{ always() && steps.iree_bazel_ci.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-results-native-artifact-attempt-${{ github.run_attempt }}
+          path: |
+            bazel-testlogs/**/test.log
+            bazel-testlogs/**/test.xml
+          if-no-files-found: warn
+          retention-days: 7
+
   linux_bazel_cpu:
     name: ${{ matrix.name }}
     concurrency:
@@ -76,14 +176,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Linux / CPU
-            command: iree-bazel-cpu
-            container_image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
-            host_ar: ar
-            host_cc: clang
-            host_cxx: clang++
-            install_compiler_rt: false
-            setup_python: true
           - name: Linux / CPU / ASAN
             command: iree-bazel-cpu-asan
             container_image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
@@ -455,11 +547,6 @@ jobs:
             optional: true
             runner_label: linux-gfx1151-gpu-rocm
             target_selector: gfx1151
-          - name: Linux / AMDGPU / gfx120X
-            command: iree-bazel-amdgpu
-            optional: false
-            runner_label: linux-gfx120X-gpu-rocm
-            target_selector: gfx120X-all
           - name: Linux / AMDGPU / gfx942 / ASAN
             command: iree-bazel-amdgpu-asan
             optional: false
@@ -545,6 +632,126 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-results-${{ matrix.command }}-${{ matrix.target_selector }}-attempt-${{ github.run_attempt }}
+          path: |
+            bazel-testlogs/**/test.log
+            bazel-testlogs/**/test.xml
+          if-no-files-found: warn
+          retention-days: 7
+
+  linux_bazel_amdgpu_gfx120x:
+    name: iree-bazel-test / linux-x86_64 / clang (system) / amd-gfx120x
+    needs: linux_bazel_native_artifact
+    concurrency:
+      group: ${{ github.workflow }}-iree-bazel-amdgpu-gfx120x-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
+      cancel-in-progress: true
+    runs-on: linux-gfx120X-gpu-rocm
+    timeout-minutes: 15
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: >-
+        --ipc host
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --group-add 993
+        --group-add 992
+        --group-add 110
+        --ulimit memlock=-1:-1
+        --security-opt seccomp=unconfined
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+        --user 0:0
+    env:
+      AR: ${{ github.workspace }}/build/iree-bazel-native-artifact-test/rocm-root/lib/llvm/bin/llvm-ar
+      CC: ${{ github.workspace }}/build/iree-bazel-native-artifact-test/rocm-root/lib/llvm/bin/clang
+      CXX: ${{ github.workspace }}/build/iree-bazel-native-artifact-test/rocm-root/lib/llvm/bin/clang++
+      HRX_ARTIFACT_SET: core
+      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/iree-bazel-native-artifact-test/downloads
+      HRX_OUTPUT_DIR: ${{ github.workspace }}/build/iree-bazel-native-artifact-test
+      HRX_PYTHON: ${{ github.workspace }}/build/iree-bazel-native-artifact-test/python/bin/python3
+      HRX_RELEASE_TYPE: nightly
+      HRX_ROCM_ROOT: ${{ github.workspace }}/build/iree-bazel-native-artifact-test/rocm-root
+      NATIVE_ARTIFACT_NAME: tests-linux-x86_64-clang-${{ github.sha }}
+      PIP_CACHE_DIR: ${{ github.workspace }}/build/iree-bazel-native-artifact-test/caches/pip
+      ROCR_VISIBLE_DEVICES: "0"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Adjust git config
+        run: |
+          mkdir -p "$HOME" "$PIP_CACHE_DIR"
+          git config --global --add safe.directory "$PWD"
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Install artifact tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends zstd
+
+      - name: Download tests
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: ${{ env.NATIVE_ARTIFACT_NAME }}
+          path: ${{ runner.temp }}/native-artifact-download
+
+      - name: Extract tests
+        shell: bash
+        run: |
+          TIMEFORMAT='artifact_extraction_seconds=%R'
+          time tar --zstd --extract \
+            --file "${RUNNER_TEMP}/native-artifact-download/${NATIVE_ARTIFACT_NAME}.tar.zst" \
+            --directory "${GITHUB_WORKSPACE}"
+
+      - name: Fetch ROCm toolchain
+        run: bash .github/scripts/fetch_rocm_toolchain.sh
+
+      - name: Install developer tools
+        run: |
+          python3 --version
+          python3 dev.py bazel setup --venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Check tool versions
+        run: |
+          bazel --version
+          bash .github/scripts/check_host_toolchain.sh --expect-rocm
+          bash .github/scripts/check_rocm_device_toolchain.sh
+          test -d "${HRX_ROCM_ROOT}/include"
+
+      - name: Report ROCm environment
+        timeout-minutes: 1
+        run: bash .github/scripts/check_rocm_environment.sh
+
+      - name: Run tests
+        id: iree_bazel_ci
+        run: |
+          python3 build_tools/devtools/ci.py iree-bazel-amdgpu \
+            --amdgpu-target gfx120X-all \
+            --native-artifact-root "${GITHUB_WORKSPACE}/artifacts/ci/linux-x86_64-clang" \
+            --native-artifact-revision "${GITHUB_SHA}" \
+            --bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles" \
+            --keep-going
+
+      - name: Upload Bazel profiles
+        continue-on-error: true
+        if: ${{ always() && steps.iree_bazel_ci.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-profiles-native-artifact-amd-gfx120x-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bazel-profiles/*.profile.gz
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 7
+
+      - name: Upload failed test results
+        if: ${{ always() && steps.iree_bazel_ci.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-results-native-artifact-amd-gfx120x-attempt-${{ github.run_attempt }}
           path: |
             bazel-testlogs/**/test.log
             bazel-testlogs/**/test.xml
