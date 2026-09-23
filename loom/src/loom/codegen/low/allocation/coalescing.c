@@ -1127,7 +1127,6 @@ static iree_status_t loom_low_allocation_coalescing_assign_concat_interval(
       .descriptor_reg_class_id = interval_reg_class_id,
       .location_count = interval->unit_count,
   };
-  uint32_t coalesced_unit_count = 0;
   uint16_t ignored_value_count = 0;
   const loom_low_allocation_assignment_t* first_assignment = NULL;
   for (uint32_t i = 0; i < range->count; ++i) {
@@ -1146,9 +1145,6 @@ static iree_status_t loom_low_allocation_coalescing_assign_concat_interval(
         !loom_low_allocation_assignment_is_register_like(source_assignment)) {
       return iree_ok_status();
     }
-    IREE_RETURN_IF_ERROR(loom_low_allocation_coalescing_append_unique_value_id(
-        ignored_value_ids, ignored_value_capacity, &ignored_value_count,
-        source_assignment->value_id));
     if (!loom_low_allocation_coalescing_assignment_unit_span_fits(
             source_assignment, relation->source_unit_offset,
             relation->unit_count)) {
@@ -1167,22 +1163,19 @@ static iree_status_t loom_low_allocation_coalescing_assign_concat_interval(
         return iree_ok_status();
       }
       first_assignment = source_assignment;
-    } else if (!loom_low_allocation_storage_assignment_subranges_equal(
-                   context->search_context->descriptor_set, &result_assignment,
-                   relation->result_unit_offset, source_assignment,
-                   relation->source_unit_offset, relation->unit_count)) {
-      return iree_ok_status();
     }
-    if (relation->unit_count > UINT32_MAX - coalesced_unit_count) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "low.concat coalesced unit count exceeds u32");
+    // Concat relations cover complete source operands. A matching source can
+    // remain live in its result subrange while packet moves fill the other
+    // units. Nonmatching sources retain ordinary interference protection.
+    if (loom_low_allocation_storage_assignment_subranges_equal(
+            context->search_context->descriptor_set, &result_assignment,
+            relation->result_unit_offset, source_assignment,
+            relation->source_unit_offset, relation->unit_count)) {
+      IREE_RETURN_IF_ERROR(
+          loom_low_allocation_coalescing_append_unique_value_id(
+              ignored_value_ids, ignored_value_capacity, &ignored_value_count,
+              source_assignment->value_id));
     }
-    coalesced_unit_count += relation->unit_count;
-  }
-  if (coalesced_unit_count != interval->unit_count) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "low.concat placement relations do not cover the "
-                            "result interval");
   }
   const uint16_t ignored_storage_lease_value_count = ignored_value_count;
   for (uint32_t i = 0; i < edge_source_range.count; ++i) {

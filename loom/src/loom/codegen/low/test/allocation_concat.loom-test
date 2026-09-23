@@ -92,3 +92,53 @@ low.func.def target<test.low.core>(@target) @physical_concat_broadcast_source(%v
 
 // ----
 {"format":"loom.low.allocation.v0","function":"physical_concat_broadcast_source","target":"target","descriptor_set":"test.low.core","allocation_mode":"virtual","assignment_count":2,"remark_count":0,"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":0,"name":"value","type":"reg<test.explicit32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.explicit32"},"start_point":0,"end_point":1,"unit_count":1,"location":{"kind":"physical_register","base":0,"count":1}},{"index":1,"value":{"id":2,"name":"pair","type":"reg<test.explicit32 x2>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.explicit32"},"start_point":1,"end_point":2,"unit_count":2,"location":{"kind":"physical_register","base":4,"count":2}}],"spill_plans":[],"copy_decisions":[],"remarks":[]}
+
+// ====
+
+// RUN: with-checks emit low-allocation-json @partial_concat_keeps_live_source fixed=%low:physical_register:0:2 fixed=%high:physical_register:4:2
+
+test.target<low_core> @target
+
+// The tuple shares units 0..1 with low and copies high into units 2..3.
+// Both original sources remain observable after the assembled tuple is copied.
+low.func.def target<test.low.core>(@target) @partial_concat_keeps_live_source(%low: reg<test.phys x2>, %high: reg<test.phys x2>) -> (reg<test.phys x4>, reg<test.phys x4>, reg<test.phys x2>, reg<test.phys x2>) asm {
+  %tuple = concat(%low, %high) : (reg<test.phys x2>, reg<test.phys x2>) -> reg<test.phys x4>
+  %copy = copy %tuple : reg<test.phys x4> -> reg<test.phys x4>
+  return %copy, %tuple, %low, %high
+}
+
+// ----
+CHECK: *"spill_count":0,*"name":"low"*"base":0,"count":2}*"name":"high"*"base":4,"count":2}*"name":"tuple"*"base":0,"count":4}*
+
+// ====
+
+// RUN: with-checks emit low-allocation-json @partial_concat_preserves_unmatched_sources fixed=%first:physical_register:0:2 fixed=%second:physical_register:4:2 fixed=%third:physical_register:2:2
+
+test.target<low_core> @target
+
+// Sharing first at base 0 would swap second and third over their live originals.
+// Only matching subranges can be exempted from interference.
+low.func.def target<test.low.core>(@target) @partial_concat_preserves_unmatched_sources(%first: reg<test.phys x2>, %second: reg<test.phys x2>, %third: reg<test.phys x2>) -> (reg<test.phys x6>, reg<test.phys x6>, reg<test.phys x2>, reg<test.phys x2>) asm {
+  %tuple = concat(%first, %second, %third) : (reg<test.phys x2>, reg<test.phys x2>, reg<test.phys x2>) -> reg<test.phys x6>
+  %copy = copy %tuple : reg<test.phys x6> -> reg<test.phys x6>
+  return %copy, %tuple, %second, %third
+}
+
+// ----
+CHECK: *"spill_count":0,*"name":"second"*"base":4,"count":2}*"name":"third"*"base":2,"count":2}*"name":"tuple"*"base":6,"count":6}*
+
+// ====
+
+// RUN: with-checks emit low-allocation-json @partial_concat_preserves_tied_source fixed=%low:target_id:0:2 fixed=%high:target_id:4:2
+
+test.target<low_core> @target
+
+// A destructive consumer cannot overwrite a source retained after the tuple.
+low.func.def target<test.low.core>(@target) @partial_concat_preserves_tied_source(%low: reg<test.i32 x2>, %high: reg<test.i32 x2>) -> (reg<test.i32 x4>, reg<test.i32 x2>) asm {
+  %tuple = concat(%low, %high) : (reg<test.i32 x2>, reg<test.i32 x2>) -> reg<test.i32 x4>
+  %result = test.early_tied.v4i32 %tuple
+  return %result, %low
+}
+
+// ----
+CHECK: *"spill_count":0,*"name":"low"*"base":0,"count":2}*"name":"tuple"*"base":4,"count":4}*"name":"result"*"base":4,"count":4}*
