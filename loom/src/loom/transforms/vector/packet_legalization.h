@@ -17,7 +17,8 @@ extern "C" {
 // Target packet widths and the source payload boundary where packetization
 // replaces ordinary target or reference lowering.
 typedef struct loom_vector_packet_policy_t {
-  // Native packet widths in bits. Ordering is not significant.
+  // Native packet widths in bits. Widths are byte-aligned, each byte width is
+  // a power of two, and ordering is not significant.
   const uint16_t* native_bit_counts;
   // Number of entries in native_bit_counts.
   uint8_t native_bit_count_count;

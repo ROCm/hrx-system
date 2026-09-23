@@ -1371,6 +1371,12 @@ static iree_status_t loom_vector_packet_build_staging_view(
   IREE_ASSERT_EQ(element_bit_count % 8, 0);
   const int64_t byte_count =
       (int64_t)shape->lane_count * (element_bit_count / 8);
+  const int64_t packet_byte_count =
+      (int64_t)shape->chunk_lane_count * (element_bit_count / 8);
+  IREE_ASSERT(iree_math_is_power_of_two_i64(packet_byte_count));
+  // Preserve the selected native packet access through private staging while
+  // retaining the historical 16-byte floor for narrower packets.
+  const int64_t staging_alignment = iree_max((int64_t)16, packet_byte_count);
   loom_builder_t* builder = &packetization->context->rewriter->builder;
   const loom_type_t offset_type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
 
@@ -1380,9 +1386,9 @@ static iree_status_t loom_vector_packet_build_staging_view(
                                 source_op->location, &byte_count_op));
   loom_op_t* staging_buffer_op = NULL;
   IREE_RETURN_IF_ERROR(loom_buffer_alloca_build(
-      builder, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE,
-      /*base_alignment=*/16, loom_index_constant_result(byte_count_op),
-      loom_type_buffer(), source_op->location, &staging_buffer_op));
+      builder, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, staging_alignment,
+      loom_index_constant_result(byte_count_op), loom_type_buffer(),
+      source_op->location, &staging_buffer_op));
   loom_op_t* zero_offset_op = NULL;
   IREE_RETURN_IF_ERROR(
       loom_index_constant_build(builder, loom_attr_i64(0), offset_type,

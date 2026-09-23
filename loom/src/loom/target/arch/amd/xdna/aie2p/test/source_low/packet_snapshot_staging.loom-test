@@ -1,0 +1,27 @@
+// RUN: with-checks emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @preserve_large_old_source(%source: buffer, %destination: buffer, %replacement: i32) {
+  %source_noalias, %destination_noalias = buffer.assume.noalias %source, %destination : buffer, buffer
+  %source_local = buffer.assume.memory_space<workgroup> %source_noalias : buffer
+  %destination_local = buffer.assume.memory_space<workgroup> %destination_noalias : buffer
+  %source_aligned, %destination_aligned = buffer.assume.alignment %source_local, %destination_local {minimum_alignment = 64} : buffer, buffer
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source_aligned[%base] : buffer -> view<528xi32>
+  %destination_view = buffer.view %destination_aligned[%base] : buffer -> view<528xi32>
+  %old = vector.load %source_view[0] : view<528xi32> -> vector<528xi32>
+  view.store %replacement, %source_view[0] : i32, view<528xi32>
+  vector.store %old, %destination_view[0] : vector<528xi32>, view<528xi32>
+  func.return
+}
+
+// ----
+CHECK: %* = vlda.512.i32x16 %source_view, 0
+CHECK: %* = mov.static-byte-offset 2048
+CHECK: %* = vlda.512.i32x16.index %source_view, *
+CHECK: %* = storage {byte_alignment = 64, byte_length = 2112} : low.storage<private>
+CHECK: vst.512.i32x16 %*, %*, 0
+CHECK: vst.512.i32x16.index %*, %*, *
+CHECK-NOT: *vlda.128*
+CHECK-NOT: *vlda.256*
+CHECK-NOT: *vst.128*
+CHECK-NOT: *vst.256*
