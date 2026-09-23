@@ -13,6 +13,19 @@ package(
 )
 
 loom_cc_library(
+    name = "cfg_layout_projection",
+    srcs = ["cfg_layout_projection.c"],
+    hdrs = ["cfg_layout_projection.h"],
+    deps = [
+        "//loom/src/loom/ops/encoding",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/transforms/boundary:projection_core",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "layout_transport",
     srcs = [
         "layout_transport.c",
@@ -20,6 +33,7 @@ loom_cc_library(
     ],
     hdrs = ["layout_transport.h"],
     deps = [
+        ":cfg_layout_projection",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/cfg",
         "//loom/src/loom/ops/encoding",
@@ -29,6 +43,8 @@ loom_cc_library(
         "//loom/src/loom/pass:value_facts",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target:pass_environment",
+        "//loom/src/loom/transforms/boundary:projection_core",
         "//loom/src/loom/util:fact_table",
         "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",

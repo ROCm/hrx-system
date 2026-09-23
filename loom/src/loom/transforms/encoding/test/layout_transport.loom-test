@@ -22,14 +22,14 @@ func.def @diamond(%input: buffer, %condition: i1) -> (f32) {
   cfg.cond_br %condition, ^row, ^column
 ^row:
   %row_layout = encoding.layout.strided [4, 1] : encoding<layout>
-  %12 = index.constant 4 : index
-  %13 = index.constant 1 : index
-  cfg.br ^join(%12: index, %13: index)
+  %11 = index.constant 4 : index
+  %12 = index.constant 1 : index
+  cfg.br ^join(%11: index, %12: index)
 ^column:
   %column_layout = encoding.layout.strided [1, 64] : encoding<layout>
-  %14 = index.constant 1 : index
-  %15 = index.constant 64 : index
-  cfg.br ^join(%14: index, %15: index)
+  %13 = index.constant 1 : index
+  %14 = index.constant 64 : index
+  cfg.br ^join(%13: index, %14: index)
 ^join(%layout_stride_0: index, %layout_stride_1: index):
   %layout = encoding.layout.strided [%layout_stride_0, %layout_stride_1] : encoding<layout>
   %view = buffer.view %input[%base] : buffer -> view<4x4xf32, %layout>
@@ -104,14 +104,14 @@ func.def @nested_joins(%input: buffer, %first: i1, %second: i1) -> (f32) {
   cfg.cond_br %first, ^row, ^column
 ^row:
   %row_layout = encoding.layout.strided [4, 1] : encoding<layout>
-  %18 = index.constant 4 : index
-  %19 = index.constant 1 : index
-  cfg.br ^inner(%18: index, %19: index)
+  %16 = index.constant 4 : index
+  %17 = index.constant 1 : index
+  cfg.br ^inner(%16: index, %17: index)
 ^column:
   %column_layout = encoding.layout.strided [1, 64] : encoding<layout>
-  %20 = index.constant 1 : index
-  %21 = index.constant 64 : index
-  cfg.br ^inner(%20: index, %21: index)
+  %18 = index.constant 1 : index
+  %19 = index.constant 64 : index
+  cfg.br ^inner(%18: index, %19: index)
 ^inner(%inner_layout_stride_0: index, %inner_layout_stride_1: index):
   %inner_layout = encoding.layout.strided [%inner_layout_stride_0, %inner_layout_stride_1] : encoding<layout>
   cfg.cond_br %second, ^forward, ^wide
@@ -119,9 +119,9 @@ func.def @nested_joins(%input: buffer, %first: i1, %second: i1) -> (f32) {
   cfg.br ^outer(%inner_layout_stride_0: index, %inner_layout_stride_1: index)
 ^wide:
   %wide_layout = encoding.layout.strided [8, 2] : encoding<layout>
-  %22 = index.constant 8 : index
-  %23 = index.constant 2 : index
-  cfg.br ^outer(%22: index, %23: index)
+  %20 = index.constant 8 : index
+  %21 = index.constant 2 : index
+  cfg.br ^outer(%20: index, %21: index)
 ^outer(%outer_layout_stride_0: index, %outer_layout_stride_1: index):
   %outer_layout = encoding.layout.strided [%outer_layout_stride_0, %outer_layout_stride_1] : encoding<layout>
   %view = buffer.view %input[%base] : buffer -> view<4x4xf32, %outer_layout>
@@ -157,9 +157,9 @@ func.def @loop_rotation(%input: buffer, %iterate: i1, %keep: i1) -> (f32) {
 func.def @loop_rotation(%input: buffer, %iterate: i1, %keep: i1) -> (f32) {
   %base = index.constant 0 : offset
   %initial_layout = encoding.layout.strided [4, 1] : encoding<layout>
-  %17 = index.constant 4 : index
-  %18 = index.constant 1 : index
-  cfg.br ^header(%17: index, %18: index)
+  %15 = index.constant 4 : index
+  %16 = index.constant 1 : index
+  cfg.br ^header(%15: index, %16: index)
 ^header(%carried_layout_stride_0: index, %carried_layout_stride_1: index):
   %carried_layout = encoding.layout.strided [%carried_layout_stride_0, %carried_layout_stride_1] : encoding<layout>
   cfg.cond_br %iterate, ^body, ^exit
@@ -169,9 +169,9 @@ func.def @loop_rotation(%input: buffer, %iterate: i1, %keep: i1) -> (f32) {
   cfg.br ^latch(%carried_layout_stride_0: index, %carried_layout_stride_1: index)
 ^changed:
   %column_layout = encoding.layout.strided [1, 64] : encoding<layout>
-  %19 = index.constant 1 : index
-  %20 = index.constant 64 : index
-  cfg.br ^latch(%19: index, %20: index)
+  %17 = index.constant 1 : index
+  %18 = index.constant 64 : index
+  cfg.br ^latch(%17: index, %18: index)
 ^latch(%next_layout_stride_0: index, %next_layout_stride_1: index):
   %next_layout = encoding.layout.strided [%next_layout_stride_0, %next_layout_stride_1] : encoding<layout>
   cfg.br ^header(%next_layout_stride_0: index, %next_layout_stride_1: index)

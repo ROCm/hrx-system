@@ -90,9 +90,9 @@ test.target<low_core> @carrier_target
 func.def public target(@carrier_target) @choose_nested(%left_root: buffer, %left_offset: offset, %middle_root: buffer, %middle_offset: offset, %right_root: buffer, %right_offset: offset, %choose_middle: i1, %choose_right: i1) -> (buffer, offset) {
   cfg.br ^_bb1(%left_root: buffer, %left_offset: offset, %middle_root: buffer, %middle_offset: offset, %right_root: buffer, %right_offset: offset, %choose_middle: i1, %choose_right: i1)
 ^_bb1(%8: buffer, %0: offset, %10: buffer, %1: offset, %12: buffer, %2: offset, %3: i1, %4: i1):
-  %right = buffer.view %12[%2] : buffer -> view<1xi32>
-  %middle = buffer.view %10[%1] : buffer -> view<1xi32>
   %left = buffer.view %8[%0] : buffer -> view<1xi32>
+  %middle = buffer.view %10[%1] : buffer -> view<1xi32>
+  %right = buffer.view %12[%2] : buffer -> view<1xi32>
   %left_or_middle_root, %left_or_middle_offset = scf.if %3 -> (buffer, offset) {
     scf.yield %10, %1 : buffer, offset
   } else {
@@ -142,8 +142,8 @@ func.def public target(@carrier_target) @rotate(%first: buffer, %second: buffer,
   %second_view = buffer.view %1[%3] : buffer -> view<1xi32>
   cfg.br ^_bb2(%begin: index, %0: buffer, %2: offset, %1: buffer, %3: offset)
 ^_bb2(%iteration: index, %left_root: buffer, %left_offset: offset, %right_root: buffer, %right_offset: offset):
-  %right = buffer.view %right_root[%right_offset] : buffer -> view<1xi32>
   %left = buffer.view %left_root[%left_offset] : buffer -> view<1xi32>
+  %right = buffer.view %right_root[%right_offset] : buffer -> view<1xi32>
   %continue = index.cmp slt, %iteration, %4 : index
   cfg.cond_br %continue, ^_bb3, ^_bb4
 ^_bb3:
@@ -176,8 +176,8 @@ test.target<low_core> @carrier_target
 func.def noinline target(@carrier_target) @shuffle(%tag: i32, %left_root: buffer, %left_offset: offset, %middle: i64, %right_root: buffer, %right_offset: offset) -> (buffer, offset, i32, buffer, offset, i64) {
   cfg.br ^_bb1(%tag: i32, %left_root: buffer, %left_offset: offset, %middle: i64, %right_root: buffer, %right_offset: offset)
 ^_bb1(%0: i32, %30: buffer, %1: offset, %2: i64, %32: buffer, %3: offset):
-  %right = buffer.view %32[%3] : buffer -> view<1xi32>
   %left = buffer.view %30[%1] : buffer -> view<1xi32>
+  %right = buffer.view %32[%3] : buffer -> view<1xi32>
   func.return %32, %3, %0, %30, %1, %2 : buffer, offset, i32, buffer, offset, i64
 }
 

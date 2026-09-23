@@ -309,6 +309,7 @@ loom_cc_library(
     loom::target::callgraph_specialization
     loom::target::pass_environment
     loom::target::pass_requirements
+    loom::transforms::boundary::projection
     loom::transforms::cfg::branch_fusion
     loom::transforms::cfg::branch_sink
     loom::transforms::cfg::cfg_converge

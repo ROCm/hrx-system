@@ -22,6 +22,7 @@
 #include "loom/target/callgraph_specialization.h"
 #include "loom/target/pass_environment.h"
 #include "loom/target/pass_requirements.h"
+#include "loom/transforms/boundary/projection.h"
 #include "loom/transforms/cfg/branch_fusion.h"
 #include "loom/transforms/cfg/branch_sink.h"
 #include "loom/transforms/cfg/cfg_converge.h"
@@ -384,7 +385,7 @@ static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
     {
         .key = IREE_SVL("decompose-cfg-layout-transports"),
         .info = loom_decompose_cfg_layout_transports_pass_info,
-        .function_run = loom_decompose_cfg_layout_transports_run,
+        .module_run = loom_decompose_cfg_layout_transports_run,
     },
     {
         .key = IREE_SVL("decompose-scf-layout-transports"),
@@ -505,6 +506,14 @@ static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
         .key = IREE_SVL("pipeline-scf-for"),
         .info = loom_scf_pipeline_pass_info,
         .function_run = loom_scf_pipeline_run,
+    },
+    {
+        .key = IREE_SVL("project-boundary-representations"),
+        .info = loom_project_boundary_representations_pass_info,
+        .module_run = loom_project_boundary_representations_run,
+        .requirement_defs = kMutableFunctionVersionRequirements,
+        .requirement_count =
+            IREE_ARRAYSIZE(kMutableFunctionVersionRequirements),
     },
     {
         .key = IREE_SVL("promote-private-fragments"),

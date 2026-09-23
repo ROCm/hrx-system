@@ -41,10 +41,10 @@ typedef struct PipelineRunCounts {
   int last_source_combination_ordinal = 0;
   // First target legalization pass that selects physical representations.
   int first_target_legalization_ordinal = 0;
-  // Number of retained view-boundary decomposition pass runs.
-  int view_boundary_decomposition = 0;
-  // Lexical pass-run ordinal of retained view-boundary decomposition.
-  int view_boundary_decomposition_ordinal = 0;
+  // Number of composed boundary projection pass runs.
+  int boundary_projection = 0;
+  // Lexical pass-run ordinal of composed boundary projection.
+  int boundary_projection_ordinal = 0;
   // Number of source-to-low pass runs.
   int source_to_low = 0;
   // Lexical pass-run ordinal of source-to-low.
@@ -148,11 +148,10 @@ iree_status_t InspectPipelineRun(void* user_data, loom_op_t* op,
       counts->first_target_legalization_ordinal =
           count_context->current_run_ordinal;
     }
-  } else if (iree_string_view_equal(key,
-                                    IREE_SV("decompose-view-boundaries"))) {
-    ++counts->view_boundary_decomposition;
-    counts->view_boundary_decomposition_ordinal =
-        count_context->current_run_ordinal;
+  } else if (iree_string_view_equal(
+                 key, IREE_SV("project-boundary-representations"))) {
+    ++counts->boundary_projection;
+    counts->boundary_projection_ordinal = count_context->current_run_ordinal;
   } else if (iree_string_view_equal(key, IREE_SV("source-to-low"))) {
     ++counts->source_to_low;
     counts->source_to_low_ordinal = count_context->current_run_ordinal;
@@ -254,7 +253,7 @@ TEST_F(TargetPipelineTest, ZeroChecksBuildsNoSanitizerPassSlots) {
   EXPECT_TRUE(
       iree_string_view_equal(counts.final_template_rewrite, IREE_SV("inline")));
   EXPECT_EQ(counts.target_callgraph_specialization, 1);
-  EXPECT_EQ(counts.view_boundary_decomposition, 1);
+  EXPECT_EQ(counts.boundary_projection, 1);
   EXPECT_EQ(counts.source_to_low, 1);
   EXPECT_EQ(counts.symbol_dce, 1);
   EXPECT_LT(counts.final_template_selection_ordinal,
@@ -266,9 +265,8 @@ TEST_F(TargetPipelineTest, ZeroChecksBuildsNoSanitizerPassSlots) {
   EXPECT_LT(counts.last_source_combination_ordinal,
             counts.first_target_legalization_ordinal);
   EXPECT_LT(counts.first_target_legalization_ordinal,
-            counts.view_boundary_decomposition_ordinal);
-  EXPECT_LT(counts.view_boundary_decomposition_ordinal,
-            counts.source_to_low_ordinal);
+            counts.boundary_projection_ordinal);
+  EXPECT_LT(counts.boundary_projection_ordinal, counts.source_to_low_ordinal);
   EXPECT_LT(counts.source_to_low_ordinal, counts.last_target_inlining_ordinal);
   EXPECT_LT(counts.source_to_low_ordinal, counts.symbol_dce_ordinal);
   EXPECT_TRUE(iree_string_view_is_empty(counts.source_to_low_diagnostics));
@@ -294,7 +292,7 @@ TEST_F(TargetPipelineTest, ExpandedSourceStopsBeforeCallgraphSpecialization) {
       iree_string_view_equal(counts.final_template_rewrite, IREE_SV("inline")));
   EXPECT_EQ(counts.target_callgraph_specialization, 0);
   EXPECT_EQ(counts.first_target_inlining_ordinal, 0);
-  EXPECT_EQ(counts.view_boundary_decomposition, 0);
+  EXPECT_EQ(counts.boundary_projection, 0);
   EXPECT_EQ(counts.source_to_low, 0);
   EXPECT_EQ(counts.symbol_dce, 0);
 }
@@ -310,15 +308,14 @@ TEST_F(TargetPipelineTest, DiagnosticArtifactsPreserveRawSourceBoundary) {
   const PipelineRunCounts counts = CountPipelineRuns(module.get(), pipeline_op);
   EXPECT_EQ(counts.final_template_selection, 0);
   EXPECT_EQ(counts.target_callgraph_specialization, 1);
-  EXPECT_EQ(counts.view_boundary_decomposition, 1);
+  EXPECT_EQ(counts.boundary_projection, 1);
   EXPECT_EQ(counts.source_to_low, 1);
   EXPECT_EQ(counts.symbol_dce, 0);
   EXPECT_LT(counts.target_callgraph_specialization_ordinal,
             counts.first_target_inlining_ordinal);
   EXPECT_LT(counts.first_target_inlining_ordinal,
-            counts.view_boundary_decomposition_ordinal);
-  EXPECT_LT(counts.view_boundary_decomposition_ordinal,
-            counts.source_to_low_ordinal);
+            counts.boundary_projection_ordinal);
+  EXPECT_LT(counts.boundary_projection_ordinal, counts.source_to_low_ordinal);
   EXPECT_LT(counts.source_to_low_ordinal, counts.last_target_inlining_ordinal);
 }
 

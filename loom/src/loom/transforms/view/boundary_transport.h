@@ -4,11 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Physical decomposition of retained source view boundaries.
-//
-// Target providers declare the carrier they require. This module pass owns the
-// atomic rewrite of function signatures, semantic calls, returns, and CFG
-// edges so every use observes one coherent representation.
+// Focused retained-view boundary projection pass.
 
 #ifndef LOOM_TRANSFORMS_VIEW_BOUNDARY_TRANSPORT_H_
 #define LOOM_TRANSFORMS_VIEW_BOUNDARY_TRANSPORT_H_

@@ -1,0 +1,68 @@
+// RUN: pass specialize-target-callgraph,project-boundary-representations
+
+test.target<low_core> @carrier_target
+
+func.def public target(@carrier_target) @dependent_layout_and_view(%first: buffer, %second: buffer, %first_base: offset, %second_base: offset, %left_stride_input: index, %right_stride_input: index, %condition: i1) -> (i32) {
+  %left_stride = index.assume %left_stride_input [range(%left_stride_input, 4, 1024)] : index
+  %right_stride = index.assume %right_stride_input [range(%right_stride_input, 4, 1024)] : index
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  %left_layout = encoding.layout.strided [%left_stride, 1] : encoding<layout>
+  %left_view = buffer.view %first[%first_base] : buffer -> view<2x4xi32, %left_layout>
+  cfg.br ^join(%left_layout: encoding<layout>, %left_view: view<2x4xi32, %left_layout>)
+^right:
+  %right_layout = encoding.layout.strided [%right_stride, 1] : encoding<layout>
+  %right_view = buffer.view %second[%second_base] : buffer -> view<2x4xi32, %right_layout>
+  cfg.br ^join(%right_layout: encoding<layout>, %right_view: view<2x4xi32, %right_layout>)
+^join(%layout: encoding<layout>, %selected: view<2x4xi32, %layout>):
+  %value = view.load %selected[1, 0] : view<2x4xi32, %layout> -> i32
+  func.return %value : i32
+}
+
+// ----
+test.target<low_core> @carrier_target
+
+func.def public target(@carrier_target) @dependent_layout_and_view(%first: buffer, %second: buffer, %first_base: offset, %second_base: offset, %left_stride_input: index, %right_stride_input: index, %condition: i1) -> (i32) {
+  %left_stride = index.assume %left_stride_input [range(%left_stride_input, 4, 1024)] : index
+  %right_stride = index.assume %right_stride_input [range(%right_stride_input, 4, 1024)] : index
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  %left_layout = encoding.layout.strided [%left_stride, 1] : encoding<layout>
+  %left_view = buffer.view %first[%first_base] : buffer -> view<2x4xi32, %left_layout>
+  cfg.br ^join(%left_stride: index, %first: buffer, %first_base: offset)
+^right:
+  %right_layout = encoding.layout.strided [%right_stride, 1] : encoding<layout>
+  %right_view = buffer.view %second[%second_base] : buffer -> view<2x4xi32, %right_layout>
+  cfg.br ^join(%right_stride: index, %second: buffer, %second_base: offset)
+^join(%layout_stride_0: index, %selected_root: buffer, %selected_offset: offset):
+  %layout = encoding.layout.strided [%layout_stride_0, 1] : encoding<layout>
+  %selected = buffer.view %selected_root[%selected_offset] : buffer -> view<2x4xi32, %layout>
+  %value = view.load %selected[1, 0] : view<2x4xi32, %layout> -> i32
+  func.return %value : i32
+}
+
+// ====
+// RUN: with-checks pass-report specialize-target-callgraph,project-boundary-representations
+
+test.target<low_core> @carrier_target
+
+func.def public target(@carrier_target) @reports_composed_rules(%first: buffer, %second: buffer, %first_base: offset, %second_base: offset, %left_stride_input: index, %right_stride_input: index, %condition: i1) -> (i32) {
+  %left_stride = index.assume %left_stride_input [range(%left_stride_input, 4, 1024)] : index
+  %right_stride = index.assume %right_stride_input [range(%right_stride_input, 4, 1024)] : index
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  %left_layout = encoding.layout.strided [%left_stride, 1] : encoding<layout>
+  %left_view = buffer.view %first[%first_base] : buffer -> view<2x4xi32, %left_layout>
+  cfg.br ^join(%left_layout: encoding<layout>, %left_view: view<2x4xi32, %left_layout>)
+^right:
+  %right_layout = encoding.layout.strided [%right_stride, 1] : encoding<layout>
+  %right_view = buffer.view %second[%second_base] : buffer -> view<2x4xi32, %right_layout>
+  cfg.br ^join(%right_layout: encoding<layout>, %right_view: view<2x4xi32, %right_layout>)
+^join(%layout: encoding<layout>, %selected: view<2x4xi32, %layout>):
+  %value = view.load %selected[1, 0] : view<2x4xi32, %layout> -> i32
+  func.return %value : i32
+}
+
+// ----
+CHECK: *"changed":true,*
+CHECK: *"cfg-edges-rewritten":2,"layout-projections":1,"layout-components":1,"view-projections":1,"view-components":2}*

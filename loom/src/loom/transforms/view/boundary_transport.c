@@ -7,8 +7,8 @@
 #include "loom/transforms/view/boundary_transport.h"
 
 #include "loom/target/pass_environment.h"
-#include "loom/transforms/view/boundary_transport_apply.h"
-#include "loom/transforms/view/boundary_transport_plan.h"
+#include "loom/transforms/boundary/projection_driver.h"
+#include "loom/transforms/view/boundary_projection.h"
 
 #define LOOM_VIEW_BOUNDARY_TRANSPORT_STATISTICS(V, statistics_type) \
   V(statistics_type, functions_rewritten, "functions-rewritten",    \
@@ -48,42 +48,29 @@ iree_status_t loom_decompose_view_boundaries_run(loom_pass_t* pass,
   IREE_ASSERT(version_list != NULL);
   IREE_ASSERT(loom_target_pass_capability_function_version_owner(capability));
 
-  loom_view_boundary_plan_t plan = {
-      .pass = pass,
-      .module = module,
-      .arena = pass->arena,
+  const loom_boundary_projection_rule_t* rules[] = {
+      loom_view_boundary_projection_rule(),
   };
-  IREE_RETURN_IF_ERROR(loom_view_boundary_plan_prepare(&plan, version_list));
+  loom_boundary_projection_statistics_t projection_statistics;
+  iree_status_t status =
+      loom_boundary_projection_run(pass, module, version_list,
+                                   (loom_boundary_projection_rule_list_t){
+                                       .values = rules,
+                                       .count = IREE_ARRAYSIZE(rules),
+                                   },
+                                   &projection_statistics);
 
-  bool has_changes = false;
-  for (iree_host_size_t i = 0; i < plan.function_count; ++i) {
-    const loom_view_boundary_function_t* function = &plan.functions[i];
-    has_changes |= function->selected && (function->signature_changes ||
-                                          function->candidate_count != 0 ||
-                                          function->call_count != 0);
+  if (iree_status_is_ok(status)) {
+    IREE_ASSERT_EQ(projection_statistics.rule_count, IREE_ARRAYSIZE(rules));
+    loom_view_boundary_transport_statistics_t* statistics =
+        loom_view_boundary_transport_statistics(pass);
+    statistics->functions_rewritten +=
+        projection_statistics.functions_rewritten;
+    statistics->calls_rewritten += projection_statistics.calls_rewritten;
+    statistics->returns_rewritten += projection_statistics.returns_rewritten;
+    statistics->cfg_edges_rewritten +=
+        projection_statistics.cfg_edges_rewritten;
+    statistics->views_decomposed += projection_statistics.rules[0].projections;
   }
-  if (!has_changes) {
-    return iree_ok_status();
-  }
-
-  loom_rewriter_initialize(&plan.rewriter, module, pass->arena);
-  iree_status_t status = loom_view_boundary_apply(&plan);
-  const bool changed =
-      iree_any_bit_set(plan.rewriter.flags, LOOM_REWRITER_FLAG_CHANGED);
-  loom_rewriter_deinitialize(&plan.rewriter);
-  if (changed) {
-    loom_pass_value_fact_owner_invalidate(pass->value_facts);
-    if (iree_status_is_ok(status)) {
-      loom_pass_mark_changed(pass);
-    }
-  }
-
-  loom_view_boundary_transport_statistics_t* statistics =
-      loom_view_boundary_transport_statistics(pass);
-  statistics->functions_rewritten += plan.functions_rewritten;
-  statistics->calls_rewritten += plan.calls_rewritten;
-  statistics->returns_rewritten += plan.returns_rewritten;
-  statistics->cfg_edges_rewritten += plan.cfg_edges_rewritten;
-  statistics->views_decomposed += plan.views_decomposed;
   return status;
 }

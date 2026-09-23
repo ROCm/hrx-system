@@ -13,40 +13,36 @@ package(
 )
 
 loom_cc_library(
-    name = "boundary_transport",
-    srcs = [
-        "boundary_transport.c",
-        "boundary_transport_apply.c",
-        "boundary_transport_plan.c",
-    ],
-    hdrs = [
-        "boundary_transport.h",
-        "boundary_transport_apply.h",
-        "boundary_transport_plan.h",
-    ],
+    name = "boundary_projection",
+    srcs = ["boundary_projection.c"],
+    hdrs = ["boundary_projection.h"],
     deps = [
         "//loom/src/loom/analysis:symbolic_expr",
         "//loom/src/loom/analysis:view_regions",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
-        "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/buffer",
-        "//loom/src/loom/ops/cfg",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/scf",
-        "//loom/src/loom/pass:types",
-        "//loom/src/loom/pass:value_facts",
-        "//loom/src/loom/rewrite:remap",
         "//loom/src/loom/rewrite:rewriter",
-        "//loom/src/loom/target:function_version",
-        "//loom/src/loom/target:pass_environment",
         "//loom/src/loom/target:provider",
-        "//loom/src/loom/util:fact_table",
-        "//loom/src/loom/util:walk",
+        "//loom/src/loom/transforms/boundary:projection_core",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "boundary_transport",
+    srcs = ["boundary_transport.c"],
+    hdrs = ["boundary_transport.h"],
+    deps = [
+        ":boundary_projection",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/target:pass_environment",
+        "//loom/src/loom/transforms/boundary:projection_core",
+        "//runtime/src/iree/base",
     ],
 )
 

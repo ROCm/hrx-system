@@ -11,38 +11,41 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
-    boundary_transport
+    boundary_projection
   HDRS
-    "boundary_transport.h"
-    "boundary_transport_apply.h"
-    "boundary_transport_plan.h"
+    "boundary_projection.h"
   SRCS
-    "boundary_transport.c"
-    "boundary_transport_apply.c"
-    "boundary_transport_plan.c"
+    "boundary_projection.c"
   DEPS
     iree::base
-    iree::base::internal
     iree::base::internal::arena
     loom::analysis::symbolic_expr
     loom::analysis::view_regions
     loom::ir
     loom::ir::facts
     loom::ops::buffer
-    loom::ops::cfg
     loom::ops::index
-    loom::ops::op_defs
     loom::ops::scalar
     loom::ops::scf
-    loom::pass::types
-    loom::pass::value_facts
-    loom::rewrite::remap
     loom::rewrite::rewriter
-    loom::target::function_version
-    loom::target::pass_environment
     loom::target::provider
-    loom::util::fact_table
-    loom::util::walk
+    loom::transforms::boundary::projection_core
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    boundary_transport
+  HDRS
+    "boundary_transport.h"
+  SRCS
+    "boundary_transport.c"
+  DEPS
+    ::boundary_projection
+    iree::base
+    loom::pass::types
+    loom::target::pass_environment
+    loom::transforms::boundary::projection_core
   PUBLIC
 )
 

@@ -11,6 +11,22 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    cfg_layout_projection
+  HDRS
+    "cfg_layout_projection.h"
+  SRCS
+    "cfg_layout_projection.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::ops::encoding
+    loom::ops::index
+    loom::transforms::boundary::projection_core
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     layout_transport
   HDRS
     "layout_transport.h"
@@ -18,6 +34,7 @@ loom_cc_library(
     "layout_transport.c"
     "scf_layout_transport.c"
   DEPS
+    ::cfg_layout_projection
     iree::base
     iree::base::internal::arena
     loom::ir
@@ -29,6 +46,8 @@ loom_cc_library(
     loom::pass::value_facts
     loom::rewrite::rewriter
     loom::target::function_version
+    loom::target::pass_environment
+    loom::transforms::boundary::projection_core
     loom::util::fact_table
     loom::util::walk
   PUBLIC
