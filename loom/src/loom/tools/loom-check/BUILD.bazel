@@ -1,3 +1,4 @@
+load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "iree_select",
@@ -438,6 +439,13 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/testing:temp_file",
     ],
+)
+
+iree_execution_test_suite(
+    name = "execution_test",
+    manifests = ["loom-check.test.json"],
+    tags = ["hostonly"],
+    tools = {"loom-check": ":loom-check"},
 )
 
 loom_cc_library(

@@ -45,7 +45,6 @@ function(loom_check_compile_tests)
       ARGS
         ${_RULE_ARGS}
         "--target=${_COMPILER_TARGET}"
-        "--template-root=."
         "--source-prefix-map=${IREE_ROOT_DIR}/="
         "{{${_SOURCE}}}"
       DATA "${_SOURCE}" ${_RULE_DATA}
@@ -147,7 +146,6 @@ function(loom_check_test_suite)
       ARGS
         "--source-prefix-map=${IREE_ROOT_DIR}/="
         "--source-prefix-map={{${_ABS_SRC}}}=${_LOGICAL_SRC}"
-        "--template-root=."
         "{{${_ABS_SRC}}}"
       SRC
         ${_RULE_RUNNER}

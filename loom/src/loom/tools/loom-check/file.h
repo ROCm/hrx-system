@@ -21,13 +21,23 @@
 extern "C" {
 #endif
 
+// Selects execution or explicit source maintenance. Ordinary execution does not
+// open TEMPLATE sources; checked-in fixtures are self-contained test inputs.
+typedef enum loom_check_process_mode_e {
+  LOOM_CHECK_PROCESS_EXECUTE = 0,
+  // Synchronizes template inputs and updates expected output in-place.
+  LOOM_CHECK_PROCESS_UPDATE,
+  // Checks template freshness without executing cases or writing files.
+  LOOM_CHECK_PROCESS_CHECK_TEMPLATES,
+} loom_check_process_mode_t;
+
 typedef struct loom_check_process_options_t {
   // Offline compiler qualification replacing RUN execution when target is set.
   loom_check_compile_options_t compile;
   // Explicit source format for stdin or nonstandard filenames, empty for auto.
   iree_string_view_t input_format;
-  // Rewrites expected sections and synchronized template cases in-place.
-  bool update;
+  // File execution or source-maintenance action.
+  loom_check_process_mode_t mode;
   // Prints PASS/FAIL/SKIP for every case, not just failures.
   bool verbose;
   // Emits structured JSON file results to stdout.
@@ -36,8 +46,8 @@ typedef struct loom_check_process_options_t {
   loom_check_json_output_mode_t json_output_mode;
   // Logical source path normalization used for diagnostics and loc() output.
   loom_tooling_source_path_options_t source_path_options;
-  // Filesystem root used to resolve root-relative TEMPLATE paths. An empty
-  // value resolves them from the current working directory.
+  // Filesystem root for explicit TEMPLATE checks and updates. An empty value
+  // resolves paths from the current working directory. Unused during execution.
   iree_string_view_t template_root;
 } loom_check_process_options_t;
 

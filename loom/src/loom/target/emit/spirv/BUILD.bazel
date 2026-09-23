@@ -280,13 +280,7 @@ loom_check_test_suite(
         "test/workgroup_byte_offsets.loom-test",
         "test/workgroup_storage.loom-test",
     ],
-    data = _SPIRV_TOOL_DATA + [
-        "//loom/src/loom/test/corpus/source_low:memory_integer_terms.loom-test",
-        "//loom/src/loom/test/corpus/source_low:memory_scalar_addressing.loom-test",
-        "//loom/src/loom/test/corpus/source_low:memory_workgroup_scalar_addressing.loom-test",
-        "//loom/src/loom/test/corpus/source_low:numeric_index.loom-test",
-        "//loom/src/loom/test/corpus/source_low:ordinary_vector_structure.loom-test",
-    ],
+    data = _SPIRV_TOOL_DATA,
     env = _SPIRV_TOOL_ENV,
     test_name_prefix_to_strip = "test/",
 )

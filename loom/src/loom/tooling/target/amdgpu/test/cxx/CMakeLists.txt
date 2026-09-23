@@ -1675,7 +1675,6 @@ iree_native_test(
     "storage_division"
   WORKING_DIRECTORY "${IREE_ROOT_DIR}"
   ARGS
-    "--template-root=."
     "{{${CMAKE_CURRENT_SOURCE_DIR}/storage_division.cxx-test}}"
   SRC
     loom::tools::loom-check
@@ -1690,7 +1689,6 @@ iree_native_test(
     "assembly_lowering"
   WORKING_DIRECTORY "${IREE_ROOT_DIR}"
   ARGS
-    "--template-root=."
     "{{${CMAKE_CURRENT_SOURCE_DIR}/assembly_lowering.cxx-test}}"
   SRC
     loom::tools::loom-check
@@ -1705,7 +1703,6 @@ iree_native_test(
     "assembly_invalid"
   WORKING_DIRECTORY "${IREE_ROOT_DIR}"
   ARGS
-    "--template-root=."
     "{{${CMAKE_CURRENT_SOURCE_DIR}/assembly_invalid.cxx-test}}"
   SRC
     loom::tools::loom-check
@@ -1720,7 +1717,6 @@ iree_native_test(
     "vector_lookup"
   WORKING_DIRECTORY "${IREE_ROOT_DIR}"
   ARGS
-    "--template-root=."
     "{{${CMAKE_CURRENT_SOURCE_DIR}/vector_lookup.cxx-test}}"
   SRC
     loom::tools::loom-check

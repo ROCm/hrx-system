@@ -15,7 +15,6 @@ iree_native_test(
     "assembly_lowering"
   WORKING_DIRECTORY "${IREE_ROOT_DIR}"
   ARGS
-    "--template-root=."
     "{{${CMAKE_CURRENT_SOURCE_DIR}/test/assembly.cxx-test}}"
   SRC
     loom::tools::loom-check

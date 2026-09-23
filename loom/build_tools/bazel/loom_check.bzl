@@ -52,7 +52,7 @@ def _loom_check_wrapper_content(ctx):
         "RUNFILES=\"${{RUNFILES_DIR:-$0.runfiles}}\"\n" +
         "cd \"${{RUNFILES}}/{workspace}\"\n" +
         "exec \"${{PWD}}/{runner}\" \"$@\" " +
-        "{compile_argument}\"--template-root=${{PWD}}\" \"{fixture}\"\n"
+        "{compile_argument}\"{fixture}\"\n"
     ).format(
         workspace = ctx.workspace_name,
         runner = ctx.executable.runner.short_path,
@@ -146,7 +146,7 @@ def loom_check_compile_tests(name, src, targets, size = "small", tags = [], data
       targets: Typed compiler profile labels.
       size: Bazel test size.
       tags: Additional test tags.
-      data: Runfiles, including source corpus inputs for TEMPLATE fixtures.
+      data: Additional runtime data. TEMPLATE sources are not runtime inputs.
       env: Test environment variables.
       **kwargs: Additional sh_test attributes, including compiler arguments.
 
@@ -207,8 +207,8 @@ def loom_check_test(
       src: Source .<format>-test file containing the test cases.
       size: Test size (default: "small").
       tags: Additional tags to apply to the test.
-      data: Additional runfiles made available to loom-check, including every
-          corpus source named by a TEMPLATE directive.
+      data: Additional runfiles made available to loom-check. TEMPLATE sources
+          are checked by precommit and are not runtime inputs.
       env: Additional test environment variables.
       runner: loom-check compatible runner binary.
       compile_targets: Typed profiles checked independently of RUN goldens.

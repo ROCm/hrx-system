@@ -2,8 +2,8 @@
 
 set -euo pipefail
 
-if [[ "$#" -ne 3 ]]; then
-  printf "expected --probe, template root, and fixture path; got %d args\n" \
+if [[ "$#" -ne 2 ]]; then
+  printf "expected --probe and fixture path; got %d args\n" \
     "$#" >&2
   exit 1
 fi
@@ -13,13 +13,7 @@ if [[ "$1" != "--probe" ]]; then
   exit 1
 fi
 
-if [[ "$2" != "--template-root=${PWD}" ]]; then
-  printf "unexpected template root: %s (working directory: %s)\n" \
-    "$2" "${PWD}" >&2
-  exit 1
-fi
-
-fixture="$3"
+fixture="$2"
 case "${fixture}" in
   loom/build_tools/bazel/test/roundtrip.loom-test) ;;
   *)

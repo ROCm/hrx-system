@@ -342,6 +342,13 @@ class CliTest(unittest.TestCase):
             ],
         )
 
+    def test_bazel_test_ordinary_run_has_no_template_root(self):
+        argv = self.planned_argv(
+            ["bazel", "test", "//loom/src/loom/transforms/vector/test:test"]
+        )
+        self.assertNotIn("--strategy=TestRunner=standalone", argv)
+        self.assertFalse(any("--template-root=" in arg for arg in argv))
+
     def test_bazel_test_update_uses_standalone_test_runner_strategy(self):
         argv = self.planned_argv(
             [
@@ -353,6 +360,7 @@ class CliTest(unittest.TestCase):
         )
 
         self.assertIn("--strategy=TestRunner=standalone", argv)
+        self.assertIn(f"--test_arg=--template-root={cli.REPO_ROOT}", argv)
 
     def test_bazel_test_update_split_arg_uses_standalone_test_runner_strategy(self):
         argv = self.planned_argv(
@@ -366,6 +374,7 @@ class CliTest(unittest.TestCase):
         )
 
         self.assertIn("--strategy=TestRunner=standalone", argv)
+        self.assertIn(f"--test_arg=--template-root={cli.REPO_ROOT}", argv)
 
     def test_bazel_query_preserves_negative_target_separator(self):
         argv = self.planned_argv(

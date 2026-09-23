@@ -26,6 +26,11 @@ IREE_FLAG(bool, update, false,
           "section (after // ----) and synchronize TEMPLATE cases. Inserts\n"
           "the separator for non-empty output when absent.\n"
           "Cannot be used with stdin or verify mode.");
+IREE_FLAG_NAMED(
+    bool, check_templates, "check-templates", false,
+    "Check TEMPLATE freshness without executing RUN directives or\n"
+    "writing files. Accepts multiple input files. Used by precommit;\n"
+    "ordinary test execution does not read template sources.");
 IREE_FLAG(bool, verbose, false,
           "Print PASS/FAIL/SKIP for every case, not just failures.");
 IREE_FLAG_NAMED(
@@ -35,7 +40,8 @@ IREE_FLAG_NAMED(
 IREE_FLAG_NAMED(bool, list_input_formats, "list-input-formats", false,
                 "List input formats linked into this binary and exit.");
 IREE_FLAG(string, template_root, "",
-          "Filesystem root used to resolve root-relative TEMPLATE paths.\n"
+          "Filesystem root for TEMPLATE paths during --check-templates or\n"
+          "--update. Unused during ordinary test execution.\n"
           "Defaults to the current working directory.");
 IREE_FLAG(string, target, "",
           "Qualify every input case for this family:selector through the "
@@ -141,10 +147,10 @@ static void loom_check_print_agents_markdown(FILE* stream) {
       "//loom/src/loom/tools/loom-check/test:test\n"
       "```\n"
       "\n"
-      "Template-backed fixtures are rebuilt in memory during every ordinary\n"
-      "run. Drift fails before any case executes; Bazel and CMake test "
-      "targets\n"
-      "supply the template root and declare the template inputs they consume.\n"
+      "Checked-in template-backed fixtures are self-contained. Ordinary\n"
+      "runs and `--target` compilation do not read their template sources.\n"
+      "Precommit checks freshness with `--check-templates`, which accepts\n"
+      "multiple files without executing RUN directives or writing files.\n"
       "\n"
       "### Compile for a profile\n"
       "\n"
@@ -155,7 +161,7 @@ static void loom_check_print_agents_markdown(FILE* stream) {
       "annotations. No device is opened and numerical checks are not "
       "executed.\n"
       "RUN goldens, XFAIL, and execution requirements belong to the separate\n"
-      "ordinary check outcome. TEMPLATE synchronization still applies.\n"
+      "ordinary check outcome.\n"
       "\n"
       "```shell\n"
       "loom-check --target=amdgpu:gfx942 offsets.loom-test\n"
@@ -183,12 +189,13 @@ static void loom_check_print_agents_markdown(FILE* stream) {
       "\n"
       "`iree-bazel-test` detects this flag and uses Bazel's standalone\n"
       "TestRunner strategy so update-capable tests can rewrite checked-in\n"
-      "fixture files. After building a target, its generated executable can\n"
+      "fixture files. It supplies the checkout root for template updates.\n"
+      "After building a target, its generated executable can\n"
       "also be run directly and will append the fixture path automatically:\n"
       "\n"
       "```shell\n"
       "iree-bazel-build <loom-check-test-target>\n"
-      "bazel-bin/path/to/generated-test --update\n"
+      "bazel-bin/path/to/generated-test --template-root=\"$PWD\" --update\n"
       "```\n"
       "\n"
       "### Direct use\n"
@@ -202,8 +209,9 @@ static void loom_check_print_agents_markdown(FILE* stream) {
       "--template-root=. --update path/to/file.loom-test\n"
       "```\n"
       "\n"
-      "Direct runs resolve TEMPLATE paths from the current directory unless\n"
-      "`--template-root` is explicit. `--update` cannot be used with stdin or\n"
+      "Explicit checks and updates resolve TEMPLATE paths from the current\n"
+      "directory unless `--template-root` is explicit. Both use the same\n"
+      "synchronizer. `--update` cannot be used with stdin or\n"
       "verify-mode cases.\n"
       "\n"
       "### Emit output discipline\n"
@@ -237,6 +245,7 @@ int loom_check_main(int argc, char** argv,
       "\n"
       "Usage:\n"
       "  loom-check [flags] [file]\n"
+      "  loom-check --check-templates [flags] file...\n"
       "  cat test.loom-test | loom-check\n"
       "  loom-check --agents_md\n"
       "\n"
@@ -247,9 +256,10 @@ int loom_check_main(int argc, char** argv,
       "--test_arg=--update\n"
       "  The iree-bazel-test wrapper automatically uses Bazel's standalone\n"
       "  TestRunner strategy for --test_arg=--update so fixture files are\n"
-      "  writable. After building a target, its generated executable can also\n"
+      "  writable, and supplies the checkout root for template updates.\n"
+      "  After building a target, its generated executable can also\n"
       "  be run directly and will append the fixture path automatically:\n"
-      "    bazel-bin/path/to/generated-test --update\n"
+      "    bazel-bin/path/to/generated-test --template-root=\"$PWD\" --update\n"
       "\n"
       "Modes (set via // RUN: directive, default is roundtrip):\n"
       "  with-checks <mode> ...\n"
@@ -335,7 +345,8 @@ int loom_check_main(int argc, char** argv,
       "case.\n"
       "    Known REQUIRES names come from providers linked into this runner.\n"
       "    TEMPLATE is only accepted in the file preamble before the first "
-      "// ==== and stale files fail before case execution.\n"
+      "// ====. Precommit rejects stale files via --check-templates;\n"
+      "    ordinary test execution does not read template sources.\n"
       "    TEMPLATE-EXCLUDE belongs in that preamble, requires an exact case\n"
       "    name and a reason, and rejects duplicate or unknown names. "
       "Entirely\n"
@@ -411,7 +422,16 @@ int loom_check_main(int argc, char** argv,
           ? NULL
           : loom_tooling_configured_compile_environment();
   iree_status_t status = iree_ok_status();
-  if (argc > 2) {
+  if (FLAG_check_templates &&
+      (FLAG_update || !iree_string_view_is_empty(target) ||
+       FLAG_json.enabled)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "--check-templates cannot be combined with "
+                              "--update, --target, or --json");
+  } else if (FLAG_check_templates && argc < 2) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "--check-templates requires input files");
+  } else if (!FLAG_check_templates && argc > 2) {
     status = iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "loom-check accepts at most one input file or '-' for stdin; got %d "
@@ -470,7 +490,9 @@ int loom_check_main(int argc, char** argv,
                   .config_set = &config_set,
                   .sanitizer = sanitizer},
       .input_format = iree_make_cstring_view(FLAG_input_format),
-      .update = FLAG_update,
+      .mode = FLAG_check_templates ? LOOM_CHECK_PROCESS_CHECK_TEMPLATES
+              : FLAG_update        ? LOOM_CHECK_PROCESS_UPDATE
+                                   : LOOM_CHECK_PROCESS_EXECUTE,
       .verbose = FLAG_verbose,
       .json_enabled = FLAG_json.enabled,
       .json_output_mode = FLAG_json.output_mode,
@@ -489,14 +511,16 @@ int loom_check_main(int argc, char** argv,
           iree_string_view_empty(), &process_options, &environment, &context,
           &block_pool, host_allocator, &pass_count, &fail_count, &skip_count);
     } else {
-      status = loom_check_read_and_process(
-          iree_make_cstring_view(argv[1]), &process_options, &environment,
-          &context, &block_pool, host_allocator, &pass_count, &fail_count,
-          &skip_count);
+      for (int i = 1; iree_status_is_ok(status) && i < argc; ++i) {
+        status = loom_check_read_and_process(
+            iree_make_cstring_view(argv[i]), &process_options, &environment,
+            &context, &block_pool, host_allocator, &pass_count, &fail_count,
+            &skip_count);
+      }
     }
   }
 
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && !FLAG_check_templates) {
     loom_check_print_summary(pass_count, fail_count, skip_count);
   }
 

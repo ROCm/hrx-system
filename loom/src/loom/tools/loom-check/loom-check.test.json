@@ -1,0 +1,309 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "ordinary execution needs no template",
+      "steps": [
+        {
+          "name": "fixture",
+          "write": {
+            "path": "{tmp}/fixture.loom-test",
+            "text": "// TEMPLATE: shared.loom-test\n// RUN: roundtrip\n\nfunc.def @alpha() {\n}\n"
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "loom-check",
+            "args": [
+              "--template-root={tmp}/absent",
+              "{tmp}/fixture.loom-test"
+            ]
+          },
+          "stdout": {
+            "empty": true
+          },
+          "stderr": {
+            "contains": [
+              "1 passed"
+            ]
+          }
+        },
+        {
+          "name": "check missing template",
+          "run": {
+            "tool": "loom-check",
+            "args": [
+              "--check-templates",
+              "--template-root={tmp}",
+              "{tmp}/fixture.loom-test"
+            ]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stdout": {
+            "empty": true
+          },
+          "stderr": {
+            "contains": [
+              "reading TEMPLATE 'shared.loom-test'"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "template checks accept multiple files without executing them",
+      "steps": [
+        {
+          "name": "template",
+          "write": {
+            "path": "{tmp}/shared.loom-test",
+            "text": "// RUN: roundtrip\n\nfunc.def @alpha() {\n}\n"
+          }
+        },
+        {
+          "name": "consumer",
+          "write": {
+            "path": "{tmp}/fixture.loom-test",
+            "text": "// TEMPLATE: shared.loom-test\n// RUN: roundtrip\n\nfunc.def @alpha() {\n}\n\n// ----\nincorrect expected output\n"
+          }
+        },
+        {
+          "name": "plain source",
+          "write": {
+            "path": "{tmp}/plain.loom",
+            "text": "// RUN: pass unknown-pass\n\nnot executable Loom IR\n"
+          }
+        },
+        {
+          "name": "check",
+          "run": {
+            "tool": "loom-check",
+            "args": [
+              "--check-templates",
+              "--template-root={tmp}",
+              "{tmp}/plain.loom",
+              "{tmp}/fixture.loom-test"
+            ]
+          },
+          "stdout": {
+            "empty": true
+          },
+          "stderr": {
+            "empty": true
+          }
+        },
+        {
+          "name": "execute mismatching golden",
+          "run": {
+            "tool": "loom-check",
+            "args": [
+              "{tmp}/fixture.loom-test"
+            ]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stdout": {
+            "empty": true
+          },
+          "stderr": {
+            "contains": [
+              "1 failed"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "explicit update synchronizes stale template inputs",
+      "steps": [
+        {
+          "name": "template",
+          "write": {
+            "path": "{tmp}/shared.loom-test",
+            "text": "// RUN: roundtrip\n\nfunc.def @alpha() {\n}\n\n// ====\n\nfunc.def @beta() {\n}\n"
+          }
+        },
+        {
+          "name": "stale consumer",
+          "write": {
+            "path": "{tmp}/fixture.loom-test",
+            "text": "// TEMPLATE: shared.loom-test\n// RUN: roundtrip\n\nfunc.def @alpha() {\n}\n"
+          }
+        },
+        {
+          "name": "check drift",
+          "run": {
+            "tool": "loom-check",
+            "args": [
+              "--check-templates",
+              "--template-root={tmp}",
+              "{tmp}/fixture.loom-test"
+            ]
+          },
+          "exit": {
+            "nonzero": true
+          },
+          "stdout": {
+            "empty": true
+          },
+          "stderr": {
+            "contains": [
+              "is stale relative to",
+              "--update"
+            ]
+          }
+        },
+        {
+          "name": "update",
+          "run": {
+            "tool": "loom-check",
+            "args": [
+              "--update",
+              "--template-root={tmp}",
+              "{tmp}/fixture.loom-test"
+            ]
+          },
+          "stdout": {
+            "empty": true
+          },
+          "stderr": {
+            "contains": [
+              "2 passed"
+            ]
+          }
+        },
+        {
+          "name": "check synchronized source",
+          "run": {
+            "tool": "loom-check",
+            "args": [
+              "--check-templates",
+              "--template-root={tmp}",
+              "{tmp}/fixture.loom-test"
+            ]
+          },
+          "stdout": {
+            "empty": true
+          },
+          "stderr": {
+            "empty": true
+          }
+        },
+        {
+          "name": "execute synchronized cases",
+          "run": {
+            "tool": "loom-check",
+            "args": [
+              "--template-root={tmp}/absent",
+              "{tmp}/fixture.loom-test"
+            ]
+          },
+          "stdout": {
+            "empty": true
+          },
+          "stderr": {
+            "contains": [
+              "2 passed"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "template check rejects --update",
+      "run": {
+        "tool": "loom-check",
+        "args": [
+          "--check-templates",
+          "--update",
+          "unused.loom-test"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": [
+          "--check-templates cannot be combined"
+        ]
+      }
+    },
+    {
+      "name": "template check rejects --target=unused:target",
+      "run": {
+        "tool": "loom-check",
+        "args": [
+          "--check-templates",
+          "--target=unused:target",
+          "unused.loom-test"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": [
+          "--check-templates cannot be combined"
+        ]
+      }
+    },
+    {
+      "name": "template check rejects --json",
+      "run": {
+        "tool": "loom-check",
+        "args": [
+          "--check-templates",
+          "--json",
+          "unused.loom-test"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": [
+          "--check-templates cannot be combined"
+        ]
+      }
+    },
+    {
+      "name": "template check requires explicit input files",
+      "run": {
+        "tool": "loom-check",
+        "args": [
+          "--check-templates"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": [
+          "--check-templates requires input files"
+        ]
+      }
+    },
+    {
+      "name": "ordinary execution still rejects multiple files",
+      "run": {
+        "tool": "loom-check",
+        "args": [
+          "first.loom-test",
+          "second.loom-test"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": [
+          "at most one input file"
+        ]
+      }
+    }
+  ]
+}

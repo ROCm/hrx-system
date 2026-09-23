@@ -7,8 +7,9 @@
 // Template synchronization for loom-check target expectation suites.
 //
 // A target suite may declare a file-level `// TEMPLATE: <path>` directive.
-// Every loom-check run uses the template's cases as the authoritative case list
-// and verifies that the concrete target file is current. --update materializes
+// Explicit --check-templates source hygiene checks use the template's cases as
+// the authoritative case list and verify that the concrete target file is
+// current. Ordinary execution does not read templates. --update materializes
 // that list and source text while preserving the target suite's file-level RUN
 // directive and case-local RUN/REQUIRES/XFAIL directives. Targets are compiler
 // options in those directives; synchronization adds no target declarations,

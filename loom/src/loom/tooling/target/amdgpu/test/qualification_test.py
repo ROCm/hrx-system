@@ -25,7 +25,7 @@ class QualificationTest(unittest.TestCase):
         self.fixture = self.root / "fixture.loom-test"
         source = Path(_ARGS.fixture).read_text()
         source = "// TEMPLATE: corpus.loom-test\n" + source.split("\n", 1)[1]
-        # TEMPLATE synchronization requires the formatter's canonical LF output.
+        # Keep the copied fixture in its canonical LF form.
         self.fixture.write_text(source, newline="\n")
 
     def check(self, source, *arguments):
@@ -33,7 +33,6 @@ class QualificationTest(unittest.TestCase):
             [
                 _ARGS.checker,
                 "--target=amdgpu:gfx942",
-                f"--template-root={self.root}",
                 "--json=all",
                 *arguments,
                 str(source),
@@ -69,25 +68,35 @@ class QualificationTest(unittest.TestCase):
         self.assertEqual(report["summary"]["passed"], 11)
         self.assertEqual(report["summary"]["failed"], 2)
 
-    def test_missing_template_case_fails_before_compilation(self):
+    def test_compilation_uses_concrete_cases_without_template_synchronization(self):
         self.fixture.write_text(
             self.fixture.read_text().split("// ====", 1)[0], newline="\n"
         )
         result = self.check(self.fixture)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("stale relative to", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(
+            report["summary"], {"total": 1, "passed": 1, "failed": 0, "skipped": 0}
+        )
 
-    def test_missing_template_source_fails(self):
+    def test_compilation_needs_no_template_source(self):
         self.corpus.unlink()
+        original = self.fixture.read_bytes()
         result = self.check(self.fixture)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("reading TEMPLATE", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(
+            report["summary"], {"total": 13, "passed": 13, "failed": 0, "skipped": 0}
+        )
+        self.assertEqual(self.fixture.read_bytes(), original)
 
     def test_update_does_not_rewrite_goldens(self):
         original = self.fixture.read_bytes()
         result = self.check(self.fixture, "--update")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("does not update RUN goldens", result.stderr)
+        self.assertIn(
+            "cannot maintain template sources or update RUN goldens", result.stderr
+        )
         self.assertEqual(self.fixture.read_bytes(), original)
 
     def test_unknown_profile_is_not_a_skip(self):

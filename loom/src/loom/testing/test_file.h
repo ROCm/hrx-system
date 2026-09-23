@@ -73,7 +73,7 @@
 //   // XFAIL: <reason>      Mark case as expected failure.
 //   // TEMPLATE: <path>      Require this file to remain synchronized with a
 //                           root-relative corpus template. File-level only;
-//                           ordinary execution rejects stale files.
+//                           precommit checks freshness, not test execution.
 //   // TEMPLATE-EXCLUDE: @<case> <reason>
 //                           Omit one architecturally inapplicable template
 //                           case. File-level only; requires TEMPLATE.
@@ -96,20 +96,21 @@
 //
 // TEMPLATE:
 //   A // TEMPLATE: directive in the leading file preamble declares the source
-//   corpus for a target-specific expectation file. Test runners rebuild the
-//   authoritative source in memory and reject stale concrete files before
-//   executing any case. TEMPLATE is a provenance contract, not a linking
-//   mechanism or case namespace. The preamble is the leading directive/comment
-//   block containing TEMPLATE; do not add a // ==== separator before the first
-//   real case. A case is identified by its sole func-like definition or, when
-//   private helpers are present, its unique public func-like definition. The
-//   helpers remain authoritative template source. // CASE directives are
-//   intentionally unsupported.
-//   TEMPLATE-EXCLUDE names an exact case symbol and requires a nonempty reason.
-//   Duplicate exclusions and names absent from the template are errors. The
-//   remaining cases keep their template order and synchronization contract.
-//   Entirely inapplicable corpora need no target fixture; excluding every case
-//   is an error instead of producing an empty passing test.
+//   corpus for a target-specific expectation file. Source hygiene checks
+//   rebuild the authoritative source in memory and reject stale concrete files;
+//   explicit updates synchronize them. Ordinary test execution uses the
+//   concrete fixture without reading the template. TEMPLATE is a provenance
+//   contract, not a linking mechanism or case namespace. The preamble is the
+//   leading directive/comment block containing TEMPLATE; do not add a // ====
+//   separator before the first real case. A case is identified by its sole
+//   func-like definition or, when private helpers are present, its unique
+//   public func-like definition. The helpers remain authoritative template
+//   source. // CASE directives are intentionally unsupported. TEMPLATE-EXCLUDE
+//   names an exact case symbol and requires a nonempty reason. Duplicate
+//   exclusions and names absent from the template are errors. The remaining
+//   cases keep their template order and synchronization contract. Entirely
+//   inapplicable corpora need no target fixture; excluding every case is an
+//   error instead of producing an empty passing test.
 //
 // Annotations (for verify mode — uppercase to distinguish from comments):
 //   // ERROR: DOMAIN/CODE "substring"

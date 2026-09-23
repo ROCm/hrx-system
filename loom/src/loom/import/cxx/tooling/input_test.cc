@@ -350,7 +350,7 @@ TEST_F(InputTest, UpdatePreservesInputAndIsIdempotent) {
       "int entry() { return count; }\n";
   IREE_ASSERT_OK(Write(path.path(), source));
   loom_check_process_options_t options = {};
-  options.update = true;
+  options.mode = LOOM_CHECK_PROCESS_UPDATE;
   iree_host_size_t passed = 0, failed = 0, skipped = 0;
   IREE_ASSERT_OK(loom_check_read_and_process(
       path.path_view(), &options, &environment_, &context_, &pool_,

@@ -25,8 +25,6 @@ loom_check_test_suite(
     "reduce_axes_to_scalar.loom-test"
     "sink_single_use_reads.loom-test"
     "to_scalar.loom-test"
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/packed_memory_consumers.loom-test"
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

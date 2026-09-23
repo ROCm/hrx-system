@@ -339,6 +339,17 @@ loom_cc_test(
     loom::testing::context
 )
 
+iree_execution_test_suite(
+  NAME
+    execution_test
+  MANIFESTS
+    "loom-check.test.json"
+  TOOLS
+    "loom-check=::loom-check"
+  LABELS
+    "hostonly"
+)
+
 loom_cc_library(
   NAME
     main

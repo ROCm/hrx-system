@@ -316,11 +316,6 @@ loom_check_test_suite(
     "test/workgroup_byte_offsets.loom-test"
     "test/workgroup_storage.loom-test"
   DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/memory_integer_terms.loom-test"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/memory_scalar_addressing.loom-test"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/memory_workgroup_scalar_addressing.loom-test"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_index.loom-test"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/ordinary_vector_structure.loom-test"
     "iree::third_party::spirv_dis"
     "iree::third_party::spirv_val"
   ENV

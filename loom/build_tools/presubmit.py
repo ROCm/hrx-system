@@ -57,6 +57,8 @@ BAZEL_SOURCE_TOOL_ARGS = (
 BAZEL_FULL_TEST_TARGET = "//loom/..."
 LOOM_FORMAT_BAZEL_TARGET = "//loom/src/loom/tools/loom-format:loom-format"
 LOOM_FORMAT_CMAKE_TARGET = "loom::tools::loom-format"
+LOOM_CHECK_BAZEL_TARGET = "//loom/src/loom/tools/loom-check:loom-check-test"
+LOOM_CHECK_CMAKE_TARGET = "loom::tools::loom-check::loom-check-test"
 LOOM_LINT_BAZEL_TARGET = "//loom/py/loom/tools:loom-lint"
 LOOM_LINT_CMAKE_TARGET = "loom::py::loom::tools::loom-lint"
 LOOM_LINT_PYTHON_SOURCE = "loom/py/loom/tools/source_lint.py"
@@ -358,6 +360,37 @@ def run_source_format_maintenance(
     )
 
 
+def run_template_checks(*, lane: str, files_from: str | None) -> bool:
+    # A changed corpus can invalidate unchanged consumers. Check the complete
+    # source set; the native parser owns TEMPLATE discovery and comparison.
+    tracked_paths = tracked_lint_source_paths()
+    if tracked_paths is None:
+        return False
+    selected_paths = (
+        []
+        if files_from is None
+        else existing_lint_source_paths(selected_files(files_from))
+    )
+    check_paths = sorted(set(tracked_paths).union(selected_paths))
+    if not check_paths:
+        return True
+    checker_path = project_presubmit.build_and_resolve_executable(
+        PROJECT_NAME,
+        REPO_ROOT,
+        lane=lane,
+        bazel_target=LOOM_CHECK_BAZEL_TARGET,
+        cmake_target=LOOM_CHECK_CMAKE_TARGET,
+        bazel_args=BAZEL_SOURCE_TOOL_ARGS,
+    )
+    if checker_path is None:
+        return False
+    return run_batched_path_command(
+        [str(checker_path), "--check-templates", "--template-root=."],
+        check_paths,
+        "Loom template freshness",
+    )
+
+
 def run_source_lint(*, lane: str, files_from: str | None) -> bool:
     tracked_paths = tracked_lint_source_paths()
     if tracked_paths is None:
@@ -539,6 +572,7 @@ def run_presubmit(args: argparse.Namespace) -> int:
             )
             and ok
         )
+        ok = run_template_checks(lane=args.lane, files_from=args.files_from) and ok
         ok = run_source_lint(lane=args.lane, files_from=args.files_from) and ok
     if args.tests:
         if args.lane == "bazel":

@@ -94,10 +94,11 @@ class FileTest : public ::testing::Test {
   }
 
   iree_status_t Process(const std::string& path,
-                        const std::string& template_root, bool update,
+                        const std::string& template_root,
+                        loom_check_process_mode_t mode,
                         CaseCounts* out_counts) {
     loom_check_process_options_t options = {};
-    options.update = update;
+    options.mode = mode;
     options.template_root = StringView(template_root);
     return loom_check_read_and_process(
         StringView(path), &options, &environment_, &context_, &block_pool_,
@@ -111,7 +112,26 @@ class FileTest : public ::testing::Test {
   loom_check_environment_t environment_;
 };
 
-TEST_F(FileTest, FreshTemplatePassesWithoutMutation) {
+TEST_F(FileTest, OrdinaryExecutionDoesNotReadTemplate) {
+  iree::testing::TempFilePath path("loom_check_independent", ".loom-test");
+  const std::string source =
+      "// TEMPLATE: absent.loom-test\n"
+      "// RUN: roundtrip\n"
+      "\n"
+      "func.def @alpha() {\n"
+      "}\n";
+  IREE_ASSERT_OK(WriteFile(path.path(), source));
+
+  CaseCounts counts;
+  IREE_ASSERT_OK(Process(path.path(), template_root_ + "absent-root",
+                         LOOM_CHECK_PROCESS_EXECUTE, &counts));
+  EXPECT_EQ(counts.pass_count, 1u);
+  EXPECT_EQ(counts.fail_count, 0u);
+  EXPECT_EQ(counts.skip_count, 0u);
+  EXPECT_EQ(ReadFile(path.path()), source);
+}
+
+TEST_F(FileTest, TemplateCheckDoesNotExecuteOrUpdateCases) {
   iree::testing::TempFilePath template_path("loom_check_template",
                                             ".loom-test");
   iree::testing::TempFilePath target_path("loom_check_target", ".loom-test");
@@ -125,15 +145,18 @@ TEST_F(FileTest, FreshTemplatePassesWithoutMutation) {
       "// RUN: roundtrip\n"
       "\n"
       "func.def @alpha() {\n"
-      "}\n";
+      "}\n"
+      "\n"
+      "// ----\n"
+      "deliberately incorrect expected output\n";
   IREE_ASSERT_OK(WriteFile(template_path.path(), template_source));
   IREE_ASSERT_OK(WriteFile(target_path.path(), target_source));
 
   CaseCounts counts;
-  IREE_ASSERT_OK(
-      Process(target_path.path(), template_root_, /*update=*/false, &counts));
+  IREE_ASSERT_OK(Process(target_path.path(), template_root_,
+                         LOOM_CHECK_PROCESS_CHECK_TEMPLATES, &counts));
 
-  EXPECT_EQ(counts.pass_count, 1u);
+  EXPECT_EQ(counts.pass_count, 0u);
   EXPECT_EQ(counts.fail_count, 0u);
   EXPECT_EQ(counts.skip_count, 0u);
   EXPECT_EQ(ReadFile(target_path.path()), target_source);
@@ -149,7 +172,7 @@ TEST_F(FileTest, UpdatePreservesPassingAndFailingChecks) {
   IREE_ASSERT_OK(WriteFile(path.path(), source));
   CaseCounts counts;
   IREE_ASSERT_OK(
-      Process(path.path(), template_root_, /*update=*/true, &counts));
+      Process(path.path(), template_root_, LOOM_CHECK_PROCESS_UPDATE, &counts));
   EXPECT_EQ(counts.pass_count, 1u);
   EXPECT_EQ(counts.fail_count, 1u);
   EXPECT_EQ(ReadFile(path.path()), source);
@@ -178,7 +201,7 @@ TEST_F(FileTest, JsonDoesNotSuggestReplacingChecksWithGoldens) {
   EXPECT_EQ(ReadFile(path.path()), source);
 }
 
-TEST_F(FileTest, StaleTemplateFailsBeforeXfailCaseExecution) {
+TEST_F(FileTest, StaleTemplateCheckFailsWithoutApplyingXfail) {
   iree::testing::TempFilePath template_path("loom_check_template",
                                             ".loom-test");
   iree::testing::TempFilePath target_path("loom_check_target", ".loom-test");
@@ -203,8 +226,8 @@ TEST_F(FileTest, StaleTemplateFailsBeforeXfailCaseExecution) {
   IREE_ASSERT_OK(WriteFile(target_path.path(), target_source));
 
   CaseCounts counts;
-  iree::Status status(
-      Process(target_path.path(), template_root_, /*update=*/false, &counts));
+  iree::Status status(Process(target_path.path(), template_root_,
+                              LOOM_CHECK_PROCESS_CHECK_TEMPLATES, &counts));
 
   EXPECT_THAT(status, StatusIs(iree::StatusCode::kFailedPrecondition));
   EXPECT_THAT(status.ToString(), HasSubstr("is stale relative to"));
@@ -237,19 +260,23 @@ TEST_F(FileTest, MissingTemplateRootFailsWithoutCheckoutFallback) {
   IREE_ASSERT_OK(WriteFile(target_path.path(), target_source));
 
   const std::string missing_root = template_root_ + "missing-template-root";
-  CaseCounts counts;
-  iree::Status status(
-      Process(target_path.path(), missing_root, /*update=*/false, &counts));
+  for (auto mode :
+       {LOOM_CHECK_PROCESS_CHECK_TEMPLATES, LOOM_CHECK_PROCESS_UPDATE}) {
+    SCOPED_TRACE(mode);
+    CaseCounts counts;
+    iree::Status status(
+        Process(target_path.path(), missing_root, mode, &counts));
 
-  EXPECT_THAT(status, StatusIs(iree::StatusCode::kNotFound));
-  EXPECT_THAT(status.ToString(), HasSubstr("reading TEMPLATE"));
-  EXPECT_THAT(status.ToString(),
-              HasSubstr(RootRelativeName(template_path.path())));
-  EXPECT_THAT(status.ToString(), HasSubstr(target_path.path()));
-  EXPECT_EQ(counts.pass_count, 0u);
-  EXPECT_EQ(counts.fail_count, 0u);
-  EXPECT_EQ(counts.skip_count, 0u);
-  EXPECT_EQ(ReadFile(target_path.path()), target_source);
+    EXPECT_THAT(status, StatusIs(iree::StatusCode::kNotFound));
+    EXPECT_THAT(status.ToString(), HasSubstr("reading TEMPLATE"));
+    EXPECT_THAT(status.ToString(),
+                HasSubstr(RootRelativeName(template_path.path())));
+    EXPECT_THAT(status.ToString(), HasSubstr(target_path.path()));
+    EXPECT_EQ(counts.pass_count, 0u);
+    EXPECT_EQ(counts.fail_count, 0u);
+    EXPECT_EQ(counts.skip_count, 0u);
+    EXPECT_EQ(ReadFile(target_path.path()), target_source);
+  }
 }
 
 TEST_F(FileTest, UpdateSynchronizesOnceAndThenIsByteStable) {
@@ -276,8 +303,8 @@ TEST_F(FileTest, UpdateSynchronizesOnceAndThenIsByteStable) {
   IREE_ASSERT_OK(WriteFile(target_path.path(), target_source));
 
   CaseCounts first_counts;
-  IREE_ASSERT_OK(Process(target_path.path(), template_root_, /*update=*/true,
-                         &first_counts));
+  IREE_ASSERT_OK(Process(target_path.path(), template_root_,
+                         LOOM_CHECK_PROCESS_UPDATE, &first_counts));
   const std::string synchronized_source = ReadFile(target_path.path());
   EXPECT_NE(synchronized_source, target_source);
   EXPECT_THAT(synchronized_source, HasSubstr("func.def @beta() {"));
@@ -287,16 +314,16 @@ TEST_F(FileTest, UpdateSynchronizesOnceAndThenIsByteStable) {
   EXPECT_EQ(first_counts.skip_count, 0u);
 
   CaseCounts second_counts;
-  IREE_ASSERT_OK(Process(target_path.path(), template_root_, /*update=*/true,
-                         &second_counts));
+  IREE_ASSERT_OK(Process(target_path.path(), template_root_,
+                         LOOM_CHECK_PROCESS_UPDATE, &second_counts));
   EXPECT_EQ(ReadFile(target_path.path()), synchronized_source);
   EXPECT_EQ(second_counts.pass_count, 2u);
   EXPECT_EQ(second_counts.fail_count, 0u);
   EXPECT_EQ(second_counts.skip_count, 0u);
 
   CaseCounts read_only_counts;
-  IREE_ASSERT_OK(Process(target_path.path(), template_root_, /*update=*/false,
-                         &read_only_counts));
+  IREE_ASSERT_OK(Process(target_path.path(), template_root_,
+                         LOOM_CHECK_PROCESS_EXECUTE, &read_only_counts));
   EXPECT_EQ(ReadFile(target_path.path()), synchronized_source);
   EXPECT_EQ(read_only_counts.pass_count, 2u);
   EXPECT_EQ(read_only_counts.fail_count, 0u);
@@ -338,8 +365,8 @@ TEST_F(FileTest, FreshTemplatePreservesXfailAndXpassSemantics) {
   IREE_ASSERT_OK(WriteFile(target_path.path(), target_source));
 
   CaseCounts counts;
-  IREE_ASSERT_OK(
-      Process(target_path.path(), template_root_, /*update=*/false, &counts));
+  IREE_ASSERT_OK(Process(target_path.path(), template_root_,
+                         LOOM_CHECK_PROCESS_EXECUTE, &counts));
 
   EXPECT_EQ(counts.pass_count, 1u);
   EXPECT_EQ(counts.fail_count, 1u);

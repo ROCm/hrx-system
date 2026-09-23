@@ -77,6 +77,22 @@ def _test_loom_check_wrapper_uses_test_runner_impl(env, target):
     if not str(info.runner).endswith("//loom/src/loom/tools/loom-check:loom-check-test"):
         env.fail("unexpected default runner %s" % info.runner)
 
+def _test_template_fixture_has_no_corpus_runfiles(name, **kwargs):
+    analysis_test(
+        name = name,
+        impl = _test_template_fixture_has_no_corpus_runfiles_impl,
+        target = "//loom/src/loom/transforms/vector/test:packed_memory_consumers_launcher",
+        **kwargs
+    )
+
+def _test_template_fixture_has_no_corpus_runfiles_impl(env, target):
+    fixture = target[LoomCheckTestInfo].fixture
+    files = target[DefaultInfo].default_runfiles.files.to_list()
+    env.expect.that_bool(fixture in files).equals(True)
+    for file in files:
+        if file.short_path.startswith("loom/src/loom/test/corpus/source_low/"):
+            env.fail("template source is a test runtime dependency: %s" % file)
+
 def _test_compiler_profile_uses_typed_identity(name, **kwargs):
     loom_check_test(
         name = name + "_subject",
@@ -129,6 +145,7 @@ def loom_check_rules_test_suite(name):
         tests = [
             _test_loom_check_wrapper_declares_fixture,
             _test_loom_check_wrapper_uses_test_runner,
+            _test_template_fixture_has_no_corpus_runfiles,
             _test_compiler_profile_uses_typed_identity,
             _test_execution_and_compiler_share_module,
         ],

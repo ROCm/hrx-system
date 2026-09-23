@@ -107,7 +107,8 @@ static iree_status_t loom_check_build_template_source(
     *out_changed =
         !iree_string_view_equal(source, iree_string_builder_view(new_source));
   }
-  if (iree_status_is_ok(status) && *out_changed && !options->update) {
+  if (iree_status_is_ok(status) && *out_changed &&
+      options->mode == LOOM_CHECK_PROCESS_CHECK_TEMPLATES) {
     const iree_string_view_t update_root =
         iree_string_view_is_empty(options->template_root)
             ? IREE_SV(".")
@@ -133,14 +134,13 @@ static iree_status_t loom_check_process_file(
     iree_string_view_t source, bool is_stdin,
     const loom_check_process_options_t* options,
     const loom_check_environment_t* environment, loom_context_t* context,
-    iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
+    iree_arena_block_pool_t* block_pool, iree_arena_allocator_t* arena,
+    iree_string_builder_t* template_synced_source, iree_allocator_t allocator,
     iree_host_size_t* pass_count, iree_host_size_t* fail_count,
     iree_host_size_t* skip_count) {
-  iree_arena_allocator_t arena;
-  iree_arena_initialize(block_pool, &arena);
-
   loom_test_file_t file = {0};
   const bool compile = !iree_string_view_is_empty(options->compile.target);
+  const bool update = options->mode == LOOM_CHECK_PROCESS_UPDATE;
   // Binary modules cannot contain case directives. Textual provider selection
   // happens after splitting so each case's INPUT can override the filename.
   const bool bytecode =
@@ -159,24 +159,25 @@ static iree_status_t loom_check_process_file(
       file.case_count = 1;
     }
   } else {
-    status = loom_test_file_parse(source, &arena, &file);
+    status = loom_test_file_parse(source, arena, &file);
   }
 
-  if (iree_status_is_ok(status) && options->update && is_stdin) {
+  if (iree_status_is_ok(status) && update && is_stdin) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "--update cannot be used with stdin");
   }
-  if (iree_status_is_ok(status) && compile && options->update) {
+  if (iree_status_is_ok(status) && compile &&
+      options->mode != LOOM_CHECK_PROCESS_EXECUTE) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "--target does not update RUN goldens");
+                              "--target cannot maintain template sources or "
+                              "update RUN goldens");
   }
 
-  iree_string_builder_t template_synced_source;
-  iree_string_builder_initialize(allocator, &template_synced_source);
   bool template_sync_changed = false;
+  const bool maintain_template = file.has_template_directive &&
+                                 options->mode != LOOM_CHECK_PROCESS_EXECUTE;
   for (iree_host_size_t i = 0;
-       iree_status_is_ok(status) && file.has_template_directive &&
-       i < file.case_count;
+       iree_status_is_ok(status) && maintain_template && i < file.case_count;
        ++i) {
     const loom_input_provider_t* provider = NULL;
     iree_string_view_t format = file.cases[i].input_options.format;
@@ -191,18 +192,23 @@ static iree_status_t loom_check_process_file(
                            "TEMPLATE materialization requires Loom text input");
     }
   }
-  if (iree_status_is_ok(status) && file.has_template_directive) {
+  if (iree_status_is_ok(status) && maintain_template) {
     status = loom_check_build_template_source(
         path, filename, source, &file, options, context, environment,
-        block_pool, &arena, allocator, &template_synced_source,
+        block_pool, arena, allocator, template_synced_source,
         &template_sync_changed);
     if (iree_status_is_ok(status) && template_sync_changed) {
-      iree_arena_deinitialize(&arena);
-      iree_arena_initialize(block_pool, &arena);
-      source = iree_string_builder_view(&template_synced_source);
+      iree_arena_deinitialize(arena);
+      iree_arena_initialize(block_pool, arena);
+      source = iree_string_builder_view(template_synced_source);
       file = (loom_test_file_t){0};
-      status = loom_test_file_parse(source, &arena, &file);
+      status = loom_test_file_parse(source, arena, &file);
     }
+  }
+
+  if (options->mode == LOOM_CHECK_PROCESS_CHECK_TEMPLATES) {
+    // Source hygiene is independent of RUN, expectations, and target support.
+    return status;
   }
 
   if (iree_status_is_ok(status) && compile) {
@@ -220,11 +226,11 @@ static iree_status_t loom_check_process_file(
 
   loom_check_file_report_t report = {0};
   if (iree_status_is_ok(status)) {
-    status = loom_check_file_report_initialize(&file, &arena, &report);
+    status = loom_check_file_report_initialize(&file, arena, &report);
   }
 
   loom_check_case_update_t* updates = NULL;
-  if (iree_status_is_ok(status) && options->update && file.case_count > 0) {
+  if (iree_status_is_ok(status) && update && file.case_count > 0) {
     status = iree_allocator_malloc_array(allocator, file.case_count,
                                          sizeof(*updates), (void**)&updates);
   }
@@ -349,8 +355,6 @@ static iree_status_t loom_check_process_file(
     iree_allocator_free(allocator, results);
   }
   iree_allocator_free(allocator, updates);
-  iree_string_builder_deinitialize(&template_synced_source);
-  iree_arena_deinitialize(&arena);
   return status;
 }
 
@@ -375,9 +379,16 @@ iree_status_t loom_check_read_and_process(
         filename, &options->source_path_options, host_allocator, &filename,
         &filename_storage);
     if (iree_status_is_ok(status)) {
+      iree_arena_allocator_t arena;
+      iree_arena_initialize(block_pool, &arena);
+      iree_string_builder_t template_synced_source;
+      iree_string_builder_initialize(host_allocator, &template_synced_source);
       status = loom_check_process_file(
           path, filename, source, is_stdin, options, environment, context,
-          block_pool, host_allocator, pass_count, fail_count, skip_count);
+          block_pool, &arena, &template_synced_source, host_allocator,
+          pass_count, fail_count, skip_count);
+      iree_string_builder_deinitialize(&template_synced_source);
+      iree_arena_deinitialize(&arena);
     }
     iree_allocator_free(host_allocator, filename_storage);
   }

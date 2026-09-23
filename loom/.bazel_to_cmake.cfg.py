@@ -1552,7 +1552,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         test_binary_block = self._convert_single_target_block("SRC", runner)
         args_block = self._convert_string_list_block(
             "ARGS",
-            ["--template-root=.", "{{${CMAKE_CURRENT_SOURCE_DIR}/%s}}" % src],
+            ["{{${CMAKE_CURRENT_SOURCE_DIR}/%s}}" % src],
             sort=False,
         )
         data_block = self._convert_data_list_block(data)

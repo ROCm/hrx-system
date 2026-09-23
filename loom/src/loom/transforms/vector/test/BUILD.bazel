@@ -28,5 +28,4 @@ loom_check_test_suite(
         "sink_single_use_reads.loom-test",
         "to_scalar.loom-test",
     ],
-    data = ["//loom/src/loom/test/corpus/source_low:packed_memory_consumers.loom-test"],
 )
