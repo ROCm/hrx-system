@@ -200,6 +200,20 @@ AMDGPU_BAZEL_TEST_TAG_FILTERS = (
     AMDGPU_BUILD_REQUIREMENT_TAG,
     AMDGPU_RUN_REQUIREMENT_TAG,
 )
+AMDGPU_BAZEL_COVERAGE_TARGETS = (
+    "//runtime/...",
+    "//loom/...",
+    "//libamdf/...",
+)
+AMDGPU_BAZEL_COVERAGE_CONFIGURE_OPTIONS = (
+    "--//loom/config/execute:enable=iree_hal",
+    "--//libamdf/config:enabled=true",
+    "--//libamdf/config:families=rdna,cdna",
+)
+AMDGPU_BAZEL_COVERAGE_TEST_TAG_FILTERS = AMDGPU_BAZEL_TEST_TAG_FILTERS + (
+    "iree-run-requirement=libamdf.resource.amd_gpu",
+)
+AMDGPU_BAZEL_COVERAGE_RESOURCES = AMDGPU_RESOURCES + ("libamdf.resource.amd_gpu",)
 AMDGPU_BAZEL_TARGET_EXCLUDES = (
     "-//runtime/src/iree/hal/drivers/vulkan/...",
     "-//runtime/src/iree/hal/drivers/webgpu/...",
@@ -352,7 +366,6 @@ NATIVE_ARTIFACT_PRODUCER_OPTIONS = NATIVE_ARTIFACT_PROFILE_OPTIONS + (
 NATIVE_ARTIFACT_CONSUMER_OPTIONS = NATIVE_ARTIFACT_PROFILE_OPTIONS + (
     "--build_tests_only",
 )
-NATIVE_ARTIFACT_AMDGPU_RESOURCES = AMDGPU_RESOURCES + ("libamdf.resource.amd_gpu",)
 NATIVE_ARTIFACT_TOOLCHAIN_NAMES = tuple(
     f"artifact_{role}_toolchain"
     for role in ("benchmark", "compile", "format", "link", "lint", "test")

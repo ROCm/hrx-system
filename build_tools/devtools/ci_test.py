@@ -595,7 +595,7 @@ class CiTest(unittest.TestCase):
         self.assertNotIn("IREE_ROCM_PATH", text)
         self.assertNotIn("/opt/rocm", text)
 
-    def test_amdgpu_target_selects_runtime_and_loom_build_settings(self):
+    def test_amdgpu_ordinary_selects_full_coverage(self):
         args = ci.parse_arguments(
             [
                 "iree-bazel-amdgpu",
@@ -621,6 +621,28 @@ class CiTest(unittest.TestCase):
                 "--//loom/config/target/amdgpu:targets=iree_hal",
                 step.argv,
             )
+
+        configure_step = next(step for step in steps if step.name == "Configure Bazel")
+        self.assertIn("--//loom/config/import:enable=cxx", configure_step.argv)
+        for option in ci_config.AMDGPU_BAZEL_COVERAGE_CONFIGURE_OPTIONS:
+            self.assertIn(option, configure_step.argv)
+
+        test_step = next(step for step in steps if step.name == "Test IREE / AMDGPU")
+        for target in ci_config.AMDGPU_BAZEL_COVERAGE_TARGETS:
+            self.assertIn(target, test_step.argv)
+        test_tag_filters = next(
+            option
+            for option in test_step.argv
+            if option.startswith("--test_tag_filters=")
+        )
+        self.assertIn(
+            "iree-run-requirement=libamdf.resource.amd_gpu",
+            test_tag_filters,
+        )
+        self.assertNotIn(
+            "-iree-run-requirement=libamdf.resource.amd_gpu",
+            test_tag_filters,
+        )
 
     def test_amdgpu_target_rejected_by_non_amdgpu_command(self):
         args = ci.parse_arguments(["iree-bazel-cpu", "--amdgpu-target", "gfx1150"])

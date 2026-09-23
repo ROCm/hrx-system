@@ -644,6 +644,8 @@ def amdgpu_test_steps(
     target_selector: str,
     config: str | None = None,
     xfail_targets: tuple[str, ...] = (),
+    test_tag_filters: tuple[str, ...] = ci_config.AMDGPU_BAZEL_TEST_TAG_FILTERS,
+    available_resources: tuple[str, ...] = ci_config.AMDGPU_RESOURCES,
 ) -> list[CiStep]:
     config_name = f" / {config.upper()}" if config is not None else ""
     scoped_targets = targets + ci_config.AMDGPU_BAZEL_TARGET_EXCLUDES
@@ -656,10 +658,8 @@ def amdgpu_test_steps(
             f"Test IREE / AMDGPU{config_name}",
             scoped_targets + xfail_targets,
             config=config,
-            test_tag_filters=(
-                ci_config.AMDGPU_BAZEL_TEST_TAG_FILTERS + host_sanitizer_tag_filters
-            ),
-            available_resources=ci_config.AMDGPU_RESOURCES,
+            test_tag_filters=(test_tag_filters + host_sanitizer_tag_filters),
+            available_resources=available_resources,
             test_env=amdgpu_libhsa_test_env(),
             bazel_options=bazel_options + ("--build_tests_only",),
         ),
@@ -671,6 +671,8 @@ def amdgpu_steps(targets: tuple[str, ...], target_selector: str) -> list[CiStep]
         bazel_configure_step(
             enabled_drivers=("amdgpu",),
             enabled_loom_targets=("amdgpu",),
+            enabled_loom_importers=("cxx",),
+            extra_options=ci_config.AMDGPU_BAZEL_COVERAGE_CONFIGURE_OPTIONS,
         ),
         *amdgpu_test_steps(
             targets,
@@ -679,6 +681,8 @@ def amdgpu_steps(targets: tuple[str, ...], target_selector: str) -> list[CiStep]
                 ci_config.AMDGPU_XFAIL_TARGETS
                 + ci_config.amdgpu_bazel_xfail_targets(target_selector)
             ),
+            test_tag_filters=ci_config.AMDGPU_BAZEL_COVERAGE_TEST_TAG_FILTERS,
+            available_resources=ci_config.AMDGPU_BAZEL_COVERAGE_RESOURCES,
         ),
     ]
 
@@ -935,7 +939,7 @@ def native_artifact_amdgpu_steps(
                 ci_config.NATIVE_ARTIFACT_AMDGPU_TEST_TAGS
                 + native_artifact_xfail_tag_filters(xfail_targets)
             ),
-            available_resources=ci_config.NATIVE_ARTIFACT_AMDGPU_RESOURCES,
+            available_resources=ci_config.AMDGPU_BAZEL_COVERAGE_RESOURCES,
             test_env=test_environment,
             bazel_options=bazel_options,
         ),
@@ -1460,6 +1464,8 @@ def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
                 ),
                 *amdgpu_config_steps(targets, amdgpu_target_selector, sanitizer),
             ]
+        if not args.target:
+            targets = ci_config.AMDGPU_BAZEL_COVERAGE_TARGETS
         return amdgpu_steps(targets, amdgpu_target_selector)
     if bazel_target == "vulkan":
         return vulkan_steps(targets)
