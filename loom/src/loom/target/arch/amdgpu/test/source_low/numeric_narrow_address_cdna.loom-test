@@ -106,12 +106,11 @@ func.def @varying_predicate_casts(%input: buffer) -> (index, offset, i1) {
 low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @varying_predicate_casts() -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) asm {
   %source = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %17 = v_mov_b32 0
-  %18 = s_mov_b32_m0_imm 0
-  %raw_coordinate = global_load_dword_saddr %17, %source, %18
+  %raw_coordinate = global_load_dword_saddr %17, %source
   %negative = v_cmp_lt_i32_src1_inline %raw_coordinate {rhs = 0}
-  %22 = v_mov_b32 1
-  %coordinate = v_cndmask_b32 %17, %22, %negative
-  %28 = v_and_b32_src0_inline %raw_coordinate, 1
-  %low_bit = v_cmp_eq_i32 %28, %22
+  %21 = v_mov_b32 1
+  %coordinate = v_cndmask_b32 %17, %21, %negative
+  %27 = v_and_b32_src0_inline %raw_coordinate, 1
+  %low_bit = v_cmp_eq_i32 %27, %21
   return %coordinate, %coordinate, %low_bit
 }

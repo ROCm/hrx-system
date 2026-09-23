@@ -22,8 +22,7 @@ low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @signed_byte_term(%input:
   %18 = v_mov_b32_copy %15
   %19, %20 = v_addc_co_u32 %18, %13, %17
   %21 = concat(%16, %19) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %22 = s_mov_b32_m0_imm 0
-  %value = global_load_dword_vaddr %21, %22 {offset = 512}
+  %value = global_load_dword_vaddr %21 {offset = 512}
   return %value
 }
 
@@ -54,8 +53,7 @@ low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @signed_halfword_term(%in
   %30 = v_mov_b32_copy %21
   %31, %32 = v_addc_co_u32 %30, %25, %29
   %33 = concat(%28, %31) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %34 = s_mov_b32_m0_imm 0
-  %value = global_load_dword_vaddr %33, %34
+  %value = global_load_dword_vaddr %33
   return %value
 }
 
@@ -82,8 +80,7 @@ low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @predicate_term(%input: r
   %17, %18 = s_add_co_u32 %14, %13
   %19, %20 = s_addc_u32 %15, %16, %18
   %21 = concat(%17, %19) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %22 = s_mov_b32_m0_imm 0
-  %value = global_load_dword_saddr %12, %21, %22 {offset = 4}
+  %value = global_load_dword_saddr %12, %21 {offset = 4}
   return %value
 }
 
@@ -200,8 +197,7 @@ low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @negative_static_bias(%co
   %20, %21 = s_add_co_u32 %17, %16
   %22, %23 = s_addc_u32 %18, %19, %21
   %24 = concat(%20, %22) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %25 = s_mov_b32_m0_imm 0
-  %value = global_load_dword_saddr %15, %24, %25
+  %value = global_load_dword_saddr %15, %24
   return %value
 }
 
@@ -294,8 +290,7 @@ low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @offset_with_static_displ
   %13, %14 = s_add_co_u32 %9, %11
   %15, %16 = s_addc_u32 %10, %12, %14
   %17 = concat(%13, %15) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %18 = s_mov_b32_m0_imm 0
-  %value = global_load_dword_saddr %8, %17, %18 {offset = 4}
+  %value = global_load_dword_saddr %8, %17 {offset = 4}
   return %value
 }
 
@@ -320,14 +315,12 @@ low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @varying_predicate_term()
   %source = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %view = resource<hal_binding> {extent = 12, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %16 = v_mov_b32 0
-  %17 = s_mov_b32_m0_imm 0
-  %raw = global_load_dword_saddr %16, %source, %17
+  %raw = global_load_dword_saddr %16, %source
   %negative = v_cmp_lt_i32_src1_inline %raw {rhs = 0}
-  %21 = v_mov_b32 1
-  %22 = v_cndmask_b32 %16, %21, %negative
-  %23 = v_lshlrev_b32_src0_inline %22, 2
-  %24 = s_mov_b32_m0_imm 0
-  %value = global_load_dword_saddr %23, %view, %24 {offset = 4}
+  %20 = v_mov_b32 1
+  %21 = v_cndmask_b32 %16, %20, %negative
+  %22 = v_lshlrev_b32_src0_inline %21, 2
+  %value = global_load_dword_saddr %22, %view {offset = 4}
   return %value
 }
 
@@ -359,8 +352,7 @@ low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @uniform_comparison_term(
   %24, %25 = s_add_co_u32 %21, %20
   %26, %27 = s_addc_u32 %22, %sign_boundary, %25
   %28 = concat(%24, %26) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %29 = s_mov_b32_m0_imm 0
-  %value = global_load_dword_saddr %16, %28, %29 {offset = 4}
+  %value = global_load_dword_saddr %16, %28 {offset = 4}
   return %value
 }
 
@@ -385,27 +377,25 @@ low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @wide_varying_predicate_t
   %source = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %view = resource<hal_binding> {extent = 12884901888, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %22 = v_mov_b32 0
-  %23 = s_mov_b32_m0_imm 0
-  %raw = global_load_dword_saddr %22, %source, %23
+  %raw = global_load_dword_saddr %22, %source
   %negative = v_cmp_lt_i32_src1_inline %raw {rhs = 0}
-  %26 = s_mov_b32 0
-  %27 = s_mov_b32 1
-  %29 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %30 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %33, %34 = s_add_co_u32 %29, %26
-  %35, %36 = s_addc_u32 %30, %27, %34
-  %39 = v_mov_b32 1
-  %40 = v_cndmask_b32 %22, %39, %negative
-  %42 = concat(%40, %22) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %43 = v_mov_b32 32
-  %44 = v_lshlrev_b64 %43, %42
-  %45 = slice %44[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %46 = slice %44[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %49, %50 = v_add_co_u32 %33, %45
-  %51 = v_mov_b32_copy %35
-  %52, %53 = v_addc_co_u32 %51, %46, %50
-  %54 = concat(%49, %52) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %55 = s_mov_b32_m0_imm 0
-  %value = global_load_dword_vaddr %54, %55
+  %25 = s_mov_b32 0
+  %26 = s_mov_b32 1
+  %28 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %29 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %32, %33 = s_add_co_u32 %28, %25
+  %34, %35 = s_addc_u32 %29, %26, %33
+  %38 = v_mov_b32 1
+  %39 = v_cndmask_b32 %22, %38, %negative
+  %41 = concat(%39, %22) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %42 = v_mov_b32 32
+  %43 = v_lshlrev_b64 %42, %41
+  %44 = slice %43[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %45 = slice %43[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %48, %49 = v_add_co_u32 %32, %44
+  %50 = v_mov_b32_copy %34
+  %51, %52 = v_addc_co_u32 %50, %45, %49
+  %53 = concat(%48, %51) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %value = global_load_dword_vaddr %53
   return %value
 }
