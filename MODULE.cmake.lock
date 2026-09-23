@@ -164,6 +164,7 @@ set(IREE_DEP_CXX_PATCHES
   "//build_tools/third_party/cxx:using_directive_attributes.patch"
   "//build_tools/third_party/cxx:constant_archive.patch"
   "//build_tools/third_party/cxx:constexpr_bitcast.patch"
+  "//build_tools/third_party/cxx:list_initialization_diagnostics.patch"
 )
 set(IREE_DEP_CXX_PATCH_ARGS
   "-p1"

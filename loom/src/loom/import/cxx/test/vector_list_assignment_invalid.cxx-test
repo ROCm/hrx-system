@@ -5,9 +5,38 @@ void entry(Int4* output) { *output = {1, 2, 3, 4, 5}; }
 
 // ====
 using Int4 = int __attribute__((ext_vector_type(4)));
-// ERROR@+2: PARSE/036 "cannot initialize array element of type 'int' with expression of type 'const int*'"
-// ERROR@+1: PARSE/036 "cannot assign expression of type"
+// ERROR@+1: PARSE/036 "cannot initialize vector element of type 'int' with expression of type 'const int*'"
 void entry(Int4* output, const int* pointer) { *output = {pointer}; }
+
+// ====
+using Int4 = int __attribute__((ext_vector_type(4)));
+// ERROR@+1: PARSE/036 "cannot initialize type 'int' with expression of type 'const int*'"
+void entry(Int4* output, const int* pointer) { *output = {{pointer}}; }
+
+// ====
+// Each bad element reports its own failure, without an outer assignment error.
+using Int4 = int __attribute__((ext_vector_type(4)));
+void entry(Int4* output, const int* pointer) {
+  // ERROR@+2: PARSE/036 "cannot initialize vector element of type 'int' with expression of type 'const int*'"
+  // ERROR@+1: PARSE/036 "cannot initialize vector element of type 'int' with expression of type 'const int*'"
+  *output = {pointer, pointer};
+}
+
+// ====
+using Int4 = int __attribute__((ext_vector_type(4)));
+template <class T>
+static void assign(Int4* output, T value) {
+  // ERROR@+1: PARSE/036 "cannot initialize vector element of type 'int' with expression of type 'const int*'"
+  *output = {value};
+}
+// REMARK@+1: PARSE/036 "in instantiation of function template specialization 'assign <const int*>' requested here"
+void entry(Int4* output, const int* pointer) { assign(output, pointer); }
+
+// ====
+// Successful list initialization still checks the destination value category.
+using Int4 = int __attribute__((ext_vector_type(4)));
+// ERROR@+1: PARSE/036 "cannot assign to an rvalue of type"
+void entry(Int4 left, Int4 right) { (left + right) = {1, 2, 3, 4}; }
 
 // ====
 using Bytes4 = unsigned char __attribute__((ext_vector_type(4)));

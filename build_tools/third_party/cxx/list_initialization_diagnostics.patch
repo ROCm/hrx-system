@@ -1,0 +1,98 @@
+diff --git a/src/parser/cxx/type_checker.cc b/src/parser/cxx/type_checker.cc
+--- a/src/parser/cxx/type_checker.cc
++++ b/src/parser/cxx/type_checker.cc
+@@ -27,6 +27,7 @@
+ #include <cxx/control.h>
+ #include <cxx/decl_specs.h>
+ #include <cxx/dependent_types.h>
++#include <cxx/diagnostics_client.h>
+ #include <cxx/implicit_conversion_sequence.h>
+ #include <cxx/initialization.h>
+ #include <cxx/literals.h>
+@@ -5694,9 +5695,16 @@
+   if (resolve_assignment_overload(ast)) return;
+
+   if (braced) {
++    auto diagnosticsClient = check.unit_->diagnosticsClient();
++    const auto errorsBefore = diagnosticsClient->errorCount();
+     check.check_list_initialization(
+         traits.remove_cv(ast->leftExpression->type), ast->rightExpression,
+         InitializationKind::kCopyListInitialization);
++    // List initialization retains its target type for recovery. Its errors
++    // already explain why the list cannot become an assignment operand.
++    if (diagnosticsClient->errorCount() != errorsBefore) {
++      return;
++    }
+     if (!braced->type) return;
+   }
+
+diff --git a/src/parser/cxx/initialization.cc b/src/parser/cxx/initialization.cc
+--- a/src/parser/cxx/initialization.cc
++++ b/src/parser/cxx/initialization.cc
+@@ -1925,8 +1925,9 @@
+     } else {
+       elemChecker.check(
+           initializer, elementType,
+-          std::format("cannot initialize array element of type '{}' with "
++          std::format("cannot initialize {} element of type '{}' with "
+                       "expression of type '{}'",
++                      plan->isVector ? "vector" : "array",
+                       to_string(elementType), to_string(initializer->type)));
+     }
+
+diff --git a/tests/unit_tests/sema/list_assignment_diagnostics_01.cc b/tests/unit_tests/sema/list_assignment_diagnostics_01.cc
+new file mode 100644
+--- /dev/null
++++ b/tests/unit_tests/sema/list_assignment_diagnostics_01.cc
+@@ -0,0 +1,51 @@
++// RUN: %cxx -verify -fsyntax-only %s
++
++using Int4 = int __attribute__((ext_vector_type(4)));
++
++void vector_element(Int4* output, const int* pointer) {
++  // expected-error@+1 {{cannot initialize vector element of type 'int' with expression of type 'const int*'}}
++  *output = {pointer};
++}
++
++void nested_element(Int4* output, const int* pointer) {
++  // expected-error@+1 {{cannot initialize type 'int' with expression of type 'const int*'}}
++  *output = {{pointer}};
++}
++
++void scalar_element(int* output, const int* pointer) {
++  // expected-error@+1 {{cannot initialize type 'int' with expression of type 'const int*'}}
++  *output = {pointer};
++}
++
++void array_element(const int* pointer) {
++  // expected-error@+1 {{cannot initialize array element of type 'int' with expression of type 'const int*'}}
++  int values[] = {pointer};
++}
++
++void independent_errors(int* output, const int* pointer) {
++  // expected-error@+1 {{cannot initialize type 'int' with expression of type 'const int*'}}
++  *output = {pointer};
++  // expected-error@+1 {{cannot assign expression of type 'const int*' to 'int'}}
++  *output = pointer;
++  // expected-error@+1 {{cannot assign to an rvalue of type 'int'}}
++  1 = {2};
++}
++
++void scalar_narrowing(int* output, float value) {
++  // expected-error@+1 {{narrowing conversion from 'float' to 'int' in braced-init-list}}
++  *output = {value};
++}
++
++void scalar_excess(int* output) {
++  // expected-error@+1 {{excess elements in scalar initializer}}
++  *output = {1, 2};
++}
++
++constexpr int valid_assignments() {
++  int scalar = 0;
++  scalar = {3};
++  Int4 vector{};
++  vector = {scalar, 7};
++  return vector[0] + vector[1] + vector[2] + vector[3];
++}
++static_assert(valid_assignments() == 10);

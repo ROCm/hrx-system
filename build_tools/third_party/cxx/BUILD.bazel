@@ -26,6 +26,7 @@ exports_files([
     "include_continuation.patch",
     "include_paths.patch",
     "initializer_dependencies.patch",
+    "list_initialization_diagnostics.patch",
     "macro_operator_locations.patch",
     "member_definition_attributes.patch",
     "packed_bitfields.patch",

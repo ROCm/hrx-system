@@ -71,6 +71,7 @@ loom_check_test_suite(
         "launch_invalid.cxx-test",
         "layout_attributes.cxx-test",
         "layout_attributes_roundtrip.cxx-test",
+        "list_initialization_invalid.cxx-test",
         "local_addresses.cxx-test",
         "local_arrays.cxx-test",
         "locations.cxx-test",

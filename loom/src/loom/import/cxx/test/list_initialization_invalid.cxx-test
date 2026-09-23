@@ -1,0 +1,32 @@
+// RUN: verify
+// Scalar list failures own their diagnostics just like vector elements.
+// ERROR@+1: PARSE/036 "cannot initialize type 'int' with expression of type 'const int*'"
+void entry(int* output, const int* pointer) { *output = {pointer}; }
+
+// ====
+// Array initializers retain the array-specific element diagnostic.
+void entry(const int* pointer) {
+  // ERROR@+1: PARSE/036 "cannot initialize array element of type 'int' with expression of type 'const int*'"
+  int values[] = {pointer};
+}
+
+// ====
+// A prior initializer error cannot suppress an independent conversion failure.
+void entry(int* output, const int* pointer) {
+  // ERROR@+1: PARSE/036 "cannot initialize type 'int' with expression of type 'const int*'"
+  *output = {pointer};
+  // ERROR@+1: PARSE/036 "cannot assign expression of type 'const int*' to 'int'"
+  *output = pointer;
+  // ERROR@+1: PARSE/036 "cannot assign to an rvalue of type 'int'"
+  1 = {2};
+}
+
+// ====
+// Narrowing remains an initializer error.
+// ERROR@+1: PARSE/036 "narrowing conversion from 'float' to 'int' in braced-init-list"
+void entry(int* output, float value) { *output = {value}; }
+
+// ====
+// Excess scalar elements keep their owning diagnostic.
+// ERROR@+1: PARSE/036 "excess elements in scalar initializer"
+void entry(int* output) { *output = {1, 2}; }
