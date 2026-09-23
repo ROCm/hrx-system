@@ -1,0 +1,106 @@
+// RUN: emit low-schedule-json @register_packing_avoids_fragmentation strategy=resource-stall diagnostics=candidates test.packed.narrow=4 test.packed.wide=8 output=none
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @register_packing_avoids_fragmentation(%lhs_source0: reg<test.i32>, %lhs_source1: reg<test.i32>, %rhs_source0: reg<test.i32>, %rhs_source1: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", scored_candidate_count="4", chosen_packet="test.packing.create", rejected_packet="test.packing.create"}
+  %lhs_narrow0 = test.packing.create %lhs_source0
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="5", scored_candidate_count="2", chosen_packet="test.packing.create", rejected_packet="test.packing.create"}
+  %lhs_narrow1 = test.packing.create %lhs_source1
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="test.packing.create", rejected_packet="test.packing.create"}
+  %rhs_narrow0 = test.packing.create %rhs_source0
+  %rhs_narrow1 = test.packing.create %rhs_source1
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.packing.expand", rejected_packet="test.packing.create"}
+  %lhs_wide0 = test.packing.expand %lhs_narrow0
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="6", chosen_packet="test.packing.expand", rejected_packet="test.packing.create"}
+  %lhs_wide1 = test.packing.expand %lhs_narrow1
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="3", chosen_packet="test.packing.expand", rejected_packet="test.packing.create"}
+  %rhs_wide0 = test.packing.expand %rhs_narrow0
+  %rhs_wide1 = test.packing.expand %rhs_narrow1
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="4", chosen_packet="test.packing.retire", rejected_packet="test.packing.create"}
+  %result0 = test.packing.retire %lhs_wide0, %rhs_wide0
+  %result1 = test.packing.retire %lhs_wide1, %rhs_wide1
+  return %result0, %result1
+}
+
+// ====
+
+// RUN: emit low-schedule-json @register_packing_materializes_active_completion strategy=resource-stall diagnostics=candidates output=none
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @register_packing_materializes_active_completion(%source0: reg<test.i32>, %source1: reg<test.i32>, %source2: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  // The fence establishes two live narrow values in the packing resource.
+  // Their configuration leaves must complete an active transaction before
+  // the third transaction opens, even though those leaves grow scalar pressure.
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.packing.create", rejected_packet="test.packing.create"}
+  %narrow0 = test.packing.create %source0
+  %narrow1 = test.packing.create %source1
+  low.schedule.fence
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="3", chosen_packet="test.const.i32", rejected_packet="test.const.i32"}
+  %config0 = test.const.i32 0
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="4", chosen_packet="test.packing.configured.expand", rejected_packet="test.const.i32"}
+  %lhs_wide0, %rhs_wide0 = test.packing.configured.expand %narrow0, %config0
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="5", chosen_packet="test.packing.retire", rejected_packet="test.const.i32"}
+  %result0 = test.packing.retire %lhs_wide0, %rhs_wide0
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="6", chosen_packet="test.const.i32", rejected_packet="test.const.i32"}
+  %config1 = test.const.i32 1
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="7", chosen_packet="test.packing.configured.expand", rejected_packet="test.const.i32"}
+  %lhs_wide1, %rhs_wide1 = test.packing.configured.expand %narrow1, %config1
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="8", chosen_packet="test.packing.retire", rejected_packet="test.packing.create"}
+  %result1 = test.packing.retire %lhs_wide1, %rhs_wide1
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="9", chosen_packet="test.packing.create", rejected_packet="test.const.i32"}
+  %narrow2 = test.packing.create %source2
+  %config2 = test.const.i32 2
+  %lhs_wide2, %rhs_wide2 = test.packing.configured.expand %narrow2, %config2
+  %result2 = test.packing.retire %lhs_wide2, %rhs_wide2
+  return %result0, %result1, %result2
+}
+
+// ====
+
+// Keep a shared producer live while preparing the peer needed to retire each
+// expanded branch. Opening more branches cannot replace their shared source.
+// RUN: emit low-schedule-json @register_packing_fanout strategy=resource-stall diagnostics=candidates output=none
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @register_packing_fanout(%source: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  // REMARK@+1: BACKEND/015 {chosen_packet="test.packing.create", rejected_packet="test.const.packed.narrow"}
+  %table = test.packing.create %source
+  // REMARK@+1: BACKEND/015 {chosen_packet="test.packing.expand", rejected_packet="test.packing.expand"}
+  %first = test.packing.expand %table
+  // REMARK@+1: BACKEND/015 {chosen_packet="test.packing.expand", rejected_packet="test.packing.expand"}
+  %second = test.packing.expand %table
+  %third = test.packing.expand %table
+  // REMARK@+1: BACKEND/015 {chosen_packet="test.const.packed.narrow", rejected_packet="test.packing.expand"}
+  %peer = test.const.packed.narrow 1
+  // REMARK@+1: BACKEND/015 {chosen_packet="test.packing.expand", rejected_packet="test.packing.expand"}
+  %wide_peer = test.packing.expand %peer
+  // REMARK@+1: BACKEND/015 {chosen_packet="test.packing.retire", rejected_packet="test.packing.expand"}
+  %result0 = test.packing.retire %first, %wide_peer
+  // REMARK@+1: BACKEND/015 {chosen_packet="test.packing.retire", rejected_packet="test.packing.expand"}
+  %result1 = test.packing.retire %second, %wide_peer
+  %result2 = test.packing.retire %third, %wide_peer
+  return %result0, %result1, %result2
+}
+
+// ====
+
+// Non-final uses preserve the shared narrow source while each expansion is
+// retired. Repeated operands still complete their producer in one instruction.
+// RUN: emit low-schedule-json @register_packing_fanout_repeated_operand strategy=resource-stall diagnostics=candidates output=none
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @register_packing_fanout_repeated_operand(%source: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %table = test.packing.create %source
+  // REMARK@+1: BACKEND/015 {chosen_packet="test.packing.expand", rejected_packet="test.packing.expand"}
+  %first = test.packing.expand %table
+  %second = test.packing.expand %table
+  // Both occurrences consume the final uses of the expanded value.
+  // REMARK@+1: BACKEND/015 {chosen_killed_live_units="2", chosen_packet="test.packing.retire", rejected_packet="test.packing.expand"}
+  %r0 = test.packing.retire %first, %first
+  %r1 = test.packing.retire %second, %second
+  return %r0, %r1
+}

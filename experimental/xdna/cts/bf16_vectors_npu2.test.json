@@ -31,7 +31,7 @@
               "path": "{tmp}/compile-report.txt",
               "contains": [
                 {
-                  "regex": "COMPILE-REPORT: pipeline\\.worker\\[0\\] .* code_bytes=878 code_capacity_bytes=16384 .* max_bank_storage_bytes=768 bank_capacity_bytes=16384\\n"
+                  "regex": "COMPILE-REPORT: pipeline\\.worker\\[0\\] .* code_bytes=898 code_capacity_bytes=16384 .* max_bank_storage_bytes=768 bank_capacity_bytes=16384\\n"
                 }
               ]
             }

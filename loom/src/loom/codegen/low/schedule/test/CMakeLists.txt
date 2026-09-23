@@ -15,6 +15,7 @@ loom_check_test_suite(
   SRCS
     "memory_access_flags.loom-test"
     "memory_frontier.loom-test"
+    "packing_completion.loom-test"
     "schedule.loom-test"
     "schedule_locked.loom-test"
     "schedule_scopes.loom-test"
