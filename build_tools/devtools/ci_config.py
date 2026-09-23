@@ -196,9 +196,6 @@ AMD_CLIENT_WINDOWS_RESOURCES = (
         "d3d12.resource.device",
     )
 )
-# Preserve case-level execution and skips: a successful hardware test target
-# can contain only skipped cases when its runner lacks an admitted device.
-AMD_CLIENT_BAZEL_TEST_OPTIONS = ("--test_output=all",)
 AMDGPU_CMAKE_DRIVER_TARGETS = ("runtime/src/iree/hal/drivers/amdgpu/all",)
 DEFAULT_AMDGPU_TARGET_SELECTOR = "gfx942"
 AMDGPU_BUILD_REQUIREMENT_TAG = "iree-build-requirement=runtime.hal.amdgpu"
