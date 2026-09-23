@@ -283,7 +283,7 @@ uint16_t iree_hal_amdgpu_host_queue_write_wait_barrier_packet_body(
   // completion. A submission at one-based epoch N is complete when the queue's
   // current epoch has reached N, so the barrier fires when:
   //   signal_load(s) <= INITIAL_VALUE - target_epoch
-  // BARRIER_VALUE only supports LT, so encode <= as:
+  // This epoch strategy uses LT, so encode <= as:
   //   signal_load(s) < INITIAL_VALUE - target_epoch + 1
   //
   // Epochs are one-based by construction (see notification_ring_advance_epoch).
