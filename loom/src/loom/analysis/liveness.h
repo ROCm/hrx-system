@@ -160,7 +160,8 @@ typedef struct loom_liveness_pressure_summary_t {
   uint32_t peak_live_values;
   // Block containing the peak program point.
   const loom_block_t* peak_block;
-  // Operation after which the peak was observed. NULL means block entry/exit.
+  // Operation after which the peak was observed. NULL at block entry/exit and
+  // for region-tree summaries derived from live segments.
   const loom_op_t* peak_op;
   // Program point associated with the peak.
   uint32_t peak_point;

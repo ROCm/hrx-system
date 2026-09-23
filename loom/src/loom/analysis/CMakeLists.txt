@@ -927,8 +927,10 @@ loom_cc_library(
     liveness
   HDRS
     "liveness.h"
+    "liveness_pressure.h"
   SRCS
     "liveness.c"
+    "liveness_pressure.c"
   DEPS
     ::liveness_dataflow
     ::liveness_events
@@ -939,9 +941,24 @@ loom_cc_library(
     loom::ir
     loom::ops::op_defs
     loom::target::registers
+    loom::util::adaptive_sort
     loom::util::cfg_graph
     loom::util::segmented_storage
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    liveness_pressure_test
+  SRCS
+    "liveness_pressure_test.cc"
+  DEPS
+    ::liveness
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::target::registers
+    loom::target::test::descriptors
 )
 
 loom_cc_test(

@@ -812,8 +812,14 @@ loom_cc_test(
 
 loom_cc_library(
     name = "liveness",
-    srcs = ["liveness.c"],
-    hdrs = ["liveness.h"],
+    srcs = [
+        "liveness.c",
+        "liveness_pressure.c",
+    ],
+    hdrs = [
+        "liveness.h",
+        "liveness_pressure.h",
+    ],
     deps = [
         ":liveness_dataflow",
         ":liveness_events",
@@ -821,11 +827,25 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/target:registers",
+        "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:cfg_graph",
         "//loom/src/loom/util:segmented_storage",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "liveness_pressure_test",
+    srcs = ["liveness_pressure_test.cc"],
+    deps = [
+        ":liveness",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/test:descriptors",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

@@ -11,6 +11,7 @@
 #include "iree/base/internal/math.h"
 #include "loom/analysis/liveness_dataflow.h"
 #include "loom/analysis/liveness_events.h"
+#include "loom/analysis/liveness_pressure.h"
 #include "loom/analysis/liveness_uses.h"
 #include "loom/ir/module.h"
 #include "loom/ir/types.h"
@@ -863,12 +864,6 @@ typedef struct loom_liveness_pressure_bucket_t {
 typedef struct loom_liveness_pressure_sweep_t {
   // Analysis build state owning summary output.
   loom_liveness_build_state_t* build_state;
-  // Finalized block ranges in program-point order.
-  const loom_liveness_block_info_t* block_infos;
-  // Number of entries in |block_infos|.
-  iree_host_size_t block_count;
-  // Current block cursor for monotonic event points.
-  iree_host_size_t block_index;
   // Mutable live buckets grouped by pressure class.
   loom_liveness_pressure_bucket_t* buckets;
   // Number of initialized buckets.
@@ -931,26 +926,6 @@ static iree_status_t loom_liveness_pressure_sweep_apply_event(
   return iree_ok_status();
 }
 
-static const loom_liveness_block_info_t*
-loom_liveness_pressure_sweep_block_for_point(
-    loom_liveness_pressure_sweep_t* sweep, uint32_t point,
-    iree_host_size_t* out_block_index) {
-  while (sweep->block_index + 1u < sweep->block_count &&
-         point > sweep->block_infos[sweep->block_index].end_point) {
-    ++sweep->block_index;
-  }
-  if (sweep->block_index >= sweep->block_count) {
-    return NULL;
-  }
-  const loom_liveness_block_info_t* block_info =
-      &sweep->block_infos[sweep->block_index];
-  if (block_info->start_point <= point && point <= block_info->end_point) {
-    *out_block_index = sweep->block_index;
-    return block_info;
-  }
-  return NULL;
-}
-
 static iree_status_t loom_liveness_pressure_sweep_record(
     loom_liveness_pressure_sweep_t* sweep,
     const loom_liveness_block_info_t* block_info, const loom_op_t* peak_op,
@@ -977,14 +952,6 @@ static iree_status_t loom_liveness_pressure_sweep_record(
     }
   }
   return iree_ok_status();
-}
-
-static iree_status_t loom_liveness_pressure_sweep_record_event_point(
-    loom_liveness_pressure_sweep_t* sweep, uint32_t point) {
-  iree_host_size_t block_index = 0;
-  const loom_liveness_block_info_t* block_info =
-      loom_liveness_pressure_sweep_block_for_point(sweep, point, &block_index);
-  return loom_liveness_pressure_sweep_record(sweep, block_info, NULL, point);
 }
 
 static iree_status_t loom_liveness_pressure_sweep_adjust_value_ordinal(
@@ -1077,8 +1044,6 @@ static iree_status_t loom_liveness_compute_block_pressure(
       state->scratch_arena, state->word_count, &live_values));
   loom_liveness_pressure_sweep_t sweep = {
       .build_state = state,
-      .block_infos = block_infos,
-      .block_count = state->region->block_count,
   };
   for (iree_host_size_t block_index = 0;
        block_index < state->region->block_count; ++block_index) {
@@ -1118,63 +1083,6 @@ static iree_status_t loom_liveness_compute_block_pressure(
     }
     IREE_RETURN_IF_ERROR(loom_liveness_pressure_sweep_record(
         &sweep, block_info, NULL, block_info->start_point));
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_liveness_compute_region_tree_pressure(
-    loom_liveness_build_state_t* state,
-    const loom_liveness_block_info_t* block_infos) {
-  if (state->segment_count == 0) {
-    return iree_ok_status();
-  }
-  if (state->segment_count > IREE_HOST_SIZE_MAX / 2) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "liveness pressure event count exceeds host size");
-  }
-  const iree_host_size_t event_count = state->segment_count * 2;
-  loom_liveness_event_t* events = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->scratch_arena, event_count, sizeof(*events), (void**)&events));
-  iree_host_size_t event_index = 0;
-  uint32_t maximum_point = 0;
-  for (iree_host_size_t i = 0; i < state->segment_count; ++i) {
-    const loom_liveness_mutable_segment_t* segment = &state->segments[i];
-    const loom_liveness_mutable_interval_t* interval_state =
-        &state->interval_states[segment->value_ordinal];
-    const loom_liveness_interval_t* interval = &interval_state->interval;
-    maximum_point = iree_max(maximum_point, segment->segment.end_point);
-    events[event_index++] = (loom_liveness_event_t){
-        .point = segment->segment.end_point,
-        .value_id = interval->value_id,
-        .value_ordinal = segment->value_ordinal,
-        .value_delta = -1,
-    };
-    events[event_index++] = (loom_liveness_event_t){
-        .point = segment->segment.start_point,
-        .value_id = interval->value_id,
-        .value_ordinal = segment->value_ordinal,
-        .value_delta = 1,
-    };
-  }
-  IREE_ASSERT_EQ(event_index, event_count);
-  IREE_RETURN_IF_ERROR(loom_liveness_events_sort(
-      events, event_count, maximum_point, state->scratch_arena));
-
-  loom_liveness_pressure_sweep_t sweep = {
-      .build_state = state,
-      .block_infos = block_infos,
-      .block_count = state->region->block_count,
-  };
-  for (iree_host_size_t i = 0; i < event_count;) {
-    const uint32_t point = events[i].point;
-    do {
-      IREE_RETURN_IF_ERROR(
-          loom_liveness_pressure_sweep_apply_event(&sweep, &events[i]));
-      ++i;
-    } while (i < event_count && events[i].point == point);
-    IREE_RETURN_IF_ERROR(
-        loom_liveness_pressure_sweep_record_event_point(&sweep, point));
   }
   return iree_ok_status();
 }
@@ -1492,11 +1400,9 @@ loom_liveness_analyze_local_value_domain_with_dataflow_impl(
   if (iree_status_is_ok(status)) {
     status = loom_liveness_finalize_intervals(&state, block_infos);
   }
-  if (iree_status_is_ok(status)) {
-    status =
-        loom_liveness_build_includes_region_tree(&state)
-            ? loom_liveness_compute_region_tree_pressure(&state, block_infos)
-            : loom_liveness_compute_block_pressure(&state, block_infos);
+  if (iree_status_is_ok(status) &&
+      !loom_liveness_build_includes_region_tree(&state)) {
+    status = loom_liveness_compute_block_pressure(&state, block_infos);
   }
 
   loom_liveness_pressure_summary_t* pressure_summaries = NULL;
@@ -1526,7 +1432,7 @@ loom_liveness_analyze_local_value_domain_with_dataflow_impl(
   }
 
   if (iree_status_is_ok(status)) {
-    *out_analysis = (loom_liveness_analysis_t){
+    loom_liveness_analysis_t analysis = {
         .module = module,
         .region = region,
         .flags = analysis_flags,
@@ -1549,6 +1455,14 @@ loom_liveness_analyze_local_value_domain_with_dataflow_impl(
         .operation_uses = state.operation_uses,
         .operation_use_count = state.operation_use_count,
     };
+    if (loom_liveness_build_includes_region_tree(&state)) {
+      status = loom_liveness_compute_segment_pressure(
+          &analysis, scratch_arena, result_arena, &analysis.pressure_summaries,
+          &analysis.pressure_summary_count);
+    }
+    if (iree_status_is_ok(status)) {
+      *out_analysis = analysis;
+    }
   }
 
   return status;
