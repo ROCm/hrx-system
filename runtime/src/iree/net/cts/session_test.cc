@@ -239,12 +239,6 @@ struct SessionDirectEndpointReadyState {
   }
 };
 
-struct SessionReceivePoolResources {
-  iree_async_slab_t* slab = nullptr;
-  iree_async_region_t* region = nullptr;
-  iree_async_buffer_pool_t* pool = nullptr;
-};
-
 class OneShotAllocationGate {
  public:
   iree_allocator_t allocator() { return {this, Control}; }
@@ -317,41 +311,6 @@ class OneShotAllocationGate {
   bool attempt_completed_ = false;
 };
 
-static iree_status_t CreateSessionReceivePool(
-    iree_async_proactor_t* proactor,
-    SessionReceivePoolResources* out_resources) {
-  *out_resources = SessionReceivePoolResources{};
-  iree_async_slab_options_t slab_options = {
-      .buffer_size = 64 * 1024,
-      .buffer_count = 16,
-  };
-  iree_status_t status = iree_async_slab_create(
-      slab_options, iree_allocator_system(), &out_resources->slab);
-  if (iree_status_is_ok(status)) {
-    status = iree_async_proactor_register_slab(
-        proactor, out_resources->slab, IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
-        &out_resources->region);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_async_buffer_pool_create(
-        out_resources->region, iree_allocator_system(), &out_resources->pool);
-  }
-  if (!iree_status_is_ok(status)) {
-    iree_async_buffer_pool_release(out_resources->pool);
-    iree_async_region_release(out_resources->region);
-    iree_async_slab_release(out_resources->slab);
-    *out_resources = SessionReceivePoolResources{};
-  }
-  return status;
-}
-
-static void ReleaseSessionReceivePool(SessionReceivePoolResources* resources) {
-  iree_async_buffer_pool_release(resources->pool);
-  iree_async_region_release(resources->region);
-  iree_async_slab_release(resources->slab);
-  *resources = SessionReceivePoolResources{};
-}
-
 class SessionTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -362,10 +321,6 @@ class SessionTest : public ::testing::Test {
     IREE_ASSERT_OK(iree_async_proactor_create_platform(
         iree_async_proactor_options_default(), iree_allocator_system(),
         &server_proactor_));
-    IREE_ASSERT_OK(
-        CreateSessionReceivePool(client_proactor_, &client_receive_pool_));
-    IREE_ASSERT_OK(
-        CreateSessionReceivePool(server_proactor_, &server_receive_pool_));
     iree_status_t status =
         backend_->create_factory(factory_allocator_.allocator(), &factory_);
     if (iree_status_code(status) == IREE_STATUS_UNAVAILABLE) {
@@ -393,8 +348,6 @@ class SessionTest : public ::testing::Test {
                            kSessionServerPolling);
     }
     iree_net_transport_factory_release(factory_);
-    ReleaseSessionReceivePool(&client_receive_pool_);
-    ReleaseSessionReceivePool(&server_receive_pool_);
     iree_async_proactor_release(client_proactor_);
     iree_async_proactor_release(server_proactor_);
   }
@@ -432,7 +385,7 @@ class SessionTest : public ::testing::Test {
     IREE_ASSERT_OK(iree_net_transport_factory_create_listener(
         factory_,
         iree_make_string_view(bind_address.data(), bind_address.size()),
-        server_proactor_, server_receive_pool_.pool, accept_state_.callback(),
+        server_proactor_, nullptr, accept_state_.callback(),
         iree_allocator_system(), &listener_));
     std::array<char, 1024> address_storage = {};
     iree_string_view_t bound_address = iree_string_view_empty();
@@ -501,8 +454,8 @@ class SessionTest : public ::testing::Test {
     IREE_ASSERT_OK(iree_net_session_connect(
         factory_,
         iree_make_string_view(connect_address_.data(), connect_address_.size()),
-        client_proactor_, client_receive_pool_.pool, client_options,
-        client_state_.callbacks(), iree_allocator_system(), &client_session_));
+        client_proactor_, nullptr, client_options, client_state_.callbacks(),
+        iree_allocator_system(), &client_session_));
     PollBothUntil([&] { return accept_state_.callback_count == 1; });
     ASSERT_EQ(accept_state_.status_code, IREE_STATUS_OK);
     accepted_connection_ = accept_state_.connection;
@@ -561,8 +514,6 @@ class SessionTest : public ::testing::Test {
   int current_poll_side_ = kSessionNotPolling;
   iree_async_proactor_t* client_proactor_ = nullptr;
   iree_async_proactor_t* server_proactor_ = nullptr;
-  SessionReceivePoolResources client_receive_pool_;
-  SessionReceivePoolResources server_receive_pool_;
   iree_net_transport_factory_t* factory_ = nullptr;
   iree_net_listener_t* listener_ = nullptr;
   iree_net_connection_t* accepted_connection_ = nullptr;
@@ -747,8 +698,8 @@ TEST_F(SessionTest, DeactivatesBeforeConnectCompletes) {
   IREE_ASSERT_OK(iree_net_session_connect(
       factory_,
       iree_make_string_view(connect_address_.data(), connect_address_.size()),
-      client_proactor_, client_receive_pool_.pool, &options,
-      client_state_.callbacks(), iree_allocator_system(), &client_session_));
+      client_proactor_, nullptr, &options, client_state_.callbacks(),
+      iree_allocator_system(), &client_session_));
   iree_net_session_deactivate(client_session_);
   iree_net_session_deactivate(client_session_);
   EXPECT_EQ(iree_net_session_state(client_session_),
@@ -775,8 +726,8 @@ TEST_F(SessionTest, DeactivatedCallbackReleasesPendingConnectSession) {
   IREE_ASSERT_OK(iree_net_session_connect(
       factory_,
       iree_make_string_view(connect_address_.data(), connect_address_.size()),
-      client_proactor_, client_receive_pool_.pool, &options, callbacks,
-      iree_allocator_system(), &session));
+      client_proactor_, nullptr, &options, callbacks, iree_allocator_system(),
+      &session));
   iree_net_session_deactivate(session);
   while (client_state_.deactivated_count == 0) {
     Poll(client_proactor_, kSessionClientPolling);

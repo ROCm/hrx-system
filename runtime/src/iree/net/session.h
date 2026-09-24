@@ -126,6 +126,8 @@ static inline iree_net_session_options_t iree_net_session_options_default(
 // A successful call returns a BOOTSTRAPPING session immediately. The factory
 // owns all resources needed by its pending connect, so |factory|, |address|,
 // |proactor|, and |receive_pool| are borrowed only through this call.
+// |receive_pool| may be NULL when the transport owns its receive storage;
+// its requirement is determined by the factory, not the session protocol.
 // Asynchronous callbacks may race with the return. The returned reference is
 // owned only after this call returns and must not be released by a callback
 // that wins that race.

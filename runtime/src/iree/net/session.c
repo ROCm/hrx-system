@@ -562,10 +562,9 @@ iree_status_t iree_net_session_connect(
                             "session output is required");
   }
   *out_session = NULL;
-  if (!factory || !proactor || !receive_pool || !options) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "factory, proactor, receive pool, and options are required");
+  if (!factory || !proactor || !options) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "factory, proactor, and options are required");
   }
 
   iree_net_session_t* session = NULL;
