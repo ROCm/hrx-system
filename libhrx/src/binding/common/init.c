@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "common/amdgpu_architecture.h"
+#include "common/graph_memory.h"
 #include "common/internal.h"
 //===----------------------------------------------------------------------===//
 // Global state
@@ -281,11 +282,13 @@ static iree_status_t iree_hal_streaming_initialize_device(
   out_device->current_mem_pool = NULL;
 
   iree_slim_mutex_initialize(&out_device->graph_memory_mutex);
-  out_device->graph_memory_used_current = 0;
+  iree_slim_mutex_initialize(&out_device->graph_memory_trim_mutex);
+  out_device->graph_memory_mapped_current = 0;
   out_device->graph_memory_used_high = 0;
   out_device->graph_memory_reserved_current = 0;
   out_device->graph_memory_reserved_high = 0;
-  out_device->graph_memory_reusable_size_entries = NULL;
+  out_device->graph_memory_cached_physical_blocks = NULL;
+  out_device->graph_memory_allocation_count = 0;
 
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_execution_resource_table_initialize(
@@ -331,6 +334,11 @@ static void iree_hal_streaming_deinitialize_device(
   hrx_mem_pool_release(device->default_mem_pool);
   device->default_mem_pool = NULL;
 
+  iree_status_t trim_status = iree_hal_streaming_graph_memory_trim(device);
+  if (!iree_status_is_ok(trim_status)) {
+    iree_status_abort(trim_status);
+  }
+
   // Release primary context (may not exist if never accessed).
   iree_hal_streaming_context_release(device->primary_context);
   device->primary_context = NULL;
@@ -338,16 +346,8 @@ static void iree_hal_streaming_deinitialize_device(
   iree_hal_streaming_execution_resource_table_deinitialize(
       &device->execution_resource_table);
 
-  iree_hal_streaming_graph_memory_size_entry_t* graph_memory_entry =
-      device->graph_memory_reusable_size_entries;
-  device->graph_memory_reusable_size_entries = NULL;
-  while (graph_memory_entry) {
-    iree_hal_streaming_graph_memory_size_entry_t* next_entry =
-        graph_memory_entry->next;
-    iree_allocator_free(host_allocator, graph_memory_entry);
-    graph_memory_entry = next_entry;
-  }
   iree_slim_mutex_deinitialize(&device->graph_memory_mutex);
+  iree_slim_mutex_deinitialize(&device->graph_memory_trim_mutex);
 
   // Deinitialize primary context mutex.
   iree_slim_mutex_deinitialize(&device->primary_context_mutex);

@@ -6,9 +6,12 @@
 
 #include "common/graph.h"
 
+#include "common/graph_memory.h"
 #include "common/internal.h"
 #include "common/kernel_arguments.h"
 #include "common/memory.h"
+#include "common/peer.h"
+#include "iree/base/threading/call_once.h"
 
 //===----------------------------------------------------------------------===//
 // iree_hal_streaming_graph_t (template)
@@ -33,18 +36,39 @@ static void iree_hal_streaming_graph_node_deinitialize_attrs(
       iree_hal_streaming_event_release(node->attrs.event.event);
       node->attrs.event.event = NULL;
       break;
-    case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC:
-      if (node->attrs.mem_alloc.owns_device_allocation &&
-          node->attrs.mem_alloc.dptr) {
-        iree_status_ignore(iree_hal_streaming_memory_free_device(
-            node->graph->context,
-            (iree_hal_streaming_deviceptr_t)node->attrs.mem_alloc.dptr));
+    case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC: {
+      if (node->graph->owns_graph_memory_node_claims) {
+        iree_status_t unmap_status =
+            iree_hal_streaming_graph_memory_allocation_unmap_if_mapped(
+                node->attrs.mem_alloc.allocation);
+        if (!iree_status_is_ok(unmap_status)) {
+          iree_status_abort(unmap_status);
+        }
+        if (iree_hal_streaming_graph_memory_allocation_claim_unexecuted_pointer_reference(
+                node->attrs.mem_alloc.allocation)) {
+          iree_hal_streaming_graph_memory_allocation_release(
+              node->attrs.mem_alloc.allocation);
+        }
       }
+      iree_hal_streaming_graph_memory_allocation_release(
+          node->attrs.mem_alloc.allocation);
       node->attrs.mem_alloc.params = NULL;
       node->attrs.mem_alloc.params_size = 0;
       node->attrs.mem_alloc.dptr = NULL;
       node->attrs.mem_alloc.bytesize = 0;
-      node->attrs.mem_alloc.owns_device_allocation = false;
+      node->attrs.mem_alloc.allocation = NULL;
+      node->attrs.mem_alloc.has_in_graph_free_node = false;
+      break;
+    }
+    case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_FREE:
+      if (node->graph->owns_graph_memory_node_claims) {
+        iree_hal_streaming_graph_memory_allocation_release_free_node_reference(
+            node->attrs.mem_free.allocation);
+      }
+      iree_hal_streaming_graph_memory_allocation_release(
+          node->attrs.mem_free.allocation);
+      node->attrs.mem_free.dptr = NULL;
+      node->attrs.mem_free.allocation = NULL;
       break;
     case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_BATCH_MEM_OP:
       for (iree_host_size_t i = 0; i < node->attrs.batch_mem_op.operation_count;
@@ -135,25 +159,108 @@ static iree_status_t iree_hal_streaming_graph_validate_batch_mem_operations(
   return status;
 }
 
-static bool iree_hal_streaming_graph_contains_graph_memory_nodes(
-    const iree_hal_streaming_graph_t* graph) {
+void iree_hal_streaming_graph_refresh_memory_allocation_free_node_state(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_memory_allocation_t* allocation) {
+  IREE_ASSERT_ARGUMENT(graph);
+  IREE_ASSERT_ARGUMENT(allocation);
+
+  iree_hal_streaming_graph_node_t* allocation_node = NULL;
+  bool has_free_node = false;
   for (iree_hal_streaming_node_block_t* block = graph->node_blocks; block;
        block = block->next) {
     for (iree_host_size_t i = 0; i < block->count; ++i) {
       iree_hal_streaming_graph_node_t* node = block->nodes[i];
-      if (node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC ||
-          node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_FREE) {
-        return true;
+      if (node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC &&
+          node->attrs.mem_alloc.allocation == allocation) {
+        allocation_node = node;
+      } else if (node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_FREE &&
+                 node->attrs.mem_free.allocation == allocation) {
+        has_free_node = true;
+      }
+      if (allocation_node && has_free_node) {
+        break;
       }
     }
+    if (allocation_node && has_free_node) {
+      break;
+    }
   }
-  return false;
+  if (allocation_node) {
+    allocation_node->attrs.mem_alloc.has_in_graph_free_node = has_free_node;
+  }
 }
 
 static iree_atomic_uint64_t iree_hal_streaming_next_graph_debug_id =
     IREE_ATOMIC_VAR_INIT(1);
 static iree_atomic_uint64_t iree_hal_streaming_next_node_debug_id =
     IREE_ATOMIC_VAR_INIT(1);
+
+// Graph handles cross public bindings as raw pointers. This intrusive registry
+// permits identity checks without dereferencing an arbitrary address. Graph
+// destruction removes the entry before releasing the object's storage.
+static iree_once_flag iree_hal_streaming_live_graph_mutex_once =
+    IREE_ONCE_FLAG_INIT;
+static iree_slim_mutex_t iree_hal_streaming_live_graph_mutex;
+static iree_hal_streaming_graph_t* iree_hal_streaming_live_graph_head = NULL;
+
+static void iree_hal_streaming_live_graph_mutex_initialize(void) {
+  iree_slim_mutex_initialize(&iree_hal_streaming_live_graph_mutex);
+}
+
+static void iree_hal_streaming_live_graph_lock(void) {
+  iree_call_once(&iree_hal_streaming_live_graph_mutex_once,
+                 iree_hal_streaming_live_graph_mutex_initialize);
+  iree_slim_mutex_lock(&iree_hal_streaming_live_graph_mutex);
+}
+
+static void iree_hal_streaming_live_graph_register(
+    iree_hal_streaming_graph_t* graph) {
+  iree_hal_streaming_live_graph_lock();
+  graph->next_live_graph = iree_hal_streaming_live_graph_head;
+  graph->is_live_registered = true;
+  iree_hal_streaming_live_graph_head = graph;
+  iree_slim_mutex_unlock(&iree_hal_streaming_live_graph_mutex);
+}
+
+static void iree_hal_streaming_live_graph_unregister(
+    iree_hal_streaming_graph_t* graph) {
+  iree_hal_streaming_live_graph_lock();
+  iree_hal_streaming_graph_t** current = &iree_hal_streaming_live_graph_head;
+  while (*current && *current != graph) {
+    current = &(*current)->next_live_graph;
+  }
+  IREE_ASSERT(*current == graph, "graph missing from identity registry");
+  if (*current == graph) {
+    *current = graph->next_live_graph;
+  }
+  graph->next_live_graph = NULL;
+  graph->is_live_registered = false;
+  iree_slim_mutex_unlock(&iree_hal_streaming_live_graph_mutex);
+}
+
+bool iree_hal_streaming_graph_is_capture_active(
+    const iree_hal_streaming_graph_t* graph) {
+  if (!graph) {
+    return false;
+  }
+  iree_hal_streaming_live_graph_lock();
+  bool is_live = false;
+  for (const iree_hal_streaming_graph_t* current =
+           iree_hal_streaming_live_graph_head;
+       current; current = current->next_live_graph) {
+    if (current == graph) {
+      is_live = true;
+      break;
+    }
+  }
+  const bool is_active =
+      is_live &&
+      iree_atomic_load(&graph->capture_state, iree_memory_order_acquire) !=
+          IREE_HAL_STREAMING_GRAPH_CAPTURE_STATE_INACTIVE;
+  iree_slim_mutex_unlock(&iree_hal_streaming_live_graph_mutex);
+  return is_active;
+}
 
 iree_status_t iree_hal_streaming_graph_create(
     iree_hal_streaming_context_t* context,
@@ -170,6 +277,8 @@ iree_status_t iree_hal_streaming_graph_create(
       iree_allocator_malloc(host_allocator, sizeof(*graph), (void**)&graph));
 
   iree_atomic_ref_count_init(&graph->ref_count);
+  graph->next_live_graph = NULL;
+  graph->is_live_registered = false;
   iree_slim_mutex_initialize(&graph->capture_mutex);
   iree_atomic_store(&graph->capture_state,
                     IREE_HAL_STREAMING_GRAPH_CAPTURE_STATE_INACTIVE,
@@ -199,11 +308,17 @@ iree_status_t iree_hal_streaming_graph_create(
   graph->owned_host_allocations = NULL;
   graph->user_object_refs = NULL;
   graph->has_graph_memory_nodes = false;
-  graph->active_graph_memory_exec_count = 0;
+  graph->owns_graph_memory_node_claims = true;
+  iree_atomic_store(&graph->active_graph_memory_exec_count, 0,
+                    iree_memory_order_relaxed);
   graph->flags = flags;
   graph->context = context;
   iree_hal_streaming_context_retain(context);
+  graph->execution_context_hint = context;
+  iree_hal_streaming_context_retain(context);
   graph->host_allocator = host_allocator;
+
+  iree_hal_streaming_live_graph_register(graph);
 
   *out_graph = graph;
   IREE_TRACE_ZONE_END(z0);
@@ -213,6 +328,10 @@ iree_status_t iree_hal_streaming_graph_create(
 static void iree_hal_streaming_graph_destroy(
     iree_hal_streaming_graph_t* graph) {
   IREE_TRACE_ZONE_BEGIN(z0);
+
+  if (graph->is_live_registered) {
+    iree_hal_streaming_live_graph_unregister(graph);
+  }
 
   for (iree_hal_streaming_node_block_t* block = graph->node_blocks; block;
        block = block->next) {
@@ -224,10 +343,10 @@ static void iree_hal_streaming_graph_destroy(
   iree_hal_streaming_graph_owned_host_allocation_t* owned_allocation =
       graph->owned_host_allocations;
   while (owned_allocation) {
-    if (owned_allocation->host_ptr) {
-      iree_status_ignore(iree_hal_streaming_memory_free_host(
-          graph->context, owned_allocation->host_ptr));
-    }
+    // Executables retain their source graph through launch completion, so no
+    // queued operation can still reference graph-private staging here.
+    iree_hal_streaming_memory_release_wrapped_buffer(owned_allocation->buffer);
+    owned_allocation->buffer = NULL;
     owned_allocation = owned_allocation->next;
   }
 
@@ -245,6 +364,7 @@ static void iree_hal_streaming_graph_destroy(
 
   iree_slim_mutex_deinitialize(&graph->capture_mutex);
   // Release context.
+  iree_hal_streaming_context_release(graph->execution_context_hint);
   iree_hal_streaming_context_release(graph->context);
 
   // Free graph memory itself (not allocated from arena).
@@ -816,15 +936,17 @@ static iree_status_t iree_hal_streaming_graph_clone_host_allocations(
   return status;
 }
 
-iree_status_t iree_hal_streaming_graph_clone(
+static iree_status_t iree_hal_streaming_graph_clone_impl(
     iree_hal_streaming_graph_t* source_graph,
+    iree_hal_streaming_context_t* target_context, bool is_exec_template,
     iree_hal_streaming_graph_t** out_graph) {
   IREE_ASSERT_ARGUMENT(source_graph);
+  IREE_ASSERT_ARGUMENT(target_context);
   IREE_ASSERT_ARGUMENT(out_graph);
   *out_graph = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  if (source_graph->has_graph_memory_nodes) {
+  if (source_graph->has_graph_memory_nodes && !is_exec_template) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
@@ -833,11 +955,20 @@ iree_status_t iree_hal_streaming_graph_clone(
 
   iree_hal_streaming_graph_t* clone_graph = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_graph_create(
-              source_graph->context, source_graph->flags,
-              source_graph->host_allocator, &clone_graph));
+      z0, iree_hal_streaming_graph_create(target_context, source_graph->flags,
+                                          source_graph->host_allocator,
+                                          &clone_graph));
+  if (is_exec_template) {
+    iree_hal_streaming_live_graph_unregister(clone_graph);
+    clone_graph->owns_graph_memory_node_claims = false;
+  }
   clone_graph->has_graph_memory_nodes = source_graph->has_graph_memory_nodes;
   clone_graph->clone_source_graph_debug_id = source_graph->debug_id;
+  if (!is_exec_template) {
+    iree_hal_streaming_context_release(clone_graph->execution_context_hint);
+    clone_graph->execution_context_hint = source_graph->execution_context_hint;
+    iree_hal_streaming_context_retain(clone_graph->execution_context_hint);
+  }
 
   iree_hal_streaming_graph_node_t** node_map = NULL;
   iree_hal_streaming_graph_clone_host_allocation_t* host_allocation_map = NULL;
@@ -923,6 +1054,7 @@ iree_status_t iree_hal_streaming_graph_clone(
       clone_node->flags = source_node->flags;
       clone_node->dependency_count = source_node->dependency_count;
       clone_node->attrs = source_node->attrs;
+      clone_node->graph = clone_graph;
 
       if (source_node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL) {
         iree_hal_streaming_module_retain(source_node->attrs.kernel.module);
@@ -965,6 +1097,12 @@ iree_status_t iree_hal_streaming_graph_clone(
         iree_hal_streaming_graph_clone_rewrite_owned_buffer_ref(
             host_allocation_map, host_allocation_count,
             &clone_node->attrs.memcpy.src_ref);
+        status = iree_hal_streaming_graph_memcpy_node_set_buffer_refs(
+            clone_node, clone_node->attrs.memcpy.dst_ref,
+            clone_node->attrs.memcpy.src_ref);
+        if (!iree_status_is_ok(status)) {
+          break;
+        }
       } else if (source_node->type ==
                      IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL &&
                  (source_node->flags &
@@ -1004,6 +1142,16 @@ iree_status_t iree_hal_streaming_graph_clone(
           }
         }
         clone_node->attrs.host.user_data = clone_data;
+      } else if (source_node->type ==
+                     IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC &&
+                 source_node->attrs.mem_alloc.allocation) {
+        iree_hal_streaming_graph_memory_allocation_retain(
+            source_node->attrs.mem_alloc.allocation);
+      } else if (source_node->type ==
+                     IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_FREE &&
+                 source_node->attrs.mem_free.allocation) {
+        iree_hal_streaming_graph_memory_allocation_retain(
+            source_node->attrs.mem_free.allocation);
       } else if (source_node->type ==
                  IREE_HAL_STREAMING_GRAPH_NODE_TYPE_BATCH_MEM_OP) {
         const iree_hal_streaming_graph_batch_mem_op_node_attrs_t* source_attrs =
@@ -1084,7 +1232,7 @@ iree_status_t iree_hal_streaming_graph_clone(
   }
 
   for (iree_hal_streaming_graph_user_object_ref_t* source_ref =
-           source_graph->user_object_refs;
+           is_exec_template ? NULL : source_graph->user_object_refs;
        iree_status_is_ok(status) && source_ref; source_ref = source_ref->next) {
     iree_hal_streaming_graph_user_object_ref_t* clone_ref = NULL;
     status = iree_arena_allocate(&clone_graph->arena, sizeof(*clone_ref),
@@ -1122,6 +1270,24 @@ iree_status_t iree_hal_streaming_graph_clone(
 
   IREE_TRACE_ZONE_END(z0);
   return status;
+}
+
+iree_status_t iree_hal_streaming_graph_clone(
+    iree_hal_streaming_graph_t* source_graph,
+    iree_hal_streaming_context_t* target_context,
+    iree_hal_streaming_graph_t** out_graph) {
+  return iree_hal_streaming_graph_clone_impl(
+      source_graph, target_context, /*is_exec_template=*/false, out_graph);
+}
+
+iree_status_t iree_hal_streaming_graph_clone_for_exec(
+    iree_hal_streaming_graph_t* source_graph,
+    iree_hal_streaming_context_t* target_context,
+    iree_hal_streaming_graph_t** out_graph) {
+  IREE_ASSERT_ARGUMENT(source_graph);
+  IREE_ASSERT_ARGUMENT(target_context);
+  return iree_hal_streaming_graph_clone_impl(
+      source_graph, target_context, /*is_exec_template=*/true, out_graph);
 }
 
 iree_status_t iree_hal_streaming_graph_add_empty_node(
@@ -1558,12 +1724,70 @@ iree_status_t iree_hal_streaming_graph_set_kernel_node_params(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_streaming_graph_import_copy_operand(
+    iree_hal_streaming_graph_t* graph, iree_hal_streaming_buffer_ref_t ref,
+    iree_hal_buffer_t** out_buffer) {
+  IREE_ASSERT_ARGUMENT(graph);
+  IREE_ASSERT_ARGUMENT(out_buffer);
+  *out_buffer = NULL;
+  if (!ref.buffer || !ref.buffer->context) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "graph copy operand has no owning allocation");
+  }
+
+  bool allow_peer_device_allocation = false;
+  if (ref.buffer->context->device_ordinal != graph->context->device_ordinal) {
+    IREE_RETURN_IF_ERROR(iree_hal_streaming_device_can_access_peer(
+        graph->context->device_ordinal, ref.buffer->context->device_ordinal,
+        &allow_peer_device_allocation));
+    if (!allow_peer_device_allocation) {
+      return iree_make_status(
+          IREE_STATUS_PERMISSION_DENIED,
+          "graph device %zu cannot access allocation device %zu",
+          graph->context->device_ordinal, ref.buffer->context->device_ordinal);
+    }
+  }
+  return iree_hal_streaming_memory_buffer_for_context(
+      graph->context, ref.buffer, allow_peer_device_allocation, out_buffer);
+}
+
+iree_status_t iree_hal_streaming_graph_memcpy_node_set_buffer_refs(
+    iree_hal_streaming_graph_node_t* node,
+    iree_hal_streaming_buffer_ref_t dst_ref,
+    iree_hal_streaming_buffer_ref_t src_ref) {
+  IREE_ASSERT_ARGUMENT(node);
+  if (!node->graph || node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMCPY) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "node is not a graph memcpy node");
+  }
+
+  iree_hal_buffer_t* execution_dst_buffer = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_import_copy_operand(
+      node->graph, dst_ref, &execution_dst_buffer));
+  iree_hal_buffer_t* execution_src_buffer = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_import_copy_operand(
+      node->graph, src_ref, &execution_src_buffer));
+
+  node->attrs.memcpy.dst_ref = dst_ref;
+  node->attrs.memcpy.src_ref = src_ref;
+  node->attrs.memcpy.execution_dst_buffer = execution_dst_buffer;
+  node->attrs.memcpy.execution_src_buffer = execution_src_buffer;
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_streaming_graph_add_copy_buffer_node_resolved(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count, iree_hal_streaming_buffer_ref_t dst_ref,
     iree_hal_streaming_buffer_ref_t src_ref, void* hip_dst, const void* hip_src,
     iree_host_size_t size, iree_hal_streaming_graph_node_t** out_node) {
+  iree_hal_buffer_t* execution_dst_buffer = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_import_copy_operand(
+      graph, dst_ref, &execution_dst_buffer));
+  iree_hal_buffer_t* execution_src_buffer = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_import_copy_operand(
+      graph, src_ref, &execution_src_buffer));
+
   // Allocate node with dependencies in a single allocation.
   iree_hal_streaming_graph_node_t* node = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_allocate_node(
@@ -1582,6 +1806,8 @@ static iree_status_t iree_hal_streaming_graph_add_copy_buffer_node_resolved(
   iree_hal_streaming_graph_memcpy_node_attrs_t* attrs = &node->attrs.memcpy;
   attrs->dst_ref = dst_ref;
   attrs->src_ref = src_ref;
+  attrs->execution_dst_buffer = execution_dst_buffer;
+  attrs->execution_src_buffer = execution_src_buffer;
   attrs->size = size;
   attrs->execution_dst_pitch = size;
   attrs->execution_src_pitch = size;
@@ -1616,6 +1842,47 @@ static iree_status_t iree_hal_streaming_graph_add_copy_buffer_node_resolved(
   return status;
 }
 
+static iree_status_t iree_hal_streaming_graph_resolve_copy_ptr(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_deviceptr_t device_ptr, iree_device_size_t size,
+    iree_hal_streaming_buffer_ref_t* out_ref) {
+  iree_status_t status = iree_hal_streaming_memory_lookup_range(
+      graph->context, device_ptr, size, out_ref);
+  if (!iree_status_is_ok(status) &&
+      iree_status_code(status) == IREE_STATUS_NOT_FOUND) {
+    iree_status_ignore(status);
+    iree_hal_streaming_context_t* owner_context = NULL;
+    status = iree_hal_streaming_memory_lookup_range_across_contexts(
+        device_ptr, size, &owner_context, out_ref);
+    iree_hal_streaming_context_release(owner_context);
+  }
+  return status;
+}
+
+static iree_status_t iree_hal_streaming_graph_resolve_copy_ptrs(
+    iree_hal_streaming_graph_t* graph, iree_hal_streaming_deviceptr_t dst,
+    iree_hal_streaming_deviceptr_t src, iree_device_size_t size,
+    iree_hal_streaming_buffer_ref_t* out_dst_ref,
+    iree_hal_streaming_buffer_ref_t* out_src_ref) {
+  if (size == 0) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_streaming_memory_lookup(graph->context, dst, out_dst_ref),
+        "resolving `dst` buffer ref %p", (void*)dst);
+    IREE_RETURN_IF_ERROR(
+        iree_hal_streaming_memory_lookup(graph->context, src, out_src_ref),
+        "resolving `src` buffer ref %p", (void*)src);
+    return iree_ok_status();
+  }
+
+  IREE_RETURN_IF_ERROR(
+      iree_hal_streaming_graph_resolve_copy_ptr(graph, dst, size, out_dst_ref),
+      "resolving `dst` buffer ref %p with size %" PRIhsz, (void*)dst, size);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_streaming_graph_resolve_copy_ptr(graph, src, size, out_src_ref),
+      "resolving `src` buffer ref %p with size %" PRIhsz, (void*)src, size);
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_streaming_graph_add_copy_ptr_node(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
@@ -1629,29 +1896,10 @@ iree_status_t iree_hal_streaming_graph_add_copy_ptr_node(
                                                          dependency_count));
 
   iree_hal_streaming_buffer_ref_t dst_ref;
-  if (size > 0) {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0,
-        iree_hal_streaming_memory_lookup_range(graph->context, dst, size,
-                                               &dst_ref),
-        "resolving `dst` buffer ref %p with size %" PRIhsz, (void*)dst, size);
-  } else {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_streaming_memory_lookup(graph->context, dst, &dst_ref),
-        "resolving `dst` buffer ref %p", (void*)dst);
-  }
   iree_hal_streaming_buffer_ref_t src_ref;
-  if (size > 0) {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0,
-        iree_hal_streaming_memory_lookup_range(graph->context, src, size,
-                                               &src_ref),
-        "resolving `src` buffer ref %p with size %" PRIhsz, (void*)src, size);
-  } else {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_streaming_memory_lookup(graph->context, src, &src_ref),
-        "resolving `src` buffer ref %p", (void*)src);
-  }
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_graph_resolve_copy_ptrs(graph, dst, src, size,
+                                                     &dst_ref, &src_ref));
 
   iree_status_t status = iree_hal_streaming_graph_add_copy_buffer_node_resolved(
       graph, dependencies, dependency_count, dst_ref, src_ref, (void*)dst,
@@ -1678,17 +1926,20 @@ iree_status_t iree_hal_streaming_graph_add_copy_buffer_node(
   return status;
 }
 
-iree_status_t iree_hal_streaming_graph_add_copy_ptr_node_with_extra_dependency(
+iree_status_t
+iree_hal_streaming_graph_add_copy_buffer_node_with_extra_dependency(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count,
     iree_hal_streaming_graph_node_t* extra_dependency,
-    iree_hal_streaming_deviceptr_t dst, iree_hal_streaming_deviceptr_t src,
-    iree_device_size_t size, iree_hal_streaming_graph_node_t** out_node) {
+    iree_hal_streaming_buffer_ref_t dst_ref,
+    iree_hal_streaming_buffer_ref_t src_ref, iree_device_size_t size,
+    iree_hal_streaming_graph_node_t** out_node) {
   IREE_ASSERT_ARGUMENT(graph);
   if (!extra_dependency) {
-    return iree_hal_streaming_graph_add_copy_ptr_node(
-        graph, dependencies, dependency_count, dst, src, size, out_node);
+    return iree_hal_streaming_graph_add_copy_buffer_node(
+        graph, dependencies, dependency_count, dst_ref, src_ref, size,
+        out_node);
   }
   if (dependency_count > 0 && !dependencies) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1696,8 +1947,9 @@ iree_status_t iree_hal_streaming_graph_add_copy_ptr_node_with_extra_dependency(
   }
   for (iree_host_size_t i = 0; i < dependency_count; ++i) {
     if (dependencies[i] == extra_dependency) {
-      return iree_hal_streaming_graph_add_copy_ptr_node(
-          graph, dependencies, dependency_count, dst, src, size, out_node);
+      return iree_hal_streaming_graph_add_copy_buffer_node(
+          graph, dependencies, dependency_count, dst_ref, src_ref, size,
+          out_node);
     }
   }
 
@@ -1708,8 +1960,8 @@ iree_status_t iree_hal_streaming_graph_add_copy_ptr_node_with_extra_dependency(
                             "graph dependency count overflow");
   }
   if (dependency_count == 0) {
-    return iree_hal_streaming_graph_add_copy_ptr_node(
-        graph, &extra_dependency, 1, dst, src, size, out_node);
+    return iree_hal_streaming_graph_add_copy_buffer_node(
+        graph, &extra_dependency, 1, dst_ref, src_ref, size, out_node);
   }
   iree_host_size_t dependency_list_size = 0;
   if (IREE_UNLIKELY(!iree_host_size_checked_mul(
@@ -1726,10 +1978,28 @@ iree_status_t iree_hal_streaming_graph_add_copy_ptr_node_with_extra_dependency(
          dependency_count * sizeof(*dependencies));
   merged_dependencies[dependency_count] = extra_dependency;
 
-  iree_status_t status = iree_hal_streaming_graph_add_copy_ptr_node(
-      graph, merged_dependencies, total_count, dst, src, size, out_node);
+  iree_status_t status = iree_hal_streaming_graph_add_copy_buffer_node(
+      graph, merged_dependencies, total_count, dst_ref, src_ref, size,
+      out_node);
   iree_allocator_free(graph->host_allocator, merged_dependencies);
   return status;
+}
+
+iree_status_t iree_hal_streaming_graph_add_copy_ptr_node_with_extra_dependency(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** dependencies,
+    iree_host_size_t dependency_count,
+    iree_hal_streaming_graph_node_t* extra_dependency,
+    iree_hal_streaming_deviceptr_t dst, iree_hal_streaming_deviceptr_t src,
+    iree_device_size_t size, iree_hal_streaming_graph_node_t** out_node) {
+  IREE_ASSERT_ARGUMENT(graph);
+  iree_hal_streaming_buffer_ref_t dst_ref;
+  iree_hal_streaming_buffer_ref_t src_ref;
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_resolve_copy_ptrs(
+      graph, dst, src, size, &dst_ref, &src_ref));
+  return iree_hal_streaming_graph_add_copy_buffer_node_with_extra_dependency(
+      graph, dependencies, dependency_count, extra_dependency, dst_ref, src_ref,
+      size, out_node);
 }
 
 iree_status_t iree_hal_streaming_graph_add_fill_ptr_node(
@@ -2180,9 +2450,12 @@ iree_status_t iree_hal_streaming_graph_destroy_node(
                             "node must belong to an active graph");
   }
   iree_hal_streaming_graph_t* graph = node->graph;
-  const bool removed_graph_memory_node =
-      node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC ||
-      node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_FREE;
+  if (node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC ||
+      node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_FREE) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "destroying graph memory allocation and free nodes is not supported");
+  }
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_streaming_graph_remove_dependency_refs(graph, node);
@@ -2201,10 +2474,6 @@ iree_status_t iree_hal_streaming_graph_destroy_node(
   }
   if (removed_from_nodes) {
     iree_hal_streaming_graph_node_deinitialize_attrs(node);
-    if (removed_graph_memory_node) {
-      graph->has_graph_memory_nodes =
-          iree_hal_streaming_graph_contains_graph_memory_nodes(graph);
-    }
     iree_hal_streaming_graph_renumber_nodes(graph);
     node->graph = NULL;
     node->dependency_count = 0;
@@ -2223,6 +2492,104 @@ iree_status_t iree_hal_streaming_graph_destroy_node(
 // iree_hal_streaming_graph_exec_t (instantiation)
 //===----------------------------------------------------------------------===//
 
+static void iree_hal_streaming_graph_consider_execution_context(
+    iree_hal_streaming_context_t* context,
+    iree_hal_streaming_context_t** candidate_context, bool* is_ambiguous) {
+  if (!context || *is_ambiguous) {
+    return;
+  }
+  if (!*candidate_context) {
+    *candidate_context = context;
+  } else if (*candidate_context != context) {
+    *is_ambiguous = true;
+  }
+}
+
+static void iree_hal_streaming_graph_consider_buffer_context(
+    const iree_hal_streaming_buffer_ref_t* ref,
+    iree_hal_streaming_context_t** candidate_context, bool* is_ambiguous) {
+  if (!ref || !ref->buffer || !ref->buffer->context ||
+      iree_any_bit_set((iree_hal_memory_type_t)ref->buffer->memory_type,
+                       IREE_HAL_MEMORY_TYPE_HOST_LOCAL)) {
+    return;
+  }
+  iree_hal_streaming_graph_consider_execution_context(
+      ref->buffer->context, candidate_context, is_ambiguous);
+}
+
+static iree_hal_streaming_context_t*
+iree_hal_streaming_graph_infer_execution_context(
+    iree_hal_streaming_graph_t* graph) {
+  // Public clones may recreate graph-owned staging in another context without
+  // changing where unchanged nodes execute. A unique context referenced by
+  // explicit node resources takes precedence. Host-only and mixed-device
+  // graphs retain the source graph's execution hint instead of guessing an
+  // affinity from opaque argument contents.
+  iree_hal_streaming_context_t* candidate_context = NULL;
+  bool is_ambiguous = false;
+  for (iree_hal_streaming_node_block_t* block = graph->node_blocks;
+       block && !is_ambiguous; block = block->next) {
+    for (iree_host_size_t i = 0; i < block->count && !is_ambiguous; ++i) {
+      iree_hal_streaming_graph_node_t* node = block->nodes[i];
+      switch (node->type) {
+        case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL:
+          if (node->attrs.kernel.symbol && node->attrs.kernel.symbol->module) {
+            iree_hal_streaming_graph_consider_execution_context(
+                node->attrs.kernel.symbol->module->context, &candidate_context,
+                &is_ambiguous);
+          }
+          break;
+        case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMCPY:
+          iree_hal_streaming_graph_consider_buffer_context(
+              &node->attrs.memcpy.dst_ref, &candidate_context, &is_ambiguous);
+          iree_hal_streaming_graph_consider_buffer_context(
+              &node->attrs.memcpy.src_ref, &candidate_context, &is_ambiguous);
+          break;
+        case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMSET:
+          iree_hal_streaming_graph_consider_buffer_context(
+              &node->attrs.memset.dst_ref, &candidate_context, &is_ambiguous);
+          break;
+        case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC:
+          iree_hal_streaming_graph_consider_execution_context(
+              iree_hal_streaming_graph_memory_allocation_context(
+                  node->attrs.mem_alloc.allocation),
+              &candidate_context, &is_ambiguous);
+          break;
+        case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_FREE:
+          iree_hal_streaming_graph_consider_execution_context(
+              iree_hal_streaming_graph_memory_allocation_context(
+                  node->attrs.mem_free.allocation),
+              &candidate_context, &is_ambiguous);
+          break;
+        case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_GRAPH:
+          if (node->attrs.child_graph.graph) {
+            iree_hal_streaming_graph_consider_execution_context(
+                iree_hal_streaming_graph_infer_execution_context(
+                    node->attrs.child_graph.graph),
+                &candidate_context, &is_ambiguous);
+          }
+          break;
+        case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT:
+        case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD:
+          if (node->attrs.event.event) {
+            iree_hal_streaming_graph_consider_execution_context(
+                node->attrs.event.event->context, &candidate_context,
+                &is_ambiguous);
+          }
+          break;
+        case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_BATCH_MEM_OP:
+          is_ambiguous = true;
+          break;
+        default:
+          break;
+      }
+    }
+  }
+
+  return !is_ambiguous && candidate_context ? candidate_context
+                                            : graph->execution_context_hint;
+}
+
 iree_status_t iree_hal_streaming_graph_instantiate(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_instantiate_flags_t flags,
@@ -2232,26 +2599,19 @@ iree_status_t iree_hal_streaming_graph_instantiate(
   *out_exec = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  if (graph->has_graph_memory_nodes &&
-      graph->active_graph_memory_exec_count > 0) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "graphs with memory allocation nodes support one live executable");
-  }
-
   // Create an uninitialized exec object.
   iree_hal_streaming_graph_exec_t* exec = NULL;
+  iree_hal_streaming_context_t* execution_context =
+      iree_hal_streaming_graph_infer_execution_context(graph);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_graph_exec_create(graph->context, graph, flags,
+      z0, iree_hal_streaming_graph_exec_create(execution_context, graph, flags,
                                                graph->host_allocator, &exec));
 
   // Instantiate from the graph template. HIP graph objects are not internally
   // synchronized; callers must externally serialize access to a graph while it
   // is being modified, queried, or instantiated.
   iree_status_t status =
-      iree_hal_streaming_graph_exec_instantiate_from_template(
-          exec, graph->node_blocks, graph->node_count);
+      iree_hal_streaming_graph_exec_instantiate_from_template(exec, exec);
 
   if (iree_status_is_ok(status)) {
     *out_exec = exec;
@@ -2803,6 +3163,9 @@ static iree_status_t iree_hal_streaming_begin_capture_to_graph_impl(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "dependency array must be provided");
   }
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_graph_validate_dependencies(graph, dependencies,
+                                                         dependency_count));
 
   iree_status_t status = iree_hal_streaming_capture_publish_begin(
       stream, graph, dependencies, dependency_count, mode,

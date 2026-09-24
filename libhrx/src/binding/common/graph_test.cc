@@ -151,7 +151,6 @@ TEST(GraphTest, ReorderedAddedDependencyUsesFinalWorkstreamIndex) {
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&block_pool);
 }
-
 TEST(GraphTest, KernelParameterUpdateIsFailureAtomic) {
   constexpr size_t kArgumentCount = 3;
   std::array<iree_hal_streaming_parameter_op_t, kArgumentCount> operations = {};

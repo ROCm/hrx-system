@@ -61,6 +61,10 @@ typedef struct iree_hal_streaming_global_symbol_registry_t
     iree_hal_streaming_global_symbol_registry_t;
 typedef struct iree_hal_streaming_graph_t iree_hal_streaming_graph_t;
 typedef struct iree_hal_streaming_graph_exec_t iree_hal_streaming_graph_exec_t;
+typedef struct iree_hal_streaming_graph_memory_allocation_t
+    iree_hal_streaming_graph_memory_allocation_t;
+typedef struct iree_hal_streaming_graph_memory_physical_block_t
+    iree_hal_streaming_graph_memory_physical_block_t;
 typedef struct iree_hal_streaming_graph_node_t iree_hal_streaming_graph_node_t;
 // mem_pool is now hrx_mem_pool_t from libhrx (no binding-internal type).
 typedef struct iree_hal_streaming_module_t iree_hal_streaming_module_t;
@@ -198,15 +202,6 @@ typedef struct iree_hal_streaming_context_symbol_map_t {
 
   iree_allocator_t host_allocator;
 } iree_hal_streaming_context_symbol_map_t;
-
-typedef struct iree_hal_streaming_graph_memory_size_entry_t {
-  // Next size class tracked in the device graph-memory accounting table.
-  struct iree_hal_streaming_graph_memory_size_entry_t* next;
-  // Exact allocation size represented by this reusable graph-memory class.
-  iree_device_size_t size;
-  // Number of live executable graphs actively using this reusable size class.
-  uint32_t reference_count;
-} iree_hal_streaming_graph_memory_size_entry_t;
 
 // Facts converting a pair of device ticks captured on one device into a
 // duration. Populated or zeroed as a unit: a zero |frequency_hz| means the
@@ -592,8 +587,11 @@ typedef struct iree_hal_streaming_device_t {
 
   // Guards graph-memory accounting fields.
   iree_slim_mutex_t graph_memory_mutex;
-  // Current graph-memory bytes visible via hipGraphMemAttrUsedMemCurrent.
-  uint64_t graph_memory_used_current;
+  // Serializes graph-memory cache trims through physical block release.
+  iree_slim_mutex_t graph_memory_trim_mutex;
+  // Currently mapped graph-memory bytes used to track the active high-water
+  // mark and hipGraphMemAttrUsedMemCurrent.
+  uint64_t graph_memory_mapped_current;
   // High-water graph-memory bytes visible via hipGraphMemAttrUsedMemHigh.
   uint64_t graph_memory_used_high;
   // Current graph-memory reservation visible via
@@ -602,9 +600,11 @@ typedef struct iree_hal_streaming_device_t {
   // High-water graph-memory reservation visible via
   // hipGraphMemAttrReservedMemHigh.
   uint64_t graph_memory_reserved_high;
-  // Reusable graph-memory size classes retained by this device graph pool.
-  iree_hal_streaming_graph_memory_size_entry_t*
-      graph_memory_reusable_size_entries;
+  // Unmapped physical graph-memory blocks available for a later reservation.
+  iree_hal_streaming_graph_memory_physical_block_t*
+      graph_memory_cached_physical_blocks;
+  // Number of live graph-memory allocation records on this device.
+  uint32_t graph_memory_allocation_count;
 } iree_hal_streaming_device_t;
 
 // Global device registry for multi-device management.
@@ -1222,6 +1222,9 @@ typedef struct iree_hal_streaming_buffer_t {
 
   // Default coherency mode for this managed memory range.
   int32_t coherency_mode;
+
+  // Graph allocation record owning this reservation, if any. Borrowed.
+  iree_hal_streaming_graph_memory_allocation_t* graph_memory_allocation;
 } iree_hal_streaming_buffer_t;
 
 // A buffer and an offset into it resolved from a device pointer.
@@ -1412,6 +1415,10 @@ typedef struct iree_hal_streaming_graph_memcpy_node_attrs_t {
   iree_hal_streaming_buffer_ref_t dst_ref;
   // Source buffer reference.
   iree_hal_streaming_buffer_ref_t src_ref;
+  // Destination buffer imported for the graph execution device.
+  iree_hal_buffer_t* execution_dst_buffer;
+  // Source buffer imported for the graph execution device.
+  iree_hal_buffer_t* execution_src_buffer;
   // Number of contiguous bytes to copy.
   iree_device_size_t size;
   // Copy flags passed to HAL.
@@ -1470,6 +1477,8 @@ typedef struct iree_hal_streaming_graph_memcpy_node_attrs_t {
   iree_device_size_t hip_extent_depth;
   // HIP memcpy kind value.
   int hip_kind;
+  // True when the HIP destination operand names a module symbol.
+  bool hip_dst_symbol;
   // HIP driver API metadata used for HIP_MEMCPY3D round-tripping.
   iree_hal_streaming_graph_memcpy_driver_node_attrs_t hip_driver;
 } iree_hal_streaming_graph_memcpy_node_attrs_t;
@@ -1523,14 +1532,17 @@ typedef struct iree_hal_streaming_graph_mem_alloc_node_attrs_t {
   void* dptr;
   // Allocation size in bytes.
   iree_device_size_t bytesize;
-  // True when |dptr| is owned by this graph template and must be released with
-  // the node.
-  bool owns_device_allocation;
+  // Graph allocation record retained while this node is alive.
+  iree_hal_streaming_graph_memory_allocation_t* allocation;
+  // True when this graph contains a free node for |allocation|.
+  bool has_in_graph_free_node;
 } iree_hal_streaming_graph_mem_alloc_node_attrs_t;
 
 typedef struct iree_hal_streaming_graph_mem_free_node_attrs_t {
   // Device pointer associated with the memory free node.
   void* dptr;
+  // Graph allocation record retained while this node is alive.
+  iree_hal_streaming_graph_memory_allocation_t* allocation;
 } iree_hal_streaming_graph_mem_free_node_attrs_t;
 
 typedef struct iree_hal_streaming_graph_batch_mem_op_node_attrs_t {
@@ -2519,6 +2531,15 @@ iree_status_t iree_hal_streaming_graph_create(
 
 iree_status_t iree_hal_streaming_graph_clone(
     iree_hal_streaming_graph_t* source_graph,
+    iree_hal_streaming_context_t* target_context,
+    iree_hal_streaming_graph_t** out_graph);
+
+// Clones graph state for private mutation by an executable in |target_context|.
+// The source graph remains responsible for public handle identity and
+// graph-memory node claims.
+iree_status_t iree_hal_streaming_graph_clone_for_exec(
+    iree_hal_streaming_graph_t* source_graph,
+    iree_hal_streaming_context_t* target_context,
     iree_hal_streaming_graph_t** out_graph);
 
 // Synchronization: none (reference counting).
@@ -2624,14 +2645,14 @@ iree_status_t iree_hal_streaming_graph_instantiate(
     iree_hal_streaming_graph_instantiate_flags_t flags,
     iree_hal_streaming_graph_exec_t** out_exec);
 
-// Synchronization: none (reference counting).
+// Synchronization: none (reference counting). The owning handle returned by
+// graph instantiation must be consumed by graph_exec_destroy_handle; retain and
+// release manage only borrowed references.
 void iree_hal_streaming_graph_exec_retain(
     iree_hal_streaming_graph_exec_t* exec);
 void iree_hal_streaming_graph_exec_release(
     iree_hal_streaming_graph_exec_t* exec);
 bool iree_hal_streaming_graph_exec_try_retain_live(
-    iree_hal_streaming_graph_exec_t* exec);
-bool iree_hal_streaming_graph_exec_is_live(
     iree_hal_streaming_graph_exec_t* exec);
 iree_status_t iree_hal_streaming_graph_exec_destroy_handle(
     iree_hal_streaming_graph_exec_t* exec);
@@ -2666,20 +2687,6 @@ iree_status_t iree_hal_streaming_graph_exec_update(
     iree_hal_streaming_graph_exec_t* exec, iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** out_error_node,
     iree_hal_streaming_graph_exec_update_result_t* out_result);
-
-uint64_t iree_hal_streaming_graph_memory_used_current(
-    iree_hal_streaming_device_t* device);
-uint64_t iree_hal_streaming_graph_memory_used_high(
-    iree_hal_streaming_device_t* device);
-uint64_t iree_hal_streaming_graph_memory_reserved_current(
-    iree_hal_streaming_device_t* device);
-uint64_t iree_hal_streaming_graph_memory_reserved_high(
-    iree_hal_streaming_device_t* device);
-void iree_hal_streaming_graph_memory_reset_used_high(
-    iree_hal_streaming_device_t* device);
-void iree_hal_streaming_graph_memory_reset_reserved_high(
-    iree_hal_streaming_device_t* device);
-void iree_hal_streaming_graph_memory_trim(iree_hal_streaming_device_t* device);
 
 //===----------------------------------------------------------------------===//
 // Stream capture

@@ -99,6 +99,15 @@ iree_status_t iree_hal_streaming_memory_wrap_virtual_reservation(
     iree_hal_streaming_context_t* context, hrx_buffer_t virtual_buffer,
     iree_hal_streaming_buffer_t** out_buffer);
 
+// Publishes or removes an existing wrapper in its context's pointer table.
+// These operations pair a wrapper's allocation-preparation admission state
+// with table visibility and are used when a stable virtual reservation becomes
+// live again across graph launches.
+iree_status_t iree_hal_streaming_memory_publish_wrapped_buffer(
+    iree_hal_streaming_buffer_t* buffer);
+iree_status_t iree_hal_streaming_memory_unpublish_wrapped_buffer(
+    iree_hal_streaming_buffer_t* buffer);
+
 // Removes and releases an externally owned buffer wrapper.
 void iree_hal_streaming_memory_release_wrapped_buffer(
     iree_hal_streaming_buffer_t* buffer);

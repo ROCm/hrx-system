@@ -44,6 +44,29 @@ using HipGraphDestroyFn = hipError_t (*)(hipGraph_t graph);
 using HipGraphAddMemAllocNodeFn = hipError_t (*)(
     hipGraphNode_t* node, hipGraph_t graph, const hipGraphNode_t* dependencies,
     size_t dependency_count, void* allocation_parameters);
+using HipGraphAddMemFreeNodeFn = hipError_t (*)(
+    hipGraphNode_t* node, hipGraph_t graph, const hipGraphNode_t* dependencies,
+    size_t dependency_count, void* device_pointer);
+using HipGraphInstantiateFn = hipError_t (*)(hipGraphExec_t* executable_graph,
+                                             hipGraph_t graph,
+                                             hipGraphNode_t* error_node,
+                                             char* log_buffer,
+                                             size_t log_buffer_size);
+using HipGraphExecDestroyFn = hipError_t (*)(hipGraphExec_t executable_graph);
+using HipGraphLaunchFn = hipError_t (*)(hipGraphExec_t executable_graph,
+                                        hipStream_t stream);
+using HipStreamSynchronizeFn = hipError_t (*)(hipStream_t stream);
+using HipDeviceGetGraphMemAttributeFn = hipError_t (*)(int device,
+                                                       int attribute,
+                                                       void* value);
+using HipStreamBeginCaptureFn = hipError_t (*)(hipStream_t stream,
+                                               hipStreamCaptureMode mode);
+using HipStreamEndCaptureFn = hipError_t (*)(hipStream_t stream,
+                                             hipGraph_t* graph);
+using HipMallocAsyncFn = hipError_t (*)(void** pointer, size_t size,
+                                        hipStream_t stream);
+using HipFreeAsyncFn = hipError_t (*)(void* pointer, hipStream_t stream);
+using HipFreeFn = hipError_t (*)(void* pointer);
 
 // Owns an RTLD_LOCAL HIP runtime instance and the entry points exercised by
 // this test. All calls use the loaded library instead of a link-time runtime.
@@ -74,6 +97,28 @@ struct HipRuntimeApi {
   HipGraphDestroyFn graph_destroy = nullptr;
   // Adds a memory-allocation node to a graph template.
   HipGraphAddMemAllocNodeFn graph_add_mem_alloc_node = nullptr;
+  // Adds a memory-free node to a graph template.
+  HipGraphAddMemFreeNodeFn graph_add_mem_free_node = nullptr;
+  // Instantiates an executable graph from a graph template.
+  HipGraphInstantiateFn graph_instantiate = nullptr;
+  // Destroys an executable graph.
+  HipGraphExecDestroyFn graph_exec_destroy = nullptr;
+  // Enqueues an executable graph on a stream.
+  HipGraphLaunchFn graph_launch = nullptr;
+  // Waits for all previously enqueued work on a stream.
+  HipStreamSynchronizeFn stream_synchronize = nullptr;
+  // Queries graph-memory accounting for a device.
+  HipDeviceGetGraphMemAttributeFn device_get_graph_mem_attribute = nullptr;
+  // Begins stream capture into a graph template.
+  HipStreamBeginCaptureFn stream_begin_capture = nullptr;
+  // Ends stream capture and returns its graph template.
+  HipStreamEndCaptureFn stream_end_capture = nullptr;
+  // Records a stream-ordered allocation.
+  HipMallocAsyncFn malloc_async = nullptr;
+  // Records a stream-ordered free.
+  HipFreeAsyncFn free_async = nullptr;
+  // Frees a device allocation after synchronizing prior use.
+  HipFreeFn free = nullptr;
 };
 
 template <typename T>
@@ -116,6 +161,28 @@ class HipMemoryPoolApiTest : public testing::Test {
       api_.graph_add_mem_alloc_node =
           ResolveHipSymbol<HipGraphAddMemAllocNodeFn>(
               api_.library, "hipGraphAddMemAllocNode");
+      api_.graph_add_mem_free_node = ResolveHipSymbol<HipGraphAddMemFreeNodeFn>(
+          api_.library, "hipGraphAddMemFreeNode");
+      api_.graph_instantiate = ResolveHipSymbol<HipGraphInstantiateFn>(
+          api_.library, "hipGraphInstantiate");
+      api_.graph_exec_destroy = ResolveHipSymbol<HipGraphExecDestroyFn>(
+          api_.library, "hipGraphExecDestroy");
+      api_.graph_launch =
+          ResolveHipSymbol<HipGraphLaunchFn>(api_.library, "hipGraphLaunch");
+      api_.stream_synchronize = ResolveHipSymbol<HipStreamSynchronizeFn>(
+          api_.library, "hipStreamSynchronize");
+      api_.device_get_graph_mem_attribute =
+          ResolveHipSymbol<HipDeviceGetGraphMemAttributeFn>(
+              api_.library, "hipDeviceGetGraphMemAttribute");
+      api_.stream_begin_capture = ResolveHipSymbol<HipStreamBeginCaptureFn>(
+          api_.library, "hipStreamBeginCapture");
+      api_.stream_end_capture = ResolveHipSymbol<HipStreamEndCaptureFn>(
+          api_.library, "hipStreamEndCapture");
+      api_.malloc_async =
+          ResolveHipSymbol<HipMallocAsyncFn>(api_.library, "hipMallocAsync");
+      api_.free_async =
+          ResolveHipSymbol<HipFreeAsyncFn>(api_.library, "hipFreeAsync");
+      api_.free = ResolveHipSymbol<HipFreeFn>(api_.library, "hipFree");
     }
 
     ASSERT_NE(nullptr, api_.init);
@@ -130,6 +197,17 @@ class HipMemoryPoolApiTest : public testing::Test {
     ASSERT_NE(nullptr, api_.graph_create);
     ASSERT_NE(nullptr, api_.graph_destroy);
     ASSERT_NE(nullptr, api_.graph_add_mem_alloc_node);
+    ASSERT_NE(nullptr, api_.graph_add_mem_free_node);
+    ASSERT_NE(nullptr, api_.graph_instantiate);
+    ASSERT_NE(nullptr, api_.graph_exec_destroy);
+    ASSERT_NE(nullptr, api_.graph_launch);
+    ASSERT_NE(nullptr, api_.stream_synchronize);
+    ASSERT_NE(nullptr, api_.device_get_graph_mem_attribute);
+    ASSERT_NE(nullptr, api_.stream_begin_capture);
+    ASSERT_NE(nullptr, api_.stream_end_capture);
+    ASSERT_NE(nullptr, api_.malloc_async);
+    ASSERT_NE(nullptr, api_.free_async);
+    ASSERT_NE(nullptr, api_.free);
 
     const hipError_t init_result = api_.init(/*flags=*/0);
     if (init_result != hipSuccess) {
@@ -208,6 +286,174 @@ TEST_F(HipMemoryPoolApiTest, GraphAllocationReleasesSelectedPool) {
 
   EXPECT_EQ(hipSuccess, api_.device_set_mem_pool(device_, default_pool));
   EXPECT_EQ(hipSuccess, api_.mem_pool_destroy(pool));
+}
+
+TEST_F(HipMemoryPoolApiTest, GraphAllocationLaunchUsesStableVirtualAddress) {
+  uint64_t used_before = 0;
+  ASSERT_EQ(hipSuccess,
+            api_.device_get_graph_mem_attribute(
+                device_, hipGraphMemAttrUsedMemCurrent, &used_before));
+
+  hipGraph_t graph = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_create(&graph, /*flags=*/0));
+
+  hipMemAllocNodeParams parameters = {};
+  parameters.poolProps.allocType = hipMemAllocationTypePinned;
+  parameters.poolProps.location.type = hipMemLocationTypeDevice;
+  parameters.poolProps.location.id = device_;
+  parameters.bytesize = 4096;
+  hipGraphNode_t allocation_node = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_add_mem_alloc_node(
+                            &allocation_node, graph, /*dependencies=*/nullptr,
+                            /*dependency_count=*/0, &parameters));
+  ASSERT_NE(nullptr, parameters.dptr);
+
+  hipGraphNode_t free_node = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_add_mem_free_node(
+                            &free_node, graph, &allocation_node,
+                            /*dependency_count=*/1, parameters.dptr));
+
+  hipGraphExec_t executable_graph = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_instantiate(&executable_graph, graph,
+                                               /*error_node=*/nullptr,
+                                               /*log_buffer=*/nullptr,
+                                               /*log_buffer_size=*/0));
+
+  hipGraphExec_t duplicate_executable_graph = nullptr;
+  EXPECT_EQ(hipErrorNotSupported,
+            api_.graph_instantiate(&duplicate_executable_graph, graph,
+                                   /*error_node=*/nullptr,
+                                   /*log_buffer=*/nullptr,
+                                   /*log_buffer_size=*/0));
+  EXPECT_EQ(nullptr, duplicate_executable_graph);
+
+  ASSERT_EQ(hipSuccess, api_.graph_launch(executable_graph, stream_));
+  ASSERT_EQ(hipSuccess, api_.graph_exec_destroy(executable_graph));
+  executable_graph = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_destroy(graph));
+  graph = nullptr;
+  ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream_));
+
+  uint64_t used_after = 0;
+  EXPECT_EQ(hipSuccess,
+            api_.device_get_graph_mem_attribute(
+                device_, hipGraphMemAttrUsedMemCurrent, &used_after));
+  EXPECT_EQ(used_before, used_after);
+}
+
+TEST_F(HipMemoryPoolApiTest, CapturedAllocationRetainsGraphOwnership) {
+  ASSERT_EQ(hipSuccess,
+            api_.stream_begin_capture(stream_, hipStreamCaptureModeGlobal));
+
+  void* pointer = nullptr;
+  ASSERT_EQ(hipSuccess, api_.malloc_async(&pointer, 4096, stream_));
+  ASSERT_NE(nullptr, pointer);
+  ASSERT_EQ(hipSuccess, api_.free_async(pointer, stream_));
+
+  hipGraph_t graph = nullptr;
+  ASSERT_EQ(hipSuccess, api_.stream_end_capture(stream_, &graph));
+  ASSERT_NE(nullptr, graph);
+
+  hipGraphExec_t executable_graph = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_instantiate(&executable_graph, graph,
+                                               /*error_node=*/nullptr,
+                                               /*log_buffer=*/nullptr,
+                                               /*log_buffer_size=*/0));
+  ASSERT_EQ(hipSuccess, api_.graph_launch(executable_graph, stream_));
+  ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream_));
+
+  EXPECT_EQ(hipSuccess, api_.graph_exec_destroy(executable_graph));
+  EXPECT_EQ(hipSuccess, api_.graph_destroy(graph));
+}
+
+TEST_F(HipMemoryPoolApiTest, StreamOrderedFreeReleasesGraphAllocation) {
+  uint64_t used_before = 0;
+  ASSERT_EQ(hipSuccess,
+            api_.device_get_graph_mem_attribute(
+                device_, hipGraphMemAttrUsedMemCurrent, &used_before));
+
+  hipGraph_t graph = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_create(&graph, /*flags=*/0));
+
+  hipMemAllocNodeParams parameters = {};
+  parameters.poolProps.allocType = hipMemAllocationTypePinned;
+  parameters.poolProps.location.type = hipMemLocationTypeDevice;
+  parameters.poolProps.location.id = device_;
+  parameters.bytesize = 4096;
+  hipGraphNode_t allocation_node = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_add_mem_alloc_node(
+                            &allocation_node, graph, /*dependencies=*/nullptr,
+                            /*dependency_count=*/0, &parameters));
+  ASSERT_NE(nullptr, parameters.dptr);
+
+  hipGraphExec_t executable_graph = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_instantiate(&executable_graph, graph,
+                                               /*error_node=*/nullptr,
+                                               /*log_buffer=*/nullptr,
+                                               /*log_buffer_size=*/0));
+  ASSERT_EQ(hipSuccess, api_.graph_launch(executable_graph, stream_));
+  ASSERT_EQ(hipSuccess, api_.free_async(parameters.dptr, stream_));
+  ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream_));
+
+  uint64_t used_after = 0;
+  EXPECT_EQ(hipSuccess,
+            api_.device_get_graph_mem_attribute(
+                device_, hipGraphMemAttrUsedMemCurrent, &used_after));
+  EXPECT_EQ(used_before, used_after);
+
+  // A later launch reactivates the graph's stable virtual address and must
+  // make it available to the same stream-ordered free path again.
+  ASSERT_EQ(hipSuccess, api_.graph_launch(executable_graph, stream_));
+  ASSERT_EQ(hipSuccess, api_.free_async(parameters.dptr, stream_));
+  ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream_));
+
+  used_after = 0;
+  EXPECT_EQ(hipSuccess,
+            api_.device_get_graph_mem_attribute(
+                device_, hipGraphMemAttrUsedMemCurrent, &used_after));
+  EXPECT_EQ(used_before, used_after);
+
+  EXPECT_EQ(hipSuccess, api_.graph_exec_destroy(executable_graph));
+  EXPECT_EQ(hipSuccess, api_.graph_destroy(graph));
+}
+
+TEST_F(HipMemoryPoolApiTest, GraphFreeRetiresAndRelaunchesStablePointer) {
+  hipGraph_t graph = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_create(&graph, /*flags=*/0));
+
+  hipMemAllocNodeParams parameters = {};
+  parameters.poolProps.allocType = hipMemAllocationTypePinned;
+  parameters.poolProps.location.type = hipMemLocationTypeDevice;
+  parameters.poolProps.location.id = device_;
+  parameters.bytesize = 4096;
+  hipGraphNode_t allocation_node = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_add_mem_alloc_node(
+                            &allocation_node, graph, /*dependencies=*/nullptr,
+                            /*dependency_count=*/0, &parameters));
+  ASSERT_NE(nullptr, parameters.dptr);
+
+  hipGraphNode_t free_node = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_add_mem_free_node(
+                            &free_node, graph, &allocation_node,
+                            /*dependency_count=*/1, parameters.dptr));
+
+  hipGraphExec_t executable_graph = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_instantiate(&executable_graph, graph,
+                                               /*error_node=*/nullptr,
+                                               /*log_buffer=*/nullptr,
+                                               /*log_buffer_size=*/0));
+  ASSERT_EQ(hipSuccess, api_.graph_launch(executable_graph, stream_));
+  ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream_));
+  EXPECT_EQ(hipErrorInvalidValue, api_.free(parameters.dptr));
+
+  // The graph free retires the current pointer lifetime. A later launch
+  // republishes the same stable address and frees its new lifetime again.
+  ASSERT_EQ(hipSuccess, api_.graph_launch(executable_graph, stream_));
+  ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream_));
+  EXPECT_EQ(hipErrorInvalidValue, api_.free(parameters.dptr));
+
+  EXPECT_EQ(hipSuccess, api_.graph_exec_destroy(executable_graph));
+  EXPECT_EQ(hipSuccess, api_.graph_destroy(graph));
 }
 
 }  // namespace

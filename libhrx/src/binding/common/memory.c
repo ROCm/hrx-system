@@ -10,6 +10,7 @@
 
 #include "common/direct_transfer.h"
 #include "common/graph.h"
+#include "common/graph_memory.h"
 #include "common/internal.h"
 #include "common/peer.h"
 #include "common/stream.h"
@@ -544,6 +545,33 @@ iree_status_t iree_hal_streaming_memory_wrap_virtual_reservation(
       context, virtual_buffer, HRX_MEMORY_TYPE_DEVICE_LOCAL,
       /*imported_host_ptr=*/NULL, /*allocation_pool=*/NULL,
       IREE_HAL_STREAMING_BUFFER_CONTEXT_RETAINED, out_buffer);
+}
+
+iree_status_t iree_hal_streaming_memory_publish_wrapped_buffer(
+    iree_hal_streaming_buffer_t* buffer) {
+  IREE_ASSERT_ARGUMENT(buffer);
+  iree_hal_streaming_allocation_preparation_reopen(&buffer->preparation);
+  iree_status_t status = HRX_CALL(hrx_buffer_table_insert(
+      &buffer->context->buffer_table, buffer->device_ptr, buffer->host_ptr,
+      buffer->size, buffer->hrx_buf, buffer));
+  if (!iree_status_is_ok(status)) {
+    iree_hal_streaming_allocation_preparation_begin_close(&buffer->preparation);
+  }
+  return status;
+}
+
+iree_status_t iree_hal_streaming_memory_unpublish_wrapped_buffer(
+    iree_hal_streaming_buffer_t* buffer) {
+  IREE_ASSERT_ARGUMENT(buffer);
+  iree_hal_streaming_allocation_preparation_begin_close(&buffer->preparation);
+  iree_status_t status = HRX_CALL(hrx_buffer_table_remove(
+      &buffer->context->buffer_table, buffer->device_ptr));
+  if (!iree_status_is_ok(status)) {
+    iree_hal_streaming_allocation_preparation_reopen(&buffer->preparation);
+    return status;
+  }
+  iree_hal_streaming_allocation_preparation_await_idle(&buffer->preparation);
+  return iree_ok_status();
 }
 
 void iree_hal_streaming_memory_release_wrapped_buffer(
@@ -1880,6 +1908,46 @@ iree_status_t iree_hal_streaming_memory_free_device(
   // The table removal closes admission atomically. Existing preparers hold an
   // allocation-local lease and cannot be overtaken by synchronization.
   iree_hal_streaming_allocation_preparation_await_idle(&wrapper->preparation);
+
+  if (wrapper->graph_memory_allocation) {
+    iree_hal_streaming_graph_memory_allocation_t* allocation =
+        wrapper->graph_memory_allocation;
+    const bool has_pointer_reference =
+        iree_hal_streaming_graph_memory_allocation_claim_external_free_reference(
+            allocation);
+    if (!has_pointer_reference) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "graph allocation has no live returned-pointer reference");
+    } else {
+      status = iree_hal_streaming_context_synchronize_all();
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_streaming_graph_memory_allocation_unmap_if_mapped(
+          allocation);
+    }
+    if (iree_status_is_ok(status)) {
+      hrx_buffer_table_cancel_reserved_insert(&owner_context->buffer_table);
+      iree_hal_streaming_graph_memory_allocation_complete_pointer_reference(
+          allocation);
+      iree_hal_streaming_graph_memory_allocation_release(allocation);
+    } else {
+      if (has_pointer_reference) {
+        iree_hal_streaming_graph_memory_allocation_restore_pointer_reference(
+            allocation);
+      }
+      status = iree_status_join(
+          status, iree_hal_streaming_memory_restore_taken_allocation(
+                      owner_context, wrapper));
+    }
+    iree_hal_streaming_context_release(owner_context);
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
+
+  // A HIP pointer may be hidden in native kernargs or device memory, so freeing
+  // cannot rely on launch-time binding discovery. Flush and wait every active
+  // context before releasing the allocation.
   status = iree_hal_streaming_context_synchronize_all();
   if (!iree_status_is_ok(status)) {
     status = iree_status_join(
@@ -1890,10 +1958,6 @@ iree_status_t iree_hal_streaming_memory_free_device(
     return status;
   }
   hrx_buffer_table_cancel_reserved_insert(&owner_context->buffer_table);
-
-  // A HIP pointer may be hidden in native kernargs or device memory, so freeing
-  // cannot rely on launch-time binding discovery. The synchronization above
-  // waits every active context before releasing the allocation.
 
   // Update free memory tracking.
   iree_hal_streaming_memory_account_device_free(wrapper);
@@ -2026,6 +2090,81 @@ iree_status_t iree_hal_streaming_memory_release_completed_async_frees_from_pool(
       completed_frees, /*trim_to_release_threshold=*/false);
 }
 
+typedef struct iree_hal_streaming_deferred_graph_memory_free_t {
+  // Resource retained by the queue until the callback runs or is cancelled.
+  iree_hal_resource_t resource;
+  // Pointer reference retained until the stream reaches this free operation.
+  iree_hal_streaming_graph_memory_allocation_t* allocation;
+  // Context whose buffer-table insertion reservation remains held until the
+  // ordered operation either completes or restores the allocation.
+  iree_hal_streaming_context_t* owner_context;
+  // Wrapper removed from |owner_context| while the operation is pending.
+  iree_hal_streaming_buffer_t* wrapper;
+} iree_hal_streaming_deferred_graph_memory_free_t;
+
+static iree_status_t iree_hal_streaming_deferred_graph_memory_free_restore(
+    iree_hal_streaming_deferred_graph_memory_free_t* free_op) {
+  if (!free_op->allocation) {
+    return iree_ok_status();
+  }
+  iree_hal_streaming_graph_memory_allocation_restore_pointer_reference(
+      free_op->allocation);
+  iree_status_t status = iree_hal_streaming_memory_restore_taken_allocation(
+      free_op->owner_context, free_op->wrapper);
+  iree_hal_streaming_context_release(free_op->owner_context);
+  free_op->allocation = NULL;
+  free_op->owner_context = NULL;
+  free_op->wrapper = NULL;
+  return status;
+}
+
+static void iree_hal_streaming_deferred_graph_memory_free_destroy(
+    iree_hal_resource_t* resource) {
+  iree_hal_streaming_deferred_graph_memory_free_t* free_op =
+      (iree_hal_streaming_deferred_graph_memory_free_t*)resource;
+  // Cancellation prevents the callback from running. Restore the pointer-table
+  // entry and returned-pointer ownership before releasing callback state.
+  iree_status_t status =
+      iree_hal_streaming_deferred_graph_memory_free_restore(free_op);
+  if (!iree_status_is_ok(status)) {
+    iree_status_abort(status);
+  }
+  iree_allocator_free(iree_allocator_system(), free_op);
+}
+
+static const iree_hal_resource_vtable_t
+    iree_hal_streaming_deferred_graph_memory_free_vtable = {
+        .destroy = iree_hal_streaming_deferred_graph_memory_free_destroy,
+};
+
+static iree_status_t iree_hal_streaming_deferred_graph_memory_free_host_call(
+    void* user_data, const uint64_t args[4],
+    iree_hal_host_call_context_t* call_context) {
+  (void)args;
+  (void)call_context;
+  iree_hal_streaming_deferred_graph_memory_free_t* free_op =
+      (iree_hal_streaming_deferred_graph_memory_free_t*)user_data;
+  iree_status_t status =
+      iree_hal_streaming_graph_memory_allocation_unmap_if_mapped(
+          free_op->allocation);
+  if (!iree_status_is_ok(status)) {
+    status = iree_status_join(
+        status, iree_hal_streaming_deferred_graph_memory_free_restore(free_op));
+    return iree_status_annotate_f(
+        status, "stream-ordered graph allocation unmap failed");
+  }
+  hrx_buffer_table_cancel_reserved_insert(
+      &free_op->owner_context->buffer_table);
+  iree_hal_streaming_graph_memory_allocation_complete_pointer_reference(
+      free_op->allocation);
+  iree_hal_streaming_graph_memory_allocation_release(free_op->allocation);
+  iree_hal_streaming_context_release(free_op->owner_context);
+  free_op->allocation = NULL;
+  free_op->owner_context = NULL;
+  free_op->wrapper = NULL;
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_streaming_memory_free_device_async(
     iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t ptr,
     iree_hal_streaming_stream_t* stream) {
@@ -2042,6 +2181,56 @@ iree_status_t iree_hal_streaming_memory_free_device_async(
       &owner_context, &wrapper);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
   iree_hal_streaming_allocation_preparation_await_idle(&wrapper->preparation);
+
+  if (wrapper->graph_memory_allocation) {
+    iree_hal_streaming_graph_memory_allocation_t* allocation =
+        wrapper->graph_memory_allocation;
+    if (!iree_hal_streaming_graph_memory_allocation_claim_async_free_reference(
+            allocation)) {
+      status = iree_hal_streaming_memory_restore_taken_allocation(owner_context,
+                                                                  wrapper);
+      iree_hal_streaming_context_release(owner_context);
+      IREE_TRACE_ZONE_END(z0);
+      return iree_status_join(
+          iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "graph allocation has no live returned-pointer reference"),
+          status);
+    }
+    iree_hal_streaming_deferred_graph_memory_free_t* free_op = NULL;
+    status = iree_allocator_malloc(iree_allocator_system(), sizeof(*free_op),
+                                   (void**)&free_op);
+    if (iree_status_is_ok(status)) {
+      iree_hal_resource_initialize(
+          &iree_hal_streaming_deferred_graph_memory_free_vtable,
+          &free_op->resource);
+      free_op->allocation = allocation;
+      free_op->owner_context = owner_context;
+      free_op->wrapper = wrapper;
+      const uint64_t args[4] = {0, 0, 0, 0};
+      status = iree_hal_streaming_queue_host_call(
+          stream,
+          iree_hal_make_host_call_with_resource(
+              iree_hal_streaming_deferred_graph_memory_free_host_call, free_op,
+              &free_op->resource),
+          args, IREE_HAL_HOST_CALL_FLAG_NONE);
+      if (!iree_status_is_ok(status)) {
+        status = iree_status_join(
+            status,
+            iree_hal_streaming_deferred_graph_memory_free_restore(free_op));
+      }
+      iree_hal_resource_release(&free_op->resource);
+    } else {
+      iree_hal_streaming_graph_memory_allocation_restore_pointer_reference(
+          allocation);
+      status = iree_status_join(
+          status, iree_hal_streaming_memory_restore_taken_allocation(
+                      owner_context, wrapper));
+      iree_hal_streaming_context_release(owner_context);
+    }
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
 
   if (owner_context != stream->context) {
     status = iree_hal_streaming_memory_restore_taken_allocation(owner_context,

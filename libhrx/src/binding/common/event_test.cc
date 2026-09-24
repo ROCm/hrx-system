@@ -366,6 +366,10 @@ class CpuStreamingContextTest : public ::testing::Test {
     // Fatal assertions return from a test body. Release every remaining gate
     // before context teardown so a diagnostic failure cannot turn into a hang.
     IREE_EXPECT_OK(ReleaseAllGates());
+    // Graph-exec destruction is nonblocking. Drain its stream-ordered
+    // retirement calls before releasing the fixture-owned device entry and
+    // the arena block pool embedded in it.
+    IREE_EXPECT_OK(iree_hal_streaming_context_synchronize(context_));
     iree_hal_streaming_context_release(context_);
     for (iree_host_size_t i = 0; i < gate_count_; ++i) {
       iree_hal_semaphore_release(gates_[i].semaphore);
@@ -925,7 +929,7 @@ TEST_F(CpuStreamingContextTest, AGraphLaunchOnAnUntimedDeviceGoesUntimed) {
   for (iree_host_size_t i = kEventCount; i > 0; --i) {
     iree_hal_streaming_event_release(events[i - 1]);
   }
-  iree_hal_streaming_graph_exec_release(exec);
+  IREE_EXPECT_OK(iree_hal_streaming_graph_exec_destroy_handle(exec));
   iree_hal_streaming_graph_release(graph);
   iree_hal_streaming_stream_release(stream);
 }

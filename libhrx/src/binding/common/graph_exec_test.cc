@@ -10,6 +10,7 @@
 #include <thread>
 #include <utility>
 
+#include "common/graph.h"
 #include "common/internal.h"
 #include "iree/base/api.h"
 #include "iree/base/internal/atomics.h"
@@ -23,6 +24,12 @@ namespace {
 void SetFlag(void* user_data) {
   static_cast<std::atomic<bool>*>(user_data)->store(true,
                                                     std::memory_order_release);
+}
+
+void DestroyGraphExecHandle(iree_hal_streaming_graph_exec_t* executable) {
+  if (executable) {
+    IREE_EXPECT_OK(iree_hal_streaming_graph_exec_destroy_handle(executable));
+  }
 }
 
 // Runs |cleanup| when it leaves scope. A test body builds its handles across a
@@ -202,6 +209,10 @@ class GraphExecTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    // Graph-exec destruction is nonblocking. Drain its stream-ordered
+    // retirement calls before releasing the fixture-owned device entry and
+    // the arena block pool embedded in it.
+    IREE_EXPECT_OK(iree_hal_streaming_context_synchronize(context_));
     iree_hal_streaming_stream_release(stream_);
     iree_hal_streaming_context_release(context_);
     iree_arena_block_pool_deinitialize(&device_entry_.block_pool);
@@ -255,7 +266,7 @@ TEST_F(GraphExecTest, BatchMemoryNodePreservesResolvedWriteSemantics) {
   iree_hal_streaming_graph_t* clone_graph = nullptr;
   iree_hal_streaming_graph_exec_t* executable = nullptr;
   ScopeExit release_handles([&] {
-    iree_hal_streaming_graph_exec_release(executable);
+    DestroyGraphExecHandle(executable);
     iree_hal_streaming_graph_release(clone_graph);
     iree_hal_streaming_graph_release(graph);
     iree_hal_streaming_retained_buffer_ref_deinitialize(&target);
@@ -324,7 +335,7 @@ TEST_F(GraphExecTest, BatchMemoryNodePreservesResolvedWriteSemantics) {
   EXPECT_EQ(target.offset,
             node->attrs.batch_mem_op.operations[0].target_offset);
 
-  IREE_ASSERT_OK(iree_hal_streaming_graph_clone(graph, &clone_graph));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_clone(graph, context_, &clone_graph));
   IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
       clone_graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE,
       &executable));
@@ -357,7 +368,7 @@ TEST_F(GraphExecTest, ReplayedEventRecordsDropEveryCapturedGraphReference) {
   // test drops its reference mid-body on purpose, to leave the events holding
   // the last ones.
   ScopeExit release_handles([&] {
-    iree_hal_streaming_graph_exec_release(exec);
+    DestroyGraphExecHandle(exec);
     iree_hal_streaming_graph_release(parent_graph);
     iree_hal_streaming_graph_release(child_graph);
     for (iree_hal_streaming_event_t* event : events) {
@@ -411,9 +422,9 @@ TEST_F(GraphExecTest, ReplayedEventRecordsDropEveryCapturedGraphReference) {
   IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
       parent_graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &exec));
 
-  // A graph holds a reference to the context that created it and drops it when
-  // it is destroyed, so one release across the launch is the capture graph and
-  // nothing else.
+  // A graph independently owns its construction context and execution-context
+  // hint. Both name |context_| here, so destroying the one capture graph drops
+  // two context references and nothing else.
   const int32_t context_references_before =
       iree_atomic_ref_count_load(&context_->ref_count);
   IREE_ASSERT_OK(iree_hal_streaming_graph_exec_launch(exec, stream_));
@@ -422,7 +433,7 @@ TEST_F(GraphExecTest, ReplayedEventRecordsDropEveryCapturedGraphReference) {
   for (iree_hal_streaming_event_t* event : events) {
     EXPECT_EQ(event->capture_graph, nullptr);
   }
-  EXPECT_EQ(context_references_before - 1,
+  EXPECT_EQ(context_references_before - 2,
             iree_atomic_ref_count_load(&context_->ref_count))
       << "the launch destroyed the capture graph a number of times other than "
          "once";
@@ -446,7 +457,7 @@ TEST_F(GraphExecTest, ExecEventNodeTakesOnlyItsOwnContextsEvent) {
   // Hands back whatever was built, on the assertion failure paths as much as
   // on the last line.
   ScopeExit release_handles([&] {
-    iree_hal_streaming_graph_exec_release(exec);
+    DestroyGraphExecHandle(exec);
     iree_hal_streaming_graph_release(graph);
     iree_hal_streaming_event_release(other_context_event);
     iree_hal_streaming_event_release(replacement);
@@ -510,6 +521,39 @@ TEST_F(GraphExecTest, ExecEventNodeTakesOnlyItsOwnContextsEvent) {
       replacement));
 }
 
+TEST_F(GraphExecTest, RebuiltHostCallRetainsExecutableUntilCompletion) {
+  iree_hal_streaming_graph_t* graph = nullptr;
+  iree_hal_streaming_graph_exec_t* exec = nullptr;
+  ScopeExit release_handles([&] {
+    DestroyGraphExecHandle(exec);
+    iree_hal_streaming_graph_release(graph);
+  });
+
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &graph));
+  iree_hal_streaming_graph_node_t* host_node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
+      graph, /*dependencies=*/nullptr, /*dependency_count=*/0, &SetFlag,
+      &graph_host_node_ran_, &host_node));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &exec));
+
+  // Rebuilds compile through a stack-local candidate whose state is moved into
+  // |exec|. Host-call resources must name |exec| rather than that candidate so
+  // queued work can keep the executable alive after this function returns.
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_rebuild_from_template(exec));
+  auto* exec_resource = reinterpret_cast<iree_hal_resource_t*>(exec);
+  EXPECT_EQ(1, iree_atomic_ref_count_load(&exec_resource->ref_count))
+      << "rebuilt callback state retained its owning executable";
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_launch(exec, stream_));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_destroy_handle(exec));
+  exec = nullptr;
+
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  EXPECT_TRUE(graph_host_node_ran_.load(std::memory_order_acquire));
+}
+
 // A launch answers the cross-context record rule once for the whole executable,
 // and a record buried in a child graph is one of the records it answers for:
 // instantiating a child graph node folds the child's answer into the parent's,
@@ -538,7 +582,7 @@ TEST_F(GraphExecTest, ChildGraphRecordRefusesALaunchOnAnotherContextsStream) {
   // on the last line. Releasing the stream and the context is what drains and
   // unregisters them, and the fixture shuts the device down either way.
   ScopeExit release_handles([&] {
-    iree_hal_streaming_graph_exec_release(exec);
+    DestroyGraphExecHandle(exec);
     iree_hal_streaming_graph_release(parent_graph);
     iree_hal_streaming_graph_release(child_graph);
     iree_hal_streaming_event_release(event);
@@ -633,7 +677,7 @@ TEST_F(GraphExecTest,
       iree_hal_queue_release(installed_queue);
     }
     iree_hal_semaphore_release(gate);
-    iree_hal_streaming_graph_exec_release(exec);
+    DestroyGraphExecHandle(exec);
     iree_hal_streaming_graph_release(parent_graph);
     iree_hal_streaming_graph_release(child_graph);
   });
@@ -747,7 +791,7 @@ TEST_F(GraphExecTest,
 
   // Accepted work is terminal at return, so immediate executable teardown is
   // safe even though no stream-tail point was published for the failed launch.
-  iree_hal_streaming_graph_exec_release(exec);
+  DestroyGraphExecHandle(exec);
   exec = nullptr;
 }
 

@@ -86,7 +86,13 @@ typedef enum iree_hal_streaming_graph_capture_state_e {
 
 // Graph structure (template).
 typedef struct iree_hal_streaming_graph_t {
+  // Reference count owning the graph lifetime.
   iree_atomic_ref_count_t ref_count;
+
+  // Next graph in the process-wide identity registry.
+  struct iree_hal_streaming_graph_t* next_live_graph;
+  // True when this graph participates in external handle validation.
+  bool is_live_registered;
 
   // Serializes every capture-time graph mutation and frontier publication with
   // participant adoption and origin termination. Capture lock order is always
@@ -130,17 +136,30 @@ typedef struct iree_hal_streaming_graph_t {
 
   // True when the graph contains HIP memory allocation or free nodes.
   bool has_graph_memory_nodes;
-  // Number of live executable graphs instantiated from memory-node graph.
-  uint32_t active_graph_memory_exec_count;
+  // True when memory nodes own the allocation pointer/free-node claims.
+  // Executable-private templates retain allocations without duplicating these
+  // one-shot claims from their public source graph.
+  bool owns_graph_memory_node_claims;
+  // One while an executable graph owns this memory-node graph's stable virtual
+  // addresses. Memory-node graphs permit only one live executable because the
+  // same reserved addresses cannot represent independent concurrent mappings.
+  iree_atomic_int32_t active_graph_memory_exec_count;
 
   // Graph creation flags.
   uint32_t flags;
   // Streaming context that owns graph resources.
   iree_hal_streaming_context_t* context;
+  // Retained default execution context when nodes have no unique affinity.
+  iree_hal_streaming_context_t* execution_context_hint;
 
   // Host allocator used for graph object allocation.
   iree_allocator_t host_allocator;
 } iree_hal_streaming_graph_t;
+
+// Returns true when |graph| is both live and part of an active capture. The
+// identity check occurs before dereferencing the externally supplied pointer.
+bool iree_hal_streaming_graph_is_capture_active(
+    const iree_hal_streaming_graph_t* graph);
 
 // Attempts to record one logical operation into |stream|'s active capture.
 // Returns |*out_was_capturing| false without invoking |record_fn| when the
@@ -188,6 +207,12 @@ iree_status_t iree_hal_streaming_capture_join_graph(
 // was removed. Lock order: graph/session -> context stream-list -> stream.
 bool iree_hal_streaming_capture_unregister_stream(
     iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream);
+
+// Refreshes whether a graph allocation node has a matching free node in the
+// same graph template after its memory-node topology changes.
+void iree_hal_streaming_graph_refresh_memory_allocation_free_node_state(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_memory_allocation_t* allocation);
 // Type of partition - determines how nodes are executed.
 enum iree_hal_streaming_graph_partition_type_e {
   // Can go in command buffer (count 1 may also be optimizable into a queue op).
@@ -227,9 +252,13 @@ iree_status_t iree_hal_streaming_graph_exec_create(
     iree_allocator_t host_allocator,
     iree_hal_streaming_graph_exec_t** out_exec);
 
+// Compiles |exec|'s template into its compiled-state fields. Host-call records
+// name |resource_owner| so queue submissions retain the persistent executable;
+// rebuilds compile into a temporary container whose fields are subsequently
+// moved into that executable.
 iree_status_t iree_hal_streaming_graph_exec_instantiate_from_template(
     iree_hal_streaming_graph_exec_t* exec,
-    iree_hal_streaming_node_block_t* node_blocks, iree_host_size_t node_count);
+    iree_hal_streaming_graph_exec_t* resource_owner);
 
 iree_status_t iree_hal_streaming_graph_exec_rebuild_from_template(
     iree_hal_streaming_graph_exec_t* exec);
@@ -237,6 +266,23 @@ iree_status_t iree_hal_streaming_graph_exec_rebuild_from_template(
 bool iree_hal_streaming_graph_exec_owns_node(
     iree_hal_streaming_graph_exec_t* exec,
     iree_hal_streaming_graph_node_t* node);
+
+// Begins a serialized executable-node update and returns the corresponding
+// private template node. A successful call must be paired with
+// iree_hal_streaming_graph_exec_end_node_update.
+iree_status_t iree_hal_streaming_graph_exec_begin_node_update(
+    iree_hal_streaming_graph_exec_t* exec,
+    iree_hal_streaming_graph_node_t* source_node,
+    iree_hal_streaming_graph_node_t** out_template_node);
+
+// Rebuilds compiled state while a node update is active. The caller must
+// restore the private node before ending the update when rebuilding fails.
+iree_status_t iree_hal_streaming_graph_exec_rebuild_node_update(
+    iree_hal_streaming_graph_exec_t* exec);
+
+// Ends an executable-node update begun by begin_node_update.
+void iree_hal_streaming_graph_exec_end_node_update(
+    iree_hal_streaming_graph_exec_t* exec);
 
 // Augmented node for sorting and partitioning.
 typedef struct iree_hal_streaming_graph_sort_node_t {
@@ -319,6 +365,26 @@ iree_status_t iree_hal_streaming_graph_add_dependencies(
 iree_status_t iree_hal_streaming_graph_allocate_host_staging(
     iree_hal_streaming_graph_t* graph, iree_device_size_t size,
     iree_hal_streaming_buffer_t** out_buffer);
+
+// Adds a buffer copy node with one dependency in addition to the caller's
+// dependency list. The buffer references may come from contexts other than the
+// graph's execution context.
+iree_status_t
+iree_hal_streaming_graph_add_copy_buffer_node_with_extra_dependency(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** dependencies,
+    iree_host_size_t dependency_count,
+    iree_hal_streaming_graph_node_t* extra_dependency,
+    iree_hal_streaming_buffer_ref_t dst_ref,
+    iree_hal_streaming_buffer_ref_t src_ref, iree_device_size_t size,
+    iree_hal_streaming_graph_node_t** out_node);
+
+// Replaces a memcpy node's allocation references and imports both allocations
+// for the graph execution device. The node is unchanged if either import fails.
+iree_status_t iree_hal_streaming_graph_memcpy_node_set_buffer_refs(
+    iree_hal_streaming_graph_node_t* node,
+    iree_hal_streaming_buffer_ref_t dst_ref,
+    iree_hal_streaming_buffer_ref_t src_ref);
 
 #ifdef __cplusplus
 }
