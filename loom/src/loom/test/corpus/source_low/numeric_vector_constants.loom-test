@@ -1,0 +1,139 @@
+// Every constant reaches memory so native oracles can compare its exact bits.
+
+func.def @vector_constants_i32(%output: buffer) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<24xi32>
+  %c0 = vector.constant 0 : vector<4xi32>
+  vector.store %c0, %view[0] : vector<4xi32>, view<24xi32>
+  %c1 = vector.constant 1 : vector<4xi32>
+  vector.store %c1, %view[4] : vector<4xi32>, view<24xi32>
+  %negative = vector.constant -19088743 : vector<4xi32>
+  vector.store %negative, %view[8] : vector<4xi32>, view<24xi32>
+  %minimum = vector.constant -2147483648 : vector<4xi32>
+  vector.store %minimum, %view[12] : vector<4xi32>, view<24xi32>
+  %all_bits = vector.constant -1 : vector<4xi32>
+  vector.store %all_bits, %view[16] : vector<4xi32>, view<24xi32>
+  // Normal folding must preserve native support for a constant splat.
+  %scalar = scalar.constant 2147483647 : i32
+  %folded = vector.splat %scalar : vector<4xi32>
+  vector.store %folded, %view[20] : vector<4xi32>, view<24xi32>
+  func.return
+}
+
+// ====
+
+func.def @vector_constants_i64(%output: buffer) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<16xi64>
+  %c0 = vector.constant 0 : vector<2xi64>
+  vector.store %c0, %view[0] : vector<2xi64>, view<16xi64>
+  %c1 = vector.constant 1 : vector<2xi64>
+  vector.store %c1, %view[2] : vector<2xi64>, view<16xi64>
+  %low_word = vector.constant 4294967295 : vector<2xi64>
+  vector.store %low_word, %view[4] : vector<2xi64>, view<16xi64>
+  %high_word = vector.constant -4294967296 : vector<2xi64>
+  vector.store %high_word, %view[6] : vector<2xi64>, view<16xi64>
+  %both_words = vector.constant -9223372036854775807 : vector<2xi64>
+  vector.store %both_words, %view[8] : vector<2xi64>, view<16xi64>
+  %minimum = vector.constant -9223372036854775808 : vector<2xi64>
+  vector.store %minimum, %view[10] : vector<2xi64>, view<16xi64>
+  %maximum = vector.constant 9223372036854775807 : vector<2xi64>
+  vector.store %maximum, %view[12] : vector<2xi64>, view<16xi64>
+  // Normal folding must preserve native support for a constant splat.
+  %scalar = scalar.constant -1 : i64
+  %folded = vector.splat %scalar : vector<2xi64>
+  vector.store %folded, %view[14] : vector<2xi64>, view<16xi64>
+  func.return
+}
+
+// ====
+
+func.def @vector_constants_f32(%output: buffer) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<36xf32>
+  %c0 = vector.constant 0.0 : vector<4xf32>
+  vector.store %c0, %view[0] : vector<4xf32>, view<36xf32>
+  %cn0 = vector.constant -0.0 : vector<4xf32>
+  vector.store %cn0, %view[4] : vector<4xf32>, view<36xf32>
+  %fraction = vector.constant -1.1000000000000001 : vector<4xf32>
+  vector.store %fraction, %view[8] : vector<4xf32>, view<36xf32>
+  %subnormal = vector.constant 1.4012984643248171e-45 : vector<4xf32>
+  vector.store %subnormal, %view[12] : vector<4xf32>, view<36xf32>
+  %normal = vector.constant 1.1754943508222875e-38 : vector<4xf32>
+  vector.store %normal, %view[16] : vector<4xf32>, view<36xf32>
+  %positive_infinity = vector.constant inf : vector<4xf32>
+  vector.store %positive_infinity, %view[20] : vector<4xf32>, view<36xf32>
+  %negative_infinity = vector.constant -inf : vector<4xf32>
+  vector.store %negative_infinity, %view[24] : vector<4xf32>, view<36xf32>
+  %nan = vector.constant nan : vector<4xf32>
+  vector.store %nan, %view[28] : vector<4xf32>, view<36xf32>
+  // Normal folding must preserve native support for a constant splat.
+  %scalar = scalar.constant 1.0000000596046448 : f32
+  %folded = vector.splat %scalar : vector<4xf32>
+  vector.store %folded, %view[32] : vector<4xf32>, view<36xf32>
+  func.return
+}
+
+// ====
+
+func.def @vector_constants_f64(%output: buffer) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<18xf64>
+  %c0 = vector.constant 0.0 : vector<2xf64>
+  vector.store %c0, %view[0] : vector<2xf64>, view<18xf64>
+  %cn0 = vector.constant -0.0 : vector<2xf64>
+  vector.store %cn0, %view[2] : vector<2xf64>, view<18xf64>
+  %fraction = vector.constant -1.1000000000000001 : vector<2xf64>
+  vector.store %fraction, %view[4] : vector<2xf64>, view<18xf64>
+  %subnormal = vector.constant 4.9406564584124654e-324 : vector<2xf64>
+  vector.store %subnormal, %view[6] : vector<2xf64>, view<18xf64>
+  %normal = vector.constant 2.2250738585072014e-308 : vector<2xf64>
+  vector.store %normal, %view[8] : vector<2xf64>, view<18xf64>
+  %positive_infinity = vector.constant inf : vector<2xf64>
+  vector.store %positive_infinity, %view[10] : vector<2xf64>, view<18xf64>
+  %negative_infinity = vector.constant -inf : vector<2xf64>
+  vector.store %negative_infinity, %view[12] : vector<2xf64>, view<18xf64>
+  %nan = vector.constant nan : vector<2xf64>
+  vector.store %nan, %view[14] : vector<2xf64>, view<18xf64>
+  // Normal folding must preserve native support for a constant splat.
+  %scalar = scalar.constant 1.1000000000000001 : f64
+  %folded = vector.splat %scalar : vector<2xf64>
+  vector.store %folded, %view[16] : vector<2xf64>, view<18xf64>
+  func.return
+}
+
+// ====
+
+// A dynamic whole-vector choice keeps both constant masks live. Numeric payload
+// selection observes every mask bit, and scalar consumers observe logical 0/1.
+func.def @vector_constants_predicate(%output: buffer, %condition: i1, %true_payload: i32, %false_payload: i32) -> (i32, i32) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<4xi32>
+  %off = vector.constant false : vector<4xi1>
+  %scalar = scalar.constant true : i1
+  %on = vector.splat %scalar : vector<4xi1>
+  %mask = scf.select %condition, %on, %off : vector<4xi1>
+  %true_values = vector.splat %true_payload : vector<4xi32>
+  %false_values = vector.splat %false_payload : vector<4xi32>
+  %payload = vector.select %mask, %true_values, %false_values : vector<4xi32>
+  vector.store %payload, %view[0] : vector<4xi32>, view<4xi32>
+  %first = vector.extract %mask[0] : vector<4xi1> -> i1
+  %last = vector.extract %mask[3] : vector<4xi1> -> i1
+  %signed = scalar.extsi %first : i1 to i32
+  %unsigned = scalar.extui %last : i1 to i32
+  func.return %signed, %unsigned : i32, i32
+}
+
+// ====
+
+// Keep independent lane bits through native f64 memory and vector selection.
+func.def @vector_constants_f64_select(%input: buffer, %output: buffer, %condition: i1) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<2xf64>
+  %output_view = buffer.view %output[%base] : buffer -> view<2xf64>
+  %input_values = vector.load %input_view[0] : view<2xf64> -> vector<2xf64>
+  %cn0 = vector.constant -0.0 : vector<2xf64>
+  %selected = scf.select %condition, %cn0, %input_values : vector<2xf64>
+  vector.store %selected, %output_view[0] : vector<2xf64>, view<2xf64>
+  func.return
+}

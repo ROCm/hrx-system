@@ -277,6 +277,53 @@ def _const_float_rule(result_type: TypePattern, descriptor_key: str) -> Descript
     )
 
 
+def _const_v128_rule(
+    result_type: TypePattern, value: ValueProject, guard: Guard
+) -> DescriptorRule:
+    descriptor = _descriptor("wasm.v128.const")
+    return DescriptorRule(
+        source_op=vector.vector_constant,
+        descriptor=descriptor,
+        guards=(_value_type("result", result_type), guard),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                results={"dst": ValueRef.result("result")},
+                immediates={"lo64": value, "hi64": value},
+                form=DescriptorEmitForm.CONST,
+            ),
+        ),
+    )
+
+
+def _const_vector_splat_rule(
+    element_type: str, immediate: str, value: ValueProject, guard: Guard
+) -> DescriptorRule:
+    # A scalar splat represents repeated 32-bit lanes without packing them into
+    # v128.const's two immediate words and fixed 16-byte payload.
+    constant = _descriptor(f"wasm.{element_type}.const")
+    splat = _descriptor(f"wasm.{element_type}x4.splat")
+    return DescriptorRule(
+        source_op=vector.vector_constant,
+        descriptor=splat,
+        guards=(_value_type("result", Vector(element_type, lanes=4)), guard),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=constant,
+                results={"dst": ValueRef.temporary("element")},
+                result_types={"dst": Scalar(element_type)},
+                immediates={immediate: value},
+                form=DescriptorEmitForm.CONST,
+            ),
+            EmitDescriptorOp(
+                descriptor=splat,
+                operands={"value": ValueRef.temporary("element")},
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
 def _binary_rule(
     source_op: Op,
     type_pattern: TypePattern,
@@ -1023,6 +1070,30 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
         _const_i64_rule(scalar_conversion.scalar_constant, _I64),
         _const_float_rule(_F32, "wasm.f32.const"),
         _const_float_rule(_F64, "wasm.f64.const"),
+        # Logical 0/1 facts become full-width 0/-1 predicate masks.
+        _const_v128_rule(
+            _V4I1,
+            ValueProject.exact_i64_negate("result"),
+            Guard.value_exact_i64("result"),
+        ),
+        _const_v128_rule(
+            _V2I64, ValueProject.exact_i64("result"), Guard.value_exact_i64("result")
+        ),
+        _const_v128_rule(
+            _V2F64, ValueProject.float_bits("result"), Guard.value_exact_float("result")
+        ),
+        _const_vector_splat_rule(
+            "i32",
+            "i32_value",
+            ValueProject.exact_i64("result"),
+            Guard.value_exact_i64("result"),
+        ),
+        _const_vector_splat_rule(
+            "f32",
+            "bits",
+            ValueProject.float_bits("result"),
+            Guard.value_exact_float("result"),
+        ),
         *(
             _whole_value_select_rule(value_type, f"wasm.{type_name}.select")
             for value_type, type_name in (
@@ -1241,6 +1312,15 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
                 ),
                 (
                     _V2I64,
+                    "v128.load",
+                    "v128.store",
+                    8,
+                    2,
+                    vector.vector_load,
+                    vector.vector_store,
+                ),
+                (
+                    _V2F64,
                     "v128.load",
                     "v128.store",
                     8,
