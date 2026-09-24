@@ -30,6 +30,25 @@ Pointer Storage::root(loom_value_id_t buffer, cxx::AST* owner) {
           scalars_.integer(0, LOOM_SCALAR_TYPE_OFFSET, locations_.get(owner))};
 }
 
+Pointer Storage::constrain_origin(Pointer pointer, cxx::AST* owner) {
+  if (unit_.control()->memoryLayout()->sizeOfPointer() != 4) {
+    return pointer;
+  }
+  auto source = locations_.get(owner);
+  auto offset_type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
+  loom_predicate_t range = {
+      .kind = LOOM_PREDICATE_RANGE,
+      .arg_count = 3,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST,
+                   LOOM_PRED_ARG_CONST},
+      .args = {pointer.byte_offset, 0, UINT32_MAX},
+  };
+  loom_op_t* op;
+  check(loom_index_assume_build(&builder_, &pointer.byte_offset, 1, &range, 1,
+                                &offset_type, 1, source, &op));
+  return {pointer.root, loom_op_results(op)[0]};
+}
+
 StorageProjection Storage::project(Pointer pointer,
                                    const cxx::Type* object_type,
                                    cxx::AST* owner) {
@@ -83,14 +102,18 @@ StorageProjection Storage::advance(StorageProjection base,
       .arg_count = 3,
       .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST,
                    LOOM_PRED_ARG_CONST},
-      .args = {byte_offset, 0, INT64_MAX},
+      .args = {byte_offset, 0,
+               unit_.control()->memoryLayout()->sizeOfPointer() == 4
+                   ? UINT32_MAX
+                   : INT64_MAX},
   };
   check(loom_scalar_assume_build(&builder_, &byte_offset, 1, &range, 1,
                                  &wide_type, 1, source, &op));
   check(loom_index_cast_build(&builder_, loom_op_results(op)[0], wide_type,
                               offset_type, source, &op));
   return {{base.pointer.root, loom_op_results(op)[0]},
-          std::gcd(base.alignment, static_cast<uint64_t>(bytes))};
+          std::gcd(base.alignment, static_cast<uint64_t>(bytes)),
+          true};
 }
 
 StorageProjection Storage::member(StorageProjection base,
@@ -102,13 +125,17 @@ StorageProjection Storage::member(StorageProjection base,
   check(loom_index_add_build(&builder_, base.pointer.byte_offset, field_offset,
                              loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET), source,
                              &op));
-  return {{base.pointer.root, loom_op_results(op)[0]},
-          std::gcd(base.alignment, *field->offsetInClass())};
+  Pointer pointer =
+      constrain_origin({base.pointer.root, loom_op_results(op)[0]}, owner);
+  return {pointer, std::gcd(base.alignment, *field->offsetInClass()), true};
 }
 
 StorageAccess Storage::dereference(StorageProjection base,
                                    const cxx::Type* element_type,
                                    cxx::AST* owner) {
+  if (!base.pointer_width_constrained) {
+    base.pointer = constrain_origin(base.pointer, owner);
+  }
   auto element = types_.get(element_type, owner);
   auto* vector = types_.vector(element_type);
   auto view_type =

@@ -119,6 +119,7 @@ loom_cc_library(
         "//loom/src/loom/import/cxx/source",
         "//loom/src/loom/import/cxx/source:error",
         "//loom/src/loom/import/cxx/value:representation",
+        "//loom/src/loom/import/cxx/value:storage",
         "//loom/src/loom/import/cxx/value:types",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",

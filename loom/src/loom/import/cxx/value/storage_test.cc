@@ -193,6 +193,50 @@ TEST_F(StorageTest, InteriorPointersRetainSignedDisplacementsAndRootIdentity) {
   EXPECT_NE(restored.pointer().byte_offset, first.pointer().byte_offset);
 }
 
+TEST_F(StorageTest, ILP32PointersPublishTheirSourceRepresentationRange) {
+  auto source_options = options();
+  source_options.data_model = LOOM_CXX_DATA_MODEL_ILP32;
+  Source source(IREE_SV("int entry();"), IREE_SV("storage_ilp32.cpp"),
+                source_options);
+  Types types(source.unit(), source.diagnostics());
+  Locations locations(source.unit(), source.diagnostics(), module_);
+  Scalars scalars(source.unit(), source.diagnostics(), types, locations,
+                  builder_);
+  Storage storage(source.unit(), source.diagnostics(), types, scalars,
+                  locations, builder_);
+  auto* control = source.unit().control();
+  auto* owner = source.unit().ast();
+  auto allocation =
+      storage.allocate(control->getBoundedArrayType(control->getIntType(), 64),
+                       LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP, 0, owner);
+  auto origin = scalars.integer(16, LOOM_SCALAR_TYPE_OFFSET);
+  auto constrained =
+      storage.constrain_origin({allocation.pointer.root, origin}, owner);
+  EXPECT_EQ(constrained.root, allocation.pointer.root);
+  auto* assumed = producer(constrained.byte_offset);
+  ASSERT_TRUE(loom_index_assume_isa(assumed));
+  auto predicates = loom_index_assume_predicates(assumed);
+  ASSERT_EQ(predicates.count, 1u);
+  EXPECT_EQ(predicates.predicate_list[0].args[0], loom_op_operands(assumed)[0]);
+  EXPECT_EQ(predicates.predicate_list[0].args[1], 0);
+  EXPECT_EQ(predicates.predicate_list[0].args[2], UINT32_MAX);
+  EXPECT_EQ(loom_op_operands(assumed)[0], origin);
+
+  auto* pointer_type = control->getPointerType(control->getIntType());
+  auto advanced =
+      storage.advance(storage.project({allocation.pointer.root, origin},
+                                      control->getIntType(), owner),
+                      scalars.integer(1, LOOM_SCALAR_TYPE_I32), pointer_type,
+                      control->getIntType(), cxx::TokenKind::T_PLUS, owner);
+  EXPECT_TRUE(advanced.pointer_width_constrained);
+  auto* advanced_assume =
+      producer(loom_index_cast_input(producer(advanced.pointer.byte_offset)));
+  ASSERT_TRUE(loom_scalar_assume_isa(advanced_assume));
+  predicates = loom_scalar_assume_predicates(advanced_assume);
+  ASSERT_EQ(predicates.count, 1u);
+  EXPECT_EQ(predicates.predicate_list[0].args[2], UINT32_MAX);
+}
+
 TEST_F(StorageTest, UnsignedDisplacementsExtendBeforeScaling) {
   Locations locations(source_.unit(), source_.diagnostics(), module_);
   Scalars scalars(source_.unit(), source_.diagnostics(), types_, locations,

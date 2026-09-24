@@ -1068,6 +1068,16 @@ loom_check_test_suite(
 )
 endif()
 
+if(LOOM_IMPORT_CXX AND LOOM_TARGET_WASM)
+loom_check_test_suite(
+  NAME
+    wasm_compiler_test
+  SRCS
+    "wasm_lowering.cxx-test"
+    "wasm_lowering_invalid.cxx-test"
+)
+endif()
+
 if(LOOM_IMPORT_CXX)
 loom_test_module(
   NAME

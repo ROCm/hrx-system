@@ -24,6 +24,8 @@ struct StorageProjection {
   Pointer pointer;
   // Source-layout byte alignment retained through fields and array indexing.
   uint64_t alignment;
+  // Whether the emitted origin already carries the source pointer-width fact.
+  bool pointer_width_constrained = false;
 };
 
 // One typed access, either a dynamic element of a retained array view or a
@@ -61,6 +63,10 @@ class Storage {
   // Forms a zero-origin source pointer for a kernel buffer binding. The buffer
   // already carries any admitted parameter contracts.
   Pointer root(loom_value_id_t buffer, cxx::AST* owner);
+  // Refines an opaque pointer origin to the configured source pointer width.
+  // The allocation root remains independent; this only publishes the range
+  // every valid source pointer representation already satisfies.
+  Pointer constrain_origin(Pointer pointer, cxx::AST* owner);
   // Admits the object's storage layout and starts a projection with its
   // ordinary source ABI alignment. Opaque pointer transport needs neither.
   // Nested fields use member() instead of resetting to their nominal type.

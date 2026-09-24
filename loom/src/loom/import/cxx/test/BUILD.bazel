@@ -21,6 +21,7 @@ exports_files([
     "llama_rms_norm.cxx",
     "packed_memory.cxx",
     "vector_lookup.cxx",
+    "wasm_pointer_origins.cxx",
 ])
 
 loom_check_test_suite(
@@ -321,6 +322,18 @@ loom_check_test_suite(
     name = "vm_compiler_test",
     srcs = ["vm_lowering.cxx-test"],
     target_compatible_with = _HOST_COMPATIBILITY,
+)
+
+loom_check_test_suite(
+    name = "wasm_compiler_test",
+    srcs = [
+        "wasm_lowering.cxx-test",
+        "wasm_lowering_invalid.cxx-test",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/target:wasm",
+    ]),
 )
 
 loom_test_module(

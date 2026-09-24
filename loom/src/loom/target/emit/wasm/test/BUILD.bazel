@@ -133,6 +133,34 @@ iree_py_test(
     ]),
 )
 
+iree_py_test(
+    name = "cxx_artifact_test",
+    srcs = ["artifact_test.py"],
+    args = [
+        "$(location //loom/src/loom/tools/loom-compile:loom-compile)",
+        "--cxx-importer",
+        "$(location //loom/src/loom/tools/loom-import-cxx:loom-import-cxx)",
+        "--cxx",
+        "$(location //loom/src/loom/import/cxx/test:wasm_pointer_origins.cxx)",
+        "$(location cxx_pointer_origins.mjs)",
+    ],
+    data = [
+        "cxx_pointer_origins.mjs",
+        "//loom/src/loom/import/cxx/test:wasm_pointer_origins.cxx",
+        "//loom/src/loom/tools/loom-compile",
+        "//loom/src/loom/tools/loom-import-cxx",
+    ],
+    env_inherit = [
+        "IREE_WASM_NODE",
+        "PATH",
+    ],
+    main = "artifact_test.py",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/target:wasm_artifacts",
+    ]),
+)
+
 loom_check_test_suite(
     name = "loom_check_file_test",
     srcs = [

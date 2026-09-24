@@ -295,7 +295,8 @@ IntrinsicCallResult Intrinsics::call(const Binding& admitted,
                                      loom_location_id_t location) {
   const auto* binding = &admitted;
   if (auto* view = std::get_if<ViewIntrinsic>(binding)) {
-    return {view->call(arguments, types_, arena, owner, builder, location)};
+    return {view->call(arguments, types_, arena, storage, owner, builder,
+                       location)};
   }
   if (auto* atomic = std::get_if<AtomicIntrinsic>(binding)) {
     return {atomic->call(arguments, storage, owner, builder, location)};

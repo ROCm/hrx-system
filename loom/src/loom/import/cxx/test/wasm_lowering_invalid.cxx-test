@@ -1,0 +1,7 @@
+// RUN: emit source-low @read target=wasm:simd128 output=low
+// INPUT: cxx data-model=lp64
+
+int read(const int* pointer) {
+  // ERROR@+1: WASM/006 {bit_count="32"}
+  return *pointer;
+}

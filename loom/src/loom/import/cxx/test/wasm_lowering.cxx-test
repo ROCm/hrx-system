@@ -1,0 +1,97 @@
+// RUN: emit source-low @evaluate target=wasm:simd128 output=low
+// INPUT: cxx data-model=ilp32
+#include <loomcxx/view.h>
+
+struct Pair {
+  int first;
+  int second;
+};
+
+static int load_next(const int* pointer) { return pointer[1]; }
+
+static int read(const int* pointer) { return *pointer; }
+
+static int read_dynamic(const int* pointer, int index) {
+  return pointer[index];
+}
+
+static int read_member(const Pair* pointer) { return pointer->second; }
+
+static int read_helper(const int* pointer) { return load_next(pointer + 1); }
+
+static int read_view(const int* pointer) {
+  auto source = loom::buffer::view<4, 8>(
+      pointer, {}, loom::encoding::layout::dense<2>());
+  return loom::view::load(source, 0u, 0u);
+}
+
+int evaluate(const int* pointer, int index, const Pair* pair,
+             const int* matrix) {
+  return read(pointer) + read_dynamic(pointer, index) + read_member(pair) +
+         read_helper(pointer) + read_view(matrix);
+}
+
+// ----
+low.func.def public target<wasm.core.simd128> abi(wasm_function) @evaluate(%pointer: reg<wasm.i32>, %pointer_byte_offset: reg<wasm.i32>, %index: reg<wasm.i32>, %pair: reg<wasm.i32>, %pair_byte_offset: reg<wasm.i32>, %matrix: reg<wasm.i32>, %matrix_byte_offset: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %94 = low.func.call @read(%pointer, %pointer_byte_offset) : (reg<wasm.i32>, reg<wasm.i32>) -> (reg<wasm.i32>)
+  %95 = low.func.call @read_dynamic(%pointer, %pointer_byte_offset, %index) : (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) -> (reg<wasm.i32>)
+  %96 = i32.add %94, %95
+  %97 = low.func.call @read_member(%pair, %pair_byte_offset) : (reg<wasm.i32>, reg<wasm.i32>) -> (reg<wasm.i32>)
+  %98 = i32.add %96, %97
+  %99 = low.func.call @read_helper(%pointer, %pointer_byte_offset) : (reg<wasm.i32>, reg<wasm.i32>) -> (reg<wasm.i32>)
+  %100 = i32.add %98, %99
+  %101 = low.func.call @read_view(%matrix, %matrix_byte_offset) : (reg<wasm.i32>, reg<wasm.i32>) -> (reg<wasm.i32>)
+  %102 = i32.add %100, %101
+  return %102
+}
+
+low.func.def target<wasm.core.simd128> @read(%pointer: reg<wasm.i32>, %pointer_byte_offset: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %106 = i32.add %pointer, %pointer_byte_offset
+  %107 = i32.load %106
+  return %107
+}
+
+low.func.def target<wasm.core.simd128> @read_dynamic(%pointer: reg<wasm.i32>, %pointer_byte_offset: reg<wasm.i32>, %index: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %112 = i64.extend_i32_s %index
+  %113 = i64.const 2
+  %114 = i64.shl %112, %113
+  %115 = i64.extend_i32_u %pointer_byte_offset
+  %116 = i64.add %115, %114
+  %117 = i32.wrap_i64 %116
+  %118 = i32.add %pointer, %117
+  %119 = i32.load %118
+  return %119
+}
+
+low.func.def target<wasm.core.simd128> @read_member(%pointer: reg<wasm.i32>, %pointer_byte_offset: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %125 = i32.const 4
+  %126 = i32.add %pointer_byte_offset, %125
+  %127 = i32.add %pointer, %126
+  %second = i32.load %127
+  return %second
+}
+
+low.func.def target<wasm.core.simd128> @read_helper(%pointer: reg<wasm.i32>, %pointer_byte_offset: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %132 = i64.const 4
+  %133 = i64.extend_i32_u %pointer_byte_offset
+  %134 = i64.add %133, %132
+  %135 = i32.wrap_i64 %134
+  %136 = low.func.call @load_next(%pointer, %135) : (reg<wasm.i32>, reg<wasm.i32>) -> (reg<wasm.i32>)
+  return %136
+}
+
+low.func.def target<wasm.core.simd128> @read_view(%source: reg<wasm.i32>, %pointer_byte_offset: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %140 = i32.add %source, %pointer_byte_offset
+  %141 = i32.load %140
+  return %141
+}
+
+low.func.def target<wasm.core.simd128> @load_next(%pointer: reg<wasm.i32>, %pointer_byte_offset: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %145 = i64.const 4
+  %146 = i64.extend_i32_u %pointer_byte_offset
+  %147 = i64.add %146, %145
+  %148 = i32.wrap_i64 %147
+  %149 = i32.add %pointer, %148
+  %150 = i32.load %149
+  return %150
+}

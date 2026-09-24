@@ -130,6 +130,33 @@ iree_py_test(
 )
 endif()
 
+if(LOOM_IMPORT_CXX AND LOOM_BUILD AND LOOM_TARGET_ARCH_WASM AND LOOM_EMIT_WASM)
+iree_py_test(
+  NAME
+    cxx_artifact_test
+  MAIN
+    "artifact_test.py"
+  SRCS
+    "artifact_test.py"
+  ARGS
+    "{{$<TARGET_FILE:loom::tools::loom-compile::loom-compile>}}"
+    "--cxx-importer"
+    "{{$<TARGET_FILE:loom::tools::loom-import-cxx::loom-import-cxx>}}"
+    "--cxx"
+    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/import/cxx/test/wasm_pointer_origins.cxx}}"
+    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/target/emit/wasm/test/cxx_pointer_origins.mjs}}"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/import/cxx/test/wasm_pointer_origins.cxx"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/emit/wasm/test/cxx_pointer_origins.mjs"
+    "loom::tools::loom-compile::loom-compile"
+    "loom::tools::loom-import-cxx::loom-import-cxx"
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+)
+endif()
+
 if(LOOM_TARGET_ARCH_WASM AND LOOM_EMIT_WASM)
 loom_check_test_suite(
   NAME

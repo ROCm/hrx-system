@@ -93,7 +93,7 @@ func.def public @read(%input: buffer, %input_byte_offset: offset, %index: i32, %
   %8 = scalar.muli %6, %7 : i64
   %9 = index.cast %input_byte_offset : offset to i64
   %10 = scalar.addi %9, %8 : i64
-  %11 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
+  %11 = scalar.assume %10 [range(%10, 0, 4294967295)] : i64
   %12 = index.cast %11 : i64 to offset
   %13 = buffer.view %input[%12] : buffer -> view<1xi32>
   %14 = view.load %13[0] : view<1xi32> -> i32
@@ -102,7 +102,7 @@ func.def public @read(%input: buffer, %input_byte_offset: offset, %index: i32, %
   %17 = scalar.muli %15, %16 : i64
   %18 = index.cast %input_byte_offset : offset to i64
   %19 = scalar.addi %18, %17 : i64
-  %20 = scalar.assume %19 [range(%19, 0, 9223372036854775807)] : i64
+  %20 = scalar.assume %19 [range(%19, 0, 4294967295)] : i64
   %21 = index.cast %20 : i64 to offset
   %22 = buffer.view %input[%21] : buffer -> view<1xi32>
   %23 = view.load %22[0] : view<1xi32> -> i32
@@ -111,7 +111,7 @@ func.def public @read(%input: buffer, %input_byte_offset: offset, %index: i32, %
   %26 = scalar.muli %wide, %25 : i64
   %27 = index.cast %input_byte_offset : offset to i64
   %28 = scalar.addi %27, %26 : i64
-  %29 = scalar.assume %28 [range(%28, 0, 9223372036854775807)] : i64
+  %29 = scalar.assume %28 [range(%28, 0, 4294967295)] : i64
   %30 = index.cast %29 : i64 to offset
   %31 = buffer.view %input[%30] : buffer -> view<1xi32>
   %32 = view.load %31[0] : view<1xi32> -> i32

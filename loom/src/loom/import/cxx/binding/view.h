@@ -21,6 +21,8 @@
 
 namespace loom::cxx_import {
 
+class Storage;
+
 // One concrete specialization of a typed encoding or view operation. Template
 // declarations establish the public operation spelling; concrete source types
 // establish the exact rank, extent, element, and constness contract retained
@@ -40,8 +42,8 @@ class ViewIntrinsic {
   // Emits the admitted operation. Value absence is the result of a handled
   // void store, not an unrecognized intrinsic.
   std::optional<Value> call(std::span<const Value> arguments, Types& types,
-                            ValueArena& arena, cxx::AST* owner,
-                            loom_builder_t* builder,
+                            ValueArena& arena, Storage& storage,
+                            cxx::AST* owner, loom_builder_t* builder,
                             loom_location_id_t location) const;
 
   // Compares the complete concrete contract for one canonical declaration.
