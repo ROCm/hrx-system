@@ -1062,9 +1062,12 @@ class CiTest(unittest.TestCase):
         block = self.workflow_job_block(
             ".github/workflows/ci_iree_bazel.yml", "linux_bazel_cpu"
         )
-        self.assertIn("name: Linux / CPU", block)
+        self.assertIn("name: iree-bazel-test / linux-x86_64 / clang / fastbuild", block)
         for sanitizer in ("ASAN", "TSAN", "UBSAN"):
-            self.assertIn(f"name: Linux / CPU / {sanitizer}", block)
+            self.assertIn(
+                f"name: iree-bazel-test / linux-x86_64 / clang / {sanitizer.lower()}",
+                block,
+            )
             self.assertIn(f"command: iree-bazel-cpu-{sanitizer.lower()}", block)
         self.assertNotIn("command: iree-bazel-cpu-msan", block)
         self.assertNotIn("command: iree-bazel-cpu-sanitizers", block)
@@ -1073,8 +1076,14 @@ class CiTest(unittest.TestCase):
         block = self.workflow_job_block(
             ".github/workflows/ci_iree_cmake.yml", "linux_cmake_cpu"
         )
-        self.assertIn("name: Linux / CPU", block)
-        self.assertIn("name: Linux / CPU / Sanitizer Smoke", block)
+        self.assertIn(
+            "name: iree-cmake-test / linux-x86_64 / clang / relwithdebinfo",
+            block,
+        )
+        self.assertIn(
+            "name: iree-cmake-test / linux-x86_64 / clang / sanitizer-smoke",
+            block,
+        )
         self.assertIn("command: iree-cmake-sanitizer-smoke", block)
         for sanitizer in ("asan", "msan", "tsan", "ubsan"):
             self.assertNotIn(f"command: iree-cmake-cpu-{sanitizer}", block)
@@ -1093,7 +1102,11 @@ class CiTest(unittest.TestCase):
             ".github/workflows/ci_iree_bazel.yml", "linux_bazel_amdgpu"
         )
         for sanitizer in ("ASAN", "TSAN", "UBSAN"):
-            self.assertIn(f"name: Linux / AMDGPU / gfx942 / {sanitizer}", block)
+            self.assertIn(
+                f"name: iree-bazel-test / linux-x86_64 / clang / "
+                f"{sanitizer.lower()} / amd-gfx942",
+                block,
+            )
             self.assertIn(f"command: iree-bazel-amdgpu-{sanitizer.lower()}", block)
         self.assertNotIn("/ Sanitizers", block)
         self.assertNotIn("iree-bazel-amdgpu-msan", block)
@@ -1122,7 +1135,11 @@ class CiTest(unittest.TestCase):
         block = self.workflow_job_block(
             ".github/workflows/ci_iree_bazel.yml", "linux_bazel_vulkan"
         )
-        self.assertIn("name: Linux / Vulkan", block)
+        self.assertIn(
+            "name: iree-bazel-test / linux-x86_64 / gcc / fastbuild / "
+            "amd-gfx120x-vulkan",
+            block,
+        )
         self.assertIn(
             "python3 build_tools/devtools/ci.py iree-bazel-vulkan",
             block,
@@ -1392,14 +1409,14 @@ fi
         self.assertIn("runs-on: azure-windows-scale-rocm", block)
         self.assertRegex(
             block,
-            r"name: Windows / Repository / MSVC Build\n"
+            r"name: iree-cmake-build / windows-x86_64 / msvc / relwithdebinfo\n"
             r"\s+command: iree-cmake-repository-build\n"
             r"\s+host_toolchain: msvc\n"
             r"\s+fetch_rocm: false",
         )
         self.assertRegex(
             block,
-            r"name: Windows / CPU\n"
+            r"name: iree-cmake-test / windows-x86_64 / clang-cl / relwithdebinfo\n"
             r"\s+command: iree-cmake-cpu\n"
             r"\s+host_toolchain: clang-cl\n"
             r"\s+fetch_rocm: true",
@@ -1423,12 +1440,12 @@ fi
         self.assertIn("name: ${{ matrix.name }}", block)
         self.assertRegex(
             block,
-            r"name: Windows / Repository / clang-cl \+ ROCm\n"
+            r"name: iree-bazel-test / windows-x86_64 / clang-cl / fastbuild\n"
             r"\s+host_toolchain: clang-cl",
         )
         self.assertRegex(
             block,
-            r"name: Windows / Repository / MSVC \+ ROCm\n"
+            r"name: iree-bazel-test / windows-x86_64 / msvc / fastbuild\n"
             r"\s+host_toolchain: msvc",
         )
         self.assertNotIn("if: ${{ false }}", block)

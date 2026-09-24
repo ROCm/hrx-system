@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-name: CI IREE CMake
+name: IREE
 
 on:
   workflow_dispatch:
@@ -49,7 +49,7 @@ on:
       - "tools/**"
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref) || github.run_id }}
+  group: iree-cmake-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref) || github.run_id }}
   cancel-in-progress: true
 
 permissions:
@@ -66,10 +66,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Linux / CPU
+          - name: iree-cmake-test / linux-x86_64 / clang / relwithdebinfo
             command: iree-cmake-cpu
             install_compiler_rt: false
-          - name: Linux / CPU / Sanitizer Smoke
+          - name: iree-cmake-test / linux-x86_64 / clang / sanitizer-smoke
             command: iree-cmake-sanitizer-smoke
             install_compiler_rt: true
     env:
@@ -142,11 +142,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Windows / Repository / MSVC Build
+          - name: iree-cmake-build / windows-x86_64 / msvc / relwithdebinfo
             command: iree-cmake-repository-build
             host_toolchain: msvc
             fetch_rocm: false
-          - name: Windows / CPU
+          - name: iree-cmake-test / windows-x86_64 / clang-cl / relwithdebinfo
             command: iree-cmake-cpu
             host_toolchain: clang-cl
             fetch_rocm: true
@@ -232,7 +232,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Linux / Vulkan
+          - name: iree-cmake-test / linux-x86_64 / gcc / relwithdebinfo / amd-gfx120x-vulkan
             command: iree-cmake-vulkan
     env:
       AR: ar
@@ -314,7 +314,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Linux / AMDGPU / gfx942
+          - name: iree-cmake-test / linux-x86_64 / clang / relwithdebinfo / amd-gfx942
             command: iree-cmake-amdgpu
             runner_label: linux-gfx942-1gpu-ccs-csp-ossci-rocm
             target_selector: gfx942

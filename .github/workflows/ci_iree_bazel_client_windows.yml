@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-name: CI IREE Bazel / Windows / AMD RDNA+XDNA
+name: IREE
 
 on:
   workflow_dispatch:
@@ -43,7 +43,7 @@ on:
       - "third_party/**"
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref) || github.run_id }}
+  group: iree-bazel-client-windows-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref) || github.run_id }}
   cancel-in-progress: true
 
 permissions:
@@ -51,7 +51,7 @@ permissions:
 
 jobs:
   client:
-    name: clang-cl
+    name: iree-bazel-test / windows-x86_64 / clang-cl / fastbuild / amd-gfx1151-npu5
     runs-on: windows-gfx1151-gpu-rocm
     timeout-minutes: 45
     env:
