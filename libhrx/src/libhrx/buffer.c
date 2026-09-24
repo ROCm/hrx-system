@@ -221,6 +221,18 @@ hrx_status_t hrx_buffer_get_device_ptr(hrx_buffer_t buffer, void** device_ptr) {
                             hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
                                             "buffer or device_ptr is NULL"));
   }
+  
+  // Registered host memory has a pointer but no HAL allocation to export or map.
+  if (!buffer->hal_buffer) {
+    *device_ptr = buffer->mapped_ptr;
+    if (*device_ptr) {
+      HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
+    }
+    HRX_RETURN_AND_END_ZONE(
+        z0, hrx_make_status(HRX_STATUS_UNAVAILABLE,
+                            "cannot get device pointer for this buffer type"));
+  }
+
   // Device allocations may not be host-visible, so ask the buffer for its
   // native device address before falling back to a host mapping.
   iree_hal_external_buffer_t external_buffer;
