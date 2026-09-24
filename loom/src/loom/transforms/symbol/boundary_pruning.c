@@ -9,7 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "loom/ops/func/ops.h"
+#include "loom/ops/op_defs.h"
 #include "loom/ops/special_values.h"
 #include "loom/util/walk.h"
 
@@ -501,6 +501,12 @@ static iree_status_t loom_refine_boundaries_rewrite_pruned_calls(
 }
 
 typedef struct loom_refine_boundaries_return_list_t {
+  // Function body containing the exits being collected.
+  loom_region_t* body;
+
+  // Declared exit operation kind for direct blocks in |body|.
+  loom_op_kind_t body_exit_kind;
+
   // Function return ops discovered before mutation.
   loom_op_t** ops;
 
@@ -519,12 +525,12 @@ static iree_status_t loom_refine_boundaries_append_return_op(
     loom_walk_result_t* out_result) {
   (void)context;
   *out_result = LOOM_WALK_CONTINUE;
-  if (!loom_func_return_isa(op)) {
-    return iree_ok_status();
-  }
-
   loom_refine_boundaries_return_list_t* list =
       (loom_refine_boundaries_return_list_t*)user_data;
+  if (op->kind != list->body_exit_kind ||
+      op->parent_block->parent_region != list->body) {
+    return iree_ok_status();
+  }
   if (list->count >= list->capacity) {
     IREE_RETURN_IF_ERROR(iree_arena_grow_array(
         list->arena, list->count, list->count + 1, sizeof(*list->ops),
@@ -535,10 +541,13 @@ static iree_status_t loom_refine_boundaries_append_return_op(
 }
 
 static iree_status_t loom_refine_boundaries_collect_return_ops(
-    loom_module_t* module, loom_func_like_t function,
+    loom_module_t* module,
+    const loom_refine_boundaries_function_t* function_info,
     iree_arena_allocator_t* arena, iree_arena_allocator_t* walk_arena,
     loom_refine_boundaries_return_list_t* out_list) {
   memset(out_list, 0, sizeof(*out_list));
+  out_list->body = function_info->body;
+  out_list->body_exit_kind = function_info->body_exit_kind;
   out_list->arena = arena;
   out_list->capacity = 4;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, out_list->capacity,
@@ -548,7 +557,7 @@ static iree_status_t loom_refine_boundaries_collect_return_ops(
   loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
   iree_arena_reset(walk_arena);
   return loom_walk_function(
-      module, function, LOOM_WALK_PRE_ORDER,
+      module, function_info->function, LOOM_WALK_PRE_ORDER,
       (loom_walk_callback_t){loom_refine_boundaries_append_return_op, out_list},
       walk_arena, &walk_result);
 }
@@ -557,7 +566,10 @@ static iree_status_t loom_refine_boundaries_rewrite_pruned_return(
     loom_module_t* module, loom_op_t* return_op,
     const loom_refine_boundaries_prune_plan_t* plan,
     iree_arena_allocator_t* arena) {
-  loom_value_slice_t operands = loom_func_return_operands(return_op);
+  loom_value_slice_t operands = {
+      .values = loom_op_operands(return_op),
+      .count = return_op->operand_count,
+  };
 
   loom_value_id_t* kept_operands = NULL;
   uint16_t kept_count = 0;
@@ -577,9 +589,20 @@ static iree_status_t loom_refine_boundaries_rewrite_pruned_return(
                           &builder);
   loom_builder_set_before(&builder, return_op);
   loom_op_t* new_return_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_func_return_build(&builder, kept_operands,
-                                              kept_count, return_op->location,
-                                              &new_return_op));
+  IREE_RETURN_IF_ERROR(loom_builder_allocate_op(
+      &builder, return_op->kind, kept_count, /*result_count=*/0,
+      /*region_count=*/0, /*tied_result_count=*/0, return_op->attribute_count,
+      return_op->location, &new_return_op));
+  if (kept_count > 0) {
+    memcpy(loom_op_operands(new_return_op), kept_operands,
+           (iree_host_size_t)kept_count * sizeof(*kept_operands));
+  }
+  if (return_op->attribute_count > 0) {
+    memcpy(loom_op_attrs(new_return_op), loom_op_const_attrs(return_op),
+           (iree_host_size_t)return_op->attribute_count *
+               sizeof(loom_attribute_t));
+  }
+  IREE_RETURN_IF_ERROR(loom_builder_finalize_op(&builder, new_return_op));
   return loom_op_erase(module, return_op);
 }
 
@@ -595,7 +618,7 @@ static iree_status_t loom_refine_boundaries_rewrite_pruned_returns(
 
     loom_refine_boundaries_return_list_t returns = {0};
     IREE_RETURN_IF_ERROR(loom_refine_boundaries_collect_return_ops(
-        module, graph->functions[node].function, arena, walk_arena, &returns));
+        module, &graph->functions[node], arena, walk_arena, &returns));
     for (iree_host_size_t i = 0; i < returns.count; ++i) {
       IREE_RETURN_IF_ERROR(loom_refine_boundaries_rewrite_pruned_return(
           module, returns.ops[i], plan, arena));

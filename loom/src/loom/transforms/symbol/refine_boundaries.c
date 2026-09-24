@@ -16,7 +16,6 @@
 #include "loom/ir/facts.h"
 #include "loom/ir/module.h"
 #include "loom/ir/type_refinement.h"
-#include "loom/ops/func/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/special_values.h"
 #include "loom/ops/type_registry.h"
@@ -913,7 +912,7 @@ static iree_status_t loom_refine_boundaries_apply_function_boundary_values(
   *out_applied_count = 0;
   *out_materialized_count = 0;
   *out_seed_facts = (loom_value_fact_table_view_t){0};
-  loom_region_t* body = loom_func_like_body(function_info->function);
+  loom_region_t* body = function_info->body;
   if (!body) {
     return iree_ok_status();
   }
@@ -1020,7 +1019,10 @@ static int32_t loom_refine_boundaries_find_prior_result_index(
 
 static iree_status_t loom_refine_boundaries_collect_return(
     loom_refine_boundaries_collect_t* collect, const loom_op_t* op) {
-  loom_value_slice_t operands = loom_func_return_operands(op);
+  loom_value_slice_t operands = {
+      .values = loom_op_operands((loom_op_t*)op),
+      .count = op->operand_count,
+  };
   loom_refine_boundaries_function_t* function = collect->current_function;
   iree_host_size_t count = operands.count < function->result_count
                                ? operands.count
@@ -1249,7 +1251,8 @@ static iree_status_t loom_refine_boundaries_collect_op(
   *out_result = LOOM_WALK_CONTINUE;
   loom_refine_boundaries_collect_t* collect =
       (loom_refine_boundaries_collect_t*)user_data;
-  if (loom_func_return_isa(op)) {
+  if (op->kind == collect->current_function->body_exit_kind &&
+      op->parent_block->parent_region == collect->current_function->body) {
     IREE_RETURN_IF_ERROR(loom_refine_boundaries_collect_return(collect, op));
   }
   return loom_refine_boundaries_collect_call(collect, op);

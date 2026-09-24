@@ -979,7 +979,8 @@ const loom_region_descriptor_t* loom_func_like_body_region_descriptor(
     const loom_module_t* module, loom_func_like_t func);
 
 // Returns true when |op| is the declared terminator kind in a block directly
-// owned by |func|'s body. A same-kind terminator in a nested region is not a
+// owned by |func|'s body. A callable exit's complete operand list is the
+// function result tuple. A same-kind terminator in a nested region is not a
 // callable exit.
 bool loom_func_like_op_is_body_exit(const loom_module_t* module,
                                     loom_func_like_t func, const loom_op_t* op);

@@ -18,7 +18,6 @@
 #include "loom/ir/local_value_domain.h"
 #include "loom/ir/module.h"
 #include "loom/ops/cfg/ops.h"
-#include "loom/ops/func/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/util/cfg_graph.h"
 #include "loom/util/walk.h"
@@ -100,6 +99,8 @@ typedef struct loom_ownership_lifetime_function_summary_t {
   loom_func_like_t function;
   // Body region analyzed for this summary, or NULL for conservative callees.
   loom_region_t* body;
+  // Declared body exit kind, or UNKNOWN for bodyless callables.
+  loom_op_kind_t body_exit_kind;
   // Number of operands in the callable signature.
   uint16_t arg_count;
   // Number of results in the callable signature.
@@ -1088,7 +1089,8 @@ static iree_status_t loom_ownership_lifetime_transfer_return(
 static iree_status_t loom_ownership_lifetime_transfer_op(
     loom_ownership_lifetime_state_t* state,
     loom_ownership_lifetime_state_bits_t bits, const loom_op_t* op) {
-  if (loom_func_return_isa(op)) {
+  if (op->kind == state->summary->body_exit_kind &&
+      op->parent_block->parent_region == state->body) {
     return loom_ownership_lifetime_transfer_return(state, bits, op);
   }
   loom_call_like_t call = loom_call_like_cast(state->module, (loom_op_t*)op);
@@ -1540,9 +1542,13 @@ static iree_status_t loom_ownership_lifetime_initialize_summary(
   }
   uint16_t arg_count = 0;
   const loom_value_id_t* arg_ids = loom_func_like_arg_ids(function, &arg_count);
+  const loom_region_descriptor_t* body_descriptor =
+      loom_func_like_body_region_descriptor(module_state->module, function);
   *summary = (loom_ownership_lifetime_function_summary_t){
       .function = function,
       .body = loom_func_like_body(function),
+      .body_exit_kind =
+          body_descriptor ? body_descriptor->terminator : LOOM_OP_KIND_UNKNOWN,
       .arg_count = arg_count,
       .result_count = function.op->result_count,
   };

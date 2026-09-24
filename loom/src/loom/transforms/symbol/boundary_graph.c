@@ -266,6 +266,11 @@ iree_status_t loom_refine_boundaries_build_graph(
         (loom_symbol_id_t)(symbol - module->symbols.entries);
     loom_refine_boundaries_function_t* info = &out_graph->functions[node];
     info->function = function;
+    info->body = loom_func_like_body(function);
+    const loom_region_descriptor_t* body_descriptor =
+        loom_func_like_body_region_descriptor(module, function);
+    info->body_exit_kind =
+        body_descriptor ? body_descriptor->terminator : LOOM_OP_KIND_UNKNOWN;
     info->argument_ids =
         loom_func_like_arg_ids(function, &info->argument_count);
     info->result_count = function.op->result_count;

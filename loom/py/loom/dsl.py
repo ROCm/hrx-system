@@ -5526,7 +5526,10 @@ class FuncLikeInterface(NamedTuple):
 
     Each field is the name of an attr or region on the op, or None if
     the op doesn't have that field. The generator resolves names to
-    attr/region indices and emits a loom_func_like_vtable_t in .rodata.
+    attr/region indices and emits a loom_func_like_vtable_t in .rodata. The
+    complete operand list of each callable exit—the declared body terminator
+    kind in a block directly owned by the body—is the function result tuple.
+    Nested same-kind terminators do not exit the function.
     """
 
     # Symbol ref attr that names this function (required).

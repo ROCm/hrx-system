@@ -1023,6 +1023,68 @@ func.def public @call_projected_dead_argument(%kept: index, %dead: index) {
 
 // ====
 
+// Return facts come from the direct body exit declared by FuncLike. A nested
+// operation may use the same terminator kind without contributing a function
+// result.
+test.func public @test_direct_body_exit(%condition: i1) -> (index) {
+  %nested = index.constant 99 : index
+  test.optional_region %condition {
+    test.yield %nested : index
+  }
+  %direct = index.constant 7 : index
+  test.yield %direct : index
+}
+
+func.def public @call_test_direct_body_exit(%condition: i1) {
+  %result = test.invoke @test_direct_body_exit(%condition) : (i1) -> (index)
+  test.use %result : index
+  func.return
+}
+
+// ----
+test.func public @test_direct_body_exit(%condition: i1) -> (index) {
+  %nested = index.constant 99 : index
+  test.optional_region %condition {
+    test.yield %nested : index
+  }
+  %direct = index.constant 7 : index
+  test.yield %direct : index
+}
+
+func.def public @call_test_direct_body_exit(%condition: i1) {
+  %6 = index.constant 7 : index
+  %result = test.invoke @test_direct_body_exit(%condition) : (i1) -> (index)
+  test.use %6 : index
+  func.return
+}
+
+// ====
+
+// Result pruning rebuilds the callable's declared body exit kind rather than
+// assuming a func.return terminator.
+test.func @test_prune_result(%kept: index, %dead: index) -> (index, index) {
+  test.yield %kept, %dead : index, index
+}
+
+func.def public @call_test_prune_result(%kept: index, %dead: index) {
+  %kept_result, %dead_result = test.invoke @test_prune_result(%kept, %dead) : (index, index) -> (index, index)
+  test.use %kept_result : index
+  func.return
+}
+
+// ----
+test.func @test_prune_result() {
+  test.yield
+}
+
+func.def public @call_test_prune_result(%kept: index, %dead: index) {
+  test.invoke @test_prune_result() : ()
+  test.use %kept : index
+  func.return
+}
+
+// ====
+
 // RUN: pass refine-boundaries{max-iterations=1}
 
 // ERROR@+1: LOWERING/043 {pass_name="refine-boundaries", max_iterations="1"}

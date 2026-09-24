@@ -189,3 +189,18 @@ func.def @external_calls_are_borrowed(%size: index) {
   test.resource.release %resource : pool<16>
   func.return
 }
+
+// ====
+
+// Ownership summaries consume the direct body exit declared by FuncLike, not
+// a concrete dialect's return operation.
+test.func @make_test_resource(%size: index) -> (pool<16>) {
+  %resource = test.resource.alloc %size : index -> pool<16>
+  test.yield %resource : pool<16>
+}
+
+test.func @consume_test_resource(%size: index) {
+  %resource = test.invoke @make_test_resource(%size) : (index) -> (pool<16>)
+  test.resource.release %resource : pool<16>
+  test.yield
+}

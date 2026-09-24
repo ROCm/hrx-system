@@ -540,7 +540,6 @@ loom_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ops::cfg
-    loom::ops::func
     loom::ops::op_defs
     loom::util::cfg_graph
     loom::util::walk

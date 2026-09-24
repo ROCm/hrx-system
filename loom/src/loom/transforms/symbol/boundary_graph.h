@@ -35,6 +35,12 @@ typedef struct loom_refine_boundaries_function_t {
   // Function-like wrapper for the bodyful definition.
   loom_func_like_t function;
 
+  // Function body region.
+  loom_region_t* body;
+
+  // Declared exit operation kind for direct blocks in |body|.
+  loom_op_kind_t body_exit_kind;
+
   // Canonical logical argument ids from the body entry block.
   const loom_value_id_t* argument_ids;
 
