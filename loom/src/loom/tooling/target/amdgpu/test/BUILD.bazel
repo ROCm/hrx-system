@@ -397,35 +397,17 @@ loom_test(
 )
 
 loom_test(
-    name = "pipeline_predicates_test",
-    srcs = [
-        "amdgpu_pipeline_predicates.loom",
-        "//loom/binding/c/benchmark/kernels:synthetic/segmented_guarded_read_ahead.loom",
-    ],
+    name = "predicate_control_test",
+    srcs = ["amdgpu_predicate_control.loom"],
     compile_targets = [
         "//loom/target/amdgpu:gfx942",
         "//loom/target/amdgpu:gfx1151",
+        "//loom/target/amdgpu:gfx1250",
     ],
-    configs = {
-        "benchmark.loop_count": "8",
-        "test.factor": "1",
-    },
-    execution_profiles = [AMDGPU_ACCESS_PROFILE],
-    variants = {
-        "depth_three": {"configs": {
-            "benchmark.pipeline_depth": "3",
-            "test.depth": "3",
-        }},
-        "serial": {"configs": {
-            "benchmark.pipeline_depth": "1",
-            "test.depth": "1",
-        }},
-        "unrolled": {"configs": {
-            "benchmark.pipeline_depth": "4",
-            "test.depth": "4",
-            "test.factor": "2",
-        }},
-    },
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
 )
 
 loom_test(

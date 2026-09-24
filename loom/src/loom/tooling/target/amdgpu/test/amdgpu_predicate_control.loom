@@ -1,0 +1,216 @@
+// The skipped arm's uniform predicate is materialized after restoring EXEC.
+// An empty active arm still leaves both fallback lanes true.
+kernel.def @predicate_fallback() {
+  %unit = index.constant 1 : index
+  %lanes = index.constant 2 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lanes, %unit, %unit) : index
+} launch(%active_lane_count: index, %fallback_flag: i32, %flag_buffer: buffer, %output_buffer: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %threshold = scalar.constant 0 : i32
+  %enabled = scalar.constant 1.0 : f32
+  %disabled = scalar.constant 0.0 : f32
+  %flags_aligned = buffer.assume.alignment %flag_buffer {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output_buffer {minimum_alignment = 4} : buffer
+  %flags = buffer.view %flags_aligned[%base] : buffer -> view<2xi32>
+  %output = buffer.view %output_aligned[%base] : buffer -> view<2xf32>
+  %fallback = scalar.cmpi ne, %fallback_flag, %threshold : i32
+  %active = index.cmp slt, %lane, %active_lane_count : index
+  cfg.cond_br %active, ^active_lane, ^inactive_lane
+^active_lane:
+  %flag = view.load %flags[%lane] : view<2xi32> -> i32
+  %present = scalar.cmpi sgt, %flag, %threshold : i32
+  cfg.cond_br %present, ^positive, ^negative
+^positive:
+  cfg.br ^active_exit(%present: i1)
+^negative:
+  %negative_flag = view.load %flags[%lane] : view<2xi32> -> i32
+  %negative_present = scalar.cmpi slt, %negative_flag, %threshold : i32
+  cfg.br ^active_exit(%negative_present: i1)
+^active_exit(%active_predicate: i1):
+  cfg.br ^join(%active_predicate: i1)
+^inactive_lane:
+  cfg.br ^join(%fallback: i1)
+^join(%chosen: i1):
+  %result = scf.select %chosen, %enabled, %disabled : f32
+  view.store %result, %output[%lane] : f32, view<2xf32>
+  kernel.return
+}
+
+check.case @predicate_fallback_empty_active_arm {
+  %count = check.literal value(0) : index
+  %fallback = check.literal value(1) : i32
+  %flags = check.generate.iota offset(-1) step(2) : tensor<2xi32>
+  %actual = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.fill value(1.0) : tensor<2xf32>
+  kernel.launch @predicate_fallback(%count, %fallback, %flags, %actual) : (index, i32, tensor<2xi32>, tensor<2xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_fallback_empty_false {
+  %count = check.literal value(0) : index
+  %fallback = check.literal value(0) : i32
+  %flags = check.generate.iota offset(-1) step(2) : tensor<2xi32>
+  %actual = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(0.0) step(0.0) : tensor<2xf32>
+  kernel.launch @predicate_fallback(%count, %fallback, %flags, %actual) : (index, i32, tensor<2xi32>, tensor<2xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_fallback_mixed_false {
+  %count = check.literal value(1) : index
+  %fallback = check.literal value(0) : i32
+  %flags = check.generate.iota offset(-1) step(2) : tensor<2xi32>
+  %actual = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(1.0) step(-1.0) : tensor<2xf32>
+  kernel.launch @predicate_fallback(%count, %fallback, %flags, %actual) : (index, i32, tensor<2xi32>, tensor<2xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_fallback_mixed_true {
+  %count = check.literal value(1) : index
+  %fallback = check.literal value(1) : i32
+  %flags = check.generate.iota offset(-1) step(2) : tensor<2xi32>
+  %actual = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(1.0) step(0.0) : tensor<2xf32>
+  kernel.launch @predicate_fallback(%count, %fallback, %flags, %actual) : (index, i32, tensor<2xi32>, tensor<2xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_fallback_full_false {
+  %count = check.literal value(2) : index
+  %fallback = check.literal value(0) : i32
+  %flags = check.generate.iota offset(-1) step(2) : tensor<2xi32>
+  %actual = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(1.0) step(0.0) : tensor<2xf32>
+  kernel.launch @predicate_fallback(%count, %fallback, %flags, %actual) : (index, i32, tensor<2xi32>, tensor<2xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_fallback_full_true {
+  %count = check.literal value(2) : index
+  %fallback = check.literal value(1) : i32
+  %flags = check.generate.iota offset(-1) step(2) : tensor<2xi32>
+  %actual = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(1.0) step(0.0) : tensor<2xf32>
+  kernel.launch @predicate_fallback(%count, %fallback, %flags, %actual) : (index, i32, tensor<2xi32>, tensor<2xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_fallback_mixed_zero_flags {
+  %count = check.literal value(1) : index
+  %fallback = check.literal value(1) : i32
+  %flags = check.generate.fill value(0) : tensor<2xi32>
+  %actual = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(0.0) step(1.0) : tensor<2xf32>
+  kernel.launch @predicate_fallback(%count, %fallback, %flags, %actual) : (index, i32, tensor<2xi32>, tensor<2xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+check.case @predicate_fallback_full_zero_flags {
+  %count = check.literal value(2) : index
+  %fallback = check.literal value(1) : i32
+  %flags = check.generate.fill value(0) : tensor<2xi32>
+  %actual = check.generate.fill value(-1.0) : tensor<2xf32>
+  %expected = check.generate.iota offset(0.0) step(0.0) : tensor<2xf32>
+  kernel.launch @predicate_fallback(%count, %fallback, %flags, %actual) : (index, i32, tensor<2xi32>, tensor<2xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+// A Boolean select produces a mask while uniform queue arguments use scalars.
+kernel.def @uniform_predicate_queue() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%selector: i32, %first_flag: i32, %second_flag: i32, %limit: i32, %output: buffer) {
+  %begin = scalar.constant 0 : i32
+  %step = scalar.constant 1 : i32
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %pick_first = scalar.cmpi ne, %selector, %begin : i32
+  %first = scalar.cmpi ne, %first_flag, %begin : i32
+  %second = scalar.cmpi ne, %second_flag, %begin : i32
+  %selected = scf.select %pick_first, %first, %second : i1
+  cfg.br ^loop(%begin: i32, %selected: i1, %first: i1)
+^loop(%iteration: i32, %head: i1, %tail: i1):
+  %again = scalar.cmpi slt, %iteration, %limit : i32
+  cfg.cond_br %again, ^body, ^exit
+^body:
+  %next = scalar.addi %iteration, %step : i32
+  cfg.br ^loop(%next: i32, %tail: i1, %head: i1)
+^exit:
+  cfg.cond_br %head, ^enabled, ^disabled
+^enabled:
+  view.store %step, %output_view[0] : i32, view<1xi32>
+  kernel.return
+^disabled:
+  view.store %begin, %output_view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+check.case @uniform_predicate_queue_selected_false {
+  %selector = check.literal value(0) : i32
+  %first = check.literal value(1) : i32
+  %second = check.literal value(0) : i32
+  %count = check.literal value(2) : i32
+  %actual = check.generate.fill value(-1) : tensor<1xi32>
+  %expected = check.generate.fill value(0) : tensor<1xi32>
+  kernel.launch @uniform_predicate_queue(%selector, %first, %second, %count, %actual) : (i32, i32, i32, i32, tensor<1xi32>)
+  check.expect.equal actual(%actual) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+check.case @uniform_predicate_queue_selected_true {
+  %selector = check.literal value(0) : i32
+  %first = check.literal value(0) : i32
+  %second = check.literal value(1) : i32
+  %count = check.literal value(2) : i32
+  %actual = check.generate.fill value(-1) : tensor<1xi32>
+  %expected = check.generate.fill value(1) : tensor<1xi32>
+  kernel.launch @uniform_predicate_queue(%selector, %first, %second, %count, %actual) : (i32, i32, i32, i32, tensor<1xi32>)
+  check.expect.equal actual(%actual) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+check.case @uniform_predicate_queue_rotated_false {
+  %selector = check.literal value(0) : i32
+  %first = check.literal value(0) : i32
+  %second = check.literal value(1) : i32
+  %count = check.literal value(3) : i32
+  %actual = check.generate.fill value(-1) : tensor<1xi32>
+  %expected = check.generate.fill value(0) : tensor<1xi32>
+  kernel.launch @uniform_predicate_queue(%selector, %first, %second, %count, %actual) : (i32, i32, i32, i32, tensor<1xi32>)
+  check.expect.equal actual(%actual) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+check.case @uniform_predicate_queue_rotated_true {
+  %selector = check.literal value(0) : i32
+  %first = check.literal value(1) : i32
+  %second = check.literal value(0) : i32
+  %count = check.literal value(3) : i32
+  %actual = check.generate.fill value(-1) : tensor<1xi32>
+  %expected = check.generate.fill value(1) : tensor<1xi32>
+  kernel.launch @uniform_predicate_queue(%selector, %first, %second, %count, %actual) : (i32, i32, i32, i32, tensor<1xi32>)
+  check.expect.equal actual(%actual) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+check.case @uniform_predicate_queue_choose_first {
+  %selector = check.literal value(1) : i32
+  %first = check.literal value(1) : i32
+  %second = check.literal value(0) : i32
+  %count = check.literal value(0) : i32
+  %actual = check.generate.fill value(-1) : tensor<1xi32>
+  %expected = check.generate.fill value(1) : tensor<1xi32>
+  kernel.launch @uniform_predicate_queue(%selector, %first, %second, %count, %actual) : (i32, i32, i32, i32, tensor<1xi32>)
+  check.expect.equal actual(%actual) expected(%expected) : tensor<1xi32>
+  check.return
+}
