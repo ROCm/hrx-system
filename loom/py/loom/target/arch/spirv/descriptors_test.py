@@ -19,6 +19,7 @@ from loom.target.arch.spirv.atomic import (
 from loom.target.arch.spirv.builtins import (
     BUILTIN_DIMENSIONS,
     BUILTIN_INDEX_QUERIES,
+    BUILTIN_SCALAR_INDEX_QUERIES,
 )
 from loom.target.arch.spirv.cooperative_matrix import (
     COOPERATIVE_MATRIX_CASES,
@@ -86,6 +87,17 @@ def test_control_barriers_classify_both_execution_scopes() -> None:
     assert workgroup.effects == subgroup.effects
     assert InstructionClass.EXECUTION_BARRIER in workgroup.instruction_classes
     assert InstructionClass.EXECUTION_BARRIER in subgroup.instruction_classes
+
+
+def test_subgroup_lane_builtin_requires_group_non_uniform() -> None:
+    descriptors = {
+        descriptor.key: descriptor
+        for descriptor in SPIRV_LOGICAL_CORE_DESCRIPTOR_SET.descriptors
+    }
+    subgroup_lane = descriptors["spirv.op_load_builtin.subgroup_lane_id"]
+    assert subgroup_lane.feature_mask_words == (
+        feature_bits_value(("group_non_uniform",)),
+    )
 
 
 def _scalar_recipe(source_type: str) -> AsmResultValueType:
@@ -309,13 +321,16 @@ def test_result_asm_recipes_cover_every_spirv_descriptor_family() -> None:
         else:
             add_scalar_recipe(from_offset_key, scalar.source_type)
 
-    for query in BUILTIN_INDEX_QUERIES:
-        for dimension in BUILTIN_DIMENSIONS:
-            add_scalar_recipe(
-                f"spirv.op_load_builtin.{query.descriptor_suffix}."
-                f"{dimension.source_keyword}",
-                "index",
-            )
+    builtin_descriptor_keys = tuple(
+        f"spirv.op_load_builtin.{query.descriptor_suffix}.{dimension.source_keyword}"
+        for query in BUILTIN_INDEX_QUERIES
+        for dimension in BUILTIN_DIMENSIONS
+    ) + tuple(
+        f"spirv.op_load_builtin.{query.descriptor_suffix}"
+        for query in BUILTIN_SCALAR_INDEX_QUERIES
+    )
+    for descriptor_key in builtin_descriptor_keys:
+        add_scalar_recipe(descriptor_key, "index")
 
     compare_rows = (
         *(

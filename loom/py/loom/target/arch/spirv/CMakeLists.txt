@@ -94,6 +94,8 @@ iree_py_library(
   SRCS
     "__init__.py"
     "builtins.py"
+  DEPS
+    loom::py::loom::target::arch::spirv::features
 )
 
 iree_py_library(

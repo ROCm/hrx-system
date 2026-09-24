@@ -37,6 +37,7 @@ from loom.target.arch.spirv.atomic import (
 from loom.target.arch.spirv.builtins import (
     BUILTIN_DIMENSIONS,
     BUILTIN_INDEX_QUERIES,
+    BUILTIN_SCALAR_INDEX_QUERIES,
 )
 from loom.target.arch.spirv.cooperative_matrix import (
     COOPERATIVE_MATRIX_CASES,
@@ -469,6 +470,25 @@ def _builtin_index_descriptors() -> tuple[Descriptor, ...]:
         )
         for query in BUILTIN_INDEX_QUERIES
         for dimension in BUILTIN_DIMENSIONS
+    )
+
+
+def _builtin_scalar_index_descriptors() -> tuple[Descriptor, ...]:
+    return tuple(
+        Descriptor(
+            key=f"spirv.op_load_builtin.{query.descriptor_suffix}",
+            mnemonic=f"OpLoadBuiltin.{query.mnemonic_suffix}",
+            semantic_tag=f"spirv.op_load_builtin.{query.descriptor_suffix}",
+            operands=(_id_result(),),
+            feature_mask_words=(query.feature_bits,) if query.feature_bits else (),
+            asm_forms=_asm(
+                results=("dst",),
+                result_value_types=(_scalar_result_value_type("index"),),
+            ),
+            schedule_class=_SCHEDULE_LOAD,
+            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        )
+        for query in BUILTIN_SCALAR_INDEX_QUERIES
     )
 
 
@@ -1900,6 +1920,7 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
         ),
         *_address_conversion_descriptors(),
         *_builtin_index_descriptors(),
+        *_builtin_scalar_index_descriptors(),
         *_compare_descriptors(),
         *_select_descriptors(),
         *_storage_buffer_descriptors(),

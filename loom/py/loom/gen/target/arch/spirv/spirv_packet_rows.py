@@ -45,6 +45,7 @@ from loom.target.arch.spirv.atomic import (  # noqa: E402
 from loom.target.arch.spirv.builtins import (  # noqa: E402
     BUILTIN_DIMENSIONS,
     BUILTIN_INDEX_QUERIES,
+    BUILTIN_SCALAR_INDEX_QUERIES,
 )
 from loom.target.arch.spirv.cooperative_matrix import (  # noqa: E402
     COOPERATIVE_MATRIX_CASES,
@@ -1005,6 +1006,23 @@ def _builtin_index_rows() -> list[_PacketRow]:
     ]
 
 
+def _builtin_scalar_index_rows() -> list[_PacketRow]:
+    return [
+        _PacketRow(
+            f"spirv.op_load_builtin.{query.descriptor_suffix}",
+            opcode="LOOM_SPIRV_OP_LOAD",
+            form="LOOM_SPIRV_PACKET_FORM_LOAD_BUILTIN",
+            result_type=_value_type(
+                "LOOM_SPIRV_VALUE_CLASS_SCALAR",
+                "LOOM_SPIRV_SCALAR_TYPE_S32",
+            ),
+            result_count=1,
+            builtin=query.builtin_enum,
+        )
+        for query in BUILTIN_SCALAR_INDEX_QUERIES
+    ]
+
+
 def _coordinate_binary_rows() -> list[_PacketRow]:
     offset64_value = _offset64_value()
     rows = [
@@ -1216,6 +1234,7 @@ def _packet_rows() -> tuple[_PacketRow, ...]:
         *_ordinary_vector_rows(),
         *_extended_math_rows(),
         *_builtin_index_rows(),
+        *_builtin_scalar_index_rows(),
         *_coordinate_binary_rows(),
         *_coordinate_unary_rows(),
         *_mul_add_rows(),
