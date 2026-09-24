@@ -1,0 +1,15 @@
+// Keep all three inputs live across the composed lowering.
+func.def @logical_index_madd(%a: index, %b: index, %c: index) -> (index, index, index, index) {
+  %sum = index.madd %a, %b, %c : index
+  func.return %sum, %a, %b, %c : index, index, index, index
+}
+
+// ====
+
+// A constant stride lets canonicalization form the combined multiply-add.
+func.def @logical_index_mul_add(%row: index, %column: index) -> (index) {
+  %stride = index.constant 8 : index
+  %product = index.mul %row, %stride : index
+  %sum = index.add %product, %column : index
+  func.return %sum : index
+}

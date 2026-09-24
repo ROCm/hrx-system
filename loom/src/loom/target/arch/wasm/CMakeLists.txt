@@ -114,6 +114,7 @@ loom_check_test_suite(
     "test/source_low/numeric_boolean_comparison.loom-test"
     "test/source_low/numeric_constant_remainder.loom-test"
     "test/source_low/numeric_float_comparison_flags.loom-test"
+    "test/source_low/numeric_index_madd.loom-test"
     "test/source_low/numeric_index_operands.loom-test"
     "test/source_low/numeric_integer_extrema.loom-test"
     "test/source_low/numeric_integer_widening.loom-test"

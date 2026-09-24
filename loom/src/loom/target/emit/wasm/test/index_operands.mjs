@@ -20,3 +20,17 @@ for (const input of [0, 1, 511, 512, 1023]) {
 assert.deepEqual(exports.address_constant_boundaries(),
                  [-2147483648, 2147483647, 1023, 1024, -2147483648, -1]);
 assert.deepEqual(exports.offset_from_constant_payloads(), [-2147483648, -1]);
+
+// BigInt keeps the full product before reduction to the target's signed i32
+// carrier, including products wider than JavaScript's exact Number range.
+const coordinates = [-2147483648, -2147483647, -65537, -1, 0, 1, 65537, 2147483647];
+for (const a of coordinates) {
+  for (const b of coordinates) {
+    const coordinate = Number(BigInt.asIntN(32, BigInt(a) * 8n + BigInt(b)));
+    assert.equal(exports.logical_index_mul_add(a, b), coordinate);
+    for (const c of coordinates) {
+      const sum = Number(BigInt.asIntN(32, BigInt(a) * BigInt(b) + BigInt(c)));
+      assert.deepEqual(exports.logical_index_madd(a, b, c), [sum, a, b, c]);
+    }
+  }
+}

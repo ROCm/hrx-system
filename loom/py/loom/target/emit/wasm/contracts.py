@@ -349,6 +349,35 @@ def _binary_rule(
     )
 
 
+def _index_madd_rule() -> DescriptorRule:
+    multiply = _descriptor("wasm.i32.mul")
+    add = _descriptor("wasm.i32.add")
+    return DescriptorRule(
+        source_op=index.index_madd,
+        descriptor=add,
+        guards=_typed_guards(("a", "b", "c", "result"), _INDEX),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=multiply,
+                operands={
+                    "lhs": ValueRef.operand("a"),
+                    "rhs": ValueRef.operand("b"),
+                },
+                results={"dst": ValueRef.temporary("product")},
+                result_types={"dst": _INDEX},
+            ),
+            EmitDescriptorOp(
+                descriptor=add,
+                operands={
+                    "lhs": ValueRef.temporary("product"),
+                    "rhs": ValueRef.operand("c"),
+                },
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
 def _index_scale_rule() -> DescriptorRule:
     descriptor = _descriptor("wasm.i32.mul")
     return DescriptorRule(
@@ -1213,6 +1242,7 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
         _binary_rule(index.index_sub, _INDEX, "wasm.i32.sub"),
         _binary_rule(index.index_sub, _OFFSET, "wasm.i32.sub"),
         _binary_rule(index.index_mul, _INDEX, "wasm.i32.mul"),
+        _index_madd_rule(),
         _index_scale_rule(),
         *(
             _binary_rule(source_op, _INDEX, f"wasm.i32.{operation}")

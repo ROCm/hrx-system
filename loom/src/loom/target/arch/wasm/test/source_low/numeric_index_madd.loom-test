@@ -1,0 +1,33 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_index_madd.loom-test
+// RUN: emit source-low target=wasm:simd128 output=low
+
+// Keep all three inputs live across the composed lowering.
+func.def @logical_index_madd(%a: index, %b: index, %c: index) -> (index, index, index, index) {
+  %sum = index.madd %a, %b, %c : index
+  func.return %sum, %a, %b, %c : index, index, index, index
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @logical_index_madd(%a: reg<wasm.i32>, %b: reg<wasm.i32>, %c: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) asm {
+  %15 = i32.mul %a, %b
+  %sum = i32.add %15, %c
+  return %sum, %a, %b, %c
+}
+
+// ====
+
+// A constant stride lets canonicalization form the combined multiply-add.
+func.def @logical_index_mul_add(%row: index, %column: index) -> (index) {
+  %stride = index.constant 8 : index
+  %product = index.mul %row, %stride : index
+  %sum = index.add %product, %column : index
+  func.return %sum : index
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @logical_index_mul_add(%row: reg<wasm.i32>, %column: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %stride = i32.const 8
+  %11 = i32.mul %row, %stride
+  %sum = i32.add %11, %column
+  return %sum
+}
