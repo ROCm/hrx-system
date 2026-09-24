@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <loomcxx/view.h>
+
 struct Pair {
   int first;
   int second;
@@ -24,6 +26,12 @@ int read_member(const Pair* pointer) { return pointer->second; }
 static int load_next(const int* pointer) { return pointer[1]; }
 
 int read_helper(const int* pointer) { return load_next(pointer + 1); }
+
+int read_view(const int* pointer) {
+  auto source =
+      loom::buffer::view<4, 8>(pointer, {}, loom::encoding::layout::dense<2>());
+  return loom::view::load(source, 1u, 2u);
+}
 
 int exchange(int* pointer, int index, int replacement) {
   int previous = pointer[index];

@@ -339,9 +339,14 @@ std::optional<Value> ViewIntrinsic::call(std::span<const Value> arguments,
                          {components.data(), component_count}, result_types);
       auto result_type = result_types.back();
       if (operation_ == Operation::BufferView) {
-        check(loom_buffer_view_build(builder, 0, pointer->root,
-                                     pointer->byte_offset, 0, result_type,
-                                     location, &op));
+        const uint8_t address_bitwidth = storage.source_address_bitwidth();
+        const loom_buffer_view_build_flags_t build_flags =
+            address_bitwidth != 0
+                ? LOOM_BUFFER_VIEW_BUILD_FLAG_HAS_ADDRESS_BITWIDTH
+                : 0;
+        check(loom_buffer_view_build(builder, build_flags, pointer->root,
+                                     pointer->byte_offset, address_bitwidth,
+                                     result_type, location, &op));
       } else {
         const int64_t static_offsets[2] = {
             std::numeric_limits<int64_t>::min(),

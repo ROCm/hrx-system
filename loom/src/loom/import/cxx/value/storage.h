@@ -7,6 +7,7 @@
 #ifndef LOOM_IMPORT_CXX_VALUE_STORAGE_H_
 #define LOOM_IMPORT_CXX_VALUE_STORAGE_H_
 
+#include <cstdint>
 #include <optional>
 #include <unordered_map>
 
@@ -52,17 +53,14 @@ struct StorageAllocation {
 class Storage {
  public:
   Storage(cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types,
-          Scalars& scalars, Locations& locations, loom_builder_t& builder)
-      : unit_(unit),
-        diagnostics_(diagnostics),
-        types_(types),
-        scalars_(scalars),
-        locations_(locations),
-        builder_(builder) {}
+          Scalars& scalars, Locations& locations, loom_builder_t& builder);
 
   // Forms a zero-origin source pointer for a kernel buffer binding. The buffer
   // already carries any admitted parameter contracts.
   Pointer root(loom_value_id_t buffer, cxx::AST* owner);
+  // Returns the narrow source pointer carrier retained on typed views, or zero
+  // when Loom's ordinary address domain is already sufficient.
+  uint8_t source_address_bitwidth() const { return source_address_bitwidth_; }
   // Refines an opaque pointer origin to the configured source pointer width.
   // The allocation root remains independent; this only publishes the range
   // every valid source pointer representation already satisfies.
@@ -126,6 +124,9 @@ class Storage {
   Locations& locations_;
   // Borrowed insertion point, controlled by the AST driver.
   loom_builder_t& builder_;
+  // Narrow source pointer carrier published on every typed view, or zero when
+  // Loom's ordinary address domain is already sufficient.
+  uint8_t source_address_bitwidth_;
   // A declared scalar array's direct-index view. Other array types or interior
   // origins sharing the allocation use ordinary object-relative addressing.
   struct ArrayView {

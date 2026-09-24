@@ -26,6 +26,7 @@ for (const root of [0, 4, 2048, 4096]) {
       ['read_previous', -4],
       ['read_member', 4],
       ['read_helper', 8],
+      ['read_view', 40],
     ];
     for (const [name, displacement] of accesses) {
       assert.equal(exports[name](root, origin),

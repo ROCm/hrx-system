@@ -204,11 +204,15 @@ TEST_F(StorageTest, ILP32PointersPublishTheirSourceRepresentationRange) {
                   builder_);
   Storage storage(source.unit(), source.diagnostics(), types, scalars,
                   locations, builder_);
+  EXPECT_EQ(storage.source_address_bitwidth(), 32);
   auto* control = source.unit().control();
   auto* owner = source.unit().ast();
   auto allocation =
       storage.allocate(control->getBoundedArrayType(control->getIntType(), 64),
                        LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP, 0, owner);
+  const loom_op_t* allocation_view = producer(allocation.view);
+  ASSERT_TRUE(loom_buffer_view_has_address_bitwidth(allocation_view));
+  EXPECT_EQ(loom_buffer_view_address_bitwidth(allocation_view), 32);
   auto origin = scalars.integer(16, LOOM_SCALAR_TYPE_OFFSET);
   auto constrained =
       storage.constrain_origin({allocation.pointer.root, origin}, owner);

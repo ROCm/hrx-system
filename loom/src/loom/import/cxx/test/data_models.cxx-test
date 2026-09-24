@@ -95,7 +95,7 @@ func.def public @read(%input: buffer, %input_byte_offset: offset, %index: i32, %
   %10 = scalar.addi %9, %8 : i64
   %11 = scalar.assume %10 [range(%10, 0, 4294967295)] : i64
   %12 = index.cast %11 : i64 to offset
-  %13 = buffer.view %input[%12] : buffer -> view<1xi32>
+  %13 = buffer.view %input[%12] address_bits(32) : buffer -> view<1xi32>
   %14 = view.load %13[0] : view<1xi32> -> i32
   %15 = scalar.extui %large : i32 to i64
   %16 = scalar.constant 4 : i64
@@ -104,7 +104,7 @@ func.def public @read(%input: buffer, %input_byte_offset: offset, %index: i32, %
   %19 = scalar.addi %18, %17 : i64
   %20 = scalar.assume %19 [range(%19, 0, 4294967295)] : i64
   %21 = index.cast %20 : i64 to offset
-  %22 = buffer.view %input[%21] : buffer -> view<1xi32>
+  %22 = buffer.view %input[%21] address_bits(32) : buffer -> view<1xi32>
   %23 = view.load %22[0] : view<1xi32> -> i32
   %24 = scalar.addi %14, %23 : i32
   %25 = scalar.constant 4 : i64
@@ -113,7 +113,7 @@ func.def public @read(%input: buffer, %input_byte_offset: offset, %index: i32, %
   %28 = scalar.addi %27, %26 : i64
   %29 = scalar.assume %28 [range(%28, 0, 4294967295)] : i64
   %30 = index.cast %29 : i64 to offset
-  %31 = buffer.view %input[%30] : buffer -> view<1xi32>
+  %31 = buffer.view %input[%30] address_bits(32) : buffer -> view<1xi32>
   %32 = view.load %31[0] : view<1xi32> -> i32
   %33 = scalar.addi %24, %32 : i32
   func.return %33 : i32

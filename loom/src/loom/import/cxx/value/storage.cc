@@ -25,13 +25,25 @@
 
 namespace loom::cxx_import {
 
+Storage::Storage(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
+                 Types& types, Scalars& scalars, Locations& locations,
+                 loom_builder_t& builder)
+    : unit_(unit),
+      diagnostics_(diagnostics),
+      types_(types),
+      scalars_(scalars),
+      locations_(locations),
+      builder_(builder),
+      source_address_bitwidth_(
+          unit.control()->memoryLayout()->sizeOfPointer() == 4 ? 32 : 0) {}
+
 Pointer Storage::root(loom_value_id_t buffer, cxx::AST* owner) {
   return {buffer,
           scalars_.integer(0, LOOM_SCALAR_TYPE_OFFSET, locations_.get(owner))};
 }
 
 Pointer Storage::constrain_origin(Pointer pointer, cxx::AST* owner) {
-  if (unit_.control()->memoryLayout()->sizeOfPointer() != 4) {
+  if (source_address_bitwidth_ == 0) {
     return pointer;
   }
   auto source = locations_.get(owner);
@@ -103,9 +115,7 @@ StorageProjection Storage::advance(StorageProjection base,
       .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST,
                    LOOM_PRED_ARG_CONST},
       .args = {byte_offset, 0,
-               unit_.control()->memoryLayout()->sizeOfPointer() == 4
-                   ? UINT32_MAX
-                   : INT64_MAX},
+               source_address_bitwidth_ == 32 ? UINT32_MAX : INT64_MAX},
   };
   check(loom_scalar_assume_build(&builder_, &byte_offset, 1, &range, 1,
                                  &wide_type, 1, source, &op));
@@ -146,9 +156,13 @@ StorageAccess Storage::dereference(StorageProjection base,
       static_cast<uint8_t>(std::min<uint64_t>(
           base.alignment, loom_type_view_natural_alignment(view_type))));
   loom_op_t* view;
-  check(loom_buffer_view_build(&builder_, 0, base.pointer.root,
-                               base.pointer.byte_offset, 0, view_type,
-                               locations_.get(owner), &view));
+  const uint8_t address_bitwidth = source_address_bitwidth();
+  const loom_buffer_view_build_flags_t build_flags =
+      address_bitwidth != 0 ? LOOM_BUFFER_VIEW_BUILD_FLAG_HAS_ADDRESS_BITWIDTH
+                            : 0;
+  check(loom_buffer_view_build(&builder_, build_flags, base.pointer.root,
+                               base.pointer.byte_offset, address_bitwidth,
+                               view_type, locations_.get(owner), &view));
   return {loom_op_results(view)[0], std::nullopt};
 }
 
@@ -248,7 +262,12 @@ StorageAllocation Storage::allocate(const cxx::Type* type,
   view_type = loom_type_view_with_alignment(
       view_type, static_cast<uint8_t>(std::min<uint64_t>(
                      *alignment, loom_type_view_natural_alignment(view_type))));
-  check(loom_buffer_view_build(&builder_, 0, root, base, 0, view_type,
+  const uint8_t address_bitwidth = source_address_bitwidth();
+  const loom_buffer_view_build_flags_t build_flags =
+      address_bitwidth != 0 ? LOOM_BUFFER_VIEW_BUILD_FLAG_HAS_ADDRESS_BITWIDTH
+                            : 0;
+  check(loom_buffer_view_build(&builder_, build_flags, root, base,
+                               address_bitwidth, view_type,
                                locations_.get(owner), &op));
   auto view = loom_op_results(op)[0];
   if (array) {

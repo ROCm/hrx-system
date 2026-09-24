@@ -22,7 +22,7 @@ static int read_helper(const int* pointer) { return load_next(pointer + 1); }
 static int read_view(const int* pointer) {
   auto source = loom::buffer::view<4, 8>(
       pointer, {}, loom::encoding::layout::dense<2>());
-  return loom::view::load(source, 0u, 0u);
+  return loom::view::load(source, 1u, 2u);
 }
 
 int evaluate(const int* pointer, int index, const Pair* pair,
@@ -82,7 +82,7 @@ low.func.def target<wasm.core.simd128> @read_helper(%pointer: reg<wasm.i32>, %po
 
 low.func.def target<wasm.core.simd128> @read_view(%source: reg<wasm.i32>, %pointer_byte_offset: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
   %140 = i32.add %source, %pointer_byte_offset
-  %141 = i32.load %140
+  %141 = i32.load %140 {offset = 40}
   return %141
 }
 
