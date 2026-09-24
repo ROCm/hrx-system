@@ -138,6 +138,24 @@ from build_tools.devtools import run_requirements
 
 
 @dataclass(frozen=True)
+class CMakeSourceScope:
+    name: str
+    build_targets: tuple[str, ...]
+    test_regex: str
+    smoke_test_regexes: tuple[str, ...]
+
+
+CMAKE_SOURCE_SCOPES = {
+    "loom": CMakeSourceScope(
+        name="Loom",
+        build_targets=ci_config.LOOM_CMAKE_BUILD_TARGETS,
+        test_regex=ci_config.LOOM_CTEST_REGEX,
+        smoke_test_regexes=ci_config.LOOM_CMAKE_SMOKE_CTEST_REGEXES,
+    ),
+}
+
+
+@dataclass(frozen=True)
 class RequirementAudit:
     # Read-only command exposing tags before resource filtering.
     argv: tuple[str, ...]
@@ -740,8 +758,13 @@ def vulkan_steps(targets: tuple[str, ...]) -> list[CiStep]:
     ]
 
 
-def cmake_cpu_steps(command_name: str, sanitizer: str | None) -> list[CiStep]:
+def cmake_cpu_steps(
+    command_name: str,
+    sanitizer: str | None,
+    scope: CMakeSourceScope | None = None,
+) -> list[CiStep]:
     sanitizer_name = f" with {sanitizer.upper()}" if sanitizer is not None else ""
+    scope_name = f"{scope.name} " if scope else "IREE "
     tests_enabled = cmake_tests_enabled(sanitizer)
     xfail_regex = (
         ci_config.CPU_SANITIZERS_CTEST_EXCLUDE_REGEX
@@ -754,13 +777,18 @@ def cmake_cpu_steps(command_name: str, sanitizer: str | None) -> list[CiStep]:
     )
     steps = [
         cmake_configure_step(command_name, sanitizer=sanitizer),
-        cmake_build_step(command_name, f"Build IREE CMake{sanitizer_name}"),
+        cmake_build_step(
+            command_name,
+            f"Build {scope_name}CMake{sanitizer_name}",
+            scope.build_targets if scope else (),
+        ),
     ]
     if tests_enabled:
         steps.append(
             cmake_test_step(
                 command_name,
-                f"Test IREE CMake{sanitizer_name}",
+                f"Test {scope_name}CMake{sanitizer_name}",
+                regex=scope.test_regex if scope else None,
                 exclude_regex=exclude_regex,
                 env=sanitizer_env(sanitizer),
                 label_exclude_regex=combine_ctest_regex(
@@ -772,7 +800,14 @@ def cmake_cpu_steps(command_name: str, sanitizer: str | None) -> list[CiStep]:
     return steps
 
 
-def cmake_repository_build_steps(command_name: str) -> list[CiStep]:
+def cmake_repository_build_steps(
+    command_name: str, scope: CMakeSourceScope | None = None
+) -> list[CiStep]:
+    smoke_regexes = (
+        scope.smoke_test_regexes
+        if scope
+        else ci_config.CMAKE_REPOSITORY_SMOKE_CTEST_REGEXES
+    )
     return [
         cmake_configure_step(
             command_name,
@@ -787,11 +822,15 @@ def cmake_repository_build_steps(command_name: str) -> list[CiStep]:
                 "-DIREE_ENABLE_D3D12=ON",
             ),
         ),
-        cmake_build_step(command_name, "Build repository"),
+        cmake_build_step(
+            command_name,
+            f"Build {scope.name}" if scope else "Build repository",
+            scope.build_targets if scope else (),
+        ),
         cmake_test_step(
             command_name,
-            "Test repository smoke",
-            regex=combine_ctest_regex(*ci_config.CMAKE_REPOSITORY_SMOKE_CTEST_REGEXES),
+            f"Test {scope.name} smoke" if scope else "Test repository smoke",
+            regex=combine_ctest_regex(*smoke_regexes),
             label_exclude_regex=combine_ctest_regex(
                 ci_config.CTEST_RESOURCE_LABEL_EXCLUDE_REGEX,
                 ci_config.CTEST_MANUAL_LABEL_EXCLUDE_REGEX,
@@ -846,7 +885,10 @@ def cmake_xdna_steps(command_name: str, sanitizer: str | None) -> list[CiStep]:
 
 
 def cmake_amdgpu_steps(
-    command_name: str, sanitizer: str | None, target_selector: str
+    command_name: str,
+    sanitizer: str | None,
+    target_selector: str,
+    scope: CMakeSourceScope | None = None,
 ) -> list[CiStep]:
     sanitizer_name = f" with {sanitizer.upper()}" if sanitizer is not None else ""
     tests_enabled = cmake_tests_enabled(sanitizer)
@@ -856,7 +898,6 @@ def cmake_amdgpu_steps(
         xfail_regex = ci_config.AMDGPU_SANITIZERS_CTEST_EXCLUDE_REGEX
     else:
         xfail_regex = ci_config.AMDGPU_CTEST_EXCLUDE_REGEX
-    build_targets = ci_config.AMDGPU_CMAKE_DRIVER_TARGETS
     steps = [
         cmake_configure_step(
             command_name,
@@ -865,26 +906,33 @@ def cmake_amdgpu_steps(
             amdgpu_target_selector=target_selector,
             sanitizer=sanitizer,
         ),
-        cmake_build_step(
-            command_name,
-            f"Build IREE CMake AMDGPU{sanitizer_name}",
-            build_targets,
-        ),
     ]
+    if scope is None or not tests_enabled:
+        build_targets = (
+            scope.build_targets if scope else ci_config.AMDGPU_CMAKE_DRIVER_TARGETS
+        )
+        steps.append(
+            cmake_build_step(
+                command_name,
+                f"Build {scope.name if scope else 'IREE'} CMake AMDGPU{sanitizer_name}",
+                build_targets,
+            )
+        )
     if not tests_enabled:
         return steps
 
-    steps.append(
-        cmake_test_step(
-            command_name,
-            f"Test IREE CMake AMDGPU package tests{sanitizer_name}",
-            regex="^iree/hal/drivers/amdgpu/",
-            exclude_regex=xfail_regex,
-            available_resources=ci_config.AMDGPU_RESOURCES,
-            env=sanitizer_env(sanitizer) + amdgpu_libhsa_test_env(),
-            parallelism=1,
+    if scope is None:
+        steps.append(
+            cmake_test_step(
+                command_name,
+                f"Test IREE CMake AMDGPU package tests{sanitizer_name}",
+                regex="^iree/hal/drivers/amdgpu/",
+                exclude_regex=xfail_regex,
+                available_resources=ci_config.AMDGPU_RESOURCES,
+                env=sanitizer_env(sanitizer) + amdgpu_libhsa_test_env(),
+                parallelism=1,
+            )
         )
-    )
     resource_exclude_regex = combine_ctest_regex(
         "^iree/hal/drivers/amdgpu/",
         xfail_regex,
@@ -897,7 +945,9 @@ def cmake_amdgpu_steps(
     steps.append(
         cmake_test_step(
             command_name,
-            f"Test IREE CMake AMDGPU resource tests{sanitizer_name}",
+            f"Test {scope.name if scope else 'IREE'} CMake AMDGPU "
+            f"resource tests{sanitizer_name}",
+            regex=scope.test_regex if scope else None,
             label_regex=ci_config.AMDGPU_CTEST_RESOURCE_LABEL_REGEX,
             label_exclude_regex=resource_label_exclude_regex,
             exclude_regex=resource_exclude_regex,
@@ -923,10 +973,13 @@ def cmake_loom_amdgpu_steps(command_name: str) -> list[CiStep]:
     ]
 
 
-def cmake_vulkan_steps(command_name: str, sanitizer: str | None) -> list[CiStep]:
+def cmake_vulkan_steps(
+    command_name: str,
+    sanitizer: str | None,
+    scope: CMakeSourceScope | None = None,
+) -> list[CiStep]:
     sanitizer_name = f" with {sanitizer.upper()}" if sanitizer is not None else ""
     tests_enabled = cmake_tests_enabled(sanitizer)
-    build_targets = ci_config.VULKAN_CMAKE_DRIVER_TARGETS
     steps = [
         cmake_configure_step(
             command_name,
@@ -935,26 +988,35 @@ def cmake_vulkan_steps(command_name: str, sanitizer: str | None) -> list[CiStep]
             sanitizer=sanitizer,
             extra_options=("-DIREE_ENABLE_VULKAN=ON",),
         ),
-        cmake_build_step(
-            command_name,
-            f"Build IREE CMake Vulkan{sanitizer_name}",
-            build_targets,
-        ),
     ]
-    if tests_enabled:
-        steps.append(
-            cmake_test_step(
-                command_name,
-                f"Test IREE CMake Vulkan package tests{sanitizer_name}",
-                regex=ci_config.VULKAN_CTEST_REGEX,
-                available_resources=ci_config.VULKAN_RESOURCES,
-                env=sanitizer_env(sanitizer) + vulkan_device_test_env(),
-            )
+    if scope is None or not tests_enabled:
+        build_targets = (
+            scope.build_targets if scope else ci_config.VULKAN_CMAKE_DRIVER_TARGETS
         )
         steps.append(
+            cmake_build_step(
+                command_name,
+                f"Build {scope.name if scope else 'IREE'} CMake Vulkan{sanitizer_name}",
+                build_targets,
+            )
+        )
+    if tests_enabled:
+        if scope is None:
+            steps.append(
+                cmake_test_step(
+                    command_name,
+                    f"Test IREE CMake Vulkan package tests{sanitizer_name}",
+                    regex=ci_config.VULKAN_CTEST_REGEX,
+                    available_resources=ci_config.VULKAN_RESOURCES,
+                    env=sanitizer_env(sanitizer) + vulkan_device_test_env(),
+                )
+            )
+        steps.append(
             cmake_test_step(
                 command_name,
-                f"Test IREE CMake Vulkan resource tests{sanitizer_name}",
+                f"Test {scope.name if scope else 'IREE'} CMake Vulkan "
+                f"resource tests{sanitizer_name}",
+                regex=scope.test_regex if scope else None,
                 label_regex=ci_config.VULKAN_CTEST_RESOURCE_LABEL_REGEX,
                 label_exclude_regex=ci_config.CTEST_MANUAL_LABEL_EXCLUDE_REGEX,
                 exclude_regex=ci_config.VULKAN_CTEST_REGEX,
@@ -970,15 +1032,18 @@ def cmake_target_steps(
     target_group: str,
     sanitizer: str | None,
     amdgpu_target_selector: str = ci_config.DEFAULT_AMDGPU_TARGET_SELECTOR,
+    scope: CMakeSourceScope | None = None,
 ) -> list[CiStep]:
     if target_group == "cpu":
-        return cmake_cpu_steps(command_name, sanitizer)
+        return cmake_cpu_steps(command_name, sanitizer, scope)
     if target_group == "repository-build":
         if sanitizer is not None:
             raise ValueError("CMake repository builds do not support sanitizers")
-        return cmake_repository_build_steps(command_name)
+        return cmake_repository_build_steps(command_name, scope)
     if target_group == "amdgpu":
-        return cmake_amdgpu_steps(command_name, sanitizer, amdgpu_target_selector)
+        return cmake_amdgpu_steps(
+            command_name, sanitizer, amdgpu_target_selector, scope
+        )
     if target_group == "xdna":
         return cmake_xdna_steps(command_name, sanitizer)
     if target_group == "loom-amdgpu":
@@ -986,7 +1051,7 @@ def cmake_target_steps(
             raise ValueError("Loom AMDGPU CMake CI does not support sanitizers")
         return cmake_loom_amdgpu_steps(command_name)
     if target_group == "vulkan":
-        return cmake_vulkan_steps(command_name, sanitizer)
+        return cmake_vulkan_steps(command_name, sanitizer, scope)
     raise ValueError(f"unknown CMake CI target: {target_group}")
 
 
@@ -994,13 +1059,14 @@ def cmake_sanitizer_steps(
     prefix: str,
     target_group: str,
     amdgpu_target_selector: str = ci_config.DEFAULT_AMDGPU_TARGET_SELECTOR,
+    scope: CMakeSourceScope | None = None,
 ) -> list[CiStep]:
     steps = []
     for config in ci_config.SANITIZER_TEST_CONFIGS:
         command_name = f"{prefix}-{config}"
         steps.extend(
             cmake_target_steps(
-                command_name, target_group, config, amdgpu_target_selector
+                command_name, target_group, config, amdgpu_target_selector, scope
             )
         )
     return steps
@@ -1099,6 +1165,17 @@ def tilelang_importer_steps(command_name: str) -> list[CiStep]:
 def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
     bazel_target_group = BAZEL_COMMANDS.get(args.command, (None, None))[0]
     cmake_target_group = CMAKE_COMMANDS.get(args.command, (None, None))[0]
+    if args.scope is not None and cmake_target_group not in (
+        "cpu",
+        "repository-build",
+        "amdgpu",
+        "vulkan",
+    ):
+        raise ValueError(
+            "--scope is only supported for CMake CPU, repository-build, "
+            "AMDGPU, and Vulkan CI commands"
+        )
+    cmake_scope = CMAKE_SOURCE_SCOPES.get(args.scope)
     amdgpu_target_bazel_groups = (
         "amdgpu",
         "repository-integration",
@@ -1132,9 +1209,18 @@ def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
         target_group, sanitizer = CMAKE_COMMANDS[args.command]
         if sanitizer == "all":
             prefix = args.command.removesuffix("-sanitizers")
-            return cmake_sanitizer_steps(prefix, target_group, amdgpu_target_selector)
+            return cmake_sanitizer_steps(
+                prefix,
+                target_group,
+                amdgpu_target_selector,
+                cmake_scope,
+            )
         return cmake_target_steps(
-            args.command, target_group, sanitizer, amdgpu_target_selector
+            args.command,
+            target_group,
+            sanitizer,
+            amdgpu_target_selector,
+            cmake_scope,
         )
 
     bazel_target, sanitizer = BAZEL_COMMANDS[args.command]
@@ -1428,6 +1514,14 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "Bazel target pattern to build/test. Defaults to the IREE target "
             "directories present in the checkout."
+        ),
+    )
+    parser.add_argument(
+        "--scope",
+        choices=tuple(CMAKE_SOURCE_SCOPES),
+        help=(
+            "Restrict a supported CMake command to a source-owned build and "
+            "test closure."
         ),
     )
     return parser.parse_args(argv)

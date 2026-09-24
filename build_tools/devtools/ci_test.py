@@ -555,6 +555,82 @@ class CiTest(unittest.TestCase):
             )
         )
 
+    def test_cmake_source_scope_selects_product_roots_and_tests(self):
+        scope = ci.CMakeSourceScope(
+            name="Compiler",
+            build_targets=("compiler/one/all", "compiler/two/all"),
+            test_regex="^compiler/",
+            smoke_test_regexes=("^compiler/smoke$",),
+        )
+        with mock.patch.dict(ci.CMAKE_SOURCE_SCOPES, {"compiler": scope}, clear=True):
+            cpu_steps = ci.steps_from_args(
+                ci.parse_arguments(["iree-cmake-cpu", "--scope", "compiler"])
+            )
+            repository_steps = ci.steps_from_args(
+                ci.parse_arguments(
+                    ["iree-cmake-repository-build", "--scope", "compiler"]
+                )
+            )
+
+        for steps in (cpu_steps, repository_steps):
+            build_step = next(step for step in steps if step.name.startswith("Build"))
+            self.assertIn("compiler/one/all", build_step.argv)
+            self.assertIn("compiler/two/all", build_step.argv)
+        cpu_test_step = next(
+            step for step in cpu_steps if step.name.startswith("Test Compiler")
+        )
+        self.assertEqual(
+            cpu_test_step.argv[cpu_test_step.argv.index("-R") + 1], "^compiler/"
+        )
+        repository_test_step = next(
+            step for step in repository_steps if step.name == "Test Compiler smoke"
+        )
+        self.assertEqual(
+            repository_test_step.argv[repository_test_step.argv.index("-R") + 1],
+            "(^compiler/smoke$)",
+        )
+
+    def test_cmake_source_scope_uses_device_resource_test_closure(self):
+        scope = ci.CMakeSourceScope(
+            name="Compiler",
+            build_targets=("compiler/all",),
+            test_regex="^compiler/",
+            smoke_test_regexes=("^compiler/smoke$",),
+        )
+        with mock.patch.dict(ci.CMAKE_SOURCE_SCOPES, {"compiler": scope}, clear=True):
+            for command in ("iree-cmake-amdgpu", "iree-cmake-vulkan"):
+                with self.subTest(command=command):
+                    steps = ci.steps_from_args(
+                        ci.parse_arguments([command, "--scope", "compiler"])
+                    )
+
+                    self.assertFalse(
+                        any("package tests" in step.name for step in steps)
+                    )
+                    self.assertFalse(
+                        any(step.name.startswith("Build") for step in steps)
+                    )
+                    resource_step = next(
+                        step for step in steps if "resource tests" in step.name
+                    )
+                    self.assertEqual(
+                        resource_step.argv[resource_step.argv.index("-R") + 1],
+                        "^compiler/",
+                    )
+
+    def test_loom_scope_rejects_commands_without_a_loom_closure(self):
+        for command in (
+            "iree-bazel-cpu",
+            "iree-cmake-sanitizer-smoke",
+            "iree-cmake-xdna",
+            "iree-cmake-loom-amdgpu",
+            "iree-importers-tilelang",
+        ):
+            with self.subTest(command=command):
+                args = ci.parse_arguments([command, "--scope", "loom"])
+                with self.assertRaisesRegex(ValueError, "--scope"):
+                    ci.steps_from_args(args)
+
     def test_amdgpu_dry_run_does_not_embed_machine_paths(self):
         args = ci.parse_arguments(
             [

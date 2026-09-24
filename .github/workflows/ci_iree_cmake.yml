@@ -86,9 +86,17 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 2
 
       - name: Adjust git config
         run: git config --global --add safe.directory "$PWD"
+
+      - name: Select affected tests
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 build_tools/ci/change_scope.py --base "$BASE_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -122,8 +130,11 @@ jobs:
       - name: Run IREE CMake CI
         id: iree_cmake_ci
         run: |
-          echo "python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going"
-          python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going
+          set -- python3 build_tools/devtools/ci.py "${{ matrix.command }}"
+          if [ "${{ steps.scope.outputs.loom_only }}" = true ] && [ "${{ matrix.command }}" != iree-cmake-sanitizer-smoke ]; then
+            set -- "$@" --scope loom
+          fi
+          "$@" --keep-going
 
       - name: Upload failed test results
         if: ${{ always() && steps.iree_cmake_ci.outcome == 'failure' }}
@@ -162,11 +173,20 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 2
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
+
+      - name: Select affected tests
+        id: scope
+        shell: cmd
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python build_tools/ci/change_scope.py --base "%BASE_SHA%" >> "%GITHUB_OUTPUT%"
 
       - name: Fetch ROCm toolchain
         if: matrix.fetch_rocm
@@ -199,7 +219,9 @@ jobs:
             set "CXX=%HRX_ROCM_ROOT%\lib\llvm\bin\clang-cl.exe"
             set "AR=%HRX_ROCM_ROOT%\lib\llvm\bin\llvm-lib.exe"
           )
-          python build_tools/devtools/ci.py ${{ matrix.command }} --keep-going
+          set "SCOPE_ARGS="
+          if "${{ steps.scope.outputs.loom_only }}"=="true" set "SCOPE_ARGS=--scope loom"
+          python build_tools/devtools/ci.py ${{ matrix.command }} %SCOPE_ARGS% --keep-going
 
       - name: Upload Windows build failure evidence
         if: ${{ always() && steps.iree_cmake_ci.outcome == 'failure' }}
@@ -241,11 +263,19 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 2
 
       - name: Adjust git config
         run: |
           mkdir -p "$HOME"
           git config --global --add safe.directory "$PWD"
+
+      - name: Select affected tests
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 build_tools/ci/change_scope.py --base "$BASE_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Install Vulkan build environment
         run: |
@@ -280,8 +310,11 @@ jobs:
       - name: Run IREE CMake CI
         id: iree_cmake_ci
         run: |
-          echo "python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going"
-          python3 build_tools/devtools/ci.py ${{ matrix.command }} --keep-going
+          set -- python3 build_tools/devtools/ci.py "${{ matrix.command }}"
+          if [ "${{ steps.scope.outputs.loom_only }}" = true ]; then
+            set -- "$@" --scope loom
+          fi
+          "$@" --keep-going
 
       - name: Upload failed test results
         if: ${{ always() && steps.iree_cmake_ci.outcome == 'failure' }}
@@ -333,11 +366,19 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 2
 
       - name: Adjust git config
         run: |
           mkdir -p "$HOME"
           git config --global --add safe.directory "$PWD"
+
+      - name: Select affected tests
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 build_tools/ci/change_scope.py --base "$BASE_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -369,9 +410,12 @@ jobs:
       - name: Run IREE CMake CI
         id: iree_cmake_ci
         run: |
-          echo "python3 build_tools/devtools/ci.py ${{ matrix.command }} --amdgpu-target ${{ matrix.target_selector }} --keep-going"
-          python3 build_tools/devtools/ci.py ${{ matrix.command }} \
-            --amdgpu-target "${{ matrix.target_selector }}" --keep-going
+          set -- python3 build_tools/devtools/ci.py "${{ matrix.command }}" \
+            --amdgpu-target "${{ matrix.target_selector }}"
+          if [ "${{ steps.scope.outputs.loom_only }}" = true ]; then
+            set -- "$@" --scope loom
+          fi
+          "$@" --keep-going
 
       - name: Upload failed test results
         if: ${{ always() && steps.iree_cmake_ci.outcome == 'failure' }}

@@ -37,6 +37,14 @@ CMAKE_REPOSITORY_SMOKE_CTEST_REGEXES = (
     "^iree/base/status_test$",
     "^loom/format/bytecode/varint_test$",
 )
+LOOM_CMAKE_BUILD_TARGETS = (
+    "loom/target/all",
+    "loom/py/loom/all",
+    "loom/src/all",
+    "loom/binding/c/all",
+)
+LOOM_CTEST_REGEX = "^loom/"
+LOOM_CMAKE_SMOKE_CTEST_REGEXES = ("^loom/format/bytecode/varint_test$",)
 BAZEL_REPOSITORY_INTEGRATION_DEVICE_TARGETS = (
     "//runtime/src/iree/hal/drivers/amdgpu/util:pm4_dispatch_test_kernels",
 )
