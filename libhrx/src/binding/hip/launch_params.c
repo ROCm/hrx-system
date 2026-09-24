@@ -56,6 +56,37 @@ hipError_t iree_hip_parse_launch_extra(void** extra, void** out_buffer,
   return hipSuccess;
 }
 
+hipError_t iree_hip_parse_launch_attributes(
+    const hipLaunchAttribute* attributes, unsigned int attribute_count,
+    bool* out_cooperative) {
+  if (!out_cooperative || (attribute_count != 0 && !attributes)) {
+    return hipErrorInvalidValue;
+  }
+  *out_cooperative = false;
+
+  for (unsigned int i = 0; i < attribute_count; ++i) {
+    switch (attributes[i].id) {
+      case hipLaunchAttributeIgnore:
+        break;
+      case hipLaunchAttributeCooperative:
+        *out_cooperative |= attributes[i].val.cooperative != 0;
+        break;
+      case hipLaunchAttributeExtDynDataPrefetch:
+        if (!attributes[i].val.dynDataPrefetch) {
+          return hipErrorInvalidValue;
+        }
+        // HRX advertises no dynamic-prefetch regions, so this recognized
+        // feature is unavailable rather than malformed.
+        return hipErrorNotSupported;
+      default:
+        // Accepting an attribute without implementing its execution semantics
+        // would silently launch a kernel with a different contract.
+        return hipErrorInvalidValue;
+    }
+  }
+  return hipSuccess;
+}
+
 hipError_t iree_hip_validate_launch_block_configuration(
     iree_hal_streaming_device_t* device, iree_hal_streaming_symbol_t* symbol,
     unsigned int block_dim_x, unsigned int block_dim_y,

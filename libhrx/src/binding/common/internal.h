@@ -2511,6 +2511,12 @@ typedef enum iree_hal_streaming_graph_exec_update_result_e {
   IREE_HAL_STREAMING_GRAPH_EXEC_UPDATE_UNSUPPORTED_FUNCTION_CHANGE = 7,
 } iree_hal_streaming_graph_exec_update_result_t;
 
+typedef enum iree_hal_streaming_graph_exec_launch_result_e {
+  IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_SUCCESS = 0,
+  IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_ERROR = 1,
+  IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_COOPERATIVE_TOO_LARGE = 2,
+} iree_hal_streaming_graph_exec_launch_result_t;
+
 // Synchronization: none (creates new graph).
 iree_status_t iree_hal_streaming_graph_create(
     iree_hal_streaming_context_t* context,
@@ -2659,7 +2665,8 @@ iree_status_t iree_hal_streaming_graph_exec_set_node_enabled(
 
 // Synchronization: stream (launches graph async on stream).
 iree_status_t iree_hal_streaming_graph_exec_launch(
-    iree_hal_streaming_graph_exec_t* exec, iree_hal_streaming_stream_t* stream);
+    iree_hal_streaming_graph_exec_t* exec, iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_graph_exec_launch_result_t* out_result);
 
 // Synchronization: none (updates graph structure).
 iree_status_t iree_hal_streaming_graph_exec_update(

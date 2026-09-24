@@ -36,7 +36,6 @@ typedef struct __hip_surface* hipSurfaceObject_t;
 typedef struct textureReference textureReference;
 typedef struct HIP_ARRAY_DESCRIPTOR HIP_ARRAY_DESCRIPTOR;
 typedef struct HIP_ARRAY3D_DESCRIPTOR HIP_ARRAY3D_DESCRIPTOR;
-typedef struct HIP_LAUNCH_CONFIG_st HIP_LAUNCH_CONFIG;
 typedef struct HIP_RESOURCE_DESC HIP_RESOURCE_DESC;
 typedef struct HIP_RESOURCE_VIEW_DESC HIP_RESOURCE_VIEW_DESC;
 typedef struct HIP_TEXTURE_DESC HIP_TEXTURE_DESC;
@@ -61,7 +60,6 @@ typedef struct hipExternalSemaphoreWaitNodeParams
 typedef struct hipFunctionLaunchParams_t hipFunctionLaunchParams;
 typedef struct hipGraphicsResource hipGraphicsResource;
 typedef hipGraphicsResource* hipGraphicsResource_t;
-typedef struct hipLaunchConfig_st hipLaunchConfig_t;
 typedef struct hipMemcpy3DPeerParms hipMemcpy3DPeerParms;
 typedef enum hipMemcpyFlags {
   hipMemcpyFlagDefault = 0x0,
@@ -786,17 +784,6 @@ HIPAPI hipError_t hipDeviceGetTexture1DLinearMaxWidth(
   HIP_RETURN_ERROR(hipErrorNotSupported);
 }
 
-HIPAPI hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config,
-                                       hipFunction_t f, void** params,
-                                       void** extra) {
-  HIP_API_BEGIN();
-  (void)config;
-  (void)f;
-  (void)params;
-  (void)extra;
-  HIP_RETURN_ERROR(hipErrorNotSupported);
-}
-
 HIPAPI hipError_t hipDrvMemcpy2DUnaligned(const hip_Memcpy2D* pCopy) {
   HIP_API_BEGIN();
   if (!pCopy) {
@@ -1135,15 +1122,6 @@ HIPAPI hipError_t hipLaunchCooperativeKernelMultiDevice(
   (void)launchParamsList;
   (void)numDevices;
   (void)flags;
-  HIP_RETURN_ERROR(hipErrorNotSupported);
-}
-
-HIPAPI hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config,
-                                     const void* fPtr, void** args) {
-  HIP_API_BEGIN();
-  (void)config;
-  (void)fPtr;
-  (void)args;
   HIP_RETURN_ERROR(hipErrorNotSupported);
 }
 

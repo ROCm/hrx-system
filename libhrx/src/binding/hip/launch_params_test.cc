@@ -126,6 +126,53 @@ TEST(LaunchParamsTest, ParseLaunchExtraRejectsMarkerValues) {
             iree_hip_parse_launch_extra(extra, &out_buffer, &out_buffer_size));
 }
 
+TEST(LaunchParamsTest, ParseLaunchAttributesSelectsCooperativeDispatch) {
+  hipLaunchAttribute attributes[2] = {};
+  attributes[0].id = hipLaunchAttributeIgnore;
+  attributes[1].id = hipLaunchAttributeCooperative;
+  attributes[1].val.cooperative = 1;
+
+  bool cooperative = false;
+  EXPECT_EQ(hipSuccess,
+            iree_hip_parse_launch_attributes(
+                attributes, IREE_ARRAYSIZE(attributes), &cooperative));
+  EXPECT_TRUE(cooperative);
+}
+
+TEST(LaunchParamsTest, ParseLaunchAttributesAcceptsNoAttributes) {
+  bool cooperative = true;
+  EXPECT_EQ(hipSuccess,
+            iree_hip_parse_launch_attributes(nullptr, 0, &cooperative));
+  EXPECT_FALSE(cooperative);
+}
+
+TEST(LaunchParamsTest, ParseLaunchAttributesRejectsInvalidLists) {
+  bool cooperative = false;
+  EXPECT_EQ(hipErrorInvalidValue,
+            iree_hip_parse_launch_attributes(nullptr, 1, &cooperative));
+  EXPECT_EQ(hipErrorInvalidValue,
+            iree_hip_parse_launch_attributes(nullptr, 0, nullptr));
+
+  hipLaunchAttribute attribute = {};
+  attribute.id = hipLaunchAttributeClusterDimension;
+  EXPECT_EQ(hipErrorInvalidValue,
+            iree_hip_parse_launch_attributes(&attribute, 1, &cooperative));
+}
+
+TEST(LaunchParamsTest, ParseLaunchAttributesValidatesPrefetchPayload) {
+  hipLaunchAttribute attribute = {};
+  attribute.id = hipLaunchAttributeExtDynDataPrefetch;
+
+  bool cooperative = false;
+  EXPECT_EQ(hipErrorInvalidValue,
+            iree_hip_parse_launch_attributes(&attribute, 1, &cooperative));
+
+  attribute.val.dynDataPrefetch =
+      reinterpret_cast<const hipExtDynDataPrefetchConfig*>(uintptr_t{1});
+  EXPECT_EQ(hipErrorNotSupported,
+            iree_hip_parse_launch_attributes(&attribute, 1, &cooperative));
+}
+
 TEST(LaunchParamsTest, ValidateLaunchConfigurationAcceptsDeviceLimits) {
   iree_hal_streaming_device_t device = {};
   InitializeLaunchDevice(&device);

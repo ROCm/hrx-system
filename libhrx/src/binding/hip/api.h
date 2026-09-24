@@ -1428,6 +1428,62 @@ typedef union hipLaunchAttributeValue {
   const hipExtDynDataPrefetchConfig* dynDataPrefetch;
 } hipLaunchAttributeValue;
 
+typedef struct hipLaunchAttribute_st {
+  // Attribute identifier selecting the active union member.
+  hipLaunchAttributeID id;
+  // Padding that aligns the attribute value to an eight-byte boundary.
+  char pad[8 - sizeof(hipLaunchAttributeID)];
+  union {
+    // Runtime API spelling for the attribute value.
+    hipLaunchAttributeValue val;
+    // Driver API spelling for the attribute value.
+    hipLaunchAttributeValue value;
+  };
+} hipLaunchAttribute;
+
+typedef struct hipLaunchConfig_st {
+  // Grid dimensions in blocks.
+  dim3 gridDim;
+  // Block dimensions in threads.
+  dim3 blockDim;
+  // Dynamic shared memory allocated per block.
+  size_t dynamicSmemBytes;
+  // Stream receiving the launch.
+  hipStream_t stream;
+  // Array of launch attributes.
+  hipLaunchAttribute* attrs;
+  // Number of entries in |attrs|.
+  unsigned int numAttrs;
+} hipLaunchConfig_t;
+
+typedef struct HIP_LAUNCH_CONFIG_st {
+  // Grid width in blocks.
+  unsigned int gridDimX;
+  // Grid height in blocks.
+  unsigned int gridDimY;
+  // Grid depth in blocks.
+  unsigned int gridDimZ;
+  // Block width in threads.
+  unsigned int blockDimX;
+  // Block height in threads.
+  unsigned int blockDimY;
+  // Block depth in threads.
+  unsigned int blockDimZ;
+  // Dynamic shared memory allocated per block.
+  unsigned int sharedMemBytes;
+  // Stream receiving the launch.
+  hipStream_t hStream;
+  // Array of launch attributes.
+  hipLaunchAttribute* attrs;
+  // Number of entries in |attrs|.
+  unsigned int numAttrs;
+} HIP_LAUNCH_CONFIG;
+
+#define hipDrvLaunchAttributeCooperative hipLaunchAttributeCooperative
+#define hipDrvLaunchAttributeID hipLaunchAttributeID
+#define hipDrvLaunchAttributeValue hipLaunchAttributeValue
+#define hipDrvLaunchAttribute hipLaunchAttribute
+
 #define hipStreamAttrID hipLaunchAttributeID
 #define hipStreamAttributeAccessPolicyWindow \
   hipLaunchAttributeAccessPolicyWindow
@@ -1997,6 +2053,8 @@ HIPAPI const char* hipKernelNameRefByPtr(const void* hostFunction,
 HIPAPI hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
                                   dim3 dimBlocks, void** args,
                                   size_t sharedMemBytes, hipStream_t stream);
+HIPAPI hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config,
+                                     const void* function_address, void** args);
 // Enqueues matching registered kernel launches across explicit device streams.
 // This is a non-cooperative AMD extension; |flags| only control the optional
 // pre-launch and post-launch stream synchronization.
@@ -2012,6 +2070,9 @@ HIPAPI hipError_t hipModuleLaunchKernel(
     unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY,
     unsigned int blockDimZ, unsigned int sharedMemBytes, hipStream_t hStream,
     void** kernelParams, void** extra);
+HIPAPI hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config,
+                                       hipFunction_t function,
+                                       void** kernel_params, void** extra);
 HIPAPI hipError_t hipModuleLaunchCooperativeKernel(
     hipFunction_t f, unsigned int gridDimX, unsigned int gridDimY,
     unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY,

@@ -911,7 +911,11 @@ TEST_F(CpuStreamingContextTest, AGraphLaunchOnAnUntimedDeviceGoesUntimed) {
   iree_hal_streaming_graph_exec_t* exec = nullptr;
   IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
       graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &exec));
-  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_launch(exec, stream));
+  iree_hal_streaming_graph_exec_launch_result_t launch_result =
+      IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_ERROR;
+  IREE_ASSERT_OK(
+      iree_hal_streaming_graph_exec_launch(exec, stream, &launch_result));
+  EXPECT_EQ(IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_SUCCESS, launch_result);
   IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream));
 
   EXPECT_EQ(nullptr, context_->timestamp_pool.slabs)

@@ -28,6 +28,15 @@ iree_status_t iree_hal_streaming_query_dispatch_occupancy(
     uint32_t dynamic_workgroup_local_memory,
     iree_hal_queue_dispatch_concurrency_t* out_concurrency);
 
+// Checks whether |config| fits the concurrent residency of |queue|.
+// Workgroup and grid products are computed with checked arithmetic and the
+// occupancy query is issued against the exact queue and executable entry point.
+// |out_exceeds_residency| is unchanged on failure.
+iree_status_t iree_hal_streaming_check_cooperative_dispatch_residency(
+    iree_hal_queue_t* queue, iree_hal_executable_t* executable,
+    iree_hal_executable_function_t function, iree_hal_dispatch_config_t config,
+    bool* out_exceeds_residency);
+
 // Selects the block size with the greatest resident invocation count per
 // scheduling domain. Equal scores select the larger block. The returned grid
 // size is the total number of concurrently resident workgroups across the exact

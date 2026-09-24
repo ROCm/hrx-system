@@ -27,6 +27,40 @@ iree_status_t iree_hal_streaming_query_dispatch_occupancy(
   return status;
 }
 
+iree_status_t iree_hal_streaming_check_cooperative_dispatch_residency(
+    iree_hal_queue_t* queue, iree_hal_executable_t* executable,
+    iree_hal_executable_function_t function, iree_hal_dispatch_config_t config,
+    bool* out_exceeds_residency) {
+  uint64_t block_size_xy = 0;
+  uint64_t block_size = 0;
+  if (IREE_UNLIKELY(!iree_checked_mul_u64(config.workgroup_size[0],
+                                          config.workgroup_size[1],
+                                          &block_size_xy) ||
+                    !iree_checked_mul_u64(
+                        block_size_xy, config.workgroup_size[2], &block_size) ||
+                    block_size == 0 || block_size > UINT32_MAX)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "cooperative workgroup size is invalid");
+  }
+
+  iree_hal_queue_dispatch_concurrency_t concurrency;
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_query_dispatch_occupancy(
+      queue, executable, function, (uint32_t)block_size,
+      config.dynamic_workgroup_local_memory, &concurrency));
+  const uint64_t maximum_workgroup_count =
+      iree_hal_queue_dispatch_concurrency_total_workgroup_count(concurrency);
+
+  uint64_t grid_size_xy = 0;
+  uint64_t grid_size = 0;
+  const bool grid_size_valid =
+      iree_checked_mul_u64(config.workgroup_count[0], config.workgroup_count[1],
+                           &grid_size_xy) &&
+      iree_checked_mul_u64(grid_size_xy, config.workgroup_count[2], &grid_size);
+  *out_exceeds_residency =
+      !grid_size_valid || grid_size > maximum_workgroup_count;
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_streaming_select_optimal_dispatch_occupancy(
     iree_hal_queue_t* queue, iree_hal_executable_t* executable,
     iree_hal_executable_function_t function, uint32_t maximum_block_size,

@@ -64,6 +64,15 @@ using HipModuleLaunchCooperativeKernelFn = hipError_t (*)(
     unsigned int grid_dim_z, unsigned int block_dim_x, unsigned int block_dim_y,
     unsigned int block_dim_z, unsigned int shared_memory_bytes,
     hipStream_t stream, void** arguments);
+using HipLaunchKernelExCFn = hipError_t (*)(const hipLaunchConfig_t* config,
+                                            const void* function,
+                                            void** arguments);
+using HipDrvLaunchKernelExFn = hipError_t (*)(const HIP_LAUNCH_CONFIG* config,
+                                              hipFunction_t function,
+                                              void** arguments, void** extra);
+using HipModuleOccupancyMaxActiveBlocksPerMultiprocessorFn =
+    hipError_t (*)(int* block_count, hipFunction_t function, int block_size,
+                   size_t dynamic_shared_memory_bytes);
 using HipDeviceSynchronizeFn = hipError_t (*)(void);
 using HipMallocFn = hipError_t (*)(hipDeviceptr_t* pointer, size_t size);
 using HipFreeFn = hipError_t (*)(hipDeviceptr_t pointer);
@@ -119,6 +128,11 @@ using HipStreamBeginCaptureFn = hipError_t (*)(hipStream_t stream,
                                                hipStreamCaptureMode mode);
 using HipStreamEndCaptureFn = hipError_t (*)(hipStream_t stream,
                                              hipGraph_t* graph);
+using HipGraphGetNodesFn = hipError_t (*)(hipGraph_t graph,
+                                          hipGraphNode_t* nodes,
+                                          size_t* node_count);
+using HipGraphNodeGetTypeFn = hipError_t (*)(hipGraphNode_t node,
+                                             hipGraphNodeType* type);
 using HipGraphCreateFn = hipError_t (*)(hipGraph_t* graph, unsigned int flags);
 using HipGraphDestroyFn = hipError_t (*)(hipGraph_t graph);
 using HipGraphAddKernelNodeFn = hipError_t (*)(
@@ -132,6 +146,9 @@ using HipGraphInstantiateFn = hipError_t (*)(hipGraphExec_t* graph_executable,
 using HipGraphLaunchFn = hipError_t (*)(hipGraphExec_t graph_executable,
                                         hipStream_t stream);
 using HipGraphExecDestroyFn = hipError_t (*)(hipGraphExec_t graph_executable);
+using HipGraphExecKernelNodeSetParamsFn =
+    hipError_t (*)(hipGraphExec_t graph_executable, hipGraphNode_t node,
+                   const hipKernelNodeParams* params);
 
 struct ExecutionContextDeleter {
   // Runtime entry point used to destroy a live execution context.
@@ -329,6 +346,8 @@ struct MultiDeviceLaunchState {
 };
 
 void MultiDeviceGatedStoreHostStub() {}
+
+void CooperativeGridSyncHostStub() {}
 
 struct PointerArguments {
   // Device input values read by the kernel.
@@ -1142,6 +1161,13 @@ TEST(HipModuleExecutionTest, CooperativeLaunchPreservesStreamAndGraphOrdering) {
   const auto module_launch_cooperative_kernel =
       ResolveHipSymbol<HipModuleLaunchCooperativeKernelFn>(
           library, "hipModuleLaunchCooperativeKernel");
+  const auto launch_kernel_ex =
+      ResolveHipSymbol<HipLaunchKernelExCFn>(library, "hipLaunchKernelExC");
+  const auto driver_launch_kernel_ex =
+      ResolveHipSymbol<HipDrvLaunchKernelExFn>(library, "hipDrvLaunchKernelEx");
+  const auto module_occupancy =
+      ResolveHipSymbol<HipModuleOccupancyMaxActiveBlocksPerMultiprocessorFn>(
+          library, "hipModuleOccupancyMaxActiveBlocksPerMultiprocessor");
   const auto hip_malloc = ResolveHipSymbol<HipMallocFn>(library, "hipMalloc");
   const auto hip_free = ResolveHipSymbol<HipFreeFn>(library, "hipFree");
   const auto hip_memcpy_async =
@@ -1174,6 +1200,10 @@ TEST(HipModuleExecutionTest, CooperativeLaunchPreservesStreamAndGraphOrdering) {
       library, "hipStreamBeginCapture");
   const auto stream_end_capture =
       ResolveHipSymbol<HipStreamEndCaptureFn>(library, "hipStreamEndCapture");
+  const auto graph_get_nodes =
+      ResolveHipSymbol<HipGraphGetNodesFn>(library, "hipGraphGetNodes");
+  const auto graph_node_get_type =
+      ResolveHipSymbol<HipGraphNodeGetTypeFn>(library, "hipGraphNodeGetType");
   const auto graph_destroy =
       ResolveHipSymbol<HipGraphDestroyFn>(library, "hipGraphDestroy");
   const auto graph_instantiate =
@@ -1182,6 +1212,15 @@ TEST(HipModuleExecutionTest, CooperativeLaunchPreservesStreamAndGraphOrdering) {
       ResolveHipSymbol<HipGraphLaunchFn>(library, "hipGraphLaunch");
   const auto graph_exec_destroy =
       ResolveHipSymbol<HipGraphExecDestroyFn>(library, "hipGraphExecDestroy");
+  const auto graph_exec_kernel_node_set_params =
+      ResolveHipSymbol<HipGraphExecKernelNodeSetParamsFn>(
+          library, "hipGraphExecKernelNodeSetParams");
+  const auto register_fat_binary = ResolveHipSymbol<HipRegisterFatBinaryFn>(
+      library, "__hipRegisterFatBinary");
+  const auto unregister_fat_binary = ResolveHipSymbol<HipUnregisterFatBinaryFn>(
+      library, "__hipUnregisterFatBinary");
+  const auto register_function =
+      ResolveHipSymbol<HipRegisterFunctionFn>(library, "__hipRegisterFunction");
 
   ASSERT_NE(nullptr, init);
   ASSERT_NE(nullptr, get_device);
@@ -1190,6 +1229,9 @@ TEST(HipModuleExecutionTest, CooperativeLaunchPreservesStreamAndGraphOrdering) {
   ASSERT_NE(nullptr, module_unload);
   ASSERT_NE(nullptr, module_get_function);
   ASSERT_NE(nullptr, module_launch_cooperative_kernel);
+  ASSERT_NE(nullptr, launch_kernel_ex);
+  ASSERT_NE(nullptr, driver_launch_kernel_ex);
+  ASSERT_NE(nullptr, module_occupancy);
   ASSERT_NE(nullptr, hip_malloc);
   ASSERT_NE(nullptr, hip_free);
   ASSERT_NE(nullptr, hip_memcpy_async);
@@ -1205,10 +1247,16 @@ TEST(HipModuleExecutionTest, CooperativeLaunchPreservesStreamAndGraphOrdering) {
   ASSERT_NE(nullptr, execution_context_stream_create);
   ASSERT_NE(nullptr, stream_begin_capture);
   ASSERT_NE(nullptr, stream_end_capture);
+  ASSERT_NE(nullptr, graph_get_nodes);
+  ASSERT_NE(nullptr, graph_node_get_type);
   ASSERT_NE(nullptr, graph_destroy);
   ASSERT_NE(nullptr, graph_instantiate);
   ASSERT_NE(nullptr, graph_launch);
   ASSERT_NE(nullptr, graph_exec_destroy);
+  ASSERT_NE(nullptr, graph_exec_kernel_node_set_params);
+  ASSERT_NE(nullptr, register_fat_binary);
+  ASSERT_NE(nullptr, unregister_fat_binary);
+  ASSERT_NE(nullptr, register_function);
 
   const hipError_t init_result = init(/*flags=*/0);
   if (init_result != hipSuccess) {
@@ -1226,6 +1274,20 @@ TEST(HipModuleExecutionTest, CooperativeLaunchPreservesStreamAndGraphOrdering) {
       hrx_cts::FindAmdgpuHipCooperativeTestImage(properties.gcnArchName);
   ASSERT_NE(nullptr, test_image.file)
       << "no embedded cooperative HSACO for " << properties.gcnArchName;
+
+  ScopedRegistration registration = {
+      /*.value=*/register_fat_binary(test_image.file->data),
+      /*.unregister=*/unregister_fat_binary,
+  };
+  ASSERT_NE(nullptr, registration.value);
+  char device_function_name[] = "hrx_cooperative_grid_sync";
+  register_function(registration.value,
+                    reinterpret_cast<const void*>(&CooperativeGridSyncHostStub),
+                    device_function_name, "hrx_cooperative_grid_sync",
+                    /*thread_limit=*/0, /*thread_index=*/nullptr,
+                    /*block_index=*/nullptr,
+                    /*block_dimensions=*/nullptr, /*grid_dimensions=*/nullptr,
+                    /*shared_memory_size=*/nullptr);
 
   std::vector<uint8_t> image(test_image.file->data,
                              test_image.file->data + test_image.file->size);
@@ -1293,10 +1355,112 @@ TEST(HipModuleExecutionTest, CooperativeLaunchPreservesStreamAndGraphOrdering) {
         function, kWorkgroupCount, 1, 1, kWorkgroupSize, 1, 1,
         /*shared_memory_bytes=*/0, stream, arguments);
   };
+  hipLaunchAttribute cooperative_attribute = {};
+  cooperative_attribute.id = hipLaunchAttributeCooperative;
+  cooperative_attribute.val.cooperative = 1;
+  auto launch_runtime_extended = [&](hipStream_t stream, uint32_t incarnation) {
+    hipDeviceptr_t scratch_argument = scratch;
+    hipDeviceptr_t output_argument = output;
+    uint32_t workgroup_count = kWorkgroupCount;
+    void* arguments[] = {&scratch_argument, &output_argument, &incarnation,
+                         &workgroup_count};
+    hipLaunchConfig_t config = {
+        /*.gridDim=*/{kWorkgroupCount, 1, 1},
+        /*.blockDim=*/{kWorkgroupSize, 1, 1},
+        /*.dynamicSmemBytes=*/0,
+        /*.stream=*/stream,
+        /*.attrs=*/&cooperative_attribute,
+        /*.numAttrs=*/1,
+    };
+    return launch_kernel_ex(
+        &config, reinterpret_cast<const void*>(&CooperativeGridSyncHostStub),
+        arguments);
+  };
+  auto launch_driver_extended = [&](hipStream_t stream, uint32_t incarnation) {
+    hipDeviceptr_t scratch_argument = scratch;
+    hipDeviceptr_t output_argument = output;
+    uint32_t workgroup_count = kWorkgroupCount;
+    void* arguments[] = {&scratch_argument, &output_argument, &incarnation,
+                         &workgroup_count};
+    HIP_LAUNCH_CONFIG config = {
+        /*.gridDimX=*/kWorkgroupCount,
+        /*.gridDimY=*/1,
+        /*.gridDimZ=*/1,
+        /*.blockDimX=*/kWorkgroupSize,
+        /*.blockDimY=*/1,
+        /*.blockDimZ=*/1,
+        /*.sharedMemBytes=*/0,
+        /*.hStream=*/stream,
+        /*.attrs=*/&cooperative_attribute,
+        /*.numAttrs=*/1,
+    };
+    return driver_launch_kernel_ex(&config, function, arguments,
+                                   /*extra=*/nullptr);
+  };
+  auto launch_driver_extended_prepacked = [&](hipStream_t stream,
+                                              uint32_t incarnation) {
+    struct NativeArguments {
+      uint32_t* scratch;
+      uint32_t* output;
+      uint32_t incarnation;
+      uint32_t workgroup_count;
+    } arguments = {
+        /*.scratch=*/static_cast<uint32_t*>(scratch),
+        /*.output=*/static_cast<uint32_t*>(output),
+        /*.incarnation=*/incarnation,
+        /*.workgroup_count=*/kWorkgroupCount,
+    };
+    static_assert(offsetof(NativeArguments, output) == sizeof(void*));
+    static_assert(offsetof(NativeArguments, incarnation) == 2 * sizeof(void*));
+    static_assert(sizeof(NativeArguments) ==
+                  2 * sizeof(void*) + 2 * sizeof(uint32_t));
+    size_t arguments_size = sizeof(arguments);
+    void* extra[] = {
+        HIP_LAUNCH_PARAM_BUFFER_POINTER,
+        &arguments,
+        HIP_LAUNCH_PARAM_BUFFER_SIZE,
+        &arguments_size,
+        HIP_LAUNCH_PARAM_END,
+    };
+    HIP_LAUNCH_CONFIG config = {
+        /*.gridDimX=*/kWorkgroupCount,
+        /*.gridDimY=*/1,
+        /*.gridDimZ=*/1,
+        /*.blockDimX=*/kWorkgroupSize,
+        /*.blockDimY=*/1,
+        /*.blockDimZ=*/1,
+        /*.sharedMemBytes=*/0,
+        /*.hStream=*/stream,
+        /*.attrs=*/&cooperative_attribute,
+        /*.numAttrs=*/1,
+    };
+    return driver_launch_kernel_ex(&config, function,
+                                   /*arguments=*/nullptr, extra);
+  };
   auto expected_sum = [](uint32_t incarnation) {
     return kWorkgroupCount * incarnation +
            (kWorkgroupCount * (kWorkgroupCount - 1)) / 2;
   };
+
+  std::array<uint32_t, kWorkgroupCount> actual = {};
+  const auto verify_extended_launch = [&](uint32_t incarnation,
+                                          const auto& launch_extended) {
+    ASSERT_EQ(hipSuccess,
+              hip_memset_async(output, 0, kWorkgroupCount * sizeof(uint32_t),
+                               direct_stream));
+    ASSERT_EQ(hipSuccess, launch_extended(direct_stream, incarnation));
+    actual.fill(UINT32_MAX);
+    ASSERT_EQ(hipSuccess,
+              hip_memcpy_async(actual.data(), output, sizeof(actual),
+                               hipMemcpyDeviceToHost, direct_stream));
+    ASSERT_EQ(hipSuccess, stream_synchronize(direct_stream));
+    std::array<uint32_t, kWorkgroupCount> expected = {};
+    expected.fill(expected_sum(incarnation));
+    EXPECT_EQ(expected, actual);
+  };
+  verify_extended_launch(/*incarnation=*/25, launch_runtime_extended);
+  verify_extended_launch(/*incarnation=*/50, launch_driver_extended);
+  verify_extended_launch(/*incarnation=*/75, launch_driver_extended_prepacked);
 
   constexpr uint32_t kDirectIncarnation = 100;
   std::array<uint32_t, kWorkgroupCount> direct_expected = {};
@@ -1308,7 +1472,7 @@ TEST(HipModuleExecutionTest, CooperativeLaunchPreservesStreamAndGraphOrdering) {
             hip_memset_async(output, 0, kWorkgroupCount * sizeof(uint32_t),
                              direct_stream));
   ASSERT_EQ(hipSuccess, launch(direct_stream, kDirectIncarnation));
-  std::array<uint32_t, kWorkgroupCount> actual = {};
+  actual = {};
   ASSERT_EQ(hipSuccess, hip_memcpy_async(actual.data(), output, sizeof(actual),
                                          hipMemcpyDeviceToHost, direct_stream));
   ASSERT_EQ(hipSuccess, stream_synchronize(direct_stream));
@@ -1346,7 +1510,7 @@ TEST(HipModuleExecutionTest, CooperativeLaunchPreservesStreamAndGraphOrdering) {
   constexpr uint32_t kGraphIncarnation = 200;
   std::array<uint32_t, kWorkgroupCount> graph_expected = {};
   graph_expected.fill(expected_sum(kGraphIncarnation));
-  // Capture creates a recordable memset partition followed by a direct
+  // Capture creates a recordable memset partition followed by an extended
   // cooperative dispatch partition. Replaying twice proves each launch gets
   // fresh grid-synchronization state and rejoins the launching stream tail.
   ASSERT_EQ(hipSuccess,
@@ -1354,7 +1518,8 @@ TEST(HipModuleExecutionTest, CooperativeLaunchPreservesStreamAndGraphOrdering) {
   ASSERT_EQ(hipSuccess,
             hip_memset_async(output, 0, kWorkgroupCount * sizeof(uint32_t),
                              graph_stream));
-  ASSERT_EQ(hipSuccess, launch(graph_stream, kGraphIncarnation));
+  ASSERT_EQ(hipSuccess,
+            launch_runtime_extended(graph_stream, kGraphIncarnation));
   hipGraph_t graph = nullptr;
   ASSERT_EQ(hipSuccess, stream_end_capture(graph_stream, &graph));
   ASSERT_NE(nullptr, graph);
@@ -1373,6 +1538,82 @@ TEST(HipModuleExecutionTest, CooperativeLaunchPreservesStreamAndGraphOrdering) {
     ASSERT_EQ(hipSuccess, stream_synchronize(graph_stream));
     EXPECT_EQ(graph_expected, actual);
   }
+
+  size_t graph_node_count = 0;
+  ASSERT_EQ(hipSuccess,
+            graph_get_nodes(graph, /*nodes=*/nullptr, &graph_node_count));
+  ASSERT_EQ(2u, graph_node_count);
+  std::vector<hipGraphNode_t> graph_nodes(graph_node_count);
+  ASSERT_EQ(hipSuccess,
+            graph_get_nodes(graph, graph_nodes.data(), &graph_node_count));
+  hipGraphNode_t kernel_node = nullptr;
+  for (hipGraphNode_t node : graph_nodes) {
+    hipGraphNodeType type = hipGraphNodeTypeCount;
+    ASSERT_EQ(hipSuccess, graph_node_get_type(node, &type));
+    if (type == hipGraphNodeTypeKernel) {
+      ASSERT_EQ(nullptr, kernel_node);
+      kernel_node = node;
+    }
+  }
+  ASSERT_NE(nullptr, kernel_node);
+
+  int active_blocks_per_multiprocessor = 0;
+  ASSERT_EQ(hipSuccess, module_occupancy(&active_blocks_per_multiprocessor,
+                                         function, kWorkgroupSize,
+                                         /*dynamic_shared_memory_bytes=*/0));
+  ASSERT_GT(active_blocks_per_multiprocessor, 0);
+  ASSERT_GT(properties.multiProcessorCount, 0);
+  const uint64_t maximum_resident_grid =
+      static_cast<uint64_t>(active_blocks_per_multiprocessor) *
+      static_cast<uint64_t>(properties.multiProcessorCount);
+  ASSERT_LT(maximum_resident_grid,
+            static_cast<uint64_t>(properties.maxGridSize[0]));
+  ASSERT_LT(maximum_resident_grid, static_cast<uint64_t>(UINT32_MAX));
+  const uint32_t oversized_grid =
+      static_cast<uint32_t>(maximum_resident_grid + 1);
+
+  hipDeviceptr_t oversized_scratch = nullptr;
+  hipDeviceptr_t oversized_output = nullptr;
+  ASSERT_EQ(hipSuccess,
+            hip_malloc(&oversized_scratch, oversized_grid * sizeof(uint32_t)));
+  ASSERT_EQ(hipSuccess,
+            hip_malloc(&oversized_output, oversized_grid * sizeof(uint32_t)));
+
+  hipDeviceptr_t updated_scratch_argument = oversized_scratch;
+  hipDeviceptr_t updated_output_argument = oversized_output;
+  uint32_t updated_incarnation = 250;
+  uint32_t updated_workgroup_count = oversized_grid;
+  void* updated_arguments[] = {&updated_scratch_argument,
+                               &updated_output_argument, &updated_incarnation,
+                               &updated_workgroup_count};
+  const hipKernelNodeParams oversized_params = {
+      /*.blockDim=*/{kWorkgroupSize, 1, 1},
+      /*.extra=*/nullptr,
+      /*.func=*/reinterpret_cast<void*>(&CooperativeGridSyncHostStub),
+      /*.gridDim=*/{oversized_grid, 1, 1},
+      /*.kernelParams=*/updated_arguments,
+      /*.sharedMemBytes=*/0,
+  };
+  ASSERT_EQ(hipSuccess, graph_exec_kernel_node_set_params(
+                            graph_executable, kernel_node, &oversized_params));
+
+  // The captured memset is an observable prefix ahead of the cooperative
+  // node. Rejection must happen before either node is submitted.
+  ASSERT_EQ(hipSuccess,
+            hip_memset_async(output, 0xA5, kWorkgroupCount * sizeof(uint32_t),
+                             graph_stream));
+  ASSERT_EQ(hipSuccess, stream_synchronize(graph_stream));
+  EXPECT_EQ(hipErrorCooperativeLaunchTooLarge,
+            graph_launch(graph_executable, graph_stream));
+  actual.fill(0);
+  ASSERT_EQ(hipSuccess, hip_memcpy_async(actual.data(), output, sizeof(actual),
+                                         hipMemcpyDeviceToHost, graph_stream));
+  ASSERT_EQ(hipSuccess, stream_synchronize(graph_stream));
+  std::array<uint32_t, kWorkgroupCount> untouched_prefix = {};
+  untouched_prefix.fill(UINT32_C(0xA5A5A5A5));
+  EXPECT_EQ(untouched_prefix, actual);
+  EXPECT_EQ(hipSuccess, hip_free(oversized_output));
+  EXPECT_EQ(hipSuccess, hip_free(oversized_scratch));
 
   EXPECT_EQ(hipSuccess, graph_exec_destroy(graph_executable));
   EXPECT_EQ(hipSuccess, graph_destroy(graph));

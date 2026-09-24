@@ -117,6 +117,33 @@ using HipStreamBatchMemOpFn =
                    hipStreamBatchMemOpParams* parameters, unsigned int flags);
 using HipLaunchHostFuncFn = hipError_t (*)(hipStream_t stream, hipHostFn_t fn,
                                            void* user_data);
+using HipLaunchKernelExCFn = hipError_t (*)(const hipLaunchConfig_t* config,
+                                            const void* function,
+                                            void** arguments);
+using HipDrvLaunchKernelExFn = hipError_t (*)(const HIP_LAUNCH_CONFIG* config,
+                                              hipFunction_t function,
+                                              void** kernel_parameters,
+                                              void** extra);
+using HipModuleLaunchCooperativeKernelFn = hipError_t (*)(
+    hipFunction_t function, unsigned int grid_dim_x, unsigned int grid_dim_y,
+    unsigned int grid_dim_z, unsigned int block_dim_x, unsigned int block_dim_y,
+    unsigned int block_dim_z, unsigned int shared_memory_bytes,
+    hipStream_t stream, void** kernel_parameters);
+using HipExtLaunchMultiKernelMultiDeviceFn = hipError_t (*)(
+    hipLaunchParams* launch_parameters, int device_count, unsigned int flags);
+using HipGraphCreateFn = hipError_t (*)(hipGraph_t* graph, unsigned int flags);
+using HipGraphAddEmptyNodeFn =
+    hipError_t (*)(hipGraphNode_t* node, hipGraph_t graph,
+                   const hipGraphNode_t* dependencies, size_t dependency_count);
+using HipGraphInstantiateFn = hipError_t (*)(hipGraphExec_t* executable,
+                                             hipGraph_t graph,
+                                             hipGraphNode_t* error_node,
+                                             char* log_buffer,
+                                             size_t buffer_size);
+using HipGraphLaunchFn = hipError_t (*)(hipGraphExec_t executable,
+                                        hipStream_t stream);
+using HipGraphExecDestroyFn = hipError_t (*)(hipGraphExec_t executable);
+using HipGraphDestroyFn = hipError_t (*)(hipGraph_t graph);
 using HipEventCreateWithFlagsFn = hipError_t (*)(hipEvent_t* event,
                                                  unsigned int flags);
 using HipEventDestroyFn = hipError_t (*)(hipEvent_t event);
@@ -323,6 +350,36 @@ struct HipRuntimeApi {
   // Enqueues a host callback in a stream.
   HipLaunchHostFuncFn launch_host_function = nullptr;
 
+  // Launches a compiler-registered kernel with extended configuration.
+  HipLaunchKernelExCFn launch_kernel_ex = nullptr;
+
+  // Launches a module kernel with extended configuration.
+  HipDrvLaunchKernelExFn driver_launch_kernel_ex = nullptr;
+
+  // Launches a module kernel cooperatively.
+  HipModuleLaunchCooperativeKernelFn module_launch_cooperative_kernel = nullptr;
+
+  // Launches one matching kernel on each explicit device stream.
+  HipExtLaunchMultiKernelMultiDeviceFn launch_multi_device = nullptr;
+
+  // Creates a graph template.
+  HipGraphCreateFn graph_create = nullptr;
+
+  // Adds a dependency-only node to a graph template.
+  HipGraphAddEmptyNodeFn graph_add_empty_node = nullptr;
+
+  // Instantiates a graph template.
+  HipGraphInstantiateFn graph_instantiate = nullptr;
+
+  // Launches a graph executable.
+  HipGraphLaunchFn graph_launch = nullptr;
+
+  // Destroys a graph executable.
+  HipGraphExecDestroyFn graph_exec_destroy = nullptr;
+
+  // Destroys a graph template.
+  HipGraphDestroyFn graph_destroy = nullptr;
+
   // Creates an event with explicit flags.
   HipEventCreateWithFlagsFn event_create_with_flags = nullptr;
 
@@ -432,6 +489,28 @@ class HipExecutionResourceApiTest : public testing::Test {
           api_.library, "hipStreamBatchMemOp");
       api_.launch_host_function = ResolveHipSymbol<HipLaunchHostFuncFn>(
           api_.library, "hipLaunchHostFunc");
+      api_.launch_kernel_ex = ResolveHipSymbol<HipLaunchKernelExCFn>(
+          api_.library, "hipLaunchKernelExC");
+      api_.driver_launch_kernel_ex = ResolveHipSymbol<HipDrvLaunchKernelExFn>(
+          api_.library, "hipDrvLaunchKernelEx");
+      api_.module_launch_cooperative_kernel =
+          ResolveHipSymbol<HipModuleLaunchCooperativeKernelFn>(
+              api_.library, "hipModuleLaunchCooperativeKernel");
+      api_.launch_multi_device =
+          ResolveHipSymbol<HipExtLaunchMultiKernelMultiDeviceFn>(
+              api_.library, "hipExtLaunchMultiKernelMultiDevice");
+      api_.graph_create =
+          ResolveHipSymbol<HipGraphCreateFn>(api_.library, "hipGraphCreate");
+      api_.graph_add_empty_node = ResolveHipSymbol<HipGraphAddEmptyNodeFn>(
+          api_.library, "hipGraphAddEmptyNode");
+      api_.graph_instantiate = ResolveHipSymbol<HipGraphInstantiateFn>(
+          api_.library, "hipGraphInstantiate");
+      api_.graph_launch =
+          ResolveHipSymbol<HipGraphLaunchFn>(api_.library, "hipGraphLaunch");
+      api_.graph_exec_destroy = ResolveHipSymbol<HipGraphExecDestroyFn>(
+          api_.library, "hipGraphExecDestroy");
+      api_.graph_destroy =
+          ResolveHipSymbol<HipGraphDestroyFn>(api_.library, "hipGraphDestroy");
       api_.event_create_with_flags =
           ResolveHipSymbol<HipEventCreateWithFlagsFn>(
               api_.library, "hipEventCreateWithFlags");
@@ -480,6 +559,16 @@ class HipExecutionResourceApiTest : public testing::Test {
     ASSERT_NE(api_.wait_value_64, nullptr);
     ASSERT_NE(api_.batch_mem_op, nullptr);
     ASSERT_NE(api_.launch_host_function, nullptr);
+    ASSERT_NE(api_.launch_kernel_ex, nullptr);
+    ASSERT_NE(api_.driver_launch_kernel_ex, nullptr);
+    ASSERT_NE(api_.module_launch_cooperative_kernel, nullptr);
+    ASSERT_NE(api_.launch_multi_device, nullptr);
+    ASSERT_NE(api_.graph_create, nullptr);
+    ASSERT_NE(api_.graph_add_empty_node, nullptr);
+    ASSERT_NE(api_.graph_instantiate, nullptr);
+    ASSERT_NE(api_.graph_launch, nullptr);
+    ASSERT_NE(api_.graph_exec_destroy, nullptr);
+    ASSERT_NE(api_.graph_destroy, nullptr);
     ASSERT_NE(api_.event_create_with_flags, nullptr);
     ASSERT_NE(api_.event_destroy, nullptr);
     ASSERT_NE(api_.event_record, nullptr);
@@ -953,7 +1042,7 @@ TEST_F(HipExecutionResourceApiTest,
 }
 
 TEST_F(HipExecutionResourceApiTest,
-       StreamMemoryOperationsReportDetachedExecutionContext) {
+       StreamOperationsReportDetachedExecutionContext) {
   hipDevResource full_resource;
   ASSERT_EQ(hipSuccess, api_.device_get_resource(device_, &full_resource,
                                                  hipDevResourceTypeSm));
@@ -969,6 +1058,19 @@ TEST_F(HipExecutionResourceApiTest,
             api_.context_stream_create(&stream, context, hipStreamDefault,
                                        /*priority=*/0));
   ASSERT_NE(stream, nullptr);
+
+  hipGraph_t graph = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_create(&graph, /*flags=*/0));
+  hipGraphNode_t empty_node = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_add_empty_node(&empty_node, graph,
+                                                  /*dependencies=*/nullptr,
+                                                  /*dependency_count=*/0));
+  hipGraphExec_t graph_exec = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_instantiate(&graph_exec, graph,
+                                               /*error_node=*/nullptr,
+                                               /*log_buffer=*/nullptr,
+                                               /*buffer_size=*/0));
+
   ASSERT_EQ(hipSuccess, api_.destroy_context(context));
 
   alignas(uint64_t) uint64_t target = 0;
@@ -992,7 +1094,91 @@ TEST_F(HipExecutionResourceApiTest,
   parameter.writeValue.flags = hipStreamWriteValueDefault;
   EXPECT_EQ(hipErrorStreamDetached,
             api_.batch_mem_op(stream, 1, &parameter, /*flags=*/0));
+
+  const dim3 one = {1, 1, 1};
+  hipLaunchConfig_t runtime_config = {};
+  runtime_config.gridDim = one;
+  runtime_config.blockDim = one;
+  runtime_config.stream = stream;
+  const void* function = reinterpret_cast<const void*>(uintptr_t{1});
+  EXPECT_EQ(hipErrorStreamDetached,
+            api_.launch_kernel_ex(&runtime_config, function,
+                                  /*arguments=*/nullptr));
+
+  HIP_LAUNCH_CONFIG driver_config = {};
+  driver_config.gridDimX = 1;
+  driver_config.gridDimY = 1;
+  driver_config.gridDimZ = 1;
+  driver_config.blockDimX = 1;
+  driver_config.blockDimY = 1;
+  driver_config.blockDimZ = 1;
+  driver_config.hStream = stream;
+  EXPECT_EQ(hipErrorStreamDetached,
+            api_.driver_launch_kernel_ex(
+                &driver_config, (hipFunction_t)function,
+                /*kernel_parameters=*/nullptr, /*extra=*/nullptr));
+
+  hipLaunchAttribute cooperative_attribute = {};
+  cooperative_attribute.id = hipLaunchAttributeCooperative;
+  cooperative_attribute.val.cooperative = 1;
+  runtime_config.attrs = &cooperative_attribute;
+  runtime_config.numAttrs = 1;
+  driver_config.attrs = &cooperative_attribute;
+  driver_config.numAttrs = 1;
+  EXPECT_EQ(hipErrorStreamDetached,
+            api_.launch_kernel_ex(&runtime_config, function,
+                                  /*arguments=*/nullptr));
+  EXPECT_EQ(hipErrorStreamDetached,
+            api_.driver_launch_kernel_ex(
+                &driver_config, (hipFunction_t)function,
+                /*kernel_parameters=*/nullptr, /*extra=*/nullptr));
+
+  hipLaunchAttribute prefetch_attribute = {};
+  prefetch_attribute.id = hipLaunchAttributeExtDynDataPrefetch;
+  runtime_config.attrs = &prefetch_attribute;
+  runtime_config.numAttrs = 1;
+  driver_config.attrs = &prefetch_attribute;
+  driver_config.numAttrs = 1;
+  EXPECT_EQ(hipErrorStreamDetached,
+            api_.launch_kernel_ex(&runtime_config, function,
+                                  /*arguments=*/nullptr));
+  EXPECT_EQ(hipErrorStreamDetached,
+            api_.driver_launch_kernel_ex(
+                &driver_config, (hipFunction_t)function,
+                /*kernel_parameters=*/nullptr, /*extra=*/nullptr));
+
+  prefetch_attribute.val.dynDataPrefetch =
+      reinterpret_cast<const hipExtDynDataPrefetchConfig*>(uintptr_t{1});
+  EXPECT_EQ(hipErrorStreamDetached,
+            api_.launch_kernel_ex(&runtime_config, function,
+                                  /*arguments=*/nullptr));
+  EXPECT_EQ(hipErrorStreamDetached,
+            api_.driver_launch_kernel_ex(
+                &driver_config, (hipFunction_t)function,
+                /*kernel_parameters=*/nullptr, /*extra=*/nullptr));
+
+  EXPECT_EQ(hipErrorStreamDetached,
+            api_.module_launch_cooperative_kernel(
+                (hipFunction_t)function, /*grid_dim_x=*/1, /*grid_dim_y=*/1,
+                /*grid_dim_z=*/1, /*block_dim_x=*/1, /*block_dim_y=*/1,
+                /*block_dim_z=*/1, /*shared_memory_bytes=*/0, stream,
+                /*kernel_parameters=*/nullptr));
+  hipLaunchParams multi_device_launch = {
+      /*.func=*/const_cast<void*>(function),
+      /*.gridDim=*/one,
+      /*.blockDim=*/one,
+      /*.args=*/nullptr,
+      /*.sharedMem=*/0,
+      /*.stream=*/stream,
+  };
+  EXPECT_EQ(hipErrorStreamDetached,
+            api_.launch_multi_device(&multi_device_launch,
+                                     /*device_count=*/1, /*flags=*/0));
+  EXPECT_EQ(hipErrorStreamDetached, api_.graph_launch(graph_exec, stream));
+
   EXPECT_EQ(hipSuccess, api_.stream_destroy(stream));
+  EXPECT_EQ(hipSuccess, api_.graph_exec_destroy(graph_exec));
+  EXPECT_EQ(hipSuccess, api_.graph_destroy(graph));
 }
 
 TEST_F(HipExecutionResourceApiTest,

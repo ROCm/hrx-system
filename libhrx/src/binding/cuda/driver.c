@@ -2641,15 +2641,6 @@ CUDAAPI CUresult cuLaunchCooperativeKernel(
   // Untag the function pointer if it was tagged by cuModuleGetFunction.
   iree_hal_streaming_symbol_t* symbol = iree_hal_streaming_symbol_untag(f);
 
-  uint64_t block_size = 0;
-  uint64_t block_size_xy = 0;
-  if (!iree_checked_mul_u64(blockDimX, blockDimY, &block_size_xy) ||
-      !iree_checked_mul_u64(block_size_xy, blockDimZ, &block_size) ||
-      block_size == 0 || block_size > UINT32_MAX) {
-    IREE_TRACE_ZONE_END(z0);
-    return CUDA_ERROR_INVALID_VALUE;
-  }
-
   iree_hal_streaming_stream_t* stream = (iree_hal_streaming_stream_t*)hStream;
   iree_hal_queue_t* cooperative_queue = NULL;
   iree_slim_mutex_lock(&stream->mutex);
@@ -2661,18 +2652,17 @@ CUDAAPI CUresult cuLaunchCooperativeKernel(
   }
   iree_slim_mutex_unlock(&stream->mutex);
 
-  uint64_t maximum_block_count = 0;
+  bool grid_exceeds_residency = false;
   if (iree_status_is_ok(status)) {
-    iree_hal_queue_dispatch_concurrency_t concurrency;
-    status = iree_hal_streaming_query_dispatch_occupancy(
+    const iree_hal_dispatch_config_t config = {
+        .workgroup_size = {blockDimX, blockDimY, blockDimZ},
+        .workgroup_count = {gridDimX, gridDimY, gridDimZ},
+        .dynamic_workgroup_local_memory = sharedMemBytes,
+    };
+    status = iree_hal_streaming_check_cooperative_dispatch_residency(
         cooperative_queue, symbol->executable,
-        iree_hal_executable_function_from_index(symbol->export_ordinal),
-        (uint32_t)block_size, sharedMemBytes, &concurrency);
-    if (iree_status_is_ok(status)) {
-      maximum_block_count =
-          iree_hal_queue_dispatch_concurrency_total_workgroup_count(
-              concurrency);
-    }
+        iree_hal_executable_function_from_index(symbol->export_ordinal), config,
+        &grid_exceeds_residency);
   }
   iree_hal_queue_release(cooperative_queue);
   CUresult result = iree_status_to_cu_result(status);
@@ -2681,11 +2671,7 @@ CUDAAPI CUresult cuLaunchCooperativeKernel(
     return result;
   }
 
-  uint64_t total_block_count = 0;
-  uint64_t grid_size_xy = 0;
-  if (!iree_checked_mul_u64(gridDimX, gridDimY, &grid_size_xy) ||
-      !iree_checked_mul_u64(grid_size_xy, gridDimZ, &total_block_count) ||
-      total_block_count > maximum_block_count) {
+  if (grid_exceeds_residency) {
     IREE_TRACE_ZONE_END(z0);
     return CUDA_ERROR_COOPERATIVE_LAUNCH_TOO_LARGE;
   }
@@ -3449,9 +3435,19 @@ CUDAAPI CUresult cuGraphLaunch(CUgraphExec hGraphExec, CUstream hStream) {
     stream = context->default_stream;
   }
 
-  iree_status_t status = iree_hal_streaming_graph_exec_launch(exec, stream);
+  iree_hal_streaming_graph_exec_launch_result_t launch_result =
+      IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_ERROR;
+  iree_status_t status =
+      iree_hal_streaming_graph_exec_launch(exec, stream, &launch_result);
 
-  CUresult result = iree_status_to_cu_result(status);
+  CUresult result = CUDA_SUCCESS;
+  if (launch_result ==
+      IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_COOPERATIVE_TOO_LARGE) {
+    iree_status_free(status);
+    result = CUDA_ERROR_COOPERATIVE_LAUNCH_TOO_LARGE;
+  } else {
+    result = iree_status_to_cu_result(status);
+  }
   IREE_TRACE_ZONE_END(z0);
   return result;
 }

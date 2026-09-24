@@ -15841,6 +15841,10 @@ static hipError_t iree_hip_launch_kernel_on_stream(
         context->device_entry, symbol, numBlocks.x, numBlocks.y, numBlocks.z,
         dimBlocks.x, dimBlocks.y, dimBlocks.z, sharedMemBytes);
   }
+  if (result == hipSuccess && !args &&
+      !iree_hal_streaming_parameter_info_is_empty(&symbol->parameters)) {
+    result = hipErrorInvalidValue;
+  }
 
   if (result == hipSuccess) {
     const iree_hal_streaming_dispatch_params_t params = {
@@ -15872,6 +15876,53 @@ static hipError_t iree_hip_launch_kernel_on_stream(
   return result;
 }
 
+// Resolves a launch stream while preserving each launch API's classification
+// for a stale explicit handle. A live explicit stream whose execution context
+// has been released is distinct: the kernel-launch boundaries below report it
+// detached. Implicit, legacy, and per-thread stream resolution failures retain
+// the resolver's original result.
+static hipError_t iree_hip_resolve_launch_stream(
+    hipStream_t stream, hipError_t stale_stream_error,
+    iree_hip_resolved_stream_t* out_resolved_stream) {
+  const hipError_t result =
+      iree_hip_resolve_registered_stream(stream, out_resolved_stream);
+  if (result == hipErrorContextIsDestroyed && stream &&
+      stream != hipStreamLegacy && stream != hipStreamPerThread) {
+    return hipErrorStreamDetached;
+  }
+  return result == hipErrorInvalidResourceHandle ? stale_stream_error : result;
+}
+
+static hipError_t iree_hip_launch_kernel_on_resolved_stream(
+    const void* function_address, dim3 numBlocks, dim3 dimBlocks, void** args,
+    size_t sharedMemBytes, const iree_hip_resolved_stream_t* resolved_stream,
+    hipEvent_t start_event, hipEvent_t stop_event) {
+  hipError_t result = hipSuccess;
+  iree_hip_launch_events_t events = {0};
+  result = iree_hip_launch_events_acquire(start_event, stop_event,
+                                          resolved_stream->context, &events);
+  if (result == hipSuccess) {
+    result = iree_hip_launch_kernel_on_stream(function_address, numBlocks,
+                                              dimBlocks, args, sharedMemBytes,
+                                              resolved_stream, &events);
+  }
+
+#if IREE_HIP_SYNC_AFTER_EVERY_LAUNCH
+  if (result == hipSuccess) {
+    iree_status_t sync_status =
+        iree_hal_streaming_context_synchronize(resolved_stream->context);
+    if (!iree_status_is_ok(sync_status)) {
+      HIP_DEBUG_LOG(
+          "[HIP_API] Warning: device sync after hipLaunchKernel failed\n");
+      iree_status_ignore(sync_status);
+    }
+  }
+#endif
+
+  iree_hip_launch_events_release(&events);
+  return result;
+}
+
 static hipError_t iree_hip_launch_kernel(const void* function_address,
                                          dim3 numBlocks, dim3 dimBlocks,
                                          void** args, size_t sharedMemBytes,
@@ -15892,34 +15943,13 @@ static hipError_t iree_hip_launch_kernel(const void* function_address,
 
   hipError_t result = hipSuccess;
   iree_hip_resolved_stream_t resolved_stream = {0};
-  iree_hip_launch_events_t events = {0};
-  result = iree_hip_resolve_registered_stream(stream, &resolved_stream);
-  if (result == hipErrorInvalidResourceHandle) {
-    result = hipErrorInvalidValue;
-  }
+  result = iree_hip_resolve_launch_stream(stream, hipErrorInvalidValue,
+                                          &resolved_stream);
   if (result == hipSuccess) {
-    result = iree_hip_launch_events_acquire(start_event, stop_event,
-                                            resolved_stream.context, &events);
+    result = iree_hip_launch_kernel_on_resolved_stream(
+        function_address, numBlocks, dimBlocks, args, sharedMemBytes,
+        &resolved_stream, start_event, stop_event);
   }
-  if (result == hipSuccess) {
-    result = iree_hip_launch_kernel_on_stream(function_address, numBlocks,
-                                              dimBlocks, args, sharedMemBytes,
-                                              &resolved_stream, &events);
-  }
-
-#if IREE_HIP_SYNC_AFTER_EVERY_LAUNCH
-  if (result == hipSuccess) {
-    iree_status_t sync_status =
-        iree_hal_streaming_context_synchronize(resolved_stream.context);
-    if (!iree_status_is_ok(sync_status)) {
-      HIP_DEBUG_LOG(
-          "[HIP_API] Warning: device sync after hipLaunchKernel failed\n");
-      iree_status_ignore(sync_status);
-    }
-  }
-#endif
-
-  iree_hip_launch_events_release(&events);
   iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
   return result;
@@ -16041,8 +16071,8 @@ HIPAPI hipError_t hipExtLaunchMultiKernelMultiDevice(
     }
 
     iree_hip_resolved_stream_t* resolved_stream = &resolved_streams[i];
-    result =
-        iree_hip_resolve_registered_stream(launch->stream, resolved_stream);
+    result = iree_hip_resolve_launch_stream(
+        launch->stream, hipErrorInvalidValue, resolved_stream);
     if (result != hipSuccess) {
       break;
     }
@@ -16228,6 +16258,51 @@ HIPAPI hipError_t hipExtLaunchKernel(const void* function_address,
                                           stream, startEvent, stopEvent));
 }
 
+static hipError_t iree_hip_validate_cooperative_launch_residency(
+    iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_symbol_t* symbol, unsigned int grid_dim_x,
+    unsigned int grid_dim_y, unsigned int grid_dim_z, unsigned int block_dim_x,
+    unsigned int block_dim_y, unsigned int block_dim_z,
+    unsigned int shared_memory_bytes) {
+  iree_hal_streaming_device_t* device = context->device_entry;
+  if (!device->supports_cooperative_launch) {
+    return hipErrorNotSupported;
+  }
+
+  // Cooperative dispatch requires every workgroup to be concurrently resident
+  // on a queue selected for this stream's priority and scheduling constraints.
+  iree_hal_queue_t* cooperative_queue = NULL;
+  iree_slim_mutex_lock(&stream->mutex);
+  iree_status_t status =
+      iree_hal_streaming_stream_select_cooperative_queue_locked(
+          stream, &cooperative_queue);
+  if (iree_status_is_ok(status)) {
+    iree_hal_queue_retain(cooperative_queue);
+  }
+  iree_slim_mutex_unlock(&stream->mutex);
+
+  bool grid_exceeds_residency = false;
+  if (iree_status_is_ok(status)) {
+    const iree_hal_dispatch_config_t config = {
+        .workgroup_size = {block_dim_x, block_dim_y, block_dim_z},
+        .workgroup_count = {grid_dim_x, grid_dim_y, grid_dim_z},
+        .dynamic_workgroup_local_memory = shared_memory_bytes,
+    };
+    status = iree_hal_streaming_check_cooperative_dispatch_residency(
+        cooperative_queue, symbol->executable,
+        iree_hal_executable_function_from_index(symbol->export_ordinal), config,
+        &grid_exceeds_residency);
+  }
+  iree_hal_queue_release(cooperative_queue);
+
+  hipError_t result = iree_status_to_hip_result(status);
+  if (result != hipSuccess) {
+    return result;
+  }
+  return grid_exceeds_residency ? hipErrorCooperativeLaunchTooLarge
+                                : hipSuccess;
+}
+
 // Launches a kernel function with specified dimensions and parameters.
 //
 // Parameters:
@@ -16282,19 +16357,22 @@ HIPAPI hipError_t hipExtLaunchKernel(const void* function_address,
 //
 // Note: Check device properties with hipDeviceGetAttribute() to determine
 // maximum grid/block dimensions and shared memory limits.
-static hipError_t iree_hip_module_launch_kernel(
+static hipError_t iree_hip_module_launch_kernel_on_resolved_stream(
     hipFunction_t f, unsigned int gridDimX, unsigned int gridDimY,
     unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY,
-    unsigned int blockDimZ, unsigned int sharedMemBytes, hipStream_t stream,
-    void** kernelParams, void** extra, hipEvent_t start_event,
-    hipEvent_t stop_event, const uint32_t exact_workitem_count[3],
-    const uint32_t validation_block_dim[3]) {
+    unsigned int blockDimZ, unsigned int sharedMemBytes,
+    const iree_hip_resolved_stream_t* resolved_stream, void** kernelParams,
+    void** extra, hipEvent_t start_event, hipEvent_t stop_event,
+    const uint32_t exact_workitem_count[3],
+    const uint32_t validation_block_dim[3],
+    iree_hal_streaming_dispatch_flags_t launch_flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
   HIP_DEBUG_LOG(
       "[HIP_API] hipModuleLaunchKernel: f=%p grid=(%u,%u,%u) "
       "block=(%u,%u,%u) shared=%u stream=%p extra=%p kernelParams=%p\n",
       (void*)f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
-      sharedMemBytes, (void*)stream, (void*)extra, (void*)kernelParams);
+      sharedMemBytes, (void*)resolved_stream->stream, (void*)extra,
+      (void*)kernelParams);
 
 #if IREE_HIP_VERBOSE_DEBUG
   // Dump packed launch-buffer contents when verbose diagnostics are enabled.
@@ -16322,27 +16400,15 @@ static hipError_t iree_hip_module_launch_kernel(
   }
 #endif
   hipError_t result = hipSuccess;
-  iree_hip_resolved_stream_t resolved_stream = {0};
   iree_hip_launch_events_t events = {0};
-  iree_hal_streaming_context_t* context = NULL;
-  iree_hal_streaming_stream_t* stream_obj = NULL;
+  iree_hal_streaming_context_t* context = resolved_stream->context;
+  iree_hal_streaming_stream_t* stream_obj = resolved_stream->stream;
   iree_hal_streaming_module_t* module = NULL;
-  result = iree_hip_resolve_registered_stream(stream, &resolved_stream);
-  if (result == hipErrorInvalidResourceHandle) {
-    // Module launch APIs classify an absent explicit stream as belonging to a
-    // destroyed context. The registry resolver retains the generic resource
-    // error used by other stream APIs, so translate it at this API boundary.
-    result = hipErrorContextIsDestroyed;
-  }
-  if (result == hipSuccess) {
-    context = resolved_stream.context;
-    stream_obj = resolved_stream.stream;
-    iree_hal_streaming_context_t* current_context =
-        iree_hal_streaming_context_current();
-    if (!current_context ||
-        current_context->device_ordinal != context->device_ordinal) {
-      result = hipErrorInvalidDevice;
-    }
+  iree_hal_streaming_context_t* current_context =
+      iree_hal_streaming_context_current();
+  if (!current_context ||
+      current_context->device_ordinal != context->device_ordinal) {
+    result = hipErrorInvalidDevice;
   }
   if (result == hipSuccess) {
     result = iree_hip_launch_events_acquire(start_event, stop_event, context,
@@ -16365,7 +16431,7 @@ static hipError_t iree_hip_module_launch_kernel(
     result = hipErrorInvalidValue;
   }
   if (result == hipSuccess && !kernelParams && !extra &&
-      (symbol->parameters.copy_count || symbol->parameters.binding_count)) {
+      !iree_hal_streaming_parameter_info_is_empty(&symbol->parameters)) {
     result = hipErrorInvalidValue;
   }
 
@@ -16387,8 +16453,7 @@ static hipError_t iree_hip_module_launch_kernel(
   // Extract params pointer and size from HIP's parameter format.
   void* params_ptr = NULL;
   size_t params_size = 0;
-  iree_hal_streaming_dispatch_flags_t dispatch_flags =
-      IREE_HAL_STREAMING_DISPATCH_FLAG_NONE;
+  iree_hal_streaming_dispatch_flags_t dispatch_flags = launch_flags;
   if (result == hipSuccess && extra) {
     result = iree_hip_parse_launch_extra(extra, &params_ptr, &params_size);
     if (result == hipSuccess) {
@@ -16401,6 +16466,14 @@ static hipError_t iree_hip_module_launch_kernel(
     // kernelParams is an array of pointers to the actual parameters.
     params_ptr = kernelParams;
     dispatch_flags |= IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY;
+  }
+
+  if (result == hipSuccess &&
+      iree_any_bit_set(launch_flags,
+                       IREE_HAL_STREAMING_DISPATCH_FLAG_COOPERATIVE)) {
+    result = iree_hip_validate_cooperative_launch_residency(
+        context, stream_obj, symbol, gridDimX, gridDimY, gridDimZ, blockDimX,
+        blockDimY, blockDimZ, sharedMemBytes);
   }
 
   if (result == hipSuccess) {
@@ -16450,8 +16523,28 @@ static hipError_t iree_hip_module_launch_kernel(
 
   iree_hal_streaming_module_release(module);
   iree_hip_launch_events_release(&events);
-  iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
+  return result;
+}
+
+static hipError_t iree_hip_module_launch_kernel(
+    hipFunction_t f, unsigned int gridDimX, unsigned int gridDimY,
+    unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY,
+    unsigned int blockDimZ, unsigned int sharedMemBytes, hipStream_t stream,
+    void** kernelParams, void** extra, hipEvent_t start_event,
+    hipEvent_t stop_event, const uint32_t exact_workitem_count[3],
+    const uint32_t validation_block_dim[3],
+    iree_hal_streaming_dispatch_flags_t launch_flags) {
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t result = iree_hip_resolve_launch_stream(
+      stream, hipErrorContextIsDestroyed, &resolved_stream);
+  if (result == hipSuccess) {
+    result = iree_hip_module_launch_kernel_on_resolved_stream(
+        f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
+        sharedMemBytes, &resolved_stream, kernelParams, extra, start_event,
+        stop_event, exact_workitem_count, validation_block_dim, launch_flags);
+  }
+  iree_hip_resolved_stream_release(&resolved_stream);
   return result;
 }
 
@@ -16464,7 +16557,8 @@ HIPAPI hipError_t hipModuleLaunchKernel(
   return iree_hip_module_launch_kernel(
       f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
       sharedMemBytes, stream, kernelParams, extra, NULL, NULL,
-      /*exact_workitem_count=*/NULL, /*validation_block_dim=*/NULL);
+      /*exact_workitem_count=*/NULL, /*validation_block_dim=*/NULL,
+      IREE_HAL_STREAMING_DISPATCH_FLAG_NONE);
 }
 
 // Launches a kernel function with specified dimensions and parameters.
@@ -16574,7 +16668,7 @@ HIPAPI hipError_t hipExtModuleLaunchKernel(
       effective_block_dim[1], effective_block_dim[2],
       (unsigned int)sharedMemBytes, stream, kernelParams, extra, startEvent,
       stopEvent, has_partial_workgroup ? exact_workitem_count : NULL,
-      validation_block_dim));
+      validation_block_dim, IREE_HAL_STREAMING_DISPATCH_FLAG_NONE));
 }
 
 HIPAPI hipError_t hipHccModuleLaunchKernel(
@@ -16604,48 +16698,15 @@ static hipError_t iree_hip_launch_cooperative_symbol(
   if (result != hipSuccess) {
     return result;
   }
-  if (!device->supports_cooperative_launch) {
-    return hipErrorNotSupported;
+  if (!kernel_params &&
+      !iree_hal_streaming_parameter_info_is_empty(&symbol->parameters)) {
+    return hipErrorInvalidValue;
   }
-
-  const uint32_t block_size = block_dim_x * block_dim_y * block_dim_z;
-  iree_hal_queue_t* cooperative_queue = NULL;
-  iree_slim_mutex_lock(&stream->mutex);
-  iree_status_t status =
-      iree_hal_streaming_stream_select_cooperative_queue_locked(
-          stream, &cooperative_queue);
-  if (iree_status_is_ok(status)) {
-    iree_hal_queue_retain(cooperative_queue);
-  }
-  iree_slim_mutex_unlock(&stream->mutex);
-  bool grid_exceeds_residency = false;
-  if (iree_status_is_ok(status)) {
-    iree_hal_queue_dispatch_concurrency_t concurrency;
-    status = iree_hal_streaming_query_dispatch_occupancy(
-        cooperative_queue, symbol->executable,
-        iree_hal_executable_function_from_index(symbol->export_ordinal),
-        block_size, shared_memory_bytes, &concurrency);
-    if (iree_status_is_ok(status)) {
-      const uint64_t maximum_block_count =
-          iree_hal_queue_dispatch_concurrency_total_workgroup_count(
-              concurrency);
-      uint64_t total_block_count = 0;
-      uint64_t xy_block_count = 0;
-      if (!iree_checked_mul_u64(grid_dim_x, grid_dim_y, &xy_block_count) ||
-          !iree_checked_mul_u64(xy_block_count, grid_dim_z,
-                                &total_block_count) ||
-          total_block_count > maximum_block_count) {
-        grid_exceeds_residency = true;
-      }
-    }
-  }
-  iree_hal_queue_release(cooperative_queue);
-  result = iree_status_to_hip_result(status);
+  result = iree_hip_validate_cooperative_launch_residency(
+      context, stream, symbol, grid_dim_x, grid_dim_y, grid_dim_z, block_dim_x,
+      block_dim_y, block_dim_z, shared_memory_bytes);
   if (result != hipSuccess) {
     return result;
-  }
-  if (grid_exceeds_residency) {
-    return hipErrorCooperativeLaunchTooLarge;
   }
 
   const iree_hal_streaming_dispatch_params_t params = {
@@ -16665,6 +16726,47 @@ static hipError_t iree_hip_launch_cooperative_symbol(
       iree_hal_streaming_launch_kernel(symbol, &params, stream));
 }
 
+static hipError_t iree_hip_launch_cooperative_kernel_on_resolved_stream(
+    const void* function_address, dim3 grid_dim, dim3 block_dim,
+    void** kernel_params, unsigned int shared_memory_bytes,
+    const iree_hip_resolved_stream_t* resolved_stream) {
+  iree_hal_streaming_module_t* module = NULL;
+  iree_hal_streaming_symbol_t* symbol = NULL;
+  hipError_t result = iree_hip_resolve_function_symbol(
+      resolved_stream->context, function_address, &symbol, &module);
+  if (result == hipSuccess) {
+    result = iree_hip_launch_cooperative_symbol(
+        resolved_stream->context, resolved_stream->stream, symbol,
+        function_address, grid_dim.x, grid_dim.y, grid_dim.z, block_dim.x,
+        block_dim.y, block_dim.z, shared_memory_bytes, kernel_params);
+  }
+  iree_hal_streaming_module_release(module);
+  return result;
+}
+
+static hipError_t iree_hip_launch_cooperative_kernel(
+    const void* function_address, dim3 grid_dim, dim3 block_dim,
+    void** kernel_params, unsigned int shared_memory_bytes,
+    hipStream_t stream) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  if (!function_address) {
+    IREE_TRACE_ZONE_END(z0);
+    return hipErrorInvalidDeviceFunction;
+  }
+
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t result = iree_hip_resolve_launch_stream(
+      stream, hipErrorInvalidValue, &resolved_stream);
+  if (result == hipSuccess) {
+    result = iree_hip_launch_cooperative_kernel_on_resolved_stream(
+        function_address, grid_dim, block_dim, kernel_params,
+        shared_memory_bytes, &resolved_stream);
+  }
+  iree_hip_resolved_stream_release(&resolved_stream);
+  IREE_TRACE_ZONE_END(z0);
+  return result;
+}
+
 // Launches a compiler-registered cooperative kernel with grid-wide
 // synchronization support.
 HIPAPI hipError_t hipLaunchCooperativeKernel(const void* function_address,
@@ -16673,30 +16775,45 @@ HIPAPI hipError_t hipLaunchCooperativeKernel(const void* function_address,
                                              unsigned int shared_memory_bytes,
                                              hipStream_t stream) {
   HIP_API_BEGIN();
-  IREE_TRACE_ZONE_BEGIN(z0);
+  HIP_RETURN_ERROR(iree_hip_launch_cooperative_kernel(
+      function_address, grid_dim, block_dim, kernel_params, shared_memory_bytes,
+      stream));
+}
+
+HIPAPI hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config,
+                                     const void* function_address,
+                                     void** args) {
+  HIP_API_BEGIN();
   if (!function_address) {
-    IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidDeviceFunction);
+  }
+  if (!config) {
+    HIP_RETURN_ERROR(hipErrorInvalidConfiguration);
   }
 
   iree_hip_resolved_stream_t resolved_stream = {0};
-  iree_hal_streaming_module_t* module = NULL;
-  hipError_t result =
-      iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  hipError_t result = iree_hip_resolve_launch_stream(
+      config->stream, hipErrorInvalidValue, &resolved_stream);
+  bool cooperative = false;
   if (result == hipSuccess) {
-    iree_hal_streaming_symbol_t* symbol = NULL;
-    result = iree_hip_resolve_function_symbol(
-        resolved_stream.context, function_address, &symbol, &module);
-    if (result == hipSuccess) {
-      result = iree_hip_launch_cooperative_symbol(
-          resolved_stream.context, resolved_stream.stream, symbol,
-          function_address, grid_dim.x, grid_dim.y, grid_dim.z, block_dim.x,
-          block_dim.y, block_dim.z, shared_memory_bytes, kernel_params);
-    }
+    result = iree_hip_parse_launch_attributes(config->attrs, config->numAttrs,
+                                              &cooperative);
   }
-  iree_hal_streaming_module_release(module);
+
+  if (result == hipSuccess && cooperative) {
+    if (config->dynamicSmemBytes > UINT32_MAX) {
+      result = hipErrorInvalidConfiguration;
+    } else {
+      result = iree_hip_launch_cooperative_kernel_on_resolved_stream(
+          function_address, config->gridDim, config->blockDim, args,
+          (unsigned int)config->dynamicSmemBytes, &resolved_stream);
+    }
+  } else if (result == hipSuccess) {
+    result = iree_hip_launch_kernel_on_resolved_stream(
+        function_address, config->gridDim, config->blockDim, args,
+        config->dynamicSmemBytes, &resolved_stream, NULL, NULL);
+  }
   iree_hip_resolved_stream_release(&resolved_stream);
-  IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(result);
 }
 
@@ -16769,8 +16886,8 @@ HIPAPI hipError_t hipModuleLaunchCooperativeKernel(
   }
 
   iree_hip_resolved_stream_t resolved_stream = {0};
-  hipError_t resolve_result =
-      iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  hipError_t resolve_result = iree_hip_resolve_launch_stream(
+      stream, hipErrorContextIsDestroyed, &resolved_stream);
   if (resolve_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(resolve_result);
@@ -16805,6 +16922,41 @@ HIPAPI hipError_t hipModuleLaunchCooperativeKernel(
   iree_hal_streaming_module_release(module);
   iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
+  HIP_RETURN_ERROR(result);
+}
+
+HIPAPI hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config,
+                                       hipFunction_t function,
+                                       void** kernel_params, void** extra) {
+  HIP_API_BEGIN();
+  if (!function) {
+    HIP_RETURN_ERROR(hipErrorInvalidResourceHandle);
+  }
+  if (!config) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  hipError_t result = iree_hip_resolve_launch_stream(
+      config->hStream, hipErrorContextIsDestroyed, &resolved_stream);
+  bool cooperative = false;
+  if (result == hipSuccess) {
+    result = iree_hip_parse_launch_attributes(config->attrs, config->numAttrs,
+                                              &cooperative);
+  }
+
+  const iree_hal_streaming_dispatch_flags_t launch_flags =
+      cooperative ? IREE_HAL_STREAMING_DISPATCH_FLAG_COOPERATIVE
+                  : IREE_HAL_STREAMING_DISPATCH_FLAG_NONE;
+  if (result == hipSuccess) {
+    result = iree_hip_module_launch_kernel_on_resolved_stream(
+        function, config->gridDimX, config->gridDimY, config->gridDimZ,
+        config->blockDimX, config->blockDimY, config->blockDimZ,
+        config->sharedMemBytes, &resolved_stream, kernel_params, extra, NULL,
+        NULL, /*exact_workitem_count=*/NULL,
+        /*validation_block_dim=*/NULL, launch_flags);
+  }
+  iree_hip_resolved_stream_release(&resolved_stream);
   HIP_RETURN_ERROR(result);
 }
 
@@ -19438,20 +19590,27 @@ HIPAPI hipError_t hipGraphLaunch(hipGraphExec_t graphExec, hipStream_t stream) {
   }
 
   iree_hip_resolved_stream_t resolved_stream = {0};
-  init_result = iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  init_result = iree_hip_resolve_launch_stream(
+      stream, hipErrorContextIsDestroyed, &resolved_stream);
   if (init_result != hipSuccess) {
     iree_hal_streaming_graph_exec_release(exec);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
   }
 
-  iree_status_t launch_status =
-      iree_hal_streaming_graph_exec_launch(exec, resolved_stream.stream);
+  iree_hal_streaming_graph_exec_launch_result_t launch_result =
+      IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_ERROR;
+  iree_status_t launch_status = iree_hal_streaming_graph_exec_launch(
+      exec, resolved_stream.stream, &launch_result);
   iree_hal_streaming_graph_exec_release(exec);
   iree_hip_resolved_stream_release(&resolved_stream);
   if (!iree_status_is_ok(launch_status)) {
-    hipError_t result =
-        iree_status_to_fixed_hip_result(launch_status, hipErrorInvalidValue);
+    hipError_t result = iree_status_to_fixed_hip_result(
+        launch_status,
+        launch_result ==
+                IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_COOPERATIVE_TOO_LARGE
+            ? hipErrorCooperativeLaunchTooLarge
+            : hipErrorInvalidValue);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(result);
   }

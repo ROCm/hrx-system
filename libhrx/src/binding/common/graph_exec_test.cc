@@ -160,6 +160,160 @@ void InitializeRejectSecondHostCallQueue(iree_hal_queue_t* target,
                             &out_queue->base);
 }
 
+// Metadata-only executable retained by graph dispatch blocks. The controlled
+// queue below answers occupancy without consulting executable metadata and no
+// dispatch is allowed to reach the executable.
+struct AtomicPreflightExecutable {
+  iree_hal_executable_t base;
+};
+
+void DestroyAtomicPreflightExecutable(iree_hal_executable_t* executable) {
+  (void)executable;
+}
+
+const iree_hal_executable_vtable_t kAtomicPreflightExecutableVtable = {
+    /*.destroy=*/DestroyAtomicPreflightExecutable,
+    /*.function_count=*/nullptr,
+    /*.function_info=*/nullptr,
+    /*.function_parameters=*/nullptr,
+    /*.lookup_function_by_name=*/nullptr,
+    /*.try_lookup_global_by_name=*/nullptr,
+    /*.global_info=*/nullptr,
+    /*.global_buffer=*/nullptr,
+};
+
+// Queue wrapper that gives one cooperative workgroup concurrent residency and
+// rejects every submission. A correct launch only asks it the former question;
+// submission counters make any prefix that escapes preflight observable.
+struct AtomicPreflightQueue {
+  iree_hal_queue_t base;
+  iree_hal_queue_t* target = nullptr;
+  std::atomic<int> concurrency_query_count = 0;
+  std::atomic<int> submission_count = 0;
+  uint32_t queried_workgroup_size[3] = {};
+};
+
+AtomicPreflightQueue* CastAtomicPreflightQueue(iree_hal_queue_t* base_queue) {
+  return reinterpret_cast<AtomicPreflightQueue*>(base_queue);
+}
+
+void DestroyAtomicPreflightQueue(iree_hal_queue_t* base_queue) {
+  auto* queue = CastAtomicPreflightQueue(base_queue);
+  iree_hal_queue_release(queue->target);
+  queue->target = nullptr;
+}
+
+iree_status_t AtomicPreflightQueueBarrier(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_queue_barrier_flags_t flags) {
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)flags;
+  CastAtomicPreflightQueue(base_queue)
+      ->submission_count.fetch_add(1, std::memory_order_acq_rel);
+  return iree_make_status(IREE_STATUS_ABORTED,
+                          "unexpected graph submission before preflight");
+}
+
+iree_status_t AtomicPreflightQueueHostCall(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_host_call_t call, const uint64_t args[4],
+    iree_hal_host_call_flags_t flags) {
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)call;
+  (void)args;
+  (void)flags;
+  CastAtomicPreflightQueue(base_queue)
+      ->submission_count.fetch_add(1, std::memory_order_acq_rel);
+  return iree_make_status(IREE_STATUS_ABORTED,
+                          "unexpected graph submission before preflight");
+}
+
+iree_status_t AtomicPreflightQueueQueryDispatchConcurrency(
+    iree_hal_queue_t* base_queue, iree_hal_executable_t* executable,
+    iree_hal_executable_function_t function,
+    iree_hal_queue_dispatch_concurrency_params_t params,
+    iree_hal_queue_dispatch_concurrency_flags_t flags,
+    iree_hal_queue_dispatch_concurrency_t* out_concurrency) {
+  (void)executable;
+  (void)function;
+  (void)flags;
+  auto* queue = CastAtomicPreflightQueue(base_queue);
+  memcpy(queue->queried_workgroup_size, params.workgroup_size,
+         sizeof(queue->queried_workgroup_size));
+  queue->concurrency_query_count.fetch_add(1, std::memory_order_acq_rel);
+  *out_concurrency = {
+      /*.scheduling_domain_count=*/1,
+      /*.maximum_concurrent_workgroup_count_per_domain=*/1,
+  };
+  return iree_ok_status();
+}
+
+iree_status_t AtomicPreflightQueueDispatch(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_executable_t* executable, iree_hal_executable_function_t function,
+    const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
+    const iree_hal_buffer_ref_list_t bindings,
+    iree_hal_dispatch_flags_t flags) {
+  (void)wait_semaphore_list;
+  (void)signal_semaphore_list;
+  (void)executable;
+  (void)function;
+  (void)config;
+  (void)constants;
+  (void)bindings;
+  (void)flags;
+  CastAtomicPreflightQueue(base_queue)
+      ->submission_count.fetch_add(1, std::memory_order_acq_rel);
+  return iree_make_status(IREE_STATUS_ABORTED,
+                          "unexpected graph submission before preflight");
+}
+
+iree_status_t AtomicPreflightQueueFlush(iree_hal_queue_t* base_queue) {
+  return iree_hal_queue_flush(CastAtomicPreflightQueue(base_queue)->target);
+}
+
+const iree_hal_queue_vtable_t kAtomicPreflightQueueVtable = {
+    /*.destroy=*/DestroyAtomicPreflightQueue,
+    /*.barrier=*/AtomicPreflightQueueBarrier,
+    /*.execute=*/nullptr,
+    /*.host_call=*/AtomicPreflightQueueHostCall,
+    /*.query_dispatch_concurrency=*/
+    AtomicPreflightQueueQueryDispatchConcurrency,
+    /*.dispatch=*/AtomicPreflightQueueDispatch,
+    /*.atomic_wait=*/nullptr,
+    /*.atomic_store=*/nullptr,
+    /*.atomic_rmw=*/nullptr,
+    /*.timestamp=*/nullptr,
+    /*.flush=*/AtomicPreflightQueueFlush,
+    /*.alloca=*/nullptr,
+    /*.dealloca=*/nullptr,
+    /*.transfer=*/nullptr,
+    /*.read=*/nullptr,
+    /*.write=*/nullptr,
+};
+
+void InitializeAtomicPreflightQueue(iree_hal_queue_t* target,
+                                    AtomicPreflightQueue* out_queue) {
+  out_queue->target = target;
+  iree_hal_queue_retain(target);
+  iree_hal_queue_params_t params;
+  iree_hal_queue_params_initialize(&params);
+  params.priority = iree_hal_queue_priority(target);
+  params.features = iree_hal_queue_features(target) |
+                    IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH;
+  params.execution_resources = iree_hal_queue_execution_resources(target);
+  iree_hal_queue_initialize(iree_hal_queue_family(target), &params,
+                            &kAtomicPreflightQueueVtable, &out_queue->base);
+}
+
 iree_hal_queue_t* ReplaceGraphExecTestQueue(iree_hal_streaming_stream_t* stream,
                                             iree_hal_queue_t* replacement) {
   iree_slim_mutex_lock(&stream->mutex);
@@ -328,7 +482,11 @@ TEST_F(GraphExecTest, BatchMemoryNodePreservesResolvedWriteSemantics) {
   IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
       clone_graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE,
       &executable));
-  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_launch(executable, stream_));
+  iree_hal_streaming_graph_exec_launch_result_t launch_result =
+      IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_ERROR;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_launch(executable, stream_,
+                                                      &launch_result));
+  EXPECT_EQ(IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_SUCCESS, launch_result);
   IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
   EXPECT_EQ(47u, *reinterpret_cast<uint64_t*>(mapping.contents.data));
 }
@@ -416,7 +574,11 @@ TEST_F(GraphExecTest, ReplayedEventRecordsDropEveryCapturedGraphReference) {
   // nothing else.
   const int32_t context_references_before =
       iree_atomic_ref_count_load(&context_->ref_count);
-  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_launch(exec, stream_));
+  iree_hal_streaming_graph_exec_launch_result_t launch_result =
+      IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_ERROR;
+  IREE_ASSERT_OK(
+      iree_hal_streaming_graph_exec_launch(exec, stream_, &launch_result));
+  EXPECT_EQ(IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_SUCCESS, launch_result);
   IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
 
   for (iree_hal_streaming_event_t* event : events) {
@@ -585,8 +747,11 @@ TEST_F(GraphExecTest, ChildGraphRecordRefusesALaunchOnAnotherContextsStream) {
   IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
       parent_graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &exec));
 
+  iree_hal_streaming_graph_exec_launch_result_t launch_result =
+      IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_SUCCESS;
   iree_status_t status =
-      iree_hal_streaming_graph_exec_launch(exec, other_stream);
+      iree_hal_streaming_graph_exec_launch(exec, other_stream, &launch_result);
+  EXPECT_EQ(IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_ERROR, launch_result);
   EXPECT_EQ(IREE_STATUS_INCOMPATIBLE, iree_status_code(status))
       << "a launch on another context's stream was accepted for an executable "
          "whose only record sits in a child graph";
@@ -610,6 +775,183 @@ TEST_F(GraphExecTest, ChildGraphRecordRefusesALaunchOnAnotherContextsStream) {
   EXPECT_FALSE(graph_host_node_ran_.load(std::memory_order_acquire))
       << "the node ahead of the refused record ran, so the launch submitted "
          "part of the graph and then failed";
+}
+
+// An updated executable carries the cooperative requirement of a nested graph
+// to the final launch. The launch must query the actual cooperative queue and
+// reject the whole executable before reserving a stream point or submitting
+// the host-call block that precedes the child.
+TEST_F(GraphExecTest,
+       UpdatedChildCooperativeDispatchPreflightsBeforePrefixAndReservation) {
+  AtomicPreflightExecutable test_executable = {};
+  iree_hal_streaming_module_t* module = nullptr;
+  iree_hal_streaming_graph_t* original_child_graph = nullptr;
+  iree_hal_streaming_graph_t* original_parent_graph = nullptr;
+  iree_hal_streaming_graph_t* updated_child_graph = nullptr;
+  iree_hal_streaming_graph_t* updated_parent_graph = nullptr;
+  iree_hal_streaming_graph_exec_t* exec = nullptr;
+  AtomicPreflightQueue test_queue = {};
+  iree_hal_queue_t* original_queue = nullptr;
+  bool wrapper_installed = false;
+
+  void* module_storage = nullptr;
+  IREE_ASSERT_OK(iree_allocator_malloc(iree_allocator_system(), sizeof(*module),
+                                       &module_storage));
+  module = static_cast<iree_hal_streaming_module_t*>(module_storage);
+  memset(module, 0, sizeof(*module));
+  iree_atomic_ref_count_init(&module->ref_count);
+  iree_slim_mutex_initialize(&module->global_mutex);
+  module->host_allocator = iree_allocator_system();
+  iree_hal_executable_initialize(iree_hal_queue_family(stream_->queue),
+                                 &kAtomicPreflightExecutableVtable,
+                                 &test_executable.base);
+  // The module owns the executable's initial reference, just as a loaded
+  // module does. Its final release below tears both down.
+  module->executable = &test_executable.base;
+
+  ScopeExit release_handles([&] {
+    if (wrapper_installed) {
+      iree_hal_queue_retain(original_queue);
+      iree_hal_queue_t* installed_queue =
+          ReplaceGraphExecTestQueue(stream_, original_queue);
+      iree_hal_queue_release(installed_queue);
+    }
+    iree_hal_streaming_graph_exec_release(exec);
+    iree_hal_streaming_graph_release(updated_parent_graph);
+    iree_hal_streaming_graph_release(updated_child_graph);
+    iree_hal_streaming_graph_release(original_parent_graph);
+    iree_hal_streaming_graph_release(original_child_graph);
+    iree_hal_streaming_module_release(module);
+  });
+
+  iree_hal_streaming_symbol_t symbol = {};
+  symbol.module = module;
+  symbol.type = IREE_HAL_STREAMING_SYMBOL_TYPE_FUNCTION;
+  symbol.executable = module->executable;
+  symbol.export_ordinal = 0;
+
+  const iree_hal_streaming_dispatch_params_t original_dispatch = {
+      /*.grid_dim=*/{1, 1, 1},
+      /*.block_dim=*/{1, 1, 1},
+      /*.shared_memory_bytes=*/0,
+      /*.buffer=*/nullptr,
+      /*.buffer_size=*/0,
+      /*.flags=*/IREE_HAL_STREAMING_DISPATCH_FLAG_COOPERATIVE,
+      /*.workitem_count=*/{},
+      /*.binding_function=*/nullptr,
+  };
+  iree_hal_streaming_dispatch_params_t updated_dispatch = original_dispatch;
+  updated_dispatch.grid_dim[0] = 2;
+
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &original_child_graph));
+  iree_hal_streaming_graph_node_t* original_kernel_node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_kernel_node(
+      original_child_graph, /*dependencies=*/nullptr, /*dependency_count=*/0,
+      &symbol, &original_dispatch, &original_kernel_node));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &original_parent_graph));
+  iree_hal_streaming_graph_node_t* original_host_node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
+      original_parent_graph, /*dependencies=*/nullptr, /*dependency_count=*/0,
+      &SetFlag, &graph_host_node_ran_, &original_host_node));
+  iree_hal_streaming_graph_node_t* original_child_node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_child_graph_node(
+      original_parent_graph, &original_host_node, /*dependency_count=*/1,
+      original_child_graph, &original_child_node));
+
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &updated_child_graph));
+  iree_hal_streaming_graph_node_t* updated_kernel_node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_kernel_node(
+      updated_child_graph, /*dependencies=*/nullptr, /*dependency_count=*/0,
+      &symbol, &updated_dispatch, &updated_kernel_node));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &updated_parent_graph));
+  iree_hal_streaming_graph_node_t* updated_host_node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
+      updated_parent_graph, /*dependencies=*/nullptr, /*dependency_count=*/0,
+      &SetFlag, &graph_host_node_ran_, &updated_host_node));
+  iree_hal_streaming_graph_node_t* updated_child_node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_child_graph_node(
+      updated_parent_graph, &updated_host_node, /*dependency_count=*/1,
+      updated_child_graph, &updated_child_node));
+
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      original_parent_graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE,
+      &exec));
+  iree_hal_streaming_graph_node_t* update_error_node = nullptr;
+  iree_hal_streaming_graph_exec_update_result_t update_result =
+      IREE_HAL_STREAMING_GRAPH_EXEC_UPDATE_ERROR;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_update(
+      exec, updated_parent_graph, &update_error_node, &update_result));
+  EXPECT_EQ(IREE_HAL_STREAMING_GRAPH_EXEC_UPDATE_SUCCESS, update_result);
+  EXPECT_EQ(nullptr, update_error_node);
+
+  original_queue = stream_->queue;
+  InitializeAtomicPreflightQueue(original_queue, &test_queue);
+  EXPECT_EQ(original_queue,
+            ReplaceGraphExecTestQueue(stream_, &test_queue.base));
+  // Transfer the stream's old queue reference to the wrapper target.
+  iree_hal_queue_release(original_queue);
+  wrapper_installed = true;
+
+  iree_slim_mutex_lock(&stream_->mutex);
+  const uint64_t initial_pending_value = stream_->pending_value;
+  iree_slim_mutex_unlock(&stream_->mutex);
+  uint64_t initial_timeline_value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(stream_->timeline_semaphore,
+                                          &initial_timeline_value));
+
+  iree_hal_streaming_graph_exec_launch_result_t launch_result =
+      IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_SUCCESS;
+  iree_status_t status =
+      iree_hal_streaming_graph_exec_launch(exec, stream_, &launch_result);
+  EXPECT_EQ(IREE_STATUS_OUT_OF_RANGE, iree_status_code(status));
+  EXPECT_EQ(IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_COOPERATIVE_TOO_LARGE,
+            launch_result);
+  iree_status_free(status);
+  EXPECT_EQ(1,
+            test_queue.concurrency_query_count.load(std::memory_order_acquire));
+  EXPECT_EQ(0, test_queue.submission_count.load(std::memory_order_acquire));
+  EXPECT_FALSE(graph_host_node_ran_.load(std::memory_order_acquire));
+
+  iree_slim_mutex_lock(&stream_->mutex);
+  const uint64_t pending_after_prefix_check = stream_->pending_value;
+  // A timeline at its maximum makes any reservation fail with overflow.
+  // Cooperative preflight must therefore win error precedence and keep the
+  // otherwise side-effect-free reservation path unobserved.
+  stream_->pending_value = IREE_HAL_SEMAPHORE_MAX_VALUE;
+  iree_slim_mutex_unlock(&stream_->mutex);
+  EXPECT_EQ(initial_pending_value, pending_after_prefix_check);
+
+  launch_result = IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_SUCCESS;
+  status = iree_hal_streaming_graph_exec_launch(exec, stream_, &launch_result);
+  EXPECT_EQ(IREE_STATUS_OUT_OF_RANGE, iree_status_code(status));
+  EXPECT_EQ(IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_COOPERATIVE_TOO_LARGE,
+            launch_result);
+  iree_status_free(status);
+
+  iree_slim_mutex_lock(&stream_->mutex);
+  const uint64_t pending_after_reservation_check = stream_->pending_value;
+  stream_->pending_value = initial_pending_value;
+  iree_slim_mutex_unlock(&stream_->mutex);
+  EXPECT_EQ(IREE_HAL_SEMAPHORE_MAX_VALUE, pending_after_reservation_check);
+  EXPECT_EQ(2,
+            test_queue.concurrency_query_count.load(std::memory_order_acquire));
+  EXPECT_EQ(1u, test_queue.queried_workgroup_size[0]);
+  EXPECT_EQ(1u, test_queue.queried_workgroup_size[1]);
+  EXPECT_EQ(1u, test_queue.queried_workgroup_size[2]);
+  EXPECT_EQ(0, test_queue.submission_count.load(std::memory_order_acquire));
+
+  uint64_t final_timeline_value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(stream_->timeline_semaphore,
+                                          &final_timeline_value));
+  EXPECT_EQ(initial_timeline_value, final_timeline_value);
 }
 
 // A later rejection in a recursive child launch must not let an accepted child
@@ -680,7 +1022,11 @@ TEST_F(GraphExecTest,
   std::atomic<bool> launch_returned = false;
   std::atomic<iree_status_code_t> launch_status_code = IREE_STATUS_UNKNOWN;
   std::thread launch_thread([&] {
-    iree_status_t status = iree_hal_streaming_graph_exec_launch(exec, stream_);
+    iree_hal_streaming_graph_exec_launch_result_t launch_result =
+        IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_SUCCESS;
+    iree_status_t status =
+        iree_hal_streaming_graph_exec_launch(exec, stream_, &launch_result);
+    EXPECT_EQ(IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_ERROR, launch_result);
     launch_status_code.store(iree_status_code(status),
                              std::memory_order_release);
     iree_status_ignore(status);
