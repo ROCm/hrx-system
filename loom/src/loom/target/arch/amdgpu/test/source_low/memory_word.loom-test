@@ -1,5 +1,4 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_word.loom
-// TEMPLATE-EXCLUDE: @copy_word_tail The packed i16 memory footprint must currently fill complete registers.
 // RUN: emit source-low target=amdgpu:gfx1151 output=low
 
 // Equal-width formats preserve their bits through ordinary memory transfers.
@@ -199,6 +198,48 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @copy_word_unaligned() 
   global_store_b128_saddr %16, %half, %target_integer {offset = 1}
   global_store_b128_saddr %16, %bfloat, %target_integer {offset = 17}
   global_store_b128_saddr %16, %integer, %target_integer {offset = 33}
+  return
+}
+
+// ====
+
+// Three-word tails must not read or write a fourth word.
+func.def @copy_word_tail(%input: buffer, %output: buffer) {
+  %first = index.constant 1 : offset
+  %second = index.constant 7 : offset
+  %third = index.constant 13 : offset
+  %source_half = buffer.view %input[%first] : buffer -> view<3xf16, align(1)>
+  %source_bfloat = buffer.view %input[%second] : buffer -> view<3xbf16, align(1)>
+  %source_integer = buffer.view %input[%third] : buffer -> view<3xi16, align(1)>
+  %target_half = buffer.view %output[%first] : buffer -> view<3xf16, align(1)>
+  %target_bfloat = buffer.view %output[%second] : buffer -> view<3xbf16, align(1)>
+  %target_integer = buffer.view %output[%third] : buffer -> view<3xi16, align(1)>
+  %half = vector.load %source_half[0] : view<3xf16, align(1)> -> vector<3xf16>
+  %bfloat = vector.load %source_bfloat[0] : view<3xbf16, align(1)> -> vector<3xbf16>
+  %integer = vector.load %source_integer[0] : view<3xi16, align(1)> -> vector<3xi16>
+  vector.store %half, %target_half[0] : vector<3xf16>, view<3xf16, align(1)>
+  vector.store %bfloat, %target_bfloat[0] : vector<3xbf16>, view<3xbf16, align(1)>
+  vector.store %integer, %target_integer[0] : vector<3xi16>, view<3xi16, align(1)>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @copy_word_tail() asm {
+  %source_integer = resource<hal_binding> {extent = 19, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %target_integer = resource<hal_binding> {extent = 19, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %16 = v_mov_b32 0
+  %17 = global_load_b32_saddr %16, %source_integer {offset = 1}
+  %19 = global_load_u16_saddr %16, %source_integer {offset = 5}
+  %22 = global_load_b32_saddr %16, %source_integer {offset = 7}
+  %24 = global_load_u16_saddr %16, %source_integer {offset = 11}
+  %27 = global_load_b32_saddr %16, %source_integer {offset = 13}
+  %29 = global_load_u16_saddr %16, %source_integer {offset = 17}
+  global_store_b32_saddr %16, %17, %target_integer {offset = 1}
+  global_store_short_saddr %16, %19, %target_integer {offset = 5}
+  global_store_b32_saddr %16, %22, %target_integer {offset = 7}
+  global_store_short_saddr %16, %24, %target_integer {offset = 11}
+  global_store_b32_saddr %16, %27, %target_integer {offset = 13}
+  global_store_short_saddr %16, %29, %target_integer {offset = 17}
   return
 }
 

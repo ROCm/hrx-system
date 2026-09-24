@@ -1,0 +1,254 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_packed_tails.loom
+// RUN: emit source-low target=amdgpu:gfx1151 output=low
+
+// Packed tails touch only their authored bytes, including the last register.
+func.def @copy_byte_tail_3(%input: buffer, %output: buffer) {
+  %origin_integer = index.constant 1 : offset
+  %source_integer = buffer.view %input[%origin_integer] : buffer -> view<3xi8>
+  %target_integer = buffer.view %output[%origin_integer] : buffer -> view<3xi8>
+  %value_integer = vector.load %source_integer[0] : view<3xi8> -> vector<3xi8>
+  vector.store %value_integer, %target_integer[0] : vector<3xi8>, view<3xi8>
+  %origin_e4m3 = index.constant 4 : offset
+  %source_e4m3 = buffer.view %input[%origin_e4m3] : buffer -> view<3xf8E4M3>
+  %target_e4m3 = buffer.view %output[%origin_e4m3] : buffer -> view<3xf8E4M3>
+  %value_e4m3 = vector.load %source_e4m3[0] : view<3xf8E4M3> -> vector<3xf8E4M3>
+  vector.store %value_e4m3, %target_e4m3[0] : vector<3xf8E4M3>, view<3xf8E4M3>
+  %origin_e5m2 = index.constant 7 : offset
+  %source_e5m2 = buffer.view %input[%origin_e5m2] : buffer -> view<3xf8E5M2>
+  %target_e5m2 = buffer.view %output[%origin_e5m2] : buffer -> view<3xf8E5M2>
+  %value_e5m2 = vector.load %source_e5m2[0] : view<3xf8E5M2> -> vector<3xf8E5M2>
+  vector.store %value_e5m2, %target_e5m2[0] : vector<3xf8E5M2>, view<3xf8E5M2>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @copy_byte_tail_3() asm {
+  %source_e5m2 = resource<hal_binding> {extent = 10, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %target_e5m2 = resource<hal_binding> {extent = 10, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %16 = v_mov_b32 0
+  %17 = global_load_u16_saddr %16, %source_e5m2 {offset = 1}
+  %19 = global_load_i8_saddr %16, %source_e5m2 {offset = 3}
+  %20 = v_lshlrev_b32_src0_inline %19, 16
+  %value_integer = v_or_b32 %17, %20
+  global_store_short_saddr %16, %value_integer, %target_e5m2 {offset = 1}
+  %25 = v_lshrrev_b32_src0_inline %value_integer, 16
+  global_store_b8_saddr %16, %25, %target_e5m2 {offset = 3}
+  %28 = global_load_u16_saddr %16, %source_e5m2 {offset = 4}
+  %30 = global_load_i8_saddr %16, %source_e5m2 {offset = 6}
+  %31 = v_lshlrev_b32_src0_inline %30, 16
+  %value_e4m3 = v_or_b32 %28, %31
+  global_store_short_saddr %16, %value_e4m3, %target_e5m2 {offset = 4}
+  %36 = v_lshrrev_b32_src0_inline %value_e4m3, 16
+  global_store_b8_saddr %16, %36, %target_e5m2 {offset = 6}
+  %39 = global_load_u16_saddr %16, %source_e5m2 {offset = 7}
+  %41 = global_load_i8_saddr %16, %source_e5m2 {offset = 9}
+  %42 = v_lshlrev_b32_src0_inline %41, 16
+  %value_e5m2 = v_or_b32 %39, %42
+  global_store_short_saddr %16, %value_e5m2, %target_e5m2 {offset = 7}
+  %47 = v_lshrrev_b32_src0_inline %value_e5m2, 16
+  global_store_b8_saddr %16, %47, %target_e5m2 {offset = 9}
+  return
+}
+
+// ====
+
+func.def @copy_byte_tail_7(%input: buffer, %output: buffer) {
+  %origin_integer = index.constant 1 : offset
+  %source_integer = buffer.view %input[%origin_integer] : buffer -> view<7xi8>
+  %target_integer = buffer.view %output[%origin_integer] : buffer -> view<7xi8>
+  %value_integer = vector.load %source_integer[0] : view<7xi8> -> vector<7xi8>
+  vector.store %value_integer, %target_integer[0] : vector<7xi8>, view<7xi8>
+  %origin_e4m3 = index.constant 8 : offset
+  %source_e4m3 = buffer.view %input[%origin_e4m3] : buffer -> view<7xf8E4M3>
+  %target_e4m3 = buffer.view %output[%origin_e4m3] : buffer -> view<7xf8E4M3>
+  %value_e4m3 = vector.load %source_e4m3[0] : view<7xf8E4M3> -> vector<7xf8E4M3>
+  vector.store %value_e4m3, %target_e4m3[0] : vector<7xf8E4M3>, view<7xf8E4M3>
+  %origin_e5m2 = index.constant 15 : offset
+  %source_e5m2 = buffer.view %input[%origin_e5m2] : buffer -> view<7xf8E5M2>
+  %target_e5m2 = buffer.view %output[%origin_e5m2] : buffer -> view<7xf8E5M2>
+  %value_e5m2 = vector.load %source_e5m2[0] : view<7xf8E5M2> -> vector<7xf8E5M2>
+  vector.store %value_e5m2, %target_e5m2[0] : vector<7xf8E5M2>, view<7xf8E5M2>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @copy_byte_tail_7() asm {
+  %source_e5m2 = resource<hal_binding> {extent = 22, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %target_e5m2 = resource<hal_binding> {extent = 22, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %16 = v_mov_b32 0
+  %17 = global_load_b32_saddr %16, %source_e5m2 {offset = 1}
+  %19 = global_load_u16_saddr %16, %source_e5m2 {offset = 5}
+  %21 = global_load_i8_saddr %16, %source_e5m2 {offset = 7}
+  %22 = v_lshlrev_b32_src0_inline %21, 16
+  %23 = v_or_b32 %19, %22
+  global_store_b32_saddr %16, %17, %target_e5m2 {offset = 1}
+  global_store_short_saddr %16, %23, %target_e5m2 {offset = 5}
+  %30 = v_lshrrev_b32_src0_inline %23, 16
+  global_store_b8_saddr %16, %30, %target_e5m2 {offset = 7}
+  %33 = global_load_b32_saddr %16, %source_e5m2 {offset = 8}
+  %35 = global_load_u16_saddr %16, %source_e5m2 {offset = 12}
+  %37 = global_load_i8_saddr %16, %source_e5m2 {offset = 14}
+  %38 = v_lshlrev_b32_src0_inline %37, 16
+  %39 = v_or_b32 %35, %38
+  global_store_b32_saddr %16, %33, %target_e5m2 {offset = 8}
+  global_store_short_saddr %16, %39, %target_e5m2 {offset = 12}
+  %46 = v_lshrrev_b32_src0_inline %39, 16
+  global_store_b8_saddr %16, %46, %target_e5m2 {offset = 14}
+  %49 = global_load_b32_saddr %16, %source_e5m2 {offset = 15}
+  %51 = global_load_u16_saddr %16, %source_e5m2 {offset = 19}
+  %53 = global_load_i8_saddr %16, %source_e5m2 {offset = 21}
+  %54 = v_lshlrev_b32_src0_inline %53, 16
+  %55 = v_or_b32 %51, %54
+  global_store_b32_saddr %16, %49, %target_e5m2 {offset = 15}
+  global_store_short_saddr %16, %55, %target_e5m2 {offset = 19}
+  %62 = v_lshrrev_b32_src0_inline %55, 16
+  global_store_b8_saddr %16, %62, %target_e5m2 {offset = 21}
+  return
+}
+
+// ====
+
+func.def @copy_byte_tail_17(%input: buffer, %output: buffer) {
+  %origin_integer = index.constant 1 : offset
+  %source_integer = buffer.view %input[%origin_integer] : buffer -> view<17xi8>
+  %target_integer = buffer.view %output[%origin_integer] : buffer -> view<17xi8>
+  %value_integer = vector.load %source_integer[0] : view<17xi8> -> vector<17xi8>
+  vector.store %value_integer, %target_integer[0] : vector<17xi8>, view<17xi8>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @copy_byte_tail_17() asm {
+  %source_integer = resource<hal_binding> {extent = 18, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %target_integer = resource<hal_binding> {extent = 18, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %8 = v_mov_b32 0
+  %9 = global_load_b128_saddr %8, %source_integer {offset = 1}
+  %11 = global_load_i8_saddr %8, %source_integer {offset = 17}
+  global_store_b128_saddr %8, %9, %target_integer {offset = 1}
+  global_store_b8_saddr %8, %11, %target_integer {offset = 17}
+  return
+}
+
+// ====
+
+func.def @copy_byte_tail_63(%input: buffer, %output: buffer) {
+  %origin_integer = index.constant 1 : offset
+  %source_integer = buffer.view %input[%origin_integer] : buffer -> view<63xi8>
+  %target_integer = buffer.view %output[%origin_integer] : buffer -> view<63xi8>
+  %value_integer = vector.load %source_integer[0] : view<63xi8> -> vector<63xi8>
+  vector.store %value_integer, %target_integer[0] : vector<63xi8>, view<63xi8>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @copy_byte_tail_63() asm {
+  %source_integer = resource<hal_binding> {extent = 64, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %target_integer = resource<hal_binding> {extent = 64, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %8 = v_mov_b32 0
+  %9 = global_load_b128_saddr %8, %source_integer {offset = 1}
+  %11 = global_load_b128_saddr %8, %source_integer {offset = 17}
+  %13 = global_load_b128_saddr %8, %source_integer {offset = 33}
+  %15 = global_load_b96_saddr %8, %source_integer {offset = 49}
+  %17 = global_load_u16_saddr %8, %source_integer {offset = 61}
+  %19 = global_load_i8_saddr %8, %source_integer {offset = 63}
+  %20 = v_lshlrev_b32_src0_inline %19, 16
+  %21 = v_or_b32 %17, %20
+  global_store_b128_saddr %8, %9, %target_integer {offset = 1}
+  global_store_b128_saddr %8, %11, %target_integer {offset = 17}
+  global_store_b128_saddr %8, %13, %target_integer {offset = 33}
+  global_store_b96_saddr %8, %15, %target_integer {offset = 49}
+  global_store_short_saddr %8, %21, %target_integer {offset = 61}
+  %34 = v_lshrrev_b32_src0_inline %21, 16
+  global_store_b8_saddr %8, %34, %target_integer {offset = 63}
+  return
+}
+
+// ====
+
+func.def @copy_word_tail_7(%input: buffer, %output: buffer) {
+  %origin_integer = index.constant 2 : offset
+  %source_integer = buffer.view %input[%origin_integer] : buffer -> view<7xi16>
+  %target_integer = buffer.view %output[%origin_integer] : buffer -> view<7xi16>
+  %value_integer = vector.load %source_integer[0] : view<7xi16> -> vector<7xi16>
+  vector.store %value_integer, %target_integer[0] : vector<7xi16>, view<7xi16>
+  %origin_half = index.constant 16 : offset
+  %source_half = buffer.view %input[%origin_half] : buffer -> view<7xf16>
+  %target_half = buffer.view %output[%origin_half] : buffer -> view<7xf16>
+  %value_half = vector.load %source_half[0] : view<7xf16> -> vector<7xf16>
+  vector.store %value_half, %target_half[0] : vector<7xf16>, view<7xf16>
+  %origin_bfloat = index.constant 30 : offset
+  %source_bfloat = buffer.view %input[%origin_bfloat] : buffer -> view<7xbf16>
+  %target_bfloat = buffer.view %output[%origin_bfloat] : buffer -> view<7xbf16>
+  %value_bfloat = vector.load %source_bfloat[0] : view<7xbf16> -> vector<7xbf16>
+  vector.store %value_bfloat, %target_bfloat[0] : vector<7xbf16>, view<7xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @copy_word_tail_7() asm {
+  %source_bfloat = resource<hal_binding> {extent = 44, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %target_bfloat = resource<hal_binding> {extent = 44, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %16 = v_mov_b32 0
+  %17 = global_load_b96_saddr %16, %source_bfloat {offset = 2}
+  %19 = global_load_u16_saddr %16, %source_bfloat {offset = 14}
+  global_store_b96_saddr %16, %17, %target_bfloat {offset = 2}
+  global_store_short_saddr %16, %19, %target_bfloat {offset = 14}
+  %26 = global_load_b96_saddr %16, %source_bfloat {offset = 16}
+  %28 = global_load_u16_saddr %16, %source_bfloat {offset = 28}
+  global_store_b96_saddr %16, %26, %target_bfloat {offset = 16}
+  global_store_short_saddr %16, %28, %target_bfloat {offset = 28}
+  %35 = global_load_b96_saddr %16, %source_bfloat {offset = 30}
+  %37 = global_load_u16_saddr %16, %source_bfloat {offset = 42}
+  global_store_b96_saddr %16, %35, %target_bfloat {offset = 30}
+  global_store_short_saddr %16, %37, %target_bfloat {offset = 42}
+  return
+}
+
+// ====
+
+// Captured bytes survive an aliasing write and a second volatile observation.
+func.def @capture_byte_tail(%input: buffer, %output: buffer, %replacement_input: buffer) {
+  %base = index.constant 0 : offset
+  %next = index.constant 3 : offset
+  %source = buffer.view %input[%base] : buffer -> view<3xi8>
+  %before = buffer.view %output[%base] : buffer -> view<3xi8>
+  %after = buffer.view %output[%next] : buffer -> view<3xi8>
+  %captured = vector.load<volatile> %source[0] : view<3xi8> -> vector<3xi8>
+  %replacement_view = buffer.view %replacement_input[%base] : buffer -> view<3xi8>
+  %replacement = vector.load %replacement_view[0] : view<3xi8> -> vector<3xi8>
+  vector.store<volatile> %replacement, %source[0] : vector<3xi8>, view<3xi8>
+  %reloaded = vector.load<volatile> %source[0] : view<3xi8> -> vector<3xi8>
+  vector.store %captured, %before[0] : vector<3xi8>, view<3xi8>
+  vector.store %reloaded, %after[0] : vector<3xi8>, view<3xi8>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @capture_byte_tail() asm {
+  %source = resource<hal_binding> {extent = 3, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %after = resource<hal_binding> {extent = 6, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %replacement_view = resource<hal_binding> {extent = 3, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %15 = v_mov_b32 0
+  %16 = global_load_u16_saddr<volatile> %15, %source
+  %18 = global_load_i8_saddr<volatile> %15, %source {offset = 2}
+  %19 = v_lshlrev_b32_src0_inline %18, 16
+  %captured = v_or_b32 %16, %19
+  %22 = global_load_u16_saddr %15, %replacement_view
+  %24 = global_load_i8_saddr %15, %replacement_view {offset = 2}
+  %25 = v_lshlrev_b32_src0_inline %24, 16
+  %replacement = v_or_b32 %22, %25
+  global_store_short_saddr<volatile> %15, %replacement, %source
+  %30 = v_lshrrev_b32_src0_inline %replacement, 16
+  global_store_b8_saddr<volatile> %15, %30, %source {offset = 2}
+  %33 = global_load_u16_saddr<volatile> %15, %source
+  %35 = global_load_i8_saddr<volatile> %15, %source {offset = 2}
+  %36 = v_lshlrev_b32_src0_inline %35, 16
+  %reloaded = v_or_b32 %33, %36
+  global_store_short_saddr %15, %captured, %after
+  %41 = v_lshrrev_b32_src0_inline %captured, 16
+  global_store_b8_saddr %15, %41, %after {offset = 2}
+  global_store_short_saddr %15, %reloaded, %after {offset = 3}
+  %46 = v_lshrrev_b32_src0_inline %reloaded, 16
+  global_store_b8_saddr %15, %46, %after {offset = 5}
+  return
+}

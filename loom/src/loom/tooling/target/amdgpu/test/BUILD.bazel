@@ -248,6 +248,16 @@ loom_test(
 )
 
 loom_test(
+    name = "packed_memory_tails_test",
+    srcs = ["//loom/src/loom/test/corpus/conformance:packed_memory_tails.loom"],
+    compile_targets = ["//loom/target/amdgpu:" + target for target in LOOM_AMDGPU_SUPPORTED_TARGETS],
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
     name = "wide_subtract_test",
     srcs = ["//loom/src/loom/test/corpus/conformance:integer_wide_subtract.loom"],
     execution_profiles = [

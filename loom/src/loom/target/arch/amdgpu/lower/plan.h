@@ -1491,15 +1491,16 @@ typedef struct loom_amdgpu_memory_access_t {
 typedef struct loom_amdgpu_memory_packet_plan_t {
   // Selected access form for this emitted direct memory packet.
   loom_amdgpu_memory_access_t access;
-  // First 32-bit source register moved by this packet.
-  uint32_t source_register_offset;
+  // First byte moved in the packed source/result register payload. Packets at
+  // offset 2 within a register complete the preceding zero-extended halfword.
+  uint32_t payload_byte_offset;
 } loom_amdgpu_memory_packet_plan_t;
 
 // Immutable function-retained direct-memory packet plan.
 typedef struct loom_amdgpu_memory_access_plan_t {
   // Number of populated packet plans.
   uint32_t packet_count;
-  // Direct memory packets emitted in increasing source-register order. The
+  // Direct memory packets emitted in increasing payload-byte order. The
   // function-retained allocation contains exactly |packet_count| entries.
   loom_amdgpu_memory_packet_plan_t packets[];
 } loom_amdgpu_memory_access_plan_t;

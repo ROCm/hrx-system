@@ -1,0 +1,415 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_packed_tails.loom
+// RUN: emit source-low target=x86:avx2 output=low
+
+// Packed tails touch only their authored bytes, including the last register.
+func.def @copy_byte_tail_3(%input: buffer, %output: buffer) {
+  %origin_integer = index.constant 1 : offset
+  %source_integer = buffer.view %input[%origin_integer] : buffer -> view<3xi8>
+  %target_integer = buffer.view %output[%origin_integer] : buffer -> view<3xi8>
+  %value_integer = vector.load %source_integer[0] : view<3xi8> -> vector<3xi8>
+  vector.store %value_integer, %target_integer[0] : vector<3xi8>, view<3xi8>
+  %origin_e4m3 = index.constant 4 : offset
+  %source_e4m3 = buffer.view %input[%origin_e4m3] : buffer -> view<3xf8E4M3>
+  %target_e4m3 = buffer.view %output[%origin_e4m3] : buffer -> view<3xf8E4M3>
+  %value_e4m3 = vector.load %source_e4m3[0] : view<3xf8E4M3> -> vector<3xf8E4M3>
+  vector.store %value_e4m3, %target_e4m3[0] : vector<3xf8E4M3>, view<3xf8E4M3>
+  %origin_e5m2 = index.constant 7 : offset
+  %source_e5m2 = buffer.view %input[%origin_e5m2] : buffer -> view<3xf8E5M2>
+  %target_e5m2 = buffer.view %output[%origin_e5m2] : buffer -> view<3xf8E5M2>
+  %value_e5m2 = vector.load %source_e5m2[0] : view<3xf8E5M2> -> vector<3xf8E5M2>
+  vector.store %value_e5m2, %target_e5m2[0] : vector<3xf8E5M2>, view<3xf8E5M2>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @copy_byte_tail_3(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
+  %46 = movzx.load.u8.gpr32 %input {disp32 = 1}
+  %47 = movzx.load.u8.gpr32 %input {disp32 = 2}
+  %48 = movzx.load.u8.gpr32 %input {disp32 = 3}
+  mov.store.u8.gpr32 %46, %output {disp32 = 1}
+  mov.store.u8.gpr32 %47, %output {disp32 = 2}
+  mov.store.u8.gpr32 %48, %output {disp32 = 3}
+  %49 = movzx.load.u8.gpr32 %input {disp32 = 4}
+  %50 = movzx.load.u8.gpr32 %input {disp32 = 5}
+  %51 = movzx.load.u8.gpr32 %input {disp32 = 6}
+  mov.store.u8.gpr32 %49, %output {disp32 = 4}
+  mov.store.u8.gpr32 %50, %output {disp32 = 5}
+  mov.store.u8.gpr32 %51, %output {disp32 = 6}
+  %52 = movzx.load.u8.gpr32 %input {disp32 = 7}
+  %53 = movzx.load.u8.gpr32 %input {disp32 = 8}
+  %54 = movzx.load.u8.gpr32 %input {disp32 = 9}
+  mov.store.u8.gpr32 %52, %output {disp32 = 7}
+  mov.store.u8.gpr32 %53, %output {disp32 = 8}
+  mov.store.u8.gpr32 %54, %output {disp32 = 9}
+  return
+}
+
+// ====
+
+func.def @copy_byte_tail_7(%input: buffer, %output: buffer) {
+  %origin_integer = index.constant 1 : offset
+  %source_integer = buffer.view %input[%origin_integer] : buffer -> view<7xi8>
+  %target_integer = buffer.view %output[%origin_integer] : buffer -> view<7xi8>
+  %value_integer = vector.load %source_integer[0] : view<7xi8> -> vector<7xi8>
+  vector.store %value_integer, %target_integer[0] : vector<7xi8>, view<7xi8>
+  %origin_e4m3 = index.constant 8 : offset
+  %source_e4m3 = buffer.view %input[%origin_e4m3] : buffer -> view<7xf8E4M3>
+  %target_e4m3 = buffer.view %output[%origin_e4m3] : buffer -> view<7xf8E4M3>
+  %value_e4m3 = vector.load %source_e4m3[0] : view<7xf8E4M3> -> vector<7xf8E4M3>
+  vector.store %value_e4m3, %target_e4m3[0] : vector<7xf8E4M3>, view<7xf8E4M3>
+  %origin_e5m2 = index.constant 15 : offset
+  %source_e5m2 = buffer.view %input[%origin_e5m2] : buffer -> view<7xf8E5M2>
+  %target_e5m2 = buffer.view %output[%origin_e5m2] : buffer -> view<7xf8E5M2>
+  %value_e5m2 = vector.load %source_e5m2[0] : view<7xf8E5M2> -> vector<7xf8E5M2>
+  vector.store %value_e5m2, %target_e5m2[0] : vector<7xf8E5M2>, view<7xf8E5M2>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @copy_byte_tail_7(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
+  %82 = movzx.load.u8.gpr32 %input {disp32 = 1}
+  %83 = movzx.load.u8.gpr32 %input {disp32 = 2}
+  %84 = movzx.load.u8.gpr32 %input {disp32 = 3}
+  %85 = movzx.load.u8.gpr32 %input {disp32 = 4}
+  %86 = movzx.load.u8.gpr32 %input {disp32 = 5}
+  %87 = movzx.load.u8.gpr32 %input {disp32 = 6}
+  %88 = movzx.load.u8.gpr32 %input {disp32 = 7}
+  mov.store.u8.gpr32 %82, %output {disp32 = 1}
+  mov.store.u8.gpr32 %83, %output {disp32 = 2}
+  mov.store.u8.gpr32 %84, %output {disp32 = 3}
+  mov.store.u8.gpr32 %85, %output {disp32 = 4}
+  mov.store.u8.gpr32 %86, %output {disp32 = 5}
+  mov.store.u8.gpr32 %87, %output {disp32 = 6}
+  mov.store.u8.gpr32 %88, %output {disp32 = 7}
+  %89 = movzx.load.u8.gpr32 %input {disp32 = 8}
+  %90 = movzx.load.u8.gpr32 %input {disp32 = 9}
+  %91 = movzx.load.u8.gpr32 %input {disp32 = 10}
+  %92 = movzx.load.u8.gpr32 %input {disp32 = 11}
+  %93 = movzx.load.u8.gpr32 %input {disp32 = 12}
+  %94 = movzx.load.u8.gpr32 %input {disp32 = 13}
+  %95 = movzx.load.u8.gpr32 %input {disp32 = 14}
+  mov.store.u8.gpr32 %89, %output {disp32 = 8}
+  mov.store.u8.gpr32 %90, %output {disp32 = 9}
+  mov.store.u8.gpr32 %91, %output {disp32 = 10}
+  mov.store.u8.gpr32 %92, %output {disp32 = 11}
+  mov.store.u8.gpr32 %93, %output {disp32 = 12}
+  mov.store.u8.gpr32 %94, %output {disp32 = 13}
+  mov.store.u8.gpr32 %95, %output {disp32 = 14}
+  %96 = movzx.load.u8.gpr32 %input {disp32 = 15}
+  %97 = movzx.load.u8.gpr32 %input {disp32 = 16}
+  %98 = movzx.load.u8.gpr32 %input {disp32 = 17}
+  %99 = movzx.load.u8.gpr32 %input {disp32 = 18}
+  %100 = movzx.load.u8.gpr32 %input {disp32 = 19}
+  %101 = movzx.load.u8.gpr32 %input {disp32 = 20}
+  %102 = movzx.load.u8.gpr32 %input {disp32 = 21}
+  mov.store.u8.gpr32 %96, %output {disp32 = 15}
+  mov.store.u8.gpr32 %97, %output {disp32 = 16}
+  mov.store.u8.gpr32 %98, %output {disp32 = 17}
+  mov.store.u8.gpr32 %99, %output {disp32 = 18}
+  mov.store.u8.gpr32 %100, %output {disp32 = 19}
+  mov.store.u8.gpr32 %101, %output {disp32 = 20}
+  mov.store.u8.gpr32 %102, %output {disp32 = 21}
+  return
+}
+
+// ====
+
+func.def @copy_byte_tail_17(%input: buffer, %output: buffer) {
+  %origin_integer = index.constant 1 : offset
+  %source_integer = buffer.view %input[%origin_integer] : buffer -> view<17xi8>
+  %target_integer = buffer.view %output[%origin_integer] : buffer -> view<17xi8>
+  %value_integer = vector.load %source_integer[0] : view<17xi8> -> vector<17xi8>
+  vector.store %value_integer, %target_integer[0] : vector<17xi8>, view<17xi8>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @copy_byte_tail_17(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
+  %60 = movzx.load.u8.gpr32 %input {disp32 = 1}
+  %61 = movzx.load.u8.gpr32 %input {disp32 = 2}
+  %62 = movzx.load.u8.gpr32 %input {disp32 = 3}
+  %63 = movzx.load.u8.gpr32 %input {disp32 = 4}
+  %64 = movzx.load.u8.gpr32 %input {disp32 = 5}
+  %65 = movzx.load.u8.gpr32 %input {disp32 = 6}
+  %66 = movzx.load.u8.gpr32 %input {disp32 = 7}
+  %67 = movzx.load.u8.gpr32 %input {disp32 = 8}
+  %68 = movzx.load.u8.gpr32 %input {disp32 = 9}
+  %69 = movzx.load.u8.gpr32 %input {disp32 = 10}
+  %70 = movzx.load.u8.gpr32 %input {disp32 = 11}
+  %71 = movzx.load.u8.gpr32 %input {disp32 = 12}
+  %72 = movzx.load.u8.gpr32 %input {disp32 = 13}
+  %73 = movzx.load.u8.gpr32 %input {disp32 = 14}
+  %74 = movzx.load.u8.gpr32 %input {disp32 = 15}
+  %75 = movzx.load.u8.gpr32 %input {disp32 = 16}
+  %76 = movzx.load.u8.gpr32 %input {disp32 = 17}
+  mov.store.u8.gpr32 %60, %output {disp32 = 1}
+  mov.store.u8.gpr32 %61, %output {disp32 = 2}
+  mov.store.u8.gpr32 %62, %output {disp32 = 3}
+  mov.store.u8.gpr32 %63, %output {disp32 = 4}
+  mov.store.u8.gpr32 %64, %output {disp32 = 5}
+  mov.store.u8.gpr32 %65, %output {disp32 = 6}
+  mov.store.u8.gpr32 %66, %output {disp32 = 7}
+  mov.store.u8.gpr32 %67, %output {disp32 = 8}
+  mov.store.u8.gpr32 %68, %output {disp32 = 9}
+  mov.store.u8.gpr32 %69, %output {disp32 = 10}
+  mov.store.u8.gpr32 %70, %output {disp32 = 11}
+  mov.store.u8.gpr32 %71, %output {disp32 = 12}
+  mov.store.u8.gpr32 %72, %output {disp32 = 13}
+  mov.store.u8.gpr32 %73, %output {disp32 = 14}
+  mov.store.u8.gpr32 %74, %output {disp32 = 15}
+  mov.store.u8.gpr32 %75, %output {disp32 = 16}
+  mov.store.u8.gpr32 %76, %output {disp32 = 17}
+  return
+}
+
+// ====
+
+func.def @copy_byte_tail_63(%input: buffer, %output: buffer) {
+  %origin_integer = index.constant 1 : offset
+  %source_integer = buffer.view %input[%origin_integer] : buffer -> view<63xi8>
+  %target_integer = buffer.view %output[%origin_integer] : buffer -> view<63xi8>
+  %value_integer = vector.load %source_integer[0] : view<63xi8> -> vector<63xi8>
+  vector.store %value_integer, %target_integer[0] : vector<63xi8>, view<63xi8>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @copy_byte_tail_63(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
+  %198 = movzx.load.u8.gpr32 %input {disp32 = 1}
+  %199 = movzx.load.u8.gpr32 %input {disp32 = 2}
+  %200 = movzx.load.u8.gpr32 %input {disp32 = 3}
+  %201 = movzx.load.u8.gpr32 %input {disp32 = 4}
+  %202 = movzx.load.u8.gpr32 %input {disp32 = 5}
+  %203 = movzx.load.u8.gpr32 %input {disp32 = 6}
+  %204 = movzx.load.u8.gpr32 %input {disp32 = 7}
+  %205 = movzx.load.u8.gpr32 %input {disp32 = 8}
+  %206 = movzx.load.u8.gpr32 %input {disp32 = 9}
+  %207 = movzx.load.u8.gpr32 %input {disp32 = 10}
+  %208 = movzx.load.u8.gpr32 %input {disp32 = 11}
+  %209 = movzx.load.u8.gpr32 %input {disp32 = 12}
+  %210 = movzx.load.u8.gpr32 %input {disp32 = 13}
+  %211 = movzx.load.u8.gpr32 %input {disp32 = 14}
+  %212 = movzx.load.u8.gpr32 %input {disp32 = 15}
+  %213 = movzx.load.u8.gpr32 %input {disp32 = 16}
+  %214 = movzx.load.u8.gpr32 %input {disp32 = 17}
+  %215 = movzx.load.u8.gpr32 %input {disp32 = 18}
+  %216 = movzx.load.u8.gpr32 %input {disp32 = 19}
+  %217 = movzx.load.u8.gpr32 %input {disp32 = 20}
+  %218 = movzx.load.u8.gpr32 %input {disp32 = 21}
+  %219 = movzx.load.u8.gpr32 %input {disp32 = 22}
+  %220 = movzx.load.u8.gpr32 %input {disp32 = 23}
+  %221 = movzx.load.u8.gpr32 %input {disp32 = 24}
+  %222 = movzx.load.u8.gpr32 %input {disp32 = 25}
+  %223 = movzx.load.u8.gpr32 %input {disp32 = 26}
+  %224 = movzx.load.u8.gpr32 %input {disp32 = 27}
+  %225 = movzx.load.u8.gpr32 %input {disp32 = 28}
+  %226 = movzx.load.u8.gpr32 %input {disp32 = 29}
+  %227 = movzx.load.u8.gpr32 %input {disp32 = 30}
+  %228 = movzx.load.u8.gpr32 %input {disp32 = 31}
+  %229 = movzx.load.u8.gpr32 %input {disp32 = 32}
+  %230 = movzx.load.u8.gpr32 %input {disp32 = 33}
+  %231 = movzx.load.u8.gpr32 %input {disp32 = 34}
+  %232 = movzx.load.u8.gpr32 %input {disp32 = 35}
+  %233 = movzx.load.u8.gpr32 %input {disp32 = 36}
+  %234 = movzx.load.u8.gpr32 %input {disp32 = 37}
+  %235 = movzx.load.u8.gpr32 %input {disp32 = 38}
+  %236 = movzx.load.u8.gpr32 %input {disp32 = 39}
+  %237 = movzx.load.u8.gpr32 %input {disp32 = 40}
+  %238 = movzx.load.u8.gpr32 %input {disp32 = 41}
+  %239 = movzx.load.u8.gpr32 %input {disp32 = 42}
+  %240 = movzx.load.u8.gpr32 %input {disp32 = 43}
+  %241 = movzx.load.u8.gpr32 %input {disp32 = 44}
+  %242 = movzx.load.u8.gpr32 %input {disp32 = 45}
+  %243 = movzx.load.u8.gpr32 %input {disp32 = 46}
+  %244 = movzx.load.u8.gpr32 %input {disp32 = 47}
+  %245 = movzx.load.u8.gpr32 %input {disp32 = 48}
+  %246 = movzx.load.u8.gpr32 %input {disp32 = 49}
+  %247 = movzx.load.u8.gpr32 %input {disp32 = 50}
+  %248 = movzx.load.u8.gpr32 %input {disp32 = 51}
+  %249 = movzx.load.u8.gpr32 %input {disp32 = 52}
+  %250 = movzx.load.u8.gpr32 %input {disp32 = 53}
+  %251 = movzx.load.u8.gpr32 %input {disp32 = 54}
+  %252 = movzx.load.u8.gpr32 %input {disp32 = 55}
+  %253 = movzx.load.u8.gpr32 %input {disp32 = 56}
+  %254 = movzx.load.u8.gpr32 %input {disp32 = 57}
+  %255 = movzx.load.u8.gpr32 %input {disp32 = 58}
+  %256 = movzx.load.u8.gpr32 %input {disp32 = 59}
+  %257 = movzx.load.u8.gpr32 %input {disp32 = 60}
+  %258 = movzx.load.u8.gpr32 %input {disp32 = 61}
+  %259 = movzx.load.u8.gpr32 %input {disp32 = 62}
+  %260 = movzx.load.u8.gpr32 %input {disp32 = 63}
+  mov.store.u8.gpr32 %198, %output {disp32 = 1}
+  mov.store.u8.gpr32 %199, %output {disp32 = 2}
+  mov.store.u8.gpr32 %200, %output {disp32 = 3}
+  mov.store.u8.gpr32 %201, %output {disp32 = 4}
+  mov.store.u8.gpr32 %202, %output {disp32 = 5}
+  mov.store.u8.gpr32 %203, %output {disp32 = 6}
+  mov.store.u8.gpr32 %204, %output {disp32 = 7}
+  mov.store.u8.gpr32 %205, %output {disp32 = 8}
+  mov.store.u8.gpr32 %206, %output {disp32 = 9}
+  mov.store.u8.gpr32 %207, %output {disp32 = 10}
+  mov.store.u8.gpr32 %208, %output {disp32 = 11}
+  mov.store.u8.gpr32 %209, %output {disp32 = 12}
+  mov.store.u8.gpr32 %210, %output {disp32 = 13}
+  mov.store.u8.gpr32 %211, %output {disp32 = 14}
+  mov.store.u8.gpr32 %212, %output {disp32 = 15}
+  mov.store.u8.gpr32 %213, %output {disp32 = 16}
+  mov.store.u8.gpr32 %214, %output {disp32 = 17}
+  mov.store.u8.gpr32 %215, %output {disp32 = 18}
+  mov.store.u8.gpr32 %216, %output {disp32 = 19}
+  mov.store.u8.gpr32 %217, %output {disp32 = 20}
+  mov.store.u8.gpr32 %218, %output {disp32 = 21}
+  mov.store.u8.gpr32 %219, %output {disp32 = 22}
+  mov.store.u8.gpr32 %220, %output {disp32 = 23}
+  mov.store.u8.gpr32 %221, %output {disp32 = 24}
+  mov.store.u8.gpr32 %222, %output {disp32 = 25}
+  mov.store.u8.gpr32 %223, %output {disp32 = 26}
+  mov.store.u8.gpr32 %224, %output {disp32 = 27}
+  mov.store.u8.gpr32 %225, %output {disp32 = 28}
+  mov.store.u8.gpr32 %226, %output {disp32 = 29}
+  mov.store.u8.gpr32 %227, %output {disp32 = 30}
+  mov.store.u8.gpr32 %228, %output {disp32 = 31}
+  mov.store.u8.gpr32 %229, %output {disp32 = 32}
+  mov.store.u8.gpr32 %230, %output {disp32 = 33}
+  mov.store.u8.gpr32 %231, %output {disp32 = 34}
+  mov.store.u8.gpr32 %232, %output {disp32 = 35}
+  mov.store.u8.gpr32 %233, %output {disp32 = 36}
+  mov.store.u8.gpr32 %234, %output {disp32 = 37}
+  mov.store.u8.gpr32 %235, %output {disp32 = 38}
+  mov.store.u8.gpr32 %236, %output {disp32 = 39}
+  mov.store.u8.gpr32 %237, %output {disp32 = 40}
+  mov.store.u8.gpr32 %238, %output {disp32 = 41}
+  mov.store.u8.gpr32 %239, %output {disp32 = 42}
+  mov.store.u8.gpr32 %240, %output {disp32 = 43}
+  mov.store.u8.gpr32 %241, %output {disp32 = 44}
+  mov.store.u8.gpr32 %242, %output {disp32 = 45}
+  mov.store.u8.gpr32 %243, %output {disp32 = 46}
+  mov.store.u8.gpr32 %244, %output {disp32 = 47}
+  mov.store.u8.gpr32 %245, %output {disp32 = 48}
+  mov.store.u8.gpr32 %246, %output {disp32 = 49}
+  mov.store.u8.gpr32 %247, %output {disp32 = 50}
+  mov.store.u8.gpr32 %248, %output {disp32 = 51}
+  mov.store.u8.gpr32 %249, %output {disp32 = 52}
+  mov.store.u8.gpr32 %250, %output {disp32 = 53}
+  mov.store.u8.gpr32 %251, %output {disp32 = 54}
+  mov.store.u8.gpr32 %252, %output {disp32 = 55}
+  mov.store.u8.gpr32 %253, %output {disp32 = 56}
+  mov.store.u8.gpr32 %254, %output {disp32 = 57}
+  mov.store.u8.gpr32 %255, %output {disp32 = 58}
+  mov.store.u8.gpr32 %256, %output {disp32 = 59}
+  mov.store.u8.gpr32 %257, %output {disp32 = 60}
+  mov.store.u8.gpr32 %258, %output {disp32 = 61}
+  mov.store.u8.gpr32 %259, %output {disp32 = 62}
+  mov.store.u8.gpr32 %260, %output {disp32 = 63}
+  return
+}
+
+// ====
+
+func.def @copy_word_tail_7(%input: buffer, %output: buffer) {
+  %origin_integer = index.constant 2 : offset
+  %source_integer = buffer.view %input[%origin_integer] : buffer -> view<7xi16>
+  %target_integer = buffer.view %output[%origin_integer] : buffer -> view<7xi16>
+  %value_integer = vector.load %source_integer[0] : view<7xi16> -> vector<7xi16>
+  vector.store %value_integer, %target_integer[0] : vector<7xi16>, view<7xi16>
+  %origin_half = index.constant 16 : offset
+  %source_half = buffer.view %input[%origin_half] : buffer -> view<7xf16>
+  %target_half = buffer.view %output[%origin_half] : buffer -> view<7xf16>
+  %value_half = vector.load %source_half[0] : view<7xf16> -> vector<7xf16>
+  vector.store %value_half, %target_half[0] : vector<7xf16>, view<7xf16>
+  %origin_bfloat = index.constant 30 : offset
+  %source_bfloat = buffer.view %input[%origin_bfloat] : buffer -> view<7xbf16>
+  %target_bfloat = buffer.view %output[%origin_bfloat] : buffer -> view<7xbf16>
+  %value_bfloat = vector.load %source_bfloat[0] : view<7xbf16> -> vector<7xbf16>
+  vector.store %value_bfloat, %target_bfloat[0] : vector<7xbf16>, view<7xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @copy_word_tail_7(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
+  %82 = movzx.load.u16.gpr32 %input {disp32 = 2}
+  %83 = movzx.load.u16.gpr32 %input {disp32 = 4}
+  %84 = movzx.load.u16.gpr32 %input {disp32 = 6}
+  %85 = movzx.load.u16.gpr32 %input {disp32 = 8}
+  %86 = movzx.load.u16.gpr32 %input {disp32 = 10}
+  %87 = movzx.load.u16.gpr32 %input {disp32 = 12}
+  %88 = movzx.load.u16.gpr32 %input {disp32 = 14}
+  mov.store.u16.gpr32 %82, %output {disp32 = 2}
+  mov.store.u16.gpr32 %83, %output {disp32 = 4}
+  mov.store.u16.gpr32 %84, %output {disp32 = 6}
+  mov.store.u16.gpr32 %85, %output {disp32 = 8}
+  mov.store.u16.gpr32 %86, %output {disp32 = 10}
+  mov.store.u16.gpr32 %87, %output {disp32 = 12}
+  mov.store.u16.gpr32 %88, %output {disp32 = 14}
+  %89 = movzx.load.u16.gpr32 %input {disp32 = 16}
+  %90 = movzx.load.u16.gpr32 %input {disp32 = 18}
+  %91 = movzx.load.u16.gpr32 %input {disp32 = 20}
+  %92 = movzx.load.u16.gpr32 %input {disp32 = 22}
+  %93 = movzx.load.u16.gpr32 %input {disp32 = 24}
+  %94 = movzx.load.u16.gpr32 %input {disp32 = 26}
+  %95 = movzx.load.u16.gpr32 %input {disp32 = 28}
+  mov.store.u16.gpr32 %89, %output {disp32 = 16}
+  mov.store.u16.gpr32 %90, %output {disp32 = 18}
+  mov.store.u16.gpr32 %91, %output {disp32 = 20}
+  mov.store.u16.gpr32 %92, %output {disp32 = 22}
+  mov.store.u16.gpr32 %93, %output {disp32 = 24}
+  mov.store.u16.gpr32 %94, %output {disp32 = 26}
+  mov.store.u16.gpr32 %95, %output {disp32 = 28}
+  %96 = movzx.load.u16.gpr32 %input {disp32 = 30}
+  %97 = movzx.load.u16.gpr32 %input {disp32 = 32}
+  %98 = movzx.load.u16.gpr32 %input {disp32 = 34}
+  %99 = movzx.load.u16.gpr32 %input {disp32 = 36}
+  %100 = movzx.load.u16.gpr32 %input {disp32 = 38}
+  %101 = movzx.load.u16.gpr32 %input {disp32 = 40}
+  %102 = movzx.load.u16.gpr32 %input {disp32 = 42}
+  mov.store.u16.gpr32 %96, %output {disp32 = 30}
+  mov.store.u16.gpr32 %97, %output {disp32 = 32}
+  mov.store.u16.gpr32 %98, %output {disp32 = 34}
+  mov.store.u16.gpr32 %99, %output {disp32 = 36}
+  mov.store.u16.gpr32 %100, %output {disp32 = 38}
+  mov.store.u16.gpr32 %101, %output {disp32 = 40}
+  mov.store.u16.gpr32 %102, %output {disp32 = 42}
+  return
+}
+
+// ====
+
+// Captured bytes survive an aliasing write and a second volatile observation.
+func.def @capture_byte_tail(%input: buffer, %output: buffer, %replacement_input: buffer) {
+  %base = index.constant 0 : offset
+  %next = index.constant 3 : offset
+  %source = buffer.view %input[%base] : buffer -> view<3xi8>
+  %before = buffer.view %output[%base] : buffer -> view<3xi8>
+  %after = buffer.view %output[%next] : buffer -> view<3xi8>
+  %captured = vector.load<volatile> %source[0] : view<3xi8> -> vector<3xi8>
+  %replacement_view = buffer.view %replacement_input[%base] : buffer -> view<3xi8>
+  %replacement = vector.load %replacement_view[0] : view<3xi8> -> vector<3xi8>
+  vector.store<volatile> %replacement, %source[0] : vector<3xi8>, view<3xi8>
+  %reloaded = vector.load<volatile> %source[0] : view<3xi8> -> vector<3xi8>
+  vector.store %captured, %before[0] : vector<3xi8>, view<3xi8>
+  vector.store %reloaded, %after[0] : vector<3xi8>, view<3xi8>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @capture_byte_tail(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %replacement_input: reg<x86.gpr64>) asm {
+  %45 = movzx.load.u8.gpr32<volatile> %input {disp32 = 0}
+  %46 = movzx.load.u8.gpr32<volatile> %input {disp32 = 1}
+  %47 = movzx.load.u8.gpr32<volatile> %input {disp32 = 2}
+  %48 = movzx.load.u8.gpr32 %replacement_input {disp32 = 0}
+  %49 = movzx.load.u8.gpr32 %replacement_input {disp32 = 1}
+  %50 = movzx.load.u8.gpr32 %replacement_input {disp32 = 2}
+  mov.store.u8.gpr32<volatile> %48, %input {disp32 = 0}
+  mov.store.u8.gpr32<volatile> %49, %input {disp32 = 1}
+  mov.store.u8.gpr32<volatile> %50, %input {disp32 = 2}
+  %51 = movzx.load.u8.gpr32<volatile> %input {disp32 = 0}
+  %52 = movzx.load.u8.gpr32<volatile> %input {disp32 = 1}
+  %53 = movzx.load.u8.gpr32<volatile> %input {disp32 = 2}
+  mov.store.u8.gpr32 %45, %output {disp32 = 0}
+  mov.store.u8.gpr32 %46, %output {disp32 = 1}
+  mov.store.u8.gpr32 %47, %output {disp32 = 2}
+  mov.store.u8.gpr32 %51, %output {disp32 = 3}
+  mov.store.u8.gpr32 %52, %output {disp32 = 4}
+  mov.store.u8.gpr32 %53, %output {disp32 = 5}
+  return
+}

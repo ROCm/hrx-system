@@ -1,0 +1,420 @@
+// Packed rows retain their exact spans across global and workgroup storage.
+// Integer tensors initialize and check floating storage without numeric conversion.
+
+kernel.def @stage_i8_3() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %guard = index.constant 1 : offset
+  %length = index.constant 192 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %length : buffer
+  %source = buffer.view %input[%base] : buffer -> view<64x3xi8>
+  %temporary = buffer.view %scratch[%base] : buffer -> view<64x3xi8>
+  %target = buffer.view %output[%guard] : buffer -> view<64x3xi8>
+  %value = vector.load %source[%lane, 0] : view<64x3xi8> -> vector<3xi8>
+  vector.store<volatile> %value, %temporary[%lane, 0] : vector<3xi8>, view<64x3xi8>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %staged = vector.load<volatile> %temporary[%lane, 0] : view<64x3xi8> -> vector<3xi8>
+  vector.store %staged, %target[%lane, 0] : vector<3xi8>, view<64x3xi8>
+  kernel.return
+}
+
+check.case public @stage_i8_3_bits {
+  %input = check.generate.iota offset(-128) step(1) : tensor<192xi8>
+  %output = check.generate.fill value(91) : tensor<194xi8>
+  kernel.launch @stage_i8_3(%input, %output) : (tensor<192xi8>, tensor<194xi8>)
+  %actual = check.tensor.view %output offset(1) : tensor<194xi8> -> tensor<192xi8>
+  %prefix = check.tensor.view %output offset(0) : tensor<194xi8> -> tensor<1xi8>
+  %suffix = check.tensor.view %output offset(193) : tensor<194xi8> -> tensor<1xi8>
+  %expected = check.generate.iota offset(-128) step(1) : tensor<192xi8>
+  %guard = check.generate.fill value(91) : tensor<1xi8>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<192xi8>
+  check.expect.bitwise actual(%input) expected(%expected) : tensor<192xi8>
+  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<1xi8>
+  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<1xi8>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+kernel.def @stage_i8_7() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %guard = index.constant 1 : offset
+  %length = index.constant 224 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %length : buffer
+  %source = buffer.view %input[%base] : buffer -> view<32x7xi8>
+  %temporary = buffer.view %scratch[%base] : buffer -> view<32x7xi8>
+  %target = buffer.view %output[%guard] : buffer -> view<32x7xi8>
+  %value = vector.load %source[%lane, 0] : view<32x7xi8> -> vector<7xi8>
+  vector.store<volatile> %value, %temporary[%lane, 0] : vector<7xi8>, view<32x7xi8>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %staged = vector.load<volatile> %temporary[%lane, 0] : view<32x7xi8> -> vector<7xi8>
+  vector.store %staged, %target[%lane, 0] : vector<7xi8>, view<32x7xi8>
+  kernel.return
+}
+
+check.case public @stage_i8_7_bits {
+  %input = check.generate.iota offset(-128) step(1) : tensor<224xi8>
+  %output = check.generate.fill value(91) : tensor<226xi8>
+  kernel.launch @stage_i8_7(%input, %output) : (tensor<224xi8>, tensor<226xi8>)
+  %actual = check.tensor.view %output offset(1) : tensor<226xi8> -> tensor<224xi8>
+  %prefix = check.tensor.view %output offset(0) : tensor<226xi8> -> tensor<1xi8>
+  %suffix = check.tensor.view %output offset(225) : tensor<226xi8> -> tensor<1xi8>
+  %expected = check.generate.iota offset(-128) step(1) : tensor<224xi8>
+  %guard = check.generate.fill value(91) : tensor<1xi8>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<224xi8>
+  check.expect.bitwise actual(%input) expected(%expected) : tensor<224xi8>
+  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<1xi8>
+  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<1xi8>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+kernel.def @stage_i8_17() {
+  %unit = index.constant 1 : index
+  %width = index.constant 8 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %guard = index.constant 1 : offset
+  %length = index.constant 136 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %length : buffer
+  %source = buffer.view %input[%base] : buffer -> view<8x17xi8>
+  %temporary = buffer.view %scratch[%base] : buffer -> view<8x17xi8>
+  %target = buffer.view %output[%guard] : buffer -> view<8x17xi8>
+  %value = vector.load %source[%lane, 0] : view<8x17xi8> -> vector<17xi8>
+  vector.store<volatile> %value, %temporary[%lane, 0] : vector<17xi8>, view<8x17xi8>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %staged = vector.load<volatile> %temporary[%lane, 0] : view<8x17xi8> -> vector<17xi8>
+  vector.store %staged, %target[%lane, 0] : vector<17xi8>, view<8x17xi8>
+  kernel.return
+}
+
+check.case public @stage_i8_17_bits {
+  %input = check.generate.iota offset(-128) step(1) : tensor<136xi8>
+  %output = check.generate.fill value(91) : tensor<138xi8>
+  kernel.launch @stage_i8_17(%input, %output) : (tensor<136xi8>, tensor<138xi8>)
+  %actual = check.tensor.view %output offset(1) : tensor<138xi8> -> tensor<136xi8>
+  %prefix = check.tensor.view %output offset(0) : tensor<138xi8> -> tensor<1xi8>
+  %suffix = check.tensor.view %output offset(137) : tensor<138xi8> -> tensor<1xi8>
+  %expected = check.generate.iota offset(-128) step(1) : tensor<136xi8>
+  %guard = check.generate.fill value(91) : tensor<1xi8>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<136xi8>
+  check.expect.bitwise actual(%input) expected(%expected) : tensor<136xi8>
+  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<1xi8>
+  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<1xi8>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+kernel.def @stage_i8_63() {
+  %unit = index.constant 1 : index
+  %width = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %guard = index.constant 1 : offset
+  %length = index.constant 252 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %length : buffer
+  %source = buffer.view %input[%base] : buffer -> view<4x63xi8>
+  %temporary = buffer.view %scratch[%base] : buffer -> view<4x63xi8>
+  %target = buffer.view %output[%guard] : buffer -> view<4x63xi8>
+  %value = vector.load %source[%lane, 0] : view<4x63xi8> -> vector<63xi8>
+  vector.store<volatile> %value, %temporary[%lane, 0] : vector<63xi8>, view<4x63xi8>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %staged = vector.load<volatile> %temporary[%lane, 0] : view<4x63xi8> -> vector<63xi8>
+  vector.store %staged, %target[%lane, 0] : vector<63xi8>, view<4x63xi8>
+  kernel.return
+}
+
+check.case public @stage_i8_63_bits {
+  %input = check.generate.iota offset(-128) step(1) : tensor<252xi8>
+  %output = check.generate.fill value(91) : tensor<254xi8>
+  kernel.launch @stage_i8_63(%input, %output) : (tensor<252xi8>, tensor<254xi8>)
+  %actual = check.tensor.view %output offset(1) : tensor<254xi8> -> tensor<252xi8>
+  %prefix = check.tensor.view %output offset(0) : tensor<254xi8> -> tensor<1xi8>
+  %suffix = check.tensor.view %output offset(253) : tensor<254xi8> -> tensor<1xi8>
+  %expected = check.generate.iota offset(-128) step(1) : tensor<252xi8>
+  %guard = check.generate.fill value(91) : tensor<1xi8>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<252xi8>
+  check.expect.bitwise actual(%input) expected(%expected) : tensor<252xi8>
+  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<1xi8>
+  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<1xi8>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+kernel.def @stage_f8E4M3_3() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %guard = index.constant 1 : offset
+  %length = index.constant 192 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %length : buffer
+  %source = buffer.view %input[%base] : buffer -> view<64x3xf8E4M3>
+  %temporary = buffer.view %scratch[%base] : buffer -> view<64x3xf8E4M3>
+  %target = buffer.view %output[%guard] : buffer -> view<64x3xf8E4M3>
+  %value = vector.load %source[%lane, 0] : view<64x3xf8E4M3> -> vector<3xf8E4M3>
+  vector.store<volatile> %value, %temporary[%lane, 0] : vector<3xf8E4M3>, view<64x3xf8E4M3>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %staged = vector.load<volatile> %temporary[%lane, 0] : view<64x3xf8E4M3> -> vector<3xf8E4M3>
+  vector.store %staged, %target[%lane, 0] : vector<3xf8E4M3>, view<64x3xf8E4M3>
+  kernel.return
+}
+
+check.case public @stage_f8E4M3_3_bits {
+  %input = check.generate.iota offset(-128) step(1) : tensor<192xi8>
+  %output = check.generate.fill value(91) : tensor<194xi8>
+  kernel.launch @stage_f8E4M3_3(%input, %output) : (tensor<192xi8>, tensor<194xi8>)
+  %actual = check.tensor.view %output offset(1) : tensor<194xi8> -> tensor<192xi8>
+  %prefix = check.tensor.view %output offset(0) : tensor<194xi8> -> tensor<1xi8>
+  %suffix = check.tensor.view %output offset(193) : tensor<194xi8> -> tensor<1xi8>
+  %expected = check.generate.iota offset(-128) step(1) : tensor<192xi8>
+  %guard = check.generate.fill value(91) : tensor<1xi8>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<192xi8>
+  check.expect.bitwise actual(%input) expected(%expected) : tensor<192xi8>
+  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<1xi8>
+  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<1xi8>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+kernel.def @stage_f8E5M2_7() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %guard = index.constant 1 : offset
+  %length = index.constant 224 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %length : buffer
+  %source = buffer.view %input[%base] : buffer -> view<32x7xf8E5M2>
+  %temporary = buffer.view %scratch[%base] : buffer -> view<32x7xf8E5M2>
+  %target = buffer.view %output[%guard] : buffer -> view<32x7xf8E5M2>
+  %value = vector.load %source[%lane, 0] : view<32x7xf8E5M2> -> vector<7xf8E5M2>
+  vector.store<volatile> %value, %temporary[%lane, 0] : vector<7xf8E5M2>, view<32x7xf8E5M2>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %staged = vector.load<volatile> %temporary[%lane, 0] : view<32x7xf8E5M2> -> vector<7xf8E5M2>
+  vector.store %staged, %target[%lane, 0] : vector<7xf8E5M2>, view<32x7xf8E5M2>
+  kernel.return
+}
+
+check.case public @stage_f8E5M2_7_bits {
+  %input = check.generate.iota offset(-128) step(1) : tensor<224xi8>
+  %output = check.generate.fill value(91) : tensor<226xi8>
+  kernel.launch @stage_f8E5M2_7(%input, %output) : (tensor<224xi8>, tensor<226xi8>)
+  %actual = check.tensor.view %output offset(1) : tensor<226xi8> -> tensor<224xi8>
+  %prefix = check.tensor.view %output offset(0) : tensor<226xi8> -> tensor<1xi8>
+  %suffix = check.tensor.view %output offset(225) : tensor<226xi8> -> tensor<1xi8>
+  %expected = check.generate.iota offset(-128) step(1) : tensor<224xi8>
+  %guard = check.generate.fill value(91) : tensor<1xi8>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<224xi8>
+  check.expect.bitwise actual(%input) expected(%expected) : tensor<224xi8>
+  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<1xi8>
+  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<1xi8>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+kernel.def @stage_i16_3() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %guard = index.constant 2 : offset
+  %length = index.constant 384 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %length : buffer
+  %source = buffer.view %input[%base] : buffer -> view<64x3xi16>
+  %temporary = buffer.view %scratch[%base] : buffer -> view<64x3xi16>
+  %target = buffer.view %output[%guard] : buffer -> view<64x3xi16>
+  %value = vector.load %source[%lane, 0] : view<64x3xi16> -> vector<3xi16>
+  vector.store<volatile> %value, %temporary[%lane, 0] : vector<3xi16>, view<64x3xi16>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %staged = vector.load<volatile> %temporary[%lane, 0] : view<64x3xi16> -> vector<3xi16>
+  vector.store %staged, %target[%lane, 0] : vector<3xi16>, view<64x3xi16>
+  kernel.return
+}
+
+check.case public @stage_i16_3_bits {
+  %input = check.generate.iota offset(-30000) step(257) : tensor<192xi16>
+  %output = check.generate.fill value(91) : tensor<194xi16>
+  kernel.launch @stage_i16_3(%input, %output) : (tensor<192xi16>, tensor<194xi16>)
+  %actual = check.tensor.view %output offset(2) : tensor<194xi16> -> tensor<192xi16>
+  %prefix = check.tensor.view %output offset(0) : tensor<194xi16> -> tensor<1xi16>
+  %suffix = check.tensor.view %output offset(386) : tensor<194xi16> -> tensor<1xi16>
+  %expected = check.generate.iota offset(-30000) step(257) : tensor<192xi16>
+  %guard = check.generate.fill value(91) : tensor<1xi16>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<192xi16>
+  check.expect.bitwise actual(%input) expected(%expected) : tensor<192xi16>
+  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<1xi16>
+  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<1xi16>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+kernel.def @stage_f16_63() {
+  %unit = index.constant 1 : index
+  %width = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %guard = index.constant 2 : offset
+  %length = index.constant 126 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %length : buffer
+  %source = buffer.view %input[%base] : buffer -> view<1x63xf16>
+  %temporary = buffer.view %scratch[%base] : buffer -> view<1x63xf16>
+  %target = buffer.view %output[%guard] : buffer -> view<1x63xf16>
+  %value = vector.load %source[%lane, 0] : view<1x63xf16> -> vector<63xf16>
+  vector.store<volatile> %value, %temporary[%lane, 0] : vector<63xf16>, view<1x63xf16>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %staged = vector.load<volatile> %temporary[%lane, 0] : view<1x63xf16> -> vector<63xf16>
+  vector.store %staged, %target[%lane, 0] : vector<63xf16>, view<1x63xf16>
+  kernel.return
+}
+
+check.case public @stage_f16_63_bits {
+  %input = check.generate.iota offset(-30000) step(257) : tensor<63xi16>
+  %output = check.generate.fill value(91) : tensor<65xi16>
+  kernel.launch @stage_f16_63(%input, %output) : (tensor<63xi16>, tensor<65xi16>)
+  %actual = check.tensor.view %output offset(2) : tensor<65xi16> -> tensor<63xi16>
+  %prefix = check.tensor.view %output offset(0) : tensor<65xi16> -> tensor<1xi16>
+  %suffix = check.tensor.view %output offset(128) : tensor<65xi16> -> tensor<1xi16>
+  %expected = check.generate.iota offset(-30000) step(257) : tensor<63xi16>
+  %guard = check.generate.fill value(91) : tensor<1xi16>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<63xi16>
+  check.expect.bitwise actual(%input) expected(%expected) : tensor<63xi16>
+  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<1xi16>
+  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<1xi16>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+kernel.def @stage_bf16_7() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %guard = index.constant 2 : offset
+  %length = index.constant 448 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %length : buffer
+  %source = buffer.view %input[%base] : buffer -> view<32x7xbf16>
+  %temporary = buffer.view %scratch[%base] : buffer -> view<32x7xbf16>
+  %target = buffer.view %output[%guard] : buffer -> view<32x7xbf16>
+  %value = vector.load %source[%lane, 0] : view<32x7xbf16> -> vector<7xbf16>
+  vector.store<volatile> %value, %temporary[%lane, 0] : vector<7xbf16>, view<32x7xbf16>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %staged = vector.load<volatile> %temporary[%lane, 0] : view<32x7xbf16> -> vector<7xbf16>
+  vector.store %staged, %target[%lane, 0] : vector<7xbf16>, view<32x7xbf16>
+  kernel.return
+}
+
+check.case public @stage_bf16_7_bits {
+  %input = check.generate.iota offset(-30000) step(257) : tensor<224xi16>
+  %output = check.generate.fill value(91) : tensor<226xi16>
+  kernel.launch @stage_bf16_7(%input, %output) : (tensor<224xi16>, tensor<226xi16>)
+  %actual = check.tensor.view %output offset(2) : tensor<226xi16> -> tensor<224xi16>
+  %prefix = check.tensor.view %output offset(0) : tensor<226xi16> -> tensor<1xi16>
+  %suffix = check.tensor.view %output offset(450) : tensor<226xi16> -> tensor<1xi16>
+  %expected = check.generate.iota offset(-30000) step(257) : tensor<224xi16>
+  %guard = check.generate.fill value(91) : tensor<1xi16>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<224xi16>
+  check.expect.bitwise actual(%input) expected(%expected) : tensor<224xi16>
+  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<1xi16>
+  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<1xi16>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+kernel.def @capture_tail() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %observed: buffer) {
+  %base = index.constant 0 : offset
+  %guard_offset = index.constant 1 : offset
+  %source = buffer.view %input[%base] : buffer -> view<3xi8>
+  %target = buffer.view %output[%guard_offset] : buffer -> view<3xi8>
+  %after = buffer.view %observed[%base] : buffer -> view<3xi8>
+  %captured = vector.load<volatile> %source[0] : view<3xi8> -> vector<3xi8>
+  %replacement = vector.constant 0 : vector<3xi8>
+  vector.store<volatile> %replacement, %source[0] : vector<3xi8>, view<3xi8>
+  %reloaded = vector.load<volatile> %source[0] : view<3xi8> -> vector<3xi8>
+  vector.store %captured, %target[0] : vector<3xi8>, view<3xi8>
+  vector.store %reloaded, %after[0] : vector<3xi8>, view<3xi8>
+  kernel.return
+}
+
+check.case public @three_byte_snapshot {
+  %input = check.generate.iota offset(115) step(-89) : tensor<3xi8>
+  %output = check.generate.fill value(37) : tensor<5xi8>
+  %observed = check.generate.fill value(99) : tensor<3xi8>
+  kernel.launch @capture_tail(%input, %output, %observed) : (tensor<3xi8>, tensor<5xi8>, tensor<3xi8>)
+  %payload = check.tensor.view %output offset(1) : tensor<5xi8> -> tensor<3xi8>
+  %prefix = check.tensor.view %output offset(0) : tensor<5xi8> -> tensor<1xi8>
+  %suffix = check.tensor.view %output offset(4) : tensor<5xi8> -> tensor<1xi8>
+  %expected = check.generate.iota offset(115) step(-89) : tensor<3xi8>
+  %guard = check.generate.fill value(37) : tensor<1xi8>
+  %cleared = check.generate.fill value(0) : tensor<3xi8>
+  check.expect.bitwise actual(%payload) expected(%expected) : tensor<3xi8>
+  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<1xi8>
+  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<1xi8>
+  check.expect.bitwise actual(%input) expected(%cleared) : tensor<3xi8>
+  check.expect.bitwise actual(%observed) expected(%cleared) : tensor<3xi8>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
+
+// Each invocation owns its private packed row.
+kernel.def @stage_private_i8_3() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %guard = index.constant 1 : offset
+  %length = index.constant 192 : offset
+  %scratch = buffer.alloca<private> align(16) %length : buffer
+  %source = buffer.view %input[%base] : buffer -> view<64x3xi8>
+  %temporary = buffer.view %scratch[%base] : buffer -> view<64x3xi8>
+  %target = buffer.view %output[%guard] : buffer -> view<64x3xi8>
+  %value = vector.load %source[%lane, 0] : view<64x3xi8> -> vector<3xi8>
+  vector.store<volatile> %value, %temporary[%lane, 0] : vector<3xi8>, view<64x3xi8>
+  %staged = vector.load<volatile> %temporary[%lane, 0] : view<64x3xi8> -> vector<3xi8>
+  vector.store %staged, %target[%lane, 0] : vector<3xi8>, view<64x3xi8>
+  kernel.return
+}
+
+check.case public @stage_private_i8_3_bits {
+  %input = check.generate.iota offset(-128) step(1) : tensor<192xi8>
+  %output = check.generate.fill value(91) : tensor<194xi8>
+  kernel.launch @stage_private_i8_3(%input, %output) : (tensor<192xi8>, tensor<194xi8>)
+  %actual = check.tensor.view %output offset(1) : tensor<194xi8> -> tensor<192xi8>
+  %prefix = check.tensor.view %output offset(0) : tensor<194xi8> -> tensor<1xi8>
+  %suffix = check.tensor.view %output offset(193) : tensor<194xi8> -> tensor<1xi8>
+  %expected = check.generate.iota offset(-128) step(1) : tensor<192xi8>
+  %guard = check.generate.fill value(91) : tensor<1xi8>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<192xi8>
+  check.expect.bitwise actual(%input) expected(%expected) : tensor<192xi8>
+  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<1xi8>
+  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<1xi8>
+  check.expect.event<device> {count = 0, type = "asan_report"}
+  check.return
+}
