@@ -1290,32 +1290,6 @@ static iree_status_t loom_low_verify_function_preamble(
   return status;
 }
 
-static iree_status_t loom_low_verify_kernel_returns(
-    const loom_module_t* module, const loom_op_t* kernel_op,
-    iree_diagnostic_emitter_t emitter) {
-  loom_region_t* body = loom_low_kernel_def_body(kernel_op);
-  if (body == NULL) {
-    return iree_ok_status();
-  }
-  loom_block_t* block = NULL;
-  loom_region_for_each_block(body, block) {
-    loom_op_t* nested_op = NULL;
-    loom_block_for_each_op(block, nested_op) {
-      if (!loom_low_return_isa(nested_op) || nested_op->operand_count == 0) {
-        continue;
-      }
-      loom_diagnostic_param_t params[] = {
-          loom_param_string(loom_low_op_name(module, nested_op)),
-          loom_param_u32(nested_op->operand_count),
-          loom_param_u32(0),
-      };
-      return loom_low_emit(emitter, nested_op, LOOM_ERR_STRUCTURE_001, params,
-                           IREE_ARRAYSIZE(params));
-    }
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_low_emit_callee_related(
     iree_diagnostic_emitter_t emitter, const loom_op_t* call_op,
     const loom_op_t* definition_op, const loom_error_def_t* error,
@@ -1483,7 +1457,6 @@ iree_status_t loom_low_kernel_def_verify(const loom_module_t* module,
                                          iree_diagnostic_emitter_t emitter) {
   IREE_RETURN_IF_ERROR(loom_low_verify_kernel_contract(op, emitter));
   IREE_RETURN_IF_ERROR(loom_low_verify_kernel_exactness_modes(op, emitter));
-  IREE_RETURN_IF_ERROR(loom_low_verify_kernel_returns(module, op, emitter));
   return loom_low_verify_function_preamble(module, op, emitter);
 }
 

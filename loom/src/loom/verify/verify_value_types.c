@@ -7,8 +7,129 @@
 #include "loom/verify/verify_value_types.h"
 
 #include "loom/error/error_catalog.h"
+#include "loom/ir/value_replacement.h"
 #include "loom/ops/op_defs.h"
 #include "loom/verify/verify_diagnostics.h"
+
+static bool loom_verify_type_representation_equal(loom_type_t expected,
+                                                  loom_type_t actual) {
+  return expected.header == actual.header &&
+         expected.encoding_id == actual.encoding_id &&
+         expected.encoding_flags == actual.encoding_flags &&
+         expected.dims[0] == actual.dims[0] &&
+         expected.dims[1] == actual.dims[1];
+}
+
+static bool loom_verify_bounded_type_equal_after_remap(
+    const loom_module_t* module, const loom_type_value_remap_t* remap,
+    loom_type_t expected, loom_type_t actual) {
+  return loom_type_may_reference_values(expected)
+             ? loom_type_equal_after_value_remap(module, expected, actual,
+                                                 remap)
+             : loom_type_equal(expected, actual);
+}
+
+IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static void
+loom_verify_func_like_emit_exit_count_mismatch(loom_verify_state_t* state,
+                                               const loom_op_t* exit_op,
+                                               uint16_t expected_count) {
+  loom_diagnostic_param_t params[] = {
+      loom_param_u32(exit_op->operand_count),
+      loom_param_u32(expected_count),
+  };
+  loom_verify_emit_structured(state, exit_op, LOOM_ERR_STRUCTURE_008, params,
+                              IREE_ARRAYSIZE(params));
+}
+
+IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static void
+loom_verify_func_like_emit_exit_type_mismatch(loom_verify_state_t* state,
+                                              const loom_op_t* exit_op,
+                                              loom_type_t actual,
+                                              loom_type_t expected) {
+  loom_diagnostic_param_t params[] = {loom_param_type(actual),
+                                      loom_param_type(expected)};
+  loom_verify_emit_structured(state, exit_op, LOOM_ERR_TYPE_009, params,
+                              IREE_ARRAYSIZE(params));
+}
+
+// Recursive containers can revisit shared canonical children through many
+// roots. Keep their traversal state out of the common bounded-type frame.
+IREE_ATTRIBUTE_NOINLINE static iree_status_t
+loom_verify_func_like_exit_types_with_lookup(
+    loom_verify_state_t* state, const loom_op_t* exit_op,
+    const loom_type_value_remap_t* remap, uint16_t start) {
+  loom_type_remap_lookup_t lookup;
+  loom_type_remap_lookup_initialize(state->module, remap, &lookup);
+  iree_status_t status = iree_ok_status();
+  for (uint16_t i = start; i < remap->count && iree_status_is_ok(status); ++i) {
+    const loom_type_t actual =
+        loom_module_value_type(state->module, remap->target_values[i]);
+    const loom_type_t expected =
+        loom_module_value_type(state->module, remap->source_values[i]);
+    bool equal = loom_verify_type_representation_equal(expected, actual);
+    if (!equal && loom_type_remap_requires_lookup(expected)) {
+      status = loom_type_remap_lookup_equal(&lookup, expected, actual, &equal);
+    } else if (!equal) {
+      equal = loom_verify_bounded_type_equal_after_remap(state->module, remap,
+                                                         expected, actual);
+    }
+    if (iree_status_is_ok(status) && !equal) {
+      loom_verify_func_like_emit_exit_type_mismatch(state, exit_op, actual,
+                                                    expected);
+      if (loom_verify_at_error_limit(state)) {
+        break;
+      }
+    }
+  }
+  loom_type_remap_lookup_deinitialize(&lookup);
+  return status;
+}
+
+iree_status_t loom_verify_func_like_exit(loom_verify_state_t* state,
+                                         const loom_op_t* func_op,
+                                         const loom_op_t* exit_op) {
+  if (exit_op->operand_count != func_op->result_count) {
+    loom_verify_func_like_emit_exit_count_mismatch(state, exit_op,
+                                                   func_op->result_count);
+    return iree_ok_status();
+  }
+  if (func_op->result_count == 0) {
+    return iree_ok_status();
+  }
+
+  const loom_value_id_t* expected_values = loom_op_const_results(func_op);
+  const loom_value_id_t* actual_values = loom_op_const_operands(exit_op);
+  const loom_type_value_remap_t remap = {
+      .source_values = expected_values,
+      .target_values = actual_values,
+      .count = func_op->result_count,
+      .flags = LOOM_TYPE_VALUE_REMAP_FLAG_SOURCE_DEFINITION_SLICE,
+  };
+  for (uint16_t i = 0; i < func_op->result_count; ++i) {
+    const loom_type_t actual =
+        loom_module_value_type(state->module, actual_values[i]);
+    const loom_type_t expected =
+        loom_module_value_type(state->module, expected_values[i]);
+    // Identical immutable representations need no structural or mapped walk.
+    if (loom_verify_type_representation_equal(expected, actual)) {
+      continue;
+    }
+    if (loom_type_remap_requires_lookup(expected)) {
+      return loom_verify_func_like_exit_types_with_lookup(state, exit_op,
+                                                          &remap, i);
+    }
+    if (loom_verify_bounded_type_equal_after_remap(state->module, &remap,
+                                                   expected, actual)) {
+      continue;
+    }
+    loom_verify_func_like_emit_exit_type_mismatch(state, exit_op, actual,
+                                                  expected);
+    if (loom_verify_at_error_limit(state)) {
+      break;
+    }
+  }
+  return iree_ok_status();
+}
 
 // Loop results describe one recurring type scheme. Unique result definitions
 // map to each entry's definitions; repeated initial operands never choose which

@@ -22,7 +22,7 @@ from loom.dsl import (
     TypeConstraint,
     type_constraint_name,
 )
-from loom.error.structure import ERR_STRUCTURE_007
+from loom.error.structure import ERR_STRUCTURE_007, ERR_STRUCTURE_008
 from loom.error.type import ERR_TYPE_001, ERR_TYPE_009, ERR_TYPE_013
 from loom.fields import FieldKind, FieldLayout, compute_layout, resolve_fields
 from loom.ir import (
@@ -268,7 +268,57 @@ class ModuleVerifier:
             and shape_ok
             and len(self.diagnostics.diagnostics) == initial_diagnostic_count
         ):
+            self._verify_func_like_exits(op_decl, operation, op_path)
+        if (
+            values_ok
+            and shape_ok
+            and len(self.diagnostics.diagnostics) == initial_diagnostic_count
+        ):
             self._verify_loop_type_scheme(op_decl, operation, op_path)
+
+    def _verify_func_like_exits(
+        self,
+        op_decl: Op,
+        operation: Operation,
+        path: str,
+    ) -> None:
+        """Verify each direct callable exit against the declared result tuple."""
+        layout = self.registry.layout(op_decl)
+        body_region_index = layout.func_body_region_index
+        if body_region_index is None or body_region_index >= len(operation.regions):
+            return
+
+        body = operation.regions[body_region_index]
+        exit_name = op_decl.regions[body_region_index].terminator
+        if exit_name is None:
+            return
+        for block_index, block in enumerate(body.blocks):
+            exit_op = block.ops[-1]
+            if exit_op.name != exit_name:
+                continue
+            exit_path = (
+                f"{path}.regions[{body_region_index}].blocks[{block_index}]"
+                f".ops[{len(block.ops) - 1}] {exit_op.name}"
+            )
+            if len(exit_op.operands) != len(operation.results):
+                self.diagnostics.error(
+                    "callable exit result count mismatch",
+                    source=exit_path,
+                    details=(
+                        f"exit has {len(exit_op.operands)} operands, expected "
+                        f"{len(operation.results)}",
+                    ),
+                    error_def=ERR_STRUCTURE_008,
+                )
+                continue
+            self._verify_remapped_type_tuple(
+                operation.results,
+                exit_op.operands,
+                path=exit_path,
+                relation="callable exit",
+                summary="callable exit type mismatch",
+                error_def=ERR_TYPE_009,
+            )
 
     def _verify_loop_type_scheme(
         self,
@@ -397,6 +447,7 @@ class ModuleVerifier:
         path: str,
         relation: str,
         error_def: Any,
+        summary: str = "loop-carried type scheme mismatch",
         argument_offset: int = 0,
     ) -> bool:
         """Compare one dependent type tuple after positional SSA remapping."""
@@ -417,7 +468,7 @@ class ModuleVerifier:
             if identities.equal(expected_type, target.type):
                 continue
             self.diagnostics.error(
-                "loop-carried type scheme mismatch",
+                summary,
                 source=path,
                 details=(
                     f"{relation} value {index + argument_offset} does not "
@@ -1039,16 +1090,11 @@ class ModuleVerifier:
         *,
         parent_stack: tuple[Operation, ...],
     ) -> None:
-        function_body = None
-        if op_decl is not None:
-            function_body = next(
-                (
-                    interface.body
-                    for interface in op_decl.interfaces
-                    if isinstance(interface, FuncLikeInterface)
-                ),
-                None,
-            )
+        function_body_index = (
+            self.registry.layout(op_decl).func_body_region_index
+            if op_decl is not None
+            else None
+        )
         for region_index, region in enumerate(operation.regions):
             region_path = f"{path}.regions[{region_index}]"
             region_decl = (
@@ -1072,9 +1118,11 @@ class ModuleVerifier:
                     block,
                     f"{region_path}.blocks[{block_index}]",
                     region_blocks=region_blocks,
-                    function_entry=region.blocks[0]
-                    if region_decl is not None and region_decl.name == function_body
-                    else None,
+                    function_entry=(
+                        region.blocks[0]
+                        if region_index == function_body_index
+                        else None
+                    ),
                     region_terminator=region_decl.terminator
                     if region_decl is not None
                     else None,

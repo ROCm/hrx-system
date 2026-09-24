@@ -74,6 +74,22 @@ typedef struct loom_type_remap_lookup_t {
   loom_type_remap_state_t state;
 } loom_type_remap_lookup_t;
 
+// Returns true when mapped equality requires the iterative lookup to bound
+// recursive type traversal. Other types have bounded leaf representations and
+// remain allocation-free with loom_type_equal_after_value_remap().
+static inline bool loom_type_remap_requires_lookup(loom_type_t type) {
+  switch (loom_type_kind(type)) {
+    case LOOM_TYPE_FUNCTION:
+    case LOOM_TYPE_DIALECT:
+    case LOOM_TYPE_PARAMETERIZED:
+      return true;
+    case LOOM_TYPE_REGISTER:
+      return loom_type_register_has_value_type(type);
+    default:
+      return false;
+  }
+}
+
 // Begins substitution between two distinct, defined module values. Initializing
 // an empty context does not allocate or inspect the module's type table.
 void loom_value_replacement_initialize(

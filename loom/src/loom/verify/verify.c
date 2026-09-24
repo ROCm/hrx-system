@@ -25,6 +25,8 @@ typedef struct loom_verify_region_contract_t {
   const loom_op_vtable_t* vtable;
   // Generated structural requirements for the region.
   const loom_region_descriptor_t* descriptor;
+  // Error count before verification of the owning operation began.
+  uint32_t owner_initial_error_count;
   // Region ordinal within the owning operation.
   uint8_t region_index;
 } loom_verify_region_contract_t;
@@ -245,6 +247,14 @@ static iree_status_t loom_verify_region(
     IREE_RETURN_IF_ERROR(loom_verify_emit_single_block_region(
         state, contract, region->block_count));
   }
+  const loom_op_t* callable_op = NULL;
+  if (contract && contract->descriptor->terminator != LOOM_OP_KIND_UNKNOWN &&
+      loom_verify_has_func_signature_scope(contract->vtable) &&
+      contract->vtable->func_like->body_region_index ==
+          contract->region_index &&
+      state->result->error_count == contract->owner_initial_error_count) {
+    callable_op = contract->op;
+  }
   // Single-block regions need only the ordinary lexical scope. Multi-block
   // regions share one graph between dominance and consumed-value queries.
   // Keep the indexed tree local: per-use checks remain a depth-table lookup.
@@ -312,6 +322,7 @@ static iree_status_t loom_verify_region(
       }
       b = source_block_index++;
     }
+    const uint32_t block_initial_error_count = state->result->error_count;
     loom_verify_restore_definitions(state, block_watermark);
     if (dominance.available && position >= dominance.preorder.count) {
       if (!unreachable_definitions.block_offsets) {
@@ -389,6 +400,16 @@ static iree_status_t loom_verify_region(
                  terminator_op->kind != contract->descriptor->terminator) {
         status =
             loom_verify_emit_wrong_terminator(state, contract, terminator_op);
+      }
+    }
+    if (callable_op && iree_status_is_ok(status) &&
+        !loom_verify_at_error_limit(state) &&
+        state->result->error_count == block_initial_error_count &&
+        terminator_op &&
+        terminator_op->kind == contract->descriptor->terminator) {
+      status = loom_verify_func_like_exit(state, callable_op, terminator_op);
+      if (iree_status_is_ok(status)) {
+        status = loom_verify_pending_diagnostic_status(state);
       }
     }
     if (block_scope_ends) {
@@ -578,28 +599,32 @@ IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t loom_verify_op(
 
   // Isolated regions start with only their own block arguments. Other regions
   // inherit enclosing definitions, including this op's results defined above.
-  loom_region_t** regions = loom_op_regions(op);
-  for (uint8_t i = 0; i < op->region_count; ++i) {
-    if (loom_verify_at_error_limit(state)) {
-      break;
+  if (op->region_count != 0) {
+    loom_region_t** regions = loom_op_regions(op);
+    for (uint8_t i = 0; i < op->region_count; ++i) {
+      if (loom_verify_at_error_limit(state)) {
+        break;
+      }
+      const loom_region_descriptor_t* descriptor =
+          loom_op_vtable_region_descriptor(vtable, i);
+      loom_verify_region_contract_t contract = {
+          .op = op,
+          .vtable = vtable,
+          .descriptor = descriptor,
+          .owner_initial_error_count = initial_error_count,
+          .region_index = i,
+      };
+      IREE_RETURN_IF_ERROR(loom_verify_region(
+          state, regions[i], descriptor ? &contract : NULL, isolated));
     }
-    const loom_region_descriptor_t* descriptor =
-        loom_op_vtable_region_descriptor(vtable, i);
-    loom_verify_region_contract_t contract = {
-        .op = op,
-        .vtable = vtable,
-        .descriptor = descriptor,
-        .region_index = i,
-    };
-    IREE_RETURN_IF_ERROR(loom_verify_region(
-        state, regions[i], descriptor ? &contract : NULL, isolated));
-  }
-  loom_verify_func_purity_body_effects(state, op, vtable);
-  IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
-
-  if (vtable->loop_like && state->result->error_count == initial_error_count) {
-    loom_verify_loop_entry_types(state, op, vtable->loop_like);
+    loom_verify_func_purity_body_effects(state, op, vtable);
     IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
+
+    if (vtable->loop_like &&
+        state->result->error_count == initial_error_count) {
+      loom_verify_loop_entry_types(state, op, vtable->loop_like);
+      IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
+    }
   }
 
   // Op-specific verification callback. Runs last, and only when this op and

@@ -552,8 +552,6 @@ low_func_def = Op(
     verify="loom_low_func_def_verify",
     constraints=[
         BlockArgsSatisfy("body", REGISTER),
-        YieldCountMatchesResults("body", "results"),
-        YieldTypesMatchResults("body", "results"),
     ],
     format=[
         *_FUNC_MODIFIER_FORMAT,

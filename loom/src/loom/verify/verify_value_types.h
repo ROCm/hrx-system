@@ -9,6 +9,12 @@
 
 #include "loom/verify/verify_state.h"
 
+// Checks a structurally verified callable exit against its function-like
+// result tuple.
+iree_status_t loom_verify_func_like_exit(loom_verify_state_t* state,
+                                         const loom_op_t* func_op,
+                                         const loom_op_t* exit_op);
+
 // Checks a structurally verified loop's entry arguments against its recurring
 // result type scheme, including counted induction variable type and arity.
 void loom_verify_loop_entry_types(loom_verify_state_t* state,

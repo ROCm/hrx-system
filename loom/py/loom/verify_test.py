@@ -423,6 +423,108 @@ func.def @f(%condition: i1, %initial: index) -> (index) {
     )
 
 
+def test_python_verifier_checks_callable_exit_count() -> None:
+    parser = _test_parser()
+    module = parser.parse(
+        """
+test.func @f(%value: i32) -> (i32, i32) {
+  test.yield %value : i32
+}
+"""
+    )
+
+    diagnostics = verify_module(module, ops=ALL_TEST_OPS)
+
+    assert [diagnostic.error_id for diagnostic in diagnostics.diagnostics] == [
+        "ERR_STRUCTURE_008"
+    ]
+    assert diagnostics.diagnostics[0].source is not None
+    assert diagnostics.diagnostics[0].source.endswith("test.yield")
+
+
+def test_python_verifier_checks_callable_exit_type() -> None:
+    parser = _test_parser()
+    module = parser.parse(
+        """
+test.func @f(%value: i64) -> (i32) {
+  test.yield %value : i64
+}
+"""
+    )
+
+    diagnostics = verify_module(module, ops=ALL_TEST_OPS)
+
+    assert [diagnostic.error_id for diagnostic in diagnostics.diagnostics] == [
+        "ERR_TYPE_009"
+    ]
+    assert _diagnostic_text_contains(diagnostics, "callable exit type mismatch")
+
+
+def test_python_verifier_checks_only_direct_body_exits() -> None:
+    parser = _test_parser()
+    module = parser.parse(
+        """
+test.func @nested(%condition: i1, %value: index) -> (index) {
+  test.optional_region %condition {
+    test.yield
+  }
+  test.yield %value : index
+}
+
+test.split_func @projected(%value: i32) {
+  test.yield %value : i32
+} launch {
+  test.yield
+}
+"""
+    )
+
+    diagnostics = verify_module(module, ops=ALL_TEST_OPS)
+
+    assert not diagnostics.has_errors
+
+
+def test_python_verifier_remaps_dependent_callable_results() -> None:
+    from loom.builders import default_ops
+
+    parser = Parser()
+    parser.register_ops(default_ops())
+    parser.register_types(ALL_BUILTIN_TYPES)
+    module = parser.parse(
+        """
+func.def @f(%storage: buffer) -> (%result_layout: encoding<layout>, view<2x3xf32, %result_layout>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %base = index.constant 0 : offset
+  %view = buffer.view %storage[%base] : buffer -> view<2x3xf32, %layout>
+  func.return %layout, %view : encoding<layout>, view<2x3xf32, %layout>
+}
+"""
+    )
+
+    diagnostics = verify_module(module)
+
+    assert not diagnostics.has_errors
+
+
+def test_python_verifier_remaps_recursive_callable_results() -> None:
+    from loom.builders import default_ops
+
+    parser = Parser()
+    parser.register_ops(default_ops())
+    parser.register_types(ALL_BUILTIN_TYPES)
+    module = parser.parse(
+        """
+func.def @f(%width: index, %callback: (vector<[%width]xf32>) -> ()) -> (%result_width: index, (vector<[%result_width]xf32>) -> ()) {
+  func.return %width, %callback : index, (vector<[%width]xf32>) -> ()
+}
+"""
+    )
+
+    diagnostics = verify_module(module)
+
+    assert not diagnostics.has_errors
+
+
 def test_verifier_defers_template_ancestor_requirement() -> None:
     diagnostics = _verify_required_ancestor_in_template(
         Operation(name="test.requires_context")

@@ -1,0 +1,108 @@
+// Direct callable exits must return the declared result tuple.
+// RUN: verify
+func.def @missing_result(%value: i32) -> (i32, i32) {
+  // ERROR@+1: STRUCTURE/008 {actual_count="1", expected_count="2"}
+  func.return %value : i32
+}
+
+// ====
+
+func.def @extra_result(%value: i32) -> (i32) {
+  // ERROR@+1: STRUCTURE/008 {actual_count="2", expected_count="1"}
+  func.return %value, %value : i32, i32
+}
+
+// ====
+
+func.def @wrong_result_type() -> (i32) {
+  %value = scalar.constant 5 : i64
+  // ERROR@+1: TYPE/009 {yield_type="i64", expected_type="i32"}
+  func.return %value : i64
+}
+
+// ====
+
+// Every direct CFG exit participates in the callable result contract.
+func.def @cfg_exit(%condition: i1, %value: i32) -> (i32) {
+  cfg.cond_br %condition, ^valid, ^invalid
+^valid:
+  func.return %value : i32
+^invalid:
+  // ERROR@+1: STRUCTURE/008 {actual_count="0", expected_count="1"}
+  func.return
+}
+
+// ====
+
+// Result identities map positionally onto the returned values before checking
+// dependent co-result types.
+func.def @dependent_result(%storage: buffer) -> (%result_layout: encoding<layout>, view<2x3xf32, %result_layout>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %base = index.constant 0 : offset
+  %view = buffer.view %storage[%base] : buffer -> view<2x3xf32, %layout>
+  func.return %layout, %view : encoding<layout>, view<2x3xf32, %layout>
+}
+
+// ====
+
+// Co-result remapping must preserve which returned identity a dependent type
+// names, rather than accepting any value of the same encoding type.
+func.def @wrong_dependent_result(%storage: buffer) -> (%result_layout: encoding<layout>, view<2x3xf32, %result_layout>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %other_layout = encoding.layout.dense : encoding<layout>
+  %base = index.constant 0 : offset
+  %view = buffer.view %storage[%base] : buffer -> view<2x3xf32, %other_layout>
+  // ERROR@+1: TYPE/009
+  func.return %layout, %view : encoding<layout>, view<2x3xf32, %other_layout>
+}
+
+// ====
+
+// Recursive result types use the same positional remap without recursively
+// replaying shared type graphs.
+func.def @recursive_dependent_result(%width: index, %callback: (vector<[%width]xf32>) -> ()) -> (%result_width: index, (vector<[%result_width]xf32>) -> ()) {
+  func.return %width, %callback : index, (vector<[%width]xf32>) -> ()
+}
+
+// ====
+
+func.def @wrong_recursive_dependent_result(%width: index, %other_width: index, %callback: (vector<[%other_width]xf32>) -> ()) -> (%result_width: index, (vector<[%result_width]xf32>) -> ()) {
+  // ERROR@+1: TYPE/009
+  func.return %width, %callback : index, (vector<[%other_width]xf32>) -> ()
+}
+
+// ====
+
+// Template providers use the same FuncLike exit contract as ordinary
+// functions; materialization does not repair a malformed provider signature.
+template.decl @provider_family() -> (i32)
+
+template.def<@provider_family> @missing_provider_result() -> (i32) {
+  // ERROR@+1: STRUCTURE/008
+  template.return
+}
+
+// ====
+
+// A same-kind terminator nested under the body does not exit the callable.
+test.func @nested_yield(%condition: i1, %value: index) -> (index) {
+  test.optional_region %condition {
+    test.yield
+  }
+  test.yield %value : index
+}
+
+// ====
+
+// Only the FuncLike body region owns callable exits. A projected configuration
+// region may use the same terminator kind for its own independent contract.
+test.split_func @projected_region(%value: i32) {
+  test.yield %value : i32
+} launch {
+  test.yield
+}
+
+// ====
+
+// Bodyless function-like declarations have no callable exits to verify.
+func.decl @external() -> (i32)
