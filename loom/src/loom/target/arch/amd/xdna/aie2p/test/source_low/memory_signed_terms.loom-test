@@ -61,6 +61,37 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @signed_varying_wo
 
 // ====
 
+func.def @signed_factored_word(%input: buffer, %table: buffer) -> (i32) {
+  %source_origin = index.constant 0 : offset
+  %source = buffer.view %input[%source_origin] : buffer -> view<1xi32>
+  %raw = view.load %source[0] : view<1xi32> -> i32
+  %signed = scalar.assume %raw [range(%raw, -64, 63)] : i32
+  %bias = scalar.constant 64 : i32
+  %ordinal = scalar.addi %signed, %bias : i32
+  %position = index.cast %ordinal : i32 to index
+  %base = index.constant 0 : offset
+  %layout = encoding.layout.strided [2] : encoding<layout>
+  %view = buffer.view %table[%base] : buffer -> view<128xi32, %layout>
+  %value = view.load %view[%position] : view<128xi32, %layout> -> i32
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @signed_factored_word() -> (reg<aie2p.er>) asm {
+  %source = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %signed = lda %source, 0
+  %18 = mov.static-byte-offset 512
+  %19 = mov.i32 3
+  %20 = lshl %signed, %19
+  %21 = add.rr %20, %18
+  %22 = mov.address-index %21
+  %value = lda.i32.index %view, %22
+  return %value
+}
+
+// ====
+
 func.def @signed_varying_byte(%input: buffer, %table: buffer) -> (i8) {
   %source_origin = index.constant 0 : offset
   %source = buffer.view %input[%source_origin] : buffer -> view<1xi32>

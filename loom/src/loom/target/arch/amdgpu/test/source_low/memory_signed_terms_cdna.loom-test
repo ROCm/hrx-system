@@ -67,6 +67,41 @@ low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @signed_varying_word() ->
 
 // ====
 
+func.def @signed_factored_word(%input: buffer, %table: buffer) -> (i32) {
+  %source_origin = index.constant 0 : offset
+  %source = buffer.view %input[%source_origin] : buffer -> view<1xi32>
+  %raw = view.load %source[0] : view<1xi32> -> i32
+  %signed = scalar.assume %raw [range(%raw, -64, 63)] : i32
+  %bias = scalar.constant 64 : i32
+  %ordinal = scalar.addi %signed, %bias : i32
+  %position = index.cast %ordinal : i32 to index
+  %base = index.constant 0 : offset
+  %layout = encoding.layout.strided [2] : encoding<layout>
+  %view = buffer.view %table[%base] : buffer -> view<128xi32, %layout>
+  %value = view.load %view[%position] : view<128xi32, %layout> -> i32
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @signed_factored_word() -> (reg<amdgpu.vgpr>) asm {
+  %source = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %view = resource<hal_binding> {extent = 1020, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %17 = v_mov_b32 0
+  %signed = global_load_dword_saddr %17, %source
+  %19 = v_lshlrev_b32_src0_inline %signed, 3
+  %20 = v_ashrrev_i32_src0_inline %signed, 29
+  %21 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %22 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %23, %24 = v_add_co_u32 %21, %19
+  %25 = v_mov_b32_copy %22
+  %26, %27 = v_addc_co_u32 %25, %20, %24
+  %28 = concat(%23, %26) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %value = global_load_dword_vaddr %28 {offset = 512}
+  return %value
+}
+
+// ====
+
 func.def @signed_varying_byte(%input: buffer, %table: buffer) -> (i8) {
   %source_origin = index.constant 0 : offset
   %source = buffer.view %input[%source_origin] : buffer -> view<1xi32>

@@ -384,6 +384,49 @@ static iree_status_t loom_low_lower_rule_source_memory_lookup_byte_offset(
   return iree_ok_status();
 }
 
+iree_status_t loom_low_lower_rule_materialize_source_memory_dynamic_term(
+    loom_low_lower_context_t* context,
+    const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
+    const loom_low_lower_source_memory_t* source_memory,
+    const loom_low_source_memory_access_plan_t* source_memory_access,
+    uint8_t term_ordinal, loom_value_id_t* out_value_id) {
+  IREE_ASSERT_NE(source_memory->byte_offset_materializer_ordinal,
+                 LOOM_LOW_LOWER_SOURCE_MEMORY_MATERIALIZER_NONE);
+  IREE_ASSERT_LT(term_ordinal, source_memory_access->dynamic_term_count);
+  const loom_low_lower_source_memory_byte_offset_materializer_t* materializer =
+      loom_low_lower_rule_set_source_memory_byte_offset_materializer(
+          rule_set, source_memory);
+  const loom_value_id_t source_value_id =
+      source_memory_access->dynamic_terms[term_ordinal].index;
+  const loom_scalar_type_t scalar_type =
+      loom_type_element_type(loom_module_value_type(
+          loom_low_lower_context_module(context), source_value_id));
+  if (!loom_scalar_type_is_integer(scalar_type)) {
+    return loom_low_lower_lookup_value(context, source_value_id, out_value_id);
+  }
+  const loom_low_lower_source_memory_integer_conversion_t* conversion =
+      &materializer->integer_conversions[scalar_type - LOOM_SCALAR_TYPE_I1];
+  if (conversion->descriptor_ref != LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE) {
+    IREE_RETURN_IF_ERROR(
+        loom_low_lower_lookup_value(context, source_value_id, out_value_id));
+    return loom_low_lower_rule_source_memory_convert_integer(
+        context, rule_set, conversion, materializer->constant_descriptor_ref,
+        materializer->constant_immediate_string_ref, *out_value_id,
+        source_op->location, out_value_id);
+  }
+  loom_low_lower_resolved_descriptor_t constant_descriptor = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_rule_source_memory_resolve_materializer_descriptor(
+          context, rule_set, materializer->constant_descriptor_ref,
+          &constant_descriptor));
+  loom_type_t carrier_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_low_lower_rule_descriptor_result_type(
+      context, constant_descriptor.descriptor, 0, &carrier_type));
+  return loom_low_lower_rule_source_memory_lookup_byte_offset(
+      context, rule_set, materializer, source_value_id, carrier_type,
+      source_op->location, out_value_id);
+}
+
 static iree_status_t loom_low_lower_rule_materialize_source_memory_term(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,

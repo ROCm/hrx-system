@@ -105,7 +105,12 @@ class SourceMemoryIntegerConversion:
 
 @dataclass(frozen=True, slots=True)
 class SourceMemoryByteOffsetMaterializer:
-    """Low descriptors used to materialize a dynamic byte offset value."""
+    """Defines target arithmetic for canonical dynamic byte offsets.
+
+    Integer conversions establish the carrier for canonical terms whether a
+    term is consumed directly by a target descriptor or composed into a
+    complete byte offset with the arithmetic descriptors.
+    """
 
     constant: Descriptor
     add: Descriptor

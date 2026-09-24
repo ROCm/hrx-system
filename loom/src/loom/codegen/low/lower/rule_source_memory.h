@@ -76,6 +76,17 @@ loom_low_lower_rule_source_memory_emits_match(
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     const loom_low_lower_rule_t* rule);
 
+// Resolves one canonical dynamic address term in the descriptor-declared byte
+// arithmetic carrier. Fixed-width source integers use the selected memory
+// contract's numeric conversion before the term is consumed directly by a
+// target descriptor.
+iree_status_t loom_low_lower_rule_materialize_source_memory_dynamic_term(
+    loom_low_lower_context_t* context,
+    const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
+    const loom_low_lower_source_memory_t* source_memory,
+    const loom_low_source_memory_access_plan_t* source_memory_access,
+    uint8_t term_ordinal, loom_value_id_t* out_value_id);
+
 // Materializes the canonical dynamic byte offset selected by a source-memory
 // plan in the descriptor-declared carrier. Wider source terms are projected
 // before arithmetic; the selected memory contract owns the address range proof.

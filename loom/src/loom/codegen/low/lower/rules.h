@@ -501,10 +501,11 @@ typedef struct loom_low_lower_source_memory_integer_conversion_t {
 static_assert(sizeof(loom_low_lower_source_memory_integer_conversion_t) == 24,
               "source-memory integer conversion must be 24 bytes");
 
-// Materializes canonical byte-offset arithmetic in the constant descriptor's
-// integer carrier. All arithmetic descriptors use that same carrier; source
-// terms are converted before multiplication or addition. Source-memory matching
-// owns the complete-address range proof, including modular narrowing.
+// Defines canonical byte-offset arithmetic in the constant descriptor's
+// integer carrier. Source terms use the same conversions whether consumed
+// directly by a target descriptor or composed with the arithmetic descriptors.
+// Source-memory matching owns the complete-address range proof, including
+// modular narrowing.
 typedef struct loom_low_lower_source_memory_byte_offset_materializer_t {
   // Rule-set string reference for the integer constant immediate field.
   loom_string_ref_t constant_immediate_string_ref;

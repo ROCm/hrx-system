@@ -118,6 +118,9 @@ def _factored_index_emit(
             "scale": dynamic_byte_stride_factor,
         },
         source_memory=source_memory,
+        source_memory_byte_offset_materializer=_byte_offset_materializer(
+            descriptor_lookup
+        ),
     )
 
 
@@ -240,7 +243,11 @@ def _memory_rule(
         source_memory=source_memory,
         source_memory_byte_offset_materializer=(
             _byte_offset_materializer(descriptor_lookup)
-            if addressing is _MemoryAddressing.MATERIALIZE_BYTE_OFFSET
+            if addressing
+            in {
+                _MemoryAddressing.DIRECT,
+                _MemoryAddressing.MATERIALIZE_BYTE_OFFSET,
+            }
             else None
         ),
     )

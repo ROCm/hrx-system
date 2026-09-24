@@ -1,9 +1,100 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_signed_terms.loom-test
-// TEMPLATE-EXCLUDE: @signed_uniform_word x86 does not yet widen a retained narrow arithmetic index to its 64-bit address carrier.
-// TEMPLATE-EXCLUDE: @signed_varying_word x86 does not yet widen a retained narrow arithmetic index to its 64-bit address carrier.
-// TEMPLATE-EXCLUDE: @signed_varying_byte x86 does not yet widen a retained narrow arithmetic index to its 64-bit address carrier.
 // TEMPLATE-EXCLUDE: @workgroup_negative_vector_coefficient x86 object functions have no workgroup memory address space.
 // RUN: emit source-low target=x86:avx2 output=low
+
+func.def @signed_uniform_word(%input: i32, %table: buffer) -> (i32) {
+  %signed = scalar.assume %input [range(%input, -128, 127)] : i32
+  %bias = scalar.constant 128 : i32
+  %ordinal = scalar.addi %signed, %bias : i32
+  %position = index.cast %ordinal : i32 to index
+  %base = index.constant 0 : offset
+  %view = buffer.view %table[%base] : buffer -> view<256xi32>
+  %value = view.load %view[%position] : view<256xi32> -> i32
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @signed_uniform_word(%signed: reg<x86.gpr32>, %table: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+  %13 = movsxd.gpr64.gpr32 %signed
+  %value = mov.load.indexed.gpr32 %table, %13 {disp32 = 512, scale = 4}
+  return %value
+}
+
+// ====
+
+func.def @signed_varying_word(%input: buffer, %table: buffer) -> (i32) {
+  %source_origin = index.constant 0 : offset
+  %source = buffer.view %input[%source_origin] : buffer -> view<1xi32>
+  %raw = view.load %source[0] : view<1xi32> -> i32
+  %signed = scalar.assume %raw [range(%raw, -128, 127)] : i32
+  %bias = scalar.constant 128 : i32
+  %ordinal = scalar.addi %signed, %bias : i32
+  %position = index.cast %ordinal : i32 to index
+  %base = index.constant 0 : offset
+  %view = buffer.view %table[%base] : buffer -> view<256xi32>
+  %value = view.load %view[%position] : view<256xi32> -> i32
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @signed_varying_word(%input: reg<x86.gpr64>, %table: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+  %signed = mov.load.gpr32 %input {disp32 = 0}
+  %17 = movsxd.gpr64.gpr32 %signed
+  %value = mov.load.indexed.gpr32 %table, %17 {disp32 = 512, scale = 4}
+  return %value
+}
+
+// ====
+
+func.def @signed_factored_word(%input: buffer, %table: buffer) -> (i32) {
+  %source_origin = index.constant 0 : offset
+  %source = buffer.view %input[%source_origin] : buffer -> view<1xi32>
+  %raw = view.load %source[0] : view<1xi32> -> i32
+  %signed = scalar.assume %raw [range(%raw, -64, 63)] : i32
+  %bias = scalar.constant 64 : i32
+  %ordinal = scalar.addi %signed, %bias : i32
+  %position = index.cast %ordinal : i32 to index
+  %base = index.constant 0 : offset
+  %layout = encoding.layout.strided [2] : encoding<layout>
+  %view = buffer.view %table[%base] : buffer -> view<128xi32, %layout>
+  %value = view.load %view[%position] : view<128xi32, %layout> -> i32
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @signed_factored_word(%input: reg<x86.gpr64>, %table: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+  %signed = mov.load.gpr32 %input {disp32 = 0}
+  %18 = movsxd.gpr64.gpr32 %signed
+  %19 = lea.scale %18 {disp32 = 128, scale = 2}
+  %value = mov.load.indexed.gpr32 %table, %19 {disp32 = 0, scale = 4}
+  return %value
+}
+
+// ====
+
+func.def @signed_varying_byte(%input: buffer, %table: buffer) -> (i8) {
+  %source_origin = index.constant 0 : offset
+  %source = buffer.view %input[%source_origin] : buffer -> view<1xi32>
+  %raw = view.load %source[0] : view<1xi32> -> i32
+  %signed = scalar.assume %raw [range(%raw, -128, 127)] : i32
+  %position = index.cast %signed : i32 to index
+  %base = index.constant 128 : offset
+  %view = buffer.view %table[%base] : buffer -> view<256xi8>
+  %bias = index.constant 128 : index
+  %ordinal = index.add %position, %bias : index
+  %value = view.load %view[%ordinal] : view<256xi8> -> i8
+  func.return %value : i8
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @signed_varying_byte(%input: reg<x86.gpr64>, %table: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+  %signed = mov.load.gpr32 %input {disp32 = 0}
+  %17 = movsxd.gpr64.gpr32 %signed
+  %value = movzx.load.indexed.u8.gpr32 %table, %17 {disp32 = 256, scale = 1}
+  return %value
+}
+
+// ====
 
 func.def @signed_irregular_stride(%input: buffer, %table: buffer) -> (i32) {
   %source_origin = index.constant 0 : offset

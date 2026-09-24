@@ -55,6 +55,36 @@ low.func.def target<vm.core> abi(vm_function) @signed_varying_word(%source: reg<
 
 // ====
 
+func.def @signed_factored_word(%input: buffer, %table: buffer) -> (i32) {
+  %source_origin = index.constant 0 : offset
+  %source = buffer.view %input[%source_origin] : buffer -> view<1xi32>
+  %raw = view.load %source[0] : view<1xi32> -> i32
+  %signed = scalar.assume %raw [range(%raw, -64, 63)] : i32
+  %bias = scalar.constant 64 : i32
+  %ordinal = scalar.addi %signed, %bias : i32
+  %position = index.cast %ordinal : i32 to index
+  %base = index.constant 0 : offset
+  %layout = encoding.layout.strided [2] : encoding<layout>
+  %view = buffer.view %table[%base] : buffer -> view<128xi32, %layout>
+  %value = view.load %view[%position] : view<128xi32, %layout> -> i32
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @signed_factored_word(%source: reg<vm.ref : buffer>, %view: reg<vm.ref : buffer>) -> (reg<vm.value : i32>) asm {
+  %17 = constant.i64 0
+  %signed = buffer.load %source, %17, %17, 0, "i32.x1" : reg<vm.value : i32>
+  %19 = constant.i64 512
+  %20 = conversion.integer %signed, "s32.to.i64" : reg<vm.value>
+  %21 = constant.i64 3 : reg<vm.value>
+  %22 = integer.shift.left.i64 %20, %21 : reg<vm.value>
+  %23 = integer.add.i64 %22, %19
+  %value = buffer.load %view, %23, %23, 0, "i32.x1" : reg<vm.value : i32>
+  return %value
+}
+
+// ====
+
 func.def @signed_varying_byte(%input: buffer, %table: buffer) -> (i8) {
   %source_origin = index.constant 0 : offset
   %source = buffer.view %input[%source_origin] : buffer -> view<1xi32>

@@ -117,6 +117,12 @@ static iree_status_t loom_low_lower_rule_low_value(
       IREE_ASSERT_EQ(value_ref->materializer_index, 0);
       IREE_ASSERT_LT(value_ref->index,
                      source_memory_access->dynamic_term_count);
+      if (source_memory->byte_offset_materializer_ordinal !=
+          LOOM_LOW_LOWER_SOURCE_MEMORY_MATERIALIZER_NONE) {
+        return loom_low_lower_rule_materialize_source_memory_dynamic_term(
+            context, rule_set, source_op, source_memory, source_memory_access,
+            value_ref->index, out_low_value_id);
+      }
       const loom_value_id_t source_value_id =
           source_memory_access->dynamic_terms[value_ref->index].index;
       return loom_low_lower_lookup_value(context, source_value_id,
