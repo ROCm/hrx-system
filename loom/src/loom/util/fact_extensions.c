@@ -143,7 +143,10 @@ static uint32_t loom_value_fact_hash_view_reference(
   hash = loom_structural_hash_mix_u32(hash, reference.buffer_value_id);
   hash = loom_structural_hash_mix_u32(hash, reference.alias_scope_id);
   hash = loom_structural_hash_mix_u32(hash, reference.nullability);
-  hash = loom_structural_hash_mix_u32(hash, reference.address_bitwidth);
+  // An absent optional contract contributes no hash state.
+  if (reference.address_bitwidth != 0) {
+    hash = loom_structural_hash_mix_u32(hash, reference.address_bitwidth);
+  }
   return loom_value_fact_hash_reference_origin(reference.origin, hash);
 }
 
