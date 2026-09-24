@@ -458,25 +458,26 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_defers_non_acti
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_closes_unspillable_storage_before_reopening strategy=resource-stall diagnostics=candidates output=none
+// RUN: with-checks emit low-schedule-json @resource_stall_closes_unspillable_storage_before_reopening strategy=resource-stall
 
 test.target<low_core> @test_target
 
 low.func.def target<test.low.core>(@test_target) @resource_stall_closes_unspillable_storage_before_reopening(%condition: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
   // The first fixed-register setup cannot expose its consumer until the
   // multiply is scheduled.
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.mul.i32", rejected_packet="low.copy"}
   %prepared = test.mul.i32 %lhs, %rhs
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="low.copy", rejected_packet="low.copy"}
   %fixed0 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
   // Completing the open unspillable value must beat a zero-stall setup that
   // would require a second physical register in a one-register class.
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="test.fixed.select.i32", rejected_packet="low.copy"}
   %select0 = test.fixed.select.i32 %prepared, %rhs, %fixed0
   %fixed1 = copy %prepared : reg<test.i32> -> reg<test.fixed.r0>
   %select1 = test.fixed.select.i32 %lhs, %rhs, %fixed1
   return %select0, %select1
 }
+
+// ----
+CHECK: *"scheduled_node_indices":[0,1,2,3,4,5]*
+CHECK: *{"from":0,"to":1,"kind":"order",*
 
 // ====
 // RUN: emit low-schedule-json @resource_stall_advances_smallest_active_unspillable_completion strategy=resource-stall diagnostics=candidates output=none
@@ -503,84 +504,57 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_advances_smalle
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_recovers_beyond_deferred_setup_window strategy=resource-stall diagnostics=candidates output=none
+// RUN: with-checks emit low-schedule-json @resource_stall_keeps_exclusive_setup_out_of_ready_window strategy=resource-stall
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_recovers_beyond_deferred_setup_window(%condition: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
-  // These fill the bounded source-order nominee window. None is actionable
-  // until %prepared is available, and every destination is the same physical
-  // register, so issuing any copy first would create avoidable storage debt.
-  // REMARK@+1: BACKEND/015
+low.func.def target<test.low.core>(@test_target) @resource_stall_keeps_exclusive_setup_out_of_ready_window(%condition: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  // Every destination is the same physical register. These copies stay outside
+  // the ready set until %prepared is available, so the bounded nominee window
+  // exposes the work that must precede their consumers.
   %fixed0 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  // REMARK@+1: BACKEND/015
   %fixed1 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  // REMARK@+1: BACKEND/015
   %fixed2 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  // REMARK@+1: BACKEND/015
   %fixed3 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  // REMARK@+1: BACKEND/015
   %fixed4 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  // REMARK@+1: BACKEND/015
   %fixed5 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  // REMARK@+1: BACKEND/015
   %fixed6 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  // REMARK@+1: BACKEND/015
   %fixed7 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  // REMARK@+1: BACKEND/015
   %fixed8 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  // REMARK@+1: BACKEND/015
   %fixed9 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  // REMARK@+1: BACKEND/015
   %fixed10 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  // REMARK@+1: BACKEND/015
   %fixed11 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  // REMARK@+1: BACKEND/015
   %fixed12 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  // REMARK@+1: BACKEND/015
   %fixed13 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  // REMARK@+1: BACKEND/015
   %fixed14 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
   %fixed15 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", ready_candidate_count="17", scored_candidate_count="17", chosen_packet="test.const.i32", rejected_packet="low.copy"}
   %constant = test.const.i32 1
-  // The rematerializable leaf sits beyond the bounded source-order window but
-  // is the only safe way to expose the consumer shared by every fixed setup.
-  // REMARK@+1: BACKEND/015
+  // Preparation precedes all fixed setup, then each selection releases the
+  // register before the next copy occupies it.
   %prepared = test.add.i32 %lhs, %constant
-  // REMARK@+1: BACKEND/015
   %select0 = test.fixed.select.i32 %prepared, %rhs, %fixed0
-  // REMARK@+1: BACKEND/015
   %select1 = test.fixed.select.i32 %prepared, %rhs, %fixed1
-  // REMARK@+1: BACKEND/015
   %select2 = test.fixed.select.i32 %prepared, %rhs, %fixed2
-  // REMARK@+1: BACKEND/015
   %select3 = test.fixed.select.i32 %prepared, %rhs, %fixed3
-  // REMARK@+1: BACKEND/015
   %select4 = test.fixed.select.i32 %prepared, %rhs, %fixed4
-  // REMARK@+1: BACKEND/015
   %select5 = test.fixed.select.i32 %prepared, %rhs, %fixed5
-  // REMARK@+1: BACKEND/015
   %select6 = test.fixed.select.i32 %prepared, %rhs, %fixed6
-  // REMARK@+1: BACKEND/015
   %select7 = test.fixed.select.i32 %prepared, %rhs, %fixed7
-  // REMARK@+1: BACKEND/015
   %select8 = test.fixed.select.i32 %prepared, %rhs, %fixed8
-  // REMARK@+1: BACKEND/015
   %select9 = test.fixed.select.i32 %prepared, %rhs, %fixed9
-  // REMARK@+1: BACKEND/015
   %select10 = test.fixed.select.i32 %prepared, %rhs, %fixed10
-  // REMARK@+1: BACKEND/015
   %select11 = test.fixed.select.i32 %prepared, %rhs, %fixed11
-  // REMARK@+1: BACKEND/015
   %select12 = test.fixed.select.i32 %prepared, %rhs, %fixed12
-  // REMARK@+1: BACKEND/015
   %select13 = test.fixed.select.i32 %prepared, %rhs, %fixed13
-  // REMARK@+1: BACKEND/015
   %select14 = test.fixed.select.i32 %prepared, %rhs, %fixed14
   %select15 = test.fixed.select.i32 %prepared, %rhs, %fixed15
   return %select15
 }
+
+// ----
+CHECK: *"scheduled_node_indices":[16,17,0,18,1,19,2,20,3,21,4,22,5,23,6,24,7,25,8,26,9,27,10,28,11,29,12,30,13,31,14,32,15,33,34]*
+CHECK: *{"from":17,"to":0,"kind":"order",*
+CHECK: *{"from":17,"to":15,"kind":"order",*
 
 // ====
 // RUN: emit low-schedule-json @resource_stall_preserves_unconstrained_leaf_order strategy=resource-stall diagnostics=candidates output=none
@@ -617,26 +591,27 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_materializes_op
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_prefers_actionable_rematerialization strategy=resource-stall diagnostics=candidates output=none
+// RUN: with-checks emit low-schedule-json @resource_stall_orders_exclusive_setup_after_prerequisites strategy=resource-stall
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @resource_stall_prefers_actionable_rematerialization(%condition: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+low.func.def target<test.low.core>(@test_target) @resource_stall_orders_exclusive_setup_after_prerequisites(%condition: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
   // Neither fixed-register setup can expose its consumer until %prepared is
   // available. Materializing %constant first immediately exposes that work and
   // avoids occupying the singleton register while the arithmetic chain runs.
-  // REMARK@+1: BACKEND/015
   %fixed0 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
   %fixed1 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.const.i32", rejected_packet="low.copy"}
   %constant = test.const.i32 1
-  // REMARK@+1: BACKEND/015
   %prepared = test.add.i32 %lhs, %constant
-  // REMARK@+1: BACKEND/015
   %select0 = test.fixed.select.i32 %prepared, %rhs, %fixed0
   %select1 = test.fixed.select.i32 %select0, %rhs, %fixed1
   return %select1
 }
+
+// ----
+CHECK: *"scheduled_node_indices":[2,3,0,4,1,5,6]*
+CHECK: *{"from":3,"to":0,"kind":"order",*
+CHECK: *{"from":4,"to":1,"kind":"order",*
 
 // ====
 // RUN: emit low-schedule-json @resource_stall_fills_unconstrained_issue_gap strategy=resource-stall diagnostics=candidates output=none

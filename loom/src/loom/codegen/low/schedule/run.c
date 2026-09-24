@@ -687,8 +687,11 @@ static iree_status_t loom_low_schedule_initialize_descriptor_tables(
         (void**)&state->call_node_indices));
   }
   iree_host_size_t call_index = 0;
+  const bool is_repair =
+      iree_bitmap_any_set(state->options->per_user_rematerialized_values);
   for (iree_host_size_t node_index = 0; node_index < node_count; ++node_index) {
-    const loom_low_schedule_node_t* node = &state->nodes[node_index];
+    loom_low_schedule_node_t* node = &state->nodes[node_index];
+    loom_low_schedule_setup_order_classify_node(state, node, is_repair);
     if (node->descriptor != NULL) {
       max_descriptor_operand_count =
           iree_max(max_descriptor_operand_count, node->operand_count);
@@ -1769,8 +1772,7 @@ static iree_status_t loom_low_schedule_build(
         loom_liveness_order_empty(), arena, &liveness);
   }
   if (iree_status_is_ok(status)) {
-    if (node_count != 0 &&
-        iree_bitmap_any_set(options->per_user_rematerialized_values)) {
+    if (state.setup_order.has_members) {
       status = loom_low_schedule_setup_order_initialize(
           (uint32_t)node_count, scratch_arena, &state.setup_order);
     }

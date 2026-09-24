@@ -164,7 +164,7 @@ control-relocation index=3 record=6 word=1 binding=3 addend=0 alignment=4
 control-relocation index=4 record=9 word=1 binding=4 addend=0 alignment=4
 
 resident-program workers=1
-resident worker=0 entry=@parallel_folded_composite_array$worker$0 tile=(0,2) code-bytes=712 resources=0 fixups=6
+resident worker=0 entry=@parallel_folded_composite_array$worker$0 tile=(0,2) code-bytes=680 resources=0 fixups=6
 
 low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @parallel_folded_composite_array$worker$0() asm {
   %184 = storage {byte_alignment = 64, byte_length = 4} : low.storage<private>

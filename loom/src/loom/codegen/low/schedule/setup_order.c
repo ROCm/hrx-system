@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/codegen/low/schedule/context.h"
+#include "loom/codegen/low/schedule/pressure.h"
 
 iree_status_t loom_low_schedule_setup_order_initialize(
     uint32_t node_count, iree_arena_allocator_t* arena,
@@ -26,14 +27,31 @@ iree_status_t loom_low_schedule_setup_order_initialize(
 
 static bool loom_low_schedule_setup_order_is_member(
     const loom_low_schedule_build_state_t* state,
-    const loom_low_schedule_node_t* node) {
+    const loom_low_schedule_node_t* node, bool is_repair) {
   if (node->kind == LOOM_LOW_SCHEDULE_NODE_STRUCTURAL) {
-    return true;
+    if (is_repair) {
+      return true;
+    }
+    if (!iree_any_bit_set(node->flags,
+                          LOOM_LOW_SCHEDULE_NODE_FLAG_STORAGE_SETUP) ||
+        node->result_count != 1) {
+      return false;
+    }
+    // A singleton cannot hold a later setup while its consumer's prerequisites
+    // still need that location. Other storage remains available for pressure
+    // and issue-slot scheduling instead of acquiring these ordering edges.
+    const loom_low_schedule_value_record_t* result =
+        &state->values[loom_low_schedule_node_const_result_ordinals(node)[0]];
+    const uint16_t domain = loom_low_schedule_unspillable_completion_domain_id(
+        state, result->register_class_id);
+    return domain != UINT16_MAX && result->unit_count == 1 &&
+           state->pressure_limits.unspillable_completion_domains[domain]
+                   .capacity == 1;
   }
   // Input-free materializations carry no source register lifetime. Leave them
   // available to pressure scheduling: delaying a wide clear behind its peers
   // can let narrow producers fragment the register bank that it needs.
-  if (node->result_count != 1 || node->operand_count == 0) {
+  if (!is_repair || node->result_count != 1 || node->operand_count == 0) {
     return false;
   }
   const loom_value_id_t value_id =
@@ -42,6 +60,15 @@ static bool loom_low_schedule_setup_order_is_member(
   return value_id < state->options->per_user_rematerialized_values.bit_count &&
          iree_bitmap_test(state->options->per_user_rematerialized_values,
                           value_id);
+}
+
+void loom_low_schedule_setup_order_classify_node(
+    loom_low_schedule_build_state_t* state, loom_low_schedule_node_t* node,
+    bool is_repair) {
+  if (loom_low_schedule_setup_order_is_member(state, node, is_repair)) {
+    node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_ORDERED_SETUP;
+    state->setup_order.has_members = true;
+  }
 }
 
 static iree_status_t loom_low_schedule_setup_order_append(
@@ -95,7 +122,8 @@ iree_status_t loom_low_schedule_setup_order_finish(
         continue;
       }
       if (successor <= node_index || successor >= range_end ||
-          !loom_low_schedule_setup_order_is_member(state, node)) {
+          !iree_any_bit_set(node->flags,
+                            LOOM_LOW_SCHEDULE_NODE_FLAG_ORDERED_SETUP)) {
         continue;
       }
       const uint32_t completion = order->completion_nodes[successor];

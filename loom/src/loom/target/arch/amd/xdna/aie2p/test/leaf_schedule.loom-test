@@ -103,3 +103,36 @@ CHECK: *"source_order_boundaries":[4]*
 CHECK: *"scheduled_node_indices":[0,2,1,3,4]*
 CHECK: *{"from":0,"to":1,"kind":"effect",*"minimum_issue_separation_cycles":4,*
 CHECK: *{"from":1,"to":3,"kind":"effect",*"minimum_issue_separation_cycles":4,*
+
+// ====
+
+// The exceptional-value tail of scalar F32 multiplication uses r27 for each
+// predicate. Completing scalar packing is not enough to open a later predicate:
+// its selection still needs earlier selections using the same register.
+// RUN: with-checks emit low-schedule-json @multiply_special_values strategy=resource-stall
+
+low.func.def target<amd.xdna.aie2p.core> @multiply_special_values(%left_magnitude: reg<aie2p.er>, %infinity: reg<aie2p.er>, %right_magnitude: reg<aie2p.er>, %right_is_zero: reg<aie2p.er>, %quiet_nan: reg<aie2p.er>, %signed_infinity: reg<aie2p.er>, %left_is_zero: reg<aie2p.er>, %finite_product: reg<aie2p.er>, %left_bits: reg<aie2p.er>, %quiet_bit: reg<aie2p.er>, %right_bits: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %left_is_infinite = eq %left_magnitude, %infinity
+  %right_is_infinite = eq %right_magnitude, %infinity
+  %right_zero_predicate = copy %right_is_zero : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %left_infinite_product = sel.nez %quiet_nan, %signed_infinity, %right_zero_predicate
+  %left_zero_predicate = copy %left_is_zero : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %right_infinite_product = sel.nez %quiet_nan, %signed_infinity, %left_zero_predicate
+  %right_infinity_predicate = copy %right_is_infinite : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %right_special_product = sel.nez %right_infinite_product, %finite_product, %right_infinity_predicate
+  %left_infinity_predicate = copy %left_is_infinite : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %infinite_product = sel.nez %left_infinite_product, %right_special_product, %left_infinity_predicate
+  %left_is_nan = ltu %infinity, %left_magnitude
+  %right_is_nan = ltu %infinity, %right_magnitude
+  %left_quiet_nan = or %left_bits, %quiet_bit
+  %right_quiet_nan = or %right_bits, %quiet_bit
+  %right_nan_predicate = copy %right_is_nan : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %right_nan_product = sel.nez %right_quiet_nan, %infinite_product, %right_nan_predicate
+  %left_nan_predicate = copy %left_is_nan : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %product = sel.nez %left_quiet_nan, %right_nan_product, %left_nan_predicate
+  return %product
+}
+
+// ----
+CHECK: *"scheduled_node_indices":[*,2,3,4,5,*,6,7,*,8,9,14,15,16,17,18]*
+CHECK: *"register_class_id":33},"peak_live_units":1,"peak_live_values":1,*

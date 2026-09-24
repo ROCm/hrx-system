@@ -76,6 +76,8 @@ enum loom_low_schedule_node_flag_bits_e {
       LOOM_LOW_SCHEDULE_NODE_FLAG_PAIR_TRANSPARENT << 1u,
   // Structural node has an issue-cycle anchor but consumes no issue width.
   LOOM_LOW_SCHEDULE_NODE_FLAG_ZERO_ISSUE_WIDTH = 1u << 7,
+  // Setup whose complete consumer chain must follow its external prerequisites.
+  LOOM_LOW_SCHEDULE_NODE_FLAG_ORDERED_SETUP = 1u << 8,
 };
 typedef uint16_t loom_low_schedule_node_flags_t;
 
