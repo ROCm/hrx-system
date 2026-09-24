@@ -1,0 +1,255 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_float8.loom
+// RUN: emit source-low target=amdgpu:gfx1151 output=low
+
+// Both FP8 formats retain their bytes, including NaN payloads, through storage.
+func.def @copy_float8_scalar(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source_e4m3 = buffer.view %input[%base] : buffer -> view<8xf8E4M3>
+  %source_e5m2 = buffer.view %input[%base] : buffer -> view<8xf8E5M2>
+  %target_e4m3 = buffer.view %output[%base] : buffer -> view<8xf8E4M3>
+  %target_e5m2 = buffer.view %output[%base] : buffer -> view<8xf8E5M2>
+  %e4m3 = view.load %source_e4m3[3] : view<8xf8E4M3> -> f8E4M3
+  %e5m2 = view.load %source_e5m2[5] : view<8xf8E5M2> -> f8E5M2
+  view.store %e4m3, %target_e4m3[3] : f8E4M3, view<8xf8E4M3>
+  view.store %e5m2, %target_e5m2[5] : f8E5M2, view<8xf8E5M2>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @copy_float8_scalar() asm {
+  %source_e5m2 = resource<hal_binding> {extent = 8, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %target_e5m2 = resource<hal_binding> {extent = 8, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %11 = v_mov_b32 0
+  %e4m3 = global_load_i8_saddr %11, %source_e5m2 {offset = 3}
+  %e5m2 = global_load_i8_saddr %11, %source_e5m2 {offset = 5}
+  global_store_b8_saddr %11, %e4m3, %target_e5m2 {offset = 3}
+  global_store_b8_saddr %11, %e5m2, %target_e5m2 {offset = 5}
+  return
+}
+
+// ====
+
+// Full-register copies use the same physical transfers as integer bytes.
+func.def @copy_float8_vector(%input: buffer, %output: buffer) {
+  %first = index.constant 0 : offset
+  %second = index.constant 16 : offset
+  %source_e4m3 = buffer.view %input[%first] : buffer -> view<16xf8E4M3>
+  %source_e5m2 = buffer.view %input[%second] : buffer -> view<16xf8E5M2>
+  %target_e4m3 = buffer.view %output[%first] : buffer -> view<16xf8E4M3>
+  %target_e5m2 = buffer.view %output[%second] : buffer -> view<16xf8E5M2>
+  %e4m3 = vector.load %source_e4m3[0] : view<16xf8E4M3> -> vector<16xf8E4M3>
+  %e5m2 = vector.load %source_e5m2[0] : view<16xf8E5M2> -> vector<16xf8E5M2>
+  vector.store %e4m3, %target_e4m3[0] : vector<16xf8E4M3>, view<16xf8E4M3>
+  vector.store %e5m2, %target_e5m2[0] : vector<16xf8E5M2>, view<16xf8E5M2>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @copy_float8_vector() asm {
+  %source_e5m2 = resource<hal_binding> {extent = 32, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %target_e5m2 = resource<hal_binding> {extent = 32, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %12 = v_mov_b32 0
+  %e4m3 = global_load_b128_saddr %12, %source_e5m2
+  %e5m2 = global_load_b128_saddr %12, %source_e5m2 {offset = 16}
+  global_store_b128_saddr %12, %e4m3, %target_e5m2
+  global_store_b128_saddr %12, %e5m2, %target_e5m2 {offset = 16}
+  return
+}
+
+// ====
+
+// Short vectors preserve their exact span instead of widening the access.
+func.def @copy_float8_tail(%input: buffer, %output: buffer) {
+  %first = index.constant 1 : offset
+  %second = index.constant 3 : offset
+  %source_e4m3 = buffer.view %input[%first] : buffer -> view<2xf8E4M3>
+  %source_e5m2 = buffer.view %input[%second] : buffer -> view<2xf8E5M2>
+  %target_e4m3 = buffer.view %output[%first] : buffer -> view<2xf8E4M3>
+  %target_e5m2 = buffer.view %output[%second] : buffer -> view<2xf8E5M2>
+  %e4m3 = vector.load %source_e4m3[0] : view<2xf8E4M3> -> vector<2xf8E4M3>
+  %e5m2 = vector.load %source_e5m2[0] : view<2xf8E5M2> -> vector<2xf8E5M2>
+  vector.store %e4m3, %target_e4m3[0] : vector<2xf8E4M3>, view<2xf8E4M3>
+  vector.store %e5m2, %target_e5m2[0] : vector<2xf8E5M2>, view<2xf8E5M2>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @copy_float8_tail() asm {
+  %source_e5m2 = resource<hal_binding> {extent = 5, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %target_e5m2 = resource<hal_binding> {extent = 5, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %12 = v_mov_b32 0
+  %e4m3 = global_load_u16_saddr %12, %source_e5m2 {offset = 1}
+  %e5m2 = global_load_u16_saddr %12, %source_e5m2 {offset = 3}
+  global_store_short_saddr %12, %e4m3, %target_e5m2 {offset = 1}
+  global_store_short_saddr %12, %e5m2, %target_e5m2 {offset = 3}
+  return
+}
+
+// ====
+
+// Dynamic origins, subviews and element indices remain byte coordinates.
+func.def @copy_float8_index(%input: buffer, %output: buffer, %byte_offset: offset, %element: index) {
+  %base = index.assume %byte_offset [range(%byte_offset, 0, 128)] : offset
+  %position = index.assume %element [range(%element, 0, 15)] : index
+  %source_e4m3 = buffer.view %input[%base] : buffer -> view<32xf8E4M3>
+  %source_e5m2 = buffer.view %input[%base] : buffer -> view<32xf8E5M2>
+  %target_e4m3 = buffer.view %output[%base] : buffer -> view<32xf8E4M3>
+  %target_e5m2 = buffer.view %output[%base] : buffer -> view<32xf8E5M2>
+  %source_tail = view.subview %source_e5m2[16] : view<32xf8E5M2> -> view<16xf8E5M2>
+  %target_tail = view.subview %target_e5m2[16] : view<32xf8E5M2> -> view<16xf8E5M2>
+  %e4m3 = view.load %source_e4m3[%position] : view<32xf8E4M3> -> f8E4M3
+  %e5m2 = view.load %source_tail[%position] : view<16xf8E5M2> -> f8E5M2
+  view.store %e4m3, %target_e4m3[%position] : f8E4M3, view<32xf8E4M3>
+  view.store %e5m2, %target_tail[%position] : f8E5M2, view<16xf8E5M2>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @copy_float8_index(%base: reg<amdgpu.sgpr x2>, %position: reg<amdgpu.sgpr>) asm {
+  %source_e5m2 = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %target_e5m2 = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %18 = v_mov_b32 0
+  %19 = slice %base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %20 = s_add_u32 %19, %position
+  %21 = slice %source_e5m2[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %22 = slice %source_e5m2[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %23 = s_mov_b32 0
+  %24, %25 = s_add_co_u32 %21, %20
+  %26, %27 = s_addc_u32 %22, %23, %25
+  %28 = concat(%24, %26) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %e4m3 = global_load_i8_saddr %18, %28
+  %32 = s_add_u32 %19, %position
+  %36, %37 = s_add_co_u32 %21, %32
+  %38, %39 = s_addc_u32 %22, %23, %37
+  %40 = concat(%36, %38) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %e5m2 = global_load_i8_saddr %18, %40 {offset = 16}
+  %44 = s_add_u32 %19, %position
+  %45 = slice %target_e5m2[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %46 = slice %target_e5m2[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %48, %49 = s_add_co_u32 %45, %44
+  %50, %51 = s_addc_u32 %46, %23, %49
+  %52 = concat(%48, %50) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_b8_saddr %18, %e4m3, %52
+  %55 = s_add_u32 %19, %position
+  %59, %60 = s_add_co_u32 %45, %55
+  %61, %62 = s_addc_u32 %46, %23, %60
+  %63 = concat(%59, %61) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_b8_saddr %18, %e5m2, %63 {offset = 16}
+  return
+}
+
+// ====
+
+// Volatile accesses retain both observations even when their addresses match.
+func.def @copy_float8_volatile(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<1xf8E4M3>
+  %target = buffer.view %output[%base] : buffer -> view<2xf8E4M3>
+  %first = view.load<volatile> %source[0] : view<1xf8E4M3> -> f8E4M3
+  %second = view.load<volatile> %source[0] : view<1xf8E4M3> -> f8E4M3
+  view.store<volatile> %first, %target[0] : f8E4M3, view<2xf8E4M3>
+  view.store<volatile> %second, %target[1] : f8E4M3, view<2xf8E4M3>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @copy_float8_volatile() asm {
+  %source = resource<hal_binding> {extent = 1, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %target = resource<hal_binding> {extent = 2, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %9 = v_mov_b32 0
+  %first = global_load_i8_saddr<volatile> %9, %source
+  %second = global_load_i8_saddr<volatile> %9, %source
+  global_store_b8_saddr<volatile> %9, %first, %target
+  global_store_b8_saddr<volatile> %9, %second, %target {offset = 1}
+  return
+}
+
+// ====
+
+func.def @extend_float8(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source_e4m3 = buffer.view %input[%base] : buffer -> view<1xf8E4M3>
+  %source_e5m2 = buffer.view %input[%base] : buffer -> view<1xf8E5M2>
+  %target = buffer.view %output[%base] : buffer -> view<2xf32>
+  %e4m3 = view.load %source_e4m3[0] : view<1xf8E4M3> -> f8E4M3
+  %e5m2 = view.load %source_e5m2[0] : view<1xf8E5M2> -> f8E5M2
+  %first = scalar.extf %e4m3 : f8E4M3 to f32
+  %second = scalar.extf %e5m2 : f8E5M2 to f32
+  view.store %first, %target[0] : f32, view<2xf32>
+  view.store %second, %target[1] : f32, view<2xf32>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @extend_float8() asm {
+  %source_e5m2 = resource<hal_binding> {extent = 1, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %target = resource<hal_binding> {extent = 8, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %125 = v_mov_b32 0
+  %e4m3 = global_load_i8_saddr %125, %source_e5m2
+  %129 = v_and_b32_lit %e4m3, 255
+  %130 = v_and_b32_lit %129, 128
+  %131 = v_lshlrev_b32_src0_inline %130, 24
+  %133 = v_and_b32_lit %129, 120
+  %134 = v_lshrrev_b32_src0_inline %133, 3
+  %135 = v_and_b32_lit %129, 7
+  %136 = v_mov_b32 120
+  %137 = v_add_u32 %134, %136
+  %139 = v_lshlrev_b32_src0_inline %137, 23
+  %140 = v_lshlrev_b32_src0_inline %135, 20
+  %141 = v_or_b32 %131, %139
+  %142 = v_or_b32 %141, %140
+  %145 = v_and_b32_lit %135, 2
+  %146 = v_cmp_ne_i32_src1_inline %145 {rhs = 0}
+  %148 = v_cndmask_b32_src0_lit_src1_inline %146 {imm32 = 0, true_value = 1}
+  %149 = v_and_b32_lit %135, 4
+  %150 = v_cmp_ne_i32_src1_inline %149 {rhs = 0}
+  %151 = v_cndmask_b32_src1_inline %148, %150 {true_value = 2}
+  %153 = v_mov_b32 118
+  %154 = v_add_u32 %151, %153
+  %155 = v_lshlrev_b32_src0_inline %154, 23
+  %156 = v_mov_b32 23
+  %157 = v_sub_nc_u32 %156, %151
+  %158 = v_lshlrev_b32 %157, %135
+  %159 = v_and_b32_lit %158, 8388607
+  %160 = v_or_b32 %131, %155
+  %161 = v_or_b32 %160, %159
+  %162 = v_cmp_eq_i32_src1_inline %135 {rhs = 0}
+  %163 = v_cndmask_b32 %161, %131, %162
+  %164 = v_cmp_eq_i32_src1_inline %134 {rhs = 0}
+  %165 = v_cndmask_b32 %142, %163, %164
+  %166 = v_cmp_eq_i32_src1_inline %134 {rhs = 15}
+  %168 = v_cmp_eq_i32_src1_inline %135 {rhs = 7}
+  %171 = s_and_b64 %166, %168
+  %first = v_cndmask_b32_src1_lit %165, %171, 2143289344
+  %176 = v_and_b32_lit %129, 124
+  %177 = v_lshrrev_b32_src0_inline %176, 2
+  %178 = v_and_b32_lit %129, 3
+  %180 = v_mov_b32 112
+  %181 = v_add_u32 %177, %180
+  %182 = v_lshlrev_b32_src0_inline %181, 23
+  %183 = v_lshlrev_b32_src0_inline %178, 21
+  %184 = v_or_b32 %131, %182
+  %185 = v_or_b32 %184, %183
+  %186 = v_and_b32_lit %178, 2
+  %187 = v_cmp_ne_i32_src1_inline %186 {rhs = 0}
+  %188 = v_cndmask_b32_src0_lit_src1_inline %187 {imm32 = 0, true_value = 1}
+  %190 = v_mov_b32 111
+  %191 = v_add_u32 %188, %190
+  %192 = v_lshlrev_b32_src0_inline %191, 23
+  %194 = v_sub_nc_u32 %156, %188
+  %195 = v_lshlrev_b32 %194, %178
+  %196 = v_and_b32_lit %195, 8388607
+  %197 = v_or_b32 %131, %192
+  %198 = v_or_b32 %197, %196
+  %199 = v_cmp_eq_i32_src1_inline %178 {rhs = 0}
+  %200 = v_cndmask_b32 %198, %131, %199
+  %201 = v_cmp_eq_i32_src1_inline %177 {rhs = 0}
+  %202 = v_cndmask_b32 %185, %200, %201
+  %203 = v_cmp_eq_i32_src1_inline %177 {rhs = 31}
+  %204 = v_or_b32_lit %131, 2139095040
+  %205 = v_cndmask_b32_src0_lit %204, %199, 2143289344
+  %second = v_cndmask_b32 %202, %205, %203
+  global_store_b32_saddr %125, %first, %target
+  global_store_b32_saddr %125, %second, %target {offset = 4}
+  return
+}

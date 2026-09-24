@@ -229,6 +229,7 @@ loom_test(
     )
     for module in [
         "packed_byte_arithmetic",
+        "packed_float8_conversion",
         "vector_lookup",
     ]
 ]
@@ -329,6 +330,55 @@ loom_cc_test(
     target_compatible_with = LOOM_SPIRV_VULKAN_COMPATIBLE_WITH,
     deps = [
         ":multiple_entries_spv",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:registry",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/drivers/vulkan/cts:backends",
+        "//runtime/src/iree/testing:gtest",
+    ],
+)
+
+loom_generated_file(
+    name = "float8_memory_binary",
+    testonly = True,
+    args = [
+        "$(location //loom/src/loom/test/corpus/source_low:memory_float8_conversion.loom)",
+        "--product=kernel",
+        "--target=spirv:vulkan1.3+bda+extended-types",
+    ],
+    generator = "//loom/src/loom/tools/loom-compile:loom-compile",
+    inputs = ["//loom/src/loom/test/corpus/source_low:memory_float8_conversion.loom"],
+    output = "float8_memory.spv",
+    output_flag = "--output=",
+    target_compatible_with = _SPIRV_COMPILE_COMPATIBLE_WITH,
+)
+
+iree_c_embed_data(
+    name = "float8_memory_spv",
+    testonly = True,
+    srcs = [":float8_memory_binary"],
+    c_file_output = "float8_memory_spv.c",
+    h_file_output = "float8_memory_spv.h",
+    identifier = "loom_spirv_float8_memory",
+    target_compatible_with = _SPIRV_COMPILE_COMPATIBLE_WITH,
+)
+
+loom_cc_test(
+    name = "float8_memory_test",
+    srcs = [
+        "float8_memory_test.cc",
+        "//runtime/src/iree/hal/cts/util:test_main.cc",
+    ],
+    args = ["--vulkan_validation_layers=false"],
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = [
+        "iree-run-requirement=vulkan.resource.device",
+        "runtime-resource=vulkan-device",
+    ],
+    target_compatible_with = _SPIRV_COMPILE_COMPATIBLE_WITH + LOOM_SPIRV_VULKAN_COMPATIBLE_WITH,
+    deps = [
+        ":float8_memory_spv",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:registry",

@@ -1,0 +1,37 @@
+// Stage four FP8 lanes per work item through workgroup memory, widen them, and
+// preserve their original storage bytes. The two formats share byte carriers.
+kernel.def @expand_float8() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %copy: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %second = index.constant 1024 : offset
+  %copy_second = index.constant 256 : offset
+  %source_e4m3 = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3>
+  %source_e5m2 = buffer.view %input[%base] : buffer -> view<64x4xf8E5M2>
+  %target_e4m3 = buffer.view %output[%base] : buffer -> view<64x4xf32>
+  %target_e5m2 = buffer.view %output[%second] : buffer -> view<64x4xf32>
+  %copy_e4m3 = buffer.view %copy[%base] : buffer -> view<64x4xf8E4M3>
+  %copy_e5m2 = buffer.view %copy[%copy_second] : buffer -> view<64x4xf8E5M2>
+  %scratch_length = index.constant 512 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %scratch_length : buffer
+  %scratch_e4m3 = buffer.view %scratch[%base] : buffer -> view<64x4xf8E4M3>
+  %scratch_e5m2_base = buffer.view %scratch[%base] : buffer -> view<128x4xf8E5M2>
+  %scratch_e5m2 = view.subview %scratch_e5m2_base[64, 0] : view<128x4xf8E5M2> -> view<64x4xf8E5M2>
+  %input_e4m3 = vector.load %source_e4m3[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
+  %input_e5m2 = vector.load %source_e5m2[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
+  vector.store %input_e4m3, %scratch_e4m3[%lane, 0] : vector<4xf8E4M3>, view<64x4xf8E4M3>
+  vector.store %input_e5m2, %scratch_e5m2[%lane, 0] : vector<4xf8E5M2>, view<64x4xf8E5M2>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %e4m3 = vector.load %scratch_e4m3[%lane, 0] : view<64x4xf8E4M3> -> vector<4xf8E4M3>
+  %e5m2 = vector.load %scratch_e5m2[%lane, 0] : view<64x4xf8E5M2> -> vector<4xf8E5M2>
+  %first = vector.extf %e4m3 : vector<4xf8E4M3> to vector<4xf32>
+  %second_value = vector.extf %e5m2 : vector<4xf8E5M2> to vector<4xf32>
+  vector.store %first, %target_e4m3[%lane, 0] : vector<4xf32>, view<64x4xf32>
+  vector.store %second_value, %target_e5m2[%lane, 0] : vector<4xf32>, view<64x4xf32>
+  vector.store %e4m3, %copy_e4m3[%lane, 0] : vector<4xf8E4M3>, view<64x4xf8E4M3>
+  vector.store %e5m2, %copy_e5m2[%lane, 0] : vector<4xf8E5M2>, view<64x4xf8E5M2>
+  kernel.return
+}

@@ -608,6 +608,13 @@ def _select_rule(
     )
 
 
+def _storage_source_types(scalar: StorageBufferScalar) -> tuple[str, ...]:
+    # FP8 values use the signed-byte carrier for both registers and memory.
+    if scalar.source_type == "i8":
+        return ("i8", "f8E4M3", "f8E5M2")
+    return (scalar.source_type,)
+
+
 def _storage_element_format_guards(
     field: str,
     scalar: StorageBufferScalar,
@@ -630,7 +637,7 @@ def _buffer_view_rule(
     *,
     require_storage_element_format: bool = False,
 ) -> ValueElideRule:
-    view_type = View(scalar.source_type)
+    view_type = View(_storage_source_types(scalar))
     return ValueElideRule(
         source_op=buffer.buffer_view,
         values=(ValueRef.result("result"),),
@@ -747,14 +754,14 @@ def _storage_subview_rule(scalar: StorageBufferScalar) -> ValueElideRule:
         source_op=view.view_subview,
         values=(ValueRef.result("result"),),
         guards=(
-            Guard.value_type("result", View(scalar.source_type)),
+            Guard.value_type("result", View(_storage_source_types(scalar))),
             Guard.value_memory_space("result", _STORAGE_BUFFER_MEMORY_SPACES),
         ),
     )
 
 
 def _workgroup_subview_rule(scalar: StorageBufferScalar) -> ValueAliasRule:
-    view_type = View(scalar.source_type)
+    view_type = View(_storage_source_types(scalar))
     return ValueAliasRule(
         source_op=view.view_subview,
         source=ValueRef.operand("source"),
@@ -1008,8 +1015,8 @@ def _cooperative_matrix_rules() -> tuple[DescriptorRule, ...]:
 
 
 def _view_load_rule(scalar: StorageBufferScalar) -> DescriptorRule:
-    scalar_type = Scalar(scalar.source_type)
-    view_type = View(scalar.source_type)
+    scalar_type = Scalar(_storage_source_types(scalar))
+    view_type = View(_storage_source_types(scalar))
     descriptor = _descriptor(f"spirv.op_load.storage_buffer.{scalar.suffix}")
     address_materializer = _storage_buffer_address_materializer(scalar)
     return DescriptorRule(
@@ -1037,8 +1044,8 @@ def _view_load_rule(scalar: StorageBufferScalar) -> DescriptorRule:
 
 
 def _view_store_rule(scalar: StorageBufferScalar) -> DescriptorRule:
-    scalar_type = Scalar(scalar.source_type)
-    view_type = View(scalar.source_type)
+    scalar_type = Scalar(_storage_source_types(scalar))
+    view_type = View(_storage_source_types(scalar))
     descriptor = _descriptor(f"spirv.op_store.storage_buffer.{scalar.suffix}")
     address_materializer = _storage_buffer_address_materializer(scalar)
     return DescriptorRule(
@@ -1158,8 +1165,8 @@ def _view_load_workgroup_rule(
     scalar: StorageBufferScalar,
     coordinate_type: SourceMemoryAddressCoordinateType,
 ) -> DescriptorRule:
-    scalar_type = Scalar(scalar.source_type)
-    view_type = View(scalar.source_type)
+    scalar_type = Scalar(_storage_source_types(scalar))
+    view_type = View(_storage_source_types(scalar))
     descriptor = _descriptor(f"spirv.op_load.workgroup.{scalar.suffix}")
     address_materializer = _workgroup_address_materializer(scalar, coordinate_type)
     return DescriptorRule(
@@ -1191,8 +1198,8 @@ def _view_store_workgroup_rule(
     scalar: StorageBufferScalar,
     coordinate_type: SourceMemoryAddressCoordinateType,
 ) -> DescriptorRule:
-    scalar_type = Scalar(scalar.source_type)
-    view_type = View(scalar.source_type)
+    scalar_type = Scalar(_storage_source_types(scalar))
+    view_type = View(_storage_source_types(scalar))
     descriptor = _descriptor(f"spirv.op_store.workgroup.{scalar.suffix}")
     address_materializer = _workgroup_address_materializer(scalar, coordinate_type)
     return DescriptorRule(

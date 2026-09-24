@@ -300,6 +300,33 @@ if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
 if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
 loom_execution_test(
   NAME
+    cxx_packed_float8_conversion_test_execute_spirv_vulkan_hardware_test
+  MODULE
+    "loom::import::cxx::test::packed_float8_conversion_module"
+  RUNNER_ARGS
+    "--device=vulkan"
+    "--vulkan_validation_layers=false"
+  LABELS
+    "iree-build-requirement=loom.target.arch.spirv"
+    "iree-build-requirement=loom.emit.spirv"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.vulkan"
+    "iree-run-requirement=vulkan.resource.device"
+    "runtime-resource=vulkan-device"
+    "loom-execution-profile=spirv_vulkan_hardware"
+    "loom-target-family=spirv"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+endif()
+
+if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
+loom_execution_test(
+  NAME
     cxx_vector_lookup_test_execute_spirv_vulkan_hardware_test
   MODULE
     "loom::import::cxx::test::vector_lookup_module"
@@ -492,6 +519,70 @@ loom_cc_test(
     "artifact_execution_test.cc"
   DEPS
     ::multiple_entries_spv
+    iree::base::tooling::flags
+    iree::hal
+    iree::hal::cts::util::registry
+    iree::hal::cts::util::test_base
+    iree::hal::drivers::vulkan::cts::backends
+    iree::testing::gtest
+  ARGS
+    "--vulkan_validation_layers=false"
+  LABELS
+    "iree-run-requirement=vulkan.resource.device"
+    "runtime-resource=vulkan-device"
+    "iree-build-requirement=loom.target.arch.spirv"
+    "iree-build-requirement=loom.emit.spirv"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
+loom_generated_file(
+  NAME
+    float8_memory_binary
+  GENERATOR
+    loom::tools::loom-compile::loom-compile
+  OUTPUT
+    "float8_memory.spv"
+  OUTPUT_FLAG
+    "--output="
+  ARGS
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/memory_float8_conversion.loom"
+    "--product=kernel"
+    "--target=spirv:vulkan1.3+bda+extended-types"
+  INPUTS
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/memory_float8_conversion.loom"
+  TESTONLY
+)
+endif()
+
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
+iree_c_embed_data(
+  NAME
+    float8_memory_spv
+  SRCS
+    "${CMAKE_CURRENT_BINARY_DIR}/float8_memory.spv"
+  C_FILE_OUTPUT
+    "float8_memory_spv.c"
+  H_FILE_OUTPUT
+    "float8_memory_spv.h"
+  IDENTIFIER
+    "loom_spirv_float8_memory"
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND IREE_HAL_DRIVER_VULKAN AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
+loom_cc_test(
+  NAME
+    float8_memory_test
+  SRCS
+    "${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/cts/util/test_main.cc"
+    "float8_memory_test.cc"
+  DEPS
+    ::float8_memory_spv
     iree::base::tooling::flags
     iree::hal
     iree::hal::cts::util::registry

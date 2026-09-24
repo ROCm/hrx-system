@@ -1,0 +1,301 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_float8.loom
+// RUN: emit source-low target=wasm:simd128 output=low
+
+// Both FP8 formats retain their bytes, including NaN payloads, through storage.
+func.def @copy_float8_scalar(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source_e4m3 = buffer.view %input[%base] : buffer -> view<8xf8E4M3>
+  %source_e5m2 = buffer.view %input[%base] : buffer -> view<8xf8E5M2>
+  %target_e4m3 = buffer.view %output[%base] : buffer -> view<8xf8E4M3>
+  %target_e5m2 = buffer.view %output[%base] : buffer -> view<8xf8E5M2>
+  %e4m3 = view.load %source_e4m3[3] : view<8xf8E4M3> -> f8E4M3
+  %e5m2 = view.load %source_e5m2[5] : view<8xf8E5M2> -> f8E5M2
+  view.store %e4m3, %target_e4m3[3] : f8E4M3, view<8xf8E4M3>
+  view.store %e5m2, %target_e5m2[5] : f8E5M2, view<8xf8E5M2>
+  func.return
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @copy_float8_scalar(%source_e5m2: reg<wasm.i32>, %target_e5m2: reg<wasm.i32>) asm {
+  %e4m3 = i32.load8_u %source_e5m2 {offset = 3}
+  %e5m2 = i32.load8_u %source_e5m2 {offset = 5}
+  i32.store8 %target_e5m2, %e4m3 {offset = 3}
+  i32.store8 %target_e5m2, %e5m2 {offset = 5}
+  return
+}
+
+// ====
+
+// Full-register copies use the same physical transfers as integer bytes.
+func.def @copy_float8_vector(%input: buffer, %output: buffer) {
+  %first = index.constant 0 : offset
+  %second = index.constant 16 : offset
+  %source_e4m3 = buffer.view %input[%first] : buffer -> view<16xf8E4M3>
+  %source_e5m2 = buffer.view %input[%second] : buffer -> view<16xf8E5M2>
+  %target_e4m3 = buffer.view %output[%first] : buffer -> view<16xf8E4M3>
+  %target_e5m2 = buffer.view %output[%second] : buffer -> view<16xf8E5M2>
+  %e4m3 = vector.load %source_e4m3[0] : view<16xf8E4M3> -> vector<16xf8E4M3>
+  %e5m2 = vector.load %source_e5m2[0] : view<16xf8E5M2> -> vector<16xf8E5M2>
+  vector.store %e4m3, %target_e4m3[0] : vector<16xf8E4M3>, view<16xf8E4M3>
+  vector.store %e5m2, %target_e5m2[0] : vector<16xf8E5M2>, view<16xf8E5M2>
+  func.return
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @copy_float8_vector(%source_e5m2: reg<wasm.i32>, %target_e5m2: reg<wasm.i32>) asm {
+  %110 = i32.load8_u %source_e5m2
+  %111 = i32.load8_u %source_e5m2 {offset = 1}
+  %112 = i32.load8_u %source_e5m2 {offset = 2}
+  %113 = i32.load8_u %source_e5m2 {offset = 3}
+  %114 = i32.load8_u %source_e5m2 {offset = 4}
+  %115 = i32.load8_u %source_e5m2 {offset = 5}
+  %116 = i32.load8_u %source_e5m2 {offset = 6}
+  %117 = i32.load8_u %source_e5m2 {offset = 7}
+  %118 = i32.load8_u %source_e5m2 {offset = 8}
+  %119 = i32.load8_u %source_e5m2 {offset = 9}
+  %120 = i32.load8_u %source_e5m2 {offset = 10}
+  %121 = i32.load8_u %source_e5m2 {offset = 11}
+  %122 = i32.load8_u %source_e5m2 {offset = 12}
+  %123 = i32.load8_u %source_e5m2 {offset = 13}
+  %124 = i32.load8_u %source_e5m2 {offset = 14}
+  %125 = i32.load8_u %source_e5m2 {offset = 15}
+  %126 = i32.load8_u %source_e5m2 {offset = 16}
+  %127 = i32.load8_u %source_e5m2 {offset = 17}
+  %128 = i32.load8_u %source_e5m2 {offset = 18}
+  %129 = i32.load8_u %source_e5m2 {offset = 19}
+  %130 = i32.load8_u %source_e5m2 {offset = 20}
+  %131 = i32.load8_u %source_e5m2 {offset = 21}
+  %132 = i32.load8_u %source_e5m2 {offset = 22}
+  %133 = i32.load8_u %source_e5m2 {offset = 23}
+  %134 = i32.load8_u %source_e5m2 {offset = 24}
+  %135 = i32.load8_u %source_e5m2 {offset = 25}
+  %136 = i32.load8_u %source_e5m2 {offset = 26}
+  %137 = i32.load8_u %source_e5m2 {offset = 27}
+  %138 = i32.load8_u %source_e5m2 {offset = 28}
+  %139 = i32.load8_u %source_e5m2 {offset = 29}
+  %140 = i32.load8_u %source_e5m2 {offset = 30}
+  %141 = i32.load8_u %source_e5m2 {offset = 31}
+  i32.store8 %target_e5m2, %110
+  i32.store8 %target_e5m2, %111 {offset = 1}
+  i32.store8 %target_e5m2, %112 {offset = 2}
+  i32.store8 %target_e5m2, %113 {offset = 3}
+  i32.store8 %target_e5m2, %114 {offset = 4}
+  i32.store8 %target_e5m2, %115 {offset = 5}
+  i32.store8 %target_e5m2, %116 {offset = 6}
+  i32.store8 %target_e5m2, %117 {offset = 7}
+  i32.store8 %target_e5m2, %118 {offset = 8}
+  i32.store8 %target_e5m2, %119 {offset = 9}
+  i32.store8 %target_e5m2, %120 {offset = 10}
+  i32.store8 %target_e5m2, %121 {offset = 11}
+  i32.store8 %target_e5m2, %122 {offset = 12}
+  i32.store8 %target_e5m2, %123 {offset = 13}
+  i32.store8 %target_e5m2, %124 {offset = 14}
+  i32.store8 %target_e5m2, %125 {offset = 15}
+  i32.store8 %target_e5m2, %126 {offset = 16}
+  i32.store8 %target_e5m2, %127 {offset = 17}
+  i32.store8 %target_e5m2, %128 {offset = 18}
+  i32.store8 %target_e5m2, %129 {offset = 19}
+  i32.store8 %target_e5m2, %130 {offset = 20}
+  i32.store8 %target_e5m2, %131 {offset = 21}
+  i32.store8 %target_e5m2, %132 {offset = 22}
+  i32.store8 %target_e5m2, %133 {offset = 23}
+  i32.store8 %target_e5m2, %134 {offset = 24}
+  i32.store8 %target_e5m2, %135 {offset = 25}
+  i32.store8 %target_e5m2, %136 {offset = 26}
+  i32.store8 %target_e5m2, %137 {offset = 27}
+  i32.store8 %target_e5m2, %138 {offset = 28}
+  i32.store8 %target_e5m2, %139 {offset = 29}
+  i32.store8 %target_e5m2, %140 {offset = 30}
+  i32.store8 %target_e5m2, %141 {offset = 31}
+  return
+}
+
+// ====
+
+// Short vectors preserve their exact span instead of widening the access.
+func.def @copy_float8_tail(%input: buffer, %output: buffer) {
+  %first = index.constant 1 : offset
+  %second = index.constant 3 : offset
+  %source_e4m3 = buffer.view %input[%first] : buffer -> view<2xf8E4M3>
+  %source_e5m2 = buffer.view %input[%second] : buffer -> view<2xf8E5M2>
+  %target_e4m3 = buffer.view %output[%first] : buffer -> view<2xf8E4M3>
+  %target_e5m2 = buffer.view %output[%second] : buffer -> view<2xf8E5M2>
+  %e4m3 = vector.load %source_e4m3[0] : view<2xf8E4M3> -> vector<2xf8E4M3>
+  %e5m2 = vector.load %source_e5m2[0] : view<2xf8E5M2> -> vector<2xf8E5M2>
+  vector.store %e4m3, %target_e4m3[0] : vector<2xf8E4M3>, view<2xf8E4M3>
+  vector.store %e5m2, %target_e5m2[0] : vector<2xf8E5M2>, view<2xf8E5M2>
+  func.return
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @copy_float8_tail(%source_e5m2: reg<wasm.i32>, %target_e5m2: reg<wasm.i32>) asm {
+  %26 = i32.load8_u %source_e5m2 {offset = 1}
+  %27 = i32.load8_u %source_e5m2 {offset = 2}
+  %28 = i32.load8_u %source_e5m2 {offset = 3}
+  %29 = i32.load8_u %source_e5m2 {offset = 4}
+  i32.store8 %target_e5m2, %26 {offset = 1}
+  i32.store8 %target_e5m2, %27 {offset = 2}
+  i32.store8 %target_e5m2, %28 {offset = 3}
+  i32.store8 %target_e5m2, %29 {offset = 4}
+  return
+}
+
+// ====
+
+// Dynamic origins, subviews and element indices remain byte coordinates.
+func.def @copy_float8_index(%input: buffer, %output: buffer, %byte_offset: offset, %element: index) {
+  %base = index.assume %byte_offset [range(%byte_offset, 0, 128)] : offset
+  %position = index.assume %element [range(%element, 0, 15)] : index
+  %source_e4m3 = buffer.view %input[%base] : buffer -> view<32xf8E4M3>
+  %source_e5m2 = buffer.view %input[%base] : buffer -> view<32xf8E5M2>
+  %target_e4m3 = buffer.view %output[%base] : buffer -> view<32xf8E4M3>
+  %target_e5m2 = buffer.view %output[%base] : buffer -> view<32xf8E5M2>
+  %source_tail = view.subview %source_e5m2[16] : view<32xf8E5M2> -> view<16xf8E5M2>
+  %target_tail = view.subview %target_e5m2[16] : view<32xf8E5M2> -> view<16xf8E5M2>
+  %e4m3 = view.load %source_e4m3[%position] : view<32xf8E4M3> -> f8E4M3
+  %e5m2 = view.load %source_tail[%position] : view<16xf8E5M2> -> f8E5M2
+  view.store %e4m3, %target_e4m3[%position] : f8E4M3, view<32xf8E4M3>
+  view.store %e5m2, %target_tail[%position] : f8E5M2, view<16xf8E5M2>
+  func.return
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @copy_float8_index(%source_tail: reg<wasm.i32>, %target_tail: reg<wasm.i32>, %base: reg<wasm.i32>, %position: reg<wasm.i32>) asm {
+  %18 = i32.add %base, %position
+  %19 = i32.add %source_tail, %18
+  %e4m3 = i32.load8_u %19
+  %e5m2 = i32.load8_u %19 {offset = 16}
+  %25 = i32.add %target_tail, %18
+  i32.store8 %25, %e4m3
+  i32.store8 %25, %e5m2 {offset = 16}
+  return
+}
+
+// ====
+
+// Volatile accesses retain both observations even when their addresses match.
+func.def @copy_float8_volatile(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<1xf8E4M3>
+  %target = buffer.view %output[%base] : buffer -> view<2xf8E4M3>
+  %first = view.load<volatile> %source[0] : view<1xf8E4M3> -> f8E4M3
+  %second = view.load<volatile> %source[0] : view<1xf8E4M3> -> f8E4M3
+  view.store<volatile> %first, %target[0] : f8E4M3, view<2xf8E4M3>
+  view.store<volatile> %second, %target[1] : f8E4M3, view<2xf8E4M3>
+  func.return
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @copy_float8_volatile(%source: reg<wasm.i32>, %target: reg<wasm.i32>) asm {
+  %first = i32.load8_u<volatile> %source
+  %second = i32.load8_u<volatile> %source
+  i32.store8<volatile> %target, %first
+  i32.store8<volatile> %target, %second {offset = 1}
+  return
+}
+
+// ====
+
+func.def @extend_float8(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source_e4m3 = buffer.view %input[%base] : buffer -> view<1xf8E4M3>
+  %source_e5m2 = buffer.view %input[%base] : buffer -> view<1xf8E5M2>
+  %target = buffer.view %output[%base] : buffer -> view<2xf32>
+  %e4m3 = view.load %source_e4m3[0] : view<1xf8E4M3> -> f8E4M3
+  %e5m2 = view.load %source_e5m2[0] : view<1xf8E5M2> -> f8E5M2
+  %first = scalar.extf %e4m3 : f8E4M3 to f32
+  %second = scalar.extf %e5m2 : f8E5M2 to f32
+  view.store %first, %target[0] : f32, view<2xf32>
+  view.store %second, %target[1] : f32, view<2xf32>
+  func.return
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @extend_float8(%source_e5m2: reg<wasm.i32>, %target: reg<wasm.i32>) asm {
+  %e4m3 = i32.load8_u %source_e5m2
+  %127 = i32.const 255
+  %128 = i32.and %e4m3, %127
+  %129 = i32.const 128
+  %130 = i32.and %128, %129
+  %131 = i32.const 24
+  %132 = i32.shl %130, %131
+  %133 = i32.const 120
+  %134 = i32.and %128, %133
+  %135 = i32.const 3
+  %136 = i32.shr_u %134, %135
+  %137 = i32.const 7
+  %138 = i32.and %128, %137
+  %139 = i32.add %136, %133
+  %140 = i32.const 23
+  %141 = i32.shl %139, %140
+  %142 = i32.const 20
+  %143 = i32.shl %138, %142
+  %144 = i32.or %132, %141
+  %145 = i32.or %144, %143
+  %146 = i32.const 0
+  %147 = i32.const 2
+  %148 = i32.and %138, %147
+  %149 = i32.ne %148, %146
+  %150 = i32.const 1
+  %151 = i32.select %150, %146, %149
+  %152 = i32.const 4
+  %153 = i32.and %138, %152
+  %154 = i32.ne %153, %146
+  %155 = i32.select %147, %151, %154
+  %156 = i32.const 118
+  %157 = i32.add %155, %156
+  %158 = i32.shl %157, %140
+  %159 = i32.sub %140, %155
+  %160 = i32.shl %138, %159
+  %161 = i32.const 8388607
+  %162 = i32.and %160, %161
+  %163 = i32.or %132, %158
+  %164 = i32.or %163, %162
+  %165 = i32.eq %138, %146
+  %166 = i32.select %132, %164, %165
+  %167 = i32.eq %136, %146
+  %168 = i32.select %166, %145, %167
+  %169 = i32.const 15
+  %170 = i32.eq %136, %169
+  %171 = i32.const 2143289344
+  %172 = i32.eq %138, %137
+  %174 = i32.select %172, %146, %170
+  %175 = i32.select %171, %168, %174
+  %first = f32.reinterpret_i32 %175
+  %181 = i32.const 124
+  %182 = i32.and %128, %181
+  %183 = i32.shr_u %182, %147
+  %184 = i32.and %128, %135
+  %185 = i32.const 112
+  %186 = i32.add %183, %185
+  %187 = i32.shl %186, %140
+  %188 = i32.const 21
+  %189 = i32.shl %184, %188
+  %190 = i32.or %132, %187
+  %191 = i32.or %190, %189
+  %192 = i32.and %184, %147
+  %193 = i32.ne %192, %146
+  %194 = i32.select %150, %146, %193
+  %195 = i32.const 111
+  %196 = i32.add %194, %195
+  %197 = i32.shl %196, %140
+  %198 = i32.sub %140, %194
+  %199 = i32.shl %184, %198
+  %200 = i32.and %199, %161
+  %201 = i32.or %132, %197
+  %202 = i32.or %201, %200
+  %203 = i32.eq %184, %146
+  %204 = i32.select %132, %202, %203
+  %205 = i32.eq %183, %146
+  %206 = i32.select %204, %191, %205
+  %207 = i32.const 31
+  %208 = i32.eq %183, %207
+  %209 = i32.const 2139095040
+  %210 = i32.or %132, %209
+  %211 = i32.select %210, %171, %203
+  %212 = i32.select %211, %206, %208
+  %second = f32.reinterpret_i32 %212
+  f32.store %target, %first
+  f32.store %target, %second {offset = 4}
+  return
+}

@@ -367,7 +367,8 @@ loom_test_module(
     )
     for source in [
         "packed_byte_arithmetic",
-        "packed_float_conversion",
+        "packed_float16_conversion",
+        "packed_float8_conversion",
         "vector_lookup",
     ]
 ]

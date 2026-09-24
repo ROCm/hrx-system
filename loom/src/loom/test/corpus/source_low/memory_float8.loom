@@ -1,0 +1,91 @@
+// Both FP8 formats retain their bytes, including NaN payloads, through storage.
+func.def @copy_float8_scalar(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source_e4m3 = buffer.view %input[%base] : buffer -> view<8xf8E4M3>
+  %source_e5m2 = buffer.view %input[%base] : buffer -> view<8xf8E5M2>
+  %target_e4m3 = buffer.view %output[%base] : buffer -> view<8xf8E4M3>
+  %target_e5m2 = buffer.view %output[%base] : buffer -> view<8xf8E5M2>
+  %e4m3 = view.load %source_e4m3[3] : view<8xf8E4M3> -> f8E4M3
+  %e5m2 = view.load %source_e5m2[5] : view<8xf8E5M2> -> f8E5M2
+  view.store %e4m3, %target_e4m3[3] : f8E4M3, view<8xf8E4M3>
+  view.store %e5m2, %target_e5m2[5] : f8E5M2, view<8xf8E5M2>
+  func.return
+}
+
+// ====
+// Full-register copies use the same physical transfers as integer bytes.
+func.def @copy_float8_vector(%input: buffer, %output: buffer) {
+  %first = index.constant 0 : offset
+  %second = index.constant 16 : offset
+  %source_e4m3 = buffer.view %input[%first] : buffer -> view<16xf8E4M3>
+  %source_e5m2 = buffer.view %input[%second] : buffer -> view<16xf8E5M2>
+  %target_e4m3 = buffer.view %output[%first] : buffer -> view<16xf8E4M3>
+  %target_e5m2 = buffer.view %output[%second] : buffer -> view<16xf8E5M2>
+  %e4m3 = vector.load %source_e4m3[0] : view<16xf8E4M3> -> vector<16xf8E4M3>
+  %e5m2 = vector.load %source_e5m2[0] : view<16xf8E5M2> -> vector<16xf8E5M2>
+  vector.store %e4m3, %target_e4m3[0] : vector<16xf8E4M3>, view<16xf8E4M3>
+  vector.store %e5m2, %target_e5m2[0] : vector<16xf8E5M2>, view<16xf8E5M2>
+  func.return
+}
+
+// ====
+// Short vectors preserve their exact span instead of widening the access.
+func.def @copy_float8_tail(%input: buffer, %output: buffer) {
+  %first = index.constant 1 : offset
+  %second = index.constant 3 : offset
+  %source_e4m3 = buffer.view %input[%first] : buffer -> view<2xf8E4M3>
+  %source_e5m2 = buffer.view %input[%second] : buffer -> view<2xf8E5M2>
+  %target_e4m3 = buffer.view %output[%first] : buffer -> view<2xf8E4M3>
+  %target_e5m2 = buffer.view %output[%second] : buffer -> view<2xf8E5M2>
+  %e4m3 = vector.load %source_e4m3[0] : view<2xf8E4M3> -> vector<2xf8E4M3>
+  %e5m2 = vector.load %source_e5m2[0] : view<2xf8E5M2> -> vector<2xf8E5M2>
+  vector.store %e4m3, %target_e4m3[0] : vector<2xf8E4M3>, view<2xf8E4M3>
+  vector.store %e5m2, %target_e5m2[0] : vector<2xf8E5M2>, view<2xf8E5M2>
+  func.return
+}
+
+// ====
+// Dynamic origins, subviews and element indices remain byte coordinates.
+func.def @copy_float8_index(%input: buffer, %output: buffer, %byte_offset: offset, %element: index) {
+  %base = index.assume %byte_offset [range(%byte_offset, 0, 128)] : offset
+  %position = index.assume %element [range(%element, 0, 15)] : index
+  %source_e4m3 = buffer.view %input[%base] : buffer -> view<32xf8E4M3>
+  %source_e5m2 = buffer.view %input[%base] : buffer -> view<32xf8E5M2>
+  %target_e4m3 = buffer.view %output[%base] : buffer -> view<32xf8E4M3>
+  %target_e5m2 = buffer.view %output[%base] : buffer -> view<32xf8E5M2>
+  %source_tail = view.subview %source_e5m2[16] : view<32xf8E5M2> -> view<16xf8E5M2>
+  %target_tail = view.subview %target_e5m2[16] : view<32xf8E5M2> -> view<16xf8E5M2>
+  %e4m3 = view.load %source_e4m3[%position] : view<32xf8E4M3> -> f8E4M3
+  %e5m2 = view.load %source_tail[%position] : view<16xf8E5M2> -> f8E5M2
+  view.store %e4m3, %target_e4m3[%position] : f8E4M3, view<32xf8E4M3>
+  view.store %e5m2, %target_tail[%position] : f8E5M2, view<16xf8E5M2>
+  func.return
+}
+
+// ====
+// Volatile accesses retain both observations even when their addresses match.
+func.def @copy_float8_volatile(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<1xf8E4M3>
+  %target = buffer.view %output[%base] : buffer -> view<2xf8E4M3>
+  %first = view.load<volatile> %source[0] : view<1xf8E4M3> -> f8E4M3
+  %second = view.load<volatile> %source[0] : view<1xf8E4M3> -> f8E4M3
+  view.store<volatile> %first, %target[0] : f8E4M3, view<2xf8E4M3>
+  view.store<volatile> %second, %target[1] : f8E4M3, view<2xf8E4M3>
+  func.return
+}
+
+// ====
+func.def @extend_float8(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source_e4m3 = buffer.view %input[%base] : buffer -> view<1xf8E4M3>
+  %source_e5m2 = buffer.view %input[%base] : buffer -> view<1xf8E5M2>
+  %target = buffer.view %output[%base] : buffer -> view<2xf32>
+  %e4m3 = view.load %source_e4m3[0] : view<1xf8E4M3> -> f8E4M3
+  %e5m2 = view.load %source_e5m2[0] : view<1xf8E5M2> -> f8E5M2
+  %first = scalar.extf %e4m3 : f8E4M3 to f32
+  %second = scalar.extf %e5m2 : f8E5M2 to f32
+  view.store %first, %target[0] : f32, view<2xf32>
+  view.store %second, %target[1] : f32, view<2xf32>
+  func.return
+}

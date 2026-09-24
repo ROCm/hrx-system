@@ -4,8 +4,8 @@
 // TEMPLATE-EXCLUDE: @uniform_i16 Scalarized halfword arithmetic requires an i32-to-i16 truncation contract.
 // TEMPLATE-EXCLUDE: @uniform_f16 The target math policy does not admit FP16 vector addition.
 // TEMPLATE-EXCLUDE: @uniform_bf16 The target lacks the BF16 load-to-FP32 conversion contract.
-// TEMPLATE-EXCLUDE: @uniform_f8E4M3 The target lacks the E4M3 load-to-FP32 conversion contract.
-// TEMPLATE-EXCLUDE: @uniform_f8E5M2 The target lacks the E5M2 load-to-FP32 conversion contract.
+// TEMPLATE-EXCLUDE: @uniform_f8E4M3 FP8 extension requires scalar legalization, Boolean selection, and eight-lane vector construction.
+// TEMPLATE-EXCLUDE: @uniform_f8E5M2 FP8 extension requires scalar legalization, Boolean selection, and eight-lane vector construction.
 // TEMPLATE-EXCLUDE: @uniform_f16_extf The target lacks the FP16 vector load-to-FP32 conversion contract.
 // RUN: emit source-low target=x86:avx2 output=low
 

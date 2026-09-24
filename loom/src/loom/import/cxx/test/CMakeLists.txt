@@ -1119,9 +1119,18 @@ endif()
 if(LOOM_IMPORT_CXX)
 loom_test_module(
   NAME
-    packed_float_conversion_module
+    packed_float16_conversion_module
   SRCS
-    "packed_float_conversion.cxx"
+    "packed_float16_conversion.cxx"
+)
+endif()
+
+if(LOOM_IMPORT_CXX)
+loom_test_module(
+  NAME
+    packed_float8_conversion_module
+  SRCS
+    "packed_float8_conversion.cxx"
 )
 endif()
 

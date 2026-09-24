@@ -1,0 +1,432 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_float8.loom
+// RUN: emit source-low target=spirv:vulkan1.3+bda+extended-types output=low control-flow=structured-low
+
+// Both FP8 formats retain their bytes, including NaN payloads, through storage.
+func.def @copy_float8_scalar(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source_e4m3 = buffer.view %input[%base] : buffer -> view<8xf8E4M3>
+  %source_e5m2 = buffer.view %input[%base] : buffer -> view<8xf8E5M2>
+  %target_e4m3 = buffer.view %output[%base] : buffer -> view<8xf8E4M3>
+  %target_e5m2 = buffer.view %output[%base] : buffer -> view<8xf8E5M2>
+  %e4m3 = view.load %source_e4m3[3] : view<8xf8E4M3> -> f8E4M3
+  %e5m2 = view.load %source_e5m2[5] : view<8xf8E5M2> -> f8E5M2
+  view.store %e4m3, %target_e4m3[3] : f8E4M3, view<8xf8E4M3>
+  view.store %e5m2, %target_e5m2[5] : f8E5M2, view<8xf8E5M2>
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @copy_float8_scalar(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>) asm {
+  %11 = OpConstant.offset64 3
+  %12 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %11
+  %e4m3 = OpLoad.storage_buffer.i8 %12
+  %14 = OpConstant.offset64 5
+  %15 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %14
+  %e5m2 = OpLoad.storage_buffer.i8 %15
+  %18 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %11
+  OpStore.storage_buffer.i8 %18, %e4m3
+  %20 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %14
+  OpStore.storage_buffer.i8 %20, %e5m2
+  return
+}
+
+// ====
+
+// Full-register copies use the same physical transfers as integer bytes.
+func.def @copy_float8_vector(%input: buffer, %output: buffer) {
+  %first = index.constant 0 : offset
+  %second = index.constant 16 : offset
+  %source_e4m3 = buffer.view %input[%first] : buffer -> view<16xf8E4M3>
+  %source_e5m2 = buffer.view %input[%second] : buffer -> view<16xf8E5M2>
+  %target_e4m3 = buffer.view %output[%first] : buffer -> view<16xf8E4M3>
+  %target_e5m2 = buffer.view %output[%second] : buffer -> view<16xf8E5M2>
+  %e4m3 = vector.load %source_e4m3[0] : view<16xf8E4M3> -> vector<16xf8E4M3>
+  %e5m2 = vector.load %source_e5m2[0] : view<16xf8E5M2> -> vector<16xf8E5M2>
+  vector.store %e4m3, %target_e4m3[0] : vector<16xf8E4M3>, view<16xf8E4M3>
+  vector.store %e5m2, %target_e5m2[0] : vector<16xf8E5M2>, view<16xf8E5M2>
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @copy_float8_vector(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>) asm {
+  %78 = OpConstant.offset64 0
+  %79 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %78
+  %80 = OpLoad.storage_buffer.i8 %79
+  %81 = OpConstant.offset64 1
+  %82 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %81
+  %83 = OpLoad.storage_buffer.i8 %82
+  %84 = OpConstant.offset64 2
+  %85 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %84
+  %86 = OpLoad.storage_buffer.i8 %85
+  %87 = OpConstant.offset64 3
+  %88 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %87
+  %89 = OpLoad.storage_buffer.i8 %88
+  %90 = OpConstant.offset64 4
+  %91 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %90
+  %92 = OpLoad.storage_buffer.i8 %91
+  %93 = OpConstant.offset64 5
+  %94 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %93
+  %95 = OpLoad.storage_buffer.i8 %94
+  %96 = OpConstant.offset64 6
+  %97 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %96
+  %98 = OpLoad.storage_buffer.i8 %97
+  %99 = OpConstant.offset64 7
+  %100 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %99
+  %101 = OpLoad.storage_buffer.i8 %100
+  %102 = OpConstant.offset64 8
+  %103 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %102
+  %104 = OpLoad.storage_buffer.i8 %103
+  %105 = OpConstant.offset64 9
+  %106 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %105
+  %107 = OpLoad.storage_buffer.i8 %106
+  %108 = OpConstant.offset64 10
+  %109 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %108
+  %110 = OpLoad.storage_buffer.i8 %109
+  %111 = OpConstant.offset64 11
+  %112 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %111
+  %113 = OpLoad.storage_buffer.i8 %112
+  %114 = OpConstant.offset64 12
+  %115 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %114
+  %116 = OpLoad.storage_buffer.i8 %115
+  %117 = OpConstant.offset64 13
+  %118 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %117
+  %119 = OpLoad.storage_buffer.i8 %118
+  %120 = OpConstant.offset64 14
+  %121 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %120
+  %122 = OpLoad.storage_buffer.i8 %121
+  %123 = OpConstant.offset64 15
+  %124 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %123
+  %125 = OpLoad.storage_buffer.i8 %124
+  %126 = OpConstant.offset64 16
+  %127 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %126
+  %128 = OpLoad.storage_buffer.i8 %127
+  %129 = OpConstant.offset64 17
+  %130 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %129
+  %131 = OpLoad.storage_buffer.i8 %130
+  %132 = OpConstant.offset64 18
+  %133 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %132
+  %134 = OpLoad.storage_buffer.i8 %133
+  %135 = OpConstant.offset64 19
+  %136 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %135
+  %137 = OpLoad.storage_buffer.i8 %136
+  %138 = OpConstant.offset64 20
+  %139 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %138
+  %140 = OpLoad.storage_buffer.i8 %139
+  %141 = OpConstant.offset64 21
+  %142 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %141
+  %143 = OpLoad.storage_buffer.i8 %142
+  %144 = OpConstant.offset64 22
+  %145 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %144
+  %146 = OpLoad.storage_buffer.i8 %145
+  %147 = OpConstant.offset64 23
+  %148 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %147
+  %149 = OpLoad.storage_buffer.i8 %148
+  %150 = OpConstant.offset64 24
+  %151 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %150
+  %152 = OpLoad.storage_buffer.i8 %151
+  %153 = OpConstant.offset64 25
+  %154 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %153
+  %155 = OpLoad.storage_buffer.i8 %154
+  %156 = OpConstant.offset64 26
+  %157 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %156
+  %158 = OpLoad.storage_buffer.i8 %157
+  %159 = OpConstant.offset64 27
+  %160 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %159
+  %161 = OpLoad.storage_buffer.i8 %160
+  %162 = OpConstant.offset64 28
+  %163 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %162
+  %164 = OpLoad.storage_buffer.i8 %163
+  %165 = OpConstant.offset64 29
+  %166 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %165
+  %167 = OpLoad.storage_buffer.i8 %166
+  %168 = OpConstant.offset64 30
+  %169 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %168
+  %170 = OpLoad.storage_buffer.i8 %169
+  %171 = OpConstant.offset64 31
+  %172 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %171
+  %173 = OpLoad.storage_buffer.i8 %172
+  %175 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %78
+  OpStore.storage_buffer.i8 %175, %80
+  %177 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %81
+  OpStore.storage_buffer.i8 %177, %83
+  %179 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %84
+  OpStore.storage_buffer.i8 %179, %86
+  %181 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %87
+  OpStore.storage_buffer.i8 %181, %89
+  %183 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %90
+  OpStore.storage_buffer.i8 %183, %92
+  %185 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %93
+  OpStore.storage_buffer.i8 %185, %95
+  %187 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %96
+  OpStore.storage_buffer.i8 %187, %98
+  %189 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %99
+  OpStore.storage_buffer.i8 %189, %101
+  %191 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %102
+  OpStore.storage_buffer.i8 %191, %104
+  %193 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %105
+  OpStore.storage_buffer.i8 %193, %107
+  %195 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %108
+  OpStore.storage_buffer.i8 %195, %110
+  %197 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %111
+  OpStore.storage_buffer.i8 %197, %113
+  %199 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %114
+  OpStore.storage_buffer.i8 %199, %116
+  %201 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %117
+  OpStore.storage_buffer.i8 %201, %119
+  %203 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %120
+  OpStore.storage_buffer.i8 %203, %122
+  %205 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %123
+  OpStore.storage_buffer.i8 %205, %125
+  %207 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %126
+  OpStore.storage_buffer.i8 %207, %128
+  %209 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %129
+  OpStore.storage_buffer.i8 %209, %131
+  %211 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %132
+  OpStore.storage_buffer.i8 %211, %134
+  %213 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %135
+  OpStore.storage_buffer.i8 %213, %137
+  %215 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %138
+  OpStore.storage_buffer.i8 %215, %140
+  %217 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %141
+  OpStore.storage_buffer.i8 %217, %143
+  %219 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %144
+  OpStore.storage_buffer.i8 %219, %146
+  %221 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %147
+  OpStore.storage_buffer.i8 %221, %149
+  %223 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %150
+  OpStore.storage_buffer.i8 %223, %152
+  %225 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %153
+  OpStore.storage_buffer.i8 %225, %155
+  %227 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %156
+  OpStore.storage_buffer.i8 %227, %158
+  %229 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %159
+  OpStore.storage_buffer.i8 %229, %161
+  %231 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %162
+  OpStore.storage_buffer.i8 %231, %164
+  %233 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %165
+  OpStore.storage_buffer.i8 %233, %167
+  %235 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %168
+  OpStore.storage_buffer.i8 %235, %170
+  %237 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %171
+  OpStore.storage_buffer.i8 %237, %173
+  return
+}
+
+// ====
+
+// Short vectors preserve their exact span instead of widening the access.
+func.def @copy_float8_tail(%input: buffer, %output: buffer) {
+  %first = index.constant 1 : offset
+  %second = index.constant 3 : offset
+  %source_e4m3 = buffer.view %input[%first] : buffer -> view<2xf8E4M3>
+  %source_e5m2 = buffer.view %input[%second] : buffer -> view<2xf8E5M2>
+  %target_e4m3 = buffer.view %output[%first] : buffer -> view<2xf8E4M3>
+  %target_e5m2 = buffer.view %output[%second] : buffer -> view<2xf8E5M2>
+  %e4m3 = vector.load %source_e4m3[0] : view<2xf8E4M3> -> vector<2xf8E4M3>
+  %e5m2 = vector.load %source_e5m2[0] : view<2xf8E5M2> -> vector<2xf8E5M2>
+  vector.store %e4m3, %target_e4m3[0] : vector<2xf8E4M3>, view<2xf8E4M3>
+  vector.store %e5m2, %target_e5m2[0] : vector<2xf8E5M2>, view<2xf8E5M2>
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @copy_float8_tail(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>) asm {
+  %22 = OpConstant.offset64 1
+  %23 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %22
+  %24 = OpLoad.storage_buffer.i8 %23
+  %25 = OpConstant.offset64 2
+  %26 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %25
+  %27 = OpLoad.storage_buffer.i8 %26
+  %28 = OpConstant.offset64 3
+  %29 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %28
+  %30 = OpLoad.storage_buffer.i8 %29
+  %31 = OpConstant.offset64 4
+  %32 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %31
+  %33 = OpLoad.storage_buffer.i8 %32
+  %35 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %22
+  OpStore.storage_buffer.i8 %35, %24
+  %37 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %25
+  OpStore.storage_buffer.i8 %37, %27
+  %39 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %28
+  OpStore.storage_buffer.i8 %39, %30
+  %41 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %31
+  OpStore.storage_buffer.i8 %41, %33
+  return
+}
+
+// ====
+
+// Dynamic origins, subviews and element indices remain byte coordinates.
+func.def @copy_float8_index(%input: buffer, %output: buffer, %byte_offset: offset, %element: index) {
+  %base = index.assume %byte_offset [range(%byte_offset, 0, 128)] : offset
+  %position = index.assume %element [range(%element, 0, 15)] : index
+  %source_e4m3 = buffer.view %input[%base] : buffer -> view<32xf8E4M3>
+  %source_e5m2 = buffer.view %input[%base] : buffer -> view<32xf8E5M2>
+  %target_e4m3 = buffer.view %output[%base] : buffer -> view<32xf8E4M3>
+  %target_e5m2 = buffer.view %output[%base] : buffer -> view<32xf8E5M2>
+  %source_tail = view.subview %source_e5m2[16] : view<32xf8E5M2> -> view<16xf8E5M2>
+  %target_tail = view.subview %target_e5m2[16] : view<32xf8E5M2> -> view<16xf8E5M2>
+  %e4m3 = view.load %source_e4m3[%position] : view<32xf8E4M3> -> f8E4M3
+  %e5m2 = view.load %source_tail[%position] : view<16xf8E5M2> -> f8E5M2
+  view.store %e4m3, %target_e4m3[%position] : f8E4M3, view<32xf8E4M3>
+  view.store %e5m2, %target_tail[%position] : f8E5M2, view<16xf8E5M2>
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @copy_float8_index(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>, %base: reg<spirv.offset64>, %position: reg<spirv.id : index>) asm {
+  %18 = OpSConvert.i32.offset64 %position
+  %19 = OpIAdd.offset64 %base, %18
+  %20 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %19
+  %e4m3 = OpLoad.storage_buffer.i8 %20
+  %24 = OpConstant.offset64 16
+  %25 = OpIAdd.offset64 %19, %24
+  %26 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %25
+  %e5m2 = OpLoad.storage_buffer.i8 %26
+  %30 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %19
+  OpStore.storage_buffer.i8 %30, %e4m3
+  %35 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %25
+  OpStore.storage_buffer.i8 %35, %e5m2
+  return
+}
+
+// ====
+
+// Volatile accesses retain both observations even when their addresses match.
+func.def @copy_float8_volatile(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<1xf8E4M3>
+  %target = buffer.view %output[%base] : buffer -> view<2xf8E4M3>
+  %first = view.load<volatile> %source[0] : view<1xf8E4M3> -> f8E4M3
+  %second = view.load<volatile> %source[0] : view<1xf8E4M3> -> f8E4M3
+  view.store<volatile> %first, %target[0] : f8E4M3, view<2xf8E4M3>
+  view.store<volatile> %second, %target[1] : f8E4M3, view<2xf8E4M3>
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @copy_float8_volatile(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>) asm {
+  %9 = OpConstant.offset64 0
+  %10 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %9
+  %first = OpLoad.storage_buffer.i8<volatile> %10
+  %second = OpLoad.storage_buffer.i8<volatile> %10
+  %16 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %9
+  OpStore.storage_buffer.i8<volatile> %16, %first
+  %17 = OpConstant.offset64 1
+  %18 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %17
+  OpStore.storage_buffer.i8<volatile> %18, %second
+  return
+}
+
+// ====
+
+func.def @extend_float8(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source_e4m3 = buffer.view %input[%base] : buffer -> view<1xf8E4M3>
+  %source_e5m2 = buffer.view %input[%base] : buffer -> view<1xf8E5M2>
+  %target = buffer.view %output[%base] : buffer -> view<2xf32>
+  %e4m3 = view.load %source_e4m3[0] : view<1xf8E4M3> -> f8E4M3
+  %e5m2 = view.load %source_e5m2[0] : view<1xf8E5M2> -> f8E5M2
+  %first = scalar.extf %e4m3 : f8E4M3 to f32
+  %second = scalar.extf %e5m2 : f8E5M2 to f32
+  view.store %first, %target[0] : f32, view<2xf32>
+  view.store %second, %target[1] : f32, view<2xf32>
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @extend_float8(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>) asm {
+  %125 = OpConstant.offset64 0
+  %126 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %125
+  %e4m3 = OpLoad.storage_buffer.i8 %126
+  %131 = OpBitcast.i8.u8 %e4m3
+  %132 = OpUConvert.u8.u32 %131
+  %133 = OpBitcast.u32.i32 %132
+  %134 = OpConstant.i32 128
+  %135 = OpBitwiseAnd %133, %134
+  %136 = OpConstant.i32 24
+  %137 = OpShiftLeftLogical %135, %136
+  %138 = OpConstant.i32 120
+  %139 = OpBitwiseAnd %133, %138
+  %140 = OpConstant.i32 3
+  %141 = OpShiftRightLogical %139, %140
+  %142 = OpConstant.i32 7
+  %143 = OpBitwiseAnd %133, %142
+  %144 = OpIAdd %141, %138
+  %145 = OpConstant.i32 23
+  %146 = OpShiftLeftLogical %144, %145
+  %147 = OpConstant.i32 20
+  %148 = OpShiftLeftLogical %143, %147
+  %149 = OpBitwiseOr %137, %146
+  %150 = OpBitwiseOr %149, %148
+  %151 = OpConstant.i32 0
+  %152 = OpConstant.i32 2
+  %153 = OpBitwiseAnd %143, %152
+  %154 = OpINotEqual %153, %151
+  %155 = OpConstant.i32 1
+  %156 = OpSelect %154, %155, %151
+  %157 = OpConstant.i32 4
+  %158 = OpBitwiseAnd %143, %157
+  %159 = OpINotEqual %158, %151
+  %160 = OpSelect %159, %152, %156
+  %161 = OpConstant.i32 118
+  %162 = OpIAdd %160, %161
+  %163 = OpShiftLeftLogical %162, %145
+  %164 = OpISub %145, %160
+  %165 = OpShiftLeftLogical %143, %164
+  %166 = OpConstant.i32 8388607
+  %167 = OpBitwiseAnd %165, %166
+  %168 = OpBitwiseOr %137, %163
+  %169 = OpBitwiseOr %168, %167
+  %170 = OpIEqual %143, %151
+  %171 = OpSelect %170, %137, %169
+  %172 = OpIEqual %141, %151
+  %173 = OpSelect %172, %171, %150
+  %174 = OpConstant.i32 15
+  %175 = OpIEqual %141, %174
+  %176 = OpConstant.i32 2143289344
+  %177 = OpIEqual %143, %142
+  %178 = OpConstantFalse.bool
+  %179 = OpSelect.bool %175, %177, %178
+  %180 = OpSelect %179, %176, %173
+  %first = OpBitcast.i32.f32 %180
+  %187 = OpConstant.i32 124
+  %188 = OpBitwiseAnd %133, %187
+  %189 = OpShiftRightLogical %188, %152
+  %190 = OpBitwiseAnd %133, %140
+  %191 = OpConstant.i32 112
+  %192 = OpIAdd %189, %191
+  %193 = OpShiftLeftLogical %192, %145
+  %194 = OpConstant.i32 21
+  %195 = OpShiftLeftLogical %190, %194
+  %196 = OpBitwiseOr %137, %193
+  %197 = OpBitwiseOr %196, %195
+  %198 = OpBitwiseAnd %190, %152
+  %199 = OpINotEqual %198, %151
+  %200 = OpSelect %199, %155, %151
+  %201 = OpConstant.i32 111
+  %202 = OpIAdd %200, %201
+  %203 = OpShiftLeftLogical %202, %145
+  %204 = OpISub %145, %200
+  %205 = OpShiftLeftLogical %190, %204
+  %206 = OpBitwiseAnd %205, %166
+  %207 = OpBitwiseOr %137, %203
+  %208 = OpBitwiseOr %207, %206
+  %209 = OpIEqual %190, %151
+  %210 = OpSelect %209, %137, %208
+  %211 = OpIEqual %189, %151
+  %212 = OpSelect %211, %210, %197
+  %213 = OpConstant.i32 31
+  %214 = OpIEqual %189, %213
+  %215 = OpConstant.i32 2139095040
+  %216 = OpBitwiseOr %137, %215
+  %217 = OpSelect %209, %216, %176
+  %218 = OpSelect %214, %217, %212
+  %second = OpBitcast.i32.f32 %218
+  %221 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %125
+  OpStore.storage_buffer.f32 %221, %first
+  %222 = OpConstant.offset64 4
+  %223 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output, %222
+  OpStore.storage_buffer.f32 %223, %second
+  return
+}

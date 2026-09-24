@@ -38,6 +38,7 @@ from loom.target.low_descriptors import Descriptor
 _DescriptorLookup = Callable[[str], Descriptor]
 
 _I64 = Scalar("i64")
+_BYTE_STORAGE_TYPES = ("i8", "f8E4M3", "f8E5M2")
 _I64_MIN = -(2**63) + 1
 _I64_MAX = (2**63) - 1
 
@@ -49,7 +50,7 @@ _DISP32_MAX = (2**31) - 1
 # proportional to physical memory forms instead of source type spellings.
 _STORAGE_FORMATS = (
     (("i32", "f32"), 4),
-    (("i8",), 1),
+    (_BYTE_STORAGE_TYPES, 1),
 )
 
 
@@ -542,7 +543,7 @@ def x86_scalar_memory_rules(
     for value_type, element_byte_count, register_suffix, load_mnemonic in (
         (Scalar("i32"), 4, "gpr32", "mov"),
         (_I64, 8, "gpr64", "mov"),
-        (Scalar("i8"), 1, "u8.gpr32", "movzx"),
+        (Scalar(_BYTE_STORAGE_TYPES), 1, "u8.gpr32", "movzx"),
         (Scalar("i16"), 2, "u16.gpr32", "movzx"),
     ):
         operations = (

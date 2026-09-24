@@ -1,0 +1,364 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_float8.loom
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+// Both FP8 formats retain their bytes, including NaN payloads, through storage.
+func.def @copy_float8_scalar(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source_e4m3 = buffer.view %input[%base] : buffer -> view<8xf8E4M3>
+  %source_e5m2 = buffer.view %input[%base] : buffer -> view<8xf8E5M2>
+  %target_e4m3 = buffer.view %output[%base] : buffer -> view<8xf8E4M3>
+  %target_e5m2 = buffer.view %output[%base] : buffer -> view<8xf8E5M2>
+  %e4m3 = view.load %source_e4m3[3] : view<8xf8E4M3> -> f8E4M3
+  %e5m2 = view.load %source_e5m2[5] : view<8xf8E5M2> -> f8E5M2
+  view.store %e4m3, %target_e4m3[3] : f8E4M3, view<8xf8E4M3>
+  view.store %e5m2, %target_e5m2[5] : f8E5M2, view<8xf8E5M2>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_float8_scalar() asm {
+  %source_e5m2 = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %target_e5m2 = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %e4m3 = lda.u8 %source_e5m2, 3
+  %e5m2 = lda.u8 %source_e5m2, 5
+  st.s8 %e4m3, %target_e5m2, 3
+  st.s8 %e5m2, %target_e5m2, 5
+  return
+}
+
+// ====
+
+// Full-register copies use the same physical transfers as integer bytes.
+func.def @copy_float8_vector(%input: buffer, %output: buffer) {
+  %first = index.constant 0 : offset
+  %second = index.constant 16 : offset
+  %source_e4m3 = buffer.view %input[%first] : buffer -> view<16xf8E4M3>
+  %source_e5m2 = buffer.view %input[%second] : buffer -> view<16xf8E5M2>
+  %target_e4m3 = buffer.view %output[%first] : buffer -> view<16xf8E4M3>
+  %target_e5m2 = buffer.view %output[%second] : buffer -> view<16xf8E5M2>
+  %e4m3 = vector.load %source_e4m3[0] : view<16xf8E4M3> -> vector<16xf8E4M3>
+  %e5m2 = vector.load %source_e5m2[0] : view<16xf8E5M2> -> vector<16xf8E5M2>
+  vector.store %e4m3, %target_e4m3[0] : vector<16xf8E4M3>, view<16xf8E4M3>
+  vector.store %e5m2, %target_e5m2[0] : vector<16xf8E5M2>, view<16xf8E5M2>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_float8_vector() asm {
+  %source_e5m2 = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %target_e5m2 = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %350 = lda.u8 %source_e5m2, 0
+  %351 = lda.u8 %source_e5m2, 1
+  %352 = lda.u8 %source_e5m2, 2
+  %353 = lda.u8 %source_e5m2, 3
+  %354 = lda.u8 %source_e5m2, 4
+  %355 = lda.u8 %source_e5m2, 5
+  %356 = lda.u8 %source_e5m2, 6
+  %357 = lda.u8 %source_e5m2, 7
+  %358 = mov.static-byte-offset 8
+  %359 = mov.address-index %358
+  %360 = lda.i8.index %source_e5m2, %359
+  %361 = mov.static-byte-offset 9
+  %362 = mov.address-index %361
+  %363 = lda.i8.index %source_e5m2, %362
+  %364 = mov.static-byte-offset 10
+  %365 = mov.address-index %364
+  %366 = lda.i8.index %source_e5m2, %365
+  %367 = mov.static-byte-offset 11
+  %368 = mov.address-index %367
+  %369 = lda.i8.index %source_e5m2, %368
+  %370 = mov.static-byte-offset 12
+  %371 = mov.address-index %370
+  %372 = lda.i8.index %source_e5m2, %371
+  %373 = mov.static-byte-offset 13
+  %374 = mov.address-index %373
+  %375 = lda.i8.index %source_e5m2, %374
+  %376 = mov.static-byte-offset 14
+  %377 = mov.address-index %376
+  %378 = lda.i8.index %source_e5m2, %377
+  %379 = mov.static-byte-offset 15
+  %380 = mov.address-index %379
+  %381 = lda.i8.index %source_e5m2, %380
+  %382 = mov.static-byte-offset 16
+  %383 = mov.address-index %382
+  %384 = lda.i8.index %source_e5m2, %383
+  %385 = mov.static-byte-offset 17
+  %386 = mov.address-index %385
+  %387 = lda.i8.index %source_e5m2, %386
+  %388 = mov.static-byte-offset 18
+  %389 = mov.address-index %388
+  %390 = lda.i8.index %source_e5m2, %389
+  %391 = mov.static-byte-offset 19
+  %392 = mov.address-index %391
+  %393 = lda.i8.index %source_e5m2, %392
+  %394 = mov.static-byte-offset 20
+  %395 = mov.address-index %394
+  %396 = lda.i8.index %source_e5m2, %395
+  %397 = mov.static-byte-offset 21
+  %398 = mov.address-index %397
+  %399 = lda.i8.index %source_e5m2, %398
+  %400 = mov.static-byte-offset 22
+  %401 = mov.address-index %400
+  %402 = lda.i8.index %source_e5m2, %401
+  %403 = mov.static-byte-offset 23
+  %404 = mov.address-index %403
+  %405 = lda.i8.index %source_e5m2, %404
+  %406 = mov.static-byte-offset 24
+  %407 = mov.address-index %406
+  %408 = lda.i8.index %source_e5m2, %407
+  %409 = mov.static-byte-offset 25
+  %410 = mov.address-index %409
+  %411 = lda.i8.index %source_e5m2, %410
+  %412 = mov.static-byte-offset 26
+  %413 = mov.address-index %412
+  %414 = lda.i8.index %source_e5m2, %413
+  %415 = mov.static-byte-offset 27
+  %416 = mov.address-index %415
+  %417 = lda.i8.index %source_e5m2, %416
+  %418 = mov.static-byte-offset 28
+  %419 = mov.address-index %418
+  %420 = lda.i8.index %source_e5m2, %419
+  %421 = mov.static-byte-offset 29
+  %422 = mov.address-index %421
+  %423 = lda.i8.index %source_e5m2, %422
+  %424 = mov.static-byte-offset 30
+  %425 = mov.address-index %424
+  %426 = lda.i8.index %source_e5m2, %425
+  %427 = mov.static-byte-offset 31
+  %428 = mov.address-index %427
+  %429 = lda.i8.index %source_e5m2, %428
+  st.s8 %350, %target_e5m2, 0
+  st.s8 %351, %target_e5m2, 1
+  st.s8 %352, %target_e5m2, 2
+  st.s8 %353, %target_e5m2, 3
+  st.s8 %354, %target_e5m2, 4
+  st.s8 %355, %target_e5m2, 5
+  st.s8 %356, %target_e5m2, 6
+  st.s8 %357, %target_e5m2, 7
+  st.i8.index %360, %target_e5m2, %359
+  st.i8.index %363, %target_e5m2, %362
+  st.i8.index %366, %target_e5m2, %365
+  st.i8.index %369, %target_e5m2, %368
+  st.i8.index %372, %target_e5m2, %371
+  st.i8.index %375, %target_e5m2, %374
+  st.i8.index %378, %target_e5m2, %377
+  st.i8.index %381, %target_e5m2, %380
+  st.i8.index %384, %target_e5m2, %383
+  st.i8.index %387, %target_e5m2, %386
+  st.i8.index %390, %target_e5m2, %389
+  st.i8.index %393, %target_e5m2, %392
+  st.i8.index %396, %target_e5m2, %395
+  st.i8.index %399, %target_e5m2, %398
+  st.i8.index %402, %target_e5m2, %401
+  st.i8.index %405, %target_e5m2, %404
+  st.i8.index %408, %target_e5m2, %407
+  st.i8.index %411, %target_e5m2, %410
+  st.i8.index %414, %target_e5m2, %413
+  st.i8.index %417, %target_e5m2, %416
+  st.i8.index %420, %target_e5m2, %419
+  st.i8.index %423, %target_e5m2, %422
+  st.i8.index %426, %target_e5m2, %425
+  st.i8.index %429, %target_e5m2, %428
+  return
+}
+
+// ====
+
+// Short vectors preserve their exact span instead of widening the access.
+func.def @copy_float8_tail(%input: buffer, %output: buffer) {
+  %first = index.constant 1 : offset
+  %second = index.constant 3 : offset
+  %source_e4m3 = buffer.view %input[%first] : buffer -> view<2xf8E4M3>
+  %source_e5m2 = buffer.view %input[%second] : buffer -> view<2xf8E5M2>
+  %target_e4m3 = buffer.view %output[%first] : buffer -> view<2xf8E4M3>
+  %target_e5m2 = buffer.view %output[%second] : buffer -> view<2xf8E5M2>
+  %e4m3 = vector.load %source_e4m3[0] : view<2xf8E4M3> -> vector<2xf8E4M3>
+  %e5m2 = vector.load %source_e5m2[0] : view<2xf8E5M2> -> vector<2xf8E5M2>
+  vector.store %e4m3, %target_e4m3[0] : vector<2xf8E4M3>, view<2xf8E4M3>
+  vector.store %e5m2, %target_e5m2[0] : vector<2xf8E5M2>, view<2xf8E5M2>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_float8_tail() asm {
+  %source_e5m2 = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %target_e5m2 = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %28 = lda.u8 %source_e5m2, 1
+  %29 = lda.u8 %source_e5m2, 2
+  %30 = lda.u8 %source_e5m2, 3
+  %31 = lda.u8 %source_e5m2, 4
+  st.s8 %28, %target_e5m2, 1
+  st.s8 %29, %target_e5m2, 2
+  st.s8 %30, %target_e5m2, 3
+  st.s8 %31, %target_e5m2, 4
+  return
+}
+
+// ====
+
+// Dynamic origins, subviews and element indices remain byte coordinates.
+func.def @copy_float8_index(%input: buffer, %output: buffer, %byte_offset: offset, %element: index) {
+  %base = index.assume %byte_offset [range(%byte_offset, 0, 128)] : offset
+  %position = index.assume %element [range(%element, 0, 15)] : index
+  %source_e4m3 = buffer.view %input[%base] : buffer -> view<32xf8E4M3>
+  %source_e5m2 = buffer.view %input[%base] : buffer -> view<32xf8E5M2>
+  %target_e4m3 = buffer.view %output[%base] : buffer -> view<32xf8E4M3>
+  %target_e5m2 = buffer.view %output[%base] : buffer -> view<32xf8E5M2>
+  %source_tail = view.subview %source_e5m2[16] : view<32xf8E5M2> -> view<16xf8E5M2>
+  %target_tail = view.subview %target_e5m2[16] : view<32xf8E5M2> -> view<16xf8E5M2>
+  %e4m3 = view.load %source_e4m3[%position] : view<32xf8E4M3> -> f8E4M3
+  %e5m2 = view.load %source_tail[%position] : view<16xf8E5M2> -> f8E5M2
+  view.store %e4m3, %target_e4m3[%position] : f8E4M3, view<32xf8E4M3>
+  view.store %e5m2, %target_tail[%position] : f8E5M2, view<16xf8E5M2>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_float8_index(%base: reg<aie2p.er>, %position: reg<aie2p.er>) asm {
+  %source_tail = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %target_tail = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %18 = add.rr %base, %position
+  %19 = mov.address-index %18
+  %e4m3 = lda.i8.index %source_tail, %19
+  %21 = add.rr %base, %position
+  %22 = add %21, 16
+  %23 = mov.address-index %22
+  %e5m2 = lda.i8.index %source_tail, %23
+  %25 = add.rr %base, %position
+  %26 = mov.address-index %25
+  st.i8.index %e4m3, %target_tail, %26
+  %27 = add.rr %base, %position
+  %28 = add %27, 16
+  %29 = mov.address-index %28
+  st.i8.index %e5m2, %target_tail, %29
+  return
+}
+
+// ====
+
+// Volatile accesses retain both observations even when their addresses match.
+func.def @copy_float8_volatile(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<1xf8E4M3>
+  %target = buffer.view %output[%base] : buffer -> view<2xf8E4M3>
+  %first = view.load<volatile> %source[0] : view<1xf8E4M3> -> f8E4M3
+  %second = view.load<volatile> %source[0] : view<1xf8E4M3> -> f8E4M3
+  view.store<volatile> %first, %target[0] : f8E4M3, view<2xf8E4M3>
+  view.store<volatile> %second, %target[1] : f8E4M3, view<2xf8E4M3>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_float8_volatile() asm {
+  %source = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %target = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %first = lda.u8.volatile<volatile> %source, 0
+  %second = lda.u8.volatile<volatile> %source, 0
+  st.s8.volatile<volatile> %first, %target, 0
+  st.s8.volatile<volatile> %second, %target, 1
+  return
+}
+
+// ====
+
+func.def @extend_float8(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source_e4m3 = buffer.view %input[%base] : buffer -> view<1xf8E4M3>
+  %source_e5m2 = buffer.view %input[%base] : buffer -> view<1xf8E5M2>
+  %target = buffer.view %output[%base] : buffer -> view<2xf32>
+  %e4m3 = view.load %source_e4m3[0] : view<1xf8E4M3> -> f8E4M3
+  %e5m2 = view.load %source_e5m2[0] : view<1xf8E5M2> -> f8E5M2
+  %first = scalar.extf %e4m3 : f8E4M3 to f32
+  %second = scalar.extf %e5m2 : f8E5M2 to f32
+  view.store %first, %target[0] : f32, view<2xf32>
+  view.store %second, %target[1] : f32, view<2xf32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @extend_float8() asm {
+  %source_e5m2 = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %target = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %e4m3 = lda.u8 %source_e5m2, 0
+  %14 = mov.short 128
+  %15 = mov.short 127
+  %16 = mov.short 7
+  %17 = mov.short 120
+  %18 = mov.short -3
+  %19 = mov.short 24
+  %20 = mov.short 20
+  %21 = mov.short 23
+  %22 = mov.short 255
+  %23 = and %e4m3, %22
+  %24 = and %23, %14
+  %25 = lshl %24, %19
+  %26 = and %23, %15
+  %27 = and %23, %17
+  %28 = lshl %27, %18
+  %29 = and %23, %16
+  %31 = add.rr %28, %17
+  %32 = lshl %31, %21
+  %33 = lshl %29, %20
+  %34 = or %32, %33
+  %35 = or %25, %34
+  %36 = clz %29
+  %37 = mov.short -28
+  %38 = add.rr %36, %37
+  %39 = lshl %29, %38
+  %40 = and %39, %16
+  %41 = lshl %40, %20
+  %42 = mov.short 121
+  %43 = sub %42, %38
+  %44 = lshl %43, %21
+  %45 = or %44, %41
+  %46 = or %25, %45
+  %47 = copy %29 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %48 = sel.nez %46, %25, %47
+  %49 = eqz %28
+  %50 = copy %49 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %51 = sel.nez %48, %35, %50
+  %52 = mov.i32 2143289344
+  %54 = eq %26, %15
+  %55 = copy %54 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %first = sel.nez %52, %51, %55
+  %59 = mov.short 3
+  %60 = mov.short 124
+  %61 = mov.short -2
+  %63 = mov.short 21
+  %70 = and %23, %60
+  %71 = lshl %70, %61
+  %72 = and %23, %59
+  %73 = mov.short 112
+  %74 = add.rr %71, %73
+  %75 = lshl %74, %21
+  %76 = lshl %72, %63
+  %77 = or %75, %76
+  %78 = or %25, %77
+  %79 = clz %72
+  %80 = mov.short -29
+  %81 = add.rr %79, %80
+  %82 = lshl %72, %81
+  %83 = and %82, %59
+  %84 = lshl %83, %63
+  %85 = mov.short 113
+  %86 = sub %85, %81
+  %87 = lshl %86, %21
+  %88 = or %87, %84
+  %89 = or %25, %88
+  %90 = copy %72 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %91 = sel.nez %89, %25, %90
+  %92 = eqz %71
+  %93 = copy %92 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %94 = sel.nez %91, %78, %93
+  %96 = mov.short 31
+  %97 = eq %71, %96
+  %98 = mov.i32 2139095040
+  %99 = or %25, %98
+  %100 = copy %72 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %101 = sel.nez %52, %99, %100
+  %102 = copy %97 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %second = sel.nez %101, %94, %102
+  st %first, %target, 0
+  st %second, %target, 4
+  return
+}

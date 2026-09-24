@@ -1,0 +1,264 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_float8.loom
+// RUN: emit source-low target=vm:core output=low
+
+// Both FP8 formats retain their bytes, including NaN payloads, through storage.
+func.def @copy_float8_scalar(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source_e4m3 = buffer.view %input[%base] : buffer -> view<8xf8E4M3>
+  %source_e5m2 = buffer.view %input[%base] : buffer -> view<8xf8E5M2>
+  %target_e4m3 = buffer.view %output[%base] : buffer -> view<8xf8E4M3>
+  %target_e5m2 = buffer.view %output[%base] : buffer -> view<8xf8E5M2>
+  %e4m3 = view.load %source_e4m3[3] : view<8xf8E4M3> -> f8E4M3
+  %e5m2 = view.load %source_e5m2[5] : view<8xf8E5M2> -> f8E5M2
+  view.store %e4m3, %target_e4m3[3] : f8E4M3, view<8xf8E4M3>
+  view.store %e5m2, %target_e5m2[5] : f8E5M2, view<8xf8E5M2>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @copy_float8_scalar(%source_e5m2: reg<vm.ref : buffer>, %target_e5m2: reg<vm.ref : buffer>) asm {
+  %11 = constant.i64 3
+  %e4m3 = buffer.load %source_e5m2, %11, %11, 0, "i8.x1" : reg<vm.value : f8E4M3>
+  %13 = constant.i64 5
+  %e5m2 = buffer.load %source_e5m2, %13, %13, 0, "i8.x1" : reg<vm.value : f8E5M2>
+  buffer.store %target_e5m2, %11, %11, %e4m3, 0, "i8.x1"
+  buffer.store %target_e5m2, %13, %13, %e5m2, 0, "i8.x1"
+  return
+}
+
+// ====
+
+// Full-register copies use the same physical transfers as integer bytes.
+func.def @copy_float8_vector(%input: buffer, %output: buffer) {
+  %first = index.constant 0 : offset
+  %second = index.constant 16 : offset
+  %source_e4m3 = buffer.view %input[%first] : buffer -> view<16xf8E4M3>
+  %source_e5m2 = buffer.view %input[%second] : buffer -> view<16xf8E5M2>
+  %target_e4m3 = buffer.view %output[%first] : buffer -> view<16xf8E4M3>
+  %target_e5m2 = buffer.view %output[%second] : buffer -> view<16xf8E5M2>
+  %e4m3 = vector.load %source_e4m3[0] : view<16xf8E4M3> -> vector<16xf8E4M3>
+  %e5m2 = vector.load %source_e5m2[0] : view<16xf8E5M2> -> vector<16xf8E5M2>
+  vector.store %e4m3, %target_e4m3[0] : vector<16xf8E4M3>, view<16xf8E4M3>
+  vector.store %e5m2, %target_e5m2[0] : vector<16xf8E5M2>, view<16xf8E5M2>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @copy_float8_vector(%source_e5m2: reg<vm.ref : buffer>, %target_e5m2: reg<vm.ref : buffer>) asm {
+  %110 = constant.i64 0
+  %111 = buffer.load %source_e5m2, %110, %110, 0, "i8.x1" : reg<vm.value : f8E4M3>
+  %112 = constant.i64 1
+  %113 = buffer.load %source_e5m2, %112, %112, 0, "i8.x1" : reg<vm.value : f8E4M3>
+  %114 = constant.i64 2
+  %115 = buffer.load %source_e5m2, %114, %114, 0, "i8.x1" : reg<vm.value : f8E4M3>
+  %116 = constant.i64 3
+  %117 = buffer.load %source_e5m2, %116, %116, 0, "i8.x1" : reg<vm.value : f8E4M3>
+  %118 = constant.i64 4
+  %119 = buffer.load %source_e5m2, %118, %118, 0, "i8.x1" : reg<vm.value : f8E4M3>
+  %120 = constant.i64 5
+  %121 = buffer.load %source_e5m2, %120, %120, 0, "i8.x1" : reg<vm.value : f8E4M3>
+  %122 = constant.i64 6
+  %123 = buffer.load %source_e5m2, %122, %122, 0, "i8.x1" : reg<vm.value : f8E4M3>
+  %124 = constant.i64 7
+  %125 = buffer.load %source_e5m2, %124, %124, 0, "i8.x1" : reg<vm.value : f8E4M3>
+  %126 = constant.i64 8
+  %127 = buffer.load %source_e5m2, %126, %126, 0, "i8.x1" : reg<vm.value : f8E4M3>
+  %128 = constant.i64 9
+  %129 = buffer.load %source_e5m2, %128, %128, 0, "i8.x1" : reg<vm.value : f8E4M3>
+  %130 = constant.i64 10
+  %131 = buffer.load %source_e5m2, %130, %130, 0, "i8.x1" : reg<vm.value : f8E4M3>
+  %132 = constant.i64 11
+  %133 = buffer.load %source_e5m2, %132, %132, 0, "i8.x1" : reg<vm.value : f8E4M3>
+  %134 = constant.i64 12
+  %135 = buffer.load %source_e5m2, %134, %134, 0, "i8.x1" : reg<vm.value : f8E4M3>
+  %136 = constant.i64 13
+  %137 = buffer.load %source_e5m2, %136, %136, 0, "i8.x1" : reg<vm.value : f8E4M3>
+  %138 = constant.i64 14
+  %139 = buffer.load %source_e5m2, %138, %138, 0, "i8.x1" : reg<vm.value : f8E4M3>
+  %140 = constant.i64 15
+  %141 = buffer.load %source_e5m2, %140, %140, 0, "i8.x1" : reg<vm.value : f8E4M3>
+  %142 = constant.i64 16
+  %143 = buffer.load %source_e5m2, %142, %142, 0, "i8.x1" : reg<vm.value : f8E5M2>
+  %144 = constant.i64 17
+  %145 = buffer.load %source_e5m2, %144, %144, 0, "i8.x1" : reg<vm.value : f8E5M2>
+  %146 = constant.i64 18
+  %147 = buffer.load %source_e5m2, %146, %146, 0, "i8.x1" : reg<vm.value : f8E5M2>
+  %148 = constant.i64 19
+  %149 = buffer.load %source_e5m2, %148, %148, 0, "i8.x1" : reg<vm.value : f8E5M2>
+  %150 = constant.i64 20
+  %151 = buffer.load %source_e5m2, %150, %150, 0, "i8.x1" : reg<vm.value : f8E5M2>
+  %152 = constant.i64 21
+  %153 = buffer.load %source_e5m2, %152, %152, 0, "i8.x1" : reg<vm.value : f8E5M2>
+  %154 = constant.i64 22
+  %155 = buffer.load %source_e5m2, %154, %154, 0, "i8.x1" : reg<vm.value : f8E5M2>
+  %156 = constant.i64 23
+  %157 = buffer.load %source_e5m2, %156, %156, 0, "i8.x1" : reg<vm.value : f8E5M2>
+  %158 = constant.i64 24
+  %159 = buffer.load %source_e5m2, %158, %158, 0, "i8.x1" : reg<vm.value : f8E5M2>
+  %160 = constant.i64 25
+  %161 = buffer.load %source_e5m2, %160, %160, 0, "i8.x1" : reg<vm.value : f8E5M2>
+  %162 = constant.i64 26
+  %163 = buffer.load %source_e5m2, %162, %162, 0, "i8.x1" : reg<vm.value : f8E5M2>
+  %164 = constant.i64 27
+  %165 = buffer.load %source_e5m2, %164, %164, 0, "i8.x1" : reg<vm.value : f8E5M2>
+  %166 = constant.i64 28
+  %167 = buffer.load %source_e5m2, %166, %166, 0, "i8.x1" : reg<vm.value : f8E5M2>
+  %168 = constant.i64 29
+  %169 = buffer.load %source_e5m2, %168, %168, 0, "i8.x1" : reg<vm.value : f8E5M2>
+  %170 = constant.i64 30
+  %171 = buffer.load %source_e5m2, %170, %170, 0, "i8.x1" : reg<vm.value : f8E5M2>
+  %172 = constant.i64 31
+  %173 = buffer.load %source_e5m2, %172, %172, 0, "i8.x1" : reg<vm.value : f8E5M2>
+  buffer.store %target_e5m2, %110, %110, %111, 0, "i8.x1"
+  buffer.store %target_e5m2, %112, %112, %113, 0, "i8.x1"
+  buffer.store %target_e5m2, %114, %114, %115, 0, "i8.x1"
+  buffer.store %target_e5m2, %116, %116, %117, 0, "i8.x1"
+  buffer.store %target_e5m2, %118, %118, %119, 0, "i8.x1"
+  buffer.store %target_e5m2, %120, %120, %121, 0, "i8.x1"
+  buffer.store %target_e5m2, %122, %122, %123, 0, "i8.x1"
+  buffer.store %target_e5m2, %124, %124, %125, 0, "i8.x1"
+  buffer.store %target_e5m2, %126, %126, %127, 0, "i8.x1"
+  buffer.store %target_e5m2, %128, %128, %129, 0, "i8.x1"
+  buffer.store %target_e5m2, %130, %130, %131, 0, "i8.x1"
+  buffer.store %target_e5m2, %132, %132, %133, 0, "i8.x1"
+  buffer.store %target_e5m2, %134, %134, %135, 0, "i8.x1"
+  buffer.store %target_e5m2, %136, %136, %137, 0, "i8.x1"
+  buffer.store %target_e5m2, %138, %138, %139, 0, "i8.x1"
+  buffer.store %target_e5m2, %140, %140, %141, 0, "i8.x1"
+  buffer.store %target_e5m2, %142, %142, %143, 0, "i8.x1"
+  buffer.store %target_e5m2, %144, %144, %145, 0, "i8.x1"
+  buffer.store %target_e5m2, %146, %146, %147, 0, "i8.x1"
+  buffer.store %target_e5m2, %148, %148, %149, 0, "i8.x1"
+  buffer.store %target_e5m2, %150, %150, %151, 0, "i8.x1"
+  buffer.store %target_e5m2, %152, %152, %153, 0, "i8.x1"
+  buffer.store %target_e5m2, %154, %154, %155, 0, "i8.x1"
+  buffer.store %target_e5m2, %156, %156, %157, 0, "i8.x1"
+  buffer.store %target_e5m2, %158, %158, %159, 0, "i8.x1"
+  buffer.store %target_e5m2, %160, %160, %161, 0, "i8.x1"
+  buffer.store %target_e5m2, %162, %162, %163, 0, "i8.x1"
+  buffer.store %target_e5m2, %164, %164, %165, 0, "i8.x1"
+  buffer.store %target_e5m2, %166, %166, %167, 0, "i8.x1"
+  buffer.store %target_e5m2, %168, %168, %169, 0, "i8.x1"
+  buffer.store %target_e5m2, %170, %170, %171, 0, "i8.x1"
+  buffer.store %target_e5m2, %172, %172, %173, 0, "i8.x1"
+  return
+}
+
+// ====
+
+// Short vectors preserve their exact span instead of widening the access.
+func.def @copy_float8_tail(%input: buffer, %output: buffer) {
+  %first = index.constant 1 : offset
+  %second = index.constant 3 : offset
+  %source_e4m3 = buffer.view %input[%first] : buffer -> view<2xf8E4M3>
+  %source_e5m2 = buffer.view %input[%second] : buffer -> view<2xf8E5M2>
+  %target_e4m3 = buffer.view %output[%first] : buffer -> view<2xf8E4M3>
+  %target_e5m2 = buffer.view %output[%second] : buffer -> view<2xf8E5M2>
+  %e4m3 = vector.load %source_e4m3[0] : view<2xf8E4M3> -> vector<2xf8E4M3>
+  %e5m2 = vector.load %source_e5m2[0] : view<2xf8E5M2> -> vector<2xf8E5M2>
+  vector.store %e4m3, %target_e4m3[0] : vector<2xf8E4M3>, view<2xf8E4M3>
+  vector.store %e5m2, %target_e5m2[0] : vector<2xf8E5M2>, view<2xf8E5M2>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @copy_float8_tail(%source_e5m2: reg<vm.ref : buffer>, %target_e5m2: reg<vm.ref : buffer>) asm {
+  %26 = constant.i64 1
+  %27 = buffer.load %source_e5m2, %26, %26, 0, "i8.x1" : reg<vm.value : f8E4M3>
+  %28 = constant.i64 2
+  %29 = buffer.load %source_e5m2, %28, %28, 0, "i8.x1" : reg<vm.value : f8E4M3>
+  %30 = constant.i64 3
+  %31 = buffer.load %source_e5m2, %30, %30, 0, "i8.x1" : reg<vm.value : f8E5M2>
+  %32 = constant.i64 4
+  %33 = buffer.load %source_e5m2, %32, %32, 0, "i8.x1" : reg<vm.value : f8E5M2>
+  buffer.store %target_e5m2, %26, %26, %27, 0, "i8.x1"
+  buffer.store %target_e5m2, %28, %28, %29, 0, "i8.x1"
+  buffer.store %target_e5m2, %30, %30, %31, 0, "i8.x1"
+  buffer.store %target_e5m2, %32, %32, %33, 0, "i8.x1"
+  return
+}
+
+// ====
+
+// Dynamic origins, subviews and element indices remain byte coordinates.
+func.def @copy_float8_index(%input: buffer, %output: buffer, %byte_offset: offset, %element: index) {
+  %base = index.assume %byte_offset [range(%byte_offset, 0, 128)] : offset
+  %position = index.assume %element [range(%element, 0, 15)] : index
+  %source_e4m3 = buffer.view %input[%base] : buffer -> view<32xf8E4M3>
+  %source_e5m2 = buffer.view %input[%base] : buffer -> view<32xf8E5M2>
+  %target_e4m3 = buffer.view %output[%base] : buffer -> view<32xf8E4M3>
+  %target_e5m2 = buffer.view %output[%base] : buffer -> view<32xf8E5M2>
+  %source_tail = view.subview %source_e5m2[16] : view<32xf8E5M2> -> view<16xf8E5M2>
+  %target_tail = view.subview %target_e5m2[16] : view<32xf8E5M2> -> view<16xf8E5M2>
+  %e4m3 = view.load %source_e4m3[%position] : view<32xf8E4M3> -> f8E4M3
+  %e5m2 = view.load %source_tail[%position] : view<16xf8E5M2> -> f8E5M2
+  view.store %e4m3, %target_e4m3[%position] : f8E4M3, view<32xf8E4M3>
+  view.store %e5m2, %target_tail[%position] : f8E5M2, view<16xf8E5M2>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @copy_float8_index(%source_tail: reg<vm.ref : buffer>, %target_tail: reg<vm.ref : buffer>, %base: reg<vm.value : i64>, %position: reg<vm.value : i64>) asm {
+  %18 = integer.add.i64 %base, %position
+  %e4m3 = buffer.load %source_tail, %18, %18, 0, "i8.x1" : reg<vm.value : f8E4M3>
+  %20 = constant.i64 16
+  %22 = integer.add.i64 %18, %20
+  %e5m2 = buffer.load %source_tail, %22, %22, 0, "i8.x1" : reg<vm.value : f8E5M2>
+  buffer.store %target_tail, %18, %18, %e4m3, 0, "i8.x1"
+  buffer.store %target_tail, %22, %22, %e5m2, 0, "i8.x1"
+  return
+}
+
+// ====
+
+// Volatile accesses retain both observations even when their addresses match.
+func.def @copy_float8_volatile(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<1xf8E4M3>
+  %target = buffer.view %output[%base] : buffer -> view<2xf8E4M3>
+  %first = view.load<volatile> %source[0] : view<1xf8E4M3> -> f8E4M3
+  %second = view.load<volatile> %source[0] : view<1xf8E4M3> -> f8E4M3
+  view.store<volatile> %first, %target[0] : f8E4M3, view<2xf8E4M3>
+  view.store<volatile> %second, %target[1] : f8E4M3, view<2xf8E4M3>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @copy_float8_volatile(%source: reg<vm.ref : buffer>, %target: reg<vm.ref : buffer>) asm {
+  %9 = constant.i64 0
+  %first = buffer.load<volatile> %source, %9, %9, 0, "i8.x1" : reg<vm.value : f8E4M3>
+  %second = buffer.load<volatile> %source, %9, %9, 0, "i8.x1" : reg<vm.value : f8E4M3>
+  buffer.store<volatile> %target, %9, %9, %first, 0, "i8.x1"
+  %14 = constant.i64 1
+  buffer.store<volatile> %target, %14, %14, %second, 0, "i8.x1"
+  return
+}
+
+// ====
+
+func.def @extend_float8(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source_e4m3 = buffer.view %input[%base] : buffer -> view<1xf8E4M3>
+  %source_e5m2 = buffer.view %input[%base] : buffer -> view<1xf8E5M2>
+  %target = buffer.view %output[%base] : buffer -> view<2xf32>
+  %e4m3 = view.load %source_e4m3[0] : view<1xf8E4M3> -> f8E4M3
+  %e5m2 = view.load %source_e5m2[0] : view<1xf8E5M2> -> f8E5M2
+  %first = scalar.extf %e4m3 : f8E4M3 to f32
+  %second = scalar.extf %e5m2 : f8E5M2 to f32
+  view.store %first, %target[0] : f32, view<2xf32>
+  view.store %second, %target[1] : f32, view<2xf32>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @extend_float8(%source_e5m2: reg<vm.ref : buffer>, %target: reg<vm.ref : buffer>) asm {
+  %12 = constant.i64 0
+  %e4m3 = buffer.load %source_e5m2, %12, %12, 0, "i8.x1" : reg<vm.value : f8E4M3>
+  %e5m2 = buffer.load %source_e5m2, %12, %12, 0, "i8.x1" : reg<vm.value : f8E5M2>
+  %first = conversion.float.extend %e4m3, "f8e4m3.to.f32" : reg<vm.value : f32>
+  %second = conversion.float.extend %e5m2, "f8e5m2.to.f32" : reg<vm.value : f32>
+  buffer.store %target, %12, %12, %first, 0, "i32.x1"
+  %19 = constant.i64 4
+  buffer.store %target, %19, %19, %second, 0, "i32.x1"
+  return
+}
