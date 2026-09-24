@@ -95,6 +95,7 @@ iree_py_library(
         "__init__.py",
         "builtins.py",
     ],
+    deps = [":features"],
 )
 
 iree_py_library(

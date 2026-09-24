@@ -31,7 +31,7 @@ extern "C" {
 #endif
 
 enum {
-  LOOM_SPIRV_BUILTIN_VARIABLE_COUNT = 3,
+  LOOM_SPIRV_BUILTIN_VARIABLE_COUNT = 4,
 };
 
 // Module-owned resources shared by each function emitted into one module.

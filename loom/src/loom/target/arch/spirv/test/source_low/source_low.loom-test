@@ -318,8 +318,10 @@ kernel.def target(@hal_target) @spirv_dynamic_builtin_storage_buffer_i32() {
   %workgroup_x = kernel.workgroup.id<x> : index
   %local_y = kernel.workitem.id<y> : index
   %global_z = kernel.workitem.dispatch.id<z> : index
+  %subgroup_lane = kernel.subgroup.lane.id : index
   %sum = index.add %workgroup_x, %local_y : index
-  %linear = index.add %sum, %global_z : index
+  %sum_with_lane = index.add %sum, %subgroup_lane : index
+  %linear = index.add %sum_with_lane, %global_z : index
   %scale = index.constant 4 : index
   %byte_index = index.mul %linear, %scale : index
   %byte_offset = index.cast %byte_index : index to offset
@@ -340,16 +342,18 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 2, 1) w
   %workgroup_x = OpLoadBuiltin.workgroup_id.x
   %local_y = OpLoadBuiltin.local_invocation_id.y
   %global_z = OpLoadBuiltin.global_invocation_id.z
+  %subgroup_lane = OpLoadBuiltin.subgroup_local_invocation_id
   %sum = OpIAdd %workgroup_x, %local_y : reg<spirv.id : index>
-  %linear = OpIAdd %sum, %global_z : reg<spirv.id : index>
-  %29 = OpConstant.i32 2 : reg<spirv.id : index>
-  %byte_index = OpShiftLeftLogical %linear, %29 : reg<spirv.id : index>
-  %31 = OpBitcast.i32.u32 %byte_index
-  %byte_offset_aligned = OpUConvert.u32.offset64 %31
-  %33 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %byte_offset_aligned
-  %loaded = OpLoad.storage_buffer.i32 %33
-  %35 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %byte_offset_aligned
-  OpStore.storage_buffer.i32 %35, %loaded
+  %sum_with_lane = OpIAdd %sum, %subgroup_lane : reg<spirv.id : index>
+  %linear = OpIAdd %sum_with_lane, %global_z : reg<spirv.id : index>
+  %33 = OpConstant.i32 2 : reg<spirv.id : index>
+  %byte_index = OpShiftLeftLogical %linear, %33 : reg<spirv.id : index>
+  %35 = OpBitcast.i32.u32 %byte_index
+  %byte_offset_aligned = OpUConvert.u32.offset64 %35
+  %37 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %byte_offset_aligned
+  %loaded = OpLoad.storage_buffer.i32 %37
+  %39 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %byte_offset_aligned
+  OpStore.storage_buffer.i32 %39, %loaded
   return
 }
 

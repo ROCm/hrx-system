@@ -31,7 +31,11 @@ from loom.target.arch.spirv.atomic import (
     atomic_descriptor_key,
     float_atomic_descriptor_key,
 )
-from loom.target.arch.spirv.builtins import BUILTIN_DIMENSIONS, BUILTIN_INDEX_QUERIES
+from loom.target.arch.spirv.builtins import (
+    BUILTIN_DIMENSIONS,
+    BUILTIN_INDEX_QUERIES,
+    BUILTIN_SCALAR_INDEX_QUERIES,
+)
 from loom.target.arch.spirv.cooperative_matrix import cooperative_matrix_descriptor_key
 from loom.target.arch.spirv.descriptors import SPIRV_LOGICAL_CORE_DESCRIPTOR_SET
 from loom.target.arch.spirv.extended_math import EXTENDED_MATH_INSTRUCTIONS
@@ -797,6 +801,11 @@ def test_generation_emits_complete_address_conversion_rows() -> None:
             assert f"SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_LOAD_BUILTIN_{suffix}" in tables
             assert query.builtin_enum in tables
             assert f".payload.builtin_load.component_index = {dimension.component_index}" in tables
+
+    for query in BUILTIN_SCALAR_INDEX_QUERIES:
+        suffix = query.descriptor_suffix.upper()
+        assert f"SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_LOAD_BUILTIN_{suffix}" in tables
+        assert query.builtin_enum in tables
 
     assert "LOOM_SPIRV_PACKET_FORM_LOAD_BUILTIN" in tables
 

@@ -28,8 +28,10 @@ from loom.dsl import Op
 from loom.target.arch.spirv.builtins import (
     BUILTIN_DIMENSIONS,
     BUILTIN_INDEX_QUERIES,
+    BUILTIN_SCALAR_INDEX_QUERIES,
     BuiltinDimension,
     BuiltinIndexQuery,
+    BuiltinScalarIndexQuery,
 )
 from loom.target.arch.spirv.contracts.atomic import SPIRV_ATOMIC_CONTRACT_CASES
 from loom.target.arch.spirv.contracts.descriptor_rule import (
@@ -319,6 +321,7 @@ def _conversion_alias_rule(
 
 
 _KERNEL_BUILTIN_SOURCE_OPS = {
+    "subgroup_lane_id": kernel.kernel_subgroup_lane_id,
     "workgroup_id": kernel.kernel_workgroup_id,
     "workitem_id": kernel.kernel_workitem_id,
     "workitem_dispatch_id": kernel.kernel_workitem_dispatch_id,
@@ -354,6 +357,30 @@ def _builtin_index_rules() -> tuple[DescriptorRule, ...]:
         _builtin_index_rule(query, dimension)
         for query in BUILTIN_INDEX_QUERIES
         for dimension in BUILTIN_DIMENSIONS
+    )
+
+
+def _builtin_scalar_index_rule(query: BuiltinScalarIndexQuery) -> DescriptorRule:
+    descriptor = _descriptor(f"spirv.op_load_builtin.{query.descriptor_suffix}")
+    return DescriptorRule(
+        source_op=_KERNEL_BUILTIN_SOURCE_OPS[query.source_op_key],
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("result", _INDEX),
+            *_feature_guards(descriptor),
+        ),
+        emit=(
+            _descriptor_emit(
+                descriptor=descriptor,
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _builtin_scalar_index_rules() -> tuple[DescriptorRule, ...]:
+    return tuple(
+        _builtin_scalar_index_rule(query) for query in BUILTIN_SCALAR_INDEX_QUERIES
     )
 
 
@@ -1453,6 +1480,7 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
         *SPIRV_INDEX_CONVERSION_RULES,
         *SPIRV_INDEX_NUMERIC_RULES,
         *_builtin_index_rules(),
+        *_builtin_scalar_index_rules(),
         _conversion_alias_rule(scalar_conversion.scalar_bitcast, _F8E4M3, _I8),
         _conversion_alias_rule(scalar_conversion.scalar_bitcast, _I8, _F8E4M3),
         _conversion_alias_rule(scalar_conversion.scalar_bitcast, _F8E5M2, _I8),

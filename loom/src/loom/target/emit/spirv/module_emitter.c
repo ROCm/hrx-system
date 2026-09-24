@@ -45,7 +45,7 @@ typedef struct loom_spirv_emit_module_state_t {
   loom_spirv_type_context_t type_context;
   // Physical push-constant storage shared by HAL kernel entries.
   loom_spirv_module_shared_bda_root_t shared_bda_root;
-  // Shared Input variables for workgroup/local/global invocation builtins.
+  // Shared Input variables for invocation and subgroup builtins.
   uint32_t builtin_variable_ids[LOOM_SPIRV_BUILTIN_VARIABLE_COUNT];
   // First function's module-level target contract.
   loom_spirv_module_contract_t contract;
