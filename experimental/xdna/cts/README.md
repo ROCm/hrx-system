@@ -61,6 +61,14 @@ benchmark-lock --label=xdna-copy -- \
   //experimental/xdna/cts:vector_copy_npu2_test
 ```
 
+`float32_multiply_npu2_test` compiles ordinary sixteen-lane F32 multiplication
+and checks 8,192 native results against a binary64 multiplication oracle rounded
+once to binary32. Inputs cover both signs of zeros, subnormals, normal numbers,
+infinities and NaNs, plus seeded bit patterns. Non-NaN results match exactly;
+NaN payload and sign are unconstrained. Two submissions also check unchanged
+inputs and binding guards. The source keeps multiplication vector-shaped;
+target math selection bounds its software expansion with a counted lane loop.
+
 `integer_shifts_npu2_test` checks scalar word and split-word shifts using streamed
 packets. An independent integer oracle covers all legal dynamic counts, bounded
 count ranges, constant word boundaries, logical and signed right shifts, and

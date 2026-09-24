@@ -1,0 +1,24 @@
+aie2p.target<array> @array_target
+aie2p.target<core> @core_target
+func.def target(@core_target) @multiply(%input_arg: buffer, %output_arg: buffer) {
+  %input, %output = buffer.assume.alignment %input_arg, %output_arg {minimum_alignment = 64} : buffer, buffer
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<32xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xf32>
+  %input_value = vector.load %input_view[0] : view<32xf32> -> vector<16xf32>
+  %right_value = vector.load %input_view[16] : view<32xf32> -> vector<16xf32>
+  %result = vector.mulf %input_value, %right_value : vector<16xf32>
+  vector.store %result, %output_view[0] : vector<16xf32>, view<16xf32>
+  func.return
+}
+pipeline.def<kernel> public retain target(@array_target) @multiply_packets() launch(%input: buffer, %output: buffer) {
+  %one = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %one : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<1x512x32xf32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1x512x16xf32>
+  %incoming = pipeline.scatter %input_view across %workers : view<1x512x32xf32>, group -> pipeline.flow<tile<32xf32>>
+  %result = pipeline.stage @multiply on %workers(%incoming) : (group, pipeline.flow<tile<32xf32>>) -> (pipeline.flow<tile<16xf32>>)
+  pipeline.write %result to %output_view : pipeline.flow<tile<16xf32>>, view<1x512x16xf32>
+  pipeline.return
+}

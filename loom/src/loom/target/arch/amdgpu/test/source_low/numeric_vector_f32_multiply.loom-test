@@ -1,0 +1,83 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_vector_f32_multiply.loom-test
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
+
+func.def @multiply3(%left: vector<3xf32>, %right: vector<3xf32>) -> (vector<3xf32>) {
+  %product = vector.mulf %left, %right : vector<3xf32>
+  func.return %product : vector<3xf32>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @multiply3(%left: reg<amdgpu.vgpr x3>, %right: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr x3>) asm {
+  %7 = slice %left[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %8 = slice %right[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %9 = v_mul_f32 %7, %8
+  %10 = slice %left[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %11 = slice %right[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %12 = v_mul_f32 %10, %11
+  %13 = slice %left[2] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %14 = slice %right[2] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %15 = v_mul_f32 %13, %14
+  %product = concat(%9, %12, %15) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
+  return %product
+}
+
+// ====
+
+func.def @multiply16(%left: vector<16xf32>, %right: vector<16xf32>) -> (vector<16xf32>) {
+  %product = vector.mulf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %left, %right : vector<16xf32>
+  func.return %product : vector<16xf32>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @multiply16(%left: reg<amdgpu.vgpr x16>, %right: reg<amdgpu.vgpr x16>) -> (reg<amdgpu.vgpr x16>) asm {
+  %7 = slice %left[0] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %8 = slice %right[0] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %9 = v_mul_f32 %7, %8
+  %10 = slice %left[1] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %11 = slice %right[1] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %12 = v_mul_f32 %10, %11
+  %13 = slice %left[2] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %14 = slice %right[2] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %15 = v_mul_f32 %13, %14
+  %16 = slice %left[3] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %17 = slice %right[3] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %18 = v_mul_f32 %16, %17
+  %19 = slice %left[4] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %20 = slice %right[4] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %21 = v_mul_f32 %19, %20
+  %22 = slice %left[5] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %23 = slice %right[5] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %24 = v_mul_f32 %22, %23
+  %25 = slice %left[6] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %26 = slice %right[6] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %27 = v_mul_f32 %25, %26
+  %28 = slice %left[7] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %29 = slice %right[7] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %30 = v_mul_f32 %28, %29
+  %31 = slice %left[8] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %32 = slice %right[8] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %33 = v_mul_f32 %31, %32
+  %34 = slice %left[9] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %35 = slice %right[9] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %36 = v_mul_f32 %34, %35
+  %37 = slice %left[10] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %38 = slice %right[10] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %39 = v_mul_f32 %37, %38
+  %40 = slice %left[11] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %41 = slice %right[11] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %42 = v_mul_f32 %40, %41
+  %43 = slice %left[12] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %44 = slice %right[12] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %45 = v_mul_f32 %43, %44
+  %46 = slice %left[13] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %47 = slice %right[13] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %48 = v_mul_f32 %46, %47
+  %49 = slice %left[14] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %50 = slice %right[14] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %51 = v_mul_f32 %49, %50
+  %52 = slice %left[15] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %53 = slice %right[15] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
+  %54 = v_mul_f32 %52, %53
+  %product = concat(%9, %12, %15, %18, %21, %24, %27, %30, %33, %36, %39, %42, %45, %48, %51, %54) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x16>
+  return %product
+}

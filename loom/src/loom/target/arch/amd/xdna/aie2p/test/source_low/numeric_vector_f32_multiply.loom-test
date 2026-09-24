@@ -1,0 +1,357 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_vector_f32_multiply.loom-test
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @multiply3(%left: vector<3xf32>, %right: vector<3xf32>) -> (vector<3xf32>) {
+  %product = vector.mulf %left, %right : vector<3xf32>
+  func.return %product : vector<3xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @multiply3(%left: reg<aie2p.vec256 x2>, %right: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %25 = mov.short 0
+  %26 = mov.short 3
+  %27 = mov.short 1
+  low.br ^_bb1(%25: reg<aie2p.er>, %left: reg<aie2p.vec256 x2>)
+^_bb1(%23: reg<aie2p.er>, %24: reg<aie2p.vec256 x2>):
+  %28 = lt %23, %26
+  low.cond_br %28, ^_bb2, ^_bb3 : reg<aie2p.er>
+^_bb2:
+  %29 = vextract.32.reg %24, %23
+  %30 = vextract.32.reg %right, %23
+  %31 = mov.i32 2147483647
+  %32 = mov.i32 -2147483648
+  %34 = mov.short 23
+  %35 = mov.short -23
+  %36 = mov.i32 8388608
+  %37 = and %29, %31
+  %38 = and %30, %31
+  %39 = xor %29, %30
+  %40 = and %39, %32
+  %41 = lshl %37, %35
+  %42 = lshl %41, %34
+  %43 = sub %37, %42
+  %44 = clz %43
+  %45 = add %44, -8
+  %46 = copy %41 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %47 = sel.eqz %45, %25, %46
+  %48 = lshl %43, %47
+  %49 = or %48, %36
+  %50 = sub %25, %45
+  %51 = add %50, 1
+  %52 = copy %41 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %53 = sel.eqz %51, %41, %52
+  %54 = lshl %38, %35
+  %55 = lshl %54, %34
+  %56 = sub %38, %55
+  %57 = clz %56
+  %58 = add %57, -8
+  %59 = copy %54 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %60 = sel.eqz %58, %25, %59
+  %61 = lshl %56, %60
+  %62 = or %61, %36
+  %63 = sub %25, %58
+  %64 = add %63, 1
+  %65 = copy %54 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %66 = sel.eqz %64, %54, %65
+  %67 = mov.i32 65535
+  %68 = mov.short 8
+  %69 = mov.short 16
+  %70 = mov.short -16
+  %71 = mov.short -24
+  %72 = and %49, %67
+  %73 = lshl %49, %70
+  %74 = and %62, %67
+  %75 = lshl %62, %70
+  %76 = mul %72, %74
+  %77 = mul %72, %75
+  %78 = mul %73, %74
+  %79 = add.rr %77, %78
+  %80 = lshl %79, %69
+  %81 = add.rr %76, %80
+  %82 = ltu %81, %76
+  %83 = mul %73, %75
+  %84 = lshl %79, %70
+  %85 = add.rr %83, %84
+  %86 = add.rr %85, %82
+  %87 = lshl %86, %68
+  %88 = lshl %81, %71
+  %89 = or %87, %88
+  %90 = lshl %81, %68
+  %91 = mov.short -127
+  %94 = mov.short -31
+  %95 = add.rr %53, %66
+  %96 = add.rr %95, %91
+  %97 = and %89, %36
+  %98 = nez %97
+  %99 = add.rr %96, %98
+  %100 = lshl %89, %27
+  %101 = lshl %90, %94
+  %102 = or %100, %101
+  %103 = lshl %90, %27
+  %104 = copy %97 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %105 = sel.nez %89, %102, %104
+  %106 = copy %97 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %107 = sel.nez %90, %103, %106
+  %109 = mov.short 31
+  %110 = sub %25, %99
+  %111 = add %110, 1
+  %112 = and %111, %109
+  %113 = sub %25, %112
+  %114 = and %113, %109
+  %115 = lshl %107, %113
+  %116 = lshl %105, %114
+  %117 = lshl %107, %114
+  %118 = nez %117
+  %119 = lshl %105, %113
+  %120 = or %115, %116
+  %121 = or %120, %118
+  %123 = copy %112 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %124 = sel.nez %116, %25, %123
+  %125 = or %107, %124
+  %126 = nez %125
+  %127 = or %119, %126
+  %128 = or %105, %107
+  %129 = nez %128
+  %130 = add %111, -32
+  %131 = lt %130, %25
+  %132 = add %111, -64
+  %133 = lt %132, %25
+  %134 = copy %133 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %135 = sel.nez %127, %129, %134
+  %136 = copy %131 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %137 = sel.nez %121, %135, %136
+  %138 = copy %131 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %139 = sel.nez %119, %25, %138
+  %143 = add %36, -1
+  %144 = and %105, %143
+  %145 = lshl %99, %34
+  %146 = or %144, %145
+  %147 = ge %25, %99
+  %148 = copy %147 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %149 = sel.nez %139, %146, %148
+  %150 = copy %147 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %151 = sel.nez %137, %107, %150
+  %154 = ltu %32, %151
+  %155 = eq %151, %32
+  %156 = and %149, %27
+  %157 = and %155, %156
+  %158 = or %154, %157
+  %159 = or %149, %40
+  %160 = add.rr %159, %158
+  %161 = mov.i32 2139095040
+  %162 = mov.short -255
+  %164 = mov.i32 4194304
+  %165 = or %161, %40
+  %166 = add.rr %99, %162
+  %167 = ge %166, %25
+  %168 = copy %167 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %169 = sel.nez %165, %160, %168
+  %170 = eqz %37
+  %171 = eqz %38
+  %172 = or %170, %171
+  %173 = copy %172 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %174 = sel.nez %40, %169, %173
+  %175 = or %161, %164
+  %176 = eq %37, %161
+  %177 = eq %38, %161
+  %178 = copy %171 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %179 = sel.nez %175, %165, %178
+  %180 = copy %170 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %181 = sel.nez %175, %165, %180
+  %182 = copy %177 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %183 = sel.nez %181, %174, %182
+  %184 = copy %176 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %185 = sel.nez %179, %183, %184
+  %186 = ltu %161, %37
+  %187 = ltu %161, %38
+  %188 = or %29, %164
+  %189 = or %30, %164
+  %190 = copy %187 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %191 = sel.nez %189, %185, %190
+  %192 = copy %186 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %193 = sel.nez %188, %191, %192
+  %194 = copy %23 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %195 = vinsert.32.reg %24, %194, %193
+  %196 = add.rr %23, %27
+  low.br ^_bb1(%196: reg<aie2p.er>, %195: reg<aie2p.vec256 x2>)
+^_bb3:
+  return %24
+}
+
+// ====
+
+func.def @multiply16(%left: vector<16xf32>, %right: vector<16xf32>) -> (vector<16xf32>) {
+  %product = vector.mulf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %left, %right : vector<16xf32>
+  func.return %product : vector<16xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @multiply16(%left: reg<aie2p.vec256 x2>, %right: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %25 = mov.short 0
+  %26 = mov.short 16
+  %27 = mov.short 1
+  low.br ^_bb1(%25: reg<aie2p.er>, %left: reg<aie2p.vec256 x2>)
+^_bb1(%23: reg<aie2p.er>, %24: reg<aie2p.vec256 x2>):
+  %28 = lt %23, %26
+  low.cond_br %28, ^_bb2, ^_bb3 : reg<aie2p.er>
+^_bb2:
+  %29 = vextract.32.reg %24, %23
+  %30 = vextract.32.reg %right, %23
+  %31 = mov.i32 2147483647
+  %32 = mov.i32 -2147483648
+  %34 = mov.short 23
+  %35 = mov.short -23
+  %36 = mov.i32 8388608
+  %37 = and %29, %31
+  %38 = and %30, %31
+  %39 = xor %29, %30
+  %40 = and %39, %32
+  %41 = lshl %37, %35
+  %42 = lshl %41, %34
+  %43 = sub %37, %42
+  %44 = clz %43
+  %45 = add %44, -8
+  %46 = copy %41 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %47 = sel.eqz %45, %25, %46
+  %48 = lshl %43, %47
+  %49 = or %48, %36
+  %50 = sub %25, %45
+  %51 = add %50, 1
+  %52 = copy %41 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %53 = sel.eqz %51, %41, %52
+  %54 = lshl %38, %35
+  %55 = lshl %54, %34
+  %56 = sub %38, %55
+  %57 = clz %56
+  %58 = add %57, -8
+  %59 = copy %54 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %60 = sel.eqz %58, %25, %59
+  %61 = lshl %56, %60
+  %62 = or %61, %36
+  %63 = sub %25, %58
+  %64 = add %63, 1
+  %65 = copy %54 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %66 = sel.eqz %64, %54, %65
+  %67 = mov.i32 65535
+  %68 = mov.short 8
+  %70 = mov.short -16
+  %71 = mov.short -24
+  %72 = and %49, %67
+  %73 = lshl %49, %70
+  %74 = and %62, %67
+  %75 = lshl %62, %70
+  %76 = mul %72, %74
+  %77 = mul %72, %75
+  %78 = mul %73, %74
+  %79 = add.rr %77, %78
+  %80 = lshl %79, %26
+  %81 = add.rr %76, %80
+  %82 = ltu %81, %76
+  %83 = mul %73, %75
+  %84 = lshl %79, %70
+  %85 = add.rr %83, %84
+  %86 = add.rr %85, %82
+  %87 = lshl %86, %68
+  %88 = lshl %81, %71
+  %89 = or %87, %88
+  %90 = lshl %81, %68
+  %91 = mov.short -127
+  %94 = mov.short -31
+  %95 = add.rr %53, %66
+  %96 = add.rr %95, %91
+  %97 = and %89, %36
+  %98 = nez %97
+  %99 = add.rr %96, %98
+  %100 = lshl %89, %27
+  %101 = lshl %90, %94
+  %102 = or %100, %101
+  %103 = lshl %90, %27
+  %104 = copy %97 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %105 = sel.nez %89, %102, %104
+  %106 = copy %97 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %107 = sel.nez %90, %103, %106
+  %109 = mov.short 31
+  %110 = sub %25, %99
+  %111 = add %110, 1
+  %112 = and %111, %109
+  %113 = sub %25, %112
+  %114 = and %113, %109
+  %115 = lshl %107, %113
+  %116 = lshl %105, %114
+  %117 = lshl %107, %114
+  %118 = nez %117
+  %119 = lshl %105, %113
+  %120 = or %115, %116
+  %121 = or %120, %118
+  %123 = copy %112 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %124 = sel.nez %116, %25, %123
+  %125 = or %107, %124
+  %126 = nez %125
+  %127 = or %119, %126
+  %128 = or %105, %107
+  %129 = nez %128
+  %130 = add %111, -32
+  %131 = lt %130, %25
+  %132 = add %111, -64
+  %133 = lt %132, %25
+  %134 = copy %133 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %135 = sel.nez %127, %129, %134
+  %136 = copy %131 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %137 = sel.nez %121, %135, %136
+  %138 = copy %131 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %139 = sel.nez %119, %25, %138
+  %143 = add %36, -1
+  %144 = and %105, %143
+  %145 = lshl %99, %34
+  %146 = or %144, %145
+  %147 = ge %25, %99
+  %148 = copy %147 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %149 = sel.nez %139, %146, %148
+  %150 = copy %147 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %151 = sel.nez %137, %107, %150
+  %154 = ltu %32, %151
+  %155 = eq %151, %32
+  %156 = and %149, %27
+  %157 = and %155, %156
+  %158 = or %154, %157
+  %159 = or %149, %40
+  %160 = add.rr %159, %158
+  %161 = mov.i32 2139095040
+  %162 = mov.short -255
+  %164 = mov.i32 4194304
+  %165 = or %161, %40
+  %166 = add.rr %99, %162
+  %167 = ge %166, %25
+  %168 = copy %167 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %169 = sel.nez %165, %160, %168
+  %170 = eqz %37
+  %171 = eqz %38
+  %172 = or %170, %171
+  %173 = copy %172 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %174 = sel.nez %40, %169, %173
+  %175 = or %161, %164
+  %176 = eq %37, %161
+  %177 = eq %38, %161
+  %178 = copy %171 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %179 = sel.nez %175, %165, %178
+  %180 = copy %170 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %181 = sel.nez %175, %165, %180
+  %182 = copy %177 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %183 = sel.nez %181, %174, %182
+  %184 = copy %176 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %185 = sel.nez %179, %183, %184
+  %186 = ltu %161, %37
+  %187 = ltu %161, %38
+  %188 = or %29, %164
+  %189 = or %30, %164
+  %190 = copy %187 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %191 = sel.nez %189, %185, %190
+  %192 = copy %186 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %193 = sel.nez %188, %191, %192
+  %194 = copy %23 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %195 = vinsert.32.reg %24, %194, %193
+  %196 = add.rr %23, %27
+  low.br ^_bb1(%196: reg<aie2p.er>, %195: reg<aie2p.vec256 x2>)
+^_bb3:
+  return %24
+}

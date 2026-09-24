@@ -85,6 +85,33 @@ xdna_execution_test_suite(
 )
 
 iree_py_binary(
+    name = "float32_multiply_cases",
+    testonly = True,
+    srcs = ["float32_multiply_cases.py"],
+    main = "float32_multiply_cases.py",
+)
+
+xdna_execution_test_suite(
+    name = "float32_multiply_npu2_test",
+    data = ["testdata/float32_multiply.loom"],
+    manifests = ["float32_multiply_npu2.test.json"],
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//loom/config/target:xdna_artifacts": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }) + select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    tools = {
+        "cases": ":float32_multiply_cases",
+        "iree-xdna-run": "//experimental/xdna:iree-xdna-run",
+        "loom-compile": "//loom/src/loom/tools/loom-compile",
+    },
+)
+
+iree_py_binary(
     name = "integer_shift_cases",
     testonly = True,
     srcs = ["integer_shift_cases.py"],

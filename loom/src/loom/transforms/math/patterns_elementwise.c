@@ -965,6 +965,7 @@ static iree_status_t loom_math_legalize_build_recipe(
       return loom_math_legalize_build_gelu_logistic(&rewriter->builder, &source,
                                                     op, out_value);
     case LOOM_TARGET_MATH_RECIPE_WIDEN_F32_ROUND:
+    case LOOM_TARGET_MATH_RECIPE_MULF_SCALAR_LOOP:
       IREE_ASSERT_UNREACHABLE("recipe is not elementwise math legalization");
       IREE_BUILTIN_UNREACHABLE();
     case LOOM_TARGET_MATH_RECIPE_UNKNOWN:
@@ -1008,6 +1009,7 @@ static bool loom_math_legalize_elementwise_recipe_is_supported(
     case LOOM_TARGET_MATH_RECIPE_GELU_LOGISTIC_F32:
     case LOOM_TARGET_MATH_RECIPE_WIDEN_F32_ROUND:
       return true;
+    case LOOM_TARGET_MATH_RECIPE_MULF_SCALAR_LOOP:
     case LOOM_TARGET_MATH_RECIPE_UNKNOWN:
       return false;
   }

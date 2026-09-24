@@ -1,0 +1,11 @@
+func.def @multiply3(%left: vector<3xf32>, %right: vector<3xf32>) -> (vector<3xf32>) {
+  %product = vector.mulf %left, %right : vector<3xf32>
+  func.return %product : vector<3xf32>
+}
+
+// ====
+
+func.def @multiply16(%left: vector<16xf32>, %right: vector<16xf32>) -> (vector<16xf32>) {
+  %product = vector.mulf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %left, %right : vector<16xf32>
+  func.return %product : vector<16xf32>
+}

@@ -1,0 +1,57 @@
+// RUN: pass target=amd.xdna.aie2p:core legalize-math
+
+func.def @multiply1(%left: vector<1xf32>, %right: vector<1xf32>) -> (vector<1xf32>) {
+  %product = vector.mulf %left, %right : vector<1xf32>
+  func.return %product : vector<1xf32>
+}
+
+// ====
+
+func.def @multiply2(%left: vector<2xf32>, %right: vector<2xf32>) -> (vector<2xf32>) {
+  %product = vector.mulf %left, %right : vector<2xf32>
+  func.return %product : vector<2xf32>
+}
+
+// ====
+
+func.def @multiply3(%left: vector<3xf32>, %right: vector<3xf32>) -> (vector<3xf32>) {
+  %product = vector.mulf %left, %right : vector<3xf32>
+  func.return %product : vector<3xf32>
+}
+
+// ----
+func.def @multiply3(%left: vector<3xf32>, %right: vector<3xf32>) -> (vector<3xf32>) {
+  %4 = index.constant 0 : index
+  %5 = index.constant 3 : index
+  %6 = index.constant 1 : index
+  %product = scf.for %7 = [%4 to %5 step %6](%8 = %left : vector<3xf32>) -> (vector<3xf32>) {
+    %10 = vector.extract %8[%7] : vector<3xf32> -> f32
+    %11 = vector.extract %right[%7] : vector<3xf32> -> f32
+    %12 = scalar.mulf %10, %11 : f32
+    %13 = vector.insert %12 into %8[%7] : f32, vector<3xf32>
+    scf.yield %13 : vector<3xf32>
+  }
+  func.return %product : vector<3xf32>
+}
+
+// ====
+
+func.def @multiply16(%left: vector<16xf32>, %right: vector<16xf32>) -> (vector<16xf32>) {
+  %product = vector.mulf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %left, %right : vector<16xf32>
+  func.return %product : vector<16xf32>
+}
+
+// ----
+func.def @multiply16(%left: vector<16xf32>, %right: vector<16xf32>) -> (vector<16xf32>) {
+  %4 = index.constant 0 : index
+  %5 = index.constant 16 : index
+  %6 = index.constant 1 : index
+  %product = scf.for %7 = [%4 to %5 step %6](%8 = %left : vector<16xf32>) -> (vector<16xf32>) {
+    %10 = vector.extract %8[%7] : vector<16xf32> -> f32
+    %11 = vector.extract %right[%7] : vector<16xf32> -> f32
+    %12 = scalar.mulf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %10, %11 : f32
+    %13 = vector.insert %12 into %8[%7] : f32, vector<16xf32>
+    scf.yield %13 : vector<16xf32>
+  }
+  func.return %product : vector<16xf32>
+}

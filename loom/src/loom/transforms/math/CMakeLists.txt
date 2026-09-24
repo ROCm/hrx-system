@@ -25,6 +25,7 @@ loom_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ir::facts
+    loom::ops::index
     loom::ops::op_defs
     loom::ops::scalar
     loom::ops::scf

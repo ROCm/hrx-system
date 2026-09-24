@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "software vector multiplication preserves binary32 results on NPU2",
+      "steps": [
+        {
+          "name": "fixtures",
+          "run": {
+            "tool": "cases",
+            "args": [
+              "prepare",
+              "{tmp}/fixtures"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/testdata/float32_multiply.loom",
+              "--root=@multiply_packets",
+              "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+              "--output={tmp}/multiply.xdna"
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "run": {
+            "tool": "iree-xdna-run",
+            "args": [
+              "--image={tmp}/multiply.xdna",
+              "--columns=1",
+              "--entry=multiply_packets",
+              "--invocation_count=2",
+              "--binding_memory=system",
+              "--binding={tmp}/fixtures/input.bin",
+              "--binding={tmp}/fixtures/output.bin",
+              "--output=0={tmp}/input-readback.bin",
+              "--output=1={tmp}/output-readback.bin"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/input-readback.bin",
+              "equals": "{tmp}/fixtures/input.bin"
+            }
+          ]
+        },
+        {
+          "name": "verify",
+          "run": {
+            "tool": "cases",
+            "args": [
+              "verify",
+              "{tmp}/fixtures",
+              "{tmp}/output-readback.bin"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

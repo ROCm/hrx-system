@@ -268,14 +268,26 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
         .shape_constraint_key = IREE_SVL("math.shape.aie2p_f32_multiply"),
         .form_constraint_key = IREE_SVL("math.op.exact_binary32"),
     },
+    // Short products avoid loop overhead. Larger software products retain one
+    // scalar body to bound live registers and instruction memory.
     {
         .math_op = LOOM_TARGET_MATH_OP_MULF,
         .element_type = LOOM_SCALAR_TYPE_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
         .minimum_lane_count = 1,
-        .maximum_lane_count = 16,
+        .maximum_lane_count = 2,
         .shape_constraint_key = IREE_SVL("math.shape.aie2p_f32_multiply"),
         .form_constraint_key = IREE_SVL("math.op.exact_binary32"),
+    },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_MULF,
+        .element_type = LOOM_SCALAR_TYPE_F32,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
+        .minimum_lane_count = 3,
+        .maximum_lane_count = 16,
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_f32_multiply"),
+        .form_constraint_key = IREE_SVL("math.recipe.mulf_scalar_loop"),
+        .recipe = LOOM_TARGET_MATH_RECIPE_MULF_SCALAR_LOOP,
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_ADDF,
