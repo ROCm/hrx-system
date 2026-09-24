@@ -314,7 +314,7 @@ loom-compile shared_memory_tile.loom \
 Useful queries:
 
 ```bash
-jq '{status, target_key, local:.entries.rows[0].local_memory_bytes, lds_ops:.static_instruction_mix.local_memory_count, barriers:.static_instruction_mix.barrier_count}' \
+jq '{status, target_key, local:.entries.rows[0].local_memory_bytes, lds_ops:.static_instruction_mix.local_memory_count, barriers:.static_instruction_mix.execution_barrier_count}' \
   /tmp/shared-memory-tile.compile-report.json
 
 llvm-objdump -d --mcpu=gfx11-generic /tmp/shared-memory-tile.hsaco | rg 'ds_(read|write)|s_barrier'
@@ -389,7 +389,7 @@ loom-compile shared_memory_transpose.loom \
 Useful queries:
 
 ```bash
-jq '{status, target_key, local:.entries.rows[0].local_memory_bytes, lds_ops:.static_instruction_mix.local_memory_count, barriers:.static_instruction_mix.barrier_count}' \
+jq '{status, target_key, local:.entries.rows[0].local_memory_bytes, lds_ops:.static_instruction_mix.local_memory_count, barriers:.static_instruction_mix.execution_barrier_count}' \
   /tmp/shared-memory-transpose.compile-report.json
 
 llvm-objdump -d --mcpu=gfx11-generic /tmp/shared-memory-transpose.hsaco | rg 'ds_(read|store)|s_barrier'
@@ -459,7 +459,7 @@ loom-compile shared_memory_vector_tile.loom \
 Useful queries:
 
 ```bash
-jq '{status, target_key, local:.entries.rows[0].local_memory_bytes, lds_ops:.static_instruction_mix.local_memory_count, barriers:.static_instruction_mix.barrier_count}' \
+jq '{status, target_key, local:.entries.rows[0].local_memory_bytes, lds_ops:.static_instruction_mix.local_memory_count, barriers:.static_instruction_mix.execution_barrier_count}' \
   /tmp/shared-memory-vector-tile.compile-report.json
 
 llvm-objdump -d --mcpu=gfx11-generic /tmp/shared-memory-vector-tile.hsaco | rg 'global_(load|store)_b128|ds_(store|load)_b128|s_barrier'
@@ -809,7 +809,7 @@ llvm-objdump --disassemble --mcpu=gfx1250 \
 
 jq '{target_key, workload, local_memory_bytes,
      explicit_action_count: .wait_plan.explicit_action_count,
-     barrier_count: .static_instruction_mix.barrier_count}' \
+     execution_barrier_count: .static_instruction_mix.execution_barrier_count}' \
   /tmp/cluster-b128-multicast.compile-report.json
 ```
 

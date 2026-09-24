@@ -509,15 +509,15 @@ def _suggest_single_subgroup_communication(
         return None
     flat_workgroup_size = _integer(workgroup_size.get("flat"))
     subgroup_size = _integer(target_resources.get("subgroup_size"))
-    barrier_count = _integer(instruction_mix.get("barrier_count"))
+    execution_barrier_count = _integer(instruction_mix.get("execution_barrier_count"))
     if (
         flat_workgroup_size is None
         or flat_workgroup_size == 0
         or subgroup_size is None
         or subgroup_size == 0
         or flat_workgroup_size > subgroup_size
-        or barrier_count is None
-        or barrier_count == 0
+        or execution_barrier_count is None
+        or execution_barrier_count == 0
     ):
         return None
 
@@ -531,8 +531,8 @@ def _suggest_single_subgroup_communication(
             value=subgroup_size,
         ),
         CompileReportSuggestionEvidence(
-            path=f"{path_prefix}.static_instruction_mix.barrier_count",
-            value=barrier_count,
+            path=f"{path_prefix}.static_instruction_mix.execution_barrier_count",
+            value=execution_barrier_count,
         ),
     ]
     local_memory_instruction_count = _integer(instruction_mix.get("local_memory_count"))
@@ -558,7 +558,8 @@ def _suggest_single_subgroup_communication(
             "The workgroup fits within one subgroup but still emits workgroup "
             "barriers. Inspect whether workgroup exchange or reduction can use "
             "subgroup operations, or whether the barriers are redundant; then "
-            "require barrier and local-memory traffic to fall before "
+            "require fewer execution-barrier packets or less local-memory "
+            "traffic before "
             "benchmarking."
         ),
         evidence=tuple(evidence),

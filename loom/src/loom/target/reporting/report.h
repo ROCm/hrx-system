@@ -197,8 +197,8 @@ typedef enum loom_target_compile_report_pressure_origin_kind_e {
   LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_GENERIC_MEMORY = 16,
   // Descriptor-backed control-flow value.
   LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_CONTROL = 17,
-  // Descriptor-backed barrier or synchronization value.
-  LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_BARRIER = 18,
+  // Descriptor-backed execution-barrier value.
+  LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_EXECUTION_BARRIER = 18,
   // Descriptor-backed numeric conversion value.
   LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_CONVERSION = 19,
   // Descriptor-backed register move or repair value.
@@ -423,8 +423,10 @@ typedef struct loom_target_compile_report_static_instruction_mix_t {
   uint64_t atomic_count;
   // Low packets identified as branch, return, or call control flow.
   uint64_t branch_count;
-  // Descriptor-backed nodes identified as barrier or synchronization packets.
-  uint64_t barrier_count;
+  // Descriptor-backed execution-barrier packets, including collective
+  // rendezvous and command execution barriers. Separate arrival/wait packets
+  // count separately; memory fences and compiler ordering effects do not count.
+  uint64_t execution_barrier_count;
   // Low packets identified as control flow or other control packets.
   uint64_t control_count;
   // Descriptor-backed nodes identified as numeric conversion packets.

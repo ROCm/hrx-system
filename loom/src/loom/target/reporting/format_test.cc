@@ -80,7 +80,7 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
   static_mix.global_memory_count = 2;
   static_mix.global_load_count = 1;
   static_mix.buffer_load_count = 1;
-  static_mix.barrier_count = 1;
+  static_mix.execution_barrier_count = 1;
   loom_target_compile_report_record_static_instruction_mix(&report,
                                                            &static_mix);
   loom_target_compile_report_static_instruction_mix_t dynamic_mix = static_mix;
@@ -247,6 +247,7 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
       LookupObject(root, IREE_SV("dynamic_instruction_mix"));
   ExpectObjectUint64Equals(mix, IREE_SV("vector_alu_count"), 3);
   ExpectObjectUint64Equals(mix, IREE_SV("global_store_count"), 1);
+  ExpectObjectUint64Equals(mix, IREE_SV("execution_barrier_count"), 1);
   const iree_string_view_t memory = LookupObject(root, IREE_SV("memory"));
   ExpectObjectUint64Equals(memory, IREE_SV("private_bytes"), 16);
   ExpectObjectUint64Equals(memory, IREE_SV("local_bytes"), 32);

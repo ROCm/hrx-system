@@ -1222,6 +1222,7 @@ def _control_barrier_descriptor(execution_scope: str) -> Descriptor:
         key=key,
         mnemonic=f"OpControlBarrier.{execution_scope}.workgroup.acq_rel",
         semantic_tag=key,
+        instruction_classes=(InstructionClass.EXECUTION_BARRIER,),
         operands=(),
         effects=(
             Effect(

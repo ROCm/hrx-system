@@ -72,7 +72,19 @@ from loom.target.arch.spirv.scalar_memory import (
     RAW_STORAGE_BUFFER_BYTE,
     STORAGE_BUFFER_SCALARS,
 )
-from loom.target.low_descriptors import AsmResultValueType
+from loom.target.low_descriptors import AsmResultValueType, InstructionClass
+
+
+def test_control_barriers_classify_both_execution_scopes() -> None:
+    descriptors = {
+        descriptor.key: descriptor
+        for descriptor in SPIRV_LOGICAL_CORE_DESCRIPTOR_SET.descriptors
+    }
+    workgroup = descriptors["spirv.op_control_barrier.workgroup.workgroup.acq_rel"]
+    subgroup = descriptors["spirv.op_control_barrier.subgroup.workgroup.acq_rel"]
+    assert workgroup.effects == subgroup.effects
+    assert InstructionClass.EXECUTION_BARRIER in workgroup.instruction_classes
+    assert InstructionClass.EXECUTION_BARRIER in subgroup.instruction_classes
 
 
 def _scalar_recipe(source_type: str) -> AsmResultValueType:

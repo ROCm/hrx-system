@@ -476,7 +476,7 @@ def _add_single_subgroup_communication_evidence(
     report: dict[str, object],
     *,
     flat_workgroup_size: int,
-    barrier_count: int,
+    execution_barrier_count: int | None,
 ) -> None:
     entry = report["entries"]["rows"][0]
     entry["workload"] = {
@@ -489,9 +489,12 @@ def _add_single_subgroup_communication_evidence(
     }
     entry["local_memory_bytes"] = 528
     entry["static_instruction_mix"] = {
-        "barrier_count": barrier_count,
         "local_memory_count": 16,
     }
+    if execution_barrier_count is not None:
+        entry["static_instruction_mix"]["execution_barrier_count"] = (
+            execution_barrier_count
+        )
 
 
 def test_suggests_ordered_experiments_from_exact_target_evidence() -> None:
@@ -772,7 +775,7 @@ def test_suggests_single_subgroup_workgroup_communication() -> None:
     _add_single_subgroup_communication_evidence(
         report,
         flat_workgroup_size=64,
-        barrier_count=4,
+        execution_barrier_count=2,
     )
     document = parse_compile_report(report)
 
@@ -787,27 +790,30 @@ def test_suggests_single_subgroup_workgroup_communication() -> None:
     evidence = {item.path: item.value for item in suggestion.evidence}
     assert evidence["entries.rows[0].workload.workgroup_size.flat"] == 64
     assert evidence["entries.rows[0].target_resources.subgroup_size"] == 64
-    assert evidence["entries.rows[0].static_instruction_mix.barrier_count"] == 4
+    assert (
+        evidence["entries.rows[0].static_instruction_mix.execution_barrier_count"] == 2
+    )
     assert evidence["entries.rows[0].static_instruction_mix.local_memory_count"] == 16
     assert evidence["entries.rows[0].local_memory_bytes"] == 528
 
 
 @pytest.mark.parametrize(
-    ("flat_workgroup_size", "barrier_count"),
+    ("flat_workgroup_size", "execution_barrier_count"),
     [
         (128, 4),
         (64, 0),
+        (64, None),
     ],
 )
-def test_ignores_multi_subgroup_or_barrier_free_communication(
+def test_communication_advice_requires_single_subgroup_rendezvous_evidence(
     flat_workgroup_size: int,
-    barrier_count: int,
+    execution_barrier_count: int | None,
 ) -> None:
     report = _compile_report()
     _add_single_subgroup_communication_evidence(
         report,
         flat_workgroup_size=flat_workgroup_size,
-        barrier_count=barrier_count,
+        execution_barrier_count=execution_barrier_count,
     )
     document = parse_compile_report(report)
 

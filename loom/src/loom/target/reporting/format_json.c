@@ -175,7 +175,8 @@ iree_status_t loom_target_compile_report_format_instruction_mix_json(
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
       &object, IREE_SV("branch_count"), mix->branch_count));
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
-      &object, IREE_SV("barrier_count"), mix->barrier_count));
+      &object, IREE_SV("execution_barrier_count"),
+      mix->execution_barrier_count));
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
       &object, IREE_SV("control_count"), mix->control_count));
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
@@ -1030,7 +1031,8 @@ iree_status_t loom_target_compile_report_format_operation_economics_json(
   LOOM_TARGET_COMPILE_REPORT_WRITE_OPERATION_ECONOMICS_FIELD(dot_count);
   LOOM_TARGET_COMPILE_REPORT_WRITE_OPERATION_ECONOMICS_FIELD(atomic_count);
   LOOM_TARGET_COMPILE_REPORT_WRITE_OPERATION_ECONOMICS_FIELD(branch_count);
-  LOOM_TARGET_COMPILE_REPORT_WRITE_OPERATION_ECONOMICS_FIELD(barrier_count);
+  LOOM_TARGET_COMPILE_REPORT_WRITE_OPERATION_ECONOMICS_FIELD(
+      execution_barrier_count);
   LOOM_TARGET_COMPILE_REPORT_WRITE_OPERATION_ECONOMICS_FIELD(control_count);
   LOOM_TARGET_COMPILE_REPORT_WRITE_OPERATION_ECONOMICS_FIELD(conversion_count);
   LOOM_TARGET_COMPILE_REPORT_WRITE_OPERATION_ECONOMICS_FIELD(cache_count);

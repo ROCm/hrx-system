@@ -13,10 +13,49 @@
 #include "loom/ops/test/ops.h"
 #include "loom/target/facts_builder.h"
 #include "loom/target/registers.h"
+#include "loom/target/reporting/low_mix.h"
 #include "loom/target/test/target_records.h"
 
 namespace loom {
 namespace {
+
+TEST(CompileReportLowMixTest, CountsExecutionBarriersFromInstructionClasses) {
+  // Both packets have ordering effects; only one is an execution rendezvous.
+  loom_low_effect_t effect = {};
+  effect.kind = LOOM_LOW_EFFECT_KIND_BARRIER;
+  loom_low_descriptor_t descriptors[2] = {};
+  loom_low_descriptor_view_t descriptor_views[2] = {};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(descriptors); ++i) {
+    descriptors[i].effect_count = 1;
+    descriptor_views[i].instruction_class_flags =
+        LOOM_LOW_INSTRUCTION_CLASS_FLAG_CONTROL;
+  }
+  descriptor_views[1].instruction_class_flags |=
+      LOOM_LOW_INSTRUCTION_CLASS_FLAG_EXECUTION_BARRIER;
+  loom_low_descriptor_set_t descriptor_set = {};
+  descriptor_set.descriptors = descriptors;
+  descriptor_set.descriptor_views = descriptor_views;
+  descriptor_set.descriptor_count = IREE_ARRAYSIZE(descriptors);
+  descriptor_set.effects = &effect;
+  descriptor_set.effect_count = 1;
+  loom_low_schedule_table_t schedule = {};
+  loom_low_allocation_table_t allocation = {};
+  loom_target_compile_report_static_instruction_mix_t mix = {};
+  for (const auto& descriptor : descriptors) {
+    loom_low_schedule_node_t node = {};
+    node.kind = LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR;
+    node.descriptor = &descriptor;
+    loom_target_compile_report_accumulate_low_node_static_mix(
+        &schedule, &allocation, &descriptor_set, &node, &mix);
+  }
+  EXPECT_EQ(mix.execution_barrier_count, 1u);
+
+  loom_target_compile_report_static_instruction_mix_t total = {};
+  loom_target_compile_report_accumulate_static_mix(&total, &mix);
+  EXPECT_TRUE(
+      loom_target_compile_report_accumulate_scaled_static_mix(&total, &mix, 3));
+  EXPECT_EQ(total.execution_barrier_count, 4u);
+}
 
 template <typename T>
 static const T* CompileReportRowAt(

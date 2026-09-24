@@ -78,7 +78,7 @@ def _compile_report() -> dict[str, object]:
             "local_memory_count": 12,
             "conversion_count": 3,
             "register_move_count": 5,
-            "barrier_count": 1,
+            "execution_barrier_count": 1,
             "branch_count": 4,
         },
         "dynamic_instruction_mix": {
@@ -93,7 +93,7 @@ def _compile_report() -> dict[str, object]:
             "dot_count": 0,
             "atomic_count": 0,
             "branch_count": 4,
-            "barrier_count": 1,
+            "execution_barrier_count": 1,
             "control_count": 4,
             "conversion_count": 3,
             "cache_count": 0,

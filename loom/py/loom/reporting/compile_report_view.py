@@ -217,7 +217,11 @@ _METRIC_SPECS = (
         "register moves",
         "static_instruction_mix.register_move_count",
     ),
-    _artifact("barrier_count", "barriers", "static_instruction_mix.barrier_count"),
+    _artifact(
+        "execution_barrier_count",
+        "execution barrier packets",
+        "static_instruction_mix.execution_barrier_count",
+    ),
     _artifact("branch_count", "branches", "static_instruction_mix.branch_count"),
     _analysis(
         "scalar_register_count",

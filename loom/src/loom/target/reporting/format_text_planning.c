@@ -401,7 +401,7 @@ static iree_status_t loom_target_compile_report_format_schedule_band_rows(
           " smfmac=%" PRIu64 " wmma=%" PRIu64 " swmmac=%" PRIu64 " dot=%" PRIu64
           " global_memory=%" PRIu64 " local_memory=%" PRIu64
           " scalar_memory=%" PRIu64 " generic_memory=%" PRIu64
-          " atomic=%" PRIu64 " branch=%" PRIu64 " barrier=%" PRIu64
+          " atomic=%" PRIu64 " branch=%" PRIu64 " execution_barrier=%" PRIu64
           " control=%" PRIu64 " conversion=%" PRIu64 " cache=%" PRIu64
           " register_move=%" PRIu64 " result_values=%" PRIu64
           " result_units=%" PRIu64 "\n",
@@ -417,7 +417,7 @@ static iree_status_t loom_target_compile_report_format_schedule_band_rows(
           mix->smfmac_count, mix->wmma_count, mix->swmmac_count, mix->dot_count,
           mix->global_memory_count, mix->local_memory_count,
           mix->scalar_memory_count, mix->generic_memory_count,
-          mix->atomic_count, mix->branch_count, mix->barrier_count,
+          mix->atomic_count, mix->branch_count, mix->execution_barrier_count,
           mix->control_count, mix->conversion_count, mix->cache_count,
           mix->register_move_count, row->result_value_count,
           row->result_unit_count));
@@ -468,7 +468,7 @@ loom_target_compile_report_format_schedule_band_summary_rows(
           " smfmac=%" PRIu64 " wmma=%" PRIu64 " swmmac=%" PRIu64 " dot=%" PRIu64
           " global_memory=%" PRIu64 " local_memory=%" PRIu64
           " scalar_memory=%" PRIu64 " generic_memory=%" PRIu64
-          " atomic=%" PRIu64 " branch=%" PRIu64 " barrier=%" PRIu64
+          " atomic=%" PRIu64 " branch=%" PRIu64 " execution_barrier=%" PRIu64
           " control=%" PRIu64 " conversion=%" PRIu64 " cache=%" PRIu64
           " register_move=%" PRIu64 " result_values=%" PRIu64
           " result_units=%" PRIu64 "\n",
@@ -484,7 +484,7 @@ loom_target_compile_report_format_schedule_band_summary_rows(
           mix->smfmac_count, mix->wmma_count, mix->swmmac_count, mix->dot_count,
           mix->global_memory_count, mix->local_memory_count,
           mix->scalar_memory_count, mix->generic_memory_count,
-          mix->atomic_count, mix->branch_count, mix->barrier_count,
+          mix->atomic_count, mix->branch_count, mix->execution_barrier_count,
           mix->control_count, mix->conversion_count, mix->cache_count,
           mix->register_move_count, row->result_value_count,
           row->result_unit_count));

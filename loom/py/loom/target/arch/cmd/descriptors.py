@@ -260,7 +260,10 @@ def _dispatch_descriptor(*, indirect_mode: str | None, barrier: bool) -> Descrip
         flags=(DescriptorFlag.SIDE_EFFECTING, DescriptorFlag.BARRIER)
         if barrier
         else (DescriptorFlag.SIDE_EFFECTING,),
-        instruction_classes=(InstructionClass.CONTROL, InstructionClass.BARRIER)
+        instruction_classes=(
+            InstructionClass.CONTROL,
+            InstructionClass.EXECUTION_BARRIER,
+        )
         if barrier
         else (InstructionClass.CONTROL,),
     )
@@ -285,7 +288,7 @@ def _fill_descriptor(*, barrier: bool) -> Descriptor:
         else (DescriptorFlag.SIDE_EFFECTING,),
         instruction_classes=(
             InstructionClass.GENERIC_MEMORY,
-            InstructionClass.BARRIER,
+            InstructionClass.EXECUTION_BARRIER,
         )
         if barrier
         else (InstructionClass.GENERIC_MEMORY,),
@@ -310,7 +313,7 @@ def _copy_descriptor(*, barrier: bool) -> Descriptor:
         else (DescriptorFlag.SIDE_EFFECTING,),
         instruction_classes=(
             InstructionClass.GENERIC_MEMORY,
-            InstructionClass.BARRIER,
+            InstructionClass.EXECUTION_BARRIER,
         )
         if barrier
         else (InstructionClass.GENERIC_MEMORY,),
@@ -337,7 +340,7 @@ _COMMAND_DESCRIPTORS = (
         effects=(_BARRIER_EFFECT,),
         schedule_class=_SCHEDULE_BARRIER,
         flags=(DescriptorFlag.SIDE_EFFECTING, DescriptorFlag.BARRIER),
-        instruction_classes=(InstructionClass.BARRIER,),
+        instruction_classes=(InstructionClass.EXECUTION_BARRIER,),
     ),
 )
 
@@ -424,7 +427,7 @@ CMD_CORE_DESCRIPTOR_SET = DescriptorSet(
             issue_uses=(IssueUse(_RESOURCE_CONTROL, cycles=1, units=1),),
             flags=(ScheduleClassFlag.CONTROL,),
             model_quality=ModelQuality.FALLBACK,
-            instruction_classes=(InstructionClass.BARRIER,),
+            instruction_classes=(InstructionClass.EXECUTION_BARRIER,),
         ),
     ),
     descriptors=(

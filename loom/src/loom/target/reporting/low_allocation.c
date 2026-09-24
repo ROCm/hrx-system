@@ -69,8 +69,8 @@ loom_target_compile_report_pressure_origin_from_instruction_classes(
     return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_CONVERSION;
   }
   if (iree_all_bits_set(instruction_classes,
-                        LOOM_LOW_INSTRUCTION_CLASS_FLAG_BARRIER)) {
-    return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_BARRIER;
+                        LOOM_LOW_INSTRUCTION_CLASS_FLAG_EXECUTION_BARRIER)) {
+    return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_EXECUTION_BARRIER;
   }
   if (iree_any_bit_set(instruction_classes,
                        LOOM_LOW_INSTRUCTION_CLASS_FLAG_CONTROL |

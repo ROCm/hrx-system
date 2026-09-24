@@ -309,8 +309,8 @@ iree_string_view_t loom_target_compile_report_pressure_origin_kind_name(
       return IREE_SV("generic-memory");
     case LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_CONTROL:
       return IREE_SV("control");
-    case LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_BARRIER:
-      return IREE_SV("barrier");
+    case LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_EXECUTION_BARRIER:
+      return IREE_SV("execution-barrier");
     case LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_CONVERSION:
       return IREE_SV("conversion");
     case LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_REGISTER_MOVE:
@@ -633,7 +633,7 @@ bool loom_target_compile_report_economics_has_operations(
          mix->smfmac_count != 0 || mix->wmma_count != 0 ||
          mix->swmmac_count != 0 || mix->dot_count != 0 ||
          mix->atomic_count != 0 || mix->branch_count != 0 ||
-         mix->barrier_count != 0 || mix->control_count != 0 ||
+         mix->execution_barrier_count != 0 || mix->control_count != 0 ||
          mix->conversion_count != 0 || mix->cache_count != 0 ||
          mix->register_move_count != 0;
 }

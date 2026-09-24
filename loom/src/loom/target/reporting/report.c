@@ -593,7 +593,7 @@ static void loom_target_compile_report_accumulate_instruction_mix(
       source->unclassified_write_byte_count;
   target->atomic_count += source->atomic_count;
   target->branch_count += source->branch_count;
-  target->barrier_count += source->barrier_count;
+  target->execution_barrier_count += source->execution_barrier_count;
   target->control_count += source->control_count;
   target->conversion_count += source->conversion_count;
   target->cache_count += source->cache_count;

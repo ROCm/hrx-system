@@ -103,11 +103,11 @@ _EXECUTION_METRIC_SPECS = (
         "branch_count",
     ),
     _ExecutionMetricSpec(
-        "barrier_count",
-        "barrier operation effects",
-        "barrier_count",
+        "execution_barrier_count",
+        "execution barrier operation effects",
+        "execution_barrier_count",
         "operations",
-        "barrier_count",
+        "execution_barrier_count",
     ),
     _ExecutionMetricSpec(
         "control_count",

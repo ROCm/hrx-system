@@ -149,7 +149,7 @@ _SEMANTIC_INSTRUCTION_CLASSES = (
     ("control.cond_branch", (InstructionClass.BRANCH,)),
     ("control.return", (InstructionClass.BRANCH,)),
     ("control.call", (InstructionClass.BRANCH,)),
-    ("control.barrier", (InstructionClass.BARRIER,)),
+    ("control.barrier", (InstructionClass.EXECUTION_BARRIER,)),
     ("control", (InstructionClass.CONTROL,)),
     ("convert", (InstructionClass.CONVERSION,)),
     ("register.copy", (InstructionClass.REGISTER_MOVE,)),
@@ -186,7 +186,7 @@ _INSTRUCTION_CLASS_IMPLICATIONS = {
     InstructionClass.SWMMAC: (InstructionClass.WMMA,),
     InstructionClass.WMMA: (InstructionClass.MATRIX,),
     InstructionClass.BRANCH: (InstructionClass.CONTROL,),
-    InstructionClass.BARRIER: (InstructionClass.CONTROL,),
+    InstructionClass.EXECUTION_BARRIER: (InstructionClass.CONTROL,),
     InstructionClass.GLOBAL_LOAD: (InstructionClass.GLOBAL_MEMORY,),
     InstructionClass.GLOBAL_STORE: (InstructionClass.GLOBAL_MEMORY,),
     InstructionClass.BUFFER_LOAD: (InstructionClass.GLOBAL_MEMORY,),
@@ -230,8 +230,6 @@ def derive_instruction_classes(
             classes.add(InstructionClass.ATOMIC)
 
     effect_kinds = {effect.kind for effect in descriptor.effects}
-    if EffectKind.BARRIER in effect_kinds:
-        classes.add(InstructionClass.BARRIER)
     if EffectKind.CALL in effect_kinds:
         classes.add(InstructionClass.BRANCH)
     if EffectKind.CONTROL in effect_kinds:
@@ -259,8 +257,8 @@ def derive_instruction_classes(
         raise ValueError(f"descriptor '{descriptor.key}' combines private and global memory instruction classes")
     if InstructionClass.ATOMIC in classes and not has_memory_effect:
         raise ValueError(f"descriptor '{descriptor.key}' has the atomic instruction class without a read or write effect")
-    if InstructionClass.BARRIER in classes and EffectKind.BARRIER not in effect_kinds:
-        raise ValueError(f"descriptor '{descriptor.key}' has the barrier instruction class without a barrier effect")
+    if InstructionClass.EXECUTION_BARRIER in classes and EffectKind.BARRIER not in effect_kinds:
+        raise ValueError(f"descriptor '{descriptor.key}' has the execution-barrier instruction class without a barrier effect")
     read_classes = {
         InstructionClass.GLOBAL_LOAD,
         InstructionClass.BUFFER_LOAD,

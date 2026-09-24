@@ -48,6 +48,7 @@ from loom.target.low_descriptors import (
     InstructionClass,
     IssueUse,
     IssueUseKind,
+    MemorySpace,
     ModelQuality,
     NativeAsmValue,
     NativeAsmValueKind,
@@ -1170,6 +1171,33 @@ def test_compiler_closes_instruction_class_hierarchies() -> None:
             InstructionClass.SMFMAC,
         )
     ]
+
+
+@pytest.mark.parametrize(
+    ("semantic_tag", "execution_barrier"),
+    [
+        ("control.barrier.workgroup", True),
+        ("control.barrier.workgroup.signal.all", True),
+        ("control.barrier.workgroup.wait.all", True),
+        ("control.barrier.subgroup", True),
+        ("control.message.send.return.u32", False),
+        ("memory.barrier", False),
+        ("memory.cache.invalidate", False),
+        ("stream.read", False),
+    ],
+)
+def test_execution_barrier_class_requires_instruction_semantics(semantic_tag: str, execution_barrier: bool) -> None:
+    # Identical ordering effects and source fences do not establish the
+    # instruction's execution semantics.
+    descriptor = replace(
+        TEST_LOW_BARRIER_DESCRIPTOR,
+        semantic_tag=semantic_tag,
+        effects=(Effect(EffectKind.BARRIER, memory_space=MemorySpace.WORKGROUP),),
+    )
+    compiled = compiler.compile_descriptor_set(replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,)))
+    classes = compiled.instruction_classes[0]
+    assert (InstructionClass.EXECUTION_BARRIER in classes) == execution_barrier
+    assert InstructionClass.CONTROL in classes
 
 
 def test_compiler_requires_explicit_other_instruction_class() -> None:

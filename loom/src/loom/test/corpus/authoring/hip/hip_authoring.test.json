@@ -27,7 +27,7 @@
             "\"function\":\"wave64_workgroup_reduce_cross_wave\"",
             "\"local_memory_bytes\":8",
             "\"local_memory_bytes\":16",
-            "\"barrier_count\":1"
+            "\"execution_barrier_count\":1"
           ]
         }
       },
@@ -74,7 +74,7 @@
             "\"status\":{\"code\":0,\"name\":\"OK\"}",
             "\"local_memory_bytes\":1024",
             "\"local_memory_count\":2",
-            "\"barrier_count\":1"
+            "\"execution_barrier_count\":1"
           ]
         }
       },
@@ -117,7 +117,7 @@
             "\"cluster_size\":{\"x\":1,\"y\":2,\"z\":1,\"flat\":2}",
             "\"local_memory_bytes\":512",
             "\"explicit_action_count\":1",
-            "\"barrier_count\":0"
+            "\"execution_barrier_count\":0"
           ]
         }
       },

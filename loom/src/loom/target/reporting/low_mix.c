@@ -254,7 +254,7 @@ void loom_target_compile_report_accumulate_low_node_static_mix(
   LOOM_ACCUMULATE_INSTRUCTION_CLASS_(generic_memory, GENERIC_MEMORY);
   LOOM_ACCUMULATE_INSTRUCTION_CLASS_(atomic, ATOMIC);
   LOOM_ACCUMULATE_INSTRUCTION_CLASS_(branch, BRANCH);
-  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(barrier, BARRIER);
+  LOOM_ACCUMULATE_INSTRUCTION_CLASS_(execution_barrier, EXECUTION_BARRIER);
   LOOM_ACCUMULATE_INSTRUCTION_CLASS_(control, CONTROL);
   LOOM_ACCUMULATE_INSTRUCTION_CLASS_(conversion, CONVERSION);
   LOOM_ACCUMULATE_INSTRUCTION_CLASS_(cache, CACHE);
@@ -308,7 +308,7 @@ void loom_target_compile_report_accumulate_static_mix(
       source->unclassified_write_byte_count;
   target->atomic_count += source->atomic_count;
   target->branch_count += source->branch_count;
-  target->barrier_count += source->barrier_count;
+  target->execution_barrier_count += source->execution_barrier_count;
   target->control_count += source->control_count;
   target->conversion_count += source->conversion_count;
   target->cache_count += source->cache_count;
@@ -371,7 +371,7 @@ bool loom_target_compile_report_accumulate_scaled_static_mix(
       unclassified_write_byte_count);
   LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(atomic_count);
   LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(branch_count);
-  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(barrier_count);
+  LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(execution_barrier_count);
   LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(control_count);
   LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(conversion_count);
   LOOM_TARGET_COMPILE_REPORT_ACCUMULATE_SCALED_FIELD(cache_count);

@@ -234,7 +234,9 @@ typedef enum loom_low_effect_kind_e {
   LOOM_LOW_EFFECT_KIND_WRITE = 2,
   // Descriptor may call outside the current low region.
   LOOM_LOW_EFFECT_KIND_CALL = 3,
-  // Descriptor is a scheduling or memory barrier.
+  // Descriptor orders memory or protocol dependencies. This is a compiler
+  // scheduling constraint, not an instruction classification or execution
+  // scope.
   LOOM_LOW_EFFECT_KIND_BARRIER = 4,
   // Descriptor observes or mutates a target counter.
   LOOM_LOW_EFFECT_KIND_COUNTER = 5,
@@ -536,8 +538,11 @@ typedef uint32_t loom_low_instruction_class_flags_t;
 #define LOOM_LOW_INSTRUCTION_CLASS_FLAG_ATOMIC ((uint32_t)1u << 19)
 // Descriptor contributes a branch, return, or call control transfer.
 #define LOOM_LOW_INSTRUCTION_CLASS_FLAG_BRANCH ((uint32_t)1u << 20)
-// Descriptor contributes barrier or synchronization work.
-#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_BARRIER ((uint32_t)1u << 21)
+// Descriptor participates in an execution barrier: a collective rendezvous
+// (including separate arrival or wait packets) or command-stream execution
+// ordering. Memory fences and compiler scheduling constraints alone do not
+// establish this class.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_EXECUTION_BARRIER ((uint32_t)1u << 21)
 // Descriptor contributes control-flow or other control work.
 #define LOOM_LOW_INSTRUCTION_CLASS_FLAG_CONTROL ((uint32_t)1u << 22)
 // Descriptor contributes numeric conversion work.
