@@ -121,10 +121,10 @@ The dedicated importer CI profile is:
 python3 build_tools/devtools/ci.py iree-importers-tilelang --keep-going
 ```
 
-The GitHub `CI Importers` workflow runs that profile when TileLang importer
-code, importer locks, importer configuration, or devtools CI machinery changes.
-It installs the locked TileLang environment, reports the package manifest, and
-runs both the Bazel and CMake test surfaces with skip failures enabled.
+TileLang importing is experimental and the profile is not run in hosted CI.
+Run it explicitly to install the locked TileLang environment, report the
+package manifest, and exercise the Bazel and CMake test surfaces with skip
+failures enabled.
 
 ## Oracle Capture
 

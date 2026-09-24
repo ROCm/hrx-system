@@ -88,13 +88,11 @@ running against whatever packages happen to be importable.
 
 ## CI
 
-Importer CI is intentionally separate from the base Bazel and CMake lanes. The
-`CI Importers` workflow is path-scoped to importer code, importer environment
-locks, and devtools/CI machinery. Its TileLang matrix entry installs the
-hash-locked environment, prints the environment manifest, and runs the
-dedicated `iree-importers-tilelang` command profile across Bazel and CMake.
-Checked-in importer tests use fail-on-skip semantics so missing frontend
-packages fail the selected importer lane instead of reporting a false green.
+TileLang importing is experimental and is not part of hosted CI. The dedicated
+`iree-importers-tilelang` command profile remains available for explicit Bazel
+and CMake validation with the hash-locked environment. Checked-in importer
+tests use fail-on-skip semantics so missing frontend packages fail an explicitly
+selected importer lane instead of reporting a false green.
 
 ## Importer Map
 

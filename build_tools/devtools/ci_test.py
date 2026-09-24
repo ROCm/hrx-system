@@ -1058,51 +1058,10 @@ class CiTest(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertIn(command, ci.BAZEL_COMMANDS)
 
-    def test_bazel_cpu_sanitizer_workflow_is_split_by_configuration(self):
-        block = self.workflow_job_block(
-            ".github/workflows/ci_iree_bazel.yml", "linux_bazel_cpu"
-        )
-        self.assertIn("name: Linux / CPU", block)
-        for sanitizer in ("ASAN", "TSAN", "UBSAN"):
-            self.assertIn(f"name: Linux / CPU / {sanitizer}", block)
-            self.assertIn(f"command: iree-bazel-cpu-{sanitizer.lower()}", block)
-        self.assertNotIn("command: iree-bazel-cpu-msan", block)
-        self.assertNotIn("command: iree-bazel-cpu-sanitizers", block)
-
-    def test_cmake_workflow_uses_sanitizer_smoke(self):
-        block = self.workflow_job_block(
-            ".github/workflows/ci_iree_cmake.yml", "linux_cmake_cpu"
-        )
-        self.assertIn("name: Linux / CPU", block)
-        self.assertIn("name: Linux / CPU / Sanitizer Smoke", block)
-        self.assertIn("command: iree-cmake-sanitizer-smoke", block)
-        for sanitizer in ("asan", "msan", "tsan", "ubsan"):
-            self.assertNotIn(f"command: iree-cmake-cpu-{sanitizer}", block)
-        self.assertNotIn("command: iree-cmake-cpu-sanitizers", block)
-
-        for job_name in ("linux_cmake_amdgpu", "linux_cmake_vulkan"):
-            with self.subTest(job=job_name):
-                block = self.workflow_job_block(
-                    ".github/workflows/ci_iree_cmake.yml", job_name
-                )
-                self.assertNotIn("/ Sanitizers", block)
-                self.assertNotIn("-sanitizers", block)
-
-    def test_bazel_amdgpu_sanitizer_workflow_is_split_by_configuration(self):
-        block = self.workflow_job_block(
-            ".github/workflows/ci_iree_bazel.yml", "linux_bazel_amdgpu"
-        )
-        for sanitizer in ("ASAN", "TSAN", "UBSAN"):
-            self.assertIn(f"name: Linux / AMDGPU / gfx942 / {sanitizer}", block)
-            self.assertIn(f"command: iree-bazel-amdgpu-{sanitizer.lower()}", block)
-        self.assertNotIn("/ Sanitizers", block)
-        self.assertNotIn("iree-bazel-amdgpu-msan", block)
-        self.assertNotIn("iree-bazel-amdgpu-sanitizers", block)
-
     def test_amdgpu_container_jobs_initialize_git_home(self):
         for path, job_name in (
-            (".github/workflows/ci_iree_bazel.yml", "linux_bazel_amdgpu"),
-            (".github/workflows/ci_iree_cmake.yml", "linux_cmake_amdgpu"),
+            (".github/workflows/ci_iree.yml", "bazel_linux"),
+            (".github/workflows/ci_iree.yml", "cmake_linux"),
             (
                 ".github/workflows/test_core_linux_gpu_source.yml",
                 "test_core_linux_gpu_source",
@@ -1117,20 +1076,6 @@ class CiTest(unittest.TestCase):
                 self.assertLess(
                     block.index(mkdir_command), block.index(git_config_command)
                 )
-
-    def test_bazel_vulkan_workflow_has_no_nonexecuting_sanitizer_lane(self):
-        block = self.workflow_job_block(
-            ".github/workflows/ci_iree_bazel.yml", "linux_bazel_vulkan"
-        )
-        self.assertIn("name: Linux / Vulkan", block)
-        self.assertIn(
-            "python3 build_tools/devtools/ci.py iree-bazel-vulkan",
-            block,
-        )
-        self.assertNotIn("matrix.", block)
-        self.assertNotIn("strategy:", block)
-        self.assertNotIn("/ Sanitizers", block)
-        self.assertNotRegex(block, r"iree-bazel-vulkan-(asan|msan|tsan|ubsan)")
 
     def test_fetch_toolchain_uses_owned_ci_entry_point(self):
         script = Path(".github/scripts/fetch_rocm_toolchain.sh").read_text()
@@ -1383,129 +1328,6 @@ fi
         self.assertIn("windows_toolchain: ${{ matrix.toolchain }}", ci_block)
         self.assertIn("uses: ./.github/workflows/build_core_windows.yml", ci_block)
         self.assertIn('ctest_label_exclude_regex: "runtime-resource=|manual"', ci_block)
-
-    def test_iree_cmake_windows_workflow_separates_build_and_test_roles(self):
-        block = self.workflow_job_block(
-            ".github/workflows/ci_iree_cmake.yml", "windows_cmake"
-        )
-
-        self.assertIn("runs-on: azure-windows-scale-rocm", block)
-        self.assertRegex(
-            block,
-            r"name: Windows / Repository / MSVC Build\n"
-            r"\s+command: iree-cmake-repository-build\n"
-            r"\s+host_toolchain: msvc\n"
-            r"\s+fetch_rocm: false",
-        )
-        self.assertRegex(
-            block,
-            r"name: Windows / CPU\n"
-            r"\s+command: iree-cmake-cpu\n"
-            r"\s+host_toolchain: clang-cl\n"
-            r"\s+fetch_rocm: true",
-        )
-        self.assertIn("if: matrix.fetch_rocm", block)
-        self.assertIn("python build_tools/ci/ci_core_windows.py fetch-rocm", block)
-        self.assertNotRegex(
-            block,
-            r"ci/ci_core_windows\.py (build|test|package|extract-packages)",
-        )
-        self.assertNotIn("uses: ./.github/workflows/build_core_windows.yml", block)
-        self.assertIn("VsDevCmd.bat", block)
-        self.assertIn('if "${{ matrix.host_toolchain }}"=="msvc"', block)
-        self.assertIn("build_tools/devtools/ci.py ${{ matrix.command }}", block)
-
-    def test_iree_bazel_windows_workflow_is_enabled_and_separates_toolchains(self):
-        block = self.workflow_job_block(
-            ".github/workflows/ci_iree_bazel.yml", "windows_bazel"
-        )
-
-        self.assertIn("name: ${{ matrix.name }}", block)
-        self.assertRegex(
-            block,
-            r"name: Windows / Repository / clang-cl \+ ROCm\n"
-            r"\s+host_toolchain: clang-cl",
-        )
-        self.assertRegex(
-            block,
-            r"name: Windows / Repository / MSVC \+ ROCm\n"
-            r"\s+host_toolchain: msvc",
-        )
-        self.assertNotIn("if: ${{ false }}", block)
-        self.assertIn("runs-on: azure-windows-scale-rocm", block)
-        self.assertIn(
-            "BAZEL_LLVM: ${{ github.workspace }}\\build\\iree-bazel-windows\\rocm-root\\lib\\llvm",
-            block,
-        )
-        self.assertIn("python build_tools/ci/ci_core_windows.py fetch-rocm", block)
-        self.assertIn("python dev.py bazel setup --venv", block)
-        self.assertIn('Join-Path $env:SystemDrive "b"', block)
-        self.assertNotIn('Join-Path $env:RUNNER_TEMP "bazel"', block)
-        self.assertIn("startup --output_user_root=$bazelOutputRoot", block)
-        self.assertNotIn("output_user_root=C:", block)
-        self.assertIn('if ("${{ matrix.host_toolchain }}" -eq "msvc")', block)
-        self.assertIn('"build --config=windows-msvc"', block)
-        self.assertIn("VsDevCmd.bat", block)
-        self.assertIn('if "${{ matrix.host_toolchain }}"=="msvc"', block)
-        self.assertIn('set "CC=cl.exe"', block)
-        self.assertIn('set "CXX=cl.exe"', block)
-        self.assertIn('set "AR=lib.exe"', block)
-        self.assertIn('set "CC=%BAZEL_LLVM%\\bin\\clang-cl.exe"', block)
-        self.assertIn('set "CXX=%BAZEL_LLVM%\\bin\\clang-cl.exe"', block)
-        self.assertIn('set "AR=%BAZEL_LLVM%\\bin\\llvm-lib.exe"', block)
-        self.assertIn(
-            "build_tools/devtools/ci.py iree-bazel-repository-integration",
-            block,
-        )
-        self.assertIn("--amdgpu-target gfx11-generic", block)
-        self.assertIn(
-            "bazel-profiles-iree-bazel-repository-integration-${{ matrix.host_toolchain }}",
-            block,
-        )
-
-    def test_iree_workflows_do_not_trigger_on_libhrx_only_paths(self):
-        for path in (
-            ".github/workflows/ci_iree_bazel.yml",
-            ".github/workflows/ci_iree_cmake.yml",
-        ):
-            with self.subTest(path=path):
-                text = Path(path).read_text()
-                self.assertIn('- "runtime/**"', text)
-                self.assertIn('- "loom/**"', text)
-                self.assertNotIn('- "libhrx/**"', text)
-
-    def test_importer_workflow_covers_loom_changes_and_uses_locked_cache_key(self):
-        text = Path(".github/workflows/ci_importers.yml").read_text()
-
-        self.assertIn("name: CI Importers", text)
-        self.assertIn('- "requirements-importers-*.lock.txt"', text)
-        self.assertIn('- "requirements-importers-*.in"', text)
-        self.assertIn('- "build_tools/devtools/**"', text)
-        self.assertIn('- "loom/**"', text)
-        self.assertNotIn('- "loom/config/**"', text)
-        self.assertNotIn('- "loom/py/loom/importers/**"', text)
-        self.assertNotIn('- "runtime/**"', text)
-        self.assertNotIn('- "libhrx/**"', text)
-
-        block = self.workflow_job_block(
-            ".github/workflows/ci_importers.yml", "linux_importer"
-        )
-        self.assertIn("profile: tilelang", block)
-        self.assertIn("command: iree-importers-tilelang", block)
-        self.assertIn("lock_file: requirements-importers-tilelang.lock.txt", block)
-        self.assertIn("RUNNER_OS", block)
-        self.assertIn("RUNNER_ARCH", block)
-        self.assertIn("IMPORTER_LOCK_FILE", block)
-        self.assertIn("requirements-dev.lock.txt", block)
-        self.assertIn("requirements-analysis.lock.txt", block)
-        self.assertIn("actions/cache@", block)
-        self.assertIn("PIP_CACHE_DIR", block)
-        self.assertIn("python3 dev.py bazel setup --venv", block)
-        self.assertIn("python3 dev.py cmake setup --venv", block)
-        self.assertIn(
-            'python3 build_tools/devtools/ci.py "${IMPORTER_COMMAND}" --keep-going',
-            block,
-        )
 
     def test_loom_docs_workflow_reviews_every_change_and_deploys_only_main(self):
         text = Path(".github/workflows/docs.yml").read_text()

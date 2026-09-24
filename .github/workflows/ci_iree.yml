@@ -1,0 +1,955 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+name: Loom
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".bazelrc"
+      - ".bazelrc.configured"
+      - ".github/scripts/**"
+      - ".github/workflows/ci_iree*.yml"
+      - "BUILD.bazel"
+      - "BUILDING.md"
+      - "CMakeLists.txt"
+      - "MODULE.*"
+      - "dev.py"
+      - "requirements-analysis*"
+      - "requirements-dev*"
+      - "build_tools/**"
+      - "runtime/**"
+      - "loom/**"
+      - "libamdf/**"
+      - "experimental/xdna/**"
+      - "third_party/**"
+      - "tools/**"
+  push:
+    branches:
+      - main
+      - main-staging
+    paths:
+      - ".bazelrc"
+      - ".bazelrc.configured"
+      - ".github/scripts/**"
+      - ".github/workflows/ci_iree*.yml"
+      - "BUILD.bazel"
+      - "BUILDING.md"
+      - "CMakeLists.txt"
+      - "MODULE.*"
+      - "dev.py"
+      - "requirements-analysis*"
+      - "requirements-dev*"
+      - "build_tools/**"
+      - "runtime/**"
+      - "loom/**"
+      - "libamdf/**"
+      - "experimental/xdna/**"
+      - "third_party/**"
+      - "tools/**"
+
+# Main binary-size history completes independently of pull request coalescing.
+concurrency:
+  group: iree-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  bazel_linux:
+    name: Bazel / Linux x86-64 / ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Clang / Fastbuild
+            kind: cpu
+            command: iree-bazel-cpu
+            runner: azure-linux-scale-rocm
+            host_ar: ar
+            host_cc: clang
+            host_cxx: clang++
+          - name: Clang / ASAN
+            kind: cpu
+            command: iree-bazel-cpu-asan
+            runner: azure-linux-scale-rocm
+            host_ar: ar
+            host_cc: clang
+            host_cxx: clang++
+            install_compiler_rt: true
+          - name: Clang / TSAN
+            kind: cpu
+            command: iree-bazel-cpu-tsan
+            runner: azure-linux-scale-rocm
+            host_ar: ar
+            host_cc: clang
+            host_cxx: clang++
+            install_compiler_rt: true
+          - name: Clang / UBSAN
+            kind: cpu
+            command: iree-bazel-cpu-ubsan
+            runner: azure-linux-scale-rocm
+            host_ar: ar
+            host_cc: clang
+            host_cxx: clang++
+            install_compiler_rt: true
+          - name: GCC / Fastbuild / Repository Build
+            kind: cpu
+            command: iree-bazel-repository-build
+            runner: azure-linux-scale-rocm
+            host_ar: ar
+            host_cc: gcc
+            host_cxx: g++
+          - name: GCC / Fastbuild / AMD gfx120x Vulkan
+            kind: vulkan
+            command: iree-bazel-vulkan
+            runner: linux-gfx120X-gpu-rocm
+            host_ar: ar
+            host_cc: gcc
+            host_cxx: g++
+            container_options: >-
+              --device /dev/dri --cap-add SYS_ADMIN
+              --security-opt seccomp=unconfined
+              --security-opt apparmor=unconfined
+              --security-opt systempaths=unconfined --user 0:0
+          - name: Clang / Fastbuild / AMD gfx942
+            kind: amdgpu
+            command: iree-bazel-amdgpu
+            runner: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+            target_selector: gfx942
+            timeout_minutes: 15
+            container_options: &amdgpu_container_options >-
+              --ipc host --group-add video --device /dev/kfd --device /dev/dri
+              --group-add 993 --group-add 992 --group-add 110
+              --ulimit memlock=-1:-1 --security-opt seccomp=unconfined
+              --env-file /etc/podinfo/gha-gpu-isolation-settings --user 0:0
+          - name: Clang / Fastbuild / AMD gfx110x
+            kind: amdgpu
+            command: iree-bazel-amdgpu
+            runner: linux-gfx110X-gpu-rocm
+            target_selector: gfx110X-all
+            timeout_minutes: 15
+            container_options: *amdgpu_container_options
+          - name: Clang / Fastbuild / AMD gfx1150
+            kind: amdgpu
+            command: iree-bazel-amdgpu
+            runner: linux-gfx1150-gpu-rocm
+            target_selector: gfx1150
+            optional: true
+            timeout_minutes: 15
+            container_options: *amdgpu_container_options
+          - name: Clang / Fastbuild / AMD gfx1151
+            kind: amdgpu
+            command: iree-bazel-amdgpu
+            runner: linux-gfx1151-gpu-rocm
+            target_selector: gfx1151
+            optional: true
+            timeout_minutes: 15
+            container_options: *amdgpu_container_options
+          - name: Clang / Fastbuild / AMD gfx120x
+            kind: amdgpu
+            command: iree-bazel-amdgpu
+            runner: linux-gfx120X-gpu-rocm
+            target_selector: gfx120X-all
+            timeout_minutes: 15
+            container_options: *amdgpu_container_options
+          - name: Clang / ASAN / AMD gfx942
+            kind: amdgpu
+            command: iree-bazel-amdgpu-asan
+            runner: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+            target_selector: gfx942
+            timeout_minutes: 15
+            container_options: *amdgpu_container_options
+          - name: Clang / TSAN / AMD gfx942
+            kind: amdgpu
+            command: iree-bazel-amdgpu-tsan
+            runner: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+            target_selector: gfx942
+            timeout_minutes: 15
+            container_options: *amdgpu_container_options
+          - name: Clang / UBSAN / AMD gfx942
+            kind: amdgpu
+            command: iree-bazel-amdgpu-ubsan
+            runner: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+            target_selector: gfx942
+            timeout_minutes: 15
+            container_options: *amdgpu_container_options
+          - name: Clang / ASAN / AMD gfx1150 NPU4
+            kind: amd_client
+            command: iree-bazel-amd-client-asan
+            runner: linux-gfx1150-gpu-rocm-npu
+            container_options: >-
+              --device=/dev/accel/accel0 --ulimit memlock=-1:-1
+              --security-opt seccomp=unconfined
+    concurrency:
+      group: iree-bazel-linux-${{ matrix.command }}-${{ matrix.target_selector }}-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
+      cancel-in-progress: true
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.optional || false }}
+    timeout-minutes: ${{ matrix.timeout_minutes || 45 }}
+    defaults:
+      run:
+        shell: bash
+    container:
+      image: ${{ matrix.command == 'iree-bazel-repository-build' && 'ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421' || 'ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98' }}
+      options: ${{ matrix.container_options || '' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: ${{ matrix.kind == 'amd_client' && '1' || '2' }}
+
+      - name: Adjust git config
+        run: |
+          mkdir -p "$HOME"
+          git config --global --add safe.directory "$PWD"
+
+      - name: Configure build environment
+        run: |
+          case "${{ matrix.kind }}" in
+            amdgpu) output_name=iree-bazel-gpu ;;
+            amd_client) output_name=iree-bazel-client ;;
+            vulkan) output_name=iree-bazel-vulkan ;;
+            *) output_name=iree-bazel ;;
+          esac
+          output_dir="${GITHUB_WORKSPACE}/build/${output_name}"
+          {
+            echo "HRX_ARTIFACT_SET=core"
+            echo "HRX_DOWNLOAD_CACHE_DIR=${output_dir}/downloads"
+            echo "HRX_OUTPUT_DIR=${output_dir}"
+            echo "HRX_PYTHON=${output_dir}/python/bin/python3"
+            echo "HRX_RELEASE_TYPE=nightly"
+            echo "HRX_ROCM_ROOT=${output_dir}/rocm-root"
+            echo "PIP_CACHE_DIR=${output_dir}/caches/pip"
+          } >> "$GITHUB_ENV"
+          case "${{ matrix.kind }}" in
+            amdgpu|amd_client)
+              {
+                echo "AR=${output_dir}/rocm-root/lib/llvm/bin/llvm-ar"
+                echo "CC=${output_dir}/rocm-root/lib/llvm/bin/clang"
+                echo "CXX=${output_dir}/rocm-root/lib/llvm/bin/clang++"
+              } >> "$GITHUB_ENV"
+              ;;
+            *)
+              {
+                echo "AR=${{ matrix.host_ar }}"
+                echo "CC=${{ matrix.host_cc }}"
+                echo "CXX=${{ matrix.host_cxx }}"
+              } >> "$GITHUB_ENV"
+              ;;
+          esac
+
+      - name: Select affected tests
+        if: matrix.kind == 'cpu' || matrix.kind == 'vulkan' || matrix.kind == 'amdgpu'
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 build_tools/ci/change_scope.py --base "$BASE_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Install Vulkan build environment
+        if: matrix.kind == 'vulkan'
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends gcc g++ libvulkan1 mesa-vulkan-drivers vulkan-tools
+          dpkg-query -W gcc g++ libvulkan1 mesa-vulkan-drivers vulkan-tools
+
+      - name: Set up Python
+        if: matrix.command != 'iree-bazel-repository-build'
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        if: matrix.kind == 'cpu' && matrix.command != 'iree-bazel-repository-build'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+
+      - name: Install Clang sanitizer runtimes
+        if: matrix.install_compiler_rt
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libclang-rt-18-dev
+
+      - name: Fetch ROCm toolchain
+        if: matrix.kind != 'vulkan'
+        run: bash .github/scripts/fetch_rocm_toolchain.sh
+
+      - name: Check Vulkan hardware environment
+        if: matrix.kind == 'vulkan'
+        timeout-minutes: 1
+        run: bash .github/scripts/check_vulkan_hardware_environment.sh
+
+      - name: Install Bazel host tools
+        run: |
+          python3 --version
+          python3 dev.py bazel setup --venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Check Bazel sandbox environment
+        if: matrix.kind == 'vulkan'
+        run: |
+          sandbox="$(bazel info install_base)/linux-sandbox"
+          execution_root="$(bazel info execution_root)"
+          mkdir -p "$execution_root"
+          namei -l "$execution_root"
+          "$sandbox" -W "$execution_root" -- /bin/true
+
+      - name: Check tool versions
+        if: matrix.kind == 'cpu' || matrix.kind == 'vulkan' || matrix.kind == 'amdgpu'
+        run: |
+          bazel --version
+          if [[ "${{ matrix.kind }}" == vulkan ]]; then
+            "${CC}" --version
+            "${CXX}" --version
+            "${AR}" --version
+          else
+            expect_rocm=()
+            if [[ "${{ matrix.kind }}" == amdgpu ]]; then
+              expect_rocm=(--expect-rocm)
+            fi
+            bash .github/scripts/check_host_toolchain.sh "${expect_rocm[@]}"
+            bash .github/scripts/check_rocm_device_toolchain.sh
+            test -d "${HRX_ROCM_ROOT}/include"
+          fi
+
+      - name: Report ROCm environment
+        if: matrix.kind == 'amdgpu'
+        timeout-minutes: 1
+        env:
+          ROCR_VISIBLE_DEVICES: "0"
+        run: bash .github/scripts/check_rocm_environment.sh
+
+      - name: Check native accelerator access
+        if: matrix.kind == 'amd_client'
+        run: |
+          bash .github/scripts/check_host_toolchain.sh --expect-rocm
+          test -r /dev/accel/accel0 && test -w /dev/accel/accel0
+
+      - name: Run IREE Bazel CI
+        if: matrix.kind == 'cpu' || matrix.kind == 'vulkan' || matrix.kind == 'amdgpu'
+        id: iree_bazel_ci
+        shell: bash
+        env:
+          ROCR_VISIBLE_DEVICES: ${{ matrix.kind == 'amdgpu' && '0' || '' }}
+        run: |
+          scope_args=()
+          if [[ "${{ steps.scope.outputs.loom_only }}" == true && "${{ matrix.command }}" != iree-bazel-repository-build ]]; then
+            scope_args=(--target //loom/...)
+          fi
+          target_args=()
+          if [[ -n "${{ matrix.target_selector }}" ]]; then
+            target_args=(--amdgpu-target "${{ matrix.target_selector }}")
+          fi
+          python3 build_tools/devtools/ci.py ${{ matrix.command }} \
+            "${target_args[@]}" "${scope_args[@]}" \
+            --bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles" --keep-going
+
+      - name: Build and test the AMD client
+        if: matrix.kind == 'amd_client'
+        id: client_ci
+        run: |
+          python3 build_tools/devtools/ci.py ${{ matrix.command }} \
+            --bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles"
+
+      - name: Upload Bazel profiles
+        continue-on-error: true
+        if: ${{ always() && (steps.iree_bazel_ci.outcome != 'skipped' || steps.client_ci.outcome != 'skipped') }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-profiles-${{ matrix.command }}-${{ matrix.target_selector || 'host' }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bazel-profiles/*.profile.gz
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 7
+
+      - name: Upload failed test results
+        if: ${{ always() && steps.iree_bazel_ci.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-results-${{ matrix.command }}-${{ matrix.target_selector || 'host' }}-attempt-${{ github.run_attempt }}
+          path: |
+            bazel-testlogs/**/test.log
+            bazel-testlogs/**/test.xml
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload native test results
+        if: ${{ always() && steps.client_ci.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-test-results-amd-client-linux-attempt-${{ github.run_attempt }}
+          path: |
+            bazel-testlogs/libamdf/**/test.log
+            bazel-testlogs/libamdf/**/test.xml
+            bazel-testlogs/experimental/xdna/**/test.log
+            bazel-testlogs/experimental/xdna/**/test.xml
+          if-no-files-found: warn
+          retention-days: 7
+
+  bazel_linux_binary_size:
+    name: Bazel / Linux x86-64 / Clang / Release / Binary Size
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    concurrency:
+      group: iree-bazel-linux-binary-size-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    runs-on: azure-linux-scale-rocm
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    container:
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
+    env:
+      AR: ${{ github.workspace }}/build/iree-bazel-binary-analysis/rocm-root/lib/llvm/bin/llvm-ar
+      BINARY_ANALYSIS_ENVIRONMENT_ID: therock-manylinux-x86_64-sha256-702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
+      CC: ${{ github.workspace }}/build/iree-bazel-binary-analysis/rocm-root/lib/llvm/bin/clang
+      CXX: ${{ github.workspace }}/build/iree-bazel-binary-analysis/rocm-root/lib/llvm/bin/clang++
+      HRX_ARTIFACT_SET: core-with-llvm-dev
+      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/iree-bazel-binary-analysis/downloads
+      HRX_OUTPUT_DIR: ${{ github.workspace }}/build/iree-bazel-binary-analysis
+      HRX_PYTHON: ${{ github.workspace }}/build/iree-bazel-binary-analysis/python/bin/python3
+      HRX_RELEASE_TYPE: nightly
+      HRX_ROCM_ROOT: ${{ github.workspace }}/build/iree-bazel-binary-analysis/rocm-root
+      PIP_CACHE_DIR: ${{ github.workspace }}/build/iree-bazel-binary-analysis/caches/pip
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Adjust git config
+        run: |
+          mkdir -p "$HOME"
+          git config --global --add safe.directory "$PWD"
+
+      - name: Fetch ROCm toolchain
+        run: bash .github/scripts/fetch_rocm_toolchain.sh
+
+      - name: Install Bazel host tools
+        run: |
+          python3 --version
+          python3 dev.py bazel setup --venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Check binary-analysis toolchain
+        run: |
+          python3 dev.py bazel doctor
+          bash .github/scripts/check_host_toolchain.sh --expect-rocm
+          "${HRX_ROCM_ROOT}/lib/llvm/bin/llvm-readobj" --version
+          "${HRX_ROCM_ROOT}/lib/llvm/bin/llvm-strip" --version
+
+      - name: Recover Loom product-size history
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+          CURRENT_MAIN_SHA: ${{ github.ref == 'refs/heads/main' && github.sha || '' }}
+          GITHUB_TOKEN: ${{ github.token }}
+          SIZE_WORK_DIR: build/iree-bazel-binary-analysis/loom-size/work
+        run: |
+          args=(
+            --repo-root "$PWD"
+            --repository "${GITHUB_REPOSITORY}"
+            --anchor "${BASE_SHA}"
+            --output "${SIZE_WORK_DIR}/baseline.json"
+          )
+          if [[ -n "${CURRENT_MAIN_SHA}" ]]; then
+            args+=(--exclude-commit "${CURRENT_MAIN_SHA}")
+          fi
+          python3 build_tools/ci/loom_binary_size.py fetch-history "${args[@]}"
+
+      - name: Build and measure Loom products
+        env:
+          SIZE_WORK_DIR: build/iree-bazel-binary-analysis/loom-size/work
+        run: |
+          python3 build_tools/ci/loom_binary_size.py collect \
+            --repo-root "$PWD" \
+            --output-dir "${SIZE_WORK_DIR}" \
+            --llvm-bin "${HRX_ROCM_ROOT}/lib/llvm/bin" \
+            --environment-id "${BINARY_ANALYSIS_ENVIRONMENT_ID}" \
+            --commit "${GITHUB_SHA}" \
+            --repository "${GITHUB_REPOSITORY}" \
+            --ref "${GITHUB_REF_NAME}" \
+            --run-id "${GITHUB_RUN_ID}"
+
+      - name: Render Loom product-size history
+        env:
+          SIZE_RECORD_DIR: build/iree-bazel-binary-analysis/loom-size/record
+          SIZE_WORK_DIR: build/iree-bazel-binary-analysis/loom-size/work
+          UPDATE_MAIN: ${{ github.ref == 'refs/heads/main' && '1' || '' }}
+        run: |
+          args=(
+            --current "${SIZE_WORK_DIR}/current.json"
+            --baseline "${SIZE_WORK_DIR}/baseline.json"
+            --output-dir "${SIZE_RECORD_DIR}"
+          )
+          if [[ -n "${UPDATE_MAIN}" ]]; then
+            args+=(--update-main)
+          fi
+          python3 build_tools/ci/loom_binary_size.py report "${args[@]}"
+          cat "${SIZE_RECORD_DIR}/summary.md" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload Loom product-size record
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ github.ref == 'refs/heads/main' && 'loom-binary-size-history-main-v1' || format('loom-binary-size-candidate-{0}', github.run_id) }}
+          path: build/iree-bazel-binary-analysis/loom-size/record/
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 45
+
+  bazel_windows:
+    name: Bazel / Windows x86-64 / ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Clang CL / Fastbuild
+            kind: repository
+            host_toolchain: clang-cl
+            runner: azure-windows-scale-rocm
+          - name: MSVC / Fastbuild
+            kind: repository
+            host_toolchain: msvc
+            runner: azure-windows-scale-rocm
+          - name: Clang CL / Fastbuild / AMD gfx1151 NPU5
+            kind: amd_client
+            host_toolchain: clang-cl
+            runner: windows-gfx1151-gpu-rocm
+    concurrency:
+      group: iree-bazel-windows-${{ matrix.kind }}-${{ matrix.host_toolchain }}-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
+      cancel-in-progress: true
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.kind == 'amd_client' && 45 || 60 }}
+    env:
+      BAZEL_LLVM: ${{ github.workspace }}\build\${{ matrix.kind == 'amd_client' && 'iree-bazel-client' || 'iree-bazel-windows' }}\rocm-root\lib\llvm
+      HRX_ARTIFACT_SET: core
+      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}\build\${{ matrix.kind == 'amd_client' && 'iree-bazel-client' || 'iree-bazel-windows' }}\downloads
+      HRX_OUTPUT_DIR: ${{ github.workspace }}\build\${{ matrix.kind == 'amd_client' && 'iree-bazel-client' || 'iree-bazel-windows' }}
+      HRX_RELEASE_TYPE: nightly
+      HRX_ROCM_ROOT: ${{ github.workspace }}\build\${{ matrix.kind == 'amd_client' && 'iree-bazel-client' || 'iree-bazel-windows' }}\rocm-root
+      IREE_CI_PYTHON: python
+      IREE_CI_FAILURE_ARTIFACT_DIR: ${{ github.workspace }}\build\windows-build-failures-${{ github.run_id }}-${{ github.run_attempt }}
+      PIP_CACHE_DIR: ${{ github.workspace }}\build\${{ matrix.kind == 'amd_client' && 'iree-bazel-client' || 'iree-bazel-windows' }}\caches\pip
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        if: matrix.kind == 'repository'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+
+      - name: Check Windows host capabilities
+        shell: powershell
+        run: |
+          $fileSystemPolicy = Get-Item -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -ErrorAction Stop
+          Write-Output "LongPathsEnabled=$($fileSystemPolicy.GetValue('LongPathsEnabled', '<unset>'))"
+          python build_tools/bazel/configure.py --check-windows-host
+
+      - name: Fetch ROCm toolchain
+        shell: powershell
+        run: |
+          python -m pip install --upgrade boto3 zstandard
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python build_tools/ci/ci_core_windows.py fetch-rocm
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Install developer tools
+        shell: powershell
+        run: |
+          $bazelOutputRoot = (Join-Path $env:SystemDrive "b").Replace('\', '/')
+          "startup --output_user_root=$bazelOutputRoot" |
+            Out-File -FilePath .bazelrc.local -Encoding ascii -Append
+          if ("${{ matrix.host_toolchain }}" -eq "msvc") {
+            "build --config=windows-msvc" |
+              Out-File -FilePath .bazelrc.local -Encoding ascii -Append
+          }
+          python --version
+          python dev.py bazel setup --venv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "$PWD\.venv\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Check native accelerator and GPU access
+        if: matrix.kind == 'amd_client'
+        shell: powershell
+        run: |
+          Get-CimInstance Win32_OperatingSystem -ErrorAction Stop |
+            Format-List Caption, Version, BuildNumber
+          $accelerators = @(Get-PnpDevice -Class ComputeAccelerator -PresentOnly -ErrorAction Stop)
+          $gpus = @(Get-PnpDevice -Class Display -PresentOnly -ErrorAction Stop |
+            Where-Object InstanceId -Like 'PCI\VEN_1002&*')
+          $devices = $accelerators + $gpus
+          $devices | Format-Table Status, Class, FriendlyName, InstanceId -AutoSize
+          foreach ($device in $devices) {
+            Write-Output $device.InstanceId
+            Get-PnpDeviceProperty -InstanceId $device.InstanceId -ErrorAction Stop -KeyName `
+              DEVPKEY_Device_DriverVersion, DEVPKEY_Device_DriverDate, DEVPKEY_Device_DriverInfPath |
+              Format-Table KeyName, Data -AutoSize
+          }
+          if (-not ($accelerators | Where-Object Status -eq 'OK')) {
+            throw 'The AMD client runner requires a healthy native compute accelerator.'
+          }
+          if (-not ($gpus | Where-Object Status -eq 'OK')) {
+            throw 'The AMD client runner requires a healthy AMD GPU.'
+          }
+          (Get-Item (Join-Path $env:SystemRoot 'System32\vulkan-1.dll') -ErrorAction Stop).VersionInfo |
+            Format-List FileName, FileVersion, ProductVersion
+
+      - name: Run IREE Bazel CI
+        if: matrix.kind == 'repository'
+        id: iree_bazel_ci
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS_INSTALL=%%i"
+          if not defined VS_INSTALL exit /b 1
+          call "%VS_INSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+          if "${{ matrix.host_toolchain }}"=="msvc" (
+            set "CC=cl.exe"
+            set "CXX=cl.exe"
+            set "AR=lib.exe"
+          ) else (
+            if not exist "%BAZEL_LLVM%\bin\clang-cl.exe" exit /b 1
+            if not exist "%BAZEL_LLVM%\bin\lld-link.exe" exit /b 1
+            if not exist "%BAZEL_LLVM%\bin\llvm-lib.exe" exit /b 1
+            set "CC=%BAZEL_LLVM%\bin\clang-cl.exe"
+            set "CXX=%BAZEL_LLVM%\bin\clang-cl.exe"
+            set "AR=%BAZEL_LLVM%\bin\llvm-lib.exe"
+          )
+          python build_tools/devtools/ci.py iree-bazel-repository-integration --amdgpu-target gfx11-generic --bazel-profile-dir "%RUNNER_TEMP%\bazel-profiles" --keep-going
+
+      - name: Build and test the AMD client
+        if: matrix.kind == 'amd_client'
+        id: client_ci
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS_INSTALL=%%i"
+          if not defined VS_INSTALL exit /b 1
+          call "%VS_INSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+          if errorlevel 1 exit /b %errorlevel%
+          if not exist "%BAZEL_LLVM%\bin\clang-cl.exe" exit /b 1
+          if not exist "%BAZEL_LLVM%\bin\lld-link.exe" exit /b 1
+          if not exist "%BAZEL_LLVM%\bin\llvm-lib.exe" exit /b 1
+          set "CC=%BAZEL_LLVM%\bin\clang-cl.exe"
+          set "CXX=%BAZEL_LLVM%\bin\clang-cl.exe"
+          set "AR=%BAZEL_LLVM%\bin\llvm-lib.exe"
+          python build_tools/devtools/ci.py iree-bazel-amd-client --bazel-profile-dir "%RUNNER_TEMP%\bazel-profiles"
+
+      - name: Upload Windows build failure evidence
+        if: ${{ always() && steps.iree_bazel_ci.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-build-failures-bazel-${{ matrix.host_toolchain }}-attempt-${{ github.run_attempt }}
+          path: ${{ env.IREE_CI_FAILURE_ARTIFACT_DIR }}
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload Bazel profiles
+        continue-on-error: true
+        if: ${{ always() && (steps.iree_bazel_ci.outcome != 'skipped' || steps.client_ci.outcome != 'skipped') }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-profiles-${{ matrix.kind }}-${{ matrix.host_toolchain }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}\bazel-profiles\*.profile.gz
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 7
+
+      - name: Upload failed test results
+        if: ${{ always() && steps.iree_bazel_ci.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-results-iree-bazel-repository-integration-${{ matrix.host_toolchain }}-attempt-${{ github.run_attempt }}
+          path: |
+            bazel-testlogs/**/test.log
+            bazel-testlogs/**/test.xml
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload native test results
+        if: ${{ always() && steps.client_ci.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-test-results-amd-client-windows-attempt-${{ github.run_attempt }}
+          path: |
+            bazel-testlogs/libamdf/**/test.log
+            bazel-testlogs/libamdf/**/test.xml
+            bazel-testlogs/experimental/xdna/**/test.log
+            bazel-testlogs/experimental/xdna/**/test.xml
+            bazel-testlogs/runtime/src/iree/hal/drivers/vulkan/**/test.log
+            bazel-testlogs/runtime/src/iree/hal/drivers/vulkan/**/test.xml
+            bazel-testlogs/loom/binding/c/test/target/spirv/**/test.log
+            bazel-testlogs/loom/binding/c/test/target/spirv/**/test.xml
+            bazel-testlogs/loom/src/loom/tooling/target/spirv/**/test.log
+            bazel-testlogs/loom/src/loom/tooling/target/spirv/**/test.xml
+          if-no-files-found: warn
+          retention-days: 7
+
+  cmake_linux:
+    name: CMake / Linux x86-64 / ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Clang / RelWithDebInfo
+            kind: cpu
+            command: iree-cmake-cpu
+            runner: azure-linux-scale-rocm
+            host_ar: ar
+            host_cc: clang
+            host_cxx: clang++
+          - name: Clang / Sanitizer Smoke
+            kind: cpu
+            command: iree-cmake-sanitizer-smoke
+            runner: azure-linux-scale-rocm
+            host_ar: ar
+            host_cc: clang
+            host_cxx: clang++
+            install_compiler_rt: true
+          - name: GCC / RelWithDebInfo / AMD gfx120x Vulkan
+            kind: vulkan
+            command: iree-cmake-vulkan
+            runner: linux-gfx120X-gpu-rocm
+            host_ar: ar
+            host_cc: gcc
+            host_cxx: g++
+            container_options: --device /dev/dri --user 0:0
+          - name: Clang / RelWithDebInfo / AMD gfx942
+            kind: amdgpu
+            command: iree-cmake-amdgpu
+            runner: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+            target_selector: gfx942
+            timeout_minutes: 60
+            container_options: >-
+              --ipc host --group-add video --device /dev/kfd --device /dev/dri
+              --group-add 993 --group-add 992 --group-add 110
+              --ulimit memlock=-1:-1 --security-opt seccomp=unconfined
+              --env-file /etc/podinfo/gha-gpu-isolation-settings --user 0:0
+    concurrency:
+      group: iree-cmake-linux-${{ matrix.command }}-${{ matrix.target_selector }}-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
+      cancel-in-progress: true
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.timeout_minutes || 45 }}
+    defaults:
+      run:
+        shell: bash
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: ${{ matrix.container_options || '' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Adjust git config
+        run: |
+          mkdir -p "$HOME"
+          git config --global --add safe.directory "$PWD"
+
+      - name: Configure build environment
+        run: |
+          output_name=iree-cmake
+          if [[ "${{ matrix.kind }}" == amdgpu ]]; then
+            output_name=iree-cmake-gpu
+          fi
+          output_dir="${GITHUB_WORKSPACE}/build/${output_name}"
+          {
+            echo "HRX_ARTIFACT_SET=core"
+            echo "HRX_DOWNLOAD_CACHE_DIR=${output_dir}/downloads"
+            echo "HRX_OUTPUT_DIR=${output_dir}"
+            echo "HRX_PYTHON=${output_dir}/python/bin/python3"
+            echo "HRX_RELEASE_TYPE=nightly"
+            echo "HRX_ROCM_ROOT=${output_dir}/rocm-root"
+            echo "PIP_CACHE_DIR=${output_dir}/caches/pip"
+          } >> "$GITHUB_ENV"
+          if [[ "${{ matrix.kind }}" == amdgpu ]]; then
+            {
+              echo "AR=${output_dir}/rocm-root/lib/llvm/bin/llvm-ar"
+              echo "CC=${output_dir}/rocm-root/lib/llvm/bin/clang"
+              echo "CXX=${output_dir}/rocm-root/lib/llvm/bin/clang++"
+            } >> "$GITHUB_ENV"
+          else
+            {
+              echo "AR=${{ matrix.host_ar }}"
+              echo "CC=${{ matrix.host_cc }}"
+              echo "CXX=${{ matrix.host_cxx }}"
+            } >> "$GITHUB_ENV"
+          fi
+
+      - name: Install Vulkan build environment
+        if: matrix.kind == 'vulkan'
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends gcc g++ libvulkan1 mesa-vulkan-drivers vulkan-tools
+          dpkg-query -W gcc g++ libvulkan1 mesa-vulkan-drivers vulkan-tools
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Clang sanitizer runtimes
+        if: matrix.install_compiler_rt
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libclang-rt-18-dev
+
+      - name: Fetch ROCm toolchain
+        if: matrix.kind != 'vulkan'
+        run: bash .github/scripts/fetch_rocm_toolchain.sh
+
+      - name: Check Vulkan hardware environment
+        if: matrix.kind == 'vulkan'
+        timeout-minutes: 1
+        run: bash .github/scripts/check_vulkan_hardware_environment.sh
+
+      - name: Install CMake host tools
+        run: |
+          python3 --version
+          python3 dev.py cmake setup --venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Check tool versions
+        run: |
+          cmake --version
+          ctest --version
+          ninja --version
+          if [[ "${{ matrix.kind }}" == vulkan ]]; then
+            "${CC}" --version
+            "${CXX}" --version
+            "${AR}" --version
+          else
+            expect_rocm=()
+            if [[ "${{ matrix.kind }}" == amdgpu ]]; then
+              expect_rocm=(--expect-rocm)
+            fi
+            bash .github/scripts/check_host_toolchain.sh "${expect_rocm[@]}"
+            bash .github/scripts/check_rocm_device_toolchain.sh
+            test -d "${HRX_ROCM_ROOT}/include"
+          fi
+
+      - name: Report ROCm environment
+        if: matrix.kind == 'amdgpu'
+        timeout-minutes: 1
+        env:
+          ROCR_VISIBLE_DEVICES: "0"
+        run: bash .github/scripts/check_rocm_environment.sh
+
+      - name: Run IREE CMake CI
+        id: iree_cmake_ci
+        env:
+          ROCR_VISIBLE_DEVICES: ${{ matrix.kind == 'amdgpu' && '0' || '' }}
+        run: |
+          target_args=()
+          if [[ -n "${{ matrix.target_selector }}" ]]; then
+            target_args=(--amdgpu-target "${{ matrix.target_selector }}")
+          fi
+          python3 build_tools/devtools/ci.py ${{ matrix.command }} \
+            "${target_args[@]}" --keep-going
+
+      - name: Upload failed test results
+        if: ${{ always() && steps.iree_cmake_ci.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ctest-results-${{ matrix.command }}-attempt-${{ github.run_attempt }}
+          path: build/ci/**/Testing/Temporary/
+          if-no-files-found: warn
+          retention-days: 7
+
+  cmake_windows:
+    name: CMake / Windows x86-64 / ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: MSVC / RelWithDebInfo / Repository Build
+            command: iree-cmake-repository-build
+            fetch_rocm: false
+            host_toolchain: msvc
+          - name: Clang CL / RelWithDebInfo
+            command: iree-cmake-cpu
+            fetch_rocm: true
+            host_toolchain: clang-cl
+    concurrency:
+      group: iree-cmake-windows-${{ matrix.command }}-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
+      cancel-in-progress: true
+    runs-on: azure-windows-scale-rocm
+    timeout-minutes: 60
+    env:
+      HRX_ARTIFACT_SET: core
+      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}\build\iree-cmake-windows\downloads
+      HRX_OUTPUT_DIR: ${{ github.workspace }}\build\iree-cmake-windows
+      HRX_RELEASE_TYPE: nightly
+      HRX_ROCM_ROOT: ${{ github.workspace }}\build\iree-cmake-windows\rocm-root
+      IREE_CI_PYTHON: python
+      IREE_CI_FAILURE_ARTIFACT_DIR: ${{ github.workspace }}\build\windows-build-failures-${{ github.run_id }}-${{ github.run_attempt }}
+      PIP_CACHE_DIR: ${{ github.workspace }}\build\iree-cmake-windows\caches\pip
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Fetch ROCm toolchain
+        if: matrix.fetch_rocm
+        run: |
+          python -m pip install --upgrade boto3 zstandard
+          python build_tools/ci/ci_core_windows.py fetch-rocm
+
+      - name: Install developer tools
+        shell: pwsh
+        run: |
+          python --version
+          python dev.py cmake setup --venv
+          "$PWD\.venv\Scripts" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Run IREE CMake CI
+        id: iree_cmake_ci
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS_INSTALL=%%i"
+          if not defined VS_INSTALL exit /b 1
+          call "%VS_INSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+          if "${{ matrix.host_toolchain }}"=="msvc" (
+            set "CC=cl.exe"
+            set "CXX=cl.exe"
+            set "AR=lib.exe"
+          ) else (
+            if not exist "%HRX_ROCM_ROOT%\lib\llvm\bin\clang-cl.exe" exit /b 1
+            if not exist "%HRX_ROCM_ROOT%\lib\llvm\bin\llvm-lib.exe" exit /b 1
+            set "CC=%HRX_ROCM_ROOT%\lib\llvm\bin\clang-cl.exe"
+            set "CXX=%HRX_ROCM_ROOT%\lib\llvm\bin\clang-cl.exe"
+            set "AR=%HRX_ROCM_ROOT%\lib\llvm\bin\llvm-lib.exe"
+          )
+          python build_tools/devtools/ci.py ${{ matrix.command }} --keep-going
+
+      - name: Upload Windows build failure evidence
+        if: ${{ always() && steps.iree_cmake_ci.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-build-failures-${{ matrix.command }}-attempt-${{ github.run_attempt }}
+          path: ${{ env.IREE_CI_FAILURE_ARTIFACT_DIR }}
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload failed test results
+        if: ${{ always() && steps.iree_cmake_ci.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ctest-results-${{ matrix.command }}-attempt-${{ github.run_attempt }}
+          path: build/ci/**/Testing/Temporary/
+          if-no-files-found: warn
+          retention-days: 7

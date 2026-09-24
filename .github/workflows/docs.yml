@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-name: Documentation
+name: HRX
 
 on:
   workflow_dispatch:
@@ -39,7 +39,7 @@ permissions:
 
 jobs:
   build_docs:
-    name: Linux / Documentation
+    name: Documentation
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     concurrency:
@@ -79,7 +79,7 @@ jobs:
           retention-days: 7
 
   deploy_docs:
-    name: GitHub Pages
+    name: Documentation / GitHub
     if: github.ref == 'refs/heads/main'
     needs: build_docs
     permissions:

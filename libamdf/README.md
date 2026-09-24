@@ -305,9 +305,8 @@ python build_tools/devtools/ci.py iree-bazel-amd-client
 ```
 
 These commands select the worktree's build configuration. The corresponding
-[Linux](../.github/workflows/ci_iree_bazel_client_linux.yml) and
-[Windows](../.github/workflows/ci_iree_bazel_client_windows.yml) workflows own
-platform setup and hardware assignment. Resource requirements select tests;
+Linux and Windows jobs in the [Loom workflow](../.github/workflows/ci_iree.yml)
+own platform setup and hardware assignment. Resource requirements select tests;
 being compiled into the library does not declare a GPU available for testing.
 For the CMake XDNA build and test sequence, use
 `python build_tools/devtools/ci.py iree-cmake-xdna-asan`.
