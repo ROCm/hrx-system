@@ -990,6 +990,27 @@ func.def @dynamic_unit_axis_proven_by_scalar_assume_before_index_cast(%buffer: b
 
 // ====
 
+// Integer source coordinates commonly compare in i32 before the view API
+// widens them. Both widened values preserve the nonnegative numeric relation.
+func.def @guarded_unsigned_widening_proves_dynamic_unit_axis(%buffer: buffer, %base: offset, %row0: i32, %n0: i32) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %row = scalar.assume %row0 [range(%row0, 0, 7)] : i32
+  %n = scalar.assume %n0 [range(%n0, 0, 8)] : i32
+  %n_wide = scalar.extui %n : i32 to i64
+  %n_idx = index.cast %n_wide : i64 to index
+  %view = buffer.view %buffer[%base] : buffer -> view<[%n_idx]x4xf32, %layout>
+  %in_bounds = scalar.cmpi ult, %row, %n : i32
+  scf.if %in_bounds {
+    %row_wide = scalar.extui %row : i32 to i64
+    %row_idx = index.cast %row_wide : i64 to index
+    %loaded = vector.load %view[%row_idx, 0] : view<[%n_idx]x4xf32, %layout> -> vector<4xf32>
+    test.use %loaded : vector<4xf32>
+  }
+  func.return
+}
+
+// ====
+
 // RUN: pass canonicalize,vector-memory-footprint
 func.def @guarded_loaded_i32_precast_index_proves_unit_axis(%ids: buffer, %payload: buffer, %base: offset, %row_count: i32) {
   %layout = encoding.layout.dense : encoding<layout>

@@ -56,8 +56,8 @@ void typed_view_copy(const float* input, float* output, unsigned rows,
   auto destination = loom::buffer::view<loomt::dynamic, 8>(
       output + output_origin, {rows}, output_layout);
 
-  loomt::size_type row = loom::workitem_id.y;
-  loomt::size_type column = loom::workitem_id.x;
+  unsigned row = loom::workitem_id.y;
+  unsigned column = loom::workitem_id.x;
   if (row < rows) {
     float value = loom::view::load(source, row, column);
     loom::view::store(value, destination, row, column);
