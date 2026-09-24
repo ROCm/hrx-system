@@ -422,6 +422,17 @@ class XdnaPoolVisibilityTest : public XdnaExecutionTest {
       amdf_endpoint_t* endpoint = nullptr;
       ASSERT_EQ(GetCtsDeviceCache().OpenEndpoint(summary.id, &endpoint),
                 AMDF_STATUS_OK);
+      amdf_gpu_endpoint_info_t gpu_info = {};
+      gpu_info.type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO;
+      gpu_info.structure_size = sizeof(gpu_info);
+      ASSERT_EQ(gpu_api_->endpoint_query_info(endpoint, &gpu_info),
+                AMDF_STATUS_OK);
+      // The fixed GCR recipe is source-qualified for GFX11.0/GFX11.5.
+      // Generic operand support still requires this architecture selection.
+      if (gpu_info.gfx_ip.major != 11 ||
+          (gpu_info.gfx_ip.minor != 0 && gpu_info.gfx_ip.minor != 5)) {
+        continue;
+      }
       amdf_endpoint_info_t info = {};
       info.type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO;
       info.structure_size = sizeof(info);
@@ -442,10 +453,20 @@ class XdnaPoolVisibilityTest : public XdnaExecutionTest {
         const bool kernel_publication =
             (family.publication_modes & AMDF_QUEUE_PUBLICATION_MODE_KERNEL) !=
             0;
+        constexpr amdf_queue_roles_t kRequiredRoles =
+            AMDF_QUEUE_ROLE_TRANSFER | AMDF_QUEUE_ROLE_CACHE_CONTROL;
+        constexpr amdf_cache_operations_t kRequiredCacheOperations =
+            AMDF_CACHE_OPERATIONS_RELEASE_TO_SYSTEM |
+            AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM;
         if (family.command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4 &&
             family.format_version == AMDF_GPU_PM4_QUEUE_FORMAT_VERSION_1 &&
             (family.format_features &
              AMDF_GPU_PM4_FORMAT_FEATURE_ACQUIRE_MEM_GCR) != 0 &&
+            (family.roles & kRequiredRoles) == kRequiredRoles &&
+            (family.cache_operations & kRequiredCacheOperations) ==
+                kRequiredCacheOperations &&
+            (family.cache_transition_kinds &
+             AMDF_CACHE_TRANSITION_KINDS_GLOBAL) != 0 &&
             (user_publication || kernel_publication)) {
           gpu_family_ = family;
           gpu_publication_mode_ = user_publication
@@ -460,7 +481,7 @@ class XdnaPoolVisibilityTest : public XdnaExecutionTest {
       }
     }
     if (!gpu_endpoint) {
-      GTEST_SKIP() << "GPU PM4 publication with GCR is not advertised";
+      GTEST_SKIP() << "GFX11.0/GFX11.5 PM4 system cache recipe is unavailable";
     }
     ASSERT_EQ(GetCtsDeviceCache().GetGpuDevice(gpu_endpoint, &gpu_device_),
               AMDF_STATUS_OK);
@@ -690,10 +711,11 @@ class XdnaPoolVisibilityTest : public XdnaExecutionTest {
                                   std::vector<uint32_t>* words) {
     ASSERT_EQ(transition.kind, AMDF_CACHE_TRANSITION_KIND_GLOBAL);
     ASSERT_EQ(transition.executor, AMDF_CACHE_TRANSITION_EXECUTOR_QUEUE);
-    // CS_PARTIAL_FLUSH followed by a conservative full-range ACQUIRE_MEM GCR
-    // implements both system release and system acquire on this format.
-    constexpr uint32_t kGcr = (3 << 0) | (1 << 4) | (1 << 5) | (1 << 7) |
-                              (1 << 8) | (1 << 9) | (1 << 14) | (1 << 15);
+    // GFX11 CS_PARTIAL_FLUSH and full-range ACQUIRE_MEM follow the recipe in
+    // docs/reference/amd/gpu/pm4/memory-commands.md: GLI_ALL=1, metadata
+    // invalidation without GLM writeback, and parallel cache operations.
+    constexpr uint32_t kGcr = (1 << 0) | (1 << 5) | (1 << 7) | (1 << 8) |
+                              (1 << 9) | (1 << 14) | (1 << 15);
     words->insert(words->end(),
                   {Pm4Header(0x46, 2), 7 | (4 << 8), Pm4Header(0x58, 8), 0,
                    UINT32_MAX, 0xff, 0, 0, 0x0a, kGcr});
