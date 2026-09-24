@@ -108,6 +108,16 @@ loom_check_compile_tests(
     ],
 )
 
+loom_check_compile_tests(
+    name = "split_kv_attention_compile_test",
+    src = "//loom/src/loom/test/corpus/checked_benchmarks:split_kv_online_softmax_combine_f32.loom",
+    targets = [
+        "//loom/target/amdgpu:gfx942",
+        "//loom/target/amdgpu:gfx1151",
+        "//loom/target/amdgpu:gfx1250",
+    ],
+)
+
 iree_execution_test_suite(
     name = "loom_link_execution_test",
     data = [
@@ -403,6 +413,7 @@ loom_test(
         "//loom/src/loom/test/corpus/checked_benchmarks:paged_online_softmax_loop_f32.loom",
         "//loom/src/loom/test/corpus/checked_benchmarks:routed_row_combine_f32.loom",
         "//loom/src/loom/test/corpus/checked_benchmarks:sparse_token_attention_f32.loom",
+        "//loom/src/loom/test/corpus/checked_benchmarks:split_kv_online_softmax_combine_f32.loom",
     ],
     execution_profiles = [AMDGPU_ACCESS_PROFILE],
 )

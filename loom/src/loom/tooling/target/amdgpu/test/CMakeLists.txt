@@ -112,6 +112,19 @@ loom_check_compile_tests(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+loom_check_compile_tests(
+  NAME
+    "split_kv_attention_compile_test"
+  SRC
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/checked_benchmarks/split_kv_online_softmax_combine_f32.loom"
+  TARGETS
+    loom::target::amdgpu::gfx1151
+    loom::target::amdgpu::gfx1250
+    loom::target::amdgpu::gfx942
+)
+endif()
+
 if(LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 iree_execution_test_suite(
   NAME
@@ -1911,6 +1924,7 @@ loom_test_module(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/checked_benchmarks/paged_online_softmax_loop_f32.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/checked_benchmarks/routed_row_combine_f32.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/checked_benchmarks/sparse_token_attention_f32.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/checked_benchmarks/split_kv_online_softmax_combine_f32.loom"
 )
 endif()
 

@@ -1,69 +1,338 @@
-// Split-KV online-softmax block combine.
+// Stable split-KV attention-state composition.
 //
-// Decode attention implementations often split the KV sequence across multiple
-// independent tiles and then combine each tile's partial max, sum, and value
-// accumulator. This motif keeps that combine boundary explicit: the larger
-// block max becomes the combined max, lower-max blocks are rescaled by
-// exp(block_max - combined_max), and both sums and value accumulators are
-// accumulated in the combined frame.
-// Numeric policy is ML-fast attention math: exp is approximate and the rescaled
-// partial sums/accumulators are contractable when combined.
-kernel.def @split_kv_online_softmax_combine_f32() {
-  %unit = index.constant 1 : index
-  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
-} launch(%state0: buffer, %acc0: buffer, %state1: buffer, %acc1: buffer, %combined_state: buffer, %combined_acc: buffer) {
+// Each instance merges eight independently normalized partition states. A
+// state preserves its maximum, denominator, and unnormalized value numerator;
+// lower-maximum states must rescale both denominator and numerator into the
+// larger maximum's frame before addition. A zero denominator is the empty-state
+// identity. The merge branches on that identity before subtracting maxima, so
+// two empty states never evaluate -infinity - -infinity.
+//
+// Partial states and numerators have independent runtime pitches. Distinct
+// physical values make accidental dense indexing observable. The explicit order
+// table models reassociated split scheduling.
+// The sink projects normalized output without changing the raw attention state:
+// negative infinity is identity and positive infinity produces zero.
+//
+// Instance counts are in [1, 256], state pitches in [2, 16], and numerator
+// pitches in [128, 256]. Order entries are in [0, 7]. Sink bits encode a finite
+// f32 or either infinity. All buffers are disjoint and four-byte aligned.
+template.decl @split_kv_online_softmax_combine(%instance_count: index, %state_stride: index, %numerator_stride: index, %partial_state: buffer, %partial_numerator: buffer, %order: buffer, %sink_bits: buffer, %combined_state: buffer, %combined_numerator: buffer, %output: buffer, %sink_output: buffer, %depth: index, %factor: index)
+
+template.def<@split_kv_online_softmax_combine> @split_kv_online_softmax_combine_impl(%instance_count: index, %state_stride0: index, %numerator_stride0: index, %partial_state: buffer, %partial_numerator: buffer, %order: buffer, %sink_bits: buffer, %combined_state: buffer, %combined_numerator: buffer, %output: buffer, %sink_output: buffer, %depth: index, %factor: index) {
+  %instance_id = kernel.workgroup.id<x> : index
+  %instance, %instances = index.assume %instance_id, %instance_count [range(%instance_count, 1, 256), lt(%instance_id, %instance_count)] : index, index
+  %state_stride = index.assume %state_stride0 [range(%state_stride0, 2, 16)] : index
+  %numerator_stride = index.assume %numerator_stride0 [range(%numerator_stride0, 128, 256)] : index
+  %lane = kernel.subgroup.lane.id : index
+  %width = kernel.subgroup.size : index
+  %head_width = index.constant 128 : index
+  %fragment_width = index.div %head_width, %width : index
+  %channel = index.mul %lane, %fragment_width : index
+  %partition_count = index.constant 8 : index
+  %state_instance_stride = index.mul %state_stride, %partition_count : index
+  %numerator_instance_stride = index.mul %numerator_stride, %partition_count : index
+  %state_layout = encoding.layout.strided [%state_instance_stride, %state_stride, 1] : encoding<layout>
+  %numerator_layout = encoding.layout.strided [%numerator_instance_stride, %numerator_stride, 1] : encoding<layout>
   %base = index.constant 0 : offset
-  %max_state_index = index.constant 0 : index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %empty_denominator = scalar.constant 0.0 : f32
+  %empty_denominator_bits = scalar.constant 0 : i32
+  %magnitude_mask = scalar.constant 2147483647 : i32
+  %negative_infinity_bits = scalar.constant -8388608 : i32
+  %positive_infinity_bits = scalar.constant 2139095040 : i32
+  %negative_infinity = scalar.bitcast %negative_infinity_bits : i32 to f32
+  %empty_numerator = vector.splat %empty_denominator : vector<[%fragment_width]xf32>
 
-  %state0_noalias, %acc0_noalias, %state1_noalias, %acc1_noalias, %combined_state_noalias, %combined_acc_noalias = buffer.assume.noalias %state0, %acc0, %state1, %acc1, %combined_state, %combined_acc : buffer, buffer, buffer, buffer, buffer, buffer
-  %state0_view = buffer.view %state0_noalias[%base] : buffer -> view<2xf32>
-  %acc0_view = buffer.view %acc0_noalias[%base] : buffer -> view<4xf32>
-  %state1_view = buffer.view %state1_noalias[%base] : buffer -> view<2xf32>
-  %acc1_view = buffer.view %acc1_noalias[%base] : buffer -> view<4xf32>
-  %combined_state_view = buffer.view %combined_state_noalias[%base] : buffer -> view<2xf32>
-  %combined_acc_view = buffer.view %combined_acc_noalias[%base] : buffer -> view<4xf32>
+  %partial_state_aligned = buffer.assume.alignment %partial_state {minimum_alignment = 4} : buffer
+  %partial_numerator_aligned = buffer.assume.alignment %partial_numerator {minimum_alignment = 4} : buffer
+  %order_aligned = buffer.assume.alignment %order {minimum_alignment = 4} : buffer
+  %sink_bits_aligned = buffer.assume.alignment %sink_bits {minimum_alignment = 4} : buffer
+  %combined_state_aligned = buffer.assume.alignment %combined_state {minimum_alignment = 4} : buffer
+  %combined_numerator_aligned = buffer.assume.alignment %combined_numerator {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %sink_output_aligned = buffer.assume.alignment %sink_output {minimum_alignment = 4} : buffer
+  %partial_state_storage, %partial_numerator_storage, %order_storage, %sink_bits_storage, %combined_state_storage, %combined_numerator_storage, %output_storage, %sink_output_storage = buffer.assume.noalias %partial_state_aligned, %partial_numerator_aligned, %order_aligned, %sink_bits_aligned, %combined_state_aligned, %combined_numerator_aligned, %output_aligned, %sink_output_aligned : buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer
+  %partial_state_view = buffer.view %partial_state_storage[%base] : buffer -> view<[%instances]x8x2xf32, %state_layout>
+  %partial_numerator_view = buffer.view %partial_numerator_storage[%base] : buffer -> view<[%instances]x8x128xf32, %numerator_layout>
+  %order_view = buffer.view %order_storage[%base] : buffer -> view<[%instances]x8xi32>
+  %sink_bits_view = buffer.view %sink_bits_storage[%base] : buffer -> view<[%instances]xi32>
+  %combined_state_view = buffer.view %combined_state_storage[%base] : buffer -> view<[%instances]x3xf32>
+  %combined_numerator_view = buffer.view %combined_numerator_storage[%base] : buffer -> view<[%instances]x128xf32>
+  %output_view = buffer.view %output_storage[%base] : buffer -> view<[%instances]x128xf32>
+  %sink_output_view = buffer.view %sink_output_storage[%base] : buffer -> view<[%instances]x128xf32>
 
-  %max0 = view.load %state0_view[0] : view<2xf32> -> f32
-  %sum0 = view.load %state0_view[1] : view<2xf32> -> f32
-  %max1 = view.load %state1_view[0] : view<2xf32> -> f32
-  %sum1 = view.load %state1_view[1] : view<2xf32> -> f32
-  %acc0_values = vector.load %acc0_view[0] : view<4xf32> -> vector<4xf32>
-  %acc1_values = vector.load %acc1_view[0] : view<4xf32> -> vector<4xf32>
+  %maximum, %denominator, %numerator = scf.for %ordinal = [%begin to %partition_count step %step](%running_maximum = %negative_infinity : f32, %running_denominator = %empty_denominator : f32, %running_numerator = %empty_numerator : vector<[%fragment_width]xf32>) -> (f32, f32, vector<[%fragment_width]xf32>) pipeline(%depth) unroll(%factor) {
+    %partition_i32 = view.load %order_view[%instance, %ordinal] : view<[%instances]x8xi32> -> i32
+    %partition_index = index.cast %partition_i32 : i32 to index
+    %partition = index.assume %partition_index [range(%partition_index, 0, 7)] : index
+    %partition_maximum = view.load %partial_state_view[%instance, %partition, 0] : view<[%instances]x8x2xf32, %state_layout> -> f32
+    %partition_denominator = view.load %partial_state_view[%instance, %partition, 1] : view<[%instances]x8x2xf32, %state_layout> -> f32
+    %partition_numerator = vector.load %partial_numerator_view[%instance, %partition, %channel] : view<[%instances]x8x128xf32, %numerator_layout> -> vector<[%fragment_width]xf32>
+    %partition_denominator_bits = scalar.bitcast %partition_denominator : f32 to i32
+    %partition_denominator_magnitude = scalar.andi %partition_denominator_bits, %magnitude_mask : i32
+    %partition_present = scalar.cmpi ne, %partition_denominator_magnitude, %empty_denominator_bits : i32
+    %next_maximum, %next_denominator, %next_numerator = scf.if %partition_present -> (f32, f32, vector<[%fragment_width]xf32>) {
+      %running_denominator_bits = scalar.bitcast %running_denominator : f32 to i32
+      %running_denominator_magnitude = scalar.andi %running_denominator_bits, %magnitude_mask : i32
+      %running_present = scalar.cmpi ne, %running_denominator_magnitude, %empty_denominator_bits : i32
+      %merged_maximum, %merged_denominator, %merged_numerator = scf.if %running_present -> (f32, f32, vector<[%fragment_width]xf32>) {
+        %new_maximum = scalar.maxnumf<nsz> %running_maximum, %partition_maximum : f32
+        %running_delta = scalar.subf %running_maximum, %new_maximum : f32
+        %partition_delta = scalar.subf %partition_maximum, %new_maximum : f32
+        %running_scale = scalar.expf<afn> %running_delta : f32
+        %partition_scale = scalar.expf<afn> %partition_delta : f32
+        %scaled_running_denominator = scalar.mulf<contract> %running_denominator, %running_scale : f32
+        %scaled_partition_denominator = scalar.mulf<contract> %partition_denominator, %partition_scale : f32
+        %new_denominator = scalar.addf<contract> %scaled_running_denominator, %scaled_partition_denominator : f32
+        %running_scales = vector.splat %running_scale : vector<[%fragment_width]xf32>
+        %partition_scales = vector.splat %partition_scale : vector<[%fragment_width]xf32>
+        %scaled_running_numerator = vector.mulf<contract> %running_numerator, %running_scales : vector<[%fragment_width]xf32>
+        %scaled_partition_numerator = vector.mulf<contract> %partition_numerator, %partition_scales : vector<[%fragment_width]xf32>
+        %new_numerator = vector.addf<contract> %scaled_running_numerator, %scaled_partition_numerator : vector<[%fragment_width]xf32>
+        scf.yield %new_maximum, %new_denominator, %new_numerator : f32, f32, vector<[%fragment_width]xf32>
+      } else {
+        scf.yield %partition_maximum, %partition_denominator, %partition_numerator : f32, f32, vector<[%fragment_width]xf32>
+      }
+      scf.yield %merged_maximum, %merged_denominator, %merged_numerator : f32, f32, vector<[%fragment_width]xf32>
+    } else {
+      scf.yield %running_maximum, %running_denominator, %running_numerator : f32, f32, vector<[%fragment_width]xf32>
+    }
+    scf.yield %next_maximum, %next_denominator, %next_numerator : f32, f32, vector<[%fragment_width]xf32>
+  }
 
-  %combined_max = scalar.maxnumf<nsz> %max0, %max1 : f32
-  %delta0 = scalar.subf %max0, %combined_max : f32
-  %delta1 = scalar.subf %max1, %combined_max : f32
-  %scale0 = scalar.expf<afn> %delta0 : f32
-  %scale1 = scalar.expf<afn> %delta1 : f32
-  %scaled_sum0 = scalar.mulf<reassoc|nnan|nsz|contract> %sum0, %scale0 : f32
-  %scaled_sum1 = scalar.mulf<reassoc|nnan|nsz|contract> %sum1, %scale1 : f32
-  %combined_sum = scalar.addf<reassoc|nnan|nsz|contract> %scaled_sum0, %scaled_sum1 : f32
+  %denominator_bits = scalar.bitcast %denominator : f32 to i32
+  %denominator_magnitude = scalar.andi %denominator_bits, %magnitude_mask : i32
+  %nonempty = scalar.cmpi ne, %denominator_magnitude, %empty_denominator_bits : i32
+  %normalized, %log_sum_exp = scf.if %nonempty -> (vector<[%fragment_width]xf32>, f32) {
+    %denominators = vector.splat %denominator : vector<[%fragment_width]xf32>
+    %result = vector.divf %numerator, %denominators : vector<[%fragment_width]xf32>
+    %log_denominator = scalar.logf<afn> %denominator : f32
+    %lse = scalar.addf %maximum, %log_denominator : f32
+    scf.yield %result, %lse : vector<[%fragment_width]xf32>, f32
+  } else {
+    scf.yield %empty_numerator, %negative_infinity : vector<[%fragment_width]xf32>, f32
+  }
 
-  %scale0_vector = vector.splat %scale0 : vector<4xf32>
-  %scale1_vector = vector.splat %scale1 : vector<4xf32>
-  %scaled_acc0 = vector.mulf<reassoc|nnan|nsz|contract> %acc0_values, %scale0_vector : vector<4xf32>
-  %scaled_acc1 = vector.mulf<reassoc|nnan|nsz|contract> %acc1_values, %scale1_vector : vector<4xf32>
-  %combined_acc_values = vector.addf<reassoc|nnan|nsz|contract> %scaled_acc0, %scaled_acc1 : vector<4xf32>
+  %sink_bits_value = view.load %sink_bits_view[%instance] : view<[%instances]xi32> -> i32
+  %sink = scalar.bitcast %sink_bits_value : i32 to f32
+  %projected = scf.if %nonempty -> (vector<[%fragment_width]xf32>) {
+    %positive_infinite_sink = scalar.cmpi eq, %sink_bits_value, %positive_infinity_bits : i32
+    %nonempty_projection = scf.if %positive_infinite_sink -> (vector<[%fragment_width]xf32>) {
+      scf.yield %empty_numerator : vector<[%fragment_width]xf32>
+    } else {
+      %negative_infinite_sink = scalar.cmpi eq, %sink_bits_value, %negative_infinity_bits : i32
+      %finite_or_negative_infinite = scf.if %negative_infinite_sink -> (vector<[%fragment_width]xf32>) {
+        scf.yield %normalized : vector<[%fragment_width]xf32>
+      } else {
+        %frame = scalar.maxnumf<nsz> %log_sum_exp, %sink : f32
+        %attention_delta = scalar.subf %log_sum_exp, %frame : f32
+        %sink_delta = scalar.subf %sink, %frame : f32
+        %attention_weight = scalar.expf<afn> %attention_delta : f32
+        %sink_weight = scalar.expf<afn> %sink_delta : f32
+        %weight_sum = scalar.addf %attention_weight, %sink_weight : f32
+        %factor = scalar.divf %attention_weight, %weight_sum : f32
+        %factors = vector.splat %factor : vector<[%fragment_width]xf32>
+        %finite_projection = vector.mulf<contract> %normalized, %factors : vector<[%fragment_width]xf32>
+        scf.yield %finite_projection : vector<[%fragment_width]xf32>
+      }
+      scf.yield %finite_or_negative_infinite : vector<[%fragment_width]xf32>
+    }
+    scf.yield %nonempty_projection : vector<[%fragment_width]xf32>
+  } else {
+    scf.yield %empty_numerator : vector<[%fragment_width]xf32>
+  }
 
-  view.store %combined_max, %combined_state_view[%max_state_index] : f32, view<2xf32>
-  view.store %combined_sum, %combined_state_view[1] : f32, view<2xf32>
-  vector.store %combined_acc_values, %combined_acc_view[0] : vector<4xf32>, view<4xf32>
+  %leader = index.cmp eq, %lane, %begin : index
+  scf.if %leader {
+    view.store %maximum, %combined_state_view[%instance, 0] : f32, view<[%instances]x3xf32>
+    view.store %denominator, %combined_state_view[%instance, 1] : f32, view<[%instances]x3xf32>
+    view.store %log_sum_exp, %combined_state_view[%instance, 2] : f32, view<[%instances]x3xf32>
+  }
+  vector.store %numerator, %combined_numerator_view[%instance, %channel] : vector<[%fragment_width]xf32>, view<[%instances]x128xf32>
+  vector.store %normalized, %output_view[%instance, %channel] : vector<[%fragment_width]xf32>, view<[%instances]x128xf32>
+  vector.store %projected, %sink_output_view[%instance, %channel] : vector<[%fragment_width]xf32>, view<[%instances]x128xf32>
+  template.return
+}
+
+kernel.def @split_kv_online_softmax_combine_serial(%instance_count: index) {
+  %unit = index.constant 1 : index
+  %width = kernel.subgroup.size : index
+  kernel.launch.config workgroups(%instance_count, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%instance_count: index, %state_stride: index, %numerator_stride: index, %partial_state: buffer, %partial_numerator: buffer, %order: buffer, %sink_bits: buffer, %combined_state: buffer, %combined_numerator: buffer, %output: buffer, %sink_output: buffer) {
+  %depth = index.constant 1 : index
+  %factor = index.constant 2 : index
+  template.apply<@split_kv_online_softmax_combine>(%instance_count, %state_stride, %numerator_stride, %partial_state, %partial_numerator, %order, %sink_bits, %combined_state, %combined_numerator, %output, %sink_output, %depth, %factor) : (index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, index, index)
   kernel.return
 }
 
-check.case public @split_kv_online_softmax_combine_f32_case {
-  %state0 = check.generate.iota offset(1.0) step(1.0) : tensor<2xf32>
-  %acc0 = check.generate.iota offset(10.0) step(1.0) : tensor<4xf32>
-  %state1 = check.generate.iota offset(0.30685281944005471) step(3.6931471805599454) : tensor<2xf32>
-  %acc1 = check.generate.iota offset(20.0) step(2.0) : tensor<4xf32>
-  %combined_state = check.generate.fill value(-1.0) : tensor<2xf32>
-  %combined_acc = check.generate.fill value(-1.0) : tensor<4xf32>
-  %expected_state = check.generate.iota offset(1.0) step(3.0) : tensor<2xf32>
-  %expected_acc = check.generate.iota offset(20.0) step(2.0) : tensor<4xf32>
-  kernel.launch @split_kv_online_softmax_combine_f32(%state0, %acc0, %state1, %acc1, %combined_state, %combined_acc) : (tensor<2xf32>, tensor<4xf32>, tensor<2xf32>, tensor<4xf32>, tensor<2xf32>, tensor<4xf32>)
-  check.expect.close actual(%combined_state) expected(%expected_state) atol(0.0001) rtol(0.0001) nan(same) : tensor<2xf32>
-  check.expect.close actual(%combined_acc) expected(%expected_acc) atol(0.0001) rtol(0.0001) nan(same) : tensor<4xf32>
+kernel.def @split_kv_online_softmax_combine_pipelined(%instance_count: index) {
+  %unit = index.constant 1 : index
+  %width = kernel.subgroup.size : index
+  kernel.launch.config workgroups(%instance_count, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%instance_count: index, %state_stride: index, %numerator_stride: index, %partial_state: buffer, %partial_numerator: buffer, %order: buffer, %sink_bits: buffer, %combined_state: buffer, %combined_numerator: buffer, %output: buffer, %sink_output: buffer) {
+  %depth = index.constant 3 : index
+  %factor = index.constant 2 : index
+  template.apply<@split_kv_online_softmax_combine>(%instance_count, %state_stride, %numerator_stride, %partial_state, %partial_numerator, %order, %sink_bits, %combined_state, %combined_numerator, %output, %sink_output, %depth, %factor) : (index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, index, index)
+  kernel.return
+}
+
+// Randomized physical storage exercises both runtime pitches. Forward and
+// reverse orders qualify the composable state, while the matched forward policy
+// isolates pipelining from the shared merge arithmetic.
+check.case public @split_kv_online_softmax_combine_varied {
+  %instances = check.param.choice values([1, 4]) name("instances") : index
+  %state_stride = check.param.choice values([3, 5]) name("state_stride") : index
+  %numerator_stride = check.param.choice values([129, 136]) name("numerator_stride") : index
+  %seed = check.param.seed base(8700) count(2) : i64
+  %partial_state = check.generate.random.uniform seed(%seed) range(0.25 to 4.0) : tensor<[%instances]x8x[%state_stride]xf32>
+  %partial_numerator = check.generate.random.uniform seed(%seed) range(-2.0 to 2.0) : tensor<[%instances]x8x[%numerator_stride]xf32>
+  %sink_bits = check.generate.fill value(1056964608) : tensor<[%instances]xi32>
+  %forward_order = check.generate.iota offset(0) step(1) period(8) : tensor<[%instances]x8xi32>
+  %reverse_order = check.generate.iota offset(7) step(-1) period(8) : tensor<[%instances]x8xi32>
+  %serial_state = check.generate.fill value(nan) : tensor<[%instances]x3xf32>
+  %serial_numerator = check.generate.fill value(nan) : tensor<[%instances]x128xf32>
+  %serial_output = check.generate.fill value(nan) : tensor<[%instances]x128xf32>
+  %serial_sink_output = check.generate.fill value(nan) : tensor<[%instances]x128xf32>
+  %reverse_state = check.generate.fill value(nan) : tensor<[%instances]x3xf32>
+  %reverse_numerator = check.generate.fill value(nan) : tensor<[%instances]x128xf32>
+  %reverse_output = check.generate.fill value(nan) : tensor<[%instances]x128xf32>
+  %reverse_sink_output = check.generate.fill value(nan) : tensor<[%instances]x128xf32>
+  %pipeline_state = check.generate.fill value(nan) : tensor<[%instances]x3xf32>
+  %pipeline_numerator = check.generate.fill value(nan) : tensor<[%instances]x128xf32>
+  %pipeline_output = check.generate.fill value(nan) : tensor<[%instances]x128xf32>
+  %pipeline_sink_output = check.generate.fill value(nan) : tensor<[%instances]x128xf32>
+  kernel.launch @split_kv_online_softmax_combine_serial[%instances](%instances, %state_stride, %numerator_stride, %partial_state, %partial_numerator, %forward_order, %sink_bits, %serial_state, %serial_numerator, %serial_output, %serial_sink_output) : [index](index, index, index, tensor<[%instances]x8x[%state_stride]xf32>, tensor<[%instances]x8x[%numerator_stride]xf32>, tensor<[%instances]x8xi32>, tensor<[%instances]xi32>, tensor<[%instances]x3xf32>, tensor<[%instances]x128xf32>, tensor<[%instances]x128xf32>, tensor<[%instances]x128xf32>)
+  kernel.launch @split_kv_online_softmax_combine_serial[%instances](%instances, %state_stride, %numerator_stride, %partial_state, %partial_numerator, %reverse_order, %sink_bits, %reverse_state, %reverse_numerator, %reverse_output, %reverse_sink_output) : [index](index, index, index, tensor<[%instances]x8x[%state_stride]xf32>, tensor<[%instances]x8x[%numerator_stride]xf32>, tensor<[%instances]x8xi32>, tensor<[%instances]xi32>, tensor<[%instances]x3xf32>, tensor<[%instances]x128xf32>, tensor<[%instances]x128xf32>, tensor<[%instances]x128xf32>)
+  kernel.launch @split_kv_online_softmax_combine_pipelined[%instances](%instances, %state_stride, %numerator_stride, %partial_state, %partial_numerator, %forward_order, %sink_bits, %pipeline_state, %pipeline_numerator, %pipeline_output, %pipeline_sink_output) : [index](index, index, index, tensor<[%instances]x8x[%state_stride]xf32>, tensor<[%instances]x8x[%numerator_stride]xf32>, tensor<[%instances]x8xi32>, tensor<[%instances]xi32>, tensor<[%instances]x3xf32>, tensor<[%instances]x128xf32>, tensor<[%instances]x128xf32>, tensor<[%instances]x128xf32>)
+  check.expect.close actual(%reverse_state) expected(%serial_state) atol(0.01) rtol(0.002) nan(same) : tensor<[%instances]x3xf32>
+  check.expect.close actual(%reverse_numerator) expected(%serial_numerator) atol(0.050000000000000003) rtol(0.0050000000000000001) nan(same) : tensor<[%instances]x128xf32>
+  check.expect.close actual(%reverse_output) expected(%serial_output) atol(0.01) rtol(0.002) nan(same) : tensor<[%instances]x128xf32>
+  check.expect.close actual(%reverse_sink_output) expected(%serial_sink_output) atol(0.01) rtol(0.002) nan(same) : tensor<[%instances]x128xf32>
+  check.expect.bitwise actual(%pipeline_state) expected(%serial_state) : tensor<[%instances]x3xf32>
+  check.expect.bitwise actual(%pipeline_numerator) expected(%serial_numerator) : tensor<[%instances]x128xf32>
+  check.expect.bitwise actual(%pipeline_output) expected(%serial_output) : tensor<[%instances]x128xf32>
+  check.expect.bitwise actual(%pipeline_sink_output) expected(%serial_sink_output) : tensor<[%instances]x128xf32>
   check.return
 }
 
-check.benchmark<@split_kv_online_softmax_combine_f32_case> @split_kv_online_softmax_combine_f32_smoke
+// Masked NaN numerators prove the empty identity does not consume inactive
+// payloads or perform undefined infinity arithmetic.
+check.case public @split_kv_online_softmax_combine_all_masked {
+  %instances = check.literal value(2) : index
+  %state_stride = check.literal value(5) : index
+  %numerator_stride = check.literal value(136) : index
+  %partial_state = check.generate.fill value(0.0) : tensor<2x8x5xf32>
+  %partial_numerator = check.generate.fill value(nan) : tensor<2x8x136xf32>
+  %sink_bits = check.generate.fill value(1056964608) : tensor<2xi32>
+  %reverse_order = check.generate.iota offset(7) step(-1) period(8) : tensor<2x8xi32>
+  %state = check.generate.fill value(1.0) : tensor<2x3xf32>
+  %numerator = check.generate.fill value(1.0) : tensor<2x128xf32>
+  %output = check.generate.fill value(1.0) : tensor<2x128xf32>
+  %sink_output = check.generate.fill value(1.0) : tensor<2x128xf32>
+  kernel.launch @split_kv_online_softmax_combine_pipelined[%instances](%instances, %state_stride, %numerator_stride, %partial_state, %partial_numerator, %reverse_order, %sink_bits, %state, %numerator, %output, %sink_output) : [index](index, index, index, tensor<2x8x5xf32>, tensor<2x8x136xf32>, tensor<2x8xi32>, tensor<2xi32>, tensor<2x3xf32>, tensor<2x128xf32>, tensor<2x128xf32>, tensor<2x128xf32>)
+  %maximum0 = check.tensor.view %state offset(0) : tensor<2x3xf32> -> tensor<1xf32>
+  %denominator0 = check.tensor.view %state offset(4) : tensor<2x3xf32> -> tensor<1xf32>
+  %log_sum_exp0 = check.tensor.view %state offset(8) : tensor<2x3xf32> -> tensor<1xf32>
+  %maximum1 = check.tensor.view %state offset(12) : tensor<2x3xf32> -> tensor<1xf32>
+  %denominator1 = check.tensor.view %state offset(16) : tensor<2x3xf32> -> tensor<1xf32>
+  %log_sum_exp1 = check.tensor.view %state offset(20) : tensor<2x3xf32> -> tensor<1xf32>
+  %negative_infinity_bits = check.generate.fill value(-8388608) : tensor<1xi32>
+  %negative_infinity = check.tensor.view %negative_infinity_bits offset(0) : tensor<1xi32> -> tensor<1xf32>
+  %zeros = check.generate.fill value(0.0) : tensor<2x128xf32>
+  %zero = check.tensor.view %zeros offset(0) : tensor<2x128xf32> -> tensor<1xf32>
+  check.expect.bitwise actual(%maximum0) expected(%negative_infinity) : tensor<1xf32>
+  check.expect.bitwise actual(%denominator0) expected(%zero) : tensor<1xf32>
+  check.expect.bitwise actual(%log_sum_exp0) expected(%negative_infinity) : tensor<1xf32>
+  check.expect.bitwise actual(%maximum1) expected(%negative_infinity) : tensor<1xf32>
+  check.expect.bitwise actual(%denominator1) expected(%zero) : tensor<1xf32>
+  check.expect.bitwise actual(%log_sum_exp1) expected(%negative_infinity) : tensor<1xf32>
+  check.expect.bitwise actual(%numerator) expected(%zeros) : tensor<2x128xf32>
+  check.expect.bitwise actual(%output) expected(%zeros) : tensor<2x128xf32>
+  check.expect.bitwise actual(%sink_output) expected(%zeros) : tensor<2x128xf32>
+  check.return
+}
+
+// Positive infinity suppresses the first output; negative infinity leaves the
+// second normalized output unchanged. Neither sink changes the reported LSE.
+check.case public @split_kv_online_softmax_combine_infinite_sinks {
+  %instances = check.literal value(2) : index
+  %state_stride = check.literal value(3) : index
+  %numerator_stride = check.literal value(129) : index
+  %partial_state = check.generate.fill value(1.0) : tensor<2x8x3xf32>
+  %partial_numerator = check.generate.fill value(1.0) : tensor<2x8x129xf32>
+  %sink_bits = check.generate.iota offset(2139095040) step(-2147483648) : tensor<2xi32>
+  %forward_order = check.generate.iota offset(0) step(1) period(8) : tensor<2x8xi32>
+  %state = check.generate.fill value(nan) : tensor<2x3xf32>
+  %numerator = check.generate.fill value(nan) : tensor<2x128xf32>
+  %output = check.generate.fill value(nan) : tensor<2x128xf32>
+  %sink_output = check.generate.fill value(nan) : tensor<2x128xf32>
+  %expected_numerator = check.generate.fill value(8.0) : tensor<2x128xf32>
+  %expected_output = check.generate.fill value(1.0) : tensor<2x128xf32>
+  kernel.launch @split_kv_online_softmax_combine_pipelined[%instances](%instances, %state_stride, %numerator_stride, %partial_state, %partial_numerator, %forward_order, %sink_bits, %state, %numerator, %output, %sink_output) : [index](index, index, index, tensor<2x8x3xf32>, tensor<2x8x129xf32>, tensor<2x8xi32>, tensor<2xi32>, tensor<2x3xf32>, tensor<2x128xf32>, tensor<2x128xf32>, tensor<2x128xf32>)
+  check.expect.close actual(%numerator) expected(%expected_numerator) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<2x128xf32>
+  check.expect.close actual(%output) expected(%expected_output) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<2x128xf32>
+  %positive_infinity_output = check.tensor.view %sink_output offset(0) : tensor<2x128xf32> -> tensor<128xf32>
+  %negative_infinity_output = check.tensor.view %sink_output offset(512) : tensor<2x128xf32> -> tensor<128xf32>
+  %second_normalized_output = check.tensor.view %output offset(512) : tensor<2x128xf32> -> tensor<128xf32>
+  %expected_suppressed_output = check.generate.fill value(0.0) : tensor<128xf32>
+  check.expect.equal actual(%positive_infinity_output) expected(%expected_suppressed_output) : tensor<128xf32>
+  check.expect.equal actual(%negative_infinity_output) expected(%second_normalized_output) : tensor<128xf32>
+  check.return
+}
+
+// Timing cases isolate one launch. Equal maxima and unit denominators compose to
+// denominator eight, while unit numerators normalize back to one.
+check.case public @split_kv_online_softmax_combine_serial_i {
+  %instances = check.param.choice values([1, 16, 256]) name("instances") : index
+  %state_stride = check.literal value(5) : index
+  %numerator_stride = check.literal value(136) : index
+  %partial_state = check.generate.fill value(1.0) : tensor<[%instances]x8x5xf32>
+  %partial_numerator = check.generate.fill value(1.0) : tensor<[%instances]x8x136xf32>
+  %order = check.generate.iota offset(0) step(1) period(8) : tensor<[%instances]x8xi32>
+  %sink_bits = check.generate.fill value(-8388608) : tensor<[%instances]xi32>
+  %state = check.generate.fill value(nan) : tensor<[%instances]x3xf32>
+  %numerator = check.generate.fill value(nan) : tensor<[%instances]x128xf32>
+  %output = check.generate.fill value(nan) : tensor<[%instances]x128xf32>
+  %sink_output = check.generate.fill value(nan) : tensor<[%instances]x128xf32>
+  %expected_numerator = check.generate.fill value(8.0) : tensor<[%instances]x128xf32>
+  %expected_output = check.generate.fill value(1.0) : tensor<[%instances]x128xf32>
+  kernel.launch @split_kv_online_softmax_combine_serial[%instances](%instances, %state_stride, %numerator_stride, %partial_state, %partial_numerator, %order, %sink_bits, %state, %numerator, %output, %sink_output) : [index](index, index, index, tensor<[%instances]x8x5xf32>, tensor<[%instances]x8x136xf32>, tensor<[%instances]x8xi32>, tensor<[%instances]xi32>, tensor<[%instances]x3xf32>, tensor<[%instances]x128xf32>, tensor<[%instances]x128xf32>, tensor<[%instances]x128xf32>)
+  check.expect.close actual(%numerator) expected(%expected_numerator) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<[%instances]x128xf32>
+  check.expect.close actual(%output) expected(%expected_output) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<[%instances]x128xf32>
+  check.expect.close actual(%sink_output) expected(%expected_output) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<[%instances]x128xf32>
+  check.return
+}
+
+check.benchmark<@split_kv_online_softmax_combine_serial_i> @split_kv_online_softmax_combine_serial_i1 {instances = 1}
+
+check.benchmark<@split_kv_online_softmax_combine_serial_i> @split_kv_online_softmax_combine_serial_i16 {instances = 16}
+
+check.benchmark<@split_kv_online_softmax_combine_serial_i> @split_kv_online_softmax_combine_serial_i256 {instances = 256}
+
+check.case public @split_kv_online_softmax_combine_pipelined_i {
+  %instances = check.param.choice values([1, 16, 256]) name("instances") : index
+  %state_stride = check.literal value(5) : index
+  %numerator_stride = check.literal value(136) : index
+  %partial_state = check.generate.fill value(1.0) : tensor<[%instances]x8x5xf32>
+  %partial_numerator = check.generate.fill value(1.0) : tensor<[%instances]x8x136xf32>
+  %order = check.generate.iota offset(0) step(1) period(8) : tensor<[%instances]x8xi32>
+  %sink_bits = check.generate.fill value(-8388608) : tensor<[%instances]xi32>
+  %state = check.generate.fill value(nan) : tensor<[%instances]x3xf32>
+  %numerator = check.generate.fill value(nan) : tensor<[%instances]x128xf32>
+  %output = check.generate.fill value(nan) : tensor<[%instances]x128xf32>
+  %sink_output = check.generate.fill value(nan) : tensor<[%instances]x128xf32>
+  %expected_numerator = check.generate.fill value(8.0) : tensor<[%instances]x128xf32>
+  %expected_output = check.generate.fill value(1.0) : tensor<[%instances]x128xf32>
+  kernel.launch @split_kv_online_softmax_combine_pipelined[%instances](%instances, %state_stride, %numerator_stride, %partial_state, %partial_numerator, %order, %sink_bits, %state, %numerator, %output, %sink_output) : [index](index, index, index, tensor<[%instances]x8x5xf32>, tensor<[%instances]x8x136xf32>, tensor<[%instances]x8xi32>, tensor<[%instances]xi32>, tensor<[%instances]x3xf32>, tensor<[%instances]x128xf32>, tensor<[%instances]x128xf32>, tensor<[%instances]x128xf32>)
+  check.expect.close actual(%numerator) expected(%expected_numerator) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<[%instances]x128xf32>
+  check.expect.close actual(%output) expected(%expected_output) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<[%instances]x128xf32>
+  check.expect.close actual(%sink_output) expected(%expected_output) atol(2.0000000000000002e-05) rtol(2.0000000000000002e-05) nan(same) : tensor<[%instances]x128xf32>
+  check.return
+}
+
+check.benchmark<@split_kv_online_softmax_combine_pipelined_i> @split_kv_online_softmax_combine_pipelined_i1 {instances = 1}
+
+check.benchmark<@split_kv_online_softmax_combine_pipelined_i> @split_kv_online_softmax_combine_pipelined_i16 {instances = 16}
+
+check.benchmark<@split_kv_online_softmax_combine_pipelined_i> @split_kv_online_softmax_combine_pipelined_i256 {instances = 256}
