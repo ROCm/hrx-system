@@ -12,11 +12,27 @@
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/lower/lower.h"
 #include "loom/codegen/low/source_memory_plan.h"
+#include "loom/target/arch/amdgpu/analysis/lds_bank_service.h"
 #include "loom/target/arch/amdgpu/lower/fragment_memory/address.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Calculates address evidence for a selected LDS packet from canonical source
+// terms. |workgroup_size| is a fixed, complete-wave geometry established by the
+// active-subgroup proof. The selected packet has a proven 32-bit DS address.
+//
+// Workitem coordinates follow native X-fastest order. Other contributions must
+// be proven subgroup-uniform. Exact evidence requires the same phase profile
+// for every wave and every compatible common subword residue. This consumes
+// retained plans and facts only; it neither queries nor traverses source IR.
+// Active-lane evidence is supplied separately by the caller.
+void loom_amdgpu_memory_calculate_source_bank_service(
+    const loom_amdgpu_lds_bank_service_model_t* model,
+    const loom_low_source_memory_access_plan_t* source,
+    const loom_target_workgroup_size_t* workgroup_size,
+    loom_low_lower_memory_bank_service_report_t* out_report);
 
 // Populates bank-service evidence for a selected source-memory packet.
 //

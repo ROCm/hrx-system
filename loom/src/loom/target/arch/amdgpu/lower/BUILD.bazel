@@ -329,6 +329,22 @@ loom_cc_library(
 )
 
 loom_cc_test(
+    name = "memory_bank_service_test",
+    srcs = ["memory_bank_service_test.cc"],
+    deps = [
+        ":lower",
+        "//loom/src/loom/codegen/low:source_memory_plan",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
+        "//loom/src/loom/target/arch/amdgpu/analysis:lds_bank_service",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "atomic_ordering_test",
     srcs = ["atomic_ordering_test.cc"],
     deps = [

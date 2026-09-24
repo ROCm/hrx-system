@@ -309,6 +309,27 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_test(
   NAME
+    memory_bank_service_test
+  SRCS
+    "memory_bank_service_test.cc"
+  DEPS
+    ::lower
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::source_memory_plan
+    loom::ir
+    loom::target::arch::amdgpu::analysis::lds_bank_service
+    loom::target::arch::amdgpu::refs::target_refs
+    loom::target::arch::amdgpu::target_info
+    loom::target::types
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_test(
+  NAME
     atomic_ordering_test
   SRCS
     "atomic_ordering_test.cc"

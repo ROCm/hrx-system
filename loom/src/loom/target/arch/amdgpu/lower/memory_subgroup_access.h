@@ -17,13 +17,6 @@
 extern "C" {
 #endif
 
-typedef enum loom_amdgpu_memory_lane_source_e {
-  // Lane identity is the X workitem coordinate and must not wrap in a wave.
-  LOOM_AMDGPU_MEMORY_LANE_SOURCE_WORKITEM_X = 0,
-  // Lane identity is the target subgroup lane ID.
-  LOOM_AMDGPU_MEMORY_LANE_SOURCE_SUBGROUP_LANE = 1,
-} loom_amdgpu_memory_lane_source_t;
-
 // Proof that one source operation executes with a complete active subgroup.
 typedef struct loom_amdgpu_memory_full_subgroup_proof_t {
   // Whether every lane in the target subgroup is proven active.
@@ -32,6 +25,9 @@ typedef struct loom_amdgpu_memory_full_subgroup_proof_t {
   iree_string_view_t proof;
   // Stable reason key when |is_full_subgroup| is false.
   iree_string_view_t unknown_reason;
+  // Fixed workgroup geometry covered by a successful proof. Native subgroups
+  // partition the X-fastest linear workitem sequence.
+  loom_target_workgroup_size_t workgroup_size;
 } loom_amdgpu_memory_full_subgroup_proof_t;
 
 // Calculates exact byte-interval geometry for the selected lanes of a compiled
@@ -49,8 +45,7 @@ void loom_amdgpu_memory_calculate_subgroup_geometry(
 // returned as ordinary structured evidence in |out_proof|.
 iree_status_t loom_amdgpu_memory_prove_full_subgroup(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    uint8_t subgroup_size, loom_amdgpu_memory_lane_source_t lane_source,
-    loom_amdgpu_memory_full_subgroup_proof_t* out_proof);
+    uint8_t subgroup_size, loom_amdgpu_memory_full_subgroup_proof_t* out_proof);
 
 // Populates exact or explicitly unknown fragment subgroup address geometry.
 //

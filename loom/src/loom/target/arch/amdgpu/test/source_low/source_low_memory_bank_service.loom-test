@@ -90,9 +90,51 @@ kernel.def target(@unmodeled_gfx1151) @coverage_gfx1151() {
   kernel.return
 }
 
+// A subgroup-common page offset preserves the per-wave bank profile.
+kernel.def target(@target_gfx1100_32) @staged_rows() {
+  %unit = index.constant 1 : index
+  %columns = index.constant 32 : index
+  %rows = index.constant 2 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%columns, %rows, %unit) : index
+} launch() {
+  %column = kernel.workitem.id<x> : index
+  %row = kernel.workitem.id<y> : index
+  %wave = kernel.subgroup.id : index
+  %page_bytes = index.constant 512 : offset
+  %base = index.scale %wave, %page_bytes : index, offset -> offset
+  %bytes = index.constant 2048 : offset
+  %layout = encoding.layout.strided [4, 128, 1] : encoding<layout>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<32x2x4xi32, %layout>
+  %value = vector.constant 1 : vector<4xi32>
+  vector.store %value, %view[%column, %row, 0] : vector<4xi32>, view<32x2x4xi32, %layout>
+  kernel.return
+}
+
+// Row coordinates vary inside each service phase in this workgroup shape.
+kernel.def target(@target_gfx1100_32) @rows_inside_wave() {
+  %unit = index.constant 1 : index
+  %columns = index.constant 4 : index
+  %rows = index.constant 8 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%columns, %rows, %unit) : index
+} launch() {
+  %column = kernel.workitem.id<x> : index
+  %row = kernel.workitem.id<y> : index
+  %base = index.constant 0 : offset
+  %bytes = index.constant 4096 : offset
+  %layout = encoding.layout.strided [4, 128, 1] : encoding<layout>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %view = buffer.view %scratch[%base] : buffer -> view<4x8x4xi32, %layout>
+  %value = vector.constant 1 : vector<4xi32>
+  vector.store %value, %view[%column, %row, 0] : vector<4xi32>, view<4x8x4xi32, %layout>
+  kernel.return
+}
+
 // ----
-bank-service function=strided_gfx1100_wave32 source-op=vector.store root=scratch packet=amdgpu.ds_write_b128 model=amdgpu.lds.gfx1100.wave32.b128.write.count-each proof=exact lane-address=affine-workitem-x-byte-stride active-lanes=subgroup-uniform-control-full-wave base-residue=all-bank-word-residues-common-translation classification=conflicted required-rounds=8 uncontended-rounds=4 extra-rounds=4 maximum-multiplicity=2
-bank-service function=strided_gfx1151_wave64 source-op=vector.store root=scratch packet=amdgpu.ds_write_b128 model=amdgpu.lds.gfx1151.wave64.b128.write.count-each proof=exact lane-address=affine-workitem-x-byte-stride active-lanes=subgroup-uniform-control-full-wave base-residue=all-bank-word-residues-common-translation classification=conflicted required-rounds=16 uncontended-rounds=8 extra-rounds=8 maximum-multiplicity=2
-bank-service function=strided_gfx942_wave64 source-op=vector.store root=scratch packet=amdgpu.ds_write_b128 model=amdgpu.lds.gfx942.wave64.b128.write.count-each proof=exact lane-address=affine-workitem-x-byte-stride active-lanes=subgroup-uniform-control-full-wave base-residue=all-bank-word-residues-common-translation classification=conflicted required-rounds=16 uncontended-rounds=8 extra-rounds=8 maximum-multiplicity=2
+bank-service function=strided_gfx1100_wave32 source-op=vector.store root=scratch packet=amdgpu.ds_write_b128 model=amdgpu.lds.gfx1100.wave32.b128.write.count-each proof=exact lane-address=canonical-workitem-coordinates-all-waves active-lanes=subgroup-uniform-control-full-wave base-residue=subgroup-uniform-common-translation-all-bank-word-residues classification=conflicted required-rounds=8 uncontended-rounds=4 extra-rounds=4 maximum-multiplicity=2
+bank-service function=strided_gfx1151_wave64 source-op=vector.store root=scratch packet=amdgpu.ds_write_b128 model=amdgpu.lds.gfx1151.wave64.b128.write.count-each proof=exact lane-address=canonical-workitem-coordinates-all-waves active-lanes=subgroup-uniform-control-full-wave base-residue=subgroup-uniform-common-translation-all-bank-word-residues classification=conflicted required-rounds=16 uncontended-rounds=8 extra-rounds=8 maximum-multiplicity=2
+bank-service function=strided_gfx942_wave64 source-op=vector.store root=scratch packet=amdgpu.ds_write_b128 model=amdgpu.lds.gfx942.wave64.b128.write.count-each proof=exact lane-address=canonical-workitem-coordinates-all-waves active-lanes=subgroup-uniform-control-full-wave base-residue=subgroup-uniform-common-translation-all-bank-word-residues classification=conflicted required-rounds=16 uncontended-rounds=8 extra-rounds=8 maximum-multiplicity=2
 bank-service function=coverage_gfx1200 source-op=vector.store root=scratch packet=amdgpu.ds_write_b128 proof=unmodeled wave-size=32 unknown-reason=target-model-unavailable
 bank-service function=coverage_gfx1151 source-op=vector.store root=scratch packet=amdgpu.ds_write_b8 proof=unmodeled wave-size=32 unknown-reason=packet-wave-model-unavailable
+bank-service function=staged_rows source-op=vector.store root=scratch packet=amdgpu.ds_write_b128 model=amdgpu.lds.gfx1100.wave32.b128.write.count-each proof=exact lane-address=canonical-workitem-coordinates-all-waves active-lanes=subgroup-uniform-control-full-wave base-residue=subgroup-uniform-common-translation-all-bank-word-residues classification=conflict-free required-rounds=4 uncontended-rounds=4 extra-rounds=0 maximum-multiplicity=1
+bank-service function=rows_inside_wave source-op=vector.store root=scratch packet=amdgpu.ds_write_b128 model=amdgpu.lds.gfx1100.wave32.b128.write.count-each proof=exact lane-address=canonical-workitem-coordinates-all-waves active-lanes=subgroup-uniform-control-full-wave base-residue=subgroup-uniform-common-translation-all-bank-word-residues classification=conflicted required-rounds=8 uncontended-rounds=4 extra-rounds=4 maximum-multiplicity=2

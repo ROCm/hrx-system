@@ -208,6 +208,16 @@ describes identical-address broadcast. Wide-packet analysis requires packet
 alignment and full-subgroup participation. Fragment accesses use their compiled
 lane/register layout, including repeated lane addresses.
 
+Source accesses can combine multiple workitem coordinates and subgroup-uniform
+offsets. The analysis uses the native X-fastest workitem order and checks every
+wave in the workgroup. For example, on gfx1100/gfx1151, a b128 store at
+`16*x + 512*y` is conflict-free for a `32×2` wave32 workgroup. Changing the shape
+to `4×8` puts two rows in each write-service phase and doubles the required
+rounds. A `12×8`
+shape has different profiles across waves and reports
+`address-wave-profiles-differ`; no single wave's profile represents it exactly.
+Unproved varying terms and runtime coordinate strides remain unknown.
+
 Narrow packets use contiguous 32-lane service groups on the qualified devices.
 Halfword reads to either half of a bank word share a request; writes to disjoint
 halves also combine. Distinct words mapping to the same bank still conflict.

@@ -47,7 +47,7 @@ static iree_status_t loom_amdgpu_memory_control_uniformity(
 
 iree_status_t loom_amdgpu_memory_prove_full_subgroup(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    uint8_t subgroup_size, loom_amdgpu_memory_lane_source_t lane_source,
+    uint8_t subgroup_size,
     loom_amdgpu_memory_full_subgroup_proof_t* out_proof) {
   IREE_ASSERT_GT(subgroup_size, 0u);
   *out_proof = (loom_amdgpu_memory_full_subgroup_proof_t){0};
@@ -57,30 +57,18 @@ iree_status_t loom_amdgpu_memory_prove_full_subgroup(
       loom_low_lower_context_source_function(context);
   const loom_value_fact_table_t* fact_table =
       loom_low_lower_context_fact_table(context);
-  if (lane_source == LOOM_AMDGPU_MEMORY_LANE_SOURCE_WORKITEM_X) {
-    loom_target_workgroup_size_t workgroup_size = {0};
-    if (!loom_amdgpu_required_workgroup_size_from_facts(
-            module, function, bundle, fact_table, &workgroup_size) ||
-        workgroup_size.x == 0) {
-      out_proof->unknown_reason = IREE_SV("active-lane-workgroup-size-unknown");
-      return iree_ok_status();
-    }
-    if (workgroup_size.x % subgroup_size != 0) {
-      out_proof->unknown_reason = IREE_SV("active-lane-workitem-x-wrap");
-      return iree_ok_status();
-    }
-  } else {
-    uint32_t flat_workgroup_size = 0;
-    if (!loom_amdgpu_required_flat_workgroup_size_from_facts(
-            module, function, bundle, fact_table, &flat_workgroup_size) ||
-        flat_workgroup_size == 0) {
-      out_proof->unknown_reason = IREE_SV("active-lane-workgroup-size-unknown");
-      return iree_ok_status();
-    }
-    if (flat_workgroup_size % subgroup_size != 0) {
-      out_proof->unknown_reason = IREE_SV("active-lane-partial-subgroup");
-      return iree_ok_status();
-    }
+  loom_target_workgroup_size_t workgroup_size = {0};
+  if (!loom_amdgpu_required_workgroup_size_from_facts(
+          module, function, bundle, fact_table, &workgroup_size) ||
+      workgroup_size.x == 0 || workgroup_size.y == 0 || workgroup_size.z == 0) {
+    out_proof->unknown_reason = IREE_SV("active-lane-workgroup-size-unknown");
+    return iree_ok_status();
+  }
+  const uint64_t flat_workgroup_size =
+      (uint64_t)workgroup_size.x * workgroup_size.y * workgroup_size.z;
+  if (flat_workgroup_size % subgroup_size != 0) {
+    out_proof->unknown_reason = IREE_SV("active-lane-partial-subgroup");
+    return iree_ok_status();
   }
 
   loom_control_uniformity_info_t* control_uniformity = NULL;
@@ -95,6 +83,7 @@ iree_status_t loom_amdgpu_memory_prove_full_subgroup(
   }
   out_proof->is_full_subgroup = true;
   out_proof->proof = IREE_SV("subgroup-uniform-control-full-wave");
+  out_proof->workgroup_size = workgroup_size;
   return iree_ok_status();
 }
 
@@ -247,8 +236,7 @@ iree_status_t loom_amdgpu_fragment_memory_report_subgroup_access(
 
   loom_amdgpu_memory_full_subgroup_proof_t active_lane_proof = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_memory_prove_full_subgroup(
-      context, source_op, layout->wave_size,
-      LOOM_AMDGPU_MEMORY_LANE_SOURCE_SUBGROUP_LANE, &active_lane_proof));
+      context, source_op, layout->wave_size, &active_lane_proof));
   if (!active_lane_proof.is_full_subgroup) {
     out_report->unknown_reason = active_lane_proof.unknown_reason;
     return iree_ok_status();

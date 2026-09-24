@@ -124,6 +124,31 @@ static uint64_t loom_amdgpu_memory_bank_service_add_offset_residues(
   return residues;
 }
 
+static void loom_amdgpu_memory_bank_service_record_result(
+    const loom_amdgpu_lds_bank_service_result_t* result,
+    loom_low_lower_memory_bank_service_report_t* out_report) {
+  out_report->base_residue_count = result->base_residue_count;
+  if (result->base_residue_count > out_report->bank_count) {
+    out_report->base_residue_proof =
+        IREE_SV("all-compatible-byte-residues-common-translation");
+  }
+
+  out_report->proof = IREE_SV("exact");
+  out_report->classification = result->extra_rounds == 0
+                                   ? IREE_SV("conflict-free")
+                                   : IREE_SV("conflicted");
+  out_report->unknown_reason = iree_string_view_empty();
+  for (uint8_t phase = 0; phase < result->phase_count; ++phase) {
+    out_report->phase_required_rounds[phase] =
+        result->phase_required_rounds[phase];
+  }
+  out_report->required_rounds = result->required_rounds;
+  out_report->uncontended_rounds = result->uncontended_rounds;
+  out_report->extra_rounds = result->extra_rounds;
+  out_report->maximum_request_multiplicity =
+      result->maximum_request_multiplicity;
+}
+
 static void loom_amdgpu_memory_bank_service_evaluate_full_wave(
     const loom_amdgpu_lds_bank_service_model_t* model,
     const uint64_t
@@ -142,26 +167,108 @@ static void loom_amdgpu_memory_bank_service_evaluate_full_wave(
         IREE_SV("address-base-residue-unproven"), out_report);
     return;
   }
-  out_report->base_residue_count = result.base_residue_count;
-  if (result.base_residue_count > model->bank_count) {
-    out_report->base_residue_proof =
-        IREE_SV("all-compatible-byte-residues-common-translation");
+  loom_amdgpu_memory_bank_service_record_result(&result, out_report);
+}
+
+void loom_amdgpu_memory_calculate_source_bank_service(
+    const loom_amdgpu_lds_bank_service_model_t* model,
+    const loom_low_source_memory_access_plan_t* source,
+    const loom_target_workgroup_size_t* workgroup_size,
+    loom_low_lower_memory_bank_service_report_t* out_report) {
+  loom_amdgpu_memory_bank_service_initialize_report(model, out_report);
+  if (source->root_uniform_scope < LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP) {
+    loom_amdgpu_memory_bank_service_mark_unknown(
+        IREE_SV("address-root-not-subgroup-uniform"), out_report);
+    return;
   }
 
-  out_report->proof = IREE_SV("exact");
-  out_report->classification = result.extra_rounds == 0
-                                   ? IREE_SV("conflict-free")
-                                   : IREE_SV("conflicted");
-  out_report->unknown_reason = iree_string_view_empty();
-  for (uint8_t phase = 0; phase < result.phase_count; ++phase) {
-    out_report->phase_required_rounds[phase] =
-        result.phase_required_rounds[phase];
+  uint64_t coordinate_byte_strides[LOOM_KERNEL_DIMENSION_COUNT_] = {0};
+  loom_value_facts_t common_offset = loom_value_facts_exact_i64(0);
+  for (uint8_t i = 0; i < source->dynamic_term_count; ++i) {
+    const loom_low_source_memory_dynamic_term_t* term =
+        &source->dynamic_terms[i];
+    if (loom_value_facts_is_subgroup_uniform(term->byte_facts)) {
+      loom_value_facts_addi(&common_offset, &term->byte_facts, &common_offset);
+      continue;
+    }
+    if (term->source !=
+        LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_WORKITEM_ID) {
+      loom_amdgpu_memory_bank_service_mark_unknown(
+          IREE_SV("address-varying-term-unproven"), out_report);
+      return;
+    }
+    if (term->stride_value_count != 0) {
+      loom_amdgpu_memory_bank_service_mark_unknown(
+          IREE_SV("address-dynamic-stride"), out_report);
+      return;
+    }
+    if (term->byte_stride < 0) {
+      loom_amdgpu_memory_bank_service_mark_unknown(
+          IREE_SV("address-negative-stride"), out_report);
+      return;
+    }
+    coordinate_byte_strides[term->dimension] += (uint64_t)term->byte_stride;
   }
-  out_report->required_rounds = result.required_rounds;
-  out_report->uncontended_rounds = result.uncontended_rounds;
-  out_report->extra_rounds = result.extra_rounds;
-  out_report->maximum_request_multiplicity =
-      result.maximum_request_multiplicity;
+  const uint32_t packet_alignment = model->packet_byte_count;
+  if (source->minimum_alignment < packet_alignment ||
+      coordinate_byte_strides[0] % packet_alignment != 0 ||
+      coordinate_byte_strides[1] % packet_alignment != 0 ||
+      coordinate_byte_strides[2] % packet_alignment != 0) {
+    loom_amdgpu_memory_bank_service_mark_unknown(
+        IREE_SV("address-packet-alignment-unproven"), out_report);
+    return;
+  }
+  out_report->lane_address_proof =
+      IREE_SV("canonical-workitem-coordinates-all-waves");
+  out_report->base_residue_proof =
+      IREE_SV("subgroup-uniform-common-translation-all-bank-word-residues");
+
+  const uint64_t common_base_byte_residues =
+      loom_amdgpu_memory_bank_service_source_residues(
+          source, common_offset, model->bank_word_byte_count);
+  const uint64_t active_lane_mask =
+      model->wave_size == 64 ? UINT64_MAX
+                             : (UINT64_C(1) << model->wave_size) - UINT64_C(1);
+  const uint32_t plane_size = workgroup_size->x * workgroup_size->y;
+  const uint32_t flat_size = plane_size * workgroup_size->z;
+  loom_amdgpu_lds_bank_service_result_t result = {0};
+  for (uint32_t wave_begin = 0; wave_begin < flat_size;
+       wave_begin += model->wave_size) {
+    uint64_t lane_offsets[LOOM_AMDGPU_LDS_BANK_SERVICE_MAX_WAVE_SIZE] = {0};
+    for (uint8_t lane = 0; lane < model->wave_size; ++lane) {
+      const uint32_t linear_id = wave_begin + lane;
+      const uint32_t x = linear_id % workgroup_size->x;
+      const uint32_t y = (linear_id / workgroup_size->x) % workgroup_size->y;
+      const uint32_t z = linear_id / plane_size;
+      // The selected DS packet already proves a 32-bit address envelope.
+      // These nonnegative canonical contributions cannot overflow it.
+      lane_offsets[lane] = x * coordinate_byte_strides[0] +
+                           y * coordinate_byte_strides[1] +
+                           z * coordinate_byte_strides[2];
+    }
+    loom_amdgpu_lds_bank_service_result_t candidate = {0};
+    if (!loom_amdgpu_lds_bank_service_evaluate(
+            model, active_lane_mask, lane_offsets, common_base_byte_residues,
+            &candidate)) {
+      out_report->base_residue_proof = IREE_SV("unproven");
+      loom_amdgpu_memory_bank_service_mark_unknown(
+          IREE_SV("address-base-residue-unproven"), out_report);
+      return;
+    }
+    if (wave_begin == 0) {
+      result = candidate;
+    } else {
+      for (uint8_t phase = 0; phase < model->phase_count; ++phase) {
+        if (candidate.phase_required_rounds[phase] !=
+            result.phase_required_rounds[phase]) {
+          loom_amdgpu_memory_bank_service_mark_unknown(
+              IREE_SV("address-wave-profiles-differ"), out_report);
+          return;
+        }
+      }
+    }
+  }
+  loom_amdgpu_memory_bank_service_record_result(&result, out_report);
 }
 
 iree_status_t loom_amdgpu_memory_report_bank_service(
@@ -181,65 +288,17 @@ iree_status_t loom_amdgpu_memory_report_bank_service(
   if (model == NULL) {
     return iree_ok_status();
   }
-  const loom_low_source_memory_dynamic_term_t* term =
-      loom_low_source_memory_access_single_dynamic_term(source);
-  if (term == NULL) {
-    loom_amdgpu_memory_bank_service_mark_unknown(
-        IREE_SV("address-dynamic-term-count"), out_report);
-    return iree_ok_status();
-  }
-  if (term->source != LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_WORKITEM_ID ||
-      term->dimension != LOOM_KERNEL_DIMENSION_X) {
-    loom_amdgpu_memory_bank_service_mark_unknown(
-        IREE_SV("address-not-workitem-x"), out_report);
-    return iree_ok_status();
-  }
-  if (term->stride_value_count != 0) {
-    loom_amdgpu_memory_bank_service_mark_unknown(
-        IREE_SV("address-dynamic-stride"), out_report);
-    return iree_ok_status();
-  }
-  if (term->byte_stride <= 0) {
-    loom_amdgpu_memory_bank_service_mark_unknown(
-        IREE_SV("address-nonpositive-stride"), out_report);
-    return iree_ok_status();
-  }
-  const uint64_t byte_stride = (uint64_t)term->byte_stride;
-  const uint32_t packet_alignment = model->packet_byte_count;
-  if (source->minimum_alignment < packet_alignment ||
-      byte_stride % packet_alignment != 0) {
-    loom_amdgpu_memory_bank_service_mark_unknown(
-        IREE_SV("address-packet-alignment-unproven"), out_report);
-    return iree_ok_status();
-  }
-  out_report->lane_address_proof = IREE_SV("affine-workitem-x-byte-stride");
-  out_report->base_residue_proof =
-      IREE_SV("all-bank-word-residues-common-translation");
-
   loom_amdgpu_memory_full_subgroup_proof_t active_lane_proof = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_memory_prove_full_subgroup(
-      context, source_op, model->wave_size,
-      LOOM_AMDGPU_MEMORY_LANE_SOURCE_WORKITEM_X, &active_lane_proof));
+      context, source_op, model->wave_size, &active_lane_proof));
   if (!active_lane_proof.is_full_subgroup) {
     loom_amdgpu_memory_bank_service_mark_unknown(
         active_lane_proof.unknown_reason, out_report);
     return iree_ok_status();
   }
+  loom_amdgpu_memory_calculate_source_bank_service(
+      model, source, &active_lane_proof.workgroup_size, out_report);
   out_report->active_lane_proof = active_lane_proof.proof;
-
-  // Default LDS packet selection already proved the complete address range
-  // fits the 32-bit DS address domain. The target model supplies the verified
-  // wave size, so these relative lane addresses cannot overflow.
-  uint64_t lane_base_byte_offsets[LOOM_AMDGPU_LDS_BANK_SERVICE_MAX_WAVE_SIZE] =
-      {0};
-  for (uint8_t lane = 0; lane < model->wave_size; ++lane) {
-    lane_base_byte_offsets[lane] = (uint64_t)lane * byte_stride;
-  }
-  const uint64_t common_base_byte_residues =
-      loom_amdgpu_memory_bank_service_source_residues(
-          source, loom_value_facts_exact_i64(0), model->bank_word_byte_count);
-  loom_amdgpu_memory_bank_service_evaluate_full_wave(
-      model, lane_base_byte_offsets, common_base_byte_residues, out_report);
   return iree_ok_status();
 }
 
@@ -274,8 +333,7 @@ iree_status_t loom_amdgpu_fragment_memory_report_bank_service(
   if (!runtime_offset->is_subgroup_uniform) {
     loom_amdgpu_memory_full_subgroup_proof_t active_lane_proof = {0};
     IREE_RETURN_IF_ERROR(loom_amdgpu_memory_prove_full_subgroup(
-        context, source_op, model->wave_size,
-        LOOM_AMDGPU_MEMORY_LANE_SOURCE_SUBGROUP_LANE, &active_lane_proof));
+        context, source_op, model->wave_size, &active_lane_proof));
     if (active_lane_proof.is_full_subgroup) {
       out_report->active_lane_proof = active_lane_proof.proof;
     }
@@ -321,8 +379,7 @@ iree_status_t loom_amdgpu_fragment_memory_report_bank_service(
 
   loom_amdgpu_memory_full_subgroup_proof_t active_lane_proof = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_memory_prove_full_subgroup(
-      context, source_op, model->wave_size,
-      LOOM_AMDGPU_MEMORY_LANE_SOURCE_SUBGROUP_LANE, &active_lane_proof));
+      context, source_op, model->wave_size, &active_lane_proof));
   if (!active_lane_proof.is_full_subgroup) {
     loom_amdgpu_memory_bank_service_mark_unknown(
         active_lane_proof.unknown_reason, out_report);
