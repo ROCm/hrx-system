@@ -122,3 +122,39 @@ func.def public @element(%input: buffer, %input_byte_offset: offset, %row: i32, 
   %11 = view.load %source[%9, %10] : view<4x8xbf16, %source_layout> -> bf16
   func.return %11 : bf16
 }
+
+// ====
+
+#include <stdfloat>
+
+float pair_sum(const std::bfloat16_t* input) {
+  return float(input[0]) + float(input[1]);
+}
+
+// ----
+func.def public @pair_sum(%input: buffer, %input_byte_offset: offset) -> (f32) {
+  %3 = scalar.constant 0 : i32
+  %4 = scalar.extsi %3 : i32 to i64
+  %5 = scalar.constant 2 : i64
+  %6 = scalar.muli %4, %5 : i64
+  %7 = index.cast %input_byte_offset : offset to i64
+  %8 = scalar.addi %7, %6 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %10 = index.cast %9 : i64 to offset
+  %11 = buffer.view %input[%10] : buffer -> view<1xbf16>
+  %12 = view.load %11[0] : view<1xbf16> -> bf16
+  %13 = scalar.extf %12 : bf16 to f32
+  %14 = scalar.constant 1 : i32
+  %15 = scalar.extsi %14 : i32 to i64
+  %16 = scalar.constant 2 : i64
+  %17 = scalar.muli %15, %16 : i64
+  %18 = index.cast %input_byte_offset : offset to i64
+  %19 = scalar.addi %18, %17 : i64
+  %20 = scalar.assume %19 [range(%19, 0, 9223372036854775807)] : i64
+  %21 = index.cast %20 : i64 to offset
+  %22 = buffer.view %input[%21] : buffer -> view<1xbf16>
+  %23 = view.load %22[0] : view<1xbf16> -> bf16
+  %24 = scalar.extf %23 : bf16 to f32
+  %25 = scalar.addf %13, %24 : f32
+  func.return %25 : f32
+}

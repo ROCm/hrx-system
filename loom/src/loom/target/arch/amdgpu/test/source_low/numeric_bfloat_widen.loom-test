@@ -1,0 +1,112 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_bfloat_widen.loom
+// RUN: emit source-low target=amdgpu:gfx1151 output=low
+
+func.def @widen_bfloat(%input: bf16) -> (f32) {
+  %wide = scalar.extf %input : bf16 to f32
+  func.return %wide : f32
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @widen_bfloat(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %wide = v_lshlrev_b32_src0_16_low16 %input
+  return %wide
+}
+
+// ====
+
+func.def @load_bfloat(%input: buffer) -> (f32) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<1xbf16>
+  %value = view.load %source[0] : view<1xbf16> -> bf16
+  %wide = scalar.extf %value : bf16 to f32
+  func.return %wide : f32
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @load_bfloat() -> (reg<amdgpu.vgpr>) asm {
+  %source = resource<hal_binding> {extent = 2, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %8 = v_mov_b32 0
+  %value = global_load_d16_b16_saddr %8, %source
+  %wide = v_lshlrev_b32_src0_16_low16 %value
+  return %wide
+}
+
+// ====
+
+func.def @load_bfloat_at(%input: buffer, %origin: offset, %element: index) -> (f32) {
+  %base = index.assume %origin [range(%origin, 0, 128)] : offset
+  %position = index.assume %element [range(%element, 0, 15)] : index
+  %source = buffer.view %input[%base] : buffer -> view<16xbf16>
+  %value = view.load %source[%position] : view<16xbf16> -> bf16
+  %wide = scalar.extf %value : bf16 to f32
+  func.return %wide : f32
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @load_bfloat_at(%base: reg<amdgpu.sgpr x2>, %position: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %13 = v_mov_b32 0
+  %14 = slice %base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %15 = s_lshl_b32_rhs_inline %position, 1
+  %16 = s_add_u32 %14, %15
+  %17 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %18 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %19 = s_mov_b32 0
+  %20, %21 = s_add_co_u32 %17, %16
+  %22, %23 = s_addc_u32 %18, %19, %21
+  %24 = concat(%20, %22) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %value = global_load_d16_b16_saddr %13, %24
+  %wide = v_lshlrev_b32_src0_16_low16 %value
+  return %wide
+}
+
+// ====
+
+func.def @bfloat_pair_sum(%input: buffer) -> (f32) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<2xbf16>
+  %first = view.load %source[0] : view<2xbf16> -> bf16
+  %second = view.load %source[1] : view<2xbf16> -> bf16
+  %first_wide = scalar.extf %first : bf16 to f32
+  %second_wide = scalar.extf %second : bf16 to f32
+  %sum = scalar.addf %first_wide, %second_wide : f32
+  func.return %sum : f32
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @bfloat_pair_sum() -> (reg<amdgpu.vgpr>) asm {
+  %source = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %14 = v_mov_b32 0
+  %first = global_load_b32_saddr %14, %source
+  %second = v_lshrrev_b32_src0_inline %first, 16
+  %first_wide = v_lshlrev_b32_src0_16_low16 %first
+  %second_wide = v_lshlrev_b32_src0_16_low16 %second
+  %sum = v_add_f32 %first_wide, %second_wide
+  return %sum
+}
+
+// ====
+
+// Conversion consumes the captured value, even when its source is overwritten.
+func.def @replace_bfloat(%input: buffer, %replacement: bf16) -> (f32, f32) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<1xbf16>
+  %before = view.load %source[0] : view<1xbf16> -> bf16
+  view.store %replacement, %source[0] : bf16, view<1xbf16>
+  %after = view.load<volatile> %source[0] : view<1xbf16> -> bf16
+  %before_wide = scalar.extf %before : bf16 to f32
+  %after_wide = scalar.extf %after : bf16 to f32
+  func.return %before_wide, %after_wide : f32, f32
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @replace_bfloat(%replacement: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %source = resource<hal_binding> {extent = 2, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %14 = v_mov_b32 0
+  %before = global_load_d16_b16_saddr %14, %source
+  global_store_short_saddr %14, %replacement, %source
+  %after = global_load_d16_b16_saddr<volatile> %14, %source
+  %before_wide = v_lshlrev_b32_src0_16_low16 %before
+  %after_wide = v_lshlrev_b32_src0_16_low16 %after
+  return %before_wide, %after_wide
+}

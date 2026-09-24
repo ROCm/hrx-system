@@ -356,6 +356,44 @@ def _conversion_rule(
     )
 
 
+def _bf16_to_f32_rule() -> DescriptorRule:
+    constant = _descriptor("wasm.i32.const")
+    shift = _descriptor("wasm.i32.shl")
+    reinterpret = _descriptor("wasm.f32.reinterpret_i32")
+    # The low 16 carrier bits become the high half of the FP32 encoding.
+    return DescriptorRule(
+        source_op=scalar_conversion.scalar_extf,
+        descriptor=reinterpret,
+        guards=(
+            _value_type("input", _BF16),
+            _value_type("result", _F32),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=constant,
+                results={"dst": ValueRef.temporary("shift")},
+                result_types={"dst": _I32},
+                immediates={"i32_value": 16},
+                form=DescriptorEmitForm.CONST,
+            ),
+            EmitDescriptorOp(
+                descriptor=shift,
+                operands={
+                    "lhs": ValueRef.operand("input"),
+                    "rhs": ValueRef.temporary("shift"),
+                },
+                results={"dst": ValueRef.temporary("bits")},
+                result_types={"dst": _I32},
+            ),
+            EmitDescriptorOp(
+                descriptor=reinterpret,
+                operands={"input": ValueRef.temporary("bits")},
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
 def _conversion_alias_rule(
     source_op: Op,
     source_type: TypePattern,
@@ -914,6 +952,7 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
         _conversion_rule(
             scalar_conversion.scalar_bitcast, _I64, _F64, "wasm.f64.reinterpret_i64"
         ),
+        _bf16_to_f32_rule(),
         _conversion_alias_rule(scalar_conversion.scalar_bitcast, _F8E4M3, _I8),
         _conversion_alias_rule(scalar_conversion.scalar_bitcast, _F8E5M2, _I8),
         _conversion_alias_rule(scalar_conversion.scalar_bitcast, _F16, _I16),

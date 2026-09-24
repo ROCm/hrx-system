@@ -264,6 +264,16 @@ SCALAR_BITCAST_CONVERSIONS = _bitcast_conversions()
 DIRECT_SCALAR_CONVERSIONS = (
     *SIGNED_INTEGER_WIDTH_CONVERSIONS,
     *_float_width_conversions(),
+    ScalarConversion(
+        source_op_key="extf",
+        descriptor_suffix="f_convert",
+        mnemonic="OpFConvert",
+        opcode="LOOM_SPIRV_OP_F_CONVERT",
+        source_type=BFLOAT16_SCALAR_TYPE,
+        result_type=next(
+            scalar for scalar in FLOAT_SCALAR_ALU_TYPES if scalar.source_type == "f32"
+        ),
+    ),
     *_signed_integer_to_float_conversions(),
     *_float_to_signed_integer_conversions(),
     *SCALAR_BITCAST_CONVERSIONS,

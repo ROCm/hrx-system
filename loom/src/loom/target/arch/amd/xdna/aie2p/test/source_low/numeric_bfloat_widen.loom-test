@@ -1,0 +1,126 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_bfloat_widen.loom
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @widen_bfloat(%input: bf16) -> (f32) {
+  %wide = scalar.extf %input : bf16 to f32
+  func.return %wide : f32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @widen_bfloat(%input: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %5 = mov.short 16
+  %wide = lshl %input, %5
+  return %wide
+}
+
+// ====
+
+func.def @load_bfloat(%input: buffer) -> (f32) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<1xbf16>
+  %value = view.load %source[0] : view<1xbf16> -> bf16
+  %wide = scalar.extf %value : bf16 to f32
+  func.return %wide : f32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @load_bfloat() -> (reg<aie2p.er>) asm {
+  %source = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %value = lda.u16 %source, 0
+  %9 = mov.short 16
+  %wide = lshl %value, %9
+  return %wide
+}
+
+// ====
+
+func.def @load_bfloat_at(%input: buffer, %origin: offset, %element: index) -> (f32) {
+  %base = index.assume %origin [range(%origin, 0, 128)] : offset
+  %position = index.assume %element [range(%element, 0, 15)] : index
+  %source = buffer.view %input[%base] : buffer -> view<16xbf16>
+  %value = view.load %source[%position] : view<16xbf16> -> bf16
+  %wide = scalar.extf %value : bf16 to f32
+  func.return %wide : f32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @load_bfloat_at(%base: reg<aie2p.er>, %position: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %source = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %13 = mov.i32 1
+  %14 = lshl %position, %13
+  %15 = add.rr %base, %14
+  %16 = mov.address-index %15
+  %value = lda.i16.index %source, %16
+  %18 = mov.short 16
+  %wide = lshl %value, %18
+  return %wide
+}
+
+// ====
+
+func.def @bfloat_pair_sum(%input: buffer) -> (f32) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<2xbf16>
+  %first = view.load %source[0] : view<2xbf16> -> bf16
+  %second = view.load %source[1] : view<2xbf16> -> bf16
+  %first_wide = scalar.extf %first : bf16 to f32
+  %second_wide = scalar.extf %second : bf16 to f32
+  %sum = scalar.addf %first_wide, %second_wide : f32
+  func.return %sum : f32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @bfloat_pair_sum() -> (reg<aie2p.er>) asm {
+  %source = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %14 = lda.u16 %source, 0
+  %15 = lda.u16 %source, 2
+  %16 = vbcst.16 %14
+  %17 = mov.short 1
+  %18 = copy %17 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %19 = vinsert.16.reg %16, %18, %15
+  %first = vextract.16.imm %19, 0
+  %second = vextract.16.imm %19, 1
+  %22 = mov.short 16
+  %first_wide = lshl %first, %22
+  %second_wide = lshl %second, %22
+  %26 = vbcst.32 %first_wide
+  %27 = vbcst.32 %second_wide
+  %28 = acc.clear.f32x64
+  %29 = slice %28[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %30 = vmov.vector512.to.accumulator512 %26
+  %31 = concat(%30, %29, %29, %29) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %32 = vmov.vector512.to.accumulator512 %27
+  %33 = concat(%32, %29, %29, %29) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %34 = mova.i32 60
+  %35 = vadd.f32x64 %31, %33, %34
+  %36 = slice %35[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %37 = vmov.accumulator512.to.vector512 %36
+  %sum = vextract.32.imm %37, 0
+  return %sum
+}
+
+// ====
+
+// Conversion consumes the captured value, even when its source is overwritten.
+func.def @replace_bfloat(%input: buffer, %replacement: bf16) -> (f32, f32) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<1xbf16>
+  %before = view.load %source[0] : view<1xbf16> -> bf16
+  view.store %replacement, %source[0] : bf16, view<1xbf16>
+  %after = view.load<volatile> %source[0] : view<1xbf16> -> bf16
+  %before_wide = scalar.extf %before : bf16 to f32
+  %after_wide = scalar.extf %after : bf16 to f32
+  func.return %before_wide, %after_wide : f32, f32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @replace_bfloat(%replacement: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>) asm {
+  %source = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %before = lda.u16 %source, 0
+  st.s16 %replacement, %source, 0
+  %after = lda.u16.volatile<volatile> %source, 0
+  %16 = mov.short 16
+  %before_wide = lshl %before, %16
+  %after_wide = lshl %after, %16
+  return %before_wide, %after_wide
+}

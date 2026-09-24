@@ -1,0 +1,111 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_bfloat_widen.loom
+// RUN: emit source-low target=wasm:simd128 output=low
+
+func.def @widen_bfloat(%input: bf16) -> (f32) {
+  %wide = scalar.extf %input : bf16 to f32
+  func.return %wide : f32
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @widen_bfloat(%input: reg<wasm.i32>) -> (reg<wasm.f32>) asm {
+  %5 = i32.const 16
+  %6 = i32.shl %input, %5
+  %wide = f32.reinterpret_i32 %6
+  return %wide
+}
+
+// ====
+
+func.def @load_bfloat(%input: buffer) -> (f32) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<1xbf16>
+  %value = view.load %source[0] : view<1xbf16> -> bf16
+  %wide = scalar.extf %value : bf16 to f32
+  func.return %wide : f32
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @load_bfloat(%source: reg<wasm.i32>) -> (reg<wasm.f32>) asm {
+  %value = i32.load16_u %source
+  %9 = i32.const 16
+  %10 = i32.shl %value, %9
+  %wide = f32.reinterpret_i32 %10
+  return %wide
+}
+
+// ====
+
+func.def @load_bfloat_at(%input: buffer, %origin: offset, %element: index) -> (f32) {
+  %base = index.assume %origin [range(%origin, 0, 128)] : offset
+  %position = index.assume %element [range(%element, 0, 15)] : index
+  %source = buffer.view %input[%base] : buffer -> view<16xbf16>
+  %value = view.load %source[%position] : view<16xbf16> -> bf16
+  %wide = scalar.extf %value : bf16 to f32
+  func.return %wide : f32
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @load_bfloat_at(%source: reg<wasm.i32>, %base: reg<wasm.i32>, %position: reg<wasm.i32>) -> (reg<wasm.f32>) asm {
+  %13 = i32.const 2
+  %14 = i32.mul %position, %13
+  %15 = i32.add %base, %14
+  %16 = i32.add %source, %15
+  %value = i32.load16_u %16
+  %18 = i32.const 16
+  %19 = i32.shl %value, %18
+  %wide = f32.reinterpret_i32 %19
+  return %wide
+}
+
+// ====
+
+func.def @bfloat_pair_sum(%input: buffer) -> (f32) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<2xbf16>
+  %first = view.load %source[0] : view<2xbf16> -> bf16
+  %second = view.load %source[1] : view<2xbf16> -> bf16
+  %first_wide = scalar.extf %first : bf16 to f32
+  %second_wide = scalar.extf %second : bf16 to f32
+  %sum = scalar.addf %first_wide, %second_wide : f32
+  func.return %sum : f32
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @bfloat_pair_sum(%source: reg<wasm.i32>) -> (reg<wasm.f32>) asm {
+  %19 = i32.load16_u %source
+  %second = i32.load16_u %source {offset = 2}
+  %21 = i32.const 16
+  %22 = i32.shl %19, %21
+  %first_wide = f32.reinterpret_i32 %22
+  %25 = i32.shl %second, %21
+  %second_wide = f32.reinterpret_i32 %25
+  %sum = f32.add %first_wide, %second_wide
+  return %sum
+}
+
+// ====
+
+// Conversion consumes the captured value, even when its source is overwritten.
+func.def @replace_bfloat(%input: buffer, %replacement: bf16) -> (f32, f32) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<1xbf16>
+  %before = view.load %source[0] : view<1xbf16> -> bf16
+  view.store %replacement, %source[0] : bf16, view<1xbf16>
+  %after = view.load<volatile> %source[0] : view<1xbf16> -> bf16
+  %before_wide = scalar.extf %before : bf16 to f32
+  %after_wide = scalar.extf %after : bf16 to f32
+  func.return %before_wide, %after_wide : f32, f32
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @replace_bfloat(%source: reg<wasm.i32>, %replacement: reg<wasm.i32>) -> (reg<wasm.f32>, reg<wasm.f32>) asm {
+  %before = i32.load16_u %source
+  i32.store16 %source, %replacement
+  %after = i32.load16_u<volatile> %source
+  %16 = i32.const 16
+  %17 = i32.shl %before, %16
+  %before_wide = f32.reinterpret_i32 %17
+  %20 = i32.shl %after, %16
+  %after_wide = f32.reinterpret_i32 %20
+  return %before_wide, %after_wide
+}

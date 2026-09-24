@@ -1,0 +1,102 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_bfloat_widen.loom
+// RUN: emit source-low target=vm:core output=low
+
+func.def @widen_bfloat(%input: bf16) -> (f32) {
+  %wide = scalar.extf %input : bf16 to f32
+  func.return %wide : f32
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @widen_bfloat(%input: reg<vm.value : bf16>) -> (reg<vm.value : f32>) asm {
+  %wide = conversion.float.extend %input, "bf16.to.f32" : reg<vm.value : f32>
+  return %wide
+}
+
+// ====
+
+func.def @load_bfloat(%input: buffer) -> (f32) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<1xbf16>
+  %value = view.load %source[0] : view<1xbf16> -> bf16
+  %wide = scalar.extf %value : bf16 to f32
+  func.return %wide : f32
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @load_bfloat(%source: reg<vm.ref : buffer>) -> (reg<vm.value : f32>) asm {
+  %8 = constant.i64 0
+  %value = buffer.load %source, %8, %8, 0, "i16.x1" : reg<vm.value : bf16>
+  %wide = conversion.float.extend %value, "bf16.to.f32" : reg<vm.value : f32>
+  return %wide
+}
+
+// ====
+
+func.def @load_bfloat_at(%input: buffer, %origin: offset, %element: index) -> (f32) {
+  %base = index.assume %origin [range(%origin, 0, 128)] : offset
+  %position = index.assume %element [range(%element, 0, 15)] : index
+  %source = buffer.view %input[%base] : buffer -> view<16xbf16>
+  %value = view.load %source[%position] : view<16xbf16> -> bf16
+  %wide = scalar.extf %value : bf16 to f32
+  func.return %wide : f32
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @load_bfloat_at(%source: reg<vm.ref : buffer>, %base: reg<vm.value : i64>, %position: reg<vm.value : i64>) -> (reg<vm.value : f32>) asm {
+  %13 = constant.i64 1 : reg<vm.value>
+  %14 = integer.shift.left.i64 %position, %13
+  %15 = integer.add.i64 %base, %14
+  %value = buffer.load %source, %15, %15, 0, "i16.x1" : reg<vm.value : bf16>
+  %wide = conversion.float.extend %value, "bf16.to.f32" : reg<vm.value : f32>
+  return %wide
+}
+
+// ====
+
+func.def @bfloat_pair_sum(%input: buffer) -> (f32) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<2xbf16>
+  %first = view.load %source[0] : view<2xbf16> -> bf16
+  %second = view.load %source[1] : view<2xbf16> -> bf16
+  %first_wide = scalar.extf %first : bf16 to f32
+  %second_wide = scalar.extf %second : bf16 to f32
+  %sum = scalar.addf %first_wide, %second_wide : f32
+  func.return %sum : f32
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @bfloat_pair_sum(%source: reg<vm.ref : buffer>) -> (reg<vm.value : f32>) asm {
+  %19 = constant.i64 0
+  %20 = buffer.load %source, %19, %19, 0, "i16.x1" : reg<vm.value : bf16>
+  %21 = constant.i64 2
+  %second = buffer.load %source, %21, %21, 0, "i16.x1" : reg<vm.value : bf16>
+  %first_wide = conversion.float.extend %20, "bf16.to.f32" : reg<vm.value : f32>
+  %second_wide = conversion.float.extend %second, "bf16.to.f32" : reg<vm.value : f32>
+  %sum = float.add.f32 %first_wide, %second_wide
+  return %sum
+}
+
+// ====
+
+// Conversion consumes the captured value, even when its source is overwritten.
+func.def @replace_bfloat(%input: buffer, %replacement: bf16) -> (f32, f32) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<1xbf16>
+  %before = view.load %source[0] : view<1xbf16> -> bf16
+  view.store %replacement, %source[0] : bf16, view<1xbf16>
+  %after = view.load<volatile> %source[0] : view<1xbf16> -> bf16
+  %before_wide = scalar.extf %before : bf16 to f32
+  %after_wide = scalar.extf %after : bf16 to f32
+  func.return %before_wide, %after_wide : f32, f32
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @replace_bfloat(%source: reg<vm.ref : buffer>, %replacement: reg<vm.value : bf16>) -> (reg<vm.value : f32>, reg<vm.value : f32>) asm {
+  %14 = constant.i64 0
+  %before = buffer.load %source, %14, %14, 0, "i16.x1" : reg<vm.value : bf16>
+  buffer.store %source, %14, %14, %replacement, 0, "i16.x1"
+  %after = buffer.load<volatile> %source, %14, %14, 0, "i16.x1" : reg<vm.value : bf16>
+  %before_wide = conversion.float.extend %before, "bf16.to.f32" : reg<vm.value : f32>
+  %after_wide = conversion.float.extend %after, "bf16.to.f32" : reg<vm.value : f32>
+  return %before_wide, %after_wide
+}

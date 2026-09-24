@@ -312,6 +312,7 @@ loom_check_test_suite(
     "test/source_low/memory_integer_terms.loom-test"
     "test/source_low/memory_scalar_addressing.loom-test"
     "test/source_low/memory_workgroup_scalar_addressing.loom-test"
+    "test/source_low/numeric_bfloat_widen.loom-test"
     "test/source_low/source_ordinary_vector_structure.loom-test"
     "test/source_structured_control.loom-test"
     "test/storage_buffer_abi.loom-test"

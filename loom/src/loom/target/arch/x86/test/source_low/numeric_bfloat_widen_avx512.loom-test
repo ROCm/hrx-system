@@ -1,0 +1,114 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_bfloat_widen.loom
+// RUN: emit source-low target=x86:avx512 output=low
+
+func.def @widen_bfloat(%input: bf16) -> (f32) {
+  %wide = scalar.extf %input : bf16 to f32
+  func.return %wide : f32
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) @widen_bfloat(%input: reg<x86.gpr32>) -> (reg<x86.xmm>) asm {
+  %5 = copy %input : reg<x86.gpr32> -> reg<x86.gpr32>
+  %6 = shl.imm.gpr32 %5 {shift = 16}
+  %wide = vmovd.xmm.gpr32 %6
+  return %wide
+}
+
+// ====
+
+func.def @load_bfloat(%input: buffer) -> (f32) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<1xbf16>
+  %value = view.load %source[0] : view<1xbf16> -> bf16
+  %wide = scalar.extf %value : bf16 to f32
+  func.return %wide : f32
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) @load_bfloat(%input: reg<x86.gpr64>) -> (reg<x86.xmm>) asm {
+  %value = movzx.load.u16.gpr32 %input {disp32 = 0}
+  %9 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
+  %10 = shl.imm.gpr32 %9 {shift = 16}
+  %wide = vmovd.xmm.gpr32 %10
+  return %wide
+}
+
+// ====
+
+func.def @load_bfloat_at(%input: buffer, %origin: offset, %element: index) -> (f32) {
+  %base = index.assume %origin [range(%origin, 0, 128)] : offset
+  %position = index.assume %element [range(%element, 0, 15)] : index
+  %source = buffer.view %input[%base] : buffer -> view<16xbf16>
+  %value = view.load %source[%position] : view<16xbf16> -> bf16
+  %wide = scalar.extf %value : bf16 to f32
+  func.return %wide : f32
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) @load_bfloat_at(%input: reg<x86.gpr64>, %base: reg<x86.gpr64>, %position: reg<x86.gpr64>) -> (reg<x86.xmm>) asm {
+  %13 = mov.imm64 2
+  %14 = copy %position : reg<x86.gpr64> -> reg<x86.gpr64>
+  %15 = imul.gpr64 %14, %13
+  %16 = copy %base : reg<x86.gpr64> -> reg<x86.gpr64>
+  %17 = add.gpr64 %16, %15
+  %value = movzx.load.indexed.u16.gpr32 %input, %17 {disp32 = 0, scale = 1}
+  %19 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
+  %20 = shl.imm.gpr32 %19 {shift = 16}
+  %wide = vmovd.xmm.gpr32 %20
+  return %wide
+}
+
+// ====
+
+func.def @bfloat_pair_sum(%input: buffer) -> (f32) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<2xbf16>
+  %first = view.load %source[0] : view<2xbf16> -> bf16
+  %second = view.load %source[1] : view<2xbf16> -> bf16
+  %first_wide = scalar.extf %first : bf16 to f32
+  %second_wide = scalar.extf %second : bf16 to f32
+  %sum = scalar.addf %first_wide, %second_wide : f32
+  func.return %sum : f32
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) @bfloat_pair_sum(%input: reg<x86.gpr64>) -> (reg<x86.xmm>) asm {
+  %19 = movzx.load.u16.gpr32 %input {disp32 = 0}
+  %second = movzx.load.u16.gpr32 %input {disp32 = 2}
+  %21 = copy %19 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %22 = shl.imm.gpr32 %21 {shift = 16}
+  %first_wide = vmovd.xmm.gpr32 %22
+  %24 = copy %second : reg<x86.gpr32> -> reg<x86.gpr32>
+  %25 = shl.imm.gpr32 %24 {shift = 16}
+  %second_wide = vmovd.xmm.gpr32 %25
+  %sum = vaddss.xmm %first_wide, %second_wide
+  return %sum
+}
+
+// ====
+
+// Conversion consumes the captured value, even when its source is overwritten.
+func.def @replace_bfloat(%input: buffer, %replacement: bf16) -> (f32, f32) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<1xbf16>
+  %before = view.load %source[0] : view<1xbf16> -> bf16
+  view.store %replacement, %source[0] : bf16, view<1xbf16>
+  %after = view.load<volatile> %source[0] : view<1xbf16> -> bf16
+  %before_wide = scalar.extf %before : bf16 to f32
+  %after_wide = scalar.extf %after : bf16 to f32
+  func.return %before_wide, %after_wide : f32, f32
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function) @replace_bfloat(%input: reg<x86.gpr64>, %replacement: reg<x86.gpr32>) -> (reg<x86.xmm>, reg<x86.xmm>) asm {
+  %before = movzx.load.u16.gpr32 %input {disp32 = 0}
+  mov.store.u16.gpr32 %replacement, %input {disp32 = 0}
+  %after = movzx.load.u16.gpr32<volatile> %input {disp32 = 0}
+  %16 = copy %before : reg<x86.gpr32> -> reg<x86.gpr32>
+  %17 = shl.imm.gpr32 %16 {shift = 16}
+  %before_wide = vmovd.xmm.gpr32 %17
+  %19 = copy %after : reg<x86.gpr32> -> reg<x86.gpr32>
+  %20 = shl.imm.gpr32 %19 {shift = 16}
+  %after_wide = vmovd.xmm.gpr32 %20
+  return %before_wide, %after_wide
+}

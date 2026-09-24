@@ -109,6 +109,7 @@ loom_check_test_suite(
     "test/source_low/memory_word.loom-test"
     "test/source_low/nested_view_selection.loom-test"
     "test/source_low/numeric_address_widening.loom-test"
+    "test/source_low/numeric_bfloat_widen.loom-test"
     "test/source_low/numeric_boolean_comparison.loom-test"
     "test/source_low/numeric_constant_remainder.loom-test"
     "test/source_low/numeric_float_comparison_flags.loom-test"

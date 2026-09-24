@@ -50,6 +50,7 @@ _DescriptorLookup = Callable[[str], Descriptor]
 _I1 = Scalar("i1")
 _I32 = Scalar("i32")
 _I64 = Scalar("i64")
+_BF16 = Scalar("bf16")
 _F32 = Scalar("f32")
 _F64 = Scalar("f64")
 _V2I64 = Vector("i64", lanes=2)
@@ -114,6 +115,35 @@ def _conversion_rule(
             _op_emit(
                 descriptor=descriptor,
                 operands={"input": ValueRef.operand("input")},
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _bf16_to_f32_rule(descriptor_lookup: _DescriptorLookup) -> DescriptorRule:
+    shift = descriptor_lookup("x86.scalar.shl.imm.gpr32")
+    move = descriptor_lookup("x86.avx2.vmovd.xmm.gpr32")
+    # BF16 is the high half of the FP32 encoding. The shift discards unused
+    # carrier bits and preserves subnormals without floating-point arithmetic.
+    return DescriptorRule(
+        source_op=scalar_conversion.scalar_extf,
+        descriptor=move,
+        guards=(
+            Guard.value_type("input", _BF16),
+            Guard.value_type("result", _F32),
+        ),
+        emit=(
+            _op_emit(
+                descriptor=shift,
+                operands={"lhs": ValueRef.operand("input")},
+                results={"dst": ValueRef.temporary("bits")},
+                result_types={"dst": _I32},
+                immediates={"shift": 16},
+            ),
+            _op_emit(
+                descriptor=move,
+                operands={"input": ValueRef.temporary("bits")},
                 results={"dst": ValueRef.result("result")},
             ),
         ),
@@ -420,6 +450,7 @@ def _reduce_f32x4_rule(
 def _cases() -> Sequence[ContractCase]:
     descriptor_lookup = _descriptor
     return (
+        _bf16_to_f32_rule(descriptor_lookup),
         *(
             _select_rule(type_pattern, descriptor_lookup)
             for type_pattern in (_F32, _F64)

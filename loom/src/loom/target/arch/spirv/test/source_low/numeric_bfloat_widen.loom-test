@@ -1,0 +1,108 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_bfloat_widen.loom
+// RUN: emit source-low target=spirv:vulkan1.3+bda+extended-types output=low
+
+func.def @widen_bfloat(%input: bf16) -> (f32) {
+  %wide = scalar.extf %input : bf16 to f32
+  func.return %wide : f32
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @widen_bfloat(%input: reg<spirv.id : bf16>) -> (reg<spirv.id : f32>) asm {
+  %wide = OpFConvert.bf16.f32 %input
+  return %wide
+}
+
+// ====
+
+func.def @load_bfloat(%input: buffer) -> (f32) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<1xbf16>
+  %value = view.load %source[0] : view<1xbf16> -> bf16
+  %wide = scalar.extf %value : bf16 to f32
+  func.return %wide : f32
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @load_bfloat(%input: reg<spirv.ptr.storage_buffer>) -> (reg<spirv.id : f32>) asm {
+  %8 = OpConstant.offset64 0
+  %9 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %8
+  %value = OpLoad.storage_buffer.bf16 %9
+  %wide = OpFConvert.bf16.f32 %value
+  return %wide
+}
+
+// ====
+
+func.def @load_bfloat_at(%input: buffer, %origin: offset, %element: index) -> (f32) {
+  %base = index.assume %origin [range(%origin, 0, 128)] : offset
+  %position = index.assume %element [range(%element, 0, 15)] : index
+  %source = buffer.view %input[%base] : buffer -> view<16xbf16>
+  %value = view.load %source[%position] : view<16xbf16> -> bf16
+  %wide = scalar.extf %value : bf16 to f32
+  func.return %wide : f32
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @load_bfloat_at(%input: reg<spirv.ptr.storage_buffer>, %base: reg<spirv.offset64>, %position: reg<spirv.id : index>) -> (reg<spirv.id : f32>) asm {
+  %13 = OpSConvert.i32.offset64 %position
+  %14 = OpConstant.offset64 2
+  %15 = OpIMul.offset64 %13, %14
+  %16 = OpIAdd.offset64 %base, %15
+  %17 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %16
+  %value = OpLoad.storage_buffer.bf16 %17
+  %wide = OpFConvert.bf16.f32 %value
+  return %wide
+}
+
+// ====
+
+func.def @bfloat_pair_sum(%input: buffer) -> (f32) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<2xbf16>
+  %first = view.load %source[0] : view<2xbf16> -> bf16
+  %second = view.load %source[1] : view<2xbf16> -> bf16
+  %first_wide = scalar.extf %first : bf16 to f32
+  %second_wide = scalar.extf %second : bf16 to f32
+  %sum = scalar.addf %first_wide, %second_wide : f32
+  func.return %sum : f32
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @bfloat_pair_sum(%input: reg<spirv.ptr.storage_buffer>) -> (reg<spirv.id : f32>) asm {
+  %17 = OpConstant.offset64 0
+  %18 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %17
+  %19 = OpLoad.storage_buffer.bf16 %18
+  %20 = OpConstant.offset64 2
+  %21 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %20
+  %22 = OpLoad.storage_buffer.bf16 %21
+  %first_wide = OpFConvert.bf16.f32 %19
+  %second_wide = OpFConvert.bf16.f32 %22
+  %sum = OpFAdd.f32 %first_wide, %second_wide
+  return %sum
+}
+
+// ====
+
+// Conversion consumes the captured value, even when its source is overwritten.
+func.def @replace_bfloat(%input: buffer, %replacement: bf16) -> (f32, f32) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<1xbf16>
+  %before = view.load %source[0] : view<1xbf16> -> bf16
+  view.store %replacement, %source[0] : bf16, view<1xbf16>
+  %after = view.load<volatile> %source[0] : view<1xbf16> -> bf16
+  %before_wide = scalar.extf %before : bf16 to f32
+  %after_wide = scalar.extf %after : bf16 to f32
+  func.return %before_wide, %after_wide : f32, f32
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @replace_bfloat(%input: reg<spirv.ptr.storage_buffer>, %replacement: reg<spirv.id : bf16>) -> (reg<spirv.id : f32>, reg<spirv.id : f32>) asm {
+  %14 = OpConstant.offset64 0
+  %15 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %14
+  %before = OpLoad.storage_buffer.bf16 %15
+  OpStore.storage_buffer.bf16 %15, %replacement
+  %after = OpLoad.storage_buffer.bf16<volatile> %15
+  %before_wide = OpFConvert.bf16.f32 %before
+  %after_wide = OpFConvert.bf16.f32 %after
+  return %before_wide, %after_wide
+}
