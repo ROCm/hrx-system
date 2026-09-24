@@ -15,9 +15,16 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-_CASES = glob(["*.loom"])
+_CONFIGURED_CASES = [
+    "pipelined_guarded_recurrence.loom",
+]
 
-exports_files(_CASES)
+_CASES = glob(
+    ["*.loom"],
+    exclude = _CONFIGURED_CASES,
+)
+
+exports_files(_CASES + _CONFIGURED_CASES)
 
 loom_generated_file_family(
     name = "vector_i64_bitwise_gen",
