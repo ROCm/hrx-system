@@ -1,11 +1,5 @@
 # Loom
 
-> [!NOTE]
-> This README is a first-merge quickstart. It is intentionally narrow: get a
-> motivated human or agent from checkout to the current examples, then point at
-> the code and docs that explain the real surfaces. Deeper architecture,
-> performance, target, and model-program docs are still being split out.
-
 Loom is a source-first native compiler substrate for asynchronous
 device-oriented programs. The current proof point is kernel authoring,
 specialization, compilation, emission, testing, benchmarking, and tuning. The
