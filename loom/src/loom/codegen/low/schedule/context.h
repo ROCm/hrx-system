@@ -203,6 +203,8 @@ typedef struct loom_low_schedule_completion_domain_t {
 } loom_low_schedule_completion_domain_t;
 
 typedef struct loom_low_schedule_build_state_t {
+  // Result-arena block pressure contributions, dense by block then class.
+  uint64_t* block_pressure_peaks;
   // Module containing the low function being scheduled.
   loom_module_t* module;
   // Scheduler options provided by the caller.

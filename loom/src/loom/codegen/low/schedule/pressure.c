@@ -94,6 +94,18 @@ iree_status_t loom_low_schedule_pressure_initialize(
   if (!loom_low_schedule_strategy_uses_pressure(state->options->strategy)) {
     return iree_ok_status();
   }
+  if (state->pressure_resources != NULL && state->body->block_count != 0 &&
+      iree_any_bit_set(state->options->flags,
+                       LOOM_LOW_SCHEDULE_FLAG_RETAIN_BLOCK_PRESSURE)) {
+    const iree_host_size_t entry_count =
+        (iree_host_size_t)state->body->block_count *
+        state->target.descriptor_set->reg_class_count;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->arena, entry_count, sizeof(*state->block_pressure_peaks),
+        (void**)&state->block_pressure_peaks));
+    memset(state->block_pressure_peaks, 0,
+           entry_count * sizeof(*state->block_pressure_peaks));
+  }
   const loom_value_ordinal_t value_count = state->value_domain->value_count;
   if (value_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -410,15 +422,14 @@ static void loom_low_schedule_advance_resource_cliffs(
   }
 }
 
-static void loom_low_schedule_note_resource_high_water(
+static void loom_low_schedule_update_resource_high_water(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_pressure_state_t* pressure_state, uint16_t reg_class_id,
+    uint64_t current_live_units,
     loom_low_schedule_resource_high_water_mode_t mode) {
   if (state->pressure_resources == NULL) {
     return;
   }
-  const uint64_t current_live_units =
-      pressure_state->current_live_units_by_reg_class[reg_class_id];
   uint64_t* peak_live_units =
       &pressure_state->resources.peak_live_units_by_reg_class[reg_class_id];
   if (current_live_units <= *peak_live_units) {
@@ -449,6 +460,48 @@ static void loom_low_schedule_note_resource_high_water(
         current_contribution - previous_contribution);
     loom_low_schedule_advance_resource_cliffs(state, pressure_state,
                                               member->resource_id, mode);
+  }
+}
+
+static void loom_low_schedule_note_resource_high_water(
+    const loom_low_schedule_build_state_t* state,
+    loom_low_schedule_pressure_state_t* pressure_state, uint16_t reg_class_id,
+    loom_low_schedule_resource_high_water_mode_t mode) {
+  const uint64_t live_units =
+      pressure_state->current_live_units_by_reg_class[reg_class_id];
+  if (state->block_pressure_peaks != NULL &&
+      mode == LOOM_LOW_SCHEDULE_RESOURCE_HIGH_WATER_SCHEDULED) {
+    uint64_t* peak = &state->block_pressure_peaks
+                          [(iree_host_size_t)state->current_block_index *
+                               state->target.descriptor_set->reg_class_count +
+                           reg_class_id];
+    *peak = iree_max(*peak, live_units);
+  }
+  loom_low_schedule_update_resource_high_water(state, pressure_state,
+                                               reg_class_id, live_units, mode);
+}
+
+void loom_low_schedule_pressure_retain_block(
+    loom_low_schedule_build_state_t* state,
+    loom_low_schedule_pressure_state_t* pressure_state,
+    const loom_low_schedule_table_t* previous, uint32_t block_index) {
+  if (state->pressure_resources == NULL) {
+    return;
+  }
+  const uint16_t class_count = state->target.descriptor_set->reg_class_count;
+  const uint64_t* peaks = previous->block_pressure_peaks +
+                          (iree_host_size_t)block_index * class_count;
+  if (state->block_pressure_peaks != NULL) {
+    memcpy(state->block_pressure_peaks +
+               (iree_host_size_t)block_index * class_count,
+           peaks, class_count * sizeof(*peaks));
+  }
+  // Resource contributions and crossed-cliff penalties grow monotonically.
+  // Merging each class maximum has the same final effect as its node updates.
+  for (uint16_t class_id = 0; class_id < class_count; ++class_id) {
+    loom_low_schedule_update_resource_high_water(
+        state, pressure_state, class_id, peaks[class_id],
+        LOOM_LOW_SCHEDULE_RESOURCE_HIGH_WATER_SCHEDULED);
   }
 }
 

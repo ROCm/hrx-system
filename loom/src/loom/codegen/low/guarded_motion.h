@@ -39,11 +39,14 @@ typedef struct loom_low_guarded_motion_plan_t {
   loom_low_guarded_motion_region_t* regions;
   // Number of entries in |regions|.
   uint32_t region_count;
+  // Blocks whose instructions and local dependencies change under the plan.
+  iree_bitmap_t changed_blocks;
 } loom_low_guarded_motion_plan_t;
 
 // Proposes legal guarded-prefix movement, without mutating the function.
 // A coarse timing bound rejects prefixes that cannot fit in the predecessor.
-// Acceptance still requires scheduling and allocating the complete trial.
+// Acceptance still requires a complete scheduled and allocated trial;
+// unchanged blocks may retain their accepted schedules.
 iree_status_t loom_low_guarded_motion_plan(
     const loom_low_schedule_table_t* schedule, iree_arena_allocator_t* arena,
     loom_low_guarded_motion_plan_t* out_plan);

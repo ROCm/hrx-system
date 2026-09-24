@@ -316,21 +316,11 @@ static iree_status_t loom_low_schedule_emit_pressure_diagnostics(
 static iree_status_t loom_low_schedule_emit_candidate_decision(
     const loom_low_schedule_table_t* table, iree_diagnostic_emitter_t emitter,
     const loom_low_schedule_candidate_decision_t* decision) {
-  if (decision->rejected_node == LOOM_LOW_SCHEDULE_NODE_NONE) {
-    return iree_ok_status();
-  }
-  const loom_low_schedule_node_t* chosen_node = NULL;
-  if (decision->chosen_node < table->scheduled_node_count) {
-    chosen_node = &table->nodes[decision->chosen_node];
-  }
-  const loom_low_schedule_node_t* rejected_node = NULL;
-  if (decision->rejected_node < table->scheduled_node_count) {
-    rejected_node = &table->nodes[decision->rejected_node];
-  }
-  const loom_block_t* block = NULL;
-  if (decision->block_index < table->block_count) {
-    block = table->blocks[decision->block_index].block;
-  }
+  const loom_low_schedule_node_t* chosen_node =
+      &table->nodes[decision->chosen_node];
+  const loom_low_schedule_node_t* rejected_node =
+      &table->nodes[decision->rejected_node];
+  const loom_block_t* block = table->blocks[decision->block_index].block;
   const iree_string_view_t chosen_label =
       loom_low_schedule_node_diagnostic_label(table, chosen_node);
   const iree_string_view_t rejected_label =
@@ -378,10 +368,9 @@ static iree_status_t loom_low_schedule_emit_candidate_decision(
       loom_param_u32(decision->rejected_pressure_cliff_penalty),
       loom_param_u32(decision->rejected_units_until_pressure_cliff),
   };
-  const loom_op_t* origin_op =
-      chosen_node && chosen_node->op ? chosen_node->op : table->function_op;
-  return loom_low_schedule_emit(table, emitter, origin_op, LOOM_ERR_BACKEND_015,
-                                params, IREE_ARRAYSIZE(params));
+  return loom_low_schedule_emit(table, emitter, chosen_node->op,
+                                LOOM_ERR_BACKEND_015, params,
+                                IREE_ARRAYSIZE(params));
 }
 
 static iree_status_t loom_low_schedule_emit_candidate_decision_diagnostics(

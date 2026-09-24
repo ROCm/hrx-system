@@ -243,26 +243,6 @@ iree_status_t loom_low_schedule_hazard_gap_write_json_fields(
                                              hazard_gap->hazard_flags);
 }
 
-static const iree_string_view_t kLoomLowScheduleRejectedMetricNames[] = {
-    IREE_SVL("rejected_node"),
-    IREE_SVL("rejected_dependency_latency_cycles"),
-    IREE_SVL("rejected_latency_cycles"),
-    IREE_SVL("rejected_pair_affinity_score"),
-    IREE_SVL("rejected_projected_live_units"),
-    IREE_SVL("rejected_killed_live_units"),
-    IREE_SVL("rejected_produced_live_units"),
-    IREE_SVL("rejected_data_ready_stall_cycles"),
-    IREE_SVL("rejected_resource_stall_cycles"),
-    IREE_SVL("rejected_hazard_stall_cycles"),
-    IREE_SVL("rejected_completion_wait_cycles"),
-    IREE_SVL("rejected_effective_stall_cycles"),
-    IREE_SVL("rejected_bottleneck_resource_id"),
-    IREE_SVL("rejected_pressure_cliff_penalty"),
-    IREE_SVL("rejected_pressure_cliff_source"),
-    IREE_SVL("rejected_pressure_cliff_units"),
-    IREE_SVL("rejected_units_until_pressure_cliff"),
-};
-
 iree_status_t loom_low_schedule_format_json(
     const loom_low_schedule_table_t* table, iree_string_builder_t* builder) {
   loom_output_stream_t stream;
@@ -747,67 +727,58 @@ iree_status_t loom_low_schedule_format_json(
           &decision_object, IREE_SV("chosen_units_until_pressure_cliff"),
           decision->chosen_units_until_pressure_cliff,
           LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE));
-      if (decision->rejected_node == LOOM_LOW_SCHEDULE_NODE_NONE) {
-        for (iree_host_size_t j = 0;
-             j < IREE_ARRAYSIZE(kLoomLowScheduleRejectedMetricNames); ++j) {
-          IREE_RETURN_IF_ERROR(loom_json_object_write_null_field(
-              &decision_object, kLoomLowScheduleRejectedMetricNames[j]));
-        }
-      } else {
-        IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-            &decision_object, IREE_SV("rejected_node"),
-            decision->rejected_node));
-        IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-            &decision_object, IREE_SV("rejected_dependency_latency_cycles"),
-            decision->rejected_dependency_latency_cycles));
-        IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-            &decision_object, IREE_SV("rejected_latency_cycles"),
-            decision->rejected_latency_cycles));
-        IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-            &decision_object, IREE_SV("rejected_pair_affinity_score"),
-            decision->rejected_pair_affinity_score));
-        IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
-            &decision_object, IREE_SV("rejected_projected_live_units"),
-            decision->rejected_projected_live_units));
-        IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
-            &decision_object, IREE_SV("rejected_killed_live_units"),
-            decision->rejected_killed_live_units));
-        IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
-            &decision_object, IREE_SV("rejected_produced_live_units"),
-            decision->rejected_produced_live_units));
-        IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-            &decision_object, IREE_SV("rejected_data_ready_stall_cycles"),
-            decision->rejected_data_ready_stall_cycles));
-        IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-            &decision_object, IREE_SV("rejected_resource_stall_cycles"),
-            decision->rejected_resource_stall_cycles));
-        IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-            &decision_object, IREE_SV("rejected_hazard_stall_cycles"),
-            decision->rejected_hazard_stall_cycles));
-        IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-            &decision_object, IREE_SV("rejected_completion_wait_cycles"),
-            decision->rejected_completion_wait_cycles));
-        IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-            &decision_object, IREE_SV("rejected_effective_stall_cycles"),
-            decision->rejected_effective_stall_cycles));
-        IREE_RETURN_IF_ERROR(loom_low_schedule_json_write_nullable_u16_field(
-            &decision_object, IREE_SV("rejected_bottleneck_resource_id"),
-            decision->rejected_bottleneck_resource_id, LOOM_LOW_RESOURCE_NONE));
-        IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-            &decision_object, IREE_SV("rejected_pressure_cliff_penalty"),
-            decision->rejected_pressure_cliff_penalty));
-        IREE_RETURN_IF_ERROR(loom_low_schedule_json_write_nullable_string_field(
-            &decision_object, IREE_SV("rejected_pressure_cliff_source"),
-            decision->rejected_pressure_cliff_source));
-        IREE_RETURN_IF_ERROR(loom_low_schedule_json_write_nullable_u32_field(
-            &decision_object, IREE_SV("rejected_pressure_cliff_units"),
-            decision->rejected_pressure_cliff_units,
-            LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE));
-        IREE_RETURN_IF_ERROR(loom_low_schedule_json_write_nullable_u32_field(
-            &decision_object, IREE_SV("rejected_units_until_pressure_cliff"),
-            decision->rejected_units_until_pressure_cliff,
-            LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE));
-      }
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+          &decision_object, IREE_SV("rejected_node"), decision->rejected_node));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+          &decision_object, IREE_SV("rejected_dependency_latency_cycles"),
+          decision->rejected_dependency_latency_cycles));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+          &decision_object, IREE_SV("rejected_latency_cycles"),
+          decision->rejected_latency_cycles));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+          &decision_object, IREE_SV("rejected_pair_affinity_score"),
+          decision->rejected_pair_affinity_score));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+          &decision_object, IREE_SV("rejected_projected_live_units"),
+          decision->rejected_projected_live_units));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+          &decision_object, IREE_SV("rejected_killed_live_units"),
+          decision->rejected_killed_live_units));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+          &decision_object, IREE_SV("rejected_produced_live_units"),
+          decision->rejected_produced_live_units));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+          &decision_object, IREE_SV("rejected_data_ready_stall_cycles"),
+          decision->rejected_data_ready_stall_cycles));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+          &decision_object, IREE_SV("rejected_resource_stall_cycles"),
+          decision->rejected_resource_stall_cycles));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+          &decision_object, IREE_SV("rejected_hazard_stall_cycles"),
+          decision->rejected_hazard_stall_cycles));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+          &decision_object, IREE_SV("rejected_completion_wait_cycles"),
+          decision->rejected_completion_wait_cycles));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+          &decision_object, IREE_SV("rejected_effective_stall_cycles"),
+          decision->rejected_effective_stall_cycles));
+      IREE_RETURN_IF_ERROR(loom_low_schedule_json_write_nullable_u16_field(
+          &decision_object, IREE_SV("rejected_bottleneck_resource_id"),
+          decision->rejected_bottleneck_resource_id, LOOM_LOW_RESOURCE_NONE));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+          &decision_object, IREE_SV("rejected_pressure_cliff_penalty"),
+          decision->rejected_pressure_cliff_penalty));
+      IREE_RETURN_IF_ERROR(loom_low_schedule_json_write_nullable_string_field(
+          &decision_object, IREE_SV("rejected_pressure_cliff_source"),
+          decision->rejected_pressure_cliff_source));
+      IREE_RETURN_IF_ERROR(loom_low_schedule_json_write_nullable_u32_field(
+          &decision_object, IREE_SV("rejected_pressure_cliff_units"),
+          decision->rejected_pressure_cliff_units,
+          LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE));
+      IREE_RETURN_IF_ERROR(loom_low_schedule_json_write_nullable_u32_field(
+          &decision_object, IREE_SV("rejected_units_until_pressure_cliff"),
+          decision->rejected_units_until_pressure_cliff,
+          LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE));
       IREE_RETURN_IF_ERROR(loom_json_object_end(&decision_object));
     }
     IREE_RETURN_IF_ERROR(loom_json_array_end(&candidate_decisions));

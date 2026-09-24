@@ -99,6 +99,8 @@ loom_cc_library(
 loom_cc_library(
     name = "schedule",
     srcs = [
+        "block.c",
+        "block.h",
         "candidate_policy.c",
         "candidate_policy.h",
         "completion_demand.c",
@@ -175,6 +177,41 @@ loom_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "block_test",
+    srcs = [
+        "block.h",
+        "block_test.cc",
+        "context.h",
+        "pressure.h",
+        "pressure_alias.h",
+        "ready_policy.h",
+        "setup_order.h",
+        "storage_lifetime.h",
+        "storage_relation_index.h",
+        "target_pressure.h",
+    ],
+    deps = [
+        ":dependency_index",
+        ":ready_frontier",
+        ":resource_calendar",
+        ":schedule",
+        "//loom/src/loom/analysis:liveness",
+        "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:memory_access",
+        "//loom/src/loom/codegen/low:storage_relation",
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target/test:descriptors",
+        "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:segmented_storage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

@@ -6,6 +6,8 @@
 
 #include "loom/codegen/low/guarded_motion.h"
 
+#include <string.h>
+
 #include "loom/codegen/low/function.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
@@ -176,6 +178,18 @@ iree_status_t loom_low_guarded_motion_plan(
       status = iree_arena_allocate_array(arena, schedule->block_count,
                                          sizeof(*out_plan->regions),
                                          (void**)&out_plan->regions);
+      if (iree_status_is_ok(status)) {
+        const iree_host_size_t word_count =
+            iree_bitmap_calculate_words(schedule->block_count);
+        status = iree_arena_allocate_array(
+            arena, word_count, sizeof(*out_plan->changed_blocks.words),
+            (void**)&out_plan->changed_blocks.words);
+        if (iree_status_is_ok(status)) {
+          memset(out_plan->changed_blocks.words, 0,
+                 word_count * sizeof(*out_plan->changed_blocks.words));
+          out_plan->changed_blocks.bit_count = schedule->block_count;
+        }
+      }
     }
     if (iree_status_is_ok(status)) {
       out_plan->regions[out_plan->region_count++] =
@@ -187,6 +201,8 @@ iree_status_t loom_low_guarded_motion_plan(
                   (loom_op_t*)schedule->nodes[block->node_start + prefix_count]
                       .op,
           };
+      iree_bitmap_set(out_plan->changed_blocks, parent_index);
+      iree_bitmap_set(out_plan->changed_blocks, block_index);
     }
   }
   return status;

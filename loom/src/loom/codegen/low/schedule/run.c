@@ -10,6 +10,7 @@
 #include "iree/base/internal/math.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/codegen/low/function_model.h"
+#include "loom/codegen/low/schedule/block.h"
 #include "loom/codegen/low/schedule/candidate_policy.h"
 #include "loom/codegen/low/schedule/completion_wait.h"
 #include "loom/codegen/low/schedule/context.h"
@@ -1227,34 +1228,6 @@ static iree_status_t loom_low_schedule_handle_dependency_cycle(
   return iree_ok_status();
 }
 
-static void loom_low_schedule_note_issue_group(
-    loom_low_schedule_build_state_t* state, uint32_t node_index) {
-  loom_low_schedule_node_t* node = &state->nodes[node_index];
-  if (state->issue_group_count != 0) {
-    loom_low_schedule_issue_group_t* group =
-        &state->issue_groups[state->issue_group_count - 1];
-    if (group->block_index == node->block_index) {
-      IREE_ASSERT_LE(group->issue_cycle, node->issue_cycle);
-    }
-    if (group->block_index == node->block_index &&
-        group->issue_cycle == node->issue_cycle) {
-      IREE_ASSERT_NE(group->scheduled_node_count, UINT32_MAX);
-      ++group->scheduled_node_count;
-      node->issue_group_ordinal = (uint32_t)state->issue_group_count - 1;
-      return;
-    }
-  }
-  IREE_ASSERT_LT(state->issue_group_count, UINT32_MAX);
-  node->issue_group_ordinal = (uint32_t)state->issue_group_count;
-  state->issue_groups[state->issue_group_count++] =
-      (loom_low_schedule_issue_group_t){
-          .block_index = node->block_index,
-          .issue_cycle = node->issue_cycle,
-          .scheduled_node_start = (uint32_t)state->scheduled_node_count,
-          .scheduled_node_count = 1,
-      };
-}
-
 static void loom_low_schedule_apply_candidate_descriptor(
     loom_low_schedule_build_state_t* state, loom_low_schedule_node_t* node,
     const loom_low_schedule_candidate_score_t* score) {
@@ -1381,21 +1354,15 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
     loom_low_schedule_block_t* block_record = &state->blocks[block_index];
     const uint32_t block_node_end =
         block_record->node_start + block_record->node_count;
-    block_record->scheduled_node_start = (uint32_t)state->scheduled_node_count;
-    block_record->scheduled_node_count = 0;
-    block_record->issue_group_start = (uint32_t)state->issue_group_count;
-    block_record->issue_group_count = 0;
-    state->liveness_block_orders[block_index] = (loom_liveness_block_order_t){
-        .block = block_record->block,
-        .ops = block_record->node_count != 0
-                   ? &state->scheduled_ops[state->scheduled_node_count]
-                   : NULL,
-        .op_count = block_record->node_count,
-    };
-    state->current_block_index = block_index;
-    state->current_issue_cycle = 0;
-    state->pending_pair_affinity_node = LOOM_LOW_SCHEDULE_NODE_NONE;
-    loom_low_schedule_resource_calendar_reset(&state->resource_calendar);
+    loom_low_schedule_block_begin(state, (uint32_t)block_index);
+    const loom_low_schedule_retained_blocks_t* retained =
+        state->options->retained_blocks;
+    if (retained != NULL &&
+        !iree_bitmap_test(retained->changed_blocks, block_index)) {
+      IREE_RETURN_IF_ERROR(loom_low_schedule_block_retain(
+          state, &pressure_state, retained->schedule));
+      continue;
+    }
     if (loom_low_schedule_strategy_uses_pressure(state->options->strategy)) {
       loom_low_schedule_pressure_initialize_block(state, block_record,
                                                   &pressure_state);
@@ -1405,7 +1372,6 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
             state, &pressure_state);
       }
     }
-    uint32_t scheduled_in_block = 0;
     uint32_t range_start = block_record->node_start;
     uint32_t range_end = range_start < block_node_end
                              ? loom_low_schedule_source_range_end(
@@ -1415,13 +1381,13 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
         state, &pressure_state, &ready_policy, indegrees, range_start,
         range_end);
     uint32_t scheduled_in_range = 0;
-    while (scheduled_in_block < block_record->node_count) {
+    while (block_record->scheduled_node_count < block_record->node_count) {
       const uint32_t ready_candidate_count =
           loom_low_schedule_ready_frontier_count(&ready_policy.frontier);
       if (ready_candidate_count == 0) {
         return loom_low_schedule_handle_dependency_cycle(
-            state, block_record, node_count, scheduled_in_block, range_start,
-            range_end);
+            state, block_record, node_count, block_record->scheduled_node_count,
+            range_start, range_end);
       }
       loom_low_schedule_candidate_selection_t selection;
       loom_low_schedule_candidate_policy_select(
@@ -1449,18 +1415,8 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
           loom_low_schedule_resource_calendar_find_earliest_issue_cycle(
               &state->resource_calendar, &chosen->schedule_class, 1,
               issue_cycle, &bottleneck_resource_id);
-      state->current_issue_cycle = issue_cycle;
-      chosen->scheduled_ordinal = scheduled_in_block++;
-      chosen->issue_cycle = issue_cycle;
-      loom_low_schedule_note_issue_group(state, chosen_node);
-      block_record->issue_group_count =
-          (uint32_t)state->issue_group_count - block_record->issue_group_start;
+      loom_low_schedule_block_append(state, chosen_node, issue_cycle);
       ++scheduled_in_range;
-      state->scheduled_node_indices[state->scheduled_node_count] = chosen_node;
-      state->scheduled_ops[state->scheduled_node_count] = chosen->op;
-      ++state->scheduled_node_count;
-      ++block_record->scheduled_node_count;
-      loom_low_schedule_ready_policy_note_node_scheduled(state, chosen_node);
       if (loom_low_schedule_strategy_uses_pressure(state->options->strategy)) {
         loom_low_schedule_candidate_policy_record_decision(
             state, block_index, state->nodes[chosen_node].scheduled_ordinal,
@@ -1542,7 +1498,7 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
       }
       // Compile-time controls remain visible in the schedule, but cannot hide
       // latency or satisfy an instruction-distance hazard by occupying a slot.
-      if (scheduled_in_block < block_record->node_count) {
+      if (block_record->scheduled_node_count < block_record->node_count) {
         uint64_t next_issue_cycle = issue_cycle;
         if (!loom_low_schedule_node_has_zero_issue_width(chosen) &&
             (state->options->strategy !=
@@ -1570,6 +1526,7 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
         }
       }
     }
+    loom_low_schedule_block_finish(state);
   }
   return iree_ok_status();
 }
@@ -1835,6 +1792,7 @@ static iree_status_t loom_low_schedule_build(
         .pressure_summary_budgets = pressure_summary_budgets,
         .blocks = state.blocks,
         .block_count = state.body->block_count,
+        .block_pressure_peaks = state.block_pressure_peaks,
         .operation_order =
             {
                 .blocks = state.liveness_block_orders,

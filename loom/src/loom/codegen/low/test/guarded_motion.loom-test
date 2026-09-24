@@ -147,3 +147,31 @@ low.func.def target<test.low.core>(@target) @occupied_issue_slots(%base: reg<tes
 // ----
 CHECK: *"block":1,"source_ordinal":2,"scheduled_ordinal":0,"kind":"descriptor","op":"low.op","descriptor":"test.total.add.i32"*
 CHECK: *"block":1,"source_ordinal":3,"scheduled_ordinal":1,"kind":"descriptor","op":"low.op","descriptor":"test.store.index.v4i32"*
+
+// ====
+
+// The intervening load/store block keeps its schedule as the later arithmetic
+// moves into the guard. Packet formation consumes the new node indices and
+// memory records after the accepted trial retires the original frame.
+// RUN: with-checks emit low-packet-json @intervening_memory strategy=resource-stall
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @intervening_memory(%base: reg<test.ptr>, %origin: reg<test.i32>, %pixel: reg<test.i32>, %color: reg<test.i32 x4>) asm {
+  %condition = test.event.fast.i32 %origin, %pixel
+  low.cond_br %condition, ^store, ^copy : reg<test.i32>
+^copy:
+  %loaded = test.load.v4i32 %base
+  test.store.v4i32 %base, %loaded
+  low.br ^done
+^store:
+  %index = test.total.add.i32 %origin, %pixel
+  test.store.index.v4i32 %base, %index, %color
+  low.br ^done
+^done:
+  return
+}
+
+// ----
+CHECK: *"block":0,"source_ordinal":?,"scheduled_ordinal":?,"kind":"descriptor","op":"low.op","descriptor":"test.total.add.i32"*
+CHECK: *"node":3,"block":1,"source_ordinal":3,"scheduled_ordinal":0,"kind":"descriptor","op":"low.op","descriptor":"test.load.v4i32"*
+CHECK: *"node":4,"block":1,"source_ordinal":4,"scheduled_ordinal":1,"kind":"descriptor","op":"low.op","descriptor":"test.store.v4i32"*
