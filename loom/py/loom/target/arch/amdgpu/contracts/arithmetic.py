@@ -23,6 +23,7 @@ from loom.dsl import Op
 from loom.target.arch.amdgpu.contracts.materializers import (
     ADDRESS_VGPR_MATERIALIZER,
     F32_VGPR_MATERIALIZER,
+    REGISTERS_VGPR_MATERIALIZER,
 )
 from loom.target.arch.amdgpu.contracts.packed_i8 import (
     PACKED_I8_TYPE as _VEC_I8_PACKED,
@@ -2158,7 +2159,7 @@ def _cast_rule(
     result_type: TypePattern,
     descriptor_key: str,
     *,
-    f32_input: bool = False,
+    input_materializer: ValueMaterializer | None = None,
     extra_guards: tuple[Guard, ...] = (),
     report_key: str = "",
 ) -> DescriptorRule:
@@ -2177,8 +2178,8 @@ def _cast_rule(
             EmitDescriptorOp(
                 descriptor=descriptor,
                 operands={
-                    "input": _f32_vgpr_operand("input")
-                    if f32_input
+                    "input": _materialized_operand("input", input_materializer)
+                    if input_materializer
                     else ValueRef.operand("input")
                 },
                 results={"dst": ValueRef.result("result")},
@@ -2285,7 +2286,9 @@ def _bf16_extf_rule() -> DescriptorRule:
         emit=(
             EmitDescriptorOp(
                 descriptor=descriptor,
-                operands={"value": ValueRef.operand("input")},
+                operands={
+                    "value": _materialized_operand("input", REGISTERS_VGPR_MATERIALIZER)
+                },
                 results={"dst": ValueRef.result("result")},
                 immediates={"imm32": 16},
                 form=DescriptorEmitForm.OP,
@@ -3700,14 +3703,14 @@ def _rules() -> tuple[ContractCase, ...]:
                 _F32,
                 _I32,
                 "amdgpu.v_cvt_i32_f32",
-                f32_input=True,
+                input_materializer=F32_VGPR_MATERIALIZER,
             ),
             _cast_rule(
                 scalar_conversion.scalar_fptoui,
                 _F32,
                 _I32,
                 "amdgpu.v_cvt_u32_f32",
-                f32_input=True,
+                input_materializer=F32_VGPR_MATERIALIZER,
             ),
         )
     )
@@ -4048,14 +4051,14 @@ def _rules() -> tuple[ContractCase, ...]:
                 _VEC_F32,
                 _VEC_I32,
                 "amdgpu.v_cvt_i32_f32",
-                f32_input=True,
+                input_materializer=F32_VGPR_MATERIALIZER,
             ),
             _cast_rule(
                 vector.vector_fptoui,
                 _VEC_F32,
                 _VEC_I32,
                 "amdgpu.v_cvt_u32_f32",
-                f32_input=True,
+                input_materializer=F32_VGPR_MATERIALIZER,
             ),
             *_commutative_f32_binary_rules(
                 scalar_arithmetic.scalar_addf,
@@ -4123,6 +4126,7 @@ def _rules() -> tuple[ContractCase, ...]:
                 _F16,
                 _F32,
                 "amdgpu.v_cvt_f32_f16",
+                input_materializer=REGISTERS_VGPR_MATERIALIZER,
             ),
             _cast_rule(
                 scalar_conversion.scalar_extf,
@@ -4166,7 +4170,7 @@ def _rules() -> tuple[ContractCase, ...]:
                 _F32,
                 _F16,
                 "amdgpu.v_cvt_f16_f32",
-                f32_input=True,
+                input_materializer=F32_VGPR_MATERIALIZER,
             ),
             _bf16_fptrunc_rule(),
             _cast_rule(
@@ -4347,6 +4351,10 @@ AMDGPU_ARITHMETIC_CONTRACT_FRAGMENT = ContractFragment(
     descriptor_set=_DESCRIPTOR_SET,
     public_header="loom/target/arch/amdgpu/contracts/arithmetic.h",
     c_source_includes=("loom/target/arch/amdgpu/lower/kinds.h",),
-    materializers=(ADDRESS_VGPR_MATERIALIZER, F32_VGPR_MATERIALIZER),
+    materializers=(
+        ADDRESS_VGPR_MATERIALIZER,
+        F32_VGPR_MATERIALIZER,
+        REGISTERS_VGPR_MATERIALIZER,
+    ),
     cases=_rules(),
 )

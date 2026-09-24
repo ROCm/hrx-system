@@ -169,11 +169,13 @@ iree_status_t loom_amdgpu_map_argument(
   // uses VGPRs. Operand adaptation handles that copy at each consuming rule.
   if (bundle->export_plan->abi_kind == LOOM_TARGET_ABI_HAL_KERNEL &&
       loom_kernel_def_isa(source_function_op) &&
-      (loom_amdgpu_type_is_f32(source_type) ||
-       loom_amdgpu_type_is_f64(source_type) ||
-       loom_amdgpu_type_is_i8(source_type) ||
-       loom_amdgpu_type_is_i16(source_type))) {
-    const uint32_t unit_count = loom_amdgpu_type_is_f64(source_type) ? 2 : 1;
+      loom_type_is_scalar(source_type) &&
+      loom_scalar_type_set_contains(
+          LOOM_SCALAR_TYPE_SET_INTEGER_PAYLOAD | LOOM_SCALAR_TYPE_SET_FLOAT,
+          loom_type_element_type(source_type))) {
+    const uint32_t bit_count = (uint32_t)loom_scalar_type_bitwidth(
+        loom_type_element_type(source_type));
+    const uint32_t unit_count = (bit_count + 31) / 32;
     return loom_amdgpu_make_sgpr_range_type(context, unit_count,
                                             &out_argument->abi_type);
   }

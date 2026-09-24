@@ -513,6 +513,7 @@ loom_check_test_suite(
     "test/source_low/memory_wide_offsets.loom-test"
     "test/source_low/memory_word.loom-test"
     "test/source_low/memory_workgroup_scalar_addressing.loom-test"
+    "test/source_low/narrow_float_arguments.loom-test"
     "test/source_low/nested_view_selection.loom-test"
     "test/source_low/numeric_address_widening.loom-test"
     "test/source_low/numeric_bfloat_widen.loom-test"

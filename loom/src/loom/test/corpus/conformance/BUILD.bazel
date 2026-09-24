@@ -46,6 +46,7 @@ loom_test(
     srcs = [
         "scalar_float_conversion.loom",
         ":scalar_float_conversion_cases.loom",
+        "//loom/src/loom/test/corpus/source_low:narrow_float_arguments.loom-test",
     ],
     compile_targets = [
         "//loom/target/amdgpu:gfx942",

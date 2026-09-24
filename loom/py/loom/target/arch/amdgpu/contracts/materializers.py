@@ -8,6 +8,13 @@
 
 from loom.target.contracts import ValueMaterializer
 
+REGISTERS_VGPR_MATERIALIZER = ValueMaterializer(
+    name="registers_vgpr",
+    can_materialize="loom_amdgpu_value_can_materialize_as_vgpr_registers",
+    materialize="loom_amdgpu_lookup_or_materialize_vgpr_registers",
+    header="loom/target/arch/amdgpu/lower/materializers.h",
+)
+
 I32_VGPR_MATERIALIZER = ValueMaterializer(
     name="i32_vgpr",
     can_materialize="loom_amdgpu_value_can_materialize_as_vgpr_i32",

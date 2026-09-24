@@ -554,6 +554,15 @@ loom_check_test_suite(
         ],
     ),
     compile_targets = {
+        "test/source_low/narrow_float_arguments.loom-test": [
+            "//loom/target/amdgpu:gfx942",
+            "//loom/target/amdgpu:gfx950",
+            "//loom/target/amdgpu:gfx1100",
+            "//loom/target/amdgpu:gfx1151",
+            "//loom/target/amdgpu:gfx1170",
+            "//loom/target/amdgpu:gfx1200",
+            "//loom/target/amdgpu:gfx1250",
+        ],
         "test/source_low/source_low_memory_atomic_observations_gfx1200.loom-test": [
             "//loom/target/amdgpu:gfx1200",
             "//loom/target/amdgpu:gfx1201",

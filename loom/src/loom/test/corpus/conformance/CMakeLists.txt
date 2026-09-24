@@ -32,6 +32,7 @@ loom_test_module(
   SRCS
     "scalar_float_conversion.loom"
     "${CMAKE_CURRENT_BINARY_DIR}/scalar_float_conversion_cases.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/narrow_float_arguments.loom-test"
   DATA
     "${CMAKE_CURRENT_BINARY_DIR}/scalar_float_conversion_arrays"
     "${CMAKE_CURRENT_BINARY_DIR}/scalar_float_conversion_cases.loom"

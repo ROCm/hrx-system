@@ -26,7 +26,7 @@ static bool loom_amdgpu_low_type_can_materialize_as_vgpr_registers(
                                                 LOOM_AMDGPU_REG_CLASS_ID_SGPR);
 }
 
-static iree_status_t loom_amdgpu_value_can_materialize_as_vgpr_registers(
+iree_status_t loom_amdgpu_value_can_materialize_as_vgpr_registers(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t value_id, bool* out_can_materialize) {
   *out_can_materialize = false;
@@ -36,6 +36,16 @@ static iree_status_t loom_amdgpu_value_can_materialize_as_vgpr_registers(
   *out_can_materialize =
       loom_amdgpu_low_type_can_materialize_as_vgpr_registers(context, low_type);
   return iree_ok_status();
+}
+
+iree_status_t loom_amdgpu_lookup_or_materialize_vgpr_registers(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_value, loom_value_id_t* out_low_value) {
+  loom_value_id_t low_value = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_lookup_value(context, source_value, &low_value));
+  return loom_amdgpu_materialize_low_vgpr_b32_registers(
+      context, source_op, low_value, out_low_value);
 }
 
 iree_status_t loom_amdgpu_value_can_materialize_as_vgpr_i32(

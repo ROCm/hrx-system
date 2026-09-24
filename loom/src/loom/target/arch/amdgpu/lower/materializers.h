@@ -16,6 +16,19 @@
 extern "C" {
 #endif
 
+// Returns true when the source value has an SGPR or VGPR register mapping
+// whose bits can be consumed by a VGPR operand.
+iree_status_t loom_amdgpu_value_can_materialize_as_vgpr_registers(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t value_id, bool* out_can_materialize);
+
+// Reuses the bound VGPR value or copies each bound SGPR word into a VGPR.
+// Preserves all payload bits, including unspecified upper bits of narrow
+// values.
+iree_status_t loom_amdgpu_lookup_or_materialize_vgpr_registers(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_value, loom_value_id_t* out_low_value);
+
 // Returns true when a source i32 scalar or vector value can be materialized as
 // a VGPR operand for vector-style packets.
 iree_status_t loom_amdgpu_value_can_materialize_as_vgpr_i32(

@@ -1,0 +1,124 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/narrow_float_arguments.loom-test
+// RUN: with-checks emit source-low target=spirv:vulkan1.3+bda+extended-types output=low control-flow=structured-low
+
+// Mixed widths, unused parameters, raw stores and independent widening uses
+// exercise the direct argument ABI without changing narrow payload bits.
+kernel.def @narrow_float_arguments() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%e4: f8E4M3, %unused: f16, %e5: f8E5M2, %marker: f64, %half: f16, %brain: bf16, %output: buffer) {
+  %e4_base = index.constant 0 : offset
+  %e4_view = buffer.view %output[%e4_base] : buffer -> view<1xf8E4M3>
+  view.store %e4, %e4_view[0] : f8E4M3, view<1xf8E4M3>
+  %e5_base = index.constant 1 : offset
+  %e5_view = buffer.view %output[%e5_base] : buffer -> view<1xf8E5M2>
+  view.store %e5, %e5_view[0] : f8E5M2, view<1xf8E5M2>
+  %half_base = index.constant 2 : offset
+  %half_view = buffer.view %output[%half_base] : buffer -> view<1xf16>
+  view.store %half, %half_view[0] : f16, view<1xf16>
+  %brain_base = index.constant 4 : offset
+  %brain_view = buffer.view %output[%brain_base] : buffer -> view<1xbf16>
+  view.store %brain, %brain_view[0] : bf16, view<1xbf16>
+  %converted_half_base = index.constant 8 : offset
+  %converted_half_view = buffer.view %output[%converted_half_base] : buffer -> view<2xf16>
+  %e4_half = scalar.extf %e4 : f8E4M3 to f16
+  view.store %e4_half, %converted_half_view[0] : f16, view<2xf16>
+  %e5_half = scalar.extf %e5 : f8E5M2 to f16
+  view.store %e5_half, %converted_half_view[1] : f16, view<2xf16>
+  %f32_base = index.constant 16 : offset
+  %f32_view = buffer.view %output[%f32_base] : buffer -> view<4xf32>
+  %e4_f32 = scalar.extf %e4 : f8E4M3 to f32
+  view.store %e4_f32, %f32_view[0] : f32, view<4xf32>
+  %e5_f32 = scalar.extf %e5 : f8E5M2 to f32
+  view.store %e5_f32, %f32_view[1] : f32, view<4xf32>
+  %half_f32 = scalar.extf %half : f16 to f32
+  view.store %half_f32, %f32_view[2] : f32, view<4xf32>
+  %brain_f32 = scalar.extf %brain : bf16 to f32
+  view.store %brain_f32, %f32_view[3] : f32, view<4xf32>
+  %f64_base = index.constant 32 : offset
+  %f64_view = buffer.view %output[%f64_base] : buffer -> view<4xf64>
+  %e4_f64 = scalar.extf %e4 : f8E4M3 to f64
+  view.store %e4_f64, %f64_view[0] : f64, view<4xf64>
+  %e5_f64 = scalar.extf %e5 : f8E5M2 to f64
+  view.store %e5_f64, %f64_view[1] : f64, view<4xf64>
+  %half_f64 = scalar.extf %half : f16 to f64
+  view.store %half_f64, %f64_view[2] : f64, view<4xf64>
+  %brain_f64 = scalar.extf %brain : bf16 to f64
+  view.store %brain_f64, %f64_view[3] : f64, view<4xf64>
+  %marker_base = index.constant 64 : offset
+  %marker_view = buffer.view %output[%marker_base] : buffer -> view<1xf64>
+  view.store %marker, %marker_view[0] : f64, view<1xf64>
+  kernel.return
+}
+
+// ----
+CHECK: low.kernel.def target<spirv.logical.core> * @narrow_float_arguments(*) asm {
+CHECK: %half_f32 = OpFConvert.f16.f32 %half
+CHECK: %brain_f32 = OpFConvert.bf16.f32 %brain
+CHECK: %half_f64 = OpFConvert.f16.f64 %half
+CHECK: %brain_f64 = OpFConvert.f32.f64 %brain_f32
+CHECK: %e4_half = OpFConvert.f32.f16 %*
+CHECK: %e5_half = OpFConvert.f32.f16 %*
+
+// ====
+
+kernel.def @narrow_argument_bitcasts() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%e4_bits: i8, %unused: f16, %e5_bits: i8, %marker: f64, %half_bits: i16, %brain_bits: i16, %output: buffer) {
+  %e4 = scalar.bitcast %e4_bits : i8 to f8E4M3
+  %e5 = scalar.bitcast %e5_bits : i8 to f8E5M2
+  %half = scalar.bitcast %half_bits : i16 to f16
+  %brain = scalar.bitcast %brain_bits : i16 to bf16
+  %e4_base = index.constant 0 : offset
+  %e4_view = buffer.view %output[%e4_base] : buffer -> view<1xf8E4M3>
+  view.store %e4, %e4_view[0] : f8E4M3, view<1xf8E4M3>
+  %e5_base = index.constant 1 : offset
+  %e5_view = buffer.view %output[%e5_base] : buffer -> view<1xf8E5M2>
+  view.store %e5, %e5_view[0] : f8E5M2, view<1xf8E5M2>
+  %half_base = index.constant 2 : offset
+  %half_view = buffer.view %output[%half_base] : buffer -> view<1xf16>
+  view.store %half, %half_view[0] : f16, view<1xf16>
+  %brain_base = index.constant 4 : offset
+  %brain_view = buffer.view %output[%brain_base] : buffer -> view<1xbf16>
+  view.store %brain, %brain_view[0] : bf16, view<1xbf16>
+  %converted_half_base = index.constant 8 : offset
+  %converted_half_view = buffer.view %output[%converted_half_base] : buffer -> view<2xf16>
+  %e4_half = scalar.extf %e4 : f8E4M3 to f16
+  view.store %e4_half, %converted_half_view[0] : f16, view<2xf16>
+  %e5_half = scalar.extf %e5 : f8E5M2 to f16
+  view.store %e5_half, %converted_half_view[1] : f16, view<2xf16>
+  %f32_base = index.constant 16 : offset
+  %f32_view = buffer.view %output[%f32_base] : buffer -> view<4xf32>
+  %e4_f32 = scalar.extf %e4 : f8E4M3 to f32
+  view.store %e4_f32, %f32_view[0] : f32, view<4xf32>
+  %e5_f32 = scalar.extf %e5 : f8E5M2 to f32
+  view.store %e5_f32, %f32_view[1] : f32, view<4xf32>
+  %half_f32 = scalar.extf %half : f16 to f32
+  view.store %half_f32, %f32_view[2] : f32, view<4xf32>
+  %brain_f32 = scalar.extf %brain : bf16 to f32
+  view.store %brain_f32, %f32_view[3] : f32, view<4xf32>
+  %f64_base = index.constant 32 : offset
+  %f64_view = buffer.view %output[%f64_base] : buffer -> view<4xf64>
+  %e4_f64 = scalar.extf %e4 : f8E4M3 to f64
+  view.store %e4_f64, %f64_view[0] : f64, view<4xf64>
+  %e5_f64 = scalar.extf %e5 : f8E5M2 to f64
+  view.store %e5_f64, %f64_view[1] : f64, view<4xf64>
+  %half_f64 = scalar.extf %half : f16 to f64
+  view.store %half_f64, %f64_view[2] : f64, view<4xf64>
+  %brain_f64 = scalar.extf %brain : bf16 to f64
+  view.store %brain_f64, %f64_view[3] : f64, view<4xf64>
+  %marker_base = index.constant 64 : offset
+  %marker_view = buffer.view %output[%marker_base] : buffer -> view<1xf64>
+  view.store %marker, %marker_view[0] : f64, view<1xf64>
+  kernel.return
+}
+
+// ----
+CHECK: low.kernel.def target<spirv.logical.core> * @narrow_argument_bitcasts(*) asm {
+CHECK: %half_f32 = OpFConvert.f16.f32 %half
+CHECK: %brain_f32 = OpFConvert.bf16.f32 %brain
+CHECK: %half_f64 = OpFConvert.f16.f64 %half
+CHECK: %brain_f64 = OpFConvert.f32.f64 %brain_f32
+CHECK: %e4_half = OpFConvert.f32.f16 %*
+CHECK: %e5_half = OpFConvert.f32.f16 %*
