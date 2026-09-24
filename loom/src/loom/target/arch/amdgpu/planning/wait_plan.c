@@ -2251,10 +2251,13 @@ static uint16_t loom_amdgpu_wait_plan_normalize_target_count(
     // Only a full drain identifies completion of a particular request.
     target_count = 0;
   }
-  if (counter_id == LOOM_AMDGPU_WAIT_COUNTER_X && target_count != 0 &&
-      builder->xcnt_group == LOOM_AMDGPU_WAIT_XCNT_GROUP_SMEM) {
-    // Scalar-memory translations may complete out of order. A nonzero XCNT
-    // threshold cannot prove that any particular SMEM source was released.
+  const bool is_smem_counter =
+      counter_id == LOOM_AMDGPU_WAIT_COUNTER_SMEM ||
+      (counter_id == LOOM_AMDGPU_WAIT_COUNTER_X &&
+       builder->xcnt_group == LOOM_AMDGPU_WAIT_XCNT_GROUP_SMEM);
+  if (is_smem_counter && target_count != 0) {
+    // Scalar-memory requests may complete out of order. A nonzero logical SMEM
+    // or XCNT threshold cannot prove completion of any particular request.
     target_count = 0;
   }
   return target_count;
@@ -3241,14 +3244,6 @@ static iree_status_t loom_amdgpu_wait_plan_handle_consumer(
         if (!loom_amdgpu_wait_plan_producer_target_count(
                 builder, link->producer_node, slot, &target_count)) {
           continue;
-        }
-        if (counter_mask == LOOM_AMDGPU_WAIT_COUNTER_MASK_SMEM) {
-          // Scalar-memory result dependencies require the producing SMEM
-          // packet to be fully drained before a later packet consumes the
-          // SGPR. Partial lgkmcnt waits are insufficient for SMEM data or
-          // address dependencies even when the producer is oldest among
-          // several outstanding scalar-memory packets.
-          target_count = 0;
         }
       } else if (producer_block == consumer_block) {
         // The producer has not reissued in this block yet. Incoming completion

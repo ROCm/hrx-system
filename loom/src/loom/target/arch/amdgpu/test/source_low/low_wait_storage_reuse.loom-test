@@ -203,3 +203,34 @@ low.func.def target<amdgpu.cdna3.core>(@target) @concat_source_at_residency_clif
   s_waitcnt vmcnt(0) lgkmcnt(15)
   v_add_u32 v0, v1, v0
   s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @smem_result_reuse_requires_full_drain strategy=source fixed=%kernarg:physical_register:0:2 fixed=%wide:physical_register:8:8 fixed=%noise0:physical_register:4:1 fixed=%noise1:physical_register:6:2 fixed=%noise2:physical_register:16:4 fixed=%sum:physical_register:10:1
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @smem_result_reuse_requires_full_drain(%kernarg: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x4>) asm {
+  %wide = s_load_dwordx8_offset_only %kernarg
+  %noise0 = s_load_dword_offset_only %kernarg {offset = 32}
+  %noise1 = s_load_dwordx2_offset_only %kernarg {offset = 40}
+  %noise2 = s_load_dwordx4_offset_only %kernarg {offset = 48}
+  %offset = s_mov_b32 4
+  %query = slice %wide[2] : reg<amdgpu.sgpr x8> -> reg<amdgpu.sgpr x2>
+  %query_lo = slice %query[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %sum, %carry = s_add_co_u32 %query_lo, %offset
+  return %sum, %noise0, %noise1, %noise2
+}
+
+// Scalar-memory requests may complete out of issue order. Reusing the oldest
+// wide load's physical result after three younger requests therefore requires
+// a full drain, even though a positional remaining-count bound would be three.
+// ----
+  s_load_dwordx8 s[8:15], s[0:1] offset:0
+  s_load_dword s4, s[0:1] offset:32
+  s_load_dwordx2 s[6:7], s[0:1] offset:40
+  s_load_dwordx4 s[16:19], s[0:1] offset:48
+  s_mov_b32 s0, 4
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  s_add_u32 s10, s10, s0
+  s_endpgm
