@@ -100,6 +100,7 @@ def iree_amdgpu_hal_cts_testdata(
         target_family = "amdgpu",
         target = "amdgcn-amd-amdhsa",
         source_format = "freestanding_c",
+        copts = [],
         deps = [],
         internal_hdrs = [],
         internalize = True,
@@ -119,6 +120,7 @@ def iree_amdgpu_hal_cts_testdata(
       target: LLVM target triple.
       source_format: Device source compilation pipeline. See
         `iree_amdgpu_binary`.
+      copts: Additional compiler options for each device source.
       deps: Bitcode archives passed to each generated executable. Labels may
         use `{AMDGPU_CODE_OBJECT_TARGET}` or
         `{AMDGPU_CODE_OBJECT_TARGET_FRAGMENT}` placeholders to refer to the
@@ -158,6 +160,7 @@ def iree_amdgpu_hal_cts_testdata(
                     target = target,
                     arch = code_object_target,
                     srcs = [src],
+                    copts = copts,
                     out = binary_out,
                     testonly = testonly,
                     tags = tags,
@@ -169,6 +172,7 @@ def iree_amdgpu_hal_cts_testdata(
                     target = target,
                     arch = code_object_target,
                     srcs = [src],
+                    copts = copts,
                     deps = _target_deps(deps, code_object_target),
                     internal_hdrs = internal_hdrs,
                     internalize = internalize,

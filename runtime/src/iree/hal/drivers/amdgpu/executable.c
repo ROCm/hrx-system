@@ -98,6 +98,30 @@ iree_hal_amdgpu_executable_dispatch_limits_validate_workgroup_size(
   return iree_ok_status();
 }
 
+iree_status_t
+iree_hal_amdgpu_executable_dispatch_descriptor_validate_workgroup_uniformity(
+    const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor,
+    const uint16_t workgroup_size[3], const uint32_t workgroup_count[3],
+    const uint32_t workitem_count[3]) {
+  if (!iree_any_bit_set(
+          descriptor->export_flags,
+          IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_REQUIRES_UNIFORM_WORKGROUPS)) {
+    return iree_ok_status();
+  }
+  for (iree_host_size_t i = 0; i < 3; ++i) {
+    const uint64_t uniform_workitem_count =
+        (uint64_t)workgroup_count[i] * workgroup_size[i];
+    if (IREE_UNLIKELY(workitem_count[i] != uniform_workitem_count)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "executable requires uniform workgroups: exact work-item count "
+          "dimension %" PRIhsz " must be %" PRIu64 "; got %u",
+          i, uniform_workitem_count, workitem_count[i]);
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_amdgpu_executable_validate_export_limits(
     const iree_hal_amdgpu_executable_limits_t* limits,
     iree_string_view_t symbol_name,
@@ -678,6 +702,7 @@ static iree_status_t iree_hal_amdgpu_executable_initialize_dispatch_descriptor(
   }
 
   out_descriptor->kernel_args = *kernel_args;
+  out_descriptor->export_flags = export_info->flags;
   out_descriptor->workgroup_cluster_count_limits =
       workgroup_cluster->cluster_count;
   out_descriptor->physical_device_ordinal = physical_device_ordinal;

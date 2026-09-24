@@ -483,6 +483,8 @@ iree_cc_library(
     "virtual_memory.h"
   DEPS
     ::dispatch_concurrency
+    ::executable_metadata
+    ::kernarg_layout
     ::profile_events
     iree::base
     iree::base::internal
@@ -953,6 +955,7 @@ iree_cc_test(
     iree::hal::cts::util::registry
     iree::hal::cts::util::test_base
     iree::hal::drivers::amdgpu::cts::testdata_amdgpu
+    iree::hal::drivers::amdgpu::cts::uniform_dispatch_testdata_amdgpu
     iree::hal::drivers::amdgpu::target::selection
     iree::hal::drivers::amdgpu::util::packet
     iree::io::file_handle

@@ -1490,6 +1490,10 @@ static iree_status_t iree_hal_amdgpu_aql_command_buffer_validate_dispatch_shape(
     params.uses_exact_workitem_count = true;
     IREE_RETURN_IF_ERROR(
         iree_hal_amdgpu_aql_validate_dispatch_params(&params, NULL));
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_executable_dispatch_descriptor_validate_workgroup_uniformity(
+            descriptor, params.workgroup_size, params.workgroup_count,
+            params.workitem_count));
   }
   if (IREE_UNLIKELY(
           config.dynamic_workgroup_local_memory >

@@ -95,6 +95,34 @@ iree_amdgpu_hal_cts_testdata(
     "testdata/executable_test.c"
     "testdata/execution_queue_mask_test.c"
     "testdata/hostcall_buffer_test.c"
+    "testdata/nonuniform_dispatch_metadata_fixture.c"
+  TESTONLY
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_amdgpu_hal_cts_testdata(
+  NAME
+    uniform_dispatch_testdata_amdgpu
+  TARGET
+    amdgcn-amd-amdhsa
+  TARGETS
+    ${IREE_HAL_AMDGPU_TARGETS}
+  TARGET_NAME
+    amdgpu_uniform_dispatch
+  IDENTIFIER
+    "iree_cts_uniform_dispatch_testdata_amdgpu"
+  BACKEND_NAME
+    "amdgpu"
+  TARGET_FAMILY
+    "amdgpu"
+  INTERNAL_HDRS
+    "${IREE_BINARY_DIR}/runtime/src/iree/hal/drivers/amdgpu/abi/amdgpu_abi_bitcode_hdrs.stamp"
+    "${IREE_BINARY_DIR}/runtime/src/iree/hal/drivers/amdgpu/device/bitcode_hdrs.stamp"
+  SRCS
+    "testdata/uniform_dispatch_metadata_fixture.c"
+  COPTS
+    "-foffload-uniform-block"
   TESTONLY
 )
 endif()

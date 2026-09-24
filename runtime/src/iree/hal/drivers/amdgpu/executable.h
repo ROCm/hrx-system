@@ -12,6 +12,7 @@
 #include "iree/hal/drivers/amdgpu/abi/kernel_args.h"
 #include "iree/hal/drivers/amdgpu/abi/kernel_descriptor.h"
 #include "iree/hal/drivers/amdgpu/device/dispatch.h"
+#include "iree/hal/drivers/amdgpu/executable_metadata.h"
 #include "iree/hal/drivers/amdgpu/kernarg_layout.h"
 #include "iree/hal/drivers/amdgpu/physical_device_capabilities.h"
 #include "iree/hal/drivers/amdgpu/profile_metadata.h"
@@ -73,6 +74,8 @@ typedef struct iree_hal_amdgpu_executable_dispatch_descriptor_t {
   uint32_t maximum_workgroup_count[3];
   // Function and physical-device dispatch limits.
   iree_hal_amdgpu_executable_dispatch_limits_t limits;
+  // Immutable requirements retained from the selected executable export.
+  iree_hal_amdgpu_executable_export_flags_t export_flags;
   // Cluster-count limits for this descriptor's physical device.
   iree_hal_amdgpu_dispatch_dimension_limits_t workgroup_cluster_count_limits;
   // Physical device ordinal owning |workgroup_cluster_count_limits|.
@@ -92,6 +95,15 @@ typedef struct iree_hal_amdgpu_executable_dispatch_descriptor_t {
   // True when the PM4 metadata fields are valid for this dispatch.
   bool pm4_launch_state_valid;
 } iree_hal_amdgpu_executable_dispatch_descriptor_t;
+
+// Validates that caller-provided exact work-item counts satisfy the export's
+// uniform-workgroup requirement. The effective workgroup size and exact grid
+// geometry must already have passed ordinary dispatch validation.
+iree_status_t
+iree_hal_amdgpu_executable_dispatch_descriptor_validate_workgroup_uniformity(
+    const iree_hal_amdgpu_executable_dispatch_descriptor_t* descriptor,
+    const uint16_t workgroup_size[3], const uint32_t workgroup_count[3],
+    const uint32_t workitem_count[3]);
 
 // Creates an AMDGPU executable from a binary in memory. Each executable may
 // contain multiple entry points and be composed of several modules presented to

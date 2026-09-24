@@ -42,7 +42,7 @@ typedef enum iree_hal_amdgpu_executable_export_flag_bits_e {
   IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_CUSTOM_DIRECT_ONLY = 1u << 1,
   // Export has decoded AMDGPU resource metadata.
   IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_HAS_RESOURCE_METADATA = 1u << 2,
-  // Export rejects dispatches that would create a partial workgroup.
+  // Every dispatched workgroup must have the selected workgroup size.
   IREE_HAL_AMDGPU_EXECUTABLE_EXPORT_FLAG_REQUIRES_UNIFORM_WORKGROUPS = 1u << 3,
 } iree_hal_amdgpu_executable_export_flag_bits_t;
 typedef uint32_t iree_hal_amdgpu_executable_export_flags_t;

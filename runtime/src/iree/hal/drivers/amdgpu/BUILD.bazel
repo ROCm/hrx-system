@@ -435,6 +435,8 @@ iree_runtime_cc_library(
     ],
     deps = [
         ":dispatch_concurrency",
+        ":executable_metadata",
+        ":kernarg_layout",
         ":profile_events",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
@@ -749,6 +751,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/cts/util:registry",
         "//runtime/src/iree/hal/cts/util:test_base",
         "//runtime/src/iree/hal/drivers/amdgpu/cts:testdata_amdgpu",
+        "//runtime/src/iree/hal/drivers/amdgpu/cts:uniform_dispatch_testdata_amdgpu",
         "//runtime/src/iree/hal/drivers/amdgpu/target:selection",
         "//runtime/src/iree/hal/drivers/amdgpu/util:packet",
         "//runtime/src/iree/io:file_handle",

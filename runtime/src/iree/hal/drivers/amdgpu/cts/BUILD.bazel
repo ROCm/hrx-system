@@ -78,6 +78,7 @@ iree_amdgpu_hal_cts_testdata(
         "testdata/executable_test.c",
         "testdata/execution_queue_mask_test.c",
         "testdata/hostcall_buffer_test.c",
+        "testdata/nonuniform_dispatch_metadata_fixture.c",
     ],
     identifier = "iree_cts_testdata_amdgpu",
     internal_hdrs = [
@@ -86,6 +87,20 @@ iree_amdgpu_hal_cts_testdata(
     ],
     tags = ["manual"],
     target_name = "amdgpu",
+    target_selectors_flag = "//runtime/src/iree/hal/drivers/amdgpu:targets",
+)
+
+iree_amdgpu_hal_cts_testdata(
+    name = "uniform_dispatch_testdata_amdgpu",
+    srcs = ["testdata/uniform_dispatch_metadata_fixture.c"],
+    copts = ["-foffload-uniform-block"],
+    identifier = "iree_cts_uniform_dispatch_testdata_amdgpu",
+    internal_hdrs = [
+        "//runtime/src/iree/hal/drivers/amdgpu/abi:amdgpu_abi_bitcode_hdrs",
+        "//runtime/src/iree/hal/drivers/amdgpu/device:bitcode_hdrs",
+    ],
+    tags = ["manual"],
+    target_name = "amdgpu_uniform_dispatch",
     target_selectors_flag = "//runtime/src/iree/hal/drivers/amdgpu:targets",
 )
 

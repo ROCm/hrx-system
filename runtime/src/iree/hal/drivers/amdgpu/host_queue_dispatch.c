@@ -193,6 +193,12 @@ static iree_status_t iree_hal_amdgpu_host_queue_validate_dispatch_shape(
     params.uses_exact_workitem_count = uses_exact_workitem_count;
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_aql_validate_dispatch_params(
         &params, out_cluster_count));
+    if (uses_exact_workitem_count) {
+      IREE_RETURN_IF_ERROR(
+          iree_hal_amdgpu_executable_dispatch_descriptor_validate_workgroup_uniformity(
+              descriptor, params.workgroup_size, params.workgroup_count,
+              params.workitem_count));
+    }
   }
   if (uses_workgroup_clusters) {
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_validate_workgroup_cluster_dispatch(

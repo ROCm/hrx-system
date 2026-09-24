@@ -2204,6 +2204,7 @@ class BuildFileFunctions(object):
         internal_hdrs=None,
         internalize=True,
         source_format=None,
+        copts=None,
         testonly=True,
         tags=None,
         target_compatible_with=None,
@@ -2233,6 +2234,7 @@ class BuildFileFunctions(object):
         source_format_block = self._convert_string_arg_block(
             "SOURCE_FORMAT", source_format, quote=False
         )
+        copts_block = self._convert_string_list_block("COPTS", copts, sort=False)
         testonly_block = self._convert_option_block("TESTONLY", testonly)
 
         self._emit_platform_guard_begin(target_compatible_with)
@@ -2250,6 +2252,7 @@ class BuildFileFunctions(object):
             f"{deps_block}"
             f"{internalize_block}"
             f"{source_format_block}"
+            f"{copts_block}"
             f"{testonly_block}"
             f")\n\n"
         )
