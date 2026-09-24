@@ -464,6 +464,60 @@ TEST_P(TcpFactoryTest, ReportsEphemeralBoundAddress) {
   EXPECT_TRUE(iree_string_view_is_empty(tiny_address));
 }
 
+TEST_P(TcpFactoryTest, StopFromFirstAcceptOwnsUnpublishedSockets) {
+  StopState stop_state;
+  AcceptState accept_state;
+  accept_state.stop_state = &stop_state;
+  accept_state.stop_after_accept_count = 1;
+  std::string address = CreateListener(&accept_state);
+  iree_async_address_t native_address;
+  IREE_ASSERT_OK(iree_async_address_from_string(
+      iree_make_string_view(address.data(), address.size()), &native_address));
+
+  // Complete every client handshake without polling the listener. A multishot
+  // native accept may have several results queued before its first callback.
+  iree_async_proactor_t* client_proactor = nullptr;
+  IREE_ASSERT_OK(iree_async_proactor_create_platform(
+      iree_async_proactor_options_default(), iree_allocator_system(),
+      &client_proactor));
+  std::array<iree_async_socket_t*, 8> clients = {};
+  for (auto& client : clients) {
+    IREE_ASSERT_OK(iree_async_socket_create(
+        client_proactor, IREE_ASYNC_SOCKET_TYPE_TCP, 0, &client));
+    bool connected = false;
+    iree_async_socket_connect_operation_t operation = {};
+    iree_async_operation_initialize(
+        &operation.base, IREE_ASYNC_OPERATION_TYPE_SOCKET_CONNECT, 0,
+        [](void* user_data, iree_async_operation_t*, iree_status_t status,
+           iree_async_completion_flags_t) {
+          IREE_EXPECT_OK(status);
+          *static_cast<bool*>(user_data) = true;
+        },
+        &connected);
+    operation.socket = client;
+    operation.address = native_address;
+    IREE_ASSERT_OK(
+        iree_async_proactor_submit_one(client_proactor, &operation.base));
+    while (!connected) {
+      IREE_ASSERT_OK(iree_async_proactor_poll(
+          client_proactor, iree_infinite_timeout(), nullptr));
+    }
+  }
+
+  PollUntil([&] { return stop_state.completed; });
+  EXPECT_EQ(accept_state.callback_count, 1);
+  EXPECT_EQ(accept_state.stop_status_code, IREE_STATUS_OK);
+  for (auto* connection : accept_state.connections) {
+    connections_.push_back(connection);
+  }
+  for (auto* client : clients) {
+    iree_async_socket_release(client);
+  }
+  iree_async_proactor_release(client_proactor);
+  iree_net_listener_free(listener_);
+  listener_ = nullptr;
+}
+
 TEST_P(TcpFactoryTest, RepeatedAcceptAndStopFromCallback) {
   int sequence = 0;
   StopState stop_state;

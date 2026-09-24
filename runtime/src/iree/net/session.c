@@ -627,22 +627,47 @@ iree_status_t iree_net_session_accept(iree_net_connection_t* connection,
   return iree_ok_status();
 }
 
+static iree_status_t iree_net_session_validate_endpoint_admission_locked(
+    iree_net_session_t* session) {
+  if (iree_net_session_state(session) != IREE_NET_SESSION_STATE_OPERATIONAL) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "application endpoints require an operational "
+                            "session");
+  }
+  if (session->opened_application_endpoint_count >=
+      session->bootstrap.application_endpoint_count) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "all %" PRIu32
+                            " application endpoint ordinals are claimed",
+                            session->bootstrap.application_endpoint_count);
+  }
+  return iree_ok_status();
+}
+
 iree_status_t iree_net_session_open_endpoint(
     iree_net_session_t* session, iree_net_endpoint_ready_callback_t callback) {
   iree_slim_mutex_lock(&session->mutex);
-  iree_status_t status = iree_ok_status();
-  if (iree_net_session_state(session) != IREE_NET_SESSION_STATE_OPERATIONAL) {
-    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "application endpoints require an operational "
-                              "session");
-  } else if (session->opened_application_endpoint_count >=
-             session->bootstrap.application_endpoint_count) {
-    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "all %" PRIu32
-                              " application endpoint ordinals are claimed",
-                              session->bootstrap.application_endpoint_count);
-  } else {
+  iree_status_t status =
+      iree_net_session_validate_endpoint_admission_locked(session);
+  if (iree_status_is_ok(status)) {
     status = iree_net_connection_open_endpoint(session->connection, callback);
+    if (iree_status_is_ok(status)) {
+      ++session->opened_application_endpoint_count;
+    }
+  }
+  iree_slim_mutex_unlock(&session->mutex);
+  return status;
+}
+
+iree_status_t iree_net_session_open_direct_endpoint(
+    iree_net_session_t* session,
+    iree_net_direct_endpoint_ready_callback_t callback) {
+  iree_slim_mutex_lock(&session->mutex);
+  iree_status_t status =
+      iree_net_session_validate_endpoint_admission_locked(session);
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_net_connection_open_direct_endpoint(session->connection, callback);
     if (iree_status_is_ok(status)) {
       ++session->opened_application_endpoint_count;
     }

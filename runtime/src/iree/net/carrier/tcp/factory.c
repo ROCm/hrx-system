@@ -319,8 +319,10 @@ static void iree_net_tcp_listener_accept_complete(
   accept_operation->accepted_socket = NULL;
 
   iree_status_t rearm_status = iree_ok_status();
+  iree_slim_mutex_lock(&listener->mutex);
+  const bool listening =
+      listener->state == IREE_NET_TCP_LISTENER_STATE_LISTENING;
   if (is_final) {
-    iree_slim_mutex_lock(&listener->mutex);
     IREE_ASSERT(iree_any_bit_set(listener->flags,
                                  IREE_NET_TCP_LISTENER_FLAG_ACCEPT_PENDING),
                 "TCP accept completed without listener ownership");
@@ -333,8 +335,8 @@ static void iree_net_tcp_listener_accept_complete(
     IREE_ASSERT(!is_cancelled ||
                     listener->state == IREE_NET_TCP_LISTENER_STATE_STOPPING,
                 "TCP accept cancelled while listener was not stopping");
-    iree_slim_mutex_unlock(&listener->mutex);
   }
+  iree_slim_mutex_unlock(&listener->mutex);
 
   if (is_cancelled) {
     IREE_ASSERT(!accepted_socket,
@@ -352,6 +354,11 @@ static void iree_net_tcp_listener_accept_complete(
         iree_make_status(IREE_STATUS_DATA_LOSS,
                          "TCP accept completed without a socket"),
         NULL);
+  } else if (!listening) {
+    // Stop owns unpublished native results. Releasing the socket here avoids
+    // constructing a connection that the application would have to drain.
+    iree_async_socket_release(accepted_socket);
+    iree_status_free(status);
   } else {
     iree_async_buffer_pool_t* receive_pool = NULL;
     iree_status_t connection_status = iree_net_tcp_receive_pool_create(

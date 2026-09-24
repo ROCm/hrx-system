@@ -195,6 +195,14 @@ static inline void iree_net_listener_free(iree_net_listener_t* listener) {
 
 // Initiates graceful shutdown of the listener.
 //
+// A stop issued on the listener's poll owner closes further successful accept
+// publication before returning. In particular, an accept callback can stop
+// after its desired connection count without taking ownership of more peers.
+// Native accepts already in flight are retired by the listener. A concurrent
+// stop from another thread may overlap an already-dispatched accept callback;
+// the stopped callback remains the lifetime join. Native failures may still
+// be reported through the accept callback during shutdown.
+//
 // This cancels any pending accept operations. The |callback| fires exactly
 // once via the proactor when all pending accepts have drained and no more
 // accept callbacks will be delivered. After the callback fires,

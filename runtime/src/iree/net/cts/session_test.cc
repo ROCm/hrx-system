@@ -211,6 +211,34 @@ struct SessionEndpointReadyState {
   }
 };
 
+struct SessionDirectEndpointReadyState {
+  // Session callback state remains alive through the deactivation join.
+  SessionCallbackState* session_state = nullptr;
+  // Number of accepted opening completions observed.
+  int callback_count = 0;
+  // Whether the callback ran before session callback storage could be released.
+  bool callback_preceded_deactivation = false;
+  // Terminal result of the opening operation.
+  iree_status_code_t status_code = IREE_STATUS_UNKNOWN;
+  // Borrowed endpoint, owned and drained by the session connection.
+  iree_net_direct_endpoint_t endpoint = {};
+
+  static void OnReady(void* user_data, iree_status_t status,
+                      iree_net_direct_endpoint_t endpoint) {
+    auto* self = static_cast<SessionDirectEndpointReadyState*>(user_data);
+    ++self->callback_count;
+    self->callback_preceded_deactivation =
+        self->session_state->deactivated_count == 0;
+    self->status_code = iree_status_code(status);
+    self->endpoint = endpoint;
+    iree_status_free(status);
+  }
+
+  iree_net_direct_endpoint_ready_callback_t callback() {
+    return {/*.fn=*/OnReady, /*.user_data=*/this};
+  }
+};
+
 struct SessionReceivePoolResources {
   iree_async_slab_t* slab = nullptr;
   iree_async_region_t* region = nullptr;
@@ -812,6 +840,98 @@ TEST_F(SessionTest, DeactivationFromReadyWaitsForReadyReturn) {
   EXPECT_EQ(client_state_.error_count, 0);
   EXPECT_EQ(iree_net_session_state(client_session_),
             IREE_NET_SESSION_STATE_DEACTIVATED);
+}
+
+TEST_F(SessionTest, DirectAndMessageEndpointsShareAdmission) {
+  auto options = iree_net_session_options_default();
+  options.local_peer.application_endpoint_count = 2;
+  ASSERT_NO_FATAL_FAILURE(EstablishSessions(&options, &options));
+
+  SessionEndpointReadyState client_message;
+  client_message.current_poll_side = &current_poll_side_;
+  client_message.expected_poll_side = kSessionClientPolling;
+  client_message.session_state = &client_state_;
+  SessionEndpointReadyState server_message;
+  server_message.current_poll_side = &current_poll_side_;
+  server_message.expected_poll_side = kSessionServerPolling;
+  server_message.session_state = &server_state_;
+  IREE_ASSERT_OK(iree_net_session_open_endpoint(client_session_,
+                                                client_message.callback()));
+  IREE_ASSERT_OK(iree_net_session_open_endpoint(server_session_,
+                                                server_message.callback()));
+  PollBothUntil([&] {
+    return client_message.callback_count == 1 &&
+           server_message.callback_count == 1;
+  });
+  EXPECT_EQ(client_message.status_code, IREE_STATUS_OK);
+  EXPECT_EQ(server_message.status_code, IREE_STATUS_OK);
+
+  SessionDirectEndpointReadyState client_direct;
+  client_direct.session_state = &client_state_;
+  SessionDirectEndpointReadyState server_direct;
+  server_direct.session_state = &server_state_;
+  if (backend_->create_registered_factory) {
+    IREE_ASSERT_OK(iree_net_session_open_direct_endpoint(
+        client_session_, client_direct.callback()));
+    IREE_ASSERT_OK(iree_net_session_open_direct_endpoint(
+        server_session_, server_direct.callback()));
+    PollBothUntil([&] {
+      return client_direct.callback_count == 1 &&
+             server_direct.callback_count == 1;
+    });
+    EXPECT_EQ(client_direct.status_code, IREE_STATUS_OK);
+    EXPECT_EQ(server_direct.status_code, IREE_STATUS_OK);
+    EXPECT_TRUE(client_direct.callback_preceded_deactivation);
+    EXPECT_TRUE(server_direct.callback_preceded_deactivation);
+  } else {
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
+                          iree_net_session_open_direct_endpoint(
+                              client_session_, client_direct.callback()));
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
+                          iree_net_session_open_direct_endpoint(
+                              server_session_, server_direct.callback()));
+    EXPECT_EQ(client_direct.callback_count, 0);
+    EXPECT_EQ(server_direct.callback_count, 0);
+    // Rejection must leave the same ordinal available to a message open.
+    IREE_ASSERT_OK(iree_net_session_open_endpoint(client_session_,
+                                                  client_message.callback()));
+    IREE_ASSERT_OK(iree_net_session_open_endpoint(server_session_,
+                                                  server_message.callback()));
+    PollBothUntil([&] {
+      return client_message.callback_count == 2 &&
+             server_message.callback_count == 2;
+    });
+    EXPECT_EQ(client_message.status_code, IREE_STATUS_OK);
+    EXPECT_EQ(server_message.status_code, IREE_STATUS_OK);
+  }
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        iree_net_session_open_endpoint(
+                            client_session_, client_message.callback()));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        iree_net_session_open_direct_endpoint(
+                            client_session_, client_direct.callback()));
+  iree_net_session_deactivate(client_session_);
+  PollBothUntil([&] { return client_state_.deactivated_count == 1; });
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        iree_net_session_open_direct_endpoint(
+                            client_session_, client_direct.callback()));
+}
+
+TEST_F(SessionTest, DeactivationWaitsForPendingDirectEndpointCallback) {
+  if (!backend_->create_registered_factory) {
+    GTEST_SKIP() << "Carrier has no direct placement";
+  }
+  auto options = iree_net_session_options_default();
+  options.local_peer.application_endpoint_count = 1;
+  ASSERT_NO_FATAL_FAILURE(EstablishSessions(&options, &options));
+  SessionDirectEndpointReadyState endpoint;
+  endpoint.session_state = &client_state_;
+  IREE_ASSERT_OK(iree_net_session_open_direct_endpoint(client_session_,
+                                                       endpoint.callback()));
+  iree_net_session_deactivate(client_session_);
+  PollBothUntil([&] { return client_state_.deactivated_count == 1; });
+  EXPECT_EQ(endpoint.callback_count, 1);
+  EXPECT_TRUE(endpoint.callback_preceded_deactivation);
 }
 
 TEST_F(SessionTest, DeactivationWaitsForPendingEndpointCallback) {

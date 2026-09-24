@@ -169,10 +169,23 @@ iree_net_session_state(const iree_net_session_t* session);
 // Opens the next application endpoint ordinal.
 //
 // Requires OPERATIONAL state and admits at most the application endpoint count
-// exchanged during bootstrap. The callback is forwarded directly to the
-// connection and its target must remain valid through session deactivation.
+// exchanged during bootstrap. Message and direct endpoints share this ordinal
+// budget and must be opened in matching order on both peers. A rejected open
+// consumes no ordinal and invokes no callback. The callback is forwarded
+// directly to the connection and its target must remain valid through session
+// deactivation.
 IREE_API_EXPORT iree_status_t iree_net_session_open_endpoint(
     iree_net_session_t* session, iree_net_endpoint_ready_callback_t callback);
+
+// Opens the next application ordinal as a direct-placement endpoint.
+//
+// Shares admission and lifetime semantics with iree_net_session_open_endpoint.
+// Returns UNIMPLEMENTED when the connection does not support direct placement;
+// it never substitutes message delivery or implicit staging. Deactivation joins
+// the ready callback and every accepted direct operation before on_deactivated.
+IREE_API_EXPORT iree_status_t iree_net_session_open_direct_endpoint(
+    iree_net_session_t* session,
+    iree_net_direct_endpoint_ready_callback_t callback);
 
 // Sends control DATA while borrowing payload storage through completion.
 //
