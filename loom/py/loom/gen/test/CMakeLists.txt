@@ -64,6 +64,17 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    vector_i64_bitwise
+  MAIN
+    "vector_i64_bitwise.py"
+  SRCS
+    "vector_i64_bitwise.py"
+  DEPS
+    loom::py::loom::gen::test::kernel_fixture
+)
+
+iree_py_library(
+  NAME
     numeric_conversion_matrix
   MAIN
     "numeric_conversion_matrix.py"

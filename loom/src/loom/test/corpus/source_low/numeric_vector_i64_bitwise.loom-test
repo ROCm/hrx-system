@@ -1,0 +1,37 @@
+func.def @single_wide_element(%lhs: vector<1xi64>, %rhs: vector<1xi64>) -> (vector<1xi64>) {
+  %result = vector.andi %lhs, %rhs : vector<1xi64>
+  func.return %result : vector<1xi64>
+}
+
+// ====
+
+func.def @odd_wide_elements(%lhs: vector<3xi64>, %rhs: vector<3xi64>) -> (vector<3xi64>) {
+  %result = vector.ori %lhs, %rhs : vector<3xi64>
+  func.return %result : vector<3xi64>
+}
+
+// ====
+
+func.def @multidimensional_wide_elements(%lhs: vector<2x2xi64>, %rhs: vector<2x2xi64>) -> (vector<2x2xi64>) {
+  %result = vector.xori %lhs, %rhs : vector<2x2xi64>
+  func.return %result : vector<2x2xi64>
+}
+
+// ====
+
+func.def @sixteen_wide_elements(%lhs: vector<16xi64>, %rhs: vector<16xi64>) -> (vector<16xi64>) {
+  %result = vector.xori %lhs, %rhs : vector<16xi64>
+  func.return %result : vector<16xi64>
+}
+
+// ====
+
+func.def @wide_element_constants(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (vector<2xi64>, vector<2xi64>, vector<2xi64>) {
+  %mask = vector.constant 4294967295 : vector<2xi64>
+  %tag = vector.constant -9223372036854775807 : vector<2xi64>
+  %toggle = vector.constant -4294967296 : vector<2xi64>
+  %masked = vector.andi %lhs, %mask : vector<2xi64>
+  %tagged = vector.ori %tag, %rhs : vector<2xi64>
+  %toggled = vector.xori %lhs, %toggle : vector<2xi64>
+  func.return %masked, %tagged, %toggled : vector<2xi64>, vector<2xi64>, vector<2xi64>
+}

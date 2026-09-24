@@ -1,0 +1,58 @@
+// Each invocation checks two distinct full-width elements and scalar consumers.
+// Two trailing elements per invocation retain the output guard.
+kernel.def @vector_i64_bitwise() {
+  %unit = index.constant 1 : index
+  %groups = index.constant 4 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%lhs_input: buffer, %rhs_input: buffer, %output: buffer) {
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %width = index.constant 64 : index
+  %group_offset = index.mul %group, %width : index
+  %item = index.add %group_offset, %lane : index
+  %input_stride = index.constant 2 : index
+  %output_stride = index.constant 16 : index
+  %input_position = index.mul %item, %input_stride : index
+  %output_position = index.mul %item, %output_stride : index
+  %base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_input[%base] : buffer -> view<512xi64>
+  %rhs_view = buffer.view %rhs_input[%base] : buffer -> view<512xi64>
+  %output_view = buffer.view %output[%base] : buffer -> view<4096xi64>
+  %lhs = vector.load %lhs_view[%input_position] : view<512xi64> -> vector<2xi64>
+  %rhs = vector.load %rhs_view[%input_position] : view<512xi64> -> vector<2xi64>
+  %and_result = vector.andi %lhs, %rhs : vector<2xi64>
+  %or_result = vector.ori %lhs, %rhs : vector<2xi64>
+  %xor_result = vector.xori %lhs, %rhs : vector<2xi64>
+  %mask = vector.constant 4294967295 : vector<2xi64>
+  %tag = vector.constant -9223372036854775807 : vector<2xi64>
+  %toggle = vector.constant -4294967296 : vector<2xi64>
+  %masked = vector.andi %lhs, %mask : vector<2xi64>
+  %tagged = vector.ori %tag, %rhs : vector<2xi64>
+  %toggled = vector.xori %lhs, %toggle : vector<2xi64>
+  vector.store %and_result, %output_view[%output_position] : vector<2xi64>, view<4096xi64>
+  %or_offset = index.constant 2 : index
+  %or_position = index.add %output_position, %or_offset : index
+  vector.store %or_result, %output_view[%or_position] : vector<2xi64>, view<4096xi64>
+  %xor_offset = index.constant 4 : index
+  %xor_position = index.add %output_position, %xor_offset : index
+  vector.store %xor_result, %output_view[%xor_position] : vector<2xi64>, view<4096xi64>
+  %masked_offset = index.constant 6 : index
+  %masked_position = index.add %output_position, %masked_offset : index
+  vector.store %masked, %output_view[%masked_position] : vector<2xi64>, view<4096xi64>
+  %tagged_offset = index.constant 8 : index
+  %tagged_position = index.add %output_position, %tagged_offset : index
+  vector.store %tagged, %output_view[%tagged_position] : vector<2xi64>, view<4096xi64>
+  %toggled_offset = index.constant 10 : index
+  %toggled_position = index.add %output_position, %toggled_offset : index
+  vector.store %toggled, %output_view[%toggled_position] : vector<2xi64>, view<4096xi64>
+  %first = vector.extract %xor_result[0] : vector<2xi64> -> i64
+  %last = vector.extract %or_result[1] : vector<2xi64> -> i64
+  %first_offset = index.constant 12 : index
+  %first_position = index.add %output_position, %first_offset : index
+  view.store %first, %output_view[%first_position] : i64, view<4096xi64>
+  %last_offset = index.constant 13 : index
+  %last_position = index.add %output_position, %last_offset : index
+  view.store %last, %output_view[%last_position] : i64, view<4096xi64>
+  kernel.return
+}

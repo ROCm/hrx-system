@@ -3952,6 +3952,7 @@ def _rules() -> tuple[ContractCase, ...]:
                     nonliteral_source="lhs",
                 ),
                 _binary_rule(source_op, _VEC_I32, descriptor_key),
+                _binary_rule(source_op, _VEC_I64_STATIC, descriptor_key),
             )
         )
     for source_op, descriptor_key in (

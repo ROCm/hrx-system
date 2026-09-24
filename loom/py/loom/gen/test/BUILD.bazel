@@ -58,6 +58,15 @@ iree_py_binary(
 )
 
 iree_py_binary(
+    name = "vector_i64_bitwise",
+    testonly = True,
+    srcs = ["vector_i64_bitwise.py"],
+    main = "vector_i64_bitwise.py",
+    visibility = ["//loom/src/loom/test/corpus/conformance:__pkg__"],
+    deps = [":kernel_fixture"],
+)
+
+iree_py_binary(
     name = "numeric_conversion_matrix",
     srcs = [
         "__init__.py",

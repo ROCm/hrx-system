@@ -20,6 +20,42 @@ _CASES = glob(["*.loom"])
 exports_files(_CASES)
 
 loom_generated_file_family(
+    name = "vector_i64_bitwise_gen",
+    testonly = True,
+    generator = "//loom/py/loom/gen/test:vector_i64_bitwise",
+    output_directories = ["vector_i64_bitwise_arrays"],
+    output_flags = [
+        "--output",
+        "--arrays",
+    ],
+    outputs = [
+        "vector_i64_bitwise_cases.loom",
+        "vector_i64_bitwise_arrays",
+    ],
+)
+
+loom_test(
+    name = "vector_i64_bitwise_test",
+    srcs = [
+        "vector_i64_bitwise.loom",
+        ":vector_i64_bitwise_cases.loom",
+    ],
+    compile_targets = [
+        "//loom/target/amdgpu:gfx942",
+        "//loom/target/amdgpu:gfx950",
+        "//loom/target/amdgpu:gfx1151",
+        "//loom/target/amdgpu:gfx1170",
+        "//loom/target/amdgpu:gfx1200",
+        "//loom/target/amdgpu:gfx1250",
+    ],
+    data = [":vector_i64_bitwise_gen"],
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_generated_file_family(
     name = "predicate_bitwise_gen",
     testonly = True,
     generator = "//loom/py/loom/gen/test:predicate_bitwise",
