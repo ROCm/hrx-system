@@ -16,6 +16,7 @@
 #include <string.h>
 
 #include "loom/analysis/storage_interference.h"
+#include "loom/codegen/low/source_storage_packing.h"
 #include "loom/ir/local_value_domain.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/low/ops.h"
@@ -41,26 +42,9 @@ typedef struct loom_amdgpu_source_alloca_layout_entry_t {
   uint64_t byte_offset;
 } loom_amdgpu_source_alloca_layout_entry_t;
 
-typedef struct loom_amdgpu_source_alloca_layout_allocation_t {
-  // Source allocation root value.
-  loom_value_id_t root_value_id;
-  // Packed byte offset in the memory-space arena.
-  uint64_t byte_offset;
-  // Allocation extent in bytes.
-  uint64_t byte_size;
-} loom_amdgpu_source_alloca_layout_allocation_t;
-
 typedef struct loom_amdgpu_source_alloca_layout_segment_t {
-  // Packed high-water mark for the memory-space arena.
-  uint64_t byte_size;
-  // Strongest base alignment required by any arena allocation.
-  uint64_t byte_alignment;
-  // Packed source allocations in stable planning order.
-  loom_amdgpu_source_alloca_layout_allocation_t* allocations;
-  // Number of initialized source allocations.
-  iree_host_size_t allocation_count;
-  // Allocated source-allocation capacity.
-  iree_host_size_t allocation_capacity;
+  // Shared stable byte-range packing for the memory-space arena.
+  loom_source_storage_packing_t* packing;
   // Emitted low-storage arena root, or INVALID before entry setup.
   loom_value_id_t low_storage_value_id;
 } loom_amdgpu_source_alloca_layout_segment_t;
@@ -126,108 +110,29 @@ static void loom_amdgpu_source_alloca_layout_record_entry(
   entry->byte_offset = byte_offset;
 }
 
-static iree_status_t loom_amdgpu_source_alloca_layout_allocations_interfere(
-    loom_amdgpu_source_alloca_layout_t* layout,
-    loom_value_fact_memory_space_t memory_space,
-    loom_value_id_t lhs_root_value_id, loom_value_id_t rhs_root_value_id,
-    bool* out_interfere) {
-  *out_interfere = true;
-  if (memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) {
-    return iree_ok_status();
-  }
+static iree_status_t
+loom_amdgpu_source_alloca_layout_query_workgroup_interference(
+    void* user_data, loom_value_id_t lhs_root_value_id,
+    loom_value_id_t rhs_root_value_id, bool* out_interferes) {
+  loom_amdgpu_source_alloca_layout_t* layout =
+      (loom_amdgpu_source_alloca_layout_t*)user_data;
+  *out_interferes = true;
   bool proven_nonoverlap = false;
   IREE_RETURN_IF_ERROR(loom_storage_interference_prove_workgroup_nonoverlap(
       layout->interference, lhs_root_value_id, rhs_root_value_id,
       &proven_nonoverlap));
-  *out_interfere = !proven_nonoverlap;
+  *out_interferes = !proven_nonoverlap;
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_source_alloca_layout_find_byte_offset(
-    loom_amdgpu_source_alloca_layout_t* layout,
-    const loom_amdgpu_source_alloca_layout_segment_t* segment,
-    loom_value_fact_memory_space_t memory_space, loom_value_id_t root_value_id,
-    uint64_t byte_length, uint64_t byte_alignment, uint64_t* out_byte_offset) {
-  *out_byte_offset = 0;
-  uint64_t candidate_offset = 0;
-  if (!iree_is_power_of_two_uint64(byte_alignment) ||
-      !iree_checked_align_u64(candidate_offset, byte_alignment,
-                              &candidate_offset)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "source allocation layout alignment overflows");
-  }
-
-  for (;;) {
-    uint64_t candidate_end = 0;
-    if (!iree_checked_add_u64(candidate_offset, byte_length, &candidate_end) ||
-        candidate_end > INT64_MAX) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "source allocation layout exceeds INT64_MAX");
-    }
-    uint64_t next_candidate_offset = candidate_offset;
-    for (iree_host_size_t i = 0; i < segment->allocation_count; ++i) {
-      const loom_amdgpu_source_alloca_layout_allocation_t* allocation =
-          &segment->allocations[i];
-      bool interferes = true;
-      IREE_RETURN_IF_ERROR(
-          loom_amdgpu_source_alloca_layout_allocations_interfere(
-              layout, memory_space, root_value_id, allocation->root_value_id,
-              &interferes));
-      if (!interferes) {
-        continue;
-      }
-      uint64_t allocation_end = 0;
-      const bool valid_allocation = iree_checked_add_u64(
-          allocation->byte_offset, allocation->byte_size, &allocation_end);
-      IREE_ASSERT(valid_allocation);
-      if (candidate_offset < allocation_end &&
-          allocation->byte_offset < candidate_end) {
-        next_candidate_offset = iree_max(next_candidate_offset, allocation_end);
-      }
-    }
-    if (next_candidate_offset == candidate_offset) {
-      *out_byte_offset = candidate_offset;
-      return iree_ok_status();
-    }
-    if (!iree_checked_align_u64(next_candidate_offset, byte_alignment,
-                                &candidate_offset)) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "source allocation layout alignment overflows");
-    }
-  }
-}
-
-static iree_status_t loom_amdgpu_source_alloca_layout_append_allocation(
-    loom_amdgpu_source_alloca_layout_t* layout,
-    loom_amdgpu_source_alloca_layout_segment_t* segment,
-    loom_value_fact_memory_space_t memory_space, loom_value_id_t root_value_id,
-    uint64_t byte_length, uint64_t byte_alignment) {
-  uint64_t byte_offset = 0;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_find_byte_offset(
-      layout, segment, memory_space, root_value_id, byte_length, byte_alignment,
-      &byte_offset));
-  uint64_t allocation_end = 0;
-  if (!iree_checked_add_u64(byte_offset, byte_length, &allocation_end)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "source allocation layout exceeds INT64_MAX");
-  }
-  const iree_host_size_t minimum_capacity = segment->allocation_count + 1;
-  if (minimum_capacity > segment->allocation_capacity) {
-    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        layout->arena, segment->allocation_count,
-        iree_max(minimum_capacity, 4u), sizeof(*segment->allocations),
-        &segment->allocation_capacity, (void**)&segment->allocations));
-  }
-  segment->allocations[segment->allocation_count++] =
-      (loom_amdgpu_source_alloca_layout_allocation_t){
-          .root_value_id = root_value_id,
-          .byte_offset = byte_offset,
-          .byte_size = byte_length,
-      };
-  segment->byte_size = iree_max(segment->byte_size, allocation_end);
-  segment->byte_alignment = iree_max(segment->byte_alignment, byte_alignment);
-  loom_amdgpu_source_alloca_layout_record_entry(
-      layout->value_domain, layout, root_value_id, memory_space, byte_offset);
+static iree_status_t
+loom_amdgpu_source_alloca_layout_query_conservative_interference(
+    void* user_data, loom_value_id_t lhs_root_value_id,
+    loom_value_id_t rhs_root_value_id, bool* out_interferes) {
+  (void)user_data;
+  (void)lhs_root_value_id;
+  (void)rhs_root_value_id;
+  *out_interferes = true;
   return iree_ok_status();
 }
 
@@ -255,9 +160,25 @@ static iree_status_t loom_amdgpu_source_alloca_layout_record_allocation(
     return iree_ok_status();
   }
 
-  return loom_amdgpu_source_alloca_layout_append_allocation(
-      layout, &layout->segments[memory_space], memory_space, root_value_id,
-      byte_length, byte_alignment);
+  loom_amdgpu_source_alloca_layout_segment_t* segment =
+      &layout->segments[memory_space];
+  if (!segment->packing) {
+    const loom_source_storage_packing_interference_fn_t interference_fn =
+        memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP
+            ? loom_amdgpu_source_alloca_layout_query_workgroup_interference
+            : loom_amdgpu_source_alloca_layout_query_conservative_interference;
+    IREE_RETURN_IF_ERROR(loom_source_storage_packing_create(
+        loom_source_storage_packing_interference_callback_make(interference_fn,
+                                                               layout),
+        layout->arena, &segment->packing));
+  }
+  uint64_t byte_offset = 0;
+  IREE_RETURN_IF_ERROR(loom_source_storage_packing_append(
+      segment->packing, root_value_id, byte_length, byte_alignment,
+      &byte_offset));
+  loom_amdgpu_source_alloca_layout_record_entry(
+      layout->value_domain, layout, root_value_id, memory_space, byte_offset);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_source_alloca_layout_initialize(
@@ -377,15 +298,17 @@ iree_status_t loom_amdgpu_source_alloca_layout_emit_low_storage_roots(
             (loom_value_fact_memory_space_t)i, &storage_space)) {
       continue;
     }
-    if (segment->allocation_count == 0) {
+    if (!segment->packing) {
       continue;
     }
+    const loom_source_storage_packing_requirement_t requirement =
+        loom_source_storage_packing_requirement(segment->packing);
     IREE_ASSERT_EQ(segment->low_storage_value_id, LOOM_VALUE_ID_INVALID);
     loom_op_t* storage_op = NULL;
     IREE_RETURN_IF_ERROR(loom_low_storage_reserve_build(
-        builder, (int64_t)segment->byte_size, (int64_t)segment->byte_alignment,
-        loom_type_storage(storage_space), layout->source_function_op->location,
-        &storage_op));
+        builder, (int64_t)requirement.byte_length,
+        (int64_t)requirement.byte_alignment, loom_type_storage(storage_space),
+        layout->source_function_op->location, &storage_op));
     segment->low_storage_value_id =
         loom_low_storage_reserve_storage(storage_op);
   }

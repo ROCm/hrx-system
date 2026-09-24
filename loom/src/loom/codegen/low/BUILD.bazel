@@ -321,6 +321,28 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "source_storage_packing",
+    srcs = ["source_storage_packing.c"],
+    hdrs = ["source_storage_packing.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "source_storage_packing_test",
+    srcs = ["source_storage_packing_test.cc"],
+    deps = [
+        ":source_storage_packing",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "launch_config_program",
     srcs = ["launch_config_program.c"],
     hdrs = ["launch_config_program.h"],

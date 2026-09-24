@@ -270,6 +270,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:function",
         "//loom/src/loom/codegen/low:representation_plan",
         "//loom/src/loom/codegen/low:source_memory_plan",
+        "//loom/src/loom/codegen/low:source_storage_packing",
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/codegen/low/lower:representation_observer",
         "//loom/src/loom/ir",

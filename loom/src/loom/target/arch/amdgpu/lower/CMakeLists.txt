@@ -251,6 +251,7 @@ loom_cc_library(
     loom::codegen::low::lower::representation_observer
     loom::codegen::low::representation_plan
     loom::codegen::low::source_memory_plan
+    loom::codegen::low::source_storage_packing
     loom::ir
     loom::ir::facts
     loom::ops::atomic
