@@ -105,6 +105,7 @@ loom_check_test_suite(
     "test/source_low/memory_packed_tails.loom-test"
     "test/source_low/memory_scalar_narrow.loom-test"
     "test/source_low/memory_signed_terms.loom-test"
+    "test/source_low/memory_source_address_domain.loom-test"
     "test/source_low/memory_subview.loom-test"
     "test/source_low/memory_wide_carriers.loom-test"
     "test/source_low/memory_word.loom-test"

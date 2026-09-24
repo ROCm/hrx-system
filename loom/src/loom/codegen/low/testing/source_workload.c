@@ -1381,19 +1381,19 @@ static iree_status_t loom_low_source_workload_generate_module_into(
       loom_encoding_layout_dense_result(layout_op));
   loom_op_t* integer_load_view_op = NULL;
   IREE_RETURN_IF_ERROR(loom_buffer_view_build(
-      &builder,
+      &builder, 0,
       loom_block_arg_id(entry_block,
                         LOOM_LOW_SOURCE_WORKLOAD_ARGUMENT_INPUT_BUFFER),
-      loom_index_constant_result(zero_op), integer_view_type,
+      loom_index_constant_result(zero_op), 0, integer_view_type,
       LOOM_LOCATION_UNKNOWN, &integer_load_view_op));
   loom_value_id_t integer_load_view =
       loom_buffer_view_result(integer_load_view_op);
   loom_op_t* integer_store_view_op = NULL;
   IREE_RETURN_IF_ERROR(loom_buffer_view_build(
-      &builder,
+      &builder, 0,
       loom_block_arg_id(entry_block,
                         LOOM_LOW_SOURCE_WORKLOAD_ARGUMENT_OUTPUT_BUFFER),
-      loom_index_constant_result(zero_op), integer_view_type,
+      loom_index_constant_result(zero_op), 0, integer_view_type,
       LOOM_LOCATION_UNKNOWN, &integer_store_view_op));
   loom_value_id_t integer_store_view =
       loom_buffer_view_result(integer_store_view_op);
@@ -1401,18 +1401,18 @@ static iree_status_t loom_low_source_workload_generate_module_into(
       loom_encoding_layout_dense_result(layout_op));
   loom_op_t* float_load_view_op = NULL;
   IREE_RETURN_IF_ERROR(loom_buffer_view_build(
-      &builder,
+      &builder, 0,
       loom_block_arg_id(entry_block,
                         LOOM_LOW_SOURCE_WORKLOAD_ARGUMENT_INPUT_BUFFER),
-      loom_index_constant_result(zero_op), float_view_type,
+      loom_index_constant_result(zero_op), 0, float_view_type,
       LOOM_LOCATION_UNKNOWN, &float_load_view_op));
   loom_value_id_t float_load_view = loom_buffer_view_result(float_load_view_op);
   loom_op_t* float_store_view_op = NULL;
   IREE_RETURN_IF_ERROR(loom_buffer_view_build(
-      &builder,
+      &builder, 0,
       loom_block_arg_id(entry_block,
                         LOOM_LOW_SOURCE_WORKLOAD_ARGUMENT_OUTPUT_BUFFER),
-      loom_index_constant_result(zero_op), float_view_type,
+      loom_index_constant_result(zero_op), 0, float_view_type,
       LOOM_LOCATION_UNKNOWN, &float_store_view_op));
   loom_value_id_t float_store_view =
       loom_buffer_view_result(float_store_view_op);
@@ -1421,19 +1421,19 @@ static iree_status_t loom_low_source_workload_generate_module_into(
           loom_encoding_layout_dense_result(layout_op));
   loom_op_t* indexed_integer_load_view_op = NULL;
   IREE_RETURN_IF_ERROR(loom_buffer_view_build(
-      &builder,
+      &builder, 0,
       loom_block_arg_id(entry_block,
                         LOOM_LOW_SOURCE_WORKLOAD_ARGUMENT_INPUT_BUFFER),
-      loom_index_constant_result(zero_op), indexed_integer_view_type,
+      loom_index_constant_result(zero_op), 0, indexed_integer_view_type,
       LOOM_LOCATION_UNKNOWN, &indexed_integer_load_view_op));
   loom_value_id_t indexed_integer_load_view =
       loom_buffer_view_result(indexed_integer_load_view_op);
   loom_op_t* indexed_integer_store_view_op = NULL;
   IREE_RETURN_IF_ERROR(loom_buffer_view_build(
-      &builder,
+      &builder, 0,
       loom_block_arg_id(entry_block,
                         LOOM_LOW_SOURCE_WORKLOAD_ARGUMENT_OUTPUT_BUFFER),
-      loom_index_constant_result(zero_op), indexed_integer_view_type,
+      loom_index_constant_result(zero_op), 0, indexed_integer_view_type,
       LOOM_LOCATION_UNKNOWN, &indexed_integer_store_view_op));
   loom_value_id_t indexed_integer_store_view =
       loom_buffer_view_result(indexed_integer_store_view_op);
@@ -1442,19 +1442,19 @@ static iree_status_t loom_low_source_workload_generate_module_into(
           loom_encoding_layout_dense_result(layout_op));
   loom_op_t* indexed_float_load_view_op = NULL;
   IREE_RETURN_IF_ERROR(loom_buffer_view_build(
-      &builder,
+      &builder, 0,
       loom_block_arg_id(entry_block,
                         LOOM_LOW_SOURCE_WORKLOAD_ARGUMENT_INPUT_BUFFER),
-      loom_index_constant_result(zero_op), indexed_float_view_type,
+      loom_index_constant_result(zero_op), 0, indexed_float_view_type,
       LOOM_LOCATION_UNKNOWN, &indexed_float_load_view_op));
   loom_value_id_t indexed_float_load_view =
       loom_buffer_view_result(indexed_float_load_view_op);
   loom_op_t* indexed_float_store_view_op = NULL;
   IREE_RETURN_IF_ERROR(loom_buffer_view_build(
-      &builder,
+      &builder, 0,
       loom_block_arg_id(entry_block,
                         LOOM_LOW_SOURCE_WORKLOAD_ARGUMENT_OUTPUT_BUFFER),
-      loom_index_constant_result(zero_op), indexed_float_view_type,
+      loom_index_constant_result(zero_op), 0, indexed_float_view_type,
       LOOM_LOCATION_UNKNOWN, &indexed_float_store_view_op));
   loom_value_id_t indexed_float_store_view =
       loom_buffer_view_result(indexed_float_store_view_op);

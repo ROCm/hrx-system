@@ -7,8 +7,8 @@ func.def @different_materializers(%input: buffer, %condition: i1) -> (view<16xf3
   %base1 = index.constant 64 : offset
   %first = buffer.assume.noalias %input : buffer
   %second = buffer.assume.noalias %input : buffer
-  %left = buffer.view %first[%base0] : buffer -> view<16xf32>
-  %right = buffer.view %second[%base1] : buffer -> view<16xf32>
+  %left = buffer.view %first[%base0] address_bits(32) : buffer -> view<16xf32>
+  %right = buffer.view %second[%base1] address_bits(32) : buffer -> view<16xf32>
   %selected = scf.select %condition, %left, %right : view<16xf32>
   func.return %selected : view<16xf32>
 }
@@ -24,7 +24,7 @@ func.def @different_materializers(%input: buffer, %condition: i1) -> (view<16xf3
   } else {
     scf.yield %second, %base1 : buffer, offset
   }
-  %selected = buffer.view %selected_root[%selected_offset] : buffer -> view<16xf32>
+  %selected = buffer.view %selected_root[%selected_offset] address_bits(32) : buffer -> view<16xf32>
   func.return %selected : view<16xf32>
 }
 

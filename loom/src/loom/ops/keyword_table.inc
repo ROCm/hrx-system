@@ -90,3 +90,4 @@
     [LOOM_KW_ACROSS] = (const uint8_t*)"\x06" "across",
     [LOOM_KW_ON] = (const uint8_t*)"\x02" "on",
     [LOOM_KW_CAPACITY] = (const uint8_t*)"\x08" "capacity",
+    [LOOM_KW_ADDRESS_BITS] = (const uint8_t*)"\x0c" "address_bits",

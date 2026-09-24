@@ -20,6 +20,7 @@ from loom.assembly import (
     Attr,
     AttrDict,
     Clause,
+    OptionalGroup,
     Ref,
     Refs,
     ResultType,
@@ -365,12 +366,27 @@ buffer_assume_same_root = Op(
 buffer_view = Op(
     name="buffer.view",
     group=buffer_ops,
-    doc=("Form a typed non-owning view from an opaque buffer root and base byte offset. The result view type carries the address layout."),
+    doc=(
+        "Form a typed non-owning view from an opaque buffer root and base byte "
+        "offset. The result view type carries the address layout. An optional "
+        "address_bits contract states that every valid active access through "
+        "the view has a complete unsigned byte address representable in that "
+        "many source carrier bits. Constructing or transporting the view does "
+        "not itself assert that its base or full footprint is representable."
+    ),
     operands=[
         Operand("buffer", BUFFER, doc="Opaque storage root."),
         Operand("byte_offset", OFFSET, doc="Base byte offset from the buffer root."),
     ],
     results=[Result("result", VIEW, doc="Typed logical view over the buffer.")],
+    attrs=[
+        AttrDef(
+            "address_bitwidth",
+            ATTR_TYPE_I64,
+            optional=True,
+            doc=("Unsigned source address-carrier width guaranteed for every valid active access through the view."),
+        ),
+    ],
     traits=[PURE, REFINABLE_RESULT_TYPE_REFS],
     verify="loom_buffer_view_verify",
     facts="loom_buffer_view_facts",
@@ -380,6 +396,10 @@ buffer_view = Op(
         LBRACKET,
         Ref("byte_offset"),
         RBRACKET,
+        OptionalGroup(
+            [Clause("address_bits", Attr("address_bitwidth"))],
+            anchor="address_bitwidth",
+        ),
         COLON,
         TypeOf("buffer"),
         ARROW,
@@ -387,6 +407,7 @@ buffer_view = Op(
     ],
     examples=[
         "%view = buffer.view %buffer[%offset] : buffer -> view<[%M]xf32, %layout>",
+        "%view32 = buffer.view %buffer[%offset] address_bits(32) : buffer -> view<4x8xf32>",
     ],
 )
 

@@ -805,9 +805,9 @@ static iree_status_t loom_stage_loop_carried_fragments_rewrite(
   loom_op_t* view_op = NULL;
   // Building the result canonicalizes the type and clones rank-3 dimensions
   // into the module arena before |view_dimensions| leaves scope.
-  IREE_RETURN_IF_ERROR(
-      loom_buffer_view_build(&context->rewriter->builder, buffer_value,
-                             zero_offset, view_type, op->location, &view_op));
+  IREE_RETURN_IF_ERROR(loom_buffer_view_build(
+      &context->rewriter->builder, 0, buffer_value, zero_offset, 0, view_type,
+      op->location, &view_op));
   loom_value_id_t staging_view = loom_buffer_view_result(view_op);
 
   loom_value_id_t* slot_columns = NULL;

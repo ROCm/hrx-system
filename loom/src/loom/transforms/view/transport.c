@@ -76,6 +76,8 @@ typedef struct loom_view_transport_value_t {
   loom_type_t type;
   // Materializing buffer retained by the view fact producer.
   loom_value_id_t buffer_value_id;
+  // Unsigned source address-carrier width retained by the view facts, or zero.
+  uint8_t address_bitwidth;
   // Operation anchoring reconstruction at the value's definition.
   loom_op_t* anchor;
   // Reconstruction side of anchor: before for arguments, after for results.
@@ -485,9 +487,13 @@ static iree_status_t loom_view_transport_reconstruct(
   IREE_RETURN_IF_ERROR(loom_rewriter_set_value_type(
       rewriter, value->value_id, loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET)));
   loom_op_t* view = NULL;
-  return loom_buffer_view_build(builder, value->buffer_value_id,
-                                value->value_id, value->type,
-                                value->anchor->location, &view);
+  const loom_buffer_view_build_flags_t build_flags =
+      value->address_bitwidth != 0
+          ? LOOM_BUFFER_VIEW_BUILD_FLAG_HAS_ADDRESS_BITWIDTH
+          : 0;
+  return loom_buffer_view_build(builder, build_flags, value->buffer_value_id,
+                                value->value_id, value->address_bitwidth,
+                                value->type, value->anchor->location, &view);
 }
 
 static iree_status_t loom_view_transport_rewrite(
@@ -567,6 +573,7 @@ static iree_status_t loom_view_transport_prepare(
       continue;
     }
     value->buffer_value_id = reference.buffer_value_id;
+    value->address_bitwidth = reference.address_bitwidth;
     value->selected =
         value->placement == LOOM_VIEW_TRANSPORT_BEFORE_ANCHOR
             ? loom_value_is_available_before_op(
@@ -661,6 +668,8 @@ typedef struct loom_view_root_selection_t {
   loom_value_id_t buffer_value_id;
   // Rewritten selected root-relative offset, or INVALID before rewriting.
   loom_value_id_t offset_value_id;
+  // Unsigned source address-carrier width common to both alternatives, or zero.
+  uint8_t address_bitwidth;
   // Whether both source coordinates can be materialized exactly.
   bool selected;
   // Whether the selection has been appended to the dependency order.
@@ -772,6 +781,7 @@ static iree_status_t loom_view_root_selection_plan_entries(
         result_reference.buffer_value_id != LOOM_VALUE_ID_INVALID) {
       continue;
     }
+    selection->address_bitwidth = result_reference.address_bitwidth;
     const bool true_available = loom_view_root_selection_plan_source(
         plan, i, loom_scf_select_true_value(selection->op),
         &selection->true_source);
@@ -901,8 +911,13 @@ static iree_status_t loom_view_root_selection_rewrite(
     IREE_RETURN_IF_ERROR(loom_rewriter_try_set_derived_value_name(
         rewriter, old_result, selection->offset_value_id, IREE_SV("offset")));
     loom_op_t* view_op = NULL;
+    const loom_buffer_view_build_flags_t build_flags =
+        selection->address_bitwidth != 0
+            ? LOOM_BUFFER_VIEW_BUILD_FLAG_HAS_ADDRESS_BITWIDTH
+            : 0;
     IREE_RETURN_IF_ERROR(loom_buffer_view_build(
-        builder, selection->buffer_value_id, selection->offset_value_id,
+        builder, build_flags, selection->buffer_value_id,
+        selection->offset_value_id, selection->address_bitwidth,
         selection->view_type, selection->op->location, &view_op));
     const loom_value_id_t replacement = loom_buffer_view_result(view_op);
     IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(

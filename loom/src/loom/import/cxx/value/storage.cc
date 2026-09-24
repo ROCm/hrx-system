@@ -146,8 +146,8 @@ StorageAccess Storage::dereference(StorageProjection base,
       static_cast<uint8_t>(std::min<uint64_t>(
           base.alignment, loom_type_view_natural_alignment(view_type))));
   loom_op_t* view;
-  check(loom_buffer_view_build(&builder_, base.pointer.root,
-                               base.pointer.byte_offset, view_type,
+  check(loom_buffer_view_build(&builder_, 0, base.pointer.root,
+                               base.pointer.byte_offset, 0, view_type,
                                locations_.get(owner), &view));
   return {loom_op_results(view)[0], std::nullopt};
 }
@@ -248,7 +248,7 @@ StorageAllocation Storage::allocate(const cxx::Type* type,
   view_type = loom_type_view_with_alignment(
       view_type, static_cast<uint8_t>(std::min<uint64_t>(
                      *alignment, loom_type_view_natural_alignment(view_type))));
-  check(loom_buffer_view_build(&builder_, root, base, view_type,
+  check(loom_buffer_view_build(&builder_, 0, root, base, 0, view_type,
                                locations_.get(owner), &op));
   auto view = loom_op_results(op)[0];
   if (array) {

@@ -720,8 +720,8 @@ static iree_status_t loom_view_boundary_reconstruct(
   IREE_ASSERT_EQ(slot->schema.component_count, 2);
   loom_op_t* view_op = NULL;
   IREE_RETURN_IF_ERROR(loom_buffer_view_build(
-      &plan->rewriter.builder, slot->component_value_ids[0],
-      slot->component_value_ids[1], logical_type, location, &view_op));
+      &plan->rewriter.builder, 0, slot->component_value_ids[0],
+      slot->component_value_ids[1], 0, logical_type, location, &view_op));
   *out_logical_value = loom_buffer_view_result(view_op);
   loom_boundary_projection_record(plan, rule, 1, slot->schema.component_count);
   return iree_ok_status();

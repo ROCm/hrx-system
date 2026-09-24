@@ -1435,8 +1435,8 @@ static iree_status_t loom_vector_packet_build_staging_view(
       loom_dim_pack_static(shape->lane_count), /*encoding_id=*/0);
   loom_op_t* staging_view_op = NULL;
   IREE_RETURN_IF_ERROR(loom_buffer_view_build(
-      builder, loom_buffer_alloca_result(staging_buffer_op),
-      loom_index_constant_result(zero_offset_op), staging_view_type,
+      builder, 0, loom_buffer_alloca_result(staging_buffer_op),
+      loom_index_constant_result(zero_offset_op), 0, staging_view_type,
       source_op->location, &staging_view_op));
   *out_staging_view = loom_buffer_view_result(staging_view_op);
   return iree_ok_status();

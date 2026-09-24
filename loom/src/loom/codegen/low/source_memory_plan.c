@@ -1082,6 +1082,7 @@ static bool loom_low_source_memory_access_add_view_base_byte_offset(
   plan->root_minimum_alignment = loom_low_source_memory_clamp_alignment(
       view_region->root_minimum_alignment);
   plan->alias_scope_id = view_region->alias_scope_id;
+  plan->address_bitwidth = view_region->address_bitwidth;
   return true;
 }
 

@@ -580,6 +580,7 @@ static iree_status_t loom_view_region_build_default(
       .root_value_id = reference.root_value_id,
       .alias_scope_id = reference.alias_scope_id,
       .nullability = reference.nullability,
+      .address_bitwidth = reference.address_bitwidth,
       .origin = reference.origin,
       .begin_byte_offset = begin,
       .base_begin_byte_offset = begin,

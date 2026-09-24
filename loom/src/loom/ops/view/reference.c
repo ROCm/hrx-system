@@ -68,6 +68,9 @@ static loom_value_fact_view_reference_t loom_view_join_reference_fields(
       .nullability = lhs.nullability == rhs.nullability
                          ? lhs.nullability
                          : LOOM_VALUE_FACT_REFERENCE_NULLABILITY_UNKNOWN,
+      .address_bitwidth = lhs.address_bitwidth == rhs.address_bitwidth
+                              ? lhs.address_bitwidth
+                              : 0,
       .origin = loom_value_fact_reference_origin_meet(lhs.origin, rhs.origin),
   };
   lhs.base_byte_offset.extension_id = LOOM_VALUE_FACT_EXTENSION_ID_NONE;
@@ -539,8 +542,8 @@ static loom_value_fact_view_reference_t loom_view_default_view_reference(
 iree_status_t loom_view_reference_make_buffer_view(
     loom_fact_context_t* context, const loom_module_t* module,
     loom_value_id_t buffer_value_id, loom_value_facts_t buffer_facts,
-    loom_value_facts_t byte_offset_facts, loom_type_t result_type,
-    loom_value_facts_t* out) {
+    loom_value_facts_t byte_offset_facts, uint8_t address_bitwidth,
+    loom_type_t result_type, loom_value_facts_t* out) {
   loom_value_fact_buffer_reference_t buffer_reference =
       loom_view_default_buffer_reference(buffer_value_id);
   (void)loom_value_facts_query_buffer_reference(context, buffer_facts,
@@ -564,6 +567,7 @@ iree_status_t loom_view_reference_make_buffer_view(
   view_reference.buffer_value_id = buffer_value_id;
   view_reference.alias_scope_id = buffer_reference.alias_scope_id;
   view_reference.nullability = buffer_reference.nullability;
+  view_reference.address_bitwidth = address_bitwidth;
   view_reference.origin = buffer_reference.origin;
   return loom_value_facts_make_view_reference(context, view_reference, out);
 }
@@ -602,6 +606,7 @@ iree_status_t loom_view_reference_make_subview(
   view_reference.buffer_value_id = source_reference.buffer_value_id;
   view_reference.alias_scope_id = source_reference.alias_scope_id;
   view_reference.nullability = source_reference.nullability;
+  view_reference.address_bitwidth = source_reference.address_bitwidth;
   view_reference.origin = source_reference.origin;
   return loom_value_facts_make_view_reference(context, view_reference, out);
 }

@@ -262,6 +262,9 @@ typedef struct loom_low_source_memory_access_plan_t {
   // Number of leading dynamic address terms contributed by the source view
   // base.
   uint8_t dynamic_view_base_term_count;
+  // Unsigned source address-carrier width guaranteed for valid active accesses,
+  // or zero when the source view carries no such contract.
+  uint8_t address_bitwidth;
   // Execution semantics copied from the source memory access and preserved by
   // every physical memory packet selected for that access.
   loom_memory_access_flags_t access_flags;
@@ -296,6 +299,9 @@ typedef struct loom_low_source_memory_access_plan_t {
   // means no per-access obligation. This is independent of advisory caching.
   uint8_t read_visibility_scope;
 } loom_low_source_memory_access_plan_t;
+
+static_assert(sizeof(loom_low_source_memory_access_plan_t) == 3496,
+              "source-memory access plans must remain 3496 bytes");
 
 static inline bool loom_low_source_memory_access_is_dynamic(
     const loom_low_source_memory_access_plan_t* plan) {

@@ -497,7 +497,7 @@ TEST_F(LowContractQuerySourceMemoryTest,
   loom_value_id_t base_offset = BuildOffsetConstant(0);
 
   loom_op_t* view_op = nullptr;
-  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base_offset,
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, 0, buffer, base_offset, 0,
                                         ViewType1D(64, layout),
                                         LOOM_LOCATION_UNKNOWN, &view_op));
   loom_op_t* workitem_op = nullptr;

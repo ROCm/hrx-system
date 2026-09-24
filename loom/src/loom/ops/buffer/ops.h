@@ -146,16 +146,23 @@ iree_status_t loom_buffer_assume_same_root_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_BUFFER_VIEW: Form a typed non-owning view from an opaque buffer root and base byte offset. The result view type carries the address layout.
+// LOOM_OP_BUFFER_VIEW: Form a typed non-owning view from an opaque buffer root and base byte offset. The result view type carries the address layout. An optional address_bits contract states that every valid active access through the view has a complete unsigned byte address representable in that many source carrier bits. Constructing or transporting the view does not itself assert that its base or full footprint is representable.
 // %view = buffer.view %buffer[%offset] : buffer -> view<[%M]xf32, %layout>
 LOOM_DEFINE_ISA(loom_buffer_view_isa, LOOM_OP_BUFFER_VIEW)
 LOOM_DEFINE_OPERAND(loom_buffer_view_buffer, 0)
 LOOM_DEFINE_OPERAND(loom_buffer_view_byte_offset, 1)
 LOOM_DEFINE_RESULT(loom_buffer_view_result, 0)
+LOOM_DEFINE_ATTR_I64(loom_buffer_view_address_bitwidth, 0)
+enum loom_buffer_view_build_flag_bits_e {
+  LOOM_BUFFER_VIEW_BUILD_FLAG_HAS_ADDRESS_BITWIDTH = 1u << 0,
+};
+typedef uint32_t loom_buffer_view_build_flags_t;
 iree_status_t loom_buffer_view_build(
     loom_builder_t* builder,
+    loom_buffer_view_build_flags_t build_flags,
     loom_may_consume loom_value_id_t buffer,
     loom_may_consume loom_value_id_t byte_offset,
+    loom_optional int64_t address_bitwidth,
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);

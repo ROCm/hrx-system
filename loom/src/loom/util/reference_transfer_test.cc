@@ -196,6 +196,7 @@ TEST_F(ReferenceTransferTest, ViewOriginsPreserveCoordinatesAcrossTables) {
   source_reference.root_value_id = buffer;
   source_reference.buffer_value_id = buffer;
   source_reference.alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
+  source_reference.address_bitwidth = 32;
   source_reference.origin = {1, 0, LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY,
                              buffer};
   loom_value_facts_t source;
@@ -221,6 +222,7 @@ TEST_F(ReferenceTransferTest, ViewOriginsPreserveCoordinatesAcrossTables) {
   EXPECT_EQ(reference.root_minimum_alignment, 64);
   EXPECT_EQ(reference.static_element_byte_count, 4);
   EXPECT_EQ(reference.memory_space, LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL);
+  EXPECT_EQ(reference.address_bitwidth, 32);
   EXPECT_TRUE(
       loom_value_fact_reference_origin_equal(reference.origin, allocation));
   EXPECT_FALSE(

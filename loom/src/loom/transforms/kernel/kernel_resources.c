@@ -58,8 +58,8 @@ static iree_status_t loom_kernel_resources_normalize_view_arg(
       loom_module_set_value_type(module, arg_id, loom_type_buffer()));
 
   loom_op_t* view_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_buffer_view_build(builder, arg_id, zero_offset,
-                                              view_type, location, &view_op));
+  IREE_RETURN_IF_ERROR(loom_buffer_view_build(
+      builder, 0, arg_id, zero_offset, 0, view_type, location, &view_op));
   loom_value_id_t view_id = loom_buffer_view_result(view_op);
   IREE_RETURN_IF_ERROR(
       loom_value_replace_all_uses_except(module, arg_id, view_id, view_op));

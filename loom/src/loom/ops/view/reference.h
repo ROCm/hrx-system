@@ -33,8 +33,8 @@ extern const loom_value_fact_domain_t loom_view_fact_domain;
 iree_status_t loom_view_reference_make_buffer_view(
     loom_fact_context_t* context, const loom_module_t* module,
     loom_value_id_t buffer_value_id, loom_value_facts_t buffer_facts,
-    loom_value_facts_t byte_offset_facts, loom_type_t result_type,
-    loom_value_facts_t* out);
+    loom_value_facts_t byte_offset_facts, uint8_t address_bitwidth,
+    loom_type_t result_type, loom_value_facts_t* out);
 
 // Constructs view-reference facts for `view.subview`.
 iree_status_t loom_view_reference_make_subview(

@@ -61,3 +61,21 @@ func.def @store_i8_requires_i32(%value: i8, %target: buffer, %byte_offset: offse
   buffer.store.i8 %value, %target[%byte_offset]
   func.return
 }
+
+// ====
+
+func.def @view_rejects_zero_address_bits(%buffer: buffer, %offset: offset) {
+  // ERROR@+1: STRUCTURE/014 "address_bitwidth" "0" "integer in the range [1, 64]"
+  %view = buffer.view %buffer[%offset] address_bits(0) : buffer -> view<4xi32>
+  test.use %view : view<4xi32>
+  func.return
+}
+
+// ====
+
+func.def @view_rejects_too_many_address_bits(%buffer: buffer, %offset: offset) {
+  // ERROR@+1: STRUCTURE/014 "address_bitwidth" "65" "integer in the range [1, 64]"
+  %view = buffer.view %buffer[%offset] address_bits(65) : buffer -> view<4xi32>
+  test.use %view : view<4xi32>
+  func.return
+}

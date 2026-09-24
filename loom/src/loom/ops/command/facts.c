@@ -18,5 +18,6 @@ iree_status_t loom_command_parameter_facts(
       loom_module_value_type(module, loom_command_parameter_result(op));
   return loom_view_reference_make_buffer_view(
       context, module, loom_command_parameter_source(op), operand_facts[0],
-      loom_value_facts_unknown(), result_type, &result_facts[0]);
+      loom_value_facts_unknown(), /*address_bitwidth=*/0, result_type,
+      &result_facts[0]);
 }

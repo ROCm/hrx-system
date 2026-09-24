@@ -60,7 +60,7 @@ bool loom_value_fact_reference_origins_are_disjoint(
     loom_value_fact_reference_origin_t rhs);
 
 // Known reference nullability for storage-like values.
-typedef uint32_t loom_value_fact_reference_nullability_t;
+typedef uint8_t loom_value_fact_reference_nullability_t;
 #define LOOM_VALUE_FACT_REFERENCE_NULLABILITY_UNKNOWN \
   ((loom_value_fact_reference_nullability_t)0)
 #define LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NULL \
@@ -100,6 +100,9 @@ typedef struct loom_value_fact_buffer_reference_t {
   // Intrinsic storage origin relative to a projected function entry.
   loom_value_fact_reference_origin_t origin;
 } loom_value_fact_buffer_reference_t;
+
+static_assert(sizeof(loom_value_fact_buffer_reference_t) == 64,
+              "buffer-reference facts must remain 64 bytes");
 
 // Resolves the concrete storage root for |reference_value_id|. Buffer fact
 // joins use a self-root when control flow chooses between distinct roots.
@@ -149,9 +152,16 @@ typedef struct loom_value_fact_view_reference_t {
   // Known nullability for the underlying storage root.
   loom_value_fact_reference_nullability_t nullability;
 
+  // Unsigned source address-carrier width guaranteed for valid active accesses
+  // through this view, or zero when no source carrier contract is known.
+  uint8_t address_bitwidth;
+
   // Intrinsic storage origin relative to a projected function entry.
   loom_value_fact_reference_origin_t origin;
 } loom_value_fact_view_reference_t;
+
+static_assert(sizeof(loom_value_fact_view_reference_t) == 112,
+              "view-reference facts must remain 112 bytes");
 
 // Resolves the storage root of a view, including joins of distinct roots.
 static inline loom_value_id_t loom_value_fact_view_reference_resolve_root_value(

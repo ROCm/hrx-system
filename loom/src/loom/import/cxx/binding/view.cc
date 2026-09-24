@@ -339,8 +339,8 @@ std::optional<Value> ViewIntrinsic::call(std::span<const Value> arguments,
                          {components.data(), component_count}, result_types);
       auto result_type = result_types.back();
       if (operation_ == Operation::BufferView) {
-        check(loom_buffer_view_build(builder, pointer->root,
-                                     pointer->byte_offset, result_type,
+        check(loom_buffer_view_build(builder, 0, pointer->root,
+                                     pointer->byte_offset, 0, result_type,
                                      location, &op));
       } else {
         const int64_t static_offsets[2] = {

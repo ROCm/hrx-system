@@ -1,0 +1,41 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_source_address_domain.loom-test
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @source_address_domain_static_coordinate(%input: buffer, %origin: offset) -> (i32) {
+  %source = buffer.view %input[%origin] address_bits(32) : buffer -> view<4x8xi32>
+  %loaded = view.load %source[3, 7] : view<4x8xi32> -> i32
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @source_address_domain_static_coordinate(%origin: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %source = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %10 = mov.static-byte-offset 124
+  %11 = add.rr %origin, %10
+  %12 = mov.address-index %11
+  %loaded = lda.i32.index %source, %12
+  return %loaded
+}
+
+// ====
+
+func.def @source_address_domain_derived_view(%input: buffer, %origin: offset, %columns: index) -> (i32) {
+  %bounded_columns = index.assume %columns [range(%columns, 4, 8)] : index
+  %source = buffer.view %input[%origin] address_bits(32) : buffer -> view<4x[%bounded_columns]xi32>
+  %row = view.subview %source[1, 0] : view<4x[%bounded_columns]xi32> -> view<1x[%bounded_columns]xi32>
+  %prefix = view.refine %row : view<1x[%bounded_columns]xi32> -> view<1x4xi32>
+  %loaded = view.load %prefix[0, 3] : view<1x4xi32> -> i32
+  func.return %loaded : i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @source_address_domain_derived_view(%origin: reg<aie2p.er>, %bounded_columns: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %prefix = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %13 = mov.i32 2
+  %14 = lshl %bounded_columns, %13
+  %15 = add.rr %origin, %14
+  %16 = add %15, 12
+  %17 = mov.address-index %16
+  %loaded = lda.i32.index %prefix, %17
+  return %loaded
+}

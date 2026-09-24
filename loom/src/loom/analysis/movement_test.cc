@@ -194,8 +194,9 @@ class MovementTest : public ::testing::Test {
     loom_value_id_t offset =
         loom_index_constant_result(BuildOffsetConstant(byte_offset));
     loom_op_t* op = nullptr;
-    IREE_CHECK_OK(loom_buffer_view_build(&builder_, buffer, offset, view_type,
-                                         LOOM_LOCATION_UNKNOWN, &op));
+    IREE_CHECK_OK(loom_buffer_view_build(&builder_, 0, buffer, offset, 0,
+                                         view_type, LOOM_LOCATION_UNKNOWN,
+                                         &op));
     return loom_buffer_view_result(op);
   }
 

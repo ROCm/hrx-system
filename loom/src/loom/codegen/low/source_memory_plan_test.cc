@@ -20,9 +20,9 @@ TEST_F(SourceMemoryPlanTest, DynamicViewOriginRetainsCompleteAddress) {
   view_type.encoding_flags = LOOM_ENCODING_FLAG_SSA;
 
   loom_op_t* view_op = nullptr;
-  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base_offset,
-                                        view_type, LOOM_LOCATION_UNKNOWN,
-                                        &view_op));
+  IREE_ASSERT_OK(loom_buffer_view_build(
+      &builder_, LOOM_BUFFER_VIEW_BUILD_FLAG_HAS_ADDRESS_BITWIDTH, buffer,
+      base_offset, 32, view_type, LOOM_LOCATION_UNKNOWN, &view_op));
 
   loom_value_fact_table_t facts = {0};
   ComputeFacts(&facts);
@@ -30,6 +30,7 @@ TEST_F(SourceMemoryPlanTest, DynamicViewOriginRetainsCompleteAddress) {
   loom_low_source_memory_access_diagnostic_t diagnostic = {0};
   ASSERT_TRUE(BuildPlan(&facts, view_op, &plan, &diagnostic));
   EXPECT_EQ(plan.operation_kind, LOOM_LOW_SOURCE_MEMORY_OPERATION_VIEW_CARRIER);
+  EXPECT_EQ(plan.address_bitwidth, 32);
   EXPECT_EQ(plan.view_value_id, loom_buffer_view_result(view_op));
   EXPECT_EQ(plan.root_value_id, buffer);
   EXPECT_EQ(plan.element_byte_count, 4u);
@@ -52,9 +53,10 @@ TEST_F(SourceMemoryPlanTest, StaticDenseLoadIncludesViewBase) {
       loom_index_constant_result(BuildOffsetConstant(16));
 
   loom_op_t* view_op = nullptr;
-  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base_offset,
-                                        ViewType1D(32, layout),
-                                        LOOM_LOCATION_UNKNOWN, &view_op));
+  IREE_ASSERT_OK(loom_buffer_view_build(
+      &builder_, LOOM_BUFFER_VIEW_BUILD_FLAG_HAS_ADDRESS_BITWIDTH, buffer,
+      base_offset, 32, ViewType1D(32, layout), LOOM_LOCATION_UNKNOWN,
+      &view_op));
   int64_t static_indices[] = {3};
   loom_op_t* load_op = nullptr;
   IREE_ASSERT_OK(loom_vector_load_build(
@@ -68,6 +70,7 @@ TEST_F(SourceMemoryPlanTest, StaticDenseLoadIncludesViewBase) {
   loom_low_source_memory_access_diagnostic_t diagnostic = {0};
   ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic));
   EXPECT_EQ(plan.operation_kind, LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD);
+  EXPECT_EQ(plan.address_bitwidth, 32);
   EXPECT_EQ(plan.view_value_id, loom_buffer_view_result(view_op));
   EXPECT_EQ(plan.base_view_value_id, loom_buffer_view_result(view_op));
   EXPECT_EQ(plan.root_value_id, buffer);
@@ -96,7 +99,7 @@ TEST_F(SourceMemoryPlanTest, ReducedAlignmentAppliesOnlyToTypedAccess) {
                             loom_dim_pack_static(8), 0),
         alignment);
     loom_op_t* view_op = nullptr;
-    IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base_offset,
+    IREE_ASSERT_OK(loom_buffer_view_build(&builder_, 0, buffer, base_offset, 0,
                                           view_type, LOOM_LOCATION_UNKNOWN,
                                           &view_op));
     const int64_t indices[] = {0};
@@ -141,8 +144,9 @@ TEST_F(SourceMemoryPlanTest, PackedSubviewRetainsStrongerAddressAlignment) {
                             loom_dim_pack_static(16), 0),
         alignment);
     loom_op_t* source = nullptr;
-    IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base, source_type,
-                                          LOOM_LOCATION_UNKNOWN, &source));
+    IREE_ASSERT_OK(loom_buffer_view_build(&builder_, 0, buffer, base, 0,
+                                          source_type, LOOM_LOCATION_UNKNOWN,
+                                          &source));
     const int64_t subview_offset = 1;
     loom_op_t* subview = nullptr;
     IREE_ASSERT_OK(loom_view_subview_build(
@@ -193,6 +197,7 @@ TEST_F(SourceMemoryPlanTest, PhysicalByteLoadUsesBufferReferenceAndOffset) {
   loom_low_source_memory_access_diagnostic_t diagnostic = {0};
   ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic));
   EXPECT_EQ(plan.operation_kind, LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD);
+  EXPECT_EQ(plan.address_bitwidth, 0);
   EXPECT_EQ(plan.view_value_id, buffer);
   EXPECT_EQ(plan.base_view_value_id, buffer);
   EXPECT_EQ(plan.root_value_id, root_buffer);
@@ -230,7 +235,7 @@ TEST_P(WideAlignmentSourceMemoryPlanTest, RetainsPowerOfTwoDivisibility) {
     IREE_ASSERT_OK(loom_buffer_load_i8_u_build(
         &builder_, buffer, byte_offset, LOOM_LOCATION_UNKNOWN, &byte_load_op));
     loom_op_t* view_op = nullptr;
-    IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, byte_offset,
+    IREE_ASSERT_OK(loom_buffer_view_build(&builder_, 0, buffer, byte_offset, 0,
                                           view_type, LOOM_LOCATION_UNKNOWN,
                                           &view_op));
     const int64_t static_index = 0;
@@ -304,7 +309,7 @@ TEST_F(SourceMemoryPlanTest, StaticStridedLayoutClassifiesCompactness) {
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(row_strides); ++i) {
     loom_value_id_t layout = BuildStridedLayout(row_strides[i], 1);
     loom_op_t* view_op = nullptr;
-    IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base_offset,
+    IREE_ASSERT_OK(loom_buffer_view_build(&builder_, 0, buffer, base_offset, 0,
                                           ViewType2D(8, 16, layout),
                                           LOOM_LOCATION_UNKNOWN, &view_op));
     const int64_t static_indices[] = {0, 0};
@@ -351,7 +356,7 @@ TEST_F(SourceMemoryPlanTest, WholeViewPayloadPreservesEveryAxis) {
         BuildStridedLayout(layout_case.row_stride, layout_case.column_stride);
     loom_op_t* view_op = nullptr;
     IREE_ASSERT_OK(loom_buffer_view_build(
-        &builder_, buffer, base_offset,
+        &builder_, 0, buffer, base_offset, 0,
         ViewType2D(layout_case.rows, layout_case.columns, layout),
         LOOM_LOCATION_UNKNOWN, &view_op));
     views[i] = loom_buffer_view_result(view_op);
@@ -388,7 +393,7 @@ TEST_F(SourceMemoryPlanTest, DynamicStridedLayoutScalesDynamicOrigin) {
   const loom_value_id_t base_offset =
       loom_index_constant_result(BuildOffsetConstant(0));
   loom_op_t* view_op = nullptr;
-  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base_offset,
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, 0, buffer, base_offset, 0,
                                         ViewType2D(8, 16, layout),
                                         LOOM_LOCATION_UNKNOWN, &view_op));
   const int64_t static_indices[] = {INT64_MIN, 0};
@@ -419,7 +424,7 @@ TEST_F(SourceMemoryPlanTest, DynamicStridedLayoutScalesStaticOrigin) {
   const loom_value_id_t base_offset =
       loom_index_constant_result(BuildOffsetConstant(0));
   loom_op_t* view_op = nullptr;
-  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base_offset,
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, 0, buffer, base_offset, 0,
                                         ViewType2D(8, 16, layout),
                                         LOOM_LOCATION_UNKNOWN, &view_op));
   const int64_t static_indices[] = {3, 0};
@@ -450,7 +455,7 @@ TEST_F(SourceMemoryPlanTest, ExactDynamicStrideFoldsIntoStaticOffset) {
   const loom_value_id_t base_offset =
       loom_index_constant_result(BuildOffsetConstant(0));
   loom_op_t* view_op = nullptr;
-  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base_offset,
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, 0, buffer, base_offset, 0,
                                         ViewType2D(8, 16, layout),
                                         LOOM_LOCATION_UNKNOWN, &view_op));
   const int64_t static_indices[] = {3, 0};
@@ -531,7 +536,7 @@ TEST_F(SourceMemoryPlanTest, FactOnlyRuntimeStrideIsNotMaterialized) {
   const loom_value_id_t base_offset =
       loom_index_constant_result(BuildOffsetConstant(0));
   loom_op_t* view_op = nullptr;
-  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base_offset,
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, 0, buffer, base_offset, 0,
                                         ViewType2D(8, 16, layout),
                                         LOOM_LOCATION_UNKNOWN, &view_op));
   const int64_t static_indices[] = {INT64_MIN, 0};
@@ -562,7 +567,7 @@ TEST_F(SourceMemoryPlanTest, ViewMemoryOperationKindUsesInterfaceShape) {
 
   loom_op_t* view_op = nullptr;
   IREE_ASSERT_OK(
-      loom_buffer_view_build(&builder_, buffer, base_offset,
+      loom_buffer_view_build(&builder_, 0, buffer, base_offset, 0,
                              ViewType1D(LOOM_SCALAR_TYPE_I32, 16, layout),
                              LOOM_LOCATION_UNKNOWN, &view_op));
   int64_t static_indices[] = {0};
@@ -637,7 +642,7 @@ TEST_F(SourceMemoryPlanTest, VectorAtomicReduceTracksIdentityIotaOffsets) {
 
   loom_op_t* view_op = nullptr;
   IREE_ASSERT_OK(
-      loom_buffer_view_build(&builder_, buffer, base_offset,
+      loom_buffer_view_build(&builder_, 0, buffer, base_offset, 0,
                              ViewType1D(LOOM_SCALAR_TYPE_F16, 16, layout),
                              LOOM_LOCATION_UNKNOWN, &view_op));
   loom_value_id_t offsets =
@@ -681,7 +686,7 @@ TEST_F(SourceMemoryPlanTest,
 
   loom_op_t* view_op = nullptr;
   IREE_ASSERT_OK(
-      loom_buffer_view_build(&builder_, buffer, base_offset,
+      loom_buffer_view_build(&builder_, 0, buffer, base_offset, 0,
                              ViewType1D(LOOM_SCALAR_TYPE_BF16, 16, layout),
                              LOOM_LOCATION_UNKNOWN, &view_op));
   loom_value_id_t offsets = BuildIndexFromElementOffsets(
@@ -723,7 +728,7 @@ TEST_F(SourceMemoryPlanTest, VectorAtomicRmwClassifiesNonIdentityOffsets) {
 
   loom_op_t* view_op = nullptr;
   IREE_ASSERT_OK(
-      loom_buffer_view_build(&builder_, buffer, base_offset,
+      loom_buffer_view_build(&builder_, 0, buffer, base_offset, 0,
                              ViewType1D(LOOM_SCALAR_TYPE_F16, 16, layout),
                              LOOM_LOCATION_UNKNOWN, &view_op));
   loom_value_id_t offsets =
@@ -763,8 +768,8 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadTracksViewBaseBoundary) {
 
   loom_op_t* view_op = nullptr;
   IREE_ASSERT_OK(loom_buffer_view_build(
-      &builder_, buffer, loom_index_add_result(base_op), ViewType1D(32, layout),
-      LOOM_LOCATION_UNKNOWN, &view_op));
+      &builder_, 0, buffer, loom_index_add_result(base_op), 0,
+      ViewType1D(32, layout), LOOM_LOCATION_UNKNOWN, &view_op));
   int64_t static_indices[] = {3};
   loom_op_t* load_op = nullptr;
   IREE_ASSERT_OK(loom_vector_load_build(
@@ -807,7 +812,7 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadFactorsScaledViewBase) {
 
   loom_op_t* view_op = nullptr;
   IREE_ASSERT_OK(loom_buffer_view_build(
-      &builder_, buffer, loom_index_scale_result(byte_offset_op),
+      &builder_, 0, buffer, loom_index_scale_result(byte_offset_op), 0,
       ViewType1D(LOOM_SCALAR_TYPE_I32, 1, layout), LOOM_LOCATION_UNKNOWN,
       &view_op));
   int64_t static_indices[] = {0};
@@ -846,7 +851,7 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadPreservesWidePowerOfTwoStride) {
 
   loom_op_t* view_op = nullptr;
   IREE_ASSERT_OK(loom_buffer_view_build(
-      &builder_, buffer, loom_index_scale_result(byte_offset_op),
+      &builder_, 0, buffer, loom_index_scale_result(byte_offset_op), 0,
       ViewType1D(LOOM_SCALAR_TYPE_I32, 1, layout), LOOM_LOCATION_UNKNOWN,
       &view_op));
   int64_t static_indices[] = {0};
@@ -881,7 +886,7 @@ TEST_F(SourceMemoryPlanTest, SubtractedViewBaseKeepsSignedByteTerms) {
                                       LOOM_LOCATION_UNKNOWN, &base_op));
   loom_op_t* view_op = nullptr;
   IREE_ASSERT_OK(loom_buffer_view_build(
-      &builder_, buffer, loom_index_sub_result(base_op),
+      &builder_, 0, buffer, loom_index_sub_result(base_op), 0,
       ViewType1D(LOOM_SCALAR_TYPE_I32, 1, BuildDenseLayout()),
       LOOM_LOCATION_UNKNOWN, &view_op));
   int64_t indices[] = {0};
@@ -923,7 +928,7 @@ TEST_F(SourceMemoryPlanTest, RetreatingViewBaseRetainsCompleteOrigin) {
   const loom_value_id_t origin = loom_index_sub_result(origin_op);
   loom_op_t* view_op = nullptr;
   IREE_ASSERT_OK(loom_buffer_view_build(
-      &builder_, buffer, origin,
+      &builder_, 0, buffer, origin, 0,
       ViewType1D(LOOM_SCALAR_TYPE_I32, 1, BuildDenseLayout()),
       LOOM_LOCATION_UNKNOWN, &view_op));
   int64_t indices[] = {0};
@@ -983,7 +988,7 @@ TEST_F(SourceMemoryPlanTest,
 
   loom_op_t* view_op = nullptr;
   IREE_ASSERT_OK(
-      loom_buffer_view_build(&builder_, buffer, payload_offset,
+      loom_buffer_view_build(&builder_, 0, buffer, payload_offset, 0,
                              ViewType1D(LOOM_SCALAR_TYPE_I32, 1, layout),
                              LOOM_LOCATION_UNKNOWN, &view_op));
   int64_t static_indices[] = {0};
@@ -1036,9 +1041,10 @@ TEST_F(SourceMemoryPlanTest,
   loom_value_id_t zero = loom_index_constant_result(BuildOffsetConstant(0));
 
   loom_op_t* header_view_op = nullptr;
-  IREE_ASSERT_OK(loom_buffer_view_build(
-      &builder_, buffer, zero, ViewType1D(LOOM_SCALAR_TYPE_I32, 8, layout),
-      LOOM_LOCATION_UNKNOWN, &header_view_op));
+  IREE_ASSERT_OK(
+      loom_buffer_view_build(&builder_, 0, buffer, zero, 0,
+                             ViewType1D(LOOM_SCALAR_TYPE_I32, 8, layout),
+                             LOOM_LOCATION_UNKNOWN, &header_view_op));
   int64_t header_indices[] = {7};
   loom_op_t* base_load_op = nullptr;
   IREE_ASSERT_OK(loom_view_load_build(&builder_, 0, /*instance_flags=*/0,
@@ -1056,7 +1062,7 @@ TEST_F(SourceMemoryPlanTest,
 
   loom_op_t* view_op = nullptr;
   IREE_ASSERT_OK(loom_buffer_view_build(
-      &builder_, buffer, loom_index_cast_result(base_cast_op),
+      &builder_, 0, buffer, loom_index_cast_result(base_cast_op), 0,
       ViewType1D(LOOM_SCALAR_TYPE_I32, 4, layout), LOOM_LOCATION_UNKNOWN,
       &view_op));
   int64_t static_indices[] = {2};
@@ -1096,7 +1102,7 @@ TEST_F(SourceMemoryPlanTest, StaticOffsetCombinesWithRootAlignment) {
       loom_index_constant_result(BuildOffsetConstant(8));
 
   loom_op_t* view_op = nullptr;
-  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base_offset,
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, 0, buffer, base_offset, 0,
                                         ViewType1D(32, layout),
                                         LOOM_LOCATION_UNKNOWN, &view_op));
   int64_t static_indices[] = {1};
@@ -1125,7 +1131,7 @@ TEST_F(SourceMemoryPlanTest, ExternalBufferArgHasNoComparableAliasScope) {
       loom_index_constant_result(BuildOffsetConstant(16));
 
   loom_op_t* view_op = nullptr;
-  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base_offset,
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, 0, buffer, base_offset, 0,
                                         ViewType1D(32, layout),
                                         LOOM_LOCATION_UNKNOWN, &view_op));
   int64_t static_indices[] = {3};
@@ -1161,7 +1167,7 @@ TEST_F(SourceMemoryPlanTest, NoaliasBufferArgFeedsComparableAliasScope) {
       loom_index_constant_result(BuildOffsetConstant(16));
 
   loom_op_t* view_op = nullptr;
-  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base_offset,
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, 0, buffer, base_offset, 0,
                                         ViewType1D(32, layout),
                                         LOOM_LOCATION_UNKNOWN, &view_op));
   int64_t static_indices[] = {3};

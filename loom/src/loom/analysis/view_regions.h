@@ -82,6 +82,10 @@ typedef struct loom_view_region_t {
   // Known nullability of the underlying storage root.
   loom_value_fact_reference_nullability_t nullability;
 
+  // Unsigned source address-carrier width guaranteed for valid active accesses
+  // through this view, or zero when no source carrier contract is known.
+  uint8_t address_bitwidth;
+
   // Intrinsic storage origin retained from the source reference.
   loom_value_fact_reference_origin_t origin;
 
@@ -122,6 +126,9 @@ typedef struct loom_view_region_t {
   // Bitfield of loom_view_region_precision_flag_bits_e.
   loom_view_region_precision_flags_t precision_flags;
 } loom_view_region_t;
+
+static_assert(sizeof(loom_view_region_t) == 440,
+              "view regions must remain 440 bytes");
 
 // Dense analysis table for one function-local value domain.
 typedef struct loom_view_region_table_t {

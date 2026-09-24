@@ -90,3 +90,4 @@
   LOOM_KW_ACROSS = 81,  // "across"
   LOOM_KW_ON = 82,  // "on"
   LOOM_KW_CAPACITY = 83,  // "capacity"
+  LOOM_KW_ADDRESS_BITS = 84,  // "address_bits"

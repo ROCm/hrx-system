@@ -228,7 +228,7 @@ class ViewRegionsTest : public ::testing::Test {
     const loom_value_id_t base =
         loom_index_constant_result(BuildOffsetConstant(0));
     loom_op_t* view = nullptr;
-    IREE_CHECK_OK(loom_buffer_view_build(&builder_, buffer, base,
+    IREE_CHECK_OK(loom_buffer_view_build(&builder_, 0, buffer, base, 0,
                                          ViewType1D(4, layout, element_type),
                                          LOOM_LOCATION_UNKNOWN, &view));
     return loom_buffer_view_result(view);
@@ -342,12 +342,13 @@ TEST_F(ViewRegionsTest, SelectedViewRetainsUnknownRootRelativeOffset) {
   loom_value_id_t second_offset =
       loom_index_constant_result(BuildOffsetConstant(128));
   loom_op_t* first_view = nullptr;
-  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, zero, view_type,
-                                        LOOM_LOCATION_UNKNOWN, &first_view));
+  IREE_ASSERT_OK(loom_buffer_view_build(
+      &builder_, LOOM_BUFFER_VIEW_BUILD_FLAG_HAS_ADDRESS_BITWIDTH, buffer, zero,
+      32, view_type, LOOM_LOCATION_UNKNOWN, &first_view));
   loom_op_t* second_view = nullptr;
-  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, second_offset,
-                                        view_type, LOOM_LOCATION_UNKNOWN,
-                                        &second_view));
+  IREE_ASSERT_OK(loom_buffer_view_build(
+      &builder_, LOOM_BUFFER_VIEW_BUILD_FLAG_HAS_ADDRESS_BITWIDTH, buffer,
+      second_offset, 32, view_type, LOOM_LOCATION_UNKNOWN, &second_view));
   loom_op_t* select = nullptr;
   IREE_ASSERT_OK(loom_scf_select_build(
       &builder_, condition, loom_buffer_view_result(first_view),
@@ -367,6 +368,7 @@ TEST_F(ViewRegionsTest, SelectedViewRetainsUnknownRootRelativeOffset) {
 
   ASSERT_NE(selected_region, nullptr);
   EXPECT_EQ(selected_region->root_value_id, buffer);
+  EXPECT_EQ(selected_region->address_bitwidth, 32);
   EXPECT_FALSE(
       loom_symbolic_expr_is_constant(&selected_region->begin_byte_offset));
   EXPECT_EQ(selected_region->begin_byte_offset.facts.range_lo, 0);
@@ -379,6 +381,71 @@ TEST_F(ViewRegionsTest, SelectedViewRetainsUnknownRootRelativeOffset) {
   EXPECT_FALSE(no_overlap);
 }
 
+TEST_F(ViewRegionsTest, ViewAddressDomainRequiresJoinAgreement) {
+  const loom_value_id_t buffer = DefineBufferArg();
+  loom_value_id_t condition = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_region_entry_block(loom_func_like_body(function_)),
+      loom_type_scalar(LOOM_SCALAR_TYPE_I1), &condition));
+  const loom_value_id_t layout = BuildDenseLayout();
+  const loom_type_t view_type = ViewType1D(8, layout);
+  const loom_value_id_t base =
+      loom_index_constant_result(BuildOffsetConstant(0));
+
+  auto build_view = [&](uint8_t address_bitwidth) {
+    loom_op_t* view = nullptr;
+    const loom_buffer_view_build_flags_t flags =
+        address_bitwidth != 0 ? LOOM_BUFFER_VIEW_BUILD_FLAG_HAS_ADDRESS_BITWIDTH
+                              : 0;
+    IREE_EXPECT_OK(loom_buffer_view_build(&builder_, flags, buffer, base,
+                                          address_bitwidth, view_type,
+                                          LOOM_LOCATION_UNKNOWN, &view));
+    return loom_buffer_view_result(view);
+  };
+  const loom_value_id_t first32 = build_view(32);
+  const loom_value_id_t second32 = build_view(32);
+  const loom_value_id_t view64 = build_view(64);
+  const loom_value_id_t ordinary = build_view(0);
+
+  auto build_select = [&](loom_value_id_t lhs, loom_value_id_t rhs) {
+    loom_op_t* select = nullptr;
+    IREE_EXPECT_OK(loom_scf_select_build(&builder_, condition, lhs, rhs,
+                                         view_type, LOOM_LOCATION_UNKNOWN,
+                                         &select));
+    return loom_scf_select_result(select);
+  };
+  const loom_value_id_t same_width = build_select(first32, second32);
+  const loom_value_id_t different_width = build_select(first32, view64);
+  const loom_value_id_t missing_width = build_select(first32, ordinary);
+
+  const int64_t subview_offset = 1;
+  loom_op_t* subview = nullptr;
+  const loom_type_t subview_type = ViewType1D(4, layout);
+  IREE_ASSERT_OK(loom_view_subview_build(&builder_, first32, nullptr, 0,
+                                         &subview_offset, 1, subview_type,
+                                         LOOM_LOCATION_UNKNOWN, &subview));
+  loom_op_t* refined = nullptr;
+  IREE_ASSERT_OK(loom_view_refine_build(
+      &builder_, loom_view_subview_result(subview), ViewType1D(2, layout),
+      LOOM_LOCATION_UNKNOWN, &refined));
+
+  loom_value_fact_table_t facts = {};
+  ComputeFacts(&facts);
+  auto address_bitwidth = [&](loom_value_id_t value) {
+    loom_value_fact_view_reference_t reference = {};
+    EXPECT_TRUE(loom_value_facts_query_view_reference(
+        &facts.context, loom_value_fact_table_lookup(&facts, value),
+        &reference));
+    return reference.address_bitwidth;
+  };
+  EXPECT_EQ(address_bitwidth(first32), 32);
+  EXPECT_EQ(address_bitwidth(loom_view_subview_result(subview)), 32);
+  EXPECT_EQ(address_bitwidth(loom_view_refine_result(refined)), 32);
+  EXPECT_EQ(address_bitwidth(same_width), 32);
+  EXPECT_EQ(address_bitwidth(different_width), 0);
+  EXPECT_EQ(address_bitwidth(missing_width), 0);
+}
+
 TEST_F(ViewRegionsTest, ProvesDisjointReadAndWriteViewsInOneSlab) {
   loom_value_id_t buffer = DefineBufferArg();
   loom_value_id_t layout = BuildDenseLayout();
@@ -387,12 +454,12 @@ TEST_F(ViewRegionsTest, ProvesDisjointReadAndWriteViewsInOneSlab) {
       loom_index_constant_result(BuildOffsetConstant(128));
 
   loom_op_t* read_view_op = nullptr;
-  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, zero,
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, 0, buffer, zero, 0,
                                         ViewType1D(16, layout),
                                         LOOM_LOCATION_UNKNOWN, &read_view_op));
   loom_op_t* write_view_op = nullptr;
   IREE_ASSERT_OK(loom_buffer_view_build(
-      &builder_, buffer, one_hundred_twenty_eight, ViewType1D(16, layout),
+      &builder_, 0, buffer, one_hundred_twenty_eight, 0, ViewType1D(16, layout),
       LOOM_LOCATION_UNKNOWN, &write_view_op));
 
   int64_t static_indices[] = {0};
@@ -754,7 +821,7 @@ TEST_F(ViewRegionsTest, PrecomputesReusedMemoryIndexExpression) {
   loom_value_id_t one = loom_index_constant_result(BuildIndexConstant(1));
 
   loom_op_t* view_op = nullptr;
-  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, zero,
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, 0, buffer, zero, 0,
                                         ViewType1D(4096, layout),
                                         LOOM_LOCATION_UNKNOWN, &view_op));
 
@@ -816,12 +883,12 @@ TEST_F(ViewRegionsTest, ProvesSymbolicOffsetCancellation) {
                                       &second_offset_op));
 
   loom_op_t* first_view_op = nullptr;
-  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base_offset,
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, 0, buffer, base_offset, 0,
                                         ViewType1D(16, layout),
                                         LOOM_LOCATION_UNKNOWN, &first_view_op));
   loom_op_t* second_view_op = nullptr;
   IREE_ASSERT_OK(loom_buffer_view_build(
-      &builder_, buffer, loom_index_add_result(second_offset_op),
+      &builder_, 0, buffer, loom_index_add_result(second_offset_op), 0,
       ViewType1D(16, layout), LOOM_LOCATION_UNKNOWN, &second_view_op));
 
   loom_value_fact_table_t facts = {0};
@@ -862,16 +929,16 @@ TEST_F(ViewRegionsTest, KeepsOverlappingAndDifferentRootViewsConservative) {
       loom_index_constant_result(BuildOffsetConstant(32));
 
   loom_op_t* first_view_op = nullptr;
-  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, first_buffer, zero,
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, 0, first_buffer, zero, 0,
                                         ViewType1D(16, layout),
                                         LOOM_LOCATION_UNKNOWN, &first_view_op));
   loom_op_t* overlapping_view_op = nullptr;
   IREE_ASSERT_OK(loom_buffer_view_build(
-      &builder_, first_buffer, thirty_two, ViewType1D(16, layout),
+      &builder_, 0, first_buffer, thirty_two, 0, ViewType1D(16, layout),
       LOOM_LOCATION_UNKNOWN, &overlapping_view_op));
   loom_op_t* other_root_view_op = nullptr;
   IREE_ASSERT_OK(loom_buffer_view_build(
-      &builder_, second_buffer, zero, ViewType1D(16, layout),
+      &builder_, 0, second_buffer, zero, 0, ViewType1D(16, layout),
       LOOM_LOCATION_UNKNOWN, &other_root_view_op));
 
   loom_value_fact_table_t facts = {0};
@@ -928,7 +995,7 @@ TEST_F(ViewRegionsTest, AllocationFreshnessRelationships) {
   loom_op_t* views[IREE_ARRAYSIZE(roots)] = {};
   for (size_t i = 0; i < IREE_ARRAYSIZE(roots); ++i) {
     IREE_ASSERT_OK(loom_buffer_view_build(
-        &builder_, roots[i], i == 5 ? separate_offset : zero,
+        &builder_, 0, roots[i], i == 5 ? separate_offset : zero, 0,
         ViewType1D(16, layout), LOOM_LOCATION_UNKNOWN, &views[i]));
   }
   loom_value_fact_table_t facts = {};
@@ -983,12 +1050,12 @@ TEST_F(ViewRegionsTest, ProvesDistinctComparableRootsDisjoint) {
   loom_value_id_t layout = BuildDenseLayout();
   loom_value_id_t zero = loom_index_constant_result(BuildOffsetConstant(0));
   loom_op_t* first_view_op = nullptr;
-  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, noalias_buffers.values[0],
-                                        zero, ViewType1D(16, layout),
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, 0, noalias_buffers.values[0],
+                                        zero, 0, ViewType1D(16, layout),
                                         LOOM_LOCATION_UNKNOWN, &first_view_op));
   loom_op_t* second_view_op = nullptr;
   IREE_ASSERT_OK(loom_buffer_view_build(
-      &builder_, noalias_buffers.values[1], zero, ViewType1D(16, layout),
+      &builder_, 0, noalias_buffers.values[1], zero, 0, ViewType1D(16, layout),
       LOOM_LOCATION_UNKNOWN, &second_view_op));
 
   loom_value_fact_table_t facts = {0};
@@ -1022,9 +1089,10 @@ TEST_F(ViewRegionsTest, SubviewPreservesRootAndAddsLogicalOffset) {
   loom_value_id_t layout = BuildDenseLayout();
 
   loom_op_t* source_op = nullptr;
-  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base_offset,
-                                        ViewType2D(8, 16, layout),
-                                        LOOM_LOCATION_UNKNOWN, &source_op));
+  IREE_ASSERT_OK(loom_buffer_view_build(
+      &builder_, LOOM_BUFFER_VIEW_BUILD_FLAG_HAS_ADDRESS_BITWIDTH, buffer,
+      base_offset, 32, ViewType2D(8, 16, layout), LOOM_LOCATION_UNKNOWN,
+      &source_op));
 
   int64_t static_offsets[] = {2, 0};
   loom_op_t* subview_op = nullptr;
@@ -1044,6 +1112,7 @@ TEST_F(ViewRegionsTest, SubviewPreservesRootAndAddsLogicalOffset) {
 
   ASSERT_NE(region, nullptr);
   EXPECT_EQ(region->root_value_id, buffer);
+  EXPECT_EQ(region->address_bitwidth, 32);
   EXPECT_EQ(region->alias_scope_id, LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE);
   EXPECT_TRUE(loom_symbolic_expr_is_linear(&region->begin_byte_offset));
   ASSERT_EQ(region->begin_byte_offset.term_count, 1);
@@ -1061,7 +1130,7 @@ TEST_F(ViewRegionsTest, StridedFootprintIncludesPaddingGaps) {
   loom_value_id_t zero = loom_index_constant_result(BuildOffsetConstant(0));
 
   loom_op_t* view_op = nullptr;
-  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, zero,
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, 0, buffer, zero, 0,
                                         ViewType2D(4, 4, layout),
                                         LOOM_LOCATION_UNKNOWN, &view_op));
 
@@ -1088,7 +1157,7 @@ TEST_F(ViewRegionsTest, DynamicStridedFootprintKeepsStrideExpression) {
   loom_value_id_t zero = loom_index_constant_result(BuildOffsetConstant(0));
 
   loom_op_t* view_op = nullptr;
-  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, zero,
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, 0, buffer, zero, 0,
                                         ViewType2D(4, 4, layout),
                                         LOOM_LOCATION_UNKNOWN, &view_op));
 
@@ -1115,7 +1184,7 @@ TEST_F(ViewRegionsTest, SeededLayoutFactsForEncodingArgDriveFootprint) {
   loom_value_id_t zero = loom_index_constant_result(BuildOffsetConstant(0));
 
   loom_op_t* view_op = nullptr;
-  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, zero,
+  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, 0, buffer, zero, 0,
                                         ViewType2D(4, 4, layout),
                                         LOOM_LOCATION_UNKNOWN, &view_op));
 

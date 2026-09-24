@@ -1,0 +1,18 @@
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @source_address_domain_rejects_disjoint_range(%input: buffer, %origin_input: offset) -> (i32) {
+  %origin = index.assume %origin_input [range(%origin_input, 4294967296, 4294967300)] : offset
+  %source = buffer.view %input[%origin] address_bits(32) : buffer -> view<1xi32>
+  // ERROR@+1: TARGET/008 {op_name = "view.load", operation_kind = "load"}
+  %loaded = view.load %source[0] : view<1xi32> -> i32
+  func.return %loaded : i32
+}
+
+// ====
+
+func.def @source_address_domain_rejects_mismatched_width(%input: buffer, %origin: offset) -> (i32) {
+  %source = buffer.view %input[%origin] address_bits(64) : buffer -> view<1xi32>
+  // ERROR@+1: TARGET/008 {op_name = "view.load", operation_kind = "load"}
+  %loaded = view.load %source[0] : view<1xi32> -> i32
+  func.return %loaded : i32
+}

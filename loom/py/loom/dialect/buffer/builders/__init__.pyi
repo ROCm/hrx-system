@@ -71,6 +71,7 @@ class BufferBuilder(DialectBuilder):
         *,
         buffer: ValueRef,
         byte_offset: ValueRef,
+        address_bitwidth: int | None = ...,
         results: list[Type | TiedResultSpec],
         name: str | None = ...,
         names: Sequence[str] | None = ...,

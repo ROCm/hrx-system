@@ -20,6 +20,11 @@ func.def @query_buffer_length(%buffer: buffer) -> (offset) {
   func.return %byte_length : offset
 }
 
+func.def @view_with_source_address_domain(%buffer: buffer, %offset: offset) -> (view<4x8xf32>) {
+  %view = buffer.view %buffer[%offset] address_bits(32) : buffer -> view<4x8xf32>
+  func.return %view : view<4x8xf32>
+}
+
 // ====
 
 func.def @bulk_byte_operations(%source: buffer, %target: buffer, %source_offset: offset, %target_offset: offset, %byte_length: offset, %pattern: bf16) -> (i32) {

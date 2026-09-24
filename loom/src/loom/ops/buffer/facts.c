@@ -292,9 +292,13 @@ iree_status_t loom_buffer_view_facts(loom_fact_context_t* context,
                                      loom_value_facts_t* result_facts) {
   loom_type_t result_type =
       loom_module_value_type(module, loom_buffer_view_result(op));
+  const uint8_t address_bitwidth =
+      loom_buffer_view_has_address_bitwidth(op)
+          ? (uint8_t)loom_buffer_view_address_bitwidth(op)
+          : 0;
   return loom_view_reference_make_buffer_view(
       context, module, loom_buffer_view_buffer(op), operand_facts[0],
-      operand_facts[1], result_type, &result_facts[0]);
+      operand_facts[1], address_bitwidth, result_type, &result_facts[0]);
 }
 
 iree_status_t loom_buffer_length_facts(loom_fact_context_t* context,

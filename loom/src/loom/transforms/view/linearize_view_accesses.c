@@ -564,10 +564,18 @@ static iree_status_t loom_linearize_view_accesses_get_linear_view(
   loom_builder_ip_t saved_ip = loom_builder_save(builder);
   loom_builder_set_after(builder, view_op);
   loom_op_t* linear_view_op = NULL;
-  iree_status_t status =
-      loom_buffer_view_build(builder, loom_buffer_view_buffer(view_op),
-                             loom_buffer_view_byte_offset(view_op), linear_type,
-                             view_op->location, &linear_view_op);
+  const loom_buffer_view_build_flags_t build_flags =
+      loom_buffer_view_has_address_bitwidth(view_op)
+          ? LOOM_BUFFER_VIEW_BUILD_FLAG_HAS_ADDRESS_BITWIDTH
+          : 0;
+  const int64_t address_bitwidth =
+      loom_buffer_view_has_address_bitwidth(view_op)
+          ? loom_buffer_view_address_bitwidth(view_op)
+          : 0;
+  iree_status_t status = loom_buffer_view_build(
+      builder, build_flags, loom_buffer_view_buffer(view_op),
+      loom_buffer_view_byte_offset(view_op), address_bitwidth, linear_type,
+      view_op->location, &linear_view_op);
   loom_builder_restore(builder, saved_ip);
   IREE_RETURN_IF_ERROR(status);
 

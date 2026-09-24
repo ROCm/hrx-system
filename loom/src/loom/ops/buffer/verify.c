@@ -216,6 +216,14 @@ iree_status_t loom_buffer_assume_alignment_verify(
 iree_status_t loom_buffer_view_verify(const loom_module_t* module,
                                       const loom_op_t* op,
                                       iree_diagnostic_emitter_t emitter) {
+  if (loom_buffer_view_has_address_bitwidth(op)) {
+    const int64_t address_bitwidth = loom_buffer_view_address_bitwidth(op);
+    if (address_bitwidth <= 0 || address_bitwidth > 64) {
+      return loom_buffer_emit_attribute_value_constraint(
+          emitter, op, IREE_SV("address_bitwidth"), address_bitwidth,
+          IREE_SV("integer in the range [1, 64]"));
+    }
+  }
   loom_type_t result_type =
       loom_module_value_type(module, loom_buffer_view_result(op));
   if (!loom_type_is_view(result_type)) {

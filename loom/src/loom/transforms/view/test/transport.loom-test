@@ -6,8 +6,8 @@ func.def @counted_packed_rotation(%input: buffer, %count: index) -> (f32, i64) {
   %step = index.constant 1 : index
   %base0 = index.constant 1 : offset
   %base1 = index.constant 65 : offset
-  %left = buffer.view %buffer[%base0] : buffer -> view<16xf32, align(1)>
-  %right = buffer.view %buffer[%base1] : buffer -> view<16xf32, align(1)>
+  %left = buffer.view %buffer[%base0] address_bits(32) : buffer -> view<16xf32, align(1)>
+  %right = buffer.view %buffer[%base1] address_bits(32) : buffer -> view<16xf32, align(1)>
   %last0, %last1 = scf.for %i = [%begin to %count step %step](%a = %left : view<16xf32, align(1)>, %b = %right : view<16xf32, align(1)>) -> (view<16xf32, align(1)>, view<16xf32, align(1)>) {
     %value = view.load %a[0] : view<16xf32, align(1)> -> f32
     view.store %value, %b[0] : f32, view<16xf32, align(1)>
@@ -26,13 +26,13 @@ func.def @counted_packed_rotation(%input: buffer, %count: index) -> (f32, i64) {
   %base0 = index.constant 1 : offset
   %base1 = index.constant 65 : offset
   %last0_offset, %last1_offset = scf.for %i = [%begin to %count step %step](%a_offset = %base0 : offset, %b_offset = %base1 : offset) -> (offset, offset) {
-    %a = buffer.view %buffer[%a_offset] : buffer -> view<16xf32, align(1)>
-    %b = buffer.view %buffer[%b_offset] : buffer -> view<16xf32, align(1)>
+    %a = buffer.view %buffer[%a_offset] address_bits(32) : buffer -> view<16xf32, align(1)>
+    %b = buffer.view %buffer[%b_offset] address_bits(32) : buffer -> view<16xf32, align(1)>
     %value = view.load %a[0] : view<16xf32, align(1)> -> f32
     view.store %value, %b[0] : f32, view<16xf32, align(1)>
     scf.yield %b_offset, %a_offset : offset, offset
   }
-  %last0 = buffer.view %buffer[%last0_offset] : buffer -> view<16xf32, align(1)>
+  %last0 = buffer.view %buffer[%last0_offset] address_bits(32) : buffer -> view<16xf32, align(1)>
   %result = view.load %last0[0] : view<16xf32, align(1)> -> f32
   %alignment = scalar.constant 64 : i64
   func.return %result, %alignment : f32, i64

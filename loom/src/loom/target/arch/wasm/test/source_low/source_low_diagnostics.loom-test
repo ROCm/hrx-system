@@ -178,3 +178,26 @@ func.def target(@target) @wide_offset_rejects_negative(%input: i64) -> (offset) 
   %offset = index.cast %bounded : i64 to offset
   func.return %offset : offset
 }
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @source_address_domain_rejects_disjoint_range(%input: buffer, %origin_input: offset) -> (i32) {
+  %origin = index.assume %origin_input [range(%origin_input, 4294967296, 4294967300)] : offset
+  %source = buffer.view %input[%origin] address_bits(32) : buffer -> view<1xi32>
+  // ERROR@+1: WASM/006 {bit_count="32"}
+  %loaded = view.load %source[0] : view<1xi32> -> i32
+  func.return %loaded : i32
+}
+
+// ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @source_address_domain_rejects_mismatched_width(%input: buffer, %origin: offset) -> (i32) {
+  %source = buffer.view %input[%origin] address_bits(64) : buffer -> view<1xi32>
+  // ERROR@+1: WASM/006 {bit_count="32"}
+  %loaded = view.load %source[0] : view<1xi32> -> i32
+  func.return %loaded : i32
+}

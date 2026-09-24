@@ -178,13 +178,30 @@ static bool loom_low_lower_rule_source_memory_byte_offset_matches(
   }
   loom_value_facts_t byte_facts = loom_low_source_memory_dynamic_offset_facts(
       access, access->static_byte_offset);
-  if (complete_bit_count != 0 && !loom_value_facts_fit_unsigned_bit_count(
-                                     byte_facts, complete_bit_count)) {
-    return false;
+  if (complete_bit_count != 0) {
+    const bool is_active_access =
+        access->operation_kind != LOOM_LOW_SOURCE_MEMORY_OPERATION_PREFETCH &&
+        access->operation_kind != LOOM_LOW_SOURCE_MEMORY_OPERATION_VIEW_CARRIER;
+    if (is_active_access && access->address_bitwidth == complete_bit_count &&
+        !loom_value_facts_is_float(byte_facts)) {
+      const int64_t maximum_address =
+          complete_bit_count >= 63 ? INT64_MAX
+                                   : (INT64_C(1) << complete_bit_count) - 1;
+      if (byte_facts.range_hi >= 0 && byte_facts.range_lo <= maximum_address) {
+        byte_facts =
+            loom_value_facts_clamp_domain(byte_facts, 0, maximum_address);
+      }
+    }
+    if (!loom_value_facts_fit_unsigned_bit_count(byte_facts,
+                                                 complete_bit_count)) {
+      return false;
+    }
   }
   if (dynamic_bit_count == 0) {
     return true;
   }
+  byte_facts = loom_low_source_memory_dynamic_offset_facts(
+      access, access->static_byte_offset);
   const loom_value_facts_t bias =
       loom_value_facts_exact_i64(access->static_byte_offset);
   loom_value_facts_subi(&byte_facts, &bias, &byte_facts);

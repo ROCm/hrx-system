@@ -1,7 +1,7 @@
 // RUN: pass linearize-view-accesses,canonicalize,cse
 
 func.def @linearize_dense_load(%input: buffer, %zero_bytes: offset, %head: index, %head_dim: index) {
-  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<4x128xf16>
+  %input_view = buffer.view %input[%zero_bytes] address_bits(32) : buffer -> view<4x128xf16>
   %value = view.load %input_view[%head, %head_dim] : view<4x128xf16> -> f16
   test.use %value : f16
   func.return
@@ -9,7 +9,7 @@ func.def @linearize_dense_load(%input: buffer, %zero_bytes: offset, %head: index
 
 // ----
 func.def @linearize_dense_load(%input: buffer, %zero_bytes: offset, %head: index, %head_dim: index) {
-  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<512xf16>
+  %input_view = buffer.view %input[%zero_bytes] address_bits(32) : buffer -> view<512xf16>
   %head_dim_bounded = index.assume %head_dim [range(%head_dim, 0, 127)] : index
   %head_bounded = index.assume %head [range(%head, 0, 3)] : index
   %8 = index.constant 128 : index

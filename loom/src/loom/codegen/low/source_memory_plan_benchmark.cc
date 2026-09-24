@@ -184,8 +184,9 @@ class SourceMemoryPlanBenchmark {
     view_type.encoding_id = (uint16_t)layout;
     view_type.encoding_flags = LOOM_ENCODING_FLAG_SSA;
     loom_op_t* view_op = nullptr;
-    IREE_CHECK_OK(loom_buffer_view_build(&builder_, buffer, zero, view_type,
-                                         LOOM_LOCATION_UNKNOWN, &view_op));
+    IREE_CHECK_OK(loom_buffer_view_build(&builder_, 0, buffer, zero, 0,
+                                         view_type, LOOM_LOCATION_UNKNOWN,
+                                         &view_op));
 
     const loom_value_id_t one = BuildIndexConstant(1);
     loom_value_id_t dynamic_index = source_index_;

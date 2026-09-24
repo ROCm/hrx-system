@@ -97,6 +97,7 @@ KEYWORD_MAP: dict[str, str] = {
     "across": "LOOM_KW_ACROSS",
     "on": "LOOM_KW_ON",
     "capacity": "LOOM_KW_CAPACITY",
+    "address_bits": "LOOM_KW_ADDRESS_BITS",
 }
 
 # Maps Region(..., syntax=...) names to C parser/printer selector IDs. The
