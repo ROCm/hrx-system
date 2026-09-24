@@ -1,0 +1,48 @@
+// RUN: emit low-allocation-json @loop_body_write_does_not_reach_drain_use fixed=%state:target_id:8:4
+
+test.target<low_core> @target
+
+// The loop-header value is read by the body copy and independently by the
+// drain. The destructive body write reaches only the redefined backedge value,
+// so the copy may share the header value's storage.
+low.func.def schedule(locked) target<test.low.core>(@target) @loop_body_write_does_not_reach_drain_use(%condition: reg<test.i32>, %seed: reg<test.i32 x4>) -> (reg<test.i32 x4>) asm {
+  low.br ^header(%seed: reg<test.i32 x4>)
+^header(%state: reg<test.i32 x4>):
+  low.cond_br %condition, ^body, ^drain : reg<test.i32>
+^body:
+  %copy = copy %state : reg<test.i32 x4> -> reg<test.i32 x4>
+  %next = test.early_tied.v4i32 %copy
+  low.br ^header(%next: reg<test.i32 x4>)
+^drain:
+  %drain_copy = copy %state : reg<test.i32 x4> -> reg<test.i32 x4>
+  %drain_result = test.early_tied.v4i32 %drain_copy
+  return %drain_result
+}
+
+// ----
+{"format":"loom.low.allocation.v0","function":"loop_body_write_does_not_reach_drain_use","target":"target","descriptor_set":"test.low.core","allocation_mode":"virtual","assignment_count":7,"remark_count":0,"copy_decision_count":2,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":2,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":1,"name":"seed","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":0,"end_point":1,"unit_count":4,"location":{"kind":"target_id","base":0,"count":4}},{"index":1,"value":{"id":0,"name":"condition","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":0,"end_point":8,"unit_count":1,"location":{"kind":"target_id","base":4,"count":1}},{"index":2,"value":{"id":3,"name":"state","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":2,"end_point":9,"unit_count":4,"location":{"kind":"target_id","base":8,"count":4}},{"index":3,"value":{"id":4,"name":"copy","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":5,"end_point":7,"unit_count":4,"location":{"kind":"target_id","base":8,"count":4}},{"index":4,"value":{"id":5,"name":"next","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":6,"end_point":7,"unit_count":4,"location":{"kind":"target_id","base":8,"count":4}},{"index":5,"value":{"id":6,"name":"drain_copy","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":9,"end_point":11,"unit_count":4,"location":{"kind":"target_id","base":8,"count":4}},{"index":6,"value":{"id":7,"name":"drain_result","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":10,"end_point":11,"unit_count":4,"location":{"kind":"target_id","base":8,"count":4}}],"spill_plans":[],"copy_decisions":[{"index":0,"kind":"coalesced","source_value":{"id":3,"name":"state","type":"reg<test.i32 x4>"},"result_value":{"id":4,"name":"copy","type":"reg<test.i32 x4>"},"source_assignment":2,"result_assignment":3},{"index":1,"kind":"coalesced","source_value":{"id":3,"name":"state","type":"reg<test.i32 x4>"},"result_value":{"id":6,"name":"drain_copy","type":"reg<test.i32 x4>"},"source_assignment":2,"result_assignment":5}],"remarks":[]}
+
+// ====
+
+// RUN: emit low-allocation-json @loop_body_write_precedes_old_content_use
+
+test.target<low_core> @target
+
+// A body use after the destructive write still observes the old header
+// contents and requires the copy to use distinct storage.
+low.func.def schedule(locked) target<test.low.core>(@target) @loop_body_write_precedes_old_content_use(%condition: reg<test.i32>, %seed: reg<test.i32 x4>) -> (reg<test.i32 x4>, reg<test.i32 x4>) asm {
+  low.br ^header(%seed: reg<test.i32 x4>, %seed: reg<test.i32 x4>)
+^header(%state: reg<test.i32 x4>, %observed: reg<test.i32 x4>):
+  low.cond_br %condition, ^body, ^drain : reg<test.i32>
+^body:
+  %copy = copy %state : reg<test.i32 x4> -> reg<test.i32 x4>
+  %next = test.early_tied.v4i32 %copy
+  %old_contents = test.add.v4i32 %state, %state
+  low.br ^header(%next: reg<test.i32 x4>, %old_contents: reg<test.i32 x4>)
+^drain:
+  %drain_copy = copy %state : reg<test.i32 x4> -> reg<test.i32 x4>
+  return %drain_copy, %observed
+}
+
+// ----
+{"format":"loom.low.allocation.v0","function":"loop_body_write_precedes_old_content_use","target":"target","descriptor_set":"test.low.core","allocation_mode":"virtual","assignment_count":8,"remark_count":0,"copy_decision_count":2,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":1,"materialized_copy_count":1,"assignments":[{"index":0,"value":{"id":1,"name":"seed","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":0,"end_point":1,"unit_count":4,"location":{"kind":"target_id","base":0,"count":4}},{"index":1,"value":{"id":0,"name":"condition","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":0,"end_point":9,"unit_count":1,"location":{"kind":"target_id","base":4,"count":1}},{"index":2,"value":{"id":4,"name":"state","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":2,"end_point":10,"unit_count":4,"location":{"kind":"target_id","base":0,"count":4}},{"index":3,"value":{"id":5,"name":"observed","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":2,"end_point":11,"unit_count":4,"location":{"kind":"target_id","base":8,"count":4}},{"index":4,"value":{"id":6,"name":"copy","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":5,"end_point":8,"unit_count":4,"location":{"kind":"target_id","base":8,"count":4}},{"index":5,"value":{"id":7,"name":"next","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":6,"end_point":8,"unit_count":4,"location":{"kind":"target_id","base":8,"count":4}},{"index":6,"value":{"id":8,"name":"old_contents","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":7,"end_point":8,"unit_count":4,"location":{"kind":"target_id","base":0,"count":4}},{"index":7,"value":{"id":9,"name":"drain_copy","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":10,"end_point":11,"unit_count":4,"location":{"kind":"target_id","base":0,"count":4}}],"spill_plans":[],"copy_decisions":[{"index":0,"kind":"materialized","source_value":{"id":4,"name":"state","type":"reg<test.i32 x4>"},"result_value":{"id":6,"name":"copy","type":"reg<test.i32 x4>"},"source_assignment":2,"result_assignment":4},{"index":1,"kind":"coalesced","source_value":{"id":4,"name":"state","type":"reg<test.i32 x4>"},"result_value":{"id":9,"name":"drain_copy","type":"reg<test.i32 x4>"},"source_assignment":2,"result_assignment":7}],"remarks":[]}

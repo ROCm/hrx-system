@@ -304,7 +304,7 @@ iree_status_t loom_low_allocate_function(
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_low_allocation_refine_destructive_reuse(
-        &state.unit_liveness, &state.placement, arena);
+        &state.unit_liveness, &state.liveness, &state.placement, arena);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_low_allocation_unit_liveness_propagate_storage_relations(
