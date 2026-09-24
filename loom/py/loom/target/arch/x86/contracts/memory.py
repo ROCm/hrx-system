@@ -39,6 +39,7 @@ _DescriptorLookup = Callable[[str], Descriptor]
 
 _I64 = Scalar("i64")
 _BYTE_STORAGE_TYPES = ("i8", "f8E4M3", "f8E5M2")
+_WORD_STORAGE_TYPES = ("i16", "f16", "bf16")
 _I64_MIN = -(2**63) + 1
 _I64_MAX = (2**63) - 1
 
@@ -51,6 +52,7 @@ _DISP32_MAX = (2**31) - 1
 _STORAGE_FORMATS = (
     (("i32", "f32"), 4),
     (_BYTE_STORAGE_TYPES, 1),
+    (_WORD_STORAGE_TYPES, 2),
 )
 
 
@@ -544,7 +546,7 @@ def x86_scalar_memory_rules(
         (Scalar("i32"), 4, "gpr32", "mov"),
         (_I64, 8, "gpr64", "mov"),
         (Scalar(_BYTE_STORAGE_TYPES), 1, "u8.gpr32", "movzx"),
-        (Scalar("i16"), 2, "u16.gpr32", "movzx"),
+        (Scalar(_WORD_STORAGE_TYPES), 2, "u16.gpr32", "movzx"),
     ):
         operations = (
             (view.view_load, SourceMemoryOperation.LOAD, load_mnemonic),

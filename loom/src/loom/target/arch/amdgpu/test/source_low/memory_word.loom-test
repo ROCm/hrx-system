@@ -1,0 +1,350 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_word.loom
+// TEMPLATE-EXCLUDE: @copy_word_tail The packed i16 memory footprint must currently fill complete registers.
+// RUN: emit source-low target=amdgpu:gfx1151 output=low
+
+// Equal-width formats preserve their bits through ordinary memory transfers.
+func.def @copy_word_scalar(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source_half = buffer.view %input[%base] : buffer -> view<3xf16>
+  %source_bfloat = buffer.view %input[%base] : buffer -> view<3xbf16>
+  %source_integer = buffer.view %input[%base] : buffer -> view<3xi16>
+  %target_half = buffer.view %output[%base] : buffer -> view<3xf16>
+  %target_bfloat = buffer.view %output[%base] : buffer -> view<3xbf16>
+  %target_integer = buffer.view %output[%base] : buffer -> view<3xi16>
+  %half = view.load %source_half[0] : view<3xf16> -> f16
+  %bfloat = view.load %source_bfloat[1] : view<3xbf16> -> bf16
+  %integer = view.load %source_integer[2] : view<3xi16> -> i16
+  view.store %half, %target_half[0] : f16, view<3xf16>
+  view.store %bfloat, %target_bfloat[1] : bf16, view<3xbf16>
+  view.store %integer, %target_integer[2] : i16, view<3xi16>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @copy_word_scalar() asm {
+  %source_integer = resource<hal_binding> {extent = 6, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %target_integer = resource<hal_binding> {extent = 6, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %14 = v_mov_b32 0
+  %half = global_load_d16_b16_saddr %14, %source_integer
+  %bfloat = global_load_d16_b16_saddr %14, %source_integer {offset = 2}
+  %integer = global_load_i16_saddr %14, %source_integer {offset = 4}
+  %20 = v_bfe_u32_offset_0_width_16_low16 %half
+  global_store_short_saddr %14, %20, %target_integer
+  %22 = v_bfe_u32_offset_0_width_16_low16 %bfloat
+  global_store_short_saddr %14, %22, %target_integer {offset = 2}
+  global_store_short_saddr %14, %integer, %target_integer {offset = 4}
+  return
+}
+
+// ====
+
+// Eight words occupy sixteen consecutive bytes in each numeric format.
+func.def @copy_word_vector(%input: buffer, %output: buffer) {
+  %first = index.constant 0 : offset
+  %second = index.constant 16 : offset
+  %third = index.constant 32 : offset
+  %source_half = buffer.view %input[%first] : buffer -> view<8xf16>
+  %source_bfloat = buffer.view %input[%second] : buffer -> view<8xbf16>
+  %source_integer = buffer.view %input[%third] : buffer -> view<8xi16>
+  %target_half = buffer.view %output[%first] : buffer -> view<8xf16>
+  %target_bfloat = buffer.view %output[%second] : buffer -> view<8xbf16>
+  %target_integer = buffer.view %output[%third] : buffer -> view<8xi16>
+  %half = vector.load %source_half[0] : view<8xf16> -> vector<8xf16>
+  %bfloat = vector.load %source_bfloat[0] : view<8xbf16> -> vector<8xbf16>
+  %integer = vector.load %source_integer[0] : view<8xi16> -> vector<8xi16>
+  vector.store %half, %target_half[0] : vector<8xf16>, view<8xf16>
+  vector.store %bfloat, %target_bfloat[0] : vector<8xbf16>, view<8xbf16>
+  vector.store %integer, %target_integer[0] : vector<8xi16>, view<8xi16>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @copy_word_vector() asm {
+  %source_integer = resource<hal_binding> {extent = 48, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %target_integer = resource<hal_binding> {extent = 48, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %16 = v_mov_b32 0
+  %half = global_load_b128_saddr %16, %source_integer
+  %bfloat = global_load_b128_saddr %16, %source_integer {offset = 16}
+  %integer = global_load_b128_saddr %16, %source_integer {offset = 32}
+  global_store_b128_saddr %16, %half, %target_integer
+  global_store_b128_saddr %16, %bfloat, %target_integer {offset = 16}
+  global_store_b128_saddr %16, %integer, %target_integer {offset = 32}
+  return
+}
+
+// ====
+
+func.def @copy_word_vector_wide(%input: buffer, %output: buffer) {
+  %first = index.constant 0 : offset
+  %second = index.constant 32 : offset
+  %third = index.constant 64 : offset
+  %source_half = buffer.view %input[%first] : buffer -> view<16xf16>
+  %source_bfloat = buffer.view %input[%second] : buffer -> view<16xbf16>
+  %source_integer = buffer.view %input[%third] : buffer -> view<16xi16>
+  %target_half = buffer.view %output[%first] : buffer -> view<16xf16>
+  %target_bfloat = buffer.view %output[%second] : buffer -> view<16xbf16>
+  %target_integer = buffer.view %output[%third] : buffer -> view<16xi16>
+  %half = vector.load %source_half[0] : view<16xf16> -> vector<16xf16>
+  %bfloat = vector.load %source_bfloat[0] : view<16xbf16> -> vector<16xbf16>
+  %integer = vector.load %source_integer[0] : view<16xi16> -> vector<16xi16>
+  vector.store %half, %target_half[0] : vector<16xf16>, view<16xf16>
+  vector.store %bfloat, %target_bfloat[0] : vector<16xbf16>, view<16xbf16>
+  vector.store %integer, %target_integer[0] : vector<16xi16>, view<16xi16>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @copy_word_vector_wide() asm {
+  %source_integer = resource<hal_binding> {extent = 96, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %target_integer = resource<hal_binding> {extent = 96, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %16 = v_mov_b32 0
+  %17 = global_load_b128_saddr %16, %source_integer
+  %19 = global_load_b128_saddr %16, %source_integer {offset = 16}
+  %22 = global_load_b128_saddr %16, %source_integer {offset = 32}
+  %24 = global_load_b128_saddr %16, %source_integer {offset = 48}
+  %27 = global_load_b128_saddr %16, %source_integer {offset = 64}
+  %29 = global_load_b128_saddr %16, %source_integer {offset = 80}
+  global_store_b128_saddr %16, %17, %target_integer
+  global_store_b128_saddr %16, %19, %target_integer {offset = 16}
+  global_store_b128_saddr %16, %22, %target_integer {offset = 32}
+  global_store_b128_saddr %16, %24, %target_integer {offset = 48}
+  global_store_b128_saddr %16, %27, %target_integer {offset = 64}
+  global_store_b128_saddr %16, %29, %target_integer {offset = 80}
+  return
+}
+
+// ====
+
+func.def @copy_word_vector_large(%input: buffer, %output: buffer) {
+  %first = index.constant 0 : offset
+  %second = index.constant 64 : offset
+  %third = index.constant 128 : offset
+  %source_half = buffer.view %input[%first] : buffer -> view<32xf16>
+  %source_bfloat = buffer.view %input[%second] : buffer -> view<32xbf16>
+  %source_integer = buffer.view %input[%third] : buffer -> view<32xi16>
+  %target_half = buffer.view %output[%first] : buffer -> view<32xf16>
+  %target_bfloat = buffer.view %output[%second] : buffer -> view<32xbf16>
+  %target_integer = buffer.view %output[%third] : buffer -> view<32xi16>
+  %half = vector.load %source_half[0] : view<32xf16> -> vector<32xf16>
+  %bfloat = vector.load %source_bfloat[0] : view<32xbf16> -> vector<32xbf16>
+  %integer = vector.load %source_integer[0] : view<32xi16> -> vector<32xi16>
+  vector.store %half, %target_half[0] : vector<32xf16>, view<32xf16>
+  vector.store %bfloat, %target_bfloat[0] : vector<32xbf16>, view<32xbf16>
+  vector.store %integer, %target_integer[0] : vector<32xi16>, view<32xi16>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @copy_word_vector_large() asm {
+  %source_integer = resource<hal_binding> {extent = 192, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %target_integer = resource<hal_binding> {extent = 192, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %16 = v_mov_b32 0
+  %17 = global_load_b128_saddr %16, %source_integer
+  %19 = global_load_b128_saddr %16, %source_integer {offset = 16}
+  %21 = global_load_b128_saddr %16, %source_integer {offset = 32}
+  %23 = global_load_b128_saddr %16, %source_integer {offset = 48}
+  %26 = global_load_b128_saddr %16, %source_integer {offset = 64}
+  %28 = global_load_b128_saddr %16, %source_integer {offset = 80}
+  %30 = global_load_b128_saddr %16, %source_integer {offset = 96}
+  %32 = global_load_b128_saddr %16, %source_integer {offset = 112}
+  %35 = global_load_b128_saddr %16, %source_integer {offset = 128}
+  %37 = global_load_b128_saddr %16, %source_integer {offset = 144}
+  %39 = global_load_b128_saddr %16, %source_integer {offset = 160}
+  %41 = global_load_b128_saddr %16, %source_integer {offset = 176}
+  global_store_b128_saddr %16, %17, %target_integer
+  global_store_b128_saddr %16, %19, %target_integer {offset = 16}
+  global_store_b128_saddr %16, %21, %target_integer {offset = 32}
+  global_store_b128_saddr %16, %23, %target_integer {offset = 48}
+  global_store_b128_saddr %16, %26, %target_integer {offset = 64}
+  global_store_b128_saddr %16, %28, %target_integer {offset = 80}
+  global_store_b128_saddr %16, %30, %target_integer {offset = 96}
+  global_store_b128_saddr %16, %32, %target_integer {offset = 112}
+  global_store_b128_saddr %16, %35, %target_integer {offset = 128}
+  global_store_b128_saddr %16, %37, %target_integer {offset = 144}
+  global_store_b128_saddr %16, %39, %target_integer {offset = 160}
+  global_store_b128_saddr %16, %41, %target_integer {offset = 176}
+  return
+}
+
+// ====
+
+// Packed records can place complete word vectors at odd byte origins.
+func.def @copy_word_unaligned(%input: buffer, %output: buffer) {
+  %first = index.constant 1 : offset
+  %second = index.constant 17 : offset
+  %third = index.constant 33 : offset
+  %source_half = buffer.view %input[%first] : buffer -> view<8xf16, align(1)>
+  %source_bfloat = buffer.view %input[%second] : buffer -> view<8xbf16, align(1)>
+  %source_integer = buffer.view %input[%third] : buffer -> view<8xi16, align(1)>
+  %target_half = buffer.view %output[%first] : buffer -> view<8xf16, align(1)>
+  %target_bfloat = buffer.view %output[%second] : buffer -> view<8xbf16, align(1)>
+  %target_integer = buffer.view %output[%third] : buffer -> view<8xi16, align(1)>
+  %half = vector.load %source_half[0] : view<8xf16, align(1)> -> vector<8xf16>
+  %bfloat = vector.load %source_bfloat[0] : view<8xbf16, align(1)> -> vector<8xbf16>
+  %integer = vector.load %source_integer[0] : view<8xi16, align(1)> -> vector<8xi16>
+  vector.store %half, %target_half[0] : vector<8xf16>, view<8xf16, align(1)>
+  vector.store %bfloat, %target_bfloat[0] : vector<8xbf16>, view<8xbf16, align(1)>
+  vector.store %integer, %target_integer[0] : vector<8xi16>, view<8xi16, align(1)>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @copy_word_unaligned() asm {
+  %source_integer = resource<hal_binding> {extent = 49, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %target_integer = resource<hal_binding> {extent = 49, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %16 = v_mov_b32 0
+  %half = global_load_b128_saddr %16, %source_integer {offset = 1}
+  %bfloat = global_load_b128_saddr %16, %source_integer {offset = 17}
+  %integer = global_load_b128_saddr %16, %source_integer {offset = 33}
+  global_store_b128_saddr %16, %half, %target_integer {offset = 1}
+  global_store_b128_saddr %16, %bfloat, %target_integer {offset = 17}
+  global_store_b128_saddr %16, %integer, %target_integer {offset = 33}
+  return
+}
+
+// ====
+
+// Runtime byte origins remain distinct from the two-byte element coordinate.
+func.def @copy_word_index(%input: buffer, %output: buffer, %byte_offset: offset, %element: index) {
+  %base = index.assume %byte_offset [range(%byte_offset, 0, 128)] : offset
+  %position = index.assume %element [range(%element, 0, 7)] : index
+  %source_half = buffer.view %input[%base] : buffer -> view<8xf16, align(1)>
+  %source_bfloat_base = buffer.view %input[%base] : buffer -> view<24xbf16, align(1)>
+  %source_integer_base = buffer.view %input[%base] : buffer -> view<24xi16, align(1)>
+  %target_half = buffer.view %output[%base] : buffer -> view<8xf16, align(1)>
+  %target_bfloat_base = buffer.view %output[%base] : buffer -> view<24xbf16, align(1)>
+  %target_integer_base = buffer.view %output[%base] : buffer -> view<24xi16, align(1)>
+  %source_bfloat = view.subview %source_bfloat_base[8] : view<24xbf16, align(1)> -> view<8xbf16, align(1)>
+  %source_integer = view.subview %source_integer_base[16] : view<24xi16, align(1)> -> view<8xi16, align(1)>
+  %target_bfloat = view.subview %target_bfloat_base[8] : view<24xbf16, align(1)> -> view<8xbf16, align(1)>
+  %target_integer = view.subview %target_integer_base[16] : view<24xi16, align(1)> -> view<8xi16, align(1)>
+  %half = view.load %source_half[%position] : view<8xf16, align(1)> -> f16
+  %bfloat = view.load %source_bfloat[%position] : view<8xbf16, align(1)> -> bf16
+  %integer = view.load %source_integer[%position] : view<8xi16, align(1)> -> i16
+  view.store %half, %target_half[%position] : f16, view<8xf16, align(1)>
+  view.store %bfloat, %target_bfloat[%position] : bf16, view<8xbf16, align(1)>
+  view.store %integer, %target_integer[%position] : i16, view<8xi16, align(1)>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @copy_word_index(%base: reg<amdgpu.sgpr x2>, %position: reg<amdgpu.sgpr>) asm {
+  %source_integer_base = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %target_integer_base = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %23 = v_mov_b32 0
+  %24 = slice %base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %25 = s_lshl_b32_rhs_inline %position, 1
+  %26 = s_add_u32 %24, %25
+  %27 = slice %source_integer_base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %28 = slice %source_integer_base[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %29 = s_mov_b32 0
+  %30, %31 = s_add_co_u32 %27, %26
+  %32, %33 = s_addc_u32 %28, %29, %31
+  %34 = concat(%30, %32) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %half = global_load_d16_b16_saddr %23, %34
+  %38 = s_lshl_b32_rhs_inline %position, 1
+  %39 = s_add_u32 %24, %38
+  %43, %44 = s_add_co_u32 %27, %39
+  %45, %46 = s_addc_u32 %28, %29, %44
+  %47 = concat(%43, %45) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %bfloat = global_load_d16_b16_saddr %23, %47 {offset = 16}
+  %51 = s_lshl_b32_rhs_inline %position, 1
+  %52 = s_add_u32 %24, %51
+  %56, %57 = s_add_co_u32 %27, %52
+  %58, %59 = s_addc_u32 %28, %29, %57
+  %60 = concat(%56, %58) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %integer = global_load_i16_saddr %23, %60 {offset = 32}
+  %62 = v_bfe_u32_offset_0_width_16_low16 %half
+  %65 = s_lshl_b32_rhs_inline %position, 1
+  %66 = s_add_u32 %24, %65
+  %67 = slice %target_integer_base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %68 = slice %target_integer_base[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %70, %71 = s_add_co_u32 %67, %66
+  %72, %73 = s_addc_u32 %68, %29, %71
+  %74 = concat(%70, %72) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_short_saddr %23, %62, %74
+  %75 = v_bfe_u32_offset_0_width_16_low16 %bfloat
+  %78 = s_lshl_b32_rhs_inline %position, 1
+  %79 = s_add_u32 %24, %78
+  %83, %84 = s_add_co_u32 %67, %79
+  %85, %86 = s_addc_u32 %68, %29, %84
+  %87 = concat(%83, %85) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_short_saddr %23, %75, %87 {offset = 16}
+  %90 = s_lshl_b32_rhs_inline %position, 1
+  %91 = s_add_u32 %24, %90
+  %95, %96 = s_add_co_u32 %67, %91
+  %97, %98 = s_addc_u32 %68, %29, %96
+  %99 = concat(%95, %97) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_short_saddr %23, %integer, %99 {offset = 32}
+  return
+}
+
+// ====
+
+func.def @copy_word_stride(%input: buffer, %output: buffer, %column_count: index, %row_index: index, %column_index: index) {
+  %columns = index.assume %column_count [range(%column_count, 1, 16)] : index
+  %row = index.assume %row_index [range(%row_index, 0, 3)] : index
+  %column = index.assume %column_index [range(%column_index, 0, 15), lt(%column_index, %columns)] : index
+  %base = index.constant 3 : offset
+  %source = buffer.view %input[%base] : buffer -> view<4x[%columns]xbf16, align(1)>
+  %target = buffer.view %output[%base] : buffer -> view<4x[%columns]xbf16, align(1)>
+  %value = view.load %source[%row, %column] : view<4x[%columns]xbf16, align(1)> -> bf16
+  view.store %value, %target[%row, %column] : bf16, view<4x[%columns]xbf16, align(1)>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @copy_word_stride(%columns: reg<amdgpu.sgpr>, %row: reg<amdgpu.sgpr>, %column: reg<amdgpu.sgpr>) asm {
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %target = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %17 = v_mov_b32 0
+  %18 = s_mul_i32 %row, %columns
+  %19 = s_lshl_b32_rhs_inline %18, 1
+  %20 = s_lshl_b32_rhs_inline %column, 1
+  %21 = s_add_u32 %19, %20
+  %22 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %23 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %24 = s_mov_b32 0
+  %25, %26 = s_add_co_u32 %22, %21
+  %27, %28 = s_addc_u32 %23, %24, %26
+  %29 = concat(%25, %27) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %value = global_load_d16_b16_saddr %17, %29 {offset = 3}
+  %31 = v_bfe_u32_offset_0_width_16_low16 %value
+  %34 = s_lshl_b32_rhs_inline %18, 1
+  %35 = s_lshl_b32_rhs_inline %column, 1
+  %36 = s_add_u32 %34, %35
+  %37 = slice %target[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %38 = slice %target[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %40, %41 = s_add_co_u32 %37, %36
+  %42, %43 = s_addc_u32 %38, %24, %41
+  %44 = concat(%40, %42) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_short_saddr %17, %31, %44 {offset = 3}
+  return
+}
+
+// ====
+
+func.def @copy_word_volatile(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<1xbf16>
+  %target = buffer.view %output[%base] : buffer -> view<2xbf16>
+  %first = view.load<volatile> %source[0] : view<1xbf16> -> bf16
+  %second = view.load<volatile> %source[0] : view<1xbf16> -> bf16
+  view.store<volatile> %first, %target[0] : bf16, view<2xbf16>
+  view.store<volatile> %second, %target[1] : bf16, view<2xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @copy_word_volatile() asm {
+  %source = resource<hal_binding> {extent = 2, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %target = resource<hal_binding> {extent = 4, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %9 = v_mov_b32 0
+  %first = global_load_d16_b16_saddr<volatile> %9, %source
+  %second = global_load_d16_b16_saddr<volatile> %9, %source
+  %13 = v_bfe_u32_offset_0_width_16_low16 %first
+  global_store_short_saddr<volatile> %9, %13, %target
+  %15 = v_bfe_u32_offset_0_width_16_low16 %second
+  global_store_short_saddr<volatile> %9, %15, %target {offset = 2}
+  return
+}

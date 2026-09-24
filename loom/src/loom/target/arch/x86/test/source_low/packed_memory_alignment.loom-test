@@ -44,38 +44,8 @@ kernel.def @halfword_origin() {
 
 // ----
 low.kernel.def target<x86.avx2.core> workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @halfword_origin(%source: reg<x86.gpr64>, %destination: reg<x86.gpr64>) asm {
-  %62 = movzx.load.u16.gpr32 %source {disp32 = 2}
-  %63 = movzx.load.u16.gpr32 %source {disp32 = 4}
-  %64 = movzx.load.u16.gpr32 %source {disp32 = 6}
-  %65 = movzx.load.u16.gpr32 %source {disp32 = 8}
-  %66 = movzx.load.u16.gpr32 %source {disp32 = 10}
-  %67 = movzx.load.u16.gpr32 %source {disp32 = 12}
-  %68 = movzx.load.u16.gpr32 %source {disp32 = 14}
-  %69 = movzx.load.u16.gpr32 %source {disp32 = 16}
-  %70 = movzx.load.u16.gpr32 %source {disp32 = 18}
-  %71 = movzx.load.u16.gpr32 %source {disp32 = 20}
-  %72 = movzx.load.u16.gpr32 %source {disp32 = 22}
-  %73 = movzx.load.u16.gpr32 %source {disp32 = 24}
-  %74 = movzx.load.u16.gpr32 %source {disp32 = 26}
-  %75 = movzx.load.u16.gpr32 %source {disp32 = 28}
-  %76 = movzx.load.u16.gpr32 %source {disp32 = 30}
-  %77 = movzx.load.u16.gpr32 %source {disp32 = 32}
-  mov.store.u16.gpr32 %62, %destination {disp32 = 0}
-  mov.store.u16.gpr32 %63, %destination {disp32 = 2}
-  mov.store.u16.gpr32 %64, %destination {disp32 = 4}
-  mov.store.u16.gpr32 %65, %destination {disp32 = 6}
-  mov.store.u16.gpr32 %66, %destination {disp32 = 8}
-  mov.store.u16.gpr32 %67, %destination {disp32 = 10}
-  mov.store.u16.gpr32 %68, %destination {disp32 = 12}
-  mov.store.u16.gpr32 %69, %destination {disp32 = 14}
-  mov.store.u16.gpr32 %70, %destination {disp32 = 16}
-  mov.store.u16.gpr32 %71, %destination {disp32 = 18}
-  mov.store.u16.gpr32 %72, %destination {disp32 = 20}
-  mov.store.u16.gpr32 %73, %destination {disp32 = 22}
-  mov.store.u16.gpr32 %74, %destination {disp32 = 24}
-  mov.store.u16.gpr32 %75, %destination {disp32 = 26}
-  mov.store.u16.gpr32 %76, %destination {disp32 = 28}
-  mov.store.u16.gpr32 %77, %destination {disp32 = 30}
+  %value = vmovdqu32.load.ymm %source {disp32 = 2}
+  vmovdqu32.store.ymm %value, %destination {disp32 = 0}
   return
 }
 

@@ -75,6 +75,7 @@ _I64 = Scalar("i64")
 _F8E4M3 = Scalar("f8E4M3")
 _F8E5M2 = Scalar("f8E5M2")
 _BYTE_STORAGE = Scalar(("i8", "f8E4M3", "f8E5M2"))
+_WORD_STORAGE = Scalar(("i16", "f16", "bf16"))
 _F16 = Scalar("f16")
 _BF16 = Scalar("bf16")
 _F32 = Scalar("f32")
@@ -130,6 +131,8 @@ def _type_text(type_pattern: TypePattern) -> str:
         return "i8, f8E4M3, or f8E5M2 scalar"
     if type_pattern == _I16:
         return "i16 scalar"
+    if type_pattern == _WORD_STORAGE:
+        return "i16, f16, or bf16 scalar"
     if type_pattern == _I32:
         return "i32 scalar"
     if type_pattern == _I64:
@@ -1103,7 +1106,7 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
                     view.view_store,
                 ),
                 (
-                    _I16,
+                    _WORD_STORAGE,
                     "i32.load16_u",
                     "i32.store16",
                     2,

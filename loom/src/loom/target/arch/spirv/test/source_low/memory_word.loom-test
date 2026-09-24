@@ -1,0 +1,990 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_word.loom
+// TEMPLATE-EXCLUDE: @copy_word_unaligned SPIR-V typed word memory requires natural alignment.
+// TEMPLATE-EXCLUDE: @copy_word_tail SPIR-V typed word memory requires natural alignment.
+// TEMPLATE-EXCLUDE: @copy_word_index SPIR-V typed word memory requires natural alignment.
+// TEMPLATE-EXCLUDE: @copy_word_stride SPIR-V typed word memory requires natural alignment.
+// RUN: emit source-low target=spirv:vulkan1.3+bda+extended-types output=low
+
+// Equal-width formats preserve their bits through ordinary memory transfers.
+func.def @copy_word_scalar(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source_half = buffer.view %input[%base] : buffer -> view<3xf16>
+  %source_bfloat = buffer.view %input[%base] : buffer -> view<3xbf16>
+  %source_integer = buffer.view %input[%base] : buffer -> view<3xi16>
+  %target_half = buffer.view %output[%base] : buffer -> view<3xf16>
+  %target_bfloat = buffer.view %output[%base] : buffer -> view<3xbf16>
+  %target_integer = buffer.view %output[%base] : buffer -> view<3xi16>
+  %half = view.load %source_half[0] : view<3xf16> -> f16
+  %bfloat = view.load %source_bfloat[1] : view<3xbf16> -> bf16
+  %integer = view.load %source_integer[2] : view<3xi16> -> i16
+  view.store %half, %target_half[0] : f16, view<3xf16>
+  view.store %bfloat, %target_bfloat[1] : bf16, view<3xbf16>
+  view.store %integer, %target_integer[2] : i16, view<3xi16>
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @copy_word_scalar(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>) asm {
+  %14 = OpConstant.offset64 0
+  %15 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %14
+  %half = OpLoad.storage_buffer.f16 %15
+  %17 = OpConstant.offset64 2
+  %18 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %17
+  %bfloat = OpLoad.storage_buffer.bf16 %18
+  %20 = OpConstant.offset64 4
+  %21 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %20
+  %integer = OpLoad.storage_buffer.i16 %21
+  %24 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %14
+  OpStore.storage_buffer.f16 %24, %half
+  %26 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %17
+  OpStore.storage_buffer.bf16 %26, %bfloat
+  %28 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %20
+  OpStore.storage_buffer.i16 %28, %integer
+  return
+}
+
+// ====
+
+// Eight words occupy sixteen consecutive bytes in each numeric format.
+func.def @copy_word_vector(%input: buffer, %output: buffer) {
+  %first = index.constant 0 : offset
+  %second = index.constant 16 : offset
+  %third = index.constant 32 : offset
+  %source_half = buffer.view %input[%first] : buffer -> view<8xf16>
+  %source_bfloat = buffer.view %input[%second] : buffer -> view<8xbf16>
+  %source_integer = buffer.view %input[%third] : buffer -> view<8xi16>
+  %target_half = buffer.view %output[%first] : buffer -> view<8xf16>
+  %target_bfloat = buffer.view %output[%second] : buffer -> view<8xbf16>
+  %target_integer = buffer.view %output[%third] : buffer -> view<8xi16>
+  %half = vector.load %source_half[0] : view<8xf16> -> vector<8xf16>
+  %bfloat = vector.load %source_bfloat[0] : view<8xbf16> -> vector<8xbf16>
+  %integer = vector.load %source_integer[0] : view<8xi16> -> vector<8xi16>
+  vector.store %half, %target_half[0] : vector<8xf16>, view<8xf16>
+  vector.store %bfloat, %target_bfloat[0] : vector<8xbf16>, view<8xbf16>
+  vector.store %integer, %target_integer[0] : vector<8xi16>, view<8xi16>
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @copy_word_vector(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>) asm {
+  %67 = OpConstant.offset64 0
+  %68 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %67
+  %69 = OpLoad.storage_buffer.f16 %68
+  %70 = OpConstant.offset64 2
+  %71 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %70
+  %72 = OpLoad.storage_buffer.f16 %71
+  %73 = OpConstant.offset64 4
+  %74 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %73
+  %75 = OpLoad.storage_buffer.f16 %74
+  %76 = OpConstant.offset64 6
+  %77 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %76
+  %78 = OpLoad.storage_buffer.f16 %77
+  %79 = OpConstant.offset64 8
+  %80 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %79
+  %81 = OpLoad.storage_buffer.f16 %80
+  %82 = OpConstant.offset64 10
+  %83 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %82
+  %84 = OpLoad.storage_buffer.f16 %83
+  %85 = OpConstant.offset64 12
+  %86 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %85
+  %87 = OpLoad.storage_buffer.f16 %86
+  %88 = OpConstant.offset64 14
+  %89 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %88
+  %90 = OpLoad.storage_buffer.f16 %89
+  %91 = OpConstant.offset64 16
+  %92 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %91
+  %93 = OpLoad.storage_buffer.bf16 %92
+  %94 = OpConstant.offset64 18
+  %95 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %94
+  %96 = OpLoad.storage_buffer.bf16 %95
+  %97 = OpConstant.offset64 20
+  %98 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %97
+  %99 = OpLoad.storage_buffer.bf16 %98
+  %100 = OpConstant.offset64 22
+  %101 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %100
+  %102 = OpLoad.storage_buffer.bf16 %101
+  %103 = OpConstant.offset64 24
+  %104 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %103
+  %105 = OpLoad.storage_buffer.bf16 %104
+  %106 = OpConstant.offset64 26
+  %107 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %106
+  %108 = OpLoad.storage_buffer.bf16 %107
+  %109 = OpConstant.offset64 28
+  %110 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %109
+  %111 = OpLoad.storage_buffer.bf16 %110
+  %112 = OpConstant.offset64 30
+  %113 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %112
+  %114 = OpLoad.storage_buffer.bf16 %113
+  %115 = OpConstant.offset64 32
+  %116 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %115
+  %117 = OpLoad.storage_buffer.i16 %116
+  %118 = OpConstant.offset64 34
+  %119 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %118
+  %120 = OpLoad.storage_buffer.i16 %119
+  %121 = OpConstant.offset64 36
+  %122 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %121
+  %123 = OpLoad.storage_buffer.i16 %122
+  %124 = OpConstant.offset64 38
+  %125 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %124
+  %126 = OpLoad.storage_buffer.i16 %125
+  %127 = OpConstant.offset64 40
+  %128 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %127
+  %129 = OpLoad.storage_buffer.i16 %128
+  %130 = OpConstant.offset64 42
+  %131 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %130
+  %132 = OpLoad.storage_buffer.i16 %131
+  %133 = OpConstant.offset64 44
+  %134 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %133
+  %135 = OpLoad.storage_buffer.i16 %134
+  %136 = OpConstant.offset64 46
+  %137 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %136
+  %138 = OpLoad.storage_buffer.i16 %137
+  %140 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %67
+  OpStore.storage_buffer.f16 %140, %69
+  %142 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %70
+  OpStore.storage_buffer.f16 %142, %72
+  %144 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %73
+  OpStore.storage_buffer.f16 %144, %75
+  %146 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %76
+  OpStore.storage_buffer.f16 %146, %78
+  %148 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %79
+  OpStore.storage_buffer.f16 %148, %81
+  %150 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %82
+  OpStore.storage_buffer.f16 %150, %84
+  %152 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %85
+  OpStore.storage_buffer.f16 %152, %87
+  %154 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %88
+  OpStore.storage_buffer.f16 %154, %90
+  %156 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %91
+  OpStore.storage_buffer.bf16 %156, %93
+  %158 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %94
+  OpStore.storage_buffer.bf16 %158, %96
+  %160 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %97
+  OpStore.storage_buffer.bf16 %160, %99
+  %162 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %100
+  OpStore.storage_buffer.bf16 %162, %102
+  %164 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %103
+  OpStore.storage_buffer.bf16 %164, %105
+  %166 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %106
+  OpStore.storage_buffer.bf16 %166, %108
+  %168 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %109
+  OpStore.storage_buffer.bf16 %168, %111
+  %170 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %112
+  OpStore.storage_buffer.bf16 %170, %114
+  %172 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %115
+  OpStore.storage_buffer.i16 %172, %117
+  %174 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %118
+  OpStore.storage_buffer.i16 %174, %120
+  %176 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %121
+  OpStore.storage_buffer.i16 %176, %123
+  %178 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %124
+  OpStore.storage_buffer.i16 %178, %126
+  %180 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %127
+  OpStore.storage_buffer.i16 %180, %129
+  %182 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %130
+  OpStore.storage_buffer.i16 %182, %132
+  %184 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %133
+  OpStore.storage_buffer.i16 %184, %135
+  %186 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %136
+  OpStore.storage_buffer.i16 %186, %138
+  return
+}
+
+// ====
+
+func.def @copy_word_vector_wide(%input: buffer, %output: buffer) {
+  %first = index.constant 0 : offset
+  %second = index.constant 32 : offset
+  %third = index.constant 64 : offset
+  %source_half = buffer.view %input[%first] : buffer -> view<16xf16>
+  %source_bfloat = buffer.view %input[%second] : buffer -> view<16xbf16>
+  %source_integer = buffer.view %input[%third] : buffer -> view<16xi16>
+  %target_half = buffer.view %output[%first] : buffer -> view<16xf16>
+  %target_bfloat = buffer.view %output[%second] : buffer -> view<16xbf16>
+  %target_integer = buffer.view %output[%third] : buffer -> view<16xi16>
+  %half = vector.load %source_half[0] : view<16xf16> -> vector<16xf16>
+  %bfloat = vector.load %source_bfloat[0] : view<16xbf16> -> vector<16xbf16>
+  %integer = vector.load %source_integer[0] : view<16xi16> -> vector<16xi16>
+  vector.store %half, %target_half[0] : vector<16xf16>, view<16xf16>
+  vector.store %bfloat, %target_bfloat[0] : vector<16xbf16>, view<16xbf16>
+  vector.store %integer, %target_integer[0] : vector<16xi16>, view<16xi16>
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @copy_word_vector_wide(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>) asm {
+  %115 = OpConstant.offset64 0
+  %116 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %115
+  %117 = OpLoad.storage_buffer.f16 %116
+  %118 = OpConstant.offset64 2
+  %119 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %118
+  %120 = OpLoad.storage_buffer.f16 %119
+  %121 = OpConstant.offset64 4
+  %122 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %121
+  %123 = OpLoad.storage_buffer.f16 %122
+  %124 = OpConstant.offset64 6
+  %125 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %124
+  %126 = OpLoad.storage_buffer.f16 %125
+  %127 = OpConstant.offset64 8
+  %128 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %127
+  %129 = OpLoad.storage_buffer.f16 %128
+  %130 = OpConstant.offset64 10
+  %131 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %130
+  %132 = OpLoad.storage_buffer.f16 %131
+  %133 = OpConstant.offset64 12
+  %134 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %133
+  %135 = OpLoad.storage_buffer.f16 %134
+  %136 = OpConstant.offset64 14
+  %137 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %136
+  %138 = OpLoad.storage_buffer.f16 %137
+  %139 = OpConstant.offset64 16
+  %140 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %139
+  %141 = OpLoad.storage_buffer.f16 %140
+  %142 = OpConstant.offset64 18
+  %143 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %142
+  %144 = OpLoad.storage_buffer.f16 %143
+  %145 = OpConstant.offset64 20
+  %146 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %145
+  %147 = OpLoad.storage_buffer.f16 %146
+  %148 = OpConstant.offset64 22
+  %149 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %148
+  %150 = OpLoad.storage_buffer.f16 %149
+  %151 = OpConstant.offset64 24
+  %152 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %151
+  %153 = OpLoad.storage_buffer.f16 %152
+  %154 = OpConstant.offset64 26
+  %155 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %154
+  %156 = OpLoad.storage_buffer.f16 %155
+  %157 = OpConstant.offset64 28
+  %158 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %157
+  %159 = OpLoad.storage_buffer.f16 %158
+  %160 = OpConstant.offset64 30
+  %161 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %160
+  %162 = OpLoad.storage_buffer.f16 %161
+  %163 = OpConstant.offset64 32
+  %164 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %163
+  %165 = OpLoad.storage_buffer.bf16 %164
+  %166 = OpConstant.offset64 34
+  %167 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %166
+  %168 = OpLoad.storage_buffer.bf16 %167
+  %169 = OpConstant.offset64 36
+  %170 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %169
+  %171 = OpLoad.storage_buffer.bf16 %170
+  %172 = OpConstant.offset64 38
+  %173 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %172
+  %174 = OpLoad.storage_buffer.bf16 %173
+  %175 = OpConstant.offset64 40
+  %176 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %175
+  %177 = OpLoad.storage_buffer.bf16 %176
+  %178 = OpConstant.offset64 42
+  %179 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %178
+  %180 = OpLoad.storage_buffer.bf16 %179
+  %181 = OpConstant.offset64 44
+  %182 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %181
+  %183 = OpLoad.storage_buffer.bf16 %182
+  %184 = OpConstant.offset64 46
+  %185 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %184
+  %186 = OpLoad.storage_buffer.bf16 %185
+  %187 = OpConstant.offset64 48
+  %188 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %187
+  %189 = OpLoad.storage_buffer.bf16 %188
+  %190 = OpConstant.offset64 50
+  %191 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %190
+  %192 = OpLoad.storage_buffer.bf16 %191
+  %193 = OpConstant.offset64 52
+  %194 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %193
+  %195 = OpLoad.storage_buffer.bf16 %194
+  %196 = OpConstant.offset64 54
+  %197 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %196
+  %198 = OpLoad.storage_buffer.bf16 %197
+  %199 = OpConstant.offset64 56
+  %200 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %199
+  %201 = OpLoad.storage_buffer.bf16 %200
+  %202 = OpConstant.offset64 58
+  %203 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %202
+  %204 = OpLoad.storage_buffer.bf16 %203
+  %205 = OpConstant.offset64 60
+  %206 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %205
+  %207 = OpLoad.storage_buffer.bf16 %206
+  %208 = OpConstant.offset64 62
+  %209 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %208
+  %210 = OpLoad.storage_buffer.bf16 %209
+  %211 = OpConstant.offset64 64
+  %212 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %211
+  %213 = OpLoad.storage_buffer.i16 %212
+  %214 = OpConstant.offset64 66
+  %215 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %214
+  %216 = OpLoad.storage_buffer.i16 %215
+  %217 = OpConstant.offset64 68
+  %218 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %217
+  %219 = OpLoad.storage_buffer.i16 %218
+  %220 = OpConstant.offset64 70
+  %221 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %220
+  %222 = OpLoad.storage_buffer.i16 %221
+  %223 = OpConstant.offset64 72
+  %224 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %223
+  %225 = OpLoad.storage_buffer.i16 %224
+  %226 = OpConstant.offset64 74
+  %227 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %226
+  %228 = OpLoad.storage_buffer.i16 %227
+  %229 = OpConstant.offset64 76
+  %230 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %229
+  %231 = OpLoad.storage_buffer.i16 %230
+  %232 = OpConstant.offset64 78
+  %233 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %232
+  %234 = OpLoad.storage_buffer.i16 %233
+  %235 = OpConstant.offset64 80
+  %236 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %235
+  %237 = OpLoad.storage_buffer.i16 %236
+  %238 = OpConstant.offset64 82
+  %239 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %238
+  %240 = OpLoad.storage_buffer.i16 %239
+  %241 = OpConstant.offset64 84
+  %242 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %241
+  %243 = OpLoad.storage_buffer.i16 %242
+  %244 = OpConstant.offset64 86
+  %245 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %244
+  %246 = OpLoad.storage_buffer.i16 %245
+  %247 = OpConstant.offset64 88
+  %248 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %247
+  %249 = OpLoad.storage_buffer.i16 %248
+  %250 = OpConstant.offset64 90
+  %251 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %250
+  %252 = OpLoad.storage_buffer.i16 %251
+  %253 = OpConstant.offset64 92
+  %254 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %253
+  %255 = OpLoad.storage_buffer.i16 %254
+  %256 = OpConstant.offset64 94
+  %257 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %256
+  %258 = OpLoad.storage_buffer.i16 %257
+  %260 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %115
+  OpStore.storage_buffer.f16 %260, %117
+  %262 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %118
+  OpStore.storage_buffer.f16 %262, %120
+  %264 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %121
+  OpStore.storage_buffer.f16 %264, %123
+  %266 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %124
+  OpStore.storage_buffer.f16 %266, %126
+  %268 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %127
+  OpStore.storage_buffer.f16 %268, %129
+  %270 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %130
+  OpStore.storage_buffer.f16 %270, %132
+  %272 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %133
+  OpStore.storage_buffer.f16 %272, %135
+  %274 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %136
+  OpStore.storage_buffer.f16 %274, %138
+  %276 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %139
+  OpStore.storage_buffer.f16 %276, %141
+  %278 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %142
+  OpStore.storage_buffer.f16 %278, %144
+  %280 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %145
+  OpStore.storage_buffer.f16 %280, %147
+  %282 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %148
+  OpStore.storage_buffer.f16 %282, %150
+  %284 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %151
+  OpStore.storage_buffer.f16 %284, %153
+  %286 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %154
+  OpStore.storage_buffer.f16 %286, %156
+  %288 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %157
+  OpStore.storage_buffer.f16 %288, %159
+  %290 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %160
+  OpStore.storage_buffer.f16 %290, %162
+  %292 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %163
+  OpStore.storage_buffer.bf16 %292, %165
+  %294 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %166
+  OpStore.storage_buffer.bf16 %294, %168
+  %296 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %169
+  OpStore.storage_buffer.bf16 %296, %171
+  %298 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %172
+  OpStore.storage_buffer.bf16 %298, %174
+  %300 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %175
+  OpStore.storage_buffer.bf16 %300, %177
+  %302 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %178
+  OpStore.storage_buffer.bf16 %302, %180
+  %304 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %181
+  OpStore.storage_buffer.bf16 %304, %183
+  %306 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %184
+  OpStore.storage_buffer.bf16 %306, %186
+  %308 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %187
+  OpStore.storage_buffer.bf16 %308, %189
+  %310 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %190
+  OpStore.storage_buffer.bf16 %310, %192
+  %312 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %193
+  OpStore.storage_buffer.bf16 %312, %195
+  %314 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %196
+  OpStore.storage_buffer.bf16 %314, %198
+  %316 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %199
+  OpStore.storage_buffer.bf16 %316, %201
+  %318 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %202
+  OpStore.storage_buffer.bf16 %318, %204
+  %320 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %205
+  OpStore.storage_buffer.bf16 %320, %207
+  %322 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %208
+  OpStore.storage_buffer.bf16 %322, %210
+  %324 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %211
+  OpStore.storage_buffer.i16 %324, %213
+  %326 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %214
+  OpStore.storage_buffer.i16 %326, %216
+  %328 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %217
+  OpStore.storage_buffer.i16 %328, %219
+  %330 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %220
+  OpStore.storage_buffer.i16 %330, %222
+  %332 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %223
+  OpStore.storage_buffer.i16 %332, %225
+  %334 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %226
+  OpStore.storage_buffer.i16 %334, %228
+  %336 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %229
+  OpStore.storage_buffer.i16 %336, %231
+  %338 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %232
+  OpStore.storage_buffer.i16 %338, %234
+  %340 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %235
+  OpStore.storage_buffer.i16 %340, %237
+  %342 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %238
+  OpStore.storage_buffer.i16 %342, %240
+  %344 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %241
+  OpStore.storage_buffer.i16 %344, %243
+  %346 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %244
+  OpStore.storage_buffer.i16 %346, %246
+  %348 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %247
+  OpStore.storage_buffer.i16 %348, %249
+  %350 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %250
+  OpStore.storage_buffer.i16 %350, %252
+  %352 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %253
+  OpStore.storage_buffer.i16 %352, %255
+  %354 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %256
+  OpStore.storage_buffer.i16 %354, %258
+  return
+}
+
+// ====
+
+func.def @copy_word_vector_large(%input: buffer, %output: buffer) {
+  %first = index.constant 0 : offset
+  %second = index.constant 64 : offset
+  %third = index.constant 128 : offset
+  %source_half = buffer.view %input[%first] : buffer -> view<32xf16>
+  %source_bfloat = buffer.view %input[%second] : buffer -> view<32xbf16>
+  %source_integer = buffer.view %input[%third] : buffer -> view<32xi16>
+  %target_half = buffer.view %output[%first] : buffer -> view<32xf16>
+  %target_bfloat = buffer.view %output[%second] : buffer -> view<32xbf16>
+  %target_integer = buffer.view %output[%third] : buffer -> view<32xi16>
+  %half = vector.load %source_half[0] : view<32xf16> -> vector<32xf16>
+  %bfloat = vector.load %source_bfloat[0] : view<32xbf16> -> vector<32xbf16>
+  %integer = vector.load %source_integer[0] : view<32xi16> -> vector<32xi16>
+  vector.store %half, %target_half[0] : vector<32xf16>, view<32xf16>
+  vector.store %bfloat, %target_bfloat[0] : vector<32xbf16>, view<32xbf16>
+  vector.store %integer, %target_integer[0] : vector<32xi16>, view<32xi16>
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @copy_word_vector_large(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>) asm {
+  %211 = OpConstant.offset64 0
+  %212 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %211
+  %213 = OpLoad.storage_buffer.f16 %212
+  %214 = OpConstant.offset64 2
+  %215 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %214
+  %216 = OpLoad.storage_buffer.f16 %215
+  %217 = OpConstant.offset64 4
+  %218 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %217
+  %219 = OpLoad.storage_buffer.f16 %218
+  %220 = OpConstant.offset64 6
+  %221 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %220
+  %222 = OpLoad.storage_buffer.f16 %221
+  %223 = OpConstant.offset64 8
+  %224 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %223
+  %225 = OpLoad.storage_buffer.f16 %224
+  %226 = OpConstant.offset64 10
+  %227 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %226
+  %228 = OpLoad.storage_buffer.f16 %227
+  %229 = OpConstant.offset64 12
+  %230 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %229
+  %231 = OpLoad.storage_buffer.f16 %230
+  %232 = OpConstant.offset64 14
+  %233 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %232
+  %234 = OpLoad.storage_buffer.f16 %233
+  %235 = OpConstant.offset64 16
+  %236 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %235
+  %237 = OpLoad.storage_buffer.f16 %236
+  %238 = OpConstant.offset64 18
+  %239 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %238
+  %240 = OpLoad.storage_buffer.f16 %239
+  %241 = OpConstant.offset64 20
+  %242 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %241
+  %243 = OpLoad.storage_buffer.f16 %242
+  %244 = OpConstant.offset64 22
+  %245 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %244
+  %246 = OpLoad.storage_buffer.f16 %245
+  %247 = OpConstant.offset64 24
+  %248 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %247
+  %249 = OpLoad.storage_buffer.f16 %248
+  %250 = OpConstant.offset64 26
+  %251 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %250
+  %252 = OpLoad.storage_buffer.f16 %251
+  %253 = OpConstant.offset64 28
+  %254 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %253
+  %255 = OpLoad.storage_buffer.f16 %254
+  %256 = OpConstant.offset64 30
+  %257 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %256
+  %258 = OpLoad.storage_buffer.f16 %257
+  %259 = OpConstant.offset64 32
+  %260 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %259
+  %261 = OpLoad.storage_buffer.f16 %260
+  %262 = OpConstant.offset64 34
+  %263 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %262
+  %264 = OpLoad.storage_buffer.f16 %263
+  %265 = OpConstant.offset64 36
+  %266 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %265
+  %267 = OpLoad.storage_buffer.f16 %266
+  %268 = OpConstant.offset64 38
+  %269 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %268
+  %270 = OpLoad.storage_buffer.f16 %269
+  %271 = OpConstant.offset64 40
+  %272 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %271
+  %273 = OpLoad.storage_buffer.f16 %272
+  %274 = OpConstant.offset64 42
+  %275 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %274
+  %276 = OpLoad.storage_buffer.f16 %275
+  %277 = OpConstant.offset64 44
+  %278 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %277
+  %279 = OpLoad.storage_buffer.f16 %278
+  %280 = OpConstant.offset64 46
+  %281 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %280
+  %282 = OpLoad.storage_buffer.f16 %281
+  %283 = OpConstant.offset64 48
+  %284 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %283
+  %285 = OpLoad.storage_buffer.f16 %284
+  %286 = OpConstant.offset64 50
+  %287 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %286
+  %288 = OpLoad.storage_buffer.f16 %287
+  %289 = OpConstant.offset64 52
+  %290 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %289
+  %291 = OpLoad.storage_buffer.f16 %290
+  %292 = OpConstant.offset64 54
+  %293 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %292
+  %294 = OpLoad.storage_buffer.f16 %293
+  %295 = OpConstant.offset64 56
+  %296 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %295
+  %297 = OpLoad.storage_buffer.f16 %296
+  %298 = OpConstant.offset64 58
+  %299 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %298
+  %300 = OpLoad.storage_buffer.f16 %299
+  %301 = OpConstant.offset64 60
+  %302 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %301
+  %303 = OpLoad.storage_buffer.f16 %302
+  %304 = OpConstant.offset64 62
+  %305 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input, %304
+  %306 = OpLoad.storage_buffer.f16 %305
+  %307 = OpConstant.offset64 64
+  %308 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %307
+  %309 = OpLoad.storage_buffer.bf16 %308
+  %310 = OpConstant.offset64 66
+  %311 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %310
+  %312 = OpLoad.storage_buffer.bf16 %311
+  %313 = OpConstant.offset64 68
+  %314 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %313
+  %315 = OpLoad.storage_buffer.bf16 %314
+  %316 = OpConstant.offset64 70
+  %317 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %316
+  %318 = OpLoad.storage_buffer.bf16 %317
+  %319 = OpConstant.offset64 72
+  %320 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %319
+  %321 = OpLoad.storage_buffer.bf16 %320
+  %322 = OpConstant.offset64 74
+  %323 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %322
+  %324 = OpLoad.storage_buffer.bf16 %323
+  %325 = OpConstant.offset64 76
+  %326 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %325
+  %327 = OpLoad.storage_buffer.bf16 %326
+  %328 = OpConstant.offset64 78
+  %329 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %328
+  %330 = OpLoad.storage_buffer.bf16 %329
+  %331 = OpConstant.offset64 80
+  %332 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %331
+  %333 = OpLoad.storage_buffer.bf16 %332
+  %334 = OpConstant.offset64 82
+  %335 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %334
+  %336 = OpLoad.storage_buffer.bf16 %335
+  %337 = OpConstant.offset64 84
+  %338 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %337
+  %339 = OpLoad.storage_buffer.bf16 %338
+  %340 = OpConstant.offset64 86
+  %341 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %340
+  %342 = OpLoad.storage_buffer.bf16 %341
+  %343 = OpConstant.offset64 88
+  %344 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %343
+  %345 = OpLoad.storage_buffer.bf16 %344
+  %346 = OpConstant.offset64 90
+  %347 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %346
+  %348 = OpLoad.storage_buffer.bf16 %347
+  %349 = OpConstant.offset64 92
+  %350 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %349
+  %351 = OpLoad.storage_buffer.bf16 %350
+  %352 = OpConstant.offset64 94
+  %353 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %352
+  %354 = OpLoad.storage_buffer.bf16 %353
+  %355 = OpConstant.offset64 96
+  %356 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %355
+  %357 = OpLoad.storage_buffer.bf16 %356
+  %358 = OpConstant.offset64 98
+  %359 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %358
+  %360 = OpLoad.storage_buffer.bf16 %359
+  %361 = OpConstant.offset64 100
+  %362 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %361
+  %363 = OpLoad.storage_buffer.bf16 %362
+  %364 = OpConstant.offset64 102
+  %365 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %364
+  %366 = OpLoad.storage_buffer.bf16 %365
+  %367 = OpConstant.offset64 104
+  %368 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %367
+  %369 = OpLoad.storage_buffer.bf16 %368
+  %370 = OpConstant.offset64 106
+  %371 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %370
+  %372 = OpLoad.storage_buffer.bf16 %371
+  %373 = OpConstant.offset64 108
+  %374 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %373
+  %375 = OpLoad.storage_buffer.bf16 %374
+  %376 = OpConstant.offset64 110
+  %377 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %376
+  %378 = OpLoad.storage_buffer.bf16 %377
+  %379 = OpConstant.offset64 112
+  %380 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %379
+  %381 = OpLoad.storage_buffer.bf16 %380
+  %382 = OpConstant.offset64 114
+  %383 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %382
+  %384 = OpLoad.storage_buffer.bf16 %383
+  %385 = OpConstant.offset64 116
+  %386 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %385
+  %387 = OpLoad.storage_buffer.bf16 %386
+  %388 = OpConstant.offset64 118
+  %389 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %388
+  %390 = OpLoad.storage_buffer.bf16 %389
+  %391 = OpConstant.offset64 120
+  %392 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %391
+  %393 = OpLoad.storage_buffer.bf16 %392
+  %394 = OpConstant.offset64 122
+  %395 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %394
+  %396 = OpLoad.storage_buffer.bf16 %395
+  %397 = OpConstant.offset64 124
+  %398 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %397
+  %399 = OpLoad.storage_buffer.bf16 %398
+  %400 = OpConstant.offset64 126
+  %401 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %400
+  %402 = OpLoad.storage_buffer.bf16 %401
+  %403 = OpConstant.offset64 128
+  %404 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %403
+  %405 = OpLoad.storage_buffer.i16 %404
+  %406 = OpConstant.offset64 130
+  %407 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %406
+  %408 = OpLoad.storage_buffer.i16 %407
+  %409 = OpConstant.offset64 132
+  %410 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %409
+  %411 = OpLoad.storage_buffer.i16 %410
+  %412 = OpConstant.offset64 134
+  %413 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %412
+  %414 = OpLoad.storage_buffer.i16 %413
+  %415 = OpConstant.offset64 136
+  %416 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %415
+  %417 = OpLoad.storage_buffer.i16 %416
+  %418 = OpConstant.offset64 138
+  %419 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %418
+  %420 = OpLoad.storage_buffer.i16 %419
+  %421 = OpConstant.offset64 140
+  %422 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %421
+  %423 = OpLoad.storage_buffer.i16 %422
+  %424 = OpConstant.offset64 142
+  %425 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %424
+  %426 = OpLoad.storage_buffer.i16 %425
+  %427 = OpConstant.offset64 144
+  %428 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %427
+  %429 = OpLoad.storage_buffer.i16 %428
+  %430 = OpConstant.offset64 146
+  %431 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %430
+  %432 = OpLoad.storage_buffer.i16 %431
+  %433 = OpConstant.offset64 148
+  %434 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %433
+  %435 = OpLoad.storage_buffer.i16 %434
+  %436 = OpConstant.offset64 150
+  %437 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %436
+  %438 = OpLoad.storage_buffer.i16 %437
+  %439 = OpConstant.offset64 152
+  %440 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %439
+  %441 = OpLoad.storage_buffer.i16 %440
+  %442 = OpConstant.offset64 154
+  %443 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %442
+  %444 = OpLoad.storage_buffer.i16 %443
+  %445 = OpConstant.offset64 156
+  %446 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %445
+  %447 = OpLoad.storage_buffer.i16 %446
+  %448 = OpConstant.offset64 158
+  %449 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %448
+  %450 = OpLoad.storage_buffer.i16 %449
+  %451 = OpConstant.offset64 160
+  %452 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %451
+  %453 = OpLoad.storage_buffer.i16 %452
+  %454 = OpConstant.offset64 162
+  %455 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %454
+  %456 = OpLoad.storage_buffer.i16 %455
+  %457 = OpConstant.offset64 164
+  %458 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %457
+  %459 = OpLoad.storage_buffer.i16 %458
+  %460 = OpConstant.offset64 166
+  %461 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %460
+  %462 = OpLoad.storage_buffer.i16 %461
+  %463 = OpConstant.offset64 168
+  %464 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %463
+  %465 = OpLoad.storage_buffer.i16 %464
+  %466 = OpConstant.offset64 170
+  %467 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %466
+  %468 = OpLoad.storage_buffer.i16 %467
+  %469 = OpConstant.offset64 172
+  %470 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %469
+  %471 = OpLoad.storage_buffer.i16 %470
+  %472 = OpConstant.offset64 174
+  %473 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %472
+  %474 = OpLoad.storage_buffer.i16 %473
+  %475 = OpConstant.offset64 176
+  %476 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %475
+  %477 = OpLoad.storage_buffer.i16 %476
+  %478 = OpConstant.offset64 178
+  %479 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %478
+  %480 = OpLoad.storage_buffer.i16 %479
+  %481 = OpConstant.offset64 180
+  %482 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %481
+  %483 = OpLoad.storage_buffer.i16 %482
+  %484 = OpConstant.offset64 182
+  %485 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %484
+  %486 = OpLoad.storage_buffer.i16 %485
+  %487 = OpConstant.offset64 184
+  %488 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %487
+  %489 = OpLoad.storage_buffer.i16 %488
+  %490 = OpConstant.offset64 186
+  %491 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %490
+  %492 = OpLoad.storage_buffer.i16 %491
+  %493 = OpConstant.offset64 188
+  %494 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %493
+  %495 = OpLoad.storage_buffer.i16 %494
+  %496 = OpConstant.offset64 190
+  %497 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %496
+  %498 = OpLoad.storage_buffer.i16 %497
+  %500 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %211
+  OpStore.storage_buffer.f16 %500, %213
+  %502 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %214
+  OpStore.storage_buffer.f16 %502, %216
+  %504 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %217
+  OpStore.storage_buffer.f16 %504, %219
+  %506 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %220
+  OpStore.storage_buffer.f16 %506, %222
+  %508 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %223
+  OpStore.storage_buffer.f16 %508, %225
+  %510 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %226
+  OpStore.storage_buffer.f16 %510, %228
+  %512 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %229
+  OpStore.storage_buffer.f16 %512, %231
+  %514 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %232
+  OpStore.storage_buffer.f16 %514, %234
+  %516 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %235
+  OpStore.storage_buffer.f16 %516, %237
+  %518 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %238
+  OpStore.storage_buffer.f16 %518, %240
+  %520 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %241
+  OpStore.storage_buffer.f16 %520, %243
+  %522 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %244
+  OpStore.storage_buffer.f16 %522, %246
+  %524 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %247
+  OpStore.storage_buffer.f16 %524, %249
+  %526 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %250
+  OpStore.storage_buffer.f16 %526, %252
+  %528 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %253
+  OpStore.storage_buffer.f16 %528, %255
+  %530 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %256
+  OpStore.storage_buffer.f16 %530, %258
+  %532 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %259
+  OpStore.storage_buffer.f16 %532, %261
+  %534 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %262
+  OpStore.storage_buffer.f16 %534, %264
+  %536 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %265
+  OpStore.storage_buffer.f16 %536, %267
+  %538 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %268
+  OpStore.storage_buffer.f16 %538, %270
+  %540 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %271
+  OpStore.storage_buffer.f16 %540, %273
+  %542 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %274
+  OpStore.storage_buffer.f16 %542, %276
+  %544 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %277
+  OpStore.storage_buffer.f16 %544, %279
+  %546 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %280
+  OpStore.storage_buffer.f16 %546, %282
+  %548 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %283
+  OpStore.storage_buffer.f16 %548, %285
+  %550 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %286
+  OpStore.storage_buffer.f16 %550, %288
+  %552 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %289
+  OpStore.storage_buffer.f16 %552, %291
+  %554 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %292
+  OpStore.storage_buffer.f16 %554, %294
+  %556 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %295
+  OpStore.storage_buffer.f16 %556, %297
+  %558 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %298
+  OpStore.storage_buffer.f16 %558, %300
+  %560 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %301
+  OpStore.storage_buffer.f16 %560, %303
+  %562 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %304
+  OpStore.storage_buffer.f16 %562, %306
+  %564 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %307
+  OpStore.storage_buffer.bf16 %564, %309
+  %566 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %310
+  OpStore.storage_buffer.bf16 %566, %312
+  %568 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %313
+  OpStore.storage_buffer.bf16 %568, %315
+  %570 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %316
+  OpStore.storage_buffer.bf16 %570, %318
+  %572 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %319
+  OpStore.storage_buffer.bf16 %572, %321
+  %574 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %322
+  OpStore.storage_buffer.bf16 %574, %324
+  %576 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %325
+  OpStore.storage_buffer.bf16 %576, %327
+  %578 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %328
+  OpStore.storage_buffer.bf16 %578, %330
+  %580 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %331
+  OpStore.storage_buffer.bf16 %580, %333
+  %582 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %334
+  OpStore.storage_buffer.bf16 %582, %336
+  %584 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %337
+  OpStore.storage_buffer.bf16 %584, %339
+  %586 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %340
+  OpStore.storage_buffer.bf16 %586, %342
+  %588 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %343
+  OpStore.storage_buffer.bf16 %588, %345
+  %590 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %346
+  OpStore.storage_buffer.bf16 %590, %348
+  %592 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %349
+  OpStore.storage_buffer.bf16 %592, %351
+  %594 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %352
+  OpStore.storage_buffer.bf16 %594, %354
+  %596 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %355
+  OpStore.storage_buffer.bf16 %596, %357
+  %598 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %358
+  OpStore.storage_buffer.bf16 %598, %360
+  %600 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %361
+  OpStore.storage_buffer.bf16 %600, %363
+  %602 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %364
+  OpStore.storage_buffer.bf16 %602, %366
+  %604 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %367
+  OpStore.storage_buffer.bf16 %604, %369
+  %606 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %370
+  OpStore.storage_buffer.bf16 %606, %372
+  %608 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %373
+  OpStore.storage_buffer.bf16 %608, %375
+  %610 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %376
+  OpStore.storage_buffer.bf16 %610, %378
+  %612 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %379
+  OpStore.storage_buffer.bf16 %612, %381
+  %614 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %382
+  OpStore.storage_buffer.bf16 %614, %384
+  %616 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %385
+  OpStore.storage_buffer.bf16 %616, %387
+  %618 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %388
+  OpStore.storage_buffer.bf16 %618, %390
+  %620 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %391
+  OpStore.storage_buffer.bf16 %620, %393
+  %622 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %394
+  OpStore.storage_buffer.bf16 %622, %396
+  %624 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %397
+  OpStore.storage_buffer.bf16 %624, %399
+  %626 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %400
+  OpStore.storage_buffer.bf16 %626, %402
+  %628 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %403
+  OpStore.storage_buffer.i16 %628, %405
+  %630 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %406
+  OpStore.storage_buffer.i16 %630, %408
+  %632 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %409
+  OpStore.storage_buffer.i16 %632, %411
+  %634 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %412
+  OpStore.storage_buffer.i16 %634, %414
+  %636 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %415
+  OpStore.storage_buffer.i16 %636, %417
+  %638 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %418
+  OpStore.storage_buffer.i16 %638, %420
+  %640 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %421
+  OpStore.storage_buffer.i16 %640, %423
+  %642 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %424
+  OpStore.storage_buffer.i16 %642, %426
+  %644 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %427
+  OpStore.storage_buffer.i16 %644, %429
+  %646 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %430
+  OpStore.storage_buffer.i16 %646, %432
+  %648 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %433
+  OpStore.storage_buffer.i16 %648, %435
+  %650 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %436
+  OpStore.storage_buffer.i16 %650, %438
+  %652 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %439
+  OpStore.storage_buffer.i16 %652, %441
+  %654 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %442
+  OpStore.storage_buffer.i16 %654, %444
+  %656 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %445
+  OpStore.storage_buffer.i16 %656, %447
+  %658 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %448
+  OpStore.storage_buffer.i16 %658, %450
+  %660 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %451
+  OpStore.storage_buffer.i16 %660, %453
+  %662 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %454
+  OpStore.storage_buffer.i16 %662, %456
+  %664 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %457
+  OpStore.storage_buffer.i16 %664, %459
+  %666 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %460
+  OpStore.storage_buffer.i16 %666, %462
+  %668 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %463
+  OpStore.storage_buffer.i16 %668, %465
+  %670 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %466
+  OpStore.storage_buffer.i16 %670, %468
+  %672 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %469
+  OpStore.storage_buffer.i16 %672, %471
+  %674 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %472
+  OpStore.storage_buffer.i16 %674, %474
+  %676 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %475
+  OpStore.storage_buffer.i16 %676, %477
+  %678 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %478
+  OpStore.storage_buffer.i16 %678, %480
+  %680 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %481
+  OpStore.storage_buffer.i16 %680, %483
+  %682 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %484
+  OpStore.storage_buffer.i16 %682, %486
+  %684 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %487
+  OpStore.storage_buffer.i16 %684, %489
+  %686 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %490
+  OpStore.storage_buffer.i16 %686, %492
+  %688 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %493
+  OpStore.storage_buffer.i16 %688, %495
+  %690 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %496
+  OpStore.storage_buffer.i16 %690, %498
+  return
+}
+
+// ====
+
+func.def @copy_word_volatile(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<1xbf16>
+  %target = buffer.view %output[%base] : buffer -> view<2xbf16>
+  %first = view.load<volatile> %source[0] : view<1xbf16> -> bf16
+  %second = view.load<volatile> %source[0] : view<1xbf16> -> bf16
+  view.store<volatile> %first, %target[0] : bf16, view<2xbf16>
+  view.store<volatile> %second, %target[1] : bf16, view<2xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @copy_word_volatile(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>) asm {
+  %9 = OpConstant.offset64 0
+  %10 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input, %9
+  %first = OpLoad.storage_buffer.bf16<volatile> %10
+  %second = OpLoad.storage_buffer.bf16<volatile> %10
+  %16 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %9
+  OpStore.storage_buffer.bf16<volatile> %16, %first
+  %17 = OpConstant.offset64 2
+  %18 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %17
+  OpStore.storage_buffer.bf16<volatile> %18, %second
+  return
+}

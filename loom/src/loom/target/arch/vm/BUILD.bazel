@@ -151,6 +151,7 @@ loom_check_test_suite(
         "test/source_low/memory_subview.loom-test",
         "test/source_low/memory_vector_atomic.loom-test",
         "test/source_low/memory_wide_carriers.loom-test",
+        "test/source_low/memory_word.loom-test",
         "test/source_low/nested_view_selection.loom-test",
         "test/source_low/numeric_address_widening.loom-test",
         "test/source_low/numeric_bitfield.loom-test",

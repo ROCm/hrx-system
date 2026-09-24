@@ -1,0 +1,1308 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_word.loom
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+// Equal-width formats preserve their bits through ordinary memory transfers.
+func.def @copy_word_scalar(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source_half = buffer.view %input[%base] : buffer -> view<3xf16>
+  %source_bfloat = buffer.view %input[%base] : buffer -> view<3xbf16>
+  %source_integer = buffer.view %input[%base] : buffer -> view<3xi16>
+  %target_half = buffer.view %output[%base] : buffer -> view<3xf16>
+  %target_bfloat = buffer.view %output[%base] : buffer -> view<3xbf16>
+  %target_integer = buffer.view %output[%base] : buffer -> view<3xi16>
+  %half = view.load %source_half[0] : view<3xf16> -> f16
+  %bfloat = view.load %source_bfloat[1] : view<3xbf16> -> bf16
+  %integer = view.load %source_integer[2] : view<3xi16> -> i16
+  view.store %half, %target_half[0] : f16, view<3xf16>
+  view.store %bfloat, %target_bfloat[1] : bf16, view<3xbf16>
+  view.store %integer, %target_integer[2] : i16, view<3xi16>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_word_scalar() asm {
+  %source_integer = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %target_integer = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %half = lda.u16 %source_integer, 0
+  %bfloat = lda.u16 %source_integer, 2
+  %integer = lda.u16 %source_integer, 4
+  st.s16 %half, %target_integer, 0
+  st.s16 %bfloat, %target_integer, 2
+  st.s16 %integer, %target_integer, 4
+  return
+}
+
+// ====
+
+// Eight words occupy sixteen consecutive bytes in each numeric format.
+func.def @copy_word_vector(%input: buffer, %output: buffer) {
+  %first = index.constant 0 : offset
+  %second = index.constant 16 : offset
+  %third = index.constant 32 : offset
+  %source_half = buffer.view %input[%first] : buffer -> view<8xf16>
+  %source_bfloat = buffer.view %input[%second] : buffer -> view<8xbf16>
+  %source_integer = buffer.view %input[%third] : buffer -> view<8xi16>
+  %target_half = buffer.view %output[%first] : buffer -> view<8xf16>
+  %target_bfloat = buffer.view %output[%second] : buffer -> view<8xbf16>
+  %target_integer = buffer.view %output[%third] : buffer -> view<8xi16>
+  %half = vector.load %source_half[0] : view<8xf16> -> vector<8xf16>
+  %bfloat = vector.load %source_bfloat[0] : view<8xbf16> -> vector<8xbf16>
+  %integer = vector.load %source_integer[0] : view<8xi16> -> vector<8xi16>
+  vector.store %half, %target_half[0] : vector<8xf16>, view<8xf16>
+  vector.store %bfloat, %target_bfloat[0] : vector<8xbf16>, view<8xbf16>
+  vector.store %integer, %target_integer[0] : vector<8xi16>, view<8xi16>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_word_vector() asm {
+  %source_integer = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %target_integer = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %175 = lda.u16 %source_integer, 0
+  %176 = lda.u16 %source_integer, 2
+  %177 = lda.u16 %source_integer, 4
+  %178 = lda.u16 %source_integer, 6
+  %179 = lda.u16 %source_integer, 8
+  %180 = lda.u16 %source_integer, 10
+  %181 = lda.u16 %source_integer, 12
+  %182 = lda.u16 %source_integer, 14
+  %183 = mov.static-byte-offset 16
+  %184 = mov.address-index %183
+  %185 = lda.i16.index %source_integer, %184
+  %186 = mov.static-byte-offset 18
+  %187 = mov.address-index %186
+  %188 = lda.i16.index %source_integer, %187
+  %189 = mov.static-byte-offset 20
+  %190 = mov.address-index %189
+  %191 = lda.i16.index %source_integer, %190
+  %192 = mov.static-byte-offset 22
+  %193 = mov.address-index %192
+  %194 = lda.i16.index %source_integer, %193
+  %195 = mov.static-byte-offset 24
+  %196 = mov.address-index %195
+  %197 = lda.i16.index %source_integer, %196
+  %198 = mov.static-byte-offset 26
+  %199 = mov.address-index %198
+  %200 = lda.i16.index %source_integer, %199
+  %201 = mov.static-byte-offset 28
+  %202 = mov.address-index %201
+  %203 = lda.i16.index %source_integer, %202
+  %204 = mov.static-byte-offset 30
+  %205 = mov.address-index %204
+  %206 = lda.i16.index %source_integer, %205
+  %207 = mov.static-byte-offset 32
+  %208 = mov.address-index %207
+  %209 = lda.i16.index %source_integer, %208
+  %210 = mov.static-byte-offset 34
+  %211 = mov.address-index %210
+  %212 = lda.i16.index %source_integer, %211
+  %213 = mov.static-byte-offset 36
+  %214 = mov.address-index %213
+  %215 = lda.i16.index %source_integer, %214
+  %216 = mov.static-byte-offset 38
+  %217 = mov.address-index %216
+  %218 = lda.i16.index %source_integer, %217
+  %219 = mov.static-byte-offset 40
+  %220 = mov.address-index %219
+  %221 = lda.i16.index %source_integer, %220
+  %222 = mov.static-byte-offset 42
+  %223 = mov.address-index %222
+  %224 = lda.i16.index %source_integer, %223
+  %225 = mov.static-byte-offset 44
+  %226 = mov.address-index %225
+  %227 = lda.i16.index %source_integer, %226
+  %228 = mov.static-byte-offset 46
+  %229 = mov.address-index %228
+  %230 = lda.i16.index %source_integer, %229
+  st.s16 %175, %target_integer, 0
+  st.s16 %176, %target_integer, 2
+  st.s16 %177, %target_integer, 4
+  st.s16 %178, %target_integer, 6
+  st.s16 %179, %target_integer, 8
+  st.s16 %180, %target_integer, 10
+  st.s16 %181, %target_integer, 12
+  st.s16 %182, %target_integer, 14
+  st.i16.index %185, %target_integer, %184
+  st.i16.index %188, %target_integer, %187
+  st.i16.index %191, %target_integer, %190
+  st.i16.index %194, %target_integer, %193
+  st.i16.index %197, %target_integer, %196
+  st.i16.index %200, %target_integer, %199
+  st.i16.index %203, %target_integer, %202
+  st.i16.index %206, %target_integer, %205
+  st.i16.index %209, %target_integer, %208
+  st.i16.index %212, %target_integer, %211
+  st.i16.index %215, %target_integer, %214
+  st.i16.index %218, %target_integer, %217
+  st.i16.index %221, %target_integer, %220
+  st.i16.index %224, %target_integer, %223
+  st.i16.index %227, %target_integer, %226
+  st.i16.index %230, %target_integer, %229
+  return
+}
+
+// ====
+
+func.def @copy_word_vector_wide(%input: buffer, %output: buffer) {
+  %first = index.constant 0 : offset
+  %second = index.constant 32 : offset
+  %third = index.constant 64 : offset
+  %source_half = buffer.view %input[%first] : buffer -> view<16xf16>
+  %source_bfloat = buffer.view %input[%second] : buffer -> view<16xbf16>
+  %source_integer = buffer.view %input[%third] : buffer -> view<16xi16>
+  %target_half = buffer.view %output[%first] : buffer -> view<16xf16>
+  %target_bfloat = buffer.view %output[%second] : buffer -> view<16xbf16>
+  %target_integer = buffer.view %output[%third] : buffer -> view<16xi16>
+  %half = vector.load %source_half[0] : view<16xf16> -> vector<16xf16>
+  %bfloat = vector.load %source_bfloat[0] : view<16xbf16> -> vector<16xbf16>
+  %integer = vector.load %source_integer[0] : view<16xi16> -> vector<16xi16>
+  vector.store %half, %target_half[0] : vector<16xf16>, view<16xf16>
+  vector.store %bfloat, %target_bfloat[0] : vector<16xbf16>, view<16xbf16>
+  vector.store %integer, %target_integer[0] : vector<16xi16>, view<16xi16>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_word_vector_wide() asm {
+  %source_integer = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %target_integer = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %342 = mov.static-byte-offset 32
+  %343 = mov.address-index %342
+  %344 = lda.i16.index %source_integer, %343
+  %345 = mov.static-byte-offset 34
+  %346 = mov.address-index %345
+  %347 = lda.i16.index %source_integer, %346
+  %348 = mov.static-byte-offset 36
+  %349 = mov.address-index %348
+  %350 = lda.i16.index %source_integer, %349
+  %351 = mov.static-byte-offset 38
+  %352 = mov.address-index %351
+  %353 = lda.i16.index %source_integer, %352
+  %354 = mov.static-byte-offset 40
+  %355 = mov.address-index %354
+  %356 = lda.i16.index %source_integer, %355
+  %357 = mov.static-byte-offset 42
+  %358 = mov.address-index %357
+  %359 = lda.i16.index %source_integer, %358
+  %360 = mov.static-byte-offset 44
+  %361 = mov.address-index %360
+  %362 = lda.i16.index %source_integer, %361
+  %363 = mov.static-byte-offset 46
+  %364 = mov.address-index %363
+  %365 = lda.i16.index %source_integer, %364
+  %366 = mov.static-byte-offset 48
+  %367 = mov.address-index %366
+  %368 = lda.i16.index %source_integer, %367
+  %369 = mov.static-byte-offset 50
+  %370 = mov.address-index %369
+  %371 = lda.i16.index %source_integer, %370
+  %372 = mov.static-byte-offset 52
+  %373 = mov.address-index %372
+  %374 = lda.i16.index %source_integer, %373
+  %375 = mov.static-byte-offset 54
+  %376 = mov.address-index %375
+  %377 = lda.i16.index %source_integer, %376
+  %378 = mov.static-byte-offset 56
+  %379 = mov.address-index %378
+  %380 = lda.i16.index %source_integer, %379
+  %381 = mov.static-byte-offset 58
+  %382 = mov.address-index %381
+  %383 = lda.i16.index %source_integer, %382
+  %384 = mov.static-byte-offset 60
+  %385 = mov.address-index %384
+  %386 = lda.i16.index %source_integer, %385
+  %387 = mov.static-byte-offset 62
+  %388 = mov.address-index %387
+  %389 = lda.i16.index %source_integer, %388
+  %390 = mov.static-byte-offset 64
+  %391 = mov.address-index %390
+  %392 = lda.i16.index %source_integer, %391
+  %393 = mov.static-byte-offset 66
+  %394 = mov.address-index %393
+  %395 = lda.i16.index %source_integer, %394
+  %396 = mov.static-byte-offset 68
+  %397 = mov.address-index %396
+  %398 = lda.i16.index %source_integer, %397
+  %399 = mov.static-byte-offset 70
+  %400 = mov.address-index %399
+  %401 = lda.i16.index %source_integer, %400
+  %402 = mov.static-byte-offset 72
+  %403 = mov.address-index %402
+  %404 = lda.i16.index %source_integer, %403
+  %405 = mov.static-byte-offset 74
+  %406 = mov.address-index %405
+  %407 = lda.i16.index %source_integer, %406
+  %408 = mov.static-byte-offset 76
+  %409 = mov.address-index %408
+  %410 = lda.i16.index %source_integer, %409
+  %411 = mov.static-byte-offset 78
+  %412 = mov.address-index %411
+  %413 = lda.i16.index %source_integer, %412
+  %414 = mov.static-byte-offset 80
+  %415 = mov.address-index %414
+  %416 = lda.i16.index %source_integer, %415
+  %417 = mov.static-byte-offset 82
+  %418 = mov.address-index %417
+  %419 = lda.i16.index %source_integer, %418
+  %420 = mov.static-byte-offset 84
+  %421 = mov.address-index %420
+  %422 = lda.i16.index %source_integer, %421
+  %423 = mov.static-byte-offset 86
+  %424 = mov.address-index %423
+  %425 = lda.i16.index %source_integer, %424
+  %426 = mov.static-byte-offset 88
+  %427 = mov.address-index %426
+  %428 = lda.i16.index %source_integer, %427
+  %429 = mov.static-byte-offset 90
+  %430 = mov.address-index %429
+  %431 = lda.i16.index %source_integer, %430
+  %432 = mov.static-byte-offset 92
+  %433 = mov.address-index %432
+  %434 = lda.i16.index %source_integer, %433
+  %435 = mov.static-byte-offset 94
+  %436 = mov.address-index %435
+  %437 = lda.i16.index %source_integer, %436
+  %438 = lda.u16 %source_integer, 0
+  %439 = lda.u16 %source_integer, 2
+  %440 = lda.u16 %source_integer, 4
+  %441 = lda.u16 %source_integer, 6
+  %442 = lda.u16 %source_integer, 8
+  %443 = lda.u16 %source_integer, 10
+  %444 = lda.u16 %source_integer, 12
+  %445 = lda.u16 %source_integer, 14
+  %446 = mov.static-byte-offset 16
+  %447 = mov.address-index %446
+  %448 = lda.i16.index %source_integer, %447
+  %449 = mov.static-byte-offset 18
+  %450 = mov.address-index %449
+  %451 = lda.i16.index %source_integer, %450
+  %452 = mov.static-byte-offset 20
+  %453 = mov.address-index %452
+  %454 = lda.i16.index %source_integer, %453
+  %455 = mov.static-byte-offset 22
+  %456 = mov.address-index %455
+  %457 = lda.i16.index %source_integer, %456
+  %458 = mov.static-byte-offset 24
+  %459 = mov.address-index %458
+  %460 = lda.i16.index %source_integer, %459
+  %461 = mov.static-byte-offset 26
+  %462 = mov.address-index %461
+  %463 = lda.i16.index %source_integer, %462
+  %464 = mov.static-byte-offset 28
+  %465 = mov.address-index %464
+  %466 = lda.i16.index %source_integer, %465
+  %467 = mov.static-byte-offset 30
+  %468 = mov.address-index %467
+  %469 = lda.i16.index %source_integer, %468
+  st.s16 %438, %target_integer, 0
+  st.s16 %439, %target_integer, 2
+  st.s16 %440, %target_integer, 4
+  st.s16 %441, %target_integer, 6
+  st.s16 %442, %target_integer, 8
+  st.s16 %443, %target_integer, 10
+  st.s16 %444, %target_integer, 12
+  st.s16 %445, %target_integer, 14
+  st.i16.index %448, %target_integer, %447
+  st.i16.index %451, %target_integer, %450
+  st.i16.index %454, %target_integer, %453
+  st.i16.index %457, %target_integer, %456
+  st.i16.index %460, %target_integer, %459
+  st.i16.index %463, %target_integer, %462
+  st.i16.index %466, %target_integer, %465
+  st.i16.index %469, %target_integer, %468
+  st.i16.index %344, %target_integer, %343
+  st.i16.index %347, %target_integer, %346
+  st.i16.index %350, %target_integer, %349
+  st.i16.index %353, %target_integer, %352
+  st.i16.index %356, %target_integer, %355
+  st.i16.index %359, %target_integer, %358
+  st.i16.index %362, %target_integer, %361
+  st.i16.index %365, %target_integer, %364
+  st.i16.index %368, %target_integer, %367
+  st.i16.index %371, %target_integer, %370
+  st.i16.index %374, %target_integer, %373
+  st.i16.index %377, %target_integer, %376
+  st.i16.index %380, %target_integer, %379
+  st.i16.index %383, %target_integer, %382
+  st.i16.index %386, %target_integer, %385
+  st.i16.index %389, %target_integer, %388
+  st.i16.index %392, %target_integer, %391
+  st.i16.index %395, %target_integer, %394
+  st.i16.index %398, %target_integer, %397
+  st.i16.index %401, %target_integer, %400
+  st.i16.index %404, %target_integer, %403
+  st.i16.index %407, %target_integer, %406
+  st.i16.index %410, %target_integer, %409
+  st.i16.index %413, %target_integer, %412
+  st.i16.index %416, %target_integer, %415
+  st.i16.index %419, %target_integer, %418
+  st.i16.index %422, %target_integer, %421
+  st.i16.index %425, %target_integer, %424
+  st.i16.index %428, %target_integer, %427
+  st.i16.index %431, %target_integer, %430
+  st.i16.index %434, %target_integer, %433
+  st.i16.index %437, %target_integer, %436
+  return
+}
+
+// ====
+
+func.def @copy_word_vector_large(%input: buffer, %output: buffer) {
+  %first = index.constant 0 : offset
+  %second = index.constant 64 : offset
+  %third = index.constant 128 : offset
+  %source_half = buffer.view %input[%first] : buffer -> view<32xf16>
+  %source_bfloat = buffer.view %input[%second] : buffer -> view<32xbf16>
+  %source_integer = buffer.view %input[%third] : buffer -> view<32xi16>
+  %target_half = buffer.view %output[%first] : buffer -> view<32xf16>
+  %target_bfloat = buffer.view %output[%second] : buffer -> view<32xbf16>
+  %target_integer = buffer.view %output[%third] : buffer -> view<32xi16>
+  %half = vector.load %source_half[0] : view<32xf16> -> vector<32xf16>
+  %bfloat = vector.load %source_bfloat[0] : view<32xbf16> -> vector<32xbf16>
+  %integer = vector.load %source_integer[0] : view<32xi16> -> vector<32xi16>
+  vector.store %half, %target_half[0] : vector<32xf16>, view<32xf16>
+  vector.store %bfloat, %target_bfloat[0] : vector<32xbf16>, view<32xbf16>
+  vector.store %integer, %target_integer[0] : vector<32xi16>, view<32xi16>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_word_vector_large() asm {
+  %source_integer = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %target_integer = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %678 = mov.static-byte-offset 64
+  %679 = mov.address-index %678
+  %680 = lda.i16.index %source_integer, %679
+  %681 = mov.static-byte-offset 66
+  %682 = mov.address-index %681
+  %683 = lda.i16.index %source_integer, %682
+  %684 = mov.static-byte-offset 68
+  %685 = mov.address-index %684
+  %686 = lda.i16.index %source_integer, %685
+  %687 = mov.static-byte-offset 70
+  %688 = mov.address-index %687
+  %689 = lda.i16.index %source_integer, %688
+  %690 = mov.static-byte-offset 72
+  %691 = mov.address-index %690
+  %692 = lda.i16.index %source_integer, %691
+  %693 = mov.static-byte-offset 74
+  %694 = mov.address-index %693
+  %695 = lda.i16.index %source_integer, %694
+  %696 = mov.static-byte-offset 76
+  %697 = mov.address-index %696
+  %698 = lda.i16.index %source_integer, %697
+  %699 = mov.static-byte-offset 78
+  %700 = mov.address-index %699
+  %701 = lda.i16.index %source_integer, %700
+  %702 = mov.static-byte-offset 80
+  %703 = mov.address-index %702
+  %704 = lda.i16.index %source_integer, %703
+  %705 = mov.static-byte-offset 82
+  %706 = mov.address-index %705
+  %707 = lda.i16.index %source_integer, %706
+  %708 = mov.static-byte-offset 84
+  %709 = mov.address-index %708
+  %710 = lda.i16.index %source_integer, %709
+  %711 = mov.static-byte-offset 86
+  %712 = mov.address-index %711
+  %713 = lda.i16.index %source_integer, %712
+  %714 = mov.static-byte-offset 88
+  %715 = mov.address-index %714
+  %716 = lda.i16.index %source_integer, %715
+  %717 = mov.static-byte-offset 90
+  %718 = mov.address-index %717
+  %719 = lda.i16.index %source_integer, %718
+  %720 = mov.static-byte-offset 92
+  %721 = mov.address-index %720
+  %722 = lda.i16.index %source_integer, %721
+  %723 = mov.static-byte-offset 94
+  %724 = mov.address-index %723
+  %725 = lda.i16.index %source_integer, %724
+  %726 = mov.static-byte-offset 96
+  %727 = mov.address-index %726
+  %728 = lda.i16.index %source_integer, %727
+  %729 = mov.static-byte-offset 98
+  %730 = mov.address-index %729
+  %731 = lda.i16.index %source_integer, %730
+  %732 = mov.static-byte-offset 100
+  %733 = mov.address-index %732
+  %734 = lda.i16.index %source_integer, %733
+  %735 = mov.static-byte-offset 102
+  %736 = mov.address-index %735
+  %737 = lda.i16.index %source_integer, %736
+  %738 = mov.static-byte-offset 104
+  %739 = mov.address-index %738
+  %740 = lda.i16.index %source_integer, %739
+  %741 = mov.static-byte-offset 106
+  %742 = mov.address-index %741
+  %743 = lda.i16.index %source_integer, %742
+  %744 = mov.static-byte-offset 108
+  %745 = mov.address-index %744
+  %746 = lda.i16.index %source_integer, %745
+  %747 = mov.static-byte-offset 110
+  %748 = mov.address-index %747
+  %749 = lda.i16.index %source_integer, %748
+  %750 = mov.static-byte-offset 112
+  %751 = mov.address-index %750
+  %752 = lda.i16.index %source_integer, %751
+  %753 = mov.static-byte-offset 114
+  %754 = mov.address-index %753
+  %755 = lda.i16.index %source_integer, %754
+  %756 = mov.static-byte-offset 116
+  %757 = mov.address-index %756
+  %758 = lda.i16.index %source_integer, %757
+  %759 = mov.static-byte-offset 118
+  %760 = mov.address-index %759
+  %761 = lda.i16.index %source_integer, %760
+  %762 = mov.static-byte-offset 120
+  %763 = mov.address-index %762
+  %764 = lda.i16.index %source_integer, %763
+  %765 = mov.static-byte-offset 122
+  %766 = mov.address-index %765
+  %767 = lda.i16.index %source_integer, %766
+  %768 = mov.static-byte-offset 124
+  %769 = mov.address-index %768
+  %770 = lda.i16.index %source_integer, %769
+  %771 = mov.static-byte-offset 126
+  %772 = mov.address-index %771
+  %773 = lda.i16.index %source_integer, %772
+  %774 = mov.static-byte-offset 128
+  %775 = mov.address-index %774
+  %776 = lda.i16.index %source_integer, %775
+  %777 = mov.static-byte-offset 130
+  %778 = mov.address-index %777
+  %779 = lda.i16.index %source_integer, %778
+  %780 = mov.static-byte-offset 132
+  %781 = mov.address-index %780
+  %782 = lda.i16.index %source_integer, %781
+  %783 = mov.static-byte-offset 134
+  %784 = mov.address-index %783
+  %785 = lda.i16.index %source_integer, %784
+  %786 = mov.static-byte-offset 136
+  %787 = mov.address-index %786
+  %788 = lda.i16.index %source_integer, %787
+  %789 = mov.static-byte-offset 138
+  %790 = mov.address-index %789
+  %791 = lda.i16.index %source_integer, %790
+  %792 = mov.static-byte-offset 140
+  %793 = mov.address-index %792
+  %794 = lda.i16.index %source_integer, %793
+  %795 = mov.static-byte-offset 142
+  %796 = mov.address-index %795
+  %797 = lda.i16.index %source_integer, %796
+  %798 = mov.static-byte-offset 144
+  %799 = mov.address-index %798
+  %800 = lda.i16.index %source_integer, %799
+  %801 = mov.static-byte-offset 146
+  %802 = mov.address-index %801
+  %803 = lda.i16.index %source_integer, %802
+  %804 = mov.static-byte-offset 148
+  %805 = mov.address-index %804
+  %806 = lda.i16.index %source_integer, %805
+  %807 = mov.static-byte-offset 150
+  %808 = mov.address-index %807
+  %809 = lda.i16.index %source_integer, %808
+  %810 = mov.static-byte-offset 152
+  %811 = mov.address-index %810
+  %812 = lda.i16.index %source_integer, %811
+  %813 = mov.static-byte-offset 154
+  %814 = mov.address-index %813
+  %815 = lda.i16.index %source_integer, %814
+  %816 = mov.static-byte-offset 156
+  %817 = mov.address-index %816
+  %818 = lda.i16.index %source_integer, %817
+  %819 = mov.static-byte-offset 158
+  %820 = mov.address-index %819
+  %821 = lda.i16.index %source_integer, %820
+  %822 = mov.static-byte-offset 160
+  %823 = mov.address-index %822
+  %824 = lda.i16.index %source_integer, %823
+  %825 = mov.static-byte-offset 162
+  %826 = mov.address-index %825
+  %827 = lda.i16.index %source_integer, %826
+  %828 = mov.static-byte-offset 164
+  %829 = mov.address-index %828
+  %830 = lda.i16.index %source_integer, %829
+  %831 = mov.static-byte-offset 166
+  %832 = mov.address-index %831
+  %833 = lda.i16.index %source_integer, %832
+  %834 = mov.static-byte-offset 168
+  %835 = mov.address-index %834
+  %836 = lda.i16.index %source_integer, %835
+  %837 = mov.static-byte-offset 170
+  %838 = mov.address-index %837
+  %839 = lda.i16.index %source_integer, %838
+  %840 = mov.static-byte-offset 172
+  %841 = mov.address-index %840
+  %842 = lda.i16.index %source_integer, %841
+  %843 = mov.static-byte-offset 174
+  %844 = mov.address-index %843
+  %845 = lda.i16.index %source_integer, %844
+  %846 = mov.static-byte-offset 176
+  %847 = mov.address-index %846
+  %848 = lda.i16.index %source_integer, %847
+  %849 = mov.static-byte-offset 178
+  %850 = mov.address-index %849
+  %851 = lda.i16.index %source_integer, %850
+  %852 = mov.static-byte-offset 180
+  %853 = mov.address-index %852
+  %854 = lda.i16.index %source_integer, %853
+  %855 = mov.static-byte-offset 182
+  %856 = mov.address-index %855
+  %857 = lda.i16.index %source_integer, %856
+  %858 = mov.static-byte-offset 184
+  %859 = mov.address-index %858
+  %860 = lda.i16.index %source_integer, %859
+  %861 = mov.static-byte-offset 186
+  %862 = mov.address-index %861
+  %863 = lda.i16.index %source_integer, %862
+  %864 = mov.static-byte-offset 188
+  %865 = mov.address-index %864
+  %866 = lda.i16.index %source_integer, %865
+  %867 = mov.static-byte-offset 190
+  %868 = mov.address-index %867
+  %869 = lda.i16.index %source_integer, %868
+  %870 = lda.u16 %source_integer, 0
+  %871 = lda.u16 %source_integer, 2
+  %872 = lda.u16 %source_integer, 4
+  %873 = lda.u16 %source_integer, 6
+  %874 = lda.u16 %source_integer, 8
+  %875 = lda.u16 %source_integer, 10
+  %876 = lda.u16 %source_integer, 12
+  %877 = lda.u16 %source_integer, 14
+  %878 = mov.static-byte-offset 16
+  %879 = mov.address-index %878
+  %880 = lda.i16.index %source_integer, %879
+  %881 = mov.static-byte-offset 18
+  %882 = mov.address-index %881
+  %883 = lda.i16.index %source_integer, %882
+  %884 = mov.static-byte-offset 20
+  %885 = mov.address-index %884
+  %886 = lda.i16.index %source_integer, %885
+  %887 = mov.static-byte-offset 22
+  %888 = mov.address-index %887
+  %889 = lda.i16.index %source_integer, %888
+  %890 = mov.static-byte-offset 24
+  %891 = mov.address-index %890
+  %892 = lda.i16.index %source_integer, %891
+  %893 = mov.static-byte-offset 26
+  %894 = mov.address-index %893
+  %895 = lda.i16.index %source_integer, %894
+  %896 = mov.static-byte-offset 28
+  %897 = mov.address-index %896
+  %898 = lda.i16.index %source_integer, %897
+  %899 = mov.static-byte-offset 30
+  %900 = mov.address-index %899
+  %901 = lda.i16.index %source_integer, %900
+  %902 = mov.static-byte-offset 32
+  %903 = mov.address-index %902
+  %904 = lda.i16.index %source_integer, %903
+  %905 = mov.static-byte-offset 34
+  %906 = mov.address-index %905
+  %907 = lda.i16.index %source_integer, %906
+  %908 = mov.static-byte-offset 36
+  %909 = mov.address-index %908
+  %910 = lda.i16.index %source_integer, %909
+  %911 = mov.static-byte-offset 38
+  %912 = mov.address-index %911
+  %913 = lda.i16.index %source_integer, %912
+  %914 = mov.static-byte-offset 40
+  %915 = mov.address-index %914
+  %916 = lda.i16.index %source_integer, %915
+  %917 = mov.static-byte-offset 42
+  %918 = mov.address-index %917
+  %919 = lda.i16.index %source_integer, %918
+  %920 = mov.static-byte-offset 44
+  %921 = mov.address-index %920
+  %922 = lda.i16.index %source_integer, %921
+  %923 = mov.static-byte-offset 46
+  %924 = mov.address-index %923
+  %925 = lda.i16.index %source_integer, %924
+  %926 = mov.static-byte-offset 48
+  %927 = mov.address-index %926
+  %928 = lda.i16.index %source_integer, %927
+  %929 = mov.static-byte-offset 50
+  %930 = mov.address-index %929
+  %931 = lda.i16.index %source_integer, %930
+  %932 = mov.static-byte-offset 52
+  %933 = mov.address-index %932
+  %934 = lda.i16.index %source_integer, %933
+  %935 = mov.static-byte-offset 54
+  %936 = mov.address-index %935
+  %937 = lda.i16.index %source_integer, %936
+  %938 = mov.static-byte-offset 56
+  %939 = mov.address-index %938
+  %940 = lda.i16.index %source_integer, %939
+  %941 = mov.static-byte-offset 58
+  %942 = mov.address-index %941
+  %943 = lda.i16.index %source_integer, %942
+  %944 = mov.static-byte-offset 60
+  %945 = mov.address-index %944
+  %946 = lda.i16.index %source_integer, %945
+  %947 = mov.static-byte-offset 62
+  %948 = mov.address-index %947
+  %949 = lda.i16.index %source_integer, %948
+  st.s16 %870, %target_integer, 0
+  st.s16 %871, %target_integer, 2
+  st.s16 %872, %target_integer, 4
+  st.s16 %873, %target_integer, 6
+  st.s16 %874, %target_integer, 8
+  st.s16 %875, %target_integer, 10
+  st.s16 %876, %target_integer, 12
+  st.s16 %877, %target_integer, 14
+  st.i16.index %880, %target_integer, %879
+  st.i16.index %883, %target_integer, %882
+  st.i16.index %886, %target_integer, %885
+  st.i16.index %889, %target_integer, %888
+  st.i16.index %892, %target_integer, %891
+  st.i16.index %895, %target_integer, %894
+  st.i16.index %898, %target_integer, %897
+  st.i16.index %901, %target_integer, %900
+  st.i16.index %904, %target_integer, %903
+  st.i16.index %907, %target_integer, %906
+  st.i16.index %910, %target_integer, %909
+  st.i16.index %913, %target_integer, %912
+  st.i16.index %916, %target_integer, %915
+  st.i16.index %919, %target_integer, %918
+  st.i16.index %922, %target_integer, %921
+  st.i16.index %925, %target_integer, %924
+  st.i16.index %928, %target_integer, %927
+  st.i16.index %931, %target_integer, %930
+  st.i16.index %934, %target_integer, %933
+  st.i16.index %937, %target_integer, %936
+  st.i16.index %940, %target_integer, %939
+  st.i16.index %943, %target_integer, %942
+  st.i16.index %946, %target_integer, %945
+  st.i16.index %949, %target_integer, %948
+  st.i16.index %680, %target_integer, %679
+  st.i16.index %683, %target_integer, %682
+  st.i16.index %686, %target_integer, %685
+  st.i16.index %689, %target_integer, %688
+  st.i16.index %692, %target_integer, %691
+  st.i16.index %695, %target_integer, %694
+  st.i16.index %698, %target_integer, %697
+  st.i16.index %701, %target_integer, %700
+  st.i16.index %704, %target_integer, %703
+  st.i16.index %707, %target_integer, %706
+  st.i16.index %710, %target_integer, %709
+  st.i16.index %713, %target_integer, %712
+  st.i16.index %716, %target_integer, %715
+  st.i16.index %719, %target_integer, %718
+  st.i16.index %722, %target_integer, %721
+  st.i16.index %725, %target_integer, %724
+  st.i16.index %728, %target_integer, %727
+  st.i16.index %731, %target_integer, %730
+  st.i16.index %734, %target_integer, %733
+  st.i16.index %737, %target_integer, %736
+  st.i16.index %740, %target_integer, %739
+  st.i16.index %743, %target_integer, %742
+  st.i16.index %746, %target_integer, %745
+  st.i16.index %749, %target_integer, %748
+  st.i16.index %752, %target_integer, %751
+  st.i16.index %755, %target_integer, %754
+  st.i16.index %758, %target_integer, %757
+  st.i16.index %761, %target_integer, %760
+  st.i16.index %764, %target_integer, %763
+  st.i16.index %767, %target_integer, %766
+  st.i16.index %770, %target_integer, %769
+  st.i16.index %773, %target_integer, %772
+  st.i16.index %776, %target_integer, %775
+  st.i16.index %779, %target_integer, %778
+  st.i16.index %782, %target_integer, %781
+  st.i16.index %785, %target_integer, %784
+  st.i16.index %788, %target_integer, %787
+  st.i16.index %791, %target_integer, %790
+  st.i16.index %794, %target_integer, %793
+  st.i16.index %797, %target_integer, %796
+  st.i16.index %800, %target_integer, %799
+  st.i16.index %803, %target_integer, %802
+  st.i16.index %806, %target_integer, %805
+  st.i16.index %809, %target_integer, %808
+  st.i16.index %812, %target_integer, %811
+  st.i16.index %815, %target_integer, %814
+  st.i16.index %818, %target_integer, %817
+  st.i16.index %821, %target_integer, %820
+  st.i16.index %824, %target_integer, %823
+  st.i16.index %827, %target_integer, %826
+  st.i16.index %830, %target_integer, %829
+  st.i16.index %833, %target_integer, %832
+  st.i16.index %836, %target_integer, %835
+  st.i16.index %839, %target_integer, %838
+  st.i16.index %842, %target_integer, %841
+  st.i16.index %845, %target_integer, %844
+  st.i16.index %848, %target_integer, %847
+  st.i16.index %851, %target_integer, %850
+  st.i16.index %854, %target_integer, %853
+  st.i16.index %857, %target_integer, %856
+  st.i16.index %860, %target_integer, %859
+  st.i16.index %863, %target_integer, %862
+  st.i16.index %866, %target_integer, %865
+  st.i16.index %869, %target_integer, %868
+  return
+}
+
+// ====
+
+// Packed records can place complete word vectors at odd byte origins.
+func.def @copy_word_unaligned(%input: buffer, %output: buffer) {
+  %first = index.constant 1 : offset
+  %second = index.constant 17 : offset
+  %third = index.constant 33 : offset
+  %source_half = buffer.view %input[%first] : buffer -> view<8xf16, align(1)>
+  %source_bfloat = buffer.view %input[%second] : buffer -> view<8xbf16, align(1)>
+  %source_integer = buffer.view %input[%third] : buffer -> view<8xi16, align(1)>
+  %target_half = buffer.view %output[%first] : buffer -> view<8xf16, align(1)>
+  %target_bfloat = buffer.view %output[%second] : buffer -> view<8xbf16, align(1)>
+  %target_integer = buffer.view %output[%third] : buffer -> view<8xi16, align(1)>
+  %half = vector.load %source_half[0] : view<8xf16, align(1)> -> vector<8xf16>
+  %bfloat = vector.load %source_bfloat[0] : view<8xbf16, align(1)> -> vector<8xbf16>
+  %integer = vector.load %source_integer[0] : view<8xi16, align(1)> -> vector<8xi16>
+  vector.store %half, %target_half[0] : vector<8xf16>, view<8xf16, align(1)>
+  vector.store %bfloat, %target_bfloat[0] : vector<8xbf16>, view<8xbf16, align(1)>
+  vector.store %integer, %target_integer[0] : vector<8xi16>, view<8xi16, align(1)>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_word_unaligned() asm {
+  %source_integer = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %target_integer = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %175 = lda.u8 %source_integer, 1
+  %176 = lda.u8 %source_integer, 2
+  %177 = mov.short 8
+  %178 = lshl %176, %177
+  %179 = or %175, %178
+  %180 = lda.u8 %source_integer, 3
+  %181 = lda.u8 %source_integer, 4
+  %183 = lshl %181, %177
+  %184 = or %180, %183
+  %185 = lda.u8 %source_integer, 5
+  %186 = lda.u8 %source_integer, 6
+  %188 = lshl %186, %177
+  %189 = or %185, %188
+  %190 = mov.static-byte-offset 7
+  %191 = mov.address-index %190
+  %192 = lda.i8.index %source_integer, %191
+  %193 = mov.static-byte-offset 8
+  %194 = mov.address-index %193
+  %195 = lda.i8.index %source_integer, %194
+  %197 = lshl %195, %177
+  %198 = or %192, %197
+  %199 = mov.static-byte-offset 9
+  %200 = mov.address-index %199
+  %201 = lda.i8.index %source_integer, %200
+  %202 = mov.static-byte-offset 10
+  %203 = mov.address-index %202
+  %204 = lda.i8.index %source_integer, %203
+  %206 = lshl %204, %177
+  %207 = or %201, %206
+  %208 = mov.static-byte-offset 11
+  %209 = mov.address-index %208
+  %210 = lda.i8.index %source_integer, %209
+  %211 = mov.static-byte-offset 12
+  %212 = mov.address-index %211
+  %213 = lda.i8.index %source_integer, %212
+  %215 = lshl %213, %177
+  %216 = or %210, %215
+  %217 = mov.static-byte-offset 13
+  %218 = mov.address-index %217
+  %219 = lda.i8.index %source_integer, %218
+  %220 = mov.static-byte-offset 14
+  %221 = mov.address-index %220
+  %222 = lda.i8.index %source_integer, %221
+  %224 = lshl %222, %177
+  %225 = or %219, %224
+  %226 = mov.static-byte-offset 15
+  %227 = mov.address-index %226
+  %228 = lda.i8.index %source_integer, %227
+  %229 = mov.static-byte-offset 16
+  %230 = mov.address-index %229
+  %231 = lda.i8.index %source_integer, %230
+  %233 = lshl %231, %177
+  %234 = or %228, %233
+  %235 = mov.static-byte-offset 17
+  %236 = mov.address-index %235
+  %237 = lda.i8.index %source_integer, %236
+  %238 = mov.static-byte-offset 18
+  %239 = mov.address-index %238
+  %240 = lda.i8.index %source_integer, %239
+  %242 = lshl %240, %177
+  %243 = or %237, %242
+  %244 = mov.static-byte-offset 19
+  %245 = mov.address-index %244
+  %246 = lda.i8.index %source_integer, %245
+  %247 = mov.static-byte-offset 20
+  %248 = mov.address-index %247
+  %249 = lda.i8.index %source_integer, %248
+  %251 = lshl %249, %177
+  %252 = or %246, %251
+  %253 = mov.static-byte-offset 21
+  %254 = mov.address-index %253
+  %255 = lda.i8.index %source_integer, %254
+  %256 = mov.static-byte-offset 22
+  %257 = mov.address-index %256
+  %258 = lda.i8.index %source_integer, %257
+  %260 = lshl %258, %177
+  %261 = or %255, %260
+  %262 = mov.static-byte-offset 23
+  %263 = mov.address-index %262
+  %264 = lda.i8.index %source_integer, %263
+  %265 = mov.static-byte-offset 24
+  %266 = mov.address-index %265
+  %267 = lda.i8.index %source_integer, %266
+  %269 = lshl %267, %177
+  %270 = or %264, %269
+  %271 = mov.static-byte-offset 25
+  %272 = mov.address-index %271
+  %273 = lda.i8.index %source_integer, %272
+  %274 = mov.static-byte-offset 26
+  %275 = mov.address-index %274
+  %276 = lda.i8.index %source_integer, %275
+  %278 = lshl %276, %177
+  %279 = or %273, %278
+  %280 = mov.static-byte-offset 27
+  %281 = mov.address-index %280
+  %282 = lda.i8.index %source_integer, %281
+  %283 = mov.static-byte-offset 28
+  %284 = mov.address-index %283
+  %285 = lda.i8.index %source_integer, %284
+  %287 = lshl %285, %177
+  %288 = or %282, %287
+  %289 = mov.static-byte-offset 29
+  %290 = mov.address-index %289
+  %291 = lda.i8.index %source_integer, %290
+  %292 = mov.static-byte-offset 30
+  %293 = mov.address-index %292
+  %294 = lda.i8.index %source_integer, %293
+  %296 = lshl %294, %177
+  %297 = or %291, %296
+  %298 = mov.static-byte-offset 31
+  %299 = mov.address-index %298
+  %300 = lda.i8.index %source_integer, %299
+  %301 = mov.static-byte-offset 32
+  %302 = mov.address-index %301
+  %303 = lda.i8.index %source_integer, %302
+  %305 = lshl %303, %177
+  %306 = or %300, %305
+  %307 = mov.static-byte-offset 33
+  %308 = mov.address-index %307
+  %309 = lda.i8.index %source_integer, %308
+  %310 = mov.static-byte-offset 34
+  %311 = mov.address-index %310
+  %312 = lda.i8.index %source_integer, %311
+  %314 = lshl %312, %177
+  %315 = or %309, %314
+  %316 = mov.static-byte-offset 35
+  %317 = mov.address-index %316
+  %318 = lda.i8.index %source_integer, %317
+  %319 = mov.static-byte-offset 36
+  %320 = mov.address-index %319
+  %321 = lda.i8.index %source_integer, %320
+  %323 = lshl %321, %177
+  %324 = or %318, %323
+  %325 = mov.static-byte-offset 37
+  %326 = mov.address-index %325
+  %327 = lda.i8.index %source_integer, %326
+  %328 = mov.static-byte-offset 38
+  %329 = mov.address-index %328
+  %330 = lda.i8.index %source_integer, %329
+  %332 = lshl %330, %177
+  %333 = or %327, %332
+  %334 = mov.static-byte-offset 39
+  %335 = mov.address-index %334
+  %336 = lda.i8.index %source_integer, %335
+  %337 = mov.static-byte-offset 40
+  %338 = mov.address-index %337
+  %339 = lda.i8.index %source_integer, %338
+  %341 = lshl %339, %177
+  %342 = or %336, %341
+  %343 = mov.static-byte-offset 41
+  %344 = mov.address-index %343
+  %345 = lda.i8.index %source_integer, %344
+  %346 = mov.static-byte-offset 42
+  %347 = mov.address-index %346
+  %348 = lda.i8.index %source_integer, %347
+  %350 = lshl %348, %177
+  %351 = or %345, %350
+  %352 = mov.static-byte-offset 43
+  %353 = mov.address-index %352
+  %354 = lda.i8.index %source_integer, %353
+  %355 = mov.static-byte-offset 44
+  %356 = mov.address-index %355
+  %357 = lda.i8.index %source_integer, %356
+  %359 = lshl %357, %177
+  %360 = or %354, %359
+  %361 = mov.static-byte-offset 45
+  %362 = mov.address-index %361
+  %363 = lda.i8.index %source_integer, %362
+  %364 = mov.static-byte-offset 46
+  %365 = mov.address-index %364
+  %366 = lda.i8.index %source_integer, %365
+  %368 = lshl %366, %177
+  %369 = or %363, %368
+  %370 = mov.static-byte-offset 47
+  %371 = mov.address-index %370
+  %372 = lda.i8.index %source_integer, %371
+  %373 = mov.static-byte-offset 48
+  %374 = mov.address-index %373
+  %375 = lda.i8.index %source_integer, %374
+  %377 = lshl %375, %177
+  %378 = or %372, %377
+  %379 = mov.short -8
+  st.s8 %179, %target_integer, 1
+  %380 = lshl %179, %379
+  st.s8 %380, %target_integer, 2
+  st.s8 %184, %target_integer, 3
+  %382 = lshl %184, %379
+  st.s8 %382, %target_integer, 4
+  st.s8 %189, %target_integer, 5
+  %384 = lshl %189, %379
+  st.s8 %384, %target_integer, 6
+  st.i8.index %198, %target_integer, %191
+  %388 = lshl %198, %379
+  st.i8.index %388, %target_integer, %194
+  st.i8.index %207, %target_integer, %200
+  %394 = lshl %207, %379
+  st.i8.index %394, %target_integer, %203
+  st.i8.index %216, %target_integer, %209
+  %400 = lshl %216, %379
+  st.i8.index %400, %target_integer, %212
+  st.i8.index %225, %target_integer, %218
+  %406 = lshl %225, %379
+  st.i8.index %406, %target_integer, %221
+  st.i8.index %234, %target_integer, %227
+  %412 = lshl %234, %379
+  st.i8.index %412, %target_integer, %230
+  st.i8.index %243, %target_integer, %236
+  %418 = lshl %243, %379
+  st.i8.index %418, %target_integer, %239
+  st.i8.index %252, %target_integer, %245
+  %424 = lshl %252, %379
+  st.i8.index %424, %target_integer, %248
+  st.i8.index %261, %target_integer, %254
+  %430 = lshl %261, %379
+  st.i8.index %430, %target_integer, %257
+  st.i8.index %270, %target_integer, %263
+  %436 = lshl %270, %379
+  st.i8.index %436, %target_integer, %266
+  st.i8.index %279, %target_integer, %272
+  %442 = lshl %279, %379
+  st.i8.index %442, %target_integer, %275
+  st.i8.index %288, %target_integer, %281
+  %448 = lshl %288, %379
+  st.i8.index %448, %target_integer, %284
+  st.i8.index %297, %target_integer, %290
+  %454 = lshl %297, %379
+  st.i8.index %454, %target_integer, %293
+  st.i8.index %306, %target_integer, %299
+  %460 = lshl %306, %379
+  st.i8.index %460, %target_integer, %302
+  st.i8.index %315, %target_integer, %308
+  %466 = lshl %315, %379
+  st.i8.index %466, %target_integer, %311
+  st.i8.index %324, %target_integer, %317
+  %472 = lshl %324, %379
+  st.i8.index %472, %target_integer, %320
+  st.i8.index %333, %target_integer, %326
+  %478 = lshl %333, %379
+  st.i8.index %478, %target_integer, %329
+  st.i8.index %342, %target_integer, %335
+  %484 = lshl %342, %379
+  st.i8.index %484, %target_integer, %338
+  st.i8.index %351, %target_integer, %344
+  %490 = lshl %351, %379
+  st.i8.index %490, %target_integer, %347
+  st.i8.index %360, %target_integer, %353
+  %496 = lshl %360, %379
+  st.i8.index %496, %target_integer, %356
+  st.i8.index %369, %target_integer, %362
+  %502 = lshl %369, %379
+  st.i8.index %502, %target_integer, %365
+  st.i8.index %378, %target_integer, %371
+  %508 = lshl %378, %379
+  st.i8.index %508, %target_integer, %374
+  return
+}
+
+// ====
+
+// Three-word tails must not read or write a fourth word.
+func.def @copy_word_tail(%input: buffer, %output: buffer) {
+  %first = index.constant 1 : offset
+  %second = index.constant 7 : offset
+  %third = index.constant 13 : offset
+  %source_half = buffer.view %input[%first] : buffer -> view<3xf16, align(1)>
+  %source_bfloat = buffer.view %input[%second] : buffer -> view<3xbf16, align(1)>
+  %source_integer = buffer.view %input[%third] : buffer -> view<3xi16, align(1)>
+  %target_half = buffer.view %output[%first] : buffer -> view<3xf16, align(1)>
+  %target_bfloat = buffer.view %output[%second] : buffer -> view<3xbf16, align(1)>
+  %target_integer = buffer.view %output[%third] : buffer -> view<3xi16, align(1)>
+  %half = vector.load %source_half[0] : view<3xf16, align(1)> -> vector<3xf16>
+  %bfloat = vector.load %source_bfloat[0] : view<3xbf16, align(1)> -> vector<3xbf16>
+  %integer = vector.load %source_integer[0] : view<3xi16, align(1)> -> vector<3xi16>
+  vector.store %half, %target_half[0] : vector<3xf16>, view<3xf16, align(1)>
+  vector.store %bfloat, %target_bfloat[0] : vector<3xbf16>, view<3xbf16, align(1)>
+  vector.store %integer, %target_integer[0] : vector<3xi16>, view<3xi16, align(1)>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_word_tail() asm {
+  %source_integer = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %target_integer = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %55 = lda.u8 %source_integer, 1
+  %56 = lda.u8 %source_integer, 2
+  %57 = mov.short 8
+  %58 = lshl %56, %57
+  %59 = or %55, %58
+  %60 = lda.u8 %source_integer, 3
+  %61 = lda.u8 %source_integer, 4
+  %63 = lshl %61, %57
+  %64 = or %60, %63
+  %65 = lda.u8 %source_integer, 5
+  %66 = lda.u8 %source_integer, 6
+  %68 = lshl %66, %57
+  %69 = or %65, %68
+  %70 = mov.static-byte-offset 7
+  %71 = mov.address-index %70
+  %72 = lda.i8.index %source_integer, %71
+  %73 = mov.static-byte-offset 8
+  %74 = mov.address-index %73
+  %75 = lda.i8.index %source_integer, %74
+  %77 = lshl %75, %57
+  %78 = or %72, %77
+  %79 = mov.static-byte-offset 9
+  %80 = mov.address-index %79
+  %81 = lda.i8.index %source_integer, %80
+  %82 = mov.static-byte-offset 10
+  %83 = mov.address-index %82
+  %84 = lda.i8.index %source_integer, %83
+  %86 = lshl %84, %57
+  %87 = or %81, %86
+  %88 = mov.static-byte-offset 11
+  %89 = mov.address-index %88
+  %90 = lda.i8.index %source_integer, %89
+  %91 = mov.static-byte-offset 12
+  %92 = mov.address-index %91
+  %93 = lda.i8.index %source_integer, %92
+  %95 = lshl %93, %57
+  %96 = or %90, %95
+  %97 = mov.static-byte-offset 13
+  %98 = mov.address-index %97
+  %99 = lda.i8.index %source_integer, %98
+  %100 = mov.static-byte-offset 14
+  %101 = mov.address-index %100
+  %102 = lda.i8.index %source_integer, %101
+  %104 = lshl %102, %57
+  %105 = or %99, %104
+  %106 = mov.static-byte-offset 15
+  %107 = mov.address-index %106
+  %108 = lda.i8.index %source_integer, %107
+  %109 = mov.static-byte-offset 16
+  %110 = mov.address-index %109
+  %111 = lda.i8.index %source_integer, %110
+  %113 = lshl %111, %57
+  %114 = or %108, %113
+  %115 = mov.static-byte-offset 17
+  %116 = mov.address-index %115
+  %117 = lda.i8.index %source_integer, %116
+  %118 = mov.static-byte-offset 18
+  %119 = mov.address-index %118
+  %120 = lda.i8.index %source_integer, %119
+  %122 = lshl %120, %57
+  %123 = or %117, %122
+  %124 = mov.short -8
+  st.s8 %59, %target_integer, 1
+  %125 = lshl %59, %124
+  st.s8 %125, %target_integer, 2
+  st.s8 %64, %target_integer, 3
+  %127 = lshl %64, %124
+  st.s8 %127, %target_integer, 4
+  st.s8 %69, %target_integer, 5
+  %129 = lshl %69, %124
+  st.s8 %129, %target_integer, 6
+  st.i8.index %78, %target_integer, %71
+  %133 = lshl %78, %124
+  st.i8.index %133, %target_integer, %74
+  st.i8.index %87, %target_integer, %80
+  %139 = lshl %87, %124
+  st.i8.index %139, %target_integer, %83
+  st.i8.index %96, %target_integer, %89
+  %145 = lshl %96, %124
+  st.i8.index %145, %target_integer, %92
+  st.i8.index %105, %target_integer, %98
+  %151 = lshl %105, %124
+  st.i8.index %151, %target_integer, %101
+  st.i8.index %114, %target_integer, %107
+  %157 = lshl %114, %124
+  st.i8.index %157, %target_integer, %110
+  st.i8.index %123, %target_integer, %116
+  %163 = lshl %123, %124
+  st.i8.index %163, %target_integer, %119
+  return
+}
+
+// ====
+
+// Runtime byte origins remain distinct from the two-byte element coordinate.
+func.def @copy_word_index(%input: buffer, %output: buffer, %byte_offset: offset, %element: index) {
+  %base = index.assume %byte_offset [range(%byte_offset, 0, 128)] : offset
+  %position = index.assume %element [range(%element, 0, 7)] : index
+  %source_half = buffer.view %input[%base] : buffer -> view<8xf16, align(1)>
+  %source_bfloat_base = buffer.view %input[%base] : buffer -> view<24xbf16, align(1)>
+  %source_integer_base = buffer.view %input[%base] : buffer -> view<24xi16, align(1)>
+  %target_half = buffer.view %output[%base] : buffer -> view<8xf16, align(1)>
+  %target_bfloat_base = buffer.view %output[%base] : buffer -> view<24xbf16, align(1)>
+  %target_integer_base = buffer.view %output[%base] : buffer -> view<24xi16, align(1)>
+  %source_bfloat = view.subview %source_bfloat_base[8] : view<24xbf16, align(1)> -> view<8xbf16, align(1)>
+  %source_integer = view.subview %source_integer_base[16] : view<24xi16, align(1)> -> view<8xi16, align(1)>
+  %target_bfloat = view.subview %target_bfloat_base[8] : view<24xbf16, align(1)> -> view<8xbf16, align(1)>
+  %target_integer = view.subview %target_integer_base[16] : view<24xi16, align(1)> -> view<8xi16, align(1)>
+  %half = view.load %source_half[%position] : view<8xf16, align(1)> -> f16
+  %bfloat = view.load %source_bfloat[%position] : view<8xbf16, align(1)> -> bf16
+  %integer = view.load %source_integer[%position] : view<8xi16, align(1)> -> i16
+  view.store %half, %target_half[%position] : f16, view<8xf16, align(1)>
+  view.store %bfloat, %target_bfloat[%position] : bf16, view<8xbf16, align(1)>
+  view.store %integer, %target_integer[%position] : i16, view<8xi16, align(1)>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_word_index(%base: reg<aie2p.er>, %position: reg<aie2p.er>) asm {
+  %source_integer = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %target_integer = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %23 = mov.i32 1
+  %24 = lshl %position, %23
+  %25 = add.rr %base, %24
+  %26 = mov.address-index %25
+  %27 = lda.i8.index %source_integer, %26
+  %28 = mov.static-byte-offset 1
+  %31 = add.rr %base, %24
+  %32 = add.rr %31, %28
+  %33 = mov.address-index %32
+  %34 = lda.i8.index %source_integer, %33
+  %35 = mov.short 8
+  %36 = lshl %34, %35
+  %half = or %27, %36
+  %40 = add.rr %base, %24
+  %41 = add %40, 16
+  %42 = mov.address-index %41
+  %43 = lda.i8.index %source_integer, %42
+  %44 = mov.static-byte-offset 17
+  %47 = add.rr %base, %24
+  %48 = add.rr %47, %44
+  %49 = mov.address-index %48
+  %50 = lda.i8.index %source_integer, %49
+  %52 = lshl %50, %35
+  %bfloat = or %43, %52
+  %56 = add.rr %base, %24
+  %57 = add %56, 32
+  %58 = mov.address-index %57
+  %59 = lda.i8.index %source_integer, %58
+  %60 = mov.static-byte-offset 33
+  %63 = add.rr %base, %24
+  %64 = add.rr %63, %60
+  %65 = mov.address-index %64
+  %66 = lda.i8.index %source_integer, %65
+  %68 = lshl %66, %35
+  %integer = or %59, %68
+  %70 = mov.short -8
+  %73 = add.rr %base, %24
+  %74 = mov.address-index %73
+  st.i8.index %half, %target_integer, %74
+  %75 = lshl %half, %70
+  %79 = add.rr %base, %24
+  %80 = add.rr %79, %28
+  %81 = mov.address-index %80
+  st.i8.index %75, %target_integer, %81
+  %85 = add.rr %base, %24
+  %86 = add %85, 16
+  %87 = mov.address-index %86
+  st.i8.index %bfloat, %target_integer, %87
+  %88 = lshl %bfloat, %70
+  %92 = add.rr %base, %24
+  %93 = add.rr %92, %44
+  %94 = mov.address-index %93
+  st.i8.index %88, %target_integer, %94
+  %98 = add.rr %base, %24
+  %99 = add %98, 32
+  %100 = mov.address-index %99
+  st.i8.index %integer, %target_integer, %100
+  %101 = lshl %integer, %70
+  %105 = add.rr %base, %24
+  %106 = add.rr %105, %60
+  %107 = mov.address-index %106
+  st.i8.index %101, %target_integer, %107
+  return
+}
+
+// ====
+
+func.def @copy_word_stride(%input: buffer, %output: buffer, %column_count: index, %row_index: index, %column_index: index) {
+  %columns = index.assume %column_count [range(%column_count, 1, 16)] : index
+  %row = index.assume %row_index [range(%row_index, 0, 3)] : index
+  %column = index.assume %column_index [range(%column_index, 0, 15), lt(%column_index, %columns)] : index
+  %base = index.constant 3 : offset
+  %source = buffer.view %input[%base] : buffer -> view<4x[%columns]xbf16, align(1)>
+  %target = buffer.view %output[%base] : buffer -> view<4x[%columns]xbf16, align(1)>
+  %value = view.load %source[%row, %column] : view<4x[%columns]xbf16, align(1)> -> bf16
+  view.store %value, %target[%row, %column] : bf16, view<4x[%columns]xbf16, align(1)>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_word_stride(%columns: reg<aie2p.er>, %row: reg<aie2p.er>, %column: reg<aie2p.er>) asm {
+  %source = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %target = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %17 = mul %row, %columns
+  %18 = mov.i32 1
+  %19 = lshl %17, %18
+  %21 = lshl %column, %18
+  %22 = add.rr %19, %21
+  %23 = add %22, 3
+  %24 = mov.address-index %23
+  %25 = lda.i8.index %source, %24
+  %26 = mov.static-byte-offset 4
+  %32 = add.rr %19, %21
+  %33 = add.rr %32, %26
+  %34 = mov.address-index %33
+  %35 = lda.i8.index %source, %34
+  %36 = mov.short 8
+  %37 = lshl %35, %36
+  %value = or %25, %37
+  %39 = mov.short -8
+  %45 = add.rr %19, %21
+  %46 = add %45, 3
+  %47 = mov.address-index %46
+  st.i8.index %value, %target, %47
+  %48 = lshl %value, %39
+  %55 = add.rr %19, %21
+  %56 = add.rr %55, %26
+  %57 = mov.address-index %56
+  st.i8.index %48, %target, %57
+  return
+}
+
+// ====
+
+func.def @copy_word_volatile(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<1xbf16>
+  %target = buffer.view %output[%base] : buffer -> view<2xbf16>
+  %first = view.load<volatile> %source[0] : view<1xbf16> -> bf16
+  %second = view.load<volatile> %source[0] : view<1xbf16> -> bf16
+  view.store<volatile> %first, %target[0] : bf16, view<2xbf16>
+  view.store<volatile> %second, %target[1] : bf16, view<2xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_word_volatile() asm {
+  %source = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %target = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %first = lda.u16.volatile<volatile> %source, 0
+  %second = lda.u16.volatile<volatile> %source, 0
+  st.s16.volatile<volatile> %first, %target, 0
+  st.s16.volatile<volatile> %second, %target, 2
+  return
+}
