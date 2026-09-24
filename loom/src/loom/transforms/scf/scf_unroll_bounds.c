@@ -111,6 +111,45 @@ static iree_status_t loom_scf_unroll_build_padded_split(
   return iree_ok_status();
 }
 
+// Selects the narrowest integer carrier that preserves the unsigned distance
+// between the clamped lower bound and upper bound. Subtraction in a fixed-width
+// carrier retains that distance modulo its width even when either address does
+// not fit the carrier's signed range. The remainder must also fit the address
+// domain when converted back: index interprets i32 as signed while offset zero
+// extends its bits.
+static loom_type_t loom_scf_unroll_split_integer_type(
+    const loom_value_fact_table_t* facts, const loom_op_t* op,
+    loom_scalar_type_t address_type, int64_t tile_span,
+    int64_t* out_tile_span_literal) {
+  *out_tile_span_literal = tile_span;
+  const int32_t target_bitwidth =
+      loom_index_target_carrier_bitwidth(&facts->context, address_type);
+  bool distance_fits_u32 = target_bitwidth > 0 && target_bitwidth <= 32;
+  if (!distance_fits_u32) {
+    const loom_value_facts_t lower =
+        loom_value_fact_table_lookup(facts, loom_scf_for_lower_bound(op));
+    const loom_value_facts_t upper =
+        loom_value_fact_table_lookup(facts, loom_scf_for_upper_bound(op));
+    int64_t maximum_distance = 0;
+    distance_fits_u32 = upper.range_hi <= lower.range_lo ||
+                        (iree_checked_sub_i64(upper.range_hi, lower.range_lo,
+                                              &maximum_distance) &&
+                         (uint64_t)maximum_distance <= UINT32_MAX);
+  }
+
+  const uint64_t maximum_tile_span =
+      address_type == LOOM_SCALAR_TYPE_OFFSET ? UINT32_MAX : INT32_MAX;
+  if (!distance_fits_u32 || (uint64_t)tile_span > maximum_tile_span) {
+    return loom_type_scalar(LOOM_SCALAR_TYPE_I64);
+  }
+
+  // Fixed-width constants use their signed spelling. Unsigned remainder
+  // consumes the same i32 bit pattern for offset spans above INT32_MAX.
+  *out_tile_span_literal =
+      tile_span <= INT32_MAX ? tile_span : tile_span - (INT64_C(1) << 32);
+  return loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+}
+
 iree_status_t loom_scf_unroll_build_dynamic_split(
     loom_builder_t* builder, const loom_value_fact_table_t* facts,
     const loom_op_t* op, int64_t step, uint32_t factor,
@@ -137,11 +176,10 @@ iree_status_t loom_scf_unroll_build_dynamic_split(
       loom_scf_select_build(builder, loom_index_cmp_result(nonempty), lower,
                             upper, type, op->location, &bounded_lower));
   const loom_value_id_t begin = loom_scf_select_result(bounded_lower);
-  const int32_t bitwidth = loom_index_target_carrier_bitwidth(
-      &facts->context, loom_type_element_type(type));
-  const loom_type_t integer_type =
-      loom_type_scalar(bitwidth > 0 && bitwidth <= 32 ? LOOM_SCALAR_TYPE_I32
-                                                      : LOOM_SCALAR_TYPE_I64);
+  const int64_t tile_span = step * factor;
+  int64_t tile_span_literal = 0;
+  const loom_type_t integer_type = loom_scf_unroll_split_integer_type(
+      facts, op, loom_type_element_type(type), tile_span, &tile_span_literal);
   loom_op_t* lower_integer = NULL;
   IREE_RETURN_IF_ERROR(loom_index_cast_build(builder, begin, type, integer_type,
                                              op->location, &lower_integer));
@@ -153,14 +191,14 @@ iree_status_t loom_scf_unroll_build_dynamic_split(
       loom_scalar_subi_build(builder, 0, loom_index_cast_result(upper_integer),
                              loom_index_cast_result(lower_integer),
                              integer_type, op->location, &distance));
-  loom_op_t* tile_span = NULL;
+  loom_op_t* tile_span_op = NULL;
   IREE_RETURN_IF_ERROR(
-      loom_scalar_constant_build(builder, loom_attr_i64(step * factor),
-                                 integer_type, op->location, &tile_span));
+      loom_scalar_constant_build(builder, loom_attr_i64(tile_span_literal),
+                                 integer_type, op->location, &tile_span_op));
   loom_op_t* remainder = NULL;
   IREE_RETURN_IF_ERROR(
       loom_scalar_remui_build(builder, loom_scalar_subi_result(distance),
-                              loom_scalar_constant_result(tile_span),
+                              loom_scalar_constant_result(tile_span_op),
                               integer_type, op->location, &remainder));
   loom_op_t* remainder_address = NULL;
   IREE_RETURN_IF_ERROR(loom_index_cast_build(

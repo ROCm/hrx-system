@@ -85,6 +85,83 @@ CHECK-NOT: *index.div *
 
 // ====
 
+// A wide offset carrier does not require wide arithmetic when the source
+// bounds prove that their unsigned distance fits an i32 bit pattern.
+//
+// RUN: with-checks pass specialize-target-callgraph,unroll-scf-for
+
+test.target<quirky> @target
+
+func.def public target(@target) @bounded_unsigned_offset_split(%end_input: i32) {
+  %begin = index.constant 4294967300 : offset
+  %length = index.cast %end_input : i32 to offset
+  %end = index.add %begin, %length : offset
+  %step = index.constant 1 : offset
+  %factor = index.constant 3 : index
+  scf.for %counter = [%begin to %end step %step] unroll(%factor) schedule(interleaved) {
+    test.use %counter : offset
+  }
+  func.return
+}
+
+// ----
+CHECK: *scalar.remui * : i32
+CHECK: *index.cast * : i32 to offset
+CHECK-NOT: *scalar.remui * : i64
+
+// ====
+
+// Unsigned offset tile spans use their signed i32 spelling without changing
+// the divisor bit pattern.
+//
+// RUN: with-checks pass specialize-target-callgraph,unroll-scf-for
+
+test.target<quirky> @target
+
+func.def public target(@target) @bounded_unsigned_offset_large_tile(%end_input: i32) {
+  %begin = index.constant 0 : offset
+  %end = index.cast %end_input : i32 to offset
+  %step = index.constant 1073741824 : offset
+  %factor = index.constant 3 : index
+  scf.for %counter = [%begin to %end step %step] unroll(%factor) schedule(interleaved) {
+    test.use %counter : offset
+  }
+  func.return
+}
+
+// ----
+CHECK: *scalar.constant -1073741824 : i32
+CHECK: *scalar.remui * : i32
+CHECK: *index.cast * : i32 to offset
+
+// ====
+
+// Recurrence scheduling uses the same domain-preserving split.
+//
+// RUN: with-checks pass specialize-target-callgraph,unroll-scf-for
+
+test.target<quirky> @target
+
+func.def public target(@target) @bounded_unsigned_offset_recurrence(%end_input: i32, %input: i32) -> (i32) {
+  %begin = index.constant 0 : offset
+  %end = index.cast %end_input : i32 to offset
+  %step = index.constant 1 : offset
+  %factor = index.constant 3 : index
+  %result = scf.for %counter = [%begin to %end step %step](%acc = %input : i32) -> (i32) unroll(%factor) schedule(recurrence) {
+    %producer = test.addi %input, %input : i32
+    %next = test.addi %acc, %producer : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+CHECK: *scalar.remui * : i32
+CHECK: *index.cast * : i32 to offset
+CHECK-NOT: *scalar.remui * : i64
+
+// ====
+
 // RUN: with-checks pass specialize-target-callgraph,unroll-scf-for
 
 // Bounded ordinary domains keep the cheaper address arithmetic.
