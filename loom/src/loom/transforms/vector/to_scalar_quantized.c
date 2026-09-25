@@ -224,14 +224,10 @@ iree_status_t loom_vector_to_scalar_build_dot4i_lane(
         state, rhs_lane, i8_type, i32_type,
         loom_vector_to_scalar_dot4i_rhs_is_signed(kind), &rhs_i32));
 
-    loom_value_id_t product = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_generic_lane_op(
-        state, LOOM_OP_SCALAR_MULI, 0, (loom_value_id_t[]){lhs_i32, rhs_i32}, 2,
-        NULL, 0, i32_type, &product));
-    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_generic_lane_op(
-        state, LOOM_OP_SCALAR_ADDI, 0,
-        (loom_value_id_t[]){accumulator, product}, 2, NULL, 0, i32_type,
-        &accumulator));
+        state, LOOM_OP_SCALAR_FMAI, 0,
+        (loom_value_id_t[]){lhs_i32, rhs_i32, accumulator}, 3, NULL, 0,
+        i32_type, &accumulator));
   }
   *out_lane = accumulator;
   return iree_ok_status();
@@ -312,14 +308,10 @@ iree_status_t loom_vector_to_scalar_build_dot8i4_lane(
         state, rhs_storage, nibble_mask, field_shifts[field_ordinal],
         sign_extend_shift, rhs_is_signed, &rhs_i32));
 
-    loom_value_id_t product = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_generic_lane_op(
-        state, LOOM_OP_SCALAR_MULI, 0, (loom_value_id_t[]){lhs_i32, rhs_i32}, 2,
-        NULL, 0, i32_type, &product));
-    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_generic_lane_op(
-        state, LOOM_OP_SCALAR_ADDI, 0,
-        (loom_value_id_t[]){accumulator, product}, 2, NULL, 0, i32_type,
-        &accumulator));
+        state, LOOM_OP_SCALAR_FMAI, 0,
+        (loom_value_id_t[]){lhs_i32, rhs_i32, accumulator}, 3, NULL, 0,
+        i32_type, &accumulator));
   }
   *out_lane = accumulator;
   return iree_ok_status();
