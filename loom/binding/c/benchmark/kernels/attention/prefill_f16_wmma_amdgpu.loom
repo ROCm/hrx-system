@@ -45,10 +45,14 @@ kernel.def retain target(@attention_prefill_gfx11_wave64) export("attention_pref
   %c1024 = index.constant 1024 : index
   %c0_offset = index.constant 0 : offset
   %query_stage_bytes = index.constant 8448 : offset
-  %score_stage_bytes = index.constant 6144 : offset
-  %probability_stage_bytes = index.constant 3072 : offset
+  // Sixteen query scores plus one f32 pad give each key row an odd word pitch.
+  %score_stage_bytes = index.constant 4352 : offset
+  // Sixteen f16 probabilities plus two pads give transposed rows nine words.
+  %probability_stage_bytes = index.constant 2304 : offset
   %product_stage_bytes = index.constant 2048 : offset
-  %tail_key_value_stage_bytes = index.constant 8192 : offset
+  // Eight f16 pads per row spread wide fragment reads across LDS banks while
+  // preserving 16-byte alignment.
+  %tail_key_value_stage_bytes = index.constant 8448 : offset
   %c0_f16 = scalar.constant 0.0 : f16
   %c1_f32 = scalar.constant 1.0 : f32
   %attention_scale = scalar.constant 0.0625 : f32
@@ -111,7 +115,7 @@ kernel.def retain target(@attention_prefill_gfx11_wave64) export("attention_pref
   %lane_output_channel = index.mul %lane, %c4 : index
 
   %query_transposed_layout = encoding.layout.strided [1, 264] : encoding<layout>
-  %probability_transposed_layout = encoding.layout.strided [1, 24] : encoding<layout>
+  %probability_transposed_layout = encoding.layout.strided [1, 18] : encoding<layout>
   %query_noalias, %gate_noalias, %key_noalias, %value_noalias, %output_noalias = buffer.assume.noalias %query, %gate, %key_cache, %value_cache, %output : buffer, buffer, buffer, buffer, buffer
   %query_view = buffer.view %query_noalias[%c0_offset] : buffer -> view<[%token_count]x6144xf32>
   %gate_view = buffer.view %gate_noalias[%c0_offset] : buffer -> view<[%token_count]x6144xf32>
@@ -125,10 +129,10 @@ kernel.def retain target(@attention_prefill_gfx11_wave64) export("attention_pref
   %tail_key_value_stage = buffer.alloca<workgroup> align(16) %tail_key_value_stage_bytes : buffer
   %query_stage_view = buffer.view %query_stage[%c0_offset] : buffer -> view<16x264xf16>
   %query_transposed_view = buffer.view %query_stage[%c0_offset] : buffer -> view<256x16xf16, %query_transposed_layout>
-  %score_stage_view = buffer.view %score_stage[%c0_offset] : buffer -> view<64x24xf32>
+  %score_stage_view = buffer.view %score_stage[%c0_offset] : buffer -> view<64x17xf32>
   %probability_stage_view = buffer.view %probability_stage[%c0_offset] : buffer -> view<16x64xf16, %probability_transposed_layout>
   %product_stage_view = buffer.view %product_stage[%c0_offset] : buffer -> view<16x64xf16>
-  %tail_key_value_stage_view = buffer.view %tail_key_value_stage[%c0_offset] : buffer -> view<16x256xf16>
+  %tail_key_value_stage_view = buffer.view %tail_key_value_stage[%c0_offset] : buffer -> view<16x264xf16>
 
   // Scale and truncate Q once before the cache traversal.
   scf.for %load_iteration = [%c0 to %c16 step %c1] unroll {
@@ -164,7 +168,7 @@ kernel.def retain target(@attention_prefill_gfx11_wave64) export("attention_pref
       %next_score_accumulator = vector.mma %key_fragment, %query_fragment, %score_accumulator : vector<16xf16>, vector<16xf16>, vector<4xf32>
       scf.yield %next_score_accumulator : vector<4xf32>
     }
-    vector.fragment.store<result> %score_fragment, %score_stage_view[%subgroup_score_column, %c0] shape [%m, %n] : vector<4xf32>, view<64x24xf32>
+    vector.fragment.store<result> %score_fragment, %score_stage_view[%subgroup_score_column, %c0] shape [%m, %n] : vector<4xf32>, view<64x17xf32>
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 
     %key_token = index.add %key_origin, %lane : index
@@ -177,10 +181,10 @@ kernel.def retain target(@attention_prefill_gfx11_wave64) export("attention_pref
     %valid2 = scalar.andi %query_valid2, %causal2 : i1
     %valid3 = scalar.andi %query_valid3, %causal3 : i1
     %valid = vector.from_elements %valid0, %valid1, %valid2, %valid3 : vector<4xi1>
-    %raw_score0 = view.load %score_stage_view[%lane, %query_row0] : view<64x24xf32> -> f32
-    %raw_score1 = view.load %score_stage_view[%lane, %query_row1] : view<64x24xf32> -> f32
-    %raw_score2 = view.load %score_stage_view[%lane, %query_row2] : view<64x24xf32> -> f32
-    %raw_score3 = view.load %score_stage_view[%lane, %query_row3] : view<64x24xf32> -> f32
+    %raw_score0 = view.load %score_stage_view[%lane, %query_row0] : view<64x17xf32> -> f32
+    %raw_score1 = view.load %score_stage_view[%lane, %query_row1] : view<64x17xf32> -> f32
+    %raw_score2 = view.load %score_stage_view[%lane, %query_row2] : view<64x17xf32> -> f32
+    %raw_score3 = view.load %score_stage_view[%lane, %query_row3] : view<64x17xf32> -> f32
     %raw_scores = vector.from_elements %raw_score0, %raw_score1, %raw_score2, %raw_score3 : vector<4xf32>
     %masked_scores = vector.select %valid, %raw_scores, %negative_f32x4 : vector<4xf32>
     %block_max = kernel.subgroup.reduce<maxnumf> %masked_scores : vector<4xf32>
@@ -270,19 +274,19 @@ kernel.def retain target(@attention_prefill_gfx11_wave64) export("attention_pref
       } else {
         scf.yield %c0_f16 : f16
       }
-      view.store %tail_key_value, %tail_key_value_stage_view[%tail_key_row, %tail_key_channel] : f16, view<16x256xf16>
+      view.store %tail_key_value, %tail_key_value_stage_view[%tail_key_row, %tail_key_channel] : f16, view<16x264xf16>
     }
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     scf.if %tail_score_wave {
       %tail_score_init_values = vector.constant 0.0 : vector<4xf32>
       %tail_score_init = vector.fragment<init> %tail_score_init_values shape [%m, %n] : vector<4xf32>
       %tail_score_fragment = scf.for %head_tile = [%c0 to %c256 step %c16](%score_accumulator = %tail_score_init : vector<4xf32>) -> (vector<4xf32>) unroll schedule(recurrence) {
-        %key_fragment = vector.fragment.load<lhs> %tail_key_value_stage_view[%c0, %head_tile] shape [%m, %k] : view<16x256xf16> -> vector<16xf16>
+        %key_fragment = vector.fragment.load<lhs> %tail_key_value_stage_view[%c0, %head_tile] shape [%m, %k] : view<16x264xf16> -> vector<16xf16>
         %query_fragment = vector.fragment.load<rhs> %query_transposed_view[%head_tile, %c0] shape [%k, %n] : view<256x16xf16, %query_transposed_layout> -> vector<16xf16>
         %next_score_accumulator = vector.mma %key_fragment, %query_fragment, %score_accumulator : vector<16xf16>, vector<16xf16>, vector<4xf32>
         scf.yield %next_score_accumulator : vector<4xf32>
       }
-      vector.fragment.store<result> %tail_score_fragment, %score_stage_view[%c0, %c0] shape [%m, %n] : vector<4xf32>, view<64x24xf32>
+      vector.fragment.store<result> %tail_score_fragment, %score_stage_view[%c0, %c0] shape [%m, %n] : vector<4xf32>, view<64x17xf32>
     }
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 
@@ -301,10 +305,10 @@ kernel.def retain target(@attention_prefill_gfx11_wave64) export("attention_pref
     %tail_valid2 = scalar.andi %tail_lane_valid, %tail_valid_query2 : i1
     %tail_valid3 = scalar.andi %tail_lane_valid, %tail_valid_query3 : i1
     %tail_valid = vector.from_elements %tail_valid0, %tail_valid1, %tail_valid2, %tail_valid3 : vector<4xi1>
-    %tail_score0 = view.load %score_stage_view[%lane, %query_row0] : view<64x24xf32> -> f32
-    %tail_score1 = view.load %score_stage_view[%lane, %query_row1] : view<64x24xf32> -> f32
-    %tail_score2 = view.load %score_stage_view[%lane, %query_row2] : view<64x24xf32> -> f32
-    %tail_score3 = view.load %score_stage_view[%lane, %query_row3] : view<64x24xf32> -> f32
+    %tail_score0 = view.load %score_stage_view[%lane, %query_row0] : view<64x17xf32> -> f32
+    %tail_score1 = view.load %score_stage_view[%lane, %query_row1] : view<64x17xf32> -> f32
+    %tail_score2 = view.load %score_stage_view[%lane, %query_row2] : view<64x17xf32> -> f32
+    %tail_score3 = view.load %score_stage_view[%lane, %query_row3] : view<64x17xf32> -> f32
     %tail_scores = vector.from_elements %tail_score0, %tail_score1, %tail_score2, %tail_score3 : vector<4xf32>
     %masked_tail_scores = vector.select %tail_valid, %tail_scores, %negative_f32x4 : vector<4xf32>
     %block_max = kernel.subgroup.reduce<maxnumf> %masked_tail_scores : vector<4xf32>
@@ -342,7 +346,7 @@ kernel.def retain target(@attention_prefill_gfx11_wave64) export("attention_pref
       } else {
         scf.yield %c0_f16 : f16
       }
-      view.store %tail_value, %tail_key_value_stage_view[%tail_value_row, %tail_value_channel] : f16, view<16x256xf16>
+      view.store %tail_value, %tail_key_value_stage_view[%tail_value_row, %tail_value_channel] : f16, view<16x264xf16>
     }
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 
@@ -365,7 +369,7 @@ kernel.def retain target(@attention_prefill_gfx11_wave64) export("attention_pref
       %product_init = vector.fragment<init> %c0_f16x8 shape [%m, %n] : vector<8xf16>
       %product_fragment = scf.for %key_tile = [%c0 to %c16 step %c16](%product_accumulator = %product_init : vector<8xf16>) -> (vector<8xf16>) unroll schedule(recurrence) {
         %probability_fragment = vector.fragment.load<lhs> %probability_stage_view[%c0, %key_tile] shape [%m, %k] : view<16x64xf16, %probability_transposed_layout> -> vector<16xf16>
-        %value_fragment = vector.fragment.load<rhs> %tail_key_value_stage_view[%key_tile, %value_channel] shape [%k, %n] : view<16x256xf16> -> vector<16xf16>
+        %value_fragment = vector.fragment.load<rhs> %tail_key_value_stage_view[%key_tile, %value_channel] shape [%k, %n] : view<16x264xf16> -> vector<16xf16>
         %next_product_accumulator = vector.mma %probability_fragment, %value_fragment, %product_accumulator : vector<16xf16>, vector<16xf16>, vector<8xf16>
         scf.yield %next_product_accumulator : vector<8xf16>
       }
