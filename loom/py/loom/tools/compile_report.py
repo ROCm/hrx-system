@@ -83,6 +83,13 @@ resource ceilings, and fixed launch limits. A tied next-tier transition requires
 all cited reductions together; missing counts or launch shape suppress exact
 gain advice. Higher modeled residency is a benchmark hypothesis, not a speedup.
 
+LDS findings are ordered by extra static service rounds and cite the buffer,
+instruction width, required/uncontended service, and incomplete coverage across
+that buffer's access forms. When recorded, the next residency cliff bounds LDS
+padding headroom at fixed launch and other resources. Static order is not runtime
+importance, and a report alone does not select a conflict-free pitch. Recompile
+layout candidates, compare all access directions and resources, and benchmark.
+
 ### Use the bounded JSON views
 
 ```shell

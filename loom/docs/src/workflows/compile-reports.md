@@ -258,9 +258,28 @@ unresolved loop counts remain unknown. The model's provenance is separate from
 the address proof: `exact` under an unvalidated model is still experimental.
 
 Use `loom-compile-report suggest kernel.report.json` to find proven conflicting
-groups. Findings retain proven conflicts even when other instructions in the
-same group are unknown, and state that coverage explicitly. Unvalidated-model
-suggestions require `--include-experimental`.
+groups, ordered by extra static service rounds. A finding names the source
+buffer and instruction, compares required and uncontended service, and gives
+the current bytes per lane. This order prioritizes structural layout
+experiments; a rarely executed tail can rank above a frequently executed loop.
+Runtime frequency and measured time determine which experiment matters most.
+
+Findings also identify unknown and unmodeled accesses to the same buffer,
+including other load and store forms. When the compiler records an LDS growth
+limit, the finding states how much padding fits before the next modeled
+residency drop, holding the launch and other resource counts fixed. Missing
+growth limits remain unavailable. Unvalidated-model suggestions require
+`--include-experimental`.
+
+For example, 32 wide reads might require 2,048 service rounds versus 256
+uncontended: an eightfold structural service requirement, with 1,792 extra
+rounds. If the report also records 27,904 bytes of LDS and a residency drop at
+32,769 bytes, there are 4,864 bytes of growth before that cliff. This supports
+trying a padded row pitch while preserving the 16-byte instruction width and
+updating both producer and consumer views. It does not establish a particular
+pitch: the physical layout, every access direction, and alignment still need
+qualification. Saving space in another staging buffer can also make room for
+padding, so compare the combined footprint as well as each individual change.
 
 Compare an authored pitch, padding, or lane-mapping change with
 `loom-compile-report diff baseline.report.json candidate.report.json`. The diff

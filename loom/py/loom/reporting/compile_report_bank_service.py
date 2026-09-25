@@ -153,7 +153,20 @@ def build_bank_service_show(
         )
         for index, value in enumerate(group_values)
     ]
-    shown_groups.sort(key=_group_key)
+    for index, group in enumerate(shown_groups):
+        if group["report_index"] != index:
+            raise CompileReportError(
+                f"source_low.memory.bank_service_groups[{index}].index: "
+                f"expected {index}, got {group['report_index']}"
+            )
+    # Structural service is a useful order for layout experiments, independent
+    # of the source order. It does not establish runtime frequency or latency.
+    shown_groups.sort(
+        key=lambda group: (
+            -_expect_dict(group["summary"])["extra_round_count"],
+            _group_key(group),
+        )
+    )
     return {
         "summary": _show_metrics(
             summary_object,
@@ -270,7 +283,8 @@ def append_bank_service_show_text(
         (
             "",
             "Bank service (compiler analysis)",
-            "  Service rounds cover proven packets only; they are not cycles.",
+            "  Service rounds cover proven instruction sites; they are not cycles.",
+            "  Groups are ordered by extra static rounds, not runtime cost.",
         )
     )
     _append_metrics(lines, _expect_dict(bank_service["summary"]), indent="  ")

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from textwrap import fill
 from typing import Protocol
 
 from loom.reporting.compile_report import (
@@ -154,7 +155,14 @@ def format_compile_report_suggestions_text(view: dict[str, object]) -> str:
                 "",
                 f"[{finding['id']}] {finding['entry']}",
                 f"  confidence: {finding['confidence']}",
-                f"  action: {finding['action']}",
+                fill(
+                    f"action: {finding['action']}",
+                    width=100,
+                    initial_indent="  ",
+                    subsequent_indent="    ",
+                    break_long_words=False,
+                    break_on_hyphens=False,
+                ),
                 "  evidence:",
             )
         )

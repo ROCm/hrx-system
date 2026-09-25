@@ -72,6 +72,7 @@ def _write_report(
         }
     if experimental_bank_conflict:
         bank_service = {
+            "unmodeled_packet_count": 0,
             "modeled_packet_count": 1,
             "exact_packet_count": 1,
             "unknown_packet_count": 0,

@@ -82,84 +82,86 @@ def _compile_report(
 def _add_bank_service_group(
     report: dict[str, object],
     *,
-    model_evidence: str,
+    model_evidence: str | None,
     exact_packet_count: int = 1,
     unknown_packet_count: int = 0,
+    unmodeled_packet_count: int = 0,
     conflicted_packet_count: int = 1,
     extra_round_count: int = 8,
+    source_root: str = "scratch",
+    function: str = "routed_linear",
 ) -> None:
-    report["source_low"] = {
-        "memory": {
-            "bank_service": {
-                "modeled_packet_count": exact_packet_count + unknown_packet_count,
-                "exact_packet_count": exact_packet_count,
-                "unknown_packet_count": unknown_packet_count,
-                "structural": {
-                    "conflict_free_packet_count": 0,
-                    "conflicted_packet_count": conflicted_packet_count,
-                    "required_round_count": 16,
-                    "uncontended_round_count": 8,
-                    "extra_round_count": extra_round_count,
-                    "maximum_request_multiplicity": 2,
-                },
-                "dynamic": {
-                    "exact_packet_count": exact_packet_count,
-                    "unknown_packet_count": unknown_packet_count,
-                    "packet_count": exact_packet_count,
-                    "required_round_count": 16,
-                    "uncontended_round_count": 8,
-                    "extra_round_count": extra_round_count,
-                },
-            },
-            "bank_service_group_count": 1,
-            "bank_service_groups": [
-                {
-                    "index": 0,
-                    "function": "routed_linear",
-                    "source_op": "vector.fragment.load",
-                    "source_op_kind": 80,
-                    "source_root": "scratch",
-                    "memory_space": "workgroup",
-                    "operation": "load",
-                    "packet": "amdgpu.ds_read_b128",
-                    "strategy": None,
-                    "model": {
-                        "key": ("amdgpu.lds.wave32.b128.quad-phases.read.count-each"),
-                        "revision": "ROCm/rocm-libraries@model",
-                        "evidence": model_evidence,
-                        "request_policy": "count-each",
-                        "wave_size": 32,
-                        "bank_count": 32,
-                        "bank_word_bytes": 4,
-                        "packet_bytes": 16,
-                    },
-                    "summary": {
-                        "modeled_packet_count": (
-                            exact_packet_count + unknown_packet_count
-                        ),
-                        "exact_packet_count": exact_packet_count,
-                        "unknown_packet_count": unknown_packet_count,
-                        "structural": {
-                            "conflict_free_packet_count": 0,
-                            "conflicted_packet_count": conflicted_packet_count,
-                            "required_round_count": 16,
-                            "uncontended_round_count": 8,
-                            "extra_round_count": extra_round_count,
-                            "maximum_request_multiplicity": 2,
-                        },
-                        "dynamic": {
-                            "exact_packet_count": exact_packet_count,
-                            "unknown_packet_count": unknown_packet_count,
-                            "packet_count": exact_packet_count,
-                            "required_round_count": 16,
-                            "uncontended_round_count": 8,
-                            "extra_round_count": extra_round_count,
-                        },
-                    },
-                }
-            ],
-        }
+    uncontended = 8 * exact_packet_count
+    summary = {
+        "unmodeled_packet_count": unmodeled_packet_count,
+        "modeled_packet_count": exact_packet_count + unknown_packet_count,
+        "exact_packet_count": exact_packet_count,
+        "unknown_packet_count": unknown_packet_count,
+        "structural": {
+            "conflict_free_packet_count": exact_packet_count - conflicted_packet_count,
+            "conflicted_packet_count": conflicted_packet_count,
+            "required_round_count": uncontended + extra_round_count,
+            "uncontended_round_count": uncontended,
+            "extra_round_count": extra_round_count,
+            "maximum_request_multiplicity": (
+                (uncontended + extra_round_count + uncontended - 1) // uncontended
+                if uncontended
+                else 0
+            ),
+        },
+        "dynamic": {
+            "exact_packet_count": exact_packet_count,
+            "unknown_packet_count": unknown_packet_count + unmodeled_packet_count,
+            "packet_count": exact_packet_count,
+            "required_round_count": uncontended + extra_round_count,
+            "uncontended_round_count": uncontended,
+            "extra_round_count": extra_round_count,
+        },
     }
+    memory = report.setdefault("source_low", {}).setdefault("memory", {})
+    groups = memory.setdefault("bank_service_groups", [])
+    groups.append(
+        {
+            "index": len(groups),
+            "function": function,
+            "source_op": "vector.fragment.load",
+            "source_op_kind": 80,
+            "source_root": source_root,
+            "memory_space": "workgroup",
+            "operation": "load",
+            "packet": "amdgpu.ds_read_b128"
+            if model_evidence
+            else "amdgpu.ds_load_u16_d16",
+            "strategy": None,
+            "wave_size": 32,
+            "model": {
+                "key": "amdgpu.lds.wave32.b128.quad-phases.read.count-each",
+                "revision": "ROCm/rocm-libraries@model",
+                "evidence": model_evidence,
+                "request_policy": "count-each",
+                "wave_size": 32,
+                "bank_count": 32,
+                "bank_word_bytes": 4,
+                "packet_bytes": 16,
+            }
+            if model_evidence
+            else None,
+            "summary": summary,
+        }
+    )
+    memory["bank_service_group_count"] = len(groups)
+    aggregate = {}
+    for field, value in summary.items():
+        if isinstance(value, dict):
+            aggregate[field] = {
+                key: (max if key == "maximum_request_multiplicity" else sum)(
+                    group["summary"][field][key] for group in groups
+                )
+                for key in value
+            }
+        else:
+            aggregate[field] = sum(group["summary"][field] for group in groups)
+    memory["bank_service"] = aggregate
 
 
 def _add_fragment_packet_evidence(
@@ -1099,7 +1101,7 @@ def test_bank_suggestion_retains_proven_conflicts_with_unknown_packets() -> None
         for suggestion in result.suggestions
         if suggestion.suggestion_id == "amdgpu.lds_bank_service"
     )
-    assert "Packets without exact address evidence: 1" in finding.action
+    assert "1 unknown and 0 unmodeled instruction sites" in finding.action
     assert any(
         evidence.path.endswith("unknown_packet_count") and evidence.value == 1
         for evidence in finding.evidence
@@ -1116,6 +1118,115 @@ def test_bank_suggestion_rejects_unknown_model_evidence_class() -> None:
 
     with pytest.raises(CompileReportError, match="unsupported evidence class"):
         AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
+
+
+def test_bank_experiments_rank_static_service_and_scope_buffer_coverage() -> None:
+    report = _compile_report()
+    _add_bank_service_group(
+        report, model_evidence="silicon-calibrated-vendor-model", source_root="scores"
+    )
+    _add_bank_service_group(
+        report,
+        model_evidence="silicon-calibrated-vendor-model",
+        exact_packet_count=32,
+        conflicted_packet_count=32,
+        extra_round_count=1792,
+    )
+    for function, count in (("routed_linear", 64), ("other_entry", 128)):
+        _add_bank_service_group(
+            report,
+            model_evidence=None,
+            exact_packet_count=0,
+            conflicted_packet_count=0,
+            extra_round_count=0,
+            unmodeled_packet_count=count,
+            function=function,
+        )
+    document = parse_compile_report(report)
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
+    findings = [
+        s for s in result.suggestions if s.suggestion_id == "amdgpu.lds_bank_service"
+    ]
+
+    first, second = findings
+    assert "32/32 proven instruction sites" in first.action
+    assert "2,048 service rounds versus 256 uncontended (8.00x" in first.action
+    assert "16 B/lane" in first.action
+    assert "static counts, not cycles or a runtime ranking" in first.action
+    assert "0 unknown and 64 unmodeled" in first.action
+    assert "unmodeled" not in second.action
+    paths = {e.path: e.value for e in first.evidence}
+    assert (
+        paths[
+            "source_low.memory.bank_service_groups[1].summary.structural.extra_round_count"
+        ]
+        == 1792
+    )
+    assert (
+        paths["source_low.memory.bank_service_groups[2].summary.unmodeled_packet_count"]
+        == 64
+    )
+    assert not any("groups[3]" in path for path in paths)
+
+
+@pytest.mark.parametrize(("units", "additional_units"), [(32768, 1), (27904, 4865)])
+def test_bank_padding_uses_retained_first_worse_footprint(
+    units: int,
+    additional_units: int,
+) -> None:
+    report = _compile_report()
+    _add_bank_service_group(report, model_evidence="silicon-calibrated-vendor-model")
+    residency = report["entries"]["rows"][0]["target_resources"]["residency"]
+    residency.update(
+        current_tier=4,
+        next_better_tier=5,
+        unique_limiting_resource={
+            "name": "amdgpu.lds",
+            "units": units,
+            "next_worse": {
+                "tier": 3,
+                "cliff_units": units + additional_units,
+                "additional_units": additional_units,
+            },
+        },
+    )
+    report["residency_constraints"]["rows"][0].update(
+        name="amdgpu.lds",
+        unit="bytes",
+        allocation_scope="workgroup",
+        pool_scope="occupancy domain",
+        pool_units=131072,
+        allocation_granularity=512,
+        units=units,
+        rounded_units=((units + 511) // 512) * 512,
+        independent_tier=4,
+        reduction_units_to_next_better_tier=units - 26112,
+    )
+    finding = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(
+        parse_compile_report(report)
+    ).suggestions[-1]
+    assert f"up to {additional_units - 1:,} B of growth" in finding.action
+    assert "4 -> 3 subgroups/SIMD" in finding.action
+    assert any(e.path.endswith("next_worse.additional_units") for e in finding.evidence)
+
+    # Resource pressure alone cannot supply a missing growth limit.
+    del residency["unique_limiting_resource"]["next_worse"]
+    without_cliff = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(
+        parse_compile_report(report)
+    ).suggestions[-1]
+    assert "B of growth" not in without_cliff.action
+
+
+def test_failed_compilation_cannot_recommend_a_bank_layout() -> None:
+    report = _compile_report()
+    _add_bank_service_group(report, model_evidence="silicon-calibrated-vendor-model")
+    report["status"] = {"code": 13, "name": "INTERNAL"}
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(
+        parse_compile_report(report)
+    )
+    assert not any(
+        s.suggestion_id == "amdgpu.lds_bank_service" for s in result.suggestions
+    )
 
 
 def _pipeline_copy_report() -> dict:
