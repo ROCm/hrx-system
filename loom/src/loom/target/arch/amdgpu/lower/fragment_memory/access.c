@@ -178,7 +178,7 @@ static iree_status_t loom_amdgpu_record_fragment_memory_packet(
   loom_amdgpu_memory_report_row_populate_storage_schema(context, &plan->source,
                                                         &row);
   IREE_RETURN_IF_ERROR(loom_amdgpu_fragment_memory_report_bank_service(
-      context, source_op, layout, plan, packet, element_index,
+      context, source_op, descriptor, layout, plan, packet, element_index,
       &runtime_packet_offset, &row.bank_service));
   if (has_static_offset) {
     IREE_RETURN_IF_ERROR(

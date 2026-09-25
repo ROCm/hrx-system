@@ -5986,6 +5986,13 @@ def test_vmem_narrow_load_descriptors_cover_active_xml_families() -> None:
 
 
 def test_d16_high_loads_preserve_tied_low_storage_without_consuming_it() -> None:
+    # CDNA SRAM ECC can overwrite both halves; these paired LDS descriptors
+    # must not promise preservation there.
+    for overlays in (_gfx940_core_overlays(), _gfx950_core_overlays()):
+        assert {
+            "amdgpu.ds_load_u16_d16",
+            "amdgpu.ds_load_u16_d16_hi",
+        }.isdisjoint(descriptor.descriptor_key for descriptor in overlays)
     descriptors = {
         descriptor.descriptor_key: descriptor for descriptor in _gfx11_core_overlays()
     }

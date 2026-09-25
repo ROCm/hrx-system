@@ -198,8 +198,10 @@ into three categories:
 
 Model selection respects the function's execution width. Silicon-calibrated
 models cover `ds_read_u16`, `ds_write_b16`, and b32/b64/b128 reads and writes on
-gfx1100/gfx1151 in wave32 and wave64, and gfx942 in wave64. Documented CDNA3
-b128 wave64 models cover gfx940/gfx941. The gfx1250 wave32 model is explicitly an
+gfx1100/gfx1151 in wave32 and wave64, and gfx942 in wave64. The gfx1100/gfx1151
+models also cover the partial-register `ds_load_u16_d16` and
+`ds_load_u16_d16_hi` reads in both wave sizes. Documented CDNA3 b128 wave64
+models cover gfx940/gfx941. The gfx1250 wave32 model is explicitly an
 unvalidated vendor software model. Other gfx11 processors, gfx1200/gfx1201,
 unsupported wave modes, and other access widths report unmodeled coverage. A
 shared bank count alone does not establish shared service rules.
@@ -242,6 +244,12 @@ Halfword reads to either half of a bank word share a request; writes to disjoint
 halves also combine. Distinct words mapping to the same bank still conflict.
 The model reports `packet_bytes` separately from `bank_word_bytes` so a two-byte
 access retains its subword identity.
+
+Packed fragment loads can fill a register with separate low- and high-half
+reads. Each instruction gets its own model and address proof. For example,
+halfword reads at `2*(lane%16)` repeat eight bank words and need only two
+uncontended rounds per instruction in wave64. Filling the other register half
+does not change which LDS banks serve the read.
 
 Subword placement matters even with a fixed lane layout. For example, two
 16-halfword spans separated by 96 bytes are conflict-free at a four-byte-aligned

@@ -385,6 +385,7 @@ iree_status_t loom_amdgpu_memory_report_bank_service(
 
 iree_status_t loom_amdgpu_fragment_memory_report_bank_service(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_descriptor_t* descriptor,
     const loom_amdgpu_matrix_fragment_layout_t* layout,
     const loom_amdgpu_fragment_memory_plan_t* plan,
     const loom_amdgpu_fragment_memory_packet_plan_t* packet,
@@ -395,11 +396,6 @@ iree_status_t loom_amdgpu_fragment_memory_report_bank_service(
   if (plan->source.memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) {
     return iree_ok_status();
   }
-  const loom_low_descriptor_set_t* descriptor_set =
-      loom_low_lower_context_descriptor_set(context);
-  const loom_low_descriptor_t* descriptor =
-      loom_amdgpu_descriptor_ref_descriptor(descriptor_set,
-                                            packet->descriptor_ref);
   const loom_amdgpu_lds_bank_service_model_t* model =
       loom_amdgpu_memory_bank_service_prepare_report(
           context, descriptor, layout->wave_size, out_report);

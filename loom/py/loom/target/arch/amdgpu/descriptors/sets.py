@@ -887,6 +887,9 @@ def _cdna_core_overlays(
             cmpxchg_expected_field="DATA0",
             cmpxchg_replacement_field="DATA1",
             include_packed_half_atomic_add=True,
+            # SRAM ECC can make D16 loads overwrite the complementary half.
+            # Paired loads require the preserving descriptors exposed on RDNA.
+            include_u16_d16_loads=False,
         ),
         *_ds_crosslane_overlays(),
         _v_dot2_f32_f16_overlay(),

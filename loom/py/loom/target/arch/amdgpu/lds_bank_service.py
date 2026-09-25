@@ -15,7 +15,7 @@ existing model therefore changes target data only.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 AMDGPU_LDS_BANK_SERVICE_EVIDENCE_PUBLIC_VENDOR_DOCUMENTATION = (
     "public-vendor-documentation"
@@ -198,11 +198,42 @@ _NATIVE_CONTIGUOUS_MODELS = tuple(
 )
 
 
+def _d16_read_model(
+    processor: str, wave_size: int, half: str
+) -> AmdgpuLdsBankServiceModelInfo:
+    # Native low/high-half controls independently qualify the same 32-lane
+    # phases and same-word read combining as u16. Destination preservation was
+    # checked separately; it is not evidence for the bank-service organization.
+    model = _contiguous_model(
+        processor, wave_size, 2, AMDGPU_LDS_BANK_SERVICE_DIRECTION_READ
+    )
+    return replace(
+        model,
+        key=(
+            f"amdgpu.lds.{processor}.wave{wave_size}.b16.d16-{half}."
+            f"read.{model.request_policy}"
+        ),
+        revision="AMD:ROCm-guide-7.2.3:6.3.3;native-d16-2026-09-25",
+        descriptor_key=(
+            "amdgpu.ds_load_u16_d16_hi" if half == "high" else "amdgpu.ds_load_u16_d16"
+        ),
+    )
+
+
+_NATIVE_D16_READ_MODELS = tuple(
+    _d16_read_model(processor, wave_size, half)
+    for processor in ("gfx1100", "gfx1151")
+    for wave_size in (32, 64)
+    for half in ("low", "high")
+)
+
+
 AMDGPU_LDS_BANK_SERVICE_MODEL_INFOS: tuple[AmdgpuLdsBankServiceModelInfo, ...] = tuple(
     sorted(
         (
             *_B128_OCTET_MODELS,
             *_NATIVE_CONTIGUOUS_MODELS,
+            *_NATIVE_D16_READ_MODELS,
             AmdgpuLdsBankServiceModelInfo(
                 key="amdgpu.lds.wave32.b128.quad-phases.read.count-each",
                 revision="ROCm/rocm-libraries@a7e3879c8847:LDSModel.cpp",

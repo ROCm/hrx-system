@@ -1,0 +1,38 @@
+// RUN: with-checks emit amdgpu-bank-service
+
+amdgpu.target<gfx1151> @target {subgroup_size = 64}
+
+// Cooperative stores transpose a tile before its packed matrix operand load.
+// The load fills each VGPR with paired halfword reads. Lanes read repeated
+// bank words, which combine into one service round per 32-lane phase.
+kernel.def target(@target) @staged_transpose() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %fragment_origin = index.constant 0 : index
+  %extent = index.constant 16 : index
+  %step = index.constant 4 : index
+  %bytes = index.constant 576 : offset
+  %row = index.rem %lane, %extent : index
+  %first_column = index.div %lane, %extent : index
+  %layout = encoding.layout.strided [1, 18] : encoding<layout>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %input_view = buffer.view %input[%base] : buffer -> view<16x16xf16>
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<16x16xf16, %layout>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x16xf16>
+  scf.for %column = [%first_column to %extent step %step] {
+    %value = view.load %input_view[%row, %column] : view<16x16xf16> -> f16
+    view.store %value, %scratch_view[%row, %column] : f16, view<16x16xf16, %layout>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %fragment = vector.fragment.load<lhs> %scratch_view[%fragment_origin, %fragment_origin] shape [%extent, %extent] : view<16x16xf16, %layout> -> vector<16xf16>
+  vector.store %fragment, %output_view[%lane, 0] : vector<16xf16>, view<64x16xf16>
+  kernel.return
+}
+
+// ----
+CHECK: bank-service function=staged_transpose source-op=vector.fragment.load root=scratch packet=amdgpu.ds_load_u16_d16 model=amdgpu.lds.gfx1151.wave64.b16.d16-low.read.coalesce-identical-reads proof=exact * classification=conflict-free required-rounds=2 uncontended-rounds=2 extra-rounds=0 maximum-multiplicity=1
+CHECK: bank-service function=staged_transpose source-op=vector.fragment.load root=scratch packet=amdgpu.ds_load_u16_d16_hi model=amdgpu.lds.gfx1151.wave64.b16.d16-high.read.coalesce-identical-reads proof=exact * classification=conflict-free required-rounds=2 uncontended-rounds=2 extra-rounds=0 maximum-multiplicity=1

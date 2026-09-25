@@ -191,12 +191,16 @@ TEST(AmdgpuLdsBankServiceTest, NarrowPacketsUseQualifiedThirtyTwoLanePhases) {
        {IREE_SV("gfx1100"), IREE_SV("gfx1151"), IREE_SV("gfx942")}) {
     for (uint8_t wave_size : {32, 64}) {
       for (auto descriptor : {LOOM_AMDGPU_DESCRIPTOR_REF_DS_READ_U16,
+                              LOOM_AMDGPU_DESCRIPTOR_REF_DS_LOAD_U16_D16,
+                              LOOM_AMDGPU_DESCRIPTOR_REF_DS_LOAD_U16_D16_HI,
                               LOOM_AMDGPU_DESCRIPTOR_REF_DS_WRITE_B16,
                               LOOM_AMDGPU_DESCRIPTOR_REF_DS_READ_B32,
                               LOOM_AMDGPU_DESCRIPTOR_REF_DS_WRITE_B32}) {
         const auto* model = LookupModel(descriptor, processor, wave_size);
-        if (wave_size == 32 &&
-            iree_string_view_equal(processor, IREE_SV("gfx942"))) {
+        if (iree_string_view_equal(processor, IREE_SV("gfx942")) &&
+            (wave_size == 32 ||
+             descriptor == LOOM_AMDGPU_DESCRIPTOR_REF_DS_LOAD_U16_D16 ||
+             descriptor == LOOM_AMDGPU_DESCRIPTOR_REF_DS_LOAD_U16_D16_HI)) {
           EXPECT_EQ(model, nullptr);
           continue;
         }
@@ -280,6 +284,8 @@ TEST(AmdgpuLdsBankServiceTest, DoublewordPacketsUseQualifiedSixteenLanePhases) {
 
 TEST(AmdgpuLdsBankServiceTest, HalfwordCombiningPreservesByteIdentity) {
   for (auto descriptor : {LOOM_AMDGPU_DESCRIPTOR_REF_DS_READ_U16,
+                          LOOM_AMDGPU_DESCRIPTOR_REF_DS_LOAD_U16_D16,
+                          LOOM_AMDGPU_DESCRIPTOR_REF_DS_LOAD_U16_D16_HI,
                           LOOM_AMDGPU_DESCRIPTOR_REF_DS_WRITE_B16}) {
     const auto* model = LookupModel(descriptor, IREE_SV("gfx1151"));
     ASSERT_NE(model, nullptr);
@@ -302,15 +308,17 @@ TEST(AmdgpuLdsBankServiceTest, HalfwordCombiningPreservesByteIdentity) {
         model, FullWaveMask(32), addresses.data(), 1, &result));
     ExpectProfile(result, 16, 1, 16);
     // Read broadcast does not authorize combining overlapping writes.
-    ExpectProfile(
-        EvaluateLinear(model, 0),
-        descriptor == LOOM_AMDGPU_DESCRIPTOR_REF_DS_READ_U16 ? 1 : 32, 1,
-        descriptor == LOOM_AMDGPU_DESCRIPTOR_REF_DS_READ_U16 ? 1 : 32);
+    const bool is_read =
+        model->direction == LOOM_AMDGPU_LDS_BANK_SERVICE_DIRECTION_READ;
+    ExpectProfile(EvaluateLinear(model, 0), is_read ? 1 : 32, 1,
+                  is_read ? 1 : 32);
   }
 }
 
 TEST(AmdgpuLdsBankServiceTest, UnresolvedSubwordBaseCanPreventExactProof) {
   for (auto descriptor : {LOOM_AMDGPU_DESCRIPTOR_REF_DS_READ_U16,
+                          LOOM_AMDGPU_DESCRIPTOR_REF_DS_LOAD_U16_D16,
+                          LOOM_AMDGPU_DESCRIPTOR_REF_DS_LOAD_U16_D16_HI,
                           LOOM_AMDGPU_DESCRIPTOR_REF_DS_WRITE_B16}) {
     const auto* model = LookupModel(descriptor, IREE_SV("gfx1151"));
     ASSERT_NE(model, nullptr);
