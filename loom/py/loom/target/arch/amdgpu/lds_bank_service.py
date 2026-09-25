@@ -141,14 +141,15 @@ _B128_OCTET_MODELS = tuple(
 )
 
 
-def _narrow_model(
+def _contiguous_model(
     processor: str, wave_size: int, byte_count: int, direction: str
 ) -> AmdgpuLdsBankServiceModelInfo:
     # Native gfx1100/gfx1151 wave32/wave64 and gfx942 wave64 controls qualify
-    # contiguous 32-lane phases. Amplified conflicts distinguish 16-lane phases
-    # from 32-lane phases, and separate bank sets distinguish the two halves of
-    # wave64. Same-word reads and disjoint halfword writes combine; a two-byte
-    # base shift can change conflicts. These are service rules, not cycle costs.
+    # contiguous 32-lane phases for b16/b32 and 16-lane phases for b64. Amplified
+    # conflicts and bank permutations distinguish these from crossed phases
+    # and a whole-wave organization. Same-word reads and disjoint halfword
+    # writes combine; a two-byte base shift can change conflicts. These are
+    # service rules, not cycle costs.
     read = direction == AMDGPU_LDS_BANK_SERVICE_DIRECTION_READ
     policy = (
         AMDGPU_LDS_BANK_SERVICE_REQUEST_POLICY_COALESCE_IDENTICAL_READS
@@ -158,12 +159,17 @@ def _narrow_model(
         else AMDGPU_LDS_BANK_SERVICE_REQUEST_POLICY_COUNT_EACH
     )
     packet = "u16" if read and byte_count == 2 else f"b{byte_count * 8}"
+    phase_lane_count = 16 if byte_count == 8 else 32
     return AmdgpuLdsBankServiceModelInfo(
         key=(
             f"amdgpu.lds.{processor}.wave{wave_size}.b{byte_count * 8}."
             f"{direction}.{policy}"
         ),
-        revision="AMD:ROCm-guide-7.2.3:6.3.3;native-narrow-2026-09-24",
+        revision=(
+            "AMD:ROCm-guide-7.2.3:6.3.3;native-b64-2026-09-25"
+            if byte_count == 8
+            else "AMD:ROCm-guide-7.2.3:6.3.3;native-narrow-2026-09-24"
+        ),
         descriptor_key=f"amdgpu.ds_{direction}_{packet}",
         evidence_class=AMDGPU_LDS_BANK_SERVICE_EVIDENCE_SILICON_CALIBRATED_VENDOR_MODEL,
         direction=direction,
@@ -173,19 +179,20 @@ def _narrow_model(
         bank_word_byte_count=4,
         packet_byte_count=byte_count,
         phase_lane_masks=tuple(
-            0xFFFFFFFF << start for start in range(0, wave_size, 32)
+            ((1 << phase_lane_count) - 1) << start
+            for start in range(0, wave_size, phase_lane_count)
         ),
     )
 
 
-_NATIVE_NARROW_MODELS = tuple(
-    _narrow_model(processor, wave_size, byte_count, direction)
+_NATIVE_CONTIGUOUS_MODELS = tuple(
+    _contiguous_model(processor, wave_size, byte_count, direction)
     for processor, wave_sizes in (
         ("gfx1100", (32, 64)),
         ("gfx1151", (32, 64)),
         ("gfx942", (64,)),
     )
-    for byte_count in (2, 4)
+    for byte_count in (2, 4, 8)
     for direction in AMDGPU_LDS_BANK_SERVICE_DIRECTIONS
     for wave_size in wave_sizes
 )
@@ -195,7 +202,7 @@ AMDGPU_LDS_BANK_SERVICE_MODEL_INFOS: tuple[AmdgpuLdsBankServiceModelInfo, ...] =
     sorted(
         (
             *_B128_OCTET_MODELS,
-            *_NATIVE_NARROW_MODELS,
+            *_NATIVE_CONTIGUOUS_MODELS,
             AmdgpuLdsBankServiceModelInfo(
                 key="amdgpu.lds.wave32.b128.quad-phases.read.count-each",
                 revision="ROCm/rocm-libraries@a7e3879c8847:LDSModel.cpp",

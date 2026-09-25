@@ -224,6 +224,60 @@ TEST(AmdgpuLdsBankServiceTest, NarrowPacketsUseQualifiedThirtyTwoLanePhases) {
   }
 }
 
+TEST(AmdgpuLdsBankServiceTest, DoublewordPacketsUseQualifiedSixteenLanePhases) {
+  struct Case {
+    // Distinct adjacent bank pairs used by each lane partition.
+    uint8_t bank_pair_count;
+    // Lanes selecting one bank subset before switching to the other subset.
+    uint8_t partition_lane_count;
+    // Largest number of requests served by one bank within a service phase.
+    uint16_t maximum_multiplicity;
+  };
+  // These native controls distinguish crossed octets, whole 32-lane phases,
+  // and independent halves of wave64. Linear strides alone are insufficient.
+  static constexpr Case kCases[] = {{8, 16, 2}, {4, 16, 4}, {4, 32, 4}};
+  for (auto processor_name :
+       {IREE_SV("gfx1100"), IREE_SV("gfx1151"), IREE_SV("gfx942")}) {
+    SCOPED_TRACE(processor_name.data);
+    for (uint8_t wave_size : {32, 64}) {
+      SCOPED_TRACE(wave_size);
+      for (auto descriptor : {LOOM_AMDGPU_DESCRIPTOR_REF_DS_READ_B64,
+                              LOOM_AMDGPU_DESCRIPTOR_REF_DS_WRITE_B64}) {
+        SCOPED_TRACE(descriptor);
+        const auto* model = LookupModel(descriptor, processor_name, wave_size);
+        if (wave_size == 32 &&
+            iree_string_view_equal(processor_name, IREE_SV("gfx942"))) {
+          EXPECT_EQ(model, nullptr);
+          continue;
+        }
+        ASSERT_NE(model, nullptr);
+        const uint16_t phases = wave_size / 16;
+        ExpectProfile(EvaluateLinear(model, 8), phases, phases, 1);
+        ExpectProfile(EvaluateLinear(model, 128), phases * 16, phases, 16);
+        if (descriptor == LOOM_AMDGPU_DESCRIPTOR_REF_DS_READ_B64) {
+          ExpectProfile(EvaluateLinear(model, 0), phases, phases, 1);
+        }
+        for (const Case& test_case : kCases) {
+          LaneAddresses addresses = {};
+          for (uint8_t lane = 0; lane < wave_size; ++lane) {
+            const uint8_t bank_pair =
+                lane % test_case.bank_pair_count +
+                (lane / test_case.partition_lane_count % 2) *
+                    test_case.bank_pair_count;
+            addresses[lane] = lane * 128 + bank_pair * 8;
+          }
+          loom_amdgpu_lds_bank_service_result_t result;
+          ASSERT_TRUE(loom_amdgpu_lds_bank_service_evaluate(
+              model, FullWaveMask(wave_size), addresses.data(),
+              /*common_base_byte_residues=*/1, &result));
+          ExpectProfile(result, phases * test_case.maximum_multiplicity, phases,
+                        test_case.maximum_multiplicity);
+        }
+      }
+    }
+  }
+}
+
 TEST(AmdgpuLdsBankServiceTest, HalfwordCombiningPreservesByteIdentity) {
   for (auto descriptor : {LOOM_AMDGPU_DESCRIPTOR_REF_DS_READ_U16,
                           LOOM_AMDGPU_DESCRIPTOR_REF_DS_WRITE_B16}) {

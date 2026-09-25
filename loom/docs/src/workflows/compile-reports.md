@@ -197,7 +197,7 @@ into three categories:
   and wave size. A missing model is not evidence of conflict-free access.
 
 Model selection respects the function's execution width. Silicon-calibrated
-models cover `ds_read_u16`, `ds_write_b16`, and b32/b128 reads and writes on
+models cover `ds_read_u16`, `ds_write_b16`, and b32/b64/b128 reads and writes on
 gfx1100/gfx1151 in wave32 and wave64, and gfx942 in wave64. Documented CDNA3
 b128 wave64 models cover gfx940/gfx941. The gfx1250 wave32 model is explicitly an
 unvalidated vendor software model. Other gfx11 processors, gfx1200/gfx1201,
@@ -231,7 +231,13 @@ nonnegative, nonwrapping arithmetic and constant divisors. Unproved varying
 terms, runtime coordinate strides, and relationships lost across control-flow
 arguments remain unknown.
 
-Narrow accesses use contiguous 32-lane service groups on the qualified devices.
+The b64 models use contiguous 16-lane service groups on the qualified devices.
+For example, a wave32 b64 access at `8*lane` needs two uncontended rounds.
+Changing the lane stride to 128 bytes maps all sixteen lanes in each group to
+the same two banks, requiring 32 rounds: 30 extra rounds per instruction.
+Repeated reads of the same address still need only the uncontended rounds.
+
+Halfword and word accesses use contiguous 32-lane service groups.
 Halfword reads to either half of a bank word share a request; writes to disjoint
 halves also combine. Distinct words mapping to the same bank still conflict.
 The model reports `packet_bytes` separately from `bank_word_bytes` so a two-byte

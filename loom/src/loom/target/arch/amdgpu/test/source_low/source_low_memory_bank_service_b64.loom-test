@@ -1,0 +1,30 @@
+// RUN: with-checks emit amdgpu-bank-service
+
+amdgpu.target<gfx1151> @target
+
+// Each lane stages a pair of words in a separate 128-byte row. All sixteen
+// lanes in a service phase select the same two banks, so each LDS instruction
+// requires 32 rounds for wave32 instead of the two uncontended rounds.
+kernel.def target(@target) @staged_pairs() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %bytes = index.constant 4096 : offset
+  %layout = encoding.layout.strided [32, 1] : encoding<layout>
+  %scratch = buffer.alloca<workgroup> align(8) %bytes : buffer
+  %input_view = buffer.view %input[%base] : buffer -> view<32x2xi32>
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<32x2xi32, %layout>
+  %output_view = buffer.view %output[%base] : buffer -> view<32x2xi32>
+  %value = vector.load %input_view[%lane, 0] : view<32x2xi32> -> vector<2xi32>
+  vector.store %value, %scratch_view[%lane, 0] : vector<2xi32>, view<32x2xi32, %layout>
+  %staged = vector.load %scratch_view[%lane, 0] : view<32x2xi32, %layout> -> vector<2xi32>
+  vector.store %staged, %output_view[%lane, 0] : vector<2xi32>, view<32x2xi32>
+  kernel.return
+}
+
+// ----
+CHECK: bank-service function=staged_pairs source-op=vector.store root=scratch packet=amdgpu.ds_write_b64 * proof=exact * classification=conflicted required-rounds=32 uncontended-rounds=2 extra-rounds=30 maximum-multiplicity=16
+CHECK: bank-service function=staged_pairs source-op=vector.load root=scratch packet=amdgpu.ds_read_b64 * proof=exact * classification=conflicted required-rounds=32 uncontended-rounds=2 extra-rounds=30 maximum-multiplicity=16
