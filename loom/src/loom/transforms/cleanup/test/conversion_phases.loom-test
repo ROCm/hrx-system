@@ -380,6 +380,27 @@ func.def @vector_conversion_splats(%float_narrow: bf16, %float_wide: f32, %integ
 }
 
 // ====
+
+func.def @vector_unsigned_after_mixed_sign_extension(%positive: i8, %negative: i8) -> (vector<2xi32>) {
+  %bounded_positive = scalar.assume %positive [range(%positive, 0, 127)] : i8
+  %bounded_negative = scalar.assume %negative [range(%negative, -128, -1)] : i8
+  %source = vector.from_elements %bounded_positive, %bounded_negative : vector<2xi8>
+  %middle = vector.extsi %source : vector<2xi8> to vector<2xi16>
+  %result = vector.extui %middle : vector<2xi16> to vector<2xi32>
+  func.return %result : vector<2xi32>
+}
+
+// ----
+func.def @vector_unsigned_after_mixed_sign_extension(%positive: i8, %negative: i8) -> (vector<2xi32>) {
+  %bounded_positive = scalar.assume %positive [range(%positive, 0, 127)] : i8
+  %bounded_negative = scalar.assume %negative [range(%negative, -128, -1)] : i8
+  %source = vector.from_elements %bounded_positive, %bounded_negative : vector<2xi8>
+  %middle = vector.extsi %source : vector<2xi8> to vector<2xi16>
+  %result = vector.extui %middle : vector<2xi16> to vector<2xi32>
+  func.return %result : vector<2xi32>
+}
+
+// ====
 // RUN: pass canonicalize
 
 // Universal cleanup preserves source and target-selected conversion forms. It

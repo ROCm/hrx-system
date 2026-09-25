@@ -40,6 +40,7 @@ loom_cc_library(
     loom::ops::vector
     loom::rewrite::pattern_registry
     loom::rewrite::rewriter
+    loom::transforms::conversion::chain
   PUBLIC
 )
 

@@ -23,6 +23,7 @@ loom_cc_library(
     loom::ops::scalar
     loom::rewrite::pattern_registry
     loom::rewrite::rewriter
+    loom::transforms::conversion::chain
   PUBLIC
 )
 

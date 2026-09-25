@@ -22,6 +22,7 @@ loom_cc_library(
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/rewrite:pattern_registry",
         "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/transforms/conversion:chain",
         "//runtime/src/iree/base",
     ],
 )

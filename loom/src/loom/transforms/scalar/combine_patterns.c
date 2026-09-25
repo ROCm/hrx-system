@@ -9,6 +9,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/transforms/conversion/chain.h"
 #include "loom/transforms/scalar/narrowing.h"
 
 static loom_op_t* loom_scalar_combine_defining_op(
@@ -20,22 +21,21 @@ static loom_op_t* loom_scalar_combine_defining_op(
   return loom_value_def_op(value);
 }
 
-static loom_value_id_t loom_scalar_combine_conversion_input(
+static loom_conversion_kind_t loom_scalar_combine_conversion_kind(
     const loom_op_t* op) {
   switch (op->kind) {
     case LOOM_OP_SCALAR_EXTF:
-      return loom_scalar_extf_input(op);
+      return LOOM_CONVERSION_EXTF;
     case LOOM_OP_SCALAR_FPTRUNC:
-      return loom_scalar_fptrunc_input(op);
+      return LOOM_CONVERSION_FPTRUNC;
     case LOOM_OP_SCALAR_EXTSI:
-      return loom_scalar_extsi_input(op);
+      return LOOM_CONVERSION_EXTSI;
     case LOOM_OP_SCALAR_EXTUI:
-      return loom_scalar_extui_input(op);
+      return LOOM_CONVERSION_EXTUI;
     case LOOM_OP_SCALAR_TRUNCI:
-      return loom_scalar_trunci_input(op);
+      return LOOM_CONVERSION_TRUNCI;
     default:
-      IREE_ASSERT_UNREACHABLE("non-conversion scalar combine root");
-      IREE_BUILTIN_UNREACHABLE();
+      return LOOM_CONVERSION_NONE;
   }
 }
 
@@ -46,14 +46,22 @@ static iree_status_t loom_scalar_combine_replace_with_value(
 }
 
 static iree_status_t loom_scalar_combine_replace_with_conversion(
-    loom_rewriter_t* rewriter, loom_op_t* op, loom_op_kind_t replacement_kind,
-    loom_value_id_t input) {
+    loom_rewriter_t* rewriter, loom_op_t* op, loom_conversion_kind_t candidate,
+    loom_value_id_t input, bool* out_changed) {
   const loom_type_t input_type =
       loom_module_value_type(rewriter->module, input);
   const loom_type_t result_type =
       loom_module_value_type(rewriter->module, loom_op_const_results(op)[0]);
-  if (loom_type_equal(input_type, result_type)) {
-    return loom_scalar_combine_replace_with_value(rewriter, op, input);
+  const loom_conversion_kind_t replacement_kind =
+      loom_conversion_chain_resolve(candidate, input_type, result_type);
+  if (replacement_kind == LOOM_CONVERSION_NONE) {
+    return iree_ok_status();
+  }
+  if (replacement_kind == LOOM_CONVERSION_IDENTITY) {
+    IREE_RETURN_IF_ERROR(
+        loom_scalar_combine_replace_with_value(rewriter, op, input));
+    *out_changed = true;
+    return iree_ok_status();
   }
 
   loom_builder_set_before(&rewriter->builder, op);
@@ -61,31 +69,31 @@ static iree_status_t loom_scalar_combine_replace_with_conversion(
       loom_rewriter_value_checkpoint(rewriter);
   loom_op_t* replacement_op = NULL;
   switch (replacement_kind) {
-    case LOOM_OP_SCALAR_EXTF: {
+    case LOOM_CONVERSION_EXTF: {
       IREE_RETURN_IF_ERROR(
           loom_scalar_extf_build(&rewriter->builder, input, input_type,
                                  result_type, op->location, &replacement_op));
       break;
     }
-    case LOOM_OP_SCALAR_FPTRUNC: {
+    case LOOM_CONVERSION_FPTRUNC: {
       IREE_RETURN_IF_ERROR(loom_scalar_fptrunc_build(
           &rewriter->builder, input, input_type, result_type, op->location,
           &replacement_op));
       break;
     }
-    case LOOM_OP_SCALAR_EXTSI: {
+    case LOOM_CONVERSION_EXTSI: {
       IREE_RETURN_IF_ERROR(
           loom_scalar_extsi_build(&rewriter->builder, input, input_type,
                                   result_type, op->location, &replacement_op));
       break;
     }
-    case LOOM_OP_SCALAR_EXTUI: {
+    case LOOM_CONVERSION_EXTUI: {
       IREE_RETURN_IF_ERROR(
           loom_scalar_extui_build(&rewriter->builder, input, input_type,
                                   result_type, op->location, &replacement_op));
       break;
     }
-    case LOOM_OP_SCALAR_TRUNCI: {
+    case LOOM_CONVERSION_TRUNCI: {
       IREE_RETURN_IF_ERROR(
           loom_scalar_trunci_build(&rewriter->builder, input, input_type,
                                    result_type, op->location, &replacement_op));
@@ -99,164 +107,108 @@ static iree_status_t loom_scalar_combine_replace_with_conversion(
   loom_value_id_t replacement = loom_op_const_results(replacement_op)[0];
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, &replacement, 1, value_checkpoint));
-  return loom_scalar_combine_replace_with_value(rewriter, op, replacement);
+  IREE_RETURN_IF_ERROR(
+      loom_scalar_combine_replace_with_value(rewriter, op, replacement));
+  *out_changed = true;
+  return iree_ok_status();
 }
 
-static bool loom_scalar_combine_select_float_chain(
-    const loom_module_t* module, const loom_op_t* op,
-    const loom_op_t* defining_op, loom_value_id_t* out_input,
-    loom_op_kind_t* out_replacement_kind) {
-  if (!loom_scalar_extf_isa(defining_op) ||
-      (!loom_scalar_extf_isa(op) && !loom_scalar_fptrunc_isa(op))) {
-    return false;
-  }
-
-  const loom_value_id_t input = loom_scalar_extf_input(defining_op);
-  const loom_scalar_type_t input_type =
-      loom_type_element_type(loom_module_value_type(module, input));
-  const loom_scalar_type_t result_type = loom_type_element_type(
-      loom_module_value_type(module, loom_op_const_results(op)[0]));
-  if (input_type == result_type) {
-    *out_input = input;
-    *out_replacement_kind = LOOM_OP_KIND_UNKNOWN;
-    return true;
-  }
-
-  const int32_t input_bitwidth = loom_scalar_type_bitwidth(input_type);
-  const int32_t result_bitwidth = loom_scalar_type_bitwidth(result_type);
-  if (input_bitwidth == result_bitwidth) {
-    // Equal-width formats are distinct representations. There is no scalar
-    // resize operation that can bypass the intermediate conversion.
-    return false;
-  }
-  *out_input = input;
-  *out_replacement_kind = result_bitwidth > input_bitwidth
-                              ? LOOM_OP_SCALAR_EXTF
-                              : LOOM_OP_SCALAR_FPTRUNC;
-  return true;
-}
-
-static bool loom_scalar_combine_select_integer_chain(
-    const loom_rewriter_t* rewriter, const loom_op_t* op,
-    const loom_op_t* defining_op, loom_value_id_t outer_input,
-    loom_value_id_t* out_input, loom_op_kind_t* out_replacement_kind) {
-  loom_value_id_t input = LOOM_VALUE_ID_INVALID;
-  loom_op_kind_t extension_kind = LOOM_OP_KIND_UNKNOWN;
-  const bool has_signed_extension = loom_scalar_extsi_isa(defining_op);
-  const bool has_unsigned_extension = loom_scalar_extui_isa(defining_op);
-  const bool has_truncation = loom_scalar_trunci_isa(defining_op);
-  if (has_signed_extension) {
-    input = loom_scalar_extsi_input(defining_op);
-    extension_kind = LOOM_OP_SCALAR_EXTSI;
-  } else if (has_unsigned_extension) {
-    input = loom_scalar_extui_input(defining_op);
-    extension_kind = LOOM_OP_SCALAR_EXTUI;
-  } else if (has_truncation) {
-    input = loom_scalar_trunci_input(defining_op);
-  } else {
-    return false;
-  }
-
-  if (loom_scalar_extsi_isa(op)) {
-    if (has_truncation) {
-      return false;
-    }
-  } else if (loom_scalar_extui_isa(op)) {
-    if (has_truncation) {
-      return false;
-    }
-    // Query the signed extension result. In particular, a true i1 becomes -1
-    // even though the source boolean itself has non-negative facts.
-    if (has_signed_extension &&
-        !loom_value_facts_is_non_negative(
-            loom_rewriter_value_facts(rewriter, outer_input))) {
-      return false;
-    }
-    extension_kind = LOOM_OP_SCALAR_EXTUI;
-  } else if (!loom_scalar_trunci_isa(op)) {
-    return false;
-  }
-
-  const loom_type_t input_type =
-      loom_module_value_type(rewriter->module, input);
-  const loom_type_t result_type =
-      loom_module_value_type(rewriter->module, loom_op_const_results(op)[0]);
-  if (loom_type_equal(input_type, result_type)) {
-    *out_input = input;
-    *out_replacement_kind = LOOM_OP_KIND_UNKNOWN;
-    return true;
-  }
-
-  const int32_t input_bitwidth =
-      loom_scalar_type_bitwidth(loom_type_element_type(input_type));
-  const int32_t result_bitwidth =
-      loom_scalar_type_bitwidth(loom_type_element_type(result_type));
-  *out_input = input;
-  *out_replacement_kind =
-      result_bitwidth > input_bitwidth ? extension_kind : LOOM_OP_SCALAR_TRUNCI;
-  return true;
-}
-
-static iree_status_t loom_scalar_conversion_chain_pattern(
-    const loom_rewrite_pattern_t* pattern, void* context, loom_op_t* op,
-    loom_rewriter_t* rewriter, bool* out_changed) {
-  (void)pattern;
-  (void)context;
+static iree_status_t loom_scalar_combine_conversion_chain(
+    loom_conversion_kind_t outer_kind, loom_op_t* op, loom_rewriter_t* rewriter,
+    bool* out_changed) {
   *out_changed = false;
-
-  const loom_value_id_t outer_input = loom_scalar_combine_conversion_input(op);
+  // Registered roots are verified unary conversions.
+  const loom_value_id_t outer_input = loom_op_const_operands(op)[0];
   loom_op_t* defining_op =
       loom_scalar_combine_defining_op(rewriter, outer_input);
   if (defining_op == NULL) {
     return iree_ok_status();
   }
 
-  loom_value_id_t input = LOOM_VALUE_ID_INVALID;
-  loom_op_kind_t replacement_kind = LOOM_OP_KIND_UNKNOWN;
-  const bool matched =
-      loom_scalar_combine_select_float_chain(rewriter->module, op, defining_op,
-                                             &input, &replacement_kind) ||
-      loom_scalar_combine_select_integer_chain(
-          rewriter, op, defining_op, outer_input, &input, &replacement_kind);
-  if (!matched) {
-    if (loom_scalar_trunci_isa(op)) {
+  const loom_conversion_chain_match_t match = loom_conversion_chain_match(
+      outer_kind, loom_scalar_combine_conversion_kind(defining_op));
+  if (match.candidate == LOOM_CONVERSION_NONE) {
+    if (outer_kind == LOOM_CONVERSION_TRUNCI) {
       return loom_scalar_narrowing_truncate(rewriter, op, defining_op,
                                             out_changed);
     }
     return iree_ok_status();
   }
-
-  if (replacement_kind == LOOM_OP_KIND_UNKNOWN) {
-    IREE_RETURN_IF_ERROR(
-        loom_scalar_combine_replace_with_value(rewriter, op, input));
-  } else {
-    IREE_RETURN_IF_ERROR(loom_scalar_combine_replace_with_conversion(
-        rewriter, op, replacement_kind, input));
+  if (iree_any_bit_set(match.flags, LOOM_CONVERSION_CHAIN_FLAG_NON_NEGATIVE) &&
+      !loom_value_facts_is_non_negative(
+          loom_rewriter_value_facts(rewriter, outer_input))) {
+    return iree_ok_status();
   }
-  *out_changed = true;
-  return iree_ok_status();
+  return loom_scalar_combine_replace_with_conversion(
+      rewriter, op, match.candidate, loom_op_const_operands(defining_op)[0],
+      out_changed);
+}
+
+static iree_status_t loom_scalar_extf_chain_pattern(
+    const loom_rewrite_pattern_t* pattern, void* context, loom_op_t* op,
+    loom_rewriter_t* rewriter, bool* out_changed) {
+  (void)pattern;
+  (void)context;
+  return loom_scalar_combine_conversion_chain(LOOM_CONVERSION_EXTF, op,
+                                              rewriter, out_changed);
+}
+
+static iree_status_t loom_scalar_fptrunc_chain_pattern(
+    const loom_rewrite_pattern_t* pattern, void* context, loom_op_t* op,
+    loom_rewriter_t* rewriter, bool* out_changed) {
+  (void)pattern;
+  (void)context;
+  return loom_scalar_combine_conversion_chain(LOOM_CONVERSION_FPTRUNC, op,
+                                              rewriter, out_changed);
+}
+
+static iree_status_t loom_scalar_extsi_chain_pattern(
+    const loom_rewrite_pattern_t* pattern, void* context, loom_op_t* op,
+    loom_rewriter_t* rewriter, bool* out_changed) {
+  (void)pattern;
+  (void)context;
+  return loom_scalar_combine_conversion_chain(LOOM_CONVERSION_EXTSI, op,
+                                              rewriter, out_changed);
+}
+
+static iree_status_t loom_scalar_extui_chain_pattern(
+    const loom_rewrite_pattern_t* pattern, void* context, loom_op_t* op,
+    loom_rewriter_t* rewriter, bool* out_changed) {
+  (void)pattern;
+  (void)context;
+  return loom_scalar_combine_conversion_chain(LOOM_CONVERSION_EXTUI, op,
+                                              rewriter, out_changed);
+}
+
+static iree_status_t loom_scalar_trunci_chain_pattern(
+    const loom_rewrite_pattern_t* pattern, void* context, loom_op_t* op,
+    loom_rewriter_t* rewriter, bool* out_changed) {
+  (void)pattern;
+  (void)context;
+  return loom_scalar_combine_conversion_chain(LOOM_CONVERSION_TRUNCI, op,
+                                              rewriter, out_changed);
 }
 
 static const loom_rewrite_pattern_t kScalarSourceCombinePatterns[] = {
     {
         .root_kind = LOOM_OP_SCALAR_EXTF,
-        .match_and_rewrite = loom_scalar_conversion_chain_pattern,
+        .match_and_rewrite = loom_scalar_extf_chain_pattern,
     },
     {
         .root_kind = LOOM_OP_SCALAR_FPTRUNC,
-        .match_and_rewrite = loom_scalar_conversion_chain_pattern,
+        .match_and_rewrite = loom_scalar_fptrunc_chain_pattern,
     },
     {
         .root_kind = LOOM_OP_SCALAR_EXTSI,
-        .match_and_rewrite = loom_scalar_conversion_chain_pattern,
+        .match_and_rewrite = loom_scalar_extsi_chain_pattern,
     },
     {
         .root_kind = LOOM_OP_SCALAR_EXTUI,
-        .match_and_rewrite = loom_scalar_conversion_chain_pattern,
+        .match_and_rewrite = loom_scalar_extui_chain_pattern,
     },
     {
         .root_kind = LOOM_OP_SCALAR_TRUNCI,
-        .match_and_rewrite = loom_scalar_conversion_chain_pattern,
+        .match_and_rewrite = loom_scalar_trunci_chain_pattern,
     },
 };
 
