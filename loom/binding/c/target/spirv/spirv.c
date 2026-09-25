@@ -10,19 +10,21 @@
 #include "target.h"
 
 static iree_status_t loomc_spirv_emit_module_artifact(
-    const loom_target_emit_request_t* request,
+    const loom_target_emit_request_t* request, bool* out_emitted,
     loom_target_emit_artifact_t* out_artifact) {
+  *out_emitted = false;
   *out_artifact = (loom_target_emit_artifact_t){0};
 
   loom_spirv_emit_low_module_options_t options = {0};
   loom_spirv_emit_low_module_options_initialize(&options);
   options.function_versions = request->function_versions;
   loom_spirv_module_binary_t binary = {0};
+  bool module_emitted = false;
   iree_status_t status = loom_spirv_emit_low_module(
       request->module, request->low_descriptor_registry,
-      request->diagnostic_emitter, request->scratch_arena, &options, &binary,
-      request->allocator);
-  if (iree_status_is_ok(status)) {
+      request->diagnostic_emitter, request->scratch_arena, &options,
+      &module_emitted, &binary, request->allocator);
+  if (iree_status_is_ok(status) && module_emitted) {
     iree_byte_span_t contents =
         iree_make_byte_span(binary.words, binary.word_count * sizeof(uint32_t));
     iree_byte_sequence_t* sequence = NULL;
@@ -34,6 +36,7 @@ static iree_status_t loomc_spirv_emit_module_artifact(
       out_artifact->target_artifact_format =
           LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY;
       out_artifact->contents = sequence;
+      *out_emitted = true;
     }
   }
 

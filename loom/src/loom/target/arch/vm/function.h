@@ -46,8 +46,9 @@ typedef struct loom_vm_function_signature_t {
 // All compiler scratch belongs to |request|'s arena and can be released when
 // this call returns. The emitted stream, scalar |out_row| fields, and
 // module-owned rodata references retain no planning storage. Structured frame
-// errors are forwarded to its diagnostic emitter and terminate emission with
-// a failure status.
+// errors are forwarded to its diagnostic emitter and return OK with
+// |out_emitted| false. Sink and infrastructure failures return a status and
+// also leave |out_emitted| false.
 // |functions| supplies callable signatures and symbol ordinals; data operands
 // append their referenced payload once to its read-only section plan.
 iree_status_t loom_vm_function_emit(
@@ -55,7 +56,7 @@ iree_status_t loom_vm_function_emit(
     const loom_target_function_version_t* function_version,
     const loom_vm_function_signature_t* signature,
     loom_vm_module_plan_t* functions, iree_io_stream_t* stream,
-    iree_vm_bytecode_v0_function_row_t* out_row);
+    bool* out_emitted, iree_vm_bytecode_v0_function_row_t* out_row);
 
 #ifdef __cplusplus
 }  // extern "C"

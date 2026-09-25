@@ -363,13 +363,15 @@ static iree_status_t loom_spirv_loom_check_emit_provider_execute(
       .function_versions = &pipeline_result.function_versions.list,
   };
   loom_spirv_module_binary_t module = {0};
+  bool module_emitted = false;
   status = loom_spirv_emit_low_module(
       request->module, &request->low_registry->registry, diagnostic_emitter,
-      request->case_arena, &emit_options, &module, request->host_allocator);
+      request->case_arena, &emit_options, &module_emitted, &module,
+      request->host_allocator);
 
   loom_spirv_toolchain_t toolchain;
   loom_spirv_toolchain_initialize_from_environment(&toolchain);
-  if (iree_status_is_ok(status) && request->diagnostic_collector->count == 0 &&
+  if (iree_status_is_ok(status) && module_emitted &&
       iree_any_bit_set(emit_request.flags,
                        LOOM_SPIRV_LOOM_CHECK_EMIT_FLAG_VALIDATE)) {
     status = loom_spirv_tool_validate_binary(
@@ -378,12 +380,12 @@ static iree_status_t loom_spirv_loom_check_emit_provider_execute(
   }
 
   loom_tool_output_t disassembly = {0};
-  if (iree_status_is_ok(status) && request->diagnostic_collector->count == 0) {
+  if (iree_status_is_ok(status) && module_emitted) {
     status = loom_spirv_tool_disassemble_binary(
         &toolchain, loom_spirv_module_binary_byte_span(&module),
         request->host_allocator, &disassembly);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && module_emitted) {
     status = loom_spirv_loom_check_strip_disassembly_comments(
         iree_make_string_view(disassembly.data, disassembly.length),
         &request->result->actual_output);

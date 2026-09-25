@@ -32,9 +32,10 @@ iree_status_t loom_check_emit_low_report(
       .emitter = emitter,
   };
   loom_low_emission_frame_t frame = {0};
+  bool frame_accepted = false;
   IREE_RETURN_IF_ERROR(loom_low_emission_frame_build(
-      module, low_function, &frame_options, arena, &frame));
-  if (frame.schedule.error_count != 0 || frame.allocation.error_count != 0) {
+      module, low_function, &frame_options, arena, &frame, &frame_accepted));
+  if (!frame_accepted) {
     return iree_ok_status();
   }
 

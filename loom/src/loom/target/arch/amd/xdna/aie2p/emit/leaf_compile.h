@@ -46,10 +46,12 @@ typedef struct loom_aie2p_leaf_compile_options_t {
 // Compiles one verified amd.xdna.aie2p.core Low function into an arena-owned
 // detached native contribution and exact realization facts. Temporary planning
 // storage is returned to the arena's block pool before this function returns.
+// Structured rejection returns OK with |out_compiled| false and no
+// contribution; infrastructure failures return a status.
 iree_status_t loom_aie2p_leaf_compile(
     loom_module_t* module, loom_op_t* function_op,
     const loom_aie2p_leaf_compile_options_t* options,
-    iree_arena_allocator_t* arena,
+    iree_arena_allocator_t* arena, bool* out_compiled,
     loom_aie2p_leaf_contribution_t* out_contribution);
 
 #ifdef __cplusplus

@@ -47,9 +47,10 @@ typedef struct loom_aie2p_xdna_artifact_request_t {
   iree_allocator_t allocator;
 } loom_aie2p_xdna_artifact_request_t;
 
-// Emits one complete Loom-owned XDNA ELF byte sequence.
+// Emits one complete Loom-owned XDNA ELF byte sequence. Structured rejection
+// returns OK with |out_emitted| false and no contents.
 iree_status_t loom_aie2p_xdna_artifact_emit(
-    const loom_aie2p_xdna_artifact_request_t* request,
+    const loom_aie2p_xdna_artifact_request_t* request, bool* out_emitted,
     iree_byte_sequence_t** out_contents);
 
 // Canonical XDNA emission for in-process target environments. Device identity

@@ -71,14 +71,15 @@ static iree_status_t loom_vm_check_emit(
       .allocator = request->host_allocator,
   };
   loom_target_emit_artifact_t artifact = {0};
-  status = loom_vm_module_emit(&emit_request, &artifact);
+  bool emitted = false;
+  status = loom_vm_module_emit(&emit_request, &emitted, &artifact);
   iree_byte_span_t contents = iree_byte_span_empty();
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && emitted) {
     status = iree_byte_sequence_clone(artifact.contents,
                                       request->host_allocator, &contents);
   }
   loom_target_emit_artifact_release(&artifact);
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && emitted) {
     status = iree_vm_bytecode_disassemble_module(
         iree_make_const_byte_span(contents.data, contents.data_length),
         (iree_vm_bytecode_disassembler_write_callback_t){

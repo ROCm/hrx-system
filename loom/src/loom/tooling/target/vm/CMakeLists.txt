@@ -22,12 +22,14 @@ loom_cc_library(
     iree::hal
     iree::vm
     iree::vm::bytecode::module
+    loom::error::error_defs
     loom::error::source
     loom::link::linker
     loom::ops::func
     loom::ops::op_defs
     loom::target::arch::vm::module
     loom::target::arch::vm::provider
+    loom::target::entry_selection
     loom::target::provider
     loom::tooling::compile::pipeline
     loom::tooling::config

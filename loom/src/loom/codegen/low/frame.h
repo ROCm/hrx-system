@@ -137,7 +137,7 @@ typedef iree_status_t (*loom_low_emission_frame_lower_spill_traffic_fn_t)(
 // target-independent packet addressability has already been checked.
 typedef iree_status_t (*loom_low_emission_frame_validate_fn_t)(
     void* user_data, const loom_low_emission_frame_t* frame,
-    iree_arena_allocator_t* arena);
+    iree_arena_allocator_t* arena, bool* out_accepted);
 
 // Options controlling final spill-free emission frame construction.
 typedef struct loom_low_emission_frame_spill_free_options_t {
@@ -155,12 +155,15 @@ typedef struct loom_low_emission_frame_spill_free_options_t {
 
 // Schedules, allocates, and validates one target-low function for target
 // emitters. |arena| must outlive |out_frame|. Schedule or allocation
-// diagnostics may return a partial frame with the corresponding table
-// |error_count| set; later emission stages have not consumed that frame.
+// diagnostics return a partial frame with the corresponding table |error_count|
+// set and |out_accepted| false; later emission stages have not consumed that
+// frame. Infrastructure failures return a status and also leave
+// |out_accepted| false.
 iree_status_t loom_low_emission_frame_build(
     loom_module_t* module, loom_op_t* low_func_op,
     const loom_low_emission_frame_options_t* options,
-    iree_arena_allocator_t* arena, loom_low_emission_frame_t* out_frame);
+    iree_arena_allocator_t* arena, loom_low_emission_frame_t* out_frame,
+    bool* out_accepted);
 
 // Builds an emission frame and greedily materializes target-lowerable spill
 // traffic until the final frame contains no spill assignments or spill plans.
@@ -170,18 +173,17 @@ iree_status_t loom_low_emission_frame_build(
 // Individual plan traffic is recomputed from the current IR while consuming
 // that batch because earlier spill rewrites can make later allocation-time
 // traffic predictions stale.
-// Materialization, final addressability, and final-frame validation
-// diagnostics follow the normal target-entry convention: if an error diagnostic
-// is emitted, the function returns OK and the caller must check its diagnostic
-// emitter before consuming the frame. Allocation diagnostics may return a
+// Materialization, final addressability, and final-frame validation diagnostics
+// return OK with |out_accepted| false. Allocation diagnostics may return a
 // partial frame containing the schedule and allocation failure table for
-// reporting; later emission stages have not validated that frame.
-// |frame_options->emitter| must be initialized.
+// reporting; later emission stages have not validated that frame. A diagnostic
+// emitter is optional and does not control the semantic result.
 iree_status_t loom_low_emission_frame_build_spill_free(
     loom_module_t* module, loom_op_t* low_func_op,
     const loom_low_emission_frame_options_t* frame_options,
     const loom_low_emission_frame_spill_free_options_t* spill_free_options,
-    iree_arena_allocator_t* arena, loom_low_emission_frame_t* out_frame);
+    iree_arena_allocator_t* arena, loom_low_emission_frame_t* out_frame,
+    bool* out_accepted);
 
 #ifdef __cplusplus
 }  // extern "C"

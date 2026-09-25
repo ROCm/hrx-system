@@ -285,7 +285,8 @@ static iree_status_t loom_wasm_module_build_function_allocation(
     loom_module_t* module, loom_op_t* function_op,
     const loom_low_descriptor_registry_t* descriptor_registry,
     iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
-    loom_low_allocation_table_t* out_allocation) {
+    loom_low_allocation_table_t* out_allocation, bool* out_accepted) {
+  *out_accepted = false;
   loom_low_function_model_t model = {0};
   iree_status_t status = loom_low_function_model_initialize(
       module, function_op,
@@ -303,12 +304,18 @@ static iree_status_t loom_wasm_module_build_function_allocation(
                                                   diagnostic_emitter);
   }
   loom_low_function_model_deinitialize(&model);
+  if (iree_status_is_ok(status) && out_allocation->error_count != 0) {
+    return iree_ok_status();
+  }
   if (iree_status_is_ok(status) &&
       out_allocation->target.descriptor_set !=
           loom_wasm_core_simd128_descriptor_set()) {
     status = iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "Wasm module emission requires descriptor set 'wasm.core.simd128'");
+  }
+  if (iree_status_is_ok(status)) {
+    *out_accepted = true;
   }
   return status;
 }
@@ -317,15 +324,21 @@ static iree_status_t loom_wasm_module_prepare_function(
     loom_wasm_module_layout_t* layout, loom_wasm_module_function_t* function,
     loom_module_t* module,
     const loom_low_descriptor_registry_t* descriptor_registry,
-    iree_diagnostic_emitter_t diagnostic_emitter,
-    iree_arena_allocator_t* arena) {
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
+    bool* out_accepted) {
+  *out_accepted = false;
+  bool allocation_accepted = false;
   IREE_RETURN_IF_ERROR(loom_wasm_module_build_function_allocation(
       module, function->symbol->defining_op, descriptor_registry,
-      diagnostic_emitter, arena, &function->allocation));
+      diagnostic_emitter, arena, &function->allocation, &allocation_accepted));
+  if (!allocation_accepted) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(loom_wasm_module_build_function_type(
       &function->allocation, arena, &function->type));
   IREE_RETURN_IF_ERROR(loom_wasm_module_intern_function_type(
       layout, &function->type, &function->type_index));
+  *out_accepted = true;
   return iree_ok_status();
 }
 
@@ -333,7 +346,8 @@ static iree_status_t loom_wasm_module_collect_functions(
     loom_module_t* module,
     const loom_low_descriptor_registry_t* descriptor_registry,
     iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
-    loom_wasm_module_layout_t* out_layout) {
+    loom_wasm_module_layout_t* out_layout, bool* out_accepted) {
+  *out_accepted = false;
   *out_layout = (loom_wasm_module_layout_t){
       .module = module,
   };
@@ -395,9 +409,13 @@ static iree_status_t loom_wasm_module_collect_functions(
     if (!iree_string_view_is_empty(function->export_name)) {
       ++out_layout->export_count;
     }
+    bool function_accepted = false;
     IREE_RETURN_IF_ERROR(loom_wasm_module_prepare_function(
         out_layout, function, module, descriptor_registry, diagnostic_emitter,
-        arena));
+        arena, &function_accepted));
+    if (!function_accepted) {
+      return iree_ok_status();
+    }
     ++out_layout->function_count;
   }
 
@@ -406,6 +424,7 @@ static iree_status_t loom_wasm_module_collect_functions(
                             "Wasm module emission requires at least one "
                             "low.func.def");
   }
+  *out_accepted = true;
   return iree_ok_status();
 }
 
@@ -722,57 +741,63 @@ iree_status_t loom_wasm_emit_low_module(
     loom_module_t* module,
     const loom_low_descriptor_registry_t* descriptor_registry,
     iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
-    iree_allocator_t allocator, loom_wasm_module_binary_t* out_module) {
+    iree_allocator_t allocator, bool* out_emitted,
+    loom_wasm_module_binary_t* out_module) {
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(descriptor_registry);
   IREE_ASSERT_ARGUMENT(arena);
+  IREE_ASSERT_ARGUMENT(out_emitted);
   IREE_ASSERT_ARGUMENT(out_module);
+  *out_emitted = false;
   *out_module = (loom_wasm_module_binary_t){0};
 
   loom_wasm_module_layout_t layout = {0};
+  bool layout_accepted = false;
   iree_status_t status = loom_wasm_module_collect_functions(
-      module, descriptor_registry, diagnostic_emitter, arena, &layout);
-  if (iree_status_is_ok(status)) {
+      module, descriptor_registry, diagnostic_emitter, arena, &layout,
+      &layout_accepted);
+  if (iree_status_is_ok(status) && layout_accepted) {
     status = loom_wasm_module_emit_function_bodies(&layout, allocator);
   }
 
   loom_wasm_binary_writer_t module_writer;
   loom_wasm_binary_writer_initialize(allocator, &module_writer);
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && layout_accepted) {
     status = loom_wasm_module_write_header(&module_writer);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && layout_accepted) {
     status =
         loom_wasm_module_write_type_section(&layout, &module_writer, allocator);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && layout_accepted) {
     status = loom_wasm_module_write_function_section(&layout, &module_writer,
                                                      allocator);
   }
-  if (iree_status_is_ok(status) &&
+  if (iree_status_is_ok(status) && layout_accepted &&
       iree_any_bit_set(layout.flags,
                        LOOM_WASM_MODULE_BINARY_FLAG_DEFINES_MEMORY)) {
     status = loom_wasm_module_write_memory_section(&module_writer, allocator);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && layout_accepted) {
     status = loom_wasm_module_write_export_section(&layout, &module_writer,
                                                    allocator);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && layout_accepted) {
     status =
         loom_wasm_module_write_code_section(&layout, &module_writer, allocator);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && layout_accepted) {
     status =
         loom_wasm_module_write_name_section(&layout, &module_writer, allocator);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && layout_accepted) {
     *out_module = (loom_wasm_module_binary_t){
         .data = module_writer.data,
         .data_length = module_writer.length,
         .flags = layout.flags,
     };
     module_writer.data = NULL;
+    *out_emitted = true;
   }
 
   loom_wasm_binary_writer_deinitialize(&module_writer);

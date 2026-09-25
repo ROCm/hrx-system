@@ -206,9 +206,11 @@ typedef struct loom_target_emit_request_t {
   iree_allocator_t allocator;
 } loom_target_emit_request_t;
 
-// Emits one target artifact from prepared target-low IR.
+// Emits one target artifact from prepared target-low IR. Structured semantic
+// rejection returns OK with |out_emitted| false and no artifact. Infrastructure
+// and output failures return a status and also leave |out_emitted| false.
 typedef iree_status_t (*loom_target_emit_fn_t)(
-    const loom_target_emit_request_t* request,
+    const loom_target_emit_request_t* request, bool* out_emitted,
     loom_target_emit_artifact_t* out_artifact);
 
 // Target-owned emission backend linked into a binary or embedding.

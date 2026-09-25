@@ -123,9 +123,11 @@ low.func.def target<test.low.core> @subtrees(%condition: reg<test.i32>, %lhs: re
   options.descriptor_registry = &registry_.registry;
   options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY;
   loom_low_emission_frame_t frame = {};
+  bool frame_accepted = false;
   IREE_ASSERT_OK(loom_low_emission_frame_build(
       module.get(), loom_block_op(loom_module_block(module.get()), 0), &options,
-      &arena_, &frame));
+      &arena_, &frame, &frame_accepted));
+  ASSERT_TRUE(frame_accepted);
   ASSERT_EQ(frame.allocation.error_count, 0u);
   ASSERT_GT(frame.allocation.liveness.operation_count,
             frame.schedule.node_count);
@@ -167,9 +169,11 @@ low.func.def target<test.low.core> @reordered(%lhs: reg<test.i32>, %rhs: reg<tes
   options.descriptor_registry = &registry_.registry;
   options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL;
   loom_low_emission_frame_t frame = {};
+  bool frame_accepted = false;
   IREE_ASSERT_OK(loom_low_emission_frame_build(
       module.get(), loom_block_op(loom_module_block(module.get()), 0), &options,
-      &arena_, &frame));
+      &arena_, &frame, &frame_accepted));
+  ASSERT_TRUE(frame_accepted);
   ASSERT_EQ(frame.allocation.error_count, 0u);
   ASSERT_LT(frame.schedule.nodes[2].scheduled_ordinal,
             frame.schedule.nodes[1].scheduled_ordinal);
@@ -213,8 +217,10 @@ low.func.def target<test.low.core> @swap(%lhs: reg<test.phys>, %rhs: reg<test.ph
   options.allocation_fixed_values = fixed_values;
   options.allocation_fixed_value_count = IREE_ARRAYSIZE(fixed_values);
   loom_low_emission_frame_t frame = {};
-  IREE_ASSERT_OK(loom_low_emission_frame_build(module.get(), function, &options,
-                                               &arena_, &frame));
+  bool frame_accepted = false;
+  IREE_ASSERT_OK(loom_low_emission_frame_build(
+      module.get(), function, &options, &arena_, &frame, &frame_accepted));
+  ASSERT_TRUE(frame_accepted);
   ASSERT_EQ(frame.allocation.error_count, 0u);
   EXPECT_EQ(frame.allocation.placement.max_move_group_unit_count, 2u);
   EXPECT_EQ(frame.allocation.placement.packet_move_unit_count, 2u);

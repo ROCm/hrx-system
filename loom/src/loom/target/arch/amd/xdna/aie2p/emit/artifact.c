@@ -249,7 +249,8 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
     const loom_aie2p_xdna_artifact_request_t* request,
     const loom_aie2p_array_plan_t* plan,
     const loom_aie2p_array_resident_program_t* resident_program,
-    loom_aie2p_xdna_tile_t** out_tiles) {
+    loom_aie2p_xdna_tile_t** out_tiles, bool* out_compiled) {
+  *out_compiled = false;
   *out_tiles = NULL;
   loom_aie2p_xdna_tile_t* tiles = NULL;
   loom_aie2p_leaf_contribution_t* contributions = NULL;
@@ -284,9 +285,10 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
         .diagnostic_emitter = request->diagnostic_emitter,
         .compile_report = worker_report_ptr,
     };
+    bool leaf_compiled = false;
     iree_status_t status = loom_aie2p_leaf_compile(
         request->module, resident->function_op, &worker_compile_options,
-        request->scratch_arena, contribution);
+        request->scratch_arena, &leaf_compiled, contribution);
     if (worker_report_ptr != NULL) {
       status = iree_status_join(
           status, loom_target_compile_report_record_entry_report(
@@ -294,6 +296,9 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
       loom_target_compile_report_deinitialize(worker_report_ptr);
     }
     IREE_RETURN_IF_ERROR(status);
+    if (!leaf_compiled) {
+      return iree_ok_status();
+    }
     if (contribution->realization.resource_import_count != 0) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
@@ -314,17 +319,20 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
     };
   }
   *out_tiles = tiles;
+  *out_compiled = true;
   return iree_ok_status();
 }
 
 iree_status_t loom_aie2p_xdna_artifact_emit(
-    const loom_aie2p_xdna_artifact_request_t* request,
+    const loom_aie2p_xdna_artifact_request_t* request, bool* out_emitted,
     iree_byte_sequence_t** out_contents) {
   IREE_ASSERT_ARGUMENT(request);
   IREE_ASSERT_ARGUMENT(request->module);
   IREE_ASSERT_ARGUMENT(request->low_descriptor_registry);
   IREE_ASSERT_ARGUMENT(request->scratch_arena);
+  IREE_ASSERT_ARGUMENT(out_emitted);
   IREE_ASSERT_ARGUMENT(out_contents);
+  *out_emitted = false;
   *out_contents = NULL;
 
   loom_aie2p_xdna_source_entry_t* source_entries = NULL;
@@ -377,8 +385,12 @@ iree_status_t loom_aie2p_xdna_artifact_emit(
         request->module, &array_plans[i], request->function_versions,
         request->scratch_arena, &resident_program));
     loom_aie2p_xdna_tile_t* tiles = NULL;
+    bool tiles_compiled = false;
     IREE_RETURN_IF_ERROR(loom_aie2p_xdna_compile_resident_tiles(
-        request, &array_plans[i], &resident_program, &tiles));
+        request, &array_plans[i], &resident_program, &tiles, &tiles_compiled));
+    if (!tiles_compiled) {
+      return iree_ok_status();
+    }
     IREE_RETURN_IF_ERROR(loom_aie2p_array_report_record(
         request->module, source_entry->name, &array_plans[i], tiles,
         request->compile_report, request->scratch_arena));
@@ -420,6 +432,7 @@ iree_status_t loom_aie2p_xdna_artifact_emit(
   if (iree_status_is_ok(status)) {
     *out_contents = contents;
     contents = NULL;
+    *out_emitted = true;
   }
   iree_byte_sequence_release(contents);
   iree_io_stream_release(stream);
@@ -427,8 +440,9 @@ iree_status_t loom_aie2p_xdna_artifact_emit(
 }
 
 static iree_status_t loom_aie2p_xdna_emit_target_artifact(
-    const loom_target_emit_request_t* request,
+    const loom_target_emit_request_t* request, bool* out_emitted,
     loom_target_emit_artifact_t* out_artifact) {
+  *out_emitted = false;
   *out_artifact = (loom_target_emit_artifact_t){0};
   if (request->artifact_manifest.mode !=
       LOOM_TARGET_ARTIFACT_MANIFEST_MODE_NONE) {
@@ -446,8 +460,11 @@ static iree_status_t loom_aie2p_xdna_emit_target_artifact(
       .scratch_arena = request->scratch_arena,
       .allocator = request->allocator,
   };
-  IREE_RETURN_IF_ERROR(loom_aie2p_xdna_artifact_emit(&artifact_request,
-                                                     &out_artifact->contents));
+  IREE_RETURN_IF_ERROR(loom_aie2p_xdna_artifact_emit(
+      &artifact_request, out_emitted, &out_artifact->contents));
+  if (!*out_emitted) {
+    return iree_ok_status();
+  }
   out_artifact->target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF;
   return iree_ok_status();
 }

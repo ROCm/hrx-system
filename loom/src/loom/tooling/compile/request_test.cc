@@ -77,9 +77,10 @@ static iree_status_t SelectTargetProfile(
 }
 
 static iree_status_t EmitDiagnosticFormat(
-    const loom_target_emit_request_t* request,
+    const loom_target_emit_request_t* request, bool* out_emitted,
     loom_target_emit_artifact_t* out_artifact) {
   (void)request;
+  *out_emitted = false;
   *out_artifact = {};
   return iree_ok_status();
 }

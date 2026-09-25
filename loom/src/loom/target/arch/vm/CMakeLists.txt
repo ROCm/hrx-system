@@ -80,7 +80,6 @@ loom_cc_library(
     loom::codegen::low::allocation::move_sequence
     loom::codegen::low::frame
     loom::codegen::low::storage_layout
-    loom::error::error_defs
     loom::ir
     loom::ops::global
     loom::ops::low

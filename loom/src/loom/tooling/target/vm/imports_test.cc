@@ -460,7 +460,10 @@ class VMSourceCaptureTest : public VMImportsTest {
     emission.scratch_arena = &arena;
     emission.allocator = iree_allocator_system();
     loom_target_emit_artifact_t artifact;
-    IREE_ASSERT_OK(loom_vm_module_emit(&emission, &artifact));
+    bool artifact_emitted = false;
+    IREE_ASSERT_OK(
+        loom_vm_module_emit(&emission, &artifact_emitted, &artifact));
+    ASSERT_TRUE(artifact_emitted);
     iree_byte_span_t image;
     IREE_ASSERT_OK(iree_byte_sequence_clone(artifact.contents,
                                             iree_allocator_system(), &image));

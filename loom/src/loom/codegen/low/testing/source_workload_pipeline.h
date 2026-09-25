@@ -69,11 +69,15 @@ typedef struct loom_low_source_workload_pipeline_counters_t {
 
 // Runs the generated workload through source verification, source-to-low
 // lowering, low verification, packetization, scheduling, and allocation.
+// |out_accepted| is true only when every generated function produced an
+// accepted emission frame. Infrastructure failures return a status and leave
+// it false.
 iree_status_t loom_low_source_workload_run_pipeline(
     loom_module_t* module,
     const loom_low_source_workload_pipeline_options_t* options,
     iree_arena_block_pool_t* block_pool,
-    loom_low_source_workload_pipeline_counters_t* out_counters);
+    loom_low_source_workload_pipeline_counters_t* out_counters,
+    bool* out_accepted);
 
 #ifdef __cplusplus
 }  // extern "C"

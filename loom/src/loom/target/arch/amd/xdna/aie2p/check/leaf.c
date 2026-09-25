@@ -101,9 +101,11 @@ static iree_status_t loom_aie2p_leaf_check_execute(
   options.compile_report =
       report_kind == LOOM_AIE2P_LEAF_CHECK_REPORT_EMISSION ? &report : NULL;
   loom_aie2p_leaf_contribution_t contribution = {0};
-  iree_status_t status = loom_aie2p_leaf_compile(
-      request->module, function, &options, request->case_arena, &contribution);
-  if (iree_status_is_ok(status) &&
+  bool compiled = false;
+  iree_status_t status =
+      loom_aie2p_leaf_compile(request->module, function, &options,
+                              request->case_arena, &compiled, &contribution);
+  if (iree_status_is_ok(status) && compiled &&
       report_kind == LOOM_AIE2P_LEAF_CHECK_REPORT_EMISSION) {
     status = iree_string_builder_append_format(
         &request->result->actual_output,
@@ -114,13 +116,10 @@ static iree_status_t loom_aie2p_leaf_check_execute(
         report.emission_breakdown.coissued_component_count);
   }
   loom_target_compile_report_deinitialize(&report);
-  if (iree_status_is_failed_precondition(status) &&
-      request->diagnostic_collector->count != 0) {
-    // The structured allocation diagnostic is the checked result.
-    iree_status_free(status);
+  IREE_RETURN_IF_ERROR(status);
+  if (!compiled) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(status);
   if (report_kind == LOOM_AIE2P_LEAF_CHECK_REPORT_CODE) {
     const loom_native_object_symbol_t* entry =
         &contribution.object

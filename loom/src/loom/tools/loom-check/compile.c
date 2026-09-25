@@ -43,7 +43,7 @@ static iree_status_t loom_check_compile_emit(
     const loom_compile_request_t* request, loom_module_t* module,
     const loom_compile_pipeline_options_t* pipeline_options,
     const loom_compile_pipeline_result_t* pipeline_result,
-    iree_arena_allocator_t* arena, iree_allocator_t allocator,
+    iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     bool* out_compiled) {
   *out_compiled = false;
   loom_compile_options_t compile_options;
@@ -81,6 +81,11 @@ static iree_status_t loom_check_compile_emit(
   loom_target_entry_diagnostic_emitter_t diagnostic_emitter;
   loom_target_entry_diagnostic_emitter_initialize(
       module, &entry_options, LOOM_EMITTER_VERIFIER, &diagnostic_emitter);
+  // Emitted diagnostics live in the collector arena. Target emitters may
+  // rewind their scratch arena before returning, so the two lifetimes must not
+  // alias.
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(block_pool, &scratch_arena);
   const loom_target_emit_request_t emit_request = {
       .target_environment = pipeline_options->target_environment,
       .low_descriptor_registry =
@@ -89,17 +94,17 @@ static iree_status_t loom_check_compile_emit(
       .function_versions = compile_options.function_versions,
       .identifier = emitter->default_identifier,
       .diagnostic_emitter = loom_target_entry_emitter(&diagnostic_emitter),
-      .scratch_arena = arena,
+      .scratch_arena = &scratch_arena,
       .allocator = allocator,
   };
   loom_target_emit_artifact_t artifact = {0};
-  iree_status_t status = emitter->emit(&emit_request, &artifact);
+  bool emitted = false;
+  iree_status_t status = emitter->emit(&emit_request, &emitted, &artifact);
   if (iree_status_is_ok(status)) {
-    *out_compiled = diagnostic_emitter.error_count == 0 &&
-                    artifact.contents != NULL &&
-                    iree_byte_sequence_length(artifact.contents) > 0;
+    *out_compiled = emitted;
   }
   loom_target_emit_artifact_release(&artifact);
+  iree_arena_deinitialize(&scratch_arena);
   return status;
 }
 
@@ -151,8 +156,8 @@ static iree_status_t loom_check_compile_request(
       collector->error_count == initial_error_count) {
     bool compiled = false;
     status = loom_check_compile_emit(request, module, pipeline_options,
-                                     &pipeline_result, collector->arena,
-                                     allocator, &compiled);
+                                     &pipeline_result, block_pool, allocator,
+                                     &compiled);
     if (iree_status_is_ok(status) && !compiled &&
         collector->error_count == initial_error_count) {
       status = iree_make_status(

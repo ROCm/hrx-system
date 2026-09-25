@@ -347,10 +347,8 @@ static iree_status_t loom_low_emission_frame_validate_final(
     *out_accepted = true;
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(
-      options->validate_frame(options->validate_frame_user_data, frame, arena));
-  *out_accepted = true;
-  return iree_ok_status();
+  return options->validate_frame(options->validate_frame_user_data, frame,
+                                 arena, out_accepted);
 }
 
 static uint64_t loom_low_emission_frame_residency_resource_units(
@@ -586,7 +584,9 @@ static iree_status_t loom_low_emission_frame_try_guarded_motion(
 iree_status_t loom_low_emission_frame_build(
     loom_module_t* module, loom_op_t* low_func_op,
     const loom_low_emission_frame_options_t* options,
-    iree_arena_allocator_t* arena, loom_low_emission_frame_t* out_frame) {
+    iree_arena_allocator_t* arena, loom_low_emission_frame_t* out_frame,
+    bool* out_accepted) {
+  *out_accepted = false;
   loom_low_planning_statistics_t* statistics = options->statistics;
   if (statistics != NULL) {
     *statistics = (loom_low_planning_statistics_t){0};
@@ -623,6 +623,10 @@ iree_status_t loom_low_emission_frame_build(
   iree_arena_deinitialize(&repair_arena);
   if (iree_status_is_ok(status)) {
     status = loom_low_emission_frame_emit_diagnostics(options, out_frame);
+  }
+  if (iree_status_is_ok(status) && out_frame->schedule.error_count == 0 &&
+      out_frame->allocation.error_count == 0) {
+    *out_accepted = true;
   }
   if (statistics != NULL) {
     loom_low_emission_frame_record_arena_high_water(
@@ -732,7 +736,7 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
     const iree_arena_checkpoint_t* frame_checkpoint,
     iree_arena_allocator_t* repair_arena, iree_arena_allocator_t* scratch_arena,
     iree_arena_allocator_t* arena, loom_low_planning_statistics_t* statistics,
-    loom_low_emission_frame_t* out_frame) {
+    loom_low_emission_frame_t* out_frame, bool* out_accepted) {
   *out_frame = (loom_low_emission_frame_t){0};
   if (spill_free_options == NULL) {
     return iree_make_status(
@@ -862,6 +866,7 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
           loom_low_emission_frame_apply_materialization_summary(
               &materialization_summary, arena, &frame));
       *out_frame = frame;
+      *out_accepted = true;
       return iree_ok_status();
     }
     if (frame.allocation.spill_plan_count == 0) {
@@ -985,9 +990,10 @@ iree_status_t loom_low_emission_frame_build_spill_free(
     loom_module_t* module, loom_op_t* low_func_op,
     const loom_low_emission_frame_options_t* frame_options,
     const loom_low_emission_frame_spill_free_options_t* spill_free_options,
-    iree_arena_allocator_t* arena, loom_low_emission_frame_t* out_frame) {
+    iree_arena_allocator_t* arena, loom_low_emission_frame_t* out_frame,
+    bool* out_accepted) {
   IREE_ASSERT_ARGUMENT(frame_options);
-  IREE_ASSERT(frame_options->emitter.fn != NULL);
+  *out_accepted = false;
   loom_low_planning_statistics_t* statistics = frame_options->statistics;
   if (statistics != NULL) {
     *statistics = (loom_low_planning_statistics_t){0};
@@ -1007,7 +1013,8 @@ iree_status_t loom_low_emission_frame_build_spill_free(
   iree_arena_initialize(arena->block_pool, &scratch_arena);
   iree_status_t status = loom_low_emission_frame_build_spill_free_impl(
       module, low_func_op, frame_options, spill_free_options, &frame_checkpoint,
-      &repair_arena, &scratch_arena, arena, statistics, out_frame);
+      &repair_arena, &scratch_arena, arena, statistics, out_frame,
+      out_accepted);
   loom_low_emission_frame_record_memory_high_water(
       &frame_checkpoint, &repair_arena, &scratch_arena, statistics);
   iree_arena_deinitialize(&scratch_arena);

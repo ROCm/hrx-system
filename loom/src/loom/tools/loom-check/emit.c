@@ -1256,9 +1256,11 @@ static iree_status_t loom_check_emit_write_low_packet_json(
       .emitter = emitter,
   };
   loom_low_emission_frame_t frame = {0};
-  IREE_RETURN_IF_ERROR(loom_low_emission_frame_build(
-      module, low_function, &frame_options, analysis_arena, &frame));
-  if (frame.schedule.error_count != 0 || frame.allocation.error_count != 0) {
+  bool frame_accepted = false;
+  IREE_RETURN_IF_ERROR(
+      loom_low_emission_frame_build(module, low_function, &frame_options,
+                                    analysis_arena, &frame, &frame_accepted));
+  if (!frame_accepted) {
     return iree_ok_status();
   }
   const loom_target_low_packet_diagnostics_options_t diagnostic_options = {

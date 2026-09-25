@@ -619,7 +619,8 @@ static iree_status_t loom_vm_module_write_metadata(
 
 static iree_status_t loom_vm_module_write(
     const loom_target_emit_request_t* request, loom_vm_module_plan_t functions,
-    iree_io_stream_t* stream) {
+    iree_io_stream_t* stream, bool* out_emitted) {
+  *out_emitted = false;
   iree_vm_bytecode_v0_section_directory_row_t directory[8] = {0};
   uint16_t section = 0;
   // Keys, hash buckets and sorted metadata views die before function scratch.
@@ -652,7 +653,9 @@ static iree_status_t loom_vm_module_write(
     iree_arena_initialize(request->scratch_arena->block_pool, &function_arena);
     loom_target_emit_request_t function_request = *request;
     function_request.scratch_arena = &function_arena;
-    for (uint32_t i = 0; i < functions.count && iree_status_is_ok(status);
+    bool functions_emitted = true;
+    for (uint32_t i = 0;
+         i < functions.count && iree_status_is_ok(status) && functions_emitted;
          ++i) {
       const loom_vm_module_callable_t* entry = &functions.values[i];
       if (entry->target_kind != IREE_VM_BYTECODE_CONTROL_CALL_TARGET_LOCAL) {
@@ -669,21 +672,27 @@ static iree_status_t loom_vm_module_write(
           .callable_type_ordinal_u16 = entry->callable_ordinal,
           .bytecode_offset_u32 = (uint32_t)offset,
       };
-      status = loom_vm_function_emit(&function_request, entry->function,
-                                     entry->function_version, &entry->signature,
-                                     &functions, stream, &row);
+      bool function_emitted = false;
+      status = loom_vm_function_emit(
+          &function_request, entry->function, entry->function_version,
+          &entry->signature, &functions, stream, &function_emitted, &row);
       iree_arena_reset(&function_arena);
-      if (iree_status_is_ok(status)) {
+      if (iree_status_is_ok(status) && function_emitted) {
         functions_header.maximum_block_count_u32 = iree_max(
             functions_header.maximum_block_count_u32, row.block_count_u32);
         status = loom_vm_stream_patch(
             stream,
             start + sizeof(functions_header) + entry->ordinal * sizeof(row),
             iree_make_const_byte_span(&row, sizeof(row)));
+      } else if (iree_status_is_ok(status)) {
+        functions_emitted = false;
       }
     }
     iree_arena_deinitialize(&function_arena);
     IREE_RETURN_IF_ERROR(status);
+    if (!functions_emitted) {
+      return iree_ok_status();
+    }
     directory[section++].byte_length_u64 =
         iree_io_stream_offset(stream) - start;
     IREE_RETURN_IF_ERROR(
@@ -736,13 +745,17 @@ static iree_status_t loom_vm_module_write(
     directory[section++].byte_length_u64 =
         iree_io_stream_offset(stream) - start;
   }
-  return loom_vm_stream_patch(
+  IREE_RETURN_IF_ERROR(loom_vm_stream_patch(
       stream, sizeof(iree_vm_bytecode_v0_image_header_t),
-      iree_make_const_byte_span(directory, section * sizeof(directory[0])));
+      iree_make_const_byte_span(directory, section * sizeof(directory[0]))));
+  *out_emitted = true;
+  return iree_ok_status();
 }
 
 iree_status_t loom_vm_module_emit(const loom_target_emit_request_t* request,
+                                  bool* out_emitted,
                                   loom_target_emit_artifact_t* out_artifact) {
+  *out_emitted = false;
   *out_artifact = (loom_target_emit_artifact_t){0};
   const iree_arena_checkpoint_t checkpoint =
       iree_arena_checkpoint_save(request->scratch_arena);
@@ -754,15 +767,17 @@ iree_status_t loom_vm_module_emit(const loom_target_emit_request_t* request,
         IREE_IO_STREAM_MODE_WRITABLE | IREE_IO_STREAM_MODE_SEEKABLE, 32 * 1024,
         request->allocator, &stream);
   }
+  bool module_emitted = false;
   if (iree_status_is_ok(status)) {
-    status = loom_vm_module_write(request, functions, stream);
+    status = loom_vm_module_write(request, functions, stream, &module_emitted);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && module_emitted) {
     status = iree_io_vec_stream_move_contents(stream, &out_artifact->contents);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && module_emitted) {
     out_artifact->target_artifact_format =
         LOOM_TARGET_ARTIFACT_FORMAT_VM_BINARY;
+    *out_emitted = true;
   }
   iree_io_stream_release(stream);
   iree_arena_checkpoint_restore(&checkpoint);

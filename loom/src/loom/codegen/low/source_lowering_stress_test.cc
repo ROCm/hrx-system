@@ -73,8 +73,11 @@ TEST_F(SourceLoweringStressTest, GeneratedSupportedSourceLowersAndPacketizes) {
       ModulePtr module(module_raw);
 
       loom_low_source_workload_pipeline_counters_t counters = {};
+      bool pipeline_accepted = false;
       IREE_ASSERT_OK(loom_low_source_workload_run_pipeline(
-          module.get(), &pipeline_options, &block_pool_, &counters));
+          module.get(), &pipeline_options, &block_pool_, &counters,
+          &pipeline_accepted));
+      ASSERT_TRUE(pipeline_accepted);
       EXPECT_EQ(counters.lower_error_count, 0u);
       loom_low_source_workload_counts_accumulate(&aggregate.source_counts,
                                                  &counters.source_counts);
@@ -132,8 +135,11 @@ TEST_F(SourceLoweringStressTest, CopiedDestructiveResultKeepsStorageIdentity) {
       /*.schedule_strategy=*/LOOM_LOW_SCHEDULE_STRATEGY_PRESSURE,
   };
   loom_low_source_workload_pipeline_counters_t counters = {};
+  bool pipeline_accepted = false;
   IREE_ASSERT_OK(loom_low_source_workload_run_pipeline(
-      module.get(), &pipeline_options, &block_pool_, &counters));
+      module.get(), &pipeline_options, &block_pool_, &counters,
+      &pipeline_accepted));
+  ASSERT_TRUE(pipeline_accepted);
   EXPECT_EQ(counters.allocation_check_count, 1u);
 }
 
@@ -179,10 +185,12 @@ TEST_F(SourceLoweringStressTest, PreparationDiagnosticStopsBeforeAllocation) {
       0, &workload_config, &context_, &block_pool_, &module_raw));
   ModulePtr module(module_raw);
   loom_low_source_workload_pipeline_counters_t counters = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_low_source_workload_run_pipeline(module.get(), &pipeline_options,
-                                            &block_pool_, &counters));
+  bool pipeline_accepted = true;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_source_workload_run_pipeline(
+                            module.get(), &pipeline_options, &block_pool_,
+                            &counters, &pipeline_accepted));
+  EXPECT_FALSE(pipeline_accepted);
   EXPECT_EQ(counters.lower_error_count, 0u);
   EXPECT_EQ(counters.low_descriptor_op_count, 0u);
   EXPECT_EQ(counters.allocation_check_count, 0u);

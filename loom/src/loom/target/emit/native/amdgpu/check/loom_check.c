@@ -483,6 +483,7 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_loom_check_parse_emit_options(request, &options));
   loom_low_emission_frame_t frame = {0};
+  bool frame_accepted = false;
   loom_symbol_fact_table_t symbol_facts = {0};
   loom_symbol_fact_table_initialize(&symbol_facts, request->case_arena);
   loom_amdgpu_loom_check_spill_lowering_context_t spill_lowering_context = {
@@ -525,12 +526,13 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
       options.allocation_fixed_value_specs,
       options.allocation_fixed_value_spec_count, residency_model,
       schedule_pair_affinities, schedule_state_reads,
-      selected_storage_lease_provider, &spill_free_options, &frame));
+      selected_storage_lease_provider, &spill_free_options, &frame,
+      &frame_accepted));
   if (request->diagnostic_collector != NULL &&
       request->diagnostic_collector->count != 0) {
     return iree_ok_status();
   }
-  if (frame.schedule.error_count != 0 || frame.allocation.error_count != 0) {
+  if (!frame_accepted) {
     return iree_ok_status();
   }
   if (iree_string_view_equal(request->target_name, IREE_SV("amdgpu-native"))) {

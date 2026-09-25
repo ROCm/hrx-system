@@ -501,7 +501,8 @@ iree_status_t loom_check_low_emit_packetize_function(
         schedule_structural_state_reads,
     const loom_low_storage_lease_provider_t* storage_lease_provider,
     const loom_low_emission_frame_spill_free_options_t* spill_free_options,
-    loom_low_emission_frame_t* out_frame) {
+    loom_low_emission_frame_t* out_frame, bool* out_accepted) {
+  *out_accepted = false;
   loom_check_diagnostic_emitter_capture_t diagnostic_capture = {
       .diagnostic_collector = request->diagnostic_collector,
       .module = request->module,
@@ -553,9 +554,9 @@ iree_status_t loom_check_low_emit_packetize_function(
   if (spill_free_options != NULL) {
     return loom_low_emission_frame_build_spill_free(
         request->module, low_function, &frame_options, spill_free_options,
-        request->case_arena, out_frame);
+        request->case_arena, out_frame, out_accepted);
   }
   return loom_low_emission_frame_build(request->module, low_function,
                                        &frame_options, request->case_arena,
-                                       out_frame);
+                                       out_frame, out_accepted);
 }

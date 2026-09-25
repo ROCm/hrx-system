@@ -639,9 +639,13 @@ static iree_status_t loom_aie2p_array_plan_check_resident_program(
   for (iree_host_size_t i = 0; i < program.worker_count; ++i) {
     const loom_aie2p_array_resident_worker_t* resident = &program.workers[i];
     loom_aie2p_leaf_contribution_t contribution = {0};
+    bool compiled = false;
     IREE_RETURN_IF_ERROR(loom_aie2p_leaf_compile(
         request->module, resident->function_op, &compile_options,
-        request->case_arena, &contribution));
+        request->case_arena, &compiled, &contribution));
+    if (!compiled) {
+      return iree_ok_status();
+    }
     if (contribution.realization.resource_import_count != 0) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,

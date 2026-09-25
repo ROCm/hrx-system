@@ -134,7 +134,9 @@ class VMEmissionTest : public ::testing::Test {
   }
 
   iree_status_t Emit(EmissionAllocator* allocations, iree_host_size_t fail_at,
+                     bool* out_emitted,
                      loom_target_emit_artifact_t* out_artifact) {
+    *out_emitted = false;
     iree_arena_block_pool_t pool;
     iree_arena_block_pool_initialize(128 * 1024, allocations->allocator(),
                                      &pool);
@@ -155,7 +157,7 @@ class VMEmissionTest : public ::testing::Test {
       request.function_versions = &pipeline_.function_versions.list;
       request.scratch_arena = &arena;
       request.allocator = allocations->allocator();
-      status = loom_vm_module_emit(&request, out_artifact);
+      status = loom_vm_module_emit(&request, out_emitted, out_artifact);
       EXPECT_EQ(arena.used_allocation_size, checkpoint.used_allocation_size);
       EXPECT_EQ(arena.total_allocation_size, checkpoint.total_allocation_size);
       for (unsigned i = 0; i < 64; ++i) {
@@ -200,14 +202,17 @@ TEST_F(VMEmissionTest, AllocationFailuresPreserveScratchAndPublishNoArtifact) {
   for (iree_host_size_t fail_at = 0;; ++fail_at) {
     SCOPED_TRACE(fail_at);
     EmissionAllocator allocations;
+    bool emitted = false;
     loom_target_emit_artifact_t artifact = {};
-    iree_status_t status = Emit(&allocations, fail_at, &artifact);
+    iree_status_t status = Emit(&allocations, fail_at, &emitted, &artifact);
     const bool succeeded = iree_status_is_ok(status);
     if (succeeded) {
+      EXPECT_TRUE(emitted);
       // Emission scratch and its entire pool are already destroyed.
       EXPECT_EQ(Clone(artifact), expected);
       EXPECT_GT(fail_at, 0u);
     } else {
+      EXPECT_FALSE(emitted);
       IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
       EXPECT_EQ(artifact.contents, nullptr);
       EXPECT_EQ(artifact.storage, nullptr);
@@ -252,8 +257,10 @@ TEST_P(VMEmissionReferenceScalingTest, WideSignaturesNeedNoOversizedScratch) {
   ASSERT_NO_FATAL_FAILURE(Prepare({source.data(), source.size()}));
   EmissionAllocator allocations;
   allocations.maximum_request = 128 * 1024;
+  bool emitted = false;
   loom_target_emit_artifact_t artifact = {};
-  IREE_ASSERT_OK(Emit(&allocations, IREE_HOST_SIZE_MAX, &artifact));
+  IREE_ASSERT_OK(Emit(&allocations, IREE_HOST_SIZE_MAX, &emitted, &artifact));
+  ASSERT_TRUE(emitted);
   EXPECT_FALSE(Clone(artifact).empty());
   loom_target_emit_artifact_release(&artifact);
   EXPECT_EQ(allocations.live, 0u);

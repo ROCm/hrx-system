@@ -278,8 +278,10 @@ iree_status_t loom_spirv_emit_low_module(
     const loom_low_descriptor_registry_t* descriptor_registry,
     iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_allocator_t* scratch_arena,
-    const loom_spirv_emit_low_module_options_t* options,
+    const loom_spirv_emit_low_module_options_t* options, bool* out_emitted,
     loom_spirv_module_binary_t* out_module, iree_allocator_t allocator) {
+  IREE_ASSERT_ARGUMENT(out_emitted);
+  *out_emitted = false;
   loom_spirv_emit_module_state_t state = {0};
   IREE_RETURN_IF_ERROR(loom_spirv_emit_low_module_options_validate(options));
   IREE_RETURN_IF_ERROR(loom_spirv_emit_low_module_initialize(
@@ -306,6 +308,9 @@ iree_status_t loom_spirv_emit_low_module(
       !iree_any_bit_set(state.flags,
                         LOOM_SPIRV_EMIT_MODULE_STATE_FLAG_INVALID_ENTRY)) {
     status = loom_spirv_emit_module_state_finalize(&state, out_module);
+    if (iree_status_is_ok(status)) {
+      *out_emitted = true;
+    }
   }
   loom_spirv_emit_module_state_deinitialize(&state);
   if (!iree_status_is_ok(status)) {

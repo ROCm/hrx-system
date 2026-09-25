@@ -12,7 +12,6 @@
 #include "loom/codegen/low/allocation/move_sequence.h"
 #include "loom/codegen/low/frame.h"
 #include "loom/codegen/low/storage_layout.h"
-#include "loom/error/error_defs.h"
 #include "loom/ops/global/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/vm/descriptors/descriptors.h"
@@ -701,20 +700,6 @@ static iree_status_t loom_vm_function_storage(
       is_store);
 }
 
-// Frame construction reports target failures as structured diagnostics. The
-// module emitter forwards them and terminates emission on an error, including
-// when its caller has no diagnostic sink.
-static iree_status_t loom_vm_function_diagnostic(
-    void* user_data, const loom_diagnostic_emission_t* emission) {
-  IREE_RETURN_IF_ERROR(iree_diagnostic_emit(
-      *(const iree_diagnostic_emitter_t*)user_data, emission));
-  if (loom_error_def_severity(emission->error) == LOOM_DIAGNOSTIC_ERROR) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "VM frame construction failed");
-  }
-  return iree_ok_status();
-}
-
 // Static register parameters occupy the entry prefix of the local value
 // domain. Unused overflow arguments have no assignment and need no load.
 static iree_status_t loom_vm_function_arguments(
@@ -752,7 +737,8 @@ iree_status_t loom_vm_function_emit(
     const loom_target_function_version_t* function_version,
     const loom_vm_function_signature_t* signature,
     loom_vm_module_plan_t* functions, iree_io_stream_t* stream,
-    iree_vm_bytecode_v0_function_row_t* out_row) {
+    bool* out_emitted, iree_vm_bytecode_v0_function_row_t* out_row) {
+  *out_emitted = false;
   uint16_t argument_count = 0;
   const loom_value_id_t* arguments =
       loom_func_like_arg_ids(function, &argument_count);
@@ -776,7 +762,6 @@ iree_status_t loom_vm_function_emit(
         .location_count = 1,
     };
   }
-  iree_diagnostic_emitter_t diagnostic_emitter = request->diagnostic_emitter;
   const loom_low_emission_frame_options_t options = {
       .descriptor_registry = request->low_descriptor_registry,
       .function_target_facts = function_version != NULL
@@ -787,8 +772,7 @@ iree_status_t loom_vm_function_emit(
       .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY,
       .allocation_fixed_values = fixed_values,
       .allocation_fixed_value_count = fixed_count,
-      .emitter = {.fn = loom_vm_function_diagnostic,
-                  .user_data = &diagnostic_emitter},
+      .emitter = request->diagnostic_emitter,
   };
   const loom_low_emission_frame_spill_free_options_t spill_options = {
       .materialization_options =
@@ -798,9 +782,13 @@ iree_status_t loom_vm_function_emit(
           },
   };
   loom_low_emission_frame_t frame = {0};
+  bool frame_accepted = false;
   IREE_RETURN_IF_ERROR(loom_low_emission_frame_build_spill_free(
       request->module, function.op, &options, &spill_options,
-      request->scratch_arena, &frame));
+      request->scratch_arena, &frame, &frame_accepted));
+  if (!frame_accepted) {
+    return iree_ok_status();
+  }
   const loom_low_storage_layout_space_sizes_t local_storage =
       frame.schedule.requirements.storage_layout.space_sizes;
   if (local_storage.scratch_bytes || local_storage.private_bytes ||
@@ -979,6 +967,9 @@ iree_status_t loom_vm_function_emit(
     if (fixup_count && iree_status_is_ok(status)) {
       status = iree_io_stream_seek(stream, IREE_IO_STREAM_SEEK_SET, end);
     }
+  }
+  if (iree_status_is_ok(status)) {
+    *out_emitted = true;
   }
   return status;
 }

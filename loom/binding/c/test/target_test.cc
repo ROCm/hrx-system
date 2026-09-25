@@ -85,7 +85,9 @@ iree_status_t CreateFakeArtifactContents(iree_const_byte_span_t source,
 }
 
 iree_status_t EmitFakeArtifact(const loom_target_emit_request_t* request,
+                               bool* out_emitted,
                                loom_target_emit_artifact_t* out_artifact) {
+  *out_emitted = false;
   *out_artifact = {};
   if (request->compile_report != nullptr) {
     loom_target_compile_report_record_emission(
@@ -103,6 +105,7 @@ iree_status_t EmitFakeArtifact(const loom_target_emit_request_t* request,
         iree_make_const_byte_span(kContents, sizeof(kContents)),
         request->allocator, &contents));
     out_artifact->contents = contents;
+    *out_emitted = true;
     return iree_ok_status();
   }
 
@@ -134,6 +137,16 @@ iree_status_t EmitFakeArtifact(const loom_target_emit_request_t* request,
   out_artifact->sidecar_count = 1;
   out_artifact->storage = storage;
   out_artifact->release_storage = FakeArtifactSidecarStorageRelease;
+  *out_emitted = true;
+  return iree_ok_status();
+}
+
+iree_status_t RejectFakeArtifact(const loom_target_emit_request_t* request,
+                                 bool* out_emitted,
+                                 loom_target_emit_artifact_t* out_artifact) {
+  (void)request;
+  *out_emitted = false;
+  *out_artifact = {};
   return iree_ok_status();
 }
 
@@ -155,12 +168,25 @@ static const loom_target_emitter_t kFakeWasmEmitter = {
     /*.emit=*/EmitFakeArtifact,
 };
 
+static const loom_target_emitter_t kFakeRejectEmitter = {
+    /*.name=*/{"fake-reject", 11},
+    /*.public_artifact_format=*/{"fake-reject", 11},
+    /*.default_identifier=*/{"rejected.bin", 12},
+    /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_ELF,
+    /*.default_pipeline_options=*/{},
+    /*.emit=*/RejectFakeArtifact,
+};
+
 static const loom_target_emitter_t* const kFakeElfEmitters[] = {
     &kFakeElfEmitter,
 };
 
 static const loom_target_emitter_t* const kFakeWasmEmitters[] = {
     &kFakeWasmEmitter,
+};
+
+static const loom_target_emitter_t* const kFakeRejectEmitters[] = {
+    &kFakeRejectEmitter,
 };
 
 static const loom_target_provider_t kEmptyProvider = {};
@@ -259,6 +285,28 @@ static const loom_target_provider_t kFakeWasmProvider = {
     {
         /*.values=*/kFakeWasmEmitters,
         /*.count=*/IREE_ARRAYSIZE(kFakeWasmEmitters),
+    },
+    /*.canonical_module_emitter=*/nullptr,
+    /*.pass_registry=*/nullptr,
+    /*.contribute_pipeline=*/nullptr,
+};
+
+static const loom_target_provider_t kFakeRejectProvider = {
+    /*.profile_type=*/nullptr,
+    /*.materialize_definition=*/nullptr,
+    /*.register_context=*/nullptr,
+    /*.initialize_low_descriptor_registry=*/nullptr,
+    /*.initialize_low_lower_policy_registry=*/nullptr,
+    /*.initialize_math_policy_registry=*/nullptr,
+    /*.low_legality_provider_list=*/{},
+    /*.legalizer_provider_list=*/{},
+    /*.low_packet_diagnostic_provider_list=*/{},
+    /*.low_asm_diagnostic_provider_list=*/{},
+    /*.low_verify_provider_list=*/{},
+    /*.emitter_list=*/
+    {
+        /*.values=*/kFakeRejectEmitters,
+        /*.count=*/IREE_ARRAYSIZE(kFakeRejectEmitters),
     },
     /*.canonical_module_emitter=*/nullptr,
     /*.pass_registry=*/nullptr,
@@ -550,6 +598,59 @@ TEST(TargetTest, EmitSelectsOnlyLinkedEmitterWhenFormatOmitted) {
   EXPECT_EQ(ToString(artifact->contents), std::string("\x7F"
                                                       "LOM",
                                                       4));
+}
+
+TEST(TargetTest, EmitPreservesSemanticRejectionWithoutInventingDiagnostic) {
+  const loom_target_provider_t* providers[] = {
+      &kFakeRejectProvider,
+  };
+  loom_target_provider_set_t provider_set =
+      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
+  TargetEnvironmentPtr target_environment =
+      CreateTargetEnvironmentFromProviderSet(&provider_set);
+  ContextPtr context = CreateContext();
+  WorkspacePtr workspace = CreateWorkspace();
+  ModulePtr module =
+      CreateIdentityModule(context.get(), workspace.get(), "entry");
+
+  loomc_artifact_manifest_options_t manifest_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS,
+      /*.structure_size=*/sizeof(manifest_options),
+      /*.next=*/nullptr,
+      /*.mode=*/LOOMC_ARTIFACT_MANIFEST_MODE_SUMMARY,
+      /*.identifier=*/loomc_string_view_empty(),
+  };
+  loomc_compile_report_options_t report_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
+      /*.structure_size=*/sizeof(report_options),
+      /*.next=*/&manifest_options,
+      /*.mode=*/LOOMC_COMPILE_REPORT_MODE_SUMMARY,
+      /*.identifier=*/loomc_string_view_empty(),
+  };
+  loomc_emit_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/&report_options,
+      /*.artifact_format=*/loomc_string_view_empty(),
+      /*.identifier=*/loomc_string_view_empty(),
+      /*.artifact_flags=*/0,
+  };
+  ResultPtr result = EmitModule(target_environment.get(), workspace.get(),
+                                module.get(), &options);
+  ASSERT_NE(result, nullptr);
+  EXPECT_FALSE(loomc_result_succeeded(result.get()));
+  EXPECT_EQ(loomc_result_diagnostic_count(result.get()), 0u);
+  ASSERT_EQ(loomc_result_artifact_count(result.get()), 1u);
+  const loomc_artifact_t* report = loomc_result_artifact_at(result.get(), 0);
+  ASSERT_NE(report, nullptr);
+  EXPECT_EQ(report->kind, LOOMC_ARTIFACT_KIND_REPORT);
+  EXPECT_EQ(ToString(report->format),
+            LOOMC_ARTIFACT_FORMAT_COMPILE_REPORT_JSON);
+  const std::string contents = ToString(report->contents);
+  EXPECT_NE(contents.find("\"name\":\"FAILED_PRECONDITION\""),
+            std::string::npos);
+  EXPECT_NE(contents.find("\"backend\":\"fake-reject\""), std::string::npos);
+  EXPECT_EQ(contents.find("\"artifact_size\""), std::string::npos);
 }
 
 TEST(TargetTest, EmitReturnsArtifactManifestSidecar) {

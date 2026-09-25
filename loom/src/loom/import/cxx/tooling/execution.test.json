@@ -117,9 +117,18 @@
       "stderr": {
         "contains": [
           "source/check_cases.h:",
+          "error [LOWERING/036]",
           "vm-math",
-          "return exact_sine_intrinsic(value);",
-          "VM compilation failed"
+          "return exact_sine_intrinsic(value);"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"category\":\"compile_rejected\"",
+          "\"provider\":\"vm\"",
+          "\"stage\":\"pipeline\"",
+          "\"kind\":\"ERR_LOWERING_036\"",
+          "Math legalization policy rejected an operation."
         ]
       }
     },

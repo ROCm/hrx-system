@@ -42,6 +42,14 @@ typedef struct loom_vm_testbench_t {
   const loom_tooling_config_set_t* config_set;
   // Allocator for bytecode and runtime objects.
   iree_allocator_t host_allocator;
+  // Whether compilation semantically rejected the selected source module.
+  bool compile_rejected;
+  // Stable compilation stage that rejected the source module.
+  iree_string_view_t compile_failure_stage;
+  // Stable diagnostic or fallback rejection identifier.
+  iree_string_view_t compile_failure_kind;
+  // Static human-facing summary of the compilation rejection.
+  iree_string_view_t compile_failure_message;
   // Owned process, or NULL until the first function call is prepared.
   iree_vm_process_t* process;
   // Owned reusable execution storage, never shared by concurrent calls.

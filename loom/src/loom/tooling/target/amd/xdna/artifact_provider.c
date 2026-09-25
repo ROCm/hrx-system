@@ -61,6 +61,7 @@ static iree_status_t loom_xdna_artifact_provider_emit_artifact(
   loom_aie2p_low_descriptor_registry_initialize(&low_descriptor_registry);
 
   iree_byte_sequence_t* contents = NULL;
+  bool artifact_emitted = false;
   iree_status_t status = loom_aie2p_xdna_artifact_emit(
       &(loom_aie2p_xdna_artifact_request_t){
           .module = module,
@@ -72,9 +73,8 @@ static iree_status_t loom_xdna_artifact_provider_emit_artifact(
           .scratch_arena = &arena,
           .allocator = allocator,
       },
-      &contents);
-  if (iree_status_is_ok(status) && diagnostic_emitter.error_count == 0 &&
-      contents != NULL) {
+      &artifact_emitted, &contents);
+  if (iree_status_is_ok(status) && artifact_emitted) {
     *out_artifact = (loom_artifact_t){
         .target_key = target->target_key,
         .target_bundle = &loom_aie2p_array_target_bundle,

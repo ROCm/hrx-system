@@ -197,6 +197,7 @@ static iree_status_t loom_amdgpu_occupancy_check_emit_provider_execute(
       loom_amdgpu_occupancy_check_parse_emit_options(request, &options));
 
   loom_low_emission_frame_t frame = {0};
+  bool frame_accepted = false;
   loom_low_storage_lease_provider_t storage_lease_provider = {0};
   loom_amdgpu_storage_lease_provider(&storage_lease_provider);
   const loom_target_residency_model_t* residency_model = NULL;
@@ -211,12 +212,12 @@ static iree_status_t loom_amdgpu_occupancy_check_emit_provider_execute(
       loom_low_schedule_pair_affinity_list_empty(),
       loom_low_schedule_structural_state_read_list_empty(),
       &storage_lease_provider,
-      /*spill_free_options=*/NULL, &frame));
+      /*spill_free_options=*/NULL, &frame, &frame_accepted));
   if (request->diagnostic_collector != NULL &&
       request->diagnostic_collector->count != 0) {
     return iree_ok_status();
   }
-  if (frame.schedule.error_count != 0 || frame.allocation.error_count != 0) {
+  if (!frame_accepted) {
     return iree_ok_status();
   }
 

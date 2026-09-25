@@ -287,6 +287,7 @@ static iree_status_t loom_check_test_synthetic_hazard_execute(
       loom_check_test_synthetic_hazard_parse_emit_options(request, &options));
 
   loom_low_emission_frame_t frame = {0};
+  bool frame_accepted = false;
   IREE_RETURN_IF_ERROR(loom_check_low_emit_packetize_function(
       request, options.function_symbol_name, options.schedule_strategy,
       /*schedule_diagnostic_flags=*/0,
@@ -295,12 +296,13 @@ static iree_status_t loom_check_test_synthetic_hazard_execute(
       options.allocation_fixed_value_spec_count,
       /*residency_model=*/NULL, loom_low_schedule_pair_affinity_list_empty(),
       loom_low_schedule_structural_state_read_list_empty(),
-      /*storage_lease_provider=*/NULL, /*spill_free_options=*/NULL, &frame));
+      /*storage_lease_provider=*/NULL, /*spill_free_options=*/NULL, &frame,
+      &frame_accepted));
   if (request->diagnostic_collector != NULL &&
       request->diagnostic_collector->count != 0) {
     return iree_ok_status();
   }
-  if (frame.schedule.error_count != 0 || frame.allocation.error_count != 0) {
+  if (!frame_accepted) {
     return iree_ok_status();
   }
 

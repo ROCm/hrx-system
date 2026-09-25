@@ -85,10 +85,12 @@ typedef struct loom_vm_module_plan_t {
 // alignment and map to module-owned immutable buffers. Bytes are appended once
 // to a segmented stream and fixed table rows are backpatched. No instruction
 // sizing pass or contiguous image is required. Success transfers the byte
-// sequence to |out_artifact|; failure publishes none. All emission-local
-// scratch is reclaimed before returning, preserving the caller's preceding
-// allocations.
+// sequence to |out_artifact| and sets |out_emitted| true. A structured
+// diagnostic returns OK with |out_emitted| false and publishes nothing.
+// Infrastructure failure also publishes nothing. All emission-local scratch is
+// reclaimed before returning, preserving the caller's preceding allocations.
 iree_status_t loom_vm_module_emit(const loom_target_emit_request_t* request,
+                                  bool* out_emitted,
                                   loom_target_emit_artifact_t* out_artifact);
 
 #ifdef __cplusplus

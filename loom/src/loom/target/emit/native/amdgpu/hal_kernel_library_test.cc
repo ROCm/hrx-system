@@ -479,7 +479,8 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
         ParseWorkgroupStorageKernel(processor_name, byte_length, &module));
 
     loom_amdgpu_hal_kernel_library_options_t options = {};
-    options.diagnostic_sink = capture->sink();
+    options.diagnostic_sink =
+        capture ? capture->sink() : loom_diagnostic_sink_t{};
     options.max_errors = 20;
     iree_status_t status = loom_amdgpu_emit_hal_kernel_library(
         module, &options, iree_allocator_system(), out_emitted, out_library);
@@ -1015,6 +1016,20 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   EXPECT_EQ(diagnostic->params[3].u64, 65536u);
 
   loom_amdgpu_hal_kernel_library_deinitialize(&library,
+                                              iree_allocator_system());
+
+  loom_amdgpu_hal_kernel_library_t silent_library = {};
+  bool silently_emitted = true;
+  ASSERT_NO_FATAL_FAILURE(
+      EmitWorkgroupStorageKernel(IREE_SV("gfx1100"), 65540, /*capture=*/nullptr,
+                                 &silently_emitted, &silent_library));
+  EXPECT_FALSE(silently_emitted);
+  EXPECT_TRUE(iree_string_view_is_empty(silent_library.target_key));
+  EXPECT_EQ(silent_library.hsaco_data, nullptr);
+  EXPECT_TRUE(iree_string_view_is_empty(silent_library.target_listing_format));
+  EXPECT_EQ(silent_library.target_listing_data, nullptr);
+  EXPECT_EQ(silent_library.artifact_manifest.contents, nullptr);
+  loom_amdgpu_hal_kernel_library_deinitialize(&silent_library,
                                               iree_allocator_system());
 }
 

@@ -79,11 +79,12 @@ static iree_status_t loom_spirv_artifact_provider_emit_entries(
   *storage = (loom_spirv_compile_artifact_storage_t){0};
 
   loom_spirv_module_binary_t module_binary = {0};
+  bool module_emitted = false;
   iree_status_t status = loom_spirv_emit_low_module(
       module, &low_registry->registry,
       loom_target_entry_emitter(diagnostic_emitter), arena, &emit_options,
-      &module_binary, allocator);
-  if (iree_status_is_ok(status) && diagnostic_emitter->error_count == 0) {
+      &module_emitted, &module_binary, allocator);
+  if (iree_status_is_ok(status) && module_emitted) {
     iree_byte_span_t module_contents = iree_make_byte_span(
         module_binary.words, module_binary.word_count * sizeof(uint32_t));
     status = iree_byte_sequence_create_from_span_move(
@@ -92,11 +93,11 @@ static iree_status_t loom_spirv_artifact_provider_emit_entries(
       module_binary = (loom_spirv_module_binary_t){0};
     }
   }
-  if (iree_status_is_ok(status) && diagnostic_emitter->error_count == 0) {
+  if (iree_status_is_ok(status) && module_emitted) {
     storage->target_bundle_storage = entries.values[0].target_facts->storage;
     loom_target_bundle_storage_rebind(&storage->target_bundle_storage);
   }
-  if (iree_status_is_ok(status) && diagnostic_emitter->error_count == 0 &&
+  if (iree_status_is_ok(status) && module_emitted &&
       artifact_manifest != NULL &&
       artifact_manifest->mode != LOOM_TARGET_ARTIFACT_MANIFEST_MODE_NONE) {
     loom_target_artifact_manifest_collect_options_t manifest_options;
@@ -132,7 +133,7 @@ static iree_status_t loom_spirv_artifact_provider_emit_entries(
     loom_target_artifact_manifest_json_release(&artifact_manifest_json,
                                                allocator);
   }
-  if (iree_status_is_ok(status) && diagnostic_emitter->error_count == 0) {
+  if (iree_status_is_ok(status) && module_emitted) {
     *out_artifact = (loom_artifact_t){
         .target_key = target->target_key,
         .target_bundle = &storage->target_bundle_storage.bundle,

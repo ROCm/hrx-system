@@ -159,8 +159,16 @@
         "contains": [
           "source_math.loom:2:3",
           "vm-math",
-          "scalar.sinf %value : f32",
-          "VM compilation failed"
+          "scalar.sinf %value : f32"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"category\":\"compile_rejected\"",
+          "\"provider\":\"vm\"",
+          "\"stage\":\"pipeline\"",
+          "\"kind\":\"ERR_LOWERING_036\"",
+          "Math legalization policy rejected an operation."
         ]
       }
     },

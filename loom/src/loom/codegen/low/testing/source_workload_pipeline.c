@@ -166,7 +166,9 @@ iree_status_t loom_low_source_workload_run_pipeline(
     loom_module_t* module,
     const loom_low_source_workload_pipeline_options_t* options,
     iree_arena_block_pool_t* block_pool,
-    loom_low_source_workload_pipeline_counters_t* out_counters) {
+    loom_low_source_workload_pipeline_counters_t* out_counters,
+    bool* out_accepted) {
+  *out_accepted = false;
   memset(out_counters, 0, sizeof(*out_counters));
 
   loom_low_source_workload_count_module_source_ops(
@@ -286,12 +288,19 @@ iree_status_t loom_low_source_workload_run_pipeline(
         .descriptor_registry = options->descriptor_registry,
         .schedule_strategy = options->schedule_strategy,
     };
-    for (iree_host_size_t i = 0;
-         i < selection_list.count && iree_status_is_ok(status); ++i) {
+    bool frames_accepted = true;
+    for (iree_host_size_t i = 0; i < selection_list.count &&
+                                 iree_status_is_ok(status) && frames_accepted;
+         ++i) {
       loom_low_emission_frame_t frame = {0};
-      status = loom_low_emission_frame_build(
-          module, lowered_funcs[i], &frame_options, &frame_arena, &frame);
-      if (iree_status_is_ok(status)) {
+      bool frame_accepted = false;
+      status = loom_low_emission_frame_build(module, lowered_funcs[i],
+                                             &frame_options, &frame_arena,
+                                             &frame, &frame_accepted);
+      if (iree_status_is_ok(status) && !frame_accepted) {
+        frames_accepted = false;
+      }
+      if (iree_status_is_ok(status) && frame_accepted) {
         loom_low_allocation_check_result_t check_result = {0};
         status = loom_low_allocation_check_frame(&frame, &frame_arena,
                                                  &check_result);
@@ -310,7 +319,7 @@ iree_status_t loom_low_source_workload_run_pipeline(
               check_result.first_violation.secondary_index);
         }
       }
-      if (iree_status_is_ok(status)) {
+      if (iree_status_is_ok(status) && frame_accepted) {
         ++out_counters->allocation_check_count;
         out_counters->schedule_node_count +=
             frame.schedule.scheduled_node_count;
@@ -331,6 +340,9 @@ iree_status_t loom_low_source_workload_run_pipeline(
     }
     if (frame_arena_initialized) {
       iree_arena_deinitialize(&frame_arena);
+    }
+    if (iree_status_is_ok(status) && frames_accepted) {
+      *out_accepted = true;
     }
   }
 

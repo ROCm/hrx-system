@@ -68,7 +68,6 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:frame",
         "//loom/src/loom/codegen/low:storage_layout",
         "//loom/src/loom/codegen/low/allocation:move_sequence",
-        "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/global",
         "//loom/src/loom/ops/low",

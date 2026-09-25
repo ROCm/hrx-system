@@ -274,8 +274,9 @@ static iree_status_t loomc_amdgpu_emit_resolve_runtime_globals(
 }
 
 static iree_status_t loomc_amdgpu_emit_module_artifact(
-    const loom_target_emit_request_t* request,
+    const loom_target_emit_request_t* request, bool* out_emitted,
     loom_target_emit_artifact_t* out_artifact) {
+  *out_emitted = false;
   *out_artifact = (loom_target_emit_artifact_t){0};
 
   loom_amdgpu_runtime_global_flags_t runtime_globals =
@@ -309,12 +310,7 @@ static iree_status_t loomc_amdgpu_emit_module_artifact(
   iree_status_t status = loom_amdgpu_emit_hal_kernel_library(
       request->module, &library_options, request->allocator, &emitted,
       &library);
-  if (iree_status_is_ok(status) && !emitted) {
-    status =
-        iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                         "AMDGPU HSACO emission produced no executable bytes");
-  }
-  if (iree_status_is_ok(status) && request->compile_report != NULL) {
+  if (iree_status_is_ok(status) && emitted && request->compile_report != NULL) {
     // The library owns its exact artifact key. Report serialization happens
     // after library release but before the caller resets invocation scratch.
     char* target_key = NULL;
@@ -326,11 +322,12 @@ static iree_status_t loomc_amdgpu_emit_module_artifact(
           iree_make_string_view(target_key, library.target_key.size);
     }
   }
-  if (iree_status_is_ok(status) && library.artifact_manifest.contents == NULL) {
+  if (iree_status_is_ok(status) && emitted &&
+      library.artifact_manifest.contents == NULL) {
     out_artifact->target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF;
     out_artifact->contents = library.hsaco_data;
     library.hsaco_data = NULL;
-  } else if (iree_status_is_ok(status)) {
+  } else if (iree_status_is_ok(status) && emitted) {
     loomc_amdgpu_emit_artifact_storage_t* storage = NULL;
     status = iree_allocator_malloc(request->allocator, sizeof(*storage),
                                    (void**)&storage);
@@ -349,6 +346,9 @@ static iree_status_t loomc_amdgpu_emit_module_artifact(
       library.hsaco_data = NULL;
       library.artifact_manifest = (loom_target_emit_sidecar_artifact_t){0};
     }
+  }
+  if (iree_status_is_ok(status) && emitted) {
+    *out_emitted = true;
   }
   loom_amdgpu_hal_kernel_library_deinitialize(&library, request->allocator);
   return status;

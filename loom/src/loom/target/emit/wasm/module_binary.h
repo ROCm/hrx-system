@@ -55,12 +55,15 @@ void loom_wasm_module_binary_deinitialize(loom_wasm_module_binary_t* module,
 // Imports, kernel entries, and non-wasm low functions currently fail loud. The
 // body emitter walks structured regions in source order. Allocation therefore
 // uses the IR order directly and performs no dependency scheduling. The caller
-// owns source-to-low lowering and target verification.
+// owns source-to-low lowering and target verification. Structured allocation
+// rejection returns OK with |out_emitted| false and no module bytes;
+// infrastructure and output failures return a status and also leave it false.
 iree_status_t loom_wasm_emit_low_module(
     loom_module_t* module,
     const loom_low_descriptor_registry_t* descriptor_registry,
     iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
-    iree_allocator_t allocator, loom_wasm_module_binary_t* out_module);
+    iree_allocator_t allocator, bool* out_emitted,
+    loom_wasm_module_binary_t* out_module);
 
 #ifdef __cplusplus
 }  // extern "C"

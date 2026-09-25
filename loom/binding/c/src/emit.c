@@ -10,7 +10,6 @@
 
 #include "diagnostic.h"
 #include "iree/base/internal/arena.h"
-#include "loom/error/error_defs.h"
 #include "loom/target/provider.h"
 #include "loom/target/reporting/format.h"
 #include "loomc/compile_report.h"
@@ -62,9 +61,6 @@ typedef struct loomc_emit_diagnostic_capture_t {
   loomc_result_t* result;
   // Borrowed module owning operation locations during emission.
   const loom_module_t* module;
-
-  // Number of error diagnostics captured during emission.
-  uint32_t error_count;
 } loomc_emit_diagnostic_capture_t;
 
 static loomc_status_t loomc_emit_validate_string_view(
@@ -516,10 +512,6 @@ static iree_status_t loomc_emit_capture_diagnostic(
     void* user_data, const loom_diagnostic_emission_t* emission) {
   loomc_emit_diagnostic_capture_t* capture =
       (loomc_emit_diagnostic_capture_t*)user_data;
-  if (emission != NULL && emission->error != NULL &&
-      loom_error_def_severity(emission->error) == LOOM_DIAGNOSTIC_ERROR) {
-    ++capture->error_count;
-  }
   return iree_status_from_loomc(loomc_result_add_loom_diagnostic_emission(
       capture->result, capture->module, LOOM_EMITTER_VERIFIER, emission));
 }
@@ -835,10 +827,16 @@ loomc_status_t loomc_emit_module(loomc_target_environment_t* target_environment,
           .allocator = host_allocator,
       };
       if (loomc_status_is_ok(status)) {
-        iree_status_t emit_status = emitter->emit(&request, &target_artifact);
+        bool target_emitted = false;
+        iree_status_t emit_status =
+            emitter->emit(&request, &target_emitted, &target_artifact);
         if (compile_report_initialized) {
-          loom_target_compile_report_record_status(
-              &compile_report, iree_status_code(emit_status));
+          iree_status_code_t report_status = iree_status_code(emit_status);
+          if (report_status == IREE_STATUS_OK && !target_emitted) {
+            report_status = IREE_STATUS_FAILED_PRECONDITION;
+          }
+          loom_target_compile_report_record_status(&compile_report,
+                                                   report_status);
           if (target_artifact.contents != NULL) {
             loom_target_compile_report_record_artifact_size(
                 &compile_report,
@@ -846,15 +844,15 @@ loomc_status_t loomc_emit_module(loomc_target_environment_t* target_environment,
           }
         }
         status = loomc_status_from_iree(emit_status);
+        if (loomc_status_is_ok(status) && !target_emitted) {
+          status = loomc_result_set_state(result, LOOMC_RESULT_STATE_FAILED);
+        }
       }
       if (!loomc_status_is_ok(status) &&
           loomc_status_is_result_diagnostic(status)) {
         status = loomc_result_fail_status_diagnostic_consume(
             result, NULL, LOOMC_DIAGNOSTIC_SEVERITY_ERROR,
             loomc_make_cstring_view("EMIT/TARGET"), status);
-      }
-      if (loomc_status_is_ok(status) && capture.error_count != 0) {
-        status = loomc_result_set_state(result, LOOMC_RESULT_STATE_FAILED);
       }
     }
   }

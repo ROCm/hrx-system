@@ -57,15 +57,16 @@ void loom_spirv_emit_low_module_options_initialize(
 // BDA HAL kernel entries must also share one dispatch ABI layout because the
 // current raw SPIR-V executable format exposes BDA metadata at module scope.
 // The output module owns allocator-backed word storage and must be
-// deinitialized by the caller.
-// A missing concrete target emits a structured diagnostic and leaves
-// |out_module| empty. Infrastructure and output failures return a status.
+// deinitialized by the caller. A missing concrete target or another structured
+// semantic rejection returns OK with |out_emitted| false and leaves
+// |out_module| empty. Infrastructure and output failures return a status and
+// also leave |out_emitted| false.
 iree_status_t loom_spirv_emit_low_module(
     loom_module_t* module,
     const loom_low_descriptor_registry_t* descriptor_registry,
     iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_allocator_t* scratch_arena,
-    const loom_spirv_emit_low_module_options_t* options,
+    const loom_spirv_emit_low_module_options_t* options, bool* out_emitted,
     loom_spirv_module_binary_t* out_module, iree_allocator_t allocator);
 
 #ifdef __cplusplus

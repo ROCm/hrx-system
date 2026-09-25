@@ -213,19 +213,20 @@ static iree_status_t loom_wasm_loom_check_emit_provider_execute(
       .user_data = &capture,
   };
   loom_wasm_module_binary_t module = {0};
+  bool module_emitted = false;
   iree_status_t status = loom_wasm_emit_low_module(
       request->module, &request->low_registry->registry, diagnostic_emitter,
-      request->case_arena, request->host_allocator, &module);
+      request->case_arena, request->host_allocator, &module_emitted, &module);
 
   loom_wasm_toolchain_t toolchain;
   loom_wasm_toolchain_initialize_from_environment(&toolchain);
   loom_tool_output_t disassembly = {0};
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && module_emitted) {
     status = loom_wasm_tool_disassemble_binary(
         &toolchain, iree_make_const_byte_span(module.data, module.data_length),
         request->host_allocator, &disassembly);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && module_emitted) {
     status = loom_wasm_loom_check_strip_objdump_preamble(
         iree_make_string_view(disassembly.data, disassembly.length),
         &request->result->actual_output);

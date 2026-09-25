@@ -112,7 +112,7 @@ iree_status_t loom_check_low_emit_packetize_function(
         schedule_structural_state_reads,
     const loom_low_storage_lease_provider_t* storage_lease_provider,
     const loom_low_emission_frame_spill_free_options_t* spill_free_options,
-    loom_low_emission_frame_t* out_frame);
+    loom_low_emission_frame_t* out_frame, bool* out_accepted);
 
 #ifdef __cplusplus
 }  // extern "C"

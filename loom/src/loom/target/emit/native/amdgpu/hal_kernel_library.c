@@ -593,7 +593,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_lower_spill_traffic(
 static iree_status_t
 loom_amdgpu_hal_kernel_library_validate_final_workgroup_storage(
     void* user_data, const loom_low_emission_frame_t* frame,
-    iree_arena_allocator_t* table_arena) {
+    iree_arena_allocator_t* table_arena, bool* out_accepted) {
   (void)table_arena;
   const uint64_t workgroup_bytes =
       frame->schedule.requirements.storage_layout.space_sizes.workgroup_bytes;
@@ -601,7 +601,7 @@ loom_amdgpu_hal_kernel_library_validate_final_workgroup_storage(
       (const iree_diagnostic_emitter_t*)user_data;
   return loom_low_diagnostic_validate_workgroup_storage_limit(
       frame->module, frame->function_op, &frame->target, workgroup_bytes,
-      *emitter, /*out_valid=*/NULL);
+      *emitter, out_accepted);
 }
 
 static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
@@ -610,8 +610,9 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
     const loom_amdgpu_hal_kernel_library_kernel_plan_t* plan,
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
     iree_arena_allocator_t* table_arena, iree_string_builder_t* target_listing,
-    loom_target_compile_report_t* report,
+    loom_target_compile_report_t* report, bool* out_built,
     loom_amdgpu_kernel_hsaco_contribution_t* out_contribution) {
+  *out_built = false;
   *out_contribution = (loom_amdgpu_kernel_hsaco_contribution_t){0};
 
   loom_low_schedule_pair_affinity_list_t schedule_pair_affinities =
@@ -669,10 +670,11 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
           loom_amdgpu_hal_kernel_library_validate_final_workgroup_storage,
       .validate_frame_user_data = (void*)&final_validation_emitter,
   };
+  bool frame_accepted = false;
   IREE_RETURN_IF_ERROR(loom_low_emission_frame_build_spill_free(
       module, plan->low_function_op, &frame_options, &spill_free_options,
-      table_arena, &frame));
-  if (diagnostic_emitter->error_count != 0) {
+      table_arena, &frame, &frame_accepted));
+  if (!frame_accepted) {
     if (report != NULL) {
       loom_target_compile_report_record_low_planning(report,
                                                      &planning_statistics);
@@ -701,6 +703,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_emission_build(
       &frame, &plan->abi_layout, &plan->abi_verify, &preflight, target_listing,
       report, out_contribution, table_arena));
+  *out_built = true;
   return iree_ok_status();
 }
 
@@ -928,10 +931,15 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
   for (uint16_t i = 0;
        i < entries.count && iree_status_is_ok(status) && !diagnostics_failed;
        ++i) {
+    bool contribution_built = false;
     status = loom_amdgpu_hal_kernel_library_build_kernel_contribution(
         module, low_registry, &plans[i], diagnostic_emitter, table_arena,
         target_listing_initialized ? &target_listing : NULL,
-        entry_reports != NULL ? &entry_reports[i] : NULL, &contributions[i]);
+        entry_reports != NULL ? &entry_reports[i] : NULL, &contribution_built,
+        &contributions[i]);
+    if (iree_status_is_ok(status) && !contribution_built) {
+      diagnostics_failed = true;
+    }
   }
   if (iree_status_is_ok(status) && !diagnostics_failed) {
     for (uint16_t i = 0; i < entries.count && entry_reports != NULL &&
@@ -941,8 +949,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
           report, &entry_reports[i]);
     }
   }
-  if (iree_status_is_ok(status) && !diagnostics_failed &&
-      diagnostic_emitter->error_count == 0) {
+  if (iree_status_is_ok(status) && !diagnostics_failed) {
     iree_byte_sequence_t* hsaco = NULL;
     const loom_amdgpu_hsaco_data_symbol_t* code_object_data_symbols = NULL;
     iree_host_size_t code_object_data_symbol_count = 0;

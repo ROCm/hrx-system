@@ -749,7 +749,9 @@ static iree_status_t loom_compile_emit_target(
       .allocator = allocator,
   };
 
-  iree_status_t status = target_emitter->emit(&request, &artifact);
+  bool target_emitted = false;
+  iree_status_t status =
+      target_emitter->emit(&request, &target_emitted, &artifact);
   if (compile_options->report != NULL) {
     loom_target_compile_report_record_status(compile_options->report,
                                              iree_status_code(status));
@@ -759,9 +761,8 @@ static iree_status_t loom_compile_emit_target(
           iree_byte_sequence_length(artifact.contents));
     }
   }
-  if (iree_status_is_ok(status) && diagnostic_emitter.error_count == 0 &&
-      artifact.contents != NULL &&
-      iree_byte_sequence_length(artifact.contents) != 0) {
+  if (iree_status_is_ok(status) && target_emitted) {
+    IREE_ASSERT(artifact.contents != NULL);
     status = loom_tooling_write_output_byte_sequence(
         output_path, artifact.contents, allocator);
     if (iree_status_is_ok(status)) {

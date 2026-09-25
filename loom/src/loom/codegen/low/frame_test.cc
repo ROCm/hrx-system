@@ -84,8 +84,14 @@ low.func.def target<test.low.core> @structural_model() -> (reg<test.i32 x4>) asm
     options.descriptor_registry = &registry_.registry;
     options.schedule_structural_models = structural_models;
     options.schedule_strategy = schedule_strategy;
-    return loom_low_emission_frame_build(module, loom_block_op(module_block, 0),
-                                         &options, &arena_, out_frame);
+    bool accepted = false;
+    iree_status_t status =
+        loom_low_emission_frame_build(module, loom_block_op(module_block, 0),
+                                      &options, &arena_, out_frame, &accepted);
+    if (iree_status_is_ok(status)) {
+      EXPECT_TRUE(accepted);
+    }
+    return status;
   }
 
   const loom_low_schedule_node_t* FindNode(
@@ -131,8 +137,10 @@ low.func.def target<test.low.core> @physical_reuse(%seed: reg<test.phys>) -> (re
   options.allocation_fixed_values = fixed_values;
   options.allocation_fixed_value_count = IREE_ARRAYSIZE(fixed_values);
   loom_low_emission_frame_t frame = {};
-  IREE_ASSERT_OK(loom_low_emission_frame_build(module.get(), function, &options,
-                                               &arena_, &frame));
+  bool frame_accepted = false;
+  IREE_ASSERT_OK(loom_low_emission_frame_build(
+      module.get(), function, &options, &arena_, &frame, &frame_accepted));
+  ASSERT_TRUE(frame_accepted);
   ASSERT_EQ(frame.schedule.error_count, 0u);
   ASSERT_EQ(frame.allocation.error_count, 0u);
   // Physical timing consumes the retained index after scheduler scratch dies.
@@ -240,9 +248,11 @@ low.func.def target<test.low.core> @constant_pair(%input: reg<test.i32>) -> (reg
     options.schedule_pair_affinities = {&affinity, 1};
     options.schedule_strategy = strategy;
     loom_low_emission_frame_t frame = {};
+    bool frame_accepted = false;
     IREE_ASSERT_OK(loom_low_emission_frame_build(
         module.get(), loom_block_op(loom_module_block(module.get()), 0),
-        &options, &arena_, &frame));
+        &options, &arena_, &frame, &frame_accepted));
+    ASSERT_TRUE(frame_accepted);
     ASSERT_EQ(frame.schedule.error_count, 0u);
     EXPECT_EQ(frame.schedule.nodes[1].scheduled_ordinal,
               frame.schedule.nodes[0].scheduled_ordinal + 1);
@@ -278,9 +288,11 @@ low.func.def target<test.low.core> @bounded_pair(%address: reg<test.ptr>, %value
   options.allocation_budgets = &budget;
   options.allocation_budget_count = 1;
   loom_low_emission_frame_t frame = {};
+  bool frame_accepted = false;
   IREE_ASSERT_OK(loom_low_emission_frame_build(
       module.get(), loom_block_op(loom_module_block(module.get()), 0), &options,
-      &arena_, &frame));
+      &arena_, &frame, &frame_accepted));
+  ASSERT_TRUE(frame_accepted);
   ASSERT_EQ(frame.schedule.error_count, 0u);
   EXPECT_LT(frame.schedule.nodes[2].scheduled_ordinal,
             frame.schedule.nodes[1].scheduled_ordinal);
@@ -303,9 +315,11 @@ low.func.def target<test.low.core> @spills(%first: reg<test.i32>, %second: reg<t
   options.allocation_budgets = &budget;
   options.allocation_budget_count = 1;
   loom_low_emission_frame_t frame = {};
+  bool frame_accepted = false;
   IREE_ASSERT_OK(loom_low_emission_frame_build(
       module.get(), loom_block_op(loom_module_block(module.get()), 0), &options,
-      &arena_, &frame));
+      &arena_, &frame, &frame_accepted));
+  ASSERT_TRUE(frame_accepted);
   iree_arena_block_pool_trim(&block_pool_);
   const loom_low_allocation_table_t& allocation = frame.allocation;
   ASSERT_EQ(allocation.error_count, 0u);
@@ -380,9 +394,11 @@ low.func.def target<test.low.core> @feedback(%lhs: reg<test.i32>, %rhs: reg<test
   spill_free_options.materialization_options.supported_storage_spaces =
       LOOM_LOW_STORAGE_SPACE_SET_NONE;
   loom_low_emission_frame_t frame = {};
+  bool frame_accepted = false;
   IREE_ASSERT_OK(loom_low_emission_frame_build_spill_free(
       module.get(), loom_block_op(loom_module_block(module.get()), 0), &options,
-      &spill_free_options, &arena_, &frame));
+      &spill_free_options, &arena_, &frame, &frame_accepted));
+  ASSERT_TRUE(frame_accepted);
   ASSERT_EQ(frame.schedule.error_count, 0u);
   ASSERT_EQ(frame.allocation.error_count, 0u);
   EXPECT_EQ(statistics.frame_build_count, 1u);
@@ -396,9 +412,12 @@ low.func.def target<test.low.core> @feedback(%lhs: reg<test.i32>, %rhs: reg<test
   quiet_options.allocation_diagnostic_flags = 0;
   quiet_options.statistics = nullptr;
   loom_low_emission_frame_t quiet_frame = {};
+  bool quiet_frame_accepted = false;
   IREE_ASSERT_OK(loom_low_emission_frame_build_spill_free(
       module.get(), loom_block_op(loom_module_block(module.get()), 0),
-      &quiet_options, &spill_free_options, &arena_, &quiet_frame));
+      &quiet_options, &spill_free_options, &arena_, &quiet_frame,
+      &quiet_frame_accepted));
+  ASSERT_TRUE(quiet_frame_accepted);
   // Release pooled scratch before comparing schedules and formatting retained
   // diagnostics. ASAN catches any accidental result borrowing from that state.
   iree_arena_block_pool_trim(&block_pool_);
@@ -470,9 +489,11 @@ low.func.def target<test.low.core> @too_wide(%wide: reg<test.special x2>) -> (re
   spill_free_options.materialization_options.supported_storage_spaces =
       LOOM_LOW_STORAGE_SPACE_SET_NONE;
   loom_low_emission_frame_t frame = {};
+  bool frame_accepted = true;
   IREE_ASSERT_OK(loom_low_emission_frame_build_spill_free(
       module.get(), loom_block_op(loom_module_block(module.get()), 0), &options,
-      &spill_free_options, &arena_, &frame));
+      &spill_free_options, &arena_, &frame, &frame_accepted));
+  EXPECT_FALSE(frame_accepted);
   ASSERT_EQ(frame.allocation.error_count, 1u);
   EXPECT_EQ(captured.count, 1u);
   EXPECT_EQ(captured.op, frame.allocation.failure.op);
@@ -484,6 +505,39 @@ low.func.def target<test.low.core> @too_wide(%wide: reg<test.special x2>) -> (re
       &frame.allocation, /*flags=*/0, options.emitter));
   EXPECT_EQ(captured.count, 2u);
   EXPECT_EQ(arena_.used_allocation_size, used_bytes);
+}
+
+TEST_F(LowEmissionFrameTest, FinalValidatorRejectsWithoutDiagnosticSink) {
+  ModulePtr module = ParseModule();
+  loom_low_emission_frame_options_t options = {};
+  options.descriptor_registry = &registry_.registry;
+  options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY;
+  loom_low_emission_frame_spill_free_options_t spill_free_options = {};
+  spill_free_options.materialization_options.has_supported_storage_spaces =
+      true;
+  spill_free_options.materialization_options.supported_storage_spaces =
+      LOOM_LOW_STORAGE_SPACE_SET_NONE;
+  bool validator_invoked = false;
+  spill_free_options.validate_frame =
+      [](void* user_data, const loom_low_emission_frame_t* frame,
+         iree_arena_allocator_t* arena, bool* out_accepted) {
+        bool* invoked = static_cast<bool*>(user_data);
+        EXPECT_FALSE(*invoked);
+        *invoked = true;
+        EXPECT_EQ(frame->schedule.error_count, 0u);
+        EXPECT_EQ(frame->allocation.error_count, 0u);
+        (void)arena;
+        *out_accepted = false;
+        return iree_ok_status();
+      };
+  spill_free_options.validate_frame_user_data = &validator_invoked;
+  loom_low_emission_frame_t frame = {};
+  bool frame_accepted = true;
+  IREE_ASSERT_OK(loom_low_emission_frame_build_spill_free(
+      module.get(), loom_block_op(loom_module_block(module.get()), 0), &options,
+      &spill_free_options, &arena_, &frame, &frame_accepted));
+  EXPECT_TRUE(validator_invoked);
+  EXPECT_FALSE(frame_accepted);
 }
 
 TEST_F(LowEmissionFrameTest, InputErrorsAreNotDeferredOrReplayed) {
@@ -517,9 +571,11 @@ low.func.def target<test.low.core> @invalid_budget(%value: reg<test.i32>) -> (re
   spill_free_options.materialization_options.supported_storage_spaces =
       LOOM_LOW_STORAGE_SPACE_SET_NONE;
   loom_low_emission_frame_t frame = {};
+  bool frame_accepted = true;
   IREE_ASSERT_OK(loom_low_emission_frame_build_spill_free(
       module.get(), loom_block_op(loom_module_block(module.get()), 0), &options,
-      &spill_free_options, &arena_, &frame));
+      &spill_free_options, &arena_, &frame, &frame_accepted));
+  EXPECT_FALSE(frame_accepted);
   ASSERT_EQ(frame.allocation.error_count, 1u);
   EXPECT_FALSE(
       loom_low_allocation_failure_is_present(&frame.allocation.failure));

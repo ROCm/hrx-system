@@ -563,11 +563,11 @@ class PacketPlanFixture {
     frame_options.allocation_fixed_value_count =
         abi_verify_result.fixed_value_count;
     frame_options.storage_lease_provider = &storage_lease_provider;
-    AbortOnError(loom_low_emission_frame_build(
-        module_, low_function, &frame_options, &frame_arena_, &frame_));
-    if (frame_.schedule.error_count != 0 ||
-        frame_.allocation.error_count != 0 ||
-        frame_.allocation.spill_plan_count != 0) {
+    bool frame_accepted = false;
+    AbortOnError(loom_low_emission_frame_build(module_, low_function,
+                                               &frame_options, &frame_arena_,
+                                               &frame_, &frame_accepted));
+    if (!frame_accepted || frame_.allocation.spill_plan_count != 0) {
       std::abort();
     }
 

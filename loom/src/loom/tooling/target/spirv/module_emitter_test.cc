@@ -186,9 +186,12 @@ low.func.def target<spirv.logical.core>(@generic) abi(shader_entry_point) @kerne
   ASSERT_NE(function_target_facts, nullptr);
 
   loom_spirv_module_binary_t generic_module = {};
+  bool generic_emitted = false;
   IREE_ASSERT_OK(loom_spirv_emit_low_module(
       module.get(), &low_registry_.registry, iree_diagnostic_emitter_t{},
-      &arena_, /*options=*/nullptr, &generic_module, iree_allocator_system()));
+      &arena_, /*options=*/nullptr, &generic_emitted, &generic_module,
+      iree_allocator_system()));
+  ASSERT_TRUE(generic_emitted);
   EXPECT_FALSE(
       SpirvModuleHasCapability(generic_module, LOOM_SPIRV_CAPABILITY_FLOAT16));
   EXPECT_FALSE(
@@ -213,9 +216,12 @@ low.func.def target<spirv.logical.core>(@generic) abi(shader_entry_point) @kerne
   options.function_versions = &function_versions;
 
   loom_spirv_module_binary_t exact_module = {};
+  bool exact_emitted = false;
   IREE_ASSERT_OK(loom_spirv_emit_low_module(
       module.get(), &low_registry_.registry, iree_diagnostic_emitter_t{},
-      &arena_, &options, &exact_module, iree_allocator_system()));
+      &arena_, &options, &exact_emitted, &exact_module,
+      iree_allocator_system()));
+  ASSERT_TRUE(exact_emitted);
   EXPECT_TRUE(
       SpirvModuleHasCapability(exact_module, LOOM_SPIRV_CAPABILITY_FLOAT16));
   EXPECT_TRUE(
@@ -246,10 +252,12 @@ low.func.def target<spirv.logical.core>(@limited) abi(shader_entry_point) @too_l
 
   DiagnosticEmissionCapture capture;
   loom_spirv_module_binary_t binary = {};
+  bool emitted = true;
   IREE_ASSERT_OK(loom_spirv_emit_low_module(
       module.get(), &low_registry_.registry, capture.emitter(), &arena_,
-      /*options=*/nullptr, &binary, iree_allocator_system()));
+      /*options=*/nullptr, &emitted, &binary, iree_allocator_system()));
 
+  EXPECT_FALSE(emitted);
   EXPECT_EQ(binary.words, nullptr);
   EXPECT_EQ(binary.word_count, 0u);
   ASSERT_EQ(capture.emissions.size(), 1u);
@@ -263,6 +271,18 @@ low.func.def target<spirv.logical.core>(@limited) abi(shader_entry_point) @too_l
   EXPECT_EQ(emission.u64_params[1], 64u);
 
   loom_spirv_module_binary_deinitialize(&binary, iree_allocator_system());
+
+  loom_spirv_module_binary_t silent_binary = {};
+  bool silent_emitted = true;
+  IREE_ASSERT_OK(loom_spirv_emit_low_module(
+      module.get(), &low_registry_.registry, iree_diagnostic_emitter_t{},
+      &arena_, /*options=*/nullptr, &silent_emitted, &silent_binary,
+      iree_allocator_system()));
+  EXPECT_FALSE(silent_emitted);
+  EXPECT_EQ(silent_binary.words, nullptr);
+  EXPECT_EQ(silent_binary.word_count, 0u);
+  loom_spirv_module_binary_deinitialize(&silent_binary,
+                                        iree_allocator_system());
 }
 
 }  // namespace
