@@ -388,6 +388,7 @@ class EmitDescriptorOp:
                 if binding.kind in (
                     SourceValueKind.SOURCE_MEMORY_DYNAMIC_TERM,
                     SourceValueKind.SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET,
+                    SourceValueKind.SOURCE_MEMORY_BYTE_OFFSET,
                     SourceValueKind.SOURCE_MEMORY_ADDRESS,
                     SourceValueKind.SOURCE_MEMORY_ROOT,
                 ):
@@ -508,6 +509,8 @@ class EmitDescriptorOp:
                 materializer.add,
                 materializer.multiply,
                 materializer.shift_left,
+                materializer.multiply_add,
+                materializer.static_bias,
                 *(
                     conversion.descriptor
                     for conversion in materializer.integer_conversions
@@ -568,7 +571,10 @@ class EmitDescriptorOp:
                     f"selects {self.source_memory.dynamic_term_count}"
                 )
         for descriptor_field, value_ref in operand_bindings.items():
-            if value_ref.kind != SourceValueKind.SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET:
+            if value_ref.kind not in (
+                SourceValueKind.SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET,
+                SourceValueKind.SOURCE_MEMORY_BYTE_OFFSET,
+            ):
                 continue
             if self.source_memory is None:
                 raise ValueError(
@@ -757,6 +763,7 @@ def _validate_structural_result(
         if result_type.kind in (
             SourceValueKind.SOURCE_MEMORY_DYNAMIC_TERM,
             SourceValueKind.SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET,
+            SourceValueKind.SOURCE_MEMORY_BYTE_OFFSET,
             SourceValueKind.SOURCE_MEMORY_ADDRESS,
             SourceValueKind.SOURCE_MEMORY_ROOT,
         ):
@@ -994,6 +1001,25 @@ def _validate_byte_offset_materializer(
                 input_carriers=(carrier, carrier),
                 result_carrier=carrier,
             )
+    if materializer.multiply_add is not None:
+        _validate_materializer_descriptor(
+            source_op,
+            materializer.multiply_add,
+            subject="source-memory byte-offset multiply-add",
+            op_kind=DescriptorOpKind.OP,
+            input_carriers=(carrier, carrier, carrier),
+            result_carrier=carrier,
+        )
+    if materializer.static_bias is not None:
+        _validate_materializer_descriptor(
+            source_op,
+            materializer.static_bias,
+            subject="source-memory byte-offset static bias",
+            op_kind=DescriptorOpKind.OP,
+            input_carriers=(),
+            result_carrier=carrier,
+            bound_immediate=materializer.constant_immediate,
+        )
     _validate_integer_conversions(
         source_op, descriptor_set, materializer.integer_conversions, carrier
     )

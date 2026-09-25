@@ -18,7 +18,7 @@ from loom.target.contracts import (
     SourceMemoryOperation,
     ValueRef,
 )
-from loom.target.low_descriptors import Immediate, ImmediateKind
+from loom.target.low_descriptors import DescriptorOpKind, Immediate, ImmediateKind
 from loom.target.test.descriptors import (
     TEST_LOW_ADD_I32_DESCRIPTOR,
     TEST_LOW_CONST_I32_DESCRIPTOR,
@@ -31,12 +31,21 @@ from loom.target.test.descriptors import (
 )
 
 
-def _validate(conversions, *, descriptors=TEST_LOW_CORE_DESCRIPTOR_SET):
+def _validate(
+    conversions,
+    *,
+    descriptors=TEST_LOW_CORE_DESCRIPTOR_SET,
+    index_ref=None,
+    multiply_add=None,
+    static_bias=None,
+):
+    if index_ref is None:
+        index_ref = ValueRef.source_memory_dynamic_byte_offset()
     emit = EmitDescriptorOp(
         descriptor=TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR,
         operands={
             "address": ValueRef.operand("view"),
-            "index": ValueRef.source_memory_dynamic_byte_offset(),
+            "index": index_ref,
         },
         results={"dst": ValueRef.result("result")},
         source_memory=SourceMemoryConstraint(
@@ -54,11 +63,56 @@ def _validate(conversions, *, descriptors=TEST_LOW_CORE_DESCRIPTOR_SET):
             add=TEST_LOW_ADD_I32_DESCRIPTOR,
             multiply=TEST_LOW_MUL_I32_DESCRIPTOR,
             shift_left=None,
+            multiply_add=multiply_add,
+            static_bias=static_bias,
             constant_immediate="i32_value",
             integer_conversions=conversions,
         ),
     )
     emit.validate(vector.vector_load, descriptors, set())
+
+
+def test_complete_byte_offset_validates_fused_arithmetic_descriptors():
+    multiply_add = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        key="test.multiply_add.i32",
+        mnemonic="test.multiply_add.i32",
+        semantic_tag="integer.multiply_add.i32",
+        operands=(
+            TEST_LOW_ADD_I32_DESCRIPTOR.operands[0],
+            replace(TEST_LOW_ADD_I32_DESCRIPTOR.operands[1], field_name="accumulator"),
+            TEST_LOW_ADD_I32_DESCRIPTOR.operands[1],
+            TEST_LOW_ADD_I32_DESCRIPTOR.operands[2],
+        ),
+        asm_forms=(),
+    )
+    static_bias = replace(
+        TEST_LOW_CONST_I32_DESCRIPTOR,
+        key="test.static_bias.i32",
+        mnemonic="test.static_bias.i32",
+        semantic_tag="integer.static_bias.i32",
+        op_kind=DescriptorOpKind.OP,
+    )
+    descriptors = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(
+            *TEST_LOW_CORE_DESCRIPTOR_SET.descriptors,
+            multiply_add,
+            static_bias,
+        ),
+    )
+    _validate(
+        (),
+        descriptors=descriptors,
+        index_ref=ValueRef.source_memory_byte_offset(),
+        multiply_add=multiply_add,
+        static_bias=static_bias,
+    )
+
+    with pytest.raises(ValueError, match="exactly 3 packet inputs"):
+        _validate((), multiply_add=TEST_LOW_ADD_I32_DESCRIPTOR)
+    with pytest.raises(ValueError, match=r"must use low\.op"):
+        _validate((), static_bias=TEST_LOW_CONST_I32_DESCRIPTOR)
 
 
 def test_integer_conversion_domains_are_unique_fixed_width_integers():

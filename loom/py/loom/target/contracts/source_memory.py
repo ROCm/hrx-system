@@ -105,17 +105,25 @@ class SourceMemoryIntegerConversion:
 
 @dataclass(frozen=True, slots=True)
 class SourceMemoryByteOffsetMaterializer:
-    """Defines target arithmetic for canonical dynamic byte offsets.
+    """Defines target arithmetic for canonical source-memory byte offsets.
 
     Integer conversions establish the carrier for canonical terms whether a
     term is consumed directly by a target descriptor or composed into a
-    complete byte offset with the arithmetic descriptors.
+    complete byte offset with the arithmetic descriptors. ``multiply_add``
+    optionally accumulates the plan's static bias into one multiplied term;
+    ``static_bias`` optionally gives that semantic bias its target-specific
+    materialization instead of using the ordinary arithmetic constant.
+
+    Both constant forms bind ``constant_immediate`` so that a target cannot
+    accidentally encode the same byte offset with different immediate fields.
     """
 
     constant: Descriptor
     add: Descriptor
     multiply: Descriptor
     shift_left: Descriptor | None
+    multiply_add: Descriptor | None = None
+    static_bias: Descriptor | None = None
     constant_immediate: str = "value"
     integer_conversions: tuple[SourceMemoryIntegerConversion, ...] = ()
 

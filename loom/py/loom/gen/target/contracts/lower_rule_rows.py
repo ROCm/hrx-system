@@ -426,6 +426,8 @@ def source_memory_byte_offset_materializer_row(
         f".constant_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.constant)}",
         f".add_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.add)}",
         f".multiply_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.multiply)}",
+        f".multiply_add_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.multiply_add)}",
+        f".static_bias_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.static_bias)}",
         f".shift_left_descriptor_ref = {_descriptor_ref_index(descriptor_refs, row.shift_left)}",
     ]
 
@@ -467,6 +469,8 @@ def descriptor_ref_keys(table: CompiledLowerRuleSet, source_contract: ContractFr
                     materializer.add,
                     materializer.multiply,
                     materializer.shift_left,
+                    materializer.multiply_add,
+                    materializer.static_bias,
                     *(conversion.descriptor for conversion in materializer.integer_conversions),
                 )
                 if descriptor is not None

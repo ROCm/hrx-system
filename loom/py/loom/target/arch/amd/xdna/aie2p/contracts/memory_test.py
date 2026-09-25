@@ -21,6 +21,7 @@ from loom.target.contracts import (
     SourceMemoryProject,
     SourceMemoryProjectKind,
     SourceMemoryRootKind,
+    SourceValueKind,
 )
 
 _I32_MIN = -(2**31)
@@ -133,7 +134,7 @@ def _assert_address_forms(
         ]
         for rule in rules
     ]
-    assert [len(emits) for emits in descriptor_emits] == [1, 3, 2, 3, 4]
+    assert [len(emits) for emits in descriptor_emits] == [1, 3, 2, 3, 2]
     assert [
         (
             _source_memory_emit(rule).source_memory.static_byte_offset_minimum,
@@ -159,6 +160,22 @@ def _assert_address_forms(
     assert immediate.kind is SourceMemoryProjectKind.STATIC_BYTE_OFFSET
     for emits in descriptor_emits[1:]:
         assert emits[-2].descriptor.key == ("amd.xdna.aie2p.move.to.address-index")
+    dynamic_offset_emit = descriptor_emits[2][-2]
+    assert dynamic_offset_emit.operands["src"].kind is (
+        SourceValueKind.SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET
+    )
+    complete_offset_emit = descriptor_emits[4][-2]
+    assert complete_offset_emit.operands["src"].kind is (
+        SourceValueKind.SOURCE_MEMORY_BYTE_OFFSET
+    )
+    materializer = complete_offset_emit.source_memory_byte_offset_materializer
+    assert materializer is not None
+    assert materializer.multiply_add is not None
+    assert materializer.multiply_add.key == "amd.xdna.aie2p.madd.i32"
+    assert materializer.static_bias is not None
+    assert materializer.static_bias.key == (
+        "amd.xdna.aie2p.materialize.static-byte-offset.i32"
+    )
 
 
 def test_scalar_memory_rules_cover_every_address_form() -> None:
@@ -867,7 +884,7 @@ def test_wide_vector_memory_rules_preserve_two_native_chunks() -> None:
                     (1, (0, 64)),
                     (2, (64,)),
                     (3, (0, 64)),
-                    (4, (0, 64)),
+                    (4, (64,)),
                 ):
                     static_projects = [
                         project
@@ -1000,7 +1017,7 @@ def test_accumulator_memory_rules_decompose_raw_payloads_into_native_chunks() ->
                     (1, expected_chunk_offsets),
                     (2, expected_chunk_offsets[1:]),
                     (3, expected_chunk_offsets),
-                    (4, expected_chunk_offsets),
+                    (4, expected_chunk_offsets[1:]),
                 ):
                     static_projects = [
                         project

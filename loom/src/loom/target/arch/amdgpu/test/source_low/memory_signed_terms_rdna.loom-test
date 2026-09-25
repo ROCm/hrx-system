@@ -293,6 +293,33 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @signed_dynamic_stride(
 
 // ====
 
+func.def @dynamic_stride_static_bias(%table: buffer, %position0: index, %stride0: index) -> (i8) {
+  %position = index.assume %position0 [range(%position0, 0, 31)] : index
+  %stride = index.assume %stride0 [range(%stride0, 1, 16)] : index
+  %base = index.constant 128 : offset
+  %layout = encoding.layout.strided [%stride] : encoding<layout>
+  %view = buffer.view %table[%base] : buffer -> view<32xi8, %layout>
+  %value = view.load %view[%position] : view<32xi8, %layout> -> i8
+  func.return %value : i8
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @dynamic_stride_static_bias(%position: reg<amdgpu.sgpr>, %stride: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %14 = v_mov_b32 0
+  %15 = s_mul_i32 %position, %stride
+  %16 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %17 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %18 = s_mov_b32 0
+  %19, %20 = s_add_co_u32 %16, %15
+  %21, %22 = s_addc_u32 %17, %18, %20
+  %23 = concat(%19, %21) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %value = global_load_i8_saddr %14, %23 {offset = 128}
+  return %value
+}
+
+// ====
+
 func.def @unsigned_high_bit_offset(%input: buffer, %table: buffer) -> (i8) {
   %source_origin = index.constant 0 : offset
   %source = buffer.view %input[%source_origin] : buffer -> view<1xi32>

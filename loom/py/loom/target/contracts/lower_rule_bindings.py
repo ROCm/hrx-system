@@ -259,11 +259,12 @@ def _source_value_index(
             return ordinal
     if value_ref.kind == SourceValueKind.SOURCE_MEMORY_DYNAMIC_TERM:
         return value_ref.element
-    if value_ref.kind == SourceValueKind.SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET:
-        return 0
-    if value_ref.kind == SourceValueKind.SOURCE_MEMORY_ADDRESS:
-        return 0
-    if value_ref.kind == SourceValueKind.SOURCE_MEMORY_ROOT:
+    if value_ref.kind in (
+        SourceValueKind.SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET,
+        SourceValueKind.SOURCE_MEMORY_BYTE_OFFSET,
+        SourceValueKind.SOURCE_MEMORY_ADDRESS,
+        SourceValueKind.SOURCE_MEMORY_ROOT,
+    ):
         return 0
     raise ValueError(f"source value field '{value_ref.field}' is not declared")
 

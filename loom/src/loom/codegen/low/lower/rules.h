@@ -109,6 +109,8 @@ enum loom_low_lower_value_ref_kind_e {
   LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_ADDRESS = 6,
   // Storage root selected by one source-memory plan.
   LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_ROOT = 7,
+  // Complete byte offset including the selected source-memory static bias.
+  LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_BYTE_OFFSET = 8,
   // Maximum value-ref kind plus one.
   LOOM_LOW_LOWER_VALUE_REF_COUNT_,
 };
@@ -508,7 +510,7 @@ static_assert(sizeof(loom_low_lower_source_memory_integer_conversion_t) == 24,
 // Source-memory matching owns the complete-address range proof, including
 // modular narrowing.
 typedef struct loom_low_lower_source_memory_byte_offset_materializer_t {
-  // Rule-set string reference for the integer constant immediate field.
+  // Shared immediate field for arithmetic constants and the static bias.
   loom_string_ref_t constant_immediate_string_ref;
   // Descriptor ref defining the arithmetic carrier and materializing constants.
   loom_low_lower_descriptor_ref_t constant_descriptor_ref;
@@ -516,6 +518,10 @@ typedef struct loom_low_lower_source_memory_byte_offset_materializer_t {
   loom_low_lower_descriptor_ref_t add_descriptor_ref;
   // Descriptor ref used to materialize multiplies in the arithmetic carrier.
   loom_low_lower_descriptor_ref_t multiply_descriptor_ref;
+  // Descriptor ref used to accumulate a multiplied term, or NONE.
+  loom_low_lower_descriptor_ref_t multiply_add_descriptor_ref;
+  // Descriptor ref used to materialize the complete static bias, or NONE.
+  loom_low_lower_descriptor_ref_t static_bias_descriptor_ref;
   // Descriptor ref used to materialize shifts in the arithmetic carrier.
   loom_low_lower_descriptor_ref_t shift_left_descriptor_ref;
   // Conversions indexed by source scalar kind minus LOOM_SCALAR_TYPE_I1.

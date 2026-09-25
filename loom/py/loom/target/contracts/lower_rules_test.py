@@ -1615,7 +1615,16 @@ def test_source_memory_address_value_rejects_element() -> None:
     )
 
 
-def test_compile_lower_rule_set_compiles_any_positive_dynamic_byte_offset() -> None:
+@pytest.mark.parametrize(
+    "byte_offset_ref",
+    [
+        ValueRef.source_memory_dynamic_byte_offset(),
+        ValueRef.source_memory_byte_offset(),
+    ],
+)
+def test_compile_lower_rule_set_compiles_any_positive_byte_offset(
+    byte_offset_ref: ValueRef,
+) -> None:
     table = ContractFragment(
         name="test.source-memory-byte-offset",
         descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
@@ -1629,7 +1638,7 @@ def test_compile_lower_rule_set_compiles_any_positive_dynamic_byte_offset() -> N
                         descriptor=TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR,
                         operands={
                             "address": ValueRef.operand("view"),
-                            "index": ValueRef.source_memory_dynamic_byte_offset(),
+                            "index": byte_offset_ref,
                         },
                         results={"dst": ValueRef.result("result")},
                         source_memory=SourceMemoryConstraint(
@@ -1666,12 +1675,32 @@ def test_compile_lower_rule_set_compiles_any_positive_dynamic_byte_offset() -> N
     ]
     assert tuple(value_ref.kind for value_ref in value_refs) == (
         SourceValueKind.OPERAND,
-        SourceValueKind.SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET,
+        byte_offset_ref.kind,
     )
     source_memory = compiled.source_memories[emit.source_memory_ordinal - 1]
     assert source_memory.constraint.dynamic_term_count is None
     assert source_memory.constraint.dynamic_term_count_minimum == 1
     assert source_memory.constraint.dynamic_view_base_term_count is None
+
+
+@pytest.mark.parametrize(
+    ("field", "element", "message"),
+    [
+        ("view", 0, "source-memory byte offset must not name a source field"),
+        ("", 1, "source-memory byte offset must not select an element"),
+    ],
+)
+def test_source_memory_byte_offset_rejects_selector(
+    field: str, element: int, message: str
+) -> None:
+    _expect_value_error(
+        lambda: ValueRef(
+            kind=SourceValueKind.SOURCE_MEMORY_BYTE_OFFSET,
+            field=field,
+            element=element,
+        ).validate(vector.vector_load, "test value"),
+        message,
+    )
 
 
 def test_compile_lower_rule_set_compiles_source_memory_static_offset_projects() -> None:

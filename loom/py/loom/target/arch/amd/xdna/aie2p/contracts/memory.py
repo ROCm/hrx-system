@@ -212,6 +212,8 @@ def _byte_offset_materializer() -> SourceMemoryByteOffsetMaterializer:
         add=_descriptor("amd.xdna.aie2p.add.i32"),
         multiply=_descriptor("amd.xdna.aie2p.mul.i32"),
         shift_left=_descriptor("amd.xdna.aie2p.lshl.i32"),
+        multiply_add=_descriptor("amd.xdna.aie2p.madd.i32"),
+        static_bias=_descriptor("amd.xdna.aie2p.materialize.static-byte-offset.i32"),
         constant_immediate="i",
         integer_conversions=tuple(
             SourceMemoryIntegerConversion(
@@ -270,6 +272,11 @@ def _register_address_emits(
                 form=DescriptorEmitForm.OP,
             )
         )
+    elif (
+        address_form is _MemoryAddressForm.DYNAMIC_FULL_STATIC
+        and additional_static_byte_offset == 0
+    ):
+        byte_offset = ValueRef.source_memory_byte_offset()
     else:
         static_offset = ValueRef.temporary(f"static_byte_offset{temporary_suffix}")
         emits.extend(
@@ -302,8 +309,12 @@ def _register_address_emits(
         )
 
     address_index = ValueRef.temporary(f"address_index{temporary_suffix}")
-    materialize_dynamic_offset = (
-        address_form is _MemoryAddressForm.DYNAMIC_ZERO_STATIC
+    materialize_byte_offset = (
+        address_form
+        in (
+            _MemoryAddressForm.DYNAMIC_ZERO_STATIC,
+            _MemoryAddressForm.DYNAMIC_FULL_STATIC,
+        )
         and additional_static_byte_offset == 0
     )
     emits.append(
@@ -312,9 +323,9 @@ def _register_address_emits(
             operands={"src": byte_offset},
             results={"dst": address_index},
             result_types={"dst": DescriptorResultType()},
-            source_memory=source_memory if materialize_dynamic_offset else None,
+            source_memory=source_memory if materialize_byte_offset else None,
             source_memory_byte_offset_materializer=(
-                _byte_offset_materializer() if materialize_dynamic_offset else None
+                _byte_offset_materializer() if materialize_byte_offset else None
             ),
             form=DescriptorEmitForm.OP,
         )

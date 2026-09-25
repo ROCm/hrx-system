@@ -192,8 +192,8 @@ func.def target(@target) @copy_i32x16_dynamic_static(%source: buffer, %output: b
 
 // ----
 CHECK: * = mov.static-byte-offset 64
-CHECK: * = mov.i32 2
-CHECK: * = lshl %element, *
+CHECK: * = mov.i32 4
+CHECK: * = mac *, %element, *
 CHECK: %value = vlda.512.i32x16.index %source_view, *
 CHECK: vst.512.i32x16.index %value, %output_view, *
 

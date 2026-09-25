@@ -127,6 +127,7 @@ loom_value_id_t loom_low_lower_rule_source_value_from_nodes(
           "source-memory dynamic term value ref needs a selected memory plan");
       IREE_BUILTIN_UNREACHABLE();
     case LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET:
+    case LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_BYTE_OFFSET:
       IREE_ASSERT_UNREACHABLE(
           "source-memory byte offset value ref needs a selected memory plan");
       IREE_BUILTIN_UNREACHABLE();
@@ -169,6 +170,7 @@ loom_value_slice_t loom_low_lower_rule_value_ref_field_span_from_nodes(
     case LOOM_LOW_LOWER_VALUE_REF_TEMPORARY:
     case LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_DYNAMIC_TERM:
     case LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET:
+    case LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_BYTE_OFFSET:
     case LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_ADDRESS:
     case LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_ROOT:
       return (loom_value_slice_t){0};

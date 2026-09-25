@@ -21,11 +21,10 @@ func.def @signed_uniform_word(%input: i32, %table: buffer) -> (i32) {
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @signed_uniform_word(%signed: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %13 = mov.static-byte-offset 512
-  %14 = mov.i32 2
-  %15 = lshl %signed, %14
-  %16 = add.rr %15, %13
-  %17 = mov.address-index %16
-  %value = lda.i32.index %view, %17
+  %14 = mov.i32 4
+  %15 = mac %13, %signed, %14
+  %16 = mov.address-index %15
+  %value = lda.i32.index %view, %16
   return %value
 }
 
@@ -51,11 +50,10 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @signed_varying_wo
   %view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %signed = lda %source, 0
   %17 = mov.static-byte-offset 512
-  %18 = mov.i32 2
-  %19 = lshl %signed, %18
-  %20 = add.rr %19, %17
-  %21 = mov.address-index %20
-  %value = lda.i32.index %view, %21
+  %18 = mov.i32 4
+  %19 = mac %17, %signed, %18
+  %20 = mov.address-index %19
+  %value = lda.i32.index %view, %20
   return %value
 }
 
@@ -82,11 +80,10 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @signed_factored_w
   %view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %signed = lda %source, 0
   %18 = mov.static-byte-offset 512
-  %19 = mov.i32 3
-  %20 = lshl %signed, %19
-  %21 = add.rr %20, %18
-  %22 = mov.address-index %21
-  %value = lda.i32.index %view, %22
+  %19 = mov.i32 8
+  %20 = mac %18, %signed, %19
+  %21 = mov.address-index %20
+  %value = lda.i32.index %view, %21
   return %value
 }
 
@@ -142,10 +139,9 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @signed_irregular_
   %signed = lda %source, 0
   %18 = mov.static-byte-offset 1536
   %19 = mov.i32 12
-  %20 = mul %signed, %19
-  %21 = add.rr %20, %18
-  %22 = mov.address-index %21
-  %value = lda.i32.index %view, %22
+  %20 = mac %18, %signed, %19
+  %21 = mov.address-index %20
+  %value = lda.i32.index %view, %21
   return %value
 }
 
@@ -180,6 +176,28 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @signed_dynamic_st
   %29 = add.rr %25, %28
   %30 = mov.address-index %29
   %value = lda.i32.index %view, %30
+  return %value
+}
+
+// ====
+
+func.def @dynamic_stride_static_bias(%table: buffer, %position0: index, %stride0: index) -> (i8) {
+  %position = index.assume %position0 [range(%position0, 0, 31)] : index
+  %stride = index.assume %stride0 [range(%stride0, 1, 16)] : index
+  %base = index.constant 128 : offset
+  %layout = encoding.layout.strided [%stride] : encoding<layout>
+  %view = buffer.view %table[%base] : buffer -> view<32xi8, %layout>
+  %value = view.load %view[%position] : view<32xi8, %layout> -> i8
+  func.return %value : i8
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @dynamic_stride_static_bias(%position: reg<aie2p.er>, %stride: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %14 = mov.static-byte-offset 128
+  %15 = mac %14, %position, %stride
+  %16 = mov.address-index %15
+  %value = lda.i8.index %view, %16
   return %value
 }
 
@@ -223,11 +241,10 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @signed_wide_sourc
   %view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %13 = mov.static-byte-offset 512
   %14 = slice %signed[0] : reg<aie2p.er x2> -> reg<aie2p.er>
-  %15 = mov.i32 2
-  %16 = lshl %14, %15
-  %17 = add.rr %16, %13
-  %18 = mov.address-index %17
-  %value = lda.i32.index %view, %18
+  %15 = mov.i32 4
+  %16 = mac %13, %14, %15
+  %17 = mov.address-index %16
+  %value = lda.i32.index %view, %17
   return %value
 }
 

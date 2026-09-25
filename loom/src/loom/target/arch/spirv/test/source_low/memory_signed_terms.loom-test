@@ -249,6 +249,30 @@ low.func.def target<spirv.logical.core> abi(shader_entry_point) @signed_dynamic_
 
 // ====
 
+func.def @dynamic_stride_static_bias(%table: buffer, %position0: index, %stride0: index) -> (i8) {
+  %position = index.assume %position0 [range(%position0, 0, 31)] : index
+  %stride = index.assume %stride0 [range(%stride0, 1, 16)] : index
+  %base = index.constant 128 : offset
+  %layout = encoding.layout.strided [%stride] : encoding<layout>
+  %view = buffer.view %table[%base] : buffer -> view<32xi8, %layout>
+  %value = view.load %view[%position] : view<32xi8, %layout> -> i8
+  func.return %value : i8
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @dynamic_stride_static_bias(%table: reg<spirv.ptr.storage_buffer>, %position: reg<spirv.id : index>, %stride: reg<spirv.id : index>) -> (reg<spirv.id : i8>) asm {
+  %14 = OpSConvert.i32.offset64 %position
+  %15 = OpSConvert.i32.offset64 %stride
+  %16 = OpIMul.offset64 %14, %15
+  %17 = OpConstant.offset64 128
+  %18 = OpIAdd.offset64 %16, %17
+  %19 = OpPtrAccessChain.storage_buffer.i8.byte_offset %table, %18
+  %value = OpLoad.storage_buffer.i8 %19
+  return %value
+}
+
+// ====
+
 func.def @unsigned_high_bit_offset(%input: buffer, %table: buffer) -> (i8) {
   %source_origin = index.constant 0 : offset
   %source = buffer.view %input[%source_origin] : buffer -> view<1xi32>

@@ -174,6 +174,26 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @signed_dynamic_stride
 
 // ====
 
+func.def @dynamic_stride_static_bias(%table: buffer, %position0: index, %stride0: index) -> (i8) {
+  %position = index.assume %position0 [range(%position0, 0, 31)] : index
+  %stride = index.assume %stride0 [range(%stride0, 1, 16)] : index
+  %base = index.constant 128 : offset
+  %layout = encoding.layout.strided [%stride] : encoding<layout>
+  %view = buffer.view %table[%base] : buffer -> view<32xi8, %layout>
+  %value = view.load %view[%position] : view<32xi8, %layout> -> i8
+  func.return %value : i8
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @dynamic_stride_static_bias(%view: reg<wasm.i32>, %position: reg<wasm.i32>, %stride: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %14 = i32.mul %position, %stride
+  %15 = i32.add %view, %14
+  %value = i32.load8_u %15 {offset = 128}
+  return %value
+}
+
+// ====
+
 func.def @unsigned_high_bit_offset(%input: buffer, %table: buffer) -> (i8) {
   %source_origin = index.constant 0 : offset
   %source = buffer.view %input[%source_origin] : buffer -> view<1xi32>

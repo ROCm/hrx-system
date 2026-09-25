@@ -78,6 +78,14 @@ class ValueRef:
         )
 
     @classmethod
+    def source_memory_byte_offset(cls) -> Self:
+        """Returns the complete byte offset selected by source-memory analysis."""
+        return cls(
+            kind=SourceValueKind.SOURCE_MEMORY_BYTE_OFFSET,
+            field="",
+        )
+
+    @classmethod
     def source_memory_address(cls) -> Self:
         """Returns the complete address selected by source-memory analysis."""
         return cls(
@@ -156,7 +164,10 @@ class ValueRef:
                     "non-negative"
                 )
             return
-        if self.kind == SourceValueKind.SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET:
+        if self.kind in (
+            SourceValueKind.SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET,
+            SourceValueKind.SOURCE_MEMORY_BYTE_OFFSET,
+        ):
             if self.field:
                 raise ValueError(
                     f"{source_op.name}: {subject} source-memory byte offset must "

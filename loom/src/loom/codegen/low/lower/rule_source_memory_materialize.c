@@ -63,17 +63,16 @@ loom_low_lower_rule_source_memory_emit_resolved_integer_const(
   return iree_ok_status();
 }
 
-static iree_status_t
-loom_low_lower_rule_source_memory_emit_dynamic_byte_offset_const(
+static iree_status_t loom_low_lower_rule_source_memory_emit_byte_offset_const(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set,
     const loom_low_lower_source_memory_byte_offset_materializer_t* materializer,
-    int64_t value, loom_location_id_t location, loom_value_id_t* out_value_id) {
+    loom_low_lower_descriptor_ref_t descriptor_ref, int64_t value,
+    loom_location_id_t location, loom_value_id_t* out_value_id) {
   loom_low_lower_resolved_descriptor_t descriptor = {0};
   IREE_RETURN_IF_ERROR(
       loom_low_lower_rule_source_memory_resolve_materializer_descriptor(
-          context, rule_set, materializer->constant_descriptor_ref,
-          &descriptor));
+          context, rule_set, descriptor_ref, &descriptor));
   loom_type_t result_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_descriptor_result_type(
       context, descriptor.descriptor, 0, &result_type));
@@ -234,45 +233,13 @@ loom_low_lower_rule_source_memory_materializer_tied_results(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_lower_rule_source_memory_emit_binary_op(
-    loom_low_lower_context_t* context,
-    const loom_low_lower_rule_set_t* rule_set,
-    loom_low_lower_descriptor_ref_t descriptor_ref, loom_value_id_t lhs,
-    loom_value_id_t rhs, loom_location_id_t location,
-    loom_value_id_t* out_value_id) {
-  *out_value_id = LOOM_VALUE_ID_INVALID;
-  loom_low_lower_resolved_descriptor_t descriptor = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_low_lower_rule_source_memory_resolve_materializer_descriptor(
-          context, rule_set, descriptor_ref, &descriptor));
-
-  const loom_value_id_t operands[2] = {lhs, rhs};
-  const loom_type_t result_type =
-      loom_module_value_type(loom_low_lower_context_module(context), lhs);
-  const loom_tied_result_t* tied_results = NULL;
-  iree_host_size_t tied_result_count = 0;
-  loom_value_id_t materializer_operands[2] = {operands[0], operands[1]};
-  IREE_RETURN_IF_ERROR(
-      loom_low_lower_rule_source_memory_materializer_tied_results(
-          context, &descriptor, IREE_ARRAYSIZE(materializer_operands),
-          materializer_operands, location, &tied_results, &tied_result_count));
-  loom_op_t* low_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
-      context, &descriptor, materializer_operands,
-      IREE_ARRAYSIZE(materializer_operands), loom_named_attr_slice_empty(),
-      &result_type, 1, tied_results, tied_result_count, location, &low_op));
-  const loom_value_slice_t results = loom_low_op_results(low_op);
-  IREE_ASSERT_EQ(results.count, 1u);
-  *out_value_id = results.values[0];
-  return iree_ok_status();
-}
-
-static iree_status_t loom_low_lower_rule_source_memory_emit_conversion_op(
+static iree_status_t loom_low_lower_rule_source_memory_emit_op(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set,
     loom_low_lower_descriptor_ref_t descriptor_ref, loom_value_id_t* operands,
-    uint16_t operand_count, loom_named_attr_slice_t attributes,
-    loom_location_id_t location, loom_value_id_t* out_value_id) {
+    uint16_t operand_count, loom_type_t result_type,
+    loom_named_attr_slice_t attributes, loom_location_id_t location,
+    loom_value_id_t* out_value_id) {
   *out_value_id = LOOM_VALUE_ID_INVALID;
   loom_low_lower_resolved_descriptor_t descriptor = {0};
   IREE_RETURN_IF_ERROR(
@@ -285,9 +252,10 @@ static iree_status_t loom_low_lower_rule_source_memory_emit_conversion_op(
       loom_low_lower_rule_source_memory_materializer_tied_results(
           context, &descriptor, operand_count, operands, location,
           &tied_results, &tied_result_count));
-  loom_type_t result_type = loom_type_none();
-  IREE_RETURN_IF_ERROR(loom_low_lower_rule_descriptor_result_type(
-      context, descriptor.descriptor, 0, &result_type));
+  if (loom_type_equal(result_type, loom_type_none())) {
+    IREE_RETURN_IF_ERROR(loom_low_lower_rule_descriptor_result_type(
+        context, descriptor.descriptor, 0, &result_type));
+  }
   loom_op_t* low_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
       context, &descriptor, operands, operand_count, attributes, &result_type,
@@ -296,6 +264,62 @@ static iree_status_t loom_low_lower_rule_source_memory_emit_conversion_op(
   IREE_ASSERT_EQ(results.count, 1u);
   *out_value_id = results.values[0];
   return iree_ok_status();
+}
+
+static iree_status_t loom_low_lower_rule_source_memory_emit_binary_op(
+    loom_low_lower_context_t* context,
+    const loom_low_lower_rule_set_t* rule_set,
+    loom_low_lower_descriptor_ref_t descriptor_ref, loom_value_id_t lhs,
+    loom_value_id_t rhs, loom_location_id_t location,
+    loom_value_id_t* out_value_id) {
+  loom_value_id_t operands[2] = {lhs, rhs};
+  const loom_type_t result_type =
+      loom_module_value_type(loom_low_lower_context_module(context), lhs);
+  return loom_low_lower_rule_source_memory_emit_op(
+      context, rule_set, descriptor_ref, operands, IREE_ARRAYSIZE(operands),
+      result_type, loom_named_attr_slice_empty(), location, out_value_id);
+}
+
+static iree_status_t loom_low_lower_rule_source_memory_emit_multiply_add(
+    loom_low_lower_context_t* context,
+    const loom_low_lower_rule_set_t* rule_set,
+    loom_low_lower_descriptor_ref_t descriptor_ref, loom_value_id_t addend,
+    loom_value_id_t lhs, loom_value_id_t rhs, loom_location_id_t location,
+    loom_value_id_t* out_value_id) {
+  loom_value_id_t operands[3] = {addend, lhs, rhs};
+  const loom_type_t result_type =
+      loom_module_value_type(loom_low_lower_context_module(context), addend);
+  return loom_low_lower_rule_source_memory_emit_op(
+      context, rule_set, descriptor_ref, operands, IREE_ARRAYSIZE(operands),
+      result_type, loom_named_attr_slice_empty(), location, out_value_id);
+}
+
+static iree_status_t loom_low_lower_rule_source_memory_emit_static_bias(
+    loom_low_lower_context_t* context,
+    const loom_low_lower_rule_set_t* rule_set,
+    const loom_low_lower_source_memory_byte_offset_materializer_t* materializer,
+    int64_t value, loom_location_id_t location, loom_value_id_t* out_value_id) {
+  if (materializer->static_bias_descriptor_ref ==
+      LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE) {
+    return loom_low_lower_rule_source_memory_emit_byte_offset_const(
+        context, rule_set, materializer, materializer->constant_descriptor_ref,
+        value, location, out_value_id);
+  }
+
+  loom_string_id_t immediate_name_id = LOOM_STRING_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_module_intern_string(
+      loom_low_lower_context_module(context),
+      loom_low_lower_rule_set_string(
+          rule_set, materializer->constant_immediate_string_ref),
+      &immediate_name_id));
+  const loom_named_attr_t attr = {
+      .name_id = immediate_name_id,
+      .value = loom_attr_i64(value),
+  };
+  return loom_low_lower_rule_source_memory_emit_op(
+      context, rule_set, materializer->static_bias_descriptor_ref, NULL, 0,
+      loom_type_none(), loom_make_named_attr_slice(&attr, 1), location,
+      out_value_id);
 }
 
 static iree_status_t loom_low_lower_rule_source_memory_convert_integer(
@@ -337,9 +361,10 @@ static iree_status_t loom_low_lower_rule_source_memory_convert_integer(
             context, &constant, immediate_name, 0, carrier_type, location,
             &operands[2]));
   }
-  return loom_low_lower_rule_source_memory_emit_conversion_op(
+  return loom_low_lower_rule_source_memory_emit_op(
       context, rule_set, conversion->descriptor_ref, operands,
-      conversion->input_count, attributes, location, out_value_id);
+      conversion->input_count, loom_type_none(), attributes, location,
+      out_value_id);
 }
 
 // Canonical terms retain their numeric source domain after index casts have
@@ -432,7 +457,7 @@ static iree_status_t loom_low_lower_rule_materialize_source_memory_term(
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     const loom_low_lower_source_memory_byte_offset_materializer_t* materializer,
     const loom_low_source_memory_dynamic_term_t* term, loom_type_t offset_type,
-    loom_value_id_t* out_value_id) {
+    loom_value_id_t addend, loom_value_id_t* out_value_id) {
   *out_value_id = LOOM_VALUE_ID_INVALID;
 
   loom_value_id_t index = LOOM_VALUE_ID_INVALID;
@@ -445,14 +470,37 @@ static iree_status_t loom_low_lower_rule_materialize_source_memory_term(
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_lookup_byte_offset(
         context, rule_set, materializer, term->stride_values[i], offset_type,
         source_op->location, &stride_value));
+    const bool can_accumulate = addend != LOOM_VALUE_ID_INVALID &&
+                                i + 1 == term->stride_value_count &&
+                                term->byte_stride == 1;
+    if (can_accumulate) {
+      return loom_low_lower_rule_source_memory_emit_multiply_add(
+          context, rule_set, materializer->multiply_add_descriptor_ref, addend,
+          accumulator, stride_value, source_op->location, out_value_id);
+    }
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_emit_binary_op(
         context, rule_set, materializer->multiply_descriptor_ref, accumulator,
         stride_value, source_op->location, &accumulator));
   }
 
   if (term->byte_stride == 1) {
+    IREE_ASSERT_EQ(addend, LOOM_VALUE_ID_INVALID);
     *out_value_id = accumulator;
     return iree_ok_status();
+  }
+
+  if (addend != LOOM_VALUE_ID_INVALID) {
+    IREE_ASSERT_NE(materializer->multiply_add_descriptor_ref,
+                   LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE);
+    loom_value_id_t stride = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(
+        loom_low_lower_rule_source_memory_emit_byte_offset_const(
+            context, rule_set, materializer,
+            materializer->constant_descriptor_ref, term->byte_stride,
+            source_op->location, &stride));
+    return loom_low_lower_rule_source_memory_emit_multiply_add(
+        context, rule_set, materializer->multiply_add_descriptor_ref, addend,
+        accumulator, stride, source_op->location, out_value_id);
   }
 
   if (term->byte_shift != LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE &&
@@ -460,22 +508,27 @@ static iree_status_t loom_low_lower_rule_materialize_source_memory_term(
           LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE) {
     loom_value_id_t shift = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(
-        loom_low_lower_rule_source_memory_emit_dynamic_byte_offset_const(
-            context, rule_set, materializer, term->byte_shift,
+        loom_low_lower_rule_source_memory_emit_byte_offset_const(
+            context, rule_set, materializer,
+            materializer->constant_descriptor_ref, term->byte_shift,
             source_op->location, &shift));
-    return loom_low_lower_rule_source_memory_emit_binary_op(
+    IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_emit_binary_op(
         context, rule_set, materializer->shift_left_descriptor_ref, accumulator,
-        shift, source_op->location, out_value_id);
+        shift, source_op->location, &accumulator));
+  } else {
+    loom_value_id_t stride = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(
+        loom_low_lower_rule_source_memory_emit_byte_offset_const(
+            context, rule_set, materializer,
+            materializer->constant_descriptor_ref, term->byte_stride,
+            source_op->location, &stride));
+    IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_emit_binary_op(
+        context, rule_set, materializer->multiply_descriptor_ref, accumulator,
+        stride, source_op->location, &accumulator));
   }
-
-  loom_value_id_t stride = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(
-      loom_low_lower_rule_source_memory_emit_dynamic_byte_offset_const(
-          context, rule_set, materializer, term->byte_stride,
-          source_op->location, &stride));
-  return loom_low_lower_rule_source_memory_emit_binary_op(
-      context, rule_set, materializer->multiply_descriptor_ref, accumulator,
-      stride, source_op->location, out_value_id);
+  IREE_ASSERT_EQ(addend, LOOM_VALUE_ID_INVALID);
+  *out_value_id = accumulator;
+  return iree_ok_status();
 }
 
 iree_status_t loom_low_lower_rule_materialize_source_memory_byte_offset(
@@ -530,7 +583,7 @@ iree_status_t loom_low_lower_rule_materialize_source_memory_byte_offset(
     loom_value_id_t term_value = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_materialize_source_memory_term(
         context, rule_set, source_op, materializer, term, offset_type,
-        &term_value));
+        LOOM_VALUE_ID_INVALID, &term_value));
     if (accumulator == LOOM_VALUE_ID_INVALID) {
       accumulator = term_value;
     } else {
@@ -544,6 +597,63 @@ iree_status_t loom_low_lower_rule_materialize_source_memory_byte_offset(
   IREE_ASSERT_NE(accumulator, LOOM_VALUE_ID_INVALID);
   *out_value_id = accumulator;
   return iree_ok_status();
+}
+
+iree_status_t
+loom_low_lower_rule_materialize_source_memory_complete_byte_offset(
+    loom_low_lower_context_t* context,
+    const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
+    const loom_low_lower_source_memory_t* source_memory,
+    const loom_low_source_memory_access_plan_t* source_memory_access,
+    loom_value_id_t* out_value_id) {
+  *out_value_id = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT(source_memory_access != NULL);
+  IREE_ASSERT_GT(source_memory_access->dynamic_term_count, 0);
+  const loom_low_lower_source_memory_byte_offset_materializer_t* materializer =
+      loom_low_lower_rule_set_source_memory_byte_offset_materializer(
+          rule_set, source_memory);
+  const int64_t static_byte_offset = source_memory_access->static_byte_offset;
+  const loom_low_source_memory_dynamic_term_t* term =
+      &source_memory_access->dynamic_terms[0];
+  const bool term_requires_multiply =
+      term->stride_value_count != 0 || term->byte_stride != 1;
+  const bool can_multiply_add =
+      static_byte_offset != 0 &&
+      source_memory_access->dynamic_term_count == 1 &&
+      materializer->multiply_add_descriptor_ref !=
+          LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE &&
+      term_requires_multiply &&
+      !(loom_low_source_memory_access_dynamic_offset_has_materialized_view_base(
+            source_memory_access) &&
+        loom_low_lower_source_value_has_low_mapping(
+            context, source_memory_access->dynamic_view_base_value_id));
+  loom_value_id_t static_value = LOOM_VALUE_ID_INVALID;
+  if (static_byte_offset != 0) {
+    IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_emit_static_bias(
+        context, rule_set, materializer, static_byte_offset,
+        source_op->location, &static_value));
+  }
+  if (can_multiply_add) {
+    const loom_type_t offset_type = loom_module_value_type(
+        loom_low_lower_context_module(context), static_value);
+    return loom_low_lower_rule_materialize_source_memory_term(
+        context, rule_set, source_op, materializer, term, offset_type,
+        static_value, out_value_id);
+  }
+
+  loom_value_id_t dynamic_byte_offset = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_rule_materialize_source_memory_byte_offset(
+          context, rule_set, source_op, source_memory, source_memory_access,
+          &dynamic_byte_offset));
+  if (static_byte_offset == 0) {
+    *out_value_id = dynamic_byte_offset;
+    return iree_ok_status();
+  }
+
+  return loom_low_lower_rule_source_memory_emit_binary_op(
+      context, rule_set, materializer->add_descriptor_ref, dynamic_byte_offset,
+      static_value, source_op->location, out_value_id);
 }
 
 static iree_status_t
@@ -584,10 +694,10 @@ loom_low_lower_rule_materialize_source_memory_address_coordinate_value(
 
   IREE_ASSERT(
       loom_type_equal(source_type, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX)));
-  return loom_low_lower_rule_source_memory_emit_conversion_op(
+  return loom_low_lower_rule_source_memory_emit_op(
       context, rule_set, materializer->index_to_coordinate_descriptor_ref,
-      &low_value_id, 1, loom_named_attr_slice_empty(), source_op->location,
-      out_value_id);
+      &low_value_id, 1, loom_type_none(), loom_named_attr_slice_empty(),
+      source_op->location, out_value_id);
 }
 
 static iree_status_t loom_low_lower_rule_materialize_source_memory_address_term(

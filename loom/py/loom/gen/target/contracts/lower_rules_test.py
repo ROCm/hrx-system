@@ -1912,7 +1912,40 @@ def test_source_memory_rows_split_byte_offset_materializer() -> None:
     assert ".constant_descriptor_ref = 0" in materializer_fields
     assert ".add_descriptor_ref = 1" in materializer_fields
     assert ".multiply_descriptor_ref = 2" in materializer_fields
+    assert ".multiply_add_descriptor_ref = 65535" in materializer_fields
+    assert ".static_bias_descriptor_ref = 65535" in materializer_fields
     assert ".shift_left_descriptor_ref = 65535" in materializer_fields
+
+
+def test_source_memory_rows_emit_optional_byte_offset_descriptors() -> None:
+    multiply_add = replace(TEST_LOW_ADD_I32_DESCRIPTOR, key="test.multiply_add.i32")
+    static_bias = replace(TEST_LOW_CONST_I32_DESCRIPTOR, key="test.static_bias.i32")
+    materializer = SourceMemoryByteOffsetMaterializer(
+        constant=TEST_LOW_CONST_I32_DESCRIPTOR,
+        add=TEST_LOW_ADD_I32_DESCRIPTOR,
+        multiply=TEST_LOW_MUL_I32_DESCRIPTOR,
+        shift_left=None,
+        multiply_add=multiply_add,
+        static_bias=static_bias,
+        constant_immediate="i32_value",
+    )
+    descriptor_refs = {
+        TEST_LOW_CONST_I32_DESCRIPTOR.key: 0,
+        TEST_LOW_ADD_I32_DESCRIPTOR.key: 1,
+        TEST_LOW_MUL_I32_DESCRIPTOR.key: 2,
+        multiply_add.key: 3,
+        static_bias.key: 4,
+    }
+
+    materializer_fields = source_memory_byte_offset_materializer_row(
+        descriptor_refs,
+        materializer,
+        immediate_string_ref="TEST_STRING_I32_VALUE",
+        conversion_immediate_string_refs={},
+    )
+
+    assert ".multiply_add_descriptor_ref = 3" in materializer_fields
+    assert ".static_bias_descriptor_ref = 4" in materializer_fields
 
 
 def test_source_memory_conversion_rows_keep_source_kind_and_selector() -> None:
