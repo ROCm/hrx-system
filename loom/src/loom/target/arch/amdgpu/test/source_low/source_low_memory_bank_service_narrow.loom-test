@@ -24,8 +24,8 @@ kernel.def target(@target) @narrow_packets() {
 }
 
 // ----
-bank-service function=narrow_packets source-op=vector.store root=scratch packet=amdgpu.ds_write_b16 model=amdgpu.lds.gfx1151.wave32.b16.write.combine-disjoint-writes proof=exact lane-address=canonical-workitem-coordinates-all-waves active-lanes=subgroup-uniform-control-full-wave base-residue=all-compatible-byte-residues-common-translation classification=conflict-free required-rounds=1 uncontended-rounds=1 extra-rounds=0 maximum-multiplicity=1
-bank-service function=narrow_packets source-op=vector.store root=scratch packet=amdgpu.ds_write_b32 model=amdgpu.lds.gfx1151.wave32.b32.write.count-each proof=exact lane-address=canonical-workitem-coordinates-all-waves active-lanes=subgroup-uniform-control-full-wave base-residue=subgroup-uniform-common-translation-all-bank-word-residues classification=conflicted required-rounds=32 uncontended-rounds=1 extra-rounds=31 maximum-multiplicity=32
+bank-service function=narrow_packets source-op=vector.store root=scratch packet=amdgpu.ds_write_b16 model=amdgpu.lds.gfx1151.wave32.b16.write.combine-disjoint-writes proof=exact lane-address=canonical-topology-coordinates-all-waves active-lanes=subgroup-uniform-control-full-wave base-residue=all-compatible-byte-residues-common-translation classification=conflict-free required-rounds=1 uncontended-rounds=1 extra-rounds=0 maximum-multiplicity=1
+bank-service function=narrow_packets source-op=vector.store root=scratch packet=amdgpu.ds_write_b32 model=amdgpu.lds.gfx1151.wave32.b32.write.count-each proof=exact lane-address=canonical-topology-coordinates-all-waves active-lanes=subgroup-uniform-control-full-wave base-residue=subgroup-uniform-common-translation-all-bank-word-residues classification=conflicted required-rounds=32 uncontended-rounds=1 extra-rounds=31 maximum-multiplicity=32
 
 // ====
 

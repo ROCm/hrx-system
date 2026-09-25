@@ -214,9 +214,11 @@ describes identical-address broadcast. Wide-access analysis requires proven
 alignment and full-subgroup participation. Fragment accesses use their compiled
 lane/register layout, including repeated lane addresses.
 
-Source accesses can combine multiple workitem coordinates and subgroup-uniform
-offsets. The analysis uses the native X-fastest workitem order and checks every
-wave in the workgroup. For example, on gfx1100/gfx1151, a b128 store at
+Source accesses can combine workitem coordinates, subgroup-lane coordinates,
+and subgroup-uniform offsets. The analysis uses native X-fastest workitem order,
+resets `kernel.subgroup.lane.id` for each wave, and checks every wave in the
+workgroup. A lane number is distinct from X when a wave spans multiple rows.
+For example, on gfx1100/gfx1151, a b128 store at
 `16*x + 512*y` is conflict-free for a `32×2` wave32 workgroup. Changing the shape
 to `4×8` puts two rows in each write-service phase and doubles the required
 rounds. A `12×8`
@@ -224,7 +226,7 @@ shape has different profiles across waves and reports
 `address-wave-profiles-differ`; no single wave's profile represents it exactly.
 
 Constant division, remainder, shift, and mask can also describe tiled
-coordinates. For example, the b128 store address
+workitem or subgroup-lane coordinates. For example, the b128 store address
 `144*(x/8) + 16*(x%8)` is conflict-free across a 128-thread wave32 workgroup
 on gfx1100/gfx1151. Replacing `x` with `x+1` inside both digits doubles the
 required rounds. An offset inside division changes lane grouping; it is not

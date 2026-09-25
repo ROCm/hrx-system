@@ -24,8 +24,9 @@ extern "C" {
 // terms. |workgroup_size| is a fixed, complete-wave geometry established by the
 // active-subgroup proof. The selected packet has a proven 32-bit DS address.
 //
-// Workitem coordinates and their retained digit projections follow native
-// X-fastest order. Other contributions must be proven subgroup-uniform.
+// Workitem coordinates follow native X-fastest order; subgroup-lane coordinates
+// reset for each wave. Both admit retained digit projections and can be mixed
+// in one address. Other contributions must be proven subgroup-uniform.
 // |expressions| contains the completed shared source-index analysis. Exact
 // evidence requires the same phase profile for every wave and every
 // compatible common subword residue. This consumes retained plans and facts

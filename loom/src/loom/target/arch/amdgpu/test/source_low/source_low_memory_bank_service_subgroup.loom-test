@@ -1,0 +1,45 @@
+// RUN: with-checks emit amdgpu-bank-service
+
+amdgpu.target<gfx1151> @target {subgroup_size = 32}
+
+// Each wave spans eight rows, so its lane coordinate is distinct from X.
+// Each subgroup stages separate tiles using direct, digit, and mixed indices.
+// The five-column digit layout distinguishes subgroup-lane reset from using a
+// flat workitem number: the latter has different phase profiles across waves.
+kernel.def target(@target) @subgroup_tiles() {
+  %unit = index.constant 1 : index
+  %columns = index.constant 4 : index
+  %rows = index.constant 16 : index
+  %planes = index.constant 2 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%columns, %rows, %planes) : index
+} launch() {
+  %lane = kernel.subgroup.lane.id : index
+  %subgroup = kernel.subgroup.id : index
+  %column = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %linear_bytes = index.constant 4096 : offset
+  %digit_bytes = index.constant 8448 : offset
+  %mixed_bytes = index.constant 16384 : offset
+  %linear_tiles = buffer.alloca<workgroup> align(16) %linear_bytes : buffer
+  %digit_tiles = buffer.alloca<workgroup> align(16) %digit_bytes : buffer
+  %mixed_tiles = buffer.alloca<workgroup> align(16) %mixed_bytes : buffer
+  %linear_layout = encoding.layout.strided [256, 4, 1] : encoding<layout>
+  %digit_layout = encoding.layout.strided [528, 40, 4, 1] : encoding<layout>
+  %mixed_layout = encoding.layout.strided [1024, 256, 4, 1] : encoding<layout>
+  %linear = buffer.view %linear_tiles[%base] : buffer -> view<4x64x4xi32, %linear_layout>
+  %digits = buffer.view %digit_tiles[%base] : buffer -> view<4x13x5x4xi32, %digit_layout>
+  %mixed = buffer.view %mixed_tiles[%base] : buffer -> view<4x4x64x4xi32, %mixed_layout>
+  %columns_per_row = index.constant 5 : index
+  %row = index.div %lane, %columns_per_row : index
+  %slot = index.rem %lane, %columns_per_row : index
+  %value = vector.constant 1 : vector<4xi32>
+  vector.store %value, %linear[%subgroup, %lane, 0] : vector<4xi32>, view<4x64x4xi32, %linear_layout>
+  vector.store %value, %digits[%subgroup, %row, %slot, 0] : vector<4xi32>, view<4x13x5x4xi32, %digit_layout>
+  vector.store %value, %mixed[%subgroup, %column, %lane, 0] : vector<4xi32>, view<4x4x64x4xi32, %mixed_layout>
+  kernel.return
+}
+
+// ----
+CHECK: bank-service function=subgroup_tiles source-op=vector.store root=linear_tiles * proof=exact lane-address=canonical-topology-coordinates-all-waves * classification=conflict-free required-rounds=4 uncontended-rounds=4 extra-rounds=0 maximum-multiplicity=1
+CHECK: bank-service function=subgroup_tiles source-op=vector.store root=digit_tiles * proof=exact lane-address=canonical-topology-digits-all-waves * classification=conflicted required-rounds=10 uncontended-rounds=4 extra-rounds=6 maximum-multiplicity=3
+CHECK: bank-service function=subgroup_tiles source-op=vector.store root=mixed_tiles * proof=exact lane-address=canonical-topology-coordinates-all-waves * classification=conflict-free required-rounds=4 uncontended-rounds=4 extra-rounds=0 maximum-multiplicity=1

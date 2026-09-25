@@ -171,6 +171,14 @@ static void loom_amdgpu_memory_bank_service_evaluate_full_wave(
   loom_amdgpu_memory_bank_service_record_result(&result, out_report);
 }
 
+static bool loom_amdgpu_memory_bank_service_is_coordinate_domain(
+    const loom_value_fact_topology_domain_t* domain) {
+  return domain &&
+         (domain->value_kind == LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKITEM_ID ||
+          domain->value_kind ==
+              LOOM_VALUE_FACT_TOPOLOGY_VALUE_SUBGROUP_LANE_ID);
+}
+
 void loom_amdgpu_memory_calculate_source_bank_service(
     const loom_amdgpu_lds_bank_service_model_t* model,
     const loom_low_source_memory_access_plan_t* source,
@@ -184,14 +192,14 @@ void loom_amdgpu_memory_calculate_source_bank_service(
     return;
   }
 
-  uint64_t coordinate_byte_strides[LOOM_KERNEL_DIMENSION_COUNT_] = {0};
+  uint64_t coordinate_byte_strides[LOOM_VALUE_FACT_TOPOLOGY_AXIS_COUNT_] = {0};
   struct {
-    // Shared producer's exact numeric function of one workitem coordinate.
+    // Shared producer's exact numeric function of one topology coordinate.
     const loom_symbolic_projection_t* projection;
     // Physical byte coefficient supplied by the canonical source plan.
     uint64_t byte_stride;
-    // Native workitem coordinate selected by the projection's root facts.
-    uint8_t dimension;
+    // Workitem or subgroup-lane axis selected by the projection's root facts.
+    uint8_t axis;
   } projected_terms[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY];
   uint8_t projected_term_count = 0;
   loom_value_facts_t common_offset = loom_value_facts_exact_i64(0);
@@ -205,12 +213,12 @@ void loom_amdgpu_memory_calculate_source_bank_service(
     loom_symbolic_expr_summary_t summary = {0};
     const loom_value_fact_topology_domain_t* domain = NULL;
     int64_t byte_stride = term->byte_stride;
-    uint8_t dimension = (uint8_t)term->dimension;
+    uint8_t axis = (uint8_t)term->dimension;
     if (term->source !=
         LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_WORKITEM_ID) {
       // A retained coordinate may materialize an affine wrapper around a digit
-      // or workitem ID. Consume that shared summary without changing the
-      // address plan's chosen SSA value or walking its producers.
+      // or topology coordinate. Consume that shared summary without changing
+      // the address plan's chosen SSA value or walking its producers.
       if (loom_symbolic_expr_context_try_lookup_summary(
               expressions, term->index, &summary) &&
           loom_symbolic_expr_is_linear(&summary.expression) &&
@@ -231,8 +239,7 @@ void loom_amdgpu_memory_calculate_source_bank_service(
         loom_value_facts_addi(&common_offset, &translation, &common_offset);
         domain = loom_value_facts_topology_domain(loom_value_fact_table_lookup(
             expressions->fact_table, coordinate->value_id));
-        if (!domain ||
-            domain->value_kind != LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKITEM_ID) {
+        if (!loom_amdgpu_memory_bank_service_is_coordinate_domain(domain)) {
           if (loom_symbolic_expr_context_try_lookup_summary(
                   expressions, coordinate->value_id, &summary) &&
               summary.projection) {
@@ -242,13 +249,12 @@ void loom_amdgpu_memory_calculate_source_bank_service(
           }
         }
       }
-      if (!domain ||
-          domain->value_kind != LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKITEM_ID) {
+      if (!loom_amdgpu_memory_bank_service_is_coordinate_domain(domain)) {
         loom_amdgpu_memory_bank_service_mark_unknown(
             IREE_SV("address-varying-term-unproven"), out_report);
         return;
       }
-      dimension = (uint8_t)domain->axis;
+      axis = (uint8_t)domain->axis;
     }
     if (term->stride_value_count != 0) {
       loom_amdgpu_memory_bank_service_mark_unknown(
@@ -261,7 +267,7 @@ void loom_amdgpu_memory_calculate_source_bank_service(
       return;
     }
     if (!summary.projection) {
-      coordinate_byte_strides[dimension] += (uint64_t)byte_stride;
+      coordinate_byte_strides[axis] += (uint64_t)byte_stride;
       continue;
     }
     if ((uint64_t)byte_stride % model->packet_byte_count != 0) {
@@ -271,22 +277,23 @@ void loom_amdgpu_memory_calculate_source_bank_service(
     }
     projected_terms[projected_term_count].projection = summary.projection;
     projected_terms[projected_term_count].byte_stride = (uint64_t)byte_stride;
-    projected_terms[projected_term_count].dimension = dimension;
+    projected_terms[projected_term_count].axis = axis;
     ++projected_term_count;
   }
   const uint32_t packet_alignment = model->packet_byte_count;
-  if (source->minimum_alignment < packet_alignment ||
-      coordinate_byte_strides[0] % packet_alignment != 0 ||
-      coordinate_byte_strides[1] % packet_alignment != 0 ||
-      coordinate_byte_strides[2] % packet_alignment != 0) {
+  bool aligned = source->minimum_alignment >= packet_alignment;
+  for (uint8_t axis = 0; axis < LOOM_VALUE_FACT_TOPOLOGY_AXIS_COUNT_; ++axis) {
+    aligned &= coordinate_byte_strides[axis] % packet_alignment == 0;
+  }
+  if (!aligned) {
     loom_amdgpu_memory_bank_service_mark_unknown(
         IREE_SV("address-packet-alignment-unproven"), out_report);
     return;
   }
   out_report->lane_address_proof =
       projected_term_count != 0
-          ? IREE_SV("canonical-workitem-digits-all-waves")
-          : IREE_SV("canonical-workitem-coordinates-all-waves");
+          ? IREE_SV("canonical-topology-digits-all-waves")
+          : IREE_SV("canonical-topology-coordinates-all-waves");
   out_report->base_residue_proof =
       IREE_SV("subgroup-uniform-common-translation-all-bank-word-residues");
 
@@ -309,14 +316,15 @@ void loom_amdgpu_memory_calculate_source_bank_service(
       const uint32_t z = linear_id / plane_size;
       // The selected DS packet already proves a 32-bit address envelope.
       // These nonnegative canonical contributions cannot overflow it.
-      lane_offsets[lane] = x * coordinate_byte_strides[0] +
-                           y * coordinate_byte_strides[1] +
-                           z * coordinate_byte_strides[2];
-      const uint32_t coordinates[] = {x, y, z};
+      const uint32_t coordinates[] = {x, y, z, lane};
+      for (uint8_t axis = 0; axis < LOOM_VALUE_FACT_TOPOLOGY_AXIS_COUNT_;
+           ++axis) {
+        lane_offsets[lane] += coordinates[axis] * coordinate_byte_strides[axis];
+      }
       for (uint8_t i = 0; i < projected_term_count; ++i) {
         const loom_symbolic_projection_t* projection =
             projected_terms[i].projection;
-        uint64_t digit = ((uint64_t)coordinates[projected_terms[i].dimension] *
+        uint64_t digit = ((uint64_t)coordinates[projected_terms[i].axis] *
                               (uint64_t)projection->scale +
                           (uint64_t)projection->offset) /
                          (uint64_t)projection->divisor;
