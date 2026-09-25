@@ -16,6 +16,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/analysis/cfg_value_identity.h"
 #include "loom/analysis/symbolic_expr.h"
 #include "loom/analysis/view_regions.h"
 #include "loom/codegen/low/builder.h"
@@ -64,6 +65,8 @@ typedef enum loom_low_lower_function_analysis_phase_e {
 typedef struct loom_low_lower_function_analysis_t {
   // Furthest analysis phase completed for the active fact table.
   loom_low_lower_function_analysis_phase_t phase;
+  // Exact CFG representatives retained from source footprint verification.
+  loom_cfg_value_identity_table_t value_identities;
   // Function-local stable symbolic expressions shared by rules and views.
   loom_symbolic_expr_context_t expression_context;
   // View-region table borrowing expression_context.

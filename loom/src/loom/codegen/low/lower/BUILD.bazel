@@ -73,6 +73,7 @@ loom_cc_library(
     ],
     visibility = _LOWER_VISIBILITY,
     deps = [
+        "//loom/src/loom/analysis:cfg_value_identity",
         "//loom/src/loom/analysis:condition_facts",
         "//loom/src/loom/analysis:contract_vector",
         "//loom/src/loom/analysis:kernel_async_legality",
@@ -251,6 +252,7 @@ loom_cc_test(
     srcs = ["source_query_test.cc"],
     deps = [
         ":lower",
+        "//loom/src/loom/analysis:cfg_value_identity",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/test",

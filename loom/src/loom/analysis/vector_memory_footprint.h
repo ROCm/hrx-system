@@ -15,6 +15,7 @@
 #define LOOM_ANALYSIS_VECTOR_MEMORY_FOOTPRINT_H_
 
 #include "iree/base/api.h"
+#include "loom/analysis/cfg_value_identity.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
 #include "loom/ir/local_value_domain.h"
@@ -30,6 +31,11 @@ typedef struct loom_vector_memory_footprint_options_t {
   // Optional acquired domain covering the function's complete region tree.
   // The verifier acquires an invocation-local domain when this is NULL.
   loom_local_value_domain_t* value_domain;
+  // Optional initialized empty identity table over the supplied value_domain.
+  // The verifier fills its caller-owned storage without retaining path
+  // conditions. On successful verification the identities remain valid until IR
+  // mutation.
+  loom_cfg_value_identity_table_t* value_identities;
   // Structured diagnostic emitter for user footprint proof failures.
   iree_diagnostic_emitter_t emitter;
   // Maximum number of errors to emit before suppressing further diagnostics.

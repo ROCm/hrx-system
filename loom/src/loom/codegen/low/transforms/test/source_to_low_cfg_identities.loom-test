@@ -1,0 +1,42 @@
+// RUN: with-checks pass source-to-low,low-dce
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @equal_pair(%left: reg<test.i32>, %right: reg<test.i32>) -> (reg<test.i32>) where [eq(%left, %right)] asm {
+  return %left
+}
+
+// Equal incoming values prove the helper contract across a CFG boundary.
+func.def target(@target) @forwarded_precondition(%value: i32) -> (i32) {
+  cfg.br ^body(%value: i32, %value: i32)
+^body(%first: i32, %second: i32):
+  %result = low.invoke @equal_pair(%first, %second) : (i32, i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+CHECK: *low.assume %first, %second [eq(%first, %second)]*
+CHECK: %result = low.func.call @equal_pair(*)*
+
+// ====
+
+// RUN: with-checks pass source-to-low,low-dce
+
+test.target<low_core> @target
+
+// A block-entry coordinate stays materialized even when its expression is known.
+func.def target(@target) @incoming_coordinate(%storage: buffer, %raw: index) -> (vector<4xi32>) {
+  %base = index.constant 0 : offset
+  %prefix = index.constant 4 : index
+  %origin = index.assume %raw [range(%raw, 0, 56)] : index
+  %initial = index.add %origin, %prefix : index
+  %view = buffer.view %storage[%base] : buffer -> view<64xi32>
+  cfg.br ^load(%initial: index)
+^load(%coordinate: index):
+  %result = vector.load %view[%coordinate] : view<64xi32> -> vector<4xi32>
+  func.return %result : vector<4xi32>
+}
+
+// ----
+CHECK: * = test.mul.i32 %coordinate, *
+CHECK: %result = test.load.index.v4i32 %view, *

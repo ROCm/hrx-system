@@ -45,7 +45,7 @@ typedef struct loom_vector_memory_footprint_state_t {
   // Caller-owned verification options.
   const loom_vector_memory_footprint_options_t* options;
 
-  // Call-scoped arena owning all verification analysis storage.
+  // Call-scoped arena owning temporary verification analysis storage.
   iree_arena_allocator_t* arena;
 
   // Per-function value facts visible to footprint proof.
@@ -57,7 +57,8 @@ typedef struct loom_vector_memory_footprint_state_t {
   // Invocation-owned value domain when the caller supplies none.
   loom_local_value_domain_t owned_value_domain;
 
-  // Direct CFG argument representatives indexed by value_domain.
+  // Direct CFG argument representatives indexed by value_domain. Storage is
+  // borrowed from the caller when supplied, otherwise owned by arena.
   loom_cfg_value_identity_table_t value_identities;
 
   // Per-function symbolic expression context sharing the fact table above.
@@ -1926,8 +1927,12 @@ iree_status_t loom_vector_memory_footprint_verify_function(
     }
   }
   if (iree_status_is_ok(status)) {
-    status = loom_cfg_value_identity_table_initialize(
-        state.value_domain, &arena, &state.value_identities);
+    if (options->value_identities) {
+      state.value_identities = *options->value_identities;
+    } else {
+      status = loom_cfg_value_identity_table_initialize(
+          state.value_domain, &arena, &state.value_identities);
+    }
   }
   if (iree_status_is_ok(status)) {
     loom_symbolic_expr_context_initialize(module, state.value_domain,

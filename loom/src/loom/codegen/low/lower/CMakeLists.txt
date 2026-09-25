@@ -58,6 +58,7 @@ loom_cc_library(
     iree::base
     iree::base::internal
     iree::base::internal::arena
+    loom::analysis::cfg_value_identity
     loom::analysis::condition_facts
     loom::analysis::contract_vector
     loom::analysis::kernel_async_legality
@@ -243,6 +244,7 @@ loom_cc_test(
     ::lower
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::analysis::cfg_value_identity
     loom::ir
     loom::ops::scalar
     loom::ops::test

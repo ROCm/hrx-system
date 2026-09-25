@@ -1258,9 +1258,16 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
 
   loom_vector_memory_footprint_result_t footprint_result = {0};
   if (iree_status_is_ok(status)) {
+    status = loom_cfg_value_identity_table_initialize(
+        &context.lowering.value_domain, &context.function_arena,
+        &context.lowering.function_analysis.value_identities);
+  }
+  if (iree_status_is_ok(status)) {
     const loom_vector_memory_footprint_options_t footprint_options = {
         .fact_table = context.lowering.fact_table,
         .value_domain = &context.lowering.value_domain,
+        .value_identities =
+            &context.lowering.function_analysis.value_identities,
         .emitter = options->emitter,
         .max_errors = options->max_errors,
     };

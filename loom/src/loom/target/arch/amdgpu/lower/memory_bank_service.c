@@ -204,13 +204,43 @@ void loom_amdgpu_memory_calculate_source_bank_service(
     }
     loom_symbolic_expr_summary_t summary = {0};
     const loom_value_fact_topology_domain_t* domain = NULL;
+    int64_t byte_stride = term->byte_stride;
+    uint8_t dimension = (uint8_t)term->dimension;
     if (term->source !=
         LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_WORKITEM_ID) {
+      // A retained coordinate may materialize an affine wrapper around a digit
+      // or workitem ID. Consume that shared summary without changing the
+      // address plan's chosen SSA value or walking its producers.
       if (loom_symbolic_expr_context_try_lookup_summary(
               expressions, term->index, &summary) &&
-          summary.projection) {
+          loom_symbolic_expr_is_linear(&summary.expression) &&
+          summary.expression.term_count == 1 &&
+          summary.expression.terms[0].coefficient > 0) {
+        const loom_symbolic_term_t* coordinate = summary.expression.terms;
+        int64_t constant_byte_offset = 0;
+        if (!iree_checked_mul_i64(summary.expression.constant, byte_stride,
+                                  &constant_byte_offset) ||
+            !iree_checked_mul_i64(coordinate->coefficient, byte_stride,
+                                  &byte_stride)) {
+          loom_amdgpu_memory_bank_service_mark_unknown(
+              IREE_SV("address-varying-term-unproven"), out_report);
+          return;
+        }
+        const loom_value_facts_t translation =
+            loom_value_facts_exact_i64(constant_byte_offset);
+        loom_value_facts_addi(&common_offset, &translation, &common_offset);
         domain = loom_value_facts_topology_domain(loom_value_fact_table_lookup(
-            expressions->fact_table, summary.projection->value_id));
+            expressions->fact_table, coordinate->value_id));
+        if (!domain ||
+            domain->value_kind != LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKITEM_ID) {
+          if (loom_symbolic_expr_context_try_lookup_summary(
+                  expressions, coordinate->value_id, &summary) &&
+              summary.projection) {
+            domain =
+                loom_value_facts_topology_domain(loom_value_fact_table_lookup(
+                    expressions->fact_table, summary.projection->value_id));
+          }
+        }
       }
       if (!domain ||
           domain->value_kind != LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKITEM_ID) {
@@ -218,30 +248,30 @@ void loom_amdgpu_memory_calculate_source_bank_service(
             IREE_SV("address-varying-term-unproven"), out_report);
         return;
       }
+      dimension = (uint8_t)domain->axis;
     }
     if (term->stride_value_count != 0) {
       loom_amdgpu_memory_bank_service_mark_unknown(
           IREE_SV("address-dynamic-stride"), out_report);
       return;
     }
-    if (term->byte_stride < 0) {
+    if (byte_stride < 0) {
       loom_amdgpu_memory_bank_service_mark_unknown(
           IREE_SV("address-negative-stride"), out_report);
       return;
     }
     if (!summary.projection) {
-      coordinate_byte_strides[term->dimension] += (uint64_t)term->byte_stride;
+      coordinate_byte_strides[dimension] += (uint64_t)byte_stride;
       continue;
     }
-    if ((uint64_t)term->byte_stride % model->packet_byte_count != 0) {
+    if ((uint64_t)byte_stride % model->packet_byte_count != 0) {
       loom_amdgpu_memory_bank_service_mark_unknown(
           IREE_SV("address-packet-alignment-unproven"), out_report);
       return;
     }
     projected_terms[projected_term_count].projection = summary.projection;
-    projected_terms[projected_term_count].byte_stride =
-        (uint64_t)term->byte_stride;
-    projected_terms[projected_term_count].dimension = (uint8_t)domain->axis;
+    projected_terms[projected_term_count].byte_stride = (uint64_t)byte_stride;
+    projected_terms[projected_term_count].dimension = dimension;
     ++projected_term_count;
   }
   const uint32_t packet_alignment = model->packet_byte_count;

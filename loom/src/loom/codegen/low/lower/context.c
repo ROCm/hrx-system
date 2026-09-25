@@ -333,6 +333,7 @@ loom_symbolic_expr_context_t* loom_low_lower_context_symbolic_expr_context(
         loom_low_lower_context_module(context), &context->lowering.value_domain,
         loom_low_lower_context_fact_table(context), &context->function_arena,
         &analysis->expression_context);
+    analysis->expression_context.value_identities = &analysis->value_identities;
     analysis->phase = LOOM_LOW_LOWER_FUNCTION_ANALYSIS_EXPRESSIONS;
   }
   return &analysis->expression_context;
