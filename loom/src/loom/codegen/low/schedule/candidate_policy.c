@@ -269,19 +269,21 @@ static bool loom_low_schedule_candidate_score_less(
   if (lhs_exceeds_unspillable_capacity != rhs_exceeds_unspillable_capacity) {
     return !lhs_exceeds_unspillable_capacity;
   }
-  // When both candidates exceed unspillable capacity, advance the tighter
-  // active completion. Otherwise a full register alone does not justify
-  // overriding pressure reduction in another storage class.
+  // Once hard-capacity feasibility ties, advance the tighter full bank's
+  // pending completion. Waiting until both candidates exceed capacity lets
+  // other chains consume the temporary storage that completion still needs.
   if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL &&
-      lhs_exceeds_unspillable_capacity &&
       compare_mode != LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT &&
       lhs->active_unspillable_completion_capacity !=
           rhs->active_unspillable_completion_capacity) {
     return lhs->active_unspillable_completion_capacity <
            rhs->active_unspillable_completion_capacity;
   }
+  // A pinned aggregate completion remains active when pressure recovery
+  // changes modes. Its retained identity keeps later packing transactions
+  // from taking storage needed to finish the current one.
   if (state->options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL &&
-      compare_mode == LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION &&
+      compare_mode != LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT &&
       lhs->active_register_packing_completion_capacity !=
           rhs->active_register_packing_completion_capacity) {
     return lhs->active_register_packing_completion_capacity <
@@ -325,6 +327,17 @@ static bool loom_low_schedule_candidate_score_less(
       const bool rhs_makes_pressure_progress =
           rhs->pressure_progress_kind !=
           LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE;
+      // Net live-unit reduction can exchange space in one register bank for
+      // debt in another. Compare physical headroom before aggregate progress
+      // when both candidates perform register work. Operations without any
+      // register activity retain the preference for actionable progress.
+      if ((lhs->killed_live_value_count != 0 ||
+           lhs->produced_live_value_count != 0) &&
+          (rhs->killed_live_value_count != 0 ||
+           rhs->produced_live_value_count != 0) &&
+          lhs->pressure_cliff_penalty != rhs->pressure_cliff_penalty) {
+        return lhs->pressure_cliff_penalty < rhs->pressure_cliff_penalty;
+      }
       if (lhs_makes_pressure_progress != rhs_makes_pressure_progress) {
         return lhs_makes_pressure_progress;
       }

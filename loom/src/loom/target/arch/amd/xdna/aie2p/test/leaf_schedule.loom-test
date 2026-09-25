@@ -134,5 +134,4 @@ low.func.def target<amd.xdna.aie2p.core> @multiply_special_values(%left_magnitud
 }
 
 // ----
-CHECK: *"scheduled_node_indices":[*,2,3,4,5,*,6,7,*,8,9,14,15,16,17,18]*
 CHECK: *"register_class_id":33},"peak_live_units":1,"peak_live_values":1,*

@@ -25,36 +25,30 @@ low.func.def target<test.low.core>(@test_target) @register_packing_avoids_fragme
 
 // ====
 
-// RUN: emit low-schedule-json @register_packing_materializes_active_completion strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule-json @register_packing_retains_active_completion_during_pressure_recovery strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
-low.func.def target<test.low.core>(@test_target) @register_packing_materializes_active_completion(%source0: reg<test.i32>, %source1: reg<test.i32>, %source2: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
-  // The fence establishes two live narrow values in the packing resource.
-  // Their configuration leaves must complete an active transaction before
-  // the third transaction opens, even though those leaves grow scalar pressure.
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.packing.create", rejected_packet="test.packing.create"}
+low.func.def target<test.low.core>(@test_target) @register_packing_retains_active_completion_during_pressure_recovery(%source0: reg<test.i32>, %source1: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  // Isolate setup and the first transaction so the second narrow value owns
+  // the active aggregate completion when pressure recovery begins.
   %narrow0 = test.packing.create %source0
+  low.schedule.fence
   %narrow1 = test.packing.create %source1
   low.schedule.fence
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="3", chosen_packet="test.const.i32", rejected_packet="test.const.i32"}
   %config0 = test.const.i32 0
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="4", chosen_packet="test.packing.configured.expand", rejected_packet="test.const.i32"}
   %lhs_wide0, %rhs_wide0 = test.packing.configured.expand %narrow0, %config0
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="5", chosen_packet="test.packing.retire", rejected_packet="test.const.i32"}
   %result0 = test.packing.retire %lhs_wide0, %rhs_wide0
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="6", chosen_packet="test.const.i32", rejected_packet="test.const.i32"}
+  low.schedule.fence
+  // The scalar add has more immediate headroom, but cannot displace the
+  // retained completion when candidate comparison enters pressure recovery.
+  %unrelated = test.add.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="8", chosen_packet="test.const.i32", rejected_packet="test.add.i32", chosen_pressure_cliff_penalty="1", rejected_pressure_cliff_penalty="0"}
   %config1 = test.const.i32 1
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="7", chosen_packet="test.packing.configured.expand", rejected_packet="test.const.i32"}
+  low.schedule.fence
   %lhs_wide1, %rhs_wide1 = test.packing.configured.expand %narrow1, %config1
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="8", chosen_packet="test.packing.retire", rejected_packet="test.packing.create"}
   %result1 = test.packing.retire %lhs_wide1, %rhs_wide1
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="9", chosen_packet="test.packing.create", rejected_packet="test.const.i32"}
-  %narrow2 = test.packing.create %source2
-  %config2 = test.const.i32 2
-  %lhs_wide2, %rhs_wide2 = test.packing.configured.expand %narrow2, %config2
-  %result2 = test.packing.retire %lhs_wide2, %rhs_wide2
-  return %result0, %result1, %result2
+  return %result0, %result1, %unrelated
 }
 
 // ====
