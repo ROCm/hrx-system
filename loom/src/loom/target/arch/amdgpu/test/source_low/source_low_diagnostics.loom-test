@@ -297,16 +297,15 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %32 = s_lshl_b32_rhs_inline %workgroup, 12
   %33 = v_lshlrev_b32_src0_inline %subgroup, 10
   %34 = v_add_u32 %32, %33
-  %35 = v_lshlrev_b32_src0_inline %31, 2
-  %36 = v_add_u32 %34, %35
-  global_store_b32_saddr %36, %22, %output_view
-  global_store_b32_saddr %36, %22, %output_view {offset = 128}
-  global_store_b32_saddr %36, %22, %output_view {offset = 256}
-  global_store_b32_saddr %36, %22, %output_view {offset = 384}
-  global_store_b32_saddr %36, %22, %output_view {offset = 512}
-  global_store_b32_saddr %36, %22, %output_view {offset = 640}
-  global_store_b32_saddr %36, %22, %output_view {offset = 768}
-  global_store_b32_saddr %36, %22, %output_view {offset = 896}
+  %35 = v_lshl_add_u32_shift_imm %31, %34, 2
+  global_store_b32_saddr %35, %22, %output_view
+  global_store_b32_saddr %35, %22, %output_view {offset = 128}
+  global_store_b32_saddr %35, %22, %output_view {offset = 256}
+  global_store_b32_saddr %35, %22, %output_view {offset = 384}
+  global_store_b32_saddr %35, %22, %output_view {offset = 512}
+  global_store_b32_saddr %35, %22, %output_view {offset = 640}
+  global_store_b32_saddr %35, %22, %output_view {offset = 768}
+  global_store_b32_saddr %35, %22, %output_view {offset = 896}
   return
 }
 
