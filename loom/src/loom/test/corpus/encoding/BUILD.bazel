@@ -4,7 +4,10 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:defs.bzl", "loom_module")
+load("//loom/build_tools/amdgpu:target_config.bzl", "LOOM_AMDGPU_SUPPORTED_TARGETS")
+load("//loom/build_tools/bazel:defs.bzl", "loom_module", "loom_test")
+load("//loom/target:execution_profiles.bzl", "GPU_HARDWARE_PROFILES")
+load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -12,9 +15,26 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-_CASES = glob(["*.loom"])
+_MXFP8_BPAD8_RECORD_CASE = "mxfp8_bpad8_record_decode.loom"
 
-exports_files(_CASES)
+_CASES = glob(
+    ["*.loom"],
+    exclude = [_MXFP8_BPAD8_RECORD_CASE],
+)
+
+exports_files(_CASES + [_MXFP8_BPAD8_RECORD_CASE])
+
+loom_test(
+    name = "mxfp8_bpad8_record_decode_test",
+    srcs = [_MXFP8_BPAD8_RECORD_CASE],
+    compile_targets = [
+        "//loom/target/amdgpu:" + target
+        for target in LOOM_AMDGPU_SUPPORTED_TARGETS
+    ] + [
+        "//loom/target/spirv:vulkan1.3+bda+extended-types",
+    ],
+    execution_profiles = GPU_HARDWARE_PROFILES + [AMDGPU_ACCESS_PROFILE],
+)
 
 loom_module(
     name = "numeric_conversion_cases",

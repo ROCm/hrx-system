@@ -1,0 +1,105 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Decodes the packed MXFP8 NoPE record used by the BSHD padded-8 layout.
+//
+// Each 512-byte row contains 448 FP8 E4M3FN payload bytes, seven E8M0 scales
+// duplicated into adjacent byte pairs, and 50 bytes of padding. The payload
+// and scale views retain one allocation and row identity while selecting only
+// the first scale byte in each pair.
+kernel.def @pack_mxfp8_bpad8_records() {
+  %record_count = index.constant 2 : index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%record_count, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%packed: buffer) {
+  %record = kernel.workgroup.id<x> : index
+  %base = index.constant 0 : offset
+  %raw = buffer.view %packed[%base] : buffer -> view<2x512xi8>
+  %begin = index.constant 0 : index
+  %group_count = index.constant 7 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c8_i32 = scalar.constant 8 : i32
+  %payload_base = scalar.constant 56 : i32
+  %payload_group_size = index.constant 64 : index
+  %scale_base = index.constant 448 : index
+  %first_scale = scalar.constant 124 : i32
+  %record_i32 = index.cast %record : index to i32
+  scf.for %group = [%begin to %group_count step %c1] {
+    %group_i32 = index.cast %group : index to i32
+    %group_and_record = scalar.addi %group_i32, %record_i32 : i32
+    %payload_delta = scalar.muli %group_and_record, %c8_i32 : i32
+    %payload_bits = scalar.addi %payload_base, %payload_delta : i32
+    %payload_byte = scalar.trunci %payload_bits : i32 to i8
+    %payload = vector.splat %payload_byte : vector<64xi8>
+    %channel = index.mul %group, %payload_group_size : index
+    vector.store %payload, %raw[%record, %channel] : vector<64xi8>, view<2x512xi8>
+
+    %scale_bits = scalar.addi %first_scale, %group_and_record : i32
+    %scale_byte = scalar.trunci %scale_bits : i32 to i8
+    %pair_offset = index.mul %group, %c2 : index
+    %first_offset = index.add %scale_base, %pair_offset : index
+    %second_offset = index.add %first_offset, %c1 : index
+    view.store %scale_byte, %raw[%record, %first_offset] : i8, view<2x512xi8>
+    view.store %scale_byte, %raw[%record, %second_offset] : i8, view<2x512xi8>
+  }
+  kernel.return
+}
+
+kernel.def @decode_mxfp8_bpad8_records() {
+  %record_count = index.constant 2 : index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%record_count, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%packed: buffer, %errors: buffer) {
+  %record = kernel.workgroup.id<x> : index
+  %base = index.constant 0 : offset
+  %scale_base = index.constant 448 : offset
+  %payload_layout = encoding.layout.strided [512, 1] : encoding<layout>
+  %scale_layout = encoding.layout.strided [512, 2] : encoding<layout>
+  %payload_view = buffer.view %packed[%base] : buffer -> view<2x448xi8, %payload_layout>
+  %scale_view = buffer.view %packed[%scale_base] : buffer -> view<2x7xi8, %scale_layout>
+  %error_view = buffer.view %errors[%base] : buffer -> view<2x7xi32>
+  %schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=64, scale_format=e8m0, scale_group_elements=64, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+
+  %begin = index.constant 0 : index
+  %group_count = index.constant 7 : index
+  %c1 = index.constant 1 : index
+  %tile = index.constant 64 : index
+  %expected_base = scalar.constant 1040187392 : i32
+  %expected_step = scalar.constant 16777216 : i32
+  %c0_i32 = scalar.constant 0 : i32
+  %record_i32 = index.cast %record : index to i32
+  scf.for %group = [%begin to %group_count step %c1] {
+    %channel = index.mul %group, %tile : index
+    %payload_bits = vector.load %payload_view[%record, %channel] : view<2x448xi8, %payload_layout> -> vector<64xi8>
+    %payload = vector.bitcast %payload_bits : vector<64xi8> to vector<64xf8E4M3>
+    %scale_byte = view.load %scale_view[%record, %group] : view<2x7xi8, %scale_layout> -> i8
+    %scale_bits = scalar.extui %scale_byte : i8 to i32
+    %scale = vector.from_elements %scale_bits : vector<1xi32>
+    %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xi32>} : vector<64xf8E4M3>, encoding<schema> -> vector<64xf32>
+    %decoded_bits = vector.bitcast %decoded : vector<64xf32> to vector<64xi32>
+
+    %group_i32 = index.cast %group : index to i32
+    %group_and_record = scalar.addi %group_i32, %record_i32 : i32
+    %expected_delta = scalar.muli %group_and_record, %expected_step : i32
+    %expected_bits_i32 = scalar.addi %expected_base, %expected_delta : i32
+    %expected = vector.splat %expected_bits_i32 : vector<64xi32>
+    %difference = vector.xori %decoded_bits, %expected : vector<64xi32>
+    %error = vector.reduce<ori> %difference, %c0_i32 : vector<64xi32>, i32
+    view.store %error, %error_view[%record, %group] : i32, view<2x7xi32>
+  }
+  kernel.return
+}
+
+check.case public @mxfp8_bpad8_record_decode {
+  %packed = check.generate.fill value(-1) : tensor<2x512xi8>
+  %errors = check.generate.fill value(-1) : tensor<2x7xi32>
+  %expected = check.generate.fill value(0) : tensor<2x7xi32>
+  kernel.launch @pack_mxfp8_bpad8_records(%packed) : (tensor<2x512xi8>)
+  kernel.launch @decode_mxfp8_bpad8_records(%packed, %errors) : (tensor<2x512xi8>, tensor<2x7xi32>)
+  check.expect.equal actual(%errors) expected(%expected) : tensor<2x7xi32>
+  check.return
+}
