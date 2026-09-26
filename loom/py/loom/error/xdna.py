@@ -445,6 +445,51 @@ ERR_XDNA_025 = ErrorDef(
     fix_hint="Make the channel ring match the stated topology relationship.",
 )
 
+# ERR_XDNA_026: A logical channel connects incompatible endpoint owners.
+ERR_XDNA_026 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=26,
+    severity=Severity.ERROR,
+    summary="Logical channel connects incompatible endpoint owners.",
+    message=(
+        "AIE2P channel {channel} cannot connect "
+        "{sender_kind}[{sender_owner}]:{sender_port} to "
+        "{receiver_kind}[{receiver_owner}]:{receiver_port}: {reason}"
+    ),
+    params=(
+        ErrorParam("channel", ParamKind.U32),
+        ErrorParam("sender_kind", ParamKind.STRING),
+        ErrorParam("sender_owner", ParamKind.U32),
+        ErrorParam("sender_port", ParamKind.U32),
+        ErrorParam("receiver_kind", ParamKind.STRING),
+        ErrorParam("receiver_owner", ParamKind.U32),
+        ErrorParam("receiver_port", ParamKind.U32),
+        ErrorParam("reason", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Connect the channel through a resident worker and compatible binding access."
+    ),
+)
+
+# ERR_XDNA_027: A receiver endpoint consumes more than one source channel.
+ERR_XDNA_027 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=27,
+    severity=Severity.ERROR,
+    summary="Receiver endpoint consumes more than one source channel.",
+    message=(
+        "AIE2P receiver endpoint {endpoint} is consumed by channels "
+        "{first_channel} and {channel}; an active receiver accepts exactly "
+        "one source channel"
+    ),
+    params=(
+        ErrorParam("endpoint", ParamKind.U32),
+        ErrorParam("first_channel", ParamKind.U32),
+        ErrorParam("channel", ParamKind.U32),
+    ),
+    fix_hint="Give each source channel a distinct receiver endpoint.",
+)
+
 ALL_XDNA_ERRORS = (
     ERR_XDNA_001,
     ERR_XDNA_002,
@@ -471,4 +516,6 @@ ALL_XDNA_ERRORS = (
     ERR_XDNA_023,
     ERR_XDNA_024,
     ERR_XDNA_025,
+    ERR_XDNA_026,
+    ERR_XDNA_027,
 )

@@ -166,6 +166,68 @@ static iree_status_t loom_aie2p_array_topology_reject_channel_ring(
   return iree_diagnostic_emit(topology->diagnostic_emitter, &emission);
 }
 
+static iree_string_view_t loom_aie2p_array_topology_owner_kind_name(
+    loom_aie2p_array_endpoint_owner_kind_t owner_kind) {
+  return owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_BINDING
+             ? IREE_SV("binding")
+             : IREE_SV("worker");
+}
+
+static iree_status_t loom_aie2p_array_topology_reject_channel_connection(
+    const loom_aie2p_array_topology_t* topology, uint32_t channel_index,
+    iree_string_view_t reason) {
+  const loom_aie2p_array_channel_t* channel =
+      &topology->channels[channel_index];
+  const loom_aie2p_array_endpoint_t* sender =
+      &topology->endpoints[channel->sender_endpoint_index];
+  const loom_aie2p_array_endpoint_t* receiver =
+      &topology->endpoints[channel->receiver_endpoint_index];
+  const loom_diagnostic_param_t params[] = {
+      loom_param_u32(channel_index),
+      loom_param_string(
+          loom_aie2p_array_topology_owner_kind_name(sender->owner_kind)),
+      loom_param_with_field_ref(
+          loom_param_u32(sender->owner_index),
+          loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND, 0)),
+      loom_param_u32(sender->port),
+      loom_param_string(
+          loom_aie2p_array_topology_owner_kind_name(receiver->owner_kind)),
+      loom_param_with_field_ref(
+          loom_param_u32(receiver->owner_index),
+          loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND, 1)),
+      loom_param_u32(receiver->port),
+      loom_param_string(reason),
+  };
+  const loom_diagnostic_emission_t emission = {
+      .op = loom_aie2p_array_topology_defining_op(topology, channel->value_id),
+      .error = LOOM_ERR_XDNA_026,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
+  return iree_diagnostic_emit(topology->diagnostic_emitter, &emission);
+}
+
+static iree_status_t loom_aie2p_array_topology_reject_receiver_use(
+    const loom_aie2p_array_topology_t* topology, uint32_t channel_index,
+    uint32_t endpoint_index, uint32_t first_channel_index) {
+  const loom_aie2p_array_channel_t* channel =
+      &topology->channels[channel_index];
+  const loom_diagnostic_param_t params[] = {
+      loom_param_with_field_ref(
+          loom_param_u32(endpoint_index),
+          loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND, 1)),
+      loom_param_u32(first_channel_index),
+      loom_param_u32(channel_index),
+  };
+  const loom_diagnostic_emission_t emission = {
+      .op = loom_aie2p_array_topology_defining_op(topology, channel->value_id),
+      .error = LOOM_ERR_XDNA_027,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
+  return iree_diagnostic_emit(topology->diagnostic_emitter, &emission);
+}
+
 // Adjacency over worker-to-worker channels. Binding transfers do not create
 // worker dependencies, and multiple channels retain their distinct edges.
 typedef struct loom_aie2p_array_worker_graph_t {
@@ -738,12 +800,15 @@ iree_status_t loom_aie2p_array_topology_validate(
         &topology->endpoints[channel->sender_endpoint_index];
     loom_aie2p_array_endpoint_t* receiver =
         &topology->endpoints[channel->receiver_endpoint_index];
+    if (receiver->first_channel_index != UINT32_MAX) {
+      return loom_aie2p_array_topology_reject_receiver_use(
+          topology, (uint32_t)i, channel->receiver_endpoint_index,
+          receiver->first_channel_index);
+    }
     if (sender->first_channel_index == UINT32_MAX) {
       sender->first_channel_index = (uint32_t)i;
     }
-    if (receiver->first_channel_index == UINT32_MAX) {
-      receiver->first_channel_index = (uint32_t)i;
-    }
+    receiver->first_channel_index = (uint32_t)i;
     ++sender->channel_use_count;
     ++receiver->channel_use_count;
   }
@@ -815,9 +880,9 @@ iree_status_t loom_aie2p_array_topology_validate(
       const loom_aie2p_array_binding_t* binding =
           &plan->bindings[base_sender->owner_index];
       if ((binding->access & LOOM_AIE2P_ARRAY_BINDING_ACCESS_READ) == 0) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P input channel uses a non-readable binding");
+        return loom_aie2p_array_topology_reject_channel_connection(
+            topology, (uint32_t)i,
+            IREE_SV("the sending binding is write-only"));
       }
       channel->transport = LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_EXTERNAL_DMA;
     } else if (sender->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER &&
@@ -826,9 +891,9 @@ iree_status_t loom_aie2p_array_topology_validate(
       const loom_aie2p_array_binding_t* binding =
           &plan->bindings[receiver->owner_index];
       if ((binding->access & LOOM_AIE2P_ARRAY_BINDING_ACCESS_WRITE) == 0) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P output channel uses a non-writable binding");
+        return loom_aie2p_array_topology_reject_channel_connection(
+            topology, (uint32_t)i,
+            IREE_SV("the receiving binding is read-only"));
       }
       channel->transport = LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_EXTERNAL_DMA;
     } else if (sender->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER &&
@@ -846,8 +911,10 @@ iree_status_t loom_aie2p_array_topology_validate(
               ? LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_NEIGHBOR_MEMORY
               : LOOM_AIE2P_ARRAY_CHANNEL_TRANSPORT_ROUTED_DMA;
     } else {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "unsupported AIE2P channel ownership");
+      return loom_aie2p_array_topology_reject_channel_connection(
+          topology, (uint32_t)i,
+          IREE_SV("binding-to-binding channels have no resident worker "
+                  "endpoint"));
     }
   }
 
@@ -903,15 +970,6 @@ iree_status_t loom_aie2p_array_topology_validate(
     }
   }
 
-  for (iree_host_size_t i = 0; i < plan->endpoint_count; ++i) {
-    const loom_aie2p_array_endpoint_t* endpoint = &plan->endpoints[i];
-    if (endpoint->direction == LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE &&
-        endpoint->channel_use_count > 1) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "AIE2P receiver endpoint cannot consume more than one channel");
-    }
-  }
   bool worker_interfaces_valid = false;
   IREE_RETURN_IF_ERROR(loom_aie2p_array_topology_validate_worker_interfaces(
       topology, &worker_interfaces_valid));

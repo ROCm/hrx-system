@@ -1,0 +1,106 @@
+// RUN: emit aie2p-array-plan @write_binding_as_input
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @write_binding_as_input() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %group = group %one
+  %worker = worker %group, %zero, @consume
+  %input = binding 0, "write"
+  %sender = sender %input, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %worker, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  // ERROR@+1: XDNA/026 {channel="0", sender_kind="binding", sender_owner="0", sender_port="0", receiver_kind="worker", receiver_owner="0", receiver_port="0", reason="the sending binding is write-only"}
+  %channel = channel %sender, %receiver, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %worker, %zero, %two
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @consume() asm {
+  return
+}
+
+// ====
+// RUN: emit aie2p-array-plan @read_binding_as_output
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @read_binding_as_output() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %group = group %one
+  %worker = worker %group, %zero, @produce
+  %output = binding 0, "read"
+  %sender = sender %worker, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %output, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  // ERROR@+1: XDNA/026 {channel="0", sender_kind="worker", sender_owner="0", sender_port="0", receiver_kind="binding", receiver_owner="0", receiver_port="0", reason="the receiving binding is read-only"}
+  %channel = channel %sender, %receiver, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %worker, %zero, %two
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @produce() asm {
+  return
+}
+
+// ====
+// RUN: emit aie2p-array-plan @binding_to_binding
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @binding_to_binding() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %group = group %one
+  %worker = worker %group, %zero, @idle
+  %input = binding 0, "read"
+  %output = binding 1, "write"
+  %sender = sender %input, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %output, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  // ERROR@+1: XDNA/026 {channel="0", sender_kind="binding", sender_owner="0", sender_port="0", receiver_kind="binding", receiver_owner="1", receiver_port="0", reason="binding-to-binding channels have no resident worker endpoint"}
+  %channel = channel %sender, %receiver, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %worker, %zero, %two
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @idle() asm {
+  return
+}
+
+// ====
+// RUN: emit aie2p-array-plan @receiver_fan_in
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @receiver_fan_in() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %group = group %one
+  %worker = worker %group, %zero, @consume
+  %input0 = binding 0, "read"
+  %input1 = binding 1, "read"
+  %sender0 = sender %input0, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %sender1 = sender %input1, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %worker, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel0 = channel %sender0, %receiver, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  // ERROR@+1: XDNA/027 {endpoint="2", first_channel="0", channel="1"}
+  %channel1 = channel %sender1, %receiver, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %worker, %zero, %two
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @consume() asm {
+  return
+}
