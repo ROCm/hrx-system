@@ -614,8 +614,18 @@ static iree_status_t loom_aie2p_array_extract_location(
       loom_aie2p_array_lookup_entity(builder, loom_op_operands(op)[0])->index;
   loom_aie2p_array_worker_t* worker = &builder->workers[worker_index];
   if (worker->coordinate.column != UINT16_MAX) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AIE2P worker has multiple locations");
+    const loom_diagnostic_param_t params[] = {
+        loom_param_u32(worker_index),
+        loom_param_u32(2),
+    };
+    const loom_diagnostic_emission_t emission = {
+        .op = op,
+        .error = LOOM_ERR_XDNA_020,
+        .params = params,
+        .param_count = IREE_ARRAYSIZE(params),
+    };
+    builder->valid = false;
+    return iree_diagnostic_emit(builder->diagnostic_emitter, &emission);
   }
   const uint32_t column =
       (uint32_t)loom_aie2p_array_constant(builder, loom_op_operands(op)[1]);
@@ -638,10 +648,51 @@ static iree_status_t loom_aie2p_array_extract_location(
     };
     return iree_diagnostic_emit(builder->diagnostic_emitter, &emission);
   }
-  worker->coordinate = (loom_xdna_tile_coordinate_t){
+  const loom_xdna_tile_coordinate_t coordinate = {
       .column = (uint16_t)column,
       .row = (uint16_t)row,
   };
+  const loom_xdna_tile_facts_t* tile_facts =
+      loom_xdna_array_tile_facts(builder->family, coordinate);
+  if (tile_facts->kind != LOOM_XDNA_TILE_KIND_COMPUTE) {
+    const loom_diagnostic_param_t params[] = {
+        loom_param_u32(worker_index),
+        loom_param_u32(column),
+        loom_param_u32(row),
+        loom_param_string(IREE_SV("the coordinate is not a compute tile")),
+    };
+    const loom_diagnostic_emission_t emission = {
+        .op = op,
+        .error = LOOM_ERR_XDNA_021,
+        .params = params,
+        .param_count = IREE_ARRAYSIZE(params),
+    };
+    builder->valid = false;
+    return iree_diagnostic_emit(builder->diagnostic_emitter, &emission);
+  }
+  for (iree_host_size_t i = 0; i < builder->worker_cursor; ++i) {
+    const loom_aie2p_array_worker_t* other = &builder->workers[i];
+    if (i == worker_index || other->coordinate.column != coordinate.column ||
+        other->coordinate.row != coordinate.row) {
+      continue;
+    }
+    const loom_diagnostic_param_t params[] = {
+        loom_param_u32(worker_index),
+        loom_param_u32(column),
+        loom_param_u32(row),
+        loom_param_string(
+            IREE_SV("another resident worker already occupies the tile")),
+    };
+    const loom_diagnostic_emission_t emission = {
+        .op = op,
+        .error = LOOM_ERR_XDNA_021,
+        .params = params,
+        .param_count = IREE_ARRAYSIZE(params),
+    };
+    builder->valid = false;
+    return iree_diagnostic_emit(builder->diagnostic_emitter, &emission);
+  }
+  worker->coordinate = coordinate;
   return iree_ok_status();
 }
 
@@ -2063,8 +2114,8 @@ iree_status_t loom_aie2p_array_plan_build(
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_aie2p_array_topology_validate(
-      &builder.facts, diagnostic_emitter, arena, &plan, builder.channels,
-      &builder.valid));
+      module, &builder.facts, diagnostic_emitter, arena, &plan,
+      builder.channels, &builder.valid));
   if (!builder.valid) {
     return iree_ok_status();
   }

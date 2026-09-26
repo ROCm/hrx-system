@@ -15,6 +15,9 @@
 
 // Mutable logical topology under validation before physical planning begins.
 typedef struct loom_aie2p_array_topology_t {
+  // Source module retaining exact defining operations for logical entities.
+  const loom_module_t* module;
+
   // Exact function-local facts used to resolve dynamic dimensions.
   const loom_value_fact_table_t* facts;
 
@@ -30,6 +33,30 @@ typedef struct loom_aie2p_array_topology_t {
   // Mutable channel array receiving transport and multicast classification.
   loom_aie2p_array_channel_t* channels;
 } loom_aie2p_array_topology_t;
+
+static const loom_op_t* loom_aie2p_array_topology_defining_op(
+    const loom_aie2p_array_topology_t* topology, loom_value_id_t value_id) {
+  return loom_value_def_op(loom_module_value(topology->module, value_id));
+}
+
+static iree_status_t loom_aie2p_array_topology_reject_group_lane(
+    const loom_aie2p_array_topology_t* topology, const loom_op_t* op,
+    uint32_t group_index, uint32_t lane, uint32_t worker_count) {
+  const loom_aie2p_array_group_t* group = &topology->plan->groups[group_index];
+  const loom_diagnostic_param_t params[] = {
+      loom_param_u32(group_index),
+      loom_param_u32(lane),
+      loom_param_u32(group->lane_count),
+      loom_param_u32(worker_count),
+  };
+  const loom_diagnostic_emission_t emission = {
+      .op = op,
+      .error = LOOM_ERR_XDNA_019,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
+  return iree_diagnostic_emit(topology->diagnostic_emitter, &emission);
+}
 
 // Adjacency over worker-to-worker channels. Binding transfers do not create
 // worker dependencies, and multiple channels retain their distinct edges.
@@ -344,12 +371,13 @@ static iree_status_t loom_aie2p_array_topology_validate_binding_view(
 }
 
 iree_status_t loom_aie2p_array_topology_validate(
-    const loom_value_fact_table_t* facts,
+    const loom_module_t* module, const loom_value_fact_table_t* facts,
     iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
     loom_aie2p_array_plan_t* plan, loom_aie2p_array_channel_t* mutable_channels,
     bool* out_valid) {
   *out_valid = false;
   const loom_aie2p_array_topology_t topology_storage = {
+      .module = module,
       .facts = facts,
       .diagnostic_emitter = diagnostic_emitter,
       .arena = arena,
@@ -358,31 +386,78 @@ iree_status_t loom_aie2p_array_topology_validate(
   };
   const loom_aie2p_array_topology_t* topology = &topology_storage;
   if (plan->worker_count == 0 || plan->channel_count == 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AIE2P resident array requires at least one worker and channel");
+    const loom_diagnostic_param_t params[] = {
+        loom_param_u32((uint32_t)plan->worker_count),
+        loom_param_u32((uint32_t)plan->channel_count),
+    };
+    const loom_diagnostic_emission_t emission = {
+        .op = plan->function_op,
+        .error = LOOM_ERR_XDNA_018,
+        .params = params,
+        .param_count = IREE_ARRAYSIZE(params),
+    };
+    return iree_diagnostic_emit(topology->diagnostic_emitter, &emission);
   }
 
-  for (iree_host_size_t i = 0; i < plan->group_count; ++i) {
-    const loom_aie2p_array_group_t* group = &plan->groups[i];
-    if (group->lane_count == 0) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "AIE2P worker group cannot be empty");
+  for (iree_host_size_t i = 0; i < plan->worker_count; ++i) {
+    const loom_aie2p_array_worker_t* worker = &plan->workers[i];
+    const loom_aie2p_array_group_t* group = &plan->groups[worker->group_index];
+    uint32_t lane_worker_count = 0;
+    for (iree_host_size_t j = 0; j < plan->worker_count; ++j) {
+      lane_worker_count +=
+          plan->workers[j].group_index == worker->group_index &&
+          plan->workers[j].lane == worker->lane;
     }
-    for (uint32_t lane = 0; lane < group->lane_count; ++lane) {
-      iree_host_size_t match_count = 0;
-      for (iree_host_size_t j = 0; j < plan->worker_count; ++j) {
-        const loom_aie2p_array_worker_t* worker = &plan->workers[j];
-        if (worker->group_index == i && worker->lane == lane) {
-          ++match_count;
-        }
+    if (worker->lane >= group->lane_count || lane_worker_count != 1) {
+      return loom_aie2p_array_topology_reject_group_lane(
+          topology,
+          loom_aie2p_array_topology_defining_op(topology, worker->value_id),
+          worker->group_index, worker->lane, lane_worker_count);
+    }
+    if (worker->coordinate.column == UINT16_MAX) {
+      const loom_diagnostic_param_t params[] = {
+          loom_param_u32((uint32_t)i),
+          loom_param_u32(0),
+      };
+      const loom_diagnostic_emission_t emission = {
+          .op =
+              loom_aie2p_array_topology_defining_op(topology, worker->value_id),
+          .error = LOOM_ERR_XDNA_020,
+          .params = params,
+          .param_count = IREE_ARRAYSIZE(params),
+      };
+      return iree_diagnostic_emit(topology->diagnostic_emitter, &emission);
+    }
+  }
+
+  for (iree_host_size_t group_index = 0; group_index < plan->group_count;
+       ++group_index) {
+    const loom_aie2p_array_group_t* group = &plan->groups[group_index];
+    uint32_t group_worker_count = 0;
+    for (iree_host_size_t i = 0; i < plan->worker_count; ++i) {
+      group_worker_count += plan->workers[i].group_index == group_index;
+    }
+    if (group_worker_count == group->lane_count) {
+      continue;
+    }
+    // Every admitted worker lane is unique and in range. If the group has
+    // fewer workers than lanes, one lane no greater than the worker count is
+    // absent, bounding this search by authored worker count rather than a
+    // potentially enormous lane-count constant.
+    for (uint64_t lane = 0; lane <= group_worker_count; ++lane) {
+      bool found = false;
+      for (iree_host_size_t i = 0; i < plan->worker_count; ++i) {
+        found |= plan->workers[i].group_index == group_index &&
+                 plan->workers[i].lane == (uint32_t)lane;
       }
-      if (match_count != 1) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P worker group must instantiate every lane exactly once");
+      if (!found) {
+        return loom_aie2p_array_topology_reject_group_lane(
+            topology,
+            loom_aie2p_array_topology_defining_op(topology, group->value_id),
+            (uint32_t)group_index, (uint32_t)lane, 0);
       }
     }
+    IREE_ASSERT_UNREACHABLE("incomplete group must have one missing lane");
   }
 
   for (iree_host_size_t i = 0; i < plan->binding_count; ++i) {
@@ -390,29 +465,6 @@ iree_status_t loom_aie2p_array_topology_validate(
       if (plan->bindings[i].ordinal == plan->bindings[j].ordinal) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "AIE2P binding ordinal is duplicated");
-      }
-    }
-  }
-
-  for (iree_host_size_t i = 0; i < plan->worker_count; ++i) {
-    const loom_aie2p_array_worker_t* worker = &plan->workers[i];
-    if (worker->group_index >= plan->group_count ||
-        worker->lane >= plan->groups[worker->group_index].lane_count ||
-        worker->coordinate.column == UINT16_MAX) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "AIE2P worker is incompletely instantiated");
-    }
-    const loom_xdna_tile_facts_t* tile_facts =
-        loom_xdna_array_tile_facts(plan->family, worker->coordinate);
-    if (tile_facts->kind != LOOM_XDNA_TILE_KIND_COMPUTE) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "AIE2P worker must occupy a compute tile");
-    }
-    for (iree_host_size_t j = i + 1; j < plan->worker_count; ++j) {
-      if (worker->coordinate.column == plan->workers[j].coordinate.column &&
-          worker->coordinate.row == plan->workers[j].coordinate.row) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "AIE2P workers cannot share a compute tile");
       }
     }
   }

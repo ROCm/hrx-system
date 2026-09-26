@@ -293,6 +293,76 @@ ERR_XDNA_017 = ErrorDef(
     ),
 )
 
+# ERR_XDNA_018: A resident array has no executable channel graph.
+ERR_XDNA_018 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=18,
+    severity=Severity.ERROR,
+    summary="Resident array has no executable channel graph.",
+    message=(
+        "AIE2P resident array has {worker_count} workers and {channel_count} "
+        "channels; both counts must be positive"
+    ),
+    params=(
+        ErrorParam("worker_count", ParamKind.U32),
+        ErrorParam("channel_count", ParamKind.U32),
+    ),
+    fix_hint="Connect at least one resident worker through an array channel.",
+)
+
+# ERR_XDNA_019: A worker group has invalid lane membership.
+ERR_XDNA_019 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=19,
+    severity=Severity.ERROR,
+    summary="Worker group has invalid lane membership.",
+    message=(
+        "AIE2P group {group} declares {lane_count} lanes, but lane {lane} has "
+        "{worker_count} workers; each declared lane requires exactly one worker "
+        "and no other lane is valid"
+    ),
+    params=(
+        ErrorParam("group", ParamKind.U32),
+        ErrorParam("lane", ParamKind.U32),
+        ErrorParam("lane_count", ParamKind.U32),
+        ErrorParam("worker_count", ParamKind.U32),
+    ),
+    fix_hint="Instantiate every declared group lane exactly once.",
+)
+
+# ERR_XDNA_020: An array worker has invalid placement cardinality.
+ERR_XDNA_020 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=20,
+    severity=Severity.ERROR,
+    summary="Array worker has invalid placement cardinality.",
+    message=(
+        "AIE2P worker {worker} has {location_count} location constraints; "
+        "exactly one is required"
+    ),
+    params=(
+        ErrorParam("worker", ParamKind.U32),
+        ErrorParam("location_count", ParamKind.U32),
+    ),
+    fix_hint="Provide exactly one physical location for the resident worker.",
+)
+
+# ERR_XDNA_021: An array worker cannot occupy its selected tile.
+ERR_XDNA_021 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=21,
+    severity=Severity.ERROR,
+    summary="Array worker cannot occupy its selected tile.",
+    message=("AIE2P worker {worker} cannot occupy tile ({column}, {row}): {reason}"),
+    params=(
+        ErrorParam("worker", ParamKind.U32),
+        ErrorParam("column", ParamKind.U32),
+        ErrorParam("row", ParamKind.U32),
+        ErrorParam("reason", ParamKind.STRING),
+    ),
+    fix_hint="Select one unoccupied compute tile for each resident worker.",
+)
+
 ALL_XDNA_ERRORS = (
     ERR_XDNA_001,
     ERR_XDNA_002,
@@ -311,4 +381,8 @@ ALL_XDNA_ERRORS = (
     ERR_XDNA_015,
     ERR_XDNA_016,
     ERR_XDNA_017,
+    ERR_XDNA_018,
+    ERR_XDNA_019,
+    ERR_XDNA_020,
+    ERR_XDNA_021,
 )

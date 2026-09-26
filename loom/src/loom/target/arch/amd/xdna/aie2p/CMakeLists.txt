@@ -558,6 +558,7 @@ loom_check_test_suite(
     "test/array_plan/route_capacity.loom-test"
     "test/array_plan/strided_transfer.loom-test"
     "test/array_plan/temporal_fold.loom-test"
+    "test/array_plan/topology_admission.loom-test"
     "test/array_plan/unused_worker_inputs.loom-test"
     "test/array_plan/wide_fold.loom-test"
     "test/array_plan/worker_cycles.loom-test"

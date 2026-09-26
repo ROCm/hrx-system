@@ -259,10 +259,6 @@ static iree_status_t loom_aie2p_xdna_plan_tile_link(
       plan->worker_plans[worker_index].coordinate;
   const loom_xdna_tile_facts_t* tile =
       loom_xdna_array_tile_facts(plan->family, coordinate);
-  if (tile->kind != LOOM_XDNA_TILE_KIND_COMPUTE) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AIE2P resident worker is not on a compute tile");
-  }
   *out_layout = (loom_aie2p_tile_link_layout_t){
       .program_address = tile->memory.program_base,
       .program_byte_capacity = tile->memory.program_capacity,
