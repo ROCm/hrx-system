@@ -1248,9 +1248,17 @@ void loom_value_facts_remui(const loom_value_facts_t* lhs,
   int64_t rhs_lo = rhs_facts.range_lo, rhs_hi = rhs_facts.range_hi;
   int64_t lhs_divisor = lhs_facts.known_divisor;
 
-  // Requires non-negative operands and positive divisor.
-  if (lhs_lo < 0 || rhs_lo <= 0) {
+  // The divisor must be provably positive in the signed fact domain.
+  if (rhs_lo <= 0) {
     *out = loom_value_facts_unknown();
+    loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
+    return;
+  }
+  // Negative signed representatives still denote unsigned dividend bits. The
+  // positive divisor bounds the result independently of those bits, but signed
+  // dividend bounds and divisibility do not survive that reinterpretation.
+  if (lhs_lo < 0) {
+    *out = loom_value_facts_make(0, rhs_hi - 1, 1);
     loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
     return;
   }

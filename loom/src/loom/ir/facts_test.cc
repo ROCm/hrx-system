@@ -1639,6 +1639,65 @@ TEST(RemuiTransfer, DynamicDivisorClampedByDividend) {
   EXPECT_EQ(out.range_hi, 63);
 }
 
+TEST(RemuiTransfer, UnknownDividendPositiveDivisor) {
+  loom_value_facts_t dividend = loom_value_facts_unknown();
+  loom_value_facts_mark_lane_varying(&dividend);
+  loom_value_facts_t divisor = loom_value_facts_exact_i64(9);
+  loom_value_facts_t out;
+  loom_value_facts_remui(&dividend, &divisor, &out);
+  EXPECT_EQ(out.range_lo, 0);
+  EXPECT_EQ(out.range_hi, 8);
+  EXPECT_TRUE(loom_value_facts_is_non_negative(out));
+  EXPECT_TRUE(loom_value_facts_is_lane_varying(out));
+}
+
+TEST(RemuiTransfer, NegativeDividendDoesNotPreserveSignedDivisibility) {
+  // The raw unsigned bits of -9 need not be divisible by 9.
+  loom_value_facts_t dividend = loom_value_facts_exact_i64(-9);
+  loom_value_facts_t divisor = loom_value_facts_exact_i64(9);
+  loom_value_facts_t out;
+  loom_value_facts_remui(&dividend, &divisor, &out);
+  EXPECT_EQ(out.range_lo, 0);
+  EXPECT_EQ(out.range_hi, 8);
+  EXPECT_EQ(out.known_divisor, 1);
+}
+
+TEST(RemuiTransfer, MixedSignedDividendDoesNotClampUnsignedRemainder) {
+  loom_value_facts_t dividend = loom_value_facts_make(-8, 2, 1);
+  loom_value_facts_t divisor = loom_value_facts_make(3, 17, 1);
+  loom_value_facts_t out;
+  loom_value_facts_remui(&dividend, &divisor, &out);
+  EXPECT_EQ(out.range_lo, 0);
+  EXPECT_EQ(out.range_hi, 16);
+}
+
+TEST(RemuiTransfer, NegativeDividendUnitDivisor) {
+  loom_value_facts_t dividend = loom_value_facts_exact_i64(INT64_MIN);
+  loom_value_facts_t divisor = loom_value_facts_exact_i64(1);
+  loom_value_facts_t out;
+  loom_value_facts_remui(&dividend, &divisor, &out);
+  EXPECT_TRUE(loom_value_facts_is_exact(out));
+  EXPECT_EQ(out.range_lo, 0);
+}
+
+TEST(RemuiTransfer, PossiblyZeroDivisorRemainsUnknown) {
+  loom_value_facts_t dividend = loom_value_facts_unknown();
+  loom_value_facts_t divisor = loom_value_facts_make(0, 9, 1);
+  loom_value_facts_t out;
+  loom_value_facts_remui(&dividend, &divisor, &out);
+  EXPECT_TRUE(loom_value_facts_is_unknown(out));
+}
+
+TEST(RemuiTransfer, HighBitDivisorRemainsUnknown) {
+  // The result can have negative signed representatives when the divisor's
+  // unsigned value exceeds the signed domain.
+  loom_value_facts_t dividend = loom_value_facts_unknown();
+  loom_value_facts_t divisor = loom_value_facts_exact_i64(-1);
+  loom_value_facts_t out;
+  loom_value_facts_remui(&dividend, &divisor, &out);
+  EXPECT_TRUE(loom_value_facts_is_unknown(out));
+}
+
 //===----------------------------------------------------------------------===//
 // Transfer functions: remsi
 //===----------------------------------------------------------------------===//
