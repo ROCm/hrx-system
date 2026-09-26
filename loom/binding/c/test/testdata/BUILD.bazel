@@ -5,11 +5,27 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test")
 
 package(
     default_visibility = ["//loom/binding/c/test:__pkg__"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
+)
+
+loom_check_test(
+    name = "related_locations",
+    src = "related_locations.loom-test",
+)
+
+iree_c_embed_data(
+    name = "diagnostic_testdata",
+    testonly = True,
+    srcs = ["related_locations.loom-test"],
+    c_file_output = "diagnostic_testdata.c",
+    flatten = True,
+    h_file_output = "diagnostic_testdata.h",
+    identifier = "loomc_diagnostic_testdata",
 )
 
 iree_c_embed_data(

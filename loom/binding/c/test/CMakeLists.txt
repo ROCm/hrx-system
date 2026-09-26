@@ -99,6 +99,9 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::binding::c::loomc
+    loom::binding::c::test::testdata::diagnostic_testdata
+    loom::error::error_defs
+    loom::ir
 )
 
 loom_cc_test(

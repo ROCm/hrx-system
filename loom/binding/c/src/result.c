@@ -17,10 +17,8 @@
 typedef struct loomc_owned_diagnostic_t {
   // Public diagnostic view returned to callers.
   loomc_diagnostic_t value;
-  // Storage for value.code.
-  loomc_string_view_t code_storage;
-  // Storage for value.message.
-  loomc_string_view_t message_storage;
+  // Packed related entries and strings, independent of result-array growth.
+  void* storage;
 } loomc_owned_diagnostic_t;
 
 typedef struct loomc_owned_artifact_t {
@@ -82,9 +80,13 @@ static loomc_status_t loomc_result_grow_array(loomc_allocator_t allocator,
 
 static void loomc_owned_diagnostic_deinitialize(
     loomc_allocator_t allocator, loomc_owned_diagnostic_t* diagnostic) {
-  loomc_allocator_free(allocator, (void*)diagnostic->code_storage.data);
-  loomc_allocator_free(allocator, (void*)diagnostic->message_storage.data);
   loomc_source_release((loomc_source_t*)diagnostic->value.range.source);
+  for (loomc_host_size_t i = 0; i < diagnostic->value.related_location_count;
+       ++i) {
+    loomc_source_release(
+        (loomc_source_t*)diagnostic->value.related_locations[i].range.source);
+  }
+  loomc_allocator_free(allocator, diagnostic->storage);
   *diagnostic = (loomc_owned_diagnostic_t){0};
 }
 
@@ -151,6 +153,18 @@ loomc_status_t loomc_result_set_state(loomc_result_t* result,
   return loomc_ok_status();
 }
 
+// Copies a string into the preallocated diagnostic payload.
+static loomc_string_view_t loomc_diagnostic_copy_string(
+    loomc_string_view_t value, char** cursor) {
+  if (value.size == 0) {
+    return loomc_string_view_empty();
+  }
+  memcpy(*cursor, value.data, value.size);
+  loomc_string_view_t copied = loomc_make_string_view(*cursor, value.size);
+  *cursor += value.size;
+  return copied;
+}
+
 loomc_status_t loomc_result_add_diagnostic(
     loomc_result_t* result, const loomc_diagnostic_t* diagnostic) {
   if (result == NULL || diagnostic == NULL) {
@@ -161,27 +175,44 @@ loomc_status_t loomc_result_add_diagnostic(
       result->allocator, sizeof(result->diagnostics[0]),
       result->diagnostic_count, result->diagnostic_count + 1,
       &result->diagnostic_capacity, (void**)&result->diagnostics));
+  loomc_host_size_t related_size = diagnostic->related_location_count *
+                                   sizeof(loomc_diagnostic_related_location_t);
+  loomc_host_size_t storage_size =
+      related_size + diagnostic->code.size + diagnostic->message.size;
+  for (loomc_host_size_t i = 0; i < diagnostic->related_location_count; ++i) {
+    storage_size += diagnostic->related_locations[i].label.size;
+  }
+  void* storage = NULL;
+  if (storage_size) {
+    LOOMC_RETURN_IF_ERROR(loomc_allocator_malloc_uninitialized(
+        result->allocator, storage_size, &storage));
+  }
+
+  loomc_diagnostic_related_location_t* related_locations = NULL;
+  char* cursor = storage;
+  if (diagnostic->related_location_count) {
+    related_locations = storage;
+    cursor += related_size;
+  }
   loomc_owned_diagnostic_t* target =
       &result->diagnostics[result->diagnostic_count];
-  *target = (loomc_owned_diagnostic_t){0};
-  loomc_status_t status = loomc_string_view_clone(
-      diagnostic->code, result->allocator, &target->code_storage);
-  if (loomc_status_is_ok(status)) {
-    status = loomc_string_view_clone(diagnostic->message, result->allocator,
-                                     &target->message_storage);
+  *target = (loomc_owned_diagnostic_t){
+      .value = *diagnostic,
+      .storage = storage,
+  };
+  target->value.code = loomc_diagnostic_copy_string(diagnostic->code, &cursor);
+  target->value.message =
+      loomc_diagnostic_copy_string(diagnostic->message, &cursor);
+  target->value.related_locations = related_locations;
+  loomc_source_retain((loomc_source_t*)target->value.range.source);
+  for (loomc_host_size_t i = 0; i < diagnostic->related_location_count; ++i) {
+    related_locations[i] = diagnostic->related_locations[i];
+    related_locations[i].label =
+        loomc_diagnostic_copy_string(related_locations[i].label, &cursor);
+    loomc_source_retain((loomc_source_t*)related_locations[i].range.source);
   }
-  if (loomc_status_is_ok(status)) {
-    target->value = *diagnostic;
-    target->value.code = target->code_storage;
-    target->value.message = target->message_storage;
-    if (target->value.range.source) {
-      loomc_source_retain((loomc_source_t*)target->value.range.source);
-    }
-    ++result->diagnostic_count;
-  } else {
-    loomc_owned_diagnostic_deinitialize(result->allocator, target);
-  }
-  return status;
+  ++result->diagnostic_count;
+  return loomc_ok_status();
 }
 
 static loomc_status_t loomc_result_prepare_artifact(

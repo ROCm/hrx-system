@@ -18,6 +18,7 @@ using loomc::testing::HandlePtr;
 
 using ByteSequencePtr =
     HandlePtr<loomc_byte_sequence_t, loomc_byte_sequence_release>;
+using ResultPtr = HandlePtr<loomc_result_t, loomc_result_release>;
 
 std::string ToString(loomc_string_view_t value) {
   return std::string(value.data, value.size);
@@ -73,7 +74,20 @@ TEST(ResultTest, OwnsDiagnosticsAndArtifacts) {
           /*.end_column=*/4,
       },
   };
+  char label[] = "defined here";
+  loomc_diagnostic_related_location_t related = {};
+  related.label = loomc_make_cstring_view(label);
+  related.range = diagnostic.range;
+  diagnostic.related_locations = &related;
+  diagnostic.related_location_count = 1;
+  diagnostic.related_location_omitted_count = 2;
   LOOMC_ASSERT_OK(loomc_result_add_diagnostic(result, &diagnostic));
+  const auto* retained_related =
+      loomc_result_diagnostic_at(result, 0)->related_locations;
+  // Growing the result array must not move the owned note payload.
+  for (int i = 0; i < 8; ++i) {
+    LOOMC_ASSERT_OK(loomc_result_add_diagnostic(result, &diagnostic));
+  }
 
   char format[] = "text";
   char identifier[] = "report";
@@ -95,6 +109,8 @@ TEST(ResultTest, OwnsDiagnosticsAndArtifacts) {
 
   code[0] = 'X';
   message[0] = 'X';
+  label[0] = 'X';
+  related.range = {};
   format[0] = 'X';
   identifier[0] = 'X';
   contents[0] = 'X';
@@ -102,7 +118,7 @@ TEST(ResultTest, OwnsDiagnosticsAndArtifacts) {
 
   EXPECT_FALSE(loomc_result_succeeded(result));
   EXPECT_EQ(loomc_result_state(result), LOOMC_RESULT_STATE_FAILED);
-  ASSERT_EQ(loomc_result_diagnostic_count(result), 1u);
+  ASSERT_EQ(loomc_result_diagnostic_count(result), 9u);
   const loomc_diagnostic_t* stored_diagnostic =
       loomc_result_diagnostic_at(result, 0);
   ASSERT_NE(stored_diagnostic, nullptr);
@@ -111,6 +127,14 @@ TEST(ResultTest, OwnsDiagnosticsAndArtifacts) {
   EXPECT_EQ(ToString(stored_diagnostic->message), "expected a thing");
   EXPECT_EQ(ToString(loomc_source_identifier(stored_diagnostic->range.source)),
             "bad.loom");
+  ASSERT_EQ(stored_diagnostic->related_location_count, 1u);
+  EXPECT_EQ(stored_diagnostic->related_location_omitted_count, 2u);
+  EXPECT_EQ(stored_diagnostic->related_locations, retained_related);
+  EXPECT_EQ(ToString(retained_related->label), "defined here");
+  EXPECT_EQ(retained_related->range.source, stored_diagnostic->range.source);
+  EXPECT_EQ(retained_related->range.end_column, 4u);
+  EXPECT_EQ(ToString(loomc_source_contents(retained_related->range.source)),
+            "bad");
 
   ASSERT_EQ(loomc_result_artifact_count(result), 1u);
   const loomc_artifact_t* stored_artifact = loomc_result_artifact_at(result, 0);
@@ -121,6 +145,20 @@ TEST(ResultTest, OwnsDiagnosticsAndArtifacts) {
   EXPECT_EQ(ToString(stored_artifact->contents), "hello");
 
   loomc_result_release(result);
+}
+
+TEST(ResultTest, EmptyDiagnosticNeedsNoMetadataPayload) {
+  loomc_result_t* result = nullptr;
+  LOOMC_ASSERT_OK(loomc_result_create(LOOMC_RESULT_STATE_FAILED,
+                                      loomc_allocator_system(), &result));
+  ResultPtr owner(result);
+  const loomc_diagnostic_t diagnostic = {};
+  LOOMC_ASSERT_OK(loomc_result_add_diagnostic(result, &diagnostic));
+  const auto* stored = loomc_result_diagnostic_at(result, 0);
+  EXPECT_EQ(stored->code.size, 0u);
+  EXPECT_EQ(stored->message.size, 0u);
+  EXPECT_EQ(stored->related_locations, nullptr);
+  EXPECT_EQ(stored->related_location_count, 0u);
 }
 
 TEST(ResultTest, RejectsMalformedArtifact) {

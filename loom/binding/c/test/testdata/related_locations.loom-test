@@ -1,0 +1,7 @@
+// RUN: verify
+func.decl @callee(%arg: i32) -> (i32)
+func.def @caller(%arg: f32) -> (i32) {
+  // ERROR@+1: TYPE/001 {field_a="operand 0", field_b="contract argument 0"}
+  %value = func.call @callee(%arg) : (f32) -> (i32)
+  func.return %value : i32
+}

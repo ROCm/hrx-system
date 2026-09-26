@@ -17,14 +17,17 @@
 extern "C" {
 #endif
 
-// Adds a rendered Loom diagnostic, retaining its source identity and optional
-// text in result. Reuses |source| only when it owns the identified contents.
+// Adds a rendered Loom diagnostic and its related locations, retaining their
+// source identities and optional text in result. Reuses |source| only when it
+// owns the identified contents. Native related locations obey the bounded
+// LOOM_DIAGNOSTIC_MAX_RELATED_LOCATIONS contract.
 LOOMC_API_PRIVATE loomc_status_t loomc_result_add_loom_diagnostic(
     loomc_result_t* result, const loomc_source_t* source,
     const loom_diagnostic_t* diagnostic);
 
 // Resolves an emission against |module| or its explicit module override and
-// adds the diagnostic to result, which owns the resolved source identity.
+// adds the diagnostic to result, which owns all resolved source identities.
+// Related operations without a module override use the active |module|.
 LOOMC_API_PRIVATE loomc_status_t loomc_result_add_loom_diagnostic_emission(
     loomc_result_t* result, const loom_module_t* module, loom_emitter_t emitter,
     const loom_diagnostic_emission_t* emission);

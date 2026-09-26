@@ -37,6 +37,13 @@
 ///   // `handle_diagnostic` is application-owned reporting policy.
 ///   handle_diagnostic(diagnostic->severity, diagnostic->code,
 ///                     diagnostic->message, diagnostic->range);
+///   for (loomc_host_size_t j = 0; j < diagnostic->related_location_count;
+///        ++j) {
+///     const loomc_diagnostic_related_location_t* related =
+///         &diagnostic->related_locations[j];
+///     handle_related_location(related->label, related->range);
+///   }
+///   // Report related_location_omitted_count when nonzero.
 /// }
 ///
 /// if (loomc_result_succeeded(result)) {
