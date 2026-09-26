@@ -633,6 +633,7 @@ loom_cc_library(
     loom::codegen::low::placement
     loom::ir
     loom::ops::low
+    loom::util::adaptive_sort
     loom::util::cfg_graph
   PUBLIC
 )
