@@ -77,6 +77,8 @@ enum loom_scf_pipeline_loop_flag_bits_e {
   LOOM_SCF_PIPELINE_LOOP_PREPARE = 1u << 2,
   // Exact bounds preserve participants across the main/drain split.
   LOOM_SCF_PIPELINE_LOOP_STATIC_BOUNDS = 1u << 3,
+  // Cloned startup indices require explicit branch-local domain refinements.
+  LOOM_SCF_PIPELINE_LOOP_REFINE_STARTUP_DOMAIN = 1u << 4,
 };
 
 typedef struct loom_scf_pipeline_loop_t {
@@ -272,10 +274,24 @@ static iree_status_t loom_scf_pipeline_resolve_facts(
         loom_value_fact_table_lookup(facts, loom_scf_for_step(loop->source));
     loop->plan.pipeline.lower_bound = loom_value_fact_table_lookup(
         facts, loom_scf_for_lower_bound(loop->source));
-    if (loom_value_facts_is_exact(loop->plan.pipeline.lower_bound) &&
-        loom_value_facts_is_exact(loom_value_fact_table_lookup(
-            facts, loom_scf_for_upper_bound(loop->source)))) {
-      loop->flags |= LOOM_SCF_PIPELINE_LOOP_STATIC_BOUNDS;
+    const loom_value_facts_t upper_bound = loom_value_fact_table_lookup(
+        facts, loom_scf_for_upper_bound(loop->source));
+    if (loom_value_facts_is_exact(loop->plan.pipeline.lower_bound)) {
+      if (loom_value_facts_is_exact(upper_bound)) {
+        loop->flags |= LOOM_SCF_PIPELINE_LOOP_STATIC_BOUNDS;
+      }
+    } else if (depth > 1) {
+      int64_t step = 0;
+      int64_t last_startup_offset = 0;
+      int64_t last_startup = 0;
+      if (!loom_value_facts_as_exact_i64(loop->plan.pipeline.step, &step) ||
+          step <= 0 ||
+          !iree_checked_mul_i64(depth - 2, step, &last_startup_offset) ||
+          !iree_checked_add_i64(loop->plan.pipeline.lower_bound.range_hi,
+                                last_startup_offset, &last_startup) ||
+          last_startup >= upper_bound.range_lo) {
+        loop->flags |= LOOM_SCF_PIPELINE_LOOP_REFINE_STARTUP_DOMAIN;
+      }
     }
     const loom_scalar_type_t scalar_type = loom_type_element_type(
         loom_module_value_type(module, loom_scf_for_lower_bound(loop->source)));
@@ -687,10 +703,35 @@ static iree_status_t loom_scf_pipeline_build_guard(
   return iree_ok_status();
 }
 
+// Retains the long-path startup domain when the source lower bound cannot
+// carry it through ordinary scalar facts. Keep this uncommon dynamic-bound
+// construction out of the exact-lower startup emission path.
+IREE_ATTRIBUTE_NOINLINE IREE_ATTRIBUTE_COLD static iree_status_t
+loom_scf_pipeline_refine_startup_index(loom_scf_pipeline_context_t* context,
+                                       const loom_op_t* source,
+                                       loom_value_id_t index,
+                                       loom_type_t index_type,
+                                       loom_value_id_t* out_index) {
+  const loom_predicate_t in_domain = {
+      .kind = LOOM_PREDICATE_LT,
+      .arg_count = 2,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE,
+                   LOOM_PRED_ARG_NONE},
+      .args = {index, loom_scf_for_upper_bound(source), 0},
+  };
+  loom_op_t* bounded_index = NULL;
+  IREE_RETURN_IF_ERROR(loom_index_assume_build(
+      &context->rewriter->builder, &index, 1, &in_domain, 1, &index_type, 1,
+      source->location, &bounded_index));
+  *out_index = loom_index_assume_results(bounded_index).values[0];
+  return iree_ok_status();
+}
+
 static iree_status_t loom_scf_pipeline_emit_long_path(
     loom_scf_pipeline_context_t* context, const loom_op_t* source,
     const loom_scf_pipeline_plan_t* plan, uint32_t depth, int64_t step,
-    uint16_t state_count, loom_value_id_t main_lower) {
+    uint16_t state_count, bool refine_startup_domain,
+    loom_value_id_t main_lower) {
   loom_builder_t* builder = &context->rewriter->builder;
   const loom_block_t* source_block =
       loom_region_entry_block(loom_scf_for_body(source));
@@ -727,6 +768,10 @@ static iree_status_t loom_scf_pipeline_emit_long_path(
       IREE_RETURN_IF_ERROR(loom_index_add_build(
           builder, index, offset, index_type, source->location, &add));
       index = loom_index_add_result(add);
+    }
+    if (refine_startup_domain) {
+      IREE_RETURN_IF_ERROR(loom_scf_pipeline_refine_startup_index(
+          context, source, index, index_type, &index));
     }
     IREE_RETURN_IF_ERROR(loom_scf_pipeline_emit_producer(
         context, plan, source_block, index, &producer_remap,
@@ -776,7 +821,7 @@ static iree_status_t loom_scf_pipeline_emit_long_path(
 static iree_status_t loom_scf_pipeline_reconstruct(
     loom_scf_pipeline_context_t* context, loom_op_t* source,
     const loom_scf_pipeline_plan_t* plan, uint32_t depth, int64_t step,
-    uint16_t state_count, int64_t maximum_value,
+    uint16_t state_count, bool refine_startup_domain, int64_t maximum_value,
     loom_value_facts_t lower_facts) {
   loom_builder_t* builder = &context->rewriter->builder;
   loom_builder_set_before(builder, source);
@@ -814,7 +859,8 @@ static iree_status_t loom_scf_pipeline_reconstruct(
     loom_builder_ip_t saved_ip = loom_builder_enter_region(
         builder, replacement, loom_scf_if_then_region(replacement));
     IREE_RETURN_IF_ERROR(loom_scf_pipeline_emit_long_path(
-        context, source, plan, depth, step, state_count, main_lower));
+        context, source, plan, depth, step, state_count, refine_startup_domain,
+        main_lower));
     loom_builder_restore(builder, saved_ip);
     saved_ip = loom_builder_enter_region(builder, replacement,
                                          loom_scf_if_else_region(replacement));
@@ -902,6 +948,8 @@ static iree_status_t loom_scf_pipeline_process_loop(
       loom_scf_pipeline_report(context, loop_ordinal, (uint32_t)depth, &plan));
   IREE_RETURN_IF_ERROR(loom_scf_pipeline_reconstruct(
       context, source, &plan, (uint32_t)depth, step, (uint16_t)state_count,
+      iree_any_bit_set(loop->flags,
+                       LOOM_SCF_PIPELINE_LOOP_REFINE_STARTUP_DOMAIN),
       loop->plan.pipeline.maximum_value, loop->plan.pipeline.lower_bound));
   loom_scf_pipeline_statistics_t* statistics =
       loom_scf_pipeline_statistics(context->pass);

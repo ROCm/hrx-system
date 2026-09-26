@@ -23,21 +23,22 @@ func.def @read_ahead_sum(%input: view<64xf32>, %begin: index, %end: index, %init
   %17 = index.cmp slt, %16, %end : index
   %18 = scalar.andi %13, %17 : i1
   %result = scf.if %18 -> (f32) {
-    %value = view.load %input[%begin] : view<64xf32> -> f32
-    %24, %25 = scf.for %21 = [%16 to %end step %step](%22 = %initial : f32, %23 = %value : f32) -> (f32, f32) {
-      %value = view.load %input[%21] : view<64xf32> -> f32
-      %next = scalar.addf %22, %23 : f32
+    %20 = index.assume %begin [lt(%begin, %end)] : index
+    %value = view.load %input[%20] : view<64xf32> -> f32
+    %25, %26 = scf.for %22 = [%16 to %end step %step](%23 = %initial : f32, %24 = %value : f32) -> (f32, f32) {
+      %value = view.load %input[%22] : view<64xf32> -> f32
+      %next = scalar.addf %23, %24 : f32
       scf.yield %next, %value : f32, f32
     }
-    %next = scalar.addf %24, %25 : f32
+    %next = scalar.addf %25, %26 : f32
     scf.yield %next : f32
   } else {
-    %31 = scf.for %29 = [%begin to %end step %step](%30 = %initial : f32) -> (f32) {
-      %value = view.load %input[%29] : view<64xf32> -> f32
-      %next = scalar.addf %30, %value : f32
+    %32 = scf.for %30 = [%begin to %end step %step](%31 = %initial : f32) -> (f32) {
+      %value = view.load %input[%30] : view<64xf32> -> f32
+      %next = scalar.addf %31, %value : f32
       scf.yield %next : f32
     }
-    scf.yield %31 : f32
+    scf.yield %32 : f32
   }
   func.return %result : f32
 }
