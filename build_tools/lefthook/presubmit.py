@@ -247,8 +247,7 @@ LEFTHOOK_TEST_PATHS = frozenset(
 VULKAN_ENVIRONMENT_TEST_PATHS = frozenset(
     {
         ".github/scripts/check_vulkan_hardware_environment.sh",
-        ".github/workflows/ci_iree_bazel.yml",
-        ".github/workflows/ci_iree_cmake.yml",
+        ".github/workflows/ci_iree.yml",
         "build_tools/ci/BUILD.bazel",
         "build_tools/ci/vulkan_environment.py",
         "build_tools/ci/vulkan_environment_test.py",

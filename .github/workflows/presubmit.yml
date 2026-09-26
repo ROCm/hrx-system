@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-name: Presubmit
+name: HRX
 
 on:
   workflow_dispatch:
@@ -23,7 +23,7 @@ permissions:
 
 jobs:
   presubmit:
-    name: Linux / Presubmit
+    name: Presubmit
     runs-on: azure-linux-scale-rocm
     timeout-minutes: 45
     container:
