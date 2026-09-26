@@ -423,3 +423,24 @@ func.def @comparison_truth_selects_cfg_indices(%storage: buffer, %choice: index,
 ^_bb3:
   func.return
 }
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// Exact condition operands remain searchable after CFG lowering even when the
+// queried access is expressed through a different affine value.
+func.def @cfg_affine_guard_with_constant_bound(%input: view<20xi32>, %raw: index) {
+  %origin = index.assume %raw [range(%raw, 0, 20)] : index
+  %bound = index.constant 20 : index
+  %guard_extent = index.constant 4 : index
+  %guard_end = index.add %origin, %guard_extent : index
+  %fits = index.cmp slt, %guard_end, %bound : index
+  cfg.cond_br %fits, ^access, ^exit
+^access:
+  %value = vector.load %input[%origin] : view<20xi32> -> vector<4xi32>
+  test.use %value : vector<4xi32>
+  cfg.br ^exit
+^exit:
+  func.return
+}

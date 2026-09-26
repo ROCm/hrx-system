@@ -318,3 +318,78 @@ check.case public @loop_boundary_full_span_reversed_extrema {
   check.expect.equal actual(%output) expected(%expected) : tensor<4xi32>
   check.return
 }
+
+// Adjacent lanes take 10 or 9 iterations through the same pipelined loop. The
+// varying lower bound exercises divergent loop retirement while every lane
+// takes the read-ahead path; factors one and three distinguish the ordinary
+// and unrolled CFG shapes.
+template.decl @loop_boundary.varying_start_sum(%values: view<64x20xi32>, %lane: index, %begin: index, %factor: index) -> (i32)
+
+template.def<@loop_boundary.varying_start_sum> @loop_boundary_varying_start_sum_impl(%values: view<64x20xi32>, %lane: index, %begin: index, %factor: index) -> (i32) {
+  %end = index.constant 20 : index
+  %step = index.constant 2 : index
+  %depth = index.constant 2 : index
+  %initial = scalar.constant 0 : i32
+  %result = scf.for %counter = [%begin to %end step %step](%sum = %initial : i32) -> (i32) pipeline(%depth) unroll(%factor) schedule(recurrence) {
+    %value = view.load %values[%lane, %counter] : view<64x20xi32> -> i32
+    %next = scalar.addi %sum, %value : i32
+    scf.yield %next : i32
+  }
+  template.return %result : i32
+}
+
+kernel.def @loop_boundary_varying_start() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %threshold0 = index.constant 16 : index
+  %start0 = index.constant 0 : index
+  %start1 = index.constant 2 : index
+  %in_group0 = index.cmp slt, %lane, %threshold0 : index
+  %begin = scf.select %in_group0, %start0, %start1 : index
+  %factor1 = index.constant 1 : index
+  %factor3 = index.constant 3 : index
+  %input_base = index.constant 0 : offset
+  %output_base = index.constant 16 : offset
+  %row0 = index.constant 0 : index
+  %row1 = index.constant 1 : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %source, %destination = buffer.assume.noalias %input_aligned, %output_aligned : buffer, buffer
+  %values = buffer.view %source[%input_base] : buffer -> view<64x20xi32>
+  %results = buffer.view %destination[%output_base] : buffer -> view<2x68xi32>
+  %result1 = template.apply<@loop_boundary.varying_start_sum>(%values, %lane, %begin, %factor1) : (view<64x20xi32>, index, index, index) -> (i32)
+  %result3 = template.apply<@loop_boundary.varying_start_sum>(%values, %lane, %begin, %factor3) : (view<64x20xi32>, index, index, index) -> (i32)
+  view.store %result1, %results[%row0, %lane] : i32, view<2x68xi32>
+  view.store %result3, %results[%row1, %lane] : i32, view<2x68xi32>
+  kernel.return
+}
+
+check.case public @loop_boundary_varying_long_path_starts {
+  %input = check.generate.iota offset(1) step(1) period(20) : tensor<64x20xi32>
+  %output = check.generate.fill value(-77) : tensor<140xi32>
+  kernel.launch @loop_boundary_varying_start(%input, %output) : (tensor<64x20xi32>, tensor<140xi32>)
+
+  %expected0 = check.generate.fill value(100) : tensor<16xi32>
+  %expected1 = check.generate.fill value(99) : tensor<48xi32>
+  %expected_guard = check.generate.fill value(-77) : tensor<4xi32>
+
+  %prefix = check.tensor.view %output offset(0) : tensor<140xi32> -> tensor<4xi32>
+  %factor1_group0 = check.tensor.view %output offset(16) : tensor<140xi32> -> tensor<16xi32>
+  %factor1_group1 = check.tensor.view %output offset(80) : tensor<140xi32> -> tensor<48xi32>
+  %middle = check.tensor.view %output offset(272) : tensor<140xi32> -> tensor<4xi32>
+  %factor3_group0 = check.tensor.view %output offset(288) : tensor<140xi32> -> tensor<16xi32>
+  %factor3_group1 = check.tensor.view %output offset(352) : tensor<140xi32> -> tensor<48xi32>
+  %suffix = check.tensor.view %output offset(544) : tensor<140xi32> -> tensor<4xi32>
+
+  check.expect.equal actual(%prefix) expected(%expected_guard) : tensor<4xi32>
+  check.expect.equal actual(%factor1_group0) expected(%expected0) : tensor<16xi32>
+  check.expect.equal actual(%factor1_group1) expected(%expected1) : tensor<48xi32>
+  check.expect.equal actual(%middle) expected(%expected_guard) : tensor<4xi32>
+  check.expect.equal actual(%factor3_group0) expected(%expected0) : tensor<16xi32>
+  check.expect.equal actual(%factor3_group1) expected(%expected1) : tensor<48xi32>
+  check.expect.equal actual(%suffix) expected(%expected_guard) : tensor<4xi32>
+  check.return
+}
