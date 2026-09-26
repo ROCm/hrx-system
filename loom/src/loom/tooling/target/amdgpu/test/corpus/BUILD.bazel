@@ -17,7 +17,7 @@ load(
     "LOOM_AMDGPU_SUPPORTED_TARGETS",
 )
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
-load("//loom/build_tools/bazel:defs.bzl", "loom_module", "loom_test")
+load("//loom/build_tools/bazel:defs.bzl", "loom_module", "loom_test", "loom_test_module")
 load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE")
 
 package(
@@ -57,6 +57,11 @@ _GFX11_COMPATIBLE_WITH = (
 _CDNA3_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/execute:amdgpu_hal",
     "//loom/config/target/amdgpu:iree_hal_descriptor_set_cdna3_core",
+])
+
+_CDNA4_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/execute:amdgpu_hal",
+    "//loom/config/target/amdgpu:iree_hal_descriptor_set_cdna4_core",
 ])
 
 loom_test(
@@ -223,6 +228,27 @@ iree_executable_test(
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = _EXECUTION_TAGS,
     target_compatible_with = _CDNA3_COMPATIBLE_WITH,
+)
+
+loom_test_module(
+    name = "gfx950_v4_lds_shared_qk_module",
+    srcs = ["gfx950/v4_lds_shared_qk.loom"],
+)
+
+loom_test(
+    name = "gfx950_v4_lds_shared_qk_compile_test",
+    compile_targets = ["//loom/target/amdgpu:gfx950"],
+    module = ":gfx950_v4_lds_shared_qk_module",
+)
+
+loom_test(
+    name = "gfx950_v4_lds_shared_qk_execution_test",
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+    module = ":gfx950_v4_lds_shared_qk_module",
+    target_compatible_with = _CDNA4_COMPATIBLE_WITH,
 )
 
 loom_module(

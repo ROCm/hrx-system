@@ -1,0 +1,246 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Qualify one AITER V4 m16x8 packed latent-KV tile through shared LDS QK.
+//
+// Seven wave64 subgroups each own one 64-element FP8 scale group across all
+// 64 KV rows. The eighth subgroup stages the separate BF16 RoPE rows. All
+// eight subgroups then consume the same 64x512 BF16 LDS tile through MFMA.
+// This bounded slice publishes exact QK scores; it is not a benchmark.
+amdgpu.target<gfx950> @v4_gfx950
+
+kernel.def @pack_v4_latent_kv_tile() {
+  %rows = index.constant 64 : index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%rows, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%packed: buffer, %payload_byte: i8) {
+  %row = kernel.workgroup.id<x> : index
+  %base = index.constant 0 : offset
+  %raw = buffer.view %packed[%base] : buffer -> view<64x512xi8>
+  %begin = index.constant 0 : index
+  %group_count = index.constant 7 : index
+  %step = index.constant 1 : index
+  %pair_stride = index.constant 2 : index
+  %payload_group_size = index.constant 64 : index
+  %scale_base = index.constant 448 : index
+  %scale_byte = scalar.constant 127 : i8
+  %unused_duplicate_scale_byte = scalar.constant 126 : i8
+  %payload = vector.splat %payload_byte : vector<64xi8>
+  scf.for %group = [%begin to %group_count step %step] {
+    %channel = index.mul %group, %payload_group_size : index
+    vector.store %payload, %raw[%row, %channel] : vector<64xi8>, view<64x512xi8>
+    %pair_offset = index.mul %group, %pair_stride : index
+    %first_offset = index.add %scale_base, %pair_offset : index
+    %second_offset = index.add %first_offset, %step : index
+    view.store %scale_byte, %raw[%row, %first_offset] : i8, view<64x512xi8>
+    view.store %unused_duplicate_scale_byte, %raw[%row, %second_offset] : i8, view<64x512xi8>
+  }
+  kernel.return
+}
+
+func.def inline @v4_bf16_power_of_two(%exponent_delta: index) -> (bf16) {
+  %exponent_delta_i32 = index.cast %exponent_delta : index to i32
+  %exponent_bias = scalar.constant 127 : i32
+  %exponent_shift = scalar.constant 7 : i32
+  %biased_exponent = scalar.addi %exponent_bias, %exponent_delta_i32 : i32
+  %value_bits_i32 = scalar.shli %biased_exponent, %exponent_shift : i32
+  %value_bits = scalar.trunci %value_bits_i32 : i32 to i16
+  %value = scalar.bitcast %value_bits : i16 to bf16
+  func.return %value : bf16
+}
+
+// Materializes one BF16 value in the first RoPE channel of every KV row.
+// Keeping the other 63 channels zero makes the QK result an exact row-identity
+// oracle without adding a reference implementation of the matrix product.
+kernel.def @pack_v4_rope_rows() {
+  %rows = index.constant 64 : index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%rows, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%rope: buffer, %token_exponent_step: index) {
+  %row = kernel.workgroup.id<x> : index
+  %base = index.constant 0 : offset
+  %rope_view = buffer.view %rope[%base] : buffer -> view<64x64xbf16>
+  %cleared_row = vector.constant 0.0 : vector<64xbf16>
+  vector.store %cleared_row, %rope_view[%row, 0] : vector<64xbf16>, view<64x64xbf16>
+  %tile_extent = index.constant 16 : index
+  %token_tile = index.div %row, %tile_extent : index
+  %exponent_delta = index.mul %token_tile, %token_exponent_step : index
+  %value = func.call @v4_bf16_power_of_two(%exponent_delta) : (index) -> (bf16)
+  view.store %value, %rope_view[%row, 0] : bf16, view<64x64xbf16>
+  kernel.return
+}
+
+// Gives each 16-row query ptile a distinct exact scalar value. The production
+// kernel must preserve all eight subgroup identities through fragment stores.
+kernel.def @pack_v4_query_ptiles() {
+  %rows = index.constant 128 : index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%rows, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%query: buffer) {
+  %row = kernel.workgroup.id<x> : index
+  %base = index.constant 0 : offset
+  %query_view = buffer.view %query[%base] : buffer -> view<128x512xbf16>
+  %tile_extent = index.constant 16 : index
+  %ptile = index.div %row, %tile_extent : index
+  %value = func.call @v4_bf16_power_of_two(%ptile) : (index) -> (bf16)
+  %values = vector.splat %value : vector<512xbf16>
+  vector.store %values, %query_view[%row, 0] : vector<512xbf16>, view<128x512xbf16>
+  kernel.return
+}
+
+kernel.def target(@v4_gfx950) @v4_lds_shared_qk() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 512 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%packed: buffer, %rope: buffer, %query: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %scale_base = index.constant 448 : offset
+  %payload_layout = encoding.layout.strided [512, 1] : encoding<layout>
+  %scale_layout = encoding.layout.strided [512, 2] : encoding<layout>
+  %rhs_layout = encoding.layout.strided [1, 512] : encoding<layout>
+  %payload_view = buffer.view %packed[%base] : buffer -> view<64x448xi8, %payload_layout>
+  %scale_view = buffer.view %packed[%scale_base] : buffer -> view<64x7xi8, %scale_layout>
+  %rope_view = buffer.view %rope[%base] : buffer -> view<64x64xbf16>
+  %query_view = buffer.view %query[%base] : buffer -> view<128x512xbf16>
+  %output_view = buffer.view %output[%base] : buffer -> view<128x64xf32>
+  %schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=64, scale_format=e8m0, scale_group_elements=64, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+
+  %lds_bytes = index.constant 65536 : offset
+  %lds = buffer.alloca<workgroup> align(16) %lds_bytes : buffer
+  %lds_rows = buffer.view %lds[%base] : buffer -> view<64x512xbf16>
+  %lds_rhs = buffer.view %lds[%base] : buffer -> view<512x64xbf16, %rhs_layout>
+
+  %subgroup_raw = kernel.subgroup.id : index
+  %subgroup = index.assume %subgroup_raw [range(%subgroup_raw, 0, 7)] : index
+  %lane_raw = kernel.subgroup.lane.id : index
+  %lane = index.assume %lane_raw [range(%lane_raw, 0, 63)] : index
+  %payload_group_count = index.constant 7 : index
+  %payload_group_size = index.constant 64 : index
+  %is_payload_subgroup = index.cmp ult, %subgroup, %payload_group_count : index
+  scf.if %is_payload_subgroup {
+    %channel = index.mul %subgroup, %payload_group_size : index
+    %payload_bits = vector.load %payload_view[%lane, %channel] : view<64x448xi8, %payload_layout> -> vector<64xi8>
+    %payload = vector.bitcast %payload_bits : vector<64xi8> to vector<64xf8E4M3>
+    %scale_byte = view.load %scale_view[%lane, %subgroup] : view<64x7xi8, %scale_layout> -> i8
+    %scale_bits = scalar.extui %scale_byte : i8 to i32
+    %scale = vector.from_elements %scale_bits : vector<1xi32>
+    %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xi32>} : vector<64xf8E4M3>, encoding<schema> -> vector<64xbf16>
+    vector.store %decoded, %lds_rows[%lane, %channel] : vector<64xbf16>, view<64x512xbf16>
+  } else {
+    %rope_values = vector.load %rope_view[%lane, 0] : view<64x64xbf16> -> vector<64xbf16>
+    %rope_channel = index.constant 448 : index
+    vector.store %rope_values, %lds_rows[%lane, %rope_channel] : vector<64xbf16>, view<64x512xbf16>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+
+  %tile_extent = index.constant 16 : index
+  %begin = index.constant 0 : index
+  %token1 = index.constant 16 : index
+  %token2 = index.constant 32 : index
+  %token3 = index.constant 48 : index
+  %channel_count = index.constant 512 : index
+  %query_row_raw = index.mul %subgroup, %tile_extent : index
+  %query_row = index.assume %query_row_raw [range(%query_row_raw, 0, 112), mul(%query_row_raw, 16)] : index
+  %score_seed = vector.constant 0.0 : vector<4xf32>
+  %score0, %score1, %score2, %score3 = scf.for %channel = [%begin to %channel_count step %tile_extent](%carried0 = %score_seed : vector<4xf32>, %carried1 = %score_seed : vector<4xf32>, %carried2 = %score_seed : vector<4xf32>, %carried3 = %score_seed : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
+    %lhs = vector.fragment.load<lhs> %query_view[%query_row, %channel] shape [%tile_extent, %tile_extent] : view<128x512xbf16> -> vector<4xbf16>
+    %rhs0 = vector.fragment.load<rhs> %lds_rhs[%channel, %begin] shape [%tile_extent, %tile_extent] : view<512x64xbf16, %rhs_layout> -> vector<4xbf16>
+    %rhs1 = vector.fragment.load<rhs> %lds_rhs[%channel, %token1] shape [%tile_extent, %tile_extent] : view<512x64xbf16, %rhs_layout> -> vector<4xbf16>
+    %rhs2 = vector.fragment.load<rhs> %lds_rhs[%channel, %token2] shape [%tile_extent, %tile_extent] : view<512x64xbf16, %rhs_layout> -> vector<4xbf16>
+    %rhs3 = vector.fragment.load<rhs> %lds_rhs[%channel, %token3] shape [%tile_extent, %tile_extent] : view<512x64xbf16, %rhs_layout> -> vector<4xbf16>
+    %init0 = vector.fragment<init> %carried0 shape [%tile_extent, %tile_extent] : vector<4xf32>
+    %init1 = vector.fragment<init> %carried1 shape [%tile_extent, %tile_extent] : vector<4xf32>
+    %init2 = vector.fragment<init> %carried2 shape [%tile_extent, %tile_extent] : vector<4xf32>
+    %init3 = vector.fragment<init> %carried3 shape [%tile_extent, %tile_extent] : vector<4xf32>
+    %next0 = vector.mma %lhs, %rhs0, %init0 : vector<4xbf16>, vector<4xbf16>, vector<4xf32>
+    %next1 = vector.mma %lhs, %rhs1, %init1 : vector<4xbf16>, vector<4xbf16>, vector<4xf32>
+    %next2 = vector.mma %lhs, %rhs2, %init2 : vector<4xbf16>, vector<4xbf16>, vector<4xf32>
+    %next3 = vector.mma %lhs, %rhs3, %init3 : vector<4xbf16>, vector<4xbf16>, vector<4xf32>
+    scf.yield %next0, %next1, %next2, %next3 : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
+  }
+  vector.fragment.store<result> %score0, %output_view[%query_row, %begin] shape [%tile_extent, %tile_extent] : vector<4xf32>, view<128x64xf32>
+  vector.fragment.store<result> %score1, %output_view[%query_row, %token1] shape [%tile_extent, %tile_extent] : vector<4xf32>, view<128x64xf32>
+  vector.fragment.store<result> %score2, %output_view[%query_row, %token2] shape [%tile_extent, %tile_extent] : vector<4xf32>, view<128x64xf32>
+  vector.fragment.store<result> %score3, %output_view[%query_row, %token3] shape [%tile_extent, %tile_extent] : vector<4xf32>, view<128x64xf32>
+  kernel.return
+}
+
+check.case public @v4_lds_shared_qk_packed_fields_case {
+  %payload_one = check.literal value(56) : i8
+  %packed = check.generate.fill value(-1) : tensor<64x512xi8>
+  %rope = check.generate.fill value(0.0) : tensor<64x64xbf16>
+  %query = check.generate.fill value(1.0) : tensor<128x512xbf16>
+  %output = check.generate.fill value(-1.0) : tensor<128x64xf32>
+  %expected = check.generate.fill value(448.0) : tensor<128x64xf32>
+  kernel.launch @pack_v4_latent_kv_tile(%packed, %payload_one) : (tensor<64x512xi8>, i8)
+  kernel.launch @v4_lds_shared_qk(%packed, %rope, %query, %output) : (tensor<64x512xi8>, tensor<64x64xbf16>, tensor<128x512xbf16>, tensor<128x64xf32>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<128x64xf32>
+  check.return
+}
+
+check.case public @v4_lds_shared_qk_token_coordinates_case {
+  %payload_zero = check.literal value(0) : i8
+  %token_exponent_step = check.literal value(1) : index
+  %packed = check.generate.fill value(-1) : tensor<64x512xi8>
+  %rope = check.generate.fill value(-1.0) : tensor<64x64xbf16>
+  %query = check.generate.fill value(1.0) : tensor<128x512xbf16>
+  %output = check.generate.fill value(-1.0) : tensor<128x64xf32>
+  kernel.launch @pack_v4_latent_kv_tile(%packed, %payload_zero) : (tensor<64x512xi8>, i8)
+  kernel.launch @pack_v4_rope_rows(%rope, %token_exponent_step) : (tensor<64x64xbf16>, index)
+  kernel.launch @v4_lds_shared_qk(%packed, %rope, %query, %output) : (tensor<64x512xi8>, tensor<64x64xbf16>, tensor<128x512xbf16>, tensor<128x64xf32>)
+  %token_tile0 = check.tensor.view %output offset(0) : tensor<128x64xf32> -> tensor<16xf32>
+  %token_tile1 = check.tensor.view %output offset(64) : tensor<128x64xf32> -> tensor<16xf32>
+  %token_tile2 = check.tensor.view %output offset(128) : tensor<128x64xf32> -> tensor<16xf32>
+  %token_tile3 = check.tensor.view %output offset(192) : tensor<128x64xf32> -> tensor<16xf32>
+  %expected0 = check.generate.fill value(1.0) : tensor<16xf32>
+  %expected1 = check.generate.fill value(2.0) : tensor<16xf32>
+  %expected2 = check.generate.fill value(4.0) : tensor<16xf32>
+  %expected3 = check.generate.fill value(8.0) : tensor<16xf32>
+  check.expect.equal actual(%token_tile0) expected(%expected0) : tensor<16xf32>
+  check.expect.equal actual(%token_tile1) expected(%expected1) : tensor<16xf32>
+  check.expect.equal actual(%token_tile2) expected(%expected2) : tensor<16xf32>
+  check.expect.equal actual(%token_tile3) expected(%expected3) : tensor<16xf32>
+  check.return
+}
+
+check.case public @v4_lds_shared_qk_query_ptiles_case {
+  %payload_zero = check.literal value(0) : i8
+  %token_exponent_step = check.literal value(0) : index
+  %packed = check.generate.fill value(-1) : tensor<64x512xi8>
+  %rope = check.generate.fill value(-1.0) : tensor<64x64xbf16>
+  %query = check.generate.fill value(-1.0) : tensor<128x512xbf16>
+  %output = check.generate.fill value(-1.0) : tensor<128x64xf32>
+  kernel.launch @pack_v4_latent_kv_tile(%packed, %payload_zero) : (tensor<64x512xi8>, i8)
+  kernel.launch @pack_v4_rope_rows(%rope, %token_exponent_step) : (tensor<64x64xbf16>, index)
+  kernel.launch @pack_v4_query_ptiles(%query) : (tensor<128x512xbf16>)
+  kernel.launch @v4_lds_shared_qk(%packed, %rope, %query, %output) : (tensor<64x512xi8>, tensor<64x64xbf16>, tensor<128x512xbf16>, tensor<128x64xf32>)
+
+  %ptile0 = check.tensor.view %output offset(0) : tensor<128x64xf32> -> tensor<1024xf32>
+  %ptile1 = check.tensor.view %output offset(4096) : tensor<128x64xf32> -> tensor<1024xf32>
+  %ptile2 = check.tensor.view %output offset(8192) : tensor<128x64xf32> -> tensor<1024xf32>
+  %ptile3 = check.tensor.view %output offset(12288) : tensor<128x64xf32> -> tensor<1024xf32>
+  %ptile4 = check.tensor.view %output offset(16384) : tensor<128x64xf32> -> tensor<1024xf32>
+  %ptile5 = check.tensor.view %output offset(20480) : tensor<128x64xf32> -> tensor<1024xf32>
+  %ptile6 = check.tensor.view %output offset(24576) : tensor<128x64xf32> -> tensor<1024xf32>
+  %ptile7 = check.tensor.view %output offset(28672) : tensor<128x64xf32> -> tensor<1024xf32>
+  %expected0 = check.generate.fill value(1.0) : tensor<1024xf32>
+  %expected1 = check.generate.fill value(2.0) : tensor<1024xf32>
+  %expected2 = check.generate.fill value(4.0) : tensor<1024xf32>
+  %expected3 = check.generate.fill value(8.0) : tensor<1024xf32>
+  %expected4 = check.generate.fill value(16.0) : tensor<1024xf32>
+  %expected5 = check.generate.fill value(32.0) : tensor<1024xf32>
+  %expected6 = check.generate.fill value(64.0) : tensor<1024xf32>
+  %expected7 = check.generate.fill value(128.0) : tensor<1024xf32>
+  check.expect.equal actual(%ptile0) expected(%expected0) : tensor<1024xf32>
+  check.expect.equal actual(%ptile1) expected(%expected1) : tensor<1024xf32>
+  check.expect.equal actual(%ptile2) expected(%expected2) : tensor<1024xf32>
+  check.expect.equal actual(%ptile3) expected(%expected3) : tensor<1024xf32>
+  check.expect.equal actual(%ptile4) expected(%expected4) : tensor<1024xf32>
+  check.expect.equal actual(%ptile5) expected(%expected5) : tensor<1024xf32>
+  check.expect.equal actual(%ptile6) expected(%expected6) : tensor<1024xf32>
+  check.expect.equal actual(%ptile7) expected(%expected7) : tensor<1024xf32>
+  check.return
+}
