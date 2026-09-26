@@ -344,7 +344,7 @@ TEST(AmdgpuHsacoTest, WritesGfx1100CodeObjectEnvelope) {
   EXPECT_EQ(symtab.link, strtab.index);
   EXPECT_EQ(symtab.info, 1u);
   EXPECT_EQ(rodata.size, LOOM_AMDGPU_KERNEL_DESCRIPTOR_LENGTH);
-  EXPECT_EQ(text.size, sizeof(s_endpgm));
+  EXPECT_EQ(text.size, 128u + 384u);
   EXPECT_EQ(bytes.substr((size_t)text.offset, sizeof(s_endpgm)),
             std::string((const char*)s_endpgm, sizeof(s_endpgm)));
 
@@ -365,6 +365,8 @@ TEST(AmdgpuHsacoTest, WritesGfx1100CodeObjectEnvelope) {
             LOOM_NATIVE_ELF_PROGRAM_TYPE_LOAD);
   EXPECT_EQ(LoadLeU64(bytes, execute_load + 8), text.offset);
   EXPECT_EQ(LoadLeU64(bytes, execute_load + 16), text.address);
+  EXPECT_EQ(LoadLeU64(bytes, execute_load + 32), text.size);
+  EXPECT_EQ(LoadLeU64(bytes, execute_load + 40), text.size);
   EXPECT_EQ(LoadLeU64(bytes, execute_load + 48), 4096u);
   EXPECT_EQ(text.offset & 4095u, text.address & 4095u);
   const size_t write_load = program_header_offset + 3u * 56u;
@@ -425,6 +427,145 @@ TEST(AmdgpuHsacoTest, WritesGfx1100CodeObjectEnvelope) {
   EXPECT_NE(note_contents.find("amdgcn-amd-amdhsa--gfx1100"),
             std::string::npos);
   EXPECT_NE(note_contents.find("loom_kernel.kd"), std::string::npos);
+}
+
+TEST(AmdgpuHsacoTest, PadsAlignedAndUnalignedTextEnds) {
+  struct PaddingCase {
+    // Exact or generic processor whose artifact is emitted.
+    const char* processor;
+    // Required native wave size for the minimal kernel.
+    uint32_t wave_size;
+    // Expected instruction-cache line alignment in bytes.
+    size_t alignment;
+    // Expected terminal storage following line alignment, in bytes.
+    size_t trailing_bytes;
+    // Expected little-endian native padding instruction.
+    uint32_t instruction_word;
+  };
+  const PaddingCase cases[] = {
+      {"gfx942", 64, 64, 1024, 0xbf800000},
+      {"gfx950", 64, 64, 1024, 0xbf800000},
+      {"gfx9-4-generic", 64, 64, 1024, 0xbf800000},
+      {"gfx1100", 32, 128, 384, 0xbf9f0000},
+      {"gfx1151", 32, 128, 384, 0xbf9f0000},
+      {"gfx1170", 32, 128, 384, 0xbf9f0000},
+      {"gfx11-generic", 32, 128, 384, 0xbf9f0000},
+      {"gfx1200", 32, 128, 384, 0xbf9f0000},
+      {"gfx12-generic", 32, 128, 384, 0xbf9f0000},
+      {"gfx1250", 32, 128, 384, 0xbf9f0000},
+      {"gfx1251", 32, 128, 384, 0xbf9f0000},
+      {"gfx12-5-generic", 32, 128, 384, 0xbf9f0000},
+  };
+  for (const PaddingCase& test_case : cases) {
+    SCOPED_TRACE(test_case.processor);
+    std::string first_descriptor;
+    for (size_t body_size : {size_t{4}, test_case.alignment}) {
+      SCOPED_TRACE(body_size);
+      std::vector<uint8_t> body(body_size, 0);
+      for (size_t offset = 0; offset < body_size; offset += 4) {
+        body[offset + 2] = 0x80;
+        body[offset + 3] = 0xbf;
+      }
+      body[body_size - 2] = test_case.wave_size == 64 ? 0x81 : 0xb0;
+      loom_amdgpu_metadata_kernel_t metadata =
+          MinimalKernel(IREE_SV("kernel"), IREE_SV("kernel.kd"));
+      metadata.wavefront_size = test_case.wave_size;
+      const loom_amdgpu_hsaco_kernel_t kernel = {
+          /*.metadata=*/metadata,
+          /*.descriptor_options=*/{},
+          /*.text=*/iree_make_const_byte_span(body.data(), body.size()),
+      };
+      const std::string target =
+          std::string("amdgcn-amd-amdhsa--") + test_case.processor;
+      const loom_amdgpu_hsaco_file_t file = {
+          /*.target=*/iree_make_string_view(target.data(), target.size()),
+          /*.processor=*/iree_make_cstring_view(test_case.processor),
+          /*.kernels=*/&kernel,
+          /*.kernel_count=*/1,
+      };
+      StreamPtr stream = CreateStream();
+      TestArena arena;
+      IREE_ASSERT_OK(
+          loom_amdgpu_hsaco_write_file(&file, stream.get(), arena.arena()));
+      const std::string bytes = StreamBytes(stream.get());
+      const auto sections = ReadSections(bytes);
+      const Section& text = FindSection(sections, ".text");
+      const Section& rodata = FindSection(sections, ".rodata");
+      const Section& dynsym = FindSection(sections, ".dynsym");
+      ASSERT_EQ(text.size, test_case.alignment + test_case.trailing_bytes);
+      EXPECT_EQ(bytes.substr(text.offset, body_size),
+                std::string((const char*)body.data(), body_size));
+      for (size_t offset = body_size; offset < text.size; offset += 4) {
+        EXPECT_EQ(LoadLeU32(bytes, text.offset + offset),
+                  test_case.instruction_word);
+      }
+      EXPECT_EQ(LoadLeU64(bytes, dynsym.offset + 24 + 8), text.address);
+      EXPECT_EQ(LoadLeU64(bytes, dynsym.offset + 24 + 16), body_size);
+      EXPECT_EQ(LoadLeI64(bytes, rodata.offset + 16),
+                (int64_t)(text.address - rodata.address));
+      const std::string descriptor = bytes.substr(rodata.offset, 64);
+      if (first_descriptor.empty()) {
+        first_descriptor = descriptor;
+      } else {
+        EXPECT_EQ(descriptor, first_descriptor);
+      }
+      bool found_text_load = false;
+      for (const Segment& segment : ReadSegments(bytes)) {
+        if (segment.type != LOOM_NATIVE_ELF_PROGRAM_TYPE_LOAD ||
+            !(segment.flags & LOOM_NATIVE_ELF_PROGRAM_FLAG_EXECUTE)) {
+          continue;
+        }
+        found_text_load = true;
+        EXPECT_EQ(segment.offset, text.offset);
+        EXPECT_EQ(segment.virtual_address, text.address);
+        EXPECT_EQ(segment.file_size, text.size);
+        EXPECT_EQ(segment.memory_size, text.size);
+      }
+      EXPECT_TRUE(found_text_load);
+    }
+  }
+}
+
+TEST(AmdgpuHsacoTest, PadsOnlyAfterFinalKernel) {
+  const uint8_t s_endpgm[] = {0x00, 0x00, 0x81, 0xbf};
+  loom_amdgpu_hsaco_kernel_t kernels[2] = {};
+  kernels[0].metadata = MinimalKernel(IREE_SV("first"), IREE_SV("first.kd"));
+  kernels[1].metadata = MinimalKernel(IREE_SV("second"), IREE_SV("second.kd"));
+  for (auto& kernel : kernels) {
+    kernel.metadata.wavefront_size = 64;
+    kernel.text = iree_make_const_byte_span(s_endpgm, sizeof(s_endpgm));
+  }
+  const loom_amdgpu_hsaco_file_t file = {
+      /*.target=*/IREE_SV("amdgcn-amd-amdhsa--gfx942"),
+      /*.processor=*/IREE_SV("gfx942"),
+      /*.kernels=*/kernels,
+      /*.kernel_count=*/IREE_ARRAYSIZE(kernels),
+  };
+  StreamPtr stream = CreateStream();
+  TestArena arena;
+  IREE_ASSERT_OK(
+      loom_amdgpu_hsaco_write_file(&file, stream.get(), arena.arena()));
+  const std::string bytes = StreamBytes(stream.get());
+  const auto sections = ReadSections(bytes);
+  const Section& text = FindSection(sections, ".text");
+  const Section& rodata = FindSection(sections, ".rodata");
+  const Section& dynsym = FindSection(sections, ".dynsym");
+  ASSERT_EQ(text.size, 320u + 1024u);
+  EXPECT_EQ(bytes.substr(text.offset, 4),
+            std::string((const char*)s_endpgm, 4));
+  EXPECT_EQ(bytes.substr(text.offset + 4, 252), std::string(252, '\0'));
+  EXPECT_EQ(bytes.substr(text.offset + 256, 4),
+            std::string((const char*)s_endpgm, 4));
+  for (size_t offset = 260; offset < text.size; offset += 4) {
+    EXPECT_EQ(LoadLeU32(bytes, text.offset + offset), 0xbf800000u);
+  }
+  for (size_t i = 0; i < 2; ++i) {
+    const size_t entry_symbol = dynsym.offset + (1 + i * 2) * 24;
+    EXPECT_EQ(LoadLeU64(bytes, entry_symbol + 8), text.address + i * 256);
+    EXPECT_EQ(LoadLeU64(bytes, entry_symbol + 16), 4u);
+    EXPECT_EQ(LoadLeI64(bytes, rodata.offset + i * 64 + 16),
+              (int64_t)(text.address + i * 256 - (rodata.address + i * 64)));
+  }
 }
 
 TEST(AmdgpuHsacoTest, WritesWritableRuntimeDataSymbols) {
@@ -668,6 +809,12 @@ TEST(AmdgpuHsacoTest, PatchesDataSymbolRel32TextFixups) {
   const Section& text = FindSection(sections, ".text");
   const std::string dynstr_contents =
       bytes.substr((size_t)dynstr.offset, (size_t)dynstr.size);
+
+  ASSERT_EQ(text.size, 128u + 384u);
+  EXPECT_EQ(LoadLeU64(bytes, dynsym.offset + 24 + 16), text_bytes.size());
+  for (size_t offset = text_bytes.size(); offset < text.size; offset += 4) {
+    EXPECT_EQ(LoadLeU32(bytes, text.offset + offset), 0xbf9f0000u);
+  }
 
   ASSERT_EQ(dynsym.size, 5u * 24u);
   const size_t const_symbol = (size_t)dynsym.offset + 3u * 24u;

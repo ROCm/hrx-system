@@ -602,6 +602,16 @@ class AmdgpuProcessorKernelEntryInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class AmdgpuProcessorCodePaddingInfo:
+    # Byte alignment applied after the final kernel body.
+    alignment: int = 4
+    # Additional executable bytes following the aligned body end.
+    trailing_bytes: int = 0
+    # Native word used for both alignment and trailing storage.
+    instruction_word: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class AmdgpuProcessorInstructionInfo:
     base_constraints: int = 0
 
@@ -770,6 +780,7 @@ class AmdgpuProcessorInfo:
     wavefront: AmdgpuProcessorWavefrontInfo
     kernel_descriptor: AmdgpuProcessorKernelDescriptorInfo
     kernel_entry: AmdgpuProcessorKernelEntryInfo = AmdgpuProcessorKernelEntryInfo()
+    code_padding: AmdgpuProcessorCodePaddingInfo = AmdgpuProcessorCodePaddingInfo()
     instructions: AmdgpuProcessorInstructionInfo = AmdgpuProcessorInstructionInfo()
     features: AmdgpuProcessorFeatureInfo = AmdgpuProcessorFeatureInfo()
     limits: AmdgpuProcessorLimitInfo = AmdgpuProcessorLimitInfo()
@@ -781,6 +792,19 @@ AMDGPU_OCCUPANCY_NONE = AmdgpuProcessorOccupancyInfo()
 
 AMDGPU_KERNEL_DESCRIPTOR_INFO_NONE = AmdgpuProcessorKernelDescriptorInfo()
 AMDGPU_KERNEL_ENTRY_INFO_NONE = AmdgpuProcessorKernelEntryInfo()
+AMDGPU_CODE_PADDING_INFO_NONE = AmdgpuProcessorCodePaddingInfo()
+# AMDHSA executable-section finalization follows AMDGPUTargetStreamer::EmitCodeEnd:
+# GFX90A-instruction processors use sixteen 64-byte lines of s_nop; GFX10+
+# uses three lines of s_code_end, with 128-byte lines beginning at GFX11.
+AMDGPU_CODE_PADDING_INFO_GFX90A = AmdgpuProcessorCodePaddingInfo(
+    alignment=64, trailing_bytes=1024, instruction_word=0xBF800000
+)
+AMDGPU_CODE_PADDING_INFO_GFX10 = AmdgpuProcessorCodePaddingInfo(
+    alignment=64, trailing_bytes=192, instruction_word=0xBF9F0000
+)
+AMDGPU_CODE_PADDING_INFO_GFX11 = AmdgpuProcessorCodePaddingInfo(
+    alignment=128, trailing_bytes=384, instruction_word=0xBF9F0000
+)
 AMDGPU_PROCESSOR_INSTRUCTION_INFO_NONE = AmdgpuProcessorInstructionInfo()
 AMDGPU_KERNEL_DESCRIPTOR_INFO_PACKED_WORKITEM_ID = AmdgpuProcessorKernelDescriptorInfo(
     flags=AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID,
@@ -1043,6 +1067,7 @@ def processor_info(
         AMDGPU_KERNEL_DESCRIPTOR_INFO_NONE
     ),
     kernel_entry: AmdgpuProcessorKernelEntryInfo = AMDGPU_KERNEL_ENTRY_INFO_NONE,
+    code_padding: AmdgpuProcessorCodePaddingInfo = AMDGPU_CODE_PADDING_INFO_NONE,
     instructions: AmdgpuProcessorInstructionInfo = (
         AMDGPU_PROCESSOR_INSTRUCTION_INFO_NONE
     ),
@@ -1073,6 +1098,7 @@ def processor_info(
         wavefront=AmdgpuProcessorWavefrontInfo(default_size=default_wavefront_size),
         kernel_descriptor=kernel_descriptor,
         kernel_entry=kernel_entry,
+        code_padding=code_padding,
         instructions=instructions,
         features=AmdgpuProcessorFeatureInfo(
             matrix=matrix_feature_profile,
@@ -1094,6 +1120,7 @@ def gfx9_10_processor_info(
     elf_feature_flags: int = 0,
     elf_generic_version: int = 0,
     default_wavefront_size: int = 64,
+    code_padding: AmdgpuProcessorCodePaddingInfo = AMDGPU_CODE_PADDING_INFO_NONE,
     matrix_feature_profile: str = AMDGPU_MATRIX_FEATURE_PROFILE_NONE,
     kernel_descriptor: AmdgpuProcessorKernelDescriptorInfo = (
         AMDGPU_KERNEL_DESCRIPTOR_INFO_NONE
@@ -1105,6 +1132,7 @@ def gfx9_10_processor_info(
         elf_feature_flags=elf_feature_flags,
         elf_generic_version=elf_generic_version,
         default_wavefront_size=default_wavefront_size,
+        code_padding=code_padding,
         matrix_feature_profile=matrix_feature_profile,
         kernel_descriptor=kernel_descriptor,
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER,
@@ -1131,6 +1159,7 @@ def rdna3_processor_info(
         elf_generic_version=elf_generic_version,
         default_wavefront_size=32,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_RDNA3_GFX11,
+        code_padding=AMDGPU_CODE_PADDING_INFO_GFX11,
         matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11,
         scheduling_bits=(
             scheduling_bits
@@ -1158,6 +1187,7 @@ def cdna3_processor_info(
         descriptor_set_key="amdgpu.cdna3.core",
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_CDNA_GFX9,
+        code_padding=AMDGPU_CODE_PADDING_INFO_GFX90A,
         matrix_feature_profile=matrix_feature_profile,
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_CDNA_FIXED_WAIT_STATES,
         max_workgroup_storage_bytes=AMDGPU_DEFAULT_MAX_WORKGROUP_STORAGE_BYTES,
@@ -1180,6 +1210,7 @@ def gfx115x_processor_info(
         elf_machine_flags=elf_machine_flags,
         default_wavefront_size=32,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_RDNA3_GFX11,
+        code_padding=AMDGPU_CODE_PADDING_INFO_GFX11,
         matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11,
         scheduling_bits=(
             AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR
@@ -1203,6 +1234,7 @@ def rdna4m_processor_info(
         elf_machine_flags=elf_machine_flags,
         default_wavefront_size=32,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_RDNA3_GFX11,
+        code_padding=AMDGPU_CODE_PADDING_INFO_GFX11,
         matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12,
         scheduling_bits=(
             AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU
@@ -1232,6 +1264,7 @@ def rdna4_processor_info(
         elf_generic_version=elf_generic_version,
         default_wavefront_size=32,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_RDNA4_GFX12,
+        code_padding=AMDGPU_CODE_PADDING_INFO_GFX11,
         matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12,
         scheduling_bits=(
             AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_DEPCTR
@@ -1271,6 +1304,7 @@ def gfx125x_processor_info(
         default_wavefront_size=32,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_RDNA4_GFX125,
         kernel_entry=AMDGPU_KERNEL_ENTRY_INFO_INITIAL_VMEM_REPLAY,
+        code_padding=AMDGPU_CODE_PADDING_INFO_GFX11,
         instructions=instructions,
         matrix_feature_profile=matrix_feature_profile,
         lds_bank_service_models=lds_bank_service_models,
@@ -1534,6 +1568,7 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
         matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX90A,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_PACKED_WORKITEM_ID,
+        code_padding=AMDGPU_CODE_PADDING_INFO_GFX90A,
     ),
     gfx9_10_processor_info(
         "gfx90c", 0x032, elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4
@@ -1551,6 +1586,7 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_CDNA_GFX9,
         matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX950,
+        code_padding=AMDGPU_CODE_PADDING_INFO_GFX90A,
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_CDNA_FIXED_WAIT_STATES,
         max_workgroup_storage_bytes=AMDGPU_CDNA4_MAX_WORKGROUP_STORAGE_BYTES,
         occupancy=AMDGPU_OCCUPANCY_CDNA4,
@@ -1560,32 +1596,71 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         0x033,
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4,
         default_wavefront_size=32,
+        code_padding=AMDGPU_CODE_PADDING_INFO_GFX10,
     ),
     gfx9_10_processor_info(
         "gfx1011",
         0x034,
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4,
         default_wavefront_size=32,
+        code_padding=AMDGPU_CODE_PADDING_INFO_GFX10,
     ),
     gfx9_10_processor_info(
         "gfx1012",
         0x035,
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4,
         default_wavefront_size=32,
+        code_padding=AMDGPU_CODE_PADDING_INFO_GFX10,
     ),
     gfx9_10_processor_info(
         "gfx1013",
         0x042,
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4,
         default_wavefront_size=32,
+        code_padding=AMDGPU_CODE_PADDING_INFO_GFX10,
     ),
-    gfx9_10_processor_info("gfx1030", 0x036, default_wavefront_size=32),
-    gfx9_10_processor_info("gfx1031", 0x037, default_wavefront_size=32),
-    gfx9_10_processor_info("gfx1032", 0x038, default_wavefront_size=32),
-    gfx9_10_processor_info("gfx1033", 0x039, default_wavefront_size=32),
-    gfx9_10_processor_info("gfx1034", 0x03E, default_wavefront_size=32),
-    gfx9_10_processor_info("gfx1035", 0x03D, default_wavefront_size=32),
-    gfx9_10_processor_info("gfx1036", 0x045, default_wavefront_size=32),
+    gfx9_10_processor_info(
+        "gfx1030",
+        0x036,
+        default_wavefront_size=32,
+        code_padding=AMDGPU_CODE_PADDING_INFO_GFX10,
+    ),
+    gfx9_10_processor_info(
+        "gfx1031",
+        0x037,
+        default_wavefront_size=32,
+        code_padding=AMDGPU_CODE_PADDING_INFO_GFX10,
+    ),
+    gfx9_10_processor_info(
+        "gfx1032",
+        0x038,
+        default_wavefront_size=32,
+        code_padding=AMDGPU_CODE_PADDING_INFO_GFX10,
+    ),
+    gfx9_10_processor_info(
+        "gfx1033",
+        0x039,
+        default_wavefront_size=32,
+        code_padding=AMDGPU_CODE_PADDING_INFO_GFX10,
+    ),
+    gfx9_10_processor_info(
+        "gfx1034",
+        0x03E,
+        default_wavefront_size=32,
+        code_padding=AMDGPU_CODE_PADDING_INFO_GFX10,
+    ),
+    gfx9_10_processor_info(
+        "gfx1035",
+        0x03D,
+        default_wavefront_size=32,
+        code_padding=AMDGPU_CODE_PADDING_INFO_GFX10,
+    ),
+    gfx9_10_processor_info(
+        "gfx1036",
+        0x045,
+        default_wavefront_size=32,
+        code_padding=AMDGPU_CODE_PADDING_INFO_GFX10,
+    ),
     rdna3_processor_info(
         processor="gfx1100",
         elf_machine_flags=0x041,
@@ -1648,6 +1723,7 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         flags=AMDGPU_PROCESSOR_INFO_FLAG_ARCHITECTED_WORKGROUP_IDS,
         default_wavefront_size=32,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_PACKED_WORKITEM_ID,
+        code_padding=AMDGPU_CODE_PADDING_INFO_GFX11,
     ),
     gfx9_10_processor_info(
         "gfx9-generic",
@@ -1661,12 +1737,14 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4,
         elf_generic_version=generic_code_object_current_version("gfx10-1-generic"),
         default_wavefront_size=32,
+        code_padding=AMDGPU_CODE_PADDING_INFO_GFX10,
     ),
     gfx9_10_processor_info(
         "gfx10-3-generic",
         0x053,
         elf_generic_version=generic_code_object_current_version("gfx10-3-generic"),
         default_wavefront_size=32,
+        code_padding=AMDGPU_CODE_PADDING_INFO_GFX10,
     ),
     rdna3_processor_info(
         "gfx11-generic",
@@ -1690,6 +1768,7 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         elf_generic_version=generic_code_object_current_version("gfx9-4-generic"),
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_CDNA_GFX9,
         matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC,
+        code_padding=AMDGPU_CODE_PADDING_INFO_GFX90A,
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_CDNA_FIXED_WAIT_STATES,
         max_workgroup_storage_bytes=AMDGPU_DEFAULT_MAX_WORKGROUP_STORAGE_BYTES,
         occupancy=AMDGPU_OCCUPANCY_GFX9_4_GENERIC,
@@ -2721,6 +2800,14 @@ def validate_amdgpu_generic_contracts(
             raise ValueError(
                 f"AMDGPU generic processor {generic_processor.processor} "
                 "kernel entry facts do not match every member"
+            )
+        if any(
+            member.code_padding != generic_processor.code_padding
+            for member in exact_members
+        ):
+            raise ValueError(
+                f"AMDGPU generic processor {generic_processor.processor} "
+                "code padding facts do not match every member"
             )
 
         portable_instruction_constraints = (

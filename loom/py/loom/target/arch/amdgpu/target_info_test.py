@@ -53,6 +53,7 @@ from loom.target.arch.amdgpu.target_info import (
     AMDGPU_TARGET_INFOS,
     AmdgpuOccupancyDomainInfo,
     AmdgpuOccupancyModelInfo,
+    AmdgpuProcessorCodePaddingInfo,
     _occupancy_capacity,
     _occupancy_capacity_change_points,
     _validate_portable_occupancy_model,
@@ -90,6 +91,80 @@ def _raises_value_error(match: str) -> Iterator[None]:
             ) from exc
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_code_padding_matches_instruction_prefetch_families() -> None:
+    processors = {info.processor: info for info in AMDGPU_PROCESSOR_INFOS}
+    gfx90a = {"gfx90a", "gfx940", "gfx941", "gfx942", "gfx950", "gfx9-4-generic"}
+    gfx10 = {
+        "gfx1010",
+        "gfx1011",
+        "gfx1012",
+        "gfx1013",
+        "gfx1030",
+        "gfx1031",
+        "gfx1032",
+        "gfx1033",
+        "gfx1034",
+        "gfx1035",
+        "gfx1036",
+        "gfx10-1-generic",
+        "gfx10-3-generic",
+    }
+    gfx11_plus = {
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153",
+        "gfx1170",
+        "gfx1171",
+        "gfx1172",
+        "gfx1200",
+        "gfx1201",
+        "gfx1250",
+        "gfx1251",
+        "gfx1310",
+        "gfx11-generic",
+        "gfx12-generic",
+        "gfx12-5-generic",
+    }
+    unpadded = {
+        "gfx900",
+        "gfx902",
+        "gfx904",
+        "gfx906",
+        "gfx908",
+        "gfx909",
+        "gfx90c",
+        "gfx9-generic",
+    }
+    assert set(processors) == gfx90a | gfx10 | gfx11_plus | unpadded
+    for names, expected in (
+        (gfx90a, AmdgpuProcessorCodePaddingInfo(64, 1024, 0xBF800000)),
+        (gfx10, AmdgpuProcessorCodePaddingInfo(64, 192, 0xBF9F0000)),
+        (gfx11_plus, AmdgpuProcessorCodePaddingInfo(128, 384, 0xBF9F0000)),
+        (unpadded, AmdgpuProcessorCodePaddingInfo(4, 0, 0)),
+    ):
+        for name in names:
+            assert processors[name].code_padding == expected
+
+
+def test_generic_code_padding_matches_every_member() -> None:
+    processors = tuple(
+        replace(
+            info,
+            code_padding=AmdgpuProcessorCodePaddingInfo(64, 1024, 0xBF800000),
+        )
+        if info.processor == "gfx11-generic"
+        else info
+        for info in AMDGPU_PROCESSOR_INFOS
+    )
+    with _raises_value_error("code padding facts do not match every member"):
+        validate_amdgpu_generic_contracts(processors, AMDGPU_DESCRIPTOR_SET_INFOS)
 
 
 def test_descriptor_set_isa_xml_validation_accepts_matching_architecture() -> None:

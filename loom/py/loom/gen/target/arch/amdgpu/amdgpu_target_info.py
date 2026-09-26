@@ -1089,6 +1089,13 @@ def _validate_processors(
         if info.wavefront.default_size not in (32, 64):
             raise ValueError(f"AMDGPU default wavefront size for {info.processor} must be 32 or 64")
         supported_wavefront_sizes = _supported_wavefront_sizes(info)
+        padding = info.code_padding
+        if padding.alignment < 4 or padding.alignment > 0xFFFFFFFF or padding.alignment & (padding.alignment - 1):
+            raise ValueError(f"AMDGPU code padding alignment for {info.processor} must be a power of two in [4, 2^32)")
+        if padding.trailing_bytes < 0 or padding.trailing_bytes > 0xFFFFFFFF or padding.trailing_bytes % 4:
+            raise ValueError(f"AMDGPU code padding trailing bytes for {info.processor} must fit a whole number of u32 words")
+        if padding.instruction_word < 0 or padding.instruction_word > 0xFFFFFFFF:
+            raise ValueError(f"AMDGPU code padding instruction word for {info.processor} must fit u32")
         _matrix_feature_profile_expr(info.features.matrix)
         _matrix_coexecution_profile_expr(info.features.matrix_coexecution)
         if kernel_descriptor.flags < 0 or kernel_descriptor.flags > 0xFFFFFFFFFFFFFFFF:
@@ -1468,6 +1475,11 @@ def _emit_processor_rows(
                 "      },",
                 "      .kernel_entry = {",
                 f"        .profile = {_kernel_entry_profile_expr(info.kernel_entry.profile)},",
+                "      },",
+                "      .code_padding = {",
+                f"        .alignment = UINT32_C({info.code_padding.alignment}),",
+                f"        .trailing_bytes = UINT32_C({info.code_padding.trailing_bytes}),",
+                f"        .instruction_word = UINT32_C(0x{info.code_padding.instruction_word:08x}),",
                 "      },",
                 "      .instructions = {",
                 f"        .base_constraints = {_instruction_constraint_bits_expr(info.instructions.base_constraints)},",

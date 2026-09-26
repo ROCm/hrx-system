@@ -628,6 +628,18 @@ typedef struct loom_amdgpu_processor_kernel_entry_info_t {
   loom_amdgpu_kernel_entry_profile_t profile;
 } loom_amdgpu_processor_kernel_entry_info_t;
 
+// Terminal executable-section storage required by instruction prefetch.
+// The writer first aligns the end of all kernel bodies, then appends the tail.
+// Both regions contain complete padding words and are outside entry symbols.
+typedef struct loom_amdgpu_processor_code_padding_info_t {
+  // Power-of-two byte alignment of the final instruction end, at least four.
+  uint32_t alignment;
+  // Additional byte length after alignment, divisible by four.
+  uint32_t trailing_bytes;
+  // Native instruction word repeated through the alignment and tail regions.
+  uint32_t instruction_word;
+} loom_amdgpu_processor_code_padding_info_t;
+
 typedef struct loom_amdgpu_processor_instruction_info_t {
   // Constraints active for the processor's same-named base target.
   loom_amdgpu_instruction_constraint_bits_t base_constraints;
@@ -665,6 +677,8 @@ typedef struct loom_amdgpu_processor_properties_t {
   loom_amdgpu_processor_kernel_descriptor_info_t kernel_descriptor;
   // Hardware kernel-entry behavior selected for this processor.
   loom_amdgpu_processor_kernel_entry_info_t kernel_entry;
+  // Executable-section terminal padding selected for this processor.
+  loom_amdgpu_processor_code_padding_info_t code_padding;
   // Instruction constraints active for the processor's base target.
   loom_amdgpu_processor_instruction_info_t instructions;
   // Instruction and scheduling feature profiles for this processor.

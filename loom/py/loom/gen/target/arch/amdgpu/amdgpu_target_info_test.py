@@ -33,6 +33,7 @@ from loom.target.arch.amdgpu.target_info import (
     AmdgpuDescriptorSetIsaInfo,
     AmdgpuDescriptorSetVectorMemoryInfo,
     AmdgpuKernelDescriptorVgprGranules,
+    AmdgpuProcessorCodePaddingInfo,
     AmdgpuProcessorKernelDescriptorInfo,
     processor_info,
 )
@@ -143,6 +144,13 @@ def test_target_info_table_source_is_data_only() -> None:
     assert ".introduction_version = UINT16_C(0)," in source
     assert ".kernel_descriptor = {" in source
     assert ".kernel_entry = {" in source
+    assert ".code_padding = {" in source
+    assert ".alignment = UINT32_C(64)," in source
+    assert ".trailing_bytes = UINT32_C(1024)," in source
+    assert ".instruction_word = UINT32_C(0xbf800000)," in source
+    assert ".alignment = UINT32_C(128)," in source
+    assert ".trailing_bytes = UINT32_C(384)," in source
+    assert ".instruction_word = UINT32_C(0xbf9f0000)," in source
     assert ".instructions = {" in source
     assert (".lds_bank_service_model_set_ordinal = LOOM_AMDGPU_LDS_BANK_SERVICE_MODEL_SET_ORDINAL_NONE,") in source
     assert "loom_amdgpu_target_info_target_infos[]" in source
@@ -320,6 +328,23 @@ def test_initial_vmem_replay_entry_profile_covers_required_processors() -> None:
     for processor_name in ("gfx1250", "gfx1251", "gfx12-5-generic"):
         assert processors[processor_name].kernel_entry.profile == AMDGPU_KERNEL_ENTRY_PROFILE_INITIAL_VMEM_REPLAY
     assert processors["gfx1200"].kernel_entry.profile != AMDGPU_KERNEL_ENTRY_PROFILE_INITIAL_VMEM_REPLAY
+
+
+def test_code_padding_rows_reject_invalid_storage_shapes() -> None:
+    for padding, message in (
+        (AmdgpuProcessorCodePaddingInfo(0, 1024, 0xBF800000), "alignment"),
+        (AmdgpuProcessorCodePaddingInfo(2, 1024, 0xBF800000), "alignment"),
+        (AmdgpuProcessorCodePaddingInfo(12, 1024, 0xBF800000), "alignment"),
+        (AmdgpuProcessorCodePaddingInfo(1 << 32, 1024, 0xBF800000), "alignment"),
+        (AmdgpuProcessorCodePaddingInfo(64, -4, 0xBF800000), "trailing bytes"),
+        (AmdgpuProcessorCodePaddingInfo(64, 3, 0xBF800000), "trailing bytes"),
+        (AmdgpuProcessorCodePaddingInfo(64, 1 << 32, 0xBF800000), "trailing bytes"),
+        (AmdgpuProcessorCodePaddingInfo(64, 1024, -1), "instruction word"),
+        (AmdgpuProcessorCodePaddingInfo(64, 1024, 1 << 32), "instruction word"),
+    ):
+        processor = processor_info("gfx-test", 0x001, code_padding=padding)
+        with _raises_value_error("code padding " + message):
+            amdgpu_target_info._validate_processors((processor,), (_descriptor_set_info(),))
 
 
 def test_target_info_flag_expressions_reject_unknown_bits() -> None:

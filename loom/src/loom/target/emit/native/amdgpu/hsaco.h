@@ -38,7 +38,8 @@ typedef struct loom_amdgpu_hsaco_kernel_t {
   loom_amdgpu_metadata_kernel_t metadata;
   // Descriptor-only ABI controls that are not present in metadata.
   loom_amdgpu_hsaco_kernel_descriptor_options_t descriptor_options;
-  // Encoded native instructions for the kernel entry symbol.
+  // Encoded native instructions for the kernel entry symbol, in whole DWORDs.
+  // The writer adds target-specific prefetch storage outside this symbol.
   iree_const_byte_span_t text;
   // Text literal patches resolved after final code-object layout is known.
   const loom_amdgpu_hsaco_text_fixup_t* text_fixups;
@@ -94,6 +95,10 @@ typedef struct loom_amdgpu_hsaco_file_t {
 // streaming. The arena must remain live until this call returns and can be
 // reset immediately after. The emitted object is self-contained and does not
 // depend on LLVM, LLD, or HAL reader code.
+//
+// Terminal instruction-prefetch padding is part of the executable section and
+// its PT_LOAD extent. It is emitted once after all kernel bodies and does not
+// alter entry symbol sizes, descriptor entry offsets, or body-relative fixups.
 iree_status_t loom_amdgpu_hsaco_write_file(
     const loom_amdgpu_hsaco_file_t* file, iree_io_stream_t* stream,
     iree_arena_allocator_t* scratch_arena);
