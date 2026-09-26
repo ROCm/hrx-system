@@ -26,6 +26,16 @@ typedef struct loom_vector_packet_policy_t {
   uint16_t maximum_unpacketized_bit_count;
 } loom_vector_packet_policy_t;
 
+// Packetizes a rank-one table lookup over the common lane interval supported
+// by both its index and result element types. The table remains one captured
+// SSA value. Existing index values supply static slices while decomposable
+// index producers stream packet by packet. Returns false through
+// |out_rewritten| when neither carrier needs splitting or the packet plan
+// cannot be materialized within the static expansion bound.
+iree_status_t loom_vector_packet_legalize_table_lookup(
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    const loom_vector_packet_policy_t* policy, bool* out_rewritten);
+
 // Packetizes a dense vector load into target-native widths and concatenates
 // the packets into the original logical vector. Returns false through
 // |out_rewritten| when the access or policy does not admit an exact split.

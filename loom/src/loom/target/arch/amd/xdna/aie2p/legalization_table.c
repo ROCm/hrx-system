@@ -90,9 +90,23 @@ static bool loom_aie2p_table_lookup_has_vector_carrier(loom_type_t type,
          count <= 512 / bit_count;
 }
 
+static bool loom_aie2p_table_lookup_has_packet_result_carriers(loom_type_t type,
+                                                               uint64_t count) {
+  const loom_scalar_type_t element_type = loom_type_element_type(type);
+  const uint32_t bit_count = loom_scalar_type_bitwidth(element_type);
+  if ((bit_count != 8 && bit_count != 16 && bit_count != 32) || count == 0 ||
+      count > 1024 / bit_count) {
+    return false;
+  }
+  // F32x32 uses the accumulator file, while each packed selection result uses
+  // an ordinary X carrier. Their representation boundary needs an explicit
+  // conversion instead of an ordinary vector concat.
+  return element_type != LOOM_SCALAR_TYPE_F32 || count != 32;
+}
+
 iree_status_t loom_aie2p_table_lookup_rewrite(
     loom_target_legalization_context_t* context, loom_op_t* op,
-    bool* out_rewritten) {
+    const loom_vector_packet_policy_t* packet_policy, bool* out_rewritten) {
   *out_rewritten = false;
   const loom_value_id_t table = loom_vector_table_lookup_table(op);
   const loom_value_id_t indices = loom_vector_table_lookup_indices(op);
@@ -105,8 +119,22 @@ iree_status_t loom_aie2p_table_lookup_rewrite(
   uint64_t result_count = 0;
   if (!loom_type_static_element_count(table_type, &table_count) ||
       !loom_type_static_element_count(result_type, &result_count) ||
-      !loom_aie2p_table_lookup_has_vector_carrier(table_type, table_count) ||
-      !loom_aie2p_table_lookup_has_vector_carrier(result_type, result_count) ||
+      !loom_aie2p_table_lookup_has_vector_carrier(table_type, table_count)) {
+    return iree_ok_status();
+  }
+  const uint32_t index_bit_count =
+      loom_scalar_type_bitwidth(loom_type_element_type(index_type));
+  if (loom_aie2p_table_lookup_has_packet_result_carriers(result_type,
+                                                         result_count) &&
+      (index_bit_count == 8 || index_bit_count == 16 ||
+       index_bit_count == 32)) {
+    IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_table_lookup(
+        context, op, packet_policy, out_rewritten));
+    if (*out_rewritten) {
+      return iree_ok_status();
+    }
+  }
+  if (!loom_aie2p_table_lookup_has_vector_carrier(result_type, result_count) ||
       !loom_aie2p_table_lookup_has_vector_carrier(index_type, result_count)) {
     return iree_ok_status();
   }
@@ -140,8 +168,6 @@ iree_status_t loom_aie2p_table_lookup_rewrite(
     span *= 2;
     ++levels;
   }
-  const uint32_t index_bit_count =
-      loom_scalar_type_bitwidth(loom_type_element_type(index_type));
   // Each index bit needs a constant, splat, bitwise AND, and comparison.
   // Halfword and word comparisons also complete their partial predicate.
   const uint32_t selector_cost = index_bit_count == 8 ? 4 : 5;

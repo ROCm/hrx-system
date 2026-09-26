@@ -91,8 +91,8 @@ static iree_status_t loom_aie2p_legalize_table_lookup(
   }
 
   bool rewritten = false;
-  IREE_RETURN_IF_ERROR(
-      loom_aie2p_table_lookup_rewrite(context, op, &rewritten));
+  IREE_RETURN_IF_ERROR(loom_aie2p_table_lookup_rewrite(
+      context, op, &kAie2pVectorPacketPolicy, &rewritten));
   if (!rewritten) {
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_rewrite_op(
         context->pass, context->rewriter, op, &rewritten));
