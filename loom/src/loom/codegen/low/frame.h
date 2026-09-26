@@ -103,6 +103,8 @@ typedef struct loom_low_emission_frame_t {
   uint64_t materialized_spill_storage_count;
   // Cumulative materialized spill storage byte size.
   uint64_t materialized_spill_storage_bytes;
+  // Strongest byte alignment required by materialized spill storage.
+  uint64_t materialized_spill_storage_minimum_alignment;
   // Cumulative low.spill stores materialized while reaching this frame.
   uint64_t materialized_spill_store_count;
   // Cumulative materialized low.spill store byte traffic.

@@ -109,6 +109,8 @@ typedef struct loom_low_allocation_materialization_result_t {
   uint32_t reload_count;
   // Byte size of low.storage.reserve ops created from spill plans.
   uint64_t storage_bytes;
+  // Strongest byte alignment required by the created spill storage.
+  uint64_t storage_minimum_alignment;
   // Byte traffic from low.spill stores inserted.
   uint64_t spill_bytes;
   // Byte traffic from low.reload ops inserted.

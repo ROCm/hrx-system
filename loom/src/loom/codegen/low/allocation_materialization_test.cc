@@ -156,7 +156,7 @@ low.func.def target<test.low.core>(@test_target) @stale_slice_plan(%wide: reg<te
           /*.slot_index=*/0,
           /*.slot_space=*/LOOM_LOW_SPILL_SLOT_SPACE_PRIVATE,
           /*.byte_size=*/16,
-          /*.byte_alignment=*/4,
+          /*.byte_alignment=*/16,
           /*.store_count=*/1,
           /*.reload_count=*/1,
       },
@@ -191,6 +191,7 @@ low.func.def target<test.low.core>(@test_target) @stale_slice_plan(%wide: reg<te
   EXPECT_EQ(result.error_count, 0u);
   EXPECT_EQ(result.storage_count, 2u);
   EXPECT_EQ(result.storage_bytes, 20u);
+  EXPECT_EQ(result.storage_minimum_alignment, 16u);
   EXPECT_EQ(result.spill_count, 1u);
   EXPECT_EQ(result.spill_bytes, 16u);
   EXPECT_EQ(result.reload_count, 1u);
