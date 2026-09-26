@@ -40,6 +40,8 @@ typedef struct loom_low_allocation_loop_edge_eviction_t {
 typedef struct loom_low_allocation_loop_edge_relocation_state_t {
   // Caller-provided immutable and mutable allocation state.
   const loom_low_allocation_loop_edge_relocation_context_t* context;
+  // Header-local scratch reset after each relocation attempt.
+  iree_arena_allocator_t* scratch_arena;
   // Assignment lookup over context assignments.
   loom_low_allocation_assignment_map_t assignment_map;
   // Reusable path-sensitive consumption query for the function body.
@@ -546,7 +548,7 @@ loom_low_allocation_loop_edge_relocation_candidate_index_initialize(
   }
   loom_low_allocation_loop_edge_storage_unit_t* units = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      context->arena, unit_count, sizeof(*units), (void**)&units));
+      state->scratch_arena, unit_count, sizeof(*units), (void**)&units));
   iree_host_size_t unit_index = 0;
   for (iree_host_size_t i = 0; i < candidate_count; ++i) {
     const uint32_t candidate_unit_count =
@@ -627,7 +629,7 @@ loom_low_allocation_loop_edge_relocation_assignment_index_initialize(
 
   loom_low_allocation_loop_edge_storage_unit_t* units = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      context->arena, unit_count, sizeof(*units), (void**)&units));
+      state->scratch_arena, unit_count, sizeof(*units), (void**)&units));
   iree_host_size_t unit_index = 0;
   for (iree_host_size_t i = 0; i < context->assignment_count; ++i) {
     const loom_low_allocation_assignment_t* assignment =
@@ -649,8 +651,8 @@ loom_low_allocation_loop_edge_relocation_assignment_index_initialize(
 
   uint32_t* seen_generations = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      context->arena, context->assignment_count, sizeof(*seen_generations),
-      (void**)&seen_generations));
+      state->scratch_arena, context->assignment_count,
+      sizeof(*seen_generations), (void**)&seen_generations));
   memset(seen_generations, 0,
          context->assignment_count * sizeof(*seen_generations));
   *out_index = (loom_low_allocation_loop_edge_assignment_index_t){
@@ -925,6 +927,7 @@ static iree_status_t loom_low_allocation_loop_edge_relocation_prepare_eviction(
 static iree_status_t
 loom_low_allocation_loop_edge_relocation_initialize_eviction_groups(
     const loom_low_allocation_loop_edge_relocation_context_t* context,
+    iree_arena_allocator_t* scratch_arena,
     const loom_low_allocation_loop_edge_eviction_t* evictions,
     iree_host_size_t eviction_count,
     loom_low_allocation_loop_edge_storage_unit_t** out_colors,
@@ -939,7 +942,7 @@ loom_low_allocation_loop_edge_relocation_initialize_eviction_groups(
 
   loom_low_allocation_loop_edge_storage_unit_t* colors = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      context->arena, eviction_count, sizeof(*colors), (void**)&colors));
+      scratch_arena, eviction_count, sizeof(*colors), (void**)&colors));
   for (iree_host_size_t i = 0; i < eviction_count; ++i) {
     const loom_low_allocation_assignment_t* assignment =
         &evictions[i].assignment;
@@ -954,7 +957,7 @@ loom_low_allocation_loop_edge_relocation_initialize_eviction_groups(
 
   loom_low_allocation_loop_edge_eviction_group_t* groups = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      context->arena, eviction_count, sizeof(*groups), (void**)&groups));
+      scratch_arena, eviction_count, sizeof(*groups), (void**)&groups));
   memset(groups, 0, eviction_count * sizeof(*groups));
   for (iree_host_size_t group_start = 0; group_start < eviction_count;) {
     iree_host_size_t group_end = group_start + 1;
@@ -1236,8 +1239,8 @@ static iree_status_t loom_low_allocation_loop_edge_relocation_try_full_group(
   }
   uint8_t* conflict_assignments = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      context->arena, context->assignment_count, sizeof(*conflict_assignments),
-      (void**)&conflict_assignments));
+      state->scratch_arena, context->assignment_count,
+      sizeof(*conflict_assignments), (void**)&conflict_assignments));
   memset(conflict_assignments, 0,
          context->assignment_count * sizeof(*conflict_assignments));
   iree_host_size_t conflict_count = 0;
@@ -1247,7 +1250,7 @@ static iree_status_t loom_low_allocation_loop_edge_relocation_try_full_group(
 
   uint32_t* vacancy_candidate_indices = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      context->arena, candidate_count, sizeof(*vacancy_candidate_indices),
+      state->scratch_arena, candidate_count, sizeof(*vacancy_candidate_indices),
       (void**)&vacancy_candidate_indices));
   iree_host_size_t vacancy_count = 0;
   for (iree_host_size_t i = 0; i < candidate_count; ++i) {
@@ -1277,7 +1280,7 @@ static iree_status_t loom_low_allocation_loop_edge_relocation_try_full_group(
   }
   loom_low_allocation_loop_edge_storage_unit_t* vacancy_units = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      context->arena, vacancy_unit_count, sizeof(*vacancy_units),
+      state->scratch_arena, vacancy_unit_count, sizeof(*vacancy_units),
       (void**)&vacancy_units));
   iree_host_size_t vacancy_unit_index = 0;
   for (iree_host_size_t i = 0; i < vacancy_count; ++i) {
@@ -1312,7 +1315,7 @@ static iree_status_t loom_low_allocation_loop_edge_relocation_try_full_group(
   loom_low_allocation_loop_edge_eviction_t* evictions = NULL;
   if (conflict_count != 0) {
     IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(context->arena, conflict_count,
+        iree_arena_allocate_array(state->scratch_arena, conflict_count,
                                   sizeof(*evictions), (void**)&evictions));
   }
   iree_host_size_t eviction_count = 0;
@@ -1336,15 +1339,15 @@ static iree_status_t loom_low_allocation_loop_edge_relocation_try_full_group(
   iree_host_size_t group_count = 0;
   IREE_RETURN_IF_ERROR(
       loom_low_allocation_loop_edge_relocation_initialize_eviction_groups(
-          context, evictions, eviction_count, &eviction_colors,
-          &eviction_groups, &group_count));
+          context, state->scratch_arena, evictions, eviction_count,
+          &eviction_colors, &eviction_groups, &group_count));
   if (group_count > vacancy_count) {
     return iree_ok_status();
   }
 
   uint8_t* eviction_ignored_assignments = NULL;
   IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(context->arena, context->assignment_count,
+      iree_arena_allocate_array(state->scratch_arena, context->assignment_count,
                                 sizeof(*eviction_ignored_assignments),
                                 (void**)&eviction_ignored_assignments));
   memset(eviction_ignored_assignments, 0,
@@ -1365,20 +1368,21 @@ static iree_status_t loom_low_allocation_loop_edge_relocation_try_full_group(
   uint32_t* unvisited_vacancy_generations = NULL;
   if (conflict_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        context->arena, vacancy_count, sizeof(*group_indices_by_vacancy),
+        state->scratch_arena, vacancy_count, sizeof(*group_indices_by_vacancy),
         (void**)&group_indices_by_vacancy));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        context->arena, conflict_count, sizeof(*assignments_by_eviction),
+        state->scratch_arena, conflict_count, sizeof(*assignments_by_eviction),
         (void**)&assignments_by_eviction));
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        context->arena, vacancy_count + 1, sizeof(*next_free_vacancy_indices),
-        (void**)&next_free_vacancy_indices));
     IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(context->arena, vacancy_count + 1,
+        iree_arena_allocate_array(state->scratch_arena, vacancy_count + 1,
+                                  sizeof(*next_free_vacancy_indices),
+                                  (void**)&next_free_vacancy_indices));
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(state->scratch_arena, vacancy_count + 1,
                                   sizeof(*next_unvisited_vacancy_indices),
                                   (void**)&next_unvisited_vacancy_indices));
     IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(context->arena, vacancy_count + 1,
+        iree_arena_allocate_array(state->scratch_arena, vacancy_count + 1,
                                   sizeof(*unvisited_vacancy_generations),
                                   (void**)&unvisited_vacancy_generations));
     memset(unvisited_vacancy_generations, 0,
@@ -1551,7 +1555,7 @@ static iree_status_t loom_low_allocation_loop_edge_relocation_try_header(
 
   loom_low_allocation_loop_edge_candidate_t* candidates = NULL;
   IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(state->context->arena, header->arg_count,
+      iree_arena_allocate_array(state->scratch_arena, header->arg_count,
                                 sizeof(*candidates), (void**)&candidates));
   iree_host_size_t candidate_count = 0;
   for (uint16_t i = 0; i < header->arg_count; ++i) {
@@ -1574,7 +1578,7 @@ static iree_status_t loom_low_allocation_loop_edge_relocation_try_header(
 
   uint8_t* ignored_assignments = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->context->arena, state->context->assignment_count,
+      state->scratch_arena, state->context->assignment_count,
       sizeof(*ignored_assignments), (void**)&ignored_assignments));
   memset(ignored_assignments, 0,
          state->context->assignment_count * sizeof(*ignored_assignments));
@@ -1609,12 +1613,12 @@ static iree_status_t loom_low_allocation_loop_edge_relocation_try_header(
 
   uint8_t* candidate_enabled = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->context->arena, candidate_count, sizeof(*candidate_enabled),
+      state->scratch_arena, candidate_count, sizeof(*candidate_enabled),
       (void**)&candidate_enabled));
   memset(candidate_enabled, 1, candidate_count * sizeof(*candidate_enabled));
   uint32_t* disabled_candidate_indices = NULL;
   IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(state->context->arena, candidate_count,
+      iree_arena_allocate_array(state->scratch_arena, candidate_count,
                                 sizeof(*disabled_candidate_indices),
                                 (void**)&disabled_candidate_indices));
   iree_host_size_t disabled_candidate_count = 0;
@@ -1633,7 +1637,7 @@ static iree_status_t loom_low_allocation_loop_edge_relocation_try_header(
   // product to discover the transitive closure.
   uint32_t* seen_candidate_generations = NULL;
   IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(state->context->arena, candidate_count,
+      iree_arena_allocate_array(state->scratch_arena, candidate_count,
                                 sizeof(*seen_candidate_generations),
                                 (void**)&seen_candidate_generations));
   memset(seen_candidate_generations, 0,
@@ -1672,8 +1676,11 @@ iree_status_t loom_low_allocation_loop_edge_relocate(
       context->cfg_graph->blocks == NULL || context->cfg_graph->malformed) {
     return iree_ok_status();
   }
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(context->arena->block_pool, &scratch_arena);
   loom_low_allocation_loop_edge_relocation_state_t state = {
       .context = context,
+      .scratch_arena = &scratch_arena,
       .assignment_map =
           {
               .module = context->module,
@@ -1688,26 +1695,31 @@ iree_status_t loom_low_allocation_loop_edge_relocate(
       context->module, context->body, context->cfg_graph, context->liveness,
       context->value_domain, context->arena, &state.consumption_query);
 
+  iree_status_t status = iree_ok_status();
   for (uint16_t header_index = 0;
-       header_index < context->cfg_graph->block_count; ++header_index) {
+       iree_status_is_ok(status) &&
+       header_index < context->cfg_graph->block_count;
+       ++header_index) {
     if (!loom_cfg_graph_block_is_reachable(context->cfg_graph, header_index)) {
       continue;
     }
     iree_host_size_t relocated_value_count = 0;
     iree_host_size_t recolored_value_count = 0;
-    IREE_RETURN_IF_ERROR(loom_low_allocation_loop_edge_relocation_try_header(
-        &state, header_index, &relocated_value_count, &recolored_value_count));
-    if (relocated_value_count == 0) {
+    status = loom_low_allocation_loop_edge_relocation_try_header(
+        &state, header_index, &relocated_value_count, &recolored_value_count);
+    iree_arena_reset(&scratch_arena);
+    if (!iree_status_is_ok(status) || relocated_value_count == 0) {
       continue;
     }
     out_result->relocated_value_count += relocated_value_count;
     out_result->recolored_value_count += recolored_value_count;
     ++out_result->relocated_header_count;
   }
-  if (out_result->relocated_value_count != 0) {
+  iree_arena_deinitialize(&scratch_arena);
+  if (iree_status_is_ok(status) && out_result->relocated_value_count != 0) {
     loom_low_allocation_target_constraints_rebuild_assignment_location_ends(
         context->target_constraints, context->assignments,
         context->assignment_count);
   }
-  return iree_ok_status();
+  return status;
 }
