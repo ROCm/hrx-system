@@ -7,7 +7,7 @@
 load("//build_tools/amdgpu:cts.bzl", "iree_amdgpu_hal_cts_testdata")
 load("//build_tools/amdgpu:selectors.bzl", "iree_amdgpu_target_selectors_flag")
 load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
-load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_binary", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
@@ -867,6 +867,29 @@ iree_runtime_cc_benchmark(
         "//runtime/src/iree/hal/drivers/amdgpu/target:selection",
         "//runtime/src/iree/hal/drivers/amdgpu/util:benchmark_flags",
         "//runtime/src/iree/hal/drivers/amdgpu/util:benchmark_profile",
+    ],
+)
+
+# A standalone timeline tool: preparation selects an optimized kernel from the
+# caller's ROCm installation. No generated code objects are checked in.
+iree_runtime_cc_binary(
+    name = "sdma_pipeline_benchmark",
+    srcs = ["sdma_pipeline_benchmark.cc"],
+    tags = ["manual"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:libhsa",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:packet",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:pm4_dispatch",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:pm4_program",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:queue_primitives",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:sdma_emitter",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:sdma_program",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:sdma_queue",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:sdma_ring",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:topology",
+        "//runtime/src/iree/hal/drivers/amdgpu/util:vmem",
     ],
 )
 

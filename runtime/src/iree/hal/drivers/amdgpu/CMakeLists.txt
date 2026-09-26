@@ -1142,6 +1142,29 @@ iree_cc_test(
 endif()
 
 if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_binary(
+  NAME
+    sdma_pipeline_benchmark
+  SRCS
+    "sdma_pipeline_benchmark.cc"
+  DEPS
+    iree::base
+    iree::base::tooling::flags
+    iree::hal::drivers::amdgpu::util::libhsa
+    iree::hal::drivers::amdgpu::util::packet
+    iree::hal::drivers::amdgpu::util::pm4_dispatch
+    iree::hal::drivers::amdgpu::util::pm4_program
+    iree::hal::drivers::amdgpu::util::queue_primitives
+    iree::hal::drivers::amdgpu::util::sdma_emitter
+    iree::hal::drivers::amdgpu::util::sdma_program
+    iree::hal::drivers::amdgpu::util::sdma_queue
+    iree::hal::drivers::amdgpu::util::sdma_ring
+    iree::hal::drivers::amdgpu::util::topology
+    iree::hal::drivers::amdgpu::util::vmem
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
 iree_cc_test(
   NAME
     system_event_test

@@ -1277,6 +1277,190 @@ iree_cc_test(
 )
 endif()
 
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
+    sdma_emitter
+  HDRS
+    "sdma_emitter.h"
+  DEPS
+
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    sdma_emitter_test
+  SRCS
+    "sdma_emitter_test.cc"
+  DEPS
+    ::sdma_emitter
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
+    sdma_capabilities
+  HDRS
+    "sdma_capabilities.h"
+  SRCS
+    "sdma_capabilities.c"
+  DEPS
+    iree::base
+    iree::hal::drivers::amdgpu::target::identity
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
+    sdma_ring
+  HDRS
+    "sdma_ring.h"
+  SRCS
+    "sdma_ring.c"
+  DEPS
+    iree::base
+    iree::base::internal
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
+    sdma_program
+  HDRS
+    "sdma_program.h"
+  SRCS
+    "sdma_program.c"
+  DEPS
+    ::sdma_capabilities
+    ::sdma_emitter
+    iree::base
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_library(
+  NAME
+    sdma_queue
+  HDRS
+    "sdma_queue.h"
+  SRCS
+    "sdma_queue.c"
+  DEPS
+    ::libhsa
+    ::sdma_capabilities
+    ::sdma_ring
+    iree::base
+    iree::hal::drivers::amdgpu::target::identity
+  PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    sdma_ring_test
+  SRCS
+    "sdma_ring_test.cc"
+  DEPS
+    ::sdma_ring
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    sdma_program_test
+  SRCS
+    "sdma_program_test.cc"
+  DEPS
+    ::sdma_capabilities
+    ::sdma_program
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    sdma_queue_test
+  SRCS
+    "sdma_queue_test.cc"
+  DEPS
+    ::libhsa
+    ::sdma_queue
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+iree_cc_test(
+  NAME
+    sdma_queue_live_test
+  SRCS
+    "sdma_queue_live_test.cc"
+  DEPS
+    ::libhsa
+    ::sdma_capabilities
+    ::sdma_emitter
+    ::sdma_program
+    ::sdma_queue
+    ::sdma_ring
+    iree::base
+    iree::base::internal
+    iree::hal::drivers::amdgpu::target::identity
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    iree-hal-drivers-amdgpu-tests
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
 
 # Enable statically linking against ROCR-Runtime.
