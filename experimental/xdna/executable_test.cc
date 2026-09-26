@@ -95,6 +95,16 @@ class XdnaExecutableTest : public ::testing::Test {
     binding_.device_address = UINT64_C(0xABCD12340000);
   }
 
+  void ReplaceImage(const ImageFixture& fixture) {
+    auto source = MakeOwnedByteSequence(fixture.Build());
+    const auto target = MakeImageTarget();
+    iree_hal_amd_xdna_image_t* image = nullptr;
+    IREE_ASSERT_OK(iree_hal_amd_xdna_image_create(
+        source.get(), &target, iree_allocator_system(), &image));
+    iree_hal_amd_xdna_image_destroy(image_);
+    image_ = image;
+  }
+
   iree_status_t Load() {
     return iree_hal_amd_xdna_executable_load(image_, 0, storage_.size(),
                                              storage_.data());
@@ -151,6 +161,27 @@ TEST_F(XdnaExecutableTest, RebindsWithoutReloadingOrChangingOtherStorage) {
     EXPECT_EQ(iree_unaligned_load_le_u32(bytes_[0].data() + 12),
               UINT32_C(0xA5A50000) | (uint32_t)((address + 4) >> 32));
   }
+}
+
+TEST_F(XdnaExecutableTest, PreservesAndIgnoresUnusedBindingSlots) {
+  ImageFixture fixture;
+  fixture.bindings.insert(fixture.bindings.begin(),
+                          iree_xdna_elf_binding_record_t{});
+  fixture.entries[0].binding_count = 2;
+  fixture.relocations[1].source_ordinal = 1;
+  ASSERT_NO_FATAL_FAILURE(ReplaceImage(fixture));
+
+  IREE_ASSERT_OK(Load());
+  std::array<iree_hal_amd_xdna_executable_binding_t, 2> bindings = {};
+  bindings[1] = binding_;
+  IREE_ASSERT_OK(iree_hal_amd_xdna_executable_bind(
+      image_, 0, storage_.size(), storage_.data(), bindings.size(),
+      bindings.data()));
+  const uint64_t address = binding_.device_address + 4;
+  EXPECT_EQ(iree_unaligned_load_le_u32(bytes_[0].data() + 8),
+            (uint32_t)address | 1u);
+  EXPECT_EQ(iree_unaligned_load_le_u32(bytes_[0].data() + 12),
+            UINT32_C(0xA5A50000) | (uint32_t)(address >> 32));
 }
 
 TEST_F(XdnaExecutableTest, ResolvesIndependentInvocationWithContinuation) {

@@ -271,6 +271,9 @@ iree_status_t iree_hal_amd_xdna_executable_bind(
   for (uint32_t i = 0; i < binding_count; ++i) {
     const iree_xdna_elf_binding_record_t contract =
         iree_hal_amd_xdna_image_tables_binding(tables, entry.first_binding + i);
+    if (contract.kind == IREE_XDNA_ELF_BINDING_KIND_NONE) {
+      continue;
+    }
     IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_executable_validate_binding(
         i, &contract, &bindings[i]));
   }
