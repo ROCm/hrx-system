@@ -177,7 +177,7 @@ typedef struct loom_aie2p_array_channel_t {
   uint32_t capacity;
   // Number of ordered records transferred per activation.
   uint32_t record_count;
-  // Byte length of one statically shaped tile record.
+  // Byte length of one topology-admitted tile record.
   uint32_t record_byte_length;
   // Transfer-length field value admitted for DMA-backed transports. Neighbor
   // memory transport does not consume this value.

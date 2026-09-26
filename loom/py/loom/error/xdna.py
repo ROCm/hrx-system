@@ -388,6 +388,63 @@ ERR_XDNA_022 = ErrorDef(
     ),
 )
 
+# ERR_XDNA_023: An active binding view has invalid record geometry.
+ERR_XDNA_023 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=23,
+    severity=Severity.ERROR,
+    summary="Active binding view has invalid record geometry.",
+    message=(
+        "AIE2P binding view {view_type} lane {lane} of {lane_count} cannot "
+        "select records from {source_type}: {reason}"
+    ),
+    params=(
+        ErrorParam("view_type", ParamKind.TYPE),
+        ErrorParam("lane", ParamKind.U32),
+        ErrorParam("lane_count", ParamKind.U32),
+        ErrorParam("source_type", ParamKind.TYPE),
+        ErrorParam("reason", ParamKind.STRING),
+    ),
+    fix_hint="Make the active view select a representable suffix of one binding tile.",
+)
+
+# ERR_XDNA_024: A logical channel record has no representable byte footprint.
+ERR_XDNA_024 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=24,
+    severity=Severity.ERROR,
+    summary="Logical channel record has no representable byte footprint.",
+    message=(
+        "AIE2P channel {channel} record type {record_type} has no representable "
+        "byte footprint: {reason}"
+    ),
+    params=(
+        ErrorParam("channel", ParamKind.U32),
+        ErrorParam("record_type", ParamKind.TYPE),
+        ErrorParam("reason", ParamKind.STRING),
+    ),
+    fix_hint="Use a non-empty exact tile shape whose whole-byte size fits in u32.",
+)
+
+# ERR_XDNA_025: A logical channel ring violates a required relationship.
+ERR_XDNA_025 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=25,
+    severity=Severity.ERROR,
+    summary="Logical channel ring has an invalid size relationship.",
+    message=(
+        "AIE2P channel {channel} has {quantity} {actual}; {relationship} is {required}"
+    ),
+    params=(
+        ErrorParam("channel", ParamKind.U32),
+        ErrorParam("quantity", ParamKind.STRING),
+        ErrorParam("actual", ParamKind.U32),
+        ErrorParam("relationship", ParamKind.STRING),
+        ErrorParam("required", ParamKind.U32),
+    ),
+    fix_hint="Make the channel ring match the stated topology relationship.",
+)
+
 ALL_XDNA_ERRORS = (
     ERR_XDNA_001,
     ERR_XDNA_002,
@@ -411,4 +468,7 @@ ALL_XDNA_ERRORS = (
     ERR_XDNA_020,
     ERR_XDNA_021,
     ERR_XDNA_022,
+    ERR_XDNA_023,
+    ERR_XDNA_024,
+    ERR_XDNA_025,
 )

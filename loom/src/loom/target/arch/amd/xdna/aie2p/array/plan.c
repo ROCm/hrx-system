@@ -165,26 +165,6 @@ static const loom_aie2p_array_leaf_t* loom_aie2p_array_find_leaf(
   return result;
 }
 
-static iree_status_t loom_aie2p_array_exact_u32(
-    const loom_aie2p_array_plan_builder_t* builder, loom_value_id_t value_id,
-    const char* purpose, uint32_t* out_value) {
-  loom_value_facts_t element_facts = loom_value_facts_unknown();
-  int64_t value = 0;
-  if (!loom_value_facts_query_all_equal_element(
-          &builder->facts.context,
-          loom_value_fact_table_lookup(&builder->facts, value_id),
-          &element_facts) ||
-      !loom_value_facts_as_exact_i64(element_facts, &value) || value < 0 ||
-      value > UINT32_MAX) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AIE2P array %s must resolve to one exact non-negative u32 fact",
-        purpose);
-  }
-  *out_value = (uint32_t)value;
-  return iree_ok_status();
-}
-
 static uint64_t loom_aie2p_array_constant(
     const loom_aie2p_array_plan_builder_t* builder, loom_value_id_t value_id) {
   // Closed array vocabulary admits only constant.u32/u64 as scalar producers.
@@ -197,62 +177,6 @@ static uint64_t loom_aie2p_array_constant(
   IREE_ASSERT(found, "admitted array constants carry uniform integer facts");
   (void)found;
   return (uint64_t)uniform.element.range_lo;
-}
-
-static iree_status_t loom_aie2p_array_dimension_value(
-    const loom_aie2p_array_plan_builder_t* builder, loom_type_t type,
-    iree_host_size_t dimension, uint32_t* out_value) {
-  if (!loom_type_dim_is_dynamic_at(type, dimension)) {
-    const int64_t value = loom_type_dim_static_size_at(type, dimension);
-    if (value < 0 || value > UINT32_MAX) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "AIE2P channel tile dimension is out of range");
-    }
-    *out_value = (uint32_t)value;
-    return iree_ok_status();
-  }
-  return loom_aie2p_array_exact_u32(builder,
-                                    loom_type_dim_value_id_at(type, dimension),
-                                    "channel tile dimension", out_value);
-}
-
-static iree_status_t loom_aie2p_array_element_count(
-    const loom_aie2p_array_plan_builder_t* builder, loom_type_t type,
-    uint64_t* out_count) {
-  uint64_t count = 1;
-  for (iree_host_size_t i = 0; i < loom_type_rank(type); ++i) {
-    uint32_t dimension = 0;
-    IREE_RETURN_IF_ERROR(
-        loom_aie2p_array_dimension_value(builder, type, i, &dimension));
-    if (dimension == 0 ||
-        !iree_checked_mul_u64(count, (uint64_t)dimension, &count)) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "AIE2P channel tile must have a non-empty representable shape");
-    }
-  }
-  *out_count = count;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_aie2p_array_record_byte_length(
-    const loom_aie2p_array_plan_builder_t* builder, loom_type_t type,
-    uint32_t* out_byte_length) {
-  uint64_t element_count = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_aie2p_array_element_count(builder, type, &element_count));
-  const int32_t element_bit_width =
-      loom_scalar_type_bitwidth(loom_type_element_type(type));
-  uint64_t bit_length = 0;
-  if (!iree_checked_mul_u64(element_count, (uint64_t)element_bit_width,
-                            &bit_length) ||
-      (bit_length & 7u) != 0 || bit_length / 8u > UINT32_MAX) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AIE2P channel tile must have a representable whole-byte footprint");
-  }
-  *out_byte_length = (uint32_t)(bit_length / 8u);
-  return iree_ok_status();
 }
 
 static loom_type_t loom_aie2p_array_result_value_type(
@@ -593,7 +517,7 @@ static void loom_aie2p_array_extract_binding_view(
                                  (uint32_t)builder->endpoint_cursor++);
 }
 
-static iree_status_t loom_aie2p_array_extract_channel(
+static void loom_aie2p_array_extract_channel(
     loom_aie2p_array_plan_builder_t* builder, const loom_op_t* op) {
   const uint32_t channel_index = (uint32_t)builder->channel_cursor;
   loom_aie2p_array_channel_t* channel = &builder->channels[channel_index];
@@ -609,12 +533,8 @@ static iree_status_t loom_aie2p_array_extract_channel(
       (uint32_t)loom_aie2p_array_constant(builder, loom_op_operands(op)[2]);
   channel->record_count =
       (uint32_t)loom_aie2p_array_constant(builder, loom_op_operands(op)[3]);
-  const loom_type_t message_type =
-      loom_aie2p_array_result_value_type(builder->module, op);
-  IREE_RETURN_IF_ERROR(loom_aie2p_array_record_byte_length(
-      builder, message_type, &channel->record_byte_length));
+  channel->record_byte_length = 0;
   ++builder->channel_cursor;
-  return iree_ok_status();
 }
 
 static iree_status_t loom_aie2p_array_extract_location(
@@ -760,7 +680,7 @@ static iree_status_t loom_aie2p_array_extract_topology(
         break;
       }
       case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_CHANNEL: {
-        IREE_RETURN_IF_ERROR(loom_aie2p_array_extract_channel(builder, op));
+        loom_aie2p_array_extract_channel(builder, op);
         break;
       }
       case AIE2P_ARRAY_DESCRIPTOR_REF_ARRAY_CONSTRAIN_LOCATION: {
@@ -1604,10 +1524,6 @@ static iree_status_t loom_aie2p_array_plan_external_channel(
     channel->sender_dma_index = shim_dma_index;
   }
 
-  if (channel->capacity > INT8_MAX) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "AIE2P channel capacity exceeds lock range");
-  }
   uint32_t credit_lock_index = UINT32_MAX;
   if (owns_compute_dma) {
     IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_lock_pair(
@@ -1672,10 +1588,6 @@ static iree_status_t loom_aie2p_array_plan_neighbor_channel(
       /*sender_storage_owner=*/NULL, /*receiver_storage_owner=*/NULL));
   const loom_xdna_tile_coordinate_t owner =
       builder->workers[sender->owner_index].coordinate;
-  if (channel->capacity > INT8_MAX) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "AIE2P channel capacity exceeds lock range");
-  }
   uint32_t credit_lock_index = UINT32_MAX;
   IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_lock_pair(
       builder, channel_index, owner, LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_SEND,
@@ -1737,10 +1649,6 @@ static iree_status_t loom_aie2p_array_plan_routed_channel(
       builder, channel_index, sender, receiver, &sender_dma->coordinate,
       &receiver_dma->coordinate));
 
-  if (channel->capacity > INT8_MAX) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "AIE2P channel capacity exceeds lock range");
-  }
   uint32_t sender_credit_lock_index = UINT32_MAX;
   if (owns_sender_dma) {
     IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_lock_pair(

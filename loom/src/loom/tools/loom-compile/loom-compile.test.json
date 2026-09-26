@@ -162,6 +162,34 @@
       ]
     },
     {
+      "name": "rejects inconsistent AIE2P binding multicast before publication",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "--pipeline=none",
+          "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+          "--output={tmp}/binding-multicast-mismatch.xdna"
+        ],
+        "stdin": {
+          "text": "aie2p.target<array> @array_target {device_profile = \"amd.xdna.strix_halo.17f0_11\"}\n\naie2p.target<core> @core_target\n\nlow.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @binding_multicast_mismatch() asm {\n  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>\n  %one = constant.u32 1 : reg<aie2p.array.scalar : index>\n  %two = constant.u32 2 : reg<aie2p.array.scalar : index>\n  %group = group %two\n  %worker0 = worker %group, %zero, @consume\n  %worker1 = worker %group, %one, @consume\n  %input = binding 0, \"read\"\n  %sender = sender %input, 0 : reg<aie2p.array.sender : tile<1xi32>>\n  %receiver0 = receiver %worker0, 0 : reg<aie2p.array.receiver : tile<1xi32>>\n  %receiver1 = receiver %worker1, 0 : reg<aie2p.array.receiver : tile<1xi32>>\n  %channel0 = channel %sender, %receiver0, %one, %one : reg<aie2p.array.channel : tile<1xi32>>\n  %channel1 = channel %sender, %receiver1, %two, %two : reg<aie2p.array.channel : tile<1xi32>>\n  constrain.location %worker0, %zero, %two\n  constrain.location %worker1, %one, %two\n  return\n}\n\nlow.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @consume() asm {\n  return\n}\n"
+        }
+      },
+      "exit": 1,
+      "stderr": {
+        "contains": [
+          "XDNA/025",
+          "AIE2P channel 1 has record count 2; the shared binding multicast record count is 1"
+        ],
+        "not_contains": ["INVALID_ARGUMENT", "stack:"]
+      },
+      "files": [
+        {
+          "path": "{tmp}/binding-multicast-mismatch.xdna",
+          "exists": false
+        }
+      ]
+    },
+    {
       "name": "prints agent documentation",
       "run": {
         "tool": "loom-compile",

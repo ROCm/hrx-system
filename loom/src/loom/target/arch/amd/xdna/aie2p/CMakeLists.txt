@@ -541,6 +541,8 @@ loom_check_test_suite(
     loom_check_file_test
   SRCS
     "test/array_plan/bank_spans.loom-test"
+    "test/array_plan/binding_view_admission.loom-test"
+    "test/array_plan/channel_shape_admission.loom-test"
     "test/array_plan/composed_folds.loom-test"
     "test/array_plan/dma_loopback.loom-test"
     "test/array_plan/dma_record_limits.loom-test"
