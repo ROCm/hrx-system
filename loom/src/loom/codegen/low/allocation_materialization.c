@@ -193,6 +193,7 @@ static iree_status_t loom_low_allocation_emit_unsupported_spill_storage_space(
                              supported_storage_space_count),
   };
   loom_diagnostic_emission_t emission = {
+      .module = table->module,
       .op = loom_low_diagnostic_value_origin_op(table->module, plan->value_id,
                                                 table->function_op),
       .error = LOOM_ERR_BACKEND_019,

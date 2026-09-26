@@ -21,6 +21,10 @@
 extern "C" {
 #endif
 
+typedef struct loom_low_memory_access_map_t loom_low_memory_access_map_t;
+typedef struct loom_target_facts_t loom_target_facts_t;
+typedef struct loom_aie2p_array_leaf_t loom_aie2p_array_leaf_t;
+
 // Access permitted through one external array-program binding.
 typedef enum loom_aie2p_array_binding_access_e {
   LOOM_AIE2P_ARRAY_BINDING_ACCESS_READ = 1,
@@ -98,6 +102,8 @@ typedef struct loom_aie2p_array_worker_t {
   uint32_t lane;
   // Core function executed by the worker.
   loom_symbol_ref_t entry;
+  // Source leaf selected for the worker entry during topology extraction.
+  const loom_aie2p_array_leaf_t* leaf;
   // Number of source records folded into one output, or zero when recordwise.
   uint32_t fold_record_count;
   // Callable output port carrying the folded result.
@@ -169,12 +175,18 @@ typedef struct loom_aie2p_array_channel_t {
 } loom_aie2p_array_channel_t;
 
 // Declared requirements associated with a worker entry symbol.
-typedef struct loom_aie2p_array_leaf_t {
+struct loom_aie2p_array_leaf_t {
   // Module-local core entry symbol.
   loom_symbol_ref_t entry;
+  // Source core function selected by entry.
+  const loom_op_t* function_op;
+  // Immutable invocation target facts selected at the source boundary.
+  const loom_target_facts_t* function_target_facts;
+  // Optional source memory proofs translated with the resident clone.
+  const loom_low_memory_access_map_t* memory_accesses;
   // Source imports and storage retained before resident worker construction.
   loom_low_function_requirements_t requirements;
-} loom_aie2p_array_leaf_t;
+};
 
 // Contiguous equal-width transfers between an output and private fold state.
 typedef struct loom_aie2p_array_fold_span_t {
@@ -211,8 +223,6 @@ typedef struct loom_aie2p_array_worker_plan_t {
   uint32_t worker_index;
   // Physical compute tile executing the worker.
   loom_xdna_tile_coordinate_t coordinate;
-  // Immutable source requirements used to assign ports and storage.
-  const loom_low_function_requirements_t* requirements;
   // First worker_ports row and worker_resource_ports entry for this worker.
   uint32_t first_port;
   // Number of contiguous ports, ordered by their first channel binding.

@@ -126,56 +126,56 @@ control-relocation index=1 record=2 word=1 binding=1 addend=0 alignment=4
 resident-program workers=1
 resident worker=0 entry=@temporal_fold_array$worker$0 tile=(0,2) code-bytes=364 resources=0 fixups=5
 
-low.func.def retain target<amd.xdna.aie2p.core>(@temporal_fold_core_target) @temporal_fold_array$worker$0() asm {
+low.func.def retain target<amd.xdna.aie2p.core> @temporal_fold_array$worker$0() asm {
   %acquire_delta = mov.short -1
   %release_delta = mov.short 1
   %fold_zero = mov.short 0
   %fold_record_count = mov.i32 4
   %fold_mode = mova.i32 60
-  %37 = acc.clear.f32x64
-  %58 = mov.local-address 458752
-  %59 = mov.local-address 491520
-  low.br ^_bb1(%58: reg<aie2p.ep>, %59: reg<aie2p.ep>)
-^_bb1(%29: reg<aie2p.ep>, %30: reg<aie2p.ep>):
+  %17 = acc.clear.f32x64
+  %38 = mov.local-address 458752
+  %39 = mov.local-address 491520
+  low.br ^_bb1(%38: reg<aie2p.ep>, %39: reg<aie2p.ep>)
+^_bb1(%9: reg<aie2p.ep>, %10: reg<aie2p.ep>):
   acq %acquire_delta, 50
-  low.br ^_bb2(%29: reg<aie2p.ep>, %30: reg<aie2p.ep>, %37: reg<aie2p.mbms x4>, %fold_record_count: reg<aie2p.er>, %release_delta: reg<aie2p.er>)
-^_bb2(%25: reg<aie2p.ep>, %27: reg<aie2p.ep>, %31: reg<aie2p.mbms x4>, %32: reg<aie2p.er>, %33: reg<aie2p.er>):
+  low.br ^_bb2(%9: reg<aie2p.ep>, %10: reg<aie2p.ep>, %17: reg<aie2p.mbms x4>, %fold_record_count: reg<aie2p.er>, %release_delta: reg<aie2p.er>)
+^_bb2(%5: reg<aie2p.ep>, %7: reg<aie2p.ep>, %11: reg<aie2p.mbms x4>, %12: reg<aie2p.er>, %13: reg<aie2p.er>):
   acq %acquire_delta, 49
-  %input = copy %25 : reg<aie2p.ep> -> reg<aie2p.ep>
-  %output = copy %27 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %input = copy %5 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %output = copy %7 : reg<aie2p.ep> -> reg<aie2p.ep>
   %value = lda %input, 0
   st %value, %output, 0
-  %39 = lda %27, 0
-  %40 = vbcst.32 %39
-  %41 = vmov.vector512.to.accumulator512 %40
-  %42 = concat(%41, %41, %41, %41) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %43 = nez %33
-  low.cond_br %43, ^_bb3, ^_bb4 : reg<aie2p.er>
+  %19 = lda %7, 0
+  %20 = vbcst.32 %19
+  %21 = vmov.vector512.to.accumulator512 %20
+  %22 = concat(%21, %21, %21, %21) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %23 = nez %13
+  low.cond_br %23, ^_bb3, ^_bb4 : reg<aie2p.er>
 ^_bb3:
-  low.br ^_bb5(%42: reg<aie2p.mbms x4>)
+  low.br ^_bb5(%22: reg<aie2p.mbms x4>)
 ^_bb4:
-  %44 = vadd.f32x64 %31, %42, %fold_mode
-  low.br ^_bb5(%44: reg<aie2p.mbms x4>)
-^_bb5(%38: reg<aie2p.mbms x4>):
+  %24 = vadd.f32x64 %11, %22, %fold_mode
+  low.br ^_bb5(%24: reg<aie2p.mbms x4>)
+^_bb5(%18: reg<aie2p.mbms x4>):
   rel %release_delta, 48
-  %45 = mov.address-to-scalar %25
-  %46 = mov.i32 16384
-  %47 = xor %45, %46
-  %48 = mov.scalar-to-address %47
-  %49 = sub %32, %release_delta
-  %50 = nez %49
-  low.cond_br %50, ^_bb6, ^_bb7 : reg<aie2p.er>
+  %25 = mov.address-to-scalar %5
+  %26 = mov.i32 16384
+  %27 = xor %25, %26
+  %28 = mov.scalar-to-address %27
+  %29 = sub %12, %release_delta
+  %30 = nez %29
+  low.cond_br %30, ^_bb6, ^_bb7 : reg<aie2p.er>
 ^_bb6:
-  low.br ^_bb2(%48: reg<aie2p.ep>, %27: reg<aie2p.ep>, %38: reg<aie2p.mbms x4>, %49: reg<aie2p.er>, %fold_zero: reg<aie2p.er>)
+  low.br ^_bb2(%28: reg<aie2p.ep>, %7: reg<aie2p.ep>, %18: reg<aie2p.mbms x4>, %29: reg<aie2p.er>, %fold_zero: reg<aie2p.er>)
 ^_bb7:
-  %51 = slice %38[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %52 = vmov.accumulator512.to.vector512 %51
-  %53 = vextract.32.imm %52, 0
-  st %53, %27, 0
+  %31 = slice %18[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %32 = vmov.accumulator512.to.vector512 %31
+  %33 = vextract.32.imm %32, 0
+  st %33, %7, 0
   rel %release_delta, 51
-  %54 = mov.address-to-scalar %27
-  %55 = mov.i32 16384
-  %56 = xor %54, %55
-  %57 = mov.scalar-to-address %56
-  low.br ^_bb1(%48: reg<aie2p.ep>, %57: reg<aie2p.ep>)
+  %34 = mov.address-to-scalar %7
+  %35 = mov.i32 16384
+  %36 = xor %34, %35
+  %37 = mov.scalar-to-address %36
+  low.br ^_bb1(%28: reg<aie2p.ep>, %37: reg<aie2p.ep>)
 }

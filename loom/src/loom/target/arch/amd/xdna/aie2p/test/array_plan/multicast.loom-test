@@ -124,46 +124,46 @@ resident-program workers=2
 resident worker=0 entry=@multicast_array$worker$0 tile=(0,2) code-bytes=132 resources=0 fixups=1
 resident worker=1 entry=@multicast_array$worker$1 tile=(1,2) code-bytes=144 resources=0 fixups=1
 
-low.func.def retain target<amd.xdna.aie2p.core>(@multicast_core_target) @multicast_array$worker$0() asm {
+low.func.def retain target<amd.xdna.aie2p.core> @multicast_array$worker$0() asm {
   %acquire_delta = mov.short -1
   %release_delta = mov.short 1
-  %40 = mov.local-address 475136
-  %41 = mov.local-address 458752
-  low.br ^_bb1(%40: reg<aie2p.ep>, %41: reg<aie2p.ep>)
-^_bb1(%36: reg<aie2p.ep>, %38: reg<aie2p.ep>):
+  %11 = mov.local-address 475136
+  %12 = mov.local-address 458752
+  low.br ^_bb1(%11: reg<aie2p.ep>, %12: reg<aie2p.ep>)
+^_bb1(%7: reg<aie2p.ep>, %9: reg<aie2p.ep>):
   acq %acquire_delta, 49
   acq %acquire_delta, 51
-  %input1 = copy %36 : reg<aie2p.ep> -> reg<aie2p.ep>
-  %input0 = copy %38 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %input1 = copy %7 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %input0 = copy %9 : reg<aie2p.ep> -> reg<aie2p.ep>
   %lhs = lda.u8 %input0, 0
   %rhs = lda.u8 %input1, 0
   %sum = add.rr %lhs, %rhs
   st.s8 %sum, %input0, 0
   rel %release_delta, 48
   rel %release_delta, 50
-  low.br ^_bb1(%36: reg<aie2p.ep>, %38: reg<aie2p.ep>)
+  low.br ^_bb1(%7: reg<aie2p.ep>, %9: reg<aie2p.ep>)
 }
 
-low.func.def retain target<amd.xdna.aie2p.core>(@multicast_core_target) @multicast_array$worker$1() asm {
+low.func.def retain target<amd.xdna.aie2p.core> @multicast_array$worker$1() asm {
   %acquire_delta = mov.short -1
   %release_delta = mov.short 1
-  %57 = mov.local-address 491520
-  %58 = mov.local-address 458752
-  low.br ^_bb1(%57: reg<aie2p.ep>, %58: reg<aie2p.ep>)
-^_bb1(%49: reg<aie2p.ep>, %51: reg<aie2p.ep>):
+  %28 = mov.local-address 491520
+  %29 = mov.local-address 458752
+  low.br ^_bb1(%28: reg<aie2p.ep>, %29: reg<aie2p.ep>)
+^_bb1(%20: reg<aie2p.ep>, %22: reg<aie2p.ep>):
   acq %acquire_delta, 49
   acq %acquire_delta, 51
-  %input1 = copy %49 : reg<aie2p.ep> -> reg<aie2p.ep>
-  %input0 = copy %51 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %input1 = copy %20 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %input0 = copy %22 : reg<aie2p.ep> -> reg<aie2p.ep>
   %lhs = lda.u8 %input0, 0
   %rhs = lda.u8 %input1, 0
   %sum = add.rr %lhs, %rhs
   st.s8 %sum, %input0, 0
   rel %release_delta, 48
   rel %release_delta, 50
-  %53 = mov.address-to-scalar %51
-  %54 = mov.i32 16384
-  %55 = xor %53, %54
-  %56 = mov.scalar-to-address %55
-  low.br ^_bb1(%49: reg<aie2p.ep>, %56: reg<aie2p.ep>)
+  %24 = mov.address-to-scalar %22
+  %25 = mov.i32 16384
+  %26 = xor %24, %25
+  %27 = mov.scalar-to-address %26
+  low.br ^_bb1(%20: reg<aie2p.ep>, %27: reg<aie2p.ep>)
 }

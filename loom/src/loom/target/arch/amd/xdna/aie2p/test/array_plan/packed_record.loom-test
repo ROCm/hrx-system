@@ -120,20 +120,20 @@ control-relocation index=2 record=4 word=1 binding=2 addend=0 alignment=4
 resident-program workers=1
 resident worker=0 entry=@canonical_q5_stream_array$worker$0 tile=(0,2) code-bytes=168 resources=0 fixups=1
 
-low.func.def retain target<amd.xdna.aie2p.core>(@canonical_q5_stream_core_target) @canonical_q5_stream_array$worker$0() asm {
+low.func.def retain target<amd.xdna.aie2p.core> @canonical_q5_stream_array$worker$0() asm {
   %acquire_delta = mov.short -1
   %release_delta = mov.short 1
-  %53 = mov.local-address 458752
-  %54 = mov.local-address 491520
-  %55 = mov.local-address 458944
-  low.br ^_bb1(%53: reg<aie2p.ep>, %54: reg<aie2p.ep>, %55: reg<aie2p.ep>)
-^_bb1(%37: reg<aie2p.ep>, %39: reg<aie2p.ep>, %41: reg<aie2p.ep>):
+  %24 = mov.local-address 458752
+  %25 = mov.local-address 491520
+  %26 = mov.local-address 458944
+  low.br ^_bb1(%24: reg<aie2p.ep>, %25: reg<aie2p.ep>, %26: reg<aie2p.ep>)
+^_bb1(%8: reg<aie2p.ep>, %10: reg<aie2p.ep>, %12: reg<aie2p.ep>):
   acq %acquire_delta, 49
   acq %acquire_delta, 51
   acq %acquire_delta, 52
-  %weight = copy %37 : reg<aie2p.ep> -> reg<aie2p.ep>
-  %activation = copy %39 : reg<aie2p.ep> -> reg<aie2p.ep>
-  %output = copy %41 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %weight = copy %8 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %activation = copy %10 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %output = copy %12 : reg<aie2p.ep> -> reg<aie2p.ep>
   %weight_head = vlda.512.i8x64 %weight, 0
   %activation_head = vlda.512.i8x64 %activation, 0
   %sum = vadd.8 %weight_head, %activation_head
@@ -141,15 +141,15 @@ low.func.def retain target<amd.xdna.aie2p.core>(@canonical_q5_stream_core_target
   rel %release_delta, 53
   rel %release_delta, 48
   rel %release_delta, 50
-  %43 = mov.address-to-scalar %37
-  %44 = mov.i32 16384
-  %45 = xor %43, %44
-  %46 = mov.scalar-to-address %45
-  %47 = mov.address-to-scalar %39
-  %48 = xor %47, %44
-  %49 = mov.scalar-to-address %48
-  %50 = mov.address-to-scalar %41
-  %51 = xor %50, %44
-  %52 = mov.scalar-to-address %51
-  low.br ^_bb1(%46: reg<aie2p.ep>, %49: reg<aie2p.ep>, %52: reg<aie2p.ep>)
+  %14 = mov.address-to-scalar %8
+  %15 = mov.i32 16384
+  %16 = xor %14, %15
+  %17 = mov.scalar-to-address %16
+  %18 = mov.address-to-scalar %10
+  %19 = xor %18, %15
+  %20 = mov.scalar-to-address %19
+  %21 = mov.address-to-scalar %12
+  %22 = xor %21, %15
+  %23 = mov.scalar-to-address %22
+  low.br ^_bb1(%17: reg<aie2p.ep>, %20: reg<aie2p.ep>, %23: reg<aie2p.ep>)
 }

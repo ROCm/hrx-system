@@ -20,6 +20,15 @@ void loom_target_compile_report_initialize(
   };
 }
 
+void loom_target_compile_report_take_storage(
+    loom_target_compile_report_t* report, void* storage,
+    loom_target_compile_report_storage_release_fn_t release) {
+  IREE_ASSERT(report->retained_storage.data == NULL,
+              "compile report already owns target storage");
+  report->retained_storage.data = storage;
+  report->retained_storage.release = release;
+}
+
 void loom_target_compile_report_deinitialize(
     loom_target_compile_report_t* report) {
   if (report == NULL) {
@@ -92,6 +101,9 @@ void loom_target_compile_report_deinitialize(
       allocator, &report->target_legalization_rows);
   loom_target_compile_report_row_list_deinitialize(
       allocator, &report->target_capability_rows);
+  if (report->retained_storage.data != NULL) {
+    report->retained_storage.release(report->retained_storage.data);
+  }
   *report = (loom_target_compile_report_t){0};
 }
 
@@ -135,6 +147,7 @@ void loom_target_compile_report_initialize_if_empty(
   if (report->detail_flags != LOOM_TARGET_COMPILE_REPORT_DETAIL_NONE ||
       report->requested_detail_flags !=
           LOOM_TARGET_COMPILE_REPORT_DETAIL_NONE ||
+      report->retained_storage.data != NULL ||
       loom_target_compile_report_has_rows(report)) {
     return;
   }

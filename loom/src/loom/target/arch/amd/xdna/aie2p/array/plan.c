@@ -152,6 +152,18 @@ static bool loom_aie2p_array_symbol_ref_equal(loom_symbol_ref_t lhs,
   return lhs.module_id == rhs.module_id && lhs.symbol_id == rhs.symbol_id;
 }
 
+static const loom_aie2p_array_leaf_t* loom_aie2p_array_find_leaf(
+    const loom_aie2p_array_plan_builder_t* builder, loom_symbol_ref_t entry) {
+  const loom_aie2p_array_leaf_t* result = NULL;
+  for (iree_host_size_t i = 0; i < builder->leaf_count; ++i) {
+    if (loom_aie2p_array_symbol_ref_equal(builder->leaves[i].entry, entry)) {
+      IREE_ASSERT(result == NULL, "leaf table entries must be unique");
+      result = &builder->leaves[i];
+    }
+  }
+  return result;
+}
+
 static iree_status_t loom_aie2p_array_exact_u32(
     const loom_aie2p_array_plan_builder_t* builder, loom_value_id_t value_id,
     const char* purpose, uint32_t* out_value) {
@@ -460,6 +472,9 @@ static iree_status_t loom_aie2p_array_extract_worker(
     builder->valid = false;
     return iree_diagnostic_emit(builder->diagnostic_emitter, &emission);
   }
+  worker->leaf = loom_aie2p_array_find_leaf(builder, worker->entry);
+  IREE_ASSERT(worker->leaf != NULL,
+              "verified resident worker must select a core leaf");
   worker->fold_record_count = 0;
   worker->fold_output_port = 0;
   worker->fold_output_count = 0;
@@ -697,18 +712,6 @@ static iree_status_t loom_aie2p_array_extract_topology(
     }
   }
   return iree_ok_status();
-}
-
-static const loom_low_function_requirements_t* loom_aie2p_array_find_leaf(
-    const loom_aie2p_array_plan_builder_t* builder, loom_symbol_ref_t entry) {
-  const loom_low_function_requirements_t* result = NULL;
-  for (iree_host_size_t i = 0; i < builder->leaf_count; ++i) {
-    if (loom_aie2p_array_symbol_ref_equal(builder->leaves[i].entry, entry)) {
-      IREE_ASSERT(result == NULL, "leaf table entries must be unique");
-      result = &builder->leaves[i].requirements;
-    }
-  }
-  return result;
 }
 
 static loom_aie2p_array_tile_state_t* loom_aie2p_array_tile_state(
@@ -1138,15 +1141,14 @@ static iree_status_t loom_aie2p_array_plan_workers(
     loom_aie2p_array_plan_builder_t* builder) {
   for (iree_host_size_t i = 0; i < builder->plan->worker_count; ++i) {
     const loom_aie2p_array_worker_t* worker = &builder->workers[i];
-    const loom_low_function_requirements_t* requirements =
-        loom_aie2p_array_find_leaf(builder, worker->entry);
+    const loom_aie2p_array_leaf_t* leaf = worker->leaf;
+    const loom_low_function_requirements_t* requirements = &leaf->requirements;
     uint32_t port_count = 0;
     IREE_RETURN_IF_ERROR(loom_aie2p_array_bind_worker_leaf(
         builder, (uint32_t)i, requirements, &port_count));
     builder->worker_plans[i] = (loom_aie2p_array_worker_plan_t){
         .worker_index = (uint32_t)i,
         .coordinate = worker->coordinate,
-        .requirements = requirements,
         .first_port = (uint32_t)builder->worker_port_cursor,
     };
     builder->worker_port_cursor += port_count;
@@ -1825,8 +1827,8 @@ static iree_status_t loom_aie2p_array_allocate_physical_plan(
 
   uint64_t worker_storage_count = 0;
   for (iree_host_size_t i = 0; i < builder->plan->worker_count; ++i) {
-    const loom_low_function_requirements_t* requirements =
-        loom_aie2p_array_find_leaf(builder, builder->workers[i].entry);
+    const loom_aie2p_array_leaf_t* leaf = builder->workers[i].leaf;
+    const loom_low_function_requirements_t* requirements = &leaf->requirements;
     for (uint32_t space = 0; space < LOOM_STORAGE_SPACE_COUNT_; ++space) {
       worker_storage_count +=
           loom_low_storage_layout_requirement(&requirements->storage_layout,
@@ -1932,7 +1934,7 @@ static void loom_aie2p_array_finalize_worker_port_states(
     loom_aie2p_array_worker_plan_t* worker_plan =
         &builder->worker_plans[worker_index];
     uint32_t next_state_ordinal =
-        (uint32_t)worker_plan->requirements->resource_count;
+        (uint32_t)worker->leaf->requirements.resource_count;
     for (uint32_t port_ordinal = 0; port_ordinal < worker_plan->port_count;
          ++port_ordinal) {
       loom_aie2p_array_worker_port_plan_t* port =

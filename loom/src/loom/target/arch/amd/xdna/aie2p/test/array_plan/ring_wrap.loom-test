@@ -94,18 +94,18 @@ control-relocation index=1 record=2 word=1 binding=1 addend=0 alignment=4
 resident-program workers=1
 resident worker=0 entry=@coprime_ring_array$worker$0 tile=(0,2) code-bytes=272 resources=0 fixups=5
 
-low.func.def retain target<amd.xdna.aie2p.core>(@coprime_core_target) @coprime_ring_array$worker$0() asm {
+low.func.def retain target<amd.xdna.aie2p.core> @coprime_ring_array$worker$0() asm {
   %acquire_delta = mov.short -1
   %release_delta = mov.short 1
-  %53 = mov.local-address 458752
-  %54 = mov.local-address 491520
+  %30 = mov.local-address 458752
+  %31 = mov.local-address 491520
   %ring_slot_zero = mov.short 0
-  low.br ^_bb1(%53: reg<aie2p.ep>, %54: reg<aie2p.ep>, %ring_slot_zero: reg<aie2p.er>)
-^_bb1(%32: reg<aie2p.ep>, %34: reg<aie2p.ep>, %35: reg<aie2p.er>):
+  low.br ^_bb1(%30: reg<aie2p.ep>, %31: reg<aie2p.ep>, %ring_slot_zero: reg<aie2p.er>)
+^_bb1(%9: reg<aie2p.ep>, %11: reg<aie2p.ep>, %12: reg<aie2p.er>):
   acq %acquire_delta, 49
   acq %acquire_delta, 51
-  %input0 = copy %32 : reg<aie2p.ep> -> reg<aie2p.ep>
-  %input1 = copy %34 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %input0 = copy %9 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %input1 = copy %11 : reg<aie2p.ep> -> reg<aie2p.ep>
   %offset = mova.modifier 1
   %cursor = paddb.modifier %input0, %offset
   %lhs = lda.u8 %cursor, 0
@@ -114,29 +114,29 @@ low.func.def retain target<amd.xdna.aie2p.core>(@coprime_core_target) @coprime_r
   st.s8 %sum, %cursor, 0
   rel %release_delta, 48
   rel %release_delta, 50
-  %37 = mov.address-to-scalar %32
-  %38 = mov.i32 16384
-  %39 = xor %37, %38
-  %40 = mov.scalar-to-address %39
-  %43 = mov.short 0
-  %44 = eq %35, %43
-  low.cond_br %44, ^_bb4, ^_bb2 : reg<aie2p.er>
+  %14 = mov.address-to-scalar %9
+  %15 = mov.i32 16384
+  %16 = xor %14, %15
+  %17 = mov.scalar-to-address %16
+  %20 = mov.short 0
+  %21 = eq %12, %20
+  low.cond_br %21, ^_bb4, ^_bb2 : reg<aie2p.er>
 ^_bb2:
-  %45 = mov.short 1
-  %46 = eq %35, %45
-  low.cond_br %46, ^_bb5, ^_bb3 : reg<aie2p.er>
+  %22 = mov.short 1
+  %23 = eq %12, %22
+  low.cond_br %23, ^_bb5, ^_bb3 : reg<aie2p.er>
 ^_bb3:
-  %47 = mov.local-address 491520
-  %48 = mov.short 0
-  low.br ^_bb6(%47: reg<aie2p.ep>, %48: reg<aie2p.er>)
+  %24 = mov.local-address 491520
+  %25 = mov.short 0
+  low.br ^_bb6(%24: reg<aie2p.ep>, %25: reg<aie2p.er>)
 ^_bb4:
-  %49 = mov.local-address 507904
-  %50 = mov.short 1
-  low.br ^_bb6(%49: reg<aie2p.ep>, %50: reg<aie2p.er>)
+  %26 = mov.local-address 507904
+  %27 = mov.short 1
+  low.br ^_bb6(%26: reg<aie2p.ep>, %27: reg<aie2p.er>)
 ^_bb5:
-  %51 = mov.local-address 458816
-  %52 = mov.short 2
-  low.br ^_bb6(%51: reg<aie2p.ep>, %52: reg<aie2p.er>)
-^_bb6(%41: reg<aie2p.ep>, %42: reg<aie2p.er>):
-  low.br ^_bb1(%40: reg<aie2p.ep>, %41: reg<aie2p.ep>, %42: reg<aie2p.er>)
+  %28 = mov.local-address 458816
+  %29 = mov.short 2
+  low.br ^_bb6(%28: reg<aie2p.ep>, %29: reg<aie2p.er>)
+^_bb6(%18: reg<aie2p.ep>, %19: reg<aie2p.er>):
+  low.br ^_bb1(%17: reg<aie2p.ep>, %18: reg<aie2p.ep>, %19: reg<aie2p.er>)
 }

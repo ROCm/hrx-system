@@ -181,26 +181,26 @@ resident-program workers=2
 resident worker=0 entry=@neighbor_dma_service_array$worker$0 tile=(0,2) code-bytes=264 resources=0 fixups=1
 resident worker=1 entry=@neighbor_dma_service_array$worker$1 tile=(0,4) code-bytes=86 resources=0 fixups=1
 
-low.func.def retain target<amd.xdna.aie2p.core>(@neighbor_dma_service_core_target) @neighbor_dma_service_array$worker$0() asm {
+low.func.def retain target<amd.xdna.aie2p.core> @neighbor_dma_service_array$worker$0() asm {
   %acquire_delta = mov.short -1
   %release_delta = mov.short 1
-  %84 = mov.local-address 458752
-  %85 = mov.local-address 491520
-  %86 = mov.local-address 393216
-  %87 = mov.local-address 425984
-  %88 = mov.local-address 458816
-  low.br ^_bb1(%84: reg<aie2p.ep>, %85: reg<aie2p.ep>, %86: reg<aie2p.ep>, %87: reg<aie2p.ep>, %88: reg<aie2p.ep>)
-^_bb1(%58: reg<aie2p.ep>, %60: reg<aie2p.ep>, %62: reg<aie2p.ep>, %64: reg<aie2p.ep>, %66: reg<aie2p.ep>):
+  %40 = mov.local-address 458752
+  %41 = mov.local-address 491520
+  %42 = mov.local-address 393216
+  %43 = mov.local-address 425984
+  %44 = mov.local-address 458816
+  low.br ^_bb1(%40: reg<aie2p.ep>, %41: reg<aie2p.ep>, %42: reg<aie2p.ep>, %43: reg<aie2p.ep>, %44: reg<aie2p.ep>)
+^_bb1(%14: reg<aie2p.ep>, %16: reg<aie2p.ep>, %18: reg<aie2p.ep>, %20: reg<aie2p.ep>, %22: reg<aie2p.ep>):
   acq %acquire_delta, 49
   acq %acquire_delta, 51
   acq %acquire_delta, 33
   acq %acquire_delta, 35
   acq %acquire_delta, 52
-  %input0 = copy %58 : reg<aie2p.ep> -> reg<aie2p.ep>
-  %input1 = copy %60 : reg<aie2p.ep> -> reg<aie2p.ep>
-  %input2 = copy %62 : reg<aie2p.ep> -> reg<aie2p.ep>
-  %input3 = copy %64 : reg<aie2p.ep> -> reg<aie2p.ep>
-  %output = copy %66 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %input0 = copy %14 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %input1 = copy %16 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %input2 = copy %18 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %input3 = copy %20 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %output = copy %22 : reg<aie2p.ep> -> reg<aie2p.ep>
   %value0 = lda.u8 %input0, 0
   %value1 = lda.u8 %input1, 0
   %value2 = lda.u8 %input2, 0
@@ -214,39 +214,39 @@ low.func.def retain target<amd.xdna.aie2p.core>(@neighbor_dma_service_core_targe
   rel %release_delta, 50
   rel %release_delta, 32
   rel %release_delta, 34
-  %68 = mov.address-to-scalar %58
-  %69 = mov.i32 16384
-  %70 = xor %68, %69
-  %71 = mov.scalar-to-address %70
-  %72 = mov.address-to-scalar %60
-  %73 = xor %72, %69
-  %74 = mov.scalar-to-address %73
-  %75 = mov.address-to-scalar %62
-  %76 = xor %75, %69
-  %77 = mov.scalar-to-address %76
-  %78 = mov.address-to-scalar %64
-  %79 = xor %78, %69
-  %80 = mov.scalar-to-address %79
-  %81 = mov.address-to-scalar %66
-  %82 = xor %81, %69
-  %83 = mov.scalar-to-address %82
-  low.br ^_bb1(%71: reg<aie2p.ep>, %74: reg<aie2p.ep>, %77: reg<aie2p.ep>, %80: reg<aie2p.ep>, %83: reg<aie2p.ep>)
+  %24 = mov.address-to-scalar %14
+  %25 = mov.i32 16384
+  %26 = xor %24, %25
+  %27 = mov.scalar-to-address %26
+  %28 = mov.address-to-scalar %16
+  %29 = xor %28, %25
+  %30 = mov.scalar-to-address %29
+  %31 = mov.address-to-scalar %18
+  %32 = xor %31, %25
+  %33 = mov.scalar-to-address %32
+  %34 = mov.address-to-scalar %20
+  %35 = xor %34, %25
+  %36 = mov.scalar-to-address %35
+  %37 = mov.address-to-scalar %22
+  %38 = xor %37, %25
+  %39 = mov.scalar-to-address %38
+  low.br ^_bb1(%27: reg<aie2p.ep>, %30: reg<aie2p.ep>, %33: reg<aie2p.ep>, %36: reg<aie2p.ep>, %39: reg<aie2p.ep>)
 }
 
-low.func.def retain target<amd.xdna.aie2p.core>(@neighbor_dma_service_core_target) @neighbor_dma_service_array$worker$1() asm {
+low.func.def retain target<amd.xdna.aie2p.core> @neighbor_dma_service_array$worker$1() asm {
   %acquire_delta = mov.short -1
   %release_delta = mov.short 1
-  %99 = mov.local-address 458752
-  low.br ^_bb1(%99: reg<aie2p.ep>)
-^_bb1(%93: reg<aie2p.ep>):
+  %55 = mov.local-address 458752
+  low.br ^_bb1(%55: reg<aie2p.ep>)
+^_bb1(%49: reg<aie2p.ep>):
   acq %acquire_delta, 48
-  %output = copy %93 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %output = copy %49 : reg<aie2p.ep> -> reg<aie2p.ep>
   %value = mov.short 4
   st.s8 %value, %output, 0
   rel %release_delta, 49
-  %95 = mov.address-to-scalar %93
-  %96 = mov.i32 16384
-  %97 = xor %95, %96
-  %98 = mov.scalar-to-address %97
-  low.br ^_bb1(%98: reg<aie2p.ep>)
+  %51 = mov.address-to-scalar %49
+  %52 = mov.i32 16384
+  %53 = xor %51, %52
+  %54 = mov.scalar-to-address %53
+  low.br ^_bb1(%54: reg<aie2p.ep>)
 }

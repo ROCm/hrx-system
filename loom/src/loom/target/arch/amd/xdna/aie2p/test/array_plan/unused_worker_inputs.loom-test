@@ -105,51 +105,51 @@ resident-program workers=2
 resident worker=0 entry=@discard_then_increment$worker$0 tile=(0,2) code-bytes=98 resources=0 fixups=1
 resident worker=1 entry=@discard_then_increment$worker$1 tile=(0,3) code-bytes=142 resources=0 fixups=1
 
-low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @discard_then_increment$worker$0() asm {
+low.func.def retain target<amd.xdna.aie2p.core> @discard_then_increment$worker$0() asm {
   %acquire_delta = mov.short -1
   %release_delta = mov.short 1
-  %85 = mov.local-address 491520
-  low.br ^_bb1(%85: reg<aie2p.ep>)
-^_bb1(%79: reg<aie2p.ep>):
+  %11 = mov.local-address 491520
+  low.br ^_bb1(%11: reg<aie2p.ep>)
+^_bb1(%5: reg<aie2p.ep>):
   acq %acquire_delta, 49
   acq %acquire_delta, 50
-  %output_view = copy %79 : reg<aie2p.ep> -> reg<aie2p.ep>
-  %77 = mov.short 1
-  %value = vbcst.32 %77
+  %output_view = copy %5 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %3 = mov.short 1
+  %value = vbcst.32 %3
   vst.512.i32x16 %value, %output_view, 0
   rel %release_delta, 51
   rel %release_delta, 48
-  %81 = mov.address-to-scalar %79
-  %82 = mov.i32 16384
-  %83 = xor %81, %82
-  %84 = mov.scalar-to-address %83
-  low.br ^_bb1(%84: reg<aie2p.ep>)
+  %7 = mov.address-to-scalar %5
+  %8 = mov.i32 16384
+  %9 = xor %7, %8
+  %10 = mov.scalar-to-address %9
+  low.br ^_bb1(%10: reg<aie2p.ep>)
 }
 
-low.func.def retain target<amd.xdna.aie2p.core>(@core_target) @discard_then_increment$worker$1() asm {
+low.func.def retain target<amd.xdna.aie2p.core> @discard_then_increment$worker$1() asm {
   %acquire_delta = mov.short -1
   %release_delta = mov.short 1
-  %105 = mov.local-address 294912
-  %106 = mov.local-address 458752
-  low.br ^_bb1(%105: reg<aie2p.ep>, %106: reg<aie2p.ep>)
-^_bb1(%94: reg<aie2p.ep>, %96: reg<aie2p.ep>):
+  %31 = mov.local-address 294912
+  %32 = mov.local-address 458752
+  low.br ^_bb1(%31: reg<aie2p.ep>, %32: reg<aie2p.ep>)
+^_bb1(%20: reg<aie2p.ep>, %22: reg<aie2p.ep>):
   acq %acquire_delta, 3
   acq %acquire_delta, 48
-  %input_view = copy %94 : reg<aie2p.ep> -> reg<aie2p.ep>
-  %output_view = copy %96 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %input_view = copy %20 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %output_view = copy %22 : reg<aie2p.ep> -> reg<aie2p.ep>
   %value = vlda.512.i32x16 %input_view, 0
-  %91 = mov.short 1
-  %increment = vbcst.32 %91
+  %17 = mov.short 1
+  %increment = vbcst.32 %17
   %next = vadd.32 %value, %increment
   vst.512.i32x16 %next, %output_view, 0
   rel %release_delta, 49
   rel %release_delta, 2
-  %98 = mov.address-to-scalar %94
-  %99 = mov.i32 16384
-  %100 = xor %98, %99
-  %101 = mov.scalar-to-address %100
-  %102 = mov.address-to-scalar %96
-  %103 = xor %102, %99
-  %104 = mov.scalar-to-address %103
-  low.br ^_bb1(%101: reg<aie2p.ep>, %104: reg<aie2p.ep>)
+  %24 = mov.address-to-scalar %20
+  %25 = mov.i32 16384
+  %26 = xor %24, %25
+  %27 = mov.scalar-to-address %26
+  %28 = mov.address-to-scalar %22
+  %29 = xor %28, %25
+  %30 = mov.scalar-to-address %29
+  low.br ^_bb1(%27: reg<aie2p.ep>, %30: reg<aie2p.ep>)
 }

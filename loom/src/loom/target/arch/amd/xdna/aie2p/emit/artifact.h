@@ -22,8 +22,8 @@ extern "C" {
 #endif
 
 typedef struct loom_aie2p_xdna_artifact_request_t {
-  // Mutable module containing prepared AIE2P target-low IR.
-  loom_module_t* module;
+  // Immutable module containing prepared AIE2P target-low IR.
+  const loom_module_t* module;
 
   // Concrete compiler function versions participating in emission.
   const loom_function_version_list_t* function_versions;
@@ -34,7 +34,8 @@ typedef struct loom_aie2p_xdna_artifact_request_t {
   // Explicit deployment profile, or NULL to use the array entry target facts.
   const loom_xdna_device_profile_t* device_profile;
 
-  // Optional caller-owned structured compile report to populate.
+  // Optional caller-owned structured compile report for this emission. The
+  // report may retain target backing storage until report deinitialization.
   loom_target_compile_report_t* compile_report;
 
   // Diagnostic emitter receiving target diagnostics.

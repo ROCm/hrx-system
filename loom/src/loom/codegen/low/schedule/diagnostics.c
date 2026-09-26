@@ -173,6 +173,7 @@ static iree_status_t loom_low_schedule_emit_dependency_cycle(
   if (producer_node != NULL) {
     related_ops[related_op_count++] = (loom_diagnostic_related_op_t){
         .label = IREE_SV("cycle producer"),
+        .module = table->module,
         .op = producer_node->op,
         .field_ref = loom_diagnostic_field_ref_none(),
     };
@@ -185,6 +186,7 @@ static iree_status_t loom_low_schedule_emit_dependency_cycle(
     }
     related_ops[related_op_count++] = (loom_diagnostic_related_op_t){
         .label = IREE_SV("cycle consumer"),
+        .module = table->module,
         .op = consumer_node->op,
         .field_ref = field_ref,
     };

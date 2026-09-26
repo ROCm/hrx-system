@@ -98,17 +98,17 @@ control-relocation index=1 record=2 word=1 binding=1 addend=0 alignment=4
 resident-program workers=1
 resident worker=0 entry=@repeated_sliding_window_array$worker$0 tile=(0,2) code-bytes=150 resources=0 fixups=1
 
-low.func.def retain target<amd.xdna.aie2p.core>(@repeated_sliding_window_core_target) @repeated_sliding_window_array$worker$0() asm {
+low.func.def retain target<amd.xdna.aie2p.core> @repeated_sliding_window_array$worker$0() asm {
   %acquire_delta = mov.short -1
   %release_delta = mov.short 1
-  %43 = mov.local-address 458752
-  %44 = mov.local-address 491520
-  low.br ^_bb1(%43: reg<aie2p.ep>, %44: reg<aie2p.ep>)
-^_bb1(%32: reg<aie2p.ep>, %34: reg<aie2p.ep>):
+  %19 = mov.local-address 458752
+  %20 = mov.local-address 491520
+  low.br ^_bb1(%19: reg<aie2p.ep>, %20: reg<aie2p.ep>)
+^_bb1(%8: reg<aie2p.ep>, %10: reg<aie2p.ep>):
   acq %acquire_delta, 49
   acq %acquire_delta, 50
-  %input = copy %32 : reg<aie2p.ep> -> reg<aie2p.ep>
-  %output = copy %34 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %input = copy %8 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %output = copy %10 : reg<aie2p.ep> -> reg<aie2p.ep>
   %value0 = lda %input, 0
   %value1 = lda %input, 4
   %value2 = lda %input, 8
@@ -119,12 +119,12 @@ low.func.def retain target<amd.xdna.aie2p.core>(@repeated_sliding_window_core_ta
   st %value3, %output, 12
   rel %release_delta, 51
   rel %release_delta, 48
-  %36 = mov.address-to-scalar %32
-  %37 = mov.i32 16384
-  %38 = xor %36, %37
-  %39 = mov.scalar-to-address %38
-  %40 = mov.address-to-scalar %34
-  %41 = xor %40, %37
-  %42 = mov.scalar-to-address %41
-  low.br ^_bb1(%39: reg<aie2p.ep>, %42: reg<aie2p.ep>)
+  %12 = mov.address-to-scalar %8
+  %13 = mov.i32 16384
+  %14 = xor %12, %13
+  %15 = mov.scalar-to-address %14
+  %16 = mov.address-to-scalar %10
+  %17 = xor %16, %13
+  %18 = mov.scalar-to-address %17
+  low.br ^_bb1(%15: reg<aie2p.ep>, %18: reg<aie2p.ep>)
 }

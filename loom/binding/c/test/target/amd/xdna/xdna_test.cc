@@ -16,6 +16,7 @@ namespace {
 
 using loomc::testing::HandlePtr;
 using ResultPtr = HandlePtr<loomc_result_t, loomc_result_release>;
+using SourcePtr = HandlePtr<loomc_source_t, loomc_source_release>;
 using ModulePtr = HandlePtr<loomc_module_t, loomc_module_release>;
 using SequencePtr =
     HandlePtr<loomc_byte_sequence_t, loomc_byte_sequence_release>;
@@ -73,6 +74,41 @@ std::string SequenceText(const loomc_byte_sequence_t* sequence) {
                  },
                  &text}));
   return text;
+}
+
+const loomc_artifact_t* FindArtifact(const loomc_result_t* result,
+                                     loomc_artifact_kind_t kind,
+                                     const char* format) {
+  for (loomc_host_size_t i = 0; i < loomc_result_artifact_count(result); ++i) {
+    const loomc_artifact_t* artifact = loomc_result_artifact_at(result, i);
+    if (artifact != nullptr && artifact->kind == kind &&
+        loomc_string_view_equal(artifact->format,
+                                loomc_make_cstring_view(format))) {
+      return artifact;
+    }
+  }
+  return nullptr;
+}
+
+std::string SerializeModuleToText(const loomc_module_t* module) {
+  loomc_module_serialize_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
+      /*.identifier=*/loomc_make_cstring_view("compiled.loom"),
+  };
+  loomc_source_t* source = nullptr;
+  loomc_status_t status = loomc_module_serialize_to_source(
+      module, &options, loomc_allocator_system(), &source);
+  LOOMC_EXPECT_OK(status);
+  if (!loomc_status_is_ok(status)) {
+    return std::string();
+  }
+  SourcePtr source_ptr(source);
+  const loomc_byte_span_t contents = loomc_source_contents(source_ptr.get());
+  return std::string(reinterpret_cast<const char*>(contents.data),
+                     contents.data_length);
 }
 
 ::testing::AssertionResult Succeeded(const loomc_result_t* result) {
@@ -235,7 +271,7 @@ TEST_F(XdnaTest, AcceptsNonTerminatedDeviceKeyAndRetainsEnvironment) {
   environment_.reset();
 }
 
-TEST_F(XdnaTest, RetainsArtifactAcrossWorkspaceReuse) {
+TEST_F(XdnaTest, PreservesPreparedModuleAcrossRepeatedEmission) {
   loomc_target_profile_t* raw_profile = nullptr;
   LOOMC_ASSERT_OK(loomc_target_profile_create_xdna(
       environment_.get(),
@@ -285,6 +321,7 @@ TEST_F(XdnaTest, RetainsArtifactAcrossWorkspaceReuse) {
 
   SequencePtr retained;
   std::string first_bytes;
+  std::string first_report;
   for (int invocation = 0; invocation < 2; ++invocation) {
     loomc_module_t* raw_module = nullptr;
     LOOMC_ASSERT_OK(loomc_module_deserialize_from_source(
@@ -308,12 +345,18 @@ TEST_F(XdnaTest, RetainsArtifactAcrossWorkspaceReuse) {
         &compile_options, loomc_allocator_system(), &raw_result));
     result.reset(raw_result);
     ASSERT_TRUE(Succeeded(result.get()));
+    const std::string prepared_text = SerializeModuleToText(module.get());
+    ASSERT_FALSE(prepared_text.empty());
 
     loomc_emit_options_t emit_options = {};
     emit_options.type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS;
     emit_options.artifact_format =
         loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_XDNA);
     emit_options.artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY;
+    loomc_compile_report_options_t report_options = {};
+    report_options.type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS;
+    report_options.structure_size = sizeof(report_options);
+    report_options.mode = LOOMC_COMPILE_REPORT_MODE_DETAILS;
     if (invocation == 0) {
       loomc_artifact_manifest_options_t manifest_options = {};
       manifest_options.type = LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS;
@@ -330,27 +373,46 @@ TEST_F(XdnaTest, RetainsArtifactAcrossWorkspaceReuse) {
       EXPECT_NE(std::string(diagnostic->message.data, diagnostic->message.size)
                     .find("sidecar artifact manifests are not supported"),
                 std::string::npos);
-      emit_options.next = nullptr;
+      EXPECT_EQ(SerializeModuleToText(module.get()), prepared_text);
     }
-    LOOMC_ASSERT_OK(loomc_emit_module(environment_.get(), workspace.get(),
-                                      module.get(), &emit_options,
-                                      loomc_allocator_system(), &raw_result));
-    result.reset(raw_result);
-    ASSERT_TRUE(Succeeded(result.get()));
-    ASSERT_EQ(loomc_result_artifact_count(result.get()), 1u);
-    const auto* executable = loomc_result_artifact_at(result.get(), 0);
-    ASSERT_NE(executable, nullptr);
-    EXPECT_EQ(executable->kind, LOOMC_ARTIFACT_KIND_EXECUTABLE);
-    EXPECT_TRUE(loomc_string_view_equal(
-        executable->format,
-        loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_XDNA)));
-    if (invocation == 0) {
-      loomc_byte_sequence_retain(executable->contents);
-      retained.reset(executable->contents);
-      first_bytes = SequenceText(retained.get());
-      ASSERT_FALSE(first_bytes.empty());
-    } else {
-      EXPECT_EQ(SequenceText(executable->contents), first_bytes);
+    for (int emission = 0; emission < 2; ++emission) {
+      const bool report_requested = emission != 0;
+      emit_options.next = report_requested ? &report_options : nullptr;
+      LOOMC_ASSERT_OK(loomc_emit_module(environment_.get(), workspace.get(),
+                                        module.get(), &emit_options,
+                                        loomc_allocator_system(), &raw_result));
+      result.reset(raw_result);
+      ASSERT_TRUE(Succeeded(result.get()));
+      ASSERT_EQ(loomc_result_artifact_count(result.get()),
+                report_requested ? 2u : 1u);
+      const loomc_artifact_t* executable =
+          FindArtifact(result.get(), LOOMC_ARTIFACT_KIND_EXECUTABLE,
+                       LOOMC_ARTIFACT_FORMAT_XDNA);
+      ASSERT_NE(executable, nullptr);
+      const std::string artifact_bytes = SequenceText(executable->contents);
+      ASSERT_FALSE(artifact_bytes.empty());
+      if (retained.get() == nullptr) {
+        loomc_byte_sequence_retain(executable->contents);
+        retained.reset(executable->contents);
+        first_bytes = artifact_bytes;
+      } else {
+        EXPECT_EQ(artifact_bytes, first_bytes);
+      }
+      if (report_requested) {
+        const loomc_artifact_t* report =
+            FindArtifact(result.get(), LOOMC_ARTIFACT_KIND_REPORT,
+                         LOOMC_ARTIFACT_FORMAT_COMPILE_REPORT_JSON);
+        ASSERT_NE(report, nullptr);
+        const std::string report_bytes = SequenceText(report->contents);
+        EXPECT_NE(report_bytes.find("first$worker$0"), std::string::npos)
+            << report_bytes;
+        if (first_report.empty()) {
+          first_report = report_bytes;
+        } else {
+          EXPECT_EQ(report_bytes, first_report);
+        }
+      }
+      EXPECT_EQ(SerializeModuleToText(module.get()), prepared_text);
     }
   }
   result.reset();

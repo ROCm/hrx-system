@@ -701,6 +701,7 @@ static iree_status_t loom_low_emission_frame_fail_final(
       loom_param_u64((uint64_t)frame->schedule.scheduled_node_count),
   };
   const loom_diagnostic_emission_t emission = {
+      .module = frame->module,
       .op = frame->function_op,
       .error = LOOM_ERR_BACKEND_021,
       .params = params,

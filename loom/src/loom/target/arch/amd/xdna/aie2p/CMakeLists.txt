@@ -335,7 +335,6 @@ loom_cc_library(
     loom::rewrite::remap
     loom::rewrite::rewriter
     loom::target::arch::amd::xdna::array_facts
-    loom::target::function_version
     loom::transforms::cfg::block_fusion
     loom::util::cfg_graph
     loom::util::dominance
@@ -494,9 +493,11 @@ loom_cc_library(
     ::machine
     ::provider
     iree::base
+    loom::analysis::symbol_facts
     loom::codegen::low::diagnostics
     loom::codegen::low::function_requirements
     loom::codegen::low::storage_layout
+    loom::codegen::low::target_binding
     loom::codegen::low::text_asm
     loom::error::error_defs
     loom::format::text::printer
@@ -844,9 +845,11 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     iree::io::stream
+    loom::analysis::symbol_facts
     loom::codegen::low::descriptors
     loom::codegen::low::diagnostics
     loom::codegen::low::function_requirements
+    loom::codegen::low::target_binding
     loom::ir
     loom::ir::facts
     loom::ops::encoding

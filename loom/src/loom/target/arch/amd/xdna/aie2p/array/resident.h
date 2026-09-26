@@ -13,7 +13,6 @@
 #include "iree/base/internal/arena.h"
 #include "loom/ir/ir.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/plan.h"
-#include "loom/target/function_version.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -43,6 +42,11 @@ typedef struct loom_aie2p_array_resident_program_t {
 
 // Materializes every planned worker as an independently compilable Low CFG.
 //
+// |source_module| owns the selected array and core leaf IR retained by |plan|.
+// |resident_module| receives all generated functions and is the module used to
+// compile and inspect them. The modules must share a finalized context and may
+// not alias. Materialization does not mutate |source_module|.
+//
 // Each source worker function represents one channel firing. The materializer
 // clones its arbitrary CFG once, replaces resource imports with loop-carried
 // local-address values, surrounds the firing with the channel lock protocol,
@@ -52,9 +56,8 @@ typedef struct loom_aie2p_array_resident_program_t {
 // The resulting functions have no imported resources or register ABI and are
 // retained as final array-image roots.
 iree_status_t loom_aie2p_array_materialize_resident_program(
-    loom_module_t* module, const loom_aie2p_array_plan_t* plan,
-    const loom_function_version_list_t* function_versions,
-    iree_arena_allocator_t* arena,
+    const loom_module_t* source_module, loom_module_t* resident_module,
+    const loom_aie2p_array_plan_t* plan, iree_arena_allocator_t* arena,
     loom_aie2p_array_resident_program_t* out_program);
 
 #ifdef __cplusplus

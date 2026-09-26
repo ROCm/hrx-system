@@ -1893,6 +1893,9 @@ typedef struct loom_target_compile_report_row_list_t {
   iree_host_size_t count;
 } loom_target_compile_report_row_list_t;
 
+// Releases storage whose lifetime is retained by a compile report.
+typedef void (*loom_target_compile_report_storage_release_fn_t)(void* storage);
+
 // Returns mutable row storage for |vec|.
 static inline void* loom_target_compile_report_vec_rows(
     loom_target_compile_report_vec_t* vec) {
@@ -1908,11 +1911,13 @@ static inline const void* loom_target_compile_report_vec_const_rows(
 // Structured feedback from one module-to-artifact compilation.
 //
 // Reports borrow string views from the compiled module, target records,
-// compile options, backend tables, or artifact storage. Config binding rows own
-// their key/value strings because materialization inputs may be transient.
-// Detail row lists are owned by the report and allocated from |allocator| as
-// rows are recorded. Consumers that need a report to outlive those string
-// owners must copy the strings before releasing the module or candidate.
+// compile options, backend tables, artifact storage, or storage explicitly
+// transferred to the report. Config binding rows own their key/value strings
+// because materialization inputs may be transient. Detail row lists are owned
+// by the report and allocated from |allocator| as rows are recorded. A target
+// may transfer one backing storage owner when its detail rows borrow transient
+// target-owned data. Other consumers that need a report to outlive a string
+// owner must copy the strings before releasing that owner.
 typedef struct loom_target_compile_report_t {
   // Host allocator used for owned row storage.
   iree_allocator_t allocator;
@@ -2126,6 +2131,13 @@ typedef struct loom_target_compile_report_t {
   loom_target_compile_report_row_list_t target_legalization_rows;
   // Owned selected-target capability rows.
   loom_target_compile_report_row_list_t target_capability_rows;
+  // Target-owned storage retained until report deinitialization.
+  struct {
+    // Opaque target storage.
+    void* data;
+    // Callback releasing |data|.
+    loom_target_compile_report_storage_release_fn_t release;
+  } retained_storage;
   // Estimated target private memory bytes.
   uint64_t private_memory_bytes;
   // Estimated target local/shared memory bytes.
@@ -2135,6 +2147,14 @@ typedef struct loom_target_compile_report_t {
 // Initializes an empty compile report using |allocator| for row storage.
 void loom_target_compile_report_initialize(
     loom_target_compile_report_t* out_report, iree_allocator_t allocator);
+
+// Transfers |storage| ownership to |report|.
+//
+// The report must not already own storage. |release| is called exactly once
+// during report deinitialization.
+void loom_target_compile_report_take_storage(
+    loom_target_compile_report_t* report, void* storage,
+    loom_target_compile_report_storage_release_fn_t release);
 
 // Returns true when |report| requests all |detail_flags|.
 static inline bool loom_target_compile_report_wants_details(
