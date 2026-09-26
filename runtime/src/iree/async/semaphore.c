@@ -789,7 +789,7 @@ IREE_API_EXPORT iree_status_t iree_async_semaphore_multi_wait(
         &semaphores[0]->failure_status, iree_memory_order_acquire);
     if (!iree_status_is_ok(failure)) {
       IREE_TRACE_ZONE_END(z0);
-      return iree_status_from_code(iree_status_code(failure));
+      return iree_status_clone(failure);
     }
 
     // Atomic check for immediate satisfaction.
@@ -819,7 +819,7 @@ IREE_API_EXPORT iree_status_t iree_async_semaphore_multi_wait(
           &semaphores[i]->failure_status, iree_memory_order_acquire);
       if (!iree_status_is_ok(failure)) {
         IREE_TRACE_ZONE_END(z0);
-        return iree_status_from_code(iree_status_code(failure));
+        return iree_status_clone(failure);
       }
       uint64_t current_value = (uint64_t)iree_atomic_load(
           &semaphores[i]->timeline_value, iree_memory_order_acquire);
@@ -838,7 +838,7 @@ IREE_API_EXPORT iree_status_t iree_async_semaphore_multi_wait(
         iree_status_t failure = (iree_status_t)iree_atomic_load(
             &semaphores[i]->failure_status, iree_memory_order_acquire);
         if (!iree_status_is_ok(failure)) {
-          return iree_status_from_code(iree_status_code(failure));
+          return iree_status_clone(failure);
         }
         uint64_t current_value = (uint64_t)iree_atomic_load(
             &semaphores[i]->timeline_value, iree_memory_order_acquire);
@@ -927,17 +927,6 @@ IREE_API_EXPORT iree_status_t iree_async_semaphore_multi_wait(
         status = iree_status_from_code(IREE_STATUS_DEADLINE_EXCEEDED);
       }
     }
-
-    // Check for failure status even if we didn't time out. Returns the failure
-    // status code (not the full status) to match the fast-path behavior and the
-    // HAL convention of following up with a query to get the full status.
-    if (iree_status_is_ok(status)) {
-      iree_status_t failure = (iree_status_t)iree_atomic_load(
-          &state.failure_status, iree_memory_order_acquire);
-      if (!iree_status_is_ok(failure)) {
-        status = iree_status_from_code(iree_status_code(failure));
-      }
-    }
   }
 
   // Cancel any timepoints that haven't been dispatched yet. For timepoints
@@ -958,11 +947,15 @@ IREE_API_EXPORT iree_status_t iree_async_semaphore_multi_wait(
     }
   }
 
-  // Free captured failure status clone (we extracted the code above).
+  // Callbacks have finished, so their first owned failure can transfer directly
+  // to the caller. Preserve a failure racing with timeout or registration error
+  // as context on that terminal status.
   iree_status_t captured_failure = (iree_status_t)iree_atomic_load(
       &state.failure_status, iree_memory_order_acquire);
-  if (!iree_status_is_ok(captured_failure)) {
-    iree_status_free(captured_failure);
+  if (iree_status_is_ok(status)) {
+    status = captured_failure;
+  } else {
+    status = iree_status_join(status, captured_failure);
   }
 
   iree_notification_deinitialize(&state.notification);

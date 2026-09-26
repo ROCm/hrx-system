@@ -225,30 +225,32 @@ TEST_P(SemaphoreTest, FailThenWait) {
   iree_status_t query_status = iree_hal_semaphore_query(semaphore, &value);
   EXPECT_GE(value, IREE_HAL_SEMAPHORE_FAILURE_VALUE);
   IREE_EXPECT_STATUS_IS(iree_status_code(status), query_status);
-  iree_status_ignore(status);
+  iree_status_free(status);
 
   iree_hal_semaphore_release(semaphore);
 }
 
-// Tests that failure status codes are preserved through the query round-trip.
-// Validates the failure encoding mechanism: drivers encode failure status in
-// the semaphore value via iree_hal_status_as_semaphore_failure(), and the HAL
-// dispatch layer decodes it back via iree_hal_semaphore_failure_as_status().
-TEST_P(SemaphoreTest, FailurePreservesStatusCode) {
+// Queries and waits return independently owned copies of the stored failure.
+TEST_P(SemaphoreTest, FailurePreservesStatus) {
   iree_hal_semaphore_t* semaphore = CreateSemaphore();
-
-  // Use DATA_LOSS specifically — distinct from UNKNOWN (Failure test) and
-  // CANCELLED (FailThenWait test). This exercises the encoding path with a
-  // full status (message + backtrace), not just a bare status code.
-  iree_hal_semaphore_fail(
-      semaphore, iree_make_status(IREE_STATUS_DATA_LOSS, "device fault"));
+  iree_status_t failure =
+      iree_make_status(IREE_STATUS_DATA_LOSS, "device fault");
+  iree_hal_semaphore_fail(semaphore, iree_status_clone(failure));
 
   uint64_t value = 0;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
-                        iree_hal_semaphore_query(semaphore, &value));
+  iree_status_t query_status = iree_hal_semaphore_query(semaphore, &value);
   EXPECT_GE(value, IREE_HAL_SEMAPHORE_FAILURE_VALUE);
+  iree_status_t wait_status = iree_hal_semaphore_wait(
+      semaphore, 1, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
 
   iree_hal_semaphore_release(semaphore);
+  EXPECT_TRUE(iree_string_view_equal(iree_status_message(query_status),
+                                     iree_status_message(failure)));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS, query_status);
+  EXPECT_TRUE(iree_string_view_equal(iree_status_message(wait_status),
+                                     iree_status_message(failure)));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS, wait_status);
+  iree_status_free(failure);
 }
 
 // Tests that failing an already-failed semaphore does not crash and preserves
@@ -256,18 +258,22 @@ TEST_P(SemaphoreTest, FailurePreservesStatusCode) {
 TEST_P(SemaphoreTest, DoubleFailurePreservesFirst) {
   iree_hal_semaphore_t* semaphore = CreateSemaphore();
 
-  iree_hal_semaphore_fail(
-      semaphore, iree_make_status(IREE_STATUS_DATA_LOSS, "first failure"));
+  iree_status_t failure =
+      iree_make_status(IREE_STATUS_DATA_LOSS, "first failure");
+  iree_hal_semaphore_fail(semaphore, iree_status_clone(failure));
   iree_hal_semaphore_fail(
       semaphore, iree_make_status(IREE_STATUS_CANCELLED, "second failure"));
 
   // The first failure status (DATA_LOSS) must be preserved.
   uint64_t value = 0;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
-                        iree_hal_semaphore_query(semaphore, &value));
+  iree_status_t status = iree_hal_semaphore_query(semaphore, &value);
   EXPECT_GE(value, IREE_HAL_SEMAPHORE_FAILURE_VALUE);
 
   iree_hal_semaphore_release(semaphore);
+  EXPECT_TRUE(iree_string_view_equal(iree_status_message(status),
+                                     iree_status_message(failure)));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS, status);
+  iree_status_free(failure);
 }
 
 CTS_REGISTER_TEST_SUITE(SemaphoreTest);

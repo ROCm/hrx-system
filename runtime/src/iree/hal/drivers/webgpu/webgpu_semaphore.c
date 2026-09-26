@@ -105,8 +105,8 @@ static void iree_hal_webgpu_semaphore_destroy(
 static uint64_t iree_hal_webgpu_semaphore_query(
     iree_async_semaphore_t* base_semaphore) {
   // Check for failure status and encode it as the HAL failure sentinel value.
-  // The HAL dispatch layer (semaphore.c) decodes this back to the original
-  // status code via iree_hal_semaphore_failure_as_status().
+  // The HAL dispatch layer clones the encoded status through
+  // iree_hal_semaphore_failure_as_status().
   iree_status_t failure = (iree_status_t)iree_atomic_load(
       &base_semaphore->failure_status, iree_memory_order_acquire);
   if (IREE_UNLIKELY(!iree_status_is_ok(failure))) {
@@ -142,11 +142,11 @@ static iree_status_t iree_hal_webgpu_semaphore_wait(
       (iree_async_semaphore_t*)base_semaphore;
 
   // Check for failure before checking the timeline value. Failure is sticky:
-  // once set, all waits return the failure code immediately.
+  // once set, all waits return an owned clone of the failure immediately.
   iree_status_t failure = (iree_status_t)iree_atomic_load(
       &async_semaphore->failure_status, iree_memory_order_acquire);
   if (IREE_UNLIKELY(!iree_status_is_ok(failure))) {
-    return iree_status_from_code(iree_status_code(failure));
+    return iree_status_clone(failure);
   }
 
   // Fast path: check if the semaphore has already reached the target value.

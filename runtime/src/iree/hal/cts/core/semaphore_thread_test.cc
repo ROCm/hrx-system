@@ -223,6 +223,8 @@ TEST_P(SemaphoreThreadTest, WaitThenFail) {
   iree_status_t wait_status = iree_hal_semaphore_wait(
       semaphore, 1, iree_make_deadline(IREE_TIME_INFINITE_FUTURE),
       IREE_ASYNC_WAIT_FLAG_NONE);
+  EXPECT_TRUE(iree_string_view_equal(iree_status_message(wait_status),
+                                     iree_status_message(status)));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, wait_status);
   uint64_t value = 1234;
   iree_status_t query_status = iree_hal_semaphore_query(semaphore, &value);
@@ -252,8 +254,8 @@ TEST_P(SemaphoreThreadTest, MultiWaitThenFail) {
   iree_status_t wait_status = iree_hal_semaphore_list_wait(
       semaphore_list, iree_make_deadline(IREE_TIME_INFINITE_FUTURE),
       IREE_ASYNC_WAIT_FLAG_NONE);
-  // multi_wait returns the actual failure code — the caller can follow up with
-  // a query to get the full status with message/backtrace if needed.
+  EXPECT_TRUE(iree_string_view_equal(iree_status_message(wait_status),
+                                     iree_status_message(status)));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, wait_status);
   uint64_t value = 1234;
   iree_status_t semaphore1_query_status =
@@ -290,6 +292,8 @@ TEST_P(SemaphoreThreadTest, DeviceMultiWaitThenFail) {
   iree_status_t wait_status = iree_hal_device_wait_semaphores(
       device_, IREE_ASYNC_WAIT_MODE_ANY, semaphore_list,
       iree_make_deadline(IREE_TIME_INFINITE_FUTURE), IREE_ASYNC_WAIT_FLAG_NONE);
+  EXPECT_TRUE(iree_string_view_equal(iree_status_message(wait_status),
+                                     iree_status_message(status)));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, wait_status);
   uint64_t value = 1234;
   iree_status_t semaphore1_query_status =

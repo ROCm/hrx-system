@@ -5,8 +5,11 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <cstdint>
+#include <future>
 #include <thread>
+#include <utility>
 
+#include "iree/async/frontier_tracker.h"
 #include "iree/base/internal/atomics.h"
 #include "iree/base/threading/notification.h"
 #include "iree/hal/api.h"
@@ -277,6 +280,10 @@ TEST_F(HostQueueFailureTest, DeferredOperationReportsRecordedQueueFailure) {
 // Submitted notification entries report the same recorded failure the deferred
 // operations above do.
 TEST_F(HostQueueFailureTest, SubmittedEntryReportsRecordedQueueFailure) {
+  std::promise<iree::Status> frontier_completion;
+  auto frontier_result = frontier_completion.get_future();
+  iree_async_single_frontier_t frontier;
+  iree_async_frontier_waiter_t frontier_waiter;
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   options.preallocate_pools = 0;
@@ -315,17 +322,39 @@ TEST_F(HostQueueFailureTest, SubmittedEntryReportsRecordedQueueFailure) {
                           sizeof(pattern), IREE_HAL_FILL_FLAG_NONE));
   EXPECT_FALSE(HostQueueHasPendingOps(queue));
 
-  iree_hal_amdgpu_host_queue_record_failure(
-      queue, iree_make_status(kInjectedFailureCode, "injected queue failure"));
+  // Register an independent causal consumer before the queue fails. It must
+  // receive the same diagnostic as the operation's signal semaphore.
+  iree_async_single_frontier_initialize(
+      &frontier, queue->axis, queue->notification_ring.epoch.next_submission);
+  IREE_ASSERT_OK(iree_async_frontier_tracker_wait(
+      queue->frontier_tracker,
+      iree_async_single_frontier_as_frontier(&frontier),
+      +[](void* user_data, iree_status_t status) {
+        static_cast<std::promise<iree::Status>*>(user_data)->set_value(
+            iree::Status(std::move(status)));
+      },
+      &frontier_completion, &frontier_waiter));
+
+  iree_status_t failure =
+      iree_make_status(kInjectedFailureCode, "injected queue failure");
+  iree_hal_amdgpu_host_queue_record_failure(queue, iree_status_clone(failure));
 
   // Release the hardware queue only after the failure is recorded so the fill
   // cannot have signalled its semaphore before the terminal transition began.
   iree_hsa_signal_store_screlease(IREE_LIBHSA(&libhsa_), blocker_signal, 0);
 
-  IREE_EXPECT_STATUS_IS(kInjectedFailureCode,
-                        iree_hal_semaphore_wait(signal_semaphore, signal_value,
-                                                iree_infinite_timeout(),
-                                                IREE_ASYNC_WAIT_FLAG_NONE));
+  iree_status_t wait_status = iree_hal_semaphore_wait(
+      signal_semaphore, signal_value, iree_infinite_timeout(),
+      IREE_ASYNC_WAIT_FLAG_NONE);
+  EXPECT_TRUE(iree_string_view_equal(iree_status_message(wait_status),
+                                     iree_status_message(failure)));
+  IREE_EXPECT_STATUS_IS(kInjectedFailureCode, wait_status);
+
+  iree::Status frontier_status = frontier_result.get();
+  EXPECT_TRUE(iree_string_view_equal(iree_status_message(frontier_status.get()),
+                                     iree_status_message(failure)));
+  EXPECT_EQ(frontier_status.code(), iree::StatusCode::kDataLoss);
+  iree_status_free(failure);
 
   WaitForSubmittedEpoch(&libhsa_, queue);
   IREE_EXPECT_OK(
