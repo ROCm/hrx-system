@@ -319,10 +319,10 @@ check.case public @loop_boundary_full_span_reversed_extrema {
   check.return
 }
 
-// Adjacent lanes take 10 or 9 iterations through the same pipelined loop. The
-// varying lower bound exercises divergent loop retirement while every lane
-// takes the read-ahead path; factors one and three distinguish the ordinary
-// and unrolled CFG shapes.
+// Four lane groups take 10, 9, 1, and 0 iterations through the same pipelined
+// loop. The varying lower bound exercises both sides of the read-ahead length
+// split and divergent loop retirement; factors one and three distinguish the
+// ordinary and unrolled CFG shapes.
 template.decl @loop_boundary.varying_start_sum(%values: view<64x20xi32>, %lane: index, %begin: index, %factor: index) -> (i32)
 
 template.def<@loop_boundary.varying_start_sum> @loop_boundary_varying_start_sum_impl(%values: view<64x20xi32>, %lane: index, %begin: index, %factor: index) -> (i32) {
@@ -345,10 +345,18 @@ kernel.def @loop_boundary_varying_start() {
 } launch(%input: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
   %threshold0 = index.constant 16 : index
+  %threshold1 = index.constant 32 : index
+  %threshold2 = index.constant 48 : index
   %start0 = index.constant 0 : index
   %start1 = index.constant 2 : index
+  %start2 = index.constant 18 : index
+  %start3 = index.constant 20 : index
   %in_group0 = index.cmp slt, %lane, %threshold0 : index
-  %begin = scf.select %in_group0, %start0, %start1 : index
+  %in_group1 = index.cmp slt, %lane, %threshold1 : index
+  %in_group2 = index.cmp slt, %lane, %threshold2 : index
+  %late_start = scf.select %in_group2, %start2, %start3 : index
+  %nonzero_start = scf.select %in_group1, %start1, %late_start : index
+  %begin = scf.select %in_group0, %start0, %nonzero_start : index
   %factor1 = index.constant 1 : index
   %factor3 = index.constant 3 : index
   %input_base = index.constant 0 : offset
@@ -367,29 +375,39 @@ kernel.def @loop_boundary_varying_start() {
   kernel.return
 }
 
-check.case public @loop_boundary_varying_long_path_starts {
+check.case public @loop_boundary_varying_length_starts {
   %input = check.generate.iota offset(1) step(1) period(20) : tensor<64x20xi32>
   %output = check.generate.fill value(-77) : tensor<140xi32>
   kernel.launch @loop_boundary_varying_start(%input, %output) : (tensor<64x20xi32>, tensor<140xi32>)
 
   %expected0 = check.generate.fill value(100) : tensor<16xi32>
-  %expected1 = check.generate.fill value(99) : tensor<48xi32>
+  %expected1 = check.generate.fill value(99) : tensor<16xi32>
+  %expected2 = check.generate.fill value(19) : tensor<16xi32>
+  %expected3 = check.generate.fill value(0) : tensor<16xi32>
   %expected_guard = check.generate.fill value(-77) : tensor<4xi32>
 
   %prefix = check.tensor.view %output offset(0) : tensor<140xi32> -> tensor<4xi32>
   %factor1_group0 = check.tensor.view %output offset(16) : tensor<140xi32> -> tensor<16xi32>
-  %factor1_group1 = check.tensor.view %output offset(80) : tensor<140xi32> -> tensor<48xi32>
+  %factor1_group1 = check.tensor.view %output offset(80) : tensor<140xi32> -> tensor<16xi32>
+  %factor1_group2 = check.tensor.view %output offset(144) : tensor<140xi32> -> tensor<16xi32>
+  %factor1_group3 = check.tensor.view %output offset(208) : tensor<140xi32> -> tensor<16xi32>
   %middle = check.tensor.view %output offset(272) : tensor<140xi32> -> tensor<4xi32>
   %factor3_group0 = check.tensor.view %output offset(288) : tensor<140xi32> -> tensor<16xi32>
-  %factor3_group1 = check.tensor.view %output offset(352) : tensor<140xi32> -> tensor<48xi32>
+  %factor3_group1 = check.tensor.view %output offset(352) : tensor<140xi32> -> tensor<16xi32>
+  %factor3_group2 = check.tensor.view %output offset(416) : tensor<140xi32> -> tensor<16xi32>
+  %factor3_group3 = check.tensor.view %output offset(480) : tensor<140xi32> -> tensor<16xi32>
   %suffix = check.tensor.view %output offset(544) : tensor<140xi32> -> tensor<4xi32>
 
   check.expect.equal actual(%prefix) expected(%expected_guard) : tensor<4xi32>
   check.expect.equal actual(%factor1_group0) expected(%expected0) : tensor<16xi32>
-  check.expect.equal actual(%factor1_group1) expected(%expected1) : tensor<48xi32>
+  check.expect.equal actual(%factor1_group1) expected(%expected1) : tensor<16xi32>
+  check.expect.equal actual(%factor1_group2) expected(%expected2) : tensor<16xi32>
+  check.expect.equal actual(%factor1_group3) expected(%expected3) : tensor<16xi32>
   check.expect.equal actual(%middle) expected(%expected_guard) : tensor<4xi32>
   check.expect.equal actual(%factor3_group0) expected(%expected0) : tensor<16xi32>
-  check.expect.equal actual(%factor3_group1) expected(%expected1) : tensor<48xi32>
+  check.expect.equal actual(%factor3_group1) expected(%expected1) : tensor<16xi32>
+  check.expect.equal actual(%factor3_group2) expected(%expected2) : tensor<16xi32>
+  check.expect.equal actual(%factor3_group3) expected(%expected3) : tensor<16xi32>
   check.expect.equal actual(%suffix) expected(%expected_guard) : tensor<4xi32>
   check.return
 }

@@ -1154,9 +1154,20 @@ static iree_status_t loom_amdgpu_prepare_exec_mask_branch(
   bool has_false_passthrough = loom_amdgpu_try_false_passthrough_continuation(
       loom_cfg_cond_br_false_dest(source_op), &passthrough_continuation,
       &passthrough_terminator);
+  bool false_path_is_direct_passthrough = false;
+  if (has_false_passthrough) {
+    const uint16_t false_entry =
+        loom_cfg_cond_br_false_dest(source_op)->region_index;
+    false_path_is_direct_passthrough =
+        facts->regions.blocks[false_entry].continuation_index ==
+        passthrough_continuation->region_index;
+  }
   const loom_cfg_region_t* true_region = NULL;
   const loom_cfg_region_t* false_region = NULL;
-  if ((immediate_diamond || !has_false_passthrough) &&
+  // A one-branch false block is only a passthrough when it jumps directly to
+  // its retained region continuation. A loop preheader has the same local
+  // shape but enters the complete false region before converging.
+  if ((immediate_diamond || !false_path_is_direct_passthrough) &&
       loom_amdgpu_try_if_else_regions(facts, source_op, &true_region,
                                       &false_region)) {
     return loom_amdgpu_prepare_if_else_regions(context, source_op, true_region,
