@@ -1,0 +1,35 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_tiled_channel.loom-test
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+// A flattened tile coordinate addresses the input while its remainder selects
+// an integer channel weight. Only the full input address needs the row
+// contribution.
+func.def @tiled_channel_load(%input: buffer, %row: index, %lane: index) -> (i32) {
+  %bounded_row = index.assume %row [range(%row, 0, 15)] : index
+  %bounded_lane = index.assume %lane [range(%lane, 0, 255)] : index
+  %stride = index.constant 256 : index
+  %linear = index.madd %bounded_row, %stride, %bounded_lane : index
+  %channel = index.rem %linear, %stride : index
+  %base = index.constant 0 : offset
+  %data = buffer.view %input[%base] : buffer -> view<4096xi32>
+  %value = view.load %data[%linear] : view<4096xi32> -> i32
+  %weight = view.load %data[%channel] : view<4096xi32> -> i32
+  %result = scalar.muli %value, %weight : i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @tiled_channel_load(%bounded_row: reg<aie2p.er>, %bounded_lane: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %data = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %20 = mov.i32 10
+  %21 = lshl %bounded_row, %20
+  %22 = mov.i32 2
+  %23 = lshl %bounded_lane, %22
+  %24 = add.rr %21, %23
+  %25 = mov.address-index %24
+  %value = lda.i32.index %data, %25
+  %29 = mov.address-index %23
+  %weight = lda.i32.index %data, %29
+  %result = mul %value, %weight
+  return %result
+}

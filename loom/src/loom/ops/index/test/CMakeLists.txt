@@ -14,6 +14,7 @@ loom_check_test_suite(
     test
   SRCS
     "fold.loom-test"
+    "mask_projection.loom-test"
     "roundtrip.loom-test"
     "subtraction.loom-test"
     "verify.loom-test"
