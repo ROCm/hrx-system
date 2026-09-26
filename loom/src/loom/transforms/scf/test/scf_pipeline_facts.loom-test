@@ -177,15 +177,17 @@ func.def @nested_carried_policy(%input: view<8xf32>, %initial: f32) -> (f32) {
 // ====
 // RUN: with-checks pass pipeline-scf-for,scf-to-cfg,vector-memory-footprint
 
-// The guarded long path proves each cloned startup producer is in the source
-// loop domain even when the dynamic lower bound's numeric range includes end.
-func.def @dynamic_lower_preserves_startup_domain(%input: view<20xi32>, %lower_raw: index, %initial: i32) -> (i32) {
+// The guarded long path retains each cloned startup producer in the source
+// loop domain even after the address has been flattened with an outer index.
+func.def @dynamic_lower_preserves_startup_domain(%input: view<1280xi32>, %lane_raw: index, %lower_raw: index, %initial: i32) -> (i32) {
+  %lane = index.assume %lane_raw [range(%lane_raw, 0, 63)] : index
   %lower = index.assume %lower_raw [range(%lower_raw, 0, 20)] : index
   %end = index.constant 20 : index
   %step = index.constant 2 : index
   %depth = index.constant 3 : index
   %result = scf.for %i = [%lower to %end step %step](%sum = %initial : i32) -> (i32) pipeline(%depth) {
-    %value = view.load %input[%i] : view<20xi32> -> i32
+    %address = index.madd %lane, %end, %i : index
+    %value = view.load %input[%address] : view<1280xi32> -> i32
     %next = scalar.addi %sum, %value : i32
     scf.yield %next : i32
   }
@@ -194,7 +196,7 @@ func.def @dynamic_lower_preserves_startup_domain(%input: view<20xi32>, %lower_ra
 
 // ----
 CHECK: *cfg.cond_br*
-CHECK-NOT: *index.assume %lower [lt(%lower, %end)]*
-CHECK: * = view.load %input[%lower] : view<20xi32> -> i32
+CHECK: * = index.assume %lower [lt(%lower, %end)] : index
+CHECK: * = view.load %input[*] : view<1280xi32> -> i32
 CHECK-NOT: *index.assume * [ge(*, %lower), lt(*, %end)]*
-CHECK: * = view.load %input[*] : view<20xi32> -> i32
+CHECK: * = view.load %input[*] : view<1280xi32> -> i32
