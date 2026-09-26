@@ -1,0 +1,332 @@
+// Equal-width formats preserve their bits through ordinary memory transfers.
+func.def @copy_word_scalar(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source_half = buffer.view %input[%base] : buffer -> view<3xf16>
+  %source_bfloat = buffer.view %input[%base] : buffer -> view<3xbf16>
+  %source_integer = buffer.view %input[%base] : buffer -> view<3xi16>
+  %target_half = buffer.view %output[%base] : buffer -> view<3xf16>
+  %target_bfloat = buffer.view %output[%base] : buffer -> view<3xbf16>
+  %target_integer = buffer.view %output[%base] : buffer -> view<3xi16>
+  %half = view.load %source_half[0] : view<3xf16> -> f16
+  %bfloat = view.load %source_bfloat[1] : view<3xbf16> -> bf16
+  %integer = view.load %source_integer[2] : view<3xi16> -> i16
+  view.store %half, %target_half[0] : f16, view<3xf16>
+  view.store %bfloat, %target_bfloat[1] : bf16, view<3xbf16>
+  view.store %integer, %target_integer[2] : i16, view<3xi16>
+  func.return
+}
+
+// Eight words occupy sixteen consecutive bytes in each numeric format.
+func.def @copy_word_vector(%input: buffer, %output: buffer) {
+  %first = index.constant 0 : offset
+  %second = index.constant 16 : offset
+  %third = index.constant 32 : offset
+  %source_half = buffer.view %input[%first] : buffer -> view<8xf16>
+  %source_bfloat = buffer.view %input[%second] : buffer -> view<8xbf16>
+  %source_integer = buffer.view %input[%third] : buffer -> view<8xi16>
+  %target_half = buffer.view %output[%first] : buffer -> view<8xf16>
+  %target_bfloat = buffer.view %output[%second] : buffer -> view<8xbf16>
+  %target_integer = buffer.view %output[%third] : buffer -> view<8xi16>
+  %half = vector.load %source_half[0] : view<8xf16> -> vector<8xf16>
+  %bfloat = vector.load %source_bfloat[0] : view<8xbf16> -> vector<8xbf16>
+  %integer = vector.load %source_integer[0] : view<8xi16> -> vector<8xi16>
+  vector.store %half, %target_half[0] : vector<8xf16>, view<8xf16>
+  vector.store %bfloat, %target_bfloat[0] : vector<8xbf16>, view<8xbf16>
+  vector.store %integer, %target_integer[0] : vector<8xi16>, view<8xi16>
+  func.return
+}
+
+func.def @copy_word_vector_wide(%input: buffer, %output: buffer) {
+  %first = index.constant 0 : offset
+  %second = index.constant 32 : offset
+  %third = index.constant 64 : offset
+  %source_half = buffer.view %input[%first] : buffer -> view<16xf16>
+  %source_bfloat = buffer.view %input[%second] : buffer -> view<16xbf16>
+  %source_integer = buffer.view %input[%third] : buffer -> view<16xi16>
+  %target_half = buffer.view %output[%first] : buffer -> view<16xf16>
+  %target_bfloat = buffer.view %output[%second] : buffer -> view<16xbf16>
+  %target_integer = buffer.view %output[%third] : buffer -> view<16xi16>
+  %half = vector.load %source_half[0] : view<16xf16> -> vector<16xf16>
+  %bfloat = vector.load %source_bfloat[0] : view<16xbf16> -> vector<16xbf16>
+  %integer = vector.load %source_integer[0] : view<16xi16> -> vector<16xi16>
+  vector.store %half, %target_half[0] : vector<16xf16>, view<16xf16>
+  vector.store %bfloat, %target_bfloat[0] : vector<16xbf16>, view<16xbf16>
+  vector.store %integer, %target_integer[0] : vector<16xi16>, view<16xi16>
+  func.return
+}
+
+func.def @copy_word_vector_large(%input: buffer, %output: buffer) {
+  %first = index.constant 0 : offset
+  %second = index.constant 64 : offset
+  %third = index.constant 128 : offset
+  %source_half = buffer.view %input[%first] : buffer -> view<32xf16>
+  %source_bfloat = buffer.view %input[%second] : buffer -> view<32xbf16>
+  %source_integer = buffer.view %input[%third] : buffer -> view<32xi16>
+  %target_half = buffer.view %output[%first] : buffer -> view<32xf16>
+  %target_bfloat = buffer.view %output[%second] : buffer -> view<32xbf16>
+  %target_integer = buffer.view %output[%third] : buffer -> view<32xi16>
+  %half = vector.load %source_half[0] : view<32xf16> -> vector<32xf16>
+  %bfloat = vector.load %source_bfloat[0] : view<32xbf16> -> vector<32xbf16>
+  %integer = vector.load %source_integer[0] : view<32xi16> -> vector<32xi16>
+  vector.store %half, %target_half[0] : vector<32xf16>, view<32xf16>
+  vector.store %bfloat, %target_bfloat[0] : vector<32xbf16>, view<32xbf16>
+  vector.store %integer, %target_integer[0] : vector<32xi16>, view<32xi16>
+  func.return
+}
+
+// Packed records can place complete word vectors at odd byte origins.
+func.def @copy_word_unaligned(%input: buffer, %output: buffer) {
+  %first = index.constant 1 : offset
+  %second = index.constant 17 : offset
+  %third = index.constant 33 : offset
+  %source_half = buffer.view %input[%first] : buffer -> view<8xf16, align(1)>
+  %source_bfloat = buffer.view %input[%second] : buffer -> view<8xbf16, align(1)>
+  %source_integer = buffer.view %input[%third] : buffer -> view<8xi16, align(1)>
+  %target_half = buffer.view %output[%first] : buffer -> view<8xf16, align(1)>
+  %target_bfloat = buffer.view %output[%second] : buffer -> view<8xbf16, align(1)>
+  %target_integer = buffer.view %output[%third] : buffer -> view<8xi16, align(1)>
+  %half = vector.load %source_half[0] : view<8xf16, align(1)> -> vector<8xf16>
+  %bfloat = vector.load %source_bfloat[0] : view<8xbf16, align(1)> -> vector<8xbf16>
+  %integer = vector.load %source_integer[0] : view<8xi16, align(1)> -> vector<8xi16>
+  vector.store %half, %target_half[0] : vector<8xf16>, view<8xf16, align(1)>
+  vector.store %bfloat, %target_bfloat[0] : vector<8xbf16>, view<8xbf16, align(1)>
+  vector.store %integer, %target_integer[0] : vector<8xi16>, view<8xi16, align(1)>
+  func.return
+}
+
+// Three-word tails must not read or write a fourth word.
+func.def @copy_word_tail(%input: buffer, %output: buffer) {
+  %first = index.constant 1 : offset
+  %second = index.constant 7 : offset
+  %third = index.constant 13 : offset
+  %source_half = buffer.view %input[%first] : buffer -> view<3xf16, align(1)>
+  %source_bfloat = buffer.view %input[%second] : buffer -> view<3xbf16, align(1)>
+  %source_integer = buffer.view %input[%third] : buffer -> view<3xi16, align(1)>
+  %target_half = buffer.view %output[%first] : buffer -> view<3xf16, align(1)>
+  %target_bfloat = buffer.view %output[%second] : buffer -> view<3xbf16, align(1)>
+  %target_integer = buffer.view %output[%third] : buffer -> view<3xi16, align(1)>
+  %half = vector.load %source_half[0] : view<3xf16, align(1)> -> vector<3xf16>
+  %bfloat = vector.load %source_bfloat[0] : view<3xbf16, align(1)> -> vector<3xbf16>
+  %integer = vector.load %source_integer[0] : view<3xi16, align(1)> -> vector<3xi16>
+  vector.store %half, %target_half[0] : vector<3xf16>, view<3xf16, align(1)>
+  vector.store %bfloat, %target_bfloat[0] : vector<3xbf16>, view<3xbf16, align(1)>
+  vector.store %integer, %target_integer[0] : vector<3xi16>, view<3xi16, align(1)>
+  func.return
+}
+
+// Runtime byte origins remain distinct from the two-byte element coordinate.
+func.def @copy_word_index(%input: buffer, %output: buffer, %byte_offset: offset, %element: index) {
+  %base = index.assume %byte_offset [range(%byte_offset, 0, 128)] : offset
+  %position = index.assume %element [range(%element, 0, 7)] : index
+  %source_half = buffer.view %input[%base] : buffer -> view<8xf16, align(1)>
+  %source_bfloat_base = buffer.view %input[%base] : buffer -> view<24xbf16, align(1)>
+  %source_integer_base = buffer.view %input[%base] : buffer -> view<24xi16, align(1)>
+  %target_half = buffer.view %output[%base] : buffer -> view<8xf16, align(1)>
+  %target_bfloat_base = buffer.view %output[%base] : buffer -> view<24xbf16, align(1)>
+  %target_integer_base = buffer.view %output[%base] : buffer -> view<24xi16, align(1)>
+  %source_bfloat = view.subview %source_bfloat_base[8] : view<24xbf16, align(1)> -> view<8xbf16, align(1)>
+  %source_integer = view.subview %source_integer_base[16] : view<24xi16, align(1)> -> view<8xi16, align(1)>
+  %target_bfloat = view.subview %target_bfloat_base[8] : view<24xbf16, align(1)> -> view<8xbf16, align(1)>
+  %target_integer = view.subview %target_integer_base[16] : view<24xi16, align(1)> -> view<8xi16, align(1)>
+  %half = view.load %source_half[%position] : view<8xf16, align(1)> -> f16
+  %bfloat = view.load %source_bfloat[%position] : view<8xbf16, align(1)> -> bf16
+  %integer = view.load %source_integer[%position] : view<8xi16, align(1)> -> i16
+  view.store %half, %target_half[%position] : f16, view<8xf16, align(1)>
+  view.store %bfloat, %target_bfloat[%position] : bf16, view<8xbf16, align(1)>
+  view.store %integer, %target_integer[%position] : i16, view<8xi16, align(1)>
+  func.return
+}
+
+func.def @copy_word_stride(%input: buffer, %output: buffer, %column_count: index, %row_index: index, %column_index: index) {
+  %columns = index.assume %column_count [range(%column_count, 1, 16)] : index
+  %row = index.assume %row_index [range(%row_index, 0, 3)] : index
+  %column = index.assume %column_index [range(%column_index, 0, 15), lt(%column_index, %columns)] : index
+  %base = index.constant 3 : offset
+  %source = buffer.view %input[%base] : buffer -> view<4x[%columns]xbf16, align(1)>
+  %target = buffer.view %output[%base] : buffer -> view<4x[%columns]xbf16, align(1)>
+  %value = view.load %source[%row, %column] : view<4x[%columns]xbf16, align(1)> -> bf16
+  view.store %value, %target[%row, %column] : bf16, view<4x[%columns]xbf16, align(1)>
+  func.return
+}
+
+func.def @copy_word_volatile(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<1xbf16>
+  %target = buffer.view %output[%base] : buffer -> view<2xbf16>
+  %first = view.load<volatile> %source[0] : view<1xbf16> -> bf16
+  %second = view.load<volatile> %source[0] : view<1xbf16> -> bf16
+  view.store<volatile> %first, %target[0] : bf16, view<2xbf16>
+  view.store<volatile> %second, %target[1] : bf16, view<2xbf16>
+  func.return
+}
+
+// Word transfers preserve their raw bits, inputs, and adjacent storage.
+check.scenario @word_memory {
+  check.trial[8](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-32768 to 32767) : tensor<3xi16>
+    %output = check.generate.fill value(-21846) : tensor<3xi16>
+    %expected = check.generate.random.uniform seed(%seed) range(-32768 to 32767) : tensor<3xi16>
+    check.compare<@copy_word_scalar>(%input, %output) : (tensor<3xi16>, tensor<3xi16>) -> () {
+      check.expect.bitwise actual(%output) expected(%expected) : tensor<3xi16>
+      check.expect.bitwise actual(%input) expected(%expected) : tensor<3xi16>
+    }
+  }
+  check.trial[8](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-32768 to 32767) : tensor<24xi16>
+    %output = check.generate.fill value(-21846) : tensor<24xi16>
+    %expected = check.generate.random.uniform seed(%seed) range(-32768 to 32767) : tensor<24xi16>
+    check.compare<@copy_word_vector>(%input, %output) : (tensor<24xi16>, tensor<24xi16>) -> () {
+      check.expect.bitwise actual(%output) expected(%expected) : tensor<24xi16>
+      check.expect.bitwise actual(%input) expected(%expected) : tensor<24xi16>
+    }
+  }
+  check.trial[8](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-32768 to 32767) : tensor<48xi16>
+    %output = check.generate.fill value(-21846) : tensor<48xi16>
+    %expected = check.generate.random.uniform seed(%seed) range(-32768 to 32767) : tensor<48xi16>
+    check.compare<@copy_word_vector_wide>(%input, %output) : (tensor<48xi16>, tensor<48xi16>) -> () {
+      check.expect.bitwise actual(%output) expected(%expected) : tensor<48xi16>
+      check.expect.bitwise actual(%input) expected(%expected) : tensor<48xi16>
+    }
+  }
+  check.trial[8](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-32768 to 32767) : tensor<96xi16>
+    %output = check.generate.fill value(-21846) : tensor<96xi16>
+    %expected = check.generate.random.uniform seed(%seed) range(-32768 to 32767) : tensor<96xi16>
+    check.compare<@copy_word_vector_large>(%input, %output) : (tensor<96xi16>, tensor<96xi16>) -> () {
+      check.expect.bitwise actual(%output) expected(%expected) : tensor<96xi16>
+      check.expect.bitwise actual(%input) expected(%expected) : tensor<96xi16>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1) step(1) period(97) : tensor<50xi8>
+    %output = check.generate.fill value(-85) : tensor<50xi8>
+    %output_prefix = check.tensor.view %output offset(0) : tensor<50xi8> -> tensor<1xi8>
+    %output_payload = check.tensor.view %output offset(1) : tensor<50xi8> -> tensor<48xi8>
+    %output_suffix = check.tensor.view %output offset(49) : tensor<50xi8> -> tensor<1xi8>
+    %expected_input = check.generate.iota offset(1) step(1) period(97) : tensor<50xi8>
+    %expected_payload = check.generate.iota offset(2) step(1) period(97) : tensor<48xi8>
+    %expected_guard = check.generate.fill value(-85) : tensor<1xi8>
+    check.compare<@copy_word_unaligned>(%input, %output) : (tensor<50xi8>, tensor<50xi8>) -> () {
+      check.expect.bitwise actual(%output_prefix) expected(%expected_guard) : tensor<1xi8>
+      check.expect.bitwise actual(%output_payload) expected(%expected_payload) : tensor<48xi8>
+      check.expect.bitwise actual(%output_suffix) expected(%expected_guard) : tensor<1xi8>
+      check.expect.bitwise actual(%input) expected(%expected_input) : tensor<50xi8>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1) step(1) period(97) : tensor<20xi8>
+    %output = check.generate.fill value(-85) : tensor<20xi8>
+    %output_prefix = check.tensor.view %output offset(0) : tensor<20xi8> -> tensor<1xi8>
+    %output_payload = check.tensor.view %output offset(1) : tensor<20xi8> -> tensor<18xi8>
+    %output_suffix = check.tensor.view %output offset(19) : tensor<20xi8> -> tensor<1xi8>
+    %expected_input = check.generate.iota offset(1) step(1) period(97) : tensor<20xi8>
+    %expected_payload = check.generate.iota offset(2) step(1) period(97) : tensor<18xi8>
+    %expected_guard = check.generate.fill value(-85) : tensor<1xi8>
+    check.compare<@copy_word_tail>(%input, %output) : (tensor<20xi8>, tensor<20xi8>) -> () {
+      check.expect.bitwise actual(%output_prefix) expected(%expected_guard) : tensor<1xi8>
+      check.expect.bitwise actual(%output_payload) expected(%expected_payload) : tensor<18xi8>
+      check.expect.bitwise actual(%output_suffix) expected(%expected_guard) : tensor<1xi8>
+      check.expect.bitwise actual(%input) expected(%expected_input) : tensor<20xi8>
+    }
+  }
+  check.trial[8](%element: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1) step(1) period(97) : tensor<224xi8>
+    %output = check.generate.fill value(-85) : tensor<224xi8>
+    %expected_input = check.generate.iota offset(1) step(1) period(97) : tensor<224xi8>
+    %base = check.literal value(0) : offset
+    check.compare<@copy_word_index>(%input, %output, %base, %element) : (tensor<224xi8>, tensor<224xi8>, offset, index) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<224xi8>
+      check.expect.bitwise actual(%input) expected(%expected_input) : tensor<224xi8>
+    }
+  }
+  check.trial[8](%element: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1) step(1) period(97) : tensor<224xi8>
+    %output = check.generate.fill value(-85) : tensor<224xi8>
+    %expected_input = check.generate.iota offset(1) step(1) period(97) : tensor<224xi8>
+    %base = check.literal value(1) : offset
+    check.compare<@copy_word_index>(%input, %output, %base, %element) : (tensor<224xi8>, tensor<224xi8>, offset, index) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<224xi8>
+      check.expect.bitwise actual(%input) expected(%expected_input) : tensor<224xi8>
+    }
+  }
+  check.trial[8](%element: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1) step(1) period(97) : tensor<224xi8>
+    %output = check.generate.fill value(-85) : tensor<224xi8>
+    %expected_input = check.generate.iota offset(1) step(1) period(97) : tensor<224xi8>
+    %base = check.literal value(31) : offset
+    check.compare<@copy_word_index>(%input, %output, %base, %element) : (tensor<224xi8>, tensor<224xi8>, offset, index) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<224xi8>
+      check.expect.bitwise actual(%input) expected(%expected_input) : tensor<224xi8>
+    }
+  }
+  check.trial[8](%element: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1) step(1) period(97) : tensor<224xi8>
+    %output = check.generate.fill value(-85) : tensor<224xi8>
+    %expected_input = check.generate.iota offset(1) step(1) period(97) : tensor<224xi8>
+    %base = check.literal value(128) : offset
+    check.compare<@copy_word_index>(%input, %output, %base, %element) : (tensor<224xi8>, tensor<224xi8>, offset, index) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<224xi8>
+      check.expect.bitwise actual(%input) expected(%expected_input) : tensor<224xi8>
+    }
+  }
+  check.trial[4](%row: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1) step(1) period(127) : tensor<139xi8>
+    %output = check.generate.fill value(-85) : tensor<139xi8>
+    %expected_input = check.generate.iota offset(1) step(1) period(127) : tensor<139xi8>
+    %columns = check.literal value(1) : index
+    %column = check.literal value(0) : index
+    check.compare<@copy_word_stride>(%input, %output, %columns, %row, %column) : (tensor<139xi8>, tensor<139xi8>, index, index, index) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<139xi8>
+      check.expect.bitwise actual(%input) expected(%expected_input) : tensor<139xi8>
+    }
+  }
+  check.trial[3](%column: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1) step(1) period(127) : tensor<139xi8>
+    %output = check.generate.fill value(-85) : tensor<139xi8>
+    %expected_input = check.generate.iota offset(1) step(1) period(127) : tensor<139xi8>
+    %columns = check.literal value(3) : index
+    %row = check.literal value(1) : index
+    check.compare<@copy_word_stride>(%input, %output, %columns, %row, %column) : (tensor<139xi8>, tensor<139xi8>, index, index, index) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<139xi8>
+      check.expect.bitwise actual(%input) expected(%expected_input) : tensor<139xi8>
+    }
+  }
+  check.trial[7](%column: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1) step(1) period(127) : tensor<139xi8>
+    %output = check.generate.fill value(-85) : tensor<139xi8>
+    %expected_input = check.generate.iota offset(1) step(1) period(127) : tensor<139xi8>
+    %columns = check.literal value(7) : index
+    %row = check.literal value(2) : index
+    check.compare<@copy_word_stride>(%input, %output, %columns, %row, %column) : (tensor<139xi8>, tensor<139xi8>, index, index, index) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<139xi8>
+      check.expect.bitwise actual(%input) expected(%expected_input) : tensor<139xi8>
+    }
+  }
+  check.trial[16](%column: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1) step(1) period(127) : tensor<139xi8>
+    %output = check.generate.fill value(-85) : tensor<139xi8>
+    %expected_input = check.generate.iota offset(1) step(1) period(127) : tensor<139xi8>
+    %columns = check.literal value(16) : index
+    %row = check.literal value(3) : index
+    check.compare<@copy_word_stride>(%input, %output, %columns, %row, %column) : (tensor<139xi8>, tensor<139xi8>, index, index, index) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<139xi8>
+      check.expect.bitwise actual(%input) expected(%expected_input) : tensor<139xi8>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(17) step(13) : tensor<2xi8>
+    %output = check.generate.fill value(-85) : tensor<4xi8>
+    %expected_input = check.generate.iota offset(17) step(13) : tensor<2xi8>
+    %expected_output = check.generate.iota offset(17) step(13) period(2) : tensor<4xi8>
+    check.compare<@copy_word_volatile>(%input, %output) : (tensor<2xi8>, tensor<4xi8>) -> () {
+      check.expect.bitwise actual(%output) expected(%expected_output) : tensor<4xi8>
+      check.expect.bitwise actual(%input) expected(%expected_input) : tensor<2xi8>
+    }
+  }
+  check.return
+}

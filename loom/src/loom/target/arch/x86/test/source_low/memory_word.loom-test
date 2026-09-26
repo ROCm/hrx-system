@@ -1,112 +1,71 @@
-// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_word.loom
-// RUN: emit source-low target=x86:avx2 output=low
+// RUN: with-checks emit source-low target=x86:avx2 output=low
 
-// Equal-width formats preserve their bits through ordinary memory transfers.
-func.def @copy_word_scalar(%input: buffer, %output: buffer) {
-  %base = index.constant 0 : offset
-  %source_half = buffer.view %input[%base] : buffer -> view<3xf16>
-  %source_bfloat = buffer.view %input[%base] : buffer -> view<3xbf16>
-  %source_integer = buffer.view %input[%base] : buffer -> view<3xi16>
-  %target_half = buffer.view %output[%base] : buffer -> view<3xf16>
-  %target_bfloat = buffer.view %output[%base] : buffer -> view<3xbf16>
-  %target_integer = buffer.view %output[%base] : buffer -> view<3xi16>
-  %half = view.load %source_half[0] : view<3xf16> -> f16
-  %bfloat = view.load %source_bfloat[1] : view<3xbf16> -> bf16
-  %integer = view.load %source_integer[2] : view<3xi16> -> i16
-  view.store %half, %target_half[0] : f16, view<3xf16>
-  view.store %bfloat, %target_bfloat[1] : bf16, view<3xbf16>
-  view.store %integer, %target_integer[2] : i16, view<3xi16>
+// Word vectors that fit in AVX2 registers remain SIMD transfers for every
+// 16-bit numeric format.
+func.def @copy_word_vectors(%input: buffer, %output: buffer) {
+  %half8_offset = index.constant 0 : offset
+  %bfloat8_offset = index.constant 16 : offset
+  %integer8_offset = index.constant 32 : offset
+  %half16_offset = index.constant 48 : offset
+  %bfloat16_offset = index.constant 80 : offset
+  %integer16_offset = index.constant 112 : offset
+  %source_half8 = buffer.view %input[%half8_offset] : buffer -> view<8xf16>
+  %source_bfloat8 = buffer.view %input[%bfloat8_offset] : buffer -> view<8xbf16>
+  %source_integer8 = buffer.view %input[%integer8_offset] : buffer -> view<8xi16>
+  %source_half16 = buffer.view %input[%half16_offset] : buffer -> view<16xf16>
+  %source_bfloat16 = buffer.view %input[%bfloat16_offset] : buffer -> view<16xbf16>
+  %source_integer16 = buffer.view %input[%integer16_offset] : buffer -> view<16xi16>
+  %target_half8 = buffer.view %output[%half8_offset] : buffer -> view<8xf16>
+  %target_bfloat8 = buffer.view %output[%bfloat8_offset] : buffer -> view<8xbf16>
+  %target_integer8 = buffer.view %output[%integer8_offset] : buffer -> view<8xi16>
+  %target_half16 = buffer.view %output[%half16_offset] : buffer -> view<16xf16>
+  %target_bfloat16 = buffer.view %output[%bfloat16_offset] : buffer -> view<16xbf16>
+  %target_integer16 = buffer.view %output[%integer16_offset] : buffer -> view<16xi16>
+  %half8 = vector.load %source_half8[0] : view<8xf16> -> vector<8xf16>
+  %bfloat8 = vector.load %source_bfloat8[0] : view<8xbf16> -> vector<8xbf16>
+  %integer8 = vector.load %source_integer8[0] : view<8xi16> -> vector<8xi16>
+  %half16 = vector.load %source_half16[0] : view<16xf16> -> vector<16xf16>
+  %bfloat16 = vector.load %source_bfloat16[0] : view<16xbf16> -> vector<16xbf16>
+  %integer16 = vector.load %source_integer16[0] : view<16xi16> -> vector<16xi16>
+  vector.store %half8, %target_half8[0] : vector<8xf16>, view<8xf16>
+  vector.store %bfloat8, %target_bfloat8[0] : vector<8xbf16>, view<8xbf16>
+  vector.store %integer8, %target_integer8[0] : vector<8xi16>, view<8xi16>
+  vector.store %half16, %target_half16[0] : vector<16xf16>, view<16xf16>
+  vector.store %bfloat16, %target_bfloat16[0] : vector<16xbf16>, view<16xbf16>
+  vector.store %integer16, %target_integer16[0] : vector<16xi16>, view<16xi16>
   func.return
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @copy_word_scalar(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
-  %half = movzx.load.u16.gpr32 %input {disp32 = 0}
-  %bfloat = movzx.load.u16.gpr32 %input {disp32 = 2}
-  %integer = movzx.load.u16.gpr32 %input {disp32 = 4}
-  mov.store.u16.gpr32 %half, %output {disp32 = 0}
-  mov.store.u16.gpr32 %bfloat, %output {disp32 = 2}
-  mov.store.u16.gpr32 %integer, %output {disp32 = 4}
-  return
-}
+CHECK: %half8 = vmovdqu32.load.xmm %input {disp32 = 0}
+CHECK: %bfloat8 = vmovdqu32.load.xmm %input {disp32 = 16}
+CHECK: %integer8 = vmovdqu32.load.xmm %input {disp32 = 32}
+CHECK: %half16 = vmovdqu32.load.ymm %input {disp32 = 48}
+CHECK: %bfloat16 = vmovdqu32.load.ymm %input {disp32 = 80}
+CHECK: %integer16 = vmovdqu32.load.ymm %input {disp32 = 112}
+CHECK: vmovdqu32.store.xmm %half8, %output {disp32 = 0}
+CHECK: vmovdqu32.store.xmm %bfloat8, %output {disp32 = 16}
+CHECK: vmovdqu32.store.xmm %integer8, %output {disp32 = 32}
+CHECK: vmovdqu32.store.ymm %half16, %output {disp32 = 48}
+CHECK: vmovdqu32.store.ymm %bfloat16, %output {disp32 = 80}
+CHECK: vmovdqu32.store.ymm %integer16, %output {disp32 = 112}
+CHECK-NOT: *movzx.load.u16*
 
 // ====
 
-// Eight words occupy sixteen consecutive bytes in each numeric format.
-func.def @copy_word_vector(%input: buffer, %output: buffer) {
-  %first = index.constant 0 : offset
-  %second = index.constant 16 : offset
-  %third = index.constant 32 : offset
-  %source_half = buffer.view %input[%first] : buffer -> view<8xf16>
-  %source_bfloat = buffer.view %input[%second] : buffer -> view<8xbf16>
-  %source_integer = buffer.view %input[%third] : buffer -> view<8xi16>
-  %target_half = buffer.view %output[%first] : buffer -> view<8xf16>
-  %target_bfloat = buffer.view %output[%second] : buffer -> view<8xbf16>
-  %target_integer = buffer.view %output[%third] : buffer -> view<8xi16>
-  %half = vector.load %source_half[0] : view<8xf16> -> vector<8xf16>
-  %bfloat = vector.load %source_bfloat[0] : view<8xbf16> -> vector<8xbf16>
-  %integer = vector.load %source_integer[0] : view<8xi16> -> vector<8xi16>
-  vector.store %half, %target_half[0] : vector<8xf16>, view<8xf16>
-  vector.store %bfloat, %target_bfloat[0] : vector<8xbf16>, view<8xbf16>
-  vector.store %integer, %target_integer[0] : vector<8xi16>, view<8xi16>
-  func.return
-}
+// RUN: with-checks emit source-low target=x86:avx512 output=low
 
-// ----
-low.func.def target<x86.avx2.core> abi(object_function) @copy_word_vector(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
-  %half = vmovdqu32.load.xmm %input {disp32 = 0}
-  %bfloat = vmovdqu32.load.xmm %input {disp32 = 16}
-  %integer = vmovdqu32.load.xmm %input {disp32 = 32}
-  vmovdqu32.store.xmm %half, %output {disp32 = 0}
-  vmovdqu32.store.xmm %bfloat, %output {disp32 = 16}
-  vmovdqu32.store.xmm %integer, %output {disp32 = 32}
-  return
-}
-
-// ====
-
-func.def @copy_word_vector_wide(%input: buffer, %output: buffer) {
-  %first = index.constant 0 : offset
-  %second = index.constant 32 : offset
-  %third = index.constant 64 : offset
-  %source_half = buffer.view %input[%first] : buffer -> view<16xf16>
-  %source_bfloat = buffer.view %input[%second] : buffer -> view<16xbf16>
-  %source_integer = buffer.view %input[%third] : buffer -> view<16xi16>
-  %target_half = buffer.view %output[%first] : buffer -> view<16xf16>
-  %target_bfloat = buffer.view %output[%second] : buffer -> view<16xbf16>
-  %target_integer = buffer.view %output[%third] : buffer -> view<16xi16>
-  %half = vector.load %source_half[0] : view<16xf16> -> vector<16xf16>
-  %bfloat = vector.load %source_bfloat[0] : view<16xbf16> -> vector<16xbf16>
-  %integer = vector.load %source_integer[0] : view<16xi16> -> vector<16xi16>
-  vector.store %half, %target_half[0] : vector<16xf16>, view<16xf16>
-  vector.store %bfloat, %target_bfloat[0] : vector<16xbf16>, view<16xbf16>
-  vector.store %integer, %target_integer[0] : vector<16xi16>, view<16xi16>
-  func.return
-}
-
-// ----
-low.func.def target<x86.avx2.core> abi(object_function) @copy_word_vector_wide(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
-  %half = vmovdqu32.load.ymm %input {disp32 = 0}
-  %bfloat = vmovdqu32.load.ymm %input {disp32 = 32}
-  %integer = vmovdqu32.load.ymm %input {disp32 = 64}
-  vmovdqu32.store.ymm %half, %output {disp32 = 0}
-  vmovdqu32.store.ymm %bfloat, %output {disp32 = 32}
-  vmovdqu32.store.ymm %integer, %output {disp32 = 64}
-  return
-}
-
-// ====
-
-func.def @copy_word_vector_large(%input: buffer, %output: buffer) {
-  %first = index.constant 0 : offset
-  %second = index.constant 64 : offset
-  %third = index.constant 128 : offset
-  %source_half = buffer.view %input[%first] : buffer -> view<32xf16>
-  %source_bfloat = buffer.view %input[%second] : buffer -> view<32xbf16>
-  %source_integer = buffer.view %input[%third] : buffer -> view<32xi16>
-  %target_half = buffer.view %output[%first] : buffer -> view<32xf16>
-  %target_bfloat = buffer.view %output[%second] : buffer -> view<32xbf16>
-  %target_integer = buffer.view %output[%third] : buffer -> view<32xi16>
+// Full AVX512 word vectors use one register instead of scalarizing each lane.
+func.def @copy_word_vectors(%input: buffer, %output: buffer) {
+  %half_offset = index.constant 0 : offset
+  %bfloat_offset = index.constant 64 : offset
+  %integer_offset = index.constant 128 : offset
+  %source_half = buffer.view %input[%half_offset] : buffer -> view<32xf16>
+  %source_bfloat = buffer.view %input[%bfloat_offset] : buffer -> view<32xbf16>
+  %source_integer = buffer.view %input[%integer_offset] : buffer -> view<32xi16>
+  %target_half = buffer.view %output[%half_offset] : buffer -> view<32xf16>
+  %target_bfloat = buffer.view %output[%bfloat_offset] : buffer -> view<32xbf16>
+  %target_integer = buffer.view %output[%integer_offset] : buffer -> view<32xi16>
   %half = vector.load %source_half[0] : view<32xf16> -> vector<32xf16>
   %bfloat = vector.load %source_bfloat[0] : view<32xbf16> -> vector<32xbf16>
   %integer = vector.load %source_integer[0] : view<32xi16> -> vector<32xi16>
@@ -117,397 +76,10 @@ func.def @copy_word_vector_large(%input: buffer, %output: buffer) {
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @copy_word_vector_large(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
-  %307 = movzx.load.u16.gpr32 %input {disp32 = 0}
-  %308 = movzx.load.u16.gpr32 %input {disp32 = 2}
-  %309 = movzx.load.u16.gpr32 %input {disp32 = 4}
-  %310 = movzx.load.u16.gpr32 %input {disp32 = 6}
-  %311 = movzx.load.u16.gpr32 %input {disp32 = 8}
-  %312 = movzx.load.u16.gpr32 %input {disp32 = 10}
-  %313 = movzx.load.u16.gpr32 %input {disp32 = 12}
-  %314 = movzx.load.u16.gpr32 %input {disp32 = 14}
-  %315 = movzx.load.u16.gpr32 %input {disp32 = 16}
-  %316 = movzx.load.u16.gpr32 %input {disp32 = 18}
-  %317 = movzx.load.u16.gpr32 %input {disp32 = 20}
-  %318 = movzx.load.u16.gpr32 %input {disp32 = 22}
-  %319 = movzx.load.u16.gpr32 %input {disp32 = 24}
-  %320 = movzx.load.u16.gpr32 %input {disp32 = 26}
-  %321 = movzx.load.u16.gpr32 %input {disp32 = 28}
-  %322 = movzx.load.u16.gpr32 %input {disp32 = 30}
-  %323 = movzx.load.u16.gpr32 %input {disp32 = 32}
-  %324 = movzx.load.u16.gpr32 %input {disp32 = 34}
-  %325 = movzx.load.u16.gpr32 %input {disp32 = 36}
-  %326 = movzx.load.u16.gpr32 %input {disp32 = 38}
-  %327 = movzx.load.u16.gpr32 %input {disp32 = 40}
-  %328 = movzx.load.u16.gpr32 %input {disp32 = 42}
-  %329 = movzx.load.u16.gpr32 %input {disp32 = 44}
-  %330 = movzx.load.u16.gpr32 %input {disp32 = 46}
-  %331 = movzx.load.u16.gpr32 %input {disp32 = 48}
-  %332 = movzx.load.u16.gpr32 %input {disp32 = 50}
-  %333 = movzx.load.u16.gpr32 %input {disp32 = 52}
-  %334 = movzx.load.u16.gpr32 %input {disp32 = 54}
-  %335 = movzx.load.u16.gpr32 %input {disp32 = 56}
-  %336 = movzx.load.u16.gpr32 %input {disp32 = 58}
-  %337 = movzx.load.u16.gpr32 %input {disp32 = 60}
-  %338 = movzx.load.u16.gpr32 %input {disp32 = 62}
-  %339 = movzx.load.u16.gpr32 %input {disp32 = 64}
-  %340 = movzx.load.u16.gpr32 %input {disp32 = 66}
-  %341 = movzx.load.u16.gpr32 %input {disp32 = 68}
-  %342 = movzx.load.u16.gpr32 %input {disp32 = 70}
-  %343 = movzx.load.u16.gpr32 %input {disp32 = 72}
-  %344 = movzx.load.u16.gpr32 %input {disp32 = 74}
-  %345 = movzx.load.u16.gpr32 %input {disp32 = 76}
-  %346 = movzx.load.u16.gpr32 %input {disp32 = 78}
-  %347 = movzx.load.u16.gpr32 %input {disp32 = 80}
-  %348 = movzx.load.u16.gpr32 %input {disp32 = 82}
-  %349 = movzx.load.u16.gpr32 %input {disp32 = 84}
-  %350 = movzx.load.u16.gpr32 %input {disp32 = 86}
-  %351 = movzx.load.u16.gpr32 %input {disp32 = 88}
-  %352 = movzx.load.u16.gpr32 %input {disp32 = 90}
-  %353 = movzx.load.u16.gpr32 %input {disp32 = 92}
-  %354 = movzx.load.u16.gpr32 %input {disp32 = 94}
-  %355 = movzx.load.u16.gpr32 %input {disp32 = 96}
-  %356 = movzx.load.u16.gpr32 %input {disp32 = 98}
-  %357 = movzx.load.u16.gpr32 %input {disp32 = 100}
-  %358 = movzx.load.u16.gpr32 %input {disp32 = 102}
-  %359 = movzx.load.u16.gpr32 %input {disp32 = 104}
-  %360 = movzx.load.u16.gpr32 %input {disp32 = 106}
-  %361 = movzx.load.u16.gpr32 %input {disp32 = 108}
-  %362 = movzx.load.u16.gpr32 %input {disp32 = 110}
-  %363 = movzx.load.u16.gpr32 %input {disp32 = 112}
-  %364 = movzx.load.u16.gpr32 %input {disp32 = 114}
-  %365 = movzx.load.u16.gpr32 %input {disp32 = 116}
-  %366 = movzx.load.u16.gpr32 %input {disp32 = 118}
-  %367 = movzx.load.u16.gpr32 %input {disp32 = 120}
-  %368 = movzx.load.u16.gpr32 %input {disp32 = 122}
-  %369 = movzx.load.u16.gpr32 %input {disp32 = 124}
-  %370 = movzx.load.u16.gpr32 %input {disp32 = 126}
-  %371 = movzx.load.u16.gpr32 %input {disp32 = 128}
-  %372 = movzx.load.u16.gpr32 %input {disp32 = 130}
-  %373 = movzx.load.u16.gpr32 %input {disp32 = 132}
-  %374 = movzx.load.u16.gpr32 %input {disp32 = 134}
-  %375 = movzx.load.u16.gpr32 %input {disp32 = 136}
-  %376 = movzx.load.u16.gpr32 %input {disp32 = 138}
-  %377 = movzx.load.u16.gpr32 %input {disp32 = 140}
-  %378 = movzx.load.u16.gpr32 %input {disp32 = 142}
-  %379 = movzx.load.u16.gpr32 %input {disp32 = 144}
-  %380 = movzx.load.u16.gpr32 %input {disp32 = 146}
-  %381 = movzx.load.u16.gpr32 %input {disp32 = 148}
-  %382 = movzx.load.u16.gpr32 %input {disp32 = 150}
-  %383 = movzx.load.u16.gpr32 %input {disp32 = 152}
-  %384 = movzx.load.u16.gpr32 %input {disp32 = 154}
-  %385 = movzx.load.u16.gpr32 %input {disp32 = 156}
-  %386 = movzx.load.u16.gpr32 %input {disp32 = 158}
-  %387 = movzx.load.u16.gpr32 %input {disp32 = 160}
-  %388 = movzx.load.u16.gpr32 %input {disp32 = 162}
-  %389 = movzx.load.u16.gpr32 %input {disp32 = 164}
-  %390 = movzx.load.u16.gpr32 %input {disp32 = 166}
-  %391 = movzx.load.u16.gpr32 %input {disp32 = 168}
-  %392 = movzx.load.u16.gpr32 %input {disp32 = 170}
-  %393 = movzx.load.u16.gpr32 %input {disp32 = 172}
-  %394 = movzx.load.u16.gpr32 %input {disp32 = 174}
-  %395 = movzx.load.u16.gpr32 %input {disp32 = 176}
-  %396 = movzx.load.u16.gpr32 %input {disp32 = 178}
-  %397 = movzx.load.u16.gpr32 %input {disp32 = 180}
-  %398 = movzx.load.u16.gpr32 %input {disp32 = 182}
-  %399 = movzx.load.u16.gpr32 %input {disp32 = 184}
-  %400 = movzx.load.u16.gpr32 %input {disp32 = 186}
-  %401 = movzx.load.u16.gpr32 %input {disp32 = 188}
-  %402 = movzx.load.u16.gpr32 %input {disp32 = 190}
-  mov.store.u16.gpr32 %307, %output {disp32 = 0}
-  mov.store.u16.gpr32 %308, %output {disp32 = 2}
-  mov.store.u16.gpr32 %309, %output {disp32 = 4}
-  mov.store.u16.gpr32 %310, %output {disp32 = 6}
-  mov.store.u16.gpr32 %311, %output {disp32 = 8}
-  mov.store.u16.gpr32 %312, %output {disp32 = 10}
-  mov.store.u16.gpr32 %313, %output {disp32 = 12}
-  mov.store.u16.gpr32 %314, %output {disp32 = 14}
-  mov.store.u16.gpr32 %315, %output {disp32 = 16}
-  mov.store.u16.gpr32 %316, %output {disp32 = 18}
-  mov.store.u16.gpr32 %317, %output {disp32 = 20}
-  mov.store.u16.gpr32 %318, %output {disp32 = 22}
-  mov.store.u16.gpr32 %319, %output {disp32 = 24}
-  mov.store.u16.gpr32 %320, %output {disp32 = 26}
-  mov.store.u16.gpr32 %321, %output {disp32 = 28}
-  mov.store.u16.gpr32 %322, %output {disp32 = 30}
-  mov.store.u16.gpr32 %323, %output {disp32 = 32}
-  mov.store.u16.gpr32 %324, %output {disp32 = 34}
-  mov.store.u16.gpr32 %325, %output {disp32 = 36}
-  mov.store.u16.gpr32 %326, %output {disp32 = 38}
-  mov.store.u16.gpr32 %327, %output {disp32 = 40}
-  mov.store.u16.gpr32 %328, %output {disp32 = 42}
-  mov.store.u16.gpr32 %329, %output {disp32 = 44}
-  mov.store.u16.gpr32 %330, %output {disp32 = 46}
-  mov.store.u16.gpr32 %331, %output {disp32 = 48}
-  mov.store.u16.gpr32 %332, %output {disp32 = 50}
-  mov.store.u16.gpr32 %333, %output {disp32 = 52}
-  mov.store.u16.gpr32 %334, %output {disp32 = 54}
-  mov.store.u16.gpr32 %335, %output {disp32 = 56}
-  mov.store.u16.gpr32 %336, %output {disp32 = 58}
-  mov.store.u16.gpr32 %337, %output {disp32 = 60}
-  mov.store.u16.gpr32 %338, %output {disp32 = 62}
-  mov.store.u16.gpr32 %339, %output {disp32 = 64}
-  mov.store.u16.gpr32 %340, %output {disp32 = 66}
-  mov.store.u16.gpr32 %341, %output {disp32 = 68}
-  mov.store.u16.gpr32 %342, %output {disp32 = 70}
-  mov.store.u16.gpr32 %343, %output {disp32 = 72}
-  mov.store.u16.gpr32 %344, %output {disp32 = 74}
-  mov.store.u16.gpr32 %345, %output {disp32 = 76}
-  mov.store.u16.gpr32 %346, %output {disp32 = 78}
-  mov.store.u16.gpr32 %347, %output {disp32 = 80}
-  mov.store.u16.gpr32 %348, %output {disp32 = 82}
-  mov.store.u16.gpr32 %349, %output {disp32 = 84}
-  mov.store.u16.gpr32 %350, %output {disp32 = 86}
-  mov.store.u16.gpr32 %351, %output {disp32 = 88}
-  mov.store.u16.gpr32 %352, %output {disp32 = 90}
-  mov.store.u16.gpr32 %353, %output {disp32 = 92}
-  mov.store.u16.gpr32 %354, %output {disp32 = 94}
-  mov.store.u16.gpr32 %355, %output {disp32 = 96}
-  mov.store.u16.gpr32 %356, %output {disp32 = 98}
-  mov.store.u16.gpr32 %357, %output {disp32 = 100}
-  mov.store.u16.gpr32 %358, %output {disp32 = 102}
-  mov.store.u16.gpr32 %359, %output {disp32 = 104}
-  mov.store.u16.gpr32 %360, %output {disp32 = 106}
-  mov.store.u16.gpr32 %361, %output {disp32 = 108}
-  mov.store.u16.gpr32 %362, %output {disp32 = 110}
-  mov.store.u16.gpr32 %363, %output {disp32 = 112}
-  mov.store.u16.gpr32 %364, %output {disp32 = 114}
-  mov.store.u16.gpr32 %365, %output {disp32 = 116}
-  mov.store.u16.gpr32 %366, %output {disp32 = 118}
-  mov.store.u16.gpr32 %367, %output {disp32 = 120}
-  mov.store.u16.gpr32 %368, %output {disp32 = 122}
-  mov.store.u16.gpr32 %369, %output {disp32 = 124}
-  mov.store.u16.gpr32 %370, %output {disp32 = 126}
-  mov.store.u16.gpr32 %371, %output {disp32 = 128}
-  mov.store.u16.gpr32 %372, %output {disp32 = 130}
-  mov.store.u16.gpr32 %373, %output {disp32 = 132}
-  mov.store.u16.gpr32 %374, %output {disp32 = 134}
-  mov.store.u16.gpr32 %375, %output {disp32 = 136}
-  mov.store.u16.gpr32 %376, %output {disp32 = 138}
-  mov.store.u16.gpr32 %377, %output {disp32 = 140}
-  mov.store.u16.gpr32 %378, %output {disp32 = 142}
-  mov.store.u16.gpr32 %379, %output {disp32 = 144}
-  mov.store.u16.gpr32 %380, %output {disp32 = 146}
-  mov.store.u16.gpr32 %381, %output {disp32 = 148}
-  mov.store.u16.gpr32 %382, %output {disp32 = 150}
-  mov.store.u16.gpr32 %383, %output {disp32 = 152}
-  mov.store.u16.gpr32 %384, %output {disp32 = 154}
-  mov.store.u16.gpr32 %385, %output {disp32 = 156}
-  mov.store.u16.gpr32 %386, %output {disp32 = 158}
-  mov.store.u16.gpr32 %387, %output {disp32 = 160}
-  mov.store.u16.gpr32 %388, %output {disp32 = 162}
-  mov.store.u16.gpr32 %389, %output {disp32 = 164}
-  mov.store.u16.gpr32 %390, %output {disp32 = 166}
-  mov.store.u16.gpr32 %391, %output {disp32 = 168}
-  mov.store.u16.gpr32 %392, %output {disp32 = 170}
-  mov.store.u16.gpr32 %393, %output {disp32 = 172}
-  mov.store.u16.gpr32 %394, %output {disp32 = 174}
-  mov.store.u16.gpr32 %395, %output {disp32 = 176}
-  mov.store.u16.gpr32 %396, %output {disp32 = 178}
-  mov.store.u16.gpr32 %397, %output {disp32 = 180}
-  mov.store.u16.gpr32 %398, %output {disp32 = 182}
-  mov.store.u16.gpr32 %399, %output {disp32 = 184}
-  mov.store.u16.gpr32 %400, %output {disp32 = 186}
-  mov.store.u16.gpr32 %401, %output {disp32 = 188}
-  mov.store.u16.gpr32 %402, %output {disp32 = 190}
-  return
-}
-
-// ====
-
-// Packed records can place complete word vectors at odd byte origins.
-func.def @copy_word_unaligned(%input: buffer, %output: buffer) {
-  %first = index.constant 1 : offset
-  %second = index.constant 17 : offset
-  %third = index.constant 33 : offset
-  %source_half = buffer.view %input[%first] : buffer -> view<8xf16, align(1)>
-  %source_bfloat = buffer.view %input[%second] : buffer -> view<8xbf16, align(1)>
-  %source_integer = buffer.view %input[%third] : buffer -> view<8xi16, align(1)>
-  %target_half = buffer.view %output[%first] : buffer -> view<8xf16, align(1)>
-  %target_bfloat = buffer.view %output[%second] : buffer -> view<8xbf16, align(1)>
-  %target_integer = buffer.view %output[%third] : buffer -> view<8xi16, align(1)>
-  %half = vector.load %source_half[0] : view<8xf16, align(1)> -> vector<8xf16>
-  %bfloat = vector.load %source_bfloat[0] : view<8xbf16, align(1)> -> vector<8xbf16>
-  %integer = vector.load %source_integer[0] : view<8xi16, align(1)> -> vector<8xi16>
-  vector.store %half, %target_half[0] : vector<8xf16>, view<8xf16, align(1)>
-  vector.store %bfloat, %target_bfloat[0] : vector<8xbf16>, view<8xbf16, align(1)>
-  vector.store %integer, %target_integer[0] : vector<8xi16>, view<8xi16, align(1)>
-  func.return
-}
-
-// ----
-low.func.def target<x86.avx2.core> abi(object_function) @copy_word_unaligned(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
-  %half = vmovdqu32.load.xmm %input {disp32 = 1}
-  %bfloat = vmovdqu32.load.xmm %input {disp32 = 17}
-  %integer = vmovdqu32.load.xmm %input {disp32 = 33}
-  vmovdqu32.store.xmm %half, %output {disp32 = 1}
-  vmovdqu32.store.xmm %bfloat, %output {disp32 = 17}
-  vmovdqu32.store.xmm %integer, %output {disp32 = 33}
-  return
-}
-
-// ====
-
-// Three-word tails must not read or write a fourth word.
-func.def @copy_word_tail(%input: buffer, %output: buffer) {
-  %first = index.constant 1 : offset
-  %second = index.constant 7 : offset
-  %third = index.constant 13 : offset
-  %source_half = buffer.view %input[%first] : buffer -> view<3xf16, align(1)>
-  %source_bfloat = buffer.view %input[%second] : buffer -> view<3xbf16, align(1)>
-  %source_integer = buffer.view %input[%third] : buffer -> view<3xi16, align(1)>
-  %target_half = buffer.view %output[%first] : buffer -> view<3xf16, align(1)>
-  %target_bfloat = buffer.view %output[%second] : buffer -> view<3xbf16, align(1)>
-  %target_integer = buffer.view %output[%third] : buffer -> view<3xi16, align(1)>
-  %half = vector.load %source_half[0] : view<3xf16, align(1)> -> vector<3xf16>
-  %bfloat = vector.load %source_bfloat[0] : view<3xbf16, align(1)> -> vector<3xbf16>
-  %integer = vector.load %source_integer[0] : view<3xi16, align(1)> -> vector<3xi16>
-  vector.store %half, %target_half[0] : vector<3xf16>, view<3xf16, align(1)>
-  vector.store %bfloat, %target_bfloat[0] : vector<3xbf16>, view<3xbf16, align(1)>
-  vector.store %integer, %target_integer[0] : vector<3xi16>, view<3xi16, align(1)>
-  func.return
-}
-
-// ----
-low.func.def target<x86.avx2.core> abi(object_function) @copy_word_tail(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
-  %46 = movzx.load.u16.gpr32 %input {disp32 = 1}
-  %47 = movzx.load.u16.gpr32 %input {disp32 = 3}
-  %48 = movzx.load.u16.gpr32 %input {disp32 = 5}
-  %49 = movzx.load.u16.gpr32 %input {disp32 = 7}
-  %50 = movzx.load.u16.gpr32 %input {disp32 = 9}
-  %51 = movzx.load.u16.gpr32 %input {disp32 = 11}
-  %52 = movzx.load.u16.gpr32 %input {disp32 = 13}
-  %53 = movzx.load.u16.gpr32 %input {disp32 = 15}
-  %54 = movzx.load.u16.gpr32 %input {disp32 = 17}
-  mov.store.u16.gpr32 %46, %output {disp32 = 1}
-  mov.store.u16.gpr32 %47, %output {disp32 = 3}
-  mov.store.u16.gpr32 %48, %output {disp32 = 5}
-  mov.store.u16.gpr32 %49, %output {disp32 = 7}
-  mov.store.u16.gpr32 %50, %output {disp32 = 9}
-  mov.store.u16.gpr32 %51, %output {disp32 = 11}
-  mov.store.u16.gpr32 %52, %output {disp32 = 13}
-  mov.store.u16.gpr32 %53, %output {disp32 = 15}
-  mov.store.u16.gpr32 %54, %output {disp32 = 17}
-  return
-}
-
-// ====
-
-// Runtime byte origins remain distinct from the two-byte element coordinate.
-func.def @copy_word_index(%input: buffer, %output: buffer, %byte_offset: offset, %element: index) {
-  %base = index.assume %byte_offset [range(%byte_offset, 0, 128)] : offset
-  %position = index.assume %element [range(%element, 0, 7)] : index
-  %source_half = buffer.view %input[%base] : buffer -> view<8xf16, align(1)>
-  %source_bfloat_base = buffer.view %input[%base] : buffer -> view<24xbf16, align(1)>
-  %source_integer_base = buffer.view %input[%base] : buffer -> view<24xi16, align(1)>
-  %target_half = buffer.view %output[%base] : buffer -> view<8xf16, align(1)>
-  %target_bfloat_base = buffer.view %output[%base] : buffer -> view<24xbf16, align(1)>
-  %target_integer_base = buffer.view %output[%base] : buffer -> view<24xi16, align(1)>
-  %source_bfloat = view.subview %source_bfloat_base[8] : view<24xbf16, align(1)> -> view<8xbf16, align(1)>
-  %source_integer = view.subview %source_integer_base[16] : view<24xi16, align(1)> -> view<8xi16, align(1)>
-  %target_bfloat = view.subview %target_bfloat_base[8] : view<24xbf16, align(1)> -> view<8xbf16, align(1)>
-  %target_integer = view.subview %target_integer_base[16] : view<24xi16, align(1)> -> view<8xi16, align(1)>
-  %half = view.load %source_half[%position] : view<8xf16, align(1)> -> f16
-  %bfloat = view.load %source_bfloat[%position] : view<8xbf16, align(1)> -> bf16
-  %integer = view.load %source_integer[%position] : view<8xi16, align(1)> -> i16
-  view.store %half, %target_half[%position] : f16, view<8xf16, align(1)>
-  view.store %bfloat, %target_bfloat[%position] : bf16, view<8xbf16, align(1)>
-  view.store %integer, %target_integer[%position] : i16, view<8xi16, align(1)>
-  func.return
-}
-
-// ----
-low.func.def target<x86.avx2.core> abi(object_function) @copy_word_index(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %base: reg<x86.gpr64>, %position: reg<x86.gpr64>) asm {
-  %23 = mov.imm64 2
-  %24 = copy %position : reg<x86.gpr64> -> reg<x86.gpr64>
-  %25 = imul.gpr64 %24, %23
-  %26 = copy %base : reg<x86.gpr64> -> reg<x86.gpr64>
-  %27 = add.gpr64 %26, %25
-  %half = movzx.load.indexed.u16.gpr32 %input, %27 {disp32 = 0, scale = 1}
-  %30 = copy %position : reg<x86.gpr64> -> reg<x86.gpr64>
-  %31 = imul.gpr64 %30, %23
-  %32 = copy %base : reg<x86.gpr64> -> reg<x86.gpr64>
-  %33 = add.gpr64 %32, %31
-  %bfloat = movzx.load.indexed.u16.gpr32 %input, %33 {disp32 = 16, scale = 1}
-  %36 = copy %position : reg<x86.gpr64> -> reg<x86.gpr64>
-  %37 = imul.gpr64 %36, %23
-  %38 = copy %base : reg<x86.gpr64> -> reg<x86.gpr64>
-  %39 = add.gpr64 %38, %37
-  %integer = movzx.load.indexed.u16.gpr32 %input, %39 {disp32 = 32, scale = 1}
-  %42 = copy %position : reg<x86.gpr64> -> reg<x86.gpr64>
-  %43 = imul.gpr64 %42, %23
-  %44 = copy %base : reg<x86.gpr64> -> reg<x86.gpr64>
-  %45 = add.gpr64 %44, %43
-  mov.store.indexed.u16.gpr32 %half, %output, %45 {disp32 = 0, scale = 1}
-  %47 = copy %position : reg<x86.gpr64> -> reg<x86.gpr64>
-  %48 = imul.gpr64 %47, %23
-  %49 = copy %base : reg<x86.gpr64> -> reg<x86.gpr64>
-  %50 = add.gpr64 %49, %48
-  mov.store.indexed.u16.gpr32 %bfloat, %output, %50 {disp32 = 16, scale = 1}
-  %52 = copy %position : reg<x86.gpr64> -> reg<x86.gpr64>
-  %53 = imul.gpr64 %52, %23
-  %54 = copy %base : reg<x86.gpr64> -> reg<x86.gpr64>
-  %55 = add.gpr64 %54, %53
-  mov.store.indexed.u16.gpr32 %integer, %output, %55 {disp32 = 32, scale = 1}
-  return
-}
-
-// ====
-
-func.def @copy_word_stride(%input: buffer, %output: buffer, %column_count: index, %row_index: index, %column_index: index) {
-  %columns = index.assume %column_count [range(%column_count, 1, 16)] : index
-  %row = index.assume %row_index [range(%row_index, 0, 3)] : index
-  %column = index.assume %column_index [range(%column_index, 0, 15), lt(%column_index, %columns)] : index
-  %base = index.constant 3 : offset
-  %source = buffer.view %input[%base] : buffer -> view<4x[%columns]xbf16, align(1)>
-  %target = buffer.view %output[%base] : buffer -> view<4x[%columns]xbf16, align(1)>
-  %value = view.load %source[%row, %column] : view<4x[%columns]xbf16, align(1)> -> bf16
-  view.store %value, %target[%row, %column] : bf16, view<4x[%columns]xbf16, align(1)>
-  func.return
-}
-
-// ----
-low.func.def target<x86.avx2.core> abi(object_function) @copy_word_stride(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %columns: reg<x86.gpr64>, %row: reg<x86.gpr64>, %column: reg<x86.gpr64>) asm {
-  %17 = copy %row : reg<x86.gpr64> -> reg<x86.gpr64>
-  %18 = imul.gpr64 %17, %columns
-  %19 = mov.imm64 2
-  %20 = copy %18 : reg<x86.gpr64> -> reg<x86.gpr64>
-  %21 = imul.gpr64 %20, %19
-  %23 = copy %column : reg<x86.gpr64> -> reg<x86.gpr64>
-  %24 = imul.gpr64 %23, %19
-  %25 = copy %21 : reg<x86.gpr64> -> reg<x86.gpr64>
-  %26 = add.gpr64 %25, %24
-  %value = movzx.load.indexed.u16.gpr32 %input, %26 {disp32 = 3, scale = 1}
-  %28 = copy %row : reg<x86.gpr64> -> reg<x86.gpr64>
-  %29 = imul.gpr64 %28, %columns
-  %31 = copy %29 : reg<x86.gpr64> -> reg<x86.gpr64>
-  %32 = imul.gpr64 %31, %19
-  %34 = copy %column : reg<x86.gpr64> -> reg<x86.gpr64>
-  %35 = imul.gpr64 %34, %19
-  %36 = copy %32 : reg<x86.gpr64> -> reg<x86.gpr64>
-  %37 = add.gpr64 %36, %35
-  mov.store.indexed.u16.gpr32 %value, %output, %37 {disp32 = 3, scale = 1}
-  return
-}
-
-// ====
-
-func.def @copy_word_volatile(%input: buffer, %output: buffer) {
-  %base = index.constant 0 : offset
-  %source = buffer.view %input[%base] : buffer -> view<1xbf16>
-  %target = buffer.view %output[%base] : buffer -> view<2xbf16>
-  %first = view.load<volatile> %source[0] : view<1xbf16> -> bf16
-  %second = view.load<volatile> %source[0] : view<1xbf16> -> bf16
-  view.store<volatile> %first, %target[0] : bf16, view<2xbf16>
-  view.store<volatile> %second, %target[1] : bf16, view<2xbf16>
-  func.return
-}
-
-// ----
-low.func.def target<x86.avx2.core> abi(object_function) @copy_word_volatile(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
-  %first = movzx.load.u16.gpr32<volatile> %input {disp32 = 0}
-  %second = movzx.load.u16.gpr32<volatile> %input {disp32 = 0}
-  mov.store.u16.gpr32<volatile> %first, %output {disp32 = 0}
-  mov.store.u16.gpr32<volatile> %second, %output {disp32 = 2}
-  return
-}
+CHECK: %half = vmovdqu32.load %input {disp32 = 0}
+CHECK: %bfloat = vmovdqu32.load %input {disp32 = 64}
+CHECK: %integer = vmovdqu32.load %input {disp32 = 128}
+CHECK: vmovdqu32.store %half, %output {disp32 = 0}
+CHECK: vmovdqu32.store %bfloat, %output {disp32 = 64}
+CHECK: vmovdqu32.store %integer, %output {disp32 = 128}
+CHECK-NOT: *movzx.load.u16*
