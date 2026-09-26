@@ -130,6 +130,24 @@ CHECK-NOT: * = vinsert.*
 
 // ====
 
+// A non-square rank-three result uses the same row-major full and partial
+// packets as its flat carrier instead of falling back to scalar assembly.
+func.def @shaped_partial_carrier(%table: vector<4xi16>, %indices: vector<2x2x10xi16>) -> (vector<2x2x10xi16>) {
+  %result = vector.table.lookup %table[%indices] : vector<4xi16>, vector<2x2x10xi16> -> vector<2x2x10xi16>
+  func.return %result : vector<2x2x10xi16>
+}
+
+// ----
+CHECK: * = slice %indices[0] *
+CHECK: * = vlt.u16x32.*
+CHECK: * = slice %indices[2] *
+CHECK: * = vlt.u16x32.*
+CHECK: %result = concat(*
+CHECK-NOT: * = vextract.*
+CHECK-NOT: * = vinsert.*
+
+// ====
+
 // An index producer wider than the function ABI streams from its owning load;
 // no 2048-bit intermediate index carrier is materialized.
 func.def @streamed_i32_indices(%source: buffer, %table: vector<4xi8>) -> (vector<64xi8>) {

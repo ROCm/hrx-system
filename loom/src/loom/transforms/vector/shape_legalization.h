@@ -15,9 +15,9 @@
 extern "C" {
 #endif
 
-// Rewrites static multidimensional broadcast and tail insertion operations
-// into rank-one structural operations and shape-only bitcasts. Returns without
-// rewriting dynamic shapes or rank-one operations.
+// Rewrites supported static multidimensional vector operations into rank-one
+// structural operations and shape-only bitcasts. Returns without rewriting
+// dynamic shapes or rank-one operations.
 iree_status_t loom_vector_static_shape_rewrite_op(
     loom_target_legalization_context_t* context, loom_op_t* op,
     bool* out_rewritten);

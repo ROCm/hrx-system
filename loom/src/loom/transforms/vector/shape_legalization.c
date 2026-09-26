@@ -268,6 +268,44 @@ static iree_status_t loom_vector_static_shape_insert_rewrite(
   return iree_ok_status();
 }
 
+static iree_status_t loom_vector_static_shape_table_lookup_rewrite(
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    bool* out_rewritten) {
+  const loom_value_id_t indices = loom_vector_table_lookup_indices(op);
+  const loom_type_t index_type =
+      loom_module_value_type(context->module, indices);
+  const loom_type_t result_type = loom_module_value_type(
+      context->module, loom_vector_table_lookup_result(op));
+  uint64_t element_count = 0;
+  if (loom_type_rank(result_type) <= 1 ||
+      !loom_type_static_element_count(result_type, &element_count) ||
+      element_count == 0 || element_count > INT64_MAX) {
+    return iree_ok_status();
+  }
+
+  loom_rewriter_t* rewriter = context->rewriter;
+  loom_builder_set_before(&rewriter->builder, op);
+  const loom_value_id_t value_checkpoint =
+      loom_rewriter_value_checkpoint(rewriter);
+  // Lookup maps each index lane independently. Flattening the verified
+  // index/result pair therefore preserves their row-major correspondence.
+  loom_value_id_t flat_indices = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_vector_static_shape_flatten_value(
+      &rewriter->builder, indices, index_type, element_count, op->location,
+      &flat_indices));
+  const loom_type_t flat_result_type =
+      loom_vector_static_shape_flat_type(result_type, element_count);
+  loom_op_t* flat_lookup_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_table_lookup_build(
+      &rewriter->builder, loom_vector_table_lookup_table(op), flat_indices,
+      flat_result_type, op->location, &flat_lookup_op));
+  IREE_RETURN_IF_ERROR(loom_vector_static_shape_restore_result(
+      context, op, loom_vector_table_lookup_result(flat_lookup_op),
+      flat_result_type, result_type, value_checkpoint));
+  *out_rewritten = true;
+  return iree_ok_status();
+}
+
 iree_status_t loom_vector_static_shape_rewrite_op(
     loom_target_legalization_context_t* context, loom_op_t* op,
     bool* out_rewritten) {
@@ -279,6 +317,9 @@ iree_status_t loom_vector_static_shape_rewrite_op(
     case LOOM_OP_VECTOR_INSERT:
       return loom_vector_static_shape_insert_rewrite(context, op,
                                                      out_rewritten);
+    case LOOM_OP_VECTOR_TABLE_LOOKUP:
+      return loom_vector_static_shape_table_lookup_rewrite(context, op,
+                                                           out_rewritten);
     default:
       return iree_ok_status();
   }

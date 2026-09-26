@@ -15,6 +15,7 @@ from loom.target.arch.amd.xdna.aie2p.contracts.structural import (
     _I32_F32_TRANSPOSE_4X4_CONTROL,
     _PACKED_VECTOR_ELEMENT_TYPES,
     _VECTOR_CARRIER_SPECS,
+    _WIDE_VECTOR_BITCAST_TYPES,
     _WIDE_VECTOR_CONCAT_SPECS,
     _WIDE_VECTOR_EXTRACT_SPECS,
     AIE2P_STRUCTURAL_RULES,
@@ -504,29 +505,43 @@ def test_16bit_8x8_transpose_preserves_both_full_carrier_halves() -> None:
     assert joined.result.field == "result"
 
 
-def test_16bit_8x8_shape_aliases_preserve_element_type_and_payload() -> None:
+def test_wide_bitcast_aliases_preserve_ordinary_y_carriers() -> None:
+    assert _WIDE_VECTOR_BITCAST_TYPES == (
+        Vector(
+            ("i8", "f8E4M3", "f8E5M2"),
+            minimum_static_elements=65,
+            maximum_static_elements=128,
+        ),
+        Vector(
+            ("i16", "f16", "bf16"),
+            minimum_static_elements=33,
+            maximum_static_elements=64,
+        ),
+        Vector("i32", minimum_static_elements=17, maximum_static_elements=32),
+        Vector("f32", minimum_static_elements=17, maximum_static_elements=31),
+        Vector(
+            ("i64", "f64"),
+            minimum_static_elements=9,
+            maximum_static_elements=16,
+        ),
+    )
     rules = tuple(
         rule
         for rule in AIE2P_STRUCTURAL_RULES
         if isinstance(rule, ValueAliasRule) and rule.source_op is vector.vector_bitcast
     )
-    assert len(rules) == 6
-    for element_type in ("i16", "f16", "bf16"):
-        for source_type, result_type in (
-            (Vector(element_type, lanes=64), Vector(element_type, dims=(8, 8))),
-            (Vector(element_type, dims=(8, 8)), Vector(element_type, lanes=64)),
-        ):
-            rule = next(
-                rule
-                for rule in rules
-                if rule.guards
-                == (
-                    Guard.value_type("input", source_type),
-                    Guard.value_type("result", result_type),
-                )
-            )
-            assert rule.source.field == "input"
-            assert rule.result.field == "result"
+    assert len(rules) == len(_WIDE_VECTOR_BITCAST_TYPES) ** 2
+    assert [rule.guards for rule in rules] == [
+        (
+            Guard.value_type("input", source_type),
+            Guard.value_type("result", result_type),
+            Guard.low_value_register_unit_count_eq("input", "result"),
+        )
+        for source_type in _WIDE_VECTOR_BITCAST_TYPES
+        for result_type in _WIDE_VECTOR_BITCAST_TYPES
+    ]
+    assert all(rule.source.field == "input" for rule in rules)
+    assert all(rule.result.field == "result" for rule in rules)
 
 
 def test_16bit_interleave_uses_alternating_native_shuffle() -> None:

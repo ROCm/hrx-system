@@ -190,6 +190,7 @@ loom_cc_library(
     loom::ops::vector
     loom::target::legalization
     loom::transforms::vector::packet_legalization
+    loom::transforms::vector::shape_legalization
     loom::transforms::vector::table_legalization
     loom::transforms::vector::target_legalization
     loom::transforms::vector::to_scalar

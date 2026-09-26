@@ -48,6 +48,18 @@ _VECTOR_CARRIER_SPECS = (
     (("i64", "f64"), 8, 16),
 )
 
+# Every vector in this domain occupies the same ordered pair of X carriers.
+# The F32 upper bound deliberately excludes flat vector<32xf32>, whose
+# accumulator representation cannot alias an ordinary shaped Y carrier.
+_WIDE_VECTOR_BITCAST_TYPES = tuple(
+    Vector(
+        element_types,
+        minimum_static_elements=64 // element_byte_count + 1,
+        maximum_static_elements=wide_lane_maximum,
+    )
+    for element_types, element_byte_count, wide_lane_maximum in (_VECTOR_CARRIER_SPECS)
+)
+
 # Ordinary source vectors wider than one 512-bit X register are carried as two
 # consecutive X registers. F32 excludes vector<32xf32>, which is an accumulator
 # fragment with a distinct physical contract.
@@ -556,9 +568,9 @@ def _vector_transpose_16bit_8x8_rule() -> DescriptorRule:
     )
 
 
-def _vector_16bit_8x8_shape_alias_rules() -> tuple[ValueAliasRule, ...]:
-    # A flat packet and its row-major matrix view retain the same four W units.
-    # The bitcast changes only logical shape, before or after transposition.
+def _wide_vector_bitcast_alias_rules() -> tuple[ValueAliasRule, ...]:
+    # Equal-width bitcasts preserve the ordered four-W payload independently
+    # of logical shape and element interpretation.
     return tuple(
         ValueAliasRule(
             source_op=vector.vector_bitcast,
@@ -567,13 +579,11 @@ def _vector_16bit_8x8_shape_alias_rules() -> tuple[ValueAliasRule, ...]:
             guards=(
                 Guard.value_type("input", source_type),
                 Guard.value_type("result", result_type),
+                Guard.low_value_register_unit_count_eq("input", "result"),
             ),
         )
-        for element_type in ("i16", "f16", "bf16")
-        for source_type, result_type in (
-            (Vector(element_type, lanes=64), Vector(element_type, dims=(8, 8))),
-            (Vector(element_type, dims=(8, 8)), Vector(element_type, lanes=64)),
-        )
+        for source_type in _WIDE_VECTOR_BITCAST_TYPES
+        for result_type in _WIDE_VECTOR_BITCAST_TYPES
     )
 
 
@@ -1303,5 +1313,5 @@ AIE2P_STRUCTURAL_RULES = (
     _vector_interleave_16bit_rule(),
     _vector_transpose_i32_f32_4x4_rule(),
     _vector_transpose_16bit_8x8_rule(),
-    *_vector_16bit_8x8_shape_alias_rules(),
+    *_wide_vector_bitcast_alias_rules(),
 )

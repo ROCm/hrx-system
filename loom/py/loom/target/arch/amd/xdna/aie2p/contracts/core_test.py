@@ -37,6 +37,7 @@ from loom.target.arch.amd.xdna.aie2p.contracts.reduction import (
 )
 from loom.target.arch.amd.xdna.aie2p.contracts.structural import (
     _I8_DEINTERLEAVE_CONTROLS,
+    _WIDE_VECTOR_BITCAST_TYPES,
     AIE2P_STRUCTURAL_RULES,
 )
 from loom.target.arch.amd.xdna.aie2p.contracts.table import AIE2P_TABLE_RULES
@@ -1349,11 +1350,8 @@ def test_core_contract_closes_scalar_and_integer_vector_families() -> None:
         for rule in vector_bitcast_rules
     ] == [
         (source_type, result_type)
-        for element_type in ("i16", "f16", "bf16")
-        for source_type, result_type in (
-            (Vector(element_type, lanes=64), Vector(element_type, dims=(8, 8))),
-            (Vector(element_type, dims=(8, 8)), Vector(element_type, lanes=64)),
-        )
+        for source_type in _WIDE_VECTOR_BITCAST_TYPES
+        for result_type in _WIDE_VECTOR_BITCAST_TYPES
     ] + [
         (source_type, result_type)
         for source_type in bitcast_types
