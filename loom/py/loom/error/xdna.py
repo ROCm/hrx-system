@@ -440,7 +440,7 @@ ERR_XDNA_025 = ErrorDef(
         ErrorParam("quantity", ParamKind.STRING),
         ErrorParam("actual", ParamKind.U32),
         ErrorParam("relationship", ParamKind.STRING),
-        ErrorParam("required", ParamKind.U32),
+        ErrorParam("required", ParamKind.U64),
     ),
     fix_hint="Make the channel ring match the stated topology relationship.",
 )
@@ -490,6 +490,53 @@ ERR_XDNA_027 = ErrorDef(
     fix_hint="Give each source channel a distinct receiver endpoint.",
 )
 
+# ERR_XDNA_028: A temporal fold declares an invalid output range.
+ERR_XDNA_028 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=28,
+    severity=Severity.ERROR,
+    summary="Temporal fold output range is invalid.",
+    message=(
+        "AIE2P worker {worker} fold declares {output_count} outputs from port "
+        "{output_port}; {quantity} {actual} {requirement}"
+    ),
+    params=(
+        ErrorParam("worker", ParamKind.U32),
+        ErrorParam("output_port", ParamKind.U32),
+        ErrorParam("output_count", ParamKind.U32),
+        ErrorParam("quantity", ParamKind.STRING),
+        ErrorParam("actual", ParamKind.U64),
+        ErrorParam("requirement", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Make active sender ports exactly cover one non-empty representable "
+        "output range."
+    ),
+)
+
+# ERR_XDNA_029: A temporal fold cannot be materialized.
+ERR_XDNA_029 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=29,
+    severity=Severity.ERROR,
+    summary="Temporal fold cannot be materialized.",
+    message=(
+        "AIE2P worker {worker} cannot fold channel {channel} record type "
+        "{record_type} with combiner {combiner}: {reason}"
+    ),
+    params=(
+        ErrorParam("worker", ParamKind.U32),
+        ErrorParam("channel", ParamKind.U32),
+        ErrorParam("record_type", ParamKind.TYPE),
+        ErrorParam("combiner", ParamKind.U32),
+        ErrorParam("reason", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Provide one compatible input cadence and use addf over one f32 element "
+        "or a multiple of 16 f32 elements."
+    ),
+)
+
 ALL_XDNA_ERRORS = (
     ERR_XDNA_001,
     ERR_XDNA_002,
@@ -518,4 +565,6 @@ ALL_XDNA_ERRORS = (
     ERR_XDNA_025,
     ERR_XDNA_026,
     ERR_XDNA_027,
+    ERR_XDNA_028,
+    ERR_XDNA_029,
 )

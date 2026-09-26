@@ -568,6 +568,7 @@ loom_check_test_suite(
     "test/array_plan/wide_fold.loom-test"
     "test/array_plan/worker_cycles.loom-test"
     "test/array_plan/worker_interface_admission.loom-test"
+    "test/array_plan/worker_rate_admission.loom-test"
     "test/descriptors/bf16_comparison.loom-test"
     "test/descriptors/bfp_move.loom-test"
     "test/descriptors/cascade.loom-test"

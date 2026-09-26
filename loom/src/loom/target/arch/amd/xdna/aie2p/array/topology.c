@@ -143,7 +143,7 @@ static iree_status_t loom_aie2p_array_topology_reject_channel_record(
 
 static iree_status_t loom_aie2p_array_topology_reject_channel_ring(
     const loom_aie2p_array_topology_t* topology, uint32_t channel_index,
-    iree_string_view_t quantity, uint32_t actual, uint32_t required,
+    iree_string_view_t quantity, uint32_t actual, uint64_t required,
     iree_string_view_t relationship, uint16_t operand_index) {
   const loom_aie2p_array_channel_t* channel =
       &topology->channels[channel_index];
@@ -155,7 +155,7 @@ static iree_status_t loom_aie2p_array_topology_reject_channel_ring(
           loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND,
                                     operand_index)),
       loom_param_string(relationship),
-      loom_param_u32(required),
+      loom_param_u64(required),
   };
   const loom_diagnostic_emission_t emission = {
       .op = loom_aie2p_array_topology_defining_op(topology, channel->value_id),
@@ -222,6 +222,53 @@ static iree_status_t loom_aie2p_array_topology_reject_receiver_use(
   const loom_diagnostic_emission_t emission = {
       .op = loom_aie2p_array_topology_defining_op(topology, channel->value_id),
       .error = LOOM_ERR_XDNA_027,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
+  return iree_diagnostic_emit(topology->diagnostic_emitter, &emission);
+}
+
+static iree_status_t loom_aie2p_array_topology_reject_fold_output_range(
+    const loom_aie2p_array_topology_t* topology, const loom_op_t* op,
+    uint32_t worker_index, iree_string_view_t quantity, uint64_t actual,
+    iree_string_view_t requirement) {
+  const loom_aie2p_array_worker_t* worker = &topology->workers[worker_index];
+  const loom_diagnostic_param_t params[] = {
+      loom_param_u32(worker_index),
+      loom_param_u32(worker->fold_output_port),
+      loom_param_u32(worker->fold_output_count),
+      loom_param_string(quantity),
+      loom_param_u64(actual),
+      loom_param_string(requirement),
+  };
+  const loom_diagnostic_emission_t emission = {
+      .op = op,
+      .error = LOOM_ERR_XDNA_028,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
+  return iree_diagnostic_emit(topology->diagnostic_emitter, &emission);
+}
+
+static iree_status_t loom_aie2p_array_topology_reject_fold_materialization(
+    const loom_aie2p_array_topology_t* topology, const loom_op_t* op,
+    uint32_t worker_index, uint32_t channel_index, iree_string_view_t reason) {
+  const loom_aie2p_array_worker_t* worker = &topology->workers[worker_index];
+  const loom_aie2p_array_channel_t* channel =
+      &topology->channels[channel_index];
+  const loom_aie2p_array_endpoint_t* sender =
+      &topology->endpoints[channel->sender_endpoint_index];
+  const loom_diagnostic_param_t params[] = {
+      loom_param_u32(worker_index),
+      loom_param_u32(channel_index),
+      loom_param_type(sender->message_type),
+      loom_param_u32((uint32_t)worker->fold_kind),
+      loom_param_string(reason),
+  };
+  const loom_diagnostic_emission_t emission = {
+      .module = topology->module,
+      .op = op,
+      .error = LOOM_ERR_XDNA_029,
       .params = params,
       .param_count = IREE_ARRAYSIZE(params),
   };
@@ -499,21 +546,34 @@ static iree_status_t loom_aie2p_array_topology_validate_worker_interfaces(
 }
 
 static iree_status_t loom_aie2p_array_topology_validate_worker_rates(
-    const loom_aie2p_array_topology_t* topology) {
+    const loom_aie2p_array_topology_t* topology, bool* out_valid) {
+  *out_valid = false;
   for (uint32_t worker_index = 0; worker_index < topology->plan->worker_count;
        ++worker_index) {
     const loom_aie2p_array_worker_t* worker =
         &topology->plan->workers[worker_index];
     uint32_t common_record_count = 0;
+    uint32_t first_input_channel_index = UINT32_MAX;
     uint32_t output_record_count = 0;
+    uint32_t first_output_channel_index = UINT32_MAX;
     uint32_t sender_count = 0;
     const uint64_t fold_output_end =
         (uint64_t)worker->fold_output_port + worker->fold_output_count;
-    if (worker->fold_record_count != 0 &&
-        (worker->fold_output_count == 0 || fold_output_end > UINT32_MAX)) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "AIE2P folded worker output port range is invalid");
+    if (worker->fold_record_count != 0) {
+      if (worker->fold_output_count == 0) {
+        return loom_aie2p_array_topology_reject_fold_output_range(
+            topology,
+            loom_aie2p_array_topology_defining_op(topology, worker->value_id),
+            worker_index, IREE_SV("output count"), 0,
+            IREE_SV("must be positive"));
+      }
+      if (fold_output_end > UINT32_MAX) {
+        return loom_aie2p_array_topology_reject_fold_output_range(
+            topology,
+            loom_aie2p_array_topology_defining_op(topology, worker->value_id),
+            worker_index, IREE_SV("exclusive output range end"),
+            fold_output_end, IREE_SV("must fit in u32"));
+      }
     }
     for (uint32_t endpoint_index = 0;
          endpoint_index < topology->plan->endpoint_count; ++endpoint_index) {
@@ -525,16 +585,18 @@ static iree_status_t loom_aie2p_array_topology_validate_worker_rates(
           endpoint->channel_use_count == 0) {
         continue;
       }
+      const uint32_t channel_index = endpoint->first_channel_index;
       const loom_aie2p_array_channel_t* channel =
-          &topology->channels[endpoint->first_channel_index];
+          &topology->channels[channel_index];
       if (worker->fold_record_count == 0) {
         if (common_record_count == 0) {
           common_record_count = channel->record_count;
         }
         if (common_record_count != channel->record_count) {
-          return iree_make_status(
-              IREE_STATUS_INVALID_ARGUMENT,
-              "AIE2P recordwise worker channels must have one record count");
+          return loom_aie2p_array_topology_reject_channel_ring(
+              topology, channel_index, IREE_SV("record count"),
+              channel->record_count, common_record_count,
+              IREE_SV("the first active recordwise channel record count"), 3);
         }
         continue;
       }
@@ -542,26 +604,32 @@ static iree_status_t loom_aie2p_array_topology_validate_worker_rates(
       if (endpoint->direction == LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE) {
         if (common_record_count == 0) {
           common_record_count = channel->record_count;
+          first_input_channel_index = channel_index;
         } else if (common_record_count != channel->record_count) {
-          return iree_make_status(
-              IREE_STATUS_INVALID_ARGUMENT,
-              "AIE2P folded worker inputs must have one record count");
+          return loom_aie2p_array_topology_reject_channel_ring(
+              topology, channel_index, IREE_SV("record count"),
+              channel->record_count, common_record_count,
+              IREE_SV("the first folded input channel record count"), 3);
         }
         continue;
       }
       ++sender_count;
       if (endpoint->port < worker->fold_output_port ||
           endpoint->port >= fold_output_end) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P folded worker must use its folded output port range");
+        return loom_aie2p_array_topology_reject_fold_output_range(
+            topology,
+            loom_aie2p_array_topology_defining_op(topology, endpoint->value_id),
+            worker_index, IREE_SV("active sender port"), endpoint->port,
+            IREE_SV("must lie in the declared output range"));
       }
       if (output_record_count == 0) {
         output_record_count = channel->record_count;
+        first_output_channel_index = channel_index;
       } else if (output_record_count != channel->record_count) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P folded worker outputs must have one record count");
+        return loom_aie2p_array_topology_reject_channel_ring(
+            topology, channel_index, IREE_SV("record count"),
+            channel->record_count, output_record_count,
+            IREE_SV("the first folded output channel record count"), 3);
       }
       const uint32_t record_byte_length = channel->record_byte_length;
       const uint32_t accumulator_lane_byte_length = 16 * sizeof(float);
@@ -572,34 +640,47 @@ static iree_status_t loom_aie2p_array_topology_validate_worker_rates(
       if (loom_type_element_type(endpoint->message_type) !=
               LOOM_SCALAR_TYPE_F32 ||
           !supported_f32_shape) {
-        return iree_make_status(
-            IREE_STATUS_UNIMPLEMENTED,
-            "AIE2P temporal fold requires one F32 element or a multiple of "
-            "16 F32 elements");
+        return loom_aie2p_array_topology_reject_fold_materialization(
+            topology,
+            loom_aie2p_array_topology_defining_op(topology, channel->value_id),
+            worker_index, channel_index,
+            IREE_SV("the resident accumulator supports one f32 element or a "
+                    "multiple of 16 f32 elements"));
       }
     }
     if (worker->fold_record_count != 0) {
-      if (worker->fold_kind != LOOM_COMBINING_KIND_ADDF) {
-        return iree_make_status(
-            IREE_STATUS_UNIMPLEMENTED,
-            "AIE2P temporal fold currently supports floating-point addition");
-      }
       if (sender_count != worker->fold_output_count) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P folded worker sender ports must exactly cover its output "
-            "port range");
+        return loom_aie2p_array_topology_reject_fold_output_range(
+            topology,
+            loom_aie2p_array_topology_defining_op(topology, worker->value_id),
+            worker_index, IREE_SV("active sender count"), sender_count,
+            IREE_SV("must equal the declared output count"));
+      }
+      if (worker->fold_kind != LOOM_COMBINING_KIND_ADDF) {
+        return loom_aie2p_array_topology_reject_fold_materialization(
+            topology,
+            loom_aie2p_array_topology_defining_op(topology, worker->value_id),
+            worker_index, first_output_channel_index,
+            IREE_SV("only addf (combiner 1) is implemented"));
+      }
+      if (first_input_channel_index == UINT32_MAX) {
+        return loom_aie2p_array_topology_reject_fold_materialization(
+            topology,
+            loom_aie2p_array_topology_defining_op(topology, worker->value_id),
+            worker_index, first_output_channel_index,
+            IREE_SV("the fold has no active input channel"));
       }
       const uint64_t expected_input_record_count =
           (uint64_t)worker->fold_record_count * output_record_count;
       if (common_record_count != expected_input_record_count) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P folded worker must consume its fold record count for each "
-            "output record");
+        return loom_aie2p_array_topology_reject_channel_ring(
+            topology, first_input_channel_index, IREE_SV("record count"),
+            common_record_count, expected_input_record_count,
+            IREE_SV("the fold count multiplied by the output record count"), 3);
       }
     }
   }
+  *out_valid = true;
   return iree_ok_status();
 }
 
@@ -976,8 +1057,12 @@ iree_status_t loom_aie2p_array_topology_validate(
   if (!worker_interfaces_valid) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(
-      loom_aie2p_array_topology_validate_worker_rates(topology));
+  bool worker_rates_valid = false;
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_topology_validate_worker_rates(
+      topology, &worker_rates_valid));
+  if (!worker_rates_valid) {
+    return iree_ok_status();
+  }
   return loom_aie2p_array_topology_validate_worker_dependencies(topology,
                                                                 out_valid);
 }
