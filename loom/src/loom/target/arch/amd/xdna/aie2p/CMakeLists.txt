@@ -699,6 +699,22 @@ endif()
 if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
+    leaf_program
+  HDRS
+    "emit/leaf_program.h"
+  DEPS
+    ::encoding
+    ::machine
+    iree::base
+    loom::ir
+    loom::ops::low
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_XDNA)
+loom_cc_library(
+  NAME
     bundle_plan
   HDRS
     "emit/bundle_plan.h"
@@ -709,10 +725,12 @@ loom_cc_library(
     ::core_structure
     ::descriptor_encoding
     ::encoding
+    ::leaf_program
     ::machine
     iree::base
     iree::base::internal
     iree::base::internal::arena
+    loom::codegen::low::diagnostics
     loom::codegen::low::frame
     loom::codegen::low::packet
     loom::codegen::low::schedule::physical_issue
@@ -732,7 +750,6 @@ loom_cc_library(
   SRCS
     "emit/relocation.c"
   DEPS
-    ::core_descriptors
     ::encoding
     ::machine
     iree::base
@@ -752,19 +769,13 @@ loom_cc_library(
   SRCS
     "emit/leaf_object.c"
   DEPS
-    ::bundle_plan
-    ::core_descriptors
     ::encoding
+    ::leaf_program
+    ::machine
     ::relocation
     iree::base
     iree::base::internal::arena
     iree::schemas::xdna_executable
-    loom::codegen::low::diagnostics
-    loom::codegen::low::packet
-    loom::codegen::low::storage_layout
-    loom::ir
-    loom::ops::low
-    loom::ops::op_defs
     loom::target::emit::native::object
   PUBLIC
 )
@@ -917,6 +928,23 @@ loom_cc_test(
     "encoding/encoding_test.cc"
   DEPS
     ::encoding
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.xdna"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_XDNA)
+loom_cc_test(
+  NAME
+    leaf_object_test
+  SRCS
+    "emit/leaf_object_test.cc"
+  DEPS
+    ::encoding
+    ::leaf_object
+    iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS

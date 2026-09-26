@@ -9,7 +9,6 @@
 #include <inttypes.h>
 #include <string.h>
 
-#include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 #include "loom/target/arch/amd/xdna/aie2p/encoding/encoding.h"
 #include "loom/target/arch/amd/xdna/aie2p/machine/machine.h"
 
@@ -29,6 +28,86 @@ static iree_status_t loom_aie2p_native_relocation_add_signed(
   }
   *out_value = value - magnitude;
   return iree_ok_status();
+}
+
+typedef struct loom_aie2p_native_relocation_immediate_t {
+  // Instruction field receiving the encoded target value.
+  loom_aie2p_encoding_field_id_t field;
+  // Machine immediate domain encoding the semantic target value.
+  loom_aie2p_immediate_id_t immediate;
+  // Number of encoded fields in |instruction|.
+  uint8_t field_count;
+} loom_aie2p_native_relocation_immediate_t;
+
+static loom_aie2p_machine_form_info_t loom_aie2p_native_relocation_machine_form(
+    loom_aie2p_instruction_id_t instruction) {
+  loom_aie2p_machine_form_info_t form_info;
+  const bool found = loom_aie2p_machine_query_form(
+      (loom_aie2p_machine_form_id_t)instruction, &form_info);
+  if (!found) {
+    IREE_ASSERT_UNREACHABLE(
+        "encoding and machine instruction IDs must remain aligned");
+    IREE_BUILTIN_UNREACHABLE();
+  }
+  return form_info;
+}
+
+static loom_aie2p_native_relocation_immediate_t
+loom_aie2p_native_relocation_immediate(
+    loom_aie2p_instruction_id_t instruction) {
+  loom_aie2p_instruction_info_t instruction_info;
+  const bool instruction_found = loom_aie2p_encoding_query_instruction_info(
+      instruction, &instruction_info);
+  if (!instruction_found) {
+    IREE_ASSERT_UNREACHABLE("relocated instruction ID must be valid");
+    IREE_BUILTIN_UNREACHABLE();
+  }
+  const loom_aie2p_machine_form_info_t form_info =
+      loom_aie2p_native_relocation_machine_form(instruction);
+  loom_aie2p_native_relocation_immediate_t result = {
+      .field_count = instruction_info.field_count,
+  };
+  const uint8_t operand_count = form_info.output_count + form_info.input_count;
+  for (uint8_t i = 0; i < operand_count; ++i) {
+    loom_aie2p_machine_operand_info_t operand_info;
+    const bool operand_found = loom_aie2p_machine_query_form_operand(
+        (loom_aie2p_machine_form_id_t)instruction, i, &operand_info);
+    if (!operand_found) {
+      IREE_ASSERT_UNREACHABLE("machine-form operand must be valid");
+      IREE_BUILTIN_UNREACHABLE();
+    }
+    if (operand_info.kind != LOOM_AIE2P_MACHINE_OPERAND_KIND_IMMEDIATE) {
+      continue;
+    }
+    if (result.immediate != LOOM_AIE2P_IMMEDIATE_ID_INVALID) {
+      IREE_ASSERT_UNREACHABLE(
+          "relocated instruction must have exactly one immediate");
+      IREE_BUILTIN_UNREACHABLE();
+    }
+    result.immediate = (loom_aie2p_immediate_id_t)operand_info.type_id;
+    result.field = loom_aie2p_encoding_find_field(operand_info.name);
+  }
+  if (result.immediate == LOOM_AIE2P_IMMEDIATE_ID_INVALID ||
+      result.field == LOOM_AIE2P_ENCODING_FIELD_ID_INVALID) {
+    IREE_ASSERT_UNREACHABLE(
+        "relocated instruction immediate must have an encoded field");
+    IREE_BUILTIN_UNREACHABLE();
+  }
+  return result;
+}
+
+static bool loom_aie2p_native_relocation_is_core_branch(
+    loom_aie2p_instruction_id_t instruction) {
+  const loom_aie2p_machine_form_info_t form_info =
+      loom_aie2p_native_relocation_machine_form(instruction);
+  switch (form_info.control_flow_kind) {
+    case LOOM_AIE2P_CONTROL_FLOW_BRANCH_CONDITIONAL_NONZERO:
+    case LOOM_AIE2P_CONTROL_FLOW_BRANCH_CONDITIONAL_ZERO:
+    case LOOM_AIE2P_CONTROL_FLOW_BRANCH_DIRECT:
+      return true;
+    default:
+      return false;
+  }
 }
 
 static iree_status_t loom_aie2p_native_relocation_patch_core_branch(
@@ -75,69 +154,55 @@ static iree_status_t loom_aie2p_native_relocation_patch_core_branch(
           branch_slot, decoded_bundle.slots[0].value, instruction_count,
           instruction_candidates);
   IREE_ASSERT_LE(candidate_count, instruction_count);
-  const uint32_t branch_descriptor_ordinals[] = {
-      AIE2P_CORE_DESCRIPTOR_REF_BRANCH_DIRECT,
-      AIE2P_CORE_DESCRIPTOR_REF_BRANCH_NONZERO,
-      AIE2P_CORE_DESCRIPTOR_REF_BRANCH_ZERO,
-  };
-  const loom_low_descriptor_set_t* descriptor_set =
-      loom_aie2p_core_descriptor_set();
-  const loom_low_descriptor_t* branch_descriptor = NULL;
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(branch_descriptor_ordinals);
-       ++i) {
-    const loom_low_descriptor_t* candidate_descriptor =
-        &descriptor_set->descriptors[branch_descriptor_ordinals[i]];
-    for (iree_host_size_t j = 0; j < candidate_count; ++j) {
-      if (instruction_candidates[j] != candidate_descriptor->encoding_id) {
-        continue;
-      }
-      if (branch_descriptor != NULL) {
-        return iree_make_status(
-            IREE_STATUS_FAILED_PRECONDITION,
-            "AIE2P branch relocation matches multiple instruction forms");
-      }
-      branch_descriptor = candidate_descriptor;
+  loom_aie2p_instruction_id_t branch_instruction =
+      LOOM_AIE2P_INSTRUCTION_ID_INVALID;
+  for (iree_host_size_t i = 0; i < candidate_count; ++i) {
+    const loom_aie2p_instruction_id_t candidate = instruction_candidates[i];
+    if (!loom_aie2p_native_relocation_is_core_branch(candidate)) {
+      continue;
     }
+    if (branch_instruction != LOOM_AIE2P_INSTRUCTION_ID_INVALID) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "AIE2P branch relocation matches multiple instruction forms");
+    }
+    branch_instruction = candidate;
   }
-  if (branch_descriptor == NULL) {
+  if (branch_instruction == LOOM_AIE2P_INSTRUCTION_ID_INVALID) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "AIE2P branch relocation does not reference J, JZ, or JNZ");
   }
 
-  const iree_host_size_t field_capacity =
-      branch_descriptor->encoding_field_value_count +
-      branch_descriptor->operand_count + branch_descriptor->immediate_count;
+  const loom_aie2p_native_relocation_immediate_t target_immediate =
+      loom_aie2p_native_relocation_immediate(branch_instruction);
+  const iree_host_size_t field_capacity = target_immediate.field_count;
   loom_aie2p_encoding_field_value_t* field_values =
       (loom_aie2p_encoding_field_value_t*)iree_alloca(field_capacity *
                                                       sizeof(*field_values));
   iree_host_size_t field_count = 0;
   IREE_RETURN_IF_ERROR(loom_aie2p_encoding_unpack_instruction(
-      branch_descriptor->encoding_id, decoded_bundle.slots[0].value,
-      field_capacity, field_values, &field_count));
-  IREE_ASSERT_EQ(branch_descriptor->immediate_count, 1u);
-  const loom_low_immediate_t* target_immediate =
-      &descriptor_set->immediates[branch_descriptor->immediate_start];
+      branch_instruction, decoded_bundle.slots[0].value, field_capacity,
+      field_values, &field_count));
   if (target_address > INT64_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "AIE2P core branch target exceeds signed range");
   }
   uint64_t encoded_target = 0;
   IREE_RETURN_IF_ERROR(loom_aie2p_machine_encode_immediate(
-      (loom_aie2p_immediate_id_t)target_immediate->encoding_id,
-      (int64_t)target_address, &encoded_target));
+      target_immediate.immediate, (int64_t)target_address, &encoded_target));
   bool target_field_found = false;
   for (iree_host_size_t i = 0; i < field_count; ++i) {
-    if (field_values[i].field_id != target_immediate->encoding_field_id) {
+    if (field_values[i].field_id != target_immediate.field) {
       continue;
     }
     field_values[i].value = encoded_target;
     target_field_found = true;
   }
   IREE_ASSERT(target_field_found &&
-              "generated branch descriptor must encode cpmaddr");
+              "generated branch form must encode cpmaddr");
   IREE_RETURN_IF_ERROR(loom_aie2p_encoding_pack_instruction(
-      branch_descriptor->encoding_id, field_values, field_count,
+      branch_instruction, field_values, field_count,
       &decoded_bundle.slots[0].value));
 
   loom_aie2p_encoding_packet_t encoded_bundle;
@@ -171,16 +236,17 @@ static iree_status_t loom_aie2p_native_relocation_patch_local_address(
       iree_make_const_byte_span(packet_bytes, decode_length), &decoded_bundle,
       &packet_length));
 
-  const loom_low_descriptor_set_t* descriptor_set =
-      loom_aie2p_core_descriptor_set();
-  const loom_low_descriptor_t* address_descriptor =
-      &descriptor_set->descriptors
-           [AIE2P_CORE_DESCRIPTOR_REF_MATERIALIZE_LOCAL_ADDRESS_I32];
   const iree_host_size_t instruction_count =
       loom_aie2p_encoding_instruction_count();
   loom_aie2p_instruction_id_t* instruction_candidates =
       (loom_aie2p_instruction_id_t*)iree_alloca(
           instruction_count * sizeof(*instruction_candidates));
+  const loom_aie2p_instruction_id_t movxm_instruction =
+      loom_aie2p_encoding_find_instruction(IREE_SV("MOVXM"));
+  IREE_ASSERT(movxm_instruction != LOOM_AIE2P_INSTRUCTION_ID_INVALID &&
+              "generated AIE2P tables must contain MOVXM");
+  loom_aie2p_instruction_id_t address_instruction =
+      LOOM_AIE2P_INSTRUCTION_ID_INVALID;
   loom_aie2p_encoded_slot_t* address_slot = NULL;
   for (uint8_t i = 0; i < decoded_bundle.slot_count; ++i) {
     loom_aie2p_encoded_slot_t* slot = &decoded_bundle.slots[i];
@@ -189,7 +255,8 @@ static iree_status_t loom_aie2p_native_relocation_patch_local_address(
             slot->slot, slot->value, instruction_count, instruction_candidates);
     IREE_ASSERT_LE(candidate_count, instruction_count);
     for (iree_host_size_t j = 0; j < candidate_count; ++j) {
-      if (instruction_candidates[j] != address_descriptor->encoding_id) {
+      const loom_aie2p_instruction_id_t candidate = instruction_candidates[j];
+      if (candidate != movxm_instruction) {
         continue;
       }
       if (address_slot != NULL) {
@@ -198,6 +265,7 @@ static iree_status_t loom_aie2p_native_relocation_patch_local_address(
             "AIE2P local-address relocation matches multiple MOVXM slots");
       }
       address_slot = slot;
+      address_instruction = candidate;
     }
   }
   if (address_slot == NULL) {
@@ -206,19 +274,16 @@ static iree_status_t loom_aie2p_native_relocation_patch_local_address(
         "AIE2P local-address relocation does not reference MOVXM");
   }
 
-  const iree_host_size_t field_capacity =
-      address_descriptor->encoding_field_value_count +
-      address_descriptor->operand_count + address_descriptor->immediate_count;
+  const loom_aie2p_native_relocation_immediate_t address_immediate =
+      loom_aie2p_native_relocation_immediate(address_instruction);
+  const iree_host_size_t field_capacity = address_immediate.field_count;
   loom_aie2p_encoding_field_value_t* field_values =
       (loom_aie2p_encoding_field_value_t*)iree_alloca(field_capacity *
                                                       sizeof(*field_values));
   iree_host_size_t field_count = 0;
   IREE_RETURN_IF_ERROR(loom_aie2p_encoding_unpack_instruction(
-      address_descriptor->encoding_id, address_slot->value, field_capacity,
-      field_values, &field_count));
-  IREE_ASSERT_EQ(address_descriptor->immediate_count, 1u);
-  const loom_low_immediate_t* address_immediate =
-      &descriptor_set->immediates[address_descriptor->immediate_start];
+      address_instruction, address_slot->value, field_capacity, field_values,
+      &field_count));
   if (target_address > INT64_MAX) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
@@ -226,21 +291,19 @@ static iree_status_t loom_aie2p_native_relocation_patch_local_address(
   }
   uint64_t encoded_target = 0;
   IREE_RETURN_IF_ERROR(loom_aie2p_machine_encode_immediate(
-      (loom_aie2p_immediate_id_t)address_immediate->encoding_id,
-      (int64_t)target_address, &encoded_target));
+      address_immediate.immediate, (int64_t)target_address, &encoded_target));
   bool target_field_found = false;
   for (iree_host_size_t i = 0; i < field_count; ++i) {
-    if (field_values[i].field_id != address_immediate->encoding_field_id) {
+    if (field_values[i].field_id != address_immediate.field) {
       continue;
     }
     field_values[i].value = encoded_target;
     target_field_found = true;
   }
   IREE_ASSERT(target_field_found &&
-              "generated local-address descriptor must encode i");
+              "generated local-address form must encode i");
   IREE_RETURN_IF_ERROR(loom_aie2p_encoding_pack_instruction(
-      address_descriptor->encoding_id, field_values, field_count,
-      &address_slot->value));
+      address_instruction, field_values, field_count, &address_slot->value));
 
   loom_aie2p_encoding_packet_t encoded_bundle;
   IREE_RETURN_IF_ERROR(loom_aie2p_encoding_pack_bundle(
