@@ -106,10 +106,10 @@ typedef uint64_t iree_hal_semaphore_flags_t;
 // iree_status_t.
 #define IREE_HAL_SEMAPHORE_FAILURE_VALUE_STATUS_BIT 0x8000000000000000ull
 
-// Returns a semaphore payload value that encodes the given |status|.
-// Ownership of the status is transferred to the semaphore and it must be
-// freed by a consumer. Not all implementations can support failure status
-// payloads and this should only be used by those implementations that can.
+// Returns a semaphore payload value that encodes a borrowed |status|.
+// Its owner must keep the status alive and immutable while the payload can be
+// decoded. Decoding with iree_hal_semaphore_failure_as_status clones the status
+// for the consumer. Not all implementations can support encoded statuses.
 static inline uint64_t iree_hal_status_as_semaphore_failure(
     iree_status_t status) {
   return IREE_HAL_SEMAPHORE_FAILURE_VALUE_STATUS_BIT |
@@ -368,9 +368,11 @@ iree_hal_semaphore_signal(iree_hal_semaphore_t* semaphore, uint64_t new_value,
                           const iree_async_frontier_t* frontier);
 
 // Signals the |semaphore| with a failure. The |status| will be returned from
-// iree_hal_semaphore_query and iree_hal_semaphore_signal for the lifetime
-// of the semaphore. Ownership of the status transfers to the semaphore and
-// callers must clone it if they wish to retain it.
+// iree_hal_semaphore_query, iree_hal_semaphore_signal, and
+// iree_hal_semaphore_wait for the lifetime of the semaphore. Ownership of the
+// status transfers to the semaphore and callers must clone it if they wish to
+// retain it. Each query, signal, or wait returns its own independently owned
+// clone of the stored failure.
 IREE_API_EXPORT void iree_hal_semaphore_fail(iree_hal_semaphore_t* semaphore,
                                              iree_status_t status);
 
@@ -382,8 +384,8 @@ IREE_API_EXPORT void iree_hal_semaphore_fail(iree_hal_semaphore_t* semaphore,
 //
 // Returns IREE_STATUS_DEADLINE_EXCEEDED if the |timeout| elapses without the
 // semaphore reaching the required value. If an asynchronous failure occurred
-// this will return the failure status code that was set on the semaphore.
-// Callers can use iree_hal_semaphore_query to get the full status with message.
+// this returns an owned clone of the failure status set on the semaphore,
+// preserving its diagnostic message even after the semaphore is released.
 IREE_API_EXPORT iree_status_t
 iree_hal_semaphore_wait(iree_hal_semaphore_t* semaphore, uint64_t value,
                         iree_timeout_t timeout, iree_async_wait_flags_t flags);
@@ -455,9 +457,8 @@ IREE_API_EXPORT void iree_hal_semaphore_list_fail(
 //
 // Returns IREE_STATUS_DEADLINE_EXCEEDED if the |timeout| elapses without all
 // timepoints being reached. If an asynchronous failure occurred on any timeline
-// this will return the failure status code from the first failed semaphore.
-// Callers can use iree_hal_semaphore_query on individual semaphores to get the
-// full status with message.
+// this returns an owned clone of the first observed failure status, preserving
+// its diagnostic message even after the semaphores are released.
 //
 // NOTE: this is not the most optimal way to wait on semaphores; if at all
 // possible use a single wait on a single semaphore to avoid additional

@@ -972,43 +972,57 @@ TEST(MultiWaitTest, FailureAbortsWait) {
   }
 
   // Fail the second semaphore from a background thread.
+  iree_status_t failure = iree_make_status(IREE_STATUS_INTERNAL, "gpu fault");
   std::thread fail_thread([&]() {
-    iree_async_semaphore_fail(
-        sems[1], iree_make_status(IREE_STATUS_INTERNAL, "gpu fault"));
+    iree_async_semaphore_fail(sems[1], iree_status_clone(failure));
   });
 
   iree_status_t status = iree_async_semaphore_multi_wait(
       IREE_ASYNC_WAIT_MODE_ALL, sems, values, kCount, iree_infinite_timeout(),
       IREE_ASYNC_WAIT_FLAG_NONE, iree_allocator_system());
-  // multi_wait returns the actual failure code (not ABORTED) so the caller
-  // knows the specific error without needing a follow-up query.
-  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INTERNAL);
-  iree_status_free(status);
-
   fail_thread.join();
 
   for (int i = 0; i < kCount; ++i) {
     iree_async_semaphore_release(sems[i]);
   }
+
+  // The result owns its diagnostic independently of the failed semaphore.
+  EXPECT_TRUE(iree_string_view_equal(iree_status_message(status),
+                                     iree_status_message(failure)));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INTERNAL, status);
+  iree_status_free(failure);
 }
 
 TEST(MultiWaitTest, AlreadyFailedSemaphoreAbortsImmediately) {
-  iree_async_semaphore_t* sem = nullptr;
-  IREE_ASSERT_OK(iree_async_semaphore_create(
-      test_proactor(), 0, IREE_ASYNC_SEMAPHORE_DEFAULT_FRONTIER_CAPACITY,
-      iree_allocator_system(), &sem));
+  // Exercise both the single-semaphore fast path and the multi-semaphore poll.
+  for (iree_host_size_t count : {1, 2}) {
+    for (auto mode : {IREE_ASYNC_WAIT_MODE_ALL, IREE_ASYNC_WAIT_MODE_ANY}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "count=" << count << " mode=" << mode);
+      iree_async_semaphore_t* semaphores[2] = {};
+      uint64_t values[2] = {10, 10};
+      for (iree_host_size_t i = 0; i < count; ++i) {
+        IREE_ASSERT_OK(iree_async_semaphore_create(
+            test_proactor(), 0, IREE_ASYNC_SEMAPHORE_DEFAULT_FRONTIER_CAPACITY,
+            iree_allocator_system(), &semaphores[i]));
+      }
+      iree_status_t failure =
+          iree_make_status(IREE_STATUS_INTERNAL, "already failed");
+      iree_async_semaphore_fail(semaphores[count - 1],
+                                iree_status_clone(failure));
 
-  iree_async_semaphore_fail(
-      sem, iree_make_status(IREE_STATUS_INTERNAL, "already failed"));
-
-  uint64_t value = 10;
-  iree_status_t status = iree_async_semaphore_multi_wait(
-      IREE_ASYNC_WAIT_MODE_ALL, &sem, &value, 1, iree_immediate_timeout(),
-      IREE_ASYNC_WAIT_FLAG_NONE, iree_allocator_system());
-  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INTERNAL);
-  iree_status_free(status);
-
-  iree_async_semaphore_release(sem);
+      iree_status_t status = iree_async_semaphore_multi_wait(
+          mode, semaphores, values, count, iree_immediate_timeout(),
+          IREE_ASYNC_WAIT_FLAG_NONE, iree_allocator_system());
+      for (iree_host_size_t i = 0; i < count; ++i) {
+        iree_async_semaphore_release(semaphores[i]);
+      }
+      EXPECT_TRUE(iree_string_view_equal(iree_status_message(status),
+                                         iree_status_message(failure)));
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_INTERNAL, status);
+      iree_status_free(failure);
+    }
+  }
 }
 
 TEST(MultiWaitTest, ImmediateTimeoutPollAnyOneSatisfied) {

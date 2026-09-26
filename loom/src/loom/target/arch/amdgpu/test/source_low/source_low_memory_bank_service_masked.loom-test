@@ -1,0 +1,56 @@
+// RUN: emit amdgpu-bank-service
+
+amdgpu.target<gfx1151> @target {subgroup_size = 64}
+
+// Four full waves stage tiles, then a quarter-wave copies one row while its
+// complement copies the remaining rows. Both branches need the exact mask:
+// substituting full participation would count inactive service phases.
+kernel.def target(@target) @masked_tiles() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch() {
+  %lane = kernel.subgroup.lane.id : index
+  %wave = kernel.subgroup.id : index
+  %thread = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %bytes = index.constant 2048 : offset
+  %input_tiles = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %selected_tiles = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %remaining_tiles = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %uneven_tiles = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %layout = encoding.layout.strided [128, 2, 1] : encoding<layout>
+  %input = buffer.view %input_tiles[%base] : buffer -> view<4x64x2xi32, %layout>
+  %selected = buffer.view %selected_tiles[%base] : buffer -> view<4x64x2xi32, %layout>
+  %remaining = buffer.view %remaining_tiles[%base] : buffer -> view<4x64x2xi32, %layout>
+  %uneven = buffer.view %uneven_tiles[%base] : buffer -> view<4x64x2xi32, %layout>
+  %initial = vector.constant 1 : vector<2xi32>
+  vector.store %initial, %input[%wave, %lane, 0] : vector<2xi32>, view<4x64x2xi32, %layout>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %row_width = index.constant 16 : index
+  %row = index.div %lane, %row_width : index
+  %column = index.rem %lane, %row_width : index
+  %selected_row = index.constant 1 : index
+  %is_selected = index.cmp eq, %row, %selected_row : index
+  scf.if %is_selected {
+    %value = vector.load %input[%wave, %column, 0] : view<4x64x2xi32, %layout> -> vector<2xi32>
+    vector.store %value, %selected[%wave, %lane, 0] : vector<2xi32>, view<4x64x2xi32, %layout>
+  } else {
+    %value = vector.load %input[%wave, %lane, 0] : view<4x64x2xi32, %layout> -> vector<2xi32>
+    vector.store %value, %remaining[%wave, %lane, 0] : vector<2xi32>, view<4x64x2xi32, %layout>
+  }
+  // This selector activates part of the first wave and none of the others.
+  %first_threads = index.cmp slt, %thread, %row_width : index
+  scf.if %first_threads {
+    vector.store %initial, %uneven[%wave, %lane, 0] : vector<2xi32>, view<4x64x2xi32, %layout>
+  }
+  kernel.return
+}
+
+// ----
+bank-service function=masked_tiles source-op=vector.store root=input_tiles packet=amdgpu.ds_write_b64 model=amdgpu.lds.gfx1151.wave64.b64.write.count-each proof=exact lane-address=canonical-topology-coordinates-all-waves active-lanes=subgroup-uniform-control-full-wave base-residue=subgroup-uniform-common-translation-all-bank-word-residues classification=conflict-free required-rounds=4 uncontended-rounds=4 extra-rounds=0 maximum-multiplicity=1
+bank-service function=masked_tiles source-op=vector.load root=input_tiles packet=amdgpu.ds_read_b64 model=amdgpu.lds.gfx1151.wave64.b64.read.coalesce-identical-reads proof=exact lane-address=canonical-topology-digits-all-waves active-lanes=single-entry-comparison-all-waves base-residue=subgroup-uniform-common-translation-all-bank-word-residues classification=conflict-free required-rounds=1 uncontended-rounds=1 extra-rounds=0 maximum-multiplicity=1
+bank-service function=masked_tiles source-op=vector.store root=selected_tiles packet=amdgpu.ds_write_b64 model=amdgpu.lds.gfx1151.wave64.b64.write.count-each proof=exact lane-address=canonical-topology-coordinates-all-waves active-lanes=single-entry-comparison-all-waves base-residue=subgroup-uniform-common-translation-all-bank-word-residues classification=conflict-free required-rounds=1 uncontended-rounds=1 extra-rounds=0 maximum-multiplicity=1
+bank-service function=masked_tiles source-op=vector.load root=input_tiles packet=amdgpu.ds_read_b64 model=amdgpu.lds.gfx1151.wave64.b64.read.coalesce-identical-reads proof=exact lane-address=canonical-topology-coordinates-all-waves active-lanes=single-entry-comparison-all-waves base-residue=subgroup-uniform-common-translation-all-bank-word-residues classification=conflict-free required-rounds=3 uncontended-rounds=3 extra-rounds=0 maximum-multiplicity=1
+bank-service function=masked_tiles source-op=vector.store root=remaining_tiles packet=amdgpu.ds_write_b64 model=amdgpu.lds.gfx1151.wave64.b64.write.count-each proof=exact lane-address=canonical-topology-coordinates-all-waves active-lanes=single-entry-comparison-all-waves base-residue=subgroup-uniform-common-translation-all-bank-word-residues classification=conflict-free required-rounds=3 uncontended-rounds=3 extra-rounds=0 maximum-multiplicity=1
+bank-service function=masked_tiles source-op=vector.store root=uneven_tiles packet=amdgpu.ds_write_b64 model=amdgpu.lds.gfx1151.wave64.b64.write.count-each proof=unknown lane-address=unproven active-lanes=unproven base-residue=unproven unknown-reason=active-lane-predicate-unproven

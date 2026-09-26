@@ -6,17 +6,14 @@
 
 #include "loom/target/arch/amdgpu/lower/memory_subgroup_access.h"
 
-#include "loom/analysis/control_uniformity.h"
+#include "iree/base/internal/math.h"
+#include "loom/analysis/symbolic_projection.h"
+#include "loom/codegen/low/lower/participation.h"
 #include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/lower/fragment_memory/address.h"
 #include "loom/target/arch/amdgpu/lower/topology.h"
 
 #define LOOM_AMDGPU_MEMORY_MAX_SUBGROUP_SIZE 64
-
-typedef struct loom_amdgpu_memory_subgroup_access_state_t {
-  // Reusable execution-uniformity analysis for the source function.
-  loom_control_uniformity_info_t control_uniformity;
-} loom_amdgpu_memory_subgroup_access_state_t;
 
 typedef struct loom_amdgpu_memory_byte_interval_t {
   // Inclusive relative byte offset of the interval begin.
@@ -25,32 +22,140 @@ typedef struct loom_amdgpu_memory_byte_interval_t {
   uint64_t end;
 } loom_amdgpu_memory_byte_interval_t;
 
-static int loom_amdgpu_memory_subgroup_access_state_key;
-
-static iree_status_t loom_amdgpu_memory_control_uniformity(
-    loom_low_lower_context_t* context,
-    loom_control_uniformity_info_t** out_control_uniformity) {
-  loom_amdgpu_memory_subgroup_access_state_t* state = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_get_or_allocate_target_state(
-      context, &loom_amdgpu_memory_subgroup_access_state_key, sizeof(*state),
-      (void**)&state));
-  if (state->control_uniformity.module == NULL) {
-    loom_control_uniformity_info_initialize(
-        loom_low_lower_context_module(context),
-        loom_low_lower_context_fact_table(context),
-        loom_low_lower_context_function_arena(context),
-        &state->control_uniformity);
+static bool loom_amdgpu_memory_coordinate_value(
+    const loom_value_fact_table_t* facts, loom_value_id_t value_id,
+    const uint32_t coordinates[LOOM_VALUE_FACT_TOPOLOGY_AXIS_COUNT_],
+    int64_t* out_value) {
+  const loom_value_facts_t value_facts =
+      loom_value_fact_table_lookup(facts, value_id);
+  if (loom_value_facts_is_exact(value_facts)) {
+    *out_value = value_facts.range_lo;
+    return true;
   }
-  *out_control_uniformity = &state->control_uniformity;
-  return iree_ok_status();
+  const loom_value_fact_topology_domain_t* domain =
+      loom_value_facts_topology_domain(value_facts);
+  if (!domain ||
+      (domain->value_kind != LOOM_VALUE_FACT_TOPOLOGY_VALUE_WORKITEM_ID &&
+       domain->value_kind != LOOM_VALUE_FACT_TOPOLOGY_VALUE_SUBGROUP_LANE_ID)) {
+    return false;
+  }
+  *out_value = coordinates[domain->axis];
+  return true;
 }
 
-iree_status_t loom_amdgpu_memory_prove_full_subgroup(
+static bool loom_amdgpu_memory_projection_value(
+    const loom_value_fact_table_t* facts,
+    const loom_symbolic_projection_t* projection,
+    const uint32_t coordinates[LOOM_VALUE_FACT_TOPOLOGY_AXIS_COUNT_],
+    int64_t* out_value) {
+  int64_t value = 0;
+  if (!loom_amdgpu_memory_coordinate_value(facts, projection->value_id,
+                                           coordinates, &value) ||
+      !iree_checked_mul_i64(value, projection->scale, &value) ||
+      !iree_checked_add_i64(value, projection->offset, &value)) {
+    return false;
+  }
+  value /= projection->divisor;
+  if (projection->modulus) {
+    value %= projection->modulus;
+  }
+  *out_value = value;
+  return true;
+}
+
+// Interpret only the shared owner's completed numeric certificate. No source
+// operations are decoded and no producer expansion occurs during lane queries.
+static bool loom_amdgpu_memory_expression_value(
+    const loom_symbolic_expr_context_t* expressions,
+    const loom_low_lower_participation_operand_t* summary,
+    const uint32_t coordinates[LOOM_VALUE_FACT_TOPOLOGY_AXIS_COUNT_],
+    int64_t* out_value) {
+  if (summary->projection) {
+    return loom_amdgpu_memory_projection_value(
+        expressions->fact_table, summary->projection, coordinates, out_value);
+  }
+  const loom_symbolic_expr_t* expression = &summary->expression;
+  if (!loom_symbolic_expr_is_linear(expression)) {
+    return false;
+  }
+  int64_t value = expression->constant;
+  for (iree_host_size_t i = 0; i < expression->term_count; ++i) {
+    const loom_symbolic_term_t* term = &expression->terms[i];
+    int64_t coordinate = 0;
+    if (!loom_amdgpu_memory_coordinate_value(expressions->fact_table,
+                                             term->value_id, coordinates,
+                                             &coordinate)) {
+      loom_symbolic_expr_summary_t term_summary;
+      if (!loom_symbolic_expr_context_try_lookup_summary(
+              expressions, term->value_id, &term_summary) ||
+          !term_summary.projection ||
+          !loom_amdgpu_memory_projection_value(expressions->fact_table,
+                                               term_summary.projection,
+                                               coordinates, &coordinate)) {
+        return false;
+      }
+    }
+    if (!iree_checked_mul_i64(coordinate, term->coefficient, &coordinate) ||
+        !iree_checked_add_i64(value, coordinate, &value)) {
+      return false;
+    }
+  }
+  *out_value = value;
+  return true;
+}
+
+static bool loom_amdgpu_memory_comparison_mask(
+    const loom_low_lower_participation_t* participation,
+    const loom_symbolic_expr_context_t* expressions,
+    const loom_target_workgroup_size_t* workgroup_size, uint8_t subgroup_size,
+    uint64_t* out_mask) {
+  const loom_low_lower_participation_condition_t* condition =
+      participation->condition;
+  const uint32_t plane_size = workgroup_size->x * workgroup_size->y;
+  const uint32_t flat_size = plane_size * workgroup_size->z;
+  for (uint32_t wave_begin = 0; wave_begin < flat_size;
+       wave_begin += subgroup_size) {
+    uint64_t mask = 0;
+    for (uint8_t lane = 0; lane < subgroup_size; ++lane) {
+      const uint32_t linear_id = wave_begin + lane;
+      const uint32_t coordinates[] = {
+          linear_id % workgroup_size->x,
+          (linear_id / workgroup_size->x) % workgroup_size->y,
+          linear_id / plane_size, lane};
+      int64_t lhs_value = 0, rhs_value = 0;
+      if (!loom_amdgpu_memory_expression_value(expressions, &condition->lhs,
+                                               coordinates, &lhs_value) ||
+          !loom_amdgpu_memory_expression_value(expressions, &condition->rhs,
+                                               coordinates, &rhs_value)) {
+        return false;
+      }
+      const loom_value_facts_t lhs_facts =
+          loom_value_facts_exact_i64(lhs_value);
+      const loom_value_facts_t rhs_facts =
+          loom_value_facts_exact_i64(rhs_value);
+      bool result = false;
+      if (!loom_condition_integer_comparison_evaluate(
+              &condition->comparison, &expressions->fact_table->context,
+              &lhs_facts, &rhs_facts, &result)) {
+        return false;
+      }
+      if (result == condition->assumed_truth) {
+        mask |= UINT64_C(1) << lane;
+      }
+    }
+    if (mask == 0 || (wave_begin != 0 && mask != *out_mask)) {
+      return false;
+    }
+    *out_mask = mask;
+  }
+  return true;
+}
+
+iree_status_t loom_amdgpu_memory_prove_subgroup(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    uint8_t subgroup_size,
-    loom_amdgpu_memory_full_subgroup_proof_t* out_proof) {
+    uint8_t subgroup_size, loom_amdgpu_memory_subgroup_proof_t* out_proof) {
   IREE_ASSERT_GT(subgroup_size, 0u);
-  *out_proof = (loom_amdgpu_memory_full_subgroup_proof_t){0};
+  *out_proof = (loom_amdgpu_memory_subgroup_proof_t){0};
   const loom_target_bundle_t* bundle = loom_low_lower_context_bundle(context);
   const loom_module_t* module = loom_low_lower_context_module(context);
   const loom_func_like_t function =
@@ -71,18 +176,27 @@ iree_status_t loom_amdgpu_memory_prove_full_subgroup(
     return iree_ok_status();
   }
 
-  loom_control_uniformity_info_t* control_uniformity = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_amdgpu_memory_control_uniformity(context, &control_uniformity));
-  const bool control_is_uniform = loom_control_uniformity_prove_execution(
-      control_uniformity, source_op, LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP,
-      NULL);
-  if (!control_is_uniform) {
+  loom_low_lower_participation_t participation;
+  IREE_RETURN_IF_ERROR(loom_low_lower_source_subgroup_participation(
+      context, source_op, &participation));
+  if (participation.kind == LOOM_LOW_LOWER_PARTICIPATION_FULL) {
+    out_proof->active_lane_mask =
+        subgroup_size == 64 ? UINT64_MAX : (UINT64_C(1) << subgroup_size) - 1u;
+    out_proof->proof = IREE_SV("subgroup-uniform-control-full-wave");
+  } else if (participation.kind == LOOM_LOW_LOWER_PARTICIPATION_COMPARISON) {
+    if (!loom_amdgpu_memory_comparison_mask(
+            &participation,
+            loom_low_lower_context_symbolic_expr_context(context),
+            &workgroup_size, subgroup_size, &out_proof->active_lane_mask)) {
+      out_proof->unknown_reason = IREE_SV("active-lane-predicate-unproven");
+      return iree_ok_status();
+    }
+    out_proof->proof = IREE_SV("single-entry-comparison-all-waves");
+  } else {
     out_proof->unknown_reason = IREE_SV("active-lane-control-not-uniform");
     return iree_ok_status();
   }
-  out_proof->is_full_subgroup = true;
-  out_proof->proof = IREE_SV("subgroup-uniform-control-full-wave");
+  out_proof->is_proven = true;
   out_proof->workgroup_size = workgroup_size;
   return iree_ok_status();
 }
@@ -234,14 +348,16 @@ iree_status_t loom_amdgpu_fragment_memory_report_subgroup_access(
   IREE_ASSERT_GT(per_lane_packet_byte_count, 0u);
   out_report->per_lane_packet_byte_count = per_lane_packet_byte_count;
 
-  loom_amdgpu_memory_full_subgroup_proof_t active_lane_proof = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_memory_prove_full_subgroup(
+  loom_amdgpu_memory_subgroup_proof_t active_lane_proof = {0};
+  IREE_RETURN_IF_ERROR(loom_amdgpu_memory_prove_subgroup(
       context, source_op, layout->wave_size, &active_lane_proof));
-  if (!active_lane_proof.is_full_subgroup) {
+  if (!active_lane_proof.is_proven) {
     out_report->unknown_reason = active_lane_proof.unknown_reason;
     return iree_ok_status();
   }
   out_report->active_lane_proof = active_lane_proof.proof;
+  out_report->active_lane_count =
+      (uint8_t)iree_math_count_ones_u64(active_lane_proof.active_lane_mask);
 
   if (!runtime_offset->is_subgroup_uniform) {
     out_report->lane_mapping = IREE_SV("runtime-axis-terms");
@@ -257,12 +373,10 @@ iree_status_t loom_amdgpu_fragment_memory_report_subgroup_access(
   out_report->lane_address_proof =
       IREE_SV("compiled-fragment-lane-register-layout");
 
-  const uint64_t active_lane_mask =
-      layout->wave_size == 64 ? UINT64_MAX
-                              : (UINT64_C(1) << layout->wave_size) - 1u;
   loom_amdgpu_memory_calculate_subgroup_geometry(
-      &plan->address_layout, layout->wave_size, active_lane_mask,
-      per_lane_packet_byte_count, out_report);
+      &plan->address_layout, layout->wave_size,
+      active_lane_proof.active_lane_mask, per_lane_packet_byte_count,
+      out_report);
   out_report->proof = IREE_SV("exact");
   return iree_ok_status();
 }

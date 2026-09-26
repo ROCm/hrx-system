@@ -674,9 +674,9 @@ IREE_API_EXPORT void iree_async_semaphore_dispatch_timepoints_failed(
 //
 // Returns IREE_STATUS_DEADLINE_EXCEEDED if the timeout expires before the
 // condition is met.
-// Returns the failure status code if any semaphore fails (regardless of mode).
-// The returned status carries only the code, not the full message — callers
-// should query individual semaphores to retrieve the complete failure status.
+// If a semaphore failure is observed (in either mode), returns an owned clone
+// of the first observed failure, preserving its diagnostic message. The result
+// remains valid after the semaphores are released.
 //
 // Handles all timepoint management internally: no event pools, wait sets, or
 // per-semaphore ceremony needed. For small counts (<=8 semaphores), uses

@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Fuzzes execution-exclusion proofs against concrete two-lane paths through
+// Fuzzes exclusion and single-entry proofs against concrete lane paths through
 // verified IR. The low bits of the first byte select 1..8 blocks and its high
 // bit permits cycles. The second byte supplies uniform-selector bits. Each
 // block consumes a successor count (0..2) and target offsets: forward targets
@@ -75,8 +75,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &pool);
   iree_arena_allocator_t arena;
   iree_arena_initialize(&pool, &arena);
-  check(loom::testing::CheckControlCoexecution(&state.context, &pool, &arena,
-                                               successors, uniform_selectors));
+  check(loom::testing::CheckControlExecution(&state.context, &pool, &arena,
+                                             successors, uniform_selectors));
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&pool);
   return 0;

@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/analysis/condition_facts.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/ir.h"
 #include "loom/util/fact_table.h"
@@ -83,6 +84,19 @@ bool loom_control_uniformity_prove_execution(
     const loom_control_uniformity_info_t* info, const loom_op_t* op,
     loom_value_fact_uniform_scope_t required_scope,
     loom_control_uniformity_failure_t* out_failure);
+
+// Proves that every entry into |block| selects one Boolean branch outcome from
+// execution uniform at |required_scope|. The returned condition describes the
+// entire active subset of that entry, including false-edge polarity. It need
+// not itself be uniform or numerically decidable.
+//
+// Requires a reachable non-entry block with exactly one incoming CFG edge;
+// backedges and duplicate successors count as entries. The retained graph and
+// execution facts establish the proof without rebuilding or scanning the CFG.
+bool loom_control_uniformity_prove_single_entry(
+    const loom_control_uniformity_info_t* info, const loom_block_t* block,
+    loom_value_fact_uniform_scope_t required_scope,
+    loom_condition_assumption_t* out_condition);
 
 // Proves that every operation in |lhs_ops| and |rhs_ops| executes on disjoint
 // alternatives of a common RegionBranch or CFG controller whose selector is

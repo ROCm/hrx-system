@@ -1179,6 +1179,7 @@ iree_cc_test(
   DEPS
     ::amdgpu
     ::headers
+    iree::async
     iree::base
     iree::base::internal
     iree::base::threading

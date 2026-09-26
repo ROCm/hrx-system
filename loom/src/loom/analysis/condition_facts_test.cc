@@ -159,6 +159,81 @@ TEST_F(ConditionFactsTest, IndexCompareTrueEdgeProducesRelation) {
   EXPECT_EQ(relation.right.value_id, upper_bound);
 }
 
+TEST_F(ConditionFactsTest, ComparisonCertificatePreservesCarrierAndIdentity) {
+  loom_target_facts_t target_facts = {};
+  target_facts.storage.snapshot.index_bitwidth = 32;
+  fact_table_.context.target_facts = &target_facts;
+  const loom_value_id_t left = DefineIndexValue();
+  const loom_value_id_t right = DefineIndexValue();
+  loom_condition_integer_comparison_t comparison = {};
+  ASSERT_TRUE(loom_condition_integer_comparison_describe(
+      module_, BuildIndexCompare(LOOM_INDEX_CMP_PREDICATE_SLT, left, right),
+      &comparison));
+  const loom_value_facts_t zero = loom_value_facts_exact_i64(0);
+  const loom_value_facts_t sign_bit =
+      loom_value_facts_exact_i64(INT64_C(1) << 31);
+  bool result = false;
+  EXPECT_TRUE(loom_condition_integer_comparison_evaluate(
+      &comparison, nullptr, &zero, &sign_bit, &result));
+  EXPECT_TRUE(result);
+  EXPECT_FALSE(loom_condition_integer_comparison_evaluate(
+      &comparison, &fact_table_.context, &zero, &sign_bit, &result));
+
+  ASSERT_TRUE(loom_condition_integer_comparison_describe(
+      module_, BuildIndexCompare(LOOM_INDEX_CMP_PREDICATE_ULT, left, right),
+      &comparison));
+  EXPECT_TRUE(loom_condition_integer_comparison_evaluate(
+      &comparison, &fact_table_.context, &zero, &sign_bit, &result));
+  EXPECT_TRUE(result);
+
+  ASSERT_TRUE(loom_condition_integer_comparison_describe(
+      module_, BuildIndexCompare(LOOM_INDEX_CMP_PREDICATE_EQ, left, left),
+      &comparison));
+  const loom_value_facts_t unknown = loom_value_facts_unknown();
+  EXPECT_TRUE(loom_condition_integer_comparison_evaluate(
+      &comparison, &fact_table_.context, &unknown, &unknown, &result));
+  EXPECT_TRUE(result);
+}
+
+TEST_F(ConditionFactsTest, ComparisonCertificatePreservesSignedBooleanOrder) {
+  const loom_value_id_t left =
+      DefineValue(loom_type_scalar(LOOM_SCALAR_TYPE_I1));
+  const loom_value_id_t right =
+      DefineValue(loom_type_scalar(LOOM_SCALAR_TYPE_I1));
+  for (bool signed_order : {false, true}) {
+    loom_condition_integer_comparison_t comparison = {};
+    ASSERT_TRUE(loom_condition_integer_comparison_describe(
+        module_,
+        BuildScalarCompare(signed_order ? LOOM_SCALAR_CMPI_PREDICATE_SLT
+                                        : LOOM_SCALAR_CMPI_PREDICATE_ULT,
+                           left, right),
+        &comparison));
+    for (int64_t a : {0, 1}) {
+      for (int64_t b : {0, 1}) {
+        const loom_value_facts_t lhs = loom_value_facts_exact_i64(a);
+        const loom_value_facts_t rhs = loom_value_facts_exact_i64(b);
+        bool result = false;
+        ASSERT_TRUE(loom_condition_integer_comparison_evaluate(
+            &comparison, nullptr, &lhs, &rhs, &result));
+        EXPECT_EQ(result, signed_order ? a > b : a < b);
+      }
+    }
+  }
+}
+
+TEST_F(ConditionFactsTest, ComparisonCertificateDoesNotDescribeConsequences) {
+  const loom_value_id_t left = DefineIndexValue();
+  const loom_value_id_t right = DefineIndexValue();
+  const loom_value_id_t opaque =
+      DefineValue(loom_type_scalar(LOOM_SCALAR_TYPE_I1));
+  loom_op_t* compare =
+      BuildIndexCompare(LOOM_INDEX_CMP_PREDICATE_SLT, left, right);
+  loom_condition_integer_comparison_t comparison = {};
+  EXPECT_FALSE(loom_condition_integer_comparison_describe(
+      module_, BuildBoolAnd(loom_index_cmp_result(compare), opaque),
+      &comparison));
+}
+
 TEST_F(ConditionFactsTest, DirectConditionQueryDoesNotAllocateScratch) {
   loom_value_id_t induction = DefineIndexValue();
   loom_value_id_t upper_bound = DefineIndexValue();

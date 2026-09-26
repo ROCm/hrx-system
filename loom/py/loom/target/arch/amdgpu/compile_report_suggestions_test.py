@@ -313,6 +313,7 @@ def _fragment_wave_group(
         "active_lane_proof": "subgroup-uniform-control-full-wave",
         "lane_mapping": "digit-terms",
         "subgroup_size": subgroup_size,
+        "active_lane_count": subgroup_size,
         "per_lane_packet_bytes": packet_bytes,
         "linear_lane_stride_bytes": 0,
         "lane_terms": [

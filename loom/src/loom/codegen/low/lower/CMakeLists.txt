@@ -20,6 +20,7 @@ loom_cc_library(
     "function_boundary.h"
     "lower.h"
     "module_state.h"
+    "participation.h"
     "report.h"
     "representation_projection.h"
     "rule_descriptor.h"
@@ -41,6 +42,7 @@ loom_cc_library(
     "lower.c"
     "memory_effects.c"
     "module_state.c"
+    "participation.c"
     "policy.c"
     "report.c"
     "representation_projection.c"
@@ -61,6 +63,7 @@ loom_cc_library(
     loom::analysis::cfg_value_identity
     loom::analysis::condition_facts
     loom::analysis::contract_vector
+    loom::analysis::control_uniformity
     loom::analysis::kernel_async_legality
     loom::analysis::native_layout
     loom::analysis::symbol_facts

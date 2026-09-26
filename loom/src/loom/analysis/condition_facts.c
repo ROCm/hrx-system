@@ -557,26 +557,84 @@ static bool loom_condition_scalar_cmpi_predicate_relation(
   }
 }
 
+static loom_condition_integer_comparison_t
+loom_condition_integer_comparison_from_op(const loom_module_t* module,
+                                          const loom_op_t* op) {
+  const loom_value_id_t lhs = loom_op_const_operands(op)[0];
+  return (loom_condition_integer_comparison_t){
+      .kind = op->kind,
+      .operand_type =
+          loom_type_element_type(loom_module_value_type(module, lhs)),
+      .predicate = loom_index_cmp_isa(op) ? loom_index_cmp_predicate(op)
+                                          : loom_scalar_cmpi_predicate(op),
+      .lhs = lhs,
+      .rhs = loom_op_const_operands(op)[1],
+  };
+}
+
+bool loom_condition_integer_comparison_describe(
+    const loom_module_t* module, const loom_op_t* op,
+    loom_condition_integer_comparison_t* out_comparison) {
+  if (!loom_index_cmp_isa(op) && !loom_scalar_cmpi_isa(op)) {
+    return false;
+  }
+  *out_comparison = loom_condition_integer_comparison_from_op(module, op);
+  return true;
+}
+
+static bool loom_condition_integer_comparison_same_value_result(
+    const loom_condition_integer_comparison_t* comparison, bool* out_result) {
+  return comparison->lhs == comparison->rhs &&
+         (comparison->kind == LOOM_OP_INDEX_CMP
+              ? loom_index_cmp_same_value_result(comparison->predicate,
+                                                 out_result)
+              : loom_scalar_cmpi_same_value_result(comparison->predicate,
+                                                   out_result));
+}
+
+bool loom_condition_integer_comparison_evaluate(
+    const loom_condition_integer_comparison_t* comparison,
+    const loom_fact_context_t* context, const loom_value_facts_t* lhs_facts,
+    const loom_value_facts_t* rhs_facts, bool* out_result) {
+  if (loom_condition_integer_comparison_same_value_result(comparison,
+                                                          out_result)) {
+    return true;
+  }
+  return comparison->kind == LOOM_OP_INDEX_CMP
+             ? loom_index_cmp_result_from_facts(
+                   context, comparison->operand_type, comparison->predicate,
+                   lhs_facts, rhs_facts, out_result)
+             : loom_scalar_cmpi_result_from_facts(
+                   comparison->operand_type, comparison->predicate, lhs_facts,
+                   rhs_facts, out_result);
+}
+
+static bool loom_condition_integer_comparison_relation(
+    const loom_condition_integer_comparison_t* comparison,
+    loom_symbolic_integer_relation_t* out_relation, bool* out_unsigned_order) {
+  return comparison->kind == LOOM_OP_INDEX_CMP
+             ? loom_condition_index_predicate_relation(
+                   comparison->predicate, out_relation, out_unsigned_order)
+             : loom_condition_scalar_cmpi_predicate_relation(
+                   loom_scalar_cmpi_range_predicate(comparison->operand_type,
+                                                    comparison->predicate),
+                   out_relation, out_unsigned_order);
+}
+
 static iree_status_t loom_condition_facts_query_integer_compare(
     const loom_module_t* module, const loom_op_t* op,
     loom_condition_fact_set_t* facts,
     loom_condition_derivation_t* out_derivation,
     const loom_value_fact_table_t* fact_table, bool assumed_truth,
     bool* out_complete) {
-  const loom_value_id_t left_value = loom_op_const_operands(op)[0];
-  const loom_value_id_t right_value = loom_op_const_operands(op)[1];
+  const loom_condition_integer_comparison_t comparison =
+      loom_condition_integer_comparison_from_op(module, op);
+  const loom_value_id_t left_value = comparison.lhs;
+  const loom_value_id_t right_value = comparison.rhs;
   loom_symbolic_integer_relation_t relation = LOOM_SYMBOLIC_INTEGER_RELATION_EQ;
   bool unsigned_order = false;
-  const bool has_relation =
-      loom_index_cmp_isa(op)
-          ? loom_condition_index_predicate_relation(
-                loom_index_cmp_predicate(op), &relation, &unsigned_order)
-          : loom_condition_scalar_cmpi_predicate_relation(
-                loom_scalar_cmpi_range_predicate(
-                    loom_type_element_type(
-                        loom_module_value_type(module, left_value)),
-                    loom_scalar_cmpi_predicate(op)),
-                &relation, &unsigned_order);
+  const bool has_relation = loom_condition_integer_comparison_relation(
+      &comparison, &relation, &unsigned_order);
   if (!has_relation) {
     return iree_ok_status();
   }
@@ -597,10 +655,9 @@ static iree_status_t loom_condition_facts_query_integer_compare(
     }
     // A bound with the carrier's sign bit set admits negative signed values.
     // Targetless address facts retain their mathematical i64 source domain.
-    if (loom_index_cmp_isa(op) &&
+    if (comparison.kind == LOOM_OP_INDEX_CMP &&
         !loom_index_value_facts_fit_signed_target_carrier(
-            fact_table ? &fact_table->context : NULL,
-            loom_type_element_type(loom_module_value_type(module, upper)),
+            fact_table ? &fact_table->context : NULL, comparison.operand_type,
             upper_facts)) {
       return iree_ok_status();
     }
@@ -886,27 +943,26 @@ static loom_value_facts_t loom_condition_edge_value_facts(
   return value_facts;
 }
 
-static bool loom_condition_fact_resolver_proves_index_cmp(
+static bool loom_condition_fact_resolver_proves_integer_comparison(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_condition_fact_resolver_t* resolver,
     const loom_op_t* defining_op, bool* out_condition) {
-  const loom_value_id_t lhs = loom_index_cmp_lhs(defining_op);
-  const loom_value_id_t rhs = loom_index_cmp_rhs(defining_op);
-  if (lhs == rhs && loom_index_cmp_same_value_result(
-                        loom_index_cmp_predicate(defining_op), out_condition)) {
+  const loom_condition_integer_comparison_t comparison =
+      loom_condition_integer_comparison_from_op(module, defining_op);
+  if (loom_condition_integer_comparison_same_value_result(&comparison,
+                                                          out_condition)) {
     return true;
   }
 
   loom_condition_integer_relation_t relation = {
-      .left = loom_condition_value_operand(lhs),
-      .right = loom_condition_value_operand(rhs),
+      .left = loom_condition_value_operand(comparison.lhs),
+      .right = loom_condition_value_operand(comparison.rhs),
   };
   bool unsigned_order = false;
-  if (loom_condition_index_predicate_relation(
-          loom_index_cmp_predicate(defining_op), &relation.relation,
-          &unsigned_order) &&
-      (!unsigned_order ||
-       loom_condition_values_are_non_negative(fact_table, lhs, rhs)) &&
+  if (loom_condition_integer_comparison_relation(
+          &comparison, &relation.relation, &unsigned_order) &&
+      (!unsigned_order || loom_condition_values_are_non_negative(
+                              fact_table, comparison.lhs, comparison.rhs)) &&
       resolver != NULL && resolver->proves_integer_relation != NULL &&
       resolver->proves_integer_relation(resolver->user_data, fact_table,
                                         &relation, out_condition)) {
@@ -914,57 +970,11 @@ static bool loom_condition_fact_resolver_proves_index_cmp(
   }
 
   const loom_value_facts_t lhs_facts =
-      loom_condition_edge_value_facts(fact_table, resolver, lhs);
+      loom_condition_edge_value_facts(fact_table, resolver, comparison.lhs);
   const loom_value_facts_t rhs_facts =
-      loom_condition_edge_value_facts(fact_table, resolver, rhs);
-  loom_type_t operand_type = loom_module_value_type(module, lhs);
-  if (!loom_type_is_scalar(operand_type)) {
-    return false;
-  }
-  return loom_index_cmp_result_from_facts(
-      fact_table ? &fact_table->context : NULL,
-      loom_type_element_type(operand_type),
-      loom_index_cmp_predicate(defining_op), &lhs_facts, &rhs_facts,
-      out_condition);
-}
-
-static bool loom_condition_fact_resolver_proves_scalar_cmpi(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    const loom_condition_fact_resolver_t* resolver,
-    const loom_op_t* defining_op, bool* out_condition) {
-  const loom_value_id_t lhs = loom_scalar_cmpi_lhs(defining_op);
-  const loom_value_id_t rhs = loom_scalar_cmpi_rhs(defining_op);
-  const loom_scalar_type_t operand_type =
-      loom_type_element_type(loom_module_value_type(module, lhs));
-  if (lhs == rhs &&
-      loom_scalar_cmpi_same_value_result(
-          loom_scalar_cmpi_predicate(defining_op), out_condition)) {
-    return true;
-  }
-
-  loom_condition_integer_relation_t relation = {
-      .left = loom_condition_value_operand(lhs),
-      .right = loom_condition_value_operand(rhs),
-  };
-  bool unsigned_order = false;
-  if (loom_condition_scalar_cmpi_predicate_relation(
-          loom_scalar_cmpi_range_predicate(
-              operand_type, loom_scalar_cmpi_predicate(defining_op)),
-          &relation.relation, &unsigned_order) &&
-      (!unsigned_order ||
-       loom_condition_values_are_non_negative(fact_table, lhs, rhs)) &&
-      resolver != NULL && resolver->proves_integer_relation != NULL &&
-      resolver->proves_integer_relation(resolver->user_data, fact_table,
-                                        &relation, out_condition)) {
-    return true;
-  }
-
-  const loom_value_facts_t lhs_facts =
-      loom_condition_edge_value_facts(fact_table, resolver, lhs);
-  const loom_value_facts_t rhs_facts =
-      loom_condition_edge_value_facts(fact_table, resolver, rhs);
-  return loom_scalar_cmpi_result_from_facts(
-      operand_type, loom_scalar_cmpi_predicate(defining_op), &lhs_facts,
+      loom_condition_edge_value_facts(fact_table, resolver, comparison.rhs);
+  return loom_condition_integer_comparison_evaluate(
+      &comparison, fact_table ? &fact_table->context : NULL, &lhs_facts,
       &rhs_facts, out_condition);
 }
 
@@ -1081,11 +1091,8 @@ static loom_condition_proof_state_t loom_condition_query_evaluate_direct_proof(
   bool proven = false;
   switch (defining_op->kind) {
     case LOOM_OP_INDEX_CMP:
-      proven = loom_condition_fact_resolver_proves_index_cmp(
-          query->module, fact_table, resolver, defining_op, &condition);
-      break;
     case LOOM_OP_SCALAR_CMPI:
-      proven = loom_condition_fact_resolver_proves_scalar_cmpi(
+      proven = loom_condition_fact_resolver_proves_integer_comparison(
           query->module, fact_table, resolver, defining_op, &condition);
       break;
     default: {

@@ -15,13 +15,13 @@
 namespace loom::testing {
 
 // Builds and verifies a small CFG with one independent selector per block,
-// then rejects any exclusion claim contradicted by concrete two-lane paths.
+// then checks exclusion and single-entry claims against concrete lane paths.
 // Inputs contain 1..8 blocks and at most two successors each; edges never
 // target the function entry. A bit in uniform_selectors forces both lanes to
 // share that choice. Choices are stable across iterations of a cyclic path.
 // The context must have the test and cfg dialects registered. Analysis storage
 // is borrowed for the call; the caller may reset it after the call returns.
-iree_status_t CheckControlCoexecution(
+iree_status_t CheckControlExecution(
     loom_context_t* context, iree_arena_block_pool_t* block_pool,
     iree_arena_allocator_t* analysis_arena,
     const std::vector<std::vector<uint16_t>>& successors,

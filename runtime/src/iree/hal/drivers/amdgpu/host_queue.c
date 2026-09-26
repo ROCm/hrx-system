@@ -438,7 +438,7 @@ static iree_host_size_t iree_hal_amdgpu_host_queue_drain_completions_locked(
     iree_hal_amdgpu_host_queue_clear_profile_events(queue);
     iree_async_frontier_tracker_fail_axis(
         queue->frontier_tracker, queue->axis,
-        iree_status_from_code(iree_status_code((iree_status_t)error_status)));
+        iree_status_clone((iree_status_t)error_status));
   } else {
     count = iree_hal_amdgpu_notification_ring_drain_reclaim_positions(
         &queue->notification_ring,

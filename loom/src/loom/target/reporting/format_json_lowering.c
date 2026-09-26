@@ -899,6 +899,8 @@ loom_target_compile_report_format_subgroup_access_object_json(
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
       &address, IREE_SV("subgroup_size"), access->subgroup_size));
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+      &address, IREE_SV("active_lane_count"), access->active_lane_count));
+  IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
       &address, IREE_SV("per_lane_packet_bytes"),
       access->per_lane_packet_byte_count));
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(

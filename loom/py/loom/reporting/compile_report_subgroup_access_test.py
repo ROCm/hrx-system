@@ -46,6 +46,7 @@ def _exact_access(
             "active_lane_proof": "subgroup-uniform-control-full-wave",
             "lane_mapping": "linear",
             "subgroup_size": subgroup_size,
+            "active_lane_count": subgroup_size,
             "per_lane_packet_bytes": packet_bytes,
             "linear_lane_stride_bytes": lane_stride_bytes,
             "lane_terms": [
@@ -78,6 +79,7 @@ def _unknown_access(*, subgroup_size: int = 32) -> dict[str, object]:
             "active_lane_proof": "unproven",
             "lane_mapping": "digit-terms",
             "subgroup_size": subgroup_size,
+            "active_lane_count": 0,
             "per_lane_packet_bytes": 16,
             "linear_lane_stride_bytes": 0,
             "lane_terms": [{"divisor": 1, "modulus": 16, "byte_stride": 4096}],
@@ -283,6 +285,34 @@ def test_show_surfaces_exact_geometry_and_lane_formula(
     assert (
         f"{subgroup_size} distinct starts, {subgroup_size} regions, max gap 56 B"
     ) in text
+
+
+def test_show_accounts_for_partial_wave_requests() -> None:
+    access = _exact_access(
+        subgroup_size=16, packet_bytes=2, lane_stride_bytes=2, coverage="dense"
+    )
+    access["address"]["subgroup_size"] = 64
+    access["address"]["active_lane_proof"] = "single-entry-comparison-all-waves"
+    document = parse_compile_report(
+        _compile_report([_group(access)], subgroup_size=64), source="report.json"
+    )
+    view = build_compile_report_show(document)
+    geometry = view["subgroup_access"]["groups"][0]["access"]["geometry"]
+    assert geometry["subgroup_requested_bytes"] == 32
+    assert "16 active / 64 lanes" in format_compile_report_show_text(view)
+
+
+@pytest.mark.parametrize("active_lane_count", [0, 16, 33])
+def test_show_rejects_inconsistent_active_lane_count(active_lane_count: int) -> None:
+    access = _exact_access(subgroup_size=32)
+    access["address"]["active_lane_count"] = active_lane_count
+    document = parse_compile_report(
+        _compile_report([_group(access)]), source="report.json"
+    )
+    with pytest.raises(
+        CompileReportError, match=r"active_lane_count|subgroup_requested_bytes"
+    ):
+        build_compile_report_show(document)
 
 
 def test_show_rejects_geometry_for_another_target_subgroup_size() -> None:

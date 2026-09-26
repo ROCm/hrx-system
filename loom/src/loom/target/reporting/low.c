@@ -130,6 +130,7 @@ loom_target_compile_report_subgroup_access(
       .interval_coverage = source->interval_coverage,
       .unknown_reason = source->unknown_reason,
       .subgroup_size = source->subgroup_size,
+      .active_lane_count = source->active_lane_count,
       .lane_term_count = source->lane_term_count,
       .per_lane_packet_byte_count = source->per_lane_packet_byte_count,
       .linear_lane_byte_stride = source->linear_lane_byte_stride,

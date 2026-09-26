@@ -31,12 +31,13 @@ extern "C" {
 // evidence requires the same phase profile for every wave and every
 // compatible common subword residue. This consumes retained plans and facts
 // only; it neither queries nor traverses source IR.
-// Active-lane evidence is supplied separately by the caller.
+// |active_lane_mask| is the proven nonempty active set shared by every wave.
 void loom_amdgpu_memory_calculate_source_bank_service(
     const loom_amdgpu_lds_bank_service_model_t* model,
     const loom_low_source_memory_access_plan_t* source,
     const loom_symbolic_expr_context_t* expressions,
     const loom_target_workgroup_size_t* workgroup_size,
+    uint64_t active_lane_mask,
     loom_low_lower_memory_bank_service_report_t* out_report);
 
 // Populates bank-service evidence for a selected source-memory packet.

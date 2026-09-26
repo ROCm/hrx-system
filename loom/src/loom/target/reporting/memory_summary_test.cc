@@ -118,6 +118,7 @@ static void SetSubgroupAccess(
   row->subgroup_access.interval_coverage = interval_coverage;
   row->subgroup_access.unknown_reason = unknown_reason;
   row->subgroup_access.subgroup_size = 32;
+  row->subgroup_access.active_lane_count = 32;
   row->subgroup_access.lane_term_count = 1;
   row->subgroup_access.lane_terms[0] = {
       /*.divisor=*/1,

@@ -211,8 +211,23 @@ can broadcast. AMD's [LDS bank-conflict explanation](https://rocm.blogs.amd.com/
 describes the CDNA3 b128 groups; the
 [ROCm programming guide](https://rocm-handbook.amd.com/_/downloads/amd-rocm-programming-guide/en/docs-7.2.3/pdf/)
 describes identical-address broadcast. Wide-access analysis requires proven
-alignment and full-subgroup participation. Fragment accesses use their compiled
+alignment and an exact active-lane set. Fragment accesses use their compiled
 lane/register layout, including repeated lane addresses.
+
+A branch such as `lane / 16 == 1` can select sixteen lanes of a wave64
+subgroup. When every entry into the memory operation comes from that branch,
+and the branch itself executes with a full subgroup, the report evaluates its
+complete comparison for every lane and wave. It also accounts for the false
+branch's complementary mask. A b64 access by one quarter-wave occupies one
+sixteen-lane service phase on gfx1100/gfx1151; inactive phases contribute zero
+rounds. Substituting a full wave would count four occupied phases instead.
+
+The active set must be nonempty and identical across waves for this proof.
+Opaque predicates, additional varying guards, and loop entries with multiple
+incoming edges retain unknown participation unless a separate uniform-execution
+proof applies. Knowing only that `lane < 16` follows from a larger condition
+is insufficient: an additional predicate may select fewer lanes. This affects
+report coverage, not the generated kernel or its supported control flow.
 
 Source accesses can combine workitem coordinates, subgroup-lane coordinates,
 and subgroup-uniform offsets. The analysis uses native X-fastest workitem order,
