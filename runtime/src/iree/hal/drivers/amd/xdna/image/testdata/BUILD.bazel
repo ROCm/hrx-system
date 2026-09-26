@@ -51,3 +51,13 @@ iree_c_embed_data(
     h_file_output = "mul_i32_npu4.h",
     identifier = "iree_hal_amd_xdna_test_mul_i32_npu4",
 )
+
+iree_c_embed_data(
+    name = "sparse_copy_i32",
+    testonly = True,
+    srcs = ["sparse_copy_i32.xdna"],
+    c_file_output = "sparse_copy_i32.c",
+    flatten = True,
+    h_file_output = "sparse_copy_i32.h",
+    identifier = "iree_hal_amd_xdna_test_sparse_copy_i32",
+)

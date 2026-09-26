@@ -16,6 +16,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/pipeline/ops.h"
+#include "loom/target/arch/amd/xdna/aie2p/array/abi_layout.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/plan.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/array_descriptors.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/composition.h"
@@ -958,7 +959,8 @@ static iree_status_t loom_aie2p_pipeline_create_low_function(
 
   loom_low_func_def_build_flags_t build_flags =
       LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TARGET |
-      LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ABI;
+      LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ABI |
+      LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ABI_LAYOUT;
   uint8_t visibility = 0;
   if (loom_func_like_visibility(pipeline) != 0) {
     build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_VISIBILITY;
@@ -981,11 +983,14 @@ static iree_status_t loom_aie2p_pipeline_create_low_function(
                           loom_module_block(emitter->module),
                           &emitter->builder);
   loom_builder_set_before(&emitter->builder, pipeline.op);
+  loom_attribute_t abi_layout_attr = loom_attr_absent();
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_abi_layout_make_attr(
+      emitter->module, emitter->plan->binding_count, &abi_layout_attr));
   IREE_RETURN_IF_ERROR(loom_low_func_def_build(
       &emitter->builder, build_flags, visibility, retain,
       /*cc=*/0, /*purity=*/0, /*inline_policy=*/0, /*allocation=*/0,
       /*schedule=*/0, descriptor_set_key, target, LOOM_TARGET_ABI_ARRAY_PROGRAM,
-      loom_named_attr_slice_empty(), loom_named_attr_slice_empty(),
+      loom_named_attr_slice_empty(), loom_attr_as_dict(abi_layout_attr),
       LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), callee,
       /*arg_types=*/NULL, /*arg_types_count=*/0,
       /*result_types=*/NULL, /*result_count=*/0,

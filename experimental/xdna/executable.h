@@ -37,8 +37,9 @@ typedef struct iree_hal_amd_xdna_executable_storage_t {
 } iree_hal_amd_xdna_executable_storage_t;
 
 // Borrowed external binding resolved by the caller into a shim DMA address.
-// The caller keeps the logical buffer and native backing alive until every
-// invocation using the binding has reached terminal completion.
+// Rows corresponding to image-declared NONE slots are ignored and may remain
+// zero. The caller keeps each active logical buffer and native backing alive
+// until every invocation using the binding has reached terminal completion.
 typedef struct iree_hal_amd_xdna_executable_binding_t {
   // Direct logical HAL buffer range whose access contract is validated.
   iree_hal_buffer_ref_t buffer_ref;

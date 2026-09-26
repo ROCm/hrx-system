@@ -1,0 +1,156 @@
+// RUN: with-checks emit aie2p-array-plan @dead_worker_endpoint
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @dead_worker_endpoint() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %group = group %one
+  %worker = worker %group, %zero, @consume
+  %input = binding 0, "read"
+  %sender = sender %input, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %worker, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %dead = receiver %worker, 7 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel = channel %sender, %receiver, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %worker, %zero, %two
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @consume() asm {
+  %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %value = lda %input, 0
+  st %value, %input, 0
+  return
+}
+
+// ----
+CHECK: array @dead_worker_endpoint * workers=1 * channels=1 *
+CHECK: worker index=0 * resources=1 *
+CHECK: worker-port worker=0 port=0 *
+CHECK-NOT: worker-port worker=0 port=7 *
+
+// ====
+// RUN: with-checks emit aie2p-array-plan @synchronization_only_endpoint
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @synchronization_only_endpoint() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %group = group %one
+  %worker = worker %group, %zero, @synchronize
+  %input = binding 0, "read"
+  %sender = sender %input, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %worker, 7 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel = channel %sender, %receiver, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %worker, %zero, %two
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @synchronize() asm {
+  return
+}
+
+// ----
+CHECK: worker index=0 * resources=0 *
+CHECK: worker-port worker=0 port=7 *
+
+// ====
+// RUN: emit aie2p-array-plan @unbound_worker_resource
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @unbound_worker_resource() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %group = group %one
+  %worker = worker %group, %zero, @consume_two
+  %input = binding 0, "read"
+  %sender = sender %input, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %worker, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel = channel %sender, %receiver, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %worker, %zero, %two
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @consume_two() asm {
+  %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  // ERROR@+1: XDNA/022 {worker="0", entry="consume_two", port="7", active_endpoint_count="0", resource_count="1"}
+  %unbound = resource<native_pointer> {index = 7, source_type = buffer} : reg<aie2p.ep>
+  %input_value = lda %input, 0
+  %unbound_value = lda %unbound, 0
+  st %input_value, %input, 0
+  st %unbound_value, %unbound, 0
+  return
+}
+
+// ====
+// RUN: emit aie2p-array-plan @duplicate_worker_resource
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @duplicate_worker_resource() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %group = group %one
+  %worker = worker %group, %zero, @duplicate_resource
+  %input = binding 0, "read"
+  %sender = sender %input, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %worker, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel = channel %sender, %receiver, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %worker, %zero, %two
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @duplicate_resource() asm {
+  %first = resource<native_pointer> {extent = 4, index = 0, source_type = buffer} : reg<aie2p.ep>
+  // ERROR@+1: XDNA/022 {worker="0", entry="duplicate_resource", port="0", active_endpoint_count="1", resource_count="2"}
+  %second = resource<native_pointer> {extent = 8, index = 0, source_type = buffer} : reg<aie2p.ep>
+  %first_value = lda %first, 0
+  %second_value = lda %second, 0
+  st %first_value, %first, 0
+  st %second_value, %second, 0
+  return
+}
+
+// ====
+// RUN: emit aie2p-array-plan @duplicate_synchronization_port
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @duplicate_synchronization_port() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %group = group %one
+  %worker = worker %group, %zero, @synchronize_two
+  %first_input = binding 0, "read"
+  %second_input = binding 1, "read"
+  %first_sender = sender %first_input, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %second_sender = sender %second_input, 0 : reg<aie2p.array.sender : tile<1xf32>>
+  %first_receiver = receiver %worker, 7 : reg<aie2p.array.receiver : tile<1xi32>>
+  // ERROR@+1: XDNA/022 {worker="0", entry="synchronize_two", port="7", active_endpoint_count="2", resource_count="0"}
+  %second_receiver = receiver %worker, 7 : reg<aie2p.array.receiver : tile<1xf32>>
+  %first_channel = channel %first_sender, %first_receiver, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  %second_channel = channel %second_sender, %second_receiver, %one, %one : reg<aie2p.array.channel : tile<1xf32>>
+  constrain.location %worker, %zero, %two
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @synchronize_two() asm {
+  return
+}

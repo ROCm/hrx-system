@@ -80,6 +80,7 @@ iree_cc_test(
     iree::hal::drivers::amd::xdna::image::testdata::add_i32_npu4
     iree::hal::drivers::amd::xdna::image::testdata::mul_i32
     iree::hal::drivers::amd::xdna::image::testdata::mul_i32_npu4
+    iree::hal::drivers::amd::xdna::image::testdata::sparse_copy_i32
     iree::testing::gtest
     iree::testing::gtest_main
 )

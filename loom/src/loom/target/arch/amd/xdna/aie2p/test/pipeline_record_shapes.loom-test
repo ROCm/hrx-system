@@ -19,7 +19,7 @@ pipeline.def<kernel> public retain target(@array_target) @scatter_unit_unit() la
 }
 
 // ----
-CHECK: low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @scatter_unit_unit() asm {
+CHECK: low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) abi_layout({binding_count = 2}) @scatter_unit_unit() asm {
 CHECK: * = channel * : reg<aie2p.array.channel : tile<2x2xi32>>
 CHECK: * = partition.sender * : reg<aie2p.array.sender : tile<4xi32>>
 CHECK: * = partition.receiver * : reg<aie2p.array.receiver : tile<2x2xi32>>
@@ -45,7 +45,7 @@ pipeline.def<kernel> public retain target(@array_target) @scatter_unit_many() la
 }
 
 // ----
-CHECK: low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @scatter_unit_many() asm {
+CHECK: low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) abi_layout({binding_count = 2}) @scatter_unit_many() asm {
 CHECK: * = channel * : reg<aie2p.array.channel : tile<4xi32>>
 CHECK: * = partition.sender * : reg<aie2p.array.sender : tile<4xi32>>
 CHECK: * = partition.receiver * : reg<aie2p.array.receiver : tile<4xi32>>
@@ -71,7 +71,7 @@ pipeline.def<kernel> public retain target(@array_target) @scatter_many_unit() la
 }
 
 // ----
-CHECK: low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @scatter_many_unit() asm {
+CHECK: low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) abi_layout({binding_count = 2}) @scatter_many_unit() asm {
 CHECK: * = channel * : reg<aie2p.array.channel : tile<4xi32>>
 CHECK: * = partition.sender * : reg<aie2p.array.sender : tile<4xi32>>
 CHECK: * = partition.receiver * : reg<aie2p.array.receiver : tile<4xi32>>
@@ -97,7 +97,7 @@ pipeline.def<kernel> public retain target(@array_target) @scatter_many_many() la
 }
 
 // ----
-CHECK: low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @scatter_many_many() asm {
+CHECK: low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) abi_layout({binding_count = 2}) @scatter_many_many() asm {
 CHECK: * = channel * : reg<aie2p.array.channel : tile<4xi32>>
 CHECK: * = partition.sender * : reg<aie2p.array.sender : tile<4xi32>>
 CHECK: * = partition.receiver * : reg<aie2p.array.receiver : tile<4xi32>>
@@ -123,7 +123,7 @@ pipeline.def<kernel> public retain target(@array_target) @scatter_unit_no_tempor
 }
 
 // ----
-CHECK: low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @scatter_unit_no_temporal_axis() asm {
+CHECK: low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) abi_layout({binding_count = 2}) @scatter_unit_no_temporal_axis() asm {
 CHECK: * = channel * : reg<aie2p.array.channel : tile<4xi32>>
 CHECK: * = partition.sender * : reg<aie2p.array.sender : tile<4xi32>>
 CHECK: * = partition.receiver * : reg<aie2p.array.receiver : tile<4xi32>>
@@ -149,7 +149,7 @@ pipeline.def<kernel> public retain target(@array_target) @single_without_lane_ax
 }
 
 // ----
-CHECK: low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @single_without_lane_axis() asm {
+CHECK: low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) abi_layout({binding_count = 2}) @single_without_lane_axis() asm {
 CHECK: * = channel * : reg<aie2p.array.channel : tile<4xi32>>
 CHECK: * = partition.sender * : reg<aie2p.array.sender : tile<4xi32>>
 CHECK: * = view.receiver * : reg<aie2p.array.receiver : tile<4xi32>>
@@ -176,7 +176,7 @@ pipeline.def<kernel> public retain target(@array_target) @single_tile_only() lau
 }
 
 // ----
-CHECK: low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @single_tile_only() asm {
+CHECK: low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) abi_layout({binding_count = 2}) @single_tile_only() asm {
 CHECK: * = channel * : reg<aie2p.array.channel : tile<4xi32>>
 CHECK: * = partition.sender * : reg<aie2p.array.sender : tile<4xi32>>
 CHECK-NOT: * = view.receiver *
@@ -203,7 +203,7 @@ pipeline.def<kernel> public retain target(@array_target) @read_unit_record() lau
 }
 
 // ----
-CHECK: low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @read_unit_record() asm {
+CHECK: low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) abi_layout({binding_count = 2}) @read_unit_record() asm {
 CHECK: * = channel * : reg<aie2p.array.channel : tile<4xi32>>
 CHECK: * = view.sender * : reg<aie2p.array.sender : tile<4xi32>>
 CHECK-NOT: * = partition.sender *
@@ -231,7 +231,7 @@ pipeline.def<kernel> public retain target(@array_target) @read_unit_partition() 
 }
 
 // ----
-CHECK: low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @read_unit_partition() asm {
+CHECK: low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) abi_layout({binding_count = 2}) @read_unit_partition() asm {
 CHECK: * = channel * : reg<aie2p.array.channel : tile<4xi32>>
 CHECK: * = view.sender * : reg<aie2p.array.sender : tile<4xi32>>
 CHECK-NOT: * = partition.sender *
@@ -259,7 +259,7 @@ pipeline.def<kernel> public retain target(@array_target) @fold_innermost_unit_ax
 }
 
 // ----
-CHECK: low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @fold_innermost_unit_axis() asm {
+CHECK: low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) abi_layout({binding_count = 2}) @fold_innermost_unit_axis() asm {
 CHECK: * = channel * : reg<aie2p.array.channel : tile<4xi32>>
 CHECK: * = partition.sender * : reg<aie2p.array.sender : tile<4xi32>>
 CHECK: * = partition.receiver * : reg<aie2p.array.receiver : tile<4xi32>>
@@ -288,7 +288,7 @@ pipeline.def<kernel> public retain target(@array_target) @independent_output_lay
 }
 
 // ----
-CHECK: low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @independent_output_layouts() asm {
+CHECK: low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) abi_layout({binding_count = 3}) @independent_output_layouts() asm {
 CHECK: * = channel * : reg<aie2p.array.channel : tile<2x2xi32>>
 CHECK: * = partition.sender * : reg<aie2p.array.sender : tile<4xi32>>
 CHECK: * = partition.receiver * : reg<aie2p.array.receiver : tile<2x2xi32>>

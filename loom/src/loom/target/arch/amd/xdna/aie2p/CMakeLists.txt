@@ -90,6 +90,23 @@ endif()
 if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
+    array_abi_layout
+  HDRS
+    "array/abi_layout.h"
+  SRCS
+    "array/abi_layout.c"
+  DEPS
+    iree::base
+    iree::schemas::xdna_executable
+    loom::ir
+    loom::ops::low
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_XDNA)
+loom_cc_library(
+  NAME
     encoding
   HDRS
     "encoding/encoding.h"
@@ -229,6 +246,7 @@ loom_cc_library(
   SRCS
     "low_verify.c"
   DEPS
+    ::array_abi_layout
     ::array_descriptors
     ::core_descriptors
     ::core_structure
@@ -277,10 +295,12 @@ loom_cc_library(
     "array/topology.c"
     "array/topology.h"
   DEPS
+    ::array_abi_layout
     ::array_descriptors
     iree::base
     iree::base::internal::arena
     loom::analysis::scc
+    loom::codegen::low::diagnostics
     loom::codegen::low::function_requirements
     loom::codegen::low::packet
     loom::codegen::low::representation_binding
@@ -435,6 +455,7 @@ loom_cc_library(
     "pipeline/composition.c"
     "pipeline/lower.c"
   DEPS
+    ::array_abi_layout
     ::array_descriptors
     ::array_plan
     iree::base
@@ -540,10 +561,15 @@ loom_check_test_suite(
     loom_check_file_test
   SRCS
     "test/array_plan/bank_spans.loom-test"
+    "test/array_plan/binding_abi.loom-test"
+    "test/array_plan/binding_view_admission.loom-test"
+    "test/array_plan/channel_connection_admission.loom-test"
+    "test/array_plan/channel_shape_admission.loom-test"
     "test/array_plan/composed_folds.loom-test"
     "test/array_plan/dma_loopback.loom-test"
     "test/array_plan/dma_record_limits.loom-test"
     "test/array_plan/dma_service.loom-test"
+    "test/array_plan/endpoint_activity.loom-test"
     "test/array_plan/endpoint_storage.loom-test"
     "test/array_plan/entry_admission.loom-test"
     "test/array_plan/mixed_transport_fan_in.loom-test"
@@ -558,9 +584,12 @@ loom_check_test_suite(
     "test/array_plan/route_capacity.loom-test"
     "test/array_plan/strided_transfer.loom-test"
     "test/array_plan/temporal_fold.loom-test"
+    "test/array_plan/topology_admission.loom-test"
     "test/array_plan/unused_worker_inputs.loom-test"
     "test/array_plan/wide_fold.loom-test"
     "test/array_plan/worker_cycles.loom-test"
+    "test/array_plan/worker_interface_admission.loom-test"
+    "test/array_plan/worker_rate_admission.loom-test"
     "test/descriptors/bf16_comparison.loom-test"
     "test/descriptors/bfp_move.loom-test"
     "test/descriptors/cascade.loom-test"

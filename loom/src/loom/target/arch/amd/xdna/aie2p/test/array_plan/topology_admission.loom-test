@@ -1,0 +1,204 @@
+// RUN: emit aie2p-array-plan @no_channel
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+// ERROR@+1: XDNA/018 {worker_count="1", channel_count="0"}
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @no_channel() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %group = group %one
+  %worker = worker %group, %zero, @empty_worker
+  constrain.location %worker, %zero, %two
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @empty_worker() asm {
+  return
+}
+
+// ====
+// RUN: emit aie2p-array-plan @missing_group_lane
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @missing_group_lane() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  // ERROR@+1: XDNA/019 {group="0", lane="1", lane_count="2", worker_count="0"}
+  %group = group %two
+  %worker = worker %group, %zero, @read_worker
+  %input = binding 0, "read"
+  %sender = sender %input, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %worker, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel = channel %sender, %receiver, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %worker, %zero, %two
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @read_worker() asm {
+  %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %value = lda %input, 0
+  st %value, %input, 0
+  return
+}
+
+// ====
+// RUN: emit aie2p-array-plan @duplicate_group_lane
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @duplicate_group_lane() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %group = group %one
+  // ERROR@+1: XDNA/019 {group="0", lane="0", lane_count="1", worker_count="2"}
+  %worker0 = worker %group, %zero, @read_worker
+  %worker1 = worker %group, %zero, @empty_worker
+  %input = binding 0, "read"
+  %sender = sender %input, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %worker0, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel = channel %sender, %receiver, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @read_worker() asm {
+  %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %value = lda %input, 0
+  st %value, %input, 0
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @empty_worker() asm {
+  return
+}
+
+// ====
+// RUN: emit aie2p-array-plan @out_of_range_group_lane
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @out_of_range_group_lane() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %group = group %one
+  // ERROR@+1: XDNA/019 {group="0", lane="1", lane_count="1", worker_count="1"}
+  %worker = worker %group, %one, @read_worker
+  %input = binding 0, "read"
+  %sender = sender %input, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %worker, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel = channel %sender, %receiver, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @read_worker() asm {
+  %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %value = lda %input, 0
+  st %value, %input, 0
+  return
+}
+
+// ====
+// RUN: emit aie2p-array-plan @missing_location
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @missing_location() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %group = group %one
+  // ERROR@+1: XDNA/020 {worker="0", location_count="0"}
+  %worker = worker %group, %zero, @read_worker
+  %input = binding 0, "read"
+  %sender = sender %input, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %worker, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel = channel %sender, %receiver, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @read_worker() asm {
+  %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %value = lda %input, 0
+  st %value, %input, 0
+  return
+}
+
+// ====
+// RUN: emit aie2p-array-plan @duplicate_location
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @duplicate_location() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %three = constant.u32 3 : reg<aie2p.array.scalar : index>
+  %group = group %one
+  %worker = worker %group, %zero, @empty_worker
+  constrain.location %worker, %zero, %two
+  // ERROR@+1: XDNA/020 {worker="0", location_count="2"}
+  constrain.location %worker, %zero, %three
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @empty_worker() asm {
+  return
+}
+
+// ====
+// RUN: emit aie2p-array-plan @noncompute_location
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @noncompute_location() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %group = group %one
+  %worker = worker %group, %zero, @empty_worker
+  // ERROR@+1: XDNA/021 {worker="0", column="0", row="0", reason="the coordinate is not a compute tile"}
+  constrain.location %worker, %zero, %zero
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @empty_worker() asm {
+  return
+}
+
+// ====
+// RUN: emit aie2p-array-plan @occupied_location
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @occupied_location() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %group = group %two
+  %worker0 = worker %group, %zero, @empty_worker
+  %worker1 = worker %group, %one, @empty_worker
+  constrain.location %worker0, %zero, %two
+  // ERROR@+1: XDNA/021 {worker="1", column="0", row="2", reason="another resident worker already occupies the tile"}
+  constrain.location %worker1, %zero, %two
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @empty_worker() asm {
+  return
+}

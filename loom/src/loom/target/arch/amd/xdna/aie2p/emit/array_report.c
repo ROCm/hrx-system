@@ -407,7 +407,7 @@ iree_status_t loom_aie2p_array_report_record(
       .realization = IREE_SV("spatial-program"),
       .group_count = (uint32_t)plan->group_count,
       .worker_count = (uint32_t)plan->worker_count,
-      .binding_count = (uint32_t)plan->binding_count,
+      .binding_count = plan->binding_slot_count,
       .channel_count = (uint32_t)plan->channel_count,
       .channel_slot_count = (uint32_t)plan->channel_slot_count,
       .hardware_lock_count = (uint32_t)plan->lock_count,

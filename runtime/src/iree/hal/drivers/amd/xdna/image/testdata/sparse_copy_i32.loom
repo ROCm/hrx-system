@@ -1,0 +1,30 @@
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+pipeline.def<kernel> public retain target(@array_target) @sparse_copy_i32() launch(%input: buffer, %unused: buffer, %output: buffer) {
+  %lanes = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %lanes : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<16xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<16xi32>
+  %input_flow = pipeline.read %input_view on %workers : view<16xi32>, group -> pipeline.flow<tile<16xi32>>
+  %output_flow = pipeline.stage @copy_record on %workers(%input_flow) : (group, pipeline.flow<tile<16xi32>>) -> (pipeline.flow<tile<16xi32>>)
+  pipeline.write %output_flow to %output_view : pipeline.flow<tile<16xi32>>, view<16xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @copy_record(%input: buffer, %output: buffer) {
+  %input_aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<16xi32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16xi32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %count = index.constant 16 : index
+  scf.for %i = [%zero to %count step %one] {
+    %value = view.load %input_view[%i] : view<16xi32> -> i32
+    view.store %value, %output_view[%i] : i32, view<16xi32>
+  }
+  func.return
+}

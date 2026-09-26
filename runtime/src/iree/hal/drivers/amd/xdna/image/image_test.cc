@@ -66,6 +66,22 @@ TEST(ImageTest, RetainsSourceAndIndexedRequirements) {
   iree_hal_amd_xdna_image_destroy(image);
 }
 
+TEST(ImageTest, AdmitsOnlyExactUnreferencedBindingSlots) {
+  ImageFixture fixture;
+  fixture.bindings.insert(fixture.bindings.begin(),
+                          iree_xdna_elf_binding_record_t{});
+  fixture.entries[0].binding_count = 2;
+  fixture.relocations[1].source_ordinal = 1;
+  IREE_EXPECT_OK(Admit(fixture.Build()));
+
+  fixture.relocations[1].source_ordinal = 0;
+  EXPECT_EQ(Admit(fixture.Build()).code(), StatusCode::kInvalidArgument);
+
+  fixture.relocations[1].source_ordinal = 1;
+  fixture.bindings[0].minimum_alignment = 1;
+  EXPECT_EQ(Admit(fixture.Build()).code(), StatusCode::kInvalidArgument);
+}
+
 TEST(ImageTest, RejectsIncompatibleExecutionContracts) {
   const std::function<void(ImageFixture&)> mutations[] = {
       [](auto& f) { ++f.header.device_profile_id; },

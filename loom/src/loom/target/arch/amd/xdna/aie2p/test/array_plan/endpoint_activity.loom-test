@@ -1,0 +1,122 @@
+// RUN: with-checks emit aie2p-array-plan @direct_and_partitioned_binding
+
+// A binding endpoint can feed one direct transfer while one of its views feeds
+// an independent transfer. Activity belongs to the exact endpoint, not to an
+// exclusive source-wide mode.
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @direct_and_partitioned_binding() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %offset = constant.u64 0 : reg<aie2p.array.offset : offset>
+  %group = group %one
+  %worker = worker %group, %zero, @consume_two
+  %input = binding 0, "read"
+  %source = sender %input, 0 : reg<aie2p.array.sender : tile<2x4xi8>>
+  %first_partition = partition.sender %source, %offset, %zero, %two : reg<aie2p.array.sender : tile<4xi8>>
+  %direct_receiver = receiver %worker, 0 : reg<aie2p.array.receiver : tile<2x4xi8>>
+  %partition_receiver = receiver %worker, 1 : reg<aie2p.array.receiver : tile<4xi8>>
+  %direct_channel = channel %source, %direct_receiver, %one, %one : reg<aie2p.array.channel : tile<2x4xi8>>
+  %partition_channel = channel %first_partition, %partition_receiver, %one, %one : reg<aie2p.array.channel : tile<4xi8>>
+  constrain.location %worker, %zero, %two
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @consume_two() asm {
+  %direct = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %partition = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %direct_value = lda %direct, 0
+  %partition_value = lda %partition, 0
+  st %direct_value, %direct, 0
+  st %partition_value, %partition, 0
+  return
+}
+
+// ----
+CHECK: array @direct_and_partitioned_binding * workers=1 bindings=1 channels=2 *
+CHECK: channel index=0 * record-bytes=8 * sender=binding[0]:0 receiver=worker[0]:0
+CHECK: channel index=1 * record-bytes=4 * sender=binding[0]:0 partition=0/2 receiver=worker[0]:1
+CHECK: worker-port worker=0 port=0 *
+CHECK: worker-port worker=0 port=1 *
+CHECK: binding-patch ordinal=0 channel=0 * partition=0/1 *
+CHECK: binding-patch ordinal=0 channel=1 * partition=0/2 *
+
+// ====
+// RUN: with-checks emit aie2p-array-plan @partial_partition_family
+
+// A physical transfer only needs the selected partition. Materializing every
+// sibling lane is not part of the active channel contract.
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @partial_partition_family() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %offset = constant.u64 0 : reg<aie2p.array.offset : offset>
+  %group = group %one
+  %worker = worker %group, %zero, @consume_one
+  %input = binding 0, "read"
+  %source = sender %input, 0 : reg<aie2p.array.sender : tile<2x4xi8>>
+  %first_partition = partition.sender %source, %offset, %zero, %two : reg<aie2p.array.sender : tile<4xi8>>
+  %receiver = receiver %worker, 0 : reg<aie2p.array.receiver : tile<4xi8>>
+  %channel = channel %first_partition, %receiver, %one, %one : reg<aie2p.array.channel : tile<4xi8>>
+  constrain.location %worker, %zero, %two
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @consume_one() asm {
+  %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %value = lda %input, 0
+  st %value, %input, 0
+  return
+}
+
+// ----
+CHECK: array @partial_partition_family * workers=1 bindings=1 channels=1 *
+CHECK: channel index=0 * sender=binding[0]:0 partition=0/2 receiver=worker[0]:0
+CHECK: binding-patch ordinal=0 channel=0 * partition=0/2 *
+
+// ====
+// RUN: with-checks emit aie2p-array-plan @inactive_binding_view
+
+// Inactive descriptors own no physical contract. Even an otherwise malformed
+// view is irrelevant when the source endpoint itself carries the only channel.
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @inactive_binding_view() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %offset = constant.u64 0 : reg<aie2p.array.offset : offset>
+  %group = group %one
+  %worker = worker %group, %zero, @consume_one_i32
+  %input = binding 0, "read"
+  %source = sender %input, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %inactive = view.sender %source, %offset : reg<aie2p.array.sender : tile<1xf32>>
+  %receiver = receiver %worker, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel = channel %source, %receiver, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %worker, %zero, %two
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @consume_one_i32() asm {
+  %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %value = lda %input, 0
+  st %value, %input, 0
+  return
+}
+
+// ----
+CHECK: array @inactive_binding_view * workers=1 bindings=1 channels=1 *
+CHECK: channel index=0 * sender=binding[0]:0 receiver=worker[0]:0
+CHECK: worker-port worker=0 port=0 *

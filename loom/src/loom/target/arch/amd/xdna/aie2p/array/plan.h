@@ -114,6 +114,8 @@ typedef struct loom_aie2p_array_worker_t {
   loom_combining_kind_t fold_kind;
   // Floating-point permissions applied by the temporal fold.
   uint8_t fold_fast_math_flags;
+  // Number of direct endpoints participating in at least one channel.
+  uint32_t active_endpoint_count;
   // Physical compute tile selected by the authored placement constraint.
   loom_xdna_tile_coordinate_t coordinate;
 } loom_aie2p_array_worker_t;
@@ -130,6 +132,10 @@ typedef struct loom_aie2p_array_endpoint_t {
   uint32_t owner_index;
   // Port ordinal in the owner ABI.
   uint32_t port;
+  // First logical channel using this endpoint, or UINT32_MAX when unused.
+  uint32_t first_channel_index;
+  // Number of logical channels using this endpoint.
+  uint32_t channel_use_count;
   // Matched leaf resource ordinal for a worker endpoint, or UINT32_MAX when
   // its pointer is unused by the leaf. Unused for bindings.
   uint32_t worker_resource_ordinal;
@@ -139,6 +145,9 @@ typedef struct loom_aie2p_array_endpoint_t {
   uint64_t binding_byte_offset;
   // Raw binding endpoint wrapped by this view, or UINT32_MAX when unwrapped.
   uint32_t binding_view_source_endpoint_index;
+  // Records selected from the source by an active binding view, or zero when
+  // this endpoint is direct or unused.
+  uint32_t binding_view_record_count;
   // Selected partition lane, or zero for an unpartitioned binding view.
   uint32_t partition_lane;
   // Number of source partitions, or one for an unpartitioned binding view.
@@ -168,7 +177,7 @@ typedef struct loom_aie2p_array_channel_t {
   uint32_t capacity;
   // Number of ordered records transferred per activation.
   uint32_t record_count;
-  // Byte length of one statically shaped tile record.
+  // Byte length of one topology-admitted tile record.
   uint32_t record_byte_length;
   // Transfer-length field value admitted for DMA-backed transports. Neighbor
   // memory transport does not consume this value.
@@ -426,8 +435,10 @@ typedef struct loom_aie2p_array_plan_t {
   iree_host_size_t group_count;
   // External bindings in source order.
   const loom_aie2p_array_binding_t* bindings;
-  // Number of external bindings.
+  // Number of active external bindings retained by the topology.
   iree_host_size_t binding_count;
+  // Dense external ABI cardinality, including unused binding slots.
+  uint32_t binding_slot_count;
   // Resident workers in source order.
   const loom_aie2p_array_worker_t* workers;
   // Number of resident workers.

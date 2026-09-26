@@ -1,0 +1,170 @@
+// RUN: emit aie2p-array-plan @nested_binding_view
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @nested_binding_view() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %offset = constant.u64 0 : reg<aie2p.array.offset : offset>
+  %group = group %one
+  %worker = worker %group, %zero, @consume
+  %input = binding 0, "read"
+  %source = sender %input, 0 : reg<aie2p.array.sender : tile<1x1xi32>>
+  %first = view.sender %source, %offset : reg<aie2p.array.sender : tile<1xi32>>
+  // ERROR@+1: XDNA/023 {view_type="tile<1xi32>", lane="0", lane_count="1", source_type="tile<1xi32>", reason="the source must be one direct binding endpoint"}
+  %second = view.sender %first, %offset : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %worker, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel = channel %second, %receiver, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %worker, %zero, %two
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @consume() asm {
+  return
+}
+
+// ====
+// RUN: emit aie2p-array-plan @worker_binding_view
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @worker_binding_view() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %offset = constant.u64 0 : reg<aie2p.array.offset : offset>
+  %group = group %one
+  %worker = worker %group, %zero, @produce
+  %output = binding 0, "write"
+  %source = sender %worker, 0 : reg<aie2p.array.sender : tile<1x1xi32>>
+  // ERROR@+1: XDNA/023 {view_type="tile<1xi32>", lane="0", lane_count="1", source_type="tile<1x1xi32>", reason="the source must be one direct binding endpoint"}
+  %view = view.sender %source, %offset : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %output, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel = channel %view, %receiver, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %worker, %zero, %two
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @produce() asm {
+  return
+}
+
+// ====
+// RUN: emit aie2p-array-plan @partition_lane_out_of_range
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @partition_lane_out_of_range() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %offset = constant.u64 0 : reg<aie2p.array.offset : offset>
+  %group = group %one
+  %worker = worker %group, %zero, @consume
+  %input = binding 0, "read"
+  %source = sender %input, 0 : reg<aie2p.array.sender : tile<2x1xi32>>
+  // ERROR@+1: XDNA/023 {view_type="tile<1xi32>", lane="2", lane_count="2", source_type="tile<2x1xi32>", reason="the partition lane must be within a non-empty lane set"}
+  %view = partition.sender %source, %offset, %two, %two : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %worker, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel = channel %view, %receiver, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %worker, %zero, %two
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @consume() asm {
+  return
+}
+
+// ====
+// RUN: emit aie2p-array-plan @mismatched_record_suffix
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @mismatched_record_suffix() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %offset = constant.u64 0 : reg<aie2p.array.offset : offset>
+  %group = group %one
+  %worker = worker %group, %zero, @consume
+  %input = binding 0, "read"
+  %source = sender %input, 0 : reg<aie2p.array.sender : tile<2x2xi32>>
+  // ERROR@+1: XDNA/023 {view_type="tile<3xi32>", lane="0", lane_count="1", source_type="tile<2x2xi32>", reason="source and result record dimensions must resolve to equal non-negative u32 values"}
+  %view = view.sender %source, %offset : reg<aie2p.array.sender : tile<3xi32>>
+  %receiver = receiver %worker, 0 : reg<aie2p.array.receiver : tile<3xi32>>
+  %channel = channel %view, %receiver, %one, %two : reg<aie2p.array.channel : tile<3xi32>>
+  constrain.location %worker, %zero, %two
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @consume() asm {
+  return
+}
+
+// ====
+// RUN: emit aie2p-array-plan @unresolved_sequence_dimension
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @unresolved_sequence_dimension() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %offset = constant.u64 0 : reg<aie2p.array.offset : offset>
+  %group = group %one
+  %worker = worker %group, %zero, @consume
+  %input = binding 0, "read"
+  %source = sender %input, 0 : reg<aie2p.array.sender : tile<[%group]x1xi32>>
+  // ERROR@+1: XDNA/023
+  %view = view.sender %source, %offset : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %worker, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel = channel %view, %receiver, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %worker, %zero, %two
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @consume() asm {
+  return
+}
+
+// ====
+// RUN: with-checks emit aie2p-array-plan @exact_dynamic_sequence
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @exact_dynamic_sequence() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %offset = constant.u64 0 : reg<aie2p.array.offset : offset>
+  %group = group %one
+  %worker = worker %group, %zero, @consume
+  %input = binding 0, "read"
+  %source = sender %input, 0 : reg<aie2p.array.sender : tile<[%two]x1xi32>>
+  %view = view.sender %source, %offset : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %worker, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel = channel %view, %receiver, %one, %two : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %worker, %zero, %two
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @consume() asm {
+  return
+}
+
+// ----
+CHECK: channel index=0 * record-bytes=4 capacity=1 records=2 *
+CHECK: binding-patch ordinal=0 channel=0 * span=8 transfer=8 repeat=1

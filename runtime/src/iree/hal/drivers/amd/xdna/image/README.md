@@ -219,7 +219,7 @@ invocations are addressed by dense ordinals relative to the selected entry.
 
 | Offset | Type | Field | Meaning |
 | --- | --- | --- | --- |
-| 0 | u16 | kind | `BUFFER = 1`. |
+| 0 | u16 | kind | `NONE = 0` or `BUFFER = 1`. |
 | 2 | u16 | address_space | `GLOBAL = 1` or `HOST = 2`. |
 | 4 | u16 | access | Nonempty combination of `READ = 1`, `WRITE = 2`. |
 | 6 | u16 | usage | Combination of `DEVICE_VISIBLE = 1`, `HOST_VISIBLE = 2`, `COHERENT = 4`, `CACHED = 8`. |
@@ -228,10 +228,13 @@ invocations are addressed by dense ordinals relative to the selected entry.
 | 24 | u64 | minimum_byte_offset | Inclusive lower bound on the supplied logical offset. |
 | 32 | u64 | maximum_byte_offset | Inclusive upper bound; `UINT64_MAX` permits any offset satisfying the other bounds. |
 
-The supplied logical range must fit its buffer and satisfy the access,
-visibility, extent, offset, and alignment requirements. Minimum offset cannot
-exceed maximum offset. Binding ordinals are independent of allocation-use
-ordinals: external tensors are not executable backing allocations.
+`NONE` is an exact all-zero row preserving an unused position in the entry's
+dense binding ABI. It has no supplied resource requirement and cannot source a
+dynamic relocation. A `BUFFER` row has nonempty access and the supplied logical
+range must fit its buffer and satisfy the visibility, extent, offset, and
+alignment requirements. Minimum offset cannot exceed maximum offset. Binding
+ordinals are independent of allocation-use ordinals: external tensors are not
+executable backing allocations.
 
 ### Relocation rows
 

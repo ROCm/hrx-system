@@ -161,6 +161,17 @@ static iree_status_t iree_hal_amd_xdna_image_validate_entry(
     const iree_xdna_elf_binding_record_t binding =
         iree_hal_amd_xdna_image_tables_binding(tables,
                                                entry->first_binding + i);
+    if (binding.kind == IREE_XDNA_ELF_BINDING_KIND_NONE) {
+      if (binding.address_space != IREE_XDNA_ELF_BINDING_ADDRESS_SPACE_NONE ||
+          binding.access != 0 || binding.usage != 0 ||
+          binding.minimum_byte_length != 0 || binding.minimum_alignment != 0 ||
+          binding.minimum_byte_offset != 0 ||
+          binding.maximum_byte_offset != 0) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "invalid unused XDNA binding %u", i);
+      }
+      continue;
+    }
     if (binding.kind != IREE_XDNA_ELF_BINDING_KIND_BUFFER ||
         (binding.address_space != IREE_XDNA_ELF_BINDING_ADDRESS_SPACE_GLOBAL &&
          binding.address_space != IREE_XDNA_ELF_BINDING_ADDRESS_SPACE_HOST) ||
@@ -196,6 +207,15 @@ static iree_status_t iree_hal_amd_xdna_image_validate_entry(
     const iree_xdna_elf_relocation_record_t dynamic_relocation =
         iree_hal_amd_xdna_image_tables_relocation(
             tables, entry->first_dynamic_relocation + i);
+    const iree_xdna_elf_binding_record_t source_binding =
+        iree_hal_amd_xdna_image_tables_binding(
+            tables, entry->first_binding + dynamic_relocation.source_ordinal);
+    if (source_binding.kind == IREE_XDNA_ELF_BINDING_KIND_NONE) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "XDNA dynamic relocation sources unused binding %u",
+          dynamic_relocation.source_ordinal);
+    }
     const iree_xdna_elf_allocation_record_t destination =
         iree_hal_amd_xdna_image_entry_allocation(
             tables, entry, dynamic_relocation.destination_use);

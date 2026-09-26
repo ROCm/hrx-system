@@ -106,6 +106,10 @@ typedef enum iree_xdna_elf_relocation_kind_e {
 
 // Runtime resource kind supplied through one binding.
 typedef enum iree_xdna_elf_binding_kind_e {
+  // Unused ABI slot. Every other field in the binding row is zero and no
+  // relocation may reference it.
+  IREE_XDNA_ELF_BINDING_KIND_NONE = 0,
+  // External logical buffer consumed or produced by the executable.
   IREE_XDNA_ELF_BINDING_KIND_BUFFER = 1,
 } iree_xdna_elf_binding_kind_t;
 
@@ -253,7 +257,7 @@ iree_xdna_elf_entry_record_t iree_xdna_elf_decode_entry(const uint8_t* storage);
 
 // Decoded 40-byte binding row.
 typedef struct iree_xdna_elf_binding_record_t {
-  // Runtime resource kind; this ABI supports buffers.
+  // Runtime resource kind or NONE for an unused ABI slot.
   uint16_t kind;
   // Required resource address space.
   uint16_t address_space;

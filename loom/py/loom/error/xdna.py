@@ -293,6 +293,288 @@ ERR_XDNA_017 = ErrorDef(
     ),
 )
 
+# ERR_XDNA_018: A resident array has no executable channel graph.
+ERR_XDNA_018 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=18,
+    severity=Severity.ERROR,
+    summary="Resident array has no executable channel graph.",
+    message=(
+        "AIE2P resident array has {worker_count} workers and {channel_count} "
+        "channels; both counts must be positive"
+    ),
+    params=(
+        ErrorParam("worker_count", ParamKind.U32),
+        ErrorParam("channel_count", ParamKind.U32),
+    ),
+    fix_hint="Connect at least one resident worker through an array channel.",
+)
+
+# ERR_XDNA_019: A worker group has invalid lane membership.
+ERR_XDNA_019 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=19,
+    severity=Severity.ERROR,
+    summary="Worker group has invalid lane membership.",
+    message=(
+        "AIE2P group {group} declares {lane_count} lanes, but lane {lane} has "
+        "{worker_count} workers; each declared lane requires exactly one worker "
+        "and no other lane is valid"
+    ),
+    params=(
+        ErrorParam("group", ParamKind.U32),
+        ErrorParam("lane", ParamKind.U32),
+        ErrorParam("lane_count", ParamKind.U32),
+        ErrorParam("worker_count", ParamKind.U32),
+    ),
+    fix_hint="Instantiate every declared group lane exactly once.",
+)
+
+# ERR_XDNA_020: An array worker has invalid placement cardinality.
+ERR_XDNA_020 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=20,
+    severity=Severity.ERROR,
+    summary="Array worker has invalid placement cardinality.",
+    message=(
+        "AIE2P worker {worker} has {location_count} location constraints; "
+        "exactly one is required"
+    ),
+    params=(
+        ErrorParam("worker", ParamKind.U32),
+        ErrorParam("location_count", ParamKind.U32),
+    ),
+    fix_hint="Provide exactly one physical location for the resident worker.",
+)
+
+# ERR_XDNA_021: An array worker cannot occupy its selected tile.
+ERR_XDNA_021 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=21,
+    severity=Severity.ERROR,
+    summary="Array worker cannot occupy its selected tile.",
+    message=("AIE2P worker {worker} cannot occupy tile ({column}, {row}): {reason}"),
+    params=(
+        ErrorParam("worker", ParamKind.U32),
+        ErrorParam("column", ParamKind.U32),
+        ErrorParam("row", ParamKind.U32),
+        ErrorParam("reason", ParamKind.STRING),
+    ),
+    fix_hint="Select one unoccupied compute tile for each resident worker.",
+)
+
+# ERR_XDNA_022: A resident worker port has no unique active/resource mapping.
+ERR_XDNA_022 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=22,
+    severity=Severity.ERROR,
+    summary="Resident worker port does not match its leaf resource ABI.",
+    message=(
+        "AIE2P worker {worker} entry '@{entry}' port {port} has "
+        "{active_endpoint_count} active topology endpoints and "
+        "{resource_count} leaf resources; each port requires exactly one active "
+        "endpoint and at most one resource"
+    ),
+    params=(
+        ErrorParam("worker", ParamKind.U32),
+        ErrorParam("entry", ParamKind.STRING),
+        ErrorParam("port", ParamKind.U64),
+        ErrorParam("active_endpoint_count", ParamKind.U32),
+        ErrorParam("resource_count", ParamKind.U32),
+    ),
+    fix_hint=(
+        "Define the topology port once and match each leaf resource to that "
+        "port, or omit the resource for a synchronization-only port."
+    ),
+)
+
+# ERR_XDNA_023: An active binding view has invalid record geometry.
+ERR_XDNA_023 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=23,
+    severity=Severity.ERROR,
+    summary="Active binding view has invalid record geometry.",
+    message=(
+        "AIE2P binding view {view_type} lane {lane} of {lane_count} cannot "
+        "select records from {source_type}: {reason}"
+    ),
+    params=(
+        ErrorParam("view_type", ParamKind.TYPE),
+        ErrorParam("lane", ParamKind.U32),
+        ErrorParam("lane_count", ParamKind.U32),
+        ErrorParam("source_type", ParamKind.TYPE),
+        ErrorParam("reason", ParamKind.STRING),
+    ),
+    fix_hint="Make the active view select a representable suffix of one binding tile.",
+)
+
+# ERR_XDNA_024: A logical channel record has no representable byte footprint.
+ERR_XDNA_024 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=24,
+    severity=Severity.ERROR,
+    summary="Logical channel record has no representable byte footprint.",
+    message=(
+        "AIE2P channel {channel} record type {record_type} has no representable "
+        "byte footprint: {reason}"
+    ),
+    params=(
+        ErrorParam("channel", ParamKind.U32),
+        ErrorParam("record_type", ParamKind.TYPE),
+        ErrorParam("reason", ParamKind.STRING),
+    ),
+    fix_hint="Use a non-empty exact tile shape whose whole-byte size fits in u32.",
+)
+
+# ERR_XDNA_025: A logical channel ring violates a required relationship.
+ERR_XDNA_025 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=25,
+    severity=Severity.ERROR,
+    summary="Logical channel ring has an invalid size relationship.",
+    message=(
+        "AIE2P channel {channel} has {quantity} {actual}; {relationship} is {required}"
+    ),
+    params=(
+        ErrorParam("channel", ParamKind.U32),
+        ErrorParam("quantity", ParamKind.STRING),
+        ErrorParam("actual", ParamKind.U32),
+        ErrorParam("relationship", ParamKind.STRING),
+        ErrorParam("required", ParamKind.U64),
+    ),
+    fix_hint="Make the channel ring match the stated topology relationship.",
+)
+
+# ERR_XDNA_026: A logical channel connects incompatible endpoint owners.
+ERR_XDNA_026 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=26,
+    severity=Severity.ERROR,
+    summary="Logical channel connects incompatible endpoint owners.",
+    message=(
+        "AIE2P channel {channel} cannot connect "
+        "{sender_kind}[{sender_owner}]:{sender_port} to "
+        "{receiver_kind}[{receiver_owner}]:{receiver_port}: {reason}"
+    ),
+    params=(
+        ErrorParam("channel", ParamKind.U32),
+        ErrorParam("sender_kind", ParamKind.STRING),
+        ErrorParam("sender_owner", ParamKind.U32),
+        ErrorParam("sender_port", ParamKind.U32),
+        ErrorParam("receiver_kind", ParamKind.STRING),
+        ErrorParam("receiver_owner", ParamKind.U32),
+        ErrorParam("receiver_port", ParamKind.U32),
+        ErrorParam("reason", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Connect the channel through a resident worker and compatible binding access."
+    ),
+)
+
+# ERR_XDNA_027: A receiver endpoint consumes more than one source channel.
+ERR_XDNA_027 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=27,
+    severity=Severity.ERROR,
+    summary="Receiver endpoint consumes more than one source channel.",
+    message=(
+        "AIE2P receiver endpoint {endpoint} is consumed by channels "
+        "{first_channel} and {channel}; an active receiver accepts exactly "
+        "one source channel"
+    ),
+    params=(
+        ErrorParam("endpoint", ParamKind.U32),
+        ErrorParam("first_channel", ParamKind.U32),
+        ErrorParam("channel", ParamKind.U32),
+    ),
+    fix_hint="Give each source channel a distinct receiver endpoint.",
+)
+
+# ERR_XDNA_028: A temporal fold declares an invalid output range.
+ERR_XDNA_028 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=28,
+    severity=Severity.ERROR,
+    summary="Temporal fold output range is invalid.",
+    message=(
+        "AIE2P worker {worker} fold declares {output_count} outputs from port "
+        "{output_port}; {quantity} {actual} {requirement}"
+    ),
+    params=(
+        ErrorParam("worker", ParamKind.U32),
+        ErrorParam("output_port", ParamKind.U32),
+        ErrorParam("output_count", ParamKind.U32),
+        ErrorParam("quantity", ParamKind.STRING),
+        ErrorParam("actual", ParamKind.U64),
+        ErrorParam("requirement", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Make active sender ports exactly cover one non-empty representable "
+        "output range."
+    ),
+)
+
+# ERR_XDNA_029: A temporal fold cannot be materialized.
+ERR_XDNA_029 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=29,
+    severity=Severity.ERROR,
+    summary="Temporal fold cannot be materialized.",
+    message=(
+        "AIE2P worker {worker} cannot fold channel {channel} record type "
+        "{record_type} with combiner {combiner}: {reason}"
+    ),
+    params=(
+        ErrorParam("worker", ParamKind.U32),
+        ErrorParam("channel", ParamKind.U32),
+        ErrorParam("record_type", ParamKind.TYPE),
+        ErrorParam("combiner", ParamKind.U32),
+        ErrorParam("reason", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Provide one compatible input cadence and use addf over one f32 element "
+        "or a multiple of 16 f32 elements."
+    ),
+)
+
+# ERR_XDNA_030: An AIE2P array ABI layout field is unsupported.
+ERR_XDNA_030 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=30,
+    severity=Severity.ERROR,
+    summary="AIE2P array ABI layout field is unsupported.",
+    message=(
+        "AIE2P array function '@{function_name}' ABI layout field "
+        "'{field_name}' is unsupported"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("field_name", ParamKind.STRING),
+    ),
+    fix_hint="Use only the binding_count field in an AIE2P array ABI layout.",
+)
+
+# ERR_XDNA_031: An active binding ordinal violates the dense external ABI.
+ERR_XDNA_031 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=31,
+    severity=Severity.ERROR,
+    summary="Active binding ordinal violates the array ABI.",
+    message=(
+        "AIE2P binding ordinal {ordinal} is {reason}; the array ABI declares "
+        "{binding_count} dense slots"
+    ),
+    params=(
+        ErrorParam("ordinal", ParamKind.U32),
+        ErrorParam("reason", ParamKind.STRING),
+        ErrorParam("binding_count", ParamKind.U32),
+    ),
+    fix_hint=(
+        "Give each active binding one unique ordinal within the declared dense "
+        "binding table."
+    ),
+)
+
 ALL_XDNA_ERRORS = (
     ERR_XDNA_001,
     ERR_XDNA_002,
@@ -311,4 +593,18 @@ ALL_XDNA_ERRORS = (
     ERR_XDNA_015,
     ERR_XDNA_016,
     ERR_XDNA_017,
+    ERR_XDNA_018,
+    ERR_XDNA_019,
+    ERR_XDNA_020,
+    ERR_XDNA_021,
+    ERR_XDNA_022,
+    ERR_XDNA_023,
+    ERR_XDNA_024,
+    ERR_XDNA_025,
+    ERR_XDNA_026,
+    ERR_XDNA_027,
+    ERR_XDNA_028,
+    ERR_XDNA_029,
+    ERR_XDNA_030,
+    ERR_XDNA_031,
 )
