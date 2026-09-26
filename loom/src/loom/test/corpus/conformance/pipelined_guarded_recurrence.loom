@@ -7,6 +7,8 @@ config.decl @test.factor : %value: index where [range(%value, 1, 2)]
 
 template.decl @test.guarded_sum(%count: index, %lane: index, %flags: view<16x17xi32>, %values: view<16x17xf32>, %depth: index, %factor: index) -> (f32)
 
+template.decl @test.guarded_state(%count: index, %flags: view<16xi32>, %values: view<16xf32>, %initial: f32, %depth: index, %factor: index) -> (f32, f32)
+
 template.def<@test.guarded_sum> @guarded_sum_impl(%count: index, %lane: index, %flags: view<16x17xi32>, %values: view<16x17xf32>, %depth: index, %factor: index) -> (f32) {
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
@@ -30,6 +32,30 @@ template.def<@test.guarded_sum> @guarded_sum_impl(%count: index, %lane: index, %
     scf.yield %next : f32
   }
   template.return %total : f32
+}
+
+template.def<@test.guarded_state> @guarded_state_impl(%count: index, %flags: view<16xi32>, %values: view<16xf32>, %initial: f32, %depth: index, %factor: index) -> (f32, f32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %threshold = scalar.constant 0 : i32
+  %total, %last = scf.for %row = [%begin to %count step %step](%sum = %initial : f32, %selected = %initial : f32) -> (f32, f32) pipeline(%depth) unroll(%factor) {
+    %flag = view.load %flags[%row] : view<16xi32> -> i32
+    %valid = scalar.cmpi sgt, %flag, %threshold : i32
+    %payload = scf.if %valid -> (f32) {
+      %loaded = view.load %values[%row] : view<16xf32> -> f32
+      scf.yield %loaded : f32
+    } else {
+      scf.yield %initial : f32
+    }
+    %next_sum, %next_selected = scf.if %valid -> (f32, f32) {
+      %updated = scalar.addf %sum, %payload : f32
+      scf.yield %updated, %payload : f32, f32
+    } else {
+      scf.yield %sum, %selected : f32, f32
+    }
+    scf.yield %next_sum, %next_selected : f32, f32
+  }
+  template.return %total, %last : f32, f32
 }
 
 kernel.def @guarded_uniform() {
@@ -75,6 +101,30 @@ kernel.def @guarded_varying() {
   %output = buffer.view %output_storage[%base] : buffer -> view<2xf32>
   %result = template.apply<@test.guarded_sum>(%count, %lane, %flags, %values, %depth, %factor) : (index, index, view<16x17xi32>, view<16x17xf32>, index, index) -> (f32)
   view.store %result, %output[%lane] : f32, view<2xf32>
+  kernel.return
+}
+
+kernel.def @guarded_state() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%row_count: index, %initial_bits: i32, %flag_buffer: buffer, %value_buffer: buffer, %sum_buffer: buffer, %last_buffer: buffer) {
+  %count = index.assume %row_count [range(%row_count, 0, 16)] : index
+  %base = index.constant 0 : offset
+  %depth = config.get @test.depth : index
+  %factor = config.get @test.factor : index
+  %initial = scalar.bitcast %initial_bits : i32 to f32
+  %flags_aligned = buffer.assume.alignment %flag_buffer {minimum_alignment = 4} : buffer
+  %values_aligned = buffer.assume.alignment %value_buffer {minimum_alignment = 4} : buffer
+  %sum_aligned = buffer.assume.alignment %sum_buffer {minimum_alignment = 4} : buffer
+  %last_aligned = buffer.assume.alignment %last_buffer {minimum_alignment = 4} : buffer
+  %flags_storage, %values_storage, %sum_storage, %last_storage = buffer.assume.noalias %flags_aligned, %values_aligned, %sum_aligned, %last_aligned : buffer, buffer, buffer, buffer
+  %flags = buffer.view %flags_storage[%base] : buffer -> view<16xi32>
+  %values = buffer.view %values_storage[%base] : buffer -> view<16xf32>
+  %sum_output = buffer.view %sum_storage[%base] : buffer -> view<1xf32>
+  %last_output = buffer.view %last_storage[%base] : buffer -> view<1xf32>
+  %sum, %last = template.apply<@test.guarded_state>(%count, %flags, %values, %initial, %depth, %factor) : (index, view<16xi32>, view<16xf32>, f32, index, index) -> (f32, f32)
+  view.store %sum, %sum_output[0] : f32, view<1xf32>
+  view.store %last, %last_output[0] : f32, view<1xf32>
   kernel.return
 }
 
@@ -260,6 +310,82 @@ check.case @predicate_queue_all_active {
   kernel.launch @guarded_varying(%count, %flags, %values, %varying) : (index, tensor<16x17xi32>, tensor<16x17xf32>, tensor<2xf32>)
   check.expect.close actual(%uniform) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
   check.expect.close actual(%varying) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.return
+}
+
+// The strict recurrence must retain source order: (2^24 + 1) - (2^24 - 2)
+// rounds to 2, while reassociating the final two terms produces 3.
+check.case @guarded_state_strict_cancellation {
+  %count = check.literal value(3) : index
+  %initial = check.literal value(0) : i32
+  %flags = check.generate.fill value(1) : tensor<16xi32>
+  %values = check.generate.iota offset(16777216.0) step(-16777215.0) : tensor<16xf32>
+  %sum = check.generate.fill value(nan) : tensor<1xf32>
+  %last = check.generate.fill value(nan) : tensor<1xf32>
+  %expected_sum = check.generate.fill value(2.0) : tensor<1xf32>
+  %expected_last = check.generate.fill value(-16777214.0) : tensor<1xf32>
+  kernel.launch @guarded_state(%count, %initial, %flags, %values, %sum, %last) : (index, i32, tensor<16xi32>, tensor<16xf32>, tensor<1xf32>, tensor<1xf32>)
+  check.expect.bitwise actual(%sum) expected(%expected_sum) : tensor<1xf32>
+  check.expect.bitwise actual(%last) expected(%expected_last) : tensor<1xf32>
+  check.return
+}
+
+// A skipped update forwards both carried values exactly. The one-element input
+// also makes every payload address after the first invalid under access checks.
+check.case @guarded_state_skipped_negative_zero {
+  %count = check.literal value(9) : index
+  %initial = check.literal value(-2147483648) : i32
+  %flags = check.generate.fill value(-1) : tensor<16xi32>
+  %values = check.generate.fill value(nan) : tensor<1xf32>
+  %sum = check.generate.fill value(1.0) : tensor<1xf32>
+  %last = check.generate.fill value(1.0) : tensor<1xf32>
+  %expected = check.generate.fill value(-0.0) : tensor<1xf32>
+  kernel.launch @guarded_state(%count, %initial, %flags, %values, %sum, %last) : (index, i32, tensor<16xi32>, tensor<1xf32>, tensor<1xf32>, tensor<1xf32>)
+  check.expect.bitwise actual(%sum) expected(%expected) : tensor<1xf32>
+  check.expect.bitwise actual(%last) expected(%expected) : tensor<1xf32>
+  check.return
+}
+
+check.case @guarded_state_skipped_nan {
+  %count = check.literal value(7) : index
+  %initial = check.literal value(2143289344) : i32
+  %flags = check.generate.fill value(-1) : tensor<16xi32>
+  %values = check.generate.fill value(1.0) : tensor<1xf32>
+  %sum = check.generate.fill value(0.0) : tensor<1xf32>
+  %last = check.generate.fill value(0.0) : tensor<1xf32>
+  %expected = check.generate.fill value(nan) : tensor<1xf32>
+  kernel.launch @guarded_state(%count, %initial, %flags, %values, %sum, %last) : (index, i32, tensor<16xi32>, tensor<1xf32>, tensor<1xf32>, tensor<1xf32>)
+  check.expect.bitwise actual(%sum) expected(%expected) : tensor<1xf32>
+  check.expect.bitwise actual(%last) expected(%expected) : tensor<1xf32>
+  check.return
+}
+
+check.case @guarded_state_active_infinity {
+  %count = check.literal value(5) : index
+  %initial = check.literal value(0) : i32
+  %flags = check.generate.fill value(1) : tensor<16xi32>
+  %values = check.generate.fill value(inf) : tensor<16xf32>
+  %sum = check.generate.fill value(nan) : tensor<1xf32>
+  %last = check.generate.fill value(nan) : tensor<1xf32>
+  %expected = check.generate.fill value(inf) : tensor<1xf32>
+  kernel.launch @guarded_state(%count, %initial, %flags, %values, %sum, %last) : (index, i32, tensor<16xi32>, tensor<16xf32>, tensor<1xf32>, tensor<1xf32>)
+  check.expect.bitwise actual(%sum) expected(%expected) : tensor<1xf32>
+  check.expect.bitwise actual(%last) expected(%expected) : tensor<1xf32>
+  check.return
+}
+
+check.case @guarded_state_active_nan {
+  %count = check.literal value(5) : index
+  %initial = check.literal value(2139095040) : i32
+  %flags = check.generate.fill value(1) : tensor<16xi32>
+  %values = check.generate.fill value(-inf) : tensor<16xf32>
+  %sum = check.generate.fill value(0.0) : tensor<1xf32>
+  %last = check.generate.fill value(0.0) : tensor<1xf32>
+  %expected_sum = check.generate.fill value(nan) : tensor<1xf32>
+  %expected_last = check.generate.fill value(-inf) : tensor<1xf32>
+  kernel.launch @guarded_state(%count, %initial, %flags, %values, %sum, %last) : (index, i32, tensor<16xi32>, tensor<16xf32>, tensor<1xf32>, tensor<1xf32>)
+  check.expect.close actual(%sum) expected(%expected_sum) atol(0.0) rtol(0.0) nan(same) : tensor<1xf32>
+  check.expect.bitwise actual(%last) expected(%expected_last) : tensor<1xf32>
   check.return
 }
 
