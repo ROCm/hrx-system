@@ -251,6 +251,56 @@
       ]
     },
     {
+      "name": "rejects dynamic storage in command configuration from text",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/testdata/command_dynamic_workgroup_storage.loom",
+          "--product=command",
+          "--output={tmp}/manifest.json",
+          "--emit-command-artifacts={tmp}/commands",
+          "--emit-kernel-requests={tmp}/requests"
+        ]
+      },
+      "exit": {"nonzero": true},
+      "stderr": {
+        "contains": ["portable command configuration cannot carry dynamic_workgroup_storage"]
+      }
+    },
+    {
+      "name": "rejects dynamic storage in command configuration from bytecode",
+      "steps": [
+        {
+          "name": "encode",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "--to=bc",
+              "--output={tmp}/program.loombc",
+              "{srcdir}/testdata/command_dynamic_workgroup_storage.loom"
+            ]
+          }
+        },
+        {
+          "name": "compile",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/program.loombc",
+              "--product=command",
+              "--output={tmp}/manifest.json",
+              "--emit-command-artifacts={tmp}/commands",
+              "--emit-kernel-requests={tmp}/requests"
+            ]
+          },
+          "exit": {"nonzero": true},
+          "stderr": {
+            "contains": ["portable command configuration cannot carry dynamic_workgroup_storage"]
+          }
+        }
+      ]
+    },
+    {
       "name": "selects a command root",
       "run": {
         "tool": "loom-compile",

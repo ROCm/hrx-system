@@ -494,6 +494,7 @@ loom_check_test_suite(
     "test/source_low/buffer_selection.loom-test"
     "test/source_low/callable_values.loom-test"
     "test/source_low/control_flow_legality.loom-test"
+    "test/source_low/dynamic_workgroup_storage.loom-test"
     "test/source_low/index_addressing.loom-test"
     "test/source_low/loop_counter_offset.loom-test"
     "test/source_low/low_verify_diagnostics.loom-test"

@@ -89,6 +89,7 @@ loom_cc_library(
     "options.c"
   DEPS
     iree::base
+    loom::codegen::low::storage_layout
     loom::error::diagnostic
     loom::error::source
     loom::ir

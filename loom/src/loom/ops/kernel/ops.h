@@ -78,7 +78,8 @@ enum {
   LOOM_OP_KERNEL_LAUNCH_YIELD = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 51),
   LOOM_OP_KERNEL_LAUNCH_SERIAL = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 52),
   LOOM_OP_KERNEL_LAUNCH_CONCURRENT = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 53),
-  LOOM_OP_KERNEL_COUNT_ = 54,
+  LOOM_OP_KERNEL_WORKGROUP_STORAGE = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 54),
+  LOOM_OP_KERNEL_COUNT_ = 55,
 };
 
 // Private symbol retention policy. Absent (0) permits ordinary DCE.
@@ -183,22 +184,24 @@ iree_status_t loom_kernel_def_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_KERNEL_LAUNCH_CONFIG: Terminate a kernel launch configuration region with the computed workgroup grid, required workgroup size, and optional static workgroup-cluster size.
+// LOOM_OP_KERNEL_LAUNCH_CONFIG: Terminate a kernel launch configuration region with the computed workgroup grid, required workgroup size, optional static cluster size, and optional additional workgroup storage byte count. The additional count excludes the compiler's aligned fixed-storage prefix and is common to all launched workgroups. An explicit zero request remains distinct from omission.
 // kernel.launch.config workgroups(%gx, %gy, %gz) workgroup_size(%sx, %sy, %sz) : index
 LOOM_DEFINE_ISA(loom_kernel_launch_config_isa, LOOM_OP_KERNEL_LAUNCH_CONFIG)
-LOOM_DEFINE_OPERAND(loom_kernel_launch_config_workgroup_count_x, 0)
-LOOM_DEFINE_OPERAND(loom_kernel_launch_config_workgroup_count_y, 1)
-LOOM_DEFINE_OPERAND(loom_kernel_launch_config_workgroup_count_z, 2)
-LOOM_DEFINE_OPERAND(loom_kernel_launch_config_workgroup_size_x, 3)
-LOOM_DEFINE_OPERAND(loom_kernel_launch_config_workgroup_size_y, 4)
-LOOM_DEFINE_OPERAND(loom_kernel_launch_config_workgroup_size_z, 5)
-LOOM_DEFINE_OPTIONAL_OPERAND(loom_kernel_launch_config_workgroup_cluster_size_x, 6)
-LOOM_DEFINE_OPTIONAL_OPERAND(loom_kernel_launch_config_workgroup_cluster_size_y, 7)
-LOOM_DEFINE_OPTIONAL_OPERAND(loom_kernel_launch_config_workgroup_cluster_size_z, 8)
+LOOM_DEFINE_SEGMENTED_OPERAND(loom_kernel_launch_config_workgroup_count_x, 0)
+LOOM_DEFINE_SEGMENTED_OPERAND(loom_kernel_launch_config_workgroup_count_y, 1)
+LOOM_DEFINE_SEGMENTED_OPERAND(loom_kernel_launch_config_workgroup_count_z, 2)
+LOOM_DEFINE_SEGMENTED_OPERAND(loom_kernel_launch_config_workgroup_size_x, 3)
+LOOM_DEFINE_SEGMENTED_OPERAND(loom_kernel_launch_config_workgroup_size_y, 4)
+LOOM_DEFINE_SEGMENTED_OPERAND(loom_kernel_launch_config_workgroup_size_z, 5)
+LOOM_DEFINE_SEGMENTED_OPTIONAL_OPERAND(loom_kernel_launch_config_workgroup_cluster_size_x, 6)
+LOOM_DEFINE_SEGMENTED_OPTIONAL_OPERAND(loom_kernel_launch_config_workgroup_cluster_size_y, 7)
+LOOM_DEFINE_SEGMENTED_OPTIONAL_OPERAND(loom_kernel_launch_config_workgroup_cluster_size_z, 8)
+LOOM_DEFINE_SEGMENTED_OPTIONAL_OPERAND(loom_kernel_launch_config_dynamic_workgroup_storage, 9)
 enum loom_kernel_launch_config_build_flag_bits_e {
   LOOM_KERNEL_LAUNCH_CONFIG_BUILD_FLAG_HAS_WORKGROUP_CLUSTER_SIZE_X = 1u << 0,
   LOOM_KERNEL_LAUNCH_CONFIG_BUILD_FLAG_HAS_WORKGROUP_CLUSTER_SIZE_Y = 1u << 1,
   LOOM_KERNEL_LAUNCH_CONFIG_BUILD_FLAG_HAS_WORKGROUP_CLUSTER_SIZE_Z = 1u << 2,
+  LOOM_KERNEL_LAUNCH_CONFIG_BUILD_FLAG_HAS_DYNAMIC_WORKGROUP_STORAGE = 1u << 3,
 };
 typedef uint32_t loom_kernel_launch_config_build_flags_t;
 iree_status_t loom_kernel_launch_config_build(
@@ -213,6 +216,7 @@ iree_status_t loom_kernel_launch_config_build(
     loom_optional loom_value_id_t workgroup_cluster_size_x,
     loom_optional loom_value_id_t workgroup_cluster_size_y,
     loom_optional loom_value_id_t workgroup_cluster_size_z,
+    loom_optional loom_value_id_t dynamic_workgroup_storage,
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_kernel_launch_config_verify(
@@ -1228,6 +1232,29 @@ iree_status_t loom_kernel_launch_concurrent_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_kernel_launch_schedule_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_KERNEL_WORKGROUP_STORAGE: Borrow the dispatch-owned storage tail of the current workgroup. At most one root may appear in the kernel body entry block, before any kernel.exit in that block. Its nonnegative byte length is uniform within each workgroup and may vary between workgroups; every declared extent must fit the launch's explicit dynamic_workgroup_storage request, including zero. The tail begins after the compiler's fixed workgroup storage, rounded up to base_alignment, and remains live for this workgroup's execution. This is borrowed entry storage, not an allocation or a kernel argument. buffer.length observes the declared extent, not physical capacity. The alignment resource requirement remains even when the result is unused.
+// %tail = kernel.workgroup.storage align(16) %bytes : buffer
+LOOM_DEFINE_ISA(loom_kernel_workgroup_storage_isa, LOOM_OP_KERNEL_WORKGROUP_STORAGE)
+LOOM_DEFINE_OPERAND(loom_kernel_workgroup_storage_byte_length, 0)
+LOOM_DEFINE_RESULT(loom_kernel_workgroup_storage_result, 0)
+LOOM_DEFINE_ATTR_I64(loom_kernel_workgroup_storage_base_alignment, 0)
+iree_status_t loom_kernel_workgroup_storage_build(
+    loom_builder_t* builder,
+    int64_t base_alignment,
+    loom_may_consume loom_value_id_t byte_length,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_kernel_workgroup_storage_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
+iree_status_t loom_kernel_workgroup_storage_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+iree_status_t loom_kernel_workgroup_storage_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 

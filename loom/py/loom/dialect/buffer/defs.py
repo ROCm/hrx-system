@@ -391,19 +391,23 @@ buffer_view = Op(
 )
 
 # ============================================================================
-# buffer.length — query physical byte length
+# buffer.length — query accessible byte extent
 # ============================================================================
 
 buffer_length = Op(
     name="buffer.length",
     group=buffer_ops,
-    doc=("Query the physical byte length of a buffer root without accessing its payload. Returns zero when the buffer is null."),
+    doc=(
+        "Query the accessible byte extent of a buffer root without accessing "
+        "its payload. The root's contract defines this extent, which may be "
+        "smaller than its backing allocation. Returns zero when the buffer is null."
+    ),
     operands=[Operand("buffer", BUFFER, doc="Opaque storage root, which may be null.")],
     results=[
         Result(
             "byte_length",
             OFFSET,
-            doc="Physical byte length of the complete buffer root.",
+            doc="Accessible byte extent of the complete buffer root.",
         ),
     ],
     traits=[PURE, SAFE_TO_SPECULATE],

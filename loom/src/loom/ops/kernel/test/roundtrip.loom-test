@@ -1,5 +1,40 @@
 // RUN: roundtrip
 
+kernel.def @dynamic_storage_without_cluster(%bytes: offset, %groups: index) {
+  %unit = index.constant 1 : index
+  %lanes = index.constant 128 : index
+  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%lanes, %unit, %unit) dynamic_workgroup_storage(%bytes) : index
+} launch(%bytes: offset) {
+  %tail = kernel.workgroup.storage align(64) %bytes : buffer
+  kernel.return
+}
+
+// ====
+
+kernel.def @dynamic_storage_with_cluster(%bytes: offset, %groups: index) {
+  %unit = index.constant 1 : index
+  %lanes = index.constant 128 : index
+  %cluster = index.constant 2 : index
+  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%lanes, %unit, %unit) cluster_size(%cluster, %unit, %unit) dynamic_workgroup_storage(%bytes) : index
+} launch(%bytes: offset) {
+  %tail = kernel.workgroup.storage align(64) %bytes : buffer
+  kernel.return
+}
+
+// ====
+
+kernel.def @explicit_zero_storage_request() {
+  %unit = index.constant 1 : index
+  %c0 = index.constant 0 : offset
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) dynamic_workgroup_storage(%c0) : index
+} launch() {
+  %c0 = index.constant 0 : offset
+  %tail = kernel.workgroup.storage align(32) %c0 : buffer
+  kernel.return
+}
+
+// ====
+
 test.target<low_core> @dispatch_target
 
 kernel.entry.decl target(@dispatch_target) @configured_entry(%output: buffer)
@@ -525,3 +560,42 @@ func.def @empty_launch_program() {
 // ====
 
 kernel.decl linkage(dso_local) @external_entry() launch()
+
+// ====
+
+// RUN: format bytecode
+
+// Each independent optional clause retains its own segment through bytecode.
+kernel.def @bytecode_no_optional_launch_clause() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch() {
+  kernel.return
+}
+
+kernel.def @bytecode_cluster_only() {
+  %unit = index.constant 1 : index
+  %cluster = index.constant 2 : index
+  kernel.launch.config workgroups(%cluster, %unit, %unit) workgroup_size(%unit, %unit, %unit) cluster_size(%cluster, %unit, %unit) : index
+} launch() {
+  kernel.return
+}
+
+kernel.def @bytecode_storage_only(%bytes: offset) {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) dynamic_workgroup_storage(%bytes) : index
+} launch(%bytes: offset) {
+  %tail = kernel.workgroup.storage align(64) %bytes : buffer
+  kernel.return
+}
+
+kernel.def @bytecode_cluster_and_zero_storage() {
+  %unit = index.constant 1 : index
+  %cluster = index.constant 2 : index
+  %c0 = index.constant 0 : offset
+  kernel.launch.config workgroups(%cluster, %unit, %unit) workgroup_size(%unit, %unit, %unit) cluster_size(%cluster, %unit, %unit) dynamic_workgroup_storage(%c0) : index
+} launch() {
+  %c0 = index.constant 0 : offset
+  %tail = kernel.workgroup.storage align(32) %c0 : buffer
+  kernel.return
+}

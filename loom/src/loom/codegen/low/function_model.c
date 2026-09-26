@@ -11,6 +11,7 @@
 iree_status_t loom_low_function_model_initialize(
     loom_module_t* module, const loom_op_t* low_func_op,
     const loom_target_facts_t* function_target_facts,
+    const loom_low_storage_layout_t* workgroup_layout,
     const loom_low_descriptor_registry_t* descriptor_registry,
     iree_diagnostic_emitter_t emitter, loom_low_function_model_flags_t flags,
     iree_arena_allocator_t* arena, loom_low_function_model_t* out_model) {
@@ -58,8 +59,9 @@ iree_status_t loom_low_function_model_initialize(
                                         &out_model->loop_forest);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_low_function_requirements_build(
-        module, out_model->body, arena, &out_model->requirements);
+    status = loom_low_function_requirements_build(module, out_model->body,
+                                                  workgroup_layout, arena,
+                                                  &out_model->requirements);
   }
   if (iree_status_is_ok(status)) {
     status = loom_liveness_dataflow_analyze(&out_model->value_domain,

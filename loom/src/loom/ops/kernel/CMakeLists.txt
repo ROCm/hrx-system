@@ -74,7 +74,10 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::error::error_defs
+    loom::ir
+    loom::ops::index
     loom::testing::diagnostic_matchers
+    loom::util::fact_table
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

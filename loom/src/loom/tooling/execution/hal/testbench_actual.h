@@ -175,6 +175,8 @@ typedef struct loom_run_hal_testbench_actual_provider_t {
   loom_source_table_resolver_t launch_config_sources;
   // Exact target facts used to expand and evaluate the launch region.
   const loom_target_facts_t* launch_config_target_facts;
+  // Source launch fields required before each dispatch can be submitted.
+  loom_kernel_launch_config_field_flags_t required_launch_fields;
   // Reusable signed workload arguments used during launch evaluation.
   int64_t* workload_arguments;
   // Backend-produced HAL executable candidate.
@@ -183,6 +185,8 @@ typedef struct loom_run_hal_testbench_actual_provider_t {
   loom_device_target_t compile_device_target;
   // Prepared executable retained for correctness and benchmark dispatches.
   loom_run_hal_prepared_candidate_t prepared_candidate;
+  // Immutable resource usage reflected by the loaded executable function.
+  iree_hal_executable_function_resource_usage_t function_resource_usage;
   // Allocator-owned reflected logical parameter layout for the prepared
   // executable function. Parameter string views borrow executable storage.
   iree_hal_executable_function_parameter_t* function_parameters;

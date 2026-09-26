@@ -47,6 +47,7 @@ from loom.dsl import (
     ATTR_TYPE_ENUM,
     ATTR_TYPE_I64,
     ATTR_TYPE_STRING,
+    BUFFER,
     COMMAND_EFFECT,
     CONVERGENT,
     I1,
@@ -54,6 +55,8 @@ from loom.dsl import (
     INTEGER,
     ISOLATED_FROM_ABOVE,
     MEMORY_FENCE,
+    OBSERVABLE_EFFECT,
+    OFFSET,
     PURE,
     SCALAR,
     SYMBOL_DEFINE,
@@ -360,7 +363,14 @@ kernel_launch_config = Op(
     "kernel.launch.config",
     group=kernel_ops,
     phase=OpPhase.EXECUTABLE,
-    doc=("Terminate a kernel launch configuration region with the computed workgroup grid, required workgroup size, and optional static workgroup-cluster size."),
+    doc=(
+        "Terminate a kernel launch configuration region with the computed "
+        "workgroup grid, required workgroup size, optional static cluster size, "
+        "and optional additional workgroup storage byte count. The additional "
+        "count excludes the compiler's aligned fixed-storage prefix and is "
+        "common to all launched workgroups. An explicit zero request remains "
+        "distinct from omission."
+    ),
     operands=[
         Operand(
             "workgroup_count_x",
@@ -410,6 +420,12 @@ kernel_launch_config = Op(
             optional=True,
             doc="Static workgroup-cluster size in the z dimension.",
         ),
+        Operand(
+            "dynamic_workgroup_storage",
+            OFFSET,
+            optional=True,
+            doc="Additional storage bytes available to every workgroup after the aligned fixed prefix.",
+        ),
     ],
     traits=[TERMINATOR, HasParent("kernel.def")],
     verify="loom_kernel_launch_config_verify",
@@ -449,13 +465,57 @@ kernel_launch_config = Op(
             ],
             anchor="workgroup_cluster_size_x",
         ),
+        OptionalGroup(
+            [Clause("dynamic_workgroup_storage", Ref("dynamic_workgroup_storage"))],
+            anchor="dynamic_workgroup_storage",
+        ),
         COLON,
         TypeOf("workgroup_count_x"),
     ],
     examples=[
         "kernel.launch.config workgroups(%gx, %gy, %gz) workgroup_size(%sx, %sy, %sz) : index",
         "kernel.launch.config workgroups(%gx, %gy, %gz) workgroup_size(%sx, %sy, %sz) cluster_size(%cx, %cy, %cz) : index",
+        "kernel.launch.config workgroups(%gx, %gy, %gz) workgroup_size(%sx, %sy, %sz) dynamic_workgroup_storage(%bytes) : index",
     ],
+)
+
+kernel_workgroup_storage = Op(
+    "kernel.workgroup.storage",
+    group=kernel_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Borrow the dispatch-owned storage tail of the current workgroup. "
+        "At most one root may appear in the kernel body entry block, before "
+        "any kernel.exit in that block. Its "
+        "nonnegative byte length is uniform within each workgroup and may vary "
+        "between workgroups; every declared extent must fit the launch's "
+        "explicit dynamic_workgroup_storage request, including zero. The tail "
+        "begins after the compiler's fixed workgroup storage, rounded up to "
+        "base_alignment, and remains live for this workgroup's execution. "
+        "This is borrowed entry storage, not an allocation or a kernel argument. "
+        "buffer.length observes the declared extent, not physical capacity. "
+        "The alignment resource requirement remains even when the result is unused."
+    ),
+    operands=[Operand("byte_length", OFFSET, doc="Declared accessible byte extent for this workgroup.")],
+    results=[Result("result", BUFFER, doc="Borrowed opaque workgroup storage root.")],
+    attrs=[
+        AttrDef(
+            "base_alignment",
+            ATTR_TYPE_I64,
+            doc="Positive power-of-two minimum byte alignment of the tail base.",
+        ),
+    ],
+    traits=[OBSERVABLE_EFFECT, HasParent("kernel.def")],
+    verify="loom_kernel_workgroup_storage_verify",
+    facts="loom_kernel_workgroup_storage_facts",
+    canonicalize="loom_kernel_workgroup_storage_canonicalize",
+    format=[
+        Clause("align", Attr("base_alignment")),
+        Ref("byte_length"),
+        COLON,
+        ResultType("result"),
+    ],
+    examples=["%tail = kernel.workgroup.storage align(16) %bytes : buffer"],
 )
 
 
@@ -2174,4 +2234,5 @@ ALL_KERNEL_OPS: tuple[Op, ...] = (
     kernel_launch_yield,
     kernel_launch_serial,
     kernel_launch_concurrent,
+    kernel_workgroup_storage,
 )

@@ -113,8 +113,10 @@ iree_execution_test_suite(
     "loom-compile.test.json"
   TOOLS
     "loom-compile=::loom-compile"
+    "loom-format=loom::tools::loom-format"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/testdata/command_artifacts.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/testdata/command_dynamic_workgroup_storage.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-compile/testdata/command_kernel_requests.loom"
   LABELS
     "hostonly"

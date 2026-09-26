@@ -686,6 +686,13 @@ static const loom_amdgpu_lower_dispatch_row_t
 
 static const loom_amdgpu_lower_dispatch_row_t
     kAmdgpuKernelDispatchRows[LOOM_OP_KERNEL_COUNT_] = {
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_WORKGROUP_STORAGE)] =
+            LOOM_AMDGPU_STRUCTURAL_DIRECT_STORAGE_ROW(
+                LOOM_OP_KERNEL_WORKGROUP_STORAGE,
+                loom_amdgpu_select_buffer_dispatch,
+                loom_amdgpu_emit_buffer_dispatch,
+                loom_amdgpu_low_legality_record_buffer_op,
+                LOOM_AMDGPU_STORAGE_NONE),
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_KERNEL_ASSERT)] =
             LOOM_AMDGPU_RECIPE_DATA_ROW(
                 LOOM_OP_KERNEL_ASSERT, loom_amdgpu_kernel_assert_plan_t,

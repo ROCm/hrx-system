@@ -9,9 +9,11 @@
 #include <inttypes.h>
 #include <string.h>
 
+#include "loom/codegen/low/function_requirements.h"
 #include "loom/codegen/low/storage_layout.h"
 #include "loom/ir/context.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/launch_config.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/low/ops.h"
@@ -50,6 +52,9 @@ struct loom_kernel_launch_config_program_entry_t {
 
   // Host function receiving the launch computation.
   loom_func_like_t launch_function;
+
+  // Residual dispatch-owned tail size, or INVALID when the clause is absent.
+  loom_value_id_t dynamic_workgroup_storage;
 
   // Results complete before final workgroup storage is joined.
   loom_value_id_t
@@ -324,6 +329,13 @@ static iree_status_t loom_kernel_launch_config_program_build_function(
   entry->version_handle = version_handle;
   entry->source_function_name_id = source_name_id;
   entry->launch_function = launch_function;
+  entry->dynamic_workgroup_storage = LOOM_VALUE_ID_INVALID;
+  const loom_value_id_t source_dynamic_storage =
+      loom_kernel_launch_config_dynamic_workgroup_storage(source_launch_config);
+  if (source_dynamic_storage != LOOM_VALUE_ID_INVALID) {
+    IREE_RETURN_IF_ERROR(loom_ir_remap_resolve_value(
+        &remap, source_dynamic_storage, &entry->dynamic_workgroup_storage));
+  }
 
   const loom_value_id_t source_results[] = {
       loom_kernel_launch_config_workgroup_count_x(source_launch_config),
@@ -430,32 +442,51 @@ static iree_status_t loom_kernel_launch_config_resolve_low_function(
   return iree_ok_status();
 }
 
-static iree_status_t loom_kernel_launch_config_workgroup_storage_bytes(
+static iree_status_t loom_kernel_launch_config_workgroup_layout(
     const loom_module_t* module, loom_func_like_t low_function,
-    uint64_t* out_bytes) {
-  *out_bytes = 0;
+    iree_arena_allocator_t* scratch_arena, iree_arena_allocator_t* layout_arena,
+    loom_low_workgroup_layouts_t* layouts, uint64_t* out_bytes) {
   if (!loom_low_kernel_def_isa(low_function.op)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "launch config entry does not resolve to a final low kernel");
   }
-  const loom_region_t* body = loom_func_like_body(low_function);
-  if (body == NULL) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "final low kernel has no body for storage layout");
+  loom_low_function_requirements_t requirements = {0};
+  IREE_RETURN_IF_ERROR(loom_low_function_requirements_build(
+      module, loom_func_like_body(low_function), /*workgroup_layout=*/NULL,
+      scratch_arena, &requirements));
+  IREE_RETURN_IF_ERROR(loom_low_workgroup_layouts_insert(
+      loom_low_kernel_def_callee(low_function.op).symbol_id,
+      &requirements.storage_layout, layout_arena, layouts));
+  *out_bytes = requirements.storage_layout.space_sizes.workgroup_bytes;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_kernel_launch_config_total_storage(
+    loom_builder_t* builder, uint64_t fixed_bytes,
+    loom_value_id_t dynamic_bytes, loom_location_id_t location,
+    loom_value_id_t* out_value) {
+  if (dynamic_bytes == LOOM_VALUE_ID_INVALID) {
+    return loom_kernel_launch_config_build_constant(
+        builder, (int64_t)fixed_bytes, location, out_value);
   }
-  loom_low_storage_layout_space_sizes_t sizes = {0};
-  loom_block_t* block = NULL;
-  loom_region_for_each_block(body, block) {
-    const loom_op_t* op = NULL;
-    loom_block_for_each_op(block, op) {
-      if (loom_low_storage_reserve_isa(op)) {
-        IREE_RETURN_IF_ERROR(
-            loom_low_storage_layout_accumulate_reservation(module, op, &sizes));
-      }
-    }
-  }
-  *out_bytes = sizes.workgroup_bytes;
+  const loom_type_t offset_type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
+  loom_value_id_t fixed_value = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_constant_build(
+      builder, loom_value_facts_exact_i64((int64_t)fixed_bytes), offset_type,
+      location, &fixed_value));
+  // Address-domain facts use checked addition, not machine-integer wrapping.
+  // An overflowing sum cannot become an exact launch result and is rejected by
+  // the public evaluator before conversion to its validated unsigned byte
+  // count.
+  loom_op_t* sum = NULL;
+  IREE_RETURN_IF_ERROR(loom_index_add_build(builder, fixed_value, dynamic_bytes,
+                                            offset_type, location, &sum));
+  loom_op_t* result = NULL;
+  IREE_RETURN_IF_ERROR(loom_index_cast_build(
+      builder, loom_index_add_result(sum), offset_type,
+      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), location, &result));
+  *out_value = loom_index_cast_result(result);
   return iree_ok_status();
 }
 
@@ -463,6 +494,8 @@ iree_status_t loom_kernel_launch_config_program_finalize(
     loom_kernel_launch_config_program_t* program,
     const loom_module_t* lowered_module,
     iree_arena_block_pool_t* scratch_block_pool,
+    iree_arena_allocator_t* layout_arena,
+    loom_low_workgroup_layouts_t* out_workgroup_layouts,
     const loom_module_t** out_module) {
   *out_module = NULL;
   if (program->entry_count == 0) {
@@ -473,7 +506,9 @@ iree_status_t loom_kernel_launch_config_program_finalize(
 
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(scratch_block_pool, &scratch_arena);
-  iree_status_t status = iree_ok_status();
+  iree_status_t status = loom_low_workgroup_layouts_initialize(
+      lowered_module->symbols.count, program->entry_count, layout_arena,
+      out_workgroup_layouts);
   for (loom_kernel_launch_config_program_entry_t* entry = program->entry_head;
        entry != NULL && iree_status_is_ok(status); entry = entry->next) {
     loom_func_like_t low_function = {0};
@@ -481,8 +516,9 @@ iree_status_t loom_kernel_launch_config_program_finalize(
         program, lowered_module, entry, &low_function);
     uint64_t workgroup_storage_bytes = 0;
     if (iree_status_is_ok(status)) {
-      status = loom_kernel_launch_config_workgroup_storage_bytes(
-          lowered_module, low_function, &workgroup_storage_bytes);
+      status = loom_kernel_launch_config_workgroup_layout(
+          lowered_module, low_function, &scratch_arena, layout_arena,
+          out_workgroup_layouts, &workgroup_storage_bytes);
     }
     if (!iree_status_is_ok(status)) {
       break;
@@ -502,8 +538,8 @@ iree_status_t loom_kernel_launch_config_program_finalize(
         &builder);
     loom_value_id_t result_values[LOOM_KERNEL_LAUNCH_CONFIG_RESULT_COUNT];
     memcpy(result_values, entry->result_values, sizeof(entry->result_values));
-    status = loom_kernel_launch_config_build_constant(
-        &builder, (int64_t)workgroup_storage_bytes,
+    status = loom_kernel_launch_config_total_storage(
+        &builder, workgroup_storage_bytes, entry->dynamic_workgroup_storage,
         entry->launch_function.op->location,
         &result_values
             [LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_STORAGE_BYTES]);

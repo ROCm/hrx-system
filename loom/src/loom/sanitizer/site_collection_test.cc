@@ -123,7 +123,8 @@ class SiteCollectionTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_kernel_launch_config_build(
         &config_builder, 0, workload, workload, workload, workload, workload,
         workload, LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID,
-        LOOM_VALUE_ID_INVALID, LOOM_LOCATION_UNKNOWN, &launch_config_op));
+        LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID, LOOM_LOCATION_UNKNOWN,
+        &launch_config_op));
     func_like_ = loom_func_like_cast(module_, func_op_);
     body_ = loom_func_like_body(func_like_);
     loom_builder_initialize(module_, &module_->arena,

@@ -825,3 +825,23 @@ low.kernel.def target<test.low.core>(@test_target) @storage_view_rejects_loop_ca
   }
   return
 }
+
+// ====
+
+test.target<low_core> @test_target
+
+low.kernel.def target<test.low.core>(@test_target) @tail_alignment_must_be_power_of_two() {
+  // ERROR@+1: STRUCTURE/014 {attr_name="base_alignment", actual_value="3", expected_constraint="positive power-of-two byte alignment"}
+  %tail = low.storage.tail.address align(3) : reg<test.ptr>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.kernel.def target<test.low.core>(@test_target) @tail_alignment_must_be_positive() {
+  // ERROR@+1: STRUCTURE/014 {attr_name="base_alignment", actual_value="0", expected_constraint="positive power-of-two byte alignment"}
+  %tail = low.storage.tail.address align(0) : reg<test.ptr>
+  low.return
+}

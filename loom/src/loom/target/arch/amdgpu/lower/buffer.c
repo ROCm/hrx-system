@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include "loom/ops/buffer/ops.h"
+#include "loom/ops/kernel/ops.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/source_alloca_layout.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
@@ -61,6 +62,13 @@ iree_status_t loom_amdgpu_select_buffer_plan(loom_low_lower_context_t* context,
                                              loom_low_lower_plan_t* out_plan) {
   *out_plan = loom_low_lower_plan_empty();
   switch (source_op->kind) {
+    case LOOM_OP_KERNEL_WORKGROUP_STORAGE: {
+      IREE_RETURN_IF_ERROR(
+          loom_amdgpu_source_alloca_layout_record_lower_workgroup_tail(
+              context, loom_kernel_workgroup_storage_result(source_op)));
+      *out_plan = loom_low_lower_plan_make(source_op->kind, NULL);
+      return iree_ok_status();
+    }
     case LOOM_OP_BUFFER_ALLOCA: {
       loom_amdgpu_buffer_alloca_plan_t local_plan = {0};
       if (!loom_amdgpu_select_buffer_alloca_plan(context, source_op,
@@ -87,6 +95,11 @@ iree_status_t loom_amdgpu_low_legality_record_buffer_op(
     bool* out_handled) {
   (void)provider;
   *out_handled = false;
+  if (op->kind == LOOM_OP_KERNEL_WORKGROUP_STORAGE) {
+    *out_handled = true;
+    return loom_amdgpu_source_alloca_layout_record_low_legality_workgroup_tail(
+        context, loom_kernel_workgroup_storage_result(op));
+  }
   if (op->kind != LOOM_OP_BUFFER_ALLOCA) {
     return iree_ok_status();
   }
@@ -129,6 +142,18 @@ iree_status_t loom_amdgpu_lower_buffer_op(loom_low_lower_context_t* context,
                                           const loom_op_t* source_op,
                                           loom_low_lower_plan_t plan) {
   switch (source_op->kind) {
+    case LOOM_OP_KERNEL_WORKGROUP_STORAGE: {
+      loom_type_t vgpr_type = loom_type_none();
+      IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &vgpr_type));
+      loom_op_t* address_op = NULL;
+      IREE_RETURN_IF_ERROR(loom_low_storage_tail_address_build(
+          loom_low_lower_context_builder(context),
+          loom_kernel_workgroup_storage_base_alignment(source_op), vgpr_type,
+          source_op->location, &address_op));
+      return loom_low_lower_bind_value(
+          context, loom_kernel_workgroup_storage_result(source_op),
+          loom_low_storage_tail_address_result(address_op));
+    }
     case LOOM_OP_BUFFER_ALLOCA:
       return loom_amdgpu_lower_buffer_alloca(
           context, source_op,

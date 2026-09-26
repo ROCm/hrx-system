@@ -927,6 +927,20 @@ ERR_STRUCTURE_055 = ErrorDef(
     ),
 )
 
+# ERR_STRUCTURE_056: Operation semantic contract is not satisfied.
+ERR_STRUCTURE_056 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=56,
+    severity=Severity.ERROR,
+    summary="Operation semantic contract is not satisfied.",
+    message="'{op_name}' requires {constraint}",
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("constraint", ParamKind.STRING),
+    ),
+    fix_hint="Establish the required source contract before using '{op_name}'",
+)
+
 ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_001,
     ERR_STRUCTURE_002,
@@ -982,4 +996,5 @@ ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_053,
     ERR_STRUCTURE_054,
     ERR_STRUCTURE_055,
+    ERR_STRUCTURE_056,
 )

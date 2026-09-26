@@ -12,5 +12,6 @@ package(
 
 exports_files([
     "command_artifacts.loom",
+    "command_dynamic_workgroup_storage.loom",
     "command_kernel_requests.loom",
 ])

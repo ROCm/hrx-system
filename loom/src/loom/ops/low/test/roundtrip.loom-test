@@ -175,3 +175,13 @@ low.func.def target<test.low.core> @mixed(%lhs: reg<test.i32 x4>, %rhs: reg<test
   %early, %normal = test.mixed_early_clobber.v4i32 %lhs, %rhs : reg<test.i32 x4>, %rhs as reg<test.i32 x4>
   return %early, %normal
 }
+
+// ====
+
+test.target<low_core> @test_target
+
+low.kernel.def target<test.low.core>(@test_target) @workgroup_tail() asm {
+  %strong = storage_tail_address align(64) : reg<test.ptr>
+  %tail = storage_tail_address align(4) : reg<test.ptr>
+  return
+}

@@ -29,6 +29,17 @@ iree_c_embed_data(
 )
 
 iree_c_embed_data(
+    name = "workgroup_storage",
+    testonly = True,
+    srcs = glob(["workgroup_storage/*.loom"]),
+    c_file_output = "workgroup_storage_testdata.c",
+    flatten = True,
+    h_file_output = "workgroup_storage_testdata.h",
+    identifier = "loomc_workgroup_storage_testdata",
+    visibility = ["//loom/binding/c/test/target/amdgpu:__pkg__"],
+)
+
+iree_c_embed_data(
     name = "link_dependency",
     testonly = True,
     srcs = glob(["link_dependency/*.loom"]),

@@ -360,6 +360,16 @@ static iree_status_t loom_run_hal_record_dispatch_sequence_edge(
       /*buffer_barrier_count=*/0, /*buffer_barriers=*/NULL);
 }
 
+static iree_hal_dispatch_config_t loom_run_hal_dispatch_config(
+    const loom_run_hal_invocation_options_t* options) {
+  iree_hal_dispatch_config_t config = iree_hal_make_static_dispatch_config(
+      options->workgroup_count[0], options->workgroup_count[1],
+      options->workgroup_count[2]);
+  config.dynamic_workgroup_local_memory =
+      options->dynamic_workgroup_local_memory;
+  return config;
+}
+
 static iree_status_t loom_run_hal_record_dispatch_batch(
     iree_hal_queue_t* queue, iree_hal_executable_t* executable,
     iree_host_size_t binding_list_count,
@@ -370,9 +380,8 @@ static iree_status_t loom_run_hal_record_dispatch_batch(
     iree_hal_command_buffer_t** out_command_buffer) {
   *out_command_buffer = NULL;
 
-  iree_hal_dispatch_config_t config = iree_hal_make_static_dispatch_config(
-      options->workgroup_count[0], options->workgroup_count[1],
-      options->workgroup_count[2]);
+  const iree_hal_dispatch_config_t config =
+      loom_run_hal_dispatch_config(options);
   iree_const_byte_span_t constants = loom_run_hal_dispatch_constants(options);
   iree_hal_executable_function_t function =
       iree_hal_executable_function_invalid();
@@ -471,9 +480,8 @@ static iree_status_t loom_run_hal_record_dispatch_sequence_batch(
       if (!iree_status_is_ok(status)) {
         break;
       }
-      iree_hal_dispatch_config_t config = iree_hal_make_static_dispatch_config(
-          options->workgroup_count[0], options->workgroup_count[1],
-          options->workgroup_count[2]);
+      const iree_hal_dispatch_config_t config =
+          loom_run_hal_dispatch_config(options);
       status = iree_hal_command_buffer_dispatch(
           command_buffer, candidates[step_index]->executable, function, config,
           loom_run_hal_dispatch_constants(options), bindings,
@@ -539,9 +547,7 @@ static iree_status_t loom_run_hal_record_indirect_dispatch_sequence(
       break;
     }
     const iree_hal_dispatch_config_t config =
-        iree_hal_make_static_dispatch_config(options->workgroup_count[0],
-                                             options->workgroup_count[1],
-                                             options->workgroup_count[2]);
+        loom_run_hal_dispatch_config(options);
     status = iree_hal_command_buffer_dispatch(
         command_buffer, step->candidate->executable, function, config,
         loom_run_hal_dispatch_constants(options), bindings,
@@ -601,9 +607,7 @@ static iree_status_t loom_run_hal_queue_dispatch_prepare_options(
   out_dispatch->executable = executable;
   iree_hal_executable_retain(out_dispatch->executable);
   out_dispatch->function = function;
-  out_dispatch->config = iree_hal_make_static_dispatch_config(
-      options->workgroup_count[0], options->workgroup_count[1],
-      options->workgroup_count[2]);
+  out_dispatch->config = loom_run_hal_dispatch_config(options);
   memcpy(out_dispatch->constants, options->constants,
          options->constant_count * sizeof(options->constants[0]));
   out_dispatch->constant_count = options->constant_count;

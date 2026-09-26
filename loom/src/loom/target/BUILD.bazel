@@ -613,6 +613,7 @@ loom_cc_library(
         ":pipeline_options",
         ":profile",
         ":resolved_target",
+        "//loom/src/loom/codegen/low:storage_layout",
         "//loom/src/loom/codegen/low:verify",
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/ir",

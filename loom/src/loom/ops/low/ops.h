@@ -52,7 +52,8 @@ enum {
   LOOM_OP_LOW_SCHEDULE_BEGIN = LOOM_OP_KIND(LOOM_DIALECT_LOW, 28),
   LOOM_OP_LOW_SCHEDULE_PHASE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 29),
   LOOM_OP_LOW_SCHEDULE_END = LOOM_OP_KIND(LOOM_DIALECT_LOW, 30),
-  LOOM_OP_LOW_COUNT_ = 31,
+  LOOM_OP_LOW_STORAGE_TAIL_ADDRESS = LOOM_OP_KIND(LOOM_DIALECT_LOW, 31),
+  LOOM_OP_LOW_COUNT_ = 32,
 };
 
 // Function visibility. Absent (0) means private (module-internal).
@@ -908,6 +909,21 @@ iree_status_t loom_low_schedule_end_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_low_schedule_control_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_LOW_STORAGE_TAIL_ADDRESS: Address the dispatch-owned workgroup tail after fixed reservations. Every query names the same base, aligned to the strongest requested alignment in the function. Its resource requirement survives even when the result is unused. The caller supplies the tail capacity.
+// %tail = low.storage.tail.address align(16) : reg<amdgpu.vgpr>
+LOOM_DEFINE_ISA(loom_low_storage_tail_address_isa, LOOM_OP_LOW_STORAGE_TAIL_ADDRESS)
+LOOM_DEFINE_RESULT(loom_low_storage_tail_address_result, 0)
+LOOM_DEFINE_ATTR_I64(loom_low_storage_tail_address_base_alignment, 0)
+iree_status_t loom_low_storage_tail_address_build(
+    loom_builder_t* builder,
+    int64_t base_alignment,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_low_storage_tail_address_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 

@@ -120,7 +120,8 @@ loom_amdgpu_structural_packet_info_t loom_amdgpu_structural_packet_analyze(
     info.flags = LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_FORWARDS_DEPENDENCIES;
     return info;
   }
-  if (loom_low_storage_address_isa(op)) {
+  if (loom_low_storage_address_isa(op) ||
+      loom_low_storage_tail_address_isa(op)) {
     info.flags = LOOM_AMDGPU_STRUCTURAL_PACKET_FLAG_MATERIALIZES;
     info.instruction_count = 1;
     info.vector_alu_instruction_count = 1;

@@ -226,6 +226,35 @@ def _signature_fields_and_regions(
     return frozenset(func_args), frozenset(declared)
 
 
+def _has_independent_optional_operand_groups(op_decl: Op) -> bool:
+    """Whether authored optional clauses can leave holes in an operand prefix."""
+    optional_names = {operand.name for operand in op_decl.operands if operand.optional}
+    conditions_by_name: dict[str, frozenset[tuple[str, bool]]] = {}
+
+    def walk(
+        elements: Sequence[FormatElement], conditions: frozenset[tuple[str, bool]]
+    ) -> None:
+        for element in elements:
+            match element:
+                case OptionalGroup(elements=inner, anchor=anchor, inverted=inverted):
+                    walk(inner, conditions | {(anchor, not inverted)})
+                case Clause(elements=inner) | Scope(elements=inner):
+                    walk(inner, conditions)
+                case Ref(field=name) if name in optional_names:
+                    conditions_by_name[name] = conditions
+
+    walk(op_decl.format, frozenset())
+    previous: frozenset[tuple[str, bool]] | None = None
+    for operand in op_decl.operands:
+        conditions = conditions_by_name.get(operand.name)
+        if conditions is None:
+            continue
+        if previous is not None and not previous.issubset(conditions):
+            return True
+        previous = conditions
+    return False
+
+
 def compute_layout(op_decl: Op) -> FieldLayout:
     """Compute the field layout from an Op declaration.
 
@@ -245,7 +274,7 @@ def compute_layout(op_decl: Op) -> FieldLayout:
 
     # Operands: use the legacy compact layout when possible, and segmented
     # counts when optional/variadic fields need independent spans.
-    segmented_operands = False
+    segmented_operands = _has_independent_optional_operand_groups(op_decl)
     saw_optional_operand = False
     saw_variadic_operand = False
     for i, operand in enumerate(op_decl.operands):

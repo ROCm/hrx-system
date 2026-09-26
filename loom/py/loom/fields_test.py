@@ -10,6 +10,7 @@ import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 
+from loom.assembly import Clause, OptionalGroup, Ref
 from loom.dsl import (
     ANY,
     INTEGER,
@@ -251,6 +252,55 @@ class TestComputeLayout:
                     ],
                 )
             )
+
+    def test_independent_optional_clauses_use_segmented_operands(self) -> None:
+        layout = compute_layout(
+            Op(
+                "test.optional_clauses",
+                operands=[
+                    Operand("left", ANY, optional=True),
+                    Operand("right", ANY, optional=True),
+                ],
+                format=[
+                    OptionalGroup([Clause("left", Ref("left"))], anchor="left"),
+                    OptionalGroup([Clause("right", Ref("right"))], anchor="right"),
+                ],
+            )
+        )
+        assert layout.segmented_operands
+        assert layout.fields["left"].index == 0
+        assert layout.fields["right"].index == 1
+
+    def test_shared_optional_clause_keeps_compact_operands(self) -> None:
+        layout = compute_layout(
+            Op(
+                "test.shared_clause",
+                operands=[
+                    Operand("left", ANY, optional=True),
+                    Operand("right", ANY, optional=True),
+                ],
+                format=[OptionalGroup([Ref("left"), Ref("right")], anchor="left")],
+            )
+        )
+        assert not layout.segmented_operands
+
+    def test_nested_optional_prefix_keeps_compact_operands(self) -> None:
+        layout = compute_layout(
+            Op(
+                "test.nested_clause",
+                operands=[
+                    Operand("left", ANY, optional=True),
+                    Operand("right", ANY, optional=True),
+                ],
+                format=[
+                    OptionalGroup(
+                        [Ref("left"), OptionalGroup([Ref("right")], anchor="right")],
+                        anchor="left",
+                    )
+                ],
+            )
+        )
+        assert not layout.segmented_operands
 
     def test_variadic_operand_after_optional_uses_segmented_operands(self) -> None:
         layout = compute_layout(

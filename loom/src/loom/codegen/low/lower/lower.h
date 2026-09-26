@@ -811,9 +811,18 @@ typedef struct loom_low_lower_contract_t {
   loom_low_lower_rule_set_list_t rule_sets;
 } loom_low_lower_contract_t;
 
+typedef enum loom_low_lower_policy_flag_bits_e {
+  // Implements the dispatch-sized workgroup storage contract in kernel launches
+  // and the corresponding workgroup tail address in the lowered function.
+  LOOM_LOW_LOWER_POLICY_FLAG_DYNAMIC_WORKGROUP_STORAGE = 1u << 0,
+} loom_low_lower_policy_flag_bits_t;
+typedef uint32_t loom_low_lower_policy_flags_t;
+
 typedef struct loom_low_lower_policy_t {
   // Stable policy name used in diagnostics and status messages.
   iree_string_view_t name;
+  // Source execution contracts implemented by this policy.
+  loom_low_lower_policy_flags_t flags;
   // Catalog resolving compact diagnostic refs carried by this policy's
   // generated rules and contract fragments.
   const loom_error_catalog_t* error_catalog;

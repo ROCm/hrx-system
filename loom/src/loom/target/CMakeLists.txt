@@ -686,6 +686,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::codegen::low::lower
+    loom::codegen::low::storage_layout
     loom::codegen::low::verify
     loom::ir
     loom::pass::environment

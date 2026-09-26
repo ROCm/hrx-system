@@ -507,7 +507,7 @@ static iree_status_t loom_run_hal_testbench_scenario_build_function_adapter(
   IREE_RETURN_IF_ERROR(loom_kernel_launch_config_build(
       &builder, /*build_flags=*/0, unit, unit, unit, unit, unit, unit,
       LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID,
-      function.op->location, &launch_config_op));
+      LOOM_VALUE_ID_INVALID, function.op->location, &launch_config_op));
   loom_builder_restore(&builder, module_ip);
 
   module_ip = loom_builder_enter_region(&builder, adapter_op,

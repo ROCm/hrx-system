@@ -1,0 +1,12 @@
+kernel.def @dynamic_storage(%byte_length: offset) {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) dynamic_workgroup_storage(%byte_length) : index
+} launch() {
+  kernel.return
+}
+
+command.program.def public @request_dynamic_storage() launch() {
+  %byte_length = index.constant 256 : offset
+  kernel.launch @dynamic_storage[%byte_length]() : [offset]()
+  command.return
+}

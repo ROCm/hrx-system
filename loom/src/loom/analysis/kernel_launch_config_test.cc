@@ -13,6 +13,8 @@
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/index/ops.h"
+#include "loom/ops/kernel/ops.h"
 #include "loom/target/facts.h"
 #include "loom/target/types.h"
 #include "loom/testing/context.h"
@@ -46,6 +48,67 @@ class KernelLaunchConfigTest : public ::testing::Test {
                                    &context_, &block_pool_, &options, &module));
     EXPECT_NE(module, nullptr);
     return ModulePtr(module);
+  }
+
+  enum class StorageRequest { kAbsent, kConstant, kWorkload };
+
+  iree_status_t BuildStorageKernel(StorageRequest request,
+                                   int64_t constant_byte_length,
+                                   ModulePtr* out_module) {
+    loom_module_t* module = nullptr;
+    IREE_RETURN_IF_ERROR(
+        loom_module_allocate(&context_, IREE_SV("storage"), &block_pool_,
+                             nullptr, iree_allocator_system(), &module));
+    out_module->reset(module);
+    loom_builder_t builder;
+    loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                            &builder);
+    loom_string_id_t name = LOOM_STRING_ID_INVALID;
+    IREE_RETURN_IF_ERROR(
+        loom_module_intern_string(module, IREE_SV("entry"), &name));
+    loom_symbol_id_t symbol = LOOM_SYMBOL_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_module_add_symbol(module, name, &symbol));
+    const loom_type_t offset_type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
+    const loom_symbol_ref_t reference = {/*.module_id=*/0,
+                                         /*.symbol_id=*/symbol};
+    loom_op_t* kernel = nullptr;
+    IREE_RETURN_IF_ERROR(loom_kernel_def_build(
+        &builder, /*build_flags=*/0, /*retain=*/0, loom_symbol_ref_null(),
+        LOOM_STRING_ID_INVALID, /*export_linkage=*/0, reference, &offset_type,
+        request == StorageRequest::kWorkload ? 1 : 0,
+        /*arg_types=*/nullptr, /*arg_types_count=*/0, /*predicates=*/nullptr,
+        /*predicates_count=*/0, LOOM_LOCATION_UNKNOWN, &kernel));
+    loom_builder_set_block(
+        &builder, loom_region_entry_block(loom_kernel_def_body(kernel)));
+    loom_op_t* terminator = nullptr;
+    IREE_RETURN_IF_ERROR(
+        loom_kernel_return_build(&builder, LOOM_LOCATION_UNKNOWN, &terminator));
+
+    loom_block_t* config =
+        loom_region_entry_block(loom_kernel_def_config(kernel));
+    loom_builder_set_block(&builder, config);
+    loom_op_t* constant = nullptr;
+    IREE_RETURN_IF_ERROR(loom_index_constant_build(
+        &builder, loom_attr_i64(1), loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+        LOOM_LOCATION_UNKNOWN, &constant));
+    const loom_value_id_t unit = loom_index_constant_result(constant);
+    loom_value_id_t byte_length = LOOM_VALUE_ID_INVALID;
+    if (request == StorageRequest::kWorkload) {
+      byte_length = loom_block_arg_id(config, 0);
+    } else if (request == StorageRequest::kConstant) {
+      IREE_RETURN_IF_ERROR(loom_index_constant_build(
+          &builder, loom_attr_i64(constant_byte_length), offset_type,
+          LOOM_LOCATION_UNKNOWN, &constant));
+      byte_length = loom_index_constant_result(constant);
+    }
+    return loom_kernel_launch_config_build(
+        &builder,
+        request == StorageRequest::kAbsent
+            ? 0
+            : LOOM_KERNEL_LAUNCH_CONFIG_BUILD_FLAG_HAS_DYNAMIC_WORKGROUP_STORAGE,
+        unit, unit, unit, unit, unit, unit, LOOM_VALUE_ID_INVALID,
+        LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID, byte_length,
+        LOOM_LOCATION_UNKNOWN, &terminator);
   }
 
   iree_arena_block_pool_t block_pool_;
@@ -317,6 +380,152 @@ kernel.def target(@gpu) @entry(%rows: index) {
   EXPECT_TRUE(config.fields &
               LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_SUBGROUP_SIZE);
   EXPECT_EQ(config.subgroup_size, 32u);
+}
+
+TEST_F(KernelLaunchConfigTest,
+       AddsFixedPrefixToRepeatedRuntimeStorageRequests) {
+  ModulePtr module;
+  IREE_ASSERT_OK(BuildStorageKernel(StorageRequest::kWorkload, 0, &module));
+  const uint64_t fixed_bytes = 64;
+  int64_t dynamic_bytes = 0;
+  loom_kernel_launch_config_options_t options = {};
+  options.function_symbol = IREE_SV("entry");
+  options.workload_arguments = &dynamic_bytes;
+  options.workload_argument_count = 1;
+  options.required_fields =
+      LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_STORAGE_BYTES;
+  options.fixed_workgroup_storage_bytes = &fixed_bytes;
+
+  for (int64_t request :
+       {INT64_C(0), INT64_C(64), INT64_C(192), INT64_C(64), INT64_C(1) << 34}) {
+    SCOPED_TRACE(request);
+    dynamic_bytes = request;
+    loom_kernel_launch_config_t config = {};
+    IREE_ASSERT_OK(loom_kernel_launch_config_evaluate(
+        module.get(), &block_pool_, &options, &config));
+    EXPECT_EQ(config.failure, LOOM_KERNEL_LAUNCH_CONFIG_FAILURE_NONE);
+    EXPECT_TRUE(config.fields &
+                LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_STORAGE_BYTES);
+    EXPECT_EQ(config.workgroup_storage_bytes,
+              fixed_bytes + static_cast<uint64_t>(request));
+  }
+}
+
+TEST_F(KernelLaunchConfigTest, DirectAndFullStorageTotalsUseKnownFixedPrefix) {
+  for (StorageRequest request :
+       {StorageRequest::kAbsent, StorageRequest::kConstant}) {
+    ModulePtr module;
+    IREE_ASSERT_OK(BuildStorageKernel(request, 192, &module));
+    const uint64_t fixed_bytes = 64;
+    loom_kernel_launch_config_options_t options = {};
+    options.function_symbol = IREE_SV("entry");
+    options.required_fields =
+        LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_STORAGE_BYTES;
+
+    for (const uint64_t* prefix :
+         {static_cast<const uint64_t*>(nullptr), &fixed_bytes}) {
+      options.fixed_workgroup_storage_bytes = prefix;
+      loom_kernel_launch_config_t direct_config = {};
+      bool evaluated = false;
+      IREE_ASSERT_OK(loom_kernel_launch_config_try_evaluate_direct(
+          module.get(), &block_pool_, &options, &direct_config, &evaluated));
+      loom_kernel_launch_config_t config = {};
+      IREE_ASSERT_OK(loom_kernel_launch_config_evaluate(
+          module.get(), &block_pool_, &options, &config));
+      const auto expected_failure =
+          prefix
+              ? LOOM_KERNEL_LAUNCH_CONFIG_FAILURE_NONE
+              : LOOM_KERNEL_LAUNCH_CONFIG_FAILURE_MISSING_WORKGROUP_STORAGE_BYTES;
+      EXPECT_EQ(config.failure, expected_failure);
+      EXPECT_EQ(direct_config.failure, expected_failure);
+      EXPECT_EQ(evaluated, prefix != nullptr);
+      EXPECT_EQ(config.fields, direct_config.fields);
+      const uint64_t expected_total =
+          prefix
+              ? fixed_bytes + (request == StorageRequest::kConstant ? 192 : 0)
+              : 0;
+      EXPECT_EQ(config.workgroup_storage_bytes, expected_total);
+      EXPECT_EQ(direct_config.workgroup_storage_bytes, expected_total);
+    }
+  }
+}
+
+TEST_F(KernelLaunchConfigTest, DistinguishesZeroRequestFromUnknownRequest) {
+  ModulePtr module;
+  IREE_ASSERT_OK(BuildStorageKernel(StorageRequest::kWorkload, 0, &module));
+  const uint64_t fixed_bytes = 0;
+  loom_kernel_launch_config_options_t options = {};
+  options.function_symbol = IREE_SV("entry");
+  options.required_fields =
+      LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_STORAGE_BYTES;
+  options.fixed_workgroup_storage_bytes = &fixed_bytes;
+  loom_kernel_launch_config_t config = {};
+  IREE_ASSERT_OK(loom_kernel_launch_config_evaluate(module.get(), &block_pool_,
+                                                    &options, &config));
+  EXPECT_EQ(config.failure,
+            LOOM_KERNEL_LAUNCH_CONFIG_FAILURE_MISSING_WORKGROUP_STORAGE_BYTES);
+  EXPECT_FALSE(config.fields &
+               LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_STORAGE_BYTES);
+
+  const int64_t dynamic_bytes = 0;
+  options.workload_arguments = &dynamic_bytes;
+  options.workload_argument_count = 1;
+  IREE_ASSERT_OK(loom_kernel_launch_config_evaluate(module.get(), &block_pool_,
+                                                    &options, &config));
+  EXPECT_EQ(config.failure, LOOM_KERNEL_LAUNCH_CONFIG_FAILURE_NONE);
+  EXPECT_TRUE(config.fields &
+              LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_STORAGE_BYTES);
+  EXPECT_EQ(config.workgroup_storage_bytes, 0u);
+}
+
+TEST_F(KernelLaunchConfigTest, ChecksStorageTotalAtOffsetBoundary) {
+  ModulePtr module;
+  IREE_ASSERT_OK(BuildStorageKernel(StorageRequest::kWorkload, 0, &module));
+  struct StorageCase {
+    // Compiled fixed prefix supplied by the caller.
+    uint64_t fixed_bytes;
+    // Additional bytes supplied as a workload value.
+    int64_t dynamic_bytes;
+    // Whether the total is representable in the nonnegative offset domain.
+    bool valid;
+  };
+  const StorageCase cases[] = {
+      {0, INT64_MAX, true},
+      {INT64_MAX, 0, true},
+      {INT64_MAX, 1, false},
+      {64, INT64_MAX, false},
+      {uint64_t{INT64_MAX} + 1, 0, false},
+      {0, -1, false},
+  };
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(::testing::Message()
+                 << "fixed=" << test_case.fixed_bytes
+                 << ", dynamic=" << test_case.dynamic_bytes);
+    loom_kernel_launch_config_options_t options = {};
+    options.function_symbol = IREE_SV("entry");
+    options.workload_arguments = &test_case.dynamic_bytes;
+    options.workload_argument_count = 1;
+    options.required_fields =
+        LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_STORAGE_BYTES;
+    options.fixed_workgroup_storage_bytes = &test_case.fixed_bytes;
+    loom_kernel_launch_config_t config = {};
+    IREE_ASSERT_OK(loom_kernel_launch_config_evaluate(
+        module.get(), &block_pool_, &options, &config));
+    EXPECT_EQ(
+        config.failure,
+        test_case.valid
+            ? LOOM_KERNEL_LAUNCH_CONFIG_FAILURE_NONE
+            : LOOM_KERNEL_LAUNCH_CONFIG_FAILURE_MISSING_WORKGROUP_STORAGE_BYTES);
+    EXPECT_EQ(
+        (config.fields &
+         LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_STORAGE_BYTES) != 0,
+        test_case.valid);
+    EXPECT_EQ(config.workgroup_storage_bytes,
+              test_case.valid
+                  ? test_case.fixed_bytes +
+                        static_cast<uint64_t>(test_case.dynamic_bytes)
+                  : 0);
+  }
 }
 
 }  // namespace

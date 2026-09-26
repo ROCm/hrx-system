@@ -353,11 +353,13 @@ loom_cc_library(
   SRCS
     "launch_config_program.c"
   DEPS
+    ::function_requirements
     ::storage_layout
     iree::base
     iree::base::internal::arena
     loom::ir
     loom::ops::func
+    loom::ops::index
     loom::ops::kernel
     loom::ops::low
     loom::ops::op_defs
@@ -386,6 +388,8 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::ir
     loom::ops::low
+    loom::target::registers
+    loom::target::test::descriptors
 )
 
 loom_cc_library(

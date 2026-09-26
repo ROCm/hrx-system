@@ -24,6 +24,7 @@ loom_check_test_suite(
         "memory_access_flags.loom-test",
         "roundtrip.loom-test",
         "schedule_scopes.loom-test",
+        "storage_tail.loom-test",
         "structured_control.loom-test",
         "structured_control_bytecode.loom-test",
         "target_verify.loom-test",

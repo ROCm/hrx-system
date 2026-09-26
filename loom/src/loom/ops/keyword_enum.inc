@@ -93,3 +93,4 @@
   LOOM_KW_CONFIGURE = 84,  // "configure"
   LOOM_KW_LANGLE = 85,  // "<"
   LOOM_KW_RANGLE = 86,  // ">"
+  LOOM_KW_DYNAMIC_WORKGROUP_STORAGE = 87,  // "dynamic_workgroup_storage"

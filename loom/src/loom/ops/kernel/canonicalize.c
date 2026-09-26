@@ -5,11 +5,30 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "loom/ir/facts.h"
+#include "loom/ops/buffer/ops.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/launch_config.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/rewrite/rewriter.h"
+
+iree_status_t loom_kernel_workgroup_storage_canonicalize(
+    loom_op_t* op, loom_rewriter_t* rewriter) {
+  const loom_value_id_t byte_length =
+      loom_kernel_workgroup_storage_byte_length(op);
+  const loom_value_t* result = loom_module_value(
+      rewriter->module, loom_kernel_workgroup_storage_result(op));
+  for (iree_host_size_t i = 0; i < result->use_count;) {
+    loom_op_t* user = loom_use_user_op(loom_value_uses(result)[i]);
+    if (!loom_buffer_length_isa(user)) {
+      ++i;
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
+        rewriter, user, &byte_length, 1));
+  }
+  return iree_ok_status();
+}
 
 static const loom_op_t* loom_kernel_enclosing_def(const loom_op_t* op) {
   for (const loom_op_t* ancestor = op ? op->parent_op : NULL; ancestor;

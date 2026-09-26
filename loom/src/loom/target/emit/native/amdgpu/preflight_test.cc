@@ -64,7 +64,7 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(),
                                      &block_pool_);
     iree_arena_initialize(&block_pool_, &table_arena_);
-    loom_low_storage_layout_builder_initialize(&storage_layout_builder_);
+    loom_low_storage_layout_builder_initialize(NULL, &storage_layout_builder_);
     loom_context_initialize(iree_allocator_system(), &context_);
     RegisterDialect(LOOM_DIALECT_LOW, loom_low_dialect_vtables);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
@@ -188,8 +188,8 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
     schedule.module = module_;
     schedule.function_op = function_op_;
     schedule.target = ResolvedTarget(descriptor_set);
-    loom_low_storage_layout_builder_finish(
-        &storage_layout_builder_, &schedule.requirements.storage_layout);
+    IREE_CHECK_OK(loom_low_storage_layout_builder_finish(
+        &storage_layout_builder_, &schedule.requirements.storage_layout));
     return schedule;
   }
 

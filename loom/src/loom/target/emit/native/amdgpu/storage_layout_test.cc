@@ -12,6 +12,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
+#include "loom/target/registers.h"
 
 namespace loom {
 namespace {
@@ -22,7 +23,8 @@ class AmdgpuStorageLayoutTest : public ::testing::Test {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(),
                                      &block_pool_);
     iree_arena_initialize(&block_pool_, &layout_arena_);
-    loom_low_storage_layout_builder_initialize(&source_layout_builder_);
+    loom_low_storage_layout_builder_initialize(nullptr,
+                                               &source_layout_builder_);
     loom_context_initialize(iree_allocator_system(), &context_);
     RegisterDialect(LOOM_DIALECT_LOW, loom_low_dialect_vtables);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
@@ -92,6 +94,8 @@ class AmdgpuStorageLayoutTest : public ::testing::Test {
         module_, &module_->arena,
         loom_region_entry_block(loom_low_func_def_body(function_op_)),
         &body_builder_);
+    loom_builder_enter_region(&body_builder_, function_op_,
+                              loom_low_func_def_body(function_op_));
   }
 
   loom_value_id_t Reserve(loom_storage_space_t space, int64_t byte_length,
@@ -115,10 +119,30 @@ class AmdgpuStorageLayoutTest : public ::testing::Test {
     return loom_low_storage_view_result(op);
   }
 
+  loom_op_t* TailAddress(int64_t base_alignment) {
+    loom_op_t* op = nullptr;
+    const loom_type_t register_type = loom_low_register_type(1, 1, 1);
+    IREE_CHECK_OK(loom_low_storage_tail_address_build(
+        &body_builder_, base_alignment, register_type, LOOM_LOCATION_UNKNOWN,
+        &op));
+    loom_low_storage_layout_builder_require_workgroup_tail(
+        (uint64_t)loom_low_storage_tail_address_base_alignment(op),
+        &source_layout_builder_);
+    return op;
+  }
+
+  loom_op_t* FixedAddress(loom_value_id_t storage, int64_t byte_offset) {
+    loom_op_t* op = nullptr;
+    IREE_CHECK_OK(loom_low_storage_address_build(
+        &body_builder_, storage, byte_offset, loom_low_register_type(1, 1, 1),
+        LOOM_LOCATION_UNKNOWN, &op));
+    return op;
+  }
+
   iree_status_t BuildLayout(loom_amdgpu_storage_layout_t* out_layout) {
     loom_low_storage_layout_t source_layout = {};
-    loom_low_storage_layout_builder_finish(&source_layout_builder_,
-                                           &source_layout);
+    IREE_RETURN_IF_ERROR(loom_low_storage_layout_builder_finish(
+        &source_layout_builder_, &source_layout));
     return loom_amdgpu_storage_layout_build(&source_layout, &layout_arena_,
                                             out_layout);
   }
@@ -172,6 +196,7 @@ TEST_F(AmdgpuStorageLayoutTest, ResolvesViewsAgainstProjectedOffsets) {
   const loom_value_id_t private_storage =
       Reserve(LOOM_STORAGE_SPACE_PRIVATE, 8, 4);
   const loom_value_id_t view = View(private_storage, 2, 4);
+  const loom_op_t* address = FixedAddress(view, 1);
 
   loom_amdgpu_storage_layout_t layout = {};
   IREE_EXPECT_OK(BuildLayout(&layout));
@@ -183,6 +208,11 @@ TEST_F(AmdgpuStorageLayoutTest, ResolvesViewsAgainstProjectedOffsets) {
   EXPECT_EQ(reference.byte_offset, 2u);
   EXPECT_EQ(reference.byte_length, 4u);
 
+  uint32_t byte_offset = 0;
+  IREE_ASSERT_OK(loom_amdgpu_storage_layout_resolve_address(
+      &layout, module_, address, &byte_offset));
+  EXPECT_EQ(byte_offset, 11u);
+
   ExpectReservation(layout, scratch, LOOM_STORAGE_SPACE_SCRATCH, 0, 8, 8);
 }
 
@@ -191,6 +221,72 @@ TEST_F(AmdgpuStorageLayoutTest, RejectsStackStorage) {
 
   loom_amdgpu_storage_layout_t layout = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION, BuildLayout(&layout));
+}
+
+TEST_F(AmdgpuStorageLayoutTest, PreservesPaddedWorkgroupTailAndFixedOffsets) {
+  const loom_value_id_t fixed = Reserve(LOOM_STORAGE_SPACE_WORKGROUP, 20, 4);
+  const loom_op_t* tail = TailAddress(64);
+  Reserve(LOOM_STORAGE_SPACE_SCRATCH, 8, 8);
+  Reserve(LOOM_STORAGE_SPACE_PRIVATE, 12, 4);
+
+  loom_amdgpu_storage_layout_t layout = {};
+  IREE_ASSERT_OK(BuildLayout(&layout));
+  EXPECT_EQ(layout.segment_sizes.group_segment_fixed_size, 64u);
+  EXPECT_EQ(layout.workgroup_tail_alignment, 64u);
+  EXPECT_EQ(layout.segment_sizes.private_segment_fixed_size, 20u);
+  ExpectReservation(layout, fixed, LOOM_STORAGE_SPACE_WORKGROUP, 0, 20, 4);
+  uint32_t tail_byte_offset = 0;
+  IREE_ASSERT_OK(loom_amdgpu_storage_layout_resolve_address(
+      &layout, module_, tail, &tail_byte_offset));
+  EXPECT_EQ(tail_byte_offset, 64u);
+}
+
+TEST_F(AmdgpuStorageLayoutTest, TailIncludesLaterFixedReservations) {
+  Reserve(LOOM_STORAGE_SPACE_WORKGROUP, 20, 4);
+  const loom_op_t* first_tail = TailAddress(16);
+  const loom_value_id_t late_fixed =
+      Reserve(LOOM_STORAGE_SPACE_WORKGROUP, 80, 16);
+  const loom_op_t* aligned_tail = TailAddress(64);
+
+  loom_amdgpu_storage_layout_t layout = {};
+  IREE_ASSERT_OK(BuildLayout(&layout));
+  EXPECT_EQ(layout.segment_sizes.group_segment_fixed_size, 128u);
+  EXPECT_EQ(layout.workgroup_tail_alignment, 64u);
+  ExpectReservation(layout, late_fixed, LOOM_STORAGE_SPACE_WORKGROUP, 32, 80,
+                    16);
+  for (const loom_op_t* tail : {first_tail, aligned_tail}) {
+    uint32_t tail_byte_offset = 0;
+    IREE_ASSERT_OK(loom_amdgpu_storage_layout_resolve_address(
+        &layout, module_, tail, &tail_byte_offset));
+    EXPECT_EQ(tail_byte_offset, 128u);
+  }
+}
+
+TEST_F(AmdgpuStorageLayoutTest, TailOnlyKeepsAlignmentWithoutReservingBytes) {
+  const loom_op_t* tail = TailAddress(256);
+  loom_amdgpu_storage_layout_t layout = {};
+  IREE_ASSERT_OK(BuildLayout(&layout));
+  EXPECT_EQ(layout.segment_sizes.group_segment_fixed_size, 0u);
+  EXPECT_EQ(layout.workgroup_tail_alignment, 256u);
+  EXPECT_EQ(layout.record_count, 0u);
+  uint32_t tail_byte_offset = UINT32_MAX;
+  IREE_ASSERT_OK(loom_amdgpu_storage_layout_resolve_address(
+      &layout, module_, tail, &tail_byte_offset));
+  EXPECT_EQ(tail_byte_offset, 0u);
+}
+
+TEST_F(AmdgpuStorageLayoutTest, RejectsTailOutsideNativeAddressWidth) {
+  Reserve(LOOM_STORAGE_SPACE_WORKGROUP, UINT32_MAX, 1);
+  const loom_op_t* tail = TailAddress(16);
+  loom_amdgpu_storage_layout_t layout = {};
+  IREE_ASSERT_OK(BuildLayout(&layout));
+  EXPECT_EQ(layout.segment_sizes.group_segment_fixed_size,
+            uint64_t{UINT32_MAX} + 1);
+  uint32_t tail_byte_offset = 17;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        loom_amdgpu_storage_layout_resolve_address(
+                            &layout, module_, tail, &tail_byte_offset));
+  EXPECT_EQ(tail_byte_offset, 17u);
 }
 
 }  // namespace

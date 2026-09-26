@@ -1484,6 +1484,9 @@ typedef struct loom_amdgpu_memory_access_t {
   int64_t secondary_immediate_offset;
   // Static byte offset materialized through the VGPR VADDR operand.
   uint64_t vaddr_static_byte_offset;
+  // The source root is a native32 workgroup tail base, added independently of
+  // the relative byte-offset proof and the packet's immediate offset.
+  bool workgroup_tail_base;
   // Static byte offset materialized through the scalar SOFFSET operand.
   uint32_t scalar_byte_offset;
   // Mixed-bank realizations that fit u32 VADDR and eliminate dynamic SOFFSET.

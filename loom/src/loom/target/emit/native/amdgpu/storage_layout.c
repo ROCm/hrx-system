@@ -6,6 +6,8 @@
 
 #include "loom/target/emit/native/amdgpu/storage_layout.h"
 
+#include "loom/ops/low/ops.h"
+
 static iree_status_t loom_amdgpu_storage_layout_segment_size_ptr(
     loom_amdgpu_storage_layout_segment_sizes_t* sizes,
     loom_storage_space_t storage_space, uint64_t** out_segment_size) {
@@ -35,6 +37,10 @@ static iree_status_t loom_amdgpu_storage_layout_project_reservation(
     loom_amdgpu_storage_layout_record_t* out_record) {
   const loom_low_storage_layout_reservation_t* source_reservation =
       &source_record->reservation;
+  if (source_reservation->space == LOOM_STORAGE_SPACE_WORKGROUP) {
+    *out_record = *source_record;
+    return iree_ok_status();
+  }
   uint64_t* segment_size = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_segment_size_ptr(
       sizes, source_reservation->space, &segment_size));
@@ -76,13 +82,16 @@ iree_status_t loom_amdgpu_storage_layout_build(
         iree_arena_allocate_array(arena, source_layout->record_count,
                                   sizeof(*records), (void**)&records));
   }
-  loom_amdgpu_storage_layout_segment_sizes_t sizes = {0};
+  loom_amdgpu_storage_layout_segment_sizes_t sizes = {
+      .group_segment_fixed_size = source_layout->space_sizes.workgroup_bytes,
+  };
   for (iree_host_size_t i = 0; i < source_layout->record_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_project_reservation(
         &source_layout->records[i], &sizes, &records[i]));
   }
   *out_layout = (loom_amdgpu_storage_layout_t){
       .segment_sizes = sizes,
+      .workgroup_tail_alignment = source_layout->workgroup_tail_alignment,
       .records = records,
       .record_count = source_layout->record_count,
   };
@@ -99,4 +108,31 @@ void loom_amdgpu_storage_layout_lookup_reference(
   };
   loom_low_storage_layout_lookup_reference(&low_layout, module,
                                            storage_value_id, out_reference);
+}
+
+iree_status_t loom_amdgpu_storage_layout_resolve_address(
+    const loom_amdgpu_storage_layout_t* layout, const loom_module_t* module,
+    const loom_op_t* address_op, uint32_t* out_byte_offset) {
+  uint64_t byte_offset = layout->segment_sizes.group_segment_fixed_size;
+  if (loom_low_storage_address_isa(address_op)) {
+    loom_amdgpu_storage_layout_reference_t reference;
+    loom_amdgpu_storage_layout_lookup_reference(
+        layout, module, loom_low_storage_address_storage(address_op),
+        &reference);
+    byte_offset = reference.reservation.byte_offset;
+    if (!iree_checked_add_u64(byte_offset, reference.byte_offset,
+                              &byte_offset) ||
+        !iree_checked_add_u64(
+            byte_offset, (uint64_t)loom_low_storage_address_offset(address_op),
+            &byte_offset)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "AMDGPU storage address byte offset overflows");
+    }
+  }
+  if (byte_offset > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AMDGPU storage address byte offset exceeds u32");
+  }
+  *out_byte_offset = (uint32_t)byte_offset;
+  return iree_ok_status();
 }

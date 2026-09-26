@@ -1,5 +1,18 @@
 // RUN: pass dce
 
+// A dead address still declares the tail alignment used by the launch layout.
+kernel.def @unused_workgroup_storage_keeps_resource_contract() {
+  %unit = index.constant 1 : index
+  %c0 = index.constant 0 : offset
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) dynamic_workgroup_storage(%c0) : index
+} launch() {
+  %c0 = index.constant 0 : offset
+  %unused = kernel.workgroup.storage align(64) %c0 : buffer
+  kernel.return
+}
+
+// ====
+
 func.def @barrier_survives_dce() {
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   func.return

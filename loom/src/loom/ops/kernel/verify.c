@@ -16,6 +16,7 @@
 #include "loom/ops/combining.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/function_contract_verify.h"
+#include "loom/ops/kernel/launch_config.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/target/facts.h"
@@ -205,10 +206,40 @@ iree_status_t loom_kernel_launch_config_verify(
   const loom_diagnostic_param_t params[] = {
       loom_param_string(IREE_SV("kernel.launch.config")),
       loom_param_u32(op->operand_count),
-      loom_param_u32(9),
+      loom_param_u32(
+          9 +
+          (uint32_t)
+              loom_kernel_launch_config_dynamic_workgroup_storage_is_present(
+                  op)),
   };
   return loom_kernel_emit(emitter, op, LOOM_ERR_STRUCTURE_001, params,
                           IREE_ARRAYSIZE(params));
+}
+
+iree_status_t loom_kernel_workgroup_storage_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter) {
+  const int64_t alignment = loom_kernel_workgroup_storage_base_alignment(op);
+  if (alignment <= 0 || ((uint64_t)alignment & ((uint64_t)alignment - 1))) {
+    return loom_kernel_emit_attribute_value_constraint(
+        emitter, op, IREE_SV("base_alignment"), alignment,
+        IREE_SV("positive power-of-two byte alignment"));
+  }
+  if (!loom_kernel_def_isa(op->parent_op)) {
+    return loom_kernel_emit_launch_placement_error(module, op, emitter,
+                                                   IREE_SV("kernel.def"));
+  }
+  if (op->parent_block !=
+      loom_region_const_entry_block(loom_kernel_def_body(op->parent_op))) {
+    const loom_diagnostic_param_t params[] = {
+        loom_param_string(IREE_SV("kernel.workgroup.storage")),
+        loom_param_string(IREE_SV("the kernel body entry block")),
+        loom_param_string(IREE_SV("another block")),
+    };
+    return loom_kernel_emit(emitter, op, LOOM_ERR_STRUCTURE_031, params,
+                            IREE_ARRAYSIZE(params));
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_kernel_emit_operand_constraint(
@@ -539,6 +570,10 @@ static bool loom_kernel_try_get_local_buffer_memory_space(
     }
     if (loom_buffer_alloca_isa(defining_op)) {
       *out_memory_space = loom_buffer_alloca_memory_space(defining_op);
+      return true;
+    }
+    if (loom_kernel_workgroup_storage_isa(defining_op)) {
+      *out_memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP;
       return true;
     }
     if (loom_buffer_assume_memory_space_isa(defining_op)) {
@@ -1097,23 +1132,29 @@ static iree_status_t loom_kernel_verify_barrier_control(
   return iree_ok_status();
 }
 
-typedef struct loom_kernel_barrier_control_verifier_t {
+typedef struct loom_kernel_body_verifier_t {
   // Module containing the kernel and authored target record.
   const loom_module_t* module;
   // Structured diagnostic sink.
   iree_diagnostic_emitter_t emitter;
-  // Function whose barriers are being checked.
+  // Function whose body contracts are being checked.
   loom_func_like_t function;
   // Function-scoped scratch storage.
   iree_arena_allocator_t* arena;
-  // Value facts populated when the first relevant barrier is encountered.
+  // Value facts populated only when a body or launch contract needs them.
   loom_value_fact_table_t fact_table;
   // Reusable control summary over fact_table.
   loom_control_uniformity_info_t control_uniformity;
-} loom_kernel_barrier_control_verifier_t;
+  // Explicit host launch contract associated with this kernel body.
+  const loom_op_t* launch_config;
+  // First dispatch-owned workgroup root, used to reject a second declaration.
+  const loom_op_t* workgroup_storage;
+  // Whether an early exit has preceded the current op in the body entry block.
+  bool has_entry_exit;
+} loom_kernel_body_verifier_t;
 
-static iree_status_t loom_kernel_barrier_control_target_facts(
-    loom_kernel_barrier_control_verifier_t* verifier,
+static iree_status_t loom_kernel_body_target_facts(
+    loom_kernel_body_verifier_t* verifier,
     const loom_target_facts_t** out_target_facts) {
   *out_target_facts = NULL;
   const loom_symbol_ref_t target_ref =
@@ -1136,15 +1177,14 @@ static iree_status_t loom_kernel_barrier_control_target_facts(
   return iree_ok_status();
 }
 
-static iree_status_t loom_kernel_barrier_control_verifier_initialize(
-    loom_kernel_barrier_control_verifier_t* verifier) {
+static iree_status_t loom_kernel_body_verifier_initialize(
+    loom_kernel_body_verifier_t* verifier) {
   if (verifier->fact_table.arena) {
     return iree_ok_status();
   }
 
   const loom_target_facts_t* target_facts = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_kernel_barrier_control_target_facts(verifier, &target_facts));
+  IREE_RETURN_IF_ERROR(loom_kernel_body_target_facts(verifier, &target_facts));
   IREE_RETURN_IF_ERROR(loom_value_fact_table_initialize(
       &verifier->fact_table, verifier->arena, verifier->module->values.count));
   verifier->fact_table.context.target_facts = target_facts;
@@ -1156,25 +1196,76 @@ static iree_status_t loom_kernel_barrier_control_verifier_initialize(
   return iree_ok_status();
 }
 
-static iree_status_t loom_kernel_verify_barrier_control_walk(
+static iree_status_t loom_kernel_emit_semantic_constraint(
+    loom_kernel_body_verifier_t* verifier, const loom_op_t* op,
+    iree_string_view_t constraint) {
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_op_name(verifier->module, op)),
+      loom_param_string(constraint),
+  };
+  return loom_kernel_emit(verifier->emitter, op, LOOM_ERR_STRUCTURE_056, params,
+                          IREE_ARRAYSIZE(params));
+}
+
+static iree_status_t loom_kernel_verify_workgroup_storage(
+    loom_kernel_body_verifier_t* verifier, const loom_op_t* op) {
+  if (verifier->workgroup_storage) {
+    return loom_kernel_emit_semantic_constraint(
+        verifier, op, IREE_SV("at most one workgroup storage root per kernel"));
+  }
+  verifier->workgroup_storage = op;
+  if (verifier->has_entry_exit) {
+    return loom_kernel_emit_semantic_constraint(
+        verifier, op, IREE_SV("placement before an entry-block kernel.exit"));
+  }
+  if (!verifier->launch_config ||
+      !loom_kernel_launch_config_dynamic_workgroup_storage_is_present(
+          verifier->launch_config)) {
+    return loom_kernel_emit_semantic_constraint(
+        verifier, op,
+        IREE_SV("an explicit dynamic_workgroup_storage launch clause, "
+                "including zero"));
+  }
+  IREE_RETURN_IF_ERROR(loom_kernel_body_verifier_initialize(verifier));
+  const loom_value_facts_t extent = loom_value_fact_table_lookup(
+      &verifier->fact_table, loom_kernel_workgroup_storage_byte_length(op));
+  if (loom_value_facts_is_float(extent) || extent.range_lo < 0) {
+    return loom_kernel_emit_semantic_constraint(
+        verifier, op, IREE_SV("a proven nonnegative byte length"));
+  }
+  if (!loom_value_facts_is_workgroup_uniform(extent)) {
+    return loom_kernel_emit_semantic_constraint(
+        verifier, op, IREE_SV("a workgroup-uniform byte length"));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_kernel_verify_body_walk(
     void* user_data, loom_op_t* op, const loom_walk_context_t* context,
     loom_walk_result_t* out_result) {
   (void)context;
   *out_result = LOOM_WALK_CONTINUE;
-  loom_kernel_barrier_control_verifier_t* verifier = user_data;
+  loom_kernel_body_verifier_t* verifier = user_data;
+  if (loom_kernel_exit_isa(op) &&
+      op->parent_block == loom_region_const_entry_block(
+                              loom_kernel_def_body(verifier->function.op))) {
+    verifier->has_entry_exit = true;
+  }
+  if (loom_kernel_workgroup_storage_isa(op)) {
+    return loom_kernel_verify_workgroup_storage(verifier, op);
+  }
   const loom_value_fact_uniform_scope_t required_scope =
       loom_kernel_barrier_required_uniform_scope(op);
   if (required_scope == LOOM_VALUE_FACT_UNIFORM_SCOPE_NONE) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(
-      loom_kernel_barrier_control_verifier_initialize(verifier));
+  IREE_RETURN_IF_ERROR(loom_kernel_body_verifier_initialize(verifier));
   return loom_kernel_verify_barrier_control(verifier->module, verifier->emitter,
                                             &verifier->control_uniformity, op,
                                             required_scope);
 }
 
-static iree_status_t loom_kernel_verify_barrier_controls(
+static iree_status_t loom_kernel_verify_body(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter) {
   loom_func_like_t function = loom_func_like_const_cast(module, op);
@@ -1185,17 +1276,18 @@ static iree_status_t loom_kernel_verify_barrier_controls(
   iree_arena_allocator_t arena;
   iree_arena_initialize(module->arena.block_pool, &arena);
 
-  loom_kernel_barrier_control_verifier_t verifier = {
+  loom_kernel_body_verifier_t verifier = {
       .module = module,
       .emitter = emitter,
       .function = function,
       .arena = &arena,
+      .launch_config = loom_kernel_def_launch_config_op(op),
   };
   loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
   iree_status_t status =
       loom_walk_region(module, loom_kernel_def_body(op), LOOM_WALK_PRE_ORDER,
                        (loom_walk_callback_t){
-                           .fn = loom_kernel_verify_barrier_control_walk,
+                           .fn = loom_kernel_verify_body_walk,
                            .user_data = &verifier,
                        },
                        &arena, &walk_result);
@@ -1209,7 +1301,7 @@ iree_status_t loom_kernel_def_verify(const loom_module_t* module,
   IREE_RETURN_IF_ERROR(loom_function_contract_verify(module, op, emitter));
   IREE_RETURN_IF_ERROR(
       loom_kernel_verify_launch_config_purity(module, op, emitter));
-  return loom_kernel_verify_barrier_controls(module, op, emitter);
+  return loom_kernel_verify_body(module, op, emitter);
 }
 
 iree_status_t loom_kernel_decl_verify(const loom_module_t* module,

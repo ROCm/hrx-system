@@ -386,9 +386,9 @@ static iree_status_t loom_low_materialize_allocation_build_table(
     loom_low_allocation_table_t* out_table) {
   loom_low_function_model_t model = {0};
   iree_status_t status = loom_low_function_model_initialize(
-      module, low_func_op, function_target_facts, descriptor_registry,
-      options->emitter, LOOM_LOW_FUNCTION_MODEL_FLAG_REGION_TREE, arena,
-      &model);
+      module, low_func_op, function_target_facts, /*workgroup_layout=*/NULL,
+      descriptor_registry, options->emitter,
+      LOOM_LOW_FUNCTION_MODEL_FLAG_REGION_TREE, arena, &model);
   if (iree_status_is_ok(status)) {
     status = loom_low_allocate_function(&model, options, arena, out_table);
   }

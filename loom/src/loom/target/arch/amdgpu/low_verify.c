@@ -214,11 +214,14 @@ static iree_status_t loom_amdgpu_low_verify_dpp_control(
 static iree_status_t loom_amdgpu_low_verify_storage_address(
     loom_low_verify_context_t* context,
     const loom_amdgpu_low_verify_state_t* state, const loom_op_t* op) {
-  if (!loom_low_storage_address_isa(op)) {
+  if (!loom_low_storage_address_isa(op) &&
+      !loom_low_storage_tail_address_isa(op)) {
     return iree_ok_status();
   }
   const loom_module_t* module = loom_low_verify_context_module(context);
-  const loom_value_id_t result = loom_low_storage_address_result(op);
+  const loom_value_id_t result = loom_low_storage_address_isa(op)
+                                     ? loom_low_storage_address_result(op)
+                                     : loom_low_storage_tail_address_result(op);
   const loom_type_t result_type = loom_module_value_type(module, result);
   if (loom_low_register_type_descriptor_set_stable_id(result_type) ==
           state->target->descriptor_set->stable_id &&

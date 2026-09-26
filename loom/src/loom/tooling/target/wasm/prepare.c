@@ -208,7 +208,8 @@ static iree_status_t loom_wasm_program_build_function_allocation(
   loom_low_function_model_t model = {0};
   iree_status_t status = loom_low_function_model_initialize(
       module, function_op,
-      /*function_target_facts=*/NULL, descriptor_registry, diagnostic_emitter,
+      /*function_target_facts=*/NULL, /*workgroup_layout=*/NULL,
+      descriptor_registry, diagnostic_emitter,
       LOOM_LOW_FUNCTION_MODEL_FLAG_REGION_TREE, arena, &model);
   if (iree_status_is_ok(status)) {
     const loom_low_allocation_options_t allocation_options = {

@@ -32,6 +32,8 @@ typedef struct loom_amdgpu_hal_kernel_library_options_t {
   // Optional concrete compiler function versions participating in this
   // emission. The list and its version objects are borrowed for the call.
   const loom_function_version_list_t* function_versions;
+  // Optional completed workgroup layouts borrowed for native-only repairs.
+  const loom_low_workgroup_layouts_t* workgroup_layouts;
   // Optional AMDGPU runtime support globals emitted into the HSACO.
   loom_amdgpu_runtime_global_flags_t runtime_globals;
   // Optional caller-owned code-object data symbols emitted into the HSACO.

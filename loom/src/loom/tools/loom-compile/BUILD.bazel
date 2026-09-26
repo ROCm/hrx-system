@@ -120,12 +120,14 @@ iree_execution_test_suite(
     name = "execution_test",
     data = [
         "//loom/src/loom/tools/loom-compile/testdata:command_artifacts.loom",
+        "//loom/src/loom/tools/loom-compile/testdata:command_dynamic_workgroup_storage.loom",
         "//loom/src/loom/tools/loom-compile/testdata:command_kernel_requests.loom",
     ],
     manifests = ["loom-compile.test.json"],
     tags = ["hostonly"],
     tools = {
         "loom-compile": ":loom-compile",
+        "loom-format": "//loom/src/loom/tools/loom-format",
     },
 )
 

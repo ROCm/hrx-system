@@ -63,6 +63,12 @@ bool loom_amdgpu_memory_access_include_alloca_root_byte_offset(
       return true;
   }
 
+  if (loom_amdgpu_source_alloca_layout_is_workgroup_tail(
+          alloca_layout, access->source.root_value_id)) {
+    access->workgroup_tail_base = true;
+    return true;
+  }
+
   uint64_t root_byte_offset = 0;
   if (!loom_amdgpu_source_alloca_layout_lookup_byte_offset(
           alloca_layout, access->source.memory_space,
@@ -323,6 +329,8 @@ typedef struct loom_amdgpu_memory_packet_selection_context_t {
       materialization_plan;
   // The retained storage root has a per-lane vector address.
   bool root_prefers_vgpr;
+  // Packet splitting preserves the independent workgroup tail address base.
+  bool workgroup_tail_base;
 } loom_amdgpu_memory_packet_selection_context_t;
 
 static void loom_amdgpu_memory_dynamic_term_materialization_plan_build(
@@ -440,6 +448,10 @@ void loom_amdgpu_mark_memory_access_plan_storage_demands(
   // address storage is shared by every packet in the selected access plan.
   loom_amdgpu_mark_source_memory_plan_storage_demands(
       context, &plan->packets[0].access.source);
+  if (plan->packets[0].access.workgroup_tail_base) {
+    loom_low_lower_require_source_value_storage(
+        context, plan->packets[0].access.source.root_value_id);
+  }
 
   const loom_value_id_t value = loom_amdgpu_memory_access_payload_value(
       loom_low_lower_context_module(context), source_op);
@@ -1608,6 +1620,11 @@ static bool loom_amdgpu_try_select_ds_addtid_memory_descriptor(
     const loom_module_t* module, loom_func_like_t source_function,
     const loom_target_bundle_t* bundle, loom_amdgpu_memory_access_t* access,
     loom_low_source_memory_operation_kind_t kind) {
+  // ADDTID uses a zero LDS base through M0 and cannot discard the final
+  // fixed-segment offset carried by a borrowed tail root.
+  if (access->workgroup_tail_base) {
+    return false;
+  }
   loom_target_workgroup_size_t workgroup_size = {0};
   const uint32_t wavefront_size = bundle != NULL && bundle->snapshot != NULL
                                       ? bundle->snapshot->subgroup_size
@@ -1694,6 +1711,9 @@ iree_string_view_t loom_amdgpu_memory_ds_addtid_reason_key(
   }
   if (access->source.memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) {
     return IREE_SV("not_applicable");
+  }
+  if (access->workgroup_tail_base) {
+    return IREE_SV("workgroup_tail_base");
   }
   const iree_string_view_t topology_reason =
       loom_amdgpu_memory_ds_addtid_topology_reason_key(module, source_function,
@@ -2041,6 +2061,13 @@ bool loom_amdgpu_memory_access_select_u32_vaddr_byte_offset(
   }
   if (!loom_amdgpu_memory_access_include_alloca_root_byte_offset(
           alloca_layout, out_access, out_diagnostic)) {
+    return false;
+  }
+  // Async cluster transfers and race-shadow addressing require a complete
+  // fixed LDS offset. They do not carry a borrowed tail's extent and base.
+  if (out_access->workgroup_tail_base) {
+    out_diagnostic->rejection_bits |=
+        LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_WORKGROUP_ROOT;
     return false;
   }
   if (!loom_amdgpu_memory_access_select_vaddr_dynamic_terms(module, out_access,
@@ -2431,6 +2458,7 @@ static bool loom_amdgpu_memory_access_select_packet(
     loom_low_source_memory_operation_kind_t kind, bool allow_global_smem,
     loom_amdgpu_memory_access_t* access,
     loom_amdgpu_memory_access_diagnostic_t* out_diagnostic) {
+  access->workgroup_tail_base = selection_context->workgroup_tail_base;
   access->address_form = LOOM_AMDGPU_MEMORY_ADDRESS_FORM_DEFAULT;
   access->descriptor = NULL;
   for (uint8_t i = 0; i < IREE_ARRAYSIZE(access->dynamic_term_kinds); ++i) {
@@ -2703,6 +2731,8 @@ bool loom_amdgpu_memory_access_plan_select(
       .root_prefers_vgpr = loom_amdgpu_analyzed_source_value_prefers_vgpr(
           module, fact_table, view_regions, analysis,
           out_source->root_value_id),
+      .workgroup_tail_base = loom_amdgpu_source_alloca_layout_is_workgroup_tail(
+          alloca_layout, out_source->root_value_id),
   };
 
   loom_amdgpu_memory_access_t access = {
@@ -2725,9 +2755,9 @@ bool loom_amdgpu_memory_access_plan_select(
           access.source.static_byte_offset, out_diagnostic)) {
     return false;
   }
-  // Fold the target-assigned alloca base once before packet splitting. Each
-  // chunk inherits this adjusted source offset instead of rediscovering the
-  // same source allocation layout per packet.
+  // Fold a fixed alloca base once before packet splitting. A borrowed tail
+  // instead retains its independent native32 base; its offset proof remains
+  // relative to the declared source extent until final storage layout.
   if (!loom_amdgpu_memory_access_include_alloca_root_byte_offset(
           alloca_layout, &access, out_diagnostic)) {
     return false;

@@ -1,0 +1,164 @@
+// RUN: with-checks emit source-low output=low
+
+amdgpu.target<gfx942> @target
+
+// A view alias and a split eight-register access retain the same independent
+// tail base. The fixed 20-byte arena cannot absorb the requested tail extent.
+kernel.def target(@target) @tail_alias_split_packets() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  %dynamic_bytes = index.constant 2080 : offset
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) dynamic_workgroup_storage(%dynamic_bytes) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : offset
+  %fixed_bytes = index.constant 20 : offset
+  %tail_bytes = index.constant 2080 : offset
+  %fixed = buffer.alloca<workgroup> align(4) %fixed_bytes : buffer
+  %tail = kernel.workgroup.storage align(64) %tail_bytes : buffer
+  %fixed_view = buffer.view %fixed[%c0] : buffer -> view<5xi32>
+  %tail_view = buffer.view %tail[%c0] : buffer -> view<65x8xi32>
+  %tail_alias = view.subview %tail_view[1, 0] : view<65x8xi32> -> view<64x8xi32>
+  %input_view = buffer.view %input[%c0] : buffer -> view<64x8xi32>
+  %output_view = buffer.view %output[%c0] : buffer -> view<64x8xi32>
+  %tag = scalar.constant 7 : i32
+  view.store %tag, %fixed_view[0] : i32, view<5xi32>
+  %loaded = vector.load %input_view[%lane, 0] : view<64x8xi32> -> vector<8xi32>
+  vector.store %loaded, %tail_alias[%lane, 0] : vector<8xi32>, view<64x8xi32>
+  %roundtrip = vector.load %tail_alias[%lane, 0] : view<64x8xi32> -> vector<8xi32>
+  vector.store %roundtrip, %output_view[%lane, 0] : vector<8xi32>, view<64x8xi32>
+  %fixed_result = view.load %fixed_view[0] : view<5xi32> -> i32
+  view.store %fixed_result, %fixed_view[1] : i32, view<5xi32>
+  kernel.return
+}
+
+// ----
+CHECK: low.kernel.def * @tail_alias_split_packets() asm {
+CHECK: * = storage {byte_alignment = 4, byte_length = 20} : low.storage<workgroup>
+CHECK: * = storage_tail_address align(64) : reg<amdgpu.vgpr>
+CHECK: * = v_add_u32 *
+CHECK: ds_write_b128 * {offset = 32}
+CHECK: ds_write_b128 * {offset = 48}
+CHECK: * = ds_read_b128 * {offset = 32}
+CHECK: * = ds_read_b128 * {offset = 48}
+CHECK-NOT: *ds_write_addtid*
+CHECK-NOT: *ds_read_addtid*
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+// A lane-byte address would otherwise select the implicit zero-base ADDTID
+// form. A borrowed tail retains an explicit base even before final packing.
+kernel.def target(@target) @tail_disables_zero_base_addtid() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  %dynamic_bytes = index.constant 64 : offset
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) dynamic_workgroup_storage(%dynamic_bytes) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %tail = kernel.workgroup.storage align(16) %bytes : buffer
+  %view = buffer.view %tail[%c0] : buffer -> view<64xi8>
+  %value = vector.constant 1 : vector<4xi8>
+  vector.store %value, %view[%lane] : vector<4xi8>, view<64xi8>
+  %loaded = vector.load %view[%lane] : view<64xi8> -> vector<4xi8>
+  vector.store %loaded, %view[%lane] : vector<4xi8>, view<64xi8>
+  kernel.return
+}
+
+// ----
+CHECK: * = storage_tail_address align(16) : reg<amdgpu.vgpr>
+CHECK: * = v_add_u32 *
+CHECK: ds_write_b32 *
+CHECK: * = ds_read_b32 *
+CHECK-NOT: *ds_write_addtid*
+CHECK-NOT: *ds_read_addtid*
+CHECK-NOT: * = storage {*
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+// The resource requirement survives an unused zero-length borrowed root.
+kernel.def target(@target) @unused_zero_tail() {
+  %unit = index.constant 1 : index
+  %dynamic_bytes = index.constant 0 : offset
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) dynamic_workgroup_storage(%dynamic_bytes) : index
+} launch() {
+  %c0 = index.constant 0 : offset
+  %tail = kernel.workgroup.storage align(64) %c0 : buffer
+  kernel.return
+}
+
+// ----
+CHECK: * = storage_tail_address align(64) : reg<amdgpu.vgpr>
+CHECK-NOT: * = storage {*
+
+// ====
+
+amdgpu.target<gfx1151> @target
+
+// Cross-wave vector reduction emits its own 32-byte LDS reserve during
+// lowering, after the tail query. Fixed40 + collective32 requires B128 at A64,
+// whereas packing the tail before lowering the collective would produce B64.
+kernel.def target(@target) @tail_precedes_collective_storage() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  %dynamic_bytes = index.constant 1024 : offset
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) dynamic_workgroup_storage(%dynamic_bytes) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %first_lane = index.constant 0 : index
+  %c0 = index.constant 0 : offset
+  %fixed_bytes = index.constant 40 : offset
+  %tail_bytes = index.constant 1024 : offset
+  %fixed = buffer.alloca<workgroup> align(4) %fixed_bytes : buffer
+  %tail = kernel.workgroup.storage align(64) %tail_bytes : buffer
+  %fixed_view = buffer.view %fixed[%c0] : buffer -> view<10xf32>
+  %tail_view = buffer.view %tail[%c0] : buffer -> view<64x4xf32>
+  %input_view = buffer.view %input[%c0] : buffer -> view<64x4xf32>
+  %output_view = buffer.view %output[%c0] : buffer -> view<64x4xf32>
+  %tag = scalar.constant 7.0 : f32
+  %leader = index.cmp eq, %lane, %first_lane : index
+  scf.if %leader {
+    view.store %tag, %fixed_view[0] : f32, view<10xf32>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %loaded = vector.load %input_view[%lane, 0] : view<64x4xf32> -> vector<4xf32>
+  vector.store %loaded, %tail_view[%lane, 0] : vector<4xf32>, view<64x4xf32>
+  %roundtrip = vector.load %tail_view[%lane, 0] : view<64x4xf32> -> vector<4xf32>
+  %sum = kernel.workgroup.reduce<addf> %roundtrip : vector<4xf32>
+  vector.store %sum, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32>
+  %fixed_value = view.load %fixed_view[0] : view<10xf32> -> f32
+  view.store %fixed_value, %output_view[%lane, 0] : f32, view<64x4xf32>
+  kernel.return
+}
+
+// ----
+CHECK: * = storage {byte_alignment = 4, byte_length = 40} : low.storage<workgroup>
+CHECK: * = storage_tail_address align(64) : reg<amdgpu.vgpr>
+CHECK: * = storage {byte_alignment = 4, byte_length = 32} : low.storage<workgroup>
+CHECK: * = storage_address * : low.storage<workgroup> -> reg<amdgpu.vgpr>
+
+// ====
+
+// RUN: emit source-low output=none
+
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @tail_atomic_requires_a_supported_root() {
+  %unit = index.constant 1 : index
+  %dynamic_bytes = index.constant 4 : offset
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) dynamic_workgroup_storage(%dynamic_bytes) : index
+} launch() {
+  %c0 = index.constant 0 : offset
+  %bytes = index.constant 4 : offset
+  %tail = kernel.workgroup.storage align(4) %bytes : buffer
+  %view = buffer.view %tail[%c0] : buffer -> view<1xi32>
+  %increment = scalar.constant 1 : i32
+  // ERROR@+1: AMDGPU/023 {constraint_key="memory_access.workgroup_root"}
+  view.atomic.reduce<addi> %increment, %view[0] {ordering = relaxed, scope = workgroup} : i32, view<1xi32>
+  kernel.return
+}

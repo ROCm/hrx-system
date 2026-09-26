@@ -31,6 +31,7 @@ from loom.assembly import (
     BindingList,
     BlockArgs,
     BlockRef,
+    Clause,
     Flags,
     FormatElement,
     FuncArgs,
@@ -1562,6 +1563,35 @@ low_storage_address = Op(
 )
 
 # ============================================================================
+# low.storage.tail.address — address the dispatch-owned workgroup tail
+# ============================================================================
+
+low_storage_tail_address = Op(
+    "low.storage.tail.address",
+    assembly=AssemblyFormat("storage_tail_address"),
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Address the dispatch-owned workgroup tail after fixed reservations. "
+        "Every query names the same base, aligned to the strongest requested "
+        "alignment in the function. Its resource requirement survives even "
+        "when the result is unused. The caller supplies the tail capacity."
+    ),
+    attrs=[AttrDef("base_alignment", ATTR_TYPE_I64)],
+    results=[Result("result", REGISTER)],
+    traits=[UNKNOWN_EFFECTS],
+    verify="loom_low_storage_tail_address_verify",
+    format=[
+        Clause("align", Attr("base_alignment")),
+        COLON,
+        ResultType("result"),
+    ],
+    examples=[
+        "%tail = low.storage.tail.address align(16) : reg<amdgpu.vgpr>",
+    ],
+)
+
+# ============================================================================
 # low.resource — import a function-local target resource into a register value
 # ============================================================================
 
@@ -1790,4 +1820,5 @@ ALL_LOW_OPS: tuple[Op, ...] = (
     low_schedule_begin,
     low_schedule_phase,
     low_schedule_end,
+    low_storage_tail_address,
 )

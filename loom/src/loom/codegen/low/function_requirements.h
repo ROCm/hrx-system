@@ -37,8 +37,11 @@ typedef struct loom_low_function_requirements_t {
 // Inventories one verified Low function body without resolving a target or
 // acquiring the module's value-ordinal scratch map. The function's immediate
 // region owns its ABI imports and storage; nested regions are not entry scopes.
+// Optional |workgroup_layout| supplies the unchanged workgroup declarations;
+// private storage, resource declarations, and counts are always reinventoried.
 iree_status_t loom_low_function_requirements_build(
     const loom_module_t* module, const loom_region_t* body,
+    const loom_low_storage_layout_t* workgroup_layout,
     iree_arena_allocator_t* arena,
     loom_low_function_requirements_t* out_requirements);
 

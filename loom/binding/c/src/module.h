@@ -9,6 +9,7 @@
 
 #include "config.h"
 #include "iree/base/internal/arena.h"
+#include "loom/codegen/low/storage_layout.h"
 #include "loom/error/diagnostic.h"
 #include "loom/ir/function_version.h"
 #include "loom/ir/module.h"
@@ -146,6 +147,21 @@ loomc_module_function_version_owner(loomc_module_t* module);
 
 // Clears products after a failed mutation invalidates their construction.
 LOOMC_API_PRIVATE void loomc_module_invalidate_compilation(
+    loomc_module_t* module);
+
+// Returns the resettable arena and result for completed-Low workgroup layouts.
+// Only companion construction allocates this result. It is independent of
+// durable function versions and becomes invalid before the next compilation.
+LOOMC_API_PRIVATE iree_arena_allocator_t* loomc_module_workgroup_layout_arena(
+    loomc_module_t* module);
+LOOMC_API_PRIVATE loom_low_workgroup_layouts_t*
+loomc_module_mutable_workgroup_layouts(loomc_module_t* module);
+LOOMC_API_PRIVATE const loom_low_workgroup_layouts_t*
+loomc_module_workgroup_layouts(const loomc_module_t* module);
+
+// Discards only physical workgroup snapshots before compiler mutation or after
+// failed native emission; live function versions and memory proofs survive.
+LOOMC_API_PRIVATE void loomc_module_invalidate_workgroup_layouts(
     loomc_module_t* module);
 
 // Captures applied invocation bindings into the module's compiler storage.

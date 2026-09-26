@@ -1,5 +1,189 @@
 // RUN: verify
 
+kernel.def @negative_dynamic_storage_request() {
+  %unit = index.constant 1 : index
+  // ERROR@+1: STRUCTURE/014 "value" "-1" "element type domain"
+  %bytes = index.constant -1 : offset
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) dynamic_workgroup_storage(%bytes) : index
+} launch() {
+  kernel.return
+}
+
+// ====
+
+// Entry arithmetic is allowed; the declaration still precedes early exit.
+kernel.def @storage_root_before_entry_exit(%bytes: offset) {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) dynamic_workgroup_storage(%bytes) : index
+} launch(%bytes: offset, %done: i1) {
+  %unit = index.constant 1 : index
+  %extent = index.scale %unit, %bytes : index, offset -> offset
+  %tail = kernel.workgroup.storage align(4) %extent : buffer
+  kernel.exit %done : i1
+  kernel.return
+}
+
+// ====
+
+kernel.def @storage_root_cannot_follow_entry_exit(%bytes: offset) {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) dynamic_workgroup_storage(%bytes) : index
+} launch(%bytes: offset, %done: i1) {
+  kernel.exit %done : i1
+  // ERROR@+1: STRUCTURE/056 {op_name="kernel.workgroup.storage", constraint="placement before an entry-block kernel.exit"}
+  %tail = kernel.workgroup.storage align(4) %bytes : buffer
+  kernel.return
+}
+
+// ====
+
+kernel.def @zero_workgroup_storage_requires_explicit_request() {
+  %unit = index.constant 1 : index
+  %c0 = index.constant 0 : offset
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) dynamic_workgroup_storage(%c0) : index
+} launch() {
+  %c0 = index.constant 0 : offset
+  %tail = kernel.workgroup.storage align(16) %c0 : buffer
+  kernel.return
+}
+
+// ====
+
+kernel.def @request_without_storage_root(%bytes: offset) {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) dynamic_workgroup_storage(%bytes) : index
+} launch() {
+  kernel.return
+}
+
+// ====
+
+// The declaration can vary between groups while remaining uniform within each.
+kernel.def @group_specific_storage_extent() {
+  %unit = index.constant 1 : index
+  %groups = index.constant 4 : index
+  %lanes = index.constant 64 : index
+  %bytes = index.constant 16 : offset
+  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%lanes, %unit, %unit) dynamic_workgroup_storage(%bytes) : index
+} launch() {
+  %group = kernel.workgroup.id<x> : index
+  %stride = index.constant 4 : offset
+  %bytes = index.scale %group, %stride : index, offset -> offset
+  %tail = kernel.workgroup.storage align(4) %bytes : buffer
+  kernel.return
+}
+
+// ====
+
+kernel.def @missing_storage_request() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch() {
+  %c0 = index.constant 0 : offset
+  // ERROR@+1: STRUCTURE/056 {op_name="kernel.workgroup.storage", constraint="an explicit dynamic_workgroup_storage launch clause, including zero"}
+  %tail = kernel.workgroup.storage align(4) %c0 : buffer
+  kernel.return
+}
+
+// ====
+
+kernel.def @duplicate_storage_roots() {
+  %unit = index.constant 1 : index
+  %c0 = index.constant 0 : offset
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) dynamic_workgroup_storage(%c0) : index
+} launch() {
+  %c0 = index.constant 0 : offset
+  %first = kernel.workgroup.storage align(4) %c0 : buffer
+  // ERROR@+1: STRUCTURE/056 {op_name="kernel.workgroup.storage", constraint="at most one workgroup storage root per kernel"}
+  %second = kernel.workgroup.storage align(4) %c0 : buffer
+  kernel.return
+}
+
+// ====
+
+kernel.def @storage_alignment_must_be_power_of_two() {
+  %unit = index.constant 1 : index
+  %c0 = index.constant 0 : offset
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) dynamic_workgroup_storage(%c0) : index
+} launch() {
+  %c0 = index.constant 0 : offset
+  // ERROR@+1: STRUCTURE/014 "base_alignment" "positive power-of-two byte alignment"
+  %tail = kernel.workgroup.storage align(3) %c0 : buffer
+  kernel.return
+}
+
+// ====
+
+kernel.def @storage_root_must_be_in_entry_block() {
+  %unit = index.constant 1 : index
+  %c0 = index.constant 0 : offset
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) dynamic_workgroup_storage(%c0) : index
+} launch() {
+  cfg.br ^next
+^next:
+  %c0 = index.constant 0 : offset
+  // ERROR@+1: STRUCTURE/031 "kernel.workgroup.storage" "the kernel body entry block"
+  %tail = kernel.workgroup.storage align(4) %c0 : buffer
+  kernel.return
+}
+
+// ====
+
+kernel.def @storage_root_cannot_be_nested() {
+  %unit = index.constant 1 : index
+  %c0 = index.constant 0 : offset
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) dynamic_workgroup_storage(%c0) : index
+} launch(%condition: i1) {
+  %c0 = index.constant 0 : offset
+  scf.if %condition {
+    // ERROR@+1: STRUCTURE/029 "kernel.workgroup.storage" "kernel.def"
+    %tail = kernel.workgroup.storage align(4) %c0 : buffer
+  }
+  kernel.return
+}
+
+// ====
+
+func.def @storage_root_is_not_a_helper_allocation(%bytes: offset) {
+  // ERROR@+1: STRUCTURE/029 "kernel.workgroup.storage" "kernel.def"
+  %tail = kernel.workgroup.storage align(4) %bytes : buffer
+  func.return
+}
+
+// ====
+
+kernel.def @lane_varying_storage_extent() {
+  %unit = index.constant 1 : index
+  %lanes = index.constant 64 : index
+  %bytes = index.constant 256 : offset
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lanes, %unit, %unit) dynamic_workgroup_storage(%bytes) : index
+} launch() {
+  %lane = kernel.workitem.id<x> : index
+  %stride = index.constant 4 : offset
+  %bytes = index.scale %lane, %stride : index, offset -> offset
+  // ERROR@+1: STRUCTURE/056 {op_name="kernel.workgroup.storage", constraint="a workgroup-uniform byte length"}
+  %tail = kernel.workgroup.storage align(4) %bytes : buffer
+  kernel.return
+}
+
+// ====
+
+kernel.def @subgroup_uniform_storage_extent_is_insufficient() {
+  %unit = index.constant 1 : index
+  %lanes = index.constant 256 : index
+  %bytes = index.constant 1024 : offset
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lanes, %unit, %unit) dynamic_workgroup_storage(%bytes) : index
+} launch() {
+  %subgroup = kernel.subgroup.id : index
+  %stride = index.constant 4 : offset
+  %bytes = index.scale %subgroup, %stride : index, offset -> offset
+  // ERROR@+1: STRUCTURE/056 {op_name="kernel.workgroup.storage", constraint="a workgroup-uniform byte length"}
+  %tail = kernel.workgroup.storage align(4) %bytes : buffer
+  kernel.return
+}
+
+// ====
+
 func.decl pure @pure_launch_extent(%value: index) -> (index)
 
 kernel.def @pure_launch_configuration_call(%count: index) {

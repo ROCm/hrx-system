@@ -630,6 +630,7 @@ static loomc_status_t loomc_compile_module_into_result(
   loomc_status_t status =
       loomc_module_verify(module, context_target_environment, result);
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
+    loomc_module_invalidate_workgroup_layouts(module);
     const loomc_module_t* config_module =
         options ? options->config_module : NULL;
     loomc_config_apply_module_options_t config_apply_options = {
@@ -667,7 +668,9 @@ static loomc_status_t loomc_compile_module_into_result(
       launch_config_requested) {
     status = loomc_status_from_iree(loom_kernel_launch_config_program_finalize(
         &launch_config_program, internal_module,
-        loomc_workspace_block_pool(workspace), &launch_config_module));
+        loomc_workspace_block_pool(workspace),
+        loomc_module_workgroup_layout_arena(module),
+        loomc_module_mutable_workgroup_layouts(module), &launch_config_module));
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
       launch_config_module != NULL) {

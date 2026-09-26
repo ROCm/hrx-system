@@ -200,7 +200,7 @@ static iree_status_t loom_aie2p_xdna_collect_source_leaves(
     loom_low_function_requirements_t requirements = {0};
     IREE_RETURN_IF_ERROR(loom_low_function_requirements_build(
         request->module, loom_low_func_def_body(function_op),
-        request->scratch_arena, &requirements));
+        /*workgroup_layout=*/NULL, request->scratch_arena, &requirements));
     leaves[leaf_index] = (loom_aie2p_array_leaf_t){
         .entry =
             {

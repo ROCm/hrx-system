@@ -15,6 +15,7 @@ loom_cc_test(
     amdgpu_test
   SRCS
     "amdgpu_test.cc"
+    "workgroup_storage_test.cc"
   DEPS
     iree::testing::gtest
     iree::testing::gtest_main
@@ -22,6 +23,7 @@ loom_cc_test(
     loom::binding::c::target::amdgpu
     loom::binding::c::target::cmd
     loom::binding::c::test::test_util
+    loom::binding::c::test::testdata::workgroup_storage
 )
 endif()
 

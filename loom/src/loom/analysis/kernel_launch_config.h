@@ -97,6 +97,11 @@ typedef struct loom_kernel_launch_config_options_t {
 
   // Structured diagnostic emitter for target-contract diagnostics.
   iree_diagnostic_emitter_t diagnostic_emitter;
+
+  // Optional fixed workgroup-local prefix of the matching compiled function,
+  // including padding before its dispatch-sized storage. Borrowed for the
+  // evaluation. Without this value, total workgroup storage remains unknown.
+  const uint64_t* fixed_workgroup_storage_bytes;
 } loom_kernel_launch_config_options_t;
 
 typedef struct loom_kernel_launch_config_t {
@@ -112,7 +117,8 @@ typedef struct loom_kernel_launch_config_t {
   // Optional concrete subgroup size.
   uint32_t subgroup_size;
 
-  // Optional concrete workgroup-local storage byte count.
+  // Optional total workgroup-local storage byte count, including the compiled
+  // fixed prefix and the launch configuration's additional storage request.
   uint64_t workgroup_storage_bytes;
 
   // Evaluation failure code, or NONE on success.

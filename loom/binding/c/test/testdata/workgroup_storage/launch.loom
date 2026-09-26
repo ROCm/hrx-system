@@ -1,0 +1,49 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+amdgpu.target<gfx942> @gpu
+
+// The workload and device byte counts describe the same caller-owned resource.
+// Only lane zero touches the scalar words; the other lanes have no memory use.
+kernel.def target(@gpu) export("padded_tail") @padded_tail(%launch_bytes: offset) {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) dynamic_workgroup_storage(%launch_bytes) : index
+} launch(%output: buffer, %body_bytes: offset) {
+  %base_offset = index.constant 0 : offset
+  %fixed_bytes = index.constant 20 : offset
+  %word_bytes = index.constant 4 : offset
+  %fixed = buffer.alloca<workgroup> align(4) %fixed_bytes : buffer
+  %tail = kernel.workgroup.storage align(64) %body_bytes : buffer
+  %fixed_word = buffer.view %fixed[%base_offset] : buffer -> view<1xi32>
+  %output_words = buffer.view %output[%base_offset] : buffer -> view<2xi32>
+  %c0 = index.constant 0 : index
+  %lane = kernel.workitem.id<x> : index
+  %leader = index.cmp eq, %lane, %c0 : index
+  scf.if %leader {
+    %value = scalar.constant 17 : i32
+    view.store<volatile> %value, %fixed_word[0] : i32, view<1xi32>
+    %fixed_result = view.load<volatile> %fixed_word[0] : view<1xi32> -> i32
+    view.store %fixed_result, %output_words[0] : i32, view<2xi32>
+    %has_word = index.cmp uge, %body_bytes, %word_bytes : offset
+    scf.if %has_word {
+      %tail_word = buffer.view %tail[%base_offset] : buffer -> view<1xi32>
+      view.store<volatile> %value, %tail_word[0] : i32, view<1xi32>
+      %tail_result = view.load<volatile> %tail_word[0] : view<1xi32> -> i32
+      view.store %tail_result, %output_words[1] : i32, view<2xi32>
+    }
+  }
+  kernel.return
+}
+
+// Reserving dispatch capacity does not require a body query or fixed prefix.
+kernel.def target(@gpu) export("capacity_only") @capacity_only(%launch_bytes: offset) {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) dynamic_workgroup_storage(%launch_bytes) : index
+} launch() {
+  kernel.return
+}

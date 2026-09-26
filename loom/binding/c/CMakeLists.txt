@@ -102,6 +102,7 @@ loom_cc_library(
     loom::codegen::low::launch_config_program
     loom::codegen::low::pipeline::legalizer_registry
     loom::codegen::low::repr
+    loom::codegen::low::storage_layout
     loom::codegen::low::target_binding
     loom::codegen::low::text_asm
     loom::codegen::low::verify

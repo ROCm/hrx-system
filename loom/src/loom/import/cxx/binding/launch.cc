@@ -184,9 +184,9 @@ void LaunchContracts::build(cxx::FunctionSymbol* function,
   auto size = build_dimensions(contract.size, symbol, "workgroup_size", names,
                                function->declaration(), builder, location);
   loom_op_t* launch;
-  check(loom_kernel_launch_config_build(builder, 0, count[0], count[1],
-                                        count[2], size[0], size[1], size[2], 0,
-                                        0, 0, location, &launch));
+  check(loom_kernel_launch_config_build(
+      builder, 0, count[0], count[1], count[2], size[0], size[1], size[2], 0, 0,
+      0, LOOM_VALUE_ID_INVALID, location, &launch));
 }
 
 }  // namespace loom::cxx_import

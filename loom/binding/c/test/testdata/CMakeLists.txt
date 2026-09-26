@@ -37,6 +37,23 @@ iree_c_embed_data(
   PUBLIC
 )
 
+file(GLOB _GLOB_WORKGROUP_STORAGE_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS workgroup_storage/*.loom)
+iree_c_embed_data(
+  NAME
+    workgroup_storage
+  SRCS
+    "${_GLOB_WORKGROUP_STORAGE_X_LOOM}"
+  C_FILE_OUTPUT
+    "workgroup_storage_testdata.c"
+  H_FILE_OUTPUT
+    "workgroup_storage_testdata.h"
+  IDENTIFIER
+    "loomc_workgroup_storage_testdata"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+
 file(GLOB _GLOB_LINK_DEPENDENCY_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS link_dependency/*.loom)
 iree_c_embed_data(
   NAME

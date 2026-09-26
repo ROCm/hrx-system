@@ -100,6 +100,7 @@ KEYWORD_MAP: dict[str, str] = {
     "configure": "LOOM_KW_CONFIGURE",
     "<": "LOOM_KW_LANGLE",
     ">": "LOOM_KW_RANGLE",
+    "dynamic_workgroup_storage": "LOOM_KW_DYNAMIC_WORKGROUP_STORAGE",
 }
 
 # Maps Region(..., syntax=...) names to C parser/printer selector IDs. The

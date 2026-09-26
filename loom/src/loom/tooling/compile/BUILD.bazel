@@ -152,6 +152,7 @@ loom_cc_library(
     srcs = ["options.c"],
     hdrs = ["options.h"],
     deps = [
+        "//loom/src/loom/codegen/low:storage_layout",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/error:source",
         "//loom/src/loom/ir",

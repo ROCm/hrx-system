@@ -1161,6 +1161,14 @@ static iree_status_t loom_low_lower_record_static_launch_config(
 
   const loom_op_t* launch_config =
       loom_kernel_def_launch_config_op(source_function.op);
+  if (loom_kernel_launch_config_dynamic_workgroup_storage_is_present(
+          launch_config) &&
+      !iree_any_bit_set(context->policy->flags,
+                        LOOM_LOW_LOWER_POLICY_FLAG_DYNAMIC_WORKGROUP_STORAGE)) {
+    return loom_low_lower_emit_target_context_error(
+        context, launch_config, LOOM_ERR_TARGET_126, /*extra_params=*/NULL,
+        /*extra_param_count=*/0);
+  }
   if (!loom_kernel_launch_config_has_workgroup_cluster_size(launch_config)) {
     return iree_ok_status();
   }

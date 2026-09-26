@@ -558,6 +558,7 @@ static iree_status_t loom_run_hal_testbench_reflect_function_parameters(
   iree_hal_executable_function_info_t function_info = {0};
   IREE_RETURN_IF_ERROR(
       iree_hal_executable_function_info(executable, function, &function_info));
+  provider->function_resource_usage = function_info.resource_usage;
 
   // Some backends only reflect aggregate constant and binding counts and
   // therefore require source-type packing. A nonzero count is a complete ABI
@@ -719,6 +720,13 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
           launch_config_func);
   provider->launch_config_target_facts =
       launch_config_function_version->function_target_facts;
+  provider->required_launch_fields =
+      LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT;
+  if (loom_kernel_launch_config_dynamic_workgroup_storage_is_present(
+          loom_kernel_def_launch_config_op(launch_config_func.op))) {
+    provider->required_launch_fields |=
+        LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_STORAGE_BYTES;
+  }
 
   IREE_RETURN_IF_ERROR(loom_run_hal_testbench_run_compile_pipeline(
       provider, provider->compile_module.module, &pipeline_options,
@@ -1017,12 +1025,22 @@ static iree_status_t loom_run_hal_testbench_evaluate_launch_config(
   IREE_ASSERT(provider->launch_config_module != NULL);
   IREE_ASSERT(provider->launch_config_target_facts != NULL);
 
+  const iree_hal_executable_function_resource_usage_t* resource_usage =
+      &provider->function_resource_usage;
+  const uint64_t fixed_bytes =
+      resource_usage->fixed_workgroup_local_memory_size;
   const loom_kernel_launch_config_options_t options = {
       .function_symbol = provider->entry_symbol,
       .workload_arguments = provider->workload_arguments,
       .workload_argument_count = workload_count,
-      .required_fields = LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT,
+      .required_fields = provider->required_launch_fields,
       .function_target_facts = provider->launch_config_target_facts,
+      .fixed_workgroup_storage_bytes =
+          iree_any_bit_set(
+              resource_usage->provided_flags,
+              IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_WORKGROUP_LOCAL_MEMORY)
+              ? &fixed_bytes
+              : NULL,
   };
   loom_kernel_launch_config_t config = {0};
   IREE_RETURN_IF_ERROR(loom_kernel_launch_config_evaluate(
@@ -1039,6 +1057,38 @@ static iree_status_t loom_run_hal_testbench_evaluate_launch_config(
   out_options->workgroup_count[0] = config.workgroup_count.x;
   out_options->workgroup_count[1] = config.workgroup_count.y;
   out_options->workgroup_count[2] = config.workgroup_count.z;
+  out_options->dynamic_workgroup_local_memory = 0;
+  if (iree_any_bit_set(
+          config.fields,
+          LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_STORAGE_BYTES)) {
+    // The evaluator includes this exact fixed prefix in the checked total.
+    const uint64_t dynamic_bytes = config.workgroup_storage_bytes - fixed_bytes;
+    if (dynamic_bytes > UINT32_MAX) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "HAL dynamic workgroup storage request of %" PRIu64
+          " bytes exceeds the dispatch field",
+          dynamic_bytes);
+    }
+    if (dynamic_bytes != 0) {
+      const loom_target_bundle_t* target_bundle =
+          loom_target_facts_bundle(provider->launch_config_target_facts);
+      const iree_hal_device_dispatch_spec_t* dispatch_spec =
+          iree_hal_device_spec_dispatch(
+              iree_hal_device_spec(provider->context->runtime.device));
+      const uint64_t maximum_bytes = iree_min(
+          target_bundle->snapshot->max_workgroup_storage_bytes,
+          dispatch_spec->execution.maximum_workgroup_local_memory_size);
+      if (config.workgroup_storage_bytes > maximum_bytes) {
+        return iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "HAL workgroup storage request of %" PRIu64
+            " bytes exceeds the selected device and target limit of %" PRIu64,
+            config.workgroup_storage_bytes, maximum_bytes);
+      }
+    }
+    out_options->dynamic_workgroup_local_memory = (uint32_t)dynamic_bytes;
+  }
   return iree_ok_status();
 }
 

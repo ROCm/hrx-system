@@ -235,7 +235,7 @@ class LowBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> ValueRef: ...
-    def address(
+    def storage_address(
         self,
         *,
         storage: ValueRef,
@@ -372,3 +372,13 @@ class LowBuilder(DialectBuilder):
         *,
         location_id: int | None = ...,
     ) -> None: ...
+    def storage_tail_address(
+        self,
+        *,
+        base_alignment: int,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...

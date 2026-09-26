@@ -138,6 +138,16 @@ loom_test(
 )
 
 loom_test(
+    name = "dynamic_workgroup_storage_test",
+    srcs = ["dynamic_workgroup_storage.loom"],
+    compile_targets = [
+        "//loom/target/amdgpu:gfx942",
+        "//loom/target/amdgpu:gfx1151",
+    ],
+    execution_profiles = [AMDGPU_HARDWARE_PROFILE],
+)
+
+loom_test(
     name = "wide_offset_hardware_test",
     srcs = [
         "//loom/src/loom/test/corpus/conformance:address_scaling.loom",

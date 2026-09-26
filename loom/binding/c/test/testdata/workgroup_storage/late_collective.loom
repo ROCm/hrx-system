@@ -1,0 +1,41 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+amdgpu.target<gfx1151> @gpu
+
+// The caller supplies at least 1024 tail bytes. Cross-wave reduction adds its
+// own 32-byte fixed reservation after the source tail query: align(40+32,64)=128.
+kernel.def target(@gpu) export("late_collective") @late_collective(%launch_bytes: offset) {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) dynamic_workgroup_storage(%launch_bytes) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %first_lane = index.constant 0 : index
+  %c0 = index.constant 0 : offset
+  %fixed_bytes = index.constant 40 : offset
+  %tail_bytes = index.constant 1024 : offset
+  %fixed = buffer.alloca<workgroup> align(4) %fixed_bytes : buffer
+  %tail = kernel.workgroup.storage align(64) %tail_bytes : buffer
+  %fixed_view = buffer.view %fixed[%c0] : buffer -> view<10xf32>
+  %tail_view = buffer.view %tail[%c0] : buffer -> view<64x4xf32>
+  %input_view = buffer.view %input[%c0] : buffer -> view<64x4xf32>
+  %output_view = buffer.view %output[%c0] : buffer -> view<64x4xf32>
+  %tag = scalar.constant 7.0 : f32
+  %leader = index.cmp eq, %lane, %first_lane : index
+  scf.if %leader {
+    view.store %tag, %fixed_view[0] : f32, view<10xf32>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %loaded = vector.load %input_view[%lane, 0] : view<64x4xf32> -> vector<4xf32>
+  vector.store %loaded, %tail_view[%lane, 0] : vector<4xf32>, view<64x4xf32>
+  %roundtrip = vector.load %tail_view[%lane, 0] : view<64x4xf32> -> vector<4xf32>
+  %sum = kernel.workgroup.reduce<addf> %roundtrip : vector<4xf32>
+  vector.store %sum, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32>
+  %fixed_value = view.load %fixed_view[0] : view<10xf32> -> f32
+  view.store %fixed_value, %output_view[%lane, 0] : f32, view<64x4xf32>
+  kernel.return
+}

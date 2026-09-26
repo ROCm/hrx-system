@@ -44,6 +44,14 @@ bool loom_kernel_launch_config_has_workgroup_cluster_size(
 loom_value_id_t loom_kernel_launch_config_workgroup_cluster_size_operand(
     const loom_op_t* launch_config, loom_kernel_dimension_t dimension);
 
+// Resolves the additional workgroup byte count using exact nonnegative facts,
+// falling back to a direct offset constant. An absent clause resolves to zero;
+// a present unknown/negative value or an incomplete config returns false.
+// This excludes the compiler's aligned fixed prefix and target capacity checks.
+bool loom_kernel_def_static_dynamic_workgroup_storage_from_facts(
+    const loom_module_t* module, const loom_op_t* kernel_op,
+    const loom_value_fact_table_t* facts, uint64_t* out_byte_length);
+
 // Resolves a fully static required workgroup size from |kernel_op|'s launch
 // config terminator. Dynamic dimensions are represented by returning false;
 // callers that need a static target contract must emit their own diagnostic at

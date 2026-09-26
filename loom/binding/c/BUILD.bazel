@@ -189,6 +189,7 @@ loom_cc_library(
         "//loom/src/loom/codegen:pass_environment",
         "//loom/src/loom/codegen/low:launch_config_program",
         "//loom/src/loom/codegen/low:repr",
+        "//loom/src/loom/codegen/low:storage_layout",
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/codegen/low:verify",

@@ -2560,24 +2560,9 @@ static iree_status_t loom_amdgpu_append_storage_address_packet(
   loom_amdgpu_assembly_emit_state_t* emit_state =
       (loom_amdgpu_assembly_emit_state_t*)user_data;
   const loom_op_t* op = context->packet->node->op;
-  loom_amdgpu_storage_layout_reference_t reference;
-  loom_amdgpu_storage_layout_lookup_reference(
-      emit_state->storage_layout, context->schedule->module,
-      loom_low_storage_address_storage(op), &reference);
-  const uint64_t offset = (uint64_t)loom_low_storage_address_offset(op);
-  uint64_t byte_offset = reference.reservation.byte_offset;
-  if (byte_offset > UINT32_MAX ||
-      reference.byte_offset > UINT32_MAX - byte_offset) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU assembly low.storage.address byte offset exceeds u32");
-  }
-  byte_offset += reference.byte_offset;
-  if (offset > UINT32_MAX - byte_offset) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU assembly low.storage.address byte offset exceeds u32");
-  }
+  uint32_t byte_offset = 0;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_resolve_address(
+      emit_state->storage_layout, context->schedule->module, op, &byte_offset));
 
   const loom_low_allocation_assignment_t* assignment =
       loom_low_packet_result_assignment(context->allocation, context->packet,
@@ -2603,7 +2588,7 @@ static iree_status_t loom_amdgpu_append_storage_address_packet(
       context->builder, "v%" PRIu32, assignment->location_base % window));
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_comma(context));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      context->builder, "%" PRIu32, (uint32_t)(byte_offset + offset)));
+      context->builder, "%" PRIu32, byte_offset));
   ++move_state.emitted_count;
   return loom_amdgpu_append_vgpr_msb_mode(&move_state, saved_mode);
 }
@@ -3610,6 +3595,7 @@ static iree_status_t loom_amdgpu_append_structural_packet(
     case LOOM_OP_LOW_CONCAT:
       return loom_amdgpu_append_concat_packet(user_data, context);
     case LOOM_OP_LOW_STORAGE_ADDRESS:
+    case LOOM_OP_LOW_STORAGE_TAIL_ADDRESS:
       return loom_amdgpu_append_storage_address_packet(user_data, context);
     case LOOM_OP_LOW_RETURN:
       return loom_amdgpu_append_return_packet(user_data, context);

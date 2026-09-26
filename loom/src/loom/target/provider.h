@@ -19,6 +19,7 @@
 #include "iree/base/byte_sequence.h"
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/lower/lower.h"
+#include "loom/codegen/low/storage_layout.h"
 #include "loom/codegen/low/verify.h"
 #include "loom/ir/context.h"
 #include "loom/ir/function_version.h"
@@ -182,6 +183,9 @@ typedef struct loom_target_emit_request_t {
 
   // Concrete compiler function versions participating in this emission.
   const loom_function_version_list_t* function_versions;
+
+  // Optional completed workgroup layouts, borrowed across native-only repairs.
+  const loom_low_workgroup_layouts_t* workgroup_layouts;
 
   // Embedding-owned option chain borrowed for the duration of the call.
   const void* option_chain;

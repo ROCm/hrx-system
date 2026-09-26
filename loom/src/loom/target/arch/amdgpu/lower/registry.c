@@ -1737,6 +1737,7 @@ static iree_status_t loom_amdgpu_low_legality_try_verify_op(
 
 static const loom_low_lower_policy_t kAmdgpuLowLowerPolicy = {
     .name = IREE_SVL("amdgpu-register-lower"),
+    .flags = LOOM_LOW_LOWER_POLICY_FLAG_DYNAMIC_WORKGROUP_STORAGE,
     .error_catalog = &loom_amdgpu_error_catalog,
     .map_type = {.fn = loom_amdgpu_map_type, .user_data = NULL},
     .source_type_supported = {.fn = loom_amdgpu_source_type_supported,

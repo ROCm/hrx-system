@@ -195,7 +195,7 @@ static iree_status_t loom_low_emission_frame_build_impl(
   loom_low_function_model_t model = {0};
   iree_status_t status = loom_low_function_model_initialize(
       module, low_func_op, options->function_target_facts,
-      options->descriptor_registry, options->emitter,
+      options->workgroup_layout, options->descriptor_registry, options->emitter,
       LOOM_LOW_FUNCTION_MODEL_FLAG_REGION_TREE, arena, &model);
   loom_low_schedule_options_t schedule_options = {
       .retained_blocks = retained_blocks,
@@ -752,6 +752,20 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
         "spill-free low emission frame construction requires spill-free "
         "options");
   }
+  // Only repairs that cannot introduce workgroup declarations may borrow the
+  // first model's layout. Copy its WG subset only before actual checkpoint
+  // restoration; speculative trials can borrow the retained baseline directly.
+  // Each rebuilt frame owns its imported records independently.
+  loom_low_emission_frame_options_t retained_options = *frame_options;
+  frame_options = &retained_options;
+  loom_low_storage_layout_t retained_workgroup_layout = {0};
+  bool workgroup_layout_borrows_frame = false;
+  const bool retain_workgroup_layout =
+      spill_free_options->materialization_options
+          .has_supported_storage_spaces &&
+      !loom_low_storage_space_set_contains(
+          spill_free_options->materialization_options.supported_storage_spaces,
+          LOOM_STORAGE_SPACE_WORKGROUP);
   IREE_RETURN_IF_ERROR(loom_low_storage_layout_hoist_reservations(
       module, loom_low_function_body(low_func_op), scratch_arena));
 
@@ -790,6 +804,13 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
     loom_low_emission_frame_record_memory_high_water(
         frame_checkpoint, repair_arena, scratch_arena, statistics);
     if (restore_frame_before_build) {
+      if (workgroup_layout_borrows_frame) {
+        loom_low_storage_layout_t owned_layout = {0};
+        IREE_RETURN_IF_ERROR(loom_low_storage_layout_project_workgroup(
+            &retained_workgroup_layout, repair_arena, &owned_layout));
+        retained_workgroup_layout = owned_layout;
+        workgroup_layout_borrows_frame = false;
+      }
       iree_arena_checkpoint_restore(frame_checkpoint);
       restore_frame_before_build = false;
     }
@@ -799,6 +820,15 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
         module, low_func_op, frame_options, NULL,
         loom_low_placement_pair_use_list_empty(), required_register_values,
         rematerialization.per_user_values, arena, statistics, &frame));
+    if (retain_workgroup_layout && retained_options.workgroup_layout == NULL &&
+        (frame.schedule.requirements.storage_layout.workgroup_record_count !=
+             0 ||
+         frame.schedule.requirements.storage_layout.workgroup_tail_alignment !=
+             0)) {
+      retained_workgroup_layout = frame.schedule.requirements.storage_layout;
+      retained_options.workgroup_layout = &retained_workgroup_layout;
+      workgroup_layout_borrows_frame = true;
+    }
     if (value_repair_iteration_limit == 0) {
       // Use the initial function-local value population as the convergence
       // budget. Allocation repair can retire a complete batch in one pass;
@@ -858,10 +888,16 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
           module, low_func_op, frame_options, required_register_values,
           rematerialization.per_user_values, frame_checkpoint, repair_arena,
           scratch_arena, statistics, &frame));
+      if (workgroup_layout_borrows_frame) {
+        retained_workgroup_layout = frame.schedule.requirements.storage_layout;
+      }
       IREE_RETURN_IF_ERROR(loom_low_emission_frame_try_pair_replication(
           module, low_func_op, frame_options, required_register_values,
           rematerialization.per_user_values, frame_checkpoint, repair_arena,
           scratch_arena, statistics, &frame));
+      if (workgroup_layout_borrows_frame) {
+        retained_workgroup_layout = frame.schedule.requirements.storage_layout;
+      }
       bool accepted = false;
       IREE_RETURN_IF_ERROR(loom_low_emission_frame_validate_final(
           frame_options, spill_free_options, &frame, scratch_arena, &accepted));

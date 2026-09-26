@@ -152,3 +152,12 @@ def test_reload_explicit_default_offset_prints_omitted_form() -> None:
     attrs, text = _parse_and_print(source, module, scope)
     assert attrs["offset"] == 0
     assert text == expected
+
+
+def test_workgroup_tail_address_has_no_static_extent() -> None:
+    source = "%tail = low.storage.tail.address align(64) : reg<test.ptr>"
+    module, scope = _scope_with_values()
+    attrs, text = _parse_and_print(source, module, scope)
+    assert attrs["base_alignment"] == 64
+    assert "byte_length" not in attrs
+    assert text == source

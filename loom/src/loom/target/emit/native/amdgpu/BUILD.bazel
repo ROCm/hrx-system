@@ -156,6 +156,7 @@ loom_check_test_suite(
         "test/packet.loom-test",
         "test/packet_json.loom-test",
         "test/spill_lowering.loom-test",
+        "test/storage_tail.loom-test",
         "test/tensor_completion.loom-test",
         "test/vopd_plan.loom-test",
         "test/wait_coalescing.loom-test",
@@ -197,6 +198,7 @@ loom_cc_library(
     hdrs = ["storage_layout.h"],
     deps = [
         "//loom/src/loom/codegen/low:storage_layout",
+        "//loom/src/loom/ops/low",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -210,6 +212,7 @@ loom_cc_test(
         "//loom/src/loom/codegen/low:storage_layout",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:registers",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

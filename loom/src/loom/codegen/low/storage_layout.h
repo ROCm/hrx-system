@@ -9,8 +9,9 @@
 // low.storage.reserve ops declare byte-addressable storage owned by the current
 // low function. This layout packs reservations by storage space in function
 // body order, honoring each reservation's byte alignment before assigning its
-// stable byte offset. Targets project the generic storage spaces onto their ABI
-// frame, private, scratch, local, or workgroup storage mechanisms.
+// stable byte offset. Tail queries align the final workgroup prefix after every
+// reservation has been packed. Targets project the generic storage spaces onto
+// their ABI frame, private, scratch, local, or workgroup storage mechanisms.
 
 #ifndef LOOM_CODEGEN_LOW_STORAGE_LAYOUT_H_
 #define LOOM_CODEGEN_LOW_STORAGE_LAYOUT_H_
@@ -69,8 +70,9 @@ iree_host_size_t loom_low_storage_space_set_names(
     loom_low_storage_space_set_t set, iree_host_size_t capacity,
     iree_string_view_t* out_names);
 
-// Hoists static reservations in a verified low function |body| into its entry
-// prefix, preserving their original function body order and SSA identities.
+// Hoists static reservations in a verified low function |body| immediately
+// after its entry ABI preamble, preserving the imports and the reservations'
+// original function body order and SSA identities.
 // Frame construction calls this before target lowering embeds storage offsets.
 // Subsequent spill reservations can then append to the prefix without changing
 // the offsets of existing storage, including target-merged storage spaces.
@@ -85,7 +87,8 @@ typedef struct loom_low_storage_layout_space_sizes_t {
   uint64_t scratch_bytes;
   // Bytes reserved in target-private per-invocation storage.
   uint64_t private_bytes;
-  // Bytes reserved in workgroup-local shared storage.
+  // Fixed workgroup bytes, including tail-base padding but not dynamic
+  // capacity.
   uint64_t workgroup_bytes;
 } loom_low_storage_layout_space_sizes_t;
 
@@ -110,6 +113,10 @@ typedef struct loom_low_storage_layout_record_t {
 typedef struct loom_low_storage_layout_t {
   // Total bytes reserved in each function-local storage space.
   loom_low_storage_layout_space_sizes_t space_sizes;
+  // Strongest dispatch-tail alignment, or zero when no tail is declared.
+  uint64_t workgroup_tail_alignment;
+  // Number of workgroup records, retained for projection without rediscovery.
+  iree_host_size_t workgroup_record_count;
   // Arena-owned records in function body declaration order.
   const loom_low_storage_layout_record_t* records;
   // Number of entries in |records|.
@@ -120,6 +127,14 @@ typedef struct loom_low_storage_layout_t {
 typedef struct loom_low_storage_layout_builder_t {
   // Packed byte sizes accumulated for each storage space.
   loom_low_storage_layout_space_sizes_t space_sizes;
+  // Strongest alignment requested by dispatch-owned workgroup tail queries.
+  uint64_t workgroup_tail_alignment;
+  // Optional prior layout whose unchanged workgroup declarations are imported.
+  const loom_low_storage_layout_t* workgroup_layout;
+  // Next source record to visit when importing workgroup declarations.
+  iree_host_size_t workgroup_record_cursor;
+  // Number of workgroup reservations visited in declaration order.
+  iree_host_size_t workgroup_record_count;
   // Arena-owned records accumulated in declaration order.
   loom_low_storage_layout_record_t* records;
   // Number of initialized records.
@@ -139,9 +154,10 @@ typedef struct loom_low_storage_layout_reference_t {
 
 // Placement requirement for one complete function-local storage space.
 typedef struct loom_low_storage_layout_requirement_t {
-  // Packed byte length, including padding between reservations.
+  // Packed fixed byte length, including inter-reservation and tail-base
+  // padding.
   uint64_t byte_length;
-  // Strongest reservation alignment, or zero for an empty space.
+  // Strongest reservation or tail alignment, or zero when neither is present.
   uint64_t minimum_alignment;
 } loom_low_storage_layout_requirement_t;
 
@@ -150,8 +166,11 @@ typedef struct loom_low_storage_layout_requirement_t {
 loom_low_storage_layout_requirement_t loom_low_storage_layout_requirement(
     const loom_low_storage_layout_t* layout, loom_storage_space_t space);
 
-// Initializes an empty one-pass layout builder.
+// Initializes a one-pass builder. A non-NULL prior layout supplies only its
+// fixed workgroup offsets and final prefix; its declarations must be unchanged
+// and retain their relative order. Other spaces are always packed afresh.
 void loom_low_storage_layout_builder_initialize(
+    const loom_low_storage_layout_t* workgroup_layout,
     loom_low_storage_layout_builder_t* out_builder);
 
 // Packs one verified low.storage.reserve into |builder|. Aggregate byte-size
@@ -160,10 +179,56 @@ iree_status_t loom_low_storage_layout_builder_append(
     const loom_module_t* module, const loom_op_t* reserve_op,
     iree_arena_allocator_t* arena, loom_low_storage_layout_builder_t* builder);
 
-// Publishes the current arena-owned builder contents as an immutable layout.
-void loom_low_storage_layout_builder_finish(
+// Records a verified tail query's resource alignment without reserving bytes.
+void loom_low_storage_layout_builder_require_workgroup_tail(
+    uint64_t base_alignment, loom_low_storage_layout_builder_t* builder);
+
+// Publishes the arena-owned layout after aligning the fixed workgroup prefix.
+// The final alignment can overflow for authored aggregate sizes.
+iree_status_t loom_low_storage_layout_builder_finish(
     const loom_low_storage_layout_builder_t* builder,
     loom_low_storage_layout_t* out_layout);
+
+// Aligns a completed fixed workgroup prefix. Zero alignment leaves it intact.
+// Used by both the layout producer and the admission walk's size-only result.
+iree_status_t loom_low_storage_layout_align_workgroup_tail(
+    uint64_t base_alignment, loom_low_storage_layout_space_sizes_t* sizes);
+
+// Copies only workgroup records and the padded prefix into |arena|. The source
+// layout already owns the packing decision; projection never repacks storage.
+iree_status_t loom_low_storage_layout_project_workgroup(
+    const loom_low_storage_layout_t* layout, iree_arena_allocator_t* arena,
+    loom_low_storage_layout_t* out_layout);
+
+// Completed Low workgroup layouts keyed by the current module's symbol IDs.
+// This physical snapshot is invalidated before compiler mutation; it is not a
+// durable function-version product and is reconstructed for clones/reparsed IR.
+typedef struct loom_low_workgroup_layouts_t {
+  // Contiguous arena-owned layouts in insertion order.
+  loom_low_storage_layout_t* entries;
+  // One-based layout ordinal by module symbol, or zero when absent.
+  uint32_t* ordinals;
+  // Number of module symbols covered by |ordinals|.
+  iree_host_size_t symbol_count;
+  // Number of initialized layouts in |entries|.
+  iree_host_size_t count;
+} loom_low_workgroup_layouts_t;
+
+// Allocates one contiguous result for a known number of completed entries.
+iree_status_t loom_low_workgroup_layouts_initialize(
+    iree_host_size_t symbol_count, iree_host_size_t entry_count,
+    iree_arena_allocator_t* arena, loom_low_workgroup_layouts_t* out_layouts);
+
+// Projects a completed entry into its owner. The producer inserts each symbol
+// once and does not exceed the entry count supplied at initialization.
+iree_status_t loom_low_workgroup_layouts_insert(
+    loom_symbol_id_t symbol_id, const loom_low_storage_layout_t* layout,
+    iree_arena_allocator_t* arena, loom_low_workgroup_layouts_t* layouts);
+
+// Returns the retained workgroup layout, or NULL when this entry was not part
+// of the completed product. The returned layout borrows the result's arena.
+const loom_low_storage_layout_t* loom_low_workgroup_layouts_lookup(
+    const loom_low_workgroup_layouts_t* layouts, loom_symbol_id_t symbol_id);
 
 // Accumulates one verified low.storage.reserve into |sizes| without retaining a
 // record. Aggregate byte-size overflow is returned as status.

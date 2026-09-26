@@ -1572,6 +1572,21 @@ ERR_TARGET_091 = ErrorDef(
     fix_hint="Convert returning values to a representation supported on every path.",
 )
 
+# ERR_TARGET_126: Target does not implement dispatch-sized workgroup storage.
+ERR_TARGET_126 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=126,
+    severity=Severity.ERROR,
+    summary="Target does not implement dispatch-sized workgroup storage.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "does not implement dynamic_workgroup_storage in '{op_name}' "
+        "of '@{function_name}'"
+    ),
+    params=_TARGET_CONTEXT_PARAMS,
+    fix_hint="Select a target with dispatch-sized workgroup storage support.",
+)
+
 ALL_TARGET_ERRORS = (
     ERR_TARGET_001,
     ERR_TARGET_002,
@@ -1648,4 +1663,5 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_089,
     ERR_TARGET_090,
     ERR_TARGET_091,
+    ERR_TARGET_126,
 )

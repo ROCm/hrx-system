@@ -57,6 +57,7 @@ static iree_status_t loom_amdgpu_artifact_provider_emit_artifact(
 
   const loom_amdgpu_hal_kernel_library_options_t library_options = {
       .function_versions = options->function_versions,
+      .workgroup_layouts = options->workgroup_layouts,
       .runtime_globals = loom_amdgpu_artifact_provider_runtime_globals(module),
       .diagnostic_sink = options->diagnostic_sink,
       .source_resolver = options->source_resolver,

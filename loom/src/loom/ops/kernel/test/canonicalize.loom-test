@@ -1,5 +1,68 @@
 // RUN: pass canonicalize
 
+kernel.def @dynamic_storage_length_is_authored_extent(%bytes: offset) {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) dynamic_workgroup_storage(%bytes) : index
+} launch(%bytes: offset) {
+  %tail = kernel.workgroup.storage align(64) %bytes : buffer
+  %first = buffer.length %tail
+  %second = buffer.length %tail
+  test.use %first, %second : offset, offset
+  kernel.return
+}
+
+// ----
+kernel.def @dynamic_storage_length_is_authored_extent(%bytes: offset) {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) dynamic_workgroup_storage(%bytes) : index
+} launch(%bytes: offset) {
+  %tail = kernel.workgroup.storage align(64) %bytes : buffer
+  test.use %bytes, %bytes : offset, offset
+  kernel.return
+}
+
+// ====
+
+// RUN: pass inline-callables,canonicalize
+
+func.def pure inline @borrow_tail(%tail: buffer) -> (buffer) {
+  func.return %tail : buffer
+}
+
+func.def pure inline @borrowed_length(%tail: buffer) -> (offset) {
+  %length = buffer.length %tail
+  func.return %length : offset
+}
+
+kernel.def @inlined_borrow_keeps_dynamic_storage_length(%bytes: offset) {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) dynamic_workgroup_storage(%bytes) : index
+} launch(%bytes: offset) {
+  %tail = kernel.workgroup.storage align(64) %bytes : buffer
+  %borrowed = func.call pure @borrow_tail(%tail) : (buffer) -> (buffer)
+  %length = func.call pure @borrowed_length(%borrowed) : (buffer) -> (offset)
+  %c0 = index.constant 0 : offset
+  %view = buffer.view %borrowed[%c0] : buffer -> view<4xi32>
+  %view_length = test.fact_view_byte_length_hi %view : view<4xi32> -> i64
+  test.use %length, %view_length : offset, i64
+  kernel.return
+}
+
+// ----
+kernel.def @inlined_borrow_keeps_dynamic_storage_length(%bytes: offset) {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) dynamic_workgroup_storage(%bytes) : index
+} launch(%bytes: offset) {
+  %tail = kernel.workgroup.storage align(64) %bytes : buffer
+  %view_length = scalar.constant 16 : i64
+  test.use %bytes, %view_length : offset, i64
+  kernel.return
+}
+
+// ====
+
+// RUN: pass canonicalize
+
 kernel.def @exit_moves_tail_to_false_path() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index

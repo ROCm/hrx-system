@@ -1,5 +1,79 @@
 // RUN: pass canonicalize
 
+// A borrowed tail has a declared extent and alignment, but no fresh noalias scope.
+kernel.def @borrowed_workgroup_storage_facts() {
+  %unit = index.constant 1 : index
+  %bytes = index.constant 48 : offset
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) dynamic_workgroup_storage(%bytes) : index
+} launch() {
+  %bytes = index.constant 48 : offset
+  %c0 = index.constant 0 : offset
+  %tail = kernel.workgroup.storage align(16) %bytes : buffer
+  %view = buffer.view %tail[%c0] : buffer -> view<12xi32>
+  %length = buffer.length %tail
+  %space = test.fact_buffer_memory_space %tail : buffer -> i64
+  %alignment = test.fact_buffer_min_alignment %tail : buffer -> i64
+  %noalias = test.fact_alias_scope_known %tail : buffer -> i1
+  %root = test.fact_view_root_matches %view, %tail : view<12xi32>, buffer -> i1
+  %view_space = test.fact_view_memory_space %view : view<12xi32> -> i64
+  %view_length = test.fact_view_byte_length_hi %view : view<12xi32> -> i64
+  %uniform = test.fact_workgroup_uniform %tail : buffer -> i1
+  test.use %length, %space, %alignment, %noalias, %root, %view_space, %view_length, %uniform : offset, i64, i64, i1, i1, i64, i64, i1
+  kernel.return
+}
+
+// ----
+kernel.def @borrowed_workgroup_storage_facts() {
+  %unit = index.constant 1 : index
+  %bytes = index.constant 48 : offset
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) dynamic_workgroup_storage(%bytes) : index
+} launch() {
+  %bytes = index.constant 48 : offset
+  %tail = kernel.workgroup.storage align(16) %bytes : buffer
+  %length = index.constant 48 : offset
+  %space = scalar.constant 2 : i64
+  %alignment = scalar.constant 16 : i64
+  %noalias = scalar.constant false : i1
+  %root = scalar.constant true : i1
+  %view_space = scalar.constant 2 : i64
+  %view_length = scalar.constant 48 : i64
+  %uniform = scalar.constant true : i1
+  test.use %length, %space, %alignment, %noalias, %root, %view_space, %view_length, %uniform : offset, i64, i64, i1, i1, i64, i64, i1
+  kernel.return
+}
+
+// ====
+
+// An empty declaration remains a real borrowed root with a zero visible extent.
+kernel.def @empty_workgroup_storage_facts() {
+  %unit = index.constant 1 : index
+  %c0 = index.constant 0 : offset
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) dynamic_workgroup_storage(%c0) : index
+} launch() {
+  %c0 = index.constant 0 : offset
+  %tail = kernel.workgroup.storage align(64) %c0 : buffer
+  %length = buffer.length %tail
+  %alignment = test.fact_buffer_min_alignment %tail : buffer -> i64
+  test.use %length, %alignment : offset, i64
+  kernel.return
+}
+
+// ----
+kernel.def @empty_workgroup_storage_facts() {
+  %unit = index.constant 1 : index
+  %c0 = index.constant 0 : offset
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) dynamic_workgroup_storage(%c0) : index
+} launch() {
+  %c0 = index.constant 0 : offset
+  %tail = kernel.workgroup.storage align(64) %c0 : buffer
+  %length = index.constant 0 : offset
+  %alignment = scalar.constant 64 : i64
+  test.use %length, %alignment : offset, i64
+  kernel.return
+}
+
+// ====
+
 kernel.def @execution_uniform_scope_facts() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index

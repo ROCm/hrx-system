@@ -957,7 +957,7 @@ static iree_status_t loom_amdgpu_spill_lowering_build_storage_layout(
     iree_arena_allocator_t* arena,
     loom_amdgpu_storage_layout_t* out_storage_layout) {
   loom_low_storage_layout_builder_t builder;
-  loom_low_storage_layout_builder_initialize(&builder);
+  loom_low_storage_layout_builder_initialize(NULL, &builder);
   const loom_block_t* block = NULL;
   const loom_op_t* op = NULL;
   loom_region_for_each_block(body, block) {
@@ -970,7 +970,8 @@ static iree_status_t loom_amdgpu_spill_lowering_build_storage_layout(
     }
   }
   loom_low_storage_layout_t source_layout;
-  loom_low_storage_layout_builder_finish(&builder, &source_layout);
+  IREE_RETURN_IF_ERROR(
+      loom_low_storage_layout_builder_finish(&builder, &source_layout));
   return loom_amdgpu_storage_layout_build(&source_layout, arena,
                                           out_storage_layout);
 }

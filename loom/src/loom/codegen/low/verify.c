@@ -55,6 +55,8 @@ typedef struct loom_low_function_verify_state_t {
   loom_low_register_parts_t register_parts;
   // Packed storage sizes accumulated during the existing verifier walk.
   loom_low_storage_layout_space_sizes_t storage_space_sizes;
+  // Strongest workgroup-tail alignment collected by the same admission walk.
+  uint64_t workgroup_tail_alignment;
   void** provider_states;
 } loom_low_function_verify_state_t;
 
@@ -1236,6 +1238,9 @@ static iree_status_t loom_low_verify_workgroup_storage_limit(
       .fn = loom_low_verify_counting_emitter,
       .user_data = function_state->state,
   };
+  IREE_RETURN_IF_ERROR(loom_low_storage_layout_align_workgroup_tail(
+      function_state->workgroup_tail_alignment,
+      &function_state->storage_space_sizes));
   return loom_low_diagnostic_validate_workgroup_storage_limit(
       function_state->state->module, function_state->function_op,
       function_state->target,
@@ -1994,6 +1999,12 @@ static iree_status_t loom_low_verify_walk_op(void* user_data, loom_op_t* op,
     IREE_RETURN_IF_ERROR(loom_low_storage_layout_accumulate_reservation(
         function_state->state->module, op,
         &function_state->storage_space_sizes));
+  } else if (loom_low_storage_tail_address_isa(op) &&
+             op->parent_block != NULL &&
+             op->parent_block->parent_region == function_state->body) {
+    function_state->workgroup_tail_alignment =
+        iree_max(function_state->workgroup_tail_alignment,
+                 (uint64_t)loom_low_storage_tail_address_base_alignment(op));
   }
 
   loom_low_descriptor_packet_t packet = {0};

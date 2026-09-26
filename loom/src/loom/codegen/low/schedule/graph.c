@@ -75,7 +75,8 @@ static bool loom_low_schedule_op_is_structural_materialization(
     const loom_op_t* op) {
   return loom_low_copy_isa(op) || loom_low_move_isa(op) ||
          loom_low_slice_isa(op) || loom_low_concat_isa(op) ||
-         loom_low_storage_address_isa(op);
+         loom_low_storage_address_isa(op) ||
+         loom_low_storage_tail_address_isa(op);
 }
 
 static bool loom_low_schedule_op_is_terminator(const loom_module_t* module,

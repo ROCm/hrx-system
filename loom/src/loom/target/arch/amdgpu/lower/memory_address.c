@@ -372,6 +372,14 @@ iree_status_t loom_amdgpu_emit_memory_vaddr(
   loom_type_t vgpr_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &vgpr_type));
 
+  // Tail-backed DS packets carry a root address independently of their proven
+  // u32 relative offset. Fixed-root callers have already folded their base or
+  // supplied it explicitly; tail-backed direct loads/stores use this root.
+  if (access->workgroup_tail_base) {
+    IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(
+        context, access->source.root_value_id, &low_base_addr));
+  }
+
   loom_value_id_t low_accumulator = LOOM_VALUE_ID_INVALID;
   bool affine_terms_selected = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_try_emit_memory_vaddr_affine_terms(

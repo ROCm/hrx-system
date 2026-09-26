@@ -196,7 +196,7 @@ iree_status_t loom_buffer_pack_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_BUFFER_LENGTH: Query the physical byte length of a buffer root without accessing its payload. Returns zero when the buffer is null.
+// LOOM_OP_BUFFER_LENGTH: Query the accessible byte extent of a buffer root without accessing its payload. The root's contract defines this extent, which may be smaller than its backing allocation. Returns zero when the buffer is null.
 // %byte_length = buffer.length %buffer
 LOOM_DEFINE_ISA(loom_buffer_length_isa, LOOM_OP_BUFFER_LENGTH)
 LOOM_DEFINE_OPERAND(loom_buffer_length_buffer, 0)

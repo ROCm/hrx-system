@@ -6,6 +6,8 @@
 
 #include "loom/codegen/low/storage_layout.h"
 
+#include <string.h>
+
 #include "loom/analysis/storage_layout.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
@@ -38,6 +40,12 @@ iree_host_size_t loom_low_storage_space_set_names(
 iree_status_t loom_low_storage_layout_hoist_reservations(
     loom_module_t* module, loom_region_t* body, iree_arena_allocator_t* arena) {
   loom_op_t* insertion_op = loom_region_entry_block(body)->first_op;
+  // ABI imports must remain the entry preamble even when reservations move
+  // out of later blocks. Their relative order does not affect storage packing.
+  while (loom_low_live_in_isa(insertion_op) ||
+         loom_low_resource_isa(insertion_op)) {
+    insertion_op = insertion_op->next_op;
+  }
   loom_rewriter_t rewriter = {0};
   iree_status_t status = iree_ok_status();
   for (uint16_t block_index = 0;
@@ -110,8 +118,17 @@ static iree_status_t loom_low_storage_layout_pack_reservation(
 }
 
 void loom_low_storage_layout_builder_initialize(
+    const loom_low_storage_layout_t* workgroup_layout,
     loom_low_storage_layout_builder_t* out_builder) {
-  *out_builder = (loom_low_storage_layout_builder_t){0};
+  *out_builder = (loom_low_storage_layout_builder_t){
+      .workgroup_layout = workgroup_layout,
+      .workgroup_tail_alignment =
+          workgroup_layout ? workgroup_layout->workgroup_tail_alignment : 0,
+  };
+  if (workgroup_layout != NULL) {
+    out_builder->space_sizes.workgroup_bytes =
+        workgroup_layout->space_sizes.workgroup_bytes;
+  }
 }
 
 loom_low_storage_layout_requirement_t loom_low_storage_layout_requirement(
@@ -127,7 +144,14 @@ loom_low_storage_layout_requirement_t loom_low_storage_layout_requirement(
     requirement.minimum_alignment =
         iree_max(requirement.minimum_alignment, reservation->byte_alignment);
   }
-  if (requirement.byte_length == 0) {
+  if (space == LOOM_STORAGE_SPACE_WORKGROUP) {
+    requirement.byte_length = layout->space_sizes.workgroup_bytes;
+    requirement.minimum_alignment = iree_max(requirement.minimum_alignment,
+                                             layout->workgroup_tail_alignment);
+  }
+  if (requirement.byte_length == 0 &&
+      !(space == LOOM_STORAGE_SPACE_WORKGROUP &&
+        layout->workgroup_tail_alignment != 0)) {
     requirement.minimum_alignment = 0;
   }
   return requirement;
@@ -137,8 +161,23 @@ iree_status_t loom_low_storage_layout_builder_append(
     const loom_module_t* module, const loom_op_t* reserve_op,
     iree_arena_allocator_t* arena, loom_low_storage_layout_builder_t* builder) {
   loom_low_storage_layout_reservation_t reservation;
-  IREE_RETURN_IF_ERROR(loom_low_storage_layout_pack_reservation(
-      module, reserve_op, &builder->space_sizes, &reservation));
+  const bool is_workgroup =
+      loom_type_storage_space(loom_module_value_type(
+          module, loom_low_storage_reserve_storage(reserve_op))) ==
+      LOOM_STORAGE_SPACE_WORKGROUP;
+  if (is_workgroup && builder->workgroup_layout != NULL) {
+    const loom_low_storage_layout_record_t* records =
+        builder->workgroup_layout->records;
+    while (records[builder->workgroup_record_cursor].reservation.space !=
+           LOOM_STORAGE_SPACE_WORKGROUP) {
+      ++builder->workgroup_record_cursor;
+    }
+    reservation = records[builder->workgroup_record_cursor++].reservation;
+  } else {
+    IREE_RETURN_IF_ERROR(loom_low_storage_layout_pack_reservation(
+        module, reserve_op, &builder->space_sizes, &reservation));
+  }
+  builder->workgroup_record_count += is_workgroup;
   const iree_host_size_t minimum_capacity = builder->record_count + 1;
   if (minimum_capacity > builder->record_capacity) {
     IREE_RETURN_IF_ERROR(iree_arena_grow_array(
@@ -154,14 +193,97 @@ iree_status_t loom_low_storage_layout_builder_append(
   return iree_ok_status();
 }
 
-void loom_low_storage_layout_builder_finish(
+void loom_low_storage_layout_builder_require_workgroup_tail(
+    uint64_t base_alignment, loom_low_storage_layout_builder_t* builder) {
+  builder->workgroup_tail_alignment =
+      iree_max(builder->workgroup_tail_alignment, base_alignment);
+}
+
+iree_status_t loom_low_storage_layout_builder_finish(
     const loom_low_storage_layout_builder_t* builder,
     loom_low_storage_layout_t* out_layout) {
   *out_layout = (loom_low_storage_layout_t){
       .space_sizes = builder->space_sizes,
       .records = builder->records,
       .record_count = builder->record_count,
+      .workgroup_record_count = builder->workgroup_record_count,
+      .workgroup_tail_alignment = builder->workgroup_tail_alignment,
   };
+  if (builder->workgroup_layout == NULL) {
+    IREE_RETURN_IF_ERROR(loom_low_storage_layout_align_workgroup_tail(
+        builder->workgroup_tail_alignment, &out_layout->space_sizes));
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_low_storage_layout_align_workgroup_tail(
+    uint64_t base_alignment, loom_low_storage_layout_space_sizes_t* sizes) {
+  if (base_alignment != 0 &&
+      !iree_checked_align_u64(sizes->workgroup_bytes, base_alignment,
+                              &sizes->workgroup_bytes)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "workgroup tail alignment overflows");
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_low_storage_layout_project_workgroup(
+    const loom_low_storage_layout_t* layout, iree_arena_allocator_t* arena,
+    loom_low_storage_layout_t* out_layout) {
+  *out_layout = (loom_low_storage_layout_t){
+      .space_sizes.workgroup_bytes = layout->space_sizes.workgroup_bytes,
+      .workgroup_tail_alignment = layout->workgroup_tail_alignment,
+      .workgroup_record_count = layout->workgroup_record_count,
+      .record_count = layout->workgroup_record_count,
+  };
+  if (layout->workgroup_record_count == 0) {
+    return iree_ok_status();
+  }
+  loom_low_storage_layout_record_t* records = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(arena, layout->workgroup_record_count,
+                                sizeof(*records), (void**)&records));
+  iree_host_size_t ordinal = 0;
+  for (iree_host_size_t i = 0; i < layout->record_count; ++i) {
+    if (layout->records[i].reservation.space == LOOM_STORAGE_SPACE_WORKGROUP) {
+      records[ordinal++] = layout->records[i];
+    }
+  }
+  out_layout->records = records;
+  return iree_ok_status();
+}
+
+iree_status_t loom_low_workgroup_layouts_initialize(
+    iree_host_size_t symbol_count, iree_host_size_t entry_count,
+    iree_arena_allocator_t* arena, loom_low_workgroup_layouts_t* out_layouts) {
+  *out_layouts = (loom_low_workgroup_layouts_t){.symbol_count = symbol_count};
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, entry_count, sizeof(*out_layouts->entries),
+      (void**)&out_layouts->entries));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, symbol_count, sizeof(*out_layouts->ordinals),
+      (void**)&out_layouts->ordinals));
+  memset(out_layouts->ordinals, 0,
+         symbol_count * sizeof(*out_layouts->ordinals));
+  return iree_ok_status();
+}
+
+iree_status_t loom_low_workgroup_layouts_insert(
+    loom_symbol_id_t symbol_id, const loom_low_storage_layout_t* layout,
+    iree_arena_allocator_t* arena, loom_low_workgroup_layouts_t* layouts) {
+  IREE_RETURN_IF_ERROR(loom_low_storage_layout_project_workgroup(
+      layout, arena, &layouts->entries[layouts->count]));
+  layouts->ordinals[symbol_id] = (uint32_t)++layouts->count;
+  return iree_ok_status();
+}
+
+const loom_low_storage_layout_t* loom_low_workgroup_layouts_lookup(
+    const loom_low_workgroup_layouts_t* layouts, loom_symbol_id_t symbol_id) {
+  if (layouts == NULL || symbol_id >= layouts->symbol_count ||
+      layouts->ordinals[symbol_id] == 0) {
+    return NULL;
+  }
+  return &layouts->entries[layouts->ordinals[symbol_id] - 1];
 }
 
 iree_status_t loom_low_storage_layout_accumulate_reservation(

@@ -52,6 +52,14 @@ struct loomc_module_t {
     loomc_config_binding_list_t config_bindings;
   } compilation;
 
+  // Physical layouts of completed Low, invalidated independently of versions.
+  struct {
+    // Lazily backed arena reset before subsequent compiler mutation.
+    iree_arena_allocator_t arena;
+    // Workgroup-only snapshots indexed by the current module's symbols.
+    loom_low_workgroup_layouts_t layouts;
+  } workgroup_storage;
+
   // Input invariants retained across successful compiler transforms. A failed
   // mutation invalidates both independently owned admission facts.
   struct {
@@ -97,6 +105,7 @@ typedef struct loomc_module_deserialize_state_t {
 
 static void loomc_module_destroy(loomc_module_t* module) {
   loomc_allocator_t allocator = module->allocator;
+  iree_arena_deinitialize(&module->workgroup_storage.arena);
   iree_arena_deinitialize(&module->compilation.arena);
   loom_module_free(module->module);
   loomc_workspace_release(module->workspace);
@@ -489,6 +498,8 @@ loomc_status_t loomc_module_create_empty(loomc_context_t* context,
   loomc_workspace_retain(workspace);
   iree_arena_initialize(loomc_workspace_block_pool(workspace),
                         &module->compilation.arena);
+  iree_arena_initialize(loomc_workspace_block_pool(workspace),
+                        &module->workgroup_storage.arena);
   loom_function_version_owner_initialize(
       &module->compilation.arena, &module->compilation.function_versions);
 
@@ -603,10 +614,33 @@ loom_function_version_owner_t* loomc_module_function_version_owner(
 
 void loomc_module_invalidate_compilation(loomc_module_t* module) {
   IREE_ASSERT_ARGUMENT(module);
+  loomc_module_invalidate_workgroup_layouts(module);
   iree_arena_reset(&module->compilation.arena);
   module->compilation.config_bindings = (loomc_config_binding_list_t){0};
   loom_function_version_owner_initialize(
       &module->compilation.arena, &module->compilation.function_versions);
+}
+
+iree_arena_allocator_t* loomc_module_workgroup_layout_arena(
+    loomc_module_t* module) {
+  return &module->workgroup_storage.arena;
+}
+
+loom_low_workgroup_layouts_t* loomc_module_mutable_workgroup_layouts(
+    loomc_module_t* module) {
+  return &module->workgroup_storage.layouts;
+}
+
+const loom_low_workgroup_layouts_t* loomc_module_workgroup_layouts(
+    const loomc_module_t* module) {
+  return module->workgroup_storage.layouts.count != 0
+             ? &module->workgroup_storage.layouts
+             : NULL;
+}
+
+void loomc_module_invalidate_workgroup_layouts(loomc_module_t* module) {
+  iree_arena_reset(&module->workgroup_storage.arena);
+  module->workgroup_storage.layouts = (loom_low_workgroup_layouts_t){0};
 }
 
 static iree_status_t loomc_module_record_config_binding(

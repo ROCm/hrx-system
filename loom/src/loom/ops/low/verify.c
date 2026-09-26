@@ -1558,6 +1558,29 @@ iree_status_t loom_low_storage_address_verify(
   return iree_ok_status();
 }
 
+iree_status_t loom_low_storage_tail_address_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter) {
+  IREE_RETURN_IF_ERROR(loom_low_verify_nested_under_low_entry(
+      module, op, IREE_SV("low executable"), emitter, NULL));
+  if (!loom_low_is_power_of_two_i64(
+          loom_low_storage_tail_address_base_alignment(op))) {
+    IREE_RETURN_IF_ERROR(loom_low_emit_attr_value_error(
+        op, loom_low_storage_tail_address_base_alignment_diagnostic_ref(),
+        IREE_SV("base_alignment"),
+        loom_low_storage_tail_address_base_alignment(op),
+        IREE_SV("positive power-of-two byte alignment"), emitter));
+  }
+  const loom_type_t result_type =
+      loom_module_value_type(module, loom_low_storage_tail_address_result(op));
+  if (!loom_type_is_register(result_type)) {
+    return loom_low_emit_type_constraint_error(
+        op, LOOM_DIAGNOSTIC_FIELD_RESULT, 0, IREE_SV("result"), result_type,
+        IREE_SV("register"), emitter);
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_low_resource_verify(const loom_module_t* module,
                                        const loom_op_t* op,
                                        iree_diagnostic_emitter_t emitter) {

@@ -18,6 +18,26 @@
 
 #define LOOM_KERNEL_DEFAULT_MAX_SUBGROUP_SIZE 128u
 
+iree_status_t loom_kernel_workgroup_storage_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  const int64_t alignment = loom_kernel_workgroup_storage_base_alignment(op);
+  const loom_value_fact_buffer_reference_t reference = {
+      .maximum_byte_extent = operand_facts[0],
+      .minimum_alignment = alignment > 0 ? (uint64_t)alignment : 1,
+      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
+      .root_value_id = loom_kernel_workgroup_storage_result(op),
+      .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
+      .nullability = LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NON_NULL,
+      .origin = context->reference_origin,
+  };
+  IREE_RETURN_IF_ERROR(loom_value_facts_make_buffer_reference(
+      context, reference, &result_facts[0]));
+  loom_value_facts_mark_workgroup_uniform(&result_facts[0]);
+  return iree_ok_status();
+}
+
 static const loom_value_fact_topology_axis_t
     kKernelDimensionTopologyAxes[LOOM_KERNEL_DIMENSION_COUNT_] = {
         [LOOM_KERNEL_DIMENSION_X] = LOOM_VALUE_FACT_TOPOLOGY_AXIS_X,

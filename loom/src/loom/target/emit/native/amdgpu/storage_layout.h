@@ -7,10 +7,9 @@
 // AMDGPU fixed-segment layout for function-local storage.
 //
 // This layout is the single contract shared by kernel metadata and native
-// encoding. Each low.storage.reserve inside a target-low function is packed in
-// function body order into the target segment selected by its storage type,
-// with the reservation's requested alignment applied before assigning its byte
-// offset.
+// encoding. Workgroup reservations retain the canonical shared layout and its
+// terminal tail padding. Private and scratch reservations are projected in
+// function body order into one private segment.
 
 #ifndef LOOM_TARGET_EMIT_NATIVE_AMDGPU_STORAGE_LAYOUT_H_
 #define LOOM_TARGET_EMIT_NATIVE_AMDGPU_STORAGE_LAYOUT_H_
@@ -24,7 +23,7 @@ extern "C" {
 #endif
 
 typedef struct loom_amdgpu_storage_layout_segment_sizes_t {
-  // Fixed bytes of workgroup storage required by low.storage.reserve ops.
+  // Fixed workgroup bytes, including alignment before a borrowed dynamic tail.
   uint64_t group_segment_fixed_size;
   // Fixed bytes of invocation-private storage required by low.storage.reserve
   // ops.
@@ -48,6 +47,8 @@ typedef loom_low_storage_layout_reference_t
 typedef struct loom_amdgpu_storage_layout_t {
   // Fixed segment sizes after laying out all function-local storage.
   loom_amdgpu_storage_layout_segment_sizes_t segment_sizes;
+  // Alignment of the borrowed workgroup tail, or zero when absent.
+  uint64_t workgroup_tail_alignment;
   // Arena-owned records in function storage layout order.
   const loom_amdgpu_storage_layout_record_t* records;
   // Number of records in |records|.
@@ -67,6 +68,12 @@ void loom_amdgpu_storage_layout_lookup_reference(
     const loom_amdgpu_storage_layout_t* layout, const loom_module_t* module,
     loom_value_id_t storage_value_id,
     loom_amdgpu_storage_layout_reference_t* out_reference);
+
+// Resolves a verified fixed or tail storage-address op to the native32 LDS or
+// private byte address used identically by assembly and binary emission.
+iree_status_t loom_amdgpu_storage_layout_resolve_address(
+    const loom_amdgpu_storage_layout_t* layout, const loom_module_t* module,
+    const loom_op_t* address_op, uint32_t* out_byte_offset);
 
 #ifdef __cplusplus
 }  // extern "C"

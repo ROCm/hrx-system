@@ -1718,28 +1718,14 @@ static iree_status_t loom_amdgpu_encode_storage_view_packet(
 static iree_status_t loom_amdgpu_encode_storage_address_packet(
     loom_amdgpu_encode_state_t* state, const loom_low_packet_view_t* packet) {
   const loom_op_t* op = packet->node->op;
-  loom_amdgpu_storage_layout_reference_t reference;
-  loom_amdgpu_storage_layout_lookup_reference(
-      state->inputs.storage_layout, state->inputs.schedule->module,
-      loom_low_storage_address_storage(op), &reference);
-  const uint64_t offset = (uint64_t)loom_low_storage_address_offset(op);
-  uint64_t byte_offset = reference.reservation.byte_offset;
-  if (byte_offset > UINT32_MAX ||
-      reference.byte_offset > UINT32_MAX - byte_offset) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU native encoding low.storage.address byte offset exceeds u32");
-  }
-  byte_offset += reference.byte_offset;
-  if (offset > UINT32_MAX - byte_offset) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "AMDGPU native encoding low.storage.address byte offset exceeds u32");
-  }
+  uint32_t byte_offset = 0;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_storage_layout_resolve_address(
+      state->inputs.storage_layout, state->inputs.schedule->module, op,
+      &byte_offset));
   const loom_low_allocation_assignment_t* assignment =
       loom_low_packet_result_assignment(state->inputs.allocation, packet, 0);
   return loom_amdgpu_encode_vgpr_move_immediate(
-      state, assignment->location_base, (uint32_t)(byte_offset + offset));
+      state, assignment->location_base, byte_offset);
 }
 
 static bool loom_amdgpu_wait_packet_matches_packet(
@@ -1950,6 +1936,7 @@ static iree_status_t loom_amdgpu_encode_packet(
     case LOOM_OP_LOW_CONCAT:
       return loom_amdgpu_encode_concat_packet(state, packet);
     case LOOM_OP_LOW_STORAGE_ADDRESS:
+    case LOOM_OP_LOW_STORAGE_TAIL_ADDRESS:
       return loom_amdgpu_encode_storage_address_packet(state, packet);
     case LOOM_OP_LOW_BR:
       return loom_amdgpu_encode_branch_packet(state, packet);

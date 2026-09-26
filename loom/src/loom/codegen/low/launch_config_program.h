@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/codegen/low/storage_layout.h"
 #include "loom/ir/function_version.h"
 #include "loom/ir/module.h"
 #include "loom/pass/environment.h"
@@ -85,10 +86,14 @@ iree_status_t loom_kernel_launch_config_program_capture(
 //
 // |lowered_module| is the module after the complete pass program. The returned
 // host module is owned by |program| and remains valid until deinitialization.
+// Workgroup layouts live in the caller-owned |layout_arena| across companion
+// release and native emission, until the next declaration-changing mutation.
 iree_status_t loom_kernel_launch_config_program_finalize(
     loom_kernel_launch_config_program_t* program,
     const loom_module_t* lowered_module,
     iree_arena_block_pool_t* scratch_block_pool,
+    iree_arena_allocator_t* layout_arena,
+    loom_low_workgroup_layouts_t* out_workgroup_layouts,
     const loom_module_t** out_module);
 
 #ifdef __cplusplus

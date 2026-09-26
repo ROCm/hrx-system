@@ -72,7 +72,10 @@ loom_cc_test(
     deps = [
         ":kernel",
         "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
         "//loom/src/loom/testing:diagnostic_matchers",
+        "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

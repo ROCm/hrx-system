@@ -56,7 +56,8 @@ class LowFunctionRequirementsTest : public ::testing::Test {
     loom_op_t* function = loom_block_op(loom_module_block(module), 0);
     loom_low_function_requirements_t requirements = {};
     IREE_CHECK_OK(loom_low_function_requirements_build(
-        module, loom_low_func_def_body(function), &arena_, &requirements));
+        module, loom_low_func_def_body(function), nullptr, &arena_,
+        &requirements));
     return requirements;
   }
 

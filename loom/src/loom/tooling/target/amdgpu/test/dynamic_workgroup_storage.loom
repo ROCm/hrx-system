@@ -1,0 +1,105 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Twenty fixed bytes require padding before the 64-byte-aligned dynamic tail.
+// Each of four 128-lane workgroups exchanges tail values across wave boundaries.
+kernel.def @exchange_dynamic_storage(%launch_stride: index) {
+  %unit = index.constant 1 : index
+  %groups = index.constant 4 : index
+  %width = index.constant 128 : index
+  %bytes_per_stride = index.constant 512 : offset
+  %dynamic_bytes = index.scale %launch_stride, %bytes_per_stride : index, offset -> offset
+  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%width, %unit, %unit) dynamic_workgroup_storage(%dynamic_bytes) : index
+} launch(%output: buffer, %stride: i32, %seed: i32) {
+  %origin = index.constant 0 : offset
+  %fixed_bytes = index.constant 20 : offset
+  %fixed = buffer.alloca<workgroup> align(4) %fixed_bytes : buffer
+  %fixed_words = buffer.view %fixed[%origin] : buffer -> view<5xi32>
+  %bytes_per_stride = scalar.constant 512 : i32
+  %dynamic_bytes_value = scalar.muli %stride, %bytes_per_stride : i32
+  %dynamic_bytes = index.cast %dynamic_bytes_value : i32 to offset
+  %tail = kernel.workgroup.storage align(64) %dynamic_bytes : buffer
+  %tail_length = buffer.length %tail
+  %tail_length_value = index.cast %tail_length : offset to i32
+
+  %lane = kernel.workitem.id<x> : index
+  %group = kernel.workgroup.id<x> : index
+  %fixed_count = index.constant 5 : index
+  %writes_fixed = index.cmp ult, %lane, %fixed_count : index
+  scf.if %writes_fixed {
+    %fixed_token = scalar.constant 11 : i32
+    view.store %fixed_token, %fixed_words[%lane] : i32, view<5xi32>
+  }
+
+  %lane_value = index.cast %lane : index to i32
+  %word_bytes = scalar.constant 4 : i32
+  %write_word = scalar.muli %lane_value, %stride : i32
+  %write_byte = scalar.muli %write_word, %word_bytes : i32
+  %write_offset = index.cast %write_byte : i32 to offset
+  %write_view = buffer.view %tail[%write_offset] : buffer -> view<1xi32>
+  view.store %seed, %write_view[0] : i32, view<1xi32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+
+  %partner_mask = scalar.constant 64 : i32
+  %partner = scalar.xori %lane_value, %partner_mask : i32
+  %read_word = scalar.muli %partner, %stride : i32
+  %read_byte = scalar.muli %read_word, %word_bytes : i32
+  %read_offset = index.cast %read_byte : i32 to offset
+  %read_view = buffer.view %tail[%read_offset] : buffer -> view<1xi32>
+  %tail_value = view.load %read_view[0] : view<1xi32> -> i32
+  %fixed_index = index.rem %lane, %fixed_count : index
+  %fixed_value = view.load %fixed_words[%fixed_index] : view<5xi32> -> i32
+  %sum = scalar.addi %tail_value, %fixed_value : i32
+  %result = scalar.addi %sum, %tail_length_value : i32
+
+  %width = index.constant 128 : index
+  %group_origin = index.mul %group, %width : index
+  %position = index.add %group_origin, %lane : index
+  %output_words = buffer.view %output[%origin] : buffer -> view<512xi32>
+  view.store %result, %output_words[%position] : i32, view<512xi32>
+  kernel.return
+}
+
+check.case @dynamic_storage_single_dispatch {
+  // CDNA3 uses the HAL's AQL dispatch path with dynamic local-memory support.
+  check.requires<hal.amdgpu.descriptor_set> {descriptor_set = "amdgpu.cdna3.core"}
+  %launch_stride = check.literal value(1) : index
+  %stride = check.literal value(1) : i32
+  %seed = check.literal value(7) : i32
+  %actual = check.generate.fill value(-1) : tensor<512xi32>
+  kernel.launch @exchange_dynamic_storage[%launch_stride](%actual, %stride, %seed) : [index](tensor<512xi32>, i32, i32)
+  %expected = check.generate.fill value(530) : tensor<512xi32>
+  check.expect.equal actual(%actual) expected(%expected) : tensor<512xi32>
+  check.return
+}
+
+check.case @dynamic_storage_dispatch_sequence {
+  check.requires<hal.amdgpu.descriptor_set> {descriptor_set = "amdgpu.cdna3.core"}
+  %one = check.literal value(1) : index
+  %three = check.literal value(3) : index
+  %stride_one = check.literal value(1) : i32
+  %stride_three = check.literal value(3) : i32
+  %first_seed = check.literal value(7) : i32
+  %second_seed = check.literal value(13) : i32
+  %third_seed = check.literal value(19) : i32
+  %first = check.generate.fill value(-1) : tensor<512xi32>
+  %second = check.generate.fill value(-1) : tensor<512xi32>
+  %third = check.generate.fill value(-1) : tensor<512xi32>
+  kernel.launch @exchange_dynamic_storage[%one](%first, %stride_one, %first_seed) : [index](tensor<512xi32>, i32, i32)
+  kernel.launch @exchange_dynamic_storage[%three](%second, %stride_three, %second_seed) : [index](tensor<512xi32>, i32, i32)
+  kernel.launch @exchange_dynamic_storage[%one](%third, %stride_one, %third_seed) : [index](tensor<512xi32>, i32, i32)
+  %first_expected = check.generate.fill value(530) : tensor<512xi32>
+  %second_expected = check.generate.fill value(1560) : tensor<512xi32>
+  %third_expected = check.generate.fill value(542) : tensor<512xi32>
+  check.expect.equal actual(%first) expected(%first_expected) : tensor<512xi32>
+  check.expect.equal actual(%second) expected(%second_expected) : tensor<512xi32>
+  check.expect.equal actual(%third) expected(%third_expected) : tensor<512xi32>
+  check.return
+}
+
+check.benchmark<@dynamic_storage_single_dispatch> @dynamic_storage_single_dispatch_latency
+
+check.benchmark<@dynamic_storage_dispatch_sequence> @dynamic_storage_dispatch_sequence_latency

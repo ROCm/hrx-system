@@ -147,6 +147,7 @@ loom_check_test_suite(
     "test/packet.loom-test"
     "test/packet_json.loom-test"
     "test/spill_lowering.loom-test"
+    "test/storage_tail.loom-test"
     "test/tensor_completion.loom-test"
     "test/vopd_plan.loom-test"
     "test/wait_coalescing.loom-test"
@@ -204,6 +205,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::codegen::low::storage_layout
+    loom::ops::low
   PUBLIC
 )
 endif()
@@ -222,6 +224,7 @@ loom_cc_test(
     loom::codegen::low::storage_layout
     loom::ir
     loom::ops::low
+    loom::target::registers
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"

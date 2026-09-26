@@ -629,6 +629,8 @@ loom_cc_test(
         ":kernel_launch_config",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
         "//loom/src/loom/target:facts",
         "//loom/src/loom/target:types",
         "//loom/src/loom/testing:context",

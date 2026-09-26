@@ -137,6 +137,43 @@ loom_value_id_t loom_kernel_launch_config_workgroup_cluster_size_operand(
   }
 }
 
+bool loom_kernel_def_static_dynamic_workgroup_storage_from_facts(
+    const loom_module_t* module, const loom_op_t* kernel_op,
+    const loom_value_fact_table_t* facts, uint64_t* out_byte_length) {
+  *out_byte_length = 0;
+  const loom_op_t* launch_config = loom_kernel_def_launch_config_op(kernel_op);
+  if (!launch_config) {
+    return false;
+  }
+  const loom_value_id_t value_id =
+      loom_kernel_launch_config_dynamic_workgroup_storage(launch_config);
+  if (value_id == LOOM_VALUE_ID_INVALID) {
+    return true;
+  }
+  int64_t byte_length = 0;
+  if (facts &&
+      loom_value_facts_as_exact_i64(
+          loom_value_fact_table_lookup(facts, value_id), &byte_length)) {
+    if (byte_length < 0) {
+      return false;
+    }
+    *out_byte_length = (uint64_t)byte_length;
+    return true;
+  }
+  const loom_value_t* value = loom_module_value(module, value_id);
+  const loom_op_t* defining_op =
+      loom_value_is_block_arg(value) ? NULL : loom_value_def_op(value);
+  if (!loom_index_constant_isa(defining_op)) {
+    return false;
+  }
+  byte_length = loom_attr_as_i64(loom_index_constant_value(defining_op));
+  if (byte_length < 0) {
+    return false;
+  }
+  *out_byte_length = (uint64_t)byte_length;
+  return true;
+}
+
 bool loom_kernel_def_static_workgroup_size(
     const loom_module_t* module, const loom_op_t* kernel_op,
     loom_target_workgroup_size_t* out_size) {

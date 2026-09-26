@@ -346,6 +346,12 @@ static iree_status_t loom_link_kernel_config_materialize_body(
         IREE_STATUS_INVALID_ARGUMENT,
         "kernel configuration does not end in kernel.launch.config");
   }
+  if (loom_kernel_launch_config_dynamic_workgroup_storage_is_present(
+          launch_config)) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "portable command configuration cannot carry "
+                            "dynamic_workgroup_storage");
+  }
   loom_value_id_t return_values[3];
   memcpy(return_values, loom_op_const_operands(launch_config),
          sizeof(return_values));
@@ -750,6 +756,12 @@ static iree_status_t loom_link_kernel_config_build_ir_helper(
     return iree_make_status(
         IREE_STATUS_INTERNAL,
         "selected kernel configuration has no launch terminator");
+  }
+  if (loom_kernel_launch_config_dynamic_workgroup_storage_is_present(
+          launch_config)) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "portable command configuration cannot carry "
+                            "dynamic_workgroup_storage");
   }
   loom_builder_t body_builder;
   loom_builder_initialize(

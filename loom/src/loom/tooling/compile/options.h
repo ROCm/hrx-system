@@ -10,6 +10,7 @@
 #define LOOM_TOOLING_COMPILE_OPTIONS_H_
 
 #include "iree/base/api.h"
+#include "loom/codegen/low/storage_layout.h"
 #include "loom/error/source.h"
 #include "loom/ir/function_version.h"
 #include "loom/target/pipeline_options.h"
@@ -44,6 +45,8 @@ typedef struct loom_compile_options_t {
   // Optional compiler-owned function versions participating in artifact
   // emission. The list and its version objects are borrowed for the call.
   const loom_function_version_list_t* function_versions;
+  // Optional completed workgroup layouts borrowed for the emission call.
+  const loom_low_workgroup_layouts_t* workgroup_layouts;
   // Target pipeline options used to prepare the module for artifact emission.
   // Artifact providers use this to publish runtime support required by
   // compiler-generated target-low code.

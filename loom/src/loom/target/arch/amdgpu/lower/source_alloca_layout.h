@@ -52,6 +52,11 @@ iree_status_t loom_amdgpu_source_alloca_layout_record_lower_alloca(
     loom_low_lower_context_t* context, const loom_op_t* alloca_op,
     uint64_t byte_length);
 
+// Records the verified borrowed workgroup tail root without reserving its
+// launch-dependent extent in the fixed source allocation arena.
+iree_status_t loom_amdgpu_source_alloca_layout_record_lower_workgroup_tail(
+    loom_low_lower_context_t* context, loom_value_id_t root_value_id);
+
 // Emits one physical low-storage arena for each populated memory space. Source
 // allocation plans are complete before entry setup, so each arena carries the
 // final packed extent and strongest required base alignment.
@@ -71,6 +76,17 @@ iree_status_t loom_amdgpu_source_alloca_layout_for_low_legality(
 iree_status_t loom_amdgpu_source_alloca_layout_record_low_legality_alloca(
     loom_target_low_legality_context_t* context, const loom_op_t* alloca_op,
     uint64_t byte_length);
+
+// Records the borrowed workgroup tail root during the existing legality walk.
+iree_status_t
+loom_amdgpu_source_alloca_layout_record_low_legality_workgroup_tail(
+    loom_target_low_legality_context_t* context, loom_value_id_t root_value_id);
+
+// Returns whether |root_value_id| is the recorded symbolic workgroup tail. Its
+// native byte base is resolved after all fixed Low reservations are complete.
+bool loom_amdgpu_source_alloca_layout_is_workgroup_tail(
+    const loom_amdgpu_source_alloca_layout_t* layout,
+    loom_value_id_t root_value_id);
 
 // Returns the physical storage-root requirement retained for |memory_space|.
 // Returns false when no selected source allocation occupies that space.

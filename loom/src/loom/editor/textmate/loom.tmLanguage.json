@@ -173,7 +173,7 @@
         },
         {
           "name": "meta.operation-name.loom",
-          "match": "\\b(kernel)\\.(async\\.tensor\\.store\\.from\\.lds|async\\.cluster\\.gather\\.mask|cluster\\.workgroup\\.flat_id|async\\.tensor\\.load\\.to\\.lds|subgroup\\.broadcast\\.first|tensor\\.lds\\.descriptor|async\\.cluster\\.gather|cluster\\.workgroup\\.id|subgroup\\.active\\.mask|subgroup\\.vote\\.ballot|workgroup\\.vote\\.count|workitem\\.dispatch\\.id|subgroup\\.broadcast|subgroup\\.match\\.all|subgroup\\.match\\.any|workgroup\\.vote\\.all|workgroup\\.vote\\.any|async\\.gather\\.mask|launch\\.concurrent|subgroup\\.vote\\.all|subgroup\\.vote\\.any|subgroup\\.lane\\.id|subgroup\\.shuffle|workgroup\\.reduce|async\\.copy\\.mask|subgroup\\.reduce|workgroup\\.count|subgroup\\.count|workgroup\\.scan|workgroup\\.size|cluster\\.count|launch\\.config|launch\\.serial|subgroup\\.scan|subgroup\\.size|async\\.gather|cluster\\.size|launch\\.yield|workgroup\\.id|async\\.group|subgroup\\.id|workitem\\.id|async\\.copy|async\\.wait|cluster\\.id|entry\\.decl|dispatch|barrier|assert|launch|return|decl|exit|def)\\b",
+          "match": "\\b(kernel)\\.(async\\.tensor\\.store\\.from\\.lds|async\\.cluster\\.gather\\.mask|cluster\\.workgroup\\.flat_id|async\\.tensor\\.load\\.to\\.lds|subgroup\\.broadcast\\.first|tensor\\.lds\\.descriptor|async\\.cluster\\.gather|cluster\\.workgroup\\.id|subgroup\\.active\\.mask|subgroup\\.vote\\.ballot|workgroup\\.vote\\.count|workitem\\.dispatch\\.id|subgroup\\.broadcast|subgroup\\.match\\.all|subgroup\\.match\\.any|workgroup\\.vote\\.all|workgroup\\.vote\\.any|async\\.gather\\.mask|launch\\.concurrent|subgroup\\.vote\\.all|subgroup\\.vote\\.any|workgroup\\.storage|subgroup\\.lane\\.id|subgroup\\.shuffle|workgroup\\.reduce|async\\.copy\\.mask|subgroup\\.reduce|workgroup\\.count|subgroup\\.count|workgroup\\.scan|workgroup\\.size|cluster\\.count|launch\\.config|launch\\.serial|subgroup\\.scan|subgroup\\.size|async\\.gather|cluster\\.size|launch\\.yield|workgroup\\.id|async\\.group|subgroup\\.id|workitem\\.id|async\\.copy|async\\.wait|cluster\\.id|entry\\.decl|dispatch|barrier|assert|launch|return|decl|exit|def)\\b",
           "captures": {
             "1": {
               "name": "support.namespace.dialect.loom"
@@ -341,7 +341,7 @@
       "patterns": [
         {
           "name": "keyword.other.loom",
-          "match": "\\b(?:workgroup_count|workgroup_size|memory_access|cluster_size|abi_layout|allocation|workgroups|configure|iter_args|artifact|capacity|expected|ordering|pipeline|priority|requires|schedule|default|dgroups|linkage|ordinal|across|actual|blocks|bounds|callee|config|device|export|extent|import|inputs|launch|layout|module|offset|period|public|reason|source|symbol|target|unroll|values|align|attrs|count|range|scope|shape|using|value|where|atol|axes|base|case|else|from|host|into|mode|name|path|rtol|seed|step|abi|for|nan|as|do|on|to|x)\\b"
+          "match": "\\b(?:dynamic_workgroup_storage|workgroup_count|workgroup_size|memory_access|cluster_size|abi_layout|allocation|workgroups|configure|iter_args|artifact|capacity|expected|ordering|pipeline|priority|requires|schedule|default|dgroups|linkage|ordinal|across|actual|blocks|bounds|callee|config|device|export|extent|import|inputs|launch|layout|module|offset|period|public|reason|source|symbol|target|unroll|values|align|attrs|count|range|scope|shape|using|value|where|atol|axes|base|case|else|from|host|into|mode|name|path|rtol|seed|step|abi|for|nan|as|do|on|to|x)\\b"
         },
         {
           "name": "constant.language.boolean.loom",

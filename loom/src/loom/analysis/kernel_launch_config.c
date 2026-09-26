@@ -152,6 +152,7 @@ static void loom_kernel_launch_config_fill_known_fields(
     const loom_module_t* module, loom_op_t* kernel_op,
     const loom_target_facts_t* target_facts,
     const loom_value_fact_table_t* fact_table,
+    const uint64_t* fixed_workgroup_storage_bytes,
     loom_kernel_launch_config_t* out_config) {
   loom_target_dispatch_workgroup_count_t count = {0};
   if (loom_kernel_def_static_workgroup_count_from_facts(module, kernel_op,
@@ -173,6 +174,18 @@ static void loom_kernel_launch_config_fill_known_fields(
       target_bundle->snapshot->subgroup_size != 0) {
     out_config->subgroup_size = target_bundle->snapshot->subgroup_size;
     out_config->fields |= LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_SUBGROUP_SIZE;
+  }
+
+  uint64_t dynamic_bytes = 0;
+  if (fixed_workgroup_storage_bytes &&
+      *fixed_workgroup_storage_bytes <= INT64_MAX &&
+      loom_kernel_def_static_dynamic_workgroup_storage_from_facts(
+          module, kernel_op, fact_table, &dynamic_bytes) &&
+      dynamic_bytes <= INT64_MAX - *fixed_workgroup_storage_bytes) {
+    out_config->workgroup_storage_bytes =
+        *fixed_workgroup_storage_bytes + dynamic_bytes;
+    out_config->fields |=
+        LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_STORAGE_BYTES;
   }
 }
 
@@ -237,9 +250,9 @@ iree_status_t loom_kernel_launch_config_try_evaluate_direct(
     }
   }
 
-  loom_kernel_launch_config_fill_known_fields(module, symbol->defining_op,
-                                              options->function_target_facts,
-                                              /*fact_table=*/NULL, out_config);
+  loom_kernel_launch_config_fill_known_fields(
+      module, symbol->defining_op, options->function_target_facts,
+      /*fact_table=*/NULL, options->fixed_workgroup_storage_bytes, out_config);
   loom_kernel_launch_config_report_required_fields(options->required_fields,
                                                    out_config, out_config);
   if (!loom_kernel_launch_config_has_failure(out_config->failure)) {
@@ -321,7 +334,8 @@ iree_status_t loom_kernel_launch_config_evaluate(
   if (iree_status_is_ok(status) &&
       !loom_kernel_launch_config_has_failure(out_config->failure)) {
     loom_kernel_launch_config_fill_known_fields(
-        module, symbol->defining_op, target_facts, fact_table, out_config);
+        module, symbol->defining_op, target_facts, fact_table,
+        options->fixed_workgroup_storage_bytes, out_config);
     loom_kernel_launch_config_report_required_fields(options->required_fields,
                                                      out_config, out_config);
   }

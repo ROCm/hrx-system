@@ -1,0 +1,98 @@
+// RUN: emit amdgpu-assembly @padded_workgroup_tail waits=none strategy=source
+
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @padded_workgroup_tail() asm {
+  %fixed = storage {byte_alignment = 4, byte_length = 20} : low.storage<workgroup>
+  %tail = storage_tail_address align(64) : reg<amdgpu.vgpr>
+  return
+}
+
+// ----
+  v_mov_b32 v0, 64
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-native-words @padded_workgroup_tail_words waits=none strategy=source
+
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @padded_workgroup_tail_words() asm {
+  %fixed = storage {byte_alignment = 4, byte_length = 20} : low.storage<workgroup>
+  %tail = storage_tail_address align(64) : reg<amdgpu.vgpr>
+  return
+}
+
+// ----
+0x7E0002C0
+0xBF810000
+
+// ====
+
+// RUN: emit amdgpu-assembly @late_fixed_workgroup_tail waits=none strategy=source
+
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @late_fixed_workgroup_tail() asm {
+  %fixed = storage {byte_alignment = 4, byte_length = 20} : low.storage<workgroup>
+  %tail = storage_tail_address align(64) : reg<amdgpu.vgpr>
+  %late = storage {byte_alignment = 16, byte_length = 80} : low.storage<workgroup>
+  return
+}
+
+// ----
+  v_mov_b32 v0, 128
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-native-words @late_fixed_workgroup_tail_words waits=none strategy=source
+
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @late_fixed_workgroup_tail_words() asm {
+  %fixed = storage {byte_alignment = 4, byte_length = 20} : low.storage<workgroup>
+  %tail = storage_tail_address align(64) : reg<amdgpu.vgpr>
+  %late = storage {byte_alignment = 16, byte_length = 80} : low.storage<workgroup>
+  return
+}
+
+// ----
+0x7E0002FF
+0x00000080
+0xBFB00000
+
+// ====
+
+// Register pressure creates private spill storage and rebuilds the native
+// frame. The retained workgroup layout still gives the tail its padded base.
+// RUN: with-checks emit amdgpu-assembly @tail_survives_private_spill_repair strategy=source amdgpu.vgpr=5
+
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @tail_survives_private_spill_repair(%blocker: reg<amdgpu.vgpr>, %wide: reg<amdgpu.vgpr x4>, %output: reg<amdgpu.sgpr x2>) asm {
+  %fixed = storage {byte_alignment = 4, byte_length = 20} : low.storage<workgroup>
+  %temporary = v_add_u32 %blocker, %blocker
+  %pressure = v_add_u32 %blocker, %temporary
+  %head = slice %wide[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x3>
+  %first = slice %head[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %second = slice %head[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %sum = v_add_u32 %first, %second
+  %end = slice %wide[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %third = slice %end[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %fourth = slice %end[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %partial = v_add_u32 %sum, %third
+  %result = v_add_u32 %partial, %fourth
+  %out = v_add_u32 %result, %pressure
+  %address = v_mov_b32 0
+  global_store_b32_saddr %address, %out, %output
+  %tail = storage_tail_address align(64) : reg<amdgpu.vgpr>
+  return
+}
+
+// ----
+CHECK: scratch_store_b128 *
+CHECK: scratch_load_b128 *
+CHECK: v_mov_b32 *, 64
+CHECK: s_endpgm

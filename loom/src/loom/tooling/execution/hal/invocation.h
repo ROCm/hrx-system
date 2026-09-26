@@ -33,6 +33,8 @@ typedef struct loom_run_hal_invocation_options_t {
   iree_string_view_t function_name;
   // Dispatch workgroup count in x, y, z order.
   uint32_t workgroup_count[3];
+  // Additional workgroup-local bytes beyond the executable's fixed prefix.
+  uint32_t dynamic_workgroup_local_memory;
   // Dispatch constants in HAL ABI order.
   uint32_t constants[LOOM_RUN_HAL_MAX_CONSTANT_COUNT];
   // Number of entries in |constants|.

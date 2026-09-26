@@ -67,6 +67,8 @@ struct loom_amdgpu_source_alloca_layout_t {
   // Per-memory-space arenas for selected allocation layout.
   loom_amdgpu_source_alloca_layout_segment_t
       segments[LOOM_AMDGPU_SOURCE_ALLOCA_SPACE_COUNT];
+  // Borrowed workgroup tail root, or INVALID when no tail was selected.
+  loom_value_id_t workgroup_tail_value_id;
   // Shared lifetime and interference facts for source allocations.
   loom_storage_interference_t* interference;
   // Analysis lifecycle bits.
@@ -78,6 +80,7 @@ static int loom_amdgpu_source_alloca_layout_state_key;
 
 static const loom_amdgpu_source_alloca_layout_t
     kLoomAmdgpuSourceAllocaLayoutEmpty = {
+        .workgroup_tail_value_id = LOOM_VALUE_ID_INVALID,
         .flags = LOOM_AMDGPU_SOURCE_ALLOCA_LAYOUT_INITIALIZED,
 };
 
@@ -197,6 +200,7 @@ static iree_status_t loom_amdgpu_source_alloca_layout_initialize(
   layout->source_function_op = source_function.op;
   layout->entries = NULL;
   layout->entry_count = value_domain != NULL ? value_domain->value_count : 0;
+  layout->workgroup_tail_value_id = LOOM_VALUE_ID_INVALID;
   layout->interference = NULL;
   layout->flags = 0;
   if (layout->entry_count != 0) {
@@ -270,6 +274,17 @@ iree_status_t loom_amdgpu_source_alloca_layout_record_lower_alloca(
       (loom_amdgpu_source_alloca_layout_t*)const_layout;
   return loom_amdgpu_source_alloca_layout_record_allocation(layout, alloca_op,
                                                             byte_length);
+}
+
+iree_status_t loom_amdgpu_source_alloca_layout_record_lower_workgroup_tail(
+    loom_low_lower_context_t* context, loom_value_id_t root_value_id) {
+  const loom_amdgpu_source_alloca_layout_t* const_layout = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_for_lower_context(
+      context, &const_layout));
+  loom_amdgpu_source_alloca_layout_t* layout =
+      (loom_amdgpu_source_alloca_layout_t*)const_layout;
+  layout->workgroup_tail_value_id = root_value_id;
+  return iree_ok_status();
 }
 
 static bool loom_amdgpu_source_alloca_layout_storage_space(
@@ -375,6 +390,26 @@ bool loom_amdgpu_source_alloca_layout_storage_requirement(
   out_requirement->byte_length = packing_requirement.byte_length;
   out_requirement->byte_alignment = packing_requirement.byte_alignment;
   return true;
+}
+
+iree_status_t
+loom_amdgpu_source_alloca_layout_record_low_legality_workgroup_tail(
+    loom_target_low_legality_context_t* context,
+    loom_value_id_t root_value_id) {
+  const loom_amdgpu_source_alloca_layout_t* const_layout = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_for_low_legality(
+      context, &const_layout));
+  loom_amdgpu_source_alloca_layout_t* layout =
+      (loom_amdgpu_source_alloca_layout_t*)const_layout;
+  layout->workgroup_tail_value_id = root_value_id;
+  return iree_ok_status();
+}
+
+bool loom_amdgpu_source_alloca_layout_is_workgroup_tail(
+    const loom_amdgpu_source_alloca_layout_t* layout,
+    loom_value_id_t root_value_id) {
+  return root_value_id != LOOM_VALUE_ID_INVALID &&
+         root_value_id == layout->workgroup_tail_value_id;
 }
 
 bool loom_amdgpu_source_alloca_layout_lookup_byte_offset(

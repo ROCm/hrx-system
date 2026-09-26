@@ -1,0 +1,22 @@
+// RUN: emit source-low target=spirv:vulkan1.3+bda output=low control-flow=structured-low
+
+kernel.def @dispatch_sized_storage() {
+  %unit = index.constant 1 : index
+  %bytes = index.constant 256 : offset
+  // ERROR@+1: TARGET/126 {op_name="kernel.launch.config"}
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) dynamic_workgroup_storage(%bytes) : index
+} launch() {
+  kernel.return
+}
+
+// ====
+
+// Even zero requests carry an explicit dispatch-sized storage contract.
+kernel.def @zero_dispatch_sized_storage() {
+  %unit = index.constant 1 : index
+  %bytes = index.constant 0 : offset
+  // ERROR@+1: TARGET/126 {op_name="kernel.launch.config"}
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) dynamic_workgroup_storage(%bytes) : index
+} launch() {
+  kernel.return
+}

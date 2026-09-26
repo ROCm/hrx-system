@@ -405,8 +405,8 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(loom_kernel_launch_config_build(
         &config_builder, /*build_flags=*/0, workload, workload, workload,
         workload, workload, workload, LOOM_VALUE_ID_INVALID,
-        LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID, LOOM_LOCATION_UNKNOWN,
-        &config_op));
+        LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID,
+        LOOM_LOCATION_UNKNOWN, &config_op));
 
     loom_region_t* body_region = loom_kernel_def_body(kernel_op);
     loom_builder_t body_builder;

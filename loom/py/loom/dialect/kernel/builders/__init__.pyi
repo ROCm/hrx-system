@@ -38,6 +38,7 @@ class KernelBuilder(DialectBuilder):
         workgroup_cluster_size_x: ValueRef | None = ...,
         workgroup_cluster_size_y: ValueRef | None = ...,
         workgroup_cluster_size_z: ValueRef | None = ...,
+        dynamic_workgroup_storage: ValueRef | None = ...,
         location_id: int | None = ...,
     ) -> None: ...
     def return_(
@@ -569,3 +570,14 @@ class KernelBuilder(DialectBuilder):
         body: Region | None = ...,
         location_id: int | None = ...,
     ) -> None: ...
+    def storage(
+        self,
+        *,
+        base_alignment: int,
+        byte_length: ValueRef,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...

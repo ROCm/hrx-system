@@ -114,7 +114,8 @@ static iree_status_t loom_aie2p_array_plan_check_collect_leaves(
     };
     IREE_RETURN_IF_ERROR(loom_low_function_requirements_build(
         request->module, loom_low_func_def_body(symbol->defining_op),
-        request->case_arena, &leaves[leaf_index].requirements));
+        /*workgroup_layout=*/NULL, request->case_arena,
+        &leaves[leaf_index].requirements));
     ++leaf_index;
   }
   *out_leaves = leaves;
