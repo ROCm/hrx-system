@@ -16,6 +16,7 @@ func.def @parent_result() -> (i32) {
     // ERROR@+1: PARSE/001 "result"
     test.yield %result : i32
   }
+  // ERROR@+1: PARSE/001 "result"
   func.return %result : i32
 }
 

@@ -308,6 +308,7 @@ func.def @lookup_ragged_case_row(%variant: index, %a: index, %b: index) -> (inde
     // ERROR@+1: PARSE/030 "1" "2"
     1 = (%a)
   } default(%a, %b) : index, index
+  // ERROR@+1: PARSE/001 "x"
   func.return %x, %y : index, index
 }
 
@@ -318,6 +319,7 @@ func.def @lookup_ragged_default_row(%variant: index, %a: index, %b: index) -> (i
     0 = (%a, %b)
     // ERROR@+1: PARSE/030 "1" "2"
   } default(%a) : index, index
+  // ERROR@+1: PARSE/001 "x"
   func.return %x, %y : index, index
 }
 

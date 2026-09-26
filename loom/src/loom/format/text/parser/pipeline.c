@@ -9,6 +9,7 @@
 #include "loom/error/error_catalog.h"
 #include "loom/format/text/parser/attrs.h"
 #include "loom/format/text/parser/diagnostics.h"
+#include "loom/format/text/parser/recovery.h"
 #include "loom/format/text/parser/regions.h"
 #include "loom/ir/context.h"
 
@@ -23,7 +24,7 @@ typedef struct loom_pipeline_attr_entry_t {
 
 static iree_status_t loom_parse_pipeline_region_contents(
     loom_parser_t* parser, const loom_region_descriptor_t* region_descriptor,
-    loom_region_t* region, bool* out_region_end_consumed);
+    loom_region_t* region);
 
 static bool loom_pipeline_token_is_name(loom_token_t token) {
   return token.kind == LOOM_TOKEN_BARE_IDENT ||
@@ -310,7 +311,6 @@ static const loom_region_descriptor_t* loom_pipeline_body_region_descriptor(
 static iree_status_t loom_parse_pipeline_nested_region(
     loom_parser_t* parser, const loom_region_descriptor_t* region_descriptor,
     loom_op_t* parent_op, loom_region_t* region) {
-  uint32_t errors_before = parser->error_count;
   LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_LBRACE, NULL);
 
   loom_parser_scope_t* outer_scope = parser->scope;
@@ -319,13 +319,8 @@ static iree_status_t loom_parse_pipeline_nested_region(
 
   loom_builder_ip_t saved_ip =
       loom_builder_enter_region(&parser->builder, parent_op, region);
-  bool region_end_consumed = false;
-  iree_status_t status = loom_parse_pipeline_region_contents(
-      parser, region_descriptor, region, &region_end_consumed);
-  if (parser->error_count > errors_before && !region_end_consumed &&
-      !loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_EOF)) {
-    loom_parser_sync_to_brace(parser);
-  }
+  iree_status_t status =
+      loom_parse_pipeline_region_contents(parser, region_descriptor, region);
   loom_parser_pending_block_args_clear(&parser->pending_func_args);
   loom_parser_pending_block_args_clear(&parser->pending_block_args);
   loom_builder_restore(&parser->builder, saved_ip);
@@ -565,9 +560,7 @@ static iree_status_t loom_parse_pipeline_statement(loom_parser_t* parser) {
 
 static iree_status_t loom_parse_pipeline_region_contents(
     loom_parser_t* parser, const loom_region_descriptor_t* region_descriptor,
-    loom_region_t* region, bool* out_region_end_consumed) {
-  *out_region_end_consumed = false;
-
+    loom_region_t* region) {
   IREE_RETURN_IF_ERROR(loom_parser_seed_region_entry_block(parser, region));
 
   loom_block_t* entry_block = loom_region_entry_block(region);
@@ -579,18 +572,21 @@ static iree_status_t loom_parse_pipeline_region_contents(
       break;
     }
 
+    loom_parser_recovery_point_t recovery = loom_parser_recovery_point(parser);
     if (loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_BLOCK_LABEL)) {
       loom_token_t label_token = loom_tokenizer_next(&parser->tokenizer);
       IREE_RETURN_IF_ERROR(loom_parser_emit_unexpected_token(
           parser, label_token, IREE_SV("pass pipeline statement")));
-      loom_parser_sync_to_newline(parser);
+      loom_parser_sync_to_next_op(parser, recovery,
+                                  LOOM_REGION_SYNTAX_PIPELINE);
       continue;
     }
 
     const uint32_t statement_errors_before = parser->error_count;
     IREE_RETURN_IF_ERROR(loom_parse_pipeline_statement(parser));
     if (parser->error_count > statement_errors_before) {
-      loom_parser_sync_to_newline(parser);
+      loom_parser_sync_to_next_op(parser, recovery,
+                                  LOOM_REGION_SYNTAX_PIPELINE);
     }
   }
 
@@ -601,7 +597,6 @@ static iree_status_t loom_parse_pipeline_region_contents(
 
   loom_tokenizer_discard_pending_comments(&parser->tokenizer);
   LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_RBRACE, NULL);
-  *out_region_end_consumed = true;
   return iree_ok_status();
 }
 
@@ -630,13 +625,8 @@ iree_status_t loom_parse_pipeline_prefixed_region(
 
   iree_host_size_t pending_successor_start =
       parser->pending_successor_refs.count;
-  bool region_end_consumed = false;
-  iree_status_t status = loom_parse_pipeline_region_contents(
-      parser, region_descriptor, region, &region_end_consumed);
-  if (parser->error_count > errors_before && !region_end_consumed &&
-      !loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_EOF)) {
-    loom_parser_sync_to_brace(parser);
-  }
+  iree_status_t status =
+      loom_parse_pipeline_region_contents(parser, region_descriptor, region);
   loom_parser_pending_block_args_clear(&parser->pending_func_args);
   loom_parser_pending_block_args_clear(&parser->pending_block_args);
   if (parser->error_count > errors_before || !iree_status_is_ok(status)) {

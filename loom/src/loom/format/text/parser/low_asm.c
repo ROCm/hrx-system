@@ -15,6 +15,7 @@
 #include "loom/format/text/parser/format.h"
 #include "loom/format/text/parser/format_signatures.h"
 #include "loom/format/text/parser/locations.h"
+#include "loom/format/text/parser/recovery.h"
 #include "loom/format/text/parser/regions.h"
 #include "loom/ir/context.h"
 
@@ -867,6 +868,7 @@ static iree_status_t loom_parse_low_asm_block_body(
     if (loom_parser_at_error_limit(parser)) {
       break;
     }
+    loom_parser_recovery_point_t recovery = loom_parser_recovery_point(parser);
     uint32_t errors_before = parser->error_count;
     loom_op_assembly_format_t format = {0};
     bool found_format = false;
@@ -878,7 +880,8 @@ static iree_status_t loom_parse_low_asm_block_body(
       IREE_RETURN_IF_ERROR(loom_parse_low_asm_packet(parser, descriptor_set));
     }
     if (parser->error_count > errors_before) {
-      loom_parser_sync_to_newline(parser);
+      loom_parser_sync_to_next_op(parser, recovery,
+                                  LOOM_REGION_SYNTAX_LOW_ASM_OPTIONAL);
     }
   }
   return iree_ok_status();
@@ -886,9 +889,7 @@ static iree_status_t loom_parse_low_asm_block_body(
 
 static iree_status_t loom_parse_low_asm_region_body(
     loom_parser_t* parser, const loom_region_descriptor_t* region_descriptor,
-    loom_region_t* region, const void* user_data,
-    bool* out_region_end_consumed) {
-  *out_region_end_consumed = false;
+    loom_region_t* region, const void* user_data) {
   const loom_text_low_asm_descriptor_set_t* descriptor_set =
       (const loom_text_low_asm_descriptor_set_t*)user_data;
 
@@ -930,7 +931,6 @@ static iree_status_t loom_parse_low_asm_region_body(
 
   loom_tokenizer_discard_pending_comments(&parser->tokenizer);
   LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_RBRACE, NULL);
-  *out_region_end_consumed = true;
   return iree_ok_status();
 }
 

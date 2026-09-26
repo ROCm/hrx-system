@@ -44,8 +44,7 @@ check.case @unnamed_slice_case {
   check.return
 }
 
-// ERROR@+2: PARSE/003 "symbol"
-// ERROR@+1: PARSE/003 "op name"
+// ERROR@+1: PARSE/003 "symbol"
 check.benchmark<@unnamed_slice_case> {count = 1}
 
 // ====

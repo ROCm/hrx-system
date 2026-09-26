@@ -247,8 +247,8 @@ iree_status_t loom_parser_expect(loom_parser_t* parser, loom_token_kind_t kind,
   if (!iree_status_is_ok(parser->tokenizer.status)) {
     return loom_tokenizer_consume_status(&parser->tokenizer);
   }
-  loom_token_t token = loom_tokenizer_next(&parser->tokenizer);
-  // A scan inside next() may have produced an infrastructure failure.
+  loom_token_t token = loom_tokenizer_peek(&parser->tokenizer);
+  // A scan inside peek() may have produced an infrastructure failure.
   if (!iree_status_is_ok(parser->tokenizer.status)) {
     return loom_tokenizer_consume_status(&parser->tokenizer);
   }
@@ -256,9 +256,12 @@ iree_status_t loom_parser_expect(loom_parser_t* parser, loom_token_kind_t kind,
     return loom_parser_emit_tokenizer_error(parser, token);
   }
   if (token.kind != kind) {
+    // The recovery owner decides whether this token belongs to the failed
+    // construct, its next sibling, or an enclosing region.
     return loom_parser_emit_unexpected_token(parser, token,
                                              loom_token_kind_name(kind));
   }
+  loom_tokenizer_next(&parser->tokenizer);
   if (out_token) {
     *out_token = token;
   }

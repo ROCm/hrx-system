@@ -122,12 +122,27 @@ static inline loom_token_t loom_token_none(void) {
   return token;
 }
 
-// Lexical scanner state. Stack-allocated; only escaped string payloads allocate
-// from |scratch_arena|. Malformed user input produces a LOOM_TOKEN_ERROR token
-// plus a structured payload in |error| so the parser can emit diagnostics and
-// recover at sibling-op boundaries. |status| is reserved for infrastructure
-// failures such as allocation errors; once set, all subsequent peek/next calls
-// return EOF and the caller must consume the status.
+// Unmatched delimiters in each punctuation family. Strings and comments are
+// opaque; unmatched closing delimiters leave the corresponding count at zero.
+// Parser recovery queries these depths at the consumed-input boundary to
+// distinguish a failed operation's aggregates from its containing region.
+typedef struct loom_tokenizer_nesting_t {
+  // Unmatched opening parentheses.
+  iree_host_size_t parentheses;
+  // Unmatched opening braces.
+  iree_host_size_t braces;
+  // Unmatched opening square brackets.
+  iree_host_size_t brackets;
+  // Unmatched opening angle brackets.
+  iree_host_size_t angles;
+} loom_tokenizer_nesting_t;
+
+// Lexical scanner state. Stack-allocated, with reusable string-decoding and
+// comment storage in |scratch_arena|. Malformed user input produces a
+// LOOM_TOKEN_ERROR token plus a structured payload in |error| so the parser can
+// emit diagnostics and recover at sibling-op boundaries. |status| is reserved
+// for infrastructure failures such as allocation errors; once set, all
+// subsequent peek/next calls return EOF and the caller must consume the status.
 typedef struct loom_tokenizer_t {
   iree_string_view_t source;
   iree_host_size_t position;
@@ -160,6 +175,12 @@ typedef struct loom_tokenizer_t {
   // compute source ranges spanning multiple tokens.
   uint32_t consumed_end_line;
   uint32_t consumed_end_column;
+
+  // Delimiter nesting after the most recently scanned token, including
+  // lookahead.
+  loom_tokenizer_nesting_t scanned_nesting;
+  // Depth before the peeked delimiter; used to query nesting before lookahead.
+  iree_host_size_t previous_delimiter_depth;
 
   // When true, 'x' at identifier-start position produces DIM_X instead of
   // starting an identifier. Set by the shaped type parser while scanning the
@@ -209,6 +230,16 @@ void loom_tokenizer_take_pending_comments(
 // Clears pending line comments that were collected before a delimiter and do
 // not attach to any operation or block.
 void loom_tokenizer_discard_pending_comments(loom_tokenizer_t* tokenizer);
+
+// Returns nesting in consumed input, excluding the peeked token. Delimiter
+// scanning retains this fact so ordinary token consumption needs no dispatch.
+loom_tokenizer_nesting_t loom_tokenizer_nesting(
+    const loom_tokenizer_t* tokenizer);
+
+// Sets the enclosing nesting after parser recovery abandons incomplete inner
+// delimiters. The current lookahead token remains unconsumed.
+void loom_tokenizer_set_nesting(loom_tokenizer_t* tokenizer,
+                                loom_tokenizer_nesting_t nesting);
 
 // Returns the next token without consuming it. Repeated calls return
 // the same token until loom_tokenizer_next is called.

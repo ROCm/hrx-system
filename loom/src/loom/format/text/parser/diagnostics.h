@@ -39,6 +39,9 @@ iree_status_t loom_parser_emit_token_text_error(loom_parser_t* parser,
                                                 loom_token_t token);
 iree_status_t loom_parser_emit_tokenizer_error(loom_parser_t* parser,
                                                loom_token_t token);
+
+// Consumes a matching token or diagnoses a mismatch without consuming it. The
+// owning operation recovers past invalid input and preserves enclosing closers.
 iree_status_t loom_parser_expect(loom_parser_t* parser, loom_token_kind_t kind,
                                  loom_token_t* out_token);
 

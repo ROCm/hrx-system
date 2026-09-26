@@ -25,6 +25,7 @@ loom_cc_library(
     "low_asm.h"
     "parser.h"
     "pipeline.h"
+    "recovery.h"
     "regions.h"
     "scope.h"
     "types.h"
@@ -39,6 +40,7 @@ loom_cc_library(
     "low_asm.c"
     "parser.c"
     "pipeline.c"
+    "recovery.c"
     "scope.c"
     "types.c"
   DEPS

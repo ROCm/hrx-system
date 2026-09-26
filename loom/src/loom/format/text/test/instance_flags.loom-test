@@ -87,6 +87,7 @@ func.def @integer_flags(%a: i32, %b: i32) -> (i32) {
 func.def @integer_rejects_fast(%a: i32, %b: i32) -> (i32) {
   // ERROR@+1: PARSE/018 "instance flag" "fast"
   %result = scalar.addi<fast> %a, %b : i32
+  // ERROR@+1: PARSE/001 "result"
   func.return %result : i32
 }
 
@@ -97,6 +98,7 @@ func.def @integer_rejects_fast(%a: i32, %b: i32) -> (i32) {
 func.def @float_rejects_integer_flag(%a: f32, %b: f32) -> (f32) {
   // ERROR@+1: PARSE/018 "instance flag" "nsw"
   %result = scalar.addf<nsw> %a, %b : f32
+  // ERROR@+1: PARSE/001 "result"
   func.return %result : f32
 }
 

@@ -15,9 +15,6 @@
 extern "C" {
 #endif
 
-void loom_parser_sync_to_newline(loom_parser_t* parser);
-void loom_parser_sync_to_brace(loom_parser_t* parser);
-
 loom_token_kind_t loom_keyword_token_kind(uint16_t keyword_id);
 iree_status_t loom_parse_keyword(loom_parser_t* parser, uint16_t keyword_id);
 
@@ -38,11 +35,11 @@ iree_status_t loom_parse_op(loom_parser_t* parser,
 
 typedef iree_status_t (*loom_parse_region_body_fn_t)(
     loom_parser_t* parser, const loom_region_descriptor_t* region_descriptor,
-    loom_region_t* region, const void* user_data,
-    bool* out_region_end_consumed);
+    loom_region_t* region, const void* user_data);
 
 typedef struct loom_parse_region_body_callback_t {
   // Parses the already-opened region body and consumes the closing brace.
+  // Errors leave remaining input for recovery by the owning operation.
   loom_parse_region_body_fn_t fn;
   // Opaque parser-internal state passed to |fn|.
   const void* user_data;

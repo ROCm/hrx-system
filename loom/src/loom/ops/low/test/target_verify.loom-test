@@ -235,6 +235,7 @@ test.target<low_core> @test_target
 low.func.def target<test.low.core>(@test_target) @add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
   // ERROR@+1: PARSE/034 "unknown descriptor in the active Low representation contract"
   %sum = low.op<test.missing.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  // ERROR@+1: PARSE/001 "sum"
   low.return %sum : reg<test.i32>
 }
 

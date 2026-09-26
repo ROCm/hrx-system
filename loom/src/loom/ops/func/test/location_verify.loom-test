@@ -35,5 +35,6 @@ func.def @field_is_not_a_node() -> (buffer) {
 func.def @wrong_field_family() -> (buffer) {
   // ERROR@+1: PARSE/003 "func.location.field"
   %site = func.location [#func.location.file<"file.cc", range = [1, 1, 1, 2], fields = [#func.location.unknown<>]>] : buffer
+  // ERROR@+1: PARSE/001 "site"
   func.return %site : buffer
 }

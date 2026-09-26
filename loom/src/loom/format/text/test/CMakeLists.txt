@@ -13,6 +13,7 @@ loom_check_test_suite(
   NAME
     test
   SRCS
+    "error_recovery.loom-test"
     "instance_flags.loom-test"
     "operand_dictionaries.loom-test"
     "predicate_attributes.loom-test"

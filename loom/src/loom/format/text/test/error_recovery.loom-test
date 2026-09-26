@@ -1,0 +1,223 @@
+// RUN: verify
+
+// Nested dictionary closers belong to the failed operation, not its function.
+func.def @nested_dictionary(%input: f32) -> (f32) {
+  // ERROR@+1: PARSE/001 "missing"
+  %configured = test.attrs %input {metadata = {shape = vector<[%missing]xf32>}} : f32
+  // ERROR@+1: PARSE/001 "later_missing"
+  %other = scalar.addf %input, %later_missing : f32
+  func.return %input : f32
+}
+
+// ====
+// RUN: verify
+
+// Multiline aggregate contents must not become operations during recovery.
+func.def @multiline_dictionary(%input: f32) -> (f32) {
+  %configured = test.attrs %input {
+    metadata = {
+      // ERROR@+1: PARSE/001 "missing"
+      shape = vector<[%missing]xf32>,
+      nested = {shape = vector<4xf32>, spelling = "} > ] )"}
+    }
+  } : f32
+      // ERROR@+1: PARSE/001 "later_missing"
+      %other = scalar.addf %input, %later_missing : f32
+  func.return %input : f32
+}
+
+// ====
+// RUN: verify
+
+// Recovery does not depend on a particular indentation column.
+func.def @indented_siblings(%input: f32) -> (f32) {
+    // ERROR@+1: PARSE/001 "first_missing"
+    %first = scalar.addf %input, %first_missing : f32
+        // ERROR@+1: PARSE/001 "second_missing"
+        %second = scalar.addf %input, %second_missing : f32
+  func.return %input : f32
+}
+
+// ====
+// RUN: verify
+
+// Recovery before an opening brace skips the failed operation's nested body.
+func.def @unopened_region(%input: vector<4xf32>) {
+  // ERROR@+1: PARSE/001 "missing"
+  test.block_args %input : vector<4xf32> do(%local: vector<[%missing]xf32>) {
+    test.yield
+  }
+  // ERROR@+1: PARSE/001 "later_missing"
+  test.use %later_missing : i32
+  func.return
+}
+
+// ====
+// RUN: verify
+
+// Nested region-table errors unwind through the table to the owning operation.
+func.def @region_table(%selector: index, %input: f32) {
+  test.region_table %selector {
+    case 0 {
+      // ERROR@+1: PARSE/001 "missing"
+      %configured = test.attrs %input {metadata = {shape = vector<[%missing]xf32>}} : f32
+      test.yield
+    }
+    default { test.yield }
+  }
+  // ERROR@+1: PARSE/001 "later_missing"
+  test.use %later_missing : i32
+  func.return
+}
+
+// ====
+// RUN: verify
+
+// Operand dictionaries can fail before or within a nested type annotation.
+func.def @operand_dictionary(%input: f32) {
+  // ERROR@+1: PARSE/001 "missing_value"
+  %first = test.operand_dict %input {value = %missing_value : f32} : f32
+  // ERROR@+1: PARSE/001 "missing_dimension"
+  %second = test.operand_dict %input {value = %input : test.array<i32, metadata = {shape = vector<[%missing_dimension]xf32>}>} : f32
+  // ERROR@+1: PARSE/001 "later_missing"
+  test.use %later_missing : i32
+  func.return
+}
+
+// ====
+// RUN: verify
+
+// A partial table row must not expose later row operands as operation results.
+func.def @attribute_table(%selector: index, %input: f32) {
+  %result = test.attr_table %selector {
+    // ERROR@+1: PARSE/001 "missing"
+    0 = (%missing,
+         %input),
+    1 = (%input, %input)
+  } default(%input, %input) : f32, f32
+  // ERROR@+1: PARSE/001 "later_missing"
+  test.use %later_missing : i32
+  func.return
+}
+
+// ====
+// RUN: verify
+
+// Even unknown operations can own nested delimiters. Their contents are opaque
+// during recovery, including strings, comments, and dotted type names.
+// ERROR@+1: PARSE/006 "missing.operation"
+missing.operation (
+  %not_a_result,
+  ^not_a_block,
+  test.array<i32>,
+  ["{)]>", // } ) ] >
+   {nested = [1, 2]}]
+)
+// ERROR@+1: PARSE/006 "missing.sibling"
+missing.sibling
+
+// ====
+// RUN: verify
+
+// A missing operand cannot consume the function's closing brace.
+func.def @missing_operand(%input: f32) {
+  %result = scalar.addf %input,
+  // ERROR@+1: PARSE/003 "SSA value"
+}
+func.def @later_function() {
+  // ERROR@+1: PARSE/001 "later_missing"
+  test.use %later_missing : i32
+  func.return
+}
+
+// ====
+// RUN: verify
+
+// Missing inner delimiters are abandoned when their containing region ends.
+func.def @unclosed_type(%input: f32) {
+  // ERROR@+1: PARSE/001 "missing"
+  %result = test.cast %input : f32 to vector<[%missing
+}
+func.def @after_unclosed_type() {
+  // ERROR@+1: PARSE/001 "later_missing"
+  test.use %later_missing : i32
+  func.return
+}
+
+// ====
+// RUN: verify
+
+// A stray top-level closer has no enclosing owner; recovery must advance.
+// ERROR@+1: PARSE/003 "op name"
+}
+// ERROR@+1: PARSE/006 "missing.sibling"
+missing.sibling
+
+// ====
+// RUN: verify
+
+// Top-level block labels also make progress after an operation-name error.
+// ERROR@+1: PARSE/003 "op name"
+^stray:
+// ERROR@+1: PARSE/006 "missing.sibling"
+missing.sibling
+
+// ====
+// RUN: verify
+
+// Alias declarations are sibling boundaries too.
+#layout = #encoding.layout.dense
+// ERROR@+1: PARSE/014 "duplicate encoding alias name"
+#layout = #encoding.layout.dense
+// ERROR@+1: PARSE/014 "alias name shadows"
+#encoding.layout.dense = #encoding.layout.dense
+// ERROR@+1: PARSE/006 "missing.sibling"
+missing.sibling
+
+// ====
+// RUN: verify
+
+// Pipeline recovery recognizes bare statement names after nested option errors.
+pass.pipeline<module> @pipeline pipeline {
+  // ERROR@+1: PARSE/001 "missing"
+  canonicalize(options = {shape = vector<[%missing]xf32>})
+  // ERROR@+1: PARSE/017 "mode" "invalid"
+  repeat invalid { dce }
+  // ERROR@+1: PARSE/003 "string"
+  fail 42
+}
+
+// ====
+// RUN: verify
+
+// Assembly recovery recognizes bare aliases such as return.
+test.target<low_core> @target
+low.func.def target<test.low.core>(@target) @assembly(%input: reg<test.i32>) asm {
+  // ERROR@+1: PARSE/001 "missing"
+  %copy = copy %missing : reg<test.i32> -> reg<test.i32>
+  // ERROR@+1: PARSE/001 "later_missing"
+  return %later_missing
+}
+
+// ====
+// RUN: verify
+
+// EOF terminates recovery even when the operation's delimiters are incomplete.
+// ERROR@+1: PARSE/006 "missing.operation"
+missing.operation ([{
+
+// ====
+// RUN: verify
+
+// Branch successors belong to the failed operation, even though block
+// declarations use the same token kind on subsequent lines.
+func.def @branches() {
+  // ERROR@+1: PARSE/001 "missing"
+  cfg.cond_br %missing, ^then, ^else
+^then:
+  // ERROR@+1: PARSE/001 "later_missing"
+  test.use %later_missing : i32
+  func.return
+^else:
+  func.return
+}

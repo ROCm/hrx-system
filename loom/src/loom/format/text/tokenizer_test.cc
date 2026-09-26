@@ -701,6 +701,76 @@ TEST(Tokenizer, PeekDoesNotMatchWrongKind) {
   EXPECT_NE(token.kind, LOOM_TOKEN_FLOAT);
 }
 
+TEST(Tokenizer, NestingTracksConsumedDelimiters) {
+  ScopedTokenizer t("({[<keyword \"}])>\" // }])>\n>]})");
+  EXPECT_EQ(t.peek().kind, LOOM_TOKEN_LPAREN);
+  EXPECT_EQ(loom_tokenizer_nesting(t.get()).parentheses, 0u);
+  EXPECT_FALSE(loom_tokenizer_try_consume(t.get(), LOOM_TOKEN_RPAREN));
+  EXPECT_EQ(loom_tokenizer_nesting(t.get()).parentheses, 0u);
+  EXPECT_TRUE(loom_tokenizer_try_consume(t.get(), LOOM_TOKEN_LPAREN));
+  EXPECT_EQ(t.next().kind, LOOM_TOKEN_LBRACE);
+  EXPECT_TRUE(loom_tokenizer_try_consume(t.get(), LOOM_TOKEN_LBRACKET));
+  EXPECT_EQ(t.next().kind, LOOM_TOKEN_LANGLE);
+  EXPECT_EQ(loom_tokenizer_nesting(t.get()).parentheses, 1u);
+  EXPECT_EQ(loom_tokenizer_nesting(t.get()).braces, 1u);
+  EXPECT_EQ(loom_tokenizer_nesting(t.get()).brackets, 1u);
+  EXPECT_EQ(loom_tokenizer_nesting(t.get()).angles, 1u);
+  EXPECT_TRUE(loom_tokenizer_try_consume_keyword(t.get(), IREE_SV("keyword")));
+  EXPECT_EQ(t.next().kind, LOOM_TOKEN_STRING);
+  EXPECT_EQ(t.peek().kind, LOOM_TOKEN_RANGLE);
+  EXPECT_EQ(loom_tokenizer_nesting(t.get()).angles, 1u);
+  EXPECT_EQ(t.next().kind, LOOM_TOKEN_RANGLE);
+  EXPECT_TRUE(loom_tokenizer_try_consume(t.get(), LOOM_TOKEN_RBRACKET));
+  EXPECT_EQ(t.next().kind, LOOM_TOKEN_RBRACE);
+  EXPECT_TRUE(loom_tokenizer_try_consume(t.get(), LOOM_TOKEN_RPAREN));
+  EXPECT_EQ(loom_tokenizer_nesting(t.get()).parentheses, 0u);
+  EXPECT_EQ(loom_tokenizer_nesting(t.get()).braces, 0u);
+  EXPECT_EQ(loom_tokenizer_nesting(t.get()).brackets, 0u);
+  EXPECT_EQ(loom_tokenizer_nesting(t.get()).angles, 0u);
+}
+
+TEST(Tokenizer, LookaheadCopyKeepsIndependentNesting) {
+  ScopedTokenizer t("{[()]}");
+  EXPECT_EQ(t.next().kind, LOOM_TOKEN_LBRACE);
+  EXPECT_EQ(t.peek().kind, LOOM_TOKEN_LBRACKET);
+  loom_tokenizer_t lookahead = *t.get();
+  while (loom_tokenizer_next(&lookahead).kind != LOOM_TOKEN_EOF) {
+  }
+  EXPECT_EQ(loom_tokenizer_nesting(&lookahead).braces, 0u);
+  EXPECT_EQ(loom_tokenizer_nesting(&lookahead).brackets, 0u);
+  EXPECT_EQ(loom_tokenizer_nesting(&lookahead).parentheses, 0u);
+  EXPECT_EQ(loom_tokenizer_nesting(t.get()).braces, 1u);
+  EXPECT_EQ(loom_tokenizer_nesting(t.get()).brackets, 0u);
+  EXPECT_EQ(t.peek().kind, LOOM_TOKEN_LBRACKET);
+  loom_tokenizer_deinitialize(&lookahead);
+}
+
+TEST(Tokenizer, UnmatchedClosersDoNotUnderflowNesting) {
+  ScopedTokenizer t(")}]>");
+  while (t.next().kind != LOOM_TOKEN_EOF) {
+  }
+  EXPECT_EQ(loom_tokenizer_nesting(t.get()).parentheses, 0u);
+  EXPECT_EQ(loom_tokenizer_nesting(t.get()).braces, 0u);
+  EXPECT_EQ(loom_tokenizer_nesting(t.get()).brackets, 0u);
+  EXPECT_EQ(loom_tokenizer_nesting(t.get()).angles, 0u);
+}
+
+TEST(Tokenizer, ReinitializationClearsNesting) {
+  ScopedTokenizer t("({[<");
+  while (t.next().kind != LOOM_TOKEN_EOF) {
+  }
+  iree_arena_allocator_t* arena = t.get()->scratch_arena;
+  loom_tokenizer_deinitialize(t.get());
+  loom_tokenizer_initialize(IREE_SV("}"), IREE_SV("<test>"), arena, t.get());
+  EXPECT_EQ(t.peek().kind, LOOM_TOKEN_RBRACE);
+  EXPECT_EQ(loom_tokenizer_nesting(t.get()).parentheses, 0u);
+  EXPECT_EQ(loom_tokenizer_nesting(t.get()).braces, 0u);
+  EXPECT_EQ(loom_tokenizer_nesting(t.get()).brackets, 0u);
+  EXPECT_EQ(loom_tokenizer_nesting(t.get()).angles, 0u);
+  EXPECT_EQ(t.next().kind, LOOM_TOKEN_RBRACE);
+  EXPECT_EQ(loom_tokenizer_nesting(t.get()).braces, 0u);
+}
+
 //===----------------------------------------------------------------------===//
 // Error propagation
 //===----------------------------------------------------------------------===//
@@ -988,6 +1058,7 @@ TEST(Tokenizer, NestedAngleBrackets) {
   IREE_ASSERT_OK(loom_tokenizer_scan_angle_interior(t.get(), &interior));
   EXPECT_TRUE(
       iree_string_view_equal(interior, IREE_SV("test.ref<hal.buffer>")));
+  EXPECT_EQ(loom_tokenizer_nesting(t.get()).angles, 0u);
 }
 
 TEST(Tokenizer, AngleInteriorWithEscapedQuotes) {
@@ -1009,6 +1080,9 @@ TEST(Tokenizer, AngleInteriorInvalidStringEscapeError) {
                        loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 23),
                        IREE_SV("\\x"), 1, 9, 11);
   ExpectErrorStringParam(t.get()->error, 0, IREE_SV("unknown escape sequence"));
+  EXPECT_EQ(loom_tokenizer_nesting(t.get()).angles, 1u);
+  EXPECT_EQ(t.next().kind, LOOM_TOKEN_RANGLE);
+  EXPECT_EQ(loom_tokenizer_nesting(t.get()).angles, 0u);
   ExpectNoInfrastructureStatus(t.get());
 }
 

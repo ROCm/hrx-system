@@ -229,6 +229,8 @@ void loom_tokenizer_initialize(iree_string_view_t source,
   out_tokenizer->status = iree_ok_status();
   out_tokenizer->consumed_end_line = 0;
   out_tokenizer->consumed_end_column = 0;
+  out_tokenizer->scanned_nesting = (loom_tokenizer_nesting_t){0};
+  out_tokenizer->previous_delimiter_depth = 0;
   out_tokenizer->in_dim_list = false;
 }
 
@@ -1098,6 +1100,52 @@ static iree_status_t loom_tokenizer_scan_block_label(loom_tokenizer_t* t,
   return iree_ok_status();
 }
 
+static inline void loom_tokenizer_scan_delimiter(loom_tokenizer_t* tokenizer,
+                                                 loom_token_kind_t kind) {
+  switch (kind) {
+    case LOOM_TOKEN_LPAREN:
+      tokenizer->previous_delimiter_depth =
+          tokenizer->scanned_nesting.parentheses;
+      ++tokenizer->scanned_nesting.parentheses;
+      break;
+    case LOOM_TOKEN_RPAREN:
+      tokenizer->previous_delimiter_depth =
+          tokenizer->scanned_nesting.parentheses;
+      tokenizer->scanned_nesting.parentheses -=
+          tokenizer->scanned_nesting.parentheses != 0;
+      break;
+    case LOOM_TOKEN_LBRACE:
+      tokenizer->previous_delimiter_depth = tokenizer->scanned_nesting.braces;
+      ++tokenizer->scanned_nesting.braces;
+      break;
+    case LOOM_TOKEN_RBRACE:
+      tokenizer->previous_delimiter_depth = tokenizer->scanned_nesting.braces;
+      tokenizer->scanned_nesting.braces -=
+          tokenizer->scanned_nesting.braces != 0;
+      break;
+    case LOOM_TOKEN_LBRACKET:
+      tokenizer->previous_delimiter_depth = tokenizer->scanned_nesting.brackets;
+      ++tokenizer->scanned_nesting.brackets;
+      break;
+    case LOOM_TOKEN_RBRACKET:
+      tokenizer->previous_delimiter_depth = tokenizer->scanned_nesting.brackets;
+      tokenizer->scanned_nesting.brackets -=
+          tokenizer->scanned_nesting.brackets != 0;
+      break;
+    case LOOM_TOKEN_LANGLE:
+      tokenizer->previous_delimiter_depth = tokenizer->scanned_nesting.angles;
+      ++tokenizer->scanned_nesting.angles;
+      break;
+    case LOOM_TOKEN_RANGLE:
+      tokenizer->previous_delimiter_depth = tokenizer->scanned_nesting.angles;
+      tokenizer->scanned_nesting.angles -=
+          tokenizer->scanned_nesting.angles != 0;
+      break;
+    default:
+      break;
+  }
+}
+
 // Scans the next token from the source. Malformed user text becomes a
 // LOOM_TOKEN_ERROR lookahead with a structured payload on the tokenizer;
 // infrastructure failures still return a non-OK status.
@@ -1130,48 +1178,56 @@ static iree_status_t loom_tokenizer_scan(loom_tokenizer_t* t,
   // Single-character punctuation.
   switch (c) {
     case '(':
+      loom_tokenizer_scan_delimiter(t, LOOM_TOKEN_LPAREN);
       ++t->position;
       ++t->column;
       *out_token = loom_tokenizer_make_verbatim_token(
           t, LOOM_TOKEN_LPAREN, start, start_line, start_column);
       return iree_ok_status();
     case ')':
+      loom_tokenizer_scan_delimiter(t, LOOM_TOKEN_RPAREN);
       ++t->position;
       ++t->column;
       *out_token = loom_tokenizer_make_verbatim_token(
           t, LOOM_TOKEN_RPAREN, start, start_line, start_column);
       return iree_ok_status();
     case '{':
+      loom_tokenizer_scan_delimiter(t, LOOM_TOKEN_LBRACE);
       ++t->position;
       ++t->column;
       *out_token = loom_tokenizer_make_verbatim_token(
           t, LOOM_TOKEN_LBRACE, start, start_line, start_column);
       return iree_ok_status();
     case '}':
+      loom_tokenizer_scan_delimiter(t, LOOM_TOKEN_RBRACE);
       ++t->position;
       ++t->column;
       *out_token = loom_tokenizer_make_verbatim_token(
           t, LOOM_TOKEN_RBRACE, start, start_line, start_column);
       return iree_ok_status();
     case '[':
+      loom_tokenizer_scan_delimiter(t, LOOM_TOKEN_LBRACKET);
       ++t->position;
       ++t->column;
       *out_token = loom_tokenizer_make_verbatim_token(
           t, LOOM_TOKEN_LBRACKET, start, start_line, start_column);
       return iree_ok_status();
     case ']':
+      loom_tokenizer_scan_delimiter(t, LOOM_TOKEN_RBRACKET);
       ++t->position;
       ++t->column;
       *out_token = loom_tokenizer_make_verbatim_token(
           t, LOOM_TOKEN_RBRACKET, start, start_line, start_column);
       return iree_ok_status();
     case '<':
+      loom_tokenizer_scan_delimiter(t, LOOM_TOKEN_LANGLE);
       ++t->position;
       ++t->column;
       *out_token = loom_tokenizer_make_verbatim_token(
           t, LOOM_TOKEN_LANGLE, start, start_line, start_column);
       return iree_ok_status();
     case '>':
+      loom_tokenizer_scan_delimiter(t, LOOM_TOKEN_RANGLE);
       ++t->position;
       ++t->column;
       *out_token = loom_tokenizer_make_verbatim_token(
@@ -1348,6 +1404,38 @@ static void loom_tokenizer_ensure_peeked(loom_tokenizer_t* tokenizer) {
   }
 }
 
+loom_tokenizer_nesting_t loom_tokenizer_nesting(
+    const loom_tokenizer_t* tokenizer) {
+  loom_tokenizer_nesting_t nesting = tokenizer->scanned_nesting;
+  switch (tokenizer->peeked.kind) {
+    case LOOM_TOKEN_LPAREN:
+    case LOOM_TOKEN_RPAREN:
+      nesting.parentheses = tokenizer->previous_delimiter_depth;
+      break;
+    case LOOM_TOKEN_LBRACE:
+    case LOOM_TOKEN_RBRACE:
+      nesting.braces = tokenizer->previous_delimiter_depth;
+      break;
+    case LOOM_TOKEN_LBRACKET:
+    case LOOM_TOKEN_RBRACKET:
+      nesting.brackets = tokenizer->previous_delimiter_depth;
+      break;
+    case LOOM_TOKEN_LANGLE:
+    case LOOM_TOKEN_RANGLE:
+      nesting.angles = tokenizer->previous_delimiter_depth;
+      break;
+    default:
+      break;
+  }
+  return nesting;
+}
+
+void loom_tokenizer_set_nesting(loom_tokenizer_t* tokenizer,
+                                loom_tokenizer_nesting_t nesting) {
+  tokenizer->scanned_nesting = nesting;
+  loom_tokenizer_scan_delimiter(tokenizer, tokenizer->peeked.kind);
+}
+
 loom_token_t loom_tokenizer_peek(loom_tokenizer_t* tokenizer) {
   loom_tokenizer_ensure_peeked(tokenizer);
   return tokenizer->peeked;
@@ -1411,9 +1499,11 @@ iree_status_t loom_tokenizer_scan_angle_interior(
     char c = tokenizer->source.data[tokenizer->position];
     if (c == '<') {
       ++depth;
+      ++tokenizer->scanned_nesting.angles;
       ++tokenizer->column;
     } else if (c == '>') {
       --depth;
+      --tokenizer->scanned_nesting.angles;
       if (depth == 0) {
         *out_interior = iree_make_string_view(tokenizer->source.data + start,
                                               tokenizer->position - start);
