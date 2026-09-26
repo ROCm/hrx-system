@@ -206,6 +206,7 @@ loom_cc_test(
     name = "module_test",
     srcs = [
         "intern_table_test.cc",
+        "module_block_order_test.cc",
         "module_dictionary_test.cc",
         "module_location_test.cc",
         "module_source_test.cc",
@@ -292,6 +293,17 @@ loom_cc_test(
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "block_order_benchmark",
+    srcs = ["block_order_benchmark.cc"],
+    deps = [
+        ":ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:benchmark_main",
     ],
 )
 

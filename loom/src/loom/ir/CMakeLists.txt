@@ -210,6 +210,7 @@ loom_cc_test(
     module_test
   SRCS
     "intern_table_test.cc"
+    "module_block_order_test.cc"
     "module_dictionary_test.cc"
     "module_location_test.cc"
     "module_source_test.cc"
@@ -299,6 +300,19 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+)
+
+loom_cc_benchmark(
+  NAME
+    block_order_benchmark
+  SRCS
+    "block_order_benchmark.cc"
+  DEPS
+    ::ir
+    iree::base
+    iree::base::internal::arena
+    iree::testing::benchmark_main
+  TESTONLY
 )
 
 loom_cc_benchmark(

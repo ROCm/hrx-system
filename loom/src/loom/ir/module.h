@@ -715,12 +715,14 @@ uint16_t loom_block_remove_args(loom_module_t* module, loom_block_t* block,
                                 const bool* remove_args,
                                 uint16_t remove_arg_count);
 
-// Appends an op to the end of a block.
+// Appends an op to the end of a block. Returns RESOURCE_EXHAUSTED if the block
+// has reached its sparse ordinal capacity.
 iree_status_t loom_block_append_op(loom_module_t* module, loom_block_t* block,
                                    loom_op_t* op);
 
 // Inserts an op before |before_op| in |block|. |before_op| must be a live op
-// in the block. Passing NULL appends.
+// in the block. Passing NULL appends. Returns RESOURCE_EXHAUSTED if the block
+// has reached its sparse ordinal capacity.
 iree_status_t loom_block_insert_before_op(loom_module_t* module,
                                           loom_block_t* block,
                                           loom_op_t* before_op, loom_op_t* op);
@@ -728,7 +730,8 @@ iree_status_t loom_block_insert_before_op(loom_module_t* module,
 // Inserts an op at |index| in the block. This is a cold indexed helper for
 // diagnostics and tests; hot mutation paths should carry an op pointer and use
 // loom_block_insert_before_op.
-// If index == block->op_count, equivalent to append.
+// If index == block->op_count, equivalent to append. Returns RESOURCE_EXHAUSTED
+// if the block has reached its sparse ordinal capacity.
 iree_status_t loom_block_insert_op(loom_module_t* module, loom_block_t* block,
                                    iree_host_size_t index, loom_op_t* op);
 

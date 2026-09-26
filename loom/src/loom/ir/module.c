@@ -4547,67 +4547,147 @@ uint16_t loom_block_remove_args(loom_module_t* module, loom_block_t* block,
 //===----------------------------------------------------------------------===//
 
 #define LOOM_BLOCK_ORDINAL_STRIDE UINT64_C(0x100000000)
+// A directional repair always has at least half of the ordinal arena. Limiting
+// the number of gaps to floor(sqrt(UINT64_MAX / 2)) guarantees that the density
+// search finds a repair window before reaching its sentinel.
+#define LOOM_BLOCK_ORDINAL_MAX_OP_COUNT UINT32_C(3037000499)
+static_assert((uint64_t)LOOM_BLOCK_ORDINAL_MAX_OP_COUNT *
+                      LOOM_BLOCK_ORDINAL_MAX_OP_COUNT <=
+                  UINT64_MAX / 2,
+              "block ordinal capacity exceeds the directional repair bound");
+static_assert(
+    (uint64_t)(LOOM_BLOCK_ORDINAL_MAX_OP_COUNT + 1) *
+            (LOOM_BLOCK_ORDINAL_MAX_OP_COUNT + 1) >
+        UINT64_MAX / 2,
+    "block ordinal capacity must use the full directional repair bound");
 
-static iree_status_t loom_block_renumber_ordinals(loom_block_t* block) {
-  uint64_t ordinal = LOOM_BLOCK_ORDINAL_STRIDE;
-  loom_op_t* op = NULL;
-  loom_block_for_each_op(block, op) {
-    op->block_ordinal = ordinal;
-    if (op->next_op && UINT64_MAX - ordinal < LOOM_BLOCK_ORDINAL_STRIDE) {
-      return iree_make_status(
-          IREE_STATUS_RESOURCE_EXHAUSTED,
-          "block has too many operations to assign sparse ordinals");
+static uint64_t loom_block_ordinal_midpoint(uint64_t lower, uint64_t upper) {
+  return lower + (upper - lower) / 2;
+}
+
+// Chooses the side of a sparse gap that preserves room for a repeated
+// insertion stream. The denser outer gap identifies the endpoint that moved on
+// the preceding insertion; placing beside it leaves the current gap available
+// beside the stable endpoint. Equal-density gaps split at the midpoint.
+static uint64_t loom_block_choose_ordinal(const loom_op_t* prev_op,
+                                          const loom_op_t* next_op,
+                                          uint64_t lower, uint64_t upper) {
+  const uint64_t previous_gap =
+      prev_op ? lower - (prev_op->prev_op ? prev_op->prev_op->block_ordinal : 0)
+              : UINT64_MAX;
+  const uint64_t next_gap =
+      next_op
+          ? (next_op->next_op ? next_op->next_op->block_ordinal : UINT64_MAX) -
+                upper
+          : UINT64_MAX;
+  if (previous_gap < next_gap) {
+    return lower + 1;
+  }
+  if (next_gap < previous_gap) {
+    return upper - 1;
+  }
+  return loom_block_ordinal_midpoint(lower, upper);
+}
+
+// Redistributes |count| successive ops across |gap_count| equal-width gaps.
+// Quotient/remainder accumulation avoids an overflowing distance * index
+// intermediate while producing floor(distance * index / gap_count).
+IREE_ATTRIBUTE_NOINLINE static void loom_block_redistribute_ordinals_forward(
+    loom_op_t* first_op, uint32_t count, uint64_t lower, uint64_t distance,
+    uint32_t gap_count) {
+  const uint64_t quotient = distance / gap_count;
+  const uint64_t remainder = distance % gap_count;
+  uint64_t ordinal = lower;
+  uint64_t remainder_accumulator = 0;
+  loom_op_t* op = first_op;
+  for (uint32_t i = 0; i < count; ++i, op = op->next_op) {
+    ordinal += quotient;
+    remainder_accumulator += remainder;
+    if (remainder_accumulator >= gap_count) {
+      ++ordinal;
+      remainder_accumulator -= gap_count;
     }
-    ordinal += LOOM_BLOCK_ORDINAL_STRIDE;
+    op->block_ordinal = ordinal;
   }
-  return iree_ok_status();
 }
 
-static iree_status_t loom_block_append_ordinal(loom_block_t* block,
-                                               uint64_t* out_ordinal) {
+// Opens a congested gap by redistributing a forward run. The first run
+// whose ordinal span exceeds the square of its gap count has enough density
+// slack to pay for the relabeling amortized across the insertions that consumed
+// it. The supported block-size limit guarantees that a run exists.
+static uint64_t loom_block_repair_ordinal_gap_forward(loom_op_t* prev_op,
+                                                      loom_op_t* next_op) {
+  const uint64_t lower = prev_op ? prev_op->block_ordinal : 0;
+  loom_op_t* boundary_op = next_op;
+  uint32_t gap_count = 1;
+  while (true) {
+    const uint64_t upper =
+        boundary_op ? boundary_op->block_ordinal : UINT64_MAX;
+    const uint64_t distance = upper - lower;
+    if (distance > (uint64_t)gap_count * gap_count) {
+      loom_block_redistribute_ordinals_forward(next_op, gap_count - 1, lower,
+                                               distance, gap_count);
+      return loom_block_choose_ordinal(
+          prev_op, next_op, lower,
+          next_op ? next_op->block_ordinal : UINT64_MAX);
+    }
+    IREE_ASSERT(boundary_op);
+    boundary_op = boundary_op->next_op;
+    ++gap_count;
+  }
+}
+
+// Opens a congested gap by redistributing a backward run.
+static uint64_t loom_block_repair_ordinal_gap_backward(loom_block_t* block,
+                                                       loom_op_t* prev_op,
+                                                       loom_op_t* next_op) {
+  const uint64_t upper = next_op ? next_op->block_ordinal : UINT64_MAX;
+  loom_op_t* boundary_op = prev_op;
+  uint32_t gap_count = 1;
+  while (true) {
+    const uint64_t lower = boundary_op ? boundary_op->block_ordinal : 0;
+    const uint64_t distance = upper - lower;
+    if (distance > (uint64_t)gap_count * gap_count) {
+      loom_op_t* first_op =
+          boundary_op ? boundary_op->next_op : block->first_op;
+      loom_block_redistribute_ordinals_forward(first_op, gap_count - 1, lower,
+                                               distance, gap_count);
+      return loom_block_choose_ordinal(
+          prev_op, next_op, prev_op ? prev_op->block_ordinal : 0, upper);
+    }
+    IREE_ASSERT(boundary_op);
+    boundary_op = boundary_op->prev_op;
+    ++gap_count;
+  }
+}
+
+// Repairs an exhausted insertion gap. Kept out of line so the sparse-gap and
+// append paths do not carry the density search and redistribution machinery.
+IREE_ATTRIBUTE_NOINLINE static uint64_t loom_block_repair_ordinal_gap(
+    loom_block_t* block, loom_op_t* prev_op, loom_op_t* next_op) {
+  const uint64_t lower = prev_op ? prev_op->block_ordinal : 0;
+  if (lower < UINT64_MAX / 2) {
+    return loom_block_repair_ordinal_gap_forward(prev_op, next_op);
+  }
+  return loom_block_repair_ordinal_gap_backward(block, prev_op, next_op);
+}
+
+static uint64_t loom_block_insert_ordinal(loom_block_t* block,
+                                          loom_op_t* prev_op,
+                                          loom_op_t* next_op) {
   if (!block->last_op) {
-    *out_ordinal = LOOM_BLOCK_ORDINAL_STRIDE;
-    return iree_ok_status();
-  }
-  if (UINT64_MAX - block->last_op->block_ordinal > LOOM_BLOCK_ORDINAL_STRIDE) {
-    *out_ordinal = block->last_op->block_ordinal + LOOM_BLOCK_ORDINAL_STRIDE;
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(loom_block_renumber_ordinals(block));
-  if (UINT64_MAX - block->last_op->block_ordinal <= LOOM_BLOCK_ORDINAL_STRIDE) {
-    return iree_make_status(
-        IREE_STATUS_RESOURCE_EXHAUSTED,
-        "block has too many operations to append another ordinal");
-  }
-  *out_ordinal = block->last_op->block_ordinal + LOOM_BLOCK_ORDINAL_STRIDE;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_block_insert_ordinal(loom_block_t* block,
-                                               loom_op_t* prev_op,
-                                               loom_op_t* next_op,
-                                               uint64_t* out_ordinal) {
-  if (!next_op) {
-    return loom_block_append_ordinal(block, out_ordinal);
+    return LOOM_BLOCK_ORDINAL_STRIDE;
   }
 
-  uint64_t lower = prev_op ? prev_op->block_ordinal : 0;
-  uint64_t upper = next_op->block_ordinal;
-  if (lower + 1 < upper) {
-    *out_ordinal = prev_op ? lower + 1 : lower + (upper - lower) / 2;
-    return iree_ok_status();
+  const uint64_t lower = prev_op ? prev_op->block_ordinal : 0;
+  const uint64_t upper = next_op ? next_op->block_ordinal : UINT64_MAX;
+  if (upper - lower > 1) {
+    if (!next_op && upper - lower > LOOM_BLOCK_ORDINAL_STRIDE) {
+      return lower + LOOM_BLOCK_ORDINAL_STRIDE;
+    }
+    return loom_block_choose_ordinal(prev_op, next_op, lower, upper);
   }
-
-  IREE_RETURN_IF_ERROR(loom_block_renumber_ordinals(block));
-  lower = prev_op ? prev_op->block_ordinal : 0;
-  upper = next_op->block_ordinal;
-  if (lower + 1 >= upper) {
-    return iree_make_status(
-        IREE_STATUS_RESOURCE_EXHAUSTED,
-        "block has too many operations to assign an insertion ordinal");
-  }
-  *out_ordinal = prev_op ? lower + 1 : lower + (upper - lower) / 2;
-  return iree_ok_status();
+  return loom_block_repair_ordinal_gap(block, prev_op, next_op);
 }
 
 static iree_status_t loom_block_link_op_between(loom_module_t* module,
@@ -4616,9 +4696,11 @@ static iree_status_t loom_block_link_op_between(loom_module_t* module,
                                                 loom_op_t* next_op,
                                                 loom_op_t* op) {
   (void)module;
-  if (block->op_count == UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "block op count exceeds UINT32_MAX");
+  if (block->op_count >= LOOM_BLOCK_ORDINAL_MAX_OP_COUNT) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "block operation count exceeds sparse ordinal capacity %u",
+        (unsigned)LOOM_BLOCK_ORDINAL_MAX_OP_COUNT);
   }
   if (op->parent_block && op->parent_block != block) {
     return iree_make_status(
@@ -4631,9 +4713,7 @@ static iree_status_t loom_block_link_op_between(loom_module_t* module,
                             "cannot insert op already linked into a block");
   }
 
-  uint64_t ordinal = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_block_insert_ordinal(block, prev_op, next_op, &ordinal));
+  const uint64_t ordinal = loom_block_insert_ordinal(block, prev_op, next_op);
 
   op->parent_block = block;
   op->block_ordinal = ordinal;

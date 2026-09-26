@@ -1699,8 +1699,9 @@ typedef struct loom_op_t {
   // its own mask constants in the per-dialect ops.h).
   uint8_t instance_flags;
   // Monotonic position key within parent_block. Live ops in a block have
-  // strictly increasing ordinals, enabling O(1) same-block order comparisons
-  // without carrying mutable array indices on every insertion.
+  // strictly increasing ordinals, enabling O(1) same-block order comparisons.
+  // Sparse placement and local density repair maintain the labels in O(log n)
+  // amortized work per insertion without persistent indexing state.
   uint64_t block_ordinal;
   // Op whose region contains this op's block. NULL for module-level
   // ops (direct children of the module body). Set during construction
