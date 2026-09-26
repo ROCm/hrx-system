@@ -12,8 +12,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "iree/schemas/xdna_executable.h"
-#include "loom/ops/low/ops.h"
-#include "loom/target/arch/amd/xdna/aie2p/emit/bundle_plan.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/leaf_program.h"
 #include "loom/target/emit/native/object.h"
 
 #ifdef __cplusplus
@@ -43,53 +42,6 @@ enum loom_aie2p_leaf_capability_flag_bits_e {
   LOOM_AIE2P_LEAF_CAPABILITY_FLAG_MATERIALIZED_SPILLS = 1u << 5,
 };
 typedef uint32_t loom_aie2p_leaf_capability_flags_t;
-
-// Exact storage required in one placement domain.
-typedef struct loom_aie2p_leaf_storage_requirement_t {
-  // Required byte length, excluding placement padding outside this domain.
-  uint64_t byte_length;
-  // Minimum placement alignment, or zero when no storage is required.
-  uint64_t minimum_alignment;
-} loom_aie2p_leaf_storage_requirement_t;
-
-enum loom_aie2p_leaf_resource_flag_bits_e {
-  // Resource extent is supplied through the Low extent operand.
-  LOOM_AIE2P_LEAF_RESOURCE_FLAG_DYNAMIC_EXTENT = 1u << 0,
-  // Resource carries a static byte extent.
-  LOOM_AIE2P_LEAF_RESOURCE_FLAG_STATIC_EXTENT = 1u << 1,
-  // Resource carries a cache-swizzle byte stride.
-  LOOM_AIE2P_LEAF_RESOURCE_FLAG_CACHE_SWIZZLE_STRIDE = 1u << 2,
-};
-typedef uint16_t loom_aie2p_leaf_resource_flags_t;
-
-// One detached Low resource import and its final physical-register binding.
-typedef struct loom_aie2p_leaf_resource_import_t {
-  // Resource table index selected by low.resource.
-  uint64_t index;
-  // Static resource extent when STATIC_EXTENT is set, otherwise zero.
-  uint64_t extent;
-  // Cache-swizzle byte stride when CACHE_SWIZZLE_STRIDE is set, otherwise
-  // zero.
-  uint32_t cache_swizzle_stride;
-  // First AIE2P physical-register ID occupied by the imported value.
-  uint32_t physical_register;
-  // Number of logical physical-register units occupied by the imported value.
-  uint32_t physical_register_count;
-  // Physical register carrying a dynamic extent, or UINT32_MAX when absent.
-  uint32_t extent_physical_register;
-  // AIE2P descriptor-set register class owning the physical register.
-  uint16_t descriptor_register_class_id;
-  // AIE2P register class carrying a dynamic extent, or zero when absent.
-  uint16_t extent_descriptor_register_class_id;
-  // Number of physical-register units carrying a dynamic extent.
-  uint32_t extent_physical_register_count;
-  // Optional resource metadata carried by this record.
-  loom_aie2p_leaf_resource_flags_t flags;
-  // Low ABI import kind.
-  loom_low_resource_import_kind_t import_kind;
-  // Outer Loom type kind of the imported source value.
-  loom_type_kind_t source_type_kind;
-} loom_aie2p_leaf_resource_import_t;
 
 // One function-local storage domain retained for final array placement.
 typedef struct loom_aie2p_leaf_storage_domain_t {
@@ -160,7 +112,7 @@ typedef struct loom_aie2p_leaf_realization_t {
 // unchanged.
 bool loom_aie2p_leaf_may_write_register(
     const loom_aie2p_leaf_realization_t* realization,
-    uint16_t physical_register);
+    loom_aie2p_physical_register_id_t physical_register);
 
 // Returns the retained requirement for one verified function-storage space.
 const loom_aie2p_leaf_storage_requirement_t*
@@ -184,7 +136,7 @@ typedef struct loom_aie2p_leaf_contribution_t {
 // independently compiled leaves without reopening worker object files or
 // retaining compiler IR.
 iree_status_t loom_aie2p_leaf_object_emit(
-    const loom_aie2p_bundle_plan_t* plan, iree_arena_allocator_t* arena,
+    const loom_aie2p_leaf_program_plan_t* plan, iree_arena_allocator_t* arena,
     loom_aie2p_leaf_contribution_t* out_contribution);
 
 #ifdef __cplusplus

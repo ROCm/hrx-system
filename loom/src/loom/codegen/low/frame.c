@@ -39,6 +39,8 @@ typedef struct loom_low_emission_frame_materialization_summary_t {
   uint64_t spill_storage_count;
   // Cumulative materialized spill storage byte size.
   uint64_t spill_storage_bytes;
+  // Strongest byte alignment required by materialized spill storage.
+  uint64_t spill_storage_minimum_alignment;
   // Cumulative low.spill stores materialized while building the final frame.
   uint64_t spill_store_count;
   // Cumulative materialized low.spill store byte traffic.
@@ -324,6 +326,9 @@ static void loom_low_emission_frame_accumulate_materialization(
     loom_low_emission_frame_materialization_summary_t* summary) {
   summary->spill_storage_count += result->storage_count;
   summary->spill_storage_bytes += result->storage_bytes;
+  summary->spill_storage_minimum_alignment =
+      iree_max(summary->spill_storage_minimum_alignment,
+               result->storage_minimum_alignment);
   summary->spill_store_count += result->spill_count;
   summary->spill_store_bytes += result->spill_bytes;
   summary->reload_count += result->reload_count;
@@ -715,6 +720,8 @@ static iree_status_t loom_low_emission_frame_apply_materialization_summary(
     iree_arena_allocator_t* arena, loom_low_emission_frame_t* frame) {
   frame->materialized_spill_storage_count = summary->spill_storage_count;
   frame->materialized_spill_storage_bytes = summary->spill_storage_bytes;
+  frame->materialized_spill_storage_minimum_alignment =
+      summary->spill_storage_minimum_alignment;
   frame->materialized_spill_store_count = summary->spill_store_count;
   frame->materialized_spill_store_bytes = summary->spill_store_bytes;
   frame->materialized_reload_count = summary->reload_count;

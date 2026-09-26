@@ -10,9 +10,11 @@
 #include <string.h>
 
 #include "iree/base/internal/math.h"
+#include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/packet.h"
 #include "loom/codegen/low/schedule/physical_issue.h"
 #include "loom/codegen/low/storage_layout.h"
+#include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/core_structure.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
@@ -134,6 +136,125 @@ typedef struct loom_aie2p_bundle_plan_builder_t {
   // Accumulated native writes, copied into the final plan.
   loom_aie2p_register_unit_set_t register_writes;
 } loom_aie2p_bundle_plan_builder_t;
+
+static iree_status_t loom_aie2p_bundle_plan_copy_function_name(
+    const loom_low_emission_frame_t* frame, iree_arena_allocator_t* arena,
+    iree_string_view_t* out_function_name) {
+  *out_function_name = iree_string_view_empty();
+  const iree_string_view_t function_name =
+      loom_low_diagnostic_function_name(frame->module, frame->function_op);
+  if (iree_string_view_is_empty(function_name)) {
+    return iree_ok_status();
+  }
+  char* function_name_data = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(arena, function_name.size,
+                                           (void**)&function_name_data));
+  memcpy(function_name_data, function_name.data, function_name.size);
+  *out_function_name =
+      iree_make_string_view(function_name_data, function_name.size);
+  return iree_ok_status();
+}
+
+static void loom_aie2p_bundle_plan_retain_storage_requirements(
+    const loom_low_emission_frame_t* frame,
+    loom_aie2p_leaf_program_plan_t* plan) {
+  for (loom_storage_space_t space = 0; space < LOOM_STORAGE_SPACE_COUNT_;
+       ++space) {
+    const loom_low_storage_layout_requirement_t requirement =
+        loom_low_storage_layout_requirement(
+            &frame->schedule.requirements.storage_layout, space);
+    plan->storage_requirements[space] = (loom_aie2p_leaf_storage_requirement_t){
+        .byte_length = requirement.byte_length,
+        .minimum_alignment = requirement.minimum_alignment,
+    };
+  }
+  plan->spill = (loom_aie2p_leaf_storage_requirement_t){
+      .byte_length = frame->materialized_spill_storage_bytes,
+      .minimum_alignment = frame->materialized_spill_storage_minimum_alignment,
+  };
+}
+
+static iree_status_t loom_aie2p_bundle_plan_retain_resource_imports(
+    const loom_low_emission_frame_t* frame, iree_arena_allocator_t* arena,
+    loom_aie2p_leaf_program_plan_t* plan) {
+  const loom_low_function_requirements_t* requirements =
+      &frame->schedule.requirements;
+  const iree_host_size_t resource_count = requirements->resource_count;
+  if (resource_count == 0) {
+    return iree_ok_status();
+  }
+
+  loom_aie2p_leaf_resource_import_t* resources = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, resource_count, sizeof(*resources), (void**)&resources));
+  for (iree_host_size_t resource_index = 0; resource_index < resource_count;
+       ++resource_index) {
+    const loom_op_t* op = requirements->resources[resource_index];
+
+    const loom_low_schedule_node_t* node =
+        loom_low_schedule_node_for_op(&frame->schedule, op);
+    IREE_ASSERT(node != NULL && node->result_count == 1);
+    const loom_low_packet_view_t packet = loom_low_packet_at_node(
+        &frame->schedule, (uint32_t)(node - frame->schedule.nodes));
+    const loom_low_allocation_assignment_t* result_assignment =
+        loom_low_packet_result_assignment(&frame->allocation, &packet, 0);
+    IREE_ASSERT(result_assignment != NULL);
+    IREE_ASSERT_EQ(result_assignment->location_kind,
+                   LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER);
+
+    loom_aie2p_leaf_resource_flags_t flags = 0;
+    uint64_t extent = 0;
+    if (loom_low_resource_has_extent(op)) {
+      flags |= LOOM_AIE2P_LEAF_RESOURCE_FLAG_STATIC_EXTENT;
+      extent = (uint64_t)loom_low_resource_extent(op);
+    }
+    uint32_t cache_swizzle_stride = 0;
+    if (loom_low_resource_has_cache_swizzle_stride(op)) {
+      flags |= LOOM_AIE2P_LEAF_RESOURCE_FLAG_CACHE_SWIZZLE_STRIDE;
+      cache_swizzle_stride =
+          (uint32_t)loom_low_resource_cache_swizzle_stride(op);
+    }
+
+    uint32_t extent_physical_register = UINT32_MAX;
+    uint16_t extent_descriptor_register_class_id = 0;
+    uint32_t extent_physical_register_count = 0;
+    if (loom_low_resource_extent_value_is_present(op)) {
+      flags |= LOOM_AIE2P_LEAF_RESOURCE_FLAG_DYNAMIC_EXTENT;
+      const loom_low_allocation_assignment_t* extent_assignment =
+          loom_low_packet_operand_assignment(&frame->allocation, &packet, 0);
+      IREE_ASSERT(extent_assignment != NULL);
+      IREE_ASSERT_EQ(extent_assignment->location_kind,
+                     LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER);
+      extent_physical_register = extent_assignment->location_base;
+      extent_descriptor_register_class_id =
+          extent_assignment->descriptor_reg_class_id;
+      extent_physical_register_count = extent_assignment->location_count;
+    }
+
+    const loom_type_id_t source_type_id = loom_low_resource_source_type(op);
+    IREE_ASSERT_LT(source_type_id, frame->module->types.count);
+    resources[resource_index] = (loom_aie2p_leaf_resource_import_t){
+        .index = (uint64_t)loom_low_resource_index(op),
+        .extent = extent,
+        .cache_swizzle_stride = cache_swizzle_stride,
+        .physical_register = result_assignment->location_base,
+        .physical_register_count = result_assignment->location_count,
+        .extent_physical_register = extent_physical_register,
+        .descriptor_register_class_id =
+            result_assignment->descriptor_reg_class_id,
+        .extent_descriptor_register_class_id =
+            extent_descriptor_register_class_id,
+        .extent_physical_register_count = extent_physical_register_count,
+        .flags = flags,
+        .import_kind = loom_low_resource_import_kind(op),
+        .source_type_kind = loom_type_kind(
+            loom_type_table_get(&frame->module->types, source_type_id)),
+    };
+  }
+  plan->resource_imports = resources;
+  plan->resource_import_count = resource_count;
+  return iree_ok_status();
+}
 
 static uint32_t loom_aie2p_bundle_plan_descriptor_ordinal(
     const loom_low_descriptor_set_t* descriptor_set,
@@ -1512,11 +1633,12 @@ static iree_status_t loom_aie2p_bundle_plan_append_terminator(
 
 static iree_status_t loom_aie2p_bundle_plan_build_impl(
     const loom_low_emission_frame_t* frame, iree_arena_allocator_t* arena,
-    iree_arena_allocator_t* scratch_arena, loom_aie2p_bundle_plan_t* out_plan) {
+    iree_arena_allocator_t* scratch_arena,
+    loom_aie2p_leaf_program_plan_t* out_plan) {
   IREE_ASSERT_ARGUMENT(frame);
   IREE_ASSERT_ARGUMENT(arena);
   IREE_ASSERT_ARGUMENT(out_plan);
-  *out_plan = (loom_aie2p_bundle_plan_t){0};
+  *out_plan = (loom_aie2p_leaf_program_plan_t){0};
 
   loom_aie2p_bundle_plan_analysis_t analysis;
   IREE_RETURN_IF_ERROR(
@@ -1760,8 +1882,7 @@ static iree_status_t loom_aie2p_bundle_plan_build_impl(
   }
   IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_resolve_storage_fixups(&builder));
 
-  *out_plan = (loom_aie2p_bundle_plan_t){
-      .frame = frame,
+  loom_aie2p_leaf_program_plan_t plan = {
       .register_writes = builder.register_writes,
       .block_byte_offsets = builder.block_byte_offsets,
       .block_count = builder.block_count,
@@ -1776,12 +1897,18 @@ static iree_status_t loom_aie2p_bundle_plan_build_impl(
       .storage_fixup_count = builder.storage_fixup_count,
       .encoded_byte_length = builder.encoded_byte_length,
   };
+  IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_copy_function_name(
+      frame, arena, &plan.function_name));
+  loom_aie2p_bundle_plan_retain_storage_requirements(frame, &plan);
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_bundle_plan_retain_resource_imports(frame, arena, &plan));
+  *out_plan = plan;
   return iree_ok_status();
 }
 
 iree_status_t loom_aie2p_bundle_plan_build(
     const loom_low_emission_frame_t* frame, iree_arena_allocator_t* arena,
-    loom_aie2p_bundle_plan_t* out_plan) {
+    loom_aie2p_leaf_program_plan_t* out_plan) {
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(arena->block_pool, &scratch_arena);
   iree_status_t status =

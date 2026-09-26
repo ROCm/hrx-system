@@ -949,6 +949,8 @@ iree_status_t loom_low_allocation_materialize_spills(
     };
     const uint64_t byte_size = table->spill_plans[i].byte_size;
     result.storage_bytes += byte_size;
+    result.storage_minimum_alignment = iree_max(
+        result.storage_minimum_alignment, table->spill_plans[i].byte_alignment);
     if (record_materialized_spills) {
       loom_low_allocation_record_materialized_spill(
           table, &table->spill_plans[i], materialized_store_traffic,

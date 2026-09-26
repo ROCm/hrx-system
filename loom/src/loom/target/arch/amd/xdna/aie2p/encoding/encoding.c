@@ -414,6 +414,7 @@ bool loom_aie2p_encoding_query_instruction_info(
       .name = loom_aie2p_encoding_instruction_name(form),
       .slot = (loom_aie2p_slot_t)layout->slot_id,
       .bit_count = kLoomAie2pSlotBitCounts[layout->slot_id],
+      .field_count = layout->field_count,
       .delay_slot_count = form->delay_slot_count,
   };
   return true;

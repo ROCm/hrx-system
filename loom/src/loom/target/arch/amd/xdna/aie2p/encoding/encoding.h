@@ -58,6 +58,8 @@ typedef struct loom_aie2p_instruction_info_t {
   loom_aie2p_slot_t slot;
   // Number of encoded bits consumed within the physical slot.
   uint8_t bit_count;
+  // Number of encoded instruction fields.
+  uint8_t field_count;
   // Number of subsequent bundles in the architectural delay window.
   uint8_t delay_slot_count;
 } loom_aie2p_instruction_info_t;
