@@ -228,10 +228,10 @@ static iree_status_t loom_aie2p_array_plan_check_format(
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       builder,
       "array @%.*s family=%s groups=%" PRIhsz " workers=%" PRIhsz
-      " bindings=%" PRIhsz " channels=%" PRIhsz " slots=%" PRIhsz
+      " bindings=%" PRIu32 " channels=%" PRIhsz " slots=%" PRIhsz
       " locks=%" PRIhsz " dma=%" PRIhsz " routes=%" PRIhsz "\n",
       (int)function_name.size, function_name.data, plan->family->key,
-      plan->group_count, plan->worker_count, plan->binding_count,
+      plan->group_count, plan->worker_count, plan->binding_slot_count,
       plan->channel_count, plan->channel_slot_count, plan->lock_count,
       plan->dma_channel_count, plan->route_count));
 

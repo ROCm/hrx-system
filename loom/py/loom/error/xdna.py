@@ -537,6 +537,44 @@ ERR_XDNA_029 = ErrorDef(
     ),
 )
 
+# ERR_XDNA_030: An AIE2P array ABI layout field is unsupported.
+ERR_XDNA_030 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=30,
+    severity=Severity.ERROR,
+    summary="AIE2P array ABI layout field is unsupported.",
+    message=(
+        "AIE2P array function '@{function_name}' ABI layout field "
+        "'{field_name}' is unsupported"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("field_name", ParamKind.STRING),
+    ),
+    fix_hint="Use only the binding_count field in an AIE2P array ABI layout.",
+)
+
+# ERR_XDNA_031: An active binding ordinal violates the dense external ABI.
+ERR_XDNA_031 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=31,
+    severity=Severity.ERROR,
+    summary="Active binding ordinal violates the array ABI.",
+    message=(
+        "AIE2P binding ordinal {ordinal} is {reason}; the array ABI declares "
+        "{binding_count} dense slots"
+    ),
+    params=(
+        ErrorParam("ordinal", ParamKind.U32),
+        ErrorParam("reason", ParamKind.STRING),
+        ErrorParam("binding_count", ParamKind.U32),
+    ),
+    fix_hint=(
+        "Give each active binding one unique ordinal within the declared dense "
+        "binding table."
+    ),
+)
+
 ALL_XDNA_ERRORS = (
     ERR_XDNA_001,
     ERR_XDNA_002,
@@ -567,4 +605,6 @@ ALL_XDNA_ERRORS = (
     ERR_XDNA_027,
     ERR_XDNA_028,
     ERR_XDNA_029,
+    ERR_XDNA_030,
+    ERR_XDNA_031,
 )

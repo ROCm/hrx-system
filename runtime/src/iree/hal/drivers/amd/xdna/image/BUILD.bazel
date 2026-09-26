@@ -70,6 +70,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/drivers/amd/xdna/image/testdata:add_i32_npu4",
         "//runtime/src/iree/hal/drivers/amd/xdna/image/testdata:mul_i32",
         "//runtime/src/iree/hal/drivers/amd/xdna/image/testdata:mul_i32_npu4",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image/testdata:sparse_copy_i32",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

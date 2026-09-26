@@ -6,6 +6,8 @@
 
 #include "loom/target/arch/amd/xdna/aie2p/array/topology.h"
 
+#include <string.h>
+
 #include "loom/analysis/scc.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/error/error_catalog.h"
@@ -58,6 +60,23 @@ static iree_status_t loom_aie2p_array_topology_reject_group_lane(
   const loom_diagnostic_emission_t emission = {
       .op = op,
       .error = LOOM_ERR_XDNA_019,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
+  return iree_diagnostic_emit(topology->diagnostic_emitter, &emission);
+}
+
+static iree_status_t loom_aie2p_array_topology_reject_binding_ordinal(
+    const loom_aie2p_array_topology_t* topology,
+    const loom_aie2p_array_binding_t* binding, iree_string_view_t reason) {
+  const loom_diagnostic_param_t params[] = {
+      loom_param_u32(binding->ordinal),
+      loom_param_string(reason),
+      loom_param_u32(topology->plan->binding_slot_count),
+  };
+  const loom_diagnostic_emission_t emission = {
+      .op = loom_aie2p_array_topology_defining_op(topology, binding->value_id),
+      .error = LOOM_ERR_XDNA_031,
       .params = params,
       .param_count = IREE_ARRAYSIZE(params),
   };
@@ -866,13 +885,33 @@ iree_status_t loom_aie2p_array_topology_validate(
     IREE_ASSERT_UNREACHABLE("incomplete group must have one missing lane");
   }
 
+  const iree_host_size_t binding_ordinal_word_count =
+      ((iree_host_size_t)plan->binding_slot_count + 63u) / 64u;
+  uint64_t* binding_ordinals = NULL;
+  if (plan->binding_count > 1 && binding_ordinal_word_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        topology->arena, binding_ordinal_word_count, sizeof(*binding_ordinals),
+        (void**)&binding_ordinals));
+    memset(binding_ordinals, 0,
+           binding_ordinal_word_count * sizeof(*binding_ordinals));
+  }
   for (iree_host_size_t i = 0; i < plan->binding_count; ++i) {
-    for (iree_host_size_t j = i + 1; j < plan->binding_count; ++j) {
-      if (plan->bindings[i].ordinal == plan->bindings[j].ordinal) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "AIE2P binding ordinal is duplicated");
-      }
+    const loom_aie2p_array_binding_t* binding = &plan->bindings[i];
+    if (binding->ordinal >= plan->binding_slot_count) {
+      return loom_aie2p_array_topology_reject_binding_ordinal(
+          topology, binding, IREE_SV("outside the dense binding table"));
     }
+    if (binding_ordinals == NULL) {
+      continue;
+    }
+    const uint64_t mask = UINT64_C(1) << (binding->ordinal & 63u);
+    uint64_t* word = &binding_ordinals[binding->ordinal / 64u];
+    if ((*word & mask) != 0) {
+      return loom_aie2p_array_topology_reject_binding_ordinal(
+          topology, binding,
+          IREE_SV("declared by more than one active binding"));
+    }
+    *word |= mask;
   }
 
   for (iree_host_size_t i = 0; i < plan->channel_count; ++i) {

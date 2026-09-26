@@ -13,6 +13,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/target/arch/amd/xdna/aie2p/array/abi_layout.h"
 #include "loom/target/arch/amd/xdna/aie2p/core_structure.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/array_descriptors.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
@@ -34,7 +35,64 @@ typedef struct loom_aie2p_low_verify_state_t {
   iree_string_view_t function_name;
   // AIE2P representation contract selected by the target.
   loom_aie2p_low_verify_program_kind_t program_kind;
+  // Whether the array ABI layout passed its one public schema boundary.
+  bool abi_layout_valid;
 } loom_aie2p_low_verify_state_t;
+
+static loom_diagnostic_param_t loom_aie2p_low_abi_layout_field_param(
+    iree_string_view_t value) {
+  return loom_param_with_field_ref(
+      loom_param_string(value), loom_low_func_def_abi_layout_diagnostic_ref());
+}
+
+static iree_status_t loom_aie2p_low_verify_array_abi_layout(
+    loom_low_verify_context_t* context, loom_aie2p_low_verify_state_t* state,
+    const loom_op_t* function_op) {
+  loom_aie2p_array_abi_layout_issue_t issue = {0};
+  if (loom_aie2p_array_abi_layout_validate(
+          state->module, loom_low_func_def_abi_layout(function_op), &issue)) {
+    return iree_ok_status();
+  }
+
+  state->abi_layout_valid = false;
+  switch (issue.kind) {
+    case LOOM_AIE2P_ARRAY_ABI_LAYOUT_ISSUE_UNEXPECTED_FIELD: {
+      const loom_diagnostic_param_t params[] = {
+          loom_param_string(state->function_name),
+          loom_aie2p_low_abi_layout_field_param(issue.field_name),
+      };
+      return loom_low_verify_context_emit(context, function_op,
+                                          LOOM_ERR_XDNA_030, params,
+                                          IREE_ARRAYSIZE(params));
+    }
+    case LOOM_AIE2P_ARRAY_ABI_LAYOUT_ISSUE_BINDING_COUNT_KIND: {
+      const loom_diagnostic_param_t params[] = {
+          loom_aie2p_low_abi_layout_field_param(
+              IREE_SV("abi_layout.binding_count")),
+          loom_param_u32(issue.attribute.kind),
+          loom_param_u32(LOOM_ATTR_I64),
+      };
+      return loom_low_verify_context_emit(context, function_op,
+                                          LOOM_ERR_TYPE_005, params,
+                                          IREE_ARRAYSIZE(params));
+    }
+    case LOOM_AIE2P_ARRAY_ABI_LAYOUT_ISSUE_BINDING_COUNT_RANGE: {
+      const loom_diagnostic_param_t params[] = {
+          loom_aie2p_low_abi_layout_field_param(
+              IREE_SV("abi_layout.binding_count")),
+          loom_param_i64(issue.attribute.i64),
+          loom_param_string(IREE_SV("an integer in [0, 65535]")),
+      };
+      return loom_low_verify_context_emit(context, function_op,
+                                          LOOM_ERR_STRUCTURE_014, params,
+                                          IREE_ARRAYSIZE(params));
+    }
+    case LOOM_AIE2P_ARRAY_ABI_LAYOUT_ISSUE_NONE:
+      break;
+  }
+  IREE_ASSERT_UNREACHABLE("array ABI layout issue kind");
+  return iree_ok_status();
+}
 
 static iree_status_t loom_aie2p_low_verify_empty_signature(
     loom_low_verify_context_t* context, const loom_module_t* module,
@@ -89,14 +147,20 @@ static iree_status_t loom_aie2p_low_verify_begin_function(
           loom_low_verify_context_module(context),
           loom_low_verify_context_function_op(context)),
       .program_kind = program_kind,
+      .abi_layout_valid = true,
   };
   *out_provider_state = state;
   if (program_kind == LOOM_AIE2P_LOW_VERIFY_PROGRAM_CORE) {
     return iree_ok_status();
   }
+  const loom_op_t* function_op = loom_low_verify_context_function_op(context);
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_low_verify_array_abi_layout(context, state, function_op));
+  if (!state->abi_layout_valid) {
+    return iree_ok_status();
+  }
   return loom_aie2p_low_verify_empty_signature(
-      context, state->module, loom_low_verify_context_function_op(context),
-      IREE_SV("aie2p-array-plan"));
+      context, state->module, function_op, IREE_SV("aie2p-array-plan"));
 }
 
 static iree_status_t loom_aie2p_low_verify_core_resource(
@@ -342,7 +406,8 @@ static iree_status_t loom_aie2p_low_verify_op(
   (void)provider;
   const loom_aie2p_low_verify_state_t* state =
       (const loom_aie2p_low_verify_state_t*)provider_state;
-  if (state == NULL || loom_low_verify_context_should_stop(context)) {
+  if (state == NULL || !state->abi_layout_valid ||
+      loom_low_verify_context_should_stop(context)) {
     return iree_ok_status();
   }
   if (state->program_kind == LOOM_AIE2P_LOW_VERIFY_PROGRAM_CORE) {

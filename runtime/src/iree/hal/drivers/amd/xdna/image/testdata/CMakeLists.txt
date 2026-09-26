@@ -73,4 +73,20 @@ iree_c_embed_data(
   PUBLIC
 )
 
+iree_c_embed_data(
+  NAME
+    sparse_copy_i32
+  SRCS
+    "sparse_copy_i32.xdna"
+  C_FILE_OUTPUT
+    "sparse_copy_i32.c"
+  H_FILE_OUTPUT
+    "sparse_copy_i32.h"
+  IDENTIFIER
+    "iree_hal_amd_xdna_test_sparse_copy_i32"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

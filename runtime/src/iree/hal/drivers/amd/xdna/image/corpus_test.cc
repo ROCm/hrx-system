@@ -13,6 +13,7 @@
 #include "iree/hal/drivers/amd/xdna/image/testdata/add_i32_npu4.h"
 #include "iree/hal/drivers/amd/xdna/image/testdata/mul_i32.h"
 #include "iree/hal/drivers/amd/xdna/image/testdata/mul_i32_npu4.h"
+#include "iree/hal/drivers/amd/xdna/image/testdata/sparse_copy_i32.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -113,5 +114,54 @@ TEST_P(XdnaImageCorpusTest,
 
 INSTANTIATE_TEST_SUITE_P(ArithmeticPrograms, XdnaImageCorpusTest,
                          ::testing::Values("mul_i32", "add_i32"));
+
+TEST(XdnaImageSparseBindingTest, PreservesUnusedMiddleLaunchBinding) {
+  const iree_file_toc_t* file = iree_hal_amd_xdna_test_sparse_copy_i32_create();
+  iree_hal_amd_xdna_aie2p_target_t target;
+  IREE_ASSERT_OK(iree_hal_amd_xdna_aie2p_npu2_target_initialize(
+      iree_make_cstring_view("amd.xdna.strix_halo.17f0_11"), 1, &target));
+  SegmentedSource source = {};
+  source.bytes = iree_make_const_byte_span(file->data, file->size);
+  source.segment_length = 7;
+  iree_byte_sequence_initialize(&kSourceVtable, file->size, &source.base);
+  iree_hal_amd_xdna_image_t* image = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_xdna_image_create(
+      &source.base, &target, iree_allocator_system(), &image));
+  iree_byte_sequence_release(&source.base);
+  EXPECT_FALSE(source.destroyed);
+
+  uint32_t ordinal = UINT32_MAX;
+  IREE_ASSERT_OK(iree_hal_amd_xdna_image_find_entry(
+      image, iree_make_cstring_view("sparse_copy_i32"), &ordinal));
+  const auto* tables = iree_hal_amd_xdna_image_tables(image);
+  const auto entry = iree_hal_amd_xdna_image_tables_entry(tables, ordinal);
+  ASSERT_EQ(entry.binding_count, 3u);
+  const uint16_t expected_kinds[] = {
+      IREE_XDNA_ELF_BINDING_KIND_BUFFER,
+      IREE_XDNA_ELF_BINDING_KIND_NONE,
+      IREE_XDNA_ELF_BINDING_KIND_BUFFER,
+  };
+  for (uint32_t i = 0; i < entry.binding_count; ++i) {
+    const auto binding =
+        iree_hal_amd_xdna_image_tables_binding(tables, entry.first_binding + i);
+    EXPECT_EQ(binding.kind, expected_kinds[i]);
+  }
+
+  bool referenced_bindings[3] = {};
+  for (uint32_t i = 0; i < entry.dynamic_relocation_count; ++i) {
+    const auto relocation = iree_hal_amd_xdna_image_tables_relocation(
+        tables, entry.first_dynamic_relocation + i);
+    EXPECT_LT(relocation.source_ordinal, entry.binding_count);
+    if (relocation.source_ordinal < entry.binding_count) {
+      referenced_bindings[relocation.source_ordinal] = true;
+    }
+  }
+  EXPECT_TRUE(referenced_bindings[0]);
+  EXPECT_FALSE(referenced_bindings[1]);
+  EXPECT_TRUE(referenced_bindings[2]);
+
+  iree_hal_amd_xdna_image_destroy(image);
+  EXPECT_TRUE(source.destroyed);
+}
 
 }  // namespace

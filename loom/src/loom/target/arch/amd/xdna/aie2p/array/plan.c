@@ -17,6 +17,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/target/arch/amd/xdna/aie2p/array/abi_layout.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/binding.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/route.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/topology.h"
@@ -96,6 +97,8 @@ typedef struct loom_aie2p_array_plan_builder_t {
   iree_diagnostic_emitter_t diagnostic_emitter;
   // Whether private construction still satisfies authored target admission.
   bool valid;
+  // Whether the Low ABI explicitly fixes the dense binding-table cardinality.
+  bool has_explicit_binding_slot_count;
   iree_arena_allocator_t* arena;
   loom_value_fact_table_t facts;
   loom_aie2p_array_plan_t* plan;
@@ -337,6 +340,13 @@ static void loom_aie2p_array_extract_binding(
       (loom_aie2p_array_binding_access_t)loom_aie2p_array_array_binding_access(
           attrs)
           .i64;
+  if (!builder->has_explicit_binding_slot_count) {
+    const uint64_t required_slot_count = (uint64_t)binding->ordinal + 1u;
+    builder->plan->binding_slot_count = iree_max(
+        builder->plan->binding_slot_count,
+        (uint32_t)iree_min(required_slot_count,
+                           (uint64_t)LOOM_AIE2P_ARRAY_MAX_BINDING_SLOT_COUNT));
+  }
   loom_aie2p_array_define_entity(builder, binding->value_id,
                                  LOOM_AIE2P_ARRAY_ENTITY_BINDING,
                                  (uint32_t)builder->binding_cursor++);
@@ -1952,6 +1962,9 @@ iree_status_t loom_aie2p_array_plan_build(
       .function_op = function_op,
       .family = loom_xdna_npu2_array_family(),
   };
+  const loom_aie2p_array_abi_layout_t abi_layout =
+      loom_aie2p_array_abi_layout_from_verified(function_op);
+  plan.binding_slot_count = abi_layout.binding_slot_count;
   loom_aie2p_array_plan_builder_t builder = {
       .module = module,
       .function_op = function_op,
@@ -1961,6 +1974,7 @@ iree_status_t loom_aie2p_array_plan_build(
       .leaf_count = leaf_count,
       .diagnostic_emitter = diagnostic_emitter,
       .valid = true,
+      .has_explicit_binding_slot_count = abi_layout.has_binding_slot_count,
       .arena = arena,
       .plan = &plan,
   };

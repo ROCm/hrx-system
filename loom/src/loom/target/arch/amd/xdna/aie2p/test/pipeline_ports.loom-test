@@ -112,7 +112,7 @@ func.def target(@core_target) @interleaved_aliases$group$1(%45: buffer, %46: buf
   func.return
 }
 
-low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @interleaved_aliases() asm {
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) abi_layout({binding_count = 4}) @interleaved_aliases() asm {
   %64 = constant.u32 1 : reg<aie2p.array.scalar : index>
   %65 = group %64
   %66 = constant.u32 1 : reg<aie2p.array.scalar : index>
@@ -217,7 +217,7 @@ func.def target(@core_target) @add(%lhs: buffer, %rhs: buffer, %output: buffer) 
   func.return
 }
 
-low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @single_stage_aliases() asm {
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) abi_layout({binding_count = 3}) @single_stage_aliases() asm {
   %22 = constant.u32 1 : reg<aie2p.array.scalar : index>
   %23 = group %22
   %24 = constant.u32 0 : reg<aie2p.array.scalar : index>

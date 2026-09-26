@@ -119,16 +119,16 @@ static iree_xdna_elf_binding_access_t loom_aie2p_xdna_binding_access(
   return result;
 }
 
-static iree_status_t loom_aie2p_xdna_build_binding_records(
+static void loom_aie2p_xdna_build_binding_records(
     const loom_aie2p_array_plan_t* plan, uint32_t address_alignment,
     iree_xdna_elf_binding_record_t* records) {
-  if (plan->binding_count == 0) {
-    return iree_ok_status();
+  if (plan->binding_slot_count == 0) {
+    return;
   }
-  memset(records, 0, plan->binding_count * sizeof(*records));
+  memset(records, 0, plan->binding_slot_count * sizeof(*records));
   for (iree_host_size_t i = 0; i < plan->binding_count; ++i) {
     const loom_aie2p_array_binding_t* binding = &plan->bindings[i];
-    records[i] = (iree_xdna_elf_binding_record_t){
+    records[binding->ordinal] = (iree_xdna_elf_binding_record_t){
         .kind = IREE_XDNA_ELF_BINDING_KIND_BUFFER,
         .address_space = IREE_XDNA_ELF_BINDING_ADDRESS_SPACE_GLOBAL,
         .access = loom_aie2p_xdna_binding_access(binding->access),
@@ -138,23 +138,17 @@ static iree_status_t loom_aie2p_xdna_build_binding_records(
     };
   }
   for (iree_host_size_t i = 0; i < plan->binding_plan_count; ++i) {
-    const loom_aie2p_array_binding_plan_t* binding = &plan->binding_plans[i];
-    uint64_t minimum_byte_length = 0;
-    if (!iree_checked_add_u64(binding->binding_byte_offset,
-                              binding->binding_span_byte_length,
-                              &minimum_byte_length)) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "AIE2P binding extent overflows");
-    }
-    iree_xdna_elf_binding_record_t* record = &records[binding->binding_index];
+    const loom_aie2p_array_binding_plan_t* binding_plan =
+        &plan->binding_plans[i];
+    const uint64_t minimum_byte_length = binding_plan->binding_byte_offset +
+                                         binding_plan->binding_span_byte_length;
+    const uint32_t binding_ordinal =
+        plan->bindings[binding_plan->binding_index].ordinal;
+    iree_xdna_elf_binding_record_t* record = &records[binding_ordinal];
     record->minimum_byte_length =
         iree_max(record->minimum_byte_length, minimum_byte_length);
     record->minimum_alignment = address_alignment;
   }
-  for (iree_host_size_t i = 0; i < plan->binding_count; ++i) {
-    IREE_ASSERT_NE(records[i].minimum_byte_length, 0u);
-  }
-  return iree_ok_status();
 }
 
 static iree_status_t loom_aie2p_xdna_encode_symbol_tables(
@@ -566,7 +560,7 @@ iree_status_t loom_aie2p_xdna_product_write(
         .first_relocation = (uint32_t)relocation_count,
     };
     tile_count += entry->tile_count;
-    binding_count += entry->array_plan->binding_count;
+    binding_count += entry->array_plan->binding_slot_count;
     relocation_count += 2 * entry->array_program->relocation_count;
     name_length += entry->name.size;
     for (iree_host_size_t j = 0; j < entry->tile_count; ++j) {
@@ -729,7 +723,7 @@ iree_status_t loom_aie2p_xdna_product_write(
         .first_allocation_use = i,
         .allocation_use_count = 1,
         .first_binding = layout->first_binding,
-        .binding_count = (uint32_t)entry->array_plan->binding_count,
+        .binding_count = entry->array_plan->binding_slot_count,
         .first_static_relocation = layout->first_relocation,
         .first_dynamic_relocation = layout->first_relocation,
         .dynamic_relocation_count =
@@ -747,8 +741,8 @@ iree_status_t loom_aie2p_xdna_product_write(
     IREE_RETURN_IF_ERROR(
         iree_arena_allocate_array(scratch_arena, entry_record.binding_count,
                                   sizeof(*bindings), (void**)&bindings));
-    IREE_RETURN_IF_ERROR(loom_aie2p_xdna_build_binding_records(
-        entry->array_plan, binding_alignment, bindings));
+    loom_aie2p_xdna_build_binding_records(entry->array_plan, binding_alignment,
+                                          bindings);
     for (uint32_t j = 0; j < entry_record.binding_count; ++j) {
       iree_xdna_elf_encode_binding(
           &bindings[j],

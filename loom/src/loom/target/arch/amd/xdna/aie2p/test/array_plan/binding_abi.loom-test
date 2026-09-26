@@ -1,0 +1,241 @@
+// RUN: with-checks emit aie2p-array-plan @interior_hole
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+pipeline.def<kernel> public retain target(@array_target) @interior_hole() launch(%input: buffer, %unused: buffer, %output: buffer) {
+  %lanes = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %lanes : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<1x1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1x1xi32>
+  %input_flow = pipeline.scatter %input_view across %workers : view<1x1xi32>, group -> pipeline.flow<tile<1xi32>>
+  %output_flow = pipeline.stage @copy on %workers(%input_flow) : (group, pipeline.flow<tile<1xi32>>) -> (pipeline.flow<tile<1xi32>>)
+  pipeline.write %output_flow to %output_view : pipeline.flow<tile<1xi32>>, view<1x1xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @copy(%input: buffer, %output: buffer) {
+  %input_aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 4} : buffer, buffer
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<1xi32>
+  %value = view.load %input_view[0] : view<1xi32> -> i32
+  view.store %value, %output_view[0] : i32, view<1xi32>
+  func.return
+}
+
+// ----
+CHECK: array @interior_hole * bindings=3 *
+CHECK: binding index=0 ordinal=0 access=read
+CHECK: binding index=1 ordinal=2 access=write
+CHECK: control-relocation index=0 * binding=0 *
+CHECK: control-relocation index=1 * binding=2 *
+
+// ====
+// RUN: with-checks emit aie2p-array-plan @trailing_hole
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+pipeline.def<kernel> public retain target(@array_target) @trailing_hole() launch(%input: buffer, %output: buffer, %unused: buffer) {
+  %lanes = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %workers = group.create %lanes : index -> group
+  %input_view = buffer.view %input[%base] : buffer -> view<1x1xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<1x1xi32>
+  %input_flow = pipeline.scatter %input_view across %workers : view<1x1xi32>, group -> pipeline.flow<tile<1xi32>>
+  %output_flow = pipeline.stage @copy on %workers(%input_flow) : (group, pipeline.flow<tile<1xi32>>) -> (pipeline.flow<tile<1xi32>>)
+  pipeline.write %output_flow to %output_view : pipeline.flow<tile<1xi32>>, view<1x1xi32>
+  pipeline.return
+}
+
+func.def target(@core_target) @copy(%input: buffer, %output: buffer) {
+  %input_aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 4} : buffer, buffer
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input_aligned[%base] : buffer -> view<1xi32>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<1xi32>
+  %value = view.load %input_view[0] : view<1xi32> -> i32
+  view.store %value, %output_view[0] : i32, view<1xi32>
+  func.return
+}
+
+// ----
+CHECK: array @trailing_hole * bindings=3 *
+CHECK: binding index=0 ordinal=0 access=read
+CHECK: binding index=1 ordinal=1 access=write
+CHECK: control-relocation index=0 * binding=0 *
+CHECK: control-relocation index=1 * binding=1 *
+
+// ====
+// RUN: with-checks emit aie2p-array-plan @explicit_sparse
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) abi_layout({binding_count = 3}) @explicit_sparse() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %group = group %one
+  %worker = worker %group, %zero, @copy
+  %input = binding 0, "read"
+  %output = binding 2, "write"
+  %input_sender = sender %input, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %input_receiver = receiver %worker, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %input_channel = channel %input_sender, %input_receiver, %two, %one : reg<aie2p.array.channel : tile<1xi32>>
+  %output_sender = sender %worker, 1 : reg<aie2p.array.sender : tile<1xi32>>
+  %output_receiver = receiver %output, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %output_channel = channel %output_sender, %output_receiver, %two, %one : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %worker, %zero, %two
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @copy() asm {
+  %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %value = lda %input, 0
+  st %value, %output, 0
+  return
+}
+
+// ----
+CHECK: array @explicit_sparse * bindings=3 *
+CHECK: binding index=0 ordinal=0 access=read
+CHECK: binding index=1 ordinal=2 access=write
+
+// ====
+// RUN: with-checks emit aie2p-array-plan @implicit_sparse
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @implicit_sparse() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %group = group %one
+  %worker = worker %group, %zero, @copy
+  %output = binding 2, "write"
+  %input = binding 0, "read"
+  %input_sender = sender %input, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %input_receiver = receiver %worker, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %input_channel = channel %input_sender, %input_receiver, %two, %one : reg<aie2p.array.channel : tile<1xi32>>
+  %output_sender = sender %worker, 1 : reg<aie2p.array.sender : tile<1xi32>>
+  %output_receiver = receiver %output, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %output_channel = channel %output_sender, %output_receiver, %two, %one : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %worker, %zero, %two
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @copy() asm {
+  %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %value = lda %input, 0
+  st %value, %output, 0
+  return
+}
+
+// ----
+CHECK: array @implicit_sparse * bindings=3 *
+CHECK: binding index=0 ordinal=2 access=write
+CHECK: binding index=1 ordinal=0 access=read
+
+// ====
+// RUN: emit aie2p-array-plan @ordinal_outside_layout
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) abi_layout({binding_count = 1}) @ordinal_outside_layout() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %group = group %one
+  %worker = worker %group, %zero, @consume
+  // ERROR@+1: XDNA/031 {ordinal="1", reason="outside the dense binding table", binding_count="1"}
+  %input = binding 1, "read"
+  %sender = sender %input, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %worker, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel = channel %sender, %receiver, %two, %one : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %worker, %zero, %two
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @consume() asm {
+  %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %value = lda %input, 0
+  st %value, %input, 0
+  return
+}
+
+// ====
+// RUN: emit aie2p-array-plan @duplicate_ordinal
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) abi_layout({binding_count = 1}) @duplicate_ordinal() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %two = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %group = group %one
+  %worker = worker %group, %zero, @consume_two
+  %input0 = binding 0, "read"
+  // ERROR@+1: XDNA/031 {ordinal="0", reason="declared by more than one active binding", binding_count="1"}
+  %input1 = binding 0, "read_write"
+  %sender0 = sender %input0, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver0 = receiver %worker, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel0 = channel %sender0, %receiver0, %two, %one : reg<aie2p.array.channel : tile<1xi32>>
+  %sender1 = sender %input1, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver1 = receiver %worker, 1 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel1 = channel %sender1, %receiver1, %two, %one : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %worker, %zero, %two
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @consume_two() asm {
+  %input0 = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %input1 = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %value0 = lda %input0, 0
+  %value1 = lda %input1, 0
+  st %value1, %input0, 0
+  st %value0, %input1, 0
+  return
+}
+
+// ====
+// RUN: emit aie2p-array-plan @unexpected_layout_field
+
+aie2p.target<array> @array_target
+
+// ERROR@+1: XDNA/030 {function_name="unexpected_layout_field", field_name="resource_count"}
+low.func.def target<amd.xdna.aie2p.array>(@array_target) abi_layout({resource_count = 3}) @unexpected_layout_field(%arg: reg<aie2p.array.group>) asm {
+  return
+}
+
+// ====
+// RUN: emit aie2p-array-plan @layout_kind
+
+aie2p.target<array> @array_target
+
+// ERROR@+1: TYPE/005
+low.func.def target<amd.xdna.aie2p.array>(@array_target) abi_layout({binding_count = "three"}) @layout_kind() asm {
+  return
+}
+
+// ====
+// RUN: emit aie2p-array-plan @layout_range
+
+aie2p.target<array> @array_target
+
+// ERROR@+1: STRUCTURE/014
+low.func.def target<amd.xdna.aie2p.array>(@array_target) abi_layout({binding_count = 65536}) @layout_range() asm {
+  return
+}

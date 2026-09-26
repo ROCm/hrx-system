@@ -90,6 +90,23 @@ endif()
 if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
+    array_abi_layout
+  HDRS
+    "array/abi_layout.h"
+  SRCS
+    "array/abi_layout.c"
+  DEPS
+    iree::base
+    iree::schemas::xdna_executable
+    loom::ir
+    loom::ops::low
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_XDNA)
+loom_cc_library(
+  NAME
     encoding
   HDRS
     "encoding/encoding.h"
@@ -229,6 +246,7 @@ loom_cc_library(
   SRCS
     "low_verify.c"
   DEPS
+    ::array_abi_layout
     ::array_descriptors
     ::core_descriptors
     ::core_structure
@@ -277,6 +295,7 @@ loom_cc_library(
     "array/topology.c"
     "array/topology.h"
   DEPS
+    ::array_abi_layout
     ::array_descriptors
     iree::base
     iree::base::internal::arena
@@ -436,6 +455,7 @@ loom_cc_library(
     "pipeline/composition.c"
     "pipeline/lower.c"
   DEPS
+    ::array_abi_layout
     ::array_descriptors
     ::array_plan
     iree::base
@@ -541,6 +561,7 @@ loom_check_test_suite(
     loom_check_file_test
   SRCS
     "test/array_plan/bank_spans.loom-test"
+    "test/array_plan/binding_abi.loom-test"
     "test/array_plan/binding_view_admission.loom-test"
     "test/array_plan/channel_connection_admission.loom-test"
     "test/array_plan/channel_shape_admission.loom-test"

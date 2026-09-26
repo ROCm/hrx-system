@@ -33,6 +33,20 @@ Generate the addition images with the same commands, replacing `mul_i32` with
 `add_i32` in the input, root and output names. The compiler produces intact
 independent programs; the execution CTS does not patch instruction encodings.
 
+`sparse_copy_i32.loom` is the compiler-to-loader witness for a preserved unused
+middle launch binding. Its Halo image has three dense ABI slots whose kinds are
+BUFFER, NONE and BUFFER; dynamic relocations reference only the two live slots.
+Regenerate it with:
+
+```sh
+iree-bazel-run //loom/src/loom/tools/loom-compile -- \
+  runtime/src/iree/hal/drivers/amd/xdna/image/testdata/sparse_copy_i32.loom \
+  --root=@sparse_copy_i32 \
+  --target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11 \
+  --format=xdna \
+  --output=runtime/src/iree/hal/drivers/amd/xdna/image/testdata/sparse_copy_i32.xdna
+```
+
 Strix and Krackan share the NPU4 execution-profile identity; Halo uses its own
 profile. The native CTS selects the matching intact image from the endpoint,
 checks exact numerical results with changing inputs, and exercises independent

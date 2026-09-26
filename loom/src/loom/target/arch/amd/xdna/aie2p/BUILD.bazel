@@ -85,6 +85,18 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "array_abi_layout",
+    srcs = ["array/abi_layout.c"],
+    hdrs = ["array/abi_layout.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/schemas:xdna_executable",
+    ],
+)
+
+loom_cc_library(
     name = "encoding",
     srcs = ["encoding/encoding.c"],
     hdrs = ["encoding/encoding.h"],
@@ -189,6 +201,7 @@ loom_cc_library(
     srcs = ["low_verify.c"],
     hdrs = ["low_verify.h"],
     deps = [
+        ":array_abi_layout",
         ":array_descriptors",
         ":core_descriptors",
         ":core_structure",
@@ -229,6 +242,7 @@ loom_cc_library(
     ],
     hdrs = ["array/plan.h"],
     deps = [
+        ":array_abi_layout",
         ":array_descriptors",
         "//loom/src/loom/analysis:scc",
         "//loom/src/loom/codegen/low:diagnostics",
@@ -370,6 +384,7 @@ loom_cc_library(
         "pipeline/lower.h",
     ],
     deps = [
+        ":array_abi_layout",
         ":array_descriptors",
         ":array_plan",
         "//loom/src/loom/analysis:pipeline_firing",
@@ -464,6 +479,7 @@ loom_check_test_suite(
     name = "loom_check_file_test",
     srcs = [
         "test/array_plan/bank_spans.loom-test",
+        "test/array_plan/binding_abi.loom-test",
         "test/array_plan/binding_view_admission.loom-test",
         "test/array_plan/channel_connection_admission.loom-test",
         "test/array_plan/channel_shape_admission.loom-test",

@@ -117,7 +117,7 @@ func.def target(@core_target) @composite_reduce$group$1(%42: buffer, %43: buffer
   func.return
 }
 
-low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @composite_reduce() asm {
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) abi_layout({binding_count = 3}) @composite_reduce() asm {
   %62 = constant.u32 2 : reg<aie2p.array.scalar : index>
   %63 = group %62
   %64 = constant.u32 1 : reg<aie2p.array.scalar : index>

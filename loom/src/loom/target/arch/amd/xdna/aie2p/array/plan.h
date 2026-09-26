@@ -435,8 +435,10 @@ typedef struct loom_aie2p_array_plan_t {
   iree_host_size_t group_count;
   // External bindings in source order.
   const loom_aie2p_array_binding_t* bindings;
-  // Number of external bindings.
+  // Number of active external bindings retained by the topology.
   iree_host_size_t binding_count;
+  // Dense external ABI cardinality, including unused binding slots.
+  uint32_t binding_slot_count;
   // Resident workers in source order.
   const loom_aie2p_array_worker_t* workers;
   // Number of resident workers.
