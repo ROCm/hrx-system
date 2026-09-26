@@ -10,11 +10,14 @@
 // separate untimed pass observes requested live memory and allocation traffic.
 
 #include <algorithm>
+#include <charconv>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "benchmark/benchmark.h"
 #include "iree/base/api.h"
@@ -98,7 +101,7 @@ struct AllocationObserver {
   iree_allocator_t allocator() { return {this, Control}; }
 };
 
-enum class Shape { kLinear, kLoop, kBranch, kTied, kFanout };
+enum class Shape { kLinear, kLoop, kLoopRelocation, kBranch, kTied, kFanout };
 enum class Phase { kModel, kLiveness, kPlacement, kAllocation };
 
 std::string MakeSource(uint32_t chain_length, uint32_t component_count,
@@ -139,6 +142,95 @@ std::string MakeSource(uint32_t chain_length, uint32_t component_count,
         source += ", ";
       }
       source += "%next" + std::to_string(i);
+    }
+    return source + "\n}\n";
+  }
+  if (shape == Shape::kLoopRelocation) {
+    std::string source =
+        "test.target<low_core> @target\n"
+        "low.func.def target<test.low.core>(@target) @kernel("
+        "%condition: reg<test.i32>";
+    for (uint32_t i = 0; i < component_count; ++i) {
+      source += ", %seed" + std::to_string(i) + ": reg<test.i32>";
+    }
+    source += ", %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (";
+    for (uint32_t i = 0; i < component_count; ++i) {
+      if (i != 0) {
+        source += ", ";
+      }
+      source += "reg<test.i32>";
+    }
+    source += ") asm {\n  low.br ^loop(";
+    for (uint32_t i = 0; i < component_count; ++i) {
+      if (i != 0) {
+        source += ", ";
+      }
+      source += "%seed" + std::to_string(i) + ": reg<test.i32>";
+    }
+    source += ")\n^loop(";
+    for (uint32_t i = 0; i < component_count; ++i) {
+      if (i != 0) {
+        source += ", ";
+      }
+      source += "%state" + std::to_string(i) + ": reg<test.i32>";
+    }
+    source +=
+        "):\n  low.cond_br %condition, ^body, ^exit : reg<test.i32>\n"
+        "^body:\n";
+    if (chain_length == 1) {
+      source +=
+          "  %early0 = test.add.i32 %lhs, %rhs\n"
+          "  %early1 = test.mul.i32 %early0, %rhs\n"
+          "  %early2 = test.add.i32 %early1, %rhs\n"
+          "  %acc0 = test.add.i32 %state0, %early2\n";
+      for (uint32_t i = 1; i < component_count; ++i) {
+        source += "  %acc" + std::to_string(i) + " = test.add.i32 %acc" +
+                  std::to_string(i - 1) + ", %state" + std::to_string(i) + "\n";
+      }
+    } else {
+      Require(chain_length == component_count && component_count >= 2,
+              "Dense relocation requires one color per component");
+      for (uint32_t i = 0; i < component_count; ++i) {
+        source += "  %early" + std::to_string(i) +
+                  (i % 2 == 0 ? " = test.add.i32 %lhs, %rhs\n"
+                              : " = test.mul.i32 %lhs, %rhs\n");
+      }
+      source += "  %early_acc0 = test.add.i32 %early0, %early1\n";
+      for (uint32_t i = 2; i < component_count; ++i) {
+        source += "  %early_acc" + std::to_string(i - 1) +
+                  " = test.add.i32 %early_acc" + std::to_string(i - 2) +
+                  ", %early" + std::to_string(i) + "\n";
+      }
+    }
+    for (uint32_t i = 0; i < component_count; ++i) {
+      source += "  %next" + std::to_string(i);
+      if (chain_length == 1) {
+        source += i % 2 == 0 ? " = test.mul.i32 %lhs, %rhs\n"
+                             : " = test.add.i32 %lhs, %rhs\n";
+      } else {
+        source += " = test.add.i32 %state" + std::to_string(i) + ", %rhs\n";
+      }
+    }
+    if (chain_length == 1) {
+      source += "  %sink = test.mul.i32 %acc" +
+                std::to_string(component_count - 1) + ", %rhs\n";
+    } else {
+      source += "  %sink = test.mul.i32 %early_acc" +
+                std::to_string(component_count - 2) + ", %rhs\n";
+    }
+    source += "  low.br ^loop(";
+    for (uint32_t i = 0; i < component_count; ++i) {
+      if (i != 0) {
+        source += ", ";
+      }
+      source += "%next" + std::to_string(i) + ": reg<test.i32>";
+    }
+    source += ")\n^exit:\n  return ";
+    for (uint32_t i = 0; i < component_count; ++i) {
+      if (i != 0) {
+        source += ", ";
+      }
+      source += "%state" + std::to_string(i);
     }
     return source + "\n}\n";
   }
@@ -238,11 +330,14 @@ struct RunResult {
   uint32_t copy_count = 0;
   // Copies requiring real moves; live fan-out copies must remain independent.
   uint32_t materialized_copy_count = 0;
+  // Physical backedge moves remaining after loop-edge relocation.
+  uint64_t backedge_move_count = 0;
 };
 
 class AllocationBenchmark {
  public:
-  AllocationBenchmark(const std::string& source, Phase phase,
+  AllocationBenchmark(const std::string& source, Phase phase, Shape shape,
+                      uint32_t chain_length, uint32_t component_count,
                       iree_allocator_t allocator)
       : phase_(phase) {
     iree_arena_block_pool_initialize(128 * 1024, allocator, &source_pool_);
@@ -274,6 +369,43 @@ class AllocationBenchmark {
     auto symbol = loom_module_find_symbol(module_, name);
     Require(symbol != LOOM_SYMBOL_ID_INVALID, "Kernel symbol missing");
     function_ = module_->symbols.entries[symbol].defining_op;
+    if (shape == Shape::kLoopRelocation) {
+      const loom_region_t* body = loom_low_func_def_body(function_);
+      Require(body->block_count == 4, "Relocation loop shape changed");
+      backedge_terminator_ =
+          loom_block_const_last_op(loom_region_const_block(body, 2));
+      Require(loom_low_br_isa(backedge_terminator_),
+              "Relocation loop backedge missing");
+    }
+    if (shape == Shape::kLoopRelocation && chain_length != 1) {
+      fixed_values_.resize(component_count);
+      std::vector<uint8_t> found(component_count);
+      for (loom_value_id_t value_id = 0; value_id < module_->values.count;
+           ++value_id) {
+        const iree_string_view_t name =
+            loom_module_value_name(module_, value_id);
+        if (name.size <= 4 || std::memcmp(name.data, "next", 4) != 0) {
+          continue;
+        }
+        uint32_t next_index = 0;
+        const auto parsed =
+            std::from_chars(name.data + 4, name.data + name.size, next_index);
+        if (parsed.ec != std::errc{} || parsed.ptr != name.data + name.size ||
+            next_index >= component_count) {
+          continue;
+        }
+        auto& fixed_value = fixed_values_[next_index];
+        fixed_value.value_id = value_id;
+        fixed_value.location_kind = LOOM_LOW_ALLOCATION_LOCATION_TARGET_ID;
+        fixed_value.location_base =
+            next_index < 2 ? next_index : component_count + 1 + next_index;
+        fixed_value.location_count = 1;
+        found[next_index] = 1;
+      }
+      Require(std::all_of(found.begin(), found.end(),
+                          [](uint8_t value) { return value != 0; }),
+              "Dense relocation source values missing");
+    }
     if (phase_ != Phase::kModel) {
       InitializeModel(&base_arena_, &model_);
     }
@@ -324,6 +456,8 @@ class AllocationBenchmark {
       benchmark::DoNotOptimize(placement.relations);
     } else {
       loom_low_allocation_options_t options = {};
+      options.fixed_values = fixed_values_.data();
+      options.fixed_value_count = fixed_values_.size();
       loom_low_allocation_table_t allocation = {};
       IREE_CHECK_OK(
           loom_low_allocate_function(&model_, &options, &arena, &allocation));
@@ -332,6 +466,17 @@ class AllocationBenchmark {
       result.value_count = model_.value_domain.value_count;
       result.copy_count = allocation.copy_decision_count;
       result.materialized_copy_count = allocation.materialized_copy_count;
+      if (backedge_terminator_ != nullptr) {
+        result.backedge_move_count = UINT64_MAX;
+        for (iree_host_size_t i = 0; i < allocation.edge_copy_group_count;
+             ++i) {
+          const auto& group = allocation.edge_copy_groups[i];
+          if (group.terminator_op == backedge_terminator_) {
+            result.backedge_move_count = group.move_group.moves.count;
+            break;
+          }
+        }
+      }
       benchmark::DoNotOptimize(allocation.assignments);
     }
     result.used_bytes = arena.used_allocation_size;
@@ -376,6 +521,10 @@ class AllocationBenchmark {
   loom_low_function_model_t model_ = {};
   // Retained semantic liveness for placement-only measurements.
   loom_liveness_analysis_t liveness_ = {};
+  // Dense relocation source colors fixed outside the header destination set.
+  std::vector<loom_low_allocation_fixed_value_t> fixed_values_;
+  // Generated loop backedge used to validate final edge-copy materialization.
+  const loom_op_t* backedge_terminator_ = nullptr;
 };
 
 struct AllocationTraffic {
@@ -405,11 +554,14 @@ struct MemoryObservation {
   uint64_t retained_pool_bytes = 0;
 };
 
-MemoryObservation ObserveMemory(const std::string& source, Phase phase) {
+MemoryObservation ObserveMemory(const std::string& source, Phase phase,
+                                Shape shape, uint32_t chain_length,
+                                uint32_t component_count) {
   AllocationObserver observer;
   MemoryObservation observation;
   {
-    AllocationBenchmark observed(source, phase, observer.allocator());
+    AllocationBenchmark observed(source, phase, shape, chain_length,
+                                 component_count, observer.allocator());
     const auto before_live = observer.live_bytes;
     observation.setup_live_bytes = before_live;
     const auto before_requested = observer.requested_bytes;
@@ -437,8 +589,10 @@ void RunBenchmark(benchmark::State& state, Shape shape, Phase phase) {
   const uint32_t component_count = static_cast<uint32_t>(state.range(1));
   const uint32_t width = static_cast<uint32_t>(state.range(2));
   const auto source = MakeSource(chain_length, component_count, width, shape);
-  const auto memory = ObserveMemory(source, phase);
-  AllocationBenchmark fixture(source, phase, iree_allocator_system());
+  const auto memory =
+      ObserveMemory(source, phase, shape, chain_length, component_count);
+  AllocationBenchmark fixture(source, phase, shape, chain_length,
+                              component_count, iree_allocator_system());
   RunResult result = fixture.Run();
   for (auto _ : state) {
     result = fixture.Run();
@@ -446,10 +600,15 @@ void RunBenchmark(benchmark::State& state, Shape shape, Phase phase) {
   }
   if (phase == Phase::kAllocation) {
     const uint32_t expected_copy_count =
-        shape == Shape::kTied ? 0
-                              : chain_length * component_count *
-                                    (shape == Shape::kBranch ? 2 : 1);
+        shape == Shape::kTied || shape == Shape::kLoopRelocation
+            ? 0
+            : chain_length * component_count *
+                  (shape == Shape::kBranch ? 2 : 1);
     Require(result.copy_count == expected_copy_count, "Copy decisions missing");
+    if (shape == Shape::kLoopRelocation) {
+      Require(result.backedge_move_count == 0,
+              "Loop-edge relocation left branch copies");
+    }
     if (shape == Shape::kFanout) {
       Require(result.materialized_copy_count >=
                   expected_copy_count - component_count,
@@ -459,6 +618,7 @@ void RunBenchmark(benchmark::State& state, Shape shape, Phase phase) {
   state.counters["value_count"] = result.value_count;
   state.counters["copy_count"] = result.copy_count;
   state.counters["materialized_copy_count"] = result.materialized_copy_count;
+  state.counters["backedge_move_count"] = result.backedge_move_count;
   state.counters["arena_used_bytes"] = result.used_bytes;
   state.counters["arena_owned_bytes"] = result.owned_bytes;
   state.counters["setup_live_requested_bytes"] = memory.setup_live_bytes;
@@ -473,17 +633,21 @@ void RunBenchmark(benchmark::State& state, Shape shape, Phase phase) {
 }
 
 [[maybe_unused]] const bool kBenchmarksRegistered = [] {
-  for (auto shape : {Shape::kLinear, Shape::kLoop, Shape::kBranch, Shape::kTied,
-                     Shape::kFanout}) {
+  for (auto shape : {Shape::kLinear, Shape::kLoop, Shape::kLoopRelocation,
+                     Shape::kBranch, Shape::kTied, Shape::kFanout}) {
     for (auto phase : {Phase::kModel, Phase::kLiveness, Phase::kPlacement,
                        Phase::kAllocation}) {
+      if (shape == Shape::kLoopRelocation && phase != Phase::kAllocation) {
+        continue;
+      }
       const std::string name =
           "LowAllocation/" +
-          std::string(shape == Shape::kLinear   ? "linear/"
-                      : shape == Shape::kLoop   ? "loop/"
-                      : shape == Shape::kBranch ? "branch/"
-                      : shape == Shape::kTied   ? "tied/"
-                                                : "fanout/") +
+          std::string(shape == Shape::kLinear           ? "linear/"
+                      : shape == Shape::kLoop           ? "loop/"
+                      : shape == Shape::kLoopRelocation ? "loop_relocation/"
+                      : shape == Shape::kBranch         ? "branch/"
+                      : shape == Shape::kTied           ? "tied/"
+                                                        : "fanout/") +
           (phase == Phase::kModel       ? "model"
            : phase == Phase::kLiveness  ? "liveness"
            : phase == Phase::kPlacement ? "placement"
@@ -492,6 +656,15 @@ void RunBenchmark(benchmark::State& state, Shape shape, Phase phase) {
           name.c_str(),
           [=](benchmark::State& state) { RunBenchmark(state, shape, phase); });
       registration->ArgNames({"length", "components", "width"});
+      if (shape == Shape::kLoopRelocation) {
+        for (int64_t components : {32, 64, 128, 256, 512, 1024}) {
+          registration->Args({1, components, 1});
+        }
+        for (int64_t components : {8, 16, 32, 64, 128, 256}) {
+          registration->Args({components, components, 1});
+        }
+        continue;
+      }
       for (int64_t count : {8, 16, 32, 64, 128, 256, 512, 1024, 2048}) {
         registration->Args({count, 1, 1});
       }

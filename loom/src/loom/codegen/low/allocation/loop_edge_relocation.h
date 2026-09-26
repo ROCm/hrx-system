@@ -52,7 +52,7 @@ typedef struct loom_low_allocation_loop_edge_relocation_context_t {
   iree_host_size_t assignment_count;
   // Assignment indices by liveness-local value ordinal.
   const uint32_t* assignment_indices_by_value_ordinal;
-  // Arena used for relocation candidates and consumption-query scratch.
+  // Arena used for retained relocation groups and consumption-query scratch.
   iree_arena_allocator_t* arena;
 } loom_low_allocation_loop_edge_relocation_context_t;
 
