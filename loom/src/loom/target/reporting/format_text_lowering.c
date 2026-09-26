@@ -158,14 +158,14 @@ loom_target_compile_report_append_source_low_memory_subgroup_access_text(
       builder,
       " subgroup_access={proof:%.*s,lane_address_proof:%.*s,"
       "active_lane_proof:%.*s,lane_mapping:%.*s,subgroup_size:%" PRIu8
-      ",per_lane_packet_bytes:%" PRIu32 ",linear_lane_stride_bytes:%" PRIu32
-      ",lane_terms:[",
+      ",active_lane_count:%" PRIu8 ",per_lane_packet_bytes:%" PRIu32
+      ",linear_lane_stride_bytes:%" PRIu32 ",lane_terms:[",
       (int)access->proof.size, access->proof.data,
       (int)access->lane_address_proof.size, access->lane_address_proof.data,
       (int)access->active_lane_proof.size, access->active_lane_proof.data,
       (int)access->lane_mapping.size, access->lane_mapping.data,
-      access->subgroup_size, access->per_lane_packet_byte_count,
-      access->linear_lane_byte_stride));
+      access->subgroup_size, access->active_lane_count,
+      access->per_lane_packet_byte_count, access->linear_lane_byte_stride));
   for (uint8_t i = 0; i < access->lane_term_count; ++i) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         builder,

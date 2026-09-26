@@ -102,6 +102,7 @@ _ADDRESS_STRING_FIELDS = (
 
 _ADDRESS_INTEGER_FIELDS = (
     "subgroup_size",
+    "active_lane_count",
     "per_lane_packet_bytes",
     "linear_lane_stride_bytes",
 )
@@ -516,13 +517,19 @@ def _validate_geometry(
     source: str,
 ) -> None:
     subgroup_size = _expect_integer(address["subgroup_size"])
+    active_lane_count = _expect_integer(address["active_lane_count"])
+    if not 0 < active_lane_count <= subgroup_size:
+        raise CompileReportError(
+            f"{source}: active_lane_count must be in 1..{subgroup_size}, "
+            f"got {active_lane_count}"
+        )
     packet_bytes = _expect_integer(address["per_lane_packet_bytes"])
     if packet_bytes == 0:
         raise CompileReportError(f"{source}: exact geometry requires packet bytes")
     requested = _expect_integer(geometry["subgroup_requested_bytes"])
     unique = _expect_integer(geometry["subgroup_unique_bytes"])
     span = _expect_integer(geometry["subgroup_span_bytes"])
-    expected_requested = subgroup_size * packet_bytes
+    expected_requested = active_lane_count * packet_bytes
     if requested != expected_requested:
         raise CompileReportError(
             f"{source}.subgroup_requested_bytes: expected {expected_requested}, "
@@ -537,9 +544,9 @@ def _validate_geometry(
             f"{source}.subgroup_span_bytes: expected at least {unique}, got {span}"
         )
     distinct = _expect_integer(geometry["distinct_lane_address_count"])
-    if not 0 < distinct <= subgroup_size:
+    if not 0 < distinct <= active_lane_count:
         raise CompileReportError(
-            f"{source}.distinct_lane_address_count: expected 1..{subgroup_size}, "
+            f"{source}.distinct_lane_address_count: expected 1..{active_lane_count}, "
             f"got {distinct}"
         )
     regions = _expect_integer(geometry["contiguous_region_count"])
@@ -948,9 +955,13 @@ def _append_group(
     lines.append(proof_line)
     packet_bytes = _expect_integer(address["per_lane_packet_bytes"])
     packet = f"{packet_bytes} B/lane" if packet_bytes else "packet width unknown"
+    participants = (
+        f"{address['active_lane_count']} active / {address['subgroup_size']} lanes"
+        if address["active_lane_count"]
+        else f"{address['subgroup_size']} lanes, active set unknown"
+    )
     lines.append(
-        f"{indent}  address: {address['subgroup_size']} lanes, {packet}; "
-        f"{_format_lane_mapping(address)}"
+        f"{indent}  address: {participants}, {packet}; {_format_lane_mapping(address)}"
     )
     geometry = access.get("geometry")
     if not isinstance(geometry, dict):

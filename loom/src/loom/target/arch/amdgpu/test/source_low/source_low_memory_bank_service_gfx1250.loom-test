@@ -55,7 +55,7 @@ bank-service function=gfx1250_b128_bank_service source-op=vector.load root=scrat
 
 amdgpu.target<gfx1250> @target
 
-kernel.def target(@target) @unknown_divergent_active_lanes() {
+kernel.def target(@target) @half_wave_bank_service() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -76,7 +76,7 @@ kernel.def target(@target) @unknown_divergent_active_lanes() {
 }
 
 // ----
-bank-service function=unknown_divergent_active_lanes source-op=vector.store root=scratch packet=amdgpu.ds_write_b128 model=amdgpu.lds.wave32.b128.quad-phases.write.count-each proof=unknown lane-address=unproven active-lanes=unproven base-residue=unproven unknown-reason=active-lane-control-not-uniform
+bank-service function=half_wave_bank_service source-op=vector.store root=scratch packet=amdgpu.ds_write_b128 model=amdgpu.lds.wave32.b128.quad-phases.write.count-each proof=exact lane-address=canonical-topology-coordinates-all-waves active-lanes=single-entry-comparison-all-waves base-residue=subgroup-uniform-common-translation-all-bank-word-residues classification=conflicted required-rounds=8 uncontended-rounds=4 extra-rounds=4 maximum-multiplicity=2
 
 // ====
 

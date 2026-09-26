@@ -150,15 +150,12 @@ static void loom_amdgpu_memory_bank_service_record_result(
       result->maximum_request_multiplicity;
 }
 
-static void loom_amdgpu_memory_bank_service_evaluate_full_wave(
+static void loom_amdgpu_memory_bank_service_evaluate_subgroup(
     const loom_amdgpu_lds_bank_service_model_t* model,
     const uint64_t
         lane_base_byte_offsets[LOOM_AMDGPU_LDS_BANK_SERVICE_MAX_WAVE_SIZE],
-    uint64_t common_base_byte_residues,
+    uint64_t common_base_byte_residues, uint64_t active_lane_mask,
     loom_low_lower_memory_bank_service_report_t* out_report) {
-  const uint64_t active_lane_mask =
-      model->wave_size == 64 ? UINT64_MAX
-                             : (UINT64_C(1) << model->wave_size) - UINT64_C(1);
   loom_amdgpu_lds_bank_service_result_t result = {0};
   if (!loom_amdgpu_lds_bank_service_evaluate(
           model, active_lane_mask, lane_base_byte_offsets,
@@ -184,6 +181,7 @@ void loom_amdgpu_memory_calculate_source_bank_service(
     const loom_low_source_memory_access_plan_t* source,
     const loom_symbolic_expr_context_t* expressions,
     const loom_target_workgroup_size_t* workgroup_size,
+    uint64_t active_lane_mask,
     loom_low_lower_memory_bank_service_report_t* out_report) {
   loom_amdgpu_memory_bank_service_initialize_report(model, out_report);
   if (source->root_uniform_scope < LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP) {
@@ -300,9 +298,6 @@ void loom_amdgpu_memory_calculate_source_bank_service(
   const uint64_t common_base_byte_residues =
       loom_amdgpu_memory_bank_service_source_residues(
           source, common_offset, model->bank_word_byte_count);
-  const uint64_t active_lane_mask =
-      model->wave_size == 64 ? UINT64_MAX
-                             : (UINT64_C(1) << model->wave_size) - UINT64_C(1);
   const uint32_t plane_size = workgroup_size->x * workgroup_size->y;
   const uint32_t flat_size = plane_size * workgroup_size->z;
   loom_amdgpu_lds_bank_service_result_t result = {0};
@@ -376,17 +371,18 @@ iree_status_t loom_amdgpu_memory_report_bank_service(
   if (model == NULL) {
     return iree_ok_status();
   }
-  loom_amdgpu_memory_full_subgroup_proof_t active_lane_proof = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_memory_prove_full_subgroup(
+  loom_amdgpu_memory_subgroup_proof_t active_lane_proof = {0};
+  IREE_RETURN_IF_ERROR(loom_amdgpu_memory_prove_subgroup(
       context, source_op, model->wave_size, &active_lane_proof));
-  if (!active_lane_proof.is_full_subgroup) {
+  if (!active_lane_proof.is_proven) {
     loom_amdgpu_memory_bank_service_mark_unknown(
         active_lane_proof.unknown_reason, out_report);
     return iree_ok_status();
   }
   loom_amdgpu_memory_calculate_source_bank_service(
       model, source, loom_low_lower_context_symbolic_expr_context(context),
-      &active_lane_proof.workgroup_size, out_report);
+      &active_lane_proof.workgroup_size, active_lane_proof.active_lane_mask,
+      out_report);
   out_report->active_lane_proof = active_lane_proof.proof;
   return iree_ok_status();
 }
@@ -416,10 +412,10 @@ iree_status_t loom_amdgpu_fragment_memory_report_bank_service(
     return iree_ok_status();
   }
   if (!runtime_offset->is_subgroup_uniform) {
-    loom_amdgpu_memory_full_subgroup_proof_t active_lane_proof = {0};
-    IREE_RETURN_IF_ERROR(loom_amdgpu_memory_prove_full_subgroup(
+    loom_amdgpu_memory_subgroup_proof_t active_lane_proof = {0};
+    IREE_RETURN_IF_ERROR(loom_amdgpu_memory_prove_subgroup(
         context, source_op, model->wave_size, &active_lane_proof));
-    if (active_lane_proof.is_full_subgroup) {
+    if (active_lane_proof.is_proven) {
       out_report->active_lane_proof = active_lane_proof.proof;
     }
     loom_amdgpu_memory_bank_service_mark_unknown(
@@ -462,10 +458,10 @@ iree_status_t loom_amdgpu_fragment_memory_report_bank_service(
   out_report->base_residue_proof =
       IREE_SV("subgroup-uniform-common-translation-all-bank-word-residues");
 
-  loom_amdgpu_memory_full_subgroup_proof_t active_lane_proof = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_memory_prove_full_subgroup(
+  loom_amdgpu_memory_subgroup_proof_t active_lane_proof = {0};
+  IREE_RETURN_IF_ERROR(loom_amdgpu_memory_prove_subgroup(
       context, source_op, model->wave_size, &active_lane_proof));
-  if (!active_lane_proof.is_full_subgroup) {
+  if (!active_lane_proof.is_proven) {
     loom_amdgpu_memory_bank_service_mark_unknown(
         active_lane_proof.unknown_reason, out_report);
     return iree_ok_status();
@@ -481,7 +477,8 @@ iree_status_t loom_amdgpu_fragment_memory_report_bank_service(
       loom_amdgpu_memory_bank_service_add_offset_residues(
           source_residues, runtime_offset->byte_facts,
           model->bank_word_byte_count);
-  loom_amdgpu_memory_bank_service_evaluate_full_wave(
-      model, lane_base_byte_offsets, common_base_byte_residues, out_report);
+  loom_amdgpu_memory_bank_service_evaluate_subgroup(
+      model, lane_base_byte_offsets, common_base_byte_residues,
+      active_lane_proof.active_lane_mask, out_report);
   return iree_ok_status();
 }

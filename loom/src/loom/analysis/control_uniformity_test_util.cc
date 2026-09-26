@@ -14,7 +14,7 @@
 
 namespace loom::testing {
 
-iree_status_t CheckControlCoexecution(
+iree_status_t CheckControlExecution(
     loom_context_t* context, iree_arena_block_pool_t* block_pool,
     iree_arena_allocator_t* analysis_arena,
     const std::vector<std::vector<uint16_t>>& successors,
@@ -95,6 +95,7 @@ iree_status_t CheckControlCoexecution(
   // every pair in their union is a realizable coexecution witness.
   const uint32_t mask = (1u << count) - 1;
   std::vector<uint32_t> visits_by_uniform_choice(mask + 1);
+  std::vector<uint32_t> visits_by_choice(mask + 1);
   for (uint32_t choices = 0; choices <= mask; ++choices) {
     uint32_t visited = 0;
     size_t block = 0;
@@ -108,6 +109,7 @@ iree_status_t CheckControlCoexecution(
       block = successors[block][choice];
     }
     visits_by_uniform_choice[choices & uniform_selectors] |= visited;
+    visits_by_choice[choices] = visited;
   }
   std::vector<uint32_t> coexecution(count);
   for (uint32_t visited : visits_by_uniform_choice) {
@@ -120,6 +122,37 @@ iree_status_t CheckControlCoexecution(
   loom_control_uniformity_info_t info;
   loom_control_uniformity_info_initialize(module.get(), &facts, analysis_arena,
                                           &info);
+  // Check the returned complete predicate against concrete visits,
+  // independently of the graph predecessor proof. Choice bit zero takes a true
+  // branch.
+  for (size_t block = 0; block < count; ++block) {
+    loom_condition_assumption_t condition;
+    if (!loom_control_uniformity_prove_single_entry(
+            &info, blocks[block], LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP,
+            &condition)) {
+      continue;
+    }
+    size_t controller = 0;
+    while (controller < count &&
+           loom_block_arg_id(blocks[0], controller) != condition.condition) {
+      ++controller;
+    }
+    if (controller == count) {
+      return iree_make_status(IREE_STATUS_INTERNAL, "unknown entry selector");
+    }
+    for (uint32_t choices = 0; choices <= mask; ++choices) {
+      const uint32_t visited = visits_by_choice[choices];
+      const bool selected =
+          ((choices & (1u << controller)) == 0) == condition.assumed_truth;
+      const bool expected = (visited & (1u << controller)) && selected;
+      if (expected != ((visited & (1u << block)) != 0)) {
+        return iree_make_status(IREE_STATUS_INTERNAL,
+                                "block %zu entry predicate disagrees with "
+                                "concrete path 0x%x",
+                                block, choices);
+      }
+    }
+  }
   for (size_t first = 0; first < count; ++first) {
     for (size_t second = 0; second < count; ++second) {
       if (!(coexecution[first] & (1u << second))) {

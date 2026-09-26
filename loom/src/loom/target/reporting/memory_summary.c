@@ -1076,6 +1076,7 @@ static bool loom_target_compile_report_subgroup_accesses_match(
       !iree_string_view_equal(lhs->interval_coverage, rhs->interval_coverage) ||
       !iree_string_view_equal(lhs->unknown_reason, rhs->unknown_reason) ||
       lhs->subgroup_size != rhs->subgroup_size ||
+      lhs->active_lane_count != rhs->active_lane_count ||
       lhs->lane_term_count != rhs->lane_term_count ||
       lhs->per_lane_packet_byte_count != rhs->per_lane_packet_byte_count ||
       lhs->linear_lane_byte_stride != rhs->linear_lane_byte_stride ||

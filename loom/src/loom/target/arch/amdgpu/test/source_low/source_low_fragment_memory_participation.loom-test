@@ -1,0 +1,41 @@
+// RUN: with-checks compile-report scf-to-cfg,cfg-simplify,source-to-low,low-dce
+
+amdgpu.target<gfx1151> @target {subgroup_size = 64}
+
+// Stage a transposed operand, then let sixteen lanes read its packed fragment.
+// The report must count only those lanes in both byte geometry and bank service.
+kernel.def target(@target) @masked_fragment() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %base = index.constant 0 : offset
+  %fragment_origin = index.constant 0 : index
+  %extent = index.constant 16 : index
+  %step = index.constant 4 : index
+  %iteration_step = index.constant 1 : index
+  %bytes = index.constant 576 : offset
+  %row = index.rem %lane, %extent : index
+  %first_column = index.div %lane, %extent : index
+  %layout = encoding.layout.strided [1, 18] : encoding<layout>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %input_view = buffer.view %input[%base] : buffer -> view<16x16xf16>
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<16x16xf16, %layout>
+  %output_view = buffer.view %output[%base] : buffer -> view<64x16xf16>
+  scf.for %slice = [%fragment_origin to %step step %iteration_step] {
+    %column = index.madd %slice, %step, %first_column : index
+    %value = view.load %input_view[%row, %column] : view<16x16xf16> -> f16
+    view.store %value, %scratch_view[%row, %column] : f16, view<16x16xf16, %layout>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %selected = index.cmp slt, %lane, %extent : index
+  scf.if %selected {
+    %fragment = vector.fragment.load<lhs> %scratch_view[%fragment_origin, %fragment_origin] shape [%extent, %extent] : view<16x16xf16, %layout> -> vector<16xf16>
+    vector.store %fragment, %output_view[%lane, 0] : vector<16xf16>, view<64x16xf16>
+  }
+  kernel.return
+}
+
+// ----
+CHECK: COMPILE-REPORT: source_low_subgroup_access[*] * source_op=vector.fragment.load * source_root=scratch * subgroup_access={proof:exact,*active_lane_proof:single-entry-comparison-all-waves,*subgroup_size:64,active_lane_count:16,per_lane_packet_bytes:2,*interval_coverage:dense,subgroup_requested_bytes:32,subgroup_unique_bytes:32,subgroup_span_bytes:32,*distinct_lane_addresses:16,contiguous_regions:1} *

@@ -50,8 +50,11 @@ static loom_low_lower_memory_bank_service_report_t Calculate(
     loom_target_workgroup_size_t workgroup_size, uint8_t wave_size = 32) {
   const loom_symbolic_expr_context_t expressions = {};
   loom_low_lower_memory_bank_service_report_t report = {};
+  const uint64_t active_lane_mask =
+      wave_size == 64 ? UINT64_MAX : (UINT64_C(1) << wave_size) - 1;
   loom_amdgpu_memory_calculate_source_bank_service(
-      WriteModel(wave_size), &source, &expressions, &workgroup_size, &report);
+      WriteModel(wave_size), &source, &expressions, &workgroup_size,
+      active_lane_mask, &report);
   return report;
 }
 
@@ -123,8 +126,8 @@ TEST(AmdgpuMemoryBankServiceTest, UniformReadStillUsesRequestPolicy) {
   const loom_target_workgroup_size_t workgroup_size = {32, 1, 1};
   const loom_symbolic_expr_context_t expressions = {};
   loom_low_lower_memory_bank_service_report_t report = {};
-  loom_amdgpu_memory_calculate_source_bank_service(model, &source, &expressions,
-                                                   &workgroup_size, &report);
+  loom_amdgpu_memory_calculate_source_bank_service(
+      model, &source, &expressions, &workgroup_size, UINT32_MAX, &report);
   ExpectExact(report, 4, 4);
 }
 
@@ -164,14 +167,14 @@ TEST(AmdgpuMemoryBankServiceTest, SubwordUniformOffsetRetainsItsResidues) {
   const loom_target_workgroup_size_t workgroup_size = {64, 1, 1};
   const loom_symbolic_expr_context_t expressions = {};
   loom_low_lower_memory_bank_service_report_t report = {};
-  loom_amdgpu_memory_calculate_source_bank_service(model, &source, &expressions,
-                                                   &workgroup_size, &report);
+  loom_amdgpu_memory_calculate_source_bank_service(
+      model, &source, &expressions, &workgroup_size, UINT32_MAX, &report);
   ExpectExact(report, 1, 1);
   EXPECT_EQ(report.base_residue_count, 64);
 
   stage.byte_facts = loom_value_facts_exact_i64(2);
-  loom_amdgpu_memory_calculate_source_bank_service(model, &source, &expressions,
-                                                   &workgroup_size, &report);
+  loom_amdgpu_memory_calculate_source_bank_service(
+      model, &source, &expressions, &workgroup_size, UINT32_MAX, &report);
   ExpectExact(report, 1, 1);
   EXPECT_EQ(report.base_residue_count, 32);
 }

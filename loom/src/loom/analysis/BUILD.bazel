@@ -64,9 +64,11 @@ loom_cc_library(
     srcs = ["control_uniformity.c"],
     hdrs = ["control_uniformity.h"],
     deps = [
+        ":condition_facts",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/cfg",
         "//loom/src/loom/util:cfg_control",
         "//loom/src/loom/util:cfg_dominance",
         "//loom/src/loom/util:cfg_graph",

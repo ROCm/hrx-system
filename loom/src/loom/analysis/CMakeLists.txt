@@ -72,10 +72,12 @@ loom_cc_library(
   SRCS
     "control_uniformity.c"
   DEPS
+    ::condition_facts
     iree::base
     iree::base::internal::arena
     loom::ir
     loom::ir::facts
+    loom::ops::cfg
     loom::ops::op_defs
     loom::util::cfg_control
     loom::util::cfg_dominance

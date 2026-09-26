@@ -217,6 +217,7 @@ TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
   memory.subgroup_access.lane_mapping = IREE_SVL("linear");
   memory.subgroup_access.interval_coverage = IREE_SVL("gapped");
   memory.subgroup_access.subgroup_size = 32;
+  memory.subgroup_access.active_lane_count = 32;
   memory.subgroup_access.lane_term_count = 1;
   memory.subgroup_access.lane_terms[0] = {
       /*.divisor=*/1,

@@ -151,13 +151,13 @@ class ControlUniformityTest : public ::testing::Test {
     return proven;
   }
 
-  void CheckCoexecution(const std::vector<std::vector<uint16_t>>& successors,
-                        uint32_t uniform_selectors) {
+  void CheckExecution(const std::vector<std::vector<uint16_t>>& successors,
+                      uint32_t uniform_selectors) {
     SCOPED_TRACE(::testing::PrintToString(successors));
     SCOPED_TRACE(uniform_selectors);
-    IREE_ASSERT_OK(testing::CheckControlCoexecution(
-        &context_, &block_pool_, &analysis_arena_, successors,
-        uniform_selectors));
+    IREE_ASSERT_OK(testing::CheckControlExecution(&context_, &block_pool_,
+                                                  &analysis_arena_, successors,
+                                                  uniform_selectors));
     iree_arena_reset(&analysis_arena_);
   }
 
@@ -170,15 +170,15 @@ class ControlUniformityTest : public ::testing::Test {
 };
 
 TEST_F(ControlUniformityTest, PartialReconvergenceIsNotAnExclusiveAlternative) {
-  CheckCoexecution({{1, 2}, {3, 4}, {3, 4}, {4}, {}}, 0x1F);
+  CheckExecution({{1, 2}, {3, 4}, {3, 4}, {4}, {}}, 0x1F);
 }
 
 TEST_F(ControlUniformityTest, PartialParticipationCannotProveExclusion) {
-  CheckCoexecution({{1, 3}, {2, 3}, {4}, {4}, {}}, 0x1E);
+  CheckExecution({{1, 3}, {2, 3}, {4}, {4}, {}}, 0x1E);
 }
 
 TEST_F(ControlUniformityTest, BypassedControllerCannotProveExclusion) {
-  CheckCoexecution({{2, 1}, {3, 4}, {4, 3}, {5, 5}, {5}, {}}, 0x0B);
+  CheckExecution({{2, 1}, {3, 4}, {4, 3}, {5, 5}, {5}, {}}, 0x0B);
 }
 
 TEST_F(ControlUniformityTest, ExhaustiveFourBlockPathsAndSelectorScopes) {
@@ -199,7 +199,7 @@ TEST_F(ControlUniformityTest, ExhaustiveFourBlockPathsAndSelectorScopes) {
       for (const auto& third : alternatives(2)) {
         for (uint32_t uniform = 0; uniform < 8; ++uniform) {
           SCOPED_TRACE(uniform);
-          CheckCoexecution({entry, second, third, {}}, uniform);
+          CheckExecution({entry, second, third, {}}, uniform);
         }
       }
     }
@@ -219,19 +219,19 @@ TEST_F(ControlUniformityTest, RandomAcyclicPathsAndMixedSelectorScopes) {
                                      random() % (count - source - 1));
       }
     }
-    CheckCoexecution(successors, random() & ((1u << count) - 1));
+    CheckExecution(successors, random() & ((1u << count) - 1));
   }
 }
 
 TEST_F(ControlUniformityTest, NonterminatingAlternativesCanFlowIntoEachOther) {
-  CheckCoexecution({{1, 2}, {2}, {2}}, 0x7);
-  CheckCoexecution({{2, 1}, {1}, {1}}, 0x7);
+  CheckExecution({{1, 2}, {2}, {2}}, 0x7);
+  CheckExecution({{2, 1}, {1}, {1}}, 0x7);
 }
 
 TEST_F(ControlUniformityTest, CyclicArmsAndPartialReconvergence) {
-  CheckCoexecution({{1, 2}, {3, 5}, {4, 5}, {1, 5}, {2, 5}, {}}, 1);
-  CheckCoexecution({{1, 2}, {3, 4}, {3, 4}, {1, 5}, {2, 5}, {}}, 1);
-  CheckCoexecution({{1, 2}, {3}, {4}, {1, 4}, {2, 3}}, 0x1F);
+  CheckExecution({{1, 2}, {3, 5}, {4, 5}, {1, 5}, {2, 5}, {}}, 1);
+  CheckExecution({{1, 2}, {3, 4}, {3, 4}, {1, 5}, {2, 5}, {}}, 1);
+  CheckExecution({{1, 2}, {3}, {4}, {1, 4}, {2, 3}}, 0x1F);
 }
 
 TEST_F(ControlUniformityTest, RandomCyclicPathsAndMixedSelectorScopes) {
@@ -246,7 +246,7 @@ TEST_F(ControlUniformityTest, RandomCyclicPathsAndMixedSelectorScopes) {
         edges.push_back(1 + random() % (count - 1));
       }
     }
-    CheckCoexecution(successors, random() & ((1u << count) - 1));
+    CheckExecution(successors, random() & ((1u << count) - 1));
   }
 }
 
@@ -283,6 +283,23 @@ func.def @direct(%condition: i1, %lhs: i32, %rhs: i32) {
                                      LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP));
   EXPECT_FALSE(ProveMutuallyExclusive(&info, uses, 0, 1,
                                       LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP));
+
+  // Entry is uniform even when the selector partitions that execution scope.
+  loom_region_t* body = loom_func_like_body(function);
+  loom_block_t* entry = loom_region_entry_block(body);
+  loom_condition_assumption_t condition;
+  for (size_t i = 0; i < uses.size(); ++i) {
+    ASSERT_TRUE(loom_control_uniformity_prove_single_entry(
+        &info, uses[i]->parent_block, LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP,
+        &condition));
+    EXPECT_EQ(condition.condition, loom_block_arg_id(entry, 0));
+    EXPECT_EQ(condition.assumed_truth, i == 0);
+  }
+  EXPECT_FALSE(loom_control_uniformity_prove_single_entry(
+      &info, entry, LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP, &condition));
+  EXPECT_FALSE(loom_control_uniformity_prove_single_entry(
+      &info, loom_region_block(body, 3),
+      LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP, &condition));
 }
 
 TEST_F(ControlUniformityTest, ProvesInheritedNestedAlternatives) {

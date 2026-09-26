@@ -566,6 +566,9 @@ typedef struct loom_low_lower_memory_subgroup_access_report_t {
   iree_string_view_t unknown_reason;
   // Number of lanes in the modeled subgroup.
   uint8_t subgroup_size;
+  // Proven number of participating lanes, or zero when participation is
+  // unknown.
+  uint8_t active_lane_count;
   // Number of populated lane-address terms with compile-time byte strides.
   uint8_t lane_term_count;
   // Relative address terms with compile-time byte strides, in array order.
