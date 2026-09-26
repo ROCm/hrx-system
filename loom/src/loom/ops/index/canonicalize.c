@@ -1191,6 +1191,55 @@ iree_status_t loom_index_madd_canonicalize(loom_op_t* op,
 // Bitwise
 //===----------------------------------------------------------------------===//
 
+// For a mask 2^k - 1, an aligned contribution cannot affect the observed low
+// bits. The remaining addend is the result when its range fits [0, mask].
+// Inspect only the immediate arithmetic producer and consume its operand facts;
+// the existing worklist handles simplification of other operations.
+static loom_value_id_t loom_index_low_mask_identity(loom_rewriter_t* rewriter,
+                                                    loom_value_id_t value,
+                                                    int64_t mask) {
+  int64_t radix = 0;
+  if (!loom_index_exact_positive_power_of_two_plus_one(mask, &radix)) {
+    return LOOM_VALUE_ID_INVALID;
+  }
+  loom_value_facts_t facts = loom_rewriter_value_facts(rewriter, value);
+  if (loom_value_facts_is_non_negative(facts) && facts.range_hi <= mask) {
+    return value;
+  }
+  loom_op_t* producer = loom_index_defining_op(rewriter, value);
+  if (!producer) {
+    return LOOM_VALUE_ID_INVALID;
+  }
+  loom_value_id_t candidate = LOOM_VALUE_ID_INVALID;
+  if (loom_index_add_isa(producer)) {
+    const loom_value_id_t lhs = loom_index_add_lhs(producer);
+    const loom_value_id_t rhs = loom_index_add_rhs(producer);
+    if (loom_value_facts_divisible_by(loom_rewriter_value_facts(rewriter, lhs),
+                                      radix)) {
+      candidate = rhs;
+    } else if (loom_value_facts_divisible_by(
+                   loom_rewriter_value_facts(rewriter, rhs), radix)) {
+      candidate = lhs;
+    }
+  } else if (loom_index_madd_isa(producer)) {
+    if (loom_value_facts_divisible_by(
+            loom_rewriter_value_facts(rewriter, loom_index_madd_a(producer)),
+            radix) ||
+        loom_value_facts_divisible_by(
+            loom_rewriter_value_facts(rewriter, loom_index_madd_b(producer)),
+            radix)) {
+      candidate = loom_index_madd_c(producer);
+    }
+  }
+  if (candidate == LOOM_VALUE_ID_INVALID) {
+    return LOOM_VALUE_ID_INVALID;
+  }
+  facts = loom_rewriter_value_facts(rewriter, candidate);
+  return loom_value_facts_is_non_negative(facts) && facts.range_hi <= mask
+             ? candidate
+             : LOOM_VALUE_ID_INVALID;
+}
+
 iree_status_t loom_index_andi_canonicalize(loom_op_t* op,
                                            loom_rewriter_t* rewriter) {
   loom_value_id_t lhs = loom_index_andi_lhs(op);
@@ -1206,14 +1255,28 @@ iree_status_t loom_index_andi_canonicalize(loom_op_t* op,
                                                                 result_type, 0);
   }
   int64_t lhs_value = 0;
-  if (loom_index_query_exact_i64(rewriter, lhs, &lhs_value) &&
-      loom_index_integer_value_is_all_ones(rewriter, lhs_value)) {
-    return loom_index_replace_single_result_with_value(op, rewriter, rhs);
+  if (loom_index_query_exact_i64(rewriter, lhs, &lhs_value)) {
+    if (loom_index_integer_value_is_all_ones(rewriter, lhs_value)) {
+      return loom_index_replace_single_result_with_value(op, rewriter, rhs);
+    }
+    const loom_value_id_t replacement =
+        loom_index_low_mask_identity(rewriter, rhs, lhs_value);
+    if (replacement != LOOM_VALUE_ID_INVALID) {
+      return loom_index_replace_single_result_with_value(op, rewriter,
+                                                         replacement);
+    }
   }
   int64_t rhs_value = 0;
-  if (loom_index_query_exact_i64(rewriter, rhs, &rhs_value) &&
-      loom_index_integer_value_is_all_ones(rewriter, rhs_value)) {
-    return loom_index_replace_single_result_with_value(op, rewriter, lhs);
+  if (loom_index_query_exact_i64(rewriter, rhs, &rhs_value)) {
+    if (loom_index_integer_value_is_all_ones(rewriter, rhs_value)) {
+      return loom_index_replace_single_result_with_value(op, rewriter, lhs);
+    }
+    const loom_value_id_t replacement =
+        loom_index_low_mask_identity(rewriter, lhs, rhs_value);
+    if (replacement != LOOM_VALUE_ID_INVALID) {
+      return loom_index_replace_single_result_with_value(op, rewriter,
+                                                         replacement);
+    }
   }
   return iree_ok_status();
 }

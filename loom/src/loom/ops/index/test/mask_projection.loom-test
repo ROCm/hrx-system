@@ -1,0 +1,235 @@
+// RUN: pass canonicalize
+
+// Every value in the inclusive range fits in the observed low bits.
+func.def @bounded_mask(%value: index) -> (index) {
+  %bounded = index.assume %value [range(%value, 0, 255)] : index
+  %mask = index.constant 255 : index
+  %result = index.andi %bounded, %mask : index
+  func.return %result : index
+}
+// ----
+func.def @bounded_mask(%value: index) -> (index) {
+  %bounded = index.assume %value [range(%value, 0, 255)] : index
+  func.return %bounded : index
+}
+
+// ====
+
+// A dynamic aligned origin contributes no bits to the masked coordinate.
+func.def @aligned_add(%origin: index, %lane: index) -> (index) {
+  %aligned = index.assume %origin [mul(%origin, 256)] : index
+  %bounded = index.assume %lane [range(%lane, 0, 255)] : index
+  %mask = index.constant 255 : index
+  %linear = index.add %aligned, %bounded : index
+  %result = index.andi %linear, %mask : index
+  func.return %result : index
+}
+// ----
+func.def @aligned_add(%origin: index, %lane: index) -> (index) {
+  %bounded = index.assume %lane [range(%lane, 0, 255)] : index
+  func.return %bounded : index
+}
+
+// ====
+
+// Alignment and mask identities work with both operand orders.
+func.def @reordered_add(%origin: index, %lane: index) -> (index) {
+  %aligned = index.assume %origin [mul(%origin, 256)] : index
+  %bounded = index.assume %lane [range(%lane, 0, 255)] : index
+  %mask = index.constant 255 : index
+  %linear = index.add %bounded, %aligned : index
+  %result = index.andi %mask, %linear : index
+  func.return %result : index
+}
+// ----
+func.def @reordered_add(%origin: index, %lane: index) -> (index) {
+  %bounded = index.assume %lane [range(%lane, 0, 255)] : index
+  func.return %bounded : index
+}
+
+// ====
+
+// Remainder strength reduction exposes the masked multiply-add used to
+// recover a channel coordinate from a flattened tiled load.
+func.def @tiled_channel(%iteration: index, %lane: index) -> (index) {
+  %bounded_iteration = index.assume %iteration [range(%iteration, 0, 15)] : index
+  %bounded_lane = index.assume %lane [range(%lane, 0, 255)] : index
+  %stride = index.constant 256 : index
+  %linear = index.madd %bounded_iteration, %stride, %bounded_lane : index
+  %result = index.rem %linear, %stride : index
+  func.return %result : index
+}
+// ----
+func.def @tiled_channel(%iteration: index, %lane: index) -> (index) {
+  %bounded_lane = index.assume %lane [range(%lane, 0, 255)] : index
+  func.return %bounded_lane : index
+}
+
+// ====
+
+// Alignment may come from either dynamic multiplicand. Other uses of the
+// original flattened index must retain the arithmetic producer.
+func.def @dynamic_stride(%stride: index, %row: index, %lane: index) -> (index, index) {
+  %aligned_stride = index.assume %stride [mul(%stride, 256)] : index
+  %bounded_lane = index.assume %lane [range(%lane, 0, 255)] : index
+  %mask = index.constant 255 : index
+  %linear = index.madd %aligned_stride, %row, %bounded_lane : index
+  %channel = index.andi %mask, %linear : index
+  func.return %linear, %channel : index, index
+}
+// ----
+func.def @dynamic_stride(%stride: index, %row: index, %lane: index) -> (index, index) {
+  %aligned_stride = index.assume %stride [mul(%stride, 256)] : index
+  %bounded_lane = index.assume %lane [range(%lane, 0, 255)] : index
+  %linear = index.madd %aligned_stride, %row, %bounded_lane : index
+  func.return %linear, %bounded_lane : index, index
+}
+
+// ====
+
+// Alignment need not constrain the sign of the discarded contribution.
+func.def @negative_aligned_origin(%origin: index, %lane: index) -> (index) {
+  %aligned = index.assume %origin [mul(%origin, 256), range(%origin, -4096, -256)] : index
+  %bounded = index.assume %lane [range(%lane, 0, 255)] : index
+  %mask = index.constant 255 : index
+  %linear = index.add %bounded, %aligned : index
+  %result = index.andi %linear, %mask : index
+  func.return %result : index
+}
+// ----
+func.def @negative_aligned_origin(%origin: index, %lane: index) -> (index) {
+  %bounded = index.assume %lane [range(%lane, 0, 255)] : index
+  func.return %bounded : index
+}
+
+// ====
+
+// Half-radix alignment still contributes a bit inside the mask.
+func.def @insufficient_alignment(%origin: index, %lane: index) -> (index) {
+  %aligned = index.assume %origin [mul(%origin, 128)] : index
+  %bounded = index.assume %lane [range(%lane, 0, 255)] : index
+  %mask = index.constant 255 : index
+  %linear = index.add %aligned, %bounded : index
+  %result = index.andi %linear, %mask : index
+  func.return %result : index
+}
+// ----
+func.def @insufficient_alignment(%origin: index, %lane: index) -> (index) {
+  %aligned = index.assume %origin [mul(%origin, 128)] : index
+  %bounded = index.assume %lane [range(%lane, 0, 255)] : index
+  %mask = index.constant 255 : index
+  %linear = index.add %aligned, %bounded : index
+  %result = index.andi %linear, %mask : index
+  func.return %result : index
+}
+
+// ====
+
+// The inclusive upper endpoint crosses the radix, so the mask remains.
+func.def @coordinate_crosses_radix(%origin: index, %lane: index) -> (index) {
+  %aligned = index.assume %origin [mul(%origin, 256)] : index
+  %bounded = index.assume %lane [range(%lane, 0, 256)] : index
+  %mask = index.constant 255 : index
+  %linear = index.add %aligned, %bounded : index
+  %result = index.andi %linear, %mask : index
+  func.return %result : index
+}
+// ----
+func.def @coordinate_crosses_radix(%origin: index, %lane: index) -> (index) {
+  %aligned = index.assume %origin [mul(%origin, 256)] : index
+  %bounded = index.assume %lane [range(%lane, 0, 256)] : index
+  %mask = index.constant 255 : index
+  %linear = index.add %aligned, %bounded : index
+  %result = index.andi %linear, %mask : index
+  func.return %result : index
+}
+
+// ====
+
+// A signed coordinate may require the mask even when its upper bound fits.
+func.def @negative_coordinate(%origin: index, %lane: index) -> (index) {
+  %aligned = index.assume %origin [mul(%origin, 256)] : index
+  %bounded = index.assume %lane [range(%lane, -1, 255)] : index
+  %mask = index.constant 255 : index
+  %linear = index.add %aligned, %bounded : index
+  %result = index.andi %linear, %mask : index
+  func.return %result : index
+}
+// ----
+func.def @negative_coordinate(%origin: index, %lane: index) -> (index) {
+  %aligned = index.assume %origin [mul(%origin, 256)] : index
+  %bounded = index.assume %lane [range(%lane, -1, 255)] : index
+  %mask = index.constant 255 : index
+  %linear = index.add %aligned, %bounded : index
+  %result = index.andi %linear, %mask : index
+  func.return %result : index
+}
+
+// ====
+
+// Without a range proof, an aligned origin alone cannot recover the addend.
+func.def @unbounded_coordinate(%origin: index, %lane: index) -> (index) {
+  %aligned = index.assume %origin [mul(%origin, 256)] : index
+  %mask = index.constant 255 : index
+  %linear = index.add %aligned, %lane : index
+  %result = index.andi %linear, %mask : index
+  func.return %result : index
+}
+// ----
+func.def @unbounded_coordinate(%origin: index, %lane: index) -> (index) {
+  %aligned = index.assume %origin [mul(%origin, 256)] : index
+  %mask = index.constant 255 : index
+  %linear = index.add %aligned, %lane : index
+  %result = index.andi %linear, %mask : index
+  func.return %result : index
+}
+
+// ====
+
+// A noncontiguous mask may remove bits below the coordinate's upper bound.
+func.def @noncontiguous_mask(%value: index) -> (index) {
+  %bounded = index.assume %value [range(%value, 0, 255)] : index
+  %mask = index.constant 253 : index
+  %result = index.andi %bounded, %mask : index
+  func.return %result : index
+}
+// ----
+func.def @noncontiguous_mask(%value: index) -> (index) {
+  %bounded = index.assume %value [range(%value, 0, 255)] : index
+  %mask = index.constant 253 : index
+  %result = index.andi %bounded, %mask : index
+  func.return %result : index
+}
+
+// ====
+
+// Large representable radices use the same proof without narrowing to i32.
+func.def @wide_radix(%origin: index, %coordinate: index) -> (index) {
+  %aligned = index.assume %origin [mul(%origin, 4611686018427387904)] : index
+  %bounded = index.assume %coordinate [range(%coordinate, 0, 4611686018427387903)] : index
+  %mask = index.constant 4611686018427387903 : index
+  %linear = index.add %aligned, %bounded : index
+  %result = index.andi %linear, %mask : index
+  func.return %result : index
+}
+// ----
+func.def @wide_radix(%origin: index, %coordinate: index) -> (index) {
+  %bounded = index.assume %coordinate [range(%coordinate, 0, 4611686018427387903)] : index
+  func.return %bounded : index
+}
+
+// ====
+
+// The largest signed mask still changes negative inputs; deriving its radix
+// must not overflow the signed fact domain.
+func.def @signed_limit_mask(%value: index) -> (index) {
+  %mask = index.constant 9223372036854775807 : index
+  %result = index.andi %value, %mask : index
+  func.return %result : index
+}
+// ----
+func.def @signed_limit_mask(%value: index) -> (index) {
+  %mask = index.constant 9223372036854775807 : index
+  %result = index.andi %value, %mask : index
+  func.return %result : index
+}

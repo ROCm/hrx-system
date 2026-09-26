@@ -1,0 +1,32 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_tiled_channel.loom-test
+// RUN: emit source-low target=x86:avx2 output=low
+
+// A flattened tile coordinate addresses the input while its remainder selects
+// an integer channel weight. Only the full input address needs the row
+// contribution.
+func.def @tiled_channel_load(%input: buffer, %row: index, %lane: index) -> (i32) {
+  %bounded_row = index.assume %row [range(%row, 0, 15)] : index
+  %bounded_lane = index.assume %lane [range(%lane, 0, 255)] : index
+  %stride = index.constant 256 : index
+  %linear = index.madd %bounded_row, %stride, %bounded_lane : index
+  %channel = index.rem %linear, %stride : index
+  %base = index.constant 0 : offset
+  %data = buffer.view %input[%base] : buffer -> view<4096xi32>
+  %value = view.load %data[%linear] : view<4096xi32> -> i32
+  %weight = view.load %data[%channel] : view<4096xi32> -> i32
+  %result = scalar.muli %value, %weight : i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @tiled_channel_load(%input: reg<x86.gpr64>, %bounded_row: reg<x86.gpr64>, %bounded_lane: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+  %stride = mov.imm64 256
+  %21 = copy %bounded_row : reg<x86.gpr64> -> reg<x86.gpr64>
+  %22 = imul.gpr64 %21, %stride
+  %linear = lea %22, %bounded_lane
+  %value = mov.load.indexed.gpr32 %input, %linear {disp32 = 0, scale = 4}
+  %weight = mov.load.indexed.gpr32 %input, %bounded_lane {disp32 = 0, scale = 4}
+  %26 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
+  %result = imul.gpr32 %26, %weight
+  return %result
+}

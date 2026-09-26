@@ -1,0 +1,36 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_tiled_channel.loom-test
+// RUN: emit source-low target=spirv:vulkan1.3+bda output=low
+
+// A flattened tile coordinate addresses the input while its remainder selects
+// an integer channel weight. Only the full input address needs the row
+// contribution.
+func.def @tiled_channel_load(%input: buffer, %row: index, %lane: index) -> (i32) {
+  %bounded_row = index.assume %row [range(%row, 0, 15)] : index
+  %bounded_lane = index.assume %lane [range(%lane, 0, 255)] : index
+  %stride = index.constant 256 : index
+  %linear = index.madd %bounded_row, %stride, %bounded_lane : index
+  %channel = index.rem %linear, %stride : index
+  %base = index.constant 0 : offset
+  %data = buffer.view %input[%base] : buffer -> view<4096xi32>
+  %value = view.load %data[%linear] : view<4096xi32> -> i32
+  %weight = view.load %data[%channel] : view<4096xi32> -> i32
+  %result = scalar.muli %value, %weight : i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @tiled_channel_load(%input: reg<spirv.ptr.storage_buffer>, %bounded_row: reg<spirv.id : index>, %bounded_lane: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
+  %20 = OpSConvert.i32.offset64 %bounded_row
+  %21 = OpConstant.offset64 1024
+  %22 = OpIMul.offset64 %20, %21
+  %23 = OpSConvert.i32.offset64 %bounded_lane
+  %24 = OpConstant.offset64 4
+  %25 = OpIMul.offset64 %23, %24
+  %26 = OpIAdd.offset64 %22, %25
+  %27 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %26
+  %value = OpLoad.storage_buffer.i32 %27
+  %32 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %25
+  %weight = OpLoad.storage_buffer.i32 %32
+  %result = OpIMul %value, %weight
+  return %result
+}

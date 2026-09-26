@@ -1,0 +1,42 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_tiled_channel.loom-test
+// RUN: emit source-low target=amdgpu:gfx1100 output=low
+
+// A flattened tile coordinate addresses the input while its remainder selects
+// an integer channel weight. Only the full input address needs the row
+// contribution.
+func.def @tiled_channel_load(%input: buffer, %row: index, %lane: index) -> (i32) {
+  %bounded_row = index.assume %row [range(%row, 0, 15)] : index
+  %bounded_lane = index.assume %lane [range(%lane, 0, 255)] : index
+  %stride = index.constant 256 : index
+  %linear = index.madd %bounded_row, %stride, %bounded_lane : index
+  %channel = index.rem %linear, %stride : index
+  %base = index.constant 0 : offset
+  %data = buffer.view %input[%base] : buffer -> view<4096xi32>
+  %value = view.load %data[%linear] : view<4096xi32> -> i32
+  %weight = view.load %data[%channel] : view<4096xi32> -> i32
+  %result = scalar.muli %value, %weight : i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<amdgpu.rdna3.core> abi(hal_kernel) @tiled_channel_load(%bounded_row: reg<amdgpu.sgpr>, %bounded_lane: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %data = resource<hal_binding> {extent = 16384, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %20 = v_mov_b32 0
+  %21 = s_lshl_b32_rhs_inline %bounded_row, 10
+  %22 = s_lshl_b32_rhs_inline %bounded_lane, 2
+  %23 = s_add_u32 %21, %22
+  %24 = slice %data[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %25 = slice %data[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %26 = s_mov_b32 0
+  %27, %28 = s_add_co_u32 %24, %23
+  %29, %30 = s_addc_u32 %25, %26, %28
+  %31 = concat(%27, %29) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %value = global_load_b32_saddr %20, %31
+  %34 = s_lshl_b32_rhs_inline %bounded_lane, 2
+  %38, %39 = s_add_co_u32 %24, %34
+  %40, %41 = s_addc_u32 %25, %26, %39
+  %42 = concat(%38, %40) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %weight = global_load_b32_saddr %20, %42
+  %result = v_mul_lo_u32 %value, %weight
+  return %result
+}
