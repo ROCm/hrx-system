@@ -33,6 +33,38 @@
 extern "C" {
 #endif
 
+// Complete semantics of an integer comparison, independent of its result's
+// users. Unlike a derived relation, this certificate is equivalent to the
+// entire Boolean result. It borrows SSA identities from an immutable module
+// snapshot; rewriting the comparison or its operand types invalidates it.
+typedef struct loom_condition_integer_comparison_t {
+  // Comparison operation kind: index.cmp or scalar.cmpi.
+  loom_op_kind_t kind;
+  // Operand element type, including signed i1 and target-sized index/offset.
+  loom_scalar_type_t operand_type;
+  // Predicate in the comparison operation's dialect.
+  uint8_t predicate;
+  // Left comparison operand in the source snapshot.
+  loom_value_id_t lhs;
+  // Right comparison operand in the source snapshot.
+  loom_value_id_t rhs;
+} loom_condition_integer_comparison_t;
+
+// Retains the complete comparison semantics of |op|. Other Boolean producers
+// return false, even when they imply an integer relation. This decodes one
+// operation without traversing its operands or allocating storage.
+bool loom_condition_integer_comparison_describe(
+    const loom_module_t* module, const loom_op_t* op,
+    loom_condition_integer_comparison_t* out_comparison);
+
+// Proves comparison truth from operand facts in the comparison's original
+// scalar or target carrier domain. Returns false when the facts cannot decide
+// the result. Evaluation reads no IR and allocates no storage.
+bool loom_condition_integer_comparison_evaluate(
+    const loom_condition_integer_comparison_t* comparison,
+    const loom_fact_context_t* context, const loom_value_facts_t* lhs_facts,
+    const loom_value_facts_t* rhs_facts, bool* out_result);
+
 typedef enum loom_condition_integer_operand_kind_e {
   // Operand is an SSA value.
   LOOM_CONDITION_INTEGER_OPERAND_VALUE = 0,
