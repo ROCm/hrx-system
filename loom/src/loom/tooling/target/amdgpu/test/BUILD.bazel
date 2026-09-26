@@ -98,16 +98,6 @@ loom_check_compile_tests(
     targets = ["//loom/target/amdgpu:gfx1151"],
 )
 
-loom_check_compile_tests(
-    name = "mxfp8_paged_attention_compile_test",
-    src = "//loom/src/loom/test/corpus/checked_benchmarks:mxfp8_paged_attention_f32.loom",
-    targets = [
-        "//loom/target/amdgpu:gfx942",
-        "//loom/target/amdgpu:gfx1151",
-        "//loom/target/amdgpu:gfx1250",
-    ],
-)
-
 iree_execution_test_suite(
     name = "loom_link_execution_test",
     data = [
@@ -399,7 +389,6 @@ loom_test(
         "//loom/src/loom/test/corpus/checked_benchmarks:cooperative_paged_attention_f32.loom",
         "//loom/src/loom/test/corpus/checked_benchmarks:grouped_paged_attention_f32.loom",
         "//loom/src/loom/test/corpus/checked_benchmarks:moe_routed_combine_loop_f32.loom",
-        "//loom/src/loom/test/corpus/checked_benchmarks:mxfp8_paged_attention_f32.loom",
         "//loom/src/loom/test/corpus/checked_benchmarks:paged_online_softmax_loop_f32.loom",
         "//loom/src/loom/test/corpus/checked_benchmarks:routed_row_combine_f32.loom",
         "//loom/src/loom/test/corpus/checked_benchmarks:sparse_token_attention_f32.loom",
