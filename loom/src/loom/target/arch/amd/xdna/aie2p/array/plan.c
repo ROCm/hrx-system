@@ -481,6 +481,7 @@ static iree_status_t loom_aie2p_array_extract_worker(
   worker->fold_output_count = 0;
   worker->fold_kind = LOOM_COMBINING_KIND_ADDI;
   worker->fold_fast_math_flags = 0;
+  worker->active_endpoint_count = 0;
   if (rate == LOOM_AIE2P_ARRAY_WORKER_RATE_FOLDED) {
     worker->fold_record_count =
         (uint32_t)loom_aie2p_array_constant(builder, loom_op_operands(op)[2]);
@@ -534,7 +535,11 @@ static void loom_aie2p_array_extract_endpoint(
           .i64;
   endpoint->message_type =
       loom_aie2p_array_result_value_type(builder->module, op);
+  endpoint->first_channel_index = UINT32_MAX;
+  endpoint->channel_use_count = 0;
+  endpoint->worker_resource_ordinal = UINT32_MAX;
   endpoint->binding_view_source_endpoint_index = UINT32_MAX;
+  endpoint->binding_view_record_count = 0;
   endpoint->binding_byte_offset = 0;
   endpoint->binding_view_partitioned = false;
   endpoint->partition_lane = 0;
@@ -568,8 +573,12 @@ static void loom_aie2p_array_extract_binding_view(
   endpoint->port = source->port;
   endpoint->message_type =
       loom_aie2p_array_result_value_type(builder->module, op);
+  endpoint->first_channel_index = UINT32_MAX;
+  endpoint->channel_use_count = 0;
+  endpoint->worker_resource_ordinal = UINT32_MAX;
   endpoint->binding_byte_offset =
       loom_aie2p_array_constant(builder, loom_op_operands(op)[1]);
+  endpoint->binding_view_record_count = 0;
   endpoint->binding_view_partitioned = partitioned;
   endpoint->partition_lane = 0;
   endpoint->partition_lane_count = 1;
@@ -1134,76 +1143,18 @@ static iree_status_t loom_aie2p_array_select_shim_dma(
                           "AIE2P shim DMA resources are exhausted");
 }
 
-static iree_status_t loom_aie2p_array_bind_worker_leaf(
-    const loom_aie2p_array_plan_builder_t* builder, uint32_t worker_index,
-    const loom_low_function_requirements_t* requirements,
-    uint32_t* out_port_count) {
-  if (requirements->return_count == 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AIE2P worker entry must return after one channel firing");
-  }
-  uint32_t port_count = 0;
-  for (iree_host_size_t i = 0; i < builder->plan->endpoint_count; ++i) {
-    loom_aie2p_array_endpoint_t* endpoint = &builder->endpoints[i];
-    if (endpoint->binding_view_source_endpoint_index == UINT32_MAX &&
-        endpoint->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER &&
-        endpoint->owner_index == worker_index) {
-      ++port_count;
-      endpoint->worker_resource_ordinal = UINT32_MAX;
-      iree_host_size_t import_match_count = 0;
-      for (iree_host_size_t j = 0; j < requirements->resource_count; ++j) {
-        if ((uint64_t)loom_low_resource_index(requirements->resources[j]) ==
-            endpoint->port) {
-          ++import_match_count;
-          endpoint->worker_resource_ordinal = (uint32_t)j;
-        }
-      }
-      if (import_match_count > 1) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P worker port must match at most one leaf resource import");
-      }
-    }
-  }
-  for (iree_host_size_t i = 0; i < requirements->resource_count; ++i) {
-    const uint64_t resource_index =
-        (uint64_t)loom_low_resource_index(requirements->resources[i]);
-    iree_host_size_t endpoint_match_count = 0;
-    for (iree_host_size_t j = 0; j < builder->plan->endpoint_count; ++j) {
-      const loom_aie2p_array_endpoint_t* endpoint = &builder->endpoints[j];
-      if (endpoint->binding_view_source_endpoint_index == UINT32_MAX &&
-          endpoint->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER &&
-          endpoint->owner_index == worker_index &&
-          endpoint->port == resource_index) {
-        ++endpoint_match_count;
-      }
-    }
-    if (endpoint_match_count != 1) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "AIE2P worker resource must be bound by exactly one topology port");
-    }
-  }
-  *out_port_count = port_count;
-  return iree_ok_status();
-}
-
 static iree_status_t loom_aie2p_array_plan_workers(
     loom_aie2p_array_plan_builder_t* builder) {
   for (iree_host_size_t i = 0; i < builder->plan->worker_count; ++i) {
     const loom_aie2p_array_worker_t* worker = &builder->workers[i];
     const loom_aie2p_array_leaf_t* leaf = worker->leaf;
     const loom_low_function_requirements_t* requirements = &leaf->requirements;
-    uint32_t port_count = 0;
-    IREE_RETURN_IF_ERROR(loom_aie2p_array_bind_worker_leaf(
-        builder, (uint32_t)i, requirements, &port_count));
     builder->worker_plans[i] = (loom_aie2p_array_worker_plan_t){
         .worker_index = (uint32_t)i,
         .coordinate = worker->coordinate,
         .first_port = (uint32_t)builder->worker_port_cursor,
     };
-    builder->worker_port_cursor += port_count;
+    builder->worker_port_cursor += worker->active_endpoint_count;
 
     loom_aie2p_array_tile_state_t* tile_state =
         loom_aie2p_array_tile_state(builder, worker->coordinate);
@@ -1898,6 +1849,7 @@ static iree_status_t loom_aie2p_array_initialize_tile_states(
 static iree_status_t loom_aie2p_array_allocate_physical_plan(
     loom_aie2p_array_plan_builder_t* builder) {
   uint64_t channel_slot_count = 0;
+  uint64_t worker_port_count = 0;
   iree_host_size_t external_channel_count = 0;
   iree_host_size_t neighbor_channel_count = 0;
   iree_host_size_t routed_channel_count = 0;
@@ -1925,11 +1877,13 @@ static iree_status_t loom_aie2p_array_allocate_physical_plan(
       ++routed_channel_count;
     }
   }
-  if (channel_slot_count > UINT32_MAX ||
-      builder->plan->endpoint_count > UINT32_MAX) {
+  for (iree_host_size_t i = 0; i < builder->plan->worker_count; ++i) {
+    worker_port_count += builder->workers[i].active_endpoint_count;
+  }
+  if (channel_slot_count > UINT32_MAX || worker_port_count > UINT32_MAX) {
     return iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED,
-        "AIE2P channel slot or endpoint count is too large");
+        "AIE2P channel slot or worker port count is too large");
   }
 
   uint64_t worker_storage_count = 0;
@@ -1967,7 +1921,7 @@ static iree_status_t loom_aie2p_array_allocate_physical_plan(
 
   builder->plan->worker_plan_count = builder->plan->worker_count;
   builder->plan->worker_storage_count = (iree_host_size_t)worker_storage_count;
-  builder->plan->worker_port_count = builder->plan->endpoint_count;
+  builder->plan->worker_port_count = (iree_host_size_t)worker_port_count;
   builder->plan->channel_slot_count = (iree_host_size_t)channel_slot_count;
   builder->plan->lock_count = (iree_host_size_t)lock_count;
   builder->plan->dma_channel_count = (iree_host_size_t)dma_channel_count;
@@ -2114,8 +2068,8 @@ iree_status_t loom_aie2p_array_plan_build(
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_aie2p_array_topology_validate(
-      module, &builder.facts, diagnostic_emitter, arena, &plan,
-      builder.channels, &builder.valid));
+      module, &builder.facts, diagnostic_emitter, arena, &plan, builder.workers,
+      builder.endpoints, builder.channels, &builder.valid));
   if (!builder.valid) {
     return iree_ok_status();
   }

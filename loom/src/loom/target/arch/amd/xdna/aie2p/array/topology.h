@@ -28,8 +28,9 @@ const loom_aie2p_array_endpoint_t* loom_aie2p_array_topology_base_endpoint(
 iree_status_t loom_aie2p_array_topology_validate(
     const loom_module_t* module, const loom_value_fact_table_t* facts,
     iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
-    loom_aie2p_array_plan_t* plan, loom_aie2p_array_channel_t* mutable_channels,
-    bool* out_valid);
+    loom_aie2p_array_plan_t* plan, loom_aie2p_array_worker_t* mutable_workers,
+    loom_aie2p_array_endpoint_t* mutable_endpoints,
+    loom_aie2p_array_channel_t* mutable_channels, bool* out_valid);
 
 #ifdef __cplusplus
 }  // extern "C"

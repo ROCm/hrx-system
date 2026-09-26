@@ -281,6 +281,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::analysis::scc
+    loom::codegen::low::diagnostics
     loom::codegen::low::function_requirements
     loom::codegen::low::packet
     loom::codegen::low::representation_binding
@@ -544,6 +545,7 @@ loom_check_test_suite(
     "test/array_plan/dma_loopback.loom-test"
     "test/array_plan/dma_record_limits.loom-test"
     "test/array_plan/dma_service.loom-test"
+    "test/array_plan/endpoint_activity.loom-test"
     "test/array_plan/endpoint_storage.loom-test"
     "test/array_plan/entry_admission.loom-test"
     "test/array_plan/mixed_transport_fan_in.loom-test"
@@ -562,6 +564,7 @@ loom_check_test_suite(
     "test/array_plan/unused_worker_inputs.loom-test"
     "test/array_plan/wide_fold.loom-test"
     "test/array_plan/worker_cycles.loom-test"
+    "test/array_plan/worker_interface_admission.loom-test"
     "test/descriptors/bf16_comparison.loom-test"
     "test/descriptors/bfp_move.loom-test"
     "test/descriptors/cascade.loom-test"

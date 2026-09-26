@@ -6,11 +6,11 @@
 
 #include "loom/target/arch/amd/xdna/aie2p/array/topology.h"
 
-#include <string.h>
-
 #include "loom/analysis/scc.h"
+#include "loom/codegen/low/diagnostics.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/facts.h"
+#include "loom/ops/low/ops.h"
 #include "loom/target/arch/amd/xdna/error_catalog.h"
 
 // Mutable logical topology under validation before physical planning begins.
@@ -21,14 +21,20 @@ typedef struct loom_aie2p_array_topology_t {
   // Exact function-local facts used to resolve dynamic dimensions.
   const loom_value_fact_table_t* facts;
 
-  // Receives diagnostics for unsupported worker dependencies.
+  // Receives diagnostics for rejected authored topology.
   iree_diagnostic_emitter_t diagnostic_emitter;
 
   // Arena used for validation scratch storage.
   iree_arena_allocator_t* arena;
 
-  // Logical topology and immutable entity arrays under validation.
+  // Logical topology under validation.
   loom_aie2p_array_plan_t* plan;
+
+  // Mutable worker array receiving active endpoint counts.
+  loom_aie2p_array_worker_t* workers;
+
+  // Mutable endpoint array receiving channel and leaf-resource facts.
+  loom_aie2p_array_endpoint_t* endpoints;
 
   // Mutable channel array receiving transport and multicast classification.
   loom_aie2p_array_channel_t* channels;
@@ -52,6 +58,28 @@ static iree_status_t loom_aie2p_array_topology_reject_group_lane(
   const loom_diagnostic_emission_t emission = {
       .op = op,
       .error = LOOM_ERR_XDNA_019,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
+  return iree_diagnostic_emit(topology->diagnostic_emitter, &emission);
+}
+
+static iree_status_t loom_aie2p_array_topology_reject_worker_port(
+    const loom_aie2p_array_topology_t* topology, const loom_op_t* op,
+    uint32_t worker_index, uint64_t port, uint32_t active_endpoint_count,
+    uint32_t resource_count) {
+  const loom_aie2p_array_worker_t* worker = &topology->workers[worker_index];
+  const loom_diagnostic_param_t params[] = {
+      loom_param_u32(worker_index),
+      loom_param_string(
+          loom_low_diagnostic_symbol_name(topology->module, worker->entry)),
+      loom_param_u64(port),
+      loom_param_u32(active_endpoint_count),
+      loom_param_u32(resource_count),
+  };
+  const loom_diagnostic_emission_t emission = {
+      .op = op,
+      .error = LOOM_ERR_XDNA_022,
       .params = params,
       .param_count = IREE_ARRAYSIZE(params),
   };
@@ -181,19 +209,114 @@ static iree_status_t loom_aie2p_array_topology_dimension_value(
   return iree_ok_status();
 }
 
-static const loom_aie2p_array_channel_t*
-loom_aie2p_array_topology_first_endpoint_channel(
-    const loom_aie2p_array_topology_t* topology, uint32_t endpoint_index) {
-  for (iree_host_size_t i = 0; i < topology->plan->channel_count; ++i) {
-    const loom_aie2p_array_channel_t* channel = &topology->channels[i];
-    if (channel->sender_endpoint_index == endpoint_index ||
-        channel->receiver_endpoint_index == endpoint_index) {
-      return channel;
+static bool loom_aie2p_array_topology_is_active_worker_endpoint(
+    const loom_aie2p_array_endpoint_t* endpoint) {
+  return endpoint->binding_view_source_endpoint_index == UINT32_MAX &&
+         endpoint->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER &&
+         endpoint->channel_use_count != 0;
+}
+
+static iree_status_t loom_aie2p_array_topology_validate_worker_interfaces(
+    const loom_aie2p_array_topology_t* topology, bool* out_valid) {
+  *out_valid = false;
+  for (iree_host_size_t i = 0; i < topology->plan->worker_count; ++i) {
+    topology->workers[i].active_endpoint_count = 0;
+  }
+
+  for (iree_host_size_t endpoint_index = 0;
+       endpoint_index < topology->plan->endpoint_count; ++endpoint_index) {
+    const loom_aie2p_array_endpoint_t* endpoint =
+        &topology->endpoints[endpoint_index];
+    if (!loom_aie2p_array_topology_is_active_worker_endpoint(endpoint)) {
+      continue;
+    }
+
+    const uint32_t worker_index = endpoint->owner_index;
+    loom_aie2p_array_worker_t* worker = &topology->workers[worker_index];
+    const loom_low_function_requirements_t* requirements =
+        &worker->leaf->requirements;
+    ++worker->active_endpoint_count;
+
+    uint32_t active_endpoint_count = 0;
+    const loom_op_t* duplicate_endpoint_op = NULL;
+    for (iree_host_size_t i = 0; i < topology->plan->endpoint_count; ++i) {
+      const loom_aie2p_array_endpoint_t* candidate = &topology->endpoints[i];
+      if (loom_aie2p_array_topology_is_active_worker_endpoint(candidate) &&
+          candidate->owner_index == worker_index &&
+          candidate->port == endpoint->port) {
+        ++active_endpoint_count;
+        if (active_endpoint_count == 2) {
+          duplicate_endpoint_op = loom_aie2p_array_topology_defining_op(
+              topology, candidate->value_id);
+        }
+      }
+    }
+
+    uint32_t resource_count = 0;
+    uint32_t resource_ordinal = UINT32_MAX;
+    const loom_op_t* duplicate_resource_op = NULL;
+    for (iree_host_size_t i = 0; i < requirements->resource_count; ++i) {
+      if ((uint64_t)loom_low_resource_index(requirements->resources[i]) ==
+          endpoint->port) {
+        ++resource_count;
+        resource_ordinal = (uint32_t)i;
+        if (resource_count == 2) {
+          duplicate_resource_op = requirements->resources[i];
+        }
+      }
+    }
+    if (active_endpoint_count != 1 || resource_count > 1) {
+      return loom_aie2p_array_topology_reject_worker_port(
+          topology,
+          duplicate_endpoint_op != NULL ? duplicate_endpoint_op
+                                        : duplicate_resource_op,
+          worker_index, endpoint->port, active_endpoint_count, resource_count);
+    }
+    if (resource_ordinal != UINT32_MAX) {
+      topology->endpoints[endpoint_index].worker_resource_ordinal =
+          resource_ordinal;
     }
   }
-  IREE_ASSERT_UNREACHABLE(
-      "validated worker endpoint must belong to one channel");
-  return NULL;
+
+  for (uint32_t worker_index = 0; worker_index < topology->plan->worker_count;
+       ++worker_index) {
+    const loom_low_function_requirements_t* requirements =
+        &topology->workers[worker_index].leaf->requirements;
+    for (iree_host_size_t resource_ordinal = 0;
+         resource_ordinal < requirements->resource_count; ++resource_ordinal) {
+      const loom_op_t* resource = requirements->resources[resource_ordinal];
+      const uint64_t port = (uint64_t)loom_low_resource_index(resource);
+      bool is_first_resource = true;
+      for (iree_host_size_t i = 0; i < resource_ordinal; ++i) {
+        is_first_resource &= (uint64_t)loom_low_resource_index(
+                                 requirements->resources[i]) != port;
+      }
+      if (!is_first_resource) {
+        continue;
+      }
+
+      uint32_t resource_count = 0;
+      for (iree_host_size_t i = resource_ordinal;
+           i < requirements->resource_count; ++i) {
+        resource_count += (uint64_t)loom_low_resource_index(
+                              requirements->resources[i]) == port;
+      }
+      uint32_t active_endpoint_count = 0;
+      for (iree_host_size_t i = 0; i < topology->plan->endpoint_count; ++i) {
+        const loom_aie2p_array_endpoint_t* endpoint = &topology->endpoints[i];
+        active_endpoint_count +=
+            loom_aie2p_array_topology_is_active_worker_endpoint(endpoint) &&
+            endpoint->owner_index == worker_index && endpoint->port == port;
+      }
+      if (active_endpoint_count == 0) {
+        return loom_aie2p_array_topology_reject_worker_port(
+            topology, resource, worker_index, port, active_endpoint_count,
+            resource_count);
+      }
+    }
+  }
+  *out_valid = true;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_aie2p_array_topology_validate_worker_rates(
@@ -219,12 +342,12 @@ static iree_status_t loom_aie2p_array_topology_validate_worker_rates(
           &topology->plan->endpoints[endpoint_index];
       if (endpoint->owner_kind != LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER ||
           endpoint->owner_index != worker_index ||
-          endpoint->binding_view_source_endpoint_index != UINT32_MAX) {
+          endpoint->binding_view_source_endpoint_index != UINT32_MAX ||
+          endpoint->channel_use_count == 0) {
         continue;
       }
       const loom_aie2p_array_channel_t* channel =
-          loom_aie2p_array_topology_first_endpoint_channel(topology,
-                                                           endpoint_index);
+          &topology->channels[endpoint->first_channel_index];
       if (worker->fold_record_count == 0) {
         if (common_record_count == 0) {
           common_record_count = channel->record_count;
@@ -373,8 +496,9 @@ static iree_status_t loom_aie2p_array_topology_validate_binding_view(
 iree_status_t loom_aie2p_array_topology_validate(
     const loom_module_t* module, const loom_value_fact_table_t* facts,
     iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
-    loom_aie2p_array_plan_t* plan, loom_aie2p_array_channel_t* mutable_channels,
-    bool* out_valid) {
+    loom_aie2p_array_plan_t* plan, loom_aie2p_array_worker_t* mutable_workers,
+    loom_aie2p_array_endpoint_t* mutable_endpoints,
+    loom_aie2p_array_channel_t* mutable_channels, bool* out_valid) {
   *out_valid = false;
   const loom_aie2p_array_topology_t topology_storage = {
       .module = module,
@@ -382,6 +506,8 @@ iree_status_t loom_aie2p_array_topology_validate(
       .diagnostic_emitter = diagnostic_emitter,
       .arena = arena,
       .plan = plan,
+      .workers = mutable_workers,
+      .endpoints = mutable_endpoints,
       .channels = mutable_channels,
   };
   const loom_aie2p_array_topology_t* topology = &topology_storage;
@@ -469,38 +595,30 @@ iree_status_t loom_aie2p_array_topology_validate(
     }
   }
 
-  uint32_t* channel_use_counts = NULL;
-  uint32_t* binding_view_use_counts = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      topology->arena, plan->endpoint_count, sizeof(*channel_use_counts),
-      (void**)&channel_use_counts));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      topology->arena, plan->endpoint_count, sizeof(*binding_view_use_counts),
-      (void**)&binding_view_use_counts));
-  memset(channel_use_counts, 0,
-         plan->endpoint_count * sizeof(*channel_use_counts));
-  memset(binding_view_use_counts, 0,
-         plan->endpoint_count * sizeof(*binding_view_use_counts));
+  for (iree_host_size_t i = 0; i < plan->channel_count; ++i) {
+    const loom_aie2p_array_channel_t* channel = &topology->channels[i];
+    loom_aie2p_array_endpoint_t* sender =
+        &topology->endpoints[channel->sender_endpoint_index];
+    loom_aie2p_array_endpoint_t* receiver =
+        &topology->endpoints[channel->receiver_endpoint_index];
+    if (sender->first_channel_index == UINT32_MAX) {
+      sender->first_channel_index = (uint32_t)i;
+    }
+    if (receiver->first_channel_index == UINT32_MAX) {
+      receiver->first_channel_index = (uint32_t)i;
+    }
+    ++sender->channel_use_count;
+    ++receiver->channel_use_count;
+  }
 
   for (iree_host_size_t i = 0; i < plan->endpoint_count; ++i) {
-    const loom_aie2p_array_endpoint_t* endpoint = &plan->endpoints[i];
-    if (endpoint->binding_view_source_endpoint_index != UINT32_MAX) {
-      uint32_t record_count = 0;
-      IREE_RETURN_IF_ERROR(loom_aie2p_array_topology_validate_binding_view(
-          topology, endpoint, &record_count));
-      ++binding_view_use_counts[endpoint->binding_view_source_endpoint_index];
+    loom_aie2p_array_endpoint_t* endpoint = &topology->endpoints[i];
+    if (endpoint->binding_view_source_endpoint_index == UINT32_MAX ||
+        endpoint->channel_use_count == 0) {
+      continue;
     }
-    for (iree_host_size_t j = i + 1; j < plan->endpoint_count; ++j) {
-      const loom_aie2p_array_endpoint_t* other = &plan->endpoints[j];
-      if (endpoint->binding_view_source_endpoint_index == UINT32_MAX &&
-          other->binding_view_source_endpoint_index == UINT32_MAX &&
-          endpoint->owner_kind == other->owner_kind &&
-          endpoint->owner_index == other->owner_index &&
-          endpoint->port == other->port) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "AIE2P owner port is defined more than once");
-      }
-    }
+    IREE_RETURN_IF_ERROR(loom_aie2p_array_topology_validate_binding_view(
+        topology, endpoint, &endpoint->binding_view_record_count));
   }
 
   for (iree_host_size_t i = 0; i < plan->channel_count; ++i) {
@@ -514,15 +632,6 @@ iree_status_t loom_aie2p_array_topology_validate(
         &plan->endpoints[channel->sender_endpoint_index];
     const loom_aie2p_array_endpoint_t* receiver =
         &plan->endpoints[channel->receiver_endpoint_index];
-    if (sender->direction != LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_SEND ||
-        receiver->direction != LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE ||
-        !loom_type_equal(sender->message_type, receiver->message_type)) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "AIE2P channel endpoints must have matching typed directions");
-    }
-    ++channel_use_counts[channel->sender_endpoint_index];
-    ++channel_use_counts[channel->receiver_endpoint_index];
 
     const loom_aie2p_array_endpoint_t* binding_view_endpoint = NULL;
     if (sender->binding_view_source_endpoint_index != UINT32_MAX) {
@@ -531,10 +640,8 @@ iree_status_t loom_aie2p_array_topology_validate(
       binding_view_endpoint = receiver;
     }
     if (binding_view_endpoint != NULL) {
-      uint32_t binding_view_record_count = 0;
-      IREE_RETURN_IF_ERROR(loom_aie2p_array_topology_validate_binding_view(
-          topology, binding_view_endpoint, &binding_view_record_count));
-      if (channel->record_count != binding_view_record_count) {
+      if (channel->record_count !=
+          binding_view_endpoint->binding_view_record_count) {
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "AIE2P channel record count must match its binding view");
@@ -594,7 +701,7 @@ iree_status_t loom_aie2p_array_topology_validate(
     const loom_aie2p_array_endpoint_t* endpoint =
         &plan->endpoints[endpoint_index];
     if (endpoint->direction != LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_SEND ||
-        channel_use_counts[endpoint_index] <= 1) {
+        endpoint->channel_use_count <= 1) {
       continue;
     }
     uint32_t source_channel_index = UINT32_MAX;
@@ -629,93 +736,18 @@ iree_status_t loom_aie2p_array_topology_validate(
 
   for (iree_host_size_t i = 0; i < plan->endpoint_count; ++i) {
     const loom_aie2p_array_endpoint_t* endpoint = &plan->endpoints[i];
-    const loom_aie2p_array_endpoint_t* base_endpoint =
-        loom_aie2p_array_topology_base_endpoint(plan, endpoint);
-    const bool is_multicast_sender =
-        endpoint->direction == LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_SEND &&
-        (base_endpoint->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_BINDING ||
-         endpoint->owner_kind == LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_WORKER);
-    if (endpoint->binding_view_source_endpoint_index != UINT32_MAX) {
-      if (channel_use_counts[i] == 0 || binding_view_use_counts[i] != 0 ||
-          (!is_multicast_sender && channel_use_counts[i] != 1)) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P binding view must feed one channel or source multicast");
-      }
-      continue;
-    }
-    if (endpoint->owner_kind != LOOM_AIE2P_ARRAY_ENDPOINT_OWNER_BINDING) {
-      if (binding_view_use_counts[i] != 0 || channel_use_counts[i] == 0 ||
-          (!is_multicast_sender && channel_use_counts[i] != 1)) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P worker endpoint must feed one channel or source multicast");
-      }
-      continue;
-    }
-    if (binding_view_use_counts[i] == 0) {
-      if (channel_use_counts[i] == 0 ||
-          (!is_multicast_sender && channel_use_counts[i] != 1)) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P direct binding endpoint must feed one channel or source "
-            "multicast");
-      }
-      continue;
-    }
-    if (channel_use_counts[i] != 0) {
+    if (endpoint->direction == LOOM_AIE2P_ARRAY_ENDPOINT_DIRECTION_RECEIVE &&
+        endpoint->channel_use_count > 1) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "AIE2P binding endpoint must feed binding views exclusively");
+          "AIE2P receiver endpoint cannot consume more than one channel");
     }
-
-    const loom_aie2p_array_endpoint_t* first_view = endpoint;
-    for (iree_host_size_t j = 0; j < plan->endpoint_count; ++j) {
-      const loom_aie2p_array_endpoint_t* view = &plan->endpoints[j];
-      if (view->binding_view_source_endpoint_index == i) {
-        first_view = view;
-        break;
-      }
-    }
-    if (!first_view->binding_view_partitioned) {
-      if (binding_view_use_counts[i] != 1) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P binding endpoint must own one unpartitioned view");
-      }
-      continue;
-    }
-
-    const uint32_t partition_lane_count = first_view->partition_lane_count;
-    if (binding_view_use_counts[i] != partition_lane_count) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "AIE2P partitioned binding view must materialize every lane");
-    }
-    for (uint32_t lane = 0; lane < partition_lane_count; ++lane) {
-      iree_host_size_t match_count = 0;
-      for (iree_host_size_t j = 0; j < plan->endpoint_count; ++j) {
-        const loom_aie2p_array_endpoint_t* view = &plan->endpoints[j];
-        if (view->binding_view_source_endpoint_index != i) {
-          continue;
-        }
-        if (!view->binding_view_partitioned ||
-            view->partition_lane_count != partition_lane_count ||
-            view->binding_byte_offset != first_view->binding_byte_offset) {
-          return iree_make_status(
-              IREE_STATUS_INVALID_ARGUMENT,
-              "AIE2P binding endpoint views must share one partition");
-        }
-        if (view->partition_lane == lane) {
-          ++match_count;
-        }
-      }
-      if (match_count != 1) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AIE2P binding view partition lanes must be unique and complete");
-      }
-    }
+  }
+  bool worker_interfaces_valid = false;
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_topology_validate_worker_interfaces(
+      topology, &worker_interfaces_valid));
+  if (!worker_interfaces_valid) {
+    return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(
       loom_aie2p_array_topology_validate_worker_rates(topology));

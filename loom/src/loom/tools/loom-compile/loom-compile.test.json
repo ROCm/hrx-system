@@ -137,6 +137,31 @@
       ]
     },
     {
+      "name": "diagnoses AIE2P worker leaf resource mismatches",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "--pipeline=none",
+          "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
+          "--output={tmp}/worker-port-mismatch.xdna"
+        ],
+        "stdin": {
+          "text": "aie2p.target<array> @array_target {device_profile = \"amd.xdna.strix_halo.17f0_11\"}\n\naie2p.target<core> @core_target\n\nlow.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @worker_port_mismatch_array() asm {\n  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>\n  %one = constant.u32 1 : reg<aie2p.array.scalar : index>\n  %row = constant.u32 2 : reg<aie2p.array.scalar : index>\n  %group = group %one\n  %worker = worker %group, %zero, @consume_worker\n  %input = binding 0, \"read\"\n  %sender = sender %input, 0 : reg<aie2p.array.sender : tile<1xi32>>\n  %receiver = receiver %worker, 0 : reg<aie2p.array.receiver : tile<1xi32>>\n  %channel = channel %sender, %receiver, %one, %one : reg<aie2p.array.channel : tile<1xi32>>\n  constrain.location %worker, %zero, %row\n  return\n}\n\nlow.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @consume_worker() asm {\n  %unbound = resource<native_pointer> {index = 7, source_type = buffer} : reg<aie2p.ep>\n  %value = lda %unbound, 0\n  st %value, %unbound, 0\n  return\n}\n"
+        }
+      },
+      "exit": 1,
+      "stderr": {
+        "contains": [
+          "XDNA/022",
+          "AIE2P worker 0 entry '@consume_worker' port 7 has 0 active topology endpoints and 1 leaf resources"
+        ],
+        "not_contains": ["INVALID_ARGUMENT", "stack:"]
+      },
+      "files": [
+        {"path": "{tmp}/worker-port-mismatch.xdna", "exists": false}
+      ]
+    },
+    {
       "name": "prints agent documentation",
       "run": {
         "tool": "loom-compile",

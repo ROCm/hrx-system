@@ -363,6 +363,31 @@ ERR_XDNA_021 = ErrorDef(
     fix_hint="Select one unoccupied compute tile for each resident worker.",
 )
 
+# ERR_XDNA_022: A resident worker port has no unique active/resource mapping.
+ERR_XDNA_022 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=22,
+    severity=Severity.ERROR,
+    summary="Resident worker port does not match its leaf resource ABI.",
+    message=(
+        "AIE2P worker {worker} entry '@{entry}' port {port} has "
+        "{active_endpoint_count} active topology endpoints and "
+        "{resource_count} leaf resources; each port requires exactly one active "
+        "endpoint and at most one resource"
+    ),
+    params=(
+        ErrorParam("worker", ParamKind.U32),
+        ErrorParam("entry", ParamKind.STRING),
+        ErrorParam("port", ParamKind.U64),
+        ErrorParam("active_endpoint_count", ParamKind.U32),
+        ErrorParam("resource_count", ParamKind.U32),
+    ),
+    fix_hint=(
+        "Define the topology port once and match each leaf resource to that "
+        "port, or omit the resource for a synchronization-only port."
+    ),
+)
+
 ALL_XDNA_ERRORS = (
     ERR_XDNA_001,
     ERR_XDNA_002,
@@ -385,4 +410,5 @@ ALL_XDNA_ERRORS = (
     ERR_XDNA_019,
     ERR_XDNA_020,
     ERR_XDNA_021,
+    ERR_XDNA_022,
 )
