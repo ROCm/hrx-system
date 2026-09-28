@@ -76,4 +76,30 @@ loom_cc_library(
 )
 endif()
 
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND AMDF_BUILD)
+loom_cc_test(
+  NAME
+    artifact_provider_test
+  SRCS
+    "artifact_provider_test.cc"
+  DEPS
+    ::artifact_provider
+    iree::base
+    iree::hal::drivers::amd::xdna::image
+    iree::hal::drivers::amd::xdna::image::aie2p::npu2
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::text_asm
+    loom::format::text::parser
+    loom::ir
+    loom::ops::op_registry
+    loom::target::arch::amd::xdna::aie2p::low_registry
+    loom::target::arch::amd::xdna::aie2p::provider
+    loom::target::arch::amd::xdna::aie2p::target_profile
+    loom::testing::module_ptr
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

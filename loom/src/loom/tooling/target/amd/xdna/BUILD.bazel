@@ -4,9 +4,11 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//libamdf/requirements:defs.bzl", "LIBAMDF")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
+    "loom_cc_test",
     "loom_config_compatible_with",
 )
 load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test")
@@ -19,6 +21,10 @@ package(
 
 _XDNA_COMPILE_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/target:xdna_artifacts",
+])
+
+_XDNA_IMAGE_COMPATIBLE_WITH = _XDNA_COMPILE_COMPATIBLE_WITH + loom_config_compatible_with([
+    LIBAMDF.enabled_by,
 ])
 
 loom_check_test(
@@ -59,5 +65,28 @@ loom_cc_library(
         "//loom/src/loom/tooling/compile:artifact",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "artifact_provider_test",
+    srcs = ["artifact_provider_test.cc"],
+    tags = ["iree-build-requirement=%s" % LIBAMDF.id],
+    target_compatible_with = _XDNA_IMAGE_COMPATIBLE_WITH,
+    deps = [
+        ":artifact_provider",
+        "//loom/src/loom/codegen/low:text_asm",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p:low_registry",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p:provider",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p:target_profile",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image",
+        "//runtime/src/iree/hal/drivers/amd/xdna/image/aie2p:npu2",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )

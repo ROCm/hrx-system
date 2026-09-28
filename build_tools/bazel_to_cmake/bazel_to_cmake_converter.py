@@ -68,6 +68,7 @@ _RUNTIME_HAL_DRIVER_CMAKE_OPTIONS = {
 }
 
 _API_CONFIG_CMAKE_OPTIONS = {
+    "//libamdf/config:enabled_setting": "AMDF_BUILD",
     "//runtime/config/net:rdma_enabled": "IREE_NET_RDMA",
     "//build_tools/vulkan/config:available": "IREE_VULKAN_AVAILABLE",
     "//build_tools/d3d12/config:available": "IREE_D3D12_AVAILABLE",

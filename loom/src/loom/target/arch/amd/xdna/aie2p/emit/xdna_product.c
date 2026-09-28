@@ -345,10 +345,6 @@ static iree_status_t loom_aie2p_xdna_measure_entry(
     const loom_aie2p_xdna_entry_t* entry, uint32_t alignment,
     iree_arena_allocator_t* arena, loom_aie2p_xdna_entry_layout_t* layout) {
   const loom_aie2p_array_program_t* program = entry->array_program;
-  if (program->control_record_count == 0) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "XDNA export requires a finite invocation drain");
-  }
   uint64_t array_bytes = LOOM_AIE2P_NATIVE_HEADER_SIZE;
   uint64_t inline_bytes = 0;
   for (iree_host_size_t i = 0; i < program->array_record_count; ++i) {
@@ -384,10 +380,12 @@ static iree_status_t loom_aie2p_xdna_measure_entry(
   layout->repeat_byte_length = (uint32_t)repeat_bytes;
   IREE_RETURN_IF_ERROR(loom_aie2p_xdna_allocate_bytes(
       arena, (iree_host_size_t)(array_bytes + repeat_bytes), &layout->source));
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(arena, program->control_record_count,
-                                sizeof(*layout->control_record_offsets),
-                                (void**)&layout->control_record_offsets));
+  if (program->control_record_count != 0) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(arena, program->control_record_count,
+                                  sizeof(*layout->control_record_offsets),
+                                  (void**)&layout->control_record_offsets));
+  }
   return iree_ok_status();
 }
 
@@ -491,12 +489,15 @@ static void loom_aie2p_xdna_emit_entry(
     control_offset +=
         loom_aie2p_xdna_native_record_size(&program->control_records[i]);
   }
-  const uint32_t control_section = loom_aie2p_xdna_append_fragment(
-      IREE_SV(".xdna.command"), source + layout->control_source_offset,
-      control_offset, sections, section_count);
-  segments[(*segment_count)++] =
-      loom_aie2p_xdna_load(allocation, layout->control_destination_offset,
-                           control_offset, control_section);
+  uint32_t control_section;
+  if (program->control_record_count != 0) {
+    control_section = loom_aie2p_xdna_append_fragment(
+        IREE_SV(".xdna.command"), source + layout->control_source_offset,
+        control_offset, sections, section_count);
+    segments[(*segment_count)++] =
+        loom_aie2p_xdna_load(allocation, layout->control_destination_offset,
+                             control_offset, control_section);
+  }
   uint8_t* repeat_header =
       source + layout->control_source_offset + control_offset;
   loom_aie2p_xdna_native_header(profile, family, columns, memory_rows,
@@ -508,9 +509,11 @@ static void loom_aie2p_xdna_emit_entry(
   segments[(*segment_count)++] =
       loom_aie2p_xdna_load(allocation, layout->repeat_offset,
                            LOOM_AIE2P_NATIVE_HEADER_SIZE, repeat_section);
-  segments[(*segment_count)++] = loom_aie2p_xdna_load(
-      allocation, layout->repeat_offset + LOOM_AIE2P_NATIVE_HEADER_SIZE,
-      control_offset, control_section);
+  if (program->control_record_count != 0) {
+    segments[(*segment_count)++] = loom_aie2p_xdna_load(
+        allocation, layout->repeat_offset + LOOM_AIE2P_NATIVE_HEADER_SIZE,
+        control_offset, control_section);
+  }
 }
 
 iree_status_t loom_aie2p_xdna_product_write(

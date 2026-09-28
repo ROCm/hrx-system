@@ -59,7 +59,9 @@ typedef struct loom_aie2p_xdna_product_t {
 // Native commands are emitted directly from compiler-owned array plans. Load
 // ranges splice shared linked code and command fragments into caller-owned
 // backing; identical code and repeat bodies each occupy one file range. Entries
-// publish exact storage, binding, relocation and invocation requirements.
+// without per-invocation control records publish a header-only self-looping
+// continuation and no empty load ranges. Entries publish exact storage,
+// binding, relocation and invocation requirements.
 // Placed uninitialized worker storage keeps its addresses without a load
 // operation. Temporary metadata and native bytes use |scratch_arena| for this
 // call.

@@ -279,6 +279,18 @@ cc_library(
                 }
             )
 
+    def test_converts_libamdf_build_condition(self):
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=SimpleNamespace(body=""),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
+            build_dir="",
+        )
+
+        self.assertEqual(
+            functions._convert_select_condition("//libamdf/config:enabled_setting"),
+            "AMDF_BUILD",
+        )
+
     def test_target_compatible_with_composes_selects_and_requirements(self):
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=SimpleNamespace(body=""),
