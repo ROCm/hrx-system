@@ -10,6 +10,10 @@
 #include "iree/base/api.h"
 #include "iree/hal/drivers/task/executable/elf/elf_types.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 //==============================================================================
 // ELF machine type/ABI
 //==============================================================================
@@ -54,5 +58,9 @@ void* iree_elf_call_p_ip(const void* symbol_ptr, int a0, void* a1);
 
 // Host -> ELF: int(*)(void*, void*, void*)
 int iree_elf_call_i_ppp(const void* symbol_ptr, void* a0, void* a1, void* a2);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
 
 #endif  // IREE_HAL_DRIVERS_TASK_EXECUTABLE_ELF_ARCH_H_

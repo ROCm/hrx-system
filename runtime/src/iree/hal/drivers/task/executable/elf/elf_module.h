@@ -13,6 +13,10 @@
 #include "iree/hal/drivers/task/executable/elf/arch.h"  // IWYU pragma: export
 #include "iree/hal/drivers/task/executable/elf/elf_types.h"  // IWYU pragma: export
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 //==============================================================================
 // Runtime ELF module loader/linker
 //==============================================================================
@@ -66,5 +70,9 @@ void iree_elf_module_deinitialize(iree_elf_module_t* module);
 iree_status_t iree_elf_module_lookup_export(iree_elf_module_t* module,
                                             const char* symbol_name,
                                             void** out_export);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
 
 #endif  // IREE_HAL_DRIVERS_TASK_EXECUTABLE_ELF_ELF_MODULE_H_

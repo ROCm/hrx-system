@@ -15,6 +15,10 @@
 // files. Portions have already been moved to memory.h:
 #include "iree/base/internal/memory.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 //===----------------------------------------------------------------------===//
 // Virtual address space manipulation
 //===----------------------------------------------------------------------===//
@@ -88,5 +92,9 @@ iree_status_t iree_memory_view_protect_ranges(void* base_address,
                                               iree_host_size_t range_count,
                                               const iree_byte_range_t* ranges,
                                               iree_memory_access_t new_access);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
 
 #endif  // IREE_HAL_DRIVERS_TASK_EXECUTABLE_ELF_PLATFORM_H_
