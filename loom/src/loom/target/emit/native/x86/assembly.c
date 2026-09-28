@@ -715,6 +715,22 @@ static iree_status_t loom_x86_append_gpr32_move_packet(
   return loom_x86_append_gpr32_operand(context, 0);
 }
 
+static iree_status_t loom_x86_append_narrow_extend_packet(
+    const loom_native_assembly_packet_context_t* context,
+    const char* const* source_names) {
+  const loom_low_allocation_assignment_t* result =
+      loom_low_packet_result_assignment(context->allocation, context->packet,
+                                        0);
+  const loom_low_allocation_assignment_t* source =
+      loom_low_packet_operand_assignment(context->allocation, context->packet,
+                                         0);
+  // MOVZX reads a subregister and writes the full result. This normalization
+  // is required even when the allocator assigns both values to the same GPR.
+  return iree_string_builder_append_format(
+      context->builder, "movzx %s, %s", kX86Gpr32Names[result->location_base],
+      source_names[source->location_base]);
+}
+
 static iree_status_t loom_x86_append_select_packet(
     const loom_native_assembly_packet_context_t* context) {
   const loom_op_t* op = context->packet->node->op;
@@ -1228,6 +1244,13 @@ static iree_status_t loom_x86_append_descriptor_packet(
       iree_string_view_equal(loom_x86_descriptor_key(context),
                              IREE_SV("x86.scalar.movzx.gpr64.gpr32"))) {
     return loom_x86_append_gpr32_move_packet(context);
+  }
+  const iree_string_view_t key = loom_x86_descriptor_key(context);
+  if (iree_string_view_equal(key, IREE_SV("x86.scalar.movzx.u8.gpr32"))) {
+    return loom_x86_append_narrow_extend_packet(context, kX86Gpr8Names);
+  }
+  if (iree_string_view_equal(key, IREE_SV("x86.scalar.movzx.u16.gpr32"))) {
+    return loom_x86_append_narrow_extend_packet(context, kX86Gpr16Names);
   }
   if (iree_string_view_equal(mnemonic, IREE_SV("select.cmovne"))) {
     return loom_x86_append_select_packet(context);

@@ -516,30 +516,6 @@ def _conversion_alias_rule(
     )
 
 
-def _masked_extui_rule(
-    input_type: TypePattern,
-    mask: int,
-    descriptor_lookup: _DescriptorLookup,
-) -> DescriptorRule:
-    bitwise_and = descriptor_lookup("x86.scalar.and.imm.gpr32")
-    return DescriptorRule(
-        source_op=scalar_conversion.scalar_extui,
-        descriptor=bitwise_and,
-        guards=(
-            Guard.value_type("input", input_type),
-            Guard.value_type("result", _I32),
-        ),
-        emit=(
-            _op_emit(
-                descriptor=bitwise_and,
-                operands={"lhs": ValueRef.operand("input")},
-                results={"dst": ValueRef.result("result")},
-                immediates={"imm32": mask},
-            ),
-        ),
-    )
-
-
 def _index_cast_i32_extend_rule(
     descriptor_key: str,
     descriptor_lookup: _DescriptorLookup,
@@ -1078,8 +1054,16 @@ def _cases() -> Sequence[ContractCase]:
         _conversion_alias_rule(scalar_conversion.scalar_bitcast, _F16, _I16),
         _conversion_alias_rule(scalar_conversion.scalar_bitcast, _BF16, _I16),
         _conversion_alias_rule(scalar_conversion.scalar_extui, _I1, _I32),
-        _masked_extui_rule(_I8, 0xFF, descriptor_lookup),
-        _masked_extui_rule(_I16, 0xFFFF, descriptor_lookup),
+        *(
+            _conversion_rule(
+                scalar_conversion.scalar_extui,
+                input_type,
+                _I32,
+                f"x86.scalar.movzx.u{width}.gpr32",
+                descriptor_lookup,
+            )
+            for input_type, width in ((_I8, 8), (_I16, 16))
+        ),
         _conversion_rule(
             scalar_conversion.scalar_extsi,
             _I32,

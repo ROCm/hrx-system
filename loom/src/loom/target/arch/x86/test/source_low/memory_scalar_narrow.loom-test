@@ -165,9 +165,7 @@ low.func.def target<x86.scalar.core> abi(object_function) @exchange_narrow(%buff
   %previous_word = movzx.load.u16.gpr32 %buffer {disp32 = 1}
   mov.store.u8.gpr32 %byte_value, %buffer {disp32 = 0}
   mov.store.u16.gpr32 %word_value, %buffer {disp32 = 1}
-  %20 = copy %previous_byte : reg<x86.gpr32> -> reg<x86.gpr32>
-  %byte_bits = and.imm.gpr32 %20 {imm32 = 255}
-  %22 = copy %previous_word : reg<x86.gpr32> -> reg<x86.gpr32>
-  %word_bits = and.imm.gpr32 %22 {imm32 = 65535}
+  %byte_bits = movzx.u8.gpr32 %previous_byte
+  %word_bits = movzx.u16.gpr32 %previous_word
   return %byte_bits, %word_bits
 }

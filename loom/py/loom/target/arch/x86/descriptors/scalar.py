@@ -289,6 +289,24 @@ def _gpr64_to_gpr32_truncate_descriptor() -> Descriptor:
     )
 
 
+def _gpr_narrow_zero_extend_descriptor(bit_count: int) -> Descriptor:
+    # The source owns a full GPR32 allocation unit, but MOVZX reads only its
+    # low byte or word. Independent operands permit distinct payload types.
+    return Descriptor(
+        key=f"x86.scalar.movzx.u{bit_count}.gpr32",
+        mnemonic="movzx",
+        semantic_tag=f"integer.extui.i{bit_count}.i32",
+        operands=(_gpr32_result(), _gpr32_operand("src")),
+        asm_forms=_asm(
+            mnemonic=f"movzx.u{bit_count}.gpr32",
+            results=("dst",),
+            operands=("src",),
+        ),
+        schedule_class=_SCHEDULE_SCALAR,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 def _gpr_select_descriptor(bit_count: int) -> Descriptor:
     result = _gpr64_result() if bit_count == 64 else _gpr32_result()
     operand = _gpr64_operand if bit_count == 64 else _gpr32_operand
@@ -684,6 +702,7 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         semantic_tag="integer.extui.i32.i64",
         asm_mnemonic="movzx.gpr64.gpr32",
     ),
+    *(_gpr_narrow_zero_extend_descriptor(width) for width in (8, 16)),
     Descriptor(
         key="x86.scalar.movimm.gpr64",
         mnemonic="mov",

@@ -1,0 +1,26 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_narrow_widening.loom
+// RUN: emit source-low target=x86:scalar output=low
+
+func.def @widen_unsigned_byte(%value: i8) -> (i32) {
+  %result = scalar.extui %value : i8 to i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<x86.scalar.core> abi(object_function) @widen_unsigned_byte(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %result = movzx.u8.gpr32 %value
+  return %result
+}
+
+// ====
+
+func.def @widen_unsigned_halfword(%value: i16) -> (i32) {
+  %result = scalar.extui %value : i16 to i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<x86.scalar.core> abi(object_function) @widen_unsigned_halfword(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %result = movzx.u16.gpr32 %value
+  return %result
+}
