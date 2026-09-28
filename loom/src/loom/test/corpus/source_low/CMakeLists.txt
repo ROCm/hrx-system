@@ -88,4 +88,20 @@ loom_check_compile_tests(
     loom::target::amdgpu::gfx950
 )
 
+loom_check_compile_tests(
+  NAME
+    "narrow_float_arguments"
+  SRC
+    "narrow_float_arguments.loom-test"
+  TARGETS
+    loom::target::amdgpu::gfx1100
+    loom::target::amdgpu::gfx1151
+    loom::target::amdgpu::gfx1170
+    loom::target::amdgpu::gfx1200
+    loom::target::amdgpu::gfx1250
+    loom::target::amdgpu::gfx942
+    loom::target::amdgpu::gfx950
+    loom::target::spirv::vulkan1.3+bda+extended-types
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

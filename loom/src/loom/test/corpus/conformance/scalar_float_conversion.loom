@@ -1,99 +1,325 @@
-// Loaded lanes and uniform arguments cross the same floating-point width
-// boundary. Separate output rows preserve both results for exact checks.
-kernel.def @scalar_f32_to_f64() {
-  %unit = index.constant 1 : index
-  %width = index.constant 64 : index
-  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
-} launch(%input: buffer, %uniform: f32, %output: buffer) {
-  %lane = kernel.workitem.id<x> : index
+// Runtime-generated raw bits keep conversion inputs outside compilation while
+// covering ordinary values, representation boundaries, infinities, and NaNs.
+func.def inline @widen_f32_block(%input: buffer, %output: buffer, %output_offset: index) {
   %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
   %input_view = buffer.view %input[%base] : buffer -> view<64xf32>
-  %output_view = buffer.view %output[%base] : buffer -> view<2x64xf64>
-  %input_value = view.load %input_view[%lane] : view<64xf32> -> f32
-  %converted = scalar.extf %input_value : f32 to f64
+  %output_view = buffer.view %output[%base] : buffer -> view<320xf64>
+  scf.for %i = [%begin to %end step %step] {
+    %value = view.load %input_view[%i] : view<64xf32> -> f32
+    %converted = scalar.extf %value : f32 to f64
+    %position = index.add %output_offset, %i : index
+    view.store %converted, %output_view[%position] : f64, view<320xf64>
+  }
+  func.return
+}
+
+func.def @widen_f32_samples(%random_bits: buffer, %positive_special_bits: buffer, %negative_special_bits: buffer, %boundary_bits: buffer, %uniform: f32, %output: buffer) {
+  %offset0 = index.constant 0 : index
+  %offset64 = index.constant 64 : index
+  %offset128 = index.constant 128 : index
+  %offset192 = index.constant 192 : index
+  %offset256 = index.constant 256 : index
+  func.call @widen_f32_block(%random_bits, %output, %offset0) : (buffer, buffer, index)
+  func.call @widen_f32_block(%positive_special_bits, %output, %offset64) : (buffer, buffer, index)
+  func.call @widen_f32_block(%negative_special_bits, %output, %offset128) : (buffer, buffer, index)
+  func.call @widen_f32_block(%boundary_bits, %output, %offset192) : (buffer, buffer, index)
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  %output_view = buffer.view %output[%base] : buffer -> view<320xf64>
   %converted_uniform = scalar.extf %uniform : f32 to f64
-  view.store %converted, %output_view[0, %lane] : f64, view<2x64xf64>
-  view.store %converted_uniform, %output_view[1, %lane] : f64, view<2x64xf64>
-  kernel.return
+  scf.for %i = [%begin to %end step %step] {
+    %position = index.add %offset256, %i : index
+    view.store %converted_uniform, %output_view[%position] : f64, view<320xf64>
+  }
+  func.return
 }
 
-kernel.def @scalar_f64_to_f32() {
-  %unit = index.constant 1 : index
-  %width = index.constant 64 : index
-  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
-} launch(%input: buffer, %uniform: f64, %output: buffer) {
-  %lane = kernel.workitem.id<x> : index
+func.def inline @narrow_f64_block(%input: buffer, %output: buffer, %output_offset: index) {
   %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
   %input_view = buffer.view %input[%base] : buffer -> view<64xf64>
-  %output_view = buffer.view %output[%base] : buffer -> view<2x64xf32>
-  %input_value = view.load %input_view[%lane] : view<64xf64> -> f64
-  %converted = scalar.fptrunc %input_value : f64 to f32
+  %output_view = buffer.view %output[%base] : buffer -> view<512xf32>
+  scf.for %i = [%begin to %end step %step] {
+    %value = view.load %input_view[%i] : view<64xf64> -> f64
+    %converted = scalar.fptrunc %value : f64 to f32
+    %position = index.add %output_offset, %i : index
+    view.store %converted, %output_view[%position] : f32, view<512xf32>
+  }
+  func.return
+}
+
+func.def @narrow_f64_samples(%random_words: buffer, %positive_special_bits: buffer, %negative_special_bits: buffer, %subnormal_edge_bits: buffer, %normal_edge_bits: buffer, %unit_edge_bits: buffer, %overflow_edge_bits: buffer, %uniform: f64, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c1 = index.constant 1 : index
+  %shift = scalar.constant 32 : i64
+  %offset64 = index.constant 64 : index
+  %offset128 = index.constant 128 : index
+  %offset192 = index.constant 192 : index
+  %offset256 = index.constant 256 : index
+  %offset320 = index.constant 320 : index
+  %offset384 = index.constant 384 : index
+  %offset448 = index.constant 448 : index
+  %random_view = buffer.view %random_words[%base] : buffer -> view<128xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<512xf32>
+  scf.for %i = [%begin to %end step %step] {
+    %low_position = index.mul %i, %c2 : index
+    %high_position = index.add %low_position, %c1 : index
+    %low_i32 = view.load %random_view[%low_position] : view<128xi32> -> i32
+    %high_i32 = view.load %random_view[%high_position] : view<128xi32> -> i32
+    %low = scalar.extui %low_i32 : i32 to i64
+    %high = scalar.extui %high_i32 : i32 to i64
+    %high_half = scalar.shli %high, %shift : i64
+    %bits = scalar.ori %low, %high_half : i64
+    %value = scalar.bitcast %bits : i64 to f64
+    %converted = scalar.fptrunc %value : f64 to f32
+    view.store %converted, %output_view[%i] : f32, view<512xf32>
+  }
+  func.call @narrow_f64_block(%positive_special_bits, %output, %offset64) : (buffer, buffer, index)
+  func.call @narrow_f64_block(%negative_special_bits, %output, %offset128) : (buffer, buffer, index)
+  func.call @narrow_f64_block(%subnormal_edge_bits, %output, %offset192) : (buffer, buffer, index)
+  func.call @narrow_f64_block(%normal_edge_bits, %output, %offset256) : (buffer, buffer, index)
+  func.call @narrow_f64_block(%unit_edge_bits, %output, %offset320) : (buffer, buffer, index)
+  func.call @narrow_f64_block(%overflow_edge_bits, %output, %offset384) : (buffer, buffer, index)
   %converted_uniform = scalar.fptrunc %uniform : f64 to f32
-  view.store %converted, %output_view[0, %lane] : f32, view<2x64xf32>
-  view.store %converted_uniform, %output_view[1, %lane] : f32, view<2x64xf32>
-  kernel.return
+  scf.for %i = [%begin to %end step %step] {
+    %position = index.add %offset448, %i : index
+    view.store %converted_uniform, %output_view[%position] : f32, view<512xf32>
+  }
+  func.return
 }
 
-kernel.def @scalar_f8E4M3_to_f64() {
-  %unit = index.constant 1 : index
-  %groups = index.constant 4 : index
-  %width = index.constant 64 : index
-  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
-} launch(%input: buffer, %output: buffer) {
-  %lane = kernel.workitem.dispatch.id<x> : index
+// One invocation exhausts every raw f8, f16, and bf16 representation. The
+// input iotas are materialized after compilation and only reinterpreted here.
+func.def @widen_all_narrow_bits(%bits8: buffer, %bits16: buffer, %e4_output: buffer, %e5_output: buffer, %f16_output: buffer, %bf16_output: buffer) {
   %base = index.constant 0 : offset
-  %input_view = buffer.view %input[%base] : buffer -> view<256xf8E4M3>
-  %output_view = buffer.view %output[%base] : buffer -> view<256xf64>
-  %input_value = view.load %input_view[%lane] : view<256xf8E4M3> -> f8E4M3
-  %converted = scalar.extf %input_value : f8E4M3 to f64
-  view.store %converted, %output_view[%lane] : f64, view<256xf64>
-  kernel.return
+  %begin = index.constant 0 : index
+  %byte_end = index.constant 256 : index
+  %word_end = index.constant 65536 : index
+  %step = index.constant 1 : index
+  %e4_input = buffer.view %bits8[%base] : buffer -> view<256xf8E4M3>
+  %e5_input = buffer.view %bits8[%base] : buffer -> view<256xf8E5M2>
+  %e4_output_view = buffer.view %e4_output[%base] : buffer -> view<256xf64>
+  %e5_output_view = buffer.view %e5_output[%base] : buffer -> view<256xf64>
+  scf.for %i = [%begin to %byte_end step %step] {
+    %e4 = view.load %e4_input[%i] : view<256xf8E4M3> -> f8E4M3
+    %e5 = view.load %e5_input[%i] : view<256xf8E5M2> -> f8E5M2
+    %wide_e4 = scalar.extf %e4 : f8E4M3 to f64
+    %wide_e5 = scalar.extf %e5 : f8E5M2 to f64
+    view.store %wide_e4, %e4_output_view[%i] : f64, view<256xf64>
+    view.store %wide_e5, %e5_output_view[%i] : f64, view<256xf64>
+  }
+  %f16_input = buffer.view %bits16[%base] : buffer -> view<65536xf16>
+  %bf16_input = buffer.view %bits16[%base] : buffer -> view<65536xbf16>
+  %f16_output_view = buffer.view %f16_output[%base] : buffer -> view<65536xf64>
+  %bf16_output_view = buffer.view %bf16_output[%base] : buffer -> view<65536xf64>
+  scf.for %i = [%begin to %word_end step %step] {
+    %half = view.load %f16_input[%i] : view<65536xf16> -> f16
+    %brain = view.load %bf16_input[%i] : view<65536xbf16> -> bf16
+    %wide_half = scalar.extf %half : f16 to f64
+    %wide_brain = scalar.extf %brain : bf16 to f64
+    view.store %wide_half, %f16_output_view[%i] : f64, view<65536xf64>
+    view.store %wide_brain, %bf16_output_view[%i] : f64, view<65536xf64>
+  }
+  func.return
 }
 
-kernel.def @scalar_f8E5M2_to_f64() {
-  %unit = index.constant 1 : index
-  %groups = index.constant 4 : index
-  %width = index.constant 64 : index
-  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
-} launch(%input: buffer, %output: buffer) {
-  %lane = kernel.workitem.dispatch.id<x> : index
-  %base = index.constant 0 : offset
-  %input_view = buffer.view %input[%base] : buffer -> view<256xf8E5M2>
-  %output_view = buffer.view %output[%base] : buffer -> view<256xf64>
-  %input_value = view.load %input_view[%lane] : view<256xf8E5M2> -> f8E5M2
-  %converted = scalar.extf %input_value : f8E5M2 to f64
-  view.store %converted, %output_view[%lane] : f64, view<256xf64>
-  kernel.return
+// Mixed widths and an unused argument exercise the direct scalar ABI. The
+// output retains raw inputs as well as independent widening paths.
+func.def @narrow_scalar_arguments(%e4: f8E4M3, %unused: f16, %e5: f8E5M2, %marker: f64, %half: f16, %brain: bf16, %output: buffer) {
+  %e4_base = index.constant 0 : offset
+  %e4_view = buffer.view %output[%e4_base] : buffer -> view<1xf8E4M3>
+  view.store %e4, %e4_view[0] : f8E4M3, view<1xf8E4M3>
+  %e5_base = index.constant 1 : offset
+  %e5_view = buffer.view %output[%e5_base] : buffer -> view<1xf8E5M2>
+  view.store %e5, %e5_view[0] : f8E5M2, view<1xf8E5M2>
+  %half_base = index.constant 2 : offset
+  %half_view = buffer.view %output[%half_base] : buffer -> view<1xf16>
+  view.store %half, %half_view[0] : f16, view<1xf16>
+  %brain_base = index.constant 4 : offset
+  %brain_view = buffer.view %output[%brain_base] : buffer -> view<1xbf16>
+  view.store %brain, %brain_view[0] : bf16, view<1xbf16>
+  %converted_half_base = index.constant 8 : offset
+  %converted_half_view = buffer.view %output[%converted_half_base] : buffer -> view<2xf16>
+  %e4_half = scalar.extf %e4 : f8E4M3 to f16
+  %e5_half = scalar.extf %e5 : f8E5M2 to f16
+  view.store %e4_half, %converted_half_view[0] : f16, view<2xf16>
+  view.store %e5_half, %converted_half_view[1] : f16, view<2xf16>
+  %f32_base = index.constant 16 : offset
+  %f32_view = buffer.view %output[%f32_base] : buffer -> view<4xf32>
+  %e4_f32 = scalar.extf %e4 : f8E4M3 to f32
+  %e5_f32 = scalar.extf %e5 : f8E5M2 to f32
+  %half_f32 = scalar.extf %half : f16 to f32
+  %brain_f32 = scalar.extf %brain : bf16 to f32
+  view.store %e4_f32, %f32_view[0] : f32, view<4xf32>
+  view.store %e5_f32, %f32_view[1] : f32, view<4xf32>
+  view.store %half_f32, %f32_view[2] : f32, view<4xf32>
+  view.store %brain_f32, %f32_view[3] : f32, view<4xf32>
+  %f64_base = index.constant 32 : offset
+  %f64_view = buffer.view %output[%f64_base] : buffer -> view<4xf64>
+  %e4_f64 = scalar.extf %e4 : f8E4M3 to f64
+  %e5_f64 = scalar.extf %e5 : f8E5M2 to f64
+  %half_f64 = scalar.extf %half : f16 to f64
+  %brain_f64 = scalar.extf %brain : bf16 to f64
+  view.store %e4_f64, %f64_view[0] : f64, view<4xf64>
+  view.store %e5_f64, %f64_view[1] : f64, view<4xf64>
+  view.store %half_f64, %f64_view[2] : f64, view<4xf64>
+  view.store %brain_f64, %f64_view[3] : f64, view<4xf64>
+  %marker_base = index.constant 64 : offset
+  %marker_view = buffer.view %output[%marker_base] : buffer -> view<1xf64>
+  view.store %marker, %marker_view[0] : f64, view<1xf64>
+  func.return
 }
 
-kernel.def @scalar_f16_to_f64() {
-  %unit = index.constant 1 : index
-  %groups = index.constant 1024 : index
-  %width = index.constant 64 : index
-  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
-} launch(%input: buffer, %output: buffer) {
-  %lane = kernel.workitem.dispatch.id<x> : index
-  %base = index.constant 0 : offset
-  %input_view = buffer.view %input[%base] : buffer -> view<65536xf16>
-  %output_view = buffer.view %output[%base] : buffer -> view<65536xf64>
-  %input_value = view.load %input_view[%lane] : view<65536xf16> -> f16
-  %converted = scalar.extf %input_value : f16 to f64
-  view.store %converted, %output_view[%lane] : f64, view<65536xf64>
-  kernel.return
+func.def @narrow_scalar_bitcasts(%e4_bits: i8, %unused: f16, %e5_bits: i8, %marker: f64, %half_bits: i16, %brain_bits: i16, %output: buffer) {
+  %e4 = scalar.bitcast %e4_bits : i8 to f8E4M3
+  %e5 = scalar.bitcast %e5_bits : i8 to f8E5M2
+  %half = scalar.bitcast %half_bits : i16 to f16
+  %brain = scalar.bitcast %brain_bits : i16 to bf16
+  func.call @narrow_scalar_arguments(%e4, %unused, %e5, %marker, %half, %brain, %output) : (f8E4M3, f16, f8E5M2, f64, f16, bf16, buffer)
+  func.return
 }
 
-kernel.def @scalar_bf16_to_f64() {
-  %unit = index.constant 1 : index
-  %groups = index.constant 1024 : index
-  %width = index.constant 64 : index
-  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
-} launch(%input: buffer, %output: buffer) {
-  %lane = kernel.workitem.dispatch.id<x> : index
-  %base = index.constant 0 : offset
-  %input_view = buffer.view %input[%base] : buffer -> view<65536xbf16>
-  %output_view = buffer.view %output[%base] : buffer -> view<65536xf64>
-  %input_value = view.load %input_view[%lane] : view<65536xbf16> -> bf16
-  %converted = scalar.extf %input_value : bf16 to f64
-  view.store %converted, %output_view[%lane] : f64, view<65536xf64>
-  kernel.return
+check.scenario @scalar_f32_to_f64_values {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %random_bits = check.generate.random.uniform seed(%seed) range(-2147483648 to 2147483647) : tensor<64xi32>
+    %positive_special_bits = check.generate.iota offset(2139095040) step(1) : tensor<64xi32>
+    %negative_special_bits = check.generate.iota offset(-8388608) step(1) : tensor<64xi32>
+    %boundary_bits = check.generate.iota offset(8388576) step(1) : tensor<64xi32>
+    %uniform = check.literal value(-0.0) : f32
+    %output = check.generate.fill value(0.0) : tensor<320xf64>
+    %random_output = check.tensor.view %output offset(0) : tensor<320xf64> -> tensor<64xf64>
+    %positive_special_output = check.tensor.view %output offset(512) : tensor<320xf64> -> tensor<64xf64>
+    %negative_special_output = check.tensor.view %output offset(1024) : tensor<320xf64> -> tensor<64xf64>
+    %boundary_output = check.tensor.view %output offset(1536) : tensor<320xf64> -> tensor<64xf64>
+    %uniform_output = check.tensor.view %output offset(2048) : tensor<320xf64> -> tensor<64xf64>
+    check.compare<@widen_f32_samples>(%random_bits, %positive_special_bits, %negative_special_bits, %boundary_bits, %uniform, %output) : (tensor<64xi32>, tensor<64xi32>, tensor<64xi32>, tensor<64xi32>, f32, tensor<320xf64>) -> () {
+      check.expect.close actual(%random_output) expected(%random_output) atol(0.0) rtol(0.0) nan(same) : tensor<64xf64>
+      check.expect.close actual(%positive_special_output) expected(%positive_special_output) atol(0.0) rtol(0.0) nan(same) : tensor<64xf64>
+      check.expect.close actual(%negative_special_output) expected(%negative_special_output) atol(0.0) rtol(0.0) nan(same) : tensor<64xf64>
+      check.expect.bitwise actual(%boundary_output) expected(%boundary_output) : tensor<64xf64>
+      check.expect.bitwise actual(%uniform_output) expected(%uniform_output) : tensor<64xf64>
+    }
+  }
+  check.return
+}
+
+check.scenario @scalar_f64_to_f32_values {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %random_words = check.generate.random.uniform seed(%seed) range(-2147483648 to 2147483647) : tensor<128xi32>
+    %positive_special_bits = check.generate.iota offset(9218868437227405312) step(1) : tensor<64xi64>
+    %negative_special_bits = check.generate.iota offset(-4503599627370496) step(1) : tensor<64xi64>
+    %subnormal_edge_bits = check.generate.iota offset(3931642474694442976) step(1) : tensor<64xi64>
+    %normal_edge_bits = check.generate.iota offset(4039728865214463968) step(1) : tensor<64xi64>
+    %unit_edge_bits = check.generate.iota offset(4607182419068452832) step(1) : tensor<64xi64>
+    %overflow_edge_bits = check.generate.iota offset(5183643170835005408) step(1) : tensor<64xi64>
+    %uniform = check.literal value(1.0000000596046448) : f64
+    %output = check.generate.fill value(0.0) : tensor<512xf32>
+    %random_output = check.tensor.view %output offset(0) : tensor<512xf32> -> tensor<64xf32>
+    %positive_special_output = check.tensor.view %output offset(256) : tensor<512xf32> -> tensor<64xf32>
+    %negative_special_output = check.tensor.view %output offset(512) : tensor<512xf32> -> tensor<64xf32>
+    %subnormal_edge_output = check.tensor.view %output offset(768) : tensor<512xf32> -> tensor<64xf32>
+    %normal_edge_output = check.tensor.view %output offset(1024) : tensor<512xf32> -> tensor<64xf32>
+    %unit_edge_output = check.tensor.view %output offset(1280) : tensor<512xf32> -> tensor<64xf32>
+    %overflow_edge_output = check.tensor.view %output offset(1536) : tensor<512xf32> -> tensor<64xf32>
+    %uniform_output = check.tensor.view %output offset(1792) : tensor<512xf32> -> tensor<64xf32>
+    check.compare<@narrow_f64_samples>(%random_words, %positive_special_bits, %negative_special_bits, %subnormal_edge_bits, %normal_edge_bits, %unit_edge_bits, %overflow_edge_bits, %uniform, %output) : (tensor<128xi32>, tensor<64xi64>, tensor<64xi64>, tensor<64xi64>, tensor<64xi64>, tensor<64xi64>, tensor<64xi64>, f64, tensor<512xf32>) -> () {
+      check.expect.close actual(%random_output) expected(%random_output) atol(0.0) rtol(0.0) nan(same) : tensor<64xf32>
+      check.expect.close actual(%positive_special_output) expected(%positive_special_output) atol(0.0) rtol(0.0) nan(same) : tensor<64xf32>
+      check.expect.close actual(%negative_special_output) expected(%negative_special_output) atol(0.0) rtol(0.0) nan(same) : tensor<64xf32>
+      check.expect.bitwise actual(%subnormal_edge_output) expected(%subnormal_edge_output) : tensor<64xf32>
+      check.expect.bitwise actual(%normal_edge_output) expected(%normal_edge_output) : tensor<64xf32>
+      check.expect.bitwise actual(%unit_edge_output) expected(%unit_edge_output) : tensor<64xf32>
+      check.expect.bitwise actual(%overflow_edge_output) expected(%overflow_edge_output) : tensor<64xf32>
+      check.expect.bitwise actual(%uniform_output) expected(%uniform_output) : tensor<64xf32>
+    }
+  }
+  check.return
+}
+
+check.scenario @narrow_float_all_bits {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %bits8 = check.generate.iota offset(-128) step(1) : tensor<256xi8>
+    %bits16 = check.generate.iota offset(-32768) step(1) : tensor<65536xi16>
+    %e4_output = check.generate.fill value(0.0) : tensor<256xf64>
+    %e5_output = check.generate.fill value(0.0) : tensor<256xf64>
+    %f16_output = check.generate.fill value(0.0) : tensor<65536xf64>
+    %bf16_output = check.generate.fill value(0.0) : tensor<65536xf64>
+    %e4_negative_zero = check.tensor.view %e4_output offset(0) : tensor<256xf64> -> tensor<1xf64>
+    %e4_positive_zero = check.tensor.view %e4_output offset(1024) : tensor<256xf64> -> tensor<1xf64>
+    %e5_negative_zero = check.tensor.view %e5_output offset(0) : tensor<256xf64> -> tensor<1xf64>
+    %e5_positive_zero = check.tensor.view %e5_output offset(1024) : tensor<256xf64> -> tensor<1xf64>
+    %f16_negative_zero = check.tensor.view %f16_output offset(0) : tensor<65536xf64> -> tensor<1xf64>
+    %f16_positive_zero = check.tensor.view %f16_output offset(262144) : tensor<65536xf64> -> tensor<1xf64>
+    %bf16_negative_zero = check.tensor.view %bf16_output offset(0) : tensor<65536xf64> -> tensor<1xf64>
+    %bf16_positive_zero = check.tensor.view %bf16_output offset(262144) : tensor<65536xf64> -> tensor<1xf64>
+    check.compare<@widen_all_narrow_bits>(%bits8, %bits16, %e4_output, %e5_output, %f16_output, %bf16_output) : (tensor<256xi8>, tensor<65536xi16>, tensor<256xf64>, tensor<256xf64>, tensor<65536xf64>, tensor<65536xf64>) -> () {
+      check.expect.close actual(%e4_output) expected(%e4_output) atol(0.0) rtol(0.0) nan(same) : tensor<256xf64>
+      check.expect.close actual(%e5_output) expected(%e5_output) atol(0.0) rtol(0.0) nan(same) : tensor<256xf64>
+      check.expect.close actual(%f16_output) expected(%f16_output) atol(0.0) rtol(0.0) nan(same) : tensor<65536xf64>
+      check.expect.close actual(%bf16_output) expected(%bf16_output) atol(0.0) rtol(0.0) nan(same) : tensor<65536xf64>
+      check.expect.bitwise actual(%e4_negative_zero) expected(%e4_negative_zero) : tensor<1xf64>
+      check.expect.bitwise actual(%e4_positive_zero) expected(%e4_positive_zero) : tensor<1xf64>
+      check.expect.bitwise actual(%e5_negative_zero) expected(%e5_negative_zero) : tensor<1xf64>
+      check.expect.bitwise actual(%e5_positive_zero) expected(%e5_positive_zero) : tensor<1xf64>
+      check.expect.bitwise actual(%f16_negative_zero) expected(%f16_negative_zero) : tensor<1xf64>
+      check.expect.bitwise actual(%f16_positive_zero) expected(%f16_positive_zero) : tensor<1xf64>
+      check.expect.bitwise actual(%bf16_negative_zero) expected(%bf16_negative_zero) : tensor<1xf64>
+      check.expect.bitwise actual(%bf16_positive_zero) expected(%bf16_positive_zero) : tensor<1xf64>
+    }
+  }
+  check.return
+}
+
+check.scenario @narrow_float_scalar_arguments {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %e4 = check.literal value(-0.0) : f8E4M3
+    %unused = check.literal value(-2.0) : f16
+    %e5 = check.literal value(57344.0) : f8E5M2
+    %marker = check.literal value(-3.1415926535897931) : f64
+    %half = check.literal value(-65504.0) : f16
+    %brain = check.literal value(1.5) : bf16
+    %output = check.generate.fill value(-123) : tensor<72xi8>
+    check.compare<@narrow_scalar_arguments>(%e4, %unused, %e5, %marker, %half, %brain, %output) : (f8E4M3, f16, f8E5M2, f64, f16, bf16, tensor<72xi8>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<72xi8>
+    }
+  }
+  check.return
+}
+
+check.scenario @narrow_float_scalar_bitcasts {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %e4_bits = check.literal value(127) : i8
+    %unused = check.literal value(-2.0) : f16
+    %e5_bits = check.literal value(125) : i8
+    %marker = check.literal value(-3.1415926535897931) : f64
+    %half_bits = check.literal value(31745) : i16
+    %brain_bits = check.literal value(32641) : i16
+    %output = check.generate.fill value(-123) : tensor<72xi8>
+    %raw = check.tensor.view %output offset(0) : tensor<72xi8> -> tensor<6xi8>
+    %half = check.tensor.view %output offset(8) : tensor<72xi8> -> tensor<2xf16>
+    %single = check.tensor.view %output offset(16) : tensor<72xi8> -> tensor<4xf32>
+    %double = check.tensor.view %output offset(32) : tensor<72xi8> -> tensor<4xf64>
+    %stored_marker = check.tensor.view %output offset(64) : tensor<72xi8> -> tensor<1xf64>
+    check.compare<@narrow_scalar_bitcasts>(%e4_bits, %unused, %e5_bits, %marker, %half_bits, %brain_bits, %output) : (i8, f16, i8, f64, i16, i16, tensor<72xi8>) -> () {
+      check.expect.bitwise actual(%raw) expected(%raw) : tensor<6xi8>
+      check.expect.close actual(%half) expected(%half) atol(0.0) rtol(0.0) nan(same) : tensor<2xf16>
+      check.expect.close actual(%single) expected(%single) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
+      check.expect.close actual(%double) expected(%double) atol(0.0) rtol(0.0) nan(same) : tensor<4xf64>
+      check.expect.bitwise actual(%stored_marker) expected(%stored_marker) : tensor<1xf64>
+    }
+  }
+  check.return
 }

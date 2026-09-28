@@ -63,15 +63,6 @@ iree_py_binary(
     deps = [":kernel_fixture"],
 )
 
-iree_py_binary(
-    name = "scalar_float_conversion",
-    testonly = True,
-    srcs = ["scalar_float_conversion.py"],
-    main = "scalar_float_conversion.py",
-    visibility = ["//loom/src/loom/test/corpus/conformance:__pkg__"],
-    deps = [":kernel_fixture"],
-)
-
 iree_py_test(
     name = "numeric_conversion_matrix_test",
     srcs = [

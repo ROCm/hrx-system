@@ -22,6 +22,7 @@ _CONFIGURED_CASES = [
 _SCENARIO_CASES = [
     "packed_vector_select.loom",
     "predicate_logic.loom",
+    "scalar_float_conversion.loom",
     "vector_i64_bitwise.loom",
 ]
 
@@ -71,43 +72,10 @@ loom_test(
     ],
 )
 
-loom_generated_file_family(
-    name = "scalar_float_conversion_gen",
-    testonly = True,
-    generator = "//loom/py/loom/gen/test:scalar_float_conversion",
-    output_directories = ["scalar_float_conversion_arrays"],
-    output_flags = [
-        "--output",
-        "--arrays",
-    ],
-    outputs = [
-        "scalar_float_conversion_cases.loom",
-        "scalar_float_conversion_arrays",
-    ],
-)
-
 loom_test(
     name = "scalar_float_conversion_test",
-    srcs = [
-        "scalar_float_conversion.loom",
-        ":scalar_float_conversion_cases.loom",
-        "//loom/src/loom/test/corpus/source_low:narrow_float_arguments.loom-test",
-    ],
-    compile_targets = [
-        "//loom/target/amdgpu:gfx942",
-        "//loom/target/amdgpu:gfx950",
-        "//loom/target/amdgpu:gfx1100",
-        "//loom/target/amdgpu:gfx1151",
-        "//loom/target/amdgpu:gfx1170",
-        "//loom/target/amdgpu:gfx1200",
-        "//loom/target/amdgpu:gfx1250",
-        "//loom/target/spirv:vulkan1.3+bda+extended-types",
-    ],
-    data = [":scalar_float_conversion_gen"],
-    execution_profiles = [
-        AMDGPU_HARDWARE_PROFILE,
-        AMDGPU_ACCESS_PROFILE,
-    ],
+    srcs = ["scalar_float_conversion.loom"],
+    execution_profiles = [AMDGPU_HARDWARE_PROFILE],
 )
 
 loom_test(
