@@ -77,6 +77,8 @@ iree_status_t loom_config_def_verify(
 LOOM_DEFINE_ISA(loom_config_get_isa, LOOM_OP_CONFIG_GET)
 LOOM_DEFINE_RESULT(loom_config_get_result, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_config_get_config, 0)
+iree_status_t loom_config_get_canonicalize(loom_op_t* op,
+                                          loom_rewriter_t* rewriter);
 iree_status_t loom_config_get_build(
     loom_builder_t* builder,
     loom_symbol_ref_t config,

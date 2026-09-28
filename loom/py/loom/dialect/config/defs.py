@@ -173,6 +173,7 @@ config_get = Op(
     results=[Result("result", ANY)],
     traits=[PURE],
     facts="loom_config_get_facts",
+    canonicalize="loom_config_get_canonicalize",
     verify="loom_config_get_verify",
     format=[
         SymbolRef("config"),

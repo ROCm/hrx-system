@@ -15,6 +15,7 @@ loom_generated_cc_library(
   GENERATOR
     loom::py::loom::gen::ops::c_tables_config_generator
   SRCS
+    "canonicalize.c"
     "facts.c"
     "verify.c"
   TEXTUAL_HDRS
@@ -41,6 +42,8 @@ loom_generated_cc_library(
     loom::ir::facts
     loom::ops::encoding
     loom::ops::op_defs
+    loom::rewrite::rewriter
+    loom::util::fact_table
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

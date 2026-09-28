@@ -1328,3 +1328,83 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 9
   global_store_short_saddr %23, %63, %output_view {offset = 448}
   return
 }
+
+// ====
+
+// RUN: emit source-low output=none
+// Exact encoding configuration feeds packed matrix fragments.
+amdgpu.target<gfx11-generic> @probe_gfx11 {subgroup_size = 32}
+
+config.def @probe.schema = #encoding.operand<element_format=i4, payload_elements=16, payload_registers=2> : encoding<schema>
+
+config.def @probe.registers = 2 : index
+
+kernel.def target(@probe_gfx11) export("packed_probe") @packed_probe() {
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%a: buffer, %b: buffer, %out: buffer) {
+  %zero = index.constant 0 : index
+  %offset = index.constant 0 : offset
+  %sixteen = index.constant 16 : index
+  %registers = config.get @probe.registers : index
+  %schema = config.get @probe.schema : encoding<schema>
+  %lane = kernel.subgroup.lane.id : index
+  %ag = buffer.assume.memory_space<global> %a : buffer
+  %bg = buffer.assume.memory_space<global> %b : buffer
+  %og = buffer.assume.memory_space<global> %out : buffer
+  %av = buffer.view %ag[%offset] : buffer -> view<32x4xi32>
+  %bv = buffer.view %bg[%offset] : buffer -> view<32x4xi32>
+  %ov = buffer.view %og[%offset] : buffer -> view<32x8xi32>
+  %ap = vector.load %av[%lane, %zero] : view<32x4xi32> -> vector<[%registers]xi32>
+  %bp = vector.load %bv[%lane, %zero] : view<32x4xi32> -> vector<[%registers]xi32>
+  %lhs = vector.fragment<lhs> %ap shape [%sixteen, %sixteen] using {schema = %schema : encoding<schema>} : vector<[%registers]xi32>
+  %rhs = vector.fragment<rhs> %bp shape [%sixteen, %sixteen] using {schema = %schema : encoding<schema>} : vector<[%registers]xi32>
+  %zeros = vector.constant 0 : vector<8xi32>
+  %init = vector.fragment<init> %zeros shape [%sixteen, %sixteen] : vector<8xi32>
+  %acc = vector.mma %lhs, %rhs, %init : vector<[%registers]xi32>, vector<[%registers]xi32>, vector<8xi32>
+  vector.store %acc, %ov[%lane, %zero] : vector<8xi32>, view<32x8xi32>
+  kernel.return
+}
+
+// ----
+
+// ====
+
+// RUN: emit source-low output=none
+// Exact encoding configuration feeds packed matrix fragments.
+amdgpu.target<gfx11-generic> @probe_gfx11 {subgroup_size = 32}
+
+config.def @probe.schema = #encoding.operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
+
+config.def @probe.registers = 4 : index
+
+kernel.def target(@probe_gfx11) export("packed_probe") @packed_probe() {
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%a: buffer, %b: buffer, %out: buffer) {
+  %zero = index.constant 0 : index
+  %offset = index.constant 0 : offset
+  %sixteen = index.constant 16 : index
+  %registers = config.get @probe.registers : index
+  %schema = config.get @probe.schema : encoding<schema>
+  %lane = kernel.subgroup.lane.id : index
+  %ag = buffer.assume.memory_space<global> %a : buffer
+  %bg = buffer.assume.memory_space<global> %b : buffer
+  %og = buffer.assume.memory_space<global> %out : buffer
+  %av = buffer.view %ag[%offset] : buffer -> view<32x4xi32>
+  %bv = buffer.view %bg[%offset] : buffer -> view<32x4xi32>
+  %ov = buffer.view %og[%offset] : buffer -> view<32x8xi32>
+  %ap = vector.load %av[%lane, %zero] : view<32x4xi32> -> vector<[%registers]xi32>
+  %bp = vector.load %bv[%lane, %zero] : view<32x4xi32> -> vector<[%registers]xi32>
+  %lhs = vector.fragment<lhs> %ap shape [%sixteen, %sixteen] using {schema = %schema : encoding<schema>} : vector<[%registers]xi32>
+  %rhs = vector.fragment<rhs> %bp shape [%sixteen, %sixteen] using {schema = %schema : encoding<schema>} : vector<[%registers]xi32>
+  %zeros = vector.constant 0 : vector<8xi32>
+  %init = vector.fragment<init> %zeros shape [%sixteen, %sixteen] : vector<8xi32>
+  %acc = vector.mma %lhs, %rhs, %init : vector<[%registers]xi32>, vector<[%registers]xi32>, vector<8xi32>
+  vector.store %acc, %ov[%lane, %zero] : vector<8xi32>, view<32x8xi32>
+  kernel.return
+}
+
+// ----

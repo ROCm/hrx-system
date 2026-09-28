@@ -150,3 +150,54 @@ func.def @read_decl_config_facts() -> (i64, i64, i64) {
   %divisor = scalar.constant 4 : i64
   func.return %lo, %hi, %divisor : i64, i64, i64
 }
+
+// ====
+
+config.def @exact_schema = #encoding.operand<element_format=i4, payload_elements=16, payload_registers=2> : encoding<schema>
+
+func.def @return_schema() -> (encoding<schema>) {
+  %value = config.get @exact_schema : encoding<schema>
+  func.return %value : encoding<schema>
+}
+
+// ----
+config.def @exact_schema = #encoding.operand<element_format=i4, payload_elements=16, payload_registers=2> : encoding<schema>
+
+func.def @return_schema() -> (encoding<schema>) {
+  %value = encoding.define #encoding.operand<element_format=i4, payload_elements=16, payload_registers=2> : encoding<schema>
+  func.return %value : encoding<schema>
+}
+
+// ====
+
+config.def @exact_layout = #encoding.layout.dense : encoding<layout>
+
+func.def @return_layout() -> (encoding<layout>) {
+  %value = config.get @exact_layout : encoding<layout>
+  func.return %value : encoding<layout>
+}
+
+// ----
+config.def @exact_layout = #encoding.layout.dense : encoding<layout>
+
+func.def @return_layout() -> (encoding<layout>) {
+  %value = encoding.define #encoding.layout.dense : encoding<layout>
+  func.return %value : encoding<layout>
+}
+
+// ====
+
+config.decl @unresolved_schema : encoding<schema>
+
+func.def @return_unresolved_schema() -> (encoding<schema>) {
+  %value = config.get @unresolved_schema : encoding<schema>
+  func.return %value : encoding<schema>
+}
+
+// ----
+config.decl @unresolved_schema : encoding<schema>
+
+func.def @return_unresolved_schema() -> (encoding<schema>) {
+  %value = config.get @unresolved_schema : encoding<schema>
+  func.return %value : encoding<schema>
+}
