@@ -946,7 +946,10 @@ def _cases() -> Sequence[ContractCase]:
                 source_op, type_pattern, operation, register_width, descriptor_lookup
             )
         ),
-        _select_rule(_I32, "x86.scalar.select.gpr32", descriptor_lookup),
+        *(
+            _select_rule(type_pattern, "x86.scalar.select.gpr32", descriptor_lookup)
+            for type_pattern in (_I1, _I32)
+        ),
         *(
             _select_rule(type_pattern, "x86.scalar.select.gpr64", descriptor_lookup)
             for type_pattern in (_I64, _INDEX, _OFFSET, Buffer())

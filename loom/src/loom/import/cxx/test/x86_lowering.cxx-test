@@ -1,0 +1,40 @@
+// RUN: emit source-low target=x86:scalar output=low
+
+bool select_predicate(bool condition, bool left, bool right) {
+  return condition ? left : right;
+}
+
+// ----
+low.func.def public target<x86.scalar.core> abi(object_function) @select_predicate(%condition: reg<x86.gpr32>, %left: reg<x86.gpr32>, %right: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %10 = copy %right : reg<x86.gpr32> -> reg<x86.gpr32>
+  %11 = select.gpr32 %condition, %left, %10
+  return %11
+}
+
+// ====
+
+// Extending the selected predicate preserves 0/1 and leaves both arms live.
+unsigned select_bits(bool condition, bool left, bool right) {
+  bool selected = condition ? left : right;
+  return (unsigned(selected) << 3) | (unsigned(left) << 2) |
+         (unsigned(right) << 1) | unsigned(condition);
+}
+
+// ----
+low.func.def public target<x86.scalar.core> abi(object_function) @select_bits(%condition: reg<x86.gpr32>, %left: reg<x86.gpr32>, %right: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %23 = copy %right : reg<x86.gpr32> -> reg<x86.gpr32>
+  %selected = select.gpr32 %condition, %left, %23
+  %25 = copy %selected : reg<x86.gpr32> -> reg<x86.gpr32>
+  %26 = shl.imm.gpr32 %25 {shift = 3}
+  %27 = copy %left : reg<x86.gpr32> -> reg<x86.gpr32>
+  %28 = shl.imm.gpr32 %27 {shift = 2}
+  %29 = copy %26 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %30 = or.gpr32 %29, %28
+  %31 = copy %right : reg<x86.gpr32> -> reg<x86.gpr32>
+  %32 = shl.imm.gpr32 %31 {shift = 1}
+  %33 = copy %30 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %34 = or.gpr32 %33, %32
+  %35 = copy %34 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %36 = or.gpr32 %35, %condition
+  return %36
+}

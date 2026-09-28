@@ -1,0 +1,26 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/scalar_selection.loom-test
+// RUN: emit source-low target=x86:avx2 output=low
+
+func.def @scalar_selection(%condition: i1, %a_i1: i1, %b_i1: i1, %a_i32: i32, %b_i32: i32, %a_i64: i64, %b_i64: i64, %a_f32: f32, %b_f32: f32, %a_f64: f64, %b_f64: f64) -> (i1, i32, i64, f32, f64) {
+  %r_i1 = scf.select %condition, %a_i1, %b_i1 : i1
+  %r_i32 = scf.select %condition, %a_i32, %b_i32 : i32
+  %r_i64 = scf.select %condition, %a_i64, %b_i64 : i64
+  %r_f32 = scf.select %condition, %a_f32, %b_f32 : f32
+  %r_f64 = scf.select %condition, %a_f64, %b_f64 : f64
+  func.return %r_i1, %r_i32, %r_i64, %r_f32, %r_f64 : i1, i32, i64, f32, f64
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @scalar_selection(%condition: reg<x86.gpr32>, %a_i1: reg<x86.gpr32>, %b_i1: reg<x86.gpr32>, %a_i32: reg<x86.gpr32>, %b_i32: reg<x86.gpr32>, %a_i64: reg<x86.gpr64>, %b_i64: reg<x86.gpr64>, %a_f32: reg<x86.xmm>, %b_f32: reg<x86.xmm>, %a_f64: reg<x86.xmm>, %b_f64: reg<x86.xmm>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr64>, reg<x86.xmm>, reg<x86.xmm>) asm {
+  %37 = copy %b_i1 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %r_i1 = select.gpr32 %condition, %a_i1, %37
+  %39 = copy %b_i32 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %r_i32 = select.gpr32 %condition, %a_i32, %39
+  %41 = copy %b_i64 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %r_i64 = select.gpr64 %condition, %a_i64, %41
+  %43 = vmovd.xmm.gpr32 %condition
+  %44 = vpsllq.xmm %43, 63
+  %r_f32 = vblendvpd.xmm %b_f32, %a_f32, %44
+  %r_f64 = vblendvpd.xmm %b_f64, %a_f64, %44
+  return %r_i1, %r_i32, %r_i64, %r_f32, %r_f64
+}

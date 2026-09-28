@@ -1097,6 +1097,15 @@ loom_check_test_suite(
 )
 endif()
 
+if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_X86)
+loom_check_test_suite(
+  NAME
+    x86_compiler_test
+  SRCS
+    "x86_lowering.cxx-test"
+)
+endif()
+
 if(LOOM_IMPORT_CXX AND LOOM_TARGET_WASM)
 loom_check_test_suite(
   NAME
