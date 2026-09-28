@@ -139,16 +139,16 @@ iree_status_t loom_bytecode_write_value_def(
       loom_bytecode_page_writer_write_uvarint(writer, name_writer_id));
 
   uint32_t type_writer_id = 0;
-  uint32_t storage_node = 0;
+  loom_type_id_t type_id = LOOM_TYPE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_type(
-      numbering, value->type, &type_writer_id, &storage_node));
+      numbering, value->type, &type_writer_id, &type_id));
   IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
-      writer, numbering->types.index.nodes[storage_node].has_bindings
+      writer, numbering->types.index.nodes[type_id].has_bindings
                   ? 1
                   : ((uint64_t)type_writer_id << 1)));
 
   return loom_bytecode_write_type_bindings(writer, numbering, value_numbering,
-                                           storage_node);
+                                           type_id);
 }
 
 static iree_status_t loom_bytecode_find_successor_block_index(

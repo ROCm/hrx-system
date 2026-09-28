@@ -143,6 +143,8 @@ iree_status_t loom_bytecode_write_types_section(
       }
       case LOOM_TYPE_FUNCTION: {
         const loom_func_type_data_t* func_data = loom_type_func_data(type);
+        const iree_host_size_t dependency_begin =
+            numbering->types.index.nodes[module_index].dependencies.begin;
         IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
             page_writer, func_data->arg_count));
         IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
@@ -150,9 +152,9 @@ iree_status_t loom_bytecode_write_types_section(
         iree_host_size_t type_count =
             (iree_host_size_t)func_data->arg_count + func_data->result_count;
         for (iree_host_size_t i = 0; i < type_count; ++i) {
-          uint32_t sub_type_id = 0;
-          IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_type(
-              numbering, func_data->types[i], &sub_type_id, NULL));
+          const uint32_t sub_type_id =
+              numbering->types.writer_ids_by_module_index
+                  [numbering->types.index.dependencies[dependency_begin + i]];
           IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
               page_writer, sub_type_id));
         }
@@ -170,11 +172,12 @@ iree_status_t loom_bytecode_write_types_section(
         uint16_t param_count = loom_type_dialect_param_count(type);
         IREE_RETURN_IF_ERROR(
             loom_bytecode_page_writer_write_uvarint(page_writer, param_count));
-        const loom_type_t* params = loom_type_dialect_params(type);
+        const iree_host_size_t dependency_begin =
+            numbering->types.index.nodes[module_index].dependencies.begin;
         for (uint16_t i = 0; i < param_count; ++i) {
-          uint32_t param_type_id = 0;
-          IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_type(
-              numbering, params[i], &param_type_id, NULL));
+          const uint32_t param_type_id =
+              numbering->types.writer_ids_by_module_index
+                  [numbering->types.index.dependencies[dependency_begin + i]];
           IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
               page_writer, param_type_id));
         }
@@ -227,9 +230,12 @@ iree_status_t loom_bytecode_write_types_section(
         IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(
             page_writer, value_type ? 1 : 0));
         if (value_type) {
-          uint32_t value_type_id = 0;
-          IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_type(
-              numbering, *value_type, &value_type_id, NULL));
+          const loom_type_id_t dependency =
+              numbering->types.index
+                  .dependencies[numbering->types.index.nodes[module_index]
+                                    .dependencies.begin];
+          const uint32_t value_type_id =
+              numbering->types.writer_ids_by_module_index[dependency];
           IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
               page_writer, value_type_id));
         }

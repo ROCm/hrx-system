@@ -171,7 +171,7 @@ typedef struct loom_bytecode_numbering_t {
   struct {
     // Bytecode type IDs indexed by module type-table index.
     uint32_t* writer_ids_by_module_index;
-    // Canonical source identities and their immediate dependency slices.
+    // Serialization facts and dependency slices indexed by module type ID.
     loom_bytecode_type_index_t index;
     // Module type-table indices indexed by bytecode type ID.
     iree_host_size_t* module_indices_by_writer_id;
@@ -271,11 +271,16 @@ iree_status_t loom_bytecode_numbering_intern_string_view(
     loom_bytecode_numbering_t* numbering, iree_string_view_t view,
     uint32_t* out_writer_id);
 
-// Interns a structural type and all of its dependencies. When non-NULL,
-// |out_storage_node| receives the exact canonical node for scope-local records.
+// Interns a known module type and its dependencies into the bytecode catalog.
+iree_status_t loom_bytecode_numbering_intern_module_type(
+    loom_bytecode_numbering_t* numbering, loom_type_id_t type_id,
+    uint32_t* out_writer_id);
+
+// Resolves a by-value source type and interns its dependencies. When non-NULL,
+// |out_type_id| receives the canonical module ID for scope-local records.
 iree_status_t loom_bytecode_numbering_intern_type(
     loom_bytecode_numbering_t* numbering, loom_type_t type,
-    uint32_t* out_writer_id, uint32_t* out_storage_node);
+    uint32_t* out_writer_id, loom_type_id_t* out_type_id);
 
 // Interns the registered kind of |op| into the operation catalog.
 iree_status_t loom_bytecode_numbering_intern_op(

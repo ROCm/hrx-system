@@ -1188,10 +1188,15 @@ TEST_F(WriterTest, CanonicalAttrDictInputOrderDoesNotAffectBytes) {
   loom_module_free(module_b);
 }
 
-TEST_F(WriterTest, TypeCatalogBytesDoNotDependOnNestedPayloadSharing) {
+TEST_F(WriterTest, TypeCatalogBytesDoNotDependOnTypeConstructionOrder) {
   std::vector<uint8_t> canonical_bytes;
   for (int variant = 0; variant < 2; ++variant) {
     loom_module_t* module = CreateModule("type_catalog");
+    loom_type_id_t result = LOOM_TYPE_ID_INVALID;
+    if (variant == 1) {
+      IREE_ASSERT_OK(loom_module_intern_type_id(
+          module, loom_type_scalar(LOOM_SCALAR_TYPE_I32), &result));
+    }
     loom_type_id_t child = LOOM_TYPE_ID_INVALID;
     IREE_ASSERT_OK(loom_module_intern_type_id(
         module, loom_type_scalar(LOOM_SCALAR_TYPE_F32), &child));
@@ -1207,9 +1212,8 @@ TEST_F(WriterTest, TypeCatalogBytesDoNotDependOnNestedPayloadSharing) {
           module, loom_type_function(data), dependencies, 2, &child));
     }
 
-    // The two public construction paths retain identical types with different
-    // payload sharing. Both must number the same structural dependencies.
-    loom_type_id_t result = LOOM_TYPE_ID_INVALID;
+    // The two public construction paths retain identical canonical types in
+    // different module order. Wire IDs follow first use through the graph.
     IREE_ASSERT_OK(loom_module_intern_type_id(
         module, loom_type_scalar(LOOM_SCALAR_TYPE_I32), &result));
     loom_type_id_t parent = LOOM_TYPE_ID_INVALID;
@@ -1248,7 +1252,12 @@ TEST_F(WriterTest, TypeCatalogBytesDoNotDependOnNestedPayloadSharing) {
         &builder, LOOM_TEST_RECORD_BUILD_FLAG_HAS_DICT, 0, {0, symbol},
         loom_make_named_attr_slice(&entry, 1), LOOM_LOCATION_NONE, &record));
 
+    const auto source_storage = module->arena.used_allocation_size;
+    const auto source_type_count = module->types.count;
     auto bytes = WriteModule(module);
+    EXPECT_EQ(WriteModule(module), bytes);
+    EXPECT_EQ(module->arena.used_allocation_size, source_storage);
+    EXPECT_EQ(module->types.count, source_type_count);
     size_t offset = SectionPayloadOffset(bytes, LOOM_BYTECODE_SECTION_TYPES);
     ASSERT_NE(offset, 0u);
     EXPECT_EQ(ReadUVarint(bytes, &offset), 11u);

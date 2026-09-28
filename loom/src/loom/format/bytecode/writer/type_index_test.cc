@@ -68,28 +68,45 @@ class TypeIndexTest : public ::testing::Test {
   loom_module_t* module_ = nullptr;
 };
 
-TEST_F(TypeIndexTest, EmptyAndMissingTypes) {
+TEST_F(TypeIndexTest, EmptyModuleAllocatesNothing) {
+  const auto storage_before = arena_.used_allocation_size;
   loom_bytecode_type_index_t index;
   IREE_ASSERT_OK(loom_bytecode_type_index_initialize(module_, &arena_, &index));
-  EXPECT_EQ(index.count, 0u);
+  EXPECT_EQ(index.nodes, nullptr);
+  EXPECT_EQ(index.slots, nullptr);
+  EXPECT_EQ(index.dependencies, nullptr);
+  EXPECT_EQ(index.stack, nullptr);
+  EXPECT_EQ(arena_.used_allocation_size, storage_before);
   EXPECT_EQ(loom_bytecode_type_index_lookup(
                 &index, loom_type_scalar(LOOM_SCALAR_TYPE_F32)),
             LOOM_TYPE_ID_INVALID);
 }
 
-TEST_F(TypeIndexTest, SharedDependenciesAreIndexedOnce) {
-  loom_type_id_t child = Intern(loom_type_scalar(LOOM_SCALAR_TYPE_F32));
+TEST_F(TypeIndexTest, SharedDependenciesRetainCanonicalIds) {
+  std::vector<loom_type_id_t> types = {
+      Intern(loom_type_scalar(LOOM_SCALAR_TYPE_F32))};
   for (int level = 0; level < 256; ++level) {
-    child = InternFunction(child, 2);
+    types.push_back(InternFunction(types.back(), 2));
   }
+  const auto source_storage = module_->arena.used_allocation_size;
   loom_bytecode_type_index_t index;
   IREE_ASSERT_OK(loom_bytecode_type_index_initialize(module_, &arena_, &index));
-  EXPECT_EQ(index.count, module_->types.count);
-  for (loom_type_id_t id = 0; id < module_->types.count; ++id) {
+  for (size_t i = 1; i < types.size(); ++i) {
     EXPECT_EQ(loom_bytecode_type_index_lookup(
-                  &index, loom_type_table_get(&module_->types, id)),
-              id);
+                  &index, loom_type_table_get(&module_->types, types[i])),
+              types[i]);
+    const auto& node = index.nodes[types[i]];
+    ASSERT_EQ(node.dependencies.count, 2u);
+    EXPECT_EQ(node.dependencies.explicit_count, 2u);
+    EXPECT_FALSE(node.has_bindings);
+    EXPECT_EQ(index.dependencies[node.dependencies.begin], types[i - 1]);
+    EXPECT_EQ(index.dependencies[node.dependencies.begin + 1], types[i - 1]);
   }
+  EXPECT_EQ(loom_bytecode_type_index_lookup(
+                &index, loom_type_scalar(LOOM_SCALAR_TYPE_F16)),
+            LOOM_TYPE_ID_INVALID);
+  EXPECT_EQ(module_->arena.used_allocation_size, source_storage);
+  EXPECT_EQ(module_->types.count, types.size());
 }
 
 TEST_F(TypeIndexTest, ShapedTypesRetainTheirScalarDependency) {
@@ -102,17 +119,14 @@ TEST_F(TypeIndexTest, ShapedTypesRetainTheirScalarDependency) {
   }
   loom_bytecode_type_index_t index;
   IREE_ASSERT_OK(loom_bytecode_type_index_initialize(module_, &arena_, &index));
-  const auto* scalar = loom_bytecode_type_index_lookup_node(
-      &index, loom_type_scalar(LOOM_SCALAR_TYPE_F32));
-  ASSERT_NE(scalar, nullptr);
+  const auto scalar = loom_module_lookup_type_id(
+      module_, loom_type_scalar(LOOM_SCALAR_TYPE_F32));
+  ASSERT_NE(scalar, LOOM_TYPE_ID_INVALID);
   for (auto type : types) {
-    const auto* node = loom_bytecode_type_index_lookup_node(
-        &index, loom_type_table_get(&module_->types, type));
-    ASSERT_NE(node, nullptr);
+    const auto* node = &index.nodes[type];
     ASSERT_EQ(node->dependencies.count, 1u);
     EXPECT_EQ(node->dependencies.explicit_count, 0u);
-    EXPECT_EQ(&index.nodes[index.dependencies[node->dependencies.begin]],
-              scalar);
+    EXPECT_EQ(index.dependencies[node->dependencies.begin], scalar);
   }
 }
 
@@ -137,15 +151,26 @@ TEST_F(TypeIndexTest, CanonicalIdentityPreservesScopedBindingsThroughChildren) {
   }
   loom_bytecode_type_index_t index;
   IREE_ASSERT_OK(loom_bytecode_type_index_initialize(module_, &arena_, &index));
-  EXPECT_EQ(index.count, module_->types.count);
   for (size_t i = 0; i < first.size(); ++i) {
     EXPECT_NE(first[i], second[i]);
     EXPECT_EQ(loom_bytecode_type_index_lookup(
-                  &index, loom_type_table_get(&module_->types, second[i])),
-              second[i]);
-    EXPECT_EQ(loom_bytecode_type_index_lookup(
                   &index, loom_type_table_get(&module_->types, first[i])),
               first[i]);
+    EXPECT_EQ(loom_bytecode_type_index_lookup(
+                  &index, loom_type_table_get(&module_->types, second[i])),
+              second[i]);
+    const auto& first_node = index.nodes[first[i]];
+    const auto& second_node = index.nodes[second[i]];
+    EXPECT_TRUE(first_node.has_bindings);
+    EXPECT_TRUE(second_node.has_bindings);
+    if (i > 0) {
+      ASSERT_EQ(first_node.dependencies.explicit_count, 2u);
+      ASSERT_EQ(second_node.dependencies.explicit_count, 2u);
+      EXPECT_EQ(index.dependencies[first_node.dependencies.begin],
+                first[i - 1]);
+      EXPECT_EQ(index.dependencies[second_node.dependencies.begin],
+                second[i - 1]);
+    }
   }
 }
 
@@ -164,9 +189,14 @@ TEST_F(TypeIndexTest, GeneralConstructionRetainsCanonicalChildren) {
 
   loom_bytecode_type_index_t index;
   IREE_ASSERT_OK(loom_bytecode_type_index_initialize(module_, &arena_, &index));
-  EXPECT_EQ(index.count, module_->types.count);
   EXPECT_EQ(loom_bytecode_type_index_lookup(&index, retained_child), child);
   EXPECT_EQ(loom_bytecode_type_index_lookup(&index, argument), child);
+  const auto parent_id = loom_module_lookup_type_id(module_, parent);
+  const auto& node = index.nodes[parent_id];
+  ASSERT_EQ(node.dependencies.explicit_count, 2u);
+  EXPECT_EQ(index.dependencies[node.dependencies.begin], child);
+  EXPECT_EQ(index.dependencies[node.dependencies.begin + 1],
+            loom_module_lookup_type_id(module_, result));
 }
 
 TEST_F(TypeIndexTest, ParameterAttributesRetainTypeDependencyIdentity) {
@@ -184,15 +214,16 @@ TEST_F(TypeIndexTest, ParameterAttributesRetainTypeDependencyIdentity) {
   loom_string_id_t key = LOOM_STRING_ID_INVALID;
   IREE_ASSERT_OK(loom_module_intern_string(module_, IREE_SV("shape"), &key));
   loom_type_id_t parent_ids[2];
+  loom_type_id_t child_ids[2];
   for (size_t i = 0; i < IREE_ARRAYSIZE(parent_ids); ++i) {
     loom_value_id_t dimension = LOOM_VALUE_ID_INVALID;
     IREE_ASSERT_OK(loom_module_define_value(
         module_, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &dimension));
-    loom_type_id_t child =
+    child_ids[i] =
         Intern(loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32,
                                    loom_dim_pack_dynamic(dimension),
                                    /*encoding_id=*/0));
-    const loom_named_attr_t entry = {key, {}, loom_attr_type(child)};
+    const loom_named_attr_t entry = {key, {}, loom_attr_type(child_ids[i])};
     loom_attribute_t metadata;
     IREE_ASSERT_OK(loom_module_make_canonical_attr_dict(
         module_, loom_make_named_attr_slice(&entry, 1), &metadata));
@@ -201,12 +232,15 @@ TEST_F(TypeIndexTest, ParameterAttributesRetainTypeDependencyIdentity) {
   ASSERT_NE(parent_ids[0], parent_ids[1]);
   loom_bytecode_type_index_t index;
   IREE_ASSERT_OK(loom_bytecode_type_index_initialize(module_, &arena_, &index));
-  EXPECT_EQ(loom_bytecode_type_index_lookup(
-                &index, loom_type_table_get(&module_->types, parent_ids[1])),
-            parent_ids[1]);
-  EXPECT_EQ(loom_bytecode_type_index_lookup(
-                &index, loom_type_table_get(&module_->types, parent_ids[0])),
-            parent_ids[0]);
+  for (size_t i = 0; i < IREE_ARRAYSIZE(parent_ids); ++i) {
+    EXPECT_EQ(loom_bytecode_type_index_lookup(
+                  &index, loom_type_table_get(&module_->types, parent_ids[i])),
+              parent_ids[i]);
+    const auto& node = index.nodes[parent_ids[i]];
+    ASSERT_EQ(node.dependencies.explicit_count, 1u);
+    EXPECT_TRUE(node.has_bindings);
+    EXPECT_EQ(index.dependencies[node.dependencies.begin], child_ids[i]);
+  }
 }
 
 }  // namespace

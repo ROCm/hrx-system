@@ -20,10 +20,11 @@ static iree_string_builder_t* loom_bytecode_record_buffer_reset(
 
 static iree_status_t loom_bytecode_emit_complete_type(
     iree_string_builder_t* sink, loom_bytecode_numbering_t* numbering,
-    loom_bytecode_value_numbering_t* values, uint32_t storage_node) {
+    loom_bytecode_value_numbering_t* values, loom_type_id_t type_id) {
   const loom_bytecode_type_index_t* index = &numbering->types.index;
-  const loom_bytecode_type_node_t* node = &index->nodes[storage_node];
-  const loom_type_t type = node->type;
+  const loom_bytecode_type_node_t* node = &index->nodes[type_id];
+  const loom_type_t type =
+      loom_type_table_get(&numbering->module->types, type_id);
   const loom_type_kind_t kind = loom_type_kind(type);
   IREE_RETURN_IF_ERROR(
       loom_bytecode_emit_u8(sink, loom_bytecode_type_kind_byte(kind)));
@@ -146,11 +147,11 @@ static iree_status_t loom_bytecode_emit_complete_type(
 
 static iree_status_t loom_bytecode_emit_complete_bindings(
     iree_string_builder_t* payload, loom_bytecode_numbering_t* numbering,
-    loom_bytecode_value_numbering_t* values, uint32_t storage_node) {
+    loom_bytecode_value_numbering_t* values, loom_type_id_t type_id) {
   uint32_t count = 0;
   uint32_t binding = 0;
   IREE_RETURN_IF_ERROR(loom_bytecode_prepare_type_bindings(
-      numbering, values, storage_node, &count, &binding));
+      numbering, values, type_id, &count, &binding));
   IREE_RETURN_IF_ERROR(loom_bytecode_emit_uvarint(payload, count));
   for (uint32_t i = 0; i < count; ++i) {
     IREE_RETURN_IF_ERROR(loom_bytecode_emit_complete_type(
@@ -161,13 +162,13 @@ static iree_status_t loom_bytecode_emit_complete_bindings(
 
 iree_status_t loom_bytecode_write_type_bindings(
     loom_bytecode_page_writer_t* sink, loom_bytecode_numbering_t* numbering,
-    loom_bytecode_value_numbering_t* values, uint32_t storage_node) {
-  if (!numbering->types.index.nodes[storage_node].has_bindings) {
+    loom_bytecode_value_numbering_t* values, loom_type_id_t type_id) {
+  if (!numbering->types.index.nodes[type_id].has_bindings) {
     return loom_bytecode_page_writer_write_uvarint(sink, 0);
   }
   iree_string_builder_t* payload = loom_bytecode_record_buffer_reset(numbering);
-  iree_status_t status = loom_bytecode_emit_complete_bindings(
-      payload, numbering, values, storage_node);
+  iree_status_t status =
+      loom_bytecode_emit_complete_bindings(payload, numbering, values, type_id);
   const iree_string_view_t bytes = iree_string_builder_view(payload);
   if (iree_status_is_ok(status)) {
     status = loom_bytecode_page_writer_write_uvarint(sink, bytes.size);

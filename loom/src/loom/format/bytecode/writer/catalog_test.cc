@@ -313,6 +313,76 @@ TEST_F(CatalogTest, SharedTypeNumberingRetainsCompletedResults) {
   EXPECT_EQ(arena_.used_allocation_size, completed_storage);
 }
 
+TEST_F(CatalogTest, KnownModuleIdsPreserveFirstUseOrder) {
+  const auto leaf = InternType(loom_type_scalar(LOOM_SCALAR_TYPE_F32));
+  const auto other = InternType(loom_type_scalar(LOOM_SCALAR_TYPE_I32));
+  const auto parent = Pair(leaf);
+  loom_bytecode_numbering_t numbering;
+  IREE_ASSERT_OK(
+      loom_bytecode_numbering_initialize(&numbering, module_, &arena_));
+  uint32_t writer_id = 0;
+  IREE_ASSERT_OK(loom_bytecode_numbering_intern_module_type(&numbering, other,
+                                                            &writer_id));
+  EXPECT_EQ(writer_id, 0u);
+  IREE_ASSERT_OK(loom_bytecode_numbering_intern_module_type(&numbering, parent,
+                                                            &writer_id));
+  EXPECT_EQ(writer_id, 2u);
+  loom_type_id_t module_id = LOOM_TYPE_ID_INVALID;
+  IREE_ASSERT_OK(loom_bytecode_numbering_intern_type(
+      &numbering, loom_type_table_get(&module_->types, leaf), &writer_id,
+      &module_id));
+  EXPECT_EQ(writer_id, 1u);
+  EXPECT_EQ(module_id, leaf);
+  EXPECT_EQ(numbering.types.count, 3u);
+}
+
+TEST_F(CatalogTest, TypeAllocationFailureLeavesSourceReusable) {
+  auto root = InternType(loom_type_scalar(LOOM_SCALAR_TYPE_F32));
+  for (size_t i = 0; i < 64; ++i) {
+    root = Pair(root);
+  }
+  const auto source_storage = module_->arena.used_allocation_size;
+  const auto source_type_count = module_->types.count;
+  for (iree_host_size_t failure_index = 0;; ++failure_index) {
+    SCOPED_TRACE(failure_index);
+    bool completed = false;
+    {
+      FailingWriterArena writer_arena;
+      writer_arena.FailAt(failure_index);
+      loom_bytecode_numbering_t numbering;
+      iree_status_t status = loom_bytecode_numbering_initialize(
+          &numbering, module_, writer_arena.arena());
+      uint32_t writer_id = 0;
+      if (iree_status_is_ok(status)) {
+        status = loom_bytecode_numbering_intern_module_type(&numbering, root,
+                                                            &writer_id);
+      }
+      completed = iree_status_is_ok(status);
+      if (completed) {
+        EXPECT_EQ(numbering.types.count, source_type_count);
+      } else {
+        IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+      }
+    }
+    EXPECT_EQ(module_->arena.used_allocation_size, source_storage);
+    EXPECT_EQ(module_->types.count, source_type_count);
+    if (completed) {
+      break;
+    }
+
+    // A new invocation can number the same immutable source after every
+    // possible failure boundary and release of the failed invocation's arena.
+    FailingWriterArena retry_arena;
+    loom_bytecode_numbering_t numbering;
+    IREE_ASSERT_OK(loom_bytecode_numbering_initialize(&numbering, module_,
+                                                      retry_arena.arena()));
+    uint32_t writer_id = 0;
+    IREE_ASSERT_OK(loom_bytecode_numbering_intern_module_type(&numbering, root,
+                                                              &writer_id));
+    EXPECT_EQ(writer_id, source_type_count - 1);
+  }
+}
+
 TEST_F(CatalogTest, NumberingRetainsDistinctScopedTypeIdentities) {
   const loom_type_t dimension_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   loom_type_id_t types[2];
@@ -328,24 +398,18 @@ TEST_F(CatalogTest, NumberingRetainsDistinctScopedTypeIdentities) {
   IREE_ASSERT_OK(
       loom_bytecode_numbering_initialize(&numbering, module_, &arena_));
   uint32_t writer_ids[2] = {};
-  uint32_t storage_nodes[2] = {};
+  loom_type_id_t type_ids[2] = {};
   for (size_t i = 0; i < 2; ++i) {
     IREE_ASSERT_OK(loom_bytecode_numbering_intern_type(
         &numbering, loom_type_table_get(&module_->types, types[i]),
-        &writer_ids[i], &storage_nodes[i]));
-    EXPECT_EQ(&numbering.types.index.nodes[storage_nodes[i]],
-              loom_bytecode_type_index_lookup_node(
-                  &numbering.types.index,
-                  loom_type_table_get(&module_->types, types[i])));
+        &writer_ids[i], &type_ids[i]));
+    EXPECT_EQ(type_ids[i], types[i]);
+    EXPECT_TRUE(numbering.types.index.nodes[type_ids[i]].has_bindings);
   }
   EXPECT_EQ(writer_ids[0], writer_ids[1]);
-  EXPECT_NE(storage_nodes[0], storage_nodes[1]);
+  EXPECT_NE(type_ids[0], type_ids[1]);
   // Bound types have no global wire entry; only their scalar leaf is global.
   EXPECT_EQ(numbering.types.count, 1u);
-  for (size_t i = 0; i < 2; ++i) {
-    EXPECT_EQ(numbering.types.index.nodes[storage_nodes[i]].module_index,
-              types[i]);
-  }
 }
 
 TEST_F(CatalogTest, TypeAndAttributeMetadataKeepFirstUseOrder) {

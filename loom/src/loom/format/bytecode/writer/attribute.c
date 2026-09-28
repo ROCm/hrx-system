@@ -13,21 +13,21 @@
 // Orders new complete records for this SSA scope child before parent.
 static iree_status_t loom_bytecode_prepare_type_bindings(
     loom_bytecode_numbering_t* numbering,
-    loom_bytecode_value_numbering_t* values, uint32_t root, uint32_t* out_count,
-    uint32_t* out_binding) {
+    loom_bytecode_value_numbering_t* values, loom_type_id_t root,
+    uint32_t* out_count, uint32_t* out_binding) {
   loom_bytecode_type_index_t* index = &numbering->types.index;
   *out_count = 0;
   *out_binding = 0;
   if (!index->pending) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        numbering->arena, index->count, sizeof(*index->pending),
-        (void**)&index->pending));
+        numbering->arena, numbering->module->types.count,
+        sizeof(*index->pending), (void**)&index->pending));
   }
   iree_host_size_t depth = 1;
-  index->stack[0] = (loom_bytecode_type_frame_t){.node = root};
+  index->stack[0] = (loom_bytecode_type_frame_t){.type_id = root};
   while (depth) {
     loom_bytecode_type_frame_t* frame = &index->stack[depth - 1];
-    loom_bytecode_type_node_t* node = &index->nodes[frame->node];
+    loom_bytecode_type_node_t* node = &index->nodes[frame->type_id];
     if (!node->has_bindings) {
       --depth;
       continue;
@@ -38,14 +38,15 @@ static iree_status_t loom_bytecode_prepare_type_bindings(
       continue;
     }
     if (frame->next_dependency < node->dependencies.explicit_count) {
-      const uint32_t child = index->dependencies[node->dependencies.begin +
-                                                 frame->next_dependency++];
-      index->stack[depth++] = (loom_bytecode_type_frame_t){.node = child};
+      const loom_type_id_t child =
+          index->dependencies[node->dependencies.begin +
+                              frame->next_dependency++];
+      index->stack[depth++] = (loom_bytecode_type_frame_t){.type_id = child};
       continue;
     }
     node->binding_generation = values->scope_generation;
     node->binding = ++values->binding_count;
-    index->pending[(*out_count)++] = frame->node;
+    index->pending[(*out_count)++] = frame->type_id;
     --depth;
   }
   *out_binding = index->nodes[root].binding;
@@ -53,15 +54,13 @@ static iree_status_t loom_bytecode_prepare_type_bindings(
 }
 
 static uint64_t loom_bytecode_scoped_type_reference(
-    loom_bytecode_numbering_t* numbering, uint32_t node_index) {
+    loom_bytecode_numbering_t* numbering, loom_type_id_t type_id) {
   const loom_bytecode_type_node_t* node =
-      &numbering->types.index.nodes[node_index];
+      &numbering->types.index.nodes[type_id];
   if (node->has_bindings) {
     return ((uint64_t)(node->binding - 1) << 1) | 1;
   }
-  return (uint64_t)
-             numbering->types.writer_ids_by_module_index[node->module_index]
-         << 1;
+  return (uint64_t)numbering->types.writer_ids_by_module_index[type_id] << 1;
 }
 
 static iree_status_t loom_bytecode_write_attr_value_at_depth(
@@ -258,17 +257,14 @@ static iree_status_t loom_bytecode_write_attr_value_at_depth(
             "type attribute id %u out of range (module has %" PRIhsz " types)",
             (unsigned)attr.type_id, numbering->module->types.count);
       }
-      loom_type_t type =
-          loom_type_table_get(&numbering->module->types, attr.type_id);
       uint32_t type_writer_id = 0;
-      uint32_t storage_node = 0;
-      IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_type(
-          numbering, type, &type_writer_id, &storage_node));
+      IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_type(
+          numbering, attr.type_id, &type_writer_id));
       IREE_RETURN_IF_ERROR(
           loom_bytecode_page_writer_write_u8(writer, LOOM_BYTECODE_ATTR_TYPE));
       const uint64_t reference =
           value_numbering
-              ? (numbering->types.index.nodes[storage_node].has_bindings
+              ? (numbering->types.index.nodes[attr.type_id].has_bindings
                      ? 1
                      : ((uint64_t)type_writer_id << 1))
               : type_writer_id;
@@ -276,7 +272,7 @@ static iree_status_t loom_bytecode_write_attr_value_at_depth(
           loom_bytecode_page_writer_write_uvarint(writer, reference));
       if (value_numbering) {
         IREE_RETURN_IF_ERROR(loom_bytecode_write_type_bindings(
-            writer, numbering, value_numbering, storage_node));
+            writer, numbering, value_numbering, attr.type_id));
       }
       break;
     }
@@ -629,16 +625,13 @@ static iree_status_t loom_bytecode_emit_attr_value_at_depth(
             "type attribute id %u out of range (module has %" PRIhsz " types)",
             (unsigned)attr.type_id, numbering->module->types.count);
       }
-      loom_type_t type =
-          loom_type_table_get(&numbering->module->types, attr.type_id);
       uint32_t type_writer_id = 0;
-      uint32_t storage_node = 0;
-      IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_type(
-          numbering, type, &type_writer_id, &storage_node));
+      IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_type(
+          numbering, attr.type_id, &type_writer_id));
       IREE_RETURN_IF_ERROR(
           loom_bytecode_emit_u8(builder, LOOM_BYTECODE_ATTR_TYPE));
       const uint64_t reference =
-          loom_bytecode_scoped_type_reference(numbering, storage_node);
+          loom_bytecode_scoped_type_reference(numbering, attr.type_id);
       IREE_RETURN_IF_ERROR(loom_bytecode_emit_uvarint(builder, reference));
       break;
     }

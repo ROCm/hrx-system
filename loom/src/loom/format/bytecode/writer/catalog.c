@@ -476,9 +476,8 @@ iree_status_t loom_bytecode_numbering_intern_string_view(
 // Publishes a completed type only after its ordered catalog storage is ready.
 static iree_status_t loom_bytecode_numbering_append_type(
     loom_bytecode_numbering_t* numbering, loom_type_id_t module_index) {
-  const loom_bytecode_type_node_t* node = loom_bytecode_type_index_lookup_node(
-      &numbering->types.index,
-      loom_type_table_get(&numbering->module->types, module_index));
+  const loom_bytecode_type_node_t* node =
+      &numbering->types.index.nodes[module_index];
   if (node->has_bindings) {
     numbering->types.writer_ids_by_module_index[module_index] = UINT32_MAX - 1;
     return iree_ok_status();
@@ -847,13 +846,20 @@ enum loom_bytecode_catalog_frame_kind_e {
 typedef struct loom_bytecode_catalog_frame_t {
   // Immutable source payload selected by kind.
   union {
-    // Exact canonical source type and its immediate dependency slice.
-    const loom_bytecode_type_node_t* type;
+    // Canonical source type owning the immediate dependency slice.
+    loom_type_id_t type_id;
+    // Parameterized type payload and its family contract.
+    struct {
+      // Borrowed slots in declaration order.
+      const loom_attribute_t* values;
+      // Family owning slot names and presence requirements.
+      const loom_parameterized_type_descriptor_t* descriptor;
+    } type_parameters;
     // Attribute payloads and their field contracts.
     struct {
-      // Borrowed single value or contiguous parameter/array values.
+      // Borrowed single value or contiguous array elements.
       const loom_attribute_t* values;
-      // Field descriptor, or the first descriptor of type parameters.
+      // Field contract for the single value or parameterized array.
       const loom_attr_descriptor_t* descriptor;
     } attributes;
     // Parameterized attribute payloads after family resolution.
@@ -868,8 +874,6 @@ typedef struct loom_bytecode_catalog_frame_t {
   } value;
   // Next child edge, dictionary entry, array element or parameter.
   iree_host_size_t position;
-  // Owning type frame for retained TYPE edges, or SIZE_MAX for external roots.
-  iree_host_size_t owner;
   // Number of entries in a suspended aggregate.
   uint16_t count;
   // Continuation operation from loom_bytecode_catalog_frame_kind_e.
@@ -893,14 +897,16 @@ static iree_status_t loom_bytecode_catalog_push(
 // Begins a first-use type. Leaf and completed types need no continuation.
 static iree_status_t loom_bytecode_catalog_enter_type(
     loom_bytecode_numbering_t* numbering, iree_host_size_t* count,
-    const loom_bytecode_type_node_t* node) {
-  const loom_type_id_t module_index = node->module_index;
-  if (numbering->types.writer_ids_by_module_index[module_index] !=
+    loom_type_id_t type_id) {
+  if (numbering->types.writer_ids_by_module_index[type_id] !=
       LOOM_WRITER_ID_NONE) {
     return iree_ok_status();
   }
 
-  const loom_type_t type = node->type;
+  const loom_bytecode_type_node_t* node =
+      &numbering->types.index.nodes[type_id];
+  const loom_type_t type =
+      loom_type_table_get(&numbering->module->types, type_id);
   uint32_t unused_id = 0;
   if (loom_type_kind(type) == LOOM_TYPE_DIALECT) {
     const loom_string_id_t name_id = loom_type_dialect_name_id(type);
@@ -930,16 +936,15 @@ static iree_status_t loom_bytecode_catalog_enter_type(
     }
     IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_string_view(
         numbering, loom_bstring_view(descriptor->name), &unused_id));
-    const iree_host_size_t owner = *count;
     IREE_RETURN_IF_ERROR(loom_bytecode_catalog_push(
         numbering, count,
         (loom_bytecode_catalog_frame_t){
-            .value.type = node, .kind = LOOM_BYTECODE_CATALOG_TYPE_COMPLETE}));
+            .value.type_id = type_id,
+            .kind = LOOM_BYTECODE_CATALOG_TYPE_COMPLETE}));
     return loom_bytecode_catalog_push(
         numbering, count,
         (loom_bytecode_catalog_frame_t){
-            .value.attributes = {parameters, descriptor->parameter_descriptors},
-            .owner = owner,
+            .value.type_parameters = {parameters, descriptor},
             .count = parameter_count,
             .kind = LOOM_BYTECODE_CATALOG_TYPE_PARAMETERS});
   }
@@ -947,24 +952,22 @@ static iree_status_t loom_bytecode_catalog_enter_type(
   // requested types commonly have their entire dependency slice numbered.
   iree_host_size_t position = 0;
   while (position < node->dependencies.count) {
-    const uint32_t child =
+    const loom_type_id_t child =
         numbering->types.index
             .dependencies[node->dependencies.begin + position];
-    const loom_type_id_t child_module_index =
-        numbering->types.index.nodes[child].module_index;
-    if (numbering->types.writer_ids_by_module_index[child_module_index] ==
+    if (numbering->types.writer_ids_by_module_index[child] ==
         LOOM_WRITER_ID_NONE) {
       break;
     }
     ++position;
   }
   if (position == node->dependencies.count) {
-    return loom_bytecode_numbering_append_type(numbering, module_index);
+    return loom_bytecode_numbering_append_type(numbering, type_id);
   }
   return loom_bytecode_catalog_push(
       numbering, count,
       (loom_bytecode_catalog_frame_t){
-          .value.type = node,
+          .value.type_id = type_id,
           .position = position,
           .kind = LOOM_BYTECODE_CATALOG_TYPE_CHILDREN});
 }
@@ -981,22 +984,23 @@ static iree_status_t loom_bytecode_catalog_complete(
     uint32_t unused_id = 0;
     switch (frame.kind) {
       case LOOM_BYTECODE_CATALOG_TYPE_CHILDREN:
-      case LOOM_BYTECODE_CATALOG_TYPE_COMPLETE:
+      case LOOM_BYTECODE_CATALOG_TYPE_COMPLETE: {
+        const loom_bytecode_type_node_t* node =
+            &numbering->types.index.nodes[frame.value.type_id];
         if (frame.kind == LOOM_BYTECODE_CATALOG_TYPE_CHILDREN &&
-            frame.position < frame.value.type->dependencies.count) {
+            frame.position < node->dependencies.count) {
           ++numbering->traversal.frames[top].position;
-          const uint32_t child =
+          const loom_type_id_t child =
               numbering->types.index
-                  .dependencies[frame.value.type->dependencies.begin +
-                                frame.position];
-          status = loom_bytecode_catalog_enter_type(
-              numbering, &count, &numbering->types.index.nodes[child]);
+                  .dependencies[node->dependencies.begin + frame.position];
+          status = loom_bytecode_catalog_enter_type(numbering, &count, child);
           break;
         }
         --count;
-        status = loom_bytecode_numbering_append_type(
-            numbering, frame.value.type->module_index);
+        status =
+            loom_bytecode_numbering_append_type(numbering, frame.value.type_id);
         break;
+      }
       case LOOM_BYTECODE_CATALOG_TYPE_PARAMETERS:
       case LOOM_BYTECODE_CATALOG_ATTRIBUTE_PARAMETERS: {
         if (frame.position == frame.count) {
@@ -1008,15 +1012,14 @@ static iree_status_t loom_bytecode_catalog_complete(
         const loom_attr_descriptor_t* descriptor = NULL;
         uint8_t aggregate_depth = 0;
         if (frame.kind == LOOM_BYTECODE_CATALOG_TYPE_PARAMETERS) {
-          value = &frame.value.attributes.values[frame.position];
-          descriptor = &frame.value.attributes.descriptor[frame.position];
+          const loom_parameterized_type_descriptor_t* family =
+              frame.value.type_parameters.descriptor;
+          value = &frame.value.type_parameters.values[frame.position];
+          descriptor = &family->parameter_descriptors[frame.position];
           if (loom_attr_is_absent(*value)) {
             if (iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPTIONAL)) {
               break;
             }
-            const loom_parameterized_type_descriptor_t* family =
-                loom_type_parameterized_descriptor(
-                    numbering->traversal.frames[frame.owner].value.type->type);
             status = iree_make_status(
                 IREE_STATUS_INVALID_ARGUMENT,
                 "parameterized type '%.*s' has absent required parameter "
@@ -1047,7 +1050,6 @@ static iree_status_t loom_bytecode_catalog_complete(
               numbering, &count,
               (loom_bytecode_catalog_frame_t){
                   .value.attributes = {value, descriptor},
-                  .owner = frame.owner,
                   .kind = LOOM_BYTECODE_CATALOG_ATTRIBUTE,
                   .aggregate_depth = aggregate_depth});
         }
@@ -1079,7 +1081,6 @@ static iree_status_t loom_bytecode_catalog_complete(
               numbering, &count,
               (loom_bytecode_catalog_frame_t){
                   .value.attributes = {value, descriptor},
-                  .owner = frame.owner,
                   .kind = kind,
                   .aggregate_depth = frame.aggregate_depth + 1});
         }
@@ -1118,7 +1119,6 @@ static iree_status_t loom_bytecode_catalog_complete(
                 numbering, &count,
                 (loom_bytecode_catalog_frame_t){
                     .value.parameters = {attr.parameterized_slots, family},
-                    .owner = frame.owner,
                     .count = family->parameter_count,
                     .kind = LOOM_BYTECODE_CATALOG_ATTRIBUTE_PARAMETERS,
                     .aggregate_depth = frame.aggregate_depth});
@@ -1135,21 +1135,8 @@ static iree_status_t loom_bytecode_catalog_complete(
                   (unsigned)attr.type_id, numbering->module->types.count);
               break;
             }
-            const loom_bytecode_type_node_t* node = NULL;
-            if (frame.owner == SIZE_MAX) {
-              node = loom_bytecode_type_index_lookup_node(
-                  &numbering->types.index,
-                  loom_type_table_get(&numbering->module->types, attr.type_id));
-            } else {
-              loom_bytecode_catalog_frame_t* owner =
-                  &numbering->traversal.frames[frame.owner];
-              const uint32_t child =
-                  numbering->types.index
-                      .dependencies[owner->value.type->dependencies.begin +
-                                    owner->position++];
-              node = &numbering->types.index.nodes[child];
-            }
-            status = loom_bytecode_catalog_enter_type(numbering, &count, node);
+            status = loom_bytecode_catalog_enter_type(numbering, &count,
+                                                      attr.type_id);
             break;
           }
           case LOOM_ATTR_DICT:
@@ -1165,7 +1152,6 @@ static iree_status_t loom_bytecode_catalog_complete(
                 numbering, &count,
                 (loom_bytecode_catalog_frame_t){
                     .value.dictionary = attr.dict_entries,
-                    .owner = frame.owner,
                     .count = attr.count,
                     .kind = LOOM_BYTECODE_CATALOG_DICTIONARY,
                     .aggregate_depth = frame.aggregate_depth});
@@ -1192,7 +1178,6 @@ static iree_status_t loom_bytecode_catalog_complete(
                 numbering, &count,
                 (loom_bytecode_catalog_frame_t){
                     .value.attributes = {attr.parameterized_array, descriptor},
-                    .owner = frame.owner,
                     .count = attr.count,
                     .kind = LOOM_BYTECODE_CATALOG_PARAMETERIZED_ARRAY,
                     .aggregate_depth = frame.aggregate_depth});
@@ -1209,12 +1194,26 @@ static iree_status_t loom_bytecode_catalog_complete(
   return status;
 }
 
+iree_status_t loom_bytecode_numbering_intern_module_type(
+    loom_bytecode_numbering_t* numbering, loom_type_id_t type_id,
+    uint32_t* out_writer_id) {
+  if (numbering->types.writer_ids_by_module_index[type_id] ==
+      LOOM_WRITER_ID_NONE) {
+    iree_host_size_t count = 0;
+    IREE_RETURN_IF_ERROR(
+        loom_bytecode_catalog_enter_type(numbering, &count, type_id));
+    IREE_RETURN_IF_ERROR(loom_bytecode_catalog_complete(numbering, count));
+  }
+  *out_writer_id = numbering->types.writer_ids_by_module_index[type_id];
+  return iree_ok_status();
+}
+
 iree_status_t loom_bytecode_numbering_intern_type(
     loom_bytecode_numbering_t* numbering, loom_type_t type,
-    uint32_t* out_writer_id, uint32_t* out_storage_node) {
-  const loom_bytecode_type_node_t* node =
-      loom_bytecode_type_index_lookup_node(&numbering->types.index, type);
-  if (!node) {
+    uint32_t* out_writer_id, loom_type_id_t* out_type_id) {
+  const loom_type_id_t type_id =
+      loom_bytecode_type_index_lookup(&numbering->types.index, type);
+  if (type_id == LOOM_TYPE_ID_INVALID) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "type not found in module type table (kind=%u, "
                             "rank=%u, module types=%" PRIhsz ")",
@@ -1222,17 +1221,10 @@ iree_status_t loom_bytecode_numbering_intern_type(
                             (unsigned)loom_type_rank(type),
                             numbering->module->types.count);
   }
-  const loom_type_id_t module_index = node->module_index;
-  if (numbering->types.writer_ids_by_module_index[module_index] ==
-      LOOM_WRITER_ID_NONE) {
-    iree_host_size_t count = 0;
-    IREE_RETURN_IF_ERROR(
-        loom_bytecode_catalog_enter_type(numbering, &count, node));
-    IREE_RETURN_IF_ERROR(loom_bytecode_catalog_complete(numbering, count));
-  }
-  *out_writer_id = numbering->types.writer_ids_by_module_index[module_index];
-  if (out_storage_node) {
-    *out_storage_node = (uint32_t)(node - numbering->types.index.nodes);
+  IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_type(
+      numbering, type_id, out_writer_id));
+  if (out_type_id) {
+    *out_type_id = type_id;
   }
   return iree_ok_status();
 }
@@ -1254,7 +1246,6 @@ iree_status_t loom_bytecode_number_attr_value(
       loom_bytecode_catalog_push(numbering, &count,
                                  (loom_bytecode_catalog_frame_t){
                                      .value.attributes = {&attr, descriptor},
-                                     .owner = SIZE_MAX,
                                      .kind = LOOM_BYTECODE_CATALOG_ATTRIBUTE}));
   return loom_bytecode_catalog_complete(numbering, count);
 }

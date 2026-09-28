@@ -19,7 +19,7 @@ extern "C" {
 // Writes the bounded complete-record extension for one scoped type use.
 iree_status_t loom_bytecode_write_type_bindings(
     loom_bytecode_page_writer_t* writer, loom_bytecode_numbering_t* numbering,
-    loom_bytecode_value_numbering_t* values, uint32_t storage_node);
+    loom_bytecode_value_numbering_t* values, loom_type_id_t type_id);
 
 // Writes one tagged attribute directly to a streaming bytecode section.
 iree_status_t loom_bytecode_write_attr_value(
