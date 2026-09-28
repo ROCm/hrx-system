@@ -1,0 +1,33 @@
+// RUN: roundtrip
+#include <stdfloat>
+
+using Half8 = std::float16_t __attribute__((ext_vector_type(8)));
+using Brain8 = std::bfloat16_t __attribute__((ext_vector_type(8)));
+
+Half8 subtract_half(Half8 lhs, Half8 rhs) { return lhs - rhs; }
+Brain8 subtract_brain(Brain8 lhs, Brain8 rhs) { return lhs - rhs; }
+Half8 subtract_half_bias(Half8 lhs, std::float16_t bias) { return lhs - bias; }
+Brain8 subtract_brain_bias(Brain8 lhs, std::bfloat16_t bias) { return lhs - bias; }
+
+// ----
+func.def public @subtract_half(%lhs: vector<8xf16>, %rhs: vector<8xf16>) -> (vector<8xf16>) {
+  %3 = vector.subf %lhs, %rhs : vector<8xf16>
+  func.return %3 : vector<8xf16>
+}
+
+func.def public @subtract_brain(%lhs: vector<8xbf16>, %rhs: vector<8xbf16>) -> (vector<8xbf16>) {
+  %7 = vector.subf %lhs, %rhs : vector<8xbf16>
+  func.return %7 : vector<8xbf16>
+}
+
+func.def public @subtract_half_bias(%lhs: vector<8xf16>, %bias: f16) -> (vector<8xf16>) {
+  %11 = vector.splat %bias : vector<8xf16>
+  %12 = vector.subf %lhs, %11 : vector<8xf16>
+  func.return %12 : vector<8xf16>
+}
+
+func.def public @subtract_brain_bias(%lhs: vector<8xbf16>, %bias: bf16) -> (vector<8xbf16>) {
+  %16 = vector.splat %bias : vector<8xbf16>
+  %17 = vector.subf %lhs, %16 : vector<8xbf16>
+  func.return %17 : vector<8xbf16>
+}

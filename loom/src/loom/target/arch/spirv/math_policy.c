@@ -25,6 +25,7 @@ static loom_target_math_policy_decision_t loom_spirv_math_reject(
 static bool loom_spirv_math_op_is_native_arithmetic(
     loom_target_math_op_t math_op) {
   return math_op == LOOM_TARGET_MATH_OP_ADDF ||
+         math_op == LOOM_TARGET_MATH_OP_SUBF ||
          math_op == LOOM_TARGET_MATH_OP_MULF;
 }
 
@@ -65,6 +66,14 @@ static void loom_spirv_math_policy_query(
   if (!loom_spirv_math_op_is_native_arithmetic(query->math_op)) {
     *out_decision =
         loom_spirv_math_reject(IREE_SV("math.op.native_arithmetic"));
+    return;
+  }
+  if (query->element_type == LOOM_SCALAR_TYPE_BF16) {
+    *out_decision = (loom_target_math_policy_decision_t){
+        .action = LOOM_TARGET_MATH_POLICY_ACTION_REWRITE,
+        .recipe = LOOM_TARGET_MATH_RECIPE_WIDEN_F32_ROUND,
+        .constraint_key = IREE_SVL("math.recipe.widen_f32_round"),
+    };
     return;
   }
   if (!loom_spirv_math_element_type_is_native_arithmetic(query->element_type)) {

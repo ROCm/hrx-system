@@ -13,6 +13,7 @@ static void loom_vm_math_policy_query(
   loom_target_math_recipe_t recipe = LOOM_TARGET_MATH_RECIPE_UNKNOWN;
   switch (query->math_op) {
     case LOOM_TARGET_MATH_OP_ADDF:
+    case LOOM_TARGET_MATH_OP_SUBF:
     case LOOM_TARGET_MATH_OP_MULF:
       if (query->element_type == LOOM_SCALAR_TYPE_F16 ||
           query->element_type == LOOM_SCALAR_TYPE_BF16) {

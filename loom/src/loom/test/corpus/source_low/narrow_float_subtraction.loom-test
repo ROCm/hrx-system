@@ -1,0 +1,95 @@
+func.def @subtract_f16_1(%lhs: f16, %rhs: f16) -> (f16) {
+  %difference = scalar.subf %lhs, %rhs : f16
+  func.return %difference : f16
+}
+
+// ====
+
+func.def @subtract_f16_2(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %byte_offset = index.constant 0 : offset
+  %left = buffer.view %lhs[%byte_offset] : buffer -> view<2xf16>
+  %right = buffer.view %rhs[%byte_offset] : buffer -> view<2xf16>
+  %result = buffer.view %output[%byte_offset] : buffer -> view<2xf16>
+  %a = vector.load %left[0] : view<2xf16> -> vector<2xf16>
+  %b = vector.load %right[0] : view<2xf16> -> vector<2xf16>
+  %difference = vector.subf %a, %b : vector<2xf16>
+  vector.store %difference, %result[0] : vector<2xf16>, view<2xf16>
+  func.return
+}
+
+// ====
+
+func.def @subtract_f16_3(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %byte_offset = index.constant 0 : offset
+  %left = buffer.view %lhs[%byte_offset] : buffer -> view<3xf16>
+  %right = buffer.view %rhs[%byte_offset] : buffer -> view<3xf16>
+  %result = buffer.view %output[%byte_offset] : buffer -> view<3xf16>
+  %a = vector.load %left[0] : view<3xf16> -> vector<3xf16>
+  %b = vector.load %right[0] : view<3xf16> -> vector<3xf16>
+  %difference = vector.subf %a, %b : vector<3xf16>
+  vector.store %difference, %result[0] : vector<3xf16>, view<3xf16>
+  func.return
+}
+
+// ====
+
+func.def @subtract_f16_8(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %byte_offset = index.constant 0 : offset
+  %left = buffer.view %lhs[%byte_offset] : buffer -> view<8xf16>
+  %right = buffer.view %rhs[%byte_offset] : buffer -> view<8xf16>
+  %result = buffer.view %output[%byte_offset] : buffer -> view<8xf16>
+  %a = vector.load %left[0] : view<8xf16> -> vector<8xf16>
+  %b = vector.load %right[0] : view<8xf16> -> vector<8xf16>
+  %difference = vector.subf %a, %b : vector<8xf16>
+  vector.store %difference, %result[0] : vector<8xf16>, view<8xf16>
+  func.return
+}
+
+// ====
+
+func.def @subtract_bf16_1(%lhs: bf16, %rhs: bf16) -> (bf16) {
+  %difference = scalar.subf %lhs, %rhs : bf16
+  func.return %difference : bf16
+}
+
+// ====
+
+func.def @subtract_bf16_2(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %byte_offset = index.constant 0 : offset
+  %left = buffer.view %lhs[%byte_offset] : buffer -> view<2xbf16>
+  %right = buffer.view %rhs[%byte_offset] : buffer -> view<2xbf16>
+  %result = buffer.view %output[%byte_offset] : buffer -> view<2xbf16>
+  %a = vector.load %left[0] : view<2xbf16> -> vector<2xbf16>
+  %b = vector.load %right[0] : view<2xbf16> -> vector<2xbf16>
+  %difference = vector.subf %a, %b : vector<2xbf16>
+  vector.store %difference, %result[0] : vector<2xbf16>, view<2xbf16>
+  func.return
+}
+
+// ====
+
+func.def @subtract_bf16_3(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %byte_offset = index.constant 0 : offset
+  %left = buffer.view %lhs[%byte_offset] : buffer -> view<3xbf16>
+  %right = buffer.view %rhs[%byte_offset] : buffer -> view<3xbf16>
+  %result = buffer.view %output[%byte_offset] : buffer -> view<3xbf16>
+  %a = vector.load %left[0] : view<3xbf16> -> vector<3xbf16>
+  %b = vector.load %right[0] : view<3xbf16> -> vector<3xbf16>
+  %difference = vector.subf %a, %b : vector<3xbf16>
+  vector.store %difference, %result[0] : vector<3xbf16>, view<3xbf16>
+  func.return
+}
+
+// ====
+
+func.def @subtract_bf16_8(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %byte_offset = index.constant 0 : offset
+  %left = buffer.view %lhs[%byte_offset] : buffer -> view<8xbf16>
+  %right = buffer.view %rhs[%byte_offset] : buffer -> view<8xbf16>
+  %result = buffer.view %output[%byte_offset] : buffer -> view<8xbf16>
+  %a = vector.load %left[0] : view<8xbf16> -> vector<8xbf16>
+  %b = vector.load %right[0] : view<8xbf16> -> vector<8xbf16>
+  %difference = vector.subf %a, %b : vector<8xbf16>
+  vector.store %difference, %result[0] : vector<8xbf16>, view<8xbf16>
+  func.return
+}

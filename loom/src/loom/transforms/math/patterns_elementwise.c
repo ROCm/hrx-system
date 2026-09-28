@@ -835,6 +835,13 @@ static void loom_math_legalize_binary_source_initialize(
       out_source->lane_builders = &kScalarLaneBuilders;
       out_source->binary_build = loom_scalar_addf_build;
       return;
+    case LOOM_OP_SCALAR_SUBF:
+      out_source->lhs = loom_scalar_subf_lhs(op);
+      out_source->rhs = loom_scalar_subf_rhs(op);
+      out_source->fastmath_flags = loom_scalar_subf_fastmath(op);
+      out_source->lane_builders = &kScalarLaneBuilders;
+      out_source->binary_build = loom_scalar_subf_build;
+      return;
     case LOOM_OP_SCALAR_MULF:
       out_source->lhs = loom_scalar_mulf_lhs(op);
       out_source->rhs = loom_scalar_mulf_rhs(op);
@@ -848,6 +855,13 @@ static void loom_math_legalize_binary_source_initialize(
       out_source->fastmath_flags = loom_vector_addf_fastmath(op);
       out_source->lane_builders = &kVectorLaneBuilders;
       out_source->binary_build = loom_vector_addf_build;
+      return;
+    case LOOM_OP_VECTOR_SUBF:
+      out_source->lhs = loom_vector_subf_lhs(op);
+      out_source->rhs = loom_vector_subf_rhs(op);
+      out_source->fastmath_flags = loom_vector_subf_fastmath(op);
+      out_source->lane_builders = &kVectorLaneBuilders;
+      out_source->binary_build = loom_vector_subf_build;
       return;
     case LOOM_OP_VECTOR_MULF:
       out_source->lhs = loom_vector_mulf_lhs(op);
@@ -927,8 +941,8 @@ static iree_status_t loom_math_legalize_build_widen_f32_operand(
                                        source->location, out_value);
 }
 
-// Addition and multiplication of f16/bf16 operands round correctly through IEEE
-// f32 arithmetic with gradual underflow.
+// Addition, subtraction and multiplication of f16/bf16 operands round correctly
+// through IEEE f32 arithmetic with gradual underflow.
 // Other arithmetic requires its own proof against intermediate rounding.
 static iree_status_t loom_math_legalize_build_widen_f32_round(
     loom_builder_t* builder, const loom_math_legalize_recipe_context_t* context,

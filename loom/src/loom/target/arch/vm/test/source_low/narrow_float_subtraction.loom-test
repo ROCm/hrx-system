@@ -1,0 +1,354 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/narrow_float_subtraction.loom-test
+// RUN: emit source-low target=vm:core output=low
+
+func.def @subtract_f16_1(%lhs: f16, %rhs: f16) -> (f16) {
+  %difference = scalar.subf %lhs, %rhs : f16
+  func.return %difference : f16
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @subtract_f16_1(%lhs: reg<vm.value : f16>, %rhs: reg<vm.value : f16>) -> (reg<vm.value : f16>) asm {
+  %11 = conversion.float.extend %lhs, "f16.to.f32" : reg<vm.value : f32>
+  %12 = conversion.float.extend %rhs, "f16.to.f32" : reg<vm.value : f32>
+  %13 = float.sub.f32 %11, %12
+  %difference = conversion.float.truncate %13, "f32.to.f16" : reg<vm.value : f16>
+  return %difference
+}
+
+// ====
+
+func.def @subtract_f16_2(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %byte_offset = index.constant 0 : offset
+  %left = buffer.view %lhs[%byte_offset] : buffer -> view<2xf16>
+  %right = buffer.view %rhs[%byte_offset] : buffer -> view<2xf16>
+  %result = buffer.view %output[%byte_offset] : buffer -> view<2xf16>
+  %a = vector.load %left[0] : view<2xf16> -> vector<2xf16>
+  %b = vector.load %right[0] : view<2xf16> -> vector<2xf16>
+  %difference = vector.subf %a, %b : vector<2xf16>
+  vector.store %difference, %result[0] : vector<2xf16>, view<2xf16>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @subtract_f16_2(%left: reg<vm.ref : buffer>, %right: reg<vm.ref : buffer>, %result: reg<vm.ref : buffer>) asm {
+  %39 = constant.i64 0
+  %40 = buffer.load %left, %39, %39, 0, "i16.x1" : reg<vm.value : f16>
+  %41 = constant.i64 2
+  %42 = buffer.load %left, %41, %41, 0, "i16.x1" : reg<vm.value : f16>
+  %44 = buffer.load %right, %39, %39, 0, "i16.x1" : reg<vm.value : f16>
+  %46 = buffer.load %right, %41, %41, 0, "i16.x1" : reg<vm.value : f16>
+  %47 = conversion.float.extend %40, "f16.to.f32" : reg<vm.value : f32>
+  %48 = conversion.float.extend %44, "f16.to.f32" : reg<vm.value : f32>
+  %49 = float.sub.f32 %47, %48
+  %50 = conversion.float.truncate %49, "f32.to.f16" : reg<vm.value : f16>
+  %51 = conversion.float.extend %42, "f16.to.f32" : reg<vm.value : f32>
+  %52 = conversion.float.extend %46, "f16.to.f32" : reg<vm.value : f32>
+  %53 = float.sub.f32 %51, %52
+  %54 = conversion.float.truncate %53, "f32.to.f16" : reg<vm.value : f16>
+  buffer.store %result, %39, %39, %50, 0, "i16.x1"
+  buffer.store %result, %41, %41, %54, 0, "i16.x1"
+  return
+}
+
+// ====
+
+func.def @subtract_f16_3(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %byte_offset = index.constant 0 : offset
+  %left = buffer.view %lhs[%byte_offset] : buffer -> view<3xf16>
+  %right = buffer.view %rhs[%byte_offset] : buffer -> view<3xf16>
+  %result = buffer.view %output[%byte_offset] : buffer -> view<3xf16>
+  %a = vector.load %left[0] : view<3xf16> -> vector<3xf16>
+  %b = vector.load %right[0] : view<3xf16> -> vector<3xf16>
+  %difference = vector.subf %a, %b : vector<3xf16>
+  vector.store %difference, %result[0] : vector<3xf16>, view<3xf16>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @subtract_f16_3(%left: reg<vm.ref : buffer>, %right: reg<vm.ref : buffer>, %result: reg<vm.ref : buffer>) asm {
+  %49 = constant.i64 0
+  %50 = buffer.load %left, %49, %49, 0, "i16.x1" : reg<vm.value : f16>
+  %51 = constant.i64 2
+  %52 = buffer.load %left, %51, %51, 0, "i16.x1" : reg<vm.value : f16>
+  %53 = constant.i64 4
+  %54 = buffer.load %left, %53, %53, 0, "i16.x1" : reg<vm.value : f16>
+  %56 = buffer.load %right, %49, %49, 0, "i16.x1" : reg<vm.value : f16>
+  %58 = buffer.load %right, %51, %51, 0, "i16.x1" : reg<vm.value : f16>
+  %60 = buffer.load %right, %53, %53, 0, "i16.x1" : reg<vm.value : f16>
+  %61 = conversion.float.extend %50, "f16.to.f32" : reg<vm.value : f32>
+  %62 = conversion.float.extend %56, "f16.to.f32" : reg<vm.value : f32>
+  %63 = float.sub.f32 %61, %62
+  %64 = conversion.float.truncate %63, "f32.to.f16" : reg<vm.value : f16>
+  %65 = conversion.float.extend %52, "f16.to.f32" : reg<vm.value : f32>
+  %66 = conversion.float.extend %58, "f16.to.f32" : reg<vm.value : f32>
+  %67 = float.sub.f32 %65, %66
+  %68 = conversion.float.truncate %67, "f32.to.f16" : reg<vm.value : f16>
+  %69 = conversion.float.extend %54, "f16.to.f32" : reg<vm.value : f32>
+  %70 = conversion.float.extend %60, "f16.to.f32" : reg<vm.value : f32>
+  %71 = float.sub.f32 %69, %70
+  %72 = conversion.float.truncate %71, "f32.to.f16" : reg<vm.value : f16>
+  buffer.store %result, %49, %49, %64, 0, "i16.x1"
+  buffer.store %result, %51, %51, %68, 0, "i16.x1"
+  buffer.store %result, %53, %53, %72, 0, "i16.x1"
+  return
+}
+
+// ====
+
+func.def @subtract_f16_8(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %byte_offset = index.constant 0 : offset
+  %left = buffer.view %lhs[%byte_offset] : buffer -> view<8xf16>
+  %right = buffer.view %rhs[%byte_offset] : buffer -> view<8xf16>
+  %result = buffer.view %output[%byte_offset] : buffer -> view<8xf16>
+  %a = vector.load %left[0] : view<8xf16> -> vector<8xf16>
+  %b = vector.load %right[0] : view<8xf16> -> vector<8xf16>
+  %difference = vector.subf %a, %b : vector<8xf16>
+  vector.store %difference, %result[0] : vector<8xf16>, view<8xf16>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @subtract_f16_8(%left: reg<vm.ref : buffer>, %right: reg<vm.ref : buffer>, %result: reg<vm.ref : buffer>) asm {
+  %99 = constant.i64 0
+  %100 = buffer.load %left, %99, %99, 0, "i16.x1" : reg<vm.value : f16>
+  %101 = constant.i64 2
+  %102 = buffer.load %left, %101, %101, 0, "i16.x1" : reg<vm.value : f16>
+  %103 = constant.i64 4
+  %104 = buffer.load %left, %103, %103, 0, "i16.x1" : reg<vm.value : f16>
+  %105 = constant.i64 6
+  %106 = buffer.load %left, %105, %105, 0, "i16.x1" : reg<vm.value : f16>
+  %107 = constant.i64 8
+  %108 = buffer.load %left, %107, %107, 0, "i16.x1" : reg<vm.value : f16>
+  %109 = constant.i64 10
+  %110 = buffer.load %left, %109, %109, 0, "i16.x1" : reg<vm.value : f16>
+  %111 = constant.i64 12
+  %112 = buffer.load %left, %111, %111, 0, "i16.x1" : reg<vm.value : f16>
+  %113 = constant.i64 14
+  %114 = buffer.load %left, %113, %113, 0, "i16.x1" : reg<vm.value : f16>
+  %116 = buffer.load %right, %99, %99, 0, "i16.x1" : reg<vm.value : f16>
+  %118 = buffer.load %right, %101, %101, 0, "i16.x1" : reg<vm.value : f16>
+  %120 = buffer.load %right, %103, %103, 0, "i16.x1" : reg<vm.value : f16>
+  %122 = buffer.load %right, %105, %105, 0, "i16.x1" : reg<vm.value : f16>
+  %124 = buffer.load %right, %107, %107, 0, "i16.x1" : reg<vm.value : f16>
+  %126 = buffer.load %right, %109, %109, 0, "i16.x1" : reg<vm.value : f16>
+  %128 = buffer.load %right, %111, %111, 0, "i16.x1" : reg<vm.value : f16>
+  %130 = buffer.load %right, %113, %113, 0, "i16.x1" : reg<vm.value : f16>
+  %131 = conversion.float.extend %100, "f16.to.f32" : reg<vm.value : f32>
+  %132 = conversion.float.extend %116, "f16.to.f32" : reg<vm.value : f32>
+  %133 = float.sub.f32 %131, %132
+  %134 = conversion.float.truncate %133, "f32.to.f16" : reg<vm.value : f16>
+  %135 = conversion.float.extend %102, "f16.to.f32" : reg<vm.value : f32>
+  %136 = conversion.float.extend %118, "f16.to.f32" : reg<vm.value : f32>
+  %137 = float.sub.f32 %135, %136
+  %138 = conversion.float.truncate %137, "f32.to.f16" : reg<vm.value : f16>
+  %139 = conversion.float.extend %104, "f16.to.f32" : reg<vm.value : f32>
+  %140 = conversion.float.extend %120, "f16.to.f32" : reg<vm.value : f32>
+  %141 = float.sub.f32 %139, %140
+  %142 = conversion.float.truncate %141, "f32.to.f16" : reg<vm.value : f16>
+  %143 = conversion.float.extend %106, "f16.to.f32" : reg<vm.value : f32>
+  %144 = conversion.float.extend %122, "f16.to.f32" : reg<vm.value : f32>
+  %145 = float.sub.f32 %143, %144
+  %146 = conversion.float.truncate %145, "f32.to.f16" : reg<vm.value : f16>
+  %147 = conversion.float.extend %108, "f16.to.f32" : reg<vm.value : f32>
+  %148 = conversion.float.extend %124, "f16.to.f32" : reg<vm.value : f32>
+  %149 = float.sub.f32 %147, %148
+  %150 = conversion.float.truncate %149, "f32.to.f16" : reg<vm.value : f16>
+  %151 = conversion.float.extend %110, "f16.to.f32" : reg<vm.value : f32>
+  %152 = conversion.float.extend %126, "f16.to.f32" : reg<vm.value : f32>
+  %153 = float.sub.f32 %151, %152
+  %154 = conversion.float.truncate %153, "f32.to.f16" : reg<vm.value : f16>
+  %155 = conversion.float.extend %112, "f16.to.f32" : reg<vm.value : f32>
+  %156 = conversion.float.extend %128, "f16.to.f32" : reg<vm.value : f32>
+  %157 = float.sub.f32 %155, %156
+  %158 = conversion.float.truncate %157, "f32.to.f16" : reg<vm.value : f16>
+  %159 = conversion.float.extend %114, "f16.to.f32" : reg<vm.value : f32>
+  %160 = conversion.float.extend %130, "f16.to.f32" : reg<vm.value : f32>
+  %161 = float.sub.f32 %159, %160
+  %162 = conversion.float.truncate %161, "f32.to.f16" : reg<vm.value : f16>
+  buffer.store %result, %99, %99, %134, 0, "i16.x1"
+  buffer.store %result, %101, %101, %138, 0, "i16.x1"
+  buffer.store %result, %103, %103, %142, 0, "i16.x1"
+  buffer.store %result, %105, %105, %146, 0, "i16.x1"
+  buffer.store %result, %107, %107, %150, 0, "i16.x1"
+  buffer.store %result, %109, %109, %154, 0, "i16.x1"
+  buffer.store %result, %111, %111, %158, 0, "i16.x1"
+  buffer.store %result, %113, %113, %162, 0, "i16.x1"
+  return
+}
+
+// ====
+
+func.def @subtract_bf16_1(%lhs: bf16, %rhs: bf16) -> (bf16) {
+  %difference = scalar.subf %lhs, %rhs : bf16
+  func.return %difference : bf16
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @subtract_bf16_1(%lhs: reg<vm.value : bf16>, %rhs: reg<vm.value : bf16>) -> (reg<vm.value : bf16>) asm {
+  %11 = conversion.float.extend %lhs, "bf16.to.f32" : reg<vm.value : f32>
+  %12 = conversion.float.extend %rhs, "bf16.to.f32" : reg<vm.value : f32>
+  %13 = float.sub.f32 %11, %12
+  %difference = conversion.float.truncate %13, "f32.to.bf16" : reg<vm.value : bf16>
+  return %difference
+}
+
+// ====
+
+func.def @subtract_bf16_2(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %byte_offset = index.constant 0 : offset
+  %left = buffer.view %lhs[%byte_offset] : buffer -> view<2xbf16>
+  %right = buffer.view %rhs[%byte_offset] : buffer -> view<2xbf16>
+  %result = buffer.view %output[%byte_offset] : buffer -> view<2xbf16>
+  %a = vector.load %left[0] : view<2xbf16> -> vector<2xbf16>
+  %b = vector.load %right[0] : view<2xbf16> -> vector<2xbf16>
+  %difference = vector.subf %a, %b : vector<2xbf16>
+  vector.store %difference, %result[0] : vector<2xbf16>, view<2xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @subtract_bf16_2(%left: reg<vm.ref : buffer>, %right: reg<vm.ref : buffer>, %result: reg<vm.ref : buffer>) asm {
+  %39 = constant.i64 0
+  %40 = buffer.load %left, %39, %39, 0, "i16.x1" : reg<vm.value : bf16>
+  %41 = constant.i64 2
+  %42 = buffer.load %left, %41, %41, 0, "i16.x1" : reg<vm.value : bf16>
+  %44 = buffer.load %right, %39, %39, 0, "i16.x1" : reg<vm.value : bf16>
+  %46 = buffer.load %right, %41, %41, 0, "i16.x1" : reg<vm.value : bf16>
+  %47 = conversion.float.extend %40, "bf16.to.f32" : reg<vm.value : f32>
+  %48 = conversion.float.extend %44, "bf16.to.f32" : reg<vm.value : f32>
+  %49 = float.sub.f32 %47, %48
+  %50 = conversion.float.truncate %49, "f32.to.bf16" : reg<vm.value : bf16>
+  %51 = conversion.float.extend %42, "bf16.to.f32" : reg<vm.value : f32>
+  %52 = conversion.float.extend %46, "bf16.to.f32" : reg<vm.value : f32>
+  %53 = float.sub.f32 %51, %52
+  %54 = conversion.float.truncate %53, "f32.to.bf16" : reg<vm.value : bf16>
+  buffer.store %result, %39, %39, %50, 0, "i16.x1"
+  buffer.store %result, %41, %41, %54, 0, "i16.x1"
+  return
+}
+
+// ====
+
+func.def @subtract_bf16_3(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %byte_offset = index.constant 0 : offset
+  %left = buffer.view %lhs[%byte_offset] : buffer -> view<3xbf16>
+  %right = buffer.view %rhs[%byte_offset] : buffer -> view<3xbf16>
+  %result = buffer.view %output[%byte_offset] : buffer -> view<3xbf16>
+  %a = vector.load %left[0] : view<3xbf16> -> vector<3xbf16>
+  %b = vector.load %right[0] : view<3xbf16> -> vector<3xbf16>
+  %difference = vector.subf %a, %b : vector<3xbf16>
+  vector.store %difference, %result[0] : vector<3xbf16>, view<3xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @subtract_bf16_3(%left: reg<vm.ref : buffer>, %right: reg<vm.ref : buffer>, %result: reg<vm.ref : buffer>) asm {
+  %49 = constant.i64 0
+  %50 = buffer.load %left, %49, %49, 0, "i16.x1" : reg<vm.value : bf16>
+  %51 = constant.i64 2
+  %52 = buffer.load %left, %51, %51, 0, "i16.x1" : reg<vm.value : bf16>
+  %53 = constant.i64 4
+  %54 = buffer.load %left, %53, %53, 0, "i16.x1" : reg<vm.value : bf16>
+  %56 = buffer.load %right, %49, %49, 0, "i16.x1" : reg<vm.value : bf16>
+  %58 = buffer.load %right, %51, %51, 0, "i16.x1" : reg<vm.value : bf16>
+  %60 = buffer.load %right, %53, %53, 0, "i16.x1" : reg<vm.value : bf16>
+  %61 = conversion.float.extend %50, "bf16.to.f32" : reg<vm.value : f32>
+  %62 = conversion.float.extend %56, "bf16.to.f32" : reg<vm.value : f32>
+  %63 = float.sub.f32 %61, %62
+  %64 = conversion.float.truncate %63, "f32.to.bf16" : reg<vm.value : bf16>
+  %65 = conversion.float.extend %52, "bf16.to.f32" : reg<vm.value : f32>
+  %66 = conversion.float.extend %58, "bf16.to.f32" : reg<vm.value : f32>
+  %67 = float.sub.f32 %65, %66
+  %68 = conversion.float.truncate %67, "f32.to.bf16" : reg<vm.value : bf16>
+  %69 = conversion.float.extend %54, "bf16.to.f32" : reg<vm.value : f32>
+  %70 = conversion.float.extend %60, "bf16.to.f32" : reg<vm.value : f32>
+  %71 = float.sub.f32 %69, %70
+  %72 = conversion.float.truncate %71, "f32.to.bf16" : reg<vm.value : bf16>
+  buffer.store %result, %49, %49, %64, 0, "i16.x1"
+  buffer.store %result, %51, %51, %68, 0, "i16.x1"
+  buffer.store %result, %53, %53, %72, 0, "i16.x1"
+  return
+}
+
+// ====
+
+func.def @subtract_bf16_8(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %byte_offset = index.constant 0 : offset
+  %left = buffer.view %lhs[%byte_offset] : buffer -> view<8xbf16>
+  %right = buffer.view %rhs[%byte_offset] : buffer -> view<8xbf16>
+  %result = buffer.view %output[%byte_offset] : buffer -> view<8xbf16>
+  %a = vector.load %left[0] : view<8xbf16> -> vector<8xbf16>
+  %b = vector.load %right[0] : view<8xbf16> -> vector<8xbf16>
+  %difference = vector.subf %a, %b : vector<8xbf16>
+  vector.store %difference, %result[0] : vector<8xbf16>, view<8xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<vm.core> abi(vm_function) @subtract_bf16_8(%left: reg<vm.ref : buffer>, %right: reg<vm.ref : buffer>, %result: reg<vm.ref : buffer>) asm {
+  %99 = constant.i64 0
+  %100 = buffer.load %left, %99, %99, 0, "i16.x1" : reg<vm.value : bf16>
+  %101 = constant.i64 2
+  %102 = buffer.load %left, %101, %101, 0, "i16.x1" : reg<vm.value : bf16>
+  %103 = constant.i64 4
+  %104 = buffer.load %left, %103, %103, 0, "i16.x1" : reg<vm.value : bf16>
+  %105 = constant.i64 6
+  %106 = buffer.load %left, %105, %105, 0, "i16.x1" : reg<vm.value : bf16>
+  %107 = constant.i64 8
+  %108 = buffer.load %left, %107, %107, 0, "i16.x1" : reg<vm.value : bf16>
+  %109 = constant.i64 10
+  %110 = buffer.load %left, %109, %109, 0, "i16.x1" : reg<vm.value : bf16>
+  %111 = constant.i64 12
+  %112 = buffer.load %left, %111, %111, 0, "i16.x1" : reg<vm.value : bf16>
+  %113 = constant.i64 14
+  %114 = buffer.load %left, %113, %113, 0, "i16.x1" : reg<vm.value : bf16>
+  %116 = buffer.load %right, %99, %99, 0, "i16.x1" : reg<vm.value : bf16>
+  %118 = buffer.load %right, %101, %101, 0, "i16.x1" : reg<vm.value : bf16>
+  %120 = buffer.load %right, %103, %103, 0, "i16.x1" : reg<vm.value : bf16>
+  %122 = buffer.load %right, %105, %105, 0, "i16.x1" : reg<vm.value : bf16>
+  %124 = buffer.load %right, %107, %107, 0, "i16.x1" : reg<vm.value : bf16>
+  %126 = buffer.load %right, %109, %109, 0, "i16.x1" : reg<vm.value : bf16>
+  %128 = buffer.load %right, %111, %111, 0, "i16.x1" : reg<vm.value : bf16>
+  %130 = buffer.load %right, %113, %113, 0, "i16.x1" : reg<vm.value : bf16>
+  %131 = conversion.float.extend %100, "bf16.to.f32" : reg<vm.value : f32>
+  %132 = conversion.float.extend %116, "bf16.to.f32" : reg<vm.value : f32>
+  %133 = float.sub.f32 %131, %132
+  %134 = conversion.float.truncate %133, "f32.to.bf16" : reg<vm.value : bf16>
+  %135 = conversion.float.extend %102, "bf16.to.f32" : reg<vm.value : f32>
+  %136 = conversion.float.extend %118, "bf16.to.f32" : reg<vm.value : f32>
+  %137 = float.sub.f32 %135, %136
+  %138 = conversion.float.truncate %137, "f32.to.bf16" : reg<vm.value : bf16>
+  %139 = conversion.float.extend %104, "bf16.to.f32" : reg<vm.value : f32>
+  %140 = conversion.float.extend %120, "bf16.to.f32" : reg<vm.value : f32>
+  %141 = float.sub.f32 %139, %140
+  %142 = conversion.float.truncate %141, "f32.to.bf16" : reg<vm.value : bf16>
+  %143 = conversion.float.extend %106, "bf16.to.f32" : reg<vm.value : f32>
+  %144 = conversion.float.extend %122, "bf16.to.f32" : reg<vm.value : f32>
+  %145 = float.sub.f32 %143, %144
+  %146 = conversion.float.truncate %145, "f32.to.bf16" : reg<vm.value : bf16>
+  %147 = conversion.float.extend %108, "bf16.to.f32" : reg<vm.value : f32>
+  %148 = conversion.float.extend %124, "bf16.to.f32" : reg<vm.value : f32>
+  %149 = float.sub.f32 %147, %148
+  %150 = conversion.float.truncate %149, "f32.to.bf16" : reg<vm.value : bf16>
+  %151 = conversion.float.extend %110, "bf16.to.f32" : reg<vm.value : f32>
+  %152 = conversion.float.extend %126, "bf16.to.f32" : reg<vm.value : f32>
+  %153 = float.sub.f32 %151, %152
+  %154 = conversion.float.truncate %153, "f32.to.bf16" : reg<vm.value : bf16>
+  %155 = conversion.float.extend %112, "bf16.to.f32" : reg<vm.value : f32>
+  %156 = conversion.float.extend %128, "bf16.to.f32" : reg<vm.value : f32>
+  %157 = float.sub.f32 %155, %156
+  %158 = conversion.float.truncate %157, "f32.to.bf16" : reg<vm.value : bf16>
+  %159 = conversion.float.extend %114, "bf16.to.f32" : reg<vm.value : f32>
+  %160 = conversion.float.extend %130, "bf16.to.f32" : reg<vm.value : f32>
+  %161 = float.sub.f32 %159, %160
+  %162 = conversion.float.truncate %161, "f32.to.bf16" : reg<vm.value : bf16>
+  buffer.store %result, %99, %99, %134, 0, "i16.x1"
+  buffer.store %result, %101, %101, %138, 0, "i16.x1"
+  buffer.store %result, %103, %103, %142, 0, "i16.x1"
+  buffer.store %result, %105, %105, %146, 0, "i16.x1"
+  buffer.store %result, %107, %107, %150, 0, "i16.x1"
+  buffer.store %result, %109, %109, %154, 0, "i16.x1"
+  buffer.store %result, %111, %111, %158, 0, "i16.x1"
+  buffer.store %result, %113, %113, %162, 0, "i16.x1"
+  return
+}

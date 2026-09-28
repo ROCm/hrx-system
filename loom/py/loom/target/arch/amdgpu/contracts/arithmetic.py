@@ -3269,6 +3269,8 @@ def _packed_float_binary_rule(
     descriptor_key: str,
     type_pattern: TypePattern,
     diagnostic: GuardDiagnostic,
+    *,
+    negate_rhs: bool = False,
 ) -> DescriptorRule:
     descriptor = _descriptor(descriptor_key)
     return DescriptorRule(
@@ -3291,6 +3293,7 @@ def _packed_float_binary_rule(
                     "rhs": ValueRef.operand("rhs"),
                 },
                 results={"dst": ValueRef.result("result")},
+                immediates={"neg_lo": 2, "neg_hi": 2} if negate_rhs else {},
                 form=DescriptorEmitForm.PER_LANE,
             ),
         ),
@@ -3742,6 +3745,13 @@ def _rules() -> tuple[ContractCase, ...]:
                 _VEC_F16_PACKED_DIAGNOSTIC,
             ),
             _packed_float_binary_rule(
+                vector.vector_subf,
+                "amdgpu.v_pk_add_f16",
+                _VEC_F16_PACKED,
+                _VEC_F16_PACKED_DIAGNOSTIC,
+                negate_rhs=True,
+            ),
+            _packed_float_binary_rule(
                 vector.vector_mulf,
                 "amdgpu.v_pk_mul_f16",
                 _VEC_F16_PACKED,
@@ -3788,6 +3798,13 @@ def _rules() -> tuple[ContractCase, ...]:
                 "amdgpu.v_pk_add_bf16",
                 _VEC_BF16_PACKED,
                 _VEC_BF16_PACKED_DIAGNOSTIC,
+            ),
+            _packed_float_binary_rule(
+                vector.vector_subf,
+                "amdgpu.v_pk_add_bf16",
+                _VEC_BF16_PACKED,
+                _VEC_BF16_PACKED_DIAGNOSTIC,
+                negate_rhs=True,
             ),
             _packed_float_binary_rule(
                 vector.vector_mulf,

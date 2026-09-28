@@ -304,6 +304,33 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
         .shape_constraint_key = IREE_SVL("math.shape.aie2p_f32_add"),
         .form_constraint_key = IREE_SVL("math.op.native_vector_f32x64"),
     },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_SUBF,
+        .element_type = LOOM_SCALAR_TYPE_F32,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 1,
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_f32_sub"),
+        .form_constraint_key = IREE_SVL("math.op.promote_vector_f32x64"),
+    },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_SUBF,
+        .element_type = LOOM_SCALAR_TYPE_F32,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 16,
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_f32_sub"),
+        .form_constraint_key = IREE_SVL("math.op.promote_vector_f32x64"),
+    },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_SUBF,
+        .element_type = LOOM_SCALAR_TYPE_F32,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
+        .minimum_lane_count = 64,
+        .maximum_lane_count = 64,
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_f32_sub"),
+        .form_constraint_key = IREE_SVL("math.op.native_vector_f32x64"),
+    },
 };
 
 static bool loom_aie2p_math_query_matches_form(

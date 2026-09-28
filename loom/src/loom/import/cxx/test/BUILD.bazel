@@ -80,6 +80,7 @@ loom_check_test_suite(
         "locations.cxx-test",
         "loops.cxx-test",
         "macro_operators.cxx-test",
+        "narrow_float_subtraction.cxx-test",
         "offsetof.cxx-test",
         "offsetof_roundtrip.cxx-test",
         "opaque_pointers.cxx-test",

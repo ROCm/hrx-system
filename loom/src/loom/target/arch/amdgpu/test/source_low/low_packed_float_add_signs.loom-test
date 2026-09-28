@@ -1,0 +1,68 @@
+// RUN: emit amdgpu-native-words @packed_signs waits=none strategy=source
+
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @packed_signs(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
+  %sum = v_pk_add_f16 %lhs, %rhs
+  %difference = v_pk_add_f16 %lhs, %rhs {neg_lo = 2, neg_hi = 2}
+  %reverse = v_pk_add_f16 %lhs, %rhs {neg_lo = 1, neg_hi = 1}
+  %mixed = v_pk_add_f16 %lhs, %rhs {neg_lo = 3}
+  return
+}
+
+// ----
+0xD38F4002
+0x18020300
+0xD38F4202
+0x58020300
+0xD38F4102
+0x38020300
+0xD38F4000
+0x78020300
+0xBF810000
+
+// ====
+
+amdgpu.target<gfx1151> @target
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @packed_signs(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
+  %sum = v_pk_add_f16 %lhs, %rhs
+  %difference = v_pk_add_f16 %lhs, %rhs {neg_lo = 2, neg_hi = 2}
+  %reverse = v_pk_add_f16 %lhs, %rhs {neg_lo = 1, neg_hi = 1}
+  %mixed = v_pk_add_f16 %lhs, %rhs {neg_lo = 3}
+  return
+}
+
+// ----
+0xCC0F4002
+0x1A020300
+0xCC0F4202
+0x5A020300
+0xCC0F4102
+0x3A020300
+0xCC0F4000
+0x7A020300
+0xBFB00000
+
+// ====
+
+amdgpu.target<gfx1250> @target
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @packed_signs(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
+  %sum = v_pk_add_bf16 %lhs, %rhs
+  %difference = v_pk_add_bf16 %lhs, %rhs {neg_lo = 2, neg_hi = 2}
+  %reverse = v_pk_add_bf16 %lhs, %rhs {neg_lo = 1, neg_hi = 1}
+  %mixed = v_pk_add_bf16 %lhs, %rhs {neg_lo = 3}
+  return
+}
+
+// ----
+0xCC234002
+0x1A020300
+0xCC234202
+0x5A020300
+0xCC234102
+0x3A020300
+0xCC234000
+0x7A020300
+0xBFB00000

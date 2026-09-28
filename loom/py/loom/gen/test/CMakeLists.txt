@@ -42,6 +42,17 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    narrow_float_subtraction
+  MAIN
+    "narrow_float_subtraction.py"
+  SRCS
+    "narrow_float_subtraction.py"
+  DEPS
+    loom::py::loom::gen::test::kernel_fixture
+)
+
+iree_py_library(
+  NAME
     predicate_bitwise
   MAIN
     "predicate_bitwise.py"

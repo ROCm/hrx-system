@@ -40,6 +40,15 @@ iree_py_binary(
 )
 
 iree_py_binary(
+    name = "narrow_float_subtraction",
+    testonly = True,
+    srcs = ["narrow_float_subtraction.py"],
+    main = "narrow_float_subtraction.py",
+    visibility = ["//loom/src/loom/tooling/target/amdgpu/test/cxx:__pkg__"],
+    deps = [":kernel_fixture"],
+)
+
+iree_py_binary(
     name = "predicate_bitwise",
     testonly = True,
     srcs = ["predicate_bitwise.py"],

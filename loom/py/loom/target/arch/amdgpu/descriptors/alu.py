@@ -4565,13 +4565,45 @@ def _v_pk_fma_f16_literal_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     )
 
 
-def _v_pk_add_f16_overlay() -> AmdgpuDescriptorOverlay:
-    return _v_pk_binary_overlay(
-        descriptor_key="amdgpu.v_pk_add_f16",
-        instruction_name="V_PK_ADD_F16",
-        mnemonic="v_pk_add_f16",
-        semantic_tag="float.add.pk2.f16",
+def _v_pk_float_add_overlay(element_type: str) -> AmdgpuDescriptorOverlay:
+    overlay = _v_pk_binary_overlay(
+        descriptor_key=f"amdgpu.v_pk_add_{element_type}",
+        instruction_name=f"V_PK_ADD_{element_type.upper()}",
+        mnemonic=f"v_pk_add_{element_type}",
+        semantic_tag=f"float.add.pk2.{element_type}",
     )
+    return replace(
+        overlay,
+        immediate_fields=("NEG", "NEG_HI"),
+        immediates=tuple(
+            Immediate(
+                name,
+                ImmediateKind.UNSIGNED,
+                flags=(ImmediateFlag.DEFAULT_VALUE,),
+                bit_width=3,
+                unsigned_max=3,
+                default_value=0,
+            )
+            for name in ("neg_lo", "neg_hi")
+        ),
+        asm_forms=_asm(
+            results=("dst",),
+            operands=("lhs", "rhs"),
+            immediates=("neg_lo", "neg_hi"),
+            named_immediates=True,
+            native_assembly_values=(
+                _native_result("dst"),
+                _native_operand("lhs"),
+                _native_operand("rhs"),
+                _native_amdgpu_named_bit_list_immediate("neg_lo", 2),
+                _native_amdgpu_named_bit_list_immediate("neg_hi", 2),
+            ),
+        ),
+    )
+
+
+def _v_pk_add_f16_overlay() -> AmdgpuDescriptorOverlay:
+    return _v_pk_float_add_overlay("f16")
 
 
 def _v_pk_minnum_f16_overlay(
@@ -4637,12 +4669,7 @@ def _v_pk_mul_bf16_overlay() -> AmdgpuDescriptorOverlay:
 
 
 def _v_pk_add_bf16_overlay() -> AmdgpuDescriptorOverlay:
-    return _v_pk_binary_overlay(
-        descriptor_key="amdgpu.v_pk_add_bf16",
-        instruction_name="V_PK_ADD_BF16",
-        mnemonic="v_pk_add_bf16",
-        semantic_tag="float.add.pk2.bf16",
-    )
+    return _v_pk_float_add_overlay("bf16")
 
 
 def _v_pk_fma_bf16_overlay() -> AmdgpuDescriptorOverlay:

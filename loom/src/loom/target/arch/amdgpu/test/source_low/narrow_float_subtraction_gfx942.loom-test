@@ -1,0 +1,347 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/narrow_float_subtraction.loom-test
+// RUN: emit source-low target=amdgpu:gfx942 output=low
+
+func.def @subtract_f16_1(%lhs: f16, %rhs: f16) -> (f16) {
+  %difference = scalar.subf %lhs, %rhs : f16
+  func.return %difference : f16
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @subtract_f16_1(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %difference = v_sub_f16 %lhs, %rhs
+  %8 = v_bfe_u32_offset_0_width_16_low16 %difference
+  return %8
+}
+
+// ====
+
+func.def @subtract_f16_2(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %byte_offset = index.constant 0 : offset
+  %left = buffer.view %lhs[%byte_offset] : buffer -> view<2xf16>
+  %right = buffer.view %rhs[%byte_offset] : buffer -> view<2xf16>
+  %result = buffer.view %output[%byte_offset] : buffer -> view<2xf16>
+  %a = vector.load %left[0] : view<2xf16> -> vector<2xf16>
+  %b = vector.load %right[0] : view<2xf16> -> vector<2xf16>
+  %difference = vector.subf %a, %b : vector<2xf16>
+  vector.store %difference, %result[0] : vector<2xf16>, view<2xf16>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @subtract_f16_2() asm {
+  %left = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %right = resource<hal_binding> {extent = 4, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result = resource<hal_binding> {extent = 4, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %13 = v_mov_b32 0
+  %a = global_load_dword_saddr %13, %left
+  %b = global_load_dword_saddr %13, %right
+  %difference = v_pk_add_f16 %a, %b {neg_lo = 2, neg_hi = 2}
+  global_store_dword_saddr %13, %difference, %result
+  return
+}
+
+// ====
+
+func.def @subtract_f16_3(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %byte_offset = index.constant 0 : offset
+  %left = buffer.view %lhs[%byte_offset] : buffer -> view<3xf16>
+  %right = buffer.view %rhs[%byte_offset] : buffer -> view<3xf16>
+  %result = buffer.view %output[%byte_offset] : buffer -> view<3xf16>
+  %a = vector.load %left[0] : view<3xf16> -> vector<3xf16>
+  %b = vector.load %right[0] : view<3xf16> -> vector<3xf16>
+  %difference = vector.subf %a, %b : vector<3xf16>
+  vector.store %difference, %result[0] : vector<3xf16>, view<3xf16>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @subtract_f16_3() asm {
+  %left = resource<hal_binding> {extent = 6, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %right = resource<hal_binding> {extent = 6, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result = resource<hal_binding> {extent = 6, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %17 = v_mov_b32 0
+  %18 = global_load_dword_saddr %17, %left
+  %20 = global_load_ushort_saddr %17, %left {offset = 4}
+  %23 = v_cvt_f32_f16 %18
+  %25 = v_lshrrev_b32_src0_inline %18, 16
+  %26 = v_cvt_f32_f16 %25
+  %28 = v_cvt_f32_f16 %20
+  %31 = global_load_dword_saddr %17, %right
+  %33 = global_load_ushort_saddr %17, %right {offset = 4}
+  %36 = v_cvt_f32_f16 %31
+  %38 = v_lshrrev_b32_src0_inline %31, 16
+  %39 = v_cvt_f32_f16 %38
+  %41 = v_cvt_f32_f16 %33
+  %45 = v_sub_f32 %23, %36
+  %48 = v_sub_f32 %26, %39
+  %51 = v_sub_f32 %28, %41
+  %54 = v_cvt_f16_f32 %45
+  %55 = v_bfe_u32_offset_0_width_16_low16 %54
+  %57 = v_cvt_f16_f32 %48
+  %58 = v_bfe_u32_offset_0_width_16_low16 %57
+  %59 = v_lshl_add_u32_shift_imm %58, %55, 16
+  %61 = v_cvt_f16_f32 %51
+  %62 = v_bfe_u32_offset_0_width_16_low16 %61
+  global_store_dword_saddr %17, %59, %result
+  global_store_short_saddr %17, %62, %result {offset = 4}
+  return
+}
+
+// ====
+
+func.def @subtract_f16_8(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %byte_offset = index.constant 0 : offset
+  %left = buffer.view %lhs[%byte_offset] : buffer -> view<8xf16>
+  %right = buffer.view %rhs[%byte_offset] : buffer -> view<8xf16>
+  %result = buffer.view %output[%byte_offset] : buffer -> view<8xf16>
+  %a = vector.load %left[0] : view<8xf16> -> vector<8xf16>
+  %b = vector.load %right[0] : view<8xf16> -> vector<8xf16>
+  %difference = vector.subf %a, %b : vector<8xf16>
+  vector.store %difference, %result[0] : vector<8xf16>, view<8xf16>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @subtract_f16_8() asm {
+  %left = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %right = resource<hal_binding> {extent = 16, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result = resource<hal_binding> {extent = 16, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %13 = v_mov_b32 0
+  %a = global_load_dwordx4_saddr %13, %left
+  %b = global_load_dwordx4_saddr %13, %right
+  %17 = slice %a[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %18 = slice %b[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %19 = v_pk_add_f16 %17, %18 {neg_lo = 2, neg_hi = 2}
+  %20 = slice %a[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %21 = slice %b[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %22 = v_pk_add_f16 %20, %21 {neg_lo = 2, neg_hi = 2}
+  %23 = slice %a[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %24 = slice %b[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %25 = v_pk_add_f16 %23, %24 {neg_lo = 2, neg_hi = 2}
+  %26 = slice %a[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %27 = slice %b[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %28 = v_pk_add_f16 %26, %27 {neg_lo = 2, neg_hi = 2}
+  %difference = concat(%19, %22, %25, %28) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_dwordx4_saddr %13, %difference, %result
+  return
+}
+
+// ====
+
+func.def @subtract_bf16_1(%lhs: bf16, %rhs: bf16) -> (bf16) {
+  %difference = scalar.subf %lhs, %rhs : bf16
+  func.return %difference : bf16
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @subtract_bf16_1(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %11 = v_lshlrev_b32_src0_16_low16 %lhs
+  %12 = v_lshlrev_b32_src0_16_low16 %rhs
+  %13 = v_sub_f32 %11, %12
+  %14 = v_lshrrev_b32_src0_inline %13, 16
+  %15 = v_and_b32_lit %14, 1
+  %16 = v_add_u32_lit %15, 32767
+  %17 = v_add_u32 %13, %16
+  %difference = v_lshrrev_b32_src0_inline %17, 16
+  return %difference
+}
+
+// ====
+
+func.def @subtract_bf16_2(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %byte_offset = index.constant 0 : offset
+  %left = buffer.view %lhs[%byte_offset] : buffer -> view<2xbf16>
+  %right = buffer.view %rhs[%byte_offset] : buffer -> view<2xbf16>
+  %result = buffer.view %output[%byte_offset] : buffer -> view<2xbf16>
+  %a = vector.load %left[0] : view<2xbf16> -> vector<2xbf16>
+  %b = vector.load %right[0] : view<2xbf16> -> vector<2xbf16>
+  %difference = vector.subf %a, %b : vector<2xbf16>
+  vector.store %difference, %result[0] : vector<2xbf16>, view<2xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @subtract_bf16_2() asm {
+  %left = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %right = resource<hal_binding> {extent = 4, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result = resource<hal_binding> {extent = 4, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %17 = v_mov_b32 0
+  %a = global_load_dword_saddr %17, %left
+  %19 = v_lshlrev_b32_src0_inline %a, 16
+  %20 = v_and_b32_lit %a, 4294901760
+  %b = global_load_dword_saddr %17, %right
+  %24 = v_lshlrev_b32_src0_inline %b, 16
+  %25 = v_and_b32_lit %b, 4294901760
+  %29 = v_sub_f32 %19, %24
+  %32 = v_sub_f32 %20, %25
+  %36 = v_lshrrev_b32_src0_inline %29, 16
+  %37 = v_and_b32_src0_inline %36, 1
+  %38 = v_add_u32_lit %37, 32767
+  %39 = v_add_u32 %29, %38
+  %40 = v_lshrrev_b32_src0_inline %39, 16
+  %41 = v_lshrrev_b32_src0_inline %32, 16
+  %42 = v_and_b32_src0_inline %41, 1
+  %43 = v_add_u32_lit %42, 32767
+  %44 = v_add_u32 %32, %43
+  %45 = v_lshrrev_b32_src0_inline %44, 16
+  %difference = v_cvt_pk_u16_u32 %40, %45
+  global_store_dword_saddr %17, %difference, %result
+  return
+}
+
+// ====
+
+func.def @subtract_bf16_3(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %byte_offset = index.constant 0 : offset
+  %left = buffer.view %lhs[%byte_offset] : buffer -> view<3xbf16>
+  %right = buffer.view %rhs[%byte_offset] : buffer -> view<3xbf16>
+  %result = buffer.view %output[%byte_offset] : buffer -> view<3xbf16>
+  %a = vector.load %left[0] : view<3xbf16> -> vector<3xbf16>
+  %b = vector.load %right[0] : view<3xbf16> -> vector<3xbf16>
+  %difference = vector.subf %a, %b : vector<3xbf16>
+  vector.store %difference, %result[0] : vector<3xbf16>, view<3xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @subtract_bf16_3() asm {
+  %left = resource<hal_binding> {extent = 6, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %right = resource<hal_binding> {extent = 6, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result = resource<hal_binding> {extent = 6, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %17 = v_mov_b32 0
+  %18 = global_load_dword_saddr %17, %left
+  %20 = global_load_ushort_saddr %17, %left {offset = 4}
+  %23 = v_lshlrev_b32_src0_inline %18, 16
+  %25 = v_and_b32_lit %18, 4294901760
+  %27 = v_lshlrev_b32_src0_inline %20, 16
+  %30 = global_load_dword_saddr %17, %right
+  %32 = global_load_ushort_saddr %17, %right {offset = 4}
+  %35 = v_lshlrev_b32_src0_inline %30, 16
+  %37 = v_and_b32_lit %30, 4294901760
+  %39 = v_lshlrev_b32_src0_inline %32, 16
+  %43 = v_sub_f32 %23, %35
+  %46 = v_sub_f32 %25, %37
+  %49 = v_sub_f32 %27, %39
+  %53 = v_lshrrev_b32_src0_inline %43, 16
+  %54 = v_and_b32_src0_inline %53, 1
+  %55 = v_add_u32_lit %54, 32767
+  %56 = v_add_u32 %43, %55
+  %57 = v_lshrrev_b32_src0_inline %56, 16
+  %58 = v_lshrrev_b32_src0_inline %46, 16
+  %59 = v_and_b32_src0_inline %58, 1
+  %60 = v_add_u32_lit %59, 32767
+  %61 = v_add_u32 %46, %60
+  %62 = v_lshrrev_b32_src0_inline %61, 16
+  %63 = v_cvt_pk_u16_u32 %57, %62
+  %65 = v_lshrrev_b32_src0_inline %49, 16
+  %66 = v_and_b32_src0_inline %65, 1
+  %67 = v_add_u32_lit %66, 32767
+  %68 = v_add_u32 %49, %67
+  %69 = v_lshrrev_b32_src0_inline %68, 16
+  global_store_dword_saddr %17, %63, %result
+  global_store_short_saddr %17, %69, %result {offset = 4}
+  return
+}
+
+// ====
+
+func.def @subtract_bf16_8(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %byte_offset = index.constant 0 : offset
+  %left = buffer.view %lhs[%byte_offset] : buffer -> view<8xbf16>
+  %right = buffer.view %rhs[%byte_offset] : buffer -> view<8xbf16>
+  %result = buffer.view %output[%byte_offset] : buffer -> view<8xbf16>
+  %a = vector.load %left[0] : view<8xbf16> -> vector<8xbf16>
+  %b = vector.load %right[0] : view<8xbf16> -> vector<8xbf16>
+  %difference = vector.subf %a, %b : vector<8xbf16>
+  vector.store %difference, %result[0] : vector<8xbf16>, view<8xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @subtract_bf16_8() asm {
+  %left = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %right = resource<hal_binding> {extent = 16, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result = resource<hal_binding> {extent = 16, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %17 = v_mov_b32 0
+  %a = global_load_dwordx4_saddr %17, %left
+  %19 = slice %a[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %20 = v_lshlrev_b32_src0_inline %19, 16
+  %22 = v_and_b32_lit %19, 4294901760
+  %23 = slice %a[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %24 = v_lshlrev_b32_src0_inline %23, 16
+  %26 = v_and_b32_lit %23, 4294901760
+  %27 = slice %a[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %28 = v_lshlrev_b32_src0_inline %27, 16
+  %30 = v_and_b32_lit %27, 4294901760
+  %31 = slice %a[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %32 = v_lshlrev_b32_src0_inline %31, 16
+  %34 = v_and_b32_lit %31, 4294901760
+  %b = global_load_dwordx4_saddr %17, %right
+  %38 = slice %b[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %39 = v_lshlrev_b32_src0_inline %38, 16
+  %41 = v_and_b32_lit %38, 4294901760
+  %42 = slice %b[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %43 = v_lshlrev_b32_src0_inline %42, 16
+  %45 = v_and_b32_lit %42, 4294901760
+  %46 = slice %b[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %47 = v_lshlrev_b32_src0_inline %46, 16
+  %49 = v_and_b32_lit %46, 4294901760
+  %50 = slice %b[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %51 = v_lshlrev_b32_src0_inline %50, 16
+  %53 = v_and_b32_lit %50, 4294901760
+  %57 = v_sub_f32 %20, %39
+  %60 = v_sub_f32 %22, %41
+  %63 = v_sub_f32 %24, %43
+  %66 = v_sub_f32 %26, %45
+  %69 = v_sub_f32 %28, %47
+  %72 = v_sub_f32 %30, %49
+  %75 = v_sub_f32 %32, %51
+  %78 = v_sub_f32 %34, %53
+  %82 = v_lshrrev_b32_src0_inline %57, 16
+  %83 = v_and_b32_src0_inline %82, 1
+  %84 = v_add_u32_lit %83, 32767
+  %85 = v_add_u32 %57, %84
+  %86 = v_lshrrev_b32_src0_inline %85, 16
+  %87 = v_lshrrev_b32_src0_inline %60, 16
+  %88 = v_and_b32_src0_inline %87, 1
+  %89 = v_add_u32_lit %88, 32767
+  %90 = v_add_u32 %60, %89
+  %91 = v_lshrrev_b32_src0_inline %90, 16
+  %92 = v_cvt_pk_u16_u32 %86, %91
+  %95 = v_lshrrev_b32_src0_inline %63, 16
+  %96 = v_and_b32_src0_inline %95, 1
+  %97 = v_add_u32_lit %96, 32767
+  %98 = v_add_u32 %63, %97
+  %99 = v_lshrrev_b32_src0_inline %98, 16
+  %100 = v_lshrrev_b32_src0_inline %66, 16
+  %101 = v_and_b32_src0_inline %100, 1
+  %102 = v_add_u32_lit %101, 32767
+  %103 = v_add_u32 %66, %102
+  %104 = v_lshrrev_b32_src0_inline %103, 16
+  %105 = v_cvt_pk_u16_u32 %99, %104
+  %108 = v_lshrrev_b32_src0_inline %69, 16
+  %109 = v_and_b32_src0_inline %108, 1
+  %110 = v_add_u32_lit %109, 32767
+  %111 = v_add_u32 %69, %110
+  %112 = v_lshrrev_b32_src0_inline %111, 16
+  %113 = v_lshrrev_b32_src0_inline %72, 16
+  %114 = v_and_b32_src0_inline %113, 1
+  %115 = v_add_u32_lit %114, 32767
+  %116 = v_add_u32 %72, %115
+  %117 = v_lshrrev_b32_src0_inline %116, 16
+  %118 = v_cvt_pk_u16_u32 %112, %117
+  %121 = v_lshrrev_b32_src0_inline %75, 16
+  %122 = v_and_b32_src0_inline %121, 1
+  %123 = v_add_u32_lit %122, 32767
+  %124 = v_add_u32 %75, %123
+  %125 = v_lshrrev_b32_src0_inline %124, 16
+  %126 = v_lshrrev_b32_src0_inline %78, 16
+  %127 = v_and_b32_src0_inline %126, 1
+  %128 = v_add_u32_lit %127, 32767
+  %129 = v_add_u32 %78, %128
+  %130 = v_lshrrev_b32_src0_inline %129, 16
+  %131 = v_cvt_pk_u16_u32 %125, %130
+  %difference = concat(%92, %105, %118, %131) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_dwordx4_saddr %17, %difference, %result
+  return
+}

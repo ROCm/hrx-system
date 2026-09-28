@@ -272,6 +272,8 @@ static loom_target_math_op_t loom_math_legalize_scalar_op_kind(
       return loom_math_legalize_scalar_geluf_op(op);
     case LOOM_OP_SCALAR_ADDF:
       return LOOM_TARGET_MATH_OP_ADDF;
+    case LOOM_OP_SCALAR_SUBF:
+      return LOOM_TARGET_MATH_OP_SUBF;
     case LOOM_OP_SCALAR_MULF:
       return LOOM_TARGET_MATH_OP_MULF;
     default:
@@ -322,6 +324,8 @@ static loom_target_math_op_t loom_math_legalize_vector_op_kind(
       return loom_math_legalize_vector_geluf_op(op);
     case LOOM_OP_VECTOR_ADDF:
       return LOOM_TARGET_MATH_OP_ADDF;
+    case LOOM_OP_VECTOR_SUBF:
+      return LOOM_TARGET_MATH_OP_SUBF;
     case LOOM_OP_VECTOR_MULF:
       return LOOM_TARGET_MATH_OP_MULF;
     default:

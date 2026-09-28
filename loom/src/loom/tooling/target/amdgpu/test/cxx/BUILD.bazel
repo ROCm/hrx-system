@@ -324,3 +324,29 @@ iree_execution_test_suite(
         "loom-import-cxx": "//loom/src/loom/tools/loom-import-cxx",
     },
 )
+
+loom_generated_file_family(
+    name = "narrow_float_subtraction_checks_gen",
+    testonly = True,
+    generator = "//loom/py/loom/gen/test:narrow_float_subtraction",
+    output_directories = ["narrow_float_subtraction_arrays"],
+    output_flags = [
+        "--output",
+        "--arrays",
+    ],
+    outputs = [
+        "narrow_float_subtraction_checks.loom",
+        "narrow_float_subtraction_arrays",
+    ],
+)
+
+loom_test(
+    name = "narrow_float_subtraction_test",
+    srcs = [
+        "narrow_float_subtraction.cxx",
+        ":narrow_float_subtraction_checks.loom",
+    ],
+    data = [":narrow_float_subtraction_checks_gen"],
+    execution_profiles = _EXECUTION_PROFILES,
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)

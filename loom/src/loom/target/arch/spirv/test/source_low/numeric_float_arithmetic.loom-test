@@ -1,0 +1,36 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_float_arithmetic.loom-test
+// TEMPLATE-EXCLUDE: @float_arithmetic_f32 Requires scalar copysignf, negf and absf contracts.
+// TEMPLATE-EXCLUDE: @float_arithmetic_f64 Requires scalar copysignf, negf and absf contracts.
+// RUN: emit source-low target=spirv:vulkan1.3+bda+extended-types output=low
+
+func.def @float_arithmetic_f16(%a: f16, %b: f16) -> (f16, f16) {
+  %sum = scalar.addf %a, %b : f16
+  %product = scalar.mulf %a, %b : f16
+  func.return %sum, %product : f16, f16
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @float_arithmetic_f16(%a: reg<spirv.id : f16>, %b: reg<spirv.id : f16>) -> (reg<spirv.id : f16>, reg<spirv.id : f16>) asm {
+  %sum = OpFAdd.f16 %a, %b
+  %product = OpFMul.f16 %a, %b
+  return %sum, %product
+}
+
+// ====
+
+func.def @float_arithmetic_bf16(%a: bf16, %b: bf16) -> (bf16, bf16) {
+  %sum = scalar.addf %a, %b : bf16
+  %product = scalar.mulf %a, %b : bf16
+  func.return %sum, %product : bf16, bf16
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @float_arithmetic_bf16(%a: reg<spirv.id : bf16>, %b: reg<spirv.id : bf16>) -> (reg<spirv.id : bf16>, reg<spirv.id : bf16>) asm {
+  %18 = OpFConvert.bf16.f32 %a
+  %19 = OpFConvert.bf16.f32 %b
+  %20 = OpFAdd.f32 %18, %19
+  %sum = OpFConvert.f32.bf16 %20
+  %22 = OpFMul.f32 %18, %19
+  %product = OpFConvert.f32.bf16 %22
+  return %sum, %product
+}

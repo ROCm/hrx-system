@@ -80,6 +80,8 @@ iree_string_view_t loom_target_math_op_name(loom_target_math_op_t math_op) {
       return IREE_SV("geluf.logistic");
     case LOOM_TARGET_MATH_OP_ADDF:
       return IREE_SV("addf");
+    case LOOM_TARGET_MATH_OP_SUBF:
+      return IREE_SV("subf");
     case LOOM_TARGET_MATH_OP_MULF:
       return IREE_SV("mulf");
     case LOOM_TARGET_MATH_OP_LOGF:

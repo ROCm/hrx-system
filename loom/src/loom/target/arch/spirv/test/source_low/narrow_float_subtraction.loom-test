@@ -1,0 +1,390 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/narrow_float_subtraction.loom-test
+// RUN: emit source-low target=spirv:vulkan1.3+bda+extended-types output=low
+
+func.def @subtract_f16_1(%lhs: f16, %rhs: f16) -> (f16) {
+  %difference = scalar.subf %lhs, %rhs : f16
+  func.return %difference : f16
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @subtract_f16_1(%lhs: reg<spirv.id : f16>, %rhs: reg<spirv.id : f16>) -> (reg<spirv.id : f16>) asm {
+  %difference = OpFSub.f16 %lhs, %rhs
+  return %difference
+}
+
+// ====
+
+func.def @subtract_f16_2(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %byte_offset = index.constant 0 : offset
+  %left = buffer.view %lhs[%byte_offset] : buffer -> view<2xf16>
+  %right = buffer.view %rhs[%byte_offset] : buffer -> view<2xf16>
+  %result = buffer.view %output[%byte_offset] : buffer -> view<2xf16>
+  %a = vector.load %left[0] : view<2xf16> -> vector<2xf16>
+  %b = vector.load %right[0] : view<2xf16> -> vector<2xf16>
+  %difference = vector.subf %a, %b : vector<2xf16>
+  vector.store %difference, %result[0] : vector<2xf16>, view<2xf16>
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @subtract_f16_2(%lhs: reg<spirv.ptr.storage_buffer>, %rhs: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>) asm {
+  %21 = OpConstant.offset64 0
+  %22 = OpPtrAccessChain.storage_buffer.f16.byte_offset %lhs, %21
+  %23 = OpLoad.storage_buffer.f16 %22
+  %24 = OpConstant.offset64 2
+  %25 = OpPtrAccessChain.storage_buffer.f16.byte_offset %lhs, %24
+  %26 = OpLoad.storage_buffer.f16 %25
+  %28 = OpPtrAccessChain.storage_buffer.f16.byte_offset %rhs, %21
+  %29 = OpLoad.storage_buffer.f16 %28
+  %31 = OpPtrAccessChain.storage_buffer.f16.byte_offset %rhs, %24
+  %32 = OpLoad.storage_buffer.f16 %31
+  %33 = OpFSub.f16 %23, %29
+  %34 = OpFSub.f16 %26, %32
+  %36 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %21
+  OpStore.storage_buffer.f16 %36, %33
+  %38 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %24
+  OpStore.storage_buffer.f16 %38, %34
+  return
+}
+
+// ====
+
+func.def @subtract_f16_3(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %byte_offset = index.constant 0 : offset
+  %left = buffer.view %lhs[%byte_offset] : buffer -> view<3xf16>
+  %right = buffer.view %rhs[%byte_offset] : buffer -> view<3xf16>
+  %result = buffer.view %output[%byte_offset] : buffer -> view<3xf16>
+  %a = vector.load %left[0] : view<3xf16> -> vector<3xf16>
+  %b = vector.load %right[0] : view<3xf16> -> vector<3xf16>
+  %difference = vector.subf %a, %b : vector<3xf16>
+  vector.store %difference, %result[0] : vector<3xf16>, view<3xf16>
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @subtract_f16_3(%lhs: reg<spirv.ptr.storage_buffer>, %rhs: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>) asm {
+  %24 = OpConstant.offset64 0
+  %25 = OpPtrAccessChain.storage_buffer.f16.byte_offset %lhs, %24
+  %26 = OpLoad.storage_buffer.f16 %25
+  %27 = OpConstant.offset64 2
+  %28 = OpPtrAccessChain.storage_buffer.f16.byte_offset %lhs, %27
+  %29 = OpLoad.storage_buffer.f16 %28
+  %30 = OpConstant.offset64 4
+  %31 = OpPtrAccessChain.storage_buffer.f16.byte_offset %lhs, %30
+  %32 = OpLoad.storage_buffer.f16 %31
+  %34 = OpPtrAccessChain.storage_buffer.f16.byte_offset %rhs, %24
+  %35 = OpLoad.storage_buffer.f16 %34
+  %37 = OpPtrAccessChain.storage_buffer.f16.byte_offset %rhs, %27
+  %38 = OpLoad.storage_buffer.f16 %37
+  %40 = OpPtrAccessChain.storage_buffer.f16.byte_offset %rhs, %30
+  %41 = OpLoad.storage_buffer.f16 %40
+  %42 = OpFSub.f16 %26, %35
+  %43 = OpFSub.f16 %29, %38
+  %44 = OpFSub.f16 %32, %41
+  %46 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %24
+  OpStore.storage_buffer.f16 %46, %42
+  %48 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %27
+  OpStore.storage_buffer.f16 %48, %43
+  %50 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %30
+  OpStore.storage_buffer.f16 %50, %44
+  return
+}
+
+// ====
+
+func.def @subtract_f16_8(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %byte_offset = index.constant 0 : offset
+  %left = buffer.view %lhs[%byte_offset] : buffer -> view<8xf16>
+  %right = buffer.view %rhs[%byte_offset] : buffer -> view<8xf16>
+  %result = buffer.view %output[%byte_offset] : buffer -> view<8xf16>
+  %a = vector.load %left[0] : view<8xf16> -> vector<8xf16>
+  %b = vector.load %right[0] : view<8xf16> -> vector<8xf16>
+  %difference = vector.subf %a, %b : vector<8xf16>
+  vector.store %difference, %result[0] : vector<8xf16>, view<8xf16>
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @subtract_f16_8(%lhs: reg<spirv.ptr.storage_buffer>, %rhs: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>) asm {
+  %55 = OpConstant.offset64 0
+  %56 = OpPtrAccessChain.storage_buffer.f16.byte_offset %lhs, %55
+  %57 = OpLoad.storage_buffer.f16 %56
+  %58 = OpConstant.offset64 2
+  %59 = OpPtrAccessChain.storage_buffer.f16.byte_offset %lhs, %58
+  %60 = OpLoad.storage_buffer.f16 %59
+  %61 = OpConstant.offset64 4
+  %62 = OpPtrAccessChain.storage_buffer.f16.byte_offset %lhs, %61
+  %63 = OpLoad.storage_buffer.f16 %62
+  %64 = OpConstant.offset64 6
+  %65 = OpPtrAccessChain.storage_buffer.f16.byte_offset %lhs, %64
+  %66 = OpLoad.storage_buffer.f16 %65
+  %67 = OpConstant.offset64 8
+  %68 = OpPtrAccessChain.storage_buffer.f16.byte_offset %lhs, %67
+  %69 = OpLoad.storage_buffer.f16 %68
+  %70 = OpConstant.offset64 10
+  %71 = OpPtrAccessChain.storage_buffer.f16.byte_offset %lhs, %70
+  %72 = OpLoad.storage_buffer.f16 %71
+  %73 = OpConstant.offset64 12
+  %74 = OpPtrAccessChain.storage_buffer.f16.byte_offset %lhs, %73
+  %75 = OpLoad.storage_buffer.f16 %74
+  %76 = OpConstant.offset64 14
+  %77 = OpPtrAccessChain.storage_buffer.f16.byte_offset %lhs, %76
+  %78 = OpLoad.storage_buffer.f16 %77
+  %80 = OpPtrAccessChain.storage_buffer.f16.byte_offset %rhs, %55
+  %81 = OpLoad.storage_buffer.f16 %80
+  %83 = OpPtrAccessChain.storage_buffer.f16.byte_offset %rhs, %58
+  %84 = OpLoad.storage_buffer.f16 %83
+  %86 = OpPtrAccessChain.storage_buffer.f16.byte_offset %rhs, %61
+  %87 = OpLoad.storage_buffer.f16 %86
+  %89 = OpPtrAccessChain.storage_buffer.f16.byte_offset %rhs, %64
+  %90 = OpLoad.storage_buffer.f16 %89
+  %92 = OpPtrAccessChain.storage_buffer.f16.byte_offset %rhs, %67
+  %93 = OpLoad.storage_buffer.f16 %92
+  %95 = OpPtrAccessChain.storage_buffer.f16.byte_offset %rhs, %70
+  %96 = OpLoad.storage_buffer.f16 %95
+  %98 = OpPtrAccessChain.storage_buffer.f16.byte_offset %rhs, %73
+  %99 = OpLoad.storage_buffer.f16 %98
+  %101 = OpPtrAccessChain.storage_buffer.f16.byte_offset %rhs, %76
+  %102 = OpLoad.storage_buffer.f16 %101
+  %103 = OpFSub.f16 %57, %81
+  %104 = OpFSub.f16 %60, %84
+  %105 = OpFSub.f16 %63, %87
+  %106 = OpFSub.f16 %66, %90
+  %107 = OpFSub.f16 %69, %93
+  %108 = OpFSub.f16 %72, %96
+  %109 = OpFSub.f16 %75, %99
+  %110 = OpFSub.f16 %78, %102
+  %112 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %55
+  OpStore.storage_buffer.f16 %112, %103
+  %114 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %58
+  OpStore.storage_buffer.f16 %114, %104
+  %116 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %61
+  OpStore.storage_buffer.f16 %116, %105
+  %118 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %64
+  OpStore.storage_buffer.f16 %118, %106
+  %120 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %67
+  OpStore.storage_buffer.f16 %120, %107
+  %122 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %70
+  OpStore.storage_buffer.f16 %122, %108
+  %124 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %73
+  OpStore.storage_buffer.f16 %124, %109
+  %126 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output, %76
+  OpStore.storage_buffer.f16 %126, %110
+  return
+}
+
+// ====
+
+func.def @subtract_bf16_1(%lhs: bf16, %rhs: bf16) -> (bf16) {
+  %difference = scalar.subf %lhs, %rhs : bf16
+  func.return %difference : bf16
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @subtract_bf16_1(%lhs: reg<spirv.id : bf16>, %rhs: reg<spirv.id : bf16>) -> (reg<spirv.id : bf16>) asm {
+  %11 = OpFConvert.bf16.f32 %lhs
+  %12 = OpFConvert.bf16.f32 %rhs
+  %13 = OpFSub.f32 %11, %12
+  %difference = OpFConvert.f32.bf16 %13
+  return %difference
+}
+
+// ====
+
+func.def @subtract_bf16_2(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %byte_offset = index.constant 0 : offset
+  %left = buffer.view %lhs[%byte_offset] : buffer -> view<2xbf16>
+  %right = buffer.view %rhs[%byte_offset] : buffer -> view<2xbf16>
+  %result = buffer.view %output[%byte_offset] : buffer -> view<2xbf16>
+  %a = vector.load %left[0] : view<2xbf16> -> vector<2xbf16>
+  %b = vector.load %right[0] : view<2xbf16> -> vector<2xbf16>
+  %difference = vector.subf %a, %b : vector<2xbf16>
+  vector.store %difference, %result[0] : vector<2xbf16>, view<2xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @subtract_bf16_2(%lhs: reg<spirv.ptr.storage_buffer>, %rhs: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>) asm {
+  %31 = OpConstant.offset64 0
+  %32 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %lhs, %31
+  %33 = OpLoad.storage_buffer.bf16 %32
+  %34 = OpConstant.offset64 2
+  %35 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %lhs, %34
+  %36 = OpLoad.storage_buffer.bf16 %35
+  %38 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %rhs, %31
+  %39 = OpLoad.storage_buffer.bf16 %38
+  %41 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %rhs, %34
+  %42 = OpLoad.storage_buffer.bf16 %41
+  %43 = OpFConvert.bf16.f32 %33
+  %44 = OpFConvert.bf16.f32 %39
+  %45 = OpFSub.f32 %43, %44
+  %46 = OpFConvert.f32.bf16 %45
+  %47 = OpFConvert.bf16.f32 %36
+  %48 = OpFConvert.bf16.f32 %42
+  %49 = OpFSub.f32 %47, %48
+  %50 = OpFConvert.f32.bf16 %49
+  %52 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %31
+  OpStore.storage_buffer.bf16 %52, %46
+  %54 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %34
+  OpStore.storage_buffer.bf16 %54, %50
+  return
+}
+
+// ====
+
+func.def @subtract_bf16_3(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %byte_offset = index.constant 0 : offset
+  %left = buffer.view %lhs[%byte_offset] : buffer -> view<3xbf16>
+  %right = buffer.view %rhs[%byte_offset] : buffer -> view<3xbf16>
+  %result = buffer.view %output[%byte_offset] : buffer -> view<3xbf16>
+  %a = vector.load %left[0] : view<3xbf16> -> vector<3xbf16>
+  %b = vector.load %right[0] : view<3xbf16> -> vector<3xbf16>
+  %difference = vector.subf %a, %b : vector<3xbf16>
+  vector.store %difference, %result[0] : vector<3xbf16>, view<3xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @subtract_bf16_3(%lhs: reg<spirv.ptr.storage_buffer>, %rhs: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>) asm {
+  %37 = OpConstant.offset64 0
+  %38 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %lhs, %37
+  %39 = OpLoad.storage_buffer.bf16 %38
+  %40 = OpConstant.offset64 2
+  %41 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %lhs, %40
+  %42 = OpLoad.storage_buffer.bf16 %41
+  %43 = OpConstant.offset64 4
+  %44 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %lhs, %43
+  %45 = OpLoad.storage_buffer.bf16 %44
+  %47 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %rhs, %37
+  %48 = OpLoad.storage_buffer.bf16 %47
+  %50 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %rhs, %40
+  %51 = OpLoad.storage_buffer.bf16 %50
+  %53 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %rhs, %43
+  %54 = OpLoad.storage_buffer.bf16 %53
+  %55 = OpFConvert.bf16.f32 %39
+  %56 = OpFConvert.bf16.f32 %48
+  %57 = OpFSub.f32 %55, %56
+  %58 = OpFConvert.f32.bf16 %57
+  %59 = OpFConvert.bf16.f32 %42
+  %60 = OpFConvert.bf16.f32 %51
+  %61 = OpFSub.f32 %59, %60
+  %62 = OpFConvert.f32.bf16 %61
+  %63 = OpFConvert.bf16.f32 %45
+  %64 = OpFConvert.bf16.f32 %54
+  %65 = OpFSub.f32 %63, %64
+  %66 = OpFConvert.f32.bf16 %65
+  %68 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %37
+  OpStore.storage_buffer.bf16 %68, %58
+  %70 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %40
+  OpStore.storage_buffer.bf16 %70, %62
+  %72 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %43
+  OpStore.storage_buffer.bf16 %72, %66
+  return
+}
+
+// ====
+
+func.def @subtract_bf16_8(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %byte_offset = index.constant 0 : offset
+  %left = buffer.view %lhs[%byte_offset] : buffer -> view<8xbf16>
+  %right = buffer.view %rhs[%byte_offset] : buffer -> view<8xbf16>
+  %result = buffer.view %output[%byte_offset] : buffer -> view<8xbf16>
+  %a = vector.load %left[0] : view<8xbf16> -> vector<8xbf16>
+  %b = vector.load %right[0] : view<8xbf16> -> vector<8xbf16>
+  %difference = vector.subf %a, %b : vector<8xbf16>
+  vector.store %difference, %result[0] : vector<8xbf16>, view<8xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @subtract_bf16_8(%lhs: reg<spirv.ptr.storage_buffer>, %rhs: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>) asm {
+  %83 = OpConstant.offset64 0
+  %84 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %lhs, %83
+  %85 = OpLoad.storage_buffer.bf16 %84
+  %86 = OpConstant.offset64 2
+  %87 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %lhs, %86
+  %88 = OpLoad.storage_buffer.bf16 %87
+  %89 = OpConstant.offset64 4
+  %90 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %lhs, %89
+  %91 = OpLoad.storage_buffer.bf16 %90
+  %92 = OpConstant.offset64 6
+  %93 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %lhs, %92
+  %94 = OpLoad.storage_buffer.bf16 %93
+  %95 = OpConstant.offset64 8
+  %96 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %lhs, %95
+  %97 = OpLoad.storage_buffer.bf16 %96
+  %98 = OpConstant.offset64 10
+  %99 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %lhs, %98
+  %100 = OpLoad.storage_buffer.bf16 %99
+  %101 = OpConstant.offset64 12
+  %102 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %lhs, %101
+  %103 = OpLoad.storage_buffer.bf16 %102
+  %104 = OpConstant.offset64 14
+  %105 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %lhs, %104
+  %106 = OpLoad.storage_buffer.bf16 %105
+  %108 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %rhs, %83
+  %109 = OpLoad.storage_buffer.bf16 %108
+  %111 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %rhs, %86
+  %112 = OpLoad.storage_buffer.bf16 %111
+  %114 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %rhs, %89
+  %115 = OpLoad.storage_buffer.bf16 %114
+  %117 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %rhs, %92
+  %118 = OpLoad.storage_buffer.bf16 %117
+  %120 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %rhs, %95
+  %121 = OpLoad.storage_buffer.bf16 %120
+  %123 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %rhs, %98
+  %124 = OpLoad.storage_buffer.bf16 %123
+  %126 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %rhs, %101
+  %127 = OpLoad.storage_buffer.bf16 %126
+  %129 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %rhs, %104
+  %130 = OpLoad.storage_buffer.bf16 %129
+  %131 = OpFConvert.bf16.f32 %85
+  %132 = OpFConvert.bf16.f32 %109
+  %133 = OpFSub.f32 %131, %132
+  %134 = OpFConvert.f32.bf16 %133
+  %135 = OpFConvert.bf16.f32 %88
+  %136 = OpFConvert.bf16.f32 %112
+  %137 = OpFSub.f32 %135, %136
+  %138 = OpFConvert.f32.bf16 %137
+  %139 = OpFConvert.bf16.f32 %91
+  %140 = OpFConvert.bf16.f32 %115
+  %141 = OpFSub.f32 %139, %140
+  %142 = OpFConvert.f32.bf16 %141
+  %143 = OpFConvert.bf16.f32 %94
+  %144 = OpFConvert.bf16.f32 %118
+  %145 = OpFSub.f32 %143, %144
+  %146 = OpFConvert.f32.bf16 %145
+  %147 = OpFConvert.bf16.f32 %97
+  %148 = OpFConvert.bf16.f32 %121
+  %149 = OpFSub.f32 %147, %148
+  %150 = OpFConvert.f32.bf16 %149
+  %151 = OpFConvert.bf16.f32 %100
+  %152 = OpFConvert.bf16.f32 %124
+  %153 = OpFSub.f32 %151, %152
+  %154 = OpFConvert.f32.bf16 %153
+  %155 = OpFConvert.bf16.f32 %103
+  %156 = OpFConvert.bf16.f32 %127
+  %157 = OpFSub.f32 %155, %156
+  %158 = OpFConvert.f32.bf16 %157
+  %159 = OpFConvert.bf16.f32 %106
+  %160 = OpFConvert.bf16.f32 %130
+  %161 = OpFSub.f32 %159, %160
+  %162 = OpFConvert.f32.bf16 %161
+  %164 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %83
+  OpStore.storage_buffer.bf16 %164, %134
+  %166 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %86
+  OpStore.storage_buffer.bf16 %166, %138
+  %168 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %89
+  OpStore.storage_buffer.bf16 %168, %142
+  %170 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %92
+  OpStore.storage_buffer.bf16 %170, %146
+  %172 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %95
+  OpStore.storage_buffer.bf16 %172, %150
+  %174 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %98
+  OpStore.storage_buffer.bf16 %174, %154
+  %176 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %101
+  OpStore.storage_buffer.bf16 %176, %158
+  %178 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output, %104
+  OpStore.storage_buffer.bf16 %178, %162
+  return
+}

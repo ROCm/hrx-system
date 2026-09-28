@@ -25,6 +25,7 @@ static loom_target_math_policy_decision_t loom_x86_math_reject(
 static bool loom_x86_math_op_is_native_arithmetic(
     loom_target_math_op_t math_op) {
   return math_op == LOOM_TARGET_MATH_OP_ADDF ||
+         math_op == LOOM_TARGET_MATH_OP_SUBF ||
          math_op == LOOM_TARGET_MATH_OP_MULF;
 }
 

@@ -89,6 +89,7 @@ static bool loom_amdgpu_math_policy_has_native_packed_bf16_binary(
              loom_amdgpu_math_policy_flags(policy),
              LOOM_AMDGPU_MATH_POLICY_FLAG_NATIVE_PACKED_BF16_BINARY) &&
          (query->math_op == LOOM_TARGET_MATH_OP_ADDF ||
+          query->math_op == LOOM_TARGET_MATH_OP_SUBF ||
           query->math_op == LOOM_TARGET_MATH_OP_MULF) &&
          query->element_type == LOOM_SCALAR_TYPE_BF16 &&
          loom_amdgpu_math_type_is_packed_float16_vector(query->value_type);
@@ -132,6 +133,7 @@ static void loom_amdgpu_math_policy_query(
     const loom_target_math_query_t* query,
     loom_target_math_policy_decision_t* out_decision) {
   if (query->math_op == LOOM_TARGET_MATH_OP_ADDF ||
+      query->math_op == LOOM_TARGET_MATH_OP_SUBF ||
       query->math_op == LOOM_TARGET_MATH_OP_MULF) {
     if (query->element_type == LOOM_SCALAR_TYPE_BF16) {
       if (loom_amdgpu_math_policy_has_native_packed_bf16_binary(policy,
@@ -140,6 +142,15 @@ static void loom_amdgpu_math_policy_query(
             loom_amdgpu_math_keep(IREE_SV("math.op.native_pk_bf16"));
         return;
       }
+      *out_decision =
+          loom_amdgpu_math_rewrite(LOOM_TARGET_MATH_RECIPE_WIDEN_F32_ROUND,
+                                   IREE_SV("math.recipe.widen_f32_round"));
+      return;
+    }
+    if (query->math_op == LOOM_TARGET_MATH_OP_SUBF &&
+        query->element_type == LOOM_SCALAR_TYPE_F16 &&
+        query->lane_domain == LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR &&
+        !loom_amdgpu_math_type_is_packed_float16_vector(query->value_type)) {
       *out_decision =
           loom_amdgpu_math_rewrite(LOOM_TARGET_MATH_RECIPE_WIDEN_F32_ROUND,
                                    IREE_SV("math.recipe.widen_f32_round"));
@@ -248,6 +259,7 @@ static void loom_amdgpu_math_policy_query(
           LOOM_TARGET_MATH_FASTMATH_FLAG_ARCP);
       return;
     case LOOM_TARGET_MATH_OP_ADDF:
+    case LOOM_TARGET_MATH_OP_SUBF:
     case LOOM_TARGET_MATH_OP_MULF:
       *out_decision = loom_amdgpu_math_keep(IREE_SV("math.op.native_f32"));
       return;
