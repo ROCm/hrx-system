@@ -86,7 +86,7 @@ func.def @narrow_nan() -> (vector<4xbf16>, i1) {
 
 // ====
 
-// Values just above a BF16 midpoint cannot be folded through F32 rounding.
+// F64 narrowing preserves which side of a BF16 midpoint the source occupies.
 func.def @f64_above_bf16_midpoint() -> (vector<4xbf16>) {
   %input = vector.constant 1.0039062500000002 : vector<4xf64>
   %narrow = vector.fptrunc %input : vector<4xf64> to vector<4xbf16>
@@ -95,8 +95,7 @@ func.def @f64_above_bf16_midpoint() -> (vector<4xbf16>) {
 
 // ----
 func.def @f64_above_bf16_midpoint() -> (vector<4xbf16>) {
-  %input = vector.constant 1.0039062500000002 : vector<4xf64>
-  %narrow = vector.fptrunc %input : vector<4xf64> to vector<4xbf16>
+  %narrow = vector.constant 1.0078125 : vector<4xbf16>
   func.return %narrow : vector<4xbf16>
 }
 
@@ -194,11 +193,255 @@ func.def @raw_nan_lane() -> (vector<2xf32>) {
 
 // ====
 
-// Per-lane materialization also respects the F64 double-rounding boundary.
+// Per-lane materialization retains the same single-round conversion.
 func.def @f64_midpoint_lane() -> (vector<2xbf16>) {
   %midpoint = scalar.constant 1.0039062500000002 : f64
   %exact_lane = scalar.constant 1.0 : f64
   %input = vector.from_elements %midpoint, %exact_lane : vector<2xf64>
   %narrow = vector.fptrunc %input : vector<2xf64> to vector<2xbf16>
   func.return %narrow : vector<2xbf16>
+}
+
+// ----
+func.def @f64_midpoint_lane() -> (vector<2xbf16>) {
+  %5 = scalar.constant 1.0078125 : bf16
+  %6 = scalar.constant 1.0 : bf16
+  %narrow = vector.from_elements %5, %6 : vector<2xbf16>
+  func.return %narrow : vector<2xbf16>
+}
+
+// ====
+
+// Narrow values distinguish midpoint neighbors, signed underflow, and overflow.
+func.def @f64_to_f16_boundary_values() -> (vector<16xf16>) {
+  %above_even = scalar.constant 1.0004882812500002 : f64
+  %below_odd = scalar.constant 1.0014648437499998 : f64
+  %negative_above_even = scalar.constant -1.0004882812500002 : f64
+  %negative_below_odd = scalar.constant -1.0014648437499998 : f64
+  %underflow_below = scalar.constant 2.9802322387695309e-08 : f64
+  %underflow_above = scalar.constant 2.9802322387695319e-08 : f64
+  %negative_underflow_below = scalar.constant -2.9802322387695309e-08 : f64
+  %negative_underflow_above = scalar.constant -2.9802322387695319e-08 : f64
+  %overflow_below = scalar.constant 65519.999999999993 : f64
+  %overflow_above = scalar.constant 65520.000000000007 : f64
+  %negative_overflow_below = scalar.constant -65519.999999999993 : f64
+  %negative_overflow_above = scalar.constant -65520.000000000007 : f64
+  %positive_infinity = scalar.constant inf : f64
+  %negative_infinity = scalar.constant -inf : f64
+  %positive_sign_input = scalar.constant 0.0 : f64
+  %negative_sign_input = scalar.constant -0.0 : f64
+  %input = vector.from_elements %above_even, %below_odd, %negative_above_even, %negative_below_odd, %underflow_below, %underflow_above, %negative_underflow_below, %negative_underflow_above, %overflow_below, %overflow_above, %negative_overflow_below, %negative_overflow_above, %positive_infinity, %negative_infinity, %positive_sign_input, %negative_sign_input : vector<16xf64>
+  %narrow = vector.fptrunc %input : vector<16xf64> to vector<16xf16>
+  func.return %narrow : vector<16xf16>
+}
+
+// ----
+func.def @f64_to_f16_boundary_values() -> (vector<16xf16>) {
+  %19 = scalar.constant 1.0009765625 : f16
+  %20 = scalar.constant 1.0009765625 : f16
+  %21 = scalar.constant -1.0009765625 : f16
+  %22 = scalar.constant -1.0009765625 : f16
+  %23 = scalar.constant 0.0 : f16
+  %24 = scalar.constant 5.9604644775390625e-08 : f16
+  %25 = scalar.constant -0.0 : f16
+  %26 = scalar.constant -5.9604644775390625e-08 : f16
+  %27 = scalar.constant 65504.0 : f16
+  %28 = scalar.constant inf : f16
+  %29 = scalar.constant -65504.0 : f16
+  %30 = scalar.constant -inf : f16
+  %31 = scalar.constant inf : f16
+  %32 = scalar.constant -inf : f16
+  %33 = scalar.constant 0.0 : f16
+  %34 = scalar.constant -0.0 : f16
+  %narrow = vector.from_elements %19, %20, %21, %22, %23, %24, %25, %26, %27, %28, %29, %30, %31, %32, %33, %34 : vector<16xf16>
+  func.return %narrow : vector<16xf16>
+}
+
+// ====
+
+// Narrow values distinguish midpoint neighbors, signed underflow, and overflow.
+func.def @f64_to_bf16_boundary_values() -> (vector<16xbf16>) {
+  %above_even = scalar.constant 1.0039062500000002 : f64
+  %below_odd = scalar.constant 1.0117187499999998 : f64
+  %negative_above_even = scalar.constant -1.0039062500000002 : f64
+  %negative_below_odd = scalar.constant -1.0117187499999998 : f64
+  %underflow_below = scalar.constant 4.5917748078995601e-41 : f64
+  %underflow_above = scalar.constant 4.5917748078995616e-41 : f64
+  %negative_underflow_below = scalar.constant -4.5917748078995601e-41 : f64
+  %negative_underflow_above = scalar.constant -4.5917748078995616e-41 : f64
+  %overflow_below = scalar.constant 3.3961775292304597e+38 : f64
+  %overflow_above = scalar.constant 3.3961775292304604e+38 : f64
+  %negative_overflow_below = scalar.constant -3.3961775292304597e+38 : f64
+  %negative_overflow_above = scalar.constant -3.3961775292304604e+38 : f64
+  %positive_infinity = scalar.constant inf : f64
+  %negative_infinity = scalar.constant -inf : f64
+  %positive_sign_input = scalar.constant 0.0 : f64
+  %negative_sign_input = scalar.constant -0.0 : f64
+  %input = vector.from_elements %above_even, %below_odd, %negative_above_even, %negative_below_odd, %underflow_below, %underflow_above, %negative_underflow_below, %negative_underflow_above, %overflow_below, %overflow_above, %negative_overflow_below, %negative_overflow_above, %positive_infinity, %negative_infinity, %positive_sign_input, %negative_sign_input : vector<16xf64>
+  %narrow = vector.fptrunc %input : vector<16xf64> to vector<16xbf16>
+  func.return %narrow : vector<16xbf16>
+}
+
+// ----
+func.def @f64_to_bf16_boundary_values() -> (vector<16xbf16>) {
+  %19 = scalar.constant 1.0078125 : bf16
+  %20 = scalar.constant 1.0078125 : bf16
+  %21 = scalar.constant -1.0078125 : bf16
+  %22 = scalar.constant -1.0078125 : bf16
+  %23 = scalar.constant 0.0 : bf16
+  %24 = scalar.constant 9.1835496157991212e-41 : bf16
+  %25 = scalar.constant -0.0 : bf16
+  %26 = scalar.constant -9.1835496157991212e-41 : bf16
+  %27 = scalar.constant 3.3895313892515355e+38 : bf16
+  %28 = scalar.constant inf : bf16
+  %29 = scalar.constant -3.3895313892515355e+38 : bf16
+  %30 = scalar.constant -inf : bf16
+  %31 = scalar.constant inf : bf16
+  %32 = scalar.constant -inf : bf16
+  %33 = scalar.constant 0.0 : bf16
+  %34 = scalar.constant -0.0 : bf16
+  %narrow = vector.from_elements %19, %20, %21, %22, %23, %24, %25, %26, %27, %28, %29, %30, %31, %32, %33, %34 : vector<16xbf16>
+  func.return %narrow : vector<16xbf16>
+}
+
+// ====
+
+// Narrow values distinguish midpoint neighbors, signed underflow, and overflow.
+func.def @f64_to_f8e4m3_boundary_values() -> (vector<16xf8E4M3>) {
+  %above_even = scalar.constant 1.0625000000000002 : f64
+  %below_odd = scalar.constant 1.1874999999999998 : f64
+  %negative_above_even = scalar.constant -1.0625000000000002 : f64
+  %negative_below_odd = scalar.constant -1.1874999999999998 : f64
+  %underflow_below = scalar.constant 0.00097656249999999989 : f64
+  %underflow_above = scalar.constant 0.00097656250000000022 : f64
+  %negative_underflow_below = scalar.constant -0.00097656249999999989 : f64
+  %negative_underflow_above = scalar.constant -0.00097656250000000022 : f64
+  %overflow_below = scalar.constant 463.99999999999994 : f64
+  %overflow_above = scalar.constant 464.00000000000006 : f64
+  %negative_overflow_below = scalar.constant -463.99999999999994 : f64
+  %negative_overflow_above = scalar.constant -464.00000000000006 : f64
+  %positive_infinity = scalar.constant inf : f64
+  %negative_infinity = scalar.constant -inf : f64
+  %positive_sign_input = scalar.constant 0.0 : f64
+  %negative_sign_input = scalar.constant -0.0 : f64
+  %input = vector.from_elements %above_even, %below_odd, %negative_above_even, %negative_below_odd, %underflow_below, %underflow_above, %negative_underflow_below, %negative_underflow_above, %overflow_below, %overflow_above, %negative_overflow_below, %negative_overflow_above, %positive_infinity, %negative_infinity, %positive_sign_input, %negative_sign_input : vector<16xf64>
+  %narrow = vector.fptrunc %input : vector<16xf64> to vector<16xf8E4M3>
+  func.return %narrow : vector<16xf8E4M3>
+}
+
+// ----
+func.def @f64_to_f8e4m3_boundary_values() -> (vector<16xf8E4M3>) {
+  %19 = scalar.constant 1.125 : f8E4M3
+  %20 = scalar.constant 1.125 : f8E4M3
+  %21 = scalar.constant -1.125 : f8E4M3
+  %22 = scalar.constant -1.125 : f8E4M3
+  %23 = scalar.constant 0.0 : f8E4M3
+  %24 = scalar.constant 0.001953125 : f8E4M3
+  %25 = scalar.constant -0.0 : f8E4M3
+  %26 = scalar.constant -0.001953125 : f8E4M3
+  %27 = scalar.constant 448.0 : f8E4M3
+  %28 = scalar.constant 448.0 : f8E4M3
+  %29 = scalar.constant -448.0 : f8E4M3
+  %30 = scalar.constant -448.0 : f8E4M3
+  %31 = scalar.constant 448.0 : f8E4M3
+  %32 = scalar.constant -448.0 : f8E4M3
+  %33 = scalar.constant 0.0 : f8E4M3
+  %34 = scalar.constant -0.0 : f8E4M3
+  %narrow = vector.from_elements %19, %20, %21, %22, %23, %24, %25, %26, %27, %28, %29, %30, %31, %32, %33, %34 : vector<16xf8E4M3>
+  func.return %narrow : vector<16xf8E4M3>
+}
+
+// ====
+
+// Narrow values distinguish midpoint neighbors, signed underflow, and overflow.
+func.def @f64_to_f8e5m2_boundary_values() -> (vector<16xf8E5M2>) {
+  %above_even = scalar.constant 1.1250000000000002 : f64
+  %below_odd = scalar.constant 1.3749999999999998 : f64
+  %negative_above_even = scalar.constant -1.1250000000000002 : f64
+  %negative_below_odd = scalar.constant -1.3749999999999998 : f64
+  %underflow_below = scalar.constant 7.6293945312499992e-06 : f64
+  %underflow_above = scalar.constant 7.6293945312500017e-06 : f64
+  %negative_underflow_below = scalar.constant -7.6293945312499992e-06 : f64
+  %negative_underflow_above = scalar.constant -7.6293945312500017e-06 : f64
+  %overflow_below = scalar.constant 61439.999999999993 : f64
+  %overflow_above = scalar.constant 61440.000000000007 : f64
+  %negative_overflow_below = scalar.constant -61439.999999999993 : f64
+  %negative_overflow_above = scalar.constant -61440.000000000007 : f64
+  %positive_infinity = scalar.constant inf : f64
+  %negative_infinity = scalar.constant -inf : f64
+  %positive_sign_input = scalar.constant 0.0 : f64
+  %negative_sign_input = scalar.constant -0.0 : f64
+  %input = vector.from_elements %above_even, %below_odd, %negative_above_even, %negative_below_odd, %underflow_below, %underflow_above, %negative_underflow_below, %negative_underflow_above, %overflow_below, %overflow_above, %negative_overflow_below, %negative_overflow_above, %positive_infinity, %negative_infinity, %positive_sign_input, %negative_sign_input : vector<16xf64>
+  %narrow = vector.fptrunc %input : vector<16xf64> to vector<16xf8E5M2>
+  func.return %narrow : vector<16xf8E5M2>
+}
+
+// ----
+func.def @f64_to_f8e5m2_boundary_values() -> (vector<16xf8E5M2>) {
+  %19 = scalar.constant 1.25 : f8E5M2
+  %20 = scalar.constant 1.25 : f8E5M2
+  %21 = scalar.constant -1.25 : f8E5M2
+  %22 = scalar.constant -1.25 : f8E5M2
+  %23 = scalar.constant 0.0 : f8E5M2
+  %24 = scalar.constant 1.52587890625e-05 : f8E5M2
+  %25 = scalar.constant -0.0 : f8E5M2
+  %26 = scalar.constant -1.52587890625e-05 : f8E5M2
+  %27 = scalar.constant 57344.0 : f8E5M2
+  %28 = scalar.constant inf : f8E5M2
+  %29 = scalar.constant -57344.0 : f8E5M2
+  %30 = scalar.constant -inf : f8E5M2
+  %31 = scalar.constant inf : f8E5M2
+  %32 = scalar.constant -inf : f8E5M2
+  %33 = scalar.constant 0.0 : f8E5M2
+  %34 = scalar.constant -0.0 : f8E5M2
+  %narrow = vector.from_elements %19, %20, %21, %22, %23, %24, %25, %26, %27, %28, %29, %30, %31, %32, %33, %34 : vector<16xf8E5M2>
+  func.return %narrow : vector<16xf8E5M2>
+}
+
+// ====
+
+// An explicit F32 intermediate still rounds before the BF16 conversion.
+func.def @f64_staged_narrowing() -> (bf16, bf16) {
+  %input = vector.constant 1.0039062500000002 : vector<4xf64>
+  %direct = vector.fptrunc %input : vector<4xf64> to vector<4xbf16>
+  %intermediate = vector.fptrunc %input : vector<4xf64> to vector<4xf32>
+  %staged = vector.fptrunc %intermediate : vector<4xf32> to vector<4xbf16>
+  %direct_value = vector.extract %direct[0] : vector<4xbf16> -> bf16
+  %staged_value = vector.extract %staged[0] : vector<4xbf16> -> bf16
+  func.return %direct_value, %staged_value : bf16, bf16
+}
+
+// ----
+func.def @f64_staged_narrowing() -> (bf16, bf16) {
+  %direct_value = scalar.constant 1.0078125 : bf16
+  %staged_value = scalar.constant 1.0 : bf16
+  func.return %direct_value, %staged_value : bf16, bf16
+}
+
+// ====
+
+// A NaN or dynamic lane prevents whole-vector materialization while an exact
+// sibling lane still folds. Classification does not invent a NaN payload.
+func.def @f64_partial_narrowing(%dynamic: f64) -> (vector<3xbf16>, i1, bf16) {
+  %nan_bits = scalar.constant 9218868437227405313 : i64
+  %nan = scalar.bitcast %nan_bits : i64 to f64
+  %above_midpoint = scalar.constant 1.0039062500000002 : f64
+  %input = vector.from_elements %nan, %above_midpoint, %dynamic : vector<3xf64>
+  %narrow = vector.fptrunc %input : vector<3xf64> to vector<3xbf16>
+  %classes = vector.isnanf %narrow : vector<3xbf16> -> vector<3xi1>
+  %is_nan = vector.extract %classes[0] : vector<3xi1> -> i1
+  %exact = vector.extract %narrow[1] : vector<3xbf16> -> bf16
+  func.return %narrow, %is_nan, %exact : vector<3xbf16>, i1, bf16
+}
+
+// ----
+func.def @f64_partial_narrowing(%dynamic: f64) -> (vector<3xbf16>, i1, bf16) {
+  %nan_bits = scalar.constant 9218868437227405313 : i64
+  %nan = scalar.bitcast %nan_bits : i64 to f64
+  %above_midpoint = scalar.constant 1.0039062500000002 : f64
+  %input = vector.from_elements %nan, %above_midpoint, %dynamic : vector<3xf64>
+  %narrow = vector.fptrunc %input : vector<3xf64> to vector<3xbf16>
+  %is_nan = scalar.constant true : i1
+  %exact = scalar.constant 1.0078125 : bf16
+  func.return %narrow, %is_nan, %exact : vector<3xbf16>, i1, bf16
 }

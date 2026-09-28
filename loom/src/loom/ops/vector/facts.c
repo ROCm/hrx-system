@@ -3391,12 +3391,6 @@ static void loom_vector_float_truncate_transfer(loom_scalar_type_t result_type,
     *out = loom_value_facts_known_nan();
   } else if (!loom_value_facts_as_exact_float(source_type, *input, &value)) {
     *out = loom_value_facts_unknown();
-  } else if (source_type == LOOM_SCALAR_TYPE_F64 &&
-             result_type != LOOM_SCALAR_TYPE_F32 &&
-             value != (double)(float)value) {
-    // Narrow-format helpers round through F32. A non-representable F64 value
-    // can double-round across a destination midpoint, so it is not foldable.
-    *out = loom_value_facts_unknown();
   } else {
     *out = loom_value_facts_exact_float(result_type, value);
   }
