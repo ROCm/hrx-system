@@ -1,0 +1,15 @@
+// RUN: emit source-low target=spirv:vulkan1.3+bda output=none
+
+func.def @requires_int8(%input: i8) -> (i1) {
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_i_equal.i8", constraint_key="descriptor_available"}
+  %result = scalar.trunci %input : i8 to i1
+  func.return %result : i1
+}
+
+// ====
+
+func.def @requires_int16(%input: i16) -> (i1) {
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_i_equal.i16", constraint_key="descriptor_available"}
+  %result = scalar.trunci %input : i16 to i1
+  func.return %result : i1
+}

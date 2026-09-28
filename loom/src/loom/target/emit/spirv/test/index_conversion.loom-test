@@ -199,11 +199,11 @@ func.def target(@target) @index_address_conversions(%flag: i1, %i8: i8, %i16: i1
  %flag_index = OpSelect %int %flag %int_1 %int_0_0
 %flag_offset = OpSelect %ulong %flag %ulong_1 %ulong_0
          %71 = OpBitwiseAnd %int %coordinate %int_1
-%index_low_bit = OpINotEqual %bool %71 %int_0_0
+%index_low_bit = OpIEqual %bool %71 %int_1
          %74 = OpUConvert %uint %byte_offset
          %75 = OpBitcast %int %74
          %76 = OpBitwiseAnd %int %75 %int_1
-%offset_low_bit = OpINotEqual %bool %76 %int_0_0
+%offset_low_bit = OpIEqual %bool %76 %int_1
          %78 = OpBitcast %uint %coordinate
  %from_index = OpUConvert %ulong %78
          %81 = OpBitcast %uchar %i8

@@ -80,6 +80,7 @@ from loom.target.arch.spirv.contracts.memory import (
 from loom.target.arch.spirv.contracts.ordinary_vector import (
     SPIRV_ORDINARY_VECTOR_CONTRACT_CASES,
 )
+from loom.target.arch.spirv.contracts.predicate import integer_to_boolean_rule
 from loom.target.arch.spirv.contracts.subgroup import SPIRV_SUBGROUP_CONTRACT_CASES
 from loom.target.arch.spirv.cooperative_matrix import (
     COOPERATIVE_MATRIX_CASES,
@@ -1425,6 +1426,10 @@ def _vector_float_binary_rules() -> tuple[DescriptorRule, ...]:
 def _conversion_rules() -> tuple[DescriptorRule, ...]:
     rules = [_conversion_rule(row) for row in DIRECT_SCALAR_CONVERSIONS]
     rules.extend(_unsigned_conversion_rule(row) for row in UNSIGNED_SCALAR_CONVERSIONS)
+    rules.extend(
+        integer_to_boolean_rule(scalar_conversion.scalar_trunci, scalar.source_type)
+        for scalar in SIGNED_INTEGER_SCALAR_ALU_TYPES
+    )
     return tuple(rules)
 
 

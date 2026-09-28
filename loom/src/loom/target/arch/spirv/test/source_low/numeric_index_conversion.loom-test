@@ -47,11 +47,11 @@ low.func.def target<spirv.logical.core> abi(shader_entry_point) @boolean_address
   %22 = OpConstant.offset64 0
   %flag_offset = OpSelect.offset64 %flag, %21, %22
   %25 = OpBitwiseAnd %coordinate, %18
-  %index_low_bit = OpINotEqual %25, %19
-  %28 = OpUConvert.offset64.u32 %byte_offset
-  %29 = OpBitcast.u32.i32 %28
-  %31 = OpBitwiseAnd %29, %18
-  %offset_low_bit = OpINotEqual %31, %19
+  %index_low_bit = OpIEqual %25, %18
+  %27 = OpUConvert.offset64.u32 %byte_offset
+  %28 = OpBitcast.u32.i32 %27
+  %30 = OpBitwiseAnd %28, %18
+  %offset_low_bit = OpIEqual %30, %18
   return %flag_index, %flag_offset, %index_low_bit, %offset_low_bit
 }
 

@@ -71,8 +71,7 @@ low.func.def target<spirv.logical.core> abi(shader_entry_point) @narrow_coordina
   %halfword = OpSConvert.i32.i16 %coordinate
   %13 = OpConstant.i32 1 : reg<spirv.id : index>
   %14 = OpBitwiseAnd %coordinate, %13
-  %15 = OpConstant.i32 0 : reg<spirv.id : index>
-  %low_bit = OpINotEqual %14, %15
+  %low_bit = OpIEqual %14, %13
   return %byte, %halfword, %low_bit
 }
 
@@ -95,8 +94,7 @@ low.func.def target<spirv.logical.core> abi(shader_entry_point) @narrow_offset_p
   %16 = OpBitcast.u32.i32 %15
   %17 = OpConstant.i32 1 : reg<spirv.id : index>
   %18 = OpBitwiseAnd %16, %17
-  %19 = OpConstant.i32 0 : reg<spirv.id : index>
-  %low_bit = OpINotEqual %18, %19
+  %low_bit = OpIEqual %18, %17
   return %byte, %halfword, %low_bit
 }
 
@@ -152,6 +150,6 @@ low.func.def target<spirv.logical.core> abi(shader_entry_point) @varying_predica
   %byte_offset = OpSelect.offset64 %negative, %25, %17
   %raw_coordinate = OpCopyObject.i32 %raw : reg<spirv.id : index>
   %30 = OpBitwiseAnd %raw_coordinate, %22
-  %low_bit = OpINotEqual %30, %23
+  %low_bit = OpIEqual %30, %22
   return %coordinate, %byte_offset, %low_bit
 }

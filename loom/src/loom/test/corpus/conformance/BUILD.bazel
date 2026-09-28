@@ -77,10 +77,7 @@ loom_test(
 loom_test(
     name = "predicate_truncation_test",
     srcs = ["predicate_truncation.loom"],
-    execution_profiles = [
-        AMDGPU_HARDWARE_PROFILE,
-        AMDGPU_ACCESS_PROFILE,
-    ],
+    execution_profiles = GPU_HARDWARE_PROFILES + [AMDGPU_ACCESS_PROFILE],
 )
 
 loom_test(

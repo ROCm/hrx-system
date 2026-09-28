@@ -21,6 +21,7 @@ iree_py_library(
     "logical_core.py"
     "memory.py"
     "ordinary_vector.py"
+    "predicate.py"
     "subgroup.py"
   DEPS
     loom::py::loom::core

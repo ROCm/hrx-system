@@ -12,6 +12,7 @@ from loom.dialect.index import defs as index
 from loom.dialect.scf import defs as scf
 from loom.dsl import Op
 from loom.error.spirv import ERR_SPIRV_026, ERR_SPIRV_027
+from loom.target.arch.spirv.contracts.predicate import integer_to_boolean_rule
 from loom.target.arch.spirv.descriptors import SPIRV_LOGICAL_CORE_DESCRIPTOR_SET
 from loom.target.arch.spirv.scalar_alu import (
     INTEGER_COMPARE_PREDICATES,
@@ -272,68 +273,12 @@ def _boolean_to_address_cast_rule(
     )
 
 
-def _address_to_boolean_cast_rule(
-    source_type: TypePattern,
-) -> DescriptorRule:
-    compare = _descriptor("spirv.op_i_not_equal.i32")
-    bitwise_and = _descriptor("spirv.op_bitwise_and.i32")
-    prefix: tuple[EmitDescriptorOp, ...] = ()
-    input_ref = ValueRef.operand("input")
-    if source_type == _OFFSET:
-        truncate = _descriptor("spirv.op_uconvert.offset64.u32")
-        prefix = (
-            _emit(
-                truncate,
-                operands={"input": input_ref},
-                results={"dst": ValueRef.temporary("unsigned_low_bits")},
-                result_types={"dst": DescriptorResultType()},
-            ),
-            _integer_view_emit(
-                "spirv.op_bitcast.u32.i32",
-                ValueRef.temporary("unsigned_low_bits"),
-                ValueRef.temporary("low_bits"),
-                _I32,
-            ),
-        )
-        input_ref = ValueRef.temporary("low_bits")
-    return DescriptorRule(
-        source_op=index.index_cast,
-        descriptor=compare,
-        guards=(
-            Guard.value_type("input", source_type),
-            Guard.value_type("result", _I1),
-        ),
-        emit=(
-            *prefix,
-            _address_constant_emit(_INDEX, 1, "one"),
-            _emit(
-                bitwise_and,
-                operands={
-                    "lhs": input_ref,
-                    "rhs": ValueRef.temporary("one"),
-                },
-                results={"dst": ValueRef.temporary("low_bit")},
-                result_types={"dst": _I32},
-            ),
-            _address_constant_emit(_INDEX, 0, "zero"),
-            _emit(
-                compare,
-                operands={
-                    "lhs": ValueRef.temporary("low_bit"),
-                    "rhs": ValueRef.temporary("zero"),
-                },
-                results={"dst": ValueRef.result("result")},
-            ),
-        ),
-    )
-
-
 def _boolean_address_cast_rules() -> tuple[DescriptorRule, ...]:
     return (
         _boolean_to_address_cast_rule(_INDEX, "spirv.op_select.i32"),
         _boolean_to_address_cast_rule(_OFFSET, "spirv.op_select.offset64"),
-        _address_to_boolean_cast_rule(_INDEX),
-        _address_to_boolean_cast_rule(_OFFSET),
+        integer_to_boolean_rule(index.index_cast, "index"),
+        integer_to_boolean_rule(index.index_cast, "offset"),
     )
 
 
