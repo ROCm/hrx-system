@@ -100,8 +100,10 @@ loom_cc_library(
     "remap.h"
   SRCS
     "remap.c"
+    "remap_payload.c"
   DEPS
     iree::base
+    iree::base::internal
     iree::base::internal::arena
     loom::ir
   PUBLIC

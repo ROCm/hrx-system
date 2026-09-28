@@ -219,6 +219,54 @@ TEST_F(MaterializeTest, ClonesCoResultDynamicTypeReferences) {
             cloned_results.values[1]);
 }
 
+TEST_F(MaterializeTest, ClonesSharedArgumentTypesWithTargetOwnedPayloads) {
+  const auto index = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_value_id_t padding;
+  IREE_ASSERT_OK(loom_module_define_value(target_, index, &padding));
+  loom_region_t* source_region;
+  IREE_ASSERT_OK(loom_module_allocate_region(source_, 1, &source_region));
+  auto* source_block = loom_region_entry_block(source_region);
+  loom_value_id_t dimension;
+  IREE_ASSERT_OK(loom_module_define_value(source_, index, &dimension));
+  IREE_ASSERT_OK(loom_block_add_arg(source_, source_block, dimension));
+  loom_type_t type = loom_type_pool(loom_dim_pack_dynamic(dimension));
+  constexpr int kDepth = 64;
+  for (int i = 0; i < kDepth; ++i) {
+    IREE_ASSERT_OK(
+        loom_module_intern_function_type(source_, &type, 1, &type, 1, &type));
+  }
+  loom_value_id_t argument;
+  IREE_ASSERT_OK(loom_module_define_value(source_, type, &argument));
+  IREE_ASSERT_OK(loom_block_add_arg(source_, source_block, argument));
+  loom_builder_t body_builder;
+  loom_builder_initialize(source_, &source_->arena, source_block,
+                          &body_builder);
+  loom_op_t* yield;
+  IREE_ASSERT_OK(loom_test_yield_build(&body_builder, &argument, 1,
+                                       LOOM_LOCATION_UNKNOWN, &yield));
+  auto remap = InitializeRemap();
+  loom_region_t* cloned;
+  IREE_ASSERT_OK(
+      loom_ir_clone_region(&target_builder_, source_region, &remap, &cloned));
+  iree_arena_reset(&remap_arena_);
+  auto* target_block = loom_region_entry_block(cloned);
+  const auto target_dimension = loom_block_arg_id(target_block, 0);
+  const auto target_argument = loom_block_arg_id(target_block, 1);
+  EXPECT_NE(target_dimension, dimension);
+  EXPECT_EQ(loom_test_yield_values(target_block->last_op).values[0],
+            target_argument);
+  type = loom_module_value_type(target_, target_argument);
+  for (int i = 0; i < kDepth; ++i) {
+    const auto* data = loom_type_func_data(type);
+    ASSERT_NE(data, nullptr);
+    ASSERT_EQ(data->arg_count, 1);
+    ASSERT_EQ(data->result_count, 1);
+    EXPECT_TRUE(loom_type_equal(data->types[0], data->types[1]));
+    type = data->types[0];
+  }
+  EXPECT_EQ(loom_type_dim_value_id_at(type, 0), target_dimension);
+}
+
 TEST_F(MaterializeTest, ClonesSegmentedOperandCounts) {
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
   loom_value_id_t source_root = LOOM_VALUE_ID_INVALID;

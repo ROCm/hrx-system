@@ -153,3 +153,35 @@ CHECK: *%first_width*: index, %first*: vector<[%first_width*]xf32>*
 CHECK: *%second_width*: index, %second*: vector<[%second_width*]xf32>*
 CHECK: func.return *
 CHECK-NOT: *func.call*
+
+// ====
+
+// Two callers clone the same parameterized type through a signature and an
+// operation attribute. Both the element and nested callback use each caller's
+// dimension, and the retained attributes survive destruction of clone scratch.
+// RUN: with-checks pass inline-callables,symbol-dce
+
+func.def inline @carry(%width: index, %input: test.array<vector<[%width]xf32>>) -> (test.array<vector<[%width]xf32>>) {
+  %result = test.attrs %input {metadata = {callback = (vector<[%width]xf32>) -> (vector<[%width]xf32>)}} : test.array<vector<[%width]xf32>>
+  func.return %result : test.array<vector<[%width]xf32>>
+}
+
+func.def public @first(%left_width: index, %left: test.array<vector<[%left_width]xf32>>) -> (test.array<vector<[%left_width]xf32>>) {
+  %result = func.call @carry(%left_width, %left) : (index, test.array<vector<[%left_width]xf32>>) -> (test.array<vector<[%left_width]xf32>>)
+  func.return %result : test.array<vector<[%left_width]xf32>>
+}
+
+func.def public @second(%right_width: index, %right: test.array<vector<[%right_width]xf32>>) -> (test.array<vector<[%right_width]xf32>>) {
+  %result = func.call @carry(%right_width, %right) : (index, test.array<vector<[%right_width]xf32>>) -> (test.array<vector<[%right_width]xf32>>)
+  func.return %result : test.array<vector<[%right_width]xf32>>
+}
+
+// ----
+CHECK: func.def public @first(%left_width: index, %left: test.array<vector<[%left_width]xf32>>) -> (test.array<vector<[%left_width]xf32>>) {
+CHECK: * = test.attrs %left {metadata = {callback = (vector<[%left_width]xf32>) -> (vector<[%left_width]xf32>)}} : test.array<vector<[%left_width]xf32>>
+CHECK: func.return * : test.array<vector<[%left_width]xf32>>
+CHECK: func.def public @second(%right_width: index, %right: test.array<vector<[%right_width]xf32>>) -> (test.array<vector<[%right_width]xf32>>) {
+CHECK: * = test.attrs %right {metadata = {callback = (vector<[%right_width]xf32>) -> (vector<[%right_width]xf32>)}} : test.array<vector<[%right_width]xf32>>
+CHECK: func.return * : test.array<vector<[%right_width]xf32>>
+CHECK-NOT: *func.call*
+CHECK-NOT: *func.def inline @carry*

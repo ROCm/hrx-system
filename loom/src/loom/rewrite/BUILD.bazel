@@ -87,11 +87,15 @@ loom_cc_test(
 
 loom_cc_library(
     name = "remap",
-    srcs = ["remap.c"],
+    srcs = [
+        "remap.c",
+        "remap_payload.c",
+    ],
     hdrs = ["remap.h"],
     deps = [
         "//loom/src/loom/ir",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
