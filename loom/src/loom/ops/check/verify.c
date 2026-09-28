@@ -550,7 +550,8 @@ static iree_status_t loom_check_verify_result_pair_observation(
 
 static iree_status_t loom_check_verify_compare_body(
     const loom_module_t* module, const loom_op_t* op,
-    loom_value_slice_t* out_actual_results, bool* out_valid,
+    loom_value_slice_t* out_actual_results,
+    loom_value_slice_t* out_expected_results, bool* out_valid,
     iree_diagnostic_emitter_t emitter) {
   *out_valid = false;
   const loom_attribute_t count_attribute = loom_op_const_attrs(op)[1];
@@ -624,28 +625,23 @@ static iree_status_t loom_check_verify_compare_body(
       .values = block->arg_ids,
       .count = actual_count,
   };
+  *out_expected_results = (loom_value_slice_t){
+      .values = actual_count ? block->arg_ids + actual_count : NULL,
+      .count = actual_count,
+  };
   *out_valid = true;
   return iree_ok_status();
 }
 
-iree_status_t loom_check_compare_verify(const loom_module_t* module,
-                                        const loom_op_t* op,
-                                        iree_diagnostic_emitter_t emitter) {
-  loom_value_slice_t actual_results = {0};
-  bool comparison_valid = false;
-  IREE_RETURN_IF_ERROR(loom_check_verify_compare_body(
-      module, op, &actual_results, &comparison_valid, emitter));
-  if (!comparison_valid) {
-    return iree_ok_status();
-  }
-
-  const loom_symbol_ref_t callee = loom_check_compare_callee(op);
+static iree_status_t loom_check_verify_compare_subject(
+    const loom_module_t* module, const loom_op_t* op, loom_symbol_ref_t callee,
+    loom_value_slice_t parameters, loom_value_slice_t arguments,
+    loom_value_slice_t results, iree_string_view_t result_field,
+    iree_diagnostic_emitter_t emitter) {
   const loom_symbol_t* symbol = loom_check_lookup_subject(module, callee);
   if (!symbol) {
     return iree_ok_status();
   }
-  const loom_value_slice_t parameters = loom_check_compare_call_parameters(op);
-  const loom_value_slice_t arguments = loom_check_compare_arguments(op);
   bool operands_valid = false;
   IREE_RETURN_IF_ERROR(loom_check_verify_subject_operands(
       module, op, symbol, parameters, arguments, &operands_valid, emitter));
@@ -654,16 +650,46 @@ iree_status_t loom_check_compare_verify(const loom_module_t* module,
   }
   if (loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_CALLABLE)) {
     return loom_function_call_contract_verify(
-        module, op, callee, arguments, actual_results,
+        module, op, callee, arguments, results,
         LOOM_FUNCTION_CALL_ARGUMENT_MATCH_FLAG_ALLOW_BUFFER_MATERIALIZATION,
         emitter);
   }
-  if (actual_results.count == 0) {
+  if (results.count == 0) {
     return iree_ok_status();
   }
-  return loom_check_emit_count_mismatch(emitter, op, IREE_SV("actual results"),
-                                        actual_results.count,
-                                        IREE_SV("product results"), 0);
+  return loom_check_emit_count_mismatch(
+      emitter, op, result_field, results.count, IREE_SV("product results"), 0);
+}
+
+iree_status_t loom_check_compare_verify(const loom_module_t* module,
+                                        const loom_op_t* op,
+                                        iree_diagnostic_emitter_t emitter) {
+  loom_value_slice_t actual_results = {0};
+  loom_value_slice_t expected_results = {0};
+  bool comparison_valid = false;
+  IREE_RETURN_IF_ERROR(loom_check_verify_compare_body(
+      module, op, &actual_results, &expected_results, &comparison_valid,
+      emitter));
+  if (!comparison_valid) {
+    return iree_ok_status();
+  }
+
+  const loom_symbol_ref_t callee = loom_check_compare_callee(op);
+  const loom_value_slice_t parameters = loom_check_compare_call_parameters(op);
+  const loom_value_slice_t arguments = loom_check_compare_arguments(op);
+  IREE_RETURN_IF_ERROR(loom_check_verify_compare_subject(
+      module, op, callee, parameters, arguments, actual_results,
+      IREE_SV("actual results"), emitter));
+
+  loom_symbol_ref_t oracle_callee = loom_check_compare_oracle_callee(op);
+  if (!loom_symbol_ref_is_valid(oracle_callee) ||
+      (oracle_callee.module_id == callee.module_id &&
+       oracle_callee.symbol_id == callee.symbol_id)) {
+    return iree_ok_status();
+  }
+  return loom_check_verify_compare_subject(
+      module, op, oracle_callee, parameters, arguments, expected_results,
+      IREE_SV("expected results"), emitter);
 }
 
 iree_status_t loom_check_invoke_verify(const loom_module_t* module,

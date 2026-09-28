@@ -274,6 +274,10 @@ test.func @update(%storage: tensor<4xi32>, %tail: tensor<2xi32>) {
   test.yield
 }
 
+test.func @update_oracle(%storage: tensor<4xi32>, %tail: tensor<2xi32>) {
+  test.yield
+}
+
 test.func @identity(%input: i32) -> (i32) {
   test.yield %input : i32
 }
@@ -286,7 +290,7 @@ check.scenario public @batched configure[2](%configuration: index, %configuratio
     %seed = check.entropy.read %input_stream[0] : check.entropy -> i64
     %storage = check.generate.random.uniform seed(%seed) range(-16 to 16) : tensor<4xi32>
     %tail = check.tensor.view %storage offset(8) : tensor<4xi32> -> tensor<2xi32>
-    check.compare<@update>(%storage, %tail) : (tensor<4xi32>, tensor<2xi32>) -> () {
+    check.compare<@update, @update_oracle>(%storage, %tail) : (tensor<4xi32>, tensor<2xi32>) -> () {
       check.expect.bitwise actual(%storage) expected(%storage) : tensor<4xi32>
       check.expect.bitwise actual(%tail) expected(%tail) : tensor<2xi32>
     }
@@ -397,6 +401,8 @@ TEST_F(ScenarioExecutorTest, PreparesBeforeMaterializationAndExecutesBatches) {
   ASSERT_EQ(plan.issue_count, 0u);
   ASSERT_EQ(plan.scenario_count, 1u);
   const loom_testbench_scenario_plan_t& scenario = plan.scenarios[0];
+  EXPECT_NE(scenario.trials[0].action.target.callee_ref.symbol_id,
+            scenario.trials[0].action.oracle.callee_ref.symbol_id);
 
   loom_testbench_value_materializer_options_t materializer =
       MaterializerOptions();
@@ -509,6 +515,8 @@ TEST_F(ScenarioExecutorTest, BenchmarksIndependentTargetOnlyReplicas) {
   ASSERT_EQ(plan.issue_count, 0u);
   ASSERT_EQ(plan.scenario_count, 1u);
   const loom_testbench_scenario_plan_t& scenario = plan.scenarios[0];
+  EXPECT_NE(scenario.trials[0].action.target.callee_ref.symbol_id,
+            scenario.trials[0].action.oracle.callee_ref.symbol_id);
 
   loom_testbench_value_materializer_options_t materializer =
       MaterializerOptions();

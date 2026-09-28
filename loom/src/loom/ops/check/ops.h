@@ -486,7 +486,7 @@ iree_status_t loom_check_trial_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_CHECK_COMPARE: Ends a trial by invoking one subject through independent target and oracle realizations and checking their explicit typed observations.
+// LOOM_OP_CHECK_COMPARE: Ends a trial by independently invoking target and oracle subjects and checking their explicit typed observations. A single subject is used for both profiles; an optional second subject supplies the oracle implementation.
 // check.compare<@logarithm>(%bits) : (i32) -> [actual(%actual: f32), expected(%expected: f32)] {
 //   check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(1.0e-6) nan(same) : f32
 // }
@@ -495,10 +495,17 @@ LOOM_DEFINE_SEGMENTED_OPERANDS(loom_check_compare_call_parameters, 0)
 LOOM_DEFINE_SEGMENTED_OPERANDS(loom_check_compare_arguments, 1)
 LOOM_DEFINE_ATTR_SYMBOL(loom_check_compare_callee, 0)
 LOOM_DEFINE_ATTR_I64(loom_check_compare_actual_count, 1)
+LOOM_DEFINE_ATTR_SYMBOL(loom_check_compare_oracle_callee, 2)
 LOOM_DEFINE_REGION(loom_check_compare_comparison, 0)
+enum loom_check_compare_build_flag_bits_e {
+  LOOM_CHECK_COMPARE_BUILD_FLAG_HAS_ORACLE_CALLEE = 1u << 0,
+};
+typedef uint32_t loom_check_compare_build_flags_t;
 iree_status_t loom_check_compare_build(
     loom_builder_t* builder,
+    loom_check_compare_build_flags_t build_flags,
     loom_symbol_ref_t callee,
+    loom_optional loom_symbol_ref_t oracle_callee,
     const loom_value_id_t* call_parameters,
     iree_host_size_t call_parameters_count,
     const loom_value_id_t* arguments,

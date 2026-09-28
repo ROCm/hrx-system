@@ -1,4 +1,22 @@
-func.def @scenario_alias_update(%first: buffer, %second: buffer, %delta: index) {
+kernel.def @scenario_alias_update() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%first: buffer, %second: buffer, %delta: index) {
+  %origin = index.constant 0 : offset
+  %delta_i32 = index.cast %delta : index to i32
+  %first_aligned = buffer.assume.alignment %first {minimum_alignment = 4} : buffer
+  %second_aligned = buffer.assume.alignment %second {minimum_alignment = 4} : buffer
+  %first_view = buffer.view %first_aligned[%origin] : buffer -> view<4xi32>
+  %second_view = buffer.view %second_aligned[%origin] : buffer -> view<4xi32>
+  %value = view.load %second_view[0] : view<4xi32> -> i32
+  %updated = scalar.addi %value, %delta_i32 : i32
+  view.store %updated, %first_view[1] : i32, view<4xi32>
+  %aliased = view.load %second_view[0] : view<4xi32> -> i32
+  view.store %aliased, %second_view[1] : i32, view<4xi32>
+  kernel.return
+}
+
+func.def @scenario_alias_update_oracle(%first: buffer, %second: buffer, %delta: index) {
   %origin = index.constant 0 : offset
   %delta_i32 = index.cast %delta : index to i32
   %first_aligned = buffer.assume.alignment %first {minimum_alignment = 4} : buffer
@@ -18,7 +36,7 @@ check.scenario public @scenario_compare_hal_vm {
     %storage = check.generate.fill value(11) : tensor<8xi32>
     %first = check.tensor.view %storage offset(4) : tensor<8xi32> -> tensor<4xi32>
     %second = check.tensor.view %storage offset(8) : tensor<8xi32> -> tensor<4xi32>
-    check.compare<@scenario_alias_update>(%first, %second, %trial) : (tensor<4xi32>, tensor<4xi32>, index) -> () {
+    check.compare<@scenario_alias_update, @scenario_alias_update_oracle>(%first, %second, %trial) : (tensor<4xi32>, tensor<4xi32>, index) -> () {
       check.expect.equal actual(%storage) expected(%storage) : tensor<8xi32>
       check.expect.equal actual(%first) expected(%first) : tensor<4xi32>
       check.expect.equal actual(%second) expected(%second) : tensor<4xi32>

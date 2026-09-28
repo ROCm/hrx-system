@@ -158,12 +158,10 @@ loom_testbench_scenario_subject_invocation_kind(const loom_symbol_t* symbol) {
 
 static bool loom_testbench_plan_scenario_invocation(
     const loom_module_t* module, const loom_op_t* action_op,
-    const loom_value_id_t* result_value_ids, iree_host_size_t result_count,
+    loom_symbol_ref_t callee, const loom_value_id_t* result_value_ids,
+    iree_host_size_t result_count,
     loom_testbench_invocation_plan_t* out_invocation) {
   const bool is_compare = loom_check_compare_isa(action_op);
-  const loom_symbol_ref_t callee = is_compare
-                                       ? loom_check_compare_callee(action_op)
-                                       : loom_check_invoke_callee(action_op);
   const loom_value_slice_t call_parameters =
       is_compare ? loom_check_compare_call_parameters(action_op)
                  : loom_check_invoke_call_parameters(action_op);
@@ -269,14 +267,24 @@ static bool loom_testbench_plan_scenario_action(
         block->arg_count - actual_count != actual_count) {
       return false;
     }
-    if (!loom_testbench_plan_scenario_invocation(module, action_op,
-                                                 block->arg_ids, actual_count,
-                                                 &out_action->target)) {
+    const loom_symbol_ref_t target_callee =
+        loom_check_compare_callee(action_op);
+    if (!loom_testbench_plan_scenario_invocation(
+            module, action_op, target_callee, block->arg_ids, actual_count,
+            &out_action->target)) {
       return false;
     }
-    out_action->oracle = out_action->target;
-    out_action->oracle.result_value_ids =
-        actual_count == 0 ? NULL : block->arg_ids + actual_count;
+    loom_symbol_ref_t oracle_callee =
+        loom_check_compare_oracle_callee(action_op);
+    if (!loom_symbol_ref_is_valid(oracle_callee)) {
+      oracle_callee = target_callee;
+    }
+    if (!loom_testbench_plan_scenario_invocation(
+            module, action_op, oracle_callee,
+            actual_count == 0 ? NULL : block->arg_ids + actual_count,
+            actual_count, &out_action->oracle)) {
+      return false;
+    }
     loom_testbench_plan_compare_expectations(
         module, scenario_index, scenario_ref, action_op, expectations,
         inout_expectation_count, issues, issue_capacity, inout_issue_count,
@@ -287,7 +295,8 @@ static bool loom_testbench_plan_scenario_action(
     out_action->kind = LOOM_TESTBENCH_SCENARIO_ACTION_INVOKE;
     const loom_value_slice_t results = loom_check_invoke_results(action_op);
     return loom_testbench_plan_scenario_invocation(
-        module, action_op, results.values, results.count, &out_action->target);
+        module, action_op, loom_check_invoke_callee(action_op), results.values,
+        results.count, &out_action->target);
   }
   return false;
 }

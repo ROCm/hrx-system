@@ -291,8 +291,7 @@ _SUBJECT_ACTION_ATTRS = [
     ),
 ]
 
-_SUBJECT_CALL_PREFIX: list[FormatElement] = [
-    TemplateParam("callee"),
+_SUBJECT_CALL_SUFFIX: list[FormatElement] = [
     OptionalGroup(
         [GLUE, LBRACKET, Refs("call_parameters"), RBRACKET],
         anchor="call_parameters",
@@ -308,10 +307,31 @@ _SUBJECT_CALL_PREFIX: list[FormatElement] = [
     ),
 ]
 
+_SUBJECT_CALL_PREFIX: list[FormatElement] = [
+    TemplateParam("callee"),
+    *_SUBJECT_CALL_SUFFIX,
+]
+
+_COMPARE_CALL_PREFIX: list[FormatElement] = [
+    GLUE,
+    kw("<"),
+    GLUE,
+    SymbolRef("callee"),
+    OptionalGroup(
+        [COMMA, SymbolRef("oracle_callee")],
+        anchor="oracle_callee",
+    ),
+    GLUE,
+    kw(">"),
+    *_SUBJECT_CALL_SUFFIX,
+]
+
 check_compare = Op(
     "check.compare",
     group=check_ops,
-    doc=("Ends a trial by invoking one subject through independent target and oracle realizations and checking their explicit typed observations."),
+    doc=(
+        "Ends a trial by independently invoking target and oracle subjects and checking their explicit typed observations. A single subject is used for both profiles; an optional second subject supplies the oracle implementation."
+    ),
     operands=list(_SUBJECT_ACTION_OPERANDS),
     attrs=[
         *_SUBJECT_ACTION_ATTRS,
@@ -320,6 +340,16 @@ check_compare = Op(
             "i64",
             optional=True,
             doc="Number of leading comparison-region arguments bound to target results.",
+        ),
+        AttrDef(
+            "oracle_callee",
+            "symbol",
+            optional=True,
+            symbol_ref=SymbolReference(
+                "scenario oracle subject",
+                ["callable", "kernel", "command_program", "pipeline"],
+            ),
+            doc="Optional oracle subject; omission uses the target subject through the oracle profile.",
         ),
     ],
     regions=[
@@ -338,7 +368,7 @@ check_compare = Op(
     ],
     verify="loom_check_compare_verify",
     format=[
-        *_SUBJECT_CALL_PREFIX,
+        *_COMPARE_CALL_PREFIX,
         LPAREN,
         TypesOf("arguments"),
         RPAREN,
@@ -372,6 +402,7 @@ check_compare = Op(
     ],
     examples=[
         "check.compare<@logarithm>(%bits) : (i32) -> [actual(%actual: f32), expected(%expected: f32)] {\n  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(1.0e-6) nan(same) : f32\n}",
+        "check.compare<@logarithm, @logarithm_oracle>(%bits) : (i32) -> [actual(%actual: f32), expected(%expected: f32)] {\n  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(1.0e-6) nan(same) : f32\n}",
         "check.compare<@update>(%storage) : (tensor<256xf32>) -> () {\n  check.expect.bitwise actual(%storage) expected(%storage) : tensor<256xf32>\n}",
     ],
 )

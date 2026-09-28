@@ -62,6 +62,8 @@ check.case @provider_case {
 // depending on the traversal order of its siblings.
 func.decl @logarithm(%bits: i32) -> (f32, vector<4xf32>)
 
+func.decl @logarithm_oracle(%bits: i32) -> (f32, vector<4xf32>)
+
 func.decl @dependent_result() -> (%width: index, vector<[%width]xf32>)
 
 check.scenario public @math_scenario {
@@ -69,7 +71,7 @@ check.scenario public @math_scenario {
     %pair_entropy = check.entropy.fork %entropy name("input_pair") : check.entropy
     %word = check.entropy.read %pair_entropy[%trial] : check.entropy -> i64
     %bits = check.literal value(1065353216) : i32
-    check.compare<@logarithm>(%bits) : (i32) -> [actual(%actual_log2: f32, %actual_exp2: vector<4xf32>), expected(%expected_log2: f32, %expected_exp2: vector<4xf32>)] {
+    check.compare<@logarithm, @logarithm_oracle>(%bits) : (i32) -> [actual(%actual_log2: f32, %actual_exp2: vector<4xf32>), expected(%expected_log2: f32, %expected_exp2: vector<4xf32>)] {
       check.expect.close actual(%actual_log2) expected(%expected_log2) atol(0.0) rtol(9.9999999999999995e-07) nan(same) : f32
       check.expect.close actual(%actual_exp2) expected(%expected_exp2) atol(0.0) rtol(9.9999999999999995e-07) nan(same) : vector<4xf32>
     }

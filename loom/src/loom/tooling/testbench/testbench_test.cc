@@ -344,6 +344,49 @@ check.benchmark<@configured> @configured_throughput
   loom_module_free(module);
 }
 
+TEST_F(TestbenchTest, PlansDistinctKernelAndOracleSubjects) {
+  loom_module_t* module = ParseModule(R"(
+kernel.decl @subgroup_target() launch(%storage: buffer)
+
+test.func @subgroup_oracle(%storage: buffer) {
+  test.yield
+}
+
+check.scenario @subgroup_comparison {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(0) : tensor<4xi32>
+    check.compare<@subgroup_target, @subgroup_oracle>(%storage) : (tensor<4xi32>) -> () {
+      check.expect.equal actual(%storage) expected(%storage) : tensor<4xi32>
+    }
+  }
+  check.return
+}
+)");
+  ASSERT_NE(module, nullptr);
+
+  loom_testbench_module_plan_t plan = {};
+  IREE_ASSERT_OK(
+      loom_testbench_plan_module(module, nullptr, &plan_arena_, &plan));
+
+  ASSERT_EQ(plan.scenario_count, 1u);
+  ASSERT_EQ(plan.scenarios[0].trial_count, 1u);
+  const loom_testbench_scenario_action_plan_t& action =
+      plan.scenarios[0].trials[0].action;
+  EXPECT_EQ(action.kind, LOOM_TESTBENCH_SCENARIO_ACTION_COMPARE);
+  EXPECT_EQ(action.target.kind, LOOM_TESTBENCH_INVOCATION_KERNEL_LAUNCH);
+  EXPECT_EQ(action.oracle.kind, LOOM_TESTBENCH_INVOCATION_FUNCTION_CALL);
+  EXPECT_NE(action.target.callee_ref.symbol_id,
+            action.oracle.callee_ref.symbol_id);
+  EXPECT_EQ(action.target.input_count, 1u);
+  EXPECT_EQ(action.oracle.input_count, 1u);
+  EXPECT_EQ(action.target.input_value_ids[0], action.oracle.input_value_ids[0]);
+  EXPECT_EQ(action.target.result_count, 0u);
+  EXPECT_EQ(action.oracle.result_count, 0u);
+  EXPECT_EQ(plan.issue_count, 0u);
+
+  loom_module_free(module);
+}
+
 TEST_F(TestbenchTest, PlansValueSourcesAndFileWrites) {
   loom_module_t* module = ParseModule(R"(
 check.case @sources {

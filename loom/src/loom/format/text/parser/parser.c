@@ -58,6 +58,10 @@ loom_token_kind_t loom_keyword_token_kind(uint16_t keyword_id) {
       return LOOM_TOKEN_LBRACE;
     case LOOM_KW_RBRACE:
       return LOOM_TOKEN_RBRACE;
+    case LOOM_KW_LANGLE:
+      return LOOM_TOKEN_LANGLE;
+    case LOOM_KW_RANGLE:
+      return LOOM_TOKEN_RANGLE;
     case LOOM_KW_X:
       return LOOM_TOKEN_DIM_X;
     default:
@@ -87,6 +91,10 @@ iree_status_t loom_parse_keyword(loom_parser_t* parser, uint16_t keyword_id) {
       return loom_parser_expect(parser, LOOM_TOKEN_LBRACE, NULL);
     case LOOM_KW_RBRACE:
       return loom_parser_expect(parser, LOOM_TOKEN_RBRACE, NULL);
+    case LOOM_KW_LANGLE:
+      return loom_parser_expect(parser, LOOM_TOKEN_LANGLE, NULL);
+    case LOOM_KW_RANGLE:
+      return loom_parser_expect(parser, LOOM_TOKEN_RANGLE, NULL);
     case LOOM_KW_X: {
       parser->tokenizer.in_dim_list = true;
       iree_status_t status = loom_parser_expect(parser, LOOM_TOKEN_DIM_X, NULL);

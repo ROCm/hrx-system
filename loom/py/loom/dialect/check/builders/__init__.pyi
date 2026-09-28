@@ -231,6 +231,7 @@ class CheckBuilder(DialectBuilder):
         self,
         *,
         callee: str,
+        oracle_callee: str | None = ...,
         call_parameters: list[ValueRef] = ...,
         arguments: list[ValueRef] = ...,
         actual_args: Sequence[tuple[str, Type]] = ...,

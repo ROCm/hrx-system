@@ -210,6 +210,13 @@ executes the named subject through the target and oracle profiles, while
 [`check.invoke`](../reference/dialects/check/ops/invoke.md) executes only the
 target.
 
+`check.compare<@subject>` compiles the same semantic subject through both
+profiles. When the executable target and semantic oracle need different Loom
+subjects, `check.compare<@target, @target_oracle>` names them in execution
+order: the first subject produces `actual` observations and the second produces
+`expected` observations. Both subjects receive independent realizations of the
+same authored arguments and must satisfy their corresponding result signature.
+
 This scenario varies a deterministic word, calls the same resultless function
 in both profiles, and checks the complete mutable state. The linked production
 module supplies the function definition:
