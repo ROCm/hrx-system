@@ -753,14 +753,10 @@ func.def @exact_product_reduce_stays_separate(%lhs: vector<4xf32>, %rhs: vector<
 
 // ====
 
-// Extracting a scalar from a statically empty axis observes an impossible lane,
-// but a dead observation folds away before it reaches a poison boundary.
+// An empty axis has no legal scalar extraction, even when the result is dead.
 func.def @extract_from_empty_axis(%v: vector<0xf32>) {
+  // ERROR@+1: SUBRANGE/004
   %r = vector.extract %v[0] : vector<0xf32> -> f32
-  func.return
-}
-// ----
-func.def @extract_from_empty_axis(%v: vector<0xf32>) {
   func.return
 }
 

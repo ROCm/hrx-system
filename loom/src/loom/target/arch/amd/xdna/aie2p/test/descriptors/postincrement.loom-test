@@ -37,7 +37,8 @@ low.func.def target<amd.xdna.aie2p.core> @observable_updates(%pointer: reg<aie2p
 
 low.func.def target<amd.xdna.aie2p.core> @address_updates(%pointer: reg<aie2p.ep>, %step: reg<aie2p.er>) -> (reg<aie2p.ep>) asm {
   %modifier = mov.modifier %step
-  %unused = padda %pointer, 64
+  %unused_pointer = copy %pointer : reg<aie2p.ep> -> reg<aie2p.ep>
+  %unused = padda %unused_pointer, 64
   %first = padda.modifier %pointer, %modifier
   %second = paddb %first, -64
   %third = padds.modifier %second, %modifier

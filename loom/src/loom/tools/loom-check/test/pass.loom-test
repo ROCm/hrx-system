@@ -38,3 +38,19 @@ func.def @named_pipeline(%value: i32) {
 func.def @pure_identity(%value: i32) -> (i32) {
   func.return %value : i32
 }
+
+// ====
+// RUN: pass canonicalize,dce
+
+// Verification must precede a fold that would erase the invalid bitwise op.
+func.def @invalid_mask(%coordinate: offset) -> (offset) {
+  %bounded = index.assume %coordinate [range(%coordinate, 0, 255)] : offset
+  %stride = index.constant 256 : offset
+  %mask = index.constant 255 : offset
+  %shifted = index.add %bounded, %stride : offset
+  // ERROR@+3: TYPE/003 "lhs"
+  // ERROR@+2: TYPE/003 "rhs"
+  // ERROR@+1: TYPE/004 "result"
+  %result = index.andi %shifted, %mask : offset
+  func.return %result : offset
+}

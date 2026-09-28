@@ -806,3 +806,22 @@ low.func.def target<test.low.core> @portable_caller(%value: reg<test.i32>) -> (r
   %result = low.func.call @portable(%value) : (reg<test.i32>) -> (reg<test.i32>)
   return %result
 }
+
+// ====
+
+// Physical storage projections require a statically rooted storage handle.
+test.target<low_core> @test_target
+
+low.kernel.def target<test.low.core>(@test_target) @storage_view_rejects_loop_carrier() asm {
+  %lo = index.constant 0 : index
+  %upper = index.constant 4 : index
+  %step = index.constant 1 : index
+  %storage = storage {byte_alignment = 64, byte_length = 256} : low.storage<workgroup>
+  %initial = storage_view %storage {byte_length = 128} : low.storage<workgroup> -> low.storage<workgroup>
+  %result = scf.for %iv = [%lo to %upper step %step](%carry = %initial : low.storage<workgroup>) -> (low.storage<workgroup>) {
+    // ERROR@+1: STRUCTURE/032 "storage" "low.storage.reserve"
+    %next = low.storage.view %carry {byte_length = 64, offset = 16} : low.storage<workgroup> -> low.storage<workgroup>
+    scf.yield %next : low.storage<workgroup>
+  }
+  return
+}

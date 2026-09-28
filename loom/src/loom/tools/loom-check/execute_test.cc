@@ -1118,36 +1118,38 @@ TEST_F(ExecuteTest, PassModeIgnoresStandaloneFixtureComments) {
   loom_check_result_deinitialize(&result);
 }
 
-TEST_F(ExecuteTest, PassModeVerifiesTransformedModule) {
-  loom_check_result_t result;
-  IREE_ASSERT_OK(
-      ExecuteFirst("// RUN: pass dce\n"
-                   "func.def @f(%a: f32, %b: f32) -> (f32) {\n"
-                   "  %r = test.addi %a, %b : f32\n"
-                   "  func.return %r : f32\n"
-                   "}\n"
-                   "// ----\n"
-                   "func.def @f(%a: f32, %b: f32) -> (f32) {\n"
-                   "  %r = test.addi %a, %b : f32\n"
-                   "  func.return %r : f32\n"
-                   "}\n",
-                   &result));
-  EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL);
-  EXPECT_GT(result.diagnostics.count, 0u);
-  EXPECT_NE(DiagnosticJsonString(result).find("\"emitter\":\"verifier\""),
-            std::string::npos);
-  EXPECT_NE(DetailString(result).find("TYPE/"), std::string::npos);
-  loom_check_result_deinitialize(&result);
+TEST_F(ExecuteTest, PassModesRejectInvalidInputBeforeDeadCodeElimination) {
+  for (const char* mode : {"pass", "pass-report", "compile-report"}) {
+    SCOPED_TRACE(mode);
+    std::string source = std::string("// RUN: ") + mode +
+                         " dce\n"
+                         "func.def @f(%a: f32, %b: f32) -> (f32) {\n"
+                         "  %dead = test.addi %a, %b : f32\n"
+                         "  func.return %a : f32\n"
+                         "}\n";
+    loom_check_result_t result;
+    IREE_ASSERT_OK(ExecuteFirst(source.c_str(), &result));
+    EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL);
+    EXPECT_EQ(result.diagnostics.count, 3u);
+    EXPECT_NE(DiagnosticJsonString(result).find("\"emitter\":\"verifier\""),
+              std::string::npos);
+    EXPECT_NE(DetailString(result).find("TYPE/003"), std::string::npos);
+    EXPECT_NE(DetailString(result).find("TYPE/004"), std::string::npos);
+    EXPECT_FALSE(result.has_actual_output);
+    loom_check_result_deinitialize(&result);
+  }
 }
 
 TEST_F(ExecuteTest, PassModeCapturesPassDiagnostic) {
   loom_check_result_t result;
   IREE_ASSERT_OK(ExecuteFirst(
       "// RUN: pass vector-memory-footprint\n"
-      "func.def @f(%buffer: buffer, %base: offset) {\n"
+      "func.def @f(%buffer: buffer, %base: offset, %origin_input: index) {\n"
+      "  %origin = index.assume %origin_input [range(%origin_input, 0, 7)] : "
+      "index\n"
       "  %layout = encoding.layout.dense : encoding<layout>\n"
       "  %view = buffer.view %buffer[%base] : buffer -> view<8xf32, %layout>\n"
-      "  %loaded = vector.load %view[5] : view<8xf32, %layout> -> "
+      "  %loaded = vector.load %view[%origin] : view<8xf32, %layout> -> "
       "vector<4xf32>\n"
       "  func.return\n"
       "}\n",

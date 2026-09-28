@@ -304,8 +304,9 @@ func.def @subview_refine_preserves_memory_space() -> (i64, i64) {
   %layout = encoding.layout.dense : encoding<layout>
   %scratch = buffer.alloca<workgroup> align(128) %bytes : buffer
   %source = buffer.view %scratch[%base] : buffer -> view<16xf32, %layout>
-  %sub = view.subview %source[4] : view<16xf32, %layout> -> view<8xf32, %layout>
-  %refined = view.refine %sub : view<8xf32, %layout> -> view<4xf32, %layout>
+  %length = index.constant 4 : index
+  %sub = view.subview %source[4] : view<16xf32, %layout> -> view<[%length]xf32, %layout>
+  %refined = view.refine %sub : view<[%length]xf32, %layout> -> view<4xf32, %layout>
   %space = test.fact_view_memory_space %refined : view<4xf32, %layout> -> i64
   %root_align = test.fact_view_root_min_alignment %refined : view<4xf32, %layout> -> i64
   func.return %space, %root_align : i64, i64

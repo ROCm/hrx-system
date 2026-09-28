@@ -147,7 +147,7 @@ func.def @rejects_carried_group_use() {
 // ====
 
 func.def @rejects_unwaited_group() {
-  // ERROR@+1: LOWERING/022 {op_name="kernel.async.group", phase_name="kernel-async-legality"}
+  // ERROR@+1: DOMINANCE/009 "group"
   %group = kernel.async.group -> kernel.async.group
   func.return
 }
@@ -420,7 +420,7 @@ func.def @rejects_transfer_token_escape(%input: buffer) {
   %source = buffer.view %global[%base] : buffer -> view<16xi8>
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %dest = buffer.view %scratch[%base] : buffer -> view<16xi8>
-  // ERROR@+1: LOWERING/040 {op_name="kernel.async.copy", phase_name="kernel-async-legality"}
+  // ERROR@+1: DOMINANCE/010 "copy"
   %copy = kernel.async.copy %source to %dest {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8> to view<16xi8> -> kernel.async.token
   test.use %copy : kernel.async.token
   func.return

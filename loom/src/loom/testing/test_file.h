@@ -27,17 +27,17 @@
 //   // RUN: with-locations roundtrip
 //                           Parse -> print with loc() annotations -> compare.
 //   // RUN: verify          Parse -> verify -> match annotations.
-//   // RUN: pass <pipeline> Parse -> run flat pipeline -> print -> compare.
-//   // RUN: pass @pipeline  Parse -> run named pass.pipeline -> print ->
-//   compare.
+//   // RUN: pass <pipeline> Parse -> verify -> run pipeline -> verify -> print
+//                           -> compare.
+//   // RUN: pass @pipeline  Same boundary with a named pass.pipeline.
 //   // RUN: with-locations pass <pipeline>
 //                           Run pipeline and print loc() annotations.
 //   // RUN: with-low-asm pass <pipeline>
 //                           Run pipeline and preserve authored Low assembly.
 //   // RUN: pass-report <pipeline>
-//                           Parse -> run pipeline -> pass report -> compare.
+//                           Same boundary, comparing a pass report.
 //   // RUN: compile-report <pipeline>
-//                           Parse -> run pipeline -> compile report -> compare.
+//                           Same boundary, comparing a compile report.
 //   // RUN: with-checks <mode> ...
 //                           Match CHECK/CHECK-NOT whole-line glob patterns in
 //                           the expected section instead of an exact golden.

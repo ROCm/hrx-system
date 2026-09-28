@@ -1019,21 +1019,21 @@ func.def @integer_coordinates(%limit: i32) -> (vector<4xi32>, vector<4xi1>) {
 
 // Static aggregate constructors expose lanes but keep vector.from_elements as
 // the explicit vector ABI boundary.
-func.def @static_constant_poison() -> (vector<2xi32>, vector<2xf32>) {
+func.def @static_constant_poison(%x: f32, %y: f32) -> (vector<2xi32>, vector<2xf32>) {
   %c = vector.constant 7 : vector<2xi32>
   %p = vector.poison : vector<2xf32>
-  func.return %c, %p : vector<2xi32>, vector<2xf32>
+  %first = vector.insert %x into %p[0] : f32, vector<2xf32>
+  %filled = vector.insert %y into %first[1] : f32, vector<2xf32>
+  func.return %c, %filled : vector<2xi32>, vector<2xf32>
 }
 
 // ----
-func.def @static_constant_poison() -> (vector<2xi32>, vector<2xf32>) {
-  %7 = scalar.constant 7 : i32
-  %8 = scalar.constant 7 : i32
-  %c = vector.from_elements %7, %8 : vector<2xi32>
-  %4 = scalar.poison : f32
-  %5 = scalar.poison : f32
-  %p = vector.from_elements %4, %5 : vector<2xf32>
-  func.return %c, %p : vector<2xi32>, vector<2xf32>
+func.def @static_constant_poison(%x: f32, %y: f32) -> (vector<2xi32>, vector<2xf32>) {
+  %9 = scalar.constant 7 : i32
+  %10 = scalar.constant 7 : i32
+  %c = vector.from_elements %9, %10 : vector<2xi32>
+  %filled = vector.from_elements %x, %y : vector<2xf32>
+  func.return %c, %filled : vector<2xi32>, vector<2xf32>
 }
 
 // ====

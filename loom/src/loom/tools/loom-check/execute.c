@@ -564,30 +564,32 @@ static iree_status_t loom_check_execute_pass_with_output(
   if (iree_status_is_ok(status)) {
     status = loom_check_parse_pass_target(&pipeline, &target_request);
   }
-  if (iree_status_is_ok(status) &&
-      iree_any_bit_set(target_request.options,
-                       LOOM_CHECK_SOURCE_LOW_OPTION_TARGET)) {
+  // Admit input before any transformation can erase an invalid operation.
+  if (iree_status_is_ok(status)) {
     bool failed_verification = false;
     status = loom_check_verify_pass_module(
         source_resolver, environment, &diagnostic_collector, module,
         &function_versions.list, &failed_verification);
-    if (iree_status_is_ok(status) && !failed_verification) {
-      loom_target_specialization_request_t specialization;
-      status = loom_check_resolve_source_target(
-          module, environment->target_environment, target_request.function_name,
-          &target_request.target, &specialization);
-      if (iree_status_is_ok(status)) {
-        loom_target_specialization_result_t specialization_result = {0};
-        status = loom_target_specialize_functions(
-            environment->target_environment, module,
-            (loom_target_specialization_request_list_t){&specialization, 1},
-            (loom_target_declaration_binding_list_t){0},
-            pass_diagnostic_emitter, &diagnostic_arena, &specialization_result);
-        function_versions = specialization_result.function_versions;
-        run_result.error_count = specialization_result.error_count;
-      }
-    } else if (failed_verification) {
+    if (failed_verification) {
       run_result.error_count = 1;
+    }
+  }
+  if (iree_status_is_ok(status) && run_result.error_count == 0 &&
+      iree_any_bit_set(target_request.options,
+                       LOOM_CHECK_SOURCE_LOW_OPTION_TARGET)) {
+    loom_target_specialization_request_t specialization;
+    status = loom_check_resolve_source_target(
+        module, environment->target_environment, target_request.function_name,
+        &target_request.target, &specialization);
+    if (iree_status_is_ok(status)) {
+      loom_target_specialization_result_t specialization_result = {0};
+      status = loom_target_specialize_functions(
+          environment->target_environment, module,
+          (loom_target_specialization_request_list_t){&specialization, 1},
+          (loom_target_declaration_binding_list_t){0}, pass_diagnostic_emitter,
+          &diagnostic_arena, &specialization_result);
+      function_versions = specialization_result.function_versions;
+      run_result.error_count = specialization_result.error_count;
     }
   }
   loom_pass_report_t pass_report = {0};

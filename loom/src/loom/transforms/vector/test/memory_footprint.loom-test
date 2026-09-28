@@ -593,11 +593,12 @@ func.def @fragment_store_rejects_column_tail_overlap(%buffer: buffer, %base: off
 
 // ====
 
-func.def @static_dense_load_out_of_bounds(%buffer: buffer, %base: offset) {
+func.def @insufficiently_bounded_dense_load_origin(%buffer: buffer, %base: offset, %origin_input: index) {
+  %origin = index.assume %origin_input [range(%origin_input, 0, 7)] : index
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%base] : buffer -> view<8xf32, %layout>
   // ERROR@+1: SUBRANGE/010 {op_name="vector.load", view_axis="0", vector_axis="0", vector_extent="4", view_bound="8", required_origin_upper_bound="4", constraint_key="vector_footprint.full_vector_upper_bound"}
-  %loaded = vector.load %view[5] : view<8xf32, %layout> -> vector<4xf32>
+  %loaded = vector.load %view[%origin] : view<8xf32, %layout> -> vector<4xf32>
   func.return
 }
 

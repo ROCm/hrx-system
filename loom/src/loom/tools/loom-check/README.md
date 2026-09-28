@@ -154,6 +154,11 @@ source-located diagnostics. Functions with authored target bindings can use the
 existing whole-module form without a function or target option. Pipeline-text
 outputs describe the pipeline itself and do not accept specialization requests.
 
+Pass, pass-report, and compile-report modes verify input before any target
+specialization or transformation, and verify successful pipeline output before
+comparison. Input verification errors use the same diagnostic annotations as
+`verify` mode and prevent the pipeline from running.
+
 Pass, pass-report, and compile-report modes accept the same target selection
 before the pipeline. An optional `entry=@function` selects an explicit entry;
 otherwise the sole definition or unique public entry is selected:
