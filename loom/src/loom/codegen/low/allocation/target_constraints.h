@@ -13,6 +13,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/allocation/assignment.h"
+#include "loom/codegen/low/allocation/fixed_storage_index.h"
 #include "loom/codegen/low/allocation/unit_liveness.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/placement.h"
@@ -195,10 +196,6 @@ static inline bool loom_low_allocation_failure_is_present(
     const loom_low_allocation_failure_t* failure) {
   return failure != NULL && !iree_string_view_is_empty(failure->failure_code);
 }
-// Immutable interval-tree entry owned by the resolved target constraints.
-typedef struct loom_low_allocation_fixed_interval_t
-    loom_low_allocation_fixed_interval_t;
-
 // Resolved target-owned constraints used while assigning concrete storage.
 typedef struct loom_low_allocation_target_constraints_t {
   // Module containing the allocated low function.
@@ -225,15 +222,12 @@ typedef struct loom_low_allocation_target_constraints_t {
   iree_host_size_t preassigned_fixed_value_count;
   // Total number of entries in |fixed_values|.
   iree_host_size_t fixed_value_count;
-  // Invocation-local indexes over the immutable resolved fixed assignments.
-  struct {
-    // Acquired domain retained by the owning allocation frame.
-    const loom_local_value_domain_t* value_domain;
-    // One-based fixed-value indices by local ordinal; zero denotes no entry.
-    uint32_t* indices_by_ordinal;
-    // Balanced interval tree in start-point order, with implicit child ranges.
-    loom_low_allocation_fixed_interval_t* intervals;
-  } fixed_index;
+  // Acquired domain retained by the owning allocation frame.
+  const loom_local_value_domain_t* fixed_value_domain;
+  // One-based fixed-value indices by local ordinal; zero denotes no entry.
+  uint32_t* fixed_value_indices_by_ordinal;
+  // Exact storage claims for the immutable resolved fixed assignments.
+  loom_low_allocation_fixed_storage_index_t fixed_index;
   // Resolved whole-function target-owned location ranges.
   loom_low_allocation_resolved_reserved_range_t* reserved_ranges;
   // Number of entries in |reserved_ranges|.
@@ -241,6 +235,9 @@ typedef struct loom_low_allocation_target_constraints_t {
   // Maximum allocated value or move-scratch location end indexed by
   // descriptor register class ID.
   uint32_t* max_assigned_location_end_by_reg_class;
+  // Maximum fixed-value or reserved-range location end indexed by descriptor
+  // register class ID.
+  uint32_t* max_constrained_location_end_by_reg_class;
 } loom_low_allocation_target_constraints_t;
 
 // Resolves budgets and reserved ranges and initializes assignment search
@@ -354,16 +351,6 @@ void loom_low_allocation_target_constraints_rebuild_assignment_location_ends(
 uint32_t loom_low_allocation_target_constraints_assigned_location_search_limit(
     const loom_low_allocation_target_constraints_t* constraints,
     uint16_t reg_class_id, loom_low_allocation_location_kind_t location_kind);
-
-// Returns true when |candidate| violates its own fixed binding or conflicts
-// with another fixed value or implicit physical write. Resolved whole-value
-// tied components share reservations when their concrete storage matches;
-// they never excuse clobbers.
-bool loom_low_allocation_target_constraints_fixed_storage_conflicts(
-    const loom_low_allocation_target_constraints_t* constraints,
-    const loom_low_allocation_unit_liveness_t* unit_liveness,
-    const loom_low_allocation_assignment_t* candidate,
-    const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count);
 
 // Returns true when the location range conflicts with a reserved range.
 bool loom_low_allocation_target_constraints_reserved_range_conflicts(

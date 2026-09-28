@@ -784,14 +784,17 @@ loom_cc_library(
   NAME
     target_constraints
   HDRS
+    "fixed_storage_index.h"
     "target_constraints.h"
   SRCS
+    "fixed_storage_index.c"
     "target_constraints.c"
   DEPS
     ::assignment
     ::live_range
     ::storage
     ::unit_liveness
+    ::unit_location
     iree::base
     iree::base::internal::arena
     loom::analysis::liveness
@@ -805,7 +808,6 @@ loom_cc_library(
     loom::ir
     loom::ops::low
     loom::target::registers
-    loom::util::adaptive_sort
   PUBLIC
 )
 

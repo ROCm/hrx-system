@@ -45,7 +45,7 @@ typedef struct loom_low_allocation_search_context_t {
   // Per-allocation-unit liveness facts for |liveness|.
   const loom_low_allocation_unit_liveness_t* unit_liveness;
   // Target storage budgets, fixed values, and reserved ranges.
-  const loom_low_allocation_target_constraints_t* target_constraints;
+  loom_low_allocation_target_constraints_t* target_constraints;
   // Current assignment lookup table.
   const loom_low_allocation_assignment_map_t* assignment_map;
   // Function-local structural and concrete-location placement relations.

@@ -352,6 +352,11 @@ TEST_F(LowAllocationTargetConstraintsTest,
       &constraints, RegisterClassId(IREE_SV("test.alias64")),
       LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, /*location_base=*/0,
       /*location_count=*/1));
+  EXPECT_EQ(
+      loom_low_allocation_target_constraints_assigned_location_search_limit(
+          &constraints, RegisterClassId(IREE_SV("test.alias64")),
+          LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER),
+      1u);
 }
 
 TEST_F(LowAllocationTargetConstraintsTest,
@@ -437,6 +442,7 @@ TEST_F(LowAllocationTargetConstraintsTest,
       &arena_));
   ASSERT_EQ(constraints.error_count, 0u);
   EXPECT_EQ(constraints.preassigned_fixed_value_count, kValueCount);
+  EXPECT_NE(constraints.fixed_index.subtree_tied_roots, nullptr);
   for (auto value : values) {
     const auto* binding =
         loom_low_allocation_target_constraints_preassigned_fixed_value_for_value(
@@ -444,6 +450,9 @@ TEST_F(LowAllocationTargetConstraintsTest,
     ASSERT_NE(binding, nullptr);
     EXPECT_EQ(binding->tied_root_ordinal, 1u);
     EXPECT_EQ(binding->assignment.location_base, 6u);
+    EXPECT_FALSE(loom_low_allocation_target_constraints_fixed_storage_conflicts(
+        &constraints, &unit_liveness, &binding->assignment,
+        /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0));
   }
   loom_local_value_domain_release(&domain);
   loom_module_free(module);
@@ -467,33 +476,48 @@ TEST_F(LowAllocationTargetConstraintsTest,
   constexpr uint32_t kValueCount = kFixedCount + 1;
   loom_value_id_t values[kValueCount];
   loom_liveness_interval_t intervals[kValueCount] = {};
+  loom_liveness_segment_t segments[kValueCount + 1] = {};
+  loom_liveness_segment_range_t segment_ranges[kValueCount] = {};
   uint32_t interval_indices[kValueCount];
   uint32_t unit_starts[kValueCount];
   uint32_t unit_ends[kValueCount];
   loom_low_allocation_fixed_value_t fixed_values[kFixedCount] = {};
-  const uint16_t reg_class_id = RegisterClassId(IREE_SV("test.phys"));
+  const uint16_t reg_class_id = RegisterClassId(IREE_SV("test.i32"));
   loom_liveness_value_class_t value_class = {};
   value_class.type_kind = LOOM_TYPE_REGISTER;
   value_class.register_descriptor_set_stable_id =
       target_.descriptor_set->stable_id;
   value_class.register_class_id = reg_class_id;
   loom_module_value_ordinal_scratch_acquire(module);
+  uint32_t segment_count = 0;
   for (uint32_t i = 0; i < kValueCount; ++i) {
     IREE_ASSERT_OK(loom_module_define_value(
-        module, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &values[i]));
+        module,
+        loom_low_register_type(target_.descriptor_set->stable_id, reg_class_id,
+                               /*unit_count=*/1),
+        &values[i]));
     loom_module_value_ordinal_scratch_set(module, values[i], i);
     intervals[i].value_id = values[i];
     intervals[i].value_class = value_class;
     intervals[i].unit_count = 1;
     intervals[i].start_point = i < kFixedCount ? ranges[i][0] : 0;
     intervals[i].end_point = i < kFixedCount ? ranges[i][1] : 64;
+    segment_ranges[i].start = segment_count;
+    if (i == 5) {
+      segments[segment_count++] = {22, 23};
+      segments[segment_count++] = {24, 25};
+      segment_ranges[i].count = 2;
+    } else {
+      segments[segment_count++] = {intervals[i].start_point,
+                                   intervals[i].end_point};
+      segment_ranges[i].count = 1;
+    }
     interval_indices[i] = i;
     unit_starts[i] = i;
     unit_ends[i] = intervals[i].end_point;
     if (i < kFixedCount) {
       fixed_values[i].value_id = values[i];
-      fixed_values[i].location_kind =
-          LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
+      fixed_values[i].location_kind = LOOM_LOW_ALLOCATION_LOCATION_TARGET_ID;
       fixed_values[i].location_base = ranges[i][2];
       fixed_values[i].location_count = 1;
     }
@@ -509,13 +533,18 @@ TEST_F(LowAllocationTargetConstraintsTest,
   liveness.value_ids = values;
   liveness.value_count = kValueCount;
   liveness.value_interval_indices = interval_indices;
+  liveness.segments = segments;
+  liveness.segment_count = segment_count;
+  liveness.value_segment_ranges = segment_ranges;
   loom_low_allocation_unit_liveness_t unit_liveness = {};
   unit_liveness.point_starts_by_value_ordinal = unit_starts;
+  unit_liveness.start_points = unit_starts;
   unit_liveness.end_points = unit_ends;
   unit_liveness.point_count = kValueCount;
   uint64_t incomplete_storage_words[] = {0};
   unit_liveness.values_with_incomplete_storage_segments = {
       kValueCount, incomplete_storage_words};
+  unit_liveness.storage_segments.entries = segments;
   loom_low_allocation_target_constraints_t constraints = {};
   IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
       module, &function_op_, &target_, nullptr, 0, nullptr, 0, {}, &arena_,
@@ -525,6 +554,11 @@ TEST_F(LowAllocationTargetConstraintsTest,
       &constraints, &liveness, &domain, &unit_liveness, &placement,
       fixed_values, kFixedCount, &arena_));
   ASSERT_EQ(constraints.error_count, 0u);
+  EXPECT_EQ(constraints.fixed_index.subtree_tied_roots, nullptr);
+  EXPECT_EQ(
+      loom_low_allocation_target_constraints_assigned_location_search_limit(
+          &constraints, reg_class_id, LOOM_LOW_ALLOCATION_LOCATION_TARGET_ID),
+      3u);
   for (uint32_t i = 0; i < kFixedCount; ++i) {
     EXPECT_EQ(loom_low_allocation_target_constraints_fixed_value_for_value(
                   &constraints, values[i]),
@@ -541,7 +575,7 @@ TEST_F(LowAllocationTargetConstraintsTest,
   candidate.value_id = values[kFixedCount];
   candidate.value_class = value_class;
   candidate.descriptor_reg_class_id = reg_class_id;
-  candidate.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
+  candidate.location_kind = LOOM_LOW_ALLOCATION_LOCATION_TARGET_ID;
   candidate.location_count = 1;
   candidate.unit_count = 1;
   candidate.unit_point_start = kFixedCount;
@@ -557,8 +591,15 @@ TEST_F(LowAllocationTargetConstraintsTest,
         for (uint16_t ignored_count : {0, 1}) {
           bool expected = false;
           for (uint32_t i = ignored_count; i < kFixedCount; ++i) {
-            expected |= ranges[i][2] == location &&
-                        ranges[i][0] < start + length && start < ranges[i][1];
+            if (ranges[i][2] != location) {
+              continue;
+            }
+            for (uint32_t j = 0; j < segment_ranges[i].count; ++j) {
+              const loom_liveness_segment_t& segment =
+                  segments[segment_ranges[i].start + j];
+              expected |= segment.start_point < start + length &&
+                          start < segment.end_point;
+            }
           }
           EXPECT_EQ(
               loom_low_allocation_target_constraints_fixed_storage_conflicts(
@@ -571,6 +612,133 @@ TEST_F(LowAllocationTargetConstraintsTest,
       }
     }
   }
+  constraints.fixed_index.generation = UINT32_MAX;
+  candidate.start_point = 23;
+  candidate.end_point = 24;
+  candidate.location_base = 2;
+  candidate.liveness_segments = {};
+  unit_ends[kFixedCount] = candidate.end_point;
+  EXPECT_FALSE(loom_low_allocation_target_constraints_fixed_storage_conflicts(
+      &constraints, &unit_liveness, &candidate,
+      /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0));
+
+  candidate.start_point = 0;
+  candidate.end_point = 64;
+  candidate.liveness_segments = segment_ranges[kFixedCount];
+  unit_ends[kFixedCount] = candidate.end_point;
+  segments[segment_ranges[kFixedCount].start] = {0, 1};
+  EXPECT_FALSE(loom_low_allocation_target_constraints_fixed_storage_conflicts(
+      &constraints, &unit_liveness, &candidate,
+      /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0));
+  segments[segment_ranges[kFixedCount].start] = {23, 24};
+  EXPECT_FALSE(loom_low_allocation_target_constraints_fixed_storage_conflicts(
+      &constraints, &unit_liveness, &candidate,
+      /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0));
+  segments[segment_ranges[kFixedCount].start] = {22, 23};
+  EXPECT_TRUE(loom_low_allocation_target_constraints_fixed_storage_conflicts(
+      &constraints, &unit_liveness, &candidate,
+      /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0));
+  loom_local_value_domain_release(&domain);
+  loom_module_free(module);
+  loom_context_deinitialize(&context);
+}
+
+TEST_F(LowAllocationTargetConstraintsTest,
+       IndexesExplicitWideAndNarrowPhysicalAliases) {
+  loom_context_t context;
+  loom_context_initialize(iree_allocator_system(), &context);
+  IREE_ASSERT_OK(loom_context_finalize(&context));
+  loom_module_t* module = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate(&context, IREE_SV("fixed_alias"),
+                                      &block_pool_, nullptr,
+                                      iree_allocator_system(), &module));
+
+  const uint16_t wide_reg_class_id =
+      RegisterClassId(IREE_SV("test.atomic.narrow"));
+  const uint16_t narrow_reg_class_id =
+      RegisterClassId(IREE_SV("test.explicit32"));
+  constexpr uint32_t kValueCount = 2;
+  loom_value_id_t values[kValueCount];
+  loom_liveness_interval_t intervals[kValueCount] = {};
+  uint32_t interval_indices[] = {0, 1};
+  uint32_t point_starts[] = {0, 1};
+  uint32_t unit_starts[] = {0, 0};
+  uint32_t unit_ends[] = {10, 10};
+  loom_module_value_ordinal_scratch_acquire(module);
+  for (uint32_t i = 0; i < kValueCount; ++i) {
+    const uint16_t reg_class_id =
+        i == 0 ? wide_reg_class_id : narrow_reg_class_id;
+    IREE_ASSERT_OK(loom_module_define_value(
+        module,
+        loom_low_register_type(target_.descriptor_set->stable_id, reg_class_id,
+                               /*unit_count=*/1),
+        &values[i]));
+    loom_module_value_ordinal_scratch_set(module, values[i], i);
+    intervals[i].value_id = values[i];
+    intervals[i].start_point = 0;
+    intervals[i].end_point = 10;
+    intervals[i].unit_count = 1;
+    intervals[i].value_class.type_kind = LOOM_TYPE_REGISTER;
+    intervals[i].value_class.register_descriptor_set_stable_id =
+        target_.descriptor_set->stable_id;
+    intervals[i].value_class.register_class_id = reg_class_id;
+  }
+  loom_local_value_domain_t domain = {};
+  domain.module = module;
+  domain.value_ids = values;
+  domain.value_count = kValueCount;
+  domain.flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED;
+  loom_liveness_analysis_t liveness = {};
+  liveness.intervals = intervals;
+  liveness.interval_count = kValueCount;
+  liveness.value_ids = values;
+  liveness.value_count = kValueCount;
+  liveness.value_interval_indices = interval_indices;
+  loom_low_allocation_unit_liveness_t unit_liveness = {};
+  unit_liveness.point_starts_by_value_ordinal = point_starts;
+  unit_liveness.start_points = unit_starts;
+  unit_liveness.end_points = unit_ends;
+  unit_liveness.point_count = kValueCount;
+  uint64_t incomplete_storage_words[] = {0};
+  unit_liveness.values_with_incomplete_storage_segments = {
+      kValueCount, incomplete_storage_words};
+
+  const uint32_t wide_register_id =
+      loom_low_descriptor_set_physical_register_candidate(
+          target_.descriptor_set, wide_reg_class_id, /*ordinal=*/0);
+  const loom_low_allocation_fixed_value_t fixed_value = {
+      values[0], LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      wide_register_id, 1};
+  loom_low_allocation_target_constraints_t constraints = {};
+  IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
+      module, &function_op_, &target_, nullptr, 0, nullptr, 0, {}, &arena_,
+      &constraints));
+  const loom_low_placement_table_t placement = {};
+  IREE_ASSERT_OK(loom_low_allocation_target_constraints_resolve_fixed_values(
+      &constraints, &liveness, &domain, &unit_liveness, &placement,
+      &fixed_value, /*fixed_value_count=*/1, &arena_));
+  ASSERT_EQ(constraints.error_count, 0u);
+
+  loom_low_allocation_assignment_t candidate = {};
+  candidate.value_id = values[1];
+  candidate.value_class = intervals[1].value_class;
+  candidate.descriptor_reg_class_id = narrow_reg_class_id;
+  candidate.start_point = 0;
+  candidate.end_point = 10;
+  candidate.unit_count = 1;
+  candidate.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
+  candidate.location_count = 1;
+  candidate.unit_point_start = 1;
+  for (uint16_t ordinal = 0; ordinal < 3; ++ordinal) {
+    candidate.location_base =
+        loom_low_descriptor_set_physical_register_candidate(
+            target_.descriptor_set, narrow_reg_class_id, ordinal);
+    EXPECT_EQ(loom_low_allocation_target_constraints_fixed_storage_conflicts(
+                  &constraints, &unit_liveness, &candidate,
+                  /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0),
+              ordinal == 0 || ordinal == 2);
+  }
+
   loom_local_value_domain_release(&domain);
   loom_module_free(module);
   loom_context_deinitialize(&context);

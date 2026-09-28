@@ -49,7 +49,7 @@ typedef struct loom_low_allocation_coalescing_context_t {
   // Function-local placement relations.
   const loom_low_placement_table_t* placement;
   // Target storage budgets, fixed values, and reserved ranges.
-  const loom_low_allocation_target_constraints_t* target_constraints;
+  loom_low_allocation_target_constraints_t* target_constraints;
   // Current assignment lookup table.
   const loom_low_allocation_assignment_map_t* assignment_map;
   // Concrete location search context at the current interval.
