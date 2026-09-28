@@ -920,6 +920,56 @@ loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(
   return loom_liveness_segment_range_for_value_ordinal(liveness, value_ordinal);
 }
 
+bool loom_low_allocation_unit_liveness_storage_component_live_at_point(
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
+    const loom_liveness_analysis_t* liveness,
+    const loom_low_placement_table_t* placement,
+    loom_value_ordinal_t value_ordinal, uint32_t unit_offset,
+    uint32_t unit_count, uint32_t program_point) {
+  const loom_liveness_interval_t* value_interval =
+      loom_liveness_interval_for_value_ordinal(liveness, value_ordinal);
+  if (value_interval == NULL || unit_count == 0) {
+    return false;
+  }
+  IREE_ASSERT_LE(unit_offset, value_interval->unit_count);
+  IREE_ASSERT_LE(unit_count, value_interval->unit_count - unit_offset);
+
+  const loom_value_ordinal_t storage_ordinal =
+      placement->tied_storage_origins_by_value_ordinal == NULL
+          ? value_ordinal
+          : placement->tied_storage_origins_by_value_ordinal[value_ordinal];
+  const loom_liveness_interval_t* storage_interval =
+      loom_liveness_interval_for_value_ordinal(liveness, storage_ordinal);
+  IREE_ASSERT_ARGUMENT(storage_interval);
+  IREE_ASSERT_EQ(storage_interval->unit_count, value_interval->unit_count);
+
+  const loom_liveness_segment_range_t segments =
+      loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(
+          unit_liveness, liveness, storage_ordinal);
+  const bool storage_live_at_point =
+      segments.count == 0 ? storage_interval->start_point <= program_point
+                          : loom_liveness_segment_range_contains(
+                                unit_liveness->storage_segments.entries,
+                                segments, program_point);
+  if (!storage_live_at_point) {
+    return false;
+  }
+
+  const uint32_t point_start =
+      loom_low_allocation_unit_liveness_point_start_for_value_ordinal(
+          unit_liveness, liveness, storage_ordinal);
+  IREE_ASSERT_NE(point_start, UINT32_MAX);
+  IREE_ASSERT_LE((uint64_t)point_start + unit_offset + unit_count,
+                 unit_liveness->point_count);
+  for (uint32_t i = 0; i < unit_count; ++i) {
+    if (unit_liveness->end_points[point_start + unit_offset + i] >
+        program_point) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // A contribution starts on one program-point bucket and is relinked into its
 // source's merged reservation during the ascending point sweep.
 typedef struct loom_low_allocation_storage_segment_contribution_t {

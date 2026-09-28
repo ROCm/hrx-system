@@ -109,6 +109,17 @@ loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(
     const loom_liveness_analysis_t* liveness,
     loom_value_ordinal_t value_ordinal);
 
+// Returns true when any unit in |unit_offset, unit_count| of |value_ordinal|'s
+// required tied component retains concrete storage across |program_point|.
+// The retained component origin owns the complete per-unit ends and sparse
+// physical segments, making the query independent of tied-chain depth.
+bool loom_low_allocation_unit_liveness_storage_component_live_at_point(
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
+    const loom_liveness_analysis_t* liveness,
+    const loom_low_placement_table_t* placement,
+    loom_value_ordinal_t value_ordinal, uint32_t unit_offset,
+    uint32_t unit_count, uint32_t program_point);
+
 // Propagates storage lifetimes across structural placement relations. One
 // origin assignment retains each exact tied component through its terminal
 // end, and source starts flow into tied results. Contiguous aggregate parts
