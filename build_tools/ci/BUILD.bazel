@@ -11,11 +11,16 @@ load("@rules_python//python:defs.bzl", "py_library", "py_test")
 
 py_test(
     name = "change_scope_test",
-    size = "small",
+    # This process-heavy integration test must still complete within one minute.
+    size = "medium",
+    timeout = "short",
     srcs = [
         "change_scope.py",
         "change_scope_test.py",
     ],
+    # The changed-path-aware Linux presubmit owns this Git integration test.
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:linux"],
 )
 
 py_library(

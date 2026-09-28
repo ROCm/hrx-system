@@ -250,6 +250,13 @@ LEFTHOOK_TEST_PATHS = frozenset(
         "build_tools/devtools/source_lock.py",
     }
 )
+CHANGE_SCOPE_TEST_PATHS = frozenset(
+    {
+        "build_tools/ci/BUILD.bazel",
+        "build_tools/ci/change_scope.py",
+        "build_tools/ci/change_scope_test.py",
+    }
+)
 VULKAN_ENVIRONMENT_TEST_PATHS = frozenset(
     {
         ".github/scripts/check_vulkan_hardware_environment.sh",
@@ -262,6 +269,7 @@ VULKAN_ENVIRONMENT_TEST_PATHS = frozenset(
 )
 DEVTOOLS_PRESUBMIT_TEST_TARGET = "//build_tools/devtools:presubmit_tests"
 LEFTHOOK_PRESUBMIT_TEST_TARGET = "//build_tools/lefthook:presubmit_tests"
+CHANGE_SCOPE_TEST_TARGET = "//build_tools/ci:change_scope_test"
 VULKAN_ENVIRONMENT_TEST_TARGET = "//build_tools/ci:vulkan_environment_test"
 ROCM_ENVIRONMENT_TEST_PATHS = frozenset(
     {
@@ -1674,6 +1682,8 @@ def repository_tool_test_targets(paths: list[str]) -> list[str]:
         targets.append(DEVTOOLS_PRESUBMIT_TEST_TARGET)
     if any(is_lefthook_test_trigger(path) for path in paths):
         targets.append(LEFTHOOK_PRESUBMIT_TEST_TARGET)
+    if sys.platform == "linux" and CHANGE_SCOPE_TEST_PATHS.intersection(paths):
+        targets.append(CHANGE_SCOPE_TEST_TARGET)
     if sys.platform == "linux" and VULKAN_ENVIRONMENT_TEST_PATHS.intersection(paths):
         targets.append(VULKAN_ENVIRONMENT_TEST_TARGET)
     if sys.platform == "linux" and ROCM_ENVIRONMENT_TEST_PATHS.intersection(paths):

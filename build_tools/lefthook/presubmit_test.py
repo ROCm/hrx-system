@@ -1666,6 +1666,24 @@ class PresubmitTest(unittest.TestCase):
                         host_platform == "linux",
                     )
 
+    def test_change_scope_test_follows_changed_inputs_on_linux(self):
+        cases = (
+            ("build_tools/ci/change_scope.py", True),
+            ("build_tools/ci/change_scope_test.py", True),
+            ("build_tools/ci/BUILD.bazel", True),
+            ("build_tools/ci/windows_diagnostics.py", False),
+            (".github/workflows/ci_iree_bazel.yml", False),
+        )
+        for path, owns_test in cases:
+            for host_platform in ("linux", "win32", "darwin"):
+                with self.subTest(path=path, platform=host_platform):
+                    with mock.patch.object(presubmit.sys, "platform", host_platform):
+                        targets = presubmit.repository_tool_test_targets([path])
+                    self.assertEqual(
+                        presubmit.CHANGE_SCOPE_TEST_TARGET in targets,
+                        owns_test and host_platform == "linux",
+                    )
+
     def test_existing_project_scripts_include_all_projects(self):
         self.assertEqual(
             {"libamdf", "libhrx", "loom", "runtime"},
