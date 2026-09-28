@@ -824,12 +824,12 @@ static bool loom_amdgpu_source_value_is_native_i1_mask_excluding(
                next_excluded_value_id);
   }
 
-  if (loom_index_cast_isa(defining_op)) {
+  if (loom_index_cast_isa(defining_op) || loom_scalar_trunci_isa(defining_op)) {
     // Numeric low-bit extraction follows the source's physical bank even
     // when source facts do not establish lane-varying values.
     return loom_amdgpu_analyzed_source_value_prefers_vgpr(
         module, fact_table, view_regions, analysis,
-        loom_index_cast_input(defining_op));
+        loom_op_const_operands(defining_op)[0]);
   }
   loom_amdgpu_i1_compare_values_t compare;
   if (loom_value_def_index(value) == 0 &&

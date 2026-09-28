@@ -23,6 +23,7 @@ _SCENARIO_CASES = [
     "numeric_vector_f32.loom",
     "packed_vector_select.loom",
     "predicate_logic.loom",
+    "predicate_truncation.loom",
     "scalar_float_conversion.loom",
     "vector_i64_bitwise.loom",
 ]
@@ -67,6 +68,15 @@ loom_test(
         "//loom/target/amdgpu:gfx1250",
     ],
     data = [":subgroup_transport_gen"],
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
+    name = "predicate_truncation_test",
+    srcs = ["predicate_truncation.loom"],
     execution_profiles = [
         AMDGPU_HARDWARE_PROFILE,
         AMDGPU_ACCESS_PROFILE,

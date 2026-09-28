@@ -1,0 +1,51 @@
+// Uniform launch arguments retain bit zero before selecting a value.
+kernel.def @truncate_uniform() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%value32: i32, %value64: i64, %true: i32, %false: i32, %output: buffer) {
+  %base = index.constant 0 : offset
+  %outputs = buffer.view %output[%base] : buffer -> view<2xi32>
+  %predicate32 = scalar.trunci %value32 : i32 to i1
+  %selected32 = scf.select %predicate32, %true, %false : i32
+  view.store %selected32, %outputs[0] : i32, view<2xi32>
+  %predicate64 = scalar.trunci %value64 : i64 to i1
+  %selected64 = scf.select %predicate64, %true, %false : i32
+  view.store %selected64, %outputs[1] : i32, view<2xi32>
+  kernel.return
+}
+
+// ====
+
+// Every workitem retains its own low bit, independent of the upper bits.
+kernel.def @truncate_lanes() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input8: buffer, %input16: buffer, %input32: buffer, %input64: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %true = scalar.constant 37 : i32
+  %false = scalar.constant -29 : i32
+  %outputs = buffer.view %output[%base] : buffer -> view<64x4xi32>
+  %inputs8 = buffer.view %input8[%base] : buffer -> view<64xi8>
+  %value8 = view.load %inputs8[%lane] : view<64xi8> -> i8
+  %predicate8 = scalar.trunci %value8 : i8 to i1
+  %selected8 = scf.select %predicate8, %true, %false : i32
+  view.store %selected8, %outputs[%lane, 0] : i32, view<64x4xi32>
+  %inputs16 = buffer.view %input16[%base] : buffer -> view<64xi16>
+  %value16 = view.load %inputs16[%lane] : view<64xi16> -> i16
+  %predicate16 = scalar.trunci %value16 : i16 to i1
+  %selected16 = scf.select %predicate16, %true, %false : i32
+  view.store %selected16, %outputs[%lane, 1] : i32, view<64x4xi32>
+  %inputs32 = buffer.view %input32[%base] : buffer -> view<64xi32>
+  %value32 = view.load %inputs32[%lane] : view<64xi32> -> i32
+  %predicate32 = scalar.trunci %value32 : i32 to i1
+  %selected32 = scf.select %predicate32, %true, %false : i32
+  view.store %selected32, %outputs[%lane, 2] : i32, view<64x4xi32>
+  %inputs64 = buffer.view %input64[%base] : buffer -> view<64xi64>
+  %value64 = view.load %inputs64[%lane] : view<64xi64> -> i64
+  %predicate64 = scalar.trunci %value64 : i64 to i1
+  %selected64 = scf.select %predicate64, %true, %false : i32
+  view.store %selected64, %outputs[%lane, 3] : i32, view<64x4xi32>
+  kernel.return
+}

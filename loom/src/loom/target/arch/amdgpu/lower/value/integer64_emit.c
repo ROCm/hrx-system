@@ -12,6 +12,7 @@
 #include "loom/target/arch/amdgpu/lower/source_integer_representation.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/lower/value/integer64.h"
+#include "loom/target/arch/amdgpu/lower/value/scalar_conversion.h"
 
 static bool loom_amdgpu_address_i64_alu_kind_uses_vgpr(
     loom_amdgpu_address_i64_alu_kind_t kind) {
@@ -207,46 +208,9 @@ iree_status_t loom_amdgpu_lower_index_cast(
           &low_result));
       return loom_low_lower_bind_value(context, plan->result, low_result);
     }
-    case LOOM_AMDGPU_INDEX_CAST_KIND_INTEGER_TO_PREDICATE: {
-      loom_type_t result_type = loom_type_none();
-      IREE_RETURN_IF_ERROR(loom_amdgpu_low_result_type(
-          context, source_op, plan->result, &result_type));
-      const bool is_mask = loom_low_register_type_unit_count(result_type) == 2;
-      loom_type_t word_type = loom_type_none();
-      loom_value_id_t low_source = LOOM_VALUE_ID_INVALID;
-      loom_value_id_t low_bit = LOOM_VALUE_ID_INVALID;
-      if (is_mask) {
-        IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &word_type));
-        IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_32_bits_as_vgpr(
-            context, source_op, plan->source, &low_source));
-        IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary_immediate(
-            context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT,
-            low_source, 1, word_type, &low_bit));
-      } else {
-        IREE_RETURN_IF_ERROR(loom_amdgpu_make_sgpr_type(context, &word_type));
-        IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_or_materialize_sgpr_address(
-            context, source_op, plan->source, &low_source));
-        IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr_binary_immediate(
-            context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_AND_B32,
-            low_source, 1, word_type, &low_bit));
-      }
-      loom_value_id_t low_result = low_bit;
-      if (is_mask || loom_low_register_type_class_id(result_type) ==
-                         LOOM_AMDGPU_REG_CLASS_ID_SCC) {
-        loom_value_id_t low_true = LOOM_VALUE_ID_INVALID;
-        IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
-            context, source_op,
-            is_mask ? LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32
-                    : LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32,
-            1, word_type, &low_true));
-        IREE_RETURN_IF_ERROR(loom_amdgpu_emit_binary(
-            context, source_op,
-            is_mask ? LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32
-                    : LOOM_AMDGPU_DESCRIPTOR_REF_S_CMP_EQ_I32,
-            low_bit, low_true, result_type, &low_result));
-      }
-      return loom_low_lower_bind_value(context, plan->result, low_result);
-    }
+    case LOOM_AMDGPU_INDEX_CAST_KIND_INTEGER_TO_PREDICATE:
+      return loom_amdgpu_lower_integer_to_predicate(context, source_op,
+                                                    plan->source, plan->result);
     case LOOM_AMDGPU_INDEX_CAST_KIND_DIAGNOSTIC_REJECTED:
       return iree_ok_status();
     case LOOM_AMDGPU_INDEX_CAST_KIND_NONE:
