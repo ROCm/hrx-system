@@ -389,6 +389,46 @@ CHECK-NOT: vst.512.*
 
 // ====
 
+// RUN: with-checks emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @transpose_rank2_bf16_tile(%source: buffer, %output: buffer) {
+  %source_aligned, %output_aligned = buffer.assume.alignment %source, %output {minimum_alignment = 64} : buffer, buffer
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source_aligned[%base] : buffer -> view<8x8xbf16>
+  %output_view = buffer.view %output_aligned[%base] : buffer -> view<8x8xbf16>
+  %value = vector.load %source_view[0, 0] : view<8x8xbf16> -> vector<8x8xbf16>
+  %transposed = vector.transpose<[1, 0]> %value : vector<8x8xbf16> -> vector<8x8xbf16>
+  vector.store %transposed, %output_view[0, 0] : vector<8x8xbf16>, view<8x8xbf16>
+  func.return
+}
+
+// ----
+CHECK: * = vlda.128.bf16x8 %source_view, 0
+CHECK: * = vlda.128.bf16x8 %source_view, 16
+CHECK: * = vlda.128.bf16x8 %source_view, 32
+CHECK: * = vlda.128.bf16x8 %source_view, 48
+CHECK: * = vlda.128.bf16x8 %source_view, 64
+CHECK: * = vlda.128.bf16x8 %source_view, 80
+CHECK: * = vlda.128.bf16x8 %source_view, 96
+CHECK: * = vlda.128.bf16x8 %source_view, 112
+CHECK: * = mova.i32 52
+CHECK: * = vshuffle *
+CHECK: * = mova.i32 53
+CHECK: vst.128.bf16x8 *, %output_view, 0
+CHECK: vst.128.bf16x8 *, %output_view, 16
+CHECK: vst.128.bf16x8 *, %output_view, 32
+CHECK: vst.128.bf16x8 *, %output_view, 48
+CHECK: vst.128.bf16x8 *, %output_view, 64
+CHECK: vst.128.bf16x8 *, %output_view, 80
+CHECK: vst.128.bf16x8 *, %output_view, 96
+CHECK: vst.128.bf16x8 *, %output_view, 112
+CHECK-NOT: * = lda.u16 *
+CHECK-NOT: st.s16 *
+
+// ====
+
 aie2p.target<core> @target
 
 func.def target(@target) @roundtrip_f32x7(%input: buffer, %output: buffer) {

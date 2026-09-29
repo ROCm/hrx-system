@@ -31,6 +31,15 @@ static bool loom_aie2p_legalizer_descriptor_set_is_core(
   return descriptor_set == loom_aie2p_core_descriptor_set();
 }
 
+// Multidimensional memory survives eager legalization for shared view
+// normalization. Final legalization owns fallback for layouts left unchanged.
+static bool loom_aie2p_defer_multidimensional_memory_reference(
+    const loom_target_legalization_context_t* context,
+    loom_type_t payload_type) {
+  return context->mode != LOOM_TARGET_LEGALIZATION_MODE_FINAL &&
+         loom_type_rank(payload_type) > 1;
+}
+
 static bool loom_aie2p_match_scalar_multiply_add(
     const loom_target_legalizer_entry_t* entry,
     const loom_target_legalization_context_t* context, const loom_op_t* op) {
@@ -224,7 +233,10 @@ static iree_status_t loom_aie2p_legalize_vector_load(
   bool rewritten = false;
   IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_load(
       context, op, &kAie2pVectorPacketPolicy, &rewritten));
-  if (!rewritten) {
+  const loom_type_t result_type =
+      loom_module_value_type(context->module, loom_vector_load_result(op));
+  if (!rewritten && !loom_aie2p_defer_multidimensional_memory_reference(
+                        context, result_type)) {
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_rewrite_op(
         context->pass, context->rewriter, op, &rewritten));
   }
@@ -246,6 +258,8 @@ static iree_status_t loom_aie2p_legalize_vector_store(
     return iree_ok_status();
   }
 
+  const loom_type_t value_type =
+      loom_module_value_type(context->module, loom_vector_store_value(op));
   const bool has_native_store = context->contract_query_result->outcome ==
                                 LOOM_TARGET_CONTRACT_QUERY_LEGAL;
   if (has_native_store) {
@@ -255,8 +269,6 @@ static iree_status_t loom_aie2p_legalize_vector_store(
     // Accepted memory rules have static rank-one payloads. The ordinary
     // four-W carrier still permits packetization of decomposable producers;
     // native-width and accumulator stores retain their selected realization.
-    const loom_type_t value_type =
-        loom_module_value_type(context->module, loom_vector_store_value(op));
     const uint64_t payload_bit_count =
         (uint64_t)loom_type_dim_static_size_at(value_type, 0) *
         loom_scalar_type_bitwidth(loom_type_element_type(value_type));
@@ -268,7 +280,9 @@ static iree_status_t loom_aie2p_legalize_vector_store(
   bool rewritten = false;
   IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_store(
       context, op, &kAie2pVectorPacketPolicy, &rewritten));
-  if (!rewritten && !has_native_store) {
+  if (!rewritten && !has_native_store &&
+      !loom_aie2p_defer_multidimensional_memory_reference(context,
+                                                          value_type)) {
     IREE_RETURN_IF_ERROR(loom_vector_store_to_scalar_rewrite_op(
         context->pass, context->rewriter, op, &rewritten));
   }
