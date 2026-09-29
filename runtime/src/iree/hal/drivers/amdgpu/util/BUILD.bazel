@@ -855,3 +855,115 @@ iree_runtime_cc_test(
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
+
+iree_runtime_cc_library(
+    name = "sdma_emitter",
+    hdrs = ["sdma_emitter.h"],
+)
+
+iree_runtime_cc_test(
+    name = "sdma_emitter_test",
+    srcs = ["sdma_emitter_test.cc"],
+    deps = [
+        ":sdma_emitter",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "sdma_capabilities",
+    srcs = ["sdma_capabilities.c"],
+    hdrs = ["sdma_capabilities.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amdgpu/target:identity",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "sdma_ring",
+    srcs = ["sdma_ring.c"],
+    hdrs = ["sdma_ring.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "sdma_program",
+    srcs = ["sdma_program.c"],
+    hdrs = ["sdma_program.h"],
+    deps = [
+        ":sdma_capabilities",
+        ":sdma_emitter",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "sdma_queue",
+    srcs = ["sdma_queue.c"],
+    hdrs = ["sdma_queue.h"],
+    deps = [
+        ":libhsa",
+        ":sdma_capabilities",
+        ":sdma_ring",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amdgpu/target:identity",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "sdma_ring_test",
+    srcs = ["sdma_ring_test.cc"],
+    deps = [
+        ":sdma_ring",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "sdma_program_test",
+    srcs = ["sdma_program_test.cc"],
+    deps = [
+        ":sdma_capabilities",
+        ":sdma_program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "sdma_queue_test",
+    srcs = ["sdma_queue_test.cc"],
+    deps = [
+        ":libhsa",
+        ":sdma_queue",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "sdma_queue_live_test",
+    srcs = ["sdma_queue_live_test.cc"],
+    deps = [
+        ":libhsa",
+        ":sdma_capabilities",
+        ":sdma_emitter",
+        ":sdma_program",
+        ":sdma_queue",
+        ":sdma_ring",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/hal/drivers/amdgpu/target:identity",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

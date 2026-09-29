@@ -130,6 +130,8 @@ enum {
       IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_GL2_INV |
       IREE_HAL_AMDGPU_PM4_ACQUIRE_MEM_GCR_GL2_WB,
   IREE_HAL_AMDGPU_PM4_WAIT_REG_MEM_FUNC_LESS_THAN = 1,
+  IREE_HAL_AMDGPU_PM4_WAIT_REG_MEM_FUNC_EQUAL = 3,
+  IREE_HAL_AMDGPU_PM4_WAIT_REG_MEM_FUNC_GREATER_EQUAL = 5,
   IREE_HAL_AMDGPU_PM4_WAIT_REG_MEM_SPACE_MEMORY = 1,
   IREE_HAL_AMDGPU_PM4_WAIT_REG_MEM_OPERATION_WAIT_REG_MEM = 0,
   IREE_HAL_AMDGPU_PM4_COMPUTE_DISPATCH_INITIATOR_REGISTER = 0x00002E00,
@@ -723,6 +725,29 @@ static inline bool iree_hal_amdgpu_pm4_ib_builder_emit_copy_data64(
   dword[3] = iree_hal_amdgpu_pm4_addr_hi(source_address);
   dword[4] = iree_hal_amdgpu_pm4_addr_lo_8(target_address);
   dword[5] = iree_hal_amdgpu_pm4_addr_hi(target_address);
+  return true;
+}
+
+// Appends a 64-bit memory wait. The caller must acquire payload memory after
+// the wait before consuming data published by the signaling engine.
+static inline bool iree_hal_amdgpu_pm4_ib_builder_emit_wait_memory64(
+    iree_hal_amdgpu_pm4_ib_builder_t* builder, const void* source,
+    uint32_t function, uint64_t compare_value, uint64_t mask) {
+  if (!iree_host_ptr_has_alignment(source, 8) || function > 6) return false;
+  const uintptr_t address = (uintptr_t)source;
+  uint32_t* dword = iree_hal_amdgpu_pm4_ib_builder_append_packet(
+      builder, IREE_HAL_AMDGPU_PM4_HDR_IT_OPCODE_WAIT_REG_MEM64, 9);
+  if (!dword) return false;
+  dword[1] = iree_hal_amdgpu_pm4_wait_reg_mem_dw1(
+      function, IREE_HAL_AMDGPU_PM4_WAIT_REG_MEM_SPACE_MEMORY,
+      IREE_HAL_AMDGPU_PM4_WAIT_REG_MEM_OPERATION_WAIT_REG_MEM);
+  dword[2] = iree_hal_amdgpu_pm4_addr_lo_8(address);
+  dword[3] = iree_hal_amdgpu_pm4_addr_hi(address);
+  dword[4] = (uint32_t)compare_value;
+  dword[5] = (uint32_t)(compare_value >> 32);
+  dword[6] = (uint32_t)mask;
+  dword[7] = (uint32_t)(mask >> 32);
+  dword[8] = 4;
   return true;
 }
 

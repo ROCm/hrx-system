@@ -565,6 +565,28 @@ TEST(PM4EmitterTest, EmitsCopyDataMemoryPackets) {
   EXPECT_EQ(slot.dwords[5], 0x0FEDCBA9u);
 }
 
+TEST(PM4EmitterTest, MemoryWaitValidationPreservesBuilder) {
+  alignas(8) uint64_t milestone = 0;
+  iree_hal_amdgpu_pm4_ib_slot_t slot;
+  memset(&slot, 0xCD, sizeof(slot));
+  iree_hal_amdgpu_pm4_ib_builder_t builder;
+  iree_hal_amdgpu_pm4_ib_builder_initialize(&slot, &builder);
+  const auto original = slot;
+  EXPECT_FALSE(iree_hal_amdgpu_pm4_ib_builder_emit_wait_memory64(
+      &builder, reinterpret_cast<const char*>(&milestone) + 1,
+      IREE_HAL_AMDGPU_PM4_WAIT_REG_MEM_FUNC_EQUAL, 1, UINT64_MAX));
+  EXPECT_FALSE(iree_hal_amdgpu_pm4_ib_builder_emit_wait_memory64(
+      &builder, &milestone, 7, 1, UINT64_MAX));
+  EXPECT_EQ(builder.dword_count, 0u);
+  EXPECT_EQ(memcmp(&slot, &original, sizeof(slot)), 0);
+  ASSERT_TRUE(iree_hal_amdgpu_pm4_ib_builder_emit_wait_memory64(
+      &builder, &milestone, IREE_HAL_AMDGPU_PM4_WAIT_REG_MEM_FUNC_EQUAL,
+      0x1122334455667788ull, UINT64_MAX));
+  EXPECT_EQ(builder.dword_count, 9u);
+  EXPECT_EQ(slot.dwords[4], 0x55667788u);
+  EXPECT_EQ(slot.dwords[5], 0x11223344u);
+}
+
 TEST(PM4EmitterTest, EmitsWaitRegMem64Packet) {
   iree_amd_signal_t signal_abi = {};
   iree_hsa_signal_t epoch_signal = {};

@@ -432,6 +432,12 @@ IREE_HAL_AMDGPU_LIBHSA_PFN(TRACE_ALWAYS, hsa_status_t,
 // Queues
 //===----------------------------------------------------------------------===//
 
+IREE_HAL_AMDGPU_LIBHSA_PFN(TRACE_ALWAYS, hsa_status_t,
+                           hsa_amd_profiling_convert_tick_to_system_domain,
+                           DECL(hsa_agent_t agent, uint64_t agent_tick,
+                                uint64_t* system_tick),
+                           ARGS(agent, agent_tick, system_tick))
+
 IREE_HAL_AMDGPU_LIBHSA_LEAK_CHECK_DISABLED_PFN(
     TRACE_ALWAYS, hsa_status_t, hsa_queue_create,
     DECL(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
