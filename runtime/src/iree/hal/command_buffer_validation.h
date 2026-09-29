@@ -25,8 +25,10 @@ typedef struct iree_hal_buffer_binding_requirements_t {
   bool requires_storage;
   // Required memory properties for the recorded operations.
   iree_hal_memory_type_t type;
-  // Maximum offset in the binding referenced by any command.
-  iree_device_size_t max_byte_offset;
+  // Minimum binding length containing every recorded reference. A fixed range
+  // contributes offset + length; a whole-buffer range contributes only offset
+  // because its length is the remaining bound range at execution time.
+  iree_device_size_t min_byte_length;
   // Minimum required alignment by at least one command.
   iree_device_size_t min_byte_alignment;
   // Minimum alignment requested by commands that classify only target
