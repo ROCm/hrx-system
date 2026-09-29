@@ -1,0 +1,55 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Model-owned packed work. The header contains three I32 words: active token
+// count, span count, and selected output count. Each following span contains
+// five I32 words: token count, absolute position, packed token begin, resident
+// row, and selected output index (-1 when no output is requested). Active spans
+// partition the packed token prefix and refer to distinct resident rows.
+// These helpers consume the caller's validated model plan, not external input.
+func.def inline @qwen38_span_active(%epoch: buffer, %span: index) -> (i1) {
+  %origin = index.constant 0 : offset
+  %span_count_index = index.constant 1 : index
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %count_word = view.load %header[%span_count_index] : view<3xi32> -> i32
+  %count = index.cast %count_word : i32 to index
+  %active = index.cmp ult, %span, %count : index
+  func.return %active : i1
+}
+
+// The returned control origin addresses the count/position pair used by the
+// ordinary single-span kernels. Token begin indexes the compact activations;
+// resident row indexes stable state and is independent of that placement.
+func.def inline @qwen38_span_binding(%epoch: buffer, %span: index) -> (offset, index, index) {
+  %header_bytes = index.constant 12 : offset
+  %span_bytes = index.constant 20 : offset
+  %relative_origin = index.scale %span, %span_bytes : index, offset -> offset
+  %control_origin = index.add %header_bytes, %relative_origin : offset
+  %descriptor = buffer.view %epoch[%control_origin] : buffer -> view<5xi32>
+  %begin_index = index.constant 2 : index
+  %row_index = index.constant 3 : index
+  %begin_word = view.load %descriptor[%begin_index] : view<5xi32> -> i32
+  %row_word = view.load %descriptor[%row_index] : view<5xi32> -> i32
+  %begin_value = index.cast %begin_word : i32 to index
+  %row_value = index.cast %row_word : i32 to index
+  %begin = index.assume %begin_value [range(%begin_value, 0, 511)] : index
+  %row = index.assume %row_value [range(%row_value, 0, 63)] : index
+  func.return %control_origin, %begin, %row : offset, index, index
+}
+
+// Each resident row has two I64 byte origins in the shared state allocation:
+// GDN/history first, then attention K/V. Cold residency owns this table; epoch
+// compaction changes only the span-to-row mapping and never copies state.
+func.def inline @qwen38_row_gdn_origin(%rows: buffer, %row: index, %layer_origin: offset) -> (offset) {
+  %row_bytes = index.constant 16 : offset
+  %table_origin = index.scale %row, %row_bytes : index, offset -> offset
+  %entry = buffer.view %rows[%table_origin] : buffer -> view<2xi64>
+  %gdn_index = index.constant 0 : index
+  %origin_word = view.load %entry[%gdn_index] : view<2xi64> -> i64
+  %nonnegative_origin = scalar.assume %origin_word [range(%origin_word, 0, 9223372036854775807)] : i64
+  %row_origin = index.cast %nonnegative_origin : i64 to offset
+  %origin = index.add %row_origin, %layer_origin : offset
+  func.return %origin : offset
+}

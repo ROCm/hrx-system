@@ -74,6 +74,43 @@ decode timing. ASAN correctness runs are not a throughput baseline. Changing
 kernel math or dispatch geometry needs no runner or HAL change when the stage's
 buffer/state and parameter-placement contracts remain intact.
 
+## Packed-span state ownership
+
+`kernels/qwen38/spans.loom` defines experiment-private model data, not a command
+ABI. An epoch describes packed token spans with their resident row, consumed
+position and selected output. A separate row table locates persistent GDN and
+KV storage in one fixed arena. Compact activation placement is independent of
+resident state placement. The caller supplies validated, nonoverlapping spans
+and distinct resident rows; kernels consume those invariants directly.
+
+The GDN span kernels reuse the ordinary serial convolution and recurrent math.
+Each workgroup carries one span's state through its causal token sequence and
+publishes only that resident row. No state compaction or history snapshot is
+needed by this serial-within-span schedule. The ordinary token-parallel
+convolution still requires its immutable snapshot.
+
+The packed-versus-isolated differential advances lengths 5, 3, 1 and 1 in
+resident rows 4, 1, 5 and 2, then advances only the first two spans again using
+the same dispatch capacity. Distinct inputs and initial state, inactive rows,
+row guards and unused activation rows are checked bit-for-bit after both issues.
+The metadata initializer belongs only to the fixture; a model caller supplies
+those buffers directly.
+
+```sh
+build_tools/bin/iree-bazel-run --config=asan \
+  //loom/src/loom/tools/iree-test-loom -- \
+  experimental/loom_serve/models/qwen38/tests/gdn_spans.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/spans.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/gdn_spans.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/gdn_prefill.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/gdn_common.loom \
+  --device=amdgpu --target=amdgpu:gfx1151 --case=@mixed_gdn_spans
+```
+
+Repeat with `--sanitizer='access|operation'` for GPU access/operation checks.
+This qualifies GDN state routing, not full-model mixed execution or serving
+throughput. The service still invokes one retained row at a time.
+
 ## Four-row projection reuse
 
 The Q5 source contains independent-row and four-row weight-reuse schedules.
