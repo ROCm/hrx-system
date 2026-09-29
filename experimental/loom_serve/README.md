@@ -163,3 +163,127 @@ The loopback checks use real sockets/carriers and cover fragmented requests,
 ordered streaming bytes, half-close, repeated slot reuse, peer reset and
 shutdown with receive/accept work pending. They establish transport ownership,
 not a working chat endpoint or a pi session.
+
+## Retained chat service
+
+`qwen_server` serves the shared model through the TCP transport. The main
+application thread owns model state and round-robins one prefill chunk or decode
+step per ready row. Network progress runs independently. Each row has one
+pending copied SSE packet; exhausted carrier credit pauses that row before its
+next stage. This is interleaved execution, not batched matrix math.
+
+`qwen_chat.{h,c}` owns the text-only, non-thinking Qwen template and XML tool
+translation. The supported endpoint is `POST /v1/chat/completions`, with model
+`qwen3.8-27b`, `stream: true`, greedy generation and optional function tools.
+Unknown generation options, nonzero temperature and strict constrained sampling
+are rejected. The model emits XML parameters; tool schemas recover JSON value
+types before a complete call is streamed to the client. Tool execution and full
+schema validation remain in the agent. Incomplete or malformed calls produce
+an error, never an executable partial call. `GET /healthz` reports readiness.
+
+`X-Loom-Session` is a local cache key of at most 64 ASCII letters, digits,
+underscores, hyphens or periods. Matching canonical client history permits
+suffix-only prefill. The GPU retains the original generated tokens, including
+their original XML spelling; canonical history is comparison data, not replayed
+replacement state. A changed history resets and replays explicitly. Idle rows
+form an LRU cache and may be evicted by another session. Untagged requests always
+replay; overlapping requests for one named session return 409; fully occupied
+rows return 503. There is no durable server-side conversation store.
+
+Disconnect cancels at a completed model stage and invalidates the checkpoint.
+SIGINT/SIGTERM stop admission, finish the current stage, relinquish request
+views, drain transport I/O and release model residency. Request diagnostics are
+JSON events on stderr: `admit`, `complete`, `cancel`, and `evict`. Admission
+reports retained/appended tokens and cache hit versus replay. Completion adds
+prefill/decode counts and completed-stage durations. These durations include
+the host build's instrumentation and are not automatically performance data.
+
+```sh
+build_tools/bin/iree-bazel-run --config=asan \
+  //experimental/loom_serve:qwen_server -- \
+  --prefill=/path/to/compiled/prefill \
+  --decode=/path/to/compiled/decode \
+  --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
+  --tokenizer=/path/to/tokenizer.json \
+  --rows=4 --port=8080 --max_tokens=384
+```
+
+### Real pi continuation check
+
+An isolated pi custom-provider configuration uses this `models.json`:
+
+```json
+{
+  "providers": {
+    "loom": {
+      "baseUrl": "http://127.0.0.1:8080/v1",
+      "api": "openai-completions",
+      "apiKey": "local",
+      "headers": {"X-Loom-Session": "$LOOM_SESSION"},
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false,
+        "supportsStore": false,
+        "supportsStrictMode": false,
+        "maxTokensField": "max_tokens"
+      },
+      "models": [{
+        "id": "qwen3.8-27b",
+        "reasoning": false,
+        "input": ["text"],
+        "contextWindow": 16384,
+        "maxTokens": 384,
+        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}
+      }]
+    }
+  }
+}
+```
+
+Set `PI_CODING_AGENT_DIR` to that isolated directory. For the bounded witness,
+its `settings.json` disables compaction and retries:
+
+```json
+{"compaction":{"enabled":false},"retry":{"enabled":false,"provider":{"maxRetries":0}}}
+```
+
+Run two pi processes with distinct `LOOM_SESSION` values and session files,
+using `--provider loom --model qwen3.8-27b --thinking off --tools read` and
+`--no-extensions --no-skills --no-prompt-templates --no-themes
+--no-context-files --no-approve --offline`. A short fixed `--system-prompt`
+keeps this a focused protocol check. Either RPC mode or repeated print-mode
+invocations with the same `--session` file preserve client history.
+
+For each client, ask it to remember a distinct codeword, use `read` with
+`offset: 1` and `limit: 8` on
+`loom/src/loom/verify/test/function_entry.loom-test`, and name the first
+function. It must execute the actual file tool and answer `count_down`. Then
+ask for the codeword without tools. The second model invocation (tool result)
+and subsequent user turn must report `cache: "hit"`, nonzero retained tokens,
+and only appended suffix tokens. Text alone does not prove retention.
+
+The focused host checks are:
+
+```sh
+build_tools/bin/iree-bazel-test --config=asan \
+  //experimental/loom_serve:qwen_chat_test \
+  //experimental/loom_serve:http_request_test \
+  //experimental/loom_serve:http_server_test
+```
+
+### Kernel/scheduler handoff
+
+Kernel changes stay behind the existing stage buffers and parameter placement.
+The [model source checks](models/qwen38/README.md) cover numerical behavior with
+VM oracles. The retained CLI witness, real pi tool continuation, and cancellation
+checks cover the state those kernels mutate across stages. The server prepares
+artifacts once; restart it after recompiling stages. There is no kernel hot-swap.
+
+For comparisons, preserve both artifact directories and the exact optimized
+host binary. Keep GGUF/tokenizer identity, context capacity, active prefill
+length, prompt/tool transcript, output count and concurrency fixed. Separate
+cold load, prefill, completed decode and whole-request latency; submit-only
+numbers do not describe agent latency. Interleave baseline/candidate runs
+(ABABA) under the benchmark lock, record hardware load/power/temperature, and
+compare generated output as well as timing. A thermally constrained or busy
+host permits qualified differentials, not a clean absolute throughput claim.

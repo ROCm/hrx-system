@@ -285,3 +285,65 @@ loom_cc_library(
         "//runtime/src/iree/vm/bytecode:module",
     ],
 )
+
+loom_cc_library(
+    name = "qwen_chat",
+    srcs = ["qwen_chat.c"],
+    hdrs = ["qwen_chat.h"],
+    deps = [
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/base/internal:unicode",
+    ],
+)
+
+loom_cc_test(
+    name = "qwen_chat_test",
+    srcs = ["qwen_chat_test.cc"],
+    deps = [
+        ":qwen_chat",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "qwen_service",
+    srcs = ["qwen_service.c"],
+    hdrs = ["qwen_service.h"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":http_request",
+        ":http_server",
+        ":qwen_chat",
+        ":qwen_model",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/tokenizer",
+    ],
+)
+
+loom_cc_binary(
+    name = "qwen_server",
+    srcs = ["qwen_server_main.c"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":http_server",
+        ":qwen_model",
+        ":qwen_service",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+    ],
+)

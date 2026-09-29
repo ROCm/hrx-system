@@ -63,8 +63,8 @@ history publication and untouched padding at lengths 1, 2, 3, 5, 511 and 512.
 
 Full-model qualification additionally requires fresh artifacts and actual
 generated text through the runner. Kernel differential success alone does not
-establish retained-session or end-to-end model correctness. The original
-single-row caller is described in the parent README.
+establish retained-session or end-to-end model correctness. The shared-row CLI
+and retained pi service checks are described in the parent README.
 
 For tuning, hold the GGUF, tokenizer, prompts, capacity and generated length
 fixed. Recompile changed requests and rerun both numerical checks and the
