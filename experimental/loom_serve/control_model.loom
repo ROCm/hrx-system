@@ -1,0 +1,24 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.decl import("runner") @prefill_to_decode(%control: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer) -> (i64)
+
+func.decl import("runner") @decode_transition(%control: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer) -> (i64)
+
+// This model entry selects prepared stages without owning per-session state.
+// Its result is an accepted submission on the hosting runner's execution domain.
+func.def public @step(%initialize: i32, %control: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer) -> (i64) {
+  %zero = scalar.constant 0 : i32
+  %is_prefill = scalar.cmpi ne, %initialize, %zero : i32
+  %completion = scf.if %is_prefill -> (i64) {
+    %prefill = func.call @prefill_to_decode(%control, %tokens, %progress) : (hal.buffer, hal.buffer, hal.buffer) -> (i64)
+    scf.yield %prefill : i64
+  } else {
+    %decode = func.call @decode_transition(%control, %tokens, %progress) : (hal.buffer, hal.buffer, hal.buffer) -> (i64)
+    scf.yield %decode : i64
+  }
+  func.return %completion : i64
+}
