@@ -39,3 +39,61 @@ build_tools/bin/iree-bazel-test --config=asan //experimental/loom_serve:control_
 Weights, KV pools, model forward stages, scheduling policy, and transport are
 separate from this coarse execution boundary. None is inferred from buffer
 contents or command names by the native submission code.
+
+## Single-row Qwen execution
+
+`qwen` is a concrete Qwen3.8-27B UD-Q5_K_XL caller, not an HTTP service. It loads
+the canonical GGUF into one resident parameter slab, prepares prefill and decode
+commands once, and invokes the compiled `qwen_model.loom` through one VM process.
+Device row state survives each invocation. Host uploads, stage execution, and
+readback share explicit timeline ordering. Greedy selection and position/history
+updates are part of the compiled stages; the host stops on their EOS result or
+the requested output length. Text output excludes special tokens.
+
+Model math is supplied as separately compiled artifacts, not built into this
+binary. Each stage directory contains:
+
+```text
+manifest.json                 Version 2 loom-command-set manifest, one root.
+commands/<artifact>           Portable command named by that root.
+kernels/<request-stem>.hsaco   Compiled image for each manifest entry.
+```
+
+The manifest supplies entry names and the root-local entry mapping. It is not
+an execution language: command order, arguments, parameter placement, and
+transient requirements come from the portable command artifact. Both stages
+must place every parameter identically; the loader compares their keys,
+fixed-buffer indices, offsets, lengths, and alignments before sharing weights.
+Allocation satisfies both stages' published slab size/alignment requirements.
+
+This caller's explicit model configuration is one fixed weight root, a
+512-token context, at most 128 generated tokens, and seven rebindable slots:
+
+| Slot | Buffer contract |
+| --- | --- |
+| 0 | Residual rows: 512 × 5120 f32 values. |
+| 1 | Three i32 values: prefill count/base/EOS, then decode position/count/EOS. |
+| 2 | GDN convolution and recurrent state: 156,893,184 bytes. |
+| 3 | Sixteen attention layers' KV state: 512 × 65,536 bytes. |
+| 4 | 512 i32 token IDs; after prefill, current token at 0 and history from 1. |
+| 5 | Eight i32 progress values; generated count at 0 and EOS flag at 7. |
+| 6 | Shared scratch sized/aligned for the larger requirement of both stages. |
+
+The stage sources must use this state layout and specialize prefill to the exact
+encoded prompt length. `--prefill_tokens` checks the encoded length against the
+caller-supplied specialization; it does not recover model semantics from kernel
+reflection. The default no-thinking arithmetic prompt is 24 tokens with the
+model's tokenizer. Different prompt lengths require matching prefill artifacts.
+
+```sh
+build_tools/bin/iree-bazel-run --config=asan //experimental/loom_serve:qwen -- \
+  --prefill=/path/to/compiled/prefill \
+  --decode=/path/to/compiled/decode \
+  --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
+  --tokenizer=/path/to/tokenizer.json \
+  --prefill_tokens=24 --max_tokens=16
+```
+
+All row buffers and scratch are allocated before generation. The current host
+loop waits for each token's readback; it provides a full-model correctness
+witness, not batching, a zero-allocation measurement, or a throughput claim.
