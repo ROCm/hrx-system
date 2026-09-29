@@ -15,6 +15,58 @@ package(
 )
 
 loom_cc_library(
+    name = "http_request",
+    srcs = ["http_request.c"],
+    hdrs = ["http_request.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_test(
+    name = "http_request_test",
+    srcs = ["http_request_test.cc"],
+    deps = [
+        ":http_request",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "http_server",
+    srcs = ["http_server.c"],
+    hdrs = ["http_server.h"],
+    deps = [
+        ":http_request",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/async/util:proactor_thread",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/net:carrier",
+        "//runtime/src/iree/net/carrier/tcp",
+    ],
+)
+
+loom_cc_test(
+    name = "http_server_test",
+    srcs = ["http_server_test.cc"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":http_request",
+        ":http_server",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "command",
     srcs = ["command.c"],
     hdrs = ["command.h"],

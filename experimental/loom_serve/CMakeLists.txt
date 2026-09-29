@@ -11,6 +11,66 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    http_request
+  HDRS
+    "http_request.h"
+  SRCS
+    "http_request.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    http_request_test
+  SRCS
+    "http_request_test.cc"
+  DEPS
+    ::http_request
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_library(
+  NAME
+    http_server
+  HDRS
+    "http_server.h"
+  SRCS
+    "http_server.c"
+  DEPS
+    ::http_request
+    iree::async
+    iree::async::platform
+    iree::async::util::proactor_thread
+    iree::base
+    iree::base::threading
+    iree::net::carrier
+    iree::net::carrier::tcp
+  PUBLIC
+)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_test(
+  NAME
+    http_server_test
+  SRCS
+    "http_server_test.cc"
+  DEPS
+    ::http_request
+    ::http_server
+    iree::async
+    iree::base
+    iree::base::threading
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
+
+loom_cc_library(
+  NAME
     command
   HDRS
     "command.h"

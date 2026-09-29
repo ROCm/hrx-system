@@ -129,3 +129,37 @@ waits for readback and is single-owner; transport can run independently. These
 checks do not establish zero allocations inside VM/HAL submission or batched
 throughput. Controlled performance uses an optimized binary and benchmark lock,
 not ASAN correctness timings.
+
+## Local TCP transport
+
+`http_server.{h,c}` runs raw `iree/net` TCP carriers on a standard proactor
+thread, independently of blocking model stages. Its application owner claims
+fully framed requests, sends copied response bytes with bounded send credit,
+and finishes or aborts each connection. The transport has no model or chat
+semantics. A connection carries one HTTP/1.1 request and a close-delimited
+response; retained sessions belong above this connection lifetime.
+
+The listener binds loopback only. Request framing bounds headers and body
+storage, rejects ambiguous framing and pipelining, and retains request views
+until application release. Sixteen connection slots bound admission; excess
+connections are diagnosed and closed. Send completion returns credit, and
+deactivation joins outstanding operations before a slot is reused. Shutdown
+joins both the accept target and its cancellation receipt before stopping the
+poll owner. An unrecoverable proactor failure aborts the experimental process
+instead of reclaiming storage whose I/O retirement cannot be established.
+
+The executable blocks handled signals before creating any threads. SIGINT and
+SIGTERM request application shutdown, allowing the model owner to finish its
+current stage before releasing the transport and model. Client errors are
+local to that peer; the model scheduler chooses its safe cancellation boundary.
+
+```sh
+build_tools/bin/iree-bazel-test --config=asan \
+  //experimental/loom_serve:http_request_test \
+  //experimental/loom_serve:http_server_test
+```
+
+The loopback checks use real sockets/carriers and cover fragmented requests,
+ordered streaming bytes, half-close, repeated slot reuse, peer reset and
+shutdown with receive/accept work pending. They establish transport ownership,
+not a working chat endpoint or a pi session.
