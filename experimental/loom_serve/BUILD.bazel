@@ -190,6 +190,23 @@ loom_cc_binary(
         "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
+        ":qwen_model",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/tokenizer",
+    ],
+)
+
+loom_cc_library(
+    name = "qwen_model",
+    srcs = ["qwen_model.c"],
+    hdrs = ["qwen_model.h"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
         ":command",
         ":execution",
         ":module",
@@ -201,7 +218,6 @@ loom_cc_binary(
         "//runtime/src/iree/base/internal:json",
         "//runtime/src/iree/base/internal:path",
         "//runtime/src/iree/base/threading",
-        "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers",
         "//runtime/src/iree/io:file_handle",

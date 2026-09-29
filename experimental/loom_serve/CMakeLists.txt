@@ -230,6 +230,23 @@ loom_cc_binary(
   SRCS
     "qwen_main.c"
   DEPS
+    ::qwen_model
+    iree::base
+    iree::base::tooling::flags
+    iree::io::file_handle
+    iree::tokenizer
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+loom_cc_library(
+  NAME
+    qwen_model
+  HDRS
+    "qwen_model.h"
+  SRCS
+    "qwen_model.c"
+  DEPS
     ::command
     ::execution
     ::module
@@ -240,7 +257,6 @@ loom_cc_binary(
     iree::base::internal::json
     iree::base::internal::path
     iree::base::threading
-    iree::base::tooling::flags
     iree::hal
     iree::hal::drivers
     iree::io::file_handle
@@ -255,6 +271,7 @@ loom_cc_binary(
     iree::vm
     iree::vm::bytecode::module
     loom::target::arch::cmd::program
+  PUBLIC
 )
 endif()
 
