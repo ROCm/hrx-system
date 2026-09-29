@@ -1,4 +1,6 @@
-// Device-resident generation control and token-history updates.
+// Device-resident generation control and a 128-token history ring. Slot zero
+// holds the current token; generated ordinal n occupies 1 + ((n - 1) % 128).
+// Consumers draining every step read slot zero and retain their own transcript.
 
 kernel.def export("qwen38_decode_commit_token") @qwen38_decode_commit_token() {
   %c1 = index.constant 1 : index
@@ -7,6 +9,7 @@ kernel.def export("qwen38_decode_commit_token") @qwen38_decode_commit_token() {
   %c0_offset = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
+  %history_capacity = index.constant 128 : index
   %c1_i32 = scalar.constant 1 : i32
   %control_view = buffer.view %control[%c0_offset] : buffer -> view<3xi32>
   %token_ids_view = buffer.view %token_ids[%c0_offset] : buffer -> view<129xi32>
@@ -14,8 +17,10 @@ kernel.def export("qwen38_decode_commit_token") @qwen38_decode_commit_token() {
   %position = view.load %control_view[%c0] : view<3xi32> -> i32
   %generated_count = view.load %control_view[%c1] : view<3xi32> -> i32
   %eos_token = view.load %control_view[2] : view<3xi32> -> i32
-  %generated_count0 = index.cast %generated_count : i32 to index
-  %generated_index0 = index.add %generated_count0, %c1 : index
+  %generated_count_cast = index.cast %generated_count : i32 to index
+  %generated_count0 = index.assume %generated_count_cast [range(%generated_count_cast, 1, 262144)] : index
+  %ring_index = index.rem %generated_count0, %history_capacity : index
+  %generated_index0 = index.add %ring_index, %c1 : index
   %generated_index = index.assume %generated_index0 [range(%generated_index0, 1, 128)] : index
   %token_id = view.load %token_ids_view[%c0] : view<129xi32> -> i32
   %is_eos = scalar.cmpi eq, %token_id, %eos_token : i32
@@ -45,13 +50,13 @@ kernel.def @qwen38_decode_read_history_index3() {
 
 check.case public @qwen38_decode_commit_token_case {
   %control = check.generate.iota offset(41) step(-39) : tensor<3xi32>
-  %token_ids = check.generate.iota offset(7) step(-1) : tensor<5xi32>
+  %token_ids = check.generate.iota offset(7) step(-1) : tensor<129xi32>
   %progress = check.generate.fill value(0) : tensor<8xi32>
   %committed_token = check.generate.fill value(-1) : tensor<1xi32>
   %expected_control = check.generate.iota offset(42) step(-39) : tensor<2xi32>
   %expected_token = check.generate.fill value(7) : tensor<1xi32>
-  kernel.launch @qwen38_decode_commit_token(%control, %token_ids, %progress) : (tensor<3xi32>, tensor<5xi32>, tensor<8xi32>)
-  kernel.launch @qwen38_decode_read_history_index3(%token_ids, %committed_token) : (tensor<5xi32>, tensor<1xi32>)
+  kernel.launch @qwen38_decode_commit_token(%control, %token_ids, %progress) : (tensor<3xi32>, tensor<129xi32>, tensor<8xi32>)
+  kernel.launch @qwen38_decode_read_history_index3(%token_ids, %committed_token) : (tensor<129xi32>, tensor<1xi32>)
   %control_pair = check.tensor.view %control offset(0) : tensor<3xi32> -> tensor<2xi32>
   %progress_count = check.tensor.view %progress offset(0) : tensor<8xi32> -> tensor<1xi32>
   %progress_done = check.tensor.view %progress offset(28) : tensor<8xi32> -> tensor<1xi32>
@@ -61,6 +66,23 @@ check.case public @qwen38_decode_commit_token_case {
   check.expect.equal actual(%committed_token) expected(%expected_token) : tensor<1xi32>
   check.expect.equal actual(%progress_count) expected(%expected_count) : tensor<1xi32>
   check.expect.equal actual(%progress_done) expected(%expected_done) : tensor<1xi32>
+  check.return
+}
+
+check.case public @qwen38_decode_history_wrap_case {
+  %control = check.generate.fill value(128) : tensor<3xi32>
+  %token_ids = check.generate.iota offset(1000) step(-1) : tensor<129xi32>
+  %progress = check.generate.fill value(0) : tensor<8xi32>
+  kernel.launch @qwen38_decode_commit_token(%control, %token_ids, %progress) : (tensor<3xi32>, tensor<129xi32>, tensor<8xi32>)
+  %wrapped = check.tensor.view %token_ids offset(4) : tensor<129xi32> -> tensor<1xi32>
+  %tail = check.tensor.view %token_ids offset(8) : tensor<129xi32> -> tensor<127xi32>
+  %expected = check.generate.fill value(1000) : tensor<1xi32>
+  %expected_tail = check.generate.iota offset(998) step(-1) : tensor<127xi32>
+  %control_pair = check.tensor.view %control offset(0) : tensor<3xi32> -> tensor<2xi32>
+  %expected_control = check.generate.fill value(129) : tensor<2xi32>
+  check.expect.equal actual(%wrapped) expected(%expected) : tensor<1xi32>
+  check.expect.equal actual(%tail) expected(%expected_tail) : tensor<127xi32>
+  check.expect.equal actual(%control_pair) expected(%expected_control) : tensor<2xi32>
   check.return
 }
 
@@ -108,13 +130,13 @@ kernel.def @qwen38_prefill_read_history_index1() {
 
 check.case public @qwen38_prefill_finish_control_case {
   %control = check.generate.iota offset(3) step(14) : tensor<3xi32>
-  %token_ids = check.generate.iota offset(7) step(-1) : tensor<5xi32>
+  %token_ids = check.generate.iota offset(7) step(-1) : tensor<129xi32>
   %progress = check.generate.fill value(0) : tensor<8xi32>
   %committed_token = check.generate.fill value(-1) : tensor<1xi32>
   %expected = check.generate.iota offset(20) step(-19) : tensor<2xi32>
   %expected_token = check.generate.fill value(7) : tensor<1xi32>
-  kernel.launch @qwen38_prefill_finish_control(%control, %token_ids, %progress) : (tensor<3xi32>, tensor<5xi32>, tensor<8xi32>)
-  kernel.launch @qwen38_prefill_read_history_index1(%token_ids, %committed_token) : (tensor<5xi32>, tensor<1xi32>)
+  kernel.launch @qwen38_prefill_finish_control(%control, %token_ids, %progress) : (tensor<3xi32>, tensor<129xi32>, tensor<8xi32>)
+  kernel.launch @qwen38_prefill_read_history_index1(%token_ids, %committed_token) : (tensor<129xi32>, tensor<1xi32>)
   %control_pair = check.tensor.view %control offset(0) : tensor<3xi32> -> tensor<2xi32>
   %progress_count = check.tensor.view %progress offset(0) : tensor<8xi32> -> tensor<1xi32>
   %progress_done = check.tensor.view %progress offset(28) : tensor<8xi32> -> tensor<1xi32>

@@ -40,21 +40,26 @@ Weights, KV pools, model forward stages, scheduling policy, and transport are
 separate from this coarse execution boundary. None is inferred from buffer
 contents or command names by the native submission code.
 
-## Single-row Qwen execution
+## Shared Qwen execution
 
-`qwen` is a concrete Qwen3.8-27B UD-Q5_K_XL caller, not an HTTP service. It loads
-the canonical GGUF into one resident parameter slab, prepares prefill and decode
-commands once, and invokes the compiled `qwen_model.loom` through one VM process.
-Device row state survives each invocation. Host uploads, stage execution, and
-readback share explicit timeline ordering. Greedy selection and position/history
-updates are part of the compiled stages; the host stops on their EOS result or
-the requested output length. Text output excludes special tokens.
+`qwen_model.{h,c}` owns a concrete Qwen3.8-27B UD-Q5_K_XL residency: one GGUF
+parameter slab, prepared prefill/decode commands, model VM process, residual
+buffer and packed workspace. One preallocated arena partitions private retained
+state among up to eight rows. Rows are data, not VM processes. A single host
+owner multiplexes their stages through the shared execution timeline.
+
+`qwen` is the CLI caller, not an HTTP service. It round-robins active input
+chunks and decode steps, supports retained follow-up turns, and can reset/reuse
+the same rows for repeated runs without reloading weights. This is stage-level
+interleaving, not batched model math. Greedy selection and device position/history
+updates are compiled stages. The host stops on EOS or its requested token limit.
 
 Model math is supplied as separately compiled artifacts, not built into this
 binary. Each stage directory contains:
 
 ```text
 manifest.json                 Version 2 loom-command-set manifest, one root.
+config.json                   Compile-time model capacities from the stage driver.
 commands/<artifact>           Portable command named by that root.
 kernels/<request-stem>.hsaco   Compiled image for each manifest entry.
 ```
@@ -66,24 +71,32 @@ must place every parameter identically; the loader compares their keys,
 fixed-buffer indices, offsets, lengths, and alignments before sharing weights.
 Allocation satisfies both stages' published slab size/alignment requirements.
 
-This caller's explicit model configuration is one fixed weight root, a
-512-token context, at most 128 generated tokens, and seven rebindable slots:
+The [model sources and compiler driver](models/qwen38/README.md) reproduce these
+artifacts. Configuration stays with its compiled stage; the loader checks that
+both stages declare the same context capacity. Prefill accepts active chunks
+up to the compiled launch capacity (at most 512); the caller enforces remaining
+context capacity. The seven rebindable slots are:
 
 | Slot | Buffer contract |
 | --- | --- |
-| 0 | Residual rows: 512 × 5120 f32 values. |
+| 0 | Shared residual rows: 512 × 5120 f32 values. |
 | 1 | Three i32 values: prefill count/base/EOS, then decode position/count/EOS. |
 | 2 | GDN convolution and recurrent state: 156,893,184 bytes. |
-| 3 | Sixteen attention layers' KV state: 512 × 65,536 bytes. |
-| 4 | 512 i32 token IDs; after prefill, current token at 0 and history from 1. |
+| 3 | Sixteen attention layers' KV state: context capacity × 65,536 bytes. |
+| 4 | 512 i32 token IDs; after prefill, current token at 0 and a 128-token history ring from 1. |
 | 5 | Eight i32 progress values; generated count at 0 and EOS flag at 7. |
 | 6 | Shared scratch sized/aligned for the larger requirement of both stages. |
 
-The stage sources must use this state layout and specialize prefill to the exact
-encoded prompt length. `--prefill_tokens` checks the encoded length against the
-caller-supplied specialization; it does not recover model semantics from kernel
-reflection. The default no-thinking arithmetic prompt is 24 tokens with the
-model's tokenizer. Different prompt lengths require matching prefill artifacts.
+Slots 1 through 5 are private arena spans; 0 and 6 are shared. The current roots
+use contiguous per-row KV, not paged KV. At a 16K context, two retained rows use
+2.292 GiB, alongside the 18.504 GiB parameter slab and shared scratch. The host
+does not infer these model semantics from kernel reflection.
+
+The selected token returned by a stage has not yet entered the recurrent/KV
+state. Decode consumes it; another prefill can instead discard it. A retained
+follow-up consumes the last delivered token before appending new role markers
+and input. This distinction is essential at EOS and tool-result boundaries.
+The CLI retains output tokens on the host while the fixed device ring wraps.
 
 ```sh
 build_tools/bin/iree-bazel-run --config=asan //experimental/loom_serve:qwen -- \
@@ -91,9 +104,28 @@ build_tools/bin/iree-bazel-run --config=asan //experimental/loom_serve:qwen -- \
   --decode=/path/to/compiled/decode \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
   --tokenizer=/path/to/tokenizer.json \
-  --prefill_tokens=24 --max_tokens=16
+  --prompt='The secret word is MAPLE. Remember it and reply only READY.' \
+  --prompt='The secret word is COBALT. Remember it and reply only READY.' \
+  --followup='What is the secret word? Answer with only that word.' \
+  --chunk_size=7 --iterations=2 --max_tokens=16
 ```
 
-All row buffers and scratch are allocated before generation. The current host
-loop waits for each token's readback; it provides a full-model correctness
-witness, not batching, a zero-allocation measurement, or a throughput claim.
+The example exercises distinct retained rows, short/padded chunks, follow-ups
+and reset/reuse. Each iteration should produce READY/READY then MAPLE/COBALT.
+Omitting `--chunk_size` uses the compiled capacity and avoids artificial tiny
+chunks. `--prompt_file` accepts an already rendered chat transcript for replay
+comparisons. `--rows` repeats the supplied prompt set across a fixed row count.
+
+JSON metric lines on stderr report consumed input, selected output (including
+EOS), prefill/decode step counts and completed-stage durations. Model TTFT runs
+from round admission through the final input chunk's first prediction; it
+includes other rows' intervening work. Round-robin duration covers the whole
+set. Cold model creation and final text printing are outside those durations.
+For a warm decode rate, divide decode steps by decode seconds; aggregate rate
+uses the whole set's elapsed time, not the sum of per-row rates.
+
+All device backing is allocated before generation. The current host stage API
+waits for readback and is single-owner; transport can run independently. These
+checks do not establish zero allocations inside VM/HAL submission or batched
+throughput. Controlled performance uses an optimized binary and benchmark lock,
+not ASAN correctness timings.
