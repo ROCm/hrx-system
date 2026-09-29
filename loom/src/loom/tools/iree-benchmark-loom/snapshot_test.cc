@@ -69,6 +69,61 @@ static bool JsonArrayContainsString(iree_string_view_t array,
   return false;
 }
 
+TEST(BenchmarkSnapshotSinkTest, PreservesInterleavedProfileSuppression) {
+  iree_allocator_t allocator = iree_allocator_system();
+  iree_benchmark_loom_snapshot_sink_t snapshot = {};
+  IREE_ASSERT_OK(
+      iree_benchmark_loom_snapshot_sink_initialize(allocator, &snapshot));
+  iree_benchmark_loom_event_sink_t event_sink = {};
+  iree_benchmark_loom_snapshot_event_sink_initialize(&snapshot, &event_sink);
+  iree_benchmark_loom_run_identity_t run = {};
+  run.run_id = IREE_SV("run");
+  IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_run(
+      &event_sink, &run, /*dry_run=*/false, &kNoSanitizer));
+
+  iree_benchmark_loom_selected_benchmark_t selection = {};
+  selection.identity.candidate_id = IREE_SV("candidate");
+  selection.policy.measure_kind = IREE_BENCHMARK_LOOM_MEASURE_DISPATCH_COMPLETE;
+  selection.policy.measure = IREE_SV("dispatch_complete");
+  iree_benchmark_loom_dispatch_comparison_candidate_t candidate = {};
+  candidate.selection = &selection;
+  iree_benchmark_loom_benchmark_result_t result = {};
+  result.executed = true;
+  result.passed = true;
+  result.has_hal_benchmark = true;
+  result.hal_benchmark.timing.batch_size = 1;
+  result.hal_benchmark.timing.measured_batch_count = 1;
+  result.hal_benchmark.timing.measured_operation_count = 1;
+  for (iree_host_size_t i = 0; i < 2; ++i) {
+    IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_benchmark_repetition(
+        &event_sink, &run, &candidate, &selection.identity, IREE_SV("group"),
+        IREE_SV("AB"), i, i, 'A', /*profile_suppressed=*/i != 0, &result));
+  }
+  iree_benchmark_loom_artifact_bundle_t bundle = {};
+  IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_summary(
+      &event_sink, &run, &bundle, /*planned_case_count=*/1,
+      /*planned_benchmark_count=*/1, /*selected_benchmark_count=*/1,
+      /*logical_sample_count=*/1, /*work_item_count=*/1,
+      /*failure_count=*/0, /*failed_benchmark_count=*/0,
+      /*correctness_sample_count=*/1, /*correctness_failed_sample_count=*/0,
+      /*dry_run=*/false));
+
+  iree_string_builder_t output;
+  iree_string_builder_initialize(allocator, &output);
+  iree_string_view_t root = ParseJsonDocument(SnapshotJson(&snapshot, &output));
+  iree_string_view_t repetitions = LookupObject(root, IREE_SV("repetitions"));
+  for (iree_host_size_t i = 0; i < 2; ++i) {
+    iree_string_view_t repetition = iree_string_view_empty();
+    IREE_ASSERT_OK(iree_json_array_get(repetitions, i, &repetition));
+    iree_string_view_t suppressed = TryLookupObject(
+        repetition, IREE_SV("profile_suppressed_for_interleave"));
+    EXPECT_TRUE(iree_string_view_equal(
+        suppressed, i == 0 ? iree_string_view_empty() : IREE_SV("true")));
+  }
+  iree_string_builder_deinitialize(&output);
+  iree_benchmark_loom_snapshot_sink_deinitialize(&snapshot);
+}
+
 TEST(BenchmarkSnapshotSinkTest, AggregatesDeduplicatedWorkItems) {
   iree_allocator_t allocator = iree_allocator_system();
   iree_benchmark_loom_snapshot_sink_t snapshot = {};

@@ -447,12 +447,16 @@ static void iree_benchmark_loom_hal_sequence_input_ring_deinitialize(
 static iree_status_t iree_benchmark_loom_append_profile_artifact_path(
     const iree_benchmark_loom_run_identity_t* run,
     const iree_benchmark_loom_candidate_identity_t* candidate,
-    iree_hal_device_profiling_data_families_t profile_data_families,
+    const loom_run_hal_benchmark_options_t* options,
     iree_host_size_t sample_ordinal, iree_string_builder_t* artifact_path) {
+  if (!iree_any_bit_set(options->flags,
+                        LOOM_RUN_HAL_BENCHMARK_FLAG_PROFILE_FINAL_BATCH)) {
+    return iree_ok_status();
+  }
   const iree_host_size_t initial_size = iree_string_builder_size(artifact_path);
   IREE_RETURN_IF_ERROR(
       iree_benchmark_loom_append_effective_profile_artifacts_dir(
-          run, profile_data_families, artifact_path));
+          run, options->profile_data_families, artifact_path));
   if (iree_string_builder_size(artifact_path) == initial_size) {
     return iree_ok_status();
   }
@@ -519,8 +523,8 @@ iree_status_t iree_benchmark_loom_run_hal_benchmark_sample(
     iree_string_builder_t profile_artifact_path;
     iree_string_builder_initialize(allocator, &profile_artifact_path);
     status = iree_benchmark_loom_append_profile_artifact_path(
-        run, candidate, policy->hal_options.profile_data_families,
-        case_sample_ordinal, &profile_artifact_path);
+        run, candidate, &hal_options, case_sample_ordinal,
+        &profile_artifact_path);
     if (iree_status_is_ok(status) &&
         iree_string_builder_size(&profile_artifact_path) != 0) {
       status = iree_benchmark_loom_create_parent_directory(
@@ -602,8 +606,8 @@ iree_status_t iree_benchmark_loom_run_hal_sequence_benchmark_sample(
     iree_string_builder_t profile_artifact_path;
     iree_string_builder_initialize(allocator, &profile_artifact_path);
     status = iree_benchmark_loom_append_profile_artifact_path(
-        run, candidate, policy->hal_options.profile_data_families,
-        case_sample_ordinal, &profile_artifact_path);
+        run, candidate, &hal_options, case_sample_ordinal,
+        &profile_artifact_path);
     if (iree_status_is_ok(status) &&
         iree_string_builder_size(&profile_artifact_path) != 0) {
       status = iree_benchmark_loom_create_parent_directory(

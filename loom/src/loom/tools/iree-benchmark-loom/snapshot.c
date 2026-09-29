@@ -597,6 +597,10 @@ static iree_status_t iree_benchmark_loom_snapshot_append_repetition(
       loom_json_object_begin_field(&object, IREE_SV("schedule_token")));
   IREE_RETURN_IF_ERROR(loom_output_stream_write_format(&stream, "\"%c\"",
                                                        event->schedule_token));
+  if (event->profile_suppressed) {
+    IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
+        &object, IREE_SV("profile_suppressed_for_interleave"), true));
+  }
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       &object, IREE_SV("state"),
       iree_benchmark_loom_snapshot_result_state(event->benchmark_result)));
