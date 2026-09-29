@@ -9,6 +9,8 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -74,6 +76,21 @@ class LoomPresubmitTest(unittest.TestCase):
             ):
                 self.assertEqual(self.presubmit.run_bazel_tests(), exit_code == 0)
                 self.assertEqual(run.call_args.args[0][-1], "//loom/...")
+
+    def test_bazel_tests_use_selected_execution_policy(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                self.presubmit.project_presubmit.BAZEL_CONFIGS_ENV: json.dumps(
+                    ["remote-execution", "local-tests"]
+                )
+            },
+            clear=True,
+        ):
+            command = self.presubmit.bazel_test_command()
+
+        self.assertIn("--config=remote-execution", command)
+        self.assertIn("--config=local-tests", command)
 
     def test_bazel_source_label_uses_nearest_build_package(self):
         with tempfile.TemporaryDirectory() as temporary_dir:

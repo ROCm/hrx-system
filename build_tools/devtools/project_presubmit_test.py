@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import io
+import json
 import os
 import tempfile
 import unittest
@@ -19,6 +20,31 @@ from build_tools.devtools import project_presubmit
 
 
 class ProjectPresubmitTest(unittest.TestCase):
+    def test_bazel_config_policy_round_trips_through_environment(self):
+        environment = project_presubmit.environment_with_bazel_configs(
+            {"PATH": "/bin"},
+            ("remote", "local-tests"),
+        )
+
+        self.assertEqual(
+            json.loads(environment[project_presubmit.BAZEL_CONFIGS_ENV]),
+            ["remote", "local-tests"],
+        )
+        with mock.patch.dict(os.environ, environment, clear=True):
+            self.assertEqual(
+                project_presubmit.bazel_config_args(),
+                ("--config=remote", "--config=local-tests"),
+            )
+
+    def test_bazel_config_policy_rejects_invalid_environment(self):
+        with mock.patch.dict(
+            os.environ,
+            {project_presubmit.BAZEL_CONFIGS_ENV: '{"config": "remote"}'},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(ValueError, "JSON list"):
+                project_presubmit.bazel_configs_from_environment()
+
     def test_common_arguments_expose_project_hygiene_phase(self):
         parser = argparse.ArgumentParser()
         project_presubmit.add_common_arguments(parser, project_name="example")
@@ -77,6 +103,15 @@ class ProjectPresubmitTest(unittest.TestCase):
             executable_path.chmod(0o755)
 
             with (
+                mock.patch.dict(
+                    os.environ,
+                    {
+                        project_presubmit.BAZEL_CONFIGS_ENV: json.dumps(
+                            ["remote-policy"]
+                        )
+                    },
+                    clear=True,
+                ),
                 mock.patch.object(
                     project_presubmit, "run_command", return_value=True
                 ) as run_command,
@@ -102,6 +137,7 @@ class ProjectPresubmitTest(unittest.TestCase):
                     "bazel",
                     "build",
                     "--config=presubmit",
+                    "--config=remote-policy",
                     "//example:tool",
                 ],
                 "Build Bazel executable //example:tool",
@@ -110,7 +146,7 @@ class ProjectPresubmitTest(unittest.TestCase):
             resolve_bazel_output_path.assert_called_once_with(
                 bazel="bazel",
                 target="//example:tool",
-                bazel_args=["--config=presubmit"],
+                bazel_args=["--config=presubmit", "--config=remote-policy"],
                 cwd=repo_root,
                 env=None,
             )

@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -36,6 +38,21 @@ class LibhrxPresubmitTest(unittest.TestCase):
             arg for arg in command if arg.startswith("--test_tag_filters=")
         )
         self.assertIn("-iree-run-requirement=runtime.resource.amd_gpu", tag_filter)
+
+    def test_bazel_tests_use_selected_execution_policy(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                self.presubmit.project_presubmit.BAZEL_CONFIGS_ENV: json.dumps(
+                    ["remote-execution", "local-tests"]
+                )
+            },
+            clear=True,
+        ):
+            command = self.presubmit.bazel_test_command()
+
+        self.assertIn("--config=remote-execution", command)
+        self.assertIn("--config=local-tests", command)
 
     def test_cmake_tests_exclude_runtime_resource_requirements(self):
         with (

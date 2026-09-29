@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -37,6 +39,21 @@ class LibamdfPresubmitTest(unittest.TestCase):
         self.assertEqual(command.count("--config=presubmit"), 0)
         self.assertIn("--//libamdf/config:enabled=true", command)
         self.assertIn("//libamdf/...", command)
+
+    def test_bazel_tests_use_selected_execution_policy(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                self.presubmit.project_presubmit.BAZEL_CONFIGS_ENV: json.dumps(
+                    ["remote-execution", "local-tests"]
+                )
+            },
+            clear=True,
+        ):
+            command = self.presubmit.bazel_test_command()
+
+        self.assertIn("--config=remote-execution", command)
+        self.assertIn("--config=local-tests", command)
 
     def test_cmake_build_names_public_library_targets(self):
         build_dir = Path("build/libamdf")

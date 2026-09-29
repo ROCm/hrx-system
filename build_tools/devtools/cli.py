@@ -82,6 +82,7 @@ DEV_OPTIONS_WITH_VALUES = frozenset(
         "--alias-dir",
         "--alias_dir",
         "--base",
+        "--bazel-config",
         "--cmake-build-dir",
         "--cmake_build_dir",
         "--profile",
@@ -415,6 +416,21 @@ def add_profile_option(
     )
 
 
+def add_bazel_config_option(parser: argparse.ArgumentParser) -> None:
+    add_argument(
+        parser,
+        "--bazel-config",
+        action="append",
+        default=None,
+        dest="bazel_configs",
+        metavar="NAME",
+        help=(
+            "Select a Bazel configuration for every build, test, and static-"
+            "analysis command in this validation process. Repeatable."
+        ),
+    )
+
+
 def parse_arguments(argv: list[str]) -> argparse.Namespace:
     argv = hoist_passthrough_dev_options(argv)
     agents_md_request = find_agents_md_request(argv)
@@ -678,6 +694,8 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
         default=presubmit.precommit_default_profile(lane),
         command="Git hook precommit",
     )
+    if lane == "bazel":
+        add_bazel_config_option(hook_parser)
     hook_parser.set_defaults(handler=handle_hook, lane=lane)
 
     configure_help = help_text.lane_command_help(lane, "configure")
@@ -949,6 +967,8 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
         default=presubmit.precommit_default_profile(lane),
         command="Precommit",
     )
+    if lane == "bazel":
+        add_bazel_config_option(precommit_parser)
     precommit_parser.add_argument(
         "paths",
         nargs="*",
@@ -969,6 +989,8 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
         default=presubmit.PRESUBMIT_DEFAULT_PROFILE,
         command="Presubmit",
     )
+    if lane == "bazel":
+        add_bazel_config_option(presubmit_parser)
     add_argument(
         presubmit_parser,
         "--base",
@@ -1139,7 +1161,11 @@ def env_with_optional_importers(
 
 def handle_hook(args: argparse.Namespace) -> CommandPlan:
     return hooks.hook_plan(
-        args.lane, existing_or_system_environment(args), args.verify, args.profile
+        args.lane,
+        existing_or_system_environment(args),
+        args.verify,
+        args.profile,
+        bazel_configs=getattr(args, "bazel_configs", None) or (),
     )
 
 
@@ -1429,6 +1455,7 @@ def handle_presubmit(args: argparse.Namespace) -> CommandPlan:
         else None,
         verbose=args.verbose,
         project_tests=args.project_tests,
+        bazel_configs=getattr(args, "bazel_configs", None) or (),
     )
 
 
@@ -1446,6 +1473,7 @@ def handle_precommit(args: argparse.Namespace) -> CommandPlan:
         staged=args.staged,
         paths=args.paths,
         verbose=args.verbose,
+        bazel_configs=getattr(args, "bazel_configs", None) or (),
     )
 
 

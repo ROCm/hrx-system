@@ -75,6 +75,7 @@ def bazel_test_command() -> list[str]:
         "bazel",
         "test",
         "--config=presubmit",
+        *project_presubmit.bazel_config_args(),
         "--test_tag_filters=" + ",".join(RESOURCE_TEST_TAG_FILTERS),
         "//libhrx/...",
     ]

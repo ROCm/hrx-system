@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import shlex
+from collections.abc import Sequence
 
 from build_tools.devtools.command_plan import (
     CommandPlan,
@@ -49,9 +50,17 @@ def _quote_lefthook_command(arguments: list[str]) -> str:
     return shlex.join([argument.replace("\\", "/") for argument in arguments])
 
 
-def hook_content(lane: str, profile: str, python_executable: str) -> str:
+def hook_content(
+    lane: str,
+    profile: str,
+    python_executable: str,
+    *,
+    bazel_configs: Sequence[str] = (),
+) -> str:
     if lane not in ("bazel", "cmake"):
         raise ValueError(f"unknown lane: {lane}")
+    if lane != "bazel" and bazel_configs:
+        raise ValueError("Bazel configurations require the Bazel hook lane")
     lane_name = {
         "bazel": "Bazel",
         "cmake": "CMake",
@@ -64,6 +73,7 @@ def hook_content(lane: str, profile: str, python_executable: str) -> str:
             "precommit",
             "--profile",
             profile,
+            *(f"--bazel-config={config}" for config in bazel_configs),
             "--staged",
             "--verbose",
         ]
@@ -98,13 +108,23 @@ commit-msg:
 
 
 def hook_plan(
-    lane: str, tool_env: ToolEnvironment, verify: bool, profile: str
+    lane: str,
+    tool_env: ToolEnvironment,
+    verify: bool,
+    profile: str,
+    *,
+    bazel_configs: Sequence[str] = (),
 ) -> CommandPlan:
     plan = CommandPlan()
     plan.add(
         WriteFileStep(
             path=REPO_ROOT / "lefthook-local.yml",
-            content=hook_content(lane, profile, tool_env.python),
+            content=hook_content(
+                lane,
+                profile,
+                tool_env.python,
+                bazel_configs=bazel_configs,
+            ),
             label=f"select {lane} hook policy with {profile} profile",
         )
     )

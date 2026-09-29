@@ -8,8 +8,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
+from build_tools.devtools import project_presubmit
 from build_tools.devtools.command_plan import CommandPlan, CommandStep
 from build_tools.devtools.environment import REPO_ROOT, ToolEnvironment
 
@@ -56,11 +58,14 @@ def presubmit_plan(
     cmake_build_dir: Path | None = None,
     verbose: bool = False,
     project_tests: bool = True,
+    bazel_configs: Sequence[str] = (),
 ) -> CommandPlan:
     env = tool_env.path_env()
     label_name = build_system_name(lane)
     if cmake_build_dir is not None:
         env[CMAKE_BUILD_DIR_ENV] = str(cmake_build_dir)
+    if lane == "bazel":
+        env = project_presubmit.environment_with_bazel_configs(env, bazel_configs)
     plan = CommandPlan()
     if lane == "bazel":
         command = [
@@ -124,6 +129,7 @@ def precommit_plan(
     staged: bool = False,
     paths: list[str] | None = None,
     verbose: bool = False,
+    bazel_configs: Sequence[str] = (),
 ) -> CommandPlan:
     if lane not in ("bazel", "cmake"):
         raise ValueError(f"unknown lane: {lane}")
@@ -132,6 +138,8 @@ def precommit_plan(
     label_name = build_system_name(lane)
     if cmake_build_dir is not None:
         env[CMAKE_BUILD_DIR_ENV] = str(cmake_build_dir)
+    if lane == "bazel":
+        env = project_presubmit.environment_with_bazel_configs(env, bazel_configs)
     input_args: list[str] = []
     if paths:
         input_args += paths

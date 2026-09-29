@@ -451,6 +451,7 @@ def bazel_test_command(target_pattern_file: Path | None = None) -> list[str]:
         "bazel",
         "test",
         *BAZEL_TEST_CONFIGURATION_ARGS,
+        *project_presubmit.bazel_config_args(),
         "--test_tag_filters=" + ",".join(RESOURCE_TEST_TAG_FILTERS),
     ]
     if target_pattern_file is None:

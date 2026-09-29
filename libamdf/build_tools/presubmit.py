@@ -81,6 +81,7 @@ def bazel_test_command() -> list[str]:
     return dev_command(
         "bazel",
         "test",
+        *project_presubmit.bazel_config_args(),
         "--//libamdf/config:enabled=true",
         "--test_tag_filters=" + ",".join(BAZEL_RESOURCE_TAG_EXCLUDES),
         "//libamdf/...",

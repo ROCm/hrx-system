@@ -1315,6 +1315,27 @@ class CliTest(unittest.TestCase):
         self.assertIn("--lane bazel", description)
         self.assertIn("--profile paranoid", description)
 
+    def test_bazel_precommit_exports_selected_configs(self):
+        args = cli.parse_arguments(
+            [
+                "bazel",
+                "precommit",
+                "--staged",
+                "--bazel-config=remote-execution",
+                "--bazel-config",
+                "local-tests",
+            ]
+        )
+
+        plan = args.handler(args)
+
+        self.assertEqual(len(plan.steps), 2)
+        for step in plan.steps:
+            self.assertEqual(
+                json.loads(step.env["IREE_PRESUBMIT_BAZEL_CONFIGS"]),
+                ["remote-execution", "local-tests"],
+            )
+
     def test_precommit_profile_can_be_selected(self):
         args = cli.parse_arguments(["bazel", "precommit", "--profile", "default"])
 
@@ -1497,6 +1518,23 @@ class CliTest(unittest.TestCase):
             "bazel precommit --profile ci --staged --verbose",
             step.content,
         )
+
+    def test_hook_persists_selected_bazel_configs(self):
+        args = cli.parse_arguments(
+            [
+                "bazel",
+                "hook",
+                "--bazel-config=remote-execution",
+                "--bazel-config=local-tests",
+            ]
+        )
+
+        plan = args.handler(args)
+        step = plan.steps[0]
+
+        self.assertIsInstance(step, WriteFileStep)
+        self.assertIn("--bazel-config=remote-execution", step.content)
+        self.assertIn("--bazel-config=local-tests", step.content)
 
     def test_hook_verify_uses_supported_lefthook_file_option(self):
         args = cli.parse_arguments(["bazel", "hook", "--verify"])

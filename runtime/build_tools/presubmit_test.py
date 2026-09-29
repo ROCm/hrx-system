@@ -7,8 +7,11 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 def load_presubmit_module():
@@ -41,6 +44,21 @@ class RuntimePresubmitTest(unittest.TestCase):
             "-//runtime/src/iree/hal/drivers/task/executable/elf:elf_module_test",
             command,
         )
+
+    def test_bazel_tests_use_selected_execution_policy(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                self.presubmit.project_presubmit.BAZEL_CONFIGS_ENV: json.dumps(
+                    ["remote-execution", "local-tests"]
+                )
+            },
+            clear=True,
+        ):
+            command = self.presubmit.bazel_test_command()
+
+        self.assertIn("--config=remote-execution", command)
+        self.assertIn("--config=local-tests", command)
 
 
 if __name__ == "__main__":

@@ -709,6 +709,23 @@ class PresubmitTest(unittest.TestCase):
         )
         self.assertEqual(command[command.index("--") + 1 :], targets)
 
+    def test_clang_tidy_bazel_command_uses_selected_execution_policy(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                presubmit.project_presubmit.BAZEL_CONFIGS_ENV: json.dumps(
+                    ["remote-execution", "local-tests"]
+                )
+            },
+            clear=True,
+        ):
+            command = presubmit.clang_tidy_bazel_command(
+                ["//runtime/src/iree/base:all"]
+            )
+
+        self.assertIn("--config=remote-execution", command)
+        self.assertIn("--config=local-tests", command)
+
     def test_clang_tidy_bazel_command_obeys_configured_jobs(self):
         with mock.patch.dict(os.environ, {"IREE_CLANG_TIDY_JOBS": "7"}):
             command = presubmit.clang_tidy_bazel_command(
@@ -1689,6 +1706,37 @@ class PresubmitTest(unittest.TestCase):
             {"libamdf", "libhrx", "loom", "runtime"},
             {project.name for project in presubmit.existing_project_scripts()},
         )
+
+    def test_repository_tool_tests_use_selected_execution_policy(self):
+        with (
+            mock.patch.dict(
+                os.environ,
+                {
+                    presubmit.project_presubmit.BAZEL_CONFIGS_ENV: json.dumps(
+                        ["remote-execution", "local-tests"]
+                    )
+                },
+                clear=True,
+            ),
+            mock.patch.object(
+                presubmit,
+                "repository_tool_test_targets",
+                return_value=["//build_tools/performance:performance_test"],
+            ),
+            mock.patch.object(
+                presubmit, "run_command", return_value=True
+            ) as run_command,
+        ):
+            self.assertTrue(
+                presubmit.run_repository_tool_tests(
+                    ["build_tools/performance/x.py"], False
+                )
+            )
+
+        command = run_command.call_args.args[0]
+        self.assertEqual(command[:3], ["bazel", "test", "--config=presubmit"])
+        self.assertIn("--config=remote-execution", command)
+        self.assertIn("--config=local-tests", command)
 
     def test_project_hygiene_dispatch_uses_project_presubmit_interface(self):
         project = presubmit.Project(

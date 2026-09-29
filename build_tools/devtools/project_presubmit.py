@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -19,6 +20,41 @@ from build_tools.devtools import bazel as bazel_dev
 from build_tools.devtools import cmake_file_api
 
 CMAKE_BUILD_DIR_ENV = "IREE_CMAKE_BUILD_DIR"
+BAZEL_CONFIGS_ENV = "IREE_PRESUBMIT_BAZEL_CONFIGS"
+
+
+def bazel_configs_from_environment() -> tuple[str, ...]:
+    """Returns the Bazel configurations selected for this presubmit tree."""
+    encoded_configs = os.environ.get(BAZEL_CONFIGS_ENV)
+    if encoded_configs is None:
+        return ()
+    try:
+        configs = json.loads(encoded_configs)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid {BAZEL_CONFIGS_ENV}: {exc.msg}") from exc
+    if not isinstance(configs, list) or any(
+        not isinstance(config, str) or not config for config in configs
+    ):
+        raise ValueError(
+            f"{BAZEL_CONFIGS_ENV} must encode a JSON list of non-empty strings"
+        )
+    return tuple(configs)
+
+
+def bazel_config_args() -> tuple[str, ...]:
+    """Returns command options selecting the configured presubmit policy."""
+    return tuple(f"--config={config}" for config in bazel_configs_from_environment())
+
+
+def environment_with_bazel_configs(
+    environment: dict[str, str], configs: Sequence[str]
+) -> dict[str, str]:
+    """Returns an environment carrying an explicit Bazel policy selection."""
+    if not configs:
+        return environment
+    selected_environment = dict(environment)
+    selected_environment[BAZEL_CONFIGS_ENV] = json.dumps(list(configs))
+    return selected_environment
 
 
 def add_common_arguments(
@@ -143,7 +179,7 @@ def build_and_resolve_executable(
     """Builds an executable target and returns its resolved artifact path."""
     executable_path: Path | None = None
     if lane == "bazel":
-        bazel_args = tuple(bazel_args)
+        bazel_args = (*bazel_args, *bazel_config_args())
         if not run_command(
             project_name,
             ["bazel", "build", *bazel_args, bazel_target],

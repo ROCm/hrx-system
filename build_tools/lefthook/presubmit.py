@@ -38,6 +38,7 @@ from urllib.request import url2pathname
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
+from build_tools.devtools import project_presubmit
 from build_tools.devtools.bazel import clang_tidy_configuration_args
 from build_tools.devtools.source_lock import (
     NonEmptyTrackedFileSnapshot,
@@ -1707,6 +1708,7 @@ def run_repository_tool_tests(paths: list[str], verbose: bool) -> bool:
                 "bazel",
                 "test",
                 "--config=presubmit",
+                *project_presubmit.bazel_config_args(),
                 *test_targets,
             ],
             "Repository tool Bazel tests",
@@ -1844,6 +1846,7 @@ def clang_tidy_bazel_command(
     command += [
         CLANG_TIDY_REPO_ENV,
         *clang_tidy_configuration_args(targets),
+        *project_presubmit.bazel_config_args(),
         f"--aspects={CLANG_TIDY_ASPECT}",
         f"--output_groups={','.join(output_groups)}",
     ]
@@ -2528,6 +2531,7 @@ def run_clang_tidy(
                     "bazel",
                     "test",
                     "--config=presubmit",
+                    *project_presubmit.bazel_config_args(),
                     CLANG_TIDY_REPO_ENV,
                     "//build_tools/clang_tidy:plugin_tests",
                 ],
@@ -2541,6 +2545,7 @@ def run_clang_tidy(
                 [
                     "bazel",
                     "build",
+                    *project_presubmit.bazel_config_args(),
                     CLANG_TIDY_REPO_ENV,
                     "//build_tools/clang_tidy:action_smoke",
                 ],
@@ -2658,6 +2663,10 @@ def print_plan(
         scopes.append("clang-tidy")
     print("presubmit plan:")
     print(f"  lane: {args.lane}")
+    if args.lane == "bazel":
+        bazel_configs = project_presubmit.bazel_configs_from_environment()
+        if bazel_configs:
+            print(f"  bazel configs: {', '.join(bazel_configs)}")
     print(f"  profile: {args.profile}")
     print(f"  mode: {mutation}")
     print(f"  validation input: {input_mode} ({len(paths)} path(s))")
@@ -2705,6 +2714,11 @@ def dev_py_rerun_command(args: argparse.Namespace, verbose: bool) -> list[str]:
             command.append("--commit")
         elif args.staged or args.paths:
             command.append("--staged")
+    if args.lane == "bazel":
+        command += [
+            f"--bazel-config={config}"
+            for config in project_presubmit.bazel_configs_from_environment()
+        ]
     if verbose:
         command.append("--verbose")
     return command
