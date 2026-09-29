@@ -73,3 +73,83 @@ the machine benchmark lock, and separate cold loading, prefill and completed
 decode timing. ASAN correctness runs are not a throughput baseline. Changing
 kernel math or dispatch geometry needs no runner or HAL change when the stage's
 buffer/state and parameter-placement contracts remain intact.
+
+## Four-row projection reuse
+
+The Q5 source contains independent-row and four-row weight-reuse schedules.
+Its differential uses distinct activation rows, a 65-channel output tail and
+K values 256, 768, 5120 and 17408. Fixed backing covers the largest sample;
+each sample consumes its own contiguous active prefix. This checks the same
+packed computation under both schedules, not an independent accuracy oracle.
+
+```sh
+build_tools/bin/iree-bazel-run --config=asan \
+  //loom/src/loom/tools/iree-test-loom -- \
+  experimental/loom_serve/models/qwen38/kernels/ggml/linear_q5k_q8_1_x4.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/ggml/linear_qk_common.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/ggml/quantize_q8_1_x4.loom \
+  --device=amdgpu --target=amdgpu:gfx1151 \
+  --case=@ggml_linear_q5k_q8_1_x4_m4_differential_case \
+  --config=ggml.linear_q5k_q8_1_x4.token_capacity=4 \
+  --config=ggml.linear_q5k_q8_1_x4.output_capacity=65 \
+  --config=ggml.quantize_q8_1_x4.group_capacity=544
+```
+
+Adding `--sanitizer='access|operation'` checks GPU accesses and operations as
+well as host ASAN. The performance pair uses M=4, K=5120, N=17408 with the same
+packed buffers. Both arms are single dispatches: one assigns separate work to
+each activation row; the other shares each weight packet across four dot chains.
+Neither benchmark includes activation quantization or the rest of the model.
+
+Build the linker and benchmark tool with optimized flags before invoking them:
+
+```sh
+build_tools/bin/iree-bazel-build \
+  //loom/src/loom/tools/loom-link //loom/src/loom/tools/iree-benchmark-loom \
+  -c opt --features=thin_lto \
+  --copt=-O3 --cxxopt=-O3 --host_copt=-O3 --host_cxxopt=-O3 \
+  --copt=-march=native --cxxopt=-march=native \
+  --host_copt=-march=native --host_cxxopt=-march=native
+```
+
+The benchmark consumes one module, so merge the source and providers first:
+
+```sh
+bazel-bin/loom/src/loom/tools/loom-link/loom-link \
+  experimental/loom_serve/models/qwen38/kernels/ggml/linear_q5k_q8_1_x4.loom \
+  experimental/loom_serve/models/qwen38/kernels/ggml/linear_qk_common.loom \
+  experimental/loom_serve/models/qwen38/kernels/ggml/quantize_q8_1_x4.loom \
+  --mode=merge --to=bc --output=/path/to/q5-linked.loombc
+```
+
+Once build activity has stopped, the following is a bounded comparison. The
+eight device-local binding sets keep the 61 MB weight matrix from becoming a
+hot-cache-only result. A batch is 64 repeated dispatches, not 64 model tokens.
+
+```sh
+benchmark-lock -- bazel-bin/loom/src/loom/tools/iree-benchmark-loom/iree-benchmark-loom \
+  /path/to/q5-linked.loombc \
+  --device=amdgpu --target=amdgpu:gfx1151 --measure=dispatch_complete \
+  --compare=@ggml_linear_q5k_q8_1_x4_m4_gate_up_baseline,@ggml_linear_q5k_q8_1_x4_m4_gate_up \
+  --interleave=ABABA --repetitions=2 --input-ring-count=8 \
+  --batch-size=64 --iterations=3 --warmup-iterations=1 \
+  --min-time-ms=0 --max-batches=3 --stable-p90-to-p50-ppm=0 \
+  --profile-final-batch=false \
+  --config=ggml.linear_q5k_q8_1_x4.token_capacity=4 \
+  --config=ggml.linear_q5k_q8_1_x4.output_capacity=17408 \
+  --output=/path/to/result.json
+```
+
+Comparison mode reports normalized host queue-completion time and suppresses
+profiling inside its windows. For device duration, run separate A/B/A/B/A
+windows under one benchmark lease: replace `--compare`, `--interleave` and
+`--repetitions` with the selected `--benchmark=@...` name, enable
+`--profile-final-batch=true`, and give each window a distinct
+`--artifact-bundle-dir`. Keep all other flags and the linked input identical.
+The profiled replay is separate from the uninstrumented completion measurement;
+its dispatch distribution contains 64 device samples. Compare each candidate
+with both adjacent controls and inspect profile warnings and sample counts.
+
+Kernel reuse is not evidence that the server batches model math: its stateful
+GDN/KV work and retained-row mapping need their own complete model witness
+before changing the service schedule.
