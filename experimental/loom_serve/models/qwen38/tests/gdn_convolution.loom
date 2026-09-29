@@ -1,0 +1,96 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.decl @qwen38_gdn_conv_channel_at_token(%token: index, %channel: index, %input: buffer, %weight: buffer, %history: buffer) -> (f32, f32, f32, f32)
+
+// The HAL scenario profile observes buffers, while the helper returns SSA
+// values. This ordinary function publishes those four observations.
+func.def @convolution_observe(%token: index, %channel: index, %input: buffer, %weight: buffer, %history: buffer, %output: buffer) {
+  %bounded_channel = index.assume %channel [range(%channel, 0, 10239)] : index
+  %value, %h0, %h1, %h2 = func.call @qwen38_gdn_conv_channel_at_token(%token, %bounded_channel, %input, %weight, %history) : (index, index, buffer, buffer, buffer) -> (f32, f32, f32, f32)
+  %origin = index.constant 0 : offset
+  %view = buffer.view %output[%origin] : buffer -> view<4xf32>
+  view.store %value, %view[0] : f32, view<4xf32>
+  view.store %h0, %view[1] : f32, view<4xf32>
+  view.store %h1, %view[2] : f32, view<4xf32>
+  view.store %h2, %view[3] : f32, view<4xf32>
+  func.return
+}
+
+// Independent serial four-tap oracle. Double accumulation separates acceptable
+// contraction/activation error from indexing and retained-history correctness.
+func.def @convolution_oracle(%token0: index, %channel0: index, %input: buffer, %weight: buffer, %history: buffer, %output: buffer) {
+  %token = index.assume %token0 [range(%token0, 0, 511)] : index
+  %channel = index.assume %channel0 [range(%channel0, 0, 10239)] : index
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %input_view = buffer.view %input[%origin] : buffer -> view<512x10240xf32>
+  %weight_view = buffer.view %weight[%origin] : buffer -> view<40960xf32>
+  %history_view = buffer.view %history[%origin] : buffer -> view<30720xf32>
+  %history_base = index.mul %channel, %three : index
+  %weight_base = index.mul %channel, %four : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %zero_f64 = scalar.constant 0.0 : f64
+  %sum, %next0, %next1, %next2 = scf.for %tap = [%zero to %four step %one](%accumulator = %zero_f64, %old0 = %zero_f32, %old1 = %zero_f32, %old2 = %zero_f32 : f64, f32, f32, f32) -> (f64, f32, f32, f32) {
+    %position = index.add %token, %tap : index
+    %from_history = index.cmp ult, %position, %three : index
+    %value = scf.if %from_history -> (f32) {
+      %history_index = index.add %history_base, %position : index
+      %retained = view.load %history_view[%history_index] : view<30720xf32> -> f32
+      scf.yield %retained : f32
+    } else {
+      %input_token = index.sub %position, %three : index
+      %projected = view.load %input_view[%input_token, %channel] : view<512x10240xf32> -> f32
+      scf.yield %projected : f32
+    }
+    %weight_index = index.add %weight_base, %tap : index
+    %coefficient = view.load %weight_view[%weight_index] : view<40960xf32> -> f32
+    %wide_value = scalar.extf %value : f32 to f64
+    %wide_weight = scalar.extf %coefficient : f32 to f64
+    %product = scalar.mulf %wide_value, %wide_weight : f64
+    %next_sum = scalar.addf %accumulator, %product : f64
+    scf.yield %next_sum, %old1, %old2, %value : f64, f32, f32, f32
+  }
+  %convolved = scalar.fptrunc %sum : f64 to f32
+  %one_f32 = scalar.constant 1.0 : f32
+  %negative = scalar.negf %convolved : f32
+  %exponential = scalar.expf<afn> %negative : f32
+  %denominator = scalar.addf %one_f32, %exponential : f32
+  %result = scalar.divf %convolved, %denominator : f32
+  %output_view = buffer.view %output[%origin] : buffer -> view<4xf32>
+  view.store %result, %output_view[0] : f32, view<4xf32>
+  view.store %next0, %output_view[1] : f32, view<4xf32>
+  view.store %next1, %output_view[2] : f32, view<4xf32>
+  view.store %next2, %output_view[3] : f32, view<4xf32>
+  func.return
+}
+
+// Trials cross the old-history/input boundary with independently varied data.
+// The normal HAL profile lowers the function itself; no test kernel is needed.
+check.scenario public @convolution_history {
+  check.trial[8](%token: index, %entropy: check.entropy) {
+    %input_seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %weight_seed = check.entropy.read %entropy[1] : check.entropy -> i64
+    %history_seed = check.entropy.read %entropy[2] : check.entropy -> i64
+    %channel = check.literal value(4095) : index
+    %input = check.generate.random.uniform seed(%input_seed) range(-2.0 to 2.0) : tensor<512x10240xf32>
+    %weight = check.generate.random.uniform seed(%weight_seed) range(-0.5 to 0.5) : tensor<40960xf32>
+    %history = check.generate.random.uniform seed(%history_seed) range(-2.0 to 2.0) : tensor<30720xf32>
+    %output = check.generate.fill value(0.0) : tensor<4xf32>
+    %activation = check.tensor.view %output offset(0) : tensor<4xf32> -> tensor<1xf32>
+    %next_history = check.tensor.view %output offset(4) : tensor<4xf32> -> tensor<3xf32>
+    check.compare<@convolution_observe, @convolution_oracle>(%token, %channel, %input, %weight, %history, %output) : (index, index, tensor<512x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<4xf32>) -> () {
+      check.expect.close actual(%activation) expected(%activation) atol(2.0e-7) rtol(2.0e-6) nan(same) : tensor<1xf32>
+      check.expect.bitwise actual(%next_history) expected(%next_history) : tensor<3xf32>
+      check.expect.bitwise actual(%input) expected(%input) : tensor<512x10240xf32>
+      check.expect.bitwise actual(%history) expected(%history) : tensor<30720xf32>
+    }
+  }
+  check.return
+}

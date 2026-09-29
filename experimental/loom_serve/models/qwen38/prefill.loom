@@ -1,0 +1,17 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @runner.qwen38.prefill_token_count : %value: index where [range(%value, 1, 512)]
+
+command.program.decl @qwen38_text_prefill_greedy(%token_count: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %token_ids: buffer, %progress: buffer) where [range(%token_count, 1, 512)]
+
+// The grid is a fixed capacity. Active count and absolute position are device
+// control data; padded work cannot advance the persistent model state.
+command.program.def public @qwen38_prefill() launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %token_ids: buffer, %progress: buffer) {
+  %capacity = config.get @runner.qwen38.prefill_token_count : index
+  command.program.launch @qwen38_text_prefill_greedy[%capacity](%parameters, %residual, %control, %gdn_state, %attention_cache, %token_ids, %progress) : [index](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
