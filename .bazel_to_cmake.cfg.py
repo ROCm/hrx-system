@@ -28,6 +28,7 @@ PROJECTS = bazel_to_cmake_config.include_projects(
         "libhrx/.bazel_to_cmake.cfg.py",
         "loom/.bazel_to_cmake.cfg.py",
         "experimental/.bazel_to_cmake.cfg.py",
+        "experimental/loom_serve/.bazel_to_cmake.cfg.py",
     ],
 )
 
