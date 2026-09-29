@@ -64,6 +64,16 @@ class LowAllocationUnitLivenessTest : public ::testing::Test {
     }
   }
 
+  void RetainAndPropagateStorage(
+      loom_low_allocation_unit_liveness_t* unit_liveness,
+      const loom_liveness_analysis_t* liveness,
+      const loom_low_placement_table_t* placement) {
+    IREE_ASSERT_OK(loom_low_allocation_unit_liveness_retain_tied_storage(
+        unit_liveness, liveness, placement, &arena_));
+    loom_low_allocation_unit_liveness_propagate_storage_relations(unit_liveness,
+                                                                  placement);
+  }
+
   iree_arena_block_pool_t block_pool_;
   iree_arena_allocator_t arena_;
   loom_context_t context_;
@@ -245,8 +255,7 @@ TEST_F(LowAllocationUnitLivenessTest, ExtendsTiedResultSourceUnits) {
   placement.storage_value_order_count = IREE_ARRAYSIZE(storage_order);
   placement.tied_storage_origins_by_value_ordinal = tied_origins;
 
-  IREE_ASSERT_OK(loom_low_allocation_unit_liveness_propagate_storage_relations(
-      &unit_liveness, &liveness, &placement, &arena_));
+  RetainAndPropagateStorage(&unit_liveness, &liveness, &placement);
   EXPECT_EQ(unit_liveness.start_points[2], 0u);
   EXPECT_EQ(unit_liveness.start_points[3], 0u);
   EXPECT_EQ(unit_liveness.end_points[0], 8u);
@@ -368,8 +377,7 @@ TEST_F(LowAllocationUnitLivenessTest, PropagatesTiedStorageAcrossOrdinalOrder) {
   placement.storage_value_order_count = IREE_ARRAYSIZE(storage_order);
   placement.tied_storage_origins_by_value_ordinal = tied_origins;
 
-  IREE_ASSERT_OK(loom_low_allocation_unit_liveness_propagate_storage_relations(
-      &unit_liveness, &liveness, &placement, &arena_));
+  RetainAndPropagateStorage(&unit_liveness, &liveness, &placement);
   EXPECT_EQ(ends[3], 40u);
   EXPECT_EQ(ends[1], 31u);
   EXPECT_EQ(ends[4], 36u);
@@ -446,8 +454,7 @@ TEST_F(LowAllocationUnitLivenessTest,
   placement.storage_value_order_count = IREE_ARRAYSIZE(storage_order);
   placement.tied_storage_origins_by_value_ordinal = tied_origins;
 
-  IREE_ASSERT_OK(loom_low_allocation_unit_liveness_propagate_storage_relations(
-      &unit_liveness, &liveness, &placement, &arena_));
+  RetainAndPropagateStorage(&unit_liveness, &liveness, &placement);
   const loom_liveness_segment_range_t source =
       loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(
           &unit_liveness, &liveness, 0);
@@ -585,8 +592,7 @@ TEST_F(LowAllocationUnitLivenessTest,
   placement.storage_value_order_count = IREE_ARRAYSIZE(storage_order);
   placement.tied_storage_origins_by_value_ordinal = tied_origins;
 
-  IREE_ASSERT_OK(loom_low_allocation_unit_liveness_propagate_storage_relations(
-      &unit_liveness, &liveness, &placement, &arena_));
+  RetainAndPropagateStorage(&unit_liveness, &liveness, &placement);
   const uint32_t* concat_start_points =
       loom_low_allocation_unit_liveness_start_points_for_value_ordinal(
           &unit_liveness, &liveness, /*value_ordinal=*/3);
@@ -664,8 +670,7 @@ TEST_F(LowAllocationUnitLivenessTest, RetainsSparseTiedStorageReservations) {
   placement.storage_value_order = storage_order;
   placement.storage_value_order_count = IREE_ARRAYSIZE(storage_order);
   placement.tied_storage_origins_by_value_ordinal = tied_origins;
-  IREE_ASSERT_OK(loom_low_allocation_unit_liveness_propagate_storage_relations(
-      &unit_liveness, &liveness, &placement, &arena_));
+  RetainAndPropagateStorage(&unit_liveness, &liveness, &placement);
 
   const loom_liveness_segment_range_t source =
       loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(

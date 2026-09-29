@@ -19,11 +19,11 @@ extern "C" {
 // of the result requires a materialized transfer. Required ties and identity
 // aliases retain their equality; CFG handoffs retain their edge semantics.
 //
-// Consumes initialized per-unit and sparse semantic liveness before storage
-// propagation. Sparse segments distinguish observations on mutually exclusive
-// paths without rediscovering CFG structure. Scratch is released on return;
-// the placement permission bits retain the result for every allocation order
-// and strategy.
+// Consumes per-unit liveness after mandatory tied-storage retention and before
+// optional storage-start propagation. Indexed tied-component segments
+// distinguish observations on mutually exclusive paths without rediscovering
+// CFG structure. Scratch is released on return; the placement permission bits
+// retain the result for every allocation order and strategy.
 iree_status_t loom_low_allocation_refine_destructive_reuse(
     const loom_low_allocation_unit_liveness_t* unit_liveness,
     const loom_liveness_analysis_t* liveness,

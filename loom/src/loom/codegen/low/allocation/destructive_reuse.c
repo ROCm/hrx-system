@@ -15,33 +15,45 @@ static bool loom_low_allocation_reuse_relation(
          relation->cause <= LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT;
 }
 
+// Returns true when any mapped storage component remains observable at its
+// counterpart's first write. Equal adjacent write points share one indexed
+// component query, keeping wide relations proportional to mapped units.
+static bool loom_low_allocation_storage_observed_at_first_writes(
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
+    const loom_liveness_analysis_t* liveness,
+    const loom_low_placement_table_t* placement,
+    loom_value_ordinal_t observed_ordinal, uint32_t observed_unit_offset,
+    const uint32_t* first_writes, uint32_t write_unit_start,
+    uint32_t unit_count) {
+  uint32_t unit = 0;
+  while (unit < unit_count) {
+    const uint32_t write_point = first_writes[write_unit_start + unit];
+    uint32_t run_count = 1;
+    while (run_count < unit_count - unit &&
+           first_writes[write_unit_start + unit + run_count] == write_point) {
+      ++run_count;
+    }
+    if (write_point != UINT32_MAX &&
+        loom_low_allocation_unit_liveness_storage_component_live_at_point(
+            unit_liveness, liveness, placement, observed_ordinal,
+            observed_unit_offset + unit, run_count, write_point)) {
+      return true;
+    }
+    unit += run_count;
+  }
+  return false;
+}
+
 static iree_status_t loom_low_allocation_refine_destructive_reuse_build(
     const loom_low_allocation_unit_liveness_t* unit_liveness,
     const loom_liveness_analysis_t* liveness,
     loom_low_placement_table_t* placement, iree_arena_allocator_t* scratch) {
-  uint32_t* preservation_ends = NULL;
   uint32_t* first_writes = NULL;
-  uint64_t* tied_preservation_words = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      scratch, unit_liveness->point_count, sizeof(*preservation_ends),
-      (void**)&preservation_ends));
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(scratch, unit_liveness->point_count,
                                 sizeof(*first_writes), (void**)&first_writes));
-  const iree_host_size_t tied_preservation_word_count =
-      iree_bitmap_calculate_words(unit_liveness->point_count);
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      scratch, tied_preservation_word_count, sizeof(*tied_preservation_words),
-      (void**)&tied_preservation_words));
-  iree_bitmap_t tied_preservation_units = {
-      .bit_count = unit_liveness->point_count,
-      .words = tied_preservation_words,
-  };
-  memcpy(preservation_ends, unit_liveness->end_points,
-         unit_liveness->point_count * sizeof(*preservation_ends));
   memset(first_writes, 0xFF,
          unit_liveness->point_count * sizeof(*first_writes));
-  iree_bitmap_reset_all(tied_preservation_units);
   const uint32_t* unit_starts = unit_liveness->point_starts_by_value_ordinal;
   for (iree_host_size_t i = 0; i < placement->relation_count; ++i) {
     const loom_low_placement_relation_t* relation = &placement->relations[i];
@@ -50,16 +62,6 @@ static iree_status_t loom_low_allocation_refine_destructive_reuse_build(
     }
     const uint32_t source_start =
         unit_starts[relation->source_ordinal] + relation->source_unit_offset;
-    const uint32_t result_start =
-        unit_starts[relation->result_ordinal] + relation->result_unit_offset;
-    if (relation->cause == LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT) {
-      // A required identity makes the preservation bound describe the whole
-      // storage family rather than either value's semantic SSA segments.
-      iree_bitmap_set_span(tied_preservation_units, source_start,
-                           relation->unit_count);
-      iree_bitmap_set_span(tied_preservation_units, result_start,
-                           relation->unit_count);
-    }
     if (iree_any_bit_set(relation->flags,
                          LOOM_LOW_PLACEMENT_RELATION_FLAG_WRITES_STORAGE)) {
       for (uint32_t unit = 0; unit < relation->unit_count; ++unit) {
@@ -69,54 +71,9 @@ static iree_status_t loom_low_allocation_refine_destructive_reuse_build(
     }
   }
 
-  // Visit users before sources. Required equalities retain the latest storage
-  // observation through each tied-result chain, independently of SSA lifetime.
   const loom_value_ordinal_t* order = placement->storage_value_order;
   const loom_value_ordinal_t order_count = placement->storage_value_order_count;
   IREE_ASSERT_EQ(order_count, placement->value_count);
-  for (loom_value_ordinal_t cursor = 0; cursor < order_count; ++cursor) {
-    const loom_low_placement_relation_range_t range =
-        placement->ranges_by_result_ordinal[order[cursor]];
-    for (uint32_t i = 0; i < range.count; ++i) {
-      const loom_low_placement_relation_t* relation =
-          &placement->relations[range.start + i];
-      if (!loom_low_allocation_reuse_relation(relation)) {
-        continue;
-      }
-      if (relation->cause == LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT) {
-        const uint32_t source_start = unit_starts[relation->source_ordinal] +
-                                      relation->source_unit_offset;
-        const uint32_t result_start = unit_starts[relation->result_ordinal] +
-                                      relation->result_unit_offset;
-        for (uint32_t unit = 0; unit < relation->unit_count; ++unit) {
-          preservation_ends[source_start + unit] =
-              iree_max(preservation_ends[source_start + unit],
-                       preservation_ends[result_start + unit]);
-        }
-      }
-    }
-  }
-
-  // Identity siblings also share the family's storage observation bound.
-  for (loom_value_ordinal_t cursor = order_count; cursor > 0; --cursor) {
-    const loom_low_placement_relation_range_t range =
-        placement->ranges_by_result_ordinal[order[cursor - 1]];
-    for (uint32_t i = 0; i < range.count; ++i) {
-      const loom_low_placement_relation_t* relation =
-          &placement->relations[range.start + i];
-      if (relation->cause != LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT) {
-        continue;
-      }
-      const uint32_t source_start =
-          unit_starts[relation->source_ordinal] + relation->source_unit_offset;
-      const uint32_t result_start =
-          unit_starts[relation->result_ordinal] + relation->result_unit_offset;
-      for (uint32_t unit = 0; unit < relation->unit_count; ++unit) {
-        preservation_ends[result_start + unit] =
-            preservation_ends[source_start + unit];
-      }
-    }
-  }
 
   // Retain the first possible write through each optional identity path. A
   // materialized relation cuts that path, so its sources do not inherit the
@@ -136,37 +93,15 @@ static iree_status_t loom_low_allocation_refine_destructive_reuse_build(
           unit_starts[relation->result_ordinal] + relation->result_unit_offset;
       bool requires_copy = false;
       if (relation->cause != LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT) {
-        const bool source_segments_complete = !iree_bitmap_test(
-            unit_liveness->values_with_incomplete_storage_segments,
-            relation->source_ordinal);
-        const loom_liveness_segment_range_t source_segments =
-            source_segments_complete
-                ? loom_liveness_segment_range_for_value_ordinal(
-                      liveness, relation->source_ordinal)
-                : (loom_liveness_segment_range_t){0};
-        uint32_t queried_write_point = UINT32_MAX;
-        bool source_live_at_queried_write = false;
-        for (uint32_t unit = 0; unit < relation->unit_count; ++unit) {
-          const uint32_t preservation_end =
-              preservation_ends[source_start + unit];
-          const uint32_t first_write = first_writes[result_start + unit];
-          if (preservation_end <= first_write) {
-            continue;
-          }
-          if (!source_segments_complete ||
-              iree_bitmap_test(tied_preservation_units, source_start + unit)) {
-            requires_copy = true;
-            break;
-          }
-          if (queried_write_point != first_write) {
-            queried_write_point = first_write;
-            source_live_at_queried_write = loom_liveness_segment_range_contains(
-                liveness->segments, source_segments, first_write);
-          }
-          if (source_live_at_queried_write) {
-            requires_copy = true;
-            break;
-          }
+        requires_copy = loom_low_allocation_storage_observed_at_first_writes(
+            unit_liveness, liveness, placement, relation->source_ordinal,
+            relation->source_unit_offset, first_writes, result_start,
+            relation->unit_count);
+        if (!requires_copy) {
+          requires_copy = loom_low_allocation_storage_observed_at_first_writes(
+              unit_liveness, liveness, placement, relation->result_ordinal,
+              relation->result_unit_offset, first_writes, source_start,
+              relation->unit_count);
         }
       }
       if (requires_copy) {

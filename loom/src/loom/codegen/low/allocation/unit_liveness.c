@@ -1425,7 +1425,7 @@ static void loom_low_allocation_unit_liveness_retain_tied_component_ends(
   }
 }
 
-iree_status_t loom_low_allocation_unit_liveness_propagate_storage_relations(
+iree_status_t loom_low_allocation_unit_liveness_retain_tied_storage(
     loom_low_allocation_unit_liveness_t* unit_liveness,
     const loom_liveness_analysis_t* liveness,
     const loom_low_placement_table_t* placement,
@@ -1433,22 +1433,40 @@ iree_status_t loom_low_allocation_unit_liveness_propagate_storage_relations(
   IREE_ASSERT_ARGUMENT(unit_liveness);
   IREE_ASSERT_ARGUMENT(liveness);
   IREE_ASSERT_ARGUMENT(placement);
-  if (unit_liveness->end_points == NULL) {
+  if (unit_liveness->end_points == NULL ||
+      placement->tied_storage_origins_by_value_ordinal == NULL) {
     return iree_ok_status();
+  }
+
+  loom_low_allocation_unit_liveness_retain_tied_component_ends(unit_liveness,
+                                                               placement);
+  IREE_RETURN_IF_ERROR(
+      loom_low_allocation_unit_liveness_refine_storage_segments(
+          unit_liveness, liveness, placement, arena));
+  for (iree_host_size_t i = 0; i < placement->relation_count; ++i) {
+    const loom_low_placement_relation_t* relation = &placement->relations[i];
+    if (relation->cause == LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT) {
+      iree_bitmap_set(unit_liveness->values_with_incomplete_storage_segments,
+                      relation->source_ordinal);
+    }
+  }
+  return iree_ok_status();
+}
+
+void loom_low_allocation_unit_liveness_propagate_storage_relations(
+    loom_low_allocation_unit_liveness_t* unit_liveness,
+    const loom_low_placement_table_t* placement) {
+  IREE_ASSERT_ARGUMENT(unit_liveness);
+  IREE_ASSERT_ARGUMENT(placement);
+  if (unit_liveness->end_points == NULL) {
+    return;
   }
   const loom_value_ordinal_t* order = placement->storage_value_order;
   const loom_value_ordinal_t order_count = placement->storage_value_order_count;
   if (order_count == 0) {
-    return iree_ok_status();
+    return;
   }
   IREE_ASSERT_EQ(order_count, placement->value_count);
-
-  loom_low_allocation_unit_liveness_retain_tied_component_ends(unit_liveness,
-                                                               placement);
-
-  IREE_RETURN_IF_ERROR(
-      loom_low_allocation_unit_liveness_refine_storage_segments(
-          unit_liveness, liveness, placement, arena));
 
   // Starts flow from sources to users. Reverse the same retained order so
   // tied-result starts reach any eventual concat reservation transitively.
@@ -1476,10 +1494,6 @@ iree_status_t loom_low_allocation_unit_liveness_propagate_storage_relations(
           result_unit_point_start == UINT32_MAX) {
         continue;
       }
-      if (is_tied_result) {
-        iree_bitmap_set(unit_liveness->values_with_incomplete_storage_segments,
-                        relation->source_ordinal);
-      }
       for (uint32_t unit_index = 0; unit_index < relation->unit_count;
            ++unit_index) {
         const iree_host_size_t source_unit_index =
@@ -1496,5 +1510,4 @@ iree_status_t loom_low_allocation_unit_liveness_propagate_storage_relations(
       }
     }
   }
-  return iree_ok_status();
 }
