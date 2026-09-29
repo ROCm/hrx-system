@@ -1,0 +1,3263 @@
+diff --git a/package.json b/package.json
+index a52895d..3df262e 100644
+--- a/package.json
++++ b/package.json
+@@ -34,6 +34,7 @@
+   ],
+   "scripts": {
+     "build:cxx-frontend": "npm run build:emscripten && npm run build --workspace=cxx-frontend",
++    "build:semantic-model-frontend": "node scripts/build-emscripten.js --parser-only && npm run build --workspace=cxx-frontend",
+     "build:playground": "npm run build:playground-sysroot && npm run build -w @robertoraggi/cxx-playground",
+     "build:playground-sysroot": "node scripts/build-playground-sysroot.js",
+     "build:emscripten": "node scripts/build-emscripten.js",
+diff --git a/packages/cxx-frontend/src/Parser.ts b/packages/cxx-frontend/src/Parser.ts
+index 9df310d..dc3acea 100644
+--- a/packages/cxx-frontend/src/Parser.ts
++++ b/packages/cxx-frontend/src/Parser.ts
+@@ -114,6 +114,14 @@ export class Parser implements Disposable, AsyncDisposable {
+       throw new TypeError("expected parameter 'source' of type 'string'");
+     }
+
++    if (
++      unitOptions.analysisMode !== undefined &&
++      unitOptions.analysisMode !== "full" &&
++      unitOptions.analysisMode !== "declarations"
++    ) {
++      throw new TypeError("expected analysisMode to be 'full' or 'declarations'");
++    }
++
+     if (!isCxxLoaded()) {
+       throw new Error(
+         "the cxx wasm module is not loaded, call loadCxx() first",
+diff --git a/packages/cxx-frontend/src/Semantic.ts b/packages/cxx-frontend/src/Semantic.ts
+index 578b4f8..08c0e0f 100644
+--- a/packages/cxx-frontend/src/Semantic.ts
++++ b/packages/cxx-frontend/src/Semantic.ts
+@@ -21,6 +21,7 @@
+
+ import { cxx } from "./cxx.js";
+ import { type SourceLocation } from "./SourceLocation.js";
++import { TokenKind } from "./TokenKind.js";
+
+ export interface ModelOwner {
+   getUnitHandle(): number;
+@@ -276,13 +277,13 @@ const DefaultStatementASTSlotBase = CaseStatementASTSlotBase + 7;
+ const ExpressionStatementASTSlotBase = DefaultStatementASTSlotBase + 5;
+ const CompoundStatementASTSlotBase = ExpressionStatementASTSlotBase + 6;
+ const IfStatementASTSlotBase = CompoundStatementASTSlotBase + 8;
+-const ConstevalIfStatementASTSlotBase = IfStatementASTSlotBase + 14;
++const ConstevalIfStatementASTSlotBase = IfStatementASTSlotBase + 16;
+ const SwitchStatementASTSlotBase = ConstevalIfStatementASTSlotBase + 11;
+-const WhileStatementASTSlotBase = SwitchStatementASTSlotBase + 11;
+-const DoStatementASTSlotBase = WhileStatementASTSlotBase + 10;
++const WhileStatementASTSlotBase = SwitchStatementASTSlotBase + 12;
++const DoStatementASTSlotBase = WhileStatementASTSlotBase + 11;
+ const ForRangeStatementASTSlotBase = DoStatementASTSlotBase + 11;
+ const ForStatementASTSlotBase = ForRangeStatementASTSlotBase + 30;
+-const BreakStatementASTSlotBase = ForStatementASTSlotBase + 13;
++const BreakStatementASTSlotBase = ForStatementASTSlotBase + 14;
+ const ContinueStatementASTSlotBase = BreakStatementASTSlotBase + 6;
+ const ReturnStatementASTSlotBase = ContinueStatementASTSlotBase + 6;
+ const CoroutineReturnStatementASTSlotBase = ReturnStatementASTSlotBase + 7;
+@@ -330,7 +331,7 @@ const BuiltinConvertVectorExpressionASTSlotBase =
+   BuiltinBitCastExpressionASTSlotBase + 11;
+ const BuiltinOffsetofExpressionASTSlotBase =
+   BuiltinConvertVectorExpressionASTSlotBase + 11;
+-const TypeidExpressionASTSlotBase = BuiltinOffsetofExpressionASTSlotBase + 14;
++const TypeidExpressionASTSlotBase = BuiltinOffsetofExpressionASTSlotBase + 15;
+ const TypeidOfTypeExpressionASTSlotBase = TypeidExpressionASTSlotBase + 9;
+ const SpliceExpressionASTSlotBase = TypeidOfTypeExpressionASTSlotBase + 9;
+ const GlobalScopeReflectExpressionASTSlotBase = SpliceExpressionASTSlotBase + 6;
+@@ -437,7 +438,7 @@ const PointerOperatorASTSlotBase = SplicerTypeSpecifierASTSlotBase + 5;
+ const ReferenceOperatorASTSlotBase = PointerOperatorASTSlotBase + 6;
+ const PtrToMemberOperatorASTSlotBase = ReferenceOperatorASTSlotBase + 6;
+ const BitfieldDeclaratorASTSlotBase = PtrToMemberOperatorASTSlotBase + 7;
+-const ParameterPackASTSlotBase = BitfieldDeclaratorASTSlotBase + 6;
++const ParameterPackASTSlotBase = BitfieldDeclaratorASTSlotBase + 8;
+ const IdDeclaratorASTSlotBase = ParameterPackASTSlotBase + 5;
+ const NestedDeclaratorASTSlotBase = IdDeclaratorASTSlotBase + 8;
+ const FunctionDeclaratorChunkASTSlotBase = NestedDeclaratorASTSlotBase + 6;
+@@ -520,8 +521,8 @@ const BaseClassSymbolSlotBase = DeductionGuideSymbolSlotBase + 64;
+ const InjectedClassNameSymbolSlotBase = BaseClassSymbolSlotBase + 56;
+ const UnresolvedSymbolSlotBase = InjectedClassNameSymbolSlotBase + 55;
+ const ClassSymbolSlotBase = UnresolvedSymbolSlotBase + 54;
+-const EnumSymbolSlotBase = ClassSymbolSlotBase + 115;
+-const ScopedEnumSymbolSlotBase = EnumSymbolSlotBase + 61;
++const EnumSymbolSlotBase = ClassSymbolSlotBase + 117;
++const ScopedEnumSymbolSlotBase = EnumSymbolSlotBase + 63;
+ const FunctionSymbolSlotBase = ScopedEnumSymbolSlotBase + 60;
+ const OverloadSetSymbolSlotBase = FunctionSymbolSlotBase + 121;
+ const LambdaSymbolSlotBase = OverloadSetSymbolSlotBase + 57;
+@@ -531,7 +532,7 @@ const BlockSymbolSlotBase = TemplateParametersSymbolSlotBase + 59;
+ const TypeAliasSymbolSlotBase = BlockSymbolSlotBase + 59;
+ const VariableSymbolSlotBase = TypeAliasSymbolSlotBase + 67;
+ const FieldSymbolSlotBase = VariableSymbolSlotBase + 76;
+-const ParameterSymbolSlotBase = FieldSymbolSlotBase + 74;
++const ParameterSymbolSlotBase = FieldSymbolSlotBase + 76;
+ const ParameterPackSymbolSlotBase = ParameterSymbolSlotBase + 56;
+ const TypeParameterSymbolSlotBase = ParameterPackSymbolSlotBase + 55;
+ const NonTypeParameterSymbolSlotBase = TypeParameterSymbolSlotBase + 54;
+@@ -570,7 +571,10 @@ const FloatTypeSlotBase = WideCharTypeSlotBase + 1;
+ const DoubleTypeSlotBase = FloatTypeSlotBase + 1;
+ const LongDoubleTypeSlotBase = DoubleTypeSlotBase + 1;
+ const Float16TypeSlotBase = LongDoubleTypeSlotBase + 1;
+-const QualTypeSlotBase = Float16TypeSlotBase + 1;
++const BFloat16TypeSlotBase = Float16TypeSlotBase + 1;
++const Float8E4M3FNTypeSlotBase = BFloat16TypeSlotBase + 1;
++const Float8E5M2TypeSlotBase = Float8E4M3FNTypeSlotBase + 1;
++const QualTypeSlotBase = Float8E5M2TypeSlotBase + 1;
+ const BoundedArrayTypeSlotBase = QualTypeSlotBase + 5;
+ const UnboundedArrayTypeSlotBase = BoundedArrayTypeSlotBase + 3;
+ const PointerTypeSlotBase = UnboundedArrayTypeSlotBase + 2;
+@@ -612,7 +616,14 @@ export class ConstComplex extends ModelObject {
+     | { readonly index: 8; readonly value: ConstAddress | undefined }
+     | { readonly index: 9; readonly value: ConstLabelAddress | undefined }
+     | { readonly index: 10; readonly value: ConstComplex | undefined }
+-    | { readonly index: 11; readonly value: {} } {
++    | {
++        readonly index: 11;
++        readonly value: {
++          readonly format: ConstFloat_Format;
++          readonly bits: bigint;
++        };
++      }
++    | { readonly index: 12; readonly value: {} } {
+     return ((item: any) =>
+       item.index === 1
+         ? { index: 1, value: objOf(item.value, this.modelOwner, StringLiteral) }
+@@ -663,7 +674,14 @@ export class ConstComplex extends ModelObject {
+     | { readonly index: 8; readonly value: ConstAddress | undefined }
+     | { readonly index: 9; readonly value: ConstLabelAddress | undefined }
+     | { readonly index: 10; readonly value: ConstComplex | undefined }
+-    | { readonly index: 11; readonly value: {} } {
++    | {
++        readonly index: 11;
++        readonly value: {
++          readonly format: ConstFloat_Format;
++          readonly bits: bigint;
++        };
++      }
++    | { readonly index: 12; readonly value: {} } {
+     return ((item: any) =>
+       item.index === 1
+         ? { index: 1, value: objOf(item.value, this.modelOwner, StringLiteral) }
+@@ -724,7 +742,14 @@ export class ConstObject extends ModelObject {
+       | { readonly index: 8; readonly value: ConstAddress | undefined }
+       | { readonly index: 9; readonly value: ConstLabelAddress | undefined }
+       | { readonly index: 10; readonly value: ConstComplex | undefined }
+-      | { readonly index: 11; readonly value: {} };
++      | {
++          readonly index: 11;
++          readonly value: {
++            readonly format: ConstFloat_Format;
++            readonly bits: bigint;
++          };
++        }
++      | { readonly index: 12; readonly value: {} };
+   }> {
+     return miscValItems(
+       this.modelOwner,
+@@ -3731,11 +3756,22 @@ export class IfStatementAST extends StatementAST {
+       this.modelOwner,
+     );
+   }
++  get constexprValue(): boolean | undefined {
++    return ((item: any) => (item === undefined ? undefined : item !== 0))(
++      cxx.readASTVal(this.handle, IfStatementASTSlotBase + 12),
++    );
++  }
++  get decisionVariable(): VariableSymbol | undefined {
++    return symbolOf(
++      cxx.readAST(this.handle, IfStatementASTSlotBase + 13),
++      this.modelOwner,
++    );
++  }
+   get firstSourceLocation(): number {
+-    return cxx.readAST(this.handle, IfStatementASTSlotBase + 12);
++    return cxx.readAST(this.handle, IfStatementASTSlotBase + 14);
+   }
+   get lastSourceLocation(): number {
+-    return cxx.readAST(this.handle, IfStatementASTSlotBase + 13);
++    return cxx.readAST(this.handle, IfStatementASTSlotBase + 15);
+   }
+ }
+ export class ConstevalIfStatementAST extends StatementAST {
+@@ -3839,11 +3875,17 @@ export class SwitchStatementAST extends StatementAST {
+       this.modelOwner,
+     );
+   }
++  get decisionVariable(): VariableSymbol | undefined {
++    return symbolOf(
++      cxx.readAST(this.handle, SwitchStatementASTSlotBase + 9),
++      this.modelOwner,
++    );
++  }
+   get firstSourceLocation(): number {
+-    return cxx.readAST(this.handle, SwitchStatementASTSlotBase + 9);
++    return cxx.readAST(this.handle, SwitchStatementASTSlotBase + 10);
+   }
+   get lastSourceLocation(): number {
+-    return cxx.readAST(this.handle, SwitchStatementASTSlotBase + 10);
++    return cxx.readAST(this.handle, SwitchStatementASTSlotBase + 11);
+   }
+ }
+ export class WhileStatementAST extends StatementAST {
+@@ -3890,11 +3932,17 @@ export class WhileStatementAST extends StatementAST {
+       this.modelOwner,
+     );
+   }
++  get decisionVariable(): VariableSymbol | undefined {
++    return symbolOf(
++      cxx.readAST(this.handle, WhileStatementASTSlotBase + 8),
++      this.modelOwner,
++    );
++  }
+   get firstSourceLocation(): number {
+-    return cxx.readAST(this.handle, WhileStatementASTSlotBase + 8);
++    return cxx.readAST(this.handle, WhileStatementASTSlotBase + 9);
+   }
+   get lastSourceLocation(): number {
+-    return cxx.readAST(this.handle, WhileStatementASTSlotBase + 9);
++    return cxx.readAST(this.handle, WhileStatementASTSlotBase + 10);
+   }
+ }
+ export class DoStatementAST extends StatementAST {
+@@ -4163,11 +4211,17 @@ export class ForStatementAST extends StatementAST {
+       this.modelOwner,
+     );
+   }
++  get decisionVariable(): VariableSymbol | undefined {
++    return symbolOf(
++      cxx.readAST(this.handle, ForStatementASTSlotBase + 11),
++      this.modelOwner,
++    );
++  }
+   get firstSourceLocation(): number {
+-    return cxx.readAST(this.handle, ForStatementASTSlotBase + 11);
++    return cxx.readAST(this.handle, ForStatementASTSlotBase + 12);
+   }
+   get lastSourceLocation(): number {
+-    return cxx.readAST(this.handle, ForStatementASTSlotBase + 12);
++    return cxx.readAST(this.handle, ForStatementASTSlotBase + 13);
+   }
+ }
+ export class BreakStatementAST extends StatementAST {
+@@ -6071,7 +6125,10 @@ export class BuiltinConvertVectorExpressionAST extends ExpressionAST {
+     return visitor.visitBuiltinConvertVectorExpression(this, context);
+   }
+   get internalId(): number {
+-    return cxx.readAST(this.handle, BuiltinConvertVectorExpressionASTSlotBase + 0);
++    return cxx.readAST(
++      this.handle,
++      BuiltinConvertVectorExpressionASTSlotBase + 0,
++    );
+   }
+   get valueCategory(): ValueCategory {
+     return cxx.readAST(
+@@ -6086,10 +6143,16 @@ export class BuiltinConvertVectorExpressionAST extends ExpressionAST {
+     );
+   }
+   get convertLoc(): number {
+-    return cxx.readAST(this.handle, BuiltinConvertVectorExpressionASTSlotBase + 3);
++    return cxx.readAST(
++      this.handle,
++      BuiltinConvertVectorExpressionASTSlotBase + 3,
++    );
+   }
+   get lparenLoc(): number {
+-    return cxx.readAST(this.handle, BuiltinConvertVectorExpressionASTSlotBase + 4);
++    return cxx.readAST(
++      this.handle,
++      BuiltinConvertVectorExpressionASTSlotBase + 4,
++    );
+   }
+   get expression(): ExpressionAST | undefined {
+     return astOf(
+@@ -6098,7 +6161,10 @@ export class BuiltinConvertVectorExpressionAST extends ExpressionAST {
+     );
+   }
+   get commaLoc(): number {
+-    return cxx.readAST(this.handle, BuiltinConvertVectorExpressionASTSlotBase + 6);
++    return cxx.readAST(
++      this.handle,
++      BuiltinConvertVectorExpressionASTSlotBase + 6,
++    );
+   }
+   get typeId(): TypeIdAST | undefined {
+     return astOf(
+@@ -6107,13 +6173,22 @@ export class BuiltinConvertVectorExpressionAST extends ExpressionAST {
+     );
+   }
+   get rparenLoc(): number {
+-    return cxx.readAST(this.handle, BuiltinConvertVectorExpressionASTSlotBase + 8);
++    return cxx.readAST(
++      this.handle,
++      BuiltinConvertVectorExpressionASTSlotBase + 8,
++    );
+   }
+   get firstSourceLocation(): number {
+-    return cxx.readAST(this.handle, BuiltinConvertVectorExpressionASTSlotBase + 9);
++    return cxx.readAST(
++      this.handle,
++      BuiltinConvertVectorExpressionASTSlotBase + 9,
++    );
+   }
+   get lastSourceLocation(): number {
+-    return cxx.readAST(this.handle, BuiltinConvertVectorExpressionASTSlotBase + 10);
++    return cxx.readAST(
++      this.handle,
++      BuiltinConvertVectorExpressionASTSlotBase + 10,
++    );
+   }
+ }
+ export class BuiltinOffsetofExpressionAST extends ExpressionAST {
+@@ -6178,11 +6253,17 @@ export class BuiltinOffsetofExpressionAST extends ExpressionAST {
+       this.modelOwner,
+     );
+   }
++  get value(): bigint | undefined {
++    return cxx.readASTVal(
++      this.handle,
++      BuiltinOffsetofExpressionASTSlotBase + 12,
++    ) as bigint | undefined;
++  }
+   get firstSourceLocation(): number {
+-    return cxx.readAST(this.handle, BuiltinOffsetofExpressionASTSlotBase + 12);
++    return cxx.readAST(this.handle, BuiltinOffsetofExpressionASTSlotBase + 13);
+   }
+   get lastSourceLocation(): number {
+-    return cxx.readAST(this.handle, BuiltinOffsetofExpressionASTSlotBase + 13);
++    return cxx.readAST(this.handle, BuiltinOffsetofExpressionASTSlotBase + 14);
+   }
+ }
+ export class TypeidExpressionAST extends ExpressionAST {
+@@ -7166,7 +7247,14 @@ export class ConstExpressionAST extends ExpressionAST {
+     | { readonly index: 8; readonly value: ConstAddress | undefined }
+     | { readonly index: 9; readonly value: ConstLabelAddress | undefined }
+     | { readonly index: 10; readonly value: ConstComplex | undefined }
+-    | { readonly index: 11; readonly value: {} }
++    | {
++        readonly index: 11;
++        readonly value: {
++          readonly format: ConstFloat_Format;
++          readonly bits: bigint;
++        };
++      }
++    | { readonly index: 12; readonly value: {} }
+     | undefined {
+     return ((item: any) =>
+       item === undefined
+@@ -9681,20 +9769,34 @@ export class BitfieldDeclaratorAST extends CoreDeclaratorAST {
+       this.modelOwner,
+     );
+   }
++  get attributeList(): Iterable<AttributeSpecifierAST | undefined> {
++    return listOf(
++      this.modelOwner,
++      cxx.readAST(this.handle, BitfieldDeclaratorASTSlotBase + 2),
++      (item: any) => astOf(item, this.modelOwner),
++    );
++  }
+   get colonLoc(): number {
+-    return cxx.readAST(this.handle, BitfieldDeclaratorASTSlotBase + 2);
++    return cxx.readAST(this.handle, BitfieldDeclaratorASTSlotBase + 3);
+   }
+   get sizeExpression(): ExpressionAST | undefined {
+     return astOf(
+-      cxx.readAST(this.handle, BitfieldDeclaratorASTSlotBase + 3),
++      cxx.readAST(this.handle, BitfieldDeclaratorASTSlotBase + 4),
+       this.modelOwner,
+     );
+   }
++  get trailingAttributeList(): Iterable<AttributeSpecifierAST | undefined> {
++    return listOf(
++      this.modelOwner,
++      cxx.readAST(this.handle, BitfieldDeclaratorASTSlotBase + 5),
++      (item: any) => astOf(item, this.modelOwner),
++    );
++  }
+   get firstSourceLocation(): number {
+-    return cxx.readAST(this.handle, BitfieldDeclaratorASTSlotBase + 4);
++    return cxx.readAST(this.handle, BitfieldDeclaratorASTSlotBase + 6);
+   }
+   get lastSourceLocation(): number {
+-    return cxx.readAST(this.handle, BitfieldDeclaratorASTSlotBase + 5);
++    return cxx.readAST(this.handle, BitfieldDeclaratorASTSlotBase + 7);
+   }
+ }
+ export class ParameterPackAST extends CoreDeclaratorAST {
+@@ -11876,7 +11978,14 @@ export class TemplateId extends Name {
+           | { readonly index: 8; readonly value: ConstAddress | undefined }
+           | { readonly index: 9; readonly value: ConstLabelAddress | undefined }
+           | { readonly index: 10; readonly value: ConstComplex | undefined }
+-          | { readonly index: 11; readonly value: {} };
++          | {
++              readonly index: 11;
++              readonly value: {
++                readonly format: ConstFloat_Format;
++                readonly bits: bigint;
++              };
++            }
++          | { readonly index: 12; readonly value: {} };
+       }
+     | { readonly index: 3; readonly value: ExpressionAST | undefined }
+   > {
+@@ -12968,7 +13077,14 @@ export class ConceptSymbol extends Symbol {
+           | { readonly index: 8; readonly value: ConstAddress | undefined }
+           | { readonly index: 9; readonly value: ConstLabelAddress | undefined }
+           | { readonly index: 10; readonly value: ConstComplex | undefined }
+-          | { readonly index: 11; readonly value: {} };
++          | {
++              readonly index: 11;
++              readonly value: {
++                readonly format: ConstFloat_Format;
++                readonly bits: bigint;
++              };
++            }
++          | { readonly index: 12; readonly value: {} };
+       }
+     | { readonly index: 3; readonly value: ExpressionAST | undefined }
+   > {
+@@ -13073,7 +13189,14 @@ export class ConceptSymbol extends Symbol {
+                 readonly value: ConstLabelAddress | undefined;
+               }
+             | { readonly index: 10; readonly value: ConstComplex | undefined }
+-            | { readonly index: 11; readonly value: {} };
++            | {
++                readonly index: 11;
++                readonly value: {
++                  readonly format: ConstFloat_Format;
++                  readonly bits: bigint;
++                };
++              }
++            | { readonly index: 12; readonly value: {} };
+         }
+       | { readonly index: 3; readonly value: ExpressionAST | undefined }
+     >
+@@ -13440,7 +13563,14 @@ export class DeductionGuideSymbol extends Symbol {
+           | { readonly index: 8; readonly value: ConstAddress | undefined }
+           | { readonly index: 9; readonly value: ConstLabelAddress | undefined }
+           | { readonly index: 10; readonly value: ConstComplex | undefined }
+-          | { readonly index: 11; readonly value: {} };
++          | {
++              readonly index: 11;
++              readonly value: {
++                readonly format: ConstFloat_Format;
++                readonly bits: bigint;
++              };
++            }
++          | { readonly index: 12; readonly value: {} };
+       }
+     | { readonly index: 3; readonly value: ExpressionAST | undefined }
+   > {
+@@ -13545,7 +13675,14 @@ export class DeductionGuideSymbol extends Symbol {
+                 readonly value: ConstLabelAddress | undefined;
+               }
+             | { readonly index: 10; readonly value: ConstComplex | undefined }
+-            | { readonly index: 11; readonly value: {} };
++            | {
++                readonly index: 11;
++                readonly value: {
++                  readonly format: ConstFloat_Format;
++                  readonly bits: bigint;
++                };
++              }
++            | { readonly index: 12; readonly value: {} };
+         }
+       | { readonly index: 3; readonly value: ExpressionAST | undefined }
+     >
+@@ -14715,7 +14852,14 @@ export class ClassSymbol extends ScopeSymbol {
+           | { readonly index: 8; readonly value: ConstAddress | undefined }
+           | { readonly index: 9; readonly value: ConstLabelAddress | undefined }
+           | { readonly index: 10; readonly value: ConstComplex | undefined }
+-          | { readonly index: 11; readonly value: {} };
++          | {
++              readonly index: 11;
++              readonly value: {
++                readonly format: ConstFloat_Format;
++                readonly bits: bigint;
++              };
++            }
++          | { readonly index: 12; readonly value: {} };
+       }
+     | { readonly index: 3; readonly value: ExpressionAST | undefined }
+   > {
+@@ -14820,7 +14964,14 @@ export class ClassSymbol extends ScopeSymbol {
+                 readonly value: ConstLabelAddress | undefined;
+               }
+             | { readonly index: 10; readonly value: ConstComplex | undefined }
+-            | { readonly index: 11; readonly value: {} };
++            | {
++                readonly index: 11;
++                readonly value: {
++                  readonly format: ConstFloat_Format;
++                  readonly bits: bigint;
++                };
++              }
++            | { readonly index: 12; readonly value: {} };
+         }
+       | { readonly index: 3; readonly value: ExpressionAST | undefined }
+     >
+@@ -14956,7 +15107,14 @@ export class ClassSymbol extends ScopeSymbol {
+           | { readonly index: 8; readonly value: ConstAddress | undefined }
+           | { readonly index: 9; readonly value: ConstLabelAddress | undefined }
+           | { readonly index: 10; readonly value: ConstComplex | undefined }
+-          | { readonly index: 11; readonly value: {} };
++          | {
++              readonly index: 11;
++              readonly value: {
++                readonly format: ConstFloat_Format;
++                readonly bits: bigint;
++              };
++            }
++          | { readonly index: 12; readonly value: {} };
+       }
+     | { readonly index: 3; readonly value: ExpressionAST | undefined }
+   > {
+@@ -15223,7 +15381,14 @@ export class ClassSymbol extends ScopeSymbol {
+                 readonly value: ConstLabelAddress | undefined;
+               }
+             | { readonly index: 10; readonly value: ConstComplex | undefined }
+-            | { readonly index: 11; readonly value: {} };
++            | {
++                readonly index: 11;
++                readonly value: {
++                  readonly format: ConstFloat_Format;
++                  readonly bits: bigint;
++                };
++              }
++            | { readonly index: 12; readonly value: {} };
+         }
+       | { readonly index: 3; readonly value: ExpressionAST | undefined }
+     >;
+@@ -15351,15 +15516,21 @@ export class ClassSymbol extends ScopeSymbol {
+       this.modelOwner,
+     );
+   }
++  get minimumAlignment(): number {
++    return cxx.readSymbol(this.handle, ClassSymbolSlotBase + 110);
++  }
++  get isPacked(): boolean {
++    return cxx.readSymbol(this.handle, ClassSymbolSlotBase + 111) !== 0;
++  }
+   get text(): string {
+     return cxx.readSymbolString(
+       this.handle,
+-      ClassSymbolSlotBase + 110,
++      ClassSymbolSlotBase + 112,
+     ) as string;
+   }
+   get templatePattern(): ClassSymbol | undefined {
+     return symbolOf(
+-      cxx.readSymbol(this.handle, ClassSymbolSlotBase + 111),
++      cxx.readSymbol(this.handle, ClassSymbolSlotBase + 113),
+       this.modelOwner,
+     );
+   }
+@@ -15380,14 +15551,21 @@ export class ClassSymbol extends ScopeSymbol {
+           | { readonly index: 8; readonly value: ConstAddress | undefined }
+           | { readonly index: 9; readonly value: ConstLabelAddress | undefined }
+           | { readonly index: 10; readonly value: ConstComplex | undefined }
+-          | { readonly index: 11; readonly value: {} };
++          | {
++              readonly index: 11;
++              readonly value: {
++                readonly format: ConstFloat_Format;
++                readonly bits: bigint;
++              };
++            }
++          | { readonly index: 12; readonly value: {} };
+       }
+     | { readonly index: 3; readonly value: ExpressionAST | undefined }
+   > {
+     return symbolValItems(
+       this.modelOwner,
+       this.handle,
+-      ClassSymbolSlotBase + 112,
++      ClassSymbolSlotBase + 114,
+       (item: any) =>
+         ((item: any) =>
+           item.index === 0
+@@ -15468,12 +15646,12 @@ export class ClassSymbol extends ScopeSymbol {
+     return symbolStringItems(
+       this.modelOwner,
+       this.handle,
+-      ClassSymbolSlotBase + 113,
++      ClassSymbolSlotBase + 115,
+       (item: any) => item,
+     );
+   }
+   get isType(): boolean {
+-    return cxx.readSymbol(this.handle, ClassSymbolSlotBase + 114) !== 0;
++    return cxx.readSymbol(this.handle, ClassSymbolSlotBase + 116) !== 0;
+   }
+ }
+ export class EnumSymbol extends ScopeSymbol {
+@@ -15727,11 +15905,20 @@ export class EnumSymbol extends ScopeSymbol {
+       this.modelOwner,
+     );
+   }
++  get promotionType(): Type | undefined {
++    return typeOf(
++      cxx.readSymbol(this.handle, EnumSymbolSlotBase + 59),
++      this.modelOwner,
++    );
++  }
++  get isPacked(): boolean {
++    return cxx.readSymbol(this.handle, EnumSymbolSlotBase + 60) !== 0;
++  }
+   get text(): string {
+-    return cxx.readSymbolString(this.handle, EnumSymbolSlotBase + 59) as string;
++    return cxx.readSymbolString(this.handle, EnumSymbolSlotBase + 61) as string;
+   }
+   get isType(): boolean {
+-    return cxx.readSymbol(this.handle, EnumSymbolSlotBase + 60) !== 0;
++    return cxx.readSymbol(this.handle, EnumSymbolSlotBase + 62) !== 0;
+   }
+ }
+ export class ScopedEnumSymbol extends ScopeSymbol {
+@@ -16272,7 +16459,14 @@ export class FunctionSymbol extends ScopeSymbol {
+           | { readonly index: 8; readonly value: ConstAddress | undefined }
+           | { readonly index: 9; readonly value: ConstLabelAddress | undefined }
+           | { readonly index: 10; readonly value: ConstComplex | undefined }
+-          | { readonly index: 11; readonly value: {} };
++          | {
++              readonly index: 11;
++              readonly value: {
++                readonly format: ConstFloat_Format;
++                readonly bits: bigint;
++              };
++            }
++          | { readonly index: 12; readonly value: {} };
+       }
+     | { readonly index: 3; readonly value: ExpressionAST | undefined }
+   > {
+@@ -16377,7 +16571,14 @@ export class FunctionSymbol extends ScopeSymbol {
+                 readonly value: ConstLabelAddress | undefined;
+               }
+             | { readonly index: 10; readonly value: ConstComplex | undefined }
+-            | { readonly index: 11; readonly value: {} };
++            | {
++                readonly index: 11;
++                readonly value: {
++                  readonly format: ConstFloat_Format;
++                  readonly bits: bigint;
++                };
++              }
++            | { readonly index: 12; readonly value: {} };
+         }
+       | { readonly index: 3; readonly value: ExpressionAST | undefined }
+     >
+@@ -16674,7 +16875,14 @@ export class FunctionSymbol extends ScopeSymbol {
+                     readonly index: 10;
+                     readonly value: ConstComplex | undefined;
+                   }
+-                | { readonly index: 11; readonly value: {} };
++                | {
++                    readonly index: 11;
++                    readonly value: {
++                      readonly format: ConstFloat_Format;
++                      readonly bits: bigint;
++                    };
++                  }
++                | { readonly index: 12; readonly value: {} };
+             }
+           | { readonly index: 3; readonly value: ExpressionAST | undefined }
+         >;
+@@ -16816,7 +17024,14 @@ export class FunctionSymbol extends ScopeSymbol {
+                     readonly index: 10;
+                     readonly value: ConstComplex | undefined;
+                   }
+-                | { readonly index: 11; readonly value: {} };
++                | {
++                    readonly index: 11;
++                    readonly value: {
++                      readonly format: ConstFloat_Format;
++                      readonly bits: bigint;
++                    };
++                  }
++                | { readonly index: 12; readonly value: {} };
+             }
+           | { readonly index: 3; readonly value: ExpressionAST | undefined }
+         >;
+@@ -16967,7 +17182,14 @@ export class FunctionSymbol extends ScopeSymbol {
+                 readonly value: ConstLabelAddress | undefined;
+               }
+             | { readonly index: 10; readonly value: ConstComplex | undefined }
+-            | { readonly index: 11; readonly value: {} };
++            | {
++                readonly index: 11;
++                readonly value: {
++                  readonly format: ConstFloat_Format;
++                  readonly bits: bigint;
++                };
++              }
++            | { readonly index: 12; readonly value: {} };
+         }
+       | { readonly index: 3; readonly value: ExpressionAST | undefined }
+     >;
+@@ -18823,7 +19045,14 @@ export class TypeAliasSymbol extends Symbol {
+           | { readonly index: 8; readonly value: ConstAddress | undefined }
+           | { readonly index: 9; readonly value: ConstLabelAddress | undefined }
+           | { readonly index: 10; readonly value: ConstComplex | undefined }
+-          | { readonly index: 11; readonly value: {} };
++          | {
++              readonly index: 11;
++              readonly value: {
++                readonly format: ConstFloat_Format;
++                readonly bits: bigint;
++              };
++            }
++          | { readonly index: 12; readonly value: {} };
+       }
+     | { readonly index: 3; readonly value: ExpressionAST | undefined }
+   > {
+@@ -18928,7 +19157,14 @@ export class TypeAliasSymbol extends Symbol {
+                 readonly value: ConstLabelAddress | undefined;
+               }
+             | { readonly index: 10; readonly value: ConstComplex | undefined }
+-            | { readonly index: 11; readonly value: {} };
++            | {
++                readonly index: 11;
++                readonly value: {
++                  readonly format: ConstFloat_Format;
++                  readonly bits: bigint;
++                };
++              }
++            | { readonly index: 12; readonly value: {} };
+         }
+       | { readonly index: 3; readonly value: ExpressionAST | undefined }
+     >
+@@ -19321,7 +19557,14 @@ export class VariableSymbol extends Symbol {
+           | { readonly index: 8; readonly value: ConstAddress | undefined }
+           | { readonly index: 9; readonly value: ConstLabelAddress | undefined }
+           | { readonly index: 10; readonly value: ConstComplex | undefined }
+-          | { readonly index: 11; readonly value: {} };
++          | {
++              readonly index: 11;
++              readonly value: {
++                readonly format: ConstFloat_Format;
++                readonly bits: bigint;
++              };
++            }
++          | { readonly index: 12; readonly value: {} };
+       }
+     | { readonly index: 3; readonly value: ExpressionAST | undefined }
+   > {
+@@ -19426,7 +19669,14 @@ export class VariableSymbol extends Symbol {
+                 readonly value: ConstLabelAddress | undefined;
+               }
+             | { readonly index: 10; readonly value: ConstComplex | undefined }
+-            | { readonly index: 11; readonly value: {} };
++            | {
++                readonly index: 11;
++                readonly value: {
++                  readonly format: ConstFloat_Format;
++                  readonly bits: bigint;
++                };
++              }
++            | { readonly index: 12; readonly value: {} };
+         }
+       | { readonly index: 3; readonly value: ExpressionAST | undefined }
+     >
+@@ -19584,7 +19834,14 @@ export class VariableSymbol extends Symbol {
+     | { readonly index: 8; readonly value: ConstAddress | undefined }
+     | { readonly index: 9; readonly value: ConstLabelAddress | undefined }
+     | { readonly index: 10; readonly value: ConstComplex | undefined }
+-    | { readonly index: 11; readonly value: {} }
++    | {
++        readonly index: 11;
++        readonly value: {
++          readonly format: ConstFloat_Format;
++          readonly bits: bigint;
++        };
++      }
++    | { readonly index: 12; readonly value: {} }
+     | undefined {
+     return ((item: any) =>
+       item === undefined
+@@ -19893,7 +20150,14 @@ export class FieldSymbol extends Symbol {
+     | { readonly index: 8; readonly value: ConstAddress | undefined }
+     | { readonly index: 9; readonly value: ConstLabelAddress | undefined }
+     | { readonly index: 10; readonly value: ConstComplex | undefined }
+-    | { readonly index: 11; readonly value: {} }
++    | {
++        readonly index: 11;
++        readonly value: {
++          readonly format: ConstFloat_Format;
++          readonly bits: bigint;
++        };
++      }
++    | { readonly index: 12; readonly value: {} }
+     | undefined {
+     return ((item: any) =>
+       item === undefined
+@@ -19985,15 +20249,18 @@ export class FieldSymbol extends Symbol {
+   get alignment(): number {
+     return cxx.readSymbol(this.handle, FieldSymbolSlotBase + 65);
+   }
++  get explicitAlignment(): number {
++    return cxx.readSymbol(this.handle, FieldSymbolSlotBase + 66);
++  }
+   get initializer(): ExpressionAST | undefined {
+     return astOf(
+-      cxx.readSymbol(this.handle, FieldSymbolSlotBase + 66),
++      cxx.readSymbol(this.handle, FieldSymbolSlotBase + 67),
+       this.modelOwner,
+     );
+   }
+   get constructorSymbol(): FunctionSymbol | undefined {
+     return symbolOf(
+-      cxx.readSymbol(this.handle, FieldSymbolSlotBase + 67),
++      cxx.readSymbol(this.handle, FieldSymbolSlotBase + 68),
+       this.modelOwner,
+     );
+   }
+@@ -20009,7 +20276,14 @@ export class FieldSymbol extends Symbol {
+     | { readonly index: 8; readonly value: ConstAddress | undefined }
+     | { readonly index: 9; readonly value: ConstLabelAddress | undefined }
+     | { readonly index: 10; readonly value: ConstComplex | undefined }
+-    | { readonly index: 11; readonly value: {} }
++    | {
++        readonly index: 11;
++        readonly value: {
++          readonly format: ConstFloat_Format;
++          readonly bits: bigint;
++        };
++      }
++    | { readonly index: 12; readonly value: {} }
+     | undefined {
+     return ((item: any) =>
+       item === undefined
+@@ -20064,26 +20338,29 @@ export class FieldSymbol extends Symbol {
+                               ),
+                             }
+                           : item)(item))(
+-      cxx.readSymbolVal(this.handle, FieldSymbolSlotBase + 68),
++      cxx.readSymbolVal(this.handle, FieldSymbolSlotBase + 69),
+     );
+   }
+   get isDefinitionRequired(): boolean {
+-    return cxx.readSymbol(this.handle, FieldSymbolSlotBase + 69) !== 0;
++    return cxx.readSymbol(this.handle, FieldSymbolSlotBase + 70) !== 0;
+   }
+   get hasPendingInitializer(): boolean {
+-    return cxx.readSymbol(this.handle, FieldSymbolSlotBase + 70) !== 0;
++    return cxx.readSymbol(this.handle, FieldSymbolSlotBase + 71) !== 0;
+   }
+   get hasInitializer(): boolean {
+-    return cxx.readSymbol(this.handle, FieldSymbolSlotBase + 71) !== 0;
++    return cxx.readSymbol(this.handle, FieldSymbolSlotBase + 72) !== 0;
++  }
++  get isPacked(): boolean {
++    return cxx.readSymbol(this.handle, FieldSymbolSlotBase + 73) !== 0;
+   }
+   get text(): string {
+     return cxx.readSymbolString(
+       this.handle,
+-      FieldSymbolSlotBase + 72,
++      FieldSymbolSlotBase + 74,
+     ) as string;
+   }
+   get isType(): boolean {
+-    return cxx.readSymbol(this.handle, FieldSymbolSlotBase + 73) !== 0;
++    return cxx.readSymbol(this.handle, FieldSymbolSlotBase + 75) !== 0;
+   }
+ }
+ export class ParameterSymbol extends Symbol {
+@@ -22139,7 +22416,14 @@ export class EnumeratorSymbol extends Symbol {
+     | { readonly index: 8; readonly value: ConstAddress | undefined }
+     | { readonly index: 9; readonly value: ConstLabelAddress | undefined }
+     | { readonly index: 10; readonly value: ConstComplex | undefined }
+-    | { readonly index: 11; readonly value: {} }
++    | {
++        readonly index: 11;
++        readonly value: {
++          readonly format: ConstFloat_Format;
++          readonly bits: bigint;
++        };
++      }
++    | { readonly index: 12; readonly value: {} }
+     | undefined {
+     return ((item: any) =>
+       item === undefined
+@@ -22955,6 +23239,27 @@ export class Float16Type extends Type {
+     return cxx.readTypeString(this.handle, Float16TypeSlotBase + 0) as string;
+   }
+ }
++export class BFloat16Type extends Type {
++  get text(): string {
++    return cxx.readTypeString(this.handle, BFloat16TypeSlotBase + 0) as string;
++  }
++}
++export class Float8E4M3FNType extends Type {
++  get text(): string {
++    return cxx.readTypeString(
++      this.handle,
++      Float8E4M3FNTypeSlotBase + 0,
++    ) as string;
++  }
++}
++export class Float8E5M2Type extends Type {
++  get text(): string {
++    return cxx.readTypeString(
++      this.handle,
++      Float8E5M2TypeSlotBase + 0,
++    ) as string;
++  }
++}
+ export class QualType extends Type {
+   get elementType(): Type | undefined {
+     return typeOf(
+@@ -23736,35 +24041,38 @@ export enum TypeKind {
+   kDouble = 23,
+   kLongDouble = 24,
+   kFloat16 = 25,
+-  kQual = 26,
+-  kBoundedArray = 27,
+-  kUnboundedArray = 28,
+-  kPointer = 29,
+-  kLvalueReference = 30,
+-  kRvalueReference = 31,
+-  kFunction = 32,
+-  kClass = 33,
+-  kEnum = 34,
+-  kScopedEnum = 35,
+-  kMemberObjectPointer = 36,
+-  kMemberFunctionPointer = 37,
+-  kNamespace = 38,
+-  kTypeParameter = 39,
+-  kTemplateTypeParameter = 40,
+-  kUnresolvedName = 41,
+-  kUnresolvedBoundedArray = 42,
+-  kUnresolvedUnderlying = 43,
+-  kUnresolvedBuiltin = 44,
+-  kOverloadSet = 45,
+-  kBuiltinVaList = 46,
+-  kBuiltinMetaInfo = 47,
+-  kBitInt = 48,
+-  kUnsignedBitInt = 49,
+-  kUnresolvedBitInt = 50,
+-  kVector = 51,
+-  kUnresolvedVector = 52,
+-  kComplex = 53,
+-  kAtomic = 54,
++  kBFloat16 = 26,
++  kFloat8E4M3FN = 27,
++  kFloat8E5M2 = 28,
++  kQual = 29,
++  kBoundedArray = 30,
++  kUnboundedArray = 31,
++  kPointer = 32,
++  kLvalueReference = 33,
++  kRvalueReference = 34,
++  kFunction = 35,
++  kClass = 36,
++  kEnum = 37,
++  kScopedEnum = 38,
++  kMemberObjectPointer = 39,
++  kMemberFunctionPointer = 40,
++  kNamespace = 41,
++  kTypeParameter = 42,
++  kTemplateTypeParameter = 43,
++  kUnresolvedName = 44,
++  kUnresolvedBoundedArray = 45,
++  kUnresolvedUnderlying = 46,
++  kUnresolvedBuiltin = 47,
++  kOverloadSet = 48,
++  kBuiltinVaList = 49,
++  kBuiltinMetaInfo = 50,
++  kBitInt = 51,
++  kUnsignedBitInt = 52,
++  kUnresolvedBitInt = 53,
++  kVector = 54,
++  kUnresolvedVector = 55,
++  kComplex = 56,
++  kAtomic = 57,
+ }
+ export enum NameKind {
+   kIdentifier = 0,
+@@ -23774,231 +24082,20 @@ export enum NameKind {
+   kConversionFunctionId = 4,
+   kTemplateId = 5,
+ }
++export enum ConstFloat_Format {
++  kFloat16 = 0,
++  kBFloat16 = 1,
++  kFloat8E4M3FN = 2,
++  kFloat8E5M2 = 3,
++  kFloat = 4,
++  kDouble = 5,
++}
+ export enum ValueCategory {
+   kNone = 0,
+   kLValue = 1,
+   kXValue = 2,
+   kPrValue = 3,
+ }
+-export enum TokenKind {
+-  T_EOF_SYMBOL = 0,
+-  T_ERROR = 1,
+-  T_COMMENT = 2,
+-  T_IDENTIFIER = 3,
+-  T_CHARACTER_LITERAL = 4,
+-  T_FLOATING_POINT_LITERAL = 5,
+-  T_INTEGER_LITERAL = 6,
+-  T_STRING_LITERAL = 7,
+-  T_USER_DEFINED_STRING_LITERAL = 8,
+-  T_UTF16_STRING_LITERAL = 9,
+-  T_UTF32_STRING_LITERAL = 10,
+-  T_UTF8_STRING_LITERAL = 11,
+-  T_WIDE_STRING_LITERAL = 12,
+-  T_PP_INTERNAL_VARIABLE = 13,
+-  T_CODE_COMPLETION = 14,
+-  T_PRAGMA_PACK = 15,
+-  T_AMP_AMP = 16,
+-  T_AMP_EQUAL = 17,
+-  T_AMP = 18,
+-  T_BAR_BAR = 19,
+-  T_BAR_EQUAL = 20,
+-  T_BAR = 21,
+-  T_CARET_CARET = 22,
+-  T_CARET_EQUAL = 23,
+-  T_CARET = 24,
+-  T_COLON_COLON = 25,
+-  T_COLON = 26,
+-  T_COMMA = 27,
+-  T_DELETE_ARRAY = 28,
+-  T_DOT_DOT_DOT = 29,
+-  T_DOT_STAR = 30,
+-  T_DOT = 31,
+-  T_EQUAL_EQUAL = 32,
+-  T_EQUAL = 33,
+-  T_EXCLAIM_EQUAL = 34,
+-  T_EXCLAIM = 35,
+-  T_GREATER_EQUAL = 36,
+-  T_GREATER_GREATER_EQUAL = 37,
+-  T_GREATER_GREATER = 38,
+-  T_GREATER = 39,
+-  T_HASH_HASH = 40,
+-  T_HASH = 41,
+-  T_LBRACE = 42,
+-  T_LBRACKET = 43,
+-  T_LESS_EQUAL_GREATER = 44,
+-  T_LESS_EQUAL = 45,
+-  T_LESS_LESS_EQUAL = 46,
+-  T_LESS_LESS = 47,
+-  T_LESS = 48,
+-  T_LPAREN = 49,
+-  T_MINUS_EQUAL = 50,
+-  T_MINUS_GREATER_STAR = 51,
+-  T_MINUS_GREATER = 52,
+-  T_MINUS_MINUS = 53,
+-  T_MINUS = 54,
+-  T_NEW_ARRAY = 55,
+-  T_PERCENT_EQUAL = 56,
+-  T_PERCENT = 57,
+-  T_PLUS_EQUAL = 58,
+-  T_PLUS_PLUS = 59,
+-  T_PLUS = 60,
+-  T_QUESTION = 61,
+-  T_RBRACE = 62,
+-  T_RBRACKET = 63,
+-  T_RPAREN = 64,
+-  T_SEMICOLON = 65,
+-  T_SLASH_EQUAL = 66,
+-  T_SLASH = 67,
+-  T_STAR_EQUAL = 68,
+-  T_STAR = 69,
+-  T_TILDE = 70,
+-  T__ATOMIC = 71,
+-  T__BITINT = 72,
+-  T__COMPLEX = 73,
+-  T__DECIMAL128 = 74,
+-  T__DECIMAL32 = 75,
+-  T__DECIMAL64 = 76,
+-  T__FLOAT16 = 77,
+-  T__GENERIC = 78,
+-  T__IMAGINARY = 79,
+-  T__NORETURN = 80,
+-  T___ATTRIBUTE__ = 81,
+-  T___BUILTIN_BIT_CAST = 82,
+-  T___BUILTIN_META_INFO = 83,
+-  T___BUILTIN_OFFSETOF = 84,
+-  T___BUILTIN_VA_ARG = 85,
+-  T___BUILTIN_VA_LIST = 86,
+-  T___COMPLEX__ = 87,
+-  T___EXTENSION__ = 88,
+-  T___FLOAT128 = 89,
+-  T___FLOAT80 = 90,
+-  T___IMAG__ = 91,
+-  T___INT128 = 92,
+-  T___INT128_T = 93,
+-  T___INT64 = 94,
+-  T___REAL__ = 95,
+-  T___RESTRICT__ = 96,
+-  T___THREAD = 97,
+-  T___UINT128_T = 98,
+-  T___UNDERLYING_TYPE = 99,
+-  T_ALIGNAS = 100,
+-  T_ALIGNOF = 101,
+-  T_ASM = 102,
+-  T_AUTO = 103,
+-  T_BOOL = 104,
+-  T_BREAK = 105,
+-  T_CASE = 106,
+-  T_CATCH = 107,
+-  T_CHAR = 108,
+-  T_CHAR16_T = 109,
+-  T_CHAR32_T = 110,
+-  T_CHAR8_T = 111,
+-  T_CLASS = 112,
+-  T_CO_AWAIT = 113,
+-  T_CO_RETURN = 114,
+-  T_CO_YIELD = 115,
+-  T_CONCEPT = 116,
+-  T_CONST = 117,
+-  T_CONST_CAST = 118,
+-  T_CONSTEVAL = 119,
+-  T_CONSTEXPR = 120,
+-  T_CONSTINIT = 121,
+-  T_CONTINUE = 122,
+-  T_DECLTYPE = 123,
+-  T_DEFAULT = 124,
+-  T_DELETE = 125,
+-  T_DO = 126,
+-  T_DOUBLE = 127,
+-  T_DYNAMIC_CAST = 128,
+-  T_ELSE = 129,
+-  T_ENUM = 130,
+-  T_EXPLICIT = 131,
+-  T_EXPORT = 132,
+-  T_EXTERN = 133,
+-  T_FALSE = 134,
+-  T_FLOAT = 135,
+-  T_FOR = 136,
+-  T_FRIEND = 137,
+-  T_GOTO = 138,
+-  T_IF = 139,
+-  T_IMPORT = 140,
+-  T_INLINE = 141,
+-  T_INT = 142,
+-  T_LONG = 143,
+-  T_MODULE = 144,
+-  T_MUTABLE = 145,
+-  T_NAMESPACE = 146,
+-  T_NEW = 147,
+-  T_NOEXCEPT = 148,
+-  T_NULLPTR = 149,
+-  T_OPERATOR = 150,
+-  T_PRIVATE = 151,
+-  T_PROTECTED = 152,
+-  T_PUBLIC = 153,
+-  T_REGISTER = 154,
+-  T_REINTERPRET_CAST = 155,
+-  T_REQUIRES = 156,
+-  T_RETURN = 157,
+-  T_SHORT = 158,
+-  T_SIGNED = 159,
+-  T_SIZEOF = 160,
+-  T_STATIC = 161,
+-  T_STATIC_ASSERT = 162,
+-  T_STATIC_CAST = 163,
+-  T_STRUCT = 164,
+-  T_SWITCH = 165,
+-  T_TEMPLATE = 166,
+-  T_THIS = 167,
+-  T_THREAD_LOCAL = 168,
+-  T_THROW = 169,
+-  T_TRUE = 170,
+-  T_TRY = 171,
+-  T_TYPEDEF = 172,
+-  T_TYPEID = 173,
+-  T_TYPENAME = 174,
+-  T_TYPEOF = 175,
+-  T_TYPEOF_UNQUAL = 176,
+-  T_UNION = 177,
+-  T_UNSIGNED = 178,
+-  T_USING = 179,
+-  T_VIRTUAL = 180,
+-  T_VOID = 181,
+-  T_VOLATILE = 182,
+-  T_WCHAR_T = 183,
+-  T_WHILE = 184,
+-  T_RESTRICT = 96,
+-  T___ALIGNOF__ = 101,
+-  T___ALIGNOF = 101,
+-  T___ASM__ = 102,
+-  T___ASM = 102,
+-  T___ATTRIBUTE = 81,
+-  T___DECLTYPE__ = 123,
+-  T___DECLTYPE = 123,
+-  T___INLINE__ = 141,
+-  T___INLINE = 141,
+-  T___RESTRICT = 96,
+-  T___TYPEOF__ = 175,
+-  T___TYPEOF = 175,
+-  T___VOLATILE__ = 182,
+-  T___VOLATILE = 182,
+-  T__ALIGNAS = 100,
+-  T__ALIGNOF = 101,
+-  T__ASM = 102,
+-  T__BOOL = 104,
+-  T__STATIC_ASSERT = 162,
+-  T__THREAD_LOCAL = 168,
+-  T_AND_EQ = 17,
+-  T_AND = 16,
+-  T_BITAND = 18,
+-  T_BITOR = 21,
+-  T_COMPL = 70,
+-  T_NOT_EQ = 34,
+-  T_NOT = 35,
+-  T_OR_EQ = 20,
+-  T_OR = 19,
+-  T_XOR_EQ = 23,
+-  T_XOR = 24,
+-}
+ export enum ImplicitCastKind {
+   kIdentity = 0,
+   kLValueToRValueConversion = 1,
+@@ -24754,7 +24851,8 @@ astConstructors[ASTKind.MemberExpression] = MemberExpressionAST;
+ astConstructors[ASTKind.PostIncrExpression] = PostIncrExpressionAST;
+ astConstructors[ASTKind.CppCastExpression] = CppCastExpressionAST;
+ astConstructors[ASTKind.BuiltinBitCastExpression] = BuiltinBitCastExpressionAST;
+-astConstructors[ASTKind.BuiltinConvertVectorExpression] = BuiltinConvertVectorExpressionAST;
++astConstructors[ASTKind.BuiltinConvertVectorExpression] =
++  BuiltinConvertVectorExpressionAST;
+ astConstructors[ASTKind.BuiltinOffsetofExpression] =
+   BuiltinOffsetofExpressionAST;
+ astConstructors[ASTKind.TypeidExpression] = TypeidExpressionAST;
+@@ -24971,6 +25069,9 @@ typeConstructors[TypeKind.kFloat] = FloatType;
+ typeConstructors[TypeKind.kDouble] = DoubleType;
+ typeConstructors[TypeKind.kLongDouble] = LongDoubleType;
+ typeConstructors[TypeKind.kFloat16] = Float16Type;
++typeConstructors[TypeKind.kBFloat16] = BFloat16Type;
++typeConstructors[TypeKind.kFloat8E4M3FN] = Float8E4M3FNType;
++typeConstructors[TypeKind.kFloat8E5M2] = Float8E5M2Type;
+ typeConstructors[TypeKind.kQual] = QualType;
+ typeConstructors[TypeKind.kBoundedArray] = BoundedArrayType;
+ typeConstructors[TypeKind.kUnboundedArray] = UnboundedArrayType;
+@@ -25621,7 +25722,9 @@ childSlots[ASTKind.PtrToMemberOperator] = [
+ ];
+ childSlots[ASTKind.BitfieldDeclarator] = [
+   [BitfieldDeclaratorASTSlotBase + 1, false],
+-  [BitfieldDeclaratorASTSlotBase + 3, false],
++  [BitfieldDeclaratorASTSlotBase + 2, true],
++  [BitfieldDeclaratorASTSlotBase + 4, false],
++  [BitfieldDeclaratorASTSlotBase + 5, true],
+ ];
+ childSlots[ASTKind.ParameterPack] = [[ParameterPackASTSlotBase + 2, false]];
+ childSlots[ASTKind.IdDeclarator] = [
+diff --git a/packages/cxx-frontend/src/cxx-js.d.ts b/packages/cxx-frontend/src/cxx-js.d.ts
+index 96a0dd3..37b9107 100644
+--- a/packages/cxx-frontend/src/cxx-js.d.ts
++++ b/packages/cxx-frontend/src/cxx-js.d.ts
+@@ -16,6 +16,7 @@ export type UnitOptions = {
+   appdir?: string | undefined;
+   sysroot?: string | undefined;
+   std?: "c++14" | "c++17" | "c++20" | "c++23" | "c++26" | undefined;
++  analysisMode?: "full" | "declarations" | undefined;
+   defines?: string[] | undefined;
+   undefines?: string[] | undefined;
+   quoteIncludePaths?: string[] | undefined;
+diff --git a/packages/cxx-gen-ast/src/gen_reflection.ts b/packages/cxx-gen-ast/src/gen_reflection.ts
+index b82c2c0..a7eef66 100644
+--- a/packages/cxx-gen-ast/src/gen_reflection.ts
++++ b/packages/cxx-gen-ast/src/gen_reflection.ts
+@@ -24,11 +24,11 @@ import {
+   ModelIndex,
+   type ModelClass,
+   type ModelType,
+-  substituteType,
+   unqualified,
+   typeArguments,
+ } from "./parseModel.ts";
+ import { cpy_header } from "./cpy_header.ts";
++import { substituteWireType } from "./semanticWire.ts";
+
+ const short = (s: string) => s.replace(/^::cxx::/, "").replaceAll("::", "_");
+
+@@ -192,6 +192,20 @@ export function gen_reflection(index: ModelIndex, root: string) {
+             ts: "boolean",
+             decode: (value) => `${value} !== 0`,
+           };
++        if (
++          ![
++            "char",
++            "double",
++            "float",
++            "int",
++            "long double",
++            "long long",
++            "unsigned int",
++            "unsigned long",
++            "unsigned long long",
++          ].includes(type.name)
++        )
++          return;
+         if (type.name.includes("long long")) {
+           const native = type.name.startsWith("unsigned")
+             ? "std::uint64_t"
+@@ -251,6 +265,15 @@ export function gen_reflection(index: ModelIndex, root: string) {
+     if (["::std::basic_string", "::std::basic_string_view"].includes(type.name))
+       return { channel: "str", cpp: `std::string(${expr})`, ts: "string" };
+
++    if (type.name === "::cxx::ConstFloat") {
++      enumNames.add("::cxx::ConstFloat::Format");
++      return {
++        channel: "val",
++        cpp: `[&]() -> val { auto result = val::object(); result.set("format", val(static_cast<double>(${expr}.format()))); result.set("bits", val(static_cast<std::uint64_t>(${expr}.bits()))); return result; }()`,
++        ts: "{ readonly format: ConstFloat_Format; readonly bits: bigint }",
++      };
++    }
++
+     if (type.name === "::cxx::SourceLocation")
+       return {
+         channel: "num",
+@@ -405,7 +428,7 @@ export function gen_reflection(index: ModelIndex, root: string) {
+             if (field.access !== "public") continue;
+             items.set(field.name, {
+               name: field.name,
+-              type: substituteType(field.type, substitution),
++              type: substituteWireType(field.type, substitution),
+               expression: `self->${field.name}`,
+             });
+           }
+@@ -419,7 +442,7 @@ export function gen_reflection(index: ModelIndex, root: string) {
+             continue;
+           items.set(method.name, {
+             name: method.name,
+-            type: substituteType(method.returnType, substitution),
++            type: substituteWireType(method.returnType, substitution),
+             expression: `self->${method.name}()`,
+           });
+         }
+@@ -819,6 +842,7 @@ auto getGlobalScope(std::intptr_t handle) -> std::intptr_t {
+     head.push(`// Generated file by: gen_reflection.ts\n${cpy_header}
+ import { cxx } from "./cxx.js";
+ import { type SourceLocation } from "./SourceLocation.js";
++import { TokenKind } from "./TokenKind.js";
+
+ export interface ModelOwner {
+   getUnitHandle(): number;
+@@ -908,6 +932,7 @@ function ${wrapperOf[family]}(handle: number, owner: ModelOwner): any {
+     const tail: string[] = [];
+
+     for (const name of enumNames) {
++      if (name === "::cxx::TokenKind") continue;
+       const entry = index.enumOf(name);
+       if (!entry) {
+         tail.push(`export type ${short(name)} = number;`);
+diff --git a/packages/cxx-gen-ast/src/modelDumper.ts b/packages/cxx-gen-ast/src/modelDumper.ts
+index 2fe6400..d01ee43 100644
+--- a/packages/cxx-gen-ast/src/modelDumper.ts
++++ b/packages/cxx-gen-ast/src/modelDumper.ts
+@@ -18,7 +18,7 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ // SOFTWARE.
+
+-import { Parser, Semantic as S, Token } from "cxx-frontend";
++import { Parser, Semantic as S, Token, TokenKind } from "cxx-frontend";
+ import type {
+   Model,
+   ModelAccess,
+@@ -46,10 +46,9 @@ function accessOf(
+   current: ModelAccess,
+ ): ModelAccess {
+   if (!(declaration instanceof S.AccessDeclarationAST)) return current;
+-  if (declaration.accessSpecifier === S.TokenKind.T_PUBLIC) return "public";
+-  if (declaration.accessSpecifier === S.TokenKind.T_PROTECTED)
+-    return "protected";
+-  if (declaration.accessSpecifier === S.TokenKind.T_PRIVATE) return "private";
++  if (declaration.accessSpecifier === TokenKind.PUBLIC) return "public";
++  if (declaration.accessSpecifier === TokenKind.PROTECTED) return "protected";
++  if (declaration.accessSpecifier === TokenKind.PRIVATE) return "private";
+   return current;
+ }
+
+@@ -219,9 +218,10 @@ export function dumpModel(parser: Parser): Model {
+   }
+   function methods(
+     declarations: Iterable<S.DeclarationAST | undefined>,
++    defaultAccess: ModelAccess,
+   ): ModelMethod[] {
+     const result: ModelMethod[] = [];
+-    let access: ModelAccess = "public";
++    let access = defaultAccess;
+     for (const declaration of declarations) {
+       if (declaration instanceof S.AccessDeclarationAST) {
+         access = accessOf(declaration, access);
+@@ -256,9 +256,10 @@ export function dumpModel(parser: Parser): Model {
+   function fields(
+     declarations: Iterable<S.DeclarationAST | undefined>,
+     anonymousPath: string[] = [],
++    defaultAccess: ModelAccess = "public",
+   ): ModelField[] {
+     const result: ModelField[] = [];
+-    let access: ModelAccess = "public";
++    let access = defaultAccess;
+     for (const declaration of declarations) {
+       if (declaration instanceof S.AccessDeclarationAST) {
+         access = accessOf(declaration, access);
+@@ -276,8 +277,14 @@ export function dumpModel(parser: Parser): Model {
+         if (anonymous instanceof S.ClassSpecifierAST) {
+           let kind = "struct";
+           if (anonymous.symbol?.isUnion) kind = "union";
++          const anonymousDefaultAccess =
++            anonymous.classKey === TokenKind.CLASS ? "private" : "public";
+           result.push(
+-            ...fields(anonymous.declarationList, [...anonymousPath, kind]),
++            ...fields(
++              anonymous.declarationList,
++              [...anonymousPath, kind],
++              anonymousDefaultAccess,
++            ),
+           );
+           continue;
+         }
+@@ -318,13 +325,15 @@ export function dumpModel(parser: Parser): Model {
+       const loc = location(node.classLoc);
+       if (isModelled(loc)) {
+         const symbol = node.symbol;
++        const defaultAccess: ModelAccess =
++          node.classKey === TokenKind.CLASS ? "private" : "public";
+         const entry: ModelClass = {
+           name: qualifiedName(symbol),
+           unqualifiedName: nameOf(symbol),
+           isUnion: symbol.isUnion,
+           isFinal: symbol.isFinal,
+           isTemplate: symbol.isTemplatePattern,
+-          location: loc,
++          ...(loc ? { location: loc } : {}),
+           bases: [...node.baseSpecifierList]
+             .filter((b) => b !== undefined)
+             .map((base) => {
+@@ -340,7 +349,7 @@ export function dumpModel(parser: Parser): Model {
+                 isVirtual: base.isVirtual,
+               };
+             }),
+-          fields: fields(node.declarationList),
++          fields: fields(node.declarationList, [], defaultAccess),
+           constructors: [...symbol.declaredConstructors]
+             .filter(
+               (fn): fn is S.FunctionSymbol => fn !== undefined && !fn.isDeleted,
+@@ -349,7 +358,7 @@ export function dumpModel(parser: Parser): Model {
+               isExplicit: fn.isExplicit,
+               parameters: parameters(fn),
+             })),
+-          methods: methods(node.declarationList),
++          methods: methods(node.declarationList, defaultAccess),
+         };
+         const body = span(node.lbraceLoc, node.rbraceLoc);
+         if (body) entry.body = body;
+@@ -369,7 +378,7 @@ export function dumpModel(parser: Parser): Model {
+         model.enums.push({
+           name: qualifiedName(symbol),
+           isScoped: symbol.isScopedEnum,
+-          location: loc,
++          ...(loc ? { location: loc } : {}),
+           underlyingType,
+           enumerators: [...node.enumeratorList]
+             .filter((e) => e !== undefined)
+diff --git a/packages/cxx-gen-ast/src/modelRefresh.ts b/packages/cxx-gen-ast/src/modelRefresh.ts
+index 8651290..9c7e81c 100644
+--- a/packages/cxx-gen-ast/src/modelRefresh.ts
++++ b/packages/cxx-gen-ast/src/modelRefresh.ts
+@@ -49,7 +49,7 @@ export async function dumpSemanticModel(root: string): Promise<string> {
+   const missing = missingFrontend(root);
+   if (missing)
+     throw new Error(
+-      `${missing} is missing; build it with npm run build:cxx-frontend`,
++      `${missing} is missing; build it with npm run build:semantic-model-frontend`,
+     );
+
+   const { loadCxx, Parser } = await import("cxx-frontend");
+@@ -63,7 +63,11 @@ export async function dumpSemanticModel(root: string): Promise<string> {
+     sysroot: sysrootPath(root),
+     path: input,
+     source: fs.readFileSync(input, "utf8"),
+-    includePaths: [path.join(root, "src/parser"), path.join(root, "src/codegen")],
++    analysisMode: "declarations",
++    includePaths: [
++      path.join(root, "src/parser"),
++      path.join(root, "src/codegen"),
++    ],
+     exists: fs.existsSync,
+     readFile: async (file: string) => {
+       try {
+diff --git a/packages/cxx-gen-ast/src/semanticPlan.ts b/packages/cxx-gen-ast/src/semanticPlan.ts
+index fd53666..851fee3 100644
+--- a/packages/cxx-gen-ast/src/semanticPlan.ts
++++ b/packages/cxx-gen-ast/src/semanticPlan.ts
+@@ -22,7 +22,6 @@ import {
+   type ModelClass,
+   type ModelIndex,
+   type ModelType,
+-  substituteType,
+ } from "./parseModel.ts";
+ import {
+   type ExtraField,
+@@ -30,7 +29,12 @@ import {
+   bindingOf,
+   extraFieldsOf,
+ } from "./semanticClassification.ts";
+-import { type Wire, WireMapper, normalizeClassName } from "./semanticWire.ts";
++import {
++  type Wire,
++  WireMapper,
++  normalizeClassName,
++  substituteWireType,
++} from "./semanticWire.ts";
+
+ export interface FieldPlan {
+   owner: string;
+@@ -269,11 +273,11 @@ export class PlanBuilder {
+     let wire: Wire;
+     let cppType: string;
+     try {
+-      const returnType = substituteType(accessor.returnType, substitution);
++      const returnType = substituteWireType(accessor.returnType, substitution);
+       wire = this.mapper.wireOf(returnType, context);
+       cppType = this.mapper.cppTypeOf(returnType);
+     } catch (error) {
+-      this.diagnostics.push((error as Error).message);
++      this.diagnostics.push(`${context}: ${(error as Error).message}`);
+       return undefined;
+     }
+
+@@ -343,7 +347,7 @@ export class PlanBuilder {
+       typeExpression = `$->${binding.from}()`;
+     } else {
+       try {
+-        type = substituteType(field.type, substitution);
++        type = substituteWireType(field.type, substitution);
+       } catch (error) {
+         this.diagnostics.push(`${context}: ${(error as Error).message}`);
+         return undefined;
+@@ -356,7 +360,7 @@ export class PlanBuilder {
+       wire = this.mapper.wireOf(type, context);
+       cppType = this.mapper.cppTypeOf(type);
+     } catch (error) {
+-      this.diagnostics.push((error as Error).message);
++      this.diagnostics.push(`${context}: ${(error as Error).message}`);
+       return undefined;
+     }
+
+@@ -392,6 +396,7 @@ export class PlanBuilder {
+       read,
+       write: derivedWrite,
+       writeElement,
++      why: binding?.why,
+     };
+   }
+
+@@ -540,20 +545,21 @@ export class PlanBuilder {
+         return undefined;
+       }
+
++      let type: ModelType;
+       let wire: Wire;
+       try {
+-        wire = this.mapper.wireOf(
+-          parameter.type,
+-          `${entry.name}(${parameter.name})`,
+-        );
++        type = substituteWireType(parameter.type, []);
++        wire = this.mapper.wireOf(type, `${entry.name}(${parameter.name})`);
+       } catch (error) {
+-        this.diagnostics.push((error as Error).message);
++        this.diagnostics.push(
++          `${entry.name}(${parameter.name}): ${(error as Error).message}`,
++        );
+         return undefined;
+       }
+
+       parameters.push({
+         name: parameter.name,
+-        cppType: this.mapper.cppTypeOf(parameter.type),
++        cppType: this.mapper.cppTypeOf(type),
+         wire,
+         read: `$->${reader}()`,
+       });
+diff --git a/packages/cxx-gen-ast/src/semanticWire.ts b/packages/cxx-gen-ast/src/semanticWire.ts
+index 94c546e..07eff95 100644
+--- a/packages/cxx-gen-ast/src/semanticWire.ts
++++ b/packages/cxx-gen-ast/src/semanticWire.ts
+@@ -22,7 +22,6 @@ import {
+   type ModelIndex,
+   type ModelType,
+   className,
+-  substituteType,
+   typeArguments,
+   unqualified,
+ } from "./parseModel.ts";
+@@ -470,7 +469,7 @@ function substituteTypeSafely(
+   substitution: ModelType[],
+ ): ModelType {
+   try {
+-    return substituteType(type, substitution);
++    return substituteWireType(type, substitution);
+   } catch {
+     return type;
+   }
+@@ -507,6 +506,7 @@ const keptArgumentCounts: Record<string, number> = {
+   "::std::map": 2,
+   "::std::unordered_set": 1,
+   "::std::basic_string": 0,
++  "::std::basic_string_view": 0,
+ };
+
+ function isStdContainer(name: string): boolean {
+@@ -518,6 +518,55 @@ function keptArguments(name: string, args: string[]): string[] {
+   return count === undefined ? args : args.slice(0, count);
+ }
+
++/** Substitutes only template arguments represented by the persistence wire. */
++export function substituteWireType(
++  type: ModelType,
++  substitution: ModelType[],
++): ModelType {
++  switch (type.kind) {
++    case "type-param": {
++      const replacement = substitution[type.index];
++      if (!replacement)
++        throw new Error(
++          `no template argument for type-param<${type.index}, ${type.depth}>`,
++        );
++      return replacement;
++    }
++    case "pointer":
++    case "lvalue-reference":
++    case "rvalue-reference":
++    case "qual":
++    case "array":
++      return {
++        ...type,
++        element: substituteWireType(type.element, substitution),
++      };
++    case "class": {
++      const count = keptArgumentCounts[type.name];
++      let typeArgumentIndex = 0;
++      return {
++        ...type,
++        arguments: type.arguments
++          .filter((argument) => {
++            if (count === undefined) return true;
++            if (argument.kind !== "type") return false;
++            return typeArgumentIndex++ < count;
++          })
++          .map((argument) =>
++            argument.kind === "type"
++              ? {
++                  ...argument,
++                  type: substituteWireType(argument.type, substitution),
++                }
++              : argument,
++          ),
++      };
++    }
++    default:
++      return type;
++  }
++}
++
+ export function normalizeClassName(name: string): string {
+   if (name === "::std::basic_string") return "std::string";
+   return name.startsWith("::") ? name.slice(2) : name;
+diff --git a/packages/cxx-gen-ast/test/semanticWire.test.mjs b/packages/cxx-gen-ast/test/semanticWire.test.mjs
+new file mode 100644
+index 0000000..e82e02a
+--- /dev/null
++++ b/packages/cxx-gen-ast/test/semanticWire.test.mjs
+@@ -0,0 +1,40 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++import { substituteWireType } from "../src/semanticWire.ts";
++
++const parameter = (index) => ({
++  kind: "type-param",
++  index,
++  depth: 0,
++  isPack: false,
++});
++
++const typeArgument = (type) => ({ kind: "type", text: "", type });
++
++const classType = (name, arguments_) => ({
++  kind: "class",
++  name,
++  isPolymorphic: false,
++  arguments: arguments_.map(typeArgument),
++});
++
++test("wire substitution ignores implementation-only container arguments", () => {
++  const string = classType("::std::basic_string", [
++    parameter(0),
++    parameter(1),
++    parameter(2),
++  ]);
++  assert.deepEqual(substituteWireType(string, []), {
++    ...string,
++    arguments: [],
++  });
++
++  const vector = classType("::std::vector", [
++    parameter(0),
++    classType("::std::allocator", [parameter(0)]),
++  ]);
++  assert.deepEqual(
++    substituteWireType(vector, [{ kind: "builtin", name: "int" }]),
++    classType("::std::vector", [{ kind: "builtin", name: "int" }]),
++  );
++});
+diff --git a/scripts/build-emscripten.js b/scripts/build-emscripten.js
+index 30c6d89..4dcc74f 100644
+--- a/scripts/build-emscripten.js
++++ b/scripts/build-emscripten.js
+@@ -17,6 +17,13 @@ const distributionDirectory = path.join(frontendDirectory, "dist");
+
+ $.cwd = repositoryDirectory;
+
++const arguments_ = process.argv.slice(2);
++for (const argument of arguments_) {
++  if (argument !== "--parser-only")
++    throw new Error(`unknown option ${argument}`);
++}
++const parserOnly = arguments_.includes("--parser-only");
++
+ function shouldSkipWasmOpt() {
+   const value = process.env.CXX_NO_WASM_OPT;
+
+@@ -38,10 +45,16 @@ async function configure() {
+     linkerFlags = "-O1 -sERROR_ON_WASM_CHANGES_AFTER_LINK";
+   }
+
+-  await $`cmake --preset emscripten-mlir -DCMAKE_EXE_LINKER_FLAGS_RELEASE=${linkerFlags}`;
++  const preset = parserOnly ? "emscripten" : "emscripten-mlir";
++  const parserOnlyValue = parserOnly ? "ON" : "OFF";
++  await $`cmake --preset ${preset} -DCXX_JS_PARSER_ONLY=${parserOnlyValue} -DCMAKE_EXE_LINKER_FLAGS_RELEASE=${linkerFlags}`;
+ }
+
+ async function build() {
++  if (parserOnly) {
++    await $`cmake --build --preset build-emscripten --target cxx-js link_cxx_include link_wasi_sysroot`;
++    return;
++  }
+   await $`cmake --build --preset build-emscripten-mlir`;
+ }
+
+diff --git a/src/js/CMakeLists.txt b/src/js/CMakeLists.txt
+index c4e2497..5faef83 100644
+--- a/src/js/CMakeLists.txt
++++ b/src/js/CMakeLists.txt
+@@ -25,7 +25,16 @@ aux_source_directory(cxx SOURCES)
+
+ add_executable(cxx-js ${SOURCES})
+
+-target_link_libraries(cxx-js cxx-parser cxx-lsp cxx-codegen embind)
++option(CXX_JS_PARSER_ONLY
++    "Build the JavaScript frontend without code emission support" OFF)
++
++if (CXX_JS_PARSER_ONLY)
++    target_compile_definitions(cxx-js PRIVATE CXX_JS_PARSER_ONLY)
++    target_include_directories(cxx-js PRIVATE ${CMAKE_SOURCE_DIR}/src/codegen)
++    target_link_libraries(cxx-js cxx-parser cxx-lsp embind)
++else()
++    target_link_libraries(cxx-js cxx-parser cxx-lsp cxx-codegen embind)
++endif()
+
+ if (CXX_ENABLE_MLIR)
+     target_link_libraries(cxx-js cxx-mlir)
+diff --git a/src/js/cxx/api.cc b/src/js/cxx/api.cc
+index a4b3411..b298041 100644
+--- a/src/js/cxx/api.cc
++++ b/src/js/cxx/api.cc
+@@ -19,8 +19,11 @@
+ // SOFTWARE.
+
+ #include <cxx/ast.h>
++#ifndef CXX_JS_PARSER_ONLY
+ #include <cxx/codegen/codegen.h>
++#endif
+ #include <cxx/control.h>
++#include <cxx/cxx_fwd.h>
+ #include <cxx/preprocessor.h>
+ #include <cxx/source_location.h>
+ #include <cxx/translation_unit.h>
+@@ -34,7 +37,9 @@
+
+ #include "async_parse.h"
+ #include "emit_code.h"
++#ifndef CXX_JS_PARSER_ONLY
+ #include "emitter_delegate-priv.h"
++#endif
+ #include "toolchain_options.h"
+
+ using namespace emscripten;
+@@ -140,11 +145,25 @@ struct WrappedUnit {
+   }
+
+   auto parse() -> val {
++    cxx::ParserConfiguration config{.checkTypes = true};
++    if (!api.isUndefined()) {
++      if (val value = api["analysisMode"]; !value.isUndefined()) {
++        const auto mode = value.as<std::string>();
++        if (mode == "declarations") {
++          config.checkTypes = false;
++          config.parseFunctionBodies = false;
++          config.resolveUserTemplateIds = true;
++        } else if (mode != "full") {
++          cxx::cxx_runtime_error("invalid analysisMode: " + mode);
++        }
++      }
++    }
++
+     cxx::js::AsyncParseRequest request{
+         .unit = unit.get(),
+         .source = std::move(source),
+         .fileName = fileName,
+-        .config = {.checkTypes = true},
++        .config = std::move(config),
+     };
+
+     if (!api.isUndefined()) {
+@@ -157,6 +176,9 @@ struct WrappedUnit {
+   }
+
+   void emitWith(EmitterDelegate delegate) {
++#ifdef CXX_JS_PARSER_ONLY
++    cxx::cxx_runtime_error("emitWith is unavailable in parser-only cxx-js");
++#else
+     if (diagnosticsClient->hasErrors) return;
+
+     cxx::js::JsEmitter emitter{delegate};
+@@ -164,6 +186,7 @@ struct WrappedUnit {
+     cxx::Codegen codegen(emitter, unit.get(), {.debugInfo = false});
+
+     (void)codegen(unit->ast());
++#endif
+   }
+
+   auto emitCode(const std::string& format) -> val {
+@@ -251,7 +274,7 @@ auto createUnit(std::string source, std::string fileName, UnitOptions api)
+ EMSCRIPTEN_BINDINGS(cxx) {
+   register_type<UnitOptions>(
+       "UnitOptions",
+-      R"({ appdir?: string | undefined; sysroot?: string | undefined; std?: "c++14" | "c++17" | "c++20" | "c++23" | "c++26" | undefined; defines?: string[] | undefined; undefines?: string[] | undefined; quoteIncludePaths?: string[] | undefined; includePaths?: string[] | undefined; systemIncludePaths?: string[] | undefined; debugInfo?: boolean | undefined; optimizationLevel?: number | undefined; exists?: ((path: string) => boolean) | undefined; readFile?: ((path: string) => Promise<string | undefined>) | undefined; shouldContinue?: (() => Promise<boolean>) | undefined })");
++      R"({ appdir?: string | undefined; sysroot?: string | undefined; std?: "c++14" | "c++17" | "c++20" | "c++23" | "c++26" | undefined; analysisMode?: "full" | "declarations" | undefined; defines?: string[] | undefined; undefines?: string[] | undefined; quoteIncludePaths?: string[] | undefined; includePaths?: string[] | undefined; systemIncludePaths?: string[] | undefined; debugInfo?: boolean | undefined; optimizationLevel?: number | undefined; exists?: ((path: string) => boolean) | undefined; readFile?: ((path: string) => Promise<string | undefined>) | undefined; shouldContinue?: (() => Promise<boolean>) | undefined })");
+
+   register_type<EmitterDelegate>("EmitterDelegate",
+                                  R"(import("./Emitter.js").EmitterDelegate)");
+diff --git a/src/js/cxx/reflection.cc b/src/js/cxx/reflection.cc
+index 2aca379..d698188 100644
+--- a/src/js/cxx/reflection.cc
++++ b/src/js/cxx/reflection.cc
+@@ -237,19 +237,19 @@ constexpr int CompoundStatementASTSlotBase = ExpressionStatementASTSlotBase + 6;
+
+ constexpr int IfStatementASTSlotBase = CompoundStatementASTSlotBase + 8;
+
+-constexpr int ConstevalIfStatementASTSlotBase = IfStatementASTSlotBase + 14;
++constexpr int ConstevalIfStatementASTSlotBase = IfStatementASTSlotBase + 16;
+
+ constexpr int SwitchStatementASTSlotBase = ConstevalIfStatementASTSlotBase + 11;
+
+-constexpr int WhileStatementASTSlotBase = SwitchStatementASTSlotBase + 11;
++constexpr int WhileStatementASTSlotBase = SwitchStatementASTSlotBase + 12;
+
+-constexpr int DoStatementASTSlotBase = WhileStatementASTSlotBase + 10;
++constexpr int DoStatementASTSlotBase = WhileStatementASTSlotBase + 11;
+
+ constexpr int ForRangeStatementASTSlotBase = DoStatementASTSlotBase + 11;
+
+ constexpr int ForStatementASTSlotBase = ForRangeStatementASTSlotBase + 30;
+
+-constexpr int BreakStatementASTSlotBase = ForStatementASTSlotBase + 13;
++constexpr int BreakStatementASTSlotBase = ForStatementASTSlotBase + 14;
+
+ constexpr int ContinueStatementASTSlotBase = BreakStatementASTSlotBase + 6;
+
+@@ -352,7 +352,7 @@ constexpr int BuiltinOffsetofExpressionASTSlotBase =
+     BuiltinConvertVectorExpressionASTSlotBase + 11;
+
+ constexpr int TypeidExpressionASTSlotBase =
+-    BuiltinOffsetofExpressionASTSlotBase + 14;
++    BuiltinOffsetofExpressionASTSlotBase + 15;
+
+ constexpr int TypeidOfTypeExpressionASTSlotBase =
+     TypeidExpressionASTSlotBase + 9;
+@@ -578,7 +578,7 @@ constexpr int PtrToMemberOperatorASTSlotBase = ReferenceOperatorASTSlotBase + 6;
+ constexpr int BitfieldDeclaratorASTSlotBase =
+     PtrToMemberOperatorASTSlotBase + 7;
+
+-constexpr int ParameterPackASTSlotBase = BitfieldDeclaratorASTSlotBase + 6;
++constexpr int ParameterPackASTSlotBase = BitfieldDeclaratorASTSlotBase + 8;
+
+ constexpr int IdDeclaratorASTSlotBase = ParameterPackASTSlotBase + 5;
+
+@@ -748,9 +748,9 @@ constexpr int UnresolvedSymbolSlotBase = InjectedClassNameSymbolSlotBase + 55;
+
+ constexpr int ClassSymbolSlotBase = UnresolvedSymbolSlotBase + 54;
+
+-constexpr int EnumSymbolSlotBase = ClassSymbolSlotBase + 115;
++constexpr int EnumSymbolSlotBase = ClassSymbolSlotBase + 117;
+
+-constexpr int ScopedEnumSymbolSlotBase = EnumSymbolSlotBase + 61;
++constexpr int ScopedEnumSymbolSlotBase = EnumSymbolSlotBase + 63;
+
+ constexpr int FunctionSymbolSlotBase = ScopedEnumSymbolSlotBase + 60;
+
+@@ -771,7 +771,7 @@ constexpr int VariableSymbolSlotBase = TypeAliasSymbolSlotBase + 67;
+
+ constexpr int FieldSymbolSlotBase = VariableSymbolSlotBase + 76;
+
+-constexpr int ParameterSymbolSlotBase = FieldSymbolSlotBase + 74;
++constexpr int ParameterSymbolSlotBase = FieldSymbolSlotBase + 76;
+
+ constexpr int ParameterPackSymbolSlotBase = ParameterSymbolSlotBase + 56;
+
+@@ -851,7 +851,13 @@ constexpr int LongDoubleTypeSlotBase = DoubleTypeSlotBase + 1;
+
+ constexpr int Float16TypeSlotBase = LongDoubleTypeSlotBase + 1;
+
+-constexpr int QualTypeSlotBase = Float16TypeSlotBase + 1;
++constexpr int BFloat16TypeSlotBase = Float16TypeSlotBase + 1;
++
++constexpr int Float8E4M3FNTypeSlotBase = BFloat16TypeSlotBase + 1;
++
++constexpr int Float8E5M2TypeSlotBase = Float8E4M3FNTypeSlotBase + 1;
++
++constexpr int QualTypeSlotBase = Float8E5M2TypeSlotBase + 1;
+
+ constexpr int BoundedArrayTypeSlotBase = QualTypeSlotBase + 5;
+
+@@ -4342,14 +4348,20 @@ auto readAST(std::intptr_t handle, int slot) -> double {
+       return static_cast<double>(reinterpret_cast<std::intptr_t>(
+           static_cast<const ::cxx::Symbol*>(self->symbol)));
+     }
+-    case IfStatementASTSlotBase + 12: {
++    case IfStatementASTSlotBase + 13: {
++      auto self = static_cast<const ::cxx::IfStatementAST*>(
++          reinterpret_cast<const ::cxx::AST*>(handle));
++      return static_cast<double>(reinterpret_cast<std::intptr_t>(
++          static_cast<const ::cxx::Symbol*>(self->decisionVariable)));
++    }
++    case IfStatementASTSlotBase + 14: {
+       auto self = static_cast<const ::cxx::IfStatementAST*>(
+           reinterpret_cast<const ::cxx::AST*>(handle));
+       return static_cast<double>(const_cast<::cxx::IfStatementAST*>(self)
+                                      ->firstSourceLocation()
+                                      .index());
+     }
+-    case IfStatementASTSlotBase + 13: {
++    case IfStatementASTSlotBase + 15: {
+       auto self = static_cast<const ::cxx::IfStatementAST*>(
+           reinterpret_cast<const ::cxx::AST*>(handle));
+       return static_cast<double>(const_cast<::cxx::IfStatementAST*>(self)
+@@ -4471,13 +4483,19 @@ auto readAST(std::intptr_t handle, int slot) -> double {
+           static_cast<const ::cxx::Symbol*>(self->symbol)));
+     }
+     case SwitchStatementASTSlotBase + 9: {
++      auto self = static_cast<const ::cxx::SwitchStatementAST*>(
++          reinterpret_cast<const ::cxx::AST*>(handle));
++      return static_cast<double>(reinterpret_cast<std::intptr_t>(
++          static_cast<const ::cxx::Symbol*>(self->decisionVariable)));
++    }
++    case SwitchStatementASTSlotBase + 10: {
+       auto self = static_cast<const ::cxx::SwitchStatementAST*>(
+           reinterpret_cast<const ::cxx::AST*>(handle));
+       return static_cast<double>(const_cast<::cxx::SwitchStatementAST*>(self)
+                                      ->firstSourceLocation()
+                                      .index());
+     }
+-    case SwitchStatementASTSlotBase + 10: {
++    case SwitchStatementASTSlotBase + 11: {
+       auto self = static_cast<const ::cxx::SwitchStatementAST*>(
+           reinterpret_cast<const ::cxx::AST*>(handle));
+       return static_cast<double>(const_cast<::cxx::SwitchStatementAST*>(self)
+@@ -4529,13 +4547,19 @@ auto readAST(std::intptr_t handle, int slot) -> double {
+           static_cast<const ::cxx::Symbol*>(self->symbol)));
+     }
+     case WhileStatementASTSlotBase + 8: {
++      auto self = static_cast<const ::cxx::WhileStatementAST*>(
++          reinterpret_cast<const ::cxx::AST*>(handle));
++      return static_cast<double>(reinterpret_cast<std::intptr_t>(
++          static_cast<const ::cxx::Symbol*>(self->decisionVariable)));
++    }
++    case WhileStatementASTSlotBase + 9: {
+       auto self = static_cast<const ::cxx::WhileStatementAST*>(
+           reinterpret_cast<const ::cxx::AST*>(handle));
+       return static_cast<double>(const_cast<::cxx::WhileStatementAST*>(self)
+                                      ->firstSourceLocation()
+                                      .index());
+     }
+-    case WhileStatementASTSlotBase + 9: {
++    case WhileStatementASTSlotBase + 10: {
+       auto self = static_cast<const ::cxx::WhileStatementAST*>(
+           reinterpret_cast<const ::cxx::AST*>(handle));
+       return static_cast<double>(const_cast<::cxx::WhileStatementAST*>(self)
+@@ -4839,13 +4863,19 @@ auto readAST(std::intptr_t handle, int slot) -> double {
+           static_cast<const ::cxx::Symbol*>(self->symbol)));
+     }
+     case ForStatementASTSlotBase + 11: {
++      auto self = static_cast<const ::cxx::ForStatementAST*>(
++          reinterpret_cast<const ::cxx::AST*>(handle));
++      return static_cast<double>(reinterpret_cast<std::intptr_t>(
++          static_cast<const ::cxx::Symbol*>(self->decisionVariable)));
++    }
++    case ForStatementASTSlotBase + 12: {
+       auto self = static_cast<const ::cxx::ForStatementAST*>(
+           reinterpret_cast<const ::cxx::AST*>(handle));
+       return static_cast<double>(const_cast<::cxx::ForStatementAST*>(self)
+                                      ->firstSourceLocation()
+                                      .index());
+     }
+-    case ForStatementASTSlotBase + 12: {
++    case ForStatementASTSlotBase + 13: {
+       auto self = static_cast<const ::cxx::ForStatementAST*>(
+           reinterpret_cast<const ::cxx::AST*>(handle));
+       return static_cast<double>(const_cast<::cxx::ForStatementAST*>(self)
+@@ -7084,7 +7114,7 @@ auto readAST(std::intptr_t handle, int slot) -> double {
+       return static_cast<double>(reinterpret_cast<std::intptr_t>(
+           static_cast<const ::cxx::Symbol*>(self->symbol)));
+     }
+-    case BuiltinOffsetofExpressionASTSlotBase + 12: {
++    case BuiltinOffsetofExpressionASTSlotBase + 13: {
+       auto self = static_cast<const ::cxx::BuiltinOffsetofExpressionAST*>(
+           reinterpret_cast<const ::cxx::AST*>(handle));
+       return static_cast<double>(
+@@ -7092,7 +7122,7 @@ auto readAST(std::intptr_t handle, int slot) -> double {
+               ->firstSourceLocation()
+               .index());
+     }
+-    case BuiltinOffsetofExpressionASTSlotBase + 13: {
++    case BuiltinOffsetofExpressionASTSlotBase + 14: {
+       auto self = static_cast<const ::cxx::BuiltinOffsetofExpressionAST*>(
+           reinterpret_cast<const ::cxx::AST*>(handle));
+       return static_cast<double>(
+@@ -10986,22 +11016,34 @@ auto readAST(std::intptr_t handle, int slot) -> double {
+     case BitfieldDeclaratorASTSlotBase + 2: {
+       auto self = static_cast<const ::cxx::BitfieldDeclaratorAST*>(
+           reinterpret_cast<const ::cxx::AST*>(handle));
+-      return static_cast<double>(self->colonLoc.index());
++      return static_cast<double>(
++          reinterpret_cast<std::intptr_t>(self->attributeList));
+     }
+     case BitfieldDeclaratorASTSlotBase + 3: {
++      auto self = static_cast<const ::cxx::BitfieldDeclaratorAST*>(
++          reinterpret_cast<const ::cxx::AST*>(handle));
++      return static_cast<double>(self->colonLoc.index());
++    }
++    case BitfieldDeclaratorASTSlotBase + 4: {
+       auto self = static_cast<const ::cxx::BitfieldDeclaratorAST*>(
+           reinterpret_cast<const ::cxx::AST*>(handle));
+       return static_cast<double>(reinterpret_cast<std::intptr_t>(
+           static_cast<const ::cxx::AST*>(self->sizeExpression)));
+     }
+-    case BitfieldDeclaratorASTSlotBase + 4: {
++    case BitfieldDeclaratorASTSlotBase + 5: {
++      auto self = static_cast<const ::cxx::BitfieldDeclaratorAST*>(
++          reinterpret_cast<const ::cxx::AST*>(handle));
++      return static_cast<double>(
++          reinterpret_cast<std::intptr_t>(self->trailingAttributeList));
++    }
++    case BitfieldDeclaratorASTSlotBase + 6: {
+       auto self = static_cast<const ::cxx::BitfieldDeclaratorAST*>(
+           reinterpret_cast<const ::cxx::AST*>(handle));
+       return static_cast<double>(const_cast<::cxx::BitfieldDeclaratorAST*>(self)
+                                      ->firstSourceLocation()
+                                      .index());
+     }
+-    case BitfieldDeclaratorASTSlotBase + 5: {
++    case BitfieldDeclaratorASTSlotBase + 7: {
+       auto self = static_cast<const ::cxx::BitfieldDeclaratorAST*>(
+           reinterpret_cast<const ::cxx::AST*>(handle));
+       return static_cast<double>(const_cast<::cxx::BitfieldDeclaratorAST*>(self)
+@@ -13141,6 +13183,20 @@ auto readASTVal(std::intptr_t handle, int slot) -> val {
+         return val(static_cast<double>(item));
+       });
+     }
++    case IfStatementASTSlotBase + 12: {
++      auto self = static_cast<const ::cxx::IfStatementAST*>(
++          reinterpret_cast<const ::cxx::AST*>(handle));
++      return optionalValue(self->constexprValue, [&](const auto& item) {
++        return val(static_cast<double>(item));
++      });
++    }
++    case BuiltinOffsetofExpressionASTSlotBase + 12: {
++      auto self = static_cast<const ::cxx::BuiltinOffsetofExpressionAST*>(
++          reinterpret_cast<const ::cxx::AST*>(handle));
++      return optionalValue(self->value, [&](const auto& item) {
++        return val(static_cast<std::uint64_t>(item));
++      });
++    }
+     case SizeofExpressionASTSlotBase + 5: {
+       auto self = static_cast<const ::cxx::SizeofExpressionAST*>(
+           reinterpret_cast<const ::cxx::AST*>(handle));
+@@ -13226,6 +13282,18 @@ auto readASTVal(std::intptr_t handle, int slot) -> val {
+                       std::get<10>(item).get()))));
+               break;
+             case 11:
++              result.set("value", [&]() -> val {
++                auto result = val::object();
++                result.set(
++                    "format",
++                    val(static_cast<double>(std::get<11>(item).format())));
++                result.set(
++                    "bits",
++                    val(static_cast<std::uint64_t>(std::get<11>(item).bits())));
++                return result;
++              }());
++              break;
++            case 12:
+               result.set("value", [&]() -> val {
+                 auto result = val::object();
+                 return result;
+@@ -16023,14 +16091,24 @@ auto readSymbol(std::intptr_t handle, int slot) -> double {
+       return static_cast<double>(reinterpret_cast<std::intptr_t>(
+           static_cast<const ::cxx::Symbol*>(self->instantiationPattern())));
+     }
++    case ClassSymbolSlotBase + 110: {
++      auto self = static_cast<const ::cxx::ClassSymbol*>(
++          reinterpret_cast<const ::cxx::Symbol*>(handle));
++      return static_cast<double>(self->minimumAlignment());
++    }
+     case ClassSymbolSlotBase + 111: {
++      auto self = static_cast<const ::cxx::ClassSymbol*>(
++          reinterpret_cast<const ::cxx::Symbol*>(handle));
++      return static_cast<double>(self->isPacked());
++    }
++    case ClassSymbolSlotBase + 113: {
+       auto self = static_cast<const ::cxx::ClassSymbol*>(
+           reinterpret_cast<const ::cxx::Symbol*>(handle));
+       return static_cast<double>(
+           reinterpret_cast<std::intptr_t>(static_cast<const ::cxx::Symbol*>(
+               class_template_of(const_cast<ClassSymbol*>(self)))));
+     }
+-    case ClassSymbolSlotBase + 114: {
++    case ClassSymbolSlotBase + 116: {
+       auto self = static_cast<const ::cxx::ClassSymbol*>(
+           reinterpret_cast<const ::cxx::Symbol*>(handle));
+       return static_cast<double>(
+@@ -16317,7 +16395,18 @@ auto readSymbol(std::intptr_t handle, int slot) -> double {
+       return static_cast<double>(reinterpret_cast<std::intptr_t>(
+           static_cast<const ::cxx::Type*>(self->underlyingType())));
+     }
++    case EnumSymbolSlotBase + 59: {
++      auto self = static_cast<const ::cxx::EnumSymbol*>(
++          reinterpret_cast<const ::cxx::Symbol*>(handle));
++      return static_cast<double>(reinterpret_cast<std::intptr_t>(
++          static_cast<const ::cxx::Type*>(self->promotionType())));
++    }
+     case EnumSymbolSlotBase + 60: {
++      auto self = static_cast<const ::cxx::EnumSymbol*>(
++          reinterpret_cast<const ::cxx::Symbol*>(handle));
++      return static_cast<double>(self->isPacked());
++    }
++    case EnumSymbolSlotBase + 62: {
+       auto self = static_cast<const ::cxx::EnumSymbol*>(
+           reinterpret_cast<const ::cxx::Symbol*>(handle));
+       return static_cast<double>(
+@@ -19551,33 +19640,43 @@ auto readSymbol(std::intptr_t handle, int slot) -> double {
+       return static_cast<double>(self->alignment());
+     }
+     case FieldSymbolSlotBase + 66: {
++      auto self = static_cast<const ::cxx::FieldSymbol*>(
++          reinterpret_cast<const ::cxx::Symbol*>(handle));
++      return static_cast<double>(self->explicitAlignment());
++    }
++    case FieldSymbolSlotBase + 67: {
+       auto self = static_cast<const ::cxx::FieldSymbol*>(
+           reinterpret_cast<const ::cxx::Symbol*>(handle));
+       return static_cast<double>(reinterpret_cast<std::intptr_t>(
+           static_cast<const ::cxx::AST*>(self->initializer())));
+     }
+-    case FieldSymbolSlotBase + 67: {
++    case FieldSymbolSlotBase + 68: {
+       auto self = static_cast<const ::cxx::FieldSymbol*>(
+           reinterpret_cast<const ::cxx::Symbol*>(handle));
+       return static_cast<double>(reinterpret_cast<std::intptr_t>(
+           static_cast<const ::cxx::Symbol*>(self->constructor())));
+     }
+-    case FieldSymbolSlotBase + 69: {
++    case FieldSymbolSlotBase + 70: {
+       auto self = static_cast<const ::cxx::FieldSymbol*>(
+           reinterpret_cast<const ::cxx::Symbol*>(handle));
+       return static_cast<double>(self->isDefinitionRequired());
+     }
+-    case FieldSymbolSlotBase + 70: {
++    case FieldSymbolSlotBase + 71: {
+       auto self = static_cast<const ::cxx::FieldSymbol*>(
+           reinterpret_cast<const ::cxx::Symbol*>(handle));
+       return static_cast<double>(self->hasPendingInitializer());
+     }
+-    case FieldSymbolSlotBase + 71: {
++    case FieldSymbolSlotBase + 72: {
+       auto self = static_cast<const ::cxx::FieldSymbol*>(
+           reinterpret_cast<const ::cxx::Symbol*>(handle));
+       return static_cast<double>(self->hasInitializer());
+     }
+     case FieldSymbolSlotBase + 73: {
++      auto self = static_cast<const ::cxx::FieldSymbol*>(
++          reinterpret_cast<const ::cxx::Symbol*>(handle));
++      return static_cast<double>(self->isPacked());
++    }
++    case FieldSymbolSlotBase + 75: {
+       auto self = static_cast<const ::cxx::FieldSymbol*>(
+           reinterpret_cast<const ::cxx::Symbol*>(handle));
+       return static_cast<double>(
+@@ -22044,12 +22143,12 @@ auto readSymbolString(std::intptr_t handle, int slot) -> std::string {
+           reinterpret_cast<const ::cxx::Symbol*>(handle));
+       return std::string(to_string(self->name()));
+     }
+-    case ClassSymbolSlotBase + 110: {
++    case ClassSymbolSlotBase + 112: {
+       auto self = static_cast<const ::cxx::ClassSymbol*>(
+           reinterpret_cast<const ::cxx::Symbol*>(handle));
+       return std::string(to_string(self->name()));
+     }
+-    case EnumSymbolSlotBase + 59: {
++    case EnumSymbolSlotBase + 61: {
+       auto self = static_cast<const ::cxx::EnumSymbol*>(
+           reinterpret_cast<const ::cxx::Symbol*>(handle));
+       return std::string(to_string(self->name()));
+@@ -22099,7 +22198,7 @@ auto readSymbolString(std::intptr_t handle, int slot) -> std::string {
+           reinterpret_cast<const ::cxx::Symbol*>(handle));
+       return std::string(to_string(self->name()));
+     }
+-    case FieldSymbolSlotBase + 72: {
++    case FieldSymbolSlotBase + 74: {
+       auto self = static_cast<const ::cxx::FieldSymbol*>(
+           reinterpret_cast<const ::cxx::Symbol*>(handle));
+       return std::string(to_string(self->name()));
+@@ -22749,6 +22848,20 @@ auto readSymbolVal(std::intptr_t handle, int slot) -> val {
+                                                    .get()))));
+                             break;
+                           case 11:
++                            result.set("value", [&]() -> val {
++                              auto result = val::object();
++                              result.set("format",
++                                         val(static_cast<double>(
++                                             std::get<11>(std::get<2>(item))
++                                                 .format())));
++                              result.set(
++                                  "bits",
++                                  val(static_cast<std::uint64_t>(
++                                      std::get<11>(std::get<2>(item)).bits())));
++                              return result;
++                            }());
++                            break;
++                          case 12:
+                             result.set("value", [&]() -> val {
+                               auto result = val::object();
+                               return result;
+@@ -22903,6 +23016,20 @@ auto readSymbolVal(std::intptr_t handle, int slot) -> val {
+                                                 .get()))));
+                                 break;
+                               case 11:
++                                result.set("value", [&]() -> val {
++                                  auto result = val::object();
++                                  result.set("format",
++                                             val(static_cast<double>(
++                                                 std::get<11>(std::get<2>(item))
++                                                     .format())));
++                                  result.set("bits",
++                                             val(static_cast<std::uint64_t>(
++                                                 std::get<11>(std::get<2>(item))
++                                                     .bits())));
++                                  return result;
++                                }());
++                                break;
++                              case 12:
+                                 result.set("value", [&]() -> val {
+                                   auto result = val::object();
+                                   return result;
+@@ -23276,6 +23403,18 @@ auto readSymbolVal(std::intptr_t handle, int slot) -> val {
+                       std::get<10>(item).get()))));
+               break;
+             case 11:
++              result.set("value", [&]() -> val {
++                auto result = val::object();
++                result.set(
++                    "format",
++                    val(static_cast<double>(std::get<11>(item).format())));
++                result.set(
++                    "bits",
++                    val(static_cast<std::uint64_t>(std::get<11>(item).bits())));
++                return result;
++              }());
++              break;
++            case 12:
+               result.set("value", [&]() -> val {
+                 auto result = val::object();
+                 return result;
+@@ -23385,6 +23524,18 @@ auto readSymbolVal(std::intptr_t handle, int slot) -> val {
+                       std::get<10>(item).get()))));
+               break;
+             case 11:
++              result.set("value", [&]() -> val {
++                auto result = val::object();
++                result.set(
++                    "format",
++                    val(static_cast<double>(std::get<11>(item).format())));
++                result.set(
++                    "bits",
++                    val(static_cast<std::uint64_t>(std::get<11>(item).bits())));
++                return result;
++              }());
++              break;
++            case 12:
+               result.set("value", [&]() -> val {
+                 auto result = val::object();
+                 return result;
+@@ -23402,7 +23553,7 @@ auto readSymbolVal(std::intptr_t handle, int slot) -> val {
+         return val(static_cast<std::uint64_t>(item));
+       });
+     }
+-    case FieldSymbolSlotBase + 68: {
++    case FieldSymbolSlotBase + 69: {
+       auto self = static_cast<const ::cxx::FieldSymbol*>(
+           reinterpret_cast<const ::cxx::Symbol*>(handle));
+       return optionalValue(self->constValue(), [&](const auto& item) {
+@@ -23466,6 +23617,18 @@ auto readSymbolVal(std::intptr_t handle, int slot) -> val {
+                       std::get<10>(item).get()))));
+               break;
+             case 11:
++              result.set("value", [&]() -> val {
++                auto result = val::object();
++                result.set(
++                    "format",
++                    val(static_cast<double>(std::get<11>(item).format())));
++                result.set(
++                    "bits",
++                    val(static_cast<std::uint64_t>(std::get<11>(item).bits())));
++                return result;
++              }());
++              break;
++            case 12:
+               result.set("value", [&]() -> val {
+                 auto result = val::object();
+                 return result;
+@@ -23785,6 +23948,18 @@ auto readSymbolVal(std::intptr_t handle, int slot) -> val {
+                       std::get<10>(item).get()))));
+               break;
+             case 11:
++              result.set("value", [&]() -> val {
++                auto result = val::object();
++                result.set(
++                    "format",
++                    val(static_cast<double>(std::get<11>(item).format())));
++                result.set(
++                    "bits",
++                    val(static_cast<std::uint64_t>(std::get<11>(item).bits())));
++                return result;
++              }());
++              break;
++            case 12:
+               result.set("value", [&]() -> val {
+                 auto result = val::object();
+                 return result;
+@@ -24024,13 +24199,13 @@ auto readSymbolSize(std::intptr_t handle, int slot) -> int {
+           reinterpret_cast<const ::cxx::Symbol*>(handle));
+       return static_cast<int>(std::size(self->templateFriendships()));
+     }
+-    case ClassSymbolSlotBase + 112: {
++    case ClassSymbolSlotBase + 114: {
+       auto self = static_cast<const ::cxx::ClassSymbol*>(
+           reinterpret_cast<const ::cxx::Symbol*>(handle));
+       return static_cast<int>(std::size(expand_template_arguments(
+           class_template_arguments(const_cast<ClassSymbol*>(self)))));
+     }
+-    case ClassSymbolSlotBase + 113: {
++    case ClassSymbolSlotBase + 115: {
+       auto self = static_cast<const ::cxx::ClassSymbol*>(
+           reinterpret_cast<const ::cxx::Symbol*>(handle));
+       return static_cast<int>(std::size([&] {
+@@ -24761,7 +24936,7 @@ auto readSymbolItem(std::intptr_t handle, int slot, int index) -> double {
+ auto readSymbolItemString(std::intptr_t handle, int slot, int index)
+     -> std::string {
+   switch (slot) {
+-    case ClassSymbolSlotBase + 113: {
++    case ClassSymbolSlotBase + 115: {
+       auto self = static_cast<const ::cxx::ClassSymbol*>(
+           reinterpret_cast<const ::cxx::Symbol*>(handle));
+       const auto& container = [&] {
+@@ -24869,6 +25044,18 @@ auto readSymbolItemVal(std::intptr_t handle, int slot, int index) -> val {
+                           std::get<10>(std::get<2>(item)).get()))));
+                   break;
+                 case 11:
++                  result.set("value", [&]() -> val {
++                    auto result = val::object();
++                    result.set("format",
++                               val(static_cast<double>(
++                                   std::get<11>(std::get<2>(item)).format())));
++                    result.set("bits",
++                               val(static_cast<std::uint64_t>(
++                                   std::get<11>(std::get<2>(item)).bits())));
++                    return result;
++                  }());
++                  break;
++                case 12:
+                   result.set("value", [&]() -> val {
+                     auto result = val::object();
+                     return result;
+@@ -24975,6 +25162,19 @@ auto readSymbolItemVal(std::intptr_t handle, int slot, int index) -> val {
+                             std::get<10>(std::get<2>(item)).get()))));
+                     break;
+                   case 11:
++                    result.set("value", [&]() -> val {
++                      auto result = val::object();
++                      result.set(
++                          "format",
++                          val(static_cast<double>(
++                              std::get<11>(std::get<2>(item)).format())));
++                      result.set("bits",
++                                 val(static_cast<std::uint64_t>(
++                                     std::get<11>(std::get<2>(item)).bits())));
++                      return result;
++                    }());
++                    break;
++                  case 12:
+                     result.set("value", [&]() -> val {
+                       auto result = val::object();
+                       return result;
+@@ -25084,6 +25284,18 @@ auto readSymbolItemVal(std::intptr_t handle, int slot, int index) -> val {
+                           std::get<10>(std::get<2>(item)).get()))));
+                   break;
+                 case 11:
++                  result.set("value", [&]() -> val {
++                    auto result = val::object();
++                    result.set("format",
++                               val(static_cast<double>(
++                                   std::get<11>(std::get<2>(item)).format())));
++                    result.set("bits",
++                               val(static_cast<std::uint64_t>(
++                                   std::get<11>(std::get<2>(item)).bits())));
++                    return result;
++                  }());
++                  break;
++                case 12:
+                   result.set("value", [&]() -> val {
+                     auto result = val::object();
+                     return result;
+@@ -25190,6 +25402,19 @@ auto readSymbolItemVal(std::intptr_t handle, int slot, int index) -> val {
+                             std::get<10>(std::get<2>(item)).get()))));
+                     break;
+                   case 11:
++                    result.set("value", [&]() -> val {
++                      auto result = val::object();
++                      result.set(
++                          "format",
++                          val(static_cast<double>(
++                              std::get<11>(std::get<2>(item)).format())));
++                      result.set("bits",
++                                 val(static_cast<std::uint64_t>(
++                                     std::get<11>(std::get<2>(item)).bits())));
++                      return result;
++                    }());
++                    break;
++                  case 12:
+                     result.set("value", [&]() -> val {
+                       auto result = val::object();
+                       return result;
+@@ -25299,6 +25524,18 @@ auto readSymbolItemVal(std::intptr_t handle, int slot, int index) -> val {
+                           std::get<10>(std::get<2>(item)).get()))));
+                   break;
+                 case 11:
++                  result.set("value", [&]() -> val {
++                    auto result = val::object();
++                    result.set("format",
++                               val(static_cast<double>(
++                                   std::get<11>(std::get<2>(item)).format())));
++                    result.set("bits",
++                               val(static_cast<std::uint64_t>(
++                                   std::get<11>(std::get<2>(item)).bits())));
++                    return result;
++                  }());
++                  break;
++                case 12:
+                   result.set("value", [&]() -> val {
+                     auto result = val::object();
+                     return result;
+@@ -25405,6 +25642,19 @@ auto readSymbolItemVal(std::intptr_t handle, int slot, int index) -> val {
+                             std::get<10>(std::get<2>(item)).get()))));
+                     break;
+                   case 11:
++                    result.set("value", [&]() -> val {
++                      auto result = val::object();
++                      result.set(
++                          "format",
++                          val(static_cast<double>(
++                              std::get<11>(std::get<2>(item)).format())));
++                      result.set("bits",
++                                 val(static_cast<std::uint64_t>(
++                                     std::get<11>(std::get<2>(item)).bits())));
++                      return result;
++                    }());
++                    break;
++                  case 12:
+                     result.set("value", [&]() -> val {
+                       auto result = val::object();
+                       return result;
+@@ -25514,6 +25764,18 @@ auto readSymbolItemVal(std::intptr_t handle, int slot, int index) -> val {
+                           std::get<10>(std::get<2>(item)).get()))));
+                   break;
+                 case 11:
++                  result.set("value", [&]() -> val {
++                    auto result = val::object();
++                    result.set("format",
++                               val(static_cast<double>(
++                                   std::get<11>(std::get<2>(item)).format())));
++                    result.set("bits",
++                               val(static_cast<std::uint64_t>(
++                                   std::get<11>(std::get<2>(item)).bits())));
++                    return result;
++                  }());
++                  break;
++                case 12:
+                   result.set("value", [&]() -> val {
+                     auto result = val::object();
+                     return result;
+@@ -25636,6 +25898,20 @@ auto readSymbolItemVal(std::intptr_t handle, int slot, int index) -> val {
+                                       std::get<10>(std::get<2>(item)).get()))));
+                           break;
+                         case 11:
++                          result.set("value", [&]() -> val {
++                            auto result = val::object();
++                            result.set(
++                                "format",
++                                val(static_cast<double>(
++                                    std::get<11>(std::get<2>(item)).format())));
++                            result.set(
++                                "bits",
++                                val(static_cast<std::uint64_t>(
++                                    std::get<11>(std::get<2>(item)).bits())));
++                            return result;
++                          }());
++                          break;
++                        case 12:
+                           result.set("value", [&]() -> val {
+                             auto result = val::object();
+                             return result;
+@@ -25663,7 +25939,7 @@ auto readSymbolItemVal(std::intptr_t handle, int slot, int index) -> val {
+         return result;
+       }();
+     }
+-    case ClassSymbolSlotBase + 112: {
++    case ClassSymbolSlotBase + 114: {
+       auto self = static_cast<const ::cxx::ClassSymbol*>(
+           reinterpret_cast<const ::cxx::Symbol*>(handle));
+       const auto& container = expand_template_arguments(
+@@ -25753,6 +26029,18 @@ auto readSymbolItemVal(std::intptr_t handle, int slot, int index) -> val {
+                           std::get<10>(std::get<2>(item)).get()))));
+                   break;
+                 case 11:
++                  result.set("value", [&]() -> val {
++                    auto result = val::object();
++                    result.set("format",
++                               val(static_cast<double>(
++                                   std::get<11>(std::get<2>(item)).format())));
++                    result.set("bits",
++                               val(static_cast<std::uint64_t>(
++                                   std::get<11>(std::get<2>(item)).bits())));
++                    return result;
++                  }());
++                  break;
++                case 12:
+                   result.set("value", [&]() -> val {
+                     auto result = val::object();
+                     return result;
+@@ -25861,6 +26149,18 @@ auto readSymbolItemVal(std::intptr_t handle, int slot, int index) -> val {
+                           std::get<10>(std::get<2>(item)).get()))));
+                   break;
+                 case 11:
++                  result.set("value", [&]() -> val {
++                    auto result = val::object();
++                    result.set("format",
++                               val(static_cast<double>(
++                                   std::get<11>(std::get<2>(item)).format())));
++                    result.set("bits",
++                               val(static_cast<std::uint64_t>(
++                                   std::get<11>(std::get<2>(item)).bits())));
++                    return result;
++                  }());
++                  break;
++                case 12:
+                   result.set("value", [&]() -> val {
+                     auto result = val::object();
+                     return result;
+@@ -25967,6 +26267,19 @@ auto readSymbolItemVal(std::intptr_t handle, int slot, int index) -> val {
+                             std::get<10>(std::get<2>(item)).get()))));
+                     break;
+                   case 11:
++                    result.set("value", [&]() -> val {
++                      auto result = val::object();
++                      result.set(
++                          "format",
++                          val(static_cast<double>(
++                              std::get<11>(std::get<2>(item)).format())));
++                      result.set("bits",
++                                 val(static_cast<std::uint64_t>(
++                                     std::get<11>(std::get<2>(item)).bits())));
++                      return result;
++                    }());
++                    break;
++                  case 12:
+                     result.set("value", [&]() -> val {
+                       auto result = val::object();
+                       return result;
+@@ -26090,6 +26403,20 @@ auto readSymbolItemVal(std::intptr_t handle, int slot, int index) -> val {
+                                       std::get<10>(std::get<2>(item)).get()))));
+                           break;
+                         case 11:
++                          result.set("value", [&]() -> val {
++                            auto result = val::object();
++                            result.set(
++                                "format",
++                                val(static_cast<double>(
++                                    std::get<11>(std::get<2>(item)).format())));
++                            result.set(
++                                "bits",
++                                val(static_cast<std::uint64_t>(
++                                    std::get<11>(std::get<2>(item)).bits())));
++                            return result;
++                          }());
++                          break;
++                        case 12:
+                           result.set("value", [&]() -> val {
+                             auto result = val::object();
+                             return result;
+@@ -26206,6 +26533,18 @@ auto readSymbolItemVal(std::intptr_t handle, int slot, int index) -> val {
+                           std::get<10>(std::get<2>(item)).get()))));
+                   break;
+                 case 11:
++                  result.set("value", [&]() -> val {
++                    auto result = val::object();
++                    result.set("format",
++                               val(static_cast<double>(
++                                   std::get<11>(std::get<2>(item)).format())));
++                    result.set("bits",
++                               val(static_cast<std::uint64_t>(
++                                   std::get<11>(std::get<2>(item)).bits())));
++                    return result;
++                  }());
++                  break;
++                case 12:
+                   result.set("value", [&]() -> val {
+                     auto result = val::object();
+                     return result;
+@@ -26312,6 +26651,19 @@ auto readSymbolItemVal(std::intptr_t handle, int slot, int index) -> val {
+                             std::get<10>(std::get<2>(item)).get()))));
+                     break;
+                   case 11:
++                    result.set("value", [&]() -> val {
++                      auto result = val::object();
++                      result.set(
++                          "format",
++                          val(static_cast<double>(
++                              std::get<11>(std::get<2>(item)).format())));
++                      result.set("bits",
++                                 val(static_cast<std::uint64_t>(
++                                     std::get<11>(std::get<2>(item)).bits())));
++                      return result;
++                    }());
++                    break;
++                  case 12:
+                     result.set("value", [&]() -> val {
+                       auto result = val::object();
+                       return result;
+@@ -26421,6 +26773,18 @@ auto readSymbolItemVal(std::intptr_t handle, int slot, int index) -> val {
+                           std::get<10>(std::get<2>(item)).get()))));
+                   break;
+                 case 11:
++                  result.set("value", [&]() -> val {
++                    auto result = val::object();
++                    result.set("format",
++                               val(static_cast<double>(
++                                   std::get<11>(std::get<2>(item)).format())));
++                    result.set("bits",
++                               val(static_cast<std::uint64_t>(
++                                   std::get<11>(std::get<2>(item)).bits())));
++                    return result;
++                  }());
++                  break;
++                case 12:
+                   result.set("value", [&]() -> val {
+                     auto result = val::object();
+                     return result;
+@@ -26527,6 +26891,19 @@ auto readSymbolItemVal(std::intptr_t handle, int slot, int index) -> val {
+                             std::get<10>(std::get<2>(item)).get()))));
+                     break;
+                   case 11:
++                    result.set("value", [&]() -> val {
++                      auto result = val::object();
++                      result.set(
++                          "format",
++                          val(static_cast<double>(
++                              std::get<11>(std::get<2>(item)).format())));
++                      result.set("bits",
++                                 val(static_cast<std::uint64_t>(
++                                     std::get<11>(std::get<2>(item)).bits())));
++                      return result;
++                    }());
++                    break;
++                  case 12:
+                     result.set("value", [&]() -> val {
+                       auto result = val::object();
+                       return result;
+@@ -27009,6 +27386,21 @@ auto readTypeString(std::intptr_t handle, int slot) -> std::string {
+           reinterpret_cast<const ::cxx::Type*>(handle));
+       return std::string(to_string(self));
+     }
++    case BFloat16TypeSlotBase + 0: {
++      auto self = static_cast<const ::cxx::BFloat16Type*>(
++          reinterpret_cast<const ::cxx::Type*>(handle));
++      return std::string(to_string(self));
++    }
++    case Float8E4M3FNTypeSlotBase + 0: {
++      auto self = static_cast<const ::cxx::Float8E4M3FNType*>(
++          reinterpret_cast<const ::cxx::Type*>(handle));
++      return std::string(to_string(self));
++    }
++    case Float8E5M2TypeSlotBase + 0: {
++      auto self = static_cast<const ::cxx::Float8E5M2Type*>(
++          reinterpret_cast<const ::cxx::Type*>(handle));
++      return std::string(to_string(self));
++    }
+     case QualTypeSlotBase + 4: {
+       auto self = static_cast<const ::cxx::QualType*>(
+           reinterpret_cast<const ::cxx::Type*>(handle));
+@@ -27456,6 +27848,18 @@ auto readNameItemVal(std::intptr_t handle, int slot, int index) -> val {
+                           std::get<10>(std::get<2>(item)).get()))));
+                   break;
+                 case 11:
++                  result.set("value", [&]() -> val {
++                    auto result = val::object();
++                    result.set("format",
++                               val(static_cast<double>(
++                                   std::get<11>(std::get<2>(item)).format())));
++                    result.set("bits",
++                               val(static_cast<std::uint64_t>(
++                                   std::get<11>(std::get<2>(item)).bits())));
++                    return result;
++                  }());
++                  break;
++                case 12:
+                   result.set("value", [&]() -> val {
+                     auto result = val::object();
+                     return result;
+@@ -27791,6 +28195,16 @@ auto readMiscVal(std::intptr_t handle, int slot) -> val {
+                            std::get<10>(self->real()).get()))));
+             break;
+           case 11:
++            result.set("value", [&]() -> val {
++              auto result = val::object();
++              result.set("format", val(static_cast<double>(
++                                       std::get<11>(self->real()).format())));
++              result.set("bits", val(static_cast<std::uint64_t>(
++                                     std::get<11>(self->real()).bits())));
++              return result;
++            }());
++            break;
++          case 12:
+             result.set("value", [&]() -> val {
+               auto result = val::object();
+               return result;
+@@ -27860,6 +28274,16 @@ auto readMiscVal(std::intptr_t handle, int slot) -> val {
+                            std::get<10>(self->imag()).get()))));
+             break;
+           case 11:
++            result.set("value", [&]() -> val {
++              auto result = val::object();
++              result.set("format", val(static_cast<double>(
++                                       std::get<11>(self->imag()).format())));
++              result.set("bits", val(static_cast<std::uint64_t>(
++                                     std::get<11>(self->imag()).bits())));
++              return result;
++            }());
++            break;
++          case 12:
+             result.set("value", [&]() -> val {
+               auto result = val::object();
+               return result;
+@@ -27959,6 +28383,16 @@ auto readMiscItemVal(std::intptr_t handle, int slot, int index) -> val {
+                       std::get<10>((item).value).get()))));
+               break;
+             case 11:
++              result.set("value", [&]() -> val {
++                auto result = val::object();
++                result.set("format", val(static_cast<double>(
++                                         std::get<11>((item).value).format())));
++                result.set("bits", val(static_cast<std::uint64_t>(
++                                       std::get<11>((item).value).bits())));
++                return result;
++              }());
++              break;
++            case 12:
+               result.set("value", [&]() -> val {
+                 auto result = val::object();
+                 return result;
+diff --git a/src/parser/cxx/binder.cc b/src/parser/cxx/binder.cc
+index 7a12b69..e191241 100644
+--- a/src/parser/cxx/binder.cc
++++ b/src/parser/cxx/binder.cc
+@@ -1010,7 +1010,8 @@ void Binder::checkQualifiedNameAccess(
+ }
+
+ void Binder::bind(BaseSpecifierAST* ast, Symbol* resolvedType) {
+-  const auto checkTemplates = unit_->config().checkTypes;
++  const auto checkTemplates = unit_->shouldResolveTemplateId(
++      ast->unqualifiedId->firstSourceLocation());
+
+   if (ast->nestedNameSpecifier && !ast->nestedNameSpecifier->symbol) {
+     (void)reportUnresolvedNestedNameSpecifier(ast->nestedNameSpecifier);
+@@ -2335,7 +2336,8 @@ void Binder::bind(UsingEnumDeclarationAST* ast) {
+     if (reportUnresolvedNestedNameSpecifier(spec->nestedNameSpecifier)) return;
+   }
+
+-  const auto checkTemplates = unit_->config().checkTypes;
++  const auto checkTemplates = unit_->shouldResolveTemplateId(
++      spec->unqualifiedId->firstSourceLocation());
+   auto symbol = resolve(spec->nestedNameSpecifier, spec->unqualifiedId,
+                         checkTemplates, spec->symbol);
+
+diff --git a/src/parser/cxx/literals.h b/src/parser/cxx/literals.h
+index 4d1b6f8..9377a04 100644
+--- a/src/parser/cxx/literals.h
++++ b/src/parser/cxx/literals.h
+@@ -75,7 +75,7 @@ class IntegerLiteral final : public Literal {
+     return components_.value;
+   }
+
+-  [[nodiscard]] auto components() const { return components_; }
++  [[nodiscard]] auto components() const -> Components { return components_; }
+
+   void initialize() const;
+
+@@ -115,7 +115,7 @@ class FloatLiteral final : public Literal {
+
+   [[nodiscard]] auto floatValue() const -> double { return components_.value; }
+
+-  [[nodiscard]] auto components() const { return components_; }
++  [[nodiscard]] auto components() const -> Components { return components_; }
+
+   void initialize() const;
+
+@@ -159,7 +159,7 @@ class StringLiteral final : public Literal {
+
+   [[nodiscard]] auto charCount() const -> std::size_t;
+
+-  [[nodiscard]] auto components() const { return components_; }
++  [[nodiscard]] auto components() const -> Components { return components_; }
+
+   void initialize(StringLiteralEncoding encoding) const;
+
+@@ -183,7 +183,7 @@ class CharLiteral final : public Literal {
+
+   [[nodiscard]] auto charValue() const -> int { return components_.value; }
+
+-  [[nodiscard]] auto components() const { return components_; }
++  [[nodiscard]] auto components() const -> Components { return components_; }
+
+   void initialize() const;
+
+diff --git a/src/parser/cxx/parser.cc b/src/parser/cxx/parser.cc
+index 386ae99..b2e6a4d 100644
+--- a/src/parser/cxx/parser.cc
++++ b/src/parser/cxx/parser.cc
+@@ -352,6 +352,7 @@ Parser::Parser(TranslationUnit* unit)
+   lang_ = unit_->language();
+   pool_ = unit_->arena();
+   globalScope_ = unit_->globalScope();
++  skipFunctionBody_ = !config().parseFunctionBodies;
+
+   cursor_ = 1;
+
+@@ -6269,7 +6270,8 @@ auto Parser::parse_named_type_specifier(SpecifierAST*& yyast, DeclSpecs& specs,
+     if (conceptSymbol && !lookat(TokenKind::T_AUTO)) return false;
+   }
+
+-  const auto checkTemplates = config().checkTypes;
++  const auto checkTemplates = unit_->shouldResolveTemplateId(
++      unqualifiedId->firstSourceLocation());
+
+   Symbol* symbol = nullptr;
+
+@@ -12178,6 +12180,10 @@ void Parser::completeFieldInitializers(
+ }
+
+ void Parser::completePendingFunctionDefinitions() {
++  if (!config().parseFunctionBodies) {
++    pendingFunctionDefinitions_.clear();
++    return;
++  }
+   if (pendingFunctionDefinitions_.empty()) return;
+
+   std::vector<FunctionDefinitionAST*> functions;
+diff --git a/src/parser/cxx/parser_fwd.h b/src/parser/cxx/parser_fwd.h
+index 06c4942..abac214 100644
+--- a/src/parser/cxx/parser_fwd.h
++++ b/src/parser/cxx/parser_fwd.h
+@@ -76,6 +76,13 @@ using ParsingState = std::variant<CanContinueParsing, ParsingComplete>;
+
+ struct ParserConfiguration {
+   bool checkTypes = false;
++
++  // Skips function bodies while retaining declarations and their types.
++  bool parseFunctionBodies = true;
++
++  // Resolves template-ids written outside system headers without type checking.
++  bool resolveUserTemplateIds = false;
++
+   bool validateAst = false;
+   bool allowUnprototypedFunctions = false;
+   std::function<bool()> stopParsingPredicate;
+diff --git a/src/parser/cxx/private/semantic_codec.h b/src/parser/cxx/private/semantic_codec.h
+index dfede43..adc7d0b 100644
+--- a/src/parser/cxx/private/semantic_codec.h
++++ b/src/parser/cxx/private/semantic_codec.h
+@@ -172,8 +172,10 @@ class SemanticEncoder final : public SemanticEncoderBase {
+                                const cxx::LongDoubleType* self);
+   void writeTypeFloat16Type(ByteWriter& out, const cxx::Float16Type* self);
+   void writeTypeBFloat16Type(ByteWriter& out, const cxx::BFloat16Type* self);
+-  void writeTypeFloat8E4M3FNType(ByteWriter& out, const cxx::Float8E4M3FNType* self);
+-  void writeTypeFloat8E5M2Type(ByteWriter& out, const cxx::Float8E5M2Type* self);
++  void writeTypeFloat8E4M3FNType(ByteWriter& out,
++                                 const cxx::Float8E4M3FNType* self);
++  void writeTypeFloat8E5M2Type(ByteWriter& out,
++                               const cxx::Float8E5M2Type* self);
+   void writeTypeQualType(ByteWriter& out, const cxx::QualType* self);
+   void writeTypeBoundedArrayType(ByteWriter& out,
+                                  const cxx::BoundedArrayType* self);
+@@ -838,7 +840,8 @@ class SemanticDecoder final : public SemanticDecoderBase {
+   [[nodiscard]] auto readTypeLongDoubleType(ByteReader& in) -> const cxx::Type*;
+   [[nodiscard]] auto readTypeFloat16Type(ByteReader& in) -> const cxx::Type*;
+   [[nodiscard]] auto readTypeBFloat16Type(ByteReader& in) -> const cxx::Type*;
+-  [[nodiscard]] auto readTypeFloat8E4M3FNType(ByteReader& in) -> const cxx::Type*;
++  [[nodiscard]] auto readTypeFloat8E4M3FNType(ByteReader& in)
++      -> const cxx::Type*;
+   [[nodiscard]] auto readTypeFloat8E5M2Type(ByteReader& in) -> const cxx::Type*;
+   [[nodiscard]] auto readTypeQualType(ByteReader& in) -> const cxx::Type*;
+   [[nodiscard]] auto readTypeBoundedArrayType(ByteReader& in)
+diff --git a/src/parser/cxx/private/semantic_model.h b/src/parser/cxx/private/semantic_model.h
+index 790f599..61a3db1 100644
+--- a/src/parser/cxx/private/semantic_model.h
++++ b/src/parser/cxx/private/semantic_model.h
+@@ -71,7 +71,8 @@ inline constexpr FieldDescriptor kSemanticFieldModelStorage[] = {
+     {"::cxx::Symbol", "parent_", FieldPersistence::kPersisted, ""},
+     {"::cxx::Symbol", "link_", FieldPersistence::kRebuilt,
+      "the same-name chain is rebuilt by ScopeSymbol::rebuildLookupTable"},
+-    {"::cxx::Symbol", "abiTags_", FieldPersistence::kPersisted, ""},
++    {"::cxx::Symbol", "abiTags_", FieldPersistence::kPersisted,
++     "abiTags() answers a span over the interned list"},
+     {"::cxx::Symbol", "attributes_", FieldPersistence::kPersisted, ""},
+     {"::cxx::Symbol", "location_", FieldPersistence::kPersisted, ""},
+     {"::cxx::Symbol", "internalId_", FieldPersistence::kBoundary,
+@@ -93,7 +94,8 @@ inline constexpr FieldDescriptor kSemanticFieldModelStorage[] = {
+     {"::cxx::NamespaceSymbol", "unnamedNamespace_",
+      FieldPersistence::kPersisted, ""},
+     {"::cxx::NamespaceSymbol", "anonNamespaceIndex_",
+-     FieldPersistence::kPersisted, ""},
++     FieldPersistence::kPersisted,
++     "the accessor answers nullopt for a named namespace"},
+     {"::cxx::NamespaceSymbol", "isInline_", FieldPersistence::kPersisted, ""},
+     {"::cxx::NamespaceSymbol", "hasInlineNamespaces_",
+      FieldPersistence::kPersisted, ""},
+@@ -116,7 +118,8 @@ inline constexpr FieldDescriptor kSemanticFieldModelStorage[] = {
+      FieldPersistence::kPersisted, ""},
+     {"::cxx::DeductionGuideSymbol", "isExplicit_", FieldPersistence::kPersisted,
+      ""},
+-    {"::cxx::MaybeRedecl", "canonical_", FieldPersistence::kPersisted, ""},
++    {"::cxx::MaybeRedecl", "canonical_", FieldPersistence::kPersisted,
++     "canonical() answers `this` when the field is null"},
+     {"::cxx::MaybeRedecl", "definition_", FieldPersistence::kPersisted, ""},
+     {"::cxx::MaybeRedecl", "redeclarations_", FieldPersistence::kPersisted, ""},
+     {"::cxx::ClassSymbol", "baseClasses_", FieldPersistence::kPersisted, ""},
+diff --git a/src/parser/cxx/semantic_codec.cc b/src/parser/cxx/semantic_codec.cc
+index 4ee8ac8..664f928 100644
+--- a/src/parser/cxx/semantic_codec.cc
++++ b/src/parser/cxx/semantic_codec.cc
+@@ -259,10 +259,12 @@ void SemanticEncoder::writeType(ByteWriter& out, const cxx::Type* type) {
+       writeTypeBFloat16Type(out, static_cast<const cxx::BFloat16Type*>(type));
+       break;
+     case cxx::TypeKind::kFloat8E4M3FN:
+-      writeTypeFloat8E4M3FNType(out, static_cast<const cxx::Float8E4M3FNType*>(type));
++      writeTypeFloat8E4M3FNType(
++          out, static_cast<const cxx::Float8E4M3FNType*>(type));
+       break;
+     case cxx::TypeKind::kFloat8E5M2:
+-      writeTypeFloat8E5M2Type(out, static_cast<const cxx::Float8E5M2Type*>(type));
++      writeTypeFloat8E5M2Type(out,
++                              static_cast<const cxx::Float8E5M2Type*>(type));
+       break;
+     case cxx::TypeKind::kQual:
+       writeTypeQualType(out, static_cast<const cxx::QualType*>(type));
+@@ -1726,8 +1728,10 @@ void SemanticEncoder::writeTypeFloat16Type(
+
+ void SemanticEncoder::writeTypeBFloat16Type(
+     ByteWriter& out, [[maybe_unused]] const cxx::BFloat16Type* self) {}
++
+ void SemanticEncoder::writeTypeFloat8E4M3FNType(
+     ByteWriter& out, [[maybe_unused]] const cxx::Float8E4M3FNType* self) {}
++
+ void SemanticEncoder::writeTypeFloat8E5M2Type(
+     ByteWriter& out, [[maybe_unused]] const cxx::Float8E5M2Type* self) {}
+
+@@ -4317,7 +4321,9 @@ void SemanticEncoder::writeAstIfStatementAST(
+   out.varU32(static_cast<std::uint32_t>(symbolRef(self->symbol)));
+   // ::cxx::IfStatementAST::constexprValue
+   out.boolean(self->constexprValue.has_value());
+-  if (self->constexprValue.has_value()) out.boolean(*self->constexprValue);
++  if (self->constexprValue.has_value()) {
++    out.boolean((*self->constexprValue));
++  }
+   // ::cxx::IfStatementAST::decisionVariable
+   out.varU32(static_cast<std::uint32_t>(symbolRef(self->decisionVariable)));
+ }
+@@ -5137,6 +5143,27 @@ void SemanticEncoder::writeAstBuiltinBitCastExpressionAST(
+   out.varU32(static_cast<std::uint32_t>(locationRef(self->rparenLoc)));
+ }
+
++void SemanticEncoder::writeAstBuiltinConvertVectorExpressionAST(
++    ByteWriter& out,
++    [[maybe_unused]] cxx::BuiltinConvertVectorExpressionAST* self) {
++  // ::cxx::ExpressionAST::valueCategory
++  out.varU32(static_cast<std::uint32_t>(self->valueCategory));
++  // ::cxx::ExpressionAST::type
++  out.varU32(static_cast<std::uint32_t>(typeRef(self->type)));
++  // ::cxx::BuiltinConvertVectorExpressionAST::convertLoc
++  out.varU32(static_cast<std::uint32_t>(locationRef(self->convertLoc)));
++  // ::cxx::BuiltinConvertVectorExpressionAST::lparenLoc
++  out.varU32(static_cast<std::uint32_t>(locationRef(self->lparenLoc)));
++  // ::cxx::BuiltinConvertVectorExpressionAST::expression
++  out.varU32(static_cast<std::uint32_t>(astRef(self->expression)));
++  // ::cxx::BuiltinConvertVectorExpressionAST::commaLoc
++  out.varU32(static_cast<std::uint32_t>(locationRef(self->commaLoc)));
++  // ::cxx::BuiltinConvertVectorExpressionAST::typeId
++  out.varU32(static_cast<std::uint32_t>(astRef(self->typeId)));
++  // ::cxx::BuiltinConvertVectorExpressionAST::rparenLoc
++  out.varU32(static_cast<std::uint32_t>(locationRef(self->rparenLoc)));
++}
++
+ void SemanticEncoder::writeAstBuiltinOffsetofExpressionAST(
+     ByteWriter& out, [[maybe_unused]] cxx::BuiltinOffsetofExpressionAST* self) {
+   // ::cxx::ExpressionAST::valueCategory
+@@ -9649,10 +9676,14 @@ auto SemanticDecoder::readTypeFloat16Type(ByteReader& in) -> const cxx::Type* {
+ auto SemanticDecoder::readTypeBFloat16Type(ByteReader& in) -> const cxx::Type* {
+   return control()->getBFloat16Type();
+ }
+-auto SemanticDecoder::readTypeFloat8E4M3FNType(ByteReader& in) -> const cxx::Type* {
++
++auto SemanticDecoder::readTypeFloat8E4M3FNType(ByteReader& in)
++    -> const cxx::Type* {
+   return control()->getFloat8E4M3FNType();
+ }
+-auto SemanticDecoder::readTypeFloat8E5M2Type(ByteReader& in) -> const cxx::Type* {
++
++auto SemanticDecoder::readTypeFloat8E5M2Type(ByteReader& in)
++    -> const cxx::Type* {
+   return control()->getFloat8E5M2Type();
+ }
+
+@@ -10504,10 +10535,10 @@ void SemanticDecoder::readSymbolClassSymbol(
+   int value83 = static_cast<int>(in.varI32());
+   self->setPackAlignment(std::move(value83));
+   // ::cxx::ClassSymbol::minimumAlignmentShift_
+-  std::uint32_t value84 = static_cast<std::uint32_t>(in.varU32());
++  unsigned int value84 = static_cast<unsigned int>(in.varU32());
+   self->setMinimumAlignment(std::move(value84));
+   // ::cxx::ClassSymbol::isPacked_
+-  std::uint32_t value85 = static_cast<std::uint32_t>(in.varU32());
++  unsigned int value85 = static_cast<unsigned int>(in.varU32());
+   self->setPacked(std::move(value85));
+   // ::cxx::ClassSymbol::isUnion_
+   unsigned int value86 = static_cast<unsigned int>(in.varU32());
+@@ -11374,7 +11405,7 @@ void SemanticDecoder::readSymbolFieldSymbol(
+   unsigned int value18 = static_cast<unsigned int>(in.varU32());
+   self->setExplicitAlignment(std::move(value18));
+   // ::cxx::FieldSymbol::isPacked_
+-  std::uint32_t value19 = static_cast<std::uint32_t>(in.varU32());
++  unsigned int value19 = static_cast<unsigned int>(in.varU32());
+   self->setPacked(std::move(value19));
+   // ::cxx::FieldSymbol::isDefinitionRequired_
+   unsigned int value20 = static_cast<unsigned int>(in.varU32());
+@@ -13793,8 +13824,9 @@ void SemanticDecoder::readAstIfStatementAST(
+   }
+   self->constexprValue = std::move(value12);
+   // ::cxx::IfStatementAST::decisionVariable
+-  self->decisionVariable =
++  cxx::VariableSymbol* value14 =
+       symbol_cast<VariableSymbol>(symbolAt(SymbolRef{in.varU32()}));
++  self->decisionVariable = std::move(value14);
+ }
+
+ void SemanticDecoder::readAstConstevalIfStatementAST(
+@@ -13862,8 +13894,9 @@ void SemanticDecoder::readAstSwitchStatementAST(
+       symbol_cast<BlockSymbol>(symbolAt(SymbolRef{in.varU32()}));
+   self->symbol = std::move(value8);
+   // ::cxx::SwitchStatementAST::decisionVariable
+-  self->decisionVariable =
++  cxx::VariableSymbol* value9 =
+       symbol_cast<VariableSymbol>(symbolAt(SymbolRef{in.varU32()}));
++  self->decisionVariable = std::move(value9);
+ }
+
+ void SemanticDecoder::readAstWhileStatementAST(
+@@ -13895,8 +13928,9 @@ void SemanticDecoder::readAstWhileStatementAST(
+       symbol_cast<BlockSymbol>(symbolAt(SymbolRef{in.varU32()}));
+   self->symbol = std::move(value7);
+   // ::cxx::WhileStatementAST::decisionVariable
+-  self->decisionVariable =
++  cxx::VariableSymbol* value8 =
+       symbol_cast<VariableSymbol>(symbolAt(SymbolRef{in.varU32()}));
++  self->decisionVariable = std::move(value8);
+ }
+
+ void SemanticDecoder::readAstDoStatementAST(
+@@ -14076,8 +14110,9 @@ void SemanticDecoder::readAstForStatementAST(
+       symbol_cast<BlockSymbol>(symbolAt(SymbolRef{in.varU32()}));
+   self->symbol = std::move(value10);
+   // ::cxx::ForStatementAST::decisionVariable
+-  self->decisionVariable =
++  cxx::VariableSymbol* value11 =
+       symbol_cast<VariableSymbol>(symbolAt(SymbolRef{in.varU32()}));
++  self->decisionVariable = std::move(value11);
+ }
+
+ void SemanticDecoder::readAstBreakStatementAST(
+@@ -15165,6 +15200,39 @@ void SemanticDecoder::readAstBuiltinBitCastExpressionAST(
+   self->rparenLoc = std::move(value8);
+ }
+
++void SemanticDecoder::readAstBuiltinConvertVectorExpressionAST(
++    [[maybe_unused]] ByteReader& in,
++    [[maybe_unused]] cxx::BuiltinConvertVectorExpressionAST* self) {
++  // ::cxx::ExpressionAST::valueCategory
++  static_assert(
++      static_cast<std::uint32_t>(::cxx::ValueCategory::kPrValue) + 1 == 4);
++  ::cxx::ValueCategory value1 =
++      static_cast<::cxx::ValueCategory>(readEnum(in, 4));
++  self->valueCategory = std::move(value1);
++  // ::cxx::ExpressionAST::type
++  const cxx::Type* value2 = typeAt(TypeRef{in.varU32()});
++  self->type = std::move(value2);
++  // ::cxx::BuiltinConvertVectorExpressionAST::convertLoc
++  cxx::SourceLocation value3 = locationAt(LocationRef{in.varU32()});
++  self->convertLoc = std::move(value3);
++  // ::cxx::BuiltinConvertVectorExpressionAST::lparenLoc
++  cxx::SourceLocation value4 = locationAt(LocationRef{in.varU32()});
++  self->lparenLoc = std::move(value4);
++  // ::cxx::BuiltinConvertVectorExpressionAST::expression
++  cxx::ExpressionAST* value5 =
++      ast_cast<ExpressionAST>(astAt(AstRef{in.varU32()}));
++  self->expression = std::move(value5);
++  // ::cxx::BuiltinConvertVectorExpressionAST::commaLoc
++  cxx::SourceLocation value6 = locationAt(LocationRef{in.varU32()});
++  self->commaLoc = std::move(value6);
++  // ::cxx::BuiltinConvertVectorExpressionAST::typeId
++  cxx::TypeIdAST* value7 = ast_cast<TypeIdAST>(astAt(AstRef{in.varU32()}));
++  self->typeId = std::move(value7);
++  // ::cxx::BuiltinConvertVectorExpressionAST::rparenLoc
++  cxx::SourceLocation value8 = locationAt(LocationRef{in.varU32()});
++  self->rparenLoc = std::move(value8);
++}
++
+ void SemanticDecoder::readAstBuiltinOffsetofExpressionAST(
+     [[maybe_unused]] ByteReader& in,
+     [[maybe_unused]] cxx::BuiltinOffsetofExpressionAST* self) {
+@@ -15206,12 +15274,12 @@ void SemanticDecoder::readAstBuiltinOffsetofExpressionAST(
+       symbol_cast<FieldSymbol>(symbolAt(SymbolRef{in.varU32()}));
+   self->symbol = std::move(value11);
+   // ::cxx::BuiltinOffsetofExpressionAST::value
+-  std::optional<std::uint64_t> offsetValue1;
++  std::optional<unsigned long long> value12;
+   if (in.boolean()) {
+-    std::uint64_t offsetValue2 = static_cast<std::uint64_t>(in.varU64());
+-    offsetValue1 = std::move(offsetValue2);
++    unsigned long long value13 = static_cast<unsigned long long>(in.varU64());
++    value12 = std::move(value13);
+   }
+-  self->value = std::move(offsetValue1);
++  self->value = std::move(value12);
+ }
+
+ void SemanticDecoder::readAstTypeidExpressionAST(
+@@ -18613,32 +18681,4 @@ void SemanticDecoder::readcxxDefaultInitializerContext(
+   self->scope = std::move(value2);
+ }
+
+-void SemanticEncoder::writeAstBuiltinConvertVectorExpressionAST(
+-    ByteWriter& out,
+-    [[maybe_unused]] cxx::BuiltinConvertVectorExpressionAST* self) {
+-  out.varU32(static_cast<std::uint32_t>(self->valueCategory));
+-  out.varU32(static_cast<std::uint32_t>(typeRef(self->type)));
+-  out.varU32(static_cast<std::uint32_t>(locationRef(self->convertLoc)));
+-  out.varU32(static_cast<std::uint32_t>(locationRef(self->lparenLoc)));
+-  out.varU32(static_cast<std::uint32_t>(astRef(self->expression)));
+-  out.varU32(static_cast<std::uint32_t>(locationRef(self->commaLoc)));
+-  out.varU32(static_cast<std::uint32_t>(astRef(self->typeId)));
+-  out.varU32(static_cast<std::uint32_t>(locationRef(self->rparenLoc)));
+-}
+-
+-void SemanticDecoder::readAstBuiltinConvertVectorExpressionAST(
+-    [[maybe_unused]] ByteReader& in,
+-    [[maybe_unused]] cxx::BuiltinConvertVectorExpressionAST* self) {
+-  static_assert(
+-      static_cast<std::uint32_t>(::cxx::ValueCategory::kPrValue) + 1 == 4);
+-  self->valueCategory = static_cast<::cxx::ValueCategory>(readEnum(in, 4));
+-  self->type = typeAt(TypeRef{in.varU32()});
+-  self->convertLoc = locationAt(LocationRef{in.varU32()});
+-  self->lparenLoc = locationAt(LocationRef{in.varU32()});
+-  self->expression = ast_cast<ExpressionAST>(astAt(AstRef{in.varU32()}));
+-  self->commaLoc = locationAt(LocationRef{in.varU32()});
+-  self->typeId = ast_cast<TypeIdAST>(astAt(AstRef{in.varU32()}));
+-  self->rparenLoc = locationAt(LocationRef{in.varU32()});
+-}
+-
+ }  // namespace cxx
+diff --git a/src/parser/cxx/symbols.h b/src/parser/cxx/symbols.h
+index 25c51a3..a165433 100644
+--- a/src/parser/cxx/symbols.h
++++ b/src/parser/cxx/symbols.h
+@@ -652,7 +652,8 @@ class ScopeSymbol : public Symbol {
+
+   [[nodiscard]] auto members() const -> const std::vector<Symbol*>&;
+
+-  [[nodiscard]] auto usingDirectives() const {
++  [[nodiscard]] auto usingDirectives() const
++      -> std::ranges::ref_view<const std::vector<ScopeSymbol*>> {
+     return std::views::all(usingDirectives_);
+   }
+
+diff --git a/src/parser/cxx/translation_unit.cc b/src/parser/cxx/translation_unit.cc
+index 058ca5c..c65a60c 100644
+--- a/src/parser/cxx/translation_unit.cc
++++ b/src/parser/cxx/translation_unit.cc
+@@ -381,6 +381,13 @@ auto TranslationUnit::config() const -> const ParserConfiguration& {
+   return config_;
+ }
+
++auto TranslationUnit::shouldResolveTemplateId(SourceLocation loc) const
++    -> bool {
++  if (config_.checkTypes) return true;
++  if (!config_.resolveUserTemplateIds) return false;
++  return !preprocessor_->isSystemHeader(tokenAt(loc).fileId());
++}
++
+ auto TranslationUnit::globalScope() const -> ScopeSymbol* {
+   if (!globalNamespace_) return nullptr;
+   return globalNamespace_;
+diff --git a/src/parser/cxx/translation_unit.h b/src/parser/cxx/translation_unit.h
+index c821a74..6e3a86d 100644
+--- a/src/parser/cxx/translation_unit.h
++++ b/src/parser/cxx/translation_unit.h
+@@ -249,6 +249,10 @@ class TranslationUnit {
+
+   [[nodiscard]] auto config() const -> const ParserConfiguration&;
+
++  // Whether a template-id at `loc` must be resolved during parsing.
++  [[nodiscard]] auto shouldResolveTemplateId(SourceLocation loc) const
++      -> bool;
++
+   void setSource(std::string source, std::string fileName);
+
+   void beginPreprocessing(std::string source, std::string fileName);

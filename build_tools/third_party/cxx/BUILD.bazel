@@ -38,6 +38,7 @@ exports_files([
     "qualified_template_calls.patch",
     "record_layout_owner.patch",
     "reference_template_arguments.patch",
+    "semantic_model_generation.patch",
     "template_lookahead.patch",
     "unsigned_complement.patch",
     "using_directive_attributes.patch",

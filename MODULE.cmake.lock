@@ -170,6 +170,7 @@ set(IREE_DEP_CXX_PATCHES
   "//build_tools/third_party/cxx:constant_template_conversions.patch"
   "//build_tools/third_party/cxx:reference_template_arguments.patch"
   "//build_tools/third_party/cxx:interpreter_frame_stability.patch"
+  "//build_tools/third_party/cxx:semantic_model_generation.patch"
 )
 set(IREE_DEP_CXX_PATCH_ARGS
   "-p1"
