@@ -9,10 +9,13 @@
 // row, and selected output index (-1 when no output is requested). Active spans
 // partition the packed token prefix and refer to distinct resident rows.
 // These helpers consume the caller's validated model plan, not external input.
-func.def inline @qwen38_span_active(%epoch: buffer, %span: index) -> (i1) {
+// Metadata is immutable for the entire queued epoch; the completion edge owns
+// permission to refill epoch storage. Resident origins remain cold data.
+func.def public inline @qwen38_span_active(%epoch: buffer, %span: index) -> (i1) {
   %origin = index.constant 0 : offset
   %span_count_index = index.constant 1 : index
-  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %metadata = buffer.assume.memory_space<constant> %epoch : buffer
+  %header = buffer.view %metadata[%origin] : buffer -> view<3xi32>
   %count_word = view.load %header[%span_count_index] : view<3xi32> -> i32
   %count = index.cast %count_word : i32 to index
   %active = index.cmp ult, %span, %count : index
@@ -22,12 +25,13 @@ func.def inline @qwen38_span_active(%epoch: buffer, %span: index) -> (i1) {
 // The returned control origin addresses the count/position pair used by the
 // ordinary single-span kernels. Token begin indexes the compact activations;
 // resident row indexes stable state and is independent of that placement.
-func.def inline @qwen38_span_binding(%epoch: buffer, %span: index) -> (offset, index, index) {
+func.def public inline @qwen38_span_binding(%epoch: buffer, %span: index) -> (offset, index, index) {
   %header_bytes = index.constant 12 : offset
   %span_bytes = index.constant 20 : offset
   %relative_origin = index.scale %span, %span_bytes : index, offset -> offset
   %control_origin = index.add %header_bytes, %relative_origin : offset
-  %descriptor = buffer.view %epoch[%control_origin] : buffer -> view<5xi32>
+  %metadata = buffer.assume.memory_space<constant> %epoch : buffer
+  %descriptor = buffer.view %metadata[%control_origin] : buffer -> view<5xi32>
   %begin_index = index.constant 2 : index
   %row_index = index.constant 3 : index
   %begin_word = view.load %descriptor[%begin_index] : view<5xi32> -> i32
@@ -42,12 +46,29 @@ func.def inline @qwen38_span_binding(%epoch: buffer, %span: index) -> (offset, i
 // Each resident row has two I64 byte origins in the shared state allocation:
 // GDN/history first, then attention K/V. Cold residency owns this table; epoch
 // compaction changes only the span-to-row mapping and never copies state.
-func.def inline @qwen38_row_gdn_origin(%rows: buffer, %row: index, %layer_origin: offset) -> (offset) {
+func.def public inline @qwen38_row_gdn_origin(%rows: buffer, %row: index, %layer_origin: offset) -> (offset) {
   %row_bytes = index.constant 16 : offset
   %table_origin = index.scale %row, %row_bytes : index, offset -> offset
-  %entry = buffer.view %rows[%table_origin] : buffer -> view<2xi64>
+  %metadata = buffer.assume.memory_space<constant> %rows : buffer
+  %entry = buffer.view %metadata[%table_origin] : buffer -> view<2xi64>
   %gdn_index = index.constant 0 : index
   %origin_word = view.load %entry[%gdn_index] : view<2xi64> -> i64
+  %nonnegative_origin = scalar.assume %origin_word [range(%origin_word, 0, 9223372036854775807)] : i64
+  %row_origin = index.cast %nonnegative_origin : i64 to offset
+  %origin = index.add %row_origin, %layer_origin : offset
+  func.return %origin : offset
+}
+
+// Locates one attention layer's token-major K/V cache in a resident row. The
+// layer origin uses the model's compiled context capacity, independently of
+// the currently consumed prefix in the span descriptor.
+func.def public inline @qwen38_row_kv_origin(%rows: buffer, %row: index, %layer_origin: offset) -> (offset) {
+  %row_bytes = index.constant 16 : offset
+  %table_origin = index.scale %row, %row_bytes : index, offset -> offset
+  %metadata = buffer.assume.memory_space<constant> %rows : buffer
+  %entry = buffer.view %metadata[%table_origin] : buffer -> view<2xi64>
+  %kv_index = index.constant 1 : index
+  %origin_word = view.load %entry[%kv_index] : view<2xi64> -> i64
   %nonnegative_origin = scalar.assume %origin_word [range(%origin_word, 0, 9223372036854775807)] : i64
   %row_origin = index.cast %nonnegative_origin : i64 to offset
   %origin = index.add %row_origin, %layer_origin : offset

@@ -1,0 +1,215 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+kernel.decl @qwen38_attention_query_prepare_spans(%token_capacity: index, %span_capacity: index) launch(%epoch: buffer, %epsilon: f32, %projection: buffer, %weight: buffer, %query: buffer, %gate: buffer)
+
+kernel.decl @qwen38_attention_kv_prepare_spans(%token_capacity: index, %span_capacity: index) launch(%epoch: buffer, %rows: buffer, %layer_origin: offset, %epsilon: f32, %key_projection: buffer, %value_projection: buffer, %weight: buffer, %state: buffer)
+
+kernel.decl @qwen38_attention_spans_f16_wmma(%token_capacity: index, %span_capacity: index) launch(%epoch: buffer, %rows: buffer, %layer_origin: offset, %query: buffer, %gate: buffer, %state: buffer, %output: buffer)
+
+kernel.decl @qwen38_attention_query_prepare_prefill(%token_count: index) launch(%control: buffer, %epsilon: f32, %projection: buffer, %weight: buffer, %query: buffer, %gate: buffer)
+
+kernel.decl @qwen38_attention_kv_prepare_prefill(%token_count: index) launch(%control: buffer, %epsilon: f32, %key_projection: buffer, %value_projection: buffer, %weight: buffer, %key_cache: buffer, %value_cache: buffer)
+
+kernel.decl @qwen38_attention_prefill_f16_wmma(%token_count: index) launch(%control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer)
+
+// Fixture-only metadata producer. State has six guarded two-layer resident
+// rows. The caller selects layer one, leaving layer zero and inactive rows as
+// sentinels. GDN origins and unused span descriptors remain poisoned.
+kernel.def @mixed_attention_metadata() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%continuation: i1, %epoch: buffer, %rows: buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<43xi32>
+  %four = scalar.constant 4 : i32
+  %two = scalar.constant 2 : i32
+  %twenty_two = scalar.constant 22 : i32
+  %three = scalar.constant 3 : i32
+  %spans = scf.select %continuation, %two, %four : i32
+  %tokens = scf.select %continuation, %three, %twenty_two : i32
+  view.store %tokens, %header[0] : i32, view<43xi32>
+  view.store %spans, %header[1] : i32, view<43xi32>
+  view.store %spans, %header[2] : i32, view<43xi32>
+  %initial_count0 = scalar.constant 17 : i32
+  %next_count0 = scalar.constant 2 : i32
+  %count0 = scf.select %continuation, %next_count0, %initial_count0 : i32
+  view.store %count0, %header[3] : i32, view<43xi32>
+  %initial_position0 = scalar.constant 61 : i32
+  %next_position0 = scalar.constant 78 : i32
+  %position0 = scf.select %continuation, %next_position0, %initial_position0 : i32
+  view.store %position0, %header[4] : i32, view<43xi32>
+  %begin0 = scalar.constant 0 : i32
+  view.store %begin0, %header[5] : i32, view<43xi32>
+  %row0 = scalar.constant 4 : i32
+  view.store %row0, %header[6] : i32, view<43xi32>
+  %output0 = scalar.constant 0 : i32
+  view.store %output0, %header[7] : i32, view<43xi32>
+  %initial_count1 = scalar.constant 3 : i32
+  %next_count1 = scalar.constant 1 : i32
+  %count1 = scf.select %continuation, %next_count1, %initial_count1 : i32
+  view.store %count1, %header[8] : i32, view<43xi32>
+  %initial_position1 = scalar.constant 127 : i32
+  %next_position1 = scalar.constant 130 : i32
+  %position1 = scf.select %continuation, %next_position1, %initial_position1 : i32
+  view.store %position1, %header[9] : i32, view<43xi32>
+  %initial_begin1 = scalar.constant 17 : i32
+  %next_begin1 = scalar.constant 2 : i32
+  %begin1 = scf.select %continuation, %next_begin1, %initial_begin1 : i32
+  view.store %begin1, %header[10] : i32, view<43xi32>
+  %row1 = scalar.constant 1 : i32
+  view.store %row1, %header[11] : i32, view<43xi32>
+  %output1 = scalar.constant 1 : i32
+  view.store %output1, %header[12] : i32, view<43xi32>
+  %count2 = scalar.constant 1 : i32
+  view.store %count2, %header[13] : i32, view<43xi32>
+  %position2 = scalar.constant 213 : i32
+  view.store %position2, %header[14] : i32, view<43xi32>
+  %begin2 = scalar.constant 20 : i32
+  view.store %begin2, %header[15] : i32, view<43xi32>
+  %row2 = scalar.constant 5 : i32
+  view.store %row2, %header[16] : i32, view<43xi32>
+  %output2 = scalar.constant 2 : i32
+  view.store %output2, %header[17] : i32, view<43xi32>
+  %count3 = scalar.constant 1 : i32
+  view.store %count3, %header[18] : i32, view<43xi32>
+  %position3 = scalar.constant 48 : i32
+  view.store %position3, %header[19] : i32, view<43xi32>
+  %begin3 = scalar.constant 21 : i32
+  view.store %begin3, %header[20] : i32, view<43xi32>
+  %row3 = scalar.constant 2 : i32
+  view.store %row3, %header[21] : i32, view<43xi32>
+  %output3 = scalar.constant 3 : i32
+  view.store %output3, %header[22] : i32, view<43xi32>
+  %table = buffer.view %rows[%origin] : buffer -> view<6x2xi64>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %six = index.constant 6 : index
+  %stride = scalar.constant 2105856 : i64
+  %guard = scalar.constant 256 : i64
+  scf.for %row = [%zero to %six step %one] {
+    %wide_row = index.cast %row : index to i64
+    %base = scalar.muli %wide_row, %stride : i64
+    %kv = scalar.addi %base, %guard : i64
+    view.store %kv, %table[%row, %one] : i64, view<6x2xi64>
+  }
+  kernel.return
+}
+
+// Complete packed preparation and causal attention must agree with ordinary
+// isolated kernels. Unequal spans cross query-tile and cache-block tails with
+// different absolute histories. A second issue changes cardinality, lengths,
+// positions and packed placement without recompiling the span kernels.
+check.case public @mixed_attention_spans {
+  %token_capacity = check.literal value(32) : index
+  %span_capacity = check.literal value(8) : index
+  %initial = check.literal value(false) : i1
+  %continuation = check.literal value(true) : i1
+  %layer_origin = check.literal value(1052672) : offset
+  %epsilon = check.literal value(9.9999999999999995e-07) : f32
+  %epoch = check.generate.fill value(-99) : tensor<43xi32>
+  %rows = check.generate.fill value(-1) : tensor<6x2xi64>
+  %projection = check.generate.iota offset(-0.5) step(1.52587890625e-05) period(65521) : tensor<32x12288xf32>
+  %key = check.generate.iota offset(-0.5) step(3.0517578125e-05) period(32749) : tensor<32x1024xf32>
+  %value = check.generate.iota offset(-0.25) step(1.52587890625e-05) period(32749) : tensor<32x1024xf32>
+  %weight = check.generate.iota offset(0.75) step(0.0009765625) : tensor<256xf32>
+  %packed_state = check.generate.iota offset(-0.125) step(3.0517578125e-05) period(8191) : tensor<6317568xf16>
+  %isolated_state = check.generate.iota offset(-0.125) step(3.0517578125e-05) period(8191) : tensor<6317568xf16>
+  %packed_query = check.generate.fill value(9.125) : tensor<32x6144xf32>
+  %isolated_query = check.generate.fill value(9.125) : tensor<32x6144xf32>
+  %packed_gate = check.generate.fill value(9.125) : tensor<32x6144xf32>
+  %isolated_gate = check.generate.fill value(9.125) : tensor<32x6144xf32>
+  %packed_output = check.generate.fill value(9.125) : tensor<32x6144xf32>
+  %isolated_output = check.generate.fill value(9.125) : tensor<32x6144xf32>
+  %key_cache0 = check.tensor.view %isolated_state offset(9476352) : tensor<6317568xf16> -> tensor<257x1024xf16>
+  %value_cache0 = check.tensor.view %isolated_state offset(10002688) : tensor<6317568xf16> -> tensor<257x1024xf16>
+  %key_cache1 = check.tensor.view %isolated_state offset(3158784) : tensor<6317568xf16> -> tensor<257x1024xf16>
+  %value_cache1 = check.tensor.view %isolated_state offset(3685120) : tensor<6317568xf16> -> tensor<257x1024xf16>
+  %key_cache2 = check.tensor.view %isolated_state offset(11582208) : tensor<6317568xf16> -> tensor<257x1024xf16>
+  %value_cache2 = check.tensor.view %isolated_state offset(12108544) : tensor<6317568xf16> -> tensor<257x1024xf16>
+  %key_cache3 = check.tensor.view %isolated_state offset(5264640) : tensor<6317568xf16> -> tensor<257x1024xf16>
+  %value_cache3 = check.tensor.view %isolated_state offset(5790976) : tensor<6317568xf16> -> tensor<257x1024xf16>
+  %initial0_count = check.literal value(17) : index
+  %initial0_control = check.generate.iota offset(17) step(44) : tensor<2xi32>
+  %initial0_projection = check.tensor.view %projection offset(0) : tensor<32x12288xf32> -> tensor<17x12288xf32>
+  %initial0_key = check.tensor.view %key offset(0) : tensor<32x1024xf32> -> tensor<17x1024xf32>
+  %initial0_value = check.tensor.view %value offset(0) : tensor<32x1024xf32> -> tensor<17x1024xf32>
+  %initial0_query = check.tensor.view %isolated_query offset(0) : tensor<32x6144xf32> -> tensor<17x6144xf32>
+  %initial0_gate = check.tensor.view %isolated_gate offset(0) : tensor<32x6144xf32> -> tensor<17x6144xf32>
+  %initial0_output = check.tensor.view %isolated_output offset(0) : tensor<32x6144xf32> -> tensor<17x6144xf32>
+  %initial1_count = check.literal value(3) : index
+  %initial1_control = check.generate.iota offset(3) step(124) : tensor<2xi32>
+  %initial1_projection = check.tensor.view %projection offset(835584) : tensor<32x12288xf32> -> tensor<3x12288xf32>
+  %initial1_key = check.tensor.view %key offset(69632) : tensor<32x1024xf32> -> tensor<3x1024xf32>
+  %initial1_value = check.tensor.view %value offset(69632) : tensor<32x1024xf32> -> tensor<3x1024xf32>
+  %initial1_query = check.tensor.view %isolated_query offset(417792) : tensor<32x6144xf32> -> tensor<3x6144xf32>
+  %initial1_gate = check.tensor.view %isolated_gate offset(417792) : tensor<32x6144xf32> -> tensor<3x6144xf32>
+  %initial1_output = check.tensor.view %isolated_output offset(417792) : tensor<32x6144xf32> -> tensor<3x6144xf32>
+  %initial2_count = check.literal value(1) : index
+  %initial2_control = check.generate.iota offset(1) step(212) : tensor<2xi32>
+  %initial2_projection = check.tensor.view %projection offset(983040) : tensor<32x12288xf32> -> tensor<1x12288xf32>
+  %initial2_key = check.tensor.view %key offset(81920) : tensor<32x1024xf32> -> tensor<1x1024xf32>
+  %initial2_value = check.tensor.view %value offset(81920) : tensor<32x1024xf32> -> tensor<1x1024xf32>
+  %initial2_query = check.tensor.view %isolated_query offset(491520) : tensor<32x6144xf32> -> tensor<1x6144xf32>
+  %initial2_gate = check.tensor.view %isolated_gate offset(491520) : tensor<32x6144xf32> -> tensor<1x6144xf32>
+  %initial2_output = check.tensor.view %isolated_output offset(491520) : tensor<32x6144xf32> -> tensor<1x6144xf32>
+  %initial3_count = check.literal value(1) : index
+  %initial3_control = check.generate.iota offset(1) step(47) : tensor<2xi32>
+  %initial3_projection = check.tensor.view %projection offset(1032192) : tensor<32x12288xf32> -> tensor<1x12288xf32>
+  %initial3_key = check.tensor.view %key offset(86016) : tensor<32x1024xf32> -> tensor<1x1024xf32>
+  %initial3_value = check.tensor.view %value offset(86016) : tensor<32x1024xf32> -> tensor<1x1024xf32>
+  %initial3_query = check.tensor.view %isolated_query offset(516096) : tensor<32x6144xf32> -> tensor<1x6144xf32>
+  %initial3_gate = check.tensor.view %isolated_gate offset(516096) : tensor<32x6144xf32> -> tensor<1x6144xf32>
+  %initial3_output = check.tensor.view %isolated_output offset(516096) : tensor<32x6144xf32> -> tensor<1x6144xf32>
+  %continuation0_count = check.literal value(2) : index
+  %continuation0_control = check.generate.iota offset(2) step(76) : tensor<2xi32>
+  %continuation0_projection = check.tensor.view %projection offset(0) : tensor<32x12288xf32> -> tensor<2x12288xf32>
+  %continuation0_key = check.tensor.view %key offset(0) : tensor<32x1024xf32> -> tensor<2x1024xf32>
+  %continuation0_value = check.tensor.view %value offset(0) : tensor<32x1024xf32> -> tensor<2x1024xf32>
+  %continuation0_query = check.tensor.view %isolated_query offset(0) : tensor<32x6144xf32> -> tensor<2x6144xf32>
+  %continuation0_gate = check.tensor.view %isolated_gate offset(0) : tensor<32x6144xf32> -> tensor<2x6144xf32>
+  %continuation0_output = check.tensor.view %isolated_output offset(0) : tensor<32x6144xf32> -> tensor<2x6144xf32>
+  %continuation1_count = check.literal value(1) : index
+  %continuation1_control = check.generate.iota offset(1) step(129) : tensor<2xi32>
+  %continuation1_projection = check.tensor.view %projection offset(98304) : tensor<32x12288xf32> -> tensor<1x12288xf32>
+  %continuation1_key = check.tensor.view %key offset(8192) : tensor<32x1024xf32> -> tensor<1x1024xf32>
+  %continuation1_value = check.tensor.view %value offset(8192) : tensor<32x1024xf32> -> tensor<1x1024xf32>
+  %continuation1_query = check.tensor.view %isolated_query offset(49152) : tensor<32x6144xf32> -> tensor<1x6144xf32>
+  %continuation1_gate = check.tensor.view %isolated_gate offset(49152) : tensor<32x6144xf32> -> tensor<1x6144xf32>
+  %continuation1_output = check.tensor.view %isolated_output offset(49152) : tensor<32x6144xf32> -> tensor<1x6144xf32>
+
+  kernel.launch @mixed_attention_metadata(%initial, %epoch, %rows) : (i1, tensor<43xi32>, tensor<6x2xi64>)
+  kernel.launch @qwen38_attention_query_prepare_spans[%token_capacity, %span_capacity](%epoch, %epsilon, %projection, %weight, %packed_query, %packed_gate) : [index, index](tensor<43xi32>, f32, tensor<32x12288xf32>, tensor<256xf32>, tensor<32x6144xf32>, tensor<32x6144xf32>)
+  kernel.launch @qwen38_attention_kv_prepare_spans[%token_capacity, %span_capacity](%epoch, %rows, %layer_origin, %epsilon, %key, %value, %weight, %packed_state) : [index, index](tensor<43xi32>, tensor<6x2xi64>, offset, f32, tensor<32x1024xf32>, tensor<32x1024xf32>, tensor<256xf32>, tensor<6317568xf16>)
+  kernel.launch @qwen38_attention_spans_f16_wmma[%token_capacity, %span_capacity](%epoch, %rows, %layer_origin, %packed_query, %packed_gate, %packed_state, %packed_output) : [index, index](tensor<43xi32>, tensor<6x2xi64>, offset, tensor<32x6144xf32>, tensor<32x6144xf32>, tensor<6317568xf16>, tensor<32x6144xf32>)
+  kernel.launch @qwen38_attention_query_prepare_prefill[%initial0_count](%initial0_control, %epsilon, %initial0_projection, %weight, %initial0_query, %initial0_gate) : [index](tensor<2xi32>, f32, tensor<17x12288xf32>, tensor<256xf32>, tensor<17x6144xf32>, tensor<17x6144xf32>)
+  kernel.launch @qwen38_attention_kv_prepare_prefill[%initial0_count](%initial0_control, %epsilon, %initial0_key, %initial0_value, %weight, %key_cache0, %value_cache0) : [index](tensor<2xi32>, f32, tensor<17x1024xf32>, tensor<17x1024xf32>, tensor<256xf32>, tensor<257x1024xf16>, tensor<257x1024xf16>)
+  kernel.launch @qwen38_attention_prefill_f16_wmma[%initial0_count](%initial0_control, %initial0_query, %initial0_gate, %key_cache0, %value_cache0, %initial0_output) : [index](tensor<2xi32>, tensor<17x6144xf32>, tensor<17x6144xf32>, tensor<257x1024xf16>, tensor<257x1024xf16>, tensor<17x6144xf32>)
+  kernel.launch @qwen38_attention_query_prepare_prefill[%initial1_count](%initial1_control, %epsilon, %initial1_projection, %weight, %initial1_query, %initial1_gate) : [index](tensor<2xi32>, f32, tensor<3x12288xf32>, tensor<256xf32>, tensor<3x6144xf32>, tensor<3x6144xf32>)
+  kernel.launch @qwen38_attention_kv_prepare_prefill[%initial1_count](%initial1_control, %epsilon, %initial1_key, %initial1_value, %weight, %key_cache1, %value_cache1) : [index](tensor<2xi32>, f32, tensor<3x1024xf32>, tensor<3x1024xf32>, tensor<256xf32>, tensor<257x1024xf16>, tensor<257x1024xf16>)
+  kernel.launch @qwen38_attention_prefill_f16_wmma[%initial1_count](%initial1_control, %initial1_query, %initial1_gate, %key_cache1, %value_cache1, %initial1_output) : [index](tensor<2xi32>, tensor<3x6144xf32>, tensor<3x6144xf32>, tensor<257x1024xf16>, tensor<257x1024xf16>, tensor<3x6144xf32>)
+  kernel.launch @qwen38_attention_query_prepare_prefill[%initial2_count](%initial2_control, %epsilon, %initial2_projection, %weight, %initial2_query, %initial2_gate) : [index](tensor<2xi32>, f32, tensor<1x12288xf32>, tensor<256xf32>, tensor<1x6144xf32>, tensor<1x6144xf32>)
+  kernel.launch @qwen38_attention_kv_prepare_prefill[%initial2_count](%initial2_control, %epsilon, %initial2_key, %initial2_value, %weight, %key_cache2, %value_cache2) : [index](tensor<2xi32>, f32, tensor<1x1024xf32>, tensor<1x1024xf32>, tensor<256xf32>, tensor<257x1024xf16>, tensor<257x1024xf16>)
+  kernel.launch @qwen38_attention_prefill_f16_wmma[%initial2_count](%initial2_control, %initial2_query, %initial2_gate, %key_cache2, %value_cache2, %initial2_output) : [index](tensor<2xi32>, tensor<1x6144xf32>, tensor<1x6144xf32>, tensor<257x1024xf16>, tensor<257x1024xf16>, tensor<1x6144xf32>)
+  kernel.launch @qwen38_attention_query_prepare_prefill[%initial3_count](%initial3_control, %epsilon, %initial3_projection, %weight, %initial3_query, %initial3_gate) : [index](tensor<2xi32>, f32, tensor<1x12288xf32>, tensor<256xf32>, tensor<1x6144xf32>, tensor<1x6144xf32>)
+  kernel.launch @qwen38_attention_kv_prepare_prefill[%initial3_count](%initial3_control, %epsilon, %initial3_key, %initial3_value, %weight, %key_cache3, %value_cache3) : [index](tensor<2xi32>, f32, tensor<1x1024xf32>, tensor<1x1024xf32>, tensor<256xf32>, tensor<257x1024xf16>, tensor<257x1024xf16>)
+  kernel.launch @qwen38_attention_prefill_f16_wmma[%initial3_count](%initial3_control, %initial3_query, %initial3_gate, %key_cache3, %value_cache3, %initial3_output) : [index](tensor<2xi32>, tensor<1x6144xf32>, tensor<1x6144xf32>, tensor<257x1024xf16>, tensor<257x1024xf16>, tensor<1x6144xf32>)
+
+  kernel.launch @mixed_attention_metadata(%continuation, %epoch, %rows) : (i1, tensor<43xi32>, tensor<6x2xi64>)
+  kernel.launch @qwen38_attention_query_prepare_spans[%token_capacity, %span_capacity](%epoch, %epsilon, %projection, %weight, %packed_query, %packed_gate) : [index, index](tensor<43xi32>, f32, tensor<32x12288xf32>, tensor<256xf32>, tensor<32x6144xf32>, tensor<32x6144xf32>)
+  kernel.launch @qwen38_attention_kv_prepare_spans[%token_capacity, %span_capacity](%epoch, %rows, %layer_origin, %epsilon, %key, %value, %weight, %packed_state) : [index, index](tensor<43xi32>, tensor<6x2xi64>, offset, f32, tensor<32x1024xf32>, tensor<32x1024xf32>, tensor<256xf32>, tensor<6317568xf16>)
+  kernel.launch @qwen38_attention_spans_f16_wmma[%token_capacity, %span_capacity](%epoch, %rows, %layer_origin, %packed_query, %packed_gate, %packed_state, %packed_output) : [index, index](tensor<43xi32>, tensor<6x2xi64>, offset, tensor<32x6144xf32>, tensor<32x6144xf32>, tensor<6317568xf16>, tensor<32x6144xf32>)
+  kernel.launch @qwen38_attention_query_prepare_prefill[%continuation0_count](%continuation0_control, %epsilon, %continuation0_projection, %weight, %continuation0_query, %continuation0_gate) : [index](tensor<2xi32>, f32, tensor<2x12288xf32>, tensor<256xf32>, tensor<2x6144xf32>, tensor<2x6144xf32>)
+  kernel.launch @qwen38_attention_kv_prepare_prefill[%continuation0_count](%continuation0_control, %epsilon, %continuation0_key, %continuation0_value, %weight, %key_cache0, %value_cache0) : [index](tensor<2xi32>, f32, tensor<2x1024xf32>, tensor<2x1024xf32>, tensor<256xf32>, tensor<257x1024xf16>, tensor<257x1024xf16>)
+  kernel.launch @qwen38_attention_prefill_f16_wmma[%continuation0_count](%continuation0_control, %continuation0_query, %continuation0_gate, %key_cache0, %value_cache0, %continuation0_output) : [index](tensor<2xi32>, tensor<2x6144xf32>, tensor<2x6144xf32>, tensor<257x1024xf16>, tensor<257x1024xf16>, tensor<2x6144xf32>)
+  kernel.launch @qwen38_attention_query_prepare_prefill[%continuation1_count](%continuation1_control, %epsilon, %continuation1_projection, %weight, %continuation1_query, %continuation1_gate) : [index](tensor<2xi32>, f32, tensor<1x12288xf32>, tensor<256xf32>, tensor<1x6144xf32>, tensor<1x6144xf32>)
+  kernel.launch @qwen38_attention_kv_prepare_prefill[%continuation1_count](%continuation1_control, %epsilon, %continuation1_key, %continuation1_value, %weight, %key_cache1, %value_cache1) : [index](tensor<2xi32>, f32, tensor<1x1024xf32>, tensor<1x1024xf32>, tensor<256xf32>, tensor<257x1024xf16>, tensor<257x1024xf16>)
+  kernel.launch @qwen38_attention_prefill_f16_wmma[%continuation1_count](%continuation1_control, %continuation1_query, %continuation1_gate, %key_cache1, %value_cache1, %continuation1_output) : [index](tensor<2xi32>, tensor<1x6144xf32>, tensor<1x6144xf32>, tensor<257x1024xf16>, tensor<257x1024xf16>, tensor<1x6144xf32>)
+  check.expect.bitwise actual(%packed_query) expected(%isolated_query) : tensor<32x6144xf32>
+  check.expect.bitwise actual(%packed_gate) expected(%isolated_gate) : tensor<32x6144xf32>
+  check.expect.bitwise actual(%packed_output) expected(%isolated_output) : tensor<32x6144xf32>
+  check.expect.bitwise actual(%packed_state) expected(%isolated_state) : tensor<6317568xf16>
+  check.return
+}

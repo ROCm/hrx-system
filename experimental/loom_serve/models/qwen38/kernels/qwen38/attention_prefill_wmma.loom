@@ -12,25 +12,10 @@ config.decl @qwen38.attention.cache_capacity : %value: index where [range(%value
 
 kernel.decl @qwen38_attention_prefill_reference(%token_count: index) launch(%control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer)
 
-kernel.def target(@qwen38_attention_prefill_gfx11_wave64) export("qwen38_attention_prefill_f16_wmma") @qwen38_attention_prefill_f16_wmma(%token_count0: index) {
-  %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
-  %c1 = index.constant 1 : index
-  %c15 = index.constant 15 : index
-  %c16 = index.constant 16 : index
-  %c24 = index.constant 24 : index
-  %c256 = index.constant 256 : index
-  %padded_token_count = index.add %token_count, %c15 : index
-  %query_tile_count = index.div %padded_token_count, %c16 : index
-  kernel.launch.config workgroups(%query_tile_count, %c24, %c1) workgroup_size(%c256, %c1, %c1) : index
-} launch(%control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer) {
+template.decl @qwen38.attention.wmma(%query_tile: index, %query_head: index, %workitem: index, %subgroup: index, %lane: index, %control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer, %control_origin: offset, %token_begin: index, %key_cache_origin: offset, %value_cache_origin: offset)
+
+template.def<@qwen38.attention.wmma> device @qwen38_attention_wmma(%query_tile: index, %query_head: index, %workitem: index, %subgroup: index, %lane: index, %control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer, %control_origin: offset, %token_begin: index, %key_cache_origin: offset, %value_cache_origin: offset) {
   %cache_capacity = config.get @qwen38.attention.cache_capacity : index
-  %query_tile = kernel.workgroup.id<x> : index
-  %query_head0 = kernel.workgroup.id<y> : index
-  %query_head = index.assume %query_head0 [range(%query_head0, 0, 23)] : index
-  %workitem = kernel.workitem.id<x> : index
-  %subgroup0 = kernel.subgroup.id : index
-  %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 3)] : index
-  %lane = kernel.subgroup.lane.id : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -63,7 +48,7 @@ kernel.def target(@qwen38_attention_prefill_gfx11_wave64) export("qwen38_attenti
   %n = index.constant 16 : index
   %k = index.constant 16 : index
 
-  %control_view = buffer.view %control[%c0_offset] : buffer -> view<2xi32>
+  %control_view = buffer.view %control[%control_origin] : buffer -> view<2xi32>
   %token_count_i32 = view.load %control_view[%c0] : view<2xi32> -> i32
   %token_count0 = index.cast %token_count_i32 : i32 to index
   %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
@@ -111,12 +96,13 @@ kernel.def target(@qwen38_attention_prefill_gfx11_wave64) export("qwen38_attenti
 
   %query_transposed_layout = encoding.layout.strided [1, 264] : encoding<layout>
   %probability_transposed_layout = encoding.layout.strided [1, 24] : encoding<layout>
-  %query_noalias, %gate_noalias, %key_noalias, %value_noalias, %output_noalias = buffer.assume.noalias %query, %gate, %key_cache, %value_cache, %output : buffer, buffer, buffer, buffer, buffer
-  %query_view = buffer.view %query_noalias[%c0_offset] : buffer -> view<[%token_count]x6144xf32>
-  %gate_view = buffer.view %gate_noalias[%c0_offset] : buffer -> view<[%token_count]x6144xf32>
-  %key_view = buffer.view %key_noalias[%c0_offset] : buffer -> view<[%cache_capacity]x1024xf16>
-  %value_view = buffer.view %value_noalias[%c0_offset] : buffer -> view<[%cache_capacity]x1024xf16>
-  %output_view = buffer.view %output_noalias[%c0_offset] : buffer -> view<[%token_count]x6144xf32>
+  %activation_row_bytes = index.constant 24576 : offset
+  %activation_origin = index.scale %token_begin, %activation_row_bytes : index, offset -> offset
+  %query_view = buffer.view %query[%activation_origin] : buffer -> view<[%token_count]x6144xf32>
+  %gate_view = buffer.view %gate[%activation_origin] : buffer -> view<[%token_count]x6144xf32>
+  %key_view = buffer.view %key_cache[%key_cache_origin] : buffer -> view<[%cache_capacity]x1024xf16>
+  %value_view = buffer.view %value_cache[%value_cache_origin] : buffer -> view<[%cache_capacity]x1024xf16>
+  %output_view = buffer.view %output[%activation_origin] : buffer -> view<[%token_count]x6144xf32>
   %query_stage = buffer.alloca<workgroup> align(16) %query_stage_bytes : buffer
   %score_stage = buffer.alloca<workgroup> align(16) %score_stage_bytes : buffer
   %probability_stage = buffer.alloca<workgroup> align(16) %probability_stage_bytes : buffer
@@ -394,10 +380,16 @@ kernel.def target(@qwen38_attention_prefill_gfx11_wave64) export("qwen38_attenti
   %sum1_scalar = vector.extract %final_sum[1] : vector<4xf32> -> f32
   %sum2_scalar = vector.extract %final_sum[2] : vector<4xf32> -> f32
   %sum3_scalar = vector.extract %final_sum[3] : vector<4xf32> -> f32
-  %inverse_sum0_f32 = scalar.divf<nnan|ninf|nsz|arcp> %c1_f32, %sum0_scalar : f32
-  %inverse_sum1_f32 = scalar.divf<nnan|ninf|nsz|arcp> %c1_f32, %sum1_scalar : f32
-  %inverse_sum2_f32 = scalar.divf<nnan|ninf|nsz|arcp> %c1_f32, %sum2_scalar : f32
-  %inverse_sum3_f32 = scalar.divf<nnan|ninf|nsz|arcp> %c1_f32, %sum3_scalar : f32
+  // Padded queries have no probability mass. Keep their unobserved arithmetic
+  // finite instead of dividing by zero before masking the final stores.
+  %safe_sum0 = scf.select %query_valid0, %sum0_scalar, %c1_f32 : f32
+  %safe_sum1 = scf.select %query_valid1, %sum1_scalar, %c1_f32 : f32
+  %safe_sum2 = scf.select %query_valid2, %sum2_scalar, %c1_f32 : f32
+  %safe_sum3 = scf.select %query_valid3, %sum3_scalar, %c1_f32 : f32
+  %inverse_sum0_f32 = scalar.divf<nnan|ninf|nsz|arcp> %c1_f32, %safe_sum0 : f32
+  %inverse_sum1_f32 = scalar.divf<nnan|ninf|nsz|arcp> %c1_f32, %safe_sum1 : f32
+  %inverse_sum2_f32 = scalar.divf<nnan|ninf|nsz|arcp> %c1_f32, %safe_sum2 : f32
+  %inverse_sum3_f32 = scalar.divf<nnan|ninf|nsz|arcp> %c1_f32, %safe_sum3 : f32
   %inverse_sum0_f16 = scalar.fptrunc %inverse_sum0_f32 : f32 to f16
   %inverse_sum1_f16 = scalar.fptrunc %inverse_sum1_f32 : f32 to f16
   %inverse_sum2_f16 = scalar.fptrunc %inverse_sum2_f32 : f32 to f16
@@ -439,6 +431,31 @@ kernel.def target(@qwen38_attention_prefill_gfx11_wave64) export("qwen38_attenti
     %gated = vector.mulf<nnan|ninf|nsz> %normalized3, %gate_values : vector<4xf32>
     vector.store %gated, %output_view[%bounded_query_token, %output_channel] : vector<4xf32>, view<[%token_count]x6144xf32>
   }
+  template.return
+}
+
+kernel.def target(@qwen38_attention_prefill_gfx11_wave64) export("qwen38_attention_prefill_f16_wmma") @qwen38_attention_prefill_f16_wmma(%token_count0: index) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
+  %c1 = index.constant 1 : index
+  %c15 = index.constant 15 : index
+  %c16 = index.constant 16 : index
+  %c24 = index.constant 24 : index
+  %c256 = index.constant 256 : index
+  %padded_token_count = index.add %token_count, %c15 : index
+  %query_tile_count = index.div %padded_token_count, %c16 : index
+  kernel.launch.config workgroups(%query_tile_count, %c24, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer) {
+  %query_tile = kernel.workgroup.id<x> : index
+  %query_head0 = kernel.workgroup.id<y> : index
+  %query_head = index.assume %query_head0 [range(%query_head0, 0, 23)] : index
+  %workitem = kernel.workitem.id<x> : index
+  %subgroup0 = kernel.subgroup.id : index
+  %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 3)] : index
+  %lane = kernel.subgroup.lane.id : index
+  %origin = index.constant 0 : offset
+  %token_begin = index.constant 0 : index
+  %query_noalias, %gate_noalias, %key_noalias, %value_noalias, %output_noalias = buffer.assume.noalias %query, %gate, %key_cache, %value_cache, %output : buffer, buffer, buffer, buffer, buffer
+  template.apply<@qwen38.attention.wmma>(%query_tile, %query_head, %workitem, %subgroup, %lane, %control, %query_noalias, %gate_noalias, %key_noalias, %value_noalias, %output_noalias, %origin, %token_begin, %origin, %origin) : (index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset)
   kernel.return
 }
 
@@ -457,7 +474,7 @@ check.case public @qwen38_attention_prefill_f16_wmma_known_case {
   %expected = check.generate.fill value(0.125) : tensor<17x6144xf32>
   kernel.launch @qwen38_attention_prefill_reference[%token_count](%control, %query, %gate, %key_cache, %value_cache, %reference_output) : [index](tensor<2xi32>, tensor<17x6144xf32>, tensor<17x6144xf32>, tensor<81x1024xf16>, tensor<81x1024xf16>, tensor<17x6144xf32>)
   kernel.launch @qwen38_attention_prefill_f16_wmma[%token_count](%control, %query, %gate, %key_cache, %value_cache, %tiled_output) : [index](tensor<2xi32>, tensor<17x6144xf32>, tensor<17x6144xf32>, tensor<81x1024xf16>, tensor<81x1024xf16>, tensor<17x6144xf32>)
-  check.expect.close actual(%reference_output) expected(%expected) atol(0.000001) rtol(0.000001) nan(same) : tensor<17x6144xf32>
+  check.expect.close actual(%reference_output) expected(%expected) atol(9.9999999999999995e-07) rtol(9.9999999999999995e-07) nan(same) : tensor<17x6144xf32>
   check.expect.close actual(%tiled_output) expected(%expected) atol(0.001) rtol(0.001) nan(same) : tensor<17x6144xf32>
   check.return
 }

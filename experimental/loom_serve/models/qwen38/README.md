@@ -108,8 +108,32 @@ build_tools/bin/iree-bazel-run --config=asan \
 ```
 
 Repeat with `--sanitizer='access|operation'` for GPU access/operation checks.
-This qualifies GDN state routing, not full-model mixed execution or serving
-throughput. The service still invokes one retained row at a time.
+
+The attention differential uses the same packed metadata contract and shared
+query normalization, RoPE, cache publication and causal WMMA bodies. Lengths
+17, 3, 1 and 1 at distinct consumed positions exercise query-tile and cache-block
+tails. Resident rows 4, 1, 5 and 2 select a nonzero layer in a guarded two-layer
+arena; a second issue changes lengths and active cardinality. Complete query,
+gate, output and cache buffers agree bit-for-bit with isolated execution,
+including inactive rows, layers and padding.
+
+```sh
+build_tools/bin/iree-bazel-run --config=asan \
+  //loom/src/loom/tools/iree-test-loom -- \
+  experimental/loom_serve/models/qwen38/tests/attention_spans.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/spans.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/attention_spans.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/attention_prefill.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/attention_prefill_wmma.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/attention_common.loom \
+  --device=amdgpu --target=amdgpu:gfx1151 --case=@mixed_attention_spans \
+  --config=qwen38.attention.cache_capacity=257
+```
+
+The same GPU sanitizer flags apply. These comparisons qualify state routing
+against the same math, not independent model accuracy or full-model mixed
+execution. Metadata remains immutable until the epoch's completion edge permits
+reuse. The service still invokes one retained row at a time.
 
 ## Four-row projection reuse
 
