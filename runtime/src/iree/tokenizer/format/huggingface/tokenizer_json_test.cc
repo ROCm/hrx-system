@@ -400,6 +400,58 @@ TEST_F(TokenizerJsonTest, DecoderErrorPropagation) {
 // Added Token Flag Tests
 //===----------------------------------------------------------------------===//
 
+TEST_F(TokenizerJsonTest, NonSpecialRawAddedTokens) {
+  // Qwen reasoning markers are added tokens without either the special or
+  // normalized flag. They match before segmentation but survive decode's
+  // special-token filtering.
+  const iree_string_view_t json = IREE_SV(R"({
+    "model": {
+      "type": "BPE",
+      "vocab": {"a": 0, "b": 1, "<": 2, ">": 3, "/": 4,
+                "t": 5, "h": 6, "i": 7, "n": 8, "k": 9},
+      "merges": []
+    },
+    "added_tokens": [
+      {"id": 10, "content": "<think>", "special": false,
+       "normalized": false, "single_word": false,
+       "lstrip": false, "rstrip": false},
+      {"id": 11, "content": "</think>", "special": false,
+       "normalized": false, "single_word": false,
+       "lstrip": false, "rstrip": false},
+      {"id": 12, "content": "<end>", "special": true,
+       "normalized": false, "single_word": false,
+       "lstrip": false, "rstrip": false}
+    ],
+    "pre_tokenizer": {"type": "ByteLevel", "add_prefix_space": false,
+                      "trim_offsets": false, "use_regex": true},
+    "decoder": {"type": "ByteLevel", "add_prefix_space": false,
+                "trim_offsets": false, "use_regex": true}
+  })");
+  iree_tokenizer_t* tokenizer = nullptr;
+  IREE_ASSERT_OK(
+      iree_tokenizer_from_huggingface_json(json, allocator_, &tokenizer));
+  int32_t tokens[32] = {};
+  iree_host_size_t count = 0;
+  IREE_EXPECT_OK(iree_tokenizer_encode(
+      tokenizer, IREE_SV("a<think>b</think><end>"),
+      IREE_TOKENIZER_ENCODE_FLAG_NONE,
+      iree_tokenizer_make_token_output(tokens, nullptr, nullptr, 32),
+      allocator_, &count));
+  EXPECT_EQ(count, 5u);
+  const int32_t expected[] = {0, 10, 1, 11, 12};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(expected); ++i) {
+    EXPECT_EQ(tokens[i], expected[i]);
+  }
+  char text[64] = {};
+  iree_host_size_t length = 0;
+  IREE_EXPECT_OK(iree_tokenizer_decode(
+      tokenizer, iree_tokenizer_make_token_id_list(expected, 5),
+      IREE_TOKENIZER_DECODE_FLAG_SKIP_SPECIAL_TOKENS,
+      iree_make_mutable_string_view(text, sizeof(text)), allocator_, &length));
+  EXPECT_EQ(std::string(text, length), "a<think>b</think>");
+  iree_tokenizer_free(tokenizer);
+}
+
 // Tests that added_token flags (lstrip, rstrip, single_word) load successfully.
 // These flags control matching behavior for special tokens.
 
