@@ -231,16 +231,16 @@ unsigned entry() {
 }
 
 // ====
-// Repeated bases require the selected inheritance path. Until member lookup
-// retains that path, reject the address instead of conflating both Base
-// subobjects through their shared field declaration.
-struct Base {
+// Virtual bases require one shared constant-object storage node. Until the
+// evaluator represents that node, reject the address instead of inventing a
+// separate nested object for each path through the diamond.
+struct VirtualBase {
   unsigned value;
 };
-struct Left : Base {};
-struct Right : Base {};
-struct Both : Left, Right {};
-extern Both object;
+struct Left : virtual VirtualBase {};
+struct Right : virtual VirtualBase {};
+struct Diamond : Left, Right {};
+extern Diamond object;
 template <const unsigned& value>
 // REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: template argument is not a converted constant expression of type 'const unsigned int&'"
 constexpr unsigned choose() { return 3; }

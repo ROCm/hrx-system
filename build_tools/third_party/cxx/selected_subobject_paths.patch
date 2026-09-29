@@ -1,0 +1,1244 @@
+diff --git a/packages/cxx-frontend/src/Semantic.ts b/packages/cxx-frontend/src/Semantic.ts
+index d4308eb..285a9d3 100644
+--- a/packages/cxx-frontend/src/Semantic.ts
++++ b/packages/cxx-frontend/src/Semantic.ts
+@@ -324,7 +324,7 @@ const TypeConstructionASTSlotBase = CallExpressionASTSlotBase + 11;
+ const BracedTypeConstructionASTSlotBase = TypeConstructionASTSlotBase + 10;
+ const SpliceMemberExpressionASTSlotBase = BracedTypeConstructionASTSlotBase + 8;
+ const MemberExpressionASTSlotBase = SpliceMemberExpressionASTSlotBase + 12;
+-const PostIncrExpressionASTSlotBase = MemberExpressionASTSlotBase + 13;
++const PostIncrExpressionASTSlotBase = MemberExpressionASTSlotBase + 14;
+ const CppCastExpressionASTSlotBase = PostIncrExpressionASTSlotBase + 10;
+ const BuiltinBitCastExpressionASTSlotBase = CppCastExpressionASTSlotBase + 13;
+ const BuiltinConvertVectorExpressionASTSlotBase =
+@@ -353,7 +353,7 @@ const NewExpressionASTSlotBase = NoexceptExpressionASTSlotBase + 10;
+ const DeleteExpressionASTSlotBase = NewExpressionASTSlotBase + 16;
+ const CastExpressionASTSlotBase = DeleteExpressionASTSlotBase + 11;
+ const ImplicitCastExpressionASTSlotBase = CastExpressionASTSlotBase + 9;
+-const ConstExpressionASTSlotBase = ImplicitCastExpressionASTSlotBase + 9;
++const ConstExpressionASTSlotBase = ImplicitCastExpressionASTSlotBase + 10;
+ const BinaryExpressionASTSlotBase = ConstExpressionASTSlotBase + 7;
+ const ConditionalExpressionASTSlotBase = BinaryExpressionASTSlotBase + 11;
+ const YieldExpressionASTSlotBase = ConditionalExpressionASTSlotBase + 10;
+@@ -5946,20 +5946,27 @@ export class MemberExpressionAST extends ExpressionAST {
+       this.modelOwner,
+     );
+   }
++  get subobjectPath(): Iterable<Symbol | undefined> {
++    return listOf(
++      this.modelOwner,
++      cxx.readAST(this.handle, MemberExpressionASTSlotBase + 9),
++      (item: any) => symbolOf(item, this.modelOwner),
++    );
++  }
+   get accessOp(): TokenKind {
+     return cxx.readAST(
+       this.handle,
+-      MemberExpressionASTSlotBase + 9,
++      MemberExpressionASTSlotBase + 10,
+     ) as TokenKind;
+   }
+   get isTemplateIntroduced(): boolean {
+-    return cxx.readAST(this.handle, MemberExpressionASTSlotBase + 10) !== 0;
++    return cxx.readAST(this.handle, MemberExpressionASTSlotBase + 11) !== 0;
+   }
+   get firstSourceLocation(): number {
+-    return cxx.readAST(this.handle, MemberExpressionASTSlotBase + 11);
++    return cxx.readAST(this.handle, MemberExpressionASTSlotBase + 12);
+   }
+   get lastSourceLocation(): number {
+-    return cxx.readAST(this.handle, MemberExpressionASTSlotBase + 12);
++    return cxx.readAST(this.handle, MemberExpressionASTSlotBase + 13);
+   }
+ }
+ export class PostIncrExpressionAST extends ExpressionAST {
+@@ -7208,16 +7215,23 @@ export class ImplicitCastExpressionAST extends ExpressionAST {
+       this.modelOwner,
+     );
+   }
++  get subobjectPath(): Iterable<Symbol | undefined> {
++    return listOf(
++      this.modelOwner,
++      cxx.readAST(this.handle, ImplicitCastExpressionASTSlotBase + 6),
++      (item: any) => symbolOf(item, this.modelOwner),
++    );
++  }
+   get isVirtualDispatch(): boolean {
+     return (
+-      cxx.readAST(this.handle, ImplicitCastExpressionASTSlotBase + 6) !== 0
++      cxx.readAST(this.handle, ImplicitCastExpressionASTSlotBase + 7) !== 0
+     );
+   }
+   get firstSourceLocation(): number {
+-    return cxx.readAST(this.handle, ImplicitCastExpressionASTSlotBase + 7);
++    return cxx.readAST(this.handle, ImplicitCastExpressionASTSlotBase + 8);
+   }
+   get lastSourceLocation(): number {
+-    return cxx.readAST(this.handle, ImplicitCastExpressionASTSlotBase + 8);
++    return cxx.readAST(this.handle, ImplicitCastExpressionASTSlotBase + 9);
+   }
+ }
+ export class ConstExpressionAST extends ExpressionAST {
+diff --git a/packages/cxx-gen-ast/src/astFromModel.ts b/packages/cxx-gen-ast/src/astFromModel.ts
+index bb35a64..dde18e6 100644
+--- a/packages/cxx-gen-ast/src/astFromModel.ts
++++ b/packages/cxx-gen-ast/src/astFromModel.ts
+@@ -100,6 +100,12 @@ export function astFromModel(index: ModelIndex): AST {
+                 name: field.name,
+                 type: shortName(target.name),
+               };
++            if (target.kind === "class" && target.name === "::cxx::Symbol")
++              return {
++                kind: "semantic-list",
++                name: field.name,
++                type: shortName(target.name),
++              };
+           }
+           if (item.kind === "class" && item.name === "::cxx::SourceLocation")
+             return {
+diff --git a/packages/cxx-gen-ast/src/gen_ast_cc.ts b/packages/cxx-gen-ast/src/gen_ast_cc.ts
+index dc9ee83..39cb6a6 100644
+--- a/packages/cxx-gen-ast/src/gen_ast_cc.ts
++++ b/packages/cxx-gen-ast/src/gen_ast_cc.ts
+@@ -38,7 +38,7 @@ export function gen_ast_cc({ ast, output }: { ast: AST; output: string }) {
+     emit();
+     emit(`auto ${name}::firstSourceLocation() -> SourceLocation {`);
+     members.forEach((m) => {
+-      if (m.kind === "attribute") return;
++      if (m.kind === "attribute" || m.kind === "semantic-list") return;
+       emit(`  if (auto loc = cxx::firstSourceLocation(${m.name})) return loc;`);
+     });
+     emit(`  return {};`);
+@@ -47,7 +47,7 @@ export function gen_ast_cc({ ast, output }: { ast: AST; output: string }) {
+     emit();
+     emit(`auto ${name}::lastSourceLocation() -> SourceLocation {`);
+     [...members].reverse().forEach((m) => {
+-      if (m.kind === "attribute") return;
++      if (m.kind === "attribute" || m.kind === "semantic-list") return;
+       emit(`  if (auto loc = cxx::lastSourceLocation(${m.name})) return loc;`);
+     });
+     emit(`  return {};`);
+@@ -87,6 +87,8 @@ export function gen_ast_cc({ ast, output }: { ast: AST; output: string }) {
+             params.push(`List<${m.type}*>* ${m.name}`);
+             paramsNoLoc.push(`List<${m.type}*>* ${m.name}`);
+             break;
++          case "semantic-list":
++            break;
+           case "token":
+             params.push(`SourceLocation ${m.name}`);
+             break;
+@@ -128,6 +130,9 @@ export function gen_ast_cc({ ast, output }: { ast: AST; output: string }) {
+             emit(`  }`);
+             emit();
+             break;
++          case "semantic-list":
++            emit(`  node->${m.name} = clone_symbol_path(arena, ${m.name});`);
++            break;
+           case "token":
+             emit(`  node->${m.name} = ${m.name};`);
+             break;
+diff --git a/packages/cxx-gen-ast/src/gen_ast_h.ts b/packages/cxx-gen-ast/src/gen_ast_h.ts
+index b47708d..f8b4555 100644
+--- a/packages/cxx-gen-ast/src/gen_ast_h.ts
++++ b/packages/cxx-gen-ast/src/gen_ast_h.ts
+@@ -71,6 +71,12 @@ export function gen_ast_h({ ast, output }: { ast: AST; output: string }) {
+           case "node-list":
+             emit(`  List<${m.type}*>* ${m.name} = nullptr;`);
+             break;
++          case "semantic-list":
++            emit(
++              `  // Ordered storage subobjects selected by semantic resolution.`,
++            );
++            emit(`  List<${m.type}*>* ${m.name} = nullptr;`);
++            break;
+           case "token":
+             emit(`  SourceLocation ${m.name};`);
+             break;
+@@ -120,6 +126,8 @@ export function gen_ast_h({ ast, output }: { ast: AST; output: string }) {
+             params.push(`List<${m.type}*>* ${m.name}`);
+             paramsNoLoc.push(`List<${m.type}*>* ${m.name}`);
+             break;
++          case "semantic-list":
++            break;
+           case "token":
+             params.push(`SourceLocation ${m.name}`);
+             break;
+@@ -214,6 +222,7 @@ ${cpy_header}
+ #include <cxx/symbols_fwd.h>
+ #include <optional>
+ #include <ranges>
++#include <span>
+
+ namespace cxx {
+
+@@ -308,6 +317,29 @@ auto make_list_node(Arena* arena, T* element = nullptr) -> List<T*>* {
+   return list;
+ }
+
++[[nodiscard]] inline auto make_symbol_path(
++    Arena* arena, std::span<Symbol* const> symbols) -> List<Symbol*>* {
++  List<Symbol*>* result = nullptr;
++  auto tail = &result;
++  for (auto symbol : symbols) {
++    *tail = make_list_node<Symbol>(arena, symbol);
++    tail = &(*tail)->next;
++  }
++  return result;
++}
++
++[[nodiscard]] inline auto clone_symbol_path(Arena* arena,
++                                            List<Symbol*>* path)
++    -> List<Symbol*>* {
++  List<Symbol*>* result = nullptr;
++  auto tail = &result;
++  for (auto symbol : ListView(path)) {
++    *tail = make_list_node<Symbol>(arena, symbol);
++    tail = &(*tail)->next;
++  }
++  return result;
++}
++
+ [[nodiscard]] inline auto firstSourceLocation(SourceLocation loc) -> SourceLocation { return loc; }
+
+ template <typename T>
+diff --git a/packages/cxx-gen-ast/src/parseAST.ts b/packages/cxx-gen-ast/src/parseAST.ts
+index 8b23fb5..75effde 100644
+--- a/packages/cxx-gen-ast/src/parseAST.ts
++++ b/packages/cxx-gen-ast/src/parseAST.ts
+@@ -18,7 +18,8 @@
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ // SOFTWARE.
+
+-export type Member = Token | TokenList | Node | NodeList | Attribute;
++export type Member =
++  Token | TokenList | Node | NodeList | SemanticList | Attribute;
+
+ export interface AST {
+   nodes: Class[];
+@@ -55,6 +56,12 @@ export interface NodeList {
+   type: string;
+ }
+
++export interface SemanticList {
++  kind: "semantic-list";
++  name: string;
++  type: string;
++}
++
+ export interface Attribute {
+   kind: "attribute";
+   cv: string;
+diff --git a/packages/cxx-gen-ast/src/semanticEmit.ts b/packages/cxx-gen-ast/src/semanticEmit.ts
+index 5fd41b4..fa76663 100644
+--- a/packages/cxx-gen-ast/src/semanticEmit.ts
++++ b/packages/cxx-gen-ast/src/semanticEmit.ts
+@@ -127,6 +127,17 @@ export function emitWrite(
+       push(`writeAstList(out, ${value});`);
+       return;
+
++    case "arena-list": {
++      const element = names.fresh("element");
++      push(
++        `out.varU32(static_cast<std::uint32_t>(std::ranges::distance(cxx::ListView(${value}))));`,
++      );
++      push(`for (const auto& ${element} : cxx::ListView(${value})) {`);
++      emitWrite(lines, `${indent}  `, wire.element, element, names);
++      push(`}`);
++      return;
++    }
++
+     case "identifier":
+       push(`out.varU32(static_cast<std::uint32_t>(identifierRef(${value})));`);
+       return;
+@@ -383,6 +394,35 @@ export function emitRead(
+       push(`${cppType} ${target} = readAstList<${wire.element}>(in);`);
+       return;
+
++    case "arena-list": {
++      const count = names.fresh("count");
++      const position = names.fresh("i");
++      const temp = names.fresh("element");
++      const tail = names.fresh("tail");
++      push(`${cppType} ${target} = nullptr;`);
++      push(`{`);
++      push(`  const auto ${count} = in.varCount(1);`);
++      push(`  auto ${tail} = &${target};`);
++      push(
++        `  for (std::uint32_t ${position} = 0; ok() && ${position} < ${count}; ++${position}) {`,
++      );
++      emitRead(
++        lines,
++        `${indent}    `,
++        wire.element,
++        `decltype(${target}->value)`,
++        temp,
++        names,
++      );
++      push(
++        `    *${tail} = new (arena()) std::remove_pointer_t<decltype(${target})>(std::move(${temp}));`,
++      );
++      push(`    ${tail} = &(*${tail})->next;`);
++      push(`  }`);
++      push(`}`);
++      return;
++    }
++
+     case "identifier":
+       push(`${cppType} ${target} = identifierAt(StringRef{in.varU32()});`);
+       return;
+diff --git a/packages/cxx-gen-ast/src/semanticPlan.ts b/packages/cxx-gen-ast/src/semanticPlan.ts
+index 851fee3..6baa3e5 100644
+--- a/packages/cxx-gen-ast/src/semanticPlan.ts
++++ b/packages/cxx-gen-ast/src/semanticPlan.ts
+@@ -456,7 +456,10 @@ export class PlanBuilder {
+       if (unary(setter)) return `$->${setter}($value)`;
+
+     const isContainer =
+-      wire.k === "vector" || wire.k === "deque" || wire.k === "ast-list";
++      wire.k === "vector" ||
++      wire.k === "deque" ||
++      wire.k === "ast-list" ||
++      wire.k === "arena-list";
+
+     this.diagnostics.push(
+       isContainer
+diff --git a/packages/cxx-gen-ast/src/semanticWire.ts b/packages/cxx-gen-ast/src/semanticWire.ts
+index 07eff95..05f7c2f 100644
+--- a/packages/cxx-gen-ast/src/semanticWire.ts
++++ b/packages/cxx-gen-ast/src/semanticWire.ts
+@@ -43,6 +43,7 @@ export type Wire =
+   | { k: "symbol"; cpp: string }
+   | { k: "ast"; cpp: string }
+   | { k: "ast-list"; element: string }
++  | { k: "arena-list"; element: Wire }
+   | { k: "identifier" }
+   | { k: "literal"; cpp: string }
+   | { k: "abi-tags" }
+@@ -286,9 +287,9 @@ export class WireMapper {
+       const [element] = typeArguments(target);
+       if (!element) throw new Error(`${context}: List without an element type`);
+       const elementName = className(unqualified(pointerElement(element)));
+-      if (!elementName || !this.isAstClass(elementName))
+-        throw new Error(`${context}: List of non-AST '${elementName}'`);
+-      return { k: "ast-list", element: normalizeClassName(elementName) };
++      if (elementName && this.isAstClass(elementName))
++        return { k: "ast-list", element: normalizeClassName(elementName) };
++      return { k: "arena-list", element: this.wireOf(element, context) };
+     }
+
+     if (name === "::std::vector") {
+diff --git a/src/js/cxx/reflection.cc b/src/js/cxx/reflection.cc
+index fa70aee..17829e7 100644
+--- a/src/js/cxx/reflection.cc
++++ b/src/js/cxx/reflection.cc
+@@ -338,7 +338,7 @@ constexpr int SpliceMemberExpressionASTSlotBase =
+ constexpr int MemberExpressionASTSlotBase =
+     SpliceMemberExpressionASTSlotBase + 12;
+
+-constexpr int PostIncrExpressionASTSlotBase = MemberExpressionASTSlotBase + 13;
++constexpr int PostIncrExpressionASTSlotBase = MemberExpressionASTSlotBase + 14;
+
+ constexpr int CppCastExpressionASTSlotBase = PostIncrExpressionASTSlotBase + 10;
+
+@@ -404,7 +404,7 @@ constexpr int CastExpressionASTSlotBase = DeleteExpressionASTSlotBase + 11;
+ constexpr int ImplicitCastExpressionASTSlotBase = CastExpressionASTSlotBase + 9;
+
+ constexpr int ConstExpressionASTSlotBase =
+-    ImplicitCastExpressionASTSlotBase + 9;
++    ImplicitCastExpressionASTSlotBase + 10;
+
+ constexpr int BinaryExpressionASTSlotBase = ConstExpressionASTSlotBase + 7;
+
+@@ -6771,21 +6771,27 @@ auto readAST(std::intptr_t handle, int slot) -> double {
+     case MemberExpressionASTSlotBase + 9: {
+       auto self = static_cast<const ::cxx::MemberExpressionAST*>(
+           reinterpret_cast<const ::cxx::AST*>(handle));
+-      return static_cast<double>(self->accessOp);
++      return static_cast<double>(
++          reinterpret_cast<std::intptr_t>(self->subobjectPath));
+     }
+     case MemberExpressionASTSlotBase + 10: {
+       auto self = static_cast<const ::cxx::MemberExpressionAST*>(
+           reinterpret_cast<const ::cxx::AST*>(handle));
+-      return static_cast<double>(self->isTemplateIntroduced);
++      return static_cast<double>(self->accessOp);
+     }
+     case MemberExpressionASTSlotBase + 11: {
++      auto self = static_cast<const ::cxx::MemberExpressionAST*>(
++          reinterpret_cast<const ::cxx::AST*>(handle));
++      return static_cast<double>(self->isTemplateIntroduced);
++    }
++    case MemberExpressionASTSlotBase + 12: {
+       auto self = static_cast<const ::cxx::MemberExpressionAST*>(
+           reinterpret_cast<const ::cxx::AST*>(handle));
+       return static_cast<double>(const_cast<::cxx::MemberExpressionAST*>(self)
+                                      ->firstSourceLocation()
+                                      .index());
+     }
+-    case MemberExpressionASTSlotBase + 12: {
++    case MemberExpressionASTSlotBase + 13: {
+       auto self = static_cast<const ::cxx::MemberExpressionAST*>(
+           reinterpret_cast<const ::cxx::AST*>(handle));
+       return static_cast<double>(const_cast<::cxx::MemberExpressionAST*>(self)
+@@ -8146,9 +8152,15 @@ auto readAST(std::intptr_t handle, int slot) -> double {
+     case ImplicitCastExpressionASTSlotBase + 6: {
+       auto self = static_cast<const ::cxx::ImplicitCastExpressionAST*>(
+           reinterpret_cast<const ::cxx::AST*>(handle));
+-      return static_cast<double>(self->isVirtualDispatch);
++      return static_cast<double>(
++          reinterpret_cast<std::intptr_t>(self->subobjectPath));
+     }
+     case ImplicitCastExpressionASTSlotBase + 7: {
++      auto self = static_cast<const ::cxx::ImplicitCastExpressionAST*>(
++          reinterpret_cast<const ::cxx::AST*>(handle));
++      return static_cast<double>(self->isVirtualDispatch);
++    }
++    case ImplicitCastExpressionASTSlotBase + 8: {
+       auto self = static_cast<const ::cxx::ImplicitCastExpressionAST*>(
+           reinterpret_cast<const ::cxx::AST*>(handle));
+       return static_cast<double>(
+@@ -8156,7 +8168,7 @@ auto readAST(std::intptr_t handle, int slot) -> double {
+               ->firstSourceLocation()
+               .index());
+     }
+-    case ImplicitCastExpressionASTSlotBase + 8: {
++    case ImplicitCastExpressionASTSlotBase + 9: {
+       auto self = static_cast<const ::cxx::ImplicitCastExpressionAST*>(
+           reinterpret_cast<const ::cxx::AST*>(handle));
+       return static_cast<double>(
+diff --git a/src/parser/cxx/ast.cc b/src/parser/cxx/ast.cc
+index 373fa37..1c45d1b 100644
+--- a/src/parser/cxx/ast.cc
++++ b/src/parser/cxx/ast.cc
+@@ -9294,6 +9294,7 @@ auto MemberExpressionAST::clone(Arena* arena) -> MemberExpressionAST* {
+   if (unqualifiedId) node->unqualifiedId = unqualifiedId->clone(arena);
+
+   node->symbol = symbol;
++  node->subobjectPath = clone_symbol_path(arena, subobjectPath);
+   node->accessOp = accessOp;
+   node->isTemplateIntroduced = isTemplateIntroduced;
+   node->valueCategory = valueCategory;
+@@ -10497,6 +10498,7 @@ auto ImplicitCastExpressionAST::clone(Arena* arena)
+
+   node->castKind = castKind;
+   node->conversionFunction = conversionFunction;
++  node->subobjectPath = clone_symbol_path(arena, subobjectPath);
+   node->isVirtualDispatch = isVirtualDispatch;
+   node->valueCategory = valueCategory;
+   node->type = type;
+diff --git a/src/parser/cxx/ast.h b/src/parser/cxx/ast.h
+index 346ff82..1e93fbe 100644
+--- a/src/parser/cxx/ast.h
++++ b/src/parser/cxx/ast.h
+@@ -33,6 +33,7 @@
+
+ #include <optional>
+ #include <ranges>
++#include <span>
+
+ namespace cxx {
+
+@@ -127,6 +128,29 @@ auto make_list_node(Arena* arena, T* element = nullptr) -> List<T*>* {
+   return list;
+ }
+
++[[nodiscard]] inline auto make_symbol_path(
++    Arena* arena, std::span<Symbol* const> symbols) -> List<Symbol*>* {
++  List<Symbol*>* result = nullptr;
++  auto tail = &result;
++  for (auto symbol : symbols) {
++    *tail = make_list_node<Symbol>(arena, symbol);
++    tail = &(*tail)->next;
++  }
++  return result;
++}
++
++[[nodiscard]] inline auto clone_symbol_path(Arena* arena,
++                                            List<Symbol*>* path)
++    -> List<Symbol*>* {
++  List<Symbol*>* result = nullptr;
++  auto tail = &result;
++  for (auto symbol : ListView(path)) {
++    *tail = make_list_node<Symbol>(arena, symbol);
++    tail = &(*tail)->next;
++  }
++  return result;
++}
++
+ [[nodiscard]] inline auto firstSourceLocation(SourceLocation loc)
+     -> SourceLocation {
+   return loc;
+@@ -3888,6 +3912,8 @@ class MemberExpressionAST final : public ExpressionAST {
+   SourceLocation templateLoc;
+   UnqualifiedIdAST* unqualifiedId = nullptr;
+   Symbol* symbol = nullptr;
++  // Ordered storage subobjects selected by semantic resolution.
++  List<Symbol*>* subobjectPath = nullptr;
+   TokenKind accessOp = TokenKind::T_EOF_SYMBOL;
+   bool isTemplateIntroduced = false;
+
+@@ -4757,6 +4783,8 @@ class ImplicitCastExpressionAST final : public ExpressionAST {
+   ExpressionAST* expression = nullptr;
+   ImplicitCastKind castKind = ImplicitCastKind::kIdentity;
+   FunctionSymbol* conversionFunction = nullptr;
++  // Ordered storage subobjects selected by semantic resolution.
++  List<Symbol*>* subobjectPath = nullptr;
+   bool isVirtualDispatch = false;
+
+   void accept(ASTVisitor* visitor) override { visitor->visit(this); }
+diff --git a/src/parser/cxx/ast_interpreter.h b/src/parser/cxx/ast_interpreter.h
+index 894e428..b0428d1 100644
+--- a/src/parser/cxx/ast_interpreter.h
++++ b/src/parser/cxx/ast_interpreter.h
+@@ -388,6 +388,9 @@ class ASTInterpreter {
+
+   [[nodiscard]] auto memberReceiver(MemberExpressionAST* ast) -> Receiver;
+
++  [[nodiscard]] auto applySubobjectPath(
++      Receiver receiver, List<Symbol*>* subobjectPath) -> Receiver;
++
+   [[nodiscard]] auto addressOfField(const Receiver& receiver,
+                                     FieldSymbol* field)
+       -> std::optional<ConstValue>;
+diff --git a/src/parser/cxx/ast_interpreter_expressions.cc b/src/parser/cxx/ast_interpreter_expressions.cc
+index 655f988..253b749 100644
+--- a/src/parser/cxx/ast_interpreter_expressions.cc
++++ b/src/parser/cxx/ast_interpreter_expressions.cc
+@@ -887,8 +887,37 @@ auto ASTInterpreter::lvalue(ExpressionAST* ast) -> ConstValue* {
+       ast = nested->expression;
+       continue;
+     }
++    if (auto cast = ast_cast<CppCastExpressionAST>(ast)) {
++      if (!is_glvalue(cast)) break;
++      ast = cast->expression;
++      continue;
++    }
++    if (auto cast = ast_cast<CastExpressionAST>(ast)) {
++      if (!is_glvalue(cast)) break;
++      ast = cast->expression;
++      continue;
++    }
+     if (auto cast = ast_cast<ImplicitCastExpressionAST>(ast)) {
+       if (!is_glvalue(cast)) break;
++      if (cast->castKind == ImplicitCastKind::kDerivedToBaseConversion) {
++        auto slot = lvalue(cast->expression);
++        for (auto symbol : ListView(cast->subobjectPath)) {
++          auto base = symbol_cast<BaseClassSymbol>(symbol);
++          if (base && base->isVirtual()) return nullptr;
++          auto object =
++              slot ? std::get_if<std::shared_ptr<ConstObject>>(slot) : nullptr;
++          if (!object || !*object) return nullptr;
++          slot = nullptr;
++          for (auto& member : (*object)->mutableMembers()) {
++            if (member.symbol == symbol) {
++              slot = &member.value;
++              break;
++            }
++          }
++          if (!slot) return nullptr;
++        }
++        return slot;
++      }
+       ast = cast->expression;
+       continue;
+     }
+@@ -947,8 +976,18 @@ auto ASTInterpreter::lvalue(ExpressionAST* ast) -> ConstValue* {
+     if (!member->symbol) return nullptr;
+     auto field = symbol_cast<FieldSymbol>(member->symbol);
+     if (!field || field->isStatic()) return nullptr;
+-
+-    if (auto object = memberObject(member)) return subobjectSlot(object, field);
++    auto receiver = memberReceiver(member);
++    if (receiver.address) {
++      auto address = addressOfField(receiver, field);
++      auto result =
++          address ? std::get_if<std::shared_ptr<ConstAddress>>(&*address)
++                  : nullptr;
++      return result && *result ? addressSlot(**result, 0) : nullptr;
++    }
++    if (receiver.object) {
++      for (auto& subobject : receiver.object->mutableMembers())
++        if (subobject.symbol == field) return &subobject.value;
++    }
+     return nullptr;
+   }
+
+@@ -1116,24 +1155,50 @@ auto ASTInterpreter::addressSlot(const ConstAddress& address,
+
+ auto ASTInterpreter::memberObject(MemberExpressionAST* ast)
+     -> std::shared_ptr<ConstObject> {
+-  auto value = expression(ast->baseExpression);
+-  if (!value) {
++  auto receiver = memberReceiver(ast);
++  if (receiver.object) return receiver.object;
++  if (receiver.address) {
++    auto value = loadAddress(*receiver.address, 0);
++    if (value) {
++      auto object = std::get_if<std::shared_ptr<ConstObject>>(&*value);
++      if (object) return *object;
++    }
++  }
++  if (!receiver.address) {
+     auto base = Initializer{ast->baseExpression}.clause();
+     if (auto id = ast_cast<IdExpressionAST>(base);
+         id && symbol_cast<VariableSymbol>(id->symbol) &&
+         traits.is_empty(traits.remove_cvref(id->type)))
+       return std::make_shared<ConstObject>(traits.remove_cvref(id->type));
+-    return {};
+   }
+-  if (ast->accessOp == TokenKind::T_MINUS_GREATER) {
+-    if (auto address = std::get_if<std::shared_ptr<ConstAddress>>(&*value)) {
+-      if (!*address) return {};
+-      value = loadAddress(**address, 0);
++  return {};
++}
++
++auto ASTInterpreter::applySubobjectPath(
++    Receiver receiver, List<Symbol*>* subobjectPath) -> Receiver {
++  for (auto symbol : ListView(subobjectPath)) {
++    auto base = symbol_cast<BaseClassSymbol>(symbol);
++    if (base && base->isVirtual()) return {};
++
++    if (receiver.address)
++      receiver.address =
++          std::make_shared<ConstAddress>(receiver.address, symbol);
++
++    if (!receiver.object) continue;
++    const ConstValue* value = nullptr;
++    for (const auto& member : receiver.object->members()) {
++      if (member.symbol == symbol) {
++        value = &member.value;
++        break;
++      }
+     }
++    auto nested = value
++                      ? std::get_if<std::shared_ptr<ConstObject>>(value)
++                      : nullptr;
++    receiver.object = nested ? *nested : nullptr;
++    if (!receiver.object && !receiver.address) return {};
+   }
+-  if (!value) return {};
+-  auto object = std::get_if<std::shared_ptr<ConstObject>>(&*value);
+-  return object ? *object : nullptr;
++  return receiver;
+ }
+
+ auto ASTInterpreter::memberReceiver(MemberExpressionAST* ast) -> Receiver {
+@@ -1145,11 +1210,11 @@ auto ASTInterpreter::memberReceiver(MemberExpressionAST* ast) -> Receiver {
+   if (!value) return result;
+   if (auto address = std::get_if<std::shared_ptr<ConstAddress>>(&*value)) {
+     result.address = *address;
+-    return result;
+-  }
+-  if (auto object = std::get_if<std::shared_ptr<ConstObject>>(&*value))
++  } else if (auto object =
++                 std::get_if<std::shared_ptr<ConstObject>>(&*value)) {
+     result.object = *object;
+-  return result;
++  }
++  return applySubobjectPath(std::move(result), ast->subobjectPath);
+ }
+
+ auto ASTInterpreter::addressOfField(const Receiver& receiver,
+@@ -1157,7 +1222,10 @@ auto ASTInterpreter::addressOfField(const Receiver& receiver,
+     -> std::optional<ConstValue> {
+   const Type* receiverType = nullptr;
+   if (receiver.address && receiver.address->symbol()) {
+-    receiverType = traits.remove_cvref(receiver.address->symbol()->type());
++    auto symbol = receiver.address->symbol();
++    if (auto base = symbol_cast<BaseClassSymbol>(symbol))
++      symbol = base->symbol();
++    receiverType = symbol ? traits.remove_cvref(symbol->type()) : nullptr;
+     if (traits.is_array(receiverType))
+       receiverType = traits.remove_extent(receiverType);
+   } else if (receiver.object) {
+@@ -1207,8 +1275,29 @@ auto ASTInterpreter::addressOfLvalue(ExpressionAST* ast)
+       ast = nested->expression;
+       continue;
+     }
++    if (auto cast = ast_cast<CppCastExpressionAST>(ast)) {
++      if (!is_glvalue(cast)) break;
++      ast = cast->expression;
++      continue;
++    }
++    if (auto cast = ast_cast<CastExpressionAST>(ast)) {
++      if (!is_glvalue(cast)) break;
++      ast = cast->expression;
++      continue;
++    }
+     if (auto cast = ast_cast<ImplicitCastExpressionAST>(ast)) {
+       if (!is_glvalue(cast)) break;
++      if (cast->castKind == ImplicitCastKind::kDerivedToBaseConversion) {
++        auto value = addressOfLvalue(cast->expression);
++        auto address =
++            value ? std::get_if<std::shared_ptr<ConstAddress>>(&*value)
++                  : nullptr;
++        if (!address || !*address) return std::nullopt;
++        auto receiver =
++            applySubobjectPath(Receiver{{}, *address}, cast->subobjectPath);
++        if (!receiver.address) return std::nullopt;
++        return ConstValue{std::move(receiver.address)};
++      }
+       ast = cast->expression;
+       continue;
+     }
+@@ -1889,9 +1978,18 @@ auto ASTInterpreter::ExpressionVisitor::operator()(
+
+ auto ASTInterpreter::ExpressionVisitor::operator()(MemberExpressionAST* ast)
+     -> ExpressionResult {
+-  if (auto object = interp.memberObject(ast)) {
+-    if (ast->symbol) {
+-      if (auto value = object->subobject(ast->symbol)) return *value;
++  if (auto field = symbol_cast<FieldSymbol>(ast->symbol);
++      field && !field->isStatic()) {
++    auto receiver = interp.memberReceiver(ast);
++    if (receiver.address) {
++      auto address = interp.addressOfField(receiver, field);
++      auto result =
++          address ? std::get_if<std::shared_ptr<ConstAddress>>(&*address)
++                  : nullptr;
++      if (result && *result) return interp.loadAddress(**result, 0);
++    } else if (receiver.object) {
++      for (const auto& subobject : receiver.object->members())
++        if (subobject.symbol == field) return subobject.value;
+     }
+   }
+
+@@ -2453,6 +2551,24 @@ auto ASTInterpreter::ExpressionVisitor::operator()(
+   auto value = evaluate(ast->expression);
+   if (!value.has_value()) return std::nullopt;
+
++  if (ast->castKind == ImplicitCastKind::kDerivedToBaseConversion) {
++    Receiver receiver;
++    if (auto address =
++            std::get_if<std::shared_ptr<ConstAddress>>(&*value)) {
++      receiver.address = *address;
++    } else if (auto object =
++                   std::get_if<std::shared_ptr<ConstObject>>(&*value)) {
++      receiver.object = *object;
++    } else {
++      return std::nullopt;
++    }
++    receiver =
++        interp.applySubobjectPath(std::move(receiver), ast->subobjectPath);
++    if (receiver.address) return ConstValue{std::move(receiver.address)};
++    if (receiver.object) return ConstValue{std::move(receiver.object)};
++    return std::nullopt;
++  }
++
+   if (ast->castKind == ImplicitCastKind::kVectorSplat) {
+     auto vectorType = unqualified_cast<VectorType>(ast->type);
+     if (!vectorType) return std::nullopt;
+diff --git a/src/parser/cxx/ast_rewriter_expressions.cc b/src/parser/cxx/ast_rewriter_expressions.cc
+index bd798f9..6891795 100644
+--- a/src/parser/cxx/ast_rewriter_expressions.cc
++++ b/src/parser/cxx/ast_rewriter_expressions.cc
+@@ -1260,6 +1260,10 @@ auto ASTRewriter::ExpressionVisitor::operator()(MemberExpressionAST* ast)
+   copy->templateLoc = ast->templateLoc;
+   copy->unqualifiedId = rewrite.unqualifiedId(ast->unqualifiedId);
+   copy->symbol = rewrite.remapSymbol(ast->symbol);
++  std::vector<Symbol*> subobjectPath;
++  for (auto symbol : ListView(ast->subobjectPath))
++    subobjectPath.push_back(rewrite.remapSymbol(symbol));
++  copy->subobjectPath = make_symbol_path(arena(), subobjectPath);
+   copy->accessOp = ast->accessOp;
+   copy->isTemplateIntroduced = ast->isTemplateIntroduced;
+
+@@ -1310,9 +1314,31 @@ auto ASTRewriter::ExpressionVisitor::operator()(MemberExpressionAST* ast)
+           copy->type = nullptr;
+           rewrite.markSubstitutionFailure();
+         } else if (lookupScope && memberName) {
+-          auto symbol = qualifiedLookup(lookupScope, memberName);
++          ClassMemberLookup lookup;
++          auto lookupClass = resolveClassScope(lookupScope);
++          if (lookupClass) {
++            lookup = lookupClassMember(lookupClass, memberName,
++                                       [](Symbol*) { return true; });
++          } else {
++            lookup.symbol = qualifiedLookup(lookupScope, memberName);
++          }
++          auto symbol = lookup.symbol;
+           if (symbol) {
+             copy->symbol = symbol;
++            std::vector<Symbol*> subobjectPath;
++            if (is_non_static_member(symbol) && lookupClass) {
++              if (lookupClass == classSymbol) {
++                subobjectPath = std::move(lookup.subobjectPath);
++              } else if (auto prefix =
++                             lookupBaseSubobjectPath(classSymbol,
++                                                     lookupClass)) {
++                subobjectPath = std::move(*prefix);
++                subobjectPath.insert(subobjectPath.end(),
++                                     lookup.subobjectPath.begin(),
++                                     lookup.subobjectPath.end());
++              }
++            }
++            copy->subobjectPath = make_symbol_path(arena(), subobjectPath);
+             if (auto function = designatedFunction(symbol)) {
+               copy->type = completedSymbolType(translationUnit(), function);
+             } else {
+@@ -1749,6 +1775,10 @@ auto ASTRewriter::ExpressionVisitor::operator()(ImplicitCastExpressionAST* ast)
+   copy->expression = expression;
+   copy->castKind = ast->castKind;
+   copy->conversionFunction = ast->conversionFunction;
++  std::vector<Symbol*> subobjectPath;
++  for (auto symbol : ListView(ast->subobjectPath))
++    subobjectPath.push_back(rewrite.remapSymbol(symbol));
++  copy->subobjectPath = make_symbol_path(arena(), subobjectPath);
+   copy->isVirtualDispatch = ast->isVirtualDispatch;
+
+   return copy;
+diff --git a/src/parser/cxx/binder_complete_class.cc b/src/parser/cxx/binder_complete_class.cc
+index bf11348..c7702b9 100644
+--- a/src/parser/cxx/binder_complete_class.cc
++++ b/src/parser/cxx/binder_complete_class.cc
+@@ -1167,6 +1167,8 @@ void Binder::CompleteClass::forEachComparisonSubobject(
+     conversion->castKind = ImplicitCastKind::kDerivedToBaseConversion;
+     conversion->expression = object;
+     conversion->type = baseType;
++    if (auto path = lookupBaseSubobjectPath(classSymbol, base))
++      conversion->subobjectPath = make_symbol_path(pool, *path);
+     conversion->valueCategory = ValueCategory::kLValue;
+     return conversion;
+   };
+@@ -1764,6 +1766,8 @@ void Binder::CompleteClass::synthesizeCompleteObjectCtor(FunctionSymbol* ctor) {
+       cast->type =
+           isCopy ? control()->getQualType(vbase->type(), CvQualifiers::kConst)
+                  : vbase->type();
++      if (auto path = lookupBaseSubobjectPath(classSymbol, vbase))
++        cast->subobjectPath = make_symbol_path(pool, *path);
+       cast->valueCategory = ValueCategory::kLValue;
+       init->expressionList = make_list_node<ExpressionAST>(pool, cast);
+     } else if (vbaseCtor) {
+@@ -1827,6 +1831,8 @@ void Binder::CompleteClass::synthesizeCompleteObjectDtor(FunctionSymbol* dtor) {
+     cast->castKind = ImplicitCastKind::kDerivedToBaseConversion;
+     cast->expression = makeThisExpr();
+     cast->type = control()->getPointerType(vbase->type());
++    if (auto path = lookupBaseSubobjectPath(classSymbol, vbase))
++      cast->subobjectPath = make_symbol_path(pool, *path);
+     cast->valueCategory = ValueCategory::kPrValue;
+
+     appendStatement(makeStructorCallStatement(vbaseDtor, cast));
+@@ -2061,6 +2067,8 @@ void Binder::CompleteClass::synthesizeCopyMoveCtorBody(FunctionSymbol* fn,
+     cast->type =
+         isMove ? baseSym->type()
+                : control()->getQualType(baseSym->type(), CvQualifiers::kConst);
++    if (auto path = lookupBaseSubobjectPath(classSymbol, baseSym))
++      cast->subobjectPath = make_symbol_path(pool, *path);
+     cast->valueCategory =
+         isMove ? ValueCategory::kXValue : ValueCategory::kLValue;
+     init->expressionList = make_list_node<ExpressionAST>(pool, cast);
+@@ -2158,6 +2166,8 @@ void Binder::CompleteClass::synthesizeCopyMoveAssignBody(FunctionSymbol* fn,
+     thisCast->castKind = ImplicitCastKind::kDerivedToBaseConversion;
+     thisCast->expression = makeThisExpr();
+     thisCast->type = control()->getPointerType(baseSym->type());
++    if (auto path = lookupBaseSubobjectPath(classSymbol, baseSym))
++      thisCast->subobjectPath = make_symbol_path(pool, *path);
+     thisCast->valueCategory = ValueCategory::kPrValue;
+
+     auto lhs = UnaryExpressionAST::create(pool);
+@@ -2172,6 +2182,8 @@ void Binder::CompleteClass::synthesizeCopyMoveAssignBody(FunctionSymbol* fn,
+     rhs->type =
+         isMove ? baseSym->type()
+                : control()->getQualType(baseSym->type(), CvQualifiers::kConst);
++    if (auto path = lookupBaseSubobjectPath(classSymbol, baseSym))
++      rhs->subobjectPath = make_symbol_path(pool, *path);
+     rhs->valueCategory =
+         isMove ? ValueCategory::kXValue : ValueCategory::kLValue;
+
+diff --git a/src/parser/cxx/name_lookup.cc b/src/parser/cxx/name_lookup.cc
+index e147b78..50f7e3a 100644
+--- a/src/parser/cxx/name_lookup.cc
++++ b/src/parser/cxx/name_lookup.cc
+@@ -997,27 +997,34 @@ auto lookupClassMember(ClassSymbol* scope, const Name* name,
+   scope = scope->resolvedDefinition();
+   if (!scope) return {};
+   std::vector<ScopeSymbol*> visited;
++  std::vector<Symbol*> directPath;
+   if (auto symbol =
+-          detail::searchScope(scope, name, visited, accept, false, false))
+-    return {symbol, false};
++          detail::searchScope(scope, name, visited, accept, false, false,
++                              &directPath))
++    return {symbol, std::move(directPath), false};
+   if (scope->baseClasses().empty()) return {};
+
+   struct Subobject {
+     ClassSymbol* type;
+     std::vector<int> bases;
++    // Ordered base-class symbols from the lookup root to this subobject.
++    std::vector<Symbol*> path;
+   };
+   struct LookupSet {
+     Symbol* declaration = nullptr;
+     std::vector<int> subobjects;
++    // Anonymous storage steps below the subobject containing the declaration.
++    std::vector<Symbol*> subobjectPath;
+     bool ambiguous = false;
+   };
+   std::vector<Subobject> graph;
+   std::vector<std::pair<ClassSymbol*, int>> virtualBases;
+   std::vector<ClassSymbol*> path;
+-  auto build = [&](auto&& self, ClassSymbol* cls) -> int {
++  auto build = [&](auto&& self, ClassSymbol* cls,
++                   std::vector<Symbol*> subobjectPath) -> int {
+     cls = cls->resolvedDefinition();
+     auto index = int(graph.size());
+-    graph.push_back({cls, {}});
++    graph.push_back({cls, {}, std::move(subobjectPath)});
+     if (std::ranges::contains(path, cls)) return index;
+     path.push_back(cls);
+     for (auto base : cls->baseClasses()) {
+@@ -1030,7 +1037,9 @@ auto lookupClassMember(ClassSymbol* scope, const Name* name,
+           if (type == baseClass) baseIndex = candidate;
+       }
+       if (baseIndex < 0) {
+-        baseIndex = self(self, baseClass);
++        auto basePath = graph[index].path;
++        basePath.push_back(base);
++        baseIndex = self(self, baseClass, std::move(basePath));
+         if (base->isVirtual()) virtualBases.emplace_back(baseClass, baseIndex);
+       }
+       graph[index].bases.push_back(baseIndex);
+@@ -1038,7 +1047,7 @@ auto lookupClassMember(ClassSymbol* scope, const Name* name,
+     path.pop_back();
+     return index;
+   };
+-  build(build, scope);
++  build(build, scope, {});
+
+   auto isBase = [&](auto&& self, int base, int derived) -> bool {
+     if (base == derived) return true;
+@@ -1064,7 +1073,8 @@ auto lookupClassMember(ClassSymbol* scope, const Name* name,
+     LookupSet result;
+     std::vector<ScopeSymbol*> directVisited;
+     result.declaration = detail::searchScope(
+-        graph[index].type, name, directVisited, accept, false, false);
++        graph[index].type, name, directVisited, accept, false, false,
++        &result.subobjectPath);
+     if (result.declaration) {
+       result.subobjects.push_back(index);
+     } else {
+@@ -1098,7 +1108,52 @@ auto lookupClassMember(ClassSymbol* scope, const Name* name,
+     return result;
+   };
+   auto result = lookup(lookup, 0);
+-  return {result.declaration, result.ambiguous};
++  if (result.subobjects.size() > 1 &&
++      is_non_static_member(resolve_using_declaration(result.declaration))) {
++    result.ambiguous = true;
++  }
++  std::vector<Symbol*> subobjectPath;
++  if (result.subobjects.size() == 1) {
++    subobjectPath = graph[result.subobjects.front()].path;
++    subobjectPath.insert(subobjectPath.end(), result.subobjectPath.begin(),
++                         result.subobjectPath.end());
++  }
++  return {result.declaration, std::move(subobjectPath), result.ambiguous};
++}
++
++auto lookupBaseSubobjectPath(ClassSymbol* derived, ClassSymbol* base)
++    -> std::optional<std::vector<Symbol*>> {
++  if (!derived || !base) return std::nullopt;
++  derived = derived->resolvedDefinition();
++  base = base->resolvedDefinition();
++  if (!derived || !base) return std::nullopt;
++  if (derived == base) return std::vector<Symbol*>{};
++  if (!derived->baseSubobjectInfo(base).isUniqueSubobject())
++    return std::nullopt;
++
++  std::vector<ClassSymbol*> visited;
++  std::vector<Symbol*> path;
++  auto find = [&](auto&& self, ClassSymbol* current) -> bool {
++    current = current->resolvedDefinition();
++    if (current == base) return true;
++    if (std::ranges::contains(visited, current)) return false;
++    visited.push_back(current);
++    for (auto baseSpecifier : current->baseClasses()) {
++      auto baseClass = symbol_cast<ClassSymbol>(baseSpecifier->symbol());
++      if (!baseClass) continue;
++      path.push_back(baseSpecifier);
++      if (self(self, baseClass)) return true;
++      path.pop_back();
++    }
++    visited.pop_back();
++    return false;
++  };
++  if (!find(find, derived)) return std::nullopt;
++  return path;
++}
++
++auto resolveClassScope(Symbol* symbol) -> ClassSymbol* {
++  return symbol_cast<ClassSymbol>(resolveTypeScope(symbol));
+ }
+
+ }  // namespace cxx
+diff --git a/src/parser/cxx/name_lookup.h b/src/parser/cxx/name_lookup.h
+index 393a8ca..26f0384 100644
+--- a/src/parser/cxx/name_lookup.h
++++ b/src/parser/cxx/name_lookup.h
+@@ -40,6 +40,8 @@ namespace cxx {
+
+ struct ClassMemberLookup {
+   Symbol* symbol = nullptr;
++  // Ordered storage subobjects from the lookup scope to the declaration.
++  std::vector<Symbol*> subobjectPath;
+   bool ambiguous = false;
+ };
+
+@@ -47,20 +49,28 @@ struct ClassMemberLookup {
+                                      const std::function<bool(Symbol*)>& accept)
+     -> ClassMemberLookup;
+
++[[nodiscard]] auto lookupBaseSubobjectPath(ClassSymbol* derived,
++                                           ClassSymbol* base)
++    -> std::optional<std::vector<Symbol*>>;
++
++[[nodiscard]] auto resolveClassScope(Symbol* symbol) -> ClassSymbol*;
++
+ namespace detail {
+ template <typename Predicate>
+ [[nodiscard]] auto searchScope(ScopeSymbol* scope, const Name* name,
+                                std::vector<ScopeSymbol*>& visited,
+                                Predicate accept,
+                                bool followUsingDirectives = true,
+-                               bool searchBaseClasses = true) -> Symbol* {
++                               bool searchBaseClasses = true,
++                               std::vector<Symbol*>* subobjectPath = nullptr)
++    -> Symbol* {
+   if (std::ranges::contains(visited, scope)) return nullptr;
+   visited.push_back(scope);
+
+   if (auto cls = symbol_cast<ClassSymbol>(scope)) {
+     if (auto def = cls->definition(); def && def != cls)
+       return searchScope(def, name, visited, accept, followUsingDirectives,
+-                         searchBaseClasses);
++                         searchBaseClasses, subobjectPath);
+   }
+
+   Symbol* classOrEnumDeclaration = nullptr;
+@@ -78,8 +88,31 @@ template <typename Predicate>
+
+     if (auto u = symbol_cast<UsingDeclarationSymbol>(symbol);
+         u && u->target()) {
+-      if (auto found = consider(resolve_using_declaration(symbol)))
++      auto target = resolve_using_declaration(symbol);
++      if (auto found = consider(target)) {
++        if (subobjectPath && is_non_static_member(target)) {
++          auto classSymbol = symbol_cast<ClassSymbol>(scope);
++          auto declarator = u->declarator();
++          auto designatingClass =
++              declarator && declarator->nestedNameSpecifier
++                  ? resolveClassScope(
++                        declarator->nestedNameSpecifier->symbol)
++                  : nullptr;
++          if (classSymbol && designatingClass) {
++            auto prefix =
++                lookupBaseSubobjectPath(classSymbol, designatingClass);
++            auto selected = lookupClassMember(designatingClass, name, accept);
++            if (prefix && selected.symbol &&
++                resolve_using_declaration(selected.symbol) == target) {
++              *subobjectPath = std::move(*prefix);
++              subobjectPath->insert(subobjectPath->end(),
++                                    selected.subobjectPath.begin(),
++                                    selected.subobjectPath.end());
++            }
++          }
++        }
+         return found;
++      }
+     }
+
+     if (auto found = consider(symbol)) return found;
+@@ -91,13 +124,33 @@ template <typename Predicate>
+     for (auto member : classSymbol->find(/*unnamed=*/nullptr)) {
+       auto nestedClass = symbol_cast<ClassSymbol>(member);
+       if (!nestedClass) continue;
++      std::vector<Symbol*> nestedPath;
+       if (auto s = searchScope(nestedClass, name, visited, accept,
+-                               followUsingDirectives))
++                               followUsingDirectives, true, &nestedPath)) {
++        if (subobjectPath) {
++          auto unnamedMembers = classSymbol->find(/*unnamed=*/nullptr);
++          auto field = std::ranges::find_if(
++              unnamedMembers, [&](Symbol* candidate) {
++                auto unnamedField = symbol_cast<FieldSymbol>(candidate);
++                auto fieldType = unnamedField
++                                     ? unqualified_cast<ClassType>(
++                                           unqualified_type(unnamedField->type()))
++                                     : nullptr;
++                return fieldType && fieldType->symbol() == nestedClass;
++              });
++          if (field != unnamedMembers.end()) subobjectPath->push_back(*field);
++          subobjectPath->insert(subobjectPath->end(), nestedPath.begin(),
++                                nestedPath.end());
++        }
+         return s;
++      }
+     }
+
+-    if (searchBaseClasses && !classSymbol->baseClasses().empty())
+-      return lookupClassMember(classSymbol, name, accept).symbol;
++    if (searchBaseClasses && !classSymbol->baseClasses().empty()) {
++      auto result = lookupClassMember(classSymbol, name, accept);
++      if (subobjectPath) *subobjectPath = std::move(result.subobjectPath);
++      return result.symbol;
++    }
+   }
+
+   if (!followUsingDirectives) return nullptr;
+diff --git a/src/parser/cxx/semantic_codec.cc b/src/parser/cxx/semantic_codec.cc
+index 141a830..4b3983d 100644
+--- a/src/parser/cxx/semantic_codec.cc
++++ b/src/parser/cxx/semantic_codec.cc
+@@ -5075,6 +5075,11 @@ void SemanticEncoder::writeAstMemberExpressionAST(
+   out.varU32(static_cast<std::uint32_t>(astRef(self->unqualifiedId)));
+   // ::cxx::MemberExpressionAST::symbol
+   out.varU32(static_cast<std::uint32_t>(symbolRef(self->symbol)));
++  // ::cxx::MemberExpressionAST::subobjectPath
++  out.varU32(static_cast<std::uint32_t>(
++      std::ranges::distance(cxx::ListView(self->subobjectPath))));
++  for (const auto& element : cxx::ListView(self->subobjectPath))
++    out.varU32(static_cast<std::uint32_t>(symbolRef(element)));
+   // ::cxx::MemberExpressionAST::accessOp
+   out.varU32(static_cast<std::uint32_t>(self->accessOp));
+   // ::cxx::MemberExpressionAST::isTemplateIntroduced
+@@ -5522,6 +5527,11 @@ void SemanticEncoder::writeAstImplicitCastExpressionAST(
+   out.varU32(static_cast<std::uint32_t>(self->castKind));
+   // ::cxx::ImplicitCastExpressionAST::conversionFunction
+   out.varU32(static_cast<std::uint32_t>(symbolRef(self->conversionFunction)));
++  // ::cxx::ImplicitCastExpressionAST::subobjectPath
++  out.varU32(static_cast<std::uint32_t>(
++      std::ranges::distance(cxx::ListView(self->subobjectPath))));
++  for (const auto& element : cxx::ListView(self->subobjectPath))
++    out.varU32(static_cast<std::uint32_t>(symbolRef(element)));
+   // ::cxx::ImplicitCastExpressionAST::isVirtualDispatch
+   out.boolean(self->isVirtualDispatch);
+ }
+@@ -15091,12 +15101,25 @@ void SemanticDecoder::readAstMemberExpressionAST(
+   // ::cxx::MemberExpressionAST::symbol
+   cxx::Symbol* value8 = symbolAt(SymbolRef{in.varU32()});
+   self->symbol = std::move(value8);
++  // ::cxx::MemberExpressionAST::subobjectPath
++  cxx::List<cxx::Symbol*>* value9 = nullptr;
++  {
++    const auto count10 = in.varCount(1);
++    auto tail11 = &value9;
++    for (std::uint32_t i12 = 0; ok() && i12 < count10; ++i12) {
++      cxx::Symbol* element13 = symbolAt(SymbolRef{in.varU32()});
++      *tail11 = new (arena()) std::remove_pointer_t<decltype(value9)>(
++          std::move(element13));
++      tail11 = &(*tail11)->next;
++    }
++  }
++  self->subobjectPath = value9;
+   // ::cxx::MemberExpressionAST::accessOp
+-  ::cxx::TokenKind value9 = static_cast<::cxx::TokenKind>(readEnum(in, 221));
+-  self->accessOp = std::move(value9);
++  ::cxx::TokenKind value14 = static_cast<::cxx::TokenKind>(readEnum(in, 221));
++  self->accessOp = std::move(value14);
+   // ::cxx::MemberExpressionAST::isTemplateIntroduced
+-  bool value10 = in.boolean();
+-  self->isTemplateIntroduced = std::move(value10);
++  bool value15 = in.boolean();
++  self->isTemplateIntroduced = std::move(value15);
+ }
+
+ void SemanticDecoder::readAstPostIncrExpressionAST(
+@@ -15835,9 +15858,22 @@ void SemanticDecoder::readAstImplicitCastExpressionAST(
+   cxx::FunctionSymbol* value5 =
+       symbol_cast<FunctionSymbol>(symbolAt(SymbolRef{in.varU32()}));
+   self->conversionFunction = std::move(value5);
++  // ::cxx::ImplicitCastExpressionAST::subobjectPath
++  cxx::List<cxx::Symbol*>* value6 = nullptr;
++  {
++    const auto count7 = in.varCount(1);
++    auto tail8 = &value6;
++    for (std::uint32_t i9 = 0; ok() && i9 < count7; ++i9) {
++      cxx::Symbol* element10 = symbolAt(SymbolRef{in.varU32()});
++      *tail8 = new (arena()) std::remove_pointer_t<decltype(value6)>(
++          std::move(element10));
++      tail8 = &(*tail8)->next;
++    }
++  }
++  self->subobjectPath = value6;
+   // ::cxx::ImplicitCastExpressionAST::isVirtualDispatch
+-  bool value6 = in.boolean();
+-  self->isVirtualDispatch = std::move(value6);
++  bool value11 = in.boolean();
++  self->isVirtualDispatch = std::move(value11);
+ }
+
+ void SemanticDecoder::readAstConstExpressionAST(
+diff --git a/src/parser/cxx/standard_conversion.cc b/src/parser/cxx/standard_conversion.cc
+index 2889bfe..aaf99b6 100644
+--- a/src/parser/cxx/standard_conversion.cc
++++ b/src/parser/cxx/standard_conversion.cc
+@@ -26,6 +26,7 @@
+ #include <cxx/control.h>
+ #include <cxx/literals.h>
+ #include <cxx/memory_layout.h>
++#include <cxx/name_lookup.h>
+ #include <cxx/names.h>
+ #include <cxx/overload_resolution.h>
+ #include <cxx/standard_conversion.h>
+@@ -2319,6 +2320,10 @@ void StandardConversion::wrapWithImplicitCast(ImplicitCastKind castKind,
+   }
+
+   if (castKind == ImplicitCastKind::kDerivedToBaseConversion) {
++    if (auto path = lookupBaseSubobjectPath(convertedClassSymbol(expr->type),
++                                            convertedClassSymbol(type))) {
++      cast->subobjectPath = make_symbol_path(arena_, *path);
++    }
+     const auto convertsPointer = traits.is_pointer(type);
+     if (!convertsPointer) {
+       if (is_glvalue(expr)) cast->valueCategory = expr->valueCategory;
+diff --git a/src/parser/cxx/type_checker.cc b/src/parser/cxx/type_checker.cc
+index 9ab82c5..cb027e2 100644
+--- a/src/parser/cxx/type_checker.cc
++++ b/src/parser/cxx/type_checker.cc
+@@ -7390,6 +7390,7 @@ auto TypeChecker::Visitor::checkUnambiguousMemberLookup(
+
+   if (lookup.ambiguous) return reportAmbiguous();
+   if (!is_non_static_member(member)) return true;
++  if (!lookup.subobjectPath.empty()) return true;
+   auto declaringClass = member->enclosingClass();
+   if (!declaringClass || declaringClass == classSymbol) return true;
+
+@@ -7501,7 +7502,15 @@ auto TypeChecker::Visitor::check_member_access(MemberExpressionAST* ast)
+     }
+   }
+
+-  auto symbol = qualifiedLookup(lookupScope, memberName);
++  ClassMemberLookup lookup;
++  auto lookupClass = resolveClassScope(lookupScope);
++  if (lookupClass) {
++    lookup = lookupClassMember(lookupClass, memberName,
++                               [](Symbol*) { return true; });
++  } else {
++    lookup.symbol = qualifiedLookup(lookupScope, memberName);
++  }
++  auto symbol = lookup.symbol;
+
+   if (lookupScope == classSymbol &&
+       !checkUnambiguousMemberLookup(classSymbol, memberName, symbol,
+@@ -7520,7 +7529,18 @@ auto TypeChecker::Visitor::check_member_access(MemberExpressionAST* ast)
+   }
+
+   ast->symbol = symbol;
+-
++  std::vector<Symbol*> subobjectPath;
++  if (symbol && is_non_static_member(symbol) && lookupClass) {
++    if (lookupClass == classSymbol) {
++      subobjectPath = std::move(lookup.subobjectPath);
++    } else if (auto prefix =
++                   lookupBaseSubobjectPath(classSymbol, lookupClass)) {
++      subobjectPath = std::move(*prefix);
++      subobjectPath.insert(subobjectPath.end(), lookup.subobjectPath.begin(),
++                           lookup.subobjectPath.end());
++    }
++  }
++  ast->subobjectPath = make_symbol_path(arena(), subobjectPath);
+   if (!symbol) {
+     if (in_template() && hasDependentBaseClass(check.unit_, classSymbol)) {
+       ast->type = dependent_type();

@@ -34,6 +34,74 @@ func.def @choose_right(%input: i32) -> (i32) {
 }
 
 // ====
+// Repeated base subobjects retain the selected inheritance path in reference
+// arguments and emitted specialization names.
+struct Base { unsigned value; };
+struct Left : Base {};
+struct Right : Base {};
+struct Both : Left, Right {};
+extern Both object;
+template <const unsigned& value>
+unsigned choose(unsigned input) {
+  if constexpr (&value == &object.Left::value) return input + 3;
+  return input + 7;
+}
+unsigned entry(unsigned input) {
+  return choose<object.Left::value>(input) +
+         choose<object.Right::value>(input);
+}
+
+// ----
+func.def public @entry(%input: i32) -> (i32) {
+  %2 = func.call @choose_object_Left_Base_value(%input) : (i32) -> (i32)
+  %3 = func.call @choose_object_Right_Base_value(%input) : (i32) -> (i32)
+  %4 = scalar.addi %2, %3 : i32
+  func.return %4 : i32
+}
+
+func.def @choose_object_Left_Base_value(%input: i32) -> (i32) {
+  %7 = scalar.constant 3 : i32
+  %8 = scalar.addi %input, %7 : i32
+  func.return %8 : i32
+}
+
+func.def @choose_object_Right_Base_value(%input: i32) -> (i32) {
+  %11 = scalar.constant 7 : i32
+  %12 = scalar.addi %input, %11 : i32
+  func.return %12 : i32
+}
+
+// ====
+// Unqualified using-declaration selection, anonymous members, reference
+// returns, and explicit base conversions preserve the same subobject identity
+// as their fully qualified spelling.
+// RUN: verify
+struct Base { unsigned value; };
+struct Left : Base {};
+struct Right : Base {};
+struct Both : Left, Right {
+  constexpr const Base& left_base() const {
+    return static_cast<const Left&>(*this);
+  }
+};
+struct Selected : Left, Right { using Left::value; };
+struct Anonymous { struct { struct { unsigned value; }; }; };
+extern Both object;
+extern Selected selected;
+extern Anonymous anonymous;
+template <const unsigned& value> struct Ref {};
+using SelectedValue = Ref<selected.value>;
+using QualifiedValue = Ref<selected.Left::value>;
+static_assert(__is_same(SelectedValue, QualifiedValue));
+static_assert(&selected.value == &selected.Left::value);
+using AnonymousValue = Ref<anonymous.value>;
+using Direct = Ref<object.Left::value>;
+using Returned = Ref<object.left_base().value>;
+using Converted = Ref<static_cast<const Left&>(object).value>;
+static_assert(__is_same(Direct, Returned));
+static_assert(__is_same(Direct, Converted));
+
+// ====
 // Field addresses retain their declared object through direct access,
 // reference-returning members, nested records, and arrays of records.
 struct Parameters {

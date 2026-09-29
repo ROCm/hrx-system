@@ -40,6 +40,7 @@ exports_files([
     "reference_parameter_binding.patch",
     "reference_template_arguments.patch",
     "rooted_subobject_addresses.patch",
+    "selected_subobject_paths.patch",
     "semantic_model_generation.patch",
     "template_lookahead.patch",
     "unsigned_complement.patch",

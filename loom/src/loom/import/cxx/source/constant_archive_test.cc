@@ -7,6 +7,7 @@
 #include <cxx/archive.h>
 #include <cxx/ast.h>
 #include <cxx/ast_interpreter.h>
+#include <cxx/ast_visitor.h>
 #include <cxx/control.h>
 #include <cxx/private/semantic_codec.h>
 #include <cxx/symbols.h>
@@ -20,6 +21,49 @@
 
 namespace loom::cxx_import {
 namespace {
+
+struct SubobjectPathCollector final : cxx::ASTVisitor {
+  // Paths retained by resolved member expressions.
+  std::vector<std::vector<cxx::Symbol*>> member_paths;
+  // Paths retained by resolved derived-to-base conversions.
+  std::vector<std::vector<cxx::Symbol*>> cast_paths;
+
+  bool preVisit(cxx::AST* ast) override {
+    if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(ast);
+        member && member->subobjectPath) {
+      member_paths.emplace_back(cxx::ListView(member->subobjectPath).begin(),
+                                cxx::ListView(member->subobjectPath).end());
+    }
+    if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(ast);
+        cast && cast->subobjectPath) {
+      cast_paths.emplace_back(cxx::ListView(cast->subobjectPath).begin(),
+                              cxx::ListView(cast->subobjectPath).end());
+    }
+    return true;
+  }
+};
+
+bool hasBasePath(const std::vector<std::vector<cxx::Symbol*>>& paths,
+                 std::initializer_list<cxx::Symbol*> targets) {
+  for (const auto& path : paths) {
+    if (path.size() != targets.size()) {
+      continue;
+    }
+    bool matches = true;
+    auto target = targets.begin();
+    for (auto* step : path) {
+      auto* base = cxx::symbol_cast<cxx::BaseClassSymbol>(step);
+      if (!base || base->symbol() != *target++) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) {
+      return true;
+    }
+  }
+  return false;
+}
 
 TEST(ConstantArchiveTest, PreservesComplexAndIndeterminateValues) {
   loom_cxx_import_options_t options;
@@ -274,6 +318,61 @@ TEST(ConstantArchiveTest, PreservesRootedSubobjectIdentity) {
                 resolved_specializations[previous]);
     }
   }
+}
+
+TEST(ConstantArchiveTest, PreservesSelectedSubobjectPaths) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  std::vector<std::uint8_t> bytes;
+  {
+    Source source(IREE_SV("struct Base { unsigned value; };"
+                          "struct Left : Base {}; struct Right : Base {};"
+                          "struct Both : Left, Right {};"
+                          "extern Both object;"
+                          "template<const unsigned&> struct Ref {};"
+                          "using Member = Ref<object.Left::value>;"
+                          "constexpr const unsigned& select(const Left& left) {"
+                          "  return left.value;"
+                          "}"
+                          "using Converted = "
+                          "    Ref<select(static_cast<const Left&>(object))>;"
+                          "static_assert(__is_same(Member, Converted));"),
+                  IREE_SV("selected_paths.cxx"), options);
+    cxx::ArchiveWriter writer;
+    cxx::SemanticArchiveRoots roots;
+    roots.ast = source.unit().ast();
+    roots.globalScope = source.unit().globalScope();
+    cxx::SemanticEncoder encoder(&source.unit());
+    ASSERT_TRUE(encoder(roots, writer));
+    bytes = writer();
+  }
+
+  Source destination(IREE_SV(""), IREE_SV("restored.cxx"), options);
+  cxx::ArchiveReader reader;
+  ASSERT_TRUE(reader(bytes)) << reader.error();
+  cxx::SemanticArchiveRoots restored;
+  cxx::SemanticDecoder decoder(&destination.unit());
+  ASSERT_TRUE(decoder(reader, restored)) << decoder.error();
+
+  auto base_symbols = restored.globalScope->find("Base");
+  ASSERT_FALSE(base_symbols.begin() == base_symbols.end());
+  auto left_symbols = restored.globalScope->find("Left");
+  ASSERT_FALSE(left_symbols.begin() == left_symbols.end());
+  auto* base = cxx::symbol_cast<cxx::ClassSymbol>(*base_symbols.begin());
+  auto* left = cxx::symbol_cast<cxx::ClassSymbol>(*left_symbols.begin());
+  ASSERT_NE(base, nullptr);
+  ASSERT_NE(left, nullptr);
+
+  SubobjectPathCollector restored_paths;
+  restored_paths.accept(restored.ast);
+  EXPECT_TRUE(hasBasePath(restored_paths.member_paths, {left, base}));
+  EXPECT_TRUE(hasBasePath(restored_paths.cast_paths, {left}));
+
+  auto* cloned = restored.ast->clone(destination.unit().arena());
+  SubobjectPathCollector cloned_paths;
+  cloned_paths.accept(cloned);
+  EXPECT_TRUE(hasBasePath(cloned_paths.member_paths, {left, base}));
+  EXPECT_TRUE(hasBasePath(cloned_paths.cast_paths, {left}));
 }
 
 }  // namespace
