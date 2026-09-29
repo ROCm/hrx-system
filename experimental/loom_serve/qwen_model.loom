@@ -1,0 +1,23 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.decl import("runner") @prefill(%residual: hal.buffer, %control: hal.buffer, %gdn: hal.buffer, %attention: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer, %workspace: hal.buffer) -> (i64)
+
+func.decl import("runner") @decode(%residual: hal.buffer, %control: hal.buffer, %gdn: hal.buffer, %attention: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer, %workspace: hal.buffer) -> (i64)
+
+// The program is shared; all request state arrives as buffer bindings.
+func.def public @step(%initialize: i32, %residual: hal.buffer, %control: hal.buffer, %gdn: hal.buffer, %attention: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer, %workspace: hal.buffer) -> (i64) {
+  %zero = scalar.constant 0 : i32
+  %is_prefill = scalar.cmpi ne, %initialize, %zero : i32
+  %completion = scf.if %is_prefill -> (i64) {
+    %prefill = func.call @prefill(%residual, %control, %gdn, %attention, %tokens, %progress, %workspace) : (hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+    scf.yield %prefill : i64
+  } else {
+    %decode = func.call @decode(%residual, %control, %gdn, %attention, %tokens, %progress, %workspace) : (hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+    scf.yield %decode : i64
+  }
+  func.return %completion : i64
+}

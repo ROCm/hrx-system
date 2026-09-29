@@ -189,4 +189,73 @@ loom_cc_library(
   PUBLIC
 )
 
+if(LOOM_TARGET_ARCH_VM)
+loom_generated_file(
+  NAME
+    qwen_model_binary
+  GENERATOR
+    loom::tools::loom-compile
+  OUTPUT
+    "qwen_model.vm"
+  OUTPUT_FLAG
+    "--output="
+  ARGS
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/qwen_model.loom"
+    "--target=vm:core"
+  INPUTS
+    "qwen_model.loom"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+iree_c_embed_data(
+  NAME
+    qwen_model_data
+  SRCS
+    "${CMAKE_CURRENT_BINARY_DIR}/qwen_model.vm"
+  C_FILE_OUTPUT
+    "qwen_model_data.c"
+  H_FILE_OUTPUT
+    "qwen_model_data.h"
+  IDENTIFIER
+    "loom_serve_qwen_model_data"
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+loom_cc_binary(
+  NAME
+    qwen
+  SRCS
+    "qwen_main.c"
+  DEPS
+    ::command
+    ::execution
+    ::module
+    ::qwen_model_data
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::internal::json
+    iree::base::internal::path
+    iree::base::threading
+    iree::base::tooling::flags
+    iree::hal
+    iree::hal::drivers
+    iree::io::file_handle
+    iree::io::parameter_index
+    iree::io::parameter_index_provider
+    iree::io::parameter_provider
+    iree::module::hal::types
+    iree::tokenizer
+    iree::tokenizer::format::huggingface::tokenizer_json
+    iree::tokenizer::vocab
+    iree::tooling::parameter_util
+    iree::vm
+    iree::vm::bytecode::module
+    loom::target::arch::cmd::program
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
