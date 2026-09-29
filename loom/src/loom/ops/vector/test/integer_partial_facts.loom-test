@@ -1,5 +1,25 @@
 // RUN: pass canonicalize
 
+// Vector integer facts use the element width when interpreting unsigned
+// operands. Each unknown i8 lane modulo nine is in [0, 8].
+func.def @remui_unknown_lanes_use_element_width(%values: vector<4xi8>) -> (i64, i64) {
+  %divisors = vector.constant 9 : vector<4xi8>
+  %remainders = vector.remui %values, %divisors : vector<4xi8>
+  %lane = vector.extract %remainders[0] : vector<4xi8> -> i8
+  %minimum = test.fact_range_lo %lane : i8 -> i64
+  %maximum = test.fact_range_hi %lane : i8 -> i64
+  func.return %minimum, %maximum : i64, i64
+}
+
+// ----
+func.def @remui_unknown_lanes_use_element_width(%values: vector<4xi8>) -> (i64, i64) {
+  %minimum = scalar.constant 0 : i64
+  %maximum = scalar.constant 8 : i64
+  func.return %minimum, %maximum : i64, i64
+}
+
+// ====
+
 // One mask bounds every unknown lane without enumerating a large vector or
 // claiming that the runtime lane values are equal.
 func.def @uniform_mask(%input: vector<32xi8>) -> (i64, i64, i1) {

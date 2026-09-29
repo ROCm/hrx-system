@@ -1,0 +1,55 @@
+// RUN: pass vector-memory-footprint
+
+// Unsigned remainder bounds the index even when the dividend can contain any
+// i32 bit pattern. The cast consumes the remainder's nonnegative range.
+func.def @unsigned_remainder_unknown_dividend(%input: buffer, %selection: i32) -> (i32) {
+  %base = index.constant 0 : offset
+  %words = buffer.view %input[%base] : buffer -> view<9xi32>
+  %count = scalar.constant 9 : i32
+  %remainder = scalar.remui %selection, %count : i32
+  %selected = index.cast %remainder : i32 to index
+  %value = view.load<volatile> %words[%selected] : view<9xi32> -> i32
+  func.return %value : i32
+}
+
+// ====
+
+// Setting the high bit establishes a negative signed representation without
+// restricting the dividend's low bits or adding a range assumption.
+func.def @unsigned_remainder_high_bit_dividend(%input: buffer, %selection: i32) -> (i32) {
+  %base = index.constant 0 : offset
+  %words = buffer.view %input[%base] : buffer -> view<9xi32>
+  %high_bit = scalar.constant -2147483648 : i32
+  %bits = scalar.ori %selection, %high_bit : i32
+  %count = scalar.constant 9 : i32
+  %remainder = scalar.remui %bits, %count : i32
+  %selected = index.cast %remainder : i32 to index
+  %value = view.load<volatile> %words[%selected] : view<9xi32> -> i32
+  func.return %value : i32
+}
+
+// ====
+
+func.def @unsigned_remainder_unknown_i64_dividend(%input: buffer, %selection: i64) -> (i32) {
+  %base = index.constant 0 : offset
+  %words = buffer.view %input[%base] : buffer -> view<9xi32>
+  %count = scalar.constant 9 : i64
+  %remainder = scalar.remui %selection, %count : i64
+  %selected = index.cast %remainder : i64 to index
+  %value = view.load<volatile> %words[%selected] : view<9xi32> -> i32
+  func.return %value : i32
+}
+
+// ====
+
+// The upper bound is inclusive: a remainder of eight does not fit this view.
+func.def @unsigned_remainder_rejects_short_view(%input: buffer, %selection: i32) -> (i32) {
+  %base = index.constant 0 : offset
+  %words = buffer.view %input[%base] : buffer -> view<8xi32>
+  %count = scalar.constant 9 : i32
+  %remainder = scalar.remui %selection, %count : i32
+  %selected = index.cast %remainder : i32 to index
+  // ERROR@+1: SUBRANGE/024 {op_name="view.load", view_axis="0"}
+  %value = view.load<volatile> %words[%selected] : view<8xi32> -> i32
+  func.return %value : i32
+}

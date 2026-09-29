@@ -869,14 +869,19 @@ void loom_value_facts_subi(const loom_value_facts_t* lhs,
 void loom_value_facts_muli(const loom_value_facts_t* lhs,
                            const loom_value_facts_t* rhs,
                            loom_value_facts_t* out);
+// Unsigned division in a verified integer width in [1, 64]. Inputs and results
+// use the declared signed fact representation, except i1 uses Boolean [0, 1]
+// facts; arithmetic interprets their raw bits as unsigned.
 void loom_value_facts_divui(const loom_value_facts_t* lhs,
-                            const loom_value_facts_t* rhs,
+                            const loom_value_facts_t* rhs, int32_t bit_count,
                             loom_value_facts_t* out);
 void loom_value_facts_divsi(const loom_value_facts_t* lhs,
                             const loom_value_facts_t* rhs,
                             loom_value_facts_t* out);
+// Unsigned remainder with the same width and representation contract as
+// divui.
 void loom_value_facts_remui(const loom_value_facts_t* lhs,
-                            const loom_value_facts_t* rhs,
+                            const loom_value_facts_t* rhs, int32_t bit_count,
                             loom_value_facts_t* out);
 void loom_value_facts_remsi(const loom_value_facts_t* lhs,
                             const loom_value_facts_t* rhs,

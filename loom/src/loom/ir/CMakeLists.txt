@@ -17,6 +17,7 @@ loom_cc_library(
     "float_facts.h"
   SRCS
     "facts.c"
+    "facts_division.c"
     "float_facts.c"
   DEPS
     ::ir
@@ -31,6 +32,7 @@ loom_cc_test(
     facts_test
   SRCS
     "facts_bitwise_test.cc"
+    "facts_division_test.cc"
     "facts_test.cc"
     "float_facts_test.cc"
   DEPS

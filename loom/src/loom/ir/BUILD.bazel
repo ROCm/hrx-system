@@ -16,6 +16,7 @@ loom_cc_library(
     name = "facts",
     srcs = [
         "facts.c",
+        "facts_division.c",
         "float_facts.c",
     ],
     hdrs = [
@@ -34,6 +35,7 @@ loom_cc_test(
     name = "facts_test",
     srcs = [
         "facts_bitwise_test.cc",
+        "facts_division_test.cc",
         "facts_test.cc",
         "float_facts_test.cc",
     ],

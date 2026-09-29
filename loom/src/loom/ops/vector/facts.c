@@ -3232,12 +3232,10 @@ LOOM_VECTOR_INTEGER_BINARY_FACTS(loom_vector_subi_facts, loom_value_facts_subi)
 LOOM_VECTOR_INTEGER_BINARY_FACTS(loom_vector_muli_facts, loom_value_facts_muli)
 LOOM_VECTOR_INTEGER_BINARY_FACTS(loom_vector_divsi_facts,
                                  loom_value_facts_divsi)
-LOOM_VECTOR_INTEGER_BINARY_FACTS(loom_vector_divui_facts,
-                                 loom_value_facts_divui)
+LOOM_VECTOR_WIDTH_BINARY_FACTS(loom_vector_divui_facts, loom_value_facts_divui)
 LOOM_VECTOR_INTEGER_BINARY_FACTS(loom_vector_remsi_facts,
                                  loom_value_facts_remsi)
-LOOM_VECTOR_INTEGER_BINARY_FACTS(loom_vector_remui_facts,
-                                 loom_value_facts_remui)
+LOOM_VECTOR_WIDTH_BINARY_FACTS(loom_vector_remui_facts, loom_value_facts_remui)
 LOOM_VECTOR_UNARY_FACTS(loom_vector_negi_facts, loom_value_facts_negi)
 LOOM_VECTOR_UNARY_FACTS(loom_vector_absi_facts, loom_value_facts_absi)
 LOOM_VECTOR_WIDTH_BINARY_FACTS(loom_vector_minsi_facts, loom_value_facts_minsi)
