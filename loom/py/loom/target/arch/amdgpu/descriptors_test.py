@@ -2649,7 +2649,7 @@ def test_feedback_atomic64_descriptors_cover_execution_families() -> None:
         _assert_feedback_atomic64_overlay(
             descriptors["amdgpu.global_atomic_swap_u64_rtn_saddr"],
             mnemonic=f"global_atomic_swap_{'x2' if wide_mnemonic_suffix == 'x2' else 'b64'}",
-            semantic_tag="memory.global.atomic.exchange.u64.return",
+            semantic_tag="memory.global.atomic.exchange.b64.return",
             memory_space=MemorySpace.GLOBAL,
             payload_field_name="value",
             payload_units=2,

@@ -110,7 +110,7 @@ def _integer64_atomic_rows(
                 if suffix == "swap_u64"
                 else suffix
             ),
-            has_no_return_form=semantic != "exchange.u64",
+            has_no_return_form=semantic != "exchange.b64",
             value_units=2,
             width_bits=64,
         )
@@ -124,7 +124,7 @@ def _integer64_atomic_rows(
             ("and_b64", "and_x2", "and.b64", "FMT_NUM_B64"),
             ("or_b64", "or_x2", "or.b64", "FMT_NUM_B64"),
             ("xor_b64", "xor_x2", "xor.b64", "FMT_NUM_B64"),
-            ("swap_u64", "swap_x2", "exchange.u64", "FMT_NUM_B64"),
+            ("swap_u64", "swap_x2", "exchange.b64", "FMT_NUM_B64"),
         )
     )
 

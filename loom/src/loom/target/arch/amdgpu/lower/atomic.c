@@ -283,7 +283,7 @@ static bool loom_amdgpu_atomic_prefers_global_saddr(
   // Wide global atomics avoid a four-SGPR buffer descriptor and preserve their
   // input payload instead of requiring fresh pairs for destructive returns.
   return memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL &&
-         (loom_amdgpu_type_is_i64(value_type) ||
+         (loom_scalar_type_bitwidth(loom_type_element_type(value_type)) == 64 ||
           loom_amdgpu_memory_cache_policy_descriptor_encoding(descriptor_set) ==
               LOOM_AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH);
 }
@@ -384,7 +384,8 @@ static bool loom_amdgpu_atomic_source_shape_supported(
     const loom_amdgpu_atomic_source_t* atomic_source,
     const loom_low_source_memory_access_plan_t* source,
     loom_type_t value_type) {
-  if (atomic_source->operation_kind == LOOM_AMDGPU_ATOMIC_OPERATION_CMPXCHG) {
+  if (atomic_source->operation_kind == LOOM_AMDGPU_ATOMIC_OPERATION_CMPXCHG ||
+      loom_atomic_kind_is_exchange(atomic_source->atomic_kind)) {
     return loom_amdgpu_atomic_bitwise_scalar_source_shape(source, value_type);
   }
   return ((loom_amdgpu_type_is_i32(value_type) ||

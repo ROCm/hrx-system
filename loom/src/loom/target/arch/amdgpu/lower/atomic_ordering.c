@@ -10,7 +10,6 @@
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
 #include "loom/target/arch/amdgpu/lower/memory_coherence.h"
-#include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/planning/wait_packets.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
@@ -79,16 +78,17 @@ bool loom_amdgpu_atomic_scope_supported(
   if (source->atomic.scope == LOOM_ATOMIC_SCOPE_DEVICE) {
     return true;
   }
+  const int32_t bit_count =
+      loom_scalar_type_bitwidth(loom_type_element_type(value_type));
   if (source->atomic.scope != LOOM_ATOMIC_SCOPE_SYSTEM ||
-      (!loom_amdgpu_type_is_i32(value_type) &&
-       !loom_amdgpu_type_is_i64(value_type) &&
-       !loom_amdgpu_type_is_f32(value_type))) {
+      !loom_type_is_scalar(value_type) ||
+      (bit_count != 32 && bit_count != 64)) {
     return false;
   }
   // System updates require a coherence recipe and backing that admits the
   // operation; mapping admission belongs to the runtime. Native floating
   // arithmetic also passes the numerical and memory-domain capability gate;
-  // other F32 updates use bitwise compare-exchange.
+  // bitwise exchange and compare-exchange preserve either carrier width.
   return loom_amdgpu_memory_coherence_rule(descriptor_set) != NULL;
 }
 

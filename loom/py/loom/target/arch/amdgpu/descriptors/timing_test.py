@@ -57,7 +57,7 @@ def test_lds_packets_share_width_dependent_service() -> None:
         (_ds_write_overlay(width_bits=128, units=4), 4),
         (_ds_bpermute_b32_overlay(), 1),
         *(
-            (overlay, 1)
+            (overlay, 2 if overlay.descriptor_key.endswith("b64") else 1)
             for overlay in _ds_atomic_overlays(
                 cmpxchg_expected_field="DATA0", cmpxchg_replacement_field="DATA1"
             )

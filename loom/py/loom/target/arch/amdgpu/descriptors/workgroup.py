@@ -334,6 +334,7 @@ def _ds_atomic_overlay(
     semantic_tag: str,
     data_format_name: str,
     returns_old_value: bool,
+    width_bits: int = 32,
     encoding_name: str = "ENC_DS",
     fixed_encoding_fields: tuple[tuple[str, AmdgpuFixedEncodingValue], ...] = (
         ("OFFSET1", 0),
@@ -343,14 +344,18 @@ def _ds_atomic_overlay(
     operands: tuple[AmdgpuOperandOverlay, ...]
     if returns_old_value:
         operands = (
-            AmdgpuOperandOverlay("VDST", _vgpr_result()),
+            AmdgpuOperandOverlay("VDST", _vgpr_result(units=width_bits // 32)),
             AmdgpuOperandOverlay("ADDR", _vgpr_operand("addr")),
-            AmdgpuOperandOverlay("DATA0", _vgpr_operand("value")),
+            AmdgpuOperandOverlay(
+                "DATA0", _vgpr_operand("value", units=width_bits // 32)
+            ),
         )
     else:
         operands = (
             AmdgpuOperandOverlay("ADDR", _vgpr_operand("addr")),
-            AmdgpuOperandOverlay("DATA0", _vgpr_operand("value")),
+            AmdgpuOperandOverlay(
+                "DATA0", _vgpr_operand("value", units=width_bits // 32)
+            ),
         )
     return AmdgpuDescriptorOverlay(
         descriptor_key=descriptor_key,
@@ -362,17 +367,17 @@ def _ds_atomic_overlay(
         operands=operands,
         implicit_operands=(
             _ignore_workgroup_memory(
-                width_bits=32, is_input=False, data_format_name=data_format_name
+                width_bits=width_bits, is_input=False, data_format_name=data_format_name
             ),
             _ignore_workgroup_memory(
-                width_bits=32, is_input=True, data_format_name=data_format_name
+                width_bits=width_bits, is_input=True, data_format_name=data_format_name
             ),
         ),
         immediates=(_ds_offset_immediate(),),
         fixed_encoding_fields=_ds_fixed_fields_without_offset1(fixed_encoding_fields),
         effects=(
-            _workgroup_memory_effect(EffectKind.READ, 32),
-            _workgroup_memory_effect(EffectKind.WRITE, 32),
+            _workgroup_memory_effect(EffectKind.READ, width_bits),
+            _workgroup_memory_effect(EffectKind.WRITE, width_bits),
         ),
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     )
@@ -380,6 +385,7 @@ def _ds_atomic_overlay(
 
 def _ds_atomic_cmpstore_overlay(
     *,
+    width_bits: int,
     expected_field: str,
     replacement_field: str,
     encoding_name: str = "ENC_DS",
@@ -391,31 +397,39 @@ def _ds_atomic_cmpstore_overlay(
     # CDNA compares DATA0 and stores DATA1; RDNA compares DATA1 and stores DATA0.
     # Keep the logical expected/replacement order independent of those fields.
     return AmdgpuDescriptorOverlay(
-        descriptor_key="amdgpu.ds_cmpst_rtn_b32",
-        instruction_name="DS_CMPST_RTN_B32",
-        mnemonic="ds_cmpst_rtn_b32",
+        descriptor_key=f"amdgpu.ds_cmpst_rtn_b{width_bits}",
+        instruction_name=f"DS_CMPST_RTN_B{width_bits}",
+        mnemonic=f"ds_cmpst_rtn_b{width_bits}",
         encoding_name=encoding_name,
-        semantic_tag="memory.workgroup.atomic.compare_exchange.b32.return",
+        semantic_tag=f"memory.workgroup.atomic.compare_exchange.b{width_bits}.return",
         schedule_class=_SCHEDULE_LDS_ATOMIC,
         operands=(
-            AmdgpuOperandOverlay("VDST", _vgpr_result()),
+            AmdgpuOperandOverlay("VDST", _vgpr_result(units=width_bits // 32)),
             AmdgpuOperandOverlay("ADDR", _vgpr_operand("addr")),
-            AmdgpuOperandOverlay(expected_field, _vgpr_operand("expected")),
-            AmdgpuOperandOverlay(replacement_field, _vgpr_operand("replacement")),
+            AmdgpuOperandOverlay(
+                expected_field, _vgpr_operand("expected", units=width_bits // 32)
+            ),
+            AmdgpuOperandOverlay(
+                replacement_field, _vgpr_operand("replacement", units=width_bits // 32)
+            ),
         ),
         implicit_operands=(
             _ignore_workgroup_memory(
-                width_bits=32, is_input=False, data_format_name="FMT_NUM_B32"
+                width_bits=width_bits,
+                is_input=False,
+                data_format_name=f"FMT_NUM_B{width_bits}",
             ),
             _ignore_workgroup_memory(
-                width_bits=32, is_input=True, data_format_name="FMT_NUM_B32"
+                width_bits=width_bits,
+                is_input=True,
+                data_format_name=f"FMT_NUM_B{width_bits}",
             ),
         ),
         immediates=(_ds_offset_immediate(),),
         fixed_encoding_fields=_ds_fixed_fields_without_offset1(fixed_encoding_fields),
         effects=(
-            _workgroup_memory_effect(EffectKind.READ, 32),
-            _workgroup_memory_effect(EffectKind.WRITE, 32),
+            _workgroup_memory_effect(EffectKind.READ, width_bits),
+            _workgroup_memory_effect(EffectKind.WRITE, width_bits),
         ),
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     )
@@ -530,12 +544,27 @@ def _ds_atomic_overlays(
         ) in rows
     ]
     overlays.append(
+        _ds_atomic_overlay(
+            descriptor_key="amdgpu.ds_wrxchg_rtn_b64",
+            instruction_name="DS_WRXCHG_RTN_B64",
+            mnemonic="ds_wrxchg_rtn_b64",
+            semantic_tag="memory.workgroup.atomic.exchange.b64.return",
+            data_format_name="FMT_NUM_B64",
+            returns_old_value=True,
+            width_bits=64,
+            encoding_name=encoding_name,
+            fixed_encoding_fields=fixed_encoding_fields,
+        )
+    )
+    overlays.extend(
         _ds_atomic_cmpstore_overlay(
+            width_bits=width_bits,
             expected_field=cmpxchg_expected_field,
             replacement_field=cmpxchg_replacement_field,
             encoding_name=encoding_name,
             fixed_encoding_fields=fixed_encoding_fields,
         )
+        for width_bits in (32, 64)
     )
     return tuple(overlays)
 

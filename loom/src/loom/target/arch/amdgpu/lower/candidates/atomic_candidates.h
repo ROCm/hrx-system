@@ -50,9 +50,9 @@ typedef enum loom_amdgpu_atomic_value_kind_e {
   LOOM_AMDGPU_ATOMIC_VALUE_KIND_I64 = 2,
   LOOM_AMDGPU_ATOMIC_VALUE_KIND_PACKED_F16 = 3,
   LOOM_AMDGPU_ATOMIC_VALUE_KIND_PACKED_BF16 = 4,
-  // Type-agnostic 32-bit payload compared by bit pattern.
+  // Type-agnostic 32-bit payload exchanged or compared by bit pattern.
   LOOM_AMDGPU_ATOMIC_VALUE_KIND_B32 = 5,
-  // Type-agnostic 64-bit payload compared by bit pattern.
+  // Type-agnostic 64-bit payload exchanged or compared by bit pattern.
   LOOM_AMDGPU_ATOMIC_VALUE_KIND_B64 = 6,
 } loom_amdgpu_atomic_value_kind_t;
 

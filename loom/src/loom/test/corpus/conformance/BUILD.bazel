@@ -380,6 +380,24 @@ loom_test(
 )
 
 loom_test(
+    name = "atomic_float_bitwise_test",
+    srcs = ["atomic_float_bitwise.loom"],
+    compile_targets = [
+        "//loom/target/amdgpu:gfx942",
+        "//loom/target/amdgpu:gfx950",
+        "//loom/target/amdgpu:gfx1100",
+        "//loom/target/amdgpu:gfx1151",
+        "//loom/target/amdgpu:gfx1170",
+        "//loom/target/amdgpu:gfx1200",
+        "//loom/target/amdgpu:gfx1250",
+    ],
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
     name = "atomic_float_extrema_test",
     srcs = ["atomic_float_extrema.loom"],
     compile_targets = [

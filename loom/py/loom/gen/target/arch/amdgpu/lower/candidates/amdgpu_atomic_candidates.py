@@ -78,11 +78,15 @@ def _candidate_ranges(
         "AMDGPU atomic descriptor candidate table",
         (candidate.descriptor_key for candidate in candidates),
     )
-    return dense_candidate_ranges(
+    ranges = dense_candidate_ranges(
         candidates,
         _candidate_range_key,
         owner="AMDGPU atomic descriptor candidate table",
     )
+    # Both source exchange kinds use the same bitwise instruction candidates.
+    # Populate the existing dense index slots without duplicating those rows.
+    exchange_aliases = tuple(((*key[:3], AmdgpuAtomicKind.XCHGF.c_name), first, count) for key, first, count in ranges if key[3] == AmdgpuAtomicKind.XCHGI.c_name)
+    return ranges + exchange_aliases
 
 
 def _range_initializer(

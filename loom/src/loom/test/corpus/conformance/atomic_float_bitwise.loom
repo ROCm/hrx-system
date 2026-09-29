@@ -1,0 +1,542 @@
+// Exchange and CAS preserve payload bits and return the previous representation.
+kernel.def @global_atomic_bitwise_f32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %initial_bits: i32, %replacement_bits: i32) {
+  %base = index.constant 0 : offset
+  %storage = buffer.assume.memory_space<global> %input : buffer
+  %cell = buffer.view %storage[%base] : buffer -> view<1xf32>
+  %results = buffer.view %output[%base] : buffer -> view<4xi32>
+  %initial = scalar.bitcast %initial_bits : i32 to f32
+  %replacement = scalar.bitcast %replacement_bits : i32 to f32
+  %exchanged = view.atomic.rmw<xchgf> %replacement, %cell[0] {ordering = acq_rel, scope = system} : f32, view<1xf32> -> f32
+  %succeeded = view.atomic.cmpxchg %replacement, %initial, %cell[0] {failure_ordering = acquire, scope = system, success_ordering = acq_rel} : f32, view<1xf32> -> f32
+  %failed = view.atomic.cmpxchg %replacement, %replacement, %cell[0] {failure_ordering = seq_cst, scope = system, success_ordering = seq_cst} : f32, view<1xf32> -> f32
+  %final = view.load %cell[0] : view<1xf32> -> f32
+  %exchanged_bits = scalar.bitcast %exchanged : f32 to i32
+  %succeeded_bits = scalar.bitcast %succeeded : f32 to i32
+  %failed_bits = scalar.bitcast %failed : f32 to i32
+  %final_bits = scalar.bitcast %final : f32 to i32
+  view.store %exchanged_bits, %results[0] : i32, view<4xi32>
+  view.store %succeeded_bits, %results[1] : i32, view<4xi32>
+  view.store %failed_bits, %results[2] : i32, view<4xi32>
+  view.store %final_bits, %results[3] : i32, view<4xi32>
+  kernel.return
+}
+
+// Exchange and CAS preserve payload bits and return the previous representation.
+kernel.def @generic_atomic_bitwise_f32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %initial_bits: i32, %replacement_bits: i32) {
+  %base = index.constant 0 : offset
+  %storage = buffer.assume.memory_space<generic> %input : buffer
+  %cell = buffer.view %storage[%base] : buffer -> view<1xf32>
+  %results = buffer.view %output[%base] : buffer -> view<3xi32>
+  %initial = scalar.bitcast %initial_bits : i32 to f32
+  %replacement = scalar.bitcast %replacement_bits : i32 to f32
+  %exchanged = view.atomic.rmw<xchgf> %replacement, %cell[0] {ordering = acq_rel, scope = device} : f32, view<1xf32> -> f32
+  %succeeded = view.atomic.cmpxchg %replacement, %initial, %cell[0] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : f32, view<1xf32> -> f32
+  %failed = view.atomic.cmpxchg %replacement, %replacement, %cell[0] {failure_ordering = seq_cst, scope = device, success_ordering = seq_cst} : f32, view<1xf32> -> f32
+  %exchanged_bits = scalar.bitcast %exchanged : f32 to i32
+  %succeeded_bits = scalar.bitcast %succeeded : f32 to i32
+  %failed_bits = scalar.bitcast %failed : f32 to i32
+  view.store %exchanged_bits, %results[0] : i32, view<3xi32>
+  view.store %succeeded_bits, %results[1] : i32, view<3xi32>
+  view.store %failed_bits, %results[2] : i32, view<3xi32>
+  kernel.return
+}
+
+// Exchange and CAS preserve payload bits and return the previous representation.
+kernel.def @workgroup_atomic_bitwise_f32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer, %initial_bits: i32, %replacement_bits: i32) {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 4 : offset
+  %storage = buffer.alloca<workgroup> align(4) %bytes : buffer
+  %cell = buffer.view %storage[%base] : buffer -> view<1xf32>
+  %results = buffer.view %output[%base] : buffer -> view<4xi32>
+  %initial = scalar.bitcast %initial_bits : i32 to f32
+  %replacement = scalar.bitcast %replacement_bits : i32 to f32
+  view.store %initial, %cell[0] : f32, view<1xf32>
+  %exchanged = view.atomic.rmw<xchgf> %replacement, %cell[0] {ordering = acq_rel, scope = workgroup} : f32, view<1xf32> -> f32
+  %succeeded = view.atomic.cmpxchg %replacement, %initial, %cell[0] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : f32, view<1xf32> -> f32
+  %failed = view.atomic.cmpxchg %replacement, %replacement, %cell[0] {failure_ordering = seq_cst, scope = workgroup, success_ordering = seq_cst} : f32, view<1xf32> -> f32
+  %final = view.load %cell[0] : view<1xf32> -> f32
+  %exchanged_bits = scalar.bitcast %exchanged : f32 to i32
+  %succeeded_bits = scalar.bitcast %succeeded : f32 to i32
+  %failed_bits = scalar.bitcast %failed : f32 to i32
+  %final_bits = scalar.bitcast %final : f32 to i32
+  view.store %exchanged_bits, %results[0] : i32, view<4xi32>
+  view.store %succeeded_bits, %results[1] : i32, view<4xi32>
+  view.store %failed_bits, %results[2] : i32, view<4xi32>
+  view.store %final_bits, %results[3] : i32, view<4xi32>
+  kernel.return
+}
+
+// Each lane is an independent atomic; inactive exchange lanes keep passthrough.
+kernel.def @vector_atomic_bitwise_f32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %initial_bits: i32, %replacement_bits: i32, %flag: i32) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %cells = buffer.view %global[%base] : buffer -> view<2xf32>
+  %results = buffer.view %output[%base] : buffer -> view<6xf32>
+  %initial_scalar = scalar.bitcast %initial_bits : i32 to f32
+  %replacement_scalar = scalar.bitcast %replacement_bits : i32 to f32
+  %initial = vector.from_elements %initial_scalar, %initial_scalar : vector<2xf32>
+  %replacement = vector.from_elements %replacement_scalar, %replacement_scalar : vector<2xf32>
+  %origin = index.constant 0 : index
+  %stride = index.constant 1 : index
+  %offsets = vector.iota %origin step %stride : vector<2xindex>
+  %c0 = scalar.constant 0 : i32
+  %enabled = scalar.cmpi ne, %flag, %c0 : i32
+  %disabled = scalar.constant false : i1
+  %mask = vector.from_elements %enabled, %disabled : vector<2xi1>
+  %exchanged = vector.atomic.rmw.mask<xchgf> %replacement, %cells[0][%offsets], %mask, %replacement {ordering = acq_rel, scope = device} : vector<2xf32>, view<2xf32>, vector<2xindex>, vector<2xi1>, vector<2xf32>
+  %observed = vector.atomic.cmpxchg %replacement, %initial, %cells[0][%offsets] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : vector<2xf32>, view<2xf32>, vector<2xindex> -> vector<2xf32>
+  %final = vector.load %cells[0] : view<2xf32> -> vector<2xf32>
+  vector.store %exchanged, %results[0] : vector<2xf32>, view<6xf32>
+  vector.store %observed, %results[2] : vector<2xf32>, view<6xf32>
+  vector.store %final, %results[4] : vector<2xf32>, view<6xf32>
+  kernel.return
+}
+
+// Exchange and CAS preserve payload bits and return the previous representation.
+kernel.def @global_atomic_bitwise_f64() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %initial_bits: i64, %replacement_bits: i64) {
+  %base = index.constant 0 : offset
+  %storage = buffer.assume.memory_space<global> %input : buffer
+  %cell = buffer.view %storage[%base] : buffer -> view<1xf64>
+  %results = buffer.view %output[%base] : buffer -> view<4xi64>
+  %initial = scalar.bitcast %initial_bits : i64 to f64
+  %replacement = scalar.bitcast %replacement_bits : i64 to f64
+  %exchanged = view.atomic.rmw<xchgf> %replacement, %cell[0] {ordering = acq_rel, scope = system} : f64, view<1xf64> -> f64
+  %succeeded = view.atomic.cmpxchg %replacement, %initial, %cell[0] {failure_ordering = acquire, scope = system, success_ordering = acq_rel} : f64, view<1xf64> -> f64
+  %failed = view.atomic.cmpxchg %replacement, %replacement, %cell[0] {failure_ordering = seq_cst, scope = system, success_ordering = seq_cst} : f64, view<1xf64> -> f64
+  %final = view.load %cell[0] : view<1xf64> -> f64
+  %exchanged_bits = scalar.bitcast %exchanged : f64 to i64
+  %succeeded_bits = scalar.bitcast %succeeded : f64 to i64
+  %failed_bits = scalar.bitcast %failed : f64 to i64
+  %final_bits = scalar.bitcast %final : f64 to i64
+  view.store %exchanged_bits, %results[0] : i64, view<4xi64>
+  view.store %succeeded_bits, %results[1] : i64, view<4xi64>
+  view.store %failed_bits, %results[2] : i64, view<4xi64>
+  view.store %final_bits, %results[3] : i64, view<4xi64>
+  kernel.return
+}
+
+// Exchange and CAS preserve payload bits and return the previous representation.
+kernel.def @generic_atomic_bitwise_f64() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %initial_bits: i64, %replacement_bits: i64) {
+  %base = index.constant 0 : offset
+  %storage = buffer.assume.memory_space<generic> %input : buffer
+  %cell = buffer.view %storage[%base] : buffer -> view<1xf64>
+  %results = buffer.view %output[%base] : buffer -> view<3xi64>
+  %initial = scalar.bitcast %initial_bits : i64 to f64
+  %replacement = scalar.bitcast %replacement_bits : i64 to f64
+  %exchanged = view.atomic.rmw<xchgf> %replacement, %cell[0] {ordering = acq_rel, scope = device} : f64, view<1xf64> -> f64
+  %succeeded = view.atomic.cmpxchg %replacement, %initial, %cell[0] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : f64, view<1xf64> -> f64
+  %failed = view.atomic.cmpxchg %replacement, %replacement, %cell[0] {failure_ordering = seq_cst, scope = device, success_ordering = seq_cst} : f64, view<1xf64> -> f64
+  %exchanged_bits = scalar.bitcast %exchanged : f64 to i64
+  %succeeded_bits = scalar.bitcast %succeeded : f64 to i64
+  %failed_bits = scalar.bitcast %failed : f64 to i64
+  view.store %exchanged_bits, %results[0] : i64, view<3xi64>
+  view.store %succeeded_bits, %results[1] : i64, view<3xi64>
+  view.store %failed_bits, %results[2] : i64, view<3xi64>
+  kernel.return
+}
+
+// Exchange and CAS preserve payload bits and return the previous representation.
+kernel.def @workgroup_atomic_bitwise_f64() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer, %initial_bits: i64, %replacement_bits: i64) {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 8 : offset
+  %storage = buffer.alloca<workgroup> align(8) %bytes : buffer
+  %cell = buffer.view %storage[%base] : buffer -> view<1xf64>
+  %results = buffer.view %output[%base] : buffer -> view<4xi64>
+  %initial = scalar.bitcast %initial_bits : i64 to f64
+  %replacement = scalar.bitcast %replacement_bits : i64 to f64
+  view.store %initial, %cell[0] : f64, view<1xf64>
+  %exchanged = view.atomic.rmw<xchgf> %replacement, %cell[0] {ordering = acq_rel, scope = workgroup} : f64, view<1xf64> -> f64
+  %succeeded = view.atomic.cmpxchg %replacement, %initial, %cell[0] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : f64, view<1xf64> -> f64
+  %failed = view.atomic.cmpxchg %replacement, %replacement, %cell[0] {failure_ordering = seq_cst, scope = workgroup, success_ordering = seq_cst} : f64, view<1xf64> -> f64
+  %final = view.load %cell[0] : view<1xf64> -> f64
+  %exchanged_bits = scalar.bitcast %exchanged : f64 to i64
+  %succeeded_bits = scalar.bitcast %succeeded : f64 to i64
+  %failed_bits = scalar.bitcast %failed : f64 to i64
+  %final_bits = scalar.bitcast %final : f64 to i64
+  view.store %exchanged_bits, %results[0] : i64, view<4xi64>
+  view.store %succeeded_bits, %results[1] : i64, view<4xi64>
+  view.store %failed_bits, %results[2] : i64, view<4xi64>
+  view.store %final_bits, %results[3] : i64, view<4xi64>
+  kernel.return
+}
+
+// Each lane is an independent atomic; inactive exchange lanes keep passthrough.
+kernel.def @vector_atomic_bitwise_f64() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %initial_bits: i64, %replacement_bits: i64, %flag: i32) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %cells = buffer.view %global[%base] : buffer -> view<2xf64>
+  %results = buffer.view %output[%base] : buffer -> view<6xf64>
+  %initial_scalar = scalar.bitcast %initial_bits : i64 to f64
+  %replacement_scalar = scalar.bitcast %replacement_bits : i64 to f64
+  %initial = vector.from_elements %initial_scalar, %initial_scalar : vector<2xf64>
+  %replacement = vector.from_elements %replacement_scalar, %replacement_scalar : vector<2xf64>
+  %origin = index.constant 0 : index
+  %stride = index.constant 1 : index
+  %offsets = vector.iota %origin step %stride : vector<2xindex>
+  %c0 = scalar.constant 0 : i32
+  %enabled = scalar.cmpi ne, %flag, %c0 : i32
+  %disabled = scalar.constant false : i1
+  %mask = vector.from_elements %enabled, %disabled : vector<2xi1>
+  %exchanged = vector.atomic.rmw.mask<xchgf> %replacement, %cells[0][%offsets], %mask, %replacement {ordering = acq_rel, scope = device} : vector<2xf64>, view<2xf64>, vector<2xindex>, vector<2xi1>, vector<2xf64>
+  %observed = vector.atomic.cmpxchg %replacement, %initial, %cells[0][%offsets] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : vector<2xf64>, view<2xf64>, vector<2xindex> -> vector<2xf64>
+  %final = vector.load %cells[0] : view<2xf64> -> vector<2xf64>
+  vector.store %exchanged, %results[0] : vector<2xf64>, view<6xf64>
+  vector.store %observed, %results[2] : vector<2xf64>, view<6xf64>
+  vector.store %final, %results[4] : vector<2xf64>, view<6xf64>
+  kernel.return
+}
+
+// NaN payloads, opposite signed zeros, and subnormals remain raw bits.
+check.case public @atomic_bitwise_f32_nan_payload {
+  %initial = check.literal value(2139169605) : i32
+  %replacement = check.literal value(2143634209) : i32
+  %expected_initial = check.generate.fill value(2139169605) : tensor<1xi32>
+  %expected_replacement = check.generate.fill value(2143634209) : tensor<1xi32>
+  %global_cell = check.generate.fill value(2139169605) : tensor<1xi32>
+  %global_output = check.generate.fill value(0) : tensor<4xi32>
+  kernel.launch @global_atomic_bitwise_f32(%global_cell, %global_output, %initial, %replacement) : (tensor<1xi32>, tensor<4xi32>, i32, i32)
+  %global_0 = check.tensor.view %global_output offset(0) : tensor<4xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%global_0) expected(%expected_initial) : tensor<1xi32>
+  %global_1 = check.tensor.view %global_output offset(4) : tensor<4xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%global_1) expected(%expected_replacement) : tensor<1xi32>
+  %global_2 = check.tensor.view %global_output offset(8) : tensor<4xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%global_2) expected(%expected_initial) : tensor<1xi32>
+  %global_3 = check.tensor.view %global_output offset(12) : tensor<4xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%global_3) expected(%expected_initial) : tensor<1xi32>
+  %generic_cell = check.generate.fill value(2139169605) : tensor<1xi32>
+  %generic_output = check.generate.fill value(0) : tensor<3xi32>
+  kernel.launch @generic_atomic_bitwise_f32(%generic_cell, %generic_output, %initial, %replacement) : (tensor<1xi32>, tensor<3xi32>, i32, i32)
+  %generic_0 = check.tensor.view %generic_output offset(0) : tensor<3xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%generic_0) expected(%expected_initial) : tensor<1xi32>
+  %generic_1 = check.tensor.view %generic_output offset(4) : tensor<3xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%generic_1) expected(%expected_replacement) : tensor<1xi32>
+  %generic_2 = check.tensor.view %generic_output offset(8) : tensor<3xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%generic_2) expected(%expected_initial) : tensor<1xi32>
+  check.expect.bitwise actual(%generic_cell) expected(%expected_initial) : tensor<1xi32>
+  %workgroup_output = check.generate.fill value(0) : tensor<4xi32>
+  kernel.launch @workgroup_atomic_bitwise_f32(%workgroup_output, %initial, %replacement) : (tensor<4xi32>, i32, i32)
+  %workgroup_0 = check.tensor.view %workgroup_output offset(0) : tensor<4xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%workgroup_0) expected(%expected_initial) : tensor<1xi32>
+  %workgroup_1 = check.tensor.view %workgroup_output offset(4) : tensor<4xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%workgroup_1) expected(%expected_replacement) : tensor<1xi32>
+  %workgroup_2 = check.tensor.view %workgroup_output offset(8) : tensor<4xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%workgroup_2) expected(%expected_initial) : tensor<1xi32>
+  %workgroup_3 = check.tensor.view %workgroup_output offset(12) : tensor<4xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%workgroup_3) expected(%expected_initial) : tensor<1xi32>
+  check.return
+}
+
+check.case public @atomic_bitwise_f32_signed_zero {
+  %initial = check.literal value(0) : i32
+  %replacement = check.literal value(-2147483648) : i32
+  %expected_initial = check.generate.fill value(0) : tensor<1xi32>
+  %expected_replacement = check.generate.fill value(-2147483648) : tensor<1xi32>
+  %global_cell = check.generate.fill value(0) : tensor<1xi32>
+  %global_output = check.generate.fill value(0) : tensor<4xi32>
+  kernel.launch @global_atomic_bitwise_f32(%global_cell, %global_output, %initial, %replacement) : (tensor<1xi32>, tensor<4xi32>, i32, i32)
+  %global_0 = check.tensor.view %global_output offset(0) : tensor<4xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%global_0) expected(%expected_initial) : tensor<1xi32>
+  %global_1 = check.tensor.view %global_output offset(4) : tensor<4xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%global_1) expected(%expected_replacement) : tensor<1xi32>
+  %global_2 = check.tensor.view %global_output offset(8) : tensor<4xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%global_2) expected(%expected_initial) : tensor<1xi32>
+  %global_3 = check.tensor.view %global_output offset(12) : tensor<4xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%global_3) expected(%expected_initial) : tensor<1xi32>
+  %generic_cell = check.generate.fill value(0) : tensor<1xi32>
+  %generic_output = check.generate.fill value(0) : tensor<3xi32>
+  kernel.launch @generic_atomic_bitwise_f32(%generic_cell, %generic_output, %initial, %replacement) : (tensor<1xi32>, tensor<3xi32>, i32, i32)
+  %generic_0 = check.tensor.view %generic_output offset(0) : tensor<3xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%generic_0) expected(%expected_initial) : tensor<1xi32>
+  %generic_1 = check.tensor.view %generic_output offset(4) : tensor<3xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%generic_1) expected(%expected_replacement) : tensor<1xi32>
+  %generic_2 = check.tensor.view %generic_output offset(8) : tensor<3xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%generic_2) expected(%expected_initial) : tensor<1xi32>
+  check.expect.bitwise actual(%generic_cell) expected(%expected_initial) : tensor<1xi32>
+  %workgroup_output = check.generate.fill value(0) : tensor<4xi32>
+  kernel.launch @workgroup_atomic_bitwise_f32(%workgroup_output, %initial, %replacement) : (tensor<4xi32>, i32, i32)
+  %workgroup_0 = check.tensor.view %workgroup_output offset(0) : tensor<4xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%workgroup_0) expected(%expected_initial) : tensor<1xi32>
+  %workgroup_1 = check.tensor.view %workgroup_output offset(4) : tensor<4xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%workgroup_1) expected(%expected_replacement) : tensor<1xi32>
+  %workgroup_2 = check.tensor.view %workgroup_output offset(8) : tensor<4xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%workgroup_2) expected(%expected_initial) : tensor<1xi32>
+  %workgroup_3 = check.tensor.view %workgroup_output offset(12) : tensor<4xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%workgroup_3) expected(%expected_initial) : tensor<1xi32>
+  check.return
+}
+
+check.case public @atomic_bitwise_f32_subnormal {
+  %initial = check.literal value(1) : i32
+  %replacement = check.literal value(1193046) : i32
+  %expected_initial = check.generate.fill value(1) : tensor<1xi32>
+  %expected_replacement = check.generate.fill value(1193046) : tensor<1xi32>
+  %global_cell = check.generate.fill value(1) : tensor<1xi32>
+  %global_output = check.generate.fill value(0) : tensor<4xi32>
+  kernel.launch @global_atomic_bitwise_f32(%global_cell, %global_output, %initial, %replacement) : (tensor<1xi32>, tensor<4xi32>, i32, i32)
+  %global_0 = check.tensor.view %global_output offset(0) : tensor<4xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%global_0) expected(%expected_initial) : tensor<1xi32>
+  %global_1 = check.tensor.view %global_output offset(4) : tensor<4xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%global_1) expected(%expected_replacement) : tensor<1xi32>
+  %global_2 = check.tensor.view %global_output offset(8) : tensor<4xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%global_2) expected(%expected_initial) : tensor<1xi32>
+  %global_3 = check.tensor.view %global_output offset(12) : tensor<4xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%global_3) expected(%expected_initial) : tensor<1xi32>
+  %generic_cell = check.generate.fill value(1) : tensor<1xi32>
+  %generic_output = check.generate.fill value(0) : tensor<3xi32>
+  kernel.launch @generic_atomic_bitwise_f32(%generic_cell, %generic_output, %initial, %replacement) : (tensor<1xi32>, tensor<3xi32>, i32, i32)
+  %generic_0 = check.tensor.view %generic_output offset(0) : tensor<3xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%generic_0) expected(%expected_initial) : tensor<1xi32>
+  %generic_1 = check.tensor.view %generic_output offset(4) : tensor<3xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%generic_1) expected(%expected_replacement) : tensor<1xi32>
+  %generic_2 = check.tensor.view %generic_output offset(8) : tensor<3xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%generic_2) expected(%expected_initial) : tensor<1xi32>
+  check.expect.bitwise actual(%generic_cell) expected(%expected_initial) : tensor<1xi32>
+  %workgroup_output = check.generate.fill value(0) : tensor<4xi32>
+  kernel.launch @workgroup_atomic_bitwise_f32(%workgroup_output, %initial, %replacement) : (tensor<4xi32>, i32, i32)
+  %workgroup_0 = check.tensor.view %workgroup_output offset(0) : tensor<4xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%workgroup_0) expected(%expected_initial) : tensor<1xi32>
+  %workgroup_1 = check.tensor.view %workgroup_output offset(4) : tensor<4xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%workgroup_1) expected(%expected_replacement) : tensor<1xi32>
+  %workgroup_2 = check.tensor.view %workgroup_output offset(8) : tensor<4xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%workgroup_2) expected(%expected_initial) : tensor<1xi32>
+  %workgroup_3 = check.tensor.view %workgroup_output offset(12) : tensor<4xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%workgroup_3) expected(%expected_initial) : tensor<1xi32>
+  check.return
+}
+
+check.case public @vector_atomic_bitwise_f32_mask_0 {
+  %initial = check.literal value(2139169605) : i32
+  %replacement = check.literal value(2143634209) : i32
+  %flag = check.literal value(0) : i32
+  %cells = check.generate.fill value(2139169605) : tensor<2xi32>
+  %output = check.generate.fill value(0) : tensor<6xi32>
+  kernel.launch @vector_atomic_bitwise_f32(%cells, %output, %initial, %replacement, %flag) : (tensor<2xi32>, tensor<6xi32>, i32, i32, i32)
+  %expected_initial = check.generate.fill value(2139169605) : tensor<1xi32>
+  %expected_replacement = check.generate.fill value(2143634209) : tensor<1xi32>
+  %result_0 = check.tensor.view %output offset(0) : tensor<6xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%result_0) expected(%expected_replacement) : tensor<1xi32>
+  %result_1 = check.tensor.view %output offset(4) : tensor<6xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%result_1) expected(%expected_replacement) : tensor<1xi32>
+  %result_2 = check.tensor.view %output offset(8) : tensor<6xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%result_2) expected(%expected_initial) : tensor<1xi32>
+  %result_3 = check.tensor.view %output offset(12) : tensor<6xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%result_3) expected(%expected_initial) : tensor<1xi32>
+  %result_4 = check.tensor.view %output offset(16) : tensor<6xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%result_4) expected(%expected_initial) : tensor<1xi32>
+  %result_5 = check.tensor.view %output offset(20) : tensor<6xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%result_5) expected(%expected_initial) : tensor<1xi32>
+  check.return
+}
+
+check.case public @vector_atomic_bitwise_f32_mask_1 {
+  %initial = check.literal value(2139169605) : i32
+  %replacement = check.literal value(2143634209) : i32
+  %flag = check.literal value(1) : i32
+  %cells = check.generate.fill value(2139169605) : tensor<2xi32>
+  %output = check.generate.fill value(0) : tensor<6xi32>
+  kernel.launch @vector_atomic_bitwise_f32(%cells, %output, %initial, %replacement, %flag) : (tensor<2xi32>, tensor<6xi32>, i32, i32, i32)
+  %expected_initial = check.generate.fill value(2139169605) : tensor<1xi32>
+  %expected_replacement = check.generate.fill value(2143634209) : tensor<1xi32>
+  %result_0 = check.tensor.view %output offset(0) : tensor<6xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%result_0) expected(%expected_initial) : tensor<1xi32>
+  %result_1 = check.tensor.view %output offset(4) : tensor<6xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%result_1) expected(%expected_replacement) : tensor<1xi32>
+  %result_2 = check.tensor.view %output offset(8) : tensor<6xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%result_2) expected(%expected_replacement) : tensor<1xi32>
+  %result_3 = check.tensor.view %output offset(12) : tensor<6xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%result_3) expected(%expected_initial) : tensor<1xi32>
+  %result_4 = check.tensor.view %output offset(16) : tensor<6xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%result_4) expected(%expected_initial) : tensor<1xi32>
+  %result_5 = check.tensor.view %output offset(20) : tensor<6xi32> -> tensor<1xi32>
+  check.expect.bitwise actual(%result_5) expected(%expected_initial) : tensor<1xi32>
+  check.return
+}
+
+check.case public @atomic_bitwise_f64_nan_payload {
+  %initial = check.literal value(9218888453225749180) : i64
+  %replacement = check.literal value(9221212811051326650) : i64
+  %expected_initial = check.generate.fill value(9218888453225749180) : tensor<1xi64>
+  %expected_replacement = check.generate.fill value(9221212811051326650) : tensor<1xi64>
+  %global_cell = check.generate.fill value(9218888453225749180) : tensor<1xi64>
+  %global_output = check.generate.fill value(0) : tensor<4xi64>
+  kernel.launch @global_atomic_bitwise_f64(%global_cell, %global_output, %initial, %replacement) : (tensor<1xi64>, tensor<4xi64>, i64, i64)
+  %global_0 = check.tensor.view %global_output offset(0) : tensor<4xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%global_0) expected(%expected_initial) : tensor<1xi64>
+  %global_1 = check.tensor.view %global_output offset(8) : tensor<4xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%global_1) expected(%expected_replacement) : tensor<1xi64>
+  %global_2 = check.tensor.view %global_output offset(16) : tensor<4xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%global_2) expected(%expected_initial) : tensor<1xi64>
+  %global_3 = check.tensor.view %global_output offset(24) : tensor<4xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%global_3) expected(%expected_initial) : tensor<1xi64>
+  %generic_cell = check.generate.fill value(9218888453225749180) : tensor<1xi64>
+  %generic_output = check.generate.fill value(0) : tensor<3xi64>
+  kernel.launch @generic_atomic_bitwise_f64(%generic_cell, %generic_output, %initial, %replacement) : (tensor<1xi64>, tensor<3xi64>, i64, i64)
+  %generic_0 = check.tensor.view %generic_output offset(0) : tensor<3xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%generic_0) expected(%expected_initial) : tensor<1xi64>
+  %generic_1 = check.tensor.view %generic_output offset(8) : tensor<3xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%generic_1) expected(%expected_replacement) : tensor<1xi64>
+  %generic_2 = check.tensor.view %generic_output offset(16) : tensor<3xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%generic_2) expected(%expected_initial) : tensor<1xi64>
+  check.expect.bitwise actual(%generic_cell) expected(%expected_initial) : tensor<1xi64>
+  %workgroup_output = check.generate.fill value(0) : tensor<4xi64>
+  kernel.launch @workgroup_atomic_bitwise_f64(%workgroup_output, %initial, %replacement) : (tensor<4xi64>, i64, i64)
+  %workgroup_0 = check.tensor.view %workgroup_output offset(0) : tensor<4xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%workgroup_0) expected(%expected_initial) : tensor<1xi64>
+  %workgroup_1 = check.tensor.view %workgroup_output offset(8) : tensor<4xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%workgroup_1) expected(%expected_replacement) : tensor<1xi64>
+  %workgroup_2 = check.tensor.view %workgroup_output offset(16) : tensor<4xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%workgroup_2) expected(%expected_initial) : tensor<1xi64>
+  %workgroup_3 = check.tensor.view %workgroup_output offset(24) : tensor<4xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%workgroup_3) expected(%expected_initial) : tensor<1xi64>
+  check.return
+}
+
+check.case public @atomic_bitwise_f64_signed_zero {
+  %initial = check.literal value(0) : i64
+  %replacement = check.literal value(-9223372036854775808) : i64
+  %expected_initial = check.generate.fill value(0) : tensor<1xi64>
+  %expected_replacement = check.generate.fill value(-9223372036854775808) : tensor<1xi64>
+  %global_cell = check.generate.fill value(0) : tensor<1xi64>
+  %global_output = check.generate.fill value(0) : tensor<4xi64>
+  kernel.launch @global_atomic_bitwise_f64(%global_cell, %global_output, %initial, %replacement) : (tensor<1xi64>, tensor<4xi64>, i64, i64)
+  %global_0 = check.tensor.view %global_output offset(0) : tensor<4xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%global_0) expected(%expected_initial) : tensor<1xi64>
+  %global_1 = check.tensor.view %global_output offset(8) : tensor<4xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%global_1) expected(%expected_replacement) : tensor<1xi64>
+  %global_2 = check.tensor.view %global_output offset(16) : tensor<4xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%global_2) expected(%expected_initial) : tensor<1xi64>
+  %global_3 = check.tensor.view %global_output offset(24) : tensor<4xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%global_3) expected(%expected_initial) : tensor<1xi64>
+  %generic_cell = check.generate.fill value(0) : tensor<1xi64>
+  %generic_output = check.generate.fill value(0) : tensor<3xi64>
+  kernel.launch @generic_atomic_bitwise_f64(%generic_cell, %generic_output, %initial, %replacement) : (tensor<1xi64>, tensor<3xi64>, i64, i64)
+  %generic_0 = check.tensor.view %generic_output offset(0) : tensor<3xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%generic_0) expected(%expected_initial) : tensor<1xi64>
+  %generic_1 = check.tensor.view %generic_output offset(8) : tensor<3xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%generic_1) expected(%expected_replacement) : tensor<1xi64>
+  %generic_2 = check.tensor.view %generic_output offset(16) : tensor<3xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%generic_2) expected(%expected_initial) : tensor<1xi64>
+  check.expect.bitwise actual(%generic_cell) expected(%expected_initial) : tensor<1xi64>
+  %workgroup_output = check.generate.fill value(0) : tensor<4xi64>
+  kernel.launch @workgroup_atomic_bitwise_f64(%workgroup_output, %initial, %replacement) : (tensor<4xi64>, i64, i64)
+  %workgroup_0 = check.tensor.view %workgroup_output offset(0) : tensor<4xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%workgroup_0) expected(%expected_initial) : tensor<1xi64>
+  %workgroup_1 = check.tensor.view %workgroup_output offset(8) : tensor<4xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%workgroup_1) expected(%expected_replacement) : tensor<1xi64>
+  %workgroup_2 = check.tensor.view %workgroup_output offset(16) : tensor<4xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%workgroup_2) expected(%expected_initial) : tensor<1xi64>
+  %workgroup_3 = check.tensor.view %workgroup_output offset(24) : tensor<4xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%workgroup_3) expected(%expected_initial) : tensor<1xi64>
+  check.return
+}
+
+check.case public @atomic_bitwise_f64_subnormal {
+  %initial = check.literal value(1) : i64
+  %replacement = check.literal value(320255973501901) : i64
+  %expected_initial = check.generate.fill value(1) : tensor<1xi64>
+  %expected_replacement = check.generate.fill value(320255973501901) : tensor<1xi64>
+  %global_cell = check.generate.fill value(1) : tensor<1xi64>
+  %global_output = check.generate.fill value(0) : tensor<4xi64>
+  kernel.launch @global_atomic_bitwise_f64(%global_cell, %global_output, %initial, %replacement) : (tensor<1xi64>, tensor<4xi64>, i64, i64)
+  %global_0 = check.tensor.view %global_output offset(0) : tensor<4xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%global_0) expected(%expected_initial) : tensor<1xi64>
+  %global_1 = check.tensor.view %global_output offset(8) : tensor<4xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%global_1) expected(%expected_replacement) : tensor<1xi64>
+  %global_2 = check.tensor.view %global_output offset(16) : tensor<4xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%global_2) expected(%expected_initial) : tensor<1xi64>
+  %global_3 = check.tensor.view %global_output offset(24) : tensor<4xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%global_3) expected(%expected_initial) : tensor<1xi64>
+  %generic_cell = check.generate.fill value(1) : tensor<1xi64>
+  %generic_output = check.generate.fill value(0) : tensor<3xi64>
+  kernel.launch @generic_atomic_bitwise_f64(%generic_cell, %generic_output, %initial, %replacement) : (tensor<1xi64>, tensor<3xi64>, i64, i64)
+  %generic_0 = check.tensor.view %generic_output offset(0) : tensor<3xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%generic_0) expected(%expected_initial) : tensor<1xi64>
+  %generic_1 = check.tensor.view %generic_output offset(8) : tensor<3xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%generic_1) expected(%expected_replacement) : tensor<1xi64>
+  %generic_2 = check.tensor.view %generic_output offset(16) : tensor<3xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%generic_2) expected(%expected_initial) : tensor<1xi64>
+  check.expect.bitwise actual(%generic_cell) expected(%expected_initial) : tensor<1xi64>
+  %workgroup_output = check.generate.fill value(0) : tensor<4xi64>
+  kernel.launch @workgroup_atomic_bitwise_f64(%workgroup_output, %initial, %replacement) : (tensor<4xi64>, i64, i64)
+  %workgroup_0 = check.tensor.view %workgroup_output offset(0) : tensor<4xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%workgroup_0) expected(%expected_initial) : tensor<1xi64>
+  %workgroup_1 = check.tensor.view %workgroup_output offset(8) : tensor<4xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%workgroup_1) expected(%expected_replacement) : tensor<1xi64>
+  %workgroup_2 = check.tensor.view %workgroup_output offset(16) : tensor<4xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%workgroup_2) expected(%expected_initial) : tensor<1xi64>
+  %workgroup_3 = check.tensor.view %workgroup_output offset(24) : tensor<4xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%workgroup_3) expected(%expected_initial) : tensor<1xi64>
+  check.return
+}
+
+check.case public @vector_atomic_bitwise_f64_mask_0 {
+  %initial = check.literal value(9218888453225749180) : i64
+  %replacement = check.literal value(9221212811051326650) : i64
+  %flag = check.literal value(0) : i32
+  %cells = check.generate.fill value(9218888453225749180) : tensor<2xi64>
+  %output = check.generate.fill value(0) : tensor<6xi64>
+  kernel.launch @vector_atomic_bitwise_f64(%cells, %output, %initial, %replacement, %flag) : (tensor<2xi64>, tensor<6xi64>, i64, i64, i32)
+  %expected_initial = check.generate.fill value(9218888453225749180) : tensor<1xi64>
+  %expected_replacement = check.generate.fill value(9221212811051326650) : tensor<1xi64>
+  %result_0 = check.tensor.view %output offset(0) : tensor<6xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%result_0) expected(%expected_replacement) : tensor<1xi64>
+  %result_1 = check.tensor.view %output offset(8) : tensor<6xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%result_1) expected(%expected_replacement) : tensor<1xi64>
+  %result_2 = check.tensor.view %output offset(16) : tensor<6xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%result_2) expected(%expected_initial) : tensor<1xi64>
+  %result_3 = check.tensor.view %output offset(24) : tensor<6xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%result_3) expected(%expected_initial) : tensor<1xi64>
+  %result_4 = check.tensor.view %output offset(32) : tensor<6xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%result_4) expected(%expected_initial) : tensor<1xi64>
+  %result_5 = check.tensor.view %output offset(40) : tensor<6xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%result_5) expected(%expected_initial) : tensor<1xi64>
+  check.return
+}
+
+check.case public @vector_atomic_bitwise_f64_mask_1 {
+  %initial = check.literal value(9218888453225749180) : i64
+  %replacement = check.literal value(9221212811051326650) : i64
+  %flag = check.literal value(1) : i32
+  %cells = check.generate.fill value(9218888453225749180) : tensor<2xi64>
+  %output = check.generate.fill value(0) : tensor<6xi64>
+  kernel.launch @vector_atomic_bitwise_f64(%cells, %output, %initial, %replacement, %flag) : (tensor<2xi64>, tensor<6xi64>, i64, i64, i32)
+  %expected_initial = check.generate.fill value(9218888453225749180) : tensor<1xi64>
+  %expected_replacement = check.generate.fill value(9221212811051326650) : tensor<1xi64>
+  %result_0 = check.tensor.view %output offset(0) : tensor<6xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%result_0) expected(%expected_initial) : tensor<1xi64>
+  %result_1 = check.tensor.view %output offset(8) : tensor<6xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%result_1) expected(%expected_replacement) : tensor<1xi64>
+  %result_2 = check.tensor.view %output offset(16) : tensor<6xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%result_2) expected(%expected_replacement) : tensor<1xi64>
+  %result_3 = check.tensor.view %output offset(24) : tensor<6xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%result_3) expected(%expected_initial) : tensor<1xi64>
+  %result_4 = check.tensor.view %output offset(32) : tensor<6xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%result_4) expected(%expected_initial) : tensor<1xi64>
+  %result_5 = check.tensor.view %output offset(40) : tensor<6xi64> -> tensor<1xi64>
+  check.expect.bitwise actual(%result_5) expected(%expected_initial) : tensor<1xi64>
+  check.return
+}

@@ -1,0 +1,326 @@
+// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_atomic_float_bitwise.loom-test
+// RUN: emit source-low target=amdgpu:gfx1200 output=low
+
+func.def @global_atomic_bitwise_f32(%input: buffer, %initial: f32, %replacement: f32) -> (f32, f32, f32) {
+  %base = index.constant 0 : offset
+  %storage = buffer.assume.memory_space<global> %input : buffer
+  %cell = buffer.view %storage[%base] : buffer -> view<1xf32>
+  %exchanged = view.atomic.rmw<xchgf> %replacement, %cell[0] {ordering = acq_rel, scope = system} : f32, view<1xf32> -> f32
+  %succeeded = view.atomic.cmpxchg %replacement, %initial, %cell[0] {failure_ordering = acquire, scope = system, success_ordering = acq_rel} : f32, view<1xf32> -> f32
+  %failed = view.atomic.cmpxchg %replacement, %replacement, %cell[0] {failure_ordering = seq_cst, scope = system, success_ordering = seq_cst} : f32, view<1xf32> -> f32
+  func.return %exchanged, %succeeded, %failed : f32, f32, f32
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @global_atomic_bitwise_f32(%initial: reg<amdgpu.vgpr>, %replacement: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %cell = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %18 = v_mov_b32 0
+  s_wait_dscnt {dscnt = 0}
+  global_wb {scope = 3}
+  s_wait_storecnt {storecnt = 0}
+  %exchanged = global_atomic_swap_b32_rtn_saddr %18, %replacement, %cell {scope = 3}
+  s_wait_loadcnt {loadcnt = 0}
+  global_inv {scope = 3}
+  s_wait_dscnt {dscnt = 0}
+  global_wb {scope = 3}
+  s_wait_storecnt {storecnt = 0}
+  %21 = concat(%initial, %replacement) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %succeeded = global_atomic_cmpswap_b32_rtn_saddr %18, %21, %cell {scope = 3}
+  s_wait_loadcnt {loadcnt = 0}
+  global_inv {scope = 3}
+  s_wait_dscnt {dscnt = 0}
+  global_wb {scope = 3}
+  s_wait_storecnt {storecnt = 0}
+  %24 = concat(%replacement, %replacement) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %failed = global_atomic_cmpswap_b32_rtn_saddr %18, %24, %cell {scope = 3}
+  s_wait_loadcnt {loadcnt = 0}
+  global_inv {scope = 3}
+  return %exchanged, %succeeded, %failed
+}
+
+// ====
+
+func.def @generic_atomic_bitwise_f32(%input: buffer, %initial: f32, %replacement: f32) -> (f32, f32, f32) {
+  %base = index.constant 0 : offset
+  %storage = buffer.assume.memory_space<generic> %input : buffer
+  %cell = buffer.view %storage[%base] : buffer -> view<1xf32>
+  %exchanged = view.atomic.rmw<xchgf> %replacement, %cell[0] {ordering = acq_rel, scope = device} : f32, view<1xf32> -> f32
+  %succeeded = view.atomic.cmpxchg %replacement, %initial, %cell[0] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : f32, view<1xf32> -> f32
+  %failed = view.atomic.cmpxchg %replacement, %replacement, %cell[0] {failure_ordering = seq_cst, scope = device, success_ordering = seq_cst} : f32, view<1xf32> -> f32
+  func.return %exchanged, %succeeded, %failed : f32, f32, f32
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @generic_atomic_bitwise_f32(%initial: reg<amdgpu.vgpr>, %replacement: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %cell = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %18 = slice %cell[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %19 = slice %cell[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %20 = v_mov_b32_copy %18
+  %21 = v_mov_b32_copy %19
+  %22 = concat(%20, %21) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  s_wait_dscnt {dscnt = 0}
+  %exchanged = flat_atomic_swap_b32_rtn %22, %replacement {scope = 2}
+  s_wait_loadcnt {loadcnt = 0}
+  s_wait_dscnt {dscnt = 0}
+  global_inv {scope = 2}
+  %28 = concat(%20, %21) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  s_wait_dscnt {dscnt = 0}
+  %29 = concat(%initial, %replacement) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %succeeded = flat_atomic_cmpswap_b32_rtn %28, %29 {scope = 2}
+  s_wait_loadcnt {loadcnt = 0}
+  s_wait_dscnt {dscnt = 0}
+  global_inv {scope = 2}
+  %35 = concat(%20, %21) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  s_wait_dscnt {dscnt = 0}
+  %36 = concat(%replacement, %replacement) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %failed = flat_atomic_cmpswap_b32_rtn %35, %36 {scope = 2}
+  s_wait_loadcnt {loadcnt = 0}
+  s_wait_dscnt {dscnt = 0}
+  global_inv {scope = 2}
+  return %exchanged, %succeeded, %failed
+}
+
+// ====
+
+func.def @workgroup_atomic_bitwise_f32(%initial: f32, %replacement: f32) -> (f32, f32, f32) {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 4 : offset
+  %storage = buffer.alloca<workgroup> align(4) %bytes : buffer
+  %cell = buffer.view %storage[%base] : buffer -> view<1xf32>
+  view.store %initial, %cell[0] : f32, view<1xf32>
+  %exchanged = view.atomic.rmw<xchgf> %replacement, %cell[0] {ordering = acq_rel, scope = workgroup} : f32, view<1xf32> -> f32
+  %succeeded = view.atomic.cmpxchg %replacement, %initial, %cell[0] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : f32, view<1xf32> -> f32
+  %failed = view.atomic.cmpxchg %replacement, %replacement, %cell[0] {failure_ordering = seq_cst, scope = workgroup, success_ordering = seq_cst} : f32, view<1xf32> -> f32
+  func.return %exchanged, %succeeded, %failed : f32, f32, f32
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @workgroup_atomic_bitwise_f32(%initial: reg<amdgpu.vgpr>, %replacement: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %17 = storage {byte_alignment = 4, byte_length = 4} : low.storage<workgroup>
+  %cell = storage_address %17 : low.storage<workgroup> -> reg<amdgpu.vgpr>
+  %19 = v_mov_b32 0
+  ds_write_b32 %19, %initial
+  %exchanged = ds_wrxchg_rtn_b32 %cell, %replacement
+  %succeeded = ds_cmpst_rtn_b32 %cell, %replacement, %initial
+  %failed = ds_cmpst_rtn_b32 %cell, %replacement, %replacement
+  return %exchanged, %succeeded, %failed
+}
+
+// ====
+
+func.def @vector_atomic_bitwise_f32(%input: buffer, %initial: vector<2xf32>, %replacement: vector<2xf32>, %flag: i32) -> (vector<2xf32>, vector<2xf32>) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %cells = buffer.view %global[%base] : buffer -> view<2xf32>
+  %origin = index.constant 0 : index
+  %stride = index.constant 1 : index
+  %offsets = vector.iota %origin step %stride : vector<2xindex>
+  %c0 = scalar.constant 0 : i32
+  %enabled = scalar.cmpi ne, %flag, %c0 : i32
+  %disabled = scalar.constant false : i1
+  %mask = vector.from_elements %enabled, %disabled : vector<2xi1>
+  %exchanged = vector.atomic.rmw.mask<xchgf> %replacement, %cells[0][%offsets], %mask, %replacement {ordering = acq_rel, scope = device} : vector<2xf32>, view<2xf32>, vector<2xindex>, vector<2xi1>, vector<2xf32>
+  %observed = vector.atomic.cmpxchg %replacement, %initial, %cells[0][%offsets] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : vector<2xf32>, view<2xf32>, vector<2xindex> -> vector<2xf32>
+  func.return %exchanged, %observed : vector<2xf32>, vector<2xf32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @vector_atomic_bitwise_f32(%initial: reg<amdgpu.vgpr x2>, %replacement: reg<amdgpu.vgpr x2>, %flag: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %cells = resource<hal_binding> {extent = 8, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %c0 = s_mov_b32 0
+  %enabled = s_cmp_lg_i32 %flag, %c0
+  low.cond_br %enabled, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+^_bb1:
+  %47 = slice %replacement[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %48 = v_mov_b32 0
+  s_wait_dscnt {dscnt = 0}
+  %49 = global_atomic_swap_b32_rtn_saddr %48, %47, %cells {scope = 2}
+  s_wait_loadcnt {loadcnt = 0}
+  global_inv {scope = 2}
+  low.br ^_bb3(%49: reg<amdgpu.vgpr>)
+^_bb2:
+  %50 = slice %replacement[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  low.br ^_bb3(%50: reg<amdgpu.vgpr>)
+^_bb3(%43: reg<amdgpu.vgpr>):
+  %51 = slice %replacement[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %exchanged = concat(%43, %51) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %53 = slice %replacement[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %54 = slice %initial[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %55 = v_mov_b32 0
+  s_wait_dscnt {dscnt = 0}
+  %56 = concat(%54, %53) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %57 = global_atomic_cmpswap_b32_rtn_saddr %55, %56, %cells {scope = 2}
+  s_wait_loadcnt {loadcnt = 0}
+  global_inv {scope = 2}
+  %58 = slice %initial[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  s_wait_dscnt {dscnt = 0}
+  %60 = concat(%58, %51) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %61 = global_atomic_cmpswap_b32_rtn_saddr %55, %60, %cells {offset = 4, scope = 2}
+  s_wait_loadcnt {loadcnt = 0}
+  global_inv {scope = 2}
+  %observed = concat(%57, %61) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %exchanged, %observed
+}
+
+// ====
+
+func.def @global_atomic_bitwise_f64(%input: buffer, %initial: f64, %replacement: f64) -> (f64, f64, f64) {
+  %base = index.constant 0 : offset
+  %storage = buffer.assume.memory_space<global> %input : buffer
+  %cell = buffer.view %storage[%base] : buffer -> view<1xf64>
+  %exchanged = view.atomic.rmw<xchgf> %replacement, %cell[0] {ordering = acq_rel, scope = system} : f64, view<1xf64> -> f64
+  %succeeded = view.atomic.cmpxchg %replacement, %initial, %cell[0] {failure_ordering = acquire, scope = system, success_ordering = acq_rel} : f64, view<1xf64> -> f64
+  %failed = view.atomic.cmpxchg %replacement, %replacement, %cell[0] {failure_ordering = seq_cst, scope = system, success_ordering = seq_cst} : f64, view<1xf64> -> f64
+  func.return %exchanged, %succeeded, %failed : f64, f64, f64
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @global_atomic_bitwise_f64(%initial: reg<amdgpu.vgpr x2>, %replacement: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %cell = resource<hal_binding> {extent = 8, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %18 = v_mov_b32 0
+  s_wait_dscnt {dscnt = 0}
+  global_wb {scope = 3}
+  s_wait_storecnt {storecnt = 0}
+  %exchanged = global_atomic_swap_b64_rtn_saddr %18, %replacement, %cell {scope = 3}
+  s_wait_loadcnt {loadcnt = 0}
+  global_inv {scope = 3}
+  s_wait_dscnt {dscnt = 0}
+  global_wb {scope = 3}
+  s_wait_storecnt {storecnt = 0}
+  %21 = concat(%initial, %replacement) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  %succeeded = global_atomic_cmpswap_b64_rtn_saddr %18, %21, %cell {scope = 3}
+  s_wait_loadcnt {loadcnt = 0}
+  global_inv {scope = 3}
+  s_wait_dscnt {dscnt = 0}
+  global_wb {scope = 3}
+  s_wait_storecnt {storecnt = 0}
+  %24 = concat(%replacement, %replacement) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  %failed = global_atomic_cmpswap_b64_rtn_saddr %18, %24, %cell {scope = 3}
+  s_wait_loadcnt {loadcnt = 0}
+  global_inv {scope = 3}
+  return %exchanged, %succeeded, %failed
+}
+
+// ====
+
+func.def @generic_atomic_bitwise_f64(%input: buffer, %initial: f64, %replacement: f64) -> (f64, f64, f64) {
+  %base = index.constant 0 : offset
+  %storage = buffer.assume.memory_space<generic> %input : buffer
+  %cell = buffer.view %storage[%base] : buffer -> view<1xf64>
+  %exchanged = view.atomic.rmw<xchgf> %replacement, %cell[0] {ordering = acq_rel, scope = device} : f64, view<1xf64> -> f64
+  %succeeded = view.atomic.cmpxchg %replacement, %initial, %cell[0] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : f64, view<1xf64> -> f64
+  %failed = view.atomic.cmpxchg %replacement, %replacement, %cell[0] {failure_ordering = seq_cst, scope = device, success_ordering = seq_cst} : f64, view<1xf64> -> f64
+  func.return %exchanged, %succeeded, %failed : f64, f64, f64
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @generic_atomic_bitwise_f64(%initial: reg<amdgpu.vgpr x2>, %replacement: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %cell = resource<hal_binding> {extent = 8, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %18 = slice %cell[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %19 = slice %cell[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %20 = v_mov_b32_copy %18
+  %21 = v_mov_b32_copy %19
+  %22 = concat(%20, %21) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  s_wait_dscnt {dscnt = 0}
+  %exchanged = flat_atomic_swap_b64_rtn %22, %replacement {scope = 2}
+  s_wait_loadcnt {loadcnt = 0}
+  s_wait_dscnt {dscnt = 0}
+  global_inv {scope = 2}
+  %28 = concat(%20, %21) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  s_wait_dscnt {dscnt = 0}
+  %29 = concat(%initial, %replacement) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  %succeeded = flat_atomic_cmpswap_b64_rtn %28, %29 {scope = 2}
+  s_wait_loadcnt {loadcnt = 0}
+  s_wait_dscnt {dscnt = 0}
+  global_inv {scope = 2}
+  %35 = concat(%20, %21) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  s_wait_dscnt {dscnt = 0}
+  %36 = concat(%replacement, %replacement) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  %failed = flat_atomic_cmpswap_b64_rtn %35, %36 {scope = 2}
+  s_wait_loadcnt {loadcnt = 0}
+  s_wait_dscnt {dscnt = 0}
+  global_inv {scope = 2}
+  return %exchanged, %succeeded, %failed
+}
+
+// ====
+
+func.def @workgroup_atomic_bitwise_f64(%initial: f64, %replacement: f64) -> (f64, f64, f64) {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 8 : offset
+  %storage = buffer.alloca<workgroup> align(8) %bytes : buffer
+  %cell = buffer.view %storage[%base] : buffer -> view<1xf64>
+  view.store %initial, %cell[0] : f64, view<1xf64>
+  %exchanged = view.atomic.rmw<xchgf> %replacement, %cell[0] {ordering = acq_rel, scope = workgroup} : f64, view<1xf64> -> f64
+  %succeeded = view.atomic.cmpxchg %replacement, %initial, %cell[0] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : f64, view<1xf64> -> f64
+  %failed = view.atomic.cmpxchg %replacement, %replacement, %cell[0] {failure_ordering = seq_cst, scope = workgroup, success_ordering = seq_cst} : f64, view<1xf64> -> f64
+  func.return %exchanged, %succeeded, %failed : f64, f64, f64
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @workgroup_atomic_bitwise_f64(%initial: reg<amdgpu.vgpr x2>, %replacement: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %17 = storage {byte_alignment = 8, byte_length = 8} : low.storage<workgroup>
+  %cell = storage_address %17 : low.storage<workgroup> -> reg<amdgpu.vgpr>
+  %19 = v_mov_b32 0
+  ds_write_b64 %19, %initial
+  %exchanged = ds_wrxchg_rtn_b64 %cell, %replacement
+  %succeeded = ds_cmpst_rtn_b64 %cell, %replacement, %initial
+  %failed = ds_cmpst_rtn_b64 %cell, %replacement, %replacement
+  return %exchanged, %succeeded, %failed
+}
+
+// ====
+
+func.def @vector_atomic_bitwise_f64(%input: buffer, %initial: vector<2xf64>, %replacement: vector<2xf64>, %flag: i32) -> (vector<2xf64>, vector<2xf64>) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %cells = buffer.view %global[%base] : buffer -> view<2xf64>
+  %origin = index.constant 0 : index
+  %stride = index.constant 1 : index
+  %offsets = vector.iota %origin step %stride : vector<2xindex>
+  %c0 = scalar.constant 0 : i32
+  %enabled = scalar.cmpi ne, %flag, %c0 : i32
+  %disabled = scalar.constant false : i1
+  %mask = vector.from_elements %enabled, %disabled : vector<2xi1>
+  %exchanged = vector.atomic.rmw.mask<xchgf> %replacement, %cells[0][%offsets], %mask, %replacement {ordering = acq_rel, scope = device} : vector<2xf64>, view<2xf64>, vector<2xindex>, vector<2xi1>, vector<2xf64>
+  %observed = vector.atomic.cmpxchg %replacement, %initial, %cells[0][%offsets] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : vector<2xf64>, view<2xf64>, vector<2xindex> -> vector<2xf64>
+  func.return %exchanged, %observed : vector<2xf64>, vector<2xf64>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @vector_atomic_bitwise_f64(%initial: reg<amdgpu.vgpr x4>, %replacement: reg<amdgpu.vgpr x4>, %flag: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm {
+  %cells = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %c0 = s_mov_b32 0
+  %enabled = s_cmp_lg_i32 %flag, %c0
+  low.cond_br %enabled, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+^_bb1:
+  %47 = slice %replacement[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %48 = v_mov_b32 0
+  s_wait_dscnt {dscnt = 0}
+  %49 = global_atomic_swap_b64_rtn_saddr %48, %47, %cells {scope = 2}
+  s_wait_loadcnt {loadcnt = 0}
+  global_inv {scope = 2}
+  low.br ^_bb3(%49: reg<amdgpu.vgpr x2>)
+^_bb2:
+  %50 = slice %replacement[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  low.br ^_bb3(%50: reg<amdgpu.vgpr x2>)
+^_bb3(%43: reg<amdgpu.vgpr x2>):
+  %51 = slice %replacement[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %exchanged = concat(%43, %51) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  %53 = slice %replacement[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %54 = slice %initial[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %55 = v_mov_b32 0
+  s_wait_dscnt {dscnt = 0}
+  %56 = concat(%54, %53) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  %57 = global_atomic_cmpswap_b64_rtn_saddr %55, %56, %cells {scope = 2}
+  s_wait_loadcnt {loadcnt = 0}
+  global_inv {scope = 2}
+  %58 = slice %initial[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  s_wait_dscnt {dscnt = 0}
+  %60 = concat(%58, %51) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  %61 = global_atomic_cmpswap_b64_rtn_saddr %55, %60, %cells {offset = 8, scope = 2}
+  s_wait_loadcnt {loadcnt = 0}
+  global_inv {scope = 2}
+  %observed = concat(%57, %61) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  return %exchanged, %observed
+}
