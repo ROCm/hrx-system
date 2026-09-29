@@ -248,6 +248,149 @@ TEST_P(DispatchReuseTest, ResubmitWithDifferentBindings) {
   }
 }
 
+// Whole-buffer references resolve against the range supplied for each issue,
+// including both the binding-table offset and the recorded reference offset.
+TEST_P(DispatchReuseTest, WholeBufferReferences) {
+  static constexpr iree_device_size_t kByteLength = 8 * sizeof(float);
+  Ref<iree_hal_buffer_t> input;
+  IREE_ASSERT_OK(
+      CreateFilledDeviceBuffer<float>(kByteLength, -2.5f, input.out()));
+
+  for (iree_device_size_t reference_offset : {0u, 4u}) {
+    Ref<iree_hal_command_buffer_t> command_buffer;
+    IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+                                       IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+                                       /*binding_capacity=*/1,
+                                       command_buffer.out()));
+    IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+    const iree_hal_buffer_ref_t references[] = {
+        iree_hal_make_buffer_ref(input, reference_offset,
+                                 IREE_HAL_WHOLE_BUFFER),
+        iree_hal_make_indirect_buffer_ref(0, reference_offset,
+                                          IREE_HAL_WHOLE_BUFFER),
+    };
+    IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
+        command_buffer, absf_executable_,
+        iree_hal_executable_function_from_index(0),
+        iree_hal_make_static_dispatch_config(1, 1, 1),
+        iree_const_byte_span_empty(), {IREE_ARRAYSIZE(references), references},
+        IREE_HAL_DISPATCH_FLAG_NONE));
+    RecordDispatchBarrier(command_buffer);
+    IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+
+    for (iree_device_size_t binding_offset : {0u, 4u}) {
+      const iree_device_size_t lengths[] = {
+          reference_offset + 2 * sizeof(float), IREE_HAL_WHOLE_BUFFER};
+      for (iree_device_size_t binding_length : lengths) {
+        Ref<iree_hal_buffer_t> output;
+        IREE_ASSERT_OK(
+            CreateFilledDeviceBuffer<float>(kByteLength, -9.0f, output.out()));
+        const iree_hal_buffer_binding_t binding = {output, binding_offset,
+                                                   binding_length};
+        ASSERT_NO_FATAL_FAILURE(
+            SubmitWithBindingsAndWait(command_buffer, {1, &binding}));
+
+        std::vector<float> expected(8, -9.0f);
+        const size_t start =
+            (binding_offset + reference_offset) / sizeof(float);
+        expected[start] = expected[start + 1] = 2.5f;
+        EXPECT_THAT(ReadBufferData<float>(output), ContainerEq(expected));
+      }
+    }
+  }
+}
+
+// A remaining-range use must neither inflate nor erase another command's exact
+// extent requirement for the same slot. Invalid tables are rejected before any
+// backend execution, and the recorded command remains reusable afterward.
+TEST_P(DispatchReuseTest, WholeAndExactReferenceRequirements) {
+  Ref<iree_hal_command_buffer_t> command_buffer;
+  IREE_ASSERT_OK(CreateCommandBuffer(
+      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+      /*binding_capacity=*/1, command_buffer.out()));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+  const iree_hal_buffer_ref_t references[] = {
+      iree_hal_make_indirect_buffer_ref(0, 4 * sizeof(uint32_t),
+                                        4 * sizeof(uint32_t)),
+      iree_hal_make_indirect_buffer_ref(0, 0, IREE_HAL_WHOLE_BUFFER),
+  };
+  for (const iree_hal_buffer_ref_t& reference : references) {
+    IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
+        command_buffer, workgroup_id_executable_,
+        iree_hal_executable_function_from_index(0),
+        iree_hal_make_static_dispatch_config(4, 1, 1),
+        iree_const_byte_span_empty(), {1, &reference},
+        IREE_HAL_DISPATCH_FLAG_NONE));
+    RecordDispatchBarrier(command_buffer);
+  }
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+
+  Ref<iree_hal_buffer_t> output;
+  IREE_ASSERT_OK(CreateZeroedDeviceBuffer(64, output.out()));
+#if IREE_HAL_COMMAND_BUFFER_VALIDATION_ENABLE
+  const iree_hal_buffer_binding_t invalid_bindings[] = {
+      {output, 0, 31},
+      {output, 48, IREE_HAL_WHOLE_BUFFER},
+      {output, 32, 64},
+      {output, 68, IREE_HAL_WHOLE_BUFFER},
+      {output, 8, IREE_DEVICE_SIZE_MAX - 1},
+  };
+  for (const iree_hal_buffer_binding_t& binding : invalid_bindings) {
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                          iree_hal_command_buffer_validate_submission(
+                              command_buffer, {1, &binding}));
+  }
+#endif  // IREE_HAL_COMMAND_BUFFER_VALIDATION_ENABLE
+
+  const iree_hal_buffer_binding_t binding = {output, 16, 32};
+  ASSERT_NO_FATAL_FAILURE(
+      SubmitWithBindingsAndWait(command_buffer, {1, &binding}));
+  EXPECT_THAT(
+      ReadBufferData<uint32_t>(output),
+      ::testing::ElementsAre(0, 0, 0, 0, 0, 1, 2, 3, 0, 1, 2, 3, 0, 0, 0, 0));
+}
+
+TEST_P(DispatchReuseTest, RejectsOutOfRangeReferences) {
+#if !IREE_HAL_COMMAND_BUFFER_VALIDATION_ENABLE
+  GTEST_SKIP() << "command buffer validation disabled";
+#endif  // !IREE_HAL_COMMAND_BUFFER_VALIDATION_ENABLE
+  Ref<iree_hal_buffer_t> output;
+  IREE_ASSERT_OK(CreateZeroedDeviceBuffer(64, output.out()));
+  Ref<iree_hal_command_buffer_t> command_buffer;
+  IREE_ASSERT_OK(CreateCommandBuffer(
+      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+      /*binding_capacity=*/1, command_buffer.out()));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+  const iree_hal_buffer_ref_t invalid_references[] = {
+      iree_hal_make_buffer_ref(output, 68, IREE_HAL_WHOLE_BUFFER),
+      iree_hal_make_buffer_ref(output, 60, 8),
+      iree_hal_make_indirect_buffer_ref(0, IREE_DEVICE_SIZE_MAX - 3, 8),
+  };
+  for (const iree_hal_buffer_ref_t& reference : invalid_references) {
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                          iree_hal_command_buffer_dispatch(
+                              command_buffer, workgroup_id_executable_,
+                              iree_hal_executable_function_from_index(0),
+                              iree_hal_make_static_dispatch_config(1, 1, 1),
+                              iree_const_byte_span_empty(), {1, &reference},
+                              IREE_HAL_DISPATCH_FLAG_NONE));
+  }
+  // A remaining-range reference still requires its start to fit the binding.
+  const iree_hal_buffer_ref_t reference =
+      iree_hal_make_indirect_buffer_ref(0, 64, IREE_HAL_WHOLE_BUFFER);
+  IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
+      command_buffer, workgroup_id_executable_,
+      iree_hal_executable_function_from_index(0),
+      iree_hal_make_static_dispatch_config(1, 1, 1),
+      iree_const_byte_span_empty(), {1, &reference},
+      IREE_HAL_DISPATCH_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+  const iree_hal_buffer_binding_t binding = {output, 0, 63};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        iree_hal_command_buffer_validate_submission(
+                            command_buffer, {1, &binding}));
+}
+
 TEST_P(DispatchReuseTest, DispatchProfilingRecordsCommandBufferDispatch) {
   static constexpr iree_host_size_t kWorkgroupCount = 32;
   const iree_device_size_t buffer_size = kWorkgroupCount * sizeof(uint32_t);

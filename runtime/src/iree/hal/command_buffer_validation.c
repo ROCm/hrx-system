@@ -128,19 +128,20 @@ static iree_status_t iree_hal_command_buffer_validate_binding_requirements(
 
   // Verify that the binding range is valid and that any commands that reference
   // it are in range.
-  if (requirements.max_byte_offset > 0) {
-    iree_device_size_t end = binding.offset + requirements.max_byte_offset;
-    if (IREE_UNLIKELY(end > binding.offset + binding.length)) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "at least one command attempted to access an "
-          "address outside of the valid bound buffer "
-          "range (length=%" PRIdsz ", end(inc)=%" PRIdsz
-          ", binding offset=%" PRIdsz ", binding length=%" PRIdsz
-          ", binding end(inc)=%" PRIdsz ")",
-          requirements.max_byte_offset, end - 1, binding.offset, binding.length,
-          binding.offset + binding.length - 1);
-    }
+  const bool is_whole_buffer = binding.length == IREE_HAL_WHOLE_BUFFER;
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_range(
+      binding.buffer, binding.offset, is_whole_buffer ? 0 : binding.length));
+  const iree_device_size_t binding_length =
+      is_whole_buffer
+          ? iree_hal_buffer_byte_length(binding.buffer) - binding.offset
+          : binding.length;
+  if (IREE_UNLIKELY(requirements.min_byte_length > binding_length)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "at least one command references a range outside of the bound buffer "
+        "(required length=%" PRIdsz ", binding offset=%" PRIdsz
+        ", binding length=%" PRIdsz ")",
+        requirements.min_byte_length, binding.offset, binding_length);
   }
 
   // Ensure the offset and length have an alignment matching the value length.
@@ -174,12 +175,26 @@ static iree_status_t iree_hal_command_buffer_validate_buffer_requirements(
     iree_hal_command_buffer_validation_state_t* validation_state,
     iree_hal_buffer_ref_t buffer_ref,
     iree_hal_buffer_binding_requirements_t requirements) {
+  // Remaining-range references require their start to fit; their length is
+  // resolved against the actual binding at execution time. Fixed ranges require
+  // the entire extent, without allowing the addition to wrap.
+  requirements.min_byte_length = buffer_ref.offset;
+  if (buffer_ref.length != IREE_HAL_WHOLE_BUFFER &&
+      IREE_UNLIKELY(
+          !iree_device_size_checked_add(buffer_ref.offset, buffer_ref.length,
+                                        &requirements.min_byte_length))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "buffer reference range overflows device size "
+                            "(offset=%" PRIdsz ", length=%" PRIdsz ")",
+                            buffer_ref.offset, buffer_ref.length);
+  }
+
   // If the buffer is directly specified we can validate it inline.
   if (buffer_ref.buffer) {
     iree_hal_buffer_binding_t binding = {
         .buffer = buffer_ref.buffer,
         .offset = 0,
-        .length = buffer_ref.offset + buffer_ref.length,
+        .length = iree_hal_buffer_byte_length(buffer_ref.buffer),
     };
     return iree_hal_command_buffer_validate_binding_requirements(
         command_buffer, validation_state, binding, requirements);
@@ -207,8 +222,8 @@ static iree_status_t iree_hal_command_buffer_validate_buffer_requirements(
   table_requirements->usage |= requirements.usage;
   table_requirements->access |= requirements.access;
   table_requirements->type |= requirements.type;
-  table_requirements->max_byte_offset = iree_max(
-      table_requirements->max_byte_offset, requirements.max_byte_offset);
+  table_requirements->min_byte_length = iree_max(
+      table_requirements->min_byte_length, requirements.min_byte_length);
   if (requirements.min_byte_alignment) {
     table_requirements->min_byte_alignment =
         table_requirements->min_byte_alignment
@@ -328,10 +343,6 @@ static iree_status_t iree_hal_command_buffer_atomic_target_validation(
         "(length=%" PRIdsz ", width_bytes=%" PRIdsz ")",
         target_ref.length, byte_count);
   }
-  if (IREE_UNLIKELY(target_ref.offset > IREE_DEVICE_SIZE_MAX - byte_count)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "atomic target range overflows device size");
-  }
   if (IREE_UNLIKELY((target_ref.offset % byte_count) != 0)) {
     const iree_status_code_t status_code =
         target_error_mode == IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE
@@ -355,16 +366,10 @@ static iree_status_t iree_hal_command_buffer_atomic_target_validation(
         "(buffer_offset=%" PRIdsz ", alignment=%" PRIdsz ")",
         iree_hal_buffer_byte_offset(target_ref.buffer), byte_count);
   }
-  if (target_ref.buffer) {
-    IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_range(
-        target_ref.buffer, target_ref.offset, target_ref.length));
-  }
-
   const iree_hal_buffer_binding_requirements_t target_requirements = {
       .usage = usage,
       .access = access,
       .type = IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-      .max_byte_offset = target_ref.offset + byte_count,
       .min_byte_alignment =
           target_error_mode == IREE_HAL_ATOMIC_TARGET_ERROR_MODE_DEFAULT
               ? byte_count
@@ -427,7 +432,6 @@ iree_status_t iree_hal_command_buffer_advise_buffer_validation(
 
   const iree_hal_buffer_binding_requirements_t buffer_reqs = {
       .type = IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-      .max_byte_offset = buffer_ref.offset + buffer_ref.length,
   };
   IREE_RETURN_IF_ERROR(iree_hal_command_buffer_validate_buffer_requirements(
       command_buffer, validation_state, buffer_ref, buffer_reqs));
@@ -466,7 +470,6 @@ iree_status_t iree_hal_command_buffer_fill_buffer_validation(
       .usage = IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
       .access = IREE_HAL_MEMORY_ACCESS_WRITE,
       .type = IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-      .max_byte_offset = target_ref.offset + target_ref.length,
       .min_byte_alignment = pattern_length,
   };
   IREE_RETURN_IF_ERROR(iree_hal_command_buffer_validate_buffer_requirements(
@@ -488,7 +491,6 @@ iree_status_t iree_hal_command_buffer_update_buffer_validation(
       .usage = IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
       .access = IREE_HAL_MEMORY_ACCESS_WRITE,
       .type = IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-      .max_byte_offset = target_ref.offset + target_ref.length,
   };
   IREE_RETURN_IF_ERROR(iree_hal_command_buffer_validate_buffer_requirements(
       command_buffer, validation_state, target_ref, target_reqs));
@@ -517,7 +519,6 @@ iree_status_t iree_hal_command_buffer_copy_buffer_validation(
       .usage = IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
       .access = IREE_HAL_MEMORY_ACCESS_READ,
       .type = IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-      .max_byte_offset = source_ref.offset + source_ref.length,
   };
   IREE_RETURN_IF_ERROR(iree_hal_command_buffer_validate_buffer_requirements(
       command_buffer, validation_state, source_ref, source_reqs));
@@ -527,7 +528,6 @@ iree_status_t iree_hal_command_buffer_copy_buffer_validation(
       .usage = IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
       .access = IREE_HAL_MEMORY_ACCESS_WRITE,
       .type = IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-      .max_byte_offset = target_ref.offset + target_ref.length,
   };
   IREE_RETURN_IF_ERROR(iree_hal_command_buffer_validate_buffer_requirements(
       command_buffer, validation_state, target_ref, target_reqs));
@@ -581,17 +581,6 @@ iree_status_t iree_hal_command_buffer_dispatch_validation(
           "(length=%" PRIdsz ", min_length=%" PRIdsz ")",
           config.workgroup_count_ref.length, workgroup_count_length);
     }
-    iree_device_size_t workgroup_count_end = 0;
-    if (IREE_UNLIKELY(!iree_device_size_checked_add(
-            config.workgroup_count_ref.offset, workgroup_count_length,
-            &workgroup_count_end))) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "workgroup count offset overflows device size (offset=%" PRIdsz
-          ", length=%" PRIdsz ")",
-          config.workgroup_count_ref.offset, workgroup_count_length);
-    }
-
     iree_hal_buffer_ref_t workgroup_count_ref = config.workgroup_count_ref;
     workgroup_count_ref.length = workgroup_count_length;
     const iree_hal_buffer_binding_requirements_t workgroups_reqs = {
@@ -599,7 +588,6 @@ iree_status_t iree_hal_command_buffer_dispatch_validation(
         .usage = IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS,
         .access = IREE_HAL_MEMORY_ACCESS_READ,
         .type = IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-        .max_byte_offset = workgroup_count_end,
         .min_byte_alignment = sizeof(uint32_t),
     };
     IREE_RETURN_IF_ERROR(iree_hal_command_buffer_validate_buffer_requirements(
@@ -622,8 +610,6 @@ iree_status_t iree_hal_command_buffer_dispatch_validation(
         .usage = IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS,
         .access = IREE_HAL_MEMORY_ACCESS_READ,
         .type = IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-        .max_byte_offset =
-            bindings.values[0].offset + bindings.values[0].length,
         .min_byte_alignment = sizeof(uint32_t),
     };
     IREE_RETURN_IF_ERROR(iree_hal_command_buffer_validate_buffer_requirements(
@@ -638,8 +624,6 @@ iree_status_t iree_hal_command_buffer_dispatch_validation(
         .type = IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
     };
     for (iree_host_size_t i = 0; i < bindings.count; ++i) {
-      binding_requirements.max_byte_offset =
-          bindings.values[i].offset + bindings.values[i].length;
       IREE_RETURN_IF_ERROR(iree_hal_command_buffer_validate_buffer_requirements(
                                command_buffer, validation_state,
                                bindings.values[i], binding_requirements),

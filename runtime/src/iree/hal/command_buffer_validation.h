@@ -12,14 +12,20 @@
 
 // Requirements for a buffer resource used within a command buffer.
 // Buffers bound to must have all bits set from the included bitfields and
-// support the given min/max byte offsets as in-range.
+// contain the minimum required byte length.
 typedef struct iree_hal_buffer_binding_requirements_t {
+  // Allocator compatibility required by commands using this binding.
   iree_hal_buffer_compatibility_t required_compatibility;
+  // Union of buffer usages required by recorded commands.
   iree_hal_buffer_usage_t usage;
+  // Union of memory access modes required by recorded commands.
   iree_hal_memory_access_t access;
+  // Required buffer memory properties.
   iree_hal_memory_type_t type;
-  // Maximum offset in the binding referenced by any command.
-  iree_device_size_t max_byte_offset;
+  // Minimum binding length containing every recorded reference. A fixed range
+  // contributes offset + length; a whole-buffer range contributes only offset
+  // because its length is the remaining bound range at execution time.
+  iree_device_size_t min_byte_length;
   // Minimum required alignment by at least one command.
   iree_device_size_t min_byte_alignment;
   // Minimum alignment requested by commands that classify only target
