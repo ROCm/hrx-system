@@ -335,4 +335,70 @@ loom_cc_library(
 )
 endif()
 
+loom_cc_library(
+  NAME
+    qwen_chat
+  HDRS
+    "qwen_chat.h"
+  SRCS
+    "qwen_chat.c"
+  DEPS
+    iree::base
+    iree::base::internal::json
+    iree::base::internal::unicode
+    loom::util::json
+    loom::util::stream
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    qwen_chat_test
+  SRCS
+    "qwen_chat_test.cc"
+  DEPS
+    ::qwen_chat
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+loom_cc_library(
+  NAME
+    qwen_service
+  HDRS
+    "qwen_service.h"
+  SRCS
+    "qwen_service.c"
+  DEPS
+    ::http_request
+    ::http_server
+    ::qwen_chat
+    ::qwen_model
+    iree::base
+    iree::base::threading
+    iree::tokenizer
+    loom::util::json
+    loom::util::stream
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+loom_cc_binary(
+  NAME
+    qwen_server
+  SRCS
+    "qwen_server_main.c"
+  DEPS
+    ::http_server
+    ::qwen_model
+    ::qwen_service
+    iree::async
+    iree::base
+    iree::base::tooling::flags
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
