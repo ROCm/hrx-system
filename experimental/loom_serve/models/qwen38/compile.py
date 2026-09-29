@@ -23,16 +23,21 @@ def compile_stage(arguments, stage):
         output / "kernels",
     ):
         directory.mkdir(parents=True, exist_ok=True)
+    token_capacity = 512 if stage == "prefill" else 1
     config = {
         "runner.qwen38.prefill_token_count": arguments.prefill_capacity,
-        "ggml.linear_q4k_q8_1_x4.token_capacity": 512,
+        "ggml.linear_q4k_q8_1_x4.token_capacity": token_capacity,
         "ggml.linear_q4k_q8_1_x4.output_capacity": 48,
-        "ggml.linear_q5k_q8_1_x4.token_capacity": 512,
+        "ggml.linear_q5k_q8_1_x4.token_capacity": token_capacity,
         "ggml.linear_q5k_q8_1_x4.output_capacity": 17408,
-        "ggml.linear_q6k_q8_1_x4.token_capacity": 512,
+        "ggml.linear_q6k_f32_decode.output_capacity": 5120,
+        "ggml.linear_q6k_q8_1_x4.token_capacity": token_capacity,
         "ggml.linear_q6k_q8_1_x4.output_capacity": 248320,
-        "ggml.quantize_q8_1_x4.group_capacity": 69632,
+        "ggml.linear_q8_0_q8_1_x4.token_capacity": 1,
+        "ggml.linear_q8_0_q8_1_x4.output_capacity": 1024,
+        "ggml.quantize_q8_1_x4.group_capacity": 136 * token_capacity,
         "qwen38.attention.cache_capacity": arguments.context_capacity,
+        "qwen38.attention.decode_split_count": arguments.decode_splits,
         "qwen38.greedy_argmax.output_capacity": 248320,
     }
     configuration = output / "config.json"
@@ -94,6 +99,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--context-capacity", type=int, default=16384)
     parser.add_argument("--prefill-capacity", type=int, default=512)
+    parser.add_argument("--decode-splits", type=int, default=10)
     parser.add_argument("--target", default="amdgpu:gfx1151")
     parser.add_argument(
         "--stage", choices=("prefill", "decode", "both"), default="both"
@@ -111,6 +117,8 @@ def main():
     arguments = parser.parse_args()
     if not 1 <= arguments.prefill_capacity <= 512:
         parser.error("prefill capacity must be in [1, 512]")
+    if not 1 <= arguments.decode_splits <= 64:
+        parser.error("decode splits must be in [1, 64]")
     if not arguments.prefill_capacity <= arguments.context_capacity <= 262144:
         parser.error("context capacity must contain prefill and be at most 262144")
     stages = ("prefill", "decode") if arguments.stage == "both" else (arguments.stage,)
