@@ -61,15 +61,11 @@ kernel.def @qwen38_decode_commit_token() {
   kernel.return
 }
 
-// The state layout publishes exact operational ranges to the portable artifact.
+// Generic launch arguments retain whole-buffer ranges in the portable artifact.
 command.program.def public @prefill_to_decode() launch(%control: buffer, %token_ids: buffer, %progress: buffer) {
-  %zero = index.constant 0 : offset
-  %control_view = buffer.view %control[%zero] : buffer -> view<3xi32>
-  %token_ids_view = buffer.view %token_ids[%zero] : buffer -> view<129xi32>
-  %progress_view = buffer.view %progress[%zero] : buffer -> view<8xi32>
   command.serial {
-    kernel.launch @qwen38_prefill_finish_control(%control_view, %token_ids_view, %progress_view) : (view<3xi32>, view<129xi32>, view<8xi32>)
-    kernel.launch @qwen38_decode_commit_token(%control_view, %token_ids_view, %progress_view) : (view<3xi32>, view<129xi32>, view<8xi32>)
+    kernel.launch @qwen38_prefill_finish_control(%control, %token_ids, %progress) : (buffer, buffer, buffer)
+    kernel.launch @qwen38_decode_commit_token(%control, %token_ids, %progress) : (buffer, buffer, buffer)
   }
   command.return
 }
