@@ -48,17 +48,16 @@ static const iree_string_view_t kTopLevelAllowedKeys[] = {
 
 // Builds special_tokens collections from added_tokens.
 //
-// ALL added tokens with `normalized=true` are included (not just those with
-// `special=true`) because they must be matched BEFORE the segmenter runs.
-// Without this, ByteLevel segmentation transforms the input before these
-// tokens can match, breaking tokenizers like GPT-NeoX that have multi-space
-// tokens (e.g., "  " at ID 50276).
+// All added tokens match before segmentation. The special flag controls
+// vocabulary attributes and decode filtering, not eligibility for matching.
+// This includes raw non-special markers such as Qwen's <think> and normalized
+// multi-space tokens such as GPT-NeoX's "  ".
 //
 // Tokens are split by their normalized flag:
 //   - out_special_tokens: normalized=false, matched in raw input before
 //     normalization runs (e.g., <|endoftext|>)
 //   - out_special_tokens_post_norm: normalized=true, matched after
-//     normalization transforms the input but BEFORE segmentation
+//     normalization transforms the input but before segmentation.
 static iree_status_t iree_tokenizer_huggingface_build_special_tokens(
     const iree_tokenizer_huggingface_added_tokens_t* added_tokens,
     iree_allocator_t allocator,
@@ -70,30 +69,13 @@ static iree_status_t iree_tokenizer_huggingface_build_special_tokens(
   iree_tokenizer_special_tokens_initialize(out_special_tokens);
   iree_tokenizer_special_tokens_initialize(out_special_tokens_post_norm);
 
-  // Count tokens to process: special tokens OR tokens with normalized=true.
-  // Non-special tokens with normalized=true must be matched before
-  // segmentation.
-  iree_host_size_t match_count = 0;
-  for (iree_host_size_t i = 0; i < added_tokens->count; ++i) {
-    const iree_tokenizer_huggingface_added_token_t* token =
-        iree_tokenizer_huggingface_added_tokens_get(added_tokens, i);
-    bool is_special = iree_any_bit_set(
-        token->flags, IREE_TOKENIZER_HUGGINGFACE_ADDED_TOKEN_FLAG_SPECIAL);
-    bool is_normalized = iree_any_bit_set(
-        token->flags, IREE_TOKENIZER_HUGGINGFACE_ADDED_TOKEN_FLAG_NORMALIZED);
-    // Include if special OR if normalized (needs pre-segmentation matching).
-    if (is_special || is_normalized) {
-      ++match_count;
-    }
-  }
-
   // Early exit if nothing to process.
-  if (match_count == 0) {
+  if (added_tokens->count == 0) {
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }
 
-  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, match_count);
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, added_tokens->count);
 
   // Build two separate collections: pre-normalization and post-normalization.
   iree_tokenizer_special_tokens_builder_t builder_pre_norm;
@@ -108,46 +90,32 @@ static iree_status_t iree_tokenizer_huggingface_build_special_tokens(
        i < added_tokens->count && iree_status_is_ok(status); ++i) {
     const iree_tokenizer_huggingface_added_token_t* token =
         iree_tokenizer_huggingface_added_tokens_get(added_tokens, i);
-    bool is_special = iree_any_bit_set(
-        token->flags, IREE_TOKENIZER_HUGGINGFACE_ADDED_TOKEN_FLAG_SPECIAL);
     bool is_normalized = iree_any_bit_set(
         token->flags, IREE_TOKENIZER_HUGGINGFACE_ADDED_TOKEN_FLAG_NORMALIZED);
+    iree_string_view_t content =
+        iree_tokenizer_huggingface_added_token_content(added_tokens, token);
 
-    // Process if special OR if normalized (needs pre-segmentation matching).
-    if (is_special || is_normalized) {
-      iree_string_view_t content =
-          iree_tokenizer_huggingface_added_token_content(added_tokens, token);
-
-      // Convert HuggingFace flags to special_tokens flags.
-      iree_tokenizer_special_token_flags_t special_flags =
-          IREE_TOKENIZER_SPECIAL_TOKEN_FLAG_NONE;
-      if (iree_any_bit_set(
-              token->flags,
-              IREE_TOKENIZER_HUGGINGFACE_ADDED_TOKEN_FLAG_LSTRIP)) {
-        special_flags |= IREE_TOKENIZER_SPECIAL_TOKEN_FLAG_LSTRIP;
-      }
-      if (iree_any_bit_set(
-              token->flags,
-              IREE_TOKENIZER_HUGGINGFACE_ADDED_TOKEN_FLAG_RSTRIP)) {
-        special_flags |= IREE_TOKENIZER_SPECIAL_TOKEN_FLAG_RSTRIP;
-      }
-      if (iree_any_bit_set(
-              token->flags,
-              IREE_TOKENIZER_HUGGINGFACE_ADDED_TOKEN_FLAG_SINGLE_WORD)) {
-        special_flags |= IREE_TOKENIZER_SPECIAL_TOKEN_FLAG_SINGLE_WORD;
-      }
-
-      // Route to appropriate builder based on normalized flag.
-      if (is_normalized) {
-        // normalized=true: match after normalization but before segmentation.
-        status = iree_tokenizer_special_tokens_builder_add(
-            &builder_post_norm, content, token->id, special_flags);
-      } else {
-        // normalized=false (default): match before normalization.
-        status = iree_tokenizer_special_tokens_builder_add(
-            &builder_pre_norm, content, token->id, special_flags);
-      }
+    // Convert HuggingFace flags to special_tokens flags.
+    iree_tokenizer_special_token_flags_t special_flags =
+        IREE_TOKENIZER_SPECIAL_TOKEN_FLAG_NONE;
+    if (iree_any_bit_set(token->flags,
+                         IREE_TOKENIZER_HUGGINGFACE_ADDED_TOKEN_FLAG_LSTRIP)) {
+      special_flags |= IREE_TOKENIZER_SPECIAL_TOKEN_FLAG_LSTRIP;
     }
+    if (iree_any_bit_set(token->flags,
+                         IREE_TOKENIZER_HUGGINGFACE_ADDED_TOKEN_FLAG_RSTRIP)) {
+      special_flags |= IREE_TOKENIZER_SPECIAL_TOKEN_FLAG_RSTRIP;
+    }
+    if (iree_any_bit_set(
+            token->flags,
+            IREE_TOKENIZER_HUGGINGFACE_ADDED_TOKEN_FLAG_SINGLE_WORD)) {
+      special_flags |= IREE_TOKENIZER_SPECIAL_TOKEN_FLAG_SINGLE_WORD;
+    }
+
+    iree_tokenizer_special_tokens_builder_t* builder =
+        is_normalized ? &builder_post_norm : &builder_pre_norm;
+    status = iree_tokenizer_special_tokens_builder_add(
+        builder, content, token->id, special_flags);
   }
 
   // Build both collections (builders are cleaned up after).
@@ -451,10 +419,8 @@ iree_status_t iree_tokenizer_parse_huggingface_json(
   }
 
   // Build special_tokens collections from added_tokens.
-  // Includes all tokens with special=true, plus all tokens with normalized=true
-  // (which must be matched before segmentation to handle multi-space tokens).
-  // Tokens are routed by normalized flag: pre-norm (normalized=false) are
-  // matched before the normalizer, post-norm (normalized=true) are matched
+  // All added tokens are routed by normalized flag: pre-norm (normalized=false)
+  // are matched before the normalizer, post-norm (normalized=true) are matched
   // after normalization but before segmentation.
   if (iree_status_is_ok(status) && added_tokens.count > 0) {
     iree_tokenizer_special_tokens_t special_tokens;
