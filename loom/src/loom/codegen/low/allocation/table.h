@@ -213,10 +213,11 @@ typedef struct loom_low_allocation_table_t {
   const loom_low_allocation_assignment_t* assignments;
   // Number of records in |assignments|.
   iree_host_size_t assignment_count;
-  // Dense physical extents retained from assignment and move planning.
+  // Dense resource extents retained from assignment and move planning.
   struct {
     // Maximum one-past-last assigned or move-scratch location indexed by
-    // descriptor register class ID.
+    // descriptor register class ID. Excludes the descriptor's ABI-fixed range,
+    // which does not consume allocatable register resources.
     const uint32_t* ends_by_reg_class;
     // Number of entries in |ends_by_reg_class|.
     iree_host_size_t count;

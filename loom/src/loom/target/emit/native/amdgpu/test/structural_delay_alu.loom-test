@@ -160,3 +160,64 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @conditional_branch_reads_scc(
 // ----
 CHECK: amdgpu.wait_state_plan states=1 *
 CHECK: state[0] reason=delay_alu_dependency action=amdgpu.s_delay_alu * producer=n0 consumer=n1 * delay_alu=0x0009
+
+// ====
+
+// RUN: emit amdgpu-wait-state-plan @fixed_source_move strategy=source fixed=%input:physical_register:117:1 fixed=%carried:physical_register:0:1
+amdgpu.target<gfx1200> @target
+
+low.func.def target<amdgpu.rdna4.core>(@target) @fixed_source_move(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  low.br ^next(%input: reg<amdgpu.sgpr>)
+^next(%carried: reg<amdgpu.sgpr>):
+  return %carried
+}
+
+// ----
+amdgpu.wait_state_plan states=0 progress=2 hazards=0
+
+// ====
+
+// RUN: emit amdgpu-wait-state-plan @fixed_result_move strategy=source fixed=%lane:physical_register:117:1 fixed=%carried:physical_register:0:1
+amdgpu.target<gfx1200> @target
+
+low.func.def target<amdgpu.rdna4.core>(@target) @fixed_result_move(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %lane = v_readfirstlane_b32 %input
+  low.br ^next(%lane: reg<amdgpu.sgpr>)
+^next(%carried: reg<amdgpu.sgpr>):
+  return %carried
+}
+
+// ----
+amdgpu.wait_state_plan states=1 progress=3 hazards=1
+state[0] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n1/o1 producer=n0 consumer=n1 required=5 observed=1 residual=4 delay_alu=0x0001
+
+// ====
+
+// RUN: emit amdgpu-wait-state-plan @fixed_result_operand strategy=source fixed=%lane:physical_register:108:1 fixed=%sum:physical_register:123:1
+amdgpu.target<gfx1201> @target
+
+low.func.def target<amdgpu.rdna4.core>(@target) @fixed_result_operand(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %lane = v_readfirstlane_b32 %input
+  %sum = s_add_u32 %lane, %lane
+  return %sum
+}
+
+// ----
+amdgpu.wait_state_plan states=1 progress=3 hazards=1
+state[0] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n1/o1 producer=n0 consumer=n1 required=5 observed=1 residual=4 delay_alu=0x0001
+
+// ====
+
+// RUN: emit amdgpu-wait-state-plan @fixed_destination_move strategy=source fixed=%input:physical_register:0:1 fixed=%tuple:physical_register:122:2 fixed=%sum:physical_register:108:1
+amdgpu.target<gfx1201> @target
+
+low.func.def target<amdgpu.rdna4.core>(@target) @fixed_destination_move(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %tuple = concat(%input, %input) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %first = slice %tuple[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %last = slice %tuple[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %sum = s_add_u32 %first, %last
+  return %sum
+}
+
+// ----
+amdgpu.wait_state_plan states=0 progress=5 hazards=0

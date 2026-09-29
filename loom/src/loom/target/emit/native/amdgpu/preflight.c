@@ -159,8 +159,8 @@ static iree_status_t loom_amdgpu_native_preflight_collect_register_usage(
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_native_preflight_options_t* options,
     loom_amdgpu_native_preflight_t* preflight) {
-  // Allocation retains the complete physical footprint, including temporaries
-  // used to sequence parallel moves that have no corresponding SSA value.
+  // Allocation retains the allocatable register footprint, including parallel
+  // move temporaries without SSA values. ABI-fixed locations are excluded.
   preflight->next_free_sgpr =
       allocation->physical_extents
           .ends_by_reg_class[LOOM_AMDGPU_REG_CLASS_ID_SGPR];

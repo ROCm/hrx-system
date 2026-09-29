@@ -287,10 +287,17 @@ typedef struct loom_amdgpu_wait_state_builder_t {
   loom_amdgpu_wait_state_vgpr_t* vgprs;
   // Number of entries in |vgprs|.
   iree_host_size_t vgpr_count;
-  // Per-physical-SGPR outstanding fixed-wait hazard state.
-  loom_amdgpu_wait_state_sgpr_t* sgprs;
-  // Number of entries in |sgprs|.
-  iree_host_size_t sgpr_count;
+  // Outstanding SGPR hazards across allocated and ABI-fixed locations.
+  struct {
+    // Dense allocated prefix followed by the descriptor's fixed-location range.
+    loom_amdgpu_wait_state_sgpr_t* states;
+    // Total number of state rows, including ABI-fixed locations.
+    iree_host_size_t count;
+    // Number of state rows in the dense allocated prefix.
+    uint32_t allocated_count;
+    // First physical location represented by the compact fixed-location suffix.
+    uint32_t fixed_location_base;
+  } sgprs;
   // Recent ALU producer state for the physical SCC condition register.
   loom_amdgpu_delay_alu_info_t scc_delay_alu;
   // Ordinary fixed waits discovered by the final-packet traversal.
@@ -456,6 +463,18 @@ static bool loom_amdgpu_wait_state_assignment_is_physical_scc(
       assignment, LOOM_AMDGPU_REG_CLASS_ID_SCC);
 }
 
+// Assignments and finalized moves stay wholly within the allocated prefix or
+// the descriptor's fixed range. ABI-fixed locations do not consume allocatable
+// register resources, but still participate in physical hazards.
+static loom_amdgpu_wait_state_sgpr_t* loom_amdgpu_wait_state_sgpr_at(
+    const loom_amdgpu_wait_state_builder_t* builder, uint32_t location) {
+  const uint32_t index = location < builder->sgprs.allocated_count
+                             ? location
+                             : builder->sgprs.allocated_count + location -
+                                   builder->sgprs.fixed_location_base;
+  return &builder->sgprs.states[index];
+}
+
 static iree_status_t loom_amdgpu_wait_state_allocate(
     loom_amdgpu_wait_state_builder_t* builder) {
   const loom_low_allocation_table_t* allocation = builder->allocation;
@@ -470,20 +489,24 @@ static iree_status_t loom_amdgpu_wait_state_allocate(
   const iree_host_size_t vgpr_count =
       allocation->physical_extents
           .ends_by_reg_class[LOOM_AMDGPU_REG_CLASS_ID_VGPR];
-  const iree_host_size_t sgpr_count =
-      allocation->physical_extents
-          .ends_by_reg_class[LOOM_AMDGPU_REG_CLASS_ID_SGPR];
   if (vgpr_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         builder->transient_arena, vgpr_count, sizeof(*builder->vgprs),
         (void**)&builder->vgprs));
     builder->vgpr_count = vgpr_count;
   }
-  if (sgpr_count != 0) {
+  const loom_low_reg_class_t* sgpr_class =
+      &builder->descriptor_set->reg_classes[LOOM_AMDGPU_REG_CLASS_ID_SGPR];
+  builder->sgprs.allocated_count =
+      allocation->physical_extents
+          .ends_by_reg_class[LOOM_AMDGPU_REG_CLASS_ID_SGPR];
+  builder->sgprs.fixed_location_base = sgpr_class->fixed_location_base;
+  builder->sgprs.count =
+      builder->sgprs.allocated_count + sgpr_class->fixed_location_count;
+  if (builder->sgprs.count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        builder->transient_arena, sgpr_count, sizeof(*builder->sgprs),
-        (void**)&builder->sgprs));
-    builder->sgpr_count = sgpr_count;
+        builder->transient_arena, builder->sgprs.count,
+        sizeof(*builder->sgprs.states), (void**)&builder->sgprs.states));
   }
   return iree_ok_status();
 }
@@ -737,12 +760,10 @@ static void loom_amdgpu_wait_state_clear_assignment(
     return;
   }
   if (loom_amdgpu_wait_state_assignment_is_physical_sgpr(assignment)) {
-    if (end > builder->sgpr_count) {
-      return;
-    }
+    loom_amdgpu_wait_state_sgpr_t* states =
+        loom_amdgpu_wait_state_sgpr_at(builder, assignment->location_base);
     for (uint32_t i = 0; i < assignment->location_count; ++i) {
-      builder->sgprs[assignment->location_base + i] =
-          (loom_amdgpu_wait_state_sgpr_t){0};
+      states[i] = (loom_amdgpu_wait_state_sgpr_t){0};
     }
   }
 }
@@ -794,17 +815,10 @@ static void loom_amdgpu_wait_state_record_sgpr_assignment(
   if (!loom_amdgpu_wait_state_assignment_is_physical_sgpr(assignment)) {
     return;
   }
-  uint64_t end = 0;
-  if (!loom_low_allocation_assignment_location_exclusive_end(assignment,
-                                                             &end)) {
-    return;
-  }
-  if (end > builder->sgpr_count) {
-    return;
-  }
+  loom_amdgpu_wait_state_sgpr_t* states =
+      loom_amdgpu_wait_state_sgpr_at(builder, assignment->location_base);
   for (uint32_t i = 0; i < assignment->location_count; ++i) {
-    loom_amdgpu_wait_state_hazard_t* hazard =
-        &builder->sgprs[assignment->location_base + i].hazards[reason];
+    loom_amdgpu_wait_state_hazard_t* hazard = &states[i].hazards[reason];
     *hazard = (loom_amdgpu_wait_state_hazard_t){
         .flags = LOOM_AMDGPU_WAIT_STATE_SGPR_FLAG_VALID,
         .reason = reason,
@@ -903,17 +917,10 @@ static void loom_amdgpu_wait_state_match_sgpr_assignment(
   if (!loom_amdgpu_wait_state_assignment_is_physical_sgpr(assignment)) {
     return;
   }
-  uint64_t end = 0;
-  if (!loom_low_allocation_assignment_location_exclusive_end(assignment,
-                                                             &end)) {
-    return;
-  }
-  if (end > builder->sgpr_count) {
-    return;
-  }
+  const loom_amdgpu_wait_state_sgpr_t* states =
+      loom_amdgpu_wait_state_sgpr_at(builder, assignment->location_base);
   for (uint32_t i = 0; i < assignment->location_count; ++i) {
-    const loom_amdgpu_wait_state_sgpr_t* sgpr_state =
-        &builder->sgprs[assignment->location_base + i];
+    const loom_amdgpu_wait_state_sgpr_t* sgpr_state = &states[i];
     for (uint32_t reason = LOOM_AMDGPU_WAIT_STATE_REASON_UNKNOWN + 1;
          reason < LOOM_AMDGPU_WAIT_STATE_TRACKED_REASON_COUNT; ++reason) {
       const loom_amdgpu_wait_state_hazard_t* hazard =
@@ -1019,8 +1026,8 @@ static void loom_amdgpu_wait_state_delay_alu_clear_all(
   for (iree_host_size_t i = 0; i < builder->vgpr_count; ++i) {
     builder->vgprs[i].delay_alu = (loom_amdgpu_delay_alu_info_t){0};
   }
-  for (iree_host_size_t i = 0; i < builder->sgpr_count; ++i) {
-    builder->sgprs[i].delay_alu = (loom_amdgpu_delay_alu_info_t){0};
+  for (iree_host_size_t i = 0; i < builder->sgprs.count; ++i) {
+    builder->sgprs.states[i].delay_alu = (loom_amdgpu_delay_alu_info_t){0};
   }
   builder->scc_delay_alu = (loom_amdgpu_delay_alu_info_t){0};
 }
@@ -1058,12 +1065,10 @@ static void loom_amdgpu_wait_state_delay_alu_match_assignment(
     return;
   }
   if (loom_amdgpu_wait_state_assignment_is_physical_sgpr(assignment)) {
-    if (end > builder->sgpr_count) {
-      return;
-    }
+    loom_amdgpu_wait_state_sgpr_t* states =
+        loom_amdgpu_wait_state_sgpr_at(builder, assignment->location_base);
     for (uint32_t i = 0; i < assignment->location_count; ++i) {
-      loom_amdgpu_delay_alu_info_t* slot =
-          &builder->sgprs[assignment->location_base + i].delay_alu;
+      loom_amdgpu_delay_alu_info_t* slot = &states[i].delay_alu;
       loom_amdgpu_delay_alu_accumulate_info(
           &builder->delay_alu, builder->current_position, slot, accumulator);
       *slot = (loom_amdgpu_delay_alu_info_t){0};
@@ -1106,8 +1111,11 @@ loom_amdgpu_wait_state_delay_alu_match_packet(
         destination = &builder->vgprs[move->destination.location].delay_alu;
       } else if (move->source.descriptor_reg_class_id ==
                  LOOM_AMDGPU_REG_CLASS_ID_SGPR) {
-        source = &builder->sgprs[move->source.location].delay_alu;
-        destination = &builder->sgprs[move->destination.location].delay_alu;
+        source = &loom_amdgpu_wait_state_sgpr_at(builder, move->source.location)
+                      ->delay_alu;
+        destination =
+            &loom_amdgpu_wait_state_sgpr_at(builder, move->destination.location)
+                 ->delay_alu;
       } else {
         continue;
       }
@@ -1162,11 +1170,10 @@ static void loom_amdgpu_wait_state_delay_alu_record_assignment(
     return;
   }
   if (loom_amdgpu_wait_state_assignment_is_physical_sgpr(assignment)) {
-    if (end > builder->sgpr_count) {
-      return;
-    }
+    loom_amdgpu_wait_state_sgpr_t* states =
+        loom_amdgpu_wait_state_sgpr_at(builder, assignment->location_base);
     for (uint32_t i = 0; i < assignment->location_count; ++i) {
-      builder->sgprs[assignment->location_base + i].delay_alu = info;
+      states[i].delay_alu = info;
     }
   }
 }
@@ -1212,12 +1219,10 @@ static void loom_amdgpu_wait_state_delay_alu_clear_assignment(
     return;
   }
   if (loom_amdgpu_wait_state_assignment_is_physical_sgpr(assignment)) {
-    if (end > builder->sgpr_count) {
-      return;
-    }
+    loom_amdgpu_wait_state_sgpr_t* states =
+        loom_amdgpu_wait_state_sgpr_at(builder, assignment->location_base);
     for (uint32_t i = 0; i < assignment->location_count; ++i) {
-      builder->sgprs[assignment->location_base + i].delay_alu =
-          (loom_amdgpu_delay_alu_info_t){0};
+      states[i].delay_alu = (loom_amdgpu_delay_alu_info_t){0};
     }
   }
 }
@@ -1285,7 +1290,8 @@ static void loom_amdgpu_wait_state_apply_move(
           delay_alu_latency_cycles, packet->node_index);
     }
   } else if (register_class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR) {
-    loom_amdgpu_wait_state_sgpr_t* state = &builder->sgprs[location];
+    loom_amdgpu_wait_state_sgpr_t* state =
+        loom_amdgpu_wait_state_sgpr_at(builder, location);
     *state = (loom_amdgpu_wait_state_sgpr_t){0};
     if (builder->has_delay_alu) {
       delay_alu_type = LOOM_AMDGPU_DELAY_ALU_TYPE_SALU;
@@ -2211,8 +2217,9 @@ static iree_status_t loom_amdgpu_wait_state_plan_build_with_scratch(
     if (builder->vgpr_count != 0) {
       memset(builder->vgprs, 0, builder->vgpr_count * sizeof(*builder->vgprs));
     }
-    if (builder->sgpr_count != 0) {
-      memset(builder->sgprs, 0, builder->sgpr_count * sizeof(*builder->sgprs));
+    if (builder->sgprs.count != 0) {
+      memset(builder->sgprs.states, 0,
+             builder->sgprs.count * sizeof(*builder->sgprs.states));
     }
     if (builder->store_data != NULL) {
       loom_amdgpu_store_data_wait_begin_block(builder->store_data,
