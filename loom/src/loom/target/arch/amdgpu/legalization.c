@@ -283,9 +283,15 @@ static iree_status_t loom_amdgpu_legalize_oversized_vector_reduce(
           context->descriptor_set)) {
     return iree_ok_status();
   }
-  bool rewritten = false;
+  loom_vector_packet_reduce_result_t packet_result =
+      LOOM_VECTOR_PACKET_REDUCE_RESULT_NONE;
   IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_reduce(
-      context, op, &kAmdgpuVectorPacketPolicy, &rewritten));
+      context, op, &kAmdgpuVectorPacketPolicy, &packet_result));
+  bool rewritten = packet_result == LOOM_VECTOR_PACKET_REDUCE_RESULT_REWRITTEN;
+  if (packet_result == LOOM_VECTOR_PACKET_REDUCE_RESULT_CAPTURE_INPUT) {
+    IREE_RETURN_IF_ERROR(loom_vector_reduce_captured_to_scalar_rewrite_op(
+        context->pass, context->rewriter, op, &rewritten));
+  }
   if (rewritten) {
     out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
   }

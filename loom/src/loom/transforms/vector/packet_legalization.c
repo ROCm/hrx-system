@@ -2155,8 +2155,9 @@ iree_status_t loom_vector_packet_legalize_store(
 
 iree_status_t loom_vector_packet_legalize_reduce(
     loom_target_legalization_context_t* context, loom_op_t* op,
-    const loom_vector_packet_policy_t* policy, bool* out_rewritten) {
-  *out_rewritten = false;
+    const loom_vector_packet_policy_t* policy,
+    loom_vector_packet_reduce_result_t* out_result) {
+  *out_result = LOOM_VECTOR_PACKET_REDUCE_RESULT_NONE;
 
   const loom_value_id_t input = loom_vector_reduce_input(op);
   const loom_type_t input_type = loom_module_value_type(context->module, input);
@@ -2171,19 +2172,27 @@ iree_status_t loom_vector_packet_legalize_reduce(
   bool producer_selected = false;
   IREE_RETURN_IF_ERROR(loom_vector_packet_select_value_shape(
       &packetization, input, &shape, &producer_selected));
-  if (producer_selected) {
-    IREE_RETURN_IF_ERROR(
-        loom_vector_packet_classify_memory_loads(&packetization, op));
+  if (!producer_selected) {
+    iree_host_size_t operations_per_chunk = 0;
+    if (!iree_host_size_checked_mul(shape.chunk_lane_count, 2u,
+                                    &operations_per_chunk) ||
+        !loom_vector_packet_static_operation_count_is_bounded(
+            operations_per_chunk, &shape)) {
+      return iree_ok_status();
+    }
+    *out_result = LOOM_VECTOR_PACKET_REDUCE_RESULT_CAPTURE_INPUT;
+    return iree_ok_status();
   }
-  if (!producer_selected ||
-      !loom_vector_packet_can_materialize(&packetization, &shape)) {
+  IREE_RETURN_IF_ERROR(
+      loom_vector_packet_classify_memory_loads(&packetization, op));
+  if (!loom_vector_packet_can_materialize(&packetization, &shape)) {
     return iree_ok_status();
   }
   bool source_reads_preserved = false;
   IREE_RETURN_IF_ERROR(loom_vector_packet_preserve_memory_loads(
       &packetization, &shape, &source_reads_preserved));
   if (source_reads_preserved) {
-    *out_rewritten = true;
+    *out_result = LOOM_VECTOR_PACKET_REDUCE_RESULT_REWRITTEN;
     return iree_ok_status();
   }
 
@@ -2203,7 +2212,7 @@ iree_status_t loom_vector_packet_legalize_reduce(
     IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
         rewriter, op, &accumulator, 1));
     IREE_RETURN_IF_ERROR(loom_vector_packet_erase_dead_sources(&packetization));
-    *out_rewritten = true;
+    *out_result = LOOM_VECTOR_PACKET_REDUCE_RESULT_REWRITTEN;
     return iree_ok_status();
   }
   if (has_snapshots) {
@@ -2282,6 +2291,6 @@ iree_status_t loom_vector_packet_legalize_reduce(
   IREE_RETURN_IF_ERROR(
       loom_rewriter_replace_all_uses_and_erase(rewriter, op, &accumulator, 1));
   IREE_RETURN_IF_ERROR(loom_vector_packet_erase_dead_sources(&packetization));
-  *out_rewritten = true;
+  *out_result = LOOM_VECTOR_PACKET_REDUCE_RESULT_REWRITTEN;
   return iree_ok_status();
 }

@@ -48,6 +48,24 @@ func.def @f32x16_reduce_add_native(%values: vector<16xf32>) -> (f32) {
 
 // ====
 
+func.def @f32_dot2_ordered_reduce(%lhs: vector<16xbf16>, %rhs: vector<16xbf16>, %initial: vector<8xf32>) -> (f32) {
+  %dot = vector.dot2f %lhs, %rhs, %initial : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %c0 = scalar.constant 0.0 : f32
+  %sum = vector.reduce<addf> %dot, %c0 : vector<8xf32>, f32
+  func.return %sum : f32
+}
+
+// ====
+
+func.def @f32_dot2_reassociated_reduce(%lhs: vector<16xbf16>, %rhs: vector<16xbf16>, %initial: vector<8xf32>) -> (f32) {
+  %dot = vector.dot2f %lhs, %rhs, %initial : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %c0 = scalar.constant 0.0 : f32
+  %sum = vector.reduce<addf, reassoc> %dot, %c0 : vector<8xf32>, f32
+  func.return %sum : f32
+}
+
+// ====
+
 func.def @f32x64_reduce_add_fastmath(%input: buffer, %output: buffer) {
   %buffer_base = index.constant 0 : offset
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xf32>

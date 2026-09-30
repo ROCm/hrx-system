@@ -19,6 +19,7 @@
 
 typedef struct loom_vector_to_scalar_accumulator_state_t {
   loom_vector_to_scalar_state_t lane_state;
+  loom_vector_to_scalar_reduce_input_mode_t input_mode;
   loom_value_id_t input;
   loom_value_id_t rhs;
   loom_value_id_t init;
@@ -32,13 +33,24 @@ typedef struct loom_vector_to_scalar_accumulator_state_t {
   bool use_product_fmaf_forest;
 } loom_vector_to_scalar_accumulator_state_t;
 
+static iree_status_t loom_vector_to_scalar_materialize_accumulator_input_lane(
+    loom_vector_to_scalar_accumulator_state_t* state,
+    loom_vector_to_scalar_index_list_t indices, loom_value_id_t* out_lane) {
+  if (state->input_mode == LOOM_VECTOR_TO_SCALAR_REDUCE_INPUT_MODE_CAPTURED) {
+    return loom_vector_to_scalar_build_terminal_extract(
+        &state->lane_state, state->input, indices, out_lane);
+  }
+  return loom_vector_to_scalar_materialize_lane(
+      &state->lane_state, state->input, indices, out_lane);
+}
+
 static iree_status_t loom_vector_to_scalar_build_accumulator_lane(
     loom_vector_to_scalar_accumulator_state_t* state,
     loom_vector_to_scalar_index_list_t indices, loom_value_id_t accumulator,
     loom_value_id_t* out_next) {
   loom_value_id_t lhs_lane = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_materialize_lane(
-      &state->lane_state, state->input, indices, &lhs_lane));
+  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_materialize_accumulator_input_lane(
+      state, indices, &lhs_lane));
   if (state->use_fmaf) {
     loom_value_id_t rhs_lane = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_materialize_lane(
@@ -201,8 +213,9 @@ static iree_status_t loom_vector_to_scalar_build_static_reduction_tree(
         .static_indices = indices,
         .rank = loom_type_rank(state->lane_state.vector_type),
     };
-    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_materialize_lane(
-        &state->lane_state, state->input, index_list, out_result));
+    IREE_RETURN_IF_ERROR(
+        loom_vector_to_scalar_materialize_accumulator_input_lane(
+            state, index_list, out_result));
     loom_vector_to_scalar_record_lane_materialized(&state->lane_state);
     return iree_ok_status();
   }
@@ -414,7 +427,9 @@ static bool loom_vector_to_scalar_try_configure_product_fmaf_forest(
 }
 
 iree_status_t loom_vector_to_scalar_lower_reduce(
-    loom_vector_to_scalar_state_t* state, loom_value_id_t* out_replacement) {
+    loom_vector_to_scalar_state_t* state,
+    loom_vector_to_scalar_reduce_input_mode_t input_mode,
+    loom_value_id_t* out_replacement) {
   loom_combining_kind_t reduce_kind = loom_vector_reduce_kind(state->op);
   uint8_t reduce_flags = loom_vector_reduce_fastmath(state->op);
   loom_op_kind_t scalar_kind = LOOM_OP_KIND_UNKNOWN;
@@ -425,6 +440,7 @@ iree_status_t loom_vector_to_scalar_lower_reduce(
               "combining kind");
   loom_vector_to_scalar_accumulator_state_t accumulator_state = {
       .lane_state = *state,
+      .input_mode = input_mode,
       .input = loom_vector_reduce_input(state->op),
       .init = loom_vector_reduce_init(state->op),
       .scalar_kind = scalar_kind,
@@ -432,8 +448,10 @@ iree_status_t loom_vector_to_scalar_lower_reduce(
                             ? state->op->instance_flags
                             : 0,
   };
-  loom_vector_to_scalar_try_configure_product_fmaf_forest(
-      state, reduce_kind, reduce_flags, &accumulator_state);
+  if (input_mode == LOOM_VECTOR_TO_SCALAR_REDUCE_INPUT_MODE_REMATERIALIZE) {
+    loom_vector_to_scalar_try_configure_product_fmaf_forest(
+        state, reduce_kind, reduce_flags, &accumulator_state);
+  }
   return loom_vector_to_scalar_lower_accumulator(&accumulator_state,
                                                  out_replacement);
 }

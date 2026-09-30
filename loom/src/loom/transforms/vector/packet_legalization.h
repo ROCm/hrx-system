@@ -26,6 +26,17 @@ typedef struct loom_vector_packet_policy_t {
   uint16_t maximum_unpacketized_bit_count;
 } loom_vector_packet_policy_t;
 
+typedef enum loom_vector_packet_reduce_result_e {
+  // The reduction does not require packet legalization or exceeds its static
+  // expansion bound.
+  LOOM_VECTOR_PACKET_REDUCE_RESULT_NONE = 0,
+  // Packet legalization rewrote the reduction or one of its source reads.
+  LOOM_VECTOR_PACKET_REDUCE_RESULT_REWRITTEN = 1,
+  // The producer graph cannot be decomposed, but a bounded scalar fallback can
+  // retain the input SSA value and consume terminal lane extracts from it.
+  LOOM_VECTOR_PACKET_REDUCE_RESULT_CAPTURE_INPUT = 2,
+} loom_vector_packet_reduce_result_t;
+
 // Packetizes a static vector splat into target-native rank-one packets,
 // concatenates them into a flat carrier, and restores the logical result
 // shape. Returns false through |out_rewritten| when the result already fits
@@ -60,12 +71,14 @@ iree_status_t loom_vector_packet_legalize_store(
     const loom_vector_packet_policy_t* policy, bool* out_rewritten);
 
 // Packetizes a vector reduction's decomposable producer graph and carries the
-// scalar accumulator across native-width packets. Returns false through
-// |out_rewritten| when the graph or policy does not admit an exact
-// packetization.
+// scalar accumulator across native-width packets. A bounded reduction whose
+// producer graph cannot be decomposed requests a captured-input scalar
+// fallback through |out_result|. Returns NONE when neither representation fits
+// the static expansion bound.
 iree_status_t loom_vector_packet_legalize_reduce(
     loom_target_legalization_context_t* context, loom_op_t* op,
-    const loom_vector_packet_policy_t* policy, bool* out_rewritten);
+    const loom_vector_packet_policy_t* policy,
+    loom_vector_packet_reduce_result_t* out_result);
 
 #ifdef __cplusplus
 }  // extern "C"

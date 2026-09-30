@@ -15,8 +15,17 @@
 extern "C" {
 #endif
 
+typedef enum loom_vector_to_scalar_reduce_input_mode_e {
+  // Rebuilds each input lane from decomposable producer operations.
+  LOOM_VECTOR_TO_SCALAR_REDUCE_INPUT_MODE_REMATERIALIZE = 0,
+  // Extracts each lane from the input aggregate without rebuilding producers.
+  LOOM_VECTOR_TO_SCALAR_REDUCE_INPUT_MODE_CAPTURED = 1,
+} loom_vector_to_scalar_reduce_input_mode_t;
+
 iree_status_t loom_vector_to_scalar_lower_reduce(
-    loom_vector_to_scalar_state_t* state, loom_value_id_t* out_replacement);
+    loom_vector_to_scalar_state_t* state,
+    loom_vector_to_scalar_reduce_input_mode_t input_mode,
+    loom_value_id_t* out_replacement);
 
 iree_status_t loom_vector_to_scalar_lower_reduce_axes(
     loom_vector_to_scalar_state_t* state, loom_value_id_t* out_replacement);

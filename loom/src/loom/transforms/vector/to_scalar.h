@@ -52,6 +52,13 @@ iree_status_t loom_vector_reduce_to_scalar_rewrite_op(loom_pass_t* pass,
                                                       loom_op_t* op,
                                                       bool* out_rewritten);
 
+// Rewrites one vector.reduce op while retaining its input as an aggregate SSA
+// snapshot. Each reduced lane is represented by a terminal vector.extract so
+// target legalization can select the producer and extracts independently.
+iree_status_t loom_vector_reduce_captured_to_scalar_rewrite_op(
+    loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
+    bool* out_rewritten);
+
 // Rewrites one vector.dotf op using scalar reference semantics.
 iree_status_t loom_vector_dotf_to_scalar_rewrite_op(loom_pass_t* pass,
                                                     loom_rewriter_t* rewriter,
