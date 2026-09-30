@@ -334,6 +334,7 @@ loom_cc_test(
     loom::analysis::condition_facts
     loom::ir
     loom::ops::index
+    loom::ops::scalar
     loom::ops::scf
     loom::ops::test
 )

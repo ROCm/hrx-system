@@ -162,6 +162,9 @@ struct loom_value_fact_table_t {
   // edits. The incremental rewriter cannot maintain their guard dependencies.
   bool has_conditioned_results;
 
+  // Structured region entries with visible projected integer relations.
+  uint32_t condition_integer_projection_count;
+
   // Canonical SSA identities retained while computing value facts. Only
   // declared identity operations populate this map; numeric equality does not.
   struct {

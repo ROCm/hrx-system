@@ -13,6 +13,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/index/ops.h"
+#include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/util/fact_table.h"
@@ -33,6 +34,9 @@ class FactTableComputeTest : public ::testing::Test {
     vtables = loom_scf_dialect_vtables(&count);
     IREE_ASSERT_OK(loom_context_register_dialect(
         &context_, LOOM_DIALECT_SCF, vtables, static_cast<uint16_t>(count)));
+    vtables = loom_scalar_dialect_vtables(&count);
+    IREE_ASSERT_OK(loom_context_register_dialect(
+        &context_, LOOM_DIALECT_SCALAR, vtables, static_cast<uint16_t>(count)));
     vtables = loom_test_dialect_vtables(&count);
     IREE_ASSERT_OK(loom_context_register_dialect(
         &context_, LOOM_DIALECT_TEST, vtables, static_cast<uint16_t>(count)));
@@ -572,11 +576,18 @@ TEST_F(FactTableComputeTest, ConditionLoopRetainsAndReplacesBodyEntryFacts) {
   };
   const loom_value_id_t body_condition = loom_region_entry_arg_id(body, 2);
 
+  const loom_value_id_t opaque_condition =
+      DefineValue(loom_type_scalar(LOOM_SCALAR_TYPE_I1));
   loom_builder_ip_t saved = loom_builder_enter_region(&builder_, loop, before);
   loom_op_t* compare = nullptr;
   IREE_ASSERT_OK(loom_index_cmp_build(&builder_, LOOM_INDEX_CMP_PREDICATE_ULT,
                                       before_argument, bound,
                                       LOOM_LOCATION_UNKNOWN, &compare));
+  loom_op_t* disjunction = nullptr;
+  IREE_ASSERT_OK(loom_scalar_ori_build(
+      &builder_, loom_index_cmp_result(compare), opaque_condition,
+      loom_type_scalar(LOOM_SCALAR_TYPE_I1), LOOM_LOCATION_UNKNOWN,
+      &disjunction));
   const loom_value_id_t forwarded[] = {
       before_argument,
       before_argument,
@@ -598,6 +609,7 @@ TEST_F(FactTableComputeTest, ConditionLoopRetainsAndReplacesBodyEntryFacts) {
   const loom_condition_edge_projection_t* projection =
       loom_value_fact_table_lookup_region_condition_projection(&table_, body);
   ASSERT_NE(projection, nullptr);
+  EXPECT_EQ(table_.condition_integer_projection_count, 1u);
 
   auto expect_relation = [&](loom_symbolic_integer_relation_t relation,
                              loom_value_id_t left,
@@ -662,6 +674,7 @@ TEST_F(FactTableComputeTest, ConditionLoopRetainsAndReplacesBodyEntryFacts) {
   EXPECT_EQ(projection->source_derivation.integer_facts.integer_relations,
             relations);
   EXPECT_EQ(projection->source_derivation.boolean_facts, boolean_facts);
+  EXPECT_EQ(table_.condition_integer_projection_count, 1u);
   expect_relation(LOOM_SYMBOLIC_INTEGER_RELATION_LT, body_arguments[0],
                   upper_bound, /*expected_proven=*/true,
                   /*expected_result=*/true);
@@ -669,10 +682,25 @@ TEST_F(FactTableComputeTest, ConditionLoopRetainsAndReplacesBodyEntryFacts) {
                   upper_bound, /*expected_proven=*/false,
                   /*expected_result=*/false);
 
+  // A true disjunction does not prove the comparison, so replacing the exact
+  // guard withdraws the table summary without scanning retained region
+  // entries. Restoring it republishes the same projection object and slot.
+  IREE_ASSERT_OK(loom_op_set_operand(module_, condition, 0,
+                                     loom_scalar_ori_result(disjunction)));
+  IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, loop));
+  EXPECT_TRUE(loom_condition_edge_projection_is_empty(projection));
+  EXPECT_EQ(table_.condition_integer_projection_count, 0u);
+  IREE_ASSERT_OK(loom_op_set_operand(module_, condition, 0,
+                                     loom_index_cmp_result(compare)));
+  IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, loop));
+  EXPECT_FALSE(loom_condition_edge_projection_is_empty(projection));
+  EXPECT_EQ(table_.condition_integer_projection_count, 1u);
+
   loom_value_fact_table_clear_scope(&table_);
   EXPECT_EQ(
       loom_value_fact_table_lookup_region_condition_projection(&table_, body),
       nullptr);
+  EXPECT_EQ(table_.condition_integer_projection_count, 0u);
   EXPECT_EQ(table_.scratch.condition, nullptr);
 }
 

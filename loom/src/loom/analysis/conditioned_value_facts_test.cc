@@ -12,6 +12,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/cfg/ops.h"
 #include "loom/ops/scalar/ops.h"
+#include "loom/ops/scf/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/pass/value_facts.h"
 
@@ -26,6 +27,7 @@ class ConditionedValueFactsTest : public ::testing::Test {
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_CFG, loom_cfg_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_SCALAR, loom_scalar_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_SCF, loom_scf_dialect_vtables);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("conditions"),
                                         &pool_, nullptr,
@@ -37,15 +39,18 @@ class ConditionedValueFactsTest : public ::testing::Test {
         loom_builder_intern_string(&builder_, IREE_SV("count"), &name));
     uint16_t symbol = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name, &symbol));
+    const loom_type_t argument_types[] = {i32_, i1_};
     loom_op_t* function = nullptr;
-    IREE_ASSERT_OK(loom_test_func_build(&builder_, 0, 0, 0, {0, symbol}, &i32_,
-                                        1, nullptr, 0, nullptr, 0, nullptr, 0,
-                                        LOOM_LOCATION_UNKNOWN, &function));
+    IREE_ASSERT_OK(loom_test_func_build(
+        &builder_, 0, 0, 0, {0, symbol}, argument_types,
+        IREE_ARRAYSIZE(argument_types), nullptr, 0, nullptr, 0, nullptr, 0,
+        LOOM_LOCATION_UNKNOWN, &function));
     function_ = loom_func_like_cast(module_, function);
     body_ = loom_func_like_body(function_);
     body_->flags |= LOOM_REGION_INSTANCE_FLAG_CFG;
     SetBlock(loom_region_entry_block(body_));
     input_ = loom_block_arg_id(builder_.ip.block, 0);
+    gate_ = loom_block_arg_id(builder_.ip.block, 1);
     loom_pass_value_fact_owner_initialize(&pool_, &owner_);
   }
 
@@ -136,20 +141,24 @@ class ConditionedValueFactsTest : public ::testing::Test {
   iree_arena_block_pool_t pool_ = {};
   // Dialect registry for the minimal function fixture.
   loom_context_t context_ = {};
-  // Owned IR containing one function with an arbitrary i32 input.
+  // Owned IR containing one function with arbitrary numeric and Boolean inputs.
   loom_module_t* module_ = nullptr;
-  // Builder whose insertion point follows each test's CFG.
+  // Builder whose insertion point follows each test's control flow.
   loom_builder_t builder_ = {};
   // Function retained for scope acquisition.
   loom_func_like_t function_ = {};
-  // Function body containing the test's CFG.
+  // Function body containing the test's control flow.
   loom_region_t* body_ = nullptr;
   // Argument with no authored range or nonzero assumptions.
   loom_value_id_t input_ = LOOM_VALUE_ID_INVALID;
+  // Arbitrary Boolean argument used by structured conservative controls.
+  loom_value_id_t gate_ = LOOM_VALUE_ID_INVALID;
   // Reusable owner whose scope transitions are part of the contract under test.
   loom_pass_value_fact_owner_t owner_ = {};
   // Scalar type used by the signature, counts, and loop-carried value.
   const loom_type_t i32_ = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  // Scalar Boolean type used by control-flow conditions.
+  const loom_type_t i1_ = loom_type_scalar(LOOM_SCALAR_TYPE_I1);
 };
 
 TEST_F(ConditionedValueFactsTest,
@@ -240,6 +249,155 @@ TEST_F(ConditionedValueFactsTest, ParallelOutcomesDoNotEstablishAGuard) {
   YieldBlock();
   ExpectRange(Acquire(LOOM_PASS_VALUE_FACT_SCOPE_CONDITIONED_FUNCTION), count,
               0, 32);
+}
+
+TEST_F(ConditionedValueFactsTest, StructuredBodyProjectionRefinesDerivedFacts) {
+  body_->flags &= ~LOOM_REGION_INSTANCE_FLAG_CFG;
+  const auto zero = Constant(0);
+  loom_op_t* loop = nullptr;
+  IREE_ASSERT_OK(loom_scf_while_build(
+      &builder_, &input_, 1, /*iter_args_types=*/nullptr, &i32_, 1,
+      /*tied_results=*/nullptr, /*tied_result_count=*/0, LOOM_LOCATION_UNKNOWN,
+      &loop));
+  loom_region_t* before = loom_scf_while_before(loop);
+  loom_region_t* body = loom_scf_while_after(loop);
+
+  loom_builder_ip_t saved = loom_builder_enter_region(&builder_, loop, before);
+  const loom_value_id_t before_mask = loom_region_entry_arg_id(before, 0);
+  const auto before_count = Count(before_mask);
+  loom_op_t* comparison = nullptr;
+  IREE_ASSERT_OK(loom_scalar_cmpi_build(
+      &builder_, LOOM_SCALAR_CMPI_PREDICATE_NE, before_mask, zero,
+      LOOM_LOCATION_UNKNOWN, &comparison));
+  loom_op_t* condition = nullptr;
+  IREE_ASSERT_OK(loom_scf_condition_build(
+      &builder_, loom_scalar_cmpi_result(comparison), &before_mask, 1,
+      LOOM_LOCATION_UNKNOWN, &condition));
+  loom_builder_restore(&builder_, saved);
+
+  saved = loom_builder_enter_region(&builder_, loop, body);
+  const loom_value_id_t mask = loom_region_entry_arg_id(body, 0);
+  const auto body_count = Count(mask);
+  loom_op_t* nested = nullptr;
+  IREE_ASSERT_OK(loom_scf_if_build(
+      &builder_, /*build_flags=*/0, gate_, /*result_types=*/nullptr,
+      /*result_count=*/0, /*tied_results=*/nullptr,
+      /*tied_result_count=*/0, LOOM_LOCATION_UNKNOWN, &nested));
+  loom_builder_ip_t nested_saved = loom_builder_enter_region(
+      &builder_, nested, loom_scf_if_then_region(nested));
+  const auto nested_count = Count(mask);
+  loom_op_t* nested_yield = nullptr;
+  IREE_ASSERT_OK(loom_scf_yield_build(&builder_, /*values=*/nullptr,
+                                      /*values_count=*/0, LOOM_LOCATION_UNKNOWN,
+                                      &nested_yield));
+  loom_builder_restore(&builder_, nested_saved);
+  loom_op_t* yield = nullptr;
+  IREE_ASSERT_OK(
+      loom_scf_yield_build(&builder_, &mask, 1, LOOM_LOCATION_UNKNOWN, &yield));
+  loom_builder_restore(&builder_, saved);
+
+  const auto outside_count = Count(input_);
+  YieldBlock();
+
+  auto* table = Acquire(LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION);
+  EXPECT_EQ(table->regions.cfg_count, 0u);
+  EXPECT_EQ(table->condition_integer_projection_count, 1u);
+  ExpectRange(table, before_count, 0, 32);
+  ExpectRange(table, body_count, 0, 32);
+  ExpectRange(table, nested_count, 0, 32);
+  ExpectRange(table, outside_count, 0, 32);
+
+  table = Acquire(LOOM_PASS_VALUE_FACT_SCOPE_CONDITIONED_FUNCTION);
+  EXPECT_TRUE(table->has_conditioned_results);
+  ExpectRange(table, before_count, 0, 32);
+  ExpectRange(table, body_count, 0, 31);
+  ExpectRange(table, nested_count, 0, 31);
+  ExpectRange(table, outside_count, 0, 32);
+}
+
+TEST_F(ConditionedValueFactsTest,
+       StructuredDisjunctionDoesNotRefineDerivedFacts) {
+  body_->flags &= ~LOOM_REGION_INSTANCE_FLAG_CFG;
+  const auto zero = Constant(0);
+  loom_op_t* loop = nullptr;
+  IREE_ASSERT_OK(loom_scf_while_build(
+      &builder_, &input_, 1, /*iter_args_types=*/nullptr, &i32_, 1,
+      /*tied_results=*/nullptr, /*tied_result_count=*/0, LOOM_LOCATION_UNKNOWN,
+      &loop));
+  loom_region_t* before = loom_scf_while_before(loop);
+  loom_region_t* body = loom_scf_while_after(loop);
+
+  loom_builder_ip_t saved = loom_builder_enter_region(&builder_, loop, before);
+  const loom_value_id_t before_mask = loom_region_entry_arg_id(before, 0);
+  loom_op_t* comparison = nullptr;
+  IREE_ASSERT_OK(loom_scalar_cmpi_build(
+      &builder_, LOOM_SCALAR_CMPI_PREDICATE_NE, before_mask, zero,
+      LOOM_LOCATION_UNKNOWN, &comparison));
+  loom_op_t* disjunction = nullptr;
+  IREE_ASSERT_OK(
+      loom_scalar_ori_build(&builder_, loom_scalar_cmpi_result(comparison),
+                            gate_, i1_, LOOM_LOCATION_UNKNOWN, &disjunction));
+  loom_op_t* condition = nullptr;
+  IREE_ASSERT_OK(loom_scf_condition_build(
+      &builder_, loom_scalar_ori_result(disjunction), &before_mask, 1,
+      LOOM_LOCATION_UNKNOWN, &condition));
+  loom_builder_restore(&builder_, saved);
+
+  saved = loom_builder_enter_region(&builder_, loop, body);
+  const loom_value_id_t mask = loom_region_entry_arg_id(body, 0);
+  const auto body_count = Count(mask);
+  loom_op_t* yield = nullptr;
+  IREE_ASSERT_OK(
+      loom_scf_yield_build(&builder_, &mask, 1, LOOM_LOCATION_UNKNOWN, &yield));
+  loom_builder_restore(&builder_, saved);
+  YieldBlock();
+
+  auto* table = Acquire(LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION);
+  EXPECT_EQ(table->regions.cfg_count, 0u);
+  EXPECT_EQ(table->condition_integer_projection_count, 0u);
+  ExpectRange(table, body_count, 0, 32);
+  table = Acquire(LOOM_PASS_VALUE_FACT_SCOPE_CONDITIONED_FUNCTION);
+  EXPECT_FALSE(table->has_conditioned_results);
+  ExpectRange(table, body_count, 0, 32);
+}
+
+TEST_F(ConditionedValueFactsTest,
+       StructuredUnforwardedValueRemainsConservative) {
+  body_->flags &= ~LOOM_REGION_INSTANCE_FLAG_CFG;
+  const auto zero = Constant(0);
+  loom_op_t* loop = nullptr;
+  IREE_ASSERT_OK(loom_scf_while_build(
+      &builder_, &input_, 1, /*iter_args_types=*/nullptr, &i32_, 1,
+      /*tied_results=*/nullptr, /*tied_result_count=*/0, LOOM_LOCATION_UNKNOWN,
+      &loop));
+  loom_region_t* before = loom_scf_while_before(loop);
+  loom_region_t* body = loom_scf_while_after(loop);
+
+  loom_builder_ip_t saved = loom_builder_enter_region(&builder_, loop, before);
+  const loom_value_id_t before_mask = loom_region_entry_arg_id(before, 0);
+  loom_op_t* comparison = nullptr;
+  IREE_ASSERT_OK(loom_scalar_cmpi_build(
+      &builder_, LOOM_SCALAR_CMPI_PREDICATE_NE, before_mask, zero,
+      LOOM_LOCATION_UNKNOWN, &comparison));
+  loom_op_t* condition = nullptr;
+  IREE_ASSERT_OK(
+      loom_scf_condition_build(&builder_, loom_scalar_cmpi_result(comparison),
+                               &zero, 1, LOOM_LOCATION_UNKNOWN, &condition));
+  loom_builder_restore(&builder_, saved);
+
+  saved = loom_builder_enter_region(&builder_, loop, body);
+  const loom_value_id_t forwarded_zero = loom_region_entry_arg_id(body, 0);
+  const auto captured_count = Count(input_);
+  const auto forwarded_count = Count(forwarded_zero);
+  loom_op_t* yield = nullptr;
+  IREE_ASSERT_OK(loom_scf_yield_build(&builder_, &forwarded_zero, 1,
+                                      LOOM_LOCATION_UNKNOWN, &yield));
+  loom_builder_restore(&builder_, saved);
+  YieldBlock();
+
+  auto* table = Acquire(LOOM_PASS_VALUE_FACT_SCOPE_CONDITIONED_FUNCTION);
+  ExpectRange(table, captured_count, 0, 32);
+  ExpectRange(table, forwarded_count, 32, 32);
 }
 
 }  // namespace

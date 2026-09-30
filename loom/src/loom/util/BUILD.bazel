@@ -295,6 +295,7 @@ loom_cc_test(
         "//loom/src/loom/analysis:condition_facts",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/scf",
         "//loom/src/loom/ops/test",
         "//runtime/src/iree/base/internal:arena",

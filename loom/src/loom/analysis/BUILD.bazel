@@ -371,6 +371,7 @@ loom_cc_test(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/cfg",
         "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/pass:value_facts",
         "//runtime/src/iree/testing:gtest",

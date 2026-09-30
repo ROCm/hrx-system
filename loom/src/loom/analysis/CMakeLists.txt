@@ -425,6 +425,7 @@ loom_cc_test(
     loom::ir
     loom::ops::cfg
     loom::ops::scalar
+    loom::ops::scf
     loom::ops::test
     loom::pass::value_facts
 )

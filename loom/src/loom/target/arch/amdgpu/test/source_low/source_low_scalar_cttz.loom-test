@@ -135,3 +135,45 @@ func.def target(@target) @guarded_scalar_cttzi(%input: i32) -> (i32) {
 // ----
 CHECK: %* = s_ctz_i32_b32 %input
 CHECK-NOT: *s_min_u32*
+
+// ====
+
+// RUN: emit source-low output=low control-flow=structured-low
+
+amdgpu.target<gfx11-generic> @target
+
+// A compact MoE router worklist visits only experts selected in the bitmask.
+// The loop condition proves every body mask nonzero before cttz chooses the
+// next expert, then mask & (mask - 1) removes that expert from the worklist.
+func.def target(@target) @expert_bitmask_walk(%expert_mask: i32) -> (i32) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %final_mask, %expert_sum = scf.while(%before_mask = %expert_mask : i32, %before_sum = %c0 : i32) -> (i32, i32) {
+    %has_expert = scalar.cmpi ne, %before_mask, %c0 : i32
+    scf.condition %has_expert, %before_mask, %before_sum : i1, i32, i32
+  } do(%mask: i32, %sum: i32) {
+    %expert = scalar.cttzi %mask : i32
+    %next_sum = scalar.addi %sum, %expert : i32
+    %mask_without_lowest_bit = scalar.subi %mask, %c1 : i32
+    %next_mask = scalar.andi %mask, %mask_without_lowest_bit : i32
+    scf.yield %next_mask, %next_sum : i32, i32
+  }
+  func.return %expert_sum : i32
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @expert_bitmask_walk(%expert_mask: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %c0 = s_mov_b32 0
+  %final_mask, %expert_sum = low.scf.while(%before_mask = %expert_mask : reg<amdgpu.sgpr>, %before_sum = %c0 : reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) {
+    %has_expert = s_cmp_lg_i32 %before_mask, %c0
+    low.scf.condition %has_expert, %before_mask, %before_sum : reg<amdgpu.scc>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>
+  } do(%mask: reg<amdgpu.sgpr>, %sum: reg<amdgpu.sgpr>) {
+    %expert = s_ctz_i32_b32 %mask
+    %next_sum = s_add_u32 %sum, %expert
+    %29 = s_mov_b32 4294967295
+    %mask_without_lowest_bit = s_add_u32 %mask, %29
+    %next_mask = s_and_b32 %mask, %mask_without_lowest_bit
+    low.scf.yield %next_mask, %next_sum : reg<amdgpu.sgpr>, reg<amdgpu.sgpr>
+  }
+  return %expert_sum
+}

@@ -301,6 +301,7 @@ iree_status_t loom_value_fact_table_initialize_with_arenas(
 
 void loom_value_fact_table_clear_scope(loom_value_fact_table_t* table) {
   table->has_conditioned_results = false;
+  table->condition_integer_projection_count = 0;
   if (table->identities.capacity) {
     for (iree_host_size_t i = 0; i < table->touched_count; ++i) {
       const loom_value_id_t value_id = table->touched_values[i];

@@ -563,10 +563,15 @@ static iree_status_t loom_value_fact_table_retain_condition_body_facts(
   loom_condition_edge_projection_t* projection =
       loom_value_fact_table_lookup_mutable_region_condition_projection(table,
                                                                        body);
+  const bool had_integer_relations =
+      projection && projection->visible_integer_relation_count != 0;
   if (!condition || !body_block ||
       condition->operand_count != body_block->arg_count + 1) {
     if (projection) {
       loom_condition_edge_projection_reset(projection);
+    }
+    if (had_integer_relations) {
+      --table->condition_integer_projection_count;
     }
     return iree_ok_status();
   }
@@ -585,9 +590,19 @@ static iree_status_t loom_value_fact_table_retain_condition_body_facts(
   IREE_RETURN_IF_ERROR(loom_condition_facts_query_complete(
       &scratch->query, table, loom_op_const_operands(condition)[0],
       /*assumed_truth=*/true, &projection->source_derivation));
-  return loom_condition_edge_projection_update_mapping(
+  IREE_RETURN_IF_ERROR(loom_condition_edge_projection_update_mapping(
       projection, module, condition_region, body_block,
-      loom_op_const_operands(condition) + 1, body_block->arg_count);
+      loom_op_const_operands(condition) + 1, body_block->arg_count));
+  const bool has_integer_relations =
+      projection->visible_integer_relation_count != 0;
+  if (had_integer_relations != has_integer_relations) {
+    if (has_integer_relations) {
+      ++table->condition_integer_projection_count;
+    } else {
+      --table->condition_integer_projection_count;
+    }
+  }
+  return iree_ok_status();
 }
 
 // The condition's tuple has separate true-edge and false-edge observations.

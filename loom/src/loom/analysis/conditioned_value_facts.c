@@ -90,8 +90,11 @@ static iree_status_t loom_conditioned_value_facts_collect(
       loom_region_t** regions = loom_op_regions(op);
       for (uint8_t i = 0; i < op->region_count; ++i) {
         if (regions[i]) {
-          IREE_RETURN_IF_ERROR(
-              loom_conditioned_value_facts_collect(state, regions[i], scope));
+          const loom_condition_fact_scope_t* child_scope = NULL;
+          IREE_RETURN_IF_ERROR(loom_condition_fact_scope_extend_region(
+              state->table, regions[i], scope, &state->arena, &child_scope));
+          IREE_RETURN_IF_ERROR(loom_conditioned_value_facts_collect(
+              state, regions[i], child_scope));
         }
       }
     }
@@ -154,7 +157,7 @@ static iree_status_t loom_conditioned_value_facts_solve(
   loom_condition_query_t query;
   loom_condition_query_initialize(state->module, &state->domain, &state->arena,
                                   &query);
-  bool has_conditions = false;
+  bool has_conditions = state->table->condition_integer_projection_count != 0;
   for (loom_conditioned_value_facts_region_t* entry = state->regions; entry;
        entry = entry->next) {
     if (!entry->structure) {
@@ -230,7 +233,9 @@ static iree_status_t loom_conditioned_value_facts_solve(
 iree_status_t loom_conditioned_value_facts_compute(
     loom_value_fact_table_t* table, loom_module_t* module,
     loom_func_like_t function) {
-  if (!table->regions.cfg_count || !loom_func_like_body(function)) {
+  if ((!table->regions.cfg_count &&
+       !table->condition_integer_projection_count) ||
+      !loom_func_like_body(function)) {
     return iree_ok_status();
   }
   loom_conditioned_value_facts_t state = {.module = module, .table = table};
