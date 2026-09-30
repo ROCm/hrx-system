@@ -373,6 +373,7 @@ static iree_status_t qwen_create_device(loom_serve_qwen_model_t* runner) {
     iree_hal_device_create_params_t params =
         iree_hal_device_create_params_default();
     params.proactor_pool = runner->proactor_pool;
+    params.event_sink = iree_hal_device_event_sink_stderr();
     status = iree_hal_create_device(registry, IREE_SV("amdgpu"), &params,
                                     runner->allocator, &runner->device);
   }

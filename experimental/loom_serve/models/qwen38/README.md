@@ -66,6 +66,26 @@ generated text through the runner. Kernel differential success alone does not
 establish retained-session or end-to-end model correctness. The shared-row CLI
 and retained pi service checks are described in the parent README.
 
+### Device sanitizer diagnostics
+
+Host `--config=asan` does not instrument GPU kernels. `compile.py` forwards
+`--sanitizer` and `--sanitizer-reporting` to each kernel compilation; for example,
+`--sanitizer='access|operation' --sanitizer-reporting=default` enables device
+access/operation checks and structured reports. Instrumented artifacts belong in
+a separate output directory from performance artifacts.
+
+The runner uses the HAL stderr event sink for device diagnostics. Access checks
+also require runtime shadow state: add `--amdgpu_asan=true` and
+`--amdgpu_asan_report_policy=fail-device` to the runner invocation to report and
+stop on an address-sanitizer failure. `--amdgpu_asan_shadow_mode=premapped`
+maps poisoned shadow across the covered reservation, allowing covered stray
+addresses to report instead of faulting on an unmapped shadow page.
+
+Stages can be instrumented independently with `--stage`; record exactly which
+artifacts were instrumented when interpreting a result. Compilation failure
+leaves an incomplete stage, not a usable partially sanitized artifact set.
+Sanitizer runs diagnose correctness, not throughput.
+
 For tuning, hold the GGUF, tokenizer, prompts, capacity and generated length
 fixed. Recompile changed requests and rerun both numerical checks and the
 full-model witness. Performance runs use optimized host binaries without ASAN,
