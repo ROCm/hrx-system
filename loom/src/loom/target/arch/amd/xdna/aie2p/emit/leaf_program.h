@@ -28,6 +28,8 @@ enum loom_aie2p_planned_slot_flag_bits_e {
   LOOM_AIE2P_PLANNED_SLOT_FLAG_STRUCTURAL_MOVE = 1u << 2,
   // Slot materializes one symbolic function-local storage address.
   LOOM_AIE2P_PLANNED_SLOT_FLAG_STRUCTURAL_STORAGE_ADDRESS = 1u << 3,
+  // Slot materializes one symbolic read-only data address.
+  LOOM_AIE2P_PLANNED_SLOT_FLAG_READ_ONLY_DATA_ADDRESS = 1u << 4,
 };
 typedef uint16_t loom_aie2p_planned_slot_flags_t;
 
@@ -77,6 +79,24 @@ typedef struct loom_aie2p_planned_storage_fixup_t {
   // Byte offset from the placed storage-space base.
   uint64_t byte_offset;
 } loom_aie2p_planned_storage_fixup_t;
+
+// One read-only data address requiring final placement.
+typedef struct loom_aie2p_planned_read_only_data_fixup_t {
+  // Bundle containing the address-materialization instruction.
+  uint32_t bundle_index;
+  // Retained read-only data record referenced by the instruction.
+  uint32_t read_only_data_ordinal;
+} loom_aie2p_planned_read_only_data_fixup_t;
+
+// One detached immutable data definition required by the leaf program.
+typedef struct loom_aie2p_leaf_read_only_data_t {
+  // Arena-owned source symbol name.
+  iree_string_view_t name;
+  // Arena-owned initialized bytes.
+  iree_const_byte_span_t contents;
+  // Required power-of-two placement alignment.
+  uint64_t minimum_alignment;
+} loom_aie2p_leaf_read_only_data_t;
 
 // Exact storage required in one placement domain.
 typedef struct loom_aie2p_leaf_storage_requirement_t {
@@ -142,6 +162,10 @@ typedef struct loom_aie2p_leaf_program_plan_t {
   const loom_aie2p_leaf_resource_import_t* resource_imports;
   // Number of entries in |resource_imports|.
   iree_host_size_t resource_import_count;
+  // Immutable data definitions in retained requirement order.
+  const loom_aie2p_leaf_read_only_data_t* read_only_data;
+  // Number of entries in |read_only_data|.
+  iree_host_size_t read_only_data_count;
   // Contribution-relative byte offsets in source block order.
   const uint32_t* block_byte_offsets;
   // Number of records in |block_byte_offsets|.
@@ -164,6 +188,10 @@ typedef struct loom_aie2p_leaf_program_plan_t {
   const loom_aie2p_planned_storage_fixup_t* storage_fixups;
   // Number of records in |storage_fixups|.
   iree_host_size_t storage_fixup_count;
+  // Read-only data address sites requiring final contribution placement.
+  const loom_aie2p_planned_read_only_data_fixup_t* read_only_data_fixups;
+  // Number of records in |read_only_data_fixups|.
+  iree_host_size_t read_only_data_fixup_count;
   // Exact byte length after variable-width bundle packing.
   iree_host_size_t encoded_byte_length;
   // Union of atomic register units written by committed native instructions,

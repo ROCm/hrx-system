@@ -36,6 +36,16 @@ _MEMORY_ROOTS = (
 )
 
 
+def _expected_memory_spaces(
+    operation: SourceMemoryOperation, memory_spaces: tuple[str, ...]
+) -> tuple[str, ...]:
+    return (
+        (*memory_spaces, "constant")
+        if operation is SourceMemoryOperation.LOAD
+        else memory_spaces
+    )
+
+
 def _source_memory_emit(rule) -> EmitDescriptorOp:
     return next(
         emit
@@ -230,7 +240,9 @@ def test_scalar_memory_rules_cover_every_address_form() -> None:
                         assert (
                             constraint.address_layout is SourceMemoryAddressLayout.ANY
                         )
-                        assert constraint.memory_spaces == memory_spaces
+                        assert constraint.memory_spaces == _expected_memory_spaces(
+                            constraint.operation, memory_spaces
+                        )
                         assert constraint.element_byte_count == element_byte_count
                         assert constraint.vector_lane_count == 1
                         assert constraint.vector_lane_byte_stride == element_byte_count
@@ -262,7 +274,9 @@ def test_pair_scalar_memory_rules_use_two_native_32bit_accesses() -> None:
                 constraint = _source_memory_emit(rule).source_memory
                 assert constraint.operation is operation
                 assert constraint.root_kind is root_kind
-                assert constraint.memory_spaces == memory_spaces
+                assert constraint.memory_spaces == _expected_memory_spaces(
+                    constraint.operation, memory_spaces
+                )
                 assert constraint.element_byte_count == 8
                 assert constraint.vector_lane_count == 1
                 assert constraint.minimum_alignment == 4
@@ -365,7 +379,9 @@ def test_bytewise_scalar_memory_rules_preserve_unknown_alignment() -> None:
                         assert (
                             constraint.address_layout is SourceMemoryAddressLayout.ANY
                         )
-                        assert constraint.memory_spaces == memory_spaces
+                        assert constraint.memory_spaces == _expected_memory_spaces(
+                            constraint.operation, memory_spaces
+                        )
                         assert constraint.element_byte_count == element_byte_count
                         assert constraint.vector_lane_count == 1
                         assert constraint.vector_lane_byte_stride == element_byte_count
@@ -459,7 +475,9 @@ def test_two_lane_16bit_load_rules_preserve_exact_access_bounds() -> None:
                     assert constraint.operation is SourceMemoryOperation.LOAD
                     assert constraint.root_kind is root_kind
                     assert constraint.address_layout is SourceMemoryAddressLayout.ANY
-                    assert constraint.memory_spaces == memory_spaces
+                    assert constraint.memory_spaces == _expected_memory_spaces(
+                        constraint.operation, memory_spaces
+                    )
                     assert constraint.element_byte_count == 2
                     assert constraint.vector_lane_count == 2
                     assert constraint.vector_lane_byte_stride == 2
@@ -656,7 +674,9 @@ def test_vector_memory_rules_cover_every_native_width_and_address_form() -> None
                 assert constraint.operation is operation
                 assert constraint.root_kind is root_kind
                 assert constraint.address_layout is SourceMemoryAddressLayout.ANY
-                assert constraint.memory_spaces == memory_spaces
+                assert constraint.memory_spaces == _expected_memory_spaces(
+                    constraint.operation, memory_spaces
+                )
                 assert constraint.element_byte_count == element_byte_count
                 assert constraint.vector_lane_count == vector_lane_count
                 assert constraint.vector_lane_byte_stride == element_byte_count
@@ -704,7 +724,9 @@ def test_256bit_vector_loads_split_at_16_byte_alignment() -> None:
                 assert constraint is not None
                 assert constraint.operation is SourceMemoryOperation.LOAD
                 assert constraint.root_kind is root_kind
-                assert constraint.memory_spaces == memory_spaces
+                assert constraint.memory_spaces == _expected_memory_spaces(
+                    constraint.operation, memory_spaces
+                )
                 assert constraint.element_byte_count == element_byte_count
                 assert constraint.vector_lane_count == vector_lane_count
                 assert constraint.vector_lane_byte_stride == element_byte_count
@@ -818,7 +840,9 @@ def test_wide_vector_memory_rules_preserve_two_native_chunks() -> None:
                     assert constraint.operation is operation
                     assert constraint.root_kind is root_kind
                     assert constraint.address_layout is SourceMemoryAddressLayout.ANY
-                    assert constraint.memory_spaces == memory_spaces
+                    assert constraint.memory_spaces == _expected_memory_spaces(
+                        constraint.operation, memory_spaces
+                    )
                     assert constraint.element_byte_count == element_byte_count
                     assert constraint.vector_lane_count == vector_lane_count
                     assert constraint.vector_lane_byte_stride == element_byte_count
@@ -952,7 +976,9 @@ def test_accumulator_memory_rules_decompose_raw_payloads_into_native_chunks() ->
                     assert constraint.operation is operation
                     assert constraint.root_kind is root_kind
                     assert constraint.address_layout is SourceMemoryAddressLayout.ANY
-                    assert constraint.memory_spaces == memory_spaces
+                    assert constraint.memory_spaces == _expected_memory_spaces(
+                        constraint.operation, memory_spaces
+                    )
                     assert constraint.element_byte_count == element_byte_count
                     assert constraint.vector_lane_count == vector_lane_count
                     assert constraint.vector_lane_byte_stride == element_byte_count

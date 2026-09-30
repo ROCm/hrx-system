@@ -1613,6 +1613,7 @@ _BASE_DESCRIPTOR_SPECS = (
         "II_MOVXM_eP",
         (("dst", "eP"),),
         asm_mnemonic="mov.local-address",
+        symbolic_immediates=("i",),
         flags=(DescriptorFlag.SAFE_TO_SPECULATE,),
     ),
     _DescriptorSpec(

@@ -179,6 +179,28 @@ static iree_status_t loom_aie2p_leaf_object_copy_storage_name(
   return iree_ok_status();
 }
 
+static iree_status_t loom_aie2p_leaf_object_copy_read_only_data_name(
+    iree_string_view_t data_name, iree_arena_allocator_t* arena,
+    iree_string_view_t* out_section_name, iree_string_view_t* out_symbol_name) {
+  const iree_string_view_t prefix = IREE_SV(".rodata.");
+  iree_host_size_t section_name_length = 0;
+  if (!iree_host_size_checked_add(prefix.size, data_name.size,
+                                  &section_name_length)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AIE2P read-only data section name is too long");
+  }
+  char* section_name_data = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(arena, section_name_length,
+                                           (void**)&section_name_data));
+  memcpy(section_name_data, prefix.data, prefix.size);
+  memcpy(section_name_data + prefix.size, data_name.data, data_name.size);
+  *out_section_name =
+      iree_make_string_view(section_name_data, section_name_length);
+  *out_symbol_name =
+      iree_make_string_view(section_name_data + prefix.size, data_name.size);
+  return iree_ok_status();
+}
+
 iree_status_t loom_aie2p_leaf_object_emit(
     const loom_aie2p_leaf_program_plan_t* plan, iree_arena_allocator_t* arena,
     loom_aie2p_leaf_contribution_t* out_contribution) {
@@ -235,7 +257,12 @@ iree_status_t loom_aie2p_leaf_object_emit(
       ++storage_domain_count;
     }
   }
-  const iree_host_size_t section_count = storage_domain_count + 1u;
+  iree_host_size_t section_count = 0;
+  if (!iree_host_size_checked_add(plan->read_only_data_count,
+                                  storage_domain_count + 1u, &section_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AIE2P leaf section count exceeds host size");
+  }
   loom_native_section_contribution_t* sections = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, section_count, sizeof(*sections), (void**)&sections));
@@ -247,6 +274,12 @@ iree_status_t loom_aie2p_leaf_object_emit(
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, storage_domain_count,
                                                    sizeof(*storage_domains),
                                                    (void**)&storage_domains));
+  }
+  loom_aie2p_leaf_read_only_data_domain_t* read_only_data = NULL;
+  if (plan->read_only_data_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, plan->read_only_data_count, sizeof(*read_only_data),
+        (void**)&read_only_data));
   }
 
   const iree_string_view_t function_name = plan->function_name;
@@ -272,6 +305,44 @@ iree_status_t loom_aie2p_leaf_object_emit(
       .kind = LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
   };
 
+  for (iree_host_size_t i = 0; i < plan->read_only_data_count; ++i) {
+    const loom_aie2p_leaf_read_only_data_t* data = &plan->read_only_data[i];
+    const uint32_t section_index = (uint32_t)(i + 1u);
+    iree_string_view_t section_name;
+    iree_string_view_t symbol_name;
+    IREE_RETURN_IF_ERROR(loom_aie2p_leaf_object_copy_read_only_data_name(
+        data->name, arena, &section_name, &symbol_name));
+    uint8_t* contents = NULL;
+    if (data->contents.data_length != 0) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(
+          arena, data->contents.data_length, (void**)&contents));
+      memcpy(contents, data->contents.data, data->contents.data_length);
+    }
+    sections[section_index] = (loom_native_section_contribution_t){
+        .section_name = section_name,
+        .section_type = LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
+        .section_flags = LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC,
+        .contribution_alignment = data->minimum_alignment,
+        .contents =
+            iree_make_const_byte_span(contents, data->contents.data_length),
+    };
+    symbols[section_index] = (loom_native_object_symbol_t){
+        .name = symbol_name,
+        .section_contribution_index = section_index,
+        .section_offset = 0,
+        .size = data->contents.data_length,
+        .binding = LOOM_NATIVE_OBJECT_SYMBOL_BINDING_LOCAL,
+        .visibility = LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_HIDDEN,
+        .kind = LOOM_NATIVE_OBJECT_SYMBOL_KIND_DATA,
+    };
+    read_only_data[i] = (loom_aie2p_leaf_read_only_data_domain_t){
+        .section_contribution_index = section_index,
+        .symbol_index = section_index,
+    };
+  }
+  realization->read_only_data = read_only_data;
+  realization->read_only_data_count = plan->read_only_data_count;
+
   uint32_t storage_symbol_indices[LOOM_STORAGE_SPACE_COUNT_];
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(storage_symbol_indices);
        ++i) {
@@ -286,7 +357,8 @@ iree_status_t loom_aie2p_leaf_object_emit(
       continue;
     }
     IREE_ASSERT_GT(requirement->minimum_alignment, 0u);
-    const uint32_t section_index = (uint32_t)(domain_index + 1u);
+    const uint32_t section_index =
+        (uint32_t)(plan->read_only_data_count + domain_index + 1u);
     iree_string_view_t storage_section_name;
     iree_string_view_t storage_symbol_name;
     IREE_RETURN_IF_ERROR(loom_aie2p_leaf_object_copy_storage_name(
@@ -325,7 +397,9 @@ iree_status_t loom_aie2p_leaf_object_emit(
 
   iree_host_size_t fixup_count = 0;
   if (!iree_host_size_checked_add(plan->branch_fixup_count,
-                                  plan->storage_fixup_count, &fixup_count)) {
+                                  plan->storage_fixup_count, &fixup_count) ||
+      !iree_host_size_checked_add(fixup_count, plan->read_only_data_fixup_count,
+                                  &fixup_count)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "AIE2P native fixup count exceeds host size");
   }
@@ -367,6 +441,24 @@ iree_status_t loom_aie2p_leaf_object_emit(
         .addend = (int64_t)storage_fixup->byte_offset,
     };
   }
+  const iree_host_size_t read_only_data_fixup_start =
+      plan->branch_fixup_count + plan->storage_fixup_count;
+  for (iree_host_size_t i = 0; i < plan->read_only_data_fixup_count; ++i) {
+    const loom_aie2p_planned_read_only_data_fixup_t* data_fixup =
+        &plan->read_only_data_fixups[i];
+    IREE_ASSERT_LT(data_fixup->bundle_index, plan->bundle_count);
+    IREE_ASSERT_LT(data_fixup->read_only_data_ordinal,
+                   plan->read_only_data_count);
+    fixups[read_only_data_fixup_start + i] = (loom_native_object_fixup_t){
+        .section_contribution_index = 0,
+        .section_offset = plan->bundles[data_fixup->bundle_index].byte_offset,
+        .relocation_kind =
+            LOOM_AIE2P_NATIVE_RELOCATION_KIND_LOCAL_ADDRESS_ABSOLUTE,
+        .target_symbol_index =
+            read_only_data[data_fixup->read_only_data_ordinal].symbol_index,
+        .addend = 0,
+    };
+  }
 
   out_contribution->object = (loom_native_object_contribution_t){
       .sections = sections,
@@ -378,6 +470,10 @@ iree_status_t loom_aie2p_leaf_object_emit(
   };
   IREE_RETURN_IF_ERROR(
       loom_aie2p_leaf_object_copy_resources(plan, arena, realization));
+  if (plan->read_only_data_count != 0) {
+    realization->capability_flags |=
+        LOOM_AIE2P_LEAF_CAPABILITY_FLAG_READ_ONLY_DATA;
+  }
   if (storage_domain_count != 0) {
     realization->capability_flags |=
         LOOM_AIE2P_LEAF_CAPABILITY_FLAG_FUNCTION_STORAGE;

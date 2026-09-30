@@ -1,0 +1,46 @@
+// RUN: with-checks emit aie2p-array-plan @read_table
+
+global.rodata.def @table = align(32) bytes("1122334455667788")
+
+global.rodata.def @other = align(32) bytes("99aabbccddeeff00")
+
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) @read_table() asm {
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %row = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %group = group %one
+  %worker = worker %group, %zero, @read_table_worker
+  %binding = binding 0, "write"
+  %sender = sender %worker, 0 : reg<aie2p.array.sender : tile<1xi32>>
+  %receiver = receiver %binding, 0 : reg<aie2p.array.receiver : tile<1xi32>>
+  %channel = channel %sender, %receiver, %one, %one : reg<aie2p.array.channel : tile<1xi32>>
+  constrain.location %worker, %zero, %row
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core_target) abi(object_function) @read_table_worker() asm {
+  %output = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %other = mov.local-address @other
+  %table = mov.local-address @table
+  %table_again = mov.local-address @table
+  %other_value = lda %other, 0
+  %table_value = lda %table, 4
+  %table_again_value = lda %table_again, 0
+  st %other_value, %output, 0
+  st %table_value, %output, 0
+  st %table_again_value, %output, 0
+  return
+}
+
+// ----
+CHECK: worker-rodata worker=0 requirement=0 offset=0x0c000 load-address=0x7c000 bytes=8
+CHECK: worker-rodata worker=0 requirement=1 offset=0x0c020 load-address=0x7c020 bytes=8
+CHECK-NOT: worker-rodata worker=0 requirement=2
+CHECK: resident worker=0 entry=@read_table$worker$0 tile=(0,2) * fixups=3
+CHECK:   %other = mov.local-address @other
+CHECK:   %table = mov.local-address @table
+CHECK:   %table_again_value = lda %table, 0

@@ -39,6 +39,8 @@ class _DescriptorSpec:
     operand_register_parts: tuple[tuple[str, str], ...] = ()
     # Native encoding adapters for the selected storage and register parts.
     encoding_adapter_overrides: tuple[tuple[str, str], ...] = ()
+    # Machine immediates that also accept unresolved Low symbol ordinals.
+    symbolic_immediates: tuple[str, ...] = ()
     # Disjoint part preserved through the first result's tied storage input.
     storage_continuation_part: str | None = None
     # Result/input pairs constrained to the same storage.

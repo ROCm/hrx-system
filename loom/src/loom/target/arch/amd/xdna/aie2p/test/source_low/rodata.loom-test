@@ -1,0 +1,18 @@
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+global.rodata.def @table = align(32) bytes("1122334455667788")
+
+func.def @read_table() -> (i32) {
+  %table = global.load @table : buffer
+  %c0 = index.constant 0 : offset
+  %view = buffer.view %table[%c0] : buffer -> view<2xi32>
+  %value = view.load %view[1] : view<2xi32> -> i32
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @read_table() -> (reg<aie2p.er>) asm {
+  %view = mov.local-address @table
+  %value = lda %view, 4
+  return %value
+}

@@ -260,6 +260,10 @@ typedef struct loom_aie2p_array_worker_plan_t {
   loom_xdna_tile_coordinate_t coordinate;
   // First worker_ports row and worker_resource_ports entry for this worker.
   uint32_t first_port;
+  // First function-local storage placement for this worker.
+  uint32_t first_storage;
+  // First read-only data placement for this worker.
+  uint32_t first_read_only_data;
   // Number of contiguous ports, ordered by their first channel binding.
   uint32_t port_count;
   // Number of resident ring positions consumed by leaf or generated code.
@@ -281,6 +285,20 @@ typedef struct loom_aie2p_array_worker_storage_plan_t {
   // Number of bytes occupied by the storage domain.
   uint32_t byte_length;
 } loom_aie2p_array_worker_storage_plan_t;
+
+// Final local-data placement for one worker read-only data requirement.
+typedef struct loom_aie2p_array_read_only_data_plan_t {
+  // Index of the logical worker referencing the data.
+  uint32_t worker_index;
+  // Ordinal in the worker leaf's retained read-only data requirements.
+  uint32_t requirement_ordinal;
+  // Byte offset in the worker tile's local data memory.
+  uint32_t owner_offset;
+  // Worker-visible load address used to relocate symbolic references.
+  uint32_t load_address;
+  // Number of initialized bytes occupying local data memory.
+  uint32_t byte_length;
+} loom_aie2p_array_read_only_data_plan_t;
 
 // Worker ABI port bound to one planned channel ring.
 typedef struct loom_aie2p_array_worker_port_plan_t {
@@ -482,6 +500,10 @@ typedef struct loom_aie2p_array_plan_t {
   const loom_aie2p_array_worker_storage_plan_t* worker_storage;
   // Number of function-local worker storage placements.
   iree_host_size_t worker_storage_count;
+  // Worker read-only data placements in worker and requirement order.
+  const loom_aie2p_array_read_only_data_plan_t* read_only_data;
+  // Number of worker read-only data placements.
+  iree_host_size_t read_only_data_count;
   // Worker ABI ports bound to planned channel rings.
   const loom_aie2p_array_worker_port_plan_t* worker_ports;
   // Number of worker ABI port bindings.

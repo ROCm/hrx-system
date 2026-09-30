@@ -1045,9 +1045,11 @@ def _implicit_operands(spec: descriptor_specs._DescriptorSpec) -> tuple[Operand,
     return tuple(result)
 
 
-def _immediate(form_name: str, operand: MachineOperand) -> Immediate:
+def _immediate(
+    spec: descriptor_specs._DescriptorSpec, operand: MachineOperand
+) -> Immediate:
     immediate = _MACHINE_IMMEDIATES[operand.type_name]
-    if immediate.allows_symbol_reference:
+    if immediate.allows_symbol_reference or operand.name in spec.symbolic_immediates:
         kind = ImmediateKind.ORDINAL
         flags = (ImmediateFlag.SYMBOLIC,)
     elif immediate.is_signed:
@@ -1078,7 +1080,7 @@ def _immediate(form_name: str, operand: MachineOperand) -> Immediate:
         encoding_field_id=(
             _ENCODING_FIELD_IDS[operand.name]
             if operand.name
-            in {field.name for field in _INSTRUCTION_ENCODINGS[form_name].fields}
+            in {field.name for field in _INSTRUCTION_ENCODINGS[spec.form_name].fields}
             else 0
         ),
         encoding_id=_IMMEDIATE_IDS[operand.type_name],
@@ -1292,6 +1294,21 @@ def _descriptor(spec: descriptor_specs._DescriptorSpec) -> Descriptor:
             f"{form.name}: implicit inputs name unknown machine inputs "
             f"{sorted(unknown_implicit_inputs)}"
         )
+    if len(set(spec.symbolic_immediates)) != len(spec.symbolic_immediates):
+        raise ValueError(f"{form.name}: symbolic immediate names must be unique")
+    machine_immediate_names = {
+        operand.name
+        for operand in form.inputs
+        if operand.kind is MachineOperandKind.IMMEDIATE
+    }
+    unknown_symbolic_immediates = (
+        set(spec.symbolic_immediates) - machine_immediate_names
+    )
+    if unknown_symbolic_immediates:
+        raise ValueError(
+            f"{form.name}: symbolic immediates name unknown machine immediates "
+            f"{sorted(unknown_symbolic_immediates)}"
+        )
     implicit_inputs = tuple(
         operand for operand in form.inputs if operand.name in spec.implicit_inputs
     )
@@ -1352,7 +1369,7 @@ def _descriptor(spec: descriptor_specs._DescriptorSpec) -> Descriptor:
     # retains the machine operand order through its independent field mapping.
     immediates = tuple(
         sorted(
-            (_immediate(spec.form_name, operand) for operand in immediate_inputs),
+            (_immediate(spec, operand) for operand in immediate_inputs),
             key=lambda immediate: immediate.field_name,
         )
     )

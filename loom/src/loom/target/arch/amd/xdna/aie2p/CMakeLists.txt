@@ -256,6 +256,7 @@ loom_cc_library(
     loom::codegen::low::verify
     loom::error::error_defs
     loom::ir
+    loom::ops::global
     loom::ops::low
     loom::ops::op_defs
     loom::target::arch::amd::xdna::error_defs
@@ -373,6 +374,7 @@ loom_cc_library(
     loom::codegen::low::function
     loom::codegen::low::memory_access
     loom::ir
+    loom::ops::global
     loom::ops::low
     loom::ops::op_defs
     loom::rewrite::materialize
@@ -409,6 +411,7 @@ loom_cc_library(
     "lower/encode.h"
     "lower/lower.h"
     "lower/matrix.h"
+    "lower/rodata.h"
     "lower/storage.h"
   TEXTUAL_HDRS
     "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amd/xdna/aie2p/contracts/core_index.inl"
@@ -416,6 +419,7 @@ loom_cc_library(
     "lower/encode.c"
     "lower/matrix.c"
     "lower/registry.c"
+    "lower/rodata.c"
     "lower/storage.c"
   DEPS
     ::core_descriptors
@@ -426,6 +430,7 @@ loom_cc_library(
     loom::ir
     loom::ir::facts
     loom::ops::buffer
+    loom::ops::global
     loom::ops::low
     loom::ops::vector
     loom::target::arch::amd::xdna::aie2p::contracts::core
@@ -597,6 +602,7 @@ loom_check_test_suite(
     "test/array_plan/packed_record.loom-test"
     "test/array_plan/pipeline_record_shapes.loom-test"
     "test/array_plan/pipeline_views.loom-test"
+    "test/array_plan/read_only_data.loom-test"
     "test/array_plan/record_contracts.loom-test"
     "test/array_plan/ring_wrap.loom-test"
     "test/array_plan/route_capacity.loom-test"
@@ -727,6 +733,7 @@ loom_check_test_suite(
     "test/source_low/predicate_extension.loom-test"
     "test/source_low/predicate_extract.loom-test"
     "test/source_low/predicate_storage_reuse.loom-test"
+    "test/source_low/rodata.loom-test"
     "test/source_low/selected_payload_transport.loom-test"
     "test/source_low/semantic_assertions.loom-test"
     "test/source_low/shared_conditional_values.loom-test"
@@ -880,6 +887,7 @@ loom_cc_library(
     ::relocation
     iree::base
     iree::base::internal::arena
+    loom::target::arch::amd::xdna::array_facts
     loom::target::emit::native::contribution
   PUBLIC
 )
@@ -1036,6 +1044,7 @@ loom_cc_test(
   DEPS
     ::encoding
     ::leaf_object
+    ::relocation
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
@@ -1093,6 +1102,24 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::target::emit::native::object
+  LABELS
+    "iree-build-requirement=loom.target.arch.xdna"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_XDNA)
+loom_cc_test(
+  NAME
+    xdna_product_test
+  SRCS
+    "emit/xdna_product_test.cc"
+  DEPS
+    ::xdna_product
+    iree::base::internal::arena
+    iree::io::stream
+    iree::schemas::xdna_executable
+    iree::testing::gtest
+    iree::testing::gtest_main
   LABELS
     "iree-build-requirement=loom.target.arch.xdna"
 )

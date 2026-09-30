@@ -1051,6 +1051,8 @@ def test_descriptor_encoding_ids_and_adapters_are_materialized() -> None:
     assert local_address.operands[0].encoding_adapter_id != 0
     assert local_address.immediates[0].field_name == "i"
     assert local_address.immediates[0].bit_width == 32
+    assert local_address.immediates[0].kind is ImmediateKind.ORDINAL
+    assert local_address.immediates[0].flags == (ImmediateFlag.SYMBOLIC,)
 
     short_constant = descriptors["amd.xdna.aie2p.constant.i32.short"]
     full_constant = descriptors["amd.xdna.aie2p.constant.i32"]

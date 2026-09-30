@@ -78,6 +78,13 @@ independent scalar oracle checks sign extension, zero extension, ordered
 quantization, exact stores, destination padding, binding guards and unchanged
 inputs.
 
+`read_only_data_npu2_test` checks that immutable bytes retained by a worker are
+initialized in tile-local data memory before core activation. One nonzero table
+word contributes to the native result; an independent scalar oracle checks that
+result, the unchanged input and both binding guards. The table's core-visible
+self aperture differs from its owner-local initialization address, so the case
+also covers the address-space boundary between relocation and product loading.
+
 `transpose_npu2_test` checks ordinary High BF16 8x8 transposition as raw bit
 transport. Its 1,056 packets include every 16-bit pattern and signed zeros,
 subnormals, infinities and NaN payloads rotated through every lane. Independent

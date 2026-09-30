@@ -39,6 +39,7 @@ iree_py_library(
     loom::py::loom::core
     loom::py::loom::dialect::buffer::buffer
     loom::py::loom::dialect::encoding::encoding
+    loom::py::loom::dialect::globals::globals
     loom::py::loom::dialect::index::index
     loom::py::loom::dialect::scalar::scalar
     loom::py::loom::dialect::scf::scf

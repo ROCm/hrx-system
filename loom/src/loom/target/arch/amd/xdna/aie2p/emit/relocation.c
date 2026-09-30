@@ -400,18 +400,18 @@ iree_status_t loom_aie2p_native_object_apply_fixups(
         }
         if ((target_section->type != LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS &&
              target_section->type != LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS) ||
-            (target_section->flags & (LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-                                      LOOM_NATIVE_ELF_SECTION_FLAG_WRITE)) !=
-                (LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-                 LOOM_NATIVE_ELF_SECTION_FLAG_WRITE) ||
+            !iree_any_bit_set(target_section->flags,
+                              LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC) ||
             iree_any_bit_set(target_section->flags,
                              LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR)) {
           return iree_make_status(
               IREE_STATUS_FAILED_PRECONDITION,
-              "AIE2P local address must target allocated writable data");
+              "AIE2P local address must target allocated data");
         }
-        if (target_offset >=
-            loom_native_elf_section_byte_length(target_section)) {
+        const uint64_t target_length =
+            loom_native_elf_section_byte_length(target_section);
+        if ((target_length == 0 && target_offset != 0) ||
+            (target_length != 0 && target_offset >= target_length)) {
           return iree_make_status(
               IREE_STATUS_OUT_OF_RANGE,
               "AIE2P local address lies outside its storage domain");

@@ -224,26 +224,27 @@ static iree_status_t loom_aie2p_xdna_plan_tile_link(
     const loom_aie2p_array_plan_t* plan, uint32_t worker_index,
     const loom_aie2p_leaf_realization_t* realization,
     loom_aie2p_tile_storage_placement_t* storage_placements,
+    loom_aie2p_tile_read_only_data_placement_t* read_only_data_placements,
     loom_aie2p_tile_link_layout_t* out_layout) {
   if (realization->storage_domain_count > LOOM_STORAGE_SPACE_COUNT_) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "AIE2P resident worker has too many storage domains");
   }
+  const loom_aie2p_array_worker_plan_t* worker_plan =
+      &plan->worker_plans[worker_index];
   for (iree_host_size_t i = 0; i < realization->storage_domain_count; ++i) {
     const loom_aie2p_leaf_storage_domain_t* domain =
         &realization->storage_domains[i];
-    const loom_aie2p_array_worker_storage_plan_t* placement = NULL;
-    for (iree_host_size_t j = 0; j < plan->worker_storage_count; ++j) {
-      if (plan->worker_storage[j].worker_index == worker_index &&
-          plan->worker_storage[j].storage_space == domain->storage_space) {
-        placement = &plan->worker_storage[j];
-        break;
-      }
-    }
+    const iree_host_size_t placement_index = worker_plan->first_storage + i;
+    const loom_aie2p_array_worker_storage_plan_t* placement =
+        placement_index < plan->worker_storage_count
+            ? &plan->worker_storage[placement_index]
+            : NULL;
     const loom_aie2p_leaf_storage_requirement_t* requirement =
         loom_aie2p_leaf_storage_requirement(realization, domain->storage_space);
-    if (placement == NULL ||
+    if (placement == NULL || placement->worker_index != worker_index ||
+        placement->storage_space != domain->storage_space ||
         placement->byte_length != requirement->byte_length) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
@@ -251,7 +252,38 @@ static iree_status_t loom_aie2p_xdna_plan_tile_link(
     }
     storage_placements[i] = (loom_aie2p_tile_storage_placement_t){
         .storage_space = domain->storage_space,
+        .owner_offset = placement->owner_offset,
         .load_address = placement->load_address,
+    };
+  }
+
+  const iree_host_size_t expected_read_only_data_count =
+      plan->workers[worker_index].leaf->requirements.read_only_data_count;
+  if (realization->read_only_data_count != expected_read_only_data_count) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AIE2P resident read-only data changed after physical array planning");
+  }
+  for (iree_host_size_t i = 0; i < realization->read_only_data_count; ++i) {
+    const iree_host_size_t placement_index =
+        worker_plan->first_read_only_data + i;
+    if (placement_index >= plan->read_only_data_count) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "AIE2P resident read-only data placement is missing");
+    }
+    const loom_aie2p_array_read_only_data_plan_t* placement =
+        &plan->read_only_data[placement_index];
+    if (placement->worker_index != worker_index ||
+        placement->requirement_ordinal != i) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "AIE2P resident read-only data placement order changed");
+    }
+    read_only_data_placements[i] = (loom_aie2p_tile_read_only_data_placement_t){
+        .owner_offset = placement->owner_offset,
+        .load_address = placement->load_address,
+        .byte_length = placement->byte_length,
     };
   }
 
@@ -261,9 +293,12 @@ static iree_status_t loom_aie2p_xdna_plan_tile_link(
       loom_xdna_array_tile_facts(plan->family, coordinate);
   *out_layout = (loom_aie2p_tile_link_layout_t){
       .program_address = tile->memory.program_base,
+      .program_owner_offset = 0,
       .program_byte_capacity = tile->memory.program_capacity,
       .storage_placements = storage_placements,
       .storage_placement_count = realization->storage_domain_count,
+      .read_only_data_placements = read_only_data_placements,
+      .read_only_data_placement_count = realization->read_only_data_count,
   };
   return iree_ok_status();
 }
@@ -329,10 +364,19 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
     }
     loom_aie2p_tile_storage_placement_t
         storage_placements[LOOM_STORAGE_SPACE_COUNT_];
+    loom_aie2p_tile_read_only_data_placement_t* read_only_data_placements =
+        NULL;
+    if (contribution->realization.read_only_data_count != 0) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          request->scratch_arena,
+          contribution->realization.read_only_data_count,
+          sizeof(*read_only_data_placements),
+          (void**)&read_only_data_placements));
+    }
     loom_aie2p_tile_link_layout_t link_layout = {0};
     IREE_RETURN_IF_ERROR(loom_aie2p_xdna_plan_tile_link(
         plan, resident->worker_index, &contribution->realization,
-        storage_placements, &link_layout));
+        storage_placements, read_only_data_placements, &link_layout));
     IREE_RETURN_IF_ERROR(loom_aie2p_tile_link(
         contribution, &link_layout, request->scratch_arena, &linked_tiles[i]));
     tiles[i] = (loom_aie2p_xdna_tile_t){
@@ -352,21 +396,26 @@ static iree_status_t loom_aie2p_xdna_compile_resident_entries(
     iree_host_size_t entry_count, loom_aie2p_xdna_entry_t* product_entries,
     bool* out_compiled) {
   *out_compiled = false;
+  loom_aie2p_array_resident_program_t* resident_programs = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      request->scratch_arena, entry_count, sizeof(*resident_programs),
+      (void**)&resident_programs));
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_materialize_resident_programs(
+      request->module, resident_module, array_plans, entry_count,
+      request->scratch_arena, resident_programs));
   for (iree_host_size_t i = 0; i < entry_count; ++i) {
-    loom_aie2p_array_resident_program_t resident_program = {0};
-    IREE_RETURN_IF_ERROR(loom_aie2p_array_materialize_resident_program(
-        request->module, resident_module, &array_plans[i],
-        request->scratch_arena, &resident_program));
+    const loom_aie2p_array_resident_program_t* resident_program =
+        &resident_programs[i];
     loom_aie2p_xdna_tile_t* tiles = NULL;
     bool tiles_compiled = false;
     IREE_RETURN_IF_ERROR(loom_aie2p_xdna_compile_resident_tiles(
-        request, resident_module, &array_plans[i], &resident_program, &tiles,
+        request, resident_module, &array_plans[i], resident_program, &tiles,
         &tiles_compiled));
     if (!tiles_compiled) {
       return iree_ok_status();
     }
     product_entries[i].tiles = tiles;
-    product_entries[i].tile_count = resident_program.worker_count;
+    product_entries[i].tile_count = resident_program->worker_count;
   }
   *out_compiled = true;
   return iree_ok_status();

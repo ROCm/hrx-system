@@ -14,9 +14,9 @@ from loom.target.arch.amd.xdna.aie2p.contracts.data_path import (
     BF16_CONVERSION_ROUNDING,
 )
 from loom.target.arch.amd.xdna.aie2p.contracts.memory import (
-    _MEMORY_ROOTS,
     _descriptor,
     _memory_constraint,
+    _memory_roots,
     _MemoryAddressForm,
     _register_address_emits,
 )
@@ -557,7 +557,7 @@ def _fused_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
                 source_lane_count=source_lane_count,
                 volatile=volatile,
             )
-            for root_kind, memory_spaces in _MEMORY_ROOTS
+            for root_kind, memory_spaces in _memory_roots(SourceMemoryOperation.LOAD)
             for source_op, source_kind in (
                 (vector.vector_bitunpacku, "u"),
                 (vector.vector_bitunpacks, "s"),
@@ -573,7 +573,7 @@ def _fused_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
                 lane_count=lane_count,
                 volatile=volatile,
             )
-            for root_kind, memory_spaces in _MEMORY_ROOTS
+            for root_kind, memory_spaces in _memory_roots(SourceMemoryOperation.LOAD)
             for lane_count in FLOAT_PACKET_LANE_COUNTS
             for address_form in _MemoryAddressForm
         ),
@@ -587,7 +587,7 @@ def _fused_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
                 instruction=instruction,
                 volatile=volatile,
             )
-            for root_kind, memory_spaces in _MEMORY_ROOTS
+            for root_kind, memory_spaces in _memory_roots(SourceMemoryOperation.LOAD)
             for source_op, signedness in (
                 (vector.vector_extui, "unsigned"),
                 (vector.vector_extsi, "signed"),
@@ -603,7 +603,7 @@ def _fused_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
                 lane_count=lane_count,
                 volatile=volatile,
             )
-            for root_kind, memory_spaces in _MEMORY_ROOTS
+            for root_kind, memory_spaces in _memory_roots(SourceMemoryOperation.STORE)
             for lane_count in FLOAT_PACKET_LANE_COUNTS
             for address_form in _MemoryAddressForm
         ),
@@ -615,7 +615,7 @@ def _fused_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
                 pack_instruction=pack_instruction,
                 volatile=volatile,
             )
-            for root_kind, memory_spaces in _MEMORY_ROOTS
+            for root_kind, memory_spaces in _memory_roots(SourceMemoryOperation.STORE)
             for pack_instruction in INTEGER_PACK_INSTRUCTIONS
             for address_form in _MemoryAddressForm
         ),

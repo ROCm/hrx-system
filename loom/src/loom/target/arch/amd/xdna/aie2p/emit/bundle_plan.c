@@ -65,6 +65,8 @@ typedef struct loom_aie2p_bundle_plan_analysis_t {
   iree_host_size_t control_bundle_capacity;
   // Structural local-storage addresses requiring placement fixups.
   iree_host_size_t storage_fixup_count;
+  // Symbolic read-only data addresses requiring placement fixups.
+  iree_host_size_t read_only_data_fixup_count;
 } loom_aie2p_bundle_plan_analysis_t;
 
 // Native bindings retained until physical issue admission. The slot's
@@ -110,6 +112,14 @@ typedef struct loom_aie2p_bundle_plan_builder_t {
   iree_host_size_t storage_fixup_capacity;
   // Number of populated records in |storage_fixups|.
   iree_host_size_t storage_fixup_count;
+  // Arena-backed read-only data fixups owned by the final plan.
+  loom_aie2p_planned_read_only_data_fixup_t* read_only_data_fixups;
+  // Fixup index for each scheduled packet, or UINT32_MAX when absent.
+  uint32_t* read_only_data_fixup_indices_by_packet;
+  // Maximum number of records available in |read_only_data_fixups|.
+  iree_host_size_t read_only_data_fixup_capacity;
+  // Number of populated records in |read_only_data_fixups|.
+  iree_host_size_t read_only_data_fixup_count;
   // Arena-backed contribution offsets in source block order.
   uint32_t* block_byte_offsets;
   // Number of source blocks represented by |block_byte_offsets|.
@@ -172,6 +182,52 @@ static void loom_aie2p_bundle_plan_retain_storage_requirements(
       .byte_length = frame->materialized_spill_storage_bytes,
       .minimum_alignment = frame->materialized_spill_storage_minimum_alignment,
   };
+}
+
+static iree_status_t loom_aie2p_bundle_plan_retain_read_only_data(
+    const loom_low_emission_frame_t* frame, iree_arena_allocator_t* arena,
+    loom_aie2p_leaf_program_plan_t* plan) {
+  const loom_low_function_requirements_t* requirements =
+      &frame->schedule.requirements;
+  if (requirements->read_only_data_count == 0) {
+    return iree_ok_status();
+  }
+  loom_aie2p_leaf_read_only_data_t* read_only_data = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, requirements->read_only_data_count, sizeof(*read_only_data),
+      (void**)&read_only_data));
+  for (iree_host_size_t i = 0; i < requirements->read_only_data_count; ++i) {
+    const loom_low_read_only_data_requirement_t* requirement =
+        &requirements->read_only_data[i];
+    IREE_ASSERT_EQ(requirement->symbol.module_id, 0u);
+    IREE_ASSERT_LT(requirement->symbol.symbol_id, frame->module->symbols.count);
+    const loom_symbol_t* symbol =
+        &frame->module->symbols.entries[requirement->symbol.symbol_id];
+    const iree_string_view_t source_name =
+        loom_string_table_get(&frame->module->strings, symbol->name_id);
+    char* name_data = NULL;
+    if (!iree_string_view_is_empty(source_name)) {
+      IREE_RETURN_IF_ERROR(
+          iree_arena_allocate(arena, source_name.size, (void**)&name_data));
+      memcpy(name_data, source_name.data, source_name.size);
+    }
+    uint8_t* contents_data = NULL;
+    if (requirement->contents.data_length != 0) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(
+          arena, requirement->contents.data_length, (void**)&contents_data));
+      memcpy(contents_data, requirement->contents.data,
+             requirement->contents.data_length);
+    }
+    read_only_data[i] = (loom_aie2p_leaf_read_only_data_t){
+        .name = iree_make_string_view(name_data, source_name.size),
+        .contents = iree_make_const_byte_span(
+            contents_data, requirement->contents.data_length),
+        .minimum_alignment = requirement->minimum_alignment,
+    };
+  }
+  plan->read_only_data = read_only_data;
+  plan->read_only_data_count = requirements->read_only_data_count;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_aie2p_bundle_plan_retain_resource_imports(
@@ -423,6 +479,20 @@ static iree_status_t loom_aie2p_bundle_plan_analyze(
         const uint32_t descriptor_ordinal =
             loom_aie2p_bundle_plan_descriptor_ordinal(descriptor_set,
                                                       packet.descriptor);
+        if (descriptor_ordinal ==
+            AIE2P_CORE_DESCRIPTOR_REF_MATERIALIZE_LOCAL_ADDRESS_I32) {
+          const loom_named_attr_slice_t attrs = loom_low_packet_attrs(&packet);
+          IREE_ASSERT_EQ(attrs.count, 1u);
+          if (attrs.entries[0].value.kind == LOOM_ATTR_SYMBOL) {
+            if (out_analysis->read_only_data_fixup_count ==
+                IREE_HOST_SIZE_MAX) {
+              return iree_make_status(
+                  IREE_STATUS_OUT_OF_RANGE,
+                  "AIE2P read-only data fixup count exceeds host size");
+            }
+            ++out_analysis->read_only_data_fixup_count;
+          }
+        }
         if (!loom_aie2p_bundle_plan_physical_control_descriptor(
                 descriptor_ordinal)) {
           continue;
@@ -614,7 +684,9 @@ static iree_status_t loom_aie2p_bundle_plan_analyze(
 static iree_status_t loom_aie2p_bundle_plan_encode_packet(
     const loom_low_emission_frame_t* frame,
     const loom_low_packet_view_t* packet,
-    loom_aie2p_encoded_slot_t* out_encoded_slot) {
+    loom_aie2p_encoded_slot_t* out_encoded_slot,
+    uint32_t* out_read_only_data_ordinal) {
+  *out_read_only_data_ordinal = UINT32_MAX;
   const loom_low_descriptor_set_t* descriptor_set =
       frame->target.descriptor_set;
   const loom_low_descriptor_t* descriptor = packet->descriptor;
@@ -651,9 +723,26 @@ static iree_status_t loom_aie2p_bundle_plan_encode_packet(
   for (uint16_t i = 0; i < descriptor->immediate_count; ++i) {
     const loom_attribute_t value = attrs.entries[i].value;
     if (value.kind == LOOM_ATTR_SYMBOL) {
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "AIE2P symbolic immediates require native object fixup planning");
+      if (packet->descriptor_ordinal !=
+          AIE2P_CORE_DESCRIPTOR_REF_MATERIALIZE_LOCAL_ADDRESS_I32) {
+        return iree_make_status(
+            IREE_STATUS_UNIMPLEMENTED,
+            "AIE2P descriptor %u has no symbolic immediate relocation",
+            packet->descriptor_ordinal);
+      }
+      const uint32_t ordinal =
+          loom_low_function_requirements_read_only_data_ordinal(
+              &frame->schedule.requirements, loom_attr_as_symbol(value));
+      if (ordinal == UINT32_MAX) {
+        return iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "AIE2P symbolic local address does not name retained read-only "
+            "data");
+      }
+      IREE_ASSERT_EQ(*out_read_only_data_ordinal, UINT32_MAX);
+      *out_read_only_data_ordinal = ordinal;
+      immediate_values[i] = 0;
+      continue;
     }
     immediate_values[i] = value.i64;
   }
@@ -823,7 +912,31 @@ static iree_status_t loom_aie2p_bundle_plan_append_storage_fixup(
   return iree_ok_status();
 }
 
-static iree_status_t loom_aie2p_bundle_plan_resolve_storage_fixups(
+static iree_status_t loom_aie2p_bundle_plan_append_read_only_data_fixup(
+    loom_aie2p_bundle_plan_builder_t* builder, uint32_t scheduled_packet_index,
+    uint32_t read_only_data_ordinal) {
+  if (builder->read_only_data_fixup_count >=
+      builder->read_only_data_fixup_capacity) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "AIE2P read-only data fixup capacity exhausted");
+  }
+  const iree_host_size_t fixup_index = builder->read_only_data_fixup_count++;
+  builder->read_only_data_fixups[fixup_index] =
+      (loom_aie2p_planned_read_only_data_fixup_t){
+          .bundle_index = LOOM_AIE2P_BUNDLE_PLAN_PACKET_NONE,
+          .read_only_data_ordinal = read_only_data_ordinal,
+      };
+  IREE_ASSERT_LT(scheduled_packet_index,
+                 builder->frame->schedule.scheduled_node_count);
+  IREE_ASSERT_EQ(
+      builder->read_only_data_fixup_indices_by_packet[scheduled_packet_index],
+      UINT32_MAX);
+  builder->read_only_data_fixup_indices_by_packet[scheduled_packet_index] =
+      (uint32_t)fixup_index;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_aie2p_bundle_plan_resolve_address_fixups(
     loom_aie2p_bundle_plan_builder_t* builder) {
   for (iree_host_size_t bundle_index = 0; bundle_index < builder->bundle_count;
        ++bundle_index) {
@@ -835,6 +948,30 @@ static iree_status_t loom_aie2p_bundle_plan_resolve_storage_fixups(
       if (!iree_any_bit_set(
               slot->flags,
               LOOM_AIE2P_PLANNED_SLOT_FLAG_STRUCTURAL_STORAGE_ADDRESS)) {
+        if (!iree_any_bit_set(
+                slot->flags,
+                LOOM_AIE2P_PLANNED_SLOT_FLAG_READ_ONLY_DATA_ADDRESS)) {
+          continue;
+        }
+        if (slot->scheduled_packet_index >=
+            builder->frame->schedule.scheduled_node_count) {
+          return iree_make_status(
+              IREE_STATUS_INTERNAL,
+              "AIE2P read-only data address has no scheduled packet");
+        }
+        const uint32_t matched_fixup_index =
+            builder->read_only_data_fixup_indices_by_packet
+                [slot->scheduled_packet_index];
+        if (matched_fixup_index == UINT32_MAX ||
+            matched_fixup_index >= builder->read_only_data_fixup_count ||
+            builder->read_only_data_fixups[matched_fixup_index].bundle_index !=
+                LOOM_AIE2P_BUNDLE_PLAN_PACKET_NONE) {
+          return iree_make_status(
+              IREE_STATUS_INTERNAL,
+              "AIE2P read-only data address has no unique planned fixup");
+        }
+        builder->read_only_data_fixups[matched_fixup_index].bundle_index =
+            (uint32_t)bundle_index;
         continue;
       }
       if (slot->scheduled_packet_index >=
@@ -864,6 +1001,14 @@ static iree_status_t loom_aie2p_bundle_plan_resolve_storage_fixups(
       return iree_make_status(
           IREE_STATUS_INTERNAL,
           "AIE2P planned storage fixup has no emitted instruction");
+    }
+  }
+  for (iree_host_size_t i = 0; i < builder->read_only_data_fixup_count; ++i) {
+    if (builder->read_only_data_fixups[i].bundle_index ==
+        LOOM_AIE2P_BUNDLE_PLAN_PACKET_NONE) {
+      return iree_make_status(
+          IREE_STATUS_INTERNAL,
+          "AIE2P planned read-only data fixup has no emitted instruction");
     }
   }
   return iree_ok_status();
@@ -1696,6 +1841,7 @@ static iree_status_t loom_aie2p_bundle_plan_build_impl(
       .slot_capacity = slot_capacity,
       .branch_fixup_capacity = branch_fixup_capacity,
       .storage_fixup_capacity = analysis.storage_fixup_count,
+      .read_only_data_fixup_capacity = analysis.read_only_data_fixup_count,
       .block_count = frame->schedule.block_count,
   };
   IREE_RETURN_IF_ERROR(loom_low_physical_issue_initialize(
@@ -1729,6 +1875,20 @@ static iree_status_t loom_aie2p_bundle_plan_build_impl(
     for (iree_host_size_t i = 0; i < frame->schedule.scheduled_node_count;
          ++i) {
       builder.storage_fixup_indices_by_packet[i] = UINT32_MAX;
+    }
+  }
+  if (builder.read_only_data_fixup_capacity != 0) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(arena, builder.read_only_data_fixup_capacity,
+                                  sizeof(*builder.read_only_data_fixups),
+                                  (void**)&builder.read_only_data_fixups));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        scratch_arena, frame->schedule.scheduled_node_count,
+        sizeof(*builder.read_only_data_fixup_indices_by_packet),
+        (void**)&builder.read_only_data_fixup_indices_by_packet));
+    for (iree_host_size_t i = 0; i < frame->schedule.scheduled_node_count;
+         ++i) {
+      builder.read_only_data_fixup_indices_by_packet[i] = UINT32_MAX;
     }
   }
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -1774,17 +1934,27 @@ static iree_status_t loom_aie2p_bundle_plan_build_impl(
           }
           if (packet.descriptor != NULL) {
             loom_aie2p_encoded_slot_t encoded_slot;
+            uint32_t read_only_data_ordinal = UINT32_MAX;
             IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_encode_packet(
-                frame, &packet, &encoded_slot));
+                frame, &packet, &encoded_slot, &read_only_data_ordinal));
             IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_slot(
                 &builder,
                 (loom_aie2p_planned_slot_t){
                     .encoded_slot = encoded_slot,
                     .scheduled_packet_index = packet_index,
+                    .flags =
+                        read_only_data_ordinal != UINT32_MAX
+                            ? LOOM_AIE2P_PLANNED_SLOT_FLAG_READ_ONLY_DATA_ADDRESS
+                            : 0,
                 },
                 (loom_aie2p_slot_realization_t){.descriptor_ordinal =
                                                     packet.descriptor_ordinal},
                 NULL));
+            if (read_only_data_ordinal != UINT32_MAX) {
+              IREE_RETURN_IF_ERROR(
+                  loom_aie2p_bundle_plan_append_read_only_data_fixup(
+                      &builder, packet_index, read_only_data_ordinal));
+            }
             continue;
           }
           const loom_aie2p_core_structure_kind_t structure_kind =
@@ -1880,7 +2050,7 @@ static iree_status_t loom_aie2p_bundle_plan_build_impl(
     IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_append_terminator(
         &builder, block_analysis, block_bundle_start));
   }
-  IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_resolve_storage_fixups(&builder));
+  IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_resolve_address_fixups(&builder));
 
   loom_aie2p_leaf_program_plan_t plan = {
       .register_writes = builder.register_writes,
@@ -1895,11 +2065,15 @@ static iree_status_t loom_aie2p_bundle_plan_build_impl(
       .branch_fixup_count = builder.branch_fixup_count,
       .storage_fixups = builder.storage_fixups,
       .storage_fixup_count = builder.storage_fixup_count,
+      .read_only_data_fixups = builder.read_only_data_fixups,
+      .read_only_data_fixup_count = builder.read_only_data_fixup_count,
       .encoded_byte_length = builder.encoded_byte_length,
   };
   IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_copy_function_name(
       frame, arena, &plan.function_name));
   loom_aie2p_bundle_plan_retain_storage_requirements(frame, &plan);
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_bundle_plan_retain_read_only_data(frame, arena, &plan));
   IREE_RETURN_IF_ERROR(
       loom_aie2p_bundle_plan_retain_resource_imports(frame, arena, &plan));
   *out_plan = plan;

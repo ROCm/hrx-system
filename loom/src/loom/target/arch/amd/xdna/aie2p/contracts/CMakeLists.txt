@@ -25,6 +25,7 @@ loom_target_contract_table_cc_libraries(
   LOWER_RULE_DEPS
     loom::codegen::low::lower
     loom::ops::buffer
+    loom::ops::global
     loom::ops::index
     loom::ops::scalar
     loom::ops::scf

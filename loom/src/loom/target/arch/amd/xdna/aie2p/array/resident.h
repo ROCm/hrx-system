@@ -42,23 +42,28 @@ typedef struct loom_aie2p_array_resident_program_t {
 
 // Materializes every planned worker as an independently compilable Low CFG.
 //
-// |source_module| owns the selected array and core leaf IR retained by |plan|.
-// |resident_module| receives all generated functions and is the module used to
-// compile and inspect them. The modules must share a finalized context and may
-// not alias. Materialization does not mutate |source_module|.
+// |source_module| owns the selected array and core leaf IR retained by |plans|.
+// |resident_module| receives the retained read-only data definitions and all
+// generated functions and is the module used to compile and inspect them. The
+// modules must share a finalized context and may not alias. Materialization
+// does not mutate |source_module|.
 //
-// Each source worker function represents one channel firing. The materializer
-// clones its arbitrary CFG once, replaces resource imports with loop-carried
-// local-address values, surrounds the firing with the channel lock protocol,
-// and advances every channel ring independently after the firing completes.
+// All plans sharing a resident module are materialized in one call. This keeps
+// one source-symbol projection across the batch, so a read-only data definition
+// referenced by several entries or workers is cloned exactly once. Each source
+// worker function represents one channel firing. The materializer clones its
+// arbitrary CFG once, replaces resource imports with loop-carried local-address
+// values, surrounds the firing with the channel lock protocol, and advances
+// every channel ring independently after the firing completes.
 // Single-predecessor block chains are fused so scheduling can overlap firing
-// and protocol work while preserving lock effects and shared loop headers.
-// The resulting functions have no imported resources or register ABI and are
+// and protocol work while preserving lock effects and shared loop headers. The
+// resulting functions have no imported resources or register ABI and are
 // retained as final array-image roots.
-iree_status_t loom_aie2p_array_materialize_resident_program(
+iree_status_t loom_aie2p_array_materialize_resident_programs(
     const loom_module_t* source_module, loom_module_t* resident_module,
-    const loom_aie2p_array_plan_t* plan, iree_arena_allocator_t* arena,
-    loom_aie2p_array_resident_program_t* out_program);
+    const loom_aie2p_array_plan_t* plans, iree_host_size_t plan_count,
+    iree_arena_allocator_t* arena,
+    loom_aie2p_array_resident_program_t* out_programs);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -32,14 +32,12 @@ enum loom_aie2p_leaf_capability_flag_bits_e {
   LOOM_AIE2P_LEAF_CAPABILITY_FLAG_RESOURCE_IMPORTS = 1u << 0,
   // The leaf contains native fixups that the array linker must resolve.
   LOOM_AIE2P_LEAF_CAPABILITY_FLAG_NATIVE_FIXUPS = 1u << 1,
-  // The leaf requires initialized local data bytes.
-  LOOM_AIE2P_LEAF_CAPABILITY_FLAG_INITIALIZED_DATA = 1u << 2,
-  // The leaf requires zero-filled local data bytes.
-  LOOM_AIE2P_LEAF_CAPABILITY_FLAG_ZERO_FILL = 1u << 3,
+  // The leaf requires initialized read-only local data.
+  LOOM_AIE2P_LEAF_CAPABILITY_FLAG_READ_ONLY_DATA = 1u << 2,
   // The leaf requires function-local storage.
-  LOOM_AIE2P_LEAF_CAPABILITY_FLAG_FUNCTION_STORAGE = 1u << 4,
+  LOOM_AIE2P_LEAF_CAPABILITY_FLAG_FUNCTION_STORAGE = 1u << 3,
   // The leaf contains materialized spill storage and traffic.
-  LOOM_AIE2P_LEAF_CAPABILITY_FLAG_MATERIALIZED_SPILLS = 1u << 5,
+  LOOM_AIE2P_LEAF_CAPABILITY_FLAG_MATERIALIZED_SPILLS = 1u << 4,
 };
 typedef uint32_t loom_aie2p_leaf_capability_flags_t;
 
@@ -52,6 +50,14 @@ typedef struct loom_aie2p_leaf_storage_domain_t {
   // Index of the domain base symbol in the native object.
   uint32_t symbol_index;
 } loom_aie2p_leaf_storage_domain_t;
+
+// One read-only data domain retained for final array placement.
+typedef struct loom_aie2p_leaf_read_only_data_domain_t {
+  // Index of the domain's native section contribution.
+  uint32_t section_contribution_index;
+  // Index of the domain base symbol in the native object.
+  uint32_t symbol_index;
+} loom_aie2p_leaf_read_only_data_domain_t;
 
 // Exact physical facts retained after all expensive leaf compilation work.
 //
@@ -74,12 +80,10 @@ typedef struct loom_aie2p_leaf_realization_t {
   loom_aie2p_leaf_capability_flags_t capability_flags;
   // Core program-memory footprint.
   loom_aie2p_leaf_storage_requirement_t code;
-  // Read-only local-data footprint.
-  loom_aie2p_leaf_storage_requirement_t read_only_data;
-  // Initialized writable local-data footprint.
-  loom_aie2p_leaf_storage_requirement_t initialized_data;
-  // Zero-filled writable local-data footprint.
-  loom_aie2p_leaf_storage_requirement_t zero_fill;
+  // Read-only data domains in retained requirement order.
+  const loom_aie2p_leaf_read_only_data_domain_t* read_only_data;
+  // Number of records in |read_only_data|.
+  iree_host_size_t read_only_data_count;
   // Function stack-storage footprint.
   loom_aie2p_leaf_storage_requirement_t stack;
   // Function scratch-storage footprint.

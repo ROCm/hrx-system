@@ -77,6 +77,8 @@ typedef struct loom_aie2p_array_committed_endpoint_t {
 typedef struct loom_aie2p_array_physical_cardinalities_t {
   // Function-local worker storage rows.
   uint32_t worker_storage_count;
+  // Worker read-only data placement rows.
+  uint32_t read_only_data_count;
   // Active worker ABI port rows.
   uint32_t worker_port_count;
   // Channel ring slot rows.
@@ -136,6 +138,7 @@ typedef struct loom_aie2p_array_plan_builder_t {
 
   loom_aie2p_array_worker_plan_t* worker_plans;
   loom_aie2p_array_worker_storage_plan_t* worker_storage;
+  loom_aie2p_array_read_only_data_plan_t* read_only_data;
   loom_aie2p_array_worker_port_plan_t* worker_ports;
   // Source-resource ordinals mapped to the corresponding physical port row.
   uint32_t* worker_resource_ports;
@@ -155,6 +158,7 @@ typedef struct loom_aie2p_array_plan_builder_t {
   iree_host_size_t endpoint_cursor;
   iree_host_size_t channel_cursor;
   iree_host_size_t worker_storage_cursor;
+  iree_host_size_t read_only_data_cursor;
   iree_host_size_t worker_port_cursor;
   iree_host_size_t channel_slot_cursor;
   iree_host_size_t lock_cursor;
@@ -1139,6 +1143,7 @@ static iree_status_t loom_aie2p_array_plan_workers(
         .worker_index = (uint32_t)i,
         .coordinate = worker->coordinate,
         .first_port = (uint32_t)builder->worker_port_cursor,
+        .first_storage = (uint32_t)builder->worker_storage_cursor,
     };
     builder->worker_port_cursor += worker->active_endpoint_count;
 
@@ -1180,6 +1185,56 @@ static iree_status_t loom_aie2p_array_plan_workers(
               .owner_offset = proposal.owner_offset,
               .load_address = load_address,
               .byte_length = (uint32_t)requirement.byte_length,
+          };
+    }
+  }
+
+  // Immutable leaf data is persistent worker state. Reserve it after every
+  // authored storage domain and before generated fold and channel storage.
+  for (iree_host_size_t worker_index = 0;
+       worker_index < builder->plan->worker_count; ++worker_index) {
+    const loom_aie2p_array_worker_t* worker = &builder->workers[worker_index];
+    builder->worker_plans[worker_index].first_read_only_data =
+        (uint32_t)builder->read_only_data_cursor;
+    const loom_low_function_requirements_t* requirements =
+        &worker->leaf->requirements;
+    loom_aie2p_array_tile_state_t* tile_state =
+        loom_aie2p_array_tile_state(builder, worker->coordinate);
+    for (iree_host_size_t requirement_ordinal = 0;
+         requirement_ordinal < requirements->read_only_data_count;
+         ++requirement_ordinal) {
+      const loom_low_read_only_data_requirement_t* requirement =
+          &requirements->read_only_data[requirement_ordinal];
+      uint32_t owner_offset = 0;
+      if (requirement->contents.data_length != 0) {
+        loom_aie2p_array_local_memory_proposal_t proposal;
+        if (!loom_aie2p_array_local_memory_propose_worker(
+                tile_state->resources.facts, tile_state->resources.bank_cursors,
+                requirement->contents.data_length,
+                requirement->minimum_alignment, &proposal)) {
+          const loom_symbol_t* symbol =
+              &builder->module->symbols.entries[requirement->symbol.symbol_id];
+          return loom_aie2p_array_reject_worker_local_storage(
+              builder, (uint32_t)worker_index,
+              loom_string_table_get(&builder->module->strings, symbol->name_id),
+              requirement->contents.data_length,
+              requirement->minimum_alignment);
+        }
+        loom_aie2p_array_local_memory_commit(tile_state->resources.facts,
+                                             &proposal,
+                                             tile_state->resources.bank_cursors,
+                                             &tile_state->resources.next_bank);
+        owner_offset = proposal.owner_offset;
+      }
+      builder->read_only_data[builder->read_only_data_cursor++] =
+          (loom_aie2p_array_read_only_data_plan_t){
+              .worker_index = (uint32_t)worker_index,
+              .requirement_ordinal = (uint32_t)requirement_ordinal,
+              .owner_offset = owner_offset,
+              .load_address =
+                  tile_state->resources.facts->memory.local_load_base +
+                  owner_offset,
+              .byte_length = (uint32_t)requirement->contents.data_length,
           };
     }
   }
@@ -2086,6 +2141,8 @@ static iree_status_t loom_aie2p_array_admit_physical_cardinalities(
                                               (loom_storage_space_t)space)
               .byte_length != 0;
     }
+    out_cardinalities->read_only_data_count +=
+        (uint32_t)requirements->read_only_data_count;
   }
   return iree_ok_status();
 }
@@ -2101,6 +2158,7 @@ static iree_status_t loom_aie2p_array_allocate_physical_plan(
 
   builder->plan->worker_plan_count = builder->plan->worker_count;
   builder->plan->worker_storage_count = cardinalities.worker_storage_count;
+  builder->plan->read_only_data_count = cardinalities.read_only_data_count;
   builder->plan->worker_port_count = cardinalities.worker_port_count;
   builder->plan->channel_slot_count = cardinalities.channel_slot_count;
   builder->plan->lock_count = cardinalities.lock_count;
@@ -2114,6 +2172,9 @@ static iree_status_t loom_aie2p_array_allocate_physical_plan(
   IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_array(
       builder->arena, builder->plan->worker_storage_count,
       sizeof(*builder->worker_storage), (void**)&builder->worker_storage));
+  IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_array(
+      builder->arena, builder->plan->read_only_data_count,
+      sizeof(*builder->read_only_data), (void**)&builder->read_only_data));
   IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_array(
       builder->arena, builder->plan->worker_port_count,
       sizeof(*builder->worker_ports) + sizeof(*builder->worker_resource_ports) +
@@ -2156,6 +2217,7 @@ static iree_status_t loom_aie2p_array_allocate_physical_plan(
 
   builder->plan->worker_plans = builder->worker_plans;
   builder->plan->worker_storage = builder->worker_storage;
+  builder->plan->read_only_data = builder->read_only_data;
   builder->plan->worker_ports = builder->worker_ports;
   builder->plan->worker_resource_ports = builder->worker_resource_ports;
   builder->plan->worker_fold_output_states = builder->worker_fold_output_states;
@@ -2202,6 +2264,7 @@ static void loom_aie2p_array_finalize_worker_port_states(
 static void loom_aie2p_array_finalize_physical_counts(
     loom_aie2p_array_plan_builder_t* builder) {
   builder->plan->worker_storage_count = builder->worker_storage_cursor;
+  builder->plan->read_only_data_count = builder->read_only_data_cursor;
   builder->plan->worker_port_count = builder->worker_port_cursor;
   builder->plan->channel_slot_count = builder->channel_slot_cursor;
   builder->plan->lock_count = builder->lock_cursor;

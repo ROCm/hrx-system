@@ -130,12 +130,29 @@ _SPLIT_256BIT_VECTOR_LOAD_SHAPES = (
 _I32_MIN = -(2**31)
 _I32_MAX = (2**31) - 1
 
-_MEMORY_ROOTS = (
+_MUTABLE_MEMORY_ROOTS = (
     (
         SourceMemoryRootKind.ANY,
         ("unknown", "generic", "private", "workgroup"),
     ),
 )
+
+_LOAD_MEMORY_ROOTS = (
+    (
+        SourceMemoryRootKind.ANY,
+        ("unknown", "generic", "private", "workgroup", "constant"),
+    ),
+)
+
+
+def _memory_roots(
+    operation: SourceMemoryOperation,
+) -> tuple[tuple[SourceMemoryRootKind, tuple[str, ...]], ...]:
+    return (
+        _LOAD_MEMORY_ROOTS
+        if operation is SourceMemoryOperation.LOAD
+        else _MUTABLE_MEMORY_ROOTS
+    )
 
 
 @unique
@@ -733,8 +750,8 @@ def _pair_scalar_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
             memory_spaces=memory_spaces,
             volatile=volatile,
         )
-        for root_kind, memory_spaces in _MEMORY_ROOTS
         for operation in (SourceMemoryOperation.LOAD, SourceMemoryOperation.STORE)
+        for root_kind, memory_spaces in _memory_roots(operation)
         for address_form in _MemoryAddressForm
     )
 
@@ -762,11 +779,11 @@ def _raw_buffer_memory_rules() -> tuple[DescriptorRule, ...]:
             immediate_offset_maximum=7,
             volatile=False,
         )
-        for root_kind, memory_spaces in _MEMORY_ROOTS
         for operation, source_op, reference_field, descriptor_family in (
             (SourceMemoryOperation.LOAD, buffer.buffer_load_i8_u, "source", "load"),
             (SourceMemoryOperation.STORE, buffer.buffer_store_i8, "target", "store"),
         )
+        for root_kind, memory_spaces in _memory_roots(operation)
         for address_form in _MemoryAddressForm
     )
 
@@ -789,7 +806,6 @@ def _scalar_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
             immediate_offset_maximum=immediate_offset_maximum,
             volatile=volatile,
         )
-        for root_kind, memory_spaces in _MEMORY_ROOTS
         for (
             descriptor_type,
             element_byte_count,
@@ -812,6 +828,7 @@ def _scalar_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
                 f"amd.xdna.aie2p.store.scalar.{descriptor_type}.indexed.register",
             ),
         )
+        for root_kind, memory_spaces in _memory_roots(operation)
         for address_form in _MemoryAddressForm
     )
 
@@ -1052,9 +1069,9 @@ def _bytewise_scalar_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ..
             element_byte_count=element_byte_count,
             volatile=volatile,
         )
-        for root_kind, memory_spaces in _MEMORY_ROOTS
         for element_byte_count, value_type in _BYTEWISE_SCALAR_MEMORY_SHAPES
         for operation in (SourceMemoryOperation.LOAD, SourceMemoryOperation.STORE)
+        for root_kind, memory_spaces in _memory_roots(operation)
         for address_form in _MemoryAddressForm
     )
 
@@ -1192,7 +1209,7 @@ def _two_lane_16bit_load_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
             element_type=element_type,
             volatile=volatile,
         )
-        for root_kind, memory_spaces in _MEMORY_ROOTS
+        for root_kind, memory_spaces in _memory_roots(SourceMemoryOperation.LOAD)
         for element_type in ("i16", "f16", "bf16")
         for address_form in _MemoryAddressForm
     )
@@ -1225,7 +1242,6 @@ def _vector_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
             volatile=volatile,
             expand_to_x_carrier=width_bits < 512,
         )
-        for root_kind, memory_spaces in _MEMORY_ROOTS
         for (
             width_bits,
             element_type,
@@ -1236,6 +1252,7 @@ def _vector_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
         ) in _VECTOR_MEMORY_SHAPES
         for shape in (f"{descriptor_element_type}x{vector_lane_count}",)
         for operation in (SourceMemoryOperation.LOAD, SourceMemoryOperation.STORE)
+        for root_kind, memory_spaces in _memory_roots(operation)
         for descriptor_family in (
             "load.a" if operation is SourceMemoryOperation.LOAD else "store",
         )
@@ -1414,7 +1431,7 @@ def _split_256bit_vector_load_rules(*, volatile: bool) -> tuple[DescriptorRule, 
             value_type=value_type,
             volatile=volatile,
         )
-        for root_kind, memory_spaces in _MEMORY_ROOTS
+        for root_kind, memory_spaces in _memory_roots(SourceMemoryOperation.LOAD)
         for element_byte_count, vector_lane_count, value_type in (
             _SPLIT_256BIT_VECTOR_LOAD_SHAPES
         )
@@ -1444,11 +1461,11 @@ def _accumulator_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
             chunk_unit_count=1,
             volatile=volatile,
         )
-        for root_kind, memory_spaces in _MEMORY_ROOTS
         for element_byte_count, vector_lane_count, value_type in (
             _ACCUMULATOR_VECTOR_SHAPES
         )
         for operation in (SourceMemoryOperation.LOAD, SourceMemoryOperation.STORE)
+        for root_kind, memory_spaces in _memory_roots(operation)
         for address_form in _MemoryAddressForm
     )
 
@@ -1479,12 +1496,12 @@ def _wide_vector_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
             chunk_unit_count=2,
             volatile=volatile,
         )
-        for root_kind, memory_spaces in _MEMORY_ROOTS
         for element_type, descriptor_element_type, element_bits in (
             _VECTOR_MEMORY_ELEMENT_TYPES
         )
         if element_type != "f32"
         for operation in (SourceMemoryOperation.LOAD, SourceMemoryOperation.STORE)
+        for root_kind, memory_spaces in _memory_roots(operation)
         for descriptor_family in (
             "load.a" if operation is SourceMemoryOperation.LOAD else "store",
         )
@@ -1521,7 +1538,7 @@ def _matrix_fragment_store_rules() -> tuple[DescriptorRule, ...]:
                 Guard.value_i64_range("columns", 8, 8),
             ),
         )
-        for root_kind, memory_spaces in _MEMORY_ROOTS
+        for root_kind, memory_spaces in _memory_roots(SourceMemoryOperation.STORE)
         for element_type in ("i32", "f32")
         for address_form in _MemoryAddressForm
     )

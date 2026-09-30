@@ -12,6 +12,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/lower/encode.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/lower.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/matrix.h"
+#include "loom/target/arch/amd/xdna/aie2p/lower/rodata.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/storage.h"
 #include "loom/target/arch/amd/xdna/error_catalog.h"
 
@@ -174,6 +175,11 @@ static iree_status_t loom_aie2p_preselect_op(void* user_data,
   if (!loom_low_lower_plan_is_empty(*out_plan)) {
     return iree_ok_status();
   }
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_select_rodata_plan(context, source_op, out_plan));
+  if (!loom_low_lower_plan_is_empty(*out_plan)) {
+    return iree_ok_status();
+  }
   return loom_aie2p_select_storage_plan(context, source_op, out_plan);
 }
 
@@ -183,6 +189,8 @@ static void loom_aie2p_mark_plan_storage_demands(
   (void)user_data;
   if (loom_aie2p_matrix_plan_isa(plan)) {
     loom_aie2p_mark_matrix_plan_demands(context, source_op, plan);
+  } else if (loom_aie2p_rodata_plan_isa(plan)) {
+    loom_aie2p_mark_rodata_plan_demands(context, source_op, plan);
   } else if (loom_aie2p_storage_plan_isa(plan)) {
     loom_aie2p_mark_storage_plan_demands(context, source_op, plan);
   } else {
@@ -198,6 +206,8 @@ static void loom_aie2p_describe_plan(void* user_data,
   (void)user_data;
   if (loom_aie2p_matrix_plan_isa(plan)) {
     loom_aie2p_describe_matrix_plan(context, source_op, plan, out_report);
+  } else if (loom_aie2p_rodata_plan_isa(plan)) {
+    loom_aie2p_describe_rodata_plan(context, source_op, plan, out_report);
   } else if (loom_aie2p_storage_plan_isa(plan)) {
     loom_aie2p_describe_storage_plan(context, source_op, plan, out_report);
   } else {
@@ -212,6 +222,9 @@ static iree_status_t loom_aie2p_emit_op(void* user_data,
   (void)user_data;
   if (loom_aie2p_matrix_plan_isa(plan)) {
     return loom_aie2p_emit_matrix_plan(context, source_op, plan);
+  }
+  if (loom_aie2p_rodata_plan_isa(plan)) {
+    return loom_aie2p_emit_rodata_plan(context, source_op, plan);
   }
   if (loom_aie2p_storage_plan_isa(plan)) {
     return loom_aie2p_emit_storage_plan(context, source_op, plan);

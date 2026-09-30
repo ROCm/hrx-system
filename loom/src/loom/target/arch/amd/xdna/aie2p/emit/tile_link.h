@@ -12,6 +12,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/leaf_object.h"
+#include "loom/target/arch/amd/xdna/array/facts.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,21 +22,47 @@ extern "C" {
 typedef struct loom_aie2p_tile_storage_placement_t {
   // Structural Low storage space selecting the leaf domain.
   loom_storage_space_t storage_space;
+  // Byte offset in the owning tile's local data memory.
+  uint32_t owner_offset;
   // Address used by core loads and stores through the selected tile aperture.
   uint32_t load_address;
 } loom_aie2p_tile_storage_placement_t;
+
+// Final core-visible placement for one read-only data domain.
+typedef struct loom_aie2p_tile_read_only_data_placement_t {
+  // Byte offset in the owning tile's local data memory.
+  uint32_t owner_offset;
+  // Address used by core loads through the selected tile aperture.
+  uint32_t load_address;
+  // Exact initialized payload byte length.
+  uint32_t byte_length;
+} loom_aie2p_tile_read_only_data_placement_t;
 
 // Final addresses assigned before native fixups and ELF serialization.
 typedef struct loom_aie2p_tile_link_layout_t {
   // Core program-memory address assigned to the executable section.
   uint32_t program_address;
+  // Byte offset in the owning tile's program memory.
+  uint32_t program_owner_offset;
   // Program-memory bytes available beginning at |program_address|.
   uint32_t program_byte_capacity;
   // Function-local storage placements keyed by storage space.
   const loom_aie2p_tile_storage_placement_t* storage_placements;
   // Number of records in |storage_placements|.
   iree_host_size_t storage_placement_count;
+  // Read-only data placements in retained requirement order.
+  const loom_aie2p_tile_read_only_data_placement_t* read_only_data_placements;
+  // Number of records in |read_only_data_placements|.
+  iree_host_size_t read_only_data_placement_count;
 } loom_aie2p_tile_link_layout_t;
+
+// Canonical physical placement of one linked native section.
+typedef struct loom_aie2p_linked_section_placement_t {
+  // Owning tile memory interpreted by the section.
+  loom_xdna_memory_space_t memory_space;
+  // Byte offset in that owning memory space.
+  uint32_t owner_offset;
+} loom_aie2p_linked_section_placement_t;
 
 // Fully placed and fixed-up native sections for one AIE2P compute tile.
 //
@@ -44,6 +71,10 @@ typedef struct loom_aie2p_tile_link_layout_t {
 typedef struct loom_aie2p_linked_tile_t {
   // Final assembled native sections with core-visible addresses.
   loom_native_section_contribution_assembly_t assembly;
+  // Physical placements parallel to |assembly.sections|.
+  const loom_aie2p_linked_section_placement_t* section_placements;
+  // Number of records in |section_placements|.
+  iree_host_size_t section_placement_count;
   // Final layouts for every symbol in the source contribution.
   const loom_native_object_symbol_layout_t* symbol_layouts;
   // Number of records in |symbol_layouts|.

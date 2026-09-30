@@ -299,6 +299,7 @@ loom_cc_library(
     deps = [
         ":storage_layout",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/global",
         "//loom/src/loom/ops/low",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

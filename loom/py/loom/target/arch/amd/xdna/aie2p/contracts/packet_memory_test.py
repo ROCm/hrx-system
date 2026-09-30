@@ -35,6 +35,16 @@ _MEMORY_ROOTS = (
 )
 
 
+def _expected_memory_spaces(
+    operation: SourceMemoryOperation, memory_spaces: tuple[str, ...]
+) -> tuple[str, ...]:
+    return (
+        (*memory_spaces, "constant")
+        if operation is SourceMemoryOperation.LOAD
+        else memory_spaces
+    )
+
+
 def _source_memory_emit(rule) -> EmitDescriptorOp:
     return next(
         emit
@@ -211,7 +221,7 @@ def test_fused_packet_memory_rules_cover_the_native_shape_matrix() -> None:
                             ),
                             operation,
                             root_kind,
-                            memory_spaces,
+                            _expected_memory_spaces(operation, memory_spaces),
                             element_byte_count,
                             lane_count,
                             width_bits // 8,
