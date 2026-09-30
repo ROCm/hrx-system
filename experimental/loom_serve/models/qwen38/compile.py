@@ -23,9 +23,10 @@ def compile_stage(arguments, stage):
         output / "kernels",
     ):
         directory.mkdir(parents=True, exist_ok=True)
-    token_capacity = 512 if stage == "prefill" else 1
+    token_capacity = 1 if stage == "decode" else 512
     config = {
         "runner.qwen38.prefill_token_count": arguments.prefill_capacity,
+        "runner.qwen38.span_capacity": arguments.span_capacity,
         "ggml.linear_q4k_q8_1_x4.token_capacity": token_capacity,
         "ggml.linear_q4k_q8_1_x4.output_capacity": 48,
         "ggml.linear_q5k_q8_1_x4.token_capacity": token_capacity,
@@ -42,10 +43,12 @@ def compile_stage(arguments, stage):
     }
     configuration = output / "config.json"
     configuration.write_text(json.dumps(config, indent=2) + "\n")
-    primary = source / (
-        "prefill.loom" if stage == "prefill" else "programs/qwen38/model_decode.loom"
-    )
-    root = "qwen38_prefill" if stage == "prefill" else "qwen38_text_decode_greedy"
+    primary_name, root = {
+        "prefill": ("prefill.loom", "qwen38_prefill"),
+        "decode": ("programs/qwen38/model_decode.loom", "qwen38_text_decode_greedy"),
+        "epoch": ("epoch.loom", "qwen38_epoch"),
+    }[stage]
+    primary = source / primary_name
     libraries = sorted(source.glob("kernels/**/*.loom")) + sorted(
         source.glob("programs/**/*.loom")
     )
@@ -99,10 +102,11 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--context-capacity", type=int, default=16384)
     parser.add_argument("--prefill-capacity", type=int, default=512)
+    parser.add_argument("--span-capacity", type=int, default=4)
     parser.add_argument("--decode-splits", type=int, default=10)
     parser.add_argument("--target", default="amdgpu:gfx1151")
     parser.add_argument(
-        "--stage", choices=("prefill", "decode", "both"), default="both"
+        "--stage", choices=("prefill", "decode", "epoch", "both", "all"), default="both"
     )
     parser.add_argument(
         "--loom-link",
@@ -117,11 +121,16 @@ def main():
     arguments = parser.parse_args()
     if not 1 <= arguments.prefill_capacity <= 512:
         parser.error("prefill capacity must be in [1, 512]")
+    if not 1 <= arguments.span_capacity <= 8:
+        parser.error("span capacity must be in [1, 8]")
     if not 1 <= arguments.decode_splits <= 64:
         parser.error("decode splits must be in [1, 64]")
     if not arguments.prefill_capacity <= arguments.context_capacity <= 262144:
         parser.error("context capacity must contain prefill and be at most 262144")
-    stages = ("prefill", "decode") if arguments.stage == "both" else (arguments.stage,)
+    stages = {
+        "both": ("prefill", "decode"),
+        "all": ("prefill", "decode", "epoch"),
+    }.get(arguments.stage, (arguments.stage,))
     for stage in stages:
         compile_stage(arguments, stage)
 

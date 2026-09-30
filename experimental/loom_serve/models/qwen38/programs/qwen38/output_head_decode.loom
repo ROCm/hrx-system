@@ -13,25 +13,35 @@ kernel.decl @qwen38_rmsnorm_f32_prefill_last() launch(%control: buffer, %epsilon
 kernel.decl @qwen38_greedy_argmax_partial_rows_f32(%token_count: index, %output_size: index) launch(%token_count: index, %output_size: index, %logits: buffer, %partial_logits: buffer, %partial_token_ids: buffer)
 kernel.decl @qwen38_greedy_argmax_reduce_rows_f32(%token_count: index, %output_size: index) launch(%token_count: index, %output_size: index, %partial_logits: buffer, %partial_token_ids: buffer, %token_ids: buffer)
 
-// Projects one normalized hidden row and publishes its deterministic greedy
-// token. Decode and prefill share this exact vocabulary path.
-command.program.def @qwen38_output_projection_greedy() launch(%parameters: buffer, %normalized: buffer, %token_id: buffer) {
-  %token_count = index.constant 1 : index
+// Projects normalized hidden rows and publishes their deterministic greedy
+// tokens. Four-row groups decode each immutable vocabulary weight once.
+command.program.def public @qwen38_output_projection_greedy(%token_count: index, %normalized_origin: offset, %output_origin: offset) launch(%parameters: buffer, %normalized: buffer, %token_id: buffer) where [range(%token_count, 1, 4)] {
   %hidden_size = index.constant 5120 : index
   %vocabulary_size = index.constant 248320 : index
   %output_weight = command.parameter %parameters, "output.weight" : view<1042944000xi8>
-  %hidden_q8_bytes = index.constant 5760 : offset
-  %logits_bytes = index.constant 993280 : offset
-  %partial_bytes = index.constant 244 : offset
+  %hidden_q8_row_bytes = index.constant 5760 : offset
+  %logits_row_bytes = index.constant 993280 : offset
+  %partial_row_bytes = index.constant 244 : offset
+  %hidden_q8_bytes = index.scale %token_count, %hidden_q8_row_bytes : index, offset -> offset
+  %logits_bytes = index.scale %token_count, %logits_row_bytes : index, offset -> offset
+  %partial_bytes = index.scale %token_count, %partial_row_bytes : index, offset -> offset
   %normalized_q8 = buffer.alloca<global> align(256) %hidden_q8_bytes : buffer
   %logits = buffer.alloca<global> align(256) %logits_bytes : buffer
   %partial_logits = buffer.alloca<global> align(256) %partial_bytes : buffer
   %partial_token_ids = buffer.alloca<global> align(256) %partial_bytes : buffer
+  %normalized_rows = buffer.view %normalized[%normalized_origin] : buffer -> view<[%token_count]x5120xf32>
+  %output_rows = buffer.view %token_id[%output_origin] : buffer -> view<[%token_count]xi32>
 
-  kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %hidden_size](%token_count, %hidden_size, %normalized, %normalized_q8) : [index, index](index, index, buffer, buffer)
-  kernel.launch @ggml_linear_q6k_q8_1_x4[%token_count, %hidden_size, %vocabulary_size](%token_count, %hidden_size, %vocabulary_size, %normalized_q8, %output_weight, %logits) : [index, index, index](index, index, index, buffer, view<1042944000xi8>, buffer)
+  kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %hidden_size](%token_count, %hidden_size, %normalized_rows, %normalized_q8) : [index, index](index, index, view<[%token_count]x5120xf32>, buffer)
+  %four = index.constant 4 : index
+  %uses_m4 = index.cmp eq, %token_count, %four : index
+  scf.if %uses_m4 {
+    kernel.launch @ggml_linear_q6k_q8_1_x4_m4[%token_count, %hidden_size, %vocabulary_size](%token_count, %hidden_size, %vocabulary_size, %normalized_q8, %output_weight, %logits) : [index, index, index](index, index, index, buffer, view<1042944000xi8>, buffer)
+  } else {
+    kernel.launch @ggml_linear_q6k_q8_1_x4[%token_count, %hidden_size, %vocabulary_size](%token_count, %hidden_size, %vocabulary_size, %normalized_q8, %output_weight, %logits) : [index, index, index](index, index, index, buffer, view<1042944000xi8>, buffer)
+  }
   kernel.launch @qwen38_greedy_argmax_partial_rows_f32[%token_count, %vocabulary_size](%token_count, %vocabulary_size, %logits, %partial_logits, %partial_token_ids) : [index, index](index, index, buffer, buffer, buffer)
-  kernel.launch @qwen38_greedy_argmax_reduce_rows_f32[%token_count, %vocabulary_size](%token_count, %vocabulary_size, %partial_logits, %partial_token_ids, %token_id) : [index, index](index, index, buffer, buffer, buffer)
+  kernel.launch @qwen38_greedy_argmax_reduce_rows_f32[%token_count, %vocabulary_size](%token_count, %vocabulary_size, %partial_logits, %partial_token_ids, %output_rows) : [index, index](index, index, buffer, buffer, view<[%token_count]xi32>)
   command.return
 }
 
@@ -41,7 +51,9 @@ command.program.def @qwen38_output_head(%residual_offset: offset) launch(%parame
   %norm_weight = command.parameter %parameters, "output_norm.weight" : view<5120xf32>
   %residual_row = buffer.view %residual[%residual_offset] : buffer -> view<5120xf32>
   kernel.launch @qwen38_rmsnorm_f32_decode(%epsilon, %residual_row, %norm_weight, %normalized) : (f32, view<5120xf32>, view<5120xf32>, buffer)
-  command.program.launch @qwen38_output_projection_greedy[](%parameters, %normalized, %token_id) : [](buffer, buffer, buffer)
+  %one = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  command.program.launch @qwen38_output_projection_greedy[%one, %origin, %origin](%parameters, %normalized, %token_id) : [index, offset, offset](buffer, buffer, buffer)
   command.return
 }
 
@@ -58,7 +70,9 @@ command.program.def public @qwen38_output_head_prefill_greedy_with_hidden() laun
   %epsilon = scalar.constant 0.000001 : f32
   %norm_weight = command.parameter %parameters, "output_norm.weight" : view<5120xf32>
   kernel.launch @qwen38_rmsnorm_f32_prefill_last(%control, %epsilon, %residual, %norm_weight, %normalized) : (buffer, f32, buffer, view<5120xf32>, buffer)
-  command.program.launch @qwen38_output_projection_greedy[](%parameters, %normalized, %token_id) : [](buffer, buffer, buffer)
+  %one = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  command.program.launch @qwen38_output_projection_greedy[%one, %origin, %origin](%parameters, %normalized, %token_id) : [index, offset, offset](buffer, buffer, buffer)
   command.return
 }
 
@@ -69,26 +83,11 @@ command.program.def public @qwen38_output_head_prefill_greedy_with_hidden() laun
 // rows are visible outside the command program.
 command.program.def public @qwen38_output_head_rows_greedy_depth4() launch(%parameters: buffer, %residual: buffer, %normalized: buffer, %token_ids: buffer) {
   %token_count = index.constant 4 : index
-  %hidden_size = index.constant 5120 : index
-  %vocabulary_size = index.constant 248320 : index
   %epsilon = scalar.constant 0.000001 : f32
   %norm_weight = command.parameter %parameters, "output_norm.weight" : view<5120xf32>
-  %q8_row_bytes = index.constant 5760 : offset
-  %logits_row_bytes = index.constant 993280 : offset
-  %partial_row_bytes = index.constant 244 : offset
-  %normalized_q8_bytes = index.scale %token_count, %q8_row_bytes : index, offset -> offset
-  %logits_bytes = index.scale %token_count, %logits_row_bytes : index, offset -> offset
-  %partial_bytes = index.scale %token_count, %partial_row_bytes : index, offset -> offset
-  %output_weight = command.parameter %parameters, "output.weight" : view<1042944000xi8>
-  %normalized_q8 = buffer.alloca<global> align(256) %normalized_q8_bytes : buffer
-  %logits = buffer.alloca<global> align(256) %logits_bytes : buffer
-  %partial_logits = buffer.alloca<global> align(256) %partial_bytes : buffer
-  %partial_token_ids = buffer.alloca<global> align(256) %partial_bytes : buffer
 
   kernel.launch @qwen38_rmsnorm_f32_prefill[%token_count](%token_count, %epsilon, %residual, %norm_weight, %normalized) : [index](index, f32, buffer, view<5120xf32>, buffer)
-  kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %hidden_size](%token_count, %hidden_size, %normalized, %normalized_q8) : [index, index](index, index, buffer, buffer)
-  kernel.launch @ggml_linear_q6k_q8_1_x4_m4[%token_count, %hidden_size, %vocabulary_size](%token_count, %hidden_size, %vocabulary_size, %normalized_q8, %output_weight, %logits) : [index, index, index](index, index, index, buffer, view<1042944000xi8>, buffer)
-  kernel.launch @qwen38_greedy_argmax_partial_rows_f32[%token_count, %vocabulary_size](%token_count, %vocabulary_size, %logits, %partial_logits, %partial_token_ids) : [index, index](index, index, buffer, buffer, buffer)
-  kernel.launch @qwen38_greedy_argmax_reduce_rows_f32[%token_count, %vocabulary_size](%token_count, %vocabulary_size, %partial_logits, %partial_token_ids, %token_ids) : [index, index](index, index, buffer, buffer, buffer)
+  %origin = index.constant 0 : offset
+  command.program.launch @qwen38_output_projection_greedy[%token_count, %origin, %origin](%parameters, %normalized, %token_ids) : [index, offset, offset](buffer, buffer, buffer)
   command.return
 }

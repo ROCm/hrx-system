@@ -262,6 +262,27 @@ loom_generated_file(
   ARGS
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/qwen_model.loom"
     "--target=vm:core"
+    "--root=@step"
+  INPUTS
+    "qwen_model.loom"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_generated_file(
+  NAME
+    qwen_model_epoch_binary
+  GENERATOR
+    loom::tools::loom-compile
+  OUTPUT
+    "qwen_model_epoch.vm"
+  OUTPUT_FLAG
+    "--output="
+  ARGS
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/qwen_model.loom"
+    "--target=vm:core"
+    "--root=@step"
+    "--root=@epoch"
   INPUTS
     "qwen_model.loom"
 )
@@ -273,6 +294,7 @@ iree_c_embed_data(
     qwen_model_data
   SRCS
     "${CMAKE_CURRENT_BINARY_DIR}/qwen_model.vm"
+    "${CMAKE_CURRENT_BINARY_DIR}/qwen_model_epoch.vm"
   C_FILE_OUTPUT
     "qwen_model_data.c"
   H_FILE_OUTPUT
@@ -332,6 +354,21 @@ loom_cc_library(
     iree::vm::bytecode::module
     loom::target::arch::cmd::program
   PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+loom_cc_binary(
+  NAME
+    qwen_epoch_check
+  SRCS
+    "qwen_epoch_check.c"
+  DEPS
+    ::qwen_model
+    iree::base
+    iree::base::tooling::flags
+    iree::tokenizer
+  TESTONLY
 )
 endif()
 
