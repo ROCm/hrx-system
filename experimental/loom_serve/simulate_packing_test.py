@@ -9,6 +9,7 @@ import unittest
 
 from experimental.loom_serve.agent_trace import (
     COMPOSITION_FORMAT,
+    ClientConfiguration,
     Request,
     Session,
     Trace,
@@ -16,8 +17,14 @@ from experimental.loom_serve.agent_trace import (
 )
 from experimental.loom_serve.simulate_packing import (
     ActiveRequest,
+    EpochCosts,
+    accepted_drafts,
     admit,
     allocate,
+    epoch_cost,
+    expected_progress,
+    plan_epoch,
+    read_costs,
     simulate,
 )
 
@@ -42,6 +49,23 @@ class PackingTest(unittest.TestCase):
     def test_short_tail_redistribution(self):
         self.assertEqual(allocate([0, 0, 1000, 2], 128, "single-pass"), [1, 1, 63, 2])
         self.assertEqual(allocate([0, 0, 1000, 2], 128, "fair-fill"), [1, 1, 124, 2])
+
+    def test_single_pass_selects_smallest_shape_without_changing_grants(self):
+        rows = [
+            ActiveRequest(index, 0, request(count, 1), 0, 0, 0, count, 1, 0)
+            for index, count in enumerate((50, 1))
+        ]
+        plan = plan_epoch(
+            rows,
+            costs=EpochCosts("uniform", dict.fromkeys((32, 64, 128), 10)),
+            capacities=(32, 64, 128),
+            depths=(0,),
+            acceptance=(),
+            capture_bytes=0,
+            policy="single-pass",
+            cohort_policy="fill",
+        )
+        self.assertEqual((plan.grants, plan.capacity), ((50, 1), 64))
 
     def test_small_frontiers_preserve_demand_progress_and_fair_fill(self):
         for size in range(1, 5):
@@ -81,7 +105,9 @@ class PackingTest(unittest.TestCase):
             policy=policy,
             capacities=(4, 8, 128),
             span_capacity=span_capacity,
-            epoch_us=epoch_us,
+            costs=EpochCosts(
+                "test uniform clock", dict.fromkeys((4, 8, 128), epoch_us)
+            ),
             admission=admission,
             max_hold_us=max_hold_us,
             emit_epoch=epochs.append,
@@ -252,6 +278,240 @@ class PackingTest(unittest.TestCase):
         self.assertEqual(result["late_service_spans"], 1)
         self.assertEqual(result["max_hold_overrun_us"], 7)
         self.assertEqual(epochs[1]["spans"][0]["ready_wait_us"], 9)
+
+
+class SpeculativePackingTest(unittest.TestCase):
+    def costs(self, **coefficients):
+        return EpochCosts(
+            "test hypothesis",
+            {4: 10, 8: 10, 32: 10},
+            transition_bytes_per_token=2,
+            **coefficients,
+        )
+
+    def replay(
+        self,
+        workload,
+        *,
+        acceptance=(1, 1, 1),
+        capture_bytes=1024,
+        cohort_policy="fill",
+        costs=None,
+    ):
+        epochs = []
+        result = simulate(
+            workload,
+            policy="fair-fill",
+            capacities=(4, 8, 32),
+            span_capacity=8,
+            costs=costs or self.costs(),
+            depths=(0, 3),
+            acceptance=acceptance,
+            capture_bytes=capture_bytes,
+            cohort_policy=cohort_policy,
+            emit_epoch=epochs.append,
+        )
+        return result, epochs
+
+    def test_all_acceptance_prefixes_and_terminal_cuts_preserve_work(self):
+        # Zero through three matching drafts, including EOS/budget cuts inside
+        # an otherwise fully matching block. Serial decode is the count oracle.
+        for matched in range(4):
+            probabilities = (1,) * matched + (0,) * (3 - matched)
+            for outputs in range(1, 12):
+                workload = trace([request(3, outputs, retained=11)])
+                result, epochs = self.replay(workload, acceptance=probabilities)
+                control = simulate(
+                    workload,
+                    policy="fair-fill",
+                    capacities=(4, 8, 32),
+                    span_capacity=8,
+                    costs=self.costs(),
+                )
+                self.assertEqual(result["prefill_tokens"], 3)
+                self.assertEqual(result["decode_tokens"], outputs - 1)
+                self.assertEqual(result["selected_outputs"], outputs)
+                self.assertEqual(
+                    result["requests"][0]["final_position"],
+                    control["requests"][0]["final_position"],
+                )
+                self.assertEqual(
+                    result["target_input_tokens"] - result["speculative_waste_tokens"],
+                    outputs + 2,
+                )
+                for epoch in epochs:
+                    self.assertEqual(
+                        epoch["target_input_tokens"]
+                        + epoch["packing_gap_tokens"]
+                        + epoch["span_gap_tokens"]
+                        + epoch["causal_gap_tokens"],
+                        32,
+                    )
+                    for span in epoch["spans"]:
+                        if span["kind"] == "decode":
+                            self.assertEqual(span["input_tokens"], 4)
+                            self.assertEqual(
+                                span["committed_inputs"], span["selected_outputs"]
+                            )
+
+    def test_terminal_length_is_not_visible_to_planning(self):
+        def choose(outputs):
+            row = ActiveRequest(0, 0, request(1, outputs), 0, 0, 0, 0, outputs, 10)
+            return plan_epoch(
+                [row],
+                costs=self.costs(),
+                capacities=(4, 8, 32),
+                depths=(0, 3),
+                acceptance=(1, 1, 1),
+                capture_bytes=1024,
+                policy="fair-fill",
+                cohort_policy="cost",
+            )
+
+        self.assertEqual(choose(1), choose(100))
+        result, epochs = self.replay(trace([request(1, 2)]))
+        self.assertEqual(epochs[-1]["target_input_tokens"], 4)
+        self.assertEqual(epochs[-1]["decode_tokens"], 1)
+        self.assertEqual(result["speculative_waste_tokens"], 3)
+
+    def test_capture_pressure_selects_ordinary_progress(self):
+        result, epochs = self.replay(trace([request(1, 7)]), capture_bytes=7)
+        self.assertEqual(result["depth_epochs"], {0: 7})
+        self.assertEqual(result["peak_capture_bytes"], 0)
+        self.assertEqual(result["selected_outputs"], 7)
+        self.assertTrue(all(epoch["capture_bytes"] <= 7 for epoch in epochs))
+
+    def test_serial_costs_include_draft_catchup_and_commit(self):
+        rows = [
+            ActiveRequest(index, 0, request(1, 100), 0, 0, 0, 0, 100, position)
+            for index, position in enumerate((10, 20))
+        ]
+        costs = self.costs(
+            head_fixed_us=2,
+            head_row_us=1,
+            attention_pair_us=0.5,
+            state_span_us=3,
+            draft_round_us=5,
+            draft_token_us=2,
+            catchup_fixed_us=4,
+            catchup_token_us=3,
+            capture_token_us=7,
+            commit_span_us=11,
+            commit_token_us=13,
+        )
+        timing = epoch_cost(costs, rows, (4, 4), 8, (2, 4), True)
+        self.assertEqual(
+            timing,
+            {
+                "target_body_us": 10,
+                "target_head_us": 10,
+                "attention_us": 70,
+                "state_us": 6,
+                "draft_us": 27,
+                "catchup_us": 22,
+                "capture_us": 56,
+                "commit_us": 100,
+            },
+        )
+        result, _ = self.replay(trace([request(5, 6)]), costs=costs, capture_bytes=0)
+        self.assertEqual(result["catchup_us"], 4 * result["epochs"] + 3 * 10)
+        self.assertEqual(result["draft_us"], 0)
+
+    def test_cost_selection_can_reject_deep_and_large_shapes(self):
+        row = ActiveRequest(0, 0, request(1, 100), 0, 0, 0, 0, 100, 10)
+        arguments = dict(
+            rows=[row],
+            capacities=(4, 8, 32),
+            depths=(0, 3),
+            acceptance=(1, 1, 1),
+            capture_bytes=1024,
+            policy="fair-fill",
+            cohort_policy="cost",
+        )
+        self.assertEqual(plan_epoch(costs=self.costs(), **arguments).depth, 3)
+        self.assertEqual(
+            plan_epoch(costs=self.costs(draft_round_us=100), **arguments).depth, 0
+        )
+        row.prefill_remaining = 100
+        costs = EpochCosts("shape hypothesis", {4: 10, 8: 100, 32: 1000})
+        plan = plan_epoch(costs=costs, **arguments)
+        self.assertEqual((plan.capacity, plan.grants), (4, (4,)))
+
+    def test_followup_waits_for_actual_speculative_completion(self):
+        workload = trace([request(1, 6), request(2, 2, delay=7, retained=6)])
+        result, _ = self.replay(workload, costs=self.costs(draft_round_us=2))
+        first, second = result["requests"]
+        self.assertEqual(second["arrival_us"], first["completion_us"] + 7)
+        self.assertEqual((first["final_position"], second["final_position"]), (6, 9))
+
+    def test_conditional_acceptance_expectation(self):
+        self.assertAlmostEqual(expected_progress(4, (0.5, 0.5, 0.5)), 1.875)
+        self.assertEqual(expected_progress(1, ()), 1)
+
+    def test_acceptance_draws_share_prefixes_and_ignore_cohort_order(self):
+        rows = [
+            ActiveRequest(index, 0, request(1, 100), 0, 0, 0, 0, 100, 10)
+            for index in range(16)
+        ]
+        probabilities = (0.7,) * 7
+        outcomes = {
+            row.session: accepted_drafts(row, 8, probabilities, 123) for row in rows
+        }
+        self.assertEqual(
+            outcomes,
+            {
+                row.session: accepted_drafts(row, 8, probabilities, 123)
+                for row in reversed(rows)
+            },
+        )
+        for row in rows:
+            for width in range(1, 9):
+                self.assertEqual(
+                    accepted_drafts(row, width, probabilities, 123),
+                    min(outcomes[row.session], width - 1),
+                )
+
+    def test_known_context_limits_clip_verification_without_peeking_at_eos(self):
+        configuration = ClientConfiguration("test", 8, 8, "off", True, 1, 1)
+        workload = Trace(
+            "loom",
+            "qwen3.8-27b",
+            0,
+            (Session("0" * 64, 0, (request(3, 6),), configuration),),
+        )
+        result, epochs = self.replay(workload)
+        self.assertEqual(result["requests"][0]["final_position"], 8)
+        self.assertEqual(
+            [epoch["spans"][0]["input_tokens"] for epoch in epochs], [3, 4, 1]
+        )
+        invalid = Trace(
+            "loom",
+            "qwen3.8-27b",
+            0,
+            (Session("0" * 64, 0, (request(3, 7),), configuration),),
+        )
+        with self.assertRaisesRegex(ValueError, "context limit"):
+            self.replay(invalid)
+
+    def test_profile_validation_rejects_missing_shapes_and_invalid_costs(self):
+        base = {
+            "format": "loom-epoch-costs-v1",
+            "provenance": "test",
+            "target_us": {"4": 10},
+        }
+        self.assertEqual(read_costs(base, (4,)).target_us, {4: 10})
+        for change in (
+            {"target_us": {}},
+            {"target_us": {"4": 0}},
+            {"target_us": {"4": True}},
+            {"provenance": ""},
+            {"draft_round_us": -1},
+            {"head_row_us": float("nan")},
+            {"transition_bytes_per_token": 0.5},
+            {"misspelled_cost": 1},
+        ):
+            with self.assertRaises(ValueError):
+                read_costs({**base, **change}, (4,))
 
 
 if __name__ == "__main__":
