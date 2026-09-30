@@ -130,14 +130,21 @@ GCR variants also exercise that stream when the backing permits a no-op.
 
 PM4/SDMA batches publish four prepared upload/compute/download graphs with one
 publication per queue. Each graph has separate payload, arguments and progress
-records. SDMA observes one graph's shader completion before uploading the next;
-the next PM4 upload wait therefore also joins the preceding shader. The ordered
-data-acquire case uses that dependency to omit the shader-idle event, preserving
-the target's data-cache actions while reusing already-published immutable code.
-The full-barrier case retains both shader-idle and instruction invalidation.
-Both cases check every graph's output and guards after the final download, then
-join shaders and retire both queues before preparing the second batch. These
-serial device chains qualify host-independent batch advancement, not overlap
+records. With a shared transfer queue, SDMA observes one graph's shader
+completion before uploading the next; the next PM4 upload wait therefore also
+joins the preceding shader. Independent upload and download queues allow
+uploads to advance without waiting for downloads. In that layout, the ordered
+data-acquire case explicitly waits for the preceding shader's completion before
+acquiring data or rebinding compute registers. Both layouts preserve the
+target's data-cache actions and reuse already-published immutable code; their
+full-barrier controls retain shader-idle and instruction invalidation.
+
+Every case snapshots all graph readbacks after the final download, then
+independently joins compute and upload before observing other backing. All
+queues retire before the second batch rewrites inputs. Complete payload and
+guard checks cover each graph and every allocation. These device chains qualify
+host-independent batch advancement with shared or separate transfer queues.
+Queue count alone establishes neither physical engine assignment nor overlap
 between transfer and compute.
 
 The lifecycle cases exercise the same resource helper as the `DISABLED_`

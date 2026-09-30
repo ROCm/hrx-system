@@ -22,6 +22,7 @@ namespace {
 
 enum class PairQuery { kConcrete, kProfile };
 enum class AcquireMode { kFullBarrier, kOrderedData };
+enum class TransferQueues { kShared, kSeparate };
 enum class Site { kHost, kPm4, kSdma };
 enum TransferPhase : size_t { kUpload, kDownload, kTransferPhaseCount };
 enum BackingIndex : size_t {
@@ -256,6 +257,7 @@ class Pm4SdmaRecipeTest : public Pm4DispatchTest {
   void RunCoherentHandoff(
       PairQuery query_kind,
       AcquireMode acquire_mode = AcquireMode::kFullBarrier,
+      TransferQueues transfer_queues = TransferQueues::kShared,
       amdf_cache_operations_t required_sdma_operations = 0) {
     if (required_sdma_operations != 0 &&
         (sdma_family_.format_features &
@@ -411,21 +413,38 @@ class Pm4SdmaRecipeTest : public Pm4DispatchTest {
                 kernel.executable.byte_length);
 
     GpuCommandQueue* pm4_queue = nullptr;
-    GpuCommandQueue* sdma_queue = nullptr;
+    GpuCommandQueue* upload_queue = nullptr;
     ASSERT_NO_FATAL_FAILURE(CreateQueue(&pm4_queue));
-    ASSERT_NO_FATAL_FAILURE(CreateQueue(sdma_family_, &sdma_queue));
+    ASSERT_NO_FATAL_FAILURE(CreateQueue(sdma_family_, &upload_queue));
+    GpuCommandQueue* download_queue = upload_queue;
+    if (transfer_queues == TransferQueues::kSeparate) {
+      ASSERT_NO_FATAL_FAILURE(CreateQueue(sdma_family_, &download_queue));
+      ASSERT_NE(upload_queue->native_handle(), download_queue->native_handle());
+    }
     ASSERT_TRUE(amdf_device_id_is_equal(&pm4_queue->device_id(),
-                                        &sdma_queue->device_id()));
-    ASSERT_NE(pm4_queue->native_handle(), sdma_queue->native_handle());
+                                        &upload_queue->device_id()));
+    ASSERT_TRUE(amdf_device_id_is_equal(&pm4_queue->device_id(),
+                                        &download_queue->device_id()));
+    ASSERT_NE(pm4_queue->native_handle(), upload_queue->native_handle());
+    ASSERT_NE(pm4_queue->native_handle(), download_queue->native_handle());
     ASSERT_GT(pm4_queue->words().size(),
               kEpochCount * kGraphCount * kMaximumPm4WordsPerGraph);
-    ASSERT_GT(sdma_queue->words().size(),
+    ASSERT_GT(upload_queue->words().size(),
+              kEpochCount * kGraphCount * kMaximumSdmaWordsPerGraph);
+    ASSERT_GT(download_queue->words().size(),
               kEpochCount * kGraphCount * kMaximumSdmaWordsPerGraph);
     Pm4CommandWriter pm4(pm4_queue->words().data(), *pm4_profile_);
-    SdmaCommandWriter sdma(sdma_queue->words().data(),
-                           sdma_family_.format_features);
+    SdmaCommandWriter upload(upload_queue->words().data(),
+                             sdma_family_.format_features);
+    SdmaCommandWriter separate_download(download_queue->words().data(),
+                                        sdma_family_.format_features);
+    // Shared transfers append both phases through one writer and one owner.
+    SdmaCommandWriter& download = transfer_queues == TransferQueues::kSeparate
+                                      ? separate_download
+                                      : upload;
     std::array<size_t, kEpochCount> pm4_frontiers;
-    std::array<size_t, kEpochCount> sdma_frontiers;
+    std::array<std::array<size_t, kTransferPhaseCount>, kEpochCount>
+        transfer_frontiers;
     for (uint32_t epoch = 0; epoch < kEpochCount; ++epoch) {
       for (uint32_t graph = 0; graph < kGraphCount; ++graph) {
         const uint32_t generation = epoch * kGraphCount + graph + 1;
@@ -437,10 +456,19 @@ class Pm4SdmaRecipeTest : public Pm4DispatchTest {
           // Queried GLOBAL data acquire and cold code publication.
           pm4.SystemBarrier();
         } else {
-          // SDMA reaches this upload marker only after observing the previous
-          // graph's shader completion and downloading its output. Between
-          // epochs, the host also joins both queues before rewriting inputs.
-          // Code remains immutable after its initial publication.
+          if (transfer_queues == TransferQueues::kSeparate) {
+            // Upload can run ahead of compute. Its marker does not join the
+            // previous shader, so wait for that shader's confirmed EOP before
+            // acquiring data or changing compute registers.
+            const uint32_t previous_graph =
+                (graph + kGraphCount - 1) % kGraphCount;
+            pm4.WaitMemory32(
+                control.device_address + previous_graph * 4096 + 64,
+                generation - 1);
+          }
+          // Shared SDMA reaches U_i only after observing C_(i-1). Separate
+          // transfers use the explicit join above. Code remains immutable
+          // after its initial publication in both layouts.
           pm4.AcquireFromSystem();
         }
         pm4.BindCompute(program, arguments.device_address + page_offset);
@@ -449,38 +477,43 @@ class Pm4SdmaRecipeTest : public Pm4DispatchTest {
         pm4.PadToEightWords();
         if ((sdma_operations[kUpload] &
              AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM) != 0) {
-          sdma.AcquireFromSystem();
+          upload.AcquireFromSystem();
         }
-        sdma.CopyLinear(source.device_address + payload_offset,
-                        input.device_address + payload_offset,
-                        kGridSize * sizeof(uint32_t));
+        upload.CopyLinear(source.device_address + payload_offset,
+                          input.device_address + payload_offset,
+                          kGridSize * sizeof(uint32_t));
         if ((sdma_operations[kUpload] &
              AMDF_CACHE_OPERATIONS_RELEASE_TO_SYSTEM) != 0) {
-          sdma.ReleaseToSystem();
+          upload.ReleaseToSystem();
         }
-        sdma.Fence32(progress_address, generation);
-        sdma.WaitMemory32(progress_address + 64, generation);
+        upload.Fence32(progress_address, generation);
+        download.WaitMemory32(progress_address + 64, generation);
         if ((sdma_operations[kDownload] &
              AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM) != 0) {
-          sdma.AcquireFromSystem();
+          download.AcquireFromSystem();
         }
-        sdma.CopyLinear(output.device_address + payload_offset,
-                        readback.device_address + payload_offset,
-                        kGridSize * sizeof(uint32_t));
+        download.CopyLinear(output.device_address + payload_offset,
+                            readback.device_address + payload_offset,
+                            kGridSize * sizeof(uint32_t));
         if ((sdma_operations[kDownload] &
              AMDF_CACHE_OPERATIONS_RELEASE_TO_SYSTEM) != 0) {
-          sdma.ReleaseToSystem();
+          download.ReleaseToSystem();
         }
-        sdma.Fence32(progress_address + 128, generation);
+        download.Fence32(progress_address + 128, generation);
         ASSERT_LE(pm4.word_count(), generation * kMaximumPm4WordsPerGraph);
-        ASSERT_GE(sdma.word_count(), generation * kMinimumSdmaWordsPerGraph);
-        ASSERT_LE(sdma.word_count(), generation * kMaximumSdmaWordsPerGraph);
+        const size_t transfer_word_count =
+            upload.word_count() + (transfer_queues == TransferQueues::kSeparate
+                                       ? download.word_count()
+                                       : 0);
+        ASSERT_GE(transfer_word_count, generation * kMinimumSdmaWordsPerGraph);
+        ASSERT_LE(transfer_word_count, generation * kMaximumSdmaWordsPerGraph);
       }
       pm4_frontiers[epoch] = pm4.word_count();
-      sdma_frontiers[epoch] = sdma.word_count();
+      transfer_frontiers[epoch] = {upload.word_count(), download.word_count()};
     }
-    // Both complete streams are resident before the first publication. PM4's
-    // index uses DWORDs; SDMA's index uses bytes. Neither stream wraps.
+    // All streams are resident before publication. PM4's native index uses
+    // DWORDs; SDMA's uses bytes. The command owners publish word frontiers.
+    // No stream wraps or exhausts its storage.
     RecordProperty("pm4_sdma_pm4_family", family_.ordinal);
     RecordProperty("pm4_sdma_sdma_family", sdma_family_.ordinal);
     RecordProperty("pm4_sdma_sdma_format_features",
@@ -488,7 +521,12 @@ class Pm4SdmaRecipeTest : public Pm4DispatchTest {
     RecordProperty("pm4_sdma_pm4_capacity_dwords",
                    std::to_string(pm4_queue->words().size()));
     RecordProperty("pm4_sdma_sdma_capacity_bytes",
-                   std::to_string(sdma_queue->words().size_bytes()));
+                   std::to_string(upload_queue->words().size_bytes()));
+    RecordProperty("pm4_sdma_download_capacity_bytes",
+                   std::to_string(download_queue->words().size_bytes()));
+    RecordProperty(
+        "pm4_sdma_transfer_queues",
+        transfer_queues == TransferQueues::kShared ? "shared" : "separate");
     RecordProperty("pm4_sdma_payload_byte_offset", 64);
     RecordProperty("pm4_sdma_copy_byte_length", kGridSize * sizeof(uint32_t));
     RecordProperty("pm4_sdma_grid_size", kGridSize);
@@ -498,7 +536,10 @@ class Pm4SdmaRecipeTest : public Pm4DispatchTest {
     RecordProperty("pm4_sdma_host_cacheability",
                    AMDF_HOST_CACHEABILITY_WRITE_BACK);
     RecordProperty("pm4_sdma_control_offsets", "0,64,128");
-    RecordProperty("pm4_sdma_publication_order", "pm4,sdma");
+    RecordProperty("pm4_sdma_publication_order",
+                   transfer_queues == TransferQueues::kShared
+                       ? "pm4,sdma"
+                       : "pm4,download,upload");
 
     std::array<std::array<uint32_t, kGraphCount * kPayloadWordCount>, 4>
         expected;
@@ -564,10 +605,14 @@ class Pm4SdmaRecipeTest : public Pm4DispatchTest {
       std::memcpy(arguments.host.pointer, expected_arguments.data(),
                   sizeof(expected_arguments));
       const uint64_t pm4_frontier = pm4_frontiers[epoch];
-      const uint64_t sdma_frontier = sdma_frontiers[epoch];
       ASSERT_NO_FATAL_FAILURE(pm4_queue->Publish(api_, gpu_api_, pm4_frontier));
-      ASSERT_NO_FATAL_FAILURE(
-          sdma_queue->Publish(api_, gpu_api_, sdma_frontier));
+      // Arm both consumers before starting the independent uploader.
+      if (transfer_queues == TransferQueues::kSeparate) {
+        ASSERT_NO_FATAL_FAILURE(download_queue->Publish(
+            api_, gpu_api_, transfer_frontiers[epoch][kDownload]));
+      }
+      ASSERT_NO_FATAL_FAILURE(upload_queue->Publish(
+          api_, gpu_api_, transfer_frontiers[epoch][kUpload]));
       const auto last_control =
           reinterpret_cast<uintptr_t>(control.host.pointer) +
           (kGraphCount - 1) * 4096;
@@ -580,6 +625,10 @@ class Pm4SdmaRecipeTest : public Pm4DispatchTest {
       // Independently join the shader before reading its other owners, even if
       // the dependency under test allowed SDMA to publish D prematurely.
       GpuWaitEqual<uint32_t>(last_control + 64, last_generation);
+      // Upload has its own owner in the separate layout. Independently join
+      // its final write before observing input backing, even if a dependency
+      // under test allowed compute or download to advance prematurely.
+      GpuWaitEqual<uint32_t>(last_control, last_generation);
       for (size_t owner = kSource; owner <= kOutput; ++owner) {
         std::memcpy(observed[owner].data(),
                     backings[owner].memory->host.pointer,
@@ -608,10 +657,13 @@ class Pm4SdmaRecipeTest : public Pm4DispatchTest {
         EXPECT_EQ(observed_code[word], expected_code[word])
             << "code word=" << word;
       }
-      // Both retirement calls run after every nonfatal oracle, then any failure
+      // All retirement calls run after every nonfatal oracle, then any failure
       // stops the next CPU rewrite. Native teardown failure retains all owners.
       EXPECT_NO_FATAL_FAILURE(pm4_queue->WaitRetired(api_));
-      EXPECT_NO_FATAL_FAILURE(sdma_queue->WaitRetired(api_));
+      EXPECT_NO_FATAL_FAILURE(upload_queue->WaitRetired(api_));
+      if (transfer_queues == TransferQueues::kSeparate) {
+        EXPECT_NO_FATAL_FAILURE(download_queue->WaitRetired(api_));
+      }
       if (HasFailure()) {
         return;
       }
@@ -628,8 +680,10 @@ class Pm4SdmaRecipeTest : public Pm4DispatchTest {
                        observed_control[graph * kPageWordCount + 32]);
       }
       RecordProperty(prefix + "_pm4_frontier", std::to_string(pm4_frontier));
-      RecordProperty(prefix + "_sdma_word_frontier",
-                     std::to_string(sdma_frontier));
+      RecordProperty(prefix + "_upload_word_frontier",
+                     std::to_string(transfer_frontiers[epoch][kUpload]));
+      RecordProperty(prefix + "_download_word_frontier",
+                     std::to_string(transfer_frontiers[epoch][kDownload]));
     }
     RecordProperty("pm4_sdma_completed_epochs", kEpochCount);
     RecordProperty("pm4_sdma_graphs_per_epoch", kGraphCount);
@@ -639,7 +693,10 @@ class Pm4SdmaRecipeTest : public Pm4DispatchTest {
     RecordProperty("pm4_sdma_pm4_command_dwords",
                    std::to_string(pm4.word_count()));
     RecordProperty("pm4_sdma_sdma_command_dwords",
-                   std::to_string(sdma.word_count()));
+                   std::to_string(upload.word_count() +
+                                  (transfer_queues == TransferQueues::kSeparate
+                                       ? download.word_count()
+                                       : 0)));
   }
 
   // Transfer family selected passively on the same endpoint as compute.
@@ -662,8 +719,19 @@ TEST_F(Pm4SdmaRecipeTest, OrderedDataAcquireBatchedUploadDispatchDownload) {
   RunCoherentHandoff<4>(PairQuery::kConcrete, AcquireMode::kOrderedData);
 }
 
+TEST_F(Pm4SdmaRecipeTest, IndependentUploadDispatchDownloadQueues) {
+  RunCoherentHandoff<4>(PairQuery::kConcrete, AcquireMode::kFullBarrier,
+                        TransferQueues::kSeparate);
+}
+
+TEST_F(Pm4SdmaRecipeTest, OrderedDataAcquireIndependentTransferQueues) {
+  RunCoherentHandoff<4>(PairQuery::kConcrete, AcquireMode::kOrderedData,
+                        TransferQueues::kSeparate);
+}
+
 TEST_F(Pm4SdmaRecipeTest, UserGcrUploadDispatchDownload) {
   RunCoherentHandoff(PairQuery::kConcrete, AcquireMode::kFullBarrier,
+                     TransferQueues::kShared,
                      AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM |
                          AMDF_CACHE_OPERATIONS_RELEASE_TO_SYSTEM);
 }
