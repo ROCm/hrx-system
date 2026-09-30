@@ -287,3 +287,37 @@ numbers do not describe agent latency. Interleave baseline/candidate runs
 (ABABA) under the benchmark lock, record hardware load/power/temperature, and
 compare generated output as well as timing. A thermally constrained or busy
 host permits qualified differentials, not a clean absolute throughput claim.
+
+### Recording agent workloads
+
+Give each pi client a distinct `--session /private/recordings/agent-N.jsonl`
+and preserve that file across tool and user turns. The settings above disable
+compaction and retries, so each recording contains the actual sequential model
+invocations. Raw recordings contain prompts, file contents, and tool arguments;
+they belong in private local storage, not source control. Record clients on the
+same host or with synchronized wall clocks.
+
+After those clients finish, export their workload counts:
+
+```sh
+build_tools/bin/iree-bazel-run //experimental/loom_serve:agent_trace -- \
+  --output=/private/recordings/workload.json \
+  /private/recordings/agent-0.jsonl /private/recordings/agent-1.jsonl
+```
+
+The exporter reads linear pi v3 `openai-completions` histories from one model.
+It strips message content, tools, paths, and working directories. The result
+retains source hashes, model identity, common clock origin, first-arrival
+offsets, uncached input counts (including cache writes), retained prefix counts,
+selected output counts, observed response durations, and client delays between
+requests. It rejects branches, compaction, failed/incomplete turns, duplicate
+recordings, and overlapping/backwards request clocks instead of approximating
+them. Output files are created exclusively to protect earlier evidence.
+
+The inner assistant timestamp is client invocation start; the outer session
+entry timestamp is completed-message persistence. Their difference includes
+transport and client overhead, not just GPU work. The next invocation depends
+on the preceding completion plus its recorded client delay. This dependency is
+what a closed-loop scheduler replay must preserve when changing model speed.
+Token lengths and recorded cache outcomes are fixed evidence; these files do
+not expose server backpressure, cancellation timing, or cache-eviction policy.

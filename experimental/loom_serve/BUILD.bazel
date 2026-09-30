@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
 load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_binary", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with", "loom_generated_file", "loom_generated_file_family")
@@ -12,6 +13,23 @@ package(
     default_visibility = ["//visibility:private"],
     features = ["layering_check"],
     licenses = ["notice"],
+)
+
+py_library(
+    name = "agent_trace_lib",
+    srcs = ["agent_trace.py"],
+)
+
+py_binary(
+    name = "agent_trace",
+    srcs = ["agent_trace.py"],
+)
+
+py_test(
+    name = "agent_trace_test",
+    size = "small",
+    srcs = ["agent_trace_test.py"],
+    deps = [":agent_trace_lib"],
 )
 
 loom_cc_library(
