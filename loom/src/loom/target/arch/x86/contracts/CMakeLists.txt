@@ -113,4 +113,15 @@ loom_cc_library(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_X86)
+loom_check_test_suite(
+  NAME
+    loom_check_file_test
+  SRCS
+    "test/floating_reduction.loom-test"
+  TEST_NAME_PREFIX_TO_STRIP
+    "test/"
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

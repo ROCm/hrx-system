@@ -73,3 +73,18 @@ low.func.def target<x86.avx512.core>(@target) @wide_lanes(%values: reg<x86.xmm>,
   vshufpd xmm4, xmm1, xmm0, 2
   vshufpd xmm0, xmm0, xmm1, 0
   ret
+
+// ====
+
+x86.target<avx2> @target
+
+low.func.def target<x86.avx2.core>(@target) @wide_lanes(%values: reg<x86.ymm>) -> (reg<x86.xmm>, reg<x86.xmm>) asm {
+  %low_half = vextractf128.xmm %values, 0
+  %high_half = vextractf128.xmm %values, 1
+  return %low_half, %high_half
+}
+
+// ----
+  vextractf128 xmm1, ymm0, 0
+  vextractf128 xmm0, ymm0, 1
+  ret

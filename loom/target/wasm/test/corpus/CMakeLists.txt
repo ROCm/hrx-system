@@ -641,6 +641,10 @@ loom_corpus_build(
     "numeric/vector/packed_selection.loom"
     "@select_packed_words"
     "WASM/001"
+    "loom::target::wasm::simd128"
+    "numeric/vector/reductions.loom"
+    "@vector_float_reductions"
+    "TARGET/001"
   ALL_ROOTS_XFAIL
     "loom::target::wasm::simd128"
     "control/loop/vector_recurrence.loom"

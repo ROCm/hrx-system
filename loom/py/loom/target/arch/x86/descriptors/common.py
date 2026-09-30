@@ -311,7 +311,7 @@ _LANE_I32X4_IMMEDIATE = Immediate(
     unsigned_max=3,
 )
 
-_LANE_I64X2_IMMEDIATE = Immediate(
+_TWO_LANE_IMMEDIATE = Immediate(
     "lane",
     ImmediateKind.UNSIGNED,
     bit_width=8,

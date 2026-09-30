@@ -154,11 +154,13 @@ func.def @f32x4_shuffle_reduce(%v: vector<4xf32>, %init: f32) -> (f32) {
 // ----
 low.func.def target<x86.avx512.core> abi(object_function) @f32x4_shuffle_reduce(%v: reg<x86.xmm>, %init: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %shuffled = vpermilps.xmm %v, 39
-  %9 = vpermilps.xmm %shuffled, 78
-  %10 = vaddps.xmm %shuffled, %9
-  %11 = vpermilps.xmm %10, 177
-  %12 = vaddps.xmm %10, %11
-  %sum = vaddss.xmm %init, %12
+  %9 = vaddss.xmm %init, %shuffled
+  %10 = vpermilps.xmm %shuffled, 1
+  %11 = vaddss.xmm %9, %10
+  %12 = vpermilps.xmm %shuffled, 2
+  %13 = vaddss.xmm %11, %12
+  %14 = vpermilps.xmm %shuffled, 3
+  %sum = vaddss.xmm %13, %14
   return %sum
 }
 

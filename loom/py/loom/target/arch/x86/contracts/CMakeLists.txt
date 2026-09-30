@@ -16,6 +16,7 @@ iree_py_library(
     "__init__.py"
     "avx2.py"
     "avx512.py"
+    "floating_reduction.py"
     "integer_division.py"
     "memory.py"
     "packed_dot.py"
