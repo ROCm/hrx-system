@@ -427,12 +427,11 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
     const loom_target_low_legality_provider_list_t* legality_provider_list =
         loom_low_pass_capability_legality_provider_list(low_capability);
     loom_value_fact_table_t* fact_table = NULL;
-    loom_pass_value_fact_scope_t fact_scope =
-        loom_pass_value_fact_scope_function_for_target(selection->func,
-                                                       selection->target_facts);
-    fact_scope.kind = LOOM_PASS_VALUE_FACT_SCOPE_CONDITIONED_FUNCTION;
-    status =
-        loom_pass_value_facts_acquire(pass, module, fact_scope, &fact_table);
+    status = loom_pass_value_facts_acquire(
+        pass, module,
+        loom_pass_value_fact_scope_conditioned_function_for_target(
+            selection->func, selection->target_facts),
+        &fact_table);
     if (!iree_status_is_ok(status)) {
       break;
     }

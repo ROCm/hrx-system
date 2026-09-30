@@ -212,7 +212,7 @@ static iree_status_t loom_scf_pipeline_resolve_facts(
   loom_value_fact_table_t* facts = NULL;
   IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
       pass, module,
-      loom_pass_value_fact_scope_function_for_target(
+      loom_pass_value_fact_scope_conditioned_function_for_target(
           function,
           loom_target_function_version_target_facts(pass->function_version)),
       &facts));

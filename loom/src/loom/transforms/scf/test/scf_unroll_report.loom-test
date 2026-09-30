@@ -149,3 +149,35 @@ func.def @interleaved_dynamic_lower_stripmine_tail(%lane0: index) {
 CHECK: *"changed":true,*
 CHECK: *"statistics":{"loops-unrolled":1,"iterations-materialized":2,"policies-cleared":0}*
 CHECK: *{"category":"scf-unroll","outcome":"stripmined","op":"scf.for","policy":"factor","schedule":"interleaved","unroll_factor":2,"step":64,"tail_strategy":"tail_loop","trip_count_state":"exact","trip_count":3,"lower_bound_kind":"dynamic",*"lower_range_min":0,"lower_range_max":63}*
+
+// ====
+// RUN: with-checks pass-report unroll-scf-for
+
+// The successful outer condition makes the derived full-tile bound exact.
+// Bare unroll can materialize the tile without a redundant body assumption.
+func.def @conditioned_full_tile_unroll(%input: view<8xi32>, %initial: i32, %remaining: index) -> (index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %tile_size = index.constant 8 : index
+  %terminal = scf.while(%before_remaining = %remaining : index) -> (index) {
+    %has_full_tile = index.cmp sge, %before_remaining, %tile_size : index
+    scf.condition %has_full_tile, %before_remaining : i1, index
+  } do(%active_remaining: index) {
+    %tile_end = index.min %active_remaining, %tile_size : index
+    %sum = scf.for %i = [%begin to %tile_end step %step](%acc = %initial : i32) -> (i32) unroll schedule(recurrence) {
+      %value = view.load %input[%i] : view<8xi32> -> i32
+      %collective = test.convergent %value : i32
+      %next = scalar.addi %acc, %collective : i32
+      scf.yield %next : i32
+    }
+    test.use %sum : i32
+    %next_remaining = index.sub %active_remaining, %tile_size : index
+    scf.yield %next_remaining : index
+  }
+  func.return %terminal : index
+}
+
+// ----
+CHECK: *"changed":true,*
+CHECK: *"statistics":{"loops-unrolled":1,"iterations-materialized":8,"policies-cleared":0}*
+CHECK: *{"category":"scf-unroll","outcome":"unrolled","op":"scf.for","policy":"bare","schedule":"recurrence","trip_count":8,"step":1,"lower_bound_kind":"static","lower":0}*

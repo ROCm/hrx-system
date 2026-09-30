@@ -107,6 +107,16 @@ loom_pass_value_fact_scope_function_for_target(
   return scope;
 }
 
+static inline loom_pass_value_fact_scope_t
+loom_pass_value_fact_scope_conditioned_function_for_target(
+    loom_func_like_t function, const loom_target_facts_t* target_facts) {
+  loom_pass_value_fact_scope_t scope = {LOOM_PASS_VALUE_FACT_SCOPE_NONE};
+  scope.kind = LOOM_PASS_VALUE_FACT_SCOPE_CONDITIONED_FUNCTION;
+  scope.function = function;
+  scope.target_facts = target_facts;
+  return scope;
+}
+
 static inline loom_pass_value_fact_scope_t loom_pass_value_fact_scope_region(
     loom_func_like_t function, loom_region_t* region, loom_op_t* parent_op) {
   loom_pass_value_fact_scope_t scope = {LOOM_PASS_VALUE_FACT_SCOPE_NONE};

@@ -54,6 +54,52 @@ collective and update as its consumer. The
 [collective participation contract](../guide/functions-and-control.md#pipeline-reads-ahead-of-ordered-computation)
 explains this shape and its diagnostics.
 
+### Derive full tiles from a ragged loop
+
+A dynamic work count can still expose fixed collective tiles. Test for one
+complete tile in an outer `scf.while`, forward the checked count into the body,
+and derive the inner bound from that value. On the successful edge below,
+`%active_remaining` is at least `%tile_size`, so `%tile_end` is exactly eight.
+The inner loop therefore has the fixed participation required for pipelining
+the subgroup reduction, and bare `unroll` can materialize all eight rows. No
+duplicate `index.assume` is needed in the body.
+
+```loom
+template.decl @guide.sum_full_tiles(%values: view<63x32xf32>, %lane: index, %count: index, %initial: f32) -> (index, index, f32)
+
+template.def<@guide.sum_full_tiles> @sum_full_tiles_impl(%values: view<63x32xf32>, %lane: index, %count: index, %initial: f32) -> (index, index, f32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %tile_size = index.constant 8 : index
+  %depth = index.constant 3 : index
+  %row = index.constant 0 : index
+  %remaining = index.assume %count [range(%count, 0, 63)] : index
+  %final_row, %tail_count, %full_sum = scf.while(%before_row = %row : index, %before_remaining = %remaining : index, %before_sum = %initial : f32) -> (index, index, f32) {
+    %has_full_tile = index.cmp sge, %before_remaining, %tile_size : index
+    scf.condition %has_full_tile, %before_row, %before_remaining, %before_sum : i1, index, index, f32
+  } do(%active_row: index, %active_remaining: index, %active_sum: f32) {
+    %tile_end = index.min %active_remaining, %tile_size : index
+    %next_sum = scf.for %tile_row = [%begin to %tile_end step %step](%sum = %active_sum : f32) -> (f32) pipeline(%depth) unroll schedule(recurrence) {
+      %source_row = index.add %active_row, %tile_row : index
+      %value = view.load %values[%source_row, %lane] : view<63x32xf32> -> f32
+      %row_sum = kernel.subgroup.reduce<addf> %value : f32
+      %updated = scalar.addf %sum, %row_sum : f32
+      scf.yield %updated : f32
+    }
+    %next_row = index.add %active_row, %tile_size : index
+    %next_remaining = index.sub %active_remaining, %tile_size : index
+    scf.yield %next_row, %next_remaining, %next_sum : index, index, f32
+  }
+  template.return %final_row, %tail_count, %full_sum : index, index, f32
+}
+```
+
+The outer loop remains sequential; only its annotated inner `scf.for` is
+scheduled. `%count` must be uniform across the subgroup because it controls
+whether participants reach the reduction. The returned `%tail_count` supports
+a separate fixed-width guarded tile or serial cleanup for the final partial
+tile.
+
 ## Read ahead across workgroup staging
 
 A tiled kernel can issue future global loads while the current tile publishes

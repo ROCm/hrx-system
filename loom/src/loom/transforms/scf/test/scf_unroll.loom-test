@@ -1494,3 +1494,27 @@ func.def @bare_unroll_dynamic_trip_count_rejected(%end: index) {
   }
   func.return
 }
+
+// ====
+
+// A disjunctive continuation does not prove the full-tile comparison and
+// cannot turn a dynamic bare unroll into a fixed schedule.
+func.def @disjunctive_condition_does_not_prove_unroll(%remaining: index, %other_reason: i1) -> (index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %tile_size = index.constant 8 : index
+  %terminal = scf.while(%before_remaining = %remaining : index) -> (index) {
+    %has_full_tile = index.cmp sge, %before_remaining, %tile_size : index
+    %continue = scalar.ori %has_full_tile, %other_reason : i1
+    scf.condition %continue, %before_remaining : i1, index
+  } do(%active_remaining: index) {
+    %tile_end = index.min %active_remaining, %tile_size : index
+    // ERROR@+1: STRUCTURE/014 {attr_name="unroll", expected_constraint="exact static trip count"}
+    scf.for %i = [%begin to %tile_end step %step] unroll {
+      test.use %i : index
+    }
+    %next_remaining = index.sub %active_remaining, %tile_size : index
+    scf.yield %next_remaining : index
+  }
+  func.return %terminal : index
+}

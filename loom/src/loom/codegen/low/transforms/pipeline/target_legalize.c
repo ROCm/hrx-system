@@ -1780,10 +1780,11 @@ static iree_status_t loom_low_target_legalize_function(
   uint32_t final_error_count = 0;
   if (iree_status_is_ok(status) && state.preflight_error_count == 0 &&
       pass_state->verify_source_legality && is_source_function) {
-    loom_pass_value_fact_scope_t final_scope = fact_scope;
-    final_scope.kind = LOOM_PASS_VALUE_FACT_SCOPE_CONDITIONED_FUNCTION;
-    status =
-        loom_pass_value_facts_acquire(pass, module, final_scope, &fact_table);
+    status = loom_pass_value_facts_acquire(
+        pass, module,
+        loom_pass_value_fact_scope_conditioned_function_for_target(
+            selection->func, selection->target_facts),
+        &fact_table);
     if (iree_status_is_ok(status)) {
       status = loom_low_target_legalize_verify_final(
           module, &state, pass_state, fact_table, &final_error_count);

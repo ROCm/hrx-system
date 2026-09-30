@@ -191,6 +191,43 @@ CHECK: *{"category":"scf-pipeline-stage","loop":0,"position":1,"op":"scf.if","pa
 CHECK: *{"category":"scf-pipeline-stage","loop":0,"position":1,"op":"scf.if","partition":"guarded","stage":"consumer","iteration_lookahead":0}*
 
 // ====
+// RUN: with-checks pass-report pipeline-scf-for
+
+// A ragged outer loop enters its body only while a complete tile remains.
+// Conditioned facts make the derived tile bound exact, preserving collective
+// participation without an authored assumption in the body.
+func.def @conditioned_full_tile_collective(%input: view<8xi32>, %initial: i32, %remaining: index) -> (index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %depth = index.constant 2 : index
+  %tile_size = index.constant 8 : index
+  %terminal = scf.while(%before_remaining = %remaining : index) -> (index) {
+    %has_full_tile = index.cmp sge, %before_remaining, %tile_size : index
+    scf.condition %has_full_tile, %before_remaining : i1, index
+  } do(%active_remaining: index) {
+    %tile_end = index.min %active_remaining, %tile_size : index
+    %sum = scf.for %i = [%begin to %tile_end step %step](%acc = %initial : i32) -> (i32) pipeline(%depth) {
+      %value = view.load %input[%i] : view<8xi32> -> i32
+      %collective = test.convergent %value : i32
+      %next = scalar.addi %acc, %collective : i32
+      scf.yield %next : i32
+    }
+    test.use %sum : i32
+    %next_remaining = index.sub %active_remaining, %tile_size : index
+    scf.yield %next_remaining : index
+  }
+  func.return %terminal : index
+}
+
+// ----
+CHECK: *"changed":true,*
+CHECK: *"statistics":{"loops-pipelined":1,"policies-cleared":0}*
+CHECK: *{"category":"scf-pipeline","loop":0,"outcome":"pipelined","schedule":"read_ahead","depth":2,"queue_records":1,"values_per_record":1,"read_count":1}*
+CHECK: *{"category":"scf-pipeline-stage","loop":0,"position":0,"op":"view.load","stage":"producer","iteration_lookahead":1}*
+CHECK: *{"category":"scf-pipeline-stage","loop":0,"position":1,"op":"test.convergent","stage":"consumer","iteration_lookahead":0}*
+CHECK: *{"category":"scf-pipeline-stage","loop":0,"position":2,"op":"scalar.addi","stage":"consumer","iteration_lookahead":0}*
+
+// ====
 
 // Independent guarded updates retain separate branch partitions in one linear
 // source schedule.
