@@ -1,0 +1,77 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+kernel.decl @qwen38_output_normalize_spans(%output_capacity: index) launch(%epoch: buffer, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_rmsnorm_f32_decode() launch(%epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) launch(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
+kernel.decl @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count: index, %input_size: index, %output_size: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @ggml_linear_q6k_q8_1_x4_m4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count: index, %input_size: index, %output_size: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.def @selected_output_metadata() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%count: i32, %epoch: buffer) {
+  %origin = index.constant 0 : offset
+  %metadata = buffer.view %epoch[%origin] : buffer -> view<387xi32>
+  view.store %count, %metadata[2] : i32, view<387xi32>
+  %row0 = scalar.constant 31 : i32
+  %row1 = scalar.constant 7 : i32
+  %row2 = scalar.constant 0 : i32
+  view.store %row0, %metadata[323] : i32, view<387xi32>
+  view.store %row1, %metadata[324] : i32, view<387xi32>
+  view.store %row2, %metadata[325] : i32, view<387xi32>
+  kernel.return
+}
+
+check.case public @selected_output_rows {
+  %four = check.literal value(4) : index
+  %three = check.literal value(3) : i32
+  %none = check.literal value(0) : i32
+  %epsilon = check.literal value(0.000001) : f32
+  %epoch = check.generate.fill value(-1) : tensor<387xi32>
+  %input_seed = check.literal value(710) : i64
+  %weight_seed = check.literal value(711) : i64
+  %input = check.generate.random.uniform seed(%input_seed) range(-1.0 to 1.0) : tensor<512x5120xf32>
+  %weight = check.generate.random.uniform seed(%weight_seed) range(0.5 to 1.5) : tensor<5120xf32>
+  %actual = check.generate.fill value(17.0) : tensor<4x5120xf32>
+  %cleared = check.generate.fill value(17.0) : tensor<4x5120xf32>
+  %expected = check.generate.fill value(0.0) : tensor<4x5120xf32>
+  %zero = check.generate.fill value(0.0) : tensor<4x5120xf32>
+  %input0 = check.tensor.view %input offset(634880) : tensor<512x5120xf32> -> tensor<5120xf32>
+  %input1 = check.tensor.view %input offset(143360) : tensor<512x5120xf32> -> tensor<5120xf32>
+  %input2 = check.tensor.view %input offset(0) : tensor<512x5120xf32> -> tensor<5120xf32>
+  %output0 = check.tensor.view %expected offset(0) : tensor<4x5120xf32> -> tensor<5120xf32>
+  %output1 = check.tensor.view %expected offset(20480) : tensor<4x5120xf32> -> tensor<5120xf32>
+  %output2 = check.tensor.view %expected offset(40960) : tensor<4x5120xf32> -> tensor<5120xf32>
+  kernel.launch @selected_output_metadata(%three, %epoch) : (i32, tensor<387xi32>)
+  kernel.launch @qwen38_output_normalize_spans[%four](%epoch, %epsilon, %input, %weight, %actual) : [index](tensor<387xi32>, f32, tensor<512x5120xf32>, tensor<5120xf32>, tensor<4x5120xf32>)
+  kernel.launch @qwen38_rmsnorm_f32_decode(%epsilon, %input0, %weight, %output0) : (f32, tensor<5120xf32>, tensor<5120xf32>, tensor<5120xf32>)
+  kernel.launch @qwen38_rmsnorm_f32_decode(%epsilon, %input1, %weight, %output1) : (f32, tensor<5120xf32>, tensor<5120xf32>, tensor<5120xf32>)
+  kernel.launch @qwen38_rmsnorm_f32_decode(%epsilon, %input2, %weight, %output2) : (f32, tensor<5120xf32>, tensor<5120xf32>, tensor<5120xf32>)
+  check.expect.equal actual(%actual) expected(%expected) : tensor<4x5120xf32>
+  kernel.launch @selected_output_metadata(%none, %epoch) : (i32, tensor<387xi32>)
+  kernel.launch @qwen38_output_normalize_spans[%four](%epoch, %epsilon, %input, %weight, %cleared) : [index](tensor<387xi32>, f32, tensor<512x5120xf32>, tensor<5120xf32>, tensor<4x5120xf32>)
+  check.expect.equal actual(%cleared) expected(%zero) : tensor<4x5120xf32>
+  check.return
+}
+
+// Distinct activation rows at the model's real hidden width catch cross-row
+// reuse errors; nine vocabulary rows include an output workgroup tail.
+check.case public @selected_output_projection {
+  %four = check.literal value(4) : index
+  %hidden = check.literal value(5120) : index
+  %vocabulary = check.literal value(9) : index
+  %seed = check.param.seed base(712) count(3) name("seed") : i64
+  %input = check.generate.random.uniform seed(%seed) range(-0.5 to 0.5) : tensor<4x5120xf32>
+  %q8 = check.generate.fill value(0) : tensor<4x5760xi8>
+  %weights = check.generate.fill value(-86) : tensor<9x20x210xi8>
+  %actual = check.generate.fill value(17.0) : tensor<4x9xf32>
+  %expected = check.generate.fill value(0.0) : tensor<4x9xf32>
+  kernel.launch @ggml_quantize_q8_1_x4_f32[%four, %hidden](%four, %hidden, %input, %q8) : [index, index](index, index, tensor<4x5120xf32>, tensor<4x5760xi8>)
+  kernel.launch @ggml_linear_q6k_q8_1_x4[%four, %hidden, %vocabulary](%four, %hidden, %vocabulary, %q8, %weights, %expected) : [index, index, index](index, index, index, tensor<4x5760xi8>, tensor<9x20x210xi8>, tensor<4x9xf32>)
+  kernel.launch @ggml_linear_q6k_q8_1_x4_m4[%four, %hidden, %vocabulary](%four, %hidden, %vocabulary, %q8, %weights, %actual) : [index, index, index](index, index, index, tensor<4x5760xi8>, tensor<9x20x210xi8>, tensor<4x9xf32>)
+  check.expect.equal actual(%actual) expected(%expected) : tensor<4x9xf32>
+  check.return
+}

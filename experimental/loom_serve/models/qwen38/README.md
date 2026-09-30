@@ -1,7 +1,7 @@
 # Qwen3.8-27B GPU stages
 
 These sources implement the UD-Q5_K_XL GGUF layout for the experimental runner.
-The prefill and greedy decode roots use ordinary command programs and kernels;
+The prefill, greedy decode and packed epoch roots use command programs and kernels;
 their artifacts are independent of the host scheduler. Parameter placement must
 match across roots so all stages share one resident weight slab.
 
@@ -134,6 +134,96 @@ The same GPU sanitizer flags apply. These comparisons qualify state routing
 against the same math, not independent model accuracy or full-model mixed
 execution. Metadata remains immutable until the epoch's completion edge permits
 reuse. The service still invokes one retained row at a time.
+
+## Complete packed model witness
+
+`epoch.loom` advances a flat token matrix through the same dense layer programs
+as prefill. Only stateful GDN/attention dispatches select resident rows. An
+epoch's output-to-packed-row map gathers requested final span rows into the
+vocabulary head, which shares Q6 weights across groups of four predictions.
+The map is produced with the spans, not recovered by a device-side search.
+Padded output rows are zeroed; the fixed head still computes padded groups,
+including when no prediction is requested. Stateless dense work also covers
+the selected token capacity. These are explicit schedule costs to measure.
+
+The runner's `loom_serve_qwen_model_epoch` accepts distinct resident row indices,
+input spans and output-selection flags. One VM process, weight slab, workspace
+and state arena serve every row. Cold setup creates the immutable row-origin
+table and reusable epoch buffers. Completion commits consumed positions and
+selected predictions. A span that omits output selection invalidates its old
+prediction but preserves the consumed state for a subsequent explicit input.
+There are no per-epoch state copies or model-storage allocations. HAL allocation
+behavior is a separate property; this interface makes no zero-allocation claim
+about queue implementation internals.
+
+The manual real-weight witness uses packed rows 6/1/7/3 and disjoint isolated
+reference rows in the same residency. It compares mixed 5/3/1/1 inputs, changing
+cardinality, paused-row resumption, omitted predictions and return to ordinary
+decode. Length-one reference inputs use the same prefill dense schedule until
+the explicit transition to the separate decode family. A 16384-token context
+makes some resident origins exceed 4 GiB. Full-model output/continuation checks
+complement the whole-state kernel differentials above.
+
+```sh
+python -B experimental/loom_serve/models/qwen38/compile.py \
+  --stage=all --output=/path/to/artifacts \
+  --context-capacity=16384 --prefill-capacity=32 --span-capacity=4
+build_tools/bin/iree-bazel-run --config=asan \
+  //experimental/loom_serve:qwen_epoch_check -- \
+  --prefill=/path/to/artifacts/prefill --decode=/path/to/artifacts/decode \
+  --epoch=/path/to/artifacts/epoch \
+  --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
+  --tokenizer=/path/to/tokenizer.json
+```
+
+Build the linker/compiler first as shown above. `--stage=both` retains the two
+isolated roots; `--stage=epoch` emits only the packed root. Stage placement and
+context must agree. The optional packed VM configuration is selected once at
+model creation, not instantiated per session. The HTTP service currently uses
+the isolated configuration; this witness exercises the packed public model API.
+
+The same manual executable has bounded completed-work comparisons. Build its
+exact target with the optimized flags used below, stop build activity, then run
+under `benchmark-lock` with the same model arguments and one comparison flag:
+
+| Flag | Ready inputs | Separate baseline |
+| --- | --- | --- |
+| `--compare=single` | One five-token span | One ordinary prefill |
+| `--compare=mixed` | 5/3/1/1 tokens | Two prefills plus two ordinary decodes |
+| `--compare=full` | 17/13/1/1 tokens | Two prefills plus two ordinary decodes |
+| `--compare=decode` | Four one-token spans | Four ordinary decodes |
+
+Each comparison warms both arms, then emits three JSONL samples per ABABA
+window. Prefixes are reset/replayed outside timing for every sample; physical
+rows, histories, weights and workspace are identical between arms. Timing
+includes input upload, VM/queue submission, execution and result completion.
+Every sample checks final positions and selected tokens against the baseline.
+No sanitizer or profiling belongs in these timings. Report window medians and
+compare each packed window with both neighboring controls. Tiny-context model
+comparisons establish neither long-context performance nor service/vLLM parity.
+
+Selected-output routing and the Q6 four-row projection have focused checks:
+
+```sh
+build_tools/bin/iree-bazel-run --config=asan \
+  //loom/src/loom/tools/iree-test-loom -- \
+  experimental/loom_serve/models/qwen38/tests/output_spans.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/output_spans.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/layer_decode.loom \
+  --device=amdgpu --target=amdgpu:gfx1151 --case=@selected_output_rows \
+  --sanitizer='access|operation'
+
+build_tools/bin/iree-bazel-run --config=asan \
+  //loom/src/loom/tools/iree-test-loom -- \
+  experimental/loom_serve/models/qwen38/tests/output_spans.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/ggml/linear_q6k_q8_1_x4.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/ggml/quantize_q8_1_x4.loom \
+  --device=amdgpu --target=amdgpu:gfx1151 --case=@selected_output_projection \
+  --config=ggml.linear_q6k_q8_1_x4.token_capacity=4 \
+  --config=ggml.linear_q6k_q8_1_x4.output_capacity=9 \
+  --config=ggml.quantize_q8_1_x4.group_capacity=160 \
+  --sanitizer='access|operation'
+```
 
 ## Four-row projection reuse
 

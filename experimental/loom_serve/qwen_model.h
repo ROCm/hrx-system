@@ -17,7 +17,7 @@ extern "C" {
 // One concrete Qwen3.8-27B residency. A single host owner multiplexes retained
 // rows through the same VM process, commands, weights and workspace. Calls wait
 // for their result; no row-local VM or thread is required. This runner-private
-// interface deliberately exposes stages, not chat or network sessions.
+// interface deliberately exposes model work, not chat or network sessions.
 // Input-capacity rejection submits no work. An execution/submission failure
 // ends the run: destroy drains accepted work before any host payload is reused.
 typedef struct loom_serve_qwen_model_t loom_serve_qwen_model_t;
@@ -28,6 +28,9 @@ typedef struct loom_serve_qwen_options_t {
   iree_string_view_t prefill_directory;
   // Compiled decode directory with identical parameter placement and context.
   iree_string_view_t decode_directory;
+  // Optional packed-epoch stage with the same weights and context placement.
+  // Empty selects isolated-stage execution only.
+  iree_string_view_t epoch_directory;
   // Canonical UD-Q5_K_XL GGUF file loaded once during creation.
   iree_string_view_t weights_path;
   // Hugging Face tokenizer.json loaded once during creation.
@@ -35,6 +38,26 @@ typedef struct loom_serve_qwen_options_t {
   // Number of retained rows preallocated in one fixed state arena (1-8).
   iree_host_size_t row_count;
 } loom_serve_qwen_options_t;
+
+enum loom_serve_qwen_span_flag_bits_e {
+  // Select the next token after consuming this span. An intermediate input
+  // chunk can omit this flag; its previous prediction then becomes invalid.
+  LOOM_SERVE_QWEN_SPAN_FLAG_SELECT = 1u << 0,
+};
+typedef uint32_t loom_serve_qwen_span_flags_t;
+
+// One ready input span. Decode is an ordinary length-one span containing the
+// row's previously selected token; model math does not distinguish its source.
+typedef struct loom_serve_qwen_span_t {
+  // Resident row index, independent of this span's packed activation position.
+  iree_host_size_t row_index;
+  // Nonempty prefix appended at the row's current consumed position.
+  iree_host_size_t token_count;
+  // Borrowed tokenizer/model-produced IDs, copied before any submission.
+  const int32_t* token_ids;
+  // Output selection policy for this span.
+  loom_serve_qwen_span_flags_t flags;
+} loom_serve_qwen_span_t;
 
 typedef struct loom_serve_qwen_metrics_t {
   // Active input tokens consumed since the last reset.
@@ -69,6 +92,21 @@ iree_host_size_t loom_serve_qwen_model_context_capacity(
     const loom_serve_qwen_model_t* model);
 iree_host_size_t loom_serve_qwen_model_prefill_capacity(
     const loom_serve_qwen_model_t* model);
+// Zero capacities mean no packed-epoch stage was loaded.
+iree_host_size_t loom_serve_qwen_model_epoch_capacity(
+    const loom_serve_qwen_model_t* model);
+iree_host_size_t loom_serve_qwen_model_span_capacity(
+    const loom_serve_qwen_model_t* model);
+
+// Advances distinct resident rows in one packed model traversal. The nonempty
+// span list and its total token count must fit the prepared capacities, and
+// each span must fit its row's remaining context. Validation rejects the whole
+// epoch before submission. Completion commits positions and selected tokens;
+// execution failure ends the run and destroy drains all accepted work.
+// Model storage, weights, commands and VM state are preallocated and reused.
+iree_status_t loom_serve_qwen_model_epoch(loom_serve_qwen_model_t* model,
+                                          iree_host_size_t span_count,
+                                          const loom_serve_qwen_span_t* spans);
 
 // Clears recurrent state and position without allocating or changing ownership.
 // Attention beyond the new logical prefix is inaccessible and need not clear.
@@ -87,8 +125,10 @@ iree_status_t loom_serve_qwen_row_prefill(loom_serve_qwen_row_t* row,
 // has completed prefill and chosen to continue; EOS policy belongs to it.
 iree_status_t loom_serve_qwen_row_decode(loom_serve_qwen_row_t* row);
 
-// Result queries are valid after a successful stage. Position counts consumed
-// tokens, excluding the currently selected token. Reset clears all metrics.
+// Token/EOS queries require a successfully selected prediction, not a reset or
+// an epoch span that omitted SELECT. Position counts consumed tokens, excluding
+// the currently selected token. Metrics cover isolated prefill/decode calls;
+// a shared epoch's duration belongs to the batch, not to each constituent row.
 int32_t loom_serve_qwen_row_token(const loom_serve_qwen_row_t* row);
 bool loom_serve_qwen_row_is_eos(const loom_serve_qwen_row_t* row);
 iree_host_size_t loom_serve_qwen_row_position(const loom_serve_qwen_row_t* row);

@@ -1,0 +1,49 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+template.decl @qwen38.rmsnorm_f32.row(%input_row_count: index, %input_row: index, %output_origin: offset, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+
+amdgpu.target<gfx11-generic> @qwen38_output_spans_gfx11_wave32 {subgroup_size = 32}
+
+// The epoch producer records selected packed rows while constructing spans.
+// Consumers need no inverse search through the span table. Every padded head
+// row is zeroed here, so the fixed four-row projection groups never read stale
+// activations when output cardinality changes or a chunk requests no output.
+kernel.def target(@qwen38_output_spans_gfx11_wave32) export("qwen38_output_normalize_spans") @qwen38_output_normalize_spans(%output_capacity: index) {
+  %outputs = index.assume %output_capacity [range(%output_capacity, 1, 64)] : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%outputs, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%epoch: buffer, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer) {
+  %ordinal_value = kernel.workgroup.id<x> : index
+  %ordinal = index.assume %ordinal_value [range(%ordinal_value, 0, 63)] : index
+  %zero_origin = index.constant 0 : offset
+  %selection_origin = index.constant 1292 : offset
+  %row_bytes = index.constant 20480 : offset
+  %output_origin = index.scale %ordinal, %row_bytes : index, offset -> offset
+  %metadata = buffer.assume.memory_space<constant> %epoch : buffer
+  %header = buffer.view %metadata[%zero_origin] : buffer -> view<3xi32>
+  %count_word = view.load %header[2] : view<3xi32> -> i32
+  %count = index.cast %count_word : i32 to index
+  %active = index.cmp ult, %ordinal, %count : index
+  scf.if %active {
+    %selection = buffer.view %metadata[%selection_origin] : buffer -> view<64xi32>
+    %row_word = view.load %selection[%ordinal] : view<64xi32> -> i32
+    %row_value = index.cast %row_word : i32 to index
+    %row = index.assume %row_value [range(%row_value, 0, 511)] : index
+    %capacity = index.constant 512 : index
+    template.apply<@qwen38.rmsnorm_f32.row>(%capacity, %row, %output_origin, %epsilon, %input, %weight, %output) : (index, index, offset, f32, buffer, buffer, buffer)
+  } else {
+    %lane = kernel.workitem.id<x> : index
+    %threads = index.constant 256 : index
+    %hidden = index.constant 5120 : index
+    %zero = scalar.constant 0.0 : f32
+    %row = buffer.view %output[%output_origin] : buffer -> view<5120xf32>
+    scf.for %element = [%lane to %hidden step %threads] {
+      view.store %zero, %row[%element] : f32, view<5120xf32>
+    }
+  }
+  kernel.return
+}

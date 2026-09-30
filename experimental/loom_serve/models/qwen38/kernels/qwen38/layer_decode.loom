@@ -1,4 +1,4 @@
-template.decl @qwen38.rmsnorm_f32.row(%input_row_count: index, %input_row: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+template.decl @qwen38.rmsnorm_f32.row(%input_row_count: index, %input_row: index, %output_origin: offset, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
 
 // Elementwise and normalization primitives shared by Qwen3.8 decode layers.
 // Quantized projections and attention/GDN state transitions remain in their
@@ -8,7 +8,7 @@ amdgpu.target<gfx11-generic> @qwen38_layer_gfx11_wave32 {subgroup_size = 32}
 
 // Normalizes one row from a row-major 5120-wide input. Decode provides its
 // single row while prefill selects the final active row from its full slab.
-template.def<@qwen38.rmsnorm_f32.row> device @qwen38_rmsnorm_f32_row(%input_row_count: index, %input_row: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer) {
+template.def<@qwen38.rmsnorm_f32.row> device @qwen38_rmsnorm_f32_row(%input_row_count: index, %input_row: index, %output_origin: offset, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer) {
   %lane0 = kernel.workitem.id<x> : index
   %lane = index.assume %lane0 [range(%lane0, 0, 255)] : index
   %workgroup_size = index.constant 256 : index
@@ -18,7 +18,7 @@ template.def<@qwen38.rmsnorm_f32.row> device @qwen38_rmsnorm_f32_row(%input_row_
   %input_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %output : buffer, buffer, buffer
   %input_view = buffer.view %input_noalias[%c0_offset] : buffer -> view<[%input_row_count]x5120xf32>
   %weight_view = buffer.view %weight_noalias[%c0_offset] : buffer -> view<5120xf32>
-  %output_view = buffer.view %output_noalias[%c0_offset] : buffer -> view<5120xf32>
+  %output_view = buffer.view %output_noalias[%output_origin] : buffer -> view<5120xf32>
   %thread_sum = scf.for %element = [%lane to %hidden_size step %workgroup_size](%partial_sum = %c0_f32 : f32) -> (f32) {
     %input_value = view.load %input_view[%input_row, %element] : view<[%input_row_count]x5120xf32> -> f32
     %square = scalar.mulf<reassoc|nnan|ninf|nsz|contract> %input_value, %input_value : f32
@@ -50,7 +50,8 @@ kernel.def target(@qwen38_layer_gfx11_wave32) export("qwen38_rmsnorm_f32_decode"
 } launch(%epsilon: f32, %input: buffer, %weight: buffer, %output: buffer) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
-  template.apply<@qwen38.rmsnorm_f32.row>(%c1, %c0, %epsilon, %input, %weight, %output) : (index, index, f32, buffer, buffer, buffer)
+  %origin = index.constant 0 : offset
+  template.apply<@qwen38.rmsnorm_f32.row>(%c1, %c0, %origin, %epsilon, %input, %weight, %output) : (index, index, offset, f32, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -71,7 +72,7 @@ kernel.def target(@qwen38_layer_gfx11_wave32) export("qwen38_rmsnorm_f32_prefill
   %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
   %last_token0 = index.sub %token_count, %c1 : index
   %last_token = index.assume %last_token0 [range(%last_token0, 0, 511)] : index
-  template.apply<@qwen38.rmsnorm_f32.row>(%c512, %last_token, %epsilon, %input, %weight, %output) : (index, index, f32, buffer, buffer, buffer)
+  template.apply<@qwen38.rmsnorm_f32.row>(%c512, %last_token, %c0_offset, %epsilon, %input, %weight, %output) : (index, index, offset, f32, buffer, buffer, buffer)
   kernel.return
 }
 

@@ -1,8 +1,11 @@
-// Exact Qwen3.8-27B Gated DeltaNet prefill layer.
+// Qwen3.8-27B Gated DeltaNet layer over a flat token matrix.
 //
 // The launch capacity and schedule are selected during compilation. Stateful
 // kernels consume the active count from the control buffer, allowing a fixed
-// grid to process shorter spans without advancing through padded rows.
+// grid to process shorter spans without advancing through padded rows. Zero
+// span capacity selects ordinary single-row state views; a nonzero capacity
+// selects resident origins from the cold row table. Packed spans publish state
+// and use verification depth zero.
 
 kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count$0: index, %input_size$1: index) launch(%token_count$2: index, %input_size$3: index, %input: buffer, %output: buffer)
 
@@ -78,11 +81,14 @@ kernel.decl @qwen38_gdn_norm_gate_f16_prefill(%token_count: index) launch(%token
 
 kernel.decl @qwen38_gdn_capture_transition_depth4() launch(%qkv: buffer, %alpha: buffer, %beta: buffer, %transition: buffer)
 
+kernel.decl @qwen38_gdn_conv_spans(%span_capacity: index) launch(%epoch: buffer, %rows: buffer, %layer_origin: offset, %epsilon: f32, %qkv: buffer, %weight: buffer, %state: buffer, %output: buffer, %inverse_norm: buffer)
+kernel.decl @qwen38_gdn_recurrent_spans(%span_capacity: index) launch(%epoch: buffer, %rows: buffer, %layer_origin: offset, %qkv: buffer, %inverse_norm: buffer, %alpha: buffer, %beta: buffer, %a: buffer, %bias: buffer, %state: buffer, %output: buffer)
+
 // Verification depth is zero for ordinary prefill and four for the MTP target
 // verifier. All callers specialize it before command preparation, so ordinary
 // prefill retains its wide WMMA schedule while verification shares each weight
 // decode across all four rows and captures the corresponding GDN transitions.
-command.program.def public @qwen38_gdn_layer_prefill(%token_count: index, %schedule_token_count: index, %layer: index, %gdn_ordinal: index, %verification_depth: index) launch(%parameters: buffer, %residual: buffer, %gdn_state: buffer, %token_count_data: buffer, %transition_capture: buffer) where [range(%token_count, 1, 512), range(%schedule_token_count, 1, 512), range(%layer, 0, 63), range(%gdn_ordinal, 0, 47), range(%verification_depth, 0, 4)] {
+command.program.def public @qwen38_gdn_layer_prefill(%token_count: index, %schedule_token_count: index, %layer: index, %gdn_ordinal: index, %verification_depth: index, %span_capacity: index) launch(%parameters: buffer, %residual: buffer, %gdn_state: buffer, %token_count_data: buffer, %transition_capture: buffer, %rows: buffer) where [range(%token_count, 1, 512), range(%schedule_token_count, 1, 512), range(%layer, 0, 63), range(%gdn_ordinal, 0, 47), range(%verification_depth, 0, 4), range(%span_capacity, 0, 64)] {
   %token_capacity = index.constant 512 : index
   %hidden_size = index.constant 5120 : index
   %qkv_size = index.constant 10240 : index
@@ -96,6 +102,7 @@ command.program.def public @qwen38_gdn_layer_prefill(%token_count: index, %sched
   %c481 = index.constant 481 : index
   %epsilon = scalar.constant 9.9999999999999995e-07 : f32
   %uses_m4 = index.cmp eq, %verification_depth, %c4 : index
+  %uses_spans = index.cmp ne, %span_capacity, %c0 : index
 
   %uses_x64 = index.cmp ult, %schedule_token_count, %c65 : index
   %uses_f32_ffn_input = scalar.ori %uses_m4, %uses_x64 : i1
@@ -233,21 +240,29 @@ command.program.def public @qwen38_gdn_layer_prefill(%token_count: index, %sched
 
   %qkv_silu = buffer.alloca<global> align(256) %qkv_bytes : buffer
   %qk_inverse_norm = buffer.alloca<global> align(256) %qk_norm_bytes : buffer
-  scf.if %uses_m4 {
-    kernel.launch @qwen38_gdn_conv_prepare_prefill_parallel_read_only[%token_count](%token_count_data, %epsilon, %qkv, %conv_weight, %conv_history, %qkv_silu, %qk_inverse_norm) : [index](buffer, f32, buffer, view<40960xf32>, view<30720xf32>, buffer, buffer)
+  scf.if %uses_spans {
+    kernel.launch @qwen38_gdn_conv_spans[%span_capacity](%token_count_data, %rows, %layer_conv_history_offset, %epsilon, %qkv, %conv_weight, %gdn_state, %qkv_silu, %qk_inverse_norm) : [index](buffer, buffer, offset, f32, buffer, view<40960xf32>, buffer, buffer, buffer)
   } else {
-    // Every token reads the same immutable prefix history. Publication by the
-    // final token cannot race readers in another workgroup.
-    %prior_history = buffer.alloca<global> align(256) %conv_history_bytes : buffer
-    kernel.launch @qwen38_gdn_snapshot_history(%conv_history, %prior_history) : (view<30720xf32>, buffer)
-    kernel.launch @qwen38_gdn_conv_prepare_prefill_parallel[%token_count](%token_count_data, %epsilon, %qkv, %conv_weight, %prior_history, %conv_history, %qkv_silu, %qk_inverse_norm) : [index](buffer, f32, buffer, view<40960xf32>, buffer, view<30720xf32>, buffer, buffer)
+    scf.if %uses_m4 {
+      kernel.launch @qwen38_gdn_conv_prepare_prefill_parallel_read_only[%token_count](%token_count_data, %epsilon, %qkv, %conv_weight, %conv_history, %qkv_silu, %qk_inverse_norm) : [index](buffer, f32, buffer, view<40960xf32>, view<30720xf32>, buffer, buffer)
+    } else {
+      // Every token reads the same immutable prefix history. Publication by the
+      // final token cannot race readers in another workgroup.
+      %prior_history = buffer.alloca<global> align(256) %conv_history_bytes : buffer
+      kernel.launch @qwen38_gdn_snapshot_history(%conv_history, %prior_history) : (view<30720xf32>, buffer)
+      kernel.launch @qwen38_gdn_conv_prepare_prefill_parallel[%token_count](%token_count_data, %epsilon, %qkv, %conv_weight, %prior_history, %conv_history, %qkv_silu, %qk_inverse_norm) : [index](buffer, f32, buffer, view<40960xf32>, buffer, view<30720xf32>, buffer, buffer)
+    }
   }
 
   %raw_gdn = buffer.alloca<global> align(256) %gdn_bytes : buffer
-  scf.if %uses_m4 {
-    kernel.launch @qwen38_gdn_recurrent_prefill_x4_read_only[%token_count](%token_count_data, %qkv_silu, %qk_inverse_norm, %alpha, %beta, %ssm_a, %dt_bias, %recurrent_state, %raw_gdn) : [index](buffer, buffer, buffer, buffer, buffer, view<48xf32>, view<48xf32>, view<786432xf32>, buffer)
+  scf.if %uses_spans {
+    kernel.launch @qwen38_gdn_recurrent_spans[%span_capacity](%token_count_data, %rows, %layer_recurrent_state_offset, %qkv_silu, %qk_inverse_norm, %alpha, %beta, %ssm_a, %dt_bias, %gdn_state, %raw_gdn) : [index](buffer, buffer, offset, buffer, buffer, buffer, buffer, view<48xf32>, view<48xf32>, buffer, buffer)
   } else {
-    kernel.launch @qwen38_gdn_recurrent_prefill_x4[%token_count](%token_count_data, %qkv_silu, %qk_inverse_norm, %alpha, %beta, %ssm_a, %dt_bias, %recurrent_state, %raw_gdn) : [index](buffer, buffer, buffer, buffer, buffer, view<48xf32>, view<48xf32>, view<786432xf32>, buffer)
+    scf.if %uses_m4 {
+      kernel.launch @qwen38_gdn_recurrent_prefill_x4_read_only[%token_count](%token_count_data, %qkv_silu, %qk_inverse_norm, %alpha, %beta, %ssm_a, %dt_bias, %recurrent_state, %raw_gdn) : [index](buffer, buffer, buffer, buffer, buffer, view<48xf32>, view<48xf32>, view<786432xf32>, buffer)
+    } else {
+      kernel.launch @qwen38_gdn_recurrent_prefill_x4[%token_count](%token_count_data, %qkv_silu, %qk_inverse_norm, %alpha, %beta, %ssm_a, %dt_bias, %recurrent_state, %raw_gdn) : [index](buffer, buffer, buffer, buffer, buffer, view<48xf32>, view<48xf32>, view<786432xf32>, buffer)
+    }
   }
 
   %gated_gdn = buffer.alloca<global> align(256) %gdn_bytes : buffer
@@ -348,8 +363,9 @@ command.program.def public @qwen38_gdn_layer0_prefill(%token_count: index) launc
   %layer = index.constant 0 : index
   %gdn_ordinal = index.constant 0 : index
   %verification_depth = index.constant 0 : index
+  %span_capacity = index.constant 0 : index
   %transition_bytes = index.constant 165376 : offset
   %transition_capture = buffer.alloca<global> align(256) %transition_bytes : buffer
-  command.program.launch @qwen38_gdn_layer_prefill[%token_count, %token_count, %layer, %gdn_ordinal, %verification_depth](%parameters, %residual, %gdn_state, %token_count_data, %transition_capture) : [index, index, index, index, index](buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @qwen38_gdn_layer_prefill[%token_count, %token_count, %layer, %gdn_ordinal, %verification_depth, %span_capacity](%parameters, %residual, %gdn_state, %token_count_data, %transition_capture, %token_count_data) : [index, index, index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
