@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -20,6 +21,7 @@
 namespace {
 
 enum class PairQuery { kConcrete, kProfile };
+enum class AcquireMode { kFullBarrier, kOrderedData };
 enum class Site { kHost, kPm4, kSdma };
 enum TransferPhase : size_t { kUpload, kDownload, kTransferPhaseCount };
 enum BackingIndex : size_t {
@@ -250,8 +252,10 @@ class Pm4SdmaRecipeTest : public Pm4DispatchTest {
     }
   }
 
+  template <uint32_t kGraphCount = 1>
   void RunCoherentHandoff(
       PairQuery query_kind,
+      AcquireMode acquire_mode = AcquireMode::kFullBarrier,
       amdf_cache_operations_t required_sdma_operations = 0) {
     if (required_sdma_operations != 0 &&
         (sdma_family_.format_features &
@@ -273,10 +277,10 @@ class Pm4SdmaRecipeTest : public Pm4DispatchTest {
     constexpr uint32_t kPayloadWordCount = 2048;
     constexpr uint32_t kPageWordCount = 1024;
     constexpr uint32_t kPayloadOffset = 16;
-    constexpr uint32_t kPm4WordsPerEpoch = 64;
-    constexpr uint32_t kMinimumSdmaWordsPerEpoch = 28;
-    constexpr uint32_t kMaximumSdmaWordsPerEpoch =
-        kMinimumSdmaWordsPerEpoch + 20;
+    constexpr uint32_t kMaximumPm4WordsPerGraph = 64;
+    constexpr uint32_t kMinimumSdmaWordsPerGraph = 28;
+    constexpr uint32_t kMaximumSdmaWordsPerGraph =
+        kMinimumSdmaWordsPerGraph + 20;
     constexpr uint32_t kEpochCount = 2;
     constexpr uint32_t kControlGuard = 0x68d329b7u;
     constexpr std::array<uint32_t, 4> kGuards = {0x759bf13du, 0x26a4e8c3u,
@@ -286,12 +290,12 @@ class Pm4SdmaRecipeTest : public Pm4DispatchTest {
 
     static_assert(sizeof(kernels::transform::Arguments) == 32);
     std::array<Backing, kBackingCount> backings = {{
-        {"source", 8192, AMDF_MEMORY_ACCESS_READ},
-        {"input", 8192, kReadWrite},
-        {"output", 8192, kReadWrite},
-        {"readback", 8192, kReadWrite},
-        {"arguments", 4096, AMDF_MEMORY_ACCESS_READ},
-        {"control", 4096, kReadWrite},
+        {"source", kGraphCount * 8192, AMDF_MEMORY_ACCESS_READ},
+        {"input", kGraphCount * 8192, kReadWrite},
+        {"output", kGraphCount * 8192, kReadWrite},
+        {"readback", kGraphCount * 8192, kReadWrite},
+        {"arguments", kGraphCount * 4096, AMDF_MEMORY_ACCESS_READ},
+        {"control", kGraphCount * 4096, kReadWrite},
         {"code", 4096, AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_EXECUTE},
     }};
     for (auto& backing : backings) {
@@ -393,9 +397,13 @@ class Pm4SdmaRecipeTest : public Pm4DispatchTest {
     // uses ReleaseSystem32's qualified completion contract. These are plain
     // DWORDs, with no HSA signal ABI and no host reset after this
     // initialization.
-    std::array<uint32_t, kPageWordCount> expected_control;
+    std::array<uint32_t, kGraphCount * kPageWordCount> expected_control;
     expected_control.fill(kControlGuard);
-    expected_control[0] = expected_control[16] = expected_control[32] = 0;
+    for (uint32_t graph = 0; graph < kGraphCount; ++graph) {
+      const size_t base = graph * kPageWordCount;
+      expected_control[base] = expected_control[base + 16] =
+          expected_control[base + 32] = 0;
+    }
     std::memcpy(control.host.pointer, expected_control.data(),
                 sizeof(expected_control));
     std::array<uint32_t, kPageWordCount> expected_code = {};
@@ -409,48 +417,67 @@ class Pm4SdmaRecipeTest : public Pm4DispatchTest {
     ASSERT_TRUE(amdf_device_id_is_equal(&pm4_queue->device_id(),
                                         &sdma_queue->device_id()));
     ASSERT_NE(pm4_queue->native_handle(), sdma_queue->native_handle());
-    ASSERT_GE(pm4_queue->words().size_bytes(),
-              kEpochCount * kPm4WordsPerEpoch * sizeof(uint32_t));
-    ASSERT_GE(sdma_queue->words().size_bytes(),
-              kEpochCount * kMaximumSdmaWordsPerEpoch * sizeof(uint32_t));
+    ASSERT_GT(pm4_queue->words().size(),
+              kEpochCount * kGraphCount * kMaximumPm4WordsPerGraph);
+    ASSERT_GT(sdma_queue->words().size(),
+              kEpochCount * kGraphCount * kMaximumSdmaWordsPerGraph);
     Pm4CommandWriter pm4(pm4_queue->words().data(), *pm4_profile_);
     SdmaCommandWriter sdma(sdma_queue->words().data(),
                            sdma_family_.format_features);
+    std::array<size_t, kEpochCount> pm4_frontiers;
     std::array<size_t, kEpochCount> sdma_frontiers;
-    for (uint32_t epoch = 1; epoch <= kEpochCount; ++epoch) {
-      pm4.WaitMemory32(control.device_address, epoch);
-      pm4.SystemBarrier();  // Queried GLOBAL acquire and cold code publication.
-      pm4.BindCompute(program, arguments.device_address);
-      pm4.DispatchWave32(kGridSize, 1, 1);
-      pm4.ReleaseSystem32(control.device_address + 64, epoch);
-      pm4.PadToEightWords();
-      if ((sdma_operations[kUpload] &
-           AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM) != 0) {
-        sdma.AcquireFromSystem();
+    for (uint32_t epoch = 0; epoch < kEpochCount; ++epoch) {
+      for (uint32_t graph = 0; graph < kGraphCount; ++graph) {
+        const uint32_t generation = epoch * kGraphCount + graph + 1;
+        const uint64_t payload_offset = graph * 8192 + 64;
+        const uint64_t page_offset = graph * 4096;
+        const uint64_t progress_address = control.device_address + page_offset;
+        pm4.WaitMemory32(progress_address, generation);
+        if (acquire_mode == AcquireMode::kFullBarrier || generation == 1) {
+          // Queried GLOBAL data acquire and cold code publication.
+          pm4.SystemBarrier();
+        } else {
+          // SDMA reaches this upload marker only after observing the previous
+          // graph's shader completion and downloading its output. Between
+          // epochs, the host also joins both queues before rewriting inputs.
+          // Code remains immutable after its initial publication.
+          pm4.AcquireFromSystem();
+        }
+        pm4.BindCompute(program, arguments.device_address + page_offset);
+        pm4.DispatchWave32(kGridSize, 1, 1);
+        pm4.ReleaseSystem32(progress_address + 64, generation);
+        pm4.PadToEightWords();
+        if ((sdma_operations[kUpload] &
+             AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM) != 0) {
+          sdma.AcquireFromSystem();
+        }
+        sdma.CopyLinear(source.device_address + payload_offset,
+                        input.device_address + payload_offset,
+                        kGridSize * sizeof(uint32_t));
+        if ((sdma_operations[kUpload] &
+             AMDF_CACHE_OPERATIONS_RELEASE_TO_SYSTEM) != 0) {
+          sdma.ReleaseToSystem();
+        }
+        sdma.Fence32(progress_address, generation);
+        sdma.WaitMemory32(progress_address + 64, generation);
+        if ((sdma_operations[kDownload] &
+             AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM) != 0) {
+          sdma.AcquireFromSystem();
+        }
+        sdma.CopyLinear(output.device_address + payload_offset,
+                        readback.device_address + payload_offset,
+                        kGridSize * sizeof(uint32_t));
+        if ((sdma_operations[kDownload] &
+             AMDF_CACHE_OPERATIONS_RELEASE_TO_SYSTEM) != 0) {
+          sdma.ReleaseToSystem();
+        }
+        sdma.Fence32(progress_address + 128, generation);
+        ASSERT_LE(pm4.word_count(), generation * kMaximumPm4WordsPerGraph);
+        ASSERT_GE(sdma.word_count(), generation * kMinimumSdmaWordsPerGraph);
+        ASSERT_LE(sdma.word_count(), generation * kMaximumSdmaWordsPerGraph);
       }
-      sdma.CopyLinear(source.device_address + 64, input.device_address + 64,
-                      kGridSize * sizeof(uint32_t));
-      if ((sdma_operations[kUpload] &
-           AMDF_CACHE_OPERATIONS_RELEASE_TO_SYSTEM) != 0) {
-        sdma.ReleaseToSystem();
-      }
-      sdma.Fence32(control.device_address, epoch);
-      sdma.WaitMemory32(control.device_address + 64, epoch);
-      if ((sdma_operations[kDownload] &
-           AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM) != 0) {
-        sdma.AcquireFromSystem();
-      }
-      sdma.CopyLinear(output.device_address + 64, readback.device_address + 64,
-                      kGridSize * sizeof(uint32_t));
-      if ((sdma_operations[kDownload] &
-           AMDF_CACHE_OPERATIONS_RELEASE_TO_SYSTEM) != 0) {
-        sdma.ReleaseToSystem();
-      }
-      sdma.Fence32(control.device_address + 128, epoch);
-      ASSERT_EQ(pm4.word_count(), epoch * kPm4WordsPerEpoch);
-      ASSERT_GE(sdma.word_count(), epoch * kMinimumSdmaWordsPerEpoch);
-      ASSERT_LE(sdma.word_count(), epoch * kMaximumSdmaWordsPerEpoch);
-      sdma_frontiers[epoch - 1] = sdma.word_count();
+      pm4_frontiers[epoch] = pm4.word_count();
+      sdma_frontiers[epoch] = sdma.word_count();
     }
     // Both complete streams are resident before the first publication. PM4's
     // index uses DWORDs; SDMA's index uses bytes. Neither stream wraps.
@@ -473,67 +500,86 @@ class Pm4SdmaRecipeTest : public Pm4DispatchTest {
     RecordProperty("pm4_sdma_control_offsets", "0,64,128");
     RecordProperty("pm4_sdma_publication_order", "pm4,sdma");
 
-    std::array<std::array<uint32_t, kPayloadWordCount>, 4> expected;
-    std::array<std::array<uint32_t, kPayloadWordCount>, 4> observed;
-    std::array<uint32_t, kPageWordCount> expected_arguments;
-    std::array<uint32_t, kPageWordCount> observed_arguments;
-    std::array<uint32_t, kPageWordCount> observed_control;
+    std::array<std::array<uint32_t, kGraphCount * kPayloadWordCount>, 4>
+        expected;
+    std::array<std::array<uint32_t, kGraphCount * kPayloadWordCount>, 4>
+        observed;
+    std::array<uint32_t, kGraphCount * kPageWordCount> expected_arguments;
+    std::array<uint32_t, kGraphCount * kPageWordCount> observed_arguments;
+    std::array<uint32_t, kGraphCount * kPageWordCount> observed_control;
     std::array<uint32_t, kPageWordCount> observed_code;
     for (uint32_t epoch = 0; epoch < kEpochCount; ++epoch) {
       SCOPED_TRACE(epoch);
-      for (size_t owner = 0; owner < expected.size(); ++owner) {
-        expected[owner].fill(kGuards[owner] ^ (epoch * 0x1020304u));
-      }
-      for (uint32_t i = 0; i < kGridSize; ++i) {
-        const size_t word = kPayloadOffset + i;
-        const uint32_t value = static_cast<uint32_t>(
-            UINT64_C(0xfffffff0) + uint64_t{i} * 0x01030507u +
-            uint64_t{epoch} * 0x11111111u);
-        expected[kSource][word] = value;
-        expected[kInput][word] = value;
-        if (i < kCounts[epoch]) {
-          expected[kOutput][word] =
-              static_cast<uint32_t>(uint64_t{value} * 3 + kAddends[epoch]);
+      for (uint32_t graph = 0; graph < kGraphCount; ++graph) {
+        const uint32_t ordinal = epoch * kGraphCount + graph;
+        const size_t payload_base = graph * kPayloadWordCount;
+        const size_t page_base = graph * kPageWordCount;
+        for (size_t owner = 0; owner < expected.size(); ++owner) {
+          std::fill_n(expected[owner].data() + payload_base, kPayloadWordCount,
+                      kGuards[owner] ^ (ordinal * 0x1020304u));
         }
-        expected[kReadback][word] = expected[kOutput][word];
+        for (uint32_t i = 0; i < kGridSize; ++i) {
+          const size_t word = payload_base + kPayloadOffset + i;
+          const uint32_t value = static_cast<uint32_t>(
+              UINT64_C(0xfffffff0) + uint64_t{i} * 0x01030507u +
+              uint64_t{ordinal} * 0x11111111u);
+          expected[kSource][word] = value;
+          expected[kInput][word] = value;
+          if (i < kCounts[ordinal % kCounts.size()]) {
+            expected[kOutput][word] = static_cast<uint32_t>(
+                uint64_t{value} * 3 + kAddends[ordinal % kAddends.size()]);
+          }
+          expected[kReadback][word] = expected[kOutput][word];
+        }
+        const kernels::transform::Arguments payload = {
+            input.device_address + graph * 8192 + 64,
+            output.device_address + graph * 8192 + 64,
+            kCounts[ordinal % kCounts.size()],
+            kAddends[ordinal % kAddends.size()]};
+        std::fill_n(expected_arguments.data() + page_base, kPageWordCount,
+                    UINT32_C(0x713ace09) ^ ordinal);
+        std::memcpy(expected_arguments.data() + page_base, &payload,
+                    kernel.arguments.byte_length);
+        expected_control[page_base] = expected_control[page_base + 16] =
+            expected_control[page_base + 32] = ordinal + 1;
       }
       for (size_t owner = 0; owner < expected.size(); ++owner) {
         std::memcpy(backings[owner].memory->host.pointer,
                     expected[owner].data(), sizeof(expected[owner]));
       }
-      for (uint32_t i = 0; i < kGridSize; ++i) {
-        const size_t word = kPayloadOffset + i;
-        static_cast<uint32_t*>(input.host.pointer)[word] =
-            ~expected[kInput][word];
-        if (i < kCounts[epoch]) {
-          static_cast<uint32_t*>(output.host.pointer)[word] =
-              ~expected[kOutput][word];
+      for (uint32_t graph = 0; graph < kGraphCount; ++graph) {
+        const uint32_t ordinal = epoch * kGraphCount + graph;
+        for (uint32_t i = 0; i < kGridSize; ++i) {
+          const size_t word = graph * kPayloadWordCount + kPayloadOffset + i;
+          static_cast<uint32_t*>(input.host.pointer)[word] =
+              ~expected[kInput][word];
+          if (i < kCounts[ordinal % kCounts.size()]) {
+            static_cast<uint32_t*>(output.host.pointer)[word] =
+                ~expected[kOutput][word];
+          }
+          static_cast<uint32_t*>(readback.host.pointer)[word] =
+              ~expected[kReadback][word];
         }
-        static_cast<uint32_t*>(readback.host.pointer)[word] =
-            ~expected[kReadback][word];
       }
-      const kernels::transform::Arguments payload = {
-          input.device_address + 64, output.device_address + 64, kCounts[epoch],
-          kAddends[epoch]};
-      expected_arguments.fill(0);
-      std::memcpy(expected_arguments.data(), &payload,
-                  kernel.arguments.byte_length);
       std::memcpy(arguments.host.pointer, expected_arguments.data(),
                   sizeof(expected_arguments));
-      const uint64_t pm4_frontier = (epoch + 1) * kPm4WordsPerEpoch;
+      const uint64_t pm4_frontier = pm4_frontiers[epoch];
       const uint64_t sdma_frontier = sdma_frontiers[epoch];
       ASSERT_NO_FATAL_FAILURE(pm4_queue->Publish(api_, gpu_api_, pm4_frontier));
       ASSERT_NO_FATAL_FAILURE(
           sdma_queue->Publish(api_, gpu_api_, sdma_frontier));
-      GpuWaitEqual<uint32_t>(
-          reinterpret_cast<uintptr_t>(control.host.pointer) + 128, epoch + 1);
-      // This complete readback snapshot is the decisive dependency observation.
+      const auto last_control =
+          reinterpret_cast<uintptr_t>(control.host.pointer) +
+          (kGraphCount - 1) * 4096;
+      const uint32_t last_generation = (epoch + 1) * kGraphCount;
+      GpuWaitEqual<uint32_t>(last_control + 128, last_generation);
+      // One final download joins the complete batch. Snapshot every readback
+      // before any independent shader join: this is the dependency observation.
       std::memcpy(observed[kReadback].data(), readback.host.pointer,
                   sizeof(observed[kReadback]));
       // Independently join the shader before reading its other owners, even if
       // the dependency under test allowed SDMA to publish D prematurely.
-      GpuWaitEqual<uint32_t>(
-          reinterpret_cast<uintptr_t>(control.host.pointer) + 64, epoch + 1);
+      GpuWaitEqual<uint32_t>(last_control + 64, last_generation);
       for (size_t owner = kSource; owner <= kOutput; ++owner) {
         std::memcpy(observed[owner].data(),
                     backings[owner].memory->host.pointer,
@@ -546,19 +592,19 @@ class Pm4SdmaRecipeTest : public Pm4DispatchTest {
       std::memcpy(observed_code.data(), code.host.pointer,
                   sizeof(observed_code));
 
-      expected_control[0] = expected_control[16] = expected_control[32] =
-          epoch + 1;
       for (size_t owner = 0; owner < expected.size(); ++owner) {
-        for (size_t word = 0; word < kPayloadWordCount; ++word) {
+        for (size_t word = 0; word < expected[owner].size(); ++word) {
           EXPECT_EQ(observed[owner][word], expected[owner][word])
               << backings[owner].name << " word=" << word;
         }
       }
-      for (size_t word = 0; word < kPageWordCount; ++word) {
+      for (size_t word = 0; word < expected_arguments.size(); ++word) {
         EXPECT_EQ(observed_arguments[word], expected_arguments[word])
             << "arguments word=" << word;
         EXPECT_EQ(observed_control[word], expected_control[word])
             << "control word=" << word;
+      }
+      for (size_t word = 0; word < expected_code.size(); ++word) {
         EXPECT_EQ(observed_code[word], expected_code[word])
             << "code word=" << word;
       }
@@ -570,14 +616,26 @@ class Pm4SdmaRecipeTest : public Pm4DispatchTest {
         return;
       }
       const std::string prefix = "pm4_sdma_epoch_" + std::to_string(epoch);
-      RecordProperty(prefix + "_count", kCounts[epoch]);
-      RecordProperty(prefix + "_addend", std::to_string(kAddends[epoch]));
-      RecordProperty(prefix + "_completion", observed_control[32]);
+      for (uint32_t graph = 0; graph < kGraphCount; ++graph) {
+        const uint32_t ordinal = epoch * kGraphCount + graph;
+        const std::string graph_prefix =
+            prefix + "_graph_" + std::to_string(graph);
+        RecordProperty(graph_prefix + "_count",
+                       kCounts[ordinal % kCounts.size()]);
+        RecordProperty(graph_prefix + "_addend",
+                       std::to_string(kAddends[ordinal % kAddends.size()]));
+        RecordProperty(graph_prefix + "_completion",
+                       observed_control[graph * kPageWordCount + 32]);
+      }
       RecordProperty(prefix + "_pm4_frontier", std::to_string(pm4_frontier));
       RecordProperty(prefix + "_sdma_word_frontier",
                      std::to_string(sdma_frontier));
     }
     RecordProperty("pm4_sdma_completed_epochs", kEpochCount);
+    RecordProperty("pm4_sdma_graphs_per_epoch", kGraphCount);
+    RecordProperty("pm4_sdma_acquire_mode",
+                   acquire_mode == AcquireMode::kFullBarrier ? "full_barrier"
+                                                             : "ordered_data");
     RecordProperty("pm4_sdma_pm4_command_dwords",
                    std::to_string(pm4.word_count()));
     RecordProperty("pm4_sdma_sdma_command_dwords",
@@ -596,8 +654,16 @@ TEST_F(Pm4SdmaRecipeTest, ProfileCoherentUploadDispatchDownload) {
   RunCoherentHandoff(PairQuery::kProfile);
 }
 
+TEST_F(Pm4SdmaRecipeTest, BatchedCoherentUploadDispatchDownload) {
+  RunCoherentHandoff<4>(PairQuery::kConcrete);
+}
+
+TEST_F(Pm4SdmaRecipeTest, OrderedDataAcquireBatchedUploadDispatchDownload) {
+  RunCoherentHandoff<4>(PairQuery::kConcrete, AcquireMode::kOrderedData);
+}
+
 TEST_F(Pm4SdmaRecipeTest, UserGcrUploadDispatchDownload) {
-  RunCoherentHandoff(PairQuery::kConcrete,
+  RunCoherentHandoff(PairQuery::kConcrete, AcquireMode::kFullBarrier,
                      AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM |
                          AMDF_CACHE_OPERATIONS_RELEASE_TO_SYSTEM);
 }

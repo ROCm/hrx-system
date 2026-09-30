@@ -128,6 +128,18 @@ replace the ordering operation under test. Query-driven compute compositions
 place required SDMA cache operations at each upload/download boundary; explicit
 GCR variants also exercise that stream when the backing permits a no-op.
 
+PM4/SDMA batches publish four prepared upload/compute/download graphs with one
+publication per queue. Each graph has separate payload, arguments and progress
+records. SDMA observes one graph's shader completion before uploading the next;
+the next PM4 upload wait therefore also joins the preceding shader. The ordered
+data-acquire case uses that dependency to omit the shader-idle event, preserving
+the target's data-cache actions while reusing already-published immutable code.
+The full-barrier case retains both shader-idle and instruction invalidation.
+Both cases check every graph's output and guards after the final download, then
+join shaders and retire both queues before preparing the second batch. These
+serial device chains qualify host-independent batch advancement, not overlap
+between transfer and compute.
+
 The lifecycle cases exercise the same resource helper as the `DISABLED_`
 peer-device recreation scenarios, without creating extra devices. Recreation requires
 `--gtest_also_run_disabled_tests` and is a separate qualification. The manual

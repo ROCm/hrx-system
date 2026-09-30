@@ -89,6 +89,35 @@ TEST(Pm4EncodingTest, TargetProfilesEncodeCacheAndRegisterDifferences) {
   }
 }
 
+TEST(Pm4EncodingTest, OrderedDataAcquirePreservesTargetCachePolicy) {
+  const struct {
+    // Compiler target family selecting the native compute representation.
+    std::array<uint32_t, 2> target;
+    // Data acquire GCR with instruction invalidation disabled.
+    uint32_t acquire;
+  } cases[] = {
+      {{11, 0}, 0xc3a0}, {{11, 5}, 0xc3a0},  {{11, 7}, 0xc3a0},
+      {{12, 0}, 0xc180}, {{12, 5}, 0x1c1e0},
+  };
+  for (const auto& test : cases) {
+    SCOPED_TRACE(::testing::Message()
+                 << test.target[0] << '.' << test.target[1]);
+    std::array<uint32_t, 10> words;
+    words.fill(0x24681357);
+    Pm4CommandWriter commands(words.data() + 1,
+                              Profile(test.target[0], test.target[1]));
+    commands.AcquireFromSystem();
+    // One ACQUIRE_MEM, without CS_PARTIAL_FLUSH or an instruction invalidate.
+    const std::array<uint32_t, 8> expected = {
+        0xc0065800, 0, UINT32_MAX, 0xff, 0, 0, 0xa, test.acquire,
+    };
+    ASSERT_EQ(commands.word_count(), expected.size());
+    ExpectWords(words.data() + 1, expected);
+    EXPECT_EQ(words.front(), 0x24681357u);
+    EXPECT_EQ(words.back(), 0x24681357u);
+  }
+}
+
 TEST(Pm4EncodingTest, AtomicStoresPreserveWidthsAndClearUnusedFields) {
   std::array<uint32_t, 20> words;
   words.fill(0x24681357);
