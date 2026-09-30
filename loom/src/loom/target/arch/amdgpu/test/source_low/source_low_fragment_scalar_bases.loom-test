@@ -1,0 +1,174 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @target
+
+// A bounded table origin and static padding belong to the scalar base even
+// though the complete address fits U32. Subgroup and lane offsets stay vector.
+kernel.def target(@target) @fragment_bounded_table_origin() {
+  %unit = index.constant 1 : index
+  %groups = index.constant 4 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%table: buffer, %input: buffer, %output: buffer) {
+  %table_unique, %input_unique, %output_unique = buffer.assume.noalias %table, %input, %output : buffer, buffer, buffer
+  %table_base = index.constant 0 : offset
+  %row = kernel.workgroup.id<x> : index
+  %origins = buffer.view %table_unique[%table_base] : buffer -> view<4xi64>
+  %word = view.load %origins[%row] : view<4xi64> -> i64
+  %bounded = scalar.assume %word [range(%word, 0, 1048576), mul(%word, 16)] : i64
+  %origin = index.cast %bounded : i64 to offset
+  %padding = index.constant 256 : offset
+  %base = index.add %origin, %padding : offset
+  %extent = index.constant 16 : index
+  %subgroup = kernel.subgroup.id : index
+  %tile_row = index.mul %subgroup, %extent : index
+  %input_view = buffer.view %input_unique[%base] : buffer -> view<64x16xbf16>
+  %output_view = buffer.view %output_unique[%base] : buffer -> view<64x16xbf16>
+  %fragment = vector.fragment.load<lhs> %input_view[%tile_row, 0] shape [%extent, %extent] : view<64x16xbf16> -> vector<16xbf16>
+  vector.fragment.store<lhs> %fragment, %output_view[%tile_row, 0] shape [%extent, %extent] : vector<16xbf16>, view<64x16xbf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 3, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(128, 1, 1) workgroup_count(4, 1, 1) @fragment_bounded_table_origin() asm {
+  %row = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
+  %26 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %origins = resource<hal_binding> {extent = 32, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %input_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %30 = s_lshl_b32_rhs_inline %row, 3
+  %bounded = s_load_dwordx2 %origins, %30
+  %subgroup = v_lshrrev_b32_src0_inline %26, 5
+  %33 = v_and_b32_src0_inline %26, 31
+  %34 = slice %bounded[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %35 = s_mov_b32 256
+  %36 = s_add_u32 %34, %35
+  %37 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %38 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %39 = s_mov_b32 0
+  %40, %41 = s_add_co_u32 %37, %36
+  %42, %43 = s_addc_u32 %38, %39, %41
+  %44 = concat(%40, %42) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %45 = v_lshlrev_b32_src0_inline %subgroup, 9
+  %46 = v_and_b32_src0_inline %33, 15
+  %47 = v_lshl_add_u32_shift_imm %46, %45, 5
+  %48 = global_load_b128_saddr %47, %44
+  %49 = global_load_b128_saddr %47, %44 {offset = 16}
+  %53 = s_add_u32 %34, %35
+  %54 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %55 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %57, %58 = s_add_co_u32 %54, %53
+  %59, %60 = s_addc_u32 %55, %39, %58
+  %61 = concat(%57, %59) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_b128_saddr %47, %48, %61
+  global_store_b128_saddr %47, %49, %61 {offset = 16}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx1200> @target
+
+// Immutable global storage uses the same scalar-origin partition as writable
+// storage. The bounded argument and padding are added once to each binding.
+kernel.def target(@target) @fragment_constant_bounded_origin() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %origin_input: offset) {
+  %constant = buffer.assume.memory_space<constant> %input : buffer
+  %origin = index.assume %origin_input [range(%origin_input, 0, 1048576), mul(%origin_input, 16)] : offset
+  %padding = index.constant 64 : offset
+  %base = index.add %origin, %padding : offset
+  %extent = index.constant 16 : index
+  %input_view = buffer.view %constant[%base] : buffer -> view<16x16xbf16>
+  %output_view = buffer.view %output[%base] : buffer -> view<16x16xbf16>
+  %fragment = vector.fragment.load<lhs> %input_view[0, 0] shape [%extent, %extent] : view<16x16xbf16> -> vector<8xbf16>
+  vector.fragment.store<lhs> %fragment, %output_view[0, 0] shape [%extent, %extent] : vector<8xbf16>, view<16x16xbf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "origin_input"}, direct_arg_offsets = [16], direct_arg_parameter_indices = [2], direct_arg_sizes = [8], parameter_count = 3, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @fragment_constant_bounded_origin(%origin: reg<amdgpu.sgpr x2>) asm {
+  %14 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %17 = slice %origin[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %18 = s_mov_b32 64
+  %19 = s_add_u32 %17, %18
+  %20 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %21 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %22 = s_mov_b32 0
+  %23, %24 = s_add_co_u32 %20, %19
+  %25, %26 = s_addc_u32 %21, %22, %24
+  %27 = concat(%23, %25) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %28 = v_and_b32_src0_inline %14, 15
+  %29 = v_lshlrev_b32_src0_inline %28, 5
+  %30 = v_lshrrev_b32_src0_inline %14, 4
+  %31 = v_lshl_add_u32_shift_imm %30, %29, 4
+  %fragment = global_load_b128_saddr %31, %27
+  %35 = s_add_u32 %17, %18
+  %36 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %37 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %39, %40 = s_add_co_u32 %36, %35
+  %41, %42 = s_addc_u32 %37, %22, %40
+  %43 = concat(%39, %41) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_b128_saddr %31, %fragment, %43
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+// CDNA keeps the workgroup origin scalar while its wave64 fragment layout
+// supplies the vector displacement. The static origin is not added to VADDR.
+kernel.def target(@target) @fragment_workgroup_origin() {
+  %unit = index.constant 1 : index
+  %groups = index.constant 4 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %group = kernel.workgroup.id<x> : index
+  %group_stride = index.constant 512 : offset
+  %origin = index.scale %group, %group_stride : index, offset -> offset
+  %padding = index.constant 256 : offset
+  %base = index.add %origin, %padding : offset
+  %extent = index.constant 16 : index
+  %input_view = buffer.view %input[%base] : buffer -> view<16x16xbf16>
+  %output_view = buffer.view %output[%base] : buffer -> view<16x16xbf16>
+  %fragment = vector.fragment.load<lhs> %input_view[0, 0] shape [%extent, %extent] : view<16x16xbf16> -> vector<4xbf16>
+  vector.fragment.store<lhs> %fragment, %output_view[0, 0] shape [%extent, %extent] : vector<4xbf16>, view<16x16xbf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(4, 1, 1) @fragment_workgroup_origin() asm {
+  %group = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
+  %15 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %18 = s_lshl_b32_rhs_inline %group, 9
+  %19 = s_mov_b32 256
+  %20 = s_add_u32 %18, %19
+  %21 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %22 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %23 = s_mov_b32 0
+  %24, %25 = s_add_co_u32 %21, %20
+  %26, %27 = s_addc_u32 %22, %23, %25
+  %28 = concat(%24, %26) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %29 = v_and_b32_src0_inline %15, 15
+  %30 = v_lshlrev_b32_src0_inline %29, 5
+  %31 = v_lshrrev_b32_src0_inline %15, 4
+  %32 = v_lshl_add_u32_shift_imm %31, %30, 3
+  %fragment = global_load_dwordx2_saddr %32, %28
+  %34 = s_lshl_b32_rhs_inline %group, 9
+  %36 = s_add_u32 %34, %19
+  %37 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %38 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %40, %41 = s_add_co_u32 %37, %36
+  %42, %43 = s_addc_u32 %38, %23, %41
+  %44 = concat(%40, %42) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_dwordx2_saddr %32, %fragment, %44
+  return
+}

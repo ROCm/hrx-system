@@ -321,29 +321,36 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 2
   %15 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %17 = v_mov_b32 0
-  %26 = s_lshl_b32_rhs_inline %row_size, 2
-  %27 = s_mul_i32 %row, %26
-  %28 = v_and_b32_src0_inline %15, 15
-  %29 = v_lshl_add_u32_shift_imm %28, %27, 2
-  %30 = v_lshrrev_b32_src0_inline %15, 4
-  %31 = v_mul_lo_u32 %26, %30
-  %32 = v_add_u32 %29, %31
-  global_store_b32_saddr %32, %17, %output_view
-  %35 = s_lshl_b32_rhs_inline %26, 1
-  %36 = v_add_u32 %35, %32
-  global_store_b32_saddr %36, %17, %output_view
-  %38 = v_add_u32_rhs_tied %35, %36
-  global_store_b32_saddr %38, %17, %output_view
-  %40 = v_add_u32_rhs_tied %35, %38
-  global_store_b32_saddr %40, %17, %output_view
-  %42 = v_add_u32_rhs_tied %35, %40
-  global_store_b32_saddr %42, %17, %output_view
-  %44 = v_add_u32_rhs_tied %35, %42
-  global_store_b32_saddr %44, %17, %output_view
-  %46 = v_add_u32_rhs_tied %35, %44
-  global_store_b32_saddr %46, %17, %output_view
-  %48 = v_add_u32_rhs_tied %35, %46
-  global_store_b32_saddr %48, %17, %output_view
+  %26 = s_mul_i32 %row, %row_size
+  %27 = s_lshl_b32_rhs_inline %26, 2
+  %28 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %29 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %30 = s_mov_b32 0
+  %31, %32 = s_add_co_u32 %28, %27
+  %33, %34 = s_addc_u32 %29, %30, %32
+  %35 = concat(%31, %33) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %36 = s_lshl_b32_rhs_inline %row_size, 2
+  %37 = v_and_b32_src0_inline %15, 15
+  %38 = v_lshlrev_b32_src0_inline %37, 2
+  %39 = v_lshrrev_b32_src0_inline %15, 4
+  %40 = v_mul_lo_u32 %36, %39
+  %41 = v_add_u32 %38, %40
+  global_store_b32_saddr %41, %17, %35
+  %44 = s_lshl_b32_rhs_inline %36, 1
+  %45 = v_add_u32 %44, %41
+  global_store_b32_saddr %45, %17, %35
+  %47 = v_add_u32_rhs_tied %44, %45
+  global_store_b32_saddr %47, %17, %35
+  %49 = v_add_u32_rhs_tied %44, %47
+  global_store_b32_saddr %49, %17, %35
+  %51 = v_add_u32_rhs_tied %44, %49
+  global_store_b32_saddr %51, %17, %35
+  %53 = v_add_u32_rhs_tied %44, %51
+  global_store_b32_saddr %53, %17, %35
+  %55 = v_add_u32_rhs_tied %44, %53
+  global_store_b32_saddr %55, %17, %35
+  %57 = v_add_u32_rhs_tied %44, %55
+  global_store_b32_saddr %57, %17, %35
   return
 }
 

@@ -295,17 +295,22 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %22 = v_mov_b32 0
   %31 = v_and_b32_src0_inline %19, 31
   %32 = s_lshl_b32_rhs_inline %workgroup, 12
-  %33 = v_lshlrev_b32_src0_inline %subgroup, 10
-  %34 = v_add_u32 %32, %33
-  %35 = v_lshl_add_u32_shift_imm %31, %34, 2
-  global_store_b32_saddr %35, %22, %output_view
-  global_store_b32_saddr %35, %22, %output_view {offset = 128}
-  global_store_b32_saddr %35, %22, %output_view {offset = 256}
-  global_store_b32_saddr %35, %22, %output_view {offset = 384}
-  global_store_b32_saddr %35, %22, %output_view {offset = 512}
-  global_store_b32_saddr %35, %22, %output_view {offset = 640}
-  global_store_b32_saddr %35, %22, %output_view {offset = 768}
-  global_store_b32_saddr %35, %22, %output_view {offset = 896}
+  %33 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %34 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %35 = s_mov_b32 0
+  %36, %37 = s_add_co_u32 %33, %32
+  %38, %39 = s_addc_u32 %34, %35, %37
+  %40 = concat(%36, %38) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %41 = v_lshlrev_b32_src0_inline %subgroup, 10
+  %42 = v_lshl_add_u32_shift_imm %31, %41, 2
+  global_store_b32_saddr %42, %22, %40
+  global_store_b32_saddr %42, %22, %40 {offset = 128}
+  global_store_b32_saddr %42, %22, %40 {offset = 256}
+  global_store_b32_saddr %42, %22, %40 {offset = 384}
+  global_store_b32_saddr %42, %22, %40 {offset = 512}
+  global_store_b32_saddr %42, %22, %40 {offset = 640}
+  global_store_b32_saddr %42, %22, %40 {offset = 768}
+  global_store_b32_saddr %42, %22, %40 {offset = 896}
   return
 }
 

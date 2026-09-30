@@ -1410,7 +1410,21 @@ static bool loom_amdgpu_fragment_memory_select_addressing(
     loom_amdgpu_fragment_memory_scalar_base_t* out_scalar_base,
     iree_string_view_t* out_constraint_key) {
   *out_scalar_base = (loom_amdgpu_fragment_memory_scalar_base_t){0};
-  if (loom_amdgpu_fragment_memory_source_plan_supports_addressing(
+  // GLOBAL packets already carry a full-width scalar binding pointer. Keep
+  // scalar-materializable dynamic origins there even when they fit VADDR.
+  // Retain the original plan for source memory analysis and instrumentation.
+  if (source->memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL ||
+      source->memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_CONSTANT) {
+    out_scalar_base->dynamic_term_mask =
+        loom_amdgpu_source_memory_scalar_term_mask(
+            environment->module, environment->fact_table,
+            environment->view_regions, environment->value_analysis, source);
+  }
+
+  // Without a dynamic scalar origin, preserve narrow addressing so constant
+  // offsets can use packet immediates without constructing a new scalar base.
+  if (out_scalar_base->dynamic_term_mask == 0 &&
+      loom_amdgpu_fragment_memory_source_plan_supports_addressing(
           source, out_scalar_base, /*out_constraint_key=*/NULL) &&
       loom_amdgpu_fragment_memory_address_range_fits_u32(
           source, out_scalar_base, address_layout, runtime_axes, view_rank,
@@ -1418,15 +1432,8 @@ static bool loom_amdgpu_fragment_memory_select_addressing(
     return true;
   }
 
-  // GLOBAL packets already carry a full-width scalar binding pointer. Move
-  // scalar-materializable origins into that pointer when the complete offset
-  // cannot fit VADDR, retaining the original plan for source memory analysis.
   if (source->memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL ||
       source->memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_CONSTANT) {
-    out_scalar_base->dynamic_term_mask =
-        loom_amdgpu_source_memory_scalar_term_mask(
-            environment->module, environment->fact_table,
-            environment->view_regions, environment->value_analysis, source);
     if (source->static_byte_offset >= 0) {
       out_scalar_base->byte_offset = (uint64_t)source->static_byte_offset;
     }
