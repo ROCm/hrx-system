@@ -10,12 +10,13 @@ import argparse
 import hashlib
 import json
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
 FORMAT = "loom-agent-trace-v2"
 CALL_FORMAT = "loom-pi-calls-v1"
+COMPOSITION_FORMAT = "loom-agent-composition-v1"
 
 
 @dataclass(frozen=True)
@@ -387,6 +388,80 @@ def load_trace(path):
         _string(record, "model"),
         _integer(record, "origin_unix_us"),
         tuple(sessions),
+    )
+
+
+def _composition_fields(record, fields):
+    record = _object(record)
+    unknown = record.keys() - fields
+    if unknown:
+        raise ValueError(f"unknown composition fields: {sorted(unknown)}")
+    return record
+
+
+def compose_trace(trace, specification):
+    """Validates an explicit synthetic schedule over trusted recorded histories.
+
+    Each instance begins at the source session's first request and may stop
+    after any completed request. Pauses add client delay before later requests;
+    neither pauses nor stops preempt device work. Source counts, cache outcomes
+    and configuration stay fixed. Repeated source hashes are intentional only
+    here, never in imports claiming to be independent recorded sessions.
+    """
+    specification = _composition_fields(specification, {"format", "instances"})
+    if specification.get("format") != COMPOSITION_FORMAT:
+        raise ValueError(f"expected {COMPOSITION_FORMAT}")
+    instances = specification.get("instances")
+    if not isinstance(instances, list) or not instances:
+        raise ValueError("composition needs a nonempty instances array")
+    sessions = []
+    descriptions = []
+    for instance in instances:
+        instance = _composition_fields(
+            instance, {"source_session", "start_us", "request_count", "pauses"}
+        )
+        source_index = _integer(instance, "source_session")
+        if source_index >= len(trace.sessions):
+            raise ValueError("source_session is outside the recorded trace")
+        source = trace.sessions[source_index]
+        start_us = _integer(instance, "start_us")
+        request_count = (
+            _integer(instance, "request_count", 1)
+            if "request_count" in instance
+            else len(source.requests)
+        )
+        if request_count > len(source.requests):
+            raise ValueError("request_count exceeds the recorded lifecycle")
+        pauses = {}
+        pause_records = instance.get("pauses", [])
+        if not isinstance(pause_records, list):
+            raise ValueError("pauses must be an array")
+        for pause in pause_records:
+            pause = _composition_fields(pause, {"before_request", "duration_us"})
+            index = _integer(pause, "before_request", 1)
+            if index >= request_count or index in pauses:
+                raise ValueError("pause must name a distinct included continuation")
+            pauses[index] = _integer(pause, "duration_us", 1)
+        requests = tuple(
+            replace(request, delay_us=request.delay_us + pauses.get(index, 0))
+            for index, request in enumerate(source.requests[:request_count])
+        )
+        sessions.append(replace(source, arrival_us=start_us, requests=requests))
+        descriptions.append(
+            {
+                "source_session": source_index,
+                "start_us": start_us,
+                "request_count": request_count,
+                "pauses": [
+                    {"before_request": index, "duration_us": duration}
+                    for index, duration in sorted(pauses.items())
+                ],
+            }
+        )
+    # Synthetic time begins at zero; this is not a new wall-clock observation.
+    return (
+        replace(trace, origin_unix_us=0, sessions=tuple(sessions)),
+        {"format": COMPOSITION_FORMAT, "instances": descriptions},
     )
 
 

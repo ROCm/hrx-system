@@ -382,6 +382,39 @@ First arrivals keep their recorded offsets. Each subsequent request becomes
 ready after **simulated** completion plus the recorded client delay; the old
 server's response time is not baked into arrival scheduling.
 
+Individual lifecycles can also be collected into one trace and overlaid with
+an explicit synthetic composition. For example:
+
+```json
+{
+  "format": "loom-agent-composition-v1",
+  "instances": [
+    {"source_session": 0, "start_us": 0},
+    {"source_session": 1, "start_us": 2000000, "request_count": 2},
+    {"source_session": 0, "start_us": 5000000,
+     "pauses": [{"before_request": 1, "duration_us": 3000000}]}
+  ]
+}
+```
+
+Pass this file as `--composition=/private/recordings/composition.json`.
+`source_session` is a zero-based index in the input trace; output session
+indices refer to instances in this list. Each instance starts from its first
+recorded request at `start_us`, ignoring its original wall-clock offset.
+`request_count` stops after that many completed model requests (default: the
+whole lifecycle). A pause adds to the recorded client gap before the specified
+zero-based continuation, after its simulated predecessor completes. These are
+request-boundary controls, not in-flight cancellation or absolute-time suspension.
+
+The result embeds the normalized composition beside the original trace hash,
+so copies remain identifiable as synthetic instances, not independent measured
+clients. Counts, compaction calls, client budgets and cache outcomes remain
+those of the source lifecycle. Mixing 8K/16K clients therefore uses recordings
+made at those budgets; changing a label would not recreate different compaction
+decisions. All instance state is assumed resident, including while paused.
+Real concurrent recordings are still needed to check the model against actual
+contention, eviction and changes in agent behavior.
+
 ```sh
 build_tools/bin/iree-bazel-run //experimental/loom_serve:simulate_packing -- \
   /private/recordings/workload.json \

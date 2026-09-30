@@ -7,7 +7,13 @@
 import itertools
 import unittest
 
-from experimental.loom_serve.agent_trace import Request, Session, Trace
+from experimental.loom_serve.agent_trace import (
+    COMPOSITION_FORMAT,
+    Request,
+    Session,
+    Trace,
+    compose_trace,
+)
 from experimental.loom_serve.simulate_packing import (
     ActiveRequest,
     admit,
@@ -119,6 +125,55 @@ class PackingTest(unittest.TestCase):
         self.assertEqual([row["arrival_us"] for row in slow["requests"]], [0, 207])
         self.assertEqual(
             (fast["simulated_finish_us"], slow["simulated_finish_us"]), (37, 307)
+        )
+
+    def test_overlay_pauses_and_stops_remain_causal_under_contention(self):
+        original = trace(
+            [
+                request(130, 3),
+                Request(7, 1000000, 20, 0, 2, "stop", "compaction"),
+                request(3, 2, delay=11),
+            ]
+        )
+        workload, _ = compose_trace(
+            original,
+            {
+                "format": COMPOSITION_FORMAT,
+                "instances": [
+                    {
+                        "source_session": 0,
+                        "start_us": 0,
+                        "request_count": 2,
+                        "pauses": [{"before_request": 1, "duration_us": 100}],
+                    },
+                    {"source_session": 0, "start_us": 5},
+                ],
+            },
+        )
+        fast, _ = self.replay(workload, epoch_us=10, span_capacity=1)
+        slow, _ = self.replay(workload, epoch_us=100, span_capacity=1)
+        for result in (fast, slow):
+            self.assertEqual(result["prefill_tokens"], 303)
+            self.assertEqual(result["decode_tokens"], 7)
+            self.assertEqual(result["selected_outputs"], 12)
+            requests = result["requests"]
+            self.assertEqual(len(requests), 5)
+            self.assertEqual(
+                [row["request"] for row in requests if row["session"] == 0], [0, 1]
+            )
+            for session_index, session in enumerate(workload.sessions):
+                rows = [row for row in requests if row["session"] == session_index]
+                self.assertEqual(rows[0]["arrival_us"], session.arrival_us)
+                for previous, following in zip(rows, rows[1:]):
+                    source_request = session.requests[following["request"]]
+                    self.assertEqual(
+                        following["arrival_us"],
+                        previous["completion_us"] + source_request.delay_us,
+                    )
+                self.assertEqual(rows[1]["purpose"], "compaction")
+                self.assertEqual(rows[1]["final_position"], 21)
+        self.assertGreater(
+            slow["requests"][1]["arrival_us"], fast["requests"][1]["arrival_us"]
         )
 
     def test_span_limited_rows_rotate_without_starvation(self):
