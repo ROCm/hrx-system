@@ -38,10 +38,8 @@ kernel.def @indexed_row_gather_f32(%nrows: index, %ncols: index, %source_rows: i
   %indices_view = buffer.view %indices_noalias[%base] : buffer -> view<[%bounded_nrows]xi32>
   %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_nrows]x[%bounded_ncols]xf32>
   scf.if %in_bounds {
-    %column0 = index.rem %linear, %bounded_ncols : index
-    %column = index.assume %column0 [range(%column0, 0, 65534), lt(%column0, %bounded_ncols)] : index
-    %row0 = index.div %linear, %bounded_ncols : index
-    %row = index.assume %row0 [range(%row0, 0, 65534), lt(%row0, %bounded_nrows)] : index
+    %column = index.rem %linear, %bounded_ncols : index
+    %row = index.div %linear, %bounded_ncols : index
     %source_row_i32 = view.load %indices_view[%row] : view<[%bounded_nrows]xi32> -> i32
     %source_row_nonnegative = scalar.cmpi sge, %source_row_i32, %minimum_row_id : i32
     scf.if %source_row_nonnegative {

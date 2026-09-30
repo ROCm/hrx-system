@@ -1,0 +1,145 @@
+// RUN: pass vector-memory-footprint
+
+// A flattened coordinate guarded by its complete product extent proves the
+// quotient is inside the dynamic row extent without an authored alias.
+func.def @guarded_product_quotient_proves_dynamic_axis_bound(%payload: buffer, %base: offset, %linear0: index, %row_count0: index, %column_count0: index, %value: i32) {
+  %linear = index.assume %linear0 [range(%linear0, 0, 65535)] : index
+  %row_count = index.assume %row_count0 [range(%row_count0, 1, 256)] : index
+  %column_count = index.assume %column_count0 [range(%column_count0, 1, 256)] : index
+  %element_count = index.mul %row_count, %column_count : index
+  %in_bounds = index.cmp ult, %linear, %element_count : index
+  scf.if %in_bounds {
+    %row = index.div %linear, %column_count : index
+    %view = buffer.view %payload[%base] : buffer -> view<[%row_count]xi32>
+    view.store %value, %view[%row] : i32, view<[%row_count]xi32>
+  }
+  func.return
+}
+
+// ====
+
+// RUN: with-checks pass scf-to-cfg,vector-memory-footprint
+
+// CFG lowering retains the product guard in the operand-indexed path facts.
+func.def @guarded_product_quotient_proves_dynamic_axis_bound_cfg(%payload: buffer, %base: offset, %linear0: index, %row_count0: index, %column_count0: index, %value: i32) {
+  %linear = index.assume %linear0 [range(%linear0, 0, 65535)] : index
+  %row_count = index.assume %row_count0 [range(%row_count0, 1, 256)] : index
+  %column_count = index.assume %column_count0 [range(%column_count0, 1, 256)] : index
+  %element_count = index.mul %row_count, %column_count : index
+  %in_bounds = index.cmp ult, %linear, %element_count : index
+  scf.if %in_bounds {
+    %row = index.div %linear, %column_count : index
+    %view = buffer.view %payload[%base] : buffer -> view<[%row_count]xi32>
+    view.store %value, %view[%row] : i32, view<[%row_count]xi32>
+  }
+  func.return
+}
+
+// ----
+CHECK: cfg.cond_br %in_bounds, *
+CHECK: %row = index.div *
+CHECK: view.store %value, %view[%row] : i32, view<[%row_count]xi32>
+CHECK-NOT: scf.if *
+
+// ====
+
+// RUN: with-checks pass canonicalize,scf-to-cfg,vector-memory-footprint
+
+// Canonicalization rewrites division by a power of two to a shift while the
+// product guard remains a multiplication. Both spellings carry the same scale.
+func.def @canonicalized_power_of_two_quotient_proves_dynamic_axis_bound(%payload: buffer, %base: offset, %linear0: index, %row_count0: index, %value: i32) {
+  %linear = index.assume %linear0 [range(%linear0, 0, 65535)] : index
+  %row_count = index.assume %row_count0 [range(%row_count0, 1, 256)] : index
+  %column_count = index.constant 4 : index
+  %element_count = index.mul %row_count, %column_count : index
+  %in_bounds = index.cmp ult, %linear, %element_count : index
+  scf.if %in_bounds {
+    %row = index.div %linear, %column_count : index
+    %view = buffer.view %payload[%base] : buffer -> view<[%row_count]xi32>
+    view.store %value, %view[%row] : i32, view<[%row_count]xi32>
+  }
+  func.return
+}
+
+// ----
+CHECK: %element_count = index.mul %row_count, %column_count : index
+CHECK: cfg.cond_br %in_bounds, *
+CHECK: %row = index.shrui *
+CHECK: view.store %value, %view[%row] : i32, view<[%row_count]xi32>
+CHECK-NOT: index.div *
+CHECK-NOT: scf.if *
+
+// ====
+
+// An explicitly shifted extent has the same product/quotient proof.
+func.def @guarded_shifted_quotient_proves_dynamic_axis_bound(%payload: buffer, %base: offset, %linear0: index, %row_count0: index, %value: i32) {
+  %linear = index.assume %linear0 [range(%linear0, 0, 65535)] : index
+  %row_count = index.assume %row_count0 [range(%row_count0, 1, 256)] : index
+  %shift = index.constant 2 : index
+  %element_count = index.shli %row_count, %shift : index
+  %in_bounds = index.cmp ult, %linear, %element_count : index
+  scf.if %in_bounds {
+    %row = index.shrui %linear, %shift : index
+    %view = buffer.view %payload[%base] : buffer -> view<[%row_count]xi32>
+    view.store %value, %view[%row] : i32, view<[%row_count]xi32>
+  }
+  func.return
+}
+
+// ====
+
+// A different right-shift scale is not licensed by the guarded extent.
+func.def @guarded_shifted_quotient_rejects_distinct_scale(%payload: buffer, %base: offset, %linear0: index, %row_count0: index, %value: i32) {
+  %linear = index.assume %linear0 [range(%linear0, 0, 65535)] : index
+  %row_count = index.assume %row_count0 [range(%row_count0, 1, 256)] : index
+  %extent_shift = index.constant 3 : index
+  %quotient_shift = index.constant 2 : index
+  %element_count = index.shli %row_count, %extent_shift : index
+  %in_bounds = index.cmp ult, %linear, %element_count : index
+  scf.if %in_bounds {
+    %row = index.shrui %linear, %quotient_shift : index
+    %view = buffer.view %payload[%base] : buffer -> view<[%row_count]xi32>
+    // ERROR@+1: SUBRANGE/024 {op_name="view.store", view_axis="0"}
+    view.store %value, %view[%row] : i32, view<[%row_count]xi32>
+  }
+  func.return
+}
+
+// ====
+
+// The strict quotient bound does not prove that the following row exists.
+func.def @guarded_product_quotient_rejects_extra_row(%payload: buffer, %base: offset, %linear0: index, %row_count0: index, %column_count0: index, %value: i32) {
+  %linear = index.assume %linear0 [range(%linear0, 0, 65535)] : index
+  %row_count = index.assume %row_count0 [range(%row_count0, 1, 256)] : index
+  %column_count = index.assume %column_count0 [range(%column_count0, 1, 256)] : index
+  %c1 = index.constant 1 : index
+  %element_count = index.mul %row_count, %column_count : index
+  %in_bounds = index.cmp ult, %linear, %element_count : index
+  scf.if %in_bounds {
+    %row = index.div %linear, %column_count : index
+    %next_row = index.add %row, %c1 : index
+    %view = buffer.view %payload[%base] : buffer -> view<[%row_count]xi32>
+    // ERROR@+1: SUBRANGE/024 {op_name="view.store", view_axis="0"}
+    view.store %value, %view[%next_row] : i32, view<[%row_count]xi32>
+  }
+  func.return
+}
+
+// ====
+
+// A non-strict flattened guard admits linear == rows * columns, whose
+// quotient is exactly the first invalid row.
+func.def @guarded_nonstrict_product_rejects_quotient_bound(%payload: buffer, %base: offset, %linear0: index, %row_count0: index, %column_count0: index, %value: i32) {
+  %linear = index.assume %linear0 [range(%linear0, 0, 65535)] : index
+  %row_count = index.assume %row_count0 [range(%row_count0, 1, 256)] : index
+  %column_count = index.assume %column_count0 [range(%column_count0, 1, 256)] : index
+  %element_count = index.mul %row_count, %column_count : index
+  %maybe_in_bounds = index.cmp ule, %linear, %element_count : index
+  scf.if %maybe_in_bounds {
+    %row = index.div %linear, %column_count : index
+    %view = buffer.view %payload[%base] : buffer -> view<[%row_count]xi32>
+    // ERROR@+1: SUBRANGE/024 {op_name="view.store", view_axis="0"}
+    view.store %value, %view[%row] : i32, view<[%row_count]xi32>
+  }
+  func.return
+}

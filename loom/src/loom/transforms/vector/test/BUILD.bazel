@@ -22,6 +22,7 @@ loom_check_test_suite(
         "memory_footprint_condition_loops.loom-test",
         "memory_footprint_conditions.loom-test",
         "memory_footprint_induction.loom-test",
+        "memory_footprint_quotient.loom-test",
         "memory_footprint_remainder.loom-test",
         "memory_to_scalar.loom-test",
         "packed_memory_consumers.loom-test",

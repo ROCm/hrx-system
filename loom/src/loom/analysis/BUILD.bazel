@@ -1272,6 +1272,8 @@ loom_cc_library(
         "symbolic_expr.c",
         "symbolic_expr_proof.c",
         "symbolic_projection.c",
+        "symbolic_quotient.c",
+        "symbolic_quotient.h",
         "symbolic_value.c",
         "symbolic_value.h",
     ],

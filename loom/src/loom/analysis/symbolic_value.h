@@ -10,10 +10,18 @@
 #define LOOM_ANALYSIS_SYMBOLIC_VALUE_H_
 
 #include "loom/analysis/symbolic_expr_proof.h"
+#include "loom/ir/attribute.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Visits one predicate carried by a value identity. |identity_value| is the
+// result whose identity operation owns |predicate|. Set |out_continue| false
+// to stop visiting successfully.
+typedef iree_status_t (*loom_symbolic_value_identity_predicate_visit_fn_t)(
+    loom_symbolic_expr_context_t* context, loom_value_id_t identity_value,
+    const loom_predicate_t* predicate, void* user_data, bool* out_continue);
 
 // Returns the facts for |value_id| after applying edge-local facts active on
 // |context|. The query does not infer facts through arbitrary producers.
@@ -33,6 +41,17 @@ iree_status_t loom_symbolic_value_apply_identity_chain_predicates_to_facts(
     loom_symbolic_expr_context_t* context, loom_value_id_t start_value,
     loom_value_facts_t* inout_facts);
 
+// Visits predicates carried by the bounded identity chain beginning at
+// |start_value|. Index casts are transparent to the chain.
+iree_status_t loom_symbolic_value_for_each_identity_predicate(
+    loom_symbolic_expr_context_t* context, loom_value_id_t start_value,
+    loom_symbolic_value_identity_predicate_visit_fn_t visit, void* user_data);
+
+// Returns the integer relation represented by |predicate|.
+bool loom_symbolic_value_predicate_relation(
+    const loom_predicate_t* predicate,
+    loom_symbolic_integer_relation_t* out_relation);
+
 // Returns whether two SSA values are algebraically identical.
 iree_status_t loom_symbolic_values_match(loom_symbolic_expr_context_t* context,
                                          loom_value_id_t left_value,
@@ -44,6 +63,10 @@ iree_status_t loom_symbolic_values_semantically_match(
     loom_symbolic_expr_context_t* context, loom_value_id_t left_value,
     loom_value_id_t right_value, bool* out_match);
 
+// Returns the original SSA value beneath a bounded chain of assumptions.
+loom_value_id_t loom_symbolic_expr_assumption_source_value(
+    const loom_symbolic_expr_context_t* context, loom_value_id_t value_id);
+
 // Returns true when the current facts prove |value_id| is non-negative.
 iree_status_t loom_symbolic_value_is_non_negative(
     loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
@@ -53,6 +76,11 @@ iree_status_t loom_symbolic_value_is_non_negative(
 bool loom_symbolic_value_product_factors(
     const loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
     loom_value_id_t* out_left, loom_value_id_t* out_right);
+
+// Returns the launch extent bounding a kernel coordinate value.
+bool loom_symbolic_expr_kernel_coordinate_launch_bound_value(
+    loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
+    loom_value_id_t* out_bound_value);
 
 // Attempts direct value-semantic proofs without expanding algebraic
 // expressions.

@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/analysis/condition_facts.h"
+#include "loom/analysis/symbolic_quotient.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/context.h"
 #include "loom/ops/index/ops.h"
@@ -330,7 +331,7 @@ iree_status_t loom_symbolic_value_lookup_condition_refined_facts(
 // Identity chains and value equivalence
 //===----------------------------------------------------------------------===//
 
-static bool loom_symbolic_expr_predicate_relation(
+bool loom_symbolic_value_predicate_relation(
     const loom_predicate_t* predicate,
     loom_symbolic_integer_relation_t* out_relation) {
   switch ((loom_predicate_kind_t)predicate->kind) {
@@ -417,7 +418,7 @@ static iree_status_t loom_symbolic_expr_predicate_apply_to_value_facts(
   }
 
   loom_symbolic_integer_relation_t relation = LOOM_SYMBOLIC_INTEGER_RELATION_EQ;
-  if (!loom_symbolic_expr_predicate_relation(predicate, &relation)) {
+  if (!loom_symbolic_value_predicate_relation(predicate, &relation)) {
     return iree_ok_status();
   }
 
@@ -526,9 +527,9 @@ static bool loom_symbolic_expr_identity_chain_step(
   return true;
 }
 
-iree_status_t loom_symbolic_value_apply_identity_chain_predicates_to_facts(
+iree_status_t loom_symbolic_value_for_each_identity_predicate(
     loom_symbolic_expr_context_t* context, loom_value_id_t start_value,
-    loom_value_facts_t* inout_facts) {
+    loom_symbolic_value_identity_predicate_visit_fn_t visit, void* user_data) {
   if (!context->module || start_value == LOOM_VALUE_ID_INVALID) {
     return iree_ok_status();
   }
@@ -550,16 +551,42 @@ iree_status_t loom_symbolic_value_apply_identity_chain_predicates_to_facts(
           continue;
         }
         for (uint16_t j = 0; j < attributes[i].count; ++j) {
-          IREE_RETURN_IF_ERROR(
-              loom_symbolic_expr_predicate_apply_to_value_facts(
-                  context, &attributes[i].predicate_list[j], current_value,
-                  inout_facts));
+          bool continue_visiting = true;
+          IREE_RETURN_IF_ERROR(visit(context, current_value,
+                                     &attributes[i].predicate_list[j],
+                                     user_data, &continue_visiting));
+          if (!continue_visiting) {
+            return iree_ok_status();
+          }
         }
       }
     }
     current_value = step.next_value;
   }
   return iree_ok_status();
+}
+
+typedef struct loom_symbolic_value_apply_predicates_t {
+  loom_value_facts_t* facts;
+} loom_symbolic_value_apply_predicates_t;
+
+static iree_status_t loom_symbolic_value_apply_identity_predicate(
+    loom_symbolic_expr_context_t* context, loom_value_id_t identity_value,
+    const loom_predicate_t* predicate, void* user_data, bool* out_continue) {
+  loom_symbolic_value_apply_predicates_t* apply =
+      (loom_symbolic_value_apply_predicates_t*)user_data;
+  *out_continue = true;
+  return loom_symbolic_expr_predicate_apply_to_value_facts(
+      context, predicate, identity_value, apply->facts);
+}
+
+iree_status_t loom_symbolic_value_apply_identity_chain_predicates_to_facts(
+    loom_symbolic_expr_context_t* context, loom_value_id_t start_value,
+    loom_value_facts_t* inout_facts) {
+  loom_symbolic_value_apply_predicates_t apply = {.facts = inout_facts};
+  return loom_symbolic_value_for_each_identity_predicate(
+      context, start_value, loom_symbolic_value_apply_identity_predicate,
+      &apply);
 }
 
 static bool loom_symbolic_expr_value_is_integer_domain(
@@ -577,7 +604,7 @@ static bool loom_symbolic_expr_value_is_integer_domain(
          loom_scalar_type_is_integer(scalar_type);
 }
 
-static loom_value_id_t loom_symbolic_expr_assumption_source_value(
+loom_value_id_t loom_symbolic_expr_assumption_source_value(
     const loom_symbolic_expr_context_t* context, loom_value_id_t value_id) {
   if (!context->module) {
     return value_id;
@@ -1012,22 +1039,6 @@ static iree_status_t loom_symbolic_expr_kernel_coordinate_proves_relation(
   return iree_ok_status();
 }
 
-static bool loom_symbolic_expr_unsigned_quotient_def(
-    const loom_op_t* op, loom_value_id_t* out_dividend,
-    loom_value_id_t* out_divisor) {
-  if (loom_index_div_isa(op)) {
-    *out_dividend = loom_index_div_lhs(op);
-    *out_divisor = loom_index_div_rhs(op);
-    return true;
-  }
-  if (loom_scalar_divui_isa(op)) {
-    *out_dividend = loom_scalar_divui_lhs(op);
-    *out_divisor = loom_scalar_divui_rhs(op);
-    return true;
-  }
-  return false;
-}
-
 iree_status_t loom_symbolic_value_is_non_negative(
     loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
     bool* out_is_non_negative) {
@@ -1075,40 +1086,7 @@ bool loom_symbolic_value_product_factors(
          loom_symbolic_expr_multiply_def(product_op, out_lhs, out_rhs);
 }
 
-static iree_status_t loom_symbolic_expr_value_matches_product(
-    loom_symbolic_expr_context_t* context, loom_value_id_t product_value,
-    loom_value_id_t left_factor, loom_value_id_t right_factor,
-    bool* out_match) {
-  *out_match = false;
-  loom_value_id_t product_lhs = LOOM_VALUE_ID_INVALID;
-  loom_value_id_t product_rhs = LOOM_VALUE_ID_INVALID;
-  if (!loom_symbolic_value_product_factors(context, product_value, &product_lhs,
-                                           &product_rhs)) {
-    return iree_ok_status();
-  }
-
-  bool lhs_matches_left = false;
-  bool rhs_matches_right = false;
-  IREE_RETURN_IF_ERROR(loom_symbolic_values_match(
-      context, product_lhs, left_factor, &lhs_matches_left));
-  IREE_RETURN_IF_ERROR(loom_symbolic_values_match(
-      context, product_rhs, right_factor, &rhs_matches_right));
-  if (lhs_matches_left && rhs_matches_right) {
-    *out_match = true;
-    return iree_ok_status();
-  }
-
-  bool lhs_matches_right = false;
-  bool rhs_matches_left = false;
-  IREE_RETURN_IF_ERROR(loom_symbolic_values_match(
-      context, product_lhs, right_factor, &lhs_matches_right));
-  IREE_RETURN_IF_ERROR(loom_symbolic_values_match(
-      context, product_rhs, left_factor, &rhs_matches_left));
-  *out_match = lhs_matches_right && rhs_matches_left;
-  return iree_ok_status();
-}
-
-static bool loom_symbolic_expr_kernel_coordinate_launch_bound_value(
+bool loom_symbolic_expr_kernel_coordinate_launch_bound_value(
     loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
     loom_value_id_t* out_bound_value) {
   *out_bound_value = LOOM_VALUE_ID_INVALID;
@@ -1132,96 +1110,6 @@ static bool loom_symbolic_expr_kernel_coordinate_launch_bound_value(
   *out_bound_value = loom_symbolic_expr_kernel_launch_bound_operand(
       launch_config, kind, dimension);
   return *out_bound_value != LOOM_VALUE_ID_INVALID;
-}
-
-static bool loom_symbolic_expr_quotient_bound_relation(
-    loom_symbolic_integer_relation_t relation,
-    loom_symbolic_proof_result_t product_relation_result,
-    loom_symbolic_proof_result_t* out_result) {
-  loom_symbolic_integer_relation_t implied_relation =
-      LOOM_SYMBOLIC_INTEGER_RELATION_LT;
-  if (product_relation_result == LOOM_SYMBOLIC_PROOF_FALSE) {
-    implied_relation = LOOM_SYMBOLIC_INTEGER_RELATION_GE;
-  } else if (product_relation_result != LOOM_SYMBOLIC_PROOF_TRUE) {
-    return false;
-  }
-
-  bool result = false;
-  if (!loom_symbolic_integer_relation_implies(implied_relation, relation,
-                                              &result)) {
-    return false;
-  }
-  *out_result = result ? LOOM_SYMBOLIC_PROOF_TRUE : LOOM_SYMBOLIC_PROOF_FALSE;
-  return true;
-}
-
-static iree_status_t loom_symbolic_expr_quotient_launch_bound_proves_relation(
-    loom_symbolic_expr_context_t* context,
-    loom_symbolic_integer_relation_t relation, loom_value_id_t dividend,
-    loom_value_id_t divisor, loom_value_id_t bound_value, bool* out_matched,
-    loom_symbolic_proof_result_t* out_result) {
-  *out_matched = false;
-  bool dividend_non_negative = false;
-  IREE_RETURN_IF_ERROR(loom_symbolic_value_is_non_negative(
-      context, dividend, &dividend_non_negative));
-  bool divisor_positive = false;
-  IREE_RETURN_IF_ERROR(loom_symbolic_expr_value_facts_are_positive(
-      context, divisor, &divisor_positive));
-  bool bound_non_negative = false;
-  IREE_RETURN_IF_ERROR(loom_symbolic_value_is_non_negative(
-      context, bound_value, &bound_non_negative));
-  if (!dividend_non_negative || !divisor_positive || !bound_non_negative) {
-    return iree_ok_status();
-  }
-
-  loom_value_id_t product_bound = LOOM_VALUE_ID_INVALID;
-  if (!loom_symbolic_expr_kernel_coordinate_launch_bound_value(
-          context, dividend, &product_bound)) {
-    return iree_ok_status();
-  }
-
-  bool product_matches = false;
-  IREE_RETURN_IF_ERROR(loom_symbolic_expr_value_matches_product(
-      context, product_bound, divisor, bound_value, &product_matches));
-  if (!product_matches) {
-    return iree_ok_status();
-  }
-
-  loom_symbolic_proof_result_t product_relation = LOOM_SYMBOLIC_PROOF_UNKNOWN;
-  bool product_relation_matched = false;
-  IREE_RETURN_IF_ERROR(loom_symbolic_expr_kernel_coordinate_proves_relation(
-      context, LOOM_SYMBOLIC_INTEGER_RELATION_LT, dividend, product_bound,
-      &product_relation_matched, &product_relation));
-  if (!product_relation_matched) {
-    return iree_ok_status();
-  }
-  if (loom_symbolic_expr_quotient_bound_relation(relation, product_relation,
-                                                 out_result)) {
-    *out_matched = true;
-  }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_symbolic_expr_quotient_bound_proves_relation(
-    loom_symbolic_expr_context_t* context,
-    loom_symbolic_integer_relation_t relation, loom_value_id_t quotient_value,
-    loom_value_id_t bound_value, bool* out_matched,
-    loom_symbolic_proof_result_t* out_result) {
-  *out_matched = false;
-  loom_value_id_t quotient_source =
-      loom_symbolic_expr_assumption_source_value(context, quotient_value);
-  const loom_op_t* quotient_op =
-      loom_symbolic_expr_value_defining_op(context, quotient_source);
-  loom_value_id_t dividend = LOOM_VALUE_ID_INVALID;
-  loom_value_id_t divisor = LOOM_VALUE_ID_INVALID;
-  if (!quotient_op || !loom_symbolic_expr_unsigned_quotient_def(
-                          quotient_op, &dividend, &divisor)) {
-    return iree_ok_status();
-  }
-
-  return loom_symbolic_expr_quotient_launch_bound_proves_relation(
-      context, relation, dividend, divisor, bound_value, out_matched,
-      out_result);
 }
 
 static bool loom_symbolic_expr_unsigned_remainder_def(
@@ -1327,7 +1215,7 @@ static iree_status_t loom_symbolic_expr_predicate_proves_relation(
   loom_value_id_t predicate_left = (loom_value_id_t)predicate->args[0];
   loom_symbolic_integer_relation_t implied_relation =
       LOOM_SYMBOLIC_INTEGER_RELATION_EQ;
-  if (!loom_symbolic_expr_predicate_relation(predicate, &implied_relation)) {
+  if (!loom_symbolic_value_predicate_relation(predicate, &implied_relation)) {
     return iree_ok_status();
   }
 
@@ -1459,7 +1347,7 @@ static iree_status_t loom_symbolic_expr_predicate_upper_bound(
     return iree_ok_status();
   }
   loom_symbolic_integer_relation_t relation = LOOM_SYMBOLIC_INTEGER_RELATION_EQ;
-  if (!loom_symbolic_expr_predicate_relation(predicate, &relation)) {
+  if (!loom_symbolic_value_predicate_relation(predicate, &relation)) {
     return iree_ok_status();
   }
   uint8_t value_argument_index = 0;
@@ -1656,44 +1544,41 @@ static iree_status_t loom_symbolic_expr_scaled_static_le_predicate_proof(
   return iree_ok_status();
 }
 
+typedef struct loom_symbolic_expr_identity_predicate_proof_t {
+  loom_symbolic_expr_predicate_proof_fn_t proof_fn;
+  const void* proof_user_data;
+  bool* matched;
+  loom_symbolic_proof_result_t* result;
+} loom_symbolic_expr_identity_predicate_proof_t;
+
+static iree_status_t loom_symbolic_expr_visit_identity_predicate_proof(
+    loom_symbolic_expr_context_t* context, loom_value_id_t identity_value,
+    const loom_predicate_t* predicate, void* user_data, bool* out_continue) {
+  (void)identity_value;
+  loom_symbolic_expr_identity_predicate_proof_t* proof =
+      (loom_symbolic_expr_identity_predicate_proof_t*)user_data;
+  IREE_RETURN_IF_ERROR(proof->proof_fn(context, predicate,
+                                       proof->proof_user_data, proof->matched,
+                                       proof->result));
+  *out_continue = !*proof->matched;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_symbolic_expr_prove_identity_chain_predicates(
     loom_symbolic_expr_context_t* context, loom_value_id_t start_value,
     loom_symbolic_expr_predicate_proof_fn_t proof_fn,
     const void* proof_user_data, bool* out_matched,
     loom_symbolic_proof_result_t* out_result) {
   *out_matched = false;
-  if (!context->module) {
-    return iree_ok_status();
-  }
-  loom_value_id_t current_value = start_value;
-  uint8_t remaining_steps = LOOM_SYMBOLIC_VALUE_IDENTITY_CHAIN_LIMIT;
-  while (remaining_steps-- > 0) {
-    loom_symbolic_expr_identity_chain_step_t step = {0};
-    if (!loom_symbolic_expr_identity_chain_step(
-            context, current_value,
-            LOOM_SYMBOLIC_EXPR_IDENTITY_CHAIN_FOLLOW_INDEX_CASTS, &step)) {
-      return iree_ok_status();
-    }
-    if (step.identity_op) {
-      const loom_attribute_t* attributes =
-          loom_op_const_attrs(step.identity_op);
-      for (uint8_t i = 0; i < step.identity_op->attribute_count; ++i) {
-        if (attributes[i].kind != LOOM_ATTR_PREDICATE_LIST) {
-          continue;
-        }
-        for (uint16_t j = 0; j < attributes[i].count; ++j) {
-          IREE_RETURN_IF_ERROR(
-              proof_fn(context, &attributes[i].predicate_list[j],
-                       proof_user_data, out_matched, out_result));
-          if (*out_matched) {
-            return iree_ok_status();
-          }
-        }
-      }
-    }
-    current_value = step.next_value;
-  }
-  return iree_ok_status();
+  loom_symbolic_expr_identity_predicate_proof_t proof = {
+      .proof_fn = proof_fn,
+      .proof_user_data = proof_user_data,
+      .matched = out_matched,
+      .result = out_result,
+  };
+  return loom_symbolic_value_for_each_identity_predicate(
+      context, start_value, loom_symbolic_expr_visit_identity_predicate_proof,
+      &proof);
 }
 
 static iree_status_t loom_symbolic_expr_prove_identity_chain_assumption(
