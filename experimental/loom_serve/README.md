@@ -343,13 +343,30 @@ between service speed and recorded client delays. All shapes have that same
 duration in this experiment; shape occupancy is not hardware utilization.
 Measured shape/context costs require separate controlled device evidence.
 
-Both policies admit ready rows round-robin, bounded by token and span capacity.
+Both policies use the same admission rule, bounded by token and span capacity.
 Each admitted decode reserves one input token; prefill divides the remaining
 budget. `single-pass` uses the count arithmetic in `qwen_workload_plan`;
 `fair-fill` redistributes short-span leftovers. Both choose the smallest listed
 shape fitting their actual plan. Final prefill selects the first prediction,
 so a request with N recorded outputs requires N-1 subsequent causal decodes.
-There is no collection delay and no speculative lookahead.
+The defaults use round-robin admission and immediate dispatch. There is no
+speculative lookahead.
+
+`--max-hold-us` experiments with bounded collection: dispatch once the maximum
+token budget or span slots are full, or the oldest ready row reaches its hold
+target. `--admission=longest` and `--admission=shortest` rank ready spans by
+length, with oldest-first priority for rows due before another epoch can
+complete. Prefill spans remain splittable, so size ranking matters primarily
+when more rows are ready than fit in the span table. These are experimental
+policies, not a claim that either ordering wins.
+
+The hold is a ready-to-dispatch target, not a hard real-time guarantee. A request
+arriving during a nonpreemptible epoch can already be late when the scheduler
+regains control. `collection_us` records deliberate waiting;
+`late_service_spans` and `max_hold_overrun_us` expose queueing/dispatch violations.
+At the default zero hold, any runnable-to-service delay is an overrun of that
+zero-wait target. Token slot occupancy and these progress counters must be
+considered together; a fuller batch obtained by idling need not be better.
 
 The optional ledger exposes every epoch's readiness, selected shape, row spans,
 positions and output selections. Its three gap counters partition unused
@@ -361,7 +378,9 @@ The summary includes shape occupancy, epoch counts, per-request completion,
 and longest runnable-to-service wait. Both policies complete identical recorded
 token counts, but their evolving ready frontiers can differ.
 
-All session state is assumed resident and recorded cache outcomes stay fixed.
+All request input is assumed ready at arrival; pi histories do not record
+incremental tokenizer publication. All session state is assumed resident and
+recorded cache outcomes stay fixed.
 The simulator does not establish resident-memory capacity, eviction behavior,
 new generated text, MTP acceptance, cancellation, or output-credit behavior.
 It is an editable packing experiment, not a replacement for endpoint/device

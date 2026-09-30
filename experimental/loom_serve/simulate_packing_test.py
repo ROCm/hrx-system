@@ -8,7 +8,12 @@ import itertools
 import unittest
 
 from experimental.loom_serve.agent_trace import Request, Session, Trace
-from experimental.loom_serve.simulate_packing import allocate, simulate
+from experimental.loom_serve.simulate_packing import (
+    ActiveRequest,
+    admit,
+    allocate,
+    simulate,
+)
 
 
 def request(prefill, output, delay=0, retained=0):
@@ -54,7 +59,16 @@ class PackingTest(unittest.TestCase):
                     if unsatisfied:
                         self.assertLessEqual(max(unsatisfied) - min(unsatisfied), 1)
 
-    def replay(self, workload, *, policy="fair-fill", span_capacity=8, epoch_us=10):
+    def replay(
+        self,
+        workload,
+        *,
+        policy="fair-fill",
+        span_capacity=8,
+        epoch_us=10,
+        admission="round-robin",
+        max_hold_us=0,
+    ):
         epochs = []
         result = simulate(
             workload,
@@ -62,6 +76,8 @@ class PackingTest(unittest.TestCase):
             capacities=(4, 8, 128),
             span_capacity=span_capacity,
             epoch_us=epoch_us,
+            admission=admission,
+            max_hold_us=max_hold_us,
             emit_epoch=epochs.append,
         )
         for epoch in epochs:
@@ -130,6 +146,57 @@ class PackingTest(unittest.TestCase):
         self.assertEqual(candidate_epochs[1]["packing_gap_tokens"], 0)
         for key in ("prefill_tokens", "decode_tokens", "selected_outputs"):
             self.assertEqual(baseline[key], candidate[key])
+
+    def test_collection_coalesces_only_arrived_work_and_obeys_oldest_timer(self):
+        workload = Trace(
+            "loom",
+            "qwen3.8-27b",
+            0,
+            (
+                Session("0" * 64, 0, (request(60, 1),)),
+                Session("1" * 64, 5, (request(68, 1),)),
+            ),
+        )
+        immediate, _ = self.replay(workload)
+        collected, epochs = self.replay(workload, max_hold_us=7)
+        self.assertEqual((immediate["epochs"], collected["epochs"]), (2, 1))
+        self.assertEqual(epochs[0]["start_us"], 5)
+        self.assertEqual(collected["collection_us"], 5)
+        # No second arrival: waiting must end at the timer, even with a gap.
+        alone, epochs = self.replay(trace([request(60, 1)]), max_hold_us=7)
+        self.assertEqual(epochs[0]["start_us"], 7)
+        self.assertEqual(alone["simulated_finish_us"], 17)
+
+    def test_size_order_yields_to_rows_due_before_another_epoch(self):
+        rows = [
+            ActiveRequest(index, 0, request(length, 1), 0, ready_since, 0, length, 1, 0)
+            for index, (length, ready_since) in enumerate(((1, 0), (1000, 9), (10, 9)))
+        ]
+        self.assertEqual(
+            [row.session for row in admit(rows, 3, "longest", 10, 20)], [1, 2, 0]
+        )
+        self.assertEqual(
+            [row.session for row in admit(rows, 3, "shortest", 10, 20)], [0, 2, 1]
+        )
+        self.assertEqual(
+            [row.session for row in admit(rows, 3, "longest", 20, 20)], [0, 1, 2]
+        )
+
+    def test_nonpreemptible_epoch_reports_hold_overrun(self):
+        workload = Trace(
+            "loom",
+            "qwen3.8-27b",
+            0,
+            (
+                Session("0" * 64, 0, (request(128, 1),)),
+                Session("1" * 64, 1, (request(1, 1),)),
+            ),
+        )
+        result, epochs = self.replay(workload, max_hold_us=2)
+        self.assertEqual(result["collection_us"], 0)
+        self.assertEqual(result["late_service_spans"], 1)
+        self.assertEqual(result["max_hold_overrun_us"], 7)
+        self.assertEqual(epochs[1]["spans"][0]["ready_wait_us"], 9)
 
 
 if __name__ == "__main__":

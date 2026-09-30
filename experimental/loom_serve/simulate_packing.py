@@ -19,6 +19,7 @@ from pathlib import Path
 from experimental.loom_serve.agent_trace import Request, load_trace
 
 POLICIES = ("single-pass", "fair-fill")
+ADMISSION_ORDERS = ("round-robin", "longest", "shortest")
 
 
 def allocate(prefill_remaining, capacity, policy):
@@ -76,14 +77,40 @@ class ActiveRequest:
     first_prediction_us: int | None = None
 
 
-def simulate(trace, *, policy, capacities, span_capacity, epoch_us, emit_epoch=None):
+def admit(ready, count, order, urgent_by_us, max_hold_us):
+    """Selects distinct rows without consuming input or changing queue order."""
+    if order == "round-robin":
+        return list(ready)[:count]
+
+    def priority(row):
+        if row.ready_since_us + max_hold_us <= urgent_by_us:
+            return (0, row.ready_since_us, 0)
+        length = row.prefill_remaining or 1
+        return (1, -length if order == "longest" else length, row.ready_since_us)
+
+    return sorted(ready, key=priority)[:count]
+
+
+def simulate(
+    trace,
+    *,
+    policy,
+    capacities,
+    span_capacity,
+    epoch_us,
+    admission="round-robin",
+    max_hold_us=0,
+    emit_epoch=None,
+):
     """Replays trusted counts with resident state and an explicit uniform clock.
 
-    Every client has at most one active request. Round-robin admission is shared
+    Every client has at most one active request. Admission settings are shared
     by both allocators. Arrivals during an epoch wait for its completion; a
     finished response releases its successor only after the recorded client gap.
     Capacities are positive, sorted and unique; epoch_us and span_capacity are
-    positive. The CLI validates these external configuration constraints.
+    positive, and max_hold_us is nonnegative. The CLI validates these external
+    configuration constraints. The hold is a ready-to-dispatch target, not a
+    guarantee: overloaded queues and nonpreemptible work can overrun it.
     """
     budget = capacities[-1]
     arrivals = [
@@ -96,6 +123,7 @@ def simulate(trace, *, policy, capacities, span_capacity, epoch_us, emit_epoch=N
     kinds = Counter()
     completed = []
     now_us = 0
+    max_hold_overrun_us = 0
 
     def release_arrivals(time_us):
         while arrivals and arrivals[0][0] <= time_us:
@@ -119,12 +147,31 @@ def simulate(trace, *, policy, capacities, span_capacity, epoch_us, emit_epoch=N
         if not ready:
             now_us = max(now_us, arrivals[0][0])
         release_arrivals(now_us)
+        collection_start_us = now_us
+        while True:
+            admitted = admit(
+                ready,
+                min(len(ready), span_capacity, budget),
+                admission,
+                now_us + epoch_us,
+                max_hold_us,
+            )
+            admitted_tokens = sum(row.prefill_remaining or 1 for row in admitted)
+            hold_until_us = min(row.ready_since_us for row in ready) + max_hold_us
+            if (
+                admitted_tokens >= budget
+                or len(admitted) == min(span_capacity, budget)
+                or now_us >= hold_until_us
+            ):
+                break
+            # The event engine supplies the next wakeup, not advance knowledge
+            # of its demand. Without new work, the collection timer still fires.
+            now_us = min(hold_until_us, arrivals[0][0]) if arrivals else hold_until_us
+            release_arrivals(now_us)
         ready_tokens = sum(row.prefill_remaining or 1 for row in ready)
         ready_rows = len(ready)
-        admitted = [
-            ready.popleft() for _ in range(min(ready_rows, span_capacity, budget))
-        ]
-        admitted_tokens = sum(row.prefill_remaining or 1 for row in admitted)
+        admitted_sessions = {row.session for row in admitted}
+        ready = deque(row for row in ready if row.session not in admitted_sessions)
         grants = allocate([row.prefill_remaining for row in admitted], budget, policy)
         useful_tokens = sum(grants)
         capacity = next(
@@ -133,9 +180,14 @@ def simulate(trace, *, policy, capacities, span_capacity, epoch_us, emit_epoch=N
         end_us = now_us + epoch_us
         spans = []
         survivors = []
+        late_service_spans = 0
         for row, count in zip(admitted, grants):
             is_prefill = row.prefill_remaining > 0
             selects_output = not is_prefill or count == row.prefill_remaining
+            ready_wait_us = now_us - row.ready_since_us
+            hold_overrun_us = max(0, ready_wait_us - max_hold_us)
+            late_service_spans += hold_overrun_us > 0
+            max_hold_overrun_us = max(max_hold_overrun_us, hold_overrun_us)
             spans.append(
                 {
                     "session": row.session,
@@ -144,11 +196,11 @@ def simulate(trace, *, policy, capacities, span_capacity, epoch_us, emit_epoch=N
                     "position": row.position,
                     "input_tokens": count,
                     "selects_output": selects_output,
+                    "ready_wait_us": ready_wait_us,
+                    "hold_overrun_us": hold_overrun_us,
                 }
             )
-            row.max_ready_wait_us = max(
-                row.max_ready_wait_us, now_us - row.ready_since_us
-            )
+            row.max_ready_wait_us = max(row.max_ready_wait_us, ready_wait_us)
             row.position += count
             if is_prefill:
                 row.prefill_remaining -= count
@@ -195,6 +247,8 @@ def simulate(trace, *, policy, capacities, span_capacity, epoch_us, emit_epoch=N
             else "decode"
         )
         counts = {
+            "collection_us": now_us - collection_start_us,
+            "late_service_spans": late_service_spans,
             "prefill_tokens": prefill_tokens,
             "decode_tokens": decode_tokens,
             "selected_outputs": sum(span["selects_output"] for span in spans),
@@ -232,6 +286,9 @@ def simulate(trace, *, policy, capacities, span_capacity, epoch_us, emit_epoch=N
     useful_tokens = counters["prefill_tokens"] + counters["decode_tokens"]
     return {
         "policy": policy,
+        "admission": admission,
+        "max_hold_us": max_hold_us,
+        "max_hold_overrun_us": max_hold_overrun_us,
         "epochs": epochs,
         **counters,
         "useful_input_tokens": useful_tokens,
@@ -254,6 +311,13 @@ def main():
         "--capacities", default="32,64,128", help="ascending token shapes"
     )
     parser.add_argument("--span-capacity", type=int, default=8)
+    parser.add_argument("--admission", choices=ADMISSION_ORDERS, default="round-robin")
+    parser.add_argument(
+        "--max-hold-us",
+        type=int,
+        default=0,
+        help="ready-to-dispatch target; zero dispatches immediately",
+    )
     parser.add_argument(
         "--epoch-us",
         type=int,
@@ -276,6 +340,8 @@ def main():
             raise ValueError("capacities must be positive, ascending, and unique")
         if args.span_capacity < 1 or args.epoch_us < 1:
             raise ValueError("span-capacity and epoch-us must be positive")
+        if args.max_hold_us < 0:
+            raise ValueError("max-hold-us must be nonnegative")
         trace = load_trace(args.trace)
         policies = POLICIES if args.policy == "both" else (args.policy,)
         configuration = {
@@ -285,13 +351,16 @@ def main():
             "sessions": len(trace.sessions),
             "capacities": capacities,
             "span_capacity": args.span_capacity,
+            "admission": args.admission,
+            "max_hold_us": args.max_hold_us,
             "uniform_epoch_us": args.epoch_us,
             "assumptions": [
                 "Hypothetical uniform epoch time, not a throughput measurement.",
                 "Recorded output lengths and retained-prefix outcomes stay fixed.",
                 "All session state remains resident; no eviction or memory-capacity model.",
                 "Ordinary causal decoding; no speculative tokens, backpressure, or cancellation.",
-                "Round-robin admission and smallest-fitting token shape; no collection delay.",
+                "Smallest-fitting token shape; hold targets may be exceeded by queueing/nonpreemptible work.",
+                "All recorded request input is ready at arrival; no incremental tokenizer publication timings.",
             ],
         }
         with ExitStack() as stack:
@@ -312,6 +381,8 @@ def main():
                     capacities=capacities,
                     span_capacity=args.span_capacity,
                     epoch_us=args.epoch_us,
+                    admission=args.admission,
+                    max_hold_us=args.max_hold_us,
                     emit_epoch=(lambda epoch: ledger.write(json.dumps(epoch) + "\n"))
                     if ledger
                     else None,
