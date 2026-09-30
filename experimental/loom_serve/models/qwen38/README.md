@@ -202,6 +202,53 @@ No sanitizer or profiling belongs in these timings. Report window medians and
 compare each packed window with both neighboring controls. Tiny-context model
 comparisons establish neither long-context performance nor service/vLLM parity.
 
+### Retained coding-work replay
+
+`qwen_workload` accepts one already-rendered chat prompt file per resident row
+(up to eight). It replays the same retained prefixes before each measurement
+window, then consumes the remaining prompt text and generates until EOS or a
+per-row output cap. Rows initially decoding have their complete prompts seeded;
+the first `--prefill_rows` rows begin at `--retained_tokens`. Seeding is reported
+separately and excluded from the measured window.
+
+The bounded workload reserves one input for each ready decode row and divides
+the remaining token capacity among ready prefill rows. Both execution arms
+receive this same partition. `A` executes each span independently with ordinary
+prefill or decode; `B` submits all spans as one epoch. This compares completed
+model work, not HTTP transport, asynchronous arrivals, or an optimized serving
+policy. The independent baseline uses the supplied fixed-capacity prefill
+program; it does not select smaller shapes for partially filled spans.
+
+Compile equal prefill/epoch token capacities and sufficient span capacity. For
+example, after building the exact executable with the optimized flags below:
+
+```sh
+benchmark-lock -- bazel-bin/experimental/loom_serve/qwen_workload \
+  --prefill=/path/to/artifacts/prefill --decode=/path/to/artifacts/decode \
+  --epoch=/path/to/artifacts/epoch \
+  --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
+  --tokenizer=/path/to/tokenizer.json \
+  --prompt_file=/path/to/review-0.txt --prompt_file=/path/to/review-1.txt \
+  --prompt_file=/path/to/review-2.txt --prompt_file=/path/to/review-3.txt \
+  --retained_tokens=1024 --prefill_rows=2 --max_tokens=64 \
+  --order=ABABA --baseline=practical
+```
+
+JSONL records each completed epoch's spans, starting positions, prefill/decode
+input counts and selected outputs. Window records include total execution time,
+wall time including planning/logging, output IDs, EOS and final positions. Text
+decoding occurs afterward on stderr. A decode row's first prediction was made
+during seeding and is printed with its continuation but excluded from timed
+output counts. No cold model loading or prefix replay is hidden in a throughput
+number. The first packed invocation is included, not discarded as warmup.
+
+The practical decode family can change greedy trajectories relative to the
+prefill/packed math. The report preserves differences; equal-work comparisons
+require matching actual counts, not merely matching requested caps. For a
+correctness run, `--baseline=matched --order=AB` uses the prefill math for
+length-one isolated inputs too and fails on any selected-token mismatch. This
+matched baseline is an ownership oracle, not a decode-performance baseline.
+
 Selected-output routing and the Q6 four-row projection have focused checks:
 
 ```sh

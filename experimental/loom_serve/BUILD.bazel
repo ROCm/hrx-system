@@ -321,6 +321,23 @@ loom_cc_binary(
     ],
 )
 
+loom_cc_binary(
+    name = "qwen_workload",
+    testonly = True,
+    srcs = ["qwen_workload.c"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":qwen_model",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/tokenizer",
+    ],
+)
+
 loom_cc_library(
     name = "qwen_chat",
     srcs = ["qwen_chat.c"],
