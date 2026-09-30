@@ -161,6 +161,7 @@ index_assume = Op(
     examples=[
         "%n2 = index.assume %n [mul(%n, 16)] : index",
         "%end2 = index.assume %end [range(%end, 0, 4096)] : offset",
+        "%count2 = index.assume %count [range(%count, 0, %row_count)] : index",
         "%n2, %off2 = index.assume %n, %off [mul(%n, 16), mul(%off, 64)] : index, offset",
     ],
 )

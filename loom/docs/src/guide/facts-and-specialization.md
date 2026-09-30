@@ -124,6 +124,20 @@ The result equals the operand, but only `%bounded_expert_id` carries the new fac
 edge. Memory accesses, casts, loop transforms, and provider selection that need
 the proof consume the refined value.
 
+Range endpoints may be SSA values when one dynamic quantity is bounded by
+another. Each endpoint contributes the interval facts already known for that
+value, so the count below is non-negative and no greater than the maximum
+possible row count without repeating that maximum:
+
+```loom
+%rows = index.assume %rows0 [range(%rows0, 1, 709)] : index
+%count = index.assume %count0 [range(%count0, 0, %rows)] : index
+```
+
+This form keeps the relationship to `%rows` as well as the finite interval. It
+is useful for routed expert counts, page-table lengths, ragged tile extents, and
+other loaded metadata whose capacity is already represented by an SSA value.
+
 [`scalar.assume`](../reference/dialects/scalar/ops/assume.md) provides the same
 contract for fixed-width integer and floating-point payloads:
 

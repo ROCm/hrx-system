@@ -940,6 +940,44 @@ TEST_F(SymbolicExprTest, ProvesLessEqualFromTermFacts) {
   EXPECT_EQ(proof, LOOM_SYMBOLIC_PROOF_TRUE);
 }
 
+TEST_F(SymbolicExprTest, ProvesBoundsFromIdentityRangeEndpointFacts) {
+  const loom_value_id_t lower = DefineIndexValue();
+  const loom_value_id_t value = DefineIndexValue();
+  const loom_value_id_t upper = DefineIndexValue();
+  DefineFacts(lower, loom_value_facts_make(-128, -32, 1));
+  DefineFacts(upper, loom_value_facts_make(32, 4096, 1));
+  const loom_predicate_t predicate = {
+      /*.kind=*/LOOM_PREDICATE_RANGE,
+      /*.arg_count=*/3,
+      /*.arg_tags=*/
+      {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+      /*.reserved=*/{},
+      /*.args=*/{value, lower, upper},
+  };
+  const loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_op_t* assume_op = nullptr;
+  IREE_ASSERT_OK(loom_index_assume_build(&builder_, &value, 1, &predicate, 1,
+                                         &index_type, 1, LOOM_LOCATION_UNKNOWN,
+                                         &assume_op));
+  const loom_value_id_t assumed_value =
+      loom_index_assume_results(assume_op).values[0];
+
+  loom_symbolic_expr_t expression = {};
+  IREE_ASSERT_OK(loom_symbolic_expr_from_value(&expression_context_,
+                                               assumed_value, &expression));
+  loom_symbolic_expr_t lower_limit = {};
+  loom_symbolic_expr_constant(-128, &lower_limit);
+  loom_symbolic_expr_t upper_limit = {};
+  loom_symbolic_expr_constant(4096, &upper_limit);
+  loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+  IREE_ASSERT_OK(loom_symbolic_expr_prove_le(&expression_context_, &lower_limit,
+                                             &expression, &proof));
+  EXPECT_EQ(proof, LOOM_SYMBOLIC_PROOF_TRUE);
+  IREE_ASSERT_OK(loom_symbolic_expr_prove_le(&expression_context_, &expression,
+                                             &upper_limit, &proof));
+  EXPECT_EQ(proof, LOOM_SYMBOLIC_PROOF_TRUE);
+}
+
 TEST_F(SymbolicExprTest, ProvesLessEqualFromExpressionFactsAfterExpansion) {
   loom_value_id_t value_id = DefineIndexValue();
   loom_predicate_t predicate = {

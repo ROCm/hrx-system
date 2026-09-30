@@ -52,6 +52,7 @@ scalar_assume = Op(
     ],
     examples=[
         "%n2 = scalar.assume %n [mul(%n, 16)] : i64",
+        "%count2 = scalar.assume %count [range(%count, 0, %capacity)] : i32",
         "%n2, %k2 = scalar.assume %n, %k [mul(%n, 16), lt(%k, 1024)] : i64, i64",
         "%x2 = scalar.assume %x [finite(%x)] : f32",
     ],

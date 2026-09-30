@@ -413,6 +413,62 @@ static iree_status_t loom_symbolic_expr_predicate_arg_exact_integer(
 static iree_status_t loom_symbolic_expr_predicate_apply_to_value_facts(
     loom_symbolic_expr_context_t* context, const loom_predicate_t* predicate,
     loom_value_id_t value_id, loom_value_facts_t* inout_facts) {
+  if (predicate->kind == LOOM_PREDICATE_RANGE) {
+    if (predicate->arg_count != 3 ||
+        predicate->arg_tags[0] != LOOM_PRED_ARG_VALUE ||
+        predicate->args[0] < 0) {
+      return iree_ok_status();
+    }
+    const bool has_dynamic_lower =
+        predicate->arg_tags[1] == LOOM_PRED_ARG_VALUE &&
+        predicate->args[1] >= 0;
+    const bool has_dynamic_upper =
+        predicate->arg_tags[2] == LOOM_PRED_ARG_VALUE &&
+        predicate->args[2] >= 0;
+    if (!has_dynamic_lower && !has_dynamic_upper) {
+      // Literal-only ranges are already materialized in the fact table.
+      return iree_ok_status();
+    }
+    bool value_is_target = false;
+    IREE_RETURN_IF_ERROR(
+        loom_symbolic_values_match(context, (loom_value_id_t)predicate->args[0],
+                                   value_id, &value_is_target));
+    if (!value_is_target) {
+      return iree_ok_status();
+    }
+
+    // Retain literal endpoints directly, then consume interval facts for
+    // dynamic endpoints as lower <= value <= upper. Endpoint facts are
+    // borrowed evidence and remain read-only.
+    loom_value_facts_apply_predicate(inout_facts, predicate);
+    if (loom_value_facts_is_float(*inout_facts)) {
+      return iree_ok_status();
+    }
+    for (uint8_t endpoint_index = 1; endpoint_index < 3; ++endpoint_index) {
+      if (predicate->arg_tags[endpoint_index] != LOOM_PRED_ARG_VALUE ||
+          predicate->args[endpoint_index] < 0) {
+        continue;
+      }
+      loom_value_facts_t endpoint_facts = loom_value_facts_unknown();
+      IREE_RETURN_IF_ERROR(loom_symbolic_expr_context_lookup_facts(
+          context, (loom_value_id_t)predicate->args[endpoint_index],
+          &endpoint_facts));
+      if (loom_value_facts_is_float(endpoint_facts)) {
+        continue;
+      }
+      if (endpoint_index == 1) {
+        (void)loom_value_facts_refine_relation(
+            LOOM_PREDICATE_LE, endpoint_facts, *inout_facts,
+            /*lhs_result=*/NULL, inout_facts);
+      } else {
+        (void)loom_value_facts_refine_relation(LOOM_PREDICATE_LE, *inout_facts,
+                                               endpoint_facts, inout_facts,
+                                               /*rhs_result=*/NULL);
+      }
+    }
+    return iree_ok_status();
+  }
+
   if (predicate->arg_count != 2) {
     return iree_ok_status();
   }

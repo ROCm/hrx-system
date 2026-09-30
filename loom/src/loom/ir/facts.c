@@ -827,9 +827,10 @@ void loom_value_facts_apply_predicate(loom_value_facts_t* facts,
     }
   }
 
-  // This scalar fact lattice can consume predicates with literal bounds. Value
-  // operands are still useful to symbolic relation analysis, but treating a
-  // value ID as an integer literal here would corrupt range facts.
+  // This scalar fact lattice consumes literal bounds. RANGE retains either
+  // literal endpoint independently; higher-level relation analysis supplies
+  // facts for value endpoints. Treating a value ID as an integer literal here
+  // would corrupt range facts.
   if (predicate->kind == LOOM_PREDICATE_POW2 ||
       predicate->kind == LOOM_PREDICATE_NOT_NAN ||
       predicate->kind == LOOM_PREDICATE_NOT_INF ||
@@ -840,9 +841,7 @@ void loom_value_facts_apply_predicate(loom_value_facts_t* facts,
     }
   } else if (predicate->kind == LOOM_PREDICATE_RANGE) {
     if (predicate->arg_count < 3 ||
-        predicate->arg_tags[0] != LOOM_PRED_ARG_VALUE ||
-        predicate->arg_tags[1] != LOOM_PRED_ARG_CONST ||
-        predicate->arg_tags[2] != LOOM_PRED_ARG_CONST) {
+        predicate->arg_tags[0] != LOOM_PRED_ARG_VALUE) {
       return;
     }
   } else if (predicate->arg_count < 2 ||
@@ -954,10 +953,15 @@ void loom_value_facts_apply_predicate(loom_value_facts_t* facts,
       return;
 
     case LOOM_PREDICATE_RANGE: {
-      int64_t lo = predicate->args[1];
-      int64_t hi = predicate->args[2];
-      facts->range_lo = iree_max(facts->range_lo, lo);
-      facts->range_hi = iree_min(facts->range_hi, hi);
+      // A dynamic endpoint does not invalidate a literal endpoint on the
+      // other side. Higher-level fact producers refine value endpoints from
+      // their retained intervals.
+      if (predicate->arg_tags[1] == LOOM_PRED_ARG_CONST) {
+        facts->range_lo = iree_max(facts->range_lo, predicate->args[1]);
+      }
+      if (predicate->arg_tags[2] == LOOM_PRED_ARG_CONST) {
+        facts->range_hi = iree_min(facts->range_hi, predicate->args[2]);
+      }
       break;
     }
 
@@ -975,6 +979,10 @@ bool loom_value_facts_refine_relation(uint8_t predicate_kind,
                                       loom_value_facts_t rhs_facts,
                                       loom_value_facts_t* lhs_result,
                                       loom_value_facts_t* rhs_result) {
+  const uint32_t lhs_preserved_flags =
+      lhs_facts.flags & LOOM_VALUE_FACT_NON_ZERO;
+  const uint32_t rhs_preserved_flags =
+      rhs_facts.flags & LOOM_VALUE_FACT_NON_ZERO;
   if (predicate_kind == LOOM_PREDICATE_ULT ||
       predicate_kind == LOOM_PREDICATE_ULE ||
       predicate_kind == LOOM_PREDICATE_UGT ||
@@ -1053,9 +1061,11 @@ bool loom_value_facts_refine_relation(uint8_t predicate_kind,
   }
   if (lhs_result) {
     loom_value_facts_recompute_flags(lhs_result);
+    lhs_result->flags |= lhs_preserved_flags;
   }
   if (rhs_result && rhs_result != lhs_result) {
     loom_value_facts_recompute_flags(rhs_result);
+    rhs_result->flags |= rhs_preserved_flags;
   }
   return true;
 }

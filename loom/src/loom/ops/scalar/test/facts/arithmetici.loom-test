@@ -104,6 +104,24 @@ func.def @assume_relational_external_bounds(%value: i32, %upper0: i32, %lower0: 
 
 // ====
 
+// A literal lower endpoint remains useful when the upper endpoint is a
+// dynamically bounded scalar value.
+func.def @assume_symbolic_range_bound(%value: i32, %upper0: i32) -> (i64, i64) {
+  %upper = scalar.assume %upper0 [range(%upper0, 32, 2048)] : i32
+  %bounded = scalar.assume %value [range(%value, 0, %upper)] : i32
+  %bounded_lo = test.fact_range_lo %bounded : i32 -> i64
+  %bounded_hi = test.fact_range_hi %bounded : i32 -> i64
+  func.return %bounded_lo, %bounded_hi : i64, i64
+}
+// ----
+func.def @assume_symbolic_range_bound(%value: i32, %upper0: i32) -> (i64, i64) {
+  %bounded_lo = scalar.constant 0 : i64
+  %bounded_hi = scalar.constant 2048 : i64
+  func.return %bounded_lo, %bounded_hi : i64, i64
+}
+
+// ====
+
 // remui is bounded by the non-negative dividend as well as by the dynamic
 // divisor range.
 func.def @remui_dynamic_divisor_uses_dividend_bound(%x0: i32, %d0: i32) -> (i64, i64) {

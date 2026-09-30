@@ -126,6 +126,36 @@ static bool loom_value_fact_alias_map_resolve(
   return loom_value_fact_table_try_lookup(table, value_id, out_facts);
 }
 
+static void loom_value_fact_alias_map_refine_relation(
+    const loom_value_fact_table_t* table,
+    const loom_value_fact_alias_map_t* alias_map, uint8_t predicate_kind,
+    loom_value_id_t lhs, loom_value_id_t rhs, loom_value_facts_t* inout_facts) {
+  bool lhs_is_alias = false;
+  bool rhs_is_alias = false;
+  uint16_t lhs_ordinal = 0;
+  uint16_t rhs_ordinal = 0;
+  loom_value_facts_t lhs_facts = loom_value_facts_unknown();
+  loom_value_facts_t rhs_facts = loom_value_facts_unknown();
+  if (!loom_value_fact_alias_map_resolve(table, alias_map, inout_facts, lhs,
+                                         &lhs_is_alias, &lhs_ordinal,
+                                         &lhs_facts) ||
+      !loom_value_fact_alias_map_resolve(table, alias_map, inout_facts, rhs,
+                                         &rhs_is_alias, &rhs_ordinal,
+                                         &rhs_facts) ||
+      (!lhs_is_alias && !rhs_is_alias) ||
+      loom_value_facts_is_float(lhs_facts) ||
+      loom_value_facts_is_float(rhs_facts)) {
+    return;
+  }
+
+  loom_value_facts_t* lhs_result =
+      lhs_is_alias ? &inout_facts[lhs_ordinal] : NULL;
+  loom_value_facts_t* rhs_result =
+      rhs_is_alias ? &inout_facts[rhs_ordinal] : NULL;
+  (void)loom_value_facts_refine_relation(predicate_kind, lhs_facts, rhs_facts,
+                                         lhs_result, rhs_result);
+}
+
 static void loom_value_fact_table_apply_alias_predicates_with_map(
     const loom_value_fact_table_t* table,
     const loom_value_fact_alias_map_t* alias_map,
@@ -174,42 +204,43 @@ static void loom_value_fact_table_apply_alias_predicates_with_map(
   }
 
   // Relational predicates constrain aliases from the known interval of their
-  // counterpart. External facts are read-only; only aliases have result slots.
+  // counterpart. RANGE decomposes into lower <= value <= upper so each dynamic
+  // endpoint contributes independently. External facts are read-only; only
+  // aliases have result slots.
   for (uint16_t i = 0; i < predicate_count; ++i) {
     const loom_predicate_t* predicate = &predicates[i];
+    if (predicate->kind == LOOM_PREDICATE_RANGE) {
+      if (predicate->arg_count == 3 &&
+          predicate->arg_tags[0] == LOOM_PRED_ARG_VALUE &&
+          predicate->args[0] >= 0) {
+        // Literal endpoints were already applied above. Only dynamic
+        // endpoints require relational refinement.
+        if (predicate->arg_tags[1] == LOOM_PRED_ARG_VALUE &&
+            predicate->args[1] >= 0) {
+          loom_value_fact_alias_map_refine_relation(
+              table, alias_map, LOOM_PREDICATE_LE,
+              (loom_value_id_t)predicate->args[1],
+              (loom_value_id_t)predicate->args[0], inout_facts);
+        }
+        if (predicate->arg_tags[2] == LOOM_PRED_ARG_VALUE &&
+            predicate->args[2] >= 0) {
+          loom_value_fact_alias_map_refine_relation(
+              table, alias_map, LOOM_PREDICATE_LE,
+              (loom_value_id_t)predicate->args[0],
+              (loom_value_id_t)predicate->args[2], inout_facts);
+        }
+      }
+      continue;
+    }
     if (predicate->arg_count != 2 ||
         predicate->arg_tags[0] != LOOM_PRED_ARG_VALUE ||
         predicate->arg_tags[1] != LOOM_PRED_ARG_VALUE ||
         predicate->args[0] < 0 || predicate->args[1] < 0) {
       continue;
     }
-
-    bool lhs_is_alias = false;
-    bool rhs_is_alias = false;
-    uint16_t lhs_ordinal = 0;
-    uint16_t rhs_ordinal = 0;
-    loom_value_facts_t lhs_facts = loom_value_facts_unknown();
-    loom_value_facts_t rhs_facts = loom_value_facts_unknown();
-    if (!loom_value_fact_alias_map_resolve(
-            table, alias_map, inout_facts, (loom_value_id_t)predicate->args[0],
-            &lhs_is_alias, &lhs_ordinal, &lhs_facts) ||
-        !loom_value_fact_alias_map_resolve(
-            table, alias_map, inout_facts, (loom_value_id_t)predicate->args[1],
-            &rhs_is_alias, &rhs_ordinal, &rhs_facts) ||
-        (!lhs_is_alias && !rhs_is_alias)) {
-      continue;
-    }
-    if (loom_value_facts_is_float(lhs_facts) ||
-        loom_value_facts_is_float(rhs_facts)) {
-      continue;
-    }
-
-    loom_value_facts_t* lhs_result =
-        lhs_is_alias ? &inout_facts[lhs_ordinal] : NULL;
-    loom_value_facts_t* rhs_result =
-        rhs_is_alias ? &inout_facts[rhs_ordinal] : NULL;
-    loom_value_facts_refine_relation(predicate->kind, lhs_facts, rhs_facts,
-                                     lhs_result, rhs_result);
+    loom_value_fact_alias_map_refine_relation(
+        table, alias_map, predicate->kind, (loom_value_id_t)predicate->args[0],
+        (loom_value_id_t)predicate->args[1], inout_facts);
   }
 }
 

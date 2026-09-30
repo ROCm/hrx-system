@@ -117,6 +117,30 @@ func.def @assume_relational_external_bounds(%value: index, %upper0: index, %lowe
 
 // ====
 
+// Dynamic RANGE endpoints contribute their retained intervals independently.
+// The mixed form matches descriptor counts bounded by a dynamic row count.
+func.def @assume_symbolic_range_bounds(%value: index, %lower0: index, %upper0: index) -> (i64, i64, i64, i64) {
+  %lower = index.assume %lower0 [range(%lower0, -128, -32)] : index
+  %upper = index.assume %upper0 [range(%upper0, 32, 4096)] : index
+  %bounded = index.assume %value [range(%value, %lower, %upper)] : index
+  %mixed = index.assume %value [range(%value, 0, %upper)] : index
+  %bounded_lo = test.fact_range_lo %bounded : index -> i64
+  %bounded_hi = test.fact_range_hi %bounded : index -> i64
+  %mixed_lo = test.fact_range_lo %mixed : index -> i64
+  %mixed_hi = test.fact_range_hi %mixed : index -> i64
+  func.return %bounded_lo, %bounded_hi, %mixed_lo, %mixed_hi : i64, i64, i64, i64
+}
+// ----
+func.def @assume_symbolic_range_bounds(%value: index, %lower0: index, %upper0: index) -> (i64, i64, i64, i64) {
+  %bounded_lo = scalar.constant -128 : i64
+  %bounded_hi = scalar.constant 4096 : i64
+  %mixed_lo = scalar.constant 0 : i64
+  %mixed_hi = scalar.constant 4096 : i64
+  func.return %bounded_lo, %bounded_hi, %mixed_lo, %mixed_hi : i64, i64, i64, i64
+}
+
+// ====
+
 // An external launch-capacity bound survives multiplication and unsigned
 // quotient transfer without repeating its literal range on the coordinate.
 func.def @assume_external_bound_through_quotient(%coordinate0: index, %capacity0: index) -> (i64, i64) {

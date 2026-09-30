@@ -994,6 +994,32 @@ TEST(FactsApplyPredicate, ValueBoundDoesNotCorruptRange) {
   EXPECT_TRUE(loom_value_facts_is_unknown(f));
 }
 
+TEST(FactsApplyPredicate, RangeRetainsEachLiteralEndpoint) {
+  loom_predicate_t predicate = make_predicate_range(10, 100);
+
+  predicate.arg_tags[2] = LOOM_PRED_ARG_VALUE;
+  predicate.args[2] = 7;
+  loom_value_facts_t literal_lower = loom_value_facts_unknown();
+  loom_value_facts_apply_predicate(&literal_lower, &predicate);
+  EXPECT_EQ(literal_lower.range_lo, 10);
+  EXPECT_EQ(literal_lower.range_hi, INT64_MAX);
+
+  predicate.arg_tags[1] = LOOM_PRED_ARG_VALUE;
+  predicate.args[1] = 8;
+  predicate.arg_tags[2] = LOOM_PRED_ARG_CONST;
+  predicate.args[2] = 100;
+  loom_value_facts_t literal_upper = loom_value_facts_unknown();
+  loom_value_facts_apply_predicate(&literal_upper, &predicate);
+  EXPECT_EQ(literal_upper.range_lo, INT64_MIN);
+  EXPECT_EQ(literal_upper.range_hi, 100);
+
+  predicate.arg_tags[2] = LOOM_PRED_ARG_VALUE;
+  predicate.args[2] = 9;
+  loom_value_facts_t dynamic_endpoints = loom_value_facts_unknown();
+  loom_value_facts_apply_predicate(&dynamic_endpoints, &predicate);
+  EXPECT_TRUE(loom_value_facts_is_unknown(dynamic_endpoints));
+}
+
 TEST(FactsApplyPredicate, NeIsRepresentedButDoesNotTightenInterval) {
   loom_value_facts_t f = loom_value_facts_unknown();
   loom_predicate_t pred = make_predicate_1(LOOM_PREDICATE_NE, 42);
@@ -1295,6 +1321,20 @@ TEST(FactsApplyPredicate, DivisibleBoundsPreserveUnboundedAndOverflowDomains) {
     EXPECT_EQ(facts.range_hi, test_case.expected_upper);
     EXPECT_EQ(facts.known_divisor, test_case.divisor);
   }
+}
+
+TEST(FactsRefineRelation, NarrowingRetainsExplicitNonzeroFacts) {
+  loom_value_facts_t nonzero = loom_value_facts_make(0, 255, 1);
+  nonzero.flags |= LOOM_VALUE_FACT_NON_ZERO;
+  const loom_value_facts_t upper = loom_value_facts_make(32, 4096, 1);
+  EXPECT_TRUE(loom_value_facts_refine_relation(LOOM_PREDICATE_LE, nonzero,
+                                               upper, &nonzero, nullptr));
+  EXPECT_TRUE(loom_value_facts_is_non_zero(nonzero));
+
+  const loom_value_facts_t lower = loom_value_facts_make(-128, -32, 1);
+  EXPECT_TRUE(loom_value_facts_refine_relation(LOOM_PREDICATE_LE, lower,
+                                               nonzero, nullptr, &nonzero));
+  EXPECT_TRUE(loom_value_facts_is_non_zero(nonzero));
 }
 
 //===----------------------------------------------------------------------===//
