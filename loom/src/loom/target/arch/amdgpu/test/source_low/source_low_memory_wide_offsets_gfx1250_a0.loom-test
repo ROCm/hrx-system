@@ -1,5 +1,5 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/memory_wide_offsets.loom-test
-// RUN: emit source-low target=amdgpu:gfx1250-a0 output=low
+// RUN: emit source-low target=amdgpu:gfx1250-strict output=low
 
 kernel.def @wide_offset_unsigned_index() {
   %unit = index.constant 1 : index

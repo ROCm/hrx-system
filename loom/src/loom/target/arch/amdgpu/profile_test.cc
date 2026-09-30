@@ -119,7 +119,7 @@ TEST(AmdgpuTargetProfileTest, ProjectsCompilerOwnedTypedFacts) {
 
 TEST(AmdgpuTargetProfileTest, SelectsTargetLocalDescriptorContract) {
   const loom_amdgpu_target_info_t* gfx1250 = LookupTarget("gfx1250");
-  const loom_amdgpu_target_info_t* gfx1250_a0 = LookupTarget("gfx1250-a0");
+  const loom_amdgpu_target_info_t* gfx1250_a0 = LookupTarget("gfx1250-strict");
   ASSERT_NE(gfx1250->descriptor_set_ordinal,
             gfx1250_a0->descriptor_set_ordinal);
   EXPECT_FALSE(iree_string_view_equal(gfx1250->descriptor_set_key,

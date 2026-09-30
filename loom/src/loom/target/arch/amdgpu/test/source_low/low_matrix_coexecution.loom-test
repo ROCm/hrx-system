@@ -254,7 +254,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_scaled_
 // instruction on A0.
 // RUN: emit amdgpu-assembly @gfx1250_a0_fp4_uses_category_zero_release_rule strategy=source fixed=%lhs:physical_register:0:8 fixed=%rhs:physical_register:8:8 fixed=%acc:physical_register:16:8 fixed=%result:physical_register:16:8 fixed=%addend:physical_register:24:1 fixed=%sum:physical_register:25:1
 
-amdgpu.target<gfx1250-a0> @gfx1250_a0_target
+amdgpu.target<gfx1250-strict> @gfx1250_a0_target
 
 low.func.def target<amdgpu.rdna4.gfx1250_a0.core>(@gfx1250_a0_target) @gfx1250_a0_fp4_uses_category_zero_release_rule(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm {
   %result = v_wmma_f32_16x16x128_f8f6f4_f4_f4 %lhs, %rhs, %acc {matrix_a_fmt = "fp4", matrix_b_fmt = "fp4"}
@@ -279,7 +279,7 @@ low.func.def target<amdgpu.rdna4.gfx1250_a0.core>(@gfx1250_a0_target) @gfx1250_a
 // f8 therefore uses the A0 16-cycle category-one release rule.
 // RUN: emit amdgpu-assembly @gfx1250_a0_f8f6f4_result_to_valu strategy=source fixed=%lhs:physical_register:0:16 fixed=%rhs:physical_register:16:8 fixed=%acc:physical_register:24:8 fixed=%result:physical_register:24:8 fixed=%addend:physical_register:32:1 fixed=%sum:physical_register:33:1
 
-amdgpu.target<gfx1250-a0> @gfx1250_a0_target
+amdgpu.target<gfx1250-strict> @gfx1250_a0_target
 
 low.func.def target<amdgpu.rdna4.gfx1250_a0.core>(@gfx1250_a0_target) @gfx1250_a0_f8f6f4_result_to_valu(%lhs: reg<amdgpu.vgpr x16>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm {
   %result = v_wmma_f32_16x16x128_f8f6f4_f8_f4 %lhs, %rhs, %acc {matrix_a_fmt = "bf8", matrix_b_fmt = "fp4"}

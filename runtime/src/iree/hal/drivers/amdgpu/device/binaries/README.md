@@ -39,14 +39,12 @@ ordered artifact set. Some ROCm releases may not yet support every architecture
 recorded in the map; in that case the script fails before compilation and
 reports the unsupported architecture names.
 
-`gfx1250` revision A0 is the first qualified artifact. Selecting exact
-`gfx1250`, `gfx12-5-generic`, or a family containing `gfx1250` builds
-`gfx1250-a0` before `gfx12-5-generic`. The A0 artifact uses `gfx1250` as its
-LLVM architecture and enforces the A0 override during both source compilation
-and LTO code generation. At runtime an A0 physical identity selects only that
-artifact; it cannot fall through to the B0-qualified generic binary. A
-toolchain that recognizes the `gfx1250` processor but predates the A0 override
-fails during option parsing instead of silently producing B0 code.
+Selecting `gfx1250`, `gfx12-5-generic`, or a family containing `gfx1250`
+builds a native `gfx1250-strict` artifact alongside exact `gfx1250` and generic
+`gfx12-5-generic` artifacts. ROCr reports the strict ISA for A0 only when
+`HSA_DISABLE_GFX12_STRICT=0`; the driver uses that reported ISA to select the
+strict artifact. Strict code objects use LLVM's distinct `gfx1250-strict`
+machine ID. The B0-qualified generic binary is not a fallback for strict A0.
 
 Tool discovery is intentionally compatible with both in-tree and out-of-tree
 LLVM flows. Explicit `--clang`, `--llvm-link`, `--lld`, and `--llvm-objcopy`

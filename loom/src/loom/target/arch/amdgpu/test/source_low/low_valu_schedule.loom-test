@@ -340,7 +340,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @independent_chains(%a: 
 
 // RUN: emit amdgpu-assembly @independent_chains strategy=resource-stall
 
-amdgpu.target<gfx1250-a0> @target
+amdgpu.target<gfx1250-strict> @target
 
 low.func.def target<amdgpu.rdna4.gfx1250_a0.core>(@target) @independent_chains(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>, %d: reg<amdgpu.vgpr>, %e: reg<amdgpu.vgpr>, %bias: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %a_sum = v_add3_u32 %a, %bias, %bias

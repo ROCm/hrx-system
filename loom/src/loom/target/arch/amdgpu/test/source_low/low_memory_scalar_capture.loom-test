@@ -220,7 +220,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @buffer_scalar_capture_g
 // ====
 // RUN: emit amdgpu-assembly @buffer_scalar_capture_gfx1250_a0 strategy=source fixed=%resource:physical_register:32:4 fixed=%offset:physical_register:40:1 fixed=%next_offset:physical_register:40:1 fixed=%first:physical_register:8:1 fixed=%second:physical_register:12:1
 
-amdgpu.target<gfx1250-a0> @target
+amdgpu.target<gfx1250-strict> @target
 
 low.func.def target<amdgpu.rdna4.gfx1250_a0.core>(@target) @buffer_scalar_capture_gfx1250_a0(%resource: reg<amdgpu.sgpr x4>, %address: reg<amdgpu.vgpr>, %offset: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %first = buffer_load_dword %resource, %address, %offset

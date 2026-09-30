@@ -690,7 +690,7 @@ typedef struct loom_amdgpu_processor_info_t {
 
 // One exact, generic, or overlay compiler target.
 typedef struct loom_amdgpu_target_info_t {
-  // Canonical target selector such as `gfx1151` or `gfx1250-a0`.
+  // Canonical target selector such as `gfx1151` or `gfx1250-strict`.
   iree_string_view_t name;
   // Numeric selector value used by amdgpu.target.
   uint32_t target_kind;

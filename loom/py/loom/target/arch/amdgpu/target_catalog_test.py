@@ -48,22 +48,18 @@ def test_target_id_features_cover_exact_and_generic_processors() -> None:
     assert target_id_features_for_processor("gfx1151") == ()
 
 
-def test_target_overlay_selects_one_backend_processor() -> None:
-    assert target_processor("gfx1250-a0") == "gfx1250"
+def test_strict_target_selects_native_backend_processor() -> None:
+    assert target_processor("gfx1250-strict") == "gfx1250-strict"
     assert target_processor("gfx1250") == "gfx1250"
     assert target_processor("gfx12-5-generic") == "gfx12-5-generic"
     assert target_processor("gfx-future") is None
 
 
-def test_physical_revision_resolves_to_canonical_target() -> None:
-    assert processor_has_physical_target_infos("gfx1250")
+def test_strict_isa_does_not_require_physical_revision() -> None:
+    assert not processor_has_physical_target_infos("gfx1250")
     assert not processor_has_physical_target_infos("gfx1100")
-    assert physical_target_info("gfx1250", 0) == AmdgpuPhysicalTargetInfo(
-        "gfx1250", 0, "gfx1250-a0"
-    )
-    assert physical_target_info("gfx1250", 1) == AmdgpuPhysicalTargetInfo(
-        "gfx1250", 1, "gfx1250"
-    )
+    assert physical_target_info("gfx1250", 0) is None
+    assert physical_target_info("gfx1250", 1) is None
     assert physical_target_info("gfx1250", 2) is None
 
 

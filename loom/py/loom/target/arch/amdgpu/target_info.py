@@ -1641,6 +1641,18 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         ),
     ),
     gfx125x_processor_info(
+        "gfx1250-strict",
+        0x0EB,
+        elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
+        processor_flags=AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE,
+        lds_bank_service_models=(
+            AMDGPU_LDS_BANK_SERVICE_MODELS_WAVE32_B128_QUAD_PHASES
+        ),
+        matrix_coexecution_profile=(
+            AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_4_8_16
+        ),
+    ),
+    gfx125x_processor_info(
         "gfx1251",
         0x05A,
         descriptor_set_key="amdgpu.rdna4.gfx1251.core",
@@ -1866,8 +1878,8 @@ AMDGPU_TARGET_INFOS: tuple[AmdgpuTargetInfo, ...] = (
         default_for_descriptor_set=True,
     ),
     AmdgpuTargetInfo(
-        target="gfx1250-a0",
-        processor="gfx1250",
+        target="gfx1250-strict",
+        processor="gfx1250-strict",
         enum_value=24,
         doc="RDNA 4 gfx1250 A0 target-overlay row.",
         default_for_descriptor_set=True,

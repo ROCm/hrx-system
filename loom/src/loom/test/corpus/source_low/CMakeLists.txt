@@ -34,7 +34,7 @@ loom_check_compile_tests(
     loom::target::amdgpu::gfx1200
     loom::target::amdgpu::gfx1201
     loom::target::amdgpu::gfx1250
-    loom::target::amdgpu::gfx1250-a0
+    loom::target::amdgpu::gfx1250-strict
     loom::target::amdgpu::gfx1251
     loom::target::amdgpu::gfx9-4-generic
     loom::target::amdgpu::gfx940
@@ -79,7 +79,7 @@ loom_check_compile_tests(
     loom::target::amdgpu::gfx1200
     loom::target::amdgpu::gfx1201
     loom::target::amdgpu::gfx1250
-    loom::target::amdgpu::gfx1250-a0
+    loom::target::amdgpu::gfx1250-strict
     loom::target::amdgpu::gfx1251
     loom::target::amdgpu::gfx9-4-generic
     loom::target::amdgpu::gfx940

@@ -407,7 +407,7 @@ TEST_F(AmdgpuDeviceProviderTest, PreservesAuthoredExactTarget) {
 }
 
 TEST_F(AmdgpuDeviceProviderTest, PreservesTargetOverlay) {
-  const loom_amdgpu_target_info_t* target_info = LookupTarget("gfx1250-a0");
+  const loom_amdgpu_target_info_t* target_info = LookupTarget("gfx1250-strict");
   loom_amdgpu_target_identity_t identity = {};
   loom_amdgpu_target_identity_initialize(target_info, &identity);
   char target_key_storage[128] = {};
@@ -417,11 +417,11 @@ TEST_F(AmdgpuDeviceProviderTest, PreservesTargetOverlay) {
   IREE_ASSERT_OK(Initialize(target_key, IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT));
 
   const loom_amdgpu_target_facts_t requirement =
-      MakeTargetRequirement("gfx1250-a0");
+      MakeTargetRequirement("gfx1250-strict");
   loom_device_target_t target = {};
   IREE_ASSERT_OK(SelectCompatibleTarget(requirement, &target));
   ExpectSelectedTarget(target, IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
-                       IREE_SV("gfx1250-a0"));
+                       IREE_SV("gfx1250-strict"));
   const loom_amdgpu_target_profile_t* profile =
       loom_amdgpu_target_profile_cast(target.artifact_target.target_profile);
   ASSERT_NE(profile, nullptr);
@@ -432,7 +432,7 @@ TEST_F(AmdgpuDeviceProviderTest, RejectsTargetOverlayMismatch) {
   IREE_ASSERT_OK(
       Initialize(IREE_SV("gfx1250"), IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT));
   const loom_amdgpu_target_facts_t requirement =
-      MakeTargetRequirement("gfx1250-a0");
+      MakeTargetRequirement("gfx1250-strict");
   loom_device_target_t target = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
                         SelectCompatibleTarget(requirement, &target));

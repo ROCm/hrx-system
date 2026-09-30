@@ -85,22 +85,9 @@ class TargetMapDataTest(unittest.TestCase):
         )
         self.assertEqual(target_id_features_for_processor("gfx1151"), ())
 
-    def test_target_overlay_selects_one_backend_processor(self):
-        self.assertEqual(
-            AMDGPU_TARGET_OVERLAY_INFOS,
-            (
-                AmdgpuTargetOverlayInfo(
-                    target="gfx1250-a0",
-                    processor="gfx1250",
-                    compile_options=(
-                        "-mllvm",
-                        "-amdgpu-gfx1250-b0-specific=false",
-                    ),
-                    link_options=("-plugin-opt=-amdgpu-gfx1250-b0-specific=false",),
-                ),
-            ),
-        )
-        self.assertEqual(target_processor("gfx1250-a0"), "gfx1250")
+    def test_strict_target_selects_native_backend_processor(self):
+        self.assertEqual(AMDGPU_TARGET_OVERLAY_INFOS, ())
+        self.assertEqual(target_processor("gfx1250-strict"), "gfx1250-strict")
         self.assertEqual(target_processor("gfx1250"), "gfx1250")
         self.assertEqual(target_processor("gfx12-5-generic"), "gfx12-5-generic")
         self.assertIsNone(target_processor("gfx-future"))
@@ -114,17 +101,11 @@ class TargetMapDataTest(unittest.TestCase):
                 (),
             )
 
-    def test_physical_revision_resolves_to_a_canonical_target(self):
-        self.assertTrue(processor_has_physical_target_infos("gfx1250"))
+    def test_strict_isa_does_not_require_physical_revision(self):
+        self.assertFalse(processor_has_physical_target_infos("gfx1250"))
         self.assertFalse(processor_has_physical_target_infos("gfx1100"))
-        self.assertEqual(
-            physical_target_info("gfx1250", 0),
-            AmdgpuPhysicalTargetInfo("gfx1250", 0, "gfx1250-a0"),
-        )
-        self.assertEqual(
-            physical_target_info("gfx1250", 1),
-            AmdgpuPhysicalTargetInfo("gfx1250", 1, "gfx1250"),
-        )
+        self.assertIsNone(physical_target_info("gfx1250", 0))
+        self.assertIsNone(physical_target_info("gfx1250", 1))
         self.assertIsNone(physical_target_info("gfx1250", 2))
         self.assertIsNone(physical_target_info("gfx1100", 4))
 

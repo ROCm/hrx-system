@@ -62,12 +62,10 @@ TEST(SelectionTest, SelectsFeatureQualifiedExactTarget) {
   iree_hal_device_spec_release(device_spec);
 }
 
-TEST(SelectionTest, AdvertisesResolvedPhysicalTarget) {
+TEST(SelectionTest, AdvertisesStrictIsaTarget) {
   iree_hal_amdgpu_target_identity_t identity;
   IREE_ASSERT_OK(iree_hal_amdgpu_target_identity_parse_artifact_key(
-      IREE_SV("gfx1250"), &identity));
-  IREE_ASSERT_OK(
-      iree_hal_amdgpu_target_identity_resolve_physical_target(0, &identity));
+      IREE_SV("gfx1250-strict"), &identity));
 
   iree_hal_device_spec_builder_t builder;
   iree_hal_device_spec_builder_initialize(iree_allocator_system(), &builder);
@@ -79,15 +77,13 @@ TEST(SelectionTest, AdvertisesResolvedPhysicalTarget) {
 
   const iree_hal_device_executable_spec_t* executable_spec =
       iree_hal_device_spec_executables(device_spec);
-  ASSERT_EQ(executable_spec->target_count, 2u);
+  ASSERT_EQ(executable_spec->target_count, 1u);
   EXPECT_TRUE(iree_string_view_equal(executable_spec->targets[0].target_key,
-                                     IREE_SV("gfx1250-a0")));
-  EXPECT_TRUE(iree_string_view_equal(executable_spec->targets[1].target_key,
-                                     IREE_SV("gfx12-5-generic")));
+                                     IREE_SV("gfx1250-strict")));
 
   iree_hal_executable_target_selection_result_t result;
   IREE_ASSERT_OK(iree_hal_amdgpu_device_spec_select_executable_target(
-      device_spec, IREE_SV("gfx1250-a0"),
+      device_spec, IREE_SV("gfx1250-strict"),
       /*physical_device_affinity=*/1ull, &result));
   EXPECT_EQ(result.outcome,
             IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED);

@@ -66,15 +66,15 @@ TEST(DeviceLibraryTargetTest,
 }
 
 TEST(DeviceLibraryTargetTest, Gfx1250A0SelectsOnlyExactVariant) {
-  const auto values = CandidateValues("amdgcn-amd-amdhsa--gfx1250");
+  const auto values = CandidateValues("amdgcn-amd-amdhsa--gfx1250-strict");
 
   ASSERT_EQ(values.size(), 1u);
-  EXPECT_EQ(values[0], "gfx1250-a0");
+  EXPECT_EQ(values[0], "gfx1250-strict");
 }
 
 TEST(DeviceLibraryTargetTest, Gfx1250A0RejectsGenericAlternateIsa) {
   const auto physical_identity =
-      ResolvedPhysicalIdentity("amdgcn-amd-amdhsa--gfx1250", 0);
+      ResolvedPhysicalIdentity("amdgcn-amd-amdhsa--gfx1250-strict", 0);
   const auto generic_isa_identity =
       ResolvedPhysicalIdentity("amdgcn-amd-amdhsa--gfx12-5-generic", 0);
 
@@ -91,7 +91,7 @@ TEST(DeviceLibraryTargetTest, Gfx1250B0IncludesGenericFallback) {
 
 TEST(DeviceLibraryTargetTest, MatchesOnlyWholeFileArchSegments) {
   EXPECT_TRUE(iree_hal_amdgpu_device_library_target_matches_file_arch(
-      IREE_SV("gfx1250-a0.so"), IREE_SV("gfx1250-a0")));
+      IREE_SV("gfx1250-strict.so"), IREE_SV("gfx1250-strict")));
   EXPECT_TRUE(iree_hal_amdgpu_device_library_target_matches_file_arch(
       IREE_SV("gfx9-4-generic.so"), IREE_SV("gfx9-4-generic")));
   EXPECT_TRUE(iree_hal_amdgpu_device_library_target_matches_file_arch(
@@ -100,7 +100,7 @@ TEST(DeviceLibraryTargetTest, MatchesOnlyWholeFileArchSegments) {
   EXPECT_FALSE(iree_hal_amdgpu_device_library_target_matches_file_arch(
       IREE_SV("gfx942x.so"), IREE_SV("gfx942")));
   EXPECT_FALSE(iree_hal_amdgpu_device_library_target_matches_file_arch(
-      IREE_SV("gfx1250-a0.so"), IREE_SV("gfx1250")));
+      IREE_SV("gfx1250-strict.so"), IREE_SV("gfx1250")));
   EXPECT_FALSE(iree_hal_amdgpu_device_library_target_matches_file_arch(
       IREE_SV("gfx9-4-generic.so"), IREE_SV("gfx9-4-generic:sramecc+:xnack-")));
   EXPECT_FALSE(iree_hal_amdgpu_device_library_target_matches_file_arch(

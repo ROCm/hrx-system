@@ -123,7 +123,7 @@ low.func.def target<amdgpu.gfx12.generic.core>(@target) @reload_wide_address(%un
 
 // ====
 
-amdgpu.target<gfx1250-a0> @target
+amdgpu.target<gfx1250-strict> @target
 
 low.func.def target<amdgpu.rdna4.gfx1250_a0.core>(@target) @reload_wide_address(%uniform: reg<amdgpu.sgpr x2>, %varying: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %storage = storage {byte_alignment = 8, byte_length = 16} : low.storage<private>

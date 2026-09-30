@@ -59,6 +59,8 @@ static const iree_hal_amdgpu_physical_target_mapping_t
   {IREE_SVL(processor), asic_revision, IREE_SVL(target)},
 #include "iree/hal/drivers/amdgpu/target/identity_catalog.inl"
 #undef IREE_AMDGPU_PHYSICAL_TARGET
+        // Keep the table nonempty when all targets have distinct ISA names.
+        {.processor = IREE_SVL(""), .target = IREE_SVL("")},
 };
 
 static bool iree_hal_amdgpu_parse_decimal_digit(char c, uint32_t* out_value) {
@@ -107,6 +109,12 @@ static bool iree_hal_amdgpu_parse_exact_processor(
     iree_string_view_t processor,
     iree_hal_amdgpu_gfxip_version_t* out_version) {
   memset(out_version, 0, sizeof(*out_version));
+  if (iree_string_view_equal(processor, IREE_SV("gfx1250-strict"))) {
+    out_version->major = 12;
+    out_version->minor = 5;
+    out_version->stepping = 0;
+    return true;
+  }
   if (!iree_string_view_consume_prefix(&processor, IREE_SV("gfx"))) {
     return false;
   }
@@ -154,7 +162,7 @@ static const iree_hal_amdgpu_physical_target_mapping_t*
 iree_hal_amdgpu_target_find_physical_mapping(iree_string_view_t processor,
                                              uint32_t asic_revision) {
   for (iree_host_size_t i = 0;
-       i < IREE_ARRAYSIZE(iree_hal_amdgpu_physical_target_mappings); ++i) {
+       i < IREE_ARRAYSIZE(iree_hal_amdgpu_physical_target_mappings) - 1; ++i) {
     const iree_hal_amdgpu_physical_target_mapping_t* mapping =
         &iree_hal_amdgpu_physical_target_mappings[i];
     if (iree_string_view_equal(processor, mapping->processor) &&
@@ -168,7 +176,7 @@ iree_hal_amdgpu_target_find_physical_mapping(iree_string_view_t processor,
 static bool iree_hal_amdgpu_target_has_physical_mappings(
     iree_string_view_t processor) {
   for (iree_host_size_t i = 0;
-       i < IREE_ARRAYSIZE(iree_hal_amdgpu_physical_target_mappings); ++i) {
+       i < IREE_ARRAYSIZE(iree_hal_amdgpu_physical_target_mappings) - 1; ++i) {
     if (iree_string_view_equal(
             processor, iree_hal_amdgpu_physical_target_mappings[i].processor)) {
       return true;

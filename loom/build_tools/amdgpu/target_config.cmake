@@ -26,6 +26,7 @@ set(_LOOM_AMDGPU_SUPPORTED_EXACT_PROCESSORS
   "gfx1200"
   "gfx1201"
   "gfx1250"
+  "gfx1250-strict"
   "gfx1150"
   "gfx1151"
   "gfx1152"
@@ -55,6 +56,7 @@ set(_LOOM_AMDGPU_SUPPORTED_DESCRIPTOR_BACKED_PROCESSORS
   "gfx1200"
   "gfx1201"
   "gfx1250"
+  "gfx1250-strict"
   "gfx1150"
   "gfx1151"
   "gfx1152"
@@ -93,7 +95,7 @@ set(_LOOM_AMDGPU_SUPPORTED_TARGETS
   "gfx1201"
   "gfx1251"
   "gfx9-4-generic"
-  "gfx1250-a0"
+  "gfx1250-strict"
 )
 
 set(_LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES
@@ -165,6 +167,7 @@ set(_LOOM_AMDGPU_DESCRIPTOR_SET_DEFINE_descriptor_set_rdna4_core "LOOM_AMDGPU_DE
 set(_LOOM_AMDGPU_DESCRIPTOR_SET_KEY_descriptor_set_rdna4_gfx125x_core "amdgpu.rdna4.gfx125x.core")
 set(_LOOM_AMDGPU_DESCRIPTOR_SET_EXACT_PROCESSORS_descriptor_set_rdna4_gfx125x_core
   "gfx1250"
+  "gfx1250-strict"
 )
 set(_LOOM_AMDGPU_DESCRIPTOR_SET_GENERIC_PROCESSORS_descriptor_set_rdna4_gfx125x_core
 )
@@ -257,7 +260,7 @@ set(_LOOM_AMDGPU_DESCRIPTOR_SET_DEFINE_descriptor_set_gfx12_5_generic_core "LOOM
 
 set(_LOOM_AMDGPU_DESCRIPTOR_SET_KEY_descriptor_set_rdna4_gfx1250_a0_core "amdgpu.rdna4.gfx1250_a0.core")
 set(_LOOM_AMDGPU_DESCRIPTOR_SET_EXACT_PROCESSORS_descriptor_set_rdna4_gfx1250_a0_core
-  "gfx1250"
+  "gfx1250-strict"
 )
 set(_LOOM_AMDGPU_DESCRIPTOR_SET_GENERIC_PROCESSORS_descriptor_set_rdna4_gfx1250_a0_core
 )

@@ -35,14 +35,14 @@ def _test_builtin_profile_preserves_overlay_identity(name, **kwargs):
     analysis_test(
         name = name,
         impl = _test_builtin_profile_preserves_overlay_identity_impl,
-        target = "//loom/target/amdgpu:gfx1250-a0",
+        target = "//loom/target/amdgpu:gfx1250-strict",
         **kwargs
     )
 
 def _test_builtin_profile_preserves_overlay_identity_impl(env, target):
     profile = target[LoomTargetProfileInfo]
     env.expect.that_str(profile.family).equals("amdgpu")
-    env.expect.that_str(profile.selector).equals("gfx1250-a0")
+    env.expect.that_str(profile.selector).equals("gfx1250-strict")
 
 def _test_amdgpu_family_set_selects_compatible_profiles(name, **kwargs):
     analysis_test(

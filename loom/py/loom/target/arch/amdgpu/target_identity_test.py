@@ -20,12 +20,12 @@ from loom.target.arch.amdgpu.target_identity import (
 from loom.target.arch.amdgpu.target_info import AMDGPU_TARGET_INFOS
 
 
-def test_resolves_target_overlay_without_losing_processor_identity() -> None:
-    identity = parse_amdgpu_artifact_target_key("gfx1250-a0")
+def test_resolves_strict_target_with_native_processor_identity() -> None:
+    identity = parse_amdgpu_artifact_target_key("gfx1250-strict")
 
     assert identity is not None
-    assert identity.target.target == "gfx1250-a0"
-    assert identity.processor.processor == "gfx1250"
+    assert identity.target.target == "gfx1250-strict"
+    assert identity.processor.processor == "gfx1250-strict"
     assert identity.feature_state("sramecc") is AmdgpuTargetFeatureState.UNSUPPORTED
     assert identity.feature_state("xnack") is AmdgpuTargetFeatureState.UNSUPPORTED
 

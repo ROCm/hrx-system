@@ -1,5 +1,5 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_offset_wide.loom-test
-// RUN: emit source-low target=amdgpu:gfx1250-a0 output=low
+// RUN: emit source-low target=amdgpu:gfx1250-strict output=low
 
 func.def @offset_scale_unbounded(%element: index) -> (offset) {
   %stride = index.constant 4 : offset

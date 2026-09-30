@@ -1349,7 +1349,7 @@ def _emit_physical_target_rows(
                 "  },",
             ]
         )
-    lines.extend(["};", ""])
+    lines.extend(["  {0},", "};", ""])
     return lines
 
 
@@ -1537,7 +1537,7 @@ def _emit_tables_source(
             "const iree_host_size_t",
             "    loom_amdgpu_target_info_physical_target_info_count =",
             "        IREE_ARRAYSIZE(",
-            "            loom_amdgpu_target_info_physical_target_infos);",
+            "            loom_amdgpu_target_info_physical_target_infos) - 1;",
         ]
     )
     return "\n".join(lines) + "\n"

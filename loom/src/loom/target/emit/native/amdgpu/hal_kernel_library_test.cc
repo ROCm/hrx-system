@@ -1085,7 +1085,6 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   }
 
   iree_host_size_t exercised_count = 0;
-  iree_host_size_t exercised_overlay_count = 0;
   for (const TargetCase& test_case : cases) {
     SCOPED_TRACE(StringViewToString(test_case.target->name));
     const loom_amdgpu_processor_info_t* processor =
@@ -1167,9 +1166,6 @@ TEST_F(AmdgpuHalKernelLibraryTest,
       EXPECT_NE(manifest.find(test_case.features_json), std::string::npos)
           << manifest;
     }
-    if (!iree_string_view_equal(test_case.target->name, processor->name)) {
-      ++exercised_overlay_count;
-    }
 
     loom_amdgpu_hal_kernel_library_deinitialize(&library,
                                                 iree_allocator_system());
@@ -1177,7 +1173,6 @@ TEST_F(AmdgpuHalKernelLibraryTest,
     iree_arena_deinitialize(&target_id_arena);
   }
   EXPECT_GE(exercised_count, 1u);
-  EXPECT_GE(exercised_overlay_count, 1u);
 }
 
 TEST_F(AmdgpuHalKernelLibraryTest, RecordsMatrixFeatureCapabilities) {

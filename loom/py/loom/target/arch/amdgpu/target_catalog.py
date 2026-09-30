@@ -164,28 +164,19 @@ AMDGPU_EXACT_TARGET_INFOS = (
     AmdgpuExactTargetInfo("gfx1200", "gfx12-generic", 1),
     AmdgpuExactTargetInfo("gfx1201", "gfx12-generic", 1),
     AmdgpuExactTargetInfo("gfx1250", "gfx12-5-generic", 1),
+    AmdgpuExactTargetInfo("gfx1250-strict", "gfx1250-strict", 0),
     AmdgpuExactTargetInfo("gfx1251", "gfx12-5-generic", 1),
 )
 
 
 # Target overlays retain one canonical compiler identity while selecting an
 # exact backend processor and any required final backend invocation options.
-AMDGPU_TARGET_OVERLAY_INFOS = (
-    AmdgpuTargetOverlayInfo(
-        target="gfx1250-a0",
-        processor="gfx1250",
-        compile_options=("-mllvm", "-amdgpu-gfx1250-b0-specific=false"),
-        link_options=("-plugin-opt=-amdgpu-gfx1250-b0-specific=false",),
-    ),
-)
+AMDGPU_TARGET_OVERLAY_INFOS = ()
 
 
 # Processors absent from this table ignore their reported ASIC revision because
 # the revision does not participate in their compiler target identity.
-AMDGPU_PHYSICAL_TARGET_INFOS = (
-    AmdgpuPhysicalTargetInfo("gfx1250", 0, "gfx1250-a0"),
-    AmdgpuPhysicalTargetInfo("gfx1250", 1, "gfx1250"),
-)
+AMDGPU_PHYSICAL_TARGET_INFOS = ()
 
 
 def generic_code_object_current_version(processor: str) -> int:

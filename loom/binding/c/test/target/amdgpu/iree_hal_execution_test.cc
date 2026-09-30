@@ -114,7 +114,7 @@ constexpr char kWideScaledSourceText[] =
                                 "amdgpu.rdna4.gfx125x.core")
 #endif
 #if defined(LOOM_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1250_A0_CORE)
-    AMDGPU_SPILL_OFFSET_PROVIDER(gfx1250_a0, "gfx1250-a0",
+    AMDGPU_SPILL_OFFSET_PROVIDER(gfx1250_a0, "gfx1250-strict",
                                 "amdgpu.rdna4.gfx1250_a0.core")
 #endif
 #if defined(LOOM_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1251_CORE)

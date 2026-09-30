@@ -171,11 +171,13 @@ def test_overlay_and_physical_targets_generate_data_rows_only() -> None:
         descriptor_set_rows=(descriptor_row,),
     )
 
-    assert "loom_amdgpu_target_info_gfx1250_a0_kernel_metadata_extensions[]" in source
-    assert '.name = IREE_SVL("gfx1250-a0"),' in source
+    assert "loom_amdgpu_target_info_gfx1250_strict_kernel_metadata_extensions[]" in source
+    assert '.name = IREE_SVL("gfx1250-strict"),' in source
     assert '.key = IREE_SVL(".gfx1250_revision"),' in source
-    assert ".asic_revision = UINT32_C(0)," in source
+    assert ".asic_revision = UINT32_C(0)," not in source
     assert ".target_kind = UINT32_C(24)," in source
+    assert "loom_amdgpu_target_info_physical_target_infos[] = {\n  {0},\n};" in source
+    assert "loom_amdgpu_target_info_physical_target_infos) - 1;" in source
     assert "\nif " not in source
     assert "\nreturn " not in source
 
@@ -311,7 +313,7 @@ def test_target_info_flag_expressions_cover_every_known_bit() -> None:
 
 
 def test_cluster_launch_state_is_scoped_to_gfx1250() -> None:
-    assert {info.processor for info in amdgpu_target_info_data.AMDGPU_PROCESSOR_INFOS if info.flags & AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE} == {"gfx1250"}
+    assert {info.processor for info in amdgpu_target_info_data.AMDGPU_PROCESSOR_INFOS if info.flags & AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE} == {"gfx1250", "gfx1250-strict"}
 
 
 def test_initial_vmem_replay_entry_profile_covers_required_processors() -> None:

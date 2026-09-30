@@ -178,6 +178,7 @@ AMDGPU_EXACT_TARGET_INFOS = (
     AmdgpuExactTargetInfo("gfx1200", "gfx12-generic", 1),
     AmdgpuExactTargetInfo("gfx1201", "gfx12-generic", 1),
     AmdgpuExactTargetInfo("gfx1250", "gfx12-5-generic", 1),
+    AmdgpuExactTargetInfo("gfx1250-strict", "gfx1250-strict", 0),
     AmdgpuExactTargetInfo("gfx1251", "gfx12-5-generic", 1),
 )
 
@@ -185,30 +186,15 @@ AMDGPU_EXACT_TARGET_INFOS = (
 # Target overlays bind a canonical target identity to one exact backend
 # processor and any final backend-invocation options it requires. Compiler
 # semantics remain structured facts on the canonical target row.
-AMDGPU_TARGET_OVERLAY_INFOS = (
-    AmdgpuTargetOverlayInfo(
-        target="gfx1250-a0",
-        processor="gfx1250",
-        compile_options=("-mllvm", "-amdgpu-gfx1250-b0-specific=false"),
-        link_options=("-plugin-opt=-amdgpu-gfx1250-b0-specific=false",),
-    ),
-)
+AMDGPU_TARGET_OVERLAY_INFOS = ()
+
+# Exact device libraries needed in addition to overlays and generic fallbacks.
+AMDGPU_DEVICE_BINARY_VARIANTS = {"gfx1250": ("gfx1250-strict", "gfx1250")}
 
 # Physical discovery resolves directly to a canonical target. Processors absent
 # from this table ignore their reported ASIC revision because the revision does
 # not participate in their target identity.
-AMDGPU_PHYSICAL_TARGET_INFOS = (
-    AmdgpuPhysicalTargetInfo(
-        processor="gfx1250",
-        asic_revision=0,
-        target="gfx1250-a0",
-    ),
-    AmdgpuPhysicalTargetInfo(
-        processor="gfx1250",
-        asic_revision=1,
-        target="gfx1250",
-    ),
-)
+AMDGPU_PHYSICAL_TARGET_INFOS = ()
 
 
 def generic_code_object_current_version(processor: str) -> int:

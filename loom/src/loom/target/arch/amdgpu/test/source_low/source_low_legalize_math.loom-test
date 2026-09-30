@@ -983,7 +983,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @vector_
 
 // ====
 
-amdgpu.target<gfx1250-a0> @target
+amdgpu.target<gfx1250-strict> @target
 
 func.def target(@target) @vector_bf16_arithmetic_native_pack_gfx1250_a0(%a: vector<2xbf16>, %b: vector<2xbf16>, %c: vector<2xbf16>) -> (vector<2xbf16>, vector<2xbf16>, vector<2xbf16>) {
   %sum = vector.addf %a, %b : vector<2xbf16>

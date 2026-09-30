@@ -384,8 +384,8 @@ def test_suggest_experimental_bank_model_requires_explicit_opt_in(
     report_path = tmp_path / "report.json"
     _write_report(
         report_path,
-        target_key="gfx1250-a0",
-        target_record="gfx1250-a0",
+        target_key="gfx1250-strict",
+        target_record="gfx1250-strict",
         experimental_bank_conflict=True,
     )
 
@@ -418,7 +418,7 @@ def test_suggest_experimental_bank_model_requires_explicit_opt_in(
 @pytest.mark.parametrize(
     ("target_key", "target_record"),
     [
-        ("gfx1250-a0", "gfx1250-a0"),
+        ("gfx1250-strict", "gfx1250-strict"),
         ("gfx942:sramecc+:xnack-", "gfx942"),
     ],
 )

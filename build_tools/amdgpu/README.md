@@ -48,15 +48,16 @@ The current generic-family map is:
 | `gfx11` RDNA/APU | `gfx1100`, `gfx1101`, `gfx1102`, `gfx1103`, `gfx1150`, `gfx1151`, `gfx1152`, `gfx1153` | `gfx11-generic` |
 | `gfx11.7` RDNA 4m | `gfx1170`, `gfx1171`, `gfx1172` | exact target only |
 | `gfx12` RDNA | `gfx1200`, `gfx1201` | `gfx12-generic` |
-| `gfx12.5` RDNA | `gfx1250`, `gfx1251` | `gfx12-5-generic` |
+| `gfx12.5` RDNA | `gfx1250`, `gfx1250-strict`, `gfx1251` | `gfx12-5-generic` for non-strict processors |
 
 `gfx11.7` processors are not folded into `gfx11-generic` because LLVM models
 them as a separate compatible family that the pinned device toolchain does not
 yet expose. `gfx12-5-generic` is
 available as an explicit selector, but consumers decide whether it belongs in
 their default checked-in artifact sets. The `device-binary` expansion also
-includes `gfx1250-a0` because the generic gfx12.5 artifact is B0-qualified and
-cannot safely serve that physical revision.
+includes a native `gfx1250-strict` code object for A0 agents that report the
+strict ISA. That code object uses LLVM's distinct strict machine ID; the
+generic gfx12.5 artifact is B0-qualified and cannot serve A0.
 
 ## Generated Files
 

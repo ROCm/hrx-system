@@ -264,11 +264,11 @@ loom_target_profile(
 
 loom_target_profile(
   NAME
-    "gfx1250-a0"
+    "gfx1250-strict"
   FAMILY
     "amdgpu"
   SELECTOR
-    "gfx1250-a0"
+    "gfx1250-strict"
   REQUIRES
     LOOM_BUILD AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1250_A0_CORE
 )

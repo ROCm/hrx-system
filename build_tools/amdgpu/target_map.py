@@ -23,6 +23,7 @@ from pathlib import Path
 
 if __package__:
     from .target_map_data import (
+        AMDGPU_DEVICE_BINARY_VARIANTS,
         AMDGPU_EXACT_TARGET_INFOS,
         AMDGPU_GENERIC_CODE_OBJECT_INFOS,
         AMDGPU_PHYSICAL_TARGET_INFOS,
@@ -38,6 +39,7 @@ if __package__:
     )
 else:
     from target_map_data import (
+        AMDGPU_DEVICE_BINARY_VARIANTS,
         AMDGPU_EXACT_TARGET_INFOS,
         AMDGPU_GENERIC_CODE_OBJECT_INFOS,
         AMDGPU_PHYSICAL_TARGET_INFOS,
@@ -105,6 +107,7 @@ ELF_MACHINE_PROCESSORS = (
     (0x047, "gfx1102"),
     (0x048, "gfx1200"),
     (0x049, "gfx1250"),
+    (0x0EB, "gfx1250-strict"),
     (0x04A, "gfx1151"),
     (0x04B, "gfx941"),
     (0x04C, "gfx942"),
@@ -280,7 +283,7 @@ def device_binary_target(name):
 
 
 def device_binary_variants_for_exact(exact_target):
-    return [
+    variants = [
         AmdgpuDeviceBinaryTarget(
             name=overlay.target,
             processor=exact_target,
@@ -290,6 +293,11 @@ def device_binary_variants_for_exact(exact_target):
         for overlay in AMDGPU_TARGET_OVERLAY_INFOS
         if overlay.processor == exact_target
     ]
+    variants.extend(
+        AmdgpuDeviceBinaryTarget(name=target, processor=target)
+        for target in AMDGPU_DEVICE_BINARY_VARIANTS.get(exact_target, ())
+    )
+    return variants
 
 
 def exact_targets_for_code_object(code_object_target):
@@ -775,6 +783,14 @@ def render_device_library_target_map_inl():
                 overlay.target,
             )
         )
+    for info in AMDGPU_EXACT_TARGET_INFOS:
+        if info.exact_processor.endswith("-strict"):
+            lines.append(
+                'IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT("{}", "{}")'.format(
+                    info.exact_processor,
+                    info.exact_processor,
+                )
+            )
     lines.extend(
         [
             "#endif  // IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT",

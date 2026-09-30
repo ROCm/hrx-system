@@ -847,7 +847,7 @@ ordinary_workgroup_y:
 
 // RUN: emit amdgpu-kernel-assembly
 
-amdgpu.target<gfx1250-a0> @target
+amdgpu.target<gfx1250-strict> @target
 
 low.kernel.def target<amdgpu.rdna4.gfx1250_a0.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 2) @ordinary_workgroup_z() asm {
   %packed_z = live_in<amdgpu.cluster_id_z> : reg<amdgpu.sgpr>
@@ -857,7 +857,7 @@ low.kernel.def target<amdgpu.rdna4.gfx1250_a0.core>(@target) workgroup_size(64, 
 
 // ----
 .text
-.amdgcn_target "amdgcn-amd-amdhsa--gfx1250"
+.amdgcn_target "amdgcn-amd-amdhsa--gfx1250-strict"
 .amdhsa_code_object_version 6
 
 .protected ordinary_workgroup_z
@@ -919,7 +919,7 @@ ordinary_workgroup_z:
   amdhsa.version:
     - 1
     - 2
-  amdhsa.target: 'amdgcn-amd-amdhsa--gfx1250'
+  amdhsa.target: 'amdgcn-amd-amdhsa--gfx1250-strict'
   amdhsa.kernels:
     - .name: 'ordinary_workgroup_z'
       .symbol: 'ordinary_workgroup_z.kd'

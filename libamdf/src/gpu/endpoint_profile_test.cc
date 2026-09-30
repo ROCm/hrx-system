@@ -67,7 +67,7 @@ TEST(GpuEndpointProfileTest, QualifiesRdnaCdnaAndMultiXccProfiles) {
        MakeProperties(9, 0, 10, 1, 64, 104, 32, 32, 64u * 1024u, 1, 8)},
       {"gfx1201",
        MakeProperties(12, 0, 1, 0, 32, 64, 32, 32, 64u * 1024u, 1, 4)},
-      {"gfx1250-a0",
+      {"gfx1250-strict",
        MakeProperties(12, 5, 0, 0, 32, 256, 64, 32, 320u * 1024u, 8, 2)},
       {"gfx1250-b0",
        MakeProperties(12, 5, 0, 1, 32, 256, 64, 32, 320u * 1024u, 8, 2)},

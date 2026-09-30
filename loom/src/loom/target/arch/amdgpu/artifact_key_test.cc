@@ -75,8 +75,8 @@ TEST(AmdgpuArtifactKeyTest, ParsesCanonicalTargetClasses) {
   EXPECT_EQ(identity.target, LookupTarget("gfx11-generic"));
 
   IREE_ASSERT_OK(
-      loom_amdgpu_artifact_key_parse(IREE_SV("gfx1250-a0"), &identity));
-  EXPECT_EQ(identity.target, LookupTarget("gfx1250-a0"));
+      loom_amdgpu_artifact_key_parse(IREE_SV("gfx1250-strict"), &identity));
+  EXPECT_EQ(identity.target, LookupTarget("gfx1250-strict"));
 }
 
 TEST(AmdgpuArtifactKeyTest, FormatsCanonicalFeatureOrder) {
@@ -87,9 +87,10 @@ TEST(AmdgpuArtifactKeyTest, FormatsCanonicalFeatureOrder) {
   EXPECT_EQ(FormatArtifactKey(identity), "gfx942:sramecc+:xnack-");
   EXPECT_EQ(FormatArenaArtifactKey(identity), "gfx942:sramecc+:xnack-");
 
-  loom_amdgpu_target_identity_initialize(LookupTarget("gfx1250-a0"), &identity);
-  EXPECT_EQ(FormatArtifactKey(identity), "gfx1250-a0");
-  EXPECT_EQ(FormatArenaArtifactKey(identity), "gfx1250-a0");
+  loom_amdgpu_target_identity_initialize(LookupTarget("gfx1250-strict"),
+                                         &identity);
+  EXPECT_EQ(FormatArtifactKey(identity), "gfx1250-strict");
+  EXPECT_EQ(FormatArenaArtifactKey(identity), "gfx1250-strict");
 }
 
 TEST(AmdgpuArtifactKeyTest, RoundTripsEveryCompilerIdentityCombination) {

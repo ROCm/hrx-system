@@ -836,7 +836,7 @@ TEST_F(AmdgpuProviderTest, PreservesTargetIdFeatureRequirements) {
 
 TEST_F(AmdgpuProviderTest, PreservesTargetOverlayRequirements) {
   ModulePtr module =
-      Parse(IREE_SV("amdgpu.target<gfx1250-a0> @gfx1250_a0\n"
+      Parse(IREE_SV("amdgpu.target<gfx1250-strict> @gfx1250_a0\n"
                     "amdgpu.target<gfx1250> @gfx1250_b0\n"
                     "amdgpu.target<gfx12-5-generic> @gfx12_5_generic\n"));
 
@@ -851,7 +851,7 @@ TEST_F(AmdgpuProviderTest, PreservesTargetOverlayRequirements) {
   EXPECT_TRUE(SatisfiesSpecialization(gfx1250_b0, gfx1250_b0));
   EXPECT_FALSE(SatisfiesSpecialization(gfx1250_a0, gfx1250_b0));
   EXPECT_FALSE(SatisfiesSpecialization(gfx1250_b0, gfx1250_a0));
-  EXPECT_TRUE(SatisfiesSpecialization(gfx1250_a0, gfx12_5_generic));
+  EXPECT_FALSE(SatisfiesSpecialization(gfx1250_a0, gfx12_5_generic));
   EXPECT_TRUE(SatisfiesSpecialization(gfx1250_b0, gfx12_5_generic));
   EXPECT_FALSE(SatisfiesSpecialization(gfx12_5_generic, gfx1250_a0));
 }

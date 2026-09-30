@@ -14,7 +14,7 @@
 #include "loomc/target/amdgpu.h"
 
 typedef struct emit_amdgpu_offline_state_t {
-  // AMDGPU target selector, such as `gfx11-generic`, `gfx1250-a0`, or
+  // AMDGPU target selector, such as `gfx11-generic`, `gfx1250-strict`, or
   // `gfx942`.
   const char* target;
 
@@ -79,7 +79,7 @@ static void print_usage(FILE* file) {
           "[manifest.json]]]\n");
   fprintf(file,
           "  target       AMDGPU target selector, such as gfx11-generic, "
-          "gfx1250-a0, or gfx942.\n");
+          "gfx1250-strict, or gfx942.\n");
   fprintf(file,
           "  output.hsaco Optional path for the emitted AMDGPU HSACO ELF "
           "artifact.\n");

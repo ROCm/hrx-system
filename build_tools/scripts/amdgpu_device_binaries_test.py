@@ -133,7 +133,7 @@ class AmdgpuDeviceBinariesTest(unittest.TestCase):
         )
 
     def test_device_binary_expansion_preserves_exact_variants_before_fallbacks(self):
-        expected = ["gfx1250-a0", "gfx12-5-generic"]
+        expected = ["gfx1250-strict", "gfx1250", "gfx12-5-generic"]
         self.assertEqual(
             expected,
             amdgpu_device_binaries.expand_target_selections(["gfx1250"]),
@@ -153,7 +153,7 @@ class AmdgpuDeviceBinariesTest(unittest.TestCase):
 
     def test_device_binary_expansion_deduplicates_artifacts(self):
         self.assertEqual(
-            ["gfx1250-a0", "gfx12-5-generic"],
+            ["gfx1250-strict", "gfx1250", "gfx12-5-generic"],
             amdgpu_device_binaries.expand_target_selections(
                 ["gfx1250", "gfx12-5-generic", "gfx125X-all"]
             ),
@@ -161,21 +161,21 @@ class AmdgpuDeviceBinariesTest(unittest.TestCase):
 
     def test_device_binary_expansion_accepts_canonical_overlay(self):
         self.assertEqual(
-            ["gfx1250-a0"],
-            amdgpu_device_binaries.expand_target_selections(["gfx1250-a0"]),
+            ["gfx1250-strict"],
+            amdgpu_device_binaries.expand_target_selections(["gfx1250-strict"]),
         )
 
     def test_resolve_device_binary_targets_rejects_public_selectors(self):
         with self.assertRaisesRegex(
-            RuntimeError, "unknown AMDGPU device binary target.*gfx1250"
+            RuntimeError, "unknown AMDGPU device binary target.*gfx125X-all"
         ):
-            amdgpu_device_binaries.resolve_device_binary_targets(["gfx1250"])
+            amdgpu_device_binaries.resolve_device_binary_targets(["gfx125X-all"])
 
-    def test_gfx1250_a0_build_applies_overlay_options_to_both_codegen_stages(
-        self,
-    ):
-        target = amdgpu_device_binaries.resolve_device_binary_targets(["gfx1250-a0"])[0]
-        self.assertEqual(target.processor, "gfx1250")
+    def test_gfx1250_strict_build_uses_native_processor(self):
+        target = amdgpu_device_binaries.resolve_device_binary_targets(
+            ["gfx1250-strict"]
+        )[0]
+        self.assertEqual(target.processor, "gfx1250-strict")
         toolchain = amdgpu_device_binaries.Toolchain(
             clang=Path("/tools/clang"),
             llvm_link=Path("/tools/llvm-link"),
@@ -210,17 +210,11 @@ class AmdgpuDeviceBinariesTest(unittest.TestCase):
         link_command = next(
             command for command in commands if Path(command[0]) == toolchain.lld
         )
-        self.assertIn("-march=gfx1250", compile_command)
-        self.assertLess(
-            compile_command.index("-user-compile-option"),
-            compile_command.index("-amdgpu-gfx1250-b0-specific=false"),
-        )
-        self.assertLess(
-            link_command.index("-user-link-option"),
-            link_command.index("-plugin-opt=-amdgpu-gfx1250-b0-specific=false"),
-        )
-        self.assertEqual(output["target"], "gfx1250-a0")
-        self.assertEqual(output["path"], "amdgcn-amd-amdhsa--gfx1250-a0.so")
+        self.assertIn("-march=gfx1250-strict", compile_command)
+        self.assertIn("-user-compile-option", compile_command)
+        self.assertIn("-user-link-option", link_command)
+        self.assertEqual(output["target"], "gfx1250-strict")
+        self.assertEqual(output["path"], "amdgcn-amd-amdhsa--gfx1250-strict.so")
 
 
 if __name__ == "__main__":

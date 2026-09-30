@@ -103,7 +103,7 @@ amdgpu_target = Op(
         "amdgpu.target<gfx11-generic> @gfx11_generic",
         "amdgpu.target<gfx942> @gfx942 {subgroup_size = 64}",
         "amdgpu.target<gfx950> @gfx950 {subgroup_size = 64}",
-        "amdgpu.target<gfx1250-a0> @gfx1250_a0",
+        "amdgpu.target<gfx1250-strict> @gfx1250_a0",
         "amdgpu.target<gfx942> @gfx942_features {features = [sramecc, -xnack]}",
     ],
 )

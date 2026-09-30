@@ -118,7 +118,7 @@ def test_target_records_materialize_current_rows() -> None:
 
     rows_by_target = {row.info.target: row for row in rows}
     assert rows_by_target["gfx1250"].descriptor_set.key == "amdgpu.rdna4.gfx125x.core"
-    assert rows_by_target["gfx1250-a0"].descriptor_set.key == "amdgpu.rdna4.gfx1250_a0.core"
+    assert rows_by_target["gfx1250-strict"].descriptor_set.key == "amdgpu.rdna4.gfx1250_a0.core"
 
 
 def test_target_record_enum_values_are_stable_and_explicit() -> None:
@@ -146,7 +146,7 @@ def test_target_record_enum_values_are_stable_and_explicit() -> None:
         "gfx1201": 21,
         "gfx1251": 22,
         "gfx9-4-generic": 23,
-        "gfx1250-a0": 24,
+        "gfx1250-strict": 24,
     }
 
 

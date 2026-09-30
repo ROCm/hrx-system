@@ -124,6 +124,9 @@ static inline const char* iree_amdgpu_code_object_target_for_exact(
   if (strcmp(exact_target, "gfx1250") == 0) {
     return "gfx12-5-generic";
   }
+  if (strcmp(exact_target, "gfx1250-strict") == 0) {
+    return "gfx1250-strict";
+  }
   if (strcmp(exact_target, "gfx1251") == 0) {
     return "gfx12-5-generic";
   }

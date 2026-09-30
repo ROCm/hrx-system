@@ -13,7 +13,7 @@
 /// AMDGPU target profile facts.
 ///
 /// The AMDGPU public profile selects one exact, generic, or overlay AMDGPU
-/// target such as `gfx1151`, `gfx11-generic`, or `gfx1250-a0`. Each target
+/// target such as `gfx1151`, `gfx11-generic`, or `gfx1250-strict`. Each target
 /// binds a backend processor to all semantic overlays required to compile for
 /// that target. The profile determines the descriptor-family target bundle,
 /// native HSACO support, default wavefront size, HSA target id, and
@@ -52,7 +52,7 @@ typedef struct loomc_amdgpu_amdhsa_feature_states_t {
 /// Complete structured AMDGPU identity used to construct a target profile.
 typedef struct loomc_amdgpu_target_identity_t {
   /// Exact, generic, or overlay AMDGPU target selector, such as `gfx1151`,
-  /// `gfx11-generic`, or `gfx1250-a0`.
+  /// `gfx11-generic`, or `gfx1250-strict`.
   loomc_string_view_t target;
 
   /// Structured AMDHSA target-ID feature states.
