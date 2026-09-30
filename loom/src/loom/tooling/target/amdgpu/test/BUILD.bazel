@@ -58,6 +58,7 @@ iree_py_test(
 iree_execution_test_suite(
     name = "loom_compile_execution_test",
     data = [
+        "feature_distinct_code_objects.loom",
         "loom_opt_f32_arith.loom",
         "selected_root_amdgpu.loom",
         "//loom/src/loom/tooling/target/amdgpu/test/corpus:gfx11/schedule_scopes.loom",

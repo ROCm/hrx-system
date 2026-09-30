@@ -48,7 +48,7 @@ _CONFIGURED_COMPILE_COPTS = (
 _CONFIGURED_COMPILE_DEPS = (
     iree_select({
         "//loom/config/target:amdgpu_artifacts": [
-            "//loom/src/loom/tooling/target/amdgpu:artifact_provider",
+            "//loom/src/loom/target/emit/native/amdgpu:hal_kernel_library",
         ],
         "//conditions:default": [],
     }) +

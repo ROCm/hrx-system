@@ -36,8 +36,9 @@ _AMDGPU_CHECK_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/check:__pkg__"]
 
 _DESCRIPTOR_SET_GFX125X = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna4.gfx125x.core"]
 
-_AMDGPU_TOOLING_VISIBILITY = [
+_AMDGPU_HAL_KERNEL_LIBRARY_VISIBILITY = [
     "//loom/binding/c/target/amdgpu:__pkg__",
+    "//loom/src/loom/tooling/compile:__pkg__",
     "//loom/src/loom/tooling/target/amdgpu:__pkg__",
 ]
 
@@ -555,7 +556,7 @@ loom_cc_library(
     name = "hal_kernel_library",
     srcs = ["hal_kernel_library.c"],
     hdrs = ["hal_kernel_library.h"],
-    visibility = _AMDGPU_TOOLING_VISIBILITY,
+    visibility = _AMDGPU_HAL_KERNEL_LIBRARY_VISIBILITY,
     deps = [
         ":hsaco",
         ":hsaco_build",

@@ -75,6 +75,9 @@ typedef struct loom_target_entry_list_t {
 } loom_target_entry_list_t;
 
 typedef struct loom_target_entry_diagnostic_emitter_t {
+  // Optional downstream raw emitter receiving emissions without materializing
+  // source locations. NULL selects the sink-backed materialization path.
+  iree_diagnostic_emitter_t forwarding_emitter;
   // Module containing op locations referenced by emitted diagnostics.
   const loom_module_t* module;
   // Source resolver for original source-backed locations.

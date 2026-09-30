@@ -26,12 +26,8 @@
 #define LOOM_CONFIG_COMPILE_HAVE_XDNA_ARTIFACTS 0
 #endif  // LOOM_CONFIG_COMPILE_HAVE_XDNA_ARTIFACTS
 
-#define LOOM_CONFIG_COMPILE_HAVE_ANY_ARTIFACT_PROVIDER \
-  (LOOM_CONFIG_COMPILE_HAVE_AMDGPU_ARTIFACTS ||        \
-   LOOM_CONFIG_COMPILE_HAVE_SPIRV_ARTIFACTS)
-
 #if LOOM_CONFIG_COMPILE_HAVE_AMDGPU_ARTIFACTS
-#include "loom/tooling/target/amdgpu/artifact_provider.h"
+#include "loom/target/emit/native/amdgpu/hal_kernel_library.h"
 #endif  // LOOM_CONFIG_COMPILE_HAVE_AMDGPU_ARTIFACTS
 #if LOOM_CONFIG_COMPILE_HAVE_SPIRV_ARTIFACTS
 #include "loom/tooling/target/spirv/artifact_provider.h"
@@ -55,26 +51,21 @@ typedef struct loom_tooling_configured_compile_storage_t {
   loom_tooling_compile_environment_t environment;
 } loom_tooling_configured_compile_storage_t;
 
-#if LOOM_CONFIG_COMPILE_HAVE_ANY_ARTIFACT_PROVIDER
-static const loom_artifact_provider_t* const kConfiguredArtifactProviders[] = {
-#if LOOM_CONFIG_COMPILE_HAVE_AMDGPU_ARTIFACTS
-    &loom_amdgpu_artifact_provider,
-#endif  // LOOM_CONFIG_COMPILE_HAVE_AMDGPU_ARTIFACTS
 #if LOOM_CONFIG_COMPILE_HAVE_SPIRV_ARTIFACTS
+static const loom_artifact_provider_t* const kConfiguredArtifactProviders[] = {
     &loom_spirv_vulkan_artifact_provider,
-#endif  // LOOM_CONFIG_COMPILE_HAVE_SPIRV_ARTIFACTS
 };
-#endif  // LOOM_CONFIG_COMPILE_HAVE_ANY_ARTIFACT_PROVIDER
+#endif  // LOOM_CONFIG_COMPILE_HAVE_SPIRV_ARTIFACTS
 
 static const loom_artifact_provider_registry_t
     kConfiguredArtifactProviderRegistry = {
-#if LOOM_CONFIG_COMPILE_HAVE_ANY_ARTIFACT_PROVIDER
+#if LOOM_CONFIG_COMPILE_HAVE_SPIRV_ARTIFACTS
         .providers = kConfiguredArtifactProviders,
         .provider_count = IREE_ARRAYSIZE(kConfiguredArtifactProviders),
 #else
         .providers = NULL,
         .provider_count = 0,
-#endif  // LOOM_CONFIG_COMPILE_HAVE_ANY_ARTIFACT_PROVIDER
+#endif  // LOOM_CONFIG_COMPILE_HAVE_SPIRV_ARTIFACTS
 };
 
 static loom_tooling_configured_compile_storage_t configured_compile_storage;
@@ -86,6 +77,11 @@ static iree_status_t loom_tooling_configured_compile_initialize_storage(void) {
   IREE_RETURN_IF_ERROR(loom_target_provider_set_storage_append_set(
       &configured_compile_storage.target_provider_storage,
       loom_configured_target_provider_set()));
+#if LOOM_CONFIG_COMPILE_HAVE_AMDGPU_ARTIFACTS
+  IREE_RETURN_IF_ERROR(loom_target_provider_set_storage_append(
+      &configured_compile_storage.target_provider_storage,
+      &loom_amdgpu_hal_kernel_library_provider));
+#endif  // LOOM_CONFIG_COMPILE_HAVE_AMDGPU_ARTIFACTS
 #if LOOM_CONFIG_COMPILE_HAVE_VM_ARTIFACTS
   IREE_RETURN_IF_ERROR(loom_target_provider_set_storage_append(
       &configured_compile_storage.target_provider_storage,

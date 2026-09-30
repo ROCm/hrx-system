@@ -1,0 +1,11 @@
+amdgpu.target<gfx942> @first_target {features = [-sramecc, -xnack]}
+
+amdgpu.target<gfx942> @second_target {features = [sramecc, -xnack]}
+
+low.kernel.def target<amdgpu.cdna3.core>(@first_target) workgroup_size(64, 1, 1) @first_kernel() asm {
+  return
+}
+
+low.kernel.def target<amdgpu.cdna3.core>(@second_target) workgroup_size(64, 1, 1) @second_kernel() asm {
+  return
+}

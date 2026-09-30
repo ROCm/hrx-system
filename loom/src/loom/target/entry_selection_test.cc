@@ -203,6 +203,61 @@ TEST_F(TargetEntrySelectionTest, EmissionAndRelatedOpsUseTheirOwnModules) {
   EXPECT_EQ(emitter.error_count, 1u);
 }
 
+TEST_F(TargetEntrySelectionTest, ForwardingPreservesRawEmissionIdentity) {
+  ModulePtr module = ParseModule("func.def @entry() { func.return }\n");
+  const loom_op_t* op = loom_module_block(module.get())->first_op;
+  ASSERT_NE(op, nullptr);
+
+  struct ForwardingCapture {
+    bool called;
+    loom_diagnostic_emission_t emission;
+  } capture = {};
+  const iree_diagnostic_emitter_t downstream = {
+      /*.fn=*/[](void* user_data, const loom_diagnostic_emission_t* emission) {
+        auto* capture = static_cast<ForwardingCapture*>(user_data);
+        capture->called = true;
+        capture->emission = *emission;
+        return iree_ok_status();
+      },
+      /*.user_data=*/&capture,
+  };
+  loom_target_entry_diagnostic_emitter_t emitter = {
+      /*.forwarding_emitter=*/downstream,
+  };
+
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(IREE_SV("value")),
+  };
+  const loom_diagnostic_related_op_t related[] = {{
+      /*.label=*/IREE_SV("related"),
+      /*.module=*/module.get(),
+      /*.op=*/op,
+      /*.field_ref=*/
+      loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND, 0),
+  }};
+  const loom_diagnostic_emission_t emission = {
+      /*.module=*/module.get(),
+      /*.op=*/op,
+      /*.error=*/loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1),
+      /*.params=*/params,
+      /*.param_count=*/IREE_ARRAYSIZE(params),
+      /*.related_ops=*/related,
+      /*.related_op_count=*/IREE_ARRAYSIZE(related),
+  };
+  IREE_ASSERT_OK(
+      iree_diagnostic_emit(loom_target_entry_emitter(&emitter), &emission));
+
+  EXPECT_TRUE(capture.called);
+  EXPECT_EQ(emitter.error_count, 1u);
+  EXPECT_EQ(capture.emission.module, emission.module);
+  EXPECT_EQ(capture.emission.op, emission.op);
+  EXPECT_EQ(capture.emission.error, emission.error);
+  EXPECT_EQ(capture.emission.params, emission.params);
+  EXPECT_EQ(capture.emission.param_count, emission.param_count);
+  EXPECT_EQ(capture.emission.related_ops, emission.related_ops);
+  EXPECT_EQ(capture.emission.related_op_count, emission.related_op_count);
+}
+
 TEST_F(TargetEntrySelectionTest, RefinedVersionOverridesAuthoredTarget) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @generic

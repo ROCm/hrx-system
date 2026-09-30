@@ -600,6 +600,9 @@ void ExpectReplayEmission(const loomc_result_t* result, const char* selector,
                    LOOMC_ARTIFACT_FORMAT_COMPILE_REPORT_JSON);
   ASSERT_NE(report, nullptr);
   const std::string report_text = ToString(report->contents);
+  EXPECT_NE(report_text.find("\"artifact_kind\":\"hal-executable\""),
+            std::string::npos);
+  EXPECT_NE(report_text.find("\"backend\":\"amdgpu-hal\""), std::string::npos);
   EXPECT_NE(report_text.find("\"target_family\":\"amdgpu\""),
             std::string::npos);
   EXPECT_NE(report_text.find(std::string("\"target_key\":\"") +

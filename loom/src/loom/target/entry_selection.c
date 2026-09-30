@@ -172,6 +172,10 @@ static iree_status_t loom_target_entry_emit_diagnostic(
       break;
   }
 
+  if (emitter->forwarding_emitter.fn != NULL) {
+    return iree_diagnostic_emit(emitter->forwarding_emitter, emission);
+  }
+
   loom_diagnostic_related_location_t
       related_locations[LOOM_DIAGNOSTIC_MAX_RELATED_LOCATIONS];
   diagnostic.related_location_count =

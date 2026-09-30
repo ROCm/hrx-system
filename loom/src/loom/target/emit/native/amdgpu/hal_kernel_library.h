@@ -31,6 +31,10 @@ typedef struct loom_amdgpu_hal_kernel_library_options_t {
   // Optional concrete compiler function versions participating in this
   // compilation. The list and its version objects are borrowed for the call.
   const loom_function_version_list_t* function_versions;
+  // Optional raw diagnostic emitter preserving operation identity for an
+  // enclosing target-emission boundary. When present, diagnostics bypass
+  // |diagnostic_sink| and |source_resolver| for the enclosing layer to render.
+  iree_diagnostic_emitter_t diagnostic_emitter;
   // Diagnostic sink used for verification, materialization, scheduling, and
   // allocation diagnostics. A NULL callback still counts diagnostics.
   loom_diagnostic_sink_t diagnostic_sink;

@@ -51,6 +51,7 @@ iree_execution_test_suite(
     "loom-opt=loom::tools::loom-opt"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11/schedule_scopes.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/feature_distinct_code_objects.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/loom_opt_f32_arith.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/selected_root_amdgpu.loom"
   LABELS
