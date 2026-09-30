@@ -50,6 +50,7 @@ from loom.dsl import (
     ATTR_TYPE_SYMBOL_SET,
     BUFFER,
     BY_REFERENCE,
+    BYTE_PATTERN_ELEMENT,
     BYTE_PATTERN_SCALAR,
     COMMAND_EFFECT,
     COMMUTATIVE,
@@ -131,6 +132,7 @@ from loom.dsl import (
     HasAnyAncestor,
     HasBitwiseElement,
     HasBitwiseScalar,
+    HasBytePatternElement,
     HasF16OrBf16Element,
     HasF32Element,
     HasFloatElement,
@@ -269,6 +271,7 @@ class TestTypeConstraints:
         assert ADDRESS == TypeConstraint.ADDRESS
         assert BUFFER == TypeConstraint.BUFFER
         assert BYTE_PATTERN_SCALAR == TypeConstraint.BYTE_PATTERN_SCALAR
+        assert BYTE_PATTERN_ELEMENT == TypeConstraint.BYTE_PATTERN_ELEMENT
         assert dsl.I32 == TypeConstraint.I32
         assert STORAGE == TypeConstraint.STORAGE
         assert ANY_ENCODING == TypeConstraint.ANY_ENCODING
@@ -291,6 +294,7 @@ class TestTypeConstraints:
         assert ADDRESS.value == "address"
         assert STORAGE.value == "storage"
         assert BYTE_PATTERN_SCALAR.value == "byte_pattern_scalar"
+        assert BYTE_PATTERN_ELEMENT.value == "byte_pattern_element"
         assert dsl.I32.value == "i32"
 
     def test_element_family_constraints_are_shaped_specific(self) -> None:
@@ -1449,7 +1453,7 @@ class TestConstraints:
             {"x": FakeValue(vector_type(F32))}
         )[0]
 
-    def test_bitwise_constraints_accept_integer_and_float_payloads(self) -> None:
+    def test_bitwise_and_byte_pattern_constraints(self) -> None:
         class FakeValue:
             def __init__(self, value_type: object):
                 self.type = value_type
@@ -1465,6 +1469,17 @@ class TestConstraints:
         assert HasBitwiseElement("x").check({"x": FakeValue(vector_type(I8))})[0]
         assert HasBitwiseElement("x").check({"x": FakeValue(vector_type(F32))})[0]
         assert not HasBitwiseElement("x").check({"x": FakeValue(vector_type(ir.I1))})[0]
+        assert HasBytePatternElement("x").check({"x": FakeValue(vector_type(I8))})[0]
+        assert HasBytePatternElement("x").check({"x": FakeValue(vector_type(F32))})[0]
+        assert not HasBytePatternElement("x").check(
+            {"x": FakeValue(vector_type(ir.I1))}
+        )[0]
+        assert not HasBytePatternElement("x").check(
+            {"x": FakeValue(vector_type(ir.INDEX))}
+        )[0]
+        assert not HasBytePatternElement("x").check(
+            {"x": FakeValue(vector_type(ir.OFFSET))}
+        )[0]
 
     def test_vector_shape_constraints_validate_vector_shape(self) -> None:
         class FakeValue:

@@ -205,3 +205,37 @@ func.def public @advance(%destination: buffer, %destination_byte_offset: offset)
   view.atomic.store %value, %7[0] {ordering = release, scope = system} : i32, view<1xi32>
   func.return %value : i32
 }
+
+// ====
+#include <loomcxx/atomic.h>
+using loom::atomic::kind;
+using loom::atomic::ordering;
+using loom::atomic::scope;
+using size_t = __SIZE_TYPE__;
+using ptrdiff_t = __PTRDIFF_TYPE__;
+
+// ABI-sized C++ object types remain fixed-width atomic payloads after import;
+// they do not become Loom address-domain index or offset values.
+size_t replace_size(size_t expected, size_t replacement, size_t* destination) {
+  return loom::view::atomic::cmpxchg<ordering::acq_rel, ordering::acquire,
+                                    scope::system>(
+      expected, replacement, destination);
+}
+
+ptrdiff_t add_difference(ptrdiff_t value, ptrdiff_t* destination) {
+  return loom::view::atomic::rmw<kind::addi, ordering::relaxed, scope::device>(
+      value, destination);
+}
+
+// ----
+func.def public @replace_size(%expected: i64, %replacement: i64, %destination: buffer, %destination_byte_offset: offset) -> (i64) {
+  %5 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi64>
+  %6 = view.atomic.cmpxchg %expected, %replacement, %5[0] {failure_ordering = acquire, scope = system, success_ordering = acq_rel} : i64, view<1xi64> -> i64
+  func.return %6 : i64
+}
+
+func.def public @add_difference(%value: i64, %destination: buffer, %destination_byte_offset: offset) -> (i64) {
+  %11 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi64>
+  %12 = view.atomic.rmw<addi> %value, %11[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
+  func.return %12 : i64
+}

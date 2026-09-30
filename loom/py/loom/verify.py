@@ -1424,6 +1424,8 @@ def _shaped_satisfies_constraint(
         return shaped_type.element_type.kind in _FLOAT_SCALAR_KINDS
     if constraint == TypeConstraint.BITWISE_ELEMENT:
         return shaped_type.element_type.kind in _BITWISE_SCALAR_KINDS
+    if constraint == TypeConstraint.BYTE_PATTERN_ELEMENT:
+        return shaped_type.element_type.kind in _BYTE_PATTERN_SCALAR_KINDS
     if constraint == TypeConstraint.INDEX_OR_NON_I1_INTEGER_ELEMENT:
         return shaped_type.element_type.kind in _INDEX_OR_NON_I1_INTEGER_SCALAR_KINDS
     if constraint == TypeConstraint.I1_ELEMENT:

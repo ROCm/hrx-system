@@ -54,7 +54,9 @@ const char* loom_type_constraint_name(loom_type_constraint_t constraint) {
       [LOOM_TYPE_CONSTRAINT_ENCODING_TRANSFORM] = "encoding<transform>",
       [LOOM_TYPE_CONSTRAINT_STORAGE] = "storage",
       [LOOM_TYPE_CONSTRAINT_BYTE_PATTERN_SCALAR] =
-          "8/16/32/64-bit scalar pattern",
+          "byte-addressable fixed-width integer or floating-point scalar",
+      [LOOM_TYPE_CONSTRAINT_BYTE_PATTERN_ELEMENT] =
+          "byte-addressable fixed-width integer or floating-point element type",
   };
   static_assert(IREE_ARRAYSIZE(names) == LOOM_TYPE_CONSTRAINT_COUNT_,
                 "constraint names out of sync with enum");
@@ -192,6 +194,14 @@ bool loom_type_satisfies_constraint(loom_type_t type,
              (element_type != LOOM_SCALAR_TYPE_I1 &&
               (loom_scalar_type_is_integer(element_type) ||
                loom_scalar_type_is_float(element_type)));
+    }
+    case LOOM_TYPE_CONSTRAINT_BYTE_PATTERN_ELEMENT: {
+      if (!loom_type_is_shaped(type)) {
+        return false;
+      }
+      return loom_scalar_type_set_contains(
+          LOOM_SCALAR_TYPE_SET_INTEGER_PAYLOAD | LOOM_SCALAR_TYPE_SET_FLOAT,
+          loom_type_element_type(type));
     }
     case LOOM_TYPE_CONSTRAINT_INDEX_OR_NON_I1_INTEGER_ELEMENT: {
       if (!loom_type_is_shaped(type)) {

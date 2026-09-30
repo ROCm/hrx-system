@@ -2,20 +2,6 @@
 
 spirv.target<vulkan1_3> @target {contract_feature_bits = 2147516422}
 
-func.def target(@target) @rejects_i1_atomic(%value: i1, %buffer: buffer) {
-  %base = index.constant 0 : offset
-  %global = buffer.assume.memory_space<global> %buffer : buffer
-  %aligned = buffer.assume.alignment %global {minimum_alignment = 1} : buffer
-  // ERROR@+1: TARGET/002 {field_name="result", actual_type="view<1xi1>"}
-  %view = buffer.view %aligned[%base] : buffer -> view<1xi1>
-  // ERROR@+1: TARGET/002 {field_name="view", actual_type="view<1xi1>"}
-  view.atomic.reduce<andi> %value, %view[0] {ordering = relaxed, scope = workgroup} : i1, view<1xi1>
-  func.return
-}
-
-// ====
-spirv.target<vulkan1_3> @target {contract_feature_bits = 2147516422}
-
 func.def target(@target) @rejects_i8_atomic(%value: i8, %buffer: buffer) {
   %base = index.constant 0 : offset
   %global = buffer.assume.memory_space<global> %buffer : buffer
@@ -101,20 +87,6 @@ func.def target(@f16_target) @rejects_f16_compare_exchange(%value: f16, %buffer:
   %view = buffer.view %aligned[%base] : buffer -> view<1xf16>
   // ERROR@+1: TARGET/002 {field_name="view", actual_type="view<1xf16>"}
   %old = view.atomic.cmpxchg %value, %value, %view[0] {failure_ordering = relaxed, scope = workgroup, success_ordering = relaxed} : f16, view<1xf16> -> f16
-  func.return
-}
-
-// ====
-spirv.target<vulkan1_3> @target {contract_feature_bits = 2147516422}
-
-func.def target(@target) @rejects_index_compare_exchange(%value: index, %buffer: buffer) {
-  %base = index.constant 0 : offset
-  %global = buffer.assume.memory_space<global> %buffer : buffer
-  %aligned = buffer.assume.alignment %global {minimum_alignment = 8} : buffer
-  // ERROR@+1: TARGET/002 {field_name="result", actual_type="view<1xindex>"}
-  %view = buffer.view %aligned[%base] : buffer -> view<1xindex>
-  // ERROR@+1: TARGET/002 {field_name="view", actual_type="view<1xindex>"}
-  %old = view.atomic.cmpxchg %value, %value, %view[0] {failure_ordering = relaxed, scope = workgroup, success_ordering = relaxed} : index, view<1xindex> -> index
   func.return
 }
 

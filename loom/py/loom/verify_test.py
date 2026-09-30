@@ -78,7 +78,7 @@ def test_type_constraints_match_payload_scalars() -> None:
         assert not type_satisfies_constraint(value_type, TypeConstraint.PAYLOAD_SCALAR)
 
 
-def test_type_constraints_match_byte_pattern_scalars() -> None:
+def test_type_constraints_match_byte_patterns() -> None:
     accepted_kinds = (
         ir.ScalarTypeKind.I8,
         ir.ScalarTypeKind.I16,
@@ -92,8 +92,13 @@ def test_type_constraints_match_byte_pattern_scalars() -> None:
         ir.ScalarTypeKind.F64,
     )
     for kind in accepted_kinds:
+        scalar_type = ir.ScalarType(kind)
         assert type_satisfies_constraint(
-            ir.ScalarType(kind), TypeConstraint.BYTE_PATTERN_SCALAR
+            scalar_type, TypeConstraint.BYTE_PATTERN_SCALAR
+        )
+        assert type_satisfies_constraint(
+            ir.ShapedType(ir.TypeKind.VECTOR, scalar_type, (ir.StaticDim(1),)),
+            TypeConstraint.BYTE_PATTERN_ELEMENT,
         )
 
     rejected_kinds = (
@@ -102,9 +107,20 @@ def test_type_constraints_match_byte_pattern_scalars() -> None:
         ir.ScalarTypeKind.I1,
     )
     for kind in rejected_kinds:
+        scalar_type = ir.ScalarType(kind)
         assert not type_satisfies_constraint(
-            ir.ScalarType(kind), TypeConstraint.BYTE_PATTERN_SCALAR
+            scalar_type, TypeConstraint.BYTE_PATTERN_SCALAR
         )
+        assert not type_satisfies_constraint(
+            ir.ShapedType(ir.TypeKind.VECTOR, scalar_type, (ir.StaticDim(1),)),
+            TypeConstraint.BYTE_PATTERN_ELEMENT,
+        )
+
+    assert not type_satisfies_constraint(
+        ir.ShapedType(ir.TypeKind.VECTOR, ir.I32, (ir.StaticDim(1),)),
+        TypeConstraint.BYTE_PATTERN_SCALAR,
+    )
+    assert not type_satisfies_constraint(ir.I32, TypeConstraint.BYTE_PATTERN_ELEMENT)
 
 
 def test_type_constraints_match_exact_i32() -> None:

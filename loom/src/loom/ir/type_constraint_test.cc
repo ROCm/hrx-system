@@ -38,7 +38,7 @@ TEST(TypeConstraintTest, PayloadScalar) {
       vector_i32, LOOM_TYPE_CONSTRAINT_PAYLOAD_SCALAR));
 }
 
-TEST(TypeConstraintTest, BytePatternScalar) {
+TEST(TypeConstraintTest, BytePatterns) {
   const loom_scalar_type_t accepted_types[] = {
       LOOM_SCALAR_TYPE_I8,  LOOM_SCALAR_TYPE_I16,    LOOM_SCALAR_TYPE_I32,
       LOOM_SCALAR_TYPE_I64, LOOM_SCALAR_TYPE_F8E4M3, LOOM_SCALAR_TYPE_F8E5M2,
@@ -48,6 +48,10 @@ TEST(TypeConstraintTest, BytePatternScalar) {
   for (loom_scalar_type_t type : accepted_types) {
     EXPECT_TRUE(loom_type_satisfies_constraint(
         loom_type_scalar(type), LOOM_TYPE_CONSTRAINT_BYTE_PATTERN_SCALAR));
+    loom_type_t vector_type =
+        loom_type_shaped_1d(LOOM_TYPE_VECTOR, type, loom_dim_pack_static(1), 0);
+    EXPECT_TRUE(loom_type_satisfies_constraint(
+        vector_type, LOOM_TYPE_CONSTRAINT_BYTE_PATTERN_ELEMENT));
   }
 
   const loom_scalar_type_t rejected_types[] = {
@@ -58,7 +62,19 @@ TEST(TypeConstraintTest, BytePatternScalar) {
   for (loom_scalar_type_t type : rejected_types) {
     EXPECT_FALSE(loom_type_satisfies_constraint(
         loom_type_scalar(type), LOOM_TYPE_CONSTRAINT_BYTE_PATTERN_SCALAR));
+    loom_type_t vector_type =
+        loom_type_shaped_1d(LOOM_TYPE_VECTOR, type, loom_dim_pack_static(1), 0);
+    EXPECT_FALSE(loom_type_satisfies_constraint(
+        vector_type, LOOM_TYPE_CONSTRAINT_BYTE_PATTERN_ELEMENT));
   }
+
+  loom_type_t vector_i32 = loom_type_shaped_1d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I32, loom_dim_pack_static(1), 0);
+  EXPECT_FALSE(loom_type_satisfies_constraint(
+      vector_i32, LOOM_TYPE_CONSTRAINT_BYTE_PATTERN_SCALAR));
+  EXPECT_FALSE(loom_type_satisfies_constraint(
+      loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+      LOOM_TYPE_CONSTRAINT_BYTE_PATTERN_ELEMENT));
 }
 
 TEST(TypeConstraintTest, ExactI32) {

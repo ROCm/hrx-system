@@ -88,7 +88,7 @@ from loom.dsl import (
     EnumDef,
     HasAllStaticRankOneVector,
     HasAllStaticVector,
-    HasBitwiseElement,
+    HasBytePatternElement,
     HasF16OrBf16Element,
     HasF32Element,
     HasFloatElement,
@@ -2155,13 +2155,14 @@ vector_atomic_reduce = Op(
         "serialized by the required ordering and scope attributes."
     ),
     operands=[
-        Operand("value", VECTOR, doc="Vector contribution for each lane."),
+        Operand("value", VECTOR, doc="Fixed-width byte-addressable contribution for each lane."),
         Operand("view", VIEW, doc="Typed destination view."),
         Operand("offsets", VECTOR, doc="Per-lane signed element offsets from the logical origin."),
         Operand("indices", INDEX, doc="Dynamic logical origin indices.", variadic=True),
     ],
     attrs=_atomic_memory_attrs(),
     constraints=[
+        HasBytePatternElement("value"),
         HasIndexOrNonI1IntegerElement("offsets"),
         SameElementType("value", "view"),
         SameShape("offsets", "value"),
@@ -2197,7 +2198,7 @@ vector_atomic_reduce_mask = Op(
     group=vector_ops,
     doc=("Masked atomic no-result scatter reduction/update. True mask lanes perform vector.atomic.reduce, while false mask lanes do not access memory."),
     operands=[
-        Operand("value", VECTOR, doc="Vector contribution for each lane."),
+        Operand("value", VECTOR, doc="Fixed-width byte-addressable contribution for each lane."),
         Operand("view", VIEW, doc="Typed destination view."),
         Operand("offsets", VECTOR, doc="Per-lane signed element offsets from the logical origin."),
         Operand("mask", VECTOR, doc="i1 vector mask selecting active atomic lanes."),
@@ -2205,6 +2206,7 @@ vector_atomic_reduce_mask = Op(
     ],
     attrs=_atomic_memory_attrs(),
     constraints=[
+        HasBytePatternElement("value"),
         HasI1Element("mask"),
         HasIndexOrNonI1IntegerElement("offsets"),
         SameElementType("value", "view"),
@@ -2251,7 +2253,7 @@ vector_atomic_rmw = Op(
         "operation."
     ),
     operands=[
-        Operand("value", VECTOR, doc="Vector update value for each lane."),
+        Operand("value", VECTOR, doc="Fixed-width byte-addressable update value for each lane."),
         Operand("view", VIEW, doc="Typed destination view."),
         Operand("offsets", VECTOR, doc="Per-lane signed element offsets from the logical origin."),
         Operand("indices", INDEX, doc="Dynamic logical origin indices.", variadic=True),
@@ -2259,6 +2261,7 @@ vector_atomic_rmw = Op(
     results=[Result("result", VECTOR, doc="Old memory values read by the atomic operations.")],
     attrs=_atomic_memory_attrs(),
     constraints=[
+        HasBytePatternElement("value"),
         HasIndexOrNonI1IntegerElement("offsets"),
         SameElementType("value", "view", "result"),
         SameShape("offsets", "value", "result"),
@@ -2295,7 +2298,7 @@ vector_atomic_rmw_mask = Op(
     group=vector_ops,
     doc=("Masked atomic read-modify-write. True mask lanes perform vector.atomic.rmw, while false mask lanes do not access memory and take the corresponding passthrough lane in the result."),
     operands=[
-        Operand("value", VECTOR, doc="Vector update value for each lane."),
+        Operand("value", VECTOR, doc="Fixed-width byte-addressable update value for each lane."),
         Operand("view", VIEW, doc="Typed destination view."),
         Operand("offsets", VECTOR, doc="Per-lane signed element offsets from the logical origin."),
         Operand("mask", VECTOR, doc="i1 vector mask selecting active atomic lanes."),
@@ -2305,6 +2308,7 @@ vector_atomic_rmw_mask = Op(
     results=[Result("result", VECTOR, doc="Old memory values for active lanes and passthrough for inactive lanes.")],
     attrs=_atomic_memory_attrs(),
     constraints=[
+        HasBytePatternElement("value"),
         HasI1Element("mask"),
         HasIndexOrNonI1IntegerElement("offsets"),
         SameElementType("value", "view", "passthrough", "result"),
@@ -2357,8 +2361,8 @@ vector_atomic_cmpxchg = Op(
         "Comparison is bitwise for every accepted element type."
     ),
     operands=[
-        Operand("expected", VECTOR, doc="Expected memory value for each lane."),
-        Operand("replacement", VECTOR, doc="Replacement value written for each successful lane."),
+        Operand("expected", VECTOR, doc="Fixed-width byte-addressable expected value for each lane."),
+        Operand("replacement", VECTOR, doc="Matching replacement value written for each successful lane."),
         Operand("view", VIEW, doc="Typed destination view."),
         Operand("offsets", VECTOR, doc="Per-lane signed element offsets from the logical origin."),
         Operand("indices", INDEX, doc="Dynamic logical origin indices.", variadic=True),
@@ -2366,7 +2370,7 @@ vector_atomic_cmpxchg = Op(
     results=[Result("old", VECTOR, doc="Old memory values read by the atomic operations.")],
     attrs=_atomic_cmpxchg_memory_attrs(),
     constraints=[
-        HasBitwiseElement("expected"),
+        HasBytePatternElement("expected"),
         HasIndexOrNonI1IntegerElement("offsets"),
         SameElementType("expected", "replacement", "view", "old"),
         SameShape("offsets", "expected", "replacement", "old"),

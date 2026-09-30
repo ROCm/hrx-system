@@ -16,6 +16,50 @@ func.def @atomic_store_rejects_acquire(%view: view<1xi32>, %value: i32) {
 
 // ====
 
+// Atomic memory objects require a concrete byte-addressable payload rather
+// than an address-domain carrier.
+func.def @atomic_load_rejects_offset_payload(%view: view<1xoffset>) {
+  // ERROR@+1: TYPE/004 "result" "offset" "byte-addressable fixed-width integer or floating-point scalar"
+  %value = view.atomic.load %view[0] {ordering = relaxed, scope = system} : view<1xoffset> -> offset
+  func.return
+}
+
+// ====
+
+func.def @atomic_store_rejects_i1_payload(%view: view<1xi1>, %value: i1) {
+  // ERROR@+1: TYPE/003 "value" "i1" "byte-addressable fixed-width integer or floating-point scalar"
+  view.atomic.store %value, %view[0] {ordering = relaxed, scope = system} : i1, view<1xi1>
+  func.return
+}
+
+// ====
+
+func.def @atomic_reduce_rejects_i1_payload(%view: view<1xi1>, %value: i1) {
+  // ERROR@+1: TYPE/003 "value" "i1" "byte-addressable fixed-width integer or floating-point scalar"
+  view.atomic.reduce<andi> %value, %view[0] {ordering = relaxed, scope = workgroup} : i1, view<1xi1>
+  func.return
+}
+
+// ====
+
+func.def @atomic_rmw_rejects_i1_payload(%view: view<1xi1>, %value: i1) {
+  // ERROR@+1: TYPE/003 "value" "i1" "byte-addressable fixed-width integer or floating-point scalar"
+  %old = view.atomic.rmw<andi> %value, %view[0] {ordering = relaxed, scope = workgroup} : i1, view<1xi1> -> i1
+  func.return
+}
+
+// ====
+
+// Index is an address-domain value whose carrier width is target-selected,
+// not a fixed-width memory-object payload.
+func.def @atomic_cmpxchg_rejects_index_payload(%view: view<1xindex>, %value: index) {
+  // ERROR@+1: TYPE/003 "expected" "index" "byte-addressable fixed-width integer or floating-point scalar"
+  %old = view.atomic.cmpxchg %value, %value, %view[0] {failure_ordering = relaxed, scope = workgroup, success_ordering = relaxed} : index, view<1xindex> -> index
+  func.return
+}
+
+// ====
+
 func.def @buffer_alloca_rejects_index_size(%size: index) {
   // ERROR@+1: TYPE/003 "byte_length" "index" "offset"
   %scratch = buffer.alloca<workgroup> align(64) %size : buffer

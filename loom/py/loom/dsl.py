@@ -65,6 +65,7 @@ __all__ = [
     "INTEGER",
     "PAYLOAD_SCALAR",
     "BYTE_PATTERN_SCALAR",
+    "BYTE_PATTERN_ELEMENT",
     "INDEX_OR_NON_I1_INTEGER_SCALAR",
     "INTEGER_ELEMENT",
     "INDEX_OR_NON_I1_INTEGER_ELEMENT",
@@ -214,6 +215,7 @@ __all__ = [
     "HasFloatElement",
     "HasBitwiseScalar",
     "HasBitwiseElement",
+    "HasBytePatternElement",
     "HasIndexOrNonI1IntegerScalar",
     "HasIndexOrNonI1IntegerElement",
     "HasI1Element",
@@ -327,6 +329,7 @@ class TypeConstraint(Enum):
       INTEGER_ELEMENT → ShapedType with integer element type
       FLOAT_ELEMENT   → ShapedType with float element type
       BITWISE_ELEMENT → ShapedType with index, non-i1 integer, or float element
+      BYTE_PATTERN_ELEMENT → ShapedType with 8/16/32/64-bit integer or float element
       INDEX_OR_NON_I1_INTEGER_ELEMENT → ShapedType index or non-i1 integer element
       I1_ELEMENT      → ShapedType with element type i1
       I8_ELEMENT      → ShapedType with element type i8
@@ -374,6 +377,7 @@ class TypeConstraint(Enum):
     INTEGER_ELEMENT = "integer_element"
     FLOAT_ELEMENT = "float_element"
     BITWISE_ELEMENT = "bitwise_element"
+    BYTE_PATTERN_ELEMENT = "byte_pattern_element"
     INDEX_OR_NON_I1_INTEGER_ELEMENT = "index_or_non_i1_integer_element"
     I1_ELEMENT = "i1_element"
     I8_ELEMENT = "i8_element"
@@ -415,6 +419,7 @@ INDEX_OR_NON_I1_INTEGER_SCALAR = TypeConstraint.INDEX_OR_NON_I1_INTEGER_SCALAR
 INTEGER_ELEMENT = TypeConstraint.INTEGER_ELEMENT
 FLOAT_ELEMENT = TypeConstraint.FLOAT_ELEMENT
 BITWISE_ELEMENT = TypeConstraint.BITWISE_ELEMENT
+BYTE_PATTERN_ELEMENT = TypeConstraint.BYTE_PATTERN_ELEMENT
 INDEX_OR_NON_I1_INTEGER_ELEMENT = TypeConstraint.INDEX_OR_NON_I1_INTEGER_ELEMENT
 I1_ELEMENT = TypeConstraint.I1_ELEMENT
 I8_ELEMENT = TypeConstraint.I8_ELEMENT
@@ -2176,6 +2181,21 @@ def _type_satisfies_field_constraint(
             ScalarTypeKind.F32,
             ScalarTypeKind.F64,
         }
+    if constraint == BYTE_PATTERN_SCALAR:
+        if not isinstance(value_type, ScalarType):
+            return False
+        return value_type.kind in {
+            ScalarTypeKind.I8,
+            ScalarTypeKind.I16,
+            ScalarTypeKind.I32,
+            ScalarTypeKind.I64,
+            ScalarTypeKind.F8E4M3,
+            ScalarTypeKind.F8E5M2,
+            ScalarTypeKind.F16,
+            ScalarTypeKind.BF16,
+            ScalarTypeKind.F32,
+            ScalarTypeKind.F64,
+        }
     if not isinstance(value_type, ShapedType):
         return False
     element_kind = value_type.element_type.kind
@@ -2189,6 +2209,19 @@ def _type_satisfies_field_constraint(
         }
     if constraint == BITWISE_ELEMENT:
         return element_kind == ScalarTypeKind.INDEX or element_kind in {
+            ScalarTypeKind.I8,
+            ScalarTypeKind.I16,
+            ScalarTypeKind.I32,
+            ScalarTypeKind.I64,
+            ScalarTypeKind.F8E4M3,
+            ScalarTypeKind.F8E5M2,
+            ScalarTypeKind.F16,
+            ScalarTypeKind.BF16,
+            ScalarTypeKind.F32,
+            ScalarTypeKind.F64,
+        }
+    if constraint == BYTE_PATTERN_ELEMENT:
+        return element_kind in {
             ScalarTypeKind.I8,
             ScalarTypeKind.I16,
             ScalarTypeKind.I32,
@@ -2286,6 +2319,12 @@ def HasBitwiseElement(field: str) -> Constraint:
     """A shaped field must have an element type with a non-i1 bitwise payload."""
 
     return _has_element_constraint(field, BITWISE_ELEMENT)
+
+
+def HasBytePatternElement(field: str) -> Constraint:
+    """A shaped field must have a fixed-width byte-addressable element type."""
+
+    return _has_element_constraint(field, BYTE_PATTERN_ELEMENT)
 
 
 def HasIndexOrNonI1IntegerScalar(field: str) -> Constraint:
