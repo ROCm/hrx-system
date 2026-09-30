@@ -321,3 +321,55 @@ on the preceding completion plus its recorded client delay. This dependency is
 what a closed-loop scheduler replay must preserve when changing model speed.
 Token lengths and recorded cache outcomes are fixed evidence; these files do
 not expose server backpressure, cancellation timing, or cache-eviction policy.
+
+### CPU packing replay
+
+`simulate_packing` replays that trace with one outstanding request per client.
+First arrivals keep their recorded offsets. Each subsequent request becomes
+ready after **simulated** completion plus the recorded client delay; the old
+server's response time is not baked into arrival scheduling.
+
+```sh
+build_tools/bin/iree-bazel-run //experimental/loom_serve:simulate_packing -- \
+  /private/recordings/workload.json \
+  --capacities=32,64,128 --span-capacity=8 --epoch-us=100000 \
+  --output=/private/recordings/packing.json \
+  --epochs=/private/recordings/epochs.jsonl
+```
+
+The required `--epoch-us` is a hypothetical uniform epoch duration, **not a
+measured cost or throughput prediction**. Varying it tests the interaction
+between service speed and recorded client delays. All shapes have that same
+duration in this experiment; shape occupancy is not hardware utilization.
+Measured shape/context costs require separate controlled device evidence.
+
+Both policies admit ready rows round-robin, bounded by token and span capacity.
+Each admitted decode reserves one input token; prefill divides the remaining
+budget. `single-pass` uses the count arithmetic in `qwen_workload_plan`;
+`fair-fill` redistributes short-span leftovers. Both choose the smallest listed
+shape fitting their actual plan. Final prefill selects the first prediction,
+so a request with N recorded outputs requires N-1 subsequent causal decodes.
+There is no collection delay and no speculative lookahead.
+
+The optional ledger exposes every epoch's readiness, selected shape, row spans,
+positions and output selections. Its three gap counters partition unused
+**maximum token budget**: `packing_gap_tokens` is admitted ready work left
+unpacked; `span_gap_tokens` is work excluded by span admission;
+`causal_gap_tokens` is space with no ready input to fill it. These differ from
+`shape_padding_tokens`, which counts only empty slots in the emitted shape.
+The summary includes shape occupancy, epoch counts, per-request completion,
+and longest runnable-to-service wait. Both policies complete identical recorded
+token counts, but their evolving ready frontiers can differ.
+
+All session state is assumed resident and recorded cache outcomes stay fixed.
+The simulator does not establish resident-memory capacity, eviction behavior,
+new generated text, MTP acceptance, cancellation, or output-credit behavior.
+It is an editable packing experiment, not a replacement for endpoint/device
+qualification. Increasing client count requires more recordings; replay does
+not silently duplicate sessions or call synthetic replicas real agents.
+
+```sh
+build_tools/bin/iree-bazel-test --config=asan \
+  //experimental/loom_serve:agent_trace_test \
+  //experimental/loom_serve:simulate_packing_test
+```

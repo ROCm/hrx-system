@@ -32,6 +32,28 @@ py_test(
     deps = [":agent_trace_lib"],
 )
 
+py_library(
+    name = "simulate_packing_lib",
+    srcs = ["simulate_packing.py"],
+    deps = [":agent_trace_lib"],
+)
+
+py_binary(
+    name = "simulate_packing",
+    srcs = ["simulate_packing.py"],
+    deps = [":agent_trace_lib"],
+)
+
+py_test(
+    name = "simulate_packing_test",
+    size = "small",
+    srcs = ["simulate_packing_test.py"],
+    deps = [
+        ":agent_trace_lib",
+        ":simulate_packing_lib",
+    ],
+)
+
 loom_cc_library(
     name = "http_request",
     srcs = ["http_request.c"],
