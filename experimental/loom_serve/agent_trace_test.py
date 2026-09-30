@@ -281,6 +281,83 @@ class AgentTraceTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     agent_trace.export_sessions([self.path])
 
+    def test_composition_keeps_sources_and_changes_only_release_schedule(self):
+        self.write_session(call_entries())
+        original = agent_trace.export_sessions([self.path])
+        original_data = original.to_dict()
+        composed, description = agent_trace.compose_trace(
+            original,
+            {
+                "format": agent_trace.COMPOSITION_FORMAT,
+                "instances": [
+                    {
+                        "source_session": 0,
+                        "start_us": 9000,
+                        "request_count": 3,
+                        "pauses": [{"before_request": 2, "duration_us": 2000}],
+                    },
+                    {"source_session": 0, "start_us": 100},
+                ],
+            },
+        )
+        self.assertEqual(original.to_dict(), original_data)
+        self.assertEqual(composed.origin_unix_us, 0)
+        self.assertEqual(
+            [session.arrival_us for session in composed.sessions], [9000, 100]
+        )
+        self.assertEqual(
+            [request.delay_us for request in composed.sessions[0].requests],
+            [0, 500, 2500],
+        )
+        for session in composed.sessions:
+            self.assertEqual(session.source_sha256, original.sessions[0].source_sha256)
+            self.assertEqual(session.configuration, original.sessions[0].configuration)
+            for index, request in enumerate(session.requests):
+                source = original.sessions[0].requests[index]
+                self.assertEqual(
+                    (
+                        request.prefill_tokens,
+                        request.retained_tokens,
+                        request.output_tokens,
+                        request.purpose,
+                    ),
+                    (
+                        source.prefill_tokens,
+                        source.retained_tokens,
+                        source.output_tokens,
+                        source.purpose,
+                    ),
+                )
+        self.assertEqual(description["instances"][1]["request_count"], 4)
+        self.assertEqual(description["instances"][1]["pauses"], [])
+
+    def test_composition_rejects_invalid_sources_and_ineffective_controls(self):
+        self.write_session(call_entries())
+        trace = agent_trace.export_sessions([self.path])
+        for overrides in (
+            {"source_session": 1},
+            {"source_session": True},
+            {"start_us": -1},
+            {"request_count": 0},
+            {"request_count": 5},
+            {"context_window_tokens": 16384},
+            {"pauses": [{"before_request": 0, "duration_us": 10}]},
+            {"pauses": [{"before_request": 4, "duration_us": 10}]},
+            {"pauses": [{"before_request": 1, "duration_us": -1}]},
+            {"pauses": [{"before_request": 1, "duration_us": 10}] * 2},
+            {"pauses": {}},
+        ):
+            with self.subTest(overrides=overrides):
+                instance = {"source_session": 0, "start_us": 0, **overrides}
+                with self.assertRaises(ValueError):
+                    agent_trace.compose_trace(
+                        trace,
+                        {
+                            "format": agent_trace.COMPOSITION_FORMAT,
+                            "instances": [instance],
+                        },
+                    )
+
 
 if __name__ == "__main__":
     unittest.main()

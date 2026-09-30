@@ -16,7 +16,7 @@ from contextlib import ExitStack
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from experimental.loom_serve.agent_trace import Request, load_trace
+from experimental.loom_serve.agent_trace import Request, compose_trace, load_trace
 
 POLICIES = ("single-pass", "fair-fill")
 ADMISSION_ORDERS = ("round-robin", "longest", "shortest")
@@ -310,6 +310,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("trace", type=Path, help="content-free agent_trace export")
     parser.add_argument(
+        "--composition",
+        type=Path,
+        help="explicit synthetic instances, start times, pauses and request limits",
+    )
+    parser.add_argument(
         "--capacities", default="32,64,128", help="ascending token shapes"
     )
     parser.add_argument("--span-capacity", type=int, default=8)
@@ -345,11 +350,18 @@ def main():
         if args.max_hold_us < 0:
             raise ValueError("max-hold-us must be nonnegative")
         trace = load_trace(args.trace)
+        source_sessions = len(trace.sessions)
+        composition = None
+        if args.composition:
+            with args.composition.open() as stream:
+                trace, composition = compose_trace(trace, json.load(stream))
         policies = POLICIES if args.policy == "both" else (args.policy,)
         configuration = {
             "format": "loom-packing-replay-v1",
             "trace_sha256": hashlib.sha256(args.trace.read_bytes()).hexdigest(),
             "model": trace.model,
+            "source_sessions": source_sessions,
+            "composition": composition,
             "sessions": len(trace.sessions),
             "client_configurations": [
                 asdict(session.configuration) if session.configuration else None
