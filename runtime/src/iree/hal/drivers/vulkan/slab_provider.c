@@ -128,6 +128,7 @@ iree_status_t iree_hal_vulkan_slab_provider_create(
   provider->logical_device = options.logical_device;
   provider->memory_type_index = options.memory_type_index;
   provider->memory_property_flags = options.memory_property_flags;
+  provider->properties.allocation_alignment = options.min_alignment;
   provider->properties.memory_type = options.memory_type;
   provider->properties.supported_usage = options.supported_usage;
   provider->properties.queue_family_affinity =

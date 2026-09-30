@@ -36,6 +36,10 @@ enum iree_hal_slab_provider_trim_flag_bits_e {
 
 // Immutable properties of slabs acquired from a provider.
 typedef struct iree_hal_slab_provider_properties_t {
+  // Minimum byte alignment guaranteed for every slab base address. Must be a
+  // non-zero power of two.
+  iree_device_size_t allocation_alignment;
+
   // Memory type properties shared by every slab from the provider.
   iree_hal_memory_type_t memory_type;
 

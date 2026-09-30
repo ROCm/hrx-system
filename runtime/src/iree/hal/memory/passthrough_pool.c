@@ -291,12 +291,12 @@ static iree_status_t iree_hal_passthrough_pool_validate_reservation_request(
                             ") must be a power of two",
                             alignment);
   }
-  if (alignment > IREE_HAL_HEAP_BUFFER_ALIGNMENT) {
+  if (alignment > pool->slab_properties.allocation_alignment) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "reservation alignment %" PRIdsz
-                            " exceeds pass-through pool alignment %" PRIdsz,
+                            " exceeds slab provider alignment %" PRIdsz,
                             alignment,
-                            (iree_device_size_t)IREE_HAL_HEAP_BUFFER_ALIGNMENT);
+                            pool->slab_properties.allocation_alignment);
   }
   if (iree_hal_asan_pool_options_is_enabled(&pool->asan_options)) {
     iree_hal_asan_allocation_layout_t asan_layout;
