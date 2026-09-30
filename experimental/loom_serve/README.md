@@ -167,10 +167,14 @@ not a working chat endpoint or a pi session.
 ## Retained chat service
 
 `qwen_server` serves the shared model through the TCP transport. The main
-application thread owns model state and round-robins one prefill chunk or decode
-step per ready row. Network progress runs independently. Each row has one
+application thread owns model state and packs ready prompt chunks and pending
+decode tokens into one model epoch. Every admitted row receives a token slot
+before remaining capacity is filled from prompt spans. Rotating priority bounds
+starvation when token/span capacity cannot fit every ready row and distributes
+large prompt chunks. Network progress runs independently. Each row has one
 pending copied SSE packet; exhausted carrier credit pauses that row before its
-next stage. This is interleaved execution, not batched matrix math.
+next epoch. The packed path shares matrix work and weight residency, not just
+host submission. Existing contiguous retained rows and F16 KV remain unchanged.
 
 `qwen_chat.{h,c}` owns the text-only, non-thinking Qwen template and XML tool
 translation. The supported endpoint is `POST /v1/chat/completions`, with model
@@ -193,20 +197,51 @@ rows return 503. There is no durable server-side conversation store.
 Disconnect cancels at a completed model stage and invalidates the checkpoint.
 SIGINT/SIGTERM stop admission, finish the current stage, relinquish request
 views, drain transport I/O and release model residency. Request diagnostics are
-JSON events on stderr: `admit`, `complete`, `cancel`, and `evict`. Admission
+JSON events on stderr: `admit`, `complete`, `cancel`, `evict`, `epoch`, and
+`heartbeat`. Admission
 reports retained/appended tokens and cache hit versus replay. Completion adds
-prefill/decode counts and completed-stage durations. These durations include
-the host build's instrumentation and are not automatically performance data.
+per-request prefill/decode epoch counts and end-to-end timing. Each epoch reports
+its actual rows, consumed positions, prompt/decode counts, selected outputs,
+token shape, traversal count and completed model duration. Shared epoch time is
+not attributed in full to every constituent row. An independent host observer
+reports current activity, active/backpressured rows, completed counters and
+interval rates every second, including while model execution is waiting.
+`--heartbeat_ms=0` disables periodic reports. All durations include the host
+build's instrumentation and are not automatically performance data.
 
 ```sh
 build_tools/bin/iree-bazel-run --config=asan \
   //experimental/loom_serve:qwen_server -- \
   --prefill=/path/to/compiled/prefill \
   --decode=/path/to/compiled/decode \
+  --epoch=/path/to/compiled/epoch \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
   --tokenizer=/path/to/tokenizer.json \
   --rows=4 --port=8080 --max_tokens=384
 ```
+
+The default `--scheduler=packed` requires `--epoch`. `--scheduler=isolated`
+executes the same ready-span plan using ordinary per-row prefill/decode stages;
+`--scheduler=matched` uses prefill math for length-one decode inputs as well.
+Loading the same epoch artifact in all modes holds planner token/span limits
+fixed. `--chunk_size` caps each row's contribution, not the whole epoch. The
+fixed prepared shape still computes padding; the epoch log exposes useful work
+separately from its capacity.
+
+For a bounded real HTTP check and initial end-to-end measurement:
+
+```sh
+build_tools/bin/iree-bazel-run //experimental/loom_serve:benchmark_service -- \
+  --url=http://127.0.0.1:8080 --clients=4 --long-lines=128 --max-tokens=64
+```
+
+Alternating short/long prompts produce overlapping decode and prefill demand.
+Each client then checks its distinct remembered codeword and requires a retained
+prefix hit. JSON output includes response text, usage, first-text latency and
+whole-cohort throughput. This is a synthetic HTTP lifecycle workload, not a
+coding-agent score. Compare optimized, non-sanitized server runs under the
+benchmark lease in interleaved mode order; preserve server epochs and client
+results together. Real pi tool continuations remain the product check below.
 
 ### Real pi continuation check
 

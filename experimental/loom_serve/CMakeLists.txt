@@ -416,6 +416,29 @@ loom_cc_test(
     iree::testing::gtest_main
 )
 
+loom_cc_library(
+  NAME
+    qwen_schedule
+  HDRS
+    "qwen_schedule.h"
+  SRCS
+    "qwen_schedule.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    qwen_schedule_test
+  SRCS
+    "qwen_schedule_test.cc"
+  DEPS
+    ::qwen_schedule
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
 loom_cc_library(
   NAME
@@ -429,8 +452,10 @@ loom_cc_library(
     ::http_server
     ::qwen_chat
     ::qwen_model
+    ::qwen_schedule
     iree::base
     iree::base::threading
+    iree::base::threading::thread
     iree::tokenizer
     loom::util::json
     loom::util::stream

@@ -153,7 +153,8 @@ build_tools/bin/iree-bazel-run --config=asan \
 The same GPU sanitizer flags apply. These comparisons qualify state routing
 against the same math, not independent model accuracy or full-model mixed
 execution. Metadata remains immutable until the epoch's completion edge permits
-reuse. The service still invokes one retained row at a time.
+reuse. The service's packed scheduler gathers credited ready rows into this
+entry; isolated and matched-math controls use the same ready-span partition.
 
 ## Complete packed model witness
 
