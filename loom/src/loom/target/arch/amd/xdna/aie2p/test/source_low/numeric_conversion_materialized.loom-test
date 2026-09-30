@@ -1,0 +1,283 @@
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @vector_sitofp_i8x2_bf16x2(%input: vector<2xi8>) -> (vector<2xbf16>) {
+  %converted = vector.sitofp %input : vector<2xi8> to vector<2xbf16>
+  func.return %converted : vector<2xbf16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @vector_sitofp_i8x2_bf16x2(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %16 = vextract.8.imm %input, 0
+  %17 = extend.s8 %16
+  %18 = mov.fx2flt-scale 0
+  %19 = convert.signed.i32.to.f32 %17, %18
+  %20 = mov.short -16
+  %21 = lshl %19, %20
+  %22 = mov.short 1
+  %23 = and %21, %22
+  %24 = mov.i32 32767
+  %25 = add.rr %24, %23
+  %26 = add.rr %19, %25
+  %27 = lshl %26, %20
+  %28 = mov.i32 2139095040
+  %29 = and %19, %28
+  %30 = eq %29, %28
+  %31 = mov.i32 8388607
+  %32 = and %19, %31
+  %33 = nez %32
+  %34 = and %30, %33
+  %35 = mov.short 64
+  %36 = or %21, %35
+  %37 = copy %34 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %38 = sel.nez %36, %27, %37
+  %39 = vextract.8.imm %input, 1
+  %40 = extend.s8 %39
+  %42 = convert.signed.i32.to.f32 %40, %18
+  %44 = lshl %42, %20
+  %46 = and %44, %22
+  %48 = add.rr %24, %46
+  %49 = add.rr %42, %48
+  %50 = lshl %49, %20
+  %52 = and %42, %28
+  %53 = eq %52, %28
+  %55 = and %42, %31
+  %56 = nez %55
+  %57 = and %53, %56
+  %59 = or %44, %35
+  %60 = copy %57 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %61 = sel.nez %59, %50, %60
+  %62 = vbcst.16 %38
+  %64 = copy %22 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %converted = vinsert.16.reg %62, %64, %61
+  return %converted
+}
+
+// ====
+
+func.def @vector_uitofp_i8x2_f16x2(%input: vector<2xi8>) -> (vector<2xf16>) {
+  %converted = vector.uitofp %input : vector<2xi8> to vector<2xf16>
+  func.return %converted : vector<2xf16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @vector_uitofp_i8x2_f16x2(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %12 = vextract.8.imm %input, 0
+  %13 = extend.u8 %12
+  %14 = mov.fx2flt-scale 0
+  %15 = convert.signed.i32.to.f32 %13, %14
+  %16 = mov.i32 -2147483648
+  %17 = mov.i32 2147483647
+  %18 = mov.i32 8388607
+  %19 = mov.i32 8388608
+  %20 = mov.short 1
+  %21 = mov.short 0
+  %22 = mov.short -13
+  %23 = mov.short -16
+  %24 = mov.short -23
+  %25 = and %15, %16
+  %26 = lshl %25, %23
+  %27 = and %15, %17
+  %28 = lshl %27, %24
+  %29 = and %27, %18
+  %30 = mov.i32 939524096
+  %31 = sub %27, %30
+  %32 = lshl %31, %22
+  %33 = and %32, %20
+  %34 = mov.i32 4095
+  %35 = add.rr %34, %33
+  %36 = add.rr %31, %35
+  %37 = lshl %36, %22
+  %38 = mov.short 102
+  %39 = mov.short 113
+  %40 = mov.short 112
+  %41 = ltu %28, %38
+  %42 = copy %41 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %43 = sel.nez %38, %28, %42
+  %44 = geu %43, %39
+  %45 = copy %44 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %46 = sel.nez %40, %43, %45
+  %47 = mov.short 126
+  %48 = sub %46, %47
+  %49 = or %29, %19
+  %50 = lshl %49, %48
+  %51 = and %50, %20
+  %52 = mov.short 125
+  %53 = sub %52, %46
+  %54 = lshl %20, %53
+  %55 = sub %54, %20
+  %56 = add.rr %55, %51
+  %57 = add.rr %49, %56
+  %58 = lshl %57, %48
+  %59 = copy %41 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %60 = sel.nez %21, %58, %59
+  %61 = ltu %28, %39
+  %62 = copy %61 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %63 = sel.nez %60, %37, %62
+  %64 = mov.i32 31744
+  %65 = mov.short 143
+  %66 = geu %28, %65
+  %67 = copy %66 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %68 = sel.nez %64, %63, %67
+  %69 = lshl %29, %22
+  %70 = mov.short 512
+  %71 = or %69, %70
+  %72 = or %64, %71
+  %73 = nez %29
+  %74 = copy %73 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %75 = sel.nez %72, %64, %74
+  %76 = mov.short 255
+  %77 = eq %28, %76
+  %78 = copy %77 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %79 = sel.nez %75, %68, %78
+  %80 = or %26, %79
+  %81 = vextract.8.imm %input, 1
+  %82 = extend.u8 %81
+  %84 = convert.signed.i32.to.f32 %82, %14
+  %94 = and %84, %16
+  %95 = lshl %94, %23
+  %96 = and %84, %17
+  %97 = lshl %96, %24
+  %98 = and %96, %18
+  %100 = sub %96, %30
+  %101 = lshl %100, %22
+  %102 = and %101, %20
+  %104 = add.rr %34, %102
+  %105 = add.rr %100, %104
+  %106 = lshl %105, %22
+  %110 = ltu %97, %38
+  %111 = copy %110 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %112 = sel.nez %38, %97, %111
+  %113 = geu %112, %39
+  %114 = copy %113 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %115 = sel.nez %40, %112, %114
+  %117 = sub %115, %47
+  %118 = or %98, %19
+  %119 = lshl %118, %117
+  %120 = and %119, %20
+  %122 = sub %52, %115
+  %123 = lshl %20, %122
+  %124 = sub %123, %20
+  %125 = add.rr %124, %120
+  %126 = add.rr %118, %125
+  %127 = lshl %126, %117
+  %128 = copy %110 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %129 = sel.nez %21, %127, %128
+  %130 = ltu %97, %39
+  %131 = copy %130 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %132 = sel.nez %129, %106, %131
+  %135 = geu %97, %65
+  %136 = copy %135 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %137 = sel.nez %64, %132, %136
+  %138 = lshl %98, %22
+  %140 = or %138, %70
+  %141 = or %64, %140
+  %142 = nez %98
+  %143 = copy %142 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %144 = sel.nez %141, %64, %143
+  %146 = eq %97, %76
+  %147 = copy %146 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %148 = sel.nez %144, %137, %147
+  %149 = or %95, %148
+  %150 = vbcst.16 %80
+  %152 = copy %20 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %converted = vinsert.16.reg %150, %152, %149
+  return %converted
+}
+
+// ====
+
+func.def @vector_fptosi_bf16x2_i8x2(%input: vector<2xbf16>) -> (vector<2xi8>) {
+  %converted = vector.fptosi %input : vector<2xbf16> to vector<2xi8>
+  func.return %converted : vector<2xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @vector_fptosi_bf16x2_i8x2(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %16 = vextract.16.imm %input, 0
+  %17 = mov.short 16
+  %18 = lshl %16, %17
+  %19 = mov.flt2fx-scale 0
+  %20 = convert.round-nearest.f32.to.signed.i32 %18, %19
+  %21 = mov.fx2flt-scale 0
+  %22 = convert.signed.i32.to.f32 %20, %21
+  %23 = mov.i32 2147483647
+  %24 = and %18, %23
+  %25 = and %22, %23
+  %26 = ltu %24, %25
+  %27 = add %20, 1
+  %28 = add %20, -1
+  %29 = mov.i32 -2147483648
+  %30 = and %18, %29
+  %31 = copy %30 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %32 = sel.nez %27, %28, %31
+  %33 = copy %26 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %34 = sel.nez %32, %20, %33
+  %35 = vextract.16.imm %input, 1
+  %37 = lshl %35, %17
+  %39 = convert.round-nearest.f32.to.signed.i32 %37, %19
+  %41 = convert.signed.i32.to.f32 %39, %21
+  %43 = and %37, %23
+  %44 = and %41, %23
+  %45 = ltu %43, %44
+  %46 = add %39, 1
+  %47 = add %39, -1
+  %49 = and %37, %29
+  %50 = copy %49 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %51 = sel.nez %46, %47, %50
+  %52 = copy %45 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %53 = sel.nez %51, %39, %52
+  %54 = vbcst.8 %34
+  %55 = mov.short 1
+  %56 = copy %55 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %converted = vinsert.8.reg %54, %56, %53
+  return %converted
+}
+
+// ====
+
+func.def @vector_fptoui_bf16x2_i8x2(%input: vector<2xbf16>) -> (vector<2xi8>) {
+  %converted = vector.fptoui %input : vector<2xbf16> to vector<2xi8>
+  func.return %converted : vector<2xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @vector_fptoui_bf16x2_i8x2(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %16 = vextract.16.imm %input, 0
+  %17 = mov.short 16
+  %18 = lshl %16, %17
+  %19 = mov.flt2fx-scale 0
+  %20 = convert.round-nearest.f32.to.signed.i32 %18, %19
+  %21 = mov.fx2flt-scale 0
+  %22 = convert.signed.i32.to.f32 %20, %21
+  %23 = mov.i32 2147483647
+  %24 = and %18, %23
+  %25 = and %22, %23
+  %26 = ltu %24, %25
+  %27 = add %20, 1
+  %28 = add %20, -1
+  %29 = mov.i32 -2147483648
+  %30 = and %18, %29
+  %31 = copy %30 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %32 = sel.nez %27, %28, %31
+  %33 = copy %26 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %34 = sel.nez %32, %20, %33
+  %35 = vextract.16.imm %input, 1
+  %37 = lshl %35, %17
+  %39 = convert.round-nearest.f32.to.signed.i32 %37, %19
+  %41 = convert.signed.i32.to.f32 %39, %21
+  %43 = and %37, %23
+  %44 = and %41, %23
+  %45 = ltu %43, %44
+  %46 = add %39, 1
+  %47 = add %39, -1
+  %49 = and %37, %29
+  %50 = copy %49 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %51 = sel.nez %46, %47, %50
+  %52 = copy %45 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %53 = sel.nez %51, %39, %52
+  %54 = vbcst.8 %34
+  %55 = mov.short 1
+  %56 = copy %55 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %converted = vinsert.8.reg %54, %56, %53
+  return %converted
+}

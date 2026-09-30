@@ -691,6 +691,7 @@ loom_check_test_suite(
     "test/source_low/numeric_conversion_f16.loom-test"
     "test/source_low/numeric_conversion_float8.loom-test"
     "test/source_low/numeric_conversion_fp8_packet.loom-test"
+    "test/source_low/numeric_conversion_materialized.loom-test"
     "test/source_low/numeric_conversion_wide.loom-test"
     "test/source_low/numeric_decode_mxfp8.loom-test"
     "test/source_low/numeric_f32.loom-test"

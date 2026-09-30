@@ -376,6 +376,22 @@ static const loom_target_legalizer_rule_t kAie2pLegalizerRules[] = {
         .legalize = loom_aie2p_legalize_vector_to_scalar,
     },
     {
+        .root_kind = LOOM_OP_VECTOR_SITOFP,
+        .legalize = loom_aie2p_legalize_vector_to_scalar,
+    },
+    {
+        .root_kind = LOOM_OP_VECTOR_UITOFP,
+        .legalize = loom_aie2p_legalize_vector_to_scalar,
+    },
+    {
+        .root_kind = LOOM_OP_VECTOR_FPTOSI,
+        .legalize = loom_aie2p_legalize_vector_to_scalar,
+    },
+    {
+        .root_kind = LOOM_OP_VECTOR_FPTOUI,
+        .legalize = loom_aie2p_legalize_vector_to_scalar,
+    },
+    {
         .root_kind = LOOM_OP_VECTOR_SELECT,
         .legalize = loom_aie2p_legalize_vector_to_scalar,
     },
