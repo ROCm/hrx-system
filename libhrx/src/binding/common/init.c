@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "common/amdgpu_architecture.h"
+#include "common/graph_memory.h"
 #include "common/internal.h"
 //===----------------------------------------------------------------------===//
 // Global state
@@ -281,11 +282,16 @@ static iree_status_t iree_hal_streaming_initialize_device(
   out_device->current_mem_pool = NULL;
 
   iree_slim_mutex_initialize(&out_device->graph_memory_mutex);
-  out_device->graph_memory_used_current = 0;
+  iree_slim_mutex_initialize(&out_device->graph_memory_trim_mutex);
+  out_device->graph_memory_mapped_current = 0;
   out_device->graph_memory_used_high = 0;
   out_device->graph_memory_reserved_current = 0;
   out_device->graph_memory_reserved_high = 0;
-  out_device->graph_memory_reusable_size_entries = NULL;
+  out_device->graph_memory_cached_physical_blocks = NULL;
+  out_device->graph_memory_allocation_count = 0;
+  iree_slim_mutex_initialize(&out_device->terminal_resource_mutex);
+  iree_notification_initialize(&out_device->terminal_resource_notification);
+  out_device->pending_terminal_resource_count = 0;
 
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_execution_resource_table_initialize(
@@ -298,6 +304,44 @@ static iree_status_t iree_hal_streaming_initialize_device(
   }
   IREE_TRACE_ZONE_END(z0);
   return status;
+}
+
+void iree_hal_streaming_device_terminal_resource_acquire(
+    iree_hal_streaming_device_t* device) {
+  iree_slim_mutex_lock(&device->terminal_resource_mutex);
+  IREE_ASSERT_LT(device->pending_terminal_resource_count, SIZE_MAX);
+  ++device->pending_terminal_resource_count;
+  iree_slim_mutex_unlock(&device->terminal_resource_mutex);
+}
+
+void iree_hal_streaming_device_terminal_resource_release(
+    iree_hal_streaming_device_t* device) {
+  iree_slim_mutex_lock(&device->terminal_resource_mutex);
+  IREE_ASSERT_GT(device->pending_terminal_resource_count, 0);
+  --device->pending_terminal_resource_count;
+  if (device->pending_terminal_resource_count == 0) {
+    // Posting under the mutex ensures a waiter that observes zero cannot
+    // deinitialize the notification until this post has returned.
+    iree_notification_post(&device->terminal_resource_notification,
+                           IREE_ALL_WAITERS);
+  }
+  iree_slim_mutex_unlock(&device->terminal_resource_mutex);
+}
+
+static bool iree_hal_streaming_device_terminal_resource_is_idle(
+    void* user_data) {
+  iree_hal_streaming_device_t* device = (iree_hal_streaming_device_t*)user_data;
+  iree_slim_mutex_lock(&device->terminal_resource_mutex);
+  const bool is_idle = device->pending_terminal_resource_count == 0;
+  iree_slim_mutex_unlock(&device->terminal_resource_mutex);
+  return is_idle;
+}
+
+void iree_hal_streaming_device_terminal_resource_await_idle(
+    iree_hal_streaming_device_t* device) {
+  iree_notification_await(&device->terminal_resource_notification,
+                          iree_hal_streaming_device_terminal_resource_is_idle,
+                          device, iree_infinite_timeout());
 }
 
 // Deinitializes a device, releasing all its resources.
@@ -313,6 +357,11 @@ static void iree_hal_streaming_deinitialize_device(
       iree_hal_streaming_device_registry();
   iree_allocator_t host_allocator =
       registry ? registry->host_allocator : iree_allocator_system();
+
+  // A cancelled host call may publish semaphore failure before its queue
+  // resource is released. Keep all binding-owned callback state live until
+  // every terminal resource has completed that cleanup path.
+  iree_hal_streaming_device_terminal_resource_await_idle(device);
 
   // Free the device name and path strings that were allocated during
   // initialization.
@@ -331,6 +380,11 @@ static void iree_hal_streaming_deinitialize_device(
   hrx_mem_pool_release(device->default_mem_pool);
   device->default_mem_pool = NULL;
 
+  iree_status_t trim_status = iree_hal_streaming_graph_memory_trim(device);
+  if (!iree_status_is_ok(trim_status)) {
+    iree_status_abort(trim_status);
+  }
+
   // Release primary context (may not exist if never accessed).
   iree_hal_streaming_context_release(device->primary_context);
   device->primary_context = NULL;
@@ -338,16 +392,11 @@ static void iree_hal_streaming_deinitialize_device(
   iree_hal_streaming_execution_resource_table_deinitialize(
       &device->execution_resource_table);
 
-  iree_hal_streaming_graph_memory_size_entry_t* graph_memory_entry =
-      device->graph_memory_reusable_size_entries;
-  device->graph_memory_reusable_size_entries = NULL;
-  while (graph_memory_entry) {
-    iree_hal_streaming_graph_memory_size_entry_t* next_entry =
-        graph_memory_entry->next;
-    iree_allocator_free(host_allocator, graph_memory_entry);
-    graph_memory_entry = next_entry;
-  }
   iree_slim_mutex_deinitialize(&device->graph_memory_mutex);
+  iree_slim_mutex_deinitialize(&device->graph_memory_trim_mutex);
+
+  iree_notification_deinitialize(&device->terminal_resource_notification);
+  iree_slim_mutex_deinitialize(&device->terminal_resource_mutex);
 
   // Deinitialize primary context mutex.
   iree_slim_mutex_deinitialize(&device->primary_context_mutex);
@@ -578,6 +627,17 @@ void iree_hal_streaming_cleanup_global(void) {
     context->context_list_entry.prev = NULL;
     iree_status_ignore(iree_hal_streaming_context_synchronize(context));
     iree_hal_streaming_context_release(context);
+  }
+
+  // Queue-owned terminal resources keep their context live until the queue has
+  // published the host call's terminal state and released its operation
+  // resources. Drain them while both the backend workers and context-list
+  // mutex are still live: resource destruction may perform the final context
+  // release, whose unregister path takes the context-list mutex even though
+  // cleanup detached the list.
+  for (iree_host_size_t i = 0; i < device_registry->device_count; ++i) {
+    iree_hal_streaming_device_terminal_resource_await_idle(
+        &device_registry->devices[i]);
   }
 
   iree_slim_mutex_lock(&device_registry->mutex);

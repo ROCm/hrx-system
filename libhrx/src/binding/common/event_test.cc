@@ -352,6 +352,8 @@ class CpuStreamingContextTest : public ::testing::Test {
     device_entry_.hal_device = hrx_device_hal(hrx_device);
     iree_slim_mutex_initialize(&device_entry_.primary_context_mutex);
     iree_slim_mutex_initialize(&device_entry_.graph_memory_mutex);
+    iree_slim_mutex_initialize(&device_entry_.terminal_resource_mutex);
+    iree_notification_initialize(&device_entry_.terminal_resource_notification);
     iree_arena_block_pool_initialize(/*block_size=*/64 * 1024,
                                      iree_allocator_system(),
                                      &device_entry_.block_pool);
@@ -366,14 +368,23 @@ class CpuStreamingContextTest : public ::testing::Test {
     // Fatal assertions return from a test body. Release every remaining gate
     // before context teardown so a diagnostic failure cannot turn into a hang.
     IREE_EXPECT_OK(ReleaseAllGates());
+    // Graph-exec destruction is nonblocking. Drain its stream-ordered
+    // retirement calls before releasing the fixture-owned device entry and
+    // the arena block pool embedded in it.
+    IREE_EXPECT_OK(iree_hal_streaming_context_synchronize(context_));
     iree_hal_streaming_context_release(context_);
     for (iree_host_size_t i = 0; i < gate_count_; ++i) {
       iree_hal_semaphore_release(gates_[i].semaphore);
     }
+    iree_hal_streaming_device_terminal_resource_await_idle(&device_entry_);
+    EXPECT_EQ(0, device_entry_.pending_terminal_resource_count);
+    IREE_EXPECT_OK(HRX_CALL(hrx_cpu_shutdown()));
+    iree_notification_deinitialize(
+        &device_entry_.terminal_resource_notification);
+    iree_slim_mutex_deinitialize(&device_entry_.terminal_resource_mutex);
     iree_arena_block_pool_deinitialize(&device_entry_.block_pool);
     iree_slim_mutex_deinitialize(&device_entry_.graph_memory_mutex);
     iree_slim_mutex_deinitialize(&device_entry_.primary_context_mutex);
-    IREE_EXPECT_OK(HRX_CALL(hrx_cpu_shutdown()));
   }
 
   iree_status_t CreateGate(uint64_t release_value,
@@ -929,7 +940,7 @@ TEST_F(CpuStreamingContextTest, AGraphLaunchOnAnUntimedDeviceGoesUntimed) {
   for (iree_host_size_t i = kEventCount; i > 0; --i) {
     iree_hal_streaming_event_release(events[i - 1]);
   }
-  iree_hal_streaming_graph_exec_release(exec);
+  IREE_EXPECT_OK(iree_hal_streaming_graph_exec_destroy_handle(exec));
   iree_hal_streaming_graph_release(graph);
   iree_hal_streaming_stream_release(stream);
 }

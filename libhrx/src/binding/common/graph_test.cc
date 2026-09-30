@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstring>
 #include <thread>
+#include <vector>
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -73,6 +74,221 @@ class GraphNodeBlockStorage {
   // Variable-sized node block populated with the owned test nodes.
   iree_hal_streaming_node_block_t* block_ = nullptr;
 };
+
+// Owns two production graph objects backed by a minimal synthetic context.
+class GraphCompatibilityTestState {
+ public:
+  GraphCompatibilityTestState() {
+    iree_atomic_ref_count_init(&context_.ref_count);
+    context_.host_allocator = iree_allocator_system();
+    context_.device_entry = &device_;
+    iree_arena_block_pool_initialize(
+        /*block_size=*/64 * 1024, iree_allocator_system(), &device_.block_pool);
+    IREE_CHECK_OK(iree_hal_streaming_graph_create(
+        &context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+        &old_graph_));
+    IREE_CHECK_OK(iree_hal_streaming_graph_create(
+        &context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+        &new_graph_));
+  }
+
+  ~GraphCompatibilityTestState() {
+    for (iree_hal_streaming_graph_t* graph : extra_graphs_) {
+      iree_hal_streaming_graph_release(graph);
+    }
+    iree_hal_streaming_graph_release(new_graph_);
+    iree_hal_streaming_graph_release(old_graph_);
+    iree_arena_block_pool_deinitialize(&device_.block_pool);
+  }
+
+  GraphCompatibilityTestState(const GraphCompatibilityTestState&) = delete;
+  GraphCompatibilityTestState& operator=(const GraphCompatibilityTestState&) =
+      delete;
+
+  iree_hal_streaming_graph_t* old_graph() const { return old_graph_; }
+  iree_hal_streaming_graph_t* new_graph() const { return new_graph_; }
+
+  iree_hal_streaming_graph_t* CreateGraph() {
+    iree_hal_streaming_graph_t* graph = nullptr;
+    IREE_CHECK_OK(iree_hal_streaming_graph_create(
+        &context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+        &graph));
+    extra_graphs_.push_back(graph);
+    return graph;
+  }
+
+ private:
+  // Device entry supplying the two graphs' arena block pool.
+  iree_hal_streaming_device_t device_ = {};
+  // Non-final context reference retained while both graphs exist.
+  iree_hal_streaming_context_t context_ = {};
+  // Original child graph embedded in an executable.
+  iree_hal_streaming_graph_t* old_graph_ = nullptr;
+  // Proposed replacement child graph.
+  iree_hal_streaming_graph_t* new_graph_ = nullptr;
+  // Additional nested graph objects owned by an individual test.
+  std::vector<iree_hal_streaming_graph_t*> extra_graphs_;
+};
+
+void NoopGraphHostCallback(void* user_data) { (void)user_data; }
+
+TEST(GraphTest, CompatibleTopologyAcceptsMatchingOrderedTypesAndEdges) {
+  GraphCompatibilityTestState state;
+  iree_hal_streaming_graph_node_t* old_first = nullptr;
+  iree_hal_streaming_graph_node_t* new_first = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      state.old_graph(), /*dependencies=*/nullptr, /*dependency_count=*/0,
+      &old_first));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      state.old_graph(), &old_first, /*dependency_count=*/1,
+      /*out_node=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      state.new_graph(), /*dependencies=*/nullptr, /*dependency_count=*/0,
+      &new_first));
+  iree_hal_streaming_graph_node_t* new_second = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      state.new_graph(), /*dependencies=*/nullptr, /*dependency_count=*/0,
+      &new_second));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_dependencies(
+      state.new_graph(), &new_first, &new_second, /*count=*/1));
+
+  IREE_EXPECT_OK(iree_hal_streaming_graph_validate_compatible_topology(
+      state.old_graph(), state.new_graph()));
+}
+
+TEST(GraphTest, CompatibleTopologyRejectsNodeCountChange) {
+  GraphCompatibilityTestState state;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      state.old_graph(), /*dependencies=*/nullptr, /*dependency_count=*/0,
+      /*out_node=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      state.new_graph(), /*dependencies=*/nullptr, /*dependency_count=*/0,
+      /*out_node=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      state.new_graph(), /*dependencies=*/nullptr, /*dependency_count=*/0,
+      /*out_node=*/nullptr));
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_streaming_graph_validate_compatible_topology(
+                            state.old_graph(), state.new_graph()));
+}
+
+TEST(GraphTest, CompatibleTopologyRejectsOrderedNodeTypeChange) {
+  GraphCompatibilityTestState state;
+  iree_hal_streaming_graph_node_t* old_first = nullptr;
+  iree_hal_streaming_graph_node_t* new_first = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      state.old_graph(), /*dependencies=*/nullptr, /*dependency_count=*/0,
+      &old_first));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      state.old_graph(), &old_first, /*dependency_count=*/1,
+      /*out_node=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      state.new_graph(), /*dependencies=*/nullptr, /*dependency_count=*/0,
+      &new_first));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
+      state.new_graph(), &new_first, /*dependency_count=*/1,
+      NoopGraphHostCallback, /*user_data=*/nullptr, /*out_node=*/nullptr));
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_streaming_graph_validate_compatible_topology(
+                            state.old_graph(), state.new_graph()));
+}
+
+TEST(GraphTest, CompatibleTopologyRejectsDependencyTopologyChange) {
+  GraphCompatibilityTestState state;
+  iree_hal_streaming_graph_node_t* old_first = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      state.old_graph(), /*dependencies=*/nullptr, /*dependency_count=*/0,
+      &old_first));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      state.old_graph(), &old_first, /*dependency_count=*/1,
+      /*out_node=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      state.new_graph(), /*dependencies=*/nullptr, /*dependency_count=*/0,
+      /*out_node=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      state.new_graph(), /*dependencies=*/nullptr, /*dependency_count=*/0,
+      /*out_node=*/nullptr));
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_streaming_graph_validate_compatible_topology(
+                            state.old_graph(), state.new_graph()));
+}
+
+TEST(GraphTest, NodeCreationRejectsDuplicateDependenciesWithoutMutation) {
+  GraphCompatibilityTestState state;
+  iree_hal_streaming_graph_node_t* first = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      state.old_graph(), /*dependencies=*/nullptr, /*dependency_count=*/0,
+      &first));
+  const iree_host_size_t initial_node_count = state.old_graph()->node_count;
+  iree_hal_streaming_graph_node_t* dependencies[] = {first, first};
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_streaming_graph_add_empty_node(state.old_graph(), dependencies,
+                                              IREE_ARRAYSIZE(dependencies),
+                                              /*out_node=*/nullptr));
+  EXPECT_EQ(initial_node_count, state.old_graph()->node_count);
+}
+
+TEST(GraphTest, CompatibleTopologyRejectsInsertionOrderMismatch) {
+  GraphCompatibilityTestState state;
+  iree_hal_streaming_graph_node_t* old_empty = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      state.old_graph(), /*dependencies=*/nullptr, /*dependency_count=*/0,
+      &old_empty));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
+      state.old_graph(), &old_empty, /*dependency_count=*/1,
+      NoopGraphHostCallback, /*user_data=*/nullptr, /*out_node=*/nullptr));
+
+  iree_hal_streaming_graph_node_t* new_host = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
+      state.new_graph(), /*dependencies=*/nullptr, /*dependency_count=*/0,
+      NoopGraphHostCallback, /*user_data=*/nullptr, &new_host));
+  iree_hal_streaming_graph_node_t* new_empty = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      state.new_graph(), /*dependencies=*/nullptr, /*dependency_count=*/0,
+      &new_empty));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_dependencies(
+      state.new_graph(), &new_empty, &new_host, /*count=*/1));
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_streaming_graph_validate_compatible_topology(
+                            state.old_graph(), state.new_graph()));
+}
+
+TEST(GraphTest, CompatibleTopologyRejectsNestedChildTopologyMismatch) {
+  GraphCompatibilityTestState state;
+  iree_hal_streaming_graph_t* old_nested_graph = state.CreateGraph();
+  iree_hal_streaming_graph_node_t* old_nested_first = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      old_nested_graph, /*dependencies=*/nullptr, /*dependency_count=*/0,
+      &old_nested_first));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      old_nested_graph, &old_nested_first, /*dependency_count=*/1,
+      /*out_node=*/nullptr));
+
+  iree_hal_streaming_graph_t* new_nested_graph = state.CreateGraph();
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      new_nested_graph, /*dependencies=*/nullptr, /*dependency_count=*/0,
+      /*out_node=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      new_nested_graph, /*dependencies=*/nullptr, /*dependency_count=*/0,
+      /*out_node=*/nullptr));
+
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_child_graph_node(
+      state.old_graph(), /*dependencies=*/nullptr, /*dependency_count=*/0,
+      old_nested_graph, /*out_node=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_child_graph_node(
+      state.new_graph(), /*dependencies=*/nullptr, /*dependency_count=*/0,
+      new_nested_graph, /*out_node=*/nullptr));
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_streaming_graph_validate_compatible_topology(
+                            state.old_graph(), state.new_graph()));
+}
 
 TEST(GraphTest, AddedDependenciesConstrainDetectedWorkstreams) {
   constexpr size_t kNodeCount = 64;
@@ -151,7 +367,6 @@ TEST(GraphTest, ReorderedAddedDependencyUsesFinalWorkstreamIndex) {
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&block_pool);
 }
-
 TEST(GraphTest, KernelParameterUpdateIsFailureAtomic) {
   constexpr size_t kArgumentCount = 3;
   std::array<iree_hal_streaming_parameter_op_t, kArgumentCount> operations = {};
@@ -626,6 +841,88 @@ struct FailOnAttemptAllocator {
   size_t allocation_count = 0;
 };
 
+struct RejectBatchEdgeAllocator {
+  ~RejectBatchEdgeAllocator() {
+    for (size_t i = 0; i < allocation_count; ++i) {
+      iree_allocator_free(delegate, allocations[i]);
+    }
+  }
+
+  static iree_status_t Control(void* self, iree_allocator_command_t command,
+                               const void* params, void** inout_ptr) {
+    auto* allocator = static_cast<RejectBatchEdgeAllocator*>(self);
+    if (command != IREE_ALLOCATOR_COMMAND_MALLOC &&
+        command != IREE_ALLOCATOR_COMMAND_CALLOC) {
+      return allocator->delegate.ctl(allocator->delegate.self, command, params,
+                                     inout_ptr);
+    }
+
+    const auto* alloc_params =
+        static_cast<const iree_allocator_alloc_params_t*>(params);
+    if (allocator->reject_batch &&
+        alloc_params->byte_length > sizeof(iree_hal_streaming_graph_edge_t)) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "injected dependency batch allocation failure");
+    }
+    IREE_RETURN_IF_ERROR(allocator->delegate.ctl(allocator->delegate.self,
+                                                 command, params, inout_ptr));
+    if (allocator->allocation_count >= allocator->allocations.size()) {
+      iree_allocator_free(allocator->delegate, *inout_ptr);
+      *inout_ptr = nullptr;
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "test allocation tracking capacity exceeded");
+    }
+    allocator->allocations[allocator->allocation_count++] = *inout_ptr;
+    return iree_ok_status();
+  }
+
+  iree_allocator_t AsAllocator() {
+    return iree_allocator_t{this, &RejectBatchEdgeAllocator::Control};
+  }
+
+  iree_allocator_t delegate = iree_allocator_system();
+  bool reject_batch = true;
+  std::array<void*, 4> allocations = {};
+  size_t allocation_count = 0;
+};
+
+TEST(GraphTest, DependencyBatchPublicationIsFailureAtomic) {
+  RejectBatchEdgeAllocator allocator;
+  std::array<GraphNodeStorage, 4> node_storage;
+  GraphNodeBlockStorage<4> node_block(node_storage);
+  iree_hal_streaming_graph_t graph = {};
+  graph.arena_allocator = allocator.AsAllocator();
+  graph.node_blocks = node_block.get();
+  graph.current_node_block = node_block.get();
+  graph.node_count = node_storage.size();
+  for (uint32_t i = 0; i < node_storage.size(); ++i) {
+    node_storage[i].get()->graph = &graph;
+    node_storage[i].get()->node_index = i;
+  }
+
+  iree_hal_streaming_graph_node_t* from_nodes[] = {node_storage[0].get(),
+                                                   node_storage[2].get()};
+  iree_hal_streaming_graph_node_t* to_nodes[] = {node_storage[1].get(),
+                                                 node_storage[3].get()};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      iree_hal_streaming_graph_add_dependencies(&graph, from_nodes, to_nodes,
+                                                std::size(from_nodes)));
+  EXPECT_EQ(nullptr, graph.additional_edges);
+  EXPECT_EQ(0u, graph.additional_edge_count);
+
+  allocator.reject_batch = false;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_dependencies(
+      &graph, from_nodes, to_nodes, std::size(from_nodes)));
+  EXPECT_EQ(2u, graph.additional_edge_count);
+  ASSERT_NE(nullptr, graph.additional_edges);
+  EXPECT_EQ(from_nodes[1], graph.additional_edges->from);
+  EXPECT_EQ(to_nodes[1], graph.additional_edges->to);
+  ASSERT_NE(nullptr, graph.additional_edges->next);
+  EXPECT_EQ(from_nodes[0], graph.additional_edges->next->from);
+  EXPECT_EQ(to_nodes[0], graph.additional_edges->next->to);
+}
+
 TEST(GraphTest, NodePublicationIsFailureAtomic) {
   FailOnAttemptAllocator allocator;
   allocator.fail_on_allocation_attempt = 3;
@@ -701,6 +998,16 @@ iree_status_t RecordGatedCaptureNode(
   while (!gate->release.load(std::memory_order_acquire)) {
     std::this_thread::yield();
   }
+  return iree_hal_streaming_graph_add_empty_node(
+      graph, dependencies, dependency_count, out_terminal_node);
+}
+
+iree_status_t RecordEmptyCaptureNode(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** dependencies,
+    iree_host_size_t dependency_count, void* user_data,
+    iree_hal_streaming_graph_node_t** out_terminal_node) {
+  (void)user_data;
   return iree_hal_streaming_graph_add_empty_node(
       graph, dependencies, dependency_count, out_terminal_node);
 }
@@ -854,6 +1161,75 @@ class CaptureTransactionTestState {
   iree_hal_streaming_graph_t* second_graph_ = nullptr;
   iree_hal_streaming_graph_node_t* node_ = nullptr;
 };
+
+TEST(GraphTest, SameStreamCapturedEventWaitKeepsFrontierUnique) {
+  CaptureTransactionTestState state;
+  IREE_ASSERT_OK(state.SetOriginFrontierToPrimaryNode());
+
+  iree_hal_streaming_event_t* event = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      state.context(), IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+      iree_allocator_system(), &event));
+  IREE_ASSERT_OK(iree_hal_streaming_event_record(event, state.origin()));
+  IREE_ASSERT_OK(iree_hal_streaming_stream_wait_event(
+      state.origin(), event, /*capture_external_wait=*/false));
+  ASSERT_EQ(1u, state.origin()->capture_dependency_count);
+  EXPECT_EQ(state.node(), state.origin()->capture_dependencies[0]);
+
+  bool was_capturing = false;
+  IREE_EXPECT_OK(iree_hal_streaming_capture_try_record_node(
+      state.origin(), RecordEmptyCaptureNode, nullptr, &was_capturing));
+  EXPECT_TRUE(was_capturing);
+  EXPECT_EQ(IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE,
+            state.origin()->capture_status);
+  EXPECT_EQ(IREE_HAL_STREAMING_GRAPH_CAPTURE_STATE_ACTIVE,
+            iree_atomic_load(&state.graph()->capture_state,
+                             iree_memory_order_acquire));
+  iree_hal_streaming_event_release(event);
+}
+
+TEST(GraphTest, CaptureDependencyUpdatesNormalizeDuplicateFrontiers) {
+  CaptureTransactionTestState state;
+  iree_hal_streaming_graph_node_t* dependencies[] = {state.node(),
+                                                     state.node()};
+  IREE_ASSERT_OK(iree_hal_streaming_update_capture_dependencies(
+      state.origin(), dependencies, std::size(dependencies),
+      IREE_HAL_STREAMING_CAPTURE_DEPENDENCIES_SET));
+  ASSERT_EQ(1u, state.origin()->capture_dependency_count);
+  EXPECT_EQ(state.node(), state.origin()->capture_dependencies[0]);
+  IREE_ASSERT_OK(iree_hal_streaming_update_capture_dependencies(
+      state.origin(), dependencies, std::size(dependencies),
+      IREE_HAL_STREAMING_CAPTURE_DEPENDENCIES_ADD));
+  ASSERT_EQ(1u, state.origin()->capture_dependency_count);
+
+  bool was_capturing = false;
+  IREE_EXPECT_OK(iree_hal_streaming_capture_try_record_node(
+      state.origin(), RecordEmptyCaptureNode, nullptr, &was_capturing));
+  EXPECT_TRUE(was_capturing);
+}
+
+TEST(GraphTest, BeginCaptureToGraphNormalizesDuplicateFrontier) {
+  CaptureTransactionTestState state;
+  iree_hal_streaming_graph_node_t* second_node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      state.second_graph(), /*dependencies=*/nullptr, /*dependency_count=*/0,
+      &second_node));
+  iree_hal_streaming_graph_node_t* dependencies[] = {second_node, second_node};
+  IREE_ASSERT_OK(iree_hal_streaming_begin_capture_to_graph(
+      state.waiter(), state.second_graph(), dependencies,
+      std::size(dependencies), IREE_HAL_STREAMING_CAPTURE_MODE_RELAXED));
+  ASSERT_EQ(1u, state.waiter()->capture_dependency_count);
+  EXPECT_EQ(second_node, state.waiter()->capture_dependencies[0]);
+
+  bool was_capturing = false;
+  IREE_EXPECT_OK(iree_hal_streaming_capture_try_record_node(
+      state.waiter(), RecordEmptyCaptureNode, nullptr, &was_capturing));
+  EXPECT_TRUE(was_capturing);
+  iree_hal_streaming_graph_t* captured_graph = nullptr;
+  IREE_EXPECT_OK(
+      iree_hal_streaming_end_capture(state.waiter(), &captured_graph));
+  EXPECT_EQ(state.second_graph(), captured_graph);
+}
 
 TEST(GraphTest, ParticipantMutationSerializesOriginTermination) {
   CaptureTransactionTestState state;

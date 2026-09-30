@@ -54,6 +54,13 @@ void iree_hal_streaming_allocation_preparation_begin_close(
   iree_slim_mutex_unlock(&preparation->mutex);
 }
 
+void iree_hal_streaming_allocation_preparation_ensure_closed(
+    iree_hal_streaming_allocation_preparation_t* preparation) {
+  iree_slim_mutex_lock(&preparation->mutex);
+  preparation->is_closing = true;
+  iree_slim_mutex_unlock(&preparation->mutex);
+}
+
 void iree_hal_streaming_allocation_preparation_reopen(
     iree_hal_streaming_allocation_preparation_t* preparation) {
   iree_slim_mutex_lock(&preparation->mutex);

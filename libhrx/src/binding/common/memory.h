@@ -23,6 +23,14 @@ typedef struct iree_hal_streaming_stream_t iree_hal_streaming_stream_t;
 
 typedef uint64_t iree_hal_streaming_deviceptr_t;
 
+// Searches the preferred context followed by every other live context while
+// retaining the matching allocation and its preparation lease. The caller
+// must deinitialize |out_ref| on success.
+iree_status_t iree_hal_streaming_memory_lookup_range_retain_across_contexts(
+    iree_hal_streaming_context_t* preferred_context,
+    iree_hal_streaming_deviceptr_t device_ptr, iree_device_size_t size,
+    iree_hal_streaming_retained_buffer_ref_t* out_ref);
+
 typedef struct iree_hal_streaming_memory_range_request_t {
   // First device or host address in the requested range.
   uint64_t address;
@@ -99,7 +107,23 @@ iree_status_t iree_hal_streaming_memory_wrap_virtual_reservation(
     iree_hal_streaming_context_t* context, hrx_buffer_t virtual_buffer,
     iree_hal_streaming_buffer_t** out_buffer);
 
-// Removes and releases an externally owned buffer wrapper.
+// Publishes or removes an existing wrapper in its context's pointer table.
+// These operations pair a wrapper's allocation-preparation admission state
+// with table visibility and are used when a stable virtual reservation becomes
+// live again across graph launches.
+iree_status_t iree_hal_streaming_memory_publish_wrapped_buffer(
+    iree_hal_streaming_buffer_t* buffer);
+iree_status_t iree_hal_streaming_memory_unpublish_wrapped_buffer(
+    iree_hal_streaming_buffer_t* buffer);
+
+// Closes lookup admission, removes |buffer| from its pointer table if present,
+// and waits for every admitted retained lookup to release its lease.
+// Final owners call this before clearing metadata borrowed through the wrapper.
+void iree_hal_streaming_memory_drain_wrapped_buffer_lookups(
+    iree_hal_streaming_buffer_t* buffer);
+
+// Removes and releases an externally owned buffer wrapper after draining every
+// retained lookup that could still access it.
 void iree_hal_streaming_memory_release_wrapped_buffer(
     iree_hal_streaming_buffer_t* buffer);
 

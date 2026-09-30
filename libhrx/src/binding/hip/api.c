@@ -44,6 +44,7 @@
 #include "binding/hip/vmm.h"
 #include "common/direct_transfer.h"
 #include "common/graph.h"
+#include "common/graph_memory.h"
 #include "common/internal.h"
 #include "common/kernel_arguments.h"
 #include "common/memory.h"
@@ -164,6 +165,8 @@ HIPAPI void hrx_hip_binding_info(hrx_hip_info_t* out_info) {
 }
 
 static bool iree_hip_graph_handle_is_live(hipGraph_t graph);
+static bool iree_hip_graph_node_is_hidden(
+    const iree_hal_streaming_graph_node_t* node);
 static hipError_t iree_hip_resolve_function_symbol(
     iree_hal_streaming_context_t* context, const void* function_address,
     iree_hal_streaming_symbol_t** out_symbol,
@@ -1554,8 +1557,8 @@ static iree_hal_streaming_graph_node_t*
 iree_hip_graph_find_post_memcpy_callback(iree_hal_streaming_graph_node_t* node);
 static bool iree_hip_graph_node_is_active(
     const iree_hal_streaming_graph_node_t* node);
-static hipError_t iree_hip_graph_exec_rebuild(
-    iree_hal_streaming_graph_exec_t* exec);
+static hipError_t iree_hip_graph_set_kernel_node_params(
+    iree_hal_streaming_graph_node_t* node, const hipKernelNodeParams* params);
 
 //===----------------------------------------------------------------------===//
 // Implicit initialization helpers
@@ -3994,8 +3997,8 @@ HIPAPI hipError_t hipDeviceGraphMemTrim(int device) {
   if (device_result != hipSuccess) {
     HIP_RETURN_ERROR(device_result);
   }
-  iree_hal_streaming_graph_memory_trim(device_entry);
-  HIP_RETURN_ERROR(hipSuccess);
+  iree_status_t status = iree_hal_streaming_graph_memory_trim(device_entry);
+  HIP_RETURN_ERROR(iree_status_to_fixed_hip_result(status, hipErrorUnknown));
 }
 
 // Waits for all operations on the current device to complete.
@@ -18716,20 +18719,6 @@ static hipError_t iree_hip_user_object_retain_refs_checked(
   return result;
 }
 
-static hipError_t iree_hip_user_object_check_ref_count(
-    hipUserObject_t user_object, uint64_t count) {
-  if (!user_object || count == 0) {
-    return hipErrorInvalidValue;
-  }
-  hipError_t result = hipSuccess;
-  iree_slim_mutex_lock(&user_object->mutex);
-  if (!user_object->destructor_called && count > user_object->ref_count) {
-    result = hipErrorInvalidValue;
-  }
-  iree_slim_mutex_unlock(&user_object->mutex);
-  return result;
-}
-
 static iree_status_t iree_hip_user_object_retain_graph_refs(void* object,
                                                             uint64_t count) {
   hipUserObject_t user_object = (hipUserObject_t)object;
@@ -18787,11 +18776,12 @@ static hipError_t iree_hip_user_object_release_refs_internal(
   iree_slim_mutex_lock(&user_object->mutex);
   if (release_graph_association && user_object->graph_association_count == 0) {
     result = hipErrorInvalidValue;
-  } else if (!user_object->destructor_called &&
-             count > user_object->ref_count) {
-    result = hipErrorInvalidValue;
   } else {
-    if (!user_object->destructor_called) {
+    // Releasing more references than are currently owned succeeds without
+    // changing the payload reference count. Graph association cleanup remains
+    // independent so an over-moved reference count cannot retain the control
+    // block after its graph has been destroyed.
+    if (!user_object->destructor_called && count <= user_object->ref_count) {
       user_object->ref_count -= count;
       if (user_object->ref_count == 0) {
         user_object->destructor_called = true;
@@ -18937,12 +18927,8 @@ HIPAPI hipError_t hipGraphRetainUserObject(hipGraph_t graph,
       if (UINT64_MAX - ref->count < count) {
         HIP_RETURN_ERROR(hipErrorInvalidValue);
       }
-      const uint64_t new_graph_ref_count = ref->count + count;
       hipError_t retain_result = hipSuccess;
-      if (move_refs) {
-        retain_result =
-            iree_hip_user_object_check_ref_count(object, new_graph_ref_count);
-      } else {
+      if (!move_refs) {
         retain_result = iree_hip_user_object_retain_refs_checked(object, count);
       }
       if (retain_result != hipSuccess) {
@@ -18959,7 +18945,7 @@ HIPAPI hipError_t hipGraphRetainUserObject(hipGraph_t graph,
   }
   object = retained_object;
   hipError_t retain_result =
-      move_refs ? iree_hip_user_object_check_ref_count(object, count)
+      move_refs ? hipSuccess
                 : iree_hip_user_object_retain_refs_checked(object, count);
   if (retain_result != hipSuccess) {
     iree_hip_user_object_handle_release(retained_object);
@@ -19012,7 +18998,7 @@ HIPAPI hipError_t hipGraphReleaseUserObject(hipGraph_t graph,
     iree_hal_streaming_graph_user_object_ref_t* ref = *previous_next;
     if (ref->object == object) {
       if (count > ref->count) {
-        HIP_RETURN_ERROR(hipErrorInvalidValue);
+        HIP_RETURN_ERROR(hipSuccess);
       }
       const bool removes_association = count == ref->count;
       hipError_t release_result =
@@ -19030,7 +19016,7 @@ HIPAPI hipError_t hipGraphReleaseUserObject(hipGraph_t graph,
     }
     previous_next = &ref->next;
   }
-  HIP_RETURN_ERROR(hipErrorInvalidValue);
+  HIP_RETURN_ERROR(hipSuccess);
 }
 
 //===----------------------------------------------------------------------===//
@@ -19122,7 +19108,7 @@ static bool iree_hip_live_graph_unregister(hipGraph_t graph) {
   return false;
 }
 
-static bool iree_hip_graph_handle_is_live(hipGraph_t graph) {
+static bool iree_hip_live_graph_contains(hipGraph_t graph) {
   if (!graph) {
     return false;
   }
@@ -19136,6 +19122,140 @@ static bool iree_hip_graph_handle_is_live(hipGraph_t graph) {
   }
   iree_slim_mutex_unlock(&iree_hip_live_graph_mutex);
   return false;
+}
+
+typedef bool (*iree_hip_graph_tree_visit_fn_t)(
+    iree_hal_streaming_graph_t* graph, void* user_data);
+
+static bool iree_hip_graph_tree_append(iree_hal_streaming_graph_t*** graphs,
+                                       size_t* graph_count,
+                                       size_t* graph_capacity,
+                                       iree_hal_streaming_graph_t* graph) {
+  for (size_t i = 0; i < *graph_count; ++i) {
+    if ((*graphs)[i] == graph) {
+      return true;
+    }
+  }
+  if (*graph_count == *graph_capacity) {
+    size_t new_capacity = *graph_capacity ? *graph_capacity * 2 : 8;
+    if (new_capacity < *graph_capacity ||
+        new_capacity > SIZE_MAX / sizeof(**graphs)) {
+      return false;
+    }
+    void* new_graphs = realloc(*graphs, new_capacity * sizeof(**graphs));
+    if (!new_graphs) {
+      return false;
+    }
+    *graphs = (iree_hal_streaming_graph_t**)new_graphs;
+    *graph_capacity = new_capacity;
+  }
+  (*graphs)[(*graph_count)++] = graph;
+  return true;
+}
+
+static bool iree_hip_graph_tree_append_children(
+    iree_hal_streaming_graph_t* graph, iree_hal_streaming_graph_t*** graphs,
+    size_t* graph_count, size_t* graph_capacity) {
+  for (iree_hal_streaming_node_block_t* block = graph->node_blocks; block;
+       block = block->next) {
+    for (iree_host_size_t node_index = 0; node_index < block->count;
+         ++node_index) {
+      iree_hal_streaming_graph_node_t* node = block->nodes[node_index];
+      if (node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_GRAPH ||
+          !node->attrs.child_graph.graph) {
+        continue;
+      }
+      if (!iree_hip_graph_tree_append(graphs, graph_count, graph_capacity,
+                                      node->attrs.child_graph.graph)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+// Visits graphs reachable through child graph nodes. Holding the public graph
+// registry lock keeps each root alive while its owned child references are
+// traversed. Graph mutation remains externally synchronized by the HIP API.
+static bool iree_hip_visit_graph_tree_locked(
+    iree_hal_streaming_graph_t* root, iree_hip_graph_tree_visit_fn_t visit,
+    void* user_data) {
+  iree_hal_streaming_graph_t** graphs = NULL;
+  size_t graph_count = 0;
+  size_t graph_capacity = 0;
+  if (visit(root, user_data)) {
+    return true;
+  }
+  if (!iree_hip_graph_tree_append_children(root, &graphs, &graph_count,
+                                           &graph_capacity)) {
+    free(graphs);
+    return false;
+  }
+
+  bool found = false;
+  for (size_t graph_index = 0; graph_index < graph_count && !found;
+       ++graph_index) {
+    iree_hal_streaming_graph_t* graph = graphs[graph_index];
+    if (visit(graph, user_data)) {
+      found = true;
+      break;
+    }
+    if (!iree_hip_graph_tree_append_children(graph, &graphs, &graph_count,
+                                             &graph_capacity)) {
+      free(graphs);
+      return false;
+    }
+  }
+
+  free(graphs);
+  return found;
+}
+
+static bool iree_hip_graph_tree_matches_graph(iree_hal_streaming_graph_t* graph,
+                                              void* user_data) {
+  return graph == user_data;
+}
+
+static bool iree_hip_graph_tree_contains_visible_node(
+    iree_hal_streaming_graph_t* graph, void* user_data) {
+  const iree_hal_streaming_graph_node_t* candidate =
+      (const iree_hal_streaming_graph_node_t*)user_data;
+  for (iree_hal_streaming_node_block_t* block = graph->node_blocks; block;
+       block = block->next) {
+    for (iree_host_size_t i = 0; i < block->count; ++i) {
+      iree_hal_streaming_graph_node_t* node = block->nodes[i];
+      if (node == candidate) {
+        return !iree_hip_graph_node_is_hidden(node);
+      }
+    }
+  }
+  return false;
+}
+
+// Child graph handles are visible while reachable from a public root, but do
+// not independently own the graph. Executable-only source graphs are excluded
+// because destroying the public root invalidates those handles.
+static bool iree_hip_live_graph_contains_reachable(hipGraph_t graph) {
+  if (!graph) {
+    return false;
+  }
+  iree_hip_live_graph_lock();
+  bool found = false;
+  for (iree_hip_live_graph_entry_t* entry = iree_hip_live_graph_head;
+       entry && !found; entry = entry->next) {
+    found = iree_hip_visit_graph_tree_locked(
+        (iree_hal_streaming_graph_t*)entry->graph,
+        iree_hip_graph_tree_matches_graph, graph);
+  }
+  iree_slim_mutex_unlock(&iree_hip_live_graph_mutex);
+  return found;
+}
+
+static bool iree_hip_graph_handle_is_live(hipGraph_t graph) {
+  return iree_hal_streaming_graph_is_capture_active(
+             (const iree_hal_streaming_graph_t*)graph) ||
+         iree_hip_live_graph_contains(graph) ||
+         iree_hip_live_graph_contains_reachable(graph);
 }
 
 static bool iree_hip_live_graph_exec_register(hipGraphExec_t graph_exec) {
@@ -19489,12 +19609,12 @@ static hipError_t iree_hip_resolve_graph_exec(
 //  - hipSuccess: Executable destroyed successfully.
 //  - hipErrorInvalidValue: graphExec is NULL or invalid.
 //
-// Synchronization: This operation is synchronous.
+// Synchronization: This operation does not wait for pending launches.
 //
 // Destruction behavior:
-// - Waits for any pending executions to complete.
-// - Releases all resources associated with executable.
-// - Handle becomes invalid after destruction.
+// - Invalidates the public handle immediately.
+// - Retains internal executable resources on each launch stream until its
+//   queued work has completed.
 // - Does not affect source graph used for instantiation.
 //
 // Resource management:
@@ -19522,7 +19642,11 @@ HIPAPI hipError_t hipGraphExecDestroy(hipGraphExec_t graphExec) {
   }
   iree_hal_streaming_graph_exec_release(exec);
   if (!iree_status_is_ok(status)) {
-    result = iree_status_to_fixed_hip_result(status, hipErrorInvalidValue);
+    const iree_status_code_t status_code = iree_status_code(status);
+    result = iree_status_to_fixed_hip_result(
+        status, status_code == IREE_STATUS_RESOURCE_EXHAUSTED
+                    ? hipErrorOutOfMemory
+                    : hipErrorInvalidValue);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(result);
   }
@@ -19605,12 +19729,15 @@ HIPAPI hipError_t hipGraphLaunch(hipGraphExec_t graphExec, hipStream_t stream) {
   iree_hal_streaming_graph_exec_release(exec);
   iree_hip_resolved_stream_release(&resolved_stream);
   if (!iree_status_is_ok(launch_status)) {
-    hipError_t result = iree_status_to_fixed_hip_result(
-        launch_status,
-        launch_result ==
-                IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_COOPERATIVE_TOO_LARGE
-            ? hipErrorCooperativeLaunchTooLarge
-            : hipErrorInvalidValue);
+    hipError_t fallback_result = hipErrorInvalidValue;
+    if (launch_result ==
+        IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_COOPERATIVE_TOO_LARGE) {
+      fallback_result = hipErrorCooperativeLaunchTooLarge;
+    } else if (iree_status_code(launch_status) == IREE_STATUS_UNIMPLEMENTED) {
+      fallback_result = hipErrorNotSupported;
+    }
+    hipError_t result =
+        iree_status_to_fixed_hip_result(launch_status, fallback_result);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(result);
   }
@@ -19700,6 +19827,10 @@ hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
   HIP_API_BEGIN();
   IREE_TRACE_ZONE_BEGIN(z0);
   if (!hGraphExec || !hGraph || !hErrorNode_out || !updateResult_out) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (!iree_hip_graph_handle_is_live(hGraph)) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
@@ -20460,6 +20591,31 @@ static bool iree_hip_graph_node_is_visible_memcpy_host_call(
              sizeof(iree_hip_graph_memcpy_callback_data_t);
 }
 
+// Resolves a graph device endpoint to the allocation that owns it. A graph may
+// describe work on peer allocations, so its execution context is not
+// necessarily the allocation owner. Executable graph resource retention keeps
+// the resolved HAL buffer alive; device access policy remains responsible for
+// making the underlying address accessible when the graph is launched.
+static iree_status_t iree_hip_graph_resolve_device_buffer_ref(
+    iree_hal_streaming_graph_t* graph, const void* ptr, iree_device_size_t size,
+    iree_hal_streaming_buffer_ref_t* out_ref) {
+  iree_status_t status = iree_hal_streaming_memory_lookup_range(
+      graph->context, (iree_hal_streaming_deviceptr_t)ptr, size, out_ref);
+  if (iree_status_is_ok(status) ||
+      iree_status_code(status) != IREE_STATUS_NOT_FOUND) {
+    return status;
+  }
+  iree_status_ignore(status);
+
+  iree_hal_streaming_context_t* owner_context = NULL;
+  status = iree_hal_streaming_memory_lookup_range_across_contexts(
+      (iree_hal_streaming_deviceptr_t)ptr, size, &owner_context, out_ref);
+  if (iree_status_is_ok(status)) {
+    iree_hal_streaming_context_release(owner_context);
+  }
+  return status;
+}
+
 static void iree_hip_graph_store_host_memcpy3d_metadata(
     iree_hal_streaming_graph_node_t* node, const hipMemcpy3DParms* params) {
   if (!iree_hip_graph_node_is_memcpy_host_call(node) || !params ||
@@ -20884,7 +21040,6 @@ static hipError_t iree_hip_graph_add_memcpy_node(
     }
     callback_node->flags |= IREE_HAL_STREAMING_GRAPH_NODE_FLAG_HIDDEN;
     callback_node->attrs.host.user_data_size = sizeof(*callback_data);
-
     *pGraphNode = (hipGraphNode_t)copy_node;
     IREE_TRACE_ZONE_END(z0);
     return (hipSuccess);
@@ -21044,6 +21199,15 @@ static hipError_t iree_hip_graph_add_memcpy_node_1d(
     IREE_TRACE_ZONE_END(z0);
     return (hipErrorInvalidValue);
   } else if (kind == hipMemcpyHostToDevice) {
+    iree_hal_streaming_buffer_ref_t dst_ref;
+    iree_status_t status = iree_hip_graph_resolve_device_buffer_ref(
+        stream_graph, dst, count, &dst_ref);
+    if (!iree_status_is_ok(status)) {
+      hipError_t result =
+          iree_status_to_fixed_hip_result(status, hipErrorInvalidValue);
+      IREE_TRACE_ZONE_END(z0);
+      return result;
+    }
     iree_hal_streaming_buffer_t* staging = NULL;
     hipError_t staging_result = iree_status_to_fixed_hip_result(
         iree_hal_streaming_graph_allocate_host_staging(stream_graph, count,
@@ -21081,15 +21245,20 @@ static hipError_t iree_hip_graph_add_memcpy_node_1d(
     callback_node->flags |= IREE_HAL_STREAMING_GRAPH_NODE_FLAG_HIDDEN;
     callback_node->attrs.host.user_data_size = sizeof(*callback_data);
 
-    hipError_t copy_node_result = iree_status_to_fixed_hip_result(
-        iree_hal_streaming_graph_add_copy_ptr_node_with_extra_dependency(
-            stream_graph, deps, numDependencies, callback_node,
-            (iree_hal_streaming_deviceptr_t)dst, staging->device_ptr, count,
-            &node),
-        hipErrorInvalidValue);
-    if (copy_node_result != hipSuccess) {
+    iree_hal_streaming_buffer_ref_t staging_ref;
+    status = iree_hal_streaming_memory_lookup_range(
+        stream_graph->context, staging->device_ptr, count, &staging_ref);
+    if (iree_status_is_ok(status)) {
+      status =
+          iree_hal_streaming_graph_add_copy_buffer_node_with_extra_dependency(
+              stream_graph, deps, numDependencies, callback_node, dst_ref,
+              staging_ref, count, &node);
+    }
+    if (!iree_status_is_ok(status)) {
+      hipError_t result =
+          iree_status_to_fixed_hip_result(status, hipErrorInvalidValue);
       IREE_TRACE_ZONE_END(z0);
-      return copy_node_result;
+      return result;
     }
     iree_hip_graph_store_1d_memcpy_metadata(node, dst, src, count,
                                             requested_kind);
@@ -21097,6 +21266,15 @@ static hipError_t iree_hip_graph_add_memcpy_node_1d(
     IREE_TRACE_ZONE_END(z0);
     return (hipSuccess);
   } else if (kind == hipMemcpyDeviceToHost) {
+    iree_hal_streaming_buffer_ref_t src_ref;
+    iree_status_t status = iree_hip_graph_resolve_device_buffer_ref(
+        stream_graph, src, count, &src_ref);
+    if (!iree_status_is_ok(status)) {
+      hipError_t result =
+          iree_status_to_fixed_hip_result(status, hipErrorInvalidValue);
+      IREE_TRACE_ZONE_END(z0);
+      return result;
+    }
     iree_hal_streaming_buffer_t* staging = NULL;
     hipError_t staging_result = iree_status_to_fixed_hip_result(
         iree_hal_streaming_graph_allocate_host_staging(stream_graph, count,
@@ -21106,15 +21284,20 @@ static hipError_t iree_hip_graph_add_memcpy_node_1d(
       IREE_TRACE_ZONE_END(z0);
       return staging_result;
     }
+    iree_hal_streaming_buffer_ref_t staging_ref;
+    status = iree_hal_streaming_memory_lookup_range(
+        stream_graph->context, staging->device_ptr, count, &staging_ref);
     iree_hal_streaming_graph_node_t* copy_node = NULL;
-    hipError_t copy_node_result = iree_status_to_fixed_hip_result(
-        iree_hal_streaming_graph_add_copy_ptr_node(
-            stream_graph, deps, numDependencies, staging->device_ptr,
-            (iree_hal_streaming_deviceptr_t)src, count, &copy_node),
-        hipErrorInvalidValue);
-    if (copy_node_result != hipSuccess) {
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_streaming_graph_add_copy_buffer_node(
+          stream_graph, deps, numDependencies, staging_ref, src_ref, count,
+          &copy_node);
+    }
+    if (!iree_status_is_ok(status)) {
+      hipError_t result =
+          iree_status_to_fixed_hip_result(status, hipErrorInvalidValue);
       IREE_TRACE_ZONE_END(z0);
-      return copy_node_result;
+      return result;
     }
     iree_hip_graph_store_1d_memcpy_metadata(copy_node, dst, src, count,
                                             requested_kind);
@@ -21146,7 +21329,6 @@ static hipError_t iree_hip_graph_add_memcpy_node_1d(
     }
     node->flags |= IREE_HAL_STREAMING_GRAPH_NODE_FLAG_HIDDEN;
     node->attrs.host.user_data_size = sizeof(*callback_data);
-
     *pGraphNode = (hipGraphNode_t)copy_node;
     IREE_TRACE_ZONE_END(z0);
     return (hipSuccess);
@@ -21495,6 +21677,10 @@ HIPAPI hipError_t hipGraphAddEmptyNode(hipGraphNode_t* pGraphNode,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  if (!iree_hip_graph_handle_is_live(graph)) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
 
   iree_hal_streaming_graph_t* stream_graph = (iree_hal_streaming_graph_t*)graph;
 
@@ -21576,6 +21762,10 @@ HIPAPI hipError_t hipGraphGetNodes(hipGraph_t graph, hipGraphNode_t* pNodes,
   HIP_API_BEGIN();
   IREE_TRACE_ZONE_BEGIN(z0);
   if (!graph || !numNodes) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (!iree_hip_graph_handle_is_live(graph)) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
@@ -21709,6 +21899,10 @@ HIPAPI hipError_t hipGraphAddDependencies(hipGraph_t graph,
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  if (!iree_hip_graph_handle_is_live(graph)) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
   if (numDependencies == 0) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipSuccess);
@@ -21721,11 +21915,9 @@ HIPAPI hipError_t hipGraphAddDependencies(hipGraph_t graph,
   iree_hal_streaming_graph_t* stream_graph = (iree_hal_streaming_graph_t*)graph;
 
   HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_hal_streaming_graph_add_dependencies(
-          stream_graph, (iree_hal_streaming_graph_node_t**)from,
-          (iree_hal_streaming_graph_node_t**)to, numDependencies),
-      hipErrorInvalidValue);
+      z0, iree_hal_streaming_graph_add_dependencies(
+              stream_graph, (iree_hal_streaming_graph_node_t**)from,
+              (iree_hal_streaming_graph_node_t**)to, numDependencies));
 
   IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(hipSuccess);
@@ -21785,6 +21977,9 @@ HIPAPI hipError_t hipGraphRemoveDependencies(hipGraph_t graph,
   if (!graph) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  if (!iree_hip_graph_handle_is_live(graph)) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
   if (numDependencies == 0) {
     HIP_RETURN_ERROR(hipSuccess);
   }
@@ -21798,8 +21993,9 @@ HIPAPI hipError_t hipGraphRemoveDependencies(hipGraph_t graph,
         (iree_hal_streaming_graph_node_t*)from[i];
     iree_hal_streaming_graph_node_t* to_node =
         (iree_hal_streaming_graph_node_t*)to[i];
-    if (!from_node || !to_node || from_node->graph != stream_graph ||
-        to_node->graph != stream_graph ||
+    if (!iree_hip_graph_node_is_active(from_node) ||
+        !iree_hip_graph_node_is_active(to_node) ||
+        from_node->graph != stream_graph || to_node->graph != stream_graph ||
         !iree_hip_graph_dependency_pair_exists(stream_graph, from_node,
                                                to_node)) {
       HIP_RETURN_ERROR(hipErrorInvalidValue);
@@ -21820,6 +22016,9 @@ HIPAPI hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from,
                                    hipGraphNode_t* to, size_t* numEdges) {
   HIP_API_BEGIN();
   if (!graph || !numEdges || (!from && to) || (from && !to)) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (!iree_hip_graph_handle_is_live(graph)) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
@@ -21881,6 +22080,10 @@ HIPAPI hipError_t hipGraphGetRootNodes(hipGraph_t graph,
   HIP_API_BEGIN();
   IREE_TRACE_ZONE_BEGIN(z0);
   if (!graph || !pNumRootNodes) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (!iree_hip_graph_handle_is_live(graph)) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
@@ -21967,10 +22170,10 @@ HIPAPI hipError_t hipGraphNodeGetDependencies(hipGraphNode_t node,
 
   iree_hal_streaming_graph_node_t* stream_node =
       (iree_hal_streaming_graph_node_t*)node;
-  iree_hal_streaming_graph_t* graph = stream_node->graph;
-  if (!graph || iree_hip_graph_node_is_hidden(stream_node)) {
+  if (!iree_hip_graph_node_is_active(stream_node)) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  iree_hal_streaming_graph_t* graph = stream_node->graph;
 
   const size_t capacity = pDependencies ? *pNumDependencies : 0;
   size_t dependency_count = 0;
@@ -22024,10 +22227,10 @@ HIPAPI hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node,
 
   iree_hal_streaming_graph_node_t* stream_node =
       (iree_hal_streaming_graph_node_t*)node;
-  iree_hal_streaming_graph_t* graph = stream_node->graph;
-  if (!graph || iree_hip_graph_node_is_hidden(stream_node)) {
+  if (!iree_hip_graph_node_is_active(stream_node)) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  iree_hal_streaming_graph_t* graph = stream_node->graph;
 
   const size_t capacity = pDependentNodes ? *pNumDependentNodes : 0;
   size_t dependent_count = 0;
@@ -22119,7 +22322,7 @@ HIPAPI hipError_t hipGraphNodeGetType(hipGraphNode_t node,
   }
   iree_hal_streaming_graph_node_t* stream_node =
       (iree_hal_streaming_graph_node_t*)node;
-  if (!stream_node->graph || iree_hip_graph_node_is_hidden(stream_node)) {
+  if (!iree_hip_graph_node_is_active(stream_node)) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   *pType = hip_graph_node_type_from_streaming_type(stream_node->type);
@@ -22129,9 +22332,11 @@ HIPAPI hipError_t hipGraphNodeGetType(hipGraphNode_t node,
 // Destroys a graph node.
 HIPAPI hipError_t hipGraphDestroyNode(hipGraphNode_t node) {
   HIP_API_BEGIN();
+  if (!iree_hip_graph_node_is_active((iree_hal_streaming_graph_node_t*)node)) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
   HIP_RETURN_STATUS(iree_hal_streaming_graph_destroy_node(
-                        (iree_hal_streaming_graph_node_t*)node),
-                    hipErrorInvalidValue);
+      (iree_hal_streaming_graph_node_t*)node));
   HIP_RETURN_ERROR(hipSuccess);
 }
 
@@ -22146,11 +22351,25 @@ HIPAPI hipError_t hipGraphClone(hipGraph_t* pGraphClone,
   if (!iree_hip_graph_handle_is_live(originalGraph)) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  iree_hal_streaming_context_t* target_context = NULL;
+  hipError_t context_result = iree_hip_ensure_context(&target_context);
+  if (context_result != hipSuccess) {
+    HIP_RETURN_ERROR(context_result);
+  }
   iree_hal_streaming_graph_t* clone_graph = NULL;
-  HIP_RETURN_STATUS(
-      iree_hal_streaming_graph_clone((iree_hal_streaming_graph_t*)originalGraph,
-                                     &clone_graph),
-      hipErrorInvalidValue);
+  // Clone-owned staging is created in the caller's current context. Explicit
+  // node affinity and the source graph's execution hint independently select
+  // where the executable is compiled.
+  iree_status_t clone_status = iree_hal_streaming_graph_clone(
+      (iree_hal_streaming_graph_t*)originalGraph, target_context, &clone_graph);
+  if (!iree_status_is_ok(clone_status)) {
+    const hipError_t result =
+        iree_status_code(clone_status) == IREE_STATUS_UNIMPLEMENTED
+            ? hipErrorNotSupported
+            : iree_status_to_fixed_hip_result(clone_status,
+                                              hipErrorInvalidValue);
+    return result;
+  }
   if (!iree_hip_live_graph_register((hipGraph_t)clone_graph)) {
     iree_hal_streaming_graph_release(clone_graph);
     HIP_RETURN_ERROR(hipErrorOutOfMemory);
@@ -22172,7 +22391,7 @@ HIPAPI hipError_t hipGraphNodeFindInClone(hipGraphNode_t* pNode,
   }
   iree_hal_streaming_graph_node_t* source_node =
       (iree_hal_streaming_graph_node_t*)originalNode;
-  if (!source_node->graph) {
+  if (!iree_hip_graph_node_is_active(source_node)) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
@@ -22232,21 +22451,22 @@ static const char* iree_hip_graph_debug_memcpy_direction(
                          node->attrs.memcpy.hip_driver.src_array;
   const bool dst_array = node->attrs.memcpy.hip_driver.valid &&
                          node->attrs.memcpy.hip_driver.dst_array;
+  const bool dst_array_like = dst_array || node->attrs.memcpy.hip_dst_symbol;
   switch ((hipMemcpyKind)node->attrs.memcpy.hip_kind) {
     case hipMemcpyHostToHost:
       return "HtoH";
     case hipMemcpyHostToDevice:
-      return dst_array ? "HtoA" : "HtoD";
+      return dst_array_like ? "HtoA" : "HtoD";
     case hipMemcpyDeviceToHost:
       return src_array ? "AtoH" : "DtoH";
     case hipMemcpyDeviceToDevice:
-      if (src_array && dst_array) {
+      if (src_array && dst_array_like) {
         return "AtoA";
       }
       if (src_array) {
         return "AtoD";
       }
-      if (dst_array) {
+      if (dst_array_like) {
         return "DtoA";
       }
       return "DtoD";
@@ -22410,12 +22630,10 @@ HIPAPI hipError_t hipGraphAddChildGraphNode(hipGraphNode_t* pGraphNode,
 
   iree_hal_streaming_graph_node_t* node = NULL;
   HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_hal_streaming_graph_add_child_graph_node(
-          (iree_hal_streaming_graph_t*)graph,
-          (iree_hal_streaming_graph_node_t**)pDependencies, numDependencies,
-          (iree_hal_streaming_graph_t*)childGraph, &node),
-      hipErrorInvalidValue);
+      z0, iree_hal_streaming_graph_add_child_graph_node(
+              (iree_hal_streaming_graph_t*)graph,
+              (iree_hal_streaming_graph_node_t**)pDependencies, numDependencies,
+              (iree_hal_streaming_graph_t*)childGraph, &node));
   *pGraphNode = (hipGraphNode_t)node;
   IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(hipSuccess);
@@ -22468,11 +22686,9 @@ HIPAPI hipError_t hipGraphAddMemcpyNodeFromSymbol(
     HIP_RETURN_ERROR(result);
   }
 
-  hipMemcpyKind copy_kind =
-      kind == hipMemcpyDefault ? hipMemcpyDeviceToHost : kind;
   HIP_RETURN_ERROR(hipGraphAddMemcpyNode1D(pGraphNode, graph, pDependencies,
                                            numDependencies, dst, symbol_ptr,
-                                           count, copy_kind));
+                                           count, kind));
 }
 
 HIPAPI hipError_t hipGraphAddMemcpyNodeToSymbol(
@@ -22493,63 +22709,63 @@ HIPAPI hipError_t hipGraphAddMemcpyNodeToSymbol(
     HIP_RETURN_ERROR(result);
   }
 
-  hipMemcpyKind copy_kind =
-      kind == hipMemcpyDefault ? hipMemcpyHostToDevice : kind;
-  HIP_RETURN_ERROR(hipGraphAddMemcpyNode1D(pGraphNode, graph, pDependencies,
-                                           numDependencies, symbol_ptr, src,
-                                           count, copy_kind));
+  result =
+      hipGraphAddMemcpyNode1D(pGraphNode, graph, pDependencies, numDependencies,
+                              symbol_ptr, src, count, kind);
+  if (result == hipSuccess) {
+    iree_hal_streaming_graph_node_t* node =
+        (iree_hal_streaming_graph_node_t*)*pGraphNode;
+    node->attrs.memcpy.hip_dst_symbol = true;
+  }
+  return result;
 }
 
-HIPAPI hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode,
-                                          hipGraph_t graph,
-                                          const hipGraphNode_t* pDependencies,
-                                          size_t numDependencies,
-                                          void* allocParams) {
-  HIP_API_BEGIN();
-  if (!pGraphNode || !graph || !allocParams ||
-      (numDependencies > 0 && !pDependencies)) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
+static hipError_t iree_hip_graph_validate_mem_alloc_node_params(
+    const hipMemAllocNodeParams* params) {
+  if (!params) {
+    return hipErrorInvalidValue;
   }
-  if (!iree_hip_graph_handle_is_live(graph)) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-  *pGraphNode = NULL;
-  hipMemAllocNodeParams* params = (hipMemAllocNodeParams*)allocParams;
-  params->dptr = NULL;
-
-  int device_count = 0;
-  hipError_t count_result = hipGetDeviceCount(&device_count);
-  if (count_result != hipSuccess) {
-    HIP_RETURN_ERROR(count_result);
+  iree_host_size_t device_count = 0;
+  iree_status_t status = iree_hal_streaming_device_count(&device_count);
+  if (!iree_status_is_ok(status)) {
+    return iree_status_to_hip_result(status);
   }
   if (params->bytesize == 0 ||
       params->poolProps.allocType != hipMemAllocationTypePinned ||
       params->poolProps.location.type != hipMemLocationTypeDevice ||
       params->poolProps.location.id < 0 ||
-      params->poolProps.location.id >= device_count ||
+      (iree_host_size_t)params->poolProps.location.id >= device_count ||
       (params->accessDescCount > 0 && !params->accessDescs) ||
-      params->accessDescCount > (size_t)device_count) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
+      params->accessDescCount > device_count) {
+    return hipErrorInvalidValue;
   }
   for (size_t i = 0; i < params->accessDescCount; ++i) {
     const hipMemAccessDesc* desc = &params->accessDescs[i];
     if (desc->location.type != hipMemLocationTypeDevice ||
-        desc->location.id < 0 || desc->location.id >= device_count ||
+        desc->location.id < 0 ||
+        (iree_host_size_t)desc->location.id >= device_count ||
         (desc->flags != hipMemAccessFlagsProtNone &&
          desc->flags != hipMemAccessFlagsProtRead &&
          desc->flags != hipMemAccessFlagsProtReadWrite)) {
-      HIP_RETURN_ERROR(hipErrorInvalidValue);
+      return hipErrorInvalidValue;
     }
   }
+  return hipSuccess;
+}
 
-  iree_hal_streaming_graph_t* stream_graph = (iree_hal_streaming_graph_t*)graph;
-  iree_hal_streaming_graph_node_t* node = NULL;
-  HIP_RETURN_STATUS(
-      iree_hal_streaming_graph_add_empty_node(
-          stream_graph, (iree_hal_streaming_graph_node_t**)pDependencies,
-          numDependencies, &node),
-      hipErrorInvalidValue);
-
+// Attaches a prepared stable virtual address to a graph. The allocation's
+// existing reference belongs to the returned pointer; the node takes a second
+// reference only after all fallible graph storage has been allocated.
+static hipError_t iree_hip_graph_add_prepared_mem_alloc_node(
+    hipGraphNode_t* out_node, iree_hal_streaming_graph_t* graph,
+    const hipGraphNode_t* dependencies, size_t dependency_count,
+    hipMemAllocNodeParams* params,
+    iree_hal_streaming_graph_memory_allocation_t* allocation) {
+  if (!out_node || !graph || !params || !allocation ||
+      (dependency_count > 0 && !dependencies)) {
+    return hipErrorInvalidValue;
+  }
+  *out_node = NULL;
   iree_host_size_t access_desc_size = 0;
   iree_host_size_t metadata_size = sizeof(*params);
   if (params->accessDescCount > 0) {
@@ -22558,40 +22774,22 @@ HIPAPI hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode,
                                                   &access_desc_size) ||
                       !iree_host_size_checked_add(
                           metadata_size, access_desc_size, &metadata_size))) {
-      iree_status_ignore(iree_hal_streaming_graph_destroy_node(node));
-      HIP_RETURN_ERROR(hipErrorOutOfMemory);
+      return hipErrorOutOfMemory;
     }
   }
   uint8_t* metadata_storage = NULL;
   iree_status_t metadata_status = iree_arena_allocate(
-      &stream_graph->arena, metadata_size, (void**)&metadata_storage);
+      &graph->arena, metadata_size, (void**)&metadata_storage);
   if (!iree_status_is_ok(metadata_status)) {
-    iree_status_ignore(iree_hal_streaming_graph_destroy_node(node));
-    HIP_RETURN_STATUS(metadata_status, hipErrorOutOfMemory);
+    return iree_status_to_fixed_hip_result(metadata_status,
+                                           hipErrorOutOfMemory);
   }
-
-  hrx_mem_pool_t pool = NULL;
-  hipError_t pool_result =
-      iree_hip_current_mem_pool(stream_graph->context, &pool);
-  if (pool_result != hipSuccess) {
-    iree_status_ignore(iree_hal_streaming_graph_destroy_node(node));
-    HIP_RETURN_ERROR(pool_result);
-  }
-  // This graph-memory implementation allocates backing storage when the graph
-  // template is built. Graph exec launch serialization prevents concurrent
-  // launches from sharing the same backing allocation.
-  hipError_t alloc_result =
-      iree_hip_malloc_from_pool(stream_graph->context, pool, params->bytesize,
-                                /*stream=*/NULL, &params->dptr);
-  hrx_mem_pool_release(pool);
-  if (alloc_result != hipSuccess) {
-    iree_status_ignore(iree_hal_streaming_graph_destroy_node(node));
-    HIP_RETURN_ERROR(alloc_result);
-  }
-
+  void* device_pointer =
+      iree_hal_streaming_graph_memory_allocation_device_pointer(allocation);
   hipMemAllocNodeParams* stored_params =
       (hipMemAllocNodeParams*)metadata_storage;
   *stored_params = *params;
+  stored_params->dptr = device_pointer;
   if (access_desc_size > 0) {
     hipMemAccessDesc* stored_descs =
         (hipMemAccessDesc*)(metadata_storage + sizeof(*params));
@@ -22599,30 +22797,141 @@ HIPAPI hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode,
     stored_params->accessDescs = stored_descs;
   }
 
+  iree_hal_streaming_graph_node_t* node = NULL;
+  iree_status_t add_node_status = iree_hal_streaming_graph_add_empty_node(
+      graph, (iree_hal_streaming_graph_node_t**)dependencies, dependency_count,
+      &node);
+  if (!iree_status_is_ok(add_node_status)) {
+    return iree_status_to_fixed_hip_result(add_node_status,
+                                           hipErrorInvalidValue);
+  }
   node->type = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC;
   node->attrs.mem_alloc.params = stored_params;
   node->attrs.mem_alloc.params_size = metadata_size;
-  node->attrs.mem_alloc.dptr = params->dptr;
+  node->attrs.mem_alloc.dptr = device_pointer;
   node->attrs.mem_alloc.bytesize = params->bytesize;
-  node->attrs.mem_alloc.owns_device_allocation = true;
-  stream_graph->has_graph_memory_nodes = true;
-  *pGraphNode = (hipGraphNode_t)node;
-  HIP_RETURN_ERROR(hipSuccess);
+  node->attrs.mem_alloc.allocation = allocation;
+  iree_hal_streaming_graph_memory_allocation_retain(allocation);
+  node->attrs.mem_alloc.has_in_graph_free_node = false;
+  graph->has_graph_memory_nodes = true;
+  params->dptr = device_pointer;
+  *out_node = (hipGraphNode_t)node;
+  return hipSuccess;
 }
 
-static bool iree_hip_graph_has_mem_alloc_node_for_pointer(
-    iree_hal_streaming_graph_t* graph, void* dptr) {
-  for (iree_hal_streaming_node_block_t* block = graph->node_blocks; block;
-       block = block->next) {
-    for (iree_host_size_t i = 0; i < block->count; ++i) {
-      iree_hal_streaming_graph_node_t* node = block->nodes[i];
-      if (node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC &&
-          node->attrs.mem_alloc.dptr == dptr) {
-        return true;
-      }
-    }
+static void iree_hip_graph_abandon_prepared_mem_alloc(
+    iree_hal_streaming_graph_memory_allocation_t* allocation) {
+  iree_status_t status =
+      iree_hal_streaming_graph_memory_allocation_release_unexecuted_pointer_reference(
+          allocation);
+  if (!iree_status_is_ok(status)) {
+    iree_status_abort(status);
   }
-  return false;
+}
+
+// Adds an allocation node after the caller has established graph ownership.
+// Public APIs validate external handles; stream capture can pass its private
+// graph directly without publishing it in the public graph registry.
+static hipError_t iree_hip_graph_add_mem_alloc_node(
+    hipGraphNode_t* out_node, iree_hal_streaming_graph_t* graph,
+    const hipGraphNode_t* dependencies, size_t dependency_count,
+    hipMemAllocNodeParams* params) {
+  if (!out_node || !graph || !params ||
+      (dependency_count > 0 && !dependencies)) {
+    return hipErrorInvalidValue;
+  }
+  *out_node = NULL;
+  params->dptr = NULL;
+  hipError_t result = iree_hip_graph_validate_mem_alloc_node_params(params);
+  if (result != hipSuccess) {
+    return result;
+  }
+
+  iree_hal_streaming_context_t* allocation_context = NULL;
+  result = iree_hip_primary_context_for_device_id(params->poolProps.location.id,
+                                                  &allocation_context);
+  if (result != hipSuccess) {
+    return result;
+  }
+
+  iree_hal_streaming_graph_memory_allocation_t* allocation = NULL;
+  iree_status_t status = iree_hal_streaming_graph_memory_allocation_create(
+      allocation_context, params->bytesize, &allocation);
+  if (!iree_status_is_ok(status)) {
+    if (iree_status_code(status) == IREE_STATUS_UNAVAILABLE) {
+      iree_status_free(status);
+      return hipErrorNotSupported;
+    }
+    return iree_status_to_fixed_hip_result(status, hipErrorOutOfMemory);
+  }
+  result = iree_hip_graph_add_prepared_mem_alloc_node(
+      out_node, graph, dependencies, dependency_count, params, allocation);
+  if (result != hipSuccess) {
+    iree_hip_graph_abandon_prepared_mem_alloc(allocation);
+    params->dptr = NULL;
+  }
+  return result;
+}
+
+HIPAPI hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode,
+                                          hipGraph_t graph,
+                                          const hipGraphNode_t* pDependencies,
+                                          size_t numDependencies,
+                                          void* allocParams) {
+  HIP_API_BEGIN();
+  if (!graph || !iree_hip_graph_handle_is_live(graph)) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  HIP_RETURN_ERROR(iree_hip_graph_add_mem_alloc_node(
+      pGraphNode, (iree_hal_streaming_graph_t*)graph, pDependencies,
+      numDependencies, (hipMemAllocNodeParams*)allocParams));
+}
+
+// Adds a free node to a graph whose ownership has already been established.
+// Public graph APIs validate a caller-owned handle before using this helper;
+// stream capture passes its private capture graph directly.
+static hipError_t iree_hip_graph_add_mem_free_node(
+    hipGraphNode_t* pGraphNode, iree_hal_streaming_graph_t* stream_graph,
+    const hipGraphNode_t* pDependencies, size_t numDependencies, void* dptr) {
+  if (!pGraphNode || !stream_graph || !dptr ||
+      (numDependencies > 0 && !pDependencies)) {
+    return hipErrorInvalidValue;
+  }
+  *pGraphNode = NULL;
+
+  iree_hal_streaming_graph_memory_allocation_t* allocation = NULL;
+  iree_status_t lookup_status =
+      iree_hal_streaming_graph_memory_allocation_lookup(
+          stream_graph->context, (uint64_t)(uintptr_t)dptr, &allocation);
+  if (!iree_status_is_ok(lookup_status)) {
+    iree_status_free(lookup_status);
+    return hipErrorInvalidValue;
+  }
+  if (!iree_hal_streaming_graph_memory_allocation_try_claim_free_node_reference(
+          allocation)) {
+    iree_hal_streaming_graph_memory_allocation_release(allocation);
+    return hipErrorInvalidValue;
+  }
+  iree_hal_streaming_graph_node_t* node = NULL;
+  iree_status_t add_node_status = iree_hal_streaming_graph_add_empty_node(
+      stream_graph, (iree_hal_streaming_graph_node_t**)pDependencies,
+      numDependencies, &node);
+  if (!iree_status_is_ok(add_node_status)) {
+    iree_hal_streaming_graph_memory_allocation_release_free_node_reference(
+        allocation);
+    iree_hal_streaming_graph_memory_allocation_release(allocation);
+    hipError_t result =
+        iree_status_to_fixed_hip_result(add_node_status, hipErrorInvalidValue);
+    return result;
+  }
+  node->type = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_FREE;
+  node->attrs.mem_free.dptr = dptr;
+  node->attrs.mem_free.allocation = allocation;
+  iree_hal_streaming_graph_refresh_memory_allocation_free_node_state(
+      stream_graph, allocation);
+  stream_graph->has_graph_memory_nodes = true;
+  *pGraphNode = (hipGraphNode_t)node;
+  return hipSuccess;
 }
 
 HIPAPI hipError_t hipGraphAddMemFreeNode(hipGraphNode_t* pGraphNode,
@@ -22630,38 +22939,12 @@ HIPAPI hipError_t hipGraphAddMemFreeNode(hipGraphNode_t* pGraphNode,
                                          const hipGraphNode_t* pDependencies,
                                          size_t numDependencies, void* dptr) {
   HIP_API_BEGIN();
-  if (!pGraphNode || !graph || !dptr ||
-      (numDependencies > 0 && !pDependencies)) {
+  if (!graph || !iree_hip_graph_handle_is_live(graph)) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  if (!iree_hip_graph_handle_is_live(graph)) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-  *pGraphNode = NULL;
-
-  iree_hal_streaming_graph_t* stream_graph = (iree_hal_streaming_graph_t*)graph;
-  iree_hal_streaming_buffer_ref_t ref;
-  iree_status_t lookup_status = iree_hal_streaming_memory_lookup(
-      stream_graph->context, (iree_hal_streaming_deviceptr_t)dptr, &ref);
-  if (!iree_status_is_ok(lookup_status)) {
-    iree_status_free(lookup_status);
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-  if (!iree_hip_graph_has_mem_alloc_node_for_pointer(stream_graph, dptr)) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-
-  iree_hal_streaming_graph_node_t* node = NULL;
-  HIP_RETURN_STATUS(
-      iree_hal_streaming_graph_add_empty_node(
-          stream_graph, (iree_hal_streaming_graph_node_t**)pDependencies,
-          numDependencies, &node),
-      hipErrorInvalidValue);
-  node->type = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_FREE;
-  node->attrs.mem_free.dptr = dptr;
-  stream_graph->has_graph_memory_nodes = true;
-  *pGraphNode = (hipGraphNode_t)node;
-  HIP_RETURN_ERROR(hipSuccess);
+  HIP_RETURN_ERROR(iree_hip_graph_add_mem_free_node(
+      pGraphNode, (iree_hal_streaming_graph_t*)graph, pDependencies,
+      numDependencies, dptr));
 }
 
 HIPAPI hipError_t hipGraphAddNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
@@ -22717,6 +23000,16 @@ HIPAPI hipError_t hipGraphAddNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
   }
 }
 
+static bool iree_hip_graph_batch_wait_flags_are_valid(unsigned int flags) {
+  return flags <= hipStreamWaitValueNor;
+}
+
+static bool iree_hip_graph_batch_write_flags_are_valid(unsigned int flags) {
+  return flags == hipStreamWriteValueDefault ||
+         flags == hipExtStreamWriteValueIncrement ||
+         flags == hipExtStreamWriteValueDecrement;
+}
+
 static hipError_t iree_hip_graph_validate_batch_mem_op_node_params(
     iree_hal_streaming_context_t* context,
     const hipBatchMemOpNodeParams* params,
@@ -22728,6 +23021,53 @@ static hipError_t iree_hip_graph_validate_batch_mem_op_node_params(
       params->count > 256 || params->flags != 0 ||
       params->ctx != (hipCtx_t)context) {
     return hipErrorInvalidValue;
+  }
+  for (unsigned int i = 0; i < params->count; ++i) {
+    const hipStreamBatchMemOpParams* operation = &params->paramArray[i];
+    const void* address = NULL;
+    iree_host_size_t byte_length = 0;
+    switch (operation->operation) {
+      case hipStreamMemOpWaitValue32:
+        address = operation->waitValue.address;
+        byte_length = sizeof(uint32_t);
+        if (!iree_hip_graph_batch_wait_flags_are_valid(
+                operation->waitValue.flags)) {
+          return hipErrorInvalidValue;
+        }
+        break;
+      case hipStreamMemOpWriteValue32:
+        address = operation->writeValue.address;
+        byte_length = sizeof(uint32_t);
+        if (!iree_hip_graph_batch_write_flags_are_valid(
+                operation->writeValue.flags)) {
+          return hipErrorInvalidValue;
+        }
+        break;
+      case hipStreamMemOpWaitValue64:
+        address = operation->waitValue.address;
+        byte_length = sizeof(uint64_t);
+        if (!iree_hip_graph_batch_wait_flags_are_valid(
+                operation->waitValue.flags)) {
+          return hipErrorInvalidValue;
+        }
+        break;
+      case hipStreamMemOpWriteValue64:
+        address = operation->writeValue.address;
+        byte_length = sizeof(uint64_t);
+        if (!iree_hip_graph_batch_write_flags_are_valid(
+                operation->writeValue.flags)) {
+          return hipErrorInvalidValue;
+        }
+        break;
+      case hipStreamMemOpFlushRemoteWrites:
+      case hipStreamMemOpBarrier:
+        return hipErrorNotSupported;
+      default:
+        return hipErrorInvalidValue;
+    }
+    if (!address || (uintptr_t)address % byte_length != 0) {
+      return hipErrorInvalidValue;
+    }
   }
   iree_host_size_t param_array_size = 0;
   if (IREE_UNLIKELY(!iree_host_size_checked_mul(
@@ -22957,7 +23297,7 @@ HIPAPI hipError_t hipGraphChildGraphNodeGetGraph(hipGraphNode_t node,
   }
   iree_hal_streaming_graph_node_t* stream_node =
       (iree_hal_streaming_graph_node_t*)node;
-  if (!stream_node->graph ||
+  if (!iree_hip_graph_node_is_active(stream_node) ||
       stream_node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_GRAPH ||
       !stream_node->attrs.child_graph.graph) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
@@ -22968,7 +23308,19 @@ HIPAPI hipError_t hipGraphChildGraphNodeGetGraph(hipGraphNode_t node,
 
 static bool iree_hip_graph_node_is_active(
     const iree_hal_streaming_graph_node_t* node) {
-  return node && node->graph && !iree_hip_graph_node_is_hidden(node);
+  if (!node) {
+    return false;
+  }
+  iree_hip_live_graph_lock();
+  bool found = false;
+  for (iree_hip_live_graph_entry_t* entry = iree_hip_live_graph_head;
+       entry && !found; entry = entry->next) {
+    found = iree_hip_visit_graph_tree_locked(
+        (iree_hal_streaming_graph_t*)entry->graph,
+        iree_hip_graph_tree_contains_visible_node, (void*)node);
+  }
+  iree_slim_mutex_unlock(&iree_hip_live_graph_mutex);
+  return found || iree_hal_streaming_capture_graph_contains_node(node);
 }
 
 static hipError_t iree_hip_graph_validate_memset_params(
@@ -23026,10 +23378,9 @@ static hipError_t iree_hip_graph_validate_memset_params(
   return hipSuccess;
 }
 
-static hipError_t iree_hip_graph_set_memset_node_params(
+static hipError_t iree_hip_graph_update_memset_node_params(
     iree_hal_streaming_graph_node_t* node, const hipMemsetParams* params) {
-  if (!iree_hip_graph_node_is_active(node) ||
-      node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMSET) {
+  if (!node || node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMSET) {
     return hipErrorInvalidValue;
   }
   iree_hal_streaming_buffer_ref_t dst_ref;
@@ -23049,6 +23400,14 @@ static hipError_t iree_hip_graph_set_memset_node_params(
   node->attrs.memset.hip_height = params->height;
   node->attrs.memset.hip_pitch = params->pitch;
   return hipSuccess;
+}
+
+static hipError_t iree_hip_graph_set_memset_node_params(
+    iree_hal_streaming_graph_node_t* node, const hipMemsetParams* params) {
+  if (!iree_hip_graph_node_is_active(node)) {
+    return hipErrorInvalidValue;
+  }
+  return iree_hip_graph_update_memset_node_params(node, params);
 }
 
 static hipError_t iree_hip_graph_memcpy3d_span_bytes(
@@ -23343,8 +23702,10 @@ static hipError_t iree_hip_graph_validate_memcpy3d_params(
 typedef struct iree_hip_graph_memcpy_node_update_t {
   iree_hal_streaming_graph_memcpy_node_attrs_t old_memcpy_attrs;
   iree_hal_streaming_graph_node_t* pre_callback_node;
+  uint32_t old_pre_callback_flags;
   iree_hip_graph_memcpy_callback_data_t old_pre_callback_data;
   iree_hal_streaming_graph_node_t* post_callback_node;
+  uint32_t old_post_callback_flags;
   iree_hip_graph_memcpy_callback_data_t old_post_callback_data;
 } iree_hip_graph_memcpy_node_update_t;
 
@@ -23524,24 +23885,26 @@ static hipError_t iree_hip_graph_update_memcpy_metadata(
     hipMemcpyKind kind, void* dst, const void* src, iree_host_size_t size,
     iree_host_size_t dst_span, iree_host_size_t src_span) {
   iree_hal_streaming_buffer_ref_t dst_ref;
-  iree_status_t status = iree_hal_streaming_memory_lookup_range(
-      node->graph->context, (iree_hal_streaming_deviceptr_t)dst, dst_span,
-      &dst_ref);
+  iree_status_t status = iree_hip_graph_resolve_device_buffer_ref(
+      node->graph, dst, dst_span, &dst_ref);
   if (!iree_status_is_ok(status)) {
     iree_status_ignore(status);
     return hipErrorInvalidValue;
   }
   iree_hal_streaming_buffer_ref_t src_ref;
-  status = iree_hal_streaming_memory_lookup_range(
-      node->graph->context, (iree_hal_streaming_deviceptr_t)src, src_span,
-      &src_ref);
+  status = iree_hip_graph_resolve_device_buffer_ref(node->graph, src, src_span,
+                                                    &src_ref);
   if (!iree_status_is_ok(status)) {
     iree_status_ignore(status);
     return hipErrorInvalidValue;
   }
 
-  node->attrs.memcpy.dst_ref = dst_ref;
-  node->attrs.memcpy.src_ref = src_ref;
+  status = iree_hal_streaming_graph_memcpy_node_set_buffer_refs(node, dst_ref,
+                                                                src_ref);
+  if (!iree_status_is_ok(status)) {
+    iree_status_ignore(status);
+    return hipErrorInvalidValue;
+  }
   node->attrs.memcpy.size = size;
   node->attrs.memcpy.execution_dst_pitch = params->dstPtr.pitch;
   node->attrs.memcpy.execution_src_pitch = params->srcPtr.pitch;
@@ -23560,6 +23923,7 @@ static void iree_hip_graph_rollback_memcpy_node_update(
     const iree_hip_graph_memcpy_node_update_t* update) {
   node->attrs.memcpy = update->old_memcpy_attrs;
   if (update->pre_callback_node) {
+    update->pre_callback_node->flags = update->old_pre_callback_flags;
     iree_hip_graph_memcpy_callback_data_t* callback_data =
         (iree_hip_graph_memcpy_callback_data_t*)
             update->pre_callback_node->attrs.host.user_data;
@@ -23568,6 +23932,7 @@ static void iree_hip_graph_rollback_memcpy_node_update(
     *callback_data = update->old_pre_callback_data;
   }
   if (update->post_callback_node) {
+    update->post_callback_node->flags = update->old_post_callback_flags;
     iree_hip_graph_memcpy_callback_data_t* callback_data =
         (iree_hip_graph_memcpy_callback_data_t*)
             update->post_callback_node->attrs.host.user_data;
@@ -23604,12 +23969,14 @@ static hipError_t iree_hip_graph_set_same_context_device_memcpy_node_params(
     iree_hip_graph_memcpy_node_update_t* update) {
   if (pre_callback) {
     update->pre_callback_node = pre_callback;
+    update->old_pre_callback_flags = pre_callback->flags;
     update->old_pre_callback_data = *(iree_hip_graph_memcpy_callback_data_t*)
                                          pre_callback->attrs.host.user_data;
     iree_hip_graph_disable_memcpy_callback(pre_callback);
   }
   if (post_callback) {
     update->post_callback_node = post_callback;
+    update->old_post_callback_flags = post_callback->flags;
     update->old_post_callback_data = *(iree_hip_graph_memcpy_callback_data_t*)
                                           post_callback->attrs.host.user_data;
     iree_hip_graph_disable_memcpy_callback(post_callback);
@@ -23643,12 +24010,14 @@ static hipError_t iree_hip_graph_set_remote_destination_memcpy_node_params(
     }
   }
   update->post_callback_node = post_callback;
+  update->old_post_callback_flags = post_callback->flags;
   iree_hip_graph_memcpy_callback_data_t* callback_data =
       (iree_hip_graph_memcpy_callback_data_t*)
           post_callback->attrs.host.user_data;
   update->old_post_callback_data = *callback_data;
   if (pre_callback) {
     update->pre_callback_node = pre_callback;
+    update->old_pre_callback_flags = pre_callback->flags;
     update->old_pre_callback_data = *(iree_hip_graph_memcpy_callback_data_t*)
                                          pre_callback->attrs.host.user_data;
     iree_hip_graph_disable_memcpy_callback(pre_callback);
@@ -23710,12 +24079,14 @@ static hipError_t iree_hip_graph_set_remote_source_memcpy_node_params(
     }
   }
   update->pre_callback_node = pre_callback;
+  update->old_pre_callback_flags = pre_callback->flags;
   iree_hip_graph_memcpy_callback_data_t* callback_data =
       (iree_hip_graph_memcpy_callback_data_t*)
           pre_callback->attrs.host.user_data;
   update->old_pre_callback_data = *callback_data;
   if (post_callback) {
     update->post_callback_node = post_callback;
+    update->old_post_callback_flags = post_callback->flags;
     update->old_post_callback_data = *(iree_hip_graph_memcpy_callback_data_t*)
                                           post_callback->attrs.host.user_data;
     iree_hip_graph_disable_memcpy_callback(post_callback);
@@ -23757,14 +24128,13 @@ static hipError_t iree_hip_graph_set_remote_source_memcpy_node_params(
   return hipSuccess;
 }
 
-static hipError_t iree_hip_graph_set_memcpy_node_params(
+static hipError_t iree_hip_graph_update_memcpy_node_params(
     iree_hal_streaming_graph_node_t* node, const hipMemcpy3DParms* params,
     iree_hip_graph_memcpy_node_update_t* out_update) {
   if (out_update) {
     memset(out_update, 0, sizeof(*out_update));
   }
-  if (!iree_hip_graph_node_is_active(node) ||
-      node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMCPY) {
+  if (!node || node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMCPY) {
     return hipErrorInvalidValue;
   }
   hipMemcpyKind kind = hipMemcpyDefault;
@@ -23876,12 +24246,14 @@ static hipError_t iree_hip_graph_set_memcpy_node_params(
       }
     }
     update.pre_callback_node = pre_callback;
+    update.old_pre_callback_flags = pre_callback->flags;
     iree_hip_graph_memcpy_callback_data_t* callback_data =
         (iree_hip_graph_memcpy_callback_data_t*)
             pre_callback->attrs.host.user_data;
     update.old_pre_callback_data = *callback_data;
     if (post_callback) {
       update.post_callback_node = post_callback;
+      update.old_post_callback_flags = post_callback->flags;
       update.old_post_callback_data = *(iree_hip_graph_memcpy_callback_data_t*)
                                            post_callback->attrs.host.user_data;
       iree_hip_graph_disable_memcpy_callback(post_callback);
@@ -23944,12 +24316,14 @@ static hipError_t iree_hip_graph_set_memcpy_node_params(
       }
     }
     update.post_callback_node = post_callback;
+    update.old_post_callback_flags = post_callback->flags;
     iree_hip_graph_memcpy_callback_data_t* callback_data =
         (iree_hip_graph_memcpy_callback_data_t*)
             post_callback->attrs.host.user_data;
     update.old_post_callback_data = *callback_data;
     if (pre_callback) {
       update.pre_callback_node = pre_callback;
+      update.old_pre_callback_flags = pre_callback->flags;
       update.old_pre_callback_data = *(iree_hip_graph_memcpy_callback_data_t*)
                                           pre_callback->attrs.host.user_data;
       iree_hip_graph_disable_memcpy_callback(pre_callback);
@@ -24012,6 +24386,15 @@ static hipError_t iree_hip_graph_set_memcpy_node_params(
     iree_hip_graph_commit_memcpy_node_update(node, &update);
   }
   return hipSuccess;
+}
+
+static hipError_t iree_hip_graph_set_memcpy_node_params(
+    iree_hal_streaming_graph_node_t* node, const hipMemcpy3DParms* params,
+    iree_hip_graph_memcpy_node_update_t* out_update) {
+  if (!iree_hip_graph_node_is_active(node)) {
+    return hipErrorInvalidValue;
+  }
+  return iree_hip_graph_update_memcpy_node_params(node, params, out_update);
 }
 
 HIPAPI hipError_t hipGraphEventRecordNodeGetEvent(hipGraphNode_t node,
@@ -24135,7 +24518,6 @@ HIPAPI hipError_t hipGraphExecBatchMemOpNodeSetParams(hipGraphExec_t graphExec,
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(validate_result);
   }
-
   iree_hip_stream_value_prepared_batch_t batch;
   hipError_t result = iree_hip_stream_value_prepared_batch_initialize(
       stream_node->graph->context, params->count, params->paramArray, &batch);
@@ -24148,40 +24530,45 @@ HIPAPI hipError_t hipGraphExecBatchMemOpNodeSetParams(hipGraphExec_t graphExec,
     HIP_RETURN_ERROR(result);
   }
 
-  // Executable updates must not modify the source graph template. Snapshot the
-  // opaque query payload and the resolved targets before temporarily changing
-  // the node for executable reconstruction.
-  iree_hip_graph_batch_mem_op_snapshot_t old_snapshot;
-  iree_status_t status = iree_hip_graph_batch_mem_op_snapshot_initialize(
-      &stream_node->attrs.batch_mem_op, &old_snapshot);
+  iree_hal_streaming_graph_node_t* exec_node = NULL;
+  iree_status_t status = iree_hal_streaming_graph_exec_begin_node_update(
+      exec, stream_node, &exec_node);
   if (!iree_status_is_ok(status)) {
     iree_hip_stream_value_prepared_batch_deinitialize(&batch);
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_STATUS(status, hipErrorInvalidValue);
   }
 
+  // Snapshot the executable-private payload so a failed rebuild leaves the
+  // previously launchable executable unchanged.
+  iree_hip_graph_batch_mem_op_snapshot_t old_snapshot;
+  status = iree_hip_graph_batch_mem_op_snapshot_initialize(
+      &exec_node->attrs.batch_mem_op, &old_snapshot);
   bool template_changed = false;
-  status = iree_hal_streaming_graph_set_batch_mem_op_node_params(
-      stream_node, params, sizeof(*params), params->paramArray,
-      param_array_size, batch.operations, batch.owners, batch.operation_count);
-  template_changed = iree_status_is_ok(status);
-  result = iree_status_to_hip_result(status);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_graph_set_batch_mem_op_node_params(
+        exec_node, params, sizeof(*params), params->paramArray,
+        param_array_size, batch.operations, batch.owners,
+        batch.operation_count);
+    template_changed = iree_status_is_ok(status);
+  }
   iree_hip_stream_value_prepared_batch_deinitialize(&batch);
-  if (result == hipSuccess) {
-    result = iree_hip_graph_exec_rebuild(exec);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_graph_exec_rebuild_node_update(exec);
   }
 
-  status = template_changed
-               ? iree_hal_streaming_graph_set_batch_mem_op_node_params(
-                     stream_node, &old_snapshot.params,
-                     sizeof(old_snapshot.params), old_snapshot.param_array,
-                     old_snapshot.param_array_size, old_snapshot.operations,
-                     old_snapshot.owners, old_snapshot.operation_count)
-               : iree_ok_status();
-  iree_hip_graph_batch_mem_op_snapshot_deinitialize(&old_snapshot);
-  if (!iree_status_is_ok(status)) {
-    result = iree_status_to_hip_result(status);
+  if (!iree_status_is_ok(status) && template_changed) {
+    iree_status_t restore_status =
+        iree_hal_streaming_graph_set_batch_mem_op_node_params(
+            exec_node, &old_snapshot.params, sizeof(old_snapshot.params),
+            old_snapshot.param_array, old_snapshot.param_array_size,
+            old_snapshot.operations, old_snapshot.owners,
+            old_snapshot.operation_count);
+    status = iree_status_join(status, restore_status);
   }
+  iree_hip_graph_batch_mem_op_snapshot_deinitialize(&old_snapshot);
+  iree_hal_streaming_graph_exec_end_node_update(exec);
+  result = iree_status_to_fixed_hip_result(status, hipErrorInvalidValue);
   iree_hal_streaming_graph_exec_release(exec);
   HIP_RETURN_ERROR(result);
 }
@@ -24270,16 +24657,6 @@ HIPAPI hipError_t hipGraphExecGetFlags(hipGraphExec_t graphExec,
   *flags = (unsigned long long)iree_hal_streaming_graph_exec_flags(exec);
   iree_hal_streaming_graph_exec_release(exec);
   HIP_RETURN_ERROR(hipSuccess);
-}
-
-static hipError_t iree_hip_graph_exec_rebuild(
-    iree_hal_streaming_graph_exec_t* exec) {
-  iree_status_t status =
-      iree_hal_streaming_graph_exec_rebuild_from_template(exec);
-  if (!iree_status_is_ok(status)) {
-    return iree_status_to_fixed_hip_result(status, hipErrorInvalidValue);
-  }
-  return hipSuccess;
 }
 
 static bool iree_hip_graph_node_supports_enable(
@@ -24393,12 +24770,23 @@ HIPAPI hipError_t hipGraphExecHostNodeSetParams(hipGraphExec_t graphExec,
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  iree_hal_streaming_graph_host_call_node_attrs_t old_attrs =
-      stream_node->attrs.host;
-  stream_node->attrs.host.fn = (void (*)(void*))params->fn;
-  stream_node->attrs.host.user_data = params->userData;
-  result = iree_hip_graph_exec_rebuild(exec);
-  stream_node->attrs.host = old_attrs;
+  iree_hal_streaming_graph_node_t* exec_node = NULL;
+  iree_status_t status = iree_hal_streaming_graph_exec_begin_node_update(
+      exec, stream_node, &exec_node);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_streaming_graph_exec_release(exec);
+    HIP_RETURN_STATUS(status, hipErrorInvalidValue);
+  }
+  const iree_hal_streaming_graph_host_call_node_attrs_t old_attrs =
+      exec_node->attrs.host;
+  exec_node->attrs.host.fn = (void (*)(void*))params->fn;
+  exec_node->attrs.host.user_data = params->userData;
+  status = iree_hal_streaming_graph_exec_rebuild_node_update(exec);
+  if (!iree_status_is_ok(status)) {
+    exec_node->attrs.host = old_attrs;
+  }
+  iree_hal_streaming_graph_exec_end_node_update(exec);
+  result = iree_status_to_fixed_hip_result(status, hipErrorInvalidValue);
   iree_hal_streaming_graph_exec_release(exec);
   HIP_RETURN_ERROR(result);
 }
@@ -24445,31 +24833,41 @@ HIPAPI hipError_t hipGraphExecMemcpyNodeSetParams(hipGraphExec_t graphExec,
       iree_hal_streaming_graph_exec_release(exec);
       HIP_RETURN_ERROR(result);
     }
+    iree_hal_streaming_graph_node_t* exec_node = NULL;
+    iree_status_t status = iree_hal_streaming_graph_exec_begin_node_update(
+        exec, stream_node, &exec_node);
+    if (!iree_status_is_ok(status)) {
+      iree_hal_streaming_graph_exec_release(exec);
+      HIP_RETURN_STATUS(status, hipErrorInvalidValue);
+    }
     iree_hip_graph_memcpy_callback_data_t* callback_data =
-        (iree_hip_graph_memcpy_callback_data_t*)
-            stream_node->attrs.host.user_data;
+        (iree_hip_graph_memcpy_callback_data_t*)exec_node->attrs.host.user_data;
     const hipMemcpyKind requested_kind =
         iree_hip_graph_metadata_memcpy_kind(params->kind);
     if (requested_kind != callback_data->hip_params.kind) {
+      iree_hal_streaming_graph_exec_end_node_update(exec);
       iree_hal_streaming_graph_exec_release(exec);
       HIP_RETURN_ERROR(hipErrorInvalidValue);
     }
     iree_hip_graph_memcpy_callback_data_t old_callback_data = *callback_data;
     result = iree_hip_graph_set_host_memcpy_callback_params(
-        stream_node, params, kind, dst, src, size, &old_callback_data);
+        exec_node, params, kind, dst, src, size, &old_callback_data);
     if (result != hipSuccess) {
+      iree_hal_streaming_graph_exec_end_node_update(exec);
       iree_hal_streaming_graph_exec_release(exec);
       HIP_RETURN_ERROR(result);
     }
-    result = iree_hip_graph_exec_rebuild(exec);
-    if (result != hipSuccess) {
-      iree_hip_graph_release_memcpy_callback_context_refs(stream_node->graph,
+    status = iree_hal_streaming_graph_exec_rebuild_node_update(exec);
+    if (!iree_status_is_ok(status)) {
+      iree_hip_graph_release_memcpy_callback_context_refs(exec_node->graph,
                                                           callback_data);
       *callback_data = old_callback_data;
     } else {
-      iree_hip_graph_release_memcpy_callback_context_refs(stream_node->graph,
+      iree_hip_graph_release_memcpy_callback_context_refs(exec_node->graph,
                                                           &old_callback_data);
     }
+    iree_hal_streaming_graph_exec_end_node_update(exec);
+    result = iree_status_to_fixed_hip_result(status, hipErrorInvalidValue);
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(result);
   }
@@ -24477,24 +24875,35 @@ HIPAPI hipError_t hipGraphExecMemcpyNodeSetParams(hipGraphExec_t graphExec,
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  iree_hal_streaming_graph_node_t* exec_node = NULL;
+  iree_status_t status = iree_hal_streaming_graph_exec_begin_node_update(
+      exec, stream_node, &exec_node);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_streaming_graph_exec_release(exec);
+    HIP_RETURN_STATUS(status, hipErrorInvalidValue);
+  }
   const hipMemcpyKind requested_kind =
       iree_hip_graph_metadata_memcpy_kind(params->kind);
-  if (requested_kind != stream_node->attrs.memcpy.hip_kind) {
+  if (requested_kind != exec_node->attrs.memcpy.hip_kind) {
+    iree_hal_streaming_graph_exec_end_node_update(exec);
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   iree_hip_graph_memcpy_node_update_t update;
-  result = iree_hip_graph_set_memcpy_node_params(stream_node, params, &update);
+  result = iree_hip_graph_update_memcpy_node_params(exec_node, params, &update);
   if (result != hipSuccess) {
+    iree_hal_streaming_graph_exec_end_node_update(exec);
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(result);
   }
-  result = iree_hip_graph_exec_rebuild(exec);
-  if (result != hipSuccess) {
-    iree_hip_graph_rollback_memcpy_node_update(stream_node, &update);
+  status = iree_hal_streaming_graph_exec_rebuild_node_update(exec);
+  if (!iree_status_is_ok(status)) {
+    iree_hip_graph_rollback_memcpy_node_update(exec_node, &update);
   } else {
-    iree_hip_graph_commit_memcpy_node_update(stream_node, &update);
+    iree_hip_graph_commit_memcpy_node_update(exec_node, &update);
   }
+  iree_hal_streaming_graph_exec_end_node_update(exec);
+  result = iree_status_to_fixed_hip_result(status, hipErrorInvalidValue);
   iree_hal_streaming_graph_exec_release(exec);
   HIP_RETURN_ERROR(result);
 }
@@ -24587,29 +24996,42 @@ HIPAPI hipError_t hipGraphExecMemsetNodeSetParams(hipGraphExec_t graphExec,
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(result);
   }
+  iree_hal_streaming_graph_node_t* exec_node = NULL;
+  iree_status_t status = iree_hal_streaming_graph_exec_begin_node_update(
+      exec, stream_node, &exec_node);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_streaming_graph_exec_release(exec);
+    HIP_RETURN_STATUS(status, hipErrorInvalidValue);
+  }
   const hipMemsetParams* params = (const hipMemsetParams*)pNodeParams;
-  const bool old_is_2d = stream_node->attrs.memset.hip_height != 1;
+  const bool old_is_2d = exec_node->attrs.memset.hip_height != 1;
   const bool new_is_2d = params->height != 1;
   if (old_is_2d || new_is_2d) {
-    if (stream_node->attrs.memset.pattern_size != params->elementSize ||
-        stream_node->attrs.memset.count != element_count ||
-        stream_node->attrs.memset.hip_width != params->width ||
-        stream_node->attrs.memset.hip_height != params->height ||
-        stream_node->attrs.memset.hip_pitch != params->pitch) {
+    if (exec_node->attrs.memset.pattern_size != params->elementSize ||
+        exec_node->attrs.memset.count != element_count ||
+        exec_node->attrs.memset.hip_width != params->width ||
+        exec_node->attrs.memset.hip_height != params->height ||
+        exec_node->attrs.memset.hip_pitch != params->pitch) {
+      iree_hal_streaming_graph_exec_end_node_update(exec);
       iree_hal_streaming_graph_exec_release(exec);
       HIP_RETURN_ERROR(hipErrorInvalidValue);
     }
   }
-  iree_hal_streaming_graph_memset_node_attrs_t old_attrs =
-      stream_node->attrs.memset;
-  result = iree_hip_graph_set_memset_node_params(stream_node, params);
+  const iree_hal_streaming_graph_memset_node_attrs_t old_attrs =
+      exec_node->attrs.memset;
+  result = iree_hip_graph_update_memset_node_params(exec_node, params);
   if (result != hipSuccess) {
-    stream_node->attrs.memset = old_attrs;
+    exec_node->attrs.memset = old_attrs;
+    iree_hal_streaming_graph_exec_end_node_update(exec);
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(result);
   }
-  result = iree_hip_graph_exec_rebuild(exec);
-  stream_node->attrs.memset = old_attrs;
+  status = iree_hal_streaming_graph_exec_rebuild_node_update(exec);
+  if (!iree_status_is_ok(status)) {
+    exec_node->attrs.memset = old_attrs;
+  }
+  iree_hal_streaming_graph_exec_end_node_update(exec);
+  result = iree_status_to_fixed_hip_result(status, hipErrorInvalidValue);
   iree_hal_streaming_graph_exec_release(exec);
   HIP_RETURN_ERROR(result);
 }
@@ -24634,13 +25056,19 @@ hipGraphExecKernelNodeSetParams(hipGraphExec_t graphExec, hipGraphNode_t node,
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  iree_hal_streaming_graph_kernel_node_attrs_t old_attrs =
-      stream_node->attrs.kernel;
-  // Hold the old module independently while the common setter transfers the
-  // node's ownership to the candidate module. On restore this retained
-  // reference becomes the node's ownership again.
+  iree_hal_streaming_graph_node_t* exec_node = NULL;
+  iree_status_t update_status = iree_hal_streaming_graph_exec_begin_node_update(
+      exec, stream_node, &exec_node);
+  if (!iree_status_is_ok(update_status)) {
+    iree_hal_streaming_graph_exec_release(exec);
+    HIP_RETURN_STATUS(update_status, hipErrorInvalidValue);
+  }
+  const iree_hal_streaming_graph_kernel_node_attrs_t old_attrs =
+      exec_node->attrs.kernel;
+  // The setter transfers the node's old module reference on success. Retain
+  // it independently so a failed executable rebuild can restore ownership.
   iree_hal_streaming_module_retain(old_attrs.module);
-  iree_allocator_t host_allocator = stream_node->graph->host_allocator;
+  iree_allocator_t host_allocator = exec_node->graph->host_allocator;
   void* old_constants = NULL;
   iree_hal_buffer_ref_t* old_bindings = NULL;
   iree_host_size_t old_bindings_size = 0;
@@ -24650,6 +25078,7 @@ hipGraphExecKernelNodeSetParams(hipGraphExec_t graphExec, hipGraphNode_t node,
     if (!iree_status_is_ok(status)) {
       iree_status_ignore(status);
       iree_hal_streaming_module_release(old_attrs.module);
+      iree_hal_streaming_graph_exec_end_node_update(exec);
       iree_hal_streaming_graph_exec_release(exec);
       HIP_RETURN_ERROR(hipErrorOutOfMemory);
     }
@@ -24662,6 +25091,7 @@ hipGraphExecKernelNodeSetParams(hipGraphExec_t graphExec, hipGraphNode_t node,
             &old_bindings_size))) {
       iree_allocator_free(host_allocator, old_constants);
       iree_hal_streaming_module_release(old_attrs.module);
+      iree_hal_streaming_graph_exec_end_node_update(exec);
       iree_hal_streaming_graph_exec_release(exec);
       HIP_RETURN_ERROR(hipErrorOutOfMemory);
     }
@@ -24671,34 +25101,43 @@ hipGraphExecKernelNodeSetParams(hipGraphExec_t graphExec, hipGraphNode_t node,
       iree_status_ignore(status);
       iree_allocator_free(host_allocator, old_constants);
       iree_hal_streaming_module_release(old_attrs.module);
+      iree_hal_streaming_graph_exec_end_node_update(exec);
       iree_hal_streaming_graph_exec_release(exec);
       HIP_RETURN_ERROR(hipErrorOutOfMemory);
     }
     memcpy(old_bindings, old_attrs.bindings.values, old_bindings_size);
   }
 
-  result = hipGraphKernelNodeSetParams(node, pNodeParams);
+  result = iree_hip_graph_set_kernel_node_params(
+      exec_node, (const hipKernelNodeParams*)pNodeParams);
   if (result != hipSuccess) {
     iree_allocator_free(host_allocator, old_bindings);
     iree_allocator_free(host_allocator, old_constants);
     iree_hal_streaming_module_release(old_attrs.module);
+    iree_hal_streaming_graph_exec_end_node_update(exec);
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(result);
   }
-  result = iree_hip_graph_exec_rebuild(exec);
   iree_hal_streaming_module_t* replacement_module =
-      stream_node->attrs.kernel.module;
-  stream_node->attrs.kernel = old_attrs;
-  if (old_constants) {
-    memcpy((void*)old_attrs.constants.data, old_constants,
-           old_attrs.constants_capacity);
-  }
-  if (old_bindings) {
-    memcpy((void*)old_attrs.bindings.values, old_bindings, old_bindings_size);
+      exec_node->attrs.kernel.module;
+  update_status = iree_hal_streaming_graph_exec_rebuild_node_update(exec);
+  if (!iree_status_is_ok(update_status)) {
+    exec_node->attrs.kernel = old_attrs;
+    if (old_constants) {
+      memcpy((void*)old_attrs.constants.data, old_constants,
+             old_attrs.constants_capacity);
+    }
+    if (old_bindings) {
+      memcpy((void*)old_attrs.bindings.values, old_bindings, old_bindings_size);
+    }
+    iree_hal_streaming_module_release(replacement_module);
+  } else {
+    iree_hal_streaming_module_release(old_attrs.module);
   }
   iree_allocator_free(host_allocator, old_bindings);
   iree_allocator_free(host_allocator, old_constants);
-  iree_hal_streaming_module_release(replacement_module);
+  iree_hal_streaming_graph_exec_end_node_update(exec);
+  result = iree_status_to_fixed_hip_result(update_status, hipErrorInvalidValue);
   iree_hal_streaming_graph_exec_release(exec);
   HIP_RETURN_ERROR(result);
 }
@@ -24724,12 +25163,23 @@ HIPAPI hipError_t hipGraphExecChildGraphNodeSetParams(hipGraphExec_t graphExec,
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  if ((iree_hal_streaming_graph_t*)childGraph == stream_node->graph) {
+    iree_hal_streaming_graph_exec_release(exec);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  iree_hal_streaming_graph_node_t* exec_node = NULL;
+  iree_status_t status = iree_hal_streaming_graph_exec_begin_node_update(
+      exec, stream_node, &exec_node);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_streaming_graph_exec_release(exec);
+    HIP_RETURN_STATUS(status, hipErrorInvalidValue);
+  }
   iree_hal_streaming_graph_t* old_child_graph =
-      stream_node->attrs.child_graph.graph;
+      exec_node->attrs.child_graph.graph;
   iree_hal_streaming_graph_t* new_child_graph =
       (iree_hal_streaming_graph_t*)childGraph;
-  if (!old_child_graph ||
-      old_child_graph->node_count != new_child_graph->node_count) {
+  if (!old_child_graph) {
+    iree_hal_streaming_graph_exec_end_node_update(exec);
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
@@ -24743,14 +25193,41 @@ HIPAPI hipError_t hipGraphExecChildGraphNodeSetParams(hipGraphExec_t graphExec,
   iree_status_t validate_status = iree_hal_streaming_graph_validate_child_graph(
       stream_node->graph, new_child_graph);
   if (!iree_status_is_ok(validate_status)) {
+    const iree_status_code_t status_code = iree_status_code(validate_status);
+    iree_hal_streaming_graph_exec_end_node_update(exec);
     iree_hal_streaming_graph_exec_release(exec);
-    HIP_RETURN_STATUS(validate_status, hipErrorInvalidValue);
+    HIP_RETURN_STATUS(
+        validate_status,
+        status_code == IREE_STATUS_RESOURCE_EXHAUSTED ? hipErrorOutOfMemory
+        : status_code == IREE_STATUS_UNIMPLEMENTED    ? hipErrorNotSupported
+                                                      : hipErrorInvalidValue);
+  }
+  validate_status = iree_hal_streaming_graph_validate_compatible_topology(
+      old_child_graph, new_child_graph);
+  if (!iree_status_is_ok(validate_status)) {
+    const iree_status_code_t status_code = iree_status_code(validate_status);
+    iree_hal_streaming_graph_exec_end_node_update(exec);
+    iree_hal_streaming_graph_exec_release(exec);
+    HIP_RETURN_STATUS(validate_status,
+                      status_code == IREE_STATUS_RESOURCE_EXHAUSTED
+                          ? hipErrorOutOfMemory
+                          : hipErrorInvalidValue);
   }
   iree_hal_streaming_graph_retain(new_child_graph);
-  stream_node->attrs.child_graph.graph = new_child_graph;
-  result = iree_hip_graph_exec_rebuild(exec);
-  stream_node->attrs.child_graph.graph = old_child_graph;
-  iree_hal_streaming_graph_release(new_child_graph);
+  exec_node->attrs.child_graph.graph = new_child_graph;
+  status = iree_hal_streaming_graph_exec_rebuild_node_update(exec);
+  if (iree_status_is_ok(status)) {
+    iree_hal_streaming_graph_release(old_child_graph);
+  } else {
+    exec_node->attrs.child_graph.graph = old_child_graph;
+    iree_hal_streaming_graph_release(new_child_graph);
+  }
+  iree_hal_streaming_graph_exec_end_node_update(exec);
+  const iree_status_code_t status_code = iree_status_code(status);
+  result = iree_status_to_fixed_hip_result(
+      status, status_code == IREE_STATUS_RESOURCE_EXHAUSTED
+                  ? hipErrorOutOfMemory
+                  : hipErrorInvalidValue);
   iree_hal_streaming_graph_exec_release(exec);
   HIP_RETURN_ERROR(result);
 }
@@ -24880,20 +25357,9 @@ HIPAPI hipError_t hipGraphKernelNodeGetParams(hipGraphNode_t node,
   HIP_RETURN_ERROR(hipSuccess);
 }
 
-HIPAPI hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node,
-                                              const void* pNodeParams) {
-  HIP_API_BEGIN();
-  if (!node || !pNodeParams) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-  iree_hal_streaming_graph_node_t* stream_node =
-      (iree_hal_streaming_graph_node_t*)node;
-  if (!iree_hip_graph_node_is_active(stream_node) ||
-      stream_node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-  const hipKernelNodeParams* params = (const hipKernelNodeParams*)pNodeParams;
-
+static hipError_t iree_hip_graph_set_kernel_node_params(
+    iree_hal_streaming_graph_node_t* stream_node,
+    const hipKernelNodeParams* params) {
   const bool preserves_exact_extent =
       stream_node->attrs.kernel.workitem_count[0] != 0 ||
       stream_node->attrs.kernel.workitem_count[1] != 0 ||
@@ -24905,9 +25371,8 @@ HIPAPI hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node,
        params->blockDim.x != stream_node->attrs.kernel.block_dim[0] ||
        params->blockDim.y != stream_node->attrs.kernel.block_dim[1] ||
        params->blockDim.z != stream_node->attrs.kernel.block_dim[2])) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
-
   // Resolve the kernel symbol first so the extra-buffer handling below can key
   // off its reflected parameter metadata.
   iree_hal_streaming_symbol_t* symbol = NULL;
@@ -24915,16 +25380,16 @@ HIPAPI hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node,
   hipError_t result = iree_hip_resolve_function_symbol(
       stream_node->graph->context, params->func, &symbol, &module);
   if (result != hipSuccess) {
-    HIP_RETURN_ERROR(result);
+    return result;
   }
   if (!params->kernelParams && !params->extra &&
       !iree_hip_symbol_accepts_empty_kernel_params(symbol)) {
     iree_hal_streaming_module_release(module);
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   if (params->kernelParams && params->extra) {
     iree_hal_streaming_module_release(module);
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   hipError_t launch_config_result = iree_hip_validate_launch_configuration(
       stream_node->graph && stream_node->graph->context
@@ -24935,7 +25400,7 @@ HIPAPI hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node,
       params->sharedMemBytes);
   if (launch_config_result != hipSuccess) {
     iree_hal_streaming_module_release(module);
-    HIP_RETURN_ERROR(launch_config_result);
+    return launch_config_result;
   }
 
   void* params_ptr = NULL;
@@ -24947,7 +25412,7 @@ HIPAPI hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node,
         iree_hip_parse_launch_extra(params->extra, &params_ptr, &params_size);
     if (parse_result != hipSuccess) {
       iree_hal_streaming_module_release(module);
-      HIP_RETURN_ERROR(parse_result);
+      return parse_result;
     }
     // The extra buffer is already laid out in the kernel's native kernarg ABI.
     // Preserve it byte-for-byte; the graph node update stores a private copy.
@@ -24980,13 +25445,28 @@ HIPAPI hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node,
           symbol->function_flags,
           IREE_HAL_EXECUTABLE_FUNCTION_FLAG_REQUIRES_UNIFORM_WORKGROUPS)) {
     iree_hal_streaming_module_release(module);
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   iree_status_t set_status = iree_hal_streaming_graph_set_kernel_node_params(
       stream_node, symbol, &dispatch_params);
   iree_hal_streaming_module_release(module);
-  HIP_RETURN_STATUS(set_status, hipErrorInvalidValue);
-  HIP_RETURN_ERROR(hipSuccess);
+  return iree_status_to_fixed_hip_result(set_status, hipErrorInvalidValue);
+}
+
+HIPAPI hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node,
+                                              const void* pNodeParams) {
+  HIP_API_BEGIN();
+  if (!node || !pNodeParams) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  iree_hal_streaming_graph_node_t* stream_node =
+      (iree_hal_streaming_graph_node_t*)node;
+  if (!iree_hip_graph_node_is_active(stream_node) ||
+      stream_node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  HIP_RETURN_ERROR(iree_hip_graph_set_kernel_node_params(
+      stream_node, (const hipKernelNodeParams*)pNodeParams));
 }
 
 static bool iree_hip_access_property_is_valid(hipAccessProperty property) {
@@ -25291,8 +25771,13 @@ HIPAPI hipError_t hipGraphMemcpyNodeSetParamsFromSymbol(
   if (result != hipSuccess) {
     HIP_RETURN_ERROR(result);
   }
-  HIP_RETURN_ERROR(
-      hipGraphMemcpyNodeSetParams1D(node, dst, symbol_ptr, count, kind));
+  result = hipGraphMemcpyNodeSetParams1D(node, dst, symbol_ptr, count, kind);
+  if (result == hipSuccess) {
+    iree_hal_streaming_graph_node_t* stream_node =
+        (iree_hal_streaming_graph_node_t*)node;
+    stream_node->attrs.memcpy.hip_dst_symbol = false;
+  }
+  HIP_RETURN_ERROR(result);
 }
 
 HIPAPI hipError_t hipGraphMemcpyNodeSetParamsToSymbol(
@@ -25308,8 +25793,13 @@ HIPAPI hipError_t hipGraphMemcpyNodeSetParamsToSymbol(
   if (result != hipSuccess) {
     HIP_RETURN_ERROR(result);
   }
-  HIP_RETURN_ERROR(
-      hipGraphMemcpyNodeSetParams1D(node, symbol_ptr, src, count, kind));
+  result = hipGraphMemcpyNodeSetParams1D(node, symbol_ptr, src, count, kind);
+  if (result == hipSuccess) {
+    iree_hal_streaming_graph_node_t* stream_node =
+        (iree_hal_streaming_graph_node_t*)node;
+    stream_node->attrs.memcpy.hip_dst_symbol = true;
+  }
+  HIP_RETURN_ERROR(result);
 }
 
 HIPAPI hipError_t hipGraphMemsetNodeGetParams(hipGraphNode_t node,
@@ -26105,9 +26595,13 @@ HIPAPI hipError_t hipStreamBeginCaptureToGraph(
     const void* dependencyData, size_t numDependencies,
     hipStreamCaptureMode mode) {
   HIP_API_BEGIN();
-  (void)dependencyData;
   IREE_TRACE_ZONE_BEGIN(z0);
-  if (!stream || !graph || (numDependencies > 0 && !dependencies)) {
+  if (dependencyData) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorNotSupported);
+  }
+  if (!stream || !graph || (!dependencies && numDependencies != 0) ||
+      (dependencies && numDependencies == 0)) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
@@ -26150,7 +26644,8 @@ HIPAPI hipError_t hipStreamBeginCaptureToGraph(
   for (size_t i = 0; i < numDependencies; ++i) {
     iree_hal_streaming_graph_node_t* dependency =
         (iree_hal_streaming_graph_node_t*)dependencies[i];
-    if (!dependency || dependency->graph != stream_graph) {
+    if (!iree_hip_graph_node_is_active(dependency) ||
+        dependency->graph != stream_graph) {
       iree_hip_resolved_stream_release(&resolved_stream);
       IREE_TRACE_ZONE_END(z0);
       HIP_RETURN_ERROR(hipErrorInvalidValue);
@@ -26177,7 +26672,11 @@ HIPAPI hipError_t hipStreamBeginCaptureToGraph(
   status = iree_hal_streaming_begin_capture_to_graph(
       stream_obj, stream_graph, (iree_hal_streaming_graph_node_t**)dependencies,
       numDependencies, capture_mode);
-  hipError_t result = iree_status_to_fixed_hip_result(status, hipErrorUnknown);
+  const iree_status_code_t status_code = iree_status_code(status);
+  hipError_t result = iree_status_to_fixed_hip_result(
+      status, status_code == IREE_STATUS_RESOURCE_EXHAUSTED
+                  ? hipErrorOutOfMemory
+                  : hipErrorUnknown);
   iree_hip_resolved_stream_release(&resolved_stream);
   if (result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
@@ -26383,6 +26882,18 @@ HIPAPI hipError_t hipStreamIsCapturing(hipStream_t stream,
   if (!pCaptureStatus) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  bool is_implicit = false;
+  hipError_t implicit_result =
+      iree_hip_capture_info_query_is_implicit(stream, &is_implicit);
+  if (implicit_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(implicit_result);
+  }
+  if (is_implicit) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorStreamCaptureImplicit);
   }
 
   if (!stream) {
@@ -26772,9 +27283,10 @@ HIPAPI hipError_t hipStreamUpdateCaptureDependencies(
     iree_status_free(status);
     iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(status_code == IREE_STATUS_FAILED_PRECONDITION
-                         ? hipErrorIllegalState
-                         : hipErrorInvalidValue);
+    HIP_RETURN_ERROR(
+        status_code == IREE_STATUS_FAILED_PRECONDITION  ? hipErrorIllegalState
+        : status_code == IREE_STATUS_RESOURCE_EXHAUSTED ? hipErrorOutOfMemory
+                                                        : hipErrorInvalidValue);
   }
 
   iree_hip_resolved_stream_release(&resolved_stream);
@@ -27580,7 +28092,8 @@ static hipError_t iree_hip_consume_capture_record_status(iree_status_t status) {
 
 typedef struct iree_hip_capture_mem_alloc_t {
   hipMemAllocNodeParams params;
-  void* dptr;
+  iree_hal_streaming_graph_memory_allocation_t* allocation;
+  hipError_t result;
 } iree_hip_capture_mem_alloc_t;
 
 static iree_status_t iree_hip_capture_record_mem_alloc(
@@ -27590,24 +28103,17 @@ static iree_status_t iree_hip_capture_record_mem_alloc(
     iree_hal_streaming_graph_node_t** out_terminal_node) {
   iree_hip_capture_mem_alloc_t* capture =
       (iree_hip_capture_mem_alloc_t*)user_data;
-
-  hipMemAllocNodeParams* stored_params = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate(
-      &graph->arena, sizeof(*stored_params), (void**)&stored_params));
-  *stored_params = capture->params;
-  stored_params->dptr = capture->dptr;
-
-  iree_hal_streaming_graph_node_t* node = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_add_empty_node(
-      graph, dependencies, dependency_count, &node));
-  node->type = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC;
-  node->attrs.mem_alloc.params = stored_params;
-  node->attrs.mem_alloc.params_size = sizeof(*stored_params);
-  node->attrs.mem_alloc.dptr = capture->dptr;
-  node->attrs.mem_alloc.bytesize = capture->params.bytesize;
-  node->attrs.mem_alloc.owns_device_allocation = true;
-  graph->has_graph_memory_nodes = true;
-  *out_terminal_node = node;
+  hipGraphNode_t node = NULL;
+  capture->result = iree_hip_graph_add_prepared_mem_alloc_node(
+      &node, graph, (const hipGraphNode_t*)dependencies, dependency_count,
+      &capture->params, capture->allocation);
+  if (capture->result != hipSuccess) {
+    return iree_make_status(capture->result == hipErrorOutOfMemory
+                                ? IREE_STATUS_RESOURCE_EXHAUSTED
+                                : IREE_STATUS_INVALID_ARGUMENT,
+                            "failed to record captured graph allocation");
+  }
+  *out_terminal_node = (iree_hal_streaming_graph_node_t*)node;
   return iree_ok_status();
 }
 
@@ -27623,33 +28129,15 @@ static iree_status_t iree_hip_capture_record_mem_free(
     iree_hal_streaming_graph_node_t** out_terminal_node) {
   iree_hip_capture_mem_free_t* capture =
       (iree_hip_capture_mem_free_t*)user_data;
-  capture->result = hipSuccess;
-
-  iree_hal_streaming_buffer_ref_t ref;
-  iree_status_t status = iree_hal_streaming_memory_lookup(
-      graph->context, (iree_hal_streaming_deviceptr_t)capture->dptr, &ref);
-  if (!iree_status_is_ok(status)) {
-    iree_status_free(status);
-    capture->result = hipErrorInvalidValue;
+  hipGraphNode_t node = NULL;
+  capture->result = iree_hip_graph_add_mem_free_node(
+      &node, graph, (const hipGraphNode_t*)dependencies, dependency_count,
+      capture->dptr);
+  if (capture->result != hipSuccess) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "captured free pointer is not allocated");
+                            "failed to record captured graph free");
   }
-  if (!iree_hip_graph_has_mem_alloc_node_for_pointer(graph, capture->dptr)) {
-    capture->result = hipErrorInvalidValue;
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "captured free pointer has no allocation node");
-  }
-
-  iree_hal_streaming_graph_node_t* node = NULL;
-  status = iree_hal_streaming_graph_add_empty_node(graph, dependencies,
-                                                   dependency_count, &node);
-  if (!iree_status_is_ok(status)) {
-    return status;
-  }
-  node->type = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_FREE;
-  node->attrs.mem_free.dptr = capture->dptr;
-  graph->has_graph_memory_nodes = true;
-  *out_terminal_node = node;
+  *out_terminal_node = (iree_hal_streaming_graph_node_t*)node;
   return iree_ok_status();
 }
 
@@ -27704,49 +28192,65 @@ HIPAPI hipError_t hipMallocAsync(void** ptr, size_t size, hipStream_t stream) {
       status = iree_hal_streaming_capture_try_record_noop(stream_obj,
                                                           &was_capturing);
       result = iree_hip_consume_capture_record_status(status);
+      iree_hip_resolved_stream_release(&resolved_stream);
+      IREE_TRACE_ZONE_END(z0);
+      HIP_RETURN_ERROR(result);
     } else {
-      // Allocate backing without capture locks. The recorder below atomically
-      // adopts it into the graph; until then no caller or queue can name it.
-      hrx_mem_pool_t pool = NULL;
-      result = iree_hip_current_mem_pool(resolved_stream.context, &pool);
-      void* prepared_ptr = NULL;
-      if (result == hipSuccess) {
-        result = iree_hip_malloc_from_pool(resolved_stream.context, pool, size,
-                                           /*stream=*/NULL, &prepared_ptr);
-      }
-      hrx_mem_pool_release(pool);
-
-      if (result == hipSuccess) {
-        iree_hip_capture_mem_alloc_t capture;
-        memset(&capture, 0, sizeof(capture));
-        capture.params.bytesize = size;
-        capture.params.poolProps.allocType = hipMemAllocationTypePinned;
-        capture.params.poolProps.location.type = hipMemLocationTypeDevice;
-        capture.params.poolProps.location.id =
-            (int)resolved_stream.context->device_ordinal;
-        capture.dptr = prepared_ptr;
-        bool was_capturing = false;
-        status = iree_hal_streaming_capture_try_record_node(
-            stream_obj, iree_hip_capture_record_mem_alloc, &capture,
-            &was_capturing);
-        if (iree_status_is_ok(status)) {
-          // If end-capture won while backing was prepared, the eager
-          // allocation is still a valid ordinary async-allocation result.
-          *ptr = prepared_ptr;
-          result = hipSuccess;
+      // Reserve the graph's stable virtual address without capture locks. The
+      // recorder atomically adopts it into the active graph. If capture ends
+      // first, discard the reservation and perform an ordinary allocation.
+      iree_hal_streaming_graph_memory_allocation_t* allocation = NULL;
+      status = iree_hal_streaming_graph_memory_allocation_create(
+          resolved_stream.context, size, &allocation);
+      if (!iree_status_is_ok(status)) {
+        if (iree_status_code(status) == IREE_STATUS_UNAVAILABLE) {
+          iree_status_free(status);
+          result = hipErrorNotSupported;
         } else {
-          status = iree_status_join(
-              status, iree_hal_streaming_memory_discard_unpublished_device(
-                          resolved_stream.context,
-                          (iree_hal_streaming_deviceptr_t)prepared_ptr));
-          result = iree_hip_consume_capture_record_status(status);
+          result = iree_status_to_fixed_hip_result(status, hipErrorOutOfMemory);
         }
+        iree_hip_resolved_stream_release(&resolved_stream);
+        IREE_TRACE_ZONE_END(z0);
+        HIP_RETURN_ERROR(result);
       }
+
+      iree_hip_capture_mem_alloc_t capture;
+      memset(&capture, 0, sizeof(capture));
+      capture.params.bytesize = size;
+      capture.params.poolProps.allocType = hipMemAllocationTypePinned;
+      capture.params.poolProps.location.type = hipMemLocationTypeDevice;
+      capture.params.poolProps.location.id =
+          (int)resolved_stream.context->device_ordinal;
+      capture.allocation = allocation;
+      capture.result = hipSuccess;
+      bool was_capturing = false;
+      status = iree_hal_streaming_capture_try_record_node(
+          stream_obj, iree_hip_capture_record_mem_alloc, &capture,
+          &was_capturing);
+      if (capture.result != hipSuccess) {
+        iree_status_free(status);
+        result = capture.result;
+      } else {
+        result = iree_hip_consume_capture_record_status(status);
+      }
+      if (result == hipSuccess && was_capturing) {
+        *ptr = capture.params.dptr;
+        iree_hip_resolved_stream_release(&resolved_stream);
+        IREE_TRACE_ZONE_END(z0);
+        HIP_RETURN_ERROR(hipSuccess);
+      }
+
+      iree_hip_graph_abandon_prepared_mem_alloc(allocation);
+      if (result != hipSuccess) {
+        iree_hip_resolved_stream_release(&resolved_stream);
+        IREE_TRACE_ZONE_END(z0);
+        HIP_RETURN_ERROR(result);
+      }
+      // Capture ended after the initial status query. Continue through the
+      // ordinary stream allocation path so the returned pointer is mapped.
     }
-    iree_hip_resolved_stream_release(&resolved_stream);
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(result);
-  } else if (size == 0) {
+  }
+  if (size == 0) {
     result = hipSuccess;
   } else {
     // Allocate eagerly from the selected pool. A pending same-stream free can

@@ -56,6 +56,12 @@ void iree_hal_streaming_allocation_preparation_release(
 void iree_hal_streaming_allocation_preparation_begin_close(
     iree_hal_streaming_allocation_preparation_t* preparation);
 
+// Leaves admission closed, whether it was open or already closed. Final
+// wrapper teardown uses this after earlier transactions may already have
+// removed the allocation from public lookup.
+void iree_hal_streaming_allocation_preparation_ensure_closed(
+    iree_hal_streaming_allocation_preparation_t* preparation);
+
 // Reopens an idle closing allocation after a failed teardown transaction.
 void iree_hal_streaming_allocation_preparation_reopen(
     iree_hal_streaming_allocation_preparation_t* preparation);

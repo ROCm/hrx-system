@@ -10,6 +10,7 @@
 #include <thread>
 #include <utility>
 
+#include "common/graph.h"
 #include "common/internal.h"
 #include "iree/base/api.h"
 #include "iree/base/internal/atomics.h"
@@ -23,6 +24,26 @@ namespace {
 void SetFlag(void* user_data) {
   static_cast<std::atomic<bool>*>(user_data)->store(true,
                                                     std::memory_order_release);
+}
+
+void DestroyGraphExecHandle(iree_hal_streaming_graph_exec_t* executable) {
+  if (executable) {
+    IREE_EXPECT_OK(iree_hal_streaming_graph_exec_destroy_handle(executable));
+  }
+}
+
+iree_status_t LaunchGraphExecAndCheckResult(
+    iree_hal_streaming_graph_exec_t* executable,
+    iree_hal_streaming_stream_t* stream) {
+  iree_hal_streaming_graph_exec_launch_result_t result =
+      IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_ERROR;
+  iree_status_t status =
+      iree_hal_streaming_graph_exec_launch(executable, stream, &result);
+  EXPECT_EQ(iree_status_is_ok(status)
+                ? IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_SUCCESS
+                : IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_ERROR,
+            result);
+  return status;
 }
 
 // Runs |cleanup| when it leaves scope. A test body builds its handles across a
@@ -314,6 +335,246 @@ void InitializeAtomicPreflightQueue(iree_hal_queue_t* target,
                             &kAtomicPreflightQueueVtable, &out_queue->base);
 }
 
+// Holds one host call after accepting it so a test can separately execute its
+// callback, publish its signal, and release its queue-owned resource. Real
+// asynchronous queues perform those same phases but do not expose the gaps.
+struct ControlledHostCallQueue {
+  // HAL queue header installed on the test stream for the controlled call.
+  iree_hal_queue_t base;
+  // Production queue receiving operations other than the controlled call.
+  iree_hal_queue_t* target = nullptr;
+  // Accepted call retained until explicit test cleanup.
+  iree_hal_host_call_t call = {};
+  // Arguments copied from the accepted call.
+  uint64_t args[4] = {};
+  // Optional timeline wait retained with the accepted call.
+  iree_hal_semaphore_t* wait_semaphore = nullptr;
+  // Payload required from |wait_semaphore| before callback invocation.
+  uint64_t wait_value = 0;
+  // Timeline signal retained with the accepted call.
+  iree_hal_semaphore_t* signal_semaphore = nullptr;
+  // Payload published after callback completion or cancellation.
+  uint64_t signal_value = 0;
+  // True while one accepted call is owned by the queue.
+  bool pending = false;
+  // True once the call's terminal timeline state has been published.
+  bool signal_published = false;
+  // Injects rejection of the next host-call submission.
+  bool reject_next = false;
+};
+
+ControlledHostCallQueue* CastControlledHostCallQueue(
+    iree_hal_queue_t* base_queue) {
+  return reinterpret_cast<ControlledHostCallQueue*>(base_queue);
+}
+
+void ControlledHostCallQueueReleasePending(ControlledHostCallQueue* queue) {
+  iree_hal_resource_release(queue->call.resource);
+  iree_hal_semaphore_release(queue->wait_semaphore);
+  iree_hal_semaphore_release(queue->signal_semaphore);
+  queue->call = {};
+  queue->wait_semaphore = nullptr;
+  queue->signal_semaphore = nullptr;
+  queue->pending = false;
+}
+
+void DestroyControlledHostCallQueue(iree_hal_queue_t* base_queue) {
+  auto* queue = CastControlledHostCallQueue(base_queue);
+  if (queue->pending) {
+    if (!queue->signal_published) {
+      iree_hal_semaphore_fail(
+          queue->signal_semaphore,
+          iree_make_status(IREE_STATUS_CANCELLED,
+                           "controlled queue destroyed with pending call"));
+    }
+    ControlledHostCallQueueReleasePending(queue);
+  }
+  iree_hal_queue_release(queue->target);
+  queue->target = nullptr;
+}
+
+iree_status_t ControlledHostCallQueueBarrier(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_queue_barrier_flags_t flags) {
+  return iree_hal_queue_barrier(CastControlledHostCallQueue(base_queue)->target,
+                                wait_semaphore_list, signal_semaphore_list,
+                                flags);
+}
+
+iree_status_t ControlledHostCallQueueHostCall(
+    iree_hal_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_host_call_t call, const uint64_t args[4],
+    iree_hal_host_call_flags_t flags) {
+  (void)flags;
+  auto* queue = CastControlledHostCallQueue(base_queue);
+  if (queue->reject_next) {
+    queue->reject_next = false;
+    return iree_make_status(IREE_STATUS_ABORTED,
+                            "controlled host-call rejection");
+  }
+  if (queue->pending || wait_semaphore_list.count > 1 ||
+      signal_semaphore_list.count != 1) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "controlled queue capacity exceeded");
+  }
+
+  queue->call = call;
+  memcpy(queue->args, args, sizeof(queue->args));
+  if (wait_semaphore_list.count == 1) {
+    queue->wait_semaphore = wait_semaphore_list.semaphores[0];
+    queue->wait_value = wait_semaphore_list.payload_values[0];
+    iree_hal_semaphore_retain(queue->wait_semaphore);
+  }
+  queue->signal_semaphore = signal_semaphore_list.semaphores[0];
+  queue->signal_value = signal_semaphore_list.payload_values[0];
+  iree_hal_semaphore_retain(queue->signal_semaphore);
+  iree_hal_resource_retain(queue->call.resource);
+  queue->pending = true;
+  return iree_ok_status();
+}
+
+iree_status_t ControlledHostCallQueueFlush(iree_hal_queue_t* base_queue) {
+  return iree_hal_queue_flush(CastControlledHostCallQueue(base_queue)->target);
+}
+
+const iree_hal_queue_vtable_t kControlledHostCallQueueVtable = {
+    /*.destroy=*/DestroyControlledHostCallQueue,
+    /*.barrier=*/ControlledHostCallQueueBarrier,
+    /*.execute=*/nullptr,
+    /*.host_call=*/ControlledHostCallQueueHostCall,
+    /*.query_dispatch_concurrency=*/nullptr,
+    /*.dispatch=*/nullptr,
+    /*.atomic_wait=*/nullptr,
+    /*.atomic_store=*/nullptr,
+    /*.atomic_rmw=*/nullptr,
+    /*.timestamp=*/nullptr,
+    /*.flush=*/ControlledHostCallQueueFlush,
+    /*.alloca=*/nullptr,
+    /*.dealloca=*/nullptr,
+    /*.transfer=*/nullptr,
+    /*.read=*/nullptr,
+    /*.write=*/nullptr,
+};
+
+void InitializeControlledHostCallQueue(iree_hal_queue_t* target,
+                                       ControlledHostCallQueue* out_queue) {
+  out_queue->target = target;
+  iree_hal_queue_retain(target);
+  iree_hal_queue_params_t params;
+  iree_hal_queue_params_initialize(&params);
+  params.priority = iree_hal_queue_priority(target);
+  params.features = iree_hal_queue_features(target);
+  params.execution_resources = iree_hal_queue_execution_resources(target);
+  iree_hal_queue_initialize(iree_hal_queue_family(target), &params,
+                            &kControlledHostCallQueueVtable, &out_queue->base);
+}
+
+iree_status_t ControlledHostCallQueueInvokeCallback(
+    ControlledHostCallQueue* queue) {
+  if (!queue->pending) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "controlled queue has no pending call");
+  }
+  if (queue->wait_semaphore) {
+    IREE_RETURN_IF_ERROR(iree_hal_semaphore_wait(
+        queue->wait_semaphore, queue->wait_value, iree_infinite_timeout(),
+        IREE_ASYNC_WAIT_FLAG_NONE));
+  }
+  const iree_hal_semaphore_list_t signals = {
+      /*.count=*/1,
+      /*.semaphores=*/&queue->signal_semaphore,
+      /*.payload_values=*/&queue->signal_value,
+  };
+  iree_hal_host_call_context_t context = {
+      /*.queue=*/&queue->base,
+      /*.signal_semaphore_list=*/signals,
+  };
+  return queue->call.fn(queue->call.user_data, queue->args, &context);
+}
+
+void ControlledHostCallQueuePublishSuccess(ControlledHostCallQueue* queue) {
+  IREE_ASSERT_TRUE(queue->pending);
+  IREE_ASSERT_FALSE(queue->signal_published);
+  IREE_EXPECT_OK(iree_hal_semaphore_signal(queue->signal_semaphore,
+                                           queue->signal_value,
+                                           /*frontier=*/nullptr));
+  queue->signal_published = true;
+}
+
+void ControlledHostCallQueuePublishFailure(ControlledHostCallQueue* queue) {
+  IREE_ASSERT_TRUE(queue->pending);
+  IREE_ASSERT_FALSE(queue->signal_published);
+  iree_hal_semaphore_fail(
+      queue->signal_semaphore,
+      iree_make_status(IREE_STATUS_CANCELLED, "controlled host-call cancel"));
+  queue->signal_published = true;
+}
+
+iree_status_t RetainGraphLifetimeProbe(void* object, uint64_t count) {
+  (void)object;
+  (void)count;
+  return iree_ok_status();
+}
+
+void ReleaseGraphLifetimeProbe(void* object, uint64_t count) {
+  IREE_ASSERT_EQ(1, count);
+  static_cast<std::atomic<bool>*>(object)->store(true,
+                                                 std::memory_order_release);
+}
+
+iree_status_t AttachGraphLifetimeProbe(iree_hal_streaming_graph_t* graph,
+                                       std::atomic<bool>* was_released) {
+  iree_hal_streaming_graph_user_object_ref_t* user_ref = nullptr;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(&graph->arena, sizeof(*user_ref), (void**)&user_ref));
+  *user_ref = {
+      /*.next=*/graph->user_object_refs,
+      /*.object=*/was_released,
+      /*.count=*/1,
+      /*.retain=*/RetainGraphLifetimeProbe,
+      /*.release=*/ReleaseGraphLifetimeProbe,
+  };
+  graph->user_object_refs = user_ref;
+  return iree_ok_status();
+}
+
+iree_host_size_t PendingTerminalResourceCount(
+    iree_hal_streaming_device_t* device) {
+  iree_slim_mutex_lock(&device->terminal_resource_mutex);
+  const iree_host_size_t count = device->pending_terminal_resource_count;
+  iree_slim_mutex_unlock(&device->terminal_resource_mutex);
+  return count;
+}
+
+struct ToggleFailAllocator {
+  // Allocator serving commands while failure injection is disabled.
+  iree_allocator_t delegate = iree_allocator_system();
+  // Rejects allocation commands while set; frees always reach |delegate|.
+  std::atomic<bool> fail_allocations{false};
+
+  static iree_status_t Control(void* self, iree_allocator_command_t command,
+                               const void* params, void** inout_ptr) {
+    auto* allocator = static_cast<ToggleFailAllocator*>(self);
+    if ((command == IREE_ALLOCATOR_COMMAND_MALLOC ||
+         command == IREE_ALLOCATOR_COMMAND_CALLOC ||
+         command == IREE_ALLOCATOR_COMMAND_REALLOC) &&
+        allocator->fail_allocations.load(std::memory_order_acquire)) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "injected retirement allocation failure");
+    }
+    return allocator->delegate.ctl(allocator->delegate.self, command, params,
+                                   inout_ptr);
+  }
+
+  iree_allocator_t AsAllocator() {
+    return iree_allocator_t{this, &ToggleFailAllocator::Control};
+  }
+};
+
 iree_hal_queue_t* ReplaceGraphExecTestQueue(iree_hal_streaming_stream_t* stream,
                                             iree_hal_queue_t* replacement) {
   iree_slim_mutex_lock(&stream->mutex);
@@ -342,6 +603,8 @@ class GraphExecTest : public ::testing::Test {
     device_entry_.hal_device = hrx_device_hal(hrx_device);
     iree_slim_mutex_initialize(&device_entry_.primary_context_mutex);
     iree_slim_mutex_initialize(&device_entry_.graph_memory_mutex);
+    iree_slim_mutex_initialize(&device_entry_.terminal_resource_mutex);
+    iree_notification_initialize(&device_entry_.terminal_resource_notification);
     iree_arena_block_pool_initialize(/*block_size=*/64 * 1024,
                                      iree_allocator_system(),
                                      &device_entry_.block_pool);
@@ -356,12 +619,21 @@ class GraphExecTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    // Graph-exec destruction is nonblocking. Drain its stream-ordered
+    // retirement calls before releasing the fixture-owned device entry and
+    // the arena block pool embedded in it.
+    IREE_EXPECT_OK(iree_hal_streaming_context_synchronize(context_));
     iree_hal_streaming_stream_release(stream_);
     iree_hal_streaming_context_release(context_);
+    iree_hal_streaming_device_terminal_resource_await_idle(&device_entry_);
+    EXPECT_EQ(0, device_entry_.pending_terminal_resource_count);
+    IREE_EXPECT_OK(HRX_CALL(hrx_cpu_shutdown()));
+    iree_notification_deinitialize(
+        &device_entry_.terminal_resource_notification);
+    iree_slim_mutex_deinitialize(&device_entry_.terminal_resource_mutex);
     iree_arena_block_pool_deinitialize(&device_entry_.block_pool);
     iree_slim_mutex_deinitialize(&device_entry_.graph_memory_mutex);
     iree_slim_mutex_deinitialize(&device_entry_.primary_context_mutex);
-    IREE_EXPECT_OK(HRX_CALL(hrx_cpu_shutdown()));
   }
 
   // Adds |count| event record nodes recording |events| to |graph|, each
@@ -390,8 +662,9 @@ class GraphExecTest : public ::testing::Test {
   iree_hal_streaming_stream_t* stream_ = nullptr;
   // Set by the host-call node a graph carries. A fixture member rather than a
   // local because no semaphore edge a test can name joins a block an aborted
-  // launch left in flight; hrx_cpu_shutdown() above is what drains the workers,
-  // so the flag has to outlive the test body it is read in.
+  // launch left in flight; fixture teardown drains retirement while the worker
+  // pool is live and then shuts it down, so the flag must outlive the test
+  // body.
   std::atomic<bool> graph_host_node_ran_{false};
   // Set by the host call a test enqueues behind an aborted launch to give the
   // blocks that launch may have left in flight their chance to run. A fixture
@@ -409,7 +682,7 @@ TEST_F(GraphExecTest, BatchMemoryNodePreservesResolvedWriteSemantics) {
   iree_hal_streaming_graph_t* clone_graph = nullptr;
   iree_hal_streaming_graph_exec_t* executable = nullptr;
   ScopeExit release_handles([&] {
-    iree_hal_streaming_graph_exec_release(executable);
+    DestroyGraphExecHandle(executable);
     iree_hal_streaming_graph_release(clone_graph);
     iree_hal_streaming_graph_release(graph);
     iree_hal_streaming_retained_buffer_ref_deinitialize(&target);
@@ -478,7 +751,7 @@ TEST_F(GraphExecTest, BatchMemoryNodePreservesResolvedWriteSemantics) {
   EXPECT_EQ(target.offset,
             node->attrs.batch_mem_op.operations[0].target_offset);
 
-  IREE_ASSERT_OK(iree_hal_streaming_graph_clone(graph, &clone_graph));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_clone(graph, context_, &clone_graph));
   IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
       clone_graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE,
       &executable));
@@ -515,7 +788,7 @@ TEST_F(GraphExecTest, ReplayedEventRecordsDropEveryCapturedGraphReference) {
   // test drops its reference mid-body on purpose, to leave the events holding
   // the last ones.
   ScopeExit release_handles([&] {
-    iree_hal_streaming_graph_exec_release(exec);
+    DestroyGraphExecHandle(exec);
     iree_hal_streaming_graph_release(parent_graph);
     iree_hal_streaming_graph_release(child_graph);
     for (iree_hal_streaming_event_t* event : events) {
@@ -569,9 +842,9 @@ TEST_F(GraphExecTest, ReplayedEventRecordsDropEveryCapturedGraphReference) {
   IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
       parent_graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &exec));
 
-  // A graph holds a reference to the context that created it and drops it when
-  // it is destroyed, so one release across the launch is the capture graph and
-  // nothing else.
+  // A graph independently owns its construction context and execution-context
+  // hint. Both name |context_| here, so destroying the one capture graph drops
+  // two context references and nothing else.
   const int32_t context_references_before =
       iree_atomic_ref_count_load(&context_->ref_count);
   iree_hal_streaming_graph_exec_launch_result_t launch_result =
@@ -584,7 +857,7 @@ TEST_F(GraphExecTest, ReplayedEventRecordsDropEveryCapturedGraphReference) {
   for (iree_hal_streaming_event_t* event : events) {
     EXPECT_EQ(event->capture_graph, nullptr);
   }
-  EXPECT_EQ(context_references_before - 1,
+  EXPECT_EQ(context_references_before - 2,
             iree_atomic_ref_count_load(&context_->ref_count))
       << "the launch destroyed the capture graph a number of times other than "
          "once";
@@ -608,7 +881,7 @@ TEST_F(GraphExecTest, ExecEventNodeTakesOnlyItsOwnContextsEvent) {
   // Hands back whatever was built, on the assertion failure paths as much as
   // on the last line.
   ScopeExit release_handles([&] {
-    iree_hal_streaming_graph_exec_release(exec);
+    DestroyGraphExecHandle(exec);
     iree_hal_streaming_graph_release(graph);
     iree_hal_streaming_event_release(other_context_event);
     iree_hal_streaming_event_release(replacement);
@@ -672,6 +945,536 @@ TEST_F(GraphExecTest, ExecEventNodeTakesOnlyItsOwnContextsEvent) {
       replacement));
 }
 
+TEST_F(GraphExecTest, RebuiltHostCallSurvivesExecutableDestroy) {
+  iree_hal_streaming_graph_t* graph = nullptr;
+  iree_hal_streaming_graph_exec_t* exec = nullptr;
+  ScopeExit release_handles([&] {
+    DestroyGraphExecHandle(exec);
+    iree_hal_streaming_graph_release(graph);
+  });
+
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &graph));
+  iree_hal_streaming_graph_node_t* host_node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
+      graph, /*dependencies=*/nullptr, /*dependency_count=*/0, &SetFlag,
+      &graph_host_node_ran_, &host_node));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &exec));
+
+  // Rebuilds compile through a stack-local candidate whose state is moved into
+  // |exec|. Its immutable host-call snapshot must move with compiled state and
+  // remain queue-owned after the executable's public handle is destroyed.
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_rebuild_from_template(exec));
+  auto* exec_resource = reinterpret_cast<iree_hal_resource_t*>(exec);
+  EXPECT_EQ(1, iree_atomic_ref_count_load(&exec_resource->ref_count))
+      << "rebuilt callback state retained its owning executable";
+  IREE_ASSERT_OK(LaunchGraphExecAndCheckResult(exec, stream_));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_destroy_handle(exec));
+  exec = nullptr;
+
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  EXPECT_TRUE(graph_host_node_ran_.load(std::memory_order_acquire));
+}
+
+TEST_F(GraphExecTest,
+       GraphMemoryRetirementDoesNotDestroyItsStreamInsideCallback) {
+  iree_hal_streaming_graph_t* graph = nullptr;
+  iree_hal_streaming_graph_exec_t* exec = nullptr;
+  iree_hal_streaming_stream_t* launch_stream = nullptr;
+  ScopeExit release_handles([&] {
+    DestroyGraphExecHandle(exec);
+    iree_hal_streaming_stream_release(launch_stream);
+    iree_hal_streaming_graph_release(graph);
+  });
+
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &graph));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      graph, /*dependencies=*/nullptr, /*dependency_count=*/0,
+      /*out_node=*/nullptr));
+  // The host allocator has no virtual-memory implementation. Marking the graph
+  // exercises the same active-stream ownership used by compiled memory nodes
+  // without weakening the executable's launch or retirement paths.
+  graph->has_graph_memory_nodes = true;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &exec));
+  IREE_ASSERT_OK(iree_hal_streaming_stream_create(
+      context_, context_->queue, IREE_HAL_STREAMING_STREAM_FLAG_NONE,
+      /*priority=*/0, iree_allocator_system(), &launch_stream));
+  IREE_ASSERT_OK(LaunchGraphExecAndCheckResult(exec, launch_stream));
+
+  // Public stream destruction synchronizes, removes the context-list owner,
+  // and releases the caller's owner. Model all three steps so executable
+  // launch bookkeeping is the stream's only remaining owner.
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(launch_stream));
+  iree_hal_streaming_context_unregister_stream(context_, launch_stream);
+  iree_hal_streaming_stream_release(launch_stream);
+  launch_stream = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_destroy_handle(exec));
+  exec = nullptr;
+
+  iree_hal_streaming_device_terminal_resource_await_idle(&device_entry_);
+  EXPECT_EQ(0, PendingTerminalResourceCount(&device_entry_));
+}
+
+TEST_F(GraphExecTest, ChildTopologySnapshotIgnoresLaterNestedSourceMutation) {
+  iree_hal_streaming_graph_t* original_nested = nullptr;
+  iree_hal_streaming_graph_t* original_child = nullptr;
+  iree_hal_streaming_graph_t* parent = nullptr;
+  iree_hal_streaming_graph_t* matching_nested = nullptr;
+  iree_hal_streaming_graph_t* matching_child = nullptr;
+  iree_hal_streaming_graph_exec_t* exec = nullptr;
+  ScopeExit release_handles([&] {
+    DestroyGraphExecHandle(exec);
+    iree_hal_streaming_graph_release(matching_child);
+    iree_hal_streaming_graph_release(matching_nested);
+    iree_hal_streaming_graph_release(parent);
+    iree_hal_streaming_graph_release(original_child);
+    iree_hal_streaming_graph_release(original_nested);
+  });
+
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &original_nested));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      original_nested, /*dependencies=*/nullptr, /*dependency_count=*/0,
+      /*out_node=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &original_child));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_child_graph_node(
+      original_child, /*dependencies=*/nullptr, /*dependency_count=*/0,
+      original_nested, /*out_node=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &parent));
+  iree_hal_streaming_graph_node_t* child_node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_child_graph_node(
+      parent, /*dependencies=*/nullptr, /*dependency_count=*/0, original_child,
+      &child_node));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      parent, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &exec));
+
+  // The executable's private template retains the instantiation-time nested
+  // topology when the public nested source changes.
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      original_nested, /*dependencies=*/nullptr, /*dependency_count=*/0,
+      /*out_node=*/nullptr));
+
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &matching_nested));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      matching_nested, /*dependencies=*/nullptr, /*dependency_count=*/0,
+      /*out_node=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &matching_child));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_child_graph_node(
+      matching_child, /*dependencies=*/nullptr, /*dependency_count=*/0,
+      matching_nested, /*out_node=*/nullptr));
+
+  iree_hal_streaming_graph_node_t* template_node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_begin_node_update(
+      exec, child_node, &template_node));
+  iree_hal_streaming_graph_t* instantiated_child =
+      template_node->attrs.child_graph.graph;
+  EXPECT_NE(original_child, instantiated_child);
+  IREE_EXPECT_OK(iree_hal_streaming_graph_validate_compatible_topology(
+      instantiated_child, matching_child));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_streaming_graph_validate_compatible_topology(
+                            instantiated_child, original_child));
+  iree_hal_streaming_graph_exec_end_node_update(exec);
+
+  // Whole-graph update must compare against the same frozen executable
+  // template. Comparing |parent| against itself here would accept the nested
+  // source mutation and silently rebuild a different topology.
+  iree_hal_streaming_graph_node_t* error_node = nullptr;
+  iree_hal_streaming_graph_exec_update_result_t update_result =
+      IREE_HAL_STREAMING_GRAPH_EXEC_UPDATE_ERROR;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        iree_hal_streaming_graph_exec_update(
+                            exec, parent, &error_node, &update_result));
+  EXPECT_EQ(child_node, error_node);
+  EXPECT_EQ(IREE_HAL_STREAMING_GRAPH_EXEC_UPDATE_TOPOLOGY_CHANGED,
+            update_result);
+}
+
+TEST_F(GraphExecTest, GraphUpdateVisibleCountUsesFrozenTemplate) {
+  iree_hal_streaming_graph_t* source_graph = nullptr;
+  iree_hal_streaming_graph_t* replacement_graph = nullptr;
+  iree_hal_streaming_graph_exec_t* exec = nullptr;
+  ScopeExit release_handles([&] {
+    DestroyGraphExecHandle(exec);
+    iree_hal_streaming_graph_release(replacement_graph);
+    iree_hal_streaming_graph_release(source_graph);
+  });
+
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &source_graph));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      source_graph, /*dependencies=*/nullptr, /*dependency_count=*/0,
+      /*out_node=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      source_graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &exec));
+
+  // A later source mutation is not part of the executable. Rebuilding its
+  // current parameter template must not refresh compatibility metadata from
+  // that mutable source.
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      source_graph, /*dependencies=*/nullptr, /*dependency_count=*/0,
+      /*out_node=*/nullptr));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_rebuild_from_template(exec));
+
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &replacement_graph));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      replacement_graph, /*dependencies=*/nullptr, /*dependency_count=*/0,
+      /*out_node=*/nullptr));
+  iree_hal_streaming_graph_node_t* error_node = nullptr;
+  iree_hal_streaming_graph_exec_update_result_t update_result =
+      IREE_HAL_STREAMING_GRAPH_EXEC_UPDATE_ERROR;
+  IREE_EXPECT_OK(iree_hal_streaming_graph_exec_update(
+      exec, replacement_graph, &error_node, &update_result));
+  EXPECT_EQ(nullptr, error_node);
+  EXPECT_EQ(IREE_HAL_STREAMING_GRAPH_EXEC_UPDATE_SUCCESS, update_result);
+}
+
+TEST_F(GraphExecTest, LaunchResourceCleanupDoesNotDelayExecRetirement) {
+  iree_hal_streaming_graph_t* graph = nullptr;
+  iree_hal_streaming_graph_exec_t* exec = nullptr;
+  ControlledHostCallQueue controlled_queue = {};
+  iree_hal_queue_t* original_queue = nullptr;
+  bool wrapper_installed = false;
+  bool wrapper_detached = false;
+  std::atomic<bool> graph_released = false;
+  ScopeExit release_handles([&] {
+    if (controlled_queue.pending) {
+      if (!controlled_queue.signal_published) {
+        ControlledHostCallQueuePublishFailure(&controlled_queue);
+      }
+      ControlledHostCallQueueReleasePending(&controlled_queue);
+    }
+    if (wrapper_installed) {
+      iree_hal_queue_retain(original_queue);
+      iree_hal_queue_t* installed_queue =
+          ReplaceGraphExecTestQueue(stream_, original_queue);
+      iree_hal_queue_release(installed_queue);
+    } else if (wrapper_detached) {
+      iree_hal_queue_release(&controlled_queue.base);
+    }
+    DestroyGraphExecHandle(exec);
+    iree_hal_streaming_graph_release(graph);
+  });
+
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &graph));
+  IREE_ASSERT_OK(AttachGraphLifetimeProbe(graph, &graph_released));
+  iree_hal_streaming_graph_node_t* host_node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
+      graph, /*dependencies=*/nullptr, /*dependency_count=*/0, &SetFlag,
+      &graph_host_node_ran_, &host_node));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &exec));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_rebuild_from_template(exec));
+
+  original_queue = stream_->queue;
+  InitializeControlledHostCallQueue(original_queue, &controlled_queue);
+  EXPECT_EQ(original_queue,
+            ReplaceGraphExecTestQueue(stream_, &controlled_queue.base));
+  iree_hal_queue_release(original_queue);
+  wrapper_installed = true;
+
+  IREE_ASSERT_OK(LaunchGraphExecAndCheckResult(exec, stream_));
+  ASSERT_TRUE(controlled_queue.pending);
+  IREE_ASSERT_OK(ControlledHostCallQueueInvokeCallback(&controlled_queue));
+  ControlledHostCallQueuePublishSuccess(&controlled_queue);
+  EXPECT_TRUE(graph_host_node_ran_.load(std::memory_order_acquire));
+
+  // Move the stream back to its production queue, transferring the wrapper's
+  // former stream reference to this test. Its pending launch resource remains
+  // deliberately retained after the launch signal has become observable.
+  iree_hal_queue_retain(original_queue);
+  EXPECT_EQ(&controlled_queue.base,
+            ReplaceGraphExecTestQueue(stream_, original_queue));
+  wrapper_installed = false;
+  wrapper_detached = true;
+
+  // The executable's source-graph reference is now the probe's only owner.
+  // Retirement must release it even though backend cleanup still retains the
+  // immutable callback snapshot for the completed launch.
+  iree_hal_streaming_graph_release(graph);
+  graph = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_destroy_handle(exec));
+  exec = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  EXPECT_TRUE(controlled_queue.pending);
+  EXPECT_TRUE(graph_released.load(std::memory_order_acquire));
+
+  ControlledHostCallQueueReleasePending(&controlled_queue);
+  iree_hal_queue_release(&controlled_queue.base);
+  wrapper_detached = false;
+}
+
+TEST_F(GraphExecTest, RetirementCallbackReleasesGraphBeforePublishingSignal) {
+  iree_hal_streaming_graph_t* graph = nullptr;
+  iree_hal_streaming_graph_exec_t* exec = nullptr;
+  ControlledHostCallQueue controlled_queue = {};
+  iree_hal_queue_t* original_queue = nullptr;
+  bool wrapper_installed = false;
+  std::atomic<bool> graph_released = false;
+  ScopeExit release_handles([&] {
+    if (controlled_queue.pending) {
+      if (!controlled_queue.signal_published) {
+        ControlledHostCallQueuePublishFailure(&controlled_queue);
+      }
+      ControlledHostCallQueueReleasePending(&controlled_queue);
+    }
+    if (wrapper_installed) {
+      iree_hal_queue_retain(original_queue);
+      iree_hal_queue_t* installed_queue =
+          ReplaceGraphExecTestQueue(stream_, original_queue);
+      iree_hal_queue_release(installed_queue);
+    }
+    DestroyGraphExecHandle(exec);
+    iree_hal_streaming_graph_release(graph);
+  });
+
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &graph));
+  IREE_ASSERT_OK(AttachGraphLifetimeProbe(graph, &graph_released));
+  iree_hal_streaming_graph_node_t* node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      graph, /*dependencies=*/nullptr, /*dependency_count=*/0, &node));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &exec));
+  IREE_ASSERT_OK(LaunchGraphExecAndCheckResult(exec, stream_));
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+
+  // Leave the executable's source-graph reference as the probe's only owner.
+  iree_hal_streaming_graph_release(graph);
+  graph = nullptr;
+
+  original_queue = stream_->queue;
+  InitializeControlledHostCallQueue(original_queue, &controlled_queue);
+  EXPECT_EQ(original_queue,
+            ReplaceGraphExecTestQueue(stream_, &controlled_queue.base));
+  iree_hal_queue_release(original_queue);
+  wrapper_installed = true;
+
+  // Destruction submits retirement and returns without waiting for the held
+  // call, preserving the public operation's nonblocking contract.
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_destroy_handle(exec));
+  exec = nullptr;
+  ASSERT_TRUE(controlled_queue.pending);
+  EXPECT_FALSE(graph_released.load(std::memory_order_acquire));
+  EXPECT_EQ(1, PendingTerminalResourceCount(&device_entry_));
+
+  // The callback, not later queue resource cleanup, performs final exec and
+  // source-graph release. Thus the graph is gone before the stream signal can
+  // become observable.
+  IREE_ASSERT_OK(ControlledHostCallQueueInvokeCallback(&controlled_queue));
+  EXPECT_TRUE(graph_released.load(std::memory_order_acquire));
+  EXPECT_EQ(1, PendingTerminalResourceCount(&device_entry_));
+  ControlledHostCallQueuePublishSuccess(&controlled_queue);
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+
+  // Queue cleanup owns only the empty token now and decrements the global
+  // teardown drain exactly once.
+  ControlledHostCallQueueReleasePending(&controlled_queue);
+  EXPECT_EQ(0, PendingTerminalResourceCount(&device_entry_));
+}
+
+TEST_F(GraphExecTest, CancelledRetirementDrainsAfterFailurePublication) {
+  iree_hal_streaming_graph_t* graph = nullptr;
+  iree_hal_streaming_graph_exec_t* exec = nullptr;
+  iree_hal_streaming_stream_t* launch_stream = nullptr;
+  ControlledHostCallQueue controlled_queue = {};
+  iree_hal_queue_t* original_queue = nullptr;
+  bool wrapper_installed = false;
+  bool launch_stream_unregistered = false;
+  std::atomic<bool> graph_released = false;
+  ScopeExit release_handles([&] {
+    if (controlled_queue.pending) {
+      if (!controlled_queue.signal_published) {
+        ControlledHostCallQueuePublishFailure(&controlled_queue);
+      }
+      ControlledHostCallQueueReleasePending(&controlled_queue);
+    }
+    if (wrapper_installed) {
+      iree_hal_queue_retain(original_queue);
+      iree_hal_queue_t* installed_queue =
+          ReplaceGraphExecTestQueue(launch_stream, original_queue);
+      iree_hal_queue_release(installed_queue);
+    }
+    DestroyGraphExecHandle(exec);
+    iree_hal_streaming_graph_release(graph);
+    if (launch_stream && !launch_stream_unregistered) {
+      iree_hal_streaming_context_unregister_stream(context_, launch_stream);
+    }
+    iree_hal_streaming_stream_release(launch_stream);
+  });
+
+  // Failure is terminal for a stream timeline. Keep the intentionally failed
+  // retirement point off the fixture stream so fixture teardown can still
+  // verify that context-wide retirement synchronization succeeds.
+  IREE_ASSERT_OK(iree_hal_streaming_stream_create(
+      context_, context_->queue, IREE_HAL_STREAMING_STREAM_FLAG_NONE,
+      /*priority=*/0, iree_allocator_system(), &launch_stream));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &graph));
+  IREE_ASSERT_OK(AttachGraphLifetimeProbe(graph, &graph_released));
+  iree_hal_streaming_graph_node_t* node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      graph, /*dependencies=*/nullptr, /*dependency_count=*/0, &node));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &exec));
+  IREE_ASSERT_OK(LaunchGraphExecAndCheckResult(exec, launch_stream));
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(launch_stream));
+  iree_hal_streaming_graph_release(graph);
+  graph = nullptr;
+
+  original_queue = launch_stream->queue;
+  InitializeControlledHostCallQueue(original_queue, &controlled_queue);
+  EXPECT_EQ(original_queue,
+            ReplaceGraphExecTestQueue(launch_stream, &controlled_queue.base));
+  iree_hal_queue_release(original_queue);
+  wrapper_installed = true;
+
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_destroy_handle(exec));
+  exec = nullptr;
+  ASSERT_TRUE(controlled_queue.pending);
+  EXPECT_EQ(1, PendingTerminalResourceCount(&device_entry_));
+
+  // Model a queue cancelling the call: failure is externally visible before
+  // its operation resource set is destroyed. The device drain must therefore
+  // remain pending across that publication.
+  ControlledHostCallQueuePublishFailure(&controlled_queue);
+  iree_status_t status = iree_hal_streaming_stream_synchronize(launch_stream);
+  EXPECT_EQ(IREE_STATUS_CANCELLED, iree_status_code(status));
+  iree_status_free(status);
+  EXPECT_FALSE(graph_released.load(std::memory_order_acquire));
+  EXPECT_EQ(1, PendingTerminalResourceCount(&device_entry_));
+
+  // Cancellation invokes no callback. Token destruction performs final exec
+  // release and retires the teardown counter exactly once.
+  ControlledHostCallQueueReleasePending(&controlled_queue);
+  EXPECT_TRUE(graph_released.load(std::memory_order_acquire));
+  EXPECT_EQ(0, PendingTerminalResourceCount(&device_entry_));
+  // The failed timeline is terminal. Remove it from context-wide
+  // synchronization while the caller reference still keeps the stream alive.
+  iree_hal_streaming_context_unregister_stream(context_, launch_stream);
+  launch_stream_unregistered = true;
+}
+
+TEST_F(GraphExecTest, RetirementAllocationFailureLeavesExecRetryable) {
+  ToggleFailAllocator allocator;
+  iree_hal_streaming_graph_t* graph = nullptr;
+  iree_hal_streaming_graph_exec_t* exec = nullptr;
+  ScopeExit release_handles([&] {
+    allocator.fail_allocations.store(false, std::memory_order_release);
+    DestroyGraphExecHandle(exec);
+    iree_hal_streaming_graph_release(graph);
+  });
+
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, allocator.AsAllocator(),
+      &graph));
+  iree_hal_streaming_graph_node_t* node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      graph, /*dependencies=*/nullptr, /*dependency_count=*/0, &node));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &exec));
+  IREE_ASSERT_OK(LaunchGraphExecAndCheckResult(exec, stream_));
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+
+  allocator.fail_allocations.store(true, std::memory_order_release);
+  iree_status_t status = iree_hal_streaming_graph_exec_destroy_handle(exec);
+  EXPECT_EQ(IREE_STATUS_RESOURCE_EXHAUSTED, iree_status_code(status));
+  iree_status_free(status);
+  EXPECT_EQ(0, PendingTerminalResourceCount(&device_entry_));
+
+  // A failed destroy retains the public reference and restores the detached
+  // launch point, so the executable remains usable and a later destroy can
+  // retire both launches.
+  allocator.fail_allocations.store(false, std::memory_order_release);
+  IREE_ASSERT_OK(LaunchGraphExecAndCheckResult(exec, stream_));
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_destroy_handle(exec));
+  exec = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  iree_hal_streaming_device_terminal_resource_await_idle(&device_entry_);
+  EXPECT_EQ(0, PendingTerminalResourceCount(&device_entry_));
+}
+
+TEST_F(GraphExecTest, RetirementQueueRejectionLeavesExecRetryable) {
+  iree_hal_streaming_graph_t* graph = nullptr;
+  iree_hal_streaming_graph_exec_t* exec = nullptr;
+  ControlledHostCallQueue controlled_queue = {};
+  iree_hal_queue_t* original_queue = nullptr;
+  bool wrapper_installed = false;
+  ScopeExit release_handles([&] {
+    if (wrapper_installed) {
+      iree_hal_queue_retain(original_queue);
+      iree_hal_queue_t* installed_queue =
+          ReplaceGraphExecTestQueue(stream_, original_queue);
+      iree_hal_queue_release(installed_queue);
+    }
+    DestroyGraphExecHandle(exec);
+    iree_hal_streaming_graph_release(graph);
+  });
+
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &graph));
+  iree_hal_streaming_graph_node_t* node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+      graph, /*dependencies=*/nullptr, /*dependency_count=*/0, &node));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &exec));
+  IREE_ASSERT_OK(LaunchGraphExecAndCheckResult(exec, stream_));
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+
+  original_queue = stream_->queue;
+  InitializeControlledHostCallQueue(original_queue, &controlled_queue);
+  controlled_queue.reject_next = true;
+  EXPECT_EQ(original_queue,
+            ReplaceGraphExecTestQueue(stream_, &controlled_queue.base));
+  iree_hal_queue_release(original_queue);
+  wrapper_installed = true;
+
+  iree_status_t status = iree_hal_streaming_graph_exec_destroy_handle(exec);
+  EXPECT_EQ(IREE_STATUS_ABORTED, iree_status_code(status));
+  iree_status_free(status);
+  EXPECT_FALSE(controlled_queue.pending);
+  EXPECT_EQ(0, PendingTerminalResourceCount(&device_entry_));
+
+  // Restore the production queue. The rejected destroy must leave the same
+  // public executable live, launchable, and eligible for a successful retry.
+  iree_hal_queue_retain(original_queue);
+  EXPECT_EQ(&controlled_queue.base,
+            ReplaceGraphExecTestQueue(stream_, original_queue));
+  iree_hal_queue_release(&controlled_queue.base);
+  wrapper_installed = false;
+
+  IREE_ASSERT_OK(LaunchGraphExecAndCheckResult(exec, stream_));
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_destroy_handle(exec));
+  exec = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  iree_hal_streaming_device_terminal_resource_await_idle(&device_entry_);
+  EXPECT_EQ(0, PendingTerminalResourceCount(&device_entry_));
+}
+
 // A launch answers the cross-context record rule once for the whole executable,
 // and a record buried in a child graph is one of the records it answers for:
 // instantiating a child graph node folds the child's answer into the parent's,
@@ -700,7 +1503,7 @@ TEST_F(GraphExecTest, ChildGraphRecordRefusesALaunchOnAnotherContextsStream) {
   // on the last line. Releasing the stream and the context is what drains and
   // unregisters them, and the fixture shuts the device down either way.
   ScopeExit release_handles([&] {
-    iree_hal_streaming_graph_exec_release(exec);
+    DestroyGraphExecHandle(exec);
     iree_hal_streaming_graph_release(parent_graph);
     iree_hal_streaming_graph_release(child_graph);
     iree_hal_streaming_event_release(event);
@@ -975,7 +1778,7 @@ TEST_F(GraphExecTest,
       iree_hal_queue_release(installed_queue);
     }
     iree_hal_semaphore_release(gate);
-    iree_hal_streaming_graph_exec_release(exec);
+    DestroyGraphExecHandle(exec);
     iree_hal_streaming_graph_release(parent_graph);
     iree_hal_streaming_graph_release(child_graph);
   });
@@ -1093,7 +1896,7 @@ TEST_F(GraphExecTest,
 
   // Accepted work is terminal at return, so immediate executable teardown is
   // safe even though no stream-tail point was published for the failed launch.
-  iree_hal_streaming_graph_exec_release(exec);
+  DestroyGraphExecHandle(exec);
   exec = nullptr;
 }
 
