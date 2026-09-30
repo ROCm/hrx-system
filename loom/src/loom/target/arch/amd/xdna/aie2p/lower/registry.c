@@ -6,10 +6,10 @@
 
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
+#include "loom/ops/vector/fragment.h"
 #include "loom/target/arch/amd/xdna/aie2p/contracts/core.h"
 #include "loom/target/arch/amd/xdna/aie2p/contracts/core_lower_rules.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
-#include "loom/target/arch/amd/xdna/aie2p/lower/encode.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/lower.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/matrix.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/rodata.h"
@@ -113,6 +113,32 @@ static iree_status_t loom_aie2p_map_type(void* user_data,
   }
   return loom_low_lower_emit_source_type_unsupported(
       context, source_op, IREE_SV("source"), source_type);
+}
+
+// Native BFP operands carry 64 signed mantissa bytes followed by eight shared
+// exponent bytes in EX. Other schemas retain their ordinary vector carrier.
+static bool loom_aie2p_value_has_bfp_storage(
+    const loom_value_fact_table_t* fact_table, loom_value_id_t value) {
+  const loom_value_fact_encoded_operand_schema_t native = {
+      .element_format = LOOM_VALUE_FACT_NUMERIC_FORMAT_BFP16EBS8,
+      .payload_packing = LOOM_VALUE_FACT_PAYLOAD_PACKING_TARGET_FRAGMENT,
+      .rounding_policy = LOOM_VALUE_FACT_ROUNDING_POLICY_FLUSH_SUBNORMAL,
+      .payload_register_count = 18,
+      .payload_element_count = 64,
+  };
+  const loom_value_facts_t facts =
+      loom_value_fact_table_lookup(fact_table, value);
+  loom_value_fact_encoding_summary_t summary = {0};
+  if (loom_value_facts_query_encoding_summary(&fact_table->context, facts,
+                                              &summary)) {
+    return loom_value_fact_encoded_operand_schema_equal(
+        summary.storage_schema.encoded_operand, native);
+  }
+  loom_vector_fragment_fact_t fragment;
+  return loom_vector_fragment_fact_query_value_facts(&fact_table->context,
+                                                     facts, &fragment) &&
+         loom_value_fact_encoded_operand_schema_equal(fragment.encoded_operand,
+                                                      native);
 }
 
 static iree_status_t loom_aie2p_map_value(void* user_data,

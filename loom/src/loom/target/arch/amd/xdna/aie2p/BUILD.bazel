@@ -346,14 +346,12 @@ loom_cc_library(
 loom_cc_library(
     name = "lower",
     srcs = [
-        "lower/encode.c",
         "lower/matrix.c",
         "lower/registry.c",
         "lower/rodata.c",
         "lower/storage.c",
     ],
     hdrs = [
-        "lower/encode.h",
         "lower/lower.h",
         "lower/matrix.h",
         "lower/rodata.h",

@@ -10,6 +10,10 @@ from __future__ import annotations
 
 from loom.dialect.vector import defs as vector
 from loom.dsl import Op
+from loom.target.arch.amd.xdna.aie2p.contracts.bfp import (
+    BFP_ENCODE_GUARDS,
+    bfp_encode_emits,
+)
 from loom.target.arch.amd.xdna.aie2p.contracts.data_path import (
     BF16_CONVERSION_ROUNDING,
 )
@@ -59,6 +63,8 @@ def _fused_memory_access_emits(
     access_preamble: tuple[ContractEmit, ...] = (),
     results: dict[str, ValueRef] | None = None,
     result_types: dict[str, DescriptorResultType] | None = None,
+    additional_static_byte_offset: int = 0,
+    temporary_suffix: str = "",
 ) -> tuple[ContractEmit, ...]:
     """Builds one fused memory access after realizing its canonical address."""
 
@@ -66,11 +72,17 @@ def _fused_memory_access_emits(
     address_emits: tuple[EmitDescriptorOp, ...] = ()
     immediates: dict[str, SourceMemoryProject] = {}
     if address_form is _MemoryAddressForm.IMMEDIATE:
-        immediates["imm"] = SourceMemoryProject.static_byte_offset()
+        immediates["imm"] = (
+            SourceMemoryProject.static_byte_offset_plus(additional_static_byte_offset)
+            if additional_static_byte_offset
+            else SourceMemoryProject.static_byte_offset()
+        )
     else:
         address_emits, address_index = _register_address_emits(
             source_memory,
             address_form,
+            additional_static_byte_offset=additional_static_byte_offset,
+            temporary_suffix=temporary_suffix,
         )
         access_operands["dj"] = address_index
     return (
@@ -272,6 +284,82 @@ def _fused_float_load_rule(
         ),
         priority=1,
         report_key=f"native_memory_load_{source_shape}_to_{result_shape}",
+    )
+
+
+def _fused_bfp_encode_load_rule(
+    address_form: _MemoryAddressForm,
+    *,
+    root_kind: SourceMemoryRootKind,
+    memory_spaces: tuple[str, ...],
+    volatile: bool,
+) -> DescriptorRule:
+    source_type = Vector("bf16", lanes=64)
+    address_family = (
+        "immediate" if address_form is _MemoryAddressForm.IMMEDIATE else "register"
+    )
+    descriptor_key = (
+        f"amd.xdna.aie2p.load.convert.bf16x32.to.f32x32.indexed.{address_family}"
+    )
+    if volatile:
+        descriptor_key = f"{descriptor_key}.volatile"
+    memory_descriptor = _descriptor(descriptor_key)
+    source_memory = _memory_constraint(
+        SourceMemoryOperation.LOAD,
+        address_form,
+        root_kind=root_kind,
+        memory_spaces=memory_spaces,
+        element_byte_count=2,
+        vector_lane_count=64,
+        minimum_alignment=64,
+        immediate_offset_minimum=-512,
+        immediate_offset_maximum=448,
+        maximum_additional_static_byte_offset=64,
+    )
+    emits: list[ContractEmit] = []
+    float_halves = (
+        ValueRef.temporary("float_half_0"),
+        ValueRef.temporary("float_half_1"),
+    )
+    for half_index, float_half in enumerate(float_halves):
+        emits.extend(
+            _fused_memory_access_emits(
+                address_form,
+                memory_descriptor,
+                source_memory,
+                {"ptr": ValueRef.operand("view")},
+                results={"op": float_half},
+                result_types={"op": DescriptorResultType()},
+                additional_static_byte_offset=half_index * 64,
+                temporary_suffix=f"_{half_index}",
+            )
+        )
+    emits.extend(
+        bfp_encode_emits(float_halves, ValueRef.result("result", source_node="encode"))
+    )
+    return DescriptorRule(
+        source_op=vector.vector_load,
+        descriptor=memory_descriptor,
+        source_nodes=(
+            SourceNode.adjacent_unique_user(
+                "encode",
+                source_op=vector.vector_encode,
+                parent_result=ValueRef.result("result"),
+                node_operand=ValueRef.operand("source"),
+                guards=BFP_ENCODE_GUARDS,
+            ),
+        ),
+        guards=(
+            *(
+                (Guard.instance_flags_has_all("memory_flags", "volatile"),)
+                if volatile
+                else ()
+            ),
+            Guard.value_type("result", source_type),
+        ),
+        emit=tuple(emits),
+        priority=1,
+        report_key="native_memory_load_bf16x64_to_bfp16ebs8",
     )
 
 
@@ -575,6 +663,16 @@ def _fused_memory_rules(*, volatile: bool) -> tuple[DescriptorRule, ...]:
             )
             for root_kind, memory_spaces in _memory_roots(SourceMemoryOperation.LOAD)
             for lane_count in FLOAT_PACKET_LANE_COUNTS
+            for address_form in _MemoryAddressForm
+        ),
+        *(
+            _fused_bfp_encode_load_rule(
+                address_form,
+                root_kind=root_kind,
+                memory_spaces=memory_spaces,
+                volatile=volatile,
+            )
+            for root_kind, memory_spaces in _memory_roots(SourceMemoryOperation.LOAD)
             for address_form in _MemoryAddressForm
         ),
         *(

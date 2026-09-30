@@ -408,7 +408,6 @@ loom_cc_library(
   NAME
     lower
   HDRS
-    "lower/encode.h"
     "lower/lower.h"
     "lower/matrix.h"
     "lower/rodata.h"
@@ -416,7 +415,6 @@ loom_cc_library(
   TEXTUAL_HDRS
     "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amd/xdna/aie2p/contracts/core_index.inl"
   SRCS
-    "lower/encode.c"
     "lower/matrix.c"
     "lower/registry.c"
     "lower/rodata.c"

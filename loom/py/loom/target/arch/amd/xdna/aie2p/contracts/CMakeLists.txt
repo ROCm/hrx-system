@@ -15,6 +15,7 @@ iree_py_library(
   SRCS
     "__init__.py"
     "accumulator_structural.py"
+    "bfp.py"
     "conversion.py"
     "core.py"
     "core_contract.py"
@@ -169,6 +170,8 @@ iree_py_test(
     "loom.target.arch.amd.xdna.aie2p.contracts.packet_memory_test"
   DEPS
     loom::py::loom::target::arch::amd::xdna::aie2p::contracts::contracts
+    loom::py::loom::core
+    loom::py::loom::dialect::encoding::encoding
     loom::py::loom::dialect::vector::vector
     loom::py::loom::dialect::view::view
     loom::py::loom::target::contracts::contracts
