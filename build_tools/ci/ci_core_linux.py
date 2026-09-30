@@ -38,6 +38,7 @@ from build_tools.ci.ci_core_common import (
     copy_matching_rocm_paths,
     copy_relative_path,
     default_ctest_parallelism,
+    env_bool,
     extract_tar_package_archive,
     log,
     path_relative_to,
@@ -247,9 +248,11 @@ def build_core(args: argparse.Namespace) -> None:
         f"CMAKE_BUILD_TYPE={args.build_type}",
         f"IREE_BUILD_TESTS={'ON' if ctest_enabled else 'OFF'}",
         "IREE_BUILD_BENCHMARKS=ON",
-        "LOOM_BUILD=ON",
+        f"LOOM_BUILD={'ON' if args.build_loom else 'OFF'}",
         "AMDF_BUILD=OFF",
+        "LIBHRX_BUILD=ON",
         f"LIBHRX_BUILD_CTS={'ON' if ctest_enabled else 'OFF'}",
+        "LIBHRX_BUILD_HIP_BINDING=ON",
         f"HRX_INSTALL_TESTS={'ON' if ctest_enabled else 'OFF'}",
         f"LIBHRX_BUILD_PASSTHROUGH={'ON' if args.passthrough else 'OFF'}",
         f"IREE_HAL_DRIVER_AMDGPU={'ON' if args.amdgpu else 'OFF'}",
@@ -383,7 +386,8 @@ def test_core(args: argparse.Namespace) -> None:
 
     require_path(installed_tests_dir / "CTestTestfile.cmake", "installed CTest file")
     require_path(install_root / "lib" / "libhrx.so", "installed libhrx.so")
-    require_path(install_root / "lib" / "libloomc.so", "installed libloomc.so")
+    if args.build_loom:
+        require_path(install_root / "lib" / "libloomc.so", "installed libloomc.so")
     require_path(install_root / "bin" / "hrx-info", "installed hrx-info")
 
     if rocm_root.exists():
@@ -426,7 +430,6 @@ def test_core(args: argparse.Namespace) -> None:
             f"-DCMAKE_CXX_FLAGS={sanitizer_link_flag}",
         ]
     hrx_smoke_build_dir = smoke_build_dir / "hrx"
-    loomc_smoke_build_dir = smoke_build_dir / "loomc"
     smoke_cmake_options = [
         "-GNinja",
         f"-DCMAKE_PREFIX_PATH={install_root};{rocm_root}",
@@ -454,20 +457,22 @@ def test_core(args: argparse.Namespace) -> None:
     run(["cmake", "--build", hrx_smoke_build_dir], cwd=REPO_ROOT, env=env)
     run([hrx_smoke_build_dir / "hrx_package_smoke"], cwd=REPO_ROOT, env=env)
     run([hrx_smoke_build_dir / "hrx_package_smoke_cxx"], cwd=REPO_ROOT, env=env)
-    run(
-        [
-            "cmake",
-            "-S",
-            REPO_ROOT / "loom" / "binding" / "c" / "packaging" / "package_smoke",
-            "-B",
-            loomc_smoke_build_dir,
-            *smoke_cmake_options,
-        ],
-        cwd=REPO_ROOT,
-        env=env,
-    )
-    run(["cmake", "--build", loomc_smoke_build_dir], cwd=REPO_ROOT, env=env)
-    run([loomc_smoke_build_dir / "loomc_package_smoke"], cwd=REPO_ROOT, env=env)
+    if args.build_loom:
+        loomc_smoke_build_dir = smoke_build_dir / "loomc"
+        run(
+            [
+                "cmake",
+                "-S",
+                REPO_ROOT / "loom" / "binding" / "c" / "packaging" / "package_smoke",
+                "-B",
+                loomc_smoke_build_dir,
+                *smoke_cmake_options,
+            ],
+            cwd=REPO_ROOT,
+            env=env,
+        )
+        run(["cmake", "--build", loomc_smoke_build_dir], cwd=REPO_ROOT, env=env)
+        run([loomc_smoke_build_dir / "loomc_package_smoke"], cwd=REPO_ROOT, env=env)
 
 
 ROCM_BUILDENV_EXCLUDE_PATHS = {
@@ -696,10 +701,11 @@ def package_core(args: argparse.Namespace) -> None:
     require_path(
         args.public_install_dir.resolve() / "lib" / "libhrx.so", "public libhrx.so"
     )
-    require_path(
-        args.public_install_dir.resolve() / "lib" / "libloomc.so",
-        "public libloomc.so",
-    )
+    if args.build_loom:
+        require_path(
+            args.public_install_dir.resolve() / "lib" / "libloomc.so",
+            "public libloomc.so",
+        )
     require_path(
         args.public_install_dir.resolve() / "bin" / "hrx-info", "public hrx-info"
     )
@@ -711,14 +717,15 @@ def package_core(args: argparse.Namespace) -> None:
         / "hrx-config.cmake",
         "public hrx CMake package",
     )
-    require_path(
-        args.public_install_dir.resolve()
-        / "lib"
-        / "cmake"
-        / "loomc"
-        / "loomc-config.cmake",
-        "public loomc CMake package",
-    )
+    if args.build_loom:
+        require_path(
+            args.public_install_dir.resolve()
+            / "lib"
+            / "cmake"
+            / "loomc"
+            / "loomc-config.cmake",
+            "public loomc CMake package",
+        )
     require_path(
         args.tests_install_dir.resolve()
         / "share"
@@ -783,6 +790,11 @@ def add_shared_args(parser: argparse.ArgumentParser) -> None:
         include_gpu=True,
         include_amdgpu=True,
         artifact_sets=ARTIFACT_SETS,
+    )
+    parser.add_argument(
+        "--build-loom",
+        action=argparse.BooleanOptionalAction,
+        default=env_bool("HRX_BUILD_LOOM", True),
     )
 
 

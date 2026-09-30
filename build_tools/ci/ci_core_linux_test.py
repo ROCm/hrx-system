@@ -154,7 +154,9 @@ class CiCoreLinuxTest(unittest.TestCase):
         self.assertIn("-DIREE_BUILD_BENCHMARKS=ON", configure_cmd)
         self.assertIn("-DLOOM_BUILD=ON", configure_cmd)
         self.assertIn("-DAMDF_BUILD=OFF", configure_cmd)
+        self.assertIn("-DLIBHRX_BUILD=ON", configure_cmd)
         self.assertIn("-DLIBHRX_BUILD_CTS=ON", configure_cmd)
+        self.assertIn("-DLIBHRX_BUILD_HIP_BINDING=ON", configure_cmd)
         self.assertIn("-DHRX_INSTALL_TESTS=ON", configure_cmd)
         self.assertIn("-DLIBHRX_BUILD_PASSTHROUGH=ON", configure_cmd)
         self.assertIn("-DIREE_HAL_DRIVER_AMDGPU=ON", configure_cmd)
@@ -173,6 +175,11 @@ class CiCoreLinuxTest(unittest.TestCase):
         self.assertEqual(len(commands), 1)
         self.assertIn("-DIREE_ENABLE_ASAN=ON", commands[0])
         self.assertIn("-DIREE_BUILD_TESTS=ON", commands[0])
+
+    def test_build_core_can_exclude_loom_from_the_product(self):
+        commands = self.build_core_commands({"HRX_BUILD_LOOM": "false"})
+
+        self.assertIn("-DLOOM_BUILD=OFF", commands[0])
 
     def test_sanitizer_tests_build_the_selected_source_ctest_closure(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
@@ -244,12 +251,6 @@ class CiCoreLinuxTest(unittest.TestCase):
         configure_cmd = commands[0]
         self.assertIn("-DCMAKE_C_COMPILER_LAUNCHER=ccache", configure_cmd)
         self.assertIn("-DCMAKE_CXX_COMPILER_LAUNCHER=ccache", configure_cmd)
-
-    def test_core_linux_workflow_has_no_unbacked_ccache_directory(self):
-        workflow = (REPO_ROOT / ".github/workflows/build_core_linux.yml").read_text()
-        self.assertNotIn("CCACHE_DIR", workflow)
-        self.assertIn("- name: Prepare CMake build", workflow)
-        self.assertIn("- name: Run tests", workflow)
 
 
 if __name__ == "__main__":

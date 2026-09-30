@@ -1,0 +1,618 @@
+# Copyright 2026 The HRX Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+name: LibHRX
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        type: choice
+        options:
+          - nightly
+          - dev
+          - prerelease
+        default: nightly
+      run_id:
+        type: string
+        description: "TheRock artifact run id. Empty means the latest complete run."
+        default: ""
+      artifact_set:
+        type: choice
+        options:
+          - core
+          - core-with-llvm-dev
+          - core-with-upstream-hip
+        default: core
+      test_gpu:
+        type: boolean
+        default: false
+  pull_request:
+    paths: &libhrx_paths
+      - ".bazelrc"
+      - ".bazelrc.configured"
+      - ".github/scripts/**"
+      - ".github/workflows/ci_libhrx.yml"
+      - "BUILD.bazel"
+      - "BUILDING.md"
+      - "CMakeLists.txt"
+      - "MODULE.*"
+      - "dev.py"
+      - "requirements-analysis*"
+      - "requirements-dev*"
+      - "build_tools/**"
+      - "runtime/**"
+      - "libhrx/**"
+      - "third_party/**"
+  push:
+    branches:
+      - main
+      - main-staging
+    paths: *libhrx_paths
+
+concurrency:
+  group: libhrx-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  cmake_linux:
+    name: CMake / Linux x86-64 / Clang / ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: RelWithDebInfo
+            sanitizer: none
+            assertions: false
+            ctest_exclude_regex: ""
+            package: true
+          - name: ASAN
+            sanitizer: asan
+            assertions: true
+            ctest_exclude_regex: ""
+            package: false
+          - name: TSAN
+            sanitizer: tsan
+            assertions: true
+            ctest_exclude_regex: "^iree/async/platform/io_uring/cts/core_tests$"
+            package: false
+          - name: UBSAN
+            sanitizer: ubsan
+            assertions: true
+            ctest_exclude_regex: ""
+            package: false
+    concurrency:
+      group: libhrx-cmake-linux-${{ matrix.sanitizer }}-${{ (github.event_name == 'push' && !matrix.package && github.ref) || github.run_id }}
+      cancel-in-progress: true
+    runs-on: azure-linux-scale-rocm
+    timeout-minutes: 30
+    container:
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
+    env:
+      HRX_OUTPUT_DIR: ${{ github.workspace }}/build/linux
+      HRX_RELEASE_TYPE: ${{ inputs.release_type || 'nightly' }}
+      HRX_RUN_ID: ${{ inputs.run_id || '' }}
+      HRX_ARTIFACT_SET: ${{ inputs.artifact_set || 'core' }}
+      HRX_ROCM_ROOT: ${{ github.workspace }}/build/linux/rocm-root
+      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/linux/downloads
+      HRX_BUILD_DIR: ${{ github.workspace }}/build/linux/build/hrx-core
+      HRX_PUBLIC_INSTALL_DIR: ${{ github.workspace }}/build/linux/install/public
+      HRX_TESTS_INSTALL_DIR: ${{ github.workspace }}/build/linux/install/tests
+      HRX_PUBLIC_DEPS_DIR: ${{ github.workspace }}/build/linux/install/public-deps
+      HRX_COMPOSED_INSTALL_DIR: ${{ github.workspace }}/build/linux/install/composed
+      HRX_PACKAGE_SMOKE_BUILD_DIR: ${{ github.workspace }}/build/linux/build/package-smoke
+      HRX_PACKAGE_OUTPUT_DIR: ${{ github.workspace }}/build/linux/dist
+      HRX_BUILD_TYPE: RelWithDebInfo
+      HRX_BUILD_LOOM: "false"
+      HRX_SANITIZER: ${{ matrix.sanitizer }}
+      HRX_ASSERTIONS: ${{ matrix.assertions }}
+      HRX_CMAKE_OPTIONS: "-DIREE_HAL_AMDGPU_TARGETS=gfx942;gfx1151;gfx1201"
+      HRX_CTEST_REGEX: ""
+      HRX_CTEST_EXCLUDE_REGEX: ${{ matrix.ctest_exclude_regex }}
+      HRX_CTEST_LABEL_REGEX: ""
+      HRX_CTEST_LABEL_EXCLUDE_REGEX: "runtime-resource=|manual"
+      HRX_TEST_GPU: ${{ inputs.test_gpu || false }}
+      HRX_PACKAGE: ${{ matrix.package }}
+      HRX_PACKAGE_SUFFIX: ""
+      PIP_CACHE_DIR: ${{ github.workspace }}/build/linux/caches/pip
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Adjust git config
+        run: git config --global --add safe.directory "$PWD"
+
+      - name: Install Python dependencies
+        run: python3 -m pip install --upgrade boto3 cmake==3.31.6 zstandard
+
+      - name: Fetch ROCm artifacts
+        run: python3 build_tools/ci/ci_core_linux.py fetch-rocm
+
+      - name: Prepare CMake build
+        run: python3 build_tools/ci/ci_core_linux.py build
+
+      - name: Run tests
+        id: core_tests
+        run: python3 build_tools/ci/ci_core_linux.py test
+
+      - name: Package
+        if: ${{ matrix.package }}
+        run: python3 build_tools/ci/ci_core_linux.py package
+
+      - name: Upload public package
+        if: ${{ matrix.package }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hrx-public-linux-x86_64
+          path: |
+            build/linux/dist/hrx-public-linux-x86_64-*.tar.zst
+            build/linux/dist/hrx-public-linux-x86_64-*.manifest.json
+            build/linux/dist/hrx-public-linux-x86_64-env.sh
+          if-no-files-found: error
+
+      - name: Upload public dependency package
+        if: ${{ matrix.package }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hrx-public-deps-linux-x86_64
+          path: |
+            build/linux/dist/hrx-public-deps-linux-x86_64-*.tar.zst
+            build/linux/dist/hrx-public-deps-linux-x86_64-*.manifest.json
+            build/linux/dist/hrx-public-deps-linux-x86_64-env.sh
+          if-no-files-found: error
+
+      - name: Upload test package
+        if: ${{ matrix.package }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hrx-tests-linux-x86_64
+          path: |
+            build/linux/dist/hrx-tests-linux-x86_64-*.tar.zst
+            build/linux/dist/hrx-tests-linux-x86_64-*.manifest.json
+          if-no-files-found: error
+
+      - name: Upload ROCm build environment package
+        if: ${{ matrix.package }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hrx-rocm-buildenv-linux-x86_64
+          path: |
+            build/linux/dist/hrx-rocm-buildenv-linux-x86_64-*.tar.zst
+            build/linux/dist/hrx-rocm-buildenv-linux-x86_64-*.manifest.json
+            build/linux/dist/hrx-rocm-buildenv-linux-x86_64-env.sh
+          if-no-files-found: error
+
+      - name: Upload failed test results
+        if: ${{ always() && steps.core_tests.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ctest-results-core-linux-${{ matrix.sanitizer }}-attempt-${{ github.run_attempt }}
+          path: build/linux/**/Testing/Temporary/
+          if-no-files-found: warn
+          retention-days: 7
+
+  cmake_linux_gfx942:
+    name: CMake / Linux x86-64 / Clang / RelWithDebInfo / AMD gfx942
+    concurrency:
+      group: libhrx-cmake-linux-gfx942-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
+      cancel-in-progress: true
+    needs: cmake_linux
+    if: ${{ needs.cmake_linux.result == 'success' }}
+    runs-on: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: >-
+        --ipc host
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --group-add 993
+        --group-add 992
+        --group-add 110
+        --ulimit memlock=-1:-1
+        --security-opt seccomp=unconfined
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+        --user 0:0
+    timeout-minutes: 60
+    env:
+      HRX_OUTPUT_DIR: ${{ github.workspace }}/build/linux-gpu
+      HRX_RELEASE_TYPE: ${{ inputs.release_type || 'nightly' }}
+      HRX_RUN_ID: ${{ inputs.run_id || '' }}
+      HRX_ARTIFACT_SET: ${{ inputs.artifact_set || 'core' }}
+      HRX_ROCM_ROOT: ${{ github.workspace }}/build/linux-gpu/rocm-root
+      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/linux-gpu/downloads
+      HRX_BUILD_DIR: ${{ github.workspace }}/build/linux-gpu/build/hrx-core
+      HRX_BUILD_LOOM: "false"
+      HRX_PUBLIC_INSTALL_DIR: ${{ github.workspace }}/build/linux-gpu/install/public
+      HRX_PUBLIC_DEPS_DIR: ${{ github.workspace }}/build/linux-gpu/install/public-deps
+      HRX_TESTS_INSTALL_DIR: ${{ github.workspace }}/build/linux-gpu/install/tests
+      HRX_COMPOSED_INSTALL_DIR: ${{ github.workspace }}/build/linux-gpu/install/composed
+      HRX_CMAKE_OPTIONS: "-DIREE_HAL_AMDGPU_TARGETS=gfx942"
+      HRX_PREPARE_PUBLIC_DEPS: "true"
+      HRX_PACKAGE_SMOKE: "false"
+      HRX_TEST_GPU: "true"
+      HRX_TEST_EXPECT_STREAM_VALUE_WAITS: "0"
+      HRX_CTS_DEVICE: gpu:0
+      HRX_CTEST_REGEX: ""
+      HRX_CTEST_EXCLUDE_REGEX: ""
+      HRX_CTEST_LABEL_REGEX: runtime-resource=amd-gpu
+      HRX_CTEST_LABEL_EXCLUDE_REGEX: manual
+      HRX_CTEST_PARALLELISM: "1"
+      HRX_TEST_TMPDIR: ${{ github.workspace }}/build/linux-gpu/test-tmp
+      HRX_PYTHON: ${{ github.workspace }}/build/linux-gpu/python/bin/python3
+      PIP_CACHE_DIR: ${{ github.workspace }}/build/linux-gpu/caches/pip
+      ROCR_VISIBLE_DEVICES: "0"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Adjust git config
+        run: |
+          mkdir -p "$HOME"
+          git config --global --add safe.directory "$PWD"
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Fetch ROCm toolchain
+        run: bash .github/scripts/fetch_rocm_toolchain.sh
+
+      - name: Install CMake host tools
+        run: |
+          "${HRX_PYTHON}" -m pip install --upgrade cmake==3.31.6 ninja
+          echo "${HRX_OUTPUT_DIR}/python/bin" >> "${GITHUB_PATH}"
+
+      - name: Check tool versions
+        run: |
+          cmake --version
+          ctest --version
+          ninja --version
+          bash .github/scripts/check_rocm_device_toolchain.sh
+          test -d "${HRX_ROCM_ROOT}/include"
+
+      - name: Report ROCm environment
+        id: rocm_environment
+        timeout-minutes: 1
+        run: bash .github/scripts/check_rocm_environment.sh
+
+      - name: Build and install HRX
+        if: ${{ steps.rocm_environment.outcome == 'success' }}
+        run: |
+          "${HRX_PYTHON}" build_tools/ci/ci_core_linux.py build
+
+      - name: Run installed GPU tests
+        id: core_tests
+        if: ${{ steps.rocm_environment.outcome == 'success' }}
+        run: |
+          "${HRX_PYTHON}" build_tools/ci/ci_core_linux.py test
+
+      - name: Upload failed test results
+        if: ${{ always() && steps.core_tests.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ctest-results-core-linux-gpu-source-attempt-${{ github.run_attempt }}
+          path: build/linux-gpu/**/Testing/Temporary/
+          if-no-files-found: warn
+          retention-days: 7
+
+  cmake_linux_gfx1201:
+    name: CMake / Linux x86-64 / Clang / RelWithDebInfo / AMD gfx1201
+    concurrency:
+      group: libhrx-cmake-linux-gfx1201-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
+      cancel-in-progress: true
+    needs: cmake_linux
+    if: ${{ needs.cmake_linux.result == 'success' }}
+    runs-on: [self-hosted, Linux, X64, gpu_navi4x]
+    timeout-minutes: 20
+    env:
+      HRX_OUTPUT_DIR: ${{ github.workspace }}/build/linux-gpu
+      HRX_ARTIFACT_DOWNLOAD_DIR: ${{ github.workspace }}/build/linux-gpu/artifacts
+      HRX_PUBLIC_INSTALL_DIR: ${{ github.workspace }}/build/linux-gpu/install/public
+      HRX_PUBLIC_DEPS_DIR: ${{ github.workspace }}/build/linux-gpu/install/public-deps
+      HRX_TESTS_INSTALL_DIR: ${{ github.workspace }}/build/linux-gpu/install/tests
+      HRX_COMPOSED_INSTALL_DIR: ${{ github.workspace }}/build/linux-gpu/install/composed
+      HRX_BUILD_LOOM: "false"
+      HRX_PREPARE_PUBLIC_DEPS: "false"
+      HRX_PACKAGE_SMOKE: "false"
+      HRX_TEST_GPU: "true"
+      HRX_TEST_EXPECT_STREAM_VALUE_WAITS: "1"
+      HRX_CTS_DEVICE: gpu:0
+      HRX_CTEST_REGEX: ""
+      HRX_CTEST_EXCLUDE_REGEX: ""
+      HRX_CTEST_LABEL_REGEX: runtime-resource=amd-gpu
+      HRX_CTEST_LABEL_EXCLUDE_REGEX: manual
+      HRX_CTEST_PARALLELISM: "1"
+      HRX_TEST_TMPDIR: ${{ github.workspace }}/build/linux-gpu/test-tmp
+      HRX_PYTHON: ${{ github.workspace }}/build/linux-gpu/python/bin/python3
+      PIP_CACHE_DIR: ${{ github.workspace }}/build/linux-gpu/caches/pip
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Adjust git config
+        run: git config --global --add safe.directory "$PWD"
+
+      - name: Install Python dependencies
+        run: |
+          python3 --version
+          mkdir -p "${HRX_OUTPUT_DIR}"
+          python3 -m venv "${HRX_OUTPUT_DIR}/python"
+          "${HRX_PYTHON}" -m pip install --upgrade pip cmake==3.31.6 zstandard
+          echo "${HRX_OUTPUT_DIR}/python/bin" >> "${GITHUB_PATH}"
+          "${HRX_OUTPUT_DIR}/python/bin/ctest" --version
+
+      - name: Download public package artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: hrx-public-linux-x86_64
+          path: ${{ env.HRX_ARTIFACT_DOWNLOAD_DIR }}
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download public dependency package artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: hrx-public-deps-linux-x86_64
+          path: ${{ env.HRX_ARTIFACT_DOWNLOAD_DIR }}
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download test package artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: hrx-tests-linux-x86_64
+          path: ${{ env.HRX_ARTIFACT_DOWNLOAD_DIR }}
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Extract package artifacts
+        run: |
+          "${HRX_PYTHON}" build_tools/ci/ci_core_linux.py extract-packages
+
+      - name: Report ROCm environment
+        id: rocm_environment
+        timeout-minutes: 1
+        run: |
+          export PATH="${HRX_PUBLIC_DEPS_DIR}/bin:${PATH}"
+          export LD_LIBRARY_PATH="${HRX_PUBLIC_DEPS_DIR}/lib:${HRX_PUBLIC_DEPS_DIR}/lib/rocm_sysdeps/lib:${LD_LIBRARY_PATH:-}"
+          bash .github/scripts/check_rocm_environment.sh
+
+      - name: Run installed GPU tests
+        id: core_tests
+        if: ${{ steps.rocm_environment.outcome == 'success' }}
+        run: |
+          "${HRX_PYTHON}" build_tools/ci/ci_core_linux.py test
+
+      - name: Upload failed test results
+        if: ${{ always() && steps.core_tests.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ctest-results-core-linux-gpu-attempt-${{ github.run_attempt }}
+          path: build/linux-gpu/**/Testing/Temporary/
+          if-no-files-found: warn
+          retention-days: 7
+
+  cmake_windows:
+    name: CMake / Windows x86-64 / ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: MSVC / RelWithDebInfo
+            toolchain: msvc
+            assertions: false
+            package: true
+          - name: Clang CL / RelWithDebInfo
+            toolchain: clang-cl
+            assertions: true
+            package: false
+    concurrency:
+      group: libhrx-cmake-windows-${{ matrix.toolchain }}-${{ (github.event_name == 'push' && !matrix.package && github.ref) || github.run_id }}
+      cancel-in-progress: true
+    runs-on: azure-windows-scale-rocm
+    timeout-minutes: 45
+    env:
+      HRX_OUTPUT_DIR: ${{ github.workspace }}/build/windows
+      HRX_WINDOWS_TOOLCHAIN: ${{ matrix.toolchain }}
+      HRX_RELEASE_TYPE: ${{ inputs.release_type || 'nightly' }}
+      HRX_RUN_ID: ${{ inputs.run_id || '' }}
+      HRX_ARTIFACT_SET: ${{ inputs.artifact_set || 'core' }}
+      HRX_ROCM_ROOT: ${{ github.workspace }}/build/windows/${{ matrix.toolchain }}/rocm-root
+      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/windows/${{ matrix.toolchain }}/downloads
+      HRX_BUILD_DIR: ${{ github.workspace }}/build/windows/${{ matrix.toolchain }}/build/hrx-core
+      HRX_PUBLIC_INSTALL_DIR: ${{ github.workspace }}/build/windows/${{ matrix.toolchain }}/install/public
+      HRX_TESTS_INSTALL_DIR: ${{ github.workspace }}/build/windows/${{ matrix.toolchain }}/install/tests
+      HRX_PUBLIC_DEPS_DIR: ${{ github.workspace }}/build/windows/${{ matrix.toolchain }}/install/public-deps
+      HRX_COMPOSED_INSTALL_DIR: ${{ github.workspace }}/build/windows/${{ matrix.toolchain }}/install/composed
+      HRX_PACKAGE_SMOKE_BUILD_DIR: ${{ github.workspace }}/build/windows/${{ matrix.toolchain }}/build/package-smoke
+      HRX_PACKAGE_OUTPUT_DIR: ${{ github.workspace }}/build/windows/${{ matrix.toolchain }}/dist
+      HRX_BUILD_TYPE: RelWithDebInfo
+      HRX_ASSERTIONS: ${{ matrix.assertions }}
+      HRX_CMAKE_OPTIONS: ""
+      HRX_CTEST_REGEX: ""
+      HRX_CTEST_EXCLUDE_REGEX: ""
+      HRX_CTEST_LABEL_REGEX: ""
+      HRX_CTEST_LABEL_EXCLUDE_REGEX: "runtime-resource=|manual"
+      HRX_PACKAGE: ${{ matrix.package }}
+      HRX_PACKAGE_SUFFIX: ""
+      IREE_CI_FAILURE_ARTIFACT_DIR: ${{ github.workspace }}\build\windows-build-failures-${{ github.run_id }}-${{ github.run_attempt }}
+      PIP_CACHE_DIR: ${{ github.workspace }}/build/windows/${{ matrix.toolchain }}/caches/pip
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Adjust git config
+        run: git config --global --add safe.directory "$PWD"
+
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade boto3 cmake==3.31.6 ninja zstandard
+
+      - name: Fetch ROCm artifacts
+        run: python build_tools/ci/ci_core_windows.py fetch-rocm
+
+      - name: Configure, build, and install
+        run: python build_tools/ci/ci_core_windows.py build
+
+      - name: Run installed tests
+        id: core_tests
+        run: python build_tools/ci/ci_core_windows.py test
+
+      - name: Package
+        if: ${{ matrix.package }}
+        run: python build_tools/ci/ci_core_windows.py package
+
+      - name: Relocate and retest package
+        id: relocated_tests
+        if: ${{ matrix.package }}
+        shell: pwsh
+        run: |
+          $relocated = "${{ github.workspace }}/build/windows/${{ matrix.toolchain }}/relocated"
+          Move-Item -LiteralPath "$env:HRX_BUILD_DIR" -Destination "${env:HRX_BUILD_DIR}.unavailable"
+          Move-Item -LiteralPath "$env:HRX_PUBLIC_INSTALL_DIR" -Destination "${env:HRX_PUBLIC_INSTALL_DIR}.unavailable"
+          Move-Item -LiteralPath "$env:HRX_TESTS_INSTALL_DIR" -Destination "${env:HRX_TESTS_INSTALL_DIR}.unavailable"
+          python -m venv "$relocated/python-venv"
+          $env:HRX_TEST_PYTHON = "$relocated/python-venv/Scripts/python.exe"
+          & "$env:HRX_TEST_PYTHON" --version
+          python build_tools/ci/ci_core_windows.py extract-packages `
+            --artifact-download-dir "$env:HRX_PACKAGE_OUTPUT_DIR" `
+            --public-install-dir "$relocated/public" `
+            --public-deps-dir "$relocated/public-deps" `
+            --tests-install-dir "$relocated/tests"
+          python build_tools/ci/ci_core_windows.py test `
+            --rocm-root "$relocated/missing-rocm-root" `
+            --public-install-dir "$relocated/public" `
+            --public-deps-dir "$relocated/public-deps" `
+            --tests-install-dir "$relocated/tests" `
+            --composed-install-dir "$relocated/composed" `
+            --package-smoke-build-dir "$relocated/package-smoke" `
+            --no-prepare-public-deps
+
+      - name: Upload Windows build failure evidence
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-build-failures-core-${{ matrix.toolchain }}-attempt-${{ github.run_attempt }}
+          path: ${{ env.IREE_CI_FAILURE_ARTIFACT_DIR }}
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload public package
+        if: ${{ matrix.package }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hrx-public-windows-${{ matrix.toolchain }}-x86_64
+          path: |
+            build/windows/${{ matrix.toolchain }}/dist/hrx-public-windows-x86_64-*.zip
+            build/windows/${{ matrix.toolchain }}/dist/hrx-public-windows-x86_64-*.manifest.json
+            build/windows/${{ matrix.toolchain }}/dist/hrx-public-windows-x86_64-env.cmd
+            build/windows/${{ matrix.toolchain }}/dist/hrx-public-windows-x86_64-env.ps1
+          if-no-files-found: error
+
+      - name: Upload public dependency package
+        if: ${{ matrix.package }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hrx-public-deps-windows-${{ matrix.toolchain }}-x86_64
+          path: |
+            build/windows/${{ matrix.toolchain }}/dist/hrx-public-deps-windows-x86_64-*.zip
+            build/windows/${{ matrix.toolchain }}/dist/hrx-public-deps-windows-x86_64-*.manifest.json
+            build/windows/${{ matrix.toolchain }}/dist/hrx-public-deps-windows-x86_64-env.cmd
+            build/windows/${{ matrix.toolchain }}/dist/hrx-public-deps-windows-x86_64-env.ps1
+          if-no-files-found: error
+
+      - name: Upload test package
+        if: ${{ matrix.package }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hrx-tests-windows-${{ matrix.toolchain }}-x86_64
+          path: |
+            build/windows/${{ matrix.toolchain }}/dist/hrx-tests-windows-x86_64-*.zip
+            build/windows/${{ matrix.toolchain }}/dist/hrx-tests-windows-x86_64-*.manifest.json
+          if-no-files-found: error
+
+      - name: Upload ROCm build environment package
+        if: ${{ matrix.package }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hrx-rocm-buildenv-windows-${{ matrix.toolchain }}-x86_64
+          path: |
+            build/windows/${{ matrix.toolchain }}/dist/hrx-rocm-buildenv-windows-x86_64-*.zip
+            build/windows/${{ matrix.toolchain }}/dist/hrx-rocm-buildenv-windows-x86_64-*.manifest.json
+            build/windows/${{ matrix.toolchain }}/dist/hrx-rocm-buildenv-windows-x86_64-env.cmd
+            build/windows/${{ matrix.toolchain }}/dist/hrx-rocm-buildenv-windows-x86_64-env.ps1
+          if-no-files-found: error
+
+      - name: Upload failed test results
+        if: ${{ always() && (steps.core_tests.outcome == 'failure' || steps.relocated_tests.outcome == 'failure') }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ctest-results-core-windows-${{ matrix.toolchain }}-attempt-${{ github.run_attempt }}
+          path: build/windows/${{ matrix.toolchain }}/**/Testing/Temporary/
+          if-no-files-found: warn
+          retention-days: 7
+
+  bazel_linux:
+    name: Bazel / Linux x86-64 / Clang / Fastbuild
+    concurrency:
+      group: libhrx-bazel-linux-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
+      cancel-in-progress: true
+    runs-on: azure-linux-scale-rocm
+    timeout-minutes: 45
+    container:
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:702a5133851e6d1daf1207d2c9fbb01c2667914a5b6dc5a01faeb3ce66ea6421
+    env:
+      AR: ${{ github.workspace }}/build/libhrx-bazel/rocm-root/lib/llvm/bin/llvm-ar
+      CC: ${{ github.workspace }}/build/libhrx-bazel/rocm-root/lib/llvm/bin/clang
+      CXX: ${{ github.workspace }}/build/libhrx-bazel/rocm-root/lib/llvm/bin/clang++
+      HRX_ARTIFACT_SET: core
+      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/libhrx-bazel/downloads
+      HRX_OUTPUT_DIR: ${{ github.workspace }}/build/libhrx-bazel
+      HRX_PYTHON: ${{ github.workspace }}/build/libhrx-bazel/python/bin/python3
+      HRX_RELEASE_TYPE: nightly
+      HRX_ROCM_ROOT: ${{ github.workspace }}/build/libhrx-bazel/rocm-root
+      PIP_CACHE_DIR: ${{ github.workspace }}/build/libhrx-bazel/caches/pip
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Adjust git config
+        run: git config --global --add safe.directory "$PWD"
+
+      - name: Fetch ROCm toolchain
+        run: bash .github/scripts/fetch_rocm_toolchain.sh
+
+      - name: Install developer tools
+        run: |
+          python3 --version
+          python3 dev.py bazel setup --venv
+          echo "$PWD/.venv/bin" >> "${GITHUB_PATH}"
+
+      - name: Check tool versions
+        run: |
+          bazel --version
+          bash .github/scripts/check_host_toolchain.sh --expect-rocm
+          bash .github/scripts/check_rocm_device_toolchain.sh
+          test -d "${HRX_ROCM_ROOT}/include"
+
+      - name: Configure LibHRX Bazel
+        run: |
+          python3 dev.py bazel configure \
+            -DIREE_HAL_DRIVER_AMDGPU=ON \
+            -DAMDF_BUILD=OFF \
+            -DIREE_ROCM_PATH="${HRX_ROCM_ROOT}" \
+            -DIREE_ROCM_DEPENDENCY_MODE=package
+
+      - name: Build and test LibHRX host coverage
+        run: >-
+          python3 dev.py bazel test
+          --test_tag_filters=-runtime-resource=amd-gpu
+          --keep_going //libhrx/...

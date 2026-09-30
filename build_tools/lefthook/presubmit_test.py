@@ -1599,7 +1599,7 @@ class PresubmitTest(unittest.TestCase):
                 [],
             ),
             (
-                [".github/workflows/ci_core_windows.yml"],
+                [".github/workflows/ci_libhrx.yml"],
                 [presubmit.DEVTOOLS_PRESUBMIT_TEST_TARGET],
             ),
             (
