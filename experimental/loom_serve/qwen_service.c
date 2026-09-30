@@ -10,6 +10,9 @@
 #include <string.h>
 
 #include "experimental/loom_serve/qwen_chat.h"
+#include "experimental/loom_serve/qwen_schedule.h"
+#include "iree/base/threading/mutex.h"
+#include "iree/base/threading/thread.h"
 #include "loom/util/json.h"
 
 typedef enum qwen_request_phase_e {
@@ -61,10 +64,62 @@ typedef struct qwen_session_t {
     iree_time_t start_time;
     // First selected token time, including a possible immediate EOS.
     iree_time_t first_token_time;
-    // Cumulative model counters at admission after any reset.
-    loom_serve_qwen_metrics_t initial_metrics;
+    // Completed epochs that consumed prompt input for this request.
+    uint64_t prefill_steps;
+    // Completed epochs that consumed a pending generated token.
+    uint64_t decode_steps;
   } request;
 } qwen_session_t;
+
+typedef struct qwen_heartbeat_snapshot_t {
+  // Current application activity; literals outlive the reporting thread.
+  const char* phase;
+  // Start of the current activity, including a possibly unfinished GPU wait.
+  iree_time_t phase_start;
+  // Most recent completed epoch, or service startup before any model work.
+  iree_time_t last_completion;
+  // Requests currently holding retained rows.
+  iree_host_size_t active_rows;
+  // Active requests still consuming prompt input.
+  iree_host_size_t prefill_rows;
+  // Active requests generating output.
+  iree_host_size_t decode_rows;
+  // Rows paused because their peer has not returned output credit.
+  iree_host_size_t backpressured_rows;
+  // Issued epoch identity; a failed epoch never increments completed_epochs.
+  uint64_t issued_epochs;
+  // Fully completed model epochs.
+  uint64_t completed_epochs;
+  // Total target weight traversals, including each isolated control span.
+  uint64_t traversals;
+  // Prompt tokens consumed by completed epochs.
+  uint64_t prefill_tokens;
+  // Pending generated tokens consumed by completed epochs.
+  uint64_t decode_tokens;
+  // Selected output tokens published to response processing, including EOS.
+  uint64_t output_tokens;
+  // Sum of completed model epoch wall times, excluding host text processing.
+  iree_duration_t model_duration;
+  // Span count of the most recently issued epoch.
+  iree_host_size_t epoch_spans;
+  // Useful input count of the most recently issued epoch.
+  iree_host_size_t epoch_tokens;
+} qwen_heartbeat_snapshot_t;
+
+typedef struct qwen_heartbeat_t {
+  // Protects only the copied snapshot and shutdown flag, never model work.
+  iree_slim_mutex_t mutex;
+  // Wakes the reporter immediately on shutdown.
+  iree_notification_t notification;
+  // Owned observer, joined before the service relinquishes its stack storage.
+  iree_thread_t* thread;
+  // Immutable reporting period in nanoseconds.
+  iree_duration_t interval;
+  // Shutdown request protected by mutex.
+  bool stopping;
+  // Application-owned counters copied under mutex before reporting.
+  qwen_heartbeat_snapshot_t snapshot;
+} qwen_heartbeat_t;
 
 typedef struct qwen_service_t {
   // Allocator for the service's host-only storage.
@@ -81,6 +136,16 @@ typedef struct qwen_service_t {
   iree_host_size_t context_capacity;
   // Output bound when the client omits one.
   iree_host_size_t default_max_tokens;
+  // Same ready partition can execute packed or through isolated controls.
+  loom_serve_qwen_schedule_mode_t schedule_mode;
+  // Prepared token shape used by the live packing policy.
+  iree_host_size_t token_capacity;
+  // Maximum distinct rows in one prepared epoch.
+  iree_host_size_t span_capacity;
+  // Rotating admission priority, independent of row or request identity.
+  iree_host_size_t cursor;
+  // Independent periodic reporting of copied service state.
+  qwen_heartbeat_t heartbeat;
   // Monotonic request identity, independent of TCP connection identity.
   uint64_t next_serial;
   // Shared cold input rendering scratch, never borrowed by device work.
@@ -92,6 +157,80 @@ typedef struct qwen_service_t {
   // Fixed retained rows sharing one model, command set and execution timeline.
   qwen_session_t sessions[8];
 } qwen_service_t;
+
+static int qwen_heartbeat_main(void* argument) {
+  qwen_heartbeat_t* heartbeat = argument;
+  iree_time_t previous_time = iree_time_now();
+  uint64_t previous_prefill = 0;
+  uint64_t previous_output = 0;
+  for (;;) {
+    const iree_wait_token_t token =
+        iree_notification_prepare_wait(&heartbeat->notification);
+    iree_slim_mutex_lock(&heartbeat->mutex);
+    const bool stopping = heartbeat->stopping;
+    const qwen_heartbeat_snapshot_t state = heartbeat->snapshot;
+    iree_slim_mutex_unlock(&heartbeat->mutex);
+    const iree_time_t now = iree_time_now();
+    const double seconds = (now - previous_time) / 1e9;
+    fprintf(
+        stderr,
+        "{\"event\":\"heartbeat\",\"phase\":\"%s\",\"phase_ms\":%.3f,"
+        "\"since_completion_ms\":%.3f,\"active_rows\":%zu,"
+        "\"prefill_rows\":%zu,\"decode_rows\":%zu,"
+        "\"backpressured_rows\":%zu,\"issued_epochs\":%" PRIu64
+        ",\"completed_epochs\":%" PRIu64 ",\"traversals\":%" PRIu64
+        ",\"prefill_tokens\":%" PRIu64 ",\"decode_tokens\":%" PRIu64
+        ",\"output_tokens_including_eos\":%" PRIu64
+        ",\"model_ms\":%.3f,\"epoch_spans\":%zu,\"epoch_tokens\":%zu,"
+        "\"interval_prefill_tokens_per_second\":%.3f,"
+        "\"interval_output_tokens_per_second\":%.3f}\n",
+        state.phase, (now - state.phase_start) / 1e6,
+        (now - state.last_completion) / 1e6, state.active_rows,
+        state.prefill_rows, state.decode_rows, state.backpressured_rows,
+        state.issued_epochs, state.completed_epochs, state.traversals,
+        state.prefill_tokens, state.decode_tokens, state.output_tokens,
+        state.model_duration / 1e6, state.epoch_spans, state.epoch_tokens,
+        seconds > 0 ? (state.prefill_tokens - previous_prefill) / seconds : 0,
+        seconds > 0 ? (state.output_tokens - previous_output) / seconds : 0);
+    previous_time = now;
+    previous_prefill = state.prefill_tokens;
+    previous_output = state.output_tokens;
+    if (stopping) {
+      iree_notification_cancel_wait(&heartbeat->notification);
+      break;
+    }
+    iree_notification_commit_wait(&heartbeat->notification, token,
+                                  IREE_DURATION_ZERO,
+                                  now + heartbeat->interval);
+  }
+  return 0;
+}
+
+static void qwen_observe(qwen_service_t* service, const char* phase) {
+  iree_host_size_t active = 0, prefill = 0, decode = 0, backpressured = 0;
+  for (iree_host_size_t i = 0; i < service->row_count; ++i) {
+    const qwen_session_t* session = &service->sessions[i];
+    if (session->request.connection) {
+      ++active;
+      prefill += session->request.phase == QWEN_REQUEST_PREFILL;
+      decode += session->request.phase == QWEN_REQUEST_DECODE;
+      backpressured +=
+          iree_string_builder_size(&session->packet) &&
+          !loom_serve_http_connection_can_send(session->request.connection);
+    }
+  }
+  iree_slim_mutex_lock(&service->heartbeat.mutex);
+  qwen_heartbeat_snapshot_t* state = &service->heartbeat.snapshot;
+  if (strcmp(state->phase, phase)) {
+    state->phase = phase;
+    state->phase_start = iree_time_now();
+  }
+  state->active_rows = active;
+  state->prefill_rows = prefill;
+  state->decode_rows = decode;
+  state->backpressured_rows = backpressured;
+  iree_slim_mutex_unlock(&service->heartbeat.mutex);
+}
 
 static void qwen_diagnose(const char* operation, iree_status_t status) {
   fprintf(stderr, "%s: ", operation);
@@ -178,9 +317,6 @@ static void qwen_request_cancel(qwen_session_t* session) {
 }
 
 static void qwen_request_finish(qwen_session_t* session) {
-  const loom_serve_qwen_metrics_t metrics =
-      loom_serve_qwen_row_metrics(session->row);
-  const loom_serve_qwen_metrics_t initial = session->request.initial_metrics;
   fprintf(
       stderr,
       "{\"event\":\"complete\",\"request\":%" PRIu64
@@ -190,16 +326,13 @@ static void qwen_request_finish(qwen_session_t* session) {
       "\"output_tokens_including_eos\":%zu,\"position\":%zu,\"prefill_steps\":"
       "%" PRIu64
       ","
-      "\"prefill_ms\":%.3f,\"decode_steps\":%" PRIu64
-      ",\"decode_ms\":%.3f,"
+      "\"decode_steps\":%" PRIu64
+      ","
       "\"model_ttft_ms\":%.3f,\"request_ms\":%.3f}\n",
       session->serial, session->name, session->request.finish_reason,
       session->request.retained_count, session->request.input_count,
       session->request.output_count, loom_serve_qwen_row_position(session->row),
-      metrics.prefill_steps - initial.prefill_steps,
-      (metrics.prefill_duration - initial.prefill_duration) / 1e6,
-      metrics.decode_steps - initial.decode_steps,
-      (metrics.decode_duration - initial.decode_duration) / 1e6,
+      session->request.prefill_steps, session->request.decode_steps,
       (session->request.first_token_time - session->request.start_time) / 1e6,
       (iree_time_now() - session->request.start_time) / 1e6);
   loom_serve_http_connection_finish(session->request.connection);
@@ -379,7 +512,6 @@ static iree_status_t qwen_admit(qwen_service_t* service,
   if (!retained_count) {
     status = loom_serve_qwen_row_reset(session->row);
   }
-  session->request.initial_metrics = loom_serve_qwen_row_metrics(session->row);
   if (iree_status_is_ok(status)) {
     status = iree_tokenizer_decode_state_initialize(
         loom_serve_qwen_model_tokenizer(service->model),
@@ -554,50 +686,156 @@ static iree_status_t qwen_selected_token(qwen_service_t* service,
   return status;
 }
 
-static iree_status_t qwen_advance(qwen_service_t* service,
-                                  qwen_session_t* session, bool* out_progress) {
+// Output credit and cancellation are settled before a row enters an epoch.
+// The carrier owns a copied send and the row owns one staging packet. An empty
+// staging packet is output credit even while the preceding send is in flight;
+// waiting for that send would split an otherwise ready cohort. A full staging
+// packet behind a busy carrier pauses only that row.
+static void qwen_prepare_ready(qwen_session_t* session, bool* out_progress,
+                               iree_host_size_t* out_ready_count) {
+  *out_ready_count = 0;
   if (!session->request.connection) {
-    return iree_ok_status();
+    return;
   }
   if (loom_serve_http_connection_failed(session->request.connection)) {
     qwen_request_cancel(session);
     *out_progress = true;
-    return iree_ok_status();
+    return;
   }
-  if (!loom_serve_http_connection_can_send(session->request.connection)) {
-    return iree_ok_status();
-  }
-  *out_progress = true;
   if (iree_string_builder_size(&session->packet)) {
+    if (!loom_serve_http_connection_can_send(session->request.connection)) {
+      return;
+    }
+    *out_progress = true;
     iree_status_t status = loom_serve_http_connection_send(
         session->request.connection,
         iree_string_builder_view(&session->packet));
     if (!iree_status_is_ok(status)) {
       qwen_diagnose("Chat stream peer failed", status);
       qwen_request_cancel(session);
-      return iree_ok_status();
+      return;
     }
     iree_string_builder_reset(&session->packet);
     if (session->request.phase == QWEN_REQUEST_FINISHING) {
       qwen_request_finish(session);
+      return;
     }
-    return iree_ok_status();
   }
-  if (session->request.phase == QWEN_REQUEST_PREFILL) {
-    const iree_host_size_t count =
-        iree_min(service->chunk_size,
-                 session->request.input_count - session->request.input_offset);
-    IREE_RETURN_IF_ERROR(loom_serve_qwen_row_prefill(
-        session->row, count, session->tokens + session->request.input_offset));
-    session->request.input_offset += count;
-    if (session->request.input_offset != session->request.input_count) {
-      return iree_ok_status();
-    }
-    session->request.phase = QWEN_REQUEST_DECODE;
+  *out_ready_count =
+      session->request.phase == QWEN_REQUEST_PREFILL
+          ? session->request.input_count - session->request.input_offset
+          : 1;
+}
+
+static iree_status_t qwen_execute_epoch(
+    qwen_service_t* service, iree_host_size_t count,
+    const loom_serve_qwen_scheduled_span_t* scheduled) {
+  loom_serve_qwen_span_t spans[8];
+  int32_t decode_tokens[8];
+  iree_host_size_t prefill_count = 0, decode_count = 0, output_count = 0;
+  iree_string_builder_reset(&service->scratch);
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(&service->scratch, "["));
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    const iree_host_size_t row = scheduled[i].row_index;
+    qwen_session_t* session = &service->sessions[row];
+    const bool prefill = session->request.phase == QWEN_REQUEST_PREFILL;
+    const bool select = !prefill || scheduled[i].token_count ==
+                                        session->request.input_count -
+                                            session->request.input_offset;
+    decode_tokens[i] = prefill ? 0 : loom_serve_qwen_row_token(session->row);
+    spans[i] = (loom_serve_qwen_span_t){
+        .row_index = row,
+        .token_count = scheduled[i].token_count,
+        .token_ids = prefill ? session->tokens + session->request.input_offset
+                             : &decode_tokens[i],
+        .flags = select ? LOOM_SERVE_QWEN_SPAN_FLAG_SELECT : 0,
+    };
+    prefill_count += prefill ? spans[i].token_count : 0;
+    decode_count += prefill ? 0 : spans[i].token_count;
+    output_count += select;
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        &service->scratch,
+        "%s{\"row\":%zu,\"request\":%" PRIu64
+        ",\"kind\":\"%s\",\"position\":%zu,\"tokens\":%zu,\"select\":%s}",
+        i ? "," : "", row, session->serial, prefill ? "prefill" : "decode",
+        loom_serve_qwen_row_position(session->row), spans[i].token_count,
+        select ? "true" : "false"));
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(&service->scratch, "]"));
+  const bool packed = service->schedule_mode == LOOM_SERVE_QWEN_SCHEDULE_PACKED;
+  const char* mode =
+      packed                                                       ? "packed"
+      : service->schedule_mode == LOOM_SERVE_QWEN_SCHEDULE_MATCHED ? "matched"
+                                                                   : "isolated";
+  qwen_observe(service, "execute");
+  const iree_time_t start = iree_time_now();
+  iree_slim_mutex_lock(&service->heartbeat.mutex);
+  qwen_heartbeat_snapshot_t* state = &service->heartbeat.snapshot;
+  const uint64_t epoch = ++state->issued_epochs;
+  state->phase_start = start;
+  state->epoch_spans = count;
+  state->epoch_tokens = prefill_count + decode_count;
+  iree_slim_mutex_unlock(&service->heartbeat.mutex);
+  iree_status_t status = iree_ok_status();
+  if (packed) {
+    status = loom_serve_qwen_model_epoch(service->model, count, spans);
   } else {
-    IREE_RETURN_IF_ERROR(loom_serve_qwen_row_decode(session->row));
+    for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+      qwen_session_t* session = &service->sessions[spans[i].row_index];
+      if (session->request.phase == QWEN_REQUEST_PREFILL ||
+          service->schedule_mode == LOOM_SERVE_QWEN_SCHEDULE_MATCHED) {
+        status = loom_serve_qwen_row_prefill(session->row, spans[i].token_count,
+                                             spans[i].token_ids);
+      } else {
+        status = loom_serve_qwen_row_decode(session->row);
+      }
+    }
   }
-  return qwen_selected_token(service, session);
+  IREE_RETURN_IF_ERROR(status);
+  const iree_time_t completed = iree_time_now();
+  iree_slim_mutex_lock(&service->heartbeat.mutex);
+  ++state->completed_epochs;
+  state->traversals += packed ? 1 : count;
+  state->prefill_tokens += prefill_count;
+  state->decode_tokens += decode_count;
+  state->model_duration += completed - start;
+  state->last_completion = completed;
+  iree_slim_mutex_unlock(&service->heartbeat.mutex);
+  fprintf(stderr,
+          "{\"event\":\"epoch\",\"epoch\":%" PRIu64
+          ",\"scheduler\":\"%s\",\"spans\":%zu,\"token_capacity\":%zu,"
+          "\"prefill_tokens\":%zu,\"decode_tokens\":%zu,"
+          "\"selected_tokens_including_eos\":%zu,\"traversals\":%zu,"
+          "\"model_ms\":%.3f,\"rows\":%.*s}\n",
+          epoch, mode, count, service->token_capacity, prefill_count,
+          decode_count, output_count, packed ? (iree_host_size_t)1 : count,
+          (completed - start) / 1e6,
+          (int)iree_string_builder_size(&service->scratch),
+          iree_string_builder_buffer(&service->scratch));
+  qwen_observe(service, "output");
+  iree_host_size_t published_count = 0;
+  for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+    qwen_session_t* session = &service->sessions[spans[i].row_index];
+    if (session->request.phase == QWEN_REQUEST_PREFILL) {
+      ++session->request.prefill_steps;
+      session->request.input_offset += spans[i].token_count;
+      if (session->request.input_offset == session->request.input_count) {
+        session->request.phase = QWEN_REQUEST_DECODE;
+      }
+    } else {
+      ++session->request.decode_steps;
+    }
+    if (iree_any_bit_set(spans[i].flags, LOOM_SERVE_QWEN_SPAN_FLAG_SELECT)) {
+      status = qwen_selected_token(service, session);
+      ++published_count;
+    }
+  }
+  iree_slim_mutex_lock(&service->heartbeat.mutex);
+  state->output_tokens += published_count;
+  iree_slim_mutex_unlock(&service->heartbeat.mutex);
+  return status;
 }
 
 static iree_status_t qwen_service_initialize(qwen_service_t* service) {
@@ -627,24 +865,36 @@ static iree_status_t qwen_service_initialize(qwen_service_t* service) {
   return status;
 }
 
-iree_status_t loom_serve_qwen_service_run(loom_serve_qwen_model_t* model,
-                                          loom_serve_http_server_t* server,
-                                          iree_host_size_t row_count,
-                                          iree_host_size_t chunk_size,
-                                          iree_host_size_t default_max_tokens,
-                                          iree_allocator_t host_allocator) {
+iree_status_t loom_serve_qwen_service_run(
+    loom_serve_qwen_model_t* model, loom_serve_http_server_t* server,
+    const loom_serve_qwen_service_options_t* options,
+    iree_allocator_t host_allocator) {
   qwen_service_t service = {
       .allocator = host_allocator,
       .model = model,
       .server = server,
-      .row_count = row_count,
-      .chunk_size = chunk_size,
+      .row_count = options->row_count,
+      .chunk_size = options->chunk_size,
       .context_capacity = loom_serve_qwen_model_context_capacity(model),
-      .default_max_tokens = default_max_tokens};
+      .default_max_tokens = options->default_max_tokens,
+      .schedule_mode = options->schedule_mode,
+      .token_capacity = loom_serve_qwen_model_epoch_capacity(model),
+      .span_capacity = loom_serve_qwen_model_span_capacity(model),
+      .heartbeat = {.interval = options->heartbeat_interval}};
+  if (!service.token_capacity) {
+    service.token_capacity = loom_serve_qwen_model_prefill_capacity(model);
+    service.span_capacity = service.row_count;
+  }
+  iree_slim_mutex_initialize(&service.heartbeat.mutex);
+  iree_notification_initialize(&service.heartbeat.notification);
+  service.heartbeat.snapshot.phase = "starting";
+  service.heartbeat.snapshot.phase_start = iree_time_now();
+  service.heartbeat.snapshot.last_completion =
+      service.heartbeat.snapshot.phase_start;
   iree_string_builder_initialize(host_allocator, &service.input_text);
   iree_string_builder_initialize(host_allocator, &service.scratch);
   iree_string_builder_initialize(host_allocator, &service.tool_calls);
-  for (iree_host_size_t i = 0; i < row_count; ++i) {
+  for (iree_host_size_t i = 0; i < service.row_count; ++i) {
     iree_string_builder_initialize(host_allocator,
                                    &service.sessions[i].checkpoint);
     iree_string_builder_initialize(host_allocator,
@@ -652,6 +902,14 @@ iree_status_t loom_serve_qwen_service_run(loom_serve_qwen_model_t* model,
     iree_string_builder_initialize(host_allocator, &service.sessions[i].packet);
   }
   iree_status_t status = qwen_service_initialize(&service);
+  if (iree_status_is_ok(status) && service.heartbeat.interval) {
+    const iree_thread_create_params_t parameters = {
+        .name = IREE_SV("qwen-heartbeat"),
+    };
+    status =
+        iree_thread_create(qwen_heartbeat_main, &service.heartbeat, parameters,
+                           host_allocator, &service.heartbeat.thread);
+  }
   iree_notification_t* notification =
       loom_serve_http_server_notification(server);
   while (iree_status_is_ok(status) &&
@@ -659,19 +917,37 @@ iree_status_t loom_serve_qwen_service_run(loom_serve_qwen_model_t* model,
     const iree_wait_token_t token =
         iree_notification_prepare_wait(notification);
     bool progress = false;
-    // Admit at most one request per cycle so new arrivals cannot starve rows.
-    const loom_serve_http_request_t* request = NULL;
-    loom_serve_http_connection_t* connection =
-        loom_serve_http_server_take_request(server, &request);
-    if (connection) {
+    // Drain a bounded cohort before selecting work, without allowing a stream
+    // of new requests or health probes to starve active rows.
+    qwen_observe(&service, "admit");
+    for (iree_host_size_t i = 0;
+         i < service.row_count && iree_status_is_ok(status); ++i) {
+      const loom_serve_http_request_t* request = NULL;
+      loom_serve_http_connection_t* connection =
+          loom_serve_http_server_take_request(server, &request);
+      if (!connection) {
+        break;
+      }
       status = qwen_admit(&service, connection, request);
       progress = true;
     }
-    for (iree_host_size_t i = 0; i < row_count && iree_status_is_ok(status) &&
-                                 !loom_serve_http_server_is_stopping(server);
-         ++i) {
-      status = qwen_advance(&service, &service.sessions[i], &progress);
+    iree_host_size_t ready_counts[8] = {0};
+    for (iree_host_size_t i = 0;
+         i < service.row_count && iree_status_is_ok(status); ++i) {
+      qwen_prepare_ready(&service.sessions[i], &progress, &ready_counts[i]);
     }
+    if (iree_status_is_ok(status) &&
+        !loom_serve_http_server_is_stopping(server)) {
+      loom_serve_qwen_scheduled_span_t spans[8];
+      const iree_host_size_t count = loom_serve_qwen_schedule(
+          service.row_count, ready_counts, service.token_capacity,
+          service.span_capacity, service.chunk_size, &service.cursor, spans);
+      if (count) {
+        progress = true;
+        status = qwen_execute_epoch(&service, count, spans);
+      }
+    }
+    qwen_observe(&service, iree_status_is_ok(status) ? "idle" : "failed");
     if (progress || !iree_status_is_ok(status) ||
         loom_serve_http_server_is_stopping(server)) {
       iree_notification_cancel_wait(notification);
@@ -680,7 +956,7 @@ iree_status_t loom_serve_qwen_service_run(loom_serve_qwen_model_t* model,
                                     IREE_TIME_INFINITE_FUTURE);
     }
   }
-  for (iree_host_size_t i = 0; i < row_count; ++i) {
+  for (iree_host_size_t i = 0; i < service.row_count; ++i) {
     qwen_session_t* session = &service.sessions[i];
     if (session->request.connection) {
       qwen_request_cancel(session);
@@ -691,6 +967,17 @@ iree_status_t loom_serve_qwen_service_run(loom_serve_qwen_model_t* model,
     iree_string_builder_deinitialize(&session->response);
     iree_string_builder_deinitialize(&session->checkpoint);
   }
+  qwen_observe(&service, iree_status_is_ok(status) ? "stopped" : "failed");
+  iree_slim_mutex_lock(&service.heartbeat.mutex);
+  service.heartbeat.stopping = true;
+  iree_slim_mutex_unlock(&service.heartbeat.mutex);
+  iree_notification_post(&service.heartbeat.notification, IREE_ALL_WAITERS);
+  if (service.heartbeat.thread) {
+    // Releasing the sole thread reference joins it before reclaiming storage.
+    iree_thread_release(service.heartbeat.thread);
+  }
+  iree_notification_deinitialize(&service.heartbeat.notification);
+  iree_slim_mutex_deinitialize(&service.heartbeat.mutex);
   iree_string_builder_deinitialize(&service.tool_calls);
   iree_string_builder_deinitialize(&service.scratch);
   iree_string_builder_deinitialize(&service.input_text);
