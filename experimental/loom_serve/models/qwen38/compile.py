@@ -90,6 +90,8 @@ def compile_stage(arguments, stage):
                 str(output / "requests" / request),
                 f"--target={arguments.target}",
                 "--format=amdgpu-hsaco",
+                f"--sanitizer={arguments.sanitizer}",
+                f"--sanitizer-reporting={arguments.sanitizer_reporting}",
                 f"--config-file={configuration}",
                 f"--output={output / 'kernels' / (Path(request).stem + '.hsaco')}",
             ],
@@ -105,6 +107,14 @@ def main():
     parser.add_argument("--span-capacity", type=int, default=4)
     parser.add_argument("--decode-splits", type=int, default=10)
     parser.add_argument("--target", default="amdgpu:gfx1151")
+    parser.add_argument(
+        "--sanitizer", default="none", help="Device checks passed to loom-compile."
+    )
+    parser.add_argument(
+        "--sanitizer-reporting",
+        choices=("default", "trap", "report-only"),
+        default="default",
+    )
     parser.add_argument(
         "--stage", choices=("prefill", "decode", "epoch", "both", "all"), default="both"
     )
