@@ -34,6 +34,7 @@
 #include "loom/transforms/vector/packet_legalization.h"
 #include "loom/transforms/vector/shape_legalization.h"
 #include "loom/transforms/vector/table_legalization.h"
+#include "loom/transforms/vector/to_scalar.h"
 #include "loom/transforms/view/atomic.h"
 
 static bool loom_amdgpu_legalizer_descriptor_set_is_amdgpu(

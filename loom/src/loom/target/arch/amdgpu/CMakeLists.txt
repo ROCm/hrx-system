@@ -391,6 +391,7 @@ loom_cc_library(
     loom::transforms::vector::packet_legalization
     loom::transforms::vector::shape_legalization
     loom::transforms::vector::table_legalization
+    loom::transforms::vector::to_scalar
     loom::transforms::view::atomic
   PUBLIC
 )
