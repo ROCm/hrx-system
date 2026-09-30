@@ -68,6 +68,53 @@ def session_entries():
     ]
 
 
+def call_entries(context_window=8192):
+    entries = [
+        {
+            "format": agent_trace.CALL_FORMAT,
+            "provider": "loom",
+            "model": "qwen3.8-27b",
+            "configuration": {
+                "pi_version": "0.82.1",
+                "context_window_tokens": context_window,
+                "max_output_tokens": 1024,
+                "thinking_level": "off",
+                "compaction_enabled": True,
+                "reserve_tokens": 2048,
+                "keep_recent_tokens": 2048,
+            },
+        }
+    ]
+    for index, purpose in enumerate(("agent", "compaction", "compaction", "agent")):
+        retained = 100 if index == 0 else 0
+        entries.extend(
+            [
+                {
+                    "type": "request_start",
+                    "index": index,
+                    "start_us": 1000 + index * 1000,
+                    "purpose": purpose,
+                    "api": "openai-completions",
+                },
+                {
+                    "type": "request_end",
+                    "index": index,
+                    "end_us": 1500 + index * 1000,
+                    "stop_reason": "stop",
+                    "usage": {
+                        "input": 10,
+                        "output": 3,
+                        "cacheRead": retained,
+                        "cacheWrite": 0,
+                        "totalTokens": 13 + retained,
+                    },
+                },
+            ]
+        )
+    entries.append({"type": "recording_end", "requests": 4})
+    return entries
+
+
 class AgentTraceTest(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -158,6 +205,81 @@ class AgentTraceTest(unittest.TestCase):
         self.write_session(session_entries())
         with self.assertRaisesRegex(ValueError, "duplicate"):
             agent_trace.export_sessions([self.path, self.path])
+
+    def test_calls_preserve_split_compaction_and_cache_reset(self):
+        self.write_session(call_entries())
+        trace = agent_trace.export_sessions([self.path])
+        session = trace.sessions[0]
+        self.assertEqual(session.configuration.context_window_tokens, 8192)
+        self.assertEqual(
+            [request.purpose for request in session.requests],
+            ["agent", "compaction", "compaction", "agent"],
+        )
+        self.assertEqual(
+            [request.delay_us for request in session.requests], [0, 500, 500, 500]
+        )
+        self.assertEqual(
+            [request.retained_tokens for request in session.requests], [100, 0, 0, 0]
+        )
+        output = Path(self.directory.name) / "trace.json"
+        output.write_text(json.dumps(trace.to_dict()))
+        self.assertEqual(agent_trace.load_trace(output), trace)
+
+    def test_clients_can_share_weights_without_sharing_context_budgets(self):
+        self.write_session(call_entries(8192))
+        other = Path(self.directory.name) / "other.jsonl"
+        other.write_text(
+            "".join(json.dumps(entry) + "\n" for entry in call_entries(16384))
+        )
+        trace = agent_trace.export_sessions([self.path, other])
+        self.assertEqual(
+            [session.configuration.context_window_tokens for session in trace.sessions],
+            [8192, 16384],
+        )
+
+    def test_rejects_broken_call_lifecycles(self):
+        changes = [
+            (1, "index", 1),
+            (2, "index", 1),
+            (1, "purpose", "other"),
+            (1, "api", "other"),
+            (2, "end_us", 999),
+            (3, "start_us", 1499),
+            (2, "type", "request_start"),
+            (2, "type", "request_error"),
+            (2, "stop_reason", "error"),
+            (2, "stop_reason", "aborted"),
+            (9, "requests", 3),
+        ]
+        for index, key, value in changes:
+            with self.subTest(key=key, value=value):
+                entries = call_entries()
+                entries[index][key] = value
+                self.write_session(entries)
+                with self.assertRaises(ValueError):
+                    agent_trace.export_sessions([self.path])
+        for length in (1, 2, 3, 9):
+            with self.subTest(length=length):
+                self.write_session(call_entries()[:length])
+                with self.assertRaisesRegex(ValueError, "incomplete"):
+                    agent_trace.export_sessions([self.path])
+        self.write_session(call_entries() + [{"type": "recording_end", "requests": 4}])
+        with self.assertRaisesRegex(ValueError, "follows"):
+            agent_trace.export_sessions([self.path])
+
+    def test_rejects_invalid_client_configuration(self):
+        for key, value in (
+            ("context_window_tokens", True),
+            ("max_output_tokens", -1),
+            ("compaction_enabled", 1),
+            ("pi_version", ""),
+        ):
+            with self.subTest(key=key):
+                entries = call_entries()
+                entries[0]["configuration"][key] = value
+                self.write_session(entries)
+                with self.assertRaises(ValueError):
+                    agent_trace.export_sessions([self.path])
 
 
 if __name__ == "__main__":

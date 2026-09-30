@@ -310,9 +310,12 @@ It strips message content, tools, paths, and working directories. The result
 retains source hashes, model identity, common clock origin, first-arrival
 offsets, uncached input counts (including cache writes), retained prefix counts,
 selected output counts, observed response durations, and client delays between
-requests. It rejects branches, compaction, failed/incomplete turns, duplicate
-recordings, and overlapping/backwards request clocks instead of approximating
-them. Output files are created exclusively to protect earlier evidence.
+requests. Native session files alone cannot account for compaction's individual
+model calls; those require the call recorder below. The exporter rejects
+branches, uninstrumented compaction, failed/incomplete turns, duplicate
+recordings, and overlapping/backwards request clocks. Output files are created
+exclusively to protect earlier evidence. The count format is
+`loom-agent-trace-v2`; regenerate older exports from their original recordings.
 
 The inner assistant timestamp is client invocation start; the outer session
 entry timestamp is completed-message persistence. Their difference includes
@@ -321,6 +324,56 @@ on the preceding completion plus its recorded client delay. This dependency is
 what a closed-loop scheduler replay must preserve when changing model speed.
 Token lengths and recorded cache outcomes are fixed evidence; these files do
 not expose server backpressure, cancellation timing, or cache-eviction policy.
+
+For full lifecycles, `pi_record.mjs` wraps the real pi SDK session's provider
+stream function. It observes both normal agent calls and summarization calls
+without replacing pi's compactor or consuming its event stream. A split-turn
+compaction can make two sequential model calls; each retains its own input,
+output, cache counts and timing. The saved native compaction entry aggregates
+usage and cannot recover those boundaries on its own.
+
+```js
+import { VERSION } from "@earendil-works/pi-coding-agent";
+import { recordPiSession } from "./experimental/loom_serve/pi_record.mjs";
+
+// session is a configured, idle SDK AgentSession with both retry layers off.
+const recorder = recordPiSession(session, "/private/agent.calls.jsonl", VERSION);
+await session.prompt(task);
+await session.waitForIdle(); // Includes automatic compaction after agent_end.
+// Additional user turns use this same session and recorder.
+recorder.finish();
+```
+
+On failure, abort/wait for the session and call `recorder.close()`; an unfinished
+log remains explicit evidence and cannot be exported as a successful lifecycle.
+Keep the native pi session file too: the call log deliberately contains no
+prompts, tool arguments/results or summaries. Export call logs with the same
+`agent_trace` command, without also importing their native sessions (which would
+double-count the workload). Call timestamps use a monotonic process clock
+anchored to Unix time; completion is provider result availability, not GPU time.
+
+Client settings are per-session metadata, not part of shared model identity.
+For example, eight clients can advertise 8192 tokens and eight 16384 while using
+the same provider/model. Configure each pi session's model and compaction
+settings independently: pi's default reserve of 16384 and kept-history budget
+of 20000 are unsuitable for these small windows. A starting experiment can use
+2048 reserve tokens, 2048 kept tokens and a 1024-token output ceiling. These
+settings need real task-quality validation. Large incoming tool results can
+still overflow a window; pi's threshold is not an exact input-admission cap.
+The service's compiled context capacity must cover the largest window. Smaller
+client budgets do not reduce its current uniform physical row reservations.
+
+The recorder has a CPU integration check using real pi 0.82.1 and a scripted
+provider (no network or device). It exercises automatic/manual split-turn
+compaction, resumed context, mixed windows and failures:
+
+```sh
+node experimental/loom_serve/pi_record_test.mjs \
+  /absolute/path/to/node_modules/@earendil-works/pi-coding-agent \
+  /private/recordings/new-cpu-witness
+```
+
+That check is protocol/lifecycle evidence, not model quality or performance.
 
 ### CPU packing replay
 

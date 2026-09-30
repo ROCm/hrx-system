@@ -14,7 +14,26 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-FORMAT = "loom-agent-trace-v1"
+FORMAT = "loom-agent-trace-v2"
+CALL_FORMAT = "loom-pi-calls-v1"
+
+
+@dataclass(frozen=True)
+class ClientConfiguration:
+    # pi SDK version used by the call recorder.
+    pi_version: str
+    # This client's advertised window, not its physical KV allocation.
+    context_window_tokens: int
+    # Configured model output ceiling; individual calls may request less.
+    max_output_tokens: int
+    # Client reasoning setting, independent of the shared model identity.
+    thinking_level: str
+    # Whether pi may compact automatically between turns.
+    compaction_enabled: bool
+    # Headroom used by pi's automatic compaction threshold.
+    reserve_tokens: int
+    # Approximate recent history retained alongside the generated summary.
+    keep_recent_tokens: int
 
 
 @dataclass(frozen=True)
@@ -31,6 +50,8 @@ class Request:
     output_tokens: int
     # Successful pi termination kind: stop, length, or toolUse.
     stop_reason: str
+    # Ordinary agent generation or a separately recorded summarization call.
+    purpose: str = "agent"
 
 
 @dataclass(frozen=True)
@@ -41,6 +62,8 @@ class Session:
     arrival_us: int
     # Sequential requests with completion-relative client delays.
     requests: tuple[Request, ...]
+    # None when the native session file did not record the client's settings.
+    configuration: ClientConfiguration | None = None
 
 
 @dataclass(frozen=True)
@@ -92,6 +115,51 @@ def _stop_reason(value):
     return value
 
 
+def _purpose(value):
+    if value not in ("agent", "compaction"):
+        raise ValueError("request purpose must be agent or compaction")
+    return value
+
+
+def _configuration(record):
+    record = _object(record)
+    enabled = record.get("compaction_enabled")
+    if type(enabled) is not bool:
+        raise ValueError("compaction_enabled must be a boolean")
+    return ClientConfiguration(
+        _string(record, "pi_version"),
+        _integer(record, "context_window_tokens", 1),
+        _integer(record, "max_output_tokens", 1),
+        _string(record, "thinking_level"),
+        enabled,
+        _integer(record, "reserve_tokens", 1),
+        _integer(record, "keep_recent_tokens", 1),
+    )
+
+
+def _request(usage, start_us, end_us, previous_end_us, stop_reason, purpose):
+    usage = _object(usage)
+    prefill = _integer(usage, "input") + _integer(usage, "cacheWrite")
+    retained = _integer(usage, "cacheRead")
+    output = _integer(usage, "output", 1)
+    if prefill == 0:
+        raise ValueError("each request needs at least one new input token")
+    if _integer(usage, "totalTokens") != prefill + retained + output:
+        raise ValueError("usage total disagrees with input/cache/output counts")
+    delay_us = 0 if previous_end_us is None else start_us - previous_end_us
+    if end_us < start_us or delay_us < 0:
+        raise ValueError("client timestamps overlap or run backwards")
+    return Request(
+        delay_us,
+        end_us - start_us,
+        prefill,
+        retained,
+        output,
+        _stop_reason(stop_reason),
+        _purpose(purpose),
+    )
+
+
 def _read_pi_session(path):
     digest = hashlib.sha256()
     requests = []
@@ -138,29 +206,16 @@ def _read_pi_session(path):
                 identities.add(
                     (_string(message, "provider"), _string(message, "model"))
                 )
-                usage = _object(message.get("usage"))
-                prefill = _integer(usage, "input") + _integer(usage, "cacheWrite")
-                retained = _integer(usage, "cacheRead")
-                output = _integer(usage, "output", 1)
-                if prefill == 0:
-                    raise ValueError("each request needs at least one new input token")
-                if _integer(usage, "totalTokens") != prefill + retained + output:
-                    raise ValueError(
-                        "usage total disagrees with input/cache/output counts"
-                    )
                 start_us = _integer(message, "timestamp") * 1000
                 end_us = _timestamp_us(entry)
-                delay_us = 0 if previous_end_us is None else start_us - previous_end_us
-                if end_us < start_us or delay_us < 0:
-                    raise ValueError("client timestamps overlap or run backwards")
                 requests.append(
-                    Request(
-                        delay_us,
-                        end_us - start_us,
-                        prefill,
-                        retained,
-                        output,
-                        _stop_reason(message.get("stopReason")),
+                    _request(
+                        message.get("usage"),
+                        start_us,
+                        end_us,
+                        previous_end_us,
+                        message.get("stopReason"),
+                        "agent",
                     )
                 )
                 if first_start_us is None:
@@ -177,14 +232,96 @@ def _read_pi_session(path):
         raise ValueError(
             f"{path.name}: model/provider changes cannot share one weight pass"
         )
-    return next(iter(identities)), first_start_us, digest.hexdigest(), tuple(requests)
+    return (
+        next(iter(identities)),
+        first_start_us,
+        digest.hexdigest(),
+        tuple(requests),
+        None,
+    )
+
+
+def _read_pi_calls(path):
+    digest = hashlib.sha256()
+    requests = []
+    active = None
+    finished = False
+    first_start_us = None
+    previous_end_us = None
+    with path.open("rb") as stream:
+        for line_number, line in enumerate(stream, 1):
+            digest.update(line)
+            try:
+                entry = _object(json.loads(line))
+                if line_number == 1:
+                    if entry.get("format") != CALL_FORMAT:
+                        raise ValueError(f"expected {CALL_FORMAT}")
+                    identity = (_string(entry, "provider"), _string(entry, "model"))
+                    configuration = _configuration(entry.get("configuration"))
+                    continue
+                if finished:
+                    raise ValueError("data follows recording_end")
+                kind = entry.get("type")
+                if kind == "request_start":
+                    if active is not None or _integer(entry, "index") != len(requests):
+                        raise ValueError("expected sequential request starts")
+                    if entry.get("api") != "openai-completions":
+                        raise ValueError("usage mapping requires openai-completions")
+                    active = (
+                        _integer(entry, "start_us"),
+                        _purpose(entry.get("purpose")),
+                    )
+                elif kind == "request_end":
+                    if active is None or _integer(entry, "index") != len(requests):
+                        raise ValueError("completion must match its request start")
+                    start_us, purpose = active
+                    end_us = _integer(entry, "end_us")
+                    requests.append(
+                        _request(
+                            entry.get("usage"),
+                            start_us,
+                            end_us,
+                            previous_end_us,
+                            entry.get("stop_reason"),
+                            purpose,
+                        )
+                    )
+                    if first_start_us is None:
+                        first_start_us = start_us
+                    previous_end_us = end_us
+                    active = None
+                elif kind == "recording_end":
+                    if active is not None or _integer(entry, "requests", 1) != len(
+                        requests
+                    ):
+                        raise ValueError(
+                            "recording_end must cover all completed requests"
+                        )
+                    if requests[-1].stop_reason == "toolUse":
+                        raise ValueError("unfinished tool continuation")
+                    finished = True
+                else:
+                    raise ValueError(f"failed or unsupported recording event: {kind!r}")
+            except (ValueError, TypeError) as error:
+                raise ValueError(f"{path.name}:{line_number}: {error}") from error
+    if not finished:
+        raise ValueError(f"{path.name}: empty or incomplete call recording")
+    return identity, first_start_us, digest.hexdigest(), tuple(requests), configuration
+
+
+def _read_recording(path):
+    with path.open("rb") as stream:
+        header = _object(json.loads(stream.readline()))
+    if header.get("format") == CALL_FORMAT:
+        return _read_pi_calls(path)
+    return _read_pi_session(path)
 
 
 def export_sessions(paths):
     """Reads completed linear recordings from one synchronized client clock."""
     if not paths:
         raise ValueError("at least one session recording is required")
-    records = [_read_pi_session(Path(path)) for path in paths]
+    records = [_read_recording(Path(path)) for path in paths]
     if len({record[0] for record in records}) != 1:
         raise ValueError("all sessions must use the same provider and model")
     if len({record[2] for record in records}) != len(records):
@@ -198,8 +335,8 @@ def export_sessions(paths):
         model,
         origin,
         tuple(
-            Session(digest, start - origin, requests)
-            for _, start, digest, requests in records
+            Session(digest, start - origin, requests, configuration)
+            for _, start, digest, requests, configuration in records
         ),
     )
 
@@ -224,6 +361,7 @@ def load_trace(path):
                     _integer(request, "retained_tokens"),
                     _integer(request, "output_tokens", 1),
                     _stop_reason(request.get("stop_reason")),
+                    _purpose(request.get("purpose")),
                 )
             )
         if not requests or requests[0].delay_us != 0:
@@ -231,8 +369,14 @@ def load_trace(path):
         digest = _string(session, "source_sha256")
         if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
             raise ValueError("source_sha256 must contain 64 lowercase hex digits")
+        configuration = session.get("configuration")
         sessions.append(
-            Session(digest, _integer(session, "arrival_us"), tuple(requests))
+            Session(
+                digest,
+                _integer(session, "arrival_us"),
+                tuple(requests),
+                _configuration(configuration) if configuration is not None else None,
+            )
         )
     if not sessions or min(session.arrival_us for session in sessions) != 0:
         raise ValueError("trace needs sessions with a zero-origin first arrival")
@@ -249,7 +393,10 @@ def load_trace(path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "sessions", type=Path, nargs="+", help="completed pi v3 JSONL files"
+        "sessions",
+        type=Path,
+        nargs="+",
+        help="completed pi v3 sessions or pi_record call logs",
     )
     parser.add_argument(
         "--output", type=Path, help="new output file; defaults to stdout"

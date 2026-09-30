@@ -13,7 +13,7 @@ import json
 import sys
 from collections import Counter, deque
 from contextlib import ExitStack
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from experimental.loom_serve.agent_trace import Request, load_trace
@@ -192,6 +192,7 @@ def simulate(
                 {
                     "session": row.session,
                     "request": row.index,
+                    "purpose": row.request.purpose,
                     "kind": "prefill" if is_prefill else "decode",
                     "position": row.position,
                     "input_tokens": count,
@@ -216,6 +217,7 @@ def simulate(
                     {
                         "session": row.session,
                         "request": row.index,
+                        "purpose": row.request.purpose,
                         "arrival_us": row.arrival_us,
                         "first_prediction_us": row.first_prediction_us,
                         "completion_us": end_us,
@@ -349,6 +351,10 @@ def main():
             "trace_sha256": hashlib.sha256(args.trace.read_bytes()).hexdigest(),
             "model": trace.model,
             "sessions": len(trace.sessions),
+            "client_configurations": [
+                asdict(session.configuration) if session.configuration else None
+                for session in trace.sessions
+            ],
             "capacities": capacities,
             "span_capacity": args.span_capacity,
             "admission": args.admission,
