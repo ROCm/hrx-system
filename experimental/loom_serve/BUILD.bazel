@@ -58,6 +58,26 @@ py_test(
     ],
 )
 
+py_library(
+    name = "dashboard_lib",
+    srcs = ["dashboard.py"],
+)
+
+py_binary(
+    name = "dashboard",
+    srcs = ["dashboard.py"],
+)
+
+py_test(
+    name = "dashboard_test",
+    size = "small",
+    srcs = ["dashboard_test.py"],
+    deps = [
+        ":dashboard_lib",
+        ":observe_lib",
+    ],
+)
+
 py_test(
     name = "agent_trace_test",
     size = "small",

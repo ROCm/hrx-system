@@ -291,6 +291,31 @@ reports suspension or transition, avoiding deliberate wake polling; state can
 still change between the guard and attribute reads. Nothing changes power
 policy, requests privileged access, or substitutes an estimate for a sensor.
 
+`dashboard.py` reads only this log. It can follow an active run, inspect a
+completed one, or stop at a recorded elapsed time without running a model:
+
+```sh
+python -B -m experimental.loom_serve.dashboard /private/runs/run.jsonl
+python -B -m experimental.loom_serve.dashboard /private/runs/run.jsonl \
+  --snapshot --at=16 --width=160
+```
+
+Wide terminals place hardware readings beside scheduler progress; narrow ones
+scroll vertically. `q` exits, arrows or `j`/`k` scroll, PageUp/PageDown move a
+page, Home returns to the top, and `a` exposes all channels with their exact
+source paths. The `--all-sensors` option selects that view initially. The
+display separates prompt inputs, decode inputs and selected outputs including
+EOS; planned token-slot occupancy is not GPU utilization. Heartbeat, last-epoch
+and system-sample ages remain independent so a stalled device cannot appear
+healthy just because the host sampler is running. A recorded prefix without
+`run_end` is not claimed to be a successful or still-running server.
+
+The viewer retains latest state and short histories, not the entire run.
+Partial trailing records wait for completion; malformed complete records fail
+with an offset. Snapshot mode reports an omitted partial record. Application
+text is escaped before terminal rendering. Neither the viewer nor replay can
+change the server or hardware state.
+
 ### Real pi continuation check
 
 An isolated pi custom-provider configuration uses this `models.json`:
