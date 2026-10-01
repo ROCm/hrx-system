@@ -1,5 +1,5 @@
 // The fixed result tests frame preservation independently of allocation policy.
-// RUN: emit x86-bytes @saved fixed=%value:physical_register:3:1
+// RUN: emit x86-frame @saved fixed=%value:physical_register:3:1
 x86.target<scalar> @target
 
 low.func.def target<x86.scalar.core>(@target) @saved() -> (reg<x86.gpr64>) asm {
@@ -8,12 +8,12 @@ low.func.def target<x86.scalar.core>(@target) @saved() -> (reg<x86.gpr64>) asm {
 }
 
 // ----
-53 bb 2a 00 00 00 48 8b c3 5b c3
+callee-preserved: rbx
 
 // ====
 
 // A caller-saved destination needs no preservation envelope.
-// RUN: emit x86-bytes @unsaved fixed=%value:physical_register:0:1
+// RUN: emit x86-frame @unsaved fixed=%value:physical_register:0:1
 x86.target<scalar> @target
 
 low.func.def target<x86.scalar.core>(@target) @unsaved() -> (reg<x86.gpr64>) asm {
@@ -22,13 +22,12 @@ low.func.def target<x86.scalar.core>(@target) @unsaved() -> (reg<x86.gpr64>) asm
 }
 
 // ----
-b8 2a 00 00 00 c3
+callee-preserved: none
 
 // ====
 
-// Both exits restore the same callee-saved set. Fixups target the envelope,
-// including a non-fallthrough return, rather than bypassing the pops.
-// RUN: emit x86-bytes @two_returns fixed=%condition:physical_register:0:1 fixed=%left:physical_register:3:1 fixed=%right:physical_register:12:1
+// The common frame preserves the union of registers written on both exits.
+// RUN: emit x86-frame @two_returns fixed=%condition:physical_register:0:1 fixed=%left:physical_register:3:1 fixed=%right:physical_register:12:1
 x86.target<scalar> @target
 
 low.func.def target<x86.scalar.core>(@target) @two_returns() -> (reg<x86.gpr64>) asm {
@@ -43,4 +42,47 @@ low.func.def target<x86.scalar.core>(@target) @two_returns() -> (reg<x86.gpr64>)
 }
 
 // ----
-53 41 54 b8 01 00 00 00 85 c0 0f 84 0d 00 00 00 bb 2a 00 00 00 48 8b c3 e9 09 00 00 00 41 bc 2b 00 00 00 49 8b c4 41 5c 5b c3
+callee-preserved: rbx, r12
+
+// ====
+
+// Reading an incoming callee-preserved register does not require saving it.
+// Return transport writes the caller-saved RAX instead.
+// RUN: emit x86-frame @read_only fixed=%input:physical_register:3:1
+x86.target<scalar> @target
+
+low.func.def target<x86.scalar.core>(@target) @read_only(%input: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  return %input
+}
+
+// ----
+callee-preserved: none
+
+// ====
+
+// An allocation-generated move writes R12 even though no target instruction
+// defines it. Frame preparation must include transport writes.
+// RUN: emit x86-frame @transport fixed=%input:physical_register:7:1 fixed=%copy:physical_register:12:1
+x86.target<scalar> @target
+
+low.func.def target<x86.scalar.core>(@target) @transport(%input: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %copy = copy %input : reg<x86.gpr64> -> reg<x86.gpr64>
+  return %copy
+}
+
+// ----
+callee-preserved: r12
+
+// ====
+
+// A write to EBX changes the full RBX value, so its 64-bit contents are saved.
+// RUN: emit x86-frame @narrow_write fixed=%value:physical_register:3:1
+x86.target<scalar> @target
+
+low.func.def target<x86.scalar.core>(@target) @narrow_write() -> (reg<x86.gpr32>) asm {
+  %value = mov.imm32 42
+  return %value
+}
+
+// ----
+callee-preserved: rbx

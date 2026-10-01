@@ -69,6 +69,39 @@ func.def public @add_word(%word: i32, %bias: i64) -> (i64) {
   func.return %result : i64
 }
 
+// Quotient and remainder use the implicit RAX/RDX register pair. The original
+// word and the first product must both survive the second high multiply.
+func.def public @divide_mix(%word: i32) -> (i32) {
+  %divisor = scalar.constant 7 : i32
+  %quotient = scalar.divui %word, %divisor : i32
+  %remainder = scalar.remui %word, %divisor : i32
+  %sum = scalar.addi %quotient, %remainder : i32
+  %result = scalar.xori %sum, %word : i32
+  func.return %result : i32
+}
+
+// Indexed byte and halfword stores truncate independently and leave neighboring
+// elements intact. The return packs both previous values after zero extension.
+// The C caller guarantees the index is in [0, 6).
+func.def public @replace_narrow(%bytes: buffer, %words: buffer, %index: index, %replacement: i32) -> (i32) {
+  %base = index.constant 0 : offset
+  %position = index.assume %index [range(%index, 0, 5)] : index
+  %byte_view = buffer.view %bytes[%base] : buffer -> view<6xi8>
+  %word_view = buffer.view %words[%base] : buffer -> view<6xi16>
+  %byte = view.load %byte_view[%position] : view<6xi8> -> i8
+  %word = view.load %word_view[%position] : view<6xi16> -> i16
+  %replacement_byte = scalar.trunci %replacement : i32 to i8
+  %replacement_word = scalar.trunci %replacement : i32 to i16
+  view.store %replacement_byte, %byte_view[%position] : i8, view<6xi8>
+  view.store %replacement_word, %word_view[%position] : i16, view<6xi16>
+  %wide_byte = scalar.extui %byte : i8 to i32
+  %wide_word = scalar.extui %word : i16 to i32
+  %shift = scalar.constant 8 : i32
+  %shifted_word = scalar.shli %wide_word, %shift : i32
+  %result = scalar.ori %wide_byte, %shifted_word : i32
+  func.return %result : i32
+}
+
 // Loop-carried values cross both the forward exit and the backward edge.
 // Their simultaneous transport belongs to the shared allocator's move plan.
 func.def public @recurrence(%first: i64, %second: i64, %iterations: i64) -> (i64) {

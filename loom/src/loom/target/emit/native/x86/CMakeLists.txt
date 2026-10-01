@@ -61,6 +61,24 @@ loom_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_X86)
+loom_cc_test(
+  NAME
+    function_test
+  SRCS
+    "function_test.cc"
+  DEPS
+    ::encoding
+    ::function
+    iree::base::internal::arena
+    iree::io::stream
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.x86"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
 loom_cc_library(
   NAME
     abi
@@ -113,7 +131,6 @@ loom_cc_library(
   DEPS
     ::function
     iree::base
-    iree::io::stream
     loom::tools::loom-check::execute
   PUBLIC
 )
@@ -124,13 +141,7 @@ loom_check_test_suite(
   NAME
     loom_check_file_test
   SRCS
-    "test/buffer_selection.loom-test"
-    "test/copies.loom-test"
     "test/function.loom-test"
-    "test/high_product.loom-test"
-    "test/memory.loom-test"
-    "test/scalar.loom-test"
-    "test/shifts.loom-test"
 )
 endif()
 

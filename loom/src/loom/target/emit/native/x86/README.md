@@ -46,6 +46,9 @@ writer joins code contributions and owns ELF tables. Only emitted bytes survive
 between functions; scheduling and allocation scratch is reclaimed immediately.
 The returned artifact is independent of all compiler storage.
 
-`test/function.loom-test` checks exact preservation and branch bytes.
-`callable_link_test` links a Loom-generated object into a normal host test with
-independent arithmetic references; the compiler exits before linking begins.
+`test/function.loom-test` checks which registers require preservation, including
+writes introduced by allocation transport. Focused writer tests verify save and
+restore order and branch destinations from prepared native instructions;
+instruction encoding has its own byte-level tests. `callable_link_test` links a
+Loom-generated object into a normal host test with independent arithmetic and
+memory references; the compiler exits before linking begins.

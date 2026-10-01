@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-// Emit provider for exact native function bytes from allocated target-low IR.
+// Emit provider for native frame decisions from allocated target-low IR.
 extern const loom_check_emit_provider_t
     loom_x86_native_loom_check_emit_provider;
 
