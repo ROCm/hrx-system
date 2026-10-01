@@ -18,6 +18,7 @@ iree_cc_library(
     "copy_test.cc"
     "fill_test.cc"
     "timestamp_test.cc"
+    "wait_test.cc"
   DEPS
     amdf::headers
     iree::third_party::google_test

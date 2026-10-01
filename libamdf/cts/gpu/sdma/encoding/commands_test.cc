@@ -168,6 +168,27 @@ TEST(SdmaEncodingTest, MemoryEqualityPollWaitsWithoutFiniteRetryLimit) {
   }
 }
 
+TEST(SdmaEncodingTest, AtLeastMemoryPollPreservesScopeAndRetryFields) {
+  constexpr std::array<uint32_t, 4> kRetryScopes = {0x0fff0004, 0x0fff0004,
+                                                    0x0fff0004, 0x3fff0004};
+  for (size_t i = 0; i < kFeatures.size(); ++i) {
+    SCOPED_TRACE(kFeatures[i]);
+    std::array<uint32_t, 7> words = {};
+    words.back() = 0x72349681;
+    SdmaCommandWriter commands(words.data(), kFeatures[i]);
+    commands.WaitMemory32(UINT64_C(0x1234567887654320), 0x12345,
+                          SdmaMemoryComparison::kGreaterOrEqual);
+    // Mesa's SDMA gang join passes comparison 5 to ac_emit_sdma_wait_mem.
+    // The comparison occupies the header; it changes neither the full mask
+    // nor the independent retry/scope word used by the ordinary poll form.
+    const std::array<uint32_t, 7> expected = {
+        0xd0000008, 0x87654320,      0x12345678, 0x00012345,
+        0xffffffff, kRetryScopes[i], 0x72349681};
+    EXPECT_EQ(commands.word_count(), 6u);
+    EXPECT_EQ(words, expected);
+  }
+}
+
 TEST(SdmaEncodingTest, LinearShortTransfersKeepByteCountUnits) {
   constexpr std::array<uint32_t, 4> kParameters = {0, 0, 0, 0x0c0c0000};
   for (size_t i = 0; i < kFeatures.size(); ++i) {

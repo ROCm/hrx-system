@@ -12,6 +12,13 @@
 
 #include "amdf/gpu.h"
 
+// Full-width classic memory comparisons used by completion-value protocols.
+// Greater-or-equal alone does not provide a wrap-aware timeline comparison.
+enum class SdmaMemoryComparison : uint32_t {
+  kEqual = 3,
+  kGreaterOrEqual = 5,
+};
+
 // SDMA v1 transfer and timestamp commands on coherent system memory. No
 // implicit GCR or HDP operations; those require their own admitted cache
 // recipe.
@@ -37,10 +44,12 @@ class SdmaCommandWriter {
   void Fill32(uint64_t target, uint32_t pattern, uint32_t byte_length);
   // Writes an aligned coherent completion word after preceding transfers.
   void Fence32(uint64_t address, uint32_t value);
-  // Waits for an aligned coherent word using full-width equality. This
+  // Waits for an aligned coherent word using a full-width comparison. This
   // POLL_REGMEM scope follows the family. The native retry-forever value leaves
   // valid asynchronous work without a deadline.
-  void WaitMemory32(uint64_t address, uint32_t value);
+  void WaitMemory32(
+      uint64_t address, uint32_t value,
+      SdmaMemoryComparison comparison = SdmaMemoryComparison::kEqual);
   // Writes the raw 64-bit global timestamp after earlier commands complete.
   // Scope follows the family, with a 32-byte-aligned caller-owned destination.
   // Clock conversion and timestamp-write completion are separate contracts.
