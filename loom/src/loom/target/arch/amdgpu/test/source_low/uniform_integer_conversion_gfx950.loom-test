@@ -47,7 +47,6 @@ low.kernel.def target<amdgpu.cdna4.core> abi_layout({constant_count = 0, direct_
   %45 = v_cvt_f32_i32 %44
   %48 = v_mov_b32_sdwa %35 {dst_sel = 6, dst_unused = 0, src0_sel = 3, src0_sext = 1}
   %49 = v_cvt_f32_i32 %48
-  %signed = concat(%21, %25, %29, %33, %37, %41, %45, %49) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
   %52 = v_cvt_f32_ubyte0 %18
   %53 = v_cvt_f32_ubyte1 %18
   %54 = v_cvt_f32_ubyte2 %18
@@ -56,16 +55,15 @@ low.kernel.def target<amdgpu.cdna4.core> abi_layout({constant_count = 0, direct_
   %58 = v_cvt_f32_ubyte1 %34
   %59 = v_cvt_f32_ubyte2 %34
   %60 = v_cvt_f32_ubyte3 %34
-  %unsigned = concat(%52, %53, %54, %55, %57, %58, %59, %60) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
-  %62 = slice %signed[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x4>
+  %73 = concat(%21, %25, %29, %33) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
   %63 = v_mov_b32 0
-  global_store_dwordx4_saddr %63, %62, %unsigned_target
-  %64 = slice %signed[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x4>
-  global_store_dwordx4_saddr %63, %64, %unsigned_target {offset = 16}
-  %66 = slice %unsigned[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x4>
-  global_store_dwordx4_saddr %63, %66, %unsigned_target {offset = 32}
-  %68 = slice %unsigned[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x4>
-  global_store_dwordx4_saddr %63, %68, %unsigned_target {offset = 48}
+  global_store_dwordx4_saddr %63, %73, %unsigned_target
+  %72 = concat(%37, %41, %45, %49) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_dwordx4_saddr %63, %72, %unsigned_target {offset = 16}
+  %71 = concat(%52, %53, %54, %55) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_dwordx4_saddr %63, %71, %unsigned_target {offset = 32}
+  %70 = concat(%57, %58, %59, %60) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_dwordx4_saddr %63, %70, %unsigned_target {offset = 48}
   return
 }
 

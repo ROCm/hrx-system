@@ -1,0 +1,63 @@
+// Maximum-width unpacking exercises source-word slicing and result assembly.
+kernel.def @unpack_nibble_words() {
+  %unit = index.constant 1 : index
+  %groups = index.constant 128 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %width = index.constant 32 : index
+  %thread = index.madd %group, %width, %lane : index
+  %input_view = buffer.view %input[%base] : buffer -> view<4096x32xi8>
+  %output_view = buffer.view %output[%base] : buffer -> view<4096x64xi8>
+  %packed = vector.load %input_view[%thread, 0] : view<4096x32xi8> -> vector<32xi8>
+  %unpacked = vector.bitunpacku<4> %packed : vector<32xi8> -> vector<64xi8>
+  vector.store %unpacked, %output_view[%thread, 0] : vector<64xi8>, view<4096x64xi8>
+  kernel.return
+}
+
+// Independent byte-wise arithmetic has no vector bitstream or permutation ops.
+kernel.def @unpack_nibbles_reference() {
+  %unit = index.constant 1 : index
+  %groups = index.constant 4096 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %width = index.constant 32 : index
+  %thread = index.madd %group, %width, %lane : index
+  %input_view = buffer.view %input[%base] : buffer -> view<131072xi8>
+  %output_view = buffer.view %output[%base] : buffer -> view<131072x2xi8>
+  %byte = view.load %input_view[%thread] : view<131072xi8> -> i8
+  %word = scalar.extui %byte : i8 to i32
+  %mask = scalar.constant 15 : i32
+  %shift = scalar.constant 4 : i32
+  %low = scalar.andi %word, %mask : i32
+  %high = scalar.shrui %word, %shift : i32
+  %low_byte = scalar.trunci %low : i32 to i8
+  %high_byte = scalar.trunci %high : i32 to i8
+  view.store %low_byte, %output_view[%thread, 0] : i8, view<131072x2xi8>
+  view.store %high_byte, %output_view[%thread, 1] : i8, view<131072x2xi8>
+  kernel.return
+}
+
+check.case public @unpack_all_halfwords {
+  // Every 16-bit pattern exercises adjacent nibble independence and sign bits.
+  %input = check.generate.iota offset(-32768) step(1) : tensor<65536xi16>
+  %storage = check.generate.fill value(-91) : tensor<262152xi8>
+  %output = check.tensor.view %storage offset(4) : tensor<262152xi8> -> tensor<262144xi8>
+  %expected = check.generate.fill value(-1) : tensor<262144xi8>
+  kernel.launch @unpack_nibble_words(%input, %output) : (tensor<65536xi16>, tensor<262144xi8>)
+  kernel.launch @unpack_nibbles_reference(%input, %expected) : (tensor<65536xi16>, tensor<262144xi8>)
+  check.expect.bitwise actual(%output) expected(%expected) : tensor<262144xi8>
+  %prefix = check.tensor.view %storage offset(0) : tensor<262152xi8> -> tensor<4xi8>
+  %suffix = check.tensor.view %storage offset(262148) : tensor<262152xi8> -> tensor<4xi8>
+  %guard = check.generate.fill value(-91) : tensor<4xi8>
+  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<4xi8>
+  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<4xi8>
+  check.return
+}

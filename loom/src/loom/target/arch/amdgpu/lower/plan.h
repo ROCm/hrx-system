@@ -597,6 +597,8 @@ typedef struct loom_amdgpu_bitunpack_plan_t {
   uint32_t result_register_count;
   // Number of unpacked result lanes.
   uint32_t lane_count;
+  // Byte permutation plan for complete unsigned nibble words, or NONE.
+  loom_amdgpu_i8_pack_permute_plan_t i8_permute;
   // True when unpacked lanes are sign-extended.
   bool is_signed;
 } loom_amdgpu_bitunpack_plan_t;

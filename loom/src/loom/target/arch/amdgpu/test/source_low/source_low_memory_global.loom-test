@@ -1697,11 +1697,10 @@ low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 0,
   %43 = v_add_f32_src0_inline %42, "f32_2_0"
   %44 = slice %loaded[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %45 = v_add_f32_src0_inline %44, "f32_2_0"
-  %result = concat(%31, %33, %35, %37, %39, %41, %43, %45) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
-  %47 = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x4>
-  global_store_b128_saddr %25, %47, %output_view
-  %49 = slice %result[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x4>
-  global_store_b128_saddr %25, %49, %output_view {offset = 16}
+  %52 = concat(%31, %33, %35, %37) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %25, %52, %output_view
+  %51 = concat(%39, %41, %43, %45) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %25, %51, %output_view {offset = 16}
   return
 }
 

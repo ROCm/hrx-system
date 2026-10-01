@@ -172,6 +172,16 @@ loom_test(
 )
 
 loom_test(
+    name = "packed_nibble_unpack_test",
+    srcs = ["packed_nibble_unpack.loom"],
+    compile_targets = ["//loom/target/amdgpu:" + target for target in LOOM_AMDGPU_SUPPORTED_TARGETS],
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
+)
+
+loom_test(
     name = "kernarg_test",
     srcs = ["amdgpu_unused_kernargs.loom"],
     execution_profiles = [
