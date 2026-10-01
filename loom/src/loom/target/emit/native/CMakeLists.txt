@@ -80,6 +80,24 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    object_elf
+  HDRS
+    "object_elf.h"
+  SRCS
+    "object_elf.c"
+  DEPS
+    ::contribution
+    ::elf
+    ::elf_sections
+    ::object
+    iree::base
+    iree::base::internal::arena
+    iree::io::stream
+  PUBLIC
+)
+
 loom_cc_test(
   NAME
     elf_test
@@ -129,6 +147,20 @@ loom_cc_test(
   DEPS
     ::elf_sections
     iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_test(
+  NAME
+    object_elf_test
+  SRCS
+    "object_elf_test.cc"
+  DEPS
+    ::object_elf
+    iree::base
+    iree::base::internal::arena
+    iree::io::stream
     iree::testing::gtest
     iree::testing::gtest_main
 )
