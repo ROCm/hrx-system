@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
@@ -17,27 +18,40 @@ package(
 )
 
 loom_cc_library(
-    name = "product_selection",
-    srcs = ["product_selection.c"],
-    hdrs = ["product_selection.h"],
+    name = "request",
+    srcs = ["request.c"],
+    hdrs = ["request.h"],
     deps = [
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/pipeline",
         "//loom/src/loom/target:entry_selection",
         "//loom/src/loom/target:projection",
+        "//loom/src/loom/target:selection",
         "//loom/src/loom/target:types",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
 
+iree_assert_dependency_boundary(
+    name = "request_has_no_tooling_or_binding_dependencies",
+    forbidden_subtrees = [
+        "//loom/binding/...",
+        "//loom/src/loom/tooling/...",
+        "//loom/src/loom/tools/...",
+    ],
+    message = "Compile request resolution is compiler-owned and must not depend on public bindings or tooling adapters",
+    target = ":request",
+)
+
 loom_cc_test(
-    name = "product_selection_test",
-    srcs = ["product_selection_test.cc"],
+    name = "request_test",
+    srcs = ["request_test.cc"],
     deps = [
-        ":product_selection",
+        ":request",
         "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
         "//loom/src/loom/ops/target",
         "//loom/src/loom/testing:context",
         "//loom/src/loom/testing:module_ptr",

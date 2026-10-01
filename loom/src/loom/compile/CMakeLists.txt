@@ -11,11 +11,11 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
-    product_selection
+    request
   HDRS
-    "product_selection.h"
+    "request.h"
   SRCS
-    "product_selection.c"
+    "request.c"
   DEPS
     iree::base
     iree::base::internal::arena
@@ -24,21 +24,23 @@ loom_cc_library(
     loom::ops::pipeline
     loom::target::entry_selection
     loom::target::projection
+    loom::target::selection
     loom::target::types
   PUBLIC
 )
 
 loom_cc_test(
   NAME
-    product_selection_test
+    request_test
   SRCS
-    "product_selection_test.cc"
+    "request_test.cc"
   DEPS
-    ::product_selection
+    ::request
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
     loom::format::text::parser
+    loom::ir
     loom::ops::target
     loom::testing::context
     loom::testing::module_ptr

@@ -11,20 +11,6 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
-    request
-  HDRS
-    "request.h"
-  SRCS
-    "request.c"
-  DEPS
-    iree::base
-    loom::compile::product_selection
-    loom::target::selection
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
     preparation
   HDRS
     "preparation.h"
@@ -32,29 +18,11 @@ loom_cc_library(
     "preparation.c"
   DEPS
     ::pipeline
-    ::request
+    loom::compile::request
     loom::link::linker
     loom::target::entry_selection
     loom::target::module_specialization
   PUBLIC
-)
-
-loom_cc_test(
-  NAME
-    request_test
-  SRCS
-    "request_test.cc"
-  DEPS
-    ::request
-    iree::base::internal::arena
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::format::text::parser
-    loom::ir
-    loom::ops::low
-    loom::ops::target
-    loom::testing::context
-    loom::testing::module_ptr
 )
 
 loom_cc_test(

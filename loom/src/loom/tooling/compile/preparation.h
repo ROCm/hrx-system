@@ -9,8 +9,8 @@
 #ifndef LOOM_TOOLING_COMPILE_PREPARATION_H_
 #define LOOM_TOOLING_COMPILE_PREPARATION_H_
 
+#include "loom/compile/request.h"
 #include "loom/tooling/compile/pipeline.h"
-#include "loom/tooling/compile/request.h"
 
 #ifdef __cplusplus
 extern "C" {

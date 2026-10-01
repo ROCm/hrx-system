@@ -4,14 +4,13 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/tooling/compile/request.h"
+#include "loom/compile/request.h"
 
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
-#include "loom/ops/low/ops.h"
 #include "loom/ops/target/ops.h"
 #include "loom/testing/context.h"
 #include "loom/testing/module_ptr.h"
@@ -152,74 +151,6 @@ class CompileRequestTest : public ::testing::Test {
     return request;
   }
 
-  ModulePtr BuildLowRoot(
-      loom_op_kind_t kind, loom_target_abi_kind_t abi,
-      loom_symbol_flags_t visibility_flags = LOOM_SYMBOL_FLAG_PUBLIC |
-                                             LOOM_SYMBOL_FLAG_RETAIN) {
-    loom_module_t* module = nullptr;
-    IREE_CHECK_OK(loom_module_allocate(&context_, IREE_SV("request"),
-                                       &block_pool_, nullptr,
-                                       iree_allocator_system(), &module));
-    loom_builder_t builder = {};
-    loom_builder_initialize(module, &module->arena, loom_module_block(module),
-                            &builder);
-    loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
-    IREE_CHECK_OK(
-        loom_builder_intern_string(&builder, IREE_SV("entry"), &name_id));
-    loom_symbol_id_t symbol_id = LOOM_SYMBOL_ID_INVALID;
-    IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-    const loom_symbol_ref_t callee = {
-        /*.module_id=*/0,
-        /*.symbol_id=*/symbol_id,
-    };
-    loom_string_id_t contract_id = LOOM_STRING_ID_INVALID;
-    IREE_CHECK_OK(loom_builder_intern_string(&builder, IREE_SV("test.low.core"),
-                                             &contract_id));
-    loom_op_t* function_op = nullptr;
-    if (kind == LOOM_OP_LOW_KERNEL_DEF) {
-      IREE_CHECK_OK(loom_low_kernel_def_build(
-          &builder, /*build_flags=*/0, /*retain=*/0, /*allocation=*/0,
-          /*schedule=*/0, contract_id, loom_symbol_ref_null(),
-          loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
-          /*export_linkage=*/0, /*workgroup_size_x=*/0,
-          /*workgroup_size_y=*/0, /*workgroup_size_z=*/0,
-          /*workgroup_count_x=*/0, /*workgroup_count_y=*/0,
-          /*workgroup_count_z=*/0, /*workgroup_cluster_size_x=*/0,
-          /*workgroup_cluster_size_y=*/0, /*workgroup_cluster_size_z=*/0,
-          callee, /*arg_types=*/nullptr, /*arg_types_count=*/0,
-          /*predicates=*/nullptr, /*predicates_count=*/0, LOOM_LOCATION_UNKNOWN,
-          &function_op));
-    } else {
-      loom_low_func_def_build_flags_t build_flags =
-          LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ABI;
-      if (iree_any_bit_set(visibility_flags, LOOM_SYMBOL_FLAG_PUBLIC)) {
-        build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_VISIBILITY;
-      }
-      if (iree_any_bit_set(visibility_flags, LOOM_SYMBOL_FLAG_RETAIN)) {
-        build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_RETAIN;
-      }
-      IREE_CHECK_OK(loom_low_func_def_build(
-          &builder, build_flags, LOOM_LOW_VISIBILITY_PUBLIC,
-          LOOM_LOW_RETAIN_RETAIN, /*cc=*/0,
-          /*purity=*/0, /*inline_policy=*/0, /*allocation=*/0, /*schedule=*/0,
-          contract_id, loom_symbol_ref_null(), abi,
-          loom_named_attr_slice_empty(), loom_named_attr_slice_empty(),
-          LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), callee,
-          /*arg_types=*/nullptr, /*arg_types_count=*/0,
-          /*result_types=*/nullptr, /*result_count=*/0,
-          /*tied_results=*/nullptr, /*tied_result_count=*/0,
-          /*predicates=*/nullptr, /*predicates_count=*/0, LOOM_LOCATION_UNKNOWN,
-          &function_op));
-    }
-    loom_builder_enter_region(
-        &builder, function_op,
-        loom_func_like_body(loom_func_like_cast(module, function_op)));
-    loom_op_t* return_op = nullptr;
-    IREE_CHECK_OK(loom_low_return_build(&builder, nullptr, 0,
-                                        LOOM_LOCATION_UNKNOWN, &return_op));
-    return ModulePtr(module);
-  }
-
   static ModulePtr ParseKernel(CompileRequestTest* test, bool with_target) {
     return with_target ? test->Parse(R"(
 target.generic<reference> @Target789 {
@@ -268,27 +199,32 @@ TEST_F(CompileRequestTest, InfersKernelAndCanonicalFormat) {
                                      IREE_SV("Kernel123")));
 }
 
-TEST_F(CompileRequestTest, ResolvesLowKernelProductsWithDefaultAndNamedRoots) {
+TEST_F(CompileRequestTest, ResolvesArrayProgramsWithDefaultAndNamedRoots) {
+  ModulePtr module = Parse(R"(
+func.def public abi(array_program) @entry() {
+  func.return
+}
+)");
   const iree_string_view_t roots[] = {IREE_SV("entry")};
-  for (loom_op_kind_t kind : {LOOM_OP_LOW_FUNC_DEF, LOOM_OP_LOW_KERNEL_DEF}) {
-    ModulePtr module = BuildLowRoot(kind, LOOM_TARGET_ABI_ARRAY_PROGRAM);
-    loom_compile_request_options_t options = {};
-    options.target = IREE_SV("TargetFamily123:Target456");
-    for (iree_host_size_t root_count : {0, 1}) {
-      options.roots = {root_count, roots};
-      const loom_compile_request_t request = Resolve(module.get(), options);
-      EXPECT_EQ(request.selection.product, LOOM_COMPILE_PRODUCT_KERNEL);
-      EXPECT_EQ(request.target_emitter, &kDiagnosticEmitter);
-      ASSERT_EQ(request.selection.roots.count, 1u);
-      EXPECT_TRUE(iree_string_view_equal(request.selection.roots.values[0],
-                                         IREE_SV("entry")));
-    }
+  loom_compile_request_options_t options = {};
+  options.target = IREE_SV("TargetFamily123:Target456");
+  for (iree_host_size_t root_count : {0, 1}) {
+    options.roots = {root_count, roots};
+    const loom_compile_request_t request = Resolve(module.get(), options);
+    EXPECT_EQ(request.selection.product, LOOM_COMPILE_PRODUCT_KERNEL);
+    EXPECT_EQ(request.target_emitter, &kDiagnosticEmitter);
+    ASSERT_EQ(request.selection.roots.count, 1u);
+    EXPECT_TRUE(iree_string_view_equal(request.selection.roots.values[0],
+                                       IREE_SV("entry")));
   }
 }
 
-TEST_F(CompileRequestTest, KeepsOrdinaryLowFunctionsAsModuleProducts) {
-  ModulePtr module =
-      BuildLowRoot(LOOM_OP_LOW_FUNC_DEF, LOOM_TARGET_ABI_OBJECT_FUNCTION);
+TEST_F(CompileRequestTest, KeepsObjectFunctionsAsModuleProducts) {
+  ModulePtr module = Parse(R"(
+func.def public abi(object_function) @entry() {
+  func.return
+}
+)");
   const iree_string_view_t roots[] = {IREE_SV("entry")};
   loom_compile_request_options_t options = {};
   options.format = IREE_SV("DiagnosticFormat123");
@@ -496,9 +432,11 @@ command.program.def public @Command123() launch() {
 }
 
 TEST_F(CompileRequestTest, RequiresExplicitSelectionOfPrivateArrayPrograms) {
-  ModulePtr module =
-      BuildLowRoot(LOOM_OP_LOW_FUNC_DEF, LOOM_TARGET_ABI_ARRAY_PROGRAM,
-                   /*visibility_flags=*/0);
+  ModulePtr module = Parse(R"(
+func.def abi(array_program) @entry() {
+  func.return
+}
+)");
   const iree_string_view_t roots[] = {IREE_SV("entry")};
   loom_compile_request_options_t options = {};
   options.product = IREE_SV("kernel");
@@ -733,7 +671,23 @@ func.def public @Function123() {
 }
 
 TEST_F(CompileRequestTest, ExplicitTargetSpecializesUntargetedKernel) {
-  ModulePtr module = ParseKernel(this, false);
+  ModulePtr module = Parse(R"(
+target.generic<reference> @Target789 {
+  subgroup_size = 32
+}
+kernel.def target(@Target789) @Targeted() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch() {
+  kernel.return
+}
+kernel.def @Untargeted() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch() {
+  kernel.return
+}
+)");
   const loom_compile_request_options_t options = {
       /*.roots=*/{},
       /*.product=*/IREE_SV("kernel"),
@@ -746,6 +700,9 @@ TEST_F(CompileRequestTest, ExplicitTargetSpecializesUntargetedKernel) {
   EXPECT_TRUE(iree_string_view_equal(
       request.explicit_target.specification.selector, IREE_SV("Target456")));
   EXPECT_EQ(request.target_emitter, &kDiagnosticEmitter);
+  EXPECT_EQ(request.selection.target_fact_type, &loom_target_generic_fact_type);
+  EXPECT_EQ(request.selection.untargeted_kernel_count, 1u);
+  EXPECT_EQ(request.selection.roots.count, 2u);
 }
 
 TEST_F(CompileRequestTest, MissingCanonicalKernelEmitterFailsClosed) {

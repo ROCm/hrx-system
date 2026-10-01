@@ -85,43 +85,15 @@ package(
 )
 
 loom_cc_library(
-    name = "request",
-    srcs = ["request.c"],
-    hdrs = ["request.h"],
-    deps = [
-        "//loom/src/loom/compile:product_selection",
-        "//loom/src/loom/target:selection",
-        "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_library(
     name = "preparation",
     srcs = ["preparation.c"],
     hdrs = ["preparation.h"],
     deps = [
         ":pipeline",
-        ":request",
+        "//loom/src/loom/compile:request",
         "//loom/src/loom/link:linker",
         "//loom/src/loom/target:entry_selection",
         "//loom/src/loom/target:module_specialization",
-    ],
-)
-
-loom_cc_test(
-    name = "request_test",
-    srcs = ["request_test.cc"],
-    deps = [
-        ":request",
-        "//loom/src/loom/format/text:parser",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/ops/low",
-        "//loom/src/loom/ops/target",
-        "//loom/src/loom/testing:context",
-        "//loom/src/loom/testing:module_ptr",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

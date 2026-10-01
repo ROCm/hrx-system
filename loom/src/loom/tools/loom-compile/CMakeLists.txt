@@ -67,6 +67,7 @@ loom_cc_binary(
     iree::base::tooling::flags
     iree::io::file_handle
     loom::codegen::low::text_asm
+    loom::compile::request
     loom::error::diagnostic
     loom::format::text::printer
     loom::ir
@@ -82,7 +83,6 @@ loom_cc_binary(
     loom::tooling::compile::pipeline
     loom::tooling::compile::preparation
     loom::tooling::compile::report_capture
-    loom::tooling::compile::request
     loom::tooling::config
     loom::tooling::context
     loom::tooling::execution::session
