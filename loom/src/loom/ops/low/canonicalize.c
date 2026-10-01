@@ -13,10 +13,6 @@
 
 static loom_op_t* loom_low_defining_op(loom_rewriter_t* rewriter,
                                        loom_value_id_t value_id) {
-  if (value_id == LOOM_VALUE_ID_INVALID ||
-      (iree_host_size_t)value_id >= rewriter->module->values.count) {
-    return NULL;
-  }
   loom_value_t* value = loom_module_value(rewriter->module, value_id);
   if (loom_value_is_block_arg(value)) {
     return NULL;
@@ -30,58 +26,81 @@ static iree_status_t loom_low_replace_single_result_with_value(
                                                   1);
 }
 
-static bool loom_low_slice_matches_concat_source(loom_rewriter_t* rewriter,
-                                                 loom_op_t* slice_op,
-                                                 loom_op_t* concat_op,
-                                                 loom_value_id_t* out_source) {
-  *out_source = LOOM_VALUE_ID_INVALID;
-  const int64_t slice_offset = loom_low_slice_offset(slice_op);
-  if (slice_offset < 0) {
-    return false;
-  }
-
+static loom_value_slice_t loom_low_slice_concat_sources(
+    loom_rewriter_t* rewriter, loom_op_t* slice_op, loom_op_t* concat_op) {
+  const uint32_t slice_offset = (uint32_t)loom_low_slice_offset(slice_op);
   const loom_type_t slice_type =
       loom_module_value_type(rewriter->module, loom_low_slice_result(slice_op));
-  if (!loom_type_is_register(slice_type)) {
-    return false;
-  }
-  const uint32_t slice_unit_count =
-      loom_low_register_type_unit_count(slice_type);
+  const uint32_t slice_end =
+      slice_offset + loom_low_register_type_unit_count(slice_type);
 
   uint32_t source_offset = 0;
+  loom_value_slice_t selected = {0};
   loom_value_slice_t sources = loom_low_concat_sources(concat_op);
   for (uint16_t i = 0; i < sources.count; ++i) {
-    const loom_value_id_t source = sources.values[i];
-    const loom_type_t source_type =
-        loom_module_value_type(rewriter->module, source);
-    if (!loom_type_is_register(source_type)) {
-      return false;
+    if (source_offset == slice_offset) {
+      selected.values = sources.values + i;
     }
-
-    const uint32_t source_unit_count =
-        loom_low_register_type_unit_count(source_type);
-    if ((uint64_t)slice_offset == source_offset &&
-        slice_unit_count == source_unit_count &&
-        loom_type_equal(slice_type, source_type)) {
-      *out_source = source;
-      return true;
+    const loom_value_t* source =
+        loom_module_value(rewriter->module, sources.values[i]);
+    source_offset += loom_low_register_type_unit_count(source->type);
+    if (!selected.values) {
+      if (source_offset > slice_offset) {
+        return (loom_value_slice_t){0};
+      }
+      continue;
     }
-    if (source_unit_count > UINT32_MAX - source_offset) {
-      return false;
+    ++selected.count;
+    if (selected.count == 1) {
+      if (source_offset == slice_end) {
+        return selected;
+      }
+      // Materialize only at a sole result-less sink. Storage chains can
+      // repeatedly project a new concat, and dead result-producing consumers
+      // can release the inputs for another projection. Both can duplicate
+      // operand lists quadratically as intermediate operations are erased.
+      const loom_use_t* use = loom_value_single_use(
+          loom_module_value(rewriter->module, loom_low_slice_result(slice_op)));
+      if (!use || loom_use_user_op(*use)->result_count != 0 ||
+          iree_any_bit_set(loom_use_user_op(*use)->traits,
+                           LOOM_TRAIT_STORAGE_RELATION)) {
+        return (loom_value_slice_t){0};
+      }
     }
-    source_offset += source_unit_count;
+    // A new sub-concat gives each selected input a second use while the
+    // original concat is live. Requiring exclusive inputs keeps overlapping
+    // projections from duplicating the same operand lists.
+    if (source_offset > slice_end || !loom_value_has_single_use(source)) {
+      return (loom_value_slice_t){0};
+    }
+    if (source_offset == slice_end) {
+      return selected;
+    }
   }
-  return false;
+  return (loom_value_slice_t){0};
 }
 
 static iree_status_t loom_low_slice_canonicalize_concat_slice(
     loom_op_t* op, loom_rewriter_t* rewriter, loom_op_t* concat_op,
     bool* out_changed) {
   *out_changed = false;
-  loom_value_id_t replacement = LOOM_VALUE_ID_INVALID;
-  if (!loom_low_slice_matches_concat_source(rewriter, op, concat_op,
-                                            &replacement)) {
+  const loom_value_slice_t sources =
+      loom_low_slice_concat_sources(rewriter, op, concat_op);
+  if (sources.count == 0) {
     return iree_ok_status();
+  }
+  loom_value_id_t replacement = sources.values[0];
+  if (sources.count > 1) {
+    loom_builder_set_before(&rewriter->builder, op);
+    loom_value_id_t value_checkpoint = loom_rewriter_value_checkpoint(rewriter);
+    loom_op_t* replacement_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_low_concat_build(
+        &rewriter->builder, sources.values, sources.count,
+        loom_module_value_type(rewriter->module, loom_low_slice_result(op)),
+        op->location, &replacement_op));
+    replacement = loom_low_concat_result(replacement_op);
+    IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+        rewriter, op, &replacement, 1, value_checkpoint));
   }
   IREE_RETURN_IF_ERROR(
       loom_low_replace_single_result_with_value(op, rewriter, replacement));

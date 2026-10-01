@@ -567,12 +567,11 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 2
   %136 = ds_bpermute_b32 %94, %128 {offset = 4}
   %137 = ds_bpermute_b32 %94, %129 {offset = 4}
   %138 = ds_bpermute_b32 %94, %130 {offset = 4}
-  %repacked = concat(%131, %132, %133, %134, %135, %136, %137, %138) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
   %140 = v_lshlrev_b32_src0_inline %89, 5
-  %141 = slice %repacked[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x4>
-  global_store_b128_saddr %140, %141, %output_view
-  %142 = slice %repacked[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x4>
-  global_store_b128_saddr %140, %142, %output_view {offset = 16}
+  %144 = concat(%131, %132, %133, %134) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %140, %144, %output_view
+  %143 = concat(%135, %136, %137, %138) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %140, %143, %output_view {offset = 16}
   return
 }
 
@@ -839,12 +838,11 @@ low.kernel.def target<amdgpu.rdna3.core>(@wave64_target) abi_layout({constant_co
   %85 = ds_bpermute_b32 %62, %77 {offset = 36}
   %86 = ds_bpermute_b32 %62, %78 {offset = 36}
   %87 = ds_bpermute_b32 %62, %79 {offset = 36}
-  %repacked = concat(%80, %81, %82, %83, %84, %85, %86, %87) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
   %89 = v_lshlrev_b32_src0_inline %57, 5
-  %90 = slice %repacked[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x4>
-  global_store_b128_saddr %89, %90, %output_view
-  %91 = slice %repacked[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x4>
-  global_store_b128_saddr %89, %91, %output_view {offset = 16}
+  %93 = concat(%80, %81, %82, %83) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %89, %93, %output_view
+  %92 = concat(%84, %85, %86, %87) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %89, %92, %output_view {offset = 16}
   return
 }
 
