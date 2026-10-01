@@ -368,6 +368,25 @@ loom_cc_binary(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+loom_cc_binary(
+  NAME
+    qwen_replay
+  SRCS
+    "qwen_replay.c"
+  DEPS
+    ::qwen_chat
+    ::qwen_model
+    ::qwen_schedule
+    iree::base
+    iree::base::internal::json
+    iree::base::tooling::flags
+    iree::io::file_handle
+    iree::tokenizer
+  TESTONLY
+)
+endif()
+
 loom_cc_library(
   NAME
     qwen_chat
